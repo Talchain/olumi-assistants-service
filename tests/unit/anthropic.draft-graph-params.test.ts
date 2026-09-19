@@ -5,10 +5,29 @@
  * 1. Static schema tests — ANTHROPIC_DRAFT_GRAPH_SCHEMA structure and model registry.
  * 2. Mock-based payload tests — assert the actual request params (body + headers +
  *    max_tokens + timeout) sent to messages.create for both flag states.
+ *
+ * ⚠⚠ SCOPE — READ THIS BEFORE QUOTING ANY ASSERTION IN THIS FILE AS EVIDENCE
+ * ABOUT THE PRODUCT. `ANTHROPIC_DRAFT_GRAPH_SCHEMA` IS NOT THE GRAMMAR THE
+ * DRAFT CALL SENDS. The draft call attaches `buildDraftRecordsSchema()`
+ * (`adapters/llm/anthropic.ts:843`, into `output_config.format.schema` at
+ * `:960`), and `buildDraftGraphSchema()` / `ANTHROPIC_DRAFT_GRAPH_SCHEMA` have
+ * ZERO production call sites outside their own defining module — the graph
+ * grammar is kept in the tree as the records cutover's revert target
+ * (`cee/draft/records/grammar.ts` header) and nothing else.
+ *
+ * That distinction is not academic: it cost two diagnostic seats. The assertion
+ * below that `goal_constraints` is REQUIRED is a true statement about a dead
+ * object, and it is the most likely reason a reader asking "is the model asked
+ * for the user's constraints?" answers yes. On the live wire it is not: the
+ * sent grammar has exactly `stated_items` and `claims`, with
+ * `additionalProperties: false`. The contrast test at the foot of this describe
+ * block asserts that disagreement explicitly, so the two objects can never
+ * quietly be read as one.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ANTHROPIC_DRAFT_GRAPH_SCHEMA } from "../../src/cee/draft/anthropic-graph-schema.js";
+import { buildDraftRecordsSchema } from "../../src/cee/draft/records/grammar.js";
 import { getModelProvider, isModelEnabled, supportsExtendedThinking } from "../../src/config/models.js";
 import { THINKING_CAPABLE_MODELS } from "../../src/adapters/llm/anthropic-model-capabilities.js";
 import { getAffordableDraftTokens, DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL } from "../../src/config/timeouts.js";
@@ -76,6 +95,47 @@ describe("ANTHROPIC_DRAFT_GRAPH_SCHEMA", () => {
   it("goal_constraints items require node_id and operator", () => {
     expect(ANTHROPIC_DRAFT_GRAPH_SCHEMA.properties.goal_constraints.items.required).toContain("node_id");
     expect(ANTHROPIC_DRAFT_GRAPH_SCHEMA.properties.goal_constraints.items.required).toContain("operator");
+  });
+
+  /**
+   * ⭐⭐ THE CONTRAST THAT STOPS THIS FILE BEING READ AS EVIDENCE ABOUT THE WIRE.
+   *
+   * Every assertion above is TRUE — of an object with no production call site.
+   * Two seats read "goal_constraints is required" here and concluded the model
+   * is asked for the user's stated limits. It is not: the grammar the draft call
+   * attaches has `stated_items` and `claims` and nothing else, closed with
+   * `additionalProperties: false`, so `goal_constraints` is not merely absent
+   * from it — it is FORBIDDEN, and no prompt can restore it.
+   *
+   * ⚠ THIS IS NOT A PIN ON THE ABSENCE, and must not be repaired as if it were.
+   * If someone deliberately adds a constraint channel to the records grammar,
+   * this test SHOULD red, and the repair is to rewrite it to describe the new
+   * arrangement — not to widen it until it stops noticing. What it forbids is
+   * the two objects silently becoming indistinguishable again.
+   *
+   * Both objects are BUILT here, never described from memory, and the sent
+   * grammar's own required keys are asserted alongside — so a run in which the
+   * builder returned an empty object could not read as agreement (trap 13).
+   */
+  it("CONTRAST: the grammar the draft call actually sends carries NO goal_constraints", () => {
+    const sent = buildDraftRecordsSchema() as {
+      properties: Record<string, unknown>;
+      required: string[];
+      additionalProperties: unknown;
+    };
+
+    // Positive half — the probe can see what IS there.
+    expect(Object.keys(sent.properties).sort()).toEqual(["claims", "stated_items"]);
+    expect(sent.required.slice().sort()).toEqual(["claims", "stated_items"]);
+    expect(sent.additionalProperties).toBe(false);
+
+    // Negative half — and it is a claim about the WHOLE serialised object, not
+    // just its top level, because a nested occurrence would be just as
+    // misleading.
+    expect(JSON.stringify(sent)).not.toContain("goal_constraints");
+
+    // The disagreement, stated as the disagreement it is.
+    expect(JSON.stringify(ANTHROPIC_DRAFT_GRAPH_SCHEMA)).toContain("goal_constraints");
   });
 });
 

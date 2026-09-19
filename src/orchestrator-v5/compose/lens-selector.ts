@@ -135,7 +135,12 @@ import {
   isDisagreementOfferComposable,
   isOverrideOfferComposable,
 } from '../coaching/judgement-offer-text.js';
-import type { JudgementEdgeRef, JudgementSignals } from './judgement-signals.js';
+import { isStatedDissentOfferComposable } from '../coaching/stated-dissent-offer-text.js';
+import type {
+  JudgementEdgeRef,
+  JudgementSignals,
+  StatedDissentSignal,
+} from './judgement-signals.js';
 import {
   tierForCandidate,
   tierRank,
@@ -172,6 +177,13 @@ export type LensId =
   // selection when the caller passes no signals (pinned byte-identical).
   | 'override_stress_test'
   | 'disagreement_resolution'
+  // T3 — a human's STATED objection to a finding (schemas 0.55.0
+  // `finding_dissent`) that no later analysis has stood against. Third member
+  // of the same `resolve_disagreement` tier, fed by the same
+  // `judgementSignals` bag, and placed LAST within that tier so it can never
+  // displace either sibling — it takes a slot the tier did not otherwise
+  // claim.
+  | 'stated_dissent_review'
   | 'fragile_edge_resolution'
   | 'consider_opposite'
   | 'devils_advocacy'
@@ -223,7 +235,13 @@ export type LensRationaleCode =
   | 'OVERRIDE_UNANSWERED'
   // disagreement_resolution (2.692 I-DISAGREE) — a contested edge the two-pass
   // pipeline surfaced and no adjudication fact has settled.
-  | 'CONTESTED_UNADJUDICATED';
+  | 'CONTESTED_UNADJUDICATED'
+  // stated_dissent_review — a human disagreed with a finding IN THEIR OWN
+  // WORDS and no analysis since has stood against it. Distinct from
+  // CONTESTED_UNADJUDICATED, which is the MACHINE disagreeing with itself
+  // across two validation passes: same English word, different disagreements,
+  // and conflating them is trap 21.
+  | 'STATED_DISSENT_UNANSWERED';
 
 /**
  * The science-bearing enrichment FIELD each lens grounds its claim in. Wave-3 σ
@@ -253,6 +271,10 @@ export type LensGroundingField =
   // allow-list, so the cage's answer is `not_allowlisted` — which is TRUE and
   // is the honest live verdict: no value from either source is ever surfaced
   // (the cards are prose-only, magnitudes banned by design §4).
+  // T3 grounds in the same class: the persisted `finding_dissent` fact. Not on
+  // the cage's enrichment allow-list, so the cage's answer is
+  // `not_allowlisted` — TRUE and the honest live verdict, because the card is
+  // prose-only and surfaces no value from any source.
   | 'judgement_fact'
   | 'graph_validation';
 
@@ -340,6 +362,14 @@ export interface LensSelection {
    * CEE-INTERNAL — never a wire field.
    */
   readonly judgementEdge?: JudgementEdgeRef;
+  /**
+   * T3 — the stated objections this lens is about. Present exactly when `lens`
+   * is `stated_dissent_review` (its evaluator is the only producer of the key).
+   * Same rationale as {@link judgementEdge}: one selection, threaded — the
+   * block mint reads the COUNT for the naming sentence and never re-derives it.
+   * CEE-INTERNAL — never a wire field, and its `statement` never reaches one.
+   */
+  readonly statedDissent?: StatedDissentSelection;
 }
 
 // ============================================================================
@@ -527,6 +557,11 @@ const LENS_EXECUTOR_INTRINSICALLY_AVAILABLE: Readonly<Record<LensId, boolean>> =
   // gate (no inert chips by construction).
   override_stress_test: true,
   disagreement_resolution: true,
+  // T3's executor is the conversation — the same class as T1's and as
+  // pre_mortem's review-path form, and chat is always live. The card ships no
+  // action chip in v1 (see `coaching/stated-dissent-offer-text.ts` for why),
+  // so there is no dispatch leg to gate and no inert chip by construction.
+  stated_dissent_review: true,
   // ROADMAP 2.989: the executor is the `edit_graph` path, which is live and
   // ungated — the composed acceptance turn passes EDIT_GRAPH_POSITIVE_REGEX,
   // clears EDIT_GRAPH_NEGATIVE_REGEX (asserted in-test against the imported
@@ -855,6 +890,26 @@ interface EvaluatorHit {
   readonly fragileEdge?: FragileEdgeSelection;
   /** ROADMAP 2.692 slice 2 — set ONLY by the two judgement-lens evaluators. */
   readonly judgementEdge?: JudgementEdgeRef;
+  /** T3 — set ONLY by {@link evaluateStatedDissentReview}. */
+  readonly statedDissent?: StatedDissentSelection;
+}
+
+/**
+ * T3's payload: the HEAD objection plus how many are open.
+ *
+ * ⚠ THE COUNT IS CARRIED, NOT RE-DERIVED AT THE MINT. The naming sentence
+ * changes on `> 1` (several objections ⇒ name none individually), so the card
+ * and the eligibility predicate must agree about how many there are. Two reads
+ * of one fact over inputs a refactor can let diverge is the twins shape
+ * (trap 12/16) — one selection, threaded.
+ *
+ * `head` carries no user text into the card (the card quotes nothing); it is
+ * threaded so telemetry and any later slice address the SAME objection the
+ * eligibility stage counted, by identity rather than by re-selection.
+ */
+export interface StatedDissentSelection {
+  readonly head: StatedDissentSignal;
+  readonly openCount: number;
 }
 
 /**
@@ -1069,6 +1124,33 @@ function evaluateDisagreementResolution(
     })[0]!;
   }
   return { code: 'CONTESTED_UNADJUDICATED', subjectFactorId: null, judgementEdge: head };
+}
+
+/**
+ * T3 — A HUMAN OBJECTED IN THEIR OWN WORDS AND NOTHING HAS ANSWERED IT.
+ *
+ * The whole trigger is the presence of the bag, which `deriveJudgementSignals`
+ * has already made fire-once by fact ordering (an objection older than the
+ * latest claim-bearing analysis is structurally spent). There is no threshold,
+ * no magnitude and no ordering heuristic here on purpose: the product has no
+ * grounds for ranking one person's stated objection above another's, and
+ * inventing one would be a judgement the user did not make. The HEAD is simply
+ * the newest, which is the only ordering the fact log actually supplies.
+ *
+ * `subjectFactorId` is null by construction: the subject is a FINDING, which is
+ * not a graph node, so the `focus` directive falls through to the v1 highlight
+ * rather than fabricating a target.
+ */
+function evaluateStatedDissentReview(
+  judgement: JudgementSignals | undefined,
+): EvaluatorHit | null {
+  const open = judgement?.statedDissentUnanswered;
+  if (open === undefined || open.length === 0) return null;
+  return {
+    code: 'STATED_DISSENT_UNANSWERED',
+    subjectFactorId: null,
+    statedDissent: { head: open[0]!, openCount: open.length },
+  };
 }
 
 /**
@@ -1291,6 +1373,11 @@ export const TITLE_BY_LENS: Readonly<Record<LensId, string>> = {
   // value you set" / "Resolve this disagreement"), in the shared title family.
   override_stress_test: 'Strengthen your model: stress-test the value you set',
   disagreement_resolution: 'Strengthen your model: resolve this disagreement',
+  // T3 — verb-free on purpose. The other titles in this family tell the user
+  // what to DO; this one tells them where something of theirs STANDS, because
+  // the card's whole proposition is that their objection has not been answered
+  // and the product is not going to answer it for them.
+  stated_dissent_review: 'Strengthen your model: your objection is still open',
   fragile_edge_resolution: 'Strengthen your model: firm up the relationship carrying the result',
   consider_opposite: 'Strengthen your model: argue the other side',
   devils_advocacy: 'Strengthen your model: challenge the main assumption',
@@ -1369,6 +1456,15 @@ export const BODY_BY_RATIONALE: Readonly<Record<LensRationaleCode, string>> = {
     'Worth stress-testing the value you set, so the next analysis rests on it honestly.',
   CONTESTED_UNADJUDICATED:
     'Resolving that disagreement is worth more than refining numbers computed through it.',
+  // T3 — licensed by the `finding_dissent` fact alone, which is why it asserts
+  // nothing about the finding, the run, or who is right.
+  //
+  // ⚠ THE SECOND CLAUSE IS THE LOAD-BEARING ONE AND IT IS A PROMISE THE CODE
+  // KEEPS: nothing is adjusted because a human objected. It is true because
+  // `deriveJudgementSignals` reads the fact and no consumer writes anything
+  // from it — not a claim about intent, a claim about the derivation.
+  STATED_DISSENT_UNANSWERED:
+    'This run does not settle it, and nothing was adjusted because you objected — your reasoning is on the record as yours. Naming what evidence would settle it turns the disagreement into something the team can test.',
   SENSITIVITY_ISOLATED_NO_FLIP:
     'This factor moves the result more than any other. The analysis swept its whole tested range and the ranking never changed, so what is still open is the size of the gap, not the order. Pressure-testing this factor tells you how much of the margin rests on it.',
   SENSITIVITY_CORRELATED_NO_FLIP:
@@ -1436,6 +1532,8 @@ export const GROUNDING_FIELD_BY_RATIONALE: Readonly<Record<LensRationaleCode, Le
   // cards are prose-only and surface no value from any source.
   OVERRIDE_UNANSWERED: 'judgement_fact',
   CONTESTED_UNADJUDICATED: 'graph_validation',
+  // T3 grounds in the persisted `finding_dissent` fact — the same class as T1.
+  STATED_DISSENT_UNANSWERED: 'judgement_fact',
   // The what-if claim is about the OUTCOME (option win probability) → grounds in
   // option_comparison, which is deliberately NOT allow-listed, so the σ cage
   // DENIES surfacing its value: the counterfactual outcome number stays omitted
@@ -1488,6 +1586,8 @@ function buildSelection(
     // ROADMAP 2.692 slice 2: same pattern — present exactly on the two
     // judgement lenses, absent everywhere else.
     ...(hit.judgementEdge !== undefined ? { judgementEdge: hit.judgementEdge } : {}),
+    // T3: same pattern — present exactly on the stated-dissent lens.
+    ...(hit.statedDissent !== undefined ? { statedDissent: hit.statedDissent } : {}),
     // ROADMAP 2.211 / 2.211-①: present ONLY on a displacement (either cause),
     // so the absence of the keys is itself the "the head lens won normally"
     // assertion (and `toStrictEqual` against a pre-amendment selection stays
@@ -1640,6 +1740,15 @@ function isInterventionComposable(lens: LensId, hit: EvaluatorHit): boolean {
     const edge = hit.judgementEdge;
     if (edge === undefined) return false;
     return isDisagreementOfferComposable(edge.fromLabel, edge.toLabel);
+  }
+  // T3's naming sentences are constants, so this predicate is total today. It
+  // is asked anyway, at both call sites, for the reason its own header gives:
+  // a guard that is a tautology by construction is one edit away from being a
+  // guard that silently stopped discriminating.
+  if (lens === 'stated_dissent_review') {
+    const dissent = hit.statedDissent;
+    if (dissent === undefined) return false;
+    return isStatedDissentOfferComposable(dissent.openCount);
   }
   return true;
 }
@@ -1799,6 +1908,14 @@ export function rankInterventions(
     // both null ⇒ byte-identical selection (the absent-input identity pin).
     ['override_stress_test', evaluateOverrideStressTest(options?.judgementSignals)],
     ['disagreement_resolution', evaluateDisagreementResolution(signals, options?.judgementSignals)],
+    // T3 — LAST within `resolve_disagreement`, so it can never displace either
+    // sibling. That placement is deliberately CONSERVATIVE rather than a
+    // statement about relative worth: on every run where T1 or T2 fires, the
+    // selection is byte-identical to the pre-change build (pinned). Where the
+    // tier would otherwise be empty, an unanswered human objection outranks
+    // every lens below it — which is the tier order already ratified, applied
+    // to a member it could not previously have.
+    ['stated_dissent_review', evaluateStatedDissentReview(options?.judgementSignals)],
     ['consider_opposite', evaluateConsiderOpposite(signals)],
     ['devils_advocacy', evaluateDevilsAdvocacy(signals)],
     // ── ROADMAP 2.989 — THE FRAGILE-EDGE RESOLUTION LENS. POSITION IS A RULING

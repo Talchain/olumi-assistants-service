@@ -25,6 +25,7 @@
 import { log } from '../../utils/telemetry.js';
 import { readIsBaseline } from '../../cee/baseline-identity.js';
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
+import { mergeInterventionSourceObjects } from '../../orchestrator/tools/analysis-ready-helper.js';
 import {
   compactGraph,
   type GraphV3Compact,
@@ -83,7 +84,7 @@ export function compactGraphForContextPack(
   if (parsed.success) {
     return {
       kind: 'compacted',
-      compact: compactGraph(withProducerBaselineIdentity(parsed.data, graphState)),
+      compact: compactGraph(withProducerContextCarriers(parsed.data, graphState)),
       via: 'strict_parse',
     };
   }
@@ -188,15 +189,15 @@ function withoutBaselineIdentity(compact: GraphV3Compact): GraphV3Compact {
 
 /**
  * GraphV3's strict projection intentionally removes the legacy `data` bag.
- * Baseline identity is one of the few producer-attested facts that can still
- * arrive on that surface, so resolve the estate's existing authority rule
- * before parsing and carry only an explicit effective `true` onto the parsed
+ * Baseline identity and edit-time intervention entries can still arrive on
+ * that surface. Resolve their existing authority rules against the original
+ * snapshot and carry the selected entries onto the parsed
  * option at the same position with the same ID and kind. This is transport,
  * not adjudication: labels and the ingress `options[]` index are never
  * consulted. A positional mismatch fails weak instead of letting one raw node
  * license a different parsed node that happens to share its ID.
  */
-function withProducerBaselineIdentity(
+function withProducerContextCarriers(
   parsed: GraphV3T,
   raw: GraphStateIngress,
 ): GraphV3T {
@@ -226,9 +227,17 @@ function withProducerBaselineIdentity(
         : {}),
       ...(data === undefined ? {} : { data }),
     });
-    if (effective !== true || parsedNode.is_baseline === true) return parsedNode;
+    // The parser removes data/slash-key carriers. Resolve them before that
+    // removal changes precedence; never infer an intervention from a label.
+    const interventions = mergeInterventionSourceObjects(candidate);
+    const hasInterventions = Object.keys(interventions).length > 0;
+    if (!hasInterventions && (effective !== true || parsedNode.is_baseline === true)) return parsedNode;
     changed = true;
-    return { ...parsedNode, is_baseline: true };
+    return {
+      ...parsedNode,
+      ...(effective === true ? { is_baseline: true } : {}),
+      ...(hasInterventions ? { interventions } : {}),
+    };
   });
 
   if (!changed) return parsed;

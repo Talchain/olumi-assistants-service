@@ -1199,6 +1199,43 @@ export function looksLikeExplicitAnalysisRequest(message: string): boolean {
 }
 
 /**
+ * True when the message carries an EXPLICIT REFUSAL of a run — "Don't run
+ * the analysis.", "No need to re-run.", "Never run this automatically."
+ *
+ * ⚠ THIS IS NOT A SECOND PREDICATE OVER THE SAME QUESTION, and it deliberately
+ * mints NO patterns of its own. It reads {@link RERUN_NEGATION_VETO_PATTERNS}
+ * — the SAME array {@link looksLikeExplicitAnalysisRequest} consults — so the
+ * two can never disagree about what a refusal is and there is no mirror to
+ * drift (CLAUDE.md trap 12). Widening the refusal set is therefore a
+ * single-array edit that moves both readers at once, by construction.
+ *
+ * WHY IT EXISTS SEPARATELY (trap 21 — name the question each authority
+ * answers). `looksLikeExplicitAnalysisRequest` answers *"may this election be
+ * honoured?"* and answers NO for two structurally different reasons: the user
+ * REFUSED, or the sentence simply did not spell one of the four verbs. Those
+ * two reasons carry OPPOSITE correct payoffs — the first must not be answered
+ * with an offer to run, the second must. A single boolean cannot express that,
+ * which is exactly why the demotion used to treat both as one refusal.
+ *
+ * ⚠ IT INHERITS THE NEGATION VETO'S ACCEPTED OVER-REACH, unchanged and on
+ * purpose: `stop` / `avoid` / `without` anywhere in the sentence read as a
+ * refusal, so "Show me the results without the outlier." declines rather than
+ * offering. That is the SAFE direction for this arm — an unwanted offer after
+ * an explicit "don't" is the harm being avoided, and the declining copy still
+ * names the acceptance path in words.
+ *
+ * Pure and total. No LLM.
+ */
+export function carriesExplicitAnalysisRefusal(message: string): boolean {
+  const trimmed = message.trim();
+  if (trimmed.length === 0) return false;
+  for (const re of RERUN_NEGATION_VETO_PATTERNS) {
+    if (re.test(trimmed)) return true;
+  }
+  return false;
+}
+
+/**
  * Positive vague-edit signal. True when the message is shaped like an
  * edit request that lacks a specific target — typical phrasings: "Update
  * something", "Change this", "Make a change", "Adjust the model",

@@ -143,3 +143,42 @@ describe('2.653 — cleanConstraintSubject: what the regex captures vs what a us
     expect(cleanConstraintSubject('return on ad spend')).toBe('return on ad spend');
   });
 });
+
+describe('⭐ the bound phrase is not composed on top of a fragment of itself', () => {
+  /**
+   * MEASURED on deployed `a3b0548d`, 2 of 2 briefs that stored a limit:
+   *
+   *   buy     "Keep spend at or AT OR BELOW £200,000"
+   *           source_quote: "spend at or below £200,000"          ← correct
+   *   hiring  "Keep voluntary attrition at or AT OR BELOW 12%"
+   *           source_quote: "while keeping voluntary attrition at or below 12%"  ← correct
+   *
+   * Each brief's OWN quote was right beside the malformed label, so the capture
+   * was correct and only the trim was short: `'or'` was missing from
+   * SCAFFOLD_WORDS while its siblings `'and'` and `'but'` were both present. The
+   * trailing trim stopped at "or", and `buildBoundDisplayName` then appended the
+   * bound phrase on top of a fragment of itself.
+   *
+   * ⚠ NOT CLAIMED: that this causes the binding failure. The product's own
+   * reason for withholding a leader is a REFERENT failure ("could not line it up
+   * with anything this analysis measures"), which is a different claim and is
+   * NOT settled by this fix. This is a user-visible copy defect on its own merit.
+   */
+  it('trims a trailing "or" so the bound is not doubled', () => {
+    expect(buildBoundDisplayName('spend at or', '<=', '£200,000'))
+      .toBe('Keep spend at or below £200,000');
+    expect(buildBoundDisplayName('voluntary attrition at or', '<=', '12%'))
+      .toBe('Keep voluntary attrition at or below 12%');
+  });
+
+  it('OPPOSITE DIRECTION: a clean subject is untouched, and a real "or" mid-subject survives', () => {
+    // The trim is TRAILING-ONLY by design — stripping from the middle would
+    // rewrite multi-word measures. Both halves pinned so the fix cannot widen.
+    expect(buildBoundDisplayName('churn', '<=', '3%')).toBe('Keep churn at or below 3%');
+    expect(buildBoundDisplayName('churn or attrition', '<=', '3%'))
+      .toBe('Keep churn or attrition at or below 3%');
+    expect(buildBoundDisplayName('spend at or', '>=', '£200,000'))
+      .toBe('Keep spend at or above £200,000');
+  });
+});
+

@@ -7,7 +7,7 @@
  * remains exported only for compatibility tests and per-option diagnostics.
  */
 
-import { GraphV3 } from "../../schemas/cee-v3.js";
+import { GraphV3, OptionStatusV3 } from "../../schemas/cee-v3.js";
 import type { GraphV3T, OptionV3T } from "../../schemas/cee-v3.js";
 import type { GraphPatchBlockData } from "../types.js";
 import { log } from "../../utils/telemetry.js";
@@ -19,7 +19,8 @@ import { pickGoalThresholdTrio } from "../../utils/goal-threshold-trio.js";
 // The PUBLISHED blocker contract, used to decide which rows the refusal carrier
 // may keep. Imported rather than restated: a hand-copied field list here would
 // be a mirror of the schema and would drift the first time a field is added.
-import { AnalysisBlocker, blockedIdentityCarrier } from "../../schemas/analysis-ready.js";
+import { AnalysisBlocker, AnalysisBlockerType, blockedIdentityCarrier } from "../../schemas/analysis-ready.js";
+import type { AnalysisBlockerTypeT } from "../../schemas/analysis-ready.js";
 import {
   validateGraphStructure,
   CURRENT_STATE_VIOLATION_MESSAGES,
@@ -39,6 +40,13 @@ import { stableStringify } from "../context/stable-stringify.js";
 // `cee/transforms/analysis-ready.ts`. See the kernel's header for why the
 // discriminator is `origin` and not `provenance.source` (measured: the V3
 // transform coerces `"synthetic"` to `"cee_hypothesis"`).
+//
+// Re-imported here as a VALUE (it had been reduced to the prose reference at
+// :882 when the adjacency build moved). It is read for DISCLOSURE only — to
+// tell the user that a link already exists and whose inference it is — and
+// never to decide status. The status decision stays where it is, with exactly
+// one owner. See `appendSemanticIssues` for why those are different questions.
+import { isRepairAuthoredOptionFactorEdge } from "../../graph/repair-authored-edge.js";
 // ⭐ INV-P6 — the SOLE derivation of "may this gap be demanded of the user?".
 // Type-only for the vocabulary, value import for the classifier; the classifier
 // module imports `CanonicalReadinessIssue` back as a TYPE, so there is no runtime
@@ -376,10 +384,16 @@ function readNonEmptyString(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
 }
 
+/**
+ * DERIVED, NOT RESTATED. This previously spelled out `'ready' | 'needs_user_mapping'
+ * | 'needs_encoding'` — a second hand-maintained copy of `OptionStatusV3`, in the
+ * same file as the blocker-vocabulary copy and with the same silent failure mode:
+ * a member added to the enum would fall through to `undefined` with nothing red.
+ * Parsing against the schema means the two cannot disagree at all.
+ */
 function readOptionStatus(value: unknown): OptionV3T['status'] | undefined {
-  return value === 'ready' || value === 'needs_user_mapping' || value === 'needs_encoding'
-    ? value
-    : undefined;
+  const parsed = OptionStatusV3.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
 }
 
 function readRawInterventions(value: unknown): OptionV3T['raw_interventions'] | undefined {
@@ -670,6 +684,123 @@ function structuralIssue(
   };
 }
 
+/** Everything the per-type message composers are allowed to see. */
+interface BlockerMessageContext {
+  readonly suffix: string;
+  readonly optionId: string | undefined;
+  readonly factorId: string | undefined;
+  readonly producerMessage: string | undefined;
+}
+
+interface BlockerIssueShape {
+  readonly code: CanonicalReadinessIssueCode;
+  readonly category: CanonicalReadinessIssueCategory;
+  readonly message: (context: BlockerMessageContext) => string;
+}
+
+/**
+ * ⭐⭐ THE ANTI-MIRROR. One entry per member of the PUBLISHED blocker vocabulary,
+ * keyed BY that vocabulary.
+ *
+ * This replaced a four-case `switch (blockerType)` whose `default` returned
+ * `null`. That switch was a hand-maintained copy of `AnalysisBlockerType`
+ * (`schemas/analysis-ready.ts`) sitting inside the estate's single named
+ * readiness authority — and `blockerType` reaches it as a bare `string` (it is
+ * read off untyped wire bytes through `readNonEmptyString`), so TypeScript could
+ * not check the switch for exhaustiveness. A member added to the enum would have
+ * fallen straight through to `default`, and all THREE call sites drop a `null`:
+ * `appendSemanticIssues` here, `mapWireBlockers` in `compose/analysis-state-v1.ts`,
+ * and `readiness-summary.ts`. The blocker would have vanished from every
+ * readiness surface with nothing red anywhere. The drift read as green.
+ *
+ * `satisfies Record<AnalysisBlockerTypeT, BlockerIssueShape>` is what closes it:
+ * a member added to the enum is now a COMPILE ERROR here until it is handled, and
+ * a key here that the enum does not publish is a compile error too. The two
+ * statements cannot silently disagree in either direction.
+ *
+ * ⚠ AND A COMPILE-TIME CHECK IS NOT THE WHOLE JOB — it proves the copies AGREE,
+ * never that the LIST IS RIGHT. `blocker-type-wire-corpus.test.ts` supplies the
+ * other half from recorded wire captures rather than from this file.
+ */
+const BLOCKER_ISSUE_BY_TYPE = {
+  missing_value: {
+    code: 'MISSING_OPTION_VALUE',
+    category: 'option_values',
+    // ⭐⭐ THE PAIR-SCOPED CASE IS THE ONE CLASS WHOSE PRODUCER AUTHORS PROSE FIT
+    // FOR A USER — so it is the one class that keeps it.
+    //
+    // `analysis-ready.ts:817` emits, for an option×factor pair:
+    //   `Factor "CRM Annual Licence Cost" is currently 50,000. What should
+    //    option "Switch to HubSpot" set it to?`
+    // It names both scopes, gives the factor's CURRENT VALUE in the factor's own
+    // display units, and asks the question the user must answer. The substitute
+    // below names the scopes and nothing else.
+    //
+    // ⚠ THE OTHER THREE CLASSES DELIBERATELY DO NOT GET THIS, AND THAT IS A
+    // MEASURED CALL, NOT TIMIDITY. A blanket rule would trade one truthfulness
+    // defect for three:
+    //   · `ambiguous_value` emits "…its analysis-scale source binding is
+    //     unresolved" — internal jargon;
+    //   · the factor-only `missing_value` (`analysis-ready.ts:1124`) emits
+    //     "Factor …  is not connected to any option" — a DIAGNOSIS with no
+    //     remedy, where the composed sentence gives one;
+    //   · `constraint_dropped` emits an internal constraint id and reason.
+    // (A)'s messages were never written to be the live user-facing sentence;
+    // only this one is. The canned copy is at least written for a human, so
+    // replacing it with jargon would be worse than the defect.
+    //
+    // THE DISCRIMINATOR IS STRUCTURAL, NEVER PROSE (trap 22f). The two
+    // `missing_value` producers are told apart by whether the blocker names an
+    // OPTION — `:817` always does, `:1124` never does. A field-presence test
+    // cannot oscillate the way a natural-language classifier would.
+    message: ({ suffix, optionId, factorId, producerMessage }) =>
+      optionId && factorId && producerMessage
+        ? producerMessage
+        : `Choose the missing effect value${suffix}.`,
+  },
+  ambiguous_value: {
+    code: 'AMBIGUOUS_OPTION_VALUE',
+    category: 'option_values',
+    message: ({ suffix }) => `Confirm the effect value${suffix}.`,
+  },
+  missing_connection: {
+    code: 'MISSING_OPTION_CONNECTION',
+    category: 'option_mapping',
+    message: ({ suffix }) => `Choose the missing connection${suffix}.`,
+  },
+  constraint_dropped: {
+    code: 'CONSTRAINT_REVIEW_REQUIRED',
+    category: 'option_values',
+    message: ({ suffix }) => `Review the unresolved constraint${suffix}.`,
+  },
+} as const satisfies Record<AnalysisBlockerTypeT, BlockerIssueShape>;
+
+/**
+ * Lookup built from the TABLE'S OWN KEYS, deliberately — not from
+ * `AnalysisBlockerType.options`.
+ *
+ * ⚠ THIS DISTINCTION IS LOAD-BEARING AND IT IS EASY TO GET BACKWARDS. Building
+ * the map by walking the enum would make `MAPPED_BLOCKER_TYPES` a restatement of
+ * the enum rather than a reading of the table, so the guard would be comparing
+ * the enum with itself — a guard agreeing with itself, which is exactly the
+ * shape this whole change exists to remove. Reading the table's keys is what
+ * makes the two sides independent, so a divergence is genuinely observable.
+ *
+ * `Object.entries` returns own enumerable keys only, so a blocker carrying
+ * `blocker_type: "constructor"` or `"__proto__"` resolves to nothing rather than
+ * reaching an inherited property.
+ */
+const BLOCKER_ISSUE_LOOKUP: ReadonlyMap<string, BlockerIssueShape> = new Map(
+  Object.entries(BLOCKER_ISSUE_BY_TYPE as Record<string, BlockerIssueShape>),
+);
+
+/** The published vocabulary, exposed for the derived guard. Never restated. */
+export const PUBLISHED_BLOCKER_TYPES: readonly string[] = AnalysisBlockerType.options;
+
+/** Exported so the guard can assert the table's KEYS against the enum in BOTH
+ *  directions — a behavioural probe alone cannot see an extra key. */
+export const MAPPED_BLOCKER_TYPES: readonly string[] = [...BLOCKER_ISSUE_LOOKUP.keys()];
+
 /**
  * Map ONE wire `analysis_ready` blocker onto a canonical readiness issue.
  *
@@ -727,68 +858,46 @@ export function blockerIssue(
       message: `Choose which option changes${suffix} and by how much.`,
     };
   }
-  switch (blockerType) {
-    case 'missing_value':
-      return {
-        ...common,
-        code: 'MISSING_OPTION_VALUE',
-        category: 'option_values',
-        // ⭐⭐ THE PAIR-SCOPED CASE IS THE ONE CLASS WHOSE PRODUCER AUTHORS
-        // PROSE FIT FOR A USER — so it is the one class that keeps it.
-        //
-        // `analysis-ready.ts:817` emits, for an option×factor pair:
-        //   `Factor "CRM Annual Licence Cost" is currently 50,000. What should
-        //    option "Switch to HubSpot" set it to?`
-        // It names both scopes, gives the factor's CURRENT VALUE in the
-        // factor's own display units, and asks the question the user must
-        // answer. The substitute below names the scopes and nothing else.
-        //
-        // ⚠ THE OTHER THREE CLASSES DELIBERATELY DO NOT GET THIS, AND THAT IS
-        // A MEASURED CALL, NOT TIMIDITY. A blanket rule would trade one
-        // truthfulness defect for three:
-        //   · `ambiguous_value` emits "…its analysis-scale source binding is
-        //     unresolved" — internal jargon;
-        //   · the factor-only `missing_value` (`analysis-ready.ts:1124`) emits
-        //     "Factor …  is not connected to any option" — a DIAGNOSIS with no
-        //     remedy, where the composed sentence gives one;
-        //   · `constraint_dropped` emits an internal constraint id and reason.
-        // (A)'s messages were never written to be the live user-facing
-        // sentence; only this one is. The canned copy is at least written for
-        // a human, so replacing it with jargon would be worse than the defect.
-        //
-        // THE DISCRIMINATOR IS STRUCTURAL, NEVER PROSE (trap 22f). The two
-        // `missing_value` producers are told apart by whether the blocker names
-        // an OPTION — `:817` always does, `:1124` never does. A field-presence
-        // test cannot oscillate the way a natural-language classifier would.
-        message:
-          optionId && factorId && producerMessage
-            ? producerMessage
-            : `Choose the missing effect value${suffix}.`,
-      };
-    case 'ambiguous_value':
-      return {
-        ...common,
-        code: 'AMBIGUOUS_OPTION_VALUE',
-        category: 'option_values',
-        message: `Confirm the effect value${suffix}.`,
-      };
-    case 'missing_connection':
-      return {
-        ...common,
-        code: 'MISSING_OPTION_CONNECTION',
-        category: 'option_mapping',
-        message: `Choose the missing connection${suffix}.`,
-      };
-    case 'constraint_dropped':
-      return {
-        ...common,
-        code: 'CONSTRAINT_REVIEW_REQUIRED',
-        category: 'option_values',
-        message: `Review the unresolved constraint${suffix}.`,
-      };
-    default:
-      return null;
+  // A carrier with no usable `blocker_type` at all is malformed, not
+  // off-contract. Its handling is unchanged: inventing a blocker out of noise
+  // would be a different defect from the one being fixed here.
+  if (blockerType === null) return null;
+
+  const mapped = BLOCKER_ISSUE_LOOKUP.get(blockerType);
+  if (mapped) {
+    return {
+      ...common,
+      code: mapped.code,
+      category: mapped.category,
+      message: mapped.message({ suffix, optionId, factorId, producerMessage }),
+    };
   }
+
+  // ⚠ OFF-CONTRACT, AND IT IS SURFACED RATHER THAN DROPPED — the behavioural
+  // half of this repair. The old `default: return null` discarded a gap the
+  // producer had genuinely detected, on all three surfaces, in silence.
+  //
+  // The direction is FAIL-SAFE by choice: this build cannot CHARACTERISE the
+  // gap, so it must not go on claiming the model is ready. `internal` is
+  // hard-blocking in `assessCanonicalAnalysisReadiness`, so the run refuses
+  // loudly instead of waiving something new — the same direction
+  // `analysis-ready-core.ts` states for its own unreachable-code removals.
+  //
+  // Unreachable from any in-repo producer at this tip (the table is exhaustive
+  // over the enum, enforced by `satisfies`). It exists for what a compile-time
+  // check cannot reach: bytes from a DIFFERENT build, or an untyped passthrough
+  // — which is precisely how blockers arrive at
+  // `mapWireBlockers(blockers: readonly unknown[])`.
+  log.warn(
+    { blocker_type: blockerType, status },
+    'analysis_ready blocker carries a blocker_type outside the published AnalysisBlockerType vocabulary; surfacing it as an internal readiness fault rather than dropping it',
+  );
+  return {
+    ...common,
+    code: 'INTERNAL_ERROR',
+    category: 'internal',
+    message: producerMessage ?? `Review the unresolved blocker${suffix}.`,
+  };
 }
 
 /**
@@ -938,9 +1047,73 @@ function projectSemanticAnalysisReadyFromGraph(
   return projectCanonicalPayloadToWire(canonical);
 }
 
+/**
+ * How many DISTINCT factors the deterministic connectivity repair wired each
+ * option to — links the PRODUCT drew for itself.
+ *
+ * ⚠ THIS IS NOT A SECOND OPINION ABOUT STATUS, AND THE DISTINCTION IS THE
+ * WHOLE POINT. `connectedFactorCount` (`cee/transforms/option-status.ts:276`)
+ * deliberately EXCLUDES these edges, so the product can never count its own
+ * wiring as a mapping the user made; that exclusion is correct, is documented
+ * at its own site, and is untouched here. The question this map answers is a
+ * different one: *"has the product already drawn a link here that it is about
+ * to ask the user to draw from scratch?"* Answering it is presentation, not
+ * adjudication — trap 21, where two authorities under similar names were
+ * reconciled instead of being named apart.
+ *
+ * Derived through `isRepairAuthoredOptionFactorEdge`, the ONE authority, so a
+ * second definition of "the repair invented this edge" cannot appear here.
+ * `origin` survives the `GraphV3` parse (`schemas/cee-v3.ts:380`,
+ * `origin: z.string().optional()`) — verified at the bytes, because a stripped
+ * field would make this map read empty forever and the disclosure would go
+ * silently dark rather than fail loud.
+ */
+function repairWiredFactorCountByOption(graph: GraphV3T): ReadonlyMap<string, number> {
+  const nodeKindById = new Map(graph.nodes.map((node) => [node.id, node.kind] as const));
+  const targetsByOption = new Map<string, Set<string>>();
+  for (const edge of graph.edges) {
+    if (!isRepairAuthoredOptionFactorEdge(edge, nodeKindById)) continue;
+    const targets = targetsByOption.get(edge.from) ?? new Set<string>();
+    targets.add(edge.to);
+    targetsByOption.set(edge.from, targets);
+  }
+  return new Map([...targetsByOption].map(([id, targets]) => [id, targets.size] as const));
+}
+
+/**
+ * The mapping ask, plus the disclosure it needs when the product has already
+ * wired this option itself.
+ *
+ * ⭐ THE ASK IS UNCHANGED AND IS STILL THE FIRST SENTENCE, VERBATIM. The user
+ * genuinely has not said which factor this option moves, so the question is
+ * correct in KIND and must keep being put — suppressing it, or counting repair
+ * edges as connections to make it disappear, would inflate readiness and
+ * silence a legitimate question. What was wrong is that it was asked FROM
+ * SCRATCH about an option the product had already wired, which reads as the
+ * product not knowing its own state.
+ *
+ * ⚠ IT DISCLOSES RATHER THAN ASKING FOR CONFIRMATION, AND THAT IS DELIBERATE.
+ * The repair wires each disconnected option to the UNION of every factor the
+ * connected options target (`stages/repair/status-quo-fix.ts:162-192`), so the
+ * link is a connectivity fallback, not a considered judgement about THIS
+ * option. Inviting the user to "confirm" it would ask them to bless an
+ * arbitrary link the product holds no evidence for — a worse failure than the
+ * one being fixed. Naming it, disowning it, and leaving the choice open is the
+ * honest form.
+ */
+function optionMappingAsk(label: string, repairWiredFactorCount: number): string {
+  const ask = `Choose which factor "${label}" changes and by how much.`;
+  if (repairWiredFactorCount <= 0) return ask;
+  const factors = repairWiredFactorCount === 1
+    ? "one factor"
+    : `${repairWiredFactorCount} factors`;
+  return `${ask} Olumi has already linked it to ${factors} to keep the model connected, but that link is Olumi's own inference rather than a mapping you stated, and it carries no effect value.`;
+}
+
 function appendSemanticIssues(
   payload: AnalysisReadyPayload | undefined,
   out: CanonicalReadinessIssue[],
+  repairWiredFactorCount: ReadonlyMap<string, number> = new Map<string, number>(),
 ): void {
   if (!payload || payload.status === 'ready') return;
   const exactKey = (issue: CanonicalReadinessIssue): string => [
@@ -989,7 +1162,10 @@ function appendSemanticIssues(
       code: mapping ? 'OPTION_NEEDS_MAPPING' : 'OPTION_NEEDS_ENCODING',
       category: mapping ? 'option_mapping' : 'option_values',
       message: mapping
-        ? `Choose which factor "${option.label}" changes and by how much.`
+        ? optionMappingAsk(
+            option.label,
+            repairWiredFactorCount.get(option.option_id) ?? 0,
+          )
         : `Choose how "${option.label}" should be represented on the effect scale.`,
       repairability: 'human_input_required',
       option_id: option.option_id,
@@ -1121,7 +1297,14 @@ export function assessCanonicalAnalysisReadiness(
     });
 
     const semantic = projectSemanticAnalysisReadyFromGraph(proposalGraph);
-    appendSemanticIssues(semantic, blockingIssues);
+    // Derived from `parsed.data` — the SAME graph `projectSemanticAnalysisReadyFromGraph`
+    // reads, schema-validated, so the disclosure can never describe a different
+    // model than the ask it rides on.
+    appendSemanticIssues(
+      semantic,
+      blockingIssues,
+      repairWiredFactorCountByOption(parsed.data),
+    );
 
     // ⭐ INV-P6 — stamp provenance + obligation on EVERY issue, at the one point
     // where the complete issue set exists.

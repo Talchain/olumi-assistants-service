@@ -452,10 +452,35 @@ describe('§6 measured against the route’s own five-conjunct predicate', () =>
     expect(divergent).toStrictEqual([
       ['Operating Profit Uplift', 'Raise Group Operating Profit by 8% Within 18 Months'],
       ['Flour Cost Margin Squeeze', 'Raise Group Operating Profit by 8% Within 18 Months'],
+      ['Change Rate', 'Throughput'],
     ]);
     // The MECHANISM, derived rather than described: it is the value-update
-    // conjunct, and the phrasing comes from the PRODUCER LABEL ("Raise … by 8%"),
-    // not from our copy.
+    // conjunct, and the phrasing comes from the PRODUCER LABEL, not our copy.
+    // ⚠ THERE ARE NOW TWO DIFFERENT MECHANISMS IN THIS ONE SET. Adjudicated
+    // 2026-09-14 rather than appended — they are not the same finding:
+    //
+    //  (a) the two "Raise … by 8% …" pairs — the TO-label carries a clause-B
+    //      by-quantity ("Raise X by 8%"). Pre-existing; unchanged by the
+    //      `change` admission.
+    //
+    //  (b) ['Change Rate', 'Throughput'] — NEW, and it is a DEFECT, not
+    //      correct behaviour. The prompt is
+    //        "Adjust the strength of the link from Change Rate to Throughput…"
+    //      whose intent is an EDGE-STRENGTH edit. It is claimed only because
+    //      the FROM-label's first word is the common noun "Change", which the
+    //      unanchored clause-A pattern reads mid-sentence as
+    //      `change <object> to <value>`. The gate has no part-of-speech
+    //      awareness, so a factor legitimately named "Change Rate" / "Change
+    //      Management Cost" / "Change Request Volume" mis-routes.
+    //      CONTRAST, measured: the identical prompt with 'Churn Rate' as the
+    //      from-label is NOT claimed — the label is the whole difference.
+    //      ⚠ PRE-EXISTING CLASS, WIDENED — NOT INVENTED HERE: the same shape
+    //      already fires on `update`, measured at the pristine tip
+    //      ("Update Frequency to Throughput" → true). Admitting `change`
+    //      widens it because "change" is far commoner as a label noun.
+    //      DELIBERATELY NOT SOLVED: a disambiguator for noun-vs-verb here is
+    //      the unwinnable-predicate road this estate has already walked.
+    //      Recorded so the next session cannot mistake it for new.
     for (const [from, to] of divergent) {
       const prompt = composeDisagreementActionPrompt(from, to);
       expect(shouldSuppressEditDispatchForValueUpdate(prompt)).toBe(true);

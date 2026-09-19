@@ -31,11 +31,21 @@ import {
   carriedDraftGraph,
   readyOptionCount,
   readinessDiagnosis,
+  draftErrorDiagnosis,
+  assertProxyDelivered,
+  proxyFailureCode,
+  TURN_PATH,
   draftGraphCensus,
   assertNoUnrequestedAnalysisRefusal,
   READINESS_PRODUCING_EXIT_PATHS,
   MIN_NODES,
   MIN_OPTIONS,
+  classifyJourneySample,
+  summariseSamples,
+  detectionProbability,
+  halfDetectionRate,
+  assertSampleFloor,
+  samplingReport,
 } from "../../../scripts/ci/staging-journey-smoke.mjs";
 
 const REPO_ROOT = resolve(__dirname, "../../..");
@@ -1111,6 +1121,616 @@ describe("C-2 — a conversational turn answered with an ANALYSIS REFUSAL is its
     expect(block).toContain('label: "turn 1", body: t1.body, requestedAnalysis: false');
     expect(block).toContain('label: "turn 2", body: t2.body, requestedAnalysis: false');
     // And the result must actually reach `failures`, or the call is decorative.
-    expect(src).toContain("failures.push(\n    ...assertNoUnrequestedAnalysisRefusal(");
+    //
+    // Matched as a regex rather than an exact string with a baked-in indent:
+    // the call moved into `runJourneySample` when the gate became multi-sample
+    // (11 Sep) and this pin reddened on the INDENTATION ALONE. A guard that
+    // fails on whitespace teaches the next author to loosen it, which is how a
+    // real guarantee gets deleted. The guarantee is unchanged and still exact —
+    // the result of THIS call reaches `failures.push`, on any indent.
+    expect(src).toMatch(/failures\.push\(\s*\.\.\.assertNoUnrequestedAnalysisRefusal\(/);
+  });
+});
+
+describe("10 Sep intermittent — the draft-failure diagnosis discriminates a refusal from a fault", () => {
+  /**
+   * PRECONDITION PIN (trap 13b). Every test below is only meaningful if this
+   * fixture really is the failure class in question. Asserted here so a fixture
+   * edit reds THIS test by name rather than quietly hollowing out the rest.
+   */
+  it("PRECONDITION: the committed 500 capture really is an egress refusal, not a timeout", () => {
+    expect(BROKEN_DRAFT.details.violation_code).toBe("OPTIONS_IDENTICAL");
+    expect(BROKEN_DRAFT.details.reason).toBe("draft_graph_cee_graph_invalid");
+    expect(BROKEN_DRAFT._diagnostic_trace.retry.timed_out).toBe(false);
+    expect(BROKEN_DRAFT._diagnostic_trace.benchmarking.total_duration_ms).toBe(40768);
+    expect(typeof BROKEN_DRAFT.details.recovery.suggestion).toBe("string");
+  });
+
+  /**
+   * DEFECT PIN. #1002 moved drafting to TURN 1, so `assertHealthyFrame` is the
+   * branch every real drafting failure now lands on — and it said only that it
+   * happened. Run 809 (build 8449e54, 10 Sep 2026) printed exactly
+   * `turn 1: exit_path was draft_graph_error` and nothing else, and that mute
+   * line was read as "the server returned a blank reply and no model".
+   */
+  it("DEFECT PIN: the FRAME turn's draft failure names the violation, not just that it happened", () => {
+    const failures = assertHealthyFrame(BROKEN_DRAFT).join(" ");
+    expect(failures).toContain("draft_graph_error");
+    expect(failures).toContain("OPTIONS_IDENTICAL");
+    expect(failures).toContain("draft_graph_cee_graph_invalid");
+    expect(failures).toContain("timed_out=false");
+  });
+
+  /**
+   * ONE CONCEPT, ONE PREDICATE — the rule the rest of this file is built on.
+   * Before this fix the two turns answered "why did drafting fail" differently:
+   * turn 2 printed a two-field summary, turn 1 printed nothing.
+   */
+  it("ONE PREDICATE: frame and draft describe the SAME failure identically", () => {
+    const diagnosis = draftErrorDiagnosis(BROKEN_DRAFT);
+    expect(diagnosis.length).toBeGreaterThan(0);
+    expect(assertHealthyFrame(BROKEN_DRAFT).join(" ")).toContain(diagnosis);
+    expect(assertHealthyDraft(BROKEN_DRAFT).join(" ")).toContain(diagnosis);
+  });
+
+  /**
+   * DISCRIMINATION, not merely output (trap 20's corollary: keep at least one
+   * probe whose expected answer DIFFERS — a blind instrument can fake
+   * agreement, never a discrimination it is not making). These three bodies
+   * are three genuinely different facts and must read three different ways.
+   */
+  it("DISCRIMINATES an egress refusal from a timeout from a body with no error envelope", () => {
+    const refusal = draftErrorDiagnosis(BROKEN_DRAFT);
+    const timedOut = draftErrorDiagnosis({
+      error: "UPSTREAM_TIMEOUT",
+      details: { reason: "draft_graph_llm_timeout", retryable: true },
+      _diagnostic_trace: {
+        retry: { timed_out: true, error_type: "AbortError" },
+        benchmarking: { total_duration_ms: 120_001 },
+      },
+    });
+    const noEnvelope = draftErrorDiagnosis({ assistant_text: "Before I draft…" });
+
+    expect(refusal).toContain("timed_out=false");
+    expect(refusal).toContain('violation_code="OPTIONS_IDENTICAL"');
+    expect(timedOut).toContain("timed_out=true");
+    expect(timedOut).toContain('error_type="AbortError"');
+    expect(timedOut).toContain("server_total_duration_ms=120001");
+    expect(noEnvelope).toBe("absent(no-error-envelope)");
+
+    expect(new Set([refusal, timedOut, noEnvelope]).size).toBe(3);
+  });
+
+  /**
+   * The field that separates "no model, and no way forward" from "no model,
+   * with a stated fix". It was on the wire on 10 Sep and never printed.
+   */
+  it("reports whether a user-actionable recovery suggestion rode with the refusal", () => {
+    expect(draftErrorDiagnosis(BROKEN_DRAFT)).toContain("recovery_suggestion=present");
+
+    const stripped = structuredClone(BROKEN_DRAFT);
+    delete stripped.details.recovery;
+    expect(draftErrorDiagnosis(stripped)).toContain("recovery_suggestion=absent");
+
+    const blank = structuredClone(BROKEN_DRAFT);
+    blank.details.recovery.suggestion = "   ";
+    expect(draftErrorDiagnosis(blank)).toContain("recovery_suggestion=absent");
+  });
+
+  /**
+   * ABSENT IS NEVER PRINTED AS EMPTY — the same rule `readinessDiagnosis`
+   * already carries. A body with no envelope and an envelope with no reason are
+   * different facts; collapsing two facts into one symbol has cost this estate
+   * a diagnosis before.
+   */
+  it("NEVER collapses an absent envelope into an empty one", () => {
+    expect(draftErrorDiagnosis({ assistant_text: "…" })).toBe("absent(no-error-envelope)");
+    const emptyEnvelope = draftErrorDiagnosis({ error: "INTERNAL_ERROR" });
+    expect(emptyEnvelope).not.toContain("absent(no-error-envelope)");
+    expect(emptyEnvelope).toContain("reason=absent");
+    expect(emptyEnvelope).toContain('error="INTERNAL_ERROR"');
+  });
+
+  /**
+   * The message change is a change of WORDS, never of TRIGGER. The same empty
+   * reply still fails, and a healthy reply still passes.
+   */
+  it("the empty-reply trigger is unchanged — same condition still fails, a real reply still passes", () => {
+    const empty = assertHealthyFrame({ assistant_text: "  ", _diagnostic_trace: { exit_path: "clarify_v2" } });
+    expect(empty.join(" ")).toContain("assistant_text was empty");
+    expect(empty.join(" ")).toContain("details.recovery.suggestion=absent");
+    expect(
+      assertHealthyFrame({ assistant_text: "Before I draft…", _diagnostic_trace: { exit_path: "clarify_v2" } }),
+    ).toEqual([]);
+  });
+
+  /**
+   * CALL-SITE PIN, the technique this file already uses on the workflow YAML.
+   * Without it the whole fix could be reverted at the call site with every test
+   * above still green: the function would be correct and nothing would print it.
+   */
+  it("CALL-SITE PIN: the CLI prints the draft-failure diagnosis on BOTH turns, healthy or not", () => {
+    const src = readFileSync(resolve(REPO_ROOT, "scripts/ci/staging-journey-smoke.mjs"), "utf8");
+    expect(src).toContain("log(`    draft_error: ${draftErrorDiagnosis(t1.body)}`)");
+    expect(src).toContain("log(`    draft_error: ${draftErrorDiagnosis(t2.body)}`)");
+    // …and the ad-hoc second copy of the concept must not come back.
+    expect(src).not.toContain("` violation_code=${d.violation_code}`");
+    expect(src).not.toContain('f.push("turn 1: exit_path was draft_graph_error")');
+  });
+});
+
+describe("10 Sep — the gate drives the route a REAL USER takes, and proves DELIVERY not just generation", () => {
+  /**
+   * "Generation succeeded server-side" and "the response reached the user" are
+   * DIFFERENT CLAIMS. The gate used to drive the internal `/orchestrate/v2/turn`,
+   * which can only ever answer the first. Derived at the deployed UI bundle
+   * (52b5cc93, 72 chunks): the shipped client bakes
+   * `https://cee-staging.onrender.com/proxy/v5/turn`, so that is the user's route.
+   */
+  it("ROUTE PIN: the gate targets the browser proxy, never the internal route", () => {
+    expect(TURN_PATH).toBe("/proxy/v5/turn");
+    const src = readFileSync(resolve(REPO_ROOT, "scripts/ci/staging-journey-smoke.mjs"), "utf8");
+    expect(src).toContain("fetch(`${base}${TURN_PATH}`");
+    // The superseded internal target must not come back as a fetch target.
+    expect(src).not.toContain("fetch(`${base}/orchestrate/v2/turn`");
+  });
+
+  it("CALL-SITE PIN: it presents a browser Origin and no service key", () => {
+    const src = readFileSync(resolve(REPO_ROOT, "scripts/ci/staging-journey-smoke.mjs"), "utf8");
+    expect(src).toContain("Origin: origin");
+    // The proxy injects the key itself; sending one would be theatre, and a
+    // dead env var is the hand-maintained mirror this repo keeps paying for.
+    expect(src).not.toContain("X-Olumi-Assist-Key");
+    expect(src).not.toContain("SMOKE_API_KEY");
+    // Delivery is asserted on BOTH turns, before the journey assertions.
+    expect(src).toContain('assertProxyDelivered(t1.body, "turn 1")');
+    expect(src).toContain('assertProxyDelivered(t2.body, "turn 2")');
+  });
+
+  it("WORKFLOW PIN: the origin is passed explicitly and is the deployed staging UI", () => {
+    // Located the same way the silencing guards locate it — a NAMED throw if
+    // the step is gone, never an unrelated "cannot read properties of
+    // undefined" that reads like an unrelated test bug.
+    const job = parse(readFileSync(WORKFLOW_PATH, "utf8")).jobs.journey;
+    const step = job.steps.find(
+      (s: any) => typeof s.run === "string" && s.run.includes("staging-journey-smoke.mjs"),
+    );
+    if (!step) throw new Error("the smoke step (running staging-journey-smoke.mjs) is gone from the workflow");
+    const env = step.env;
+    const originExpr = String(env.SMOKE_ORIGIN);
+    expect(originExpr).toContain("staging--olumi.netlify.app");
+    // Not defaulted inside the script: if this origin stops being admitted,
+    // every browser user is blocked and the gate must go red rather than
+    // invent an origin that still works.
+    expect(env.SMOKE_API_KEY, "SMOKE_API_KEY is no longer read by the gate").toBeUndefined();
+  });
+
+  /**
+   * DISCRIMINATION. Four genuinely different facts, four different answers.
+   * A 504 here is the exact shape of "CEE logged draft_graph.succeeded and the
+   * user still got nothing" — the claim that started this repair.
+   */
+  it("DISCRIMINATES origin rejection, delivery timeout, a non-JSON hop, and a delivered turn", () => {
+    const rejected = assertProxyDelivered(
+      { error: { code: "PROXY_ORIGIN_REJECTED", message: "Origin not allowed", source: "proxy" } },
+      "turn 1",
+    ).join(" ");
+    const timedOut = assertProxyDelivered(
+      {
+        error: {
+          code: "PROXY_UPSTREAM_TIMEOUT",
+          message: "The model generation service did not respond within 125s. Please try again.",
+          upstream_duration_ms: 125_003,
+          source: "proxy",
+        },
+      },
+      "turn 1",
+    ).join(" ");
+    const nonJson = assertProxyDelivered(
+      { error: { code: "PROXY_INTERNAL_NON_JSON", message: "…", source: "proxy" } },
+      "turn 1",
+    );
+
+    expect(rejected).toContain("PROXY_ORIGIN_REJECTED");
+    expect(rejected).toContain("EVERY browser user is blocked");
+    expect(timedOut).toContain("PROXY_UPSTREAM_TIMEOUT");
+    expect(timedOut).toContain("upstream_duration_ms=125003");
+    expect(timedOut).toContain("the user still received nothing");
+    expect(nonJson.length).toBe(1);
+    expect(nonJson.join(" ")).toContain("did not survive the hop");
+
+    // …and a real delivered turn is silent. Without this the check would be a
+    // guard that fires on everything, which is a guard that means nothing.
+    expect(assertProxyDelivered(HEALTHY_DRAFT, "turn 1")).toEqual([]);
+    expect(new Set([rejected, timedOut, nonJson.join(" ")]).size).toBe(3);
+  });
+
+  /**
+   * TWIN — the two `error` fields are DIFFERENT PRODUCERS under one name (the
+   * proxy's is an OBJECT with a `code`, the orchestrator's is a STRING). A
+   * generation failure must NOT be reported as a delivery failure: they need
+   * different actions, and conflating them is the confusion this repair ends.
+   */
+  it("TWIN: an orchestrator-side failure is NOT reported as a delivery failure", () => {
+    expect(BROKEN_DRAFT.error).toBe("INTERNAL_ERROR"); // precondition: a STRING
+    expect(proxyFailureCode(BROKEN_DRAFT)).toBeNull();
+    expect(assertProxyDelivered(BROKEN_DRAFT, "turn 1")).toEqual([]);
+    // …while the generation half still fails it, loudly and by name.
+    expect(assertHealthyFrame(BROKEN_DRAFT).join(" ")).toContain("OPTIONS_IDENTICAL");
+  });
+
+  /**
+   * FOUND BY RUNNING IT, not by reading it: with a disallowed origin the
+   * diagnosis line printed `error=[object Object]` on both turns. One field
+   * name, two producers — the orchestrator's `error` is a STRING, the proxy's
+   * is an OBJECT with a `code`.
+   */
+  it("the diagnosis names the proxy's error CODE, never [object Object]", () => {
+    const line = draftErrorDiagnosis({ error: { code: "PROXY_ORIGIN_REJECTED", message: "Origin not allowed" } });
+    expect(line).toContain('error="PROXY_ORIGIN_REJECTED"');
+    expect(line).not.toContain("[object Object]");
+    // TWIN: the string-shaped producer is unchanged.
+    expect(draftErrorDiagnosis(BROKEN_DRAFT)).toContain('error="INTERNAL_ERROR"');
+  });
+
+  it("an unrecognised error code is not silently swallowed as a proxy failure", () => {
+    expect(proxyFailureCode({ error: { code: "SOMETHING_ELSE" } })).toBeNull();
+    expect(proxyFailureCode({ error: { code: "PROXY_UPSTREAM_TIMEOUT" } })).toBe("PROXY_UPSTREAM_TIMEOUT");
+  });
+});
+
+/**
+ * ⭐⭐ 11 Sep 2026 — A SINGLE-SAMPLE GATE CANNOT MEASURE A RATE.
+ *
+ * The alarm FAILED on ccb7188e (run 34559516620) and then PASSED on the next
+ * two commits while the defect was live and unchanged, because it drove one
+ * journey against a stochastic producer. These tests pin the two properties
+ * that fixes: the gate takes k samples, and it REDS on a rate rather than on a
+ * coin landing.
+ *
+ * Every fixture below is a REAL COMMITTED CAPTURE. A self-authored body would
+ * encode this author's model of the producer rather than the producer (trap 16)
+ * — and the capture of the exact failure class is already in the tree.
+ */
+describe("11 Sep — the gate samples, and REDS on a RATE", () => {
+  const brokenTurn1 = () => readJson(BROKEN_DRAFT_PATH);
+  const healthyTurn1 = () => readJson(resolve(REPO_ROOT, "tests/unit/ci/fixtures/live-journey-draftfirst-turn1-2ceb65f.json"));
+  const healthyTurn2 = () => readJson(resolve(REPO_ROOT, "tests/unit/ci/fixtures/live-journey-draftfirst-turn2-2ceb65f.json"));
+
+  /** One journey sample, judged by the SAME assertion the gate runs. */
+  const sampleFrom = (t1: any, t2: any, status1 = 200) => {
+    const turns = [
+      { label: "turn 1", body: t1, status: status1 },
+      { label: "turn 2", body: t2, status: 200 },
+    ];
+    const failures = assertHealthyJourney(t1, t2);
+    if (status1 !== 200) failures.push(`turn 1: HTTP ${status1} (expected 200)`);
+    return { ...classifyJourneySample(turns, failures), failures };
+  };
+
+  const OK_SAMPLE = () => sampleFrom(healthyTurn1(), healthyTurn2());
+  const BROKEN_SAMPLE = () => sampleFrom(brokenTurn1(), healthyTurn2(), 500);
+
+  const OPTS = { floor: 5, requested: 5, minSamples: 3 };
+
+  it("POSITIVE CONTROL: the two real captures are the OPPOSITE objects this suite needs", () => {
+    // Without this, every test below could be agreeing about two bodies that
+    // both fail, or both pass, and read perfectly green while measuring
+    // nothing. A discrimination the fixtures must actually be making.
+    const ok = OK_SAMPLE();
+    const broken = BROKEN_SAMPLE();
+    expect(ok.failures, `healthy journey capture produced failures: ${ok.failures.join(" | ")}`).toEqual([]);
+    expect(ok.ok).toBe(true);
+    expect(broken.failures.length).toBeGreaterThan(0);
+    expect(broken.ok).toBe(false);
+    // …and bound by IDENTITY to the 11 Sep failure class, not by a predicate
+    // another body could satisfy.
+    expect(brokenTurn1().details.violation_code).toBe("OPTIONS_IDENTICAL");
+    expect(brokenTurn1().details.reason).toBe("draft_graph_cee_graph_invalid");
+  });
+
+  it("classifies the real outage by the PRODUCER's violation code, not by HTTP status", () => {
+    // "3 of 5 failed" says look; "3 of 5 failed, all VIOLATION:OPTIONS_IDENTICAL"
+    // says where. Exact string, so a widened classifier cannot pass this.
+    expect(BROKEN_SAMPLE().code).toBe("VIOLATION:OPTIONS_IDENTICAL");
+  });
+
+  it("DISCRIMINATING PAIR: a DELIVERY failure outranks a generation failure", () => {
+    // A proxy refusal means the model may be perfectly fine and the user still
+    // got nothing — a different fault with a different action. Neither case
+    // alone proves the ordering; the pair does.
+    const withProxy = {
+      ...brokenTurn1(),
+      error: { code: "PROXY_ORIGIN_REJECTED", message: "origin not allowed" },
+    };
+    expect(classifyJourneySample([{ label: "turn 1", body: withProxy, status: 403 }], ["x"]).code).toBe(
+      "PROXY:PROXY_ORIGIN_REJECTED",
+    );
+    // …the SAME body without the proxy envelope must NOT report PROXY.
+    expect(classifyJourneySample([{ label: "turn 1", body: brokenTurn1(), status: 500 }], ["x"]).code).toBe(
+      "VIOLATION:OPTIONS_IDENTICAL",
+    );
+  });
+
+  it("a sample that THREW is a FAILED sample, never an absent one", () => {
+    expect(classifyJourneySample([{ label: "threw", threw: "AbortError" }], ["boom"])).toEqual({
+      ok: false,
+      code: "THREW:AbortError",
+    });
+  });
+
+  it("`ok` is decided by the FAILURE LIST, never by the error envelope", () => {
+    // The classifier describes a failure already established; it must never
+    // manufacture one. Feed it the outage body with an EMPTY failure list.
+    expect(classifyJourneySample([{ label: "turn 1", body: brokenTurn1(), status: 500 }], [])).toEqual({
+      ok: true,
+      code: "OK",
+    });
+    // …and the inverse: a clean 200 body that still failed the journey is a
+    // silent-wrongness class and must not be collapsed into the loud ones.
+    expect(classifyJourneySample([{ label: "turn 1", body: healthyTurn2(), status: 200 }], ["journey: ..."]).code).toBe(
+      "ASSERTIONS_FAILED",
+    );
+  });
+
+  it("⭐ THE DEFECT, PINNED: one sample PASSES the population five samples RED", () => {
+    // This is the 11 Sep failure in one assertion. The same product, the same
+    // rate: the gate that looks at one journey reports health, and the gate
+    // that looks at five reports the rate. If this ever reads green in both
+    // directions, the sampling has stopped doing anything.
+    const population = [OK_SAMPLE(), BROKEN_SAMPLE(), OK_SAMPLE(), BROKEN_SAMPLE(), OK_SAMPLE()];
+
+    const single = summariseSamples([population[0]]);
+    expect(assertSampleFloor(single, { floor: 1, requested: 1, minSamples: 1 })).toEqual([]);
+
+    const five = summariseSamples(population);
+    const red = assertSampleFloor(five, OPTS);
+    expect(red.length).toBeGreaterThan(0);
+    expect(red.join(" ")).toContain("3/5");
+    // The census must name the class, or the rate is not actionable.
+    expect(red.join(" ")).toContain("VIOLATION:OPTIONS_IDENTICAL×2");
+  });
+
+  it("the floor is MET when every sample delivers, and the run passes", () => {
+    const all = summariseSamples([OK_SAMPLE(), OK_SAMPLE(), OK_SAMPLE(), OK_SAMPLE(), OK_SAMPLE()]);
+    expect(all.failureRate).toBe(0);
+    expect(assertSampleFloor(all, OPTS)).toEqual([]);
+  });
+
+  it("ONE failed sample of five reds the default floor — there is no acceptable 500 rate", () => {
+    const one = summariseSamples([OK_SAMPLE(), OK_SAMPLE(), OK_SAMPLE(), OK_SAMPLE(), BROKEN_SAMPLE()]);
+    expect(assertSampleFloor(one, OPTS).length).toBeGreaterThan(0);
+  });
+
+  describe("truncation can neither weaken the floor silently nor invert into a false red", () => {
+    it("3 healthy samples of a requested 5 is NOT a false red", () => {
+      // An absolute floor of 5 against 3 taken samples would red a run in which
+      // every sample it managed to take was healthy.
+      const s = summariseSamples([OK_SAMPLE(), OK_SAMPLE(), OK_SAMPLE()]);
+      expect(assertSampleFloor(s, OPTS)).toEqual([]);
+    });
+
+    it("but 2 samples is UNMEASURED, and unmeasured is a HARD ERROR", () => {
+      const s = summariseSamples([OK_SAMPLE(), OK_SAMPLE()]);
+      const f = assertSampleFloor(s, OPTS);
+      expect(f.length).toBeGreaterThan(0);
+      expect(f.join(" ")).toContain("UNMEASURED");
+    });
+
+    it("and truncation never turns a RED green", () => {
+      const s = summariseSamples([OK_SAMPLE(), BROKEN_SAMPLE(), OK_SAMPLE()]);
+      expect(assertSampleFloor(s, OPTS).length).toBeGreaterThan(0);
+    });
+
+    it("zero samples reports failureRate null, NEVER 0 — absent is not empty", () => {
+      // "No samples ran" and "no samples failed" are opposite facts, and a 0
+      // would print them identically.
+      expect(summariseSamples([]).failureRate).toBeNull();
+      expect(summariseSamples([]).attempted).toBe(0);
+    });
+  });
+
+  describe("the blindness statement is DERIVED, so it cannot go stale when k changes", () => {
+    it("detectionProbability is 1-(1-r)^k, pinned at the rates the PR body quotes", () => {
+      expect(detectionProbability(1, 0.3)!).toBeCloseTo(0.3, 10);
+      expect(detectionProbability(5, 0.3)!).toBeCloseTo(0.83193, 5);
+      expect(detectionProbability(5, 0.38)!).toBeCloseTo(0.90839, 5);
+      expect(detectionProbability(5, 0.1)!).toBeCloseTo(0.40951, 5);
+      expect(detectionProbability(3, 0.3)!).toBeCloseTo(0.657, 3);
+      // Monotone in k — more samples can never see less.
+      expect(detectionProbability(5, 0.2)!).toBeGreaterThan(detectionProbability(4, 0.2)!);
+    });
+
+    it("returns null rather than a number on inputs that are not a (k, rate) pair", () => {
+      // A gate that reports 0% blindness because its input was rubbish is worse
+      // than one that reports nothing.
+      expect(detectionProbability(0, 0.3)).toBeNull();
+      expect(detectionProbability(2.5, 0.3)).toBeNull();
+      expect(detectionProbability(5, 1.2)).toBeNull();
+      expect(detectionProbability(5, Number.NaN)).toBeNull();
+      expect(halfDetectionRate(0)).toBeNull();
+    });
+
+    it("halfDetectionRate names the rate at which k=5 is a coin flip", () => {
+      expect(halfDetectionRate(5)!).toBeCloseTo(0.12945, 5);
+      // The definition, checked against the other function rather than restated:
+      // at that rate the detection probability really is 50%.
+      expect(detectionProbability(5, halfDetectionRate(5)!)!).toBeCloseTo(0.5, 10);
+      expect(detectionProbability(1, halfDetectionRate(1)!)!).toBeCloseTo(0.5, 10);
+    });
+  });
+
+  describe("the gate reports the rate ON A PASS, not only on a failure", () => {
+    const passLines = () =>
+      samplingReport(summariseSamples([OK_SAMPLE(), OK_SAMPLE(), OK_SAMPLE(), OK_SAMPLE(), OK_SAMPLE()]), OPTS);
+
+    it("a PASSING run prints the observed rate, the census and the floor", () => {
+      // A gate that only speaks when it fails teaches nobody what normal looks
+      // like — and the rate is the single number that would have stopped the
+      // 11 Sep merge. The 18 Aug intermittent had no discriminator for exactly
+      // this reason: eight passing runs carried the answer and never printed it.
+      const out = passLines().join("\n");
+      expect(out).toContain("OBSERVED DRAFT FAILURE RATE: 0.0%");
+      expect(out).toContain("floor: MET");
+      expect(out).toMatch(/OK\s+5/);
+      expect(out).toContain("5 of 5 samples taken");
+    });
+
+    it("a PASSING run also prints what it CANNOT see", () => {
+      // The scope statement travels with the green, or it is inherited as a
+      // guarantee the gate cannot give.
+      const out = passLines().join("\n");
+      expect(out).toContain("BLIND BELOW ~12.9%");
+      expect(out).toContain("detection power at k=5");
+      expect(out).toContain("30.0%→83.2%");
+    });
+
+    it("a FAILING run prints the rate and the classification census", () => {
+      const out = samplingReport(
+        summariseSamples([OK_SAMPLE(), BROKEN_SAMPLE(), OK_SAMPLE(), BROKEN_SAMPLE(), OK_SAMPLE()]),
+        OPTS,
+      ).join("\n");
+      expect(out).toContain("OBSERVED DRAFT FAILURE RATE: 40.0%");
+      expect(out).toContain("floor: MISSED");
+      expect(out).toMatch(/VIOLATION:OPTIONS_IDENTICAL\s+2/);
+    });
+
+    it("prints n/a rather than 0.0% when nothing was sampled", () => {
+      expect(samplingReport(summariseSamples([]), OPTS).join("\n")).toContain("OBSERVED DRAFT FAILURE RATE: n/a");
+    });
+  });
+
+  describe("the job's own budget is DERIVED from the script, and reds when they drift apart", () => {
+    /**
+     * A hand-maintained mirror between a script's default budget and the job's
+     * timeout goes stale the first time k moves, and the failure mode is the
+     * worst available: the runner kills the process, so the rate, the census
+     * and the floor verdict are never printed at all — a run that measured four
+     * healthy samples looks identical to one that measured nothing.
+     */
+    const gateSource = () => readFileSync(resolve(REPO_ROOT, "scripts/ci/staging-journey-smoke.mjs"), "utf8");
+    const defaultOf = (name: string): number => {
+      const m = gateSource().match(new RegExp(`intFromEnv\\("${name}", (\\d+)`));
+      if (!m) throw new Error(`no intFromEnv default found for ${name}`);
+      return Number(m[1]);
+    };
+    const freshnessDefaultMs = (): number => {
+      const m = gateSource().match(/SMOKE_FRESHNESS_TIMEOUT_MS \?\? (\d+)/);
+      if (!m) throw new Error("no SMOKE_FRESHNESS_TIMEOUT_MS default found");
+      return Number(m[1]);
+    };
+
+    it("POSITIVE CONTROL: the parsers read real numbers out of the real script", () => {
+      // Two parsers that both read nothing agree perfectly.
+      expect(defaultOf("SMOKE_JOURNEY_BUDGET_MS")).toBeGreaterThan(0);
+      expect(defaultOf("SMOKE_DRAFT_SAMPLES")).toBeGreaterThan(0);
+      expect(freshnessDefaultMs()).toBeGreaterThan(0);
+      expect(() => defaultOf("SMOKE_NO_SUCH_KNOB")).toThrow();
+    });
+
+    it("timeout-minutes exceeds the freshness poll plus the journey budget", () => {
+      const wf = parse(readFileSync(WORKFLOW_PATH, "utf8"));
+      const timeoutMinutes = wf.jobs.journey["timeout-minutes"];
+      expect(typeof timeoutMinutes).toBe("number");
+      const neededMinutes = (freshnessDefaultMs() + defaultOf("SMOKE_JOURNEY_BUDGET_MS")) / 60000;
+      expect(
+        timeoutMinutes,
+        `the job would be KILLED mid-report: timeout-minutes=${timeoutMinutes} but the script's own ` +
+          `defaults can consume ${neededMinutes} minutes`,
+      ).toBeGreaterThan(neededMinutes);
+    });
+
+    it("k samples at the slowest observed journey still fit the journey budget", () => {
+      // The slowest JOURNEY actually measured, rounded up. Two sources, and the
+      // wider one wins: this gate's own CI run logs 9–11 Sep (turn 1 81.4s +
+      // turn 2 15.3s = 96.7s) and a live k=5 run against staging build 77d1138
+      // on 11 Sep, whose slowest sample was 85.7s + 22.6s = 108.3s.
+      //
+      // ⚠ A constant like this is a hand-maintained mirror of a measurement and
+      // WILL drift. It is deliberately set to the widest sample seen rather than
+      // a mean, so it errs toward reserving too much budget: the cost of being
+      // wrong is truncation, and a truncated run reports UNMEASURED rather than
+      // a false green. Re-measure it if k or the journey changes.
+      const SLOWEST_SAMPLE_MS = 110000;
+      const k = defaultOf("SMOKE_DRAFT_SAMPLES");
+      expect(
+        k * SLOWEST_SAMPLE_MS,
+        `k=${k} at the slowest measured sample exceeds SMOKE_JOURNEY_BUDGET_MS — the run would truncate ` +
+          `on every slow day and report UNMEASURED`,
+      ).toBeLessThanOrEqual(defaultOf("SMOKE_JOURNEY_BUDGET_MS"));
+    });
+  });
+});
+
+describe("the .d.mts type mirror cannot silently fall behind the .mjs", () => {
+  /**
+   * WHY THIS EXISTS, and why it is DERIVED rather than a second list.
+   *
+   * The declaration file is a HAND-WRITTEN MIRROR of the .mjs exports — its own
+   * header says so. On 10 Sep 2026 that caveat cost a CI red: four exports the
+   * spec imports landed in the .mjs with no declaration, and the required gate
+   * COULD NOT SEE IT. `pnpm typecheck` runs `tsconfig.build.json`, which
+   * EXCLUDES test files; only the separate `Typecheck Drift (ratchet)` job runs
+   * the full `tsc --noEmit`. So a green local gate and four TS2305s are fully
+   * consistent, which is how this shipped.
+   *
+   * THE RULE IS KEYED ON WHAT THE SPEC IMPORTS, not on "every export must be
+   * declared" — deliberately. `PROXY_FAILURE_CODES` is exported and NOT
+   * declared, on the stated ground that the mirror's header claims every export
+   * it declares is exercised at runtime by this spec, and declaring an
+   * unexercised one would make that claim false. That omission is legitimate
+   * and this guard must not fight it. What it must catch is the defect that
+   * actually happened: a symbol this spec IMPORTS with no declaration behind it.
+   * If PROXY_FAILURE_CODES is ever imported here, this guard reds until it is
+   * declared — no exception list to maintain, and none written down.
+   */
+  const SPEC = "tests/unit/ci/staging-journey-smoke.test.ts";
+  const MJS = "scripts/ci/staging-journey-smoke.mjs";
+  const DTS = "scripts/ci/staging-journey-smoke.d.mts";
+  const read = (f: string) => readFileSync(resolve(REPO_ROOT, f), "utf8");
+
+  /** Names this spec imports from the gate module. */
+  const specImports = (): string[] => {
+    const block = read(SPEC).match(/import\s*\{([^}]*)\}\s*from\s*"[^"]*staging-journey-smoke\.mjs"/);
+    if (!block) throw new Error(`could not find the ${MJS} import block in ${SPEC}`);
+    return block[1]
+      .split(",")
+      .map((s) => s.trim().split(/\s+as\s+/)[0].trim())
+      .filter((s) => s.length > 0)
+      .sort();
+  };
+  const mjsExports = () =>
+    [...read(MJS).matchAll(/^export (?:const|function) ([A-Za-z_][A-Za-z0-9_]*)/gm)].map((m) => m[1]).sort();
+  const dtsDeclares = () =>
+    [...read(DTS).matchAll(/^export declare (?:const|function) ([A-Za-z_][A-Za-z0-9_]*)/gm)].map((m) => m[1]).sort();
+
+  it("POSITIVE CONTROL: all three parsers see names, and see the SAME known name", () => {
+    // Without this, an empty-vs-empty comparison would agree perfectly while
+    // reading nothing — a guard that cannot fail is the theatre this file hunts.
+    expect(specImports().length).toBeGreaterThan(10);
+    expect(mjsExports().length).toBeGreaterThan(10);
+    expect(dtsDeclares().length).toBeGreaterThan(10);
+    for (const names of [specImports(), mjsExports(), dtsDeclares()]) {
+      expect(names).toContain("assertHealthyFrame");
+    }
+    // …and a DISCRIMINATION the parsers must actually be making: the .mjs
+    // exports at least one name the spec does not import. If this ever reads
+    // equal, the three parsers have collapsed onto one another.
+    expect(mjsExports().length).toBeGreaterThan(specImports().length);
+  });
+
+  it("every symbol this spec imports from the gate is declared in the .d.mts", () => {
+    const declared = dtsDeclares();
+    const missing = specImports().filter((n) => !declared.includes(n));
+    expect(
+      missing,
+      `imported by ${SPEC} but NOT declared in ${DTS} — this is the 10 Sep TS2305 defect: ${missing.join(", ")}`,
+    ).toEqual([]);
+  });
+
+  it("nothing is declared in the .d.mts that the .mjs does not export", () => {
+    const exported = mjsExports();
+    const phantom = dtsDeclares().filter((n) => !exported.includes(n));
+    expect(phantom, `declared in ${DTS} but NOT exported from ${MJS}: ${phantom.join(", ")}`).toEqual([]);
   });
 });

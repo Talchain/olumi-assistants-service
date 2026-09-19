@@ -138,6 +138,33 @@ export const NOTICE_KIND_BY_REASON: Record<
   // declined to assert rather than guessing a direction — the conservative
   // resolution of an ambiguity, which is what this kind names.
   constraint_direction_unstated: "conflict_resolved_conservatively",
+  // A magnitude authored in an earlier pass, against a population that no longer
+  // existed by the time the factor's scale was derived. `other`, not a
+  // nearest-looking kind: nothing was consolidated and no relationship was
+  // dropped — a NUMBER was declined while its option kept its place. A
+  // coarse-but-true bucket beats a specific-but-false one on a channel whose
+  // whole purpose is telling the truth about what was lost.
+  option_magnitude_scale_unreconciled: "other",
+  // "A stated limit carries no threshold we can use, so it cannot be enforced."
+  // Same family as the direction case above and for the same reason: the user's
+  // limit is on the model in their own words and is NOT being applied, which is
+  // a conservative resolution of an ambiguity rather than a lost detail.
+  constraint_value_unstated: "conflict_resolved_conservatively",
+  // "A stated limit named the part of the model it applies to, and that part
+  // cannot carry a threshold — a goal is the thing being achieved, an option is
+  // a course of action, and neither is the measured quantity a limit bounds. The
+  // limit keeps its own node and its own threshold; what is withheld is the
+  // BINDING." The projector declined to attach rather than attaching to whatever
+  // the reference happened to reach, which is the conservative resolution of an
+  // ambiguity — the same kind `constraint_direction_unstated` carries, and for
+  // the same reason.
+  constraint_target_not_measurable: "conflict_resolved_conservatively",
+  // "The reference resolved to a node measuring a DIFFERENT quantity — a
+  // percentage against a currency. Binding it would have inverted or rescaled
+  // the user's own limit while looking perfectly bound, and a wrong binding is
+  // worse than a gap." Again a refusal to assert, not a loss: the limit is still
+  // on the graph in the user's words.
+  constraint_target_unit_mismatch: "conflict_resolved_conservatively",
 
   // ── A NODE IS ON THE GRAPH, NAMED WITH A SENTENCE ─────────────────────────
   // "The node IS on the graph … what is disclosed is that the model's display

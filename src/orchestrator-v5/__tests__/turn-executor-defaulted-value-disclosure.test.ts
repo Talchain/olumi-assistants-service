@@ -287,7 +287,7 @@ describe('turn-executor finaliser — defaulted-value disclosure guard (WIRING)'
 
     const evt = egressEvent();
     expect(evt, 'F6 egress telemetry should fire').toBeDefined();
-    expect(evt!.data.dispatch_path).toBe('turn_executor_finalise');
+    expect(evt!.data.dispatch_path).toBe('turn_executor_commit');
     expect(evt!.data.defaulted_count).toBe(1);
     expect(evt!.data.disclosure_added).toBe(true);
   });
@@ -346,7 +346,7 @@ describe('turn-executor finaliser — defaulted-value disclosure guard (WIRING)'
  * A fix whose test cannot see it is not tested (CLAUDE.md trap 11).
  */
 
-const HEADLINE = 'Launch now came out ahead in 62% of runs of this model.';
+const HEADLINE = 'Launch now scored highest against your goal in 62% of runs of this model.';
 
 const GRAPH_WITH_OPTIONS: GraphStateIngress = {
   nodes: [

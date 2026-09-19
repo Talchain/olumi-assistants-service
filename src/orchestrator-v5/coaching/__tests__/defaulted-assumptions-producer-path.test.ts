@@ -156,6 +156,7 @@ describe('F6 — defaulted assumptions are read at the producer’s real path', 
 
     expect(readDefaultedAssumptions(brief['defaulted_assumptions'])).toEqual({
       count: 1,
+      factorCount: 1,
       named: ['Market Conditions'],
     });
   });

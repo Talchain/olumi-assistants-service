@@ -199,7 +199,31 @@ function neutralise(text: string): string {
  * ones below, which are legitimate and had to be kept in step (see
  * {@link GAP_FALSE_POSITIVE_SPANS}).
  */
-const GAP_BINDER_SRC = String.raw`(?:leads?|leading|led|wins|winning|won|ahead|in\s+front|on\s+top|trails?|trailing|trailed|behind|lags?|lagging|margin|gap|performs?\s+best|outperforms?|outperforming|outranks?|beats?|beating)`;
+/**
+ * ⚠ `scor(e|es|ed|ing)\s+highest` ADDED 2026-09-07, IN THE SAME COMMIT that
+ * retired the contest copy — for the same reason the leader-claim vocabulary
+ * gained it, and it is the same class of miss.
+ *
+ * Paul's no-winner ruling moved the deterministic templates from "came out
+ * ahead in N% of runs of this model" to "scored highest against your goal in
+ * N% of runs of this model". The retired phrasing bound here through `ahead`.
+ * The replacement bound through NOTHING: every alternative in this group is a
+ * contest verb, and "scored highest" is deliberately not one.
+ *
+ * That matters because this reader is the thing that stops the CATEGORY ERROR
+ * coming back in a new dialect. Without this alternative, "scored highest by 17
+ * percentage points" — the retired gap statistic wearing the new vocabulary —
+ * is invisible to `gap_by`, and the redaction that exists to catch exactly that
+ * sentence would pass it through. A vocabulary change that leaves a redaction
+ * registry behind does not make the registry wrong; it makes it BLIND, and a
+ * blind registry reports clean.
+ *
+ * The bare-`%` exclusion above is UNAFFECTED and still deliberate: "scored
+ * highest in 42% of runs" carries no `percentage points`/`pp`/`points` unit, so
+ * `QTY_SRC` does not match it and the ratified-correct sentence still passes.
+ * What is now caught is only the gap form, which is what this reader is for.
+ */
+const GAP_BINDER_SRC = String.raw`(?:leads?|leading|led|wins|winning|won|ahead|in\s+front|on\s+top|trails?|trailing|trailed|behind|lags?|lagging|margin|gap|performs?\s+best|scor(?:e|es|ed|ing)\s+highest|outperforms?|outperforming|outranks?|beats?|beating)`;
 
 /**
  * Bounded and ordered: the FIRST match is what rides the log's primary `reason`

@@ -237,6 +237,28 @@ export interface RatifiedConstraint {
    * `source_quote ?? null` and treats absence exactly like `null`.
    */
   readonly source_quote?: string | null;
+  /**
+   * ⭐ THE TARGET NODE'S IDENTITY — the next field in `source_quote`'s own
+   * argument, for the same reason and with the same shape.
+   *
+   * `GoalConstraintSchema` declares `node_id` as REQUIRED (`z.string().min(1)`)
+   * and every persisted row carries it, but this reader took `constraint_id`,
+   * `label` and `source_quote` only — so every disclosure built from a
+   * `RatifiedConstraint` could say WHICH LIMIT failed and never WHICH NODE it
+   * was about. The Canvas lane reports the consequence from the other side:
+   * `CONSTRAINT_TARGET_UNRELIABLE` reaches them carrying no identity, so they
+   * can render only the anonymous form of the withheld-recommendation copy.
+   *
+   * `null` when the row genuinely carries none — never fabricated.
+   */
+  readonly node_id?: string | null;
+  /**
+   * The unit the threshold is stated in, when the row carries one (e.g.
+   * `"GBP"`). Read for the SAME reason as the identity: an ask about a cell
+   * must state the unit the answer will be recorded in, and the only
+   * non-fabricating source for it is the persisted row the user ratified.
+   */
+  readonly unit?: string | null;
 }
 
 /**
@@ -493,6 +515,10 @@ export function readRatifiedConstraints(source: unknown): RatifiedConstraint[] {
       constraint_id: id,
       label: readString(obj.label),
       source_quote: readString(obj.source_quote),
+      // Same record, same hop as the label and the quote — so identity, name
+      // and the user's own words can never come from different rows.
+      node_id: readString(obj.node_id),
+      unit: readString(obj.unit),
     });
   }
   return out;
@@ -533,13 +559,48 @@ const NODE_QUANTITY_FIELDS: readonly string[] = [
   "data",
 ];
 
-function nodeCarriesNoQuantity(node: Record<string, unknown>): boolean {
+/**
+ * Does this graph node carry NO numeric quantity at all, on ANY of the fields a
+ * quantity can arrive on ({@link NODE_QUANTITY_FIELDS})?
+ *
+ * ⚠⚠ NAME THE QUESTION, BECAUSE THERE IS A NEIGHBOURING ONE AND THEY ARE NOT
+ * THE SAME (CLAUDE.md trap 21). This predicate answers *"does the model record
+ * any number here?"*. It does NOT answer *"will PLoT's constraint-target
+ * ParameterUncertainty injection fire?"* — that one is narrower, and reads
+ * `observed_state.value` specifically
+ * (`plot-lite-service/src/integrations/isl/constraint-pu-injection.ts`
+ * `classifyConstraintPu`, derived at the bytes 14 Sep 2026). A node carrying,
+ * say, only `display_value` answers YES to this one and still gets
+ * `missing_observed_state` there.
+ *
+ * ⭐ THE ENTAILMENT RUNS ONE WAY, AND THAT IS WHY THIS PREDICATE IS THE SAFE ONE
+ * TO SPEAK FROM. "Carries no quantity" ⟹ no `observed_state.value` and no
+ * `prior` ⟹ PLoT emits `plot.constraint_no_observed_value` and ISL falls back
+ * to base = 0.0. So every node this returns `true` for is genuinely
+ * un-evaluable; the converse does not hold, and the gap it leaves is recorded
+ * rather than chased (see {@link classifyConstraintWriteAdmissibility} in
+ * `orchestrator-v5/tools/handlers/d1-shared/constraint-write-admissibility.ts`).
+ *
+ * Exported so the WRITE path and the READ path share ONE definition instead of
+ * growing a differently-named twin (CLAUDE.md trap 12 — derive, don't mirror).
+ * The two call sites consume it in OPPOSITE directions, which is exactly why
+ * the shared definition has to be conservative:
+ *   - read time ({@link collectUnmeasuredConstraintTargetIds}) uses it to
+ *     RELAX a withholding, so a false `true` costs a withholding;
+ *   - write time uses it to SPEAK, so a false `true` tells a user their valid
+ *     limit will not be checked. A short {@link NODE_QUANTITY_FIELDS} list is
+ *     the unsafe direction for BOTH.
+ */
+export function constraintTargetCarriesNoQuantity(node: Record<string, unknown>): boolean {
   for (const field of NODE_QUANTITY_FIELDS) {
     const v = node[field];
     if (v !== undefined && v !== null) return false;
   }
   return true;
 }
+
+/** Internal alias kept so the read-time collector reads as it always did. */
+const nodeCarriesNoQuantity = constraintTargetCarriesNoQuantity;
 
 /**
  * The constraint ids whose TARGET NODE carries no quantity to compare against.

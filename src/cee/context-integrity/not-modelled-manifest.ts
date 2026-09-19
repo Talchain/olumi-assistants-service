@@ -51,6 +51,7 @@ import { CURRENCY_SYMBOL_TO_CODE } from "../extraction/numeric-parser.js";
 import { readUnit, type AmountKind } from "../provenance/stated-amounts.js";
 import { classifyValueSource } from "../graph-readiness/obligation-provenance.js";
 import type { KnownObservedStateSourceLiteral } from "@talchain/schemas";
+import type { ObservedStateStatedRole } from "./stated-role-vocabulary.js";
 
 /** Wire schema discriminator. The UI lane builds against this. */
 export const NOT_MODELLED_SCHEMA = "not_modelled.v1" as const;
@@ -1504,6 +1505,18 @@ interface ConstraintSpan {
   readonly end: number;
   readonly value: number | null;
   readonly unit: string | null;
+  /**
+   * The node the producer BOUND this limit to (`goal_constraints[].node_id`),
+   * or null where the row named none.
+   *
+   * ⭐ ADDITIVE, AND `classifyStatedKind` DOES NOT READ IT — that function's
+   * two-part conjunction is byte-unchanged. It is here for
+   * {@link deriveStatedQuantityRoles}, which needs the producer's own IDENTITY
+   * binding rather than a re-derived one: the row already says which node the
+   * limit is about, and re-deriving that from magnitudes would be a value
+   * predicate another node could satisfy (CLAUDE.md trap 19).
+   */
+  readonly nodeId: string | null;
 }
 
 /**
@@ -1550,6 +1563,7 @@ function constraintSpans(
       end: start + matched.length,
       value: typeof r.value === "number" ? r.value : null,
       unit: typeof r.unit === "string" ? r.unit : null,
+      nodeId: typeof r.node_id === "string" && r.node_id.length > 0 ? r.node_id : null,
     });
   }
   return spans;
@@ -1724,4 +1738,285 @@ export function deriveNotModelledManifest(
     ),
     not_tracked: NOT_TRACKED_CLASSES,
   };
+}
+
+
+// ── the ROLE axis reaching the NODE, not just the manifest ──────────────────
+
+/**
+ * One node, and what the user stated the magnitude it carries **as**.
+ *
+ * `node_id` is the PRODUCER'S OWN binding — `goal_constraints[].node_id`,
+ * written by the drafting model and validated by `GoalConstraintSchema` — never
+ * a magnitude this function matched back to a node. Identity, not a value
+ * predicate another node could satisfy (CLAUDE.md trap 19).
+ */
+export interface StatedQuantityRoleBinding {
+  readonly node_id: string;
+  readonly stated_role: ObservedStateStatedRole;
+}
+
+/** A node's `observed_state.value`, or null if it has none. */
+function observedValueOf(graph: Record<string, unknown>, nodeId: string): number | null {
+  const nodes = graph.nodes;
+  if (!Array.isArray(nodes)) return null;
+  for (const raw of nodes) {
+    if (raw === null || typeof raw !== "object") continue;
+    const n = raw as Record<string, unknown>;
+    if (n.id !== nodeId) continue;
+    const observed = n.observed_state;
+    if (observed === null || typeof observed !== "object") return null;
+    const v = (observed as Record<string, unknown>).value;
+    return typeof v === "number" ? v : null;
+  }
+  return null;
+}
+
+/**
+ * Do two quantities READ OFF THE SAME BRIEF state the same magnitude?
+ *
+ * ⚠ THE FRAME IS THE PRECONDITION, AND IT IS STRUCTURAL. Both operands must
+ * come from one `extractStatedQuantities` pass over one text, so they are
+ * already expressed in that extractor's own frame — percent literals as
+ * percentage points, money fully expanded, counts as written. Nothing here may
+ * ever be handed a producer-side `goal_constraints[].value`: the row holds
+ * `0.04` where the brief says `4%`, and comparing those is the frame error this
+ * module's own manifest test pins as an open, disclosed finding.
+ *
+ * Equivalence is deliberately NOT literal equality — `"4.0%"` and `"4%"` are one
+ * magnitude written two ways, and treating them as different is what let a
+ * genuine observation be withdrawn. It is also not bare numeric equality:
+ * `4%`, `4 people` and `£4` share a number and state nothing in common, so the
+ * kind must match, money must share its currency symbol, and a count must share
+ * its unit family (`sameUnitFamily`, so "month"/"months" agree).
+ *
+ * Dates and periods carry no magnitude at all (`value === null`); for those the
+ * only honest comparison left is what was written.
+ */
+function sameStatedQuantity(a: Quantity, b: Quantity): boolean {
+  if (a.kind !== b.kind) return false;
+  if (a.value === null || b.value === null) {
+    return (
+      a.value === b.value &&
+      a.literal.trim().toLowerCase() === b.literal.trim().toLowerCase()
+    );
+  }
+  if (!numbersEqual(a.value, b.value)) return false;
+  if (a.kind === "money") return a.unit === b.unit;
+  if (a.kind === "count") {
+    if (a.unit === null || b.unit === null) return a.unit === b.unit;
+    return sameUnitFamily(a.unit, b.unit);
+  }
+  return true;
+}
+
+/**
+ * The words that make a magnitude a BOUND rather than a reading.
+ *
+ * ⚠ DELIBERATELY NORMATIVE ONLY. Comparatives that a reader uses to REPORT a
+ * level ("churn is above 4%", "spend exceeded £2m") are absent: they describe
+ * where a number sits, which is an observation, and admitting them would let
+ * the stamp fire on one. Both directions of bound are here — a floor is as much
+ * a limit as a ceiling.
+ */
+const LIMIT_CUES: readonly string[] = [
+  "under",
+  "below",
+  "beneath",
+  "at most",
+  "no more than",
+  "not exceed",
+  "without exceeding",
+  "max",
+  "maximum",
+  "cap",
+  "capped",
+  "ceiling",
+  "keep",
+  "keeps",
+  "keeping",
+  "kept",
+  "stay",
+  "stays",
+  "staying",
+  "remain",
+  "remains",
+  "within",
+  "less than",
+  "fewer than",
+  "up to",
+  "at least",
+  "no less than",
+  "no fewer than",
+  "minimum",
+  "floor",
+];
+
+const LIMIT_CUE_RE = new RegExp(`\\b(?:${LIMIT_CUES.map(escapeRe).join("|")})\\b`, "i");
+
+/**
+ * ⭐⭐ Does the brief state THIS occurrence of a magnitude as a LIMIT?
+ *
+ * ⚠ THIS ASKS FOR POSITIVE EVIDENCE, AND THE DIRECTION IS THE WHOLE POINT. The
+ * first version of the surrounding guard reasoned from an ABSENCE — "no
+ * identical literal appears outside the quoted span, therefore no observation
+ * was stated" — and an independent review refuted it: absence of a restatement
+ * is not proof of anything. The claim this module stamps is that the user wrote
+ * this number AS A BOUND, so the evidence demanded is the words that make it
+ * one, sitting in the same clause as the number.
+ *
+ * The clause is cut at the nearest `[.;:,]` before the magnitude, so cue words
+ * cannot be borrowed from a neighbouring sentence — *"we must stay under
+ * budget. Churn is currently 4%"* offers "stay"/"under" to the wrong clause,
+ * and the cut is what stops it.
+ *
+ * ⚠ ITS FAILURE DIRECTION IS A GAP, NOT A LIE, AND THAT IS WHY IT IS SHAPED
+ * THIS WAY ROUND. A phrasing this list does not carry (*"churn: 4% max by Q3"*
+ * reads, *"keep it beneath a four percent line"*) withholds a stamp that was
+ * warranted — a silence. The inverse shape, a detector for OBSERVATION language
+ * used to withhold, fails toward stamping a genuine observation, which is the
+ * lie this change exists to prevent. A list of cues will always be incomplete;
+ * only one of the two arrangements makes incompleteness safe.
+ */
+function statesALimitAt(briefText: string, at: number): boolean {
+  const clause = briefText.slice(0, at).split(/[.;:,]/).pop() ?? "";
+  return LIMIT_CUE_RE.test(clause);
+}
+
+/**
+ * ⭐⭐ A STATED LIMIT SITTING IN THE FIELD FOR WHAT IS CURRENTLY TRUE.
+ *
+ * MEASURED, 14 Sep 2026, 11 fresh live drafts of one brief containing
+ * *"…while keeping monthly churn under 4%…"*. In 3 of the 11 the 4% reached the
+ * wire as the churn node's `observed_state: { value: 0.04, unit: "%", source:
+ * "brief_extraction", extractionType: "explicit" }` — `observed_state` being,
+ * by its own declaration, *"current or proposed value"*. The model therefore
+ * asserts **churn IS 4%** where the user said **keep it under 4%**. In 2 of
+ * those 3 the SAME node also carried an honest `goal_constraints[]` row
+ * (`{node_id, operator: "<=", value: 0.04}`), so CEE had already decided the
+ * role and stored the number in the other field regardless.
+ *
+ * This returns the nodes for which that is provable, so a stamp can say so.
+ *
+ * ── THE ORACLE IS THE ROW, AND THE ROW IS ALREADY BOUND ────────────────────
+ * Nothing here parses the brief for limit language, and nothing re-matches a
+ * magnitude to a node. `goal_constraints[].node_id` states which node the limit
+ * is about; `constraintSpans` (this module, unchanged) proves the row's
+ * `source_quote` is really in the brief, which is the fabrication gate —
+ * an unlocatable quote classifies nothing and can never produce a stamp.
+ *
+ * ── ⛔ THE LIE-DIRECTION GUARD, AND WHY IT IS A *SUFFICIENCY* TEST ──────────
+ * One predicate guards two OPPOSITE harms (trap 22b). Not stamping leaves a
+ * limit masquerading as an observation (a GAP). Stamping wrongly tells a user
+ * that a rate they actually measured is only a cap (a LIE) — and because the
+ * consumer lets this stamp override provenance to `assumption`/`ai_inferred`,
+ * the lie direction WITHDRAWS A TRUE AUTHORSHIP CLAIM. They cannot share one
+ * window, so the lie direction gets its own, strictly stronger condition, and
+ * anything it cannot resolve resolves toward NOT demoting.
+ *
+ * The case is real: *"churn is currently 4% and we must keep it under 4%"*
+ * states one magnitude twice, in two different roles, and the observed 0.04
+ * then genuinely is an observation.
+ *
+ * ⛔⛔ THE FIRST VERSION OF THIS GUARD ASKED THE WRONG QUESTION, AND AN
+ * INDEPENDENT CORPUS REFUTED IT (Codex, 14 Sep 2026, at `007e4265`, executed).
+ * It asked *"does a quantity written the SAME WAY as one inside the quoted span
+ * appear OUTSIDE it?"* — and reasoned that a literal comparison could not be
+ * defeated by a frame. Two cases it could not see, both of which withdrew a
+ * genuine user observation:
+ *
+ *   1. **Equivalent quantities have different literals.** *"monthly churn is
+ *      currently 4.0%, while keeping monthly churn under 4%"* — `"4.0%"` is not
+ *      the string `"4%"`, so no restatement was detected and the observation
+ *      was demoted. Literal identity is not quantity identity.
+ *   2. **Both roles can sit inside ONE legitimate quote.** When the row quotes
+ *      the whole sentence, there is no "outside" left to look in, so a guard
+ *      that only looks outside the span passes VACUOUSLY.
+ *
+ * Neither absence is proof that the observation was never stated. **The absence
+ * of an identical literal outside a quote is not evidence of anything.**
+ *
+ * ⭐ WHAT IT ASKS NOW — the sufficiency rule. Every magnitude the quoted span
+ * states must be stated EXACTLY ONCE in the whole brief. A second writing of it
+ * — inside the quote or outside it, spelt the same way or not — is an
+ * occurrence whose role this function has no evidence about, so the stamp is
+ * withheld. That subsumes the old test (an identical literal outside the span
+ * is a second occurrence) and closes both holes above, because the count is
+ * taken over the WHOLE brief and compares MAGNITUDES, not spellings.
+ *
+ * ⚠ AND IT STILL NEVER COMPARES 4 TO 0.04. Both operands of `sameStatedQuantity`
+ * are read off the SAME brief by `extractStatedQuantities`, so they share that
+ * one declared frame by construction. The producer's row holds **0.04** (a
+ * `value_frame` of "level" with `unit` "fraction" — measured on all six live
+ * drafts that carried a row) while the brief says `4%`, read as **4**; those two
+ * are never operands of the same comparison here, and `numbersEqual` performs no
+ * frame conversion that could rescue such a comparison.
+ *
+ * ── WHAT THIS DOES NOT CLAIM ───────────────────────────────────────────────
+ * The `observed_state.value === row.value` test only holds where the two are
+ * already on the same scale, which they are for a fraction-framed percent
+ * (both 0.04, measured). A currency row stated *"in user units"* (200000)
+ * against an observed 0-1 position (0.4) will not compare equal and is NOT
+ * stamped. That is a known GAP, disclosed rather than closed by guessing a
+ * frame — it fails toward silence, the safe direction, and closing it needs the
+ * frame authority, not a wider window here.
+ *
+ * Pure: same (brief, graph) ⇒ same bindings, sorted by `node_id`.
+ */
+export function deriveStatedQuantityRoles(
+  briefText: string | null | undefined,
+  graph: unknown,
+): readonly StatedQuantityRoleBinding[] {
+  if (typeof briefText !== "string" || briefText.trim().length === 0) return [];
+  if (graph === null || graph === undefined || typeof graph !== "object") return [];
+
+  const g = graph as Record<string, unknown>;
+  const spans = constraintSpans(g, briefText);
+  if (spans.length === 0) return [];
+
+  const quantities = extractStatedQuantities(briefText);
+  const seen = new Set<string>();
+  const bindings: StatedQuantityRoleBinding[] = [];
+
+  for (const span of spans) {
+    if (span.nodeId === null || span.value === null) continue;
+    if (seen.has(span.nodeId)) continue;
+
+    // The node's stored position must BE this limit's threshold. Where it is
+    // some other number the node holds an independent level and nothing here
+    // has anything to say about it.
+    const observed = observedValueOf(g, span.nodeId);
+    if (observed === null || !numbersEqual(observed, span.value)) continue;
+
+    // The lie-direction guard — see the note above.
+    const inSpan = quantities.filter(
+      (q) => q.at >= span.start && q.at + q.literal.length <= span.end,
+    );
+    if (inSpan.length === 0) continue;
+
+    // SUFFICIENCY. Every magnitude the quoted span states must be stated
+    // exactly once in the WHOLE brief. `sameStatedQuantity` is reflexive, so a
+    // count above one means the same magnitude was written somewhere else too —
+    // inside this quote or outside it — and at least one of those writings may
+    // be the observation the node genuinely carries. Unresolved role evidence
+    // resolves toward NOT demoting.
+    const roleAmbiguous = inSpan.some(
+      (q) => quantities.filter((other) => sameStatedQuantity(q, other)).length > 1,
+    );
+    if (roleAmbiguous) continue;
+
+    // POSITIVE EVIDENCE. Uniqueness alone still reasons from an absence, and
+    // one occurrence can carry both roles at once — *"monthly churn is
+    // currently 4%, and that is also our maximum"* writes the magnitude once
+    // and states it as a reading. So the occurrence must also be WORDED as a
+    // bound in its own clause. Nothing infers a limit from the producer's
+    // `operator`: that is the row's claim, and the user's words are the oracle.
+    if (!inSpan.some((q) => statesALimitAt(briefText, q.at))) continue;
+
+    seen.add(span.nodeId);
+    bindings.push({ node_id: span.nodeId, stated_role: "constraint" });
+  }
+
+  bindings.sort((a, b) => (a.node_id < b.node_id ? -1 : a.node_id > b.node_id ? 1 : 0));
+  return bindings;
 }

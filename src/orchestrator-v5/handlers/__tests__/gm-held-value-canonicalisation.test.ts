@@ -324,21 +324,68 @@ describe('R1 — blast radius: the currently-working cases are unchanged', () =>
     operations.forEach((op, i) => expect(op).toBe(ops[i]));
   }
 
-  it('canonical observed_state spelling: the canonicaliser is the identity', () => {
+  /**
+   * ⚠ THIS CASE DELIBERATELY CHANGED, AND THE OLD EXPECTATION WAS THE DEFECT.
+   *
+   * It used to call `assertIdentity` and then assert the applied node equalled
+   * `{ value: 0.5, source: 'user_override' }` — i.e. it PINNED the whole-object
+   * replace that drops `unit` / `raw_value` / `cap`, describing it in its own
+   * comment as "the (pre-existing) whole-object replace". The fixture node
+   * carries `{ value: 0.1, unit: 'index', raw_value: 10, cap: 100 }`, so that
+   * expectation recorded three siblings being silently destroyed by an edit
+   * that named only `value`.
+   *
+   * `canonicaliseUpdateNodeValue` now merges a literal whole-object
+   * `observed_state` write the same way it already merged every alias
+   * spelling, so this op IS translated (count 1) and the siblings survive.
+   * The identity contract is unchanged for everything else — the two cases
+   * below still call `assertIdentity`, and a literal write onto a node with no
+   * stored `observed_state` still returns by reference.
+   */
+  it('canonical observed_state spelling: siblings survive the merge', () => {
     const ops = [
       { op: 'update_node', path: 'fac_setup', value: { observed_state: { value: 0.5 } } },
       RISK_ADD,
       RISK_LINK,
     ];
-    assertIdentity(ops);
 
-    // …and it still applies, with the (pre-existing) whole-object replace.
+    // Precondition, pinned in-test: the fixture really carries the siblings
+    // whose survival is asserted below.
+    const stored = nodeOf(VALUE_GRAPH as never, 'fac_setup').observed_state as Record<
+      string,
+      unknown
+    >;
+    expect(stored).toEqual({ value: 0.1, unit: 'index', raw_value: 10, cap: 100 });
+
+    const { operations, translatedCount } = canonicaliseValueOps(
+      ops as never,
+      VALUE_GRAPH as never,
+    );
+    expect(translatedCount).toBe(1);
+    expect((operations[0] as { value: Record<string, unknown> }).value.observed_state).toEqual({
+      value: 0.5,
+      unit: 'index',
+      raw_value: 10,
+      cap: 100,
+    });
+    // The structural siblings are untouched and still returned BY REFERENCE.
+    expect(operations[1]).toBe(ops[1]);
+    expect(operations[2]).toBe(ops[2]);
+
     const outcome = holdThenConfirm(ops);
     expect(outcome.status).toBe('executed');
     if (outcome.status !== 'executed') return;
     expect(
       nodeOf(outcome.mutatedGraph as Record<string, unknown>, 'fac_setup').observed_state,
-    ).toEqual({ value: 0.5, source: 'user_override' }); // 2.396(b) user stamp
+    ).toEqual({
+      value: 0.5,
+      unit: 'index',
+      // `reconcileObservedValuePair` re-derives the denormalised sibling from
+      // the NEW value (0.5 × cap 100); the stale 10 must not survive.
+      raw_value: 50,
+      cap: 100,
+      source: 'user_override', // 2.396(b) user stamp
+    });
   });
 
   it('pure-structural hold: the canonicaliser is the identity', () => {

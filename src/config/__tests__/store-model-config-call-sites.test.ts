@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import {
   STORE_MODEL_CONFIG_LIVE_CALL_SITES,
   STORE_MODEL_CONFIG_NON_TASK_READERS,
+  STORE_MODEL_CONFIG_OUTRANKABLE_TASKS,
 } from "../model-routing.js";
 
 /* ===========================================================================
@@ -262,11 +263,29 @@ describe("store_model_config — the documented claims are bound to the source",
       );
     }
 
-    expect(namedTasks.sort()).toEqual([
-      'critique_graph',
-      'draft_graph',
-      'suggest_options',
-    ]);
+    /*
+     * THE TASK-ID DECLARATION IS DERIVED, NOT MIRRORED.
+     *
+     * This used to be a literal list written here. `/v1/status` now publishes
+     * which tasks a rank-2 pin can outrank, and a reporting surface cannot
+     * depend on a literal in a test file — so the set moved to
+     * STORE_MODEL_CONFIG_OUTRANKABLE_TASKS and this assertion pins it to the
+     * task names read out of the call sites' OWN SOURCE above. A new task path
+     * REDs here; a task path that stopped reading pins REDs here.
+     */
+    expect(
+      namedTasks.sort(),
+      `The tasks whose call sites read a prompt-store modelConfig pin have changed.\n\n` +
+        `  derived from src/: ${JSON.stringify(namedTasks.sort())}\n` +
+        `  declared:          ${JSON.stringify([...STORE_MODEL_CONFIG_OUTRANKABLE_TASKS].sort())}\n\n` +
+        `STORE_MODEL_CONFIG_OUTRANKABLE_TASKS is published on the unauthenticated ` +
+        `/v1/status endpoint as startup_task_models_unverified. A stale entry there makes ` +
+        `the endpoint understate OR overstate what it knows. Update the declaration in ` +
+        `src/config/model-routing.ts; do not edit this expectation.`,
+    ).toEqual([...STORE_MODEL_CONFIG_OUTRANKABLE_TASKS].sort());
+
+    // ANTI-VACUITY: [] === [] would pass. The scan must have named tasks.
+    expect(namedTasks.length).toBeGreaterThan(0);
   });
 
   it("SELECTED_ADAPTERS_CONSUME_BOTH_PRELOADED_BYTES_AND_METADATA", () => {

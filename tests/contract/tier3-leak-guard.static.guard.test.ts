@@ -98,6 +98,43 @@ const ALLOWLIST = new Map<string, 'cage' | 'transport' | 'structured'>([
   // logged, or made available to a user-facing composer.
   ['coaching/select-factor-evppi.ts', 'structured'],
   ['routing/post-analysis-advice-gate.ts', 'structured'],
+  // ⭐ NEW SITE, AND IT IS DELIBERATELY CLASSIFIED `transport` RATHER THAN
+  // `structured` — the classification that asks for the most scrutiny, because
+  // this one genuinely puts a projection of a banned subtree ON THE WIRE rather
+  // than using it as a gate.
+  //
+  // WHY IT EXISTS. `m1_coaching.evidence_gaps` is computed on every run and the
+  // whole subtree is transport-banned, so the consumer's evidence check could
+  // never be answered and rendered "Evidence not assessed" permanently — an
+  // honest refusal that had become a constant. Journey-witnessed on deployed
+  // staging, 10 Sep 2026, two briefs, every run.
+  //
+  // WHAT IT MAY CARRY, and the list is exhaustive: `factor_label`, a string the
+  // PRODUCER already wrote, the `factor_id` that binds it, and the fact that the
+  // producer looked. It carries NO `voi_score`, NO `evpi_percentage_points` and
+  // NO `influence`. Pinned by a test that serialises the emitted block and
+  // asserts each of those names is absent, so a later widening reds here rather
+  // than shipping.
+  //
+  // ⚠ THE ID TRAVELS AND THE NUMERICS DO NOT, AND THAT LINE IS DELIBERATE. An
+  // id licenses no claim; it lets the consumer bind a gap to its factor by
+  // IDENTITY rather than keying on a label, which collides and would have the
+  // consumer fabricating a key. A VOI score is the thing a surface could author
+  // a claim from, and it stays behind the ban.
+  //
+  // WHY NOT AN UN-BANDING. `m1_coaching` stays on TIER3_TRANSPORT_BANNED_FIELDS
+  // and the finaliser still deletes the subtree; the enricher/fact path that
+  // reads its structured enums for the prompt is untouched. This follows the
+  // `flip_thresholds` precedent — a narrow licensed carrier of producer-written
+  // display content, not a hole in the cage.
+  //
+  // ⛔ THE CLAIM POSTURE THAT MATTERS. The consumer reads an empty gap list
+  // beside `assessed: true` as a LICENSED ALL-CLEAR. So this module may never
+  // emit a PARTIAL list: every branch fails closed (no array, one unlabellable
+  // gap → emit nothing and leave the honest refusal standing). Understating the
+  // list is not a smaller truth here, it is a false statement about the user's
+  // evidence.
+  ['compose/project-evidence-assessment.ts', 'transport'],
   // Root-level seams (non-recursive root scan):
   ['compose.ts', 'transport'],
 ]);

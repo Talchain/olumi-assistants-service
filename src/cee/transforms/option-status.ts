@@ -222,19 +222,22 @@ export interface AnalysisReadyStatusResult {
  * @param originalStatus - Status from V3 option
  * @param hasNonNumericRaw - Whether any raw values are non-numeric
  * @param connectedFactorCount - Non-repair-authored option→factor edge count
+ * @param isBaseline - Whether this option is the status-quo baseline
  * @returns Computed status
  */
 export function computeAnalysisReadyStatus(
   interventionCount: number,
   originalStatus: "ready" | "needs_user_mapping" | "needs_encoding" | undefined,
   hasNonNumericRaw: boolean,
-  connectedFactorCount: number
+  connectedFactorCount: number,
+  isBaseline = false
 ): "ready" | "needs_user_mapping" | "needs_encoding" {
   return computeAnalysisReadyStatusWithReason(
     interventionCount,
     originalStatus,
     hasNonNumericRaw,
-    connectedFactorCount
+    connectedFactorCount,
+    isBaseline
   ).status;
 }
 
@@ -246,13 +249,18 @@ export function computeAnalysisReadyStatus(
  * @param originalStatus - Status from V3 option
  * @param hasNonNumericRaw - Whether any raw values are non-numeric
  * @param connectedFactorCount - Non-repair-authored option→factor edge count
+ * @param isBaseline - Whether this option is the status-quo baseline, as
+ *   decided by `detectBaselineOptionIndex` in `analysis-ready.ts` (the same
+ *   decision `analysable-option-gate.ts` later reads off the wire). Defaults
+ *   to `false` for the standalone callers that hold no payload-wide view.
  * @returns Computed status and reason
  */
 export function computeAnalysisReadyStatusWithReason(
   interventionCount: number,
   originalStatus: "ready" | "needs_user_mapping" | "needs_encoding" | undefined,
   hasNonNumericRaw: boolean,
-  connectedFactorCount: number
+  connectedFactorCount: number,
+  isBaseline = false
 ): AnalysisReadyStatusResult {
   // ⭐ THE SINGLE ADJUDICATION OF "this option has no effect value yet".
   //
@@ -276,6 +284,42 @@ export function computeAnalysisReadyStatusWithReason(
         reason: "No interventions extracted; original status preserved",
       };
     }
+    // ⭐ THE HELD BASELINE. `interventions: {}` ENCODES TWO DIFFERENT FACTS and
+    // this function used to read only one of them (trap 21 at field grain):
+    //   · "nobody has said what this option does"        → a real question;
+    //   · "it has been stated that this does nothing"    → a complete answer.
+    //
+    // RUN ADMISSION ALREADY NAMES THEM APART, strictly on the same flag:
+    // `orchestrator-v5/tools/handlers/analysable-option-gate.ts::isBaselineOption`
+    // HOLDS a baseline with no interventions and SUBMITS it, because "holding
+    // every factor at its own observed value *is* the complete and correct
+    // specification of 'no change'" (that file's docblock, Paul's 2026-08-14
+    // ruling). Readiness never got that ruling, so the same option was
+    // analysable and un-ready in the same turn — measured on the wire at
+    // staging build `0168483`, 18 Sep 2026, option `bad0f75e`
+    // "Status Quo (Hold Current Plan)", `is_baseline: true`, `interventions: {}`,
+    // `status: "needs_user_mapping"`.
+    //
+    // ⚠ THE ASK IT WAS PRODUCING HAS NO ANSWERABLE FORM. "Choose which factor
+    // X changes and by how much" cannot be answered for a status quo: supplying
+    // the mapping stops it being the status quo. The user could not exit,
+    // because the exit destroys the thing being configured — which is why the
+    // conversational layer, correctly, told them there was nothing to configure
+    // while this authority kept the blocker on screen.
+    //
+    // This is NOT a loosening of the run gate toward readiness; it is readiness
+    // learning the distinction the run gate already makes, from the same flag,
+    // with the same strict predicate. It is placed AFTER the `needs_encoding`
+    // limb above on purpose: an explicit upstream `needs_encoding` claims a
+    // stated effect could not be represented, which is a different fact from
+    // "nothing was stated" and is not this rule's to overturn.
+    if (isBaseline === true) {
+      return {
+        status: "ready",
+        reason: "Baseline: every factor holds at its observed value, so no effect values are needed",
+      };
+    }
+
     // CONNECTED BUT NUMBERLESS. A surviving option→factor edge IS the mapping:
     // the product has already established which factor this option moves.
     // Repair-authored edges are excluded upstream by the caller, so the product

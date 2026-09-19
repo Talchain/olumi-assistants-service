@@ -517,6 +517,50 @@ export interface SemanticQualitySignals {
   readonly intervened_factor_baselines_total: number;
   readonly intervened_factor_baselines_user_stated: number;
   /**
+   * ⭐⭐ WHICH PARAMETERS THE USER COULD SET TO MOVE THE FLOOR — the material,
+   * confidence-bearing NODES whose value is not the user's.
+   *
+   * ── WHY THIS EXISTS ────────────────────────────────────────────────────────
+   * `semanticQualitySufficient` refuses a leader while
+   * `material_parameters_user_stated === 0`, and `SEMANTIC_REASON` already tells
+   * the user the refusal can be lifted by setting "a value on a factor one of the
+   * options changes, or somewhere on the chain from there to your goal". That
+   * sentence describes a SET the consumer cannot compute: materiality is
+   * reachability over the comparison's substrate ({@link comparisonSubstrate}),
+   * and nothing downstream has it. This publishes it.
+   *
+   * ⛔ A CONSUMER MUST NOT MIRROR THE REACHABILITY TO GET THIS. Re-deriving it
+   * in another service would be a hand-maintained mirror of a producer in a
+   * different repo (trap 12) AND a second authority on one question (trap 21),
+   * and it would fail in the worst direction: naming a parameter CEE does not
+   * count, so the user sets it and nothing moves. The ids were already computed
+   * here and discarded; only the counts crossed the wire.
+   *
+   * ⚠⚠ NOT A DECOMPOSITION OF THE COUNTS ABOVE, AND THE DIFFERENCE IS NOT AN
+   * INCONSISTENCY. `material_parameters_total` counts material NODES **and**
+   * material EDGES; an edge has no node id, so
+   * `material_parameters_total - material_parameters_user_stated` will normally
+   * EXCEED this array's length. Two populations, named apart rather than
+   * reconciled. Read `.length` for this set's own size; never subtract.
+   *
+   * ⚠ GRAPH ORDER, NOT A RANKING. These arrive in the order the graph lists its
+   * nodes. No priority, influence or value-of-information ordering is computed
+   * here, and a surface that presents the first member as "the most important
+   * one to set" would be inventing a claim this module has not made.
+   *
+   * ⚠ UNCAPPED, DELIBERATELY. A capped list is an understatement the consumer
+   * cannot detect and therefore cannot report. These are node ids on a graph the
+   * consumer already holds in full, so there is nothing to protect by truncating.
+   *
+   * EMPTY IS MEANINGFUL AND AMBIGUOUS — read it WITH the counts, never alone. It
+   * means either "every material parameter is already the user's"
+   * (`material_parameters_user_stated > 0`, floor satisfied) or "this graph has no
+   * material parameters at all" (`material_parameters_total === 0`, e.g. an
+   * unreadable graph, which censuses as all-zero). Those are opposite situations
+   * and this field alone cannot tell them apart.
+   */
+  readonly material_parameters_awaiting_user_node_ids: readonly string[];
+  /**
    * ⭐ HAS THE USER SAID WHAT "GOOD" MEANS? Derived from the estate's ONE
    * goal-target rule (`utils/goal-threshold-trio.ts`), so the raw anchor — not a
    * lone cap or unit — is what counts. Nothing is re-implemented here.
@@ -763,6 +807,7 @@ export function censusConfidenceParameters(graph: unknown): SemanticQualitySigna
   let materialUserStated = 0;
   let intervenedTotal = 0;
   let intervenedUserStated = 0;
+  const materialAwaitingUser: string[] = [];
 
   const tally = (provenance: StructureProvenance): void => {
     if (provenance === 'user_stated') userStated += 1;
@@ -790,7 +835,16 @@ export function censusConfidenceParameters(graph: unknown): SemanticQualitySigna
     const provenance = structureProvenance(node, graph);
     tally(provenance);
     const id = typeof node.id === 'string' ? node.id : undefined;
-    if (id !== undefined && materialNodeIds.has(id)) tallyMaterial(provenance);
+    if (id !== undefined && materialNodeIds.has(id)) {
+      tallyMaterial(provenance);
+      // ⚠ `!== 'user_stated'` rather than `=== 'machine_authored'`:
+      // `StructureProvenance` has a third member, `unattributed`, and a
+      // parameter nobody can attribute is exactly one the user should be offered.
+      // Testing for the ONE state that disqualifies keeps a future fourth member
+      // in the offered set by default, which is the safe direction — the harm of
+      // a missing id is a refusal the user cannot act on.
+      if (provenance !== 'user_stated') materialAwaitingUser.push(id);
+    }
     if (id !== undefined && intervened.has(id)) {
       intervenedTotal += 1;
       if (provenance === 'user_stated') intervenedUserStated += 1;
@@ -823,6 +877,7 @@ export function censusConfidenceParameters(graph: unknown): SemanticQualitySigna
     material_parameters_user_stated: materialUserStated,
     intervened_factor_baselines_total: intervenedTotal,
     intervened_factor_baselines_user_stated: intervenedUserStated,
+    material_parameters_awaiting_user_node_ids: materialAwaitingUser,
     goal_target_stated: goalTargetStated(graph),
   };
 }

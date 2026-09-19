@@ -11,6 +11,7 @@
 import type { FastifyRequest } from "fastify";
 import { log } from "../../utils/telemetry.js";
 import { runUnifiedPipeline } from "../../cee/unified-pipeline/index.js";
+import type { GoalTargetCandidate } from "../../cee/factor-extraction/goal-label-target.js";
 import { currentStageEmitter } from "../../cee/unified-pipeline/stage-stream-context.js";
 import type { DraftInputWithCeeExtras, UnifiedPipelineOpts, PipelineOutcome } from "../../cee/unified-pipeline/types.js";
 import type { PromptAttributionCollector } from "../pipeline/prompt-attribution.js";
@@ -100,6 +101,16 @@ export interface DraftGraphResult {
   graphOutput: GraphV3T | null;
   /** Analysis-ready payload from the pipeline boundary stage. Threaded to V5 for OlumiResponse. */
   analysisReady?: GraphPatchBlockData['analysis_ready'];
+  /**
+   * ROUND 6 (CEE #1328) — the figure the goal LABEL names when the brief
+   * contains it and no route minted a typed target: a CANDIDATE the V5
+   * orchestration seam may turn into an `elicit_goal_target` question (an
+   * amount answer; the pending record carries no value). `binding` is a
+   * parser result, never authority to mint, preselect or assert a target.
+   * Read off `UnifiedPipelineResult.goal_target_candidate` — the stage
+   * context does not escape the pipeline, and the body is the legacy wire.
+   */
+  goalTargetCandidate?: GoalTargetCandidate;
   /**
    * ⭐ THE R1 REFUSALS, AGGREGATED FOR THE TURN THE USER RENDERS.
    *
@@ -407,6 +418,13 @@ export async function handleDraftGraph(
       // been spent made "the server tried twice" and "the server never tried"
       // indistinguishable — the two cases whose honest advice differs most.
       'auto_retry',              // bounded auto-retry disclosure — fixed shape, no user content
+      // ROADMAP goalfence: did the draft fail to reach a goal CEE ITSELF
+      // minted? A fixed boolean, emitted only on the true arm by
+      // `graph-enforcement.ts`, carrying no user content. It is allowlisted
+      // because route-v2 reads it OFF THIS OBJECT to decide whether to answer
+      // the turn with the outcome question instead of a dead 500 — the graph is
+      // gone by then and nothing downstream can re-derive the fact.
+      'goal_never_stated',       // self-inflicted goal gap — fixed boolean, no user content
     ]);
     const rawDetails = (body as { details?: unknown }).details;
     const pipelineDetails: Record<string, unknown> | null =
@@ -605,6 +623,11 @@ export async function handleDraftGraph(
     ...(modelBuildingNotices !== undefined ? { modelBuildingNotices } : {}),
     ...(draftGraphTimings !== undefined ? { draftGraphTimings } : {}),
     ...(draftQuality !== undefined ? { draftQuality } : {}),
+    // ROUND 6 (CEE #1328) — second hop of the candidate: pipeline result → the
+    // field the V5 seam reads. A field is carried only by being named here.
+    ...(pipelineResult.goal_target_candidate !== undefined
+      ? { goalTargetCandidate: pipelineResult.goal_target_candidate }
+      : {}),
   };
 }
 

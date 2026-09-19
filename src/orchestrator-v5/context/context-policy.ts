@@ -133,6 +133,8 @@ export type ContextSource =
   | 'graph_authority'
   | 'claim_safety'
   | 'recent_changes'
+  /** The user's own stated disagreements (`finding_dissent` judgement receipts). */
+  | 'stated_objections'
   | 'coaching_cache'
   | 'coaching_context'
   /** The canonical `analysis_ready` payload — status + `readiness_issues[]`. */
@@ -373,6 +375,12 @@ const COACH_CONVERSE: ContextPolicy = {
     { name: 'conversation', source: 'conversation_window', projection: 'projectConversation (8 turns with summary coverage; fetched hot window when summary absent/zero); whole-pack ceiling trim (enforceContextPackCeiling — oldest-first turn-pairs, floor CONTEXT_PACK_CEILING_MIN_RETAINED_TURNS, re-stamped window + notice, disclosed)', char_budget: T_ROUTING_CONVERSATION, enforcement: 'enforced_by_total', cut_rank: ceilingCutRank('conversation'), model_facing: true },
     { name: 'recent_changes', source: 'recent_changes', projection: 'recent-changes summary (recent-changes.ts authority)', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
     { name: 'recent_changes_status', source: 'recent_changes', projection: 'scenario-wide mutation-history reconciliation (complete | capped | degraded)', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true, always_expected: true },
+    // The user's OWN stated disagreements. Sourced from `priorFacts`, NOT from
+    // the recent-changes read — that read filters judgement receipts out by
+    // construction. Key ABSENT when nothing was objected to (never `[]`):
+    // there is no completeness authority here, so an empty list would be an
+    // unearned "the user has objected to nothing" claim.
+    { name: 'stated_objections', source: 'stated_objections', projection: 'projectStatedObjections (newest-wins per finding, capped at STATED_OBJECTIONS_CAP; statements VERBATIM, never truncated)', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
     // Knowledge-over-time (P6): the decision-records read slice, serialised among
     // the hard state (buildUserMessage keeps it in `...rest`, ABOVE the appended
     // conversation_summary → facts beat summary). ENFORCED: projectDecisionRecords
@@ -519,9 +527,25 @@ const DECISION_REVIEW: ContextPolicy = {
  * enforcement constant bounds it — declaring it `enforced` would be a false
  * guarantee), so `brief` is `telemetry_only`. The draft path has no
  * conversation window (`memory_window: null`) and no total budget. Its S0
- * instrumentation (`handlers/draft-graph-dispatch.ts:482`) decomposes the
- * model-facing prompt as `brief` only (the retrieved `docs` + seed graph also
- * feed the prompt but are not separately measured on that seam).
+ * instrumentation (`handlers/draft-graph-dispatch.ts`, the `emitContextBudget`
+ * call in the post-draft block) decomposes the model-facing prompt as `brief`
+ * only.
+ *
+ * ⚠⚠ THE EXCLUSION LIST HERE WAS BOTH STALE AND SHORT, and that is why the
+ * 128-vs-~18,000 gap went unread. It cited `:482`/`:489` (the emit has moved)
+ * and named only `docs` + seed graph. The ACTUAL unmeasured bytes on this seam
+ * are: the served `draft_graph` system prompt (~58,564 chars),
+ * `DRAFT_RECORDS_INSTRUCTION` (a second system block), the records JSON
+ * grammar, the untrusted-content envelope, the compliance reminder, the brief
+ * signals header, the currency instruction, any retry directive, any attached
+ * document, and the legacy text-preview docs. `brief` is a MINORITY of the
+ * request.
+ *
+ * This site is now DECLARED as `declared_sections_only` on the wire
+ * (`TOTAL_CHARS_SCOPE` in context-budget-telemetry) — the only call site that
+ * is — and `classifyCharsPerToken` warns LOUDLY on every call while the gap
+ * stands. A prose exclusion list is a hand-maintained mirror; the loud,
+ * per-call, ground-truth-token check is the mechanism.
  */
 const DRAFT_STRUCTURAL: ContextPolicy = {
   call_site: 'draft_structural',
@@ -543,7 +567,7 @@ const DRAFT_STRUCTURAL: ContextPolicy = {
     // the `cee.draft.document_attached` seam (anthropic.ts).
     { name: 'attached_document', source: 'attached_document', projection: 'native Anthropic document block (base64 pdf / text), untrusted-bracketed — no text extraction', char_budget: DRAFT_ATTACHMENT_MAX_BYTES, enforcement: 'enforced', cut_rank: null, model_facing: true, always_expected: false },
   ],
-  note: 'POST wave-1 lean structural draft (draftGraph). brief is uncapped (no enforcement constant → telemetry_only, never a false enforced). attached_document (D-59-7): the model-native doc-attach — carried as a native Anthropic document block, ENFORCED at DRAFT_ATTACHMENT_MAX_BYTES (fail-closed 4xx), CONDITIONAL, disclosed on cee.draft.document_attached. Legacy text-preview docs (grounding flag, default off) + seed graph also feed the prompt; S0 measures brief only (draft-graph-dispatch:489).',
+  note: 'POST wave-1 lean structural draft (draftGraph). brief is uncapped (no enforcement constant → telemetry_only, never a false enforced). total_char_budget is null BY DESIGN, not by omission — emitted as budget_basis:"unbounded_by_design" so it cannot be read as an unmigrated site. attached_document (D-59-7): the model-native doc-attach — carried as a native Anthropic document block, ENFORCED at DRAFT_ATTACHMENT_MAX_BYTES (fail-closed 4xx), CONDITIONAL, disclosed on cee.draft.document_attached. ⚠ S0 measures brief ONLY: the served system prompt, DRAFT_RECORDS_INSTRUCTION, the records grammar, the untrusted envelope, compliance reminder, signals header, currency instruction, retry directive, attached document and legacy text-preview docs are all UNMEASURED — declared as total_chars_scope:"declared_sections_only" and flagged per-call by chars_per_token.',
 };
 
 /**
@@ -676,7 +700,12 @@ export function deriveContextSectionBudgets(): Record<BudgetTelemetryCallSite, D
   for (const site of Object.keys(TELEMETRY_TO_POLICY) as BudgetTelemetryCallSite[]) {
     const policySite = TELEMETRY_TO_POLICY[site];
     if (policySite === null) {
-      out[site] = { sections: {}, total: null }; // draft_graph: instrumented, not budgeted.
+      // No telemetry call site maps to null today (P4 closed the draft gap);
+      // kept so a NEW, not-yet-migrated site degrades to instrumented-only
+      // rather than throwing. `total: null` reaches the wire as
+      // budget_basis:'unbounded_by_design', so if this branch ever becomes
+      // live it must gain its own basis — the two are NOT the same claim.
+      out[site] = { sections: {}, total: null };
       continue;
     }
     const policy = CONTEXT_POLICY[policySite];

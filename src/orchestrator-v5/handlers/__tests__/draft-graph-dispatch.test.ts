@@ -314,7 +314,25 @@ describe('dispatchDraftGraph', () => {
     });
 
     // Decision-coach narrative — populated case (goal + options + factors + risk).
-    it('coaching narrative names the goal and summarises options and factors when all present', async () => {
+    //
+    // ⭐ THIS ROUTE-LEVEL CASE USED TO REQUIRE THE UNEARNED CLAIM, WITH THE SAME
+    //   FIXTURE SHAPE AS THE UNIT-LEVEL ONE IT MIRRORS. Its graph gave neither
+    //   factor a single edge, and it then asserted
+    //   `/Main trade-off|Key consideration/` — i.e. it demanded the product
+    //   assert a relationship about a model containing no factor→goal edge at
+    //   all. That is precisely the defect `findOpposingFactorPair` exists to
+    //   stop (see `post-draft-narrative.ts`), so it is the FIXTURE that was
+    //   wrong here, not the composer suppressing a claim the model supports.
+    //
+    //   Widening the regex to accept the neutral line would have deleted the
+    //   route-level check that a trade-off is ever claimed. The case is split
+    //   into the two routes instead, and each names which one it is: the
+    //   UNEARNED graph (unchanged, below) must NOT claim a trade-off, and an
+    //   EARNED graph — the same labels, plus one positive and one negative
+    //   factor→goal edge — must claim exactly that pair. Neither passes on the
+    //   other's graph, so a composer that dropped the claim entirely, or
+    //   restored the old positional claim, REDs one of them.
+    it('coaching narrative summarises options and factors, and claims NO trade-off, when no factor edge earns one', async () => {
       const graph = {
         nodes: [
           { id: 'g1', kind: 'goal', provenance: 'from_brief', label: 'Maximise revenue' },
@@ -344,9 +362,59 @@ describe('dispatchDraftGraph', () => {
       expect(text).toContain('Options compared');
       expect(text).toContain('Launch now');
       expect(text).toContain('Delay');
-      expect(text).toMatch(/Main trade-off|Key consideration/);
+      // The factors are still named — losing the names to avoid a false
+      // relationship would delete a true and useful line.
+      expect(text).toContain('The model weighs Market size and Cost');
       expect(text).toContain('Market size');
       expect(text).toContain('Cost');
+      // …and the relationship is NOT asserted. This is the discriminating half.
+      expect(text).not.toContain('Main trade-off');
+      expect(text).not.toContain('balanced against');
+      expect(text).toContain('run the analysis');
+      expect(text).not.toContain('nodes');
+      expect(text).not.toContain('edges');
+    });
+
+    it('coaching narrative claims the trade-off when two factors provably oppose on the goal', async () => {
+      const graph = {
+        nodes: [
+          { id: 'g1', kind: 'goal', provenance: 'from_brief', label: 'Maximise revenue' },
+          { id: 'o1', kind: 'option', label: 'Launch now' },
+          { id: 'o2', kind: 'option', label: 'Delay' },
+          { id: 'f1', kind: 'factor', label: 'Market size' },
+          { id: 'f2', kind: 'factor', label: 'Cost' },
+          { id: 'r1', kind: 'risk', label: 'Regulatory' },
+        ],
+        // The ONLY difference from the case above: the model now says which way
+        // each factor pushes the goal, and they push opposite ways.
+        edges: [
+          { from: 'o1', to: 'g1' },
+          { from: 'f1', to: 'g1', effect_direction: 'positive' },
+          { from: 'f2', to: 'g1', effect_direction: 'negative' },
+        ],
+      };
+      const draftResult = {
+        ...makeDraftResult(graph, MINIMAL_ANALYSIS_READY),
+        assistantText: null,
+      };
+      (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
+        .mockResolvedValue(draftResult as Awaited<ReturnType<typeof handleDraftGraph>>);
+
+      const result = await dispatchDraftGraph({
+        payload: makePayload(),
+        requestId: 'req-1',
+        request: STUB_REQUEST,
+      });
+
+      const text = result.response.assistant_text;
+      expect(text).toContain('"Maximise revenue"');
+      expect(text).toContain('Options compared');
+      expect(text).toContain('Launch now');
+      expect(text).toContain('Delay');
+      // Bound to the named pair, in the direction-derived order (positive
+      // first), not to any text matching a trade-off-shaped regex.
+      expect(text).toContain('Main trade-off: Market size balanced against Cost');
+      expect(text).not.toContain('The model weighs Market size and Cost');
       expect(text).toContain('run the analysis');
       expect(text).not.toContain('nodes');
       expect(text).not.toContain('edges');

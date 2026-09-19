@@ -28,6 +28,7 @@ import { isDemandNotBriefFailure } from "../../adapters/llm/draft-budget.js";
 import { buildCeeErrorResponse } from "../validation/pipeline.js";
 import { buildLlmMetadataProjection } from "./llm-metadata-projection.js";
 import {
+  applyGoalNeverStatedSkipCopy,
   decideDraftAutoRetry,
   applyRetryExhaustedCopy,
   applyRetryUnaffordableCopy,
@@ -45,6 +46,7 @@ import type { DraftGraphTimings } from "../../orchestrator-v5/telemetry/turn-tim
 import { runStageParse } from "./stages/parse.js";
 import { runStageNormalise } from "./stages/normalise.js";
 import { runStageEnrich } from "./stages/enrich.js";
+import { runStageOptionMappingRecovery } from "./stages/option-mapping-recovery.js";
 import { runStageRepair } from "./stages/repair/index.js";
 import { runStageCoachingPass } from "./stages/coaching-pass.js";
 import { runStagePackage } from "./stages/package.js";
@@ -714,6 +716,28 @@ export async function runUnifiedPipeline(
   const elapsedMs = Date.now() - retryBaselineMs;
   const decision = decideDraftAutoRetry(first, elapsedMs);
   if (!decision.retry) {
+    if (decision.reason === "goal_never_stated") {
+      // ⭐ THE RETRY IS NOT UNAFFORDABLE HERE — IT IS USELESS.
+      //
+      // Measured on the served build `2212ae0`: the retry ran on all 11
+      // captured short-brief failures, returned IDENTICAL validator codes both
+      // times, rescued 0 of 11, and cost ~18s of the user's request budget. The
+      // placeholder goal is minted deterministically, so attempt 2 begins from
+      // the same contentless goal as attempt 1.
+      //
+      // The disclosure is emitted on this arm exactly as it is on the
+      // unaffordable arm and for the same P0d reason: "the server never tried"
+      // and "the server tried twice" are the two cases whose honest advice
+      // differs most, so neither may be silent.
+      log.warn({
+        event: TelemetryEvents.CeeEnforcementAutoRetrySkipped,
+        request_id: getRequestId(request),
+        retry_class: classifyRetryableDraftFailure(first),
+        auto_retry_skip_reason: decision.reason,
+        elapsed_ms: elapsedMs,
+      }, "Draft failed to reach a goal CEE itself minted — a re-draft cannot supply the missing outcome, so no retry was funded");
+      return applyGoalNeverStatedSkipCopy(first);
+    }
     if (decision.reason === "budget_unaffordable") {
       // ⭐ P0d — THE COPY ON THIS PATH WAS A FALSE CLAIM, AND THE PATH ITSELF
       // WAS INVISIBLE.
@@ -1050,6 +1074,18 @@ async function runUnifiedPipelineAttempt(
     timings.enrich_ms = stageElapsed(t3);
     ctx.stageSnapshots.stage_3_enrich = captureStageSnapshot(ctx);
     ctx.planAnnotation = capturePlanAnnotation(ctx);
+
+    // Stage 3b: Option mapping recovery — ask the drafter which factors an
+    // option it left unmapped actually moves, BEFORE the connectivity repair
+    // reaches for the union of everyone else's targets.
+    //
+    // ⚠ NO try/catch HERE ON PURPOSE. The stage owns its own failure handling
+    // and is documented to fail OPEN — a second catch at this level would make
+    // the two disagree about what "skipped" means, and this file already
+    // carries one such pair (trap 21). It cannot throw; if it ever does, the
+    // draft SHOULD fail loudly rather than silently ship a graph half-mutated
+    // by a stage that promised not to mutate it.
+    await runStageOptionMappingRecovery(ctx);
 
     // Stage 4: Repair — Validation + goal merge + connectivity
     const t4 = stageStart();
@@ -1569,6 +1605,9 @@ async function runUnifiedPipelineAttempt(
     return {
       statusCode: 200,
       body: ctx.finalResponse,
+      // ROUND 6 (CEE #1328) — the candidate leaves the pipeline BESIDE the body,
+      // not on it (see UnifiedPipelineResult). The stage context dies here.
+      ...(ctx.goal_target_candidate !== undefined && { goal_target_candidate: ctx.goal_target_candidate }),
     };
   } catch (error) {
     // Pre-sweep failures (Stage 1-3) or unexpected errors still map to error responses.

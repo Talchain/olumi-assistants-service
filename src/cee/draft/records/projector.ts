@@ -66,6 +66,14 @@ import { MAX_OPTIONS as MAX_PROJECTED_OPTIONS } from "../../../validators/graph-
 // EXPORTED for exactly this reuse. A local copy would drift from the rule it
 // claims to pre-empt, and this file's own history says the drift reads as green.
 import { buildInterventionSignature } from "../../../validators/graph-validator.js";
+// ⭐ THE SAME REPAIR THE ENFORCEMENT STAGE RUNS, RUN WHERE THE RECONCILIATION
+// BELOW CAN STILL SEE ITS RESULT. Imported rather than reimplemented: a second
+// copy of the corroboration rule is trap 12, and this module must not hold a
+// private opinion about what an option's own sentence states.
+import {
+  repairNoOpOptionTargets,
+  type NoOpTargetRepairPolicy,
+} from "../../unified-pipeline/stages/repair/no-op-target-repair.js";
 // ⭐ THE SINGLE BRIEF-BINDING AUTHORITY. Shared with the V3 response transform so
 // that a node's badge and an option's badge cannot disagree about one fact — they
 // contradicted each other on the wire before this (trap 12, two mirrors).
@@ -82,10 +90,29 @@ import {
 // (`utils/goal-threshold-cap.ts:20-26`). The records projector is a THIRD
 // registration path; minting its own cap arithmetic here would recreate exactly
 // the divergence that module was extracted to end (trap 12).
-import { resolveGoalThresholdCap, CEE_GOAL_THRESHOLD_FRAME } from "../../../utils/goal-threshold-cap.js";
+import { resolveGoalThresholdCapWithProvenance, CEE_GOAL_THRESHOLD_FRAME, type GoalThresholdCapProvenance } from "../../../utils/goal-threshold-cap.js";
+import type { DraftRecordValueScale } from "./grammar.js";
 import { boundNodeLabel } from "./label-bound.js";
 import { isNameShapedLabel } from "./claim-label-shape.js";
-import { deriveGoalObjectiveLabel, deriveDecisionLabel } from "./objective-label.js";
+// ⭐ THE CONSTRAINT-BINDING AUTHORITIES, all DERIVED rather than re-spelled.
+// `MINTABLE_TARGET_KINDS` is the one rule about which kinds may carry a
+// threshold; `classifyUnitScaleClass` is this directory's four-class unit scale
+// authority; `CURRENCY_SYMBOL_TO_CODE` is the canonical currency vocabulary (a
+// second hand-written one is exactly the mirror a union guard in
+// `cee/extraction/__tests__/currency-vocabulary.union.test.ts` exists to RED).
+import { MINTABLE_TARGET_KINDS } from "../../compound-goal/mintable-target-kinds.js";
+import { generateConstraintId } from "../../compound-goal/extractor.js";
+import { classifyUnitScaleClass } from "./unit-scale-class.js";
+import { soleStatedQuantityInSpan } from "../../factor-extraction/goal-label-target.js";
+import { CURRENCY_SYMBOL_TO_CODE } from "../../../utils/currency-alphabet.js";
+import type { GoalConstraintT } from "../../../schemas/assist.js";
+import {
+  deriveGoalObjectiveLabel,
+  deriveDecisionLabel,
+  refusalDeniesObjecthood,
+  deliberationFrameOpensTheSpan,
+  type AuthoredLabel,
+} from "./objective-label.js";
 import type {
   DraftInferenceClaim,
   DraftRecordRole,
@@ -143,6 +170,17 @@ export const PROJECTOR_STRUCTURAL_CLASS: RecordProvenanceClass = "projector_stru
 export function scaffoldingProvenance(quote: string): RecordProvenance {
   return { provenance_class: PROJECTOR_STRUCTURAL_CLASS, source: "synthetic", quote };
 }
+
+/**
+ * The disclosure for a goal whose SPAN the user wrote but never designated as
+ * the objective. Exported so guards bind to it by identity rather than by
+ * copying the string (trap 19).
+ *
+ * ⚠ 58 characters — `StructuredProvenance.quote` is `z.string().max(100)`, and
+ * it describes what the machine did. It is NEVER user text.
+ */
+export const GOAL_SPAN_CHOSEN_BY_CEE =
+  "Goal span chosen by CEE: the brief designates no objective";
 
 /**
  * ⭐ THE TWO FIELDS THE CONSUMER REQUIRES, AND WHY THESE VALUES.
@@ -226,6 +264,36 @@ export interface RecordProvenance {
   readonly source_quote?: string;
   /** Present iff `ai_inferred`. Minted ids of the stated items it builds on. */
   readonly basis?: readonly string[];
+  /**
+   * ⭐⭐ THE STATED FIGURES THIS CLAIM IS BASED ON — the SUBJECT IDENTITY that
+   * survives the conversion, present iff `ai_inferred` and iff the basis names
+   * at least one `figure`.
+   *
+   * `basis` above names the stated items by their MINTED IDS, and a stated
+   * `figure` is minted and then pruned (`unconnected_to_goal`), so those ids
+   * resolve to nothing in the saved graph. A downstream reader holding a node
+   * and a number therefore had no way to ask the only question that matters —
+   * *is this one of the figures this node is based on?* — and the factor
+   * enricher answered it with `labelsMatch`, a substring-and-synonym test over
+   * labels, instead. That is how the user's £49 was written onto a factor
+   * measuring churn (`enricher.ts`, and the test named below).
+   *
+   * So the figures themselves ride alongside the ids. This is the same fact the
+   * projector already computed, conserved rather than re-derived: no consumer
+   * has to re-open the record set, and no consumer has to guess from a label.
+   *
+   * ⚠ ABSENCE MEANS "THIS CLAIM NAMES NO STATED FIGURE", never "no figure
+   * matched". A claim with an empty or figure-less basis carries the key not at
+   * all, and a reader must treat that as *unknown*, never as *excluded* — the
+   * same rule `unbased` states one field up.
+   *
+   * Pinned by `factor-extraction/__tests__/enhance-binds-to-declared-basis.test.ts`.
+   */
+  readonly basis_figures?: readonly {
+    readonly value: number;
+    readonly unit?: string;
+    readonly source_quote?: string;
+  }[];
   /**
    * Present iff `ai_inferred`. TRUE when `basis` is empty — pure invention,
    * and marked so. Explicit rather than inferable from an empty array,
@@ -329,6 +397,24 @@ export interface RecordProvenance {
    */
   readonly label_placeholder?: boolean;
 }
+
+/**
+ * ⭐⭐ THE `claim_kind` A DISCLOSURE CARRIES WHEN ITS SUBJECT IS A
+ * `stated_items[]` ENTRY RATHER THAN A `claims[]` ENTRY.
+ *
+ * ⛔ LOAD-BEARING BEYOND LABELLING, and that is why it is a constant rather than
+ * three string literals. `enumerateCompletionAsk` reads it to decide whether a
+ * refusal can be PUT TO THE MODEL at all: the repair for a stated-item refusal
+ * is a change to a `stated_items[]` field, and the completion grammar exposes
+ * `claims` only (`buildRecordsCompletionSchema`, `additionalProperties: false`).
+ * Several reasons — `ambiguous_ref`, `ref_out_of_range`, `ref_target_not_a_node`,
+ * `missing_ref` — arrive on BOTH paths from the same resolver, so the reason
+ * cannot tell the two apart and this label is the only thing that can.
+ *
+ * Imported by the consumer rather than re-spelled, so the two cannot drift into
+ * a hand-maintained mirror of each other (trap 12).
+ */
+export const STATED_ITEM_DROP_KIND = "stated_item";
 
 /** A reference the model emitted that the projector could not resolve. */
 export interface DroppedRecordRef {
@@ -538,6 +624,98 @@ export interface DroppedRecordRef {
      */
     | "constraint_direction_unstated"
     /**
+     * ⭐⭐ A STATED LIMIT CARRIES NO THRESHOLD WE CAN USE — so it cannot be
+     * enforced, and until now nobody said so.
+     *
+     * MEASURED 15 Sep 2026: 13 of 13 captured constraints arrived with a
+     * `direction` and NO numeric `value` — the figure sat in the span, or in a
+     * separate `figure` item. Both binding branches gate on
+     * `typeof item.value === "number"`, so the limit never reached the binding
+     * path and its only disclosure was the generic `unconnected_to_goal`. The
+     * limit reached the graph in 0 of 20 pricing drafts.
+     *
+     * ⛔ THIS READS NOTHING OUT OF THE SPAN, and that is deliberate. An earlier
+     * attempt (#1513) recovered the sole quantity from the quote and FABRICATED
+     * a 60% floor out of "…dead in enterprise, which is 60% of revenue" — a
+     * descriptive aside in a qualitative constraint. Which quantity a sentence
+     * BOUNDS is a semantic judgement, and the only routes to it are comparative-
+     * word parsing or name matching, both of which this estate has already paid
+     * for. So this disclosure states the ABSENCE and asks; it never guesses.
+     *
+     * ⚠ IT FIRES ON A GENUINELY QUALITATIVE LIMIT TOO, and that is correct
+     * rather than noise: "legal has NOT confirmed this" IS a constraint we
+     * cannot enforce, and saying so is honest. The completion turn is told
+     * explicitly to leave such a limit alone.
+     */
+    | "constraint_value_unstated"
+    /**
+     * ⭐⭐ A MAGNITUDE AUTHORED IN AN EARLIER PASS, AGAINST A POPULATION THAT NO
+     * LONGER EXISTS.
+     *
+     * Witnessed live 16 Sep 2026. Factor "Hiring and Onboarding Cost", frame
+     * 200000 — the user's own budget:
+     *   hire a Tech lead                      raw 80000   -> 0.4
+     *   two developers                        raw 120000  -> 0.6
+     *   Hire One Tech Lead and One Developer  raw 0.85    -> 0.00000425
+     * The third option read as FREE on the cost axis, ~141,000x understated, on
+     * a product that ranks options.
+     *
+     * Established at the bytes: pass 1 emitted SEVEN option-effect magnitudes and
+     * every one was on the unit interval (0.9, 0.55, 0.8, 0.7, 0.6, 0.5, 0.85).
+     * `80000` and `120000` appear NOWHERE in the pass-1 record set. Pass 1 was
+     * internally consistent; the pounds arrive only from the completion pass, and
+     * pass 3d then frames both together.
+     *
+     * ⛔ THE DETECTOR IS NOT MAGNITUDE, and two attempts proved why. "Refuse a
+     * sub-unit magnitude beside an absolute one" is refuted by
+     * `projector-scale-projection`, which asserts the opposite deliberately:
+     * £0.50 penny pricing beside £50,000 enterprise pricing is a REAL strategy.
+     * The same rule with zero excluded also deleted a legitimate £0 status quo.
+     *
+     * ⭐ IT IS THE PASS BOUNDARY, WHICH THE PIPELINE ALREADY RECORDS.
+     * `enumerateCompletionAsk` returns `baseClaimIndex`; the completion prompt
+     * tells the model its first new claim carries that index. Claims below it are
+     * pass 1, at or above it completion-authored. Nothing is inferred — the fact
+     * was simply never handed to the projector.
+     *
+     * ⚠ A NUMBER IS REFUSED, NEVER A PROPOSAL. The option keeps its identity and
+     * its other interventions, and the existing `missing_value` blocker then asks
+     * what it sets. Completion ran later with the merged graph in view, which is
+     * the ordering argument for preferring its magnitudes — not a judgement about
+     * which number looks more plausible.
+     */
+    | "option_magnitude_scale_unreconciled"
+    /**
+     * ⭐ A STATED `constraint` NAMED WHAT IT LIMITS, AND THE TARGET CANNOT
+     * CARRY A THRESHOLD.
+     *
+     * The reference RESOLVED — it is a real record and a real node — but its
+     * kind is outside `MINTABLE_TARGET_KINDS`. A `goal` is the thing being
+     * achieved and an `option` is a course of action; neither is the measured
+     * quantity a limit bounds. Named apart from `ref_target_not_a_node` (which
+     * means the index reached nothing at all) because they are different
+     * questions and the fixes differ (trap 21).
+     */
+    | "constraint_target_not_measurable"
+    /**
+     * ⭐⭐ THE REFERENCE RESOLVED TO A NODE MEASURING A DIFFERENT QUANTITY.
+     *
+     * A percentage must not weld to a currency node. This is the refusal that
+     * makes a model-supplied binding safe to honour at all: a reference alone
+     * cannot tell "budget remaining" from "budget consumed", and a limit bound
+     * to the complement of its metric INVERTS while looking perfectly bound. A
+     * WRONG BINDING IS WORSE THAN A GAP, so where the two sides provably
+     * measure different quantities the projector declines and asks.
+     *
+     * ⚠ WHAT IT CANNOT DO, STATED PLAINLY. It fires only where BOTH sides
+     * declare a unit this service can classify. A model-authored factor claim
+     * carries no unit at all (`claims[]` has no `unit` field), so the common
+     * case is UNCHECKABLE rather than checked — see `constraintUnitFamily`.
+     * This gate bounds the unit class of harm; it does not bound the
+     * complement class, and nothing here should be read as claiming it does.
+     */
+    | "constraint_target_unit_mismatch"
+    /**
      * ⭐ ROOT 2(b). A `figure` was stated with `role:"target"`. It is on the
      * graph as the user's own words, but it is NOT yet a goal threshold — so
      * nothing downstream should read it as a level that has been ACHIEVED.
@@ -599,6 +777,16 @@ export interface DroppedRecordRef {
     | "claim_label_not_a_name";
   /** The reference as emitted, rendered for a reader. */
   readonly from_ref?: string;
+  /**
+   * ⭐ THE `stated_items` POSITION THIS REFUSAL IS ABOUT, when it is about one.
+   *
+   * Typed rather than parsed back out of `from_ref`. A consumer that scraped
+   * `stated_items[N]` out of the rendered string would be a hand-maintained
+   * mirror of `renderRef`'s format (trap 12): change the rendering and the
+   * scraper silently stops matching, with nothing red. The completion's repair
+   * scope is derived from this field.
+   */
+  readonly stated_index?: number;
   readonly to_ref?: string;
   /** Resolved node kinds — present only on `ref_kind_illegal`, where they ARE the finding. */
   readonly from_kind?: string;
@@ -670,6 +858,41 @@ export interface RecordProjection {
    * that vanished without trace.
    */
   readonly dropped: readonly DroppedRecordRef[];
+  /**
+   * ⭐⭐ THE LIMITS THE MODEL BOUND TO A NODE ITSELF.
+   *
+   * A stated `constraint` that names what it limits (`applies_to_stated` /
+   * `applies_to_claim`) and survives every safety gate becomes a row here,
+   * carrying the TARGET's node id.
+   *
+   * ⛔⛔ THIS FIELD HAS NO CONSUMER YET, AND SAYING SO IS THE POINT. An earlier
+   * version of this comment said the row "reaches `ctx.llmGoalConstraints` and
+   * is merged by the EXISTING `runCompoundGoals` machinery". THAT IS FALSE at
+   * this tip and was falsified by sweeping for it: the live draft path copies
+   * only `.graph` (`adapters/llm/anthropic.ts`,
+   * `rawJson = { ...activeProjection.graph }`), and this field is read by NO
+   * non-test file outside this one. Contrast control in the same sweep: the
+   * sibling `.dropped` is read by 12. `ctx.goalConstraints` in
+   * `unified-pipeline` IS real and IS widely read — it is a DIFFERENT FIELD
+   * THAT HAPPENS TO SHARE THE NAME, and nothing joins the two. Believing the
+   * two were one channel is what made removing the user's constraint node look
+   * safe (trap 21).
+   *
+   * ⭐ So this field is the ARTEFACT the carrier lane needs, produced and
+   * proven, and nothing more. It changes no user-visible byte, which is
+   * precisely why nothing may be taken away on the strength of it.
+   *
+   * ⭐ WHY THIS CANNOT NAME A NODE THAT DOES NOT EXIST. The id is the one the
+   * projector MINTED for the target in this same pass, so the merge's
+   * `existingNodeIds.has(node_id)` filter is satisfied by construction. That is
+   * the whole reason the reference is an integer index into the record set
+   * rather than a name to be matched: string matching is what dropped the
+   * user's limit in the first place.
+   *
+   * EMPTY on every record set that does not use the new fields, which is what
+   * makes the change strictly additive.
+   */
+  readonly goalConstraints: readonly GoalConstraintT[];
 }
 
 // ── GraphV3 output shapes (structural mirrors of `schemas/graph.ts`) ─────────
@@ -691,10 +914,38 @@ export interface ProjectedNode {
    * They travel as ONE set, minted at ONE site, or not at all — see the goal
    * branch in `projectOnce`. `goal_baseline` is deliberately NEVER minted here.
    */
+  /**
+   * ⭐ v10 — the model's declared scale class, NODE-LEVEL, because that is what
+   * the reader reads: `transforms/schema-v3.ts:660` passes
+   * `anyNode.declared_scale` into `synthesiseRangeDisplayValue`.
+   *
+   * ⚠ NEITHER CONTRACT DECLARES IT AT NODE LEVEL — checked, not assumed. In
+   * `@talchain/schemas` it sits INSIDE `observed_state`, and CEE's own
+   * `src/schemas/graph.ts` has ZERO occurrences of it. The node-level carrier is
+   * an untyped CEE-internal extension that `repair/unreachable-factors.ts:582`
+   * writes as `(node as any).declared_scale`. Typing it here rather than casting
+   * is the difference between a field the compiler protects and one it cannot
+   * see.
+   *
+   * ⚠ WRITTEN ALONGSIDE `observed_state.declared_scale`, WHICH IS THE PUBLISHED
+   * CARRIER — the same two-carrier shape this file already uses for
+   * `value`/`raw_value`, and for the same stated reason: *"Both carriers are
+   * written because `schema-v3.ts` rebuilds factor observed_state FROM `data`."*
+   * A field-by-field rebuild drops whatever it does not name, which is exactly
+   * how `sets_to` was lost for a release. The two carriers must AGREE, and trap
+   * 21 says two authorities on one question do not get to drift — so
+   * `__tests__/declared-scale-carriage.test.ts` asserts they cannot.
+   */
+  declared_scale?: DraftRecordValueScale;
   goal_threshold?: number;
   goal_threshold_raw?: number;
   goal_threshold_unit?: string;
   goal_threshold_cap?: number;
+  /**
+   * Which rule produced `goal_threshold_cap` — derived from the resolver's own
+   * union, never restated, for the same reason the frame below is.
+   */
+  goal_threshold_cap_provenance?: GoalThresholdCapProvenance;
   /**
    * Typed FROM the constant rather than as the literal `"level"`, so the field
    * cannot drift from `GoalThresholdFrame` if a later contract release widens or
@@ -1314,11 +1565,16 @@ function applyStatedGoalTarget(
   value: number,
   unit: string | undefined,
 ): void {
-  const cap = resolveGoalThresholdCap(undefined, value, unit, undefined);
+  const resolved = resolveGoalThresholdCapWithProvenance(undefined, value, unit, undefined);
   node.goal_threshold_raw = value;
   if (unit !== undefined) node.goal_threshold_unit = unit;
-  if (cap !== null) {
+  if (resolved !== null) {
+    const cap = resolved.cap;
     node.goal_threshold_cap = cap;
+    // Minted in the SAME statement as the cap it describes, so the two can
+    // never diverge (a provenance describing a cap that has since moved reads
+    // as attested and is worse than none).
+    node.goal_threshold_cap_provenance = resolved.provenance;
     node.goal_threshold = value / cap;
     // A CODE CONSTANT, never derived from model output — `'level'` is true by
     // construction of the `raw / cap` arithmetic one line above.
@@ -1517,10 +1773,25 @@ function causalTargetKey(claim: DraftInferenceClaim): string | null {
  * single-candidate case.
  */
 function claimConflictsWithStatedParent(
+  statedItems: readonly DraftStatedItem[],
   claims: readonly DraftInferenceClaim[],
   parentStatedIndex: number,
   refinementClaimIndex: number,
 ): boolean {
+  const parent = statedItems[parentStatedIndex];
+  const refinementClaim = claims[refinementClaimIndex];
+  // Opposing explicit baseline roles name distinct alternatives even when the
+  // parent supplies no magnitude to compare. Missing roles are not inferred.
+  if (
+    parent?.kind === "option" &&
+    refinementClaim?.claim_kind === "option_refinement" &&
+    typeof parent.is_baseline === "boolean" &&
+    typeof refinementClaim.is_baseline === "boolean" &&
+    parent.is_baseline !== refinementClaim.is_baseline
+  ) {
+    return true;
+  }
+
   const magnitudesByTarget = (
     ownsSource: (claim: DraftInferenceClaim) => boolean,
   ): Map<string, Set<number>> => {
@@ -2070,10 +2341,104 @@ function bindFactorCarriedStatedMagnitude(args: {
  * would silently re-point every later reference — the exact class of silent
  * mis-binding the typed reference fields were introduced to end.
  */
+/**
+ * ⭐ WHAT A UNIT MEASURES — coarse ON PURPOSE, and honest about `unknown`.
+ *
+ * Three classes, every one DERIVED from an existing authority: the percent
+ * family from this directory's own `classifyUnitScaleClass` (percent /
+ * percentage points / basis points), currency from the canonical
+ * `CURRENCY_SYMBOL_TO_CODE` map in BOTH its spellings (the symbol "£" and the
+ * ISO code "GBP" both occur across this estate), and `unknown` for everything
+ * else.
+ *
+ * ⚠⚠ `unknown` MEANS "I CANNOT TELL", NEVER "COMPATIBLE" — and the caller must
+ * treat it that way. This function is used ONLY to REFUSE on a proven
+ * mismatch; it is never evidence that two things DO measure the same quantity.
+ * Written this way round deliberately: a classifier used to grant bindings
+ * would be a string matcher wearing a unit's clothes, which is the family of
+ * fix this change exists to avoid.
+ *
+ * Deliberately NOT extended to counts, durations or bare words. Every class
+ * added here is a class that can produce a REFUSAL, so a sloppy addition costs
+ * a user their stated limit. Two classes cover the harm actually measured.
+ */
+type ConstraintUnitFamily = "percent" | "currency" | "unknown";
+
+function constraintUnitFamily(unit: string | undefined): ConstraintUnitFamily {
+  if (typeof unit !== "string") return "unknown";
+  const token = unit.trim();
+  if (token.length === 0) return "unknown";
+  if (classifyUnitScaleClass(token) !== "unknown") return "percent";
+  for (const [symbol, code] of Object.entries(CURRENCY_SYMBOL_TO_CODE)) {
+    // ⚠ AN ALPHABETIC SYMBOL MATCHES ONLY EXACTLY. The canonical map holds two
+    // that are pure letters (`CHF`, `kr`), and prefix/suffix matching on those
+    // would classify any unit word that happens to end in them as currency.
+    // That direction produces a FALSE REFUSAL rather than a false binding — the
+    // safe direction — but it costs a user their stated limit for no reason, so
+    // it is closed rather than tolerated. Symbols carrying a non-letter (`£`,
+    // `$`, `A$`, `NZ$`…) keep affix matching, because that is how they actually
+    // appear against a number.
+    const alphabeticOnly = /^[A-Za-z]+$/.test(symbol);
+    if (alphabeticOnly) {
+      if (token.toLowerCase() === symbol.toLowerCase()) return "currency";
+    } else if (token === symbol || token.startsWith(symbol) || token.endsWith(symbol)) {
+      return "currency";
+    }
+    if (token.toUpperCase() === code) return "currency";
+  }
+  return "unknown";
+}
+
+/**
+ * The unit a projected node DECLARES, read from the two places this projector
+ * writes one. Derived from the emission sites rather than guessed: a `figure`
+ * lands its unit on `data.unit`, and a directed `constraint` lands it on
+ * `observed_state.metadata.unit`.
+ *
+ * Absent is absent. A node that declares no unit yields `undefined`, which
+ * classifies `unknown`, which cannot produce a refusal — see the warning on
+ * `constraintUnitFamily`.
+ */
+function nodeDeclaredUnit(node: ProjectedNode): string | undefined {
+  const data = node.data as { unit?: unknown } | undefined;
+  if (typeof data?.unit === "string") return data.unit;
+  const observed = node.observed_state as { metadata?: { unit?: unknown } } | undefined;
+  if (typeof observed?.metadata?.unit === "string") return observed.metadata.unit;
+  return undefined;
+}
+
+/** A stated `constraint` that named what it limits, held until every id exists. */
+interface StatedConstraintBinding {
+  readonly statedIndex: number;
+  readonly nodeId: string;
+  /**
+   * ⭐ THE ORIGINAL NODE OBJECT, held so it can be PUT BACK.
+   *
+   * The ordering rule's failure behaviour is PRESERVE THE ORIGINAL — not crash,
+   * and above all not silently discard, which is the defect being repaired. A
+   * postcondition cannot restore what it did not keep, so the carrier is held
+   * from the moment it is minted rather than reconstructed later from parts.
+   */
+  readonly node: ProjectedNode;
+  readonly quote: string;
+  readonly operator: ">=" | "<=";
+  readonly value: number;
+  readonly unit: string | undefined;
+  readonly appliesToStated: number | undefined;
+  readonly appliesToClaim: number | undefined;
+}
+
 function projectOnce(
   records: DraftRecordSet,
   demoted: ReadonlyMap<number, DemoteDecision>,
   brief: string | undefined,
+  /**
+   * The claim index at which the COMPLETION pass began — `baseClaimIndex` from
+   * `enumerateCompletionAsk`. Claims below it were authored in pass 1. OPTIONAL
+   * and behaviour-preserving when absent: with no boundary, nothing can be shown
+   * to span one and pass 3d behaves exactly as before.
+   */
+  completionBoundary?: number,
 ): OneProjection {
   const statedItems: readonly DraftStatedItem[] = records.stated_items ?? [];
   const claims: readonly DraftInferenceClaim[] = records.claims ?? [];
@@ -2081,6 +2446,16 @@ function projectOnce(
   const nodes: ProjectedNode[] = [];
   const edges: ProjectedEdge[] = [];
   const dropped: DroppedRecordRef[] = [];
+  /**
+   * Stated `constraint`s that named a target, held until BOTH node passes have
+   * run. A constraint may point at a `claims[]` entry declared after it, so the
+   * reference cannot be resolved while pass 1 is still minting — the same
+   * reason `causal_link` endpoints are resolved in pass 3 rather than inline.
+   */
+  const statedConstraintBindings: StatedConstraintBinding[] = [];
+  /** Bindings that actually produced a row — the only carriers a withdrawal could be licensed by. */
+  const boundCarriers: StatedConstraintBinding[] = [];
+  const goalConstraints: GoalConstraintT[] = [];
   /** edge id → the model's stated option→factor intervention level (`sets_to`). */
   const setsToByEdgeId = new Map<string, number>();
   /**
@@ -2250,15 +2625,121 @@ function projectOnce(
     // over the QUOTE. It is still true of the LEGACY graph path, which has no
     // typed record — which is why the authoring at the wire runs inside the
     // typed branch only.
-    const authoredLabel =
+    const authoredLabel: AuthoredLabel =
       kind === "goal" ? deriveGoalObjectiveLabel(quote) : { label: quote, authored: false };
 
-    const prov: RecordProvenance = {
-      provenance_class: "stated",
-      source_quote: quote,
-      brief_binding: briefBinding,
-      ...(authoredLabel.authored ? { label_authored: true } : {}),
-    };
+    // ⭐⭐ THE BADGE SAYS THE USER DESIGNATED THIS GOAL, SO IT MAY ONLY BE WORN
+    // BY A GOAL THE USER DESIGNATED.
+    //
+    // ── THE DEFECT, MEASURED ON A REAL GOVERNED CAPTURE ────────────────────
+    // Brief `01-simple-binary` (`run-b9389df`, real staging): the model files
+    // the user's own QUESTION — "Should we raise the price or keep it as is?" —
+    // as a `stated_item` of `kind: "goal"`. Every line below then agreed with
+    // it: `provenance_class: "stated"` + `brief_binding: "verified"` earns
+    // `from_brief` at `schema-v3.ts:1176`, and the opener quoted it back:
+    //
+    //   I've built a first decision model for "Should we raise the price or
+    //   keep it as is?".
+    //
+    // Quotation marks promise THESE ARE YOUR WORDS. They were — but the claim
+    // the badge makes is not about the WORDS, it is about the DESIGNATION, and
+    // a question designates no objective. The founder's ruling names this exact
+    // shape: *"Bad: Olumi invents a goal and records it as `from_brief`."*
+    // FOUR of the thirteen governed goal quotes are this shape.
+    //
+    // ── THE EVIDENCE WAS ALREADY IN HAND AND WAS BEING DISCARDED ───────────
+    // `deriveGoalObjectiveLabel` had already answered the question one line up,
+    // returning `{ authored: false, reason: "deliberation_frame" }` — the
+    // union's own words: *"The quote states a DECISION, not an objective."*
+    // That `reason` was dropped on the floor and `"stated"` written
+    // unconditionally. Nothing new is derived here; a verdict that was being
+    // computed and thrown away is now read.
+    //
+    // ── ⛔ WHY THIS IS A NARROW SUBSET OF "REFUSED", AND NOT "REFUSED" ─────
+    // The opposite harm is WORSE: telling a user their own designated goal was
+    // invented. Most of this deriver's refusals answer a DISPLAY question ("may
+    // I shorten this safely?"), not an authorship one — and an earlier head of
+    // this branch shipped that conflation and an independent reviewer measured
+    // it: admitting `head_disclaims` (a lexical `not|never|no|nor` test) told a
+    // user who wrote *"Our objective for this quarter is: We must never let
+    // latency exceed 200ms"* that the brief designates no objective. Three of
+    // three `head_disclaims` quotes in the external adversarial corpus are
+    // genuine objectives.
+    //
+    // ⛔⛔ AND THE SAME MISTAKE WAS THEN MADE ONE REASON ACROSS. That head kept
+    // `states_alternatives` — `/(^|\s)or(\s|$)/`, a BARE WORD TEST — on the
+    // strength of a comment calling both survivors "closed construction tests".
+    // False at the bytes for one of them. A second review drove three ordinary
+    // objectives through this seam and every one was told the brief designates
+    // no objective: "Reach 99.9% uptime or better" (a COMPARATIVE), "Increase
+    // margin, or failing that, hold it flat" (a FALLBACK), "grow in Germany or
+    // France" (a SCOPE). ⭐ The defect was a COMMENT doing the work of a
+    // MEASUREMENT — a claim about the KIND of a test is a claim about bytes.
+    //
+    // `refusalDeniesObjecthood` therefore admits exactly ONE reason:
+    // `deliberation_frame`, whose predicate is a genuinely CLOSED list of 32
+    // explicit constructions, read rather than asserted. The full table and its
+    // measurement live at `objective-label.ts:REFUSAL_ANSWERS`, and both
+    // directions — plus the DISJUNCTION axis the first corpus was structurally
+    // blind to — are pinned in `goal-designation-provenance.test.ts`.
+    //
+    // ── WHAT IS AND IS NOT SAID ───────────────────────────────────────────
+    // `source_quote` STAYS: the user's verbatim is theirs and still reaches the
+    // inspector (`schema-v3.ts:1187` carries it for every recognised class), so
+    // nothing the user wrote is lost — only the DESIGNATION is withdrawn.
+    // `label_authored` is deliberately NOT set HERE: it answers *"did we write
+    // these characters?"* and at this point we did not — the deriver refused, so
+    // the label is still the user's own text. Two signals, two questions
+    // (trap 21); `MINTED_GOAL_PROVENANCE` sets it because its label is
+    // CEE-authored prose, and this one's is not.
+    //
+    // ⚠ NOT SET HERE ≠ NEVER SET, and the distinction became reachable at the
+    // rebase onto #1180. `boundEveryNodeLabel` (this module's return) shortens
+    // any label past 200 characters and stamps `label_authored: true` on a node
+    // that carries the verbatim — which a goal re-badged here DOES. So an
+    // over-long chosen span legitimately ends up `projector_structural` +
+    // `label_authored` + a whole `source_quote`, and all three are true at once:
+    // CEE chose the span, the display string is ours, the user's words survive.
+    // #1180's reviewed world had only `stated` goals carrying `source_quote`;
+    // this branch mints the second kind, so neither review saw the combination.
+    // It is pinned in `goal-designation-provenance.test.ts` with a discriminating
+    // pair proving the flag tracks the BOUND rather than the badge. Reachable,
+    // not hypothetical: the two longest real `deliberation_frame` goal quotes in
+    // the governed baseline are 178 and 159 characters.
+    //
+    // ⚠ ONE CONSEQUENCE, DISCLOSED RATHER THAN DISCOVERED: `completion.ts:444`
+    // skips `projector_structural` nodes in its destroyed-content guard, so a
+    // goal re-badged here leaves that guard's domain. Pinned by name in the
+    // spec so it is visible in the suite rather than silent.
+    // ⭐ TWO CONDITIONS, TWO QUESTIONS. `refusalDeniesObjecthood` asks whether
+    // this KIND of refusal is a designation verdict at all;
+    // `deliberationFrameOpensTheSpan` asks whether THIS SPAN's evidence is
+    // sentence-initial. A frame token merely PRESENT in a span is ordinary
+    // English — "Considering the runway, reach break-even by Q3" is an
+    // objective, not a deliberation — and the unanchored form told eight such
+    // spans the brief designated no objective.
+    const goalWasNeverDesignated =
+      kind === "goal" &&
+      !authoredLabel.authored &&
+      refusalDeniesObjecthood(authoredLabel.reason) &&
+      deliberationFrameOpensTheSpan(quote);
+
+    const prov: RecordProvenance = goalWasNeverDesignated
+      ? {
+          // The SAME constructor and the SAME class the fallback limb already
+          // uses (`goal-inference.ts:47`). One vocabulary for "the machine put
+          // this here" — a second spelling would be two authorities for one
+          // fact, which is the estate's dominant defect.
+          ...scaffoldingProvenance(GOAL_SPAN_CHOSEN_BY_CEE),
+          source_quote: quote,
+          brief_binding: briefBinding,
+        }
+      : {
+          provenance_class: "stated",
+          source_quote: quote,
+          brief_binding: briefBinding,
+          ...(authoredLabel.authored ? { label_authored: true } : {}),
+        };
     provenance[id] = prov;
 
     const node: ProjectedNode = {
@@ -2269,6 +2750,19 @@ function projectOnce(
     };
 
     const statedDirection = item.direction;
+    // ⭐ THE ABSENCE, DISCLOSED. Derived from the record alone: a limit was
+    // stated, a direction was given, and no usable threshold came with it.
+    if (kind === "constraint" && typeof item.value !== "number" && statedDirection !== undefined) {
+      dropped.push({
+        claim_index: -1,
+        claim_kind: STATED_ITEM_DROP_KIND,
+        label: quote,
+        node_id: id,
+        reason: "constraint_value_unstated",
+        from_ref: `stated_items[${index}]`,
+        stated_index: index,
+      });
+    }
     if (kind === "constraint" && typeof item.value === "number" && statedDirection === undefined) {
       // ⭐⭐ ROOT 2(a) — DO NOT GUESS A DIRECTION. ASK.
       //
@@ -2290,7 +2784,7 @@ function projectOnce(
       // says so. `enumerateCompletionAsk` turns this disclosure into a question.
       dropped.push({
         claim_index: -1,
-        claim_kind: "stated_item",
+        claim_kind: STATED_ITEM_DROP_KIND,
         label: quote,
         node_id: id,
         reason: "constraint_direction_unstated",
@@ -2307,6 +2801,27 @@ function projectOnce(
           ...(item.unit ? { unit: item.unit } : {}),
         },
       };
+      // ⭐⭐ THE DIRECTION GATE STAYS IN FRONT OF THE MODEL'S BINDING, NEVER
+      // BEHIND IT. This collection sits INSIDE the branch that already proved a
+      // direction was stated, so a constraint whose direction is unknown keeps
+      // its `constraint_direction_unstated` disclosure and binds NOTHING —
+      // whatever reference it carries. A floor shipped as a ceiling is a LIE and
+      // an unbound limit is a GAP; honouring a reference on an undirected limit
+      // would let the model's confidence about the TARGET smuggle past our
+      // refusal to guess the OPERATOR, which are two different questions.
+      if (item.applies_to_stated !== undefined || item.applies_to_claim !== undefined) {
+        statedConstraintBindings.push({
+          statedIndex: index,
+          nodeId: id,
+          node,
+          quote,
+          operator,
+          value: item.value,
+          unit: item.unit,
+          appliesToStated: item.applies_to_stated,
+          appliesToClaim: item.applies_to_claim,
+        });
+      }
     } else if (kind === "factor" && typeof item.value === "number") {
       node.data = {
         value: item.value,
@@ -2401,6 +2916,87 @@ function projectOnce(
       // no probability, which the contract itself calls honest; a guessed one
       // yields a confident wrong probability. Not symmetric harms, so not a
       // symmetric default (trap 22b).
+    } else if (kind === "goal" && item.value === undefined && item.role === "target") {
+      // ── ⭐⭐ THE TARGET THE MODEL PUT IN ITS QUOTE INSTEAD OF ITS FIELD ──
+      //
+      // MEASURED, 5 identical draws on the live staging build `50cb5d5f`
+      // (2026-09-14), brief "Given our goal of reaching £20k MRR within 12
+      // months while keeping monthly churn under 4%, should we increase the Pro
+      // plan price from £49 to £59…":
+      //
+      //   £20,000 registered as the goal's target ............ 0 / 5
+      //   goal carried NO threshold at all .................. 3 / 5
+      //   goal carried `raw: 12, unit: "months"` ............ 2 / 5   ⛔ the DEADLINE
+      //
+      // and in all 5 the goal node carried `source_quote: "reaching £20k MRR
+      // within 12 months"` — the user's own words, verbatim. The number was
+      // never lost; it never had a field to land in, because the model wrote
+      // the span and omitted the `value` it could have copied out of it. Two
+      // banked REAL emissions show the same shape and are the reason this is
+      // treated as the model's habit rather than one draw's accident:
+      // `fixtures/live-emission-round11-set12.json` item 0 is
+      // `{kind:"goal", source_quote:"15% ARR growth next year…", role:"target"}`
+      // — `role: "target"` asserted, `value` absent — while every `figure`
+      // beside it carries one.
+      //
+      // ── ⛔ WHY THIS IS NOT #1328's LABEL ROUTE, WHICH IS FORBIDDEN ──
+      // That route read the model-COMPOSED LABEL ("Reach £20k MRR Within 12
+      // Months") and attested its figure against ANY occurrence in the brief.
+      // The attestation scope was the whole brief, which is precisely why "We
+      // rejected the proposal to reach £64k MRR." still minted 64000 after four
+      // oscillating rounds and sixteen defects. Round 6 removed the write.
+      //
+      // This reads `source_quote` on a `stated_items[]` entry the model marked
+      // `kind: "goal"` — the grammar's own resolution of which words are the
+      // objective — and requires `role: "target"` EXPLICITLY. The model has
+      // therefore made both assertions itself: *these user words are the goal*,
+      // and *the role of this goal's number is target*. Nothing here decides
+      // which sentence is the target; it does arithmetic on the span the model
+      // designated. That is the remedy `goal-label-target.ts`'s own header names
+      // as KNOWN AND DUE — bind the attestation to a span the grammar resolved
+      // as a target, not to an occurrence of the figure.
+      //
+      // ── ⚠ STRICTER THAN THE BRANCH ABOVE, DELIBERATELY ──
+      // The valued branch accepts `goalValueIsATarget(item.role)`, which admits
+      // an UNSTATED role, because the model's own `value` corroborates it there.
+      // Here there is no corroboration, so an unstated role is refused. That
+      // keeps #1411's `DISCUSSION ONLY` and `WRONG TARGET` contrasts — both
+      // `{kind:"goal", source_quote}` with NO role — meaning exactly what they
+      // say, and it is pinned in both directions by the discriminating pair in
+      // `goal-target-from-stated-span.test.ts`.
+      const spanTarget = soleStatedQuantityInSpan(item.source_quote);
+      // ⚠ TWO QUANTITIES REFUSE, and that is not a corner: this very brief's
+      // goal span carries "£20k" and "12 months". The deadline is excluded by
+      // the scanner's own unit test, so ONE survives and the mint proceeds. A
+      // span stating two genuine targets ("£30k MRR and 4% churn") yields two,
+      // and the ask-don't-guess exit applies (ROADMAP 2.1051, trap 22f).
+      if (spanTarget !== undefined) {
+        // ⭐ THE QUOTE MUST BE THE USER'S. `bindStatedItemToBrief` is the
+        // estate's existing attestation primitive and is used here rather than
+        // a second containment rule (trap 12). The LOAD-BEARING limb is
+        // `isQuoteStatedInBrief`: a model that invents a span mints nothing.
+        // ⚠ Stated honestly — the magnitude limb is CORROBORATIVE ONLY here,
+        // because the value was read out of the same quote it is checked
+        // against, so it cannot discriminate. It is kept because the two
+        // scanners are independent and a disagreement should refuse, which is
+        // the safe direction; it is NOT evidence, and a reviewer should not read
+        // it as one (trap 13b — a guard agreeing with itself).
+        const spanBinding = bindStatedItemToBrief({
+          quote: item.source_quote,
+          value: spanTarget.value,
+          unit: spanTarget.unit,
+          brief,
+        });
+        if (bindingEarnsBriefClaim(spanBinding)) {
+          // The SAME writer as the valued branch. raw · cap · normalised ·
+          // frame · unit travel together from one derivation, or not at all —
+          // a second mint site would be a second authority on the denominator
+          // ISL divides by (trap 12), and `applyStatedGoalTarget` is bound to
+          // `node`, i.e. to the goal BY IDENTITY, never by a predicate another
+          // node could satisfy (trap 19).
+          applyStatedGoalTarget(node, spanTarget.value, spanTarget.unit);
+        }
+      }
     }
 
     // ⭐⭐ THE USER'S OWN STATUS QUO, CARRIED. `is_baseline` was structurally
@@ -2479,7 +3075,7 @@ function projectOnce(
       const valueLandedSomewhere = node.observed_state !== undefined;
       dropped.push({
         claim_index: -1,
-        claim_kind: "stated_item",
+        claim_kind: STATED_ITEM_DROP_KIND,
         label: quote,
         node_id: id,
         reason: valueLandedSomewhere
@@ -2606,7 +3202,7 @@ function projectOnce(
       // alternatives; leave them standing.
       if (
         claimIndices.length === 1 &&
-        !claimConflictsWithStatedParent(claims, parent, claimIndices[0]!)
+        !claimConflictsWithStatedParent(statedItems, claims, parent, claimIndices[0]!)
       ) {
         refinementParentStatedIndex.set(claimIndices[0]!, parent);
       }
@@ -2690,14 +3286,33 @@ function projectOnce(
     // has to infer provenance from a label or a value (trap 19).
     if (nodeKind === "option") optionClaimIndexById.set(id, index);
 
-    const basisIds = (claim.basis ?? [])
-      .filter((i) => Number.isInteger(i) && statedIdByIndex.has(i))
-      .map((i) => statedIdByIndex.get(i)!);
+    const basisIndices = (claim.basis ?? []).filter(
+      (i) => Number.isInteger(i) && statedIdByIndex.has(i),
+    );
+    const basisIds = basisIndices.map((i) => statedIdByIndex.get(i)!);
+    // The stated FIGURES behind those ids, conserved beside them. See
+    // `RecordProvenance.basis_figures` for why the ids alone are not enough.
+    const basisFigures = basisIndices
+      .map((i) => statedItems[i])
+      .filter(
+        (item): item is DraftStatedItem =>
+          item?.kind === "figure" && typeof item.value === "number",
+      )
+      .map((item) => ({
+        value: item.value as number,
+        ...(typeof item.unit === "string" && item.unit.length > 0 ? { unit: item.unit } : {}),
+        ...(typeof item.source_quote === "string" && item.source_quote.length > 0
+          ? { source_quote: item.source_quote }
+          : {}),
+      }));
 
     const prov: RecordProvenance = {
       provenance_class: "ai_inferred",
       basis: basisIds,
       unbased: basisIds.length === 0,
+      // Omitted entirely when the claim names no stated figure — absent means
+      // "unknown", never "excluded".
+      ...(basisFigures.length > 0 ? { basis_figures: basisFigures } : {}),
     };
     provenance[id] = prov;
 
@@ -2736,8 +3351,138 @@ function projectOnce(
       // keeps the field: removing it is a wire change for no gain, and an
       // unread optional property costs one slot, not a rejection.)
       if (typeof claim.value === "number") {
-        node.data = { value: claim.value };
-        node.observed_state = { value: claim.value };
+        // ⭐⭐ THE HONESTY HALF, SHIPPED IN THE SAME CHANGE AS THE ASK — exactly
+        // as v10 did when it stopped telling the model to withhold `sets_to`.
+        //
+        // ⚠⚠ MEASURED ON THE RAW RECORD SETS, before any projection or
+        // representation: across five banked live captures, 33 quantity claims
+        // and `value` set on ZERO of them, while `sets_to` was set on 28 causal
+        // links. The model puts a number on a LINK and never on a NODE — it
+        // says how much an option MOVES a factor and never what the factor IS.
+        // v10's docblock explains why, about its own mirror image of this:
+        // "THE MODEL WAS NOT FAILING TO COMPLY; IT WAS COMPLYING."
+        //
+        // ⛔ SO THE ASK CANNOT SHIP ALONE. Until now a claim `value` carried NO
+        // provenance at all, which leaves exactly two bad outcomes once the
+        // model starts supplying one: our estimate is displayed as the user's
+        // fact, or it is displayed as nobody's and does not count where a
+        // user-stated parameter is what unlocks a comparison.
+        //
+        // ⭐ EARNED THE SAME WAY `bindDirectStatedMagnitude` earns it for a
+        // `sets_to`: the stamp is `explicit` ONLY when the number the model
+        // asserted equals a figure it CITED — i.e. the user gave that number for
+        // that quantity. Anything else sets nothing and falls to the safe
+        // `ai_inferred`, which is what the header calls the projector's
+        // node-level provenance honesty.
+        //
+        // ⚠ AND NOTE WHAT DECIDES WHAT. The MODEL supplies the number; `basis`
+        // decides only ATTRIBUTION. Reading a magnitude OUT of `basis` is the
+        // fabrication refuted and pinned in
+        // `claim-carries-its-cited-figure.test.ts` — it put "Current Subscriber
+        // Count = £20,000" on a graph, because `basis` means built on, not equal
+        // to. This reads the same array for a different question.
+        // ⛔⛔ NO ATTRIBUTION IS EARNED HERE, AND THE ATTEMPT WAS REFUTED BY
+        // INDEPENDENT REVIEW BEFORE IT SHIPPED.
+        //
+        // The first version of this block stamped `extractionType: "explicit"`
+        // and borrowed the cited figure's unit whenever `claim.value` EQUALLED a
+        // figure in `basis`. The reviewer's exact reproductions:
+        //   · "Current Subscriber Count" stamped explicit at 49 £/month from a
+        //     citation of a £49 PRICE — same number, DIFFERENT SUBJECT;
+        //   · a CURRENT level of 59 stamped explicit from a quote proposing 59 —
+        //     same number, DIFFERENT ROLE.
+        //
+        // Numeric equality plus a citation proves neither. Earning
+        // `brief_extraction` needs subject, quantity, unit AND the
+        // current/proposed/target/limit role all to match, and `basis` carries
+        // none of that — it means "built on", exactly as the sibling refutation
+        // in `claim-carries-its-cited-figure.test.ts` established when the same
+        // field was misread as a magnitude. I closed that hole and opened its
+        // twin one level up, in ATTRIBUTION rather than in value.
+        //
+        // ⭐ SO THE VALUE IS RECORDED AND STAYS OURS. No `extractionType` means
+        // the safe `ai_inferred`, and no unit is borrowed from a figure whose
+        // subject was never established. That is honest, and it deliberately
+        // does NOT lift a user-authorship permission via an inferred value.
+        // Earning the attribution needs an attested subject relationship this
+        // record set does not carry; it is not a stamp to guess at.
+        // ⭐ THE DECLARED UNIT IS CARRIED, NOTHING IS INFERRED. `data.unit` is
+        // exactly what `nodeDeclaredUnit` reads, so declaring it here is what
+        // lets SAFETY 2 refuse a £ limit welded to a %-measured factor. The
+        // refuted earlier attempt BORROWED this from a cited figure; this takes
+        // only what the model said, and still earns no `extractionType`.
+        node.data = { value: claim.value, ...(claim.unit ? { unit: claim.unit } : {}) };
+        node.observed_state = { value: claim.value, raw_value: claim.value };
+      } else if (claim.unit !== undefined) {
+        // ⛔⛔ A UNIT WITHOUT A LEVEL, AND THIS IS THE COMMON CASE — the branch
+        // whose absence made grammar v9 nearly a no-op twenty minutes after it
+        // shipped.
+        //
+        // v9 added `unit` to the claim, and the write above carried it — but ONLY
+        // inside `typeof claim.value === "number"`. Measured on the banked
+        // records: **21 of 22 factor claims carry no value at all.** So in 21 of
+        // 22 cases the model could declare a unit and the projector would drop
+        // it, leaving `data` undefined and `nodeDeclaredUnit` returning
+        // undefined — exactly the state v9 existed to end.
+        //
+        // ⚠ MY OWN ADVERSARIAL REVIEW MISSED IT because every case I wrote set a
+        // value alongside the unit. That is the same one-door corpus that has
+        // cost this estate repeatedly: I tested unit-WITH-value and never
+        // unit-WITHOUT-value, which is the overwhelmingly common shape.
+        //
+        // Knowing what a quantity is MEASURED IN is useful even when nobody
+        // knows what it currently SITS AT: it is what lets a stated £ limit be
+        // refused against a %-measured factor, and refusing that weld does not
+        // require a level.
+        node.data = { unit: claim.unit };
+      }
+
+      // ⭐⭐ v10 — THE DECLARED SCALE, STAMPED FROM A DECLARATION AND NEVER FROM
+      // A MAGNITUDE. This is the consumer that stops `value_scale` being a dark
+      // grammar field, and it is deliberately OUTSIDE the `typeof claim.value
+      // === "number"` guard above for exactly the reason that branch's own
+      // comment gives: 21 of 22 factor claims carry no value, and v9's unit
+      // carriage was nearly a no-op for a whole release because it sat inside
+      // it. Repeating that mistake one field along would be indefensible.
+      //
+      // ⚠ AND IT IS MEANINGFUL WITHOUT A VALUE, which is the case that matters
+      // most. `declared_scale` is a property of THE FACTOR'S MEASUREMENT SCALE,
+      // not of one number — so a factor the model gave a RANGE for and no level
+      // is precisely where the declaration earns its keep. Measured on two live
+      // v202 draws: 2 of 9 drafted factors take the `prior` display path
+      // (`Team Churn Rate` `{uniform, 0.02, 0.22}`, unit absent), and that path
+      // is where `display-value.ts` sniffs the scale from the bounds today.
+      //
+      // ⭐ THE CARRIER IS NODE-LEVEL BECAUSE THAT IS WHAT THE READER READS.
+      // `transforms/schema-v3.ts:660` passes `anyNode.declared_scale` into
+      // `synthesiseRangeDisplayValue`, and `display-value.ts:507-515` carries a
+      // DATED DELETION CONDITION addressed to this change: *"The `else` limb
+      // below exists ONLY because `declared_scale` is stamped by the repair
+      // stage and NOT by the draft/edit transform … WHEN THE MODEL-AUTHORED
+      // PRODUCER STAMPS `declared_scale` … THE ENTIRE `else` BRANCH IS DELETED,
+      // NOT EXTENDED."* That deletion is NOT taken here: it changes displayed
+      // values and belongs in its own reviewed change, against a corpus.
+      //
+      // ⛔ WHY NOT DERIVE IT FROM THE MAGNITUDES, which is free and was my first
+      // instinct. `display-value.ts:541` states the standing condition from the
+      // consumer side: *"if any producer ever stamps `declared_scale` WITHOUT
+      // deriving the prior from the same value, this read must be re-verified
+      // before it is trusted."* A magnitude sniff is VISIBLY a guess; a
+      // declaration is TRUSTED. Laundering the first into the second is strictly
+      // worse than leaving the field absent, and the contract agrees that
+      // absence is the safe state: *"A consumer MUST NOT treat absence as
+      // `unit_interval`: that is the unsound guess 2.193 exists to retire."*
+      // So: the model declares, or nothing is stamped.
+      //
+      // ⚠ NOT A PERMISSION, AND NO `extractionType` IS EARNED — the same
+      // boundary the unit carriage above holds. Declaring a scale says what the
+      // number means, never whose number it is; the value stays `ai_inferred`.
+      if (claim.value_scale !== undefined) {
+        node.declared_scale = claim.value_scale;
+        node.observed_state = {
+          ...(node.observed_state ?? {}),
+          declared_scale: claim.value_scale,
+        };
       }
     }
     nodes.push(node);
@@ -2781,6 +3526,181 @@ function projectOnce(
     if (claimIdx !== undefined) return `claims[${claimIdx}]`;
     return undefined;
   };
+
+  // ── Pass 2b: a stated `constraint` that says WHAT IT LIMITS ───────────────
+  //
+  // ⭐⭐ THE DEFECT THIS CLOSES, wire-witnessed. A user writes "…keeping monthly
+  // churn under 4%". The model labels the relevant node "Subscriber Churn Rate"
+  // — so it plainly knows they are the same quantity. A regex then minted the
+  // target id `fac_monthly_churn`, and a string-containment matcher asked
+  // whether `"subscriber_churn_rate"` contains `"monthly_churn"`. It does not.
+  // The limit was dropped and the user was told it matched nothing on the model.
+  // Characterised across draws: THE BINDER WORKED WHEN THE DRAFTER ECHOED THE
+  // USER'S PHRASING AND FAILED WHEN IT IMPROVED ON IT.
+  //
+  // The root cause was not the matcher's quality — it was that the record
+  // grammar had fields for a limit's value, unit, direction and source quote and
+  // NO FIELD FOR WHAT IT APPLIES TO. The model had nowhere to write down what it
+  // already knew. This pass reads that field.
+  //
+  // ⛔ NOT A BETTER STRING MATCHER, AND DELIBERATELY SO. Three candidates
+  // (alias-to-labels, head-noun, all-tokens) were built and adversarially tested
+  // and EVERY ONE wrong-binds somewhere. That ruling is settled and this pass
+  // does no string comparison of any kind.
+  //
+  // ⭐ RUNS HERE, between the node passes and the edge pass, for two reasons that
+  // are both about not blaming the model for our own sequencing: every minted id
+  // exists by now (a constraint may point at a claim declared after it), and any
+  // id remapping below lands BEFORE the first edge is built, so a link into a
+  // withdrawn constraint resolves onto its target instead of reporting
+  // `ref_out_of_range` for a reference that was perfectly good.
+  for (const binding of statedConstraintBindings) {
+    const resolved = resolveEndpoint(binding.appliesToStated, binding.appliesToClaim);
+    const toRef = renderRef(binding.appliesToStated, binding.appliesToClaim);
+    // ⭐ EVERY REFUSAL BELOW IS DISCLOSED AND LEAVES THE PROJECTION EXACTLY AS
+    // IT WOULD HAVE BEEN WITH NO REFERENCE AT ALL — which is the precise claim,
+    // and it is pinned by a same-run comparison rather than asserted.
+    //
+    // ⚠ THE LOOSER SENTENCE THAT WAS HERE FIRST SAID "the constraint keeps its
+    // own node", AND THAT IS NOT ALWAYS TRUE — measured, not assumed. An
+    // unconnected `constraint` node is PRUNED by the connectivity pass with
+    // `unconnected_to_goal`, so a stated limit the model does not link to the
+    // goal reaches the graph NOWHERE, with or without this change. Refusing
+    // therefore costs the user nothing they had a moment ago, which is the
+    // honest claim; it does NOT mean their limit is safe on the graph.
+    const refuse = (reason: DroppedRecordRef["reason"]): void => {
+      dropped.push({
+        claim_index: -1,
+        claim_kind: STATED_ITEM_DROP_KIND,
+        label: binding.quote,
+        node_id: binding.nodeId,
+        reason,
+        from_ref: `stated_items[${binding.statedIndex}]`,
+        stated_index: binding.statedIndex,
+        ...(toRef !== undefined ? { to_ref: toRef } : {}),
+      });
+    };
+
+    if (resolved.reason !== undefined || resolved.id === undefined) {
+      // `ambiguous_ref` (both namespaces named at once) and `ref_out_of_range`
+      // (an index that reached no minted node) arrive here from the SAME
+      // resolver the causal-link endpoints use, and both are already cases in
+      // the completion ask's switch — so an unresolved reference becomes a
+      // follow-up question with no new machinery.
+      refuse(resolved.reason ?? "missing_ref");
+      continue;
+    }
+    const target = nodes.find((n) => n.id === resolved.id);
+    if (target === undefined) {
+      refuse("ref_target_not_a_node");
+      continue;
+    }
+    // SAFETY 1 — the target must be a MEASURED quantity. Derived from the one
+    // shared `MINTABLE_TARGET_KINDS`, never re-spelled here.
+    if (!MINTABLE_TARGET_KINDS.has(target.kind)) {
+      refuse("constraint_target_not_measurable");
+      continue;
+    }
+    // SAFETY 2 — the unit must SURVIVE and be CHECKED. It survives because
+    // `binding.unit` is carried onto the row below unchanged, in the user's own
+    // units (the convention `observed_state` already uses: "PLoT normalises").
+    // It is CHECKED here, and only ever to REFUSE: a percentage must not weld
+    // to a currency node.
+    const limitFamily = constraintUnitFamily(binding.unit);
+    const targetFamily = constraintUnitFamily(nodeDeclaredUnit(target));
+    if (limitFamily !== "unknown" && targetFamily !== "unknown" && limitFamily !== targetFamily) {
+      refuse("constraint_target_unit_mismatch");
+      continue;
+    }
+
+    // ── BOUND ──────────────────────────────────────────────────────────────
+    //
+    // ⚠⚠ `value_frame` IS DELIBERATELY NOT STAMPED, AND THAT COSTS SOMETHING.
+    // The contract is explicit that the field is never defaulted, because "a
+    // defaulted frame is a manufactured attestation" and only a producer that
+    // knows its own minting arithmetic may stamp it. This projector does not:
+    // the grammar's `constraint` has `direction` and `value` and no way to say
+    // whether the number is a LEVEL to stay under or a DELTA to stay within, so
+    // a stamped "level" would be a guess on exactly the axis a wrong answer
+    // makes a 100x error. The honest consequence, stated rather than glossed:
+    // an unframed row leaves ISL's `constraint_analysis` withheld with
+    // `CONSTRAINT_FRAME_UNSPECIFIED` unless a frame-bearing producer speaks for
+    // the same node+operator — in which case `mergeWithProtectedFrame` carries
+    // that deterministic frame onto this row, which is the collaboration that
+    // merge was built for. Earning the frame outright needs a new grammar field
+    // and its own measurement; it is NOT a line to add here.
+    goalConstraints.push({
+      constraint_id: generateConstraintId(target.id, binding.operator),
+      node_id: target.id,
+      operator: binding.operator,
+      value: binding.value,
+      ...(binding.unit !== undefined ? { unit: binding.unit } : {}),
+      // The user's own words, bounded to the contract's 200-char maximum so a
+      // long quote cannot fail the schema and take the whole row with it.
+      source_quote: binding.quote.slice(0, 200),
+      // `explicit`: the user stated this limit and the MODEL named its target.
+      // Not `inferred` — nothing here was guessed; the alternative to a stated
+      // reference was a refusal, not an inference.
+      provenance: "explicit",
+    });
+    // The carrier this bind would license a later lane to withdraw. Tracked so
+    // the postcondition below can police that withdrawal — see pass 2d.
+    boundCarriers.push(binding);
+
+    // ⛔⛔ THE STANDALONE CONSTRAINT NODE IS *NOT* WITHDRAWN, AND THAT IS THE
+    // WHOLE ORDERING CONSTRAINT OF THIS CHANGE.
+    //
+    // ⚠⚠ WHAT WAS HERE BEFORE, AND WHY IT WAS DESTRUCTIVE — MEASURED, NOT
+    // ARGUED. This block used to splice the constraint node out of `nodes` and
+    // repoint the stated index, on the stated ground that "the limit now lives
+    // ON the quantity it bounds". IT DOES NOT. The row above is written to
+    // `RecordProjection.goalConstraints`, a SIBLING of `.graph` — and the live
+    // draft path copies ONLY `.graph` (`adapters/llm/anthropic.ts`,
+    // `rawJson = { ...activeProjection.graph }`). Contrast-controlled sweep of
+    // the same tree: the sibling `.dropped` is read by 12 non-test files;
+    // `RecordProjection.goalConstraints` is read by NONE outside this file.
+    // (`ctx.goalConstraints` in `unified-pipeline` is a DIFFERENTLY-SCOPED FIELD
+    // OF THE SAME NAME with many readers, and nothing joins the two — conflating
+    // them is exactly what made the removal look safe. Trap 21: two names, two
+    // questions.)
+    //
+    // A/B on this projector, two arms differing in ONE key, the constraint
+    // LINKED to the goal so the connectivity prune is not the variable:
+    //   without the field → 3 nodes, incl. `constraint` "keeping monthly churn
+    //                        under 4%" carrying `observed_state.value 4`,
+    //                        `unit "%"`, `operator "<="`
+    //   with    the field → 2 nodes. THAT NODE IS GONE. `dropped` EMPTY.
+    //                        `graph.goal_constraints` undefined.
+    // The user's own stated limit left the product with nothing disclosed — the
+    // precise silent loss this change exists to end, manufactured by the change
+    // itself.
+    //
+    // ⛔ THE RULE, and it is an ORDERING rule rather than a better splice:
+    // A NODE CARRYING A USER-STATED LIMIT MAY ONLY BE REMOVED ONCE THAT LIMIT IS
+    // DEMONSTRABLY CARRIED SOMEWHERE A CONSUMER READS. Until then, KEEP THE NODE.
+    //
+    // So the row is still MINTED above — the grammar, the reference resolution
+    // and every safety gate are exactly as designed, and the artefact the
+    // carrier lane needs exists — but nothing is taken away. The change is
+    // therefore genuinely additive: the graph a user receives is byte-identical
+    // to the one they receive today, which is what "inert until the carrier
+    // lands" has to MEAN. Pinned, not asserted, by a same-run byte comparison in
+    // `__tests__/constraint-applies-to-binding.test.ts` ("NO SILENT LOSS — a
+    // SUCCESSFUL bind leaves the graph byte-identical to the same records with
+    // no reference").
+    //
+    // ⭐ WHEN THE CARRIER LANDS (`goalConstraints` carried across
+    // `anthropic.ts` alongside `.graph`, reaching `ctx.goalConstraints`), the
+    // removal becomes correct — AND IT MUST ARRIVE WITH A DISCLOSURE. That is
+    // not left to a comment anyone must remember: the invariant test
+    // "NO SILENT LOSS INVARIANT — every bound limit is on the graph as a node,
+    // or is disclosed" is written against the RULE rather than against today's
+    // code, so re-enabling a splice without disclosing REDs it.
+    //
+    // No repoint is needed while the node stays: a `causal_link` into this
+    // constraint still resolves onto the constraint itself, exactly as it does
+    // today, so no good reference is turned into a dropped one.
+  }
 
   const kindAtLinkTime = new Map(nodes.map((n) => [n.id, n.kind as string]));
 
@@ -3141,10 +4061,70 @@ function projectOnce(
         const claim = origin === undefined ? undefined : claims[origin.index];
         const isDirectStatedOption =
           claim?.from_stated !== undefined && statedItems[claim.from_stated]?.kind === "option";
-        const binding =
+        const directBinding =
           claim === undefined
             ? undefined
             : bindDirectStatedMagnitude({ claim, edgeId: edge.id, statedItems, claims, brief });
+        // ⭐⭐ AN UNCITED MAGNITUDE IS OURS ON *EVERY* PATH, NOT ONLY THE
+        // DIRECT-STATED ONE. `bindDirectStatedMagnitude` opens with
+        // `if (claim.from_stated === undefined …) return undefined`, so it
+        // correctly declines a link that arrives via `from_claim` — which is
+        // exactly what a MERGED REFINEMENT's option→factor link is once
+        // `projectOnce` folds "one alternative under two names" onto its stated
+        // parent. Nothing else picked it up, so the magnitude reached
+        // `interventions` with NO `intervention_details` entry: the class-1
+        // defect ("absence represented as value") in the field the analysis
+        // ranks options on, in the very shape the direct-stated stamp above was
+        // written to close. Measured by executing the projector: a refinement
+        // contributing a factor the parent does not touch produced
+        // `interventions` with two keys and `intervention_details` with one.
+        //
+        // ⚠ SCOPED TO `!isDirectStatedOption` ON PURPOSE, AND THAT GUARD IS
+        // LOAD-BEARING. The direct-stated arm has its OWN deliberate `undefined`
+        // return — when the value IS a stated figure, so the extractor may still
+        // earn it brief authority via `classifyAmountAgainstBrief`. Stamping
+        // there would demote a user's own figure to our estimate: this defect's
+        // mirror image, and strictly worse. The two returns look identical from
+        // here and mean opposite things, so the discriminator is the CALLER's
+        // already-computed `isDirectStatedOption`, never the absent binding.
+        //
+        // ⚠ `cee_hypothesis`, never brief authority: a refinement's magnitude is
+        // model-authored by construction. And the receipt deliberately avoids the
+        // `Direct causal value …` prefix that `transforms/analysis-ready.ts:833`
+        // turns into a NON-WAIVABLE `ambiguous_value` refusal — an honest estimate
+        // is disclosed, not refused (trap 23).
+        //
+        // ⚠⚠ THE RECEIPT ASSERTS ONLY WHAT THE GUARD ESTABLISHES, AND THAT IS
+        // NARROWER THAN IT FIRST READ. `bindDirectStatedMagnitude` has TWO early
+        // returns — `from_stated` absent, and `from_stated` present but pointing at
+        // a NON-OPTION stated item — and `!isDirectStatedOption` is true for BOTH.
+        // An earlier draft of this sentence also claimed the effect "cites no
+        // stated figure", which the guard does NOT establish: a claim whose
+        // `from_stated` names a `figure` cites one. Since this `reasoning` is
+        // provenance carried to the wire (`schema-v3.ts:1277`) and this class
+        // previously produced NO entry at all, that would have replaced SILENCE
+        // with a sentence that can be FALSE — the lie direction this module's
+        // doctrine at :1738-1752 exists to prevent. Found in review.
+        //
+        // ⚠ AND THE SECOND CLASS IS NOT GIVEN ITS OWN BRANCH ON PURPOSE. Probing
+        // `from_stated` at a `figure`, a `goal` and a `constraint` produced ZERO
+        // option→factor edges in every case — the ref resolves to a non-option
+        // node, so it never reaches this loop. Three probes are not a proof of
+        // unreachability, which is exactly why the SENTENCE is narrowed rather
+        // than the class special-cased: a branch for a case that cannot be
+        // constructed is a branch no test can kill, the same "guard that cannot
+        // fail" shape this pass already deleted once (see the `undefined` note
+        // below). Narrow the claim; do not add unreachable code to justify it.
+        const binding =
+          directBinding !== undefined
+            ? directBinding
+            : claim !== undefined && !isDirectStatedOption
+              ? ({
+                  raw_value: setsTo,
+                  source: "cee_hypothesis",
+                  reasoning: `Olumi estimate via edge ${edge.id}; this option\u2192factor effect is not bound to a stated option record`,
+                } as const)
+              : undefined;
         candidate = {
           edgeId: edge.id,
           setsTo,
@@ -3262,6 +4242,149 @@ function projectOnce(
         typeof observed?.value === "number" && Number.isFinite(observed.value)
           ? observed.value
           : undefined;
+      // ⛔⛔ WITHHOLD A MAGNITUDE AUTHORED BEFORE THE COMPLETION PASS once
+      // completion has authored one on the SAME factor — see
+      // `option_magnitude_scale_unreconciled`. Runs BEFORE the frame is derived,
+      // so the withheld value never contributes to it.
+      if (completionBoundary !== undefined) {
+        // ⛔⛔ BIND BY THE WHOLE EDGE SET, NEVER BY THE FIRST MATCH. An
+        // option→factor pair can carry MORE THAN ONE edge — a merged refinement
+        // repoints its links onto the option it merged into, so a pass-1 edge and
+        // a completion-authored edge can name the same pair. `edges.find` picked
+        // whichever came first, so a value the completion had just supplied was
+        // judged by a pass-1 edge and withheld: `option-framing-adapter` went red
+        // on "accepted completion must recover the original question option ID".
+        //
+        // The magnitude in `interventions` is the LATEST writer's, so the honest
+        // question is "did the completion author ANY edge for this pair?" — if it
+        // did, the value is completion-authored and stays. Only a pair whose
+        // edges are ENTIRELY pass-1 can be withheld.
+        const originsOf = (optId: string): number[] =>
+          edges
+            .filter((e) => e.from === optId && e.to === factor.id)
+            .map((e) => claimOriginByEdgeId.get(e.id)?.index)
+            .filter((i): i is number => typeof i === "number");
+        const carried = optionNodes3d
+          .map((opt) => ({ opt, v: opt.data.interventions[factor.id], origins: originsOf(opt.id) }))
+          .filter(
+            (x): x is { opt: typeof optionNodes3d[number]; v: number; origins: number[] } =>
+              typeof x.v === "number" && Number.isFinite(x.v) && x.origins.length > 0,
+          );
+        const authoredByCompletion = (x: { origins: number[] }): boolean =>
+          x.origins.some((i) => i >= completionBoundary);
+        // ⛔⛔ SPANNING THE BOUNDARY IS NECESSARY AND NOT SUFFICIENT — measured,
+        // after shipping the boundary-only rule and watching it misfire.
+        // `option-framing-adapter` carries a factor whose three magnitudes are
+        // 0.4 (completion-authored) beside 0.8 and 0.6 (pass 1): the completion
+        // simply added one more option to an already-coherent unit-interval set.
+        // A boundary-only rule withheld two perfectly good magnitudes there.
+        //
+        // ⭐ SO THE TEST IS THE CONJUNCTION, and that is what makes it safe where
+        // each half alone was refuted. Magnitude ALONE was refuted by penny
+        // pricing (£0.50 beside £50,000 in ONE pass is a real strategy). The
+        // boundary ALONE was refuted by the case above. Together they name
+        // exactly the observed harm: a set that crosses the pass boundary AND
+        // diverges in scale across it — 0.85 beside £80,000 and £120,000, three
+        // orders of magnitude, which no single quantity plausibly spans within
+        // one draft. Penny pricing is single-pass, so it can never reach this
+        // test at all, whatever its ratio.
+        // ⛔⛔ COMPARE THE EXTREMES OF THE WHOLE SET, NOT THE MAXIMUM OF EACH
+        // SIDE — and compare them SYMMETRICALLY. The maxima form shipped first
+        // and independent review named exactly what it cannot see:
+        //
+        //   (b) REVERSED ORDER. Native amounts in pass 1, the normalised value
+        //       from completion: {80000 @pass1, 0.85 @completion}. The maxima
+        //       ratio is 0.85/80000 ≈ 1e-5, nowhere near 1000, so the identical
+        //       clash went unreported purely because it arrived the other way
+        //       round. A rule that only looks for LATER-BIGGER is answering
+        //       "did completion inflate?" when the question is "do these
+        //       reconcile?" — and the second question has no direction.
+        //
+        //   (c) MASKING BY A LARGE SIBLING. {0.85 @pass1, 80000 @pass1,
+        //       120000 @completion}: maxima give 120000/80000 = 1.5 and the
+        //       0.85 — the actually-unreconciled value — is invisible, because
+        //       `Math.max` on its own side discarded it before the comparison.
+        //       A detector that reduces each side to one number cannot see a
+        //       value that is not that number.
+        //
+        // ⭐ BOTH ARE THE SAME DEFECT: reducing to per-side maxima throws away
+        // the quantity being asked about. The span of a SET is max/min over the
+        // set, and the boundary question is whether that span is straddled —
+        // so take the global extremes and ask which side each came from. Order
+        // stops mattering (fixes b) and no value is discarded before the
+        // comparison (fixes c). The 1000 constant is untouched: this changes
+        // WHICH numbers are compared, not how far apart they must be.
+        //
+        // The two live refutations still hold, and that is the point of stating
+        // them as the precondition rather than the outcome:
+        //   · single-pass penny pricing (£0.50 and £50,000 both pass 1) puts
+        //     BOTH extremes on the same side ⇒ never fires, at any ratio;
+        //   · `option-framing-adapter` (0.4 completion, 0.8/0.6 pass 1) straddles
+        //     but spans only 2x ⇒ never fires.
+        const withSide = carried.map((x) => ({
+          mag: Math.abs(x.v),
+          fromCompletion: authoredByCompletion(x),
+        })).filter((x) => x.mag > 0);
+        let lo = withSide[0];
+        let hi = withSide[0];
+        for (const x of withSide) {
+          if (lo === undefined || x.mag < lo.mag) lo = x;
+          if (hi === undefined || x.mag > hi.mag) hi = x;
+        }
+        const spansBoundary =
+          lo !== undefined &&
+          hi !== undefined &&
+          lo.fromCompletion !== hi.fromCompletion &&
+          hi.mag / lo.mag >= 1000;
+        if (spansBoundary) {
+          // ⛔⛔ DISCLOSE, DO NOT DELETE — AND THIS IS THE FOURTH SHAPE OF THIS
+          // RULE, WITH THE FIRST THREE REFUTED BY EXECUTION.
+          //   1. magnitude alone → refuted by `projector-scale-projection`:
+          //      £0.50 penny pricing beside £50,000 in ONE pass is a real strategy.
+          //   2. the same with zero excluded → still refuted, and it also deleted
+          //      a legitimate £0 status quo.
+          //   3. the pass boundary alone → refuted by `option-framing-adapter`:
+          //      0.4 from completion beside 0.8 and 0.6 from pass 1 is a coherent
+          //      set a boundary rule wrongly stripped.
+          //   4. the conjunction → refuted by independent review: put penny
+          //      pricing ACROSS the boundary (£0.50 in pass 1, £50,000 from
+          //      completion) and it deletes the legitimate £0.50. Reproduced
+          //      before accepting it; the £0.50 came back `undefined`.
+          //
+          // ⭐ SO THE DETECTOR STAYS AND THE REMEDY CHANGES. I cannot separate a
+          // convention clash from a genuine wide-scale quantity using magnitude
+          // and pass origin alone — four attempts say so, not one. What I CAN do
+          // without guessing is say that the scales did not reconcile. Review's
+          // own words were "disclose unresolved scales rather than guessing or
+          // dropping whole useful proposals"; I read "dropping proposals" as
+          // licence to drop the NUMBER, and it was not.
+          //
+          // ⚠ WHAT THIS DOES NOT FIX, STATED PLAINLY: the live £0.85 still
+          // normalises to ~4e-06 and can still read as free. Disclosure makes
+          // that visible to a consumer instead of silent. Choosing what the
+          // product then DOES about the ranking is a decision with an owner, not
+          // a guess for this function to make.
+          // ⛔⛔ NAME EVERY MAGNITUDE ON THE FACTOR, NOT THE PASS-1 ONES. The
+          // first form disclosed only the earlier side, which is precisely the
+          // "silently favouring completion" review warned against: it asserts
+          // the completion's number is the sound one, and I have no evidence for
+          // that. Four refuted shapes say I cannot tell WHICH value is wrong —
+          // so the honest object of the disclosure is THE SET THAT DID NOT
+          // RECONCILE, and a consumer reading it is told that and nothing more.
+          // Nothing is deleted either way, so naming all of them loses no data.
+          for (const x of carried) {
+            dropped.push({
+              claim_index: Math.min(...x.origins),
+              claim_kind: "claim",
+              label: `${String(x.opt.label)} → ${String(factor.label)}`,
+              node_id: x.opt.id,
+              reason: "option_magnitude_scale_unreconciled",
+              value: x.v,
+            });
+          }
+        }
+      }
+
       const magnitudes: number[] = baseline !== undefined ? [baseline] : [];
       for (const opt of optionNodes3d) {
         const v = opt.data.interventions[factor.id];
@@ -3593,12 +4716,104 @@ function projectOnce(
     }
   }
 
+  // ── Pass 2c: a bound limit whose TARGET did not survive ──────────────────
+  //
+  // ⚠⚠ CAUGHT BY PROBING MY OWN CLAIM, AND IT WAS FALSE. Pass 2b's note says the
+  // bound `node_id` is on the graph "by construction" because it was minted in
+  // the same pass. That is true AT BIND TIME and NOT true at the end: the
+  // connectivity prune runs AFTER, and it withdraws a `factor` that never
+  // reaches the goal. Measured — a constraint bound to an unconnected factor
+  // left a row naming a node the graph no longer carried.
+  //
+  // ⭐ WHY THAT IS THE WORST CASE AND NOT A COSMETIC ONE. Binding WITHDREW the
+  // standalone constraint node. So an orphan row means the limit is gone from
+  // the graph AND gone from the constraint list — the user's stated limit
+  // vanishes with nothing but a downstream `llm_dropped` warn to show for it,
+  // which is precisely the silent-loss failure this whole change exists to end.
+  //
+  // The row is therefore reconciled against the FINAL node set and, where the
+  // target is gone, DISCLOSED with the same reason the target itself carries.
+  // `unconnected_to_goal` is honest here and is deliberately not turned into a
+  // question: `enumerateCompletionAsk` already declines to ask about it, on the
+  // measured ground that asking is pressure to invent a causal link.
+  const survivingNodeIds = new Set(nodes.map((n) => n.id));
+  const boundLimits: GoalConstraintT[] = [];
+  for (const row of goalConstraints) {
+    if (survivingNodeIds.has(row.node_id)) boundLimits.push(row);
+    // ⭐ NO DISCLOSURE IS PUSHED HERE, AND THAT IS A MEASUREMENT RATHER THAN AN
+    // OMISSION. Pass 2b no longer withdraws the standalone constraint node, so
+    // the user's stated limit is NOT lost when its target is pruned — it is
+    // still on the graph as its own node, carrying its operator, value and
+    // unit. And in the case where the constraint is itself unconnected, the
+    // connectivity prune ALREADY discloses it, more richly than this loop could:
+    // measured on this projector with no reference at all, `dropped` carries
+    // `{ label: "keeping monthly churn under 4%", reason: "unconnected_to_goal",
+    // value: 4, unit: "%" }`. A second entry for the same event would be a
+    // duplicate, and an entry claiming the limit was lost while it sits on the
+    // graph would be false — confident wrongness is worse than silence, and
+    // here silence is not even the alternative.
+    //
+    // ⛔ WHAT MUST COME BACK WITH A FUTURE SPLICE. Re-enable the withdrawal in
+    // pass 2b and this branch becomes a REAL loss that MUST be disclosed. That
+    // obligation is not parked in this comment: the invariant test "NO SILENT
+    // LOSS INVARIANT" is written against the rule, so it REDs the moment a
+    // removal happens without a disclosure.
+  }
+
+  // ── Pass 2d: THE ORDERING RULE, MADE EXECUTABLE ──────────────────────────
+  //
+  // ⛔⛔ NOTHING IS REMOVED UNLESS IT IS DISCLOSED. Stated as an invariant a few
+  // lines up is a comment; stated here it is a POSTCONDITION THAT ACTS.
+  //
+  // ⚠ WHY A COMMENT WAS NOT ENOUGH, and it is this estate's most expensive
+  // defect class. The rule "a node carrying a user-stated limit may only be
+  // removed once that limit is carried somewhere a consumer reads" is exactly
+  // the kind of rule a later author, holding a green suite and a plausible
+  // reason, removes in one line. A HAND-MAINTAINED RULE DRIFTS SILENTLY AND THE
+  // DRIFT ALWAYS READS AS GREEN (trap 12). So the rule is derived and enforced
+  // from the projection itself on every single run.
+  //
+  // ⭐ THE FAILURE BEHAVIOUR IS PRESERVE, NOT CRASH AND NOT DISCARD. Throwing
+  // here would turn a representation bug into a dead draft — trading a silent
+  // loss for a loud total one, which is the same trade the seam's
+  // `not_a_record_set` was making over an optional field. So an undisclosed
+  // withdrawal is UNDONE: the original node goes back, exactly the object that
+  // was minted, with its operator, value and unit.
+  //
+  // ⭐ AND IT DOES NOT BLOCK A LEGITIMATE FUTURE WITHDRAWAL — it prices it. Once
+  // `goalConstraints` genuinely reaches a consumer, a lane may withdraw the
+  // standalone node, and this postcondition lets that through THE MOMENT the
+  // withdrawal is accompanied by a `dropped` entry the user can read. Removal is
+  // permitted; UNDISCLOSED removal is not.
+  //
+  // ⚠ WHAT IT DELIBERATELY DOES NOT DO: it does not second-guess the
+  // connectivity prune. A constraint the prune withdraws is already disclosed by
+  // the prune (measured: `{ label, reason: "unconnected_to_goal", value, unit }`),
+  // so it satisfies the rule and is left alone. Restoring those would put
+  // unconnected nodes back on the graph — a different defect wearing this fix's
+  // clothes.
+  const disclosedNodeIds = new Set(dropped.map((d) => d.node_id));
+  for (const carrier of boundCarriers) {
+    const stillPresent = nodes.some((n) => n.id === carrier.nodeId);
+    if (stillPresent || disclosedNodeIds.has(carrier.nodeId)) continue;
+    // An undisclosed withdrawal. PRESERVE THE ORIGINAL — the node object that
+    // was minted, and the provenance entry that belongs to it. Provenance is
+    // taken FROM THE NODE rather than from a second held copy, because the two
+    // are the same object by construction (`provenance[id] = prov` and
+    // `node.provenance = prov`) and a second copy is a mirror that could drift.
+    nodes.push(carrier.node);
+    nodeIds.add(carrier.nodeId);
+    if (carrier.node.provenance !== undefined) provenance[carrier.nodeId] = carrier.node.provenance;
+  }
+
   // ── meta: derived, in node-emission order (never Set-iteration order).
   const hasIncoming = new Set(edges.map((e) => e.to));
   const hasOutgoing = new Set(edges.map((e) => e.from));
 
   return {
     optionClaimIndexById,
+    // Reconciled against the final node set — see pass 2c.
+    goalConstraints: boundLimits,
     graph: {
       version: "1",
       // The frozen default (`schemas/graph.ts` `default_seed: 17`). A projector
@@ -3773,6 +4988,80 @@ function findUndevelopedDuplicates(projection: OneProjection): DemoteDecision[] 
 }
 
 /**
+ * ⭐⭐ GIVE A USER-STATED OPTION THE TARGET ITS OWN SENTENCE STATES, BEFORE THE
+ * DUPLICATE GATE GROUPS.
+ *
+ * ## WHY HERE, AND NOT ONLY AT THE ENFORCEMENT STAGE
+ *
+ * `no-op-target-repair.ts` already computes the number; nothing is recomputed
+ * here and no predicate over language is minted. What this placement changes is
+ * WHEN it runs. Derived at the call sites:
+ *
+ *   Stage 1 Parse  -> `adapters/llm/anthropic.ts:1982` -> `seam.ts:277` -> HERE
+ *   Stage 4 Repair -> `stages/repair/graph-enforcement.ts:765`
+ *
+ * The enforcement stage runs THREE STAGES LATER, and by then its only neighbour
+ * is re-validation — so a repair that collides with a model option it cannot
+ * withdraw must decline, or `OPTIONS_IDENTICAL` kills the draft. Measured on
+ * Paul's own graph (11 Sep 2026), that decline is exactly what happens: his
+ * option, an invented £59 and an invented £54, so repairing his to £59 collides
+ * and he keeps the de-configured outcome.
+ *
+ * Run before {@link findUndevelopedDuplicates} and the collision is not a hazard
+ * but that gate's own input: it groups on the validator's own
+ * `buildInterventionSignature` and withdraws the MODEL duplicate of a
+ * user-stated option, disclosing it. No adjudication is invented — that ruling
+ * already exists, and this function only lets the gate see the number it was
+ * always meant to group on.
+ *
+ * ## ⚠ EVERY REFUSAL DIRECTION LANDS ON TODAY'S BEHAVIOUR
+ *
+ *  · No goal node — {@link findUndevelopedDuplicates} returns `[]` on such a
+ *    graph (its own first line), so NOTHING would reconcile a collision we
+ *    created. The gate's precondition is therefore this function's precondition;
+ *    it is read here rather than assumed, and pinned in-test.
+ *  · Only USER-STATED options are candidates. A repaired MODEL option could be
+ *    demoted by the very gate this runs before, which is that gate's question,
+ *    not this one's.
+ *  · Only MODEL options are declared reconcilable. A collision between two
+ *    STATED options is one the gate deliberately leaves standing for the user to
+ *    resolve, so it still blocks the repair.
+ *
+ * The set of drafts that survive can only GROW: every option this declines
+ * reaches the enforcement stage exactly as it does today.
+ *
+ * ⚠ THAT IS A CLAIM ABOUT WHICH DRAFTS SURVIVE, NOT ABOUT WHAT IS WRITTEN INTO
+ * THEM. This placement converts a class of DECLINES into WRITES — an option
+ * whose repaired signature collides with a reconcilable model option now
+ * completes where the enforcement stage would have declined. Every one of those
+ * writes rests on `resolveRepairedLevel`'s corroboration, including its unit
+ * conjunct (#1462). Until this PR was rebased that dependency was enforced by
+ * the branch stacking; on `staging` it is enforced by nothing but this note.
+ */
+function repairStatedOptionTargets(projection: OneProjection): void {
+  // The gate's OWN precondition, read from the gate rather than restated as a
+  // rule of our own (trap 13b — a guard agreeing with itself).
+  if (!projection.graph.nodes.some((n) => n.kind === "goal")) return;
+
+  const repairableOptionIds = new Set<string>();
+  const reconciledOptionIds = new Set<string>();
+  for (const node of projection.graph.nodes) {
+    if (node.kind !== "option") continue;
+    // A MODEL option is one this projector minted FROM A CLAIM — the same
+    // authority the gate itself uses to decide what it may withdraw, read from
+    // the projection rather than from a label or a position (trap 19).
+    if (projection.optionClaimIndexById.has(node.id)) reconciledOptionIds.add(node.id);
+    else if (projection.provenance[node.id]?.provenance_class === "stated") {
+      repairableOptionIds.add(node.id);
+    }
+  }
+  if (repairableOptionIds.size === 0) return;
+
+  const policy: NoOpTargetRepairPolicy = { repairableOptionIds, reconciledOptionIds };
+  repairNoOpOptionTargets(projection.graph, undefined, policy);
+}
+
+/**
  * ⭐⭐ THE PROJECTOR — projection to a FIXED POINT.
  *
  * `projectOnce` is run, its option signatures are compared with the VALIDATOR'S
@@ -3808,15 +5097,19 @@ export function projectRecordsToGraph(
    * brief gets honest under-claiming, never a badge it did not establish.
    */
   brief?: string,
+  /** See `projectOnce`. Absent = byte-identical to the previous behaviour. */
+  completionBoundary?: number,
 ): RecordProjection {
   const claimCount = (records.claims ?? []).length;
   const demoted = new Map<number, DemoteDecision>();
-  let projection = projectOnce(records, demoted, brief);
+  let projection = projectOnce(records, demoted, brief, completionBoundary);
+  repairStatedOptionTargets(projection);
   for (let pass = 0; pass < claimCount; pass++) {
     const decisions = findUndevelopedDuplicates(projection);
     if (decisions.length === 0) break;
     for (const d of decisions) demoted.set(d.claimIndex, d);
-    projection = projectOnce(records, demoted, brief);
+    projection = projectOnce(records, demoted, brief, completionBoundary);
+    repairStatedOptionTargets(projection);
   }
   // The internal binding is not part of the contract: consumers get the same
   // three fields they always did.
@@ -3825,6 +5118,7 @@ export function projectRecordsToGraph(
       graph: projection.graph,
       provenance: projection.provenance,
       dropped: projection.dropped,
+      goalConstraints: projection.goalConstraints,
     }),
   );
 }
@@ -3988,6 +5282,11 @@ function boundEveryNodeLabel(projection: RecordProjection): RecordProjection {
 
   if (!changed) return projection;
   return {
+    // ⚠ SPREAD FIRST, THEN OVERRIDE. This was a field-by-field literal, and a
+    // field-by-field literal is how `sets_to` reached the wire and was dropped
+    // one line before projection with every test still green. A field added to
+    // `RecordProjection` now survives this hop by default.
+    ...projection,
     graph: { ...projection.graph, nodes },
     provenance,
     dropped: projection.dropped,

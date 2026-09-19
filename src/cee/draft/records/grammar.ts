@@ -299,6 +299,48 @@ export const DRAFT_RECORD_REF_FIELDS = {
 export const DRAFT_RECORD_REF_FIELD_NAMES = Object.values(DRAFT_RECORD_REF_FIELDS) as readonly string[];
 
 /**
+ * ⭐⭐ WHAT A STATED `constraint` APPLIES TO — the field the record grammar
+ * never had.
+ *
+ * A `constraint` stated item could say what the limit IS (`value`, `unit`,
+ * `direction`) and could quote the sentence it came from — and had **nowhere to
+ * write down what it LIMITS.** The model knows: it labels the node
+ * "Subscriber Churn Rate" in the same breath as it transcribes "keeping monthly
+ * churn under 4%". The binder then had to REDISCOVER that link from the two
+ * strings, and a string-containment matcher asking whether
+ * `"subscriber_churn_rate"` contains `"monthly_churn"` says no. The limit was
+ * dropped and the user was told it matched nothing on the model.
+ *
+ * ⛔ THE RULED-OUT ALTERNATIVE, recorded so it is not re-proposed. Three better
+ * string matchers (alias-to-labels, head-noun, all-tokens) were built and
+ * adversarially tested, and EVERY ONE wrong-binds somewhere; the best-looking
+ * one passed only because its stop-word list was written while looking at the
+ * answer. Widening `CONSTRAINT_ALIASES` is worse still — it matches node IDS
+ * while this projector mints CONTENT HASHES, so it can never fire, and
+ * widening it would trade a silent gap for a confident wrong binding. **A wrong
+ * binding is worse than a gap.** Both rulings are settled; this field is the
+ * exit that does not guess.
+ *
+ * ⭐ WHY AN INTEGER INDEX AND NOT A NAME. These are the SAME
+ * `DRAFT_RECORD_REF_FIELDS` integer-index refs `claims[]` already uses, resolved
+ * by the SAME resolver. A ref is therefore **structurally incapable of naming a
+ * record that does not exist** — the failure modes are `out of range` and
+ * `names both arrays at once`, both of which the projector already discloses and
+ * the completion ask already turns into a question. A NAME would have reopened
+ * the matching problem one layer up.
+ *
+ * `stated` and `claim` are the ARRAY NAMES the model is already emitting, so the
+ * field name tells the model which list it is indexing — the same reasoning that
+ * shaped the reference fields above, kept deliberately identical so one habit
+ * serves both.
+ */
+export const DRAFT_RECORD_APPLIES_TO_FIELDS = {
+  appliesToStated: "applies_to_stated",
+  appliesToClaim: "applies_to_claim",
+} as const;
+
+
+/**
  * ⚠ NOTE FOR THE ADAPTER, recorded because a silence here is invisible.
  * `DRAFT_EDGES_REACHED_RE` (`draft-budget.ts`) is `/"from(_ref)?"\s*:/`, and it
  * matched records streams ONLY because the old reference field happened to be
@@ -360,6 +402,51 @@ export const DRAFT_RECORDS_STATED_PROGRESS_RE = new RegExp(
 export const DRAFT_RECORDS_CLAIM_PROGRESS_RE = new RegExp(`"${DRAFT_RECORD_CLAIM_DISCRIMINATOR}"\\s*:`);
 
 /** `FactorCategory` (graph.ts). */
+/**
+ * ⭐⭐ WHAT CONVENTION THE MODEL'S OWN NUMBER IS WRITTEN IN — v10.
+ *
+ * `unit` says what the number is measured in. It does NOT say what the number
+ * MEANS: under `unit: "%"`, `4` and `0.04` are both well-formed and mean the
+ * same thing, and nothing in v9's grammar could tell them apart. Measured on a
+ * live v202 draw (17 Sep): the churn baseline arrived as `0.04` while its own
+ * option intervention arrived as `5.5`, both under `"%"`, and
+ * `deriveFactorScaleFrame` — which must pick ONE frame per factor from
+ * `Math.max(...)` — framed both by 100. A real x1.375 move was stored as x137.5
+ * and the baseline was understated 100x. Pinned in
+ * `__tests__/percent-frame-straddles-one.test.ts`.
+ *
+ * ⛔ THE FIX IS NOT A BETTER MAGNITUDE TEST, AND THE REPAIR LANE ALREADY SAID SO.
+ * `repair/unreachable-factors.ts:337`: *"The `declared_scale` read this repair
+ * stage feeds was added to stop a 100x UNDER-statement, and THE TWO HARMS CANNOT
+ * SHARE ONE WINDOW — a single `value > 1` test tries to serve both and serves
+ * the wrong one on non-compliant input."* `unitPinnedScaleFrame`'s
+ * `magnitude > 1` IS that single test. A window cannot be widened into evidence;
+ * the producer has to declare.
+ *
+ * ⚠ NAMED APART FROM `declared_scale` DELIBERATELY (trap 21). The contract's
+ * `observed_state.declared_scale` describes the STORED value. This describes the
+ * MODEL'S value, BEFORE pass 3d divides it by a frame. After framing the two are
+ * different numbers, so sharing one name would be two questions under one label
+ * — which is the defect this file's header warns about in its own first section.
+ * `display-value.ts:541` states the matching standing condition from the
+ * consumer side: a producer that stamps a declaration without deriving it from
+ * the same number it describes invalidates that read.
+ *
+ * ⚠ VOCABULARY MIRRORED FROM THE CONTRACT'S `DeclaredScale`, AND NOT IMPORTED
+ * FROM IT — because this file's header forbids exactly that: *"Changes on
+ * instruction/grammar iteration and NEVER on a `@talchain/schemas` train."* An
+ * imported enum would add a MODEL-FACING token on a contract bump, with no
+ * grammar iteration and no measurement. So the tokens are local and
+ * `__tests__/value-scale-vocabulary-matches-the-contract.test.ts` REDs if the
+ * two ever diverge — trap 12's remedy where derivation is not available: the
+ * mirror must fail loud, never assume-good.
+ *
+ * Optional and additive, exactly as `unit` was: an older consumer drops an
+ * unknown field silently, where a new enum member fails validation outright.
+ */
+export const DRAFT_RECORD_VALUE_SCALES = ["unit_interval", "ratio", "raw_count"] as const;
+export type DraftRecordValueScale = (typeof DRAFT_RECORD_VALUE_SCALES)[number];
+
 export const DRAFT_RECORD_CATEGORIES = ["controllable", "observable", "external"] as const;
 export type DraftRecordCategory = (typeof DRAFT_RECORD_CATEGORIES)[number];
 
@@ -379,6 +466,19 @@ export interface DraftStatedItem {
   role?: DraftRecordRole;
   /** `constraint` only. */
   direction?: DraftRecordDirection;
+  /**
+   * `constraint` only — WHAT THIS LIMIT APPLIES TO. TYPED BY NAMESPACE, exactly
+   * as the `claims[]` endpoints are: `applies_to_stated` indexes
+   * `stated_items`, `applies_to_claim` indexes `claims`. At most ONE of the
+   * pair; emitting both is a contradiction the projector discloses rather than
+   * resolving by preference.
+   *
+   * OPTIONAL, and its absence is byte-identical to the behaviour before it
+   * existed: the constraint keeps its own node and asserts its own threshold.
+   */
+  applies_to_stated?: number;
+  /** The other namespace — see `applies_to_stated`. */
+  applies_to_claim?: number;
   /**
    * `option` only — see design note 5.
    *
@@ -417,6 +517,38 @@ export interface DraftInferenceClaim {
   strength?: number;
   category?: DraftRecordCategory;
   value?: number;
+  /**
+   * ⭐⭐ WHAT THE MODEL'S OWN NUMBER IS MEASURED IN — the field whose ABSENCE made
+   * SAFETY 2 unfireable on anything the model authored.
+   *
+   * `nodeDeclaredUnit` (`projector.ts`) reads `data.unit`. Before this field
+   * existed, every write site for a unit read `item.unit` — from a STATED item,
+   * never a claim — so a model-authored factor's `targetFamily` was ALWAYS
+   * `unknown` and the unit-mismatch conjunction could never hold. The gate was
+   * one-sided not by oversight but because the other side could not exist.
+   *
+   * ⛔ DECLARING IS NOT THE THING THAT WAS ALREADY REFUTED. An earlier attempt
+   * BORROWED a unit from a figure cited in `basis` whenever `claim.value`
+   * equalled it, and review killed it with two reproductions — a £49 PRICE read
+   * onto a subscriber COUNT, and a PROPOSED 59 read as a CURRENT 59 — because
+   * `basis` means built on, not equal to. Inferring a unit is a fabrication;
+   * the model stating one is a declaration. Nothing is borrowed here and no
+   * `extractionType` is earned: the value stays `ai_inferred`.
+   *
+   * Optional and additive on purpose. An older consumer drops an unknown field
+   * silently, where a new enum member would fail its validation outright.
+   */
+  unit?: string;
+  /**
+   * The convention `value` (and `sets_to`) are written in. See
+   * `DRAFT_RECORD_VALUE_SCALES`.
+   *
+   * Absence means UNDECLARED and MUST NOT be read as `unit_interval` — the
+   * contract's own failure semantics for the field this feeds: *"that is the
+   * unsound guess 2.193 exists to retire."* Undeclared behaves exactly as v9
+   * did, so every graph drafted before v10 is unaffected.
+   */
+  value_scale?: DraftRecordValueScale;
   /**
    * `causal_link` FROM AN OPTION ONLY — the value the target factor takes if
    * that option is chosen, in the factor's own unit. Becomes an entry in the
@@ -480,6 +612,33 @@ export function buildDraftRecordsSchema(): Record<string, unknown> {
             direction: { type: "string", enum: [...DRAFT_RECORD_DIRECTIONS] },
             // Design note 5. `option` only; the projector ignores it elsewhere.
             is_baseline: { type: "boolean" },
+            // ⭐ WHAT A `constraint` APPLIES TO.
+            //
+            // ⚠⚠ THE CLAIM THAT USED TO BE HERE WAS FALSE, AND IT CITED TRAP 12
+            // WHILE COMMITTING IT. It said the wire schema, the seam's
+            // carried-key set and the projector's binder were all keyed from
+            // `DRAFT_RECORD_APPLIES_TO_FIELDS` so none was a hand-maintained
+            // mirror. Derived at the bytes: ONLY THE TWO LINES BELOW are. The
+            // seam's Zod (`seam.ts`), the seam's carried-key spread and the
+            // projector's binder all read the names as literals — necessarily,
+            // for the property ACCESSES — and the companion export
+            // `DRAFT_RECORD_APPLIES_TO_FIELD_NAMES` had ZERO consumers anywhere
+            // in the repo (contrast control in the same sweep:
+            // `DRAFT_RECORD_REF_FIELD_NAMES`, 2). A derivation claim over a
+            // symbol nobody reads is the mirror wearing the anti-mirror's
+            // clothes, so the claim and the dead export are both gone rather
+            // than restated.
+            //
+            // ⭐ WHAT ACTUALLY CATCHES A RENAME, stated so the next reader does
+            // not have to re-derive it: the PRE-REGISTERED GRAMMAR HASH. Change
+            // either name and the pin REDs. That is a real guard; it is simply
+            // not the one the deleted sentence described.
+            //
+            // DELIBERATELY ABSENT FROM `required`: a model that does not know
+            // what a limit applies to must be able to say so by omission, and
+            // omission has to mean exactly today's behaviour.
+            [DRAFT_RECORD_APPLIES_TO_FIELDS.appliesToStated]: { type: "integer" },
+            [DRAFT_RECORD_APPLIES_TO_FIELDS.appliesToClaim]: { type: "integer" },
           },
           required: ["kind", "source_quote"],
           additionalProperties: false,
@@ -525,6 +684,12 @@ export function buildDraftClaimItemSchema(): Record<string, unknown> {
       strength: { type: "number" },
       category: { type: "string", enum: [...DRAFT_RECORD_CATEGORIES] },
       value: { type: "number" },
+      // See the interface note: without this a model-authored quantity is
+      // unitless BY CONTRACT, and SAFETY 2's target side is always `unknown`.
+      unit: { type: "string" },
+      // What convention `value`/`sets_to` are written in. See the interface
+      // note: `unit` says what it is measured in, this says what it means.
+      value_scale: { type: "string", enum: [...DRAFT_RECORD_VALUE_SCALES] },
       // Option→factor intervention level. See the interface note: named apart
       // from `strength` on purpose.
       sets_to: { type: "number" },

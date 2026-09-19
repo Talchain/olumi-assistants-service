@@ -39,6 +39,7 @@ import type { GraphV3Compact } from '../../orchestrator/context/graph-compact.js
 import type { ContextPackGoalTarget } from './goal-target-record.js';
 import type { ContextPackFactorValues } from './factor-value-record.js';
 import { buildRunDelta } from '../coaching/build-run-delta.js';
+import { eligibleInvestigationPriority, type InvestigationPriorityLicence } from '../coaching/investigation-priority.js';
 import { toSignedInfluenceValue } from '../../orchestrator/context/influence-direction.js';
 import { log } from '../../utils/telemetry.js';
 import { sha8 } from '../../utils/logger-config.js';
@@ -54,6 +55,10 @@ import {
   type ContextPackCeilingCutSection,
 } from './context-policy.js';
 import { partitionInterventionControlledDrivers } from './intervention-controlled-drivers.js';
+import type {
+  FactorInvestigationSignal,
+  FactorInvestigationVerdict,
+} from './factor-investigation-licence.js';
 import { isRecommendableTypedOption } from '../tools/handlers/recommendable-option.js';
 import { EMPTY_COACHING_CACHE, type CoachingCache } from '../coaching/types.js';
 import type { ContextPackConversationSummary } from '../rolling-summary/inject.js';
@@ -62,6 +67,7 @@ import type { MayNameLeadingOptionProvenance } from './claim-safety-read.js';
 import { isCanonicalStrictContextGraphCompaction } from './compact-graph-for-contextpack.js';
 import { measureModelFacingContextPackChars } from './model-facing-context-pack.js';
 import type { ConstraintVerdictState } from '../../orchestrator/context/constraint-feasibility.js';
+import type { PermittedAnalysisMode } from '../admission/analysis-admission.js';
 import {
   projectCoachingForUnavailableAnalysis,
   projectCoachingForWithheldClaim,
@@ -104,6 +110,10 @@ import {
   type ContextPackRunDelta,
 } from './context-pack-schema.js';
 import { projectRecentChanges, type RecentMutation } from './recent-changes.js';
+import {
+  projectStatedObjections,
+  type StatedObjection,
+} from './stated-objections.js';
 import {
   readRecentMutationHistoryFromPriorFacts,
   type RecentChangesHistoryStatus,
@@ -196,6 +206,47 @@ export interface ContextPackAnalysisOption {
 export interface ContextPackAnalysisDriver {
   readonly factor_label: string;
   readonly sensitivity_value: number;
+  /**
+   * The producer's own verdict on whether this factor is worth RESOLVING —
+   * see `./factor-investigation-licence.ts`. Joined on the structural
+   * `factor_id` before this projection strips it.
+   *
+   * ⚠ A DIFFERENT QUESTION FROM `sensitivity_value` (trap #21). Sensitivity
+   * says how much this factor moves the outcome; this says whether there is
+   * any measured gain in the user going and pinning it down. The witnessed
+   * live harm was a factor with `sensitivity_score: -0.35` and
+   * `value_of_information: 0` — it mattered a great deal AND was worthless to
+   * investigate, and with only the first field projected the model could not
+   * possibly know the second.
+   *
+   * Key absent when the producer said nothing (older producer) or scored a
+   * real value of information — both keep today's behaviour exactly.
+   */
+  readonly investigation_verdict?: FactorInvestigationVerdict;
+  /**
+   * True when that verdict rests on a heuristic method or a default range, so
+   * the display layer can disclose the strength of its own evidence instead of
+   * asserting a settledness the producer never claimed.
+   */
+  readonly investigation_basis_heuristic?: boolean;
+  /**
+   * The producer's `value_of_information` for this factor — the dimensionless
+   * [0,1] figure the verdict above is decided on.
+   *
+   * ⭐ Carried so a claim's STRENGTH can match its evidence. The verdicts decide
+   * whether a factor may be recommended at all; this says how MUCH it is worth,
+   * which is a different question and the one the composer was missing for
+   * every `informative` factor. Additive only — the display layer bands it and
+   * never suppresses on it.
+   *
+   * ⚠ This is the PUBLIC-SURFACE figure, never `m1_coaching.evidence_gaps[]
+   * .voi_score`. Derived at PLoT, those are different quantities sharing a
+   * word — see `./factor-investigation-licence.ts` for the two formulas and the
+   * producer's own regression pin against conflating them.
+   *
+   * Key absent when the producer emitted no finite figure.
+   */
+  readonly investigation_voi?: number;
 }
 
 export interface ContextPackAnalysisFragileEdge {
@@ -298,6 +349,23 @@ export interface ContextPackAnalysis {
    * #308-union structural authority) fires.
    */
   readonly evidence_gaps_lever_suppressed?: true;
+  /**
+   * ⭐ WHAT THE INFORMATION-VALUE SCIENCE SAID ABOUT WHAT TO INVESTIGATE FIRST.
+   *
+   * A DIFFERENT QUESTION FROM `evidence_gaps` ABOVE, from a DIFFERENT PRODUCER
+   * CHANNEL, and the two disagreed on the capture that produced this field.
+   * `evidence_gaps` is `enrichment.m1_coaching.evidence_gaps[]`; this is ISL's
+   * `enrichment.factor_evppi`, read through the existing
+   * `coaching/select-factor-evppi.ts` authority.
+   *
+   * Attached at `reconcileAnalysisSummaryWithEnrichment` — the single seam
+   * between a summary and its own enrichment — so it can never describe a
+   * different run from the analysis it travels with.
+   *
+   * ABSENT (never `'not_assessed'`) when the EVPPI channel said nothing at all:
+   * other information-value channels retain their separate disclosures.
+   */
+  readonly investigation_priority?: InvestigationPriorityLicence;
   readonly goal_fit?: ContextPackAnalysisGoalFit | null;
   /**
    * Lane 30 fix 3 — top-level ordinal confidence tier (attested values
@@ -421,7 +489,17 @@ export interface ContextPackConversation {
 
 /** Model-facing marker for the one persisted-analysis read failure arm. */
 export interface ContextPackAnalysisContext {
-  readonly status: 'unavailable';
+  /**
+   * `unavailable` — the saved analysis state could NOT be established.
+   *
+   * `provisional_figures` — it was established and is genuinely separable, but
+   * the admission caps the mode below `comparative_leader`. Paul's ruling for
+   * that population is **caveat, not withhold** (relayed at
+   * `olumi-programme-docs#38` comment `5576895511`); #1254's withhold governs
+   * the DIFFERENT population where options cannot be separated. The two must
+   * not be collapsed — see `SCOPE-DISPOSITION-f361-20260908.md`.
+   */
+  readonly status: 'unavailable' | 'provisional_figures';
 }
 
 export interface ContextPack {
@@ -633,6 +711,19 @@ export interface ContextPack {
    */
   readonly recent_changes_status: RecentChangesHistoryStatus;
   /**
+   * ⭐ THE USER'S STANDING OBJECTIONS — what they have said they do not
+   * accept, and why, in their own words.
+   *
+   * ABSENT (key missing, never `[]`) when this turn's facts carry no
+   * `finding_dissent` receipt. The distinction is load-bearing for the same
+   * reason it is on `readiness`: there is no completeness authority behind
+   * this field, so an empty array would be an unearned "the user has objected
+   * to nothing" claim. Absence means UNKNOWN.
+   *
+   * See {@link projectStatedObjections} for the supersession rule and the cap.
+   */
+  readonly stated_objections?: readonly StatedObjection[];
+  /**
    * Coaching state assembled from prior turns. draft_coaching is populated
    * from the draft-graph sidecar (logs/v5-draft-graph-coaching.jsonl) keyed
    * by scenario_id. decision_review is populated from the most recent
@@ -784,6 +875,33 @@ export interface AssembleContextPackInput {
   readonly graphContext?: ContextPackGraphContext;
   readonly graph?: GraphWithOptions | null;
   /**
+   * ⭐⭐ THE CONSTRAINT-EVALUABILITY VERDICT FOR THIS TURN.
+   *
+   * The `constraint_id`s the analysis cannot check on the graph as it stands,
+   * derived by `collectNotCheckableConstraintIds` from the SELECTOR'S RAW
+   * SNAPSHOT at the turn-executor call site and passed in already-decided. The
+   * assembler places it; it does not derive it, and it holds nothing it could
+   * derive it from.
+   *
+   * ⚠⚠ IT IS A SEPARATE INPUT BECAUSE `graph` ABOVE IS DARK IN PRODUCTION, AND
+   * THAT IS MEASURED, NOT ASSUMED. The turn-executor passes
+   * `graph: compactedGraph ? undefined : contextGraphForReasoning`, and
+   * `compactGraphForContextPack` returns `absent` ONLY for a null/undefined
+   * graph — so on every turn that HAS a graph, `graph` here is `undefined`.
+   * (`decision-constraints-wire.route-level.test.ts` states the same fact for
+   * the constraints wire, independently.) Deriving this verdict from `graph`
+   * would produce a feature that is correct, tested, and reaches no user.
+   *
+   * ⚠ AND THE COMPACT GRAPH CANNOT SUBSTITUTE: `compactGraph` flattens
+   * `observed_state` into `{value, raw_value, unit, cap}` and drops `prior`,
+   * `display_value`, `intercept`, `goal_threshold*`, `scale_frame` and `data`,
+   * so classifying a compact node would report EVERY target as recording
+   * nothing — telling users their perfectly good limits will be ignored.
+   *
+   * Omission is byte-identical to the behaviour before this existed.
+   */
+  readonly notCheckableConstraintIds?: ReadonlySet<string>;
+  /**
    * The already-derived model-facing claim-safety decision for this turn.
    * Production supplies this from the same scenario-scoped verdict that gates
    * deterministic response copy. The assembler does not re-select or infer it.
@@ -793,8 +911,24 @@ export interface AssembleContextPackInput {
    * whole-pack ceiling so bytes the model is forbidden to receive cannot evict
    * authorised conversation or other context.
    */
+  /**
+   * ⭐⭐ THREE STATES, NOT TWO — and the third exists because two was the defect.
+   *
+   * `permitted` / `withheld` answer entitlement x separation. They cannot
+   * express the population Paul ruled on: a run that IS separable and DOES
+   * carry a percentage, but whose admission mode is `quantified_provisional`.
+   * Forcing that run into `withheld` strips the comparative material the person
+   * asked about — #1254's rule applied to the wrong population. Forcing it into
+   * `permitted` hands the coach leader fields with no signal to qualify them,
+   * which is the witnessed incoherence: caveated prose beside a block saying no
+   * option can be put forward.
+   *
+   * `qualified` keeps the material AND says it is provisional. It is not a new
+   * policy authority: the mode it carries is read from the existing admission.
+   */
   readonly modelFacingClaimSafety?:
     | { readonly status: 'permitted' }
+    | { readonly status: 'qualified'; readonly mode: PermittedAnalysisMode }
     | {
         readonly status: 'withheld';
         readonly constraintVerdictState: ConstraintVerdictState | null;
@@ -1621,6 +1755,13 @@ export function assembleContextPackWithSummary(
     analysis: selectedDisplayAnalysisSource,
     scenarioId: input.payload.scenario_id ?? null,
   });
+  // Eligibility is current-model identity, not another estimate or ranking.
+  // Use the canonical input before budgeting can remove a factor. Missing
+  // graph or option-control authority withholds a named EVPPI priority.
+  const currentFactorIds = graphContext.status === 'canonical'
+    ? new Set((input.compactedGraph?.nodes ?? input.graph?.nodes ?? [])
+        .filter(node => node.kind === 'factor').map(node => node.id))
+    : undefined;
   // Keep raw handler policy on its hot-window source. It is not part of the
   // model context budget once a distinct display source is supplied. Legacy
   // callers still reuse the budgeted value exactly as before.
@@ -1628,6 +1769,7 @@ export function assembleContextPackWithSummary(
     hasDistinctDisplayAnalysisSource ? input.analysis ?? null : budgeted.analysis,
     input.analysisStalenessReason ?? null,
     input.interventionControlledFactorIds,
+    currentFactorIds,
   );
   const displayRawAnalysis = hasDistinctDisplayAnalysisSource
     ? projectAnalysis(
@@ -1636,6 +1778,7 @@ export function assembleContextPackWithSummary(
         // the split source explicit without creating a second inert contract.
         null,
         input.interventionControlledFactorIds,
+        currentFactorIds,
       )
     : rawAnalysis;
   const projectedGraphBeforeAuthority: ContextPackGraph = budgeted.compactedGraph
@@ -1733,7 +1876,22 @@ export function assembleContextPackWithSummary(
   // degraded and stay so.
   const projectedRecentChanges = projectRecentChanges(
     recentMutationFacts, recentMutationHistory?.recent_mutation_entries,
+    // ⚠ THIS IS THE WIRE for the later-turn evaluability verdict. Cutting it
+    // does NOT remove a `recent_changes` entry — it silently strips the
+    // qualification from it, which is the quieter failure and is exactly the
+    // pre-#1484 product: an unqualified "Added constraint: …" re-grounding the
+    // routing model on every subsequent turn. Neutering it MUST turn
+    // `__tests__/constraint-evaluability-wire.route-level.test.ts` red.
+    input.notCheckableConstraintIds,
   );
+  // ⭐ STANDING OBJECTIONS — projected from `input.priorFacts`, NOT from
+  // `recentMutationFacts`. The two sources are different on purpose: the
+  // durable recent-changes read is filtered by `MUTATION_RECEIPT_FACT_TYPES`
+  // (reconcile-recent-mutation-facts.ts:297,343), which deliberately drops
+  // every judgement receipt — so reading objections from it would return a
+  // structural zero forever, and the zero would look exactly like "the user
+  // never objected". `priorFacts` is the turn window's UNFILTERED fact list.
+  const statedObjections = projectStatedObjections(input.priorFacts);
   const effectiveRecentChangesStatus: RecentChangesHistoryStatus =
     recentChangesStatus !== 'degraded' &&
     projectedRecentChanges.length !== recentMutationFacts.length
@@ -1777,7 +1935,12 @@ export function assembleContextPackWithSummary(
     input.modelFacingClaimSafety?.status === 'withheld' &&
     input.modelFacingClaimSafety.provenance === 'fail_closed_unavailable'
       ? { status: 'unavailable' }
-      : undefined;
+      : // Established, separable, not settled. The marker and its instruction
+        // are emitted by ONE condition, so a qualified pack can never carry the
+        // figures without the sentence that qualifies them.
+        input.modelFacingClaimSafety?.status === 'qualified'
+        ? { status: 'provisional_figures' }
+        : undefined;
   const constraintVerdictState =
     input.modelFacingClaimSafety?.status === 'withheld'
       ? input.modelFacingClaimSafety.constraintVerdictState
@@ -1948,6 +2111,16 @@ export function assembleContextPackWithSummary(
       : {}),
     recent_changes: projectedRecentChanges,
     recent_changes_status: effectiveRecentChangesStatus,
+    // STANDING OBJECTIONS — placed with the HARD STRUCTURED STATE, beside the
+    // change history and above the conversation summary, so the model reads a
+    // stated disagreement as part of the record rather than as conversational
+    // colour it may let the transcript overwrite.
+    //
+    // Conditional spread: the key is ABSENT when the user has objected to
+    // nothing this turn window, never `stated_objections: []`. A no-objection
+    // scenario therefore serialises byte-identically to pre-change packs and
+    // `buildUserMessage` appends no section.
+    ...(statedObjections.length > 0 ? { stated_objections: statedObjections } : {}),
     // Knowledge-over-time (P6): the decision-records read slice. Placed with the
     // hard structured state (above the rolling summary, which buildUserMessage
     // re-appends LAST) so durable prior DECISIONS beat the summary. Conditional
@@ -2296,6 +2469,7 @@ export function projectTopDrivers(
   drivers: readonly DriverSummary[],
   controlledFactorIds?: ReadonlySet<string>,
   cap: number = TOP_DRIVER_CAP,
+  investigation?: readonly FactorInvestigationSignal[],
 ): ContextPackAnalysisDriver[] {
   // Spine A backstop: drop any driver whose factor is option-controlled BEFORE
   // the projection strips `factor_id` (the structural match key). Authority is
@@ -2325,12 +2499,55 @@ export function projectTopDrivers(
     }
     source = kept;
   }
+  // Join the producer's investigation verdict BEFORE `factor_id` is stripped.
+  // ⚠ IDENTITY FIRST (trap #19): the id index is authoritative and the label
+  // index is consulted ONLY for a driver that carries no id, because two
+  // factors can share a label and a label-first join would silently stamp one
+  // factor's verdict onto another.
+  const byId = new Map<string, FactorInvestigationSignal>();
+  const byLabel = new Map<string, FactorInvestigationSignal>();
+  for (const signal of investigation ?? []) {
+    if (signal.factor_id !== null && signal.factor_id.length > 0) {
+      byId.set(signal.factor_id, signal);
+    }
+    byLabel.set(signal.factor_label.trim().toLowerCase(), signal);
+  }
+  const verdictFor = (d: DriverSummary): FactorInvestigationSignal | undefined => {
+    const id = typeof d.factor_id === 'string' ? d.factor_id.trim() : '';
+    if (id.length > 0) {
+      const hit = byId.get(id);
+      // A driver that HAS an id but is absent from the id index gets no
+      // verdict — never a label fallback, which is where a wrong-object match
+      // would come from.
+      if (hit !== undefined) return hit;
+      if (byId.size > 0) return undefined;
+    }
+    return byLabel.get(d.factor_label.trim().toLowerCase());
+  };
+
   return source
     .filter((d) => isFiniteSensitivity(d.sensitivity))
-    .map((d) => ({
-      factor_label: d.factor_label,
-      sensitivity_value: toSignedInfluenceValue(d.direction, d.sensitivity),
-    }))
+    .map((d) => {
+      const signal = verdictFor(d);
+      return {
+        factor_label: d.factor_label,
+        sensitivity_value: toSignedInfluenceValue(d.direction, d.sensitivity),
+        // Keys ABSENT (never undefined-valued) when the producer said nothing,
+        // so the strict ContextPack schema and the pre-fix byte-shape are both
+        // preserved for every driver this fix is not about.
+        ...(signal !== undefined
+          ? {
+              investigation_verdict: signal.verdict,
+              ...(signal.heuristic_basis ? { investigation_basis_heuristic: true as const } : {}),
+              // Magnitude rides along whenever the producer supplied one — the
+              // display layer decides where it is worth rendering.
+              ...(signal.value_of_information !== null
+                ? { investigation_voi: signal.value_of_information }
+                : {}),
+            }
+          : {}),
+      };
+    })
     .sort((a, b) => Math.abs(b.sensitivity_value) - Math.abs(a.sensitivity_value))
     .slice(0, cap);
 }
@@ -2454,6 +2671,7 @@ export function projectAnalysis(
   analysis: AnalysisResponseSummaryWithSignals | null,
   stalenessReason: string | null,
   controlledFactorIds?: ReadonlySet<string>,
+  currentFactorIds?: ReadonlySet<string>,
 ): ContextPackAnalysis | null {
   if (analysis === null) return null;
 
@@ -2536,6 +2754,9 @@ export function projectAnalysis(
     analysis.top_drivers,
     controlledFactorIds,
     CONTEXT_PACK_TOP_DRIVER_CAP,
+    // The producer's investigation verdict travels WITH the driver so the
+    // display projection cannot present influence without it.
+    analysis.factor_investigation,
   );
 
   // 3. Robustness band: null when source is unknown / empty; do not fabricate.
@@ -2645,6 +2866,13 @@ export function projectAnalysis(
     // ROADMAP 2.54 (b) — key absent (never `false`) when nothing was
     // suppressed.
     ...(evidenceGapsLeverSuppressed ? { evidence_gaps_lever_suppressed: true as const } : {}),
+    // Same-run producer verdict, qualified by current model membership and
+    // the existing option-control set. A refusal never promotes another row.
+    ...(analysis.investigation_priority !== undefined
+      ? { investigation_priority: eligibleInvestigationPriority(
+          analysis.investigation_priority, currentFactorIds, controlledFactorIds,
+        ) }
+      : {}),
     goal_fit: goalFit,
     confidence_tier: confidenceTier,
     // Trust-spine board #1 (CEE half): the honest constraint note, verbatim

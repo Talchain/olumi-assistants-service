@@ -24,6 +24,7 @@ import { UpstreamTimeoutError, UpstreamHTTPError, UpstreamNonJsonError } from ".
 import { makeIdempotencyKey } from "./idempotency.js";
 import { generateDeterministicLayout } from "../../utils/layout.js";
 import { normaliseDraftResponse, ensureControllableFactorBaselines } from "./normalisation.js";
+import { contentDigest } from "../../utils/redaction.js";
 import { isUsableDraftDocument } from "./draft-document-acceptance.js";
 import { captureCheckpoint, type PipelineCheckpoint } from "../../cee/pipeline-checkpoints.js";
 import { getMaxTokensFromConfig } from "./router.js";
@@ -82,11 +83,15 @@ import {
   countBlockingAskItems,
   shouldKeepCompletion,
   completionRegressesProtectedContent,
+  optionEffectReferencesUnreliable,
   buildRecordsCompletionPrompt,
   buildRecordsCompletionSchema,
   mergeCompletionClaims,
+  repairableConstraintFields,
+  type ConstraintCorrection,
   RECORDS_COMPLETION_MAX_TOKENS,
   RECORDS_COMPLETION_WALL_MS,
+  censusOptionFactorMagnitudes,
   type DraftInferenceClaim,
 } from '../../cee/draft/records/index.js';
 import { DRAFT_ATTACHMENT_MAX_BYTES, type BuiltDraftAttachment } from './draft-attachment.js';
@@ -904,7 +909,11 @@ export async function draftGraphWithAnthropic(
       cache_age_ms: promptMeta.cache_age_ms,
       instance_id: promptMeta.instance_id,
       structured_outputs_enabled: structuredOutputsEnabled,
-      system_prompt_preview: systemText.slice(0, 200),
+      // Digest the assembled system prompt — never place it on the wire
+      // verbatim (see contentDigest). The diagnostic survives as a
+      // correlatable hash + length; `system_prompt_chars` below is
+      // already the right shape-only form and is unchanged.
+      system_prompt_preview: contentDigest(systemText),
       system_prompt_chars: systemText.length,
     }, "[CEE_PROMPT_DEBUG] draft_graph prompt delivery");
   }
@@ -1990,6 +1999,21 @@ export async function draftGraphWithAnthropic(
         },
       );
     }
+    // ⭐ CENSUS POINT 1 of 4 — `before_completion`. MEASUREMENT ONLY: nothing
+    // downstream reads this, and deleting the line changes no persisted byte.
+    //
+    // Deployed drafts persist options with `interventions: {}` (28 of 32 options
+    // empty across 8 drafts), and nobody can say WHERE the magnitude goes
+    // missing, so no fix can be chosen between the three suspected causes. These
+    // four counts are what says where. This one is the earliest graph-shaped
+    // artefact that exists: pass 1, before the completion turn can add anything.
+    emit(TelemetryEvents.CeeDraftOptionMagnitudeCensus, {
+      point: "before_completion",
+      idempotency_key: idempotencyKey,
+      model,
+      ...censusOptionFactorMagnitudes(seam.projection.graph),
+    });
+
     // ── ⭐⭐ PASS 2: THE COMPLETION TURN ─────────────────────────────────────
     //
     // Pass 1 produced a complete, well-formed record set. Where it does not join
@@ -2069,11 +2093,39 @@ export async function draftGraphWithAnthropic(
         }
         const merged =
           completionParsed !== undefined
-            ? mergeCompletionClaims(seam.records, completionParsed as { claims?: DraftInferenceClaim[] })
+            ? mergeCompletionClaims(
+                seam.records,
+                // ⭐ `constraint_corrections` travels with the claims. Omitting it
+                // here would leave the new grammar field parsed and then dropped —
+                // the ask answerable in principle and unanswered in fact.
+                completionParsed as {
+                  claims?: DraftInferenceClaim[];
+                  constraint_corrections?: readonly ConstraintCorrection[];
+                },
+                // ⭐ THE REPAIR SCOPE — derived from the SAME projection that
+                // raised the ask, so the model can only change a limit this turn
+                // actually questioned.
+                repairableConstraintFields(seam.records, seam.projection),
+              )
             : ({ ok: false, reason: "no_new_claims" } as const);
         completionMeta.parsed = completionParsed !== undefined;
         if (merged.ok) {
-          const reprojected = projectRecordsToGraph(merged.records, args.brief);
+          // ⭐⭐ THE PASS BOUNDARY, THREADED — without this the guard it feeds is
+          // DEAD CODE, which is how a change ships dark in this estate.
+          //
+          // `completionAsk.baseClaimIndex` is the claim index at which THIS
+          // completion pass began; it is already logged four lines above. Pass 3d
+          // needs it because it derives ONE scale frame per factor from whatever
+          // magnitudes are present by then, and a magnitude authored in pass 1
+          // was framed against a population that no longer exists once completion
+          // has added its own. Measured live: an option read as £0.85 against
+          // £80,000 and £120,000, ~141,000x understated — see
+          // `option_magnitude_scale_unreconciled`.
+          const reprojected = projectRecordsToGraph(
+            merged.records,
+            args.brief,
+            completionAsk.baseClaimIndex,
+          );
           // ⭐⭐ THE NON-INFERIORITY CHECK — THE BLOCKING CLASSES ONLY.
           //
           // ⚠ THIS IS THE THIRD SHAPE OF THIS LINE, AND THE FIRST DERIVED ONE.
@@ -2108,14 +2160,25 @@ export async function draftGraphWithAnthropic(
           // ⭐ THE PROJECTIONS ARE PASSED BECAUSE THE PRESERVATION QUESTION NEEDS
           // THEM. `activeProjection` is pass 1 — the content the completion is
           // forbidden to overwrite, disconnect, reclassify or delete.
+          // ⭐ PASS-1 OPTION EFFECTS ARE DEFENDED ONLY WHEN THEY ARE CREDIBLE.
+          // Derived from the PASS-1 records (`seam.records`), never from pass 2:
+          // the question is whether the values this guard is about to protect
+          // were reliably referenced in the first place.
+          const optionEffectsUnreliable = optionEffectReferencesUnreliable(seam.records);
           const preservationViolations = completionRegressesProtectedContent(
             activeProjection,
             reprojected,
+            { optionEffectsUnreliable },
           );
-          const notWorse = shouldKeepCompletion(completionAsk, askAfter, {
-            before: activeProjection,
-            after: reprojected,
-          });
+          completionMeta.option_effect_refs_unreliable = optionEffectsUnreliable;
+          // ⭐ THE SAME VIOLATIONS OBJECT THE TELEMETRY REPORTS — never a second
+          // derivation. See the note on `shouldKeepCompletion`'s `opts`.
+          const notWorse = shouldKeepCompletion(
+            completionAsk,
+            askAfter,
+            { before: activeProjection, after: reprojected },
+            { optionEffectsUnreliable, preservationViolations },
+          );
           completionMeta.ask_items_after = askAfter.items.length;
           completionMeta.blocking_before = blockingBefore;
           completionMeta.blocking_after = blockingAfter;
@@ -2154,6 +2217,27 @@ export async function draftGraphWithAnthropic(
       }, "[Anthropic] records completion pass");
     }
 
+    // ⭐ CENSUS POINT 2 of 4 — `after_completion`. MEASUREMENT ONLY.
+    //
+    // ⚠ OUTSIDE the `answerableAskItems > 0` block, deliberately. Inside it,
+    // this point would go silent on every draft that bought no completion turn
+    // — and those are not a rare tail, they are a large share of drafts. A
+    // census absent from part of its own population reads downstream as "those
+    // drafts did not have the problem", which is the opposite of what a missing
+    // measurement means. So it fires on all four arms: completion merged and
+    // kept, merged and discarded, attempted and failed, never attempted.
+    //
+    // It censuses `activeProjection` — the projection the pipeline CARRIES
+    // FORWARD, which is pass 1's whenever the completion was not kept. That is
+    // the honest reading of "after the completion pass": what the draft is left
+    // holding once the pass has had its chance.
+    emit(TelemetryEvents.CeeDraftOptionMagnitudeCensus, {
+      point: "after_completion",
+      idempotency_key: idempotencyKey,
+      model,
+      ...censusOptionFactorMagnitudes(activeProjection.graph),
+    });
+
     // Run after completion selection: completion reprojects records directly,
     // so guarding only the initial seam would let the invalid label return.
     const optionFraming = reconcileDraftOptionFraming(activeRecords, activeProjection);
@@ -2178,6 +2262,24 @@ export async function draftGraphWithAnthropic(
     // record so `rawJson` keeps its declared type, and nothing downstream holds a
     // reference to the projection the sidecar also describes.
     rawJson = { ...activeProjection.graph } as Record<string, unknown>;
+
+    // ⭐ CENSUS POINT 3 of 4 — `after_projection`. MEASUREMENT ONLY.
+    //
+    // Taken on `rawJson`, not on `activeProjection.graph`, even though the line
+    // above makes them the same content: `rawJson` is the object the rest of the
+    // draft path actually reads, and binding the census to the artefact that
+    // TRAVELS is what keeps this point honest if that assignment ever changes.
+    //
+    // ⚠ WHAT THE 2→3 INTERVAL COVERS, precisely, so no delta here is over-read:
+    // `reconcileDraftOptionFraming` and nothing else. It can withdraw an option
+    // (and with it that option's edges), so BOTH numbers can fall between these
+    // two points without a single magnitude having been lost.
+    emit(TelemetryEvents.CeeDraftOptionMagnitudeCensus, {
+      point: "after_projection",
+      idempotency_key: idempotencyKey,
+      model,
+      ...censusOptionFactorMagnitudes(rawJson),
+    });
 
     // Diagnostic census of what the projector produced. Computed AFTER the
     // projection deliberately: before it, `rawJson.nodes` is absent on every
@@ -4472,11 +4574,49 @@ export class AnthropicAdapter implements LLMAdapter {
       }
     );
 
+    // ⚠ THIS LITERAL IS A NARROWING, AND IT IS SILENT. It names the keys that
+    // survive the adapter hop; anything `draftGraphWithAnthropic` returns under
+    // another name is discarded HERE, one hop before its reader. TypeScript
+    // cannot catch the loss — every one of these fields is `?: unknown` on
+    // `DraftGraphResult`, so a short literal typechecks clean. A field added to
+    // the direct function's return MUST be added here too, or it is dark.
+    //
+    // `record_disclosures` was dark for exactly that reason from 2026-02-18
+    // (when `coaching` was added on its own) until this line. It is the
+    // projector's record of what it REFUSED to assert — an unstated constraint
+    // direction, a target that is not a threshold, a withdrawn duplicate — and
+    // its readers (`parse.ts` -> `ctx.recordDisclosures` -> `optionFramingRecovery`,
+    // then `package.ts`'s wire key and `optionFramingWarnings`) had been
+    // receiving `undefined` on every draft. The user was shown a graph quietly
+    // weaker than their brief and told nothing.
+    //
+    // ⛔ THE THREE SIBLINGS ON `DraftGraphResult` ARE ABSENT ON PURPOSE. They
+    // are not dropped here; they are NOT PRODUCED, and a carrier for them would
+    // be an empty one:
+    //   · `topology_plan`   — deleted from the draft grammar unconditionally
+    //     (`cee/draft/anthropic-graph-schema.ts` v11). Top-level
+    //     `additionalProperties: false` makes the key unemittable.
+    //   · `causal_claims`   — removed from the grammar with `coaching` in v12
+    //     (lean-draft contract, ROADMAP 1.197); re-produced by the post-draft
+    //     coaching pass, never by this adapter. (`coaching`'s spread below is
+    //     vestigial for the same reason, and is left alone deliberately.)
+    //   · `goal_constraints` — killed TWO hops earlier and unreachable from
+    //     here: the draft emits a RECORD SET whose grammar declares no `goal_*`
+    //     field, and the `rawJson` replacement above hands the parser
+    //     `activeProjection.graph`, an explicit literal of version/default_seed/
+    //     nodes/edges/meta. Adding it here would repair nothing while reading
+    //     as a repair.
+    // Guarded by `draft-adapter-projection-hop.test.ts`, whose R2 REDs if any
+    // of the three ever starts arriving — that is the signal to re-derive
+    // before minting a carrier, not to mint one.
     return {
       graph: result.graph,
       rationales: result.rationales,
       usage: result.usage,
       ...((result as any).coaching ? { coaching: (result as any).coaching } : {}),
+      ...((result as any).record_disclosures
+        ? { record_disclosures: (result as any).record_disclosures }
+        : {}),
       ...(result.debug ? { debug: result.debug } : {}),
       ...(result.meta ? { meta: result.meta } : {}),
     };

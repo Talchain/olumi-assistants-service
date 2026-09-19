@@ -570,6 +570,20 @@ export interface HandlerOutcome {
    * status quo" chip in front of a user who has nothing to configure, next to
    * a disclosure that deliberately prescribes nothing.
    */
+  /**
+   * ⭐ THE GRAPH THIS RUN ACTUALLY ANALYSED — server-only, never the wire.
+   *
+   * The exact `snapshot.rawPersistedGraph` the handler submitted to PLoT and
+   * hashed into `graph_hash_at_run`. Consumed by the turn-executor's
+   * decision-review block so the reviewing model reasons about, and grounds its
+   * citations in, the same model the numbers came from.
+   *
+   * ⚠ NAMED APART FROM `context.persistedGraph` ON PURPOSE (trap 21). That one
+   * answers *"what is saved right now"*; this one answers *"what did this run
+   * analyse"*. On an edit-then-analyse turn they are different graphs, and
+   * reconciling them is the wrong move — the review needs THIS one.
+   */
+  readonly __run_graph_snapshot?: unknown;
   readonly __excluded_options?: ReadonlyArray<
     import('../coaching/scaffold-disclosure.js').OmittedOptionRecord
   >;
@@ -586,6 +600,52 @@ export interface HandlerOutcome {
    * the next turn has no elliptical binding (fail closed).
    */
   readonly __elicit_baseline?: import('../session/pending-action.js').ElicitTargetBaselineFields;
+  /**
+   * ⭐ GO(A) — set ONLY by `run_analysis`, and ONLY when the producer's own
+   * constraint verdict is `unevaluated` (its "I did not reach decision grade"
+   * state). Names the ONE option-factor cell whose value in the limit's own
+   * unit would make the withheld limit checkable.
+   *
+   * Internal channel on the `__elicit_baseline` pattern — never crosses to the
+   * wire envelope; the user-facing half is the disclosure already appended to
+   * `assistant_text`. The executor arms the matching
+   * `elicit_option_native_quantity` pending in the SAME commit, so the question
+   * and the record that can answer it are never persisted apart. Absent ⇒ no
+   * question was asked ⇒ no pending persists (fail closed).
+   *
+   * ⚠ Fields are the pending's own, so the two cannot drift.
+   */
+  /**
+   * ⭐ Set ONLY by `add_constraint`, and ONLY when the limit landed on a target
+   * that cannot carry it AND exactly one factor in the graph already records
+   * the constraint's own unit. Names both ends of a MOVE the user may confirm.
+   *
+   * Internal channel on the `__option_cost_ask` pattern — never crosses to the
+   * wire envelope. The user-facing half is the sentence already appended to
+   * `assistant_text`; the executor turns this into the chip + pending through
+   * the EXISTING `emitProposedChange`, so the correction rides the
+   * `apply_proposed_change` lifecycle rather than a new one.
+   *
+   * ⚠ It proposes; it never moves. Absent ⇒ nothing was offered ⇒ no pending
+   * persists (fail closed).
+   */
+  readonly __constraint_target_correction?: {
+    readonly misplaced_node_id: string;
+    readonly misplaced_node_label: string;
+    readonly operator: '>=' | '<=';
+    readonly value: number;
+    readonly unit: string;
+    readonly alternative_node_id: string;
+    readonly alternative_label: string;
+  };
+  readonly __option_cost_ask?: {
+    readonly option_id: string;
+    readonly option_label: string;
+    readonly factor_id: string;
+    readonly factor_label: string;
+    readonly unit: string;
+    readonly constraint_label: string | null;
+  };
   // ⚠ ROADMAP 2.804 — `__leading_option_claim_withheld` WAS DECLARED HERE AND
   // IS DELETED. DO NOT REINSTATE IT.
   //

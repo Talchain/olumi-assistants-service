@@ -116,6 +116,49 @@ import {
 import type { JudgementSignals } from './judgement-signals.js';
 import { ENTITY_ID_LEAK_RE } from '../../orchestrator/shared/entity-id-pattern.js';
 import { isSlugShapedEntityId } from '../../orchestrator/shared/output-safety.js';
+
+// ⭐⭐ THE REFERENT RESOLVER MOVED OUT — `src/orchestrator/shared/referent-resolver.ts`.
+//
+// It is the ONE authority for "which stored element does this phrase name?",
+// and it now sits beside `entity-id-pattern.ts` (the canonical owner of the
+// INVERSE direction, id → label) rather than inside this 3,600-line composer.
+// It lived here for one reason — this is where prose linking needed it — and
+// that address is exactly why eight server-side WRITE lanes never found it and
+// grew fourteen private normalisers instead, which disagree on 8 of 10
+// realistic labels.
+//
+// ⛔ NOTHING BELOW CHANGED. The move was a fold: every rail, normalisation and
+// matching primitive is the same text at a new address, re-exported here so
+// every existing consumer keeps its import path and prose output is
+// byte-identical.
+import {
+  buildLabelIndex,
+  containsWholePhrase,
+  GENERIC_LEVER_TOKENS,
+  hasAmbiguousProseEntityReference,
+  hasAmbiguousProseEntityReferenceWithOptions,
+  LEVER_LABEL_MIN_LEN,
+  normaliseForPhraseMatch,
+  resolveLabelToId,
+  resolveProseEntityRefs,
+  resolveProseEntityRefsWithOptions,
+  AMBIGUOUS_LABEL,
+  type GraphNodeLookup,
+  type GraphNodeRef,
+  type LabelIndex,
+} from "../../orchestrator/shared/referent-resolver.js";
+
+export {
+  AMBIGUOUS_LABEL,
+  buildLabelIndex,
+  hasAmbiguousProseEntityReference,
+  resolveLabelToId,
+  resolveProseEntityRefs,
+  type GraphNodeLookup,
+  type GraphNodeRef,
+  type LabelIndex,
+};
+
 import { bandConfidence } from './confidence-bands.js';
 import { deterministicBlockId } from './block-id.js';
 import {
@@ -151,12 +194,17 @@ import { readTopLevelFlipRows } from '../context/flip-threshold-rows.js';
 import { findForbiddenPhraseHit, RAW_DECIMAL_RE } from './forbidden-user-facing-phrases.js';
 import { applyTerminologyRewrite } from './terminology-rewrite.js';
 import {
+  composeStatedDissentBody,
+  isStatedDissentOfferComposable,
+} from '../coaching/stated-dissent-offer-text.js';
+import {
   disagreementResolutionSignals,
   evidenceSignals,
   fragileEdgeOfferSignals,
   guidanceSignalsForCoachingKind,
   overrideStressTestSignals,
   reviewCardSignals,
+  statedDissentReviewSignals,
 } from './guidance-signals.js';
 // ROADMAP 2.989 — the fragile-edge selector (pure) and the leader admission.
 // `mayPresentLeaderClaimForFact` is IMPORTED, not restated: the offer's
@@ -164,6 +212,11 @@ import {
 // ⚠ It was the per-fact withheld LEAF until the unrequested-run confinement;
 // the leaf answers only "does the constraint verdict permit a leader?", and
 // compose now also asks "did anybody request this analysis?".
+import {
+  canonicaliseEdgeReference,
+  canonicalEdgeAddress,
+  composeEdgeIdentity,
+} from './edge-address.js';
 import { selectFragileEdge } from '../coaching/select-fragile-edge.js';
 // Lane C — the grounded counter-case. NOTE it answers a DIFFERENT question
 // from `selectFragileEdge` above ("what should the team argue against?" vs
@@ -288,50 +341,8 @@ function isLeverFactor(
   return id.length > 0 && interventionControlledFactorIds.has(id);
 }
 
-/**
- * Minimum lever-label length used for the NAMING scan below. A 1–2 char label
- * (an unlabelled or degenerate node) would over-match arbitrary prose, so it is
- * ignored for detection — structural membership (`isLeverFactor`) is unaffected.
- * The length is measured on the NORMALISED, punctuation-stripped label so a
- * label like `"C#"` (one letter after normalisation) is treated as too short.
- */
-const LEVER_LABEL_MIN_LEN = 3;
 
-/**
- * Finding 5 (over-suppression): generic single-word lever labels that collide
- * with ordinary decision prose. A lever whose WHOLE label normalises to just
- * one of these bare words ("Cost", "Time") cannot be distinguished from
- * incidental use of the word in a NON-lever assumption ("Implementation cost
- * estimates are uncertain"), so the free-text NAME scan refuses to suppress on
- * such a label alone — stronger identity (a multi-word phrase, or a distinctive
- * single word) is required. This is a fail-closed choice: err toward keeping an
- * honest surface over silently dropping it on a weak-identity match. STRUCTURAL
- * factor_id suppression (`isLeverFactor`, used by the evidence surfaces) is
- * unaffected — this guard only tempers label-based detection in free text.
- */
-const GENERIC_LEVER_TOKENS: ReadonlySet<string> = new Set([
-  'cost', 'costs', 'time', 'price', 'prices', 'value', 'values', 'risk',
-  'risks', 'quality', 'revenue', 'budget', 'scope', 'speed', 'effort',
-  'resource', 'resources', 'team', 'size', 'rate', 'growth', 'demand',
-  'supply', 'margin', 'profit', 'sales', 'people', 'timeline', 'timelines',
-]);
 
-/**
- * Finding 5 (under-suppression + Unicode): normalise a label / free-text body
- * for whole-phrase matching. NFKC folds Unicode compatibility forms (curly
- * apostrophes, full-width chars, non-breaking spaces); lower-casing folds case;
- * every run of non-letter/non-number is collapsed to a single space so
- * punctuation cannot block a match — `"Time-to-market"` and `"Time to market"`
- * both normalise to `"time to market"`. Result is trimmed; interior words are
- * single-space separated.
- */
-function normaliseForPhraseMatch(s: string): string {
-  return s
-    .normalize('NFKC')
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, ' ')
-    .trim();
-}
 
 /**
  * Doctrine D-U F2 (assumption surface): resolve the option-set LEVER factor_ids
@@ -362,55 +373,7 @@ function collectLeverLabels(
   return labels;
 }
 
-/**
- * Offset of the FIRST whole-phrase occurrence of `needle` in `haystack`, with
- * letter/number word boundaries on BOTH ends — or `-1` when there is none.
- * Both arguments are expected to be pre-normalised via `normaliseForPhraseMatch`
- * (so only Unicode letters/numbers and single spaces remain). Scans every
- * occurrence so a first boundary-failing hit cannot mask a later valid one.
- * Boundaries use the Unicode letter/number classes so accented words ("café")
- * are bounded correctly.
- *
- * The offset is into the NORMALISED haystack, not the original prose. That is
- * sufficient for ORDERING and nothing else reads it: `normaliseForPhraseMatch`
- * is monotone (NFKC, lower-case, collapse non-alphanumeric runs, trim all map a
- * prefix to a prefix), so relative order is preserved exactly even though
- * absolute positions shift.
- */
-function firstBoundedPhraseAt(haystack: string, needle: string, from = 0): number {
-  if (needle.length === 0) return -1;
-  for (;;) {
-    const at = haystack.indexOf(needle, from);
-    if (at < 0) return -1;
-    const before = at === 0 ? '' : haystack[at - 1]!;
-    const afterIdx = at + needle.length;
-    const after = afterIdx >= haystack.length ? '' : haystack[afterIdx]!;
-    const boundedBefore = before === '' || !/[\p{L}\p{N}]/u.test(before);
-    const boundedAfter = after === '' || !/[\p{L}\p{N}]/u.test(after);
-    if (boundedBefore && boundedAfter) return at;
-    from = at + 1;
-  }
-}
 
-/**
- * Whole-phrase containment — the boolean face of {@link firstBoundedPhraseAt},
- * which is the single owner of the scan (one derivation, two read points, so a
- * boundary-rule change can never apply to one caller and not the other).
- *
- * A bare shared token must NOT match a DIFFERENT phrase — on live staging the
- * lever "Equity Offered to CTO" and a non-lever assumption both contain "CTO",
- * so a token match would over-suppress.
- *
- * ⚠ NOTE WHAT THIS DOES NOT DO, because a docstring here previously claimed it
- * did: bounded matching stops "CTO" matching inside "director", it does NOT
- * stop a node genuinely LABELLED "CTO" from matching prose that names "Equity
- * Offered to CTO" — there, "CTO" is a bounded whole word and both labels match.
- * Choosing between them is an ORDERING question, settled in
- * {@link resolveProseEntityRefs} by the longer-label tie-break.
- */
-function containsWholePhrase(haystack: string, needle: string): boolean {
-  return firstBoundedPhraseAt(haystack, needle) >= 0;
-}
 
 /**
  * Doctrine D-U F2: does this free-text prose NAME an option-set lever? True when
@@ -467,14 +430,6 @@ export interface BlockBuildCtx {
   readonly freshness?: 'fresh' | 'stale';
 }
 
-export interface GraphNodeRef {
-  readonly id: string;
-  readonly label: string;
-  readonly kind: TargetRefKindLiteral;
-}
-
-/** factor_id → {id, label, kind} resolved from `enrichment.graph.nodes[]`. */
-export type GraphNodeLookup = ReadonlyMap<string, GraphNodeRef>;
 
 /**
  * Build a lookup table from `fact.result.enrichment.graph.{nodes,edges}[]`
@@ -577,274 +532,138 @@ function populateGraphNodeLookup(
   // Without this pass, every scenario_context card would drop (the
   // round-3 fail-closed gate is correct; the lookup just needed to be
   // wider).
+  //
+  // ⛔⛔ AND IT WAS STILL NOT WIDE ENOUGH — IT KEYED ON A FIELD THE CONTRACT
+  // DOES NOT DEFINE, AND THAT COST A REAL USER TWELVE CARDS.
+  //
+  // Measured on Render `srv-d4slpaili9vc73eiq4og`, 17 Sep 2026 17:39–18:20Z, one
+  // session, twelve occurrences of `v5.phase3.block_dropped` with
+  // `drop_reason: 'lookup_miss'` — `scenario_context` on `edge_id`, `pre_mortem`
+  // on `grounded_in`. Every pre-mortem and scenario card that referenced a
+  // relationship was deleted before egress.
+  //
+  // This pass read `e.id` and `continue`d when it was absent. `EdgeV3Schema`
+  // DECLARES NO `id` (contrast control: `NodeV3Schema` declares one, with
+  // `NODE_ID_PATTERN`), and `GraphV3Schema.edges` is `z.array(EdgeV3Schema)` —
+  // so for a canonical graph NO EDGE WAS EVER REGISTERED and every edge
+  // reference missed BY CONSTRUCTION. The drop gates downstream are correct
+  // fail-closed guards; the map underneath them was empty.
+  //
+  // ⭐ THE MODEL WAS CITING THE RIGHT THING THE WHOLE TIME. Both committed live
+  // captures (`__tests__/fixtures/dsk-walk/*.enrichment.json`) key
+  // `scenario_contexts` and `pre_mortem.grounded_in` on `from->to` endpoint
+  // addresses, which is exactly what `decision-review-graph-projection.ts`
+  // hands the model as an edge's `id` and what `fragile_edges[].edge_id`
+  // carries. The producer honoured the prompt; the consumer looked for a field
+  // that does not exist. So the repair is NOT to relax a gate — it is to make
+  // the ADDRESS resolvable, by the identity the contract actually defines.
   const edges = graph.edges;
   if (Array.isArray(edges)) {
+    // ⚠ THE PAIR DOES NOT UNIQUELY RESOLVE EVERY CASE, so the address is read
+    // in two passes rather than written straight into the map. PARALLEL EDGES
+    // (two edges over the same ordered pair) share ONE address between them,
+    // and `Map.set` would silently hand the card to whichever came last.
+    // Attaching a card to an arbitrary one of several relationships asserts an
+    // identity nothing gave us — the exact fabrication class the `lookup_miss`
+    // gates exist to prevent. An address claimed more than once therefore
+    // resolves to NEITHER edge and the card drops exactly as it does today,
+    // with its existing telemetry. This is `deriveLabelIndex`'s own
+    // `AMBIGUOUS_LABEL` doctrine one level down, not a new opinion.
+    const pending: Array<{
+      readonly explicitId: string | null;
+      readonly address: string | null;
+      readonly ref: GraphNodeRef;
+    }> = [];
+    const addressClaims = new Map<string, number>();
     for (const raw of edges) {
       const e = readRecord(raw);
       if (e === null) continue;
-      const id = typeof e.id === 'string' ? e.id : null;
-      if (id === null) continue;
+      const explicitId = typeof e.id === 'string' && e.id.length > 0 ? e.id : null;
       const explicitLabel = typeof e.label === 'string' && e.label.length > 0
         ? e.label
         : null;
-      if (explicitLabel !== null) {
-        lookup.set(id, { id, label: explicitLabel, kind: 'edge' });
-        continue;
-      }
-      // Derive `from → to` from canonical endpoint node labels. Skip if
-      // either endpoint isn't in the node lookup (graph drift). Endpoint
-      // ids: `from_node_id`/`to_node_id` (enrichment shape) or `from`/`to`
-      // (persisted GraphStateIngress shape).
+      // Endpoint ids: `from_node_id`/`to_node_id` (enrichment shape) or
+      // `from`/`to` (the canonical `EdgeV3` / persisted shape).
       const fromId = typeof e.from_node_id === 'string' ? e.from_node_id
         : typeof e.from === 'string' ? e.from
         : null;
       const toId = typeof e.to_node_id === 'string' ? e.to_node_id
         : typeof e.to === 'string' ? e.to
         : null;
-      if (fromId === null || toId === null) continue;
-      const fromRef = lookup.get(fromId);
-      const toRef = lookup.get(toId);
-      if (fromRef === undefined || toRef === undefined) continue;
-      lookup.set(id, {
-        id,
-        label: `${fromRef.label} → ${toRef.label}`,
-        kind: 'edge',
-      });
+      // Both endpoints must resolve to canonical nodes before the pair is an
+      // address: an endpoint that is not in the graph is drift, and an address
+      // built over it would point at nothing (the pre-existing skip).
+      const fromRef = fromId === null ? undefined : lookup.get(fromId);
+      const toRef = toId === null ? undefined : lookup.get(toId);
+      const addressed = fromId !== null && toId !== null
+        && fromRef !== undefined && toRef !== undefined;
+      const address = addressed ? canonicalEdgeAddress(fromId, toId) : null;
+      // Derive `from → to` from canonical endpoint node labels when the
+      // producer named none. An explicit label still wins, unchanged.
+      const label = explicitLabel ?? (
+        fromRef !== undefined && toRef !== undefined
+          ? `${fromRef.label} → ${toRef.label}`
+          : null
+      );
+      // Nothing honest to register: no label to show and/or no key to file it
+      // under. Both were already `continue`s; neither is new.
+      if (label === null) continue;
+      if (explicitId === null && address === null) continue;
+      // The ref's OWN id is the ACTIONABLE composite, matching the fragile-edge
+      // card above (`composeEdgeIdentity`) — the string
+      // `adjust-edge-strength.ts::parseEdgeId` round-trips, so the thing the
+      // card points at and the thing the handler resolves are one string. A
+      // producer-supplied id still wins, so nothing that resolved before moves.
+      const id = explicitId ?? (
+        addressed && fromId !== null && toId !== null
+          ? composeEdgeIdentity(fromId, toId)
+          : ''
+      );
+      if (id.length === 0) continue;
+      pending.push({ explicitId, address, ref: { id, label, kind: 'edge' } });
+      if (address !== null) {
+        addressClaims.set(address, (addressClaims.get(address) ?? 0) + 1);
+      }
+    }
+    for (const entry of pending) {
+      // A producer-minted id is unambiguous by construction and keeps its own
+      // key — so a producer that DOES distinguish its parallel edges stays
+      // fully addressable even where the shared endpoint pair cannot.
+      if (entry.explicitId !== null) lookup.set(entry.explicitId, entry.ref);
+      if (entry.address !== null && addressClaims.get(entry.address) === 1) {
+        lookup.set(entry.address, entry.ref);
+      }
     }
   }
 }
 
-// ============================================================================
-// Wave-4 δ1 — the ONE shared entity→node-id resolver (ROADMAP 1.202 + 1.135).
-//
-// DERIVED (not mirrored, trap-12) from the forward `GraphNodeLookup` above: the
-// reverse `label → id` index is a pure O(nodes) derivation of the SAME map, so it
-// cannot desync — it has no independent source. Two consumers share it:
-//   - 1.202 (the ui_directive emitter, δ2) uses the FORWARD path (id → ref) it
-//     already has — every deterministic fact names its subject by id;
-//   - 1.135 (clickable coach copy) uses this REVERSE path (label → id) to link
-//     entity NAMES inside LLM-authored prose to their nodes.
-// Fail-closed everywhere: a duplicate normalised label is AMBIGUOUS → never
-// linked (we do not guess which node the prose meant); a too-short / bare-generic
-// label is not linked in prose (reusing the shipped over-match rails); a miss is
-// unlinked. Reuses `normaliseForPhraseMatch` + `containsWholePhrase` +
-// `LEVER_LABEL_MIN_LEN` + `GENERIC_LEVER_TOKENS` — the exact matching rails the
-// lever-naming guard already ships, so a producer label change or new node kind
-// flows through automatically (one input, no second list to maintain).
-// ============================================================================
-
 /**
- * Sentinel: a normalised label shared by TWO OR MORE nodes. Such a label resolves
- * to nothing (fail-closed unlinked) — the required ambiguity ruling. A unique
- * `symbol` so it can never collide with a real string id.
- */
-export const AMBIGUOUS_LABEL: unique symbol = Symbol('AMBIGUOUS_LABEL');
-
-/** Reverse index: normalised label → the single node id that owns it, or
- *  `AMBIGUOUS_LABEL` when two+ nodes share the normalised label. */
-export type LabelIndex = ReadonlyMap<string, string | typeof AMBIGUOUS_LABEL>;
-
-/**
- * Narrow override for a caller that already carries a typed canonical-identity
- * warrant. Generic single-word labels stay blocked by default because ordinary
- * prose cannot establish that a word such as "cost" names a model element.
- */
-interface ProseEntityReferenceOptions {
-  readonly allowGenericSingleWordLabels?: boolean;
-  readonly genericAllowedIds?: ReadonlySet<string>;
-  readonly preferLongestMention?: boolean;
-}
-
-/**
- * Build the reverse `label → id` index from a forward `GraphNodeLookup`. One
- * pass; duplicate normalised label → `AMBIGUOUS_LABEL`. Pure + deterministic;
- * derived every build from the forward map (no hand-maintained mirror).
- */
-export function buildLabelIndex(lookup: GraphNodeLookup): LabelIndex {
-  const index = new Map<string, string | typeof AMBIGUOUS_LABEL>();
-  for (const ref of lookup.values()) {
-    const key = normaliseForPhraseMatch(ref.label);
-    if (key.length === 0) continue;
-    // First writer wins the id slot; the SECOND collision flips the key to
-    // AMBIGUOUS and it never reverts (fail-closed on duplicate labels).
-    index.set(key, index.has(key) ? AMBIGUOUS_LABEL : ref.id);
-  }
-  return index;
-}
-
-/**
- * Resolve a single candidate label token to its node id, or `null`. Fail-closed
- * on: too-short / bare-generic label (would over-match), ambiguous (duplicate)
- * label, or a miss. Reuses the shipped normalisation + over-match rails so a lone
- * "Cost" / "AI" / "C#" never links.
- */
-export function resolveLabelToId(index: LabelIndex, rawLabel: string): string | null {
-  const key = normaliseForPhraseMatch(rawLabel);
-  if (key.length < LEVER_LABEL_MIN_LEN) return null;
-  if (!key.includes(' ') && GENERIC_LEVER_TOKENS.has(key)) return null;
-  const resolved = index.get(key);
-  if (resolved === undefined || resolved === AMBIGUOUS_LABEL) return null;
-  return resolved;
-}
-
-/**
- * True when prose names a label that the canonical reverse index marks as
- * ambiguous. This is the fail-closed companion to
- * {@link resolveProseEntityRefs}: that resolver deliberately omits ambiguous
- * references, while callers answering an explicit relationship question need
- * to distinguish "no second model element was named" from "a named element
- * maps to more than one canonical identity".
+ * Resolve an LLM-supplied graph reference to its canonical ref.
  *
- * Uses the exact same normalisation, whole-phrase and over-match rails as the
- * resolver. It does not create a second label-matching authority.
+ * ⭐ THIS IS THE CONSUMER HALF OF THE EDGE-IDENTITY REPAIR. A direct hit covers
+ * every node id and every producer-minted edge id, exactly as before. The
+ * fallback normalises an EDGE ADDRESS onto the one key the lookup is registered
+ * under, so the `->` spelling the decision_review producer emits and the `→`
+ * spelling the graph-edit path round-trips both resolve to the same edge
+ * instead of one of them missing by spelling alone.
+ *
+ * ⚠ IT WIDENS NO GATE. A reference that names an edge the graph does not
+ * contain, an address whose endpoints are not nodes, an ambiguous parallel-edge
+ * address, or a string with no separator at all still returns `undefined` and
+ * still drops its card with the same telemetry. The only references that newly
+ * resolve are ones naming an edge that GENUINELY EXISTS.
  */
-function hasAmbiguousProseEntityReferenceWithOptions(
-  index: LabelIndex,
-  prose: string,
-  options: ProseEntityReferenceOptions = {},
-): boolean {
-  const hay = normaliseForPhraseMatch(prose);
-  if (hay.length === 0) return false;
-  for (const [needle, resolved] of index) {
-    if (resolved !== AMBIGUOUS_LABEL) continue;
-    if (needle.length < LEVER_LABEL_MIN_LEN) continue;
-    if (
-      options.allowGenericSingleWordLabels !== true &&
-      !needle.includes(' ') &&
-      GENERIC_LEVER_TOKENS.has(needle)
-    ) continue;
-    if (firstBoundedPhraseAt(hay, needle) >= 0) return true;
-  }
-  return false;
-}
-
-export function hasAmbiguousProseEntityReference(
-  index: LabelIndex,
-  prose: string,
-): boolean {
-  return hasAmbiguousProseEntityReferenceWithOptions(index, prose);
-}
-
-/**
- * 1.135 — scan LLM-authored prose for the graph node labels it NAMES and return
- * one deduped `TargetRef` per unambiguously-resolved node, **ordered by first
- * mention in the prose**.
- *
- * Whole-phrase, both-ends-bounded matching; too-short / bare-generic
- * single-word labels are skipped; a label shared by two nodes
- * (`AMBIGUOUS_LABEL`) links to NEITHER. Pure; no producer value is read — only
- * the node's own display label.
- *
- * ⭐ WHY THE ORDER IS PROSE ORDER AND NOT LOOKUP ORDER (ROADMAP 2.1023).
- * This function used to return refs in `lookup.values()` order — i.e. the order
- * the PRODUCER happened to emit its nodes in, which the reader cannot see and
- * which has nothing to do with the sentence. Two consumers read `[0]` as "the
- * entity this card is about": the card's own `target_refs` pills, and
- * `ui_directive` row 7, which MOVES THE USER'S VIEWPORT. Measured across the 14
- * committed captures (`olumi-docs/PHASE0-EVIDENCE-2026-07-28/
- * mutation-witness-2026-08-10`): **12 of 21 multi-ref coaching cards listed
- * their entities in an order that contradicted their own sentence**, the
- * dominant shape being `"The link from <factor> to <goal> assumes…"` rendered
- * as `[goal, factor]`.
- *
- * ⚠ THIS IS A PURE REORDERING. The set of resolved refs is byte-identical —
- * every rail above still decides membership, and this function still cannot
- * add, drop, or invent a ref. Only the sequence changes. That is deliberate:
- * salience is NOT inferred from graph structure (influence, degree, rank).
- * The card named these entities in prose; the prose is the only evidence, and a
- * structural salience score would be a fabricated number wearing computed
- * clothes.
- *
- * TIE-BREAK — LONGER LABEL FIRST, and it is load-bearing. When a node labelled
- * `"CTO"` and one labelled `"Equity Offered to CTO"` both exist, prose naming
- * the longer phrase matches BOTH (see {@link containsWholePhrase} — bounded
- * matching does not prevent this). Ordering by offset alone already prefers the
- * longer one whenever the shorter sits INSIDE it and starts later; the
- * tie-break covers the remaining case, prefix containment
- * (`"Onboarding"` vs `"Onboarding friction"`), where both start at the same
- * offset. Together they make a separate longest-match rule unnecessary.
- *
- * Final tie-break is the original lookup order, so the result stays TOTAL and
- * DETERMINISTIC (never dependent on `Array.prototype.sort` stability).
- */
-function resolveProseEntityRefsWithOptions(
+export function resolveGraphEntityRef(
   lookup: GraphNodeLookup,
-  index: LabelIndex,
-  prose: string,
-  options: ProseEntityReferenceOptions = {},
-): readonly TargetRef[] {
-  const hay = normaliseForPhraseMatch(prose);
-  if (hay.length === 0) return [];
-  const matched: Array<{
-    ref: TargetRef;
-    at: number;
-    len: number;
-    ordinal: number;
-  }> = [];
-  const seen = new Set<string>();
-  let ordinal = 0;
-  for (const ref of lookup.values()) {
-    ordinal++;
-    const needle = normaliseForPhraseMatch(ref.label);
-    if (needle.length < LEVER_LABEL_MIN_LEN) continue;
-    // A bare generic single word ("cost") over-matches ordinary decision prose —
-    // require a distinctive single word or a multi-word phrase (same rule as the
-    // lever-naming guard's Finding-5 tempering).
-    if (
-      !needle.includes(' ') &&
-      GENERIC_LEVER_TOKENS.has(needle) &&
-      !(
-        options.allowGenericSingleWordLabels === true &&
-        options.genericAllowedIds?.has(ref.id) === true
-      )
-    ) continue;
-    let at = firstBoundedPhraseAt(hay, needle);
-    if (at < 0) continue;
-    // Fail-closed on ambiguity: a duplicate normalised label resolves to
-    // AMBIGUOUS_LABEL → link to neither node.
-    const resolved = index.get(needle);
-    if (resolved === undefined || resolved === AMBIGUOUS_LABEL) continue;
-    if (seen.has(resolved)) continue;
-    seen.add(resolved);
-    do {
-      matched.push({
-        ref: { id: ref.id, label: ref.label, kind: ref.kind },
-        at,
-        len: needle.length,
-        ordinal,
-      });
-      // A second standalone "Cost" must remain visible even when its first
-      // occurrence was nested inside "Engineering Build Cost".
-      at = options.preferLongestMention === true
-        ? firstBoundedPhraseAt(hay, needle, at + needle.length)
-        : -1;
-    } while (at >= 0);
-  }
-  matched.sort(
-    (a, b) => a.at - b.at || b.len - a.len || a.ordinal - b.ordinal,
-  );
-  if (options.preferLongestMention !== true) return matched.map((m) => m.ref);
-  let coveredUntil = -1;
-  const visibleIds = new Set<string>();
-  const visible: TargetRef[] = [];
-  for (const match of matched) {
-    const end = match.at + match.len;
-    if (end <= coveredUntil) continue;
-    coveredUntil = end;
-    if (visibleIds.has(match.ref.id)) continue;
-    visibleIds.add(match.ref.id);
-    visible.push(match.ref);
-  }
-  return visible;
+  raw: string,
+): GraphNodeRef | undefined {
+  const direct = lookup.get(raw);
+  if (direct !== undefined) return direct;
+  const address = canonicaliseEdgeReference(raw);
+  if (address === null || address === raw) return undefined;
+  return lookup.get(address);
 }
 
-export function resolveProseEntityRefs(
-  lookup: GraphNodeLookup,
-  index: LabelIndex,
-  prose: string,
-): readonly TargetRef[] {
-  return resolveProseEntityRefsWithOptions(lookup, index, prose);
-}
 
 /**
  * Resolve exact canonical labels for a typed identity-bearing question.
@@ -1001,8 +820,35 @@ export function buildReviewCardBlocks(
   // an uncertainty on any of them. Empty ⇒ suppress nothing (byte-identical).
   const leverLabels = collectLeverLabels(interventionControlledFactorIds, lookup);
 
-  // narrative (rank 1) — free-text prose; Finding 1 lever-naming guard applies.
-  const narrative = buildNarrativeCard(dr, ctx, leverLabels);
+  // narrative (rank 1) — free-text prose.
+  //
+  // ⛔⛔ `leverLabels` is deliberately NOT passed, on the SAME reasoning that
+  // scoped out `buildPreMortemCard` below, and after a measured user harm.
+  //
+  // Witnessed live 16 Sep 2026: three `review_card` blocks dropped before egress
+  // in one run, this one as `{ kind: 'narrative', reason: 'lever_named', field:
+  // 'narrative_summary' }`. The user asked three different questions in that
+  // session — including "What updates are you recommending we actually make?" —
+  // and got the same canned paragraph each time, because the card that describes
+  // the analysis never reached them.
+  //
+  // The guard is a SPEECH-ACT rule implemented as STRING CONTAINMENT.
+  // `proseNamesLever` tests only whether a lever LABEL occurs in the prose;
+  // mention and assertion-of-uncertainty read identically to it. `leverLabels`
+  // is the label of EVERY factor any option intervenes on — precisely the
+  // quantities this card exists to describe, and which the served prompt tells
+  // the model to name. One bounded occurrence dropped the whole card, with no
+  // rewrite path.
+  //
+  // ⭐ AND THIS SURFACE CANNOT COMMIT THE HARM THE DOCTRINE BANS. Read at the
+  // candidate it builds: title "How the analysis reads",
+  // `reviewCardSignals('narrative', 'info')`, `target_refs: []`, and NO
+  // `action_intent` of any kind. It offers the reader nothing to "resolve", so a
+  // lever named here is REPORTED, not proposed as an open question — the same
+  // distinction that made a pre-mortem's watch-point coaching rather than
+  // steering. Every OTHER surface in this file still receives `leverLabels`, and
+  // every other rule on this path still applies to this card.
+  const narrative = buildNarrativeCard(dr, ctx, []);
   if (narrative !== null) blocks.push(narrative);
 
   // pre_mortem (rank 2) — optional in the LLM output; free-text failure prose.
@@ -1867,6 +1713,43 @@ function buildJudgementLensOffer(selection: LensSelection): JudgementLensOffer |
 }
 
 /**
+ * T3 — the stated-dissent offer, or `null` for every other lens.
+ *
+ * Deliberately NOT folded into {@link buildJudgementLensOffer}: that function's
+ * whole body is an edge — `selection.judgementEdge`, two endpoint labels, an
+ * edge-shaped `target_refs` entry and an edge-shaped action prompt. T3 has no
+ * edge and no graph subject at all, so folding it in would mean four new
+ * `isDissent` branches through a function whose header records that FOUR
+ * readings of one discrimination is how a fifth branch acquires the wrong one.
+ *
+ * ⚠ `targetRefs` IS EMPTY, AND THAT IS DERIVED RATHER THAN LAZY.
+ * `TargetRefKind` is a CLOSED 7-value schema enum — factor, option, edge, goal,
+ * risk, constraint, outcome — with no member for a FINDING, and `target_refs`
+ * is `z.array(TargetRefSchema)` with no minimum, so an empty array is the
+ * contract's own way of saying "this card points at no graph entity". Choosing
+ * the nearest wrong kind would state a false OBJECT on a producer-owned field,
+ * which is the wrong-object class ROADMAP 2.392 exists to kill; inventing an id
+ * would put an id in a user-facing block. Empty is the true answer.
+ */
+function buildStatedDissentOffer(selection: LensSelection): JudgementLensOffer | null {
+  if (selection.lens !== 'stated_dissent_review') return null;
+  const dissent = selection.statedDissent;
+  if (dissent === undefined) return null;
+  // Same backstop stance as the sibling offers: the SAME pure predicate ran at
+  // eligibility inside `selectLens`, so this arm is unreachable through the
+  // live path — it stays because a lens id and its payload travelling as two
+  // fields is exactly the pairing a future refactor can break.
+  if (!isStatedDissentOfferComposable(dissent.openCount)) return null;
+  return {
+    body: composeStatedDissentBody(selection.body, dissent.openCount),
+    // No action pair in v1 — see `coaching/stated-dissent-offer-text.ts`. The
+    // mint emits `action_label`/`action_prompt` together or not at all, so the
+    // card ships with its finding and no inert chip.
+    targetRefs: [],
+  };
+}
+
+/**
  * ⚠ TEST-ONLY as of ROADMAP 2.211. Complete caller manifest at this tip
  * (`rg -a` over the whole repo excluding `node_modules`): this definition, one
  * prose mention in `lens-selector.ts`, and three spec files
@@ -2011,10 +1894,22 @@ export function buildLensSurface(
     return null;
   }
 
+  // T3 — same backstop stance again. The lens exists only to carry this
+  // sentence, so an uncomposable offer drops the SURFACE rather than shipping a
+  // card whose body opens on a tail with no antecedent.
+  const statedDissentOffer = buildStatedDissentOffer(selection);
+  if (selection.lens === 'stated_dissent_review' && statedDissentOffer === null) {
+    return null;
+  }
+
   // The turn's ONE action pair, whichever lens produced it. `judgementOffer`
   // first for the same reason `body`/`target_refs` read it first below: the two
   // offer kinds are mutually exclusive by lens, so the order is a tie-break that
   // can never fire, not a precedence rule.
+  // T3 carries no action pair, so it is deliberately absent from this chain:
+  // adding `statedDissentOffer?.actionLabel` would read as though it might one
+  // day supply one, and a later slice adding a PROBE prompt must revisit the
+  // routing gates rather than inherit a silent hook.
   const actionLabel = judgementOffer?.actionLabel ?? offer?.actionLabel;
   const actionPrompt = judgementOffer?.actionPrompt ?? offer?.actionPrompt;
 
@@ -2044,24 +1939,34 @@ export function buildLensSurface(
     coaching_kind: 'strengthen' as const,
     title: truncate(selection.title, TITLE_MAX),
     body: truncate(
-      judgementOffer?.body ?? offer?.body ?? groundedSensitivity?.grounded?.body ?? selection.body,
+      judgementOffer?.body ??
+        statedDissentOffer?.body ??
+        offer?.body ??
+        groundedSensitivity?.grounded?.body ??
+        selection.body,
       BODY_MAX,
     ),
     source: 'deterministic_signal' as const,
-    target_refs: (judgementOffer?.targetRefs ?? offer?.targetRefs ?? []) as readonly TargetRef[],
+    target_refs: (judgementOffer?.targetRefs ??
+      statedDissentOffer?.targetRefs ??
+      offer?.targetRefs ??
+      []) as readonly TargetRef[],
     priority_rank: 15,
     // Wave-2 ask 1 (0.19.0) + 1.120 residual (0.21.0): producer-owned guidance
     // signals for `strengthen` (category could_fix, signal_code STRENGTHEN_ITEM)
     // — except on the fragile-edge offer (detector class: result fragility) and
-    // the two judgement lenses (detector classes: the user's own override / the
-    // validation pipeline's contested verdict — see `guidance-signals.ts`).
+    // the three judgement lenses (detector classes: the user's own override /
+    // the validation pipeline's contested verdict / the user's own stated
+    // objection — see `guidance-signals.ts`).
     ...(selection.lens === 'override_stress_test'
       ? overrideStressTestSignals()
       : selection.lens === 'disagreement_resolution'
         ? disagreementResolutionSignals()
-        : offer !== null
-          ? fragileEdgeOfferSignals()
-          : guidanceSignalsForCoachingKind('strengthen')),
+        : selection.lens === 'stated_dissent_review'
+          ? statedDissentReviewSignals()
+          : offer !== null
+            ? fragileEdgeOfferSignals()
+            : guidanceSignalsForCoachingKind('strengthen')),
     // ROADMAP 2.989 — the ACTION. ⚠ NO `action_intent`, and that is derived,
     // not forgotten. `ActionIntentLiteral` is a CLOSED 15-value schema enum with
     // no edge-mutation member; its nearest value, `edit_factor`, would state a
@@ -2377,10 +2282,16 @@ export function buildLensCompanionBlocks(
     // 2.690 §B.5 names the P-003 companion reuse as a candidate for a LATER
     // slice — with honest copy — and that is a reviewed addition here, not a
     // default.
+    //
+    // T3 (`stated_dissent_review`) declares no companion either, and for a
+    // sharper reason than its siblings: a structured exercise block would be
+    // the product taking a turn at the objection, and the whole proposition of
+    // that card is that the objection is the user's to answer.
     case 'sensitivity_flip_risk':
     case 'evpi_evidence_priority':
     case 'override_stress_test':
     case 'disagreement_resolution':
+    case 'stated_dissent_review':
     case 'fragile_edge_resolution':
     case 'what_if_counterfactual':
       return [];
@@ -2794,7 +2705,7 @@ function buildPreMortemCard(
   const groundedStrings = grounded.filter((g): g is string => typeof g === 'string' && g.length > 0);
   const targetRefs: TargetRef[] = [];
   for (const raw of groundedStrings) {
-    const ref = lookup.get(raw);
+    const ref = resolveGraphEntityRef(lookup, raw);
     if (ref !== undefined) targetRefs.push(ref);
   }
   if (groundedStrings.length > 0 && targetRefs.length === 0) {
@@ -3117,7 +3028,13 @@ function buildBiasCards(
     const targetRefs: TargetRef[] = [];
     for (const elt of affected) {
       if (typeof elt !== 'string') continue;
-      const ref = lookup.get(elt);
+      // Same LLM-supplied edge-reference class as the two drop sites above:
+      // the served prompt tells the model `affected_elements` may carry
+      // "valid node/edge ids from graph". This one never DROPPED the card — a
+      // missed edge just silently lost its link — so it cost a link rather
+      // than a card, but it is the same unresolvable address and the same
+      // one-line resolution.
+      const ref = resolveGraphEntityRef(lookup, elt);
       if (ref !== undefined) targetRefs.push(ref);
     }
     const candidate = {
@@ -3331,7 +3248,7 @@ function buildScenarioContextCards(
     // the canonical graph lookup. The Record key IS the edge claim;
     // emitting with `target_refs: []` would publish a "scenario about
     // an unknown thing" — fail-closed instead.
-    const ref = lookup.get(edgeId);
+    const ref = resolveGraphEntityRef(lookup, edgeId);
     if (ref === undefined || ref.kind !== 'edge') {
       emitDrop({
         block_type: 'review_card',

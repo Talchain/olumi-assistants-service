@@ -200,6 +200,7 @@
  */
 
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
+import type { GraphStateIngress } from '../boundary/request-extensions.js';
 import {
   buildCanonicalAnalysisReadyFromGraph,
   mergeInterventionSources,
@@ -375,7 +376,28 @@ export const BASELINE_FRAMING = /\bbaselines?\b/;
  *   - an attached unit or a thousands separator still mean the number is not
  *     the model-unit value, and are checked on the text AFTER the match.
  */
-const VALUE_ASSIGNMENT = /\bto\s+(£|\$|€)?\s*(\d+(?:\.\d+)?|\.\d+)(\s*%)?/g;
+// ⛔ THE WORD SPELLING OF PERCENT WAS REFUSED WHILE THE ASK INVITED IT.
+//
+// MEASURED on the real bytes, 14 Sep 2026, over "Set the <option> option's
+// effect on <factor> <form>":
+//     to 60%          -> 0.6      to 60 percent   -> NULL
+//     to 0.6          -> 0.6      to 60 per cent  -> NULL
+// The word forms match `to 60`, then die on the [0,1] range check below.
+//
+// And the product's own ask uses the word: `MISSING_VALUE_ASK_FORMAT_HINT`
+// (missing-value-answer.ts) is "Just the percentage is enough — it is the level
+// the factor reaches, not how much it moves: 0% means zero, 100% means its top."
+// So a user typing what they were just asked for was refused.
+//
+// The sibling owner already reads all three spellings (`PERCENT_SUFFIX`,
+// missing-value-answer.ts:230). Two spellings of "percent" in one estate is the
+// hand-maintained mirror this file exists downstream of; this uses the same set.
+//
+// ⛔ THE CURRENCY REFUSAL IS UNTOUCHED, deliberately. `to 59` and `to £59` still
+// resolve to NULL on the range check, because no currency-to-level conversion
+// exists on this path and inventing one here would choose a scale this module
+// has no basis for.
+const VALUE_ASSIGNMENT = /\bto\s+(£|\$|€)?\s*(\d+(?:\.\d+)?|\.\d+)(\s*(?:%|per\s?cent|percent))?/g;
 
 /**
  * One candidate assignment, kept with WHERE it occurred so a compound
@@ -700,7 +722,7 @@ export function countCollidingOptionLabels(labels: readonly string[]): number {
 
 /** The factors this option is wired to. Same reader as the recovery copy. */
 export function linkedFactorsOf(
-  graph: GraphV3T,
+  graph: Pick<GraphStateIngress, 'nodes' | 'edges'>,
   optionId: string,
 ): { readonly id: string; readonly label: unknown }[] {
   const byId = new Map(graph.nodes.map((n) => [n.id, n]));

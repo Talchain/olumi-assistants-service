@@ -76,6 +76,11 @@ import {
 // persisted graph — the same lookup the wave-4 directive rows use for the
 // mutation / what_would_flip branches, which likewise have no enrichment graph
 // to read. Labels come from here, never from the id (Phase-3 §0.1).
+import {
+  analysisReadyPermitsLeaderNaming,
+  permittedAnalysisModeFromAnalysisReady,
+  type PermittedAnalysisMode,
+} from './admission/analysis-admission.js';
 import { buildGraphNodeLookupFromGraph } from './compose/phase3-blocks.js';
 import {
   commitDirectAnswer,
@@ -127,6 +132,7 @@ import {
   tryCompoundValueUpdate,
   buildClarifyAssistantText,
   buildNonFactorKindRefusalText,
+  buildNonFactorKindRefusalConstraintChips,
   buildClarifyChipMessage,
   buildDeicticClarifyAssistantText,
   mapCqeQuantityToProposalValue,
@@ -156,6 +162,13 @@ import {
 // `detectWithheldConsent` above answers the NEGATIVE half and stands down on a
 // read request, which is how the walk's unrequested constraint write happened.
 // See the two gates below: the STEP 2 demotion, and the commit-closure strip.
+// ⭐ The quote-mask the ordinary-text authority term needs. Bound to the
+// model's OWN node labels: of 1,564 mutating turns, three carried a
+// deliberative frame and TWO were false positives from a node labelled
+// "What should we do?" matching inside its own quoted mention. Projected from
+// `context.persistedGraph` — the server-side read, never request-supplied
+// graph_state, which is null on every live turn.
+import { projectModelNodeLabels } from './routing/ordinary-text-authority.js';
 import {
   detectMutationWarrant,
   buildMutationWarrantDemotionText,
@@ -194,6 +207,7 @@ import {
   type ProposalRejectionReason,
 } from './tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import { mergeMutatedGraphForPersistence } from './tools/handlers/d1-shared/apply-graph-mutation.js';
+import { collectNotCheckableConstraintIds } from './tools/handlers/d1-shared/constraint-write-admissibility.js';
 import {
   applyCompoundValueUpdateChain,
   preflightCompoundBatch,
@@ -201,6 +215,8 @@ import {
 } from './compound-value-update-chain.js';
 import {
   decideGoalTargetReceipt,
+  extractPersistedGoalTarget,
+  findSoleGoalNode,
   formatGoalTargetNotSavedText,
 } from './compose/goal-target-receipt-guard.js';
 import {
@@ -211,10 +227,12 @@ import {
 import {
   tryBaselineElicitationResume,
   tryClarificationResume,
+  tryGoalTargetElicitationResume,
 } from './routing/clarification-resume.js';
 import {
   formatBaselineReask,
   formatBaselineAskCollision,
+  formatValueWithUnit,
 } from './tools/handlers/d1-shared/format-confirmation.js';
 import {
   buildTypedChipMutationProposal,
@@ -282,10 +300,33 @@ import {
 } from './handlers/gm-held-execute.js';
 import {
   buildReadinessRepairOffer,
+  withReadinessApplyControl,
   executeReadinessRepair,
   readReadinessRepairResume,
   type ReadinessRepairResumeRead,
 } from './handlers/readiness-repair-proposal.js';
+import { executeValueBatch } from './handlers/readiness-value-batch.js';
+import {
+  readValueBatchResume,
+  type ValueBatchResumeRead,
+} from './handlers/readiness-value-batch-resume.js';
+import { buildGenericEditGraphHandlerFact } from './handlers/edit-graph-fact-builder.js';
+
+/**
+ * ⭐ THE TWO SENTENCES A DECLINED VALUE BATCH IS ALLOWED TO SAY.
+ *
+ * Both open by stating that NOTHING was applied, because that is the fact the
+ * user needs first and the one a vague apology hides. Neither offers a retry
+ * the product cannot honour, and neither implies the user authored a number:
+ * the estimates are the product's, the approval was the user's, and the copy
+ * keeps those apart.
+ */
+const VALUE_BATCH_NOT_APPLIED_MOVED =
+  'I did not apply the estimated values. The model has changed since I put them '
+  + 'together, so they are no longer the set you reviewed.';
+const VALUE_BATCH_NOT_APPLIED_WHOLE =
+  'I did not apply the estimated values. I could not apply all of them safely, and '
+  + 'writing only part of the set would leave the model in a state you never reviewed.';
 import { composeReadinessIntakeResponse } from './routing/readiness-intake.js';
 import { describeHeldOperationsSubject } from './handlers/edit-graph-referee-gate.js';
 import { isProposedChangeActionType } from './types/proposed-change.js';
@@ -297,10 +338,14 @@ import {
   sanitisePublicCopyOrFallback,
   emitProposedChange,
 } from './compose/proposed-change.js';
+import { buildConstraintTargetCorrection } from './compose/constraint-target-correction.js';
 import {
   buildWarrantDemotion,
+  buildIncompleteOfferRefusalText,
+  findUnsupportedOfferTargetKind,
   isProductMintedOfferCopy,
   type PersistedConstraintRow,
+  type TargetKindLookupNode,
 } from './compose/warrant-demotion.js';
 import {
   derivePendingActivity,
@@ -467,6 +512,7 @@ import {
 import { pickLatestDecisionReview } from './coaching/pick-decision-review.js';
 import { pickLatestFactorEvppiPriorityGuidance } from './coaching/select-factor-evppi.js';
 import { pickLatestRawRobustness } from './coaching/pick-raw-robustness.js';
+import { separationEstablishedFromRobustness } from './compose/analysis-state-v1.js';
 import { pickLatestDefaultedAssumptions } from './coaching/pick-defaulted-assumptions.js';
 import { applyDefaultedValueEgress } from './compose/defaulted-value-egress.js';
 import { applyBlockedSlotClaimGuard } from './compose/blocked-slot-claim-guard.js';
@@ -614,9 +660,9 @@ export interface TurnExecutorRunResult {
    */
   mayNameLeadingOptionProvenance: MayNameLeadingOptionProvenance;
   /**
-   * ROADMAP 1.233 — which branch the withheld-explanation claim gate took on
-   * this turn, or ABSENT when the gate never ran (non-explanation handler, or
-   * a permitted verdict).
+   * Which branch the withheld-explanation projection took at the in-flow or
+   * finalise gate. Absent when neither applied a projection; a non-explanation
+   * handler can still be projected at finalise.
    *
    * Exists for one reason: to make the gate OBSERVABLE AT THE WIRE. Route-v2
    * stamps it onto `_diagnostic_trace.claim_safety.withheld_projection_reason`.
@@ -1350,6 +1396,10 @@ export async function runTurnExecutor(
       // LAYER 2 reads the commit's own `consumedPendingRefs` instead, which is
       // the same fact recorded on the meta by every consuming site.
       isConfirmResume: false,
+      // Term D's quote-mask. A degraded graph read yields `[]`, which masks
+      // nothing and therefore withholds MORE rather than less — the same
+      // fail-safe direction this gate declares above.
+      modelNodeLabels: projectModelNodeLabels(context.persistedGraph),
     },
     GRAPH_MUTATING_HANDLER_IDS,
   );
@@ -1585,6 +1635,11 @@ export async function runTurnExecutor(
     lastCommitConflictError = null;
     zeroResolvedSelectionGuardAppliedAtCommit = false;
     zeroResolvedSelectionMutationReceiptPersistedAtCommit = false;
+    const projectionStateBeforeCommit = {
+      functionalAnswerText,
+      capturedReasoning,
+      withheldExplanationReasonForRun,
+    };
     let result: Awaited<ReturnType<typeof commitDirectAnswer>>;
     try {
       // The finaliser's zero-resolved-selection guard used to run only AFTER
@@ -1643,11 +1698,24 @@ export async function runTurnExecutor(
           contentGraph: effectiveTurnGraph,
         },
         store,
+        // Ordinary conversation must remember its public answer, not the
+        // candidate that the finaliser will replace. Executed handlers and
+        // graph writes retain their existing receipt/fact ordering unchanged.
+        proposedHandlerIdForOutcome === null &&
+          !handlerEmittedMutatedGraph &&
+          !graphWasProvided(meta.graph)
+          ? projectConversationResponseForCommit
+          : undefined,
       );
       zeroResolvedSelectionGuardAppliedAtCommit = zeroSelectionProjection.applied;
       zeroResolvedSelectionMutationReceiptPersistedAtCommit =
         mutationReceiptCandidate && result.graphPersisted;
     } catch (error) {
+      // An attempted projection is not a committed answer. Do not leak its
+      // classification/reason into the existing failed-commit recovery.
+      functionalAnswerText = projectionStateBeforeCommit.functionalAnswerText;
+      capturedReasoning = projectionStateBeforeCommit.capturedReasoning;
+      withheldExplanationReasonForRun = projectionStateBeforeCommit.withheldExplanationReasonForRun;
       if (
         error instanceof TurnFenceRejectedError ||
         error instanceof GraphStaleWriteError
@@ -1936,8 +2004,9 @@ export async function runTurnExecutor(
   // HTTP-level acceptance walk can observe the gate at all: the POST-#713 walk
   // could prove REPLACE only because that branch happens to substitute a
   // byte-identifiable constant, and could NOT verify APPEND at any price
-  // (§4.3, "UNVERIFIED — not a pass"). `null` = the gate did not run or made
-  // no change.
+  // (§4.3, "UNVERIFIED — not a pass"). Both projection sites record their
+  // result here. `null` means neither applied a projection; the in-flow gate
+  // records `unchanged` explicitly when it examines an already-clean answer.
   let withheldExplanationReasonForRun: WithheldExplanationReason | null = null;
   // ROADMAP 2.104 (F2) — may the withheld-reason copy NAME the user's ratified
   // conditions on this turn? Only when the analysis is `fresh`: the verdict is
@@ -2306,6 +2375,20 @@ export async function runTurnExecutor(
   // opt out. `finalizeRun` classifies `'functional'` iff this captured text (or
   // a failure response) survives to the final text; everything else is
   // `'substantive'`. See TurnExecutorRunResult.answerKind + the route egress.
+  // ⭐ THE ANALYSIS-ELECTION OFFER (15 Sep 2026). Armed at ONE place — the
+  // analysis-election gate's demotion arm, ~4.7k lines below — and consumed at
+  // ONE place, the converse compose branch that owns the synthesised demotion
+  // turn. Hoisted because those two sites sit in the same function body but
+  // thousands of lines apart, and `routingResult` (which is try-scoped and
+  // reassigned by the demotion itself) cannot carry it.
+  //
+  // It is a CHIP, not a pending action, and that is deliberate: `commit.ts`
+  // derives exactly one `run_analysis` pending from a rendered `run_analysis`
+  // chip (the atomic-emit contract), so arming the chip arms the pending and
+  // the "persisted pending ⟹ rendered chip" invariant cannot be broken by
+  // this path. Arming a pending directly would have created the orphan that
+  // invariant exists to forbid.
+  let analysisElectionOfferChip: SuggestedAction | undefined;
   let functionalAnswerText: string | undefined;
 
   // ROADMAP 1.132 (F1) — the SINGLE capture chokepoint for direct-answer
@@ -2769,6 +2852,36 @@ export async function runTurnExecutor(
       const compactedConstraints = compactedGraph
         ? (contextGraphForReasoning?.goal_constraints ?? null)
         : null;
+      // ⭐⭐ THE EVALUABILITY VERDICT, DERIVED WHERE THE RAW GRAPH STILL EXISTS.
+      //
+      // #1484 made the WRITE-TIME receipt say when a limit's target records no
+      // number, so the analysis cannot check it. The same claim is then
+      // re-rendered on every LATER turn by `recent-changes.ts`, from a site
+      // that holds no graph — so the ContextPack went on saying "Added
+      // constraint: …" unqualified for the rest of the conversation. This is
+      // the one line that carries the verdict across that gap.
+      //
+      // ⚠ DERIVED FROM `contextGraphForReasoning`, THE SELECTOR'S RAW
+      // SNAPSHOT — the same authority `compactedConstraints` above reads, and
+      // deliberately NOT from `compactedGraph`. `compactGraph` flattens
+      // `observed_state` and drops `prior`/`display_value`/`intercept`/
+      // `goal_threshold*`/`scale_frame`/`data`, so a compact node classifies as
+      // recording nothing and EVERY limit would be reported unevaluable. Nor
+      // from the assembler's own `graph` input, which is `undefined` on every
+      // turn that has a graph (see the note on the line below `graph:`).
+      //
+      // ⚠ CANONICAL-ONLY, for the same reason `selection` and `goal_target`
+      // are: this SPEAKS about the saved model. A provisional first-touch
+      // request graph is not the saved model, and a verdict read off caller
+      // bytes would tell a user their limit is ignored on the strength of a
+      // graph nobody has committed.
+      const notCheckableConstraintIds =
+        contextGraphSelection.status === 'canonical'
+          ? collectNotCheckableConstraintIds(
+              contextGraphForReasoning?.goal_constraints ?? null,
+              contextGraphForReasoning,
+            )
+          : undefined;
       const contextPackStartedAt = timingsEnabled ? Date.now() : 0;
       // Coaching Context Pack v1: project the live `deriveAnalysisFreshness`
       // verdict (already computed this turn) + readiness into the hash-free,
@@ -2810,6 +2923,78 @@ export async function runTurnExecutor(
       // unknown readiness stays UNKNOWN rather than reading as "unblocked".
       const readinessForPack =
         projectContextPackReadiness(analysisReadyForTurn) ?? undefined;
+      // ⭐⭐ THE POPULATION, AND WHY THIS READS SEPARATION RATHER THAN ENTITLEMENT.
+      //
+      // ⛔ MY FIRST CUT WAS WRONG AND THE INDEPENDENT REVIEW CAUGHT IT
+      //    (CHANGES_REQUIRED `5592620999` at `39557a98`). It gated only on
+      //    `mayNameLeadingOptionForRun`, which resolves through
+      //    `claim-safety-read.ts:412-415` -> `constraint-feasibility.ts:1042-1053`
+      //    to the persisted CONSTRAINT verdict. That is ENTITLEMENT. It says
+      //    nothing about whether this result separated the arms. So an entitled
+      //    `quantified_provisional` run with `near_tie.is_tie = true`, or with
+      //    no separation computed at all, was handed
+      //    `PROVISIONAL_FIGURES_INSTRUCTION` — a deterministic statement that
+      //    its options ARE separable, which is false — while the final wire arm
+      //    (which does read separation) refused that same population. It
+      //    recreated the coach/summary disagreement this work exists to remove,
+      //    from the opposite side.
+      //
+      // The separation interpretation is REUSED, not recomputed:
+      // `pickLatestRawRobustness` off the SAME selected `run_analysis` fact,
+      // and the SAME predicate `composeLeaderClaim` applies
+      // (`compose/analysis-state-v1.ts:604-606`) — known AND not a near tie.
+      // No second calculator, and `composeLeaderClaim` remains the author of
+      // the published `analysis_state.leader_claim.separation`.
+      //
+      // ⚠ EXACTLY `quantified_provisional`, not "any mode below comparative".
+      //   That was the second half of the same finding: `none` and
+      //   `exploratory` are different admission answers and keep their
+      //   restrictions, and the final wire arm already required the exact mode.
+      //   The two consumers must name the same population or they disagree
+      //   again.
+      //
+      // ⚠ ABSENCE IS NOT PERMISSION. Unknown separation (`null` signals) is NOT
+      //   separated: it falls through to today's behaviour rather than
+      //   asserting separability the model never established.
+      //
+      // ⛔ AND THE COLLECTION MATTERED TOO. My first read used
+      //    `context.prior_facts` — a BOUNDED HOT WINDOW — while the analysis the
+      //    model is actually shown comes from `promptAnalysisSourceFact`,
+      //    selected out of the durable `scenarioAnalysisFacts` above. After a
+      //    hot-window eviction those disagree: the model still receives the
+      //    durable result while this interpretation would read no analysis at
+      //    all and fall through. Bind to the SAME selected fact the prompt uses,
+      //    through the SAME reader — one selection, not two populations.
+      const admissionPermitsLeaderNaming =
+        analysisReadyPermitsLeaderNaming(analysisReadyForTurn);
+      const separationEstablishedForRun = separationEstablishedFromRobustness(
+        pickLatestRawRobustness(
+          promptAnalysisSourceFact === null ? [] : [promptAnalysisSourceFact],
+        ),
+      );
+      const provisionalAdmissionModeForRun: PermittedAnalysisMode | null =
+        !admissionPermitsLeaderNaming &&
+        separationEstablishedForRun &&
+        permittedAnalysisModeFromAnalysisReady(analysisReadyForTurn) ===
+          'quantified_provisional'
+          ? 'quantified_provisional'
+          : null;
+      // ⛔ THE FALL-THROUGH WAS THE OTHER HALF OF THE SAME DEFECT. Not
+      //    qualifying is not the same as being permitted: an admission that
+      //    actively caps below `comparative_leader` on a run this population
+      //    test rejects (near tie, unknown separation, a lower mode) was still
+      //    reaching `{ status: 'permitted' }`, and the assembler only removes
+      //    leader-bearing display fields for `withheld`
+      //    (`context-pack-assembler.ts:1873-1900`). So the coach kept an
+      //    ordering the FINAL arm withholds — the same two-surface disagreement
+      //    this work exists to remove, moved one population over.
+      //
+      // ⚠ FAIL-OPEN IS PRESERVED EXACTLY. `analysisReadyPermitsLeaderNaming`
+      //   returns `true` for an absent or unparseable admission, so this is
+      //   `false` there and every pre-`analysis_admission` producer keeps its
+      //   behaviour. It fires only on an admission that actively caps.
+      const admissionWithholdsLeaderNaming =
+        !admissionPermitsLeaderNaming && provisionalAdmissionModeForRun === null;
       // Context v2 S4-INJECT (ROADMAP 1.73; 01 §2/§4, 05 §S4 inject row):
       // read the stored rolling summary for injection — UNCONDITIONAL since
       // the O-2 activation (CEE_ROLLING_SUMMARY deleted per the
@@ -2987,6 +3172,20 @@ export async function runTurnExecutor(
             : undefined,
         graphContext: { status: contextGraphSelection.status },
         graph: compactedGraph ? undefined : contextGraphForReasoning,
+        // ⚠ THIS LINE IS THE WIRE — same pin as `compactedConstraints` below,
+        // and for the same reason: the projection it feeds is defended by its
+        // own unit suite, but a defended pure function with a dark call site is
+        // this estate's chronic failure #1. Cutting this line does not remove a
+        // `recent_changes` entry; it silently strips the qualification from it,
+        // restoring the pre-#1484 product on every turn after the write.
+        //
+        // Neutering it MUST turn
+        // context/__tests__/constraint-evaluability-wire.route-level.test.ts
+        // red. That suite pins its own PRECONDITION first — it asserts from
+        // telemetry that the turn took the COMPACT path, because on the
+        // non-compact path the assembler's `graph` input is populated and a
+        // future reader might believe the verdict could have come from there.
+        notCheckableConstraintIds,
         compactedGraph,
         // ⚠ THIS LINE IS THE WIRE — the same pin as `selection` above, and for
         // the same reason. `compactGraph` produces a `GraphV3Compact`
@@ -3039,13 +3238,40 @@ export async function runTurnExecutor(
         // analysis channel. The assembler applies this before its single
         // whole-pack ceiling, so withheld bytes cannot displace authorised
         // conversation and then disappear in a later projection.
-        modelFacingClaimSafety: mayNameLeadingOptionForRun
-          ? { status: 'permitted' }
-          : {
+        //
+        // ⭐⭐ THREE STATES. `mayNameLeadingOptionForRun` answers entitlement x
+        // separation; the admission answers semantic MODE. Composing them as a
+        // single boolean is what produced the witnessed incoherence on native
+        // request `23ab579d`: caveated comparative prose beside a block reading
+        // "No single option can be put forward yet".
+        //
+        // Paul ruled `quantified_provisional` is **caveat, not withhold**
+        // (relayed, `olumi-programme-docs#38` comment `5576895511`); #1254's
+        // withhold governs the different population where options CANNOT be
+        // separated. So a separable run whose mode is merely provisional keeps
+        // its comparative material and gains the qualification — it is not
+        // pushed into `withheld`, which would apply #1254's rule to Paul's
+        // population and delete the material the person asked about.
+        modelFacingClaimSafety: !mayNameLeadingOptionForRun
+          ? {
               status: 'withheld',
               constraintVerdictState: constraintVerdictStateForRun,
               provenance: mayNameLeadingOptionVerdictForRun.provenance,
-            },
+            }
+          : provisionalAdmissionModeForRun !== null
+            ? { status: 'qualified', mode: provisionalAdmissionModeForRun }
+            : admissionWithholdsLeaderNaming
+              ? {
+                  // The turn IS entitled; the ADMISSION is what withholds. The
+                  // run's real verdict state is passed unchanged, so
+                  // `withheldLeaderInputNoteForState` selects the NO-CAUSE note
+                  // rather than asserting a constraint failure that did not
+                  // happen — one withheld shape, no invented cause.
+                  status: 'withheld',
+                  constraintVerdictState: constraintVerdictStateForRun,
+                  provenance: mayNameLeadingOptionVerdictForRun.provenance,
+                }
+              : { status: 'permitted' },
         // Spine A backstop: option-controlled levers must not be surfaced as
         // tunable sensitivity drivers. Computed from the RAW, unparsed graph —
         // NOT the compacted projection (strips intervention bundles) and NOT a
@@ -3460,15 +3686,13 @@ export async function runTurnExecutor(
                 assistant_text:
                   `The earlier repair plan is no longer valid, so I regenerated it against the model as it stands now. ` +
                   recoveryResponse.assistant_text,
-                suggested_actions: [
-                  ...recoveryResponse.suggested_actions,
-                  {
-                    id: offer.chip.id,
-                    label: offer.chip.label,
-                    message: offer.chip.message,
-                    ...(offer.chip.detail ? { detail: offer.chip.detail } : {}),
-                  },
-                ],
+                // Same seam as the route-level arm: the composer's row is
+                // already at its cap, so an append would leave the regenerated
+                // apply control unrenderable.
+                suggested_actions: withReadinessApplyControl(
+                  recoveryResponse.suggested_actions,
+                  offer.chip,
+                ) as typeof recoveryResponse.suggested_actions,
               };
             } else {
               recoveryResponse = {
@@ -3705,6 +3929,318 @@ export async function runTurnExecutor(
         }
         return finalizeRun();
       };
+      /**
+       * ⭐⭐ THE VALUE BATCH'S ONLY DEGRADE — disclosure, and ZERO graph writes.
+       *
+       * Every non-executed outcome lands here. It commits a CONVERSATION turn
+       * (so the user is told what happened and the dead chip is consumed) and
+       * deliberately passes NO `graph`, so `commitTurn` writes none.
+       *
+       * ⛔ WHY THERE IS NO PARTIAL PATH, AND WHY IT IS NOT A CONVENIENCE.
+       * A batch is approved AS A SET: the user read N estimates together and
+       * pressed one control. Writing the subset that still matched would put
+       * numbers in the model that were never reviewed in the combination that
+       * now exists — strictly worse than the one-at-a-time loop this replaces,
+       * because there the user sees each value as it lands. `executeValueBatch`
+       * is structurally atomic; this closure is the reason that atomicity
+       * survives the trip through the executor.
+       *
+       * ⚠ IT DOES NOT REGENERATE THE OFFER, and that is deliberate rather than
+       * an omission. The sibling `regenerateReadinessRepair` can rebuild its
+       * chip because `buildReadinessRepairOffer` is pure. Rebuilding a value
+       * batch needs the ESTIMATOR — a model call — and a decline is not the
+       * place to spend one silently. `composeReadinessIntakeResponse` still
+       * carries the current open issues and its own answer chips, so the user
+       * is left with a live route rather than a dead control.
+       */
+      const declineValueBatch = async (
+        priorPending: PendingAction,
+        baseGraph: unknown,
+        pathTag: string,
+        lead: string,
+      ): Promise<TurnExecutorRunResult> => {
+        const current = composeReadinessIntakeResponse(baseGraph, context.stage);
+        const recoveryResponse = {
+          ...current.response,
+          assistant_text: `${lead} ${current.response.assistant_text}`,
+        };
+        sonnetTextForLog = recoveryResponse.assistant_text;
+        resolvedTurnClass = 'direct_answer';
+        intentClass = 'converse';
+        responseTypeForObs = 'direct_answer';
+        llmCallsUsed = 0;
+        stagesCompleted.push('orient');
+        stagesCompleted.push('compose');
+        try {
+          const committed = await commitTurn(recoveryResponse, {
+            scenario_id: context.session_id,
+            turn_id: context.request_id,
+            turn_class: 'direct_answer',
+            handler_id: null,
+            request_hash: computeRequestHash(payload),
+            llm_calls_used: 0,
+            duration_ms: Date.now() - startedAt,
+            handler_facts: [],
+            pending_actions: [],
+            consumedPendingRefs: [priorPending.chip_id],
+          });
+          commitPerformed = committed.performed;
+          stagesCompleted.push('commit');
+          response = committed.response;
+          analysisReadyForTurn = current.assessment?.analysisReady;
+        } catch (error) {
+          log.error(
+            {
+              event: 'v5.state_commit_failed',
+              request_id: requestId,
+              session_id: context.session_id,
+              path: pathTag,
+              err: serialiseError(error),
+            },
+            'V5 TurnExecutor commit failure while declining a value batch',
+          );
+          failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
+          response = buildFailureResponse(
+            'STATE_COMMIT_FAILED',
+            context.stage,
+            { phase: 'commit' },
+            recoveryCtx(),
+          );
+        }
+        return finalizeRun();
+      };
+
+      /**
+       * ⭐⭐ THE CHIP CLICK THE VALUE BATCH NEVER HAD.
+       *
+       * The producer, the composition, the resume reader and the atomic writer
+       * all existed and were all tested. Nothing handled the CLICK, so the one
+       * chip this feature offers fell through to the generic
+       * `apply_proposed_change` synthesis — which does not know this handler id,
+       * resolves it `invalid`, and DECLINES the action the user just approved.
+       * This closure is that missing seam, mirroring the readiness-repair
+       * sibling above hop for hop.
+       *
+       * ⚠ THE STALENESS CHECK IS NOT REDUNDANT WITH `executeValueBatch`'s
+       * membership re-derivation, and it is worth saying why both stay.
+       * They answer DIFFERENT QUESTIONS (trap 21). The hash asks *"is this the
+       * model the user was looking at when they read the estimates?"*; the
+       * membership re-derivation asks *"is this still the exact set of gaps the
+       * proposal covers?"*. A graph can move in ways that leave the gap set
+       * identical — an edited label, a changed edge strength — and the user
+       * would then be approving numbers they read against a different model.
+       * Aligning the two, or dropping either, is the wrong fix.
+       */
+      const commitValueBatchResume = async (
+        batchPending: PendingAction,
+        read: ValueBatchResumeRead,
+      ): Promise<TurnExecutorRunResult> => {
+        const baseGraph = context.persistedGraph ?? graphStateForTurn ?? null;
+        if (read.kind !== 'ok') {
+          return declineValueBatch(
+            batchPending,
+            baseGraph,
+            'value_batch_invalid_payload',
+            VALUE_BATCH_NOT_APPLIED_WHOLE,
+          );
+        }
+        let baseHash: string | null = null;
+        try {
+          baseHash = computeAnalysisAffectingGraphHash(
+            baseGraph as GraphStateIngress | null | undefined,
+          );
+        } catch {
+          baseHash = null;
+        }
+        if (
+          baseHash === null
+          || !batchPending.preconditions.graph_hash
+          || batchPending.preconditions.graph_hash !== baseHash
+        ) {
+          return declineValueBatch(
+            batchPending,
+            baseGraph,
+            'value_batch_stale',
+            VALUE_BATCH_NOT_APPLIED_MOVED,
+          );
+        }
+
+        // The single writer. It re-derives membership from the CURRENT graph and
+        // refuses on `membership_moved`; nothing here pre-empts or bypasses that.
+        const outcome = executeValueBatch({
+          proposal: read.proposal,
+          currentGraph: baseGraph,
+        });
+        if (outcome.status !== 'executed') {
+          log.warn(
+            {
+              request_id: requestId,
+              scenario_id: context.session_id,
+              pending_action_id: batchPending.id,
+              reason: outcome.reason,
+            },
+            'Value batch confirmation declined; zero graph writes',
+          );
+          return declineValueBatch(
+            batchPending,
+            baseGraph,
+            `value_batch_${outcome.reason}`,
+            outcome.reason === 'membership_moved'
+              ? VALUE_BATCH_NOT_APPLIED_MOVED
+              : VALUE_BATCH_NOT_APPLIED_WHOLE,
+          );
+        }
+
+        const preParsedForFact = GraphV3.safeParse(baseGraph);
+        const batchFact = preParsedForFact.success
+          ? buildGenericEditGraphHandlerFact({
+              editResult: {
+                blocks: [],
+                assistantText: null,
+                latencyMs: 0,
+                appliedGraph: outcome.appliedGraph,
+                wasRejected: false,
+                operations: [...outcome.operations],
+              },
+              preEditGraph: preParsedForFact.data,
+              hasExistingAnalysis:
+                freshness?.freshness === 'fresh' || freshness?.freshness === 'stale',
+            })
+          : null;
+        if (!batchFact) {
+          // No receipt, no write. A graph change the turn cannot account for is
+          // exactly the state this feature exists to avoid.
+          return declineValueBatch(
+            batchPending,
+            baseGraph,
+            'value_batch_fact_unavailable',
+            VALUE_BATCH_NOT_APPLIED_WHOLE,
+          );
+        }
+
+        const written = outcome.writtenCells.length;
+        const declined = read.proposal.cells.length - written;
+        const unsettable = read.proposal.unsettable.length;
+        const remaining = outcome.assessmentAfter.blockingIssues.length;
+        const appliedResponse = composeAnswer({
+          answerKind: 'functional',
+          assistant_text:
+            `Confirmed. I applied ${written} estimated ${written === 1 ? 'value' : 'values'} in one action. `
+            + `${written === 1 ? 'It is' : 'Each is'} marked as an AI estimate you reviewed, not as a figure you stated, `
+            + `so that difference stays visible for the rest of this model's life. `
+            + (declined > 0
+              ? `${declined} ${declined === 1 ? 'value' : 'values'} I could not estimate defensibly, so ${declined === 1 ? 'it was' : 'they were'} left open for you. `
+              : '')
+            + (unsettable > 0
+              ? `${unsettable} further ${unsettable === 1 ? 'gap needs' : 'gaps need'} you to say which factor is affected before anything can be estimated for ${unsettable === 1 ? 'it' : 'them'}. `
+              : '')
+            + (remaining > 0
+              ? `${remaining} ${remaining === 1 ? 'item still needs' : 'items still need'} your judgement.`
+              : 'The model now passes the readiness check.'),
+          stage: context.stage,
+          suggested_actions: [],
+        });
+        sonnetTextForLog = appliedResponse.assistant_text;
+        resolvedTurnClass = 'direct_answer';
+        intentClass = 'execute';
+        responseTypeForObs = 'direct_answer';
+        llmCallsUsed = 0;
+        stagesCompleted.push('orient');
+        stagesCompleted.push('compose');
+        const previousEffectiveGraphForBatch = effectiveTurnGraph;
+        const previousMutationObservationForBatch = handlerEmittedMutatedGraph;
+        effectiveTurnGraph = outcome.appliedGraph;
+        handlerEmittedMutatedGraph = true;
+        try {
+          const committed = await commitTurn(appliedResponse, {
+            scenario_id: context.session_id,
+            turn_id: context.request_id,
+            turn_class: 'direct_answer',
+            handler_id: null,
+            request_hash: computeRequestHash(payload),
+            llm_calls_used: 0,
+            duration_ms: Date.now() - startedAt,
+            handler_facts: [batchFact],
+            graph: outcome.appliedGraph,
+            consumedPendingRefs: [batchPending.chip_id],
+          });
+          commitPerformed = committed.performed;
+          stagesCompleted.push('commit');
+          const readback = assessCanonicalAnalysisReadiness(committed.persistedGraph);
+          analysisReadyForTurn = readback.analysisReady;
+          const readbackParsed = GraphV3.safeParse(committed.persistedGraph);
+          response = {
+            ...committed.response,
+            draft_graph: buildAppliedGraphWireField(
+              readbackParsed.success ? readbackParsed.data : outcome.appliedGraph,
+            ),
+          };
+          let postApplyHash: string | null = null;
+          try {
+            postApplyHash = computeAnalysisAffectingGraphHash(
+              committed.persistedGraph as GraphStateIngress | null | undefined,
+            );
+          } catch {
+            postApplyHash = null;
+          }
+          // Same canonical-state reuse as the readiness-repair sibling: one
+          // record for wire, Run admission and diagnostics.
+          currentAnalysisGraphHashForTurn = postApplyHash;
+          canonicalReadinessGraphForRun = committed.persistedGraph;
+          nonExecuteCanonicalMemo = undefined;
+          canonicalStateForRun = canonicalStateForNonExecute()!;
+          freshness = {
+            freshness: canonicalStateForRun.freshness,
+            reason: canonicalStateForRun.freshness_reason,
+            selected_fact_index: canonicalStateForRun.selected_fact_index,
+            computed_at: canonicalStateForRun.computed_at,
+            graph_hash_at_run: canonicalStateForRun.graph_hash_at_run,
+            current_graph_hash: canonicalStateForRun.current_graph_hash,
+          };
+          try {
+            emit(TelemetryEvents.PendingActionConsumed, {
+              request_id: requestId,
+              scenario_id: context.session_id,
+              pending_action_id: batchPending.id,
+              kind: batchPending.action.kind,
+              chip_id: batchPending.chip_id,
+              llm_calls_used: 0,
+              duration_ms: Date.now() - startedAt,
+            });
+          } catch (telemetryError) {
+            log.warn(
+              {
+                request_id: requestId,
+                scenario_id: context.session_id,
+                err: serialiseError(telemetryError),
+              },
+              'Value batch committed; pending-consumed telemetry failed',
+            );
+          }
+        } catch (error) {
+          effectiveTurnGraph = previousEffectiveGraphForBatch;
+          handlerEmittedMutatedGraph = previousMutationObservationForBatch;
+          log.error(
+            {
+              event: 'v5.state_commit_failed',
+              request_id: requestId,
+              session_id: context.session_id,
+              path: 'value_batch_apply',
+              err: serialiseError(error),
+            },
+            'V5 TurnExecutor commit failure on value batch apply',
+          );
+          failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
+          response = buildFailureResponse(
+            'STATE_COMMIT_FAILED',
+            context.stage,
+            { phase: 'commit' },
+            recoveryCtx(),
+          );
+        }
+        return finalizeRun();
+      };
+
       // Lane 34 — GM held-execute resume (propose → hold → confirm →
       // apply). Reached ONLY from the pending_action branch below when the
       // matched pending is a GM held one AND CEE_GRAPH_MANAGEMENT_MODE is
@@ -4338,6 +4874,14 @@ export async function runTurnExecutor(
           if (readinessRepairRead.kind !== 'not_readiness_repair') {
             return commitReadinessRepairResume(pending, readinessRepairRead);
           }
+          // The value batch's chip click. `not_value_batch` falls through to
+          // every existing path untouched — that discrimination is the whole
+          // safety property of adding a branch here, and it is pinned by
+          // `readiness-value-batch-route-level.test.ts`.
+          const valueBatchRead = readValueBatchResume(pending);
+          if (valueBatchRead.kind !== 'not_value_batch') {
+            return commitValueBatchResume(pending, valueBatchRead);
+          }
           // Lane 34 — GM held-execute wiring. A GM held pending
           // (inline_patch.handler_id = 'graph_management_held_v1') is
           // recognised BEFORE the generic synthesis. Live mode executes
@@ -4758,6 +5302,13 @@ export async function runTurnExecutor(
             if (ordinalReadinessRepair.kind !== 'not_readiness_repair') {
               return commitReadinessRepairResume(ordinal.pending, ordinalReadinessRepair);
             }
+            // Same parity as the sibling above: a batch the user picked by
+            // ORDINAL must reach the batch writer, not the generic synthesis
+            // that would decline the action they explicitly chose.
+            const ordinalValueBatch = readValueBatchResume(ordinal.pending);
+            if (ordinalValueBatch.kind !== 'not_value_batch') {
+              return commitValueBatchResume(ordinal.pending, ordinalValueBatch);
+            }
             if (
               ordinalGmRead.kind !== 'not_gm_held' &&
               config.features.graphManagementMode === 'live'
@@ -5152,6 +5703,14 @@ export async function runTurnExecutor(
             if (labelReadinessRepair.kind !== 'not_readiness_repair') {
               return commitReadinessRepairResume(labelPick.pending, labelReadinessRepair);
             }
+            // The batch chip carries NAMED public copy ("Apply all 3
+            // estimates"), so a chip click replaying that message lands HERE
+            // rather than in the bare-confirm branch. Without this the feature
+            // is unreachable by its own affordance.
+            const labelValueBatch = readValueBatchResume(labelPick.pending);
+            if (labelValueBatch.kind !== 'not_value_batch') {
+              return commitValueBatchResume(labelPick.pending, labelValueBatch);
+            }
             if (
               labelGmRead.kind !== 'not_gm_held' &&
               config.features.graphManagementMode === 'live'
@@ -5435,6 +5994,33 @@ export async function runTurnExecutor(
           ? { currentGraphHash: freshness.current_graph_hash }
           : {}),
       });
+      // ⭐⭐ THE ELEVEN SKIP REASONS THIS RESUMER COMPUTES WERE COMPUTED AND
+      // DISCARDED. Derived repo-wide, not at this call site alone:
+      // `tryClarificationResume` has exactly ONE caller (here), every use of
+      // this binding is a property read (`.dispatch` 5, `.matched` 3,
+      // `.candidates` 3, `.pending` 2, `.riskLabel` 1, `.driverLabel` 1), the
+      // object is never passed on wholesale, and `.skip_reason` was read ZERO
+      // times — while THREE siblings in this same function emit theirs.
+      //
+      // ⛔ SO IT IS NOT A CONVENTION NOBODY FOLLOWS — it is a convention
+      // followed for the siblings and dropped for this one. The module's own
+      // header says its skip reasons "exist for telemetry only"; nothing
+      // emitted them, so "which of the eleven fired" could not be answered
+      // from logs, telemetry, or anywhere else. A module reporting its own
+      // reason into a void.
+      //
+      // ⚠ THIS CHANGES NO ROUTING AND NO PREDICATE. It makes an existing
+      // diagnostic observable and nothing else. It is deliberately NOT a fix
+      // for the measured carry-forward defect: that repair cannot be named
+      // until this value can be read, and naming it from a guess is how the
+      // estate paid for four oscillating rounds on a predicate of this class.
+      if (!clarificationDispatch.matched) {
+        emit(TelemetryEvents.PendingActionSkipped, {
+          request_id: requestId,
+          scenario_id: context.session_id,
+          reason: clarificationDispatch.skip_reason,
+        });
+      }
       if (
         clarificationDispatch.matched &&
         clarificationDispatch.dispatch === 'set_factor_value'
@@ -5621,7 +6207,8 @@ export async function runTurnExecutor(
           | 'expired'
           | 'graph_changed'
           | 'targets_missing'
-          | 'label_ambiguous';
+          | 'label_ambiguous'
+          | 'missing_base';
         if (clarificationDispatch.dispatch === 'recovery_expired') {
           telemetryReason = 'expired';
           recoveryAssistantText =
@@ -5636,6 +6223,70 @@ export async function runTurnExecutor(
           telemetryReason = 'targets_missing';
           recoveryAssistantText =
             'The factors I was asking about aren’t in the model any more. Tell me which factor you want to change and what value to set, and I’ll apply it.';
+        } else if (
+          clarificationDispatch.dispatch === 'recovery_missing_base'
+        ) {
+          // ROADMAP 2.1426 — THE QUESTION THAT WAS NEVER ASKED.
+          //
+          // The target is settled and the change is a delta, but the factor
+          // has no current value to compute it from. Until now this
+          // dispatched into `delta_no_existing_value`, whose refusal is
+          // correct and terminal: it tells the user what went wrong and
+          // leaves them with no move.
+          //
+          // ⛔ THE BINDING CONSTRAINT ON THIS COPY. "From what?" is the right
+          // question ONLY if the user can answer it, and a person who never
+          // recorded a value for this factor may well not know one. A message
+          // that is TRUE ABOUT A STATE but names an action the reader cannot
+          // take is still a defect (UI #1539/#1540 — a toast prescribing a
+          // gesture the product had just greyed out). So the sentence that
+          // asks for anything at all is the ABSOLUTE one, and it is always
+          // available: `set` is exempt from the delta guard by construction,
+          // and on a factor with no recorded state the unit and cap
+          // redeclaration gates are inert too, so "set X to 120" is
+          // executable on exactly the factor this fires for. The delta route
+          // is offered second, as two steps that are each independently
+          // reachable, and never as a promise that a bare current value
+          // typed now will have the held change applied to it — nothing
+          // consumes an answer in that shape, and saying otherwise would
+          // reproduce the defect one turn later.
+          telemetryReason = 'missing_base';
+          const held = formatValueWithUnit(
+            clarificationDispatch.value,
+            clarificationDispatch.unit,
+          );
+          const changePhrase =
+            clarificationDispatch.operator === 'multiply'
+              ? `multiplying it by ${held}`
+              : `a ${held} ${clarificationDispatch.operator}`;
+          const label = clarificationDispatch.factorLabel;
+          recoveryAssistantText =
+            `I don’t have a current value recorded for ${label}, so there’s nothing for ${changePhrase} to work from. ` +
+            `Tell me what ${label} should be and I’ll set it directly. ` +
+            `If you’d rather keep that change, set its current value first and ask me again.`;
+          // ⭐ THE PERSIST DECISION: this arm RE-EMITS NOTHING, i.e. it leaves
+          // `recoveryPendingActions` undefined, exactly like the expired /
+          // graph-changed / targets-missing arms. Only the ambiguity arm
+          // re-emits, and it has a reason this arm does not: there a chip
+          // click genuinely resumes the original quantity, so the candidates
+          // must survive with a fresh TTL. Here the copy asks for an ABSOLUTE
+          // value, which routes through the value-update detector — a path
+          // that reads no pending actions at all — so a re-emitted pending
+          // would have no reader.
+          //
+          // ⚠ AND WHAT THAT DOES NOT MEAN, measured rather than assumed:
+          // re-emitting nothing does NOT delete the held pending. `commitTurn`
+          // runs `computeSurvivingPriorPendingsDetailed` (`commit.ts`), the
+          // Signature-Loop carry-forward that keeps a still-valid proposal
+          // alive across a non-consuming turn, decrementing its turn TTL. So
+          // the held `increase` survives this turn with one less life, which
+          // is the right outcome and is not this arm's doing: if the user
+          // answers by setting a current value the graph hash moves and the
+          // carried pending is hash-invalidated on the next commit; if they
+          // reply with the bare label again this arm simply fires again, which
+          // is still true. Carrying a delta ACROSS a stated base would need
+          // its own pending kind and its own resume path — a larger repair,
+          // and inventing half of it here would ship a question with no reader.
         } else {
           // recovery_label_ambiguous — emit one chip per candidate so
           // the user can disambiguate without retyping. No LLM call.
@@ -6245,6 +6896,129 @@ export async function runTurnExecutor(
             );
           }
           return finalizeRun();
+        }
+      }
+
+      // ⭐⭐ GOAL-TARGET ANSWER PRE-ROUTE — the receiving half of the
+      // `elicit_goal_target` question this executor persists at the receipt-swap
+      // site below (search `goalTargetAskChannel`).
+      //
+      // THE LOOP IT CLOSES, and it is the measured one. When a success-target
+      // registration claim is swapped for the honest fallback, the user reads
+      // "Tell me it again in one message, including the value and the goal it
+      // applies to". They then type "£20,000". Before this branch that answer
+      // reached the deterministic value-update parser below, which matches
+      // FACTORS by label — so the number either bound a factor the user was
+      // not talking about or fell through to the LLM with no referent at all.
+      // The question named a goal; the answer must reach THAT goal.
+      //
+      // WHY IT IS A SEPARATE BRANCH FROM THE BASELINE SIBLING ABOVE, rather
+      // than another arm of it. They are differently-shaped questions and the
+      // estate's chronic defect is merging such pairs (trap 21):
+      //   · baseline asks for a CURRENT LEVEL of a factor, is percent-framed,
+      //     and `classifyElicitedBaselineAnswer` is built around that scale;
+      //   · this asks for a SUCCESS THRESHOLD on a goal, in the goal's own
+      //     units (currency, count, months — anything the CQE can read), and a
+      //     ceiling ("no more than 5%") is a REFUSAL here, not an answer,
+      //     because ISL computes P(samples >= threshold).
+      // Folding them would need one classifier answering both, which is how
+      // four rounds were once lost on a single predicate (trap 22f).
+      //
+      // Placement is the baseline sibling's, for the same reasons: after the
+      // typed-chip mutation route (an explicit chip click outranks an inferred
+      // answer) and before the deterministic value-update parser (a bare
+      // "£20,000" carries a digit, and the answer must bind the QUESTION's
+      // goal, never a fuzzy factor match). `routingResult === undefined`
+      // guards the chip route; chip-click sources are excluded because their
+      // copy is canned, not an answer. Every non-match falls through SILENTLY
+      // — this is additive, so a lapsed, diverged, refused or ignored question
+      // leaves the flow exactly as it was.
+      //
+      // ⚠ NO RE-ASK ARM, deliberately, and this is the one place it diverges
+      // from the baseline sibling. R2918B re-asks on `unreadable_answer`
+      // because its classifier reserves that reason for messages SHAPED like a
+      // level answer. This helper's refusals include `several_amounts` and
+      // `ceiling_not_minimum`, which fire on ordinary sentences that merely
+      // contain numbers ("churn is 5% and revenue is £2m"), so a re-ask here
+      // would hijack turns that were never answering. Refuse and fall through:
+      // the ordinary lanes still get the message intact.
+      if (
+        routingResult === undefined &&
+        payload.source !== 'chip_click' &&
+        payload.source !== 'chip'
+      ) {
+        const goalTargetAnswer = tryGoalTargetElicitationResume({
+          message: payload.message,
+          pendingActions: context.most_recent_pending_actions ?? [],
+          nowMs: Date.now(),
+          ...(freshness?.current_graph_hash != null
+            ? { currentGraphHash: freshness.current_graph_hash }
+            : {}),
+          graphNodes: graphStateForTurn?.nodes,
+        });
+        if (goalTargetAnswer.matched) {
+          const pending = goalTargetAnswer.pending;
+          emit(TelemetryEvents.PendingActionMatched, {
+            request_id: requestId,
+            scenario_id: context.session_id,
+            pending_action_id: pending.id,
+            kind: 'elicit_goal_target',
+            chip_id: pending.chip_id,
+            candidate_count: 1,
+          });
+          // The SANCTIONED writer, reached the ordinary way. `add_constraint`
+          // with `constraint_type: 'at_least'` on a goal-kind entity is the
+          // one canonical success-target path (`isSuccessTargetTurn` →
+          // `stampGoalThreshold`, which writes goal_threshold_raw/_unit/_cap
+          // and the normalised goal_threshold from ONE derivation). No second
+          // parser, no second mutation path: this branch resolves the answer
+          // to (goal, value, unit) and hands those three to the existing
+          // STEP 2-7 lifecycle, which validates and executes them exactly as
+          // it would a Sonnet-routed dispatch.
+          //
+          // `entity.kind` is 'goal' rather than the baseline sibling's 'node':
+          // the validation registry accepts goal entities on add_constraint,
+          // and the handler's own target lookup is by id, so naming the kind
+          // truthfully costs nothing and keeps the proposal readable in logs.
+          const replayProposal: ProposalAction = {
+            handler_id: 'add_constraint',
+            entity: {
+              id: goalTargetAnswer.goalNodeId,
+              kind: 'goal',
+              label: goalTargetAnswer.goalLabel,
+              resolution_status: 'resolved',
+              resolution_method: 'id_match',
+            },
+            parameters: [
+              { name: 'constraint_type', value: 'at_least', source: 'user_explicit' },
+              { name: 'value', value: goalTargetAnswer.value, source: 'user_explicit' },
+              ...(goalTargetAnswer.unit !== undefined
+                ? [{ name: 'unit', value: goalTargetAnswer.unit, source: 'user_explicit' as const }]
+                : []),
+            ],
+            cited_context_fields: ['graph.nodes'],
+          };
+          routingResult = {
+            type: 'tool_call',
+            proposal: { intent_class: 'execute', action: replayProposal },
+            orientationText: '',
+            rawResult: {
+              content: [],
+              stop_reason: 'tool_use',
+              usage: { input_tokens: 0, output_tokens: 0 },
+              model: 'deterministic-goal-target-elicitation-resume',
+              latencyMs: 0,
+            },
+            llmCallCount: 0,
+            droppedActions: [],
+          };
+          llmCallsUsed = 0;
+          sonnetTextForLog = '';
+          stagesCompleted.push('orient');
+          // Consume the question — it has been answered. A successful mint
+          // also moves the graph hash, which invalidates it independently;
+          // this is the explicit, hash-independent guard.
+          consumedPendingAction = pending;
         }
       }
 
@@ -7359,11 +8133,19 @@ export async function runTurnExecutor(
               deterministicValueUpdate.quantity,
             ),
           })),
-          {
-            id: 'chip_prompt_refuse_constraint',
-            label: `Add a constraint on ${refusedCandidate.label}`,
-            message: `Add a constraint on ${refusedCandidate.label}.`,
-          },
+          // The constraint route is named ONLY when `add_constraint` genuinely
+          // accepts this kind — the same gate, from the same builder, as the
+          // refusal prose composed nine lines below. This chip used to be
+          // minted unconditionally, so a `decision` / `action` target got a
+          // button offering a route the prose had just withheld and the
+          // resumer would have thrown on. Where the route does not exist the
+          // refusal keeps the factor chips; when the graph has no factor
+          // nodes it is chip-less, which is the honest shape (an empty
+          // `suggested_actions` is an established response here).
+          ...buildNonFactorKindRefusalConstraintChips(
+            refusedCandidate.label,
+            refusedKind,
+          ),
         ];
         const refusalResponse = composeAnswer({
           answerKind: 'functional',
@@ -8765,12 +9547,34 @@ export async function runTurnExecutor(
               handler_id: GATED_ANALYSIS_HANDLER_ID,
               outcome: electionOutcome.kind,
               reason: electionOutcome.reason,
+              // Which of the two demotion arms ran. Without this the offer arm
+              // and the refusal arm are indistinguishable in telemetry, and a
+              // silently-unarmed offer would look like a clean refusal.
+              offered:
+                electionOutcome.kind === 'demoted' && electionOutcome.offer !== undefined,
             });
           }
           if (
             electionOutcome.kind === 'demoted' &&
             !isBoundedNonMutationAnalyticalRequest(payload.message)
           ) {
+            // ⭐ ARM THE OFFER. Present iff the gate judged this a PHRASING
+            // MISS rather than an explicit refusal ("Don't run it." arms
+            // nothing and is answered with the acknowledgement copy). The chip
+            // is prepended to the converse turn's chips below, and the commit
+            // derives the matching `run_analysis` pending from it, so a bare
+            // "yes" on the NEXT turn resumes through `tryShortConfirmResume`.
+            //
+            // The gate stays MONOTONE: this offers an analysis, it never runs
+            // one. Nothing computes until the user consents on a later turn.
+            if (electionOutcome.offer !== undefined) {
+              analysisElectionOfferChip = {
+                id: 'chip_action_analysis_election_offer',
+                label: 'Run analysis',
+                message: 'Run the analysis.',
+                action_type: 'run_analysis',
+              };
+            }
             routingResult = {
               type: 'tool_call',
               proposal: {
@@ -10261,6 +11065,8 @@ export async function runTurnExecutor(
           turnSource: payload.source,
           chipActionType: payload.chip?.action_type,
           isConfirmResume: consumedPendingAction !== null,
+          // Same mask, same source, same fail-safe as the ingress derivation.
+          modelNodeLabels: projectModelNodeLabels(context.persistedGraph),
         },
         GRAPH_MUTATING_HANDLER_IDS,
       );
@@ -10311,6 +11117,36 @@ export async function runTurnExecutor(
           return Array.isArray(rows) ? (rows as readonly PersistedConstraintRow[]) : [];
         })();
 
+        // ⭐⭐ TARGET-KIND PRECONDITION — the sibling of the registry-executable
+        // check above, and the same rule: do not offer a chip the resumer must
+        // refuse. That check asks whether the HANDLER exists; this one asks
+        // whether the TARGET is one it accepts.
+        //
+        // WITNESSED 1 Sep 2026 on deployed staging. "Engineering Overstretch"
+        // is a `risk`; `set_factor_value` accepts factors only. The product
+        // offered "Set this value", the user confirmed, and got "the target or
+        // value was not valid" — naming neither. The honest reason ("it is a
+        // risk") was in the graph BEFORE the chip was minted. Fixing the
+        // apology would have left the promise in place.
+        //
+        // Node source mirrors `existingConstraints` directly above: the
+        // persisted model is what the resuming handler will load, so it is the
+        // right thing to ask about the target's kind.
+        const offerTargetKindNodes: readonly TargetKindLookupNode[] = (() => {
+          const persistedNodes = (
+            context.persistedGraph as { nodes?: unknown } | null | undefined
+          )?.nodes;
+          if (Array.isArray(persistedNodes) && persistedNodes.length > 0) {
+            return persistedNodes as readonly TargetKindLookupNode[];
+          }
+          const turnNodes = graphStateForTurn?.nodes;
+          return Array.isArray(turnNodes) ? (turnNodes as readonly TargetKindLookupNode[]) : [];
+        })();
+        const unsupportedTargetKind = findUnsupportedOfferTargetKind(
+          action,
+          offerTargetKindNodes,
+        );
+
         const demotion = buildWarrantDemotion(action, existingConstraints);
         const graphHashForProposal =
           currentAnalysisGraphHashForTurn ?? freshness?.current_graph_hash ?? null;
@@ -10320,7 +11156,50 @@ export async function runTurnExecutor(
         let demotionOutcome: string;
         let demotionText: string;
 
-        if (!demotion.ok) {
+        if (unsupportedTargetKind !== null) {
+          // HONEST REFUSAL AT THE OFFER, not an apology after the confirm.
+          // Same copy the deterministic pre-route already uses for this exact
+          // case, so the product says one thing about one fact — and NO
+          // pending is persisted, because there is no resumable action here.
+          // Emitting one would rebuild the dead end by another door.
+          demotionOutcome = `emit_refused:unsupported_target_kind:${unsupportedTargetKind.nodeKind}`;
+          const factorLabelsForRefusal = offerTargetKindNodes
+            .filter((n) => (n as { kind?: unknown }).kind === 'factor')
+            .map((n) => (n as { label?: unknown }).label)
+            .filter((l): l is string => typeof l === 'string' && l.trim().length > 0);
+          demotionText = buildNonFactorKindRefusalText(
+            unsupportedTargetKind.label,
+            unsupportedTargetKind.nodeKind,
+            factorLabelsForRefusal,
+          );
+          // The constraint chip is offered ONLY when `add_constraint` genuinely
+          // accepts this kind — the same gate the refusal copy applies. A chip
+          // for a route that also refuses is the defect one turn along.
+          demotionChips = [
+            ...buildNonFactorKindRefusalConstraintChips(
+              unsupportedTargetKind.label,
+              unsupportedTargetKind.nodeKind,
+            ),
+          ];
+        } else if (!demotion.ok && demotion.reason === 'required_parameter_missing') {
+          // PARAMETER-SUFFICIENCY PRECONDITION — the third sibling of the
+          // registry-executable and target-kind checks. The handler requires a
+          // parameter this proposal does not usably carry, so a chip would
+          // promise a change the resumer must refuse, and (witnessed on
+          // staging 2026-09-14) would ALSO accumulate beside the complete
+          // offer under a different id, rendering as a second, identical
+          // "Add this limit" the user cannot choose between.
+          //
+          // Its own copy, deliberately: the generic branch below closes with
+          // "Say the word and I will make it.", and there is nothing here to
+          // say the word to. No chip and no pending are emitted, so the
+          // "persisted pending ⟹ rendered chip" invariant holds trivially.
+          demotionOutcome = `emit_refused:${demotion.reason}:${demotion.parameterName}`;
+          demotionText = buildIncompleteOfferRefusalText(
+            demotion.parameterName,
+            action.entity.label,
+          );
+        } else if (!demotion.ok) {
           // A mutating handler outside the three proposable intents. There is
           // no chip channel for it, so the honest outcome is a refusal that
           // says nothing was changed — never an execution.
@@ -11304,6 +12183,17 @@ export async function runTurnExecutor(
               scenarioId: context.session_id,
               signal: turnAbort.signal,
               brief: resolvedBrief,
+              // The reviewing model has never had the graph: the enrichment
+              // envelope does not carry one (`readGraph`'s own docstring says
+              // so). Threaded like `brief`, from the server-side read only.
+              //
+              // ⭐ AND IT IS THE RUN'S OWN SNAPSHOT. `__run_graph_snapshot` is
+              // stamped by run-analysis from the same `rawPersistedGraph` it
+              // submitted to PLoT, so the review is grounded in the model that
+              // was actually analysed. `context.persistedGraph` is the
+              // turn-start reread and remains only as the fallback for a
+              // handler that produced no snapshot.
+              runGraph: handlerOutcome.__run_graph_snapshot ?? context.persistedGraph,
               ...(timingsEnabled ? { callTelemetrySink } : {}),
               // D-ask-1 (2.11 P0-1) — P1-2: scaffolded-placeholder
               // disclosure channel — the review must never narrate a
@@ -11406,6 +12296,7 @@ export async function runTurnExecutor(
         contextPack: contextPackForLog ?? null,
         priorFacts: context.prior_facts,
         handlerFacts: handlerFactsForCommit,
+        analysisReady: analysisReadyForTurn,
         requestId,
         scenarioId: context.session_id,
         // ROADMAP 2.804 — the SCOPE only. The helper derives the leader-claim
@@ -11800,7 +12691,15 @@ export async function runTurnExecutor(
       // template copy that is already gated at its own producer, and running
       // this over it would risk replacing an honest receipt.
       let confirmationForCompose = confirmationText;
-      if (isExplanationHandler && !mayNameLeadingOptionForRun) {
+      // Structural coaching does not explain a computed result. Preserve its
+      // useful answer without appending result-only constraint repair steps.
+      // An unsupported leader claim is still suppressed on EVERY explanation
+      // handler, using the projector's own predicate. Result explanations keep
+      // both the replacement and disclosure branches unchanged.
+      const needsWithheldExplanationProjection =
+        proposedHandlerId !== 'explain_from_structure' ||
+        textAssertsLeadingOption(confirmationText);
+      if (isExplanationHandler && !mayNameLeadingOptionForRun && needsWithheldExplanationProjection) {
         // Read the STATE off the SAME fact the permission came from, via the
         // SAME canonical selector — so the sentence and the permission describe
         // one analysis. Labels come from the persisted `goal_constraints`, the
@@ -11884,6 +12783,15 @@ export async function runTurnExecutor(
         stage: context.stage,
         handlerFacts: handlerFactsForCommit,
         analysisReadyStatus: analysisReadyForTurn?.status,
+        // ⭐ THE WHOLE PAYLOAD, NOT A SECOND NARROWING. `analysisReadyForTurn`
+        // already carries `analysis_admission` (it is built by
+        // `canonicalAnalysisReadyFrom`); until now compose only ever saw
+        // `.status`, so the unrequested-run summary asserted "nothing in it is
+        // confirmed yet" with no way to check whether the admission had already
+        // recorded the opposite. Measured contradicting itself on a founder
+        // session, 2026-09-14 — see `compose/unrequested-analysis-confinement.ts`
+        // :: unrequestedSummaryPremiseHolds.
+        analysisReady: analysisReadyForTurn,
         suggested_actions: executeChips,
         // R4 lookup fix — persisted-snapshot fallback for graph-node
         // ID→{label,kind} resolution. The PLoT envelope on the fact has no
@@ -12401,10 +13309,24 @@ export async function runTurnExecutor(
         sanitised.output,
         converseComposedChips,
       );
+      // ⭐ THE ANALYSIS-ELECTION OFFER, rendered. Prepended so a chip budget
+      // that truncates can never be what silently removes the product's own
+      // question-and-answer pair, and suppressed when the turn already carries
+      // a `run_analysis` chip — two identical offers is a worse surface than
+      // one, and either chip derives the same pending.
+      //
+      // Applied AFTER the coaching output guard on purpose: if that guard
+      // degraded the model's prose to recovery copy, the offer is still the
+      // honest next step and must survive the degrade.
+      const converseChipsWithOffer =
+        analysisElectionOfferChip !== undefined &&
+        !converseGuarded.suggested_actions.some((c) => c.action_type === 'run_analysis')
+          ? [analysisElectionOfferChip, ...converseGuarded.suggested_actions]
+          : converseGuarded.suggested_actions;
       composedOk = composeAnswer({
         assistant_text: converseGuarded.assistant_text,
         stage: context.stage,
-        suggested_actions: converseGuarded.suggested_actions,
+        suggested_actions: converseChipsWithOffer,
         answerKind: 'substantive',
         // Same rationale as the coach branch above — one helper, one rule, so
         // the two substantive branches cannot drift apart about when a prose
@@ -12900,6 +13822,20 @@ export async function runTurnExecutor(
       // via the STEP 7 catch (STATE_COMMIT_FAILED), so together the
       // formatGoalTargetSet class ships only on a durable commit whose
       // graph carries the threshold.
+      //
+      // ⭐⭐ AND THE SWAP NOW ASKS A QUESTION IT CAN HEAR THE ANSWER TO.
+      // The fallback copy ends "Tell me it again in one message, including the
+      // value and the goal it applies to" — a solicitation, which until now
+      // was persisted nowhere. `goalTargetAskChannel` carries the referent
+      // this turn can name (the sole goal in the PERSISTED graph, fail-closed
+      // on plurality) down to the commit site below, which arms it as a
+      // `elicit_goal_target` pending in the SAME commit as the copy the user
+      // read. The receiving branch is the goal-target answer pre-route.
+      let goalTargetAskChannel: {
+        readonly goal_node_id: string;
+        readonly question: string;
+        readonly unit?: string;
+      } | null = null;
       {
         const goalReceiptDecision = decideGoalTargetReceipt({
           assistantText: composedOk.assistant_text,
@@ -12928,6 +13864,38 @@ export async function runTurnExecutor(
             ...composedOk,
             assistant_text: formatGoalTargetNotSavedText(context.persistedGraph ?? null),
           };
+          // Arm the question against the PERSISTED graph, never the withheld
+          // commit graph: the write below is withheld on this path, so the
+          // graph the next turn loads — and hashes — is this one. Binding the
+          // referent to a graph that is about to be discarded would fail the
+          // answer turn's divergence gate every time.
+          //
+          // The `question` field stores the bytes the user actually read
+          // (assigned above, so this reads the swapped text, not the claim it
+          // replaced). It is the record of what was asked; the resume binds on
+          // the goal id, so a copy revision can never silently change which
+          // goal an answer lands on.
+          {
+            const askGoal = findSoleGoalNode(context.persistedGraph ?? null);
+            if (askGoal !== null) {
+              // Unit carried from a SURVIVING registered target when there is
+              // one — the copy names it ("your previous target of 15% is still
+              // registered"), so a bare "20" in reply means 20 of that same
+              // unit. With nothing surviving there is no unit to carry, and
+              // none is invented: the answer must supply its own or the
+              // writer's existing cap doctrine decides.
+              const survivingForUnit = extractPersistedGoalTarget(
+                context.persistedGraph ?? null,
+              );
+              goalTargetAskChannel = {
+                goal_node_id: askGoal.id,
+                question: composedOk.assistant_text,
+                ...(survivingForUnit?.unit !== undefined
+                  ? { unit: survivingForUnit.unit }
+                  : {}),
+              };
+            }
+          }
           // ROADMAP 1.19(b) — swap-vs-commit: swapping the TEXT for the
           // honest fallback while still persisting the graph this turn's
           // (unbacked) mutation produced would commit junk — the exact
@@ -13091,6 +14059,114 @@ export async function runTurnExecutor(
       // the add-risk clarify's fail-closed posture): the question text still
       // ships, a full-sentence answer still binds through the LLM path, and
       // only the elliptical carry is (safely) unavailable.
+      // GO(A) — the option-cost ask, armed in the SAME commit as the
+      // disclosure that motivates it. Mirrors `__elicit_baseline` exactly:
+      // server-only, fail-closed on an unavailable hash, stable `chip_id` so a
+      // re-ask SUPERSEDES its predecessor by key instead of consuming another
+      // of the column's three slots.
+      const optionCostChannel = handlerOutcome?.__option_cost_ask;
+      const optionCostPendingForCommit: PendingAction | undefined = (() => {
+        if (optionCostChannel === undefined) return undefined;
+        if (llmGraphHash === null) {
+          log.warn(
+            { request_id: requestId, scenario_id: context.session_id },
+            'V5 option-cost ask — graph hash unavailable; no pending question persisted (fail-closed)',
+          );
+          return undefined;
+        }
+        const askedAtIso = new Date().toISOString();
+        return {
+          id: randomUUID(),
+          scenario_id: context.session_id,
+          chip_id: 'chip_elicit_option_native_quantity',
+          action: {
+            kind: 'elicit_option_native_quantity' as const,
+            option_id: optionCostChannel.option_id,
+            option_label: optionCostChannel.option_label,
+            factor_id: optionCostChannel.factor_id,
+            factor_label: optionCostChannel.factor_label,
+            unit: optionCostChannel.unit,
+            ...(optionCostChannel.constraint_label !== null
+              ? { constraint_label: optionCostChannel.constraint_label }
+              : {}),
+          },
+          preconditions: { graph_hash: llmGraphHash },
+          expires_at_turn_count: PENDING_ACTION_DEFAULT_TURN_TTL,
+          expires_at_iso: new Date(
+            Date.parse(askedAtIso) + PENDING_ACTION_DEFAULT_WALL_TTL_MS,
+          ).toISOString(),
+          emitted_at_iso: askedAtIso,
+        };
+      })();
+      // ⭐⭐ THE CORRECTION OFFER — armed in the SAME commit as the sentence
+      // that makes it. Mirrors `__option_cost_ask`: server-only, fail-closed on
+      // an unavailable hash, and the user-facing half is already in
+      // `assistant_text`.
+      //
+      // It rides `emitProposedChange`, so the confirmation is the EXISTING
+      // `apply_proposed_change` lifecycle (freshness + idempotency gating, then
+      // handler dispatch at the top of this file) rather than a new one. The
+      // patch carries `corrects_node_id`, which is what makes the confirmed
+      // turn MOVE the limit instead of appending a second one.
+      //
+      // ⚠ On an emit refusal nothing is offered and telemetry says which — a
+      // silent drop would leave the sentence promising a move with no carrier.
+      // Even then the failure is honest rather than silent: the handler refuses
+      // an unresolvable correction explicitly and says nothing changed.
+      const correctionChannel = handlerOutcome?.__constraint_target_correction;
+      const correctionOffer: { pending: PendingAction; chip: unknown } | undefined = (() => {
+        if (correctionChannel === undefined) return undefined;
+        if (llmGraphHash === null) {
+          log.warn(
+            { request_id: requestId, scenario_id: context.session_id },
+            'V5 constraint-target correction — graph hash unavailable; nothing offered (fail-closed)',
+          );
+          return undefined;
+        }
+        const proposal = buildConstraintTargetCorrection({
+          misplaced: {
+            nodeId: correctionChannel.misplaced_node_id,
+            nodeLabel: correctionChannel.misplaced_node_label,
+            operator: correctionChannel.operator,
+            value: correctionChannel.value,
+            unit: correctionChannel.unit,
+          },
+          alternative: {
+            nodeId: correctionChannel.alternative_node_id,
+            label: correctionChannel.alternative_label,
+          },
+        });
+        if (proposal === null) return undefined;
+        const emitted = emitProposedChange(proposal, {
+          scenario_id: context.session_id,
+          graph_hash: llmGraphHash,
+          emitted_at_iso: new Date().toISOString(),
+          registry: options.handlerRegistry ?? getDefaultRegistry(),
+        });
+        if (emitted.status !== 'success') {
+          log.warn(
+            {
+              request_id: requestId,
+              scenario_id: context.session_id,
+              emit_status: emitted.status,
+            },
+            'V5 constraint-target correction — emit refused; nothing offered',
+          );
+          return undefined;
+        }
+        // ⛔⛔ BOTH HALVES OR NEITHER (Codex CX-210). The first version kept
+        // `emitted.pending` and threw `emitted.chip` away, so the offer was
+        // ARMED WITH NOTHING FOR THE USER TO CLICK — and `commit.ts` does not
+        // reconstruct a public chip from a pending, so nothing downstream put
+        // it back.
+        //
+        // ⚠ I inherited that from `__option_cost_ask`, whose user-facing half
+        // IS the assistant_text. This proposal's user-facing half is the CHIP.
+        // The precedent did not transfer and I did not check that it did —
+        // copying a pattern is not the same as copying its preconditions.
+        return { pending: emitted.pending, chip: emitted.chip };
+      })();
+      const correctionPendingForCommit: PendingAction | undefined = correctionOffer?.pending;
       const elicitChannel = handlerOutcome?.__elicit_baseline;
       const elicitPendingForCommit: PendingAction | undefined = (() => {
         if (elicitChannel === undefined) return undefined;
@@ -13127,10 +14203,88 @@ export async function runTurnExecutor(
       // same front-of-list precedence when present (it is this turn's own
       // question; flip proposals cannot co-occur with an add_constraint
       // turn, so the two heads never compete).
+      // The swapped success-target receipt's own question (see
+      // `goalTargetAskChannel` above), armed in the SAME commit as the copy
+      // the user read — the 2.918 pattern, applied to the goal seam.
+      //
+      // ⚠ HASHED AGAINST THE PERSISTED GRAPH, not `llmGraphHash`. The swap
+      // withholds this turn's graph write, so the graph the answer turn loads
+      // is the persisted one; `llmGraphHash` is derived from the mutated graph
+      // when a handler produced one, which on this path is precisely the graph
+      // being discarded. Arming with that hash would make the answer turn's
+      // divergence gate fail closed on every single answer — a question that
+      // can never be answered is worse than no question at all.
+      //
+      // Fail-closed on an unavailable hash, the same posture as the baseline
+      // elicitation and the add-risk clarify: no hash, no pending. The copy
+      // still ships and a full-sentence restatement still routes through the
+      // ordinary LLM path; only the elliptical carry is (safely) unavailable.
+      const goalTargetAskPendingForCommit: PendingAction | undefined = (() => {
+        if (goalTargetAskChannel === null) return undefined;
+        const persistedHash = ((): string | null => {
+          try {
+            return (
+              computeAnalysisAffectingGraphHash(
+                (context.persistedGraph as GraphStateIngress | null | undefined) ?? undefined,
+              ) ?? null
+            );
+          } catch {
+            return null;
+          }
+        })();
+        if (persistedHash === null) {
+          log.warn(
+            { request_id: requestId, scenario_id: context.session_id },
+            'V5 goal-target elicitation — graph hash unavailable; no pending question persisted (fail-closed)',
+          );
+          return undefined;
+        }
+        const askedAtIso = new Date().toISOString();
+        return {
+          id: randomUUID(),
+          scenario_id: context.session_id,
+          // Server-only pending (no rendered chip). STABLE by design: a
+          // re-ask supersedes its predecessor by key in carry-forward rather
+          // than consuming another of the column's three slots.
+          chip_id: 'chip_elicit_goal_target',
+          action: { kind: 'elicit_goal_target', ...goalTargetAskChannel },
+          preconditions: { graph_hash: persistedHash },
+          expires_at_turn_count: PENDING_ACTION_DEFAULT_TURN_TTL,
+          expires_at_iso: new Date(
+            Date.parse(askedAtIso) + PENDING_ACTION_DEFAULT_WALL_TTL_MS,
+          ).toISOString(),
+          emitted_at_iso: askedAtIso,
+        };
+      })();
+      // ⭐ THE VISIBLE HALF. Appended AFTER `buildPendingActionsWithProposalCapture`
+      // has already read `suggested_actions` above, deliberately: that helper
+      // mints pendings from LLM-proposed chips, and this chip is SERVER-minted
+      // with its pending already armed — capturing it again would double-mint.
+      if (composedOk !== null && correctionOffer !== undefined) {
+        composedOk = {
+          ...composedOk,
+          suggested_actions: [
+            ...(composedOk.suggested_actions ?? []),
+            correctionOffer.chip,
+          ] as typeof composedOk.suggested_actions,
+        };
+      }
+
       const pendingForCommit =
-        flipProposalPending || elicitPendingForCommit
+        flipProposalPending || elicitPendingForCommit || goalTargetAskPendingForCommit
+        || optionCostPendingForCommit || correctionPendingForCommit
           ? [
               ...(elicitPendingForCommit ? [elicitPendingForCommit] : []),
+              ...(goalTargetAskPendingForCommit ? [goalTargetAskPendingForCommit] : []),
+              // Ahead of the rerun/proposal chips for the same reason the
+              // option-cost ask is: a limit on a target that cannot carry it
+              // will keep producing the same withheld verdict, so the offer
+              // that can FIX it takes the scarcer slot.
+              ...(correctionPendingForCommit ? [correctionPendingForCommit] : []),
+              // Ahead of the rerun/proposal chips: a rerun offered while the
+              // limit is still uncheckable repeats the same withheld verdict,
+              // so the question that could change it takes the scarcer slot.
+              ...(optionCostPendingForCommit ? [optionCostPendingForCommit] : []),
               ...(flipProposalPending ? [flipProposalPending] : []),
               ...(proposalPendingForCommit ?? []),
             ].slice(0, 3)
@@ -13716,35 +14870,18 @@ export async function runTurnExecutor(
    * place the moment the disclosure flags are opened. Flipping either flag is
    * a product decision and is not taken here.
    *
-   * ⛔ WHAT THIS DOES NOT REACH — THE DURABLE COPY, AND IT IS FED BACK TO THE
-   * MODEL. Every `commitTurn` site in this executor runs BEFORE `finalizeRun`,
-   * and `commit.ts:332 durablePublicAssistantText` re-applies only the
-   * forbidden-phrase guard and the entity scrub. So `assistant_message`
-   * persists the UNGUARDED text for these turns, and that value is read back
-   * as prior-turn context by `context/context-pack-assembler.ts`,
-   * `rolling-summary/build-input.ts` and `handlers/edit-graph-dispatch.ts`
-   * (as `{ role: 'assistant', content: turn.assistant_message }`).
-   * `session/store.ts:189-193` describes that field as *"the egress-validated,
-   * user-visible prose … `assistant_text` is what the user saw"*, which stops
-   * being true on a turn this guard rewrites.
-   *
-   * ⚠ SCOPE, STATED PRECISELY. This guard WIDENS a gap the leader-claim and
-   * structural-success guards already have; it does not create one. It matters
-   * more here only because the retained content is the exact monologue this
-   * guard exists to suppress, and the model is then re-shown it as its own
-   * prior answer. NO REINFORCEMENT EFFECT HAS BEEN MEASURED — in the single
-   * available capture the model recovered on the following turn, and one data
-   * point is not a finding. The repo names the remedy in two places
-   * (`turn-executor.ts:12384`, `edit-graph-dispatch.ts:4583`: *"runs BEFORE
-   * commitTurn so the stored assistant_message equals the honest wire copy"*),
-   * and applying it belongs with the sibling guards that share the gap rather
-   * than in this change.
+   * Conversation-only commits now run this same ordered policy before storing
+   * assistant_message, so later context does not receive the blocked candidate
+   * as though the user saw it. Executed-handler receipts keep their existing
+   * commit ordering; this is not a universal history/egress parity claim.
+   * Later route-level rewriting and the conversation-storage cap remain outside
+   * this seam. No model-reinforcement effect has been measured.
    *
    * Idempotent: neither the surviving answer sentences nor the fallback copy
    * carries a narration marker.
    */
   function enforceProcessNarrationGuard(
-    dispatchPath: 'turn_executor_finalise',
+    dispatchPath: 'turn_executor_finalise' | 'turn_executor_commit',
   ): void {
     if (!response) return;
     const assistantText = response.assistant_text;
@@ -13800,7 +14937,7 @@ export async function runTurnExecutor(
    * because the neutral fallback contains no forbidden phrase.
    */
   function enforceEgressForbiddenPhraseGuard(
-    dispatchPath: 'turn_executor_finalise',
+    dispatchPath: 'turn_executor_finalise' | 'turn_executor_commit',
   ): void {
     if (!response) return;
     const assistantText = response.assistant_text;
@@ -13849,7 +14986,7 @@ export async function runTurnExecutor(
    * text carries no claim, so a second pass is a no-op.
    */
   function enforceStructuralSuccessClaimGuard(
-    dispatchPath: 'turn_executor_finalise',
+    dispatchPath: 'turn_executor_finalise' | 'turn_executor_commit',
   ): void {
     if (!response) return;
     const assistantText = response.assistant_text;
@@ -13929,7 +15066,7 @@ export async function runTurnExecutor(
    * presence cannot suppress this persisted-fact disclosure path.
    */
   function enforceDefaultedValueDisclosureGuard(
-    dispatchPath: 'turn_executor_finalise',
+    dispatchPath: 'turn_executor_finalise' | 'turn_executor_commit',
   ): void {
     if (!response) return;
     const assistantText = response.assistant_text;
@@ -14007,7 +15144,7 @@ export async function runTurnExecutor(
    * pointed at).
    */
   function enforceBlockedSlotClaimGuard(
-    dispatchPath: 'turn_executor_finalise',
+    dispatchPath: 'turn_executor_finalise' | 'turn_executor_commit',
   ): void {
     if (!response) return;
     const assistantText = response.assistant_text;
@@ -14116,7 +15253,7 @@ export async function runTurnExecutor(
    * ═══════════════════════════════════════════════════════════════════════════
    */
   function enforceWithheldLeaderClaimGuard(
-    dispatchPath: 'turn_executor_finalise',
+    dispatchPath: 'turn_executor_finalise' | 'turn_executor_commit',
   ): void {
     if (!response) return;
     // PERMITTED ⇒ no-op, byte-identical. Same short-circuit shape (and same
@@ -14316,7 +15453,7 @@ export async function runTurnExecutor(
       // cannot vary reads as a measured population when it is a tautology.
       //
       // `in_flow_gate_eligible` was `withheldExplanationReasonForRun !== null`.
-      // That variable's ONLY assignment site is inside the execute block, which
+      // At the time, that variable's only assignment was inside the execute block, which
       // the scope check above (`proposedHandlerIdForOutcome !== null → return`)
       // excludes by construction — so it was always `null` at this emit and the
       // tag was always `false`. Removed on the same reasoning that removed
@@ -14333,6 +15470,10 @@ export async function runTurnExecutor(
       ...response,
       assistant_text: projected.text,
     };
+    // Record the same projection that supplied the replacement bytes. Without
+    // this, the wire diagnostic reported null after a finalise replacement and
+    // a captured reply could not distinguish model text from guard output.
+    withheldExplanationReasonForRun = projected.reason;
     // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: same reasoning as the
     // structural-success swap directly above. The substitution replaces the
     // answer with short withheld copy; mark it functional so the egress does
@@ -14426,6 +15567,31 @@ export async function runTurnExecutor(
     functionalAnswerText = projected.response.assistant_text;
   }
 
+  // One ordered public-answer policy, shared by the conversation commit and
+  // the finaliser. Keep finalise as the fallback for failures/handler exits;
+  // do not move commit-conflict remapping or receipt construction before save.
+  function enforcePublicAnswerGuards(
+    dispatchPath: 'turn_executor_finalise' | 'turn_executor_commit',
+  ): void {
+    enforceProcessNarrationGuard(dispatchPath);
+    enforceWithheldLeaderClaimGuard(dispatchPath);
+    enforceEgressForbiddenPhraseGuard(dispatchPath);
+    enforceStructuralSuccessClaimGuard(dispatchPath);
+    enforceDefaultedValueDisclosureGuard(dispatchPath);
+    enforceBlockedSlotClaimGuard(dispatchPath);
+  }
+
+  function projectConversationResponseForCommit(candidate: OlumiResponse): OlumiResponse {
+    const previousResponse = response;
+    response = candidate;
+    try {
+      enforcePublicAnswerGuards('turn_executor_commit');
+      return response;
+    } finally {
+      response = previousResponse;
+    }
+  }
+
   function finalizeRun(): TurnExecutorRunResult {
     // ── ROADMAP 2.301 secondary fix — HOISTED conflict remap ─────────────
     // Runs FIRST, before the egress guards below, so the remapped envelope
@@ -14515,48 +15681,12 @@ export async function runTurnExecutor(
     // freshness derivation so the response-finaliser can thread freshness
     // onto the analysis_ready wire fields without re-deriving.
     //
-    // V5 stale-aware explain recovery — finaliser-level egress guard.
-    // Runs as the LAST step before the response leaves this function,
-    // so it backstops EVERY emit path: deterministic templates, LLM
-    // output, fallback copy, recoverable-handler recovery, state-query
-    // guard. An upstream hook would miss new emit paths added later;
-    // a finaliser hook cannot. See FORBIDDEN_USER_FACING_PHRASES for
-    // the contradiction list this enforces.
-    // ⭐ CLAIM SAFETY AT THE CHOKEPOINT — the THIRD guard, and deliberately the
-    // FIRST to run. It performs a WHOLE-TEXT substitution, so running it ahead
-    // of the other two means its replacement copy is itself subject to the
-    // forbidden-phrase and structural-success guards below rather than
-    // bypassing them. (`withheld-leader-claim-chokepoint.test.ts` pins the
-    // converse: that the other two guards' own substitution constants are
-    // leader-free, so this ordering cannot silently rot.) See
-    // `enforceWithheldLeaderClaimGuard` for why a finaliser hook and not
-    // another in-flow gate.
-    // ⭐⭐⭐ PROCESS NARRATION — FIRST OF ALL THE PROSE GUARDS. It is the only
-    // one that can substitute the WHOLE reply with new copy of its own, so it
-    // runs ahead of the other three and its replacement is then judged by
-    // them. See `enforceProcessNarrationGuard` for the witnessed leaks, for
-    // why the branch-level `stripPlanningPreamble` could not cover them, and
-    // for where the excised deliberation goes.
-    enforceProcessNarrationGuard('turn_executor_finalise');
-    enforceWithheldLeaderClaimGuard('turn_executor_finalise');
-    enforceEgressForbiddenPhraseGuard('turn_executor_finalise');
-    // AI Harness capability 1 — always-on false-success neutralisation. Runs
-    // alongside the forbidden-phrase guard so EVERY emit path (incl. the
-    // deterministic short-circuits and the new post-analysis composer, which
-    // bypass STEP 6.6) is backstopped against a first-person mutation-success
-    // claim with no committed mutation. Commit-anchored, precision-first, not
-    // flag-gated. See `enforceStructuralSuccessClaimGuard`.
-    enforceStructuralSuccessClaimGuard('turn_executor_finalise');
-    // F6 — LAST, after every whole-text substitution above, so the disclosure
-    // qualifies the text that actually ships rather than one a later guard
-    // discards. See `enforceDefaultedValueDisclosureGuard` for the ordering
-    // argument and for why it reads `context.prior_facts` directly.
-    enforceDefaultedValueDisclosureGuard('turn_executor_finalise');
-    // ⭐⭐ 2.1265 — LAST. The mutual-exclusion invariant judges the text that
-    // actually ships, after every whole-text substitution above. See
-    // `enforceBlockedSlotClaimGuard` for the ordering argument and for why the
-    // authoritative read is `canonicalReadinessGraphForRun` and nothing else.
-    enforceBlockedSlotClaimGuard('turn_executor_finalise');
+    // Backstop every executor exit, including handlers and failed commits that
+    // are intentionally excluded from pre-commit conversation projection.
+    // The shared policy preserves the existing guard order: narration, leader
+    // claim, forbidden phrase, structural success, defaulted value, blocked slot.
+    // Later substitutions therefore cannot bypass the guards that judge them.
+    enforcePublicAnswerGuards('turn_executor_finalise');
     const turnOutcome = buildTurnOutcome();
     // Fix 4 (observability): finalise turn timings only when V5_TIMING_DEBUG
     // is enabled. Default-OFF production paths skip the telemetry emit and

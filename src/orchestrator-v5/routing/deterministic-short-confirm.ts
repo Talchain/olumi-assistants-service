@@ -98,9 +98,54 @@ const EDIT_VERB_OR_QUANTITY_PATTERN =
  * model to include churn") disqualifies the match and falls to the normal
  * edit / value-update path — only an anchored, content-free confirmation
  * resolves a pending proposal.
+ *
+ * ⭐⭐ #1560 — THE AFFIRMATIVE LEAD REACHED ONLY ONE OF THE TWO MATCHERS, AND
+ * THE PRODUCT'S OWN OFFER COPY TEACHES A PHRASE THIS PATTERN COULD NOT HEAR.
+ *
+ * WITNESSED LIVE on staging CEE `8e4efce0`, 14 Sep 2026. The warrant demotion
+ * offers a constraint and closes with, verbatim:
+ *
+ *   "Nothing has been changed. I want to confirm this with you before I edit
+ *    the model … Say the word and I will MAKE IT."
+ *
+ * The user says "Yes, make it." — the word the product just asked for — and
+ * measured at the wire: `graph_hash` UNCHANGED (`b6fb4e2aaa2d4eae` both sides),
+ * no `graph_patch` block, and the prose asks a SECOND time ("Reply yes to
+ * continue with it"). Nothing is written. The mechanism is entirely here:
+ *
+ *   · `EDIT_VERB_OR_QUANTITY_PATTERN` contains `make`, so the gate at the top
+ *     of `tryShortConfirmResume` claims the turn unless `isProposalConfirm`;
+ *   · this pattern knew `make that` but never `make it`, so `isProposalConfirm`
+ *     was false, nothing consumed the pending, `isConfirmResume` stayed false,
+ *     and the warrant gate DEMOTED the turn into a fresh offer — a consent loop
+ *     that re-mints a near-identical proposal every turn.
+ *
+ * Two corrections, both narrow, and the safety argument above is UNCHANGED —
+ * every arm is still anchored ^…$, still names NO user-supplied value, and
+ * still fires only while a live `apply_proposed_change` is held:
+ *
+ *   (1) THE AFFIRMATIVE LEAD. P1a added an optional leading affirmative to
+ *       `SHORT_CONFIRM_PATTERN` because real users OVER-ANSWER a confirmation
+ *       ("Yes, go ahead"). That remedy was scoped to the instance in hand and
+ *       never swept its sibling — so "add that" resolved while "Yes, add that"
+ *       did not, and ADDING AN AFFIRMATIVE MADE A CONFIRMATION WEAKER. The
+ *       prefix here is the same construct, deliberately character-identical.
+ *
+ *   (2) THE PRONOUN OBJECT. `(?:add|make|apply)\s+it`, and ONLY that.
+ *       "make it" is not a fresh request when a proposal is held and the offer
+ *       copy just invited exactly that word; an anchored bare pronoun can name
+ *       no target and carry no value ("make it 5%" / "make it bigger" both
+ *       carry trailing content and are still refused by the anchor).
+ *
+ *       ⚠ The `this` forms ("apply this change") were tried and REVERTED: they
+ *       are unwitnessed, and they stole `"Apply this change"` from the
+ *       route-level exact-copy resolver, whose numbered clarification names the
+ *       DISTINCT rendered labels and is strictly more useful than this module's
+ *       generic ambiguity copy. Pinned by
+ *       `proposed-change-route-level.test.ts` — do not re-add them.
  */
 export const PROPOSAL_CONFIRM_PATTERN =
-  /^\s*(?:add\s+that|make\s+that(?:\s+(?:change|update|edit))?|do\s+that\s+(?:change|update|edit)|apply\s+that(?:\s+(?:change|update|edit))?|try\s+that(?:\s+(?:change|update|edit|one))?|test\s+that(?:\s+(?:change|update|edit|one))?|(?:update|try|test)\s+the\s+model|let'?s\s+(?:do\s+that|apply\s+that|try\s+that|test\s+that))(?:\s+(?:please|now|thanks|thank\s+you))?[\s.!?\u{1F300}-\u{1FAFF}]*$/iu;
+  /^\s*(?:(?:yes|yep|yeah|sure|ok(?:ay)?)[,\s]+(?:and\s+)?)?(?:add\s+that|make\s+that(?:\s+(?:change|update|edit))?|do\s+that\s+(?:change|update|edit)|apply\s+that(?:\s+(?:change|update|edit))?|(?:add|make|apply)\s+it|try\s+that(?:\s+(?:change|update|edit|one))?|test\s+that(?:\s+(?:change|update|edit|one))?|(?:update|try|test)\s+the\s+model|let'?s\s+(?:do\s+that|apply\s+that|try\s+that|test\s+that))(?:\s+(?:please|now|thanks|thank\s+you))?[\s.!?\u{1F300}-\u{1FAFF}]*$/iu;
 
 /**
  * ⭐⭐ OFFER-REFERENCE ACCEPTANCE (ROADMAP 2.663 / F-B). Two patterns, and the

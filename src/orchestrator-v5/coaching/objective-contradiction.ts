@@ -748,20 +748,23 @@ export function detectDirectionalContradiction(
 export const OBJECTIVE_LABEL_MAX_CHARS = 60;
 
 const ATTAINMENT_LEAD_IN = ' Two different questions have two different answers here: ';
-const ATTAINMENT_MIDDLE = ' came out ahead most often, but ';
+const ATTAINMENT_MIDDLE = ' scored highest against your goal most often, but ';
 const ATTAINMENT_TAIL_A = ' is more likely to reach your stated target (';
 const ATTAINMENT_TAIL_B =
-  '). Coming out ahead counts how often an option scored highest on the goal, not whether your target was met.';
+  '). Scoring highest counts how often an option scored highest on your goal, not whether your target was met.';
 
-const DIRECTIONAL_MIDDLE = ' came out ahead most often without moving ';
+const DIRECTIONAL_MIDDLE = ' scored highest against your goal most often without moving ';
 const DIRECTIONAL_TAIL_A = ' the way your goal asks. Among the options that do, ';
 /**
  * ⚠⚠ THIS CLAUSE MUST NOT END IN THE HEADLINE'S OWN LEAD CLAUSE, and the first
  * draft did — caught by a probe, not by inspection.
  *
  * `analysis-result-headline.ts` builds its Case-E grammar as
- * `^.+? came out ahead in \d{1,3}% of runs of this model\.${TAIL_PATTERN}$`.
+ * `^.+? scored highest against your goal in \d{1,3}% of runs of this model\.${TAIL_PATTERN}$`.
  * The draft ended with exactly `came out ahead in 28% of runs of this model.`,
+ * ⚠ THAT QUOTE IS THE HISTORIC DRAFT AND IS LEFT VERBATIM — the lead clause was
+ * retired on 2026-09-07 (Paul's no-winner ruling); the grammar line ABOVE is the
+ * current shape, this line is what was actually measured colliding with it.
  * so `^.+?` swallowed the template AND this whole disclosure, and the summary
  * was ADMITTED BY THE HEADLINE GRAMMAR — measured `true` with no tail slot
  * registered at all, against a control that read `false` once the clause was
@@ -781,7 +784,7 @@ const DIRECTIONAL_TAIL_A = ' the way your goal asks. Among the options that do, 
  * discriminating pair in the wiring spec pins it: the composed summary must be
  * REJECTED with the slot removed and ADMITTED with it present.
  */
-const DIRECTIONAL_TAIL_B = ' came out ahead in ';
+const DIRECTIONAL_TAIL_B = ' scored highest in ';
 const DIRECTIONAL_TAIL_C = '% of runs.';
 
 function quote(label: string): string {

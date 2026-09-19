@@ -689,11 +689,18 @@ function simplifyModelPrompt(): SuggestedAction {
 // `derivePendingActionsFromChips` (compose/derive-pending-actions.ts)
 // filters them out via `mapChipKind`, preventing a stale pending
 // `run_analysis` from being persisted on a mutation failure.
+// ⭐ THE VOICE OF A CHIP MESSAGE IS THE USER'S, NOT OURS. This message used to
+// read "Tell me what you'd like to change." — our own prose, addressed TO the
+// user, sent BY the user. Clicking it asked the product what the PRODUCT wanted
+// changed, which is not a move the product can make. Same harm as the
+// edit-rejection dead end measured on staging 2026-09-14 (scenario 9677de7d):
+// a chip whose text names nothing to route. Pinned in
+// `compose/recovery-chip-actionability.test.ts`.
 function restateChangePrompt(): SuggestedAction {
   return {
     id: 'chip_prompt_restate_change',
     label: 'Tell me what to change',
-    message: "Tell me what you'd like to change.",
+    message: 'Tell me what I can change in my model.',
   };
 }
 

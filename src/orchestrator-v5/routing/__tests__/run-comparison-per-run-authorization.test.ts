@@ -5,8 +5,8 @@
  * THE DEFECT. `composeComparison` received ONE permission and composed BOTH
  * runs' leaders from it:
  *
- *     "The leading option has changed. ${prior} came out ahead before,
- *      and ${current} now leads."
+ *     "The option most likely to serve your goal has changed. ${prior} came out ahead before,
+ *      and ${current} scores highest now."
  *
  * The caller supplies the TURN's permission, which #730 reads off the
  * scenario's newest CLAIM-BEARING fact — a fact that speaks for the current run
@@ -176,8 +176,8 @@ const FOLLOW_UP = 'If you want to test this further, ask what would change the r
 describe('run-comparison: a WITHHELD prior run under a PERMITTED current run', () => {
   it('does NOT name the prior run\'s leading option', () => {
     // ⭐ THE DEFECT, in one assertion. Before the fix this text read
-    // "The leading option has changed. Offshore came out ahead before, and
-    // Onshore now leads." — the prior run's withheld leader, named verbatim
+    // "The option most likely to serve your goal has changed. Offshore came out ahead before, and
+    // Onshore scores highest now." — the prior run's withheld leader, named verbatim
     // under the current run's permission.
     const text = textOf(ask('withheld', 'permitted'));
     expect(text).not.toContain(PRIOR_LEADER);
@@ -192,13 +192,13 @@ describe('run-comparison: a WITHHELD prior run under a PERMITTED current run', (
   });
 
   it('makes NO cross-run claim — no "has changed", no "still", no margin shift', () => {
-    // The implication channel. "The leading option has changed" plus a named
+    // The implication channel. "The option that scored highest most often in the model simulations has changed" plus a named
     // current leader determines the prior leader by elimination on a two-option
     // model; "still leads" asserts the prior leader WAS this option, which is a
     // designation of the withheld run's leader in a sentence that never names
     // it. Both are cross-run claims and both require both permissions.
     const text = textOf(ask('withheld', 'permitted'));
-    expect(text).not.toMatch(/leading option has changed/i);
+    expect(text).not.toMatch(/option that scored highest most often in the model simulations has changed/i);
     expect(text).not.toMatch(/\bstill leads\b/i);
     expect(text).not.toMatch(/came out ahead before/i);
     expect(text).not.toMatch(/its lead has (?:widened|narrowed)/i);
@@ -226,15 +226,15 @@ describe('run-comparison: a WITHHELD prior run under a PERMITTED current run', (
 // ---------------------------------------------------------------------------
 
 describe('run-comparison: the four per-run permission combinations', () => {
-  it('PERMITTED / PERMITTED — byte-identical to the pre-fix answer (POSITIVE CONTROL)', () => {
+  it('PERMITTED / PERMITTED — retains the scoped comparison and margin (POSITIVE CONTROL)', () => {
     // Pinned to the FULL string, not to fragments. This is the control that
     // makes every absence assertion in this file non-vacuous: it proves the
     // fixture produces a real, leader-naming, margin-carrying comparison, so
     // the "not.toContain" assertions elsewhere are measuring suppression rather
-    // than an empty answer. It is also the one-directionality proof at the
-    // bytes — this branch must not move at all.
+    // than an empty answer. The comparison is scoped to score frequency, not
+    // likelihood of meeting a target; the margin and band remain available.
     expect(textOf(ask('permitted', 'permitted'))).toBe(
-      'The leading option has changed. Offshore came out ahead before, and Onshore now leads.'
+      'The option that scored highest most often in the model simulations has changed. Offshore scored highest most often in the earlier run, and Onshore scored highest most often in the latest run.'
         + ' Its lead has narrowed by about 14 percentage points.'
         + ` ${BAND_SENTENCE}`
         + ` ${FOLLOW_UP}`,
@@ -249,7 +249,7 @@ describe('run-comparison: the four per-run permission combinations', () => {
 
   it('WITHHELD / PERMITTED — the current leader, and an honest gap where the prior one was', () => {
     expect(textOf(ask('withheld', 'permitted'))).toBe(
-      'Onshore leads on the latest result.'
+      'Onshore scored highest on the latest result.'
         + ` ${WITHHELD_PRIOR_LEADER_COMPARISON_TEXT}`
         + ` ${BAND_SENTENCE}`
         + ` ${FOLLOW_UP}`,
@@ -264,7 +264,7 @@ describe('run-comparison: the four per-run permission combinations', () => {
     // through to a neighbouring branch degrades however the last `else` was
     // written, which is not "degrades honestly".
     expect(textOf(ask('permitted', 'withheld'))).toBe(
-      'Offshore came out ahead in the earlier run.'
+      'Offshore scored highest in the earlier run.'
         + ` ${WITHHELD_CURRENT_LEADER_COMPARISON_TEXT}`
         + ` ${BAND_SENTENCE}`
         + ` ${FOLLOW_UP}`,

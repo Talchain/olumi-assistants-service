@@ -392,6 +392,24 @@ describe("ROADMAP 2.330 — a new magnitude list in src/ forces a review", () =>
    * magnitude word for a reason that is not a magnitude lookup.
    */
   const REVIEWED: Readonly<Record<string, string>> = {
+    // 16 Sep 2026 — INCIDENTAL, and the mention is one word of English prose.
+    // `orchestrator/context/graph-compact.ts` qualifies an option's model value
+    // for the AI-facing context ("model value 1 (display band Very high;
+    // real-world meaning not established)"). Its band comes from
+    // `qualitativeBand` in `cee/factor-extraction/display-value.ts` — the
+    // canonical shared rule, imported, never re-typed — and the bands are
+    // Low/Moderate/High/Very high, which are not magnitude words at all.
+    // The single trigger is the word `hundred` in a docstring sentence pricing
+    // the size cost of that qualification ("a few hundred characters it did not
+    // before"). It declares no alphabet, holds no magnitude->value map, and
+    // maps no magnitude word to a number.
+    // ⚠ Recorded rather than reworded. Rewording the comment to dodge the
+    // guard would quiet a working alarm and leave the next reader no record
+    // that this file was looked at; this entry IS the review the guard asked
+    // for. If this file ever maps a magnitude word to a NUMBER, it becomes a
+    // genuine sibling lookup and must move to SIBLING_VALUE_LOOKUPS.
+    'orchestrator/context/graph-compact.ts':
+      'incidental — the word `hundred` appears once in a docstring pricing the context size cost; bands come from the shared qualitativeBand, and no magnitude word is mapped to a number',
     // ROADMAP 2.1131 — INCIDENTAL, and deliberately so. `utils/amount-range.ts`
     // is the RANGE grammar: how a magnitude written once after a coordinate
     // pair ("£80-120k") scopes both bounds. It declares no alphabet, holds no
@@ -593,6 +611,20 @@ describe("ROADMAP 2.330 — a new magnitude list in src/ forces a review", () =>
       "of `grand` alone and false of the file — the `['grand','currency']` unit-KIND row sits " +
       "beside a real multiplier map that this guard could not see.",
     "cee/factor-extraction/display-value.ts": "formats from MAGNITUDE_DISPLAY_LADDER; comment mentions 'thousand'",
+    // Paul's scale-ask ruling (2026-09-07). CLASSIFIED (b) — INCIDENTAL, and
+    // the classification was MEASURED rather than asserted: every occurrence of
+    // a magnitude word in that file was enumerated, and each one is either
+    // inside a comment/docstring or the identifier `thousands`, which is the
+    // integer FORMATTER imported from `compose/format-factor-value.js` and not
+    // a magnitude word at all. The file declares no alphabet and maps no
+    // magnitude word to a number: its rungs come from `MAGNITUDE_WORD_LADDER`,
+    // which is itself derived from `MAGNITUDE_MULTIPLIERS` in the canonical
+    // leaf (longest key per multiplier, the mirror of the display ladder).
+    // ⚠ If it ever spells a magnitude word in a declaration position or maps
+    // one to a number, it becomes a genuine sibling and must move to
+    // SIBLING_VALUE_LOOKUPS.
+    "orchestrator-v5/system-events/scale-ask.ts":
+      "derived — offers magnitude readings from MAGNITUDE_WORD_LADDER; declares no alphabet and maps no magnitude word to a number",
     // ROADMAP 2.973. ⚠ CLASSIFIED (b) — INCIDENTAL MENTION ONLY, and it earned
     // that classification the hard way: the first cut of that file DID
     // hand-write a fifth multiplier map, and THIS GUARD caught it in CI. The
@@ -627,6 +659,20 @@ describe("ROADMAP 2.330 — a new magnitude list in src/ forces a review", () =>
       "check that keeps '2.5 tonne' inside one candidate.",
     "cee/compound-goal/extractor.ts": "comments only; derives its patterns from the canonical alphabet",
     "cee/factor-extraction/index.ts": "comments only; derives its patterns from the canonical alphabet",
+    // 18 Sep 2026 — INCIDENTAL, and the mention is a QUOTED USER BRIEF inside a
+    // docblock. `goal-baseline-admissibility.ts` decides whether a stated
+    // current level may be minted beside a stated target; its only magnitude
+    // word is the word "million" inside the measured counter-example it names
+    // as OUT of scope ("grow ARR from 8 to 11 million within 12 months", eight
+    // persisted staging rows where an elided magnitude word put the two members
+    // of a from-to pair on different scales). It declares no alphabet, holds no
+    // magnitude->value map, parses nothing, and maps no magnitude word to a
+    // number — it compares two numbers a caller hands it. Recorded rather than
+    // reworded, for the reason the `graph-compact.ts` entry above states: the
+    // quoted brief is the evidence for the scope limit, and paraphrasing it to
+    // dodge the guard would delete the evidence and quiet a working alarm.
+    "cee/factor-extraction/goal-baseline-admissibility.ts":
+      "docblock only; quotes one user brief containing 'million' as the case this module deliberately does NOT close",
     "context/resolver.ts": "comments only; derives its patterns from the canonical alphabet",
     "utils/reduction-framing.ts": "comments only; derives its patterns from the canonical alphabet",
     "cee/unified-pipeline/stages/repair/graph-enforcement.ts":

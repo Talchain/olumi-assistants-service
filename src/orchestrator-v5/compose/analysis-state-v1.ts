@@ -109,10 +109,30 @@
  *
  *      **BOTH CLAUSES ARE NOW FALSE.** Swept at UI `staging` 13b8676d
  *      (2026-08-26), contrast control in the same run:
- *        - `canvas/state/analysisStateSelector.ts:671` reads
- *          `wire.leader_claim.permitted && run_state.kind === 'complete_current'`
- *          — THE STEP-7 CONJUNCT THIS NOTE SAID MUST NOT BE BUILT UNTIL THE
- *          QUESTION WAS SETTLED. It was built. The question was not settled.
+ *        - ⚠⚠ **THE CONSUMER NAMED HERE HAS MOVED — RE-POINTED 2026-09-18, and
+ *          the old text is corrected rather than deleted (trap 14).** It read:
+ *          *"`canvas/state/analysisStateSelector.ts:671` reads
+ *          `wire.leader_claim.permitted && run_state.kind === 'complete_current'`"*.
+ *          Re-swept at UI `staging` **af4370a0**: that file still EXISTS and
+ *          contains **ZERO** occurrences of `permitted` (contrast control in the
+ *          same run: `leader_claim` is read in 15 non-test UI files, so the probe
+ *          is sighted). **The live read is
+ *          `lib/coherence/crossSurfaceCoherence.ts` →
+ *          `producerWithholdsLeaderClaim`**, reached from
+ *          `canvas/hydrate/applyScenarioAnalysisRead.ts` (import, then
+ *          `'leader_claim_withheld'`). Its body is `state?.leader_claim
+ *          ?.permitted === false` — so the substance of the finding STANDS: the
+ *          step-7 conjunct was built, the question was not settled, and the
+ *          consumer still reads `permitted` as a permission.
+ *
+ *          ⭐ THE DURABLE REFERENCE IS THE SYMBOL, NOT THE LINE, for the same
+ *          reason the sibling bullet below already gives about `:863`/`:872`:
+ *          these are UI-repo coordinates this CEE module cannot verify at build
+ *          time, so they rot silently. A stale pointer reads as CONSIDERED and
+ *          sends the next session to the wrong file — which is how CLAUDE.md's
+ *          readiness-authority line sat wrong from 19 Aug to 18 Sep. Cite
+ *          `producerWithholdsLeaderClaim` by name; re-derive the line if you
+ *          need one.
  *        - `lib/coherence/crossSurfaceCoherence.ts` (the EMISSION site; the
  *          nearby `:863` cited in the first draft of this note is the GUARD,
  *          not the emission — a review measured the emission at `:872`. Both
@@ -424,6 +444,14 @@ export interface AnalysisStateComposeInput {
     readonly status?: unknown;
     readonly blocked_reason?: unknown;
     readonly blockers?: readonly unknown[];
+    /**
+     * The canonical assessor's own itemised issues. Declared here because this
+     * composer READS them as a fallback source of wire blockers — see
+     * {@link issuesAsWireBlockers}. Typed `unknown[]` for the same reason
+     * `blockers` is: the payload reaching this composer comes from several
+     * producers at several schema versions.
+     */
+    readonly readiness_issues?: readonly unknown[];
   };
   /**
    * CEE's constraint entitlement for this turn (`MAY_NAME_LEADING_OPTION`),
@@ -498,6 +526,129 @@ export function mapWireBlockers(
   return out;
 }
 
+/**
+ * ⭐⭐ THE SECOND SOURCE — CARRIED, NOT DERIVED. CEE HAD ALREADY NAMED THE GAP.
+ *
+ * THE DEFECT, AND IT IS THE FIRST CLICK A COLLABORATOR MAKES. A fresh guest on
+ * the seeded model presses the board's primary CTA. The run is CORRECTLY
+ * refused, and the product says *"Olumi needs something more from this model
+ * before the next analysis. Ask in the chat and it will explain what is
+ * missing."* That is the `unspecified` rung of the UI's `composeBlockedReason`,
+ * whose FIRST line is `if (blockers.length === 0) return [unspecified]`. The
+ * rung is correct for a verdict carrying nothing nameable. This verdict was not
+ * one.
+ *
+ * MEASURED ON CEE STAGING (60 `cee.analysis_ready.built` events over two
+ * hours): 8 returned `status: needs_user_mapping` with `blockerCount: 0` while
+ * carrying `optionsNeedingMapping: 1` and `userQuestionCount: 2`. Reproduced
+ * from the 19 Aug capture corpus — `assessCanonicalAnalysisReadiness` on
+ * draw-5's `e405d56a` returns, AT PRISTINE:
+ *
+ *   analysisReady.blockers   = []
+ *   readiness_issues         = [ … , { code: 'OPTION_NEEDS_MAPPING',
+ *                                      option_id: 'e405d56a',
+ *                                      message: 'Choose which factor "Status
+ *                                        Quo: Hold current strategy" changes
+ *                                        and by how much.' } ]
+ *
+ * ⭐ SO NOTHING NEEDED DERIVING. `appendSemanticIssues`
+ * (`analysis-ready-helper.ts:941`) already walks every non-ready option that no
+ * blocker covers and authors exactly the sentence the user needs. It writes it
+ * into `readiness_issues`. This composer read ONLY `blockers`, so the one
+ * surface that had the answer was the one surface the UI could not see.
+ *
+ * ⚠⚠ THE FIRST ATTEMPT AT THIS FIX MINTED A SECOND AUTHORITY, AND THE SUITE
+ * CAUGHT IT. Emitting fresh option-scoped blockers inside
+ * `transforms/analysis-ready.ts` made `payload.blockers` non-empty, which fed
+ * `appendSemanticIssues`' own `coveredOptionIds` set and SUPPRESSED its better
+ * copy — `option-status-connected-but-numberless.test.ts` REDed on its pinned
+ * precondition. Two producers of one sentence is this estate's chronic defect;
+ * the fix is to CARRY the existing one, never to author a rival.
+ *
+ * ⚠ FALLBACK, NEVER A MERGE. `blockers` wins whenever it yields anything. These
+ * are the SAME gaps seen from the assessor's side, so appending both would show
+ * the user one gap twice and inflate every downstream count.
+ *
+ * ⚠⚠ NO `obligation` FILTER, AND THAT IS A MEASURED CALL THAT REVERSED THIS
+ * FUNCTION'S FIRST VERSION. It filtered `obligation === 'offered'`, copying the
+ * rule the UI applies in `readinessAuthoredRefusalItems`. Measured on the
+ * 19 Aug corpus, EVERY option-scoped issue is `obligation: 'offered'` —
+ * including the `MISSING_OPTION_VALUE` issues whose blockers already ship on
+ * the wire today (`provenance` is `unattributed` on a draft graph, and an
+ * unattributable structure cannot be demanded of the user). So the filter
+ * (a) left the mute refusal exactly as mute, fixing nothing, and (b) disagreed
+ * with `mapWireBlockers`, which applies NO obligation filter — meaning the
+ * meaning of `readiness.blockers` would have depended on WHICH source happened
+ * to populate it. Two rules for one wire field is the trap-21 shape. The
+ * demand-vs-offer decision belongs to the consumer, which already makes it.
+ *
+ * ⚠ `waived_by_exclusion` IS still dropped, and it is a different question.
+ * It is not about how to RENDER a gap; it states that this gap is not what
+ * stands in the way — the run will proceed by excluding or holding that option.
+ * Naming it as the reason for a refusal would name a non-reason. It is
+ * `undefined` throughout the corpus above, so this branch is covered by a unit
+ * case rather than by the captures, and that is stated rather than implied.
+ *
+ * ⚠ THE FIELD SET IS AN ALLOW-LIST, NOT A SPREAD-AND-DELETE. The contract's
+ * `AnalysisBlocker` is `.strict()` at 0.54.0 AND 0.55.0 (both vendored tarballs
+ * read; the schema is byte-identical across them). A `CanonicalReadinessIssue`
+ * additionally carries `issue_id`, `provenance`, `obligation` and
+ * `waived_by_exclusion` — every one of which would REJECT the whole block at
+ * the consumer. Picking the eight permitted fields by name means a new field
+ * added upstream is dropped here rather than silently breaking the wire.
+ */
+export function issuesAsWireBlockers(issues: readonly unknown[] | undefined): AnalysisBlocker[] {
+  if (!Array.isArray(issues) || issues.length === 0) return [];
+  const out: AnalysisBlocker[] = [];
+  for (const raw of issues) {
+    if (typeof raw !== 'object' || raw === null) continue;
+    const issue = raw as Record<string, unknown>;
+    if (issue.waived_by_exclusion === true) continue;
+    const code = readNonEmptyString(issue.code);
+    const category = readNonEmptyString(issue.category);
+    const message = readNonEmptyString(issue.message);
+    const repairability = readNonEmptyString(issue.repairability);
+    // All four are REQUIRED by the contract. An issue missing any of them
+    // cannot be rendered as a blocker, and inventing a default would put a
+    // fabricated category in front of a user.
+    if (!code || !category || !message || !repairability) continue;
+    const optionId = readNonEmptyString(issue.option_id);
+    const optionLabel = readNonEmptyString(issue.option_label);
+    const factorId = readNonEmptyString(issue.factor_id);
+    const factorLabel = readNonEmptyString(issue.factor_label);
+    out.push({
+      code,
+      category,
+      message,
+      repairability,
+      ...(optionId ? { option_id: optionId } : {}),
+      ...(optionLabel ? { option_label: optionLabel } : {}),
+      ...(factorId ? { factor_id: factorId } : {}),
+      ...(factorLabel ? { factor_label: factorLabel } : {}),
+    });
+  }
+  return out;
+}
+
+/**
+ * The wire blocker list for this turn: the producer's own `blockers` when it
+ * itemised any, and the canonical assessor's owed `readiness_issues` when it
+ * did not.
+ *
+ * ONE FUNCTION, THREE CALL SITES. The three `readiness:` literals below would
+ * otherwise each need the fallback spelled out, and a fourth arm added later
+ * would quietly get the old behaviour — the mute refusal, back again on one
+ * path only.
+ */
+function wireBlockers(
+  readiness: AnalysisStateComposeInput['readiness'],
+  status: string,
+): AnalysisBlocker[] {
+  const stated = mapWireBlockers(readiness?.blockers, status);
+  if (stated.length > 0) return stated;
+  return issuesAsWireBlockers(readiness?.readiness_issues);
+}
+
 function composeRunState(input: AnalysisStateComposeInput): AnalysisRunState {
   const canonical = input.canonical as CanonicalAnalysisState;
   const freshness = input.freshness;
@@ -521,7 +672,7 @@ function composeRunState(input: AnalysisStateComposeInput): AnalysisRunState {
       kind: 'blocked',
       reason_code:
         readNonEmptyString(input.readiness?.blocked_reason) ?? BLOCKED_REASON_UNSPECIFIED,
-      blockers: mapWireBlockers(input.readiness?.blockers, 'blocked'),
+      blockers: wireBlockers(input.readiness, 'blocked'),
     };
   }
 
@@ -599,11 +750,35 @@ function composeRunState(input: AnalysisStateComposeInput): AnalysisRunState {
   }
 }
 
+/**
+ * ⭐ ONE DEFINITION OF "THIS RESULT SEPARATED THE ARMS".
+ *
+ * Exported because a SECOND consumer now needs the same answer: the receiving
+ * decision in `turn-executor.ts` must not tell the coach that options are
+ * separable when they are not. The independent review of `39557a98` found
+ * exactly that — the receiving branch was reading the CONSTRAINT verdict
+ * (entitlement) and treating it as separation.
+ *
+ * A copy in the caller would be CLAUDE.md trap 12 in its purest form: two lists,
+ * one of which gets the next fix. `composeLeaderClaim` below remains the sole
+ * author of the PUBLISHED `analysis_state.leader_claim.separation`; this is the
+ * predicate it uses, named so others can ask the same question rather than
+ * invent a second calculator.
+ *
+ * ⚠ UNKNOWN IS NOT SEPARATED. `null` signals mean no separation statement was
+ *   computed — never "the options do not separate", and never permission.
+ */
+export function separationEstablishedFromRobustness(
+  raw: RawRobustnessSignals | null,
+): boolean {
+  return raw !== null && !raw.near_tie_is_tie;
+}
+
 function composeLeaderClaim(input: AnalysisStateComposeInput): AnalysisLeaderClaim {
   const entitled = input.mayNameLeadingOption === true;
   const raw: RawRobustnessSignals | null = input.rawRobustness;
   const separationKnown = raw !== null;
-  const separates = separationKnown && !raw.near_tie_is_tie;
+  const separates = separationEstablishedFromRobustness(raw);
 
   const claim: {
     permitted: boolean;
@@ -673,7 +848,7 @@ export function composeAnalysisStateV1(
       : { kind: 'unknown_degraded' as const, cause: 'store_unreadable' as const };
     return {
       run_state: runState,
-      readiness: { status: readinessStatus, blockers: mapWireBlockers(input.readiness?.blockers, readinessStatus) },
+      readiness: { status: readinessStatus, blockers: wireBlockers(input.readiness, readinessStatus) },
       leader_claim: { permitted: false, withheld_reason: reason },
       robustness: {},
       usable_for_prose: false,
@@ -691,7 +866,7 @@ export function composeAnalysisStateV1(
       status: readinessStatus,
       // An EMPTY list here is a positive claim: readiness was assessed and
       // nothing is blocking. It is distinct from `analysis_state` being absent.
-      blockers: mapWireBlockers(input.readiness?.blockers, readinessStatus),
+      blockers: wireBlockers(input.readiness, readinessStatus),
     },
     leader_claim: composeLeaderClaim(input),
     robustness: composeRobustness(input),

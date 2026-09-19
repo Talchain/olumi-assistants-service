@@ -133,6 +133,14 @@ describe('[P1c.1] the enforcement auto-retry arm reaches the quality pass', () =
       if (r.startsWith('return applyDraftQualityPass({')) return 'measured';
       if (r.startsWith('return applyRetryUnaffordableCopy(')) return 'failure_arm';
       if (r.startsWith('return applyRetryExhaustedCopy(')) return 'failure_arm';
+      // goalfence: the draft blocked on a goal CEE itself minted, so no retry
+      // was funded (a re-draft starts from the same contentless goal and
+      // rescued 0 of 11 in the capture). A FAILURE arm for the same reason
+      // `applyRetryUnaffordableCopy` is one — it returns the FAILED result with
+      // honest skip copy, and there is no drafted model to measure. Routing it
+      // through the quality pass would ask "does this model cover the brief?"
+      // about a model that does not exist.
+      if (r.startsWith('return applyGoalNeverStatedSkipCopy(')) return 'failure_arm';
       return `UNCLASSIFIED:${r}`;
     });
     expect(classified.filter((c) => c.startsWith('UNCLASSIFIED'))).toEqual([]);

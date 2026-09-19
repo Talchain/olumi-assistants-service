@@ -16,7 +16,7 @@
  * statistic: no threshold on a difference-of-argmax-probabilities makes it
  * mean what a reader takes it to mean.
  *
- * WHAT REPLACES IT. `{leader} came out ahead in {P}% of runs of this model` —
+ * WHAT REPLACES IT. `{leader} scored highest against your goal in {P}% of runs of this model` —
  * exactly what `win_probability` is, scoped to the model that produced it.
  * It cannot be inflated by a third option collapsing, and the leader's own
  * probability was already resolved in the same module (`winner.winnerProb`),
@@ -77,7 +77,7 @@ describe('headline states the leader’s own win probability, not the gap', () =
       status_kind: 'ok',
     });
     expect(out).toBe(
-      'Hire One Senior Technical Lead came out ahead in 62% of runs of this model, but treat this as provisional: the result is sensitive to Hiring and Salary Cost.',
+      'Hire One Senior Technical Lead scored highest against your goal in 62% of runs of this model, but treat this as provisional: the result is sensitive to Hiring and Salary Cost.',
     );
     // Egress: the builder emitting it is not enough — the grammar must admit it
     // or the wire silently serves the locked template instead.
@@ -91,7 +91,7 @@ describe('headline states the leader’s own win probability, not the gap', () =
       status_kind: 'ok',
     });
     expect(out).toBe(
-      'Hire One Senior Technical Lead came out ahead in 62% of runs of this model because Technical Leadership in Place is the strongest driver.',
+      'Hire One Senior Technical Lead scored highest against your goal in 62% of runs of this model because Technical Leadership in Place is the strongest driver.',
     );
     expect(isAllowedRunAnalysisAssistantText(out!)).toBe(true);
   });
@@ -109,7 +109,7 @@ describe('headline states the leader’s own win probability, not the gap', () =
       status_kind: 'ok',
     });
     expect(out).toBe(
-      'Hire One Senior Technical Lead came out ahead in 62% of runs of this model.',
+      'Hire One Senior Technical Lead scored highest against your goal in 62% of runs of this model.',
     );
     expect(isAllowedRunAnalysisAssistantText(out!)).toBe(true);
   });
@@ -157,8 +157,8 @@ describe('headline states the leader’s own win probability, not the gap', () =
     // old gap copy these read "leads by 42 percentage points" and "leads by 28
     // percentage points": the same leader, two different confident numbers,
     // moved entirely by options the user was not asking about.
-    expect(spreadField).toContain('came out ahead in 62% of runs of this model');
-    expect(collapsedField).toContain('came out ahead in 62% of runs of this model');
+    expect(spreadField).toContain('scored highest against your goal in 62% of runs of this model');
+    expect(collapsedField).toContain('scored highest against your goal in 62% of runs of this model');
     expect(spreadField).toBe(collapsedField);
   });
 
@@ -177,7 +177,7 @@ describe('headline states the leader’s own win probability, not the gap', () =
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toBe('Switch to HubSpot came out ahead in 91% of runs of this model.');
+    expect(out).toBe('Switch to HubSpot scored highest against your goal in 91% of runs of this model.');
   });
 
   // ==========================================================================
@@ -210,7 +210,7 @@ describe('headline states the leader’s own win probability, not the gap', () =
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toBe('Switch to HubSpot came out ahead in 62% of runs of this model.');
+    expect(out).toBe('Switch to HubSpot scored highest against your goal in 62% of runs of this model.');
     expect(isAllowedRunAnalysisAssistantText(out!)).toBe(true);
   });
 
@@ -239,7 +239,7 @@ describe('headline states the leader’s own win probability, not the gap', () =
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toBe('Switch to HubSpot came out ahead in 61% of runs of this model.');
+    expect(out).toBe('Switch to HubSpot scored highest against your goal in 61% of runs of this model.');
     expect(isAllowedRunAnalysisAssistantText(out!)).toBe(true);
   });
 
@@ -258,7 +258,7 @@ describe('headline states the leader’s own win probability, not the gap', () =
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toBe('Switch to HubSpot came out ahead in 100% of runs of this model.');
+    expect(out).toBe('Switch to HubSpot scored highest against your goal in 100% of runs of this model.');
     expect(out!).not.toMatch(/\d+\.\d+/);
     expect(isAllowedRunAnalysisAssistantText(out!)).toBe(true);
   });
@@ -284,7 +284,7 @@ describe('headline states the leader’s own win probability, not the gap', () =
       status_kind: 'ok',
     });
     expect(out).toBe(
-      'Hire One Senior Technical Lead came out ahead in 52% of runs of this model, but the options are close.',
+      'Hire One Senior Technical Lead scored highest against your goal in 52% of runs of this model, but the options are close.',
     );
     expect(isAllowedRunAnalysisAssistantText(out!)).toBe(true);
   });

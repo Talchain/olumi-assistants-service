@@ -127,6 +127,7 @@
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 import type { FreshnessDerivation } from '../context/freshness.js';
+import { wasAnalysisRequestedByUser } from './unrequested-analysis-confinement.js';
 import { buildAnalysisResultBlock } from '../compose.js';
 
 /**
@@ -168,6 +169,33 @@ export function buildProseGroundingBlocks(
   // licence and `classifyClaimUsable` already apply: anything but the literal
   // 'fresh' — including absence — keeps the band.
   if (input.freshness === null || input.freshness.freshness !== FRESH) return [];
+  // ⛔ AND THE THIRD `[]` CASE — an analysis the user never asked for.
+  //
+  // MEASURED, 14 Sep 2026: this block shipped UNCHANGED on eight consecutive
+  // assistant turns of one founder session —
+  //   "Olumi ran a first pass on the model it had just drafted. Nothing in it is
+  //    confirmed yet, so no option is put forward and no result is called
+  //    reliable. Use it to find what is wrong."
+  // — because the two conditions above do not change while the user merely
+  // TALKS: the persisted fact stays non-null and the verdict stays fresh until
+  // the graph is edited. So the re-emission is unbounded on the chat path.
+  //
+  // ⭐ AND ON THE UNREQUESTED PATH THE CAVEAT IS ALL THAT SURVIVES. The
+  // confinement pass strips every figure this grounding block exists to ground,
+  // so what re-ships eight times is the disclaimer with nothing left to
+  // disclaim. Grounding prose in figures the same turn removes is not grounding.
+  //
+  // Uses the single existing authority rather than a new predicate — the
+  // provenance question ("did the user ask for this?") has one owner and this is
+  // it. Not `hasUserSeenRunAnalysisResult`, which is a delivery question whose
+  // answer moves.
+  //
+  // ⚠ RESIDUAL, DISCLOSED: this closes the CHAT path only. `compose.ts:1768`
+  // re-emits the same block on every handler turn while the verdict is fresh,
+  // and `PROVISIONAL_FIGURES_CAVEAT` is a third independent repeater on
+  // `assistant_text`. Neither is closed here; both need turn identity that
+  // `ComposeToolCallInput['lifecycle']` does not carry.
+  if (!wasAnalysisRequestedByUser(fact)) return [];
   return [buildAnalysisResultBlock(fact)];
 }
 

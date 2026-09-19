@@ -1,0 +1,24 @@
+{
+  "prompt_version": "v16r",
+  "fixture": "02-close-call",
+  "arm": 3,
+  "model": "claude-sonnet-5",
+  "stop_reason": "end_turn",
+  "usage": {
+    "input_tokens": 17011,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation": {
+      "ephemeral_5m_input_tokens": 0,
+      "ephemeral_1h_input_tokens": 0
+    },
+    "output_tokens": 1401,
+    "output_tokens_details": {
+      "thinking_tokens": 0
+    },
+    "service_tier": "standard",
+    "inference_geo": "global"
+  },
+  "latency_s": 13.9,
+  "text": "{\n  \"narrative_summary\": \"Move to Four Day Week produced the best outcome in 53% of runs of this model, and the other option is close on these numbers. The link from Delivery Throughput to Operating Margin is sensitive to your assumptions, worth checking before acting.\",\n  \"story_headlines\": {\n    \"opt_four_day\": \"Move to Four Day Week produced the best outcome where retention gains outweighed throughput risk.\",\n    \"opt_status_quo\": \"Keep Current Schedule would produce the best outcome if throughput held up better than modelled.\"\n  },\n  \"robustness_explanation\": {\n    \"summary\": \"The ordering holds in about 56% of variations, based on current estimates.\",\n    \"primary_risk\": \"The link from Delivery Throughput to Operating Margin is fragile and could shift which option this model points to.\",\n    \"stability_factors\": [\n      \"Staff Retention shows a reasonably well evidenced connection to Operating Margin.\"\n    ],\n    \"fragility_factors\": [\n      \"The link from Delivery Throughput to Operating Margin is sensitive to your assumptions, worth checking before acting.\"\n    ]\n  },\n  \"readiness_rationale\": \"The two options are close enough that either could suit, and Delivery Throughput is the specific gap still holding this back. Closing that gap would settle the comparison further.\",\n  \"evidence_enhancements\": {\n    \"fac_throughput\": {\n      \"specific_action\": \"Pull recent delivery cycle data to establish an actual throughput baseline under a shortened week trial.\",\n      \"rationale\": \"This connection is fragile and could change which option this model points to.\",\n      \"evidence_type\": \"internal_data\",\n      \"decision_hygiene\": \"Estimate the throughput impact yourself before looking at the data.\"\n    }\n  },\n  \"scenario_contexts\": {\n    \"edge_throughput_margin\": {\n      \"trigger_description\": \"If Delivery Throughput weakens its connection to Operating Margin beyond what is currently modelled...\",\n      \"consequence\": \"...then this model points to Keep Current Schedule rather than Move to Four Day Week.\"\n    }\n  },\n  \"flip_thresholds\": [\n    {\n      \"factor_id\": \"fac_throughput\",\n      \"factor_label\": \"Delivery Throughput\",\n      \"current_display\": \"44%\",\n      \"flip_display\": \"49%\",\n      \"narrative\": \"If Delivery Throughput moves from 44% to 49%, this model points to a different option.\"\n    }\n  ],\n  \"bias_findings\": [],\n  \"key_assumptions\": [\n    \"The link from Staff Retention to Operating Margin assumes current market conditions hold.\",\n    \"The link from Delivery Throughput to Operating Margin assumes no major process changes alongside the schedule decision.\"\n  ],\n  \"decision_quality_prompts\": [\n    {\n      \"question\": \"This failed because Delivery Throughput dropped more than expected under Move to Four Day Week. What early signs would you watch for?\",\n      \"principle\": \"Pre-mortem (Klein)\",\n      \"applies_because\": \"The two options are close enough that either could suit, and imagining failure surfaces what to monitor before committing.\"\n    },\n    {\n      \"question\": \"How would choosing Move to Four Day Week over Keep Current Schedule feel in 10 minutes, 10 months, and 10 years?\",\n      \"principle\": \"10-10-10 (Welch)\",\n      \"applies_because\": \"The two options are close enough that either could suit, so weighing the timeframe of impact helps separate short term discomfort from long term effect.\"\n    }\n  ],\n  \"pre_mortem\": {\n    \"failure_scenario\": \"The move to Move to Four Day Week failed because Delivery Throughput fell further than expected, weakening its connection to Operating Margin.\",\n    \"warning_signs\": [\n      \"Delivery cycle times lengthening in the weeks after the change.\",\n      \"Missed delivery commitments becoming more frequent.\"\n    ],\n    \"mitigation\": \"Run a short trial period with throughput tracked weekly before fully committing.\",\n    \"grounded_in\": [\"edge_throughput_margin\", \"fac_throughput\"],\n    \"review_trigger\": \"Reconvene if pilot throughput falls short of the modelled rate before full rollout.\"\n  }\n}"
+}

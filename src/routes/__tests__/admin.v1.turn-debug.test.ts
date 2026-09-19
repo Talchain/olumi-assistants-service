@@ -28,7 +28,7 @@ vi.mock('../../utils/hash.js', () => ({
   safeEqual: (a: string, b: string) => a === b,
 }));
 
-const { storeTurnDebug, clearTurnDebugStore } = await import('../../orchestrator-v5/debug/turn-debug-store.js');
+const { storeTurnDebug, clearTurnDebugStore, recordPromptCapture } = await import('../../orchestrator-v5/debug/turn-debug-store.js');
 const { adminTurnDebugRoutes } = await import('../admin.v1.turn-debug.js');
 
 function buildApp() {
@@ -146,5 +146,77 @@ describe('GET /admin/v1/turn-debug-stats', () => {
     const body = res.json();
     expect(body.store_size).toBe(1);
     expect(body.max_entries).toBe(500);
+  });
+});
+
+describe('GET /admin/v1/turn-debug/:turn_id — served-prompt capture (harness visibility)', () => {
+  let app: ReturnType<typeof buildApp>;
+
+  beforeEach(() => {
+    app = buildApp();
+    clearTurnDebugStore();
+  });
+
+  afterEach(async () => {
+    await app.close();
+    clearTurnDebugStore();
+  });
+
+  it('returns the served prompt BYTES and its provenance to an admin caller', async () => {
+    const PROMPT = 'SENTINEL-ADMIN-5d21bc90 You are Olumi. State assumptions explicitly.';
+    recordPromptCapture('turn-abc', 'sess-1', {
+      task: 'draft_graph',
+      systemPrompt: PROMPT,
+      meta: {
+        prompt_hash: 'b'.repeat(64),
+        prompt_version: 'draft_graph_default@v6 (staging)',
+        promptId: 'prompt_xyz',
+        version: 6,
+        source: 'store',
+        isStaging: true,
+        cache_status: 'fresh',
+        instance_id: 'inst-9',
+      },
+      resolution: {
+        resolved_model: 'claude-sonnet-4-5',
+        resolution_source: 'store_model_config',
+        provider: 'anthropic',
+      },
+      userContent: 'should we enter the German market',
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/admin/v1/turn-debug/turn-abc',
+      headers: { 'x-admin-key': TEST_KEY },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as {
+      prompt_captures: Array<Record<string, unknown>>;
+    };
+    expect(body.prompt_captures).toHaveLength(1);
+    const c = body.prompt_captures[0]!;
+    // The bytes — whole, not a hash and not a preview.
+    expect(c.system_prompt).toBe(PROMPT);
+    // …and the identity that says which prompt and which model.
+    expect(c.prompt_version).toBe('draft_graph_default@v6 (staging)');
+    expect(c.prompt_source).toBe('store');
+    expect(c.resolved_model).toBe('claude-sonnet-4-5');
+    expect(c.resolution_source).toBe('store_model_config');
+    // The user's words must not appear anywhere in the admin payload.
+    expect(JSON.stringify(body)).not.toContain('German market');
+    expect(c.user_content_sha256).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('returns an empty array (not undefined) when the turn recorded no prompt', async () => {
+    storeTurnDebug({ ...BASE_ENTRY });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/admin/v1/turn-debug/turn-abc',
+      headers: { 'x-admin-key': TEST_KEY },
+    });
+    expect(res.statusCode).toBe(200);
+    expect((res.json() as { prompt_captures: unknown[] }).prompt_captures).toEqual([]);
   });
 });

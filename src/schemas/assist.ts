@@ -436,6 +436,82 @@ export const GoalConstraintSchema = z.object({
    * own enum rather than restated as a local literal union (trap 12).
    */
   value_frame: GoalThresholdFrame.optional(),
+  /**
+   * Audit trail for the percent→fraction rewrite performed by
+   * `normaliseConstraintUnits` (`cee/compound-goal/extractor.ts`).
+   *
+   * ⚠ DECLARED FOR THE SAME REASON `value_frame` IS, AND IT WAS MISSING FOR
+   * EXACTLY AS LONG AS THE WARNING ABOVE HAS EXISTED. The extractor stamps
+   * this object and `toGoalConstraints` carries it forward explicitly — a
+   * by-presence projection written so the field would not be lost — and then
+   * this plain `z.object` deleted it at the first parse hop, with no error
+   * anywhere. Proven by execution before the fix: parsing a minted constraint
+   * returned `value_frame` and dropped `provenance_unit_normalised`.
+   *
+   * Reported by the Canvas lane, which cannot otherwise tell `value: 1.1,
+   * unit: "%"` meaning 110% from a genuine 1.1%, because BOTH conventions are
+   * live on the wire and a constraint gets no display twin the way
+   * `goal_threshold`/`goal_threshold_raw` does.
+   *
+   * ⚠ BY-PRESENCE, AND NEVER DEFAULTED. Absent means "no rewrite happened",
+   * which is a different fact from "a rewrite happened and was lost".
+   * Synthesising an empty audit trail would manufacture provenance, the same
+   * way a defaulted `value_frame` manufactures an attestation.
+   *
+   * ⚠ THIS DOES NOT WIDEN THE REWRITE RULE, which fires only for
+   * `unit === "%"` with `0 < |value| < 1`. Canvas's reported case (`1.1`)
+   * sits OUTSIDE that window and is therefore still unstamped — deciding
+   * whether `1.1` means 110% or 1.1% is a semantic judgement, not a carrier
+   * fix, and guessing it is how a value silently moves by 100×.
+   */
+  provenance_unit_normalised: z
+    .object({
+      rule: z.string(),
+      original_value: z.number(),
+      original_unit: z.string(),
+    })
+    .optional(),
+  /**
+   * ⭐⭐⭐ THE UNIT LABEL WAS REWRITTEN. THE VALUE WAS NOT. THAT IS THE WHOLE
+   * CLAIM, AND IT IS THE ONLY ONE THE REWRITE SITE CAN HONESTLY MAKE.
+   *
+   * `normaliseConstraintUnits` used to stamp the sibling above with
+   * `original_value: c.value`. Its guard fires ONLY for `unit === '%'` with
+   * `0 < |value| < 1`, so that number was BY CONSTRUCTION the post-relabel
+   * fraction — while the contract fixture (`original_value: 15`,
+   * `original_unit: '%'`) and the UI's `goalConstraintText.ts` (*"the number
+   * the reader actually stated — 110, not 1.1"*) both declare it to be the
+   * READER'S figure. A reader who wrote *"under 4%"* was shown *"≤ 0.04%"*,
+   * because the UI's audit path outranks the `source_quote` fallback and so
+   * the false stamp suppressed the honest rendering.
+   *
+   * ⛔ NOT FIXED BY MULTIPLYING BY 100 — that is the producer guessing a scale
+   * from a magnitude, which is the same defect one surface over. The stated
+   * figure is simply not recoverable at the rewrite site, so this field
+   * REPLACES the claim rather than restating it, under names scoped to the
+   * rule's own input rather than to the reader.
+   *
+   * ⛔⛔ `original_value` AND `original_unit` ARE ONE PAIR. `original_unit: '%'`
+   * carries the same defect as its twin — true of the reader's phrasing, false
+   * of the value beside it — and the consumer appends `%` on a percent unit.
+   * Unstamping one and keeping the other rebuilds `≤ 0.04%` at the next
+   * consumer that pairs them, so both are left unstamped together.
+   *
+   * ⚠ DECLARED, NOT LEFT TO PASSTHROUGH — this object is a plain `z.object`
+   * ("strip unknown fields", below), so an undeclared stamp is SILENTLY
+   * DELETED at the first parse hop with no error anywhere. That is exactly how
+   * `value_frame`'s sibling was lost; the warning was written, and the sibling
+   * was not declared. Pinned by spec rather than trusted to this prose.
+   *
+   * ⚠ BY-PRESENCE, NEVER DEFAULTED. Absent means "no rewrite happened".
+   */
+  provenance_unit_relabelled: z
+    .object({
+      rule: z.string(),
+      pre_normalisation_value: z.number(),
+      pre_normalisation_unit: z.string(),
+    })
+    .optional(),
   /** Deadline metadata for temporal constraints */
   deadline_metadata: z.object({
     deadline_date: z.string().optional(),

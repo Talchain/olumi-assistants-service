@@ -569,4 +569,62 @@ describe('add-option TEXT leg — opposite direction: what must NOT be claimed',
     expect(addOptionEvents(emitSpy).some((e) => e.outcome === 'held')).toBe(false);
     expect(dispatchEditGraphMock).toHaveBeenCalled();
   });
+
+  it('⭐⭐ an option named after its own DECISION is ASKED about, not silently declined', async () => {
+    // ═══ THE CAPABILITY THIS ARM SHIPS ═══
+    // `labelIsTheDecisionItself` has always detected this. Until now the route
+    // discarded the detection: every non-`composed` status fell through to the
+    // generic edit lane with telemetry only, so the product knew exactly what
+    // was wrong with the name and told the user nothing about it.
+    //
+    // ⚠ THIS IS THE HALF A UNIT TEST CANNOT PROVE. An unhandled clarify does
+    // not fail loudly — it falls through to `dispatchEditGraph`. So the
+    // load-bearing assertion here is that the edit-lane stub is NEVER called.
+    const decisionLabel = 'Geographic expansion strategy';
+    const collidingLabel = 'Geographic expansion';
+    // PRECONDITION PINNED IN-TEST (two of them), so a green result cannot be
+    // the fixture failing to set the trap:
+    //  (a) the decision really is in this graph under that exact label, and
+    expect(GRAPH.nodes.some((n) => n.id === 'dec_expansion' && n.label === decisionLabel)).toBe(true);
+    //  (b) the proposed label really is the decision minus its head noun.
+    expect(collidingLabel).not.toBe(decisionLabel);
+    expect(decisionLabel.toLowerCase().replace(/\s+strategy$/, '')).toBe(collidingLabel.toLowerCase());
+
+    toolPayload = {
+      label: collidingLabel,
+      parent_decision_id: 'dec_expansion',
+      parent_decision_label: decisionLabel,
+      links: [],
+      unknowns: [],
+    };
+
+    const res = await post(app, `Add "${collidingLabel}" as an option`);
+    expect(res.status).toBe(200);
+
+    // (1) THE ROUTE HANDLED IT. The generic lane never saw the turn.
+    expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+    expect(res.body.assistant_text).not.toContain('GENERIC_EDIT_LANE_SENTINEL');
+
+    // (2) THE USER IS TOLD WHAT IS WRONG, in the words they used — bound by
+    //     identity to both strings, not by a "mentions a name" predicate.
+    expect(res.body.assistant_text).toContain(`"${collidingLabel}"`);
+    expect(res.body.assistant_text).toContain(`"${decisionLabel}"`);
+    expect(res.body.assistant_text).toContain('?');
+
+    // (3) NOTHING WAS CREATED and nothing was held — this is a question.
+    const events = addOptionEvents(emitSpy);
+    expect(events.some((e) => e.outcome === 'held')).toBe(false);
+    expect(writtenGraph()?.nodes?.find((n: any) => n.label === collidingLabel)).toBeUndefined();
+
+    // (4) IT IS NOT RECORDED AS A FALL-THROUGH ANY MORE. The old
+    //     `fell_through:text_clarify` is precisely the event that said "the
+    //     detector fired and the user got nothing".
+    expect(events.some((e) => String(e.outcome).startsWith('fell_through'))).toBe(false);
+    expect(events.some((e) => e.outcome === 'clarify_label' && e.origin === 'text')).toBe(true);
+
+    // (5) NO CHIP. Every name this seam can spell is either the rejected label
+    //     or the decision's own, and a chip replaying either re-enters the
+    //     rejection it was minted to end.
+    expect(res.body.suggested_actions).toEqual([]);
+  });
 });

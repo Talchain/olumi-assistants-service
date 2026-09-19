@@ -7,7 +7,7 @@
 
 import { emit, TelemetryEvents, log } from "../../utils/telemetry.js";
 import { contentDigest } from "../../utils/redaction.js";
-import { resolveGoalThresholdCap } from "../../utils/goal-threshold-cap.js";
+import { resolveGoalThresholdCapWithProvenance } from "../../utils/goal-threshold-cap.js";
 import { buildUnquantifiedPrior, shouldPreserveModelPrior } from "../../cee/provenance/unquantified-factor.js";
 
 // ============================================================================
@@ -186,6 +186,7 @@ export const CEE_MINTED_GOAL_FIELDS = [
   'goal_threshold_raw',
   'goal_threshold_unit',
   'goal_threshold_cap',
+  'goal_threshold_cap_provenance',
   'goal_threshold_frame',
   'goal_baseline',
   'goal_baseline_raw',
@@ -363,6 +364,10 @@ export function normaliseDraftResponse(raw: unknown): unknown {
         node.goal_threshold_raw = undefined;
         node.goal_threshold_unit = undefined;
         node.goal_threshold_cap = undefined;
+        // Cleared WITH the cap it describes. A provenance surviving the
+        // denominator it was minted for is a claim about a number that is no
+        // longer there — and it reads as attested.
+        node.goal_threshold_cap_provenance = undefined;
       } else {
         if (node.goal_threshold === null) node.goal_threshold = undefined;
         if (node.goal_threshold_raw === null) node.goal_threshold_raw = undefined;
@@ -373,6 +378,7 @@ export function normaliseDraftResponse(raw: unknown): unknown {
           (node.goal_threshold_raw === null || node.goal_threshold_raw === undefined)
         ) {
           node.goal_threshold_cap = undefined;
+          node.goal_threshold_cap_provenance = undefined;
         }
 
         // ── ROADMAP 2.239: degenerate model-supplied cap ────────────────
@@ -480,15 +486,22 @@ export function normaliseDraftResponse(raw: unknown): unknown {
           // gate (1) — only a degenerate or undercutting denominator
           (gtCap as number) <= (gtRaw as number)
         ) {
-          const soundCap = resolveGoalThresholdCap(
+          const resolved = resolveGoalThresholdCapWithProvenance(
             gtCap,
             gtRaw,
             node.goal_threshold_unit,
             node.goal_threshold_unit,
           );
-          if (soundCap !== null && soundCap !== gtCap) {
+          const soundCap = resolved === null ? null : resolved.cap;
+          if (resolved !== null && soundCap !== null && soundCap !== gtCap) {
             const before = { cap: gtCap, threshold: node.goal_threshold };
             node.goal_threshold_cap = soundCap;
+            // ⭐ THE REPAIR MOVES THE DENOMINATOR, SO IT MUST MOVE THE CLAIM
+            // ABOUT THE DENOMINATOR. Leaving a provenance minted for `gtCap`
+            // beside the new `soundCap` would describe a number that has since
+            // moved — a declaration outliving its subject, which reads as
+            // attested and is strictly worse than no provenance at all.
+            node.goal_threshold_cap_provenance = resolved.provenance;
             node.goal_threshold = gtRaw / soundCap;
             log.info(
               {

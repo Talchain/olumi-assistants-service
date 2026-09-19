@@ -27,7 +27,11 @@ import {
   REDACT_CENSOR,
   REDACT_PATHS,
   createLoggerConfig,
+  MEASUREMENT_CONTAINER_FIELDS,
   decisionContentRedactPaths,
+  isDecisionContentField,
+  isMeasurementValue,
+  measurementContainerRedactPaths,
   redactCensor,
   sha8,
 } from "../logger-config.js";
@@ -77,6 +81,176 @@ describe("decision-content redaction at the pino boundary", () => {
       expect(line).not.toContain(SENTINEL);
       expect(line).toMatch(DIGEST_RE);
     }
+  });
+
+  it("IDENTITY: `system_prompt` is in the content class and is redacted at depths 0, 1 and 2 — while its SHAPE twins are deliberately NOT", () => {
+    // Bound by the exact field NAME, not by a value predicate: this test
+    // must RED if `system_prompt` leaves DECISION_CONTENT_FIELDS, which
+    // the list-derived coverage test above cannot see (a derived guard
+    // proves agreement, never completeness).
+    expect(isDecisionContentField("system_prompt")).toBe(true);
+
+    const { logger, lines } = protectedLogger();
+    logger.info({ system_prompt: SENTINEL });
+    logger.info({ ctx: { system_prompt: SENTINEL } });
+    logger.info({ a: { b: { system_prompt: SENTINEL } } });
+    expect(lines).toHaveLength(3);
+    for (const line of lines) {
+      expect(line).not.toContain(SENTINEL);
+      expect(line).toMatch(DIGEST_RE);
+    }
+
+    // Discriminating twin: the shape-only fields carry no bytes and are
+    // the detection surface for a leak, so they must pass through intact.
+    expect(isDecisionContentField("system_prompt_sha256")).toBe(false);
+    expect(isDecisionContentField("system_prompt_chars")).toBe(false);
+  });
+
+  it("IDENTITY: `systemPrompt` (the camelCase twin) is in the content class and is redacted at depths 0, 1 and 2 — while ITS shape twins are deliberately NOT", () => {
+    // WHY THE TWIN IS NEEDED, derived at the bytes and not from the
+    // parameter name alone: `turn-debug-store.ts` declares
+    // `readonly systemPrompt: string` (PromptCaptureInput) and the
+    // draft_graph seam BUILDS AN OBJECT LITERAL with that key carrying
+    // the served bytes (`cee/unified-pipeline/stages/parse.ts:268`,
+    // `systemPrompt: draftPromptSnapshot.content`). A spread of that
+    // object into any `log.*` call would put the prompt bytes on the
+    // wire under the camelCase name. The list's own convention already
+    // carries camelCase twins for exactly this reason — `userMessage`,
+    // `assistantText`, `answerText`, `orientationText`.
+    //
+    // SCOPE, stated precisely: this is PROSPECTIVE, not a live leak.
+    // Swept at f9ee43a9 with a contrast control — no site logs
+    // `systemPrompt` today; every occurrence is a function parameter,
+    // the in-memory store literal above (which never reaches pino), or
+    // a test. turn-debug-store.ts:491 states the rule as a COMMENT
+    // ("Do not pass `systemPrompt` … to `log.*`"), i.e. a
+    // hand-maintained mirror; this listing makes it mechanical.
+    //
+    // Bound by the exact field NAME, not by a value predicate: this
+    // test must RED if `systemPrompt` leaves DECISION_CONTENT_FIELDS,
+    // which the list-derived coverage test above cannot see (a derived
+    // guard proves agreement, never completeness).
+    expect(isDecisionContentField("systemPrompt")).toBe(true);
+
+    const { logger, lines } = protectedLogger();
+    logger.info({ systemPrompt: SENTINEL });
+    logger.info({ ctx: { systemPrompt: SENTINEL } });
+    logger.info({ a: { b: { systemPrompt: SENTINEL } } });
+    expect(lines).toHaveLength(3);
+    for (const line of lines) {
+      expect(line).not.toContain(SENTINEL);
+      expect(line).toMatch(DIGEST_RE);
+    }
+
+    // NEGATIVE PIN (discriminating twin, same ruling as `system_prompt`
+    // above): the camelCase shape-only fields carry no bytes and are the
+    // detection surface for a leak, so they must pass through intact. A
+    // future blanket add of the whole `systemPrompt*` family REDs here.
+    expect(isDecisionContentField("systemPromptSha256")).toBe(false);
+    expect(isDecisionContentField("systemPromptChars")).toBe(false);
+
+    // And the shape twins really do survive the protected logger — the
+    // negative pin above is about the LIST; this is about the WIRE.
+    const shape = protectedLogger();
+    shape.logger.info({ systemPromptSha256: "abc123", systemPromptChars: 4096 });
+    expect(shape.lines.join("")).toContain("abc123");
+    expect(shape.lines.join("")).toContain("4096");
+  });
+
+  it("IDENTITY: `statement` is in the content class and is redacted at depths 0, 1 and 2 — while its ADDRESS fields are deliberately NOT", () => {
+    // WHY, derived at the bytes: #1445 added the `finding_dissent` system
+    // event, which PERSISTS a user's stated reason for disagreeing with a
+    // finding VERBATIM (`system-events/dispatch.ts`, `statement:
+    // event.statement`, "the words are the record"). That persistence is
+    // Paul's ruling of 2026-09-11 — a deliberate, reviewed widening of
+    // standing privacy rule R-004. The half of R-004 that STANDS is that
+    // the text may contain PII and must never be re-emitted into telemetry
+    // or logs, so the field name joins the mechanical boundary here.
+    //
+    // SCOPE, stated precisely: this is PROSPECTIVE, not a live leak — the
+    // same footing as `systemPrompt` (#1435). Swept at 46a27ae6 with a
+    // contrast control: NO log call site in `src/` names `statement` today
+    // (contrast: 27 log sites name `label`), and there is no SQL/prepared
+    // `statement` anywhere in the tree. What enrolment buys is that a
+    // future `log.*({ ...fact.result })`, or an innocent
+    // `log.debug({ statement })`, cannot put the user's words on the wire.
+    //
+    // ⚠ WHAT IT DOES NOT COVER, so nobody inherits an overclaim: the one
+    // real re-emission surface #1445's reviewer probed is
+    // `log.error({ parse_error: check.error.message })` (dispatch.ts
+    // ~:757-765). That field is named `parse_error`, not `statement`, so
+    // this enrolment does NOT close it; the boundary keys on the field
+    // NAME. The reviewer measured no leak there across seven failure modes
+    // with a firing positive control — that remains the evidence for that
+    // surface, and this listing neither strengthens nor replaces it.
+    //
+    // SECOND POPULATION under the same name, and it is content too, so the
+    // enrolment is reinforcing rather than a collision cost: decision-records
+    // carries `prediction.statement` (`store-adapter.ts:120`). Auto-capture
+    // sets it from `fact.result.summary` (`capture.ts:246`) — analysis prose
+    // naming the leading option, which `turn-executor.ts:2863` already gates
+    // as withheld content — and the user-committed write sets it to "the
+    // user's own stated expectation" (`user-commit.ts:28`). Both halves are
+    // decision content; NEITHER is service vocabulary, an enum or a
+    // diagnostic code, so digesting the name blinds no diagnostic.
+    //
+    // Bound by the exact field NAME, not by a value predicate: this test
+    // must RED if `statement` leaves DECISION_CONTENT_FIELDS, which the
+    // list-derived coverage test above cannot see (a derived guard proves
+    // agreement, never completeness).
+    expect(isDecisionContentField("statement")).toBe(true);
+
+    const { logger, lines } = protectedLogger();
+    logger.info({ statement: SENTINEL });
+    logger.info({ ctx: { statement: SENTINEL } });
+    logger.info({ a: { b: { statement: SENTINEL } } });
+    expect(lines).toHaveLength(3);
+    for (const line of lines) {
+      expect(line).not.toContain(SENTINEL);
+      expect(line).toMatch(DIGEST_RE);
+    }
+
+    // The two live SHAPES this protects, at the depth each actually occurs:
+    // the #1445 handler-fact result (depth 1 under `result`) and the
+    // decision-records prediction (depth 1 under `prediction`).
+    const shapes = protectedLogger();
+    shapes.logger.info({
+      result: { finding_id: "f-42", analysis_id: "a-7", statement: SENTINEL },
+    });
+    shapes.logger.info({ prediction: { statement: SENTINEL, confidence: 0.62 } });
+    expect(shapes.lines.join("")).not.toContain(SENTINEL);
+    expect(shapes.lines.join("")).toMatch(DIGEST_RE);
+
+    // NEGATIVE PIN — the discriminating twin. `statement` has NO shape twins
+    // (measured zero at 46a27ae6, contrast control `system_prompt_sha256`
+    // firing at 3 files), so unlike `system_prompt` there is no
+    // `statement_sha256` to exclude. The honest analogue is the ADDRESS:
+    // 0.55.0's FindingDissentResultSchema is {finding_id, analysis_id,
+    // statement, provenance}, and the pair (analysis_id, finding_id) is what
+    // makes a dissent traceable and a leak correlatable. Those carry no user
+    // bytes and must survive, or the detection surface goes with the words.
+    expect(isDecisionContentField("finding_id")).toBe(false);
+    expect(isDecisionContentField("analysis_id")).toBe(false);
+    expect(isDecisionContentField("provenance")).toBe(false);
+    const addr = protectedLogger();
+    addr.logger.info({ finding_id: "f-42", analysis_id: "a-7", provenance: "user_set" });
+    expect(addr.lines.join("")).toContain("f-42");
+    expect(addr.lines.join("")).toContain("a-7");
+    expect(addr.lines.join("")).toContain("user_set");
+  });
+
+  it("POSITIVE CONTROL: `statement` leaks through a logger WITHOUT the content paths (the probe can see a presence)", () => {
+    // Absence assertions above are only worth the harness that proves a
+    // presence. Both controls fire on the SAME field name and the SAME
+    // sentinel used in the protected assertions.
+    const preFix = preFixLogger();
+    preFix.logger.info({ statement: SENTINEL });
+    preFix.logger.info({ ctx: { statement: SENTINEL } });
+    expect(preFix.lines.filter((l) => l.includes(SENTINEL))).toHaveLength(2);
+
+    const bare = captureLogger({ level: "info" });
+    bare.logger.info({ result: { statement: SENTINEL } });
+    expect(bare.lines.join("")).toContain(SENTINEL);
   });
 
   it("POSITIVE CONTROL: the pre-fix config (credential paths only) leaks the sentinel at every depth", () => {
@@ -206,13 +380,35 @@ describe("decision-content redaction at the pino boundary", () => {
     expect(lines.join("")).toMatch(DIGEST_RE);
   });
 
-  it("REDACT_PATHS is derived: credential paths + generated decision-content paths, nothing hand-merged", () => {
+  it("REDACT_PATHS is derived: credential paths + generated decision-content paths + generated measurement-container paths, nothing hand-merged", () => {
     expect([...REDACT_PATHS]).toEqual([
       ...BASE_REDACT_PATHS,
       ...decisionContentRedactPaths(DECISION_CONTENT_FIELDS),
+      ...measurementContainerRedactPaths(
+        MEASUREMENT_CONTAINER_FIELDS,
+        DECISION_CONTENT_FIELDS,
+      ),
     ]);
     // Depth contract: 3 paths per protected field, for BOTH classes.
     expect(decisionContentRedactPaths(["x"])).toEqual(["x", "*.x", "*.*.x"]);
+    // The measurement-container limb is EXPLICIT (wildcard-free at the
+    // container) — that is the whole point: fast-redact reports `null` for a
+    // wildcard segment, so only an explicit path lets the censor see WHICH
+    // container a value sits under.
+    expect(measurementContainerRedactPaths(["c"], ["x"])).toEqual(["c.x", "*.c.x"]);
+    expect(REDACT_PATHS).toHaveLength(
+      BASE_REDACT_PATHS.length +
+        DECISION_CONTENT_FIELDS.length * 3 +
+        MEASUREMENT_CONTAINER_FIELDS.length * DECISION_CONTENT_FIELDS.length * 2,
+    );
+    // It ADDS no coverage — every location was already matched by `*.f`.
+    // Asserting that keeps the limb honest: it changes visibility, not policy.
+    for (const c of MEASUREMENT_CONTAINER_FIELDS) {
+      for (const f of DECISION_CONTENT_FIELDS) {
+        expect(decisionContentRedactPaths(DECISION_CONTENT_FIELDS)).toContain(`*.${f}`);
+        expect(REDACT_PATHS).toContain(`${c}.${f}`);
+      }
+    }
     expect(BASE_REDACT_PATHS).toHaveLength(
       CREDENTIAL_FIELDS.length * 3 + CREDENTIAL_HEADER_NAMES.length * 3,
     );
@@ -241,5 +437,39 @@ describe("decision-content redaction at the pino boundary", () => {
     const { logger, lines } = protectedLogger();
     logger.info({ a: { b: { c: { node_label: SENTINEL } } } });
     expect(lines.join("")).toContain(SENTINEL);
+  });
+});
+
+describe("measurement containers — the exemption is on the VALUE, never the name", () => {
+  it("isMeasurementValue accepts counts and flat count-manifests only", () => {
+    expect(isMeasurementValue(0)).toBe(true);
+    expect(isMeasurementValue(1847)).toBe(true);
+    expect(isMeasurementValue(-1)).toBe(true);
+    expect(isMeasurementValue({ nodes: 0, edges: 0, constraints: 0 })).toBe(true);
+    expect(isMeasurementValue({})).toBe(true);
+  });
+
+  it("isMeasurementValue REFUSES anything that could carry content", () => {
+    expect(isMeasurementValue(SENTINEL)).toBe(false);
+    expect(isMeasurementValue("1847")).toBe(false);
+    expect(isMeasurementValue(null)).toBe(false);
+    expect(isMeasurementValue(undefined)).toBe(false);
+    expect(isMeasurementValue(true)).toBe(false);
+    expect(isMeasurementValue([1, 2, 3])).toBe(false);
+    expect(isMeasurementValue(Number.NaN)).toBe(false);
+    expect(isMeasurementValue(Number.POSITIVE_INFINITY)).toBe(false);
+    // A nested object is not a flat manifest — refuse rather than walk.
+    expect(isMeasurementValue({ graph: { nodes: 1 } })).toBe(false);
+    // The dangerous one: a manifest with ONE text field among the counts.
+    expect(isMeasurementValue({ nodes: 3, label: SENTINEL })).toBe(false);
+  });
+
+  it("END-TO-END: a text value under a measurement container is still digested (the exemption cannot be used as a bypass)", () => {
+    const { logger, lines } = protectedLogger();
+    logger.info({ section_chars: { brief: SENTINEL, node_label: SENTINEL } });
+    logger.info({ section_shape: { brief: { nodes: 1, goal_text: 2 }, label: SENTINEL } });
+    const raw = lines.join("\n");
+    expect(raw).not.toContain(SENTINEL);
+    expect(raw).toMatch(DIGEST_RE);
   });
 });

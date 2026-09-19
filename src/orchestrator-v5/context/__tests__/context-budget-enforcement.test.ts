@@ -121,6 +121,23 @@ function subtractRecentChangesStatusDelta(pack: {
   delete pack.recent_changes_status;
 }
 
+/** #1332 scopes the old global absence claim to its actual evidence-gap channel.
+ * Pin exactly that changed sentence, then restore the historical sentence only
+ * for the byte-neutrality check. Do not re-capture either golden hash. */
+function subtractEvidenceGapDisclosureDelta(analysis: Record<string, unknown> | null): void {
+  expect(analysis?.value_of_information_note).toBe(
+    'no evidence-gap coaching scores are available in this channel — ' +
+    'do not infer an information-value priority from this evidence-gap channel or from ' +
+    'influence alone. Other investigation signals retain their own stated basis and limits',
+  );
+  if (analysis === null) throw new Error('Expected the fixture analysis');
+  analysis.value_of_information_note =
+    'no value-of-information scores are available for this analysis — ' +
+    'do not claim any factor carries the highest (or a high) value of information, and do ' +
+    'not present a sensitivity or influence ranking as a value-of-information ranking — ' +
+    'describe factors by their modelled influence instead';
+}
+
 function assembleUnderBudgetPack() {
   return assembleContextPack({
     payload: BASE_PAYLOAD,
@@ -314,6 +331,7 @@ describe('context budget enforcement at assembly (O-3)', () => {
         'if it is absent the subtraction below is vacuous and proves nothing',
     ).toBeTypeOf('string');
     delete displayAnalysis?.analysis_not_current_note;
+    subtractEvidenceGapDisclosureDelta(displayAnalysis);
     subtractGoalsProjectionDelta(withoutFreshnessDisclosure);
     subtractGraphContextDelta(withoutFreshnessDisclosure);
     subtractRecentChangesStatusDelta(withoutFreshnessDisclosure);
@@ -409,6 +427,7 @@ describe('context budget enforcement at assembly (O-3)', () => {
     const displayAnalysis = pack.display_analysis as Record<string, unknown> | null;
     expect(displayAnalysis?.analysis_not_current_note).toBeTypeOf('string');
     delete displayAnalysis?.analysis_not_current_note;
+    subtractEvidenceGapDisclosureDelta(displayAnalysis);
     subtractGoalsProjectionDelta(pack);
     subtractGraphContextDelta(pack);
     subtractRecentChangesStatusDelta(pack);

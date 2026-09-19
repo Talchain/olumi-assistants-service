@@ -154,6 +154,23 @@ function pendingOfKind(kind: PendingActionKind): PendingAction {
           label: 'Churn rate',
         },
       };
+    case 'elicit_option_native_quantity':
+      // GO(A) — the same cell as `elicit_option_effect` below, asking the
+      // OPPOSITE question: that one supplies a MISSING model-unit value, this
+      // restates an EXISTING one in the user's own units. `unit` is required
+      // and comes from the ratified constraint's own row — an answer is
+      // recorded in that unit or not at all.
+      return {
+        ...base,
+        action: {
+          kind,
+          option_id: 'opt_two_devs',
+          option_label: 'Two Developers',
+          factor_id: 'fac_hiring_cost',
+          factor_label: 'Hiring Cost',
+          unit: 'GBP',
+        },
+      };
     case 'elicit_option_effect':
       // ROADMAP 2.1352 — the configure-option clarify intercept's asked cell
       // (server-only; carries the (option, factor) identity the question
@@ -198,6 +215,19 @@ function pendingOfKind(kind: PendingActionKind): PendingAction {
           kind,
           reason: 'vague_edit',
           offered_targets: [{ node_id: 'fac_hiring_cost', label: 'Hiring and Salary Cost' }],
+        },
+      };
+    case 'elicit_goal_target':
+      // The swapped success-target receipt's own question (server-only;
+      // carries the goal it names plus the bytes the user actually read, so a
+      // bare "£20,000" on the next turn has a referent to bind to).
+      return {
+        ...base,
+        action: {
+          kind,
+          goal_node_id: 'goal_revenue',
+          question:
+            "I couldn't register that success target, so the model still has no target for the analysis to score against.",
         },
       };
     case 'proposed_concept':
@@ -252,6 +282,9 @@ describe('derivePendingActivity — single ORIENT-time pending tally, per kind',
     // proposals, so they must contribute ZERO here while still counting live.
     ['elicit_effect_target', 0],
     ['elicit_edit_target', 0],
+    // Same reasoning again: a bare "yes" answers no "what value counts as
+    // success?" question. An elicitation, never a proposal.
+    ['elicit_goal_target', 0],
     ['run_analysis', 0],
     ['what_would_flip', 0],
   ])('a single live %s → confirmationExpectingLiveCount %d, but always counted live', (kind, expected) => {

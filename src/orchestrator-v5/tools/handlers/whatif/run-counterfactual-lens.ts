@@ -88,7 +88,12 @@ export async function runCounterfactualLens(
       : meta.interventionValue < meta.factorCurrentValue
         ? 'lower'
         : 'change';
-  const targetDisplay = formatFactorValue(meta.interventionValue, meta.factorUnit)?.display ?? null;
+  // The DISPLAY magnitude, not the model-unit intervention: `formatFactorValue`
+  // formats user-scale values and returns `null` for a bare sub-1 decimal. The
+  // two were one field until the intervention target was put on the model scale
+  // — see `build-counterfactual-model.ts`'s `InterventionTarget`.
+  const targetDisplay =
+    formatFactorValue(meta.interventionDisplayValue, meta.factorUnit)?.display ?? null;
 
   const card = composeCounterfactualCard({
     factorLabel: meta.factorLabel,

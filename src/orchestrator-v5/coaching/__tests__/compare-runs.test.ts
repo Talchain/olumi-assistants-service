@@ -272,7 +272,7 @@ describe('compareRuns', () => {
 // `graph-hash.ts` excludes labels from the analysis-affecting hash, so a
 // rename → re-run stays `fresh` and both runs stay permitted. Comparing
 // LABELS therefore let a pure rename reach the both-permitted prose arm and
-// assert "X came out ahead before, and Y now leads" about one option.
+// assert "X came out ahead before, and Y scores highest now" about one option.
 describe('compareRuns — leader identity is the option id, not the label (F3)', () => {
   /** Legacy enrichment: labels + probabilities, NO `option_id` anywhere. */
   function labelOnlyEnvelope(

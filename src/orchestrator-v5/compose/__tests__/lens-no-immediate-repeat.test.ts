@@ -139,7 +139,7 @@ describe('2.211 — no-immediate-repeat over two consecutive analysis turns', ()
   // pre-mortem also triggers") was the measured 12/12 starvation defect
   // (probe-premortem-chain-final.md), and is exactly what the ratified ruling
   // reversed. The alternation the no-repeat rule guarantees is unchanged; its
-  // PHASE flips (pre-mortem now leads). See lens-correlated-yield.test.ts.
+  // PHASE flips (pre-mortem scores highest now). See lens-correlated-yield.test.ts.
   it('turn 1 (2.211-①): the CORRELATED flip-risk hit yields the slot to pre-mortem', () => {
     const selection = selectLens(makeFact(BOTH_TRIGGER));
     expect(selection?.lens).toBe('pre_mortem');

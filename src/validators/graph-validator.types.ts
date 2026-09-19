@@ -57,6 +57,17 @@ export type FactorDataErrorCode =
 export type SemanticErrorCode =
   | "NO_EFFECT_PATH"
   | "OPTIONS_IDENTICAL"
+  /**
+   * A non-baseline option whose interventions equal the factor baseline on
+   * EVERY factor it intervenes on. It models changing nothing while presenting
+   * itself as an alternative — see `validateSemantic`'s note for the measured
+   * session this closes.
+   *
+   * Named APART from `OPTIONS_IDENTICAL` (trap 21): that one answers "are these
+   * two options the same as each other?", this one answers "is this option the
+   * same as the status quo?". A graph can carry either without the other.
+   */
+  | "OPTION_NO_OP"
   | "INVALID_INTERVENTION_REF"
   | "GOAL_NUMBER_AS_FACTOR"
   | "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR";

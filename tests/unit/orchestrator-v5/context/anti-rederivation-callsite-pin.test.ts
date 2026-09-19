@@ -213,7 +213,51 @@ const EXPECTED: Record<string, Record<string, number>> = {
     // never authorises or blocks the write. Fourth instance of the seam and
     // the last one that should land ad-hoc; migrate with the frame-consumer
     // audit, do not add more.
-    'src/orchestrator-v5/system-events/dispatch.ts': 4,
+    //
+    // ⭐⭐ 4 → 6 (schemas 0.54.0, `option_intervention_edit`). Two, not one, and
+    // the SECOND one is the finding — recorded here as the guard's own header
+    // requires, not widened to hide growth.
+    //
+    // This family cannot read a frame: `buildTurnContext` is never called for a
+    // system event (`SystemEventTurnPayload` has no `message`, and the route
+    // dispatches before the TurnExecutor), which is the same reason the four
+    // rows above exist. So the migration note stands and this is not precedent
+    // for a call site that DOES hold a frame.
+    //
+    // Why this writer needs TWO where its siblings need one:
+    //
+    //   · PRE-write — the referee consumes `freshness` as an INPUT, and the
+    //     writer refuses on `'unknown'`. It must therefore be derived before
+    //     the transaction, against the hash under edit.
+    //   · POST-commit — the finaliser needs the currency of the model the user
+    //     NOW has. An independent review found the first cut returning neither,
+    //     so the finaliser fell back to `NO_ANALYSIS_CONTEXT_DERIVATION` and
+    //     emitted unknown-degraded on a model-CHANGING route.
+    //
+    // ⚠ AND THEY CANNOT BE ONE DERIVATION REUSED. Forwarding the pre-write
+    // value as the post-edit verdict would describe the model as it was before
+    // the edit — the exact thing the review said not to do. There is no extra
+    // I/O: the same prior facts are re-projected against the committed hash.
+    //
+    // The healthy-empty/degraded distinction is preserved in BOTH: a read that
+    // succeeded and found nothing is `none`, a read that degraded is `unknown`,
+    // and collapsing them would let a transport failure read as "never
+    // analysed".
+    // 2026-09-11 structural_add_edge writer: 6 → 7 (+1 CALL, no new import) —
+    // `dispatchStructuralAddEdge` derives POST-COMMIT wire freshness against the
+    // persisted hash, which is the identical seam and the identical reason as
+    // the five system-event dispatchers already counted here: a structural edge
+    // add ALWAYS moves the analysis-affecting hash (a new edge changes the
+    // projected `edges` array), so a pre-derived frame value would describe the
+    // model as it was before the edit.
+    //
+    // ⚠ NOT A NEW KIND OF DEBT, and not a convenience bump. It is one more
+    // instance of a seam this table already approves for its five siblings; had
+    // it been written any other way it would have been inconsistent with them.
+    // No extra I/O: the same prior facts are re-projected against the committed
+    // hash, and the healthy-empty/degraded distinction is preserved exactly as
+    // the note above requires.
+    'src/orchestrator-v5/system-events/dispatch.ts': 7,
     // 2026-07-22 Lane C3: +2 (import + one call) — the typed add-option
     // transaction pre-route derives the PRE-edit frame freshness for its
     // referee gate against `computeAnalysisAffectingGraphHash(persistedGraph)`

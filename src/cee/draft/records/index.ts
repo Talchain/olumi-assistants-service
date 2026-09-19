@@ -99,6 +99,11 @@ export {
   modelAnswerableAskItems,
   shouldKeepCompletion,
   completionRegressesProtectedContent,
+  applyConstraintCorrections,
+  repairableConstraintIndices,
+  repairableConstraintFields,
+  type ConstraintRepairField,
+  type ConstraintCorrection,
   askItemIdentity,
   buildRecordsCompletionSchema,
   buildRecordsCompletionPrompt,
@@ -110,3 +115,17 @@ export type { CompletionAsk, CompletionAskItem, CompletionMergeResult } from "./
 
 export { buildDraftRecordsSidecar, DRAFT_RECORDS_SIDECAR_VERSION } from "./sidecar.js";
 export type { DraftRecordsSidecar, RecordBinding, BindingClass } from "./sidecar.js";
+
+export {
+  censusOptionFactorMagnitudes,
+  interventionFactorIdsWithFiniteMagnitude,
+  OPTION_MAGNITUDE_CENSUS_POINTS,
+} from "./option-magnitude-census.js";
+export type {
+  OptionFactorMagnitudeCensus,
+  OptionMagnitudeCensusPoint,
+} from "./option-magnitude-census.js";
+export {
+  countInvalidOptionEffectSources,
+  optionEffectReferencesUnreliable,
+} from "./option-effect-reference-trust.js";

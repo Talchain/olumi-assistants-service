@@ -39,9 +39,11 @@ import {
   DRAFT_RECORD_EFFECTS,
   DRAFT_RECORD_ROLES,
   DRAFT_RECORD_STATED_KINDS,
+  DRAFT_RECORD_VALUE_SCALES,
   type DraftRecordSet,
 } from "./grammar.js";
 import { projectRecordsToGraph, type RecordProjection } from "./projector.js";
+import { log } from "../../../utils/telemetry.js";
 
 /**
  * The CEE-INTERNAL validator for what came back off the wire.
@@ -62,6 +64,45 @@ const StatedItemWire = z.object({
   direction: z.enum(DRAFT_RECORD_DIRECTIONS).optional(),
   // `option` only — grammar design note 5.
   is_baseline: z.boolean().optional(),
+  // ⭐ `constraint` only — WHAT THE LIMIT APPLIES TO. Typed by namespace, the
+  // same shape as the `claims[]` endpoints below. `.int()` because these index
+  // an array: a fractional index is not a near-miss of a valid one, and letting
+  // it through would push the refusal down to the projector where it would have
+  // to be named `unparseable_ref` — a reason the grammar otherwise makes
+  // unreachable.
+  // ⛔⛔ `.catch(undefined)` — A MALFORMED VALUE HERE DEGRADES TO ABSENCE, NEVER
+  // TO A DEAD DRAFT. Without it a model that emits `applies_to_claim: "0"` on
+  // the prompt-only degradation path (where no grammar is attached, so nothing
+  // enforces `{"type":"integer"}` provider-side) fails THIS item, which fails
+  // the whole `DraftRecordSetWire.safeParse`, which the seam turns into
+  // `not_a_record_set` — the ENTIRE draft lost over an optional enhancement
+  // field. Measured on this tree, and the measurement CORRECTED THE PREMISE
+  // handed to the repair: this is NOT a falsy check treating `"0"` as absent.
+  // There is no falsy special-case anywhere. `"1"`, `0.5` and `null` all refuse
+  // identically to `"0"` — it is plain type strictness whose blast radius is the
+  // whole record set. Absent, empty and zero are three different facts and none
+  // of them is what was happening.
+  //
+  // ⭐ WHY THESE TWO AND NOT THE REFERENCE FAMILY — they answer DIFFERENT
+  // QUESTIONS (trap 21), so one rule was never right for both. `from_claim` /
+  // `to_claim` / `from_stated` / `to_stated` are LOAD-BEARING STRUCTURE: a
+  // malformed one means an edge the model intended cannot be built, and
+  // refusing loudly is correct. `applies_to_*` is an OPTIONAL ENHANCEMENT whose
+  // ABSENCE is defined as byte-identical to today's behaviour — so absence IS
+  // the honest degradation, and failing the whole draft to reach it is
+  // disproportionate in a way the existing case is not. The asymmetry is
+  // deliberate and it is PINNED: a contrast control in
+  // `__tests__/constraint-applies-to-binding.test.ts` asserts a malformed
+  // `from_claim` STILL refuses, so this tolerance cannot silently widen to the
+  // family.
+  //
+  // ⚠ Nothing is hidden by this. The limit itself is untouched — its value,
+  // unit, direction and quote all still parse, the constraint node is still
+  // minted with them, and the pre-existing unbindable-limit ask still fires.
+  // What degrades is only the model's optional HINT about what the limit
+  // applies to, which is a field that did not exist at all until this change.
+  applies_to_stated: z.number().int().optional().catch(undefined),
+  applies_to_claim: z.number().int().optional().catch(undefined),
 }).passthrough();
 
 const InferenceClaimWire = z.object({
@@ -105,6 +146,20 @@ const InferenceClaimWire = z.object({
   // grammar is therefore covered without anyone updating a mirror — and deleting
   // any line from the rebuild below is a red.
   sets_to: z.number().optional(),
+  // ⭐ WHAT THE MODEL'S OWN NUMBER IS MEASURED IN. Added here in the SAME change
+  // as the grammar field, because this seam is exactly where `sets_to` was lost:
+  // it shipped in the grammar, the instruction and the projector, and was
+  // dropped one line before projection on every live draft. The derived guard
+  // that comment promised now exists and it RED-ed on this change before I had
+  // wired it — which is the guard working, not a nuisance.
+  unit: z.string().optional(),
+  // ⭐ WHAT CONVENTION THAT NUMBER IS WRITTEN IN — v10, and it is carried here
+  // in the SAME change as the grammar field for the reason the comment above
+  // gives. `unit` and `value_scale` answer different questions and are the two
+  // halves of one quantity; carrying one without the other would leave the
+  // projector inferring the convention from magnitudes, which is the defect
+  // v10 exists to remove.
+  value_scale: z.enum(DRAFT_RECORD_VALUE_SCALES).optional(),
   // `option_refinement` only — grammar design note 5.
   is_baseline: z.boolean().optional(),
 }).passthrough();
@@ -209,6 +264,8 @@ export function projectDraftRecords(
       ...(item.role !== undefined ? { role: item.role } : {}),
       ...(item.direction !== undefined ? { direction: item.direction } : {}),
       ...(item.is_baseline !== undefined ? { is_baseline: item.is_baseline } : {}),
+      ...(item.applies_to_stated !== undefined ? { applies_to_stated: item.applies_to_stated } : {}),
+      ...(item.applies_to_claim !== undefined ? { applies_to_claim: item.applies_to_claim } : {}),
     })),
     claims: parsed.data.claims.map((claim) => ({
       claim_kind: claim.claim_kind,
@@ -223,9 +280,92 @@ export function projectDraftRecords(
       ...(claim.category !== undefined ? { category: claim.category } : {}),
       ...(claim.value !== undefined ? { value: claim.value } : {}),
       ...(claim.sets_to !== undefined ? { sets_to: claim.sets_to } : {}),
+      ...(claim.unit !== undefined ? { unit: claim.unit } : {}),
+      ...(claim.value_scale !== undefined ? { value_scale: claim.value_scale } : {}),
       ...(claim.is_baseline !== undefined ? { is_baseline: claim.is_baseline } : {}),
     })),
   };
+  // ⭐⭐ THE WIRE HISTOGRAM — the first telemetry this directory has ever carried.
+  //
+  // Derived, not asserted: before this line `src/cee/draft/records/` emitted
+  // ZERO events and made ZERO log calls (contrast control in the same sweep:
+  // the sibling `unified-pipeline/stages/` carries 42 `event:` lines, 24 in
+  // `parse.ts` alone). So the model's RAW claim-kind mix — how many `risk` and
+  // `outcome` claims actually crossed the wire — was never recorded anywhere,
+  // and every census downstream is taken at least one transform later.
+  //
+  // ⚠ WHY THAT MATTERS AND WHY A LATER COUNT CANNOT SUBSTITUTE. "The model
+  // emitted one risk" and "the model emitted three and something dropped two"
+  // produce an IDENTICAL post-projection graph. Without a count taken HERE,
+  // at the first point the response is structurally readable, those two are
+  // indistinguishable and any repair aimed at either is aimed by inference.
+  //
+  // ⛔ KINDS AND COUNTS ONLY — NEVER THE USER'S WORDS. This seam holds
+  // `source_quote` and `label`, which are the user's own text and the model's
+  // prose about it. Both stay out of the log by construction: every value below
+  // is a grammar ENUM or an integer. A histogram cannot leak a brief.
+  //
+  // ⚠ NO `request_id`, AND ITS ABSENCE IS MEASURED RATHER THAN OVERLOOKED:
+  // `projectDraftRecords` receives none (its only parameters are `rawJson` and
+  // `brief`), `log` is a bare pino instance with no ambient request context
+  // (`utils/telemetry.ts:33`), and `DraftArgs` at the live call site
+  // (`adapters/llm/anthropic.ts:1977`) carries no request identifier either.
+  // Threading one is a signature change through another lane's file, so it is
+  // deliberately NOT done here — correlate by `time` against the adjacent
+  // pipeline events, which do carry it.
+  const claimKinds: Record<string, number> = {};
+  for (const claim of records.claims) {
+    claimKinds[claim.claim_kind] = (claimKinds[claim.claim_kind] ?? 0) + 1;
+  }
+  const statedKinds: Record<string, number> = {};
+  for (const item of records.stated_items) {
+    statedKinds[item.kind] = (statedKinds[item.kind] ?? 0) + 1;
+  }
+  // ⭐⭐ DOES THE MODEL ACTUALLY ANSWER? — the one question grammar v10 and
+  // instruction v19 (#1562) left unanswerable.
+  //
+  // `value_scale` is the model's declaration of what its number MEANS, and the
+  // whole producer-declares-it-then-delete-the-inference programme rests on the
+  // model emitting it. Before this line NOTHING could see whether it does:
+  // `value_scale` and `declared_scale` appear in ZERO telemetry payloads
+  // repo-wide, `cee.llm_output.field_presence` tracks six other fields, the
+  // banked v202 witnesses are post-projection payloads that never carry
+  // `claims`, and the projector's own stamp is invisible downstream. So the
+  // rate has been unmeasured AND unmeasurable — which is why the repair stage's
+  // competing inference cannot yet be deleted (`repair/unreachable-factors.ts`),
+  // and why `display-value.ts:507`'s own dated deletion condition cannot be
+  // taken either. Both are waiting on a number nothing produced.
+  //
+  // ⚠ PER CLAIM KIND, NOT A TOTAL, AND THAT IS THE POINT. The projector stamps
+  // `declared_scale` only where the claim mints a factor-kind node
+  // (`CLAIM_KIND_TO_NODE_KIND` maps `factor` and `prior` to "factor"), so a
+  // pooled rate would average a kind that can carry the declaration together
+  // with kinds that structurally cannot, and read as a producer failure when it
+  // is a carrier gap. A per-kind split makes the two distinguishable in the
+  // data rather than in an argument about the data.
+  //
+  // ⛔ KINDS AND INTEGERS ONLY — the block above says a histogram cannot leak a
+  // brief, and that invariant holds here verbatim: `claim_kind` is a grammar
+  // enum and every value below is a count. No value, no unit, no label, no
+  // `source_quote`.
+  const valueScaleByKind: Record<string, { declared: number; absent: number }> = {};
+  for (const claim of records.claims) {
+    const bucket = (valueScaleByKind[claim.claim_kind] ??= { declared: 0, absent: 0 });
+    if (claim.value_scale === undefined) bucket.absent += 1;
+    else bucket.declared += 1;
+  }
+  log.info(
+    {
+      event: "cee.draft.records.wire_histogram",
+      claim_kinds: claimKinds,
+      stated_kinds: statedKinds,
+      claim_count: records.claims.length,
+      stated_count: records.stated_items.length,
+      value_scale_by_kind: valueScaleByKind,
+    },
+    "Draft record set accepted at the seam",
+  );
+
   return { ok: true, records, projection: projectRecordsToGraph(records, brief) };
 }
 

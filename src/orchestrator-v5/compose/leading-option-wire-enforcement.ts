@@ -101,9 +101,10 @@
  *   1. A CLAIM IS PRESENT — `textAssertsLeadingOption` at FIELD level (not unit
  *      level: a claim that straddles a sentence split must still count).
  *   2. A DESIGNATION IS POSSIBLE — the field NAMES one of the scenario's own
- *      options. Vocabulary with no option name designates nobody: "one option
- *      leads" is not a claim about which. No name ⇒ ship unchanged, and the
- *      Layer-3 alarm observes it.
+ *      options OR explicitly asserts an implicit lead (a current advantage/edge
+ *      or an analysis that "shows which option leads"). The native C2 capture
+ *      proved exact names alone were insufficient. A bare mention such as
+ *      "Explore the leading option" still does not establish an assertion.
  *
  * Rule 2 is what spares the whole "sales leads" class, and it does NOT re-derive
  * "who is leading" (which would be a second authority beside the verdict —
@@ -140,7 +141,10 @@
  *
  * This gate suppresses a withheld leader claim only when the field BOTH
  *   (a) uses the shared leader VOCABULARY, AND
- *   (b) names a roster option as an EXACT token sequence (whitespace-flexible).
+ *   (b) names a roster option as an EXACT token sequence (whitespace-flexible),
+ *       or uses the explicit implicit-comparison forms classified by
+ *       `textAssertsImplicitLeadingOption`. Conditional and negated occurrences
+ *       do not count as assertions; this is still a bounded prose classifier.
  *
  * The stated residual — leak surface, NOT closed here, observed by the alarm:
  *
@@ -188,10 +192,33 @@
 
 import { log, emit, TelemetryEvents } from '../../utils/telemetry.js';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
-import { textAssertsLeadingOption, textNamesLeadingOption } from './leading-option-egress-guard.js';
-import { replaceAssertingUnits } from './redactable-units.js';
-import { analysisReadyPermitsLeaderNaming } from '../admission/analysis-admission.js';
+import {
+  textAssertsLeadingOption,
+  textAssertsImplicitLeadingOption,
+  textAssertsOnlyImplicitLeadingOptions,
+  optionLabelPattern,
+  textNamesLeadingOption,
+  // The BLOCK-SURFACE readers. Imported, never copied: a private list here would
+  // drift from the alarm and the first symptom would be a leak this gate is
+  // reported to have closed (CLAUDE.md trap #12).
+  keyDesignatesLeadingOption,
+  assertedLeaderNamesItsOwnSubject,
+  BLOCK_PROSE_FIELDS,
+} from './leading-option-egress-guard.js';
+import { replaceAssertingUnits, splitIntoRedactableUnits } from './redactable-units.js';
+import {
+  analysisReadyPermitsLeaderNaming,
+  permittedAnalysisModeFromAnalysisReady,
+} from '../admission/analysis-admission.js';
 import { WITHHELD_EXPLANATION_NO_DISCLOSURE_TAIL } from './withheld-explanation-answer.js';
+// The PRODUCER's own withheld projections, reused at the chokepoint rather than
+// re-derived beside it. These already encode the anti-over-suppression policy
+// (a summary naming no leader stays byte-identical; the fragility science
+// survives while only the identities go), and they are already tested.
+import {
+  projectAnalysisSummaryForWithheldClaim,
+  projectTransportEnrichmentForWithheldClaim,
+} from './withheld-claim-projection.js';
 
 /**
  * The sentence that replaces one offending unit.
@@ -253,10 +280,6 @@ export type WireEnforcementMode =
  * over-suppression finding demands.
  */
 const MIN_OPTION_LABEL_LENGTH = 3;
-
-function escapeForRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
 
 /**
  * The scenario's OPTION ROSTER, read off the graph the exit is already shipping.
@@ -350,13 +373,7 @@ export function optionRosterFromAnalysisReady(analysisReady: unknown): readonly 
  */
 export function textNamesAnOption(value: string, roster: readonly string[]): boolean {
   if (typeof value !== 'string' || value.length === 0 || roster.length === 0) return false;
-  return roster.some((label) => {
-    // Escape metacharacters FIRST (so a label's own `.`/`(` is literal), then
-    // relax the already-escaped inter-word whitespace to `\s+`. `escapeForRegExp`
-    // does not touch space characters, so this rewrite cannot corrupt an escape.
-    const pattern = escapeForRegExp(label).replace(/\s+/g, '\\s+');
-    return new RegExp(`(?<![\\p{L}\\p{N}_])${pattern}(?![\\p{L}\\p{N}_])`, 'iu').test(value);
-  });
+  return roster.some((label) => optionLabelPattern(label).test(value));
 }
 
 /**
@@ -396,6 +413,31 @@ export interface WireLeaderClaimEnforcementOpts {
    * by-reference no-op.
    */
   readonly mayNameLeadingOption: boolean;
+  /**
+   * ⭐⭐ SEPARABLE-PROVISIONAL: the third answer this gate could not express.
+   *
+   * Threaded from the ALREADY-COMPOSED `analysis_state.leader_claim.separation`
+   * at the single call site — read, never re-derived here (the same rule
+   * `mayNameLeadingOption` follows, CLAUDE.md trap #12). `composeLeaderClaim`
+   * stays the sole author of the separation question.
+   *
+   * Paul ruled that `quantified_provisional` is **caveat, not withhold**
+   * (relayed, `olumi-programme-docs#38` comment `5576895511`) for runs
+   * confident enough to state a percentage. #1254's withhold governs the
+   * DIFFERENT population where the options cannot be separated. Without this
+   * operand the conjunction above could only ask "does the admission license a
+   * leader at all", so a separable provisional run was pushed down the withhold
+   * path and its structured summary was replaced with
+   * `WIRE_WITHHELD_LEADER_REPLACEMENT` — while the coach's own caveated prose
+   * survived. That is the witnessed incoherence on native request `23ab579d`:
+   * a comparative assessment beside "No single option can be put forward yet."
+   *
+   * ⚠ ABSENCE IS NOT PERMISSION. `undefined`/`false` leaves this gate exactly as
+   * it was, so every caller that does not thread it — and every run whose
+   * separation was never computed — keeps today's behaviour byte-for-byte. It
+   * widens the permit for ONE named population and nothing else.
+   */
+  readonly separationEstablished?: boolean;
   /**
    * The graph this exit is shipping (`ctx.graph`), read ONLY for the option
    * ROSTER — see {@link optionRosterFromGraph} for why that is not a second
@@ -468,10 +510,167 @@ export interface WireLeaderClaimEnforcementResult {
   readonly changed: boolean;
   /** Which covered fields were edited. Bounded by {@link WIRE_ENFORCED_PROSE_FIELDS}. */
   readonly editedFields: readonly WireEnforcedProseField[];
+  /**
+   * True when the BLOCK SURFACE was projected (block prose, `analysis_result`
+   * summary / `leading_option_id` / `enrichment`).
+   *
+   * ⚠ REPORTED SEPARATELY FROM {@link editedFields}, NOT FOLDED INTO IT. That
+   * array is documented as bounded by {@link WIRE_ENFORCED_PROSE_FIELDS} and
+   * existing callers and tests read it as exactly that set; widening it in place
+   * would make a two-element union silently three-valued and break the "a scope
+   * only implied by which arms happen to exist" property that list exists to
+   * prevent. A new question gets a new field.
+   */
+  readonly blocksProjected: boolean;
 }
 
 function unchanged(response: OlumiResponse): WireLeaderClaimEnforcementResult {
-  return { response, changed: false, editedFields: [] };
+  return { response, changed: false, editedFields: [], blocksProjected: false };
+}
+
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ * THE BLOCK SURFACE — added 2026-09-07, and the measurement that forced it.
+ *
+ * A founder journey driven against deployed CEE `9de184f` on 2026-09-07 held
+ * `permitted_analysis_mode: "quantified_provisional"` on ALL TWELVE turns — the
+ * mode whose own admission message reads *"no option can be called the leader"*
+ * — and shipped 160 leader designations across the run. Their distribution is
+ * the whole argument for this function:
+ *
+ *     100  blocks[].enrichment.*        ← not covered before
+ *      25  blocks[].priority_rank       ← NOT a designation (see below)
+ *      12  _diagnostic_trace            ← the licence flag itself, not a claim
+ *       6  blocks[].summary             ← not covered before
+ *       6  blocks[].leading_option_id   ← not covered before
+ *       3  blocks[].body                ← not covered before
+ *       3  assistant_text               ← covered; these are the paraphrase
+ *                                          residual (2.197 / 2.198)
+ *
+ * Three of 160 landed in the two fields this gate could reach.
+ *
+ * WHY THE GAP EXISTED, stated so nobody "fixes" it in the wrong place. The
+ * producer projection (`compose/withheld-claim-projection.ts`) already performs
+ * every edit below and is well tested. Its gate is `mayPresentLeaderClaimForFact`
+ * — the constraint verdict composed with "did anybody ask for this run". It
+ * never reads `permitted_analysis_mode`. On this journey the fact PERMITTED (the
+ * arms separated, 73% vs 24%) and the user DID click, so the projection was
+ * skipped wholesale while the ADMISSION withheld.
+ *
+ * ⚠ THE FIX IS NOT TO MAKE THE PRODUCER READ THE ADMISSION. This module's own
+ * docstring forbids it: *"making one authority call another is the #709/#737
+ * defect"*, and `mayPresentLeaderClaimForFact` answers a genuinely different
+ * question (CLAUDE.md trap 21). The conjunction belongs HERE, at the chokepoint,
+ * where the question is the surface-level one — *may this response name a leader
+ * on screen?* So what changes is this gate's REACH, not anyone's authority.
+ *
+ * NO NEW VOCABULARY AND NO NEW PREDICATE. Every reader below is imported:
+ * {@link BLOCK_PROSE_FIELDS} and `keyDesignatesLeadingOption` from the alarm,
+ * `projectAnalysisSummaryForWithheldClaim` and
+ * `projectTransportEnrichmentForWithheldClaim` from the producer. CEE #888 paid
+ * four oscillating rounds for widening a natural-language predicate; this is a
+ * SCOPE extension with the predicates held fixed.
+ *
+ * ⚠ WHAT IS DELIBERATELY NOT SUPPRESSED — stated, not implied.
+ *   - `priority_rank` is CARD DISPLAY ORDERING (`phase3-blocks.ts` emits 1, 10,
+ *     15, 20, 30+idx, 100+idx, 200+idx — values far outside any option ordinal).
+ *     The witness harness counted its 25 hits as comparative standing; that was
+ *     an over-read. Suppressing it would scramble every review card on every
+ *     withheld turn.
+ *   - `_diagnostic_trace.claim_safety.may_name_leading_option` is the LICENCE
+ *     FLAG, not a claim about an option.
+ *   - Short-form and paraphrase namings ("the sprint" for "ICP Validation Sprint
+ *     Before Hiring") remain the documented ceiling — {@link textNamesAnOption}
+ *     records why fuzzy matching is refused, and reopening it reopens
+ *     P1-OVERSUPPRESS. ROADMAP 2.197 / 2.198.
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * Returns `null` when nothing changed, so the caller returns the input BY
+ * REFERENCE and byte-identity stays a construction rather than a hope.
+ */
+function projectBlocksForWithheldClaim(
+  blocks: unknown,
+  roster: readonly string[],
+): { blocks: unknown[]; mode: WireEnforcementMode } | null {
+  if (!Array.isArray(blocks) || blocks.length === 0) return null;
+
+  let changed = false;
+  // The LOUDEST mode wins the report, same rule as the prose fields.
+  let mode: WireEnforcementMode = 'surgical';
+  const escalate = (next: WireEnforcementMode): void => {
+    if (next === 'whole_field') mode = 'whole_field';
+    else if (next === 'surgical_escalated' && mode === 'surgical') mode = 'surgical_escalated';
+  };
+
+  const projected = blocks.map((block) => {
+    if (block === null || typeof block !== 'object' || Array.isArray(block)) return block;
+    const source = block as Record<string, unknown>;
+    let next: Record<string, unknown> | null = null;
+    const write = (key: string, value: unknown): void => {
+      next ??= { ...source };
+      next[key] = value;
+      changed = true;
+    };
+
+    // (1) STRUCTURED DESIGNATIONS — no roster needed. A key whose whole job is
+    //     to name the leader designates one whatever its value says.
+    for (const [key, value] of Object.entries(source)) {
+      if (value === null || value === undefined) continue;
+      if (!keyDesignatesLeadingOption(key)) continue;
+      // `null`, never a deleted key: `leading_option_id` is REQUIRED and
+      // NULLABLE at the boundary (`boundary/blocks.ts`), so omitting it fails
+      // egress validation, and `null` is already what `ui-directive.ts`'s
+      // fail-closed ladder reads as "no option is being put forward". This is
+      // byte-identical to what `compose.ts` writes on a producer-withheld turn.
+      write(key, null);
+    }
+
+    // (2) THE `analysis_result` SUMMARY — the producer's own policy for this
+    //     exact field, reused rather than re-derived. Conditional by
+    //     construction: a summary naming no leader is kept byte-identical.
+    if (source.type === 'analysis_result' && typeof source.summary === 'string') {
+      const summary = projectAnalysisSummaryForWithheldClaim(source.summary);
+      if (summary !== source.summary) write('summary', summary);
+    }
+
+    // (3) THE ENRICHMENT BLOB — 100 of the run's 160 designations. Again the
+    //     producer's own projection, which keeps the fragility science verbatim
+    //     and drops only the identities.
+    if (source.enrichment !== undefined && source.enrichment !== null) {
+      const enrichment = projectTransportEnrichmentForWithheldClaim(
+        source.enrichment as Record<string, unknown>,
+      );
+      if (enrichment !== source.enrichment) {
+        if (enrichment === undefined) {
+          next ??= { ...source };
+          delete next.enrichment;
+          changed = true;
+        } else {
+          write('enrichment', enrichment);
+        }
+      }
+    }
+
+    // (4) BLOCK PROSE — the same surgical projection, the same name-gate, the
+    //     same escalation ladder as `assistant_text`. Skipped without a roster:
+    //     with no option names there is no designation this reader can
+    //     establish, and deleting prose on a guess is the over-suppression this
+    //     module weights equally with the leak.
+    if (roster.length > 0) {
+      for (const field of BLOCK_PROSE_FIELDS) {
+        const value = source[field];
+        if (typeof value !== 'string') continue;
+        const result = projectField(value, roster);
+        if (result === null) continue;
+        escalate(result.mode);
+        write(field, result.text);
+      }
+    }
+
+    return next ?? block;
+  });
+
+  return changed ? { blocks: projected, mode } : null;
 }
 
 /**
@@ -486,9 +685,8 @@ function unchanged(response: OlumiResponse): WireLeaderClaimEnforcementResult {
  * | no            | no              | untouched                                |
  * | no            | YES             | untouched — a receipt naming the option   |
  * |               |                 | the user just edited is not a claim       |
- * | YES           | no              | untouched — "sales leads improved" and    |
- * |               |                 | the terminology-rewrite's manufactured    |
- * |               |                 | "leading option" designate nobody         |
+ * | YES           | no              | enter only for an asserted implicit lead; |
+ * |               |                 | ordinary vocabulary/mentions stay intact  |
  * | YES           | YES             | ENTER: surgery, then post-check           |
  *
  * "Claim present" is read at FIELD level, deliberately: a claim that straddles a
@@ -499,7 +697,9 @@ function unchanged(response: OlumiResponse): WireLeaderClaimEnforcementResult {
  * vocabulary unit is precisely what leaves a distributed claim's naming half
  * behind. So after each pass the residual must satisfy BOTH:
  *   - it asserts no leader (`textAssertsLeadingOption` — the ENFORCER reader),
- *   - it names no option (`textNamesAnOption`).
+ *   - when any assertion needs a naming half, it names no option. Explicit
+ *     implicit designations are complete locally, so an unrelated explanation
+ *     is not removed merely for naming an option.
  * Failing either escalates: first the name-bearing units go too, then, if the
  * residual STILL fails, the whole field.
  *
@@ -525,18 +725,80 @@ function projectField(
   roster: readonly string[],
 ): { text: string; mode: WireEnforcementMode } | null {
   if (typeof value !== 'string' || value.length === 0) return null;
+  const context = { optionLabels: roster };
+  const asserts = (text: string): boolean => textAssertsLeadingOption(text, context);
   // (1) A CLAIM IS PRESENT — field level, so a straddling match still counts.
-  if (!textAssertsLeadingOption(value)) return null;
-  // (2) A DESIGNATION IS POSSIBLE — the field names one of this scenario's own
-  //     options. Vocabulary with no name designates nobody.
-  if (!textNamesAnOption(value, roster)) return null;
+  if (!asserts(value)) return null;
+  // A designation can be exact-name or an explicitly asserted implicit lead.
+  // This is prose classification, not fuzzy matching of the scenario roster.
+  const namesOption = textNamesAnOption(value, roster);
+  if (!namesOption && !textAssertsImplicitLeadingOption(value, context)) return null;
+  // An explicit implicit designation is complete locally. A neighbouring
+  // option explanation is not its missing naming half. Keep the existing
+  // escalation for other/distributed claims, including mixed fields.
+  //
+  // ⭐⭐ AND A SELF-NAMING ASSERTION IS COMPLETE LOCALLY FOR THE SAME REASON.
+  //
+  // Escalation exists for the DISTRIBUTED claim — "Hire X is strong. It leads
+  // at 54%." — where the asserting unit borrows its naming half from a
+  // neighbour, so removing the assertion alone leaves the designation standing.
+  // It was firing for self-contained claims too, and that cost real coaching:
+  // on a captured answer, "Hire X leads in 54% of simulations against Y" was
+  // correctly removed and then TWO independently non-asserting conditional
+  // paragraphs were deleted with it, purely for naming the options they
+  // discuss. 709 -> 393 characters, mode `surgical_escalated`. The same
+  // paragraphs WITHOUT the unsafe neighbour survive byte-for-byte, which is
+  // what proves this is collateral rather than a classifier that rejects
+  // conditional prose.
+  //
+  // The discriminator is whether any assertion is missing its own name. If
+  // every asserting unit names the option it designates, surgery is complete
+  // and nothing elsewhere is that claim's other half. If one does not, it
+  // borrowed the name from another unit and the name-bearing units must go too.
+  //
+  // ⚠ NOT A RELAXATION OF WHAT MAY BE CLAIMED. Every asserting unit is still
+  //   removed, by the same predicate, and a distributed claim still loses both
+  //   halves. This narrows only WHICH NON-ASSERTING units are collateral.
+  //
+  // ⭐⭐ AND "NAMES AN OPTION" IS NOT "NAMES ITS OWN SUBJECT" — the first cut of
+  //   this discriminator asked the wider question and reopened the very leak
+  //   the escalation exists for. Reproduced by the independent reviewer at
+  //   `7b54f07c`:
+  //
+  //     "Hire a Hands-on Technical Lead is strong. It leads in 54% of
+  //      simulations against Two Developers."
+  //
+  //   The asserting unit names a roster option — the COMPARATOR — while its own
+  //   subject is the anaphoric "It", borrowed from the sentence before. Under
+  //   `textNamesAnOption` it read as self-contained, so no escalation ran and
+  //   the withheld answer shipped as "Hire a Hands-on Technical Lead is strong.
+  //   No single option can be put forward yet." — still designating the leader
+  //   it may not name. A comparator mention is not a subject.
+  //
+  //   `assertedLeaderNamesItsOwnSubject` asks the narrower question, and asks it
+  //   with the binding the guard already performs: a claim's subject is the
+  //   option reference that reaches its predicate through the grammatical
+  //   prelude. No comparison-word list, no new policy, no new runtime model —
+  //   the same classifier, one question sharper. Withholding is unchanged in
+  //   both directions it must be: a self-contained comparative ("Hire X leads
+  //   in 54% against Y") still names its subject and still keeps neighbouring
+  //   conditional paragraphs, and an anaphoric claim still loses both halves.
+  const units = splitIntoRedactableUnits(value).filter((unit) => !/^\s+$/.test(unit));
+  const someAssertionBorrowsItsName = units.some(
+    (unit) => asserts(unit) && !assertedLeaderNamesItsOwnSubject(unit, context),
+  );
+  const needsNameEscalation =
+    namesOption &&
+    !textAssertsOnlyImplicitLeadingOptions(value, context) &&
+    someAssertionBorrowsItsName;
 
   const isClean = (candidate: string): boolean =>
-    !textAssertsLeadingOption(candidate) && !textNamesAnOption(candidate, roster);
+    !asserts(candidate) &&
+    (!needsNameEscalation || !textNamesAnOption(candidate, roster));
 
   const surgical = replaceAssertingUnits(
     value,
-    textAssertsLeadingOption,
+    asserts,
     WIRE_WITHHELD_LEADER_REPLACEMENT,
   );
   if (isClean(surgical)) return { text: surgical, mode: 'surgical' };
@@ -551,12 +813,101 @@ function projectField(
   // exactly what the collapse rule is for.
   const escalated = replaceAssertingUnits(
     value,
-    (unit) => textAssertsLeadingOption(unit) || textNamesAnOption(unit, roster),
+    (unit) => asserts(unit) || textNamesAnOption(unit, roster),
     WIRE_WITHHELD_LEADER_REPLACEMENT,
   );
   if (isClean(escalated)) return { text: escalated, mode: 'surgical_escalated' };
 
   return { text: WIRE_WITHHELD_LEADER_REPLACEMENT, mode: 'whole_field' };
+}
+
+/**
+ * ⭐⭐ THE QUALIFICATION THE QUALIFIED POPULATION MUST CARRY — output, not advice.
+ *
+ * ⛔ MY FIRST CUT RETURNED THE WHOLE RESPONSE UNCHANGED for this population and
+ *    the independent review named it exactly (`5592620999` at `39557a98`):
+ *    "the final projection permits unqualified output, not qualified output".
+ *    It was right. `Adopt RudderStack is the best option.` took the same early
+ *    return as a carefully caveated sentence, because nothing derived, applied
+ *    or verified a qualification. A PROMPT INSTRUCTION IS GUIDANCE; the
+ *    receiving contract says in terms that guidance is not output enforcement,
+ *    and I shipped the thing it warned against.
+ *
+ * So the permit for this population is not "pass through". It is "pass through
+ * WITH the caveat attached", applied deterministically at the chokepoint that
+ * already owns final claim projection — one interpretation reaching the two
+ * surfaces that disagreed on the captured turn: the assistant prose and the
+ * retained `analysis_result.summary`.
+ *
+ * ⚠ THIS IS NOT A CLASSIFIER AND NOT A WORDING RULE. Nothing here reads the
+ *   model's language, judges whether prose "sounds qualified", or bans a word.
+ *   Idempotence is IDENTITY ON OUR OWN CONSTANT — `includes` of the exact
+ *   sentence below — so re-running is a no-op and an already-caveated answer is
+ *   not caveated twice. A natural-language predicate here would be the
+ *   over-suppression trade running backwards (module docstring).
+ *
+ * ⚠ TERMINOLOGY IS THE PRODUCT'S, NOT THE CAPTURE'S. Goal fit, not a contest:
+ *   a simulation share is how often an option scored highest against the goal,
+ *   never the probability the goal is achieved and never evidence confidence.
+ */
+/**
+ * ⛔ THE FIRST WORDING FAILED HOSTED INTEGRATION `102261951683` AT 22:32:56Z, at
+ *    the probe below, and the failure was correct. It read "…an option **scored
+ *    highest** against your goal…", and `LEADER_CLAIM_PATTERNS` carries
+ *    `scored_highest: /\bscor(?:e|es|ed|ing)\s+highest\b/i` — added by #1389's
+ *    vocabulary change. Importing `route-v2.ts` therefore threw at module load.
+ *
+ *    I HAD CHECKED THAT LIST AND MY CHECK WAS SHORT: a `grep` capped with `head`
+ *    showed only the array's first arm, and I treated a truncated enumeration as
+ *    licence to claim the constant was inert. An absence claim from a partial
+ *    read is not an absence claim (CLAUDE.md trap 13e). The probe is the only
+ *    reason this surfaced instead of shipping, so the probe stays and the
+ *    CONSTANT changes — no reader is weakened and no check is deleted.
+ *
+ * The meaning is unchanged: provisional, machine-authored, and a simulation
+ * share is not the chance the goal is achieved. It is now said with none of the
+ * claim vocabulary, and with goal-fit rather than contest framing.
+ */
+export const PROVISIONAL_FIGURES_CAVEAT =
+  'These figures are provisional: every estimate behind them is machine-authored and unconfirmed. ' +
+  'Treat each percentage as how often that option fitted your goal better than the alternatives ' +
+  'across the simulated runs, not as the chance the goal is achieved.';
+
+/** Append the caveat once. Identity on the constant, never a language test. */
+function withProvisionalCaveat(text: string): string {
+  if (text.includes(PROVISIONAL_FIGURES_CAVEAT)) return text;
+  const trimmed = text.trimEnd();
+  return trimmed.length === 0
+    ? PROVISIONAL_FIGURES_CAVEAT
+    : `${trimmed}\n\n${PROVISIONAL_FIGURES_CAVEAT}`;
+}
+
+/**
+ * Attach the caveat to the retained `analysis_result` summaries.
+ *
+ * ⚠ SUMMARIES ONLY, AND NOTHING IS REMOVED. The honest figures stay; the
+ *   leading option ID stays exactly as the producer set it. A legitimate null
+ *   projection (unrequested / constraint / run-identity) is left null — this
+ *   seam never restores an ID over a restriction, which the review explicitly
+ *   asked for and which the upstream-null observation does not license.
+ *
+ * Returns `null` when nothing changed, so the caller keeps byte-identity by
+ * construction rather than by hope — the same contract
+ * {@link projectBlocksForWithheldClaim} follows.
+ */
+function qualifyAnalysisResultSummaries(blocks: unknown): unknown[] | null {
+  if (!Array.isArray(blocks) || blocks.length === 0) return null;
+  let changed = false;
+  const projected = blocks.map((block) => {
+    if (block === null || typeof block !== 'object') return block;
+    const source = block as { readonly type?: unknown; readonly summary?: unknown };
+    if (source.type !== 'analysis_result' || typeof source.summary !== 'string') return block;
+    const next = withProvisionalCaveat(source.summary);
+    if (next === source.summary) return block;
+    changed = true;
+    return { ...(block as Record<string, unknown>), summary: next };
+  });
+  return changed ? projected : null;
 }
 
 /**
@@ -611,6 +962,45 @@ export function enforceLeadingOptionClaimsAtWire(
   // admission returns `true` from the mode reader, so this line collapses back to
   // the single operand it was, and every pre-`analysis_admission` producer is
   // byte-identical. Over-suppression is the WORSE defect (module docstring).
+  //
+  // ⭐ AND THE THIRD ARM, added for the population Paul ruled on: entitled, the
+  // result SEPARATES the arms, and the admission's only objection is that every
+  // estimate is still machine-authored (`quantified_provisional`). Withholding
+  // there applies #1254's non-separation rule to a separable run and deletes
+  // the comparison the person asked about. The qualification is carried
+  // elsewhere — `PROVISIONAL_FIGURES_INSTRUCTION` to the coach — so this arm
+  // permits a QUALIFIED claim, never an unqualified one, and the two consumers
+  // now read the same derived interpretation instead of contradicting.
+  //
+  // ⚠ Narrow by construction: it requires the mode to be EXACTLY the provisional
+  //   cap. A lower mode, an unknown separation, a near tie, an unentitled turn
+  //   or an absent admission all still withhold, unchanged.
+  const separableProvisional =
+    opts.separationEstablished === true &&
+    permittedAnalysisModeFromAnalysisReady(opts.analysisReady) === 'quantified_provisional';
+  if (opts.mayNameLeadingOption && separableProvisional) {
+    // PERMIT-WITH-CAVEAT, not permit. See {@link PROVISIONAL_FIGURES_CAVEAT}:
+    // the review's second finding was that returning the response untouched
+    // here admits an unqualified assertion, and it does. Both surfaces that
+    // disagreed on the captured turn are qualified from this one decision.
+    const answer =
+      typeof response.assistant_text === 'string'
+        ? withProvisionalCaveat(response.assistant_text)
+        : response.assistant_text;
+    const qualifiedBlocks = qualifyAnalysisResultSummaries(response.blocks);
+    const answerChanged = answer !== response.assistant_text;
+    if (!answerChanged && qualifiedBlocks === null) return unchanged(response);
+    return {
+      response: {
+        ...response,
+        ...(answerChanged ? { assistant_text: answer } : {}),
+        ...(qualifiedBlocks !== null ? { blocks: qualifiedBlocks } : {}),
+      } as OlumiResponse,
+      changed: true,
+      editedFields: answerChanged ? (['assistant_text'] as const) : [],
+      blocksProjected: qualifiedBlocks !== null,
+    };
+  }
   if (opts.mayNameLeadingOption && analysisReadyPermitsLeaderNaming(opts.analysisReady)) {
     return unchanged(response);
   }
@@ -625,27 +1015,56 @@ export function enforceLeadingOptionClaimsAtWire(
     const roster =
       graphRoster.length > 0 ? graphRoster : optionRosterFromAnalysisReady(opts.analysisReady);
 
+    // ⭐ THE BLOCK SURFACE IS PROJECTED WHETHER OR NOT A ROSTER EXISTS, and the
+    // asymmetry is deliberate. The roster gates PROSE only — it is what turns
+    // "this sentence uses leader vocabulary" into "this sentence designates one
+    // of THIS scenario's options", and without it deleting prose is a guess. The
+    // STRUCTURED half needs no such warrant: `leading_option_id`,
+    // `recommended_option_id` and the enrichment identities designate a leader
+    // by the KEY, whatever their value says and whatever the roster knows. Making
+    // the whole block surface wait on a roster would have reproduced the original
+    // defect on every graph-less exit.
+    const blockProjection = projectBlocksForWithheldClaim(response.blocks, roster);
+
     if (roster.length === 0) {
-      // STAND DOWN, LOUDLY. Without a roster the gate cannot establish that any
-      // designation is possible, so deleting prose would be a guess. Reported
-      // rather than silent, because a silent stand-down is how a guarantee turns
-      // into theatre: a reader of the dashboard must be able to see the
-      // difference between "nothing to do" and "could not look".
+      // STAND DOWN ON PROSE, LOUDLY. Without a roster the gate cannot establish
+      // that any prose designation is possible, so deleting prose would be a
+      // guess. Reported rather than silent, because a silent stand-down is how a
+      // guarantee turns into theatre: a reader of the dashboard must be able to
+      // see the difference between "nothing to do" and "could not look".
       const couldHaveMattered =
         textAssertsLeadingOption(response.assistant_text) ||
         (typeof response.framing_question === 'string' &&
           textAssertsLeadingOption(response.framing_question));
-      if (couldHaveMattered) {
+      // ⚠ ONE EVENT, AND `mode` IS WHAT DISTINGUISHES THIS BRANCH. A first cut
+      // emitted `edited_fields: 'blocks'` with `mode: 'surgical'` here — BYTE
+      // IDENTICAL to what the main path emits when the prose happened to be
+      // clean and only blocks were edited. Two different states rendering the
+      // same event is a dashboard that cannot tell "prose was fine" from "prose
+      // could not be examined", which is the guarantee-theatre shape this
+      // module's stand-down comment exists to prevent. `roster_unavailable`
+      // names the state; `edited_fields` says what still shipped.
+      if (couldHaveMattered || blockProjection !== null) {
         emit(TelemetryEvents.V5WithheldLeaderClaimNeutralisedAtWire, {
           request_id: opts.requestId,
           exit_path: opts.exitPath,
-          edited_fields: 'none',
+          edited_fields: blockProjection !== null ? 'blocks' : 'none',
           mode: 'roster_unavailable',
           original_length: 0,
           projected_length: 0,
         });
       }
-      return unchanged(response);
+      // The structured block edits still ship — they never needed the roster.
+      if (blockProjection === null) return unchanged(response);
+      return {
+        response: {
+          ...response,
+          blocks: blockProjection.blocks,
+        } as OlumiResponse,
+        changed: true,
+        editedFields: [],
+        blocksProjected: true,
+      };
     }
 
     const editedFields: WireEnforcedProseField[] = [];
@@ -682,21 +1101,34 @@ export function enforceLeadingOptionClaimsAtWire(
       }
     }
 
-    if (editedFields.length === 0) return unchanged(response);
+    if (blockProjection !== null) {
+      escalate(blockProjection.mode);
+      next = { ...next, blocks: blockProjection.blocks } as OlumiResponse;
+    }
+
+    if (editedFields.length === 0 && blockProjection === null) return unchanged(response);
 
     emit(TelemetryEvents.V5WithheldLeaderClaimNeutralisedAtWire, {
       request_id: opts.requestId,
       exit_path: opts.exitPath,
       // Bounded field names and a bounded mode. LENGTHS only, never the matched
       // prose: this is the claim-safety boundary and the prose is the user's own
-      // decision content.
-      edited_fields: [...editedFields].sort().join(','),
+      // decision content. `blocks` is a bounded token like the two field names,
+      // so the tag stays a closed vocabulary.
+      edited_fields: [...editedFields, ...(blockProjection !== null ? ['blocks'] : [])]
+        .sort()
+        .join(','),
       mode: modes,
       original_length: originalLength,
       projected_length: projectedLength,
     });
 
-    return { response: next, changed: true, editedFields };
+    return {
+      response: next,
+      changed: true,
+      editedFields,
+      blocksProjected: blockProjection !== null,
+    };
   } catch (err) {
     log.error(
       {
@@ -752,6 +1184,30 @@ function assertReplacementIsInertAndNonVacuous(): void {
     throw new Error(
       'leading-option-wire-enforcement: the replacement trips the ALARM vocabulary. The gate ' +
         'would inject the residue the alarm measures on every enforced turn.',
+    );
+  }
+  // ⭐ THE SAME OBLIGATION FOR THE CAVEAT THIS GATE NOW ATTACHES. A caveat that
+  //   tripped either reader would be a claim the gate injects on every qualified
+  //   turn — the exact defect the two probes above exist to prevent, one arm
+  //   over. Checked at module load so it fails the process, not a review.
+  if (textAssertsLeadingOption(PROVISIONAL_FIGURES_CAVEAT)) {
+    throw new Error(
+      'leading-option-wire-enforcement: PROVISIONAL_FIGURES_CAVEAT trips the ENFORCEMENT reader, ' +
+        'so the qualified arm would attach a sentence a later pass reads as a leader claim.',
+    );
+  }
+  if (textNamesLeadingOption(PROVISIONAL_FIGURES_CAVEAT)) {
+    throw new Error(
+      'leading-option-wire-enforcement: PROVISIONAL_FIGURES_CAVEAT trips the ALARM vocabulary, so ' +
+        'the qualified arm would inject the residue the alarm measures.',
+    );
+  }
+  // IDEMPOTENCE, exercised rather than argued: attaching twice attaches once.
+  const caveated = withProvisionalCaveat('Some answer.');
+  if (withProvisionalCaveat(caveated) !== caveated) {
+    throw new Error(
+      'leading-option-wire-enforcement: the provisional caveat is not idempotent, so a re-run of ' +
+        'the qualified arm would repeat it in the answer the person reads.',
     );
   }
   // POSITIVE CONTROL — the probe above is vacuous if the readers see nothing.

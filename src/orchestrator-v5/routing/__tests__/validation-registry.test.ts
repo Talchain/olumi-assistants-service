@@ -216,7 +216,7 @@ describe('run_analysis confirmation_template forwarder', () => {
 
   it('forwards a well-shaped deterministic headline verbatim', () => {
     const headline =
-      'Hire One Senior Technical Lead came out ahead in 24% of runs of this model, but treat this as provisional: the result is sensitive to Hiring and Salary Cost.';
+      'Hire One Senior Technical Lead scored highest against your goal in 24% of runs of this model, but treat this as provisional: the result is sensitive to Hiring and Salary Cost.';
     expect(fwd({ assistant_text: headline })).toBe(headline);
   });
 
@@ -229,19 +229,19 @@ describe('run_analysis confirmation_template forwarder', () => {
       ' The analysis engine reported an unfamiliar status — treat the result with caution.';
     const baseShapes = [
       // Case A — caution + margin
-      'Hire A came out ahead in 24% of runs of this model, but treat this as provisional: the result is sensitive to Quality.',
+      'Hire A scored highest against your goal in 24% of runs of this model, but treat this as provisional: the result is sensitive to Quality.',
       // Case C — caution, no margin
       'Hire A currently leads, but treat this as provisional: the result is sensitive to Quality.',
       // Case B — driver + margin
-      'Hire A came out ahead in 24% of runs of this model because Cost is the strongest driver.',
+      'Hire A scored highest against your goal in 24% of runs of this model because Cost is the strongest driver.',
       // Case B — driver, no margin
       'Hire A currently leads because Cost is the strongest driver.',
       // Case D — margin only
-      'Hire A came out ahead in 24% of runs of this model.',
+      'Hire A scored highest against your goal in 24% of runs of this model.',
       // Case D — probability (single-option)
-      'Hire A came out ahead in 62% of runs of this model. Run the follow-up checks before treating this as final.',
+      'Hire A scored highest against your goal in 62% of runs of this model. Run the follow-up checks before treating this as final.',
       // Case NT — small but real lead, flagged close
-      'Hire A came out ahead in 2% of runs of this model, but the options are close.',
+      'Hire A scored highest against your goal in 2% of runs of this model, but the options are close.',
       // Case NT — effectively tied
       'Hire A is currently only fractionally ahead, so the options are effectively tied.',
       // Case E — floor
@@ -291,7 +291,7 @@ describe('run_analysis confirmation_template forwarder', () => {
 
   it('falls back when text is Case D shape with the wrong follow-up phrase', () => {
     const adversarial =
-      'Hire A came out ahead in 62% of runs of this model. Please run more tests before deciding.';
+      'Hire A scored highest against your goal in 62% of runs of this model. Please run more tests before deciding.';
     expect(fwd({ assistant_text: adversarial })).toBe(FALLBACK);
   });
 

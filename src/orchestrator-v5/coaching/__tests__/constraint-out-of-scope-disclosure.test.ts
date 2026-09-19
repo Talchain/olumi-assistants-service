@@ -86,7 +86,7 @@ function verdictOf(
  * would never exercise the shape the user actually receives.
  */
 const LEADER_HEADLINE =
-  'Hire Two Sales Reps came out ahead in 27% of runs of this model because Sales capacity is the strongest driver.';
+  'Hire Two Sales Reps scored highest against your goal in 27% of runs of this model because Sales capacity is the strongest driver.';
 
 describe('2.349 — the out-of-scope voice says the true thing and none of the false ones', () => {
   const suffix = buildConstraintDisclosure(verdictOf('not_applicable', [], [DEADLINE]));
@@ -226,6 +226,44 @@ describe('2.349 — the length budget covers the COMBINED shape', () => {
     );
     expect(worst.length).toBeGreaterThan(0);
     expect(CONSTRAINT_GAP_DISCLOSURE_MAX_CHARS).toBeGreaterThanOrEqual(worst.length);
+  });
+
+  it('⭐ the budget covers the LONGER of the two `unevaluated` repair arms', () => {
+    // ⚠ THE GUARD ABOVE CANNOT SEE THIS, AND A SURVIVING MUTANT PROVED IT.
+    // It builds the worst case WITHOUT the proved-unanchored id set, so it
+    // measures only the short arm. Replacing the budget's `Math.max` over both
+    // arms with the `false` arm alone left it fully green — the budget would
+    // have gone ~155 characters short with nothing red, which is the exact
+    // silent revert-to-locked-template failure this whole section exists to
+    // prevent.
+    //
+    // Derived, never hand-estimated: the same worst shape is built twice, once
+    // per arm, and the budget must cover the larger.
+    const many = (n: number, prefix: string) =>
+      Array.from({ length: n }, (_, i) => ({
+        constraint_id: `${prefix}_${i}`,
+        label: 'x'.repeat(CONSTRAINT_GAP_LABEL_MAX_CHARS),
+      }));
+    const constraints = many(999, 'a');
+    // ⚠ ALL THREE VOICES RIDING TOGETHER — the maximal reachable shape, and the
+    // reason an earlier version of this guard did NOT discriminate: built with
+    // only two voices it measured 1272/1450 characters and passed under the
+    // mutant anyway. Measured at this shape the budget goes from 1591 to 1413
+    // while the message needs 1450, i.e. 37 characters short.
+    const verdict = {
+      ...verdictOf('unevaluated', constraints, many(999, 'b')),
+      unmeasuredTargetConstraints: many(999, 'c'),
+    } as ConstraintVerdict;
+    const everyIdProvedUnanchored = new Set(constraints.map((c) => c.constraint_id));
+
+    const shortArm = buildConstraintDisclosure(verdict);
+    const longArm = buildConstraintDisclosure(verdict, null, everyIdProvedUnanchored);
+
+    // PINS ITS OWN PRECONDITION (trap 13b): if the arms ever stop differing,
+    // this guard would pass while measuring one thing twice.
+    expect(longArm).not.toBe(shortArm);
+    expect(longArm.length).toBeGreaterThan(shortArm.length);
+    expect(CONSTRAINT_GAP_DISCLOSURE_MAX_CHARS).toBeGreaterThanOrEqual(longArm.length);
   });
 
   it('the budget accounts for EVERY declared voice (trap 12d — the list itself)', () => {

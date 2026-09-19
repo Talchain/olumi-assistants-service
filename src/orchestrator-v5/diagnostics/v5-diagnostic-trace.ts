@@ -361,6 +361,26 @@ export type V5DiagnosticExitPath =
   // (process_meta_intake / readiness_intake / clarify_v2). External dashboards
   // that bucket by exit_path gain a new `add_option_transaction` bucket.
   | 'add_option_transaction'
+  // ROADMAP goalfence — the draft pipeline blocked, and the ONLY thing it could
+  // not connect was a goal IT minted itself (`details.goal_never_stated`, set by
+  // `graph-enforcement.ts` when the goal is `DEFAULT_GOAL_LABEL` and every
+  // blocking code is a goal-connectivity code). Instead of the dead 500 the turn
+  // asks the one question whose absence caused the failure. Its OWN member, not
+  // `clarify_v2`: clarify is strictly PRE-draft (`clarify-v2-dispatch.ts:362`
+  // refuses a turn once a graph exists) and a dashboard that buckets clarify
+  // volume must not silently absorb post-draft-failure asks — the two have
+  // different causes and different fixes.
+  | 'draft_graph_goal_never_stated'
+  // Paul's ruling 2026-09-15 — NO BARE 500 ON THE DRAFT PATH. The draft
+  // pipeline failed, no GRAPH_READY frame had reached the client, and instead
+  // of an `assistant_text`-less BoundaryError the turn COMMITS and SPEAKS: the
+  // pipeline's own recovery sentence, an ErrorBlock carrying `request_id` /
+  // `fault` / `readable` in its passthrough `details`, and a one-tap retry.
+  // Its OWN member, not `draft_graph_goal_never_stated`: that exit ASKS a
+  // question the user can answer, this one REPORTS a failure that is usually
+  // ours, and a dashboard that folded them together could not tell the
+  // coaching arm of Paul's ruling from the it-is-our-fault arm.
+  | 'draft_graph_failure_spoken'
   | 'draft_graph_error';
 
 /**

@@ -19,7 +19,7 @@ import type {
   GraphV3T,
   ValidationWarningV3T,
 } from "../../schemas/cee-v3.js";
-import { deriveEffectDirection } from "../../schemas/cee-v3.js";
+import { resolveEffectDirection } from "../../schemas/cee-v3.js";
 import { deriveStrengthStd, type ProvenanceObject } from "./strength-derivation.js";
 import type { V1DraftGraphResponse, V1Node, V1Edge, V1Graph } from "./schema-v2.js";
 import { isFactorData, isOptionData } from "./schema-v2.js";
@@ -64,6 +64,10 @@ import {
   mergeRephrasedOptions,
   type RephraseMergeResult,
 } from "./option-rephrase-merge.js";
+import {
+  adoptStatedFiguresForStatedOptions,
+  type StatedOptionCoverageResult,
+} from "./stated-option-figure-adoption.js";
 import { detectUnreconciledStatedMagnitudes } from "../provenance/money-invariant.js";
 import { UNAUTHORED_DECISION_LABEL } from "../draft/records/objective-label.js";
 
@@ -131,6 +135,88 @@ const LABEL_BOUND_PROVENANCE_KINDS: ReadonlySet<string> = new Set([
   "outcome",
   "decision",
 ]);
+
+/**
+ * ⭐⭐ NODE KINDS WHOSE `observed_state` MAY BE RENDERED AS A HUMAN-READABLE
+ * `display_value` WHEN THE MODEL DID NOT AUTHOR ONE.
+ *
+ * ── WHAT THIS IS NOT ─────────────────────────────────────────────────────────
+ * This set does NOT decide whether a non-factor node may CARRY a value. It
+ * never did, and a brief that reached this lane said it did — the correction is
+ * recorded here because the false version is the more plausible one and will be
+ * re-derived otherwise.
+ *
+ * `observed_state` is built at `:364` from `isFactorData(node.data) &&
+ * node.data.value !== undefined`, and `isFactorData` is `!('interventions' in
+ * data)` (`schema-v2.ts:85`) — it reads the DATA SHAPE, never `kind`. The
+ * LLM-authored `display_value` passthrough (`:633`) is gated the same way. So a
+ * risk or an outcome carrying `data.value` ALREADY reaches the wire with its
+ * number, its `observed_state.source`, its `extractionType` and its
+ * `provenance`. Measured by execution, not read
+ * (`__tests__/ai-value-non-factor-kinds.test.ts`, three kinds, green at the
+ * pristine tip before this change existed).
+ *
+ * The one genuinely kind-gated limb was the SYNTHESIS FALLBACK below, and its
+ * effect was narrower and stranger than "the value is dropped": the number
+ * arrived and the sentence a human reads did not. A risk shipped
+ * `observed_state.value: 0.3` with no `display_value` at all — a quantity the
+ * canvas holds and cannot render as words.
+ *
+ * ── WHY IT WAS SCOPED TO `factor`: NO DOWNSTREAM REASON WAS EVER STATED ──────
+ * The gate entered at `8cc0f15c` ("synthesise display_value for all factor
+ * categories and improve unit fallback", 11 Apr 2026), whose own message frames
+ * the work as widening from `external` factors to *all factor CATEGORIES*
+ * (external / observable / controllable). `kind === "factor"` was the ambient
+ * scope of a change about categories, not a ruling about kinds. No comment, no
+ * commit and no consumer states a reason a non-factor `display_value` would
+ * break anything — and the two node-level consumers are scoped by lookup rather
+ * than by kind (`analysis-ready.ts:467,587` resolve a FACTOR node by id;
+ * `label-value-divergence.ts:371` is a divergence GUARD, which widening feeds
+ * more nodes, not fewer).
+ *
+ * ── WHY `goal` IS EXCLUDED, DELIBERATELY (trap 21: one field, two questions) ──
+ * A goal's `observed_state` is NOT this node's own measured quantity. It is
+ * built by the goal limb at `:315` from `goal_baseline`, and that limb's own
+ * doctrine says `value` and `baseline` carry the same number because they are
+ * "the goal metric's current observed level" serving a change-from-baseline
+ * frame. A goal also already owns a separate target/threshold display surface
+ * (`goal_threshold_raw`/`goal_threshold_unit`). Synthesising a bare
+ * `display_value` there would put a BASELINE string on the one node kind whose
+ * user-facing number is a TARGET, and the two are indistinguishable once
+ * rendered. That is the "a value that reaches the screen misread is worse than
+ * one that never arrives" harm, so the goal limb is left exactly as it was and
+ * is rowed rather than widened here.
+ *
+ * `option` is excluded because OptionData carries `interventions`, so
+ * `isFactorData` is false and no `observed_state` is built from it — the option
+ * value surface is the intervention's own `display_value` (`cee-v3.ts:559`).
+ *
+ * ⚠ THIS SET IS A HAND-WRITTEN LIST, WHICH IS TRAP 12. It is therefore pinned
+ * by a completeness guard that asserts every member of the canonical
+ * `NodeKindV3` enum is EXPLICITLY included or excluded here — so adding a kind
+ * to the contract REDs this file rather than silently defaulting it to "no
+ * display value". The exclusions are named so the guard has something to check.
+ */
+const DISPLAY_VALUE_SYNTHESIS_KINDS: ReadonlySet<string> = new Set([
+  "factor",
+  "risk",
+  "outcome",
+  "decision",
+  "action",
+]);
+
+/**
+ * Kinds deliberately withheld from `DISPLAY_VALUE_SYNTHESIS_KINDS`, each for a
+ * reason stated in that constant's doc. Exported for the completeness guard,
+ * which asserts the two sets partition `NodeKindV3` exactly.
+ */
+export const DISPLAY_VALUE_SYNTHESIS_EXCLUDED_KINDS: ReadonlySet<string> = new Set([
+  "goal",
+  "option",
+]);
+
+/** Exported for the completeness guard only. */
+export const DISPLAY_VALUE_SYNTHESIS_INCLUDED_KINDS = DISPLAY_VALUE_SYNTHESIS_KINDS;
 
 /**
  * Resolve an option's baseline flag from its two accepted V1 carriers.
@@ -253,6 +339,16 @@ export function transformNodeToV3(
     ...(node.goal_threshold_raw != null && { goal_threshold_raw: node.goal_threshold_raw }),
     ...(node.goal_threshold_unit != null && { goal_threshold_unit: node.goal_threshold_unit }),
     ...(node.goal_threshold_cap != null && { goal_threshold_cap: node.goal_threshold_cap }),
+    // The cap's PROVENANCE rides across with the cap, for the same reason the
+    // frame does below: this transform rebuilds the node field-by-field, so an
+    // unnamed key is dropped here silently under a green suite. Carried only
+    // when the cap itself is present — a provenance without the denominator it
+    // describes is a claim about nothing, and would leave a consumer unable to
+    // tell "no cap" from "a cap produced by this rule".
+    ...(node.goal_threshold_cap != null &&
+      node.goal_threshold_cap_provenance != null && {
+        goal_threshold_cap_provenance: node.goal_threshold_cap_provenance,
+      }),
     // ROADMAP 2.258 — the frame rides across the V1→V3 transform with its
     // threshold. This copy is REQUIRED, not decorative: the transform rebuilds
     // the node field-by-field, so a `goal_threshold_frame` minted on the V1
@@ -417,6 +513,134 @@ export function transformNodeToV3(
     }
   }
 
+  // ⭐⭐ THE PROMOTED SCALE — READ FROM THE NODE WHEN `data` IS GONE.
+  //
+  // ⚠⚠ WITHOUT THIS, A SCALE THE PIPELINE CHOSE AND APPLIED IS DISCARDED, and
+  // that is measured rather than argued. `unreachable-factors.ts` promotes
+  // `raw_value` / `cap` / `declared_scale` to NODE level and then deletes
+  // `node.data`, precisely because a field-by-field rebuild drops anything left
+  // on a deleted `data`. Every branch above reads `node.data.*` ONLY, so the
+  // promotion landed at a level this rebuild also never read — the same defect
+  // one storey up. That lane located the hop and handed it here verbatim:
+  // "correcting it means teaching the V3 transform to read node-level values".
+  //
+  // Measured, two ways:
+  //   · that lane, across four deployed captures: ZERO of 29 factors carried
+  //     node-level `raw_value`, `cap` or `unit` on the wire;
+  //   · executed on this function before the change — a node carrying promoted
+  //     `{raw_value: 55000, cap: 100000, unit: '$'}` with no `data` produced NO
+  //     `observed_state` AT ALL, while the same values under `data` produced a
+  //     complete one.
+  //
+  // THE USER-VISIBLE COST, from Paul's 16 Sep capture: `Annual Assistant Cost`
+  // reached the wire carrying only id/label/type/kind/category, while its four
+  // option cells were encoded at a consistent 1:100,000 ratio. The scale was
+  // chosen, applied to every cell, and recorded nowhere — so a money limit on
+  // that factor can never be checked, and nothing downstream can reproduce the
+  // encoding.
+  //
+  // ⚠ CARRIES, NEVER DERIVES. Every value here was already extracted by the
+  // pipeline and promoted by the repair stage; this copies it to the level the
+  // contract reads. Nothing is read from the brief and nothing is computed — a
+  // number taken out of prose and attributed to the user is the ROADMAP 2.714
+  // defect class, reverted 8 Aug 2026.
+  //
+  // ⚠ FALLBACK ONLY. If a branch above already built `observed_state`, it wins
+  // untouched: `data` is the richer source and this must not shadow it.
+  if (v3Node.observed_state === undefined) {
+    const promotedRaw = (node as { raw_value?: unknown }).raw_value;
+    const promotedCap = (node as { cap?: unknown }).cap;
+    const promotedUnit = (node as { unit?: unknown }).unit;
+    const rawOk = typeof promotedRaw === 'number' && Number.isFinite(promotedRaw);
+    const capOk = typeof promotedCap === 'number' && Number.isFinite(promotedCap) && promotedCap !== 0;
+
+    // ⚠⚠ `observed_state.value` IS REQUIRED BY `NodeV3`, so a partial object is
+    // not a weaker record — it is an INVALID one. A first cut emitted
+    // {raw_value, cap, unit} with no value; six specs passed because they
+    // asserted on this function's OUTPUT and never parsed it through the schema
+    // the wire actually uses. `NodeV3.safeParse` rejects it with
+    // "observed_state.value Required" (Codex CX-147, reproduced here).
+    //
+    // So the pair is the unit of carry: `value = raw_value / cap` is the
+    // contract's OWN stated relationship — `unreachable-factors.ts` says it
+    // verbatim, "value = raw_value / cap ... When `cap` is absent, value =
+    // raw_value" — so computing it from two carried numbers is carrying, not
+    // deriving a new fact. With only a unit, or only one of the pair, there is
+    // no valid record to make and this correctly does nothing rather than
+    // emitting something the strict re-parse will delete or refuse.
+    // ⭐⭐ AND THE PROVENANCE TRAVELS WITH THE SCALE, OR THE CARRY MOVES NOTHING
+    // THE USER CAN SEE.
+    //
+    // A first cut of this fallback carried `{value, raw_value, cap, unit}` and
+    // stopped there. It restores the SCALE and drops the AUTHORSHIP, and the
+    // authorship is what the product actually gates on:
+    //
+    //   `obligation-provenance.ts` `structureProvenance` reads
+    //   `observed_state.source`, then `observed_state.extractionType`, and
+    //   returns `'unattributed'` when it finds neither
+    //     → `censusConfidenceParameters` does not increment
+    //       `material_parameters_user_stated`
+    //     → `semanticQualitySufficient` is literally
+    //       `signals.material_parameters_user_stated > 0` → false
+    //     → `deriveMode` withholds `comparative_leader`
+    //     → the run is confined: no leading option, no win probabilities, and
+    //       the user is told "Nothing in it is confirmed yet".
+    //
+    // So a restored factor with no `extractionType` reaches the wire carrying a
+    // perfectly good number that counts for NOTHING at the only gate that
+    // decides whether the analysis may say anything. That is this estate's
+    // trap 23 — validating against the symptom's metric (is the scale on the
+    // wire?) while the outcome metric (may the product speak?) never moves.
+    //
+    // `extractionType` is promoted to NODE level by the same repair stage that
+    // promotes the pair (`unreachable-factors.ts:502`), and the `data`-present
+    // branch above already nests it inside `observed_state`. This carries it to
+    // the same place from the same source. ⚠ CARRIES, NEVER INFERS: absent
+    // upstream, it stays absent here — a fabricated authorship is far worse
+    // than a withheld one.
+    // ⛔⛔ A DECLARED PRIOR OUTRANKS THE PAIR — DO NOT RESTORE A REJECTED
+    // DEFAULT (Codex CX-175, an independent review that BLOCKED this change
+    // with an executed reproduction, confirmed here by running it).
+    //
+    // `handleUnreachableFactors` DELIBERATELY removes a fabricated point value
+    // and substitutes `buildUnquantifiedPrior()` — "Do not disguise ignorance
+    // as a 0–1 distribution", "MARK, NEVER SUPPRESS" — but it leaves the
+    // promoted `raw_value`/`cap` ON THE NODE. So this fallback saw the pair,
+    // recreated `observed_state.value = raw_value / cap`, reinstated exactly
+    // the default the repair had REJECTED, and PLoT sampled that point instead
+    // of the declared distribution. Genuine prior-backed externals too.
+    //
+    // ⭐ THE TELL, AND IT WAS IN MY OWN COMMENT: "CARRIES, NEVER DERIVES" sat
+    // directly above a DIVISION. Dividing two numbers is a derivation; it is
+    // defensible as carrying only into a VACUUM. A prior is not a vacuum — it
+    // is the pipeline's considered statement about this factor's level, and it
+    // wins.
+    //
+    // ⚠ RESIDUAL RECORDED, NOT CHASED: a prior-backed factor still reaches the
+    // wire with no unit. That is a real display/comparison gap and it needs a
+    // carrier that is NOT `observed_state` (`scale_frame` is the typed one the
+    // estate already designed). Synthesising one here would trade a display gap
+    // for a corrupted computation, which is the worse of the two by far.
+    const declaredPrior = (node as { prior?: unknown }).prior;
+    const hasDeclaredPrior =
+      declaredPrior !== null && typeof declaredPrior === 'object' && !Array.isArray(declaredPrior);
+
+    if (rawOk && capOk && !hasDeclaredPrior) {
+      const derived = promotedRaw / promotedCap;
+      if (Number.isFinite(derived)) {
+        const promotedExtraction = (node as { extractionType?: unknown }).extractionType;
+        (v3Node as { observed_state?: unknown }).observed_state = {
+          value: derived,
+          raw_value: promotedRaw,
+          cap: promotedCap,
+          ...(typeof promotedUnit === 'string' && promotedUnit.trim() !== ''
+            ? { unit: promotedUnit } : {}),
+          ...(promotedExtraction !== undefined ? { extractionType: promotedExtraction } : {}),
+        };
+      }
+    }
+  }
+
   // Preserve prior distribution data for external factors.
   // prior is set by the LLM (via Anthropic schema) or synthesised by unreachable-factors
   // repair. ISL needs prior ranges to run Monte Carlo sampling on external factors.
@@ -503,13 +727,33 @@ export function transformNodeToV3(
     v3Node.display_value = dataDisplayValue;
   }
 
-  // Synthesise display_value for factors that lack an LLM-provided value.
+  // Synthesise display_value for quantified nodes that lack an LLM-provided one.
   //
-  // Path A (external factors): use prior range via synthesiseRangeDisplayValue.
-  // Path B (controllable/observable factors): use observed_state fields via
-  //   synthesiseDisplayValue. E.g. value=6, unit="developers" → "6 developers".
-  if (v3Node.display_value === undefined && v3Node.kind === "factor") {
-    if ((node as any).category === "external" && v3Node.prior) {
+  // Path A (external FACTORS only): use prior range via synthesiseRangeDisplayValue.
+  //   Its `kind === "factor"` test is kept EXPLICIT rather than inferred from
+  //   `category`: `V1Node.category` is declared without a kind restriction, so
+  //   "only factors are external" is a convention of the producer, not a
+  //   guarantee of the type. Widening Path A would push non-factor nodes through
+  //   the external-factor scale machinery (`declared_scale` is stamped only on
+  //   factors by `repair/unreachable-factors.ts`), which nothing here tests and
+  //   this row does not need. Unchanged behaviour, stated rather than assumed.
+  // Path B (any kind in DISPLAY_VALUE_SYNTHESIS_KINDS): use observed_state fields
+  //   via synthesiseDisplayValue. E.g. value=6, unit="developers" → "6 developers".
+  //   Widened from `kind === "factor"` — see DISPLAY_VALUE_SYNTHESIS_KINDS for
+  //   what the old gate did and did NOT do, and why `goal` stays out.
+  //
+  // ⛔ AUTHORSHIP IS NOT TOUCHED HERE, AND THAT IS LOAD-BEARING. This block only
+  // renders a string from numbers `observed_state` already carries. The fields
+  // that say WHOSE value it is — `observed_state.source`
+  // (`cee_inference` | `brief_extraction`), `observed_state.extractionType`, and
+  // the node's `provenance` — are computed below at `:761+` from the SAME
+  // `extractionType` for every kind, and the 2.972 withdrawal that demotes an
+  // unearned `from_brief` runs after this and reads `observed_state`, not
+  // `display_value`. So a widened value arrives carrying the same authorship
+  // stamp a factor's would, and an AI-proposed number on a risk reaches the user
+  // as the AI's (`provenance: "ai_inferred"`), never as their own.
+  if (v3Node.display_value === undefined && DISPLAY_VALUE_SYNTHESIS_KINDS.has(v3Node.kind)) {
+    if (v3Node.kind === "factor" && (node as any).category === "external" && v3Node.prior) {
       // Path A: external factor — synthesise from prior range
       const priorUnit = anyNode.unit ?? (isFactorData(node.data) ? (node.data as any).unit : undefined);
       // ⭐ THE SCALE IS DECLARED BY A PRODUCER, NOT SNIFFED BY THIS CONSUMER.
@@ -863,8 +1107,30 @@ export function transformEdgeToV3(
   // P1-CEE-2: Apply std bounds (floor 1e-6, cap max(0.5, 2×|mean|))
   strengthStd = boundStrengthStd(strengthStd, strengthMean, edge.from, edge.to);
 
-  // Derive effect direction from strength_mean
-  const effectDirection = deriveEffectDirection(strengthMean);
+  // Resolve effect direction from BOTH carriers — the magnitude's sign and the
+  // stated label — through the one definition in `schemas/cee-v3.ts`.
+  //
+  // ⚠ `existingDirection` MUST be passed. Without it a zero magnitude resolved
+  // to "positive", so an edge stating `effect_direction: "negative"` with
+  // `strength_mean: 0` left this function as "positive" — an authored negative
+  // silently inverted on the wire, with every reconciliation authority
+  // abstaining at zero (each is guarded `!== 0`). The sign-transfer above is
+  // guarded `rawStrength > 0` and so abstains too, which is why this call is
+  // the only place the zero case can be got right.
+  const directionResolution = resolveEffectDirection(strengthMean, existingDirection);
+  const effectDirection = directionResolution.direction;
+  if (directionResolution.invented) {
+    // Neither carrier stated a direction. The V3 egress enum has no member for
+    // "unresolved", so one is chosen — and recorded in the same channel every
+    // other invented edge value already uses, so it cannot become positive
+    // SILENTLY.
+    defaults.push({
+      edge_id: edgeId,
+      field: "effect_direction",
+      default_value: effectDirection,
+      reason: "zero magnitude carries no sign information and no direction was stated",
+    });
+  }
 
   // Extract provenance — prefer structured edge.provenance, fall back to
   // edge.provenance_source (flat enum from Anthropic structured outputs).
@@ -1235,6 +1501,11 @@ export interface V3GraphOptionsProjection extends GraphTransformResult {
   readonly goal_node_id: string;
   readonly extracted_options: ExtractedOption[];
   readonly rephrase_merge: RephraseMergeResult;
+  /**
+   * What the stated options were completed with, and which elements of a stated
+   * proposal remain unwired. See `stated-option-figure-adoption.ts`.
+   */
+  readonly stated_option_coverage: StatedOptionCoverageResult;
 }
 
 /**
@@ -1387,12 +1658,23 @@ export function projectGraphAndOptionsToV3(
     options,
   });
 
+  // ⭐ AFTER absorption, and that order is load-bearing. A rephrase twin that is
+  // about to be removed must not fund an adoption, and an option that survives
+  // absorption must be complete before either consumer reads it. Running this
+  // first would let a donor disappear between the write and the read.
+  const statedOptionCoverage = adoptStatedFiguresForStatedOptions({
+    nodes: projectedNodes,
+    edges: projectedEdges,
+    options,
+  });
+
   return {
     ...transformed,
     options,
     goal_node_id: goalNodeId,
     extracted_options: extractedOptions,
     rephrase_merge: rephraseMerge,
+    stated_option_coverage: statedOptionCoverage,
   };
 }
 

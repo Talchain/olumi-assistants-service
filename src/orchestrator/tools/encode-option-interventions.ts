@@ -30,10 +30,150 @@
  * (which still runs at commit as a safety net).
  */
 import { normaliseFactorValue } from '../../orchestrator-v5/tools/handlers/d1-shared/normalise-factor-value.js';
+import { OBSERVED_ROOT_SPELLINGS } from '../canonicalise-value-ops.js';
 import { log } from '../../utils/telemetry.js';
 
 type Dict = Record<string, unknown>;
-const SLASH_KEY_RE = /^data\/interventions\/(.+)$/;
+/**
+ * ⭐ THE RECOGNISER, DERIVED FROM THE ATOMICITY POSTCONDITION RATHER THAN GUESSED.
+ *
+ * This module previously used `/^data\/interventions\/(.+)$/` — ONE prefix
+ * family. The postcondition that judges whether an edit landed
+ * (`isInterventionSubtreeKey`, canonicalise-value-ops.ts) accepts THREE:
+ * `interventions/*`, `data/interventions/*` and `observed_state/interventions/*`,
+ * on either separator. Every spelling in that gap was gathered by nothing, left
+ * on the node verbatim, stripped by the GraphV3 parse, and then correctly
+ * refused by the atomicity guard as OPERATION_DID_NOT_LAND — behind user-facing
+ * copy saying "try again in a moment". The failure is DETERMINISTIC, so that
+ * retry cannot succeed: the same phrasing yields the same op spelling every
+ * time. Measured live on staging, 14 Sep 2026: 6 of 12 op spellings refused.
+ *
+ * ⚠ FOUR VERBATIM COPIES OF THE OLD REGEX REMAIN, each with the same narrowness:
+ * `cee/draft/records/option-magnitude-census.ts:72`,
+ * `orchestrator-v5/context/baseline-override-reach.ts:50`,
+ * `orchestrator-v5/normalise-option-interventions.ts:74` (a near-twin writer,
+ * gather at :175 and sweep at :420) and
+ * `orchestrator-v5/context/intervention-controlled-drivers.ts:41`.
+ * They are NOT changed here: only this module's narrowness is proven to cause a
+ * live refusal, and widening four unproven readers mid-incident trades a
+ * measured fix for an unmeasured one. The predicates below are exported so a
+ * follow-up adopts them rather than inventing a sixth spelling.
+ */
+function interventionKeySegments(key: string): readonly string[] {
+  return key.split(/[/.]/).filter((s) => s.length > 0);
+}
+
+/**
+ * Index of the `interventions` segment when `key` is a FLAT intervention-subtree
+ * key, else `-1`.
+ *
+ * ⚠ THE `length < 2` GUARD IS LOAD-BEARING AND IS NOT A TIDY-UP. Bare
+ * `interventions` IS the canonical bundle key, and the postcondition's
+ * `isInterventionSubtreeKey('interventions')` returns TRUE for it. The promotion
+ * sweep below runs AFTER `node.interventions = bundle`, so a predicate that
+ * accepted the bare key would delete the bundle this module has just written.
+ */
+function interventionRootIndex(key: string): number {
+  const segments = interventionKeySegments(key);
+  if (segments.length < 2) return -1;
+  if (segments[0] === 'interventions') return 0;
+  if (OBSERVED_ROOT_SPELLINGS.has(segments[0]!) && segments[1] === 'interventions') return 1;
+  return -1;
+}
+
+/**
+ * A flat intervention-subtree key at ANY depth — the promotion sweep's and the
+ * intent detector's predicate. The sweep must clear every verbatim spelling once
+ * the canonical bundle is written, including the deeper ones
+ * {@link parseFlatInterventionKey} declines to gather.
+ */
+export function isFlatInterventionKey(key: string): boolean {
+  return interventionRootIndex(key) >= 0;
+}
+
+/**
+ * The factor id a flat intervention key targets, or `undefined` when the key is
+ * not one this encoder can safely encode.
+ *
+ * ⚠ EXACTLY ONE TRAILING SEGMENT — the second, worse defect fixed here. The old
+ * capture group was `(.+)`, so `data/interventions/<fac>/value` captured the
+ * factor id as `"<fac>/value"`: an intervention keyed on a factor that does not
+ * exist. The canonical bundle then DIFFERED from the pre-edit one,
+ * `batchFullyLanded` returned TRUE, and the turn reported the edit APPLIED while
+ * the real factor's value never moved. A silent false success about saved data
+ * is worse than an honest refusal.
+ *
+ * Deeper paths are FIELD-level writes for which this encoder has no safe
+ * encoding (the served edit prompt teaches whole-object patches, not field
+ * updates). Returning `undefined` leaves them to the atomicity guard, which
+ * refuses them honestly. They are a KNOWN-DROPPED set, pinned by name in the
+ * spec so the suite REDs if that set grows OR shrinks.
+ */
+export function parseFlatInterventionKey(key: string): string | undefined {
+  const i = interventionRootIndex(key);
+  if (i < 0) return undefined;
+  const rest = interventionKeySegments(key).slice(i + 1);
+  return rest.length === 1 ? rest[0] : undefined;
+}
+
+/**
+ * The `InterventionV3.source` members this encoder will PRESERVE from a raw
+ * record instead of defaulting.
+ *
+ * ⭐⭐ WHY THIS EXISTS, AND WHY IT IS SAFE IN ONLY ONE DIRECTION.
+ *
+ * `buildInterventionV3` stamped `source: 'user_specified'` unconditionally, so
+ * a value the PRODUCT chose became permanently indistinguishable from one the
+ * USER stated — measured 2026-09-04 by writing `cee_hypothesis` through the
+ * full apply chain and reading `user_specified` back out. That matters the
+ * moment the product proposes estimates for approval: "whose number is this?"
+ * is the question the whole review rests on, and the graph could not answer it.
+ *
+ * ⚠⚠ THE ALLOWLIST IS EXACTLY ONE MEMBER, AND THE REASON IS A FACT ABOUT THIS
+ * ESTATE RATHER THAN A STYLE CHOICE. `cee_hypothesis` is the ONLY
+ * `InterventionV3.source` the estate's provenance authority classes as the
+ * model speaking:
+ *
+ *   `obligation-provenance.ts` `INTERVENTION_SOURCE` —
+ *     `cee_hypothesis: 'ai_drafted'`
+ *     `user_specified: 'user_stated'`
+ *     `brief_extraction: 'user_stated'`   ← the SAME class as `user_specified`
+ *
+ * and `obligationFor('user_stated') === 'required'`. So `brief_extraction` is a
+ * USER provenance here, not a second non-user one — that file's own header
+ * names it among the producer-written stamps whose gaps "must STILL block".
+ *
+ * ⚠ A `brief_extraction` record therefore defaults to `user_specified` exactly
+ * as it did before this change — same `user_stated` class, same `required`
+ * obligation, no behaviour change for any existing writer. The invariant this
+ * set must keep is the narrow one: NOTHING in it may map to `user_stated`, so
+ * the carry can only ever NARROW a value's claim, never widen it to
+ * user-authored. That is pinned in
+ * `__tests__/encode-option-interventions.provenance.test.ts` by
+ * "every preserved source is a NON-user provenance, checked against the
+ * authority", which reads the mapping out of the authority at test time rather
+ * than restating it here.
+ */
+export const PRESERVED_INTERVENTION_SOURCES: ReadonlySet<string> = new Set([
+  'cee_hypothesis',
+]);
+
+const INTERVENTION_CONFIDENCES: ReadonlySet<string> = new Set(['high', 'medium', 'low']);
+
+// ⚠ A SECOND COPY OF `PRESERVED_INTERVENTION_SOURCES` AND
+// `INTERVENTION_CONFIDENCES` WAS REMOVED HERE DURING A REBASE (18 Sep 2026).
+//
+// This branch was 231 commits behind, and `staging` had independently shipped
+// both constants with byte-identical values (`new Set(['cee_hypothesis'])` and
+// `new Set(['high','medium','low'])`) plus an equivalent docblock, 40 lines
+// above. Git merged the two additions without a conflict because they landed at
+// different offsets, so the only signal was `TS2451: Cannot redeclare
+// block-scoped variable` — 4 errors, against a control showing `staging` alone
+// typechecks clean.
+//
+// The surviving copy is STAGING'S. Nothing was reverted: the values are
+// identical, and both docblocks make the same argument — that the carry may
+// only ever NARROW a value's claim, never widen it to user-authored.
 
 /** Raw intervention recovered from any location, pre-encoding. */
 interface RawIntervention {
@@ -44,6 +184,10 @@ interface RawIntervention {
   readonly unit?: string;
   /** Cap carried on the intervention object itself (proposal cap). */
   readonly cap?: number;
+  /** A NON-user provenance the writer stated explicitly; absent ⇒ default. */
+  readonly source?: string;
+  readonly value_confidence?: string;
+  readonly reasoning?: string;
 }
 
 export interface EncodeOptionInterventionsResult<T> {
@@ -70,7 +214,15 @@ function toRawIntervention(src: unknown): RawIntervention {
   const bare = finiteNum(src);
   if (bare !== undefined) return { value: bare };
   if (!isPlainObject(src)) return {};
-  const out: { value?: number; raw_value?: number; unit?: string; cap?: number } = {};
+  const out: {
+    value?: number;
+    raw_value?: number;
+    unit?: string;
+    cap?: number;
+    source?: string;
+    value_confidence?: string;
+    reasoning?: string;
+  } = {};
   const v = finiteNum(src.value);
   if (v !== undefined) out.value = v;
   const rv = finiteNum(src.raw_value);
@@ -78,6 +230,17 @@ function toRawIntervention(src: unknown): RawIntervention {
   if (typeof src.unit === 'string') out.unit = src.unit;
   const cap = finiteNum(src.cap);
   if (cap !== undefined) out.cap = cap;
+  // Carried ONLY when explicitly stated and recognised; anything else falls
+  // through to the unchanged default in `buildInterventionV3`.
+  if (typeof src.source === 'string' && PRESERVED_INTERVENTION_SOURCES.has(src.source)) {
+    out.source = src.source;
+    if (typeof src.value_confidence === 'string' && INTERVENTION_CONFIDENCES.has(src.value_confidence)) {
+      out.value_confidence = src.value_confidence;
+    }
+    if (typeof src.reasoning === 'string' && src.reasoning.trim().length > 0) {
+      out.reasoning = src.reasoning;
+    }
+  }
   return out;
 }
 
@@ -99,11 +262,11 @@ function gatherRawInterventions(node: Dict, factorTargets: readonly string[]): M
     }
   }
 
-  // Source 2: slash-keyed flat entries `data/interventions/<fac>`.
+  // Source 2: FLAT intervention-subtree entries, in EVERY spelling the
+  // atomicity postcondition accepts — not only `data/interventions/<fac>`.
   for (const [k, v] of Object.entries(node)) {
-    const m = SLASH_KEY_RE.exec(k);
-    if (!m) continue;
-    const fac = m[1]!;
+    const fac = parseFlatInterventionKey(k);
+    if (fac === undefined) continue;
     if (out.has(fac)) continue;
     out.set(fac, toRawIntervention(v));
   }
@@ -162,11 +325,99 @@ function deriveValue(rec: RawIntervention, factor: Dict | undefined): number | u
   }
 }
 
-/** Construct a canonical InterventionV3, preserving an existing top-level entry's target_match. */
+/**
+ * ⭐⭐ FIELDS THIS RECONSTRUCTION OWNS OR THE NEW VALUE INVALIDATES.
+ *
+ * Everything else on an existing entry is carried through. The split is the
+ * whole point: `reasoning`, evidence references and other additive provenance
+ * describe the ASSUMPTION and survive a change of number, while anything
+ * DERIVED FROM the old number would contradict the new one and must not be
+ * inherited.
+ *
+ *   value, source, target_match  — set explicitly below; the writer owns them.
+ *   display_value                — presentation synthesised from the value.
+ *                                  "Very high (1)" sitting on 0.75 is the exact
+ *                                  stale-display harm this list exists to stop.
+ *   raw_value, value_type,
+ *   encoding_map                 — the value's own encoding. Re-supplied from
+ *                                  the NEW proposal below when it carries them.
+ *   value_confidence             — confidence in the OLD value. A user-specified
+ *                                  number does not inherit a prior estimate's
+ *                                  confidence.
+ */
+/**
+ * ⚠ `reasoning` IS ON THIS LIST DELIBERATELY, AND I HAD IT WRONG FIRST.
+ *
+ * It reads like unrelated prose, so my first version carried it through. It is
+ * not, and **PR #276's CASE 4 is the load-bearing evidence** — that reviewed case
+ * already pinned `reasoning` as stale value-descriptive metadata a value override
+ * must drop. A justification for 0.9 sitting beside a committed 0.55 is the same
+ * defect as a stale `display_value`, one sentence further down the card.
+ *
+ * ⚠ The producer's docstring is NOT strong enough to carry this on its own, and
+ * I originally leaned on it. `cee-v3.ts:457` says only "Explanation for
+ * transparency" — unqualified — while its neighbours `value_confidence`
+ * ("Confidence in the value itself") and `display_value` DO bind themselves to
+ * the value explicitly. **This producer says so when it means it**, so the
+ * silence is evidence against my reading, not for it. The precedent decides;
+ * the docstring merely fails to contradict it.
+ *
+ * The line this list draws is not "derived vs prose". It is: does the field
+ * make a claim ABOUT THE VALUE? `reasoning`, `display_value` and
+ * `value_confidence` do, so they go. `evidence_refs` and the person's own
+ * annotations do not, so they survive.
+ */
+const VALUE_DERIVED_OR_OWNED_KEYS: ReadonlySet<string> = new Set([
+  'value', 'source', 'target_match',
+  'display_value', 'raw_value', 'value_type', 'encoding_map', 'value_confidence',
+  'reasoning',
+]);
+
+/**
+ * Construct a canonical InterventionV3, preserving an existing top-level entry's
+ * `target_match` AND its unrelated legitimate metadata.
+ *
+ * ⚠⚠ THE PRESERVATION HALF IS NEW, AND IT EXISTS BECAUSE ADMITTING A POPULATION
+ * MADE IT REACHABLE. Entries persisted without `target_match` used to be refused
+ * outright, so nothing of theirs could be lost. Now that they are editable, this
+ * reconstruction was silently dropping their additive evidence and provenance
+ * every time a value changed — the intervention contract is `.passthrough()`, so
+ * those fields are legal and were simply not rebuilt.
+ *
+ * ⚠ `reasoning` IS NOT IN THAT SET, AND THE DISTINCTION IS THE WHOLE POINT.
+ * An earlier version of this comment named it alongside the evidence, twenty
+ * lines above the list that now deliberately drops it — the code and its
+ * justification disagreeing in the same file. `reasoning` is value-descriptive
+ * (PR #276's CASE 4 pinned it as stale metadata a value override must drop), so
+ * dropping it is the fix, not the defect.
+ *
+ * ⚠ AND THE CONSEQUENCE, STATED RATHER THAN LEFT TO BE DISCOVERED: this function
+ * supplies no replacement, so a value edit DELETES the explanation rather than
+ * refreshing it. That is deliberate — a justification written for the old value
+ * is false beside the new one, and there is nothing here that could author a
+ * true one. If the product should instead PROMPT for a fresh explanation, that
+ * is a capability decision, not a change to make quietly inside this writer.
+ *
+ * ⚠ AND THE SCOPE GUARD CANNOT SEE IT. `optionInterventionPostimageIsScoped`
+ * restores the WHOLE selected cell before comparing, so it proves only that no
+ * OTHER cell moved — never that this cell kept its own fields. Passing it is not
+ * evidence of preservation, which is why the controls assert the committed
+ * object directly.
+ */
 function buildInterventionV3(fac: string, value: number, rec: RawIntervention, existing: unknown): Dict {
+  const carried: Dict = {};
+  if (isPlainObject(existing)) {
+    for (const [key, entryValue] of Object.entries(existing)) {
+      if (!VALUE_DERIVED_OR_OWNED_KEYS.has(key)) carried[key] = entryValue;
+    }
+  }
   const iv: Dict = {
+    ...carried,
     value,
-    source: 'user_specified',
+    // Default UNCHANGED. `rec.source` is only ever a non-user provenance the
+    // writer stated explicitly (see `PRESERVED_INTERVENTION_SOURCES`), so this
+    // can narrow the claim but never widen it to user-authored.
+    source: rec.source ?? 'user_specified',
     target_match:
       isPlainObject(existing) && isPlainObject(existing.target_match)
         ? existing.target_match
@@ -174,6 +425,12 @@ function buildInterventionV3(fac: string, value: number, rec: RawIntervention, e
   };
   if (rec.unit !== undefined) iv.unit = rec.unit;
   if (rec.raw_value !== undefined) iv.raw_value = rec.raw_value;
+  // Carried only alongside a preserved non-user provenance: an estimate that
+  // cannot say how confident it is, or why, is not reviewable after the turn
+  // that produced it. `VALUE_DERIVED_OR_OWNED_KEYS` above drops the OLD entry's
+  // copies of both, so these are re-supplied from the NEW record or not at all.
+  if (rec.value_confidence !== undefined) iv.value_confidence = rec.value_confidence;
+  if (rec.reasoning !== undefined) iv.reasoning = rec.reasoning;
   return iv;
 }
 
@@ -318,7 +575,8 @@ export function encodeOptionInterventionsForEdit<T>(
         if (Object.keys(node.data as Dict).length === 0) delete node.data;
       }
       for (const k of Object.keys(node)) {
-        if (SLASH_KEY_RE.test(k)) delete node[k];
+        // NEVER matches bare `interventions` — see `interventionRootIndex`.
+        if (isFlatInterventionKey(k)) delete node[k];
       }
       delete node.unit;
       delete node.raw_value;
@@ -395,9 +653,9 @@ function addPayloadRequestsIntervention(value: Dict): boolean {
     if (isPlainObject(di) && Object.keys(di as Dict).length > 0) return true;
     if ('interventions' in (data as Dict) && di === null) return true;
   }
-  // Slash-keyed flat entries `data/interventions/<fac>`.
+  // Flat intervention-subtree entries, every accepted spelling.
   for (const k of Object.keys(value)) {
-    if (SLASH_KEY_RE.test(k)) return true;
+    if (isFlatInterventionKey(k)) return true;
   }
   // Node-level scalar intent (SHAPE 2): a unit/raw_value/value smeared on the option.
   if (finiteNum(value.raw_value) !== undefined || finiteNum(value.value) !== undefined || typeof value.unit === 'string') {

@@ -39,7 +39,10 @@ import {
   CANONICAL_STRENGTH_BANDS,
   STRENGTH_BEARING_CLAIM_TYPE,
 } from "../../../adapters/llm/coaching-contract-conformance.js";
-import { emitContextBudget } from "../../../orchestrator-v5/context/context-budget-telemetry.js";
+import {
+  emitContextBudget,
+  jsonStructureManifest,
+} from "../../../orchestrator-v5/context/context-budget-telemetry.js";
 import { remainingRequestBudgetMs } from "../../../config/timeouts.js";
 import { escapeUntrustedDelimiters } from "../../../adapters/llm/untrusted-envelope.js";
 import { hashPromptContent } from "../../../context/context-pack.js";
@@ -447,6 +450,13 @@ export async function runStageCoachingPass(ctx: StageContext): Promise<void> {
       request_id: ctx.requestId,
       scenario_id: (ctx.input as { scenario_id?: string } | undefined)?.scenario_id ?? null,
       section_chars: { brief: ctx.effectiveBrief.length, graph: structuralGraphChars },
+      // CONTENT MANIFEST — derived from the EXACT string handed to
+      // buildCoachingUserMessage, so it describes the graph the coaching model
+      // actually received. `graph: {nodes: 0, edges: 0}` is the reading a char
+      // count cannot give: a serialised empty graph and a small real one are
+      // the same order of size, and this pass is the one that mints coaching
+      // and causal claims FROM that structure.
+      section_shape: { graph: jsonStructureManifest(structuralGraphJson) },
       total_chars: ctx.effectiveBrief.length + structuralGraphChars,
       truncations: [],
       summary_lag_turns: null,

@@ -19,7 +19,7 @@ import {
 import { calcConfidence } from "../../../utils/confidence.js";
 import { estimateTokens, allowedCostUSD } from "../../../utils/costGuard.js";
 import { getAdapterWithResolution } from "../../../adapters/llm/router.js";
-import { recordModelResolution } from "../../../orchestrator-v5/debug/turn-debug-store.js";
+import { recordModelResolution, recordPromptCapture } from "../../../orchestrator-v5/debug/turn-debug-store.js";
 import {
   getSystemPromptSnapshot,
   invalidatePromptCache,
@@ -241,6 +241,38 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
     resolved_model: draftResolution.resolved_model,
     resolution_source: draftResolution.resolution_source,
     provider: draftResolution.provider,
+  });
+
+  // ── HARNESS VISIBILITY: the bytes we are about to send ──────────────────
+  // Everything recorded above is an IDENTITY — a hash, a version, a model
+  // name. Identities let an operator say two turns used the same prompt;
+  // they never say what that prompt ASKED FOR, which is the question that
+  // gates any work on prompts, models or the assistant's voice.
+  //
+  // Reading the repo's default prompt instead answers a DIFFERENT question:
+  // the served prompt comes from the runtime store, and (as the block
+  // directly above shows) a store `modelConfig` can override the
+  // `CEE_MODEL_*` env vars entirely. So the bytes are captured here, at the
+  // one point that already holds the resolved snapshot AND the turn id.
+  //
+  // `draftPromptSnapshot` is the SAME resolution passed to the adapter, so
+  // these bytes are what the model receives, not a second lookup that could
+  // race the cache and certify a prompt that was never sent.
+  //
+  // ⛔ CHANNEL: this goes to the flag-gated, in-memory, TTL-bounded turn-debug
+  // store — never to pino, Sentry or telemetry. `getSystemPromptSnapshot` is
+  // called above with NO `variables`, so these bytes carry no user text; the
+  // user's half is recorded as a COUNT and a DIGEST only.
+  recordPromptCapture(ctx.requestId, ctx.requestId, {
+    task: 'draft_graph',
+    systemPrompt: draftPromptSnapshot.content,
+    meta: draftPromptSnapshot.meta,
+    resolution: {
+      resolved_model: draftResolution.resolved_model,
+      resolution_source: draftResolution.resolution_source,
+      provider: draftResolution.provider,
+    },
+    userContent: ctx.effectiveBrief ?? ctx.input.brief,
   });
 
   // ── Step 5b: attachment / adapter compatibility (fail-closed, F-1) ────────

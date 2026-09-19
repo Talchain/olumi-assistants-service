@@ -153,7 +153,9 @@ describe('turn-executor finaliser — egress forbidden-phrase guard', () => {
       // Telemetry must record the hit with the phrase + dispatch path.
       const evt = findEgressEvent();
       expect(evt, 'egress telemetry event should fire').toBeDefined();
-      expect(evt!.data.dispatch_path).toBe('turn_executor_finalise');
+      // Conversation answers are validated before the same atomic history
+      // append; the finaliser remains the fallback for other executor exits.
+      expect(evt!.data.dispatch_path).toBe('turn_executor_commit');
       expect((evt!.data.phrase as string).toLowerCase()).toMatch(
         new RegExp(label.split(/\s+/).join('\\s+'), 'i'),
       );

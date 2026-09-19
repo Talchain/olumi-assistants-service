@@ -21,6 +21,24 @@ export declare const SNAPSHOT_PATH: string;
 /** The PMS status key whose bytes the sanction gate validates the pack against. */
 export declare const TRACKED_KEY: string;
 
+/**
+ * The PMS task `TRACKED_KEY` resolves from (`routing` -> `orchestrator`).
+ * Mirrors `PMS_TASK_ALIAS` in src/prompts/estate.ts; the test asserts the two
+ * agree by DERIVATION, so this mirror cannot drift silently.
+ */
+export declare const TRACKED_PMS_TASK: string;
+
+/** One row of `GET /admin/prompts/status` (`{ keys: [...] }`). */
+export interface ServedPromptStatusRow {
+  key?: string;
+  version?: string | number;
+  sent_hash?: string;
+  content_hash?: string;
+  content_chars?: number;
+  pms_task?: string;
+  source?: string;
+}
+
 /** First 16 hex chars of the sha256 of `s` — the same short hash PMS reports. */
 export declare function shortSha256(s: string): string;
 
@@ -45,4 +63,27 @@ export declare function evaluateDrift(args: {
   version: string | number;
   liveChars: number;
   snapshotChars: number;
+  /** Carried onto the SAME line as the hash so the two can be correlated. */
+  pmsTask?: string | undefined;
+  source?: string | undefined;
+}): { ok: boolean; message: string };
+
+/**
+ * PURE selection: the status row this alarm is about, chosen BY KEY.
+ * `null` when the tracked key is absent — which the caller treats as fatal.
+ */
+export declare function selectTrackedRow(
+  body: { keys?: ServedPromptStatusRow[] } | null | undefined,
+): ServedPromptStatusRow | null;
+
+/**
+ * PURE task-binding discriminator: are these bytes the bytes of the task we
+ * think they are? A hash match against the wrong row, an un-established
+ * `pms_task`, or a re-pointed alias are each `{ ok: false }` with their own
+ * named condition. Never throws, never reads the network.
+ */
+export declare function evaluateTaskBinding(args: {
+  key: string | undefined | null;
+  pmsTask: string | undefined | null;
+  source?: string | undefined | null;
 }): { ok: boolean; message: string };

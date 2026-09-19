@@ -179,7 +179,7 @@
             "factor_label": "Delivery Throughput",
             "current_display": "44%",
             "flip_display": "49%",
-            "narrative": "If Delivery Throughput moves from 44% to 49%, the leading option changes. A small move reverses the ordering."
+            "narrative": "If Delivery Throughput moves from 44% to 49%, this model points to a different option. A small move reverses the ordering."
           }
         ],
         "bias_findings": [],
@@ -231,7 +231,7 @@
             "factor_label": "Delivery Throughput",
             "current_display": "44%",
             "flip_display": "49%",
-            "narrative": "If Delivery Throughput moves from 44% to 49%, the leading option changes. A small move reverses the ordering."
+            "narrative": "If Delivery Throughput moves from 44% to 49%, this model points to a different option. A small move reverses the ordering."
           }
         ],
         "bias_findings": [],
@@ -283,7 +283,7 @@
             "factor_label": "Delivery Throughput",
             "current_display": "44%",
             "flip_display": "49%",
-            "narrative": "If Delivery Throughput moves from 44% to 49%, the leading option changes. A small move reverses the ordering."
+            "narrative": "If Delivery Throughput moves from 44% to 49%, this model points to a different option. A small move reverses the ordering."
           }
         ],
         "bias_findings": [],
@@ -335,7 +335,7 @@
             "factor_label": "Delivery Throughput",
             "current_display": "44%",
             "flip_display": "49%",
-            "narrative": "If Delivery Throughput moves from 44% to 49%, the leading option changes. A small move reverses the ordering."
+            "narrative": "If Delivery Throughput moves from 44% to 49%, this model points to a different option. A small move reverses the ordering."
           }
         ],
         "bias_findings": [],

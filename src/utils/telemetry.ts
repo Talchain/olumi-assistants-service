@@ -221,6 +221,12 @@ export const TelemetryEvents = {
   // `fell_through:text_clarify`, `fell_through:text_no_grounding`,
   // `fell_through:text_no_budget`). One event, one place to read the whole
   // add-option funnel — and no widening of this frozen registry.
+  //
+  // 2026-09-12 — `clarify_label` joins that outcome set (NOT a fall-through:
+  // the turn is ANSWERED with a question about the option's name). It replaces
+  // `fell_through:text_clarify` for the label case only; the parent-decision
+  // clarify still emits the fall-through. The two are distinguishable in
+  // telemetry precisely because they are different outcomes for the user.
   V5AddOptionTransaction: "v5.add_option_transaction",
 
   // ROADMAP 2.63 C1 — stage-2 explicit-generate wire. Fires once per
@@ -242,6 +248,19 @@ export const TelemetryEvents = {
   // reoffered_graph_changed / reoffered_graph_present /
   // state_read_failed_fallthrough; `trigger`: copy_replay / bare_confirm).
   V5DraftOfferSeeded: "v5.draft_offer.seeded",
+  // ROADMAP goalfence — the draft blocked on a goal CEE itself minted and the
+  // turn asked the user for the outcome instead of returning a dead 500.
+  //
+  // NAMESPACED UNDER `recovery_response`, NOT `clarify_v2`, and not under a new
+  // `v5.draft_graph.*` token. Two reasons, and the second is a rule this file
+  // enforces on itself: (a) clarify is strictly PRE-draft, so a dashboard
+  // measuring "how often do we clarify before drafting" must not silently
+  // absorb post-draft-failure asks; (b) `v5.draft_graph` is not a sanctioned
+  // v5 namespace token — `tests/utils/telemetry-events.test.ts` REDs on it —
+  // and widening a frozen contract to fit one event is the wrong direction.
+  // This IS a recovery response, so it belongs in the namespace that already
+  // means that.
+  V5DraftGoalNeverStatedAsk: "v5.recovery_response.goal_never_stated_ask",
   V5DraftOfferResumed: "v5.draft_offer.resumed",
   // Clarify v2 (E0-B, ROADMAP 1.94 Option A replacement) — DARK behind
   // CEE_CLARIFY_V2_ENABLED. `questions_emitted` fires once per clarify
@@ -394,6 +413,8 @@ export const TelemetryEvents = {
   CeeEnforcementPostValidationWarnings: "cee.draft_graph.enforcement_post_validation_warnings",
   CeeEnforcementPostValidationFailed: "cee.draft_graph.enforcement_post_validation_failed",
   CeeEnforcementBlocked: "cee.draft_graph.enforcement_blocked",
+  CeeOptionNoOpNeutralised: "cee.draft_graph.option_no_op_neutralised",
+  CeeOptionNoOpTargetRepaired: "cee.draft_graph.option_no_op_target_repaired",
 
   // Bounded auto-retry on the post-enforcement fail-closed class (ROADMAP 2.1086)
   CeeEnforcementAutoRetry: "cee.draft_graph.enforcement_auto_retry",
@@ -894,6 +915,11 @@ export const TelemetryEvents = {
   // Track S 0.13c-1 — run_analysis load-time intercept guard summary.
   // Redacted: corrected_count + node IDs only, no observed magnitudes.
   V5RunAnalysisInterceptGuard: "v5.run_analysis.intercept_guard",
+  // COLLAB Track A — run_analysis participation guard summary.
+  // Redacted: excluded/pruned COUNTS + node IDs only. Never a label and never a
+  // value: the excluded node's number is exactly what the user kept out of the
+  // calculation, so it must not leak through telemetry either.
+  V5RunAnalysisParticipationGuard: "v5.run_analysis.participation_guard",
   // ROADMAP 2.229 fix 4 — deterministic IMPERATIVE RE-RUN pre-route.
   //
   // Fires once per turn whose message reads as an instruction to re-run
@@ -985,6 +1011,55 @@ export const TelemetryEvents = {
   // content. The mode distinguishes suppressed model prose from preserved
   // deterministic functional copy.
   V5ClaimSafetyFailClosedUnavailable: "v5.claim_safety.fail_closed_unavailable",
+
+  // ⭐ A USER-VISIBLE REFUSAL, COUNTED AS A REFUSAL.
+  //
+  // Emitted once per turn at `sendFinalised200`, the SOLE sanctioned 200-OK
+  // exit, when the bytes leaving for the user carry a refusal. Same seam and
+  // same argument as `V5ClaimSafetyFailClosedUnavailable` above: a
+  // derivation-level emit would count refusals that were later recovered and
+  // never shipped, and would not prove the user received one.
+  //
+  // WHY IT EXISTS. Before this event a turn that said *"I couldn't complete
+  // that change, and nothing in your model has changed"* was recorded by every
+  // instrument we own as a SUCCESS. Measured on scenario
+  // 9677de7d-0af8-4bee-b2ac-0e63b45aff8e (2026-09-14): 18 turns, `failed 0`,
+  // `answered 17`, two of them refusals, `status: 200` on both. A refusal was
+  // not a queryable thing, which is why the first search for one returned zero.
+  //
+  // WHY NOT `v5.edit_graph.turn` outcome `rejected`, which already exists: it
+  // answers a different question (CLAUDE.md trap 21). It reports the HANDLER's
+  // verdict, and the same session logged `outcome="rejected" branch="clarify"`
+  // for a turn whose user-visible text was a QUESTION. A clarification is the
+  // product working; counting it as a refusal over-states the harm.
+  //
+  // Payload — correlation ids plus the producers' OWN codes, no new vocabulary:
+  //   request_id: string        (joins to every other line of this request)
+  //   scenario_id: string|null  (joins to the SESSION — the join that did not
+  //                              exist: the one event with a request_id had no
+  //                              scenario_id and vice versa)
+  //   exit_path: V5ExitPath     (closed union)
+  //   error_code: BoundaryErrorCode
+  //   severity: 'warn' | 'error'   ('warn' = recoverable, 'error' = fatal)
+  //   refusal_source: string|null  (producer's `details.source`, e.g. 'edit_graph')
+  //   refusal_code: string|null    (producer's `details.rejection_code`, e.g.
+  //                                 'OPERATION_DID_NOT_LAND'; null means the
+  //                                 producer stated no cause — never guessed)
+  //
+  // ⚠ SCOPE, EXACTLY (CLAUDE.md trap 20). This counts refusals MARKED ON THE
+  // WIRE. `composeRecoverableHandlerResponse`,
+  // `composeRecoverableValidationResponse` and `composeUnsupportedActionResponse`
+  // deliberately ship a clean body (`blocks: []`), so their refusals are
+  // invisible here by construction. Those are ALREADY countable via
+  // `turn_executor.failure_response` — and joinable, because that event's
+  // `session_id` IS the scenario id (this repo writes
+  // `scenario_id: context.session_id` at ~30 sites). ⚠ The differently-named
+  // twin is a live hazard, not a tidy-up: a query joining `scenario_id` across
+  // events silently misses that one. Deliberately NOT renamed here — renaming
+  // a frozen event's field is a dashboard-breaking change, and refusals are
+  // countable without it. Recorded so the next reader does not conclude the
+  // clean-body class is dark.
+  CeeTurnRefused: "cee.turn.refused",
 
   // G-CEE-1 — the EXPLANATION-ANSWER gate (compose/withheld-explanation-answer.ts).
   //
@@ -1292,6 +1367,29 @@ export const TelemetryEvents = {
   //   derived_text_length: number
   V5AnswerShapeDroppedStale: "v5.answer_shape.dropped_stale",
 
+  // THE COLLAPSE FLOOR (18 Sep 2026). The egress reached a shapeable answer and
+  // DECLINED to attach the `_answer_shape` wire directive, because the answer is
+  // short enough that the deployed UI renders it whole of its own accord
+  // (DecisionGuideAI `CLAMP_CHAR_THRESHOLD`). See
+  // ANSWER_SHAPE_COLLAPSE_FLOOR_CHARS in `orchestrator-v5/routing/answer-shape.ts`.
+  //
+  // ⭐ WHY THIS EVENT EXISTS RATHER THAN SILENCE. Four prior F1 fixes each
+  // shipped believing the egress synthesiser ran on a dispatch path where it
+  // never did, and each passed its own tests. The guard against that was
+  // `v5.answer_shape.emitted` — which is now absent on every SHORT answer, for
+  // a completely different reason. An absent event that means two different
+  // things is how the next silent miss goes unnoticed, so the decline is
+  // announced rather than inferred: the two outcomes of a REACHED egress are
+  // `emitted` and `declined_below_floor`, and NEITHER means the path was never
+  // reached.
+  //
+  // Lengths + seam only, never content (PII discipline).
+  //   dispatch_path: 'route_egress_model_shape' | 'route_egress_synthesised'
+  //   final_text_length: number   (the text the user receives, in full)
+  //   floor_chars: number         (the threshold in force, so a moved floor is
+  //                                visible in the telemetry without a deploy diff)
+  V5AnswerShapeDeclinedBelowFloor: "v5.answer_shape.declined_below_floor",
+
   // V5 Coaching State Spine — Stage 2B-1b. Emitted once per turn AFTER the turn's
   // state is successfully persisted (post-append_turn_atomic). Same privacy
   // contract as V5CoachingStateDerived: correlation IDs + counts / closed-enum
@@ -1464,6 +1562,28 @@ export const TelemetryEvents = {
   // EVERY status so a withhold RATE is derivable rather than only the
   // happy-path count. Still content-free: booleans + closed enums.
   V5DecisionRecordCaptured: "v5.decision_records.record_captured",
+
+  // ROADMAP 2.1229 — brief + analysis-provenance forwarded to `scenarios`
+  // from the commit seam, so the share path has something to share. Emitted
+  // once per successful (non-noop) run_analysis commit, from the
+  // fire-and-forget hook. `status` is a closed enum:
+  //   ok          — a scenario row was updated;
+  //   not_stored  — the RPC returned false: it wrote NOTHING (no matching
+  //                 scenario, or a null reached it). Distinct from `ok`
+  //                 deliberately — a silent no-write must never read as a
+  //                 success, which is the defect class this lane removes;
+  //   skipped     — the fact carried an incomplete envelope (`skip_reason`
+  //                 names the first missing member: no_brief |
+  //                 no_graph_hash | no_seed | no_response_hash). All-or-
+  //                 nothing is a CONSUMER requirement: `create_shared_brief`
+  //                 dereferences three provenance keys into three NOT NULL
+  //                 columns after a single null check, so a partial envelope
+  //                 becomes a 23502 at share time;
+  //   error       — store construction or the RPC threw.
+  // Content-free: correlation ids + closed enums ONLY. Never the brief text,
+  // the seed or either hash. Non-blocking contract: capture/emit failures log
+  // and NEVER affect the turn result.
+  V5BriefProvenanceStored: "v5.brief_provenance.stored",
 
   // V5 Coaching State Spine — Stage 2B-2. Emitted once per turn after the internal coaching
   // LIFECYCLE is derived (prior pre-dispatch snapshot vs current pre-dispatch coaching_state
@@ -1799,6 +1919,79 @@ export const TelemetryEvents = {
   // V5 Group 1 Task C: coaching signal fired during Step 5. Payload carries
   // the signal_id + turn_id so evaluators can correlate with coaching text.
   V5CoachingSignalFired: "v5.coaching.signal_fired",
+
+  // ── WHY THE RUN-OVER-RUN CONSEQUENCE DID OR DID NOT SHIP ──────────────────
+  //
+  // Emitted once per `finaliseV5Response` CALL, from `attachRunDelta`
+  // (`orchestrator-v5/response-finaliser.ts`), the sole caller of
+  // `buildRunDelta`.
+  //
+  // ⚠ ONCE PER CALL IS NOT ONCE PER TURN, AND THE DIFFERENCE IS FLAG-DEPENDENT.
+  // `route-v2.ts`'s `sendFinalised200` RE-FINALISES: each debug surface it
+  // re-attaches (`_timings`, `_diagnostic_trace`, `_context_summary`, …) spreads
+  // onto `wireBody` and finalises again, SEQUENTIALLY, each behind its own
+  // config gate. Under the default posture those gates are off and a turn
+  // finalises once; with any of them on, expect N>1 IDENTICAL events for one
+  // turn. So COUNT DISTINCT TURNS, never raw event rows — a rate built on rows
+  // silently tracks debug posture rather than product behaviour. (`request_id`
+  // would be the natural dedupe key and is deliberately absent — see the scope
+  // note below; dedupe on `scenario_id` + timestamp window instead.)
+  //
+  // ⛔ THE DEFECT IT CLOSES. The caller discarded the producer's discriminated
+  // refusal with a bare `if (built.kind !== 'ok') return response;`, and nothing
+  // on the path logged anything at all. All five `RunDeltaRefusal` reasons, plus
+  // `priorFacts` absent, plus the identity-unbound strip, plus "it emitted and
+  // something downstream dropped it" were therefore BYTE-IDENTICAL SILENCE —
+  // seven consecutive probes into the dark outcome clause failed on exactly
+  // this, and an eighth would have too.
+  //
+  // ⭐ IT MINTS NO TAXONOMY FOR THE PRODUCER'S OWN REASONS. `RunDeltaRefusal`'s
+  // docblock already says the reason exists because "the caller emits it as
+  // telemetry (this module stays pure)" — the producer kept its half of that
+  // contract and the caller never kept its. The five arrive as passthrough; only
+  // the three the CALLER owns (and the producer cannot see) are added here.
+  //
+  // Payload:
+  //   - scenario_id: string | null — `?? null`, never a placeholder. The
+  //     system-event exit reaches the finaliser with no scenario, and "we do not
+  //     know which session" must not be spelled like a real id.
+  //   - outcome: 'emitted' | 'refused' | 'skipped'
+  //   - reason: string | null — null IFF outcome is 'emitted'. One of the five
+  //     `RunDeltaRefusal` members, or the caller's own `prior_facts_absent` /
+  //     `run_identity_unconfirmed` / `run_identity_conflict`.
+  //   - prior_facts_count / run_analysis_facts_count: number | null — STRUCTURAL
+  //     counts. They separate "no facts in scope" from "facts, but not enough
+  //     run_analysis ones" without naming a single one of them.
+  //   - wire_reason_carried: boolean | null — did the USER-FACING half ship?
+  //     `null` on every exit that puts no reason on the wire BY DESIGN (the
+  //     `emitted` case, and the caller's own three skips — see
+  //     `attachRunDeltaAbsenceReason` for why those stay operator-only).
+  //     `true`/`false` only on `refused`. ⚠ `false` IS THE ONE TO ALERT ON: the
+  //     reason exists and a user could have been told it, but the exit carried
+  //     no `analysis_ready` carrier to put it in. The carrier is CONDITIONAL
+  //     because the strict boundary leaves no declared top-level home, so a
+  //     conditional channel that reported nothing when it missed would be a
+  //     new silent-loss seam of exactly the shape this event was built to end.
+  //     A non-zero rate here is a finding about the CARRIER, not about the
+  //     producer — the refusal itself was correct.
+  //
+  // ⛔ REDACTION: reason code and counts ONLY. No label, quote or id — entity ids
+  // in this estate are slug renderings of the user's own labels
+  // (`fac_delivery_cost`), so an id IS user content. Pinned by the leak arm of
+  // `__tests__/run-delta-outcome-disclosure.test.ts`, which carries a positive
+  // control proving the token was in the input.
+  //
+  // ⚠ QUERY NOTE FOR OPERATORS: grep `run_delta_outcome`. Measured 15 Sep 2026,
+  // it appears nowhere else in the tree (case-insensitive), so it is not
+  // shadowed by an existing constant the way `did_not_land` is by
+  // `OPERATION_DID_NOT_LAND`. The bare token `run_delta` IS shadowed — it is the
+  // wire field name — so do not grep that.
+  //
+  // ⚠ SCOPE, STATED EXACTLY: this reports what the FINALISER decided. It is not
+  // evidence that the bytes reached the UI. `request_id` is deliberately absent
+  // because `FinaliserContext` does not carry one; join to the same turn's
+  // `cee.turn.refused` / `v5.*` events on `scenario_id`.
+  V5RunDeltaOutcome: "v5.coaching.run_delta_outcome",
 
   // V5 Phase 1 brief persistence — fires from draft-graph-dispatch when the
   // user-supplied free-text brief is truncated by normaliseBriefText (input
@@ -2490,7 +2683,8 @@ export const TelemetryEvents = {
   //   coaching_summary_reject_reason: GateRejectReason | null,
   //   coaching_summary_style_rewritten: boolean,   // RC4: em/en dash
   //                                                // rewritten in place
-  //   fallback_reason: 'gate_rejected' | 'no_candidate' | null,
+  //   fallback_reason: 'gate_rejected' | 'readiness_gated' | 'no_candidate'
+  //                    | null,
   //   strengthen_items_count: number,
   //   bias_findings_count: number,
   //   coaching_bias_signals_count: number }.
@@ -2738,6 +2932,28 @@ export const TelemetryEvents = {
   // Coded reasons, counts and model ids only — no labels, no brief content.
   CeeDraftQuality: "cee.draft_graph.quality",
   CeeDraftQualityRedraw: "cee.draft_graph.quality_redraw",
+
+  // ⭐ THE OPTION→FACTOR MAGNITUDE CENSUS (src/cee/draft/records/
+  // option-magnitude-census.ts). Emitted FOUR TIMES per drafted graph — once at
+  // each of `before_completion`, `after_completion`, `after_projection` (all
+  // three in the Anthropic draft adapter) and `at_commit` (the V5 commit seam,
+  // on every turn that writes a graph). ONE event name with a `point`
+  // discriminator rather than four names: the four are the same measurement of
+  // the same population at four places, and four names would let one of them be
+  // renamed, dropped or diverge in meaning without the others noticing.
+  //
+  // WHY IT EXISTS. Deployed drafts persist options with `interventions: {}` —
+  // 28 of 32 options empty across 8 drafts, 0 of 8 fully valued. Nothing
+  // currently says WHERE the magnitude goes missing, so no fix can be chosen
+  // over the three suspected causes. This is the instrument that says where.
+  //
+  // ⚠ BOTH NUMBERS OR NEITHER. `missing_magnitude` alone cannot distinguish "no
+  // magnitudes" from "no option→factor claims"; `option_factor_edges` is the
+  // denominator that separates them and is also how the instrument reports its
+  // own blindness (a shape it cannot read counts 0 edges, not 0 misses).
+  // Counts, a closed-enum point and an idempotency key only — no labels, no
+  // brief content, no magnitudes.
+  CeeDraftOptionMagnitudeCensus: "cee.draft_graph.option_magnitude_census",
 } as const;
 
 /**

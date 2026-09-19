@@ -57,6 +57,7 @@ import { applyPatchOperations } from "../../../../src/orchestrator/patch-applier
 import type { ConversationContext, PatchOperation, GraphPatchBlockData } from "../../../../src/orchestrator/types.js";
 import type { LLMAdapter } from "../../../../src/adapters/llm/types.js";
 import type { PLoTClient, ValidatePatchResult } from "../../../../src/orchestrator/plot-client.js";
+import { PLoTError, PLoTTimeoutError } from "../../../../src/orchestrator/plot-client.js";
 import { assertNoBannedInternalTokens } from "../../../helpers/banned-internal-tokens.js";
 
 // ============================================================================
@@ -812,7 +813,120 @@ describe("handleEditGraph", () => {
     const data = result.blocks[0].data as GraphPatchBlockData;
     expect(data.status).toBe("rejected");
     expect(data.rejection?.reason).toContain("PLoT semantic validation unavailable");
+    // ⚠ A BARE `Error` IS NOT EVIDENCE OF AN OUTAGE. This assertion used to read
+    // `PLOT_UNAVAILABLE`, and that was the tell for the over-breadth the review
+    // found: an undifferentiated throwable produced the code whose copy claims
+    // the analysis service could not be reached. The class here proves nothing
+    // about whether PLoT answered, so it takes the neutral code. What this test
+    // is actually for — that a configured-but-failing PLoT HARD REJECTS rather
+    // than silently passing an unvalidated patch through — is unchanged.
+    expect(data.rejection?.code).toBe("PLOT_REQUEST_FAILED");
+  });
+
+  // ⚠ SCOPE OF THE TWO TESTS BELOW — READ BEFORE CITING THEM.
+  //
+  // An earlier revision of this file called this "the REAL rejection path end
+  // to end… rather than a fixture of it", citing CLAUDE.md trap 16. That
+  // caption was FALSE, and self-refuting: these tests INJECT a `plotClient`,
+  // and NEITHER live call site of `handleEditGraph` passes one
+  // (`edit-graph-dispatch.ts:1153`, `:2491` — `grep -a 'plotClient'` over that
+  // file returns zero, with `handleEditGraph` at 24 hits as a contrast
+  // control). So this exercises a HANDLER PATH THAT NO DEPLOYED TURN REACHES.
+  //
+  // What they honestly are: an in-process test that the handler's own
+  // `catch (plotError)` maps a failure class to the copy that is true of it.
+  // Rung: TESTED. Not WIRE-WITNESSED, and explicitly not JOURNEY-WITNESSED.
+  //
+  // They earn their place anyway — the gate is a live `if (plotClient)` over a
+  // caller-supplied option, so the day a caller passes a client this mapping is
+  // what the user reads. They are a DISCRIMINATING PAIR: same injected failure
+  // seam, opposite error classes, opposite expected sentences. Either one alone
+  // would pass against a classifier that collapsed to a single answer.
+
+  it("says the analysis service was unreachable when it PROVABLY was — and never blames the user", async () => {
+    const adapter = makeAdapter([VALID_ADD_NODE_OP]);
+    const plotClient: PLoTClient = {
+      run: vi.fn(),
+      validatePatch: vi
+        .fn()
+        .mockRejectedValue(
+          new PLoTTimeoutError("PLoT validate_patch timed out", "validate_patch", 5000, 5001),
+        ),
+    };
+
+    const result = await handleEditGraph(
+      makeContext(),
+      "Add factor",
+      adapter,
+      "req-1",
+      "turn-1",
+      { plotClient, maxRetries: 0 },
+    );
+
+    const data = result.blocks[0].data as GraphPatchBlockData;
+    // Precondition pinned IN-TEST: this really is the timeout classification,
+    // so the copy assertion below is provably about that class and not about
+    // some other rejection the fixture happened to trigger.
     expect(data.rejection?.code).toBe("PLOT_UNAVAILABLE");
+
+    const text = result.assistantText ?? "";
+    expect(text).toBe(
+      "I couldn't reach the analysis service, so nothing in your model has changed. " +
+        "Try again in a moment.",
+    );
+    // The false accusation, in full, must be gone from this path.
+    expect(text).not.toContain("describe what you'd like to add or change in simpler terms");
+    expect(text).not.toMatch(/simpler terms/i);
+    // And the copy's factual claim must match the result it ships with.
+    expect(result.appliedGraph).toBeNull();
+    expect(result.wasRejected).toBe(true);
+    // Recovery is offered, not a dead end.
+    expect(result.suggestedActions?.length ?? 0).toBeGreaterThanOrEqual(1);
+    assertNoBannedInternalTokens(text, (t, re) => expect(t).not.toMatch(re));
+  });
+
+  it("does NOT claim the service was unreachable when PLoT answered — a 400 is not an outage", async () => {
+    // ⭐ THE DISCRIMINATING TWIN. The defect the review found: the code was
+    // assigned in a bare `catch`, so a 400/413/429, a malformed 200, a
+    // never-sent request and an abort ALL produced "I couldn't reach the
+    // analysis service" — a sentence about a service that had in fact replied.
+    // 413 makes it sharpest: it is deterministic in the size of the user's
+    // graph, so "try again in a moment" is futile as well as false.
+    const adapter = makeAdapter([VALID_ADD_NODE_OP]);
+    const plotClient: PLoTClient = {
+      run: vi.fn(),
+      validatePatch: vi
+        .fn()
+        .mockRejectedValue(new PLoTError("INVALID_REQUEST", 400, "validate_patch", 12, "req-1")),
+    };
+
+    const result = await handleEditGraph(
+      makeContext(),
+      "Add factor",
+      adapter,
+      "req-1",
+      "turn-1",
+      { plotClient, maxRetries: 0 },
+    );
+
+    const data = result.blocks[0].data as GraphPatchBlockData;
+    // Precondition: a DIFFERENT code from the twin above. This is what makes
+    // the pair evidence of discrimination rather than of mere sensitivity.
+    expect(data.rejection?.code).toBe("PLOT_REQUEST_FAILED");
+
+    const text = result.assistantText ?? "";
+    expect(text).toBe(
+      "I couldn't complete that change, and nothing in your model has changed. " +
+        "Try again in a moment, or describe the change a different way.",
+    );
+    // The specific false claim.
+    expect(text).not.toContain("I couldn't reach the analysis service");
+    // ...and it must still not blame the user, which is the PR's real guarantee.
+    expect(text).not.toMatch(/simpler terms/i);
+    expect(text).toMatch(/nothing in your model has changed/);
+    expect(result.appliedGraph).toBeNull();
+    expect(result.wasRejected).toBe(true);
+    assertNoBannedInternalTokens(text, (t, re) => expect(t).not.toMatch(re));
   });
 
   // ------------------------------------------------------------------

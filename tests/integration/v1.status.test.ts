@@ -79,21 +79,29 @@ describe("GET /v1/status", () => {
     expect(body.llm).toHaveProperty("scope", "untasked_default_adapter");
   });
 
-  it("reports the PER-TASK models real turns run on, not the untasked default", async () => {
+  it("reports PER-TASK routing, not the untasked default", async () => {
     // A deployed capture of this endpoint reported `gpt-4o-mini` while real
     // turns routed to `claude-sonnet-5`: the endpoint was answering a
     // question nobody asked (what the untasked fallback would pick) in a
     // field everyone reads as "the model this product runs on".
+    //
+    // ⚠ THE FIELD NAME WAS FIXED SEPARATELY. This assertion pins the per-task
+    // projection to the PRODUCER, which is a statement about STARTUP routing
+    // only — `resolveTaskRouting` is the same env/defaults projection the
+    // route uses, so it cannot and does not certify what a turn runs on.
+    // That limit is why the block also ships
+    // `startup_task_models_unverified`; the guard for it is
+    // tests/integration/v1.status.startup-task-models.test.ts.
     const response = await app.inject({ method: "GET", url: "/v1/status" });
     const body = JSON.parse(response.body);
 
     expect(body).toHaveProperty("model_routing");
-    const effective = body.model_routing.effective_task_models;
-    expect(effective).toBeDefined();
+    const startup = body.model_routing.startup_task_models;
+    expect(startup).toBeDefined();
 
     // POSITIVE CONTROL (trap 13): the projection must be non-empty, or every
     // assertion below would pass by looking at nothing.
-    expect(Object.keys(effective).length).toBeGreaterThan(0);
+    expect(Object.keys(startup).length).toBeGreaterThan(0);
 
     // Bound BY TASK ID to the PRODUCER's own resolution — not to a literal
     // written here, and not to anything derived from the default adapter.
@@ -101,7 +109,7 @@ describe("GET /v1/status", () => {
     // adapter and fail on a change to the ROUTING, which is the direction
     // that matters.
     for (const task of ["draft_graph", "edit_graph", "orchestrator", "critique_graph"]) {
-      expect(effective[task]).toBe(resolveTaskRouting(task as never).model);
+      expect(startup[task]).toBe(resolveTaskRouting(task as never).model);
     }
 
     expect(body.model_routing).toHaveProperty("default_provider");
@@ -120,7 +128,7 @@ describe("GET /v1/status", () => {
     expect(raw).not.toContain("configuration_error");
     // CONTRAST CONTROL: the block we DO expose is present in the same body,
     // so these absence assertions are not passing on an empty response.
-    expect(raw).toContain("effective_task_models");
+    expect(raw).toContain("startup_task_models");
   });
 
   it("should not expose cache_stats for fixtures adapter (no caching support)", async () => {

@@ -34,6 +34,7 @@ import type { V5DiagnosticTrace } from '../orchestrator-v5/diagnostics/v5-diagno
 import type { V5ContextSummary } from '../orchestrator-v5/context/build-context-summary.js';
 import type { AnswerShape } from '../orchestrator-v5/routing/answer-shape.js';
 import type { GroundedSelection } from '../orchestrator-v5/context/grounded-selection.js';
+import type { PromptCaptureRecord } from '../orchestrator-v5/debug/turn-debug-store.js';
 
 const DEBUG_HEADER_NAME = 'x-olumi-debug';
 
@@ -176,6 +177,33 @@ export type OlumiResponseWithDebugFields = OlumiResponse & {
    * off `responseParser`'s `__additive__` demotion sidecar.
    */
   readonly _grounded_selection?: GroundedSelection;
+  /**
+   * HARNESS VISIBILITY — operator diagnostic surface: the VERBATIM served
+   * system prompt(s) this turn sent to the model, each with the identity
+   * that says which prompt and which model (`prompt_version`,
+   * `prompt_hash`, `prompt_source`, `resolved_model`, `resolution_source`).
+   *
+   * WHY IT IS ON THE WIRE AT ALL, given a perfectly good admin route
+   * already returns it: `/admin/v1/turn-debug/:turn_id` needs a shared
+   * admin key, and the person who most needs to read the harness does not
+   * have one. The browser debug bundle he can already export in one click
+   * carries unknown TOP-LEVEL response keys through verbatim, so putting
+   * the capture HERE — at the root, not inside `_diagnostic_trace` — is
+   * what makes it reachable without credentials. A capture nobody can read
+   * does not make the harness visible.
+   *
+   * Populated only when `config.cee.turnDebugEnabled`
+   * (`CEE_TURN_DEBUG_ENABLED=true`, default FALSE and off in production).
+   * READ FROM THE TURN-DEBUG STORE at the re-attach gate, never
+   * body-attached upstream; any body-attached copy is dropped by the strip
+   * step, same defence-in-depth posture as `_context_summary`.
+   *
+   * CONTENT: Olumi-authored instruction bytes only. The capture seam
+   * resolves the system prompt with no `variables`, and the user's half of
+   * the turn is recorded as a char count and a digest — never as text — so
+   * this surface carries no user decision content by construction.
+   */
+  readonly _prompt_capture?: readonly PromptCaptureRecord[];
 };
 
 /**
@@ -184,7 +212,7 @@ export type OlumiResponseWithDebugFields = OlumiResponse & {
  * the literal string. Keeping the union tight catches typos at the
  * caller site (`debugFieldRequested(headers, 'timins')` is a tsc error).
  */
-export type DebugFieldToken = 'timings' | 'diagnostics';
+export type DebugFieldToken = 'timings' | 'diagnostics' | 'prompts';
 
 /**
  * Returns true when the request's `X-Olumi-Debug` header includes the

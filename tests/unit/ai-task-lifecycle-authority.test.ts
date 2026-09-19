@@ -184,14 +184,46 @@ describe('AI task lifecycle authority', () => {
       'extraction',
       'rolling_summary',
       'decision_review_decompose',
+      // The readiness value-batch estimate producer. It is not a router task —
+      // it reaches the shared Anthropic chat boundary directly with its own
+      // code-constant prompt — so it appears here and never in
+      // LITERAL_ROUTER_TASKS.
+      'readiness_value_estimate',
+      // The draft-seam option mapping re-ask (unified pipeline Stage 3b). Same
+      // shape as the row above and here for the same reason: it reaches the
+      // shared Anthropic chat boundary directly with its own code-constant
+      // prompt, so it is never a router task.
+      'option_factor_map',
     ].sort());
   });
 
   it('derives every dedicated shared-Anthropic caller and gives each an executable authority row', () => {
     expect(DIRECT_ANTHROPIC_CHAT_CALLERS).toEqual([
+      // The draft-seam option mapping re-ask. Like the row below it, this entry
+      // records a CHANGED FACT rather than an assertion bent to pass: a new
+      // dedicated caller appeared, and this guard's whole job is to refuse to
+      // let one appear without an authority row. The row it demanded is
+      // RUNTIME_AI_TASK_AUTHORITY.option_factor_map, asserted at the bottom of
+      // this test.
       'cee/decision-review/decompose.ts',
+      'cee/draft/option-factor-mapper.ts',
+      // The readiness value-batch estimate producer. This row was added because
+      // the FACT changed, not to make the assertion pass: the binding used to
+      // sit in `orchestrator/route-v2.ts`, which put the ROUTER on this census —
+      // importing chatWithAnthropic and choosing temperature and token budget
+      // for a prompt it does not own. The call moved to the module that owns
+      // VALUE_ESTIMATE_SYSTEM_PROMPT and VALUE_ESTIMATE_OUTPUT_SCHEMA, and the
+      // authority row below is the declaration this guard exists to demand.
+      'orchestrator-v5/handlers/readiness-value-estimator.ts',
       'orchestrator-v5/rolling-summary/summariser.ts',
     ]);
+    // Named negatively as well, because the exact-equality above states the
+    // repair only implicitly and this is the specific regression to catch: the
+    // router must not be a dedicated model caller. The non-empty assertion is
+    // the contrast control — without it this would also pass if the derivation
+    // silently stopped seeing anything at all.
+    expect(DIRECT_ANTHROPIC_CHAT_CALLERS).not.toContain('orchestrator/route-v2.ts');
+    expect(DIRECT_ANTHROPIC_CHAT_CALLERS.length).toBeGreaterThan(0);
     expect(RUNTIME_AI_TASK_AUTHORITY.rolling_summary).toMatchObject({
       hasExecutablePath: true,
       modelAuthority: 'dedicated_anthropic_chain',
@@ -204,6 +236,38 @@ describe('AI task lifecycle authority', () => {
       promptAuthority: 'provider_specific_code_constant',
       promptIdentity: 'code_hash',
     });
+    expect(RUNTIME_AI_TASK_AUTHORITY.readiness_value_estimate).toMatchObject({
+      hasExecutablePath: true,
+      modelAuthority: 'dedicated_anthropic_chain',
+      promptAuthority: 'code_constant',
+      promptIdentity: 'code_hash',
+      // ⚠ PINNED AS null ON PURPOSE, and it is the one thing a later reader is
+      // most likely to "tidy up". The call passes no explicit model, so the
+      // resolver chain is the GLOBAL LLM_MODEL then FALLBACK_ANTHROPIC_MODEL.
+      // Writing a model id here would make the row describe behaviour the code
+      // does not have; giving the task its own env key is a behaviour change
+      // and belongs in its own lane.
+      checkedInModel: null,
+    });
+    // Unlike decision_review_decompose, this path is NOT behind a feature gate —
+    // it is reached on an ordinary readiness turn. Pinning the availability is
+    // what stops the row reading as "declared but dark".
+    expect(getAiTaskRuntimeAvailability('readiness_value_estimate')).toBe('available');
+    expect(RUNTIME_AI_TASK_AUTHORITY.option_factor_map).toMatchObject({
+      hasExecutablePath: true,
+      modelAuthority: 'dedicated_anthropic_chain',
+      promptAuthority: 'code_constant',
+      promptIdentity: 'code_hash',
+      // \u26a0 null FOR THE SAME REASON, AND IT IS NOT A COPY-PASTE. The call
+      // passes no explicit model, so the resolver chain is the GLOBAL LLM_MODEL
+      // then FALLBACK_ANTHROPIC_MODEL. A model id written here would describe
+      // behaviour this code does not have.
+      checkedInModel: null,
+    });
+    // Not behind a feature gate: it is reached on an ordinary DRAFT turn, though
+    // only on the narrow shape Stage 3b selects for. Pinning the availability is
+    // what stops the row reading as "declared but dark".
+    expect(getAiTaskRuntimeAvailability('option_factor_map')).toBe('available');
   });
 
   it('derives the executable dedicated reporting set from runtime authority', () => {
@@ -211,6 +275,8 @@ describe('AI task lifecycle authority', () => {
       'extraction',
       'rolling_summary',
       'decision_review_decompose',
+      'readiness_value_estimate',
+      'option_factor_map',
     ]);
     for (const task of EXECUTABLE_DEDICATED_RUNTIME_TASKS) {
       expect(RUNTIME_AI_TASK_AUTHORITY[task].hasExecutablePath).toBe(true);

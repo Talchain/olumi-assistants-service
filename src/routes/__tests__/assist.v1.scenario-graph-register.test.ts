@@ -158,6 +158,91 @@ beforeEach(() => {
   append.mockResolvedValue({ id: "turn-1" });
 });
 
+describe("register — optional initial brief", () => {
+  const brief = "Saved example: Customer Data Platform Selection (vendor-selection; captured 2026-07-28). Original brief:\n\nWe need to replace our customer data platform before the current contract renews in March. The shortlist is Segment, RudderStack, or building on our existing Snowflake warehouse with Fivetran. Our constraint is a £120k annual budget and a two-person data team who can't absorb much operational overhead. We also have GDPR obligations that rule out any vendor without EU data residency.";
+
+  it("passes the attributed brief and graph through the SAME scenario-bound atomic write", async () => {
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, brief_text: brief });
+    expect(res.statusCode).toBe(200);
+    expect(append).toHaveBeenCalledTimes(1);
+    expect(append.mock.calls[0][0]).toMatchObject({ scenario_id: SCENARIO, briefText: brief });
+    expect(writtenGraph()).toEqual(projectGraphForPersistence(IMPORTED, {}));
+    await app.close();
+  });
+
+  it.each([undefined, null, "", " \n\t "])("keeps an absent/empty brief backward compatible: %j", async (briefText) => {
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, brief_text: briefText });
+    expect(res.statusCode).toBe(200);
+    expect(append.mock.calls[0][0].briefText).toBeUndefined();
+    await app.close();
+  });
+
+  it.each([
+    ["number", 42], ["object", { text: "not this contract" }],
+    ["array", ["brief"]], ["overlong", "x".repeat(8001)],
+  ])("rejects %s brief without any scenario write", async (_label, briefText) => {
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, brief_text: briefText });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().details.code).toBe("BRIEF_INVALID");
+    expect(ensureScenarioExists).not.toHaveBeenCalled();
+    expect(append).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("cannot use a brief to write another user's scenario", async () => {
+    getScenarioOwner.mockResolvedValue(OTHER_USER);
+    ensureScenarioExists.mockResolvedValue({ user_id: OTHER_USER });
+    const app = await buildApp();
+    expect((await post(app, SCENARIO, { graph: IMPORTED, brief_text: brief })).statusCode).toBe(404);
+    expect(append).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it.each([null, "", "Newer user-authored brief: choose within the revised £90k budget."])(
+    "retains canonical context across registration and reopen (prior brief %j)", async (existing) => {
+      // A stateful RPC-contract double, NOT execution against PostgreSQL.
+      // The executable SQL predicates it models are pinned below; real store
+      // RPC argument/read coverage lives in session/__tests__/supabase-store.
+      const rows = new Map([
+        [SCENARIO, { graph: SERVER_PRE_IMPORT, briefText: existing }],
+        [OTHER_USER, { graph: SERVER_PRE_IMPORT, briefText: "Unrelated scenario context" }],
+      ]);
+      append.mockImplementation(async (write: { scenario_id: string; graph: WireGraph; briefText?: string }) => {
+        const row = rows.get(write.scenario_id);
+        if (!row) throw new Error("Unexpected scenario write");
+        row.graph = write.graph;
+        if (write.briefText !== undefined && (row.briefText === null || row.briefText === "")) {
+          row.briefText = write.briefText;
+        }
+        return { id: "registered-turn" };
+      });
+      const app = await buildApp();
+      expect((await post(app, SCENARIO, { graph: IMPORTED, brief_text: brief })).statusCode).toBe(200);
+      const reopened = structuredClone(rows.get(SCENARIO));
+      expect(reopened?.briefText).toBe(existing || brief);
+      expect(reopened?.graph).toEqual(projectGraphForPersistence(IMPORTED, {}));
+      // A second registration cannot replace the seeded or newer text.
+      await post(app, SCENARIO, { graph: IMPORTED, brief_text: "A stale replacement" });
+      expect(rows.get(SCENARIO)?.briefText).toBe(existing || brief);
+      expect(rows.get(OTHER_USER)).toEqual({ graph: SERVER_PRE_IMPORT, briefText: "Unrelated scenario context" });
+      await app.close();
+    },
+  );
+
+  it.each([
+    "20260711000000_v5_append_turn_atomic_for_share.sql",
+    "20260717120000_v5_append_turn_atomic_v3_graph_cas.sql",
+    "20260806120000_v5_turn_fence_first_write_exemption.sql",
+  ])("pins scenario-bound write-once brief SQL used by the RPC contract double: %s", (migration) => {
+    const sql = readFileSync(new URL(`../../../supabase/migrations/${migration}`, import.meta.url), "utf8")
+      .split("\n").map((line) => line.split("--")[0]).join(" ").replace(/\s+/g, " ");
+    expect(sql).toMatch(/UPDATE scenarios SET brief_text = p_brief_text, updated_at = NOW\(\) WHERE id = p_scenario_id AND \(brief_text IS NULL OR brief_text = ''\);/);
+  });
+});
+
 describe("register — the acceptance case the P0 walk failed", () => {
   it("POSITIVE CONTROL: the server graph and the imported graph really do differ, and differ in a way the identity hash SEES", () => {
     // Trap 13. Every assertion below about "the imported graph was stored"

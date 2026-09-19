@@ -347,15 +347,35 @@ describe('F6 egress — the builder and its invariant tail cannot drift apart', 
    * not, recognition would fail SILENTLY and in the worst direction: the layer
    * would stop seeing the composers' disclosure and append a second one.
    */
-  it.each([1, 2, 4])('every %i-count permutation ends with the tail', (count) => {
+  it.each([1, 2, 4])('every %i-factor permutation ends with the tail', (count) => {
     const signal: DefaultedAssumptionsSignal = {
       count,
+      factorCount: count,
       named: ['Market Conditions', 'Wholesale Flour Price', 'Demand'].slice(0, Math.min(count, 3)),
     };
 
     expect(buildDefaultedAssumptionsDisclosure(signal).endsWith(DEFAULTED_DISCLOSURE_TAIL)).toBe(
       true,
     );
+  });
+
+  /**
+   * ⭐ THE PERMUTATIONS ABOVE ARE ALL FACTOR-BEARING, SO THEY CANNOT SEE THE
+   * TAIL DROPPING OFF THE TWO BRANCHES ADDED WHEN ENGINE-LEVEL CODES STOPPED
+   * BEING COUNTED AS FACTORS. Recognition is what keeps the disclosure to
+   * EXACTLY ONE; a branch whose sentence ends differently would be appended to
+   * a second time, silently, on exactly the payload shape staging serves today.
+   */
+  it.each([
+    ['engine-level codes only', { count: 2, factorCount: 0, named: [] }],
+    ['mixed factor + codes', { count: 3, factorCount: 1, named: ['Market Conditions'] }],
+  ] as const)('the %s branch ends with the tail too', (_name, signal) => {
+    const text = buildDefaultedAssumptionsDisclosure(signal);
+    expect(text.endsWith(DEFAULTED_DISCLOSURE_TAIL)).toBe(true);
+    // …and the egress layer RECOGNISES it, so it is never doubled.
+    const out = applyDefaultedValueEgress(`Launch leads with a probability of 61%. ${text}`, signal);
+    expect(out.disclosureAdded).toBe(false);
+    expect(occurrences(out.text, DEFAULTED_DISCLOSURE_TAIL)).toBe(1);
   });
 });
 
@@ -518,7 +538,7 @@ describe('F6 egress — the survivors, now discriminated', () => {
     // first version used two neutral sentences, so `applyDefaultedValueEgress`
     // returned at the gate and the join was never executed — a separator-
     // normalising mutant survived it. `leads` puts the text through the layer.
-    const twoParagraphs = 'Launch now leads.\n\nPrice matters least.';
+    const twoParagraphs = 'Launch scores highest now.\n\nPrice matters least.';
     expect(isAnalysisBearing(twoParagraphs)).toBe(true);
     // PRECONDITION: this really IS two segments with a newline separator —
     // otherwise the assertion below would pass on a single unsplit string.
@@ -526,8 +546,8 @@ describe('F6 egress — the survivors, now discriminated', () => {
     expect(segmentSentences(twoParagraphs)[0]!.sep).toBe('\n\n');
 
     const out = applyDefaultedValueEgress(twoParagraphs, SIGNAL);
-    expect(out.text).toContain('Launch now leads.\n\nPrice matters least.');
-    expect(out.text).not.toContain('Launch now leads. Price matters least.');
+    expect(out.text).toContain('Launch scores highest now.\n\nPrice matters least.');
+    expect(out.text).not.toContain('Launch scores highest now. Price matters least.');
   });
 });
 
@@ -542,7 +562,7 @@ describe('F6 egress — the survivors, now discriminated', () => {
 describe('F6 egress — the disclosure’s append point', () => {
   it('gets its own paragraph when the answer is block-structured', () => {
     const bulleted =
-      'Launch now leads.\n\n- Capacity matters most.\n- Price matters least.';
+      'Launch scores highest now.\n\n- Capacity matters most.\n- Price matters least.';
     // PRECONDITION: the answer really is block-structured AND analysis-bearing,
     // or this asserts nothing about the append point.
     expect(bulleted).toContain('\n');
@@ -557,7 +577,7 @@ describe('F6 egress — the disclosure’s append point', () => {
   });
 
   it('stays inline on a plain single-paragraph answer', () => {
-    const plain = 'Launch now leads, with a probability of 62%.';
+    const plain = 'Launch scores highest now, with a probability of 62%.';
     expect(plain).not.toContain('\n');
 
     const out = applyDefaultedValueEgress(plain, SIGNAL);
@@ -569,5 +589,73 @@ describe('F6 egress — the disclosure’s append point', () => {
   it('the joiner is decided by the ORIGINAL text, both ways', () => {
     expect(disclosureJoiner('one paragraph only')).toBe(' ');
     expect(disclosureJoiner('two\nlines')).toBe('\n\n');
+  });
+});
+
+/**
+ * PLACEMENT AND NUMBER AGREEMENT.
+ *
+ * The disclosure is CORRECT and stays — this block is only about where it
+ * lands and whether it agrees with itself. On the 2026-09-05 founder journey
+ * it was the final sentence on 6 of 12 turns and occupied up to 48.8% of one,
+ * so turn 9 asked "Which of these three failure modes worries you most…?" and
+ * then buried that question under boilerplate.
+ */
+describe('defaulted-value disclosure — placement and number agreement', () => {
+  const ONE: DefaultedAssumptionsSignal = { count: 1, factorCount: 1, named: [] };
+
+  const ENDS_ON_QUESTION =
+    'The analysis currently favours Option A, with a probability of 82%.\n\n'
+    + 'Two of your own decision-quality prompts point the same direction.\n\n'
+    + 'Which of these three failure modes worries you most, the conversion assumption, '
+    + 'the runway timing, or the competitive window?';
+
+  const ENDS_ON_STATEMENT =
+    'The analysis currently favours Option A, with a probability of 82%.\n\n'
+    + 'Two of your own decision-quality prompts point the same direction.';
+
+  it('PRECONDITION — both fixtures really do differ in how they end', () => {
+    // Without this the two cases below could be measuring the same branch.
+    expect(ENDS_ON_QUESTION.trim().endsWith('?')).toBe(true);
+    expect(ENDS_ON_STATEMENT.trim().endsWith('?')).toBe(false);
+  });
+
+  it('places the disclosure BEFORE a trailing closing question', () => {
+    const out = applyDefaultedValueEgress(ENDS_ON_QUESTION, ONE);
+    expect(out.disclosureAdded).toBe(true);
+    expect(occurrences(out.text, DEFAULTED_DISCLOSURE_TAIL)).toBe(1);
+    // The user's eye lands on the question, not on the caveat.
+    expect(out.text.trim().endsWith('?')).toBe(true);
+    expect(out.text.indexOf(DEFAULTED_DISCLOSURE_TAIL)).toBeLessThan(
+      out.text.indexOf('Which of these three failure modes'),
+    );
+  });
+
+  it('still appends at the END when the reply does not close on a question', () => {
+    // The narrow-scope guard: replies that were not burying a question keep
+    // the previous behaviour byte for byte.
+    const out = applyDefaultedValueEgress(ENDS_ON_STATEMENT, ONE);
+    expect(out.disclosureAdded).toBe(true);
+    expect(out.text).toBe(
+      `${ENDS_ON_STATEMENT}${disclosureJoiner(ENDS_ON_STATEMENT)}${buildDefaultedAssumptionsDisclosure(ONE)}`,
+    );
+    expect(out.text.trim().endsWith(DEFAULTED_DISCLOSURE_TAIL)).toBe(true);
+  });
+
+  it('agrees with itself in number at count 1 and count N', () => {
+    const singular = buildDefaultedAssumptionsDisclosure(ONE);
+    const plural = buildDefaultedAssumptionsDisclosure(
+      { count: 3, factorCount: 3, named: [] },
+    );
+    // The observed defect: "one of the factors … which HAS no value set …
+    // until THOSE VALUES are set" — an anaphoric plural with a singular
+    // antecedent.
+    expect(singular).toContain('which has no value set');
+    expect(plural).toContain('which have no value set');
+    expect(singular).not.toContain('those values');
+    expect(plural).not.toContain('those values');
+    // One invariant tail, still shared by every permutation.
+    expect(singular.endsWith(DEFAULTED_DISCLOSURE_TAIL)).toBe(true);
+    expect(plural.endsWith(DEFAULTED_DISCLOSURE_TAIL)).toBe(true);
   });
 });

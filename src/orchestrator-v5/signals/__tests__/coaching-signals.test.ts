@@ -430,8 +430,8 @@ describe('detectCoachingSignal', () => {
         priorFacts: [priorRunAnalysisFactWithEnvelope(priorEnv)],
       });
       expect(detection?.signal_id).toBe('RERUN_ANALYSIS_COMPLETE');
-      expect(detection?.coaching_text).toContain('Offshore led before');
-      expect(detection?.coaching_text).toContain('Onshore now leads');
+      expect(detection?.coaching_text).toContain('Offshore scored highest before');
+      expect(detection?.coaching_text).toContain('Onshore scores highest now');
     });
 
     // ── F2 (same defect class as the comparison pair): the "previous run"
@@ -451,7 +451,7 @@ describe('detectCoachingSignal', () => {
         ],
       });
       // A legacy fact with no computed_at sits FIRST; the genuinely newest
-      // prior run sits second. Array position says "Offshore led before";
+      // prior run sits second. Array position says "Offshore scored highest before";
       // the canonical ordering says the previous run already led with Onshore.
       const detection = detectCoachingSignal({
         proposedHandlerId: 'run_analysis',
@@ -465,11 +465,11 @@ describe('detectCoachingSignal', () => {
       });
       expect(detection?.signal_id).toBe('RERUN_ANALYSIS_COMPLETE');
       expect(detection?.coaching_text).toContain('Onshore still leads');
-      expect(detection?.coaching_text).not.toContain('Offshore led before');
+      expect(detection?.coaching_text).not.toContain('Offshore scored highest before');
     });
 
     // ── F3: a rename is not an outcome change.
-    it('F3: renaming the leading option does not produce "led before / now leads" copy', () => {
+    it('F3: renaming the leading option does not produce "scored highest before / scores highest now" copy', () => {
       const priorEnv = runEnvelope({
         options: [
           { id: 'a', label: 'Offshore', win: 0.62 },
@@ -490,7 +490,7 @@ describe('detectCoachingSignal', () => {
         priorFacts: [priorRunAnalysisFactWithEnvelope(priorEnv)],
       });
       expect(detection?.signal_id).toBe('RERUN_ANALYSIS_COMPLETE');
-      expect(detection?.coaching_text).not.toContain('led before');
+      expect(detection?.coaching_text).not.toContain('scored highest before');
       expect(detection?.coaching_text).toContain('Offshore (EU) still leads');
     });
 
@@ -524,7 +524,7 @@ describe('detectCoachingSignal', () => {
       // Neither direction, and no margin movement about two different leaders.
       expect(text).not.toContain('still leads');
       expect(text).not.toContain('The result is unchanged');
-      expect(text).not.toContain('led before');
+      expect(text).not.toContain('scored highest before');
       expect(text).not.toContain('widened');
       expect(text).not.toContain('narrowed');
       // What IS said: this run's leader, and the honest limit.

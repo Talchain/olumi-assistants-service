@@ -32,6 +32,7 @@ import {
   RULE_CITATION_PATTERNS,
   SELF_HONESTY_POLICY_PATTERNS,
   SENTENCE_SPLIT,
+  THIRD_PERSON_KNOWN_DROPPED_NOUNS,
   THIRD_PERSON_READER_PATTERNS,
 } from '../process-narration.js';
 import {
@@ -62,6 +63,23 @@ const LEAK_ROUTING_VERDICT =
   `strongly, which weighs against the goal. That link is still flagged as ` +
   `fragile, so treat the shift as directional rather than settled. No model ` +
   `changes are needed to answer this.`;
+
+/**
+ * ⭐ THE 12 SEP LEAK — a THIRD miss of this module's own third-person class,
+ * driven on the deployed build. 12 runs: 2 of 3 in one arm, 0 of 9 across
+ * every other arm, so the negative population is MEASURED, not assumed.
+ *
+ * ⚠ PROVENANCE, STATED EXACTLY RATHER THAN IMPLIED. This is the string as
+ * reported by that driven measurement, and that report's quotation carried
+ * ellipses. THE ELLIPSES ARE THE REPORT'S ELISIONS, NOT THE PRODUCT'S
+ * CHARACTERS — the full reply was not available to this lane. The opening
+ * clause, which is what the pattern binds to, is complete and verbatim.
+ * Recorded as it was witnessed and never tidied: a capture corpus is evidence
+ * and is append-only (CLAUDE.md trap 14b).
+ */
+const LEAK_CLARIFY_ANSWER =
+  `The user's turn "Both" answers the clarifying question from two turns ` +
+  `back… "both" doesn't resolve to a single factor with a single value…`;
 
 /** The 29 Aug witnessed monologue — the class the SHIPPED stripper already saw. */
 const PRIOR_WITNESSED_MONOLOGUE =
@@ -136,6 +154,7 @@ const MARKER_CORPUS: ReadonlyArray<readonly [string, string]> = [
   // THIRD_PERSON_READER_PATTERNS
   ['third-person reader · verb', 'The user wants two things from this turn.'],
   ['third-person reader · contraction', "The user's asking about strengths."],
+  ['third-person reader · possessive + conversational noun', "The user's turn answers the earlier question."],
   // ROUTING_SELF_TALK_PATTERNS
   ['routing self-talk · one action per turn', 'I am limited to one action per turn.'],
   ['routing self-talk · can only route one', 'I can only route one request at a time.'],
@@ -278,6 +297,146 @@ describe('process-narration — the two witnessed leaks', () => {
   });
 });
 
+describe('the 12 Sep clarifying-answer leak — the third miss of this class', () => {
+  /**
+   * ⚠ PINNED TO THE FROZEN HISTORIC PATTERNS, NOT THE LIVE ONES (trap 12b).
+   * This change widens `THIRD_PERSON_READER_PATTERNS`, so calling the live set
+   * here would report a hit and the historic fact — that the shipped guard
+   * missed this — would silently stop being testable. These two literals are
+   * the group EXACTLY as it read at `a3d9b953`. They are a record of what
+   * shipped and are never updated.
+   */
+  const SHIPPED_AT_a3d9b953: readonly RegExp[] = [
+    /\bthe\s+user\s+(?:wants?|is\s+asking|asked|asks|has\s+asked|needs?|would\s+like|is\s+trying|said|means|meant|expects?)\b/i,
+    /\bthe\s+user['’]s\s+(?:asking|wanting|trying|saying|looking|after)\b/i,
+  ];
+
+  it('walked through BOTH shipped third-person patterns — the gap this widening closes', () => {
+    // The refutable claim the change rests on, pinned rather than asserted in
+    // a header. Target zero AND contrasts non-zero in the SAME run, so a blind
+    // instrument cannot fake the result (trap 13e).
+    for (const pattern of SHIPPED_AT_a3d9b953) {
+      expect(pattern.test(LEAK_CLARIFY_ANSWER), `historic ${pattern.source} must miss`).toBe(false);
+    }
+    // CONTRAST, same run: neither historic pattern was blind. Pattern 1 sees
+    // the bare-verb form, pattern 2 sees the 3 Sep contraction. The miss is
+    // the POSSESSIVE + NOUN shape, which neither alternation admits.
+    expect(SHIPPED_AT_a3d9b953[0]!.test(PRIOR_WITNESSED_MONOLOGUE)).toBe(true);
+    expect(SHIPPED_AT_a3d9b953[1]!.test(LEAK_DELIBERATION)).toBe(true);
+
+    // ⛔ FLIPPED 14 Sep 2026, AND THE PREMISE IT RESTED ON IS CORRECTED HERE
+    // RATHER THAN LEFT STANDING. This assertion used to read `.toBeNull()`,
+    // justified by the comment "that lexicon is a SEPARATE module with its own
+    // remedy, and it has no third-person-reader entry". THAT IS NO LONGER TRUE:
+    // the same change that widened THIRD_PERSON_READER_PATTERNS also added a
+    // register entry — `/\bthe\s+user\b/i` — to FORBIDDEN_USER_FACING_PHRASES,
+    // after a founder received the model's own reasoning as the reply. Leaving
+    // the old comment beside a flipped assertion would leave the file asserting
+    // one thing and explaining another.
+    //
+    // The HISTORIC fact this block exists to pin is untouched and still lives
+    // above, against the FROZEN `SHIPPED_AT_a3d9b953` patterns — which is
+    // exactly where a record of what shipped belongs (trap 12b). What changes
+    // here is only the LIVE reading, and the live reading is now a second,
+    // independent guard seeing the same leak.
+    //
+    // Bound by IDENTITY to the matched substring, not merely to "something
+    // fired" (trap 19): `findForbiddenPhraseHit` returns the matched text, so
+    // this pins the REGISTER entry specifically. An unrelated entry going off
+    // on this string would not satisfy it.
+    expect(findForbiddenPhraseHit(LEAK_CLARIFY_ANSWER)).toBe('The user');
+    // CONTRAST, same run, so the flip cannot pass by the lexicon having become
+    // a blanket that hits everything: the second-person register Olumi is
+    // supposed to use is still clean through the very same call.
+    expect(findForbiddenPhraseHit('You named values for the two unset factors.')).toBeNull();
+  });
+
+  it('the widening reaches BOTH consumers of the shared set, by construction', () => {
+    // ⚠ THIS TEST REPLACED A WRONG ONE OF MINE, AND THE ERROR IS WORTH THE
+    // RECORD. The first draft asserted `isPlanningText(LEAK) === false` to pin
+    // the historic "no shipped guard saw it" fact — against the LIVE function.
+    // But `strip-planning-preamble` IMPORTS this module's marker set, so the
+    // moment the third pattern landed the live call went true and the test
+    // REDed. That is trap 12b (a control pinned to "whatever is current")
+    // committed inside the block written to avoid it. The historic fact is
+    // pinned above, against the FROZEN patterns, which is where it belongs.
+    //
+    // The live behaviour is a genuine property and is asserted here instead:
+    // one marker set, two consumers, so a pattern added for the egress guard
+    // cannot cover one path and silently miss the other (trap 12).
+    expect(isPlanningText(LEAK_CLARIFY_ANSWER)).toBe(true);
+    // …and the remedies stay DIFFERENT (trap 21): the stripper may empty, this
+    // guard may not.
+    expect(applyProcessNarrationGuard(LEAK_CLARIFY_ANSWER).text.length).toBeGreaterThan(0);
+  });
+
+  it('the live guard now sees it, bound to the possessive + conversational noun', () => {
+    expect(findProcessNarrationHit(LEAK_CLARIFY_ANSWER)).toBe("The user's turn");
+  });
+
+  it('is condemned WHOLE — the report\'s ellipsis is not a sentence boundary', () => {
+    // SENTENCE_SPLIT requires whitespace THEN an optional quote THEN a CAPITAL.
+    // `back… "both"` offers a lowercase `b`, so this is ONE sentence: 1 of 1
+    // narration ⇒ strict majority ⇒ the block is replaced, not half-shipped.
+    expect(LEAK_CLARIFY_ANSWER.split(SENTENCE_SPLIT)).toHaveLength(1);
+    const r = applyProcessNarrationGuard(LEAK_CLARIFY_ANSWER);
+    expect(r.rewritten).toBe(true);
+    expect(r.remedy).toBe('block_replaced');
+    expect(r.text).toBe(PROCESS_NARRATION_FALLBACK_TEXT);
+    // ⭐ SUPPRESSED, NEVER REWRITTEN. The model's reasoning is not restated in
+    // the first person — which would invent an intent it never expressed. It is
+    // dropped, and routed verbatim to the disclosure channel.
+    expect(r.narration).toBe(LEAK_CLARIFY_ANSWER);
+    expect(r.text).not.toContain('Both');
+  });
+});
+
+describe('the KNOWN-DROPPED nouns — an honest gap, pinned in the suite', () => {
+  it('is EXACTLY this set — RED if it grows, RED if it shrinks', () => {
+    // A gap recorded in the suite is honest; a gap invisible to it is how the
+    // previous two misses of this class survived. Changing the constant
+    // without changing this literal REDs, in both directions.
+    expect([...THIRD_PERSON_KNOWN_DROPPED_NOUNS]).toEqual([
+      'request',
+      'input',
+      'intent',
+      'feedback',
+      'journey',
+      'base',
+      'experience',
+      'point',
+    ]);
+  });
+
+  it('every dropped noun is genuinely NOT matched — widening the pattern REDs here', () => {
+    // The opposite-direction guard on the same constant: if a later round
+    // quietly folds one of these into the alternation, this bites.
+    for (const noun of THIRD_PERSON_KNOWN_DROPPED_NOUNS) {
+      const sentence = `The user's ${noun} is the binding constraint here.`;
+      expect(findProcessNarrationHit(sentence), `"${noun}" must stay dropped`).toBeNull();
+    }
+  });
+
+  it('the CONTRAST — every ADMITTED noun does match, in the same run', () => {
+    // Without this, the test above passes just as well on a pattern that
+    // matches nothing at all (trap 13: an absence assertion needs a presence).
+    for (const noun of [
+      'turn',
+      'message',
+      'reply',
+      'answer',
+      'response',
+      'question',
+      'brief',
+      'phrasing',
+      'wording',
+    ]) {
+      const sentence = `The user's ${noun} is the binding constraint here.`;
+      expect(findProcessNarrationHit(sentence), `"${noun}" must be admitted`).not.toBeNull();
+    }
+  });
+});
+
 describe('process-narration — the answers that must survive', () => {
   it.each(GOOD_ANSWERS)('leaves %s byte-identical', (_name, text) => {
     const r = applyProcessNarrationGuard(text);
@@ -382,6 +541,34 @@ describe('ONE marker set, TWO remedies — the anti-mirror assertion', () => {
     // asserts they have NOT been aligned.
     expect(isPlanningText(PRIOR_WITNESSED_MONOLOGUE)).toBe(true);
     expect(applyProcessNarrationGuard(PRIOR_WITNESSED_MONOLOGUE).text.length).toBeGreaterThan(0);
+  });
+
+  it('⭐ THE TWINS — the possessive class, in the register that is CORRECT', () => {
+    // Trap 22b: a corpus that tests one direction is a guard watching one door.
+    // For every sentence this widening must SUPPRESS, a sentence carrying the
+    // SAME information in the second person must SURVIVE — because destroying
+    // legitimate prose is worse than leaking: the user loses something they
+    // needed, and nothing anywhere reports it.
+    const MUST_SURVIVE: ReadonlyArray<readonly [string, string]> = [
+      // ⭐ The direct twin of the 12 Sep leak: same fact, correct register.
+      [
+        'the leak said properly',
+        `Your answer "Both" doesn't resolve to a single factor with a single value — which of the two did you mean?`,
+      ],
+      ['second-person brief', 'Your brief targets a 5-point NPS improvement.'],
+      ['second-person turn', 'Your reply told me the ceiling, so I held it fixed.'],
+      ['quoting the user back', `You said the ceiling was £600k, so I held it fixed.`],
+      // Domain possessives whose head noun is a KNOWN-DROPPED compound.
+      ["the user journey's drop-off", "The user journey's steepest drop-off is at checkout."],
+      ["the user base's growth", "The user base's growth rate is the binding constraint."],
+      ["the user's feedback (dropped)", "The user's feedback scores are flat across both options."],
+    ];
+    for (const [name, text] of MUST_SURVIVE) {
+      expect(findProcessNarrationHit(text), `${name} must survive`).toBeNull();
+      const r = applyProcessNarrationGuard(text);
+      expect(r.rewritten, `${name} must not be rewritten`).toBe(false);
+      expect(r.text).toBe(text);
+    }
   });
 
   it('a factor legitimately containing "the user" is untouched', () => {

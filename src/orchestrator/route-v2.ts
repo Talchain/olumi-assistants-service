@@ -78,7 +78,10 @@
  * ENABLE_V5_ORCHESTRATOR flag was deleted in O-7 wave 2.
  *
  * Transport invariant: buffered JSON only (no raw-stream writes, no SSE
- * Content-Type). Enforced by scripts/validate-transport-invariants.sh in CI.
+ * Content-Type). Checked by scripts/validate-transport-invariants.sh, which runs
+ * ONLY from the manually-installed pre-push hook (scripts/install-hooks.sh) —
+ * it is in no CI workflow, so it does not gate merges. Do not cite it as CI
+ * enforcement; tests/meta/guard-liveness.test.ts pins that distinction.
  *
  * No imports from V4 pipeline (pipeline-v4, response-assembler, handlers).
  */
@@ -90,6 +93,10 @@ import { isReplayedTurnSource } from '../orchestrator-v5/routing/turn-source-aut
 import { emit, log, TelemetryEvents } from '../utils/telemetry.js';
 import { config } from '../config/index.js';
 import { debugFieldRequested, type OlumiResponseWithDebugFields } from './debug-fields.js';
+import {
+  getTurnDebugPromptCaptures,
+  promptCaptureMayRideTheWire,
+} from '../orchestrator-v5/debug/turn-debug-store.js';
 import type { TurnTimingsBlock, V5TurnTimings } from '../orchestrator-v5/telemetry/turn-timings.js';
 import type {
   V5DiagnosticExitPath,
@@ -150,6 +157,7 @@ import type { TurnClaimSafetyResolver } from '../orchestrator-v5/context/turn-cl
 // re-enters 2–8 times per response and always upstream of `finaliseV5Response`.
 import { guardLeadingOptionClaimsAtEgress } from '../orchestrator-v5/compose/leading-option-egress-guard.js';
 import { enforceLeadingOptionClaimsAtWire } from '../orchestrator-v5/compose/leading-option-wire-enforcement.js';
+import { classifyUserVisibleRefusal } from '../orchestrator-v5/compose/user-visible-refusal.js';
 import {
   ANALYSIS_AUTHORITY_UNAVAILABLE_FRESHNESS,
   enforceAnalysisAuthorityUnavailableAtEgress,
@@ -159,6 +167,8 @@ import {
   classifyAnswerShape,
   deriveAnswerTextFromShape,
   synthesiseAnswerShapeFromText,
+  warrantsProgressiveDisclosure,
+  ANSWER_SHAPE_COLLAPSE_FLOOR_CHARS,
 } from '../orchestrator-v5/routing/answer-shape.js';
 import type { GraphV3T } from './types.js';
 import { GraphV3 } from '../schemas/cee-v3.js';
@@ -230,6 +240,15 @@ import {
   PENDING_ACTION_DEFAULT_WALL_TTL_MS,
 } from '../orchestrator-v5/session/pending-action.js';
 import { randomUUID } from 'node:crypto';
+import { composeGoalNeverStatedAsk } from '../orchestrator-v5/clarify-v2/goal-never-stated-ask.js';
+import {
+  composeDraftFailureRecoveryTurn,
+  isPostEnforcementBlock,
+  DRAFT_FAILURE_RETRY_CHIP_ID,
+  DRAFT_FAILURE_RETRY_CHIP_LABEL,
+  DRAFT_FAILURE_RETRY_CHIP_MESSAGE,
+  type DraftFailureFault,
+} from '../orchestrator-v5/draft-failure-recovery-turn.js';
 import {
   commitDirectAnswer,
   computeRequestHash,
@@ -238,7 +257,10 @@ import {
 import { normaliseBriefText } from '../orchestrator-v5/session/normalise-brief-text.js';
 import { normaliseReplayMessage } from '../orchestrator-v5/compose/looping-chip-guard.js';
 import { isAnalyticalQuestion } from '../orchestrator-v5/routing/analytical-question-guard.js';
-import { isBoundedNonMutationAnalyticalRequest } from '../orchestrator-v5/routing/mutation-warrant.js';
+import {
+  hasExplicitNoModelChangeIntent,
+  isBoundedNonMutationAnalyticalRequest,
+} from '../orchestrator-v5/routing/mutation-warrant.js';
 import {
   PROPOSAL_CONFIRM_PATTERN,
   SHORT_CONFIRM_PATTERN,
@@ -265,6 +287,7 @@ import { shouldInterceptBeforeEditLane } from '../orchestrator-v5/routing/config
 import { resolveOptionEffectWrite } from '../orchestrator-v5/routing/option-effect-write.js';
 import { composeOptionEffectAskResponse } from '../orchestrator-v5/compose/option-effect-ask-response.js';
 import { composeDuplicateOptionLabelResponse } from '../orchestrator-v5/compose/duplicate-option-label-response.js';
+import { composeOptionLabelClarifyResponse } from '../orchestrator-v5/compose/option-label-clarify-response.js';
 import { composeConfigureOptionClarifyResponse } from '../orchestrator-v5/compose/configure-option-clarify-response.js';
 // ⭐ ROADMAP 2.1261 — repair-leg bare-value binding ("Set it to 0.12.").
 import {
@@ -296,7 +319,15 @@ import {
   composeProcessMetaIntakeResponse,
 } from '../orchestrator-v5/routing/process-meta-intake.js';
 import { composeReadinessIntakeResponse } from '../orchestrator-v5/routing/readiness-intake.js';
-import { buildReadinessRepairOffer } from '../orchestrator-v5/handlers/readiness-repair-proposal.js';
+import {
+  buildReadinessRepairOffer,
+  withReadinessApplyControl,
+} from '../orchestrator-v5/handlers/readiness-repair-proposal.js';
+import { prepareValueBatchOffer } from '../orchestrator-v5/handlers/readiness-value-batch-flow.js';
+import {
+  buildValueBatchReviewBlock,
+  composeValueBatchReviewText,
+} from '../orchestrator-v5/handlers/readiness-value-batch.js';
 import { shouldSuppressEditDispatchForValueUpdate } from './routing/value-update-gate.js';
 import {
   EDIT_GRAPH_NEGATIVE_REGEX,
@@ -1111,13 +1142,20 @@ async function sendFinalised200(
     // is the sole authority, and the strict `OlumiResponseSchema` must not see
     // an unknown key.
     const hasGroundedSelection = '_grounded_selection' in asRecord;
+    // HARNESS VISIBILITY — `_prompt_capture` is READ FROM THE TURN-DEBUG
+    // STORE at the re-attach gate below, never body-attached by any dispatch
+    // path. Stripped defensively anyway (same defence-in-depth posture as
+    // `_context_summary`): the re-attach gate is the sole authority, and the
+    // strict `OlumiResponseSchema` must not see an unknown key.
+    const hasPromptCapture = '_prompt_capture' in asRecord;
     if (
       !hasTimings &&
       !hasTrace &&
       !hasContextSummary &&
       !hasReasoning &&
       !hasAnswerShape &&
-      !hasGroundedSelection
+      !hasGroundedSelection &&
+      !hasPromptCapture
     ) {
       return { timings: undefined, diagnosticTrace: undefined, body: candidateFinalised };
     }
@@ -1130,6 +1168,7 @@ async function sendFinalised200(
     delete cloned._reasoning;
     delete cloned._answer_shape;
     delete cloned._grounded_selection;
+    delete cloned._prompt_capture;
     return {
       timings: hasTimings ? timings : undefined,
       diagnosticTrace: hasTrace ? diagnosticTrace : undefined,
@@ -1456,7 +1495,44 @@ async function sendFinalised200(
   // its own, which is exactly why the wire gate DROPS `_answer_shape` whenever
   // it edits the answer rather than relying on this comparison to notice.
   // Neither guard is now the last word alone; read them together.
-  if (egress.ok && !analysisAuthorityUnavailable && ctx.answerShape) {
+  //
+  // ⭐ THE COLLAPSE FLOOR (added 18 Sep 2026). The sidecar is a WIRE DIRECTIVE
+  // to collapse: `MessageBubble.tsx` renders `<AnswerBody>` INSTEAD of the
+  // free-text body whenever it arrives. Below the floor the deployed UI would
+  // have shown the answer WHOLE, so attaching it there replaces "the user reads
+  // all of it" with "the user reads one sentence" — the measured founder
+  // defect. `warrantsProgressiveDisclosure` is applied to `derivedText`, the
+  // exact string `assistant_text` carries on the wire, because that is what the
+  // UI's own clamp measures. Rationale, the deployed-bundle derivation and the
+  // drift analysis: `answer-shape.ts` → ANSWER_SHAPE_COLLAPSE_FLOOR_CHARS.
+  //
+  // Note the ORDER: the floor is checked BEFORE the fail-closed tie
+  // verification below, never instead of it. Declining to collapse ships
+  // `wireBody` untouched — the executor already set `assistant_text` to this
+  // same derived text, so nothing is lost and no new text/shape pair is minted.
+  const shapeDerivedText = ctx.answerShape ? deriveAnswerTextFromShape(ctx.answerShape) : '';
+  if (
+    egress.ok &&
+    !analysisAuthorityUnavailable &&
+    ctx.answerShape &&
+    !warrantsProgressiveDisclosure(shapeDerivedText)
+  ) {
+    // Announced, never silent — see V5AnswerShapeDeclinedBelowFloor. This is
+    // the positive witness that the egress DID reach a shapeable answer here.
+    emit(TelemetryEvents.V5AnswerShapeDeclinedBelowFloor, {
+      request_id: requestId,
+      exit_path: exitPath,
+      dispatch_path: 'route_egress_model_shape',
+      final_text_length: shapeDerivedText.length,
+      floor_chars: ANSWER_SHAPE_COLLAPSE_FLOOR_CHARS,
+    });
+  }
+  if (
+    egress.ok &&
+    !analysisAuthorityUnavailable &&
+    ctx.answerShape &&
+    warrantsProgressiveDisclosure(shapeDerivedText)
+  ) {
     const augmented: OlumiResponseWithDebugFields = {
       ...wireBody,
       _answer_shape: ctx.answerShape,
@@ -1465,7 +1541,7 @@ async function sendFinalised200(
       sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
       finaliserContext,
     );
-    const derivedText = deriveAnswerTextFromShape(ctx.answerShape);
+    const derivedText = shapeDerivedText;
     const finalText =
       typeof withShape.assistant_text === 'string' ? withShape.assistant_text : '';
     if (finalText === derivedText) {
@@ -1535,7 +1611,33 @@ async function sendFinalised200(
     wireBody.assistant_text.trim().length > 0
   ) {
     const synth = synthesiseAnswerShapeFromText(wireBody.assistant_text);
-    if (synth !== null) {
+    // ⭐ THE COLLAPSE FLOOR (18 Sep 2026) — see
+    // ANSWER_SHAPE_COLLAPSE_FLOOR_CHARS in `answer-shape.ts` for the measured
+    // defect, the deployed-bundle derivation of 3,000 and why the cross-service
+    // drift is benign in both directions.
+    //
+    // Declining here leaves `wireBody` COMPLETELY untouched — no sidecar AND no
+    // blank-line reflow — so a short answer ships exactly as its author composed
+    // it. The reflow is part of the disclosure treatment, not a free readability
+    // win, and applying half a treatment is how a text/shape pair drifts apart.
+    //
+    // ⚠ The floor is checked on `derived`, NOT on `wireBody.assistant_text`.
+    // They differ: derivation re-joins headline/bullets/detail with `\n\n`. The
+    // UI's clamp measures the RENDERED string, so the derived text is the only
+    // one that answers the same question the UI is asking.
+    if (synth !== null && !warrantsProgressiveDisclosure(deriveAnswerTextFromShape(synth))) {
+      // Announced, never silent — see V5AnswerShapeDeclinedBelowFloor. The
+      // answer WAS shapeable and the egress DID run: this event is what stops
+      // a future silent dispatch-path miss reading as "short answer".
+      emit(TelemetryEvents.V5AnswerShapeDeclinedBelowFloor, {
+        request_id: requestId,
+        exit_path: exitPath,
+        dispatch_path: 'route_egress_synthesised',
+        final_text_length: wireBody.assistant_text.length,
+        floor_chars: ANSWER_SHAPE_COLLAPSE_FLOOR_CHARS,
+      });
+    }
+    if (synth !== null && warrantsProgressiveDisclosure(deriveAnswerTextFromShape(synth))) {
       const derived = deriveAnswerTextFromShape(synth);
       const augmented: OlumiResponseWithDebugFields = {
         ...wireBody,
@@ -1660,6 +1762,19 @@ async function sendFinalised200(
     // `compose/__tests__/leader-roster-fallback.test.ts` RED if that stops
     // being true.
     analysisReady: ctx.analysisReady,
+    // ⭐ READ, NOT RE-DERIVED. `composeLeaderClaim` remains the sole author of
+    // the separation question; this threads the value it ALREADY published on
+    // the very body being enforced, so the enforcer and every structured
+    // consumer read one interpretation rather than two. Absent field ⇒ absent
+    // operand ⇒ today's behaviour exactly.
+    separationEstablished:
+      (
+        wireBody as {
+          readonly analysis_state?: {
+            readonly leader_claim?: { readonly separation?: unknown };
+          };
+        }
+      ).analysis_state?.leader_claim?.separation === 'separated',
   });
   if (wireEnforcement.changed) {
     let projected: import('@talchain/schemas/boundary').OlumiResponse =
@@ -1735,6 +1850,50 @@ async function sendFinalised200(
     };
     // Re-finalise: the spread breaks WeakSet membership (finaliser Mechanism B).
     wireBody = finaliseV5Response(augmented, finaliserContext);
+  }
+  // ═══════════════════════════════════════════════════════════════════════════
+  // HARNESS VISIBILITY — re-attach `_prompt_capture` post-validation.
+  //
+  // Single-flag gating (`CEE_TURN_DEBUG_ENABLED`, default FALSE, forced off in
+  // production), same re-attach shape as `_context_summary` / `_reasoning`.
+  //
+  // READ FROM THE STORE, NOT THREADED. Every sibling sidecar above rides a
+  // `ctx` member that some dispatch path had to remember to populate — the
+  // failure mode `prompt-attribution.ts` documents at length: "a call the
+  // builder was never told about is invisible by construction, and silently
+  // so". The capture is written at the prompt-resolution seam keyed by the
+  // same request id this route already holds, so reading it back here needs no
+  // threading and cannot be silently skipped by a dispatch path that forgot.
+  //
+  // NO TIE-CHECK, for the reason `_grounded_selection` gives directly above:
+  // this describes a fact fixed BEFORE the model replied — which prompt bytes
+  // went out — and no downstream prose rewrite can make it untrue.
+  //
+  // Empty array ⇒ attach nothing, so a turn that made no LLM call stays
+  // byte-identical on the wire rather than carrying an empty diagnostic.
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ⛔ PRODUCTION HARD-STOP, and it is NOT belt-and-braces. Unlike
+  // `CEE_OBSERVABILITY_RAW_IO` — the estate's other raw-prompt flag, declared
+  // `createEnvEnforcedBoolean(..., "CEE_OBSERVABILITY_RAW_IO")` so prod forces
+  // it false — `turnDebugEnabled` is a plain `booleanString.default(false)`
+  // (`config/index.ts:1156`) with NO prod enforcement. Before this change that
+  // flag exposed CQE counters and a trace shape; it now decides whether prompt
+  // BYTES ride the wire, so the same env value carries a materially larger
+  // consequence than it did when it was declared. Refuse in prod at the
+  // attach site rather than trust an operator never to set it there.
+  //
+  // The admin route is deliberately NOT gated this way: it is admin-key
+  // gated, so the same bytes stay reachable to an operator who holds the key.
+  if (egress.ok && promptCaptureMayRideTheWire()) {
+    const promptCaptures = getTurnDebugPromptCaptures(requestId);
+    if (promptCaptures.length > 0) {
+      const augmented: OlumiResponseWithDebugFields = {
+        ...wireBody,
+        _prompt_capture: promptCaptures,
+      };
+      // Re-finalise: the spread breaks WeakSet membership (finaliser Mechanism B).
+      wireBody = finaliseV5Response(augmented, finaliserContext);
+    }
   }
   // ═══════════════════════════════════════════════════════════════════════════
   // T1 claim safety, LAYER 3 — THE SINGLE EGRESS SCAN. (ROADMAP 1.272 E1.)
@@ -1828,6 +1987,31 @@ async function sendFinalised200(
     emit(TelemetryEvents.V5ClaimSafetyFailClosedUnavailable, {
       exit_path: exitPath,
       outcome: analysisAuthorityUnavailableEgressMode,
+    });
+  }
+  // ── A REFUSAL THE USER CAN SEE IS COUNTED AS A REFUSAL ────────────────────
+  //
+  // Same exactly-once seam and the same argument as the fail-closed counter
+  // immediately above: the question is "what did the USER receive?", and
+  // `wireBody` is the only artefact that answers it. A producer-side emit
+  // would count refusals that were recovered upstream and never shipped.
+  //
+  // Read AFTER every pass that can edit the body, so this classifies the bytes
+  // that are about to be sent rather than an object that no longer ships.
+  // Observe-only: it cannot alter a wire byte.
+  const refusal = classifyUserVisibleRefusal(wireBody);
+  if (refusal) {
+    emit(TelemetryEvents.CeeTurnRefused, {
+      request_id: requestId,
+      // Honest null, never a placeholder: the system-event exit can reach here
+      // without a scenario, and "we do not know which session" must not be
+      // spelled the same way as a real id.
+      scenario_id: ctx.scenarioId ?? null,
+      exit_path: exitPath,
+      error_code: refusal.error_code,
+      severity: refusal.severity,
+      refusal_source: refusal.source,
+      refusal_code: refusal.refusal_code,
     });
   }
   logFinalisedResponse(requestId, exitPath, wireBody, egress.ok, ctx.analysisReady == null);
@@ -2771,7 +2955,49 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         );
         return reply.code(409).send(boundaryError);
       }
-      if (!sysResult.commitPerformed && sysResult.commitSkippedReason !== 'client_only_event') {
+      // ⭐ A VERIFIED NO-OP IS A SUCCESS, NOT A FAILURE. The server looked and the
+      // model already holds what was asked for. Nothing committed, nothing
+      // broken, nothing for the client to do — so it takes the ordinary 200
+      // path below rather than being reported as an infrastructure failure.
+      // `analysis_ready` is deliberately not stamped: the graph did not move, so
+      // the client's prior value is still the truth.
+      //
+      // ⚠ A REFUSAL THAT WROTE NOTHING IS NOT RETRYABLE, and saying it is was the
+      // defect. A permanently unhonourable request — an unresolvable id, an
+      // option and factor that are not linked, a value outside the model scale —
+      // cannot succeed by being repeated. It gets a non-retryable 422 with the
+      // ingress-contract code, so the client corrects the request instead of
+      // hammering it. A STALE BASE does not come here at all: it is a
+      // `graphConflict` and was answered with 409 refresh-and-reconfirm above.
+      //
+      // ⚠ AND "UNVERIFIED" DELIBERATELY FALLS THROUGH TO THE RETRYABLE 500. A
+      // writer that could not confirm what happened must not be described as a
+      // skip — a commit may have landed, and the retry is idempotent on
+      // (scenario_id, turn_id). "We do not know" stays "we do not know".
+      if (sysResult.commitSkippedReason === 'refused_no_write') {
+        const boundaryError: BoundaryError = buildCommitFailureBoundaryError({
+          validator: 'turn_commit',
+          reason: 'system_event_refused_no_write',
+          retryable: false,
+          requestId,
+          stage: ingress.stage,
+          errorCode: 'INGRESS_CONTRACT_VIOLATION',
+          preStageExtras: { event_kind: ingress.event.kind },
+        });
+        log.warn(
+          {
+            request_id: requestId,
+            event_kind: ingress.event.kind,
+          },
+          'V5 system event refused with no write — returning non-retryable 422 BoundaryError envelope',
+        );
+        return reply.code(422).send(boundaryError);
+      }
+      if (
+        !sysResult.commitPerformed &&
+        sysResult.commitSkippedReason !== 'client_only_event' &&
+        sysResult.commitSkippedReason !== 'verified_no_op'
+      ) {
         const boundaryError: BoundaryError = buildCommitFailureBoundaryError({
           validator: 'turn_commit',
           reason: 'system_event_commit_failed',
@@ -3145,18 +3371,178 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           readinessOffer = null;
         }
       }
-      if (readinessOffer) {
+      /**
+       * ⭐ THE SECOND APPLY CONTROL, AND IT ANSWERS A DIFFERENT QUESTION FROM THE
+       * FIRST (trap 21 — named apart, deliberately, not collapsed).
+       *
+       *   `readiness_multi_repair_v1` — "can these blockers be CANONICALISED
+       *      without guessing?" It is value-preserving by construction and its
+       *      module states it never guesses a missing scalar.
+       *   `readiness_value_batch_v1` — "can the missing VALUES be estimated and
+       *      reviewed in one action?" It proposes numbers the model authored,
+       *      every one marked as an AI estimate and none applied unreviewed.
+       *
+       * So the batch is tried ONLY when the repair path found nothing to
+       * canonicalise: where a value-preserving fix exists it is strictly better
+       * than an estimate, and offering both would ask the user to choose between
+       * two controls that sound alike.
+       *
+       * ⚠ THE MODEL CALL SITS BEHIND THE FLOOR CHECK, NOT IN FRONT OF IT.
+       * `prepareValueBatchOffer` returns `below_floor` without calling anything
+       * when fewer than two cells are open — a single missing value is already
+       * served by the per-cell chip, which asks a precise question the user can
+       * answer in a sentence. The witnessed harm is TEN values and ten
+       * round-trips, and the cost should be proportional to that.
+       *
+       * ⭐ AND THE ROUTER DOES NOT KNOW A MODEL EXISTS. It asks for an offer and
+       * gets one. The shared-Anthropic binding — temperature, token budget, the
+       * output schema — belongs to `readiness-value-estimator.ts`, which owns the
+       * prompt those settings serve. It used to live HERE, which made the router
+       * a dedicated Anthropic chat caller for a prompt it does not own, and
+       * `tests/unit/ai-task-lifecycle-authority.test.ts` derives that set from the
+       * source and requires each member to declare a model/prompt authority row.
+       * It fired, correctly. Moving the binding is the fix; widening the expected
+       * array would have been the hand-maintained mirror the guard exists to stop.
+       */
+      let valueBatchOffer: Awaited<ReturnType<typeof prepareValueBatchOffer>> | null = null;
+      // Hoisted out of the try: the review surface below needs the SAME hash the
+      // offer was built against, so the block's `graph_hash_at_generation` names
+      // the model the user is looking at rather than one re-derived later.
+      let valueBatchGraphHash: string | null = null;
+      if (
+        readinessOffer === null
+        && readiness.assessment
+        && readinessPendingReadOk
+        && persistedGraph !== null
+      ) {
+        try {
+          const graphHash = computeAnalysisAffectingGraphHash(
+            persistedGraph as GraphStateIngress,
+          );
+          if (graphHash !== null) {
+            valueBatchGraphHash = graphHash;
+            valueBatchOffer = await prepareValueBatchOffer({
+              assessment: readiness.assessment,
+              graph: persistedGraph,
+              currentGraphHash: graphHash,
+              scenarioId: ingress.scenario_id,
+              brief: ingress.message,
+              requestId,
+            });
+          }
+        } catch (err) {
+          // Fail CLOSED to the existing route: the per-cell chip and the typed
+          // issue list are still there, so the user is never worse off than
+          // before this control existed.
+          valueBatchOffer = null;
+          log.warn(
+            {
+              request_id: requestId,
+              scenario_id: ingress.scenario_id,
+              err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+            },
+            'S2-L1 readiness arm — value batch unavailable; readiness remains available without it',
+          );
+        }
+      }
+      if (valueBatchOffer && valueBatchOffer.kind !== 'offer') {
+        // Recorded by NAME rather than collapsed to a null: `below_floor` and
+        // `estimator_failed` are different facts and only one of them is a defect.
+        log.info(
+          {
+            request_id: requestId,
+            scenario_id: ingress.scenario_id,
+            outcome: valueBatchOffer.kind,
+          },
+          'S2-L1 readiness arm — no value batch offered',
+        );
+      }
+
+      /**
+       * ⭐⭐⭐ THE NUMBERS REACH THE USER HERE, ON THE TURN THAT OFFERS THE CHIP.
+       *
+       * THE DEFECT THIS CLOSES, measured at the bytes on this branch's own first
+       * head: the chip applied N model-authored values to the user's model in one
+       * click and the user saw NONE of them first. `valueBatchOffer.proposal` was
+       * carried into the pending action's `inline_patch` and read by nothing on
+       * the way out — this file consumed `.kind` and `.offer` only, the readiness
+       * response was composed 63 lines ABOVE the estimator call, the chip had no
+       * `detail` and `params: {}`, and `OlumiResponseSchema` is `.strict()` with
+       * no pending/inline_patch key, so NO CLIENT COULD HAVE RENDERED IT however
+       * it was written. Three separate sites told the user they had reviewed
+       * them. That is the product's own ruling — humans remain the authors and
+       * the decision-makers — inverted.
+       *
+       * ⚠ IT RUNS ON `no_writable` TOO, and that is not tidiness. The module
+       * refuses at compose time to accept a silent decline
+       * (`declined_without_reason`) precisely so the reasons can be shown; a
+       * branch that surfaced only the writable set would delete the one thing a
+       * user can act on in the state where the model estimated nothing. There is
+       * still no chip there, because there is still nothing to approve.
+       *
+       * ⛔ AND IT IS ORDERED BEFORE THE APPLY CONTROL DELIBERATELY. `applyOffer`
+       * below reads `valueBatchReviewShown`, so the chip cannot exist on a turn
+       * whose values were not rendered. The previous version of this feature
+       * asserted that coupling in a comment; this one cannot compile without it.
+       */
+      let valueBatchReviewShown = false;
+      if (
+        valueBatchOffer
+        && (valueBatchOffer.kind === 'offer' || valueBatchOffer.kind === 'no_writable')
+        && valueBatchGraphHash !== null
+      ) {
+        const reviewText = composeValueBatchReviewText(valueBatchOffer.proposal);
+        // Fail closed on an empty compose: a chip whose values did not render is
+        // exactly the state this block exists to make impossible.
+        if (reviewText.trim().length > 0) {
+          const reviewBlock = buildValueBatchReviewBlock({
+            proposal: valueBatchOffer.proposal,
+            currentGraphHash: valueBatchGraphHash,
+            createdAtIso: new Date().toISOString(),
+          });
+          readinessResponse = {
+            ...readinessResponse,
+            assistant_text: `${readinessResponse.assistant_text}\n\n${reviewText}`,
+            // The typed mark is ADDITIVE to the numbers, never a substitute for
+            // them: `CoachingBlockSchema.body` caps at 300 characters, so a
+            // ten-cell batch cannot live there. A null block (its own schema
+            // refused it) loses the mark and keeps every number.
+            ...(reviewBlock !== null
+              ? { blocks: [...readinessResponse.blocks, reviewBlock] as typeof readinessResponse.blocks }
+              : {}),
+          };
+          valueBatchReviewShown = true;
+        }
+      }
+
+      /** Whichever apply control this turn earned. At most one is ever offered. */
+      let applyOffer:
+        | { readonly chip: { readonly id: string; readonly label: string; readonly message: string; readonly detail?: string }; readonly pending: PendingAction }
+        | null =
+        readinessOffer
+        ?? (valueBatchOffer && valueBatchOffer.kind === 'offer' && valueBatchReviewShown
+          ? valueBatchOffer.offer
+          : null);
+
+      if (applyOffer) {
         readinessResponse = {
           ...readinessResponse,
-          suggested_actions: [
-            ...readinessResponse.suggested_actions,
-            {
-              id: readinessOffer.chip.id,
-              label: readinessOffer.chip.label,
-              message: readinessOffer.chip.message,
-              ...(readinessOffer.chip.detail ? { detail: readinessOffer.chip.detail } : {}),
-            },
-          ],
+          // The composer already filled this row to its cap. Appending here put
+          // the apply control at index 3 of 4 and the client rendered the first
+          // three, so the control never reached the user. `withReadinessApplyControl`
+          // makes room instead of overflowing.
+          //
+          // ⚠ MERGE RESOLUTION, 18 Sep: staging (#1596) passed `readinessOffer.chip`
+          // because on staging the repair offer was the ONLY apply control. This
+          // branch adds a second one, so `applyOffer` is `readinessOffer ?? the
+          // value-batch offer` — and inside this block `readinessOffer` can be
+          // null. Passing it would throw on exactly the turns this branch exists
+          // to serve. Both fixes are kept: staging's cap-preserving insert, this
+          // branch's two-control selection, bound to the control actually chosen.
+          suggested_actions: withReadinessApplyControl(
+            readinessResponse.suggested_actions,
+            applyOffer.chip,
+          ) as typeof readinessResponse.suggested_actions,
         };
         try {
           const committed = await commitDirectAnswer(readinessResponse, {
@@ -3168,7 +3554,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             llm_calls_used: 0,
             duration_ms: Date.now() - routeStartedAt,
             handler_facts: [],
-            pending_actions: [readinessOffer.pending],
+            pending_actions: [applyOffer.pending],
             priorPendingActions: readinessPriorPendings,
             coaching_state: null,
             userMessage: ingress.message,
@@ -3178,7 +3564,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           // A review control without a durable pending would be a dead control.
           // Keep the complete issue explanation, but remove the apply action.
           readinessResponse = readiness.response;
-          readinessOffer = null;
+          applyOffer = null;
           log.warn(
             {
               request_id: requestId,
@@ -4403,6 +4789,27 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       explicitGenerateDraft ||
       clarifyV2DraftBrief !== null
     ) {
+      // ⭐ ONE AUTHORITY FOR "THE BRIEF THIS DRAFT IS ABOUT" (trap 21).
+      //
+      // This value used to be an inline ternary in the argument list below and
+      // nowhere else. The goal-never-stated exit in the catch block needs the
+      // SAME string — it must retain the brief the pipeline actually drafted
+      // from so the user's answer resumes it — and re-deriving it there would
+      // create two expressions for one concept that can silently disagree.
+      // Computed once, read twice: the argument, and the resumable round.
+      const draftBriefOverride: string | null =
+        clarifyV2DraftBrief !== null
+          ? clarifyV2DraftBrief
+          : explicitGenerateDraft && explicitGenerateBrief !== null
+            ? explicitGenerateBrief.brief
+            : null;
+      // The dispatcher's own resolution, mirrored deliberately:
+      // `effectiveBrief = params.briefOverride ?? payload.message`
+      // (`draft-graph-dispatch.ts:591`). Anything the pipeline drafted from is
+      // in here; `ingress.message` alone is NOT that string whenever an
+      // override is live, which is exactly the case that loses the user's
+      // alternatives and constraints.
+      const draftEffectiveBrief: string = draftBriefOverride ?? ingress.message;
       // V4 cordon: dispatchDraftGraph delegates to the V4 graph-synthesis
       // pipeline. V5 has no deterministic draft_graph handler yet. See
       // Docs/v5/v5-cordon.md §1 for trigger conditions and replacement plan.
@@ -4424,11 +4831,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           // behaviour there is bit-identical to before. Clarify v2's
           // answer-augmented brief (flag-gated resume) takes precedence —
           // when set, it already incorporates the explicit-generate brief.
-          ...(clarifyV2DraftBrief !== null
-            ? { briefOverride: clarifyV2DraftBrief }
-            : explicitGenerateDraft && explicitGenerateBrief !== null
-              ? { briefOverride: explicitGenerateBrief.brief }
-              : {}),
+          ...(draftBriefOverride !== null
+            ? { briefOverride: draftBriefOverride }
+            : {}),
           // ROADMAP 2.63 C3/C4 — a draft retires any outstanding draft
           // offer: the honoured pending on a consent resume, or the stale
           // marker when a shaped brief drafted alongside one. Without this
@@ -4667,6 +5072,461 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         // frames at all, so it reads false, which is the honest answer: no
         // client saw a preview from it.
         const previewWasStreamed = graphPreviewEmitted();
+
+        // ⭐⭐⭐ WE INVENTED THE GOAL, THEN FAILED THE DRAFT FOR NOT REACHING IT.
+        //     ASK, INSTEAD OF DYING SILENTLY.
+        //
+        // ── THE DEFECT THIS CLOSES ──────────────────────────────────────
+        // When a brief designates no objective, the pipeline mints a goal node
+        // labelled "Achieve the best outcome for this decision"
+        // (`goal-inference.ts:87`) — CEE-authored prose naming no metric, no
+        // direction, no horizon — and the post-enforcement validator then
+        // requires every node to reach it. Nothing can meaningfully reach it,
+        // so the draft is rejected. `graph-enforcement.ts` stamps
+        // `details.goal_never_stated` when, and only when, that is what
+        // happened: the goal is OURS and every blocking code is a
+        // goal-connectivity code.
+        //
+        // Measured on the served build `2212ae0`, n=40, zero excluded attempts:
+        // the short brief failed 11/15 (73%); the SAME brief plus one sentence
+        // naming the outcome failed 0/10, at the same graph-size band
+        // (Fisher two-sided p = 5.45e-04). The missing fact is the goal, and
+        // only the user has it.
+        //
+        // ── WHY THIS IS A 200 AND NOT BETTER 500 COPY ───────────────────
+        // The honest sentence ALREADY rides this failure — `recovery.suggestion`
+        // has said "State the outcome you are optimising for explicitly" for
+        // weeks. It reaches nobody: a `BoundaryError` has no `assistant_text`,
+        // as the note ~90 lines below this one records in terms. The product
+        // knew the remedy, composed the sentence, and delivered it in an
+        // envelope the user cannot read. This puts it where it can be read.
+        //
+        // ── THE THREE CONJUNCTS, AND WHY EACH IS LOAD-BEARING ───────────
+        //  1. `goal_never_stated` — the producer's own verdict, derived at the
+        //     GRAPH (only the goal node knows who authored it) and never
+        //     re-derived here. An absent key is false, so every other failure
+        //     class keeps today's 500 exactly.
+        //  2. `!previewWasStreamed` — if a GRAPH_READY frame already reached
+        //     this client the user HAS SEEN a model, and replacing it with a
+        //     question would silently retract something on their screen. That
+        //     case belongs to the existing draft-loss disclosure, untouched.
+        //  3. the commit must SUCCEED — a question the user answers into a turn
+        //     that was never recorded is worse than the 500, because their
+        //     reply arrives with no memory of what was asked. On any commit
+        //     failure we fall through to the unchanged 500 path below.
+        //
+        // ⚠ NOTHING PARTIAL IS SHIPPED. The drafted graph is discarded here
+        // exactly as it is discarded today. An option cannot silently vanish
+        // from a comparison that was never presented, and there is no gutted
+        // model to mistake for a whole one — the safety argument is structural,
+        // not a matter of care.
+        if (
+          pipelineDetails?.goal_never_stated === true
+          && !previewWasStreamed
+        ) {
+          // ⭐⭐⭐ THE QUESTION MUST BE RESUMABLE, OR IT IS NOT A CONTINUATION.
+          //
+          // ── WHAT WAS WRONG (Codex P1 at b87aa7bd) ───────────────────────
+          // This exit committed `pending_actions: []` and nothing else. The
+          // commit chokepoint RESPECTS an explicit empty list rather than
+          // deriving one (`commit.ts:1205-1216`), so the ask carried no state
+          // at all: no outstanding goal question, no working brief, and — the
+          // half that is a separate harm — no carry-forward, which WIPED any
+          // unrelated live hold (measured: a `proposed_concept` hold vanished
+          // across the ask turn).
+          //
+          // The user's answer then arrived at a route with no memory of the
+          // brief. If it reached the heuristic draft path, the dispatcher
+          // drafts from `payload.message` alone (`draft-graph-dispatch.ts:591`)
+          // — so the chip answer *"The goal is to increase revenue."* BECOMES
+          // THE WHOLE BRIEF, and the alternatives and constraints the user
+          // wrote are gone. The ask's closing promise — *"You don't need to
+          // rewrite anything else"* — was false.
+          //
+          // ── THE MECHANISM, REUSED RATHER THAN REBUILT ───────────────────
+          // `clarify_v2_round` is this service's EXISTING typed resumable
+          // clarification state, and its reader is live and unconditional
+          // (`route-v2.ts:4324`: the former CEE_CLARIFY_V2_ENABLED gate is
+          // deleted; swept with a contrast control — no `process.env` read for
+          // it survives anywhere in `src/`). `tryClarifyV2Turn` resumes the
+          // latest live round, folds the reply into the persisted brief via
+          // `incorporateAnswerIntoBrief`, and hands the route the augmented
+          // `briefOverride` (`clarify-v2-dispatch.ts:125-148,402-413`). Round 1
+          // no longer ARMS rounds, so the reader has been running with no
+          // writer — this exit is exactly the writer it was built for. Minting
+          // a second continuation channel beside it is this estate's dominant
+          // defect, so nothing new is invented here.
+          //
+          //  · `brief` is the EFFECTIVE brief the pipeline drafted from, not
+          //    `ingress.message` — with a live override those differ, and the
+          //    message is the lossy one.
+          //  · `asked_dimensions: ['goal']` is the truth (we asked exactly the
+          //    goal) and NO-REPEAT then stops the goal being asked twice.
+          //  · `round: CLARIFY_V2_MAX_ROUNDS` fires the resume's OWN STOP RULE
+          //    so the answer DRAFTS instead of buying another question. The
+          //    round budget is genuinely spent: a whole draft attempt was made
+          //    and failed. Asking again here would dilute the one question
+          //    measured to work (0/10 failures once the outcome is named).
+          //  · NO "draft it anyway" affordance is armed. The composer emits
+          //    candidate answers only, deliberately — that chip is the action
+          //    just measured to fail 11/15 on this input, and the pending's
+          //    `chip_id` is the clarify round's own stable handle (so a re-ask
+          //    SUPERSEDES the previous round rather than accumulating against
+          //    the 3-pending cap), never a rendered bypass.
+          //
+          // The prior pendings are read FIRST and separately, and an
+          // unreadable prior state FAILS CLOSED to the unchanged 500 — same
+          // reasoning as the configure-option clarify ask ~900 lines below:
+          // committing without carry-forward would silently wipe a live
+          // proposal, and losing the memory of this question is strictly
+          // better than losing the user's own state.
+          const { CLARIFY_V2_MAX_ROUNDS, CLARIFY_V2_PROCEED_CHIP_ID } = await import(
+            '../orchestrator-v5/clarify-v2/preflight.js'
+          );
+          const { CLARIFY_V2_TURN_TTL, CLARIFY_V2_WALL_TTL_MS } = await import(
+            '../orchestrator-v5/handlers/clarify-v2-dispatch.js'
+          );
+          let askPriorPendings: readonly PendingAction[] | null = null;
+          try {
+            askPriorPendings = await loadMostRecentPendingActionsStrict(
+              ingress.scenario_id,
+              requestId,
+            );
+          } catch (err) {
+            log.warn(
+              {
+                request_id: requestId,
+                scenario_id: ingress.scenario_id,
+                err:
+                  err instanceof Error
+                    ? { name: err.name, message: err.message }
+                    : { message: String(err) },
+              },
+              'V5 goal-never-stated ask — prior-pending read failed; not asking, because a commit without carry-forward would wipe live proposals',
+            );
+          }
+          if (askPriorPendings !== null) {
+            try {
+              const askResponse = composeGoalNeverStatedAsk();
+              const askEmittedAtIso = new Date().toISOString();
+              const goalRoundPending: PendingAction = {
+                id: `cv2_${ingress.turn_id}`,
+                scenario_id: ingress.scenario_id,
+                chip_id: CLARIFY_V2_PROCEED_CHIP_ID,
+                action: {
+                  kind: 'clarify_v2_round',
+                  brief: draftEffectiveBrief,
+                  asked_dimensions: ['goal'],
+                  round: CLARIFY_V2_MAX_ROUNDS,
+                },
+                preconditions: {},
+                expires_at_turn_count: CLARIFY_V2_TURN_TTL,
+                expires_at_iso: new Date(
+                  Date.parse(askEmittedAtIso) + CLARIFY_V2_WALL_TTL_MS,
+                ).toISOString(),
+                emitted_at_iso: askEmittedAtIso,
+              };
+              const askCommit = await commitDirectAnswer(askResponse, {
+                scenario_id: ingress.scenario_id,
+                turn_id: ingress.turn_id,
+                // The same class the frame-no-brief guard commits its framing
+                // prompt under (`route-v2.ts:7186`). This turn asks a question
+                // and carries no graph — that is what `clarify` means here.
+                turn_class: 'clarify',
+                handler_id: null,
+                request_hash: computeRequestHash(ingress),
+                // The draft's own LLM spend is attributed to the failed draft,
+                // not to this exit: the ask itself is deterministic and calls
+                // nothing. Counting the draft's calls here would double-count
+                // them against a turn that made none.
+                llm_calls_used: 0,
+                duration_ms: Date.now() - routeStartedAt,
+                handler_facts: [],
+                // THIS TURN'S OWN pending: the resumable goal round.
+                pending_actions: [goalRoundPending],
+                // …and the prior turn's set, so the carry-forward runs over the
+                // REAL prior state instead of the empty default. Without this,
+                // `computeSurvivingPriorPendings` is a no-op and every unrelated
+                // live hold is wiped by the ask (hold-wipe class).
+                priorPendingActions: askPriorPendings,
+                coaching_state: null,
+                userMessage: ingress.message,
+              });
+              emit(TelemetryEvents.V5DraftGoalNeverStatedAsk, {
+                request_id: requestId,
+                scenario_id: ingress.scenario_id,
+                codes: Array.isArray(pipelineDetails.validation_error_codes)
+                  ? pipelineDetails.validation_error_codes
+                  : [],
+              });
+              log.info({
+                event: 'v5.recovery_response.goal_never_stated_ask',
+                request_id: requestId,
+                scenario_id: ingress.scenario_id,
+              }, 'Draft blocked on a goal CEE itself minted — asking the user for the outcome instead of returning a dead 500');
+              return sendFinalised200(
+                reply,
+                requestId,
+                'draft_graph_goal_never_stated',
+                askCommit.response,
+                {
+                  graph: null,
+                  // T1 claim safety — INHERITED from the turn-entry read. Never a
+                  // literal: the permission belongs to the fact this response
+                  // DISPLAYS, and this one displays no analysis at all.
+                  ...(await claimSafety.forExit()),
+                  // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: a deterministic
+                  // question is functional copy and must ship plain.
+                  answerKind: 'functional',
+                  requestStartedAt: routeStartedAt,
+                  scenarioId: ingress.scenario_id,
+                  turnId: ingress.turn_id,
+                  userMessage: ingress.message,
+                },
+              );
+            } catch (askErr) {
+              // FALL THROUGH to the unchanged 500. A failed commit means the turn
+              // was not recorded, and an unrecorded question is worse than an
+              // error (see conjunct 3). This is the fail-closed direction and it
+              // is the same shape the frame guard uses when ITS commit fails.
+              log.warn({
+                request_id: requestId,
+                scenario_id: ingress.scenario_id,
+                err: askErr instanceof Error
+                  ? { name: askErr.name, message: askErr.message }
+                  : { message: String(askErr) },
+              }, 'V5 draft goal-never-stated ask — commit failed; falling back to the 500 BoundaryError');
+            }
+          }
+        }
+
+        // ⭐⭐⭐ NO BARE 500 ON THIS PATH. (Paul's ruling, 2026-09-15)
+        //
+        // ── THE DEFECT THIS CLOSES ──────────────────────────────────────
+        // Roughly one fresh brief in three came back HTTP 500 with NO MODEL
+        // AT ALL. Measured on this build (`07da2c0b`): 30/96 at concurrency
+        // <= 4, and 3/8 on a SEQUENTIAL concurrency=1 control, so it is the
+        // product and not harness load. IDENTICAL brief bytes gave
+        // 200 / 200 / 500 across three runs.
+        //
+        // The user got nothing, learnt nothing, and was handed no reference
+        // they could send us. WE learnt nothing either: a `BoundaryError` has
+        // no `assistant_text`, so the honest recovery sentence the pipeline
+        // had ALREADY COMPOSED rode the wire unread. This file confessed it in
+        // terms ~50 lines below and named the exact remedy — *"a turn
+        // committing direct_answer 200 here"*. This is that turn.
+        //
+        // Paul's ruling: *"Nothing should fail silently. Everything should be
+        // an opportunity to coach the user and get them to help correct the
+        // data, unless it is Olumi's fault, and then we just need to know that
+        // error."* Both arms are served: `details.fault` says WHICH arm, read
+        // off the producer's own stamp, and `details.readable` carries the
+        // producer's own sentence.
+        //
+        // ── WHY IT IS A REFUSAL AND NOT A REPAIR ────────────────────────
+        // Nothing here invents model content. No edge is synthesised, no
+        // strength/mean/std is minted, and no partial graph is shipped — the
+        // drafted graph is discarded exactly as it is discarded today. Shipping
+        // a graph with stranded nodes is precisely what the enforcement gate
+        // fails closed to prevent (`graph-enforcement.ts:804-805`), and
+        // `retry-directive.ts:130` already rules that *"an unsupported link is
+        // worse than an omitted one"*. The safety argument is therefore
+        // STRUCTURAL, not a matter of care: there is no gutted model to mistake
+        // for a whole one.
+        //
+        // ── THE THREE CONJUNCTS, EACH LOAD-BEARING ──────────────────────
+        //  1. `!previewWasStreamed` — if a GRAPH_READY frame already reached
+        //     this client the user HAS SEEN a model, and replacing it with an
+        //     error turn would silently retract something on their screen.
+        //     That case keeps the existing draft-loss disclosure, untouched.
+        //  2. the prior-pending read must SUCCEED — committing without
+        //     carry-forward silently wipes an unrelated live hold, and losing
+        //     the memory of this failure is strictly better than losing the
+        //     user's own state. Same reasoning as the goal ask above.
+        //  3. the commit must SUCCEED — an unrecorded turn is worse than the
+        //     500, because the user's next message arrives at a route with no
+        //     memory of what was said. Any failure falls through to the
+        //     UNCHANGED 500 below.
+        //
+        // ⚠ ORDERING. This sits AFTER the goal-never-stated ask, which is
+        // strictly better where it applies (it asks the one question measured
+        // to flip 11/15 failures to 0/10). This is the floor underneath it,
+        // reached when that exit does not apply OR could not commit — which is
+        // also the only way `fault: 'your_data'` is reachable here.
+        //
+        // ── THE CLASS, NAMED BY THE PRODUCER AND NOT BY ME ──────────────
+        // `validation_error_codes` is emitted by exactly one site — the
+        // post-enforcement block gate (`graph-enforcement.ts:~905`) — and it is
+        // the same site whose `selectEnforcementBlockRecovery` composed the
+        // sentence this turn speaks. So the gate below is the producer's own
+        // signature, not a code list restated here that could drift from it
+        // (trap 12). Absent is false, so EVERY other failure class on this path
+        // keeps today's 500 exactly: timeouts, rate limits, upstream errors,
+        // truncations and plain throws are different failures with different
+        // remedies, and speaking for them is a separate, separately-ruled
+        // increment. THAT IS THE RESIDUAL, and it is stated rather than buried.
+        const recoveryCodes = Array.isArray(pipelineDetails?.validation_error_codes)
+          ? (pipelineDetails.validation_error_codes as unknown[]).filter(
+              (c): c is string => typeof c === 'string',
+            )
+          : [];
+        if (!previewWasStreamed && isPostEnforcementBlock(recoveryCodes)) {
+          let recoveryPriorPendings: readonly PendingAction[] | null = null;
+          try {
+            recoveryPriorPendings = await loadMostRecentPendingActionsStrict(
+              ingress.scenario_id,
+              requestId,
+            );
+          } catch (err) {
+            log.warn(
+              {
+                request_id: requestId,
+                scenario_id: ingress.scenario_id,
+                err:
+                  err instanceof Error
+                    ? { name: err.name, message: err.message }
+                    : { message: String(err) },
+              },
+              'V5 draft-failure recovery turn — prior-pending read failed; not speaking, because a commit without carry-forward would wipe live proposals',
+            );
+          }
+          if (recoveryPriorPendings !== null) {
+            try {
+              const mappedRecovery =
+                pipelineStatusCode != null && pipelineErrorCode != null
+                  ? mapDraftGraphPipelineReason(
+                      pipelineStatusCode,
+                      pipelineErrorCode,
+                      pipelineReason,
+                      pipelineRetryable,
+                    )
+                  : { reason: 'draft_graph_pipeline_threw', retryable: true };
+              // READ, never re-derived. Only the goal NODE knows who authored
+              // the goal, and the graph is gone by the time we hold this
+              // failure. Absent is `'olumi'` and that is the fail-safe
+              // direction — see the composer's header for the measurement.
+              const recoveryFault: DraftFailureFault =
+                pipelineDetails?.goal_never_stated === true ? 'your_data' : 'olumi';
+              const recoverySuggestion =
+                typeof pipelineRecovery?.suggestion === 'string'
+                  ? pipelineRecovery.suggestion
+                  : null;
+              const recoveryHints = Array.isArray(pipelineRecovery?.hints)
+                ? (pipelineRecovery.hints as unknown[]).filter(
+                    (h): h is string => typeof h === 'string',
+                  )
+                : [];
+              // ⚠ `draftEffectiveBrief`, NOT `ingress.message`: with a live
+              // override those differ and the message is the lossy one. The
+              // floor is the draft input schema's own minimum — a seed below it
+              // cannot be drafted from, so offering the retry would be an
+              // affordance we could not honour.
+              const retrySeed =
+                draftEffectiveBrief.length >= DRAFT_GRAPH_MIN_BRIEF_LENGTH
+                  ? draftEffectiveBrief
+                  : null;
+              const offerRetry = mappedRecovery.retryable && retrySeed !== null;
+              const recoveryResponse = composeDraftFailureRecoveryTurn({
+                requestId,
+                fault: recoveryFault,
+                suggestion: recoverySuggestion,
+                hints: recoveryHints,
+                reason: mappedRecovery.reason,
+                validationErrorCodes: recoveryCodes,
+                retryable: mappedRecovery.retryable,
+                offerRetry,
+              });
+              // The retry is the EXISTING `draft_graph` pending, not a new
+              // continuation channel: its resume already lives at
+              // `route-v2.ts:4092` and claims the offer by exact copy replay of
+              // the chip's own label/message. A `clarify_v2_round` would be
+              // wrong here — it folds the reply into the BRIEF, and "Try again"
+              // is not an answer to anything.
+              const recoveryPendings: readonly PendingAction[] =
+                offerRetry && retrySeed !== null
+                  ? [
+                      buildDraftOfferPending({
+                        scenarioId: ingress.scenario_id,
+                        chipId: DRAFT_FAILURE_RETRY_CHIP_ID,
+                        publicLabel: DRAFT_FAILURE_RETRY_CHIP_LABEL,
+                        publicMessage: DRAFT_FAILURE_RETRY_CHIP_MESSAGE,
+                        briefSeed: retrySeed,
+                        nowMs: Date.now(),
+                      }),
+                    ]
+                  : [];
+              const recoveryCommit = await commitDirectAnswer(recoveryResponse, {
+                scenario_id: ingress.scenario_id,
+                turn_id: ingress.turn_id,
+                // It answers rather than asks — the goal exit's `'clarify'` is
+                // right for a question and wrong for a report.
+                turn_class: 'direct_answer',
+                handler_id: null,
+                request_hash: computeRequestHash(ingress),
+                // The failed draft's own LLM spend is attributed to the draft,
+                // not to this exit: composing the turn is deterministic and
+                // calls nothing.
+                llm_calls_used: 0,
+                duration_ms: Date.now() - routeStartedAt,
+                handler_facts: [],
+                pending_actions: [...recoveryPendings],
+                // …and the prior turn's set, so the carry-forward runs over the
+                // REAL prior state instead of the empty default.
+                priorPendingActions: recoveryPriorPendings,
+                coaching_state: null,
+                userMessage: ingress.message,
+              });
+              log.info(
+                {
+                  event: 'v5.recovery_response.draft_failure_spoken',
+                  request_id: requestId,
+                  scenario_id: ingress.scenario_id,
+                  reason: mappedRecovery.reason,
+                  fault: recoveryFault,
+                  codes: recoveryCodes,
+                  retry_offered: offerRetry,
+                },
+                'Draft pipeline failed before any preview — committing a speaking 200 instead of a dead 500',
+              );
+              return sendFinalised200(
+                reply,
+                requestId,
+                'draft_graph_failure_spoken',
+                recoveryCommit.response,
+                {
+                  graph: null,
+                  // T1 claim safety — INHERITED from the turn-entry read. Never
+                  // a literal: the permission belongs to the fact this response
+                  // DISPLAYS, and this one displays no analysis at all.
+                  ...(await claimSafety.forExit()),
+                  // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: a
+                  // deterministic failure report is functional copy and must
+                  // ship plain.
+                  answerKind: 'functional',
+                  requestStartedAt: routeStartedAt,
+                  scenarioId: ingress.scenario_id,
+                  turnId: ingress.turn_id,
+                  userMessage: ingress.message,
+                },
+              );
+            } catch (recoveryErr) {
+              // FALL THROUGH to the unchanged 500. Conjunct 3: an unrecorded
+              // turn is worse than an error.
+              log.warn(
+                {
+                  request_id: requestId,
+                  scenario_id: ingress.scenario_id,
+                  err:
+                    recoveryErr instanceof Error
+                      ? { name: recoveryErr.name, message: recoveryErr.message }
+                      : { message: String(recoveryErr) },
+                },
+                'V5 draft-failure recovery turn — commit failed; falling back to the 500 BoundaryError',
+              );
+            }
+          }
+        }
+
         await markDraftGraphWriteFailed(
           ingress.scenario_id,
           ingress.turn_id,
@@ -4853,6 +5713,11 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // ────────────────────────────────────────────────────────────────
     const boundedNonMutationAnalytical =
       isBoundedNonMutationAnalyticalRequest(ingress.message);
+    // Authority is independent of the bounded analytical vocabulary: an
+    // ordinary reminder may explicitly refuse an edit without matching it.
+    // Reuse the scoped veto so an affirmative edit followed by "don't change
+    // anything else" remains eligible. Do not derive authority from selection.
+    const modelChangeRefused = hasExplicitNoModelChangeIntent(ingress.message);
     const analyticalQuestionDetected =
       isAnalyticalQuestion(ingress.message) || boundedNonMutationAnalytical;
     const positiveEditRegexHit = EDIT_GRAPH_POSITIVE_REGEX.test(ingress.message);
@@ -5033,6 +5898,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // value-update gate keeps `set X to Y` / `increase X by N` on the
     // deterministic D1 path (value-update-gate.ts).
     const editVerbCandidate =
+      !modelChangeRefused &&
       positiveEditRegexHit &&
       !negativeEditRegexHit &&
       !valueUpdatePhrasingHit &&
@@ -5160,7 +6026,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // shared bounded classifier owns the turn, every legacy edit intercept
     // stands down; the normal router gets exactly one chance to answer it.
     const bypassEditHandling =
-      proposalConfirmSuppressed || stateQuerySuppressed || boundedNonMutationAnalytical;
+      proposalConfirmSuppressed || stateQuerySuppressed || boundedNonMutationAnalytical || modelChangeRefused;
 
     // ══════════════════════════════════════════════════════════════════════
     // ⭐⭐ ROADMAP 2.1353 — THE TWO EDIT-CLARIFY INTERCEPTS MUST REMEMBER ASKING.
@@ -5997,6 +6863,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         // is an edit-lane intent in its own right, on exactly the same footing
         // as 2.1261's bare-value bind: the pre-route's gates ARE its gates.
         answeredAskClaim) &&
+      !modelChangeRefused &&
       !proposalConfirmSuppressed &&
       // Edge-chip door (ROADMAP 1.187 / #30, HARD GATE before Lane U). A typed
       // mutation chip_click (source==='chip_click' with a defined, non-readiness
@@ -6553,15 +7420,78 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
                 outcome: `fell_through:${textOutcome.reason}`,
               });
             }
+          } else if (composed.status === 'clarify' && composed.reason === 'label') {
+            // ⭐⭐ THE OPTION-LABEL CLARIFY — the one non-composed outcome that
+            // is now ANSWERED rather than discarded.
+            //
+            // `labelIsTheDecisionItself` has always detected this class
+            // ("Geographic expansion" proposed under "Geographic expansion
+            // strategy"). It fell through to the generic edit lane below,
+            // which asks for "the specific factor, edge, option, or value to
+            // change" — a sentence about a different question. The product
+            // knew exactly what was wrong with the name and said none of it.
+            //
+            // ⚠ IT COMMITS NOTHING, AND THAT IS WHY IT IS NOT THE
+            // "clarify-and-commit path" the note below rightly declined. There
+            // is no pending, no proposal and no second consent producer: this
+            // turn is a QUESTION, and the answer arrives as an ordinary user
+            // turn that re-enters the add-option recogniser at the top of this
+            // same block.
+            //
+            // ⚠ CORRECTED 12 Sep 2026 — this added "the resume costs nothing
+            // because it already exists." IT RE-ENTERS AND DOES NOT MATCH: four
+            // natural answers to this very question all return
+            // `not_add_option_shape` and reach no proposer, while the contrast
+            // control 'Add "X" as an option' is held in the same run. The
+            // deterministic path accepts a COMMAND, not an answer. The replies
+            // fall to the conversational lane, which the harness stubs, so the
+            // live behaviour is UNMEASURED rather than known-broken. Full
+            // measurement and scope at `propose-add-option.ts`'s header.
+            //
+            // Detection is DETERMINISTIC (equality after head-noun stripping),
+            // so no model call decides whether the user is asked — the same
+            // property that lets this ship without a new string rule over
+            // natural language.
+            emit(TelemetryEvents.V5AddOptionTransaction, {
+              request_id: requestId,
+              origin: 'text',
+              outcome: 'clarify_label',
+            });
+            return sendFinalised200(
+              reply,
+              requestId,
+              'add_option_transaction',
+              composeOptionLabelClarifyResponse({
+                proposedLabel: composed.label,
+                decisionLabel: composed.decision.label,
+                stage: ingress.stage,
+              }),
+              {
+                graph: null,
+                ...(await claimSafety.forExit()),
+                // A question about a name is functional copy, shipped plain
+                // (ROADMAP 1.132 / F1) — the same posture as the held
+                // proposal and the configure-option clarify.
+                answerKind: 'functional',
+                requestStartedAt: routeStartedAt,
+                scenarioId: ingress.scenario_id,
+                turnId: ingress.turn_id,
+                userMessage: ingress.message,
+              },
+            );
           } else {
-            // ⭐ EVERY NON-COMPOSED OUTCOME FALLS THROUGH, INCLUDING `clarify`.
+            // ⭐ EVERY REMAINING NON-COMPOSED OUTCOME FALLS THROUGH.
+            //
+            // ⚠ AMENDED 12 Sep 2026: this block used to read "INCLUDING
+            // `clarify`", which is no longer true of the LABEL clarify — it is
+            // answered by the branch above. The PARENT clarify ("which decision
+            // owns this option?") still falls through here, deliberately.
             //
             // ⚠ ROWED, NOT FIXED (3 Sep 2026): the parenthetical below is
             // FALSE as a reachability claim — a `clarify` is not restricted to
             // multi-decision models, and the validator's single-decision
             // auto-resolve is not the only path here. The BEHAVIOUR is correct
-            // either way (every non-`composed` status falls through to the edit
-            // lane), so this is a comment defect, not a routing defect.
+            // either way, so this is a comment defect, not a routing defect.
             // Backlog; deliberately not fixed inside this round.
             //
             // ⚠ ALSO ROWED: the three chip-arm telemetry emits above
@@ -6571,14 +7501,18 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             // chip-originated fall-throughs are indistinguishable from
             // unattributed ones in telemetry. Real, minor, backlog.
             //
-            // `clarify` means the proposer could not tell WHICH decision owns
-            // the option (only reachable when the model holds more than one —
-            // with a single decision the validator resolves it). The edit lane
-            // below is the existing, working answer for that turn and it holds
-            // its proposal for confirmation too, so the user still sees and
-            // approves the parent before anything moves. Deliberately NOT a new
-            // clarify-and-commit path here: it would be a second consent
-            // producer on a live route for a case this arm can simply decline.
+            // The `clarify` that still reaches here is the PARENT one — the
+            // proposer could not tell WHICH decision owns the option. The edit
+            // lane below is the existing, working answer for that turn and it
+            // holds its proposal for confirmation too, so the user still sees
+            // and approves the parent before anything moves. Deliberately NOT a
+            // clarify-and-COMMIT path: that would be a second consent producer
+            // on a live route for a case this arm can simply decline.
+            //
+            // ⚠ THAT RULING IS ABOUT COMMITTING, NOT ABOUT ASKING, and the
+            // label-clarify branch above does not breach it: it persists
+            // nothing, holds nothing, and produces no consent — it asks a
+            // question and lets the answer arrive as an ordinary turn.
             emit(TelemetryEvents.V5AddOptionTransaction, {
               request_id: requestId,
               origin: 'text',

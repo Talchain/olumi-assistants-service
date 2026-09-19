@@ -177,6 +177,12 @@ const SCANNED_FILES: Readonly<Record<string, string>> = {
     HERE,
     '../compose/duplicate-option-label-response.ts',
   ),
+  // The option-label clarify exit (2026-09-12) — registered on the commit that
+  // created it, because the derived domain test fails otherwise.
+  'compose/option-label-clarify-response.ts': resolve(
+    HERE,
+    '../compose/option-label-clarify-response.ts',
+  ),
 };
 
 /**
@@ -382,6 +388,10 @@ const TURN_EXECUTOR_SITES: Readonly<Record<string, RegisteredSite>> = {
     stance: 'structural',
     why: 'Canonical readiness-repair receipt. Interpolates only applied/unresolved counts after hash/CAS-protected commit and readback; it names no option, ranking or analysis claim.',
   },
+  "`Confirmed. I applied ${written} estimated ${written === 1 ? 'value' :": {
+    stance: 'structural',
+    why: 'Value-batch apply receipt, the readiness-repair receipt above one seam over. Interpolates only counts — values written, values declined, unsettable gaps, blockers remaining — after the atomic commit and readback. It names no option, no ranking and no analysis claim; the estimates themselves were shown in the reviewed proposal, not here.',
+  },
   PROPOSAL_DISMISSAL_RESPONSE: { stance: 'structural', why: 'Module constant.' },
   '`Got it: I can add ${riskLabel} as a risk with ${driverLabel} as its m': {
     stance: 'structural',
@@ -488,7 +498,7 @@ const TURN_EXECUTOR_SITES: Readonly<Record<string, RegisteredSite>> = {
   'runComparisonOutcome.assistant_text': {
     stance: 'gated',
     why:
-      'ROADMAP 1.233. Zero LLM calls: `composeComparison` builds "The leading option has changed. X came out ahead before, and Y now leads." and the margin sentences straight from the two runs\' persisted enrichment. `tryRunComparisonGate` takes a REQUIRED `mayNameLeadingOption` (required, not optional-defaulting-true, so a new call site cannot re-open the leak by omission) and suppresses the ordering + margin sentences while KEEPING the robustness-band shift and the driver-influence mover, which rank nothing and are the substance of "what changed?". '
+      'ROADMAP 1.233. Zero LLM calls: `composeComparison` builds "The option most likely to serve your goal has changed. X scored highest before, and Y scores highest now." and the margin sentences straight from the two runs\' persisted enrichment. `tryRunComparisonGate` takes a REQUIRED `mayNameLeadingOption` (required, not optional-defaulting-true, so a new call site cannot re-open the leak by omission) and suppresses the ordering + margin sentences while KEEPING the robustness-band shift and the driver-influence mover, which rank nothing and are the substance of "what changed?". '
       + '⚠ 2026-07-27 — THE PERMISSION WAS SINGULAR AND THE CLAIM IS PLURAL. That required boolean is the TURN\'s permission, read off the scenario\'s newest CLAIM-BEARING fact (#730); the sentence above names TWO runs. So a scenario whose PRIOR run withheld its leader had that leader named as soon as a later run permitted — the withhold expired after one more analysis. Commonest form needs no unusual state at all: a run predating the #710 verdict stamp fail-closes, and every such legacy run was nameable from a later permitted turn. Closed by `RunComparisonLeaderAuthority`: one permission PER COMPARED RUN, each `turnPermission && thatRunsOwnVerdict` via #730\'s one fact -> one verdict narrow over the pair the gate already selects — no second selection. Cross-run claims (the "has changed" sentence, "still leads", and the margin shift) require BOTH permissions, because each presupposes both leaders; the mixed cases name the licensed run and state plainly that the other half is unavailable. One-directional by construction: every value is <= the pre-fix boolean, so permitted/permitted is byte-identical. '
       + '2026-09-06 — a second mode, `same_inputs`, frames the SAME comparison sentences (one composer, `composeComparisonParts`) with a lead sentence and an offer when both compared runs carry equal `graph_hash_at_run`; the per-run authority applies to it unchanged, and its two constants are in the module-load leader-vocabulary probe.',
   },
@@ -867,6 +877,39 @@ const DUPLICATE_OPTION_LABEL_SITES: Readonly<Record<string, RegisteredSite>> = {
   },
 };
 
+/**
+ * `src/orchestrator-v5/compose/option-label-clarify-response.ts` — the
+ * option-label clarify exit (2026-09-12), on the commit that created the file.
+ * The derived domain test caught it on its first run, which is the mechanism
+ * working exactly as designed.
+ */
+const OPTION_LABEL_CLARIFY_SITES: Readonly<Record<string, RegisteredSite>> = {
+  assistant_text: {
+    stance: 'structural',
+    why:
+      'ONE site, keyed `assistant_text` because the site uses the ES6 shorthand property (same '
+      + 'shape as DUPLICATE_OPTION_LABEL_SITES, OPTION_EFFECT_ASK_SITES and '
+      + 'REPAIR_VALUE_ASK_SITES). The template interpolates exactly TWO ingredients and one '
+      + 'exported constant, and every one is a structural fact rather than anything read from '
+      + 'an analysis. '
+      + '(1) `proposedLabel` — the name the focused proposer emitted for a NEW option, echoed '
+      + 'back verbatim so the user reads their own words; it names a node that does NOT exist '
+      + 'on the graph, so it cannot be an analysed option at all. '
+      + '(2) `decisionLabel` — the label of the DECISION node the proposed name collided with, '
+      + 'selected by `labelIsTheDecisionItself` (equality after head-noun stripping), quoted '
+      + 'verbatim. A decision is not a candidate in any ranking. '
+      + '(3) `OPTION_LABEL_CLARIFY_UNCHANGED_SENTENCE`, a frozen literal. '
+      + 'IT CANNOT ASSERT A LEADER: this composer never receives an analysis result, a value, '
+      + 'a candidate list, or an option ordering of any kind — its whole input is one rejected '
+      + 'string and one decision label, so there is no per-option datum in scope to rank, '
+      + 'compare or crown even if the copy wanted one. '
+      + 'It ships ZERO chips, asserted by its companion spec, so no label leaves this file '
+      + 'through the chip channel either. Zero LLM calls: the composer exists precisely to '
+      + 'answer without one, from a DETERMINISTIC detection. The route threads '
+      + '`mayNameLeadingOption` from `claimSafety.forExit()` on this exit, not a literal.',
+  },
+};
+
 const COMPOSE_SITE_REGISTER: Readonly<Record<string, Readonly<Record<string, RegisteredSite>>>> = {
   'turn-executor.ts': TURN_EXECUTOR_SITES,
   'route-v2.ts': ROUTE_V2_SITES,
@@ -879,6 +922,7 @@ const COMPOSE_SITE_REGISTER: Readonly<Record<string, Readonly<Record<string, Reg
   'compose/repair-value-ask-response.ts': REPAIR_VALUE_ASK_SITES,
   'compose/option-effect-ask-response.ts': OPTION_EFFECT_ASK_SITES,
   'compose/duplicate-option-label-response.ts': DUPLICATE_OPTION_LABEL_SITES,
+  'compose/option-label-clarify-response.ts': OPTION_LABEL_CLARIFY_SITES,
 };
 
 /** Count occurrences per key — the multiset the assertions compare. */
@@ -1134,7 +1178,7 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // turn-executor.ts — the competing-ask branch, the re-ask's sibling on the
     // same pre-route. Explicit `assistant_text:` form, so keyable by the same
     // regex and in scope here.
-    expect(compared, 'the re-key comparison compared nothing').toBe(43);
+    expect(compared, 'the re-key comparison compared nothing').toBe(44);
   });
 
   it('THE DOMAIN IS DERIVED: scanned ∪ unscanned == every compose file in src/', () => {
@@ -1354,13 +1398,23 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // for the same reason: this ledger failed `pnpm test:required` on the
     // commit that created the site, and the guard found the omission rather
     // than a human remembering it. Ninth instance of the mechanism working.
-    expect(sites.length, 'total compose SITES across every scanned file').toBe(48);
-    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(44);
+    // ⚠ OPTION-LABEL CLARIFY EXIT (2026-09-12): 47 -> 48 sites, 43 -> 44 keys,
+    // one ADDED file (compose/option-label-clarify-response.ts), registered
+    // `structural` with its derivation (OPTION_LABEL_CLARIFY_SITES). Recorded
+    // the same way as every entry above, and for the same reason: this ledger
+    // failed the required check on the commit that created the site, and the
+    // guard found the omission rather than a human remembering it. NINTH
+    // instance of the mechanism working — and the author had run the whole
+    // affected-set locally and still missed it, which is the argument for
+    // deriving the domain rather than listing it, once more.
+    expect(sites.length, 'total compose SITES across every scanned file').toBe(50);
+    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(46);
     expect(Object.keys(COMPOSE_SITE_REGISTER).sort()).toEqual([
       'compose/configure-option-clarify-response.ts',
       'compose/duplicate-option-label-response.ts',
       'compose/edit-clarify-response.ts',
       'compose/option-effect-ask-response.ts',
+      'compose/option-label-clarify-response.ts',
       'compose/repair-value-ask-response.ts',
       'handlers/chip-click-dispatch.ts',
       'route-v2.ts',
@@ -1476,8 +1530,32 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
       qualify('turn-executor.ts', 'coachGuarded.assistant_text'),
       qualify('turn-executor.ts', 'converseGuarded.assistant_text'),
     ]);
+    // ⚠ RECONCILED TO THE INTENTIONAL TERNARY (#1401), OBLIGATION UNCHANGED.
+    //   The gate used to read `modelFacingClaimSafety: mayNameLeadingOptionForRun`
+    //   and this pin matched that literal. The corrected gate opens with the
+    //   NEGATION — entitlement is still the FIRST branch, and failing it still
+    //   withholds — because two further outcomes now sit behind it: a
+    //   `qualified` state for an entitled, separated, exactly-provisional run,
+    //   and a `withheld` state when the admission ACTIVELY CAPS a run that does
+    //   not qualify (previously that fell through to `permitted`, handing the
+    //   coach an ordering the final wire arm withholds).
+    //
+    //   So the pin names the entitlement-first branch AND the two outcomes that
+    //   must not vanish. A revert to a single boolean, or a silent return of the
+    //   permissive fall-through, breaks one of them.
     expect(source).toContain(
+      'modelFacingClaimSafety: !mayNameLeadingOptionForRun',
+    );
+    expect(source).toContain("status: 'qualified'");
+    expect(source).toContain('admissionWithholdsLeaderNaming');
+    // Drift control, same idiom as the `PIN` test above: removing the negation
+    // must be visible to this assertion rather than passing on a substring.
+    const REVERTED = source.replace(
+      'modelFacingClaimSafety: !mayNameLeadingOptionForRun',
       'modelFacingClaimSafety: mayNameLeadingOptionForRun',
+    );
+    expect(REVERTED).not.toContain(
+      'modelFacingClaimSafety: !mayNameLeadingOptionForRun',
     );
     // Non-vacuity, same rationale as the gated check above. `gated_by_input`
     // asserts something about the PACK, so the evidence is the projection call
@@ -1672,8 +1750,25 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // TAIL_PATTERN, so appending it anywhere earlier here would compose a
     // summary the egress allowlist rejects and the user would silently receive
     // the bare template.
+    //
+    // The run-level PARTICIPATION disclosure adds a SIXTH slot, appended after
+    // the unset-option-effect one. Same treatment for the same reasons: the
+    // `gated` stance is unaffected — `summary` is still "withheld-able
+    // headline, else a locked template" — and the pin is UPDATED RATHER THAN
+    // LOOSENED, so a future reordering stays visible here.
+    //
+    // ⚠ AND THE PIN EARNED ITS KEEP A FOURTH TIME, in the same way and for the
+    // same reason as the fifth slot: `pnpm typecheck`, `eslint` and every
+    // focused spec the lane ran were GREEN, and the required CI check named
+    // this line. A static-source pin catches exactly the thing a behavioural
+    // suite cannot see — a compose site that was edited without anyone looking
+    // at the composition. The ordering constraint is real for this slot too:
+    // the participation tail sits LAST in `analysis-result-headline.ts`'s
+    // TAIL_PATTERN, so appending it anywhere earlier here would compose a
+    // summary the egress allowlist rejects and the user would silently receive
+    // the bare template.
     expect(RUN_ANALYSIS).toContain(
-      'const summary = `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}`;',
+      'const summary = `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}`;',
     );
     expect(RUN_ANALYSIS).toContain('assistant_text: summary,');
     // ONE verdict, TWO consumers — the property that makes this `gated` rather

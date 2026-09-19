@@ -328,23 +328,17 @@ function nodeViews(graph: unknown): readonly GraphNodeView[] {
  * when it names a kind the graph actually has — derived from the graph in hand,
  * never a hand-listed vocabulary (trap 12).
  */
-function resolveElement(message: string, graph: unknown): GraphNodeView | null {
-  const nodes = nodeViews(graph);
-  if (nodes.length === 0) return null;
-
-  const messageTokens = identifyingTokens(message);
-  if (messageTokens.size === 0) return null;
-
-  // Kind narrowing, derived from THIS graph's kinds.
-  const kindsPresent = new Set(nodes.map((n) => n.kind).filter((k) => k.length > 0));
-  const messageWords = new Set(tokenise(message));
-  const namedKinds = [...kindsPresent].filter(
-    (kind) => messageWords.has(kind) || messageWords.has(`${kind}s`),
-  );
-  const candidates =
-    namedKinds.length > 0 ? nodes.filter((n) => namedKinds.includes(n.kind)) : nodes;
-  if (candidates.length === 0) return null;
-
+/**
+ * The strict-maximum label-overlap winner over a candidate set, or `null`.
+ *
+ * Lifted out of `resolveElement` UNCHANGED so it can be run twice over two
+ * candidate sets — see the narrowing-disagreement check below. The tie rule and
+ * the zero-score rule are the originals.
+ */
+function strictBestByLabelOverlap(
+  candidates: readonly GraphNodeView[],
+  messageTokens: ReadonlySet<string>,
+): GraphNodeView | null {
   let best: GraphNodeView | null = null;
   let bestScore = 0;
   let runnerUp = 0;
@@ -375,6 +369,87 @@ function resolveElement(message: string, graph: unknown): GraphNodeView | null {
   if (best === null || bestScore === 0 || bestScore === runnerUp) return null;
   return best;
 }
+
+function resolveElement(message: string, graph: unknown): GraphNodeView | null {
+  const nodes = nodeViews(graph);
+  if (nodes.length === 0) return null;
+
+  const messageTokens = identifyingTokens(message);
+  if (messageTokens.size === 0) return null;
+
+  // Kind narrowing, derived from THIS graph's kinds.
+  const kindsPresent = new Set(nodes.map((n) => n.kind).filter((k) => k.length > 0));
+  const messageWords = new Set(tokenise(message));
+  const namedKinds = [...kindsPresent].filter(
+    (kind) => messageWords.has(kind) || messageWords.has(`${kind}s`),
+  );
+
+  // No kind word typed: nothing is narrowed, so there is nothing to disagree
+  // with. This path is byte-for-byte the original behaviour.
+  if (namedKinds.length === 0) return strictBestByLabelOverlap(nodes, messageTokens);
+
+  const candidates = nodes.filter((n) => namedKinds.includes(n.kind));
+  if (candidates.length === 0) return null;
+
+  const narrowed = strictBestByLabelOverlap(candidates, messageTokens);
+  if (narrowed === null) return null;
+
+  /**
+   * ⭐⭐ NARROWING MAY CONFIRM A WINNER. IT MAY NEVER CREATE ONE.
+   *
+   * —— THE DEFECT THIS CLOSES ——
+   * Live journey witness, deployed staging. The user's brief said the platform
+   * team is SIX; both drafted options said "10 people". They asked, VERBATIM:
+   *
+   *   "Where did 10 people come from? I told you the platform team is six.
+   *    Both your options say 10 people. What else in this model did you make up?"
+   *
+   * and the COMPLETE reply was *"'Keep Platform Team as-is (Status Quo)' was my
+   * suggestion, not something you wrote."* — three questions, zero answered, and
+   * provenance about a DIFFERENT element than the one asked about.
+   *
+   * The third sentence contains "options", so `namedKinds` became `['option']`
+   * and the factor `Platform Team Headcount` — the actual subject of "where did
+   * 10 come from" — was filtered out of the candidate set BEFORE scoring.
+   *
+   * ⚠ NOTE THE DIRECTION. This was never a tie the resolver failed to detect.
+   * **The right answer was not a candidate**, so the strict-maximum rule — this
+   * module's own defence against answering about the wrong element (trap 19) —
+   * could not fire. That defence is written against the SCORING; the filter runs
+   * BEFORE the scoring and sat outside it.
+   *
+   * —— THE RULE ——
+   * Score the graph both ways. If the kind word CHANGED which node wins, the two
+   * readings disagree about what the user is asking about, and that disagreement
+   * IS the ambiguity — so decline, exactly as a tie does.
+   *
+   * `unnarrowed === null` is a disagreement too, and the witnessed case is
+   * precisely that shape: across the whole graph the factor TIES the option, so
+   * the unnarrowed read has no strict maximum, and narrowing manufactured one out
+   * of a field that had none. A tie is the resolver saying "I cannot tell"; the
+   * filter must not overturn it.
+   *
+   * Compared by OBJECT IDENTITY, not by `id`: `candidates` is a filter of
+   * `nodes`, so the winners are the same reference when they are the same node,
+   * and a graph carrying duplicate ids cannot talk this into agreeing.
+   *
+   * ⚠ IT DOES NOT DECLINE ON EVERYTHING, and that is the load-bearing half. Where
+   * the narrowed winner also wins outright over the whole graph — the module's
+   * headline "hybrid phased option" case, where the option beats its twin factors
+   * 2–1 rather than tying them — both reads agree and the answer still ships.
+   * Pinned in both directions by `structure-origin-kind-narrowing.test.ts`.
+   *
+   * Purely state-derived: no natural-language predicate is added, so this cannot
+   * begin another CEE #888 phrasing oscillation (trap 22f). Declining costs only
+   * a fall-through to the reasoning layer, which the sibling guard records as the
+   * best provenance answer witnessed on either build — strictly better than the
+   * canned sentence it replaces.
+   */
+  const unnarrowed = strictBestByLabelOverlap(nodes, messageTokens);
+  if (unnarrowed === null || unnarrowed !== narrowed) return null;
+  return narrowed;
+}
+
 
 /**
  * ⭐⭐ WHICH RECORDED SESSION MUTATION, IF ANY, IS ABOUT THE ELEMENT THIS QUESTION

@@ -14,6 +14,7 @@ import { isDirectedEdge } from "../schemas/graph.js";
 import { validatorNodePath } from "./violation-paths.js";
 import { isDecisionFreeShape } from "./decision-free-shape.js";
 import { factorHasExpressiblePrior } from "../cee/provenance/unquantified-factor.js";
+import { findNoOpOptions } from "./option-no-op.js";
 import {
   type GraphValidationInput,
   type GraphValidationResult,
@@ -253,6 +254,21 @@ export function buildInterventionSignature(interventions: Record<string, number>
     .sort();
   return entries.join("|");
 }
+
+/**
+ * OPTION_NO_OP's predicate lives in its own leaf module so the ENFORCEMENT
+ * REPAIR can read the SAME authority without inheriting this module's `vi.mock`
+ * exposure (five specs replace it wholesale). Re-exported here so every
+ * existing importer of these three symbols is unchanged.
+ *
+ * See `option-no-op.ts` for the epsilon's sign-symmetry argument, the
+ * observed_state/data precedence, and the fail-safe directions.
+ */
+export {
+  LEVEL_IDENTITY_EPSILON,
+  levelsAreIdentical,
+  readFactorBaselineLevel,
+} from "./option-no-op.js";
 
 /**
  * Check if a number is NaN or Infinity.
@@ -968,6 +984,71 @@ function validateSemantic(
         context: { optionIds, signature },
       });
     }
+  }
+
+  // ⭐⭐⭐ OPTION_NO_OP: a non-baseline option must actually change something.
+  //
+  // ── THE MEASURED DEFECT THIS CLOSES ───────────────────────────────────────
+  // Paul's session, 11 Sep 2026 (`olumi-debug-5b41f0eb-20260911.json`). The
+  // brief asked whether to raise the Pro plan price "from £49 to £59". Three
+  // options were drafted against a factor whose baseline is 0.49, and the
+  // first — labelled with the question sentence verbatim — carried
+  // `sets_to` 0.49. It modelled changing nothing. Raising the price hurts in
+  // that model, so the do-nothing arm had the least downside: ISL returned
+  // −0.0226 / −0.1358 / −0.0792, the user was shown 73.4% / 25.1% / 1.5%, and
+  // the assistant said *"increase the Pro plan price from £49 to £59 …
+  // currently leads"*. The product recommended raising the price while
+  // modelling not raising it, at `warnings_count: 0`.
+  //
+  // ── WRITTEN AGAINST THE SPEC, NOT AGAINST THE FAILURE MODE (trap 13d) ─────
+  // The phrasing that produced it is where we came in, not the property.
+  // Nothing here reads a label, a verb or a number in a sentence: a predicate
+  // over the wording would have to be right about natural language in both
+  // directions, and four consecutive rounds on one such predicate have already
+  // proved this estate cannot bound one (trap 22f). What an option DOES is
+  // decidable, so that is what is decided.
+  //
+  // ── NAMED APART FROM `OPTIONS_IDENTICAL` (trap 21) ────────────────────────
+  // That code answers *"are these two options the same as each other?"*; this
+  // answers *"is this option the same as the status quo?"*. Paul's graph
+  // raised neither: its three options were pairwise distinct, and the defect
+  // was invisible to a predicate that only ever compares options to siblings.
+  // Reconciling the two would lose exactly the case that shipped.
+  //
+  // ── WHY REFUSAL, AND NOT "DROP IT" OR "MARK IT THE BASELINE" ──────────────
+  // Dropping asserts *this alternative does not matter*; marking it baseline
+  // asserts *these words describe the status quo*. Both put words in the
+  // user's mouth about a sentence the user wrote, and this file's siblings
+  // refuse rather than guess for exactly that reason (`projector.ts:2250`
+  // *"DO NOT GUESS A DIRECTION. ASK"*; `objective-label.ts`'s refusal set;
+  // `utils/amount-range.ts`'s two refusals).
+  //
+  // ⭐ AND MARKING IT BASELINE WAS CHECKED AGAINST THE HARM, NOT REASONED
+  // ABOUT: it does not remove it. `analysable-option-gate.ts` HOLDS an
+  // `is_baseline` option at its factors' observed values and still submits it,
+  // so the same arm would still have been compared and still have won — now
+  // under a flag saying "current arrangement" while its label says "increase
+  // the price". A remedy that relabels the lie is not a remedy.
+  //
+  // Refusal claims only what is true: we could not build a model whose options
+  // differ from the status quo. It is not a dead end — the enforcement gate
+  // this feeds carries `retryable: true` with a recovery envelope, and
+  // `unified-pipeline/retry-directive.ts` tells attempt 2 both ways out.
+  // ⭐ ONE PREDICATE, TWO CONSUMERS. `findNoOpOptions` is the authority; this
+  // block only turns its findings into issues. The ENFORCEMENT REPAIR
+  // (`no-op-neutralisation.ts`) reads the SAME function, so the reporter and
+  // the repairer cannot disagree about what a no-op is.
+  for (const finding of findNoOpOptions(options, nodeMap.byId)) {
+    issues.push({
+      code: "OPTION_NO_OP",
+      severity: "error",
+      message:
+        `Option "${finding.optionId}" changes nothing: every factor it intervenes on is already at that level`,
+      path: `${validatorNodePath(finding.optionId)}.data.interventions`,
+      // Ids only — no magnitudes, per the same rule `schema-v3.ts:1095`
+      // states for its own diagnostic.
+      context: { optionId: finding.optionId, factorIds: finding.factorIds },
+    });
   }
 
   // INVALID_INTERVENTION_REF: Option intervention references non-existent or non-factor node

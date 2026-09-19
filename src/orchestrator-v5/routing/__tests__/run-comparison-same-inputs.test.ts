@@ -355,9 +355,9 @@ describe('run-comparison: same-inputs mode under MIXED per-run verdicts', () => 
   const CURRENT_WITHHELD_DISTINCT = pair(runFact(ENV_B, 'h-current', T_CURRENT, false), runFact(ENV_A, 'h-prior', T_PRIOR, true));
 
   it('PRECONDITION: the two mixed fixtures reach the mixed branches (the both-permitted twin names a leader change; they do not)', () => {
-    expect(textOf(ask(SAME_INPUTS_CHANGED))).toContain('The leading option has changed.');
-    expect(textOf(ask(PRIOR_WITHHELD))).not.toContain('The leading option has changed.');
-    expect(textOf(ask(CURRENT_WITHHELD))).not.toContain('The leading option has changed.');
+    expect(textOf(ask(SAME_INPUTS_CHANGED))).toContain('The option that scored highest most often in the model simulations has changed.');
+    expect(textOf(ask(PRIOR_WITHHELD))).not.toContain('The option that scored highest most often in the model simulations has changed.');
+    expect(textOf(ask(CURRENT_WITHHELD))).not.toContain('The option that scored highest most often in the model simulations has changed.');
   });
 
   it('prior withheld / current permitted: the withheld run stays withheld inside the same-inputs frame', () => {
@@ -367,7 +367,7 @@ describe('run-comparison: same-inputs mode under MIXED per-run verdicts', () => 
     expect(text).toBe(
       `${gate.SAME_INPUTS_LEAD_TEXT} ${comparedBody(PRIOR_WITHHELD_DISTINCT)} ${gate.SAME_INPUTS_OFFER_TEXT}`,
     );
-    expect(text).toContain('Onshore leads on the latest result.');
+    expect(text).toContain('Onshore scored highest on the latest result.');
     expect(text).toContain(WITHHELD_PRIOR_LEADER_COMPARISON_TEXT);
     expect(text).not.toContain('Offshore');
     // Denial-class ban on the mixed arm's bytes (see section 3).
@@ -382,7 +382,7 @@ describe('run-comparison: same-inputs mode under MIXED per-run verdicts', () => 
     expect(text).toBe(
       `${gate.SAME_INPUTS_LEAD_TEXT} ${comparedBody(CURRENT_WITHHELD_DISTINCT)} ${gate.SAME_INPUTS_OFFER_TEXT}`,
     );
-    expect(text).toContain('Offshore came out ahead in the earlier run.');
+    expect(text).toContain('Offshore scored highest in the earlier run.');
     expect(text).toContain(WITHHELD_CURRENT_LEADER_COMPARISON_TEXT);
     expect(text).not.toContain('Onshore');
     // Denial-class ban on the mirror arm's bytes (see section 3).
@@ -392,7 +392,7 @@ describe('run-comparison: same-inputs mode under MIXED per-run verdicts', () => 
 
   it('POSITIVE CONTROL: the denial-class pin sees a denial spliced into a mixed frame', () => {
     expect(
-      `${gate.SAME_INPUTS_LEAD_TEXT} Onshore leads on the latest result. ${WITHHELD_PRIOR_LEADER_COMPARISON_TEXT} That update has not reached the model. ${gate.SAME_INPUTS_OFFER_TEXT}`,
+      `${gate.SAME_INPUTS_LEAD_TEXT} Onshore scored highest on the latest result. ${WITHHELD_PRIOR_LEADER_COMPARISON_TEXT} That update has not reached the model. ${gate.SAME_INPUTS_OFFER_TEXT}`,
     ).toMatch(DENIAL_CLASS);
   });
 });

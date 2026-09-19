@@ -74,8 +74,13 @@ import { composeDroppedFigureNotice } from '../../cee/context-integrity/brief-au
 
 import { isDirectionClarificationId } from '../../cee/compound-goal/direction-gate.js';
 import { UNAUTHORED_DECISION_LABEL } from '../../cee/draft/records/objective-label.js';
+// ⭐ ONE OWNER for "does this string assert brief extraction". Shared with the
+// `schema-v3.ts` withdrawal and with both producers in `enricher.ts`, so a
+// reworded marker cannot leave this picker matching the old spelling.
+import { assertsBriefExtraction } from '../../cee/factor-extraction/brief-extraction-claim.js';
 
 import {
+  assertsAnalysisOutcome,
   gateAssumptionFragment,
   gateCoachingCardBody,
   gateFullResponse,
@@ -97,10 +102,27 @@ function gatedFragmentText(candidate: string): string | null {
   return gated.accept ? (gated.text ?? candidate) : null;
 }
 
-const MAX_WORDS = 140;
+/**
+ * The word ceiling `assembleSectionedNarrative` spends on CONTENT (the fixed
+ * footers are spliced afterwards and are deliberately not priced against it).
+ *
+ * ⭐ EXPORTED SO GUARDS DERIVE IT RATHER THAN MIRROR IT. A test that hardcodes
+ * `140` keeps passing when the budget moves and quietly stops exercising the
+ * over-budget case it was written for — which is exactly what happened to the
+ * first "the word budget sheds the inventory before it sheds the limit" test on
+ * #1428: its fixture returned at rung 1 and both new rungs could be deleted
+ * with it still green.
+ */
+export const MAX_WORDS = 140;
 const MAX_LABEL_CHARS = 40;
 const MAX_GOAL_CHARS = 80;
 const MAX_NAMED_OPTIONS = 4;
+/**
+ * Appended to an option the product proposed, so the user can tell our
+ * suggestion from their own. Appended AFTER elision, so it is never the part
+ * that gets truncated. See {@link collectOptions} for when it is earned.
+ */
+const CEE_PROPOSED_MARKER = ' — my suggestion';
 const MAX_LISTED_WHEN_OVER = 3;
 
 /**
@@ -142,9 +164,19 @@ const PROVISIONAL_FRAMING_SENTENCE =
  * open the reply with two hedges in a row. It is the CLOSING frame instead,
  * placed BEFORE the call to action so the reader still ends on the next step.
  * It states what the thing is; it does not apologise for it.
+ *
+ * ── ⛔ ONE SENTENCE WAS REMOVED, AND THE FACT ABOVE IS NOT WITHDRAWN ────────
+ * It read: "Ask me again and you would get a different one." Everything
+ * measured above still holds — nothing here claims the variance went away, and
+ * no mechanism changed. What changed is what the product SAYS about it.
+ * Reviewed on the served build by the product owner: an invitation to re-roll
+ * reads as a property being OFFERED, and it sits against the stated position
+ * that this reasoning layer is to be made as deterministic as it can be. The
+ * surviving half is the honesty that was not objected to, and it is quoted
+ * VERBATIM by `handlers/chip-click-dispatch.ts` — so it stays exactly as is.
  */
 export const MODEL_VARIANCE_NOTE =
-  'This is one of several models I could build from your brief: a starting point to argue with, not an answer. Ask me again and you would get a different one.';
+  'This is one of several models I could build from your brief: a starting point to argue with, not an answer.';
 
 /**
  * Cap on EXTRA "check" bullets surfaced in the weighing section beyond the
@@ -331,6 +363,23 @@ export function validateUncertaintyDriver(driver: string): boolean {
   return true;
 }
 
+/**
+ * The edge fields this composer reads. Deliberately tiny: the only question
+ * asked of an edge here is which way a factor pushes the goal.
+ */
+interface EdgeLite {
+  readonly from?: string;
+  readonly to?: string;
+  readonly effect_direction?: 'positive' | 'negative';
+  readonly strength?: { readonly mean?: number };
+  /**
+   * ⚠ READ, NOT IGNORED. An edge the model says does not exist establishes no
+   *   effect however large its mean — omitting this field let a zero-existence
+   *   edge license a trade-off claim.
+   */
+  readonly exists_probability?: number;
+}
+
 interface NodeLite {
   readonly id?: string;
   readonly kind?: string;
@@ -362,6 +411,20 @@ interface NodeLite {
    * to node level and collapses the rest to this verdict.
    */
   readonly provenance?: string;
+  /**
+   * The user's own words for this node, lifted to node level by
+   * `projectNodeProvenance` alongside `label_authored` (see the note on
+   * {@link NodeLite.provenance} above; declared at `cee-v3.ts:276`).
+   *
+   * ⭐ READ HERE AS A STRUCTURAL FACT ABOUT WHICH ARRAY THE NODE CAME FROM,
+   * not as display text. A user-stated option arrives in `stated_items[]`,
+   * whose schema REQUIRES `source_quote` (`grammar.ts:484`); an option the
+   * model proposed arrives in `claims[]`, which has no `source_quote` field
+   * at all. `projector.ts:4257-4259` states the consequence directly — an
+   * `ai_inferred` claim node "has no `source_quote` and whose label was never
+   * the user's". See {@link collectOptions}.
+   */
+  readonly source_quote?: string;
   readonly observed_state?: {
     readonly uncertainty_drivers?: readonly string[];
   };
@@ -405,10 +468,20 @@ export type AssumptionSource =
  * Coarse fallback category emitted alongside {@link AssumptionSource}.
  *   - `gate_rejected`: a higher-priority candidate existed but failed
  *     the copy-quality gate.
+ *   - `readiness_gated`: freeform LLM coaching candidates WERE present and
+ *     were never inspected, because typed readiness is not `ready`. This is
+ *     the SUPPRESSED-not-absent case.
  *   - `no_candidate`: no higher-priority candidate was available at all.
  *   - `null`: the highest-priority available source was used cleanly.
+ *
+ * ⭐⭐ WHY `readiness_gated` EXISTS. Until it did, a non-ready turn that
+ * suppressed real coaching reported `no_candidate` — i.e. *"there was nothing
+ * to serve"* — which is false, and which is exactly how the size of this
+ * discard stayed invisible. An honest label overwritten by a convenient one is
+ * `CLAUDE.md` trap 14, and the cost here was that nobody could measure the
+ * population. The two states are now distinguishable in telemetry.
  */
-export type FallbackReason = 'gate_rejected' | 'no_candidate' | null;
+export type FallbackReason = 'gate_rejected' | 'readiness_gated' | 'no_candidate' | null;
 
 /** Copy-gate failures plus a typed-readiness contradiction after acceptance. */
 export type CoachingSummaryRejectReason = GateRejectReason | 'readiness_conflict';
@@ -652,7 +725,7 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
   }
 
   const goalLabel = findGoalLabel(nodes);
-  const options = collectLabels(nodes, 'option');
+  const options = collectOptions(nodes);
   const factors = collectLabels(nodes, 'factor');
   const risks = collectLabels(nodes, 'risk');
 
@@ -664,30 +737,100 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
 
   const optionsBlock = buildOptionsBlock(options, provisionalDecision);
 
-  const tradeOffBullet = buildTradeOffBullet(factors, risks);
+  const edges = (graph?.edges ?? []) as readonly EdgeLite[];
+  // The goal is identified the same way `findGoalLabel` identifies it — by node
+  // kind — so the two cannot disagree about which node the goal is.
+  const goalId = nodes.find((n) => n?.kind === 'goal')?.id ?? null;
+  const tradeOffBullet = buildTradeOffBullet(
+    factors,
+    risks,
+    findOpposingFactorPair(nodes, edges, goalId),
+  );
   const mayServeFreeformCoaching = analysisReady?.status === 'ready';
 
   // A direction clarification gets its OWN slot and is therefore removed from
   // the general-purpose pickers below. Leaving it in both would surface the
   // same question twice, and leaving it ONLY in the generic pool is the defect
-  // being fixed — see `pickDirectionClarifications`. Non-ready turns cannot
-  // trust it, however: at this boundary a producer-built clarification and an
-  // LLM item are distinguished only by a spoofable ID prefix, and package
-  // deduplication can let the latter occupy that ID. Until provenance is
-  // carried structurally, direction copy follows the same ready-only policy.
-  const directionBullets = mayServeFreeformCoaching
-    ? pickDirectionClarifications(strengthenItems, MAX_DIRECTION_BULLETS).map(
-        (text) => toDirectionBullet(text),
-      )
-    : [];
+  // being fixed — see `pickDirectionClarifications`.
+  //
+  // ⭐⭐ IT IS NO LONGER GATED ON READINESS, AND THE PRECONDITION THE OLD GATE
+  // NAMED HAS BEEN MET. The previous comment here read: "at this boundary a
+  // producer-built clarification and an LLM item are distinguished only by a
+  // spoofable ID prefix, and package deduplication can let the latter occupy
+  // that ID. Until provenance is carried structurally, direction copy follows
+  // the same ready-only policy." The prefix is now a RESERVED NAMESPACE:
+  // `runStagePackage` evicts every `direction_unresolved_*` item it did not
+  // mint itself, unconditionally, immediately before its own append — so an LLM
+  // item cannot reach this function under that id, and cannot displace the
+  // producer's card either.
+  //
+  // ⚠ WHY THE READY-ONLY POLICY DOES NOT APPLY TO THIS CLASS ANYWAY. That
+  // policy exists to keep FREEFORM LLM PROSE off non-ready turns ("do not
+  // inspect those bytes at all"). These bullets are not that: the copy is
+  // composed deterministically by `renderDirectionClarifications` from a fixed
+  // template over the user's own quoted amount, and every candidate still
+  // passes `gateCoachingCardBody` and is DROPPED WHOLE if it trips it. The
+  // freeform pool below keeps the ready-only gate unchanged, which is the
+  // discrimination this pair of lines exists to make.
+  //
+  // ⚠ AND THE HARM THE OLD GATE CAUSED, MEASURED — this is why it moved rather
+  // than being left alone. Across 13 live draft turns on staging build
+  // `3427aea` (2026-09-07), `analysis_ready.status` was `ready` on 4 and not
+  // ready on 9. The limit question reached the user on 4 of 4 ready turns and 0
+  // of 9 non-ready ones, a perfect correlation. So the user was told their
+  // stated limit had not been understood exactly when their model was already
+  // in good shape, and was told nothing when it was not — and a brief whose
+  // limits are the part that failed to land is more likely, not less, to leave
+  // the draft non-ready. Silent loss of a stated constraint is the worse
+  // defect; that is the whole argument the gate below it makes for asking.
+  const directionBullets = pickDirectionClarifications(
+    strengthenItems,
+    MAX_DIRECTION_BULLETS,
+  ).map((text) => toDirectionBullet(text));
   const generalStrengthenItems = mayServeFreeformCoaching && Array.isArray(strengthenItems)
     ? strengthenItems.filter((i) => !isDirectionClarificationItem(i))
     : [];
 
   // Freeform coaching fragments can contain action copy that the fragment gate
   // is not designed to classify. For every non-ready or missing status, do not
-  // inspect those bytes at all: graph labels/trade-off, the fixed generic
-  // assumption and typed readiness recovery are the complete narrative.
+  // inspect those bytes at all: the LLM prose channels (strengthen items, bias
+  // findings, coaching bias signals) stay shut, exactly as before.
+  //
+  // ⭐⭐ WHAT CHANGED, AND WHAT DELIBERATELY DID NOT. A non-ready turn no
+  // longer serves the fixed-generic line UNCONDITIONALLY. It now takes the
+  // deterministic picker below, which can serve a factor-level uncertainty
+  // driver — the user's own graph annotation, bounded at two entries by
+  // `GraphV3`, carrying its own narrower validator — provided the copy does
+  // not ASSERT AN ANALYSIS OUTCOME.
+  //
+  // ⭐ THE PRINCIPLE, and it is the same one that moved direction
+  // clarifications out of this gate directly above: gate on what the copy
+  // CLAIMS, not on the phase the run is in. `analysis_ready.status` was never
+  // a statement about whether a sentence is true; it is a statement about
+  // whether a comparison can be prepared. Using it as a truth gate discards
+  // true, useful coaching on every turn that needs it most.
+  //
+  // ⛔ FAIL-CLOSED BY CONSTRUCTION, NOT BY ORDERING. `pickDeterministic-
+  // Assumption` does not TAKE `strengthenItems`, `analysisReady.bias_findings`
+  // or `coachingBiasSignals` as parameters at all, so no reordering, no future
+  // edit to the priority chain, and no gate regression can leak a freeform
+  // byte onto a non-ready turn through this call. A guard that depends on
+  // priority order is a guard that a refactor silently removes.
+  // ⚠ READS THE RAW INPUT, NOT `generalStrengthenItems`. That derived array is
+  // already emptied whenever `mayServeFreeformCoaching` is false, so asking it
+  // "was anything suppressed?" always answers no — the telemetry would report
+  // `no_candidate` on exactly the turns it exists to distinguish. Caught by the
+  // suite; it is the same shape as a probe reporting on itself.
+  const rawFreeformStrengthenCount = Array.isArray(strengthenItems)
+    ? strengthenItems.filter((i) => !isDirectionClarificationItem(i)).length
+    : 0;
+  const freeformCandidatesSuppressed =
+    !mayServeFreeformCoaching &&
+    (rawFreeformStrengthenCount > 0 ||
+      (Array.isArray(analysisReady?.bias_findings) &&
+        (analysisReady?.bias_findings?.length ?? 0) > 0) ||
+      (Array.isArray(coachingBiasSignals) && coachingBiasSignals.length > 0));
+
   const assumption: AssumptionPick = mayServeFreeformCoaching
     ? pickAssumption({
         nodes,
@@ -695,11 +838,7 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
         strengthenItems: generalStrengthenItems,
         coachingBiasSignals,
       })
-    : {
-        text: FIXED_GENERIC_ASSUMPTION,
-        source: 'deterministic_fallback',
-        fallbackReason: 'no_candidate',
-      };
+    : pickDeterministicAssumption({ nodes, freeformCandidatesSuppressed });
   const assumptionBullet = assumption.text ? toAssumptionBullet(assumption.text) : null;
 
   // One extra "check" bullet from the next unused coaching signal. Seed the
@@ -720,8 +859,35 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
   // ⭐ DIRECTION BULLETS LEAD THE SECTION AND SIT IN THE CORE. A limit the user
   // stated and the product declined to enforce outranks a coaching suggestion,
   // and the core block is the one the word-budget ladder sheds LAST.
+  //
+  // ⛔ THE FIRST ONE NO LONGER OPENS THE REPLY — IT SITS DIRECTLY BENEATH IT.
+  // #1409 promoted it AHEAD of the confirm sentence, and the product owner's
+  // objection on the served build was exactly that: the first message began by
+  // reporting the product's own failure before it had said what it built. The
+  // reader is told what exists, then what to settle.
+  //
+  // ⚠⚠ WHAT IS *NOT* WITHDRAWN IS THE DEDICATED SLOT, AND THE FIRST ATTEMPT AT
+  // THIS FIX LOST IT. Moving the line into the coaching section put it inside
+  // the word-budget ladder for the first time, and `assembleSectionedNarrative`
+  // has a rung that sheds the whole weighing block — so on inputs that overrun,
+  // the question DISAPPEARED and the option inventory came back in its place.
+  // Measured by execution on one unresolved 4% limit plus a `missing_value`
+  // next step: at three outstanding effect values the limit is served; at four
+  // it is gone (see `first-response-stated-limit-order.test.ts`, which pins the
+  // pair). `assistant_text` is the ONLY carrier for a direction clarification
+  // (`tests/integration/orchestrator/route-v2-direction-clarification-served.test.ts`),
+  // so shedding the block is not a demotion — the user is told nothing at all.
+  //
+  // So the promotion STAYS, and only its POSITION changes: the first
+  // clarification is spliced immediately AFTER the confirm sentence, present at
+  // every rung of the ladder including the terminal one, exactly as it was
+  // before #1409's position was objected to. Moved, not duplicated: it is
+  // dropped from the core bullets below. With none, the narrative is
+  // byte-identical to before.
+  const [promotedDirectionBullet = null, ...remainingDirectionBullets] = directionBullets;
+  const leadClarification = promotedDirectionBullet;
   const coreBullets = [
-    ...directionBullets,
+    ...remainingDirectionBullets,
     ...(tradeOffBullet ? [tradeOffBullet] : []),
     ...(assumptionBullet ? [assumptionBullet] : []),
   ];
@@ -731,8 +897,8 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
     ...additionalBullets,
   ]);
   const weighingBlockDirectionOnly =
-    directionBullets.length > 0
-      ? renderBulletSection('What the model is weighing', directionBullets)
+    remainingDirectionBullets.length > 0
+      ? renderBulletSection('What the model is weighing', remainingDirectionBullets)
       : null;
 
   // Brief-completeness advisory (own droppable block). Only the enum is read;
@@ -746,6 +912,7 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
     weighingBlockCore,
     weighingBlockDirectionOnly,
     completenessBlock,
+    leadClarification,
     nextStep,
     droppedFigureNotice,
   });
@@ -771,7 +938,13 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
       // word-budget ladder can shed the whole weighing block, and a count of
       // bullets that were composed but not served is the optimism this
       // telemetry exists to catch.
-      direction_clarifications_surfaced: sectioned.includedWeighing ? directionBullets.length : 0,
+      // Counts what was SERVED. The promoted line sits in its own slot beneath
+      // the confirm sentence and is therefore surfaced whether or not the
+      // weighing block survived the word budget; the remainder is surfaced only
+      // inside that block.
+      direction_clarifications_surfaced:
+        (leadClarification !== null ? 1 : 0) +
+        (sectioned.includedWeighing ? remainingDirectionBullets.length : 0),
     },
   };
 }
@@ -1111,11 +1284,19 @@ function buildConfirmSentence(
  * spread without enumerating every variant.
  */
 function buildOptionsBlock(
-  options: readonly string[],
+  options: readonly OptionLite[],
   provisionalDecision = false,
 ): string | null {
   if (options.length === 0) return null;
-  const trimmed = options.map((label) => elideLabelAtWordBoundary(label, MAX_LABEL_CHARS));
+  // ⚠ THE MARKER IS APPENDED AFTER ELISION, NEVER BEFORE. Eliding the joined
+  // string would spend the label budget on our own disclosure and could cut
+  // the marker itself — the display budget belongs to the user's words.
+  const trimmed = options.map(
+    (option) =>
+      `${elideLabelAtWordBoundary(option.label, MAX_LABEL_CHARS)}${
+        option.ceeProposed ? CEE_PROPOSED_MARKER : ''
+      }`,
+  );
 
   // ⚠ THE OPTIONS ARE NEVER WITHHELD, ONLY RE-TITLED. They are rendered on the
   // user's canvas either way; a narrative that omitted them while the canvas
@@ -1150,6 +1331,182 @@ function buildOptionsBlock(
 }
 
 /**
+ * The sign this edge carries, or `null` when it carries none.
+ *
+ * ⚠ `exists_probability: 0` YIELDS NULL. An edge the model says does not exist
+ *   cannot establish an effect, however large its mean. Reading the sign alone
+ *   let a zero-existence edge license a trade-off claim.
+ *
+ * `effect_direction` is the producer's own field and is authoritative. The sign
+ * of `strength.mean` is a fallback only, and a mean of exactly 0 yields `null`
+ * rather than a guess — at zero the sign cannot recover direction, and
+ * `-0 >= 0` is `true`, so an unguarded test calls every zero positive.
+ */
+function edgeSign(e: EdgeLite): 1 | -1 | null {
+  if (e?.exists_probability === 0) return null;
+  if (e?.effect_direction === 'positive') return 1;
+  if (e?.effect_direction === 'negative') return -1;
+  const mean = e?.strength?.mean;
+  if (typeof mean === 'number' && mean !== 0) return mean > 0 ? 1 : -1;
+  return null;
+}
+
+/**
+ * Depth bound, so a cyclic or densely connected graph cannot make this walk the
+ * cost. Chosen to traverse the indirect chains real drafted models contain; a
+ * path longer than this is not silently ignored — see `truncated` below.
+ */
+const MAX_PATH_DEPTH = 8;
+
+interface PathScan {
+  /** Composed signs of every INDIRECT path fully traversed to the goal. */
+  readonly signs: ReadonlySet<number>;
+  /**
+   * ⚠ TRUE WHEN THE WALK STOPPED SHORT — and this field is the whole point.
+   *
+   * A previous cut returned an empty set at the depth cap, and the caller read
+   * that as "no contradictory path exists". It meant "no contradictory path was
+   * LOOKED FOR beyond here". Reproduced: a six-edge chain positive at every hop
+   * except a final negative one lies past a four-deep lookahead, so the direct
+   * +0.2 survived as an unqualified sign and the product claimed a trade-off
+   * the fuller model refutes. An incomplete check is not a negative result.
+   */
+  readonly truncated: boolean;
+}
+
+/**
+ * Composed signs of every indirect path from `fromId` to the goal.
+ *
+ * Direct edges are excluded — they are the establishing evidence, handled by
+ * the caller; these paths exist only to contradict it.
+ */
+function scanIndirectPaths(
+  fromId: string,
+  goalId: string,
+  edges: readonly EdgeLite[],
+  depth = 0,
+  seen: ReadonlySet<string> = new Set(),
+  carried: 1 | -1 | null = null,
+): PathScan {
+  const signs = new Set<number>();
+  let truncated = false;
+  for (const e of edges) {
+    if (e?.from !== fromId || typeof e.to !== 'string') continue;
+    if (seen.has(e.to)) continue;
+    const sign = edgeSign(e);
+    if (sign === null) continue;
+    const composed = carried === null ? sign : ((carried * sign) as 1 | -1);
+    if (e.to === goalId) {
+      // A single hop straight to the goal is the DIRECT edge, not an indirect
+      // path; it only counts once something has been carried into it.
+      if (carried !== null) signs.add(composed);
+      continue;
+    }
+    if (depth + 1 >= MAX_PATH_DEPTH) {
+      // There is more graph beyond here that this walk will not look at.
+      truncated = true;
+      continue;
+    }
+    const nextSeen = new Set(seen);
+    nextSeen.add(fromId);
+    const deeper = scanIndirectPaths(e.to, goalId, edges, depth + 1, nextSeen, composed);
+    for (const d of deeper.signs) signs.add(d);
+    if (deeper.truncated) truncated = true;
+  }
+  return { signs, truncated };
+}
+
+/**
+ * ⭐ WHICH WAY DOES THIS FACTOR PUSH THE GOAL? `null` unless the model settles it.
+ *
+ * ⚠ A DIRECT EDGE ESTABLISHES; AN INDIRECT PATH MAY ONLY VETO. Two independently
+ *   reproduced counterexamples forced this shape, and both were my own defect
+ *   repeated one level in — I had replaced "two labels exist" with "one direct
+ *   edge exists" and again claimed more than the model supports:
+ *
+ *     · A→goal +0.2 was promoted to a global positive sign while
+ *       A→outcome +1 → goal −1 makes A's fuller path negative. A mixed model
+ *       does not establish unqualified opposition, so "A balanced against B"
+ *       remained unearned.
+ *     · A→goal +0.2 with `exists_probability: 0` still licensed the pair.
+ *
+ *   Indirect paths are deliberately NOT allowed to establish a sign on their
+ *   own either: an indirect-only factor stays unknown rather than having a
+ *   global sign invented for it from a chain the person never sees summarised.
+ */
+function factorDirectionOnGoal(
+  factorId: string,
+  goalId: string | null,
+  edges: readonly EdgeLite[],
+): 'positive' | 'negative' | null {
+  if (goalId === null) return null;
+  let direct: 1 | -1 | null = null;
+  for (const e of edges) {
+    if (e?.from !== factorId || e?.to !== goalId) continue;
+    const sign = edgeSign(e);
+    if (sign === null) return null;
+    if (direct !== null && direct !== sign) return null;
+    direct = sign;
+  }
+  if (direct === null) return null;
+  const scan = scanIndirectPaths(factorId, goalId, edges);
+  // ⚠ A TRUNCATED WALK CANNOT REPORT "NO CONTRADICTION". Unknown is not
+  //   permission: if the search stopped short, the direct sign is not an
+  //   unqualified claim and no trade-off is asserted.
+  if (scan.truncated) return null;
+  for (const indirect of scan.signs) {
+    if (indirect !== direct) return null;
+  }
+  return direct > 0 ? 'positive' : 'negative';
+}
+
+/**
+ * ⭐⭐ THE FIRST TWO FACTOR LABELS ARE NOT A TRADE-OFF, AND THIS PRODUCT SAID THEY WERE.
+ *
+ * MEASURED ON A REAL SERVED TURN (CEE `083e0da`, request `2e5d48a8`, scenario
+ * `e309fd7e`, 8 Sep 2026). The user's first reply contained:
+ *
+ *   "Main trade-off: Team Coordination Overhead balanced against
+ *    Onboarding and Ramp Time"
+ *
+ * Both are COSTS of hiring. They push the goal the same way and are not in
+ * tension with each other. The sentence asserted a relationship the model does
+ * not contain, in the first thing the person reads — because
+ * `buildTradeOffBullet` received only `string[]` labels and emitted
+ * `factors[0] balanced against factors[1]` whenever two labels existed. Nothing
+ * consulted an edge; `graph` was in scope the whole time and `graph.edges` was
+ * never read. The suite's own case was named "…using the first two factor
+ * labels" and built its fixture with `edges: []`, so it required the claim to
+ * be made about a graph containing no relationships at all.
+ *
+ * A trade-off is a claim about DIRECTION: raising one lowers the other's
+ * contribution to the goal. It is now said only when two factors provably push
+ * the goal opposite ways, and the pair is chosen by that test rather than by
+ * array position.
+ *
+ * ⚠ WHEN NOTHING OPPOSES, THE ANSWER IS NOT SILENCE. Dropping the bullet would
+ *   delete a true and useful line (these ARE the factors the model weighs) to
+ *   avoid a false one. The caller keeps the names and loses only the unearned
+ *   relationship.
+ */
+function findOpposingFactorPair(
+  nodes: readonly NodeLite[],
+  edges: readonly EdgeLite[],
+  goalId: string | null,
+): readonly [string, string] | null {
+  const positive: string[] = [];
+  const negative: string[] = [];
+  for (const f of nodes) {
+    if (f?.kind !== 'factor' || typeof f.id !== 'string' || typeof f.label !== 'string') continue;
+    const dir = factorDirectionOnGoal(f.id, goalId, edges);
+    if (dir === 'positive') positive.push(f.label);
+    else if (dir === 'negative') negative.push(f.label);
+  }
+  if (positive.length === 0 || negative.length === 0) return null;
+  return [positive[0], negative[0]] as const;
+}
+
+/**
  * Return a single bullet-ready trade-off fragment (no leading bullet
  * glyph; no trailing full stop — the renderer adds those). Returns null
  * when no factor/risk material is available, so the caller can omit the
@@ -1158,10 +1515,18 @@ function buildOptionsBlock(
 function buildTradeOffBullet(
   factors: readonly string[],
   risks: readonly string[],
+  opposingPair: readonly [string, string] | null,
 ): string | null {
   const trimmedFactors = factors.map((l) => elideLabelAtWordBoundary(l, MAX_LABEL_CHARS));
+  if (opposingPair !== null) {
+    const a = elideLabelAtWordBoundary(opposingPair[0], MAX_LABEL_CHARS);
+    const b = elideLabelAtWordBoundary(opposingPair[1], MAX_LABEL_CHARS);
+    return `Main trade-off: ${a} balanced against ${b}`;
+  }
   if (trimmedFactors.length >= 2) {
-    return `Main trade-off: ${trimmedFactors[0]} balanced against ${trimmedFactors[1]}`;
+    // Two factors, no opposition the model can show: name them without
+    // asserting a relationship. See `findOpposingFactorPair`.
+    return `The model weighs ${trimmedFactors[0]} and ${trimmedFactors[1]}`;
   }
   if (trimmedFactors.length === 1 && risks.length >= 1) {
     const risk = elideLabelAtWordBoundary(risks[0], MAX_LABEL_CHARS);
@@ -1225,6 +1590,90 @@ interface AssumptionPick {
  * candidate existed but failed) from `no_candidate` (nothing was
  * available at all, so we fell through to the generic).
  */
+/**
+ * The NON-READY assumption picker: deterministic sources only.
+ *
+ * Priority chain, deliberately a strict SUBSET of {@link pickAssumption}'s:
+ *   4. uncertainty_driver (grammar guard AND analysis-assertion guard)
+ *   5. fixed-generic
+ *
+ * ⛔ IT CANNOT REACH A FREEFORM CHANNEL. The LLM prose inputs are not
+ * parameters of this function. That is the point: the exclusion is structural,
+ * so it survives a refactor of the priority order, which a `status === 'ready'`
+ * check inside a shared chain would not.
+ *
+ * ⭐ THE EXTRA GUARD IS THE WHOLE REASON THIS IS SAFE ON A NON-READY TURN.
+ * `validateUncertaintyDriver` is a grammar/jargon guard; it has nothing to say
+ * about whether a phrase presupposes a completed analysis, and the driver field
+ * is model-authored. {@link assertsAnalysisOutcome} is the missing precondition
+ * — see its own comment for why it is a deliberately generous closed list and
+ * why over-blocking is free here.
+ *
+ * A driver that trips EITHER guard is dropped whole and the fixed-generic line
+ * is served, which is byte-identical to this surface's previous behaviour on
+ * every non-ready turn. Nothing gets worse; some turns get better.
+ */
+/**
+ * ⛔⛔ THE THREE GUARDS AN UNCERTAINTY DRIVER MUST CLEAR — AND THE THIRD ONE
+ * WAS MISSING ON EVERY TURN, INCLUDING READY ONES.
+ *
+ * `validateUncertaintyDriver` is a GRAMMAR and JARGON guard: length, trailing
+ * punctuation, question shape, and a substring list of internal schema terms.
+ * It has no opinion about what the sentence CLAIMS. Priority 4 of
+ * {@link pickAssumption} called it and nothing else, so the driver was the one
+ * assumption source that never met `checkShared`'s premature-recommendation
+ * lexicon — the estate's standing "never name a leading option" rule.
+ *
+ * ⚠ MEASURED AT PRISTINE, NOT INFERRED. On a `ready` turn, a driver reading
+ * "the strongest option depends on how fast new hires ramp up" was SERVED, with
+ * `assumption_source: 'uncertainty_driver'`. The phrase is the eleventh
+ * alternate of `PREMATURE_RECOMMENDATION_REGEX`; it was simply never consulted
+ * on this path. This was found while adding the non-ready content gate below:
+ * the old phase gate had been masking it on non-ready turns, so opening that
+ * gate is what made it observable.
+ *
+ * The gate is used as a PREDICATE only. Accepted drivers keep their existing
+ * `cleanLeadIn` rendering, so ready-path copy is byte-identical for every
+ * driver that was legitimately servable before.
+ */
+function driverIsServable(driver: string): boolean {
+  if (!validateUncertaintyDriver(driver)) return false;
+  if (assertsAnalysisOutcome(driver)) return false;
+  return gateAssumptionFragment(driver).accept === true;
+}
+
+function pickDeterministicAssumption(input: {
+  readonly nodes: readonly NodeLite[];
+  readonly freeformCandidatesSuppressed: boolean;
+}): AssumptionPick {
+  const { nodes, freeformCandidatesSuppressed } = input;
+
+  const driver = pickUncertaintyDriver(nodes);
+  if (driver !== null) {
+    if (driverIsServable(driver)) {
+      return {
+        text: `One assumption worth checking: ${cleanLeadIn(driver)}.`,
+        source: 'uncertainty_driver',
+        fallbackReason: null,
+      };
+    }
+    // A driver existed and was refused on its content. That is a gate
+    // rejection, and it is reported as one even when freeform was ALSO
+    // suppressed: the nearest-miss candidate is the more useful signal.
+    return {
+      text: FIXED_GENERIC_ASSUMPTION,
+      source: 'deterministic_fallback',
+      fallbackReason: 'gate_rejected',
+    };
+  }
+
+  return {
+    text: FIXED_GENERIC_ASSUMPTION,
+    source: 'deterministic_fallback',
+    fallbackReason: freeformCandidatesSuppressed ? 'readiness_gated' : 'no_candidate',
+  };
+}
+
 function pickAssumption(input: {
   readonly nodes: readonly NodeLite[];
   readonly analysisReady: PostDraftAnalysisReadyLite | null | undefined;
@@ -1276,7 +1725,10 @@ function pickAssumption(input: {
   // Priority 4: uncertainty_driver (factor-level, with grammar guard).
   const driver = pickUncertaintyDriver(nodes);
   if (driver) {
-    if (validateUncertaintyDriver(driver)) {
+    // ⭐ ONE AUTHORITY FOR "may this driver be served", shared with the
+    // non-ready picker. Two copies of this decision is the twin-function defect
+    // this repo has paid for more than once.
+    if (driverIsServable(driver)) {
       return {
         text: `One assumption worth checking: ${cleanLeadIn(driver)}.`,
         source: 'uncertainty_driver',
@@ -1755,6 +2207,57 @@ function goalCameFromBrief(nodes: readonly NodeLite[]): boolean {
   return false;
 }
 
+/** An option label plus the one verdict the narrative needs about it. */
+interface OptionLite {
+  readonly label: string;
+  /** TRUE only when BOTH signals agree that the product proposed this option. */
+  readonly ceeProposed: boolean;
+}
+
+/**
+ * ⭐⭐ THE OPTION LIST KEEPS ITS PROVENANCE. `collectLabels` projects a node to
+ * its label string, which is why the verdict the projector already stamped on
+ * every option node died two lines before the composer could read it — an
+ * option the product INVENTED was rendered indistinguishably from one the user
+ * stated. (The founder's own session: his stated option was a no-op, the
+ * product invented a price he never named, and that price won.)
+ *
+ * ⚠⚠ TWO SIGNALS, AND THE CONJUNCTION IS LOAD-BEARING. `provenance ===
+ * 'ai_inferred'` ALONE IS NOT SAFE, and the producer says so in its own
+ * header: `bindOptionLabelToBrief` shares a 3-character specificity floor
+ * (`brief-binding.ts:153-157`) under which a genuine two-character option the
+ * user wrote (`"Go"`) "now reads `cee_hypothesis` rather than
+ * `brief_extraction`". Marking on that signal alone would tell a user that
+ * their own option was our suggestion.
+ *
+ * So the second conjunct is STRUCTURAL rather than lexical: a user-stated
+ * option arrives in `stated_items[]`, whose schema REQUIRES `source_quote`;
+ * an invented one arrives in `claims[]`, which has no such field. A node
+ * carrying a quote is therefore the user's, whatever the binding floor made of
+ * its label.
+ *
+ * ⚠ FAIL-SAFE DIRECTION, AND IT IS THE SAME RULING THE GOAL OPENER MADE.
+ * UNDER-disclosing our own suggestion is recoverable; falsely telling a user we
+ * invented THEIR option is not. Every ambiguous shape goes UNMARKED — an absent
+ * stamp, a legacy graph, a stated option whose label failed the floor.
+ */
+function collectOptions(nodes: readonly NodeLite[]): OptionLite[] {
+  const out: OptionLite[] = [];
+  for (const n of nodes) {
+    if (n.kind !== 'option') continue;
+    if (typeof n.label !== 'string') continue;
+    const trimmed = n.label.trim();
+    if (trimmed.length === 0) continue;
+    const carriesVerbatim =
+      typeof n.source_quote === 'string' && n.source_quote.trim().length > 0;
+    out.push({
+      label: trimmed,
+      ceeProposed: n.provenance === 'ai_inferred' && !carriesVerbatim,
+    });
+  }
+  return out;
+}
+
 function collectLabels(nodes: readonly NodeLite[], kind: string): string[] {
   const out: string[] = [];
   for (const n of nodes) {
@@ -1767,13 +2270,61 @@ function collectLabels(nodes: readonly NodeLite[], kind: string): string[] {
   return out;
 }
 
+/**
+ * ⭐⭐ A FILL STRING IS AN ABSENCE OF A CANDIDATE, NOT A CANDIDATE.
+ *
+ * WIRE-WITNESSED 10 Sep 2026 on served build `ecfc086`, on 2 of 4 non-ready
+ * turns, both `assumption_source: uncertainty_driver`:
+ *
+ *     • Assumption to check: Extracted from brief — confirm value
+ *
+ * That is CEE's own provenance marker, served to the user verbatim as the
+ * thing they should go and check. It is not something a person can act on.
+ *
+ * ⛔ WHY IT IS REFUSED HERE AND NOT IN {@link driverIsServable}. That gate
+ * answers *"is this sentence safe to say"* — three conjuncts about grammar,
+ * analysis assertions and copy quality, and the marker legitimately clears all
+ * three (36 chars, asserts nothing, gate-admitted; the em dash is a repairable
+ * STYLE offence since RC4, not a rejection). Refusing it there would answer a
+ * DIFFERENT question with the safety gate's voice (trap 21) and would cost two
+ * things that matter:
+ *
+ *   - a real driver sitting BESIDE the marker would be lost, because the gate
+ *     sees only the one string this picker already chose;
+ *   - the turn would report `fallback_reason: 'gate_rejected'`, telling ops a
+ *     candidate was refused on its content when in truth there was none.
+ *
+ * Skipping here keeps `driverIsServable`'s three conjuncts untouched and
+ * load-bearing, and lets the existing fallback fire for the honest reason.
+ *
+ * ⚠ THE PREDICATE IS THE ESTATE'S EXISTING ONE, DELIBERATELY. `brief-
+ * extraction-claim.ts` is already "the one place this claim is spelled", and
+ * `schema-v3.ts` already withdraws it — from `v3Node.uncertainty_drivers`, the
+ * TOP-LEVEL field. This picker reads `observed_state.uncertainty_drivers`, and
+ * the two carriers are DISJOINT BY CONSTRUCTION at `schema-v3.ts:360`: a
+ * factor with a value puts its drivers in `observed_state` and leaves the
+ * top-level field undefined, while only a valueless factor carries the
+ * top-level one. The enricher always writes a `value` beside the claim
+ * (`enricher.ts:1323`, `:1423`), so the existing withdrawal could never fire
+ * on the nodes carrying it. Importing the shared predicate rather than
+ * spelling a second placeholder list keeps one owner for the question "does
+ * this string assert brief extraction" — a hand-written list here would be the
+ * fourth copy of a string whose copies have already drifted once.
+ *
+ * ⚠ IT IS A PREFIX TEST, NOT A SUBSTRING ONE. A genuine driver that merely
+ * mentions the brief ("the timeline stated in the brief may already be out of
+ * date") is untouched, and is pinned as such.
+ */
 function pickUncertaintyDriver(nodes: readonly NodeLite[]): string | null {
   for (const n of nodes) {
     if (n.kind !== 'factor') continue;
     const drivers = n.observed_state?.uncertainty_drivers;
     if (!drivers || drivers.length === 0) continue;
     for (const d of drivers) {
-      if (typeof d === 'string' && d.trim().length > 0) return d.trim();
+      if (typeof d !== 'string' || d.trim().length === 0) continue;
+      // SKIP, not abort: a real driver may sit behind the marker.
+      if (assertsBriefExtraction(d)) continue;
+      return d.trim();
     }
   }
   return null;
@@ -1844,6 +2395,47 @@ interface SectionedNarrativeInput {
   readonly weighingBlockDirectionOnly: string | null;
   /** Brief-completeness advisory line, or null when absent / `complete`. */
   readonly completenessBlock: string | null;
+  /**
+   * The one stated-limit clarification promoted into its own slot directly
+   * BENEATH the confirm sentence, or `null` when the draft has none. Not new
+   * copy: the first `pickDirectionClarifications` line, MOVED — it is removed
+   * from the weighing block so the person reads it once.
+   *
+   * ⭐⭐ IT IS OUTSIDE EVERY SHED — *WITHIN THE ASSEMBLER*. `tryAssemble` emits
+   * it at every rung of the ladder, including the terminal one that takes no
+   * budget check. That is the whole point of the slot: the weighing block IS
+   * sheddable, `assistant_text` is the only carrier, and a clarification that
+   * rides inside a sheddable block is a question the user simply never sees.
+   *
+   * ⛔⛔ THE SENTENCE THAT USED TO SIT HERE — *"so no input can reach the user
+   * without it"* — WAS FALSE, AND ITS FALSENESS IS WHY THE GAP BELOW WENT
+   * UNNOTICED. It stated a UNIVERSAL over all inputs while the evidence
+   * supports only a claim about the assembler's rungs. `buildPostDraftNarrative`
+   * has TWO returns that never reach `assembleSectionedNarrative` at all, so
+   * `leadClarification` is not composed on either:
+   *
+   *   · the verbatim `coachingSummary` shortcut — the MAJORITY path. Derived
+   *     at the committed corpus, not inherited: the 688-reply record in
+   *     `compose/__tests__/fixtures/live-assistant-text-corpus-2026-08-17/`
+   *     carries 146 replies opening with the deterministic opener, so 542 of
+   *     688 (79%) took a non-deterministic path. On those replies a stated
+   *     limit the model did not carry is NOT surfaced by this slot.
+   *   · the graphless `nodes.length === 0` return.
+   *
+   * ⚠ THE GAP IS REAL AND IS DELIBERATELY NOT CLOSED HERE. Routing either
+   * return through the assembler would change what 542 of 688 replies say,
+   * which is a behavioural change far larger than a comment repair and needs
+   * its own measured lane. What is fixed here is the FALSE UNIVERSAL: a
+   * comment asserting a property that does not hold is how this stayed hidden,
+   * and an honest boundary is worth more than a confident one.
+   *
+   * ⚠ Scope note, stated precisely because the last version of this comment
+   * over-read its own evidence: the 542/688 figure is a count of replies that
+   * did not open with the deterministic opener. It bounds how often the
+   * shortcut path is taken. It is NOT a count of replies that lost a
+   * clarification, which nothing in this repo currently measures.
+   */
+  readonly leadClarification: string | null;
   readonly nextStep: string;
   /**
    * The stated figures the model did not carry, or `null` when there are none
@@ -1876,10 +2468,24 @@ interface SectionedNarrativeResult {
  *   1. full (extra check bullet + completeness + options)
  *   2. drop the extra check bullet (weighing core)
  *   3. drop the completeness advisory
+ *   3b. reduce the weighing block to the stated-limit clarifications alone
  *   4. drop the whole weighing block
  *   5. drop options too (confirm + next-step only)
  *
- * The confirm sentence and next-step nudge are load-bearing and never drop.
+ * ⭐⭐ THE LADDER IS MONOTONE, AND THAT IS A PROPERTY TO PRESERVE, NOT A
+ * COINCIDENCE. Every rung serves a STRICT SUBSET of the rung above it, so
+ * "one rung down" always means "strictly less content". A rung that sheds one
+ * block while RE-ADDING another breaks that — and it is not a cosmetic
+ * breakage: the first attempt at #1428 inserted a rung that dropped the option
+ * inventory to keep the stated-limit clarifications, above a rung that dropped
+ * the clarifications and put the inventory back. Adding a single word to the
+ * next-step nudge then flipped a served limit question into a served option
+ * list, with the user's limit silently gone. Measured, and pinned as a
+ * discriminating pair in `first-response-stated-limit-order.test.ts`.
+ *
+ * The confirm sentence, the promoted stated-limit clarification and the
+ * next-step nudge are load-bearing and never drop — they sit outside the
+ * ladder in `tryAssemble`, so no rung can shed them.
  * When there is no extra bullet and no completeness block, `weighingBlock ===
  * weighingBlockCore` and `completenessBlock === null`, so rungs 1-3 collapse
  * to the original two-outcome behaviour (output is byte-identical to before).
@@ -1890,7 +2496,19 @@ function assembleSectionedNarrative(input: SectionedNarrativeInput): SectionedNa
     includeOptions: boolean,
     includeCompleteness: boolean,
   ): string => {
+    // ⭐ WHAT WAS BUILT COMES FIRST, AND THE STATED LIMIT COMES SECOND.
+    //
+    // The confirm sentence opens the reply: a first message that begins by
+    // reporting the product's own failure was the owner's objection to #1409's
+    // ordering. The clarification keeps its dedicated slot immediately beneath
+    // it — highest-ranked line in the reply after the model itself, and, by
+    // being emitted here rather than inside the weighing block, present at
+    // EVERY rung including the terminal one. See the note on
+    // `leadClarification` for what shipping it inside the ladder cost.
     const blocks: string[] = [input.confirm];
+    if (input.leadClarification !== null && input.leadClarification.length > 0) {
+      blocks.push(input.leadClarification);
+    }
     if (includeOptions && input.optionsBlock !== null) {
       blocks.push(input.optionsBlock);
     }

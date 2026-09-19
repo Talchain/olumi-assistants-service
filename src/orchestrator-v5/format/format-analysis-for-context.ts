@@ -31,6 +31,10 @@ import type {
 import { formatPercentagePoints, formatProbability } from './format-analysis-value.js';
 import { looksLikeRawDecimal } from './format-graph-for-context.js';
 import { bandFromMagnitude, NEAR_ZERO_INFLUENCE_THRESHOLD } from './influence-bands.js';
+import {
+  hasFactorEvppiAssessment,
+  investigationPriorityNote,
+} from '../coaching/investigation-priority.js';
 
 export interface DisplaySafeAnalysisOption {
   readonly label: string;
@@ -279,6 +283,31 @@ export interface DisplaySafeAnalysisDriver {
    *  `"moderate negative influence"`, or `"no material influence"` for
    *  near-zero sensitivities where sign is not meaningful. */
   readonly influence: string;
+  /**
+   * ⭐ THE PRODUCER'S OWN VERDICT ON WHETHER THIS FACTOR IS WORTH RESOLVING.
+   *
+   * Added because its ABSENCE caused a witnessed live harm (2026-09-04): the
+   * model was handed `{label, influence}` and nothing else, so for a factor
+   * with `value_of_information: 0` and `flip_risk_category: "negligible"` the
+   * only inference available was "this matters, so investigate it" — and the
+   * product spent eight narrations telling a founder to run a pilot that its
+   * own engine scored at zero benefit.
+   *
+   * Carries ONE of two things, never both: the honest verdict sentence for a
+   * factor the producer scored at zero, or — for an `informative` factor — the
+   * MAGNITUDE of what resolving it is worth. The second exists because a
+   * verdict-only fix leaves every positively-scored factor projected exactly as
+   * it was before, which is the shape that produced the harm.
+   *
+   * Key ABSENT (never empty string) when the factor is unscored, or informative
+   * with no producer magnitude, so the pre-fix projection is reproduced
+   * byte-for-byte for every case this fix is not about.
+   *
+   * ⚠ Lives on the SAME object as `influence` deliberately: the budget
+   * truncator drops `top_drivers` wholesale, so a drop can never strip the
+   * counter-evidence while leaving the influence claim standing.
+   */
+  readonly investigation?: string;
 }
 
 export interface DisplaySafeFragileEdge {
@@ -331,6 +360,27 @@ export interface DisplaySafeAnalysis {
    * VOI-claim truthfulness outranks breadth.
    */
   readonly value_of_information_note?: string;
+  /**
+   * ⭐ WHAT THE INFORMATION-VALUE SCIENCE SAID ABOUT WHAT TO INVESTIGATE FIRST.
+   *
+   * A DIFFERENT QUESTION FROM `value_of_information` ABOVE, AND THAT IS THE
+   * POINT — they read different producer channels and answered differently on
+   * the capture that produced this field. `value_of_information` bands
+   * `m1_coaching.evidence_gaps[]`; this projects the `factor_evppi` authority
+   * (`coaching/select-factor-evppi.ts` → `coaching/investigation-priority.ts`),
+   * which is the channel PLoT actually populated on 3 Sep 2026.
+   *
+   * Present exactly when the caller supplied a licence AND that licence is not
+   * `not_assessed` (already covered by `value_of_information_note`). Absent
+   * otherwise, so a caller that has not wired the licence gets a
+   * byte-identical projection.
+   *
+   * Like `goal_fit` and `value_of_information_note`, NEVER dropped by the
+   * char-budget guard: without it the pack's only ranking is `top_drivers`,
+   * which ranks INFLUENCE, and narrating that as an investigation priority is
+   * the live defect this field exists to stop.
+   */
+  readonly investigation_priority_note?: string;
   readonly goal_fit?: string;
   /**
    * Lane 30 fix 3 — analysis confidence prose from the producer's ordinal
@@ -427,10 +477,125 @@ export function influencePhrase(signedSensitivity: number): string {
   return `${band} ${sign} influence`;
 }
 
+/**
+ * The honest sentence for each investigation verdict.
+ *
+ * ⚠ THREE SENTENCES, NOT THREE STRENGTHS OF ONE (trap #21). Each states a
+ * different fact with a different remedy, and none may stand in for another:
+ *
+ *  - `no_reordering_found` — zero measured value of information AND a PRESENT
+ *    zero `rank_flip_rate`: the producer's bootstrap resampling did not move
+ *    this factor's importance rank.
+ *  - `no_information_value` — zero measured value of information, with the
+ *    ranking either measured as unstable or never measured at all.
+ *  - `option_controlled` — the factor is not free to vary; every option sets
+ *    its own value. It is a CHOICE, not an uncertainty to investigate, so
+ *    "not worth investigating" would be the wrong advice for the right reason.
+ *
+ * ⚠⚠ NONE OF THESE MAY SAY "WHICH OPTION LEADS", AND ONE OF THEM DID UNTIL
+ * 2026-09-05. `no_reordering_found` read *"nothing we tested would change which
+ * option leads"*. Derived at the producer, neither field it rests on is about
+ * option ordering:
+ *   - `rank_flip_rate` is ISL's bootstrap stability of THIS FACTOR'S POSITION
+ *     IN THE DRIVER RANKING ("per-bootstrap importance ranks by |elasticity|",
+ *     `robustness_analyzer_v2.py:5548`);
+ *   - `flip_risk_category` is PLoT's FRAGILE-EDGE ADJACENCY test, which returns
+ *     `'negligible'` when there are no fragile edges to be adjacent to.
+ * The producer's real option-ordering evidence (`conditional_winners`,
+ * `flip_thresholds`) is not read here, so the copy claims only what was
+ * measured. Saying "we tested" of an untested thing is the exact harm class
+ * this module exists to remove.
+ *
+ * ⭐ NEVER SILENT. Each of these says something TRUE in place of the false
+ * recommendation; suppressing the sentence and leaving a blank would hide the
+ * most decision-relevant fact the analysis produced.
+ */
+const INVESTIGATION_PHRASES: Readonly<Record<string, string>> = {
+  no_reordering_found:
+    'resolving this has no measured value, and resampling did not move its ranking',
+  no_information_value:
+    'resolving this has no measured value, and its ranking was not shown to be stable',
+  option_controlled:
+    'every option sets its own value for this — a choice, not an uncertainty to investigate',
+};
+
+/**
+ * Disclosed when the value-of-information figure is itself heuristic, or rests
+ * on a default (not user-supplied) range. Without it the replacement sentence
+ * would assert a settledness the producer never claimed — the same overclaim
+ * in the opposite direction.
+ */
+const INVESTIGATION_HEURISTIC_TAIL = ' (heuristic estimate, default range)';
+
+/**
+ * ⭐ THE MAGNITUDE HALF — STRICTLY ADDITIVE, SUPPRESSES NOTHING.
+ *
+ * An `informative` factor keeps its recommendation; what it did NOT keep, until
+ * now, was any sense of SCALE. The composer received `{label, influence}` and
+ * nothing else — byte-identical to the projection that produced the witnessed
+ * lie — so at `value_of_information: 0.004` the model still had only "moderate
+ * negative influence" to reason from, and still supplied "could decisively
+ * clarify which option leads". The zero-verdicts above cannot reach that case,
+ * because 0.004 is not zero.
+ *
+ * ⚠ THIS IS DELIBERATELY NOT A WIDER GATE. Whether a factor may be recommended
+ * at all, and how much it is worth, are DIFFERENT QUESTIONS; a band spanning
+ * both would buy coverage of the overclaim by silently eating small-but-real
+ * value (trap 22b — two opposite harms cannot share one window). Nothing here
+ * removes a driver, a recommendation or a phrase.
+ *
+ * ⚠ BANDED, NOT NUMERIC, AND THE BANDS ARE DERIVED NOT INVENTED. Doctrine A2
+ * binds the display projection to carry no raw numbers in its prose (the
+ * digit-bearing fields — `margin`, option percents — are structured, not
+ * prose), and this field is pinned by a no-digits invariant. So the magnitude
+ * is rendered through the SHARED `bandFromMagnitude` /
+ * `NEAR_ZERO_INFLUENCE_THRESHOLD` vocabulary already used by
+ * {@link influencePhrase}, on the same dimensionless [0,1] scale. The 0.05
+ * near-zero cut is the estate's shared constant and independently matches the
+ * cut-point PLoT ratified for this very field (`lib/evpi-emission.ts:151`,
+ * "the UI's `value_of_information > 0.05` cut-point") — so the boundary is
+ * corroborated by the producer rather than chosen here.
+ *
+ * Returns `undefined` — leaving the pre-fix byte-shape untouched — unless the
+ * producer emitted a STRICTLY POSITIVE figure. A zero or negative value on an
+ * `informative` factor is a producer disagreement, not a magnitude to publish.
+ */
+function informativeMagnitudePhrase(
+  driver: ContextPackAnalysisDriver,
+): string | undefined {
+  if (driver.investigation_verdict !== 'informative') return undefined;
+  const voi = driver.investigation_voi;
+  if (typeof voi !== 'number' || !Number.isFinite(voi) || voi <= 0) return undefined;
+  if (voi < NEAR_ZERO_INFLUENCE_THRESHOLD) {
+    // The case the exact-zero verdicts cannot reach, and the one that produced
+    // "could decisively clarify". Positive, so it is NOT suppressed; near zero,
+    // so the composer is told not to call it decisive.
+    return 'a positive but near-zero measured value in resolving this — too small to call decisive';
+  }
+  return `${bandFromMagnitude(voi)} measured value in resolving this`;
+}
+
 function formatDriver(driver: ContextPackAnalysisDriver): DisplaySafeAnalysisDriver {
-  return {
+  const base: DisplaySafeAnalysisDriver = {
     label: driver.factor_label,
     influence: influencePhrase(driver.sensitivity_value),
+  };
+  // `unscored` deliberately has no phrase: an absent producer signal is NEVER
+  // read as zero, so it reproduces the pre-fix projection byte-for-byte.
+  // `informative` keeps its recommendation and gains only a MAGNITUDE, and only
+  // when the producer supplied one.
+  const phrase =
+    driver.investigation_verdict === undefined
+      ? undefined
+      : (INVESTIGATION_PHRASES[driver.investigation_verdict] ??
+        informativeMagnitudePhrase(driver));
+  if (phrase === undefined) return base;
+  return {
+    ...base,
+    investigation:
+      driver.investigation_basis_heuristic === true
+        ? phrase + INVESTIGATION_HEURISTIC_TAIL
+        : phrase,
   };
 }
 
@@ -728,12 +893,12 @@ export function voiBandPhrase(voiScore: number): string | null {
 
 /**
  * ROADMAP 2.54 (b) — the three DISCLOSED-absence lines for the VOI section.
- * Shared instruction tail: forbid VOI superlatives, redirect to influence
- * phrasing (the vocabulary `top_drivers` actually grounds). Claim
+ * Shared instruction tail: scope absence to evidence-gap coaching, without
+ * negating independent EVPPI or factor-sensitivity signals. Claim
  * discipline per line:
  *
  *  - NOT_SCORED: no evidence-gap signal reached this projection — "no
- *    value-of-information scores are available" is unconditionally true.
+ *    evidence-gap scores are available" is scoped to that channel.
  *  - ALL_NEAR_ZERO: entries arrived but every score banded below the
  *    shared noise floor (`NEAR_ZERO_INFLUENCE_THRESHOLD`) — exactly the
  *    live scorecard shape (every delivered VOI was zero).
@@ -748,23 +913,21 @@ export function voiBandPhrase(voiScore: number): string | null {
  * strings.
  */
 const VOI_NOTE_INSTRUCTION_TAIL =
-  'do not claim any factor carries the highest (or a high) value of information, and do ' +
-  'not present a sensitivity or influence ranking as a value-of-information ranking — ' +
-  'describe factors by their modelled influence instead';
+  'do not infer an information-value priority from this evidence-gap channel or from ' +
+  'influence alone. Other investigation signals retain their own stated basis and limits';
 
 export const VOI_NOT_SCORED_NOTE =
-  'no value-of-information scores are available for this analysis — ' +
+  'no evidence-gap coaching scores are available in this channel — ' +
   VOI_NOTE_INSTRUCTION_TAIL;
 
 export const VOI_ALL_NEAR_ZERO_NOTE =
-  'value of information is at or near zero for every factor available to investigate in ' +
-  'this analysis, so no factor stands out as worth investigating on value-of-information ' +
-  'grounds — ' +
+  'the received evidence-gap coaching scores are all below the display threshold; ' +
+  'this is not a verdict on unassessed factors or other information-value channels — ' +
   VOI_NOTE_INSTRUCTION_TAIL;
 
 export const VOI_LEVER_SUPPRESSED_NOTE =
-  'no independently investigable factor carries a scored value of information in this ' +
-  'analysis (factors set directly by the options themselves are excluded by design — ' +
+  'no independently investigable scored entry remains in the evidence-gap coaching ' +
+  'channel (factors set directly by the options themselves are excluded by design — ' +
   'they are choices, not uncertainties to investigate) — ' +
   VOI_NOTE_INSTRUCTION_TAIL;
 
@@ -1016,8 +1179,31 @@ export function formatAnalysisForContext(
     out.value_of_information_note = VOI_ALL_NEAR_ZERO_NOTE;
   } else if (raw.evidence_gaps_lever_suppressed === true) {
     out.value_of_information_note = VOI_LEVER_SUPPRESSED_NOTE;
-  } else {
+  } else if (!hasFactorEvppiAssessment(raw.investigation_priority)) {
+    // Avoid a redundant empty-channel note when an EVPPI verdict is present.
+    // All emitted notes are channel-scoped, including mixed nonempty cases.
     out.value_of_information_note = VOI_NOT_SCORED_NOTE;
+  }
+
+  // The investigation-priority licence — the EVPPI channel's own verdict, in
+  // the pack for the first time.
+  //
+  // NEVER DROPPED by the char-budget guard (deliberately absent from
+  // {@link DISPLAY_ANALYSIS_TRUNCATION_ORDER}), on the same doctrine as
+  // `goal_fit` and `value_of_information_note`: a truncated projection that
+  // loses this note leaves the influence ranking as the only ranking in the
+  // pack, which is the exact condition under which the model narrated one as
+  // the other. Set BEFORE the guard so its own length is inside the budget
+  // arithmetic.
+  //
+  // The contract suite investigation-priority-not-narrated-from-influence
+  // pins retention under actual truncation; the module tests bound fixed
+  // note length. Optional producer action text is not part of that fixed cost.
+  if (raw.investigation_priority !== undefined) {
+    const priorityNote = investigationPriorityNote(raw.investigation_priority);
+    if (priorityNote !== null) {
+      out.investigation_priority_note = priorityNote;
+    }
   }
 
   // Lane 30 — goal-fit prose. Three DISCLOSED states (never silent, so the

@@ -66,6 +66,7 @@ import {
 import type { SuggestedAction } from './compose/types.js';
 import type { CoachingState } from './coaching/coaching-state.js';
 import { emit, log, TelemetryEvents } from '../utils/telemetry.js';
+import { censusOptionFactorMagnitudes } from '../cee/draft/records/option-magnitude-census.js';
 import { emitContextTruncation } from './context/context-budget-telemetry.js';
 import { config } from '../config/index.js';
 import { floorGraphSigmaForCompute } from '../validators/numeric-bounds.js';
@@ -83,6 +84,7 @@ import {
 } from './model-management/mutation-receipt.js';
 import type { ModelVersionMutationReceiptV1Local } from './model-management/mutation-receipt.js';
 import { recordDecisionRecordForCommit } from './decision-records/capture.js';
+import { recordBriefProvenanceForCommit } from './brief-provenance/capture.js';
 import { maintainRollingSummaryForCommit } from './rolling-summary/capture.js';
 import { isSuccessfulRunAnalysisFact } from './context/freshness.js';
 
@@ -743,8 +745,33 @@ export function isCompetingRunAnalysisSuggestionChip(chip: SuggestedAction): boo
  *   - `system-events/dispatch.ts:1543` and `:1595`, both inside
  *     `dispatchFactorValueEdit` (a MUTATING path, so it needs
  *     `threadHoldsThroughMutatingCommit`, not a plain thread);
- *   - `handlers/chip-click-dispatch.ts:1679`, in
- *     `dispatchChipClickRunAnalysis` (the run_analysis SUCCESS commit);
+ *   - ~~the run_analysis SUCCESS commit in `dispatchChipClickRunAnalysis`
+ *     (`handlers/chip-click-dispatch.ts`)~~ — ⭐ CLOSED (2.1353 rounds 3-4,
+ *     PR #1286). It reads the prior row with
+ *     `loadMostRecentPendingActionsIntegrityStrict` and threads
+ *     `priorPendingActions`. On a read FAILURE it still commits (the
+ *     `run_analysis` fact must stay durable) and emits
+ *     `v5.pending_wipe_risk_on_success_commit`. On `pending_actions_corrupt`
+ *     it consults the tolerant loader and then SPLITS ON THE RECOVERED COUNT,
+ *     because that code has two producers with opposite recovery behaviour
+ *     (`supabase-store.ts`: a non-array column can only ever yield ZERO, while
+ *     parse failures can yield survivors):
+ *       · ≥1 survivor  -> carries them, emits
+ *         `v5.pending_wipe_partial_recovery_on_success_commit`;
+ *       · 0 survivors  -> threads NOTHING (the key stays omitted rather than
+ *         becoming `[]`, which commit.ts resolves to a total wipe) and emits
+ *         `v5.pending_wipe_unrecoverable_on_success_commit`. Round 3 assigned
+ *         `[]` here and called it a partial recovery — a total loss reported
+ *         as a recovery, found by review at `63880ed1`.
+ *     So a wipe is possible only on a failed read, and never silently, and
+ *     never described as something it was not.
+ *     ⚠ THE LINE NUMBER THAT USED TO BE IN THIS ENTRY IS GONE ON PURPOSE. It
+ *     said `:1679`, moved to `:1847` when round 3 landed, and moved again to
+ *     `:1927` inside round 4 — it was wrong at every reading, including in the
+ *     correction that was supposed to fix it. A line number in a docstring is
+ *     a hand-maintained mirror (trap 12) that this entry has now drifted three
+ *     times; the function name does not drift. Re-derive with
+ *     `rg -a -n 'commitDirectAnswer\(' src/`.
  *   - `routes/assist.v1.scenario-graph-register.ts:435`, which writes a turn
  *     row through `appendCheckedGraphWrite` with no `pending_actions` at all
  *     (`supabase-store.ts:325` resolves that to `[]` — the same silent wipe).
@@ -1074,6 +1101,7 @@ export async function commitDirectAnswer(
   response: OlumiResponse,
   metadata: CommitMetadata,
   sessionStore?: SessionStore,
+  projectPublicResponse?: (response: OlumiResponse) => OlumiResponse,
 ): Promise<CommitResult> {
   // Invariant guard: the TurnExecutor seven-step assembly must produce a
   // composed OlumiResponse before reaching COMMIT. A falsy response here
@@ -1370,6 +1398,12 @@ export async function commitDirectAnswer(
   // NULL (system-event turns, blank answers, and the draft_graph path whose
   // provisional response carries empty assistant_text — its narrative is
   // reconstructable from the persisted graph in context).
+  // The conversation owner can apply its existing public-answer policy here:
+  // after pending/lapse composition, before the SAME response is stored and
+  // returned. No second write or alternative conversation history is created.
+  if (projectPublicResponse) {
+    responseForCommit = projectPublicResponse(responseForCommit);
+  }
   const userMessage = capConversationText(metadata.userMessage, 'user_message');
   // F-HELD: derived from `responseForCommit` (not the raw input response) so
   // the durable copy includes the lapse notice / excludes suppressed chips'
@@ -1568,6 +1602,37 @@ export async function commitDirectAnswer(
       });
     }
 
+    // ⭐ CENSUS POINT 4 of 4 — `at_commit`. MEASUREMENT ONLY: nothing reads it,
+    // and it is inside the post-success block, so it can never turn a durable
+    // write into a turn failure.
+    //
+    // ⚠ ON `graphForStore`, NOT `metadata.graph` — the exact object written to
+    // `scenarios.graph`, because `at_commit` is a claim about the PERSISTED
+    // bytes and each point must be about the artefact its name promises.
+    //
+    // ⚠ AND THE HONEST LIMIT OF THAT CHOICE, so nobody reads more into it: on
+    // THIS measure the two currently agree for every input, and the mutant that
+    // swaps them SURVIVES (demonstrated, not asserted — see the PR body). The
+    // persist passes between them move interventions BETWEEN CARRIERS, and the
+    // census is carrier-agnostic by design, so a carrier move is invisible to it
+    // — correctly, since moving a magnitude is not losing one. `graphForStore`
+    // is still the right input: it is the only one that would show it if a
+    // future persist pass changed the option→factor topology itself.
+    //
+    // ⚠ GATED ON `writesGraph`. A commit that writes no graph has no artefact to
+    // census; emitting `{0, 0}` there would put a fabricated zero-denominator
+    // row into the same series as real measurements and drag every aggregate
+    // down. Absent is the truthful report of "nothing to measure".
+    if (writesGraph) {
+      emit(TelemetryEvents.CeeDraftOptionMagnitudeCensus, {
+        point: 'at_commit',
+        scenario_id: metadata.scenario_id,
+        turn_id: metadata.turn_id,
+        turn_class: metadata.turn_class,
+        ...censusOptionFactorMagnitudes(graphForStore),
+      });
+    }
+
     // V5 Coaching State Spine — Stage 2B-1b: post-success persistence telemetry.
     // Once per commit across the whole turn taxonomy. `coaching_state_present`
     // distinguishes turns that derived a snapshot (turn-executor / chip-click)
@@ -1670,6 +1735,44 @@ export async function commitDirectAnswer(
       // getScenarioOwner (structural ScenarioOwnerReader slice — keeps
       // the SessionStore import surface at its declared three files).
       sessionStore: store,
+    });
+  }
+
+  // ROADMAP 2.1229 (CEE half) — brief + analysis-provenance capture hook.
+  //
+  // THE USER OUTCOME: a person who has run an analysis can send their model
+  // to a colleague, and the colleague opens the link and sees it. Today
+  // `create_shared_brief` raises 'No brief to share - generate a brief
+  // first' on every real share, because `scenarios.brief` is NULL on 14,157
+  // of 14,158 rows. The DB-side producers were always correct — they lost
+  // their CALLER when the direct browser→PLoT `/v2/run` path was retired
+  // (ROADMAP 2.1229). CEE already mints all four required values on every
+  // run and writes them only to the telemetry table `v5_handler_facts`;
+  // this hook forwards them to the row the share path actually reads.
+  //
+  // SIBLING of the decision-record hook above and deliberately INDEPENDENT
+  // of it: same predicate, same fire-and-forget contract, its own `find` and
+  // its own failure handling, so neither can silently change the other's
+  // firing condition (two hooks answering two questions — they are not one
+  // concept with two writes). Fires ONLY after the durable append succeeded
+  // AND this commit carries a successful (non-noop) run_analysis fact; the
+  // predicate already excludes 'refused' attempts, which carry no brief.
+  // Any failure logs and NEVER affects the turn result. No qualifying fact
+  // ⇒ byte-identical commit path (no store construction, no env reads —
+  // pinned by commit-brief-provenance-hook.test.ts, which asserts the
+  // store-construction COUNT rather than merely that the RPC went uncalled).
+  // The hook needs no session store: `store_brief_and_provenance` runs with
+  // the SERVICE ROLE and updates `scenarios` by id, so there is no guest
+  // pre-check to do and no SessionStore import to add.
+  const briefProvenanceFact = metadata.handler_facts.find(
+    (f): f is RunAnalysisHandlerFact => isSuccessfulRunAnalysisFact(f),
+  );
+  if (briefProvenanceFact !== undefined) {
+    void recordBriefProvenanceForCommit({
+      scenarioId: metadata.scenario_id,
+      turnId: metadata.turn_id,
+      persistedRowId,
+      fact: briefProvenanceFact,
     });
   }
 

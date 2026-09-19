@@ -97,10 +97,30 @@ describe('E — DISCRIMINATING CONTROLS: non-currency bounds are unchanged below
     expect(describeOf(addConstraint(200000, 'users'))).toContain('200,000 users');
   });
 
-  it('a non-numeric value still degrades to "that level"', () => {
-    expect(describeOf(addConstraint('not a number' as unknown as number, 'GBP'))).toContain(
-      'that level',
+  it('a non-numeric value is NOT OFFERED AT ALL, which is stronger than degrading to "that level"', () => {
+    // ⚠ AMENDED 2026-09-14, and deliberately NOT deleted. This case's job is
+    // the FAILURE DIRECTION of the currency formatter: a value the formatter
+    // cannot read must never be corrupted into a wrong number. It asserted
+    // that by pinning the vague fallback, "that level".
+    //
+    // The offer-sufficiency gate makes that fallback UNREACHABLE from here:
+    // `add_constraint` throws PARAMETER_INVALID without a usable `value`, so
+    // a proposal carrying one is refused before any copy is composed (it was
+    // also minting a second, unappliable "Add this limit" beside the real
+    // offer — see `warrant-demotion-offer-sufficiency.test.ts`).
+    //
+    // The control's INTENT is preserved and strengthened: the formatter still
+    // cannot fabricate a number from a non-numeric value, because the product
+    // no longer describes, or offers, that change at all.
+    const built = buildWarrantDemotion(
+      addConstraint('not a number' as unknown as number, 'GBP'),
+      [],
     );
+    expect(built.ok).toBe(false);
+    if (built.ok || built.reason !== 'required_parameter_missing') {
+      throw new Error(`expected required_parameter_missing, got ${JSON.stringify(built)}`);
+    }
+    expect(built.parameterName).toBe('value');
   });
 
   it('a NON-currency unit degrades to the old rendering, never to a wrong number', () => {

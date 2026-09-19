@@ -57,6 +57,14 @@ import { buildBootModelRegistryBatch } from "./config/boot-model-registry-batch.
 import { DEFAULT_SUMMARY_MODEL } from "./orchestrator-v5/rolling-summary/summary-types.js";
 import { DEFAULT_DECOMPOSE_MODEL } from "./cee/decision-review/decompose.js";
 import { SERVICE_VERSION, GIT_COMMIT_SHA, GIT_COMMIT_SHORT } from "./version.js";
+// The contract-health manifest, published on /healthz. Imported from the
+// RUNTIME-RESOLVED module, never from the package.json pin — see the block at
+// the /healthz 200 return for why that distinction is the whole point.
+import {
+  SCHEMA_PACKAGE_VERSION,
+  SCHEMA_SHA,
+  CONTRACT_MANIFEST_SHA,
+} from "@talchain/schemas";
 import { getAllFeatureFlags } from "./utils/feature-flags.js";
 import { attachRequestId, getRequestId, REQUEST_ID_HEADER } from "./utils/request-id.js";
 import { buildErrorV1, toErrorV1, getStatusCodeForErrorCode, isClientAbortError, RateLimitedError, retryAfterSecondsFromRateLimitContext } from "./utils/errors.js";
@@ -86,7 +94,7 @@ import { proxyV5TurnRoute } from "./routes/proxy-v5-turn.js";
 import proxyV5TurnStreamRoute from "./routes/proxy-v5-turn-stream.js";
 import { logResolvedTaskModels } from "./config/model-resolution-logger.js";
 import {
-  buildEffectiveTaskModels,
+  buildStartupTaskModels,
   resolveModelRoutingSnapshot,
 } from "./adapters/llm/model-routing-report.js";
 import { initializeAndSeedPrompts, getBraintrustManager, registerAllDefaultPrompts, getPromptStore, getPromptStoreStatus, isPromptStoreHealthy, isStoreBackendConfigured, initializePromptStore } from "./prompts/index.js";
@@ -305,9 +313,9 @@ export async function build() {
   // endpoint. Gated, inert/display and invalid rows remain visible in the full
   // snapshot but cannot be presented as effective serving assignments.
   const modelRoutingSnapshot = resolveModelRoutingSnapshot();
-  const effectiveTaskModels = buildEffectiveTaskModels(modelRoutingSnapshot);
+  const startupTaskModels = buildStartupTaskModels(modelRoutingSnapshot);
   log.info(
-    { event: 'config.task_models', ...effectiveTaskModels },
+    { event: 'config.task_models', ...startupTaskModels },
     'Effective task model assignments from shared routing authority',
   );
 
@@ -452,7 +460,7 @@ export async function build() {
     orchestrator_version: config.features.orchestratorV2 ? 'V2' : 'V1',
     diagnostic_trace: diagnosticTraceEnabled,
     streaming: config.features.orchestratorStreaming,
-    models: effectiveTaskModels,
+    models: startupTaskModels,
     deprecated_vars_detected: deprecationWarnings.length,
     dead_vars_detected: deadVarWarnings.length,
   }, 'Startup health summary');
@@ -904,6 +912,97 @@ app.get("/healthz", async (_request, reply) => {
     prompts_ready,
     critical_prompts_pms,
     prompt_environment: promptEnvironment.environment,
+    // ⭐ THE RESOLVED GRAPH-CAS CAPABILITY, PUBLISHED BECAUSE A PROTECTION
+    // NOBODY OUTSIDE CAN WITNESS IS ONE NOBODY CAN RELY ON.
+    //
+    // `src/config/index.ts` rowed this and stated the problem exactly: the
+    // deployed posture is set in the Render dashboard, is not derivable from
+    // any file, and was "UNOBSERVABLE FROM ANY CLIENT by construction". Two
+    // prose claims in the tree contradict each other about it — one says
+    // staging runs MODE=observe + RPC=enforce, the header of
+    // `routes/assist.v1.scenario-graph-register.ts` says RPC=shadow — and
+    // NOTHING IN THE REPOSITORY COULD SETTLE WHICH. Both were deliberately
+    // left in place pointing at each other so no reader picked one at random.
+    //
+    // A real cost, paid on 18 Sep 2026: the Canvas lane held a built UI PR
+    // because it could not learn whether `edge_strength_edit` would be
+    // refused with `reader_only_refusal` on the deployed service. Shipping it
+    // blind would have given users a control that silently never reached the
+    // model. That question is now one curl, for every workstream, for good.
+    //
+    // ⚠ PUBLISHED AS THE RESOLVED CAPABILITY, NOT THE RAW ENV VARS. The two
+    // switches are coupled — RPC=enforce with MODE=off is boot-rejected as
+    // enforcement theatre (no caller derives an expected hash, so the RPC
+    // receives a NULL expected and the update falls through to
+    // unconditional). Publishing the resolved object means a reader cannot
+    // reconstruct that invalid combination from what they see here, and
+    // `enforcing` answers the only question a caller actually has.
+    //
+    // Non-secret by construction: an enum posture, never a key, a host or a
+    // magnitude. It sits beside `build`, `version` and `prompt_environment`,
+    // which are published on the same public probe for the same reason.
+    graph_cas: {
+      app_mode: config.features.graphCas.appMode,
+      rpc_mode: config.features.graphCas.rpcMode,
+      // The one field a caller needs: is an atomic compare-and-set actually
+      // enforced on a graph write, or is it observing/shadowing?
+      enforcing: config.features.graphCas.rpcEnforce,
+      requires_expected_hash: config.features.graphCas.requiresExpectedHash,
+    },
+
+    // ⭐ THE CONTRACT THIS BOX IS ACTUALLY RUNNING — published because
+    // SCHEMA-VERSION SKEW IS THIS ESTATE'S DOMINANT CROSS-CUTTING RISK AND
+    // WAS, UNTIL THIS FIELD, UNMEASURABLE FROM OUTSIDE THE BOX.
+    //
+    // `CLAUDE.md` states the risk: each repo pins its own `@talchain/schemas`,
+    // the versions drift, and a consumer on an older version SILENTLY DROPS
+    // fields it does not know — coaching, evidence and enrichment have all
+    // been lost this way. A value that validates at the producer vanishes at
+    // the consumer with no error anywhere.
+    //
+    // A real cost, measured 18 Sep 2026: a live debug capture reported all six
+    // `schema_versions.*` fields null with `consistency_status: "unknown"`,
+    // reason `missing_schema_versions`. The bundle could not see the risk the
+    // doctrine calls dominant. Those six fields read a WIRE field named
+    // `schema_version`, which — where it exists at all — is a per-endpoint
+    // FORMAT LABEL (`"sequential.v1"`, `"optimise.v1"`; olumi-schemas
+    // `src/boundary/group-a.ts:119,236-238`), never a package version. They
+    // could not have answered this question even fully populated. This field
+    // answers it directly.
+    //
+    // ⚠ THE RUNTIME-RESOLVED VERSION, NOT THE PIN. `package.json:97` is a
+    // DECLARATION; the loaded module is the FACT, and they diverge exactly
+    // when it matters — a stale `node_modules`, a hoisted duplicate, a
+    // vendored tarball re-cut under the same version string. The divergence
+    // is live TODAY: the published 0.55.0 tarball carries
+    // `CONTRACT_MANIFEST_SHA = 088fb46a…` while olumi-schemas `main`, also
+    // calling itself 0.55.0, carries `4d3b0995…`. Two byte-sets, one version
+    // string — which is exactly why the two digests are published beside the
+    // version and why a pin-derived value would be worse than useless here.
+    //
+    // ⚠ NOT NESTED, DELIBERATELY. The four keys and their names are fixed by
+    // the contract (`@talchain/schemas` `HEALTH_MANIFEST_FIELDS`, shipped
+    // 2026-07-26): "a nested object is easy to add and easy for a load
+    // balancer / smoke test to never look at. Top-level fields sit next to
+    // `build` and get read." `parseHealthManifest()` parses them `.strict()`,
+    // so a typo fails loudly instead of being ignored. CEE is the FIRST
+    // adopter — measured the same day, all four services scored zero.
+    //
+    // Non-secret by construction: a semver string and two sha256 digests over
+    // PUBLIC contract bytes. Never a key, a host, a path or a magnitude. It
+    // sits beside `build`, `version` and `graph_cas`, published on the same
+    // unauthenticated probe for the same reason.
+    schema_write_version: SCHEMA_PACKAGE_VERSION,
+    // DELIBERATELY CONSERVATIVE: exactly what this service writes. CEE's
+    // boundary schemas are tolerant-additive and would in practice read more
+    // than one release line, but a wider claim here is one I cannot
+    // substantiate, and this field is the input to `compareHealthManifest`'s
+    // reader-first deploy gate — a writer may only be promoted once every
+    // downstream reader lists its release line. An unearned entry would
+    // silently widen that gate. Widen it only with evidence per version.
+    schema_read_versions: [SCHEMA_PACKAGE_VERSION],
+    schema_sha: SCHEMA_SHA,
+    contract_manifest_sha: CONTRACT_MANIFEST_SHA,
   };
 });
 

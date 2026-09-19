@@ -37,7 +37,12 @@ import {
   getDraftLlmRetryBudgetMs,
   MIN_DRAFT_RETRY_BUDGET_MS,
 } from "../../config/timeouts.js";
-import { isEnforcementBlockedResult } from "./stages/repair/graph-enforcement.js";
+import {
+  isEnforcementBlockedResult,
+  isOptionNoOpOnlyBlock,
+  readEnforcementBlockCodes,
+  readGoalNeverStated,
+} from "./stages/repair/graph-enforcement.js";
 import { isOptionsIdenticalBypassResult } from "./stages/repair/options-identical-bypass.js";
 import type { UnifiedPipelineResult } from "./types.js";
 
@@ -85,7 +90,7 @@ export type DraftAutoRetryDecision =
   | { retry: true; retryBudgetMs: number; retryClass: RetryableDraftFailureClass }
   | {
       retry: false;
-      reason: "not_retryable_class" | "budget_unaffordable";
+      reason: "not_retryable_class" | "budget_unaffordable" | "goal_never_stated";
       retryBudgetMs?: number;
     };
 
@@ -111,6 +116,32 @@ export function decideDraftAutoRetry(
   const retryClass = classifyRetryableDraftFailure(result);
   if (retryClass === null) {
     return { retry: false, reason: "not_retryable_class" };
+  }
+  // ⭐⭐ THE RETRY WAS MEASURED NEVER TO RESCUE THIS CLASS.
+  //
+  // ⚠ THE CLAIM IS THE MEASUREMENT, NOT AN IMPOSSIBILITY PROOF. What was
+  // measured is a rate and a cost; "a re-draft CANNOT invent a goal" is a
+  // stronger statement about a stochastic generator than any capture can
+  // support, and this comment used to make it (review, 13 Sep).
+  //
+  // The retry exists because the two funded classes are STOCHASTIC — the same
+  // brief drafts cleanly in a neighbouring run, which is measured and is why
+  // `retryable: true` is honest for them. The self-inflicted goal gap behaved
+  // differently in every capture we have: the placeholder is minted
+  // deterministically from a brief that designates no objective, so attempt 2
+  // began from the same contentless goal and returned the same codes.
+  //
+  // MEASURED on the served build `2212ae0`: across all 11 captured short-brief
+  // failures the retry ran (`{attempted: true, attempts: 2}`, zero
+  // `skipped_reason`), produced IDENTICAL codes both times, RESCUED 0 OF 11,
+  // and spent ~18s doing it. That is the whole basis for declining it: an
+  // observed 0/11 rescue rate at ~18s, not a proof that a rescue is impossible.
+  //
+  // Checked BEFORE affordability because the two skips are different facts and
+  // the user is owed the true one: "no budget to retry" invites a retry by
+  // hand, which on this class has never yet produced a different outcome.
+  if (readGoalNeverStated(result.body)) {
+    return { retry: false, reason: "goal_never_stated" };
   }
   const retryBudgetMs = getDraftLlmRetryBudgetMs(elapsedMs);
   if (retryBudgetMs < MIN_DRAFT_RETRY_BUDGET_MS) {
@@ -170,11 +201,88 @@ export const OPTIONS_IDENTICAL_RETRY_EXHAUSTED_HINTS: readonly string[] = [
   "Trying the same brief again is still possible, but it has now produced identical options twice",
 ];
 
-/** Per-class post-retry copy. One table, keyed by the class the classifier
- *  returned — so a new class cannot be added to `RetryableDraftFailureClass`
- *  without the typechecker demanding its copy here. */
+/**
+ * Post-retry copy for the `OPTION_NO_OP` finding.
+ *
+ * ⚠ THE ENFORCEMENT COPY ABOVE IS NOT REUSABLE HERE EITHER, for exactly the
+ * reason its `OPTIONS_IDENTICAL` sibling gives: it tells the user "part of the
+ * drafted model was left unconnected to your goal", which describes a topology
+ * failure this finding did not have. The option was connected fine. It was
+ * drafted holding its factors where they already were.
+ *
+ * That sentence shipped to Paul on 2026-09-11 against a brief that stated its
+ * outcome explicitly and named how each consideration bears on it — so the copy
+ * prescribed, twice, the two things the brief already did. The lie is the
+ * inherited class, not the wording of either sentence.
+ *
+ * ⚠ IT DESCRIBES WHAT WAS OBSERVED, NOT WHAT THE USER THOUGHT. A separate lane
+ * is repairing a data defect that binds a factor's recorded current level from
+ * the wrong slot, which can make a genuine option LOOK like a no-op. Until that
+ * lands, even honest copy here may be describing our own data error, so the
+ * sentence reports the comparison the system made rather than judging the
+ * user's option. That phrasing stays true in both worlds.
+ *
+ * Both ways out are named (`retry-directive.ts:109-113`): only the model can
+ * tell a mis-drafted alternative from a deliberate do-nothing arm. Retry is
+ * demoted to a disclosed footnote, as on every other exhausted path — it has
+ * now come out the same way twice. Domain-neutral by ruling (2026-07-24); no em
+ * dashes in product content (Paul, 2026-09-10).
+ */
+export const OPTION_NO_OP_RETRY_EXHAUSTED_SUGGESTION =
+  "One of your options was drafted with values that match the ones already recorded for the factors it acts on, " +
+  "so it modelled no change and there was nothing to compare it against. A second draft was tried automatically " +
+  "and came out the same way, so the clearest next step is to say what that option changes, or that it is meant " +
+  "to be the current arrangement.";
+
+export const OPTION_NO_OP_RETRY_EXHAUSTED_HINTS: readonly string[] = [
+  "Say what that option changes: cost, time, scope, capacity or risk, whichever dimension the decision turns on",
+  "Or, if that option is meant to be the current arrangement, say so, and give the others something that differs from it",
+  "Trying the same brief again is still possible, but this has now happened twice in a row",
+];
+
+/**
+ * ⭐ THE COPY AXIS, NAMED APART FROM THE RETRY AXIS (trap 21).
+ *
+ * `RetryableDraftFailureClass` answers *"should the server fund a re-draft?"*
+ * and is minted from a PRODUCER SIGNATURE. `OPTION_NO_OP` has no signature of
+ * its own — it rides the generic post-enforcement envelope beside every
+ * topology code — so it is not a retry class, and giving it one would force
+ * `classifyRetryableDraftFailure` to read a hand-list of validator codes, which
+ * this file's own trigger doctrine refuses.
+ *
+ * It IS a distinct copy key, because "what went wrong" has a different answer
+ * for it. So: one extra key on the copy axis, zero change to the retry axis.
+ * The union still CONTAINS every retry class, so the exhaustiveness property
+ * the tables were built for is intact — a new retry class still cannot be added
+ * without the typechecker demanding its copy on BOTH post-retry paths.
+ */
+export type DraftFailureCopyKey = RetryableDraftFailureClass | "option_no_op";
+
+/**
+ * Which sentence does THIS result deserve?
+ *
+ * Delegates the code reading and the all-or-nothing rule to the producer's own
+ * exports (`graph-enforcement.ts`), so the three sites that need this
+ * discrimination cannot answer it three different ways (trap 12). Falls back to
+ * the retry class for every result that is not a no-op-only enforcement block —
+ * i.e. today's behaviour, unchanged, for every other failure.
+ */
+export function resolveDraftFailureCopyKey(
+  result: UnifiedPipelineResult,
+  retryClass: RetryableDraftFailureClass,
+): DraftFailureCopyKey {
+  if (retryClass !== "post_enforcement") return retryClass;
+  return isOptionNoOpOnlyBlock(readEnforcementBlockCodes(result.body))
+    ? "option_no_op"
+    : "post_enforcement";
+}
+
+/** Per-key post-retry copy. One table, keyed by the copy key resolved above —
+ *  so a new retry class cannot be added to `RetryableDraftFailureClass`, and a
+ *  new copy key cannot be added to `DraftFailureCopyKey`, without the
+ *  typechecker demanding copy here. */
 const RETRY_EXHAUSTED_COPY: Record<
-  RetryableDraftFailureClass,
+  DraftFailureCopyKey,
   { suggestion: string; hints: readonly string[] }
 > = {
   post_enforcement: {
@@ -184,6 +292,10 @@ const RETRY_EXHAUSTED_COPY: Record<
   options_identical: {
     suggestion: OPTIONS_IDENTICAL_RETRY_EXHAUSTED_SUGGESTION,
     hints: OPTIONS_IDENTICAL_RETRY_EXHAUSTED_HINTS,
+  },
+  option_no_op: {
+    suggestion: OPTION_NO_OP_RETRY_EXHAUSTED_SUGGESTION,
+    hints: OPTION_NO_OP_RETRY_EXHAUSTED_HINTS,
   },
 };
 
@@ -247,16 +359,31 @@ export const OPTIONS_IDENTICAL_UNAFFORDABLE_HINTS: readonly string[] = [
   "If it happens again, give each option at least one value that differs — cost, time, scope, capacity or risk",
 ];
 
-/** Per-class unfunded copy. Same table shape, and the same reason for it: a new
- *  class cannot be added to `RetryableDraftFailureClass` without the
- *  typechecker demanding its copy on BOTH the exhausted and the unfunded path.
+/** The unfunded variant of the `OPTION_NO_OP` copy. Same finding, different
+ *  second half: nothing was retried, so the "twice in a row" disclosure would
+ *  be false here and the retry lever stays live. Kept in step with its
+ *  connectivity sibling above, which makes the same distinction. */
+export const OPTION_NO_OP_UNAFFORDABLE_SUGGESTION =
+  "One of your options was drafted with values that match the ones already recorded for the factors it acts on, " +
+  "so it modelled no change and there was nothing to compare it against. This draft ran long enough that there " +
+  "was no time left to try again automatically, so nothing was retried on your behalf.";
+
+export const OPTION_NO_OP_UNAFFORDABLE_HINTS: readonly string[] = [
+  "Trying again is worth it. A fresh attempt starts with a full time budget",
+  "If it happens again, say what that option changes: cost, time, scope, capacity or risk",
+  "Or, if that option is meant to be the current arrangement, say so, and give the others something that differs from it",
+];
+
+/** Per-key unfunded copy. Same table shape, and the same reason for it: a new
+ *  key cannot be added to `DraftFailureCopyKey` without the typechecker
+ *  demanding its copy on BOTH the exhausted and the unfunded path.
  *
  *  ⚠ The two tables are deliberately NOT merged. They answer different
  *  questions — *"we tried twice and it failed twice"* versus *"we never tried"*
  *  — and they prescribe different next steps. Collapsing them into one table
  *  with a flag is how a single sentence ends up making both claims (trap 21). */
 const RETRY_UNAFFORDABLE_COPY: Record<
-  RetryableDraftFailureClass,
+  DraftFailureCopyKey,
   { suggestion: string; hints: readonly string[] }
 > = {
   post_enforcement: {
@@ -266,6 +393,10 @@ const RETRY_UNAFFORDABLE_COPY: Record<
   options_identical: {
     suggestion: OPTIONS_IDENTICAL_UNAFFORDABLE_SUGGESTION,
     hints: OPTIONS_IDENTICAL_UNAFFORDABLE_HINTS,
+  },
+  option_no_op: {
+    suggestion: OPTION_NO_OP_UNAFFORDABLE_SUGGESTION,
+    hints: OPTION_NO_OP_UNAFFORDABLE_HINTS,
   },
 };
 
@@ -289,7 +420,7 @@ export function applyRetryUnaffordableCopy(
     body.details !== null && typeof body.details === "object" && !Array.isArray(body.details)
       ? (body.details as Record<string, unknown>)
       : {};
-  const copy = RETRY_UNAFFORDABLE_COPY[retryClass];
+  const copy = RETRY_UNAFFORDABLE_COPY[resolveDraftFailureCopyKey(result, retryClass)];
   return {
     ...result,
     body: {
@@ -309,6 +440,81 @@ export function applyRetryUnaffordableCopy(
           attempted: false,
           attempts: 1,
           skipped_reason: "budget_unaffordable",
+        },
+      },
+    },
+  };
+}
+
+/**
+ * The honest sentence for a draft that failed to reach a goal THIS PIPELINE
+ * INVENTED.
+ *
+ * ⚠ IT MAKES NO FREQUENCY CLAIM AND DOES NOT SAY "TRY AGAIN", and both
+ * omissions are measured. The connectivity copy's "usually transient / retrying
+ * usually succeeds" is inherited from a population this user is not in: for
+ * this class the same brief re-drafted from the same contentless goal and
+ * failed identically, 11 times out of 11. Telling this user to retry would be
+ * the cruel inversion the truncation arm already names — advice that
+ * reproduces the failure.
+ *
+ * It also does not blame the brief. The brief was fine; the pipeline supplied
+ * the goal. What is missing is one fact only the user has, so the sentence asks
+ * for that fact and nothing else.
+ */
+export const GOAL_NEVER_STATED_SUGGESTION =
+  "This model could not be built because the outcome it should optimise for was never named, "
+  + "so there was nothing for the alternatives to connect to. Say what a good result looks like "
+  + "and the model can be drafted around it.";
+
+export const GOAL_NEVER_STATED_HINTS: readonly string[] = [
+  "Name the measure that matters — revenue, cost, risk, retention — and which way you want it to move",
+  "A single sentence is enough; the rest of the brief can stay as it is",
+];
+
+/**
+ * Return a copy of `result` whose recovery copy is honest that no automatic
+ * retry was made BECAUSE IT WAS MEASURED NOT TO HELP ON THIS CLASS (0 of 11
+ * captured failures rescued, identical codes both attempts, ~18s spent), and
+ * whose details disclose the skip on the wire (`auto_retry: { attempted: false, attempts: 1,
+ * skipped_reason: "goal_never_stated" }` — fixed shape, fixed enum reason, no
+ * user content, riding the already-allowlisted `auto_retry` key).
+ *
+ * ⚠ A DIFFERENT SKIP FROM `applyRetryUnaffordableCopy`, AND THE DISTINCTION IS
+ * THE POINT (trap 21). That one means *"we ran out of budget to try again"* —
+ * a fact about this request. This means *"retrying has not rescued this class
+ * in any run we have measured"* — a fact about the failure. They share a shape
+ * and must not share a reason: a user told "no time to retry" will retry by
+ * hand, which on every captured instance of this class reproduced the failure. Everything else — status code, `code`, `retryable`, the codes-only
+ * validator mirror, `last_phase`, `goal_never_stated` — is preserved
+ * byte-for-byte. Pure: the input is not mutated.
+ */
+export function applyGoalNeverStatedSkipCopy(
+  result: UnifiedPipelineResult,
+): UnifiedPipelineResult {
+  const body = result.body as Record<string, unknown>;
+  const details =
+    body.details !== null && typeof body.details === "object" && !Array.isArray(body.details)
+      ? (body.details as Record<string, unknown>)
+      : {};
+  return {
+    ...result,
+    body: {
+      ...body,
+      recovery: {
+        suggestion: GOAL_NEVER_STATED_SUGGESTION,
+        hints: [...GOAL_NEVER_STATED_HINTS],
+      },
+      // The pinned flat mirror, kept in agreement with `recovery.suggestion` —
+      // `buildCeeErrorResponse` set it at emission, so rewriting `recovery`
+      // alone would leave the body carrying two DIFFERENT sentences.
+      recovery_suggestion: GOAL_NEVER_STATED_SUGGESTION,
+      details: {
+        ...details,
+        auto_retry: {
+          attempted: false,
+          attempts: 1,
+          skipped_reason: "goal_never_stated",
         },
       },
     },
@@ -336,7 +542,7 @@ export function applyRetryExhaustedCopy(
     body.details !== null && typeof body.details === "object" && !Array.isArray(body.details)
       ? (body.details as Record<string, unknown>)
       : {};
-  const copy = RETRY_EXHAUSTED_COPY[retryClass];
+  const copy = RETRY_EXHAUSTED_COPY[resolveDraftFailureCopyKey(result, retryClass)];
   return {
     ...result,
     body: {

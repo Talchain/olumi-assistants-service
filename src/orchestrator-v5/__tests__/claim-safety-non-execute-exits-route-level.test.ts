@@ -372,6 +372,7 @@ function converseTextOnly(text: string) {
 const { ceeOrchestratorRouteV2, EDIT_GRAPH_RECOVERY_TEXT } = await import(
   '../../orchestrator/route-v2.js'
 );
+const { synthesiseAnswerShapeFromText } = await import('../routing/answer-shape.js');
 
 async function postTurn(
   app: FastifyInstance,
@@ -1105,13 +1106,34 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
   describe('the CHIP-CLICK ok exit — the second model-text exit, and the _answer_shape pin', () => {
     const CHIP_RECEIPT = 'Analysis complete.';
     const CHIP_LEADER_SENTENCE = `${LEADER_LABEL} leads at 72% on this run.`;
-    const CHIP_ANSWER = `${CHIP_RECEIPT} ${CHIP_LEADER_SENTENCE} The gap is not stable across the runs.`;
+    /**
+     * ⚠ LONG ON PURPOSE (THE COLLAPSE FLOOR, 18 Sep 2026), AND THE REASON IS
+     * THIS DESCRIBE'S OWN INSTRUMENT.
+     *
+     * `_answer_shape` is a WIRE DIRECTIVE to collapse the answer, and CEE now
+     * issues it only above `ANSWER_SHAPE_COLLAPSE_FLOOR_CHARS` (3,000 — the
+     * deployed UI's own `CLAMP_CHAR_THRESHOLD`). The pin below asserts the
+     * sidecar is ABSENT whenever the claim-safety gate edited the answer, and
+     * the INSTRUMENT case above it exists to prove that absence is not vacuous.
+     *
+     * At the original length BOTH would have read "absent" for the floor's
+     * reason rather than the gate's — the positive control would have gone
+     * quietly dead and the pin with it (trap 13). Padding past the floor keeps
+     * the two causes separable: permitted ⇒ long ⇒ sidecar present; edited ⇒
+     * still long ⇒ sidecar absent, and absent BECAUSE THE GATE DROPPED IT.
+     *
+     * The pad is additive prose on one line; every content assertion in this
+     * describe is `toContain` and is unaffected.
+     */
+    const CHIP_FLOOR_PAD = ` ${'Every figure here is read straight from the run you just completed. '.repeat(46).trim()}`;
+    const CHIP_ANSWER = `${CHIP_RECEIPT} ${CHIP_LEADER_SENTENCE} The gap is not stable across the runs.${CHIP_FLOOR_PAD}`;
 
-    function mockChipOk(opts: { mayName: boolean; text: string }): void {
+    function mockChipOk(opts: { mayName: boolean; text: string; analysisReady?: unknown }): void {
       dispatchDeterministicChipClickMock.mockResolvedValue({
         outcome: 'ok',
         graph: READY_GRAPH,
         mayNameLeadingOption: opts.mayName,
+        analysisReady: opts.analysisReady,
         // SUBSTANTIVE, deliberately: it is what makes the egress answer-shape
         // synthesiser attach `_answer_shape`, which is the sidecar this
         // describe exists to pin. A `functional` chip answer never shapes.
@@ -1201,6 +1223,62 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
         'and no other surface may carry the removed designation either',
       ).not.toContain(LEADER_LABEL);
     });
+
+    it.each([false, true])(
+      'native C2 prose: admission licensed=%s keeps answer-shape coherence at the real wire seam',
+      async (licensed) => {
+        const capture = JSON.parse(
+          readFileSync(
+            new URL(
+              './../compose/__tests__/fixtures/c2-context-response-20260907T203538Z.json',
+              import.meta.url,
+            ),
+            'utf8',
+          ),
+        );
+        if (licensed)
+          capture.analysis_ready.analysis_admission.permitted_analysis_mode = 'comparative_leader';
+        mockChipOk({
+          mayName: true,
+          text: capture.assistant_text,
+          analysisReady: capture.analysis_ready,
+        });
+        const { status, body } = await postChip(app);
+        expect(status).toBe(200);
+        expect(dispatchDeterministicChipClickMock).toHaveBeenCalled();
+        expect(routeWithToolUseMock).not.toHaveBeenCalled();
+        expect(body.assistant_text).toContain(
+          "Your model doesn't yet capture technical debt or a launch deadline",
+        );
+        // ⚠ THE CAPTURE IS NOT PADDED, AND THAT IS DELIBERATE. This fixture is
+        // a REAL RESPONSE recorded on 2026-09-07 — evidence, not a fixture to
+        // keep current (CLAUDE.md trap 14b). It is ~1,200 characters, i.e.
+        // below the collapse floor, so NEITHER arm ships `_answer_shape` any
+        // more and the presence/absence pair can no longer discriminate.
+        //
+        // The coherence claim is preserved by asserting it on the shape that
+        // WOULD have shipped, built with the same function the egress uses:
+        // licensed ⇒ the designation survives into it; withheld ⇒ it does not
+        // appear on ANY surface, the sidecar included. That is the property
+        // this case was written to protect, and it is now checked at a length
+        // where the sidecar is legitimately withheld.
+        const wouldShip = synthesiseAnswerShapeFromText(body.assistant_text as string);
+        expect(body).not.toHaveProperty('_answer_shape');
+        expect(
+          wouldShip,
+          'the captured answer must be shapeable, or the assertions below are vacuous',
+        ).not.toBeNull();
+        if (licensed) {
+          expect(body.assistant_text).toContain("The lead's current advantage");
+          expect(JSON.stringify(wouldShip)).toContain("The lead's current advantage");
+        } else {
+          expect(body.assistant_text).not.toContain("The lead's current advantage");
+          expect(body.assistant_text).not.toContain('The analysis shows which option leads');
+          expect(body.assistant_text).not.toContain("the leading option's edge");
+          expect(JSON.stringify(wouldShip)).not.toContain("The lead's current advantage");
+        }
+      },
+    );
   });
 
   // ── ⭐ THE WIRE-GATE CANARY — the blindness that let this slip ────────────
@@ -1517,18 +1595,17 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
       expect(provenanceOnTheWire(body)).toBe('fail_closed_no_turn_context');
       expect(unavailableEvents()).toEqual([]);
       expect(
-        events.filter(
-          (e) => e.name === TelemetryEvents.V5WithheldLeaderClaimNeutralisedAtWire,
-        ),
+        events.filter((e) => e.name === TelemetryEvents.V5WithheldLeaderClaimNeutralisedAtWire),
         'the most fail-closed verdict in the union must still not edit deterministic copy',
       ).toEqual([]);
     });
 
-    it('the turn_executor exit is BYTE-NEUTRAL — no double substitution', async () => {
+    it('the turn_executor answer is BYTE-NEUTRAL — block-only protection is not double prose substitution', async () => {
       // ⭐ IDEMPOTENCE ACROSS THE TWO GATES. The converse exit is the ONE exit
       // downstream of `finalizeRun`, whose #755 guard already substitutes for
-      // this population. The wire gate must therefore find nothing left to do:
-      // two gates that both fire would append the refusal twice, and a user
+      // this population. The wire gate must find no ANSWER edit left to do:
+      // block-only licence projection is separate. Two prose substitutions
+      // would append the refusal twice, and a user
       // being told the same thing twice is how a safety gate reads as a bug.
       routeWithToolUseMock.mockResolvedValue(
         converseTextOnly(`For context, ${LEADER_LABEL} leads at 72%.`),
@@ -1544,9 +1621,11 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
       ).toBeLessThanOrEqual(1);
       expect(
         events.filter(
-          (e) => e.name === TelemetryEvents.V5WithheldLeaderClaimNeutralisedAtWire,
+          (e) =>
+            e.name === TelemetryEvents.V5WithheldLeaderClaimNeutralisedAtWire &&
+            e.data.edited_fields !== 'blocks',
         ),
-        'the executor already neutralised this answer; the wire gate must be a no-op here',
+        'the executor already neutralised this answer; only block-only projection may remain',
       ).toEqual([]);
     });
   });

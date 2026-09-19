@@ -720,8 +720,18 @@ describe('route-level: the constraint disclosure in the serialised HTTP envelope
     // It does NOT say the condition went unchecked (#703's false statement).
     expect(turn.assistantText).not.toContain('could not be checked');
     // It does NOT certify safety — no leader is named (#707's false statement).
+    // ⚠ THAT CHECK IS THE LINE BELOW. The line under it used to assert
+    // "no option can be put forward yet" as a PROXY for the same thing, and the
+    // proxy was not equivalent: withholding the LEADER is a claim-safety
+    // entitlement (`MAY_NAME_LEADING_OPTION`, enforced by
+    // `compose/leading-option-egress-guard.ts`), while "no option can be put
+    // forward" asserts the RANKING is void. Measured live on 16 Sep 2026, those
+    // came apart: a user was told no option could be put forward while
+    // `analysis_ready` logged 5 ready options and 0 blockers. The entitlement
+    // check stays; the proxy is replaced by the voice's true consequence.
     expect(turn.assistantText).not.toContain('Hire Marketing Manager');
-    expect(turn.assistantText).toContain('no option can be put forward yet');
+    expect(turn.assistantText).toContain('cannot be counted as part of the comparison');
+    expect(turn.assistantText).not.toContain('no option can be put forward yet');
     // And it offers ITS repair step, not the units one.
     expect(turn.assistantText).toContain(
       'State the condition in your own words and run the analysis again',
@@ -796,6 +806,14 @@ const LEADING_OPTION_LANGUAGE: readonly RegExp[] = [
   /\bstill leads\b/i,
   /\bnow leads\b/i,
   /\bled before\b/i,
+  // ⚠ THE GOAL-FRAMED REPLACEMENTS (2026-09-07, Paul's no-winner ruling). The
+  // list above is an ABSENCE assertion: it proves a withheld turn carries no
+  // leader language. Retiring the copy without adding its replacement would
+  // leave every pattern here matching a sentence the product no longer emits —
+  // the suite would stay green by testing nothing (CLAUDE.md trap 13).
+  /\bscored? highest\b/i,
+  /\bscores highest\b/i,
+  /most likely to serve your goal/i,
   /its lead has (?:widened|narrowed)/i,
   /the result is unchanged/i,
 ];
@@ -2059,7 +2077,23 @@ describe('2.349 R2 — gap 5 at the serialised HTTP boundary', () => {
     const block = body.blocks.find((b: any) => b.type === 'analysis_result');
     expect(block.leading_option_id).toBeNull();
     expect(turn.assistantText).toContain('could not be checked');
-    expect(turn.assistantText).toContain('Tell me the limit you meant');
+    // ⚠ REBOUND, NOT RELAXED. This assertion used to name the repair sentence
+    // `Tell me the limit you meant`, as a proxy for "the unevaluated voice
+    // spoke". It is no longer a stable proxy: this file's goal node
+    // `goal_growth` carries a directed incoming edge (`fac_capacity ->
+    // goal_growth`) and a `goal_threshold` with no baseline, so PLoT's anchor
+    // resolution refuses it and the disclosure now takes its UNANCHORED repair
+    // arm. That is the same judgement THIS FILE already makes 50 lines above,
+    // where the identical sentence is called *"untruth #3 — a repair step that
+    // can never change the outcome"* for the out-of-scope class.
+    //
+    // So it binds instead to the part that identifies the VOICE and cannot
+    // move with the arm — the consequence sentence — plus the invariant the
+    // test is actually about: a repair the user can act on is still offered.
+    expect(turn.assistantText).toContain(
+      'We could not line it up with anything this analysis measures',
+    );
+    expect(turn.assistantText).toContain('and I will record it');
   });
 
   it('MIXED: a second, genuinely unscored constraint still withholds AND both are disclosed', async () => {

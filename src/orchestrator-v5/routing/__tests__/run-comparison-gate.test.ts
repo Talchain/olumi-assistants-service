@@ -106,7 +106,7 @@ describe('tryRunComparisonGate', () => {
     if (!out.matched) return;
     expect(out.mode).toBe('compared');
     expect(out.leading_option_changed).toBe(true);
-    expect(out.assistant_text).toContain('leading option has changed');
+    expect(out.assistant_text).toContain('option that scored highest most often in the model simulations has changed');
     expect(out.assistant_text).toContain('Offshore');
     expect(out.assistant_text).toContain('Onshore');
     expect(out.assistant_text).toContain('narrowed');
@@ -156,7 +156,7 @@ describe('tryRunComparisonGate', () => {
     expect(out.assistant_text.toLowerCase()).not.toContain('has changed');
     expect(out.assistant_text.toLowerCase()).toContain("can't confirm");
     // No comparison content leaked.
-    expect(out.assistant_text).not.toContain('leading option has changed');
+    expect(out.assistant_text).not.toContain('option that scored highest most often in the model simulations has changed');
     expect(out.leading_option_changed).toBeNull();
     // Copy safety.
     expect(out.assistant_text).not.toMatch(FORBIDDEN);
@@ -346,7 +346,7 @@ describe('tryRunComparisonGate — claim safety (ROADMAP 1.233)', () => {
     if (!out.matched) return;
     expect(out.mode).toBe('compared');
     expect(out.assistant_text).toContain('Onshore');
-    expect(out.assistant_text).toMatch(/leads|now leads|came out ahead/);
+    expect(out.assistant_text).toMatch(/leads|scored highest most often in the latest run|came out ahead/);
   });
 
   it('a WITHHELD verdict drops the ordering and the margin sentences', () => {
@@ -452,7 +452,7 @@ describe('tryRunComparisonGate — withheld copy vs the ALARM vocabulary (F1)', 
   it('POSITIVE CONTROL: the alarm DOES see the permitted answer', () => {
     // Rule 2 — without this, the three absence assertions above would pass
     // identically against a broken scanner. The permitted arm composes "X still
-    // leads" / "the leading option has changed", which must be visible.
+    // leads" / "the option that scored highest most often in the model simulations has changed", which must be visible.
     const out = tryRunComparisonGate({
       message: 'What changed?', priorFacts: TWO_RUNS, freshness: 'fresh', mayNameLeadingOption: true,
     });
@@ -466,7 +466,7 @@ describe('tryRunComparisonGate — withheld copy vs the ALARM vocabulary (F1)', 
 // display label. `graph-hash.ts` deliberately EXCLUDES labels from the
 // analysis-affecting hash (so a rename leaves freshness `fresh` and both runs
 // permitted), which means a pure rename used to reach the both-permitted arm
-// and assert "X came out ahead before, and Y now leads" about ONE option.
+// and assert "X came out ahead before, and Y scores highest now" about ONE option.
 describe('tryRunComparisonGate — leader identity is the option id, not the label (F3)', () => {
   /** Legacy enrichment: labels + probabilities, NO `option_id` anywhere. */
   function labelOnlyEnvelope(
@@ -507,7 +507,7 @@ describe('tryRunComparisonGate — leader identity is the option id, not the lab
     if (!out.matched) return;
     expect(out.mode).toBe('same_inputs');
     expect(out.leading_option_changed).toBe(false);
-    expect(out.assistant_text).not.toContain('leading option has changed');
+    expect(out.assistant_text).not.toContain('option that scored highest most often in the model simulations has changed');
     expect(out.assistant_text).not.toContain('came out ahead before');
     expect(out.assistant_text).toContain('still leads');
   });
@@ -519,8 +519,8 @@ describe('tryRunComparisonGate — leader identity is the option id, not the lab
     expect(out.matched).toBe(true);
     if (!out.matched) return;
     expect(out.leading_option_changed).toBe(true);
-    expect(out.assistant_text).toContain('leading option has changed');
-    expect(out.assistant_text).toContain('Onshore now leads');
+    expect(out.assistant_text).toContain('option that scored highest most often in the model simulations has changed');
+    expect(out.assistant_text).toContain('Onshore scored highest most often in the latest run');
   });
 
   it('F3 RED: legacy label-only enrichment never asserts a leader change on a label mismatch', () => {
@@ -542,7 +542,7 @@ describe('tryRunComparisonGate — leader identity is the option id, not the lab
     expect(out.mode).toBe('same_inputs');
     expect(out.leading_option_changed).toBe(false);
     expect(out.leader_identity_basis).toBe('indeterminate');
-    expect(out.assistant_text).not.toContain('leading option has changed');
+    expect(out.assistant_text).not.toContain('option that scored highest most often in the model simulations has changed');
     // ⚠ ASSERT WHAT IS SAID, not only what is not. An absence-only assertion
     // leaves the arm's actual content unpinned — and the arm it reaches emits
     // an AFFIRMATIVE continuity claim unless it is told not to.
@@ -572,11 +572,11 @@ describe('tryRunComparisonGate — leader identity is the option id, not the lab
     expect(out.leader_identity_basis).toBe('indeterminate');
     // No cross-run leader claim, in EITHER direction.
     expect(out.assistant_text).not.toContain('still leads');
-    expect(out.assistant_text).not.toContain('leading option has changed');
-    expect(out.assistant_text).not.toContain('came out ahead');
+    expect(out.assistant_text).not.toContain('option that scored highest most often in the model simulations has changed');
+    expect(out.assistant_text).not.toContain('scored highest against your goal');
     // The no-relational-claim form: name this run's leader, say plainly that
     // the two cannot be lined up.
-    expect(out.assistant_text).toContain('Onshore leads on the latest result.');
+    expect(out.assistant_text).toContain('Onshore scored highest on the latest result.');
     expect(out.assistant_text).toContain(UNMATCHED_LEADER_IDENTITY_TEXT);
   });
 

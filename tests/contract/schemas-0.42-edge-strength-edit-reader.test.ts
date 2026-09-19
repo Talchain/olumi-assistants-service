@@ -112,7 +112,68 @@ describe('schema 0.42 — root edge_strength_edit contract', () => {
     // constant, byte-identical validation, not a tightening. Nothing removed,
     // nothing renamed (`git diff --name-status -M` reports zero R entries).
     // `src/graph.ts` is byte-identical between the two tags.
-    expect(SCHEMA_PACKAGE_VERSION).toBe('0.50.0');
+    // 0.50.0 → 0.54.0 (`option_intervention_edit`, the per-cell option→factor
+    // effect carrier). RE-DERIVED THE SAME WAY rather than inherited: BOTH
+    // tarballs were pulled from the registry — 0.50.0 sha1 `ed84e38a…`, 0.54.0
+    // sha1 `1281c862…`, each matching the registry's own published shasum — and
+    // every `dist` file mentioning `edge_strength_edit` was compared.
+    //
+    // The FILE SET is identical (the same five files). Measured symmetrically,
+    // line numbers stripped from BOTH sides:
+    //   turn-payload.d.ts  19 → 19 lines, ZERO lost
+    //   turn-payload.js    10 → 11 lines, ZERO lost — the one added hit is a
+    //                      COMMENT inside the new member's header (`The
+    //                      reasoning is \`edge_strength_edit\`'s, unchanged,
+    //                      because the two`), the same shape as the four
+    //                      comment hits the 0.48.0 entry above records;
+    //   enums.js           3 → 3 lines, ZERO lost;
+    //   fixtures/index.js  3 → 3 lines, ZERO lost;
+    //   enums.d.ts         1 → 1, and the one line DIFFERS — it is the
+    //                      `SystemEventKind` literal. Proven APPEND-ONLY by
+    //                      STRING EQUALITY, exactly as the 0.48.0 entry did:
+    //                      0.50's literal with `, "option_intervention_edit"`
+    //                      inserted after `"structural_rename"` is EQUAL to
+    //                      0.54's, so nothing was removed, renamed or
+    //                      reordered.
+    // Same positive control as its predecessors: `package.json` DOES differ
+    // between the two tarballs, so the comparator is demonstrably able to see a
+    // difference and these verdicts are not a check that cannot fail.
+    //
+    // 0.54.0 → 0.55.0 (`finding_dissent`, the Reasoning tab's stated
+    // disagreement). RE-DERIVED THE SAME WAY rather than inherited: both
+    // vendored tarballs were unpacked — 0.54.0 sha256 `8dffea3a…`, 0.55.0
+    // sha256 `ea61d924…`, each matching the `.sha256` its own commit ships —
+    // and every `dist` file mentioning `edge_strength_edit` was compared.
+    //
+    // The FILE SET is identical (the same five files). Measured symmetrically,
+    // line numbers stripped from BOTH sides, no filter applied to one side
+    // only — reported as LOST-from-0.54.0 and NEW-in-0.55.0 in the same run:
+    //   turn-payload.d.ts  19 → 19 lines, ZERO lost, ZERO new
+    //   turn-payload.js    11 → 11 lines, ZERO lost, ZERO new
+    //   enums.js            3 →  3 lines, ZERO lost, ZERO new
+    //   fixtures/index.js   3 →  3 lines, ZERO lost, ZERO new
+    //   enums.d.ts          1 →  1, and the one line DIFFERS — it is the
+    //                      `SystemEventKind` literal. Proven APPEND-ONLY by
+    //                      STRING EQUALITY, exactly as the 0.48.0 and 0.54.0
+    //                      entries did: 0.54's literal with `, "finding_dissent"`
+    //                      inserted after `"option_intervention_edit"` is EQUAL
+    //                      to 0.55's, so nothing was removed, renamed or
+    //                      reordered.
+    // Two controls, because an equality proof that cannot fail proves nothing:
+    //   POSITIVE — `package.json` DOES differ between the two tarballs, so the
+    //     comparator is demonstrably able to see a difference and the four
+    //     ZERO-lost/ZERO-new verdicts are not a check that cannot fail.
+    //   NEGATIVE — the same construction with `finding_dissent` inserted after
+    //     `"feedback"` instead does NOT equal 0.55's literal, so the append-only
+    //     proof genuinely discriminates POSITION and is not satisfied by any
+    //     insertion anywhere.
+    // The `HandlerFact` union was compared the same way for the sibling guard:
+    // 13 → 14 `fact_type` literals, `finding_dissent` the only addition, none
+    // removed.
+    //
+    // So the strict member, the root superRefine and the intent/direction
+    // vocabularies this suite exercises are unchanged across the bump.
+    expect(SCHEMA_PACKAGE_VERSION).toBe('0.55.0');
   });
 
   it('accepts a valid set event through the ROOT payload schema without rewriting it', () => {
@@ -267,12 +328,22 @@ describe('schema 0.42 — pre-0.42 system-event corpus is byte-compatible', () =
     // independent evidence that the 0.48.0 → 0.50.0 bump removed and renamed
     // NOTHING in this vocabulary — the additions genuinely arrive at the end.
     expect(SystemEventKind.options.slice(0, PRE_042_KINDS.length)).toEqual([...PRE_042_KINDS]);
+    // 0.54.0 appends `option_intervention_edit` the same way, and the PREFIX
+    // assertion above passing unchanged is again the independent evidence that
+    // the bump removed and renamed NOTHING — the addition arrives at the end.
+    // 0.55.0 appends `finding_dissent` the same way. Asserted at the vendored
+    // bytes, not inferred from a changelog: 0.54's `SystemEventKind` literal
+    // with `, "finding_dissent"` appended after `"option_intervention_edit"` is
+    // STRING-EQUAL to 0.55's, and a control insertion mid-list is NOT — so the
+    // addition is proven to arrive at the end rather than merely to be present.
     expect(SystemEventKind.options.slice(PRE_042_KINDS.length)).toEqual([
       'edge_strength_edit',
       'structural_delete',
       'structural_add',
       'structural_add_edge',
       'structural_rename',
+      'option_intervention_edit',
+      'finding_dissent',
     ]);
   });
 

@@ -2,7 +2,7 @@
 
 import { log } from '../utils/telemetry.js';
 import {
-  buildEffectiveTaskModels,
+  buildStartupTaskModels,
   type ModelRoutingSnapshot,
 } from '../adapters/llm/model-routing-report.js';
 
@@ -17,7 +17,7 @@ export function logResolvedTaskModels(snapshot: ModelRoutingSnapshot): void {
     'Startup routing is adapter-free; per-request logs remain authoritative for explicit and prompt-store overrides.',
   );
 
-  const effective = buildEffectiveTaskModels(snapshot);
+  const effective = buildStartupTaskModels(snapshot);
   for (const row of snapshot.tasks) {
     const isEffective = Object.hasOwn(effective, row.task);
     log.info(

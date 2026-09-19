@@ -29,6 +29,11 @@
 import { describe, it, expect } from 'vitest';
 
 import { evaluateConfigureOptionOutcome } from '../configure-option-outcome.js';
+import { buildConfigureOptionRecoveryCopy } from '../configure-option-clarify.js';
+import {
+  detectConfigureOptionIntent,
+  projectOptionLabels,
+} from '../configure-option-intent.js';
 import { buildConfigureOptionAdvisedFormat } from '../../configure-option-chip-text.js';
 import { computeStructuralReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import type { GraphV3T } from '../../../schemas/cee-v3.js';
@@ -275,35 +280,75 @@ describe('ROADMAP 2.427 — recorded configure phrasings stay untouched', () => 
   });
 
   /**
-   * ⚠ THE GUARD'S DOMAIN, PINNED — and this is a DELIBERATE BOUND, not an
-   * oversight. Stated as a test because a scope this consequential must fail
-   * loudly if someone widens the predicate without widening the copy.
+   * ⭐⭐ THE COPY DOMAIN BOUND, STILL HERE — BUT IT NO LONGER SWITCHES OFF THE
+   * PROTECTION. This case previously asserted `not_applicable` and was the
+   * clearest statement of the defect the deliberate-edit lane closed.
    *
-   * The guard fires only for an option that was `needs_encoding` BEFORE the
-   * edit, because that is the domain in which the recovery copy is TRUE. The
-   * composer says *"X has no effect values yet, so the analysis cannot compare
-   * it with the others"* — a sentence that is false of an option already
-   * carrying one value and being given a second.
+   * ── WHAT THIS CASE USED TO SAY, AND WHY IT WAS HALF RIGHT ────────────────
+   * ~~"a wrong-entity write against a PARTIALLY-configured option is NOT
+   * covered here … widening the predicate without a second copy variant would
+   * trade a false success for a false NOTICE."~~
    *
-   * So a wrong-entity write against a PARTIALLY-configured option is NOT
-   * covered here. That is a real residual, reported and rowed rather than
-   * silently absorbed: widening the predicate without a second copy variant
-   * would trade a false success for a false NOTICE, which is the same harm
-   * wearing the opposite sign (review doctrine — a notice's truth condition is
-   * a claim about the WHOLE domain of the predicate that raises it).
+   * The SECOND half is exactly right and is why the recovery copy's domain
+   * bound is untouched: *"X has no effect values yet, so the analysis cannot
+   * compare it with the others"* is FALSE of an option already carrying a
+   * value, and a product that says it has swapped one lie for another.
+   *
+   * The FIRST half conflated two questions under one predicate (trap 21).
+   * *Which option did the user name?* and *what copy replaces the response?*
+   * are different questions, and only the second has no honest answer here.
+   * Binding the WRITE protection to the COPY predicate's domain is what left
+   * every REVISION unguarded — a drafted graph arrives populated, so there is
+   * no outstanding slot and the guard was never asked. Measured live on
+   * deployed CEE staging, 14 Sep 2026: `not_applicable` on 46 of 46 real
+   * captured turns, six of which moved an edge or a shared baseline and told
+   * the user it had worked.
+   *
+   * So the verdict is now `not_honoured_no_copy`: protection WITHOUT copy. The
+   * bound this case exists to defend is asserted directly — the verdict carries
+   * NO `factorLabels`, so no consumer can compose the untrue sentence, and
+   * `edit-graph-dispatch.ts`'s `=== 'not_honoured'` text replacement cannot
+   * fire.
    */
-  it('DOMAIN BOUND: a partially-configured option is out of scope (copy would be untrue)', () => {
+  it('COPY DOMAIN BOUND: a partially-configured option is protected WITHOUT copy', () => {
     const before = captureGraph({ cloudNativeInterventions: { fac_platform_cost: 0.2 } });
     const after = captureGraph({
       cloudNativeInterventions: { fac_platform_cost: 0.2 },
       cloudNativeComplexityStrength: 0.7,
     });
 
-    // The wrong-entity write happened — and the guard deliberately says nothing,
-    // because it has no true sentence available for this state.
+    // PRECONDITION (trap 13b): this is only a statement about a PARTIALLY
+    // configured option while the option really is partially configured.
+    // Derived from `computeStructuralReadiness`, the reader the bound consults.
+    expect(
+      computeStructuralReadiness(before)!.options.find((o) => o.option_id === 'opt_cloud_native')
+        ?.status,
+    ).toBe('ready');
+
     expect(evaluateConfigureOptionOutcome({ message: T12C, before, after })).toEqual({
-      status: 'not_applicable',
-      reason: 'option_not_identified',
+      status: 'not_honoured_no_copy',
+      optionId: 'opt_cloud_native',
+      optionLabel: 'Cloud-Native CRM',
+      copyDeclineReason: 'option_already_partially_configured',
+    });
+  });
+
+  /**
+   * ⭐ THE OTHER HALF OF THE SAME BOUND, and it is what stops the case above
+   * decaying into "the status string changed". The copy predicate itself must
+   * STILL refuse this option — if it ever starts matching, the untrue sentence
+   * becomes composable again and nothing else in the suite would notice.
+   */
+  it('COPY DOMAIN BOUND: the copy predicate itself still refuses the configured option', () => {
+    const before = captureGraph({ cloudNativeInterventions: { fac_platform_cost: 0.2 } });
+    const recovery = buildConfigureOptionRecoveryCopy({
+      message: T12C,
+      detection: detectConfigureOptionIntent(T12C, projectOptionLabels(before.nodes)),
+      graph: before,
+    });
+    expect(recovery).toEqual({
+      matched: false,
+      reason: 'option_already_partially_configured',
     });
   });
 });
@@ -531,23 +576,82 @@ describe('the post-edit re-resolution may not rename the option', () => {
   const NAMES_BOTH =
     'Under the Cloud-Native CRM option, set its effect on Adoption Complexity to 0.7 — not like Basic Platform.';
 
-  it('declines when pre- and post-edit resolution disagree about which option this is', () => {
-    const before = captureGraph(); // opt_basic ready, opt_cloud_native blocked
-    const after = captureGraph({ basicInterventions: {} }); // the edit cleared opt_basic
+  /**
+   * ⚠⚠ THE ORIGINAL FIXTURE FOR THIS PIN NO LONGER REACHES IT, AND SAYING SO
+   * IS THE POINT — a pin kept pointing at an unreachable branch is a guard
+   * agreeing with itself (trap 13b).
+   *
+   * It relied on the message NAMING BOTH OPTIONS while the resolver's
+   * outstanding-slot candidate set quietly hid one of them, so "which option"
+   * had a single answer before the edit and a different single answer after.
+   * `resolveConfigureOptionTarget` reads ALL options, so a message naming two
+   * of them is now what it plainly is — AMBIGUOUS — and declines before any
+   * re-resolution happens. That is a strictly better answer to the same input,
+   * and it is pinned here rather than deleted.
+   */
+  it('a message naming TWO options declines by AMBIGUITY, before divergence can arise', () => {
+    const before = captureGraph();
+    const after = captureGraph({ basicInterventions: {} });
 
     // Preconditions pinned in-test, so this cannot decay into a tautology.
-    const blockedBefore = computeStructuralReadiness(before)!
-      .options.filter((o) => o.status === 'needs_encoding').map((o) => o.option_id);
-    const blockedAfter = computeStructuralReadiness(after)!
-      .options.filter((o) => o.status === 'needs_encoding').map((o) => o.option_id);
-    expect(blockedBefore).toEqual(['opt_cloud_native']);
-    expect(blockedAfter).toEqual(['opt_basic', 'opt_cloud_native']);
     expect(NAMES_BOTH).toContain('Cloud-Native CRM');
     expect(NAMES_BOTH).toContain('Basic Platform');
+    expect(
+      computeStructuralReadiness(before)!.options.map((o) => o.option_id).sort(),
+    ).toEqual(['opt_basic', 'opt_cloud_native']);
 
     expect(evaluateConfigureOptionOutcome({ message: NAMES_BOTH, before, after })).toEqual({
       status: 'not_applicable',
-      reason: 'recovery_target_diverged',
+      reason: 'option_label_ambiguous',
+    });
+  });
+
+  /**
+   * ⭐⭐ THE DIVERGENCE PIN, RE-GROUNDED ON A FIXTURE THAT STILL REACHES IT.
+   *
+   * With one identity resolver on both sides, divergence now requires the
+   * LABEL SET ITSELF to move between the two graphs — which a rename does, and
+   * a rename is well inside a wrong-entity edit's repertoire (this file already
+   * carries a factor-rename case). Here the edit renames the option the user
+   * named, and gives ITS NAME to the other option.
+   *
+   * Without the pin the verdict would carry `opt_cloud_native`'s outcome under
+   * `opt_basic`'s identity: the exact wrong-entity harm this module exists to
+   * remove, reintroduced two lines from the end of it. What the pin now asserts
+   * is stronger than the old `not_applicable` — the protection SURVIVES and is
+   * bound to the option the message named, while the unusable copy is dropped.
+   */
+  it('keeps the NAMED option’s identity when the post-edit re-resolution lands elsewhere', () => {
+    const before = captureGraph();
+    const renamed = captureGraph({ basicInterventions: {} });
+    const after = {
+      ...renamed,
+      nodes: renamed.nodes.map((n) =>
+        n.id === 'opt_cloud_native'
+          ? { ...n, label: 'Legacy CRM' }
+          : n.id === 'opt_basic'
+            ? { ...n, label: 'Cloud-Native CRM' }
+            : n,
+      ),
+    } as GraphV3T;
+
+    // PRECONDITIONS (trap 13b): the two graphs must genuinely resolve the SAME
+    // message to DIFFERENT options, or this asserts nothing about divergence.
+    const labelOf = (g: GraphV3T, id: string) => g.nodes.find((n) => n.id === id)?.label;
+    expect(labelOf(before, 'opt_cloud_native')).toBe('Cloud-Native CRM');
+    expect(labelOf(after, 'opt_cloud_native')).toBe('Legacy CRM');
+    expect(labelOf(after, 'opt_basic')).toBe('Cloud-Native CRM');
+    // The post-edit graph must still offer the copy predicate real material,
+    // or the verdict would come from the `!recovery.matched` branch instead.
+    expect(
+      computeStructuralReadiness(after)!.options.find((o) => o.option_id === 'opt_basic')?.status,
+    ).toBe('needs_encoding');
+
+    expect(evaluateConfigureOptionOutcome({ message: T12C, before, after })).toEqual({
+      status: 'not_honoured_no_copy',
+      optionId: 'opt_cloud_native',
+      optionLabel: 'Cloud-Native CRM',
+      copyDeclineReason: 'recovery_target_diverged',
     });
   });
 });

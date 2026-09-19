@@ -177,6 +177,66 @@ export const DECISION_CONTENT_FIELDS = [
   "summary_text",
   "coaching_text",
   "headline",
+  // Assembled AI prompt text (turn-debug prompt capture, #1435). The
+  // captured SYSTEM half is Olumi-authored only because ONE call site
+  // resolves it with no variables — that is a property of the call
+  // site, not of the field NAME. A second capture seam resolving WITH
+  // variables would put interpolated user text under this same name,
+  // so it joins the list now (fail-safe direction). Only the bytes
+  // field is listed: `system_prompt_sha256` and `system_prompt_chars`
+  // are shape-only, non-reversible, and are what lets a leak be
+  // correlated and DETECTED — redacting them would remove the
+  // detection surface and add no privacy.
+  "system_prompt",
+  // camelCase twin, on the same convention as `userMessage`,
+  // `assistantText`, `answerText` and `orientationText` above. This is
+  // not merely a parameter name: `turn-debug-store.ts` declares
+  // `readonly systemPrompt: string` (PromptCaptureInput) and the
+  // draft_graph seam builds an object literal with that key carrying
+  // the served bytes (`cee/unified-pipeline/stages/parse.ts:268`), so a
+  // spread of that object into `log.*` would put the prompt on the wire
+  // under this name. PROSPECTIVE, not a live leak — swept at f9ee43a9
+  // with a contrast control and no site logs it today; turn-debug-store
+  // states the rule only as a COMMENT (:491), i.e. a hand-maintained
+  // mirror, and listing it here makes it mechanical. Same shape-twin
+  // ruling as above: `systemPromptSha256` / `systemPromptChars` stay OFF.
+  "systemPrompt",
+  // A user's STATED REASON for disagreeing with a finding (#1445's
+  // `finding_dissent` system event). Paul's ruling of 2026-09-11
+  // deliberately widened standing privacy rule R-004 so this free text
+  // is PERSISTED verbatim — `dispatch.ts` passes it through untouched,
+  // "the words are the record". The half of R-004 that STANDS is that
+  // the text may contain PII and must never be re-emitted into telemetry
+  // or logs, which is exactly this boundary's job.
+  //
+  // PROSPECTIVE, not a live leak — same footing as `systemPrompt` above.
+  // Swept at 46a27ae6 with a contrast control: no log call site in `src/`
+  // names `statement` today (contrast: 27 log sites name `label`), and
+  // #1445's reviewer measured the one real re-emission surface
+  // (`log.error({ parse_error: check.error.message })`, dispatch.ts
+  // ~:757-765) across seven failure modes with a firing positive control
+  // and saw no leak. ⚠ Note the honest limit: that field is named
+  // `parse_error`, so listing `statement` does NOT close that surface —
+  // this boundary keys on the field NAME. What it closes is the innocent
+  // future `log.*({ ...fact.result })` or `log.debug({ statement })`.
+  //
+  // NO SHAPE TWINS TO EXCLUDE, unlike `system_prompt`: 0.55.0's
+  // FindingDissentResultSchema is {finding_id, analysis_id, statement,
+  // provenance} and there is no `statement_sha256`/`statement_chars`
+  // anywhere in the tree (measured zero, contrast control firing). The
+  // address pair (analysis_id, finding_id) stays OFF this list on the
+  // same reasoning the shape twins do — it carries no user bytes and is
+  // what lets a dissent be traced and a leak correlated.
+  //
+  // SECOND POPULATION, and it is content too, so this is reinforcing
+  // rather than over-scrubbing: decision-records' `prediction.statement`
+  // (`store-adapter.ts:120`) is set either from `fact.result.summary`
+  // (`capture.ts:246` — analysis prose naming the leading option, which
+  // `turn-executor.ts:2863` already gates as withheld content) or from
+  // "the user's own stated expectation" (`user-commit.ts:28`). Neither
+  // half is service vocabulary, an enum or a diagnostic code, so the
+  // digest blinds no diagnostic.
+  "statement",
 ] as const;
 
 export type DecisionContentField = (typeof DECISION_CONTENT_FIELDS)[number];
@@ -204,12 +264,106 @@ export function decisionContentRedactPaths(
 }
 
 /**
+ * MEASUREMENT CONTAINERS — object keys whose CHILD VALUES are, by
+ * construction, measurements OF content rather than content.
+ *
+ * WHY THIS EXISTS. The censor keys on the terminal field NAME, and
+ * `v5.context_budget` keys its decomposition BY SECTION NAME. A section
+ * is named `brief`, so `section_chars.brief` — a character COUNT —
+ * was digested exactly like `brief`, the brief TEXT. The one section
+ * the draft call records reached staging as
+ * `section_chars: {"brief": "sha8:d8531659"}`: a redaction of a LENGTH,
+ * on the single event that says what we send our own models.
+ *
+ * This is the ruling this file ALREADY makes one paragraph up, for
+ * `system_prompt_chars` / `system_prompt_sha256`: shape-only,
+ * non-reversible, and the very thing that lets a leak be correlated and
+ * DETECTED, so "redacting them would remove the detection surface and add
+ * no privacy". `section_chars` cannot express that rule by NAMING its keys
+ * differently — its keys ARE the CONTEXT_POLICY section names, and a
+ * conformance gate asserts they match.
+ *
+ * ⚠ MECHANISM, and it is NOT obvious — settled by an executed probe, not
+ * by reading: fast-redact hands the censor a `null` for every WILDCARD
+ * segment, so under `*.brief` the path is `[null, "brief"]` and the
+ * container name is NOT knowable. The exemption therefore needs EXPLICIT
+ * (wildcard-free) paths, which report `["section_chars", "brief"]` with
+ * the real name. The generated explicit path and the pre-existing
+ * wildcard BOTH fire on the same location — verified — and both carry the
+ * real container name, so the pass-through is stable under either.
+ *
+ * FAIL-SAFE, never a name bypass: membership exempts a value ONLY when the
+ * value IS a measurement — a finite number, or a flat object of finite
+ * numbers (the per-section content manifest, e.g. `{nodes, edges}`). A
+ * STRING under `section_chars.brief` is not a measurement and is digested
+ * exactly as before, so a call site that starts passing text under a
+ * measurement key leaks nothing. Proven by a positive control in the
+ * sentinel suite.
+ */
+export const MEASUREMENT_CONTAINER_FIELDS = [
+  /** `v5.context_budget` per-section CHARACTER COUNTS. */
+  "section_chars",
+  /**
+   * `v5.context_budget` per-section CONTENT MANIFEST — structural counts
+   * (`{nodes, edges, constraints}`). A char count cannot distinguish
+   * `<GRAPH>{}</GRAPH>` from a real graph of the same size; a field count
+   * can, which is the whole reason this event is read.
+   */
+  "section_shape",
+] as const;
+
+const MEASUREMENT_CONTAINER_SET: ReadonlySet<string> = new Set(
+  MEASUREMENT_CONTAINER_FIELDS,
+);
+
+/**
+ * Is this value a MEASUREMENT (safe to pass through under a measurement
+ * container)? A finite number, or a flat object whose every value is a
+ * finite number. Everything else — strings, arrays, nested objects,
+ * NaN/Infinity — is NOT, and falls through to the digest.
+ */
+export function isMeasurementValue(value: unknown): boolean {
+  if (typeof value === "number") return Number.isFinite(value);
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  return Object.values(value as Record<string, unknown>).every(
+    (v) => typeof v === "number" && Number.isFinite(v),
+  );
+}
+
+/**
+ * EXPLICIT (wildcard-free) redact paths for every
+ * `<measurement container>.<decision-content field>` collision, at depths
+ * 0-1 for the container. DERIVED from both lists — a new measurement
+ * container, or a new decision-content field name, is covered without
+ * anyone remembering to extend a third list.
+ *
+ * These paths do not change WHAT is redacted (the wildcard `*.f` already
+ * matched every one of these locations). They exist solely so the censor
+ * can SEE the container name and apply {@link isMeasurementValue}.
+ */
+export function measurementContainerRedactPaths(
+  containers: readonly string[],
+  fields: readonly string[],
+): string[] {
+  return containers.flatMap((c) => fields.flatMap((f) => [`${c}.${f}`, `*.${c}.${f}`]));
+}
+
+/**
  * Paths to redact from all log output — DERIVED, not hand-listed:
  * credential paths + generated decision-content paths.
  */
 export const REDACT_PATHS = [
   ...BASE_REDACT_PATHS,
   ...decisionContentRedactPaths(DECISION_CONTENT_FIELDS),
+  // Additive: same locations the wildcards already cover, named explicitly so
+  // the censor can identify the measurement container (see
+  // MEASUREMENT_CONTAINER_FIELDS — fast-redact nulls wildcard segments).
+  ...measurementContainerRedactPaths(
+    MEASUREMENT_CONTAINER_FIELDS,
+    DECISION_CONTENT_FIELDS,
+  ),
 ] as const;
 
 /**
@@ -270,6 +424,14 @@ export function redactCensor(
   path: ReadonlyArray<string | number>,
 ): unknown {
   const terminal = String(path[path.length - 1] ?? "");
+  // A value sitting DIRECTLY under a measurement container is a measurement
+  // of content, never content — but only if it actually IS one (see
+  // MEASUREMENT_CONTAINER_FIELDS: the guard is on the VALUE, so this can
+  // never become a name-based content bypass).
+  const container = String(path[path.length - 2] ?? "");
+  if (MEASUREMENT_CONTAINER_SET.has(container) && isMeasurementValue(value)) {
+    return value;
+  }
   if (DECISION_CONTENT_FIELD_SET.has(terminal)) {
     if (Array.isArray(value)) {
       return value.map(digestLeaf);

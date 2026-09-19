@@ -58,6 +58,7 @@ vi.mock("../../src/cee/structure/index.js", () => ({
   detectStructuralWarnings: vi.fn(),
   detectUniformStrengths: vi.fn(),
   detectStrengthClustering: vi.fn(),
+  detectGoalLayerStrengthClustering: vi.fn(),
   detectSameLeverOptions: vi.fn(),
   detectOptionSimilarity: vi.fn().mockReturnValue({ detected: false, critiques: [], warnings: [], validationIssues: [] }),
   detectMissingBaseline: vi.fn(),
@@ -121,6 +122,7 @@ import {
   detectStructuralWarnings,
   detectUniformStrengths,
   detectStrengthClustering,
+  detectGoalLayerStrengthClustering,
   detectSameLeverOptions,
   detectMissingBaseline,
   detectGoalNoBaselineValue,
@@ -233,6 +235,7 @@ function setupDefaultMocks() {
   (detectStructuralWarnings as any).mockReturnValue({ warnings: [], uncertainNodeIds: [] });
   (detectUniformStrengths as any).mockReturnValue({ detected: false });
   (detectStrengthClustering as any).mockReturnValue({ detected: false });
+  (detectGoalLayerStrengthClustering as any).mockReturnValue({ detected: false });
   (detectSameLeverOptions as any).mockReturnValue({ detected: false });
   (detectMissingBaseline as any).mockReturnValue({ detected: false });
   (detectGoalNoBaselineValue as any).mockReturnValue({ detected: false });
@@ -402,6 +405,52 @@ describe("runStagePackage", () => {
     // The other detectors run alongside, as before
     expect(detectUniformStrengths).toHaveBeenCalledTimes(1);
     expect(detectStrengthClustering).toHaveBeenCalledTimes(1);
+  });
+
+  it("runs the goal-layer strength detector and surfaces its warning", async () => {
+    // The goal layer is the population the option comparison is weighted by, and
+    // it is invisible to every graph-wide aggregate. If this detector is not
+    // CALLED here, the whole capability is dark however correct the function is.
+    (detectGoalLayerStrengthClustering as any).mockReturnValue({
+      detected: true,
+      coefficientOfVariation: 0,
+      edgeCount: 3,
+      warning: {
+        id: "goal_layer_strength_clustering",
+        severity: "medium",
+        explanation: "flat goal layer",
+      },
+    });
+    const ctx = makeCtx();
+    await runStagePackage(ctx);
+
+    expect(detectGoalLayerStrengthClustering).toHaveBeenCalledTimes(1);
+    expect(ctx.draftWarnings).toContainEqual(
+      expect.objectContaining({ id: "goal_layer_strength_clustering", severity: "medium" }),
+    );
+  });
+
+  it("adds no goal-layer warning when the goal layer is differentiated", async () => {
+    // DISCRIMINATING TWIN: proves the push above is gated on `detected`, not
+    // unconditional. Without this, a detector wired to fire always would pass.
+    (detectGoalLayerStrengthClustering as any).mockReturnValue({
+      detected: false,
+      coefficientOfVariation: 0.42,
+      edgeCount: 3,
+    });
+    const ctx = makeCtx();
+    await runStagePackage(ctx);
+
+    expect(detectGoalLayerStrengthClustering).toHaveBeenCalledTimes(1);
+    expect(ctx.draftWarnings ?? []).not.toContainEqual(
+      expect.objectContaining({ id: "goal_layer_strength_clustering" }),
+    );
+    // An ungated push adds `undefined` rather than a warning object, which no
+    // objectContaining assertion can see. Say it directly: a silent detector
+    // contributes NOTHING to the array.
+    for (const w of ctx.draftWarnings ?? []) {
+      expect(w).toBeTruthy();
+    }
   });
 
   it("adds uniform strength warning when detected", async () => {

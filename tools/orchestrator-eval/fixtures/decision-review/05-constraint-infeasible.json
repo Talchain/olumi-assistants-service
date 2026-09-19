@@ -141,7 +141,7 @@
           "opt_june": "Feasible path, gives up some early demand"
         },
         "robustness_explanation": {
-          "summary": "The ordering holds in about 68% of runs, but the leading option is infeasible under the stated constraint.",
+          "summary": "The ordering holds in about 68% of runs, but the option this model points to is infeasible under the stated constraint.",
           "primary_risk": "The audit constraint rules out the option the model scores highest.",
           "stability_factors": [
             "Audit completion is well supported."
@@ -178,7 +178,7 @@
         "narrative_summary": "Launch in March scores highest by about 38 percentage points over Launch in June. Early demand is what carries the result.",
         "story_headlines": {
           "opt_march": "Scores highest on early demand",
-          "opt_june": "Trails but with a narrower spread"
+          "opt_june": "Launch in June has a narrower spread on these numbers"
         },
         "robustness_explanation": {
           "summary": "The ordering holds in about 68% of runs.",
@@ -220,7 +220,7 @@
           "opt_june": "Feasible path, gives up some early demand"
         },
         "robustness_explanation": {
-          "summary": "The ordering holds in about 68% of runs, but the leading option is infeasible under the stated constraint.",
+          "summary": "The ordering holds in about 68% of runs, but the option this model points to is infeasible under the stated constraint.",
           "primary_risk": "The audit constraint rules out the option the model scores highest.",
           "stability_factors": [
             "Audit completion is well supported."

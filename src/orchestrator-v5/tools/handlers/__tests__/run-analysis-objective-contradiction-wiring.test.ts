@@ -110,7 +110,7 @@ function composeSummaryAsHandlerDoes(disclosure: string): string {
  * emits when the stronger cases do not qualify.
  */
 function composeSummaryWithRealHeadline(disclosure: string, label = 'Hold at £49 Per Seat'): string {
-  const headline = `${label} came out ahead in 71% of runs of this model.`;
+  const headline = `${label} scored highest against your goal in 71% of runs of this model.`;
   return `${headline}${''}${''}${''}${disclosure}`;
 }
 
@@ -173,9 +173,9 @@ describe('egress — the sentence actually reaches the user', () => {
     );
     expect(disclosure).toBe(
       ' Two different questions have two different answers here: “Hold at £49 Per Seat (Status Quo)”' +
-        ' came out ahead most often, but “Raise to £59 Per Seat” is more likely to reach your stated' +
-        ' target (48% against 0%). Coming out ahead counts how often an option scored highest on the' +
-        ' goal, not whether your target was met.',
+        ' scored highest against your goal most often, but “Raise to £59 Per Seat” is more likely to reach your stated' +
+        ' target (48% against 0%). Scoring highest counts how often an option scored highest on' +
+        ' your goal, not whether your target was met.',
     );
     // THE LOAD-BEARING ASSERTION: without this, the tail is composed and then
     // silently discarded at egress, and the user gets the locked template.
@@ -197,9 +197,9 @@ describe('egress — the sentence actually reaches the user', () => {
       true,
     );
     expect(disclosure).toBe(
-      ' “Hold at £49 Per Seat (Status Quo)” came out ahead most often without moving' +
+      ' “Hold at £49 Per Seat (Status Quo)” scored highest against your goal most often without moving' +
         ' “Seat Price Level” the way your goal asks. Among the options that do,' +
-        ' “Raise to £59 Per Seat” came out ahead in 28% of runs.',
+        ' “Raise to £59 Per Seat” scored highest in 28% of runs.',
     );
     expect(isAllowedRunAnalysisAssistantText(composeSummaryWithRealHeadline(disclosure))).toBe(
       true,

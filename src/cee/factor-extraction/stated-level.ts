@@ -90,6 +90,53 @@ const PRESENT_STATE_QUALIFIERS: readonly string[] = [
 const QUALIFIER_ALT = `(?:${PRESENT_STATE_QUALIFIERS.join("|")})`;
 
 /**
+ * ⭐⭐ THE TENSE-BEARING SUBSET, and the HEDGES that are left when you remove it.
+ *
+ * ⛔ AN EARLIER VERSION OF THIS BLOCK EXPORTED `reportsPresentState`, A
+ * PREDICATE THAT ASKED "does this message REPORT a current level?" AND WAS
+ * USED TO REFUSE A GOAL-TARGET ANSWER. It is withdrawn, and the reason is the
+ * finding rather than a tidy-up: a finite list of markers returning FALSE is
+ * not affirmative evidence that a message IS a target answer. "Our baseline
+ * MRR is £12,000." carries no marker at all and is still a baseline report.
+ * The polarity was wrong — a refusal cannot license a bind — and the consumer
+ * now decides eligibility POSITIVELY. What survives here is the VOCABULARY,
+ * because that part was sound and is single-sourced.
+ *
+ * `PRESENT_STATE_QUALIFIERS` mixes two kinds of word, and the two are useful
+ * in opposite directions:
+ *   · TENSE markers ("currently", "now", "presently", "today", "still") say
+ *     WHEN, so a message carrying one is talking about the present;
+ *   · HEDGES ("at", "around", "about", "roughly") say only HOW PRECISELY, so
+ *     they are answer furniture — "about £20k" is still just the amount.
+ *
+ * Both sets below are DERIVED from that one list rather than restated beside
+ * it (CLAUDE.md trap 12): `ANSWER_HEDGE_WORDS` is the list MINUS the tense
+ * members, so a word added to the shared list lands in exactly one of them and
+ * cannot silently appear in both.
+ */
+export const PRESENT_STATE_TENSE_WORDS: readonly string[] = [
+  "currently",
+  "now",
+  "presently",
+  "today",
+  "still",
+];
+
+/**
+ * The qualifier list with the tense words removed — the words that may sit
+ * around a bare amount without making it anything other than that amount.
+ *
+ * `right` is subtracted explicitly on top of the tense set: on its own it is a
+ * hedge ("right around 20k"), but its dominant use in an answer is "right
+ * now", which is tense. A hedge misclassified as tense costs coverage; a tense
+ * word misclassified as a hedge would let a baseline report through as a bare
+ * answer, so the asymmetry is deliberate.
+ */
+export const ANSWER_HEDGE_WORDS: readonly string[] = PRESENT_STATE_QUALIFIERS.filter(
+  (w) => !PRESENT_STATE_TENSE_WORDS.includes(w) && w !== "right",
+);
+
+/**
  * What may sit between the verb and the number — the closed qualifier
  * vocabulary above, zero or more times.
  */

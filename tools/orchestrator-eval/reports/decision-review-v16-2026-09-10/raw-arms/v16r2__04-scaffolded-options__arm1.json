@@ -1,0 +1,24 @@
+{
+  "prompt_version": "v16r",
+  "fixture": "04-scaffolded-options",
+  "arm": 1,
+  "model": "claude-sonnet-5",
+  "stop_reason": "end_turn",
+  "usage": {
+    "input_tokens": 17105,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation": {
+      "ephemeral_5m_input_tokens": 0,
+      "ephemeral_1h_input_tokens": 0
+    },
+    "output_tokens": 1442,
+    "output_tokens_details": {
+      "thinking_tokens": 0
+    },
+    "service_tier": "standard",
+    "inference_geo": "global"
+  },
+  "latency_s": 13.9,
+  "text": "{\n  \"narrative_summary\": \"Automate Tier One Triage produced the best outcome in 64% of runs of this model, and Hire Two Support Engineers produced the best outcome in 36% of runs. The link from Automation Coverage to Response Time is sensitive to your assumptions, worth checking before acting.\",\n  \"story_headlines\": {\n    \"opt_automate\": \"Automate Tier One Triage reduces response time as automation coverage rises in this model.\",\n    \"opt_hire\": \"Hire Two Support Engineers would need ticket volume growth to outpace automation gains to produce the best outcome.\"\n  },\n  \"robustness_explanation\": {\n    \"summary\": \"The ordering holds in about 73% of variations, based on current estimates.\",\n    \"primary_risk\": \"The link from Automation Coverage to Response Time is fragile and could shift which option this model points to.\",\n    \"stability_factors\": [\"Ticket Volume shows a well evidenced connection to Response Time\"],\n    \"fragility_factors\": [\"The link from Automation Coverage to Response Time carries some chance of flipping which option this model favours\"]\n  },\n  \"readiness_rationale\": \"The comparison is settled enough to act on, though the connection between Automation Coverage and Response Time is worth checking, since it is the main source of fragility here.\",\n  \"evidence_enhancements\": {\n    \"fac_automation_rate\": {\n      \"specific_action\": \"Pull actual automation deflection rates from the last full quarter of ticket data before committing.\",\n      \"rationale\": \"This factor carries the highest-value evidence you could gather for this decision.\",\n      \"evidence_type\": \"internal_data\",\n      \"decision_hygiene\": \"Estimate the deflection rate you expect before looking at the data.\"\n    }\n  },\n  \"scenario_contexts\": {\n    \"edge_automation_response\": {\n      \"trigger_description\": \"If Automation Coverage delivers less improvement in Response Time than currently modelled...\",\n      \"consequence\": \"...then this model points to Hire Two Support Engineers rather than Automate Tier One Triage.\"\n    }\n  },\n  \"flip_thresholds\": [\n    {\n      \"factor_id\": \"fac_automation_rate\",\n      \"factor_label\": \"Automation Coverage\",\n      \"current_display\": \"58%\",\n      \"flip_display\": \"31%\",\n      \"narrative\": \"If Automation Coverage moves from 58% to 31%, this model points to a different option.\"\n    }\n  ],\n  \"bias_findings\": [],\n  \"key_assumptions\": [\n    \"The link from Automation Coverage to Response Time assumes deflection holds at modelled rates once live.\",\n    \"Automate Tier One Triage carries placeholder intervention values rather than ones you have confirmed, so treat its outcome as illustrative.\",\n    \"Ticket Volume is assumed to follow current patterns without a major seasonal shift.\"\n  ],\n  \"decision_quality_prompts\": [\n    {\n      \"question\": \"What would make you switch to Hire Two Support Engineers instead of Automate Tier One Triage?\",\n      \"principle\": \"Consider-the-opposite\",\n      \"applies_because\": \"Automate Tier One Triage produced the best outcome in well over half the runs, so it is worth naming what would overturn that.\"\n    },\n    {\n      \"question\": \"This failed because Automation Coverage underdelivered on Response Time, what warning signs would you look for first?\",\n      \"principle\": \"Pre-mortem (Klein)\",\n      \"applies_because\": \"The comparison is settled enough to act on but rests on a fragile connection worth stress testing before committing.\"\n    }\n  ],\n  \"pre_mortem\": {\n    \"failure_scenario\": \"Automate Tier One Triage was pulled but Automation Coverage delivered far less improvement to Response Time than modelled, leaving response times close to where Hire Two Support Engineers would have landed.\",\n    \"warning_signs\": [\"Deflection rates from automated triage come in well below the modelled coverage level\", \"Response Time fails to improve within the first weeks of rollout\"],\n    \"mitigation\": \"Track actual automation deflection weekly against the modelled rate and be ready to revisit Hire Two Support Engineers.\",\n    \"grounded_in\": [\"edge_automation_response\", \"fac_automation_rate\"],\n    \"review_trigger\": \"Reconvene if early deflection rates fall short of modelled coverage before full rollout\"\n  }\n}"
+}

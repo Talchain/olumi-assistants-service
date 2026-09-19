@@ -26,6 +26,53 @@ export interface StatusQuoRepair {
   action: string;
 }
 
+/**
+ * ⭐ THE REASON THIS REPAIR STAMPS ON EVERY EDGE IT MINTS — and it is stated
+ * here, once, because the literal it replaces was a BOILERPLATE MISDESCRIPTION.
+ *
+ * THE DEFECT, measured live on `cee-staging` (`/proxy/v5/turn`, frame stage,
+ * fresh scenario, 2026-09-14): the edge this pass mints carried
+ * `"Status-quo option wired to factor"` — naming an option CLASS that nothing
+ * in this module ever tests. Detection here is purely structural
+ * (`!hasPathToGoal`, and the file header says so in its own first paragraph:
+ * *"Structural detection only — does NOT use label matching"*), so the option
+ * it selects is whichever one has no route to goal. On the measured draft that
+ * was the user's OWN proposal, labelled with the user's own words
+ * (*"increase the Pro plan price from £49 to £59 per month with the next Pro
+ * feature release"*), while a genuine `is_baseline` status-quo option
+ * (*"Hold Price at £49"*) sat in the same graph fully connected and untouched.
+ * The product therefore filed the user's raise-price proposal under the one
+ * option class it demonstrably is not.
+ *
+ * ⚠ THE SELECTION WAS NEVER WRONG — ONLY THE SENTENCE. This distinction is the
+ * whole finding, and it decides the remedy: a repair that picked the wrong
+ * node would need its predicate changed; a repair that picked the right node
+ * and then misdescribed it needs its STRING changed, and changing the
+ * predicate would have broken a correct connectivity fix. The sibling `action`
+ * string below (`STATUS_QUO_WIRED`) was already honest — it is DERIVED, and
+ * says *"Wired disconnected option …"*. One module, one act, two strings: the
+ * derived one told the truth and the hardcoded one did not, which is trap 12's
+ * hand-maintained mirror living inside a single function.
+ *
+ * The module name (`status-quo-fix.ts`) and the `STATUS_QUO_*` repair codes are
+ * DELIBERATELY left alone. They are the estate's existing vocabulary for this
+ * pass, the served prompt genuinely mandates a Status Quo option wired to every
+ * indicator (see PR #1475's `THE BASELINE CONFOUND`), and renaming a repair
+ * code is a wire-visible change to `repair_provenance[]` that is not this
+ * lane's to make. What is fixed is the only string that makes a FALSE CLAIM
+ * ABOUT A PARTICULAR OPTION.
+ *
+ * Exported so a test binds to the producer by IDENTITY rather than re-copying
+ * the literal (trap 19). Four existing fixtures spell the old string by hand;
+ * none of them ASSERTS that this module emits it (checked at the bytes: they
+ * construct edges, and `cee.edge-provenance-ingress.test.ts:277` round-trips
+ * its own local constant), so they keep working and are deliberately not
+ * rewritten — two of them are DATED CAPTURE FIXTURES and are append-only
+ * evidence, not text to keep current (trap 14b).
+ */
+export const CONNECTIVITY_REPAIR_WIRING_REASON =
+  "Connectivity repair wired this option to a factor another option targets; no effect value is implied";
+
 export interface StatusQuoResult {
   fixed: boolean;
   markedDroppable: boolean;
@@ -200,7 +247,7 @@ export function fixStatusQuoConnectivity(
           origin: "repair" as const,
           provenance: {
             source: "synthetic",
-            quote: "Status-quo option wired to factor",
+            quote: CONNECTIVITY_REPAIR_WIRING_REASON,
           },
           provenance_source: "synthetic" as const,
         };

@@ -51,6 +51,14 @@ import { evaluateConfigureOptionOutcome } from '../routing/configure-option-outc
 // guard. 2.427 above owns the TEXT on this turn; this owns the WRITE, so a
 // factor-baseline mutation cannot persist behind a reply that says the option's
 // effect value is still unset. See the module header for the wire witness.
+import { buildFactorScaleMap } from '../tools/plot-intervention-scale.js';
+import { decideNativeQuantityAnswer } from '../routing/native-quantity-answer.js';
+import {
+  buildNativeQuantityOperation,
+  formatNativeQuantityAck,
+  readCommittedNativeQuantity,
+  readExistingIntervention,
+} from '../routing/native-quantity-operation.js';
 import {
   decideOptionInterventionWrite,
   formatWithheldWriteNotice,
@@ -70,6 +78,24 @@ import {
 // chip's copy and the prefix route-v2's configure gate matches. Derived, never
 // a second spelling (trap 12).
 import { buildConfigureOptionChip } from '../configure-option-chip-text.js';
+// ⭐⭐ ORDINARY-TEXT AUTHORITY (the increment this file's `grep -c warrant = 0`
+// named). This lane had NO affirmative authority of any kind: it asked whether
+// the user's words DESCRIBED a change and never whether they AUTHORISED one, so
+// "Should we rename this?" renamed the node and confirmed it. The verdict is
+// resolved ONCE in `routing/ordinary-text-authority.ts` — from the estate's
+// already-ratified deliberation classifier over a message quote-masked by THIS
+// graph's own node labels — and consumed here and in `hasMutationWarrantSignal`.
+// `hasStrongerThanTextWarrant` is the SAME precedence the V5 warrant applies, as
+// a value, so this lane cannot second-guess a typed chip or a confirmed answer.
+import {
+  buildMutationWarrantDemotionText,
+  hasStrongerThanTextWarrant,
+} from '../routing/mutation-warrant.js';
+import {
+  projectModelNodeLabels,
+  resolveOrdinaryTextAuthority,
+} from '../routing/ordinary-text-authority.js';
+import { GRAPH_MUTATING_HANDLER_IDS } from '../routing/mutation-consent.js';
 // ⭐⭐ ROADMAP 2.1266 — the WRITE PATH the guard above exists because we lacked.
 // `option-intervention-write-guard.ts` withholds a wrong-entity write; this
 // composes the RIGHT one deterministically, so the product's own advised
@@ -1640,6 +1666,21 @@ function buildBoundaryBlocks(result: EditGraphResult): OlumiResponse['blocks'] {
       if (violationCodes && violationCodes.length > 0) {
         details.violation_codes = violationCodes;
       }
+      // ⭐ NOTHING FAILS SILENTLY (Paul's ruling, 2026-09-15). The three fields
+      // a person actually needs when a change of theirs is discarded: a
+      // `request_id` they can copy, whose `fault` it was, and a `readable`
+      // sentence that is English rather than a code. They ride in `details`,
+      // which is `z.object({}).passthrough().optional()` while the block itself
+      // is `.strict()` — so this widens no boundary enum and needs no schema
+      // release. Content-free: `readable` is fixed copy selected by a closed
+      // reason enum, never interpolated from the model, the graph or the op,
+      // so the redaction rule the codes above obey is not weakened here.
+      const disclosure = rej.disclosure;
+      if (disclosure) {
+        details.request_id = disclosure.request_id;
+        details.fault = disclosure.fault;
+        details.readable = disclosure.readable;
+      }
       return [
         {
           type: 'error',
@@ -1794,6 +1835,39 @@ function canonicaliseOptionEffectOperation(
         operations_count: parsedOperations.length,
       },
       'V5 edit_graph — the deterministic option-effect operation did not survive canonicalisation; falling back to the edit LLM',
+    );
+    return null;
+  }
+  return parsedOperations as readonly PatchOperation[];
+}
+
+/**
+ * The native-quantity operation, through the SAME canonicalisation gate as its
+ * option-effect sibling — `parseEditGraphResponse`, which is the parser the LLM
+ * path's own operations go through. A deterministic operation gets no easier
+ * ride than a generated one; if it does not survive the parser it is discarded
+ * and the turn takes the LLM path, exactly as the sibling does.
+ */
+function canonicaliseNativeQuantityOperation(
+  raw: Record<string, unknown>,
+  requestId: string,
+): readonly PatchOperation[] | null {
+  let parsedOperations: unknown[];
+  try {
+    parsedOperations = parseEditGraphResponse(
+      JSON.stringify({ operations: [raw], removed_edges: [], warnings: [], coaching: null }),
+    ).operations;
+  } catch {
+    parsedOperations = [];
+  }
+  if (parsedOperations.length !== 1) {
+    log.error(
+      {
+        event: 'v5.edit_graph.native_quantity_operation_canonicalise_failed',
+        request_id: requestId,
+        operations_count: parsedOperations.length,
+      },
+      'V5 edit_graph — the native-quantity operation did not survive canonicalisation; falling back to the edit LLM',
     );
     return null;
   }
@@ -2218,6 +2292,39 @@ export async function dispatchEditGraph(
   // `decideNoOpRecovery` call to suppress its parallel proposal
   // branches so the wire response carries one chip set, not two.
   let proposalEarlyEmitted = false;
+  /**
+   * ⭐⭐ THE ADD-RISK CLARIFIER ACTUALLY ANSWERED THIS TURN.
+   *
+   * Measured on request `b0d541a9-1631-4604-9546-f089dbb916cc` (8 Sep 2026,
+   * CEE `0f1cbc6b`): "Please can you add it as a risk?" produced
+   * `add_risk_clarified`, and then `no_op_recovery` fired `proposal_stage_one`
+   * with `rewrote_text: true`, replacing that specific clarification with the
+   * generic "one of these" kind chooser. Zero LLM calls, zero operations,
+   * 12 nodes / 21 edges unchanged. The person asked for a risk, was asked back
+   * which kind of thing they meant, and clicking "Add as risk" repeated it.
+   *
+   * PR #212 already established that the recovery's `proposal_stage_*` ladder
+   * must not fire when this turn has ALREADY given a deterministic answer — but
+   * it keys on `proposalEarlyEmitted`, which only the pre-LLM continuation
+   * intercept sets. The add-risk fast path is the SIBLING deterministic answer
+   * (the intercept lives in its `else`: "Add-risk still wins"), so it answered
+   * the turn and left the flag false. Same contract, one path short.
+   *
+   * ⚠ ANSWERED, NOT MATCHED — and the distinction is the whole point. There is
+   *   already a `deterministicAddRiskAttempted` for "the classifier matched";
+   *   keying on that would suppress the ladder on turns the clarifier began and
+   *   did not finish. This is set only where the clarification is actually
+   *   returned to the user.
+   *
+   * ⚠ SCOPE: it is OR-ed into the existing flag at the recovery call site ONLY.
+   *   `proposalEarlyEmitted` keeps its own meaning everywhere else (chip
+   *   counting, `llm_calls_used`, the V4 no-op branch), and every other recovery
+   *   branch — `analytical_*`, `vague_edit`, `explore_factor*`, `ambiguous` —
+   *   still runs as defence-in-depth, exactly as PR #212 requires. A genuinely
+   *   ambiguous agreement, where the add-risk classifier did NOT answer, still
+   *   reaches Stage 1 unchanged.
+   */
+  let addRiskClarifierAnswered = false;
   // PR #216 review follow-up: set true when the pre-LLM intercept
   // already emitted a `V5ProposalContinuationInvalidated` event for an
   // expired / diverged pending. The recovery block re-runs the same
@@ -2449,6 +2556,9 @@ export async function dispatchEditGraph(
           },
           'V5 edit_graph add_risk clarification returned without graph mutation',
         );
+        // The clarification has been returned to the user: this turn is
+        // answered, so the recovery ladder must not re-open Stage 1 over it.
+        addRiskClarifierAnswered = true;
         emit(TelemetryEvents.V5EditGraphAddRiskClarified, {
           request_id: requestId,
           scenario_id: payload.scenario_id,
@@ -2617,6 +2727,57 @@ export async function dispatchEditGraph(
         // `interventions` were dropped on the way in. A guard held up by a
         // coincidence in someone else's constant is exactly the kind this
         // estate loses; keeping it costs one boolean.
+        // ⭐ GO(A) — THE NATIVE ANSWER TAKES PRECEDENCE, and it is a SEPARATE
+        // branch rather than a case of the option-effect resolution below.
+        //
+        // The two answer opposite questions about the same cell (trap 21):
+        // `optionEffect` supplies a MISSING model-unit value; this restates an
+        // EXISTING one in the user's own units. Folding them would hand a
+        // currency amount to a [0,1] writer.
+        //
+        // Resolved HERE rather than in the caller (unlike `recordedAnswer`)
+        // because it does not change ROUTING — the turn is an edit either way;
+        // it changes only which operation is composed. `earlyPending` and
+        // `earlyCurrentGraphHash` are already loaded a few lines above for the
+        // proposal resume, so this adds no read.
+        const nativeAnswer = decideNativeQuantityAnswer({
+          message: payload.message,
+          pendings: earlyPending,
+          graph: graphState,
+          currentGraphHash: earlyCurrentGraphHash,
+          nowMs: Date.now(),
+        });
+        const nativeQuantityRaw = nativeAnswer.kind !== 'bind'
+          ? null
+          : buildNativeQuantityOperation(
+              {
+                optionId: nativeAnswer.optionId,
+                optionLabel: nativeAnswer.optionLabel,
+                factorId: nativeAnswer.factorId,
+                factorLabel: nativeAnswer.factorLabel,
+                nativeValue: nativeAnswer.nativeValue,
+                unit: nativeAnswer.unit,
+              },
+              // The cell as it stands, so every existing field survives and the
+              // ENCODED value rides through untouched.
+              readExistingIntervention(graphState, nativeAnswer.optionId, nativeAnswer.factorId),
+              // The target factor's declared scale, from the estate's own
+              // reader. Absent ⇒ no supported mapping ⇒ the write refuses
+              // rather than storing a figure nothing can consume.
+              buildFactorScaleMap(
+                (graphState as { nodes?: unknown } | null | undefined)?.nodes,
+              ).get(nativeAnswer.factorId),
+            );
+        const nativeQuantityOperation = nativeQuantityRaw === null
+          ? null
+          : canonicaliseNativeQuantityOperation(nativeQuantityRaw, requestId);
+        // Bound to the OPERATIONS, not to the answer — an answer whose operation
+        // did not canonicalise must take the LLM path, and the ack below reads
+        // this one variable so it cannot be left behind.
+        const nativeWrite = nativeQuantityOperation === null || nativeAnswer.kind !== 'bind'
+          ? null
+          : nativeAnswer;
+
         const optionEffect = recordedAnswer !== null
           ? { matched: true as const, kind: 'write' as const,
               ...recordedAnswer.pair, value: Number(recordedAnswer.valueText) }
@@ -2674,10 +2835,79 @@ export async function dispatchEditGraph(
           // (`option-configure-apply-chain.test.ts` hop 2 pins that verdict).
           // No structural operation can be composed by this path — the shape
           // is fixed by `buildOptionEffectRawOperation`.
-          optionEffectOperations === null
+          // The native restatement wins when both resolve: it is an answer to a
+          // question the product ASKED, and the option-effect resolution is a
+          // read of the sentence. A recorded answer outranks a fresh guess.
+          nativeQuantityOperation !== null
+            ? { preComposedOperations: nativeQuantityOperation }
+            : optionEffectOperations === null
             ? undefined
             : { preComposedOperations: optionEffectOperations },
         );
+        // ⭐ THE NATIVE PATH'S OWN LANDING CHECK AND ACK.
+        //
+        // ⚠⚠ IT CANNOT REUSE THE BLOCK BELOW. That one reads
+        // `readCommittedOptionEffect`, which returns the ENCODED value, and
+        // compares it to the value it asked to write. A native write leaves the
+        // encoded value DELIBERATELY unchanged, so the comparison never holds,
+        // the success ack never fires, and the turn falls into
+        // `option_effect_write_did_not_land` — telling the user their cost did
+        // not save while it sits correctly in the graph. Pinned by
+        // `native-quantity-operation.test.ts`, which asserts the two readers
+        // return different numbers from the same committed graph.
+        if (nativeWrite !== null) {
+          const committedNative = readCommittedNativeQuantity(
+            editResult.appliedGraph,
+            nativeWrite.optionId,
+            nativeWrite.factorId,
+          );
+          if (
+            committedNative !== undefined
+            && committedNative.rawValue === nativeWrite.nativeValue
+            && committedNative.unit === nativeWrite.unit
+          ) {
+            editResult = {
+              ...editResult,
+              assistantText: formatNativeQuantityAck({
+                optionLabel: nativeWrite.optionLabel,
+                factorLabel: nativeWrite.factorLabel,
+                rawValue: committedNative.rawValue,
+                unit: committedNative.unit,
+                // READ BACK, never assumed: the calibration authority derives
+                // this from the figure, so the only honest source is the
+                // committed graph. Absent ⇒ the sentence omits it rather than
+                // asserting a number we did not observe.
+                ...(typeof readCommittedOptionEffect(
+                  editResult.appliedGraph,
+                  nativeWrite.optionId,
+                  nativeWrite.factorId,
+                ) === 'number'
+                  ? {
+                      derivedModelValue: readCommittedOptionEffect(
+                        editResult.appliedGraph,
+                        nativeWrite.optionId,
+                        nativeWrite.factorId,
+                      ) as number,
+                    }
+                  : {}),
+              }),
+            };
+          } else {
+            // Nothing is claimed. The existing recovery machinery composes the
+            // answer, exactly as it does when an option-effect write does not
+            // land.
+            log.warn(
+              {
+                event: 'v5.edit_graph.native_quantity_write_did_not_land',
+                request_id: requestId,
+                scenario_id: payload.scenario_id,
+                option_id: nativeWrite.optionId,
+                factor_id: nativeWrite.factorId,
+              },
+              'V5 native-quantity write did not survive to the applied graph',
+            );
+          }
+        }
         if (optionEffectWrite !== null) {
           // ⭐ P5 — THE ACKNOWLEDGEMENT CITES THE COMMITTED BYTES, NOT THE
           // REQUEST. The value is read back out of the applied graph through
@@ -3416,6 +3646,20 @@ export async function dispatchEditGraph(
     appliedMutation: successfulAppliedMutation && !gmBlockedApply && !paSubstitutionBlocked,
   });
   const optionInterventionWriteWithheld = optionInterventionWriteVerdict.verdict === 'withhold';
+  /**
+   * ⭐ THE SCOPE-UNRESOLVED ARM. A turn that is recognisably ABOUT an option
+   * whose identity never resolved, which moved a model-wide baseline and landed
+   * no intervention. Measured on deployed `a3b0548d`: it MINTED
+   * `observed_state` on "Vendor Licensing Cost" and COMMITTED, while the option
+   * the user named kept its own value.
+   *
+   * ⚠ NAMED APART from `optionInterventionWriteWithheld` rather than folded into
+   * it (trap 21). They answer different questions — "was a RESOLVED option's
+   * write not honoured?" versus "do we know which option this was for at all?"
+   * — and they carry different payloads: this one has no `optionId`, because
+   * none resolved, which is the whole reason it must ASK rather than assert.
+   */
+  const optionScopeUnresolved = optionInterventionWriteVerdict.verdict === 'scope_unresolved';
   // ⭐⭐ THE OPTION-`observed_state` SUBSTITUTION, witnessed on deployed
   // `91d39119` (30 Aug 2026, scenario `0fe8c040`, request `1a0ba66d`): a plain
   // English revision wrote each OPTION node's OWN `observed_state` (Pilot 30 /
@@ -3439,17 +3683,197 @@ export async function dispatchEditGraph(
   const recordedAnswerNotLanded = recordedAnswer !== null && successfulAppliedMutation
     && readCommittedOptionEffect(editResult.appliedGraph, recordedAnswer.pair.optionId,
       recordedAnswer.pair.factorId) !== Number(recordedAnswer.valueText);
+  /**
+   * ⭐⭐ ORDINARY-TEXT AUTHORITY — "did the user ASK for this, or ask what I
+   * THINK?" — the question this lane never asked.
+   *
+   * MEASURED AT PRISTINE `f19d1a92`, through this dispatcher: the message
+   * **"Should we rename this?"** returned an applied graph, `commitDirectAnswer`
+   * received it, and the reply confirmed the rename. `grep -c warrant` over this
+   * file read **0** (in-file contrast control `scope_unresolved`: 3), and
+   * `route-v2.ts` imports only the two NEGATIVE warrant helpers — so the V5
+   * mutation warrant, which exists precisely to stop this, never reached here.
+   * The same person on the V5 typed-handler path got a chip; on this path the
+   * model changed under them.
+   *
+   * ⚠ RESOLVED, NOT RE-DERIVED. `resolveOrdinaryTextAuthority` is the single
+   * authority; `hasMutationWarrantSignal` consumes the identical verdict. Two
+   * lists standing for one concept is this estate's dominant defect, and it is
+   * literally what produced this seam: `classifyUnappliedEditFrame` has been
+   * imported by `orchestrator/tools/edit-graph.ts` for months and was consulted
+   * ONLY to word a reply in the no-op branch. The capability was misplaced, not
+   * missing.
+   *
+   * ⚠ QUOTE-MASKED BY THIS GRAPH'S OWN LABELS, and that is load-bearing rather
+   * than tidy: of 1,564 mutating turns, three carry a deliberative frame and TWO
+   * are FALSE POSITIVES, because a user's graph holds a node labelled
+   * `"What should we do?"` and the frame pattern matches inside the quoted
+   * label. Quote-masked the true number is ONE, and that one is the harm.
+   *
+   * ⚠ SUBORDINATE TO THE TWO STRONGER SOURCES, by the warrant's OWN precedence
+   * helper rather than by a second ordering written here. A typed mutation chip
+   * IS the instruction, and a recorded answer (or the repair-leg instruction
+   * override, which the route sets only after the whole-message claim anchor
+   * matched) resumes a question the PRODUCT asked. Neither may be second-guessed
+   * by reading the text again.
+   *
+   * ⚠ WHY IT IS COMPUTED HERE, one line above the gate: identical reason to the
+   * option-intervention verdict above it. `effectiveAppliedMutation` is this
+   * dispatcher's SINGLE gate for persist, edit fact, `analysis_ready` and the
+   * returned graph, so withholding THROUGH it means the write, the receipt fact,
+   * the wire graph and the readiness stamp cannot disagree, and no new per-signal
+   * wiring can be forgotten.
+   */
+  const editTurnCarriesStrongerWarrant = hasStrongerThanTextWarrant(
+    {
+      turnSource: payload.source,
+      chipActionType: payload.chip?.action_type,
+      isConfirmResume:
+        recordedAnswer !== null || params.editInstructionOverride !== undefined,
+    },
+    GRAPH_MUTATING_HANDLER_IDS,
+  );
+  const ordinaryTextAuthorityWithheld =
+    !editTurnCarriesStrongerWarrant &&
+    resolveOrdinaryTextAuthority({
+      // The USER's own bytes, never `editInstruction` — that may be the
+      // repair-leg synthesised instruction, and authority is a fact about what
+      // the person typed (trap 14b: the record is not ours to rewrite).
+      message: payload.message,
+      modelNodeLabels: projectModelNodeLabels(parsedGraph),
+    }) === 'withheld_deliberation';
+
   // Structural honesty: every downstream success effect (persist, edit fact,
   // analysis_ready, returned graph) gates on the EFFECTIVE predicate so a
   // live-blocked verdict — or a part-accounting substitution block, or a
-  // withheld wrong-entity write — can never surface an applied-mutation signal.
+  // withheld wrong-entity write, or a turn that asked for a VIEW rather than an
+  // edit — can never surface an applied-mutation signal.
   const effectiveAppliedMutation =
     successfulAppliedMutation &&
     !gmBlockedApply &&
     !paSubstitutionBlocked &&
     !optionInterventionWriteWithheld &&
+    // Same reason as its sibling above: a write whose SCOPE was never
+    // established may not surface an applied-mutation signal either, or it
+    // persists exactly as the measured buy turn did.
+    !optionScopeUnresolved &&
     !optionOwnValueWithheld &&
-    !recordedAnswerNotLanded;
+    !recordedAnswerNotLanded &&
+    // A turn that asked what we THINK never authorised a write, so it may not
+    // surface an applied-mutation signal either.
+    !ordinaryTextAuthorityWithheld;
+
+  // ⭐⭐ THE HEADLINE MAY NOT OUTRUN THE GATE. Measured on deployed `a3b0548d`,
+  // wire-level, FRESH. One turn shipped BOTH of these:
+  //
+  //   "2 model parameters updated: Pro Plan Monthly Price, Model is raising the
+  //    Pro plan price from £49 to £69 per month with the next Pro feature release"
+  //   "Note: nothing from this message was saved, so \"Pro Plan Monthly Price\"
+  //    is unchanged."
+  //
+  // The second is true — `graph_hash` did not move across the whole session, and
+  // the option's stored value read 59 at save, rerun AND reopen.
+  //
+  // WHY IT IS AN ORDERING DEFECT, NOT A WORDING ONE. The headline is
+  // `buildAppliedChanges`'s summary, composed from the PARSED OPERATIONS and the
+  // in-memory post-apply graph — its signature has no persistence input at all —
+  // and it is fixed into `response.assistant_text` long before the withhold
+  // verdict exists. It is STRUCTURALLY INCAPABLE of knowing the write was
+  // withheld, so no rewording can fix it; only reading the gate can.
+  //
+  // ⚠ A GUARD ALREADY SAT HERE AND MISSED IT. `findSuccessClaimHit` against
+  // `SUCCESS_CLAIM_PATTERNS` replaces a false success sentence on this lane —
+  // but it is bound by PHRASE. EXECUTED against the real wire string: it returns
+  // null for "2 model parameters updated: …" while returning "Updated V" for
+  // "Updated Vendor Licensing Cost". So the list is a hand-maintained mirror of
+  // `edit-graph.ts`'s summary composer (trap 12) and goes stale the day the
+  // headline is reworded. When it misses, the code falls through to
+  // `appendLapseNotice` and the honest note is appended UNDER the false claim.
+  //
+  // This binds by IDENTITY instead — string equality against the very object
+  // that produced the text (trap 19) — so it cannot go stale, and it covers the
+  // five sibling withholds the phrase arm never reached.
+  if (
+    !effectiveAppliedMutation &&
+    editResult.appliedChanges?.summary &&
+    response.assistant_text === editResult.appliedChanges.summary
+  ) {
+    log.warn(
+      {
+        event: 'v5.edit_graph.proposal_headline_withdrawn',
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        // The GATE's conjuncts, never the model's prose — no free text here.
+        gm_blocked_apply: gmBlockedApply,
+        pa_substitution_blocked: paSubstitutionBlocked,
+        option_intervention_write_withheld: optionInterventionWriteWithheld,
+        option_own_value_withheld: optionOwnValueWithheld,
+        recorded_answer_not_landed: recordedAnswerNotLanded,
+        ordinary_text_authority_withheld: ordinaryTextAuthorityWithheld,
+      },
+      'edit_graph: withdrew an applied-changes headline for a turn that persisted nothing',
+    );
+    response = { ...response, assistant_text: EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT };
+  }
+
+  // ⭐⭐ THE HALF THE USER SEES — and it must say what happened FIRST.
+  //
+  // The write is already withheld by the gate above. This replaces whatever the
+  // edit LLM narrated (a rename receipt, on the measured turn) with the
+  // product's OWN demotion copy. Composed by `buildMutationWarrantDemotionText`,
+  // the single authority for this sentence — NOT re-spelled here (trap 12), and
+  // not composed by the model, because on the witnessed turn the model narrated
+  // an "Applied" receipt for a change nobody asked for and a string built from a
+  // template cannot narrate.
+  //
+  // It opens "Nothing has been changed.", which is TRUE BY CONSTRUCTION at this
+  // point, and it OFFERS rather than refusing — the same shape the V5 lane uses,
+  // so the two paths now answer a user's question the same way. Per INV-3 it
+  // asserts nothing about what the user did or did not ask for: this gate WILL
+  // keep missing a real instruction sometimes (see KNOWN_DROPPED), and a reply
+  // that also asserted the user never spoke would turn every residual miss into
+  // an insult.
+  //
+  // ⚠ NOT a `suggested_actions` change. Emitting a chip here would need a
+  // synthesised instruction naming a change only the edit LLM's prose describes,
+  // and that is the fabricated-write class this whole gate exists to prevent.
+  // "Say the word and I will make it" is an affordance the next turn can honour
+  // through the ordinary path, which is the estate's own ratified idiom
+  // (the calibration confirm chip replays a MESSAGE, not a blanket exemption).
+  //
+  // ⭐⭐ `&& successfulAppliedMutation` IS LOAD-BEARING, AND A GUARD FOUND IT.
+  // Without it this branch fired on turns where the handler applied NOTHING and
+  // there was therefore nothing false to withdraw — and it CLOBBERED an
+  // authoritative reply. MEASURED, not reasoned: `edit-graph-dispatch-early-emit
+  // -authoritative.test.ts` went red on the pre-LLM intercept path, and an
+  // instrumented run printed `successfulAppliedMutation: false,
+  // effectiveAppliedMutation: false` — i.e. that turn was ALREADY a no-op at
+  // pristine, my conjunct changed nothing about its write, and the only thing
+  // this branch did was replace a correct Stage-1 coaching reply with a demotion
+  // notice about a change nobody proposed. The guard was working; the decision it
+  // demanded is recorded here rather than silenced by re-pinning the test.
+  //
+  // So it binds by IDENTITY to the thing it withdraws (CLAUDE.md trap 19): a
+  // write the handler REALLY produced and this gate is REALLY withholding —
+  // exactly the discipline the headline gate above already follows.
+  if (ordinaryTextAuthorityWithheld && successfulAppliedMutation) {
+    log.warn(
+      {
+        event: 'v5.edit_graph.ordinary_text_authority_withheld',
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        // Counts and flags only — never the user's prose in telemetry.
+        graph_node_count: parsedGraph.nodes.length,
+        handler_applied_a_graph: editResult.appliedGraph != null,
+      },
+      'edit_graph: the turn asked for a view rather than an edit — write withheld, offering',
+    );
+    response = {
+      ...response,
+      assistant_text: buildMutationWarrantDemotionText('that change to your model', null),
+    };
+  }
+
   if (optionInterventionWriteWithheld) {
     log.warn(
       {
@@ -3458,9 +3882,15 @@ export async function dispatchEditGraph(
         scenario_id: payload.scenario_id,
         option_id: optionInterventionWriteVerdict.optionId,
         baseline_node_count: optionInterventionWriteVerdict.baselineNodeIds.length,
+        // ⭐ NAMED APART because they are two different facts, and because the
+        // message below was FALSE without it: an edge-only withhold moves no
+        // node baseline at all, so a reader of this line was told the wrong
+        // thing about what had been discarded. A log line that misdescribes the
+        // event is how the next session inherits a wrong model of the guard.
+        option_edge_count: optionInterventionWriteVerdict.optionEdgeKeys.length,
         operations_count: editResult.operations?.length ?? 0,
       },
-      'V5 edit_graph — the applied mutation moved a node baseline while writing no effect value for the option the user named; write withheld so the graph matches the honest reply (mutation NOT persisted)',
+      'V5 edit_graph — the applied mutation moved a node baseline the named option is wired to, or one of that option\'s own edges, while writing no effect value for the option the user named; write withheld so the graph matches the honest reply (mutation NOT persisted)',
     );
   }
   if (optionOwnValueWithheld) {
@@ -3475,7 +3905,16 @@ export async function dispatchEditGraph(
       "V5 edit_graph — the applied mutation wrote an option's OWN observed_state while that option's effect values did not move; write withheld so the reply cannot confirm a change the analysis will never see (mutation NOT persisted)",
     );
   }
-  if (optionInterventionWriteWithheld || optionOwnValueWithheld || recordedAnswerNotLanded) {
+  if (
+    optionInterventionWriteWithheld ||
+    // Reviewer finding 3 (REVIEW1512): without this, freshness at :3088/:3137 is
+    // derived from the REJECTED post-edit graph and returned to the user beside
+    // "I have not changed the model" — a worse lie than the one this verdict was
+    // added to prevent, because it is staleness claimed off a write we refused.
+    optionScopeUnresolved ||
+    optionOwnValueWithheld ||
+    recordedAnswerNotLanded
+  ) {
     // The graph did NOT change this turn — re-derive the wire freshness against
     // the UNCHANGED frame base, exactly as the GM-blocked and part-accounting
     // branches below do, so staleness is never claimed off an unpersisted
@@ -3898,7 +4337,12 @@ export async function dispatchEditGraph(
         // intercept already emitted Stage 1 / Stage 2 chips. Without
         // this guard both layers fire and the wire response carries
         // 6 chips instead of 3.
-        proposalAlreadyEmittedInThisTurn: proposalEarlyEmitted,
+        // ⭐ OR-ed with the add-risk clarifier's ANSWERED marker — see its
+        //   declaration. Both are "this turn already answered deterministically",
+        //   which is the question this flag was introduced to answer; keying on
+        //   only one of the two paths is what let `proposal_stage_one` overwrite
+        //   a specific risk clarification with the generic kind chooser.
+        proposalAlreadyEmittedInThisTurn: proposalEarlyEmitted || addRiskClarifierAnswered,
         // R10 — when the V4 no-op branch preserved a scrubbed clarifying
         // question, the recovery layer must stay inert (no vague-edit clobber).
         noOpClarificationPreserved: editResult.noOpClarificationPreserved === true,
@@ -4268,7 +4712,79 @@ export async function dispatchEditGraph(
       `I could not record that value for "${recordedAnswer.pair.optionLabel}" on "${recordedAnswer.pair.factorLabel}". Nothing has changed.`,
       suggested_actions: [] };
   }
+  if (optionInterventionWriteVerdict.verdict === 'scope_unresolved') {
+    // ⭐ NOTHING FAILS SILENTLY, AND THE FAILURE IS OURS (Paul, 2026-09-15).
+    // The write is already withheld by the gate above; this is the half the
+    // user sees. It ASKS, because the one thing we genuinely do not know is
+    // which option they meant — and guessing is the fabricated write the whole
+    // guard exists to prevent.
+    log.warn(
+      {
+        event: 'v5.edit_graph.option_scope_unresolved',
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        // Counts and ids only — never the user's prose in telemetry.
+        baseline_node_count: optionInterventionWriteVerdict.baselineNodeIds.length,
+        option_count: optionInterventionWriteVerdict.optionLabels.length,
+      },
+      'edit_graph: option-anchored turn with no resolved option — write withheld, asking',
+    );
+    const moved = resolveNodeLabels(parsedGraph, optionInterventionWriteVerdict.baselineNodeIds);
+    const movedNamed = moved.length > 0 ? `"${moved[0]}"` : 'that value';
+    const choices = optionInterventionWriteVerdict.optionLabels
+      .map((l) => `"${l}"`)
+      .join(', ');
+    response = {
+      ...response,
+      assistant_text:
+        `That would have changed ${movedNamed} for every option, and I do not think that is ` +
+        `what you meant — so I have not changed the model. Which option did you mean? ` +
+        `${choices}.`,
+    };
+  }
+
   if (optionInterventionWriteVerdict.verdict === 'withhold') {
+    // ⛔⛔ A WITHHELD TURN MUST NOT CONFIRM AND THEN DENY — and this is the
+    // hole withholding itself opened.
+    //
+    // V5 H5, the false-success invariant, is gated on
+    // `!successfulAppliedMutation`. That predicate asks *"did the applier
+    // apply?"* — and on a withheld turn it is TRUE, because it did. The
+    // predicate that says *"did anything PERSIST?"* is
+    // `effectiveAppliedMutation`, and H5 does not consult it. So for a
+    // `not_honoured_no_copy` verdict — the REVISION class, which carries no
+    // copy and therefore gets no wholesale replacement — the LLM's own
+    // *"Updated … edge strength from 1.0 to 0.7"* survived to the wire, with
+    // the notice below appended underneath it. Measured through this
+    // dispatcher: both sentences, one reply.
+    //
+    // That is worse than the silent wrong-entity write it replaced: there the
+    // reply at least matched the graph. **Withholding the write obliges us to
+    // withdraw the claim.**
+    //
+    // DERIVED, not a phrase list (trap 12): `findSuccessClaimHit` is the
+    // repo's own detector, already used by H5 sub-case B, and it catches the
+    // captured sentence. Scoped deliberately to the success-claim rewrite and
+    // NOT by widening H5's gate — that `else` branch also runs the no-op
+    // RECOVERY layer, which is written for legitimate no-ops and has no
+    // business composing copy for a withheld wrong-entity turn.
+    //
+    // ⚠ SIBLING WITHHOLDS ARE NOT COVERED HERE AND ARE NOT CLAIMED TO BE.
+    // `optionOwnValueWithheld`, `gmBlockedApply`, `paSubstitutionBlocked` and
+    // `recordedAnswerNotLanded` clear `effectiveAppliedMutation` the same way
+    // and are outside this lane's ownership; each owns its own text path. The
+    // general form — H5 asking the wrong question for every withhold — is
+    // reported rather than fixed here.
+    const withheldSuccessHit = findSuccessClaimHit(response.assistant_text ?? '');
+    if (withheldSuccessHit !== null) {
+      emit(TelemetryEvents.V5EditGraphFalseSuccessRewritten, {
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        original_phrase: withheldSuccessHit,
+        dispatch_path: 'option_intervention_write_withheld',
+      });
+      response = { ...response, assistant_text: EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT };
+    }
     response = {
       ...response,
       assistant_text: appendLapseNotice(
@@ -4324,8 +4840,22 @@ export async function dispatchEditGraph(
     // a reply that both confirms and denies the same write, with the
     // confirmation FIRST. That is worse than the defect, not better.
     //
-    // The sibling factor-baseline withhold does not need this because 2.427's
-    // recovery copy has already replaced the narration wholesale on its branch.
+    // ⚠⚠ A CLAIM ABOUT THE SIBLING BRANCH STOOD HERE AND WAS FALSE. It read:
+    // ~~"The sibling factor-baseline withhold does not need this because
+    // 2.427's recovery copy has already replaced the narration wholesale on its
+    // branch."~~ **Refuted by execution.** That wholesale replacement is gated
+    // on `=== 'not_honoured'`, and the REVISION class reaches
+    // `not_honoured_no_copy` — which carries no copy and therefore gets no
+    // replacement. So the sibling branch appended a denial under a surviving
+    // success sentence: a reply that confirmed and denied the same write, the
+    // exact harm this comment describes. It is now fixed at that branch, with
+    // its own `findSuccessClaimHit` withdrawal.
+    //
+    // The durable lesson is the one this file keeps relearning: **a comment
+    // asserting that a NEIGHBOURING branch is safe is a claim about code
+    // nobody re-derives**, and it stayed true only until that branch grew a
+    // verdict it did not have when the sentence was written.
+    //
     // This branch has no text guard in front of it, so the edit LLM's own
     // success sentence survives unless it is replaced here. Nothing is lost:
     // the turn was withheld WHOLESALE, so every success claim in that text is
@@ -4518,7 +5048,13 @@ export async function dispatchEditGraph(
   // `scenarios.graph`.
   let analysisReady: AnalysisReadyPayload | undefined = effectiveAppliedMutation
     ? buildCanonicalAnalysisReadyFromGraph(editResult.appliedGraph!)
-    : (!successfulAppliedMutation || optionInterventionWriteWithheld || recordedAnswerNotLanded) && graphStrictlyCanonical
+    : (!successfulAppliedMutation ||
+        optionInterventionWriteWithheld ||
+        // Same reviewer finding: a turn that refused the write must still hand
+        // back readiness for the UNCHANGED model, or the user is told nothing
+        // changed and given no readiness at all.
+        optionScopeUnresolved ||
+        recordedAnswerNotLanded) && graphStrictlyCanonical
       ? buildCanonicalAnalysisReadyFromGraph(parsedGraph)
       : undefined;
 

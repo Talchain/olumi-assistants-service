@@ -523,7 +523,7 @@ describe('projectTurnReferents — the claim record cannot name what it does not
     + 'conversion, CAC and runway. Since several key factors, like your ICP '
     + 'understanding and the product-gap-to-churn link, are still unvalidated '
     + 'assumptions, treat the result as a first read to stress-test rather than a '
-    + 'final answer.\n\nICP Validation Sprint Before Hiring came out ahead in 82% of '
+    + 'final answer.\n\nICP Validation Sprint Before Hiring scored highest against your goal in 82% of '
     + 'runs of this model, but treat this as provisional: the link between Sales '
     + 'Headcount Investment and Runway Depletion Risk is fragile.\n\nYour first '
     + 'analysis is ready. Take a moment to explore the leading option and the '

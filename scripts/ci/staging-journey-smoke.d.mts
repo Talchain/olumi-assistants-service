@@ -14,6 +14,12 @@
  * declaration can only make types imprecise, never make a broken journey pass.
  */
 
+/**
+ * THE USER'S ROUTE. Named once so the gate and its guards cannot hold two
+ * different opinions about which path is under test.
+ */
+export declare const TURN_PATH: string;
+
 /** Minimum node count for a drafted graph to count as usable. */
 export declare const MIN_NODES: number;
 
@@ -107,4 +113,99 @@ export declare function extractDiagnostics(body: unknown): {
 export declare function assertPromptProvenance(
   diagnostics: Array<Pick<ReturnType<typeof extractDiagnostics>, "exit_path" | "prompt_identity_count"> | null>,
   bodies?: readonly unknown[],
+): string[];
+
+/**
+ * REPORTS ONLY — never asserts. The error-envelope fields that tell a drafting
+ * failure's causes apart: the orchestrator's STRING `error` vs the proxy's
+ * OBJECT `error.code`, the reason, the violation code, the repair-skip reason,
+ * retryability, whether a recovery suggestion was offered, and both clocks.
+ * Shared by the per-turn log line AND both failure paths, so the alarm and the
+ * diagnostic can never describe the same turn differently. A body with no error
+ * envelope reports `absent(no-error-envelope)` — absent is never printed as
+ * empty, for the same reason `readinessDiagnosis` refuses to.
+ */
+export declare function draftErrorDiagnosis(body: unknown): string;
+
+/**
+ * The proxy error code on a body, or `null` when the proxy did not refuse.
+ * Reads `error.code`: the proxy's `error` is an OBJECT and the orchestrator's is
+ * a STRING, so the code is read rather than the field's stringification.
+ */
+export declare function proxyFailureCode(body: unknown): string | null;
+
+/**
+ * PROXY-LAYER DELIVERY — assert the response was DELIVERED, not merely
+ * generated. A proxy refusal means the model may be perfectly fine and the user
+ * still received nothing, which is a different failure with a different action
+ * from a generation failure.
+ * @param label names the turn in every message.
+ * @returns failure messages; an empty array means the proxy handed it over.
+ */
+export declare function assertProxyDelivered(body: unknown, label?: string): string[];
+
+/**
+ * REPORTS ONLY — never asserts. Classify ONE journey sample's outcome, so a
+ * rate becomes actionable: "3 of 5 failed" says look, "3 of 5 failed, all
+ * VIOLATION:OPTIONS_IDENTICAL" says where. Codes are read from the PRODUCER's
+ * own fields, most-specific first (threw → proxy → violation → reason → error →
+ * HTTP → assertions). `ok` is decided by the failure list, never by the code,
+ * so an unanticipated failure class reports `ASSERTIONS_FAILED` rather than
+ * passing.
+ */
+export declare function classifyJourneySample(
+  turns: ReadonlyArray<{ label?: string; status?: number; body?: unknown; threw?: string }>,
+  failures: readonly string[],
+): { ok: boolean; code: string };
+
+/**
+ * Aggregate samples into the numbers printed on EVERY run. `failureRate` is
+ * `null` when nothing was attempted — "no samples ran" and "no samples failed"
+ * are opposite facts and a 0 would print them identically.
+ */
+export declare function summariseSamples(samples: ReadonlyArray<{ ok?: boolean; code?: string }>): {
+  attempted: number;
+  ok: number;
+  failed: number;
+  failureRate: number | null;
+  byCode: Record<string, number>;
+};
+
+/**
+ * `1 - (1 - rate)^k` — P(this gate reds on a push) for k independent samples
+ * that must all deliver. Exported so the job output, the PR body and the test
+ * share one function rather than three copies of a number. Returns `null` on
+ * inputs that are not a usable (k, rate) pair.
+ */
+export declare function detectionProbability(k: number, failureRate: number): number | null;
+
+/**
+ * `1 - 0.5^(1/k)` — the true per-sample failure rate at which this gate is a
+ * coin flip. Below it, a given push is more likely missed than caught. This is
+ * the number that bounds what k buys.
+ */
+export declare function halfDetectionRate(k: number): number | null;
+
+/**
+ * THE FLOOR. Two separate failures, deliberately not one predicate: too few
+ * SAMPLES (the run is unmeasured, never healthy) and too few SUCCESSES. The
+ * floor is scaled to the samples actually taken and rounded up, so truncation
+ * can neither weaken it silently nor invert into a false red.
+ * @returns failure messages; an empty array means the run cleared the floor.
+ */
+export declare function assertSampleFloor(
+  summary: { attempted: number; ok: number; failed: number; byCode: Record<string, number> },
+  options: { floor: number; requested: number; minSamples: number },
+): string[];
+
+/**
+ * REPORTS ONLY — never asserts. The lines printed on every run, healthy or not:
+ * the census, the observed rate, the effective floor, the detection-power table
+ * and the blindness statement. A gate that only speaks when it fails teaches
+ * nobody what normal looks like, and the rate is the number that would have
+ * stopped the 11 Sep merge.
+ */
+export declare function samplingReport(
+  summary: { attempted: number; ok: number; failed: number; failureRate: number | null; byCode: Record<string, number> },
+  options: { floor: number; requested: number; minSamples: number },
 ): string[];

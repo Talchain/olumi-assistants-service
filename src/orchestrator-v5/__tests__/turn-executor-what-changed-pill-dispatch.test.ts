@@ -163,7 +163,7 @@ function makeRunFact(opts: {
 }
 
 // Leading option FLIPS between the two runs (freelance ahead → hire ahead), so a
-// genuine "the leading option has changed" comparison is produced. The model
+// genuine "the option that scored highest most often in the model simulations has changed" comparison is produced. The model
 // changed between the runs, so the prior run carries a different hash
 // (2026-09-06: with equal hashes the gate answers `same_inputs` instead).
 function twoRuns(): Array<Record<string, unknown>> {
@@ -244,7 +244,7 @@ describe('F2 CHANGE B — typed what_changed pill dispatch', () => {
 
     const text = assistantTextOf(result);
     // A genuine two-run comparison naming both options and the leading-option flip.
-    expect(text).toContain('leading option has changed');
+    expect(text).toContain('option that scored highest most often in the model simulations has changed');
     expect(text).toContain('Freelance + Moderate Ad Spend');
     expect(text).toContain('Hire Marketing Manager');
     // The distinct-hash pair is `compared`, not `same_inputs`.
@@ -326,6 +326,6 @@ describe('F2 CHANGE B — typed what_changed pill dispatch', () => {
     expect(gateSpy.forceIntents).toContain(true);
     const text = assistantTextOf(result).toLowerCase();
     expect(text).toContain('re-run');
-    expect(text).not.toContain('leading option has changed');
+    expect(text).not.toContain('option that scored highest most often in the model simulations has changed');
   });
 });

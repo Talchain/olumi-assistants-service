@@ -23,7 +23,25 @@
  * disclosure sentence never entered the DOM. Structural, not timing — the
  * draft's SSE stream closes on a terminal COMPLETE frame, the auto-run turn has
  * no client, and the scenario-graph read leg returns no analysis. The two PRs
- * that would change it (CEE #1010, UI #752) are BOTH unmerged.
+ * that would change it (CEE #1010, UI #752) were BOTH unmerged when that capture
+ * was taken; both have since shipped.
+ *
+ * ── THE SECOND WITNESS, 2026-09-11, WHICH IS WHY THIS FILE IS PRODUCTION AGAIN ─
+ * Both PRs shipping is what licensed the flip to the DELIVERED posture, and the
+ * delivered posture was then refuted on the deployed build: a journey witness saw
+ * a model's FIRST-EVER successful analysis open with "The result is unchanged:
+ * <option> still leads", when BOTH prior runs had REFUSED and the panel had been
+ * reading "No analysis has run yet for this model". The sentence is CEE's, not
+ * the UI's — "The result is unchanged" reads 0 files across the whole UI repo,
+ * with the contrast control "No analysis has run yet for this model" at 8 files
+ * in the same sweep, so the sweep is not blind.
+ *
+ * ⭐ THE CHANNEL WAS NOT THE PROBLEM; THE CLAIM ABOUT IT WAS. #1010 + #752 really
+ * do deliver — on the `delivered` outcome. The constant asserted delivery on all
+ * five (`delivered | already_held | deadline | aborted | unreadable`), because a
+ * module-level constant answers "can this channel deliver?" and the coaching slot
+ * asks "did THIS USER receive it?". Two questions under one name (CLAUDE.md trap
+ * #21), coincident only while the channel could never deliver at all.
  *
  * ── WHAT IS PINNED HERE ─────────────────────────────────────────────────────
  * Every case binds BY IDENTITY — to the production copy constant, to the
@@ -34,16 +52,11 @@
  * first", so both harms are watched, not one door.
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import type { SuccessfulHandlerOutcome } from '../../tools/handler-outcome.js';
-// ⚠ `AUTO_RUN_RESULT_REACHES_USER` and `hasUserSeenRunAnalysisResult` are NOT
-// imported here on purpose. The mock below injects the pre-delivery posture over
-// this module, so a file-level import of either would hand the tests the
-// injection back and let them agree with themselves (CLAUDE.md trap #13b). Every
-// test that needs the SHIPPED answer reaches for it with `vi.importActual`.
 import {
   buildAutoRunProvenance,
   isAutoInitiatedRunAnalysisFact,
@@ -52,35 +65,26 @@ import {
 import { RUN_PROVENANCE_ENRICHMENT_KEY as KEY_REEXPORTED_BY_THE_WRITER } from '../../handlers/chip-click-dispatch.js';
 import { COACHING_TEXT, detectCoachingSignal } from '../coaching-signals.js';
 
-// ── the posture switch: PRE-DELIVERY ────────────────────────────────────────
+// ── no posture switch: THIS FILE IS PRODUCTION AGAIN ────────────────────────
 //
-// ⭐ THIS MOCK IS NOT DECORATION — IT IS WHAT KEEPS #1058 UNDER TEST AFTER THE
-// FLIP. `AUTO_RUN_RESULT_REACHES_USER` is `true` in production from the change
-// that flipped it alongside UI #752, so the suppression cases below no longer
-// describe production. They still describe a REACHABLE state — see the
-// residual-exposure note on the deploy-ordering pin at the foot of this file —
-// and they describe the exact defect the witness in this header recorded. So
-// the pre-delivery posture is INJECTED here rather than deleted, and this file
-// and `coaching-auto-run-delivered.test.ts` have swapped roles: that one is now
-// production, this one is the counterfactual.
+// ⭐ IT CARRIED ONE FOR THREE WEEKS, AND THE ROLES HAVE NOW SWAPPED BACK. While
+// `AUTO_RUN_RESULT_REACHES_USER` read `true`, this file injected the
+// PRE-DELIVERY posture so #1058 stayed under test as a counterfactual. The
+// constant was flipped to `false` on 2026-09-11 after the witnessed sentence in
+// this header's first block was seen AGAIN on the deployed build, so the
+// injection would now set a value to itself: a no-op mock whose positive control
+// could no longer fail — a control decayed into a tautology by its own success
+// (CLAUDE.md trap #12b, the shape that hollowed out the prompt-drift gate's three
+// controls). It is REMOVED rather than left looking load-bearing.
 //
-// `importOriginal`-spread so every other export stays REAL (CLAUDE.md trap #12:
-// a `vi.mock` factory REPLACES the module). `vi.mock` is file-scoped and
-// hoisted, which is why the two postures live in two files rather than two
-// `describe`s.
+// The counterfactual moved with it: `coaching-auto-run-delivered.test.ts` now
+// carries the injected DELIVERED posture and its own positive control. `vi.mock`
+// is file-scoped and hoisted, which is why the two postures live in two files
+// rather than two `describe`s. Neither posture went unpinned in the swap.
 //
-// ⚠ Tests below that need PRODUCTION semantics use `vi.importActual`, never the
-// file-level import, so they cannot read this injection back as if it were the
-// shipped answer.
-vi.mock('../../context/run-initiator.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../context/run-initiator.js')>();
-  return {
-    ...actual,
-    AUTO_RUN_RESULT_REACHES_USER: false,
-    hasUserSeenRunAnalysisResult: (fact: HandlerFact): boolean =>
-      actual.hasUserSeenRunAnalysisResult(fact, false),
-  };
-});
+// The discrimination this file needs no longer comes from a mock at all: it comes
+// from `hasUserSeenRunAnalysisResult`'s explicit parameter, which is real in both
+// directions whatever the constant says.
 
 // ── fixtures ────────────────────────────────────────────────────────────────
 
@@ -196,23 +200,25 @@ function editBranch(priorFacts: readonly HandlerFact[]) {
 // ── the defect ──────────────────────────────────────────────────────────────
 
 describe('the phantom prior: a post-draft auto-run is not a result the user saw', () => {
-  it('POSITIVE CONTROL: the pre-delivery posture actually reaches the predicate production calls', async () => {
+  it('POSITIVE CONTROL: production ships the fail-closed posture, and the predicate still discriminates', async () => {
     // Without this, every suppression assertion below would pass or fail for
     // reasons invisible here (CLAUDE.md trap #13: an absence probe with no
-    // positive control is vacuous). The injection must be observable AT the
-    // predicate, and it must DISCRIMINATE — so the contrast is asserted in the
-    // same test, against the REAL module.
-    const injected = await import('../../context/run-initiator.js');
-    const real = await vi.importActual<typeof import('../../context/run-initiator.js')>(
-      '../../context/run-initiator.js',
-    );
-    expect(injected.AUTO_RUN_RESULT_REACHES_USER).toBe(false);
-    expect(injected.hasUserSeenRunAnalysisResult(AUTO_RUN_PRIOR())).toBe(false);
-    // …and the contrast: production ships the DELIVERED posture. If these two
-    // ever read the same value, this file has stopped being a counterfactual
-    // and every suppression case below is silently re-testing production.
-    expect(real.AUTO_RUN_RESULT_REACHES_USER).toBe(true);
-    expect(real.hasUserSeenRunAnalysisResult(AUTO_RUN_PRIOR())).toBe(true);
+    // positive control is vacuous). No mock stands between this file and
+    // production any more, so this is a claim about the SHIPPED constant.
+    const runInitiator = await import('../../context/run-initiator.js');
+    expect(runInitiator.AUTO_RUN_RESULT_REACHES_USER).toBe(false);
+    expect(runInitiator.hasUserSeenRunAnalysisResult(AUTO_RUN_PRIOR())).toBe(false);
+
+    // ⭐ THE DISCRIMINATION, and it does NOT come from the constant. A control
+    // that only asserts the current value cannot fail once that value is the
+    // default (CLAUDE.md trap #12b). The explicit parameter is real in both
+    // directions, so this pair bites whichever way the constant is set.
+    expect(runInitiator.hasUserSeenRunAnalysisResult(AUTO_RUN_PRIOR(), false)).toBe(false);
+    expect(runInitiator.hasUserSeenRunAnalysisResult(AUTO_RUN_PRIOR(), true)).toBe(true);
+
+    // …and provenance is unmoved by either posture: the identical fact is still
+    // correctly identified as auto-INITIATED. Two questions, one object.
+    expect(runInitiator.isAutoInitiatedRunAnalysisFact(AUTO_RUN_PRIOR())).toBe(true);
   });
 
   it('THE WITNESSED SENTENCE: an auto-run-only prior must not produce "The result is unchanged"', () => {
@@ -321,17 +327,14 @@ describe('the phantom prior: a post-draft auto-run is not a result the user saw'
   // ── provenance vs delivery: TWO questions, named apart (trap 21) ───────────
 
   it('PROVENANCE AND DELIVERY ARE DIFFERENT QUESTIONS ABOUT THE SAME FACT', async () => {
-    // The whole point of the #1010 split, and it SURVIVES the flip — which is
-    // the thing worth pinning. Before delivery the two answers differed on the
-    // same object; now they agree on it. If the split were only ever a restating
-    // of the stamp, that agreement would make it vanish. It does not: delivery
-    // still moves with the POSTURE while provenance is immovable, so the
-    // discrimination is carried by the explicit parameter rather than by the
-    // constant's happening to be `false` (CLAUDE.md trap #12b: a control pinned
-    // to whatever is current decays into a tautology the moment current moves).
-    const real = await vi.importActual<typeof import('../../context/run-initiator.js')>(
-      '../../context/run-initiator.js',
-    );
+    // The whole point of the #1010 split, and it SURVIVES both flips — which is
+    // the thing worth pinning. The split must not be readable as a restating of
+    // the stamp: delivery moves with the POSTURE while provenance is immovable,
+    // so the discrimination is carried by the explicit parameter rather than by
+    // the constant's happening to hold either value (CLAUDE.md trap #12b: a
+    // control pinned to whatever is current decays into a tautology the moment
+    // current moves — and this constant has now moved twice).
+    const real = await import('../../context/run-initiator.js');
     const autoRun = AUTO_RUN_PRIOR();
 
     // PROVENANCE — permanent, and unmoved by either posture.
@@ -349,16 +352,13 @@ describe('the phantom prior: a post-draft auto-run is not a result the user saw'
   });
 
   it('BOTH POSTURES of the delivery predicate are pinned, so the constant governs exactly one class', async () => {
-    // ⚠ Bound to the REAL module. Reading the file-level import here would ask
-    // the injection what the injection says — a guard agreeing with itself
-    // (CLAUDE.md trap #13b).
-    const { hasUserSeenRunAnalysisResult: real } = await vi.importActual<
-      typeof import('../../context/run-initiator.js')
-    >('../../context/run-initiator.js');
+    const { hasUserSeenRunAnalysisResult: real } = await import(
+      '../../context/run-initiator.js'
+    );
     const autoRun = AUTO_RUN_PRIOR();
-    // Pre-delivery — what this file's suppression cases describe.
+    // Fail-closed — what production ships, and what this file's cases describe.
     expect(real(autoRun, false)).toBe(false);
-    // Delivered — what production ships.
+    // Delivered — the counterfactual, pinned in `coaching-auto-run-delivered.test.ts`.
     expect(real(autoRun, true)).toBe(true);
     // A user-initiated run is TRUE in BOTH postures — the flag governs exactly
     // one class of fact, and a flip that moved this one would be the
@@ -367,31 +367,44 @@ describe('the phantom prior: a post-draft auto-run is not a result the user saw'
     expect(real(USER_RUN_PRIOR(), true)).toBe(true);
   });
 
-  it('THE DEPLOY-ORDERING PIN: auto-run delivery is ON at this tip, and the residual exposure is named', async () => {
+  it('THE FAIL-CLOSED PIN: auto-run delivery is OFF at this tip, and the cost of that is named', async () => {
     // ⚠ A CONSTANT IS A HAND-MAINTAINED MIRROR (CLAUDE.md trap #12), so it is
-    // asserted rather than left to be remembered — and asserted against the
-    // REAL module, because the file-level import is injected above.
+    // asserted rather than left to be remembered. It has now moved TWICE, which
+    // is the argument for asserting it rather than describing it in prose.
     //
-    // It reads `true` because UI #752 renders the auto-run's result: the
-    // scenario-graph read leg returns the committed analysis and
-    // `canvas/hooks/useProvisionalAnalysisDelivery.ts` applies it without
-    // another turn. Flipped LATE it would have left the inversion (a genuine
-    // re-run narrated as a first analysis); flipped EARLY it re-opens #1058.
+    // It reads `false` because the DELIVERED posture was refuted by a second
+    // deployed witness on 2026-09-11: a first-ever successful analysis narrated
+    // "The result is unchanged: <option> still leads", with both prior runs
+    // REFUSED and the panel reading "No analysis has run yet for this model".
     //
-    // ⚠⚠ AND THE FLIP DOES NOT CLOSE #1058 — IT NARROWS IT. Derived at UI
-    // #752's head `fe1944af`: the delivery hook arms only on a `running`
+    // ⭐ THE COST IS REAL AND IS NOT HIDDEN. Users who genuinely DID see the
+    // provisional result now lose the re-run acknowledgement: their second
+    // analysis is narrated as their first. Under-claiming is the right side of
+    // the trade — it tells a user less than we know, where the other posture
+    // asserted a comparison against something they never saw — but a future
+    // session weighing a flip back must weigh a real loss, not a free one.
+    //
+    // ⚠⚠ NEITHER POSTURE IS CORRECT. The delivery hook arms only on a `running`
     // verdict and returns `delivered | already_held | deadline | aborted |
-    // unreadable`; `serverGraphHydration.ts` is UNTOUCHED by that PR, so the
-    // BOOT path never applies the analysis. A user who navigates away or
-    // reloads inside the ~20s run therefore never sees the result, and this
-    // constant still asserts they did — #1058, verbatim, on that path. Only a
-    // per-user DELIVERY RECEIPT can distinguish those outcomes, and CEE has no
-    // surface to record one on (`v5_handler_facts` is append-only; no
-    // `SessionStore` method updates a fact). That is the successor, and this
-    // pin is what makes its absence loud rather than forgotten.
-    const real = await vi.importActual<typeof import('../../context/run-initiator.js')>(
-      '../../context/run-initiator.js',
-    );
-    expect(real.AUTO_RUN_RESULT_REACHES_USER).toBe(true);
+    // unreadable`; a constant cannot distinguish those five outcomes because it
+    // is an estate-wide claim about a CHANNEL and the question is per-USER. Only
+    // a DELIVERY RECEIPT can, and CEE has no surface to record one on
+    // (`v5_handler_facts` is append-only; no `SessionStore` method updates a
+    // fact), so it rides the NEXT REQUEST instead. That is the successor, and
+    // this pin is what makes its absence loud rather than forgotten.
+    //
+    // ⚠ ONE PREMISE THIS PIN CARRIED WAS STALE AND IS CORRECTED IN PLACE
+    // (2026-09-11). It read: "`serverGraphHydration.ts` is UNTOUCHED by that PR,
+    // so the BOOT path never applies the analysis", derived at UI #752's head
+    // `fe1944af`. At the DEPLOYED UI build `b93904c9` that file is NOT untouched
+    // — it imports `applyBootAnalysisVerdict` / `applyBootLeaderClaimWithholding`
+    // at line 25. ⭐ THE CONCLUSION SURVIVES AND ONLY THE PREMISE MOVED:
+    // `'running'` is in that file's BOOT-DECLINED set, and the file writes no
+    // analysis RESULTS at all (target 0; contrast control `useCanvasStore` reads
+    // 9 in the same file, so the sweep is not blind). The boot path still never
+    // applies the analysis. Corrected rather than deleted, because a session
+    // reading the stale premise would conclude the residual had closed.
+    const real = await import('../../context/run-initiator.js');
+    expect(real.AUTO_RUN_RESULT_REACHES_USER).toBe(false);
   });
 });

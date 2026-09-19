@@ -63,6 +63,7 @@ import { preNormalise } from '../context/cqe/pre-normalise.js';
 import { applyWordNumberPrePass } from '../context/cqe/word-numbers.js';
 import type { QuantityExtractionResult } from '../context/cqe/schema-types.js';
 import { formatValueWithUnit } from '../tools/handlers/d1-shared/format-confirmation.js';
+import { ALLOWED_TARGET_KINDS as ADD_CONSTRAINT_ALLOWED_TARGET_KINDS } from '../tools/handlers/add-constraint.js';
 import type { GraphLookup } from './validator.js';
 import { bigramDice } from './validator.js';
 import {
@@ -1700,6 +1701,21 @@ function articleFor(kind: string): string {
 }
 
 /**
+ * Can `add_constraint` actually accept a target of this kind?
+ *
+ * ONE predicate, exported, so the refusal PROSE and the refusal CHIP cannot
+ * disagree about whether the route they recommend exists. Two independent
+ * lookups of the same constant would agree today and drift the first time one
+ * of them grew a condition — the estate's dominant defect (CLAUDE.md trap 21:
+ * two authorities answering one question under similar names).
+ *
+ * Derived from the handler's own exported authority, never re-spelled here.
+ */
+export function isConstraintableKind(nodeKind: string): boolean {
+  return ADD_CONSTRAINT_ALLOWED_TARGET_KINDS.includes(nodeKind);
+}
+
+/**
  * User-facing copy for the "you named a real node, but it isn't a factor and
  * a value cannot be set on it" case (`dispatch: 'refuse_non_factor_kind'`).
  *
@@ -1759,13 +1775,75 @@ export function buildNonFactorKindRefusalText(
       : examples.length === 1
         ? `You can set a value on a factor instead — ${examples[0]}, for example.`
         : `You can set a value on a factor instead — ${examples[0]} or ${examples[1]}, for example.`;
+  // ⚠ THE CONSTRAINT ROUTE IS NOT UNIVERSAL, AND OFFERING IT BLIND RECREATES
+  // THIS DEFECT ONE TURN ALONG. `add_constraint` accepts factor / outcome /
+  // goal / risk; it REJECTS decision, action and option — and those kinds
+  // reach this copy, because `modelEntityLabels` above buckets decision and
+  // action alongside factors when scanning candidates. Sending a user to an
+  // action that will also refuse them is the same harm as the offer this
+  // refusal replaces, so the sentence is gated on the recommending handler's
+  // OWN exported authority rather than assumed (CLAUDE.md trap 12: derived,
+  // never mirrored). Where the route does not exist the refusal simply stops
+  // after the factor route, which is always real.
+  const constraintClause = isConstraintableKind(nodeKind)
+    ? ` If you want to hold ${label} to a limit, ask me to add a constraint on it.`
+    : '';
   return (
     (disclosure === null ? '' : `${disclosure} `) +
     `${label} is ${articleFor(nodeKind)} ${nodeKind}, not a factor, and I can't ` +
     `set a value on ${articleFor(nodeKind)} ${nodeKind} directly. The model is unchanged so far. ` +
-    `${exampleClause} ` +
-    `If you want to hold ${label} to a limit, ask me to add a constraint on it.`
+    `${exampleClause}` +
+    constraintClause
   );
+}
+
+/**
+ * The constraint CHIP that accompanies `buildNonFactorKindRefusalText`.
+ *
+ * ⚠ WHY THIS IS A FUNCTION AND NOT A CHIP LITERAL AT THE CALL SITE.
+ * The chip and the prose are two channels answering ONE question — "does the
+ * constraint route exist for this target?" — and until this builder existed
+ * they answered it in two places. One call site (the mutation-warrant demotion
+ * branch) gated its literal; its sibling (the `refuse_non_factor_kind` branch)
+ * did not, so on a `decision` or `action` target the assistant text WITHHELD
+ * the constraint route while the button directly beneath it OFFERED it, and
+ * clicking that button reached `add_constraint`, which throws on those kinds
+ * (`add-constraint.ts` ALLOWED_TARGET_KIND_SET). The response contradicted
+ * itself inside one turn — CLAUDE.md trap 21, two authorities under similar
+ * names — and no test could see it, because the chip array was built inline.
+ *
+ * Both channels now read `isConstraintableKind`, the recommending handler's
+ * OWN exported authority (trap 12: derived, never mirrored). Minting the chip
+ * here rather than at each call site is what makes that guarantee testable and
+ * keeps it from drifting the next time a call site is added.
+ *
+ * ⚠ THE TWO HARMS ARE NOT A THRESHOLD. Offering a route that will refuse (a
+ * lie) and withholding one that would have worked (a gap) are opposite harms,
+ * but they do not need opposite tuning here: this is exact set membership
+ * against the very constant the resumer throws on, so for any KNOWN kind both
+ * harms are zero simultaneously. They separate only on IGNORANCE — the caller
+ * spells an unresolvable kind with the sentinel `'node'`
+ * (turn-executor.ts, `typeof nodeKind?.kind === 'string' ? nodeKind.kind : 'node'`),
+ * which is not in the allowlist, so BOTH channels withhold. That is the gap
+ * direction, it is pre-existing, and it is deliberately shared: letting the
+ * chip fail open while the prose fails closed would rebuild the exact
+ * divergence this builder exists to abolish.
+ *
+ * Returns an ARRAY so both call sites spread it — an empty chip list is an
+ * established response shape in the executor, not a degenerate one.
+ */
+export function buildNonFactorKindRefusalConstraintChips(
+  label: string,
+  nodeKind: string,
+): ReadonlyArray<{ id: string; label: string; message: string }> {
+  if (!isConstraintableKind(nodeKind)) return [];
+  return [
+    {
+      id: 'chip_prompt_refuse_constraint',
+      label: `Add a constraint on ${label}`,
+      message: `Add a constraint on ${label}.`,
+    },
+  ];
 }
 
 /**

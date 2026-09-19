@@ -144,7 +144,7 @@ const MUST_TRIP: ReadonlyArray<readonly [string, string]> = [
 const MUST_NOT_TRIP: ReadonlyArray<readonly [string, string]> = [
   [
     'THE RATIFIED-CORRECT SENTENCE (#906)',
-    'Switch to HubSpot came out ahead in 61% of runs of this model.',
+    'Switch to HubSpot scored highest against your goal in 61% of runs of this model.',
   ],
   [
     'the other correct form — win probability, not a gap',
@@ -394,13 +394,13 @@ describe('redactRunnerUpGapStatistic — surgery, not demolition', () => {
 
   it('reaches every prose field, not just narrative_summary (trap 3b at field grain)', () => {
     const out = redactRunnerUpGapStatistic({
-      narrative_summary: 'Plan A came out ahead in 61% of runs of this model.',
+      narrative_summary: 'Plan A scored highest against your goal in 61% of runs of this model.',
       robustness_explanation: { summary: 'The lead is 14 percentage points.' },
       story_headlines: { opt_a: 'Leads by 18 percentage points', opt_b: 'Needs stronger demand' },
     });
 
     expect(out.paths).toEqual(['robustness_explanation.summary', 'story_headlines.opt_a']);
-    expect(out.value.narrative_summary).toBe('Plan A came out ahead in 61% of runs of this model.');
+    expect(out.value.narrative_summary).toBe('Plan A scored highest against your goal in 61% of runs of this model.');
     expect(out.value.story_headlines.opt_b).toBe('Needs stronger demand');
   });
 
@@ -415,7 +415,7 @@ describe('redactRunnerUpGapStatistic — surgery, not demolition', () => {
   it('BYTE IDENTITY: a clean review comes back as the SAME REFERENCE', () => {
     const input = {
       produced_at: '2026-08-10T12:00:00.000Z',
-      narrative_summary: 'Plan A came out ahead in 61% of runs of this model.',
+      narrative_summary: 'Plan A scored highest against your goal in 61% of runs of this model.',
       flip_thresholds: [{ factor_id: 'fac_conv', current_display: '33 percentage points' }],
       bias_findings: [{ affected_elements: ['opt_a', 'edge_1'] }],
     };

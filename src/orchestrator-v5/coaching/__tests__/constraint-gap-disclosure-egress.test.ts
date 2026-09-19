@@ -148,7 +148,13 @@ describe('T1 gap disclosure — reaches the wire', () => {
     // used to pin 'conditions you set', which was an ATTRIBUTION claim, not the
     // withholding statement it was labelled as — and a false one whenever the
     // brief extractor authored the row. Pin the statement the comment names.
-    expect(out).toContain('no option can be put forward yet');
+    // ⚠ WORDING UPDATED 16 Sep 2026. This voice used to end "so no option can be
+    // put forward yet", which told the user their RANKING was void. Measured live:
+    // it reached a user four times while `analysis_ready` logged 5 ready options and
+    // 0 blockers. Whether a LEADER may be named is a separate gate
+    // (`MAY_NAME_LEADING_OPTION` / `leading-option-egress-guard`) and is unchanged.
+    expect(out).toContain('not part of the comparison');
+    expect(out).not.toContain('no option can be put forward yet');
   });
 
   it('the count-only form (label unusable) also reaches the wire', () => {
@@ -247,7 +253,8 @@ describe('identity_unresolved — its OWN wording, and it reaches the wire too',
   it('does NOT certify constraint-safety — it still withholds the option', () => {
     // The #707 false statement, in copy form: a disclosure that reassured the
     // user here would pair with a named leader on the same screen.
-    expect(UNRESOLVED).toContain('no option can be put forward yet');
+    expect(UNRESOLVED).toContain('cannot be counted as part of the comparison');
+    expect(UNRESOLVED).not.toContain('no option can be put forward yet');
   });
 
   it('says what actually happened: the results could not be matched', () => {
@@ -380,7 +387,7 @@ describe('the forwarder honesty floor — a REJECTED summary still discloses', (
     // loudly instead of the assertion going quietly green.
     const poisoned =
       ' One limit on your model could not be checked: “the best option”.' +
-      ' We could not line it up with anything this analysis measures, so no option can be put forward yet.' +
+      ' We could not line it up with anything this analysis measures, so it was not part of the comparison.' +
       ' Tell me the limit you meant in your own words and I will record it; this one stays on the model. Then run the analysis again.';
 
     // PRECONDITION 1 — it is disclosure-SHAPED (else we test structure, not content).

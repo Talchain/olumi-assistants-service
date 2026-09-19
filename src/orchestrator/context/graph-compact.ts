@@ -12,6 +12,7 @@
  */
 
 import type { GraphV3T } from "../../schemas/cee-v3.js";
+import { qualitativeBand } from '../../cee/factor-extraction/display-value.js';
 import { DEFAULT_EXISTS_PROBABILITY } from "./constants.js";
 import { isLegalStructuralEdge } from "../../cee/utils/structural-edge-classifier.js";
 import {
@@ -20,6 +21,8 @@ import {
   type ValueSourceDisplay,
 } from "../../cee/transforms/provenance-display.js";
 import { collectDirectedReachable } from "../../graph/reachability.js";
+import type { ObservedStateStatedRole } from "../../cee/context-integrity/stated-role-vocabulary.js";
+import { mergeInterventionSourceObjects } from "../tools/analysis-ready-helper.js";
 
 // ============================================================================
 // Output Types
@@ -100,6 +103,16 @@ export interface CompactNode {
   raw_value?: number;  // from observed_state.raw_value
   unit?: string;       // from observed_state.unit
   cap?: number;        // from observed_state.cap
+  /**
+   * What the user stated this magnitude AS — from `observed_state.stated_role`.
+   *
+   * `constraint` means the user gave it as a LIMIT and `value` is that limit
+   * standing in for a level they never stated. Emitted ONLY when a producer
+   * settled the role: absence is UNDECLARED and must never be read as
+   * "therefore an observation". See `cee/context-integrity/
+   * stated-role-vocabulary.ts` for why the alphabet has one member.
+   */
+  stated_role?: ObservedStateStatedRole;
   /** Provenance enum (legacy CompactNodeSource vocabulary).
    *  Kept alongside `provenance` for back-compat with context-pack-assembler /
    *  telemetry consumers that read this field today. */
@@ -340,14 +353,35 @@ export function projectUncertaintyDriversForContext(
 
 /**
  * Build a human-readable intervention summary for an option node.
- * Format: "sets Label1=0.9, Label2=0.7" (capped at 5 entries).
  *
- * @param interventions - factor_id → numeric value map (from data.interventions)
+ * Format, capped at 5 entries:
+ *   bare, in [0,1]   "sets Evening Footfall Uplift=model value 0.7
+ *                     (display band High; real-world meaning not established)"
+ *   bare, off scale  "sets Headcount Added=model value 42
+ *                     (real-world meaning not established)"
+ *   native quantity  "sets Monthly price=69 £/month (model value 0.69)"
+ *
+ * ⚠ SIZE COST, DISCLOSED RATHER THAN DISCOVERED LATER — AND RESTATED AFTER THE
+ * REVIEW CORRECTION, BECAUSE IT GREW. The qualified form runs roughly 80–100
+ * characters per entry against the bare numeral's handful, so a 5-entry option
+ * costs a few hundred characters it did not before. `budget.ts` drops this
+ * whole field in its second pass under context pressure, so on a graph already
+ * over budget the drop becomes more likely than it was.
+ *
+ * Accepted deliberately, and the trade is the honest one: a summary that
+ * SURVIVES while asserting a meaning the stored value does not establish is
+ * worse than one dropped cleanly. The bare numeral is what produced the
+ * "active" / "inactive baseline" answer in capture served-coaching-8077853a,
+ * and an unqualified band would have produced a confident wrong scale instead.
+ * If this field starts being dropped in practice, the fix is a shorter honest
+ * form, never a shorter dishonest one.
+ *
+ * @param interventions - entries selected by the existing intervention authority
  * @param labelMap - node id → label lookup built from graph nodes
  * @returns summary string, or undefined if no interventions
  */
 function buildInterventionSummary(
-  interventions: Record<string, number>,
+  interventions: Record<string, unknown>,
   labelMap: Map<string, string>,
 ): string | undefined {
   const entries = Object.entries(interventions);
@@ -363,7 +397,54 @@ function buildInterventionSummary(
   const shown = resolved.slice(0, MAX_INTERVENTION_ENTRIES);
   const remaining = resolved.length - shown.length;
 
-  const parts = shown.map(([factorId, value]) => `${labelMap.get(factorId)!}=${value}`);
+  const parts = shown.map(([factorId, entry]) => {
+    // ⚠ A BARE MODEL VALUE CARRIES NO ESTABLISHED MEANING, AND SAYING SO IS
+    // THE POINT — corrected by review CX-20260916-90.
+    //
+    // Served capture `served-coaching-8077853a` (16 Sep 2026): the owned
+    // bookshop options carry bare `1` and `0`, so this line sent
+    // "Friday Extended Hours=1" and "=0" to the model. The answer came back
+    // saying each option "sets Friday extended hours ACTIVE" and that the
+    // baseline "sets Friday extended hours to its INACTIVE baseline".
+    //
+    // ⚠⚠ MY FIRST REPAIR MADE THE MODEL'S OWN MISTAKE. It sent
+    // "Very high (1)" and argued the value was ORDINAL because the UI renders
+    // it that way. The reviewer's correction is right and is the rule here: a
+    // bare 1/0 establishes NEITHER a binary NOR an ordinal reading, and a
+    // display band is a FORMATTER FALLBACK, not semantic evidence. Replacing
+    // the model's unwarranted "active" with our own unwarranted "Very high"
+    // would have moved the fabrication one layer upstream and made it look
+    // authoritative, which is worse — the model can hedge a number it was
+    // given raw, and cannot hedge a label we asserted.
+    //
+    // So the context now states all three things separately and lets the model
+    // see which is which: the MODEL VALUE (fact), the DISPLAY BAND (how the UI
+    // renders it, `qualitativeBand`, the shared rule reused rather than
+    // restated), and that the REAL-WORLD MEANING IS NOT ESTABLISHED (the
+    // actual epistemic state). An unknown scale is named as unknown.
+    //
+    // Outside [0,1] no band is claimed at all, because `qualitativeBand` is
+    // documented for normalised values and a label outside its domain would be
+    // exactly the unwarranted promotion this comment exists to prevent.
+    if (typeof entry === 'number') {
+      const label = labelMap.get(factorId)!;
+      if (!Number.isFinite(entry)) return `${label}=${entry}`;
+      return entry >= 0 && entry <= 1
+        ? `${label}=model value ${entry} (display band ${qualitativeBand(entry)}; real-world meaning not established)`
+        : `${label}=model value ${entry} (real-world meaning not established)`;
+    }
+    const value = entry as Record<string, unknown>;
+    const unit = typeof value.unit === 'string' ? value.unit.trim() : '';
+    const native = value.raw_value;
+    const rawScalar = (typeof native === 'number' && Number.isFinite(native)) ||
+      typeof native === 'string' || typeof native === 'boolean';
+    const nativeValue = typeof native === 'number' && Number.isFinite(native) && unit
+      ? `${native} ${unit} (model value ${value.value})`
+      : rawScalar
+        ? `raw value ${JSON.stringify(native)} (model value ${value.value}; ${unit ? `unit ${JSON.stringify(unit)}` : 'unit not established'})`
+        : `model value ${value.value} (native quantity not established)`;
+    return `${labelMap.get(factorId)!}=${nativeValue}`;
+  });
 
   let summary = `sets ${parts.join(', ')}`;
   if (remaining > 0) {
@@ -707,6 +788,55 @@ export function compactGraph(graph: GraphV3T): GraphV3Compact {
         // table, so emitting it would just burn LLM context tokens.
         const et = obsState.extractionType;
         const authored = valueSourceAuthorship(obsState.source);
+        // ⭐⭐ A LIMIT IS NOT A LEVEL THE USER STATED — AND SAYING SO IS THE
+        // ROLE'S JOB, NOT THE AUTHORSHIP FIELD'S.
+        //
+        // MEASURED on live staging 14 Sep 2026. A brief saying *"keeping
+        // monthly churn under 4%"* put `{ value: 0.04, source:
+        // "brief_extraction", extractionType: "explicit" }` on the churn node.
+        // `brief_extraction` maps to `null` in `SOURCE_AUTHORSHIP` (the table's
+        // own note: the `extractionType` mapping is the finer instrument), so
+        // the `authored` route declines and the `explicit` arm below fires:
+        // **`source: 'user' / provenance: 'from_brief'`**. The model is
+        // therefore told the USER stated that churn IS 4% — about a number they
+        // gave as a ceiling. `stated_role: 'constraint'`, set here and carried
+        // into BOTH prompt packs, is what corrects that.
+        //
+        // ⛔⛔ THIS BRANCH USED TO REWRITE AUTHORSHIP TOO (`source:
+        // 'assumption'`, `provenance: 'ai_inferred'`) AND THAT IS WITHDRAWN. An
+        // independent review (Codex) established the case it cannot survive:
+        // *"monthly churn must stay below 4%, and that is where it sits today"*
+        // states ONE magnitude in TWO true roles — a limit AND an observation.
+        // Rewriting authorship there withdraws a claim the user genuinely made.
+        // Measured at the previous head, 3 of 4 such phrasings demoted a real
+        // observation.
+        //
+        // ⭐ AND THE REASON NO BETTER RULE FIXES IT, which is why this is a
+        // withdrawal rather than another attempt: the demotion is justified
+        // only where the user stated NO observation — and **that absence cannot
+        // be established.** The two sentences above are identical in graph,
+        // quote extent, occurrence count and `operator`; only the English
+        // differs. So the evidence the destructive act requires cannot be
+        // produced, and the act is therefore unjustified IN PRINCIPLE, not
+        // merely unimplemented. A future session arriving with a better regex
+        // has not found the missing evidence — it has found a better guess.
+        //
+        // ⭐ WHAT REPLACES IT: the two questions are named apart (trap 21). The
+        // ROLE of a quantity and the AUTHORSHIP of a quantity were conflated in
+        // one field; `stated_role` answers the first and is additive and true,
+        // and the authorship chain below answers the second, undisturbed. The
+        // model is told *"this is a constraint"* without us lying about who
+        // supplied the number. `value`, `raw_value`, `unit` and `cap` were
+        // always untouched and remain so.
+        const statedRole = obsState.stated_role;
+        if (statedRole === 'constraint') {
+          // ⚠ ADDITIVE, AND DELIBERATELY OUTSIDE THE CHAIN BELOW. As an
+          // `if/else if` arm this consumed the authorship decision, so a
+          // stamped node that fell through to it received NO `source` and NO
+          // `provenance` at all once the two rewrites were removed. Hoisted, so
+          // the role is added and the authorship chain still runs to a verdict.
+          n.stated_role = 'constraint';
+        }
         if (authored !== undefined) {
           n.source = authored.source;
           n.provenance = authored.provenance;
@@ -746,21 +876,18 @@ export function compactGraph(graph: GraphV3T): GraphV3Compact {
         }
       }
 
-      // Intervention summary for option nodes with data.interventions
+      // One summary of the settings the saved option actually carries.
       if (node.kind === 'option') {
         // Structural reachability. ALWAYS emitted on an option (empty included)
         // so absence of the key means "not an option", never "not computed".
         n.reaches = buildOptionReachability(node.id, graph.edges, knownNodeIds);
 
-        const data = anyNode.data as Record<string, unknown> | undefined;
-        if (data && typeof data.interventions === 'object' && data.interventions !== null) {
-          const summary = buildInterventionSummary(
-            data.interventions as Record<string, number>,
-            labelMap,
-          );
-          if (summary) {
-            n.intervention_summary = summary;
-          }
+        const summary = buildInterventionSummary(
+          mergeInterventionSourceObjects(anyNode),
+          labelMap,
+        );
+        if (summary) {
+          n.intervention_summary = summary;
         }
       }
 

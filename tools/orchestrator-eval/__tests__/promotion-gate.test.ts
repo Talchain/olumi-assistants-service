@@ -499,8 +499,30 @@ describe('real committed state', () => {
     const manifest = loadManifestPrompts();
     const packs = await discoverPacks();
     const reports = loadPromotionReports();
+
+    // ⚠ `now` WAS PINNED TO '2026-07-31', THE DATE OF THE v15 PROMOTION, AND IT
+    // WENT STALE THE MOMENT A NEWER REPORT LANDED: a report generated after that
+    // instant reads as FUTURE_SKEW, so this test RED-ed on a gate the hermetic
+    // CLI, running at the real clock, reported GATED-PASS. A control pinned to a
+    // moving reference — the defect class this file exists to catch, occurring
+    // inside it.
+    //
+    // DERIVING `now` FROM THE REPORT WAS TRIED AND REJECTED, because it is the
+    // same defect wearing the opposite coat: it makes the report zero days old
+    // by construction, so the freshness window becomes unmeasurable here. That
+    // was proven, not assumed — with `now` derived, a committed report back-dated
+    // 200 days left this file fully GREEN.
+    //
+    // `now` is therefore THE REAL CLOCK, which is what CI experiences and what
+    // the hermetic CLI already uses. It cannot go stale, and it RED-s when the
+    // committed promotion evidence genuinely expires — which is a TRUE alarm,
+    // not a maintenance burden: evidence ageing out is exactly what this gate is
+    // for. EXPIRED and future-skew semantics keep their own synthetic controls
+    // above, pinned against fixture reports.
+    const now = new Date();
+
     const gate = computePromotionGate(manifest, packs, reports, {
-      now: new Date('2026-07-31T00:00:00Z'),
+      now,
       maxReportAgeDays: 90,
       maxFutureSkewDays: 1,
     });
@@ -514,7 +536,7 @@ describe('real committed state', () => {
     // real manifest + packs must BLOCK. A green that survives having its
     // evidence deleted is a green that was never reading it.
     const withoutReports = computePromotionGate(manifest, packs, [], {
-      now: new Date('2026-07-31T00:00:00Z'),
+      now,
       maxReportAgeDays: 90,
       maxFutureSkewDays: 1,
     });

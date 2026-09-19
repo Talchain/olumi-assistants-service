@@ -155,8 +155,31 @@ describe('the prose-grounding rule is wired into both substantive branches', () 
     // assigned exactly once, inside the block that assigns the projection, and
     // must select over `scenarioAnalysisFacts` — the array
     // `buildAnalysisFromPriorFacts` was handed on the line above it.
-    const assignments = TURN_EXECUTOR.match(/promptAnalysisSourceFact\s*=/g) ?? [];
+    //
+    // ⚠ ASSIGNMENT, NOT EQUALITY — and this matcher could not tell them apart.
+    //   `#1401` added a legitimate READ, `promptAnalysisSourceFact === null`, so
+    //   the selected durable fact (not the bounded hot window) feeds the
+    //   provisional-admission interpretation. The old `/…\s*=/g` counted that
+    //   comparison as a SECOND ASSIGNMENT and RED-ed a source change that
+    //   strengthens the very contract this test defends. The obligation is
+    //   unchanged — exactly one assignment, over `scenarioAnalysisFacts` — the
+    //   matcher simply learns the difference.
+    const ASSIGNMENT = /promptAnalysisSourceFact\s*=(?!=)/g;
+    const assignments = TURN_EXECUTOR.match(ASSIGNMENT) ?? [];
     expect(assignments).toHaveLength(1);
+
+    // EQUALITY POSITIVE — the read exists and is NOT counted. Without this the
+    // narrowed matcher could silently stop seeing assignments too.
+    expect(TURN_EXECUTOR).toContain('promptAnalysisSourceFact === null');
+    expect(
+      'if (promptAnalysisSourceFact === null) return;\nx === promptAnalysisSourceFact;'.match(
+        ASSIGNMENT,
+      ),
+    ).toBeNull();
+    // SECOND-ASSIGNMENT NEGATIVE — the count still bites if one is ever added.
+    expect(
+      'promptAnalysisSourceFact = a;\npromptAnalysisSourceFact = b;'.match(ASSIGNMENT),
+    ).toHaveLength(2);
 
     const guardStart = TURN_EXECUTOR.indexOf('if (durableFallback) {');
     expect(guardStart).toBeGreaterThan(-1);

@@ -25,6 +25,7 @@
  */
 import { z } from "zod";
 import { GoalThresholdFrame } from "@talchain/schemas";
+import { GoalThresholdCapProvenanceSchema } from "../utils/goal-threshold-cap.js";
 
 /**
  * HOW A GRAPH DATUM WAS OBTAINED — the evidence kind stamped on a node or edge.
@@ -347,10 +348,42 @@ export const Node = z.object({
   /** Normalisation denominator (e.g., 1000 for "800/1000 = 0.8") */
   goal_threshold_cap: z.number().nullable().optional(),
   /**
+   * WHICH RULE PRODUCED `goal_threshold_cap` — see
+   * `GOAL_THRESHOLD_CAP_PROVENANCE` (utils/goal-threshold-cap.ts) for the full
+   * account, including the arithmetic that makes this load-bearing.
+   *
+   * The short version: on `target_derived_headroom` the denominator is
+   * `raw * 1.25`, so `goal_threshold = raw / cap` is the CONSTANT 0.8 for every
+   * target — the same number for a GBP 20,000 goal and a GBP 20,000,000 one.
+   * The other two rules take their denominator from outside the target and do
+   * carry the user's goal. A consumer cannot fail closed on a denominator it
+   * cannot see, which is why this travels beside the cap rather than being
+   * re-derived (a second derivation would disagree with the cap the graph was
+   * actually scored against).
+   *
+   * ⚠ MUST DESCRIBE THE CAP CURRENTLY ON THE NODE. Any site that rewrites
+   * `goal_threshold_cap` rewrites this in the same statement, and any site that
+   * clears the cap clears this too — a provenance describing a number that has
+   * since moved is worse than none, because it reads as attested.
+   *
+   * ABSENCE MEANS UNATTESTED. Never defaulted: a defaulted provenance is a
+   * manufactured attestation, the same fabrication class `goal_threshold_frame`
+   * refuses. CEE mints it; no model authors it (it is in
+   * `CEE_MINTED_GOAL_FIELDS`).
+   */
+  goal_threshold_cap_provenance: GoalThresholdCapProvenanceSchema.optional(),
+  /**
    * The FRAME `goal_threshold` is stated in (ROADMAP 2.258, schemas 0.31.0).
    * Always `'level'` from CEE — see `CEE_GOAL_THRESHOLD_FRAME`. Typed here so
    * the draft-path mint site is contextually typed rather than relying on
    * `.passthrough()` to smuggle an unknown key across.
+   *
+   * ⚠ A DIFFERENT QUESTION FROM `goal_threshold_cap_provenance` ABOVE, and the
+   * two must not be collapsed. The frame answers "is this number a LEVEL or a
+   * CHANGE FROM BASELINE?"; the provenance answers "where did the DENOMINATOR
+   * come from?". A threshold can be an honest `level` and still be normalised
+   * against a denominator nobody supplied — which is exactly the live case.
+   * Two questions, two fields (CLAUDE.md trap 21).
    */
   goal_threshold_frame: GoalThresholdFrame.optional(),
   /**
@@ -405,10 +438,54 @@ export const Node = z.object({
 
 // Structured provenance for production trust and traceability
 // .passthrough() — preserve additive fields from LLM/enrichment provenance
+//
+// ⚠ THIS IS THE MINT-SITE CONTRACT, NOT THE INGRESS ONE, AND THE DISTINCTION IS
+// LOAD-BEARING (see `SourceOnlyProvenance` below). It answers "is this
+// provenance object CEE is AUTHORING a well-formed attribution?" — which is why
+// `quote` is REQUIRED and bounded, and why `shared-schemas.ts`'s `LLMEdge`
+// (the producer contract for model output) takes THIS schema and not the
+// ingress union. `cee/draft/records/projector.ts:130-210` records the
+// attribution rule that requirement enforces: an inferred edge carries an
+// honestly AI-attributed statement, never fabricated user text.
 export const StructuredProvenance = z.object({
   source: z.string().min(1), // File name, metric name, or "hypothesis"
   quote: z.string().max(100), // Short citation or statement
   location: z.string().optional(), // "page 3", "row 42", "line 15", etc.
+}).passthrough();
+
+/**
+ * ⭐ PROVENANCE THAT NAMES A SOURCE AND MAKES NO STATEMENT — the shape CEE'S OWN
+ * EGRESS EMITS. Ingress only; never a mint-site contract.
+ *
+ * DERIVED AT THE BYTES, NOT CHOSEN. `EdgeProvenanceV3` (`schemas/cee-v3.ts:335-341`)
+ * — the published V3 edge-provenance wire shape — is
+ * `{ source: <4-member enum>, reasoning?: string }` and **declares no `quote` at
+ * all**; `extractProvenanceForV3` (`cee/transforms/schema-v3.ts:930-938`) maps the
+ * internal `quote` onto `reasoning` and drops the key. So EVERY graph CEE puts on
+ * the V3 wire carries edge provenance that `StructuredProvenance` cannot parse,
+ * and the union below could not read CEE's own output back.
+ *
+ * MEASURED CONSEQUENCE (staging `88b4db2c`, 2026-09-08): the five bundled UI
+ * starters are verbatim captures of CEE's own `POST /assist/v1/draft-graph`
+ * (the UI manifest names the URL, CEE build `cb54320` and a sha256 per capture).
+ * `POST /assist/v1/scenarios/:id/graph/register` accepted and byte-exactly
+ * persisted one; `POST /assist/v1/graph-readiness` then refused THE SAME BYTES
+ * with HTTP 400 and one "Invalid input" per edge — 163 of 163 edges across all
+ * five starters carry `{"source":"cee_hypothesis"}` and nothing else. A graph CEE
+ * has itself persisted must be readable back by its own readiness route.
+ *
+ * ⚠ `quote: z.undefined()` IS NOT DECORATION — IT IS WHAT STOPS THIS BRANCH
+ * BECOMING A BYPASS. Zod unions return the FIRST member that parses. Without the
+ * pin, an object whose `quote` merely *failed* `StructuredProvenance` (>100
+ * characters, or not a string) would fall through to here and be accepted, so
+ * adding a source-only alternative would silently repeal `quote`'s bound for
+ * every caller. Pinning the key ABSENT keeps the two branches disjoint: an object
+ * either carries a statement, and is held to the statement's rules, or carries
+ * none and says so.
+ */
+export const SourceOnlyProvenance = z.object({
+  source: z.string().min(1),
+  quote: z.undefined(),
 }).passthrough();
 
 /**
@@ -469,8 +546,25 @@ const EdgeInput = z.object({
   weight: z.number().optional(),
   /** @deprecated Use belief_exists instead. */
   belief: z.number().min(0).max(1).optional(),
-  // Support both structured and legacy string provenance for migration
-  provenance: z.union([StructuredProvenance, z.string().min(1)]).optional(),
+  /**
+   * INGRESS provenance — three named alternatives, and the ORDER IS THE DESIGN.
+   *
+   *   1. `StructuredProvenance` — names a source AND carries a statement. Tried
+   *      FIRST so a `quote`-bearing object is held to `max(100)`.
+   *   2. `SourceOnlyProvenance` — names a source and carries NO statement, with
+   *      `quote` pinned absent. This is CEE's own V3 egress shape
+   *      (`EdgeProvenanceV3` = `{ source, reasoning? }`), so it is what a client
+   *      re-posting a CEE-drafted or CEE-persisted graph actually sends.
+   *   3. `z.string().min(1)` — the legacy flat-string form, kept for migration.
+   *
+   * Still refused, deliberately: an object with no `source` (provenance that
+   * names nothing), an empty `source`, an empty string, and any `quote` that
+   * breaks rule 1's bound — see `SourceOnlyProvenance`'s note on why (2) cannot
+   * absorb those.
+   */
+  provenance: z
+    .union([StructuredProvenance, SourceOnlyProvenance, z.string().min(1)])
+    .optional(),
   provenance_source: GraphEvidenceSource.optional(),
   // Effect direction: LLM outputs directly, fallback to heuristic inference if missing
   effect_direction: EffectDirection.optional(),
@@ -526,6 +620,7 @@ export type NodeDataT = z.infer<typeof NodeData>;
 export type FactorObservedStateT = z.infer<typeof FactorObservedState>;
 export type NodeObservedStateT = z.infer<typeof NodeObservedState>;
 export type StructuredProvenanceT = z.infer<typeof StructuredProvenance>;
+export type SourceOnlyProvenanceT = z.infer<typeof SourceOnlyProvenance>;
 export type EffectDirectionT = z.infer<typeof EffectDirection>;
 export type EdgeOriginT = z.infer<typeof EdgeOrigin>;
 export type FactorTypeT = z.infer<typeof FactorType>;

@@ -24,6 +24,7 @@ import { describe, expect, it } from 'vitest';
 
 import { enrichGraphWithFactorsAsync } from '../enricher.js';
 import type { GraphT } from '../../../schemas/graph.js';
+import { pickGoalThresholdTrio } from '../../../utils/goal-threshold-trio.js';
 import { createAddConstraintHandler } from '../../../orchestrator-v5/tools/handlers/add-constraint.js';
 import { buildD1Fixture } from '../../../orchestrator-v5/tools/handlers/d1-shared/__tests__/fixtures.js';
 import type { HandlerInvocation } from '../../../orchestrator-v5/tools/registry.js';
@@ -159,5 +160,122 @@ describe('cap-doctrine unification (ROADMAP 1.18): draft vs chat goal_threshold 
 
     expect(draftGoal?.goal_threshold_cap).toBe(chatGoal?.goal_threshold_cap);
     expect(draftGoal?.goal_threshold).toBeCloseTo(chatGoal?.goal_threshold as number, 10);
+  });
+});
+
+/**
+ * THE PARTIAL QUAD — an upstream mint that resolved no cap is still deferred to.
+ *
+ * Extracted from CEE #1328 (author: `olumi-core-model-systems` lane), whose
+ * round-4 work found and evidenced this defect. Its witnessed capture is the
+ * evidence below and is cited as ITS finding, not re-presented as new. The rest
+ * of #1328 — the ~1,400-line label-route mint — is BLOCKED on a separate,
+ * unrelated review finding and remains its author's; only this guard is here,
+ * because the defect it closes is live on `staging` today.
+ *
+ * THE DEFECT, at `d2e45e8b`:
+ *   `projector.ts:1335` writes `goal_threshold_raw` UNCONDITIONALLY; it writes
+ *   `goal_threshold`/`_cap`/`_frame` only `if (cap !== null)`. The resolver ends
+ *   `if (raw > 0) return raw * 1.25; return null`, so a STATED TARGET OF ZERO
+ *   resolves null and leaves raw written with no threshold — a PARTIAL QUAD.
+ *   `applyGoalTargetRedirect` guarded on `goal_threshold` alone, missed it, and
+ *   overwrote the user's stated zero with the extracted factor's value.
+ *
+ * #1328's witnessed log: goal label `"Cut Churn From 4% To Zero"` shipped
+ * `goal_threshold_raw: 4`. The user asked for ZERO churn and the field recorded
+ * the CURRENT LEVEL they were trying to move away from — not a mislabelled
+ * value, but a contradiction of stated intent using the number they rejected.
+ *
+ * ⚠ Every case asserts its own precondition, so none can pass by the fixture
+ * quietly failing to present a partial quad in the first place.
+ */
+describe('the partial quad: an upstream mint that resolved no cap is still deferred to', () => {
+  function goalCarrying(threshold: Record<string, unknown>): GraphT {
+    return {
+      version: '1',
+      default_seed: 17,
+      nodes: [
+        { id: 'g1', kind: 'goal', label: 'Cut Monthly Churn From 4% To Zero', ...threshold },
+        { id: 'd1', kind: 'decision', label: 'Retention decision' },
+      ],
+      edges: [],
+      meta: { roots: [], leaves: [], suggested_positions: {}, source: 'test' },
+    } as unknown as GraphT;
+  }
+
+  const goalOf = (g: GraphT) => g.nodes.find((n) => n.kind === 'goal');
+
+  it('⛔ THE HARM — a stated ZERO is not overwritten with the CURRENT level', async () => {
+    const input = goalCarrying({ goal_threshold_raw: 0, goal_threshold_unit: '%' });
+
+    // PRECONDITION, in-test: this really is a PARTIAL quad — raw present,
+    // threshold absent. Without it the case could pass on a full quad, which
+    // the pre-existing `goal_threshold` guard already handles.
+    expect(goalOf(input)?.goal_threshold_raw).toBe(0);
+    expect(goalOf(input)?.goal_threshold).toBeUndefined();
+
+    const result = await enrichGraphWithFactorsAsync(input, 'Our target is 4%.');
+    const goal = goalOf(result.graph);
+
+    // The user's stated zero stands. At pristine this reads 4 — the current level.
+    expect(goal?.goal_threshold_raw).toBe(0);
+    // And no derived value is invented on top of it.
+    expect(goal?.goal_threshold).toBeUndefined();
+  });
+
+  it('⭐ the deferred zero SURVIVES — explicit and recoverable, not discarded', async () => {
+    // Deferring must not become dropping. `pickGoalThresholdTrio` is the
+    // CONSUMER'S own anchor test for whether a raw value rides at all, and it
+    // gates on `typeof === number && isFinite` — which 0 passes and null does
+    // not. Asserted against that function rather than re-stating its rule.
+    const result = await enrichGraphWithFactorsAsync(
+      goalCarrying({ goal_threshold_raw: 0, goal_threshold_unit: '%' }),
+      'Our target is 4%.',
+    );
+    const goal = goalOf(result.graph);
+
+    expect(pickGoalThresholdTrio(goal as never)).toEqual({
+      goal_threshold_raw: 0,
+      goal_threshold_unit: '%',
+    });
+  });
+
+  it('⭐ OPPOSITE CONTROL — with no upstream mint, a target still binds exactly as before', async () => {
+    const input = goalCarrying({});
+    expect(goalOf(input)?.goal_threshold_raw).toBeUndefined();
+
+    const result = await enrichGraphWithFactorsAsync(input, 'Our target is 800.');
+    const goal = goalOf(result.graph);
+
+    // A deferral guard that swallowed valid targets would trade a lie for a
+    // gap. This is the direction that would not show up in the harm case.
+    expect(goal?.goal_threshold_raw).toBe(800);
+    expect(goal?.goal_threshold).toBeDefined();
+  });
+
+  it('⭐ OPPOSITE CONTROL — a FULL upstream quad still defers (pre-existing, unchanged)', async () => {
+    const input = goalCarrying({
+      goal_threshold: 0.5,
+      goal_threshold_raw: 500,
+      goal_threshold_cap: 1000,
+    });
+    expect(goalOf(input)?.goal_threshold).toBe(0.5);
+
+    const result = await enrichGraphWithFactorsAsync(input, 'Our target is 800.');
+    expect(goalOf(result.graph)?.goal_threshold_raw).toBe(500);
+  });
+
+  it('⭐ THE NULL TWIN — a null raw does NOT block the mint', async () => {
+    // `goal_threshold_raw` is `z.number().nullable().optional()`
+    // (`schemas/graph.ts:344`), and `null !== undefined` is TRUE. A guard
+    // written as `!== undefined` would DEFER TO A NULL and suppress a
+    // legitimate mint — trading the lie above for a gap. This case is what
+    // makes the consumer-matched `typeof`/`isFinite` predicate load-bearing
+    // rather than a stylistic choice, and it fails against `!== undefined`.
+    const input = goalCarrying({ goal_threshold_raw: null });
+    expect(goalOf(input)?.goal_threshold_raw).toBeNull();
+
+    const result = await enrichGraphWithFactorsAsync(input, 'Our target is 800.');
+    expect(goalOf(result.graph)?.goal_threshold_raw).toBe(800);
   });
 });

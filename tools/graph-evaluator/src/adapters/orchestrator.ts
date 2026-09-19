@@ -187,6 +187,9 @@ export class OrchestratorAdapter
         banned_terms: result.banned_terms,
         scenario_specific: result.scenario_specific,
       },
+      // Non-scoring diagnostic, carried OUTSIDE `dimensions` so it cannot be
+      // read as a scored dimension or land in the structural-scores table.
+      scale_conversions: result.scale_conversions,
     };
   }
 }

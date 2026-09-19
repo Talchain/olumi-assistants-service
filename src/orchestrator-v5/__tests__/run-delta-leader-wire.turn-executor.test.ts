@@ -19,7 +19,7 @@
  * fail-closed (`=== true`) in the assembler, so dropping the argument does not
  * throw and does not remove the delta: it SILENTLY STRIPS THE LEADER IDS from a
  * comparison the model still receives, and the model is told what moved without
- * being told who now leads.
+ * being told who scores highest now.
  *
  * ⭐ SCOPE OF THE ABSENCE CLAIM, STATED EXACTLY. The measurement above covered
  * the seven seam suites named in that lane's report, not the whole repository.

@@ -35,9 +35,11 @@ import { createHash } from 'node:crypto';
 import {
   evaluateAnalysisElection,
   ANALYSIS_ELECTION_DEMOTION_TEXT,
+  ANALYSIS_ELECTION_REFUSAL_ACK_TEXT,
   GATED_ANALYSIS_HANDLER_ID,
 } from '../analysis-election-gate.js';
 import {
+  carriesExplicitAnalysisRefusal,
   looksLikeExplicitAnalysisRequest,
   looksLikeImperativeRerun,
 } from '../analytical-intent.js';
@@ -696,5 +698,124 @@ describe('relationship to looksLikeImperativeRerun', () => {
       expect(looksLikeImperativeRerun(m), `${m} must be a re-run instruction`).toBe(true);
       expect(looksLikeExplicitAnalysisRequest(m), `${m} must also be admitted`).toBe(true);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 6. THE DEMOTION PAYOFF — ordinary English gets a QUESTION, a refusal does not
+// ---------------------------------------------------------------------------
+
+/**
+ * ⭐ THE ONE TEST THAT PROVES THE BLOCKER IS GONE, and it is a RED/GREEN PAIR
+ * over the SAME outcome shape, not a single assertion.
+ *
+ * THE BLOCKER: ordinary English does not run the analysis. The admission
+ * predicate is a four-verb regex, so a user who writes "ok lets see the
+ * numbers" was answered with a sentence teaching them our vocabulary and no
+ * way to proceed except retyping. Measured at the serving tip 07da2c0b:
+ * 13/13 ordinary phrasings demoted, 5/5 literal commands admitted — the
+ * predicate discriminates, the PAYOFF was wrong.
+ *
+ * ⚠ WHAT THIS PINS, AND WHAT IT DOES NOT. It pins the payoff SPLIT, bound by
+ * IDENTITY: each message is asserted by its exact string against its exact
+ * `offer` field (trap 19 — never a value predicate another message could
+ * satisfy). It does NOT pin the admission rule, which this change leaves
+ * byte-identical, and it is NOT a census of ordinary English — the arrays
+ * below are sampled floors on an open class, exactly as the KNOWN-DROPPED
+ * corpora above are.
+ *
+ * The GREEN arm alone would pass on a build that offered a run to EVERYONE,
+ * including a user who just said "don't". The RED arm is what makes the
+ * assertion about the split rather than about the offer, and it is the arm a
+ * naive "make demotion offer" fix breaks.
+ */
+describe('the demotion payoff — ask on a phrasing miss, never on a refusal', () => {
+  /**
+   * PROVENANCE: the ordinary-English corpus measured against the serving-tip
+   * predicate on 15 Sep 2026. Every member demotes; none contains a negator.
+   */
+  const ORDINARY_ENGLISH_REQUESTS: readonly string[] = [
+    'ok lets see the numbers',
+    'ok go ahead',
+    "let's see what it says",
+    'show me the results',
+    'so which one wins?',
+    'I think we are ready',
+    'go on then',
+    'crunch it',
+    'work it out',
+  ];
+
+  /**
+   * PROVENANCE: the negation-veto corpus already recorded verbatim on
+   * `RERUN_NEGATION_VETO_PATTERNS` as the sentences that, before that veto
+   * existed, each dispatched a real `run_analysis`. These are the messages an
+   * offer would be arguing with.
+   */
+  const EXPLICIT_REFUSALS: readonly string[] = [
+    'Don’t run the analysis.',
+    "Don't re-run it.",
+    'Do not re-run the analysis.',
+    'Never re-run this automatically.',
+    'I do not want to re-run anything.',
+    'No need to re-run.',
+  ];
+
+  it.each(ORDINARY_ENGLISH_REQUESTS)(
+    'GREEN — %j is demoted WITH an offered run_analysis, and asks a question',
+    (message) => {
+      const outcome = evaluateAnalysisElection({
+        electedHandlerId: GATED_ANALYSIS_HANDLER_ID,
+        message,
+      });
+      // Bound by identity: this exact message, this exact outcome shape.
+      expect(outcome.kind).toBe('demoted');
+      expect(outcome.kind === 'demoted' && outcome.offer).toEqual({ kind: 'run_analysis' });
+      // The user-visible half. A demotion that offers in the type but still
+      // instructs in the prose has not removed the defect.
+      expect(outcome.kind === 'demoted' && outcome.assistant_text).toBe(
+        ANALYSIS_ELECTION_DEMOTION_TEXT,
+      );
+      expect(ANALYSIS_ELECTION_DEMOTION_TEXT).toContain('?');
+    },
+  );
+
+  it.each(EXPLICIT_REFUSALS)(
+    'RED — %j is demoted with NO offer (the product does not argue with a refusal)',
+    (message) => {
+      const outcome = evaluateAnalysisElection({
+        electedHandlerId: GATED_ANALYSIS_HANDLER_ID,
+        message,
+      });
+      expect(outcome.kind).toBe('demoted');
+      expect(outcome.kind === 'demoted' && outcome.offer).toBeUndefined();
+      expect(outcome.kind === 'demoted' && outcome.assistant_text).toBe(
+        ANALYSIS_ELECTION_REFUSAL_ACK_TEXT,
+      );
+      // The refusal acknowledgement must not end up asking the same question.
+      expect(ANALYSIS_ELECTION_REFUSAL_ACK_TEXT).not.toContain('?');
+    },
+  );
+
+  it('an ADMITTED election still carries no offer (monotonicity is unchanged)', () => {
+    // The offer arm exists only on the suppressed path. If an admitted
+    // election ever carried one, the gate would be arming consent for a run
+    // it is simultaneously dispatching.
+    const outcome = evaluateAnalysisElection({
+      electedHandlerId: GATED_ANALYSIS_HANDLER_ID,
+      message: 'Run the analysis now.',
+    });
+    expect(outcome.kind).toBe('admitted');
+    expect('offer' in outcome).toBe(false);
+  });
+
+  it('the refusal split is driven by the SHARED negation veto, not a second list', () => {
+    // Trap 12 — the two readers must not be able to disagree about what a
+    // refusal is. Positive control (a refusal) and contrast control (an
+    // ordinary request) in the same run, so a dead predicate cannot pass this.
+    expect(carriesExplicitAnalysisRefusal("Don't run the analysis.")).toBe(true);
+    expect(carriesExplicitAnalysisRefusal('ok lets see the numbers')).toBe(false);
+    // And the admission predicate agrees with it: a refusal is never admitted.
+    expect(looksLikeExplicitAnalysisRequest("Don't run the analysis.")).toBe(false);
   });
 });

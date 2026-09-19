@@ -35,10 +35,16 @@ describe("normaliseConstraintUnits", () => {
     expect(result).toHaveLength(1);
     expect(result[0].unit).toBe("fraction");
     expect(result[0].value).toBe(0.04);
-    expect((result[0] as any).provenance_unit_normalised).toEqual({
-      rule: "percent_to_fraction",
-      original_value: 0.04,
-      original_unit: "%",
+    // ⛔ The reader-stated pair is NOT claimed here. This rule fires only when
+    // the value is ALREADY a fraction, so it cannot know the figure the reader
+    // typed; `original_value`/`original_unit` mean that figure and its unit to
+    // every declared consumer, and stamping them made a "4%" limit render as
+    // "≤ 0.04%". The audit records this rule's own INPUT instead.
+    expect((result[0] as any).provenance_unit_normalised).toBeUndefined();
+    expect((result[0] as any).provenance_unit_relabelled).toEqual({
+      rule: "percent_label_to_fraction_label",
+      pre_normalisation_value: 0.04,
+      pre_normalisation_unit: "%",
     });
   });
 
@@ -50,19 +56,21 @@ describe("normaliseConstraintUnits", () => {
     expect(result[0].unit).toBe("£");
     expect(result[0].value).toBe(50000);
     expect((result[0] as any).provenance_unit_normalised).toBeUndefined();
+    expect((result[0] as any).provenance_unit_relabelled).toBeUndefined();
   });
 
-  it("value 0.5 stays 0.5 (not re-converted to 0.005) and provenance preserves originals", () => {
+  it("value 0.5 stays 0.5 (not re-converted to 0.005) and the audit records this rule's input", () => {
     const input = [makeConstraint({ value: 0.5, unit: "%" })];
     const result = normaliseConstraintUnits(input);
 
     expect(result).toHaveLength(1);
     expect(result[0].value).toBe(0.5);
     expect(result[0].unit).toBe("fraction");
-    expect((result[0] as any).provenance_unit_normalised).toEqual({
-      rule: "percent_to_fraction",
-      original_value: 0.5,
-      original_unit: "%",
+    expect((result[0] as any).provenance_unit_normalised).toBeUndefined();
+    expect((result[0] as any).provenance_unit_relabelled).toEqual({
+      rule: "percent_label_to_fraction_label",
+      pre_normalisation_value: 0.5,
+      pre_normalisation_unit: "%",
     });
   });
 
@@ -106,17 +114,18 @@ describe("normaliseConstraintUnits", () => {
     expect(normaliseConstraintUnits([])).toEqual([]);
   });
 
-  it("provenance_unit_normalised passes through to toGoalConstraints output", async () => {
+  it("the relabel audit passes through to toGoalConstraints output", async () => {
     const { toGoalConstraints } = await import("../../src/cee/compound-goal/index.js");
     const input = [makeConstraint({ value: 0.04, unit: "%" })];
     const normalised = normaliseConstraintUnits(input);
     const goalConstraints = toGoalConstraints(normalised);
 
     expect(goalConstraints).toHaveLength(1);
-    expect((goalConstraints[0] as any).provenance_unit_normalised).toEqual({
-      rule: "percent_to_fraction",
-      original_value: 0.04,
-      original_unit: "%",
+    expect((goalConstraints[0] as any).provenance_unit_normalised).toBeUndefined();
+    expect((goalConstraints[0] as any).provenance_unit_relabelled).toEqual({
+      rule: "percent_label_to_fraction_label",
+      pre_normalisation_value: 0.04,
+      pre_normalisation_unit: "%",
     });
     expect(goalConstraints[0].unit).toBe("fraction");
   });

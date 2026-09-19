@@ -52,6 +52,8 @@ import { isStructureOriginQuestion } from '../../../cee/context-integrity/struct
 import { asksForOwnJudgement } from '../judgement-request.js';
 import { hasMutationWarrantSignal, isEditRequestShape } from '../mutation-warrant.js';
 import { isStateQueryQuestionShape, tryStateQueryGuard } from '../state-query-guard.js';
+import { tryPostAnalysisAdviceGate } from '../post-analysis-advice-gate.js';
+import { tryStaleRerunGuard } from '../stale-rerun-guard.js';
 
 /** Lifted verbatim from `state-query-guard.structure-origin.test.ts`. */
 const WITNESS_GRAPH = {
@@ -99,6 +101,356 @@ function ctx(
 }
 
 const briefAudit = { briefText: BRIEF_TEXT, graph: WITNESS_GRAPH };
+
+describe('coaching requests are not answered with only a provenance stamp', () => {
+  it.each([
+    'Why is Enterprise ACV target in the model, and what would you recommend?',
+    'Why is Enterprise ACV target in the model? Please suggest a sensible value.',
+  ])('leaves the whole mixed request for reasoning: %j', (message) => {
+    for (const recent of [[], [ADD_CONSTRAINT_50K]]) {
+      expect(tryStateQueryGuard({ message, contextPack: ctx(recent), briefAudit }).matched).toBe(false);
+    }
+    // Declining an incomplete answer must not create permission to edit.
+    expect(isStateQueryQuestionShape(message)).toBe(true);
+    expect(hasMutationWarrantSignal(message)).toBe(false);
+  });
+
+  it('still answers a pure origin question containing quoted advice', () => {
+    const graph = {
+      nodes: [{ id: 'quoted-advice', kind: 'factor', label: 'Please recommend a sensible value', provenance: 'ai_inferred' }],
+      edges: [],
+    };
+    const outcome = tryStateQueryGuard({
+      message: 'Why is "Please recommend a sensible value" in the model?',
+      contextPack: ctx([]),
+      briefAudit: { briefText: null, graph },
+    });
+    expect(outcome.matched && outcome.dispatch).toBe('structure_origin');
+  });
+});
+
+describe('independent review — control complements retain the system subject', () => {
+  it.each([
+    // Outside review5674373071: an embedded handling fact is not the request.
+    'Can you tell me what to use from the figures you kept in my brief?',
+    'Could you explain whether to use the assumptions you inferred from my brief?',
+    'Would you show me which figures Paul should rely on from those you used in my brief?',
+    'Can you list which assumptions the team should keep from what you included from my brief?',
+    'As you know, tell me what to use from the figures you kept in my brief.',
+    'Before you answer, explain whether to use the assumptions you inferred from my brief.',
+  ])('does not turn the requested human judgement into a report on a relative clause: %j', (message) => {
+    for (const recent of [[], [ADD_CONSTRAINT_50K]]) {
+      expect(tryStateQueryGuard({ message, contextPack: ctx(recent), briefAudit }).matched).toBe(false);
+    }
+    expect(hasMutationWarrantSignal(message)).toBe(false);
+  });
+
+  it.each([
+    // Outside review5674195175: requesting a report is not recalling one.
+    'Can you tell me which of my figures you used?',
+    'Could you explain what you left out of my brief?',
+    'Would you show me which assumptions you kept from my brief?',
+    'Can you list what you omitted from my brief?',
+    'Could you tell me what you inferred from my brief?',
+    'As you know, tell me which of my figures you used.',
+    'Given what you said, show me what you left out of my brief.',
+    'Before you answer, list which assumptions you kept from my brief.',
+    'Can you tell me which estimates from my brief you used?',
+    'Could you explain whether you used my figures?',
+    'Would you show me which of my constraints you kept?',
+  ])('recognises the current request to report a handling fact: %j', (message) => {
+    for (const recent of [[], [ADD_CONSTRAINT_50K]]) {
+      const outcome = tryStateQueryGuard({ message, contextPack: ctx(recent), briefAudit });
+      expect(outcome.matched && outcome.dispatch).toBe('brief_audit');
+    }
+    expect(hasMutationWarrantSignal(message)).toBe(false);
+  });
+
+  it.each([
+    'Did you tell me which of my figures you used?',
+    'Can you remember which of my figures you used?',
+    'Could you explain what you planned to use from my brief?',
+    'Can you tell me what I should keep from the figures you used in my brief?',
+    'As you know, tell me what I should infer from my brief.',
+    'Can you tell me which figures Paul favours from those you used in my brief?',
+    'Could you explain what the team recommends from the assumptions you kept in my brief?',
+    // An unrecognised nominal object is not proof of a current handling
+    // question. This bounded classifier may leave a real audit to reasoning;
+    // it must not invent a subject or a deterministic answer to claim it.
+    'Can you tell me which contractual milestones you used from my brief?',
+  ])('requesting a report does not make its content actual system handling: %j', (message) => {
+    expect(tryStateQueryGuard({ message, contextPack: ctx([]), briefAudit }).matched).toBe(false);
+    expect(hasMutationWarrantSignal(message)).toBe(false);
+  });
+
+  it.each([
+    // Outside review5674116183: the question subject follows the preamble.
+    'As you know, which of my figures did you decide to use?',
+    'Given what you said, which figures from my brief did you start using?',
+    'Before you answer, what did you leave out of my brief?',
+    'You mentioned the model earlier; which of my assumptions did you choose to keep?',
+    'What you told me was useful — which figures did you use from my brief?',
+    'You gave me a tally before: what parts of my brief did you end up omitting?',
+  ])('binds the current interrogative rather than a preamble subject: %j', (message) => {
+    for (const recent of [[], [ADD_CONSTRAINT_50K]]) {
+      const outcome = tryStateQueryGuard({ message, contextPack: ctx(recent), briefAudit });
+      expect(outcome.matched && outcome.dispatch).toBe('brief_audit');
+    }
+    expect(hasMutationWarrantSignal(message)).toBe(false);
+  });
+
+  it.each([
+    'As you know, did you mention that you started using my figures?',
+    'You mentioned a draft earlier; did you claim to have used my figures?',
+    'Before you answer, do you think we should use my figures?',
+  ])('a preamble does not make an outer report or advice request factual handling: %j', (message) => {
+    expect(tryStateQueryGuard({ message, contextPack: ctx([]), briefAudit }).matched).toBe(false);
+    expect(hasMutationWarrantSignal(message)).toBe(false);
+  });
+
+  it.each([
+    // Outside corpus from exact-head review of e5ab279e, comment 5673875752.
+    'Which of my figures did you decide to use?',
+    'Which of my assumptions did you choose to keep?',
+    'What parts of my brief did you end up omitting?',
+    'What did you choose to infer from my brief?',
+    'Which parts of my brief did you opt to incorporate?',
+    'Which figures from my brief did you go on to include?',
+    // Self-review after the outside corpus: a bare gerund complement carries
+    // the same subject too; do not fix only the six infinitive/particle forms.
+    'Which figures from my brief did you start using?',
+    'Which figures from my brief have you been using?',
+    'Which figures from my brief did you continue using?',
+  ])('keeps the factual audit in both edit-history states: %j', (message) => {
+    for (const recent of [[], [ADD_CONSTRAINT_50K]]) {
+      const outcome = tryStateQueryGuard({ message, contextPack: ctx(recent), briefAudit });
+      expect(outcome.matched && outcome.dispatch).toBe('brief_audit');
+    }
+    expect(isStateQueryQuestionShape(message)).toBe(true);
+    expect(hasMutationWarrantSignal(message)).toBe(false);
+    expect(isEditRequestShape(message)).toBe(false);
+  });
+
+  it.each([
+    'Do you believe we should choose to use my figures?',
+    'Do you reckon I should decide to keep my estimates?',
+    'Do you believe we should go on to infer a target from my brief?',
+    'Do you believe we should start using my figures?',
+    'What did you choose to infer from my brief? What should we use instead?',
+  ])('does not transfer the human\'s prospective action to the system: %j', (message) => {
+    for (const recent of [[], [ADD_CONSTRAINT_50K]]) {
+      expect(tryStateQueryGuard({ message, contextPack: ctx(recent), briefAudit }).matched).toBe(false);
+    }
+    expect(hasMutationWarrantSignal(message)).toBe(false);
+    expect(isEditRequestShape(message)).toBe(false);
+  });
+});
+
+describe('outside-corpus blockers — disposition ownership and reported speech', () => {
+  it.each([
+    // Outside follow-up5674055262: an embedded handling proposition is not
+    // permission to replace the outer question about saying/thinking it.
+    'Did you say that you decided to use my figures?',
+    'Did you mention that you started using my figures?',
+    'Do you think you decided to keep my assumptions?',
+    'Did you deny that you had decided to use my figures?',
+    'Did you agree that you used my figures?',
+  ])('does not answer the inner proposition instead of the current question: %j', (message) => {
+    for (const recent of [[], [ADD_CONSTRAINT_50K]]) {
+      expect(tryStateQueryGuard({ message, contextPack: ctx(recent), briefAudit }).matched).toBe(false);
+    }
+    expect(hasMutationWarrantSignal(message)).toBe(false);
+  });
+
+  it.each([
+    // Current assent to the handling fact remains the existing contract;
+    // past agreement above asks about a different event.
+    'Do you agree you left out my ARR figure?',
+    'Do you agree that you left out my ARR figure?',
+  ])('retains an explicit current request to check the handling fact: %j', (message) => {
+    const outcome = tryStateQueryGuard({ message, contextPack: ctx([]), briefAudit });
+    expect(outcome.matched && outcome.dispatch).toBe('brief_audit');
+  });
+
+  it.each([
+    // Independent delta review 5673979510: subject continuity alone does not
+    // prove that a promise, intention or claim was actually carried out.
+    'Did you promise to use my figures?',
+    'Did you plan to keep my assumptions?',
+    'Did you hope to include the targets from my brief?',
+    'Did you claim to have used my figures?',
+    'Did you pretend to use my estimates?',
+    'Did you bring up using my figures?',
+    'Did you refuse to use my figures?',
+    // Same semantic distinction, not seven phrase exclusions.
+    'What parts of my brief did you consider omitting?',
+    'Did you try to use my figures?',
+    'Did you expect to use my figures?',
+    'Did you ask us to use my figures?',
+  ])('leaves non-completed or other-person handling to reasoning: %j', (message) => {
+    for (const recent of [[], [ADD_CONSTRAINT_50K]]) {
+      expect(tryStateQueryGuard({ message, contextPack: ctx(recent), briefAudit }).matched).toBe(false);
+    }
+    expect(hasMutationWarrantSignal(message)).toBe(false);
+  });
+
+  it.each([
+    'Do you believe we should use my figures?',
+    'Do you reckon I should use my estimates?',
+    'Do you believe we should infer a target from my brief?',
+  ])('does not mistake the user\'s prospective action for our handling: %j', (message) => {
+    expect(tryStateQueryGuard({ message, contextPack: ctx([]), briefAudit }).matched).toBe(false);
+    expect(hasMutationWarrantSignal(message)).toBe(false);
+  });
+
+  it.each([
+    'What did you leave out of my brief when I wrote, "Do you think we should protect a 30% margin?"',
+    'What did you leave out of my brief when I wrote, “Do you think we should protect a 30% margin?”',
+    "What did you leave out of my brief when I wrote, 'Do you think we should protect a 30% margin?'",
+  ])('keeps a real audit when advice is only quoted: %j', (message) => {
+    const result = tryStateQueryGuard({ message, contextPack: ctx([]), briefAudit });
+    expect(result.matched && result.dispatch).toBe('brief_audit');
+    expect(hasMutationWarrantSignal(message)).toBe(false);
+  });
+
+  it('does not let a quoted audit licence an unquoted recommendation request', () => {
+    const message = 'In my brief I wrote "which of my figures did you use?"; what should I use now?';
+    expect(tryStateQueryGuard({ message, contextPack: ctx([]), briefAudit }).matched).toBe(false);
+  });
+
+  it('still declines advice appended after a quoted audit subject', () => {
+    const message = 'What did you leave out of my brief when I wrote "should we protect 30%"? What should we do next?';
+    expect(tryStateQueryGuard({ message, contextPack: ctx([]), briefAudit }).matched).toBe(false);
+  });
+
+  it.each([
+    '"Which of my figures did you use?"',
+    '“Which of my figures did you use”?',
+    'Which of my figures have you already used?',
+    'What did you leave out of my brief when I wrote "we shouldn\'t spend more"?',
+  ])('preserves a whole quoted request and ordinary audit modifiers: %j', (message) => {
+    const result = tryStateQueryGuard({ message, contextPack: ctx([]), briefAudit });
+    expect(result.matched && result.dispatch).toBe('brief_audit');
+  });
+});
+
+describe('independent review — a modal naming the audited item is not advice', () => {
+  const auditQuestions = [
+    // CCT's independent contrast corpus, review of 32cbaf45.
+    'Which of my figures did you use for the margin we should protect?',
+    'What did you leave out that I should know about?',
+    'Which of my figures do you use?',
+    'What did you leave out of my brief?',
+    // Same distinction with the other modal admitted by the former rule.
+    'Which of my figures did you use for the margin we could protect?',
+    'What did you leave out that I could know about?',
+  ];
+
+  it.each(auditQuestions)('keeps the grounded audit and mutation protection for %j', (message) => {
+    const outcome = tryStateQueryGuard({ message, contextPack: ctx([]), briefAudit });
+    expect(outcome.matched && outcome.dispatch).toBe('brief_audit');
+    expect(isStateQueryQuestionShape(message)).toBe(true);
+    expect(hasMutationWarrantSignal(message)).toBe(false);
+    expect(isEditRequestShape(message)).toBe(false);
+  });
+
+  it.each([
+    'Which of my figures did you use for the margin we should protect? What should we use instead?',
+    'What did you leave out that I should know about? Recommend what I should add.',
+    'Given my brief, do you think that we could use £59?',
+    'Given my brief, should I use £59?',
+  ])('still sends an actual advice request to reasoning: %j', (message) => {
+    expect(tryStateQueryGuard({ message, contextPack: ctx([]), briefAudit }).matched).toBe(false);
+    expect(hasMutationWarrantSignal(message)).toBe(false);
+    expect(isEditRequestShape(message)).toBe(false);
+  });
+});
+
+describe('a brief reference is not permission to replace a conversation with an audit', () => {
+  const reasoningRequests = [
+    // Paul, served CEE 78515b95, request ef2da921-cc66-4a53-9506-e23d79554489.
+    'Looking at my brief, what do you recommend these values should be?',
+    // New paraphrases are contrasts, not additional live witnesses.
+    'Given my brief, do you see a better way forward?',
+    'What do you think about my brief?',
+    'What do you recommend I use from my brief?',
+    'What did you leave out of my brief, and what would you recommend instead?',
+    'Which of my figures did you use? Suggest better values for the uncertain ones.',
+    'What did you leave out of my brief, and what should I do next?',
+    'Based on what I told you, which values would you choose?',
+    'Given my brief, do you think I should use £59?',
+  ];
+
+  it.each(reasoningRequests)('does not intercept %j, with or without a saved edit', (message) => {
+    for (const recent of [[], [ADD_CONSTRAINT_50K]]) {
+      expect(tryStateQueryGuard({ message, contextPack: ctx(recent), briefAudit })).toEqual({
+        matched: false,
+      });
+    }
+  });
+
+  it('keeps the witnessed recommendation protected from mutation when its answer falls through', () => {
+    const message = reasoningRequests[0];
+    expect(isBriefAuditQuestion(message)).toBe(true);
+    expect(isStateQueryQuestionShape(message)).toBe(true);
+    expect(hasMutationWarrantSignal(message)).toBe(false);
+  });
+
+  it.each(['fresh', 'stale', 'unknown'] as const)(
+    'the witnessed request also clears the two following conversational gates when analysis is %s',
+    (freshness) => {
+      const message = reasoningRequests[0];
+      expect(tryStaleRerunGuard({ message, freshness }).matched).toBe(false);
+      expect(tryPostAnalysisAdviceGate({
+        message,
+        freshness,
+        analysis: {
+          status: 'success',
+          leading_option: { label: 'Increase price' },
+          runner_up: { label: 'Hold price' },
+          top_drivers: [],
+          fragile_edges: [],
+        },
+      }).matched).toBe(false);
+    },
+  );
+
+  it.each([
+    'Tell me what you kept from my brief.',
+    'Which of my figures do you use?',
+    'What did you leave out of my brief?',
+    'Do you agree you left out my ARR figure?',
+  ])('still answers the explicit factual audit %j', (message) => {
+    const outcome = tryStateQueryGuard({ message, contextPack: ctx([]), briefAudit });
+    expect(outcome.matched && outcome.dispatch).toBe('brief_audit');
+    expect(outcome.matched && outcome.assistant_text).toContain('£11.2m');
+  });
+
+  it.each([
+    undefined,
+    { briefText: null, graph: WITNESS_GRAPH },
+    { briefText: BRIEF_TEXT, graph: null },
+  ])('does not manufacture an audit when its source is unavailable: %j', (source) => {
+    expect(tryStateQueryGuard({
+      message: 'What did you leave out of my brief?',
+      contextPack: ctx([]),
+      briefAudit: source,
+    })).toEqual({ matched: false });
+  });
+
+  it('does not swallow an edit attached to an audit', () => {
+    const message = 'What did you leave out of my brief? Also set Enterprise ACV target to 45000.';
+    expect(tryStateQueryGuard({ message, contextPack: ctx([]), briefAudit })).toEqual({ matched: false });
+    expect(hasMutationWarrantSignal(message)).toBe(true);
+  });
+
+  it.each(['Yes, confirm it.', 'No, cancel that.', 'Do not save that change.'])(
+    'does not acquire ownership of a consent turn: %j',
+    (message) => {
+      expect(tryStateQueryGuard({ message, contextPack: ctx([]), briefAudit })).toEqual({ matched: false });
+    },
+  );
+});
 
 // ───────────────────────────────────────────────────────────────────────────
 // RED — the questions the evaluation measured being intercepted

@@ -484,6 +484,10 @@ describe('tryClarificationResume — kind classification regression', () => {
   > = {
     // Graph-mutating today.
     set_factor_value: 'mutating',
+    // GO(A) — answering "what does <option> cost, in <unit>?" WRITES a native
+    // quantity onto an option->factor cell, so it fails closed as mutating for
+    // the same reason its model-unit sibling does.
+    elicit_option_native_quantity: 'mutating',
     // Reserved graph-mutating kinds (depend on graph_hash per the
     // PendingAction docstring). Classifying as `mutating` now means
     // they fail closed when wired, rather than slipping through the
@@ -527,6 +531,11 @@ describe('tryClarificationResume — kind classification regression', () => {
     // the deterministic brief rubric (ask again or proceed to draft);
     // there is no graph at the pre-draft stage and no mutation applies.
     clarify_v2_round: 'non_mutating',
+    // The swapped success-target receipt's question. Answering it replays
+    // add_constraint on the goal, which stamps goal_threshold_raw/_unit/_cap
+    // and the normalised goal_threshold onto the goal node: graph-mutating,
+    // so ask→answer divergence fails closed.
+    elicit_goal_target: 'mutating',
   };
 
   it('every PendingAction kind has the expected safety classification (semantic regression)', () => {

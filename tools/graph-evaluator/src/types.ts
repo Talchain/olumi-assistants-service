@@ -262,6 +262,12 @@ export interface GenericScoreResult {
   dimensions: Record<string, boolean | number | null>;
   parse_error?: string;
   unmatched_numbers?: Array<{ value: number; field_path: string }>;
+  /**
+   * Non-scoring diagnostic — see `ScaleConversionRecord`. Carried alongside
+   * `dimensions` rather than inside it, so it can never be mistaken for a
+   * scored dimension or picked up by the structural-scores table.
+   */
+  scale_conversions?: ScaleConversionRecord[];
 }
 
 /** A scored result for any evaluator type */
@@ -427,6 +433,18 @@ export interface FactorEntityRef extends EntityRef {
   category: "controllable" | "observable" | "external";
   value?: number | null;
   has_prior?: boolean;
+  /**
+   * The unit the `value` is expressed in, when the graph attests one.
+   *
+   * OPTIONAL AND USUALLY ABSENT — that absence is the point. A factor value
+   * with no unit is a UNITLESS number: nothing in the TurnContext says whether
+   * `0.5` means "50%", "0.5 of a thing", or "we did not know" (CEE's own
+   * draft-graph prompt uses a bare 0.5 with extractionType 'inferred' as its
+   * Unknown-baseline placeholder). The scorer treats an absent unit as
+   * UNATTESTED SCALE and reports any percentage rendered from it — see
+   * `ScaleConversionRecord`.
+   */
+  unit?: string;
 }
 
 export interface GoalEntityRef extends EntityRef {
@@ -447,6 +465,8 @@ export interface ConstraintRef {
   label: string;
   operator: string;
   value: number;
+  /** Unit the `value` is expressed in, when attested. See `FactorEntityRef.unit`. */
+  unit?: string;
 }
 
 export interface TurnContext {
@@ -549,6 +569,47 @@ export interface ScenarioAssertion {
 
 // ── Score (v30.3 dimensions) ────────────────────────────────────────────────
 
+/**
+ * Whether the model value behind a rendered percentage attests the 0-1 -> % scale.
+ *
+ * - `probability`    — the source is a declared probability (`winner.probability`,
+ *                      `exists_probability`). A percentage rendering is the standard,
+ *                      correct presentation. LEGITIMATE.
+ * - `unit_percent`   — the source carries an explicit percent unit. LEGITIMATE.
+ * - `unattested`     — the source is a bare unitless number. Nothing says its scale.
+ *                      Rendering it as a percentage INVENTS one.
+ * - `unit_conflict`  — the source carries a unit, and it is not a percentage
+ *                      (e.g. `GBP`). Rendering it as a percentage contradicts it.
+ */
+export type ScaleAttestation =
+  | "probability"
+  | "unit_percent"
+  | "unattested"
+  | "unit_conflict";
+
+/**
+ * DIAGNOSTIC RECORD — one number in the response whose ONLY grounding route was
+ * an unattested 0-1 -> percentage conversion of a model value.
+ *
+ * This is REPORTED, NOT SCORED. It does not affect `fabrication_check` or
+ * `overall`; the remedy for the underlying rendering is an open product
+ * decision, and a gate that failed on this class before that decision was made
+ * would block every promotion. The purpose here is only to make a promotion run
+ * able to TELL AN IMPROVEMENT FROM A REGRESSION on this class.
+ */
+export interface ScaleConversionRecord {
+  /** The token exactly as it appeared in the response text, e.g. `"50%"`. */
+  rendered: string;
+  /** The numeric value parsed from that token, e.g. `50`. */
+  rendered_value: number;
+  /** The model value it was grounded against, e.g. `0.5`. */
+  source_value: number;
+  /** Which context field supplied it, e.g. `"factor:fac_retention"`. */
+  source_ref: string;
+  /** Why this conversion is not attested. */
+  attestation: ScaleAttestation;
+}
+
 export interface OrchestratorScore {
   valid_json: boolean;
   text_quality: boolean;
@@ -558,6 +619,12 @@ export interface OrchestratorScore {
   banned_terms: boolean;
   scenario_specific: boolean;
   overall: number;
+  /**
+   * Non-scoring diagnostic. Percentages the response rendered from model values
+   * whose scale nothing attests. Always present (empty when there are none) so a
+   * consumer can distinguish "measured, found none" from "not measured".
+   */
+  scale_conversions: ScaleConversionRecord[];
 }
 
 export interface JudgeDimensionScore {

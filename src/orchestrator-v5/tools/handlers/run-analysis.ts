@@ -53,6 +53,8 @@ import {
   projectClaimSafety,
 } from '../../../orchestrator/context/constraint-feasibility.js';
 import { buildConstraintDisclosure } from '../../coaching/constraint-gap-disclosure.js';
+import { collectUnanchoredConstraintTargetIds } from './d1-shared/constraint-target-alternative.js';
+import { decideOptionCostAsk } from '../../coaching/decide-option-cost-ask.js';
 // ROADMAP 2.579 — the intake axis: did the graph keep every option the brief
 // spelled out? Derived here, at the point of the claim, from the two pieces of
 // canonical persisted state this handler already holds (`snapshot.briefText`
@@ -96,6 +98,7 @@ import { isKnownPlotFailureCode } from '../../compose/handler-failure-responses.
 import { findFirstInvalidNumeric } from './numeric-integrity.js';
 import { validateEnrichmentShadow } from './enrichment-validation.js';
 import { guardAnalysisGraphIntercepts } from './run-analysis-intercept-guard.js';
+import { guardAnalysisParticipation } from './run-analysis-participation-guard.js';
 import {
   AnalysisNotReadyError,
   readinessQuestions,
@@ -109,6 +112,10 @@ import {
   unsetOptionEffectFactorIds,
   type UnsetOptionEffect,
 } from '../../coaching/unset-option-effect-disclosure.js';
+// The run-level participation disclosure. Consumes the participation guard's
+// OWN return value — see the module docblock for why neither this handler nor
+// the UI may re-derive either count from graph shape.
+import { buildAnalysisParticipationDisclosure } from '../../coaching/analysis-participation-disclosure.js';
 import {
   gateAnalysableOptions,
   PLOT_MIN_COMPARISON_OPTIONS,
@@ -286,6 +293,73 @@ export interface RunAnalysisHandlerDeps {
  * Returned handler is a pure function modulo its deps — same invocation +
  * same deps → same outcome (modulo PLoT non-determinism, bounded by seed).
  */
+/**
+ * Graph NODES for the cost-ask decision — read defensively off whichever graph
+ * shape the snapshot holds, exactly as the sibling readers on this path do.
+ * Only used to resolve the constraint's target factor by id.
+ */
+function readGraphNodesForCostAsk(
+  source: unknown,
+): ReadonlyArray<{ id?: unknown; kind?: unknown; label?: unknown }> {
+  if (source === null || typeof source !== 'object') return [];
+  const nodes = (source as Record<string, unknown>).nodes;
+  return Array.isArray(nodes)
+    ? (nodes as ReadonlyArray<{ id?: unknown; kind?: unknown; label?: unknown }>)
+    : [];
+}
+
+/**
+ * The LABEL of a node whose exclusion could not be honoured, for the refusal
+ * sentence. Reuses the same defensive node reader as the cost-ask path.
+ *
+ * Returns null for a missing, non-string or blank label so the caller falls
+ * back to neutral wording rather than quoting `''` at the user — `NodeV3`
+ * accepts `""` and `"   "` and no validator rejects them.
+ */
+function participationRefusalLabel(graph: unknown, nodeId: string): string | null {
+  for (const node of readGraphNodesForCostAsk(graph)) {
+    if (node.id !== nodeId) continue;
+    const label = node.label;
+    if (typeof label !== 'string') return null;
+    const trimmed = label.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+  return null;
+}
+
+/**
+ * OPTION ENTRIES for the cost-ask decision.
+ *
+ * ⚠ ENTRIES, NOT NODES. `raw_interventions` is the option-entry-only
+ * pre-encoding carrier (`reconcile-top-level-options.ts`: "zero
+ * `raw_interventions` writes onto a node exist in `src/`"), so reading options
+ * out of `graph.nodes` would make the native-value check read ABSENT forever
+ * and ask for a figure the product already holds.
+ */
+function readOptionEntriesForCostAsk(
+  snapshot: { readonly options?: unknown; readonly rawPersistedGraph?: unknown },
+): ReadonlyArray<{
+  id?: unknown;
+  label?: unknown;
+  interventions?: unknown;
+  raw_interventions?: unknown;
+}> {
+  type Entry = {
+    id?: unknown;
+    label?: unknown;
+    interventions?: unknown;
+    raw_interventions?: unknown;
+  };
+  const direct = snapshot.options;
+  if (Array.isArray(direct)) return direct as ReadonlyArray<Entry>;
+  const raw = snapshot.rawPersistedGraph;
+  if (raw !== null && typeof raw === 'object') {
+    const nested = (raw as Record<string, unknown>).options;
+    if (Array.isArray(nested)) return nested as ReadonlyArray<Entry>;
+  }
+  return [];
+}
+
 export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerFn {
   return async function runAnalysisHandler(
     invocation: HandlerInvocation,
@@ -492,10 +566,84 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // below for `graph_hash_at_run` / freshness) are deliberately left
     // untouched — this is a runtime guard, not a migration, and must not
     // perturb freshness.
-    const graphForAnalysis = guardAnalysisGraphIntercepts(snapshot.graph, {
+    const graphAfterIntercepts = guardAnalysisGraphIntercepts(snapshot.graph, {
       requestId: invocation.requestId,
       scenarioId: args.scenario_id,
     }).graph;
+
+    // --- 2.7. Participation guard (COLLAB Track A) -------------------------
+    // Honours `node.analysis_participation === 'retained_excluded'`: the node
+    // stays in `scenarios.graph` with its label, value and authorship intact
+    // and is simply ABSENT from the wire graph — the same construction the
+    // option gate above uses, one level down. Incident edges go with it
+    // because PLoT's preflight raises `INVALID_EDGE_ENDPOINT` as a BLOCKER for
+    // a dangling endpoint, so leaving them would refuse the whole run.
+    // See `run-analysis-participation-guard.ts` for the full doctrine.
+    const optionsForParticipation = gate.options as ReadonlyArray<Record<string, unknown>>;
+    const optionInterventionTargetIds = new Set<string>();
+    const submittedOptionIds = new Set<string>();
+    for (const opt of optionsForParticipation) {
+      const optionId =
+        typeof opt.option_id === 'string' && opt.option_id.length > 0
+          ? opt.option_id
+          : typeof opt.id === 'string' && opt.id.length > 0
+            ? opt.id
+            : null;
+      if (optionId !== null) submittedOptionIds.add(optionId);
+      const interventions = opt.interventions;
+      if (interventions !== null && typeof interventions === 'object') {
+        for (const targetId of Object.keys(interventions as Record<string, unknown>)) {
+          optionInterventionTargetIds.add(targetId);
+        }
+      }
+    }
+    const participation = guardAnalysisParticipation(graphAfterIntercepts, {
+      goalNodeId: snapshot.goal_node_id,
+      optionInterventionTargetIds,
+      submittedOptionIds,
+      requestId: invocation.requestId,
+      scenarioId: args.scenario_id,
+    });
+    // An exclusion that cannot be honoured is REFUSED, never quietly dropped.
+    // Computing anyway would produce a number that included a node the field
+    // still marks `'retained_excluded'` — so the surface would render
+    // "excluded" over a result that did not exclude it. No number beats a
+    // number that lies, and the conflict is a real inconsistency in the user's
+    // own model, which is worth saying out loud on a reasoning tool.
+    if (participation.refusals.length > 0) {
+      const refusal = participation.refusals[0];
+      const refusedLabel = participationRefusalLabel(graphAfterIntercepts, refusal.node_id);
+      const named = refusedLabel !== null ? `'${refusedLabel}'` : 'that part of your model';
+      throw new HandlerInvocationFailedError(
+        'A node excluded from the calculation is required by it',
+        {
+          cause_kind: 'analysis_not_ready',
+          retryable: false,
+          details: {
+            handler_id: 'run_analysis',
+            scenario_id: args.scenario_id,
+            reason_code: 'excluded_node_required_by_analysis',
+            next_step:
+              refusal.reason === 'goal_node'
+                ? `You've kept ${named} out of the calculation, but it's the outcome the ` +
+                  `analysis is measuring — so there's nothing left to compare the options ` +
+                  `against. Put ${named} back into the calculation, or choose a different ` +
+                  `goal, and ask me to run the analysis again.`
+                : refusal.reason === 'submitted_option'
+                  ? `You've kept ${named} out of the calculation, but it's one of the options ` +
+                    `I'd be comparing — so I've stopped rather than rank an option you've ` +
+                    `excluded. Put it back into the calculation or remove it from this ` +
+                    `comparison, then ask me to run the analysis again.`
+                  : `You've kept ${named} out of the calculation, but one of your options ` +
+                    `changes it — so I can't leave it out and still work out what that option ` +
+                    `does. That's worth a second look: either ${named} belongs in the ` +
+                    `calculation after all, or that option shouldn't be changing it. Settle ` +
+                    `which, and ask me to run the analysis again.`,
+          },
+        },
+      );
+    }
+    const graphForAnalysis = participation.graph;
 
     // --- 3. ONE request-level scale projection, on the FINAL option set -----
     // ROUND 4: the projection runs HERE — after the scaffold, immediately
@@ -662,8 +810,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
             // action is worse than one that says plainly it cannot proceed.
             next_step:
               scaleBlock.reason_code === 'mixed_scale_unresolved'
-                ? `I can't run this analysis safely. The request I assembled carries values for ${named} that the analysis engine would silently rescale, so the numbers it gave back would not be the ones your model states — I've stopped rather than show you a confident wrong answer. Nothing in your model has changed, and this is a limit in how I prepare the analysis, not a verdict on your model. I don't have a step I can promise will clear it, so please don't rewrite your own numbers to try; ask me to run it again after any change and I'll re-check.`
-                : `I can't run this analysis safely. ${named} is recorded as a bare amount with no range for me to measure it against, so I can't tell the analysis engine what it means next to everything else, and the numbers would not be the ones your model states — I've stopped rather than show you a confident wrong answer. Nothing in your model has changed, and this is a limit in how I record and prepare values, not a verdict on your model. Telling me the same amount again won't clear it; ask me to run it again after any change and I'll re-check.`,
+                ? `I can't run this analysis safely. The request I assembled carries values for ${named} that the analysis engine would silently rescale, so the numbers it gave back would not be the ones your model states. I've stopped rather than show you a confident wrong answer. Nothing in your model has changed, and this is a limit in how I prepare the analysis, not a verdict on your model. I don't have a step I can promise will clear it, so please don't rewrite your own numbers to try; ask me to run it again after any change and I'll re-check.`
+                : `I can't run this analysis safely. ${named} is recorded as a bare amount with no range for me to measure it against, so I can't tell the analysis engine what it means next to everything else, and the numbers would not be the ones your model states. I've stopped rather than show you a confident wrong answer. Nothing in your model has changed, and this is a limit in how I record and prepare values, not a verdict on your model. Telling me the same amount again won't clear it; ask me to run it again after any change and I'll re-check.`,
           },
         },
       );
@@ -1761,10 +1909,65 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // an unchecked quote could state the opposite of the limit beside it. Same
     // `snapshot.briefText` the intake reconciliation above reads; absent ⇒ the
     // quote stands down and the labelled disclosure ships unchanged.
+    // ⭐ THE REPAIR ARM — COPY ONLY, AND DELIBERATELY NOT A FOURTH VERDICT
+    // ARGUMENT. Measured on Paul's 19 Sep session (`34678f42`): he was told to
+    // restate his limit in his own words, did exactly that, and the next turn
+    // returned an UNCHANGED `graph_hash`, ZERO `graph_patch` blocks and
+    // BYTE-IDENTICAL win probabilities. The target was the goal node with five
+    // incoming edges, and PLoT's anchor resolution returns `null` for any node
+    // with a directed incoming edge before it ever reads `observed_state` — so
+    // no restatement of the LIMIT could ever have moved it. `plot-lite-service`
+    // #364 shipped that service's half of the same sentence on 18 Sep.
+    //
+    // ⚠⚠ THIS IS NOT THE REVERTED #1225 PREDICATE, AND THE DIFFERENCE IS
+    // STRUCTURAL, NOT A PROMISE. That one was passed to
+    // `deriveConstraintVerdict` and partitioned constraints out at STEP 0b,
+    // which moved `may_name_leading_option` and silently un-fixed trust-spine
+    // board #1. This set is passed to the DISCLOSURE BUILDER, which has no way
+    // to reach the verdict: the call above is already made, `constraintVerdict`
+    // is frozen by the time this runs, and the only thing downstream of this
+    // argument is which repair SENTENCE is printed. Worst case here is a less
+    // useful true sentence; it cannot name a leader.
+    //
+    // It also reads a DIFFERENT question: #1225 asked "does this node record
+    // any number" (false for every derived node, which is why it inverted);
+    // this asks "can PLoT anchor a sample frame on it", the estate's single
+    // mirror of that service's own rule, consumed on its REFUSAL side — the
+    // side its docblock says carries a proof.
+    const unanchoredConstraintIds = collectUnanchoredConstraintTargetIds(
+      snapshot.goal_constraints ?? snapshot.rawPersistedGraph ?? snapshot.graph,
+      snapshot.rawPersistedGraph ?? snapshot.graph,
+    );
     const constraintGapDisclosure = buildConstraintDisclosure(
       constraintVerdict,
       snapshot.briefText,
+      unanchoredConstraintIds,
     );
+    // GO(A) — the ask that makes the disclosure above ACTIONABLE.
+    //
+    // `buildConstraintDisclosure` already tells the user which limit was not
+    // checked and invites them to repair it. Measured on session `82f31082`,
+    // the repair it invites cannot land: the limit was ALREADY correct
+    // (`Hiring Cost <= 200000 GBP`, provenance explicit), so restating it
+    // changes nothing, and every pending action minted on that turn was
+    // `run_analysis` or `what_would_flip` — the answer had nothing to bind to.
+    //
+    // The genuinely missing datum is the OPTION'S OWN COST in the limit's unit.
+    // This selects ONE such cell; the turn-executor arms it as an
+    // `elicit_option_effect` pending, whose reader
+    // (`routing/repair-value-binding.ts`) already binds a bare value to the
+    // exact `(option_id, factor_id)` the pending names.
+    //
+    // ⚠ THE TRIGGER IS THE PRODUCER'S OWN VERDICT. `unevaluated` is the one
+    // state where "your condition was not checked" is assertable. We do NOT
+    // derive scoreability here — that predicate is the reverted #1225 release
+    // blocker (see the ⚠⚠ block above `deriveConstraintVerdict`).
+    const optionCostAsk = decideOptionCostAsk({
+      notDecisionGrade: constraintVerdict.state === 'unevaluated',
+      ratified: ratifiedConstraints,
+      nodes: readGraphNodesForCostAsk(snapshot.rawPersistedGraph ?? snapshot.graph),
+      options: readOptionEntriesForCostAsk(snapshot),
+    });
     // ROADMAP 2.579 disclosure, LAST of the three. It names the option(s) the
     // brief listed and the graph does not carry, and gives BOTH repair paths
     // (add it, or confirm the omission was deliberate). Appended after the
@@ -1814,6 +2017,39 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // is an integer count of pairs.
     const unsetOptionEffectDisclosure =
       buildUnsetOptionEffectDisclosure(unsetOptionEffects);
+    // ⭐ THE PARTICIPATION DISCLOSURE, LAST OF THE SIX — and the reason it
+    // exists is the EDGES, not the nodes.
+    //
+    // §2.7 above handed PLoT a graph with every `'retained_excluded'` node
+    // withheld AND EVERY EDGE INCIDENT TO ONE withheld with it (PLoT's
+    // preflight raises `INVALID_EDGE_ENDPOINT` as a BLOCKER for a dangling
+    // endpoint, so the edges cannot stay). The UI already marks the NODE
+    // ("Unfinished — not included in analysis."), so the user knows that one
+    // node was left out. NOTHING told them the RUN excluded anything, and
+    // nothing told them CONNECTIONS went with it — so a user who marks one
+    // factor unfinished can lose several links they never marked, while every
+    // number below stays internally consistent with a graph they are not
+    // looking at. They cannot detect that by reading carefully; only a sentence
+    // reaches it.
+    //
+    // ⛔ BOTH NUMBERS COME FROM `participation`, THE GUARD'S OWN RETURN VALUE,
+    // and are never re-derived here or at the UI. The exclusion decision is
+    // CEE's; two derivations of one fact drift, and the drift is invisible
+    // because both look plausible (trap 21). The builder's parameter type is
+    // bolted to the guard's result type so that binding is structural.
+    //
+    // ⚠ DELIBERATELY *NOT* GATED ON `headline !== null`, for the same reason as
+    // the unset-option-effect tail directly above: it names no option, asserts
+    // no ranking and implies no leader, so it is honest on a withheld turn —
+    // and a withheld turn computed on a reduced model is exactly where the fact
+    // matters most. Its slot is registered in BOTH branches of the egress
+    // allowlist (`analysis-result-headline.ts`) for that reason.
+    //
+    // ⚠ NO TELEMETRY EMIT HERE, deliberately. The guard ALREADY emits
+    // `V5RunAnalysisParticipationGuard` with both counts at the moment it
+    // prunes; a second event on the same fact would give two authorities one
+    // number, which is the defect this disclosure is closing one level down.
+    const participationDisclosure = buildAnalysisParticipationDisclosure(participation);
     // ⚠ NO TELEMETRY EMIT HERE, deliberately. The obvious move was to reuse
     // `V5RunAnalysisOptionsScaffolded`, and it is wrong: that event means "the
     // scaffold filled or excluded a WHOLLY unvalued option", and this is the
@@ -1822,7 +2058,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // (trap 21), and it would corrupt the scaffold rate every dashboard reads.
     // A dedicated event is a registered-telemetry change with its own
     // validation gate; it belongs in its own PR, not bundled here.
-    const summary = `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}`;
+    const summary = `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}`;
 
     // V5 link-safe response floor: when the deterministic headline builder
     // picks Case-E ("{label} currently leads.") because stronger cases
@@ -1964,6 +2200,21 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       // The configure chip's source (see chip-generator): the options a
       // configure step actually repairs.
       ...(gate.excluded.length > 0 ? { __excluded_options: gate.excluded } : {}),
+      // Internal channel — the exact graph THIS run analysed, for the
+      // decision-review enricher. Same object the submission and
+      // `graph_hash_at_run` were derived from, so a review grounded in it is
+      // grounded in the analysed model rather than in a turn-start reread.
+      // Omitted when the snapshot carried none, which the reader treats
+      // exactly as today (it falls back to `context.persistedGraph`).
+      ...(snapshot.rawPersistedGraph !== undefined && snapshot.rawPersistedGraph !== null
+        ? { __run_graph_snapshot: snapshot.rawPersistedGraph }
+        : {}),
+      // GO(A) — the cell whose native value would make the withheld limit
+      // checkable. Server-only: the turn-executor arms it as an
+      // `elicit_option_effect` pending in the SAME commit as the disclosure
+      // copy, so the question and the thing that can answer it are never
+      // persisted apart. `null`/absent when there is nothing coherent to ask.
+      ...(optionCostAsk !== null ? { __option_cost_ask: optionCostAsk } : {}),
       ...(gate.held.length > 0
         ? { __scaffolded_options: heldPresence.stamped }
         : {}),

@@ -417,10 +417,20 @@ describe('handleEditGraph — LEG 2: an ADDED label quantity the model does not 
     // route straight back into the edit_graph LLM that caused this.
     expect(isValueUpdatePhrasing(chip!.prompt)).toBe(true);
     expect(shouldSuppressEditDispatchForValueUpdate(chip!.prompt)).toBe(true);
-    // Contrast control: the phrasing that CAUSED the defect is NOT claimed —
-    // which is why this disclosure has to exist at all. (Routing is a separate
-    // lane; this asserts the boundary, it does not fix it.)
-    expect(isValueUpdatePhrasing('Change Annual CRM Spend to £63,000.')).toBe(false);
+    // ⚠ FLIPPED 2026-09-14 — the separate lane this comment named has landed.
+    // This row previously asserted FALSE and read: "the phrasing that CAUSED
+    // the defect is NOT claimed ... Routing is a separate lane; this asserts
+    // the boundary, it does not fix it." `change` is now in
+    // VALUE_UPDATE_VERBS_TO, so the causing phrasing is claimed by the value
+    // path and this rename should no longer be reachable through routing.
+    //
+    // The assertion is KEPT rather than deleted, in the opposite direction:
+    // it is now the regression pin proving the routing fix reaches this
+    // exact captured utterance. Everything else in this file is unchanged —
+    // the divergence detector still behaves correctly if edit_graph is
+    // reached by any other path, which is the point of a consent-first
+    // disclosure: it is a backstop, not the routing.
+    expect(isValueUpdatePhrasing('Change Annual CRM Spend to £63,000.')).toBe(true);
   });
 
   it('the receipt cannot read as a completed value change', async () => {

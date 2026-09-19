@@ -255,7 +255,10 @@ vi.mock('../routing/route-with-tool-use.js', async () => {
  * `chip_action_explain_results` absent from `suggested_actions` exactly on
  * those bodies.
  */
-function routedExplainResults(answerText: string) {
+function routedExplainResults(
+  answerText: string,
+  handlerId: 'explain_results' | 'explain_from_structure' = 'explain_results',
+) {
   return {
     type: 'tool_call' as const,
     orientationText: '',
@@ -271,7 +274,7 @@ function routedExplainResults(answerText: string) {
     proposal: {
       intent_class: 'execute' as const,
       action: {
-        handler_id: 'explain_results',
+        handler_id: handlerId,
         entity: {
           id: 'goal_growth',
           kind: 'goal' as const,
@@ -281,12 +284,16 @@ function routedExplainResults(answerText: string) {
         parameters: [],
         cited_context_fields: [],
         explanation: { answer_text: answerText },
+        ...(handlerId === 'explain_from_structure'
+          ? { structure_query: { kind: 'general' as const } }
+          : {}),
       },
     },
   };
 }
 
 const { ceeOrchestratorRouteV2 } = await import('../../orchestrator/route-v2.js');
+const { synthesiseAnswerShapeFromText } = await import('../routing/answer-shape.js');
 
 interface WireTurn {
   readonly status: number;
@@ -295,7 +302,10 @@ interface WireTurn {
   readonly blocks: Array<Record<string, any>>;
 }
 
-async function rerunTurn(app: FastifyInstance): Promise<WireTurn> {
+async function rerunTurn(
+  app: FastifyInstance,
+  message = 'Run the analysis',
+): Promise<WireTurn> {
   const res = await app.inject({
     method: 'POST',
     url: '/orchestrate/v2/turn',
@@ -304,7 +314,7 @@ async function rerunTurn(app: FastifyInstance): Promise<WireTurn> {
       turn_id: randomUUID(),
       scenario_id: SCENARIO_ID,
       stage: 'analyse',
-      message: 'Run the analysis',
+      message,
       turn_class: 'decide',
       source: 'composer',
       graph_state: READY_GRAPH,
@@ -375,9 +385,25 @@ describe('route-level: the rerun no-op explanation answer on a WITHHELD turn', (
       // (b) which condition
       expect(turn.assistantText).toContain('Three-Year Total Cost of Ownership');
       expect(turn.assistantText).toContain('could not be checked');
-      // the consequence, in the estate's own wording ("put forward", never
-      // "recommended" — the forbidden-vocabulary ban is blunt by design)
-      expect(turn.assistantText).toContain('no option can be put forward yet');
+      // ⚠ THE CONSEQUENCE CLAUSE CHANGED, AND THIS ASSERTION WAS STALE AGAINST
+      // THE NEW CONTRACT. It pinned "no option can be put forward yet", which
+      // told the user their RANKING was void. Measured live 16 Sep 2026: that
+      // sentence reached a user four times in one session while
+      // `analysis_ready` logged 5 ready options and 0 blockers.
+      //
+      // ⭐ WHAT THIS TEST PROTECTS IS UNCHANGED AND STILL ASSERTED EITHER SIDE
+      // of this line: (b) the condition is NAMED, and (c) a repair step the user
+      // can act on is present. Neither depended on the false clause. Whether a
+      // LEADING OPTION may be named is a different gate
+      // (`MAY_NAME_LEADING_OPTION` / `leading-option-egress-guard`), and the
+      // withheld-permission checks in the sibling case above still cover it —
+      // so nothing here restores a blanket ban on useful comparison in order to
+      // satisfy the old phrase.
+      expect(turn.assistantText).toContain('not part of the comparison');
+      expect(
+        turn.assistantText,
+        'the false blanket claim must not come back through any producer',
+      ).not.toContain('no option can be put forward yet');
       // (c) a repair step the user can act on
       expect(turn.assistantText).toContain(
         'Tell me the limit you meant in your own words and I will record it',
@@ -386,12 +412,28 @@ describe('route-level: the rerun no-op explanation answer on a WITHHELD turn', (
 
     it('the `_answer_shape` SIDECAR is clean too — it is derived from the projected text', async () => {
       const turn = await rerunTurn(app);
-      const shape = (JSON.parse(turn.raw) as Record<string, any>)._answer_shape;
+      const raw = JSON.parse(turn.raw) as Record<string, any>;
 
-      // Non-vacuity first: the sidecar must actually be on this response, or
-      // the absence assertion below is testing nothing. An explanation answer
-      // is classified `substantive`, so the route egress synthesises it.
-      expect(shape, '_answer_shape absent — the assertion below would be vacuous').toBeDefined();
+      // ⛔ NON-VACUITY, AND WHY IT MOVED (18 Sep 2026, the collapse floor).
+      // This assertion used to read the sidecar off the wire. It no longer
+      // ships on this turn: `_answer_shape` is a directive to COLLAPSE the
+      // answer, and CEE now issues it only above
+      // `ANSWER_SHAPE_COLLAPSE_FLOOR_CHARS` (3,000 — the deployed UI's own
+      // clamp). This answer is far shorter, so it correctly ships whole.
+      //
+      // Taking "absent" as the answer would have made the leak scan below
+      // VACUOUS while leaving it green — the exact shape of defect the original
+      // comment guarded against, arriving through a change to a different file.
+      // So the scan is pointed at the shape the egress WOULD have attached,
+      // built by the SAME function the egress uses. The safety claim is
+      // unchanged: this surface is clean because the leading-option gate runs
+      // UPSTREAM of compose, and it would still be clean at any length.
+      expect(raw).not.toHaveProperty('_answer_shape');
+      const shape = synthesiseAnswerShapeFromText(raw.assistant_text as string);
+      expect(
+        shape,
+        'the projected answer must be shapeable — otherwise the scan below is vacuous',
+      ).not.toBeNull();
 
       // It matters that this is checked SEPARATELY from assistant_text. The
       // sidecar is a distinct rendered surface (the walk's §3.3 read the leak
@@ -464,6 +506,44 @@ describe('route-level: the rerun no-op explanation answer on a WITHHELD turn', (
         // the least.
         const occurrences = turn.assistantText.split('could not be checked').length - 1;
         expect(occurrences, 'the disclosure was appended to an answer that already had it').toBe(1);
+      });
+    });
+
+    describe('structural coaching is not a request to explain analysis results', () => {
+      beforeEach(() => vi.stubEnv('CEE_DIAGNOSTIC_TRACE_ENABLED', 'true'));
+      afterEach(() => vi.unstubAllEnvs());
+
+      const STRUCTURE_QUESTION =
+        'What does each option actually change in my current model, and what should I clarify next? ' +
+        "Don't change anything or run an analysis.";
+      const STRUCTURE_ANSWER =
+        'Hire Marketing Manager changes capacity while Hold retains the baseline. ' +
+        'Both connect to customer growth. Clarify what capacity represents before deciding how to estimate it.';
+
+      it.each([STRUCTURE_QUESTION, 'Explain how the alternatives connect to customer growth.'])(
+        'keeps structural advice without an unrelated constraint repair: %s', async (question) => {
+        routeWithToolUseMock.mockResolvedValue(
+          routedExplainResults(STRUCTURE_ANSWER, 'explain_from_structure'),
+        );
+        const turn = await rerunTurn(app, question);
+        expect(turn.status).toBe(200);
+        expect(routeWithToolUseMock).toHaveBeenCalledOnce();
+        expect(turn.assistantText.replace(/\s+/g, ' ').trim()).toBe(STRUCTURE_ANSWER);
+        expect(turn.assistantText).not.toContain('Tell me the limit');
+        expect(turn.assistantText).not.toContain('run the analysis again');
+        expect(JSON.parse(turn.raw)._diagnostic_trace.claim_safety.may_name_leading_option).toBe(false);
+      });
+
+      it('still suppresses an unsupported recommendation inside structural coaching', async () => {
+        routeWithToolUseMock.mockResolvedValue(
+          routedExplainResults(SONNET_LEADER_ANSWER, 'explain_from_structure'),
+        );
+        const turn = await rerunTurn(app, STRUCTURE_QUESTION);
+        expect(turn.status).toBe(200);
+        expect(turn.assistantText).not.toContain('comes out ahead');
+        expect(turn.assistantText).not.toContain('leading in 72%');
+        expect(turn.assistantText).toContain('could not be checked');
+        expect(findLeaderClaims(JSON.parse(turn.raw)).filter(h => h.path === 'assistant_text')).toEqual([]);
       });
     });
 

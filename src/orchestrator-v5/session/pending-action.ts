@@ -276,6 +276,64 @@ export type PendingActionAction =
        */
       readonly cap?: number;
     }
+  | {
+      /**
+       * ⭐ A GOAL TARGET THE PRODUCT ASKED FOR AND THE PERSON HAS NOT YET GIVEN.
+       *
+       * The mirror of `set_factor_value`: there the CHANGE is decided and the
+       * TARGET is being asked for; here the target (this goal) is decided and
+       * the VALUE is. Named apart for that reason — folding them into one kind
+       * would be two questions under one name, and the resumer would have to
+       * guess which half the person just answered.
+       *
+       * Bound to the specific goal AND the sentence actually asked, so a resume
+       * cannot attach an answer to a question the person never saw.
+       */
+      readonly kind: 'elicit_goal_target';
+      readonly goal_node_id: string;
+      /** The exact question put to the user, for the receipt and the audit. */
+      readonly question: string;
+      /** The unit already established, when one was. Never guessed. */
+      readonly unit?: string;
+    }
+  | {
+      /**
+       * ⭐ AN OPTION'S COST IN THE USER'S OWN UNITS — asked when a money limit
+       * could not be checked because nothing in the model is denominated in
+       * that unit.
+       *
+       * ⚠⚠ NAMED APART FROM `elicit_option_effect` DELIBERATELY, AND THE TWO
+       * MUST NEVER BE FOLDED (trap 21 — this estate's signature defect).
+       * They name the same cell and ask OPPOSITE questions:
+       *   · `elicit_option_effect` — "this cell has NO value; give me a number
+       *     from 0 to 1". Its reader enforces that: `isModelUnitEffectValueText`,
+       *     whose own comment reads "it never turns bare 20 into 20%", and it
+       *     resolves only for pairs readiness still lists as MISSING.
+       *   · this kind — "this cell HAS a value (0.7) and I need the same
+       *     quantity in GBP". The cell is not missing; it is unreadable against
+       *     a native limit.
+       * Measured: on session `82f31082` a saved `Hiring Cost <= 200000 GBP`
+       * sat beside unitless interventions `0` / `0.85` / `0.7`, readiness read
+       * `{"status":"ready","blockers":[]}`, and the product asked a question
+       * whose answer had nowhere to land.
+       *
+       * ⚠ THE UNIT IS CARRIED, NEVER INFERRED. It comes from the ratified
+       * constraint's own persisted row — the only non-fabricating source. An
+       * answer is recorded in THIS unit or not at all; no conversion is
+       * derived from the cap, and none from the encoded `0.7`.
+       */
+      readonly kind: 'elicit_option_native_quantity';
+      readonly option_id: string;
+      readonly option_label: string;
+      readonly factor_id: string;
+      readonly factor_label: string;
+      /** The constraint's own unit, e.g. `"GBP"`. Carried, never guessed. */
+      readonly unit: string;
+      /** The user-ratified limit this repairs, for copy that names it. */
+      readonly constraint_label?: string;
+      /** How many times this cell has been asked; read off the superseded row. */
+      readonly attempt?: number;
+    }
   | { readonly kind: 'run_analysis' }
   | { readonly kind: 'what_would_flip' }
   | {
@@ -575,6 +633,9 @@ export const RESUMABLE_ACTION_TYPES: ReadonlySet<PendingActionKind> = new Set([
   // Deliberately ABSENT from the short-confirm resumer's local
   // RESUMABLE_KINDS: a bare "yes" answers no "give me a number" question.
   'elicit_option_effect',
+  // Answering it WRITES a native quantity onto the named cell, so it resumes
+  // for the same reason its model-unit sibling does.
+  'elicit_option_native_quantity',
   // ROADMAP 2.1353 — the value-ask and edit-clarify exits' offered referents.
   // MANDATORY here for the SAME structural reason 2.1352 records above, and it
   // is worth restating because it is not obvious from the set's name:
@@ -587,6 +648,29 @@ export const RESUMABLE_ACTION_TYPES: ReadonlySet<PendingActionKind> = new Set([
   // RESUMABLE_KINDS: a bare "yes" answers neither question.
   'elicit_effect_target',
   'elicit_edit_target',
+  // The swapped success-target receipt's own question ("Tell me it again in
+  // one message, including the value and the goal it applies to").
+  //
+  // ⚠ MANDATORY HERE, and this is the whole reason the entry carries a
+  // comment: `parsePendingAction` gates EVERY read on this set, so a kind
+  // omitted from it is WRITE-ONLY — it round-trips to the column and is
+  // dropped on the way back out, which is indistinguishable from never
+  // having been persisted. The same note is recorded on 2.1352/2.1353 above
+  // because it is not derivable from the set's name.
+  //
+  // ⚠ AND NOTE THE NAME IT DELIBERATELY DOES NOT USE. The legacy V2
+  // deterministic vocabulary has an `action_type: 'set_goal_target'`
+  // (`orchestrator/deterministic/types.ts`) carrying `{threshold, unit, cap}`
+  // — a DIFFERENT shape answering a different question in a different
+  // namespace. Reusing that spelling here would put two same-named,
+  // differently-shaped concepts in one estate, which is this repo's chronic
+  // defect (CLAUDE.md trap 21). This kind is named for the `elicit_*` family
+  // it belongs to: it records a QUESTION, not an action to replay.
+  //
+  // Deliberately ABSENT from the short-confirm resumer's local
+  // RESUMABLE_KINDS: a bare "yes" answers no "what value counts as success?"
+  // question.
+  'elicit_goal_target',
 ]);
 
 /**
@@ -820,8 +904,12 @@ export const PENDING_KIND_IS_RECORDED_ASK: Record<PendingActionKind, boolean> = 
   // every bind path re-checks the live graph before it binds.
   elicit_target_baseline: true, // "Roughly what percentage is X at right now?"
   elicit_option_effect: true, // "give me a number from 0 to 1"
+  // "What does <option> cost, in <unit>?" — a recorded question awaiting the
+  // user's own figure, which is the defining case for the longer ask window.
+  elicit_option_native_quantity: true,
   elicit_effect_target: true, // "which of these does your number belong to?"
   elicit_edit_target: true, // "which factor, edge, option or value?"
+  elicit_goal_target: true, // "what value counts as success for <goal>?"
   // Offers and holds. A bare "yes", a chip click or a follow-up parameter
   // resolves these, so a longer window IS the stale-hijack harm. Unchanged.
   run_analysis: false,
@@ -1163,11 +1251,19 @@ export type ElicitTargetBaselinePending = PendingAction & {
  */
 export const PENDING_KIND_CLAIMS_BARE_NUMBER: Record<PendingActionKind, boolean> = {
   // The asks whose natural answer IS a bare number, or a bare menu index.
+  // "What does this option cost?" -> "95000" / "£95,000". TRUE so a lone
+  // numeric reply is CLAIMED rather than falling through to the edit lane.
+  // ⚠ Claiming it is not the same as binding it: the model-unit reader in
+  // `repair-value-binding.ts` checks `kind !== 'elicit_option_effect'` and
+  // returns `other_question`, so a native amount can never be written into a
+  // [0,1] slot by that path. Fail-safe by construction.
+  elicit_option_native_quantity: true,
   elicit_target_baseline: true, // "Roughly what percentage is X at right now?"
   elicit_option_effect: true, // "give me a number from 0 to 1"
   elicit_effect_target: true, // "which of these does your number belong to?"
   elicit_edit_target: true, // "which factor, edge, option or value?"
   set_factor_value: true, // a held quantity awaiting a target; "12" re-states it
+  elicit_goal_target: true, // "what value counts as success?" — a bare "20000" answers it
   clarify_v2_round: true, // a clarify round may offer numbered choices
   proposed_concept: true, // the two-stage clarifier offers a choice
   // The asks a bare number CANNOT be answering: each expects a confirmation or
@@ -1200,6 +1296,40 @@ export const PENDING_KIND_CLAIMS_BARE_NUMBER: Record<PendingActionKind, boolean>
  * Liveness via the shared predicate; `null` in every other case, so every
  * caller fails closed by construction.
  */
+/** The goal-target elicitation pending, narrowed. */
+export type ElicitGoalTargetPending = PendingAction & {
+  readonly action: {
+    readonly kind: 'elicit_goal_target';
+    readonly goal_node_id: string;
+    readonly question: string;
+    readonly unit?: string;
+  };
+};
+
+/**
+ * The goal-target twin of {@link findSoleLiveElicitBaselinePending}, and the
+ * same three-step order for the same reason: LIVENESS, then CLAIMANTS, then
+ * IDENTITY. Filtering to the kind first would count competing number-asking
+ * questions out of existence before they could block a bare answer.
+ *
+ * ⚠ A GOAL TARGET IS NOT A BASELINE. They are separate kinds, resolved by
+ *   separate resumers, because "what does success look like" and "where is it
+ *   now" are different questions — folding them together would make the
+ *   resumer guess which one a bare number answered.
+ */
+export function findSoleLiveGoalTargetPending(
+  pendings: readonly PendingAction[] | undefined,
+  nowMs: number,
+): ElicitGoalTargetPending | null {
+  const claimants = filterLivePendingActions(pendings ?? [], nowMs).filter(
+    (pa) => PENDING_KIND_CLAIMS_BARE_NUMBER[pa.action.kind],
+  );
+  if (claimants.length !== 1) return null;
+  const sole = claimants[0]!;
+  if (sole.action.kind !== 'elicit_goal_target') return null;
+  return sole as ElicitGoalTargetPending;
+}
+
 export function findSoleLiveElicitBaselinePending(
   pendings: readonly PendingAction[] | undefined,
   nowMs: number,
@@ -1521,6 +1651,28 @@ export function parsePendingAction(input: unknown): PendingAction | null {
       if (typeof t.node_id !== 'string' || t.node_id.length === 0) return null;
       if (typeof t.label !== 'string' || t.label.length === 0) return null;
     }
+  }
+  if (a.kind === 'elicit_goal_target') {
+    // The goal's identity and the bytes the user actually read are both
+    // REQUIRED. Same flat-`if`-chain reasoning the three blocks above record:
+    // a kind admitted to RESUMABLE_ACTION_TYPES with no block here clears the
+    // envelope checks and is returned by a CAST, so a corrupted row would
+    // reach the readers with zero field validation.
+    //
+    // `goal_node_id` is what the answer binds to — a row without it names no
+    // goal and could only guess. `question` is the record of what was asked;
+    // it is bounded at 2000 (well above the fallback copy, well below
+    // anything that would bloat the column) so a corrupted row cannot smuggle
+    // an unbounded string into the context projection that renders pendings
+    // to the model.
+    if (typeof a.goal_node_id !== 'string' || a.goal_node_id.length === 0) return null;
+    if (typeof a.question !== 'string' || a.question.trim().length === 0) return null;
+    if (a.question.length > 2000) return null;
+    // Optional, and validated when present: an unvalidated optional is how a
+    // corrupted row reaches the writer. An empty unit is refused rather than
+    // coerced — the resume would carry it into `add_constraint`'s `unit`
+    // parameter, and "" is not a unit.
+    if (a.unit !== undefined && (typeof a.unit !== 'string' || a.unit.length === 0)) return null;
   }
   if (a.kind === 'proposed_concept') {
     // V5 P0 proposal-memory continuation. Both fields REQUIRED.

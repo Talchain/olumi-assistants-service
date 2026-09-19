@@ -525,3 +525,47 @@ export const MAGNITUDE_DISPLAY_LADDER: ReadonlyArray<readonly [number, string]> 
     .sort((a, b) => b[0] - a[0])
     .map(([multiplier, key]) => [multiplier, key] as const);
 })();
+
+/**
+ * THE SPOKEN SIDE OF THE SAME ALPHABET — descending rungs of
+ * `[multiplier, canonical WORD]`, derived from the same map the parsers read.
+ *
+ * WHY A SECOND LADDER RATHER THAN A REUSE OF {@link MAGNITUDE_DISPLAY_LADDER}.
+ * They answer different questions and must not be collapsed (CLAUDE.md trap 21
+ * — two questions under one name is this estate's signature defect):
+ *   · `MAGNITUDE_DISPLAY_LADDER` → "how do I PRINT this compactly?"  — `8k`.
+ *   · this ladder                → "how do I SAY this to a person?" — `8 thousand`.
+ * A chip asking the user which magnitude they meant has to read as English:
+ * "Did you mean 8 or 8k?" is a worse question than "Did you mean 8 or 8
+ * thousand?", and the compact suffix is the one the display ladder exists to
+ * produce. Same key set, same derivation discipline, different projection.
+ *
+ * THE WORD IS THE LONGEST KEY FOR THAT MULTIPLIER, tie-broken
+ * lexicographically — the exact mirror of the display ladder's shortest-key
+ * rule, and a pure function of the key set for the same reason. Today that
+ * yields `thousand` (over `k`/`grand`), `million` (over `m`/`mn`), `billion`
+ * (over `b`/`bn`) and `trillion` (over `t`). A future rung spelled only in
+ * short form would surface as that short form rather than silently vanishing,
+ * which is the honest degradation: a missing rung is the failure mode this
+ * whole module exists to make impossible.
+ *
+ * Sub-1,000 multipliers have no rung — the literal reading of a number needs
+ * no word, and the caller states it plainly.
+ */
+export const MAGNITUDE_WORD_LADDER: ReadonlyArray<readonly [number, string]> = (() => {
+  const longestByMultiplier = new Map<number, string>();
+  for (const [key, multiplier] of Object.entries(MAGNITUDE_MULTIPLIERS)) {
+    if (multiplier < 1e3) continue;
+    const existing = longestByMultiplier.get(multiplier);
+    if (
+      existing === undefined ||
+      key.length > existing.length ||
+      (key.length === existing.length && key < existing)
+    ) {
+      longestByMultiplier.set(multiplier, key);
+    }
+  }
+  return [...longestByMultiplier.entries()]
+    .sort((a, b) => b[0] - a[0])
+    .map(([multiplier, key]) => [multiplier, key] as const);
+})();

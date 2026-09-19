@@ -40,6 +40,18 @@ const PRODUCER_REASONS = [
   "endpoint_demoted_duplicate",
   "disconnected_by_shape_gate",
   "constraint_direction_unstated",
+    // A stated limit with a direction and no usable threshold: asked about, and
+    // now answerable via `constraint_corrections`.
+    "constraint_value_unstated",
+    // A magnitude authored before the completion pass and diverging in scale from
+    // what completion then authored on the same factor. Witnessed live: an option
+    // read as £0.85 against £80,000 and £120,000.
+    "option_magnitude_scale_unreconciled",
+  // The two refusals a model-supplied constraint reference can produce. Both are
+  // "the projector declined to assert" rather than "something was lost", which is
+  // why both map to `conflict_resolved_conservatively` beside the reason above.
+  "constraint_target_not_measurable",
+  "constraint_target_unit_mismatch",
   "stated_target_not_represented_as_threshold",
   "stated_target_value_dropped",
   "parallel_intervention_conflict",

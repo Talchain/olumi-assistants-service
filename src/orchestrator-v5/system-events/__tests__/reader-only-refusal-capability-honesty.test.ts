@@ -102,7 +102,18 @@ describe('reader-only refusal — the capability denial must be true', () => {
     // because the fixture stopped reaching the branch rather than because the
     // property holds. If a writer lands and these become 'mutating', this REDs
     // here first and names why.
-    expect(READER_ONLY_KINDS.length).toBeGreaterThan(0);
+    // ⚠⚠ THIS WAS `toBeGreaterThan(0)` AND IT HAD TO CHANGE, because the set is
+    // now EMPTY — `structural_add_edge` was the last reader-only kind and left
+    // when its writer landed. Every kind `SYSTEM_EVENT_HANDLING` declares now has
+    // a writer or a defined non-writer posture.
+    //
+    // ⛔ ASSERTED EXACTLY, NOT DELETED. An empty set is the healthy reading TODAY
+    // and will stop being one the moment a contract version adds a kind CEE
+    // cannot yet write: that kind must land reader-first, and this REDs then, by
+    // name, so its refusal copy gets adjudicated instead of being parked. The
+    // opposite treatment — dropping the pin because it currently has nothing to
+    // say — is how this file would decay into agreeing with whatever is current.
+    expect(READER_ONLY_KINDS).toEqual([]);
     for (const kind of Object.keys(READER_ONLY_CHAT_ROUTE_OPS)) {
       expect(SYSTEM_EVENT_HANDLING[kind as keyof typeof SYSTEM_EVENT_HANDLING]).toBe(
         'reader_only_refusal',
@@ -111,16 +122,41 @@ describe('reader-only refusal — the capability denial must be true', () => {
   });
 
   describe('DIRECTION A — a capability we HAVE must not be denied', () => {
-    it.each(Object.keys(READER_ONLY_CHAT_ROUTE_OPS))(
-      '⭐ %s scopes the denial to the canvas and names the chat route',
-      (kind) => {
+    /**
+     * ⚠⚠ THIS WAS A `describe.skipIf` AND THAT WAS THE WRONG ANSWER TWICE OVER.
+     *
+     * The table is empty today — `structural_add_edge` was the last reader-only
+     * kind and left when its writer landed — and `it.each([])` is an error in
+     * vitest. Skipping the block avoided the error and cost two things:
+     *
+     *   1. A SKIPPED TEST IS INVISIBLE COVERAGE, which is exactly what the
+     *      repo's skip inventory exists to stop. It was green on the base commit
+     *      and red on mine; the ratchet was right and I was wrong.
+     *   2. It also skipped the VERBATIM SENTENCE PINS below, which do not depend
+     *      on the table at all and were still doing real work.
+     *
+     * One always-running case with an explicit empty branch keeps every
+     * assertion live, reports honestly when there is nothing to iterate, and
+     * adds no skip. The emptiness is separately guarded by the exact-table pin,
+     * which REDs the moment a kind is parked reader-only.
+     */
+    it('⭐ every reader-only kind scopes its denial to the canvas and names the chat route', () => {
+      const kinds = Object.keys(READER_ONLY_CHAT_ROUTE_OPS);
+      if (kinds.length === 0) {
+        // Not a silent pass: states WHY there is nothing to iterate, so a reader
+        // of the output can tell "no kinds" from "no assertions".
+        expect(SYSTEM_EVENT_HANDLING).toBeDefined();
+        expect(kinds).toEqual([]);
+        return;
+      }
+      for (const kind of kinds) {
         const text = textFor(kind);
         // The denial is about the SURFACE, not the capability.
-        expect(text).toContain('canvas');
+        expect(text, `${kind} does not scope its denial to the canvas`).toContain('canvas');
         // And the route that works is named, so the user is not left stuck.
-        expect(text).toContain('in chat');
-      },
-    );
+        expect(text, `${kind} names no chat route`).toContain('in chat');
+      }
+    });
 
     it('⭐ THE WITNESSED FALSE SENTENCES — bound VERBATIM, by identity', () => {
       // Value predicates could be satisfied by a different sentence (trap 19);
@@ -190,9 +226,11 @@ describe('reader-only refusal — the capability denial must be true', () => {
     });
 
     it('⭐ the route table is EXACT — it REDs if it grows or shrinks', () => {
-      expect(Object.keys(READER_ONLY_CHAT_ROUTE_OPS).sort()).toEqual([
-        'structural_add_edge',
-      ]);
+      // Empty, and pinned exactly so it REDs if it GROWS (a kind parked
+      // reader-only without adjudicating its copy) as loudly as it did when it
+      // shrank. See the precondition above for why emptiness is asserted rather
+      // than the pin being removed.
+      expect(Object.keys(READER_ONLY_CHAT_ROUTE_OPS).sort()).toEqual([]);
     });
   });
 
@@ -213,5 +251,56 @@ describe('reader-only refusal — the capability denial must be true', () => {
       expect(block.error_code).toBe('FEATURE_NOT_ENABLED');
       expect(block.details?.reason).toBe(`${kind}_reader_only`);
     }
+  });
+});
+
+/**
+ * ⭐ THE KIND THE SUITE ABOVE STRUCTURALLY CANNOT SEE.
+ *
+ * `READER_ONLY_KINDS` is derived from `SYSTEM_EVENT_HANDLING` — correctly, so it
+ * cannot drift. But `edge_strength_edit` is declared `'mutating'` there and only
+ * becomes a refusal at RUNTIME, when `dispatchSystemEvent` demotes it because
+ * `config.features.graphCas.rpcEnforce !== true`. So the one kind whose copy was
+ * actually false was invisible to the one suite written to catch false copy, and
+ * nothing but a single integration assertion pinned it.
+ *
+ * That is why this block is keyed on the kind directly rather than on a derived
+ * list: a runtime-demoted kind has no declaration to derive from. It is a
+ * deliberate exception to "derive, never re-list", and the derived precondition
+ * below states the exact reason it is allowed, so it REDs if that stops being
+ * true — e.g. if the kind is ever declared `reader_only_refusal`, at which point
+ * the suite above covers it and this block should be deleted.
+ */
+describe('edge_strength_edit — a runtime-demoted kind, refused without naming a gesture', () => {
+  it('⭐ PRECONDITION — this kind is NOT declared reader-only, which is why it needs its own pin', () => {
+    expect(SYSTEM_EVENT_HANDLING.edge_strength_edit).toBe('mutating');
+    expect(READER_ONLY_KINDS).not.toContain('edge_strength_edit');
+  });
+
+  /**
+   * One kind, two gestures since 0.50.0 (`direction_intent`). The copy table
+   * reads `event.kind` alone, so ANY axis it names is a guess — and it was wrong
+   * for every direction-only edit. Naming no axis cannot be false.
+   */
+  it.each(['strength', 'direction', 'helps', 'hurts'])(
+    'does not name the "%s" axis it cannot know the user changed',
+    (axis) => {
+      expect(textFor('edge_strength_edit')).not.toContain(axis);
+    },
+  );
+
+  it('still says what happened and that nothing changed', () => {
+    const text = textFor('edge_strength_edit');
+    expect(text).toContain('link');
+    expect(text).toContain("haven't changed the model");
+  });
+
+  it('keeps the machine reason, so the rollout floor stays distinguishable from B1/422', () => {
+    const block = refusalFor('edge_strength_edit').blocks[0] as {
+      error_code?: string;
+      details?: { reason?: string };
+    };
+    expect(block.error_code).toBe('FEATURE_NOT_ENABLED');
+    expect(block.details?.reason).toBe('edge_strength_edit_reader_only');
   });
 });

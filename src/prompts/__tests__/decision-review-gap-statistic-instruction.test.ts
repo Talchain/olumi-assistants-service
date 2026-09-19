@@ -67,8 +67,23 @@ const GAP_INSTRUCTIONS: readonly string[] = [
   '0.07 becomes "7 percentage points"',
 ];
 
-/** The ratified-correct statistic (PR #906's sentence family). */
-const WIN_PROBABILITY_INSTRUCTION = 'came out ahead in';
+/**
+ * The ratified-correct statistic: the option's OWN win probability.
+ *
+ * ⚠ THE WORDING MOVED, THE PROPERTY DID NOT (race-framing repair, 2026-09-10).
+ * PR #906's sentence family was "{label} came out ahead in {N}% of runs of this
+ * model". "came out ahead" is a race idiom, which Paul's standing ruling bars
+ * (never "winner", and no race framing at all), so it is now "{label} produced
+ * the best outcome in {N}% of runs of this model" — the SAME quantity, the same
+ * per-option grounding, stated without a contest. `win_probability` is the share
+ * of simulated runs in which that option's outcome was best; the replacement
+ * says exactly that and claims nothing more (it is NOT the probability of
+ * achieving the user's goal). See `decision-review-race-framing.test.ts`.
+ *
+ * `GAP_INSTRUCTIONS` above is UNCHANGED: it is a record of phrases these
+ * prompts once carried, and a record is append-only (CLAUDE.md trap 14b).
+ */
+const WIN_PROBABILITY_INSTRUCTION = 'produced the best outcome in';
 
 function decisionReviewDefault(): string {
   const text = getDefaultPrompts().decision_review;

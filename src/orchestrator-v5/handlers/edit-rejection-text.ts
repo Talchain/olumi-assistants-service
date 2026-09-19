@@ -8,18 +8,77 @@
  *   - Chips omit `action_type` so the boundary mapper drops to a plain
  *     prompt-replay button via the chip `message`/`prompt` field
  *     (BOUNDARY_ACTION_TYPES whitelist in edit-graph-dispatch.ts).
+ *   - ⭐ EVERY CHIP'S `prompt` NAMES A MOVE THE PRODUCT CAN ROUTE. See the
+ *     rule below; pinned as an exact set in
+ *     `tests/unit/orchestrator-v5/compose/recovery-chip-actionability.test.ts`.
  *
- * Used by both the deterministic template path (apply-template.ts) and
- * the LLM path (edit-graph.ts rejection sites).
+ * ⭐⭐ THE NO-DEAD-END RULE FOR RECOVERY CHIPS (2026-09-14, wire-witnessed).
+ *
+ * A chip here carries no `action_type`, so a click re-submits its `prompt` as
+ * a fresh user turn and routes normally. That makes the prompt the WHOLE of
+ * what the product receives. It must therefore NAME A MOVE: an instruction
+ * ("Add churn rate to the model.") or something to look at ("Show me what's in
+ * my model."). **A sentence ABOUT HOW THE USER WILL SPEAK NEXT is not a move.**
+ *
+ * Measured, scenario 9677de7d, staging 2026-09-14: request 809d0ee2 rejected an
+ * edit with `failure_code: OPERATION_DID_NOT_LAND` → `unknown_failure` → this
+ * module offered `prompt: 'Let me describe the change differently.'`. The user
+ * clicked it, and the product answered that the message "doesn't yet say what
+ * you want to update" — a dead end the product built, offered, and refused.
+ *
+ * This is the SAME HARM the egress invariant `no_chip_replays_the_user_message`
+ * (compose/looping-chip-guard.ts) exists to stop, in a DIFFERENT SHAPE: there
+ * the chip replays what the user said, here it says nothing at all. It is NOT
+ * fixed at egress, deliberately — that guard's predicate is structural (chip
+ * message === user message), whereas "carries no instruction" is a predicate
+ * over open natural language, and a chip's text can be MODEL-AUTHORED
+ * (coaching/post-analysis-wrapper.ts builds chip messages from review-card
+ * prose). A prose classifier there would be unbounded and would DROP chips,
+ * leaving the user with fewer options rather than better ones. The fix belongs
+ * where the log line says it does: in the composer.
+ *
+ * ⚠ CORRECTED 2026-09-07 — this header used to say *"Used by both the
+ * deterministic template path (apply-template.ts) and the LLM path"*.
+ * **`apply-template.ts` DOES NOT EXIST** anywhere in this repo (the only
+ * occurrences of that path were this comment and a doc quoting it), and
+ * `buildEditRejectionResponse` has exactly ONE non-test caller repo-wide:
+ * `edit-graph.ts:4320`, via `mapCodeToRejectionReason`. A false "who uses this"
+ * note is worse than none — it invents a second consumer whose needs a later
+ * change will try to respect.
+ *
+ * CONSEQUENCE, stated so it is not rediscovered: because that single caller is
+ * the only producer of these reasons, `parse_failure` and `entity_not_found`
+ * have ZERO live producers — `mapCodeToRejectionReason` cannot return either.
+ * Their copy below is unreachable. Left in place rather than deleted in this
+ * change (out of scope; rowed), but do not read them as evidence that some
+ * other path reaches this module.
  */
 
 import type { SuggestedAction } from "../../orchestrator/types.js";
 
+/**
+ * ⭐ THESE NAMES ARE CLAIMS ABOUT WHOSE FAILURE IT WAS, and the copy below is
+ * only honest if the mapping respects that.
+ *
+ * `structural_validation` says *the change you asked for could not be made
+ * safely* — a statement about the USER'S REQUEST. It was previously also
+ * serving `PLOT_UNAVAILABLE` (the analysis service was unreachable) and, via
+ * the `default` arm, five system-side failures. On every one of those the
+ * product told the user their own change was the problem when the problem was
+ * ours. `service_unavailable`, `internal_failure` and `unknown_failure` exist
+ * so those failures have somewhere true to go.
+ */
 export type EditRejectionReason =
   | 'too_many_operations'
   | 'structural_validation'
   | 'parse_failure'
-  | 'entity_not_found';
+  | 'entity_not_found'
+  /** An upstream service we depend on could not be reached. Not the user's doing. */
+  | 'service_unavailable'
+  /** We failed on our own side after the change was understood. Not the user's doing. */
+  | 'internal_failure'
+  /** Cause not established. Claims nothing about who or what was at fault. */
+  | 'unknown_failure';
 
 export interface EditRejectionResponse {
   assistantText: string;
@@ -29,6 +88,27 @@ export interface EditRejectionResponse {
 export interface EditRejectionContext {
   /** Optional human-readable label of the missing entity, used by `entity_not_found`. */
   label?: string;
+}
+
+/**
+ * The one recovery move that is routable on EVERY scenario state and is a real
+ * step for a user whose edit named the wrong thing: look at the model, then
+ * restate. Witnessed routable on staging 2026-09-14 (scenario 74a72412, a
+ * no-model state class — the product answered with the model's state rather
+ * than asking what was meant).
+ *
+ * Existing precedent for the same sentence as a recovery chip:
+ * `compose/handler-failure-responses.ts` `restateTargetPrompt()`.
+ *
+ * It replaced four chips whose prompts described the act of rephrasing
+ * ("Let me describe the change differently.") and so named nothing to route.
+ */
+function showModelChip(): SuggestedAction {
+  return {
+    label: "Show what's in my model",
+    prompt: "Show me what's in my model.",
+    role: 'facilitator',
+  };
 }
 
 export function buildEditRejectionResponse(
@@ -55,25 +135,75 @@ export function buildEditRejectionResponse(
         assistantText:
           "I wasn't able to make that change safely. " +
           "Can you describe what you'd like to add or change in simpler terms?",
-        suggestedActions: [
-          {
-            label: 'Describe what to change',
-            prompt: 'Let me describe the change differently.',
-            role: 'facilitator',
-          },
-        ],
+        suggestedActions: [showModelChip()],
       };
     case 'parse_failure':
       return {
         assistantText:
           "I had trouble understanding how to make that edit. " +
           "Could you try describing it differently?",
+        suggestedActions: [showModelChip()],
+      };
+    case 'service_unavailable':
+      // ⚠ THE FIRST CLAUSE IS THE NARROW ONE. "I couldn't reach the analysis
+      // service" is only true where we can PROVE no usable answer came back, so
+      // this reason is reachable ONLY via `classifyPlotFailureCode`, which
+      // admits a `PLoTTimeoutError` or a 5xx. A 400/413/429, a malformed 200, a
+      // never-sent request or an abort take `PLOT_REQUEST_FAILED` →
+      // `unknown_failure` instead. If you widen this arm's producers, re-check
+      // this sentence against the class you are adding — it asserts something
+      // specific about the world, and it used to be shipped over a domain where
+      // PLoT had usually answered.
+      //
+      // "nothing in your model has changed" is a VERIFIED claim, not a
+      // reassurance: every caller of this reason returns through
+      // `buildRejectionResult`, which sets `appliedGraph: null` +
+      // `wasRejected: true`; `isSuccessfulAppliedMutation` short-circuits on
+      // `wasRejected` at its first check; and the whole persistence region in
+      // edit-graph-dispatch.ts sits behind `if (successfulAppliedMutation)`.
+      // Nothing is written, so the sentence is true.
+      return {
+        assistantText:
+          "I couldn't reach the analysis service, so nothing in your model has changed. " +
+          'Try again in a moment.',
         suggestedActions: [
           {
-            label: 'Try a different description',
-            prompt: 'Let me try describing the edit differently.',
+            label: 'Try that change again',
+            prompt: 'Try that change again.',
             role: 'facilitator',
           },
+        ],
+      };
+    case 'internal_failure':
+      return {
+        assistantText:
+          'Something went wrong on my side, so nothing in your model has changed. ' +
+          'Try again in a moment — and if it keeps happening, describing the change a ' +
+          'different way may help.',
+        suggestedActions: [
+          {
+            label: 'Try that change again',
+            prompt: 'Try that change again.',
+            role: 'facilitator',
+          },
+          showModelChip(),
+        ],
+      };
+    case 'unknown_failure':
+      // Deliberately attributes nothing. The only things this copy asserts are
+      // the two that hold for EVERY rejection regardless of cause: the change
+      // did not go through, and the model is untouched.
+      return {
+        assistantText:
+          "I couldn't complete that change, and nothing in your model has changed. " +
+          'Try again in a moment, or describe the change a different way.',
+        suggestedActions: [
+          {
+            label: 'Try that change again',
+            prompt: 'Try that change again.',
+            role: 'facilitator',
+          },
+          showModelChip(),
         ],
       };
     case 'entity_not_found': {

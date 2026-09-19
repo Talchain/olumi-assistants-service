@@ -24,7 +24,7 @@
  *    against ID-shaped strings).
  *  - One short sentence, or one + one status-suffix sentence — never more.
  *    Maximum {@link MAX_HEADLINE_CHARS} characters including any suffix.
- *  - Uses "came out ahead in N% of runs of this model" (numbered bands),
+ *  - Uses "scored highest against your goal in N% of runs of this model" (numbered bands),
  *    "currently leads" (the number-free floor), "provisional", "sensitive to"
  *    — never "best" / "recommended" / "winner". The scope clause "of this
  *    model" is mandatory on every numbered band: the statistic is arithmetic
@@ -109,7 +109,7 @@ import {
 //
 // ⚠ THIS TAIL WAS ONCE ADMITTED WITHOUT ITS SLOT, by accident. Its directional
 // arm originally ended in this module's own `LEAD_CLAUSE_RE_SRC`
-// ("came out ahead in N% of runs of this model."), so `^.+?` swallowed the
+// ("scored highest against your goal in N% of runs of this model."), so `^.+?` swallowed the
 // whole summary and the CASE-E HEADLINE grammar matched it — measured, with a
 // control. The copy was changed to end "…in N% of runs." so the slot below is
 // genuinely load-bearing. Keep those two clauses structurally distinct.
@@ -132,14 +132,75 @@ import {
   UNSET_OPTION_EFFECT_DISCLOSURE_RE_SRC,
   UNSET_OPTION_EFFECT_DISCLOSURE_MAX_CHARS,
 } from './unset-option-effect-disclosure.js';
+// The run-level PARTICIPATION disclosure rides LAST. It is registered on the
+// withheld branch for the SAME reason as the tail above and by the SAME test:
+// it names no option, asserts no leader and makes no comparative claim — it
+// states only which parts of the user's own model the calculation did not
+// receive, and how many connections went with them. That is true on a withheld
+// turn, and a user whose model was silently reduced is owed it there most of
+// all.
+import {
+  ANALYSIS_PARTICIPATION_DISCLOSURE_RE_SRC,
+  ANALYSIS_PARTICIPATION_DISCLOSURE_MAX_CHARS,
+} from './analysis-participation-disclosure.js';
 // P1-3 (derive, don't mirror): the defence-in-depth content rules live in
 // their own leaf module so the scaffold-disclosure BUILDER validates its
 // composed suffix against the SAME functions this egress allowlist applies
 // — a builder-side mirror is exactly the drift class that silently
 // swallowed the disclosure for ID-shaped labels ("Plan E_2").
 import { passesAssistantTextContentDefences } from './assistant-text-defences.js';
+// SEPARABILITY (31 Aug 2026): "does this model tell the options apart at all?"
+// A leaf module rather than a predicate inlined here, because the question has
+// to be named APART from the five neighbouring ones it resembles — and in
+// particular apart from PROVENANCE ("did the user supply these numbers?"),
+// whose ruled answer is caveat-not-withhold and which is owned elsewhere. The
+// module header carries the full disclaimer list.
+import { isFieldUnseparable } from './option-separability.js';
 
-export const MAX_HEADLINE_CHARS = 220;
+/**
+ * ⚠⚠ 220 + THE COPY DELTA, AND THE DELTA IS DERIVED RATHER THAN TYPED.
+ *
+ * The cap was a flat 220 until 2026-09-07, when Paul's no-winner ruling
+ * replaced the lead clause's opening — "came out ahead in" (17 chars) became
+ * "scored highest against your goal in" (35). Every numbered headline got 18
+ * characters longer WITHOUT SAYING ANYTHING MORE.
+ *
+ * Left at 220 that is not a neutral copy change, and the tests said so:
+ * `analysis-result-headline.test.ts` measured a soft-confidence headline at
+ * 236 chars, and the "reduced suffix composes BEFORE the status suffix" case
+ * SHED from its numbered shape all the way down to Case E.
+ *
+ * ⭐ AND THE SHED'S DESTINATION IS THE POINT. Case E is `{label} currently
+ * leads.` — so holding the cap would have made the product fall back to the
+ * CONTEST vocabulary more often, on exactly the runs where the goal-framed
+ * sentence is most informative. The rewrite would have partially undone itself,
+ * silently, with a green suite and no error anywhere (a length shed is not a
+ * failure — it is a quieter sentence).
+ *
+ * So the budget absorbs the delta and the change is LENGTH-NEUTRAL BY
+ * CONSTRUCTION: no headline sheds that did not shed before, and none survives
+ * that did not survive before. Deriving the delta rather than writing `238`
+ * means a future rewording re-derives it instead of inheriting a magic number
+ * whose reason has been forgotten (CLAUDE.md trap 12: derive, don't mirror).
+ *
+ * This widens what `isAllowedRunAnalysisAssistantText` admits by the same 18
+ * characters, which is intended: the same sentence, in longer words.
+ */
+const LEAD_CLAUSE_OPENING = 'scored highest against your goal in';
+/**
+ * Length of the RETIRED opening (`came out ahead in`) — recorded as a NUMBER,
+ * not as a string constant, and deliberately so: a literal of the retired copy
+ * anywhere in this file trips
+ * `compose/__tests__/goal-framed-outcome-vocabulary.test.ts`, which scans this
+ * module's string and template literals. It is right to trip on one, so the
+ * retired wording lives in this comment where the scanner (which strips
+ * comments) can read it and the product cannot emit it.
+ */
+const RETIRED_LEAD_CLAUSE_OPENING_CHARS = 17;
+const LEAD_CLAUSE_COPY_DELTA_CHARS =
+  LEAD_CLAUSE_OPENING.length - RETIRED_LEAD_CLAUSE_OPENING_CHARS;
+
+export const MAX_HEADLINE_CHARS = 220 + LEAD_CLAUSE_COPY_DELTA_CHARS;
 
 // ============================================================================
 // Lane 3 narration-completeness tails (Mission B — provisional_doctrine_v0)
@@ -229,7 +290,26 @@ const ELIMINATED_MIN_COUNT = 2;
  * percentage (no raw decimal) so the defence-in-depth decimal rule holds.
  */
 function eliminatedSentence(count: number): string {
-  return ` ${count} options are effectively eliminated (each has less than a 1% chance of winning).`;
+  // ⚠ "CHANCE OF WINNING" IS RETIRED — Paul's ruling, 2026-09-07. This was the
+  // SECOND HALF of the sentence measured on deployed staging that day:
+  //
+  //   "Segment came out ahead in 99% of runs of this model. 3 options are
+  //    effectively eliminated (each has less than a 1% chance of winning)."
+  //
+  // The parenthesis is a definition of the elimination floor, so it inherited
+  // whatever frame the headline used — and "chance of winning" is a claim about
+  // a contest the product should never have been running. The statistic is
+  // untouched (`win_probability` < ELIMINATED_WIN_PROBABILITY_CEILING); it is
+  // now described as what it actually counts, in the same goal frame as
+  // `leadClause`.
+  //
+  // "effectively eliminated" is KEPT. It is about the field narrowing, not
+  // about designating a winner, and #1280's banned vocabulary spares it too —
+  // widening into it from this seat would be inventing a third vocabulary.
+  //
+  // Still an integer percentage ("1%", no raw decimal) so the defence-in-depth
+  // decimal rule holds, and still plural-safe (count >= ELIMINATED_MIN_COUNT).
+  return ` ${count} options are effectively eliminated (each scored highest in less than 1% of runs).`;
 }
 
 /**
@@ -288,7 +368,14 @@ export const MAX_ASSISTANT_TEXT_CHARS =
   // incomplete candidate set, contradict the stated objective AND have run past
   // an unset option effect. Same rule: budgeted from the builder's own worst
   // case, never hand-estimated.
-  UNSET_OPTION_EFFECT_DISCLOSURE_MAX_CHARS;
+  UNSET_OPTION_EFFECT_DISCLOSURE_MAX_CHARS +
+  // The participation disclosure rides LAST (matching the handler's append
+  // order) and can co-occur with all five above: a run can hold a status quo,
+  // carry an unevaluated constraint, rank an incomplete candidate set,
+  // contradict the stated objective, have run past an unset option effect AND
+  // have been computed on a model the user had excluded parts of. Same rule:
+  // budgeted from the builder's own worst case, never hand-estimated.
+  ANALYSIS_PARTICIPATION_DISCLOSURE_MAX_CHARS;
 
 /**
  * Minimum win_probability for the leading option before the headline may emit a
@@ -568,6 +655,13 @@ export type HeadlineFallbackReason =
   // the INTAKE, not about the run's evidence, and conflating them on the
   // dashboard would hide a drafter defect inside a producer statistic.
   | 'intake_options_missing'
+  // SEPARABILITY: the win-probability field does not separate the options, so
+  // the bare Case E leader assertion is withheld (see `option-separability.ts`
+  // for the question this answers and the five neighbouring questions it does
+  // NOT). Its own reason code — conflating it with `low_margin` or
+  // `soft_confidence` would hide a withhold inside two codes that today mean
+  // "a weaker headline was emitted", not "no leader was named".
+  | 'options_not_separable'
   | 'unknown';
 
 export interface HeadlineDescriptor {
@@ -838,8 +932,32 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
   // genuinely is a question about the gap. It is only the wrong thing to
   // DISPLAY. Deciding on the gap and reporting the leader's own probability is
   // the whole shape of this change.
+  // ⚠⚠ "CAME OUT AHEAD" IS RETIRED — Paul's ruling, 2026-09-07. The statistic
+  // and its scope clause are UNCHANGED; only the frame moved, from a contest
+  // between options to the user's own goal:
+  //
+  //   "There's never a winner… we should never really be saying 'winner'
+  //    anyway. This is not simply providing causal analysis results. This is
+  //    meant to be enhancing their critical and creative thinking."
+  //
+  // What the user is owed is what the most likely outcome is, how confident we
+  // can be in it, and WHICH OPTION IS MOST LIKELY TO ACHIEVE THEIR GOAL. "Came
+  // out ahead" answers a fourth question nobody asked — who won — and the
+  // sentence was measured on deployed staging on 2026-09-07 reading
+  // "Segment came out ahead in 99% of runs of this model."
+  //
+  // The wording is TAKEN FROM the UI half (DecisionGuideAI #1280, merged), not
+  // invented here: "Scored highest against your goal in 69% of simulated
+  // futures". One product, one vocabulary. This module's own gloss already
+  // agreed — `objective-contradiction.ts` explains the statistic as "how often
+  // an option scored highest on the goal", so this is the existing explanation
+  // promoted into the sentence it explains.
+  //
+  // ⚠ "OF THIS MODEL" IS STILL LOAD-BEARING and is deliberately kept over
+  // #1280's "of simulated futures" — see the note above. The scope clause and
+  // the goal frame answer different objections and neither replaces the other.
   const leadPercent = Math.round(winnerProbability * 100);
-  const leadClause = `came out ahead in ${leadPercent}% of runs of this model`;
+  const leadClause = `${LEAD_CLAUSE_OPENING} ${leadPercent}% of runs of this model`;
 
   // The number-free shed form, kept verbatim for the bands that must not carry
   // a statistic: the Case E floor (every enriching gate declined the run) and
@@ -1221,6 +1339,84 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
     }
   }
 
+  // ══════════════════════════════════════════════════════════════════════════
+  // SEPARABILITY — the last gate before the Case E floor, and the only place
+  // in this function that can decline to name a leader on the FIELD's shape.
+  // ══════════════════════════════════════════════════════════════════════════
+  //
+  // ⚠ THE DEFECT, MEASURED. Case E calls itself "the minimum non-overclaiming"
+  // output. It is not: `"{Label} currently leads."` NAMES A WINNER, and it does
+  // so with every statistic and every hedge stripped away — so the weakest
+  // evidence in this module produces the most confident-READING sentence in it.
+  // Witnessed on deployed CEE `3a79b40`, run `20260831T002215Z-fresh-6c5a96`,
+  // an open-ended retention brief whose four explanations came back at
+  // 0.3045 / 0.2895 / 0.2177 / 0.1883 with the producer's own
+  // `near_tie.is_tie: true` and `robustness.level: very_low`:
+  //
+  //     "Selling to the Wrong Customers currently leads."
+  //
+  // The same brief, re-run 15 times on that build, named FOUR different winners
+  // (6/4/3/2) with leader probabilities from 0.297 to 0.881. Which explanation
+  // the team was told to act on depended on the draw.
+  //
+  // ⭐ WHY HERE AND NOT AT THE TOP WITH THE OTHER FOUR WITHHOLDS. Placement is
+  // the substantive design decision in this change, not a detail.
+  //
+  // The four sibling withholds are facts about the RUN (a constraint broken,
+  // unchecked, unreconcilable; a candidate missing), true before any copy is
+  // chosen, so they preempt everything. Separability is different: the near-tie
+  // authority ALREADY says something honest and useful about a close field
+  // ("…but the analysis treats this as a close call"), and the soft-confidence
+  // band already caveats a weak leader. Preempting either would replace true,
+  // informative copy with the bland locked template — a loss to the user and no
+  // gain in honesty. That is trap 21 in its constructive form: a neighbouring
+  // authority answering its own question correctly must not be overridden by
+  // this one.
+  //
+  // So this gate fires ONLY where every other authority has already declined
+  // and the sole remaining output is the bare leader assertion. On the 21
+  // measured runs (7 class-a, 7 class-b, 7 class-c — the committed fixture)
+  // exactly ONE run changes, and it is the one quoted above. Every other run in
+  // all three classes is byte-identical, INCLUDING the two class-b runs whose
+  // fields are near-uniform but which reach honest near-tie copy first.
+  //
+  // ⚠ AND WHAT IT DOES NOT FIX, STATED SO NOBODY INHERITS THE OPTIMISM. Winner
+  // INSTABILITY BETWEEN RUNS is invisible from inside one envelope. The 0.881
+  // draw is decisive within itself and is untouched here. This gate stops the
+  // product asserting a leader its own field does not support; it does not make
+  // the leader reproducible, and reporting it against the winner-stability
+  // metric would be measuring the symptom the fix was not aimed at.
+  const separability = isFieldUnseparable(
+    winner.fieldProbabilities,
+    // ⭐ DERIVED, NOT MINTED. The contender band IS this module's existing
+    // meaningful-lead margin. That identity is what makes the safety property
+    // structural rather than measured: cases A/B/C/D all require a margin ≥
+    // MIN_LEAD_MARGIN, so a run that qualifies for a confident headline can
+    // have no rival inside the band, so this verdict cannot fire for it — at
+    // ANY value of MIN_FIELD_SEPARATION. A second constant here would have
+    // turned a proof into a corpus result.
+    MIN_LEAD_MARGIN,
+    // ⭐ The SAME ceiling that generates "N options are effectively eliminated
+    // (each scored highest in less than 1% of runs)" a few lines below. Passing
+    // it in keeps one definition of "cannot win" in this module and closes the
+    // zero-tail hole found at `9afa8699`: without it, appending two zero-win
+    // options to a withheld field moved the uniform reference from 1/4 to 1/6,
+    // raised separation 0.0727 → 0.1654, and handed the suppressed leader claim
+    // straight back — while the product was calling those same arms eliminated
+    // in the next sentence.
+    ELIMINATED_WIN_PROBABILITY_CEILING,
+  );
+  if (separability.unseparable) {
+    return {
+      text: null,
+      descriptor: buildDescriptor(null, 'options_not_separable', {
+        hasDriver,
+        hasFragility,
+        marginBucket,
+      }),
+    };
+  }
+
   // Case E (link-safe floor): we have a clean winner label but the
   // stronger cases didn't qualify or didn't fit. Output is the minimum
   // non-overclaiming "{Label} currently leads." (+ status suffix).
@@ -1374,6 +1570,19 @@ interface ResolvedWinner {
    * never mix probabilities across envelope shapes.
    */
   readonly eliminatedCount: number;
+  /**
+   * Every usable `win_probability` in the ACCEPTED source, the winner's
+   * included, in source order. The separability verdict's only input.
+   *
+   * SAME-SOURCE BY CONSTRUCTION, which is the point of collecting it here
+   * rather than re-reading the envelope at the call site: this module's
+   * cardinal rule is that the label, the winner's probability and every
+   * probability it is compared against come from ONE accepted source. A
+   * separability statistic assembled from a second read could mix a fresh
+   * `option_comparison[]` with a stale `results[]` and describe a field that
+   * never existed.
+   */
+  readonly fieldProbabilities: readonly number[];
 }
 
 /**
@@ -1472,7 +1681,18 @@ function resolveWinner(
         '';
       runnerUpLabel = sanitiseLabel(rawRunnerUpLabel, runnerUpId);
     }
-    return { label: cleanedLabel, winnerProb, runnerUpProb, runnerUpLabel, eliminatedCount };
+    // The whole field, from THIS accepted source only (see fieldProbabilities).
+    const fieldProbabilities = source
+      .map((r) => r.win_probability)
+      .filter((p): p is number => isUsableWinProbability(p));
+    return {
+      label: cleanedLabel,
+      winnerProb,
+      runnerUpProb,
+      runnerUpLabel,
+      eliminatedCount,
+      fieldProbabilities,
+    };
   }
   return null;
 }
@@ -1975,8 +2195,11 @@ const STATUS_SUFFIX_PATTERN = `(?:${PARTIAL_SUFFIX_RE_SRC}|${UNKNOWN_SUFFIX_RE_S
 // a variant emitted but absent from the grammar is rejected at egress and the
 // user silently receives the locked template instead.
 const NOT_ROBUST_RE_SRC = NOT_ROBUST_SENTENCES.map(escapeForRegex).join('|');
+// Moves in lockstep with `eliminatedSentence` — a variant emitted but absent
+// from the grammar is rejected at egress and the user silently receives the
+// locked template instead.
 const ELIMINATED_RE_SRC =
-  ' \\d{1,3} options are effectively eliminated \\(each has less than a 1% chance of winning\\)\\.';
+  ' \\d{1,3} options are effectively eliminated \\(each scored highest in less than 1% of runs\\)\\.';
 const REDUCED_SAMPLES_RE_SRC = escapeForRegex(REDUCED_SAMPLES_SUFFIX);
 // D-ask-1 (2.11 P0-1): the scaffold disclosure composes LAST — after every
 // narration tail and status suffix — mirroring the handler's
@@ -1993,7 +2216,7 @@ const REDUCED_SAMPLES_RE_SRC = escapeForRegex(REDUCED_SAMPLES_SUFFIX);
 // `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}${
 // intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}`
 // in the run_analysis handler.
-const TAIL_PATTERN = `(?:${NOT_ROBUST_RE_SRC})?(?:${ELIMINATED_RE_SRC})?(?:${REDUCED_SAMPLES_RE_SRC})?${STATUS_SUFFIX_PATTERN}(?:${SCAFFOLD_ANY_DISCLOSURE_RE_SRC})?(?:${CONSTRAINT_GAP_DISCLOSURE_RE_SRC})?(?:${INTAKE_OPTION_DISCLOSURE_RE_SRC})?(?:${OBJECTIVE_CONTRADICTION_RE_SRC})?(?:${UNSET_OPTION_EFFECT_DISCLOSURE_RE_SRC})?`;
+const TAIL_PATTERN = `(?:${NOT_ROBUST_RE_SRC})?(?:${ELIMINATED_RE_SRC})?(?:${REDUCED_SAMPLES_RE_SRC})?${STATUS_SUFFIX_PATTERN}(?:${SCAFFOLD_ANY_DISCLOSURE_RE_SRC})?(?:${CONSTRAINT_GAP_DISCLOSURE_RE_SRC})?(?:${INTAKE_OPTION_DISCLOSURE_RE_SRC})?(?:${OBJECTIVE_CONTRADICTION_RE_SRC})?(?:${UNSET_OPTION_EFFECT_DISCLOSURE_RE_SRC})?(?:${ANALYSIS_PARTICIPATION_DISCLOSURE_RE_SRC})?`;
 
 /** One disclosure family admitted on the locked-template (withheld) branch. */
 export interface TemplateSuffixDisclosureGrammar {
@@ -2080,6 +2303,24 @@ export const TEMPLATE_SUFFIX_DISCLOSURE_GRAMMARS: readonly TemplateSuffixDisclos
   {
     name: 'UNSET_OPTION_EFFECT_DISCLOSURE_RE_SRC',
     source: UNSET_OPTION_EFFECT_DISCLOSURE_RE_SRC,
+  },
+  // ⭐ REGISTERED, NOT EXCLUDED, and the test is the one stated above: does the
+  // tail make a claim the withhold just denied? This one states which parts of
+  // the user's own model the calculation did not receive and how many of their
+  // connections went with them. No option is named, no ranking is asserted, no
+  // leader is implied — so `template + tail` is a composition the handler can
+  // and does emit, and a withheld turn computed on a reduced model is exactly
+  // the turn where the fact matters most.
+  //
+  // ⚠ REGISTERING IT HERE IS ALSO WHAT KEEPS IT SALVAGED. Moving this entry to
+  // the exclusion list with a plausible reason leaves the completeness guard's
+  // union assertion GREEN while the withheld branch stops admitting it and the
+  // confirmation salvage stops rescuing it — green, and wrong. That half is
+  // pinned per-family in
+  // `tools/handlers/__tests__/run-analysis-participation-disclosure-wiring.test.ts`.
+  {
+    name: 'ANALYSIS_PARTICIPATION_DISCLOSURE_RE_SRC',
+    source: ANALYSIS_PARTICIPATION_DISCLOSURE_RE_SRC,
   },
 ];
 
@@ -2184,7 +2425,16 @@ const CAUTION_REASON_PATTERN =
 
 /**
  * Grammar source for the lead clause emitted by `leadClause` in
- * `computeHeadline` — "{label} came out ahead in {N}% of runs of this model".
+ * `computeHeadline` — "{label} scored highest against your goal in {N}% of runs
+ * of this model".
+ *
+ * ⚠ TWO RETIRED ALTERNATIVES NOW, AND NEITHER IS KEPT AS A TOLERATED LEGACY.
+ * "leads by {N} percentage points" went first (the category error, below).
+ * "scored highest against your goal in {N}% of runs of this model" went on 2026-09-07 under
+ * Paul's no-winner ruling — same statistic, same scope clause, goal frame
+ * instead of a contest. The rule is unchanged and is why this line moves in the
+ * SAME COMMIT as the emitter: a grammar that still admits the retired sentence
+ * leaves it one bug away from shipping again with the egress guard blessing it.
  *
  * ⚠ THE OLD ALTERNATIVE IS DELIBERATELY GONE, NOT KEPT AS A TOLERATED LEGACY.
  * This allowlist is the SECOND line of defence: anything it admits, a future
@@ -2199,7 +2449,10 @@ const CAUTION_REASON_PATTERN =
  * The percentage is `\\d{1,3}` — an integer, matching the content defences'
  * no-raw-decimals rule and the `Math.round` at the emission site.
  */
-const LEAD_CLAUSE_RE_SRC = 'came out ahead in \\d{1,3}% of runs of this model';
+// DERIVED from the emitter's own opening, so the grammar cannot drift from the
+// sentence it admits — the failure mode is silent (a rejected headline becomes
+// the locked template, with no error anywhere).
+const LEAD_CLAUSE_RE_SRC = `${LEAD_CLAUSE_OPENING} \\d{1,3}% of runs of this model`;
 
 const HEADLINE_GRAMMAR_REGEXES: ReadonlyArray<RegExp> = [
   // Case A: winner + margin + provisional caution naming the fragile reason.

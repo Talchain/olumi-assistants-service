@@ -24,11 +24,22 @@
  * honest explicit fallback NAMING the op — never a silent count.
  *
  * Copy-shape constraints (load-bearing — see route-v2's replay resolution):
- *   - never `set|update … to …` within the value-update gate's object
- *     window where avoidable: tunable updates say "change 'X' to 0.8"
- *     (`change` is not a clause-A verb in value-update-gate.ts), so
- *     `isValueUpdatePhrasing` stays false on the minted chip message and
- *     the route-level proposal-replay resolution keeps running;
+ *   - never `<clause-A verb> … to <value>`: the minted chip message is
+ *     REPLAYED by the user, so if `isValueUpdatePhrasing` claims it the
+ *     route-level proposal-replay resolution stops running and the replay
+ *     is handled as a fresh value edit instead of a CONFIRMATION of the
+ *     hold — a consent difference, not a cosmetic one.
+ *     ⚠ THIS COPY PREVIOUSLY SAID "change 'X' to 0.8" AND RELIED ON
+ *     `change` NOT BEING A CLAUSE-A VERB. It is one as of 2026-09-14
+ *     (it was excluded by mistake, which cost a live label-rename defect),
+ *     so every value-bearing clause here now uses `make <subject> <value>`
+ *     — no clause-A verb, and no ` to ` before the value. Clause A is
+ *     `set|update|change`; the safe shape is the ABSENCE of the
+ *     `verb … to <value>` structure, not any particular verb, because the
+ *     verb list has moved once and may move again.
+ *     Pinned in describe-changeset.test.ts with a contrast control
+ *     asserting a genuine user instruction still evaluates TRUE, so the
+ *     pin cannot pass by the gate simply going dead;
  *   - never `add … constraint` as a direct object (clause D): constraint-
  *     kind nodes render WITHOUT their kind word;
  *   - never the literal phrase "success target" (clause C): goal-threshold
@@ -262,16 +273,16 @@ function describeOp(
       const observedValue = formatChangeValue(observed.value, observed.unit);
       if (observedValue !== null) {
         return node.label !== null
-          ? `change '${node.label}' to ${observedValue}`
-          : `change a part of the model to ${observedValue}`;
+          ? `make '${node.label}' ${observedValue}`
+          : `make a part of the model ${observedValue}`;
       }
       // Goal target: goal_threshold (+ unit) — never the literal phrase
       // "success target" (value-update gate clause C).
       const threshold = formatChangeValue(v.goal_threshold, v.unit);
       if (threshold !== null) {
         return node.label !== null
-          ? `change the target for '${node.label}' to ${threshold}`
-          : `change a target to ${threshold}`;
+          ? `make the target for '${node.label}' ${threshold}`
+          : `make a target ${threshold}`;
       }
       // Description-only update.
       const keys = Object.keys(v);
@@ -308,7 +319,7 @@ function describeOp(
       const mean = formatChangeValue(strength.mean, undefined);
       if (from !== null && to !== null) {
         return mean !== null
-          ? `change the strength of the link from '${from}' to '${to}' to ${mean}`
+          ? `make the strength of the link from '${from}' to '${to}' ${mean}`
           : `adjust the link from '${from}' to '${to}'`;
       }
       return 'adjust a link';

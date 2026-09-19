@@ -157,6 +157,27 @@ const ContextPackAnalysisDriverSchema = z
   .object({
     factor_label: z.string(),
     sensitivity_value: z.number().finite(),
+    // The producer's verdict on whether resolving this factor has measured
+    // value (`./factor-investigation-licence.ts`). Optional: absent for an
+    // older producer and for a factor that genuinely IS worth investigating,
+    // both of which keep the pre-fix byte-shape. The enum is closed on purpose
+    // — a verdict this schema does not recognise must fail loudly here rather
+    // than reach the model as an unrendered token.
+    investigation_verdict: z
+      .enum([
+        'option_controlled',
+        'no_reordering_found',
+        'no_information_value',
+        'informative',
+        'unscored',
+      ])
+      .optional(),
+    investigation_basis_heuristic: z.literal(true).optional(),
+    // The producer's public-surface value_of_information for this factor.
+    // Additive disclosure — never a suppression input. Finite by construction
+    // (`readFiniteNumber` at the derivation site); pinned finite here too so a
+    // NaN can never reach the model.
+    investigation_voi: z.number().finite().optional(),
   })
   .strict();
 
@@ -237,6 +258,26 @@ const ContextPackAnalysisSchema = z
     // `false`), matching the pack's key-absence style (cf. conversation
     // `truncated`).
     evidence_gaps_lever_suppressed: z.literal(true).optional(),
+    /**
+     * The EVPPI channel's investigation-priority verdict
+     * (`../coaching/investigation-priority.ts`). A discriminated union so a
+     * malformed or unknown state fails the schema rather than reaching the
+     * display projection as an unrecognised object.
+     *
+     * `'not_assessed'` is a legal member of the TYPE but is never attached by
+     * the producer seam; it
+     * is admitted here so the schema describes the type rather than the
+     * producer's current habit — a schema narrower than its type is a trap
+     * for the next writer.
+     */
+    investigation_priority: z
+      .discriminatedUnion('kind', [
+        z.object({ kind: z.literal('named'), factorId: z.string().min(1), factorLabel: z.string().min(1), specificAction: z.string().min(1).nullable() }).strict(),
+        z.object({ kind: z.literal('below_resolution') }).strict(),
+        z.object({ kind: z.literal('incomplete') }).strict(),
+        z.object({ kind: z.literal('not_assessed') }).strict(),
+      ])
+      .optional(),
     goal_fit: ContextPackAnalysisGoalFitSchema.nullable().optional(),
     /**
      * Lane 30 fix 3 — top-level ordinal confidence tier (attested values
@@ -307,6 +348,23 @@ const ContextPackConversationSchema = z
   .strict();
 
 /**
+ * One standing objection the user has stated against a finding.
+ *
+ * ⚠ THE KEY IS `statement`, AND THE NAME IS LOAD-BEARING: `utils/logger-config.ts`
+ * redacts `statement` at depths 0-2, which is exactly where an element of
+ * `stated_objections` serialises. Renaming it would leave that boundary behind.
+ * Pinned by test rather than left to review.
+ */
+export const StatedObjectionSchema = z
+  .object({
+    finding_id: z.string().min(1),
+    analysis_id: z.string().min(1),
+    /** The user's reason, VERBATIM. Never truncated — the cap is on the COUNT. */
+    statement: z.string().min(1),
+  })
+  .strict();
+
+/**
  * RecentMutation shape — see `./recent-changes.ts`.
  *
  * Exported so the projection ↔ schema drift guard (see
@@ -335,6 +393,19 @@ export const RecentMutationSchema = z
     summary: z.string().max(RECENT_CHANGES_SUMMARY_MAX_CHARS),
     target_label: z.string().max(RECENT_CHANGES_SUMMARY_MAX_CHARS),
     transition: z.literal('node_label_changed').optional(),
+    /**
+     * The write-time evaluability verdict, carried onto every later turn. See
+     * `RecentMutation.constraint_not_checkable` in `./recent-changes.ts` for
+     * why absence is UNKNOWN rather than "this limit is fine", and why the
+     * verdict rides its own key instead of being appended to `summary`.
+     *
+     * The literal is the same token `ConstraintWriteAdmissibility.reason`
+     * carries, so the write receipt and the pack cannot drift into two
+     * vocabularies for one fact. This object is `.strict()`, so registering it
+     * here is what lets the projection's output through the assembler's
+     * non-prod runtime gate at all.
+     */
+    constraint_not_checkable: z.literal('target_records_no_value').optional(),
   })
   .strict();
 
@@ -759,13 +830,21 @@ const ContextPackObjectSchema = z
       .strict()
       .optional(),
     /**
-     * Exact marker for an unavailable persisted-analysis read. It is optional
-     * because healthy absence and every established state carry no marker;
-     * omission is never interpreted as permission or as proof of no analysis.
+     * Exact marker for a persisted-analysis read that the model must interpret
+     * rather than take at face value. Optional because healthy, settled states
+     * carry no marker; omission is never interpreted as permission or as proof
+     * of no analysis.
+     *
+     * `unavailable` — the read failed; the invariants below apply to it ALONE.
+     * `provisional_figures` — the read SUCCEEDED and the options are separable,
+     * but the admission caps the mode below `comparative_leader`. That is the
+     * population Paul ruled is **caveat, not withhold**, so this state
+     * deliberately carries a full `display_analysis`; the `unavailable`
+     * invariants below are keyed on the exact literal and do not reach it.
      */
     analysis_context: z
       .object({
-        status: z.literal('unavailable'),
+        status: z.enum(['unavailable', 'provisional_figures']),
       })
       .strict()
       .optional(),
@@ -859,6 +938,29 @@ const ContextPackObjectSchema = z
      * authoritative no-changes claim only when this is `complete`.
      */
     recent_changes_status: z.enum(['complete', 'capped', 'degraded']),
+    /**
+     * ⭐ WHAT THE USER HAS SAID THEY DISAGREE WITH, AND WHY — the standing
+     * objections projected from this turn's `finding_dissent` receipts.
+     *
+     * Named APART from `recent_changes` deliberately (trap 21). That field
+     * answers "what changed in the MODEL?"; this one answers "what has the
+     * HUMAN said they do not accept?". `finding_dissent` remains classified
+     * SKIP in `MUTATION_DISPATCH_SKIP` and that is correct — a dissent moves
+     * no graph state. This is not a correction to the skip; it is the second
+     * classification that was missing, so "not a model change" no longer
+     * collapses into "not context at all".
+     *
+     * ⚠ PRESENT ONLY WHEN THE USER HAS ACTUALLY OBJECTED — the key is ABSENT
+     * (never `[]`, never null) otherwise, so a scenario with no objections
+     * serialises byte-identically to pre-change packs and the prompt gains no
+     * section. An EMPTY ARRAY IS NOT EMITTED ON PURPOSE: unlike
+     * `recent_changes`, there is no completeness authority for this field, so
+     * an empty list would be an unearned "the user has objected to nothing"
+     * claim rather than an observation. Absence means UNKNOWN.
+     *
+     * See `context/stated-objections.ts` for the supersession rule and the cap.
+     */
+    stated_objections: z.array(StatedObjectionSchema).readonly().optional(),
     coaching: CoachingCacheSchema,
     compound_detected: z.boolean(),
     /**

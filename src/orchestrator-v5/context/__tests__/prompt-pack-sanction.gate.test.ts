@@ -60,11 +60,14 @@ import {
   GRAPH_CONTEXT_INSTRUCTION,
   DISPLAY_GRAPH_INSTRUCTION,
   ANALYSIS_CONTEXT_INSTRUCTION,
+  PROVISIONAL_FIGURES_INSTRUCTION,
+  MARGIN_MEANING_INSTRUCTION,
   CONTEXT_BUDGET_INSTRUCTION,
   FACTOR_VALUES_INSTRUCTION,
   OLDER_RELEVANT_FACTS_INSTRUCTION,
   RECENT_CHANGES_INSTRUCTION,
   RUN_DELTA_INSTRUCTION,
+  STATED_OBJECTIONS_INSTRUCTION,
 } from '../../routing/route-with-tool-use.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 // ONE shared extractor. This gate and the context-policy conformance anchor read
@@ -141,6 +144,9 @@ const CODE_OWNED_INSTRUCTIONS = [
   // operator-managed prompt.
   ['DISPLAY_GRAPH_INSTRUCTION', DISPLAY_GRAPH_INSTRUCTION],
   ['ANALYSIS_CONTEXT_INSTRUCTION', ANALYSIS_CONTEXT_INSTRUCTION],
+  ['PROVISIONAL_FIGURES_INSTRUCTION', PROVISIONAL_FIGURES_INSTRUCTION],
+  // Emitted by the same condition that serialises a non-null `analysis.margin`.
+  ['MARGIN_MEANING_INSTRUCTION', MARGIN_MEANING_INSTRUCTION],
   // Prompt coverage. Emitted by the SAME condition that serialises
   // `context_budget`, so a reduced graph/analysis projection cannot be read as
   // proof of absence. The maximal fixture reaches this through real graph
@@ -178,6 +184,14 @@ const CODE_OWNED_INSTRUCTIONS = [
   // to catch, live inside the gate. REGISTRATION_COMPLETENESS below now derives
   // the emission set from the source, so this list cannot fall short again.
   ['OLDER_RELEVANT_FACTS_INSTRUCTION', OLDER_RELEVANT_FACTS_INSTRUCTION],
+  // Standing objections. Emitted by the SAME condition that puts
+  // `stated_objections` on the pack. Code-owned for the reason every sibling
+  // above is: the served V5 routing prompt is an operator-managed PMS row, so
+  // this repo cannot sanction a new field there. The field is the user's OWN
+  // words about a finding they reject, and an unsanctioned field of that kind
+  // is the worst of the class — the model would be free to read an objection
+  // as a correction and quietly agree.
+  ['STATED_OBJECTIONS_INSTRUCTION', STATED_OBJECTIONS_INSTRUCTION],
   // Factor value state. Emitted by the SAME condition that puts `factor_values`
   // on the pack — same reasoning as its seven siblings above. PR #1122 shipped
   // the FIELD with no instruction at all; registering here puts the block under
@@ -357,9 +371,38 @@ function runAnalysisFact(
 }
 
 /** Newest-first, exactly how the turn loader delivers `prior_facts`. */
+/**
+ * FIXTURE_COMPLETENESS: `stated_objections` is a schema-declared key, so the
+ * maximal fixture must populate it or this gate narrows its own scope.
+ *
+ * ⚠ THE STATEMENT IS DELIBERATELY PROSE-LENGTH, and that is not cosmetic — it
+ * is what makes THE GATE cover this field at all. `proseLeaves` only collects
+ * strings of >= 4 words; a one-word objection scores ZERO prose leaves and the
+ * gate would pass the field by testing nothing. That is the same fixture-
+ * contingent blindness measured on `factor_values` above, and a real user's
+ * stated reason is prose by construction — the contract bounds it at 2000
+ * characters precisely because people write sentences.
+ *
+ * ⚠ APPENDED OLDEST (last) so the two-newest `run_analysis` selection that
+ * `run_delta` depends on is untouched by this addition.
+ */
+const FINDING_DISSENT_FACT = {
+  fact_type: 'finding_dissent',
+  fact_version: 1,
+  noop: false,
+  result: {
+    finding_id: 'strengthen:robustness',
+    analysis_id: 'hash-b',
+    statement:
+      'The ranking is called fragile because the salary estimate moves it, but our local salary band is fixed by a pay framework we renegotiate only in April, so that input cannot move this year.',
+    provenance: 'user_set',
+  },
+} as unknown;
+
 const RUN_DELTA_PRIOR_FACTS = [
   runAnalysisFact([['opt_local', 0.62], ['opt_offshore', 0.38]], '222', 'hash-b', '2026-07-25T00:00:00Z'),
   runAnalysisFact([['opt_local', 0.41], ['opt_offshore', 0.59]], '111', 'hash-a', '2026-07-24T00:00:00Z'),
+  FINDING_DISSENT_FACT,
 ];
 
 const ANALYSIS = {
@@ -645,6 +688,17 @@ const UNAVAILABLE_PACK = assembleMaximalPack({
   },
 });
 /**
+ * `analysis_context.status` is ONE field with mutually exclusive values, so a
+ * single maximal pack can never render both its instructions — which is exactly
+ * why the corpus below is a set of packs rather than one. This is the
+ * `provisional_figures` sibling: the analysis IS established and separable, and
+ * the admission merely caps the mode, so the pack keeps its full
+ * `display_analysis` and gains the qualification instruction.
+ */
+const PROVISIONAL_PACK = assembleMaximalPack({
+  modelFacingClaimSafety: { status: 'qualified', mode: 'quantified_provisional' },
+});
+/**
  * The message `buildUserMessage` ACTUALLY renders — kept, not discarded. The
  * gate previously parsed the pack out of this and threw the prompt away, which
  * is why it could certify a field as sanctioned by an instruction the prompt
@@ -652,6 +706,7 @@ const UNAVAILABLE_PACK = assembleMaximalPack({
  */
 const RENDERED = buildUserMessage(PACK, USER_MESSAGE);
 const UNAVAILABLE_RENDERED = buildUserMessage(UNAVAILABLE_PACK, USER_MESSAGE);
+const PROVISIONAL_RENDERED = buildUserMessage(PROVISIONAL_PACK, USER_MESSAGE);
 const SERIALISED = observeSerialisedPack(RENDERED);
 const UNAVAILABLE_SERIALISED = observeSerialisedPack(UNAVAILABLE_RENDERED);
 const LIVE_SHA = shortSha256(SERVED_PROMPT);
@@ -664,7 +719,7 @@ describe('prompt ↔ pack sanction gate', () => {
   });
 
   it('FIXTURE_COMPLETENESS — the fixture populates every schema-declared key (this gate can never be blind)', () => {
-    const unpopulated = findUnpopulatedFieldsAcross([PACK, UNAVAILABLE_PACK]);
+    const unpopulated = findUnpopulatedFieldsAcross([PACK, UNAVAILABLE_PACK, PROVISIONAL_PACK]);
     expect(
       unpopulated,
       `The gate's fixture does not populate ${unpopulated.join(', ')}. A field the fixture ` +
@@ -719,7 +774,7 @@ describe('prompt ↔ pack sanction gate', () => {
     ).toBeGreaterThan(0);
     expect(RENDERED).toContain('## ContextPack');
 
-    const renderedCorpus = `${RENDERED}\n${UNAVAILABLE_RENDERED}`;
+    const renderedCorpus = `${RENDERED}\n${UNAVAILABLE_RENDERED}\n${PROVISIONAL_RENDERED}`;
     const missing = CODE_OWNED_INSTRUCTIONS.filter(
       ([, text]) => !renderedCorpus.includes(text),
     ).map(([name]) => name);

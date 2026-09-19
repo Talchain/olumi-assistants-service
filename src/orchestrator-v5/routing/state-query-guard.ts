@@ -37,11 +37,15 @@
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import {
-  hasDispositionVerb,
+  hasSystemDisposition,
   isBriefAuditQuestion,
   tryBriefAuditAnswer,
 } from '../../cee/context-integrity/brief-audit-answer.js';
 import { asksForOwnJudgement } from './judgement-request.js';
+import { computeQuoteMask } from './edit-part-decomposition.js';
+// The ratified "your model records no value to test this limit" voice. A leaf
+// with no imports of its own, precisely so a non-coaching caller can read it.
+import { unmeasuredTargetReadbackSentence } from '../coaching/constraint-gap-copy.js';
 import {
   findRecentChangeAboutOriginSubject,
   isStructureOriginQuestion,
@@ -373,9 +377,34 @@ export interface TryStateQueryGuardInput {
   };
 }
 
+/**
+ * Brief and origin records can report facts, not propose the next step.
+ * Answering either as the entire reply discards the requested advice.
+ * Saved-edit effect readbacks keep their separate quantitative safeguards.
+ * This is an ANSWER-coverage check only; never use it to authorise a mutation.
+ */
+const ADVICE_REQUEST_PATTERNS: readonly RegExp[] = [
+  /\b(?:do|would|could|can)\s+you\s+(?:\w+\s+){0,2}(?:recommend|suggest|advise|propose)\b/i,
+  /(?:^|[.!?;:]|\band\b|\balso\b)\s*(?:please\s+)?(?:recommend|suggest|advise|propose)\b/i,
+  /\b(?:what|which|how)\b[^.!?;\n]*\b(?:should|would|could)\s+(?:i|we|you)\b/i,
+  // Require an actual question about a prospective action. A bare "we should"
+  // also occurs inside the ITEM being audited ("the margin we should protect")
+  // and is not evidence that the user requested advice. The explicit second-
+  // person question keeps "do you think I should use ..." out of the audit;
+  // the inverted modal keeps "should I use ..." on the same reasoning path.
+  /\b(?:do|would|could|can)\s+you\s+think\s+(?:that\s+)?(?:i|we)\s+(?:should|could)\b|\b(?:should|would|could)\s+(?:i|we)\b/i,
+];
+
 export function tryStateQueryGuard(
   input: TryStateQueryGuardInput,
 ): StateQueryGuardOutcome {
+  const quoteMask = computeQuoteMask(input.message);
+  const outsideQuotes = input.message.split('').map((ch, i) => quoteMask[i] ? ' ' : ch).join('');
+  // An embedded quotation is content under discussion, not a second request.
+  // A whole-message quotation is still the user's request.
+  const requestText = /[\p{L}\p{N}]/u.test(outsideQuotes) ? outsideQuotes : input.message;
+  const asksForAdvice = ADVICE_REQUEST_PATTERNS.some((pat) => pat.test(requestText));
+
   // Production ContextPacks always carry this status. Legacy/direct callers
   // may omit it, and malformed JS callers can still evade the TypeScript
   // boundary; both resolve to the weakest interpretation rather than silently
@@ -402,29 +431,13 @@ export function tryStateQueryGuard(
     if (FRESH_EDIT_BAIL_OUT_PATTERNS.some((pat) => pat.test(input.message))) {
       return { matched: false };
     }
-    // ⭐⭐ THE USER ASKED FOR OUR JUDGEMENT, AND A MANIFEST TALLY IS NOT ONE.
-    //
-    // Measured at `de254398`: *"Do you actually disagree with anything I
-    // said?"* satisfies the audit frame on `do you` and the brief referent on
-    // **"anything I said"**, and was answered with *"I found 8 stated figures.
-    // 0 of them are carried in the model…"* — a fidelity report to a request
-    // for disagreement, at `llm_calls: 0`. On the same scenario and build,
-    // *"Argue the opposite case as strongly as you can."* reached the reasoning
-    // layer and answered well. The capability was there; the phrasing decided
-    // whether the user reached it.
-    //
-    // ⚠ THE SECOND CONJUNCT IS LOAD-BEARING, NOT DEFENSIVE. Declining a GENUINE
-    // audit question re-opens loss class 7 (this module's header: explanation
-    // layers re-read the brief rather than the model). `hasDispositionVerb`
-    // keeps the decline to messages that attribute NO handling action to us —
-    // there is then nothing for the manifest to report on, whatever else the
-    // sentence contains. *"Do you agree you left out my deadline?"* keeps its
-    // manifest answer; both directions are pinned by execution in
-    // `__tests__/judgement-request.test.ts`.
-    if (
-      asksForOwnJudgement(input.message) &&
-      !hasDispositionVerb(input.message)
-    ) {
+    // `isBriefAuditQuestion` is deliberately broad for mutation protection:
+    // "do you" + "my brief" is enough. It is NOT sufficient permission to
+    // replace the answer with a numeric audit. Require an unquoted disposition
+    // attributed to the system, not a verb inside the user's proposed action.
+    // Keep the protective predicate above unchanged. A question that falls
+    // through here must not gain permission to edit the thing it asks about.
+    if (!hasSystemDisposition(requestText) || asksForAdvice) {
       return { matched: false };
     }
     if (input.briefAudit === undefined) return { matched: false };
@@ -489,7 +502,7 @@ export function tryStateQueryGuard(
     // those words. Swept across `src/` for *"best provenance answer"*: three
     // hits, being this citation, its twin in `judgement-request.ts`, and that
     // comment. Both citations pointed at bytes that do not exist.
-    if (asksForOwnJudgement(input.message)) {
+    if (asksForOwnJudgement(input.message) || asksForAdvice) {
       return { matched: false };
     }
     // ⭐⭐ THE DEFERRAL IS NARROWED TO THE CASE IT WAS WRITTEN FOR — measured on
@@ -718,7 +731,43 @@ function composeRecentChangeAnswer(
       ? `Recorded an edit to the saved model. That saved edit does not include a trustworthy before-and-after value and unit, so I can't quantify its effect without guessing.`
       : head.summary.trimEnd();
   const terminated = /[.!?…]$/u.test(receipt) ? receipt : `${receipt}.`;
-  return `${RECENT_CHANGE_RECORD_PREFIX}${terminated}${tail}`;
+  // ⭐⭐ THE RECEIPT MAY NOT BE READ BACK AS AN UNQUALIFIED CLAIM.
+  //
+  // `constraint_not_checkable` is the write-time evaluability verdict, carried
+  // onto every later turn on the very entry being quoted above. Until this
+  // line existed it had ZERO production readers: the receipt was re-emitted
+  // verbatim here at `llm_calls: 0`, so a user asking "did you add that
+  // constraint?" was told yes, six phrasings out of six, about a limit the
+  // analysis structurally cannot evaluate. The write disclosed it; every
+  // readback afterwards took it back.
+  //
+  // ⚠ THE TWO DIRECTIONS DO NOT SHARE A THRESHOLD, WHICH IS WHY THIS READS THE
+  // FIELD AND NOTHING ELSE. Saying "your limit will not be checked" about a
+  // limit that IS checked is a LIE and is the one error this disclosure must
+  // never make; saying nothing about one that is not checked is a GAP, and is
+  // merely the product as it shipped. So the ONLY thing that speaks is the
+  // verdict's own literal. ABSENCE IS UNKNOWN, NOT "this limit is fine" — the
+  // field is absent when the turn read no graph, when the target is not in the
+  // graph, when no verdict was derived AND when the limit is genuinely
+  // checkable, and only the last of those is evidence. On absence this path is
+  // byte-identical to what it emitted before, deliberately.
+  //
+  // ⚠ NOT gated on `head.action`. The field's contract is "the analysis cannot
+  // check this limit", and that claim is true of whatever entry carries it;
+  // adding an action conjunct would invent a second, narrower question under
+  // the same name. It is `summariseAddConstraint` that decides who carries it.
+  //
+  // ⚠ THIS IS A TYPED-FIELD READ, NOT A NEW RULE OVER NATURAL LANGUAGE. The
+  // guard mints no predicate here and asks no new question of the message; it
+  // forwards a verdict another authority already decided
+  // (`classifyConstraintWriteAdmissibility`, one function, now three moments).
+  const evaluability =
+    head.constraint_not_checkable === 'target_records_no_value'
+      ? ` ${unmeasuredTargetReadbackSentence()}`
+      : '';
+  // Order is load-bearing: the qualification belongs to the receipt it
+  // qualifies, so it goes BEFORE the history tail, which is about other edits.
+  return `${RECENT_CHANGE_RECORD_PREFIX}${terminated}${evaluability}${tail}`;
 }
 
 // V5 stale-aware explain recovery — neutral honest copy that contains
