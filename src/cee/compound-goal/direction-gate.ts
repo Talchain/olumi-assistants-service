@@ -99,8 +99,8 @@
  * successive corpora have each spelled negation the same way and each missed a
  * class the next one found (trap 22).
  *
- * ⚠ THE SHARED GRAMMARS ARE IMPORTED, NEVER COPIED: `AMT`, `FALL_VERB` and
- * `parseValue` from `extractor.ts`, `POSSIBILITY_MARKER_SRC` from
+ * ⚠ THE SHARED GRAMMARS ARE IMPORTED, NEVER COPIED: `AMT` and `parseValue`
+ * from `extractor.ts`, motion vocabulary from `motion-grammar.ts`, `POSSIBILITY_MARKER_SRC` from
  * `risk-polarity.ts`. A copied amount grammar is the hand-maintained mirror this
  * estate keeps paying for — the gate would drift from the producer it screens
  * and the drift would read as green.
@@ -125,7 +125,8 @@
  * Pure, no I/O, every function exported for direct test.
  */
 
-import { AMT, FALL_VERB, parseValue } from './extractor.js';
+import { AMT, parseValue } from './extractor.js';
+import { FALL_PLUS_SRC, RISE_PLUS_SRC } from './motion-grammar.js';
 import { POSSIBILITY_MARKER_SRC } from './risk-polarity.js';
 import { CURRENCY_SYMBOL_TO_CODE } from '../extraction/numeric-parser.js';
 
@@ -480,35 +481,6 @@ const NEG_PLUS_RE = new RegExp(`\\b(?:${inner(NEG_CORE_SRC)}|${inner(PREVENTION_
 
 /** Exported so the union assertion in the corpus spec can screen against it. */
 export const NEGATION_SCREEN_RE = NEG_PLUS_RE;
-
-/**
- * FALL verbs — the extractor's own list, plus the forms it omits.
- *
- * ⚠ `shrink` WAS MISSING AND IT COST AN INVERSION (round-1 review). "We must
- * keep cash runway from shrinking below 250000" failed T1-3, `keep` is
- * correctly not a negation, so the sentence screened CLEAN and `<= 250000`
- * shipped against a user who meant a floor. Its `falling` twin withheld
- * correctly — a discriminating pair, which is what made it a defect rather
- * than noise. Completeness is guarded by the external vocabulary sweep, not by
- * re-reading this line.
- */
-const FALL_PLUS_SRC = `(?:${inner(FALL_VERB)}|go(?:es|ing)?|went|sink(?:s|ing)?|sank|declin(?:e|es|ing)|decreas(?:e|es|ing)|slid(?:e|es|ing)?|` +
-  'shrink(?:s|ing)?|shrank|shrunk|contract(?:s|ing)?|dwindl(?:e|es|ing)|' +
-  'erod(?:e|es|ing)|deteriorat(?:e|es|ing)|worsen(?:s|ing)?|weaken(?:s|ing)?|' +
-  'diminish(?:es|ing)?|lessen(?:s|ing)?|sag(?:s|ging)?|soften(?:s|ing)?|' +
-  'taper(?:s|ing)?|reduc(?:e|es|ing)|fall(?:s|ing)?\\s+short|' +
-  // ── added round 1, from the EXTERNAL VOCABULARY SWEEP ──
-  'plummet(?:s|ing)?|plung(?:e|es|ing)|tumbl(?:e|es|ing)|collaps(?:e|es|ing)|' +
-  'crash(?:es|ing)?|crater(?:s|ing)?|reced(?:e|es|ing)|retreat(?:s|ing)?|' +
-  'subsid(?:e|es|ing)|wan(?:e|es|ing)|ebb(?:s|ing)?|backslid(?:e|es|ing)|' +
-  'degrad(?:e|es|ing)|regress(?:es|ing)?)';
-
-/** RISE verbs / upper-crossing forms, for the ceiling constructions. */
-const RISE_PLUS_SRC = '(?:exceed(?:s|ing)?|surpass(?:es|ing)?|overshoot(?:s|ing)?|' +
-  'go(?:es|ing)?\\s+(?:above|over|beyond|past)|ris(?:e|es|ing)\\s+above|' +
-  'climb(?:s|ing)?|grow(?:s|ing)?|escalat(?:e|es|ing)|balloon(?:s|ing)?|' +
-  'spiral(?:s|ling|ing)?|surg(?:e|es|ing)|spik(?:e|es|ing)|creep(?:s|ing)?\\s+(?:up|above)|' +
-  'inflat(?:e|es|ing)|swell(?:s|ing)?|top(?:s|ping)?)';
 
 /**
  * A bounded subject capture — the extractor's own shape, so no new window.

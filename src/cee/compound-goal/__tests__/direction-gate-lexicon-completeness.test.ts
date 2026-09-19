@@ -209,6 +209,21 @@ describe('ROADMAP 2.1051 — lexicon completeness (external vocabulary sweep)', 
     ).toBe(true);
   });
 
+  it('restores the stated floor for every already-covered movement verb', () => {
+    for (const verb of FALL_GERUNDS) {
+      expect(
+        wireFor(`We must keep cash runway from ${verb} below 250000.`),
+        `${verb}: withholding a false ceiling must not conceal the proven floor`,
+      ).toEqual([{ node_id: 'fac_cash_runway', operator: '>=', value: 250000 }]);
+    }
+  });
+
+  it.each(['rising', 'ballooning', 'surging', 'spiking', 'escalating', 'swelling', 'creeping up'])
+  ('restores the already-proven ceiling for %s without a competing parser floor', (verb) => {
+    expect(wireFor(`Keep marketing spend from ${verb} above 2000000.`))
+      .toEqual([{ node_id: 'fac_marketing_spend', operator: '<=', value: 2000000 }]);
+  });
+
   /* ---------------------------------------------------------------------
    * PREVENTION SWEEP — "<VERB> any move that takes X above N" must never
    * ship a floor. Sign-symmetric twin below.
