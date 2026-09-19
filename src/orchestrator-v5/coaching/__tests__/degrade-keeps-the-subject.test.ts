@@ -31,7 +31,11 @@ import {
   buildCoachingDegradeResponse,
   NEUTRAL_DEGRADE_TEXT,
 } from '../coaching-output-postcheck.js';
-import type { CoachingStatePack } from '../coaching-output-postcheck.js';
+// ⚠ FROM ITS OWNER, not from the module under test. `coaching-output-postcheck`
+// imports this type and does not re-export it, so importing it from there is a
+// TS2459 that the required check cannot see (`tsconfig.build.json` excludes
+// tests) and only `Typecheck Drift (ratchet)` catches.
+import type { CoachingStatePack } from '../../context/canonical-analysis-state.js';
 
 /** Fresh + usable: the arm where the analysis is fine and only the prose was unsafe. */
 const FRESH_PACK = {
