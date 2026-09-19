@@ -382,10 +382,29 @@ export function projectDraftRecords(
   // enum and every value below is a count. No value, no unit, no label, no
   // `source_quote`.
   const valueScaleByKind: Record<string, { declared: number; absent: number }> = {};
+  // ⭐⭐ `likelihood_by_kind` IS THE FIELD'S OWN JUSTIFICATION MADE COLLECTABLE.
+  //
+  // `likelihood` exists because ROUTING is falsifiable where WITHHOLDING is
+  // not: a populated value is countable over banked draws, whereas a correct
+  // suppression is invisible against a baseline where 135 of 28,055 risks carry
+  // any value at all. **Without a bucket the countable signal cannot be
+  // counted, and the argument for the field is hollow.**
+  //
+  // ⚠ Counted on the REBUILT records, exactly as `value_scale_by_kind` is — the
+  // same array the seam ships — so the number describes what actually left CEE
+  // rather than what the model emitted before the rebuild. That distinction is
+  // not academic here: the rebuild dropped this very field once, and a counter
+  // reading the pre-rebuild claims would have reported a healthy rate for a
+  // value no consumer ever received.
+  const likelihoodByKind: Record<string, { routed: number; absent: number }> = {};
   for (const claim of records.claims) {
     const bucket = (valueScaleByKind[claim.claim_kind] ??= { declared: 0, absent: 0 });
     if (claim.value_scale === undefined) bucket.absent += 1;
     else bucket.declared += 1;
+
+    const lb = (likelihoodByKind[claim.claim_kind] ??= { routed: 0, absent: 0 });
+    if (claim.likelihood === undefined) lb.absent += 1;
+    else lb.routed += 1;
   }
   log.info(
     {
@@ -395,6 +414,7 @@ export function projectDraftRecords(
       claim_count: records.claims.length,
       stated_count: records.stated_items.length,
       value_scale_by_kind: valueScaleByKind,
+      likelihood_by_kind: likelihoodByKind,
     },
     "Draft record set accepted at the seam",
   );

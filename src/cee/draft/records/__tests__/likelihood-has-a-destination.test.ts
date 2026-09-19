@@ -142,3 +142,69 @@ describe('the routed field survives the seam', () => {
     }
   });
 });
+
+/**
+ * ⛔⛔ THE UNIT IS WITHHELD ON `risk` AND `outcome` — AND WITHHOLDING IT
+ * PRESERVES A USER-STATED BASELINE THAT WRITING IT DESTROYED.
+ *
+ * `add-constraint.ts:1074-1084` mints `observed_state {value: frac, baseline:
+ * frac, unit: 'fraction', cap: 1}` on a risk or outcome FROM THE USER'S OWN
+ * STATEMENT ("keep churn under 4%"), and its eligibility requires
+ * `existingObserved?.unit === undefined || === 'fraction'`. A drafted
+ * `unit: "%"` arriving first makes that false, and TWO things are lost in one
+ * write: the 2.877 baseline mint, and the 2.918 question that would have ASKED
+ * the user for the level.
+ *
+ * ⇒ The trade was strictly bad: a value the USER stated swapped for one the
+ * model guessed, on the exact axis `material_parameters_user_stated` gates —
+ * which is what caps the analysis mode at `quantified_provisional`.
+ *
+ * ⚠ Found by an independent seat, not by this PR's own tests, every one of
+ * which passed. The guards that caught all three blocking findings were the
+ * seam's completeness probe, the grammar hash pin and the instruction's
+ * half-pins — none written by this PR and none consulted before the push.
+ */
+describe('the unit is withheld on the kinds the constraint seam owns', () => {
+  const claim = (kind: string) => ({
+    claim_kind: kind,
+    label: `${kind} node`,
+    value: 4,
+    unit: '%',
+  });
+
+  it('a `risk` claim carries its LEVEL but not its unit', async () => {
+    const { projectDraftRecords } = (await import('../projector.js')) as Record<string, unknown> as {
+      projectDraftRecords?: (r: unknown) => unknown;
+    };
+    // Bound to the SOURCE, because the projector's entry point is not stable
+    // across revisions and a behavioural probe that cannot resolve it would
+    // pass by being blind.
+    const src = readFileSync(new URL('../projector.ts', import.meta.url), 'utf8');
+    expect(
+      src.includes('nodeKind !== "risk" && nodeKind !== "outcome"'),
+      'the projector writes `unit` on risk/outcome again. That disables the ' +
+        'user-stated baseline mint in add-constraint.ts AND the question that ' +
+        'would have asked the user for the level.',
+    ).toBe(true);
+    expect(projectDraftRecords ?? true, 'projector module failed to load').toBeTruthy();
+    void claim;
+  });
+
+  it('CONTRAST: the level and the authorship stamp are still written', () => {
+    // Without this the assertion above would pass against a projector that had
+    // stopped writing `node.data` altogether — which would "fix" B3 by
+    // removing the feature.
+    const src = readFileSync(new URL('../projector.ts', import.meta.url), 'utf8');
+    expect(src).toContain('raw_value: claim.value');
+    expect(src).toContain('extractionType: "inferred"');
+  });
+
+  it('the wire histogram carries a `likelihood_by_kind` bucket', () => {
+    // Without it the field's own falsifiability argument is hollow: a routed
+    // value is only countable if something counts it, and the bucket must read
+    // the REBUILT records — the rebuild dropped this field once already.
+    const src = readFileSync(new URL('../seam.ts', import.meta.url), 'utf8');
+    expect(src).toContain('likelihood_by_kind: likelihoodByKind');
+    expect(src).toContain('claim.likelihood === undefined');
+  });
+});

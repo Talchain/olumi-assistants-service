@@ -3490,7 +3490,40 @@ function projectOnce(
           value: claim.value,
           raw_value: claim.value,
           extractionType: "inferred",
-          ...(claim.unit ? { unit: claim.unit } : {}),
+          // ⛔⛔ THE UNIT IS WITHHELD ON `risk` AND `outcome`, AND WITHHOLDING IT
+          // IS THE POINT — WRITING IT REPLACED A USER-STATED BASELINE WITH A
+          // MACHINE-GUESSED ONE.
+          //
+          // `add-constraint.ts:1074-1084` mints `observed_state {value: frac,
+          // baseline: frac, unit: 'fraction', cap: 1}` on a risk or outcome
+          // FROM THE USER'S OWN STATEMENT ("keep churn under 4%"), and its
+          // eligibility requires `existingObserved?.unit === undefined ||
+          // === 'fraction'`. A drafted `unit: "%"` arriving first makes that
+          // false, so TWO things are lost in one write: the 2.877 baseline mint,
+          // and the 2.918 question that would have ASKED the user for the level.
+          //
+          // ⇒ The trade is strictly bad. It swaps a value the USER stated for
+          // one the model guessed — on the exact axis
+          // `material_parameters_user_stated` gates, which is what caps the
+          // analysis mode at `quantified_provisional`. The level still travels;
+          // only the unit is withheld, and only on the two kinds that seam owns.
+          //
+          // ⚠ AND THE CONJUNCT IT WOULD HAVE BROKEN IS CORRECT, NOT A PROXY.
+          // The mint declares the IDENTITY SCALE (`'fraction'` + `cap: 1`) so
+          // PLoT's `deriveRange` resolves `explicit_cap [0,1]`; a second,
+          // different unit declaration on the same node is two scale claims
+          // about one quantity — the class that produces "a confident wrong
+          // number", which that function's own docblock names.
+          //
+          // ⚠ THE PRINCIPLED FIX IS NOT THIS ONE AND IS DELIBERATELY NOT TAKEN
+          // HERE. The draft path could emit the SAME convention the constraint
+          // seam mints (`{value: 0.04, unit: 'fraction'}` for "4%"), which would
+          // let both paths agree instead of one standing down. That is a scale
+          // CONVERSION on the seam this lane has been burned by four times, and
+          // it needs an outside corpus and an independent seat. Rowed, not slipped in.
+          ...(claim.unit && nodeKind !== "risk" && nodeKind !== "outcome"
+            ? { unit: claim.unit }
+            : {}),
         };
         node.observed_state = { value: claim.value, raw_value: claim.value };
       } else if (claim.unit !== undefined) {
