@@ -11,7 +11,10 @@ import {
   decideGoalTargetAsk,
   composeGoalTargetQuestion,
 } from '../decide-goal-target-ask.js';
-import type { GoalTargetCandidate } from '../../../cee/factor-extraction/goal-label-target.js';
+import {
+  deriveGoalTargetCandidate,
+  type GoalTargetCandidate,
+} from '../../../cee/factor-extraction/goal-label-target.js';
 
 const GOAL = { id: 'goal_mrr', kind: 'goal' as const };
 
@@ -137,5 +140,59 @@ describe('the decision never carries a value', () => {
     const d = decideGoalTargetAsk(candidate({ binding: 'governed' }), [GOAL]);
     expect(JSON.stringify(d)).not.toContain('value_user_units');
     expect(d).not.toHaveProperty('value_user_units');
+  });
+});
+
+describe('an UNLABELLED goal reaches the same neutral question', () => {
+  /**
+   * ⚠ THE CANDIDATE IS BUILT BY THE PRODUCER, NEVER HAND-AUTHORED. This file's
+   * own header records why: a previous hostile-case test FABRICATED
+   * `present_unbound` for the £64k brief instead of composing from what the
+   * producer actually returns, and passed while the real behaviour was wrong.
+   * A fixture written here is not evidence about the producer.
+   */
+  const CAPTURED_BRIEF =
+    "For our startup, should we target angel investors or focus only on funds that can provide the " +
+    "full amount for our pre-seed round? We're raising 1.3 million, and we need all of it. If we " +
+    "fall short, we'd have to completely replan our approach, which would be a very bad outcome. " +
+    "Ideally, we'd like to be offered more.";
+
+  const fromProducer = (label: string, brief: string): GoalTargetCandidate => {
+    const c = deriveGoalTargetCandidate('goal_mrr', label, brief);
+    if (c === undefined) throw new Error('producer returned no candidate — the precondition failed');
+    return c;
+  };
+
+  it('⭐ the witnessed 19 Sep goal now ASKS, where it previously produced no candidate at all', () => {
+    const c = fromProducer("Ideally, We'd Like to Be Offered More", CAPTURED_BRIEF);
+    // PRECONDITION PINNED IN-TEST: assert this really is the new arm, so the
+    // outcome below is provably that arm's doing and not another route's.
+    expect(c.binding).toBe('unlabelled_goal');
+
+    const d = decideGoalTargetAsk(c, [GOAL]);
+    expect(d.ask).toBe(true);
+  });
+
+  it('⛔ and carries NO unit — a figure elsewhere in the brief must not become a hint', () => {
+    const c = fromProducer("Ideally, We'd Like to Be Offered More", CAPTURED_BRIEF);
+    const d = decideGoalTargetAsk(c, [GOAL]);
+    expect(d).not.toHaveProperty('unit');
+  });
+
+  it('⛔ THE HOSTILE CASE: the rejected £64k reaches the same sentence and is never quoted', () => {
+    const c = fromProducer(
+      'Grow The Business',
+      'We rejected the proposal to reach £64k MRR. We are deciding how to grow.',
+    );
+    const d = decideGoalTargetAsk(c, [GOAL]);
+
+    expect(d.ask).toBe(true);
+    if (d.ask) {
+      expect(d.question).toBe(composeGoalTargetQuestion(c));
+      expect(d.question).not.toContain('64');
+      expect(d.question).not.toContain('£');
+    }
+    expect(d).not.toHaveProperty('unit');
+    expect(JSON.stringify(d)).not.toContain('64000');
   });
 });

@@ -1068,9 +1068,14 @@ export function goalLabelStatesUncarriedTarget(
  * `governed`: the round-5 governor would have minted it (S20 shows a REJECTED
  * proposal is in this class — never quote the figure to the user on this basis).
  * `present_unbound`: present in the brief but no governor claimed it.
- * Neither value licenses a write or a quoted figure; the candidate exists to ASK.
+ * `unlabelled_goal`: the LABEL names no figure at all, and the brief states at
+ * least one. There is no label figure to bind, so nothing here is even a
+ * candidate VALUE — it is evidence that the person has numbers in mind and has
+ * not been asked which one counts as success. `label_span` is empty exactly on
+ * this arm, and `unit` is always `count` so no unit hint can escape.
+ * NO value licenses a write or a quoted figure; the candidate exists to ASK.
  */
-export type GoalTargetCandidateBinding = "governed" | "present_unbound";
+export type GoalTargetCandidateBinding = "governed" | "present_unbound" | "unlabelled_goal";
 
 export interface GoalTargetCandidate {
   readonly goal_node_id: string;
@@ -1136,12 +1141,53 @@ export function deriveGoalTargetCandidate(
       reason: "governed",
     };
   }
-  if (
-    r.refusal === "no_goal_label" ||
-    r.refusal === "no_quantity_in_label" ||
-    r.refusal === "quantity_not_attested"
-  ) {
+  if (r.refusal === "no_goal_label" || r.refusal === "quantity_not_attested") {
     return undefined;
+  }
+
+  /* ── THE UNLABELLED GOAL, and it is the commonest goal this product drafts ──
+   *
+   * ⭐ MEASURED, 19 Sep 2026, twelve captures: `goal_target_stated` is FALSE in
+   * 9 of 12, and the product named a recommendation in exactly ONE session —
+   * the one whose goal the model happened to label "Reach £30k MRR Within 18
+   * Months", so the figure sat inside the LABEL. Whether a person is asked for
+   * their own success criterion was decided by how the model phrased a display
+   * string. On the witnessed session the goal was labelled "Ideally, We'd Like
+   * to Be Offered More" — the brief's softest final clause — while the brief
+   * said "We're raising 1.3 million, and we need all of it." The refusal was
+   * correct and ended the chain; the chain is what was wrong.
+   *
+   * ⛔ THIS WIDENS WHEN WE ASK, NEVER WHAT WE WRITE, and that is the whole
+   * safety case under Codex's #1328 ruling. `composeGoalTargetQuestion`
+   * IGNORES the candidate and returns a constant that quotes nothing; the
+   * pending `elicit_goal_target` record carries no value field; and the number
+   * that becomes `goal_threshold` is parsed from the USER'S ANSWER through the
+   * one canonical writer. The canonical hostile case — "We rejected the
+   * proposal to reach £64k MRR." — reaches exactly the same neutral question.
+   *
+   * ⚠ `unit` IS `count` DELIBERATELY, NOT AS A PLACEHOLDER. There is no label
+   * figure, so there is no unit we are entitled to. `count` is this module's
+   * bare-figure unit and `isUserEstablishedUnit` rejects it BY NAME, so this
+   * arm cannot carry a unit hint inferred from an unrelated figure in the
+   * brief. `label_span` is empty for the same reason: the label named nothing.
+   *
+   * The module's standing rule is untouched — no figure in the brief, no
+   * candidate. We ask because the person has numbers in mind, not to propose
+   * one of them. */
+  if (r.refusal === "no_quantity_in_label") {
+    const briefText = canonicalise(typeof brief === "string" ? brief : "");
+    const stated = scanQuantities(briefText).filter((q) => !q.temporal);
+    const first = stated[0];
+    if (first === undefined) return undefined;
+    return {
+      goal_node_id: goalNodeId,
+      value_user_units: toUserUnits(first.value, first.unit),
+      unit: "count",
+      label_span: "",
+      brief_span: first.matchedText,
+      binding: "unlabelled_goal",
+      reason: "no_quantity_in_label",
+    };
   }
   const att = firstAttestedLabelQuantity(
     typeof goalLabel === "string" ? goalLabel : "",
