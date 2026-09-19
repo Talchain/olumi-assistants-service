@@ -21,6 +21,7 @@ export function hasBaselineIndependentMutationWarrant(message: string): boolean 
   return detectMutationWarrant({
     message: baselineIndependentInstruction(message),
     turnSource: 'message',
+    chipActionType: undefined,
     isConfirmResume: false,
   }, new Set()).granted;
 }
