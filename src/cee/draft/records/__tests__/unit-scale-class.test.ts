@@ -477,6 +477,9 @@ describe("deriveFactorScaleFrame — the single consumer, behaviour pinned", () 
  * admits only a bounded unit_interval pair whose raw/calculation values agree,
  * with no existing baseline/cap. These storage checks must not be broadened to
  * the display classifier's vocabulary or used to infer baseline authority.
+ * The native-intervention receipt adds one site (45 across 24 files): it keeps
+ * the existing exact-'%' display convention separate from native raw quantity
+ * carriage, because percentage raw records still use two input conventions.
  *
  * The set is pinned so it REDs if it GROWS (a new bare equality is added) or
  * SHRINKS (one is migrated without recording it). A gap recorded in the suite is
@@ -491,6 +494,7 @@ const KNOWN_INLINE_PERCENT_EQUALITY_SITES: Readonly<Record<string, number>> = {
   "cee/factor-extraction/display-value.ts": 7,
   "cee/factor-extraction/enricher.ts": 3,
   "cee/factor-extraction/index.ts": 4,
+  "cee/transforms/analysis-ready.ts": 1,
   "cee/transforms/graph-data-integrity.ts": 2,
   "cee/unified-pipeline/stages/repair/deterministic-sweep.ts": 1,
   "cee/unified-pipeline/stages/repair/unreachable-factors.ts": 3,
