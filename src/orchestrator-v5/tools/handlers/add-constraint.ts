@@ -1134,6 +1134,17 @@ export function createAddConstraintHandler(): HandlerFn {
       // single-number argument the goal limb documents (transforms/schema-v3).
       const effectiveRowFrame = statedValueFrame ?? inheritedValueFrame;
       const existingObserved = targetNode.observed_state;
+      // Draft percentages carry a unit-interval calculation value and a raw
+      // display percentage. Only that declared, corroborated pair is compatible.
+      const declaredPercentLevel = existingObserved?.unit === '%' &&
+        existingObserved.declared_scale === 'unit_interval' &&
+        existingObserved.cap === undefined &&
+        Number.isFinite(existingObserved.value) &&
+        existingObserved.value >= 0 && existingObserved.value <= 1 &&
+        typeof existingObserved.raw_value === 'number' &&
+        Number.isFinite(existingObserved.raw_value) &&
+        existingObserved.raw_value >= 0 && existingObserved.raw_value <= 100 &&
+        valuesMatch(existingObserved.value, existingObserved.raw_value / 100);
       const mintEligible =
         effectiveRowFrame === 'level' &&
         (targetNode.kind === 'outcome' || targetNode.kind === 'risk') &&
@@ -1143,7 +1154,7 @@ export function createAddConstraintHandler(): HandlerFn {
         targetNode.goal_threshold_cap === undefined &&
         graph.edges.some((e) => e.to === targetId) &&
         existingObserved?.baseline === undefined &&
-        (existingObserved?.unit === undefined || existingObserved.unit === 'fraction') &&
+        (existingObserved?.unit === undefined || existingObserved.unit === 'fraction' || declaredPercentLevel) &&
         (existingObserved?.cap === undefined || existingObserved.cap === 1);
       // Review B2, WIDENED by 2.960 R2 — the statement must name THIS target
       // unambiguously among EVERY other labelled node, whatever its kind. The
@@ -1380,6 +1391,7 @@ export function createAddConstraintHandler(): HandlerFn {
               cap: 1,
               raw_value: frac,
               source: 'brief_extraction',
+              extractionType: 'explicit',
             };
           }
         }
