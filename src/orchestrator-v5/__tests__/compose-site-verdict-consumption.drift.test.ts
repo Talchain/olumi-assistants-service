@@ -378,6 +378,10 @@ const TURN_EXECUTOR_SITES: Readonly<Record<string, RegisteredSite>> = {
   noPendingAssistantText: { stance: 'structural', why: 'Pending-action recovery template.' },
   '"The analysis is no longer fresh': { stance: 'structural', why: 'Literal staleness copy.' },
   expiredAssistantText: { stance: 'structural', why: 'Pending-expiry template.' },
+  expiryText: {
+    stance: 'structural',
+    why: 'Expired-constraint renewal or safe-restatement copy. Names the previously offered bound and its frame, explicitly says nothing changed, and requests fresh consent or a restated target. buildExpiredConstraintRenewal reads graph identities, saved constraints and proposal history; it does not read an analysis result or make a ranking or constraint-verdict claim.',
+  },
   ambiguousAssistantText: {
     stance: 'structural',
     count: 2,
@@ -1178,7 +1182,9 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // turn-executor.ts — the competing-ask branch, the re-ask's sibling on the
     // same pre-route. Explicit `assistant_text:` form, so keyable by the same
     // regex and in scope here.
-    expect(compared, 'the re-key comparison compared nothing').toBe(44);
+    // Expired-constraint renewal adds the explicit assistant_text: expiryText
+    // site; the old regex keys it too, so the comparison includes that site.
+    expect(compared, 'the re-key comparison compared nothing').toBe(45);
   });
 
   it('THE DOMAIN IS DERIVED: scanned ∪ unscanned == every compose file in src/', () => {
@@ -1407,8 +1413,10 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // instance of the mechanism working — and the author had run the whole
     // affected-set locally and still missed it, which is the argument for
     // deriving the domain rather than listing it, once more.
-    expect(sites.length, 'total compose SITES across every scanned file').toBe(50);
-    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(46);
+    // Expired-constraint renewal adds one structural site and one distinct key
+    // in the already-scanned turn-executor.ts; no existing site is reclassified.
+    expect(sites.length, 'total compose SITES across every scanned file').toBe(51);
+    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(47);
     expect(Object.keys(COMPOSE_SITE_REGISTER).sort()).toEqual([
       'compose/configure-option-clarify-response.ts',
       'compose/duplicate-option-label-response.ts',
@@ -1470,6 +1478,11 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // Same shape as the gated-site evidence check: one required source fragment
     // per claim, chosen so that removing the property makes THIS test red.
     const STRUCTURAL_EVIDENCE: ReadonlyArray<readonly [string, string, string]> = [
+      [
+        'expiryText',
+        '../routing/expired-constraint-renewal.ts',
+        'readonly graphNodes: readonly { readonly id: string; readonly kind: string; readonly label?: string | null }[];',
+      ],
       // ⚠ ROADMAP 2.229 — the `freshFollowupOutcome.assistant_text` row was
       // REMOVED from this list together with its compose site: the
       // fresh-analysis follow-up guard was retired by founder ruling and its

@@ -700,6 +700,10 @@ describe('compound baseline answer and independently requested limit', () => {
 });
 
 describe("the product's offered answer commits, and licenses nothing else", () => {
+  beforeEach(() => {
+    servedGraph = mintEligibleGraph();
+  });
+
   /** Extracted from the copy the product emits, never transcribed. */
   const offered = (() => {
     const copy = formatBaselineAskCollision({
@@ -846,6 +850,10 @@ describe("the product's offered answer commits, and licenses nothing else", () =
  * changing ONLY the message — and it must still write 30%.
  */
 describe('an answer alone states a current level, never a new limit', () => {
+  beforeEach(() => {
+    servedGraph = mintEligibleGraph();
+  });
+
   const offered = (() => {
     const copy = formatBaselineAskCollision({
       targetLabel: TARGET_LABEL,

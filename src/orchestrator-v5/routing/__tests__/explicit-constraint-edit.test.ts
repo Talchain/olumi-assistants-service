@@ -27,6 +27,14 @@ function expectBound(message: string, target: string, constraintType: string, va
 }
 
 describe('explicit constraint edit grounding', () => {
+  it.each([
+    'I actually only have a budget of $40,000 for an assistant.',
+    'Somewhere between 20000 and 30000.',
+    'Churn is currently 30%.',
+  ])('leaves statements and answer-only ambiguity to their existing routes: %s', (message) => {
+    expect(resolveExplicitConstraintEdit(message, graph)).toEqual({ status: 'unmatched' });
+  });
+
   it('routes the complete funding floor to a constraint, with native amount preserved', () => {
     expectBound('Funding Amount Secured must be at least £1.3m.', 'funding', 'at_least', 1_300_000, '£');
   });

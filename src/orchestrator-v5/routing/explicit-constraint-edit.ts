@@ -79,9 +79,10 @@ export function resolveExplicitConstraintEdit(
       }
     }
     if (!direct && !copiedOffer) continue;
-    claimed = true;
     const warrant = detectMutationWarrant({ message, turnSource: 'message', chipActionType: undefined, isConfirmResume: false,
       modelNodeLabels: graph.nodes.flatMap((node) => node.label ? [node.label] : []) }, new Set());
+    if (direct && !copiedOffer && !warrant.granted) continue;
+    claimed = true;
     const quantity = soleStatedQuantityInSpan(message);
     const targetUnits = [target?.data?.unit, target?.observed_state?.unit, target?.observed_state?.metadata?.unit]
       .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0);
