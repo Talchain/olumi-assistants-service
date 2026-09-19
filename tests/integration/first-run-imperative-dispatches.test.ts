@@ -185,6 +185,33 @@ describe('FIRST-RUN FALLBACK — a typed run instruction reaches run_analysis', 
     expect(telemetry.stages_completed).not.toContain('validate');
   });
 
+  it('⛔ A CONDITIONAL INSTRUCTION IS NOT AN INSTRUCTION TO ACT NOW', async () => {
+    // Codex's source-derived counterexample on this change. The first-run
+    // patterns match the prefix "Run the analysis" and the start-of-message
+    // left context licenses it, so without the deferral veto the product would
+    // EXECUTE on a sentence whose whole point is to wait. Strictly worse than
+    // a miss: a declined instruction costs a clarification; an executed
+    // deferral runs the analysis the user asked us to hold.
+    const routingAdapter = mockAdapter(textResult('Understood — I will wait.'));
+    const { telemetry } = await runTurnExecutor(
+      payload('Run the analysis only after I confirm.'),
+      'req-first-run-deferred',
+      { routingAdapter, graphState: configuredGraph() },
+    );
+    expect(telemetry.turn_class).not.toBe('handler');
+    expect(telemetry.stages_completed).not.toContain('validate');
+  });
+
+  it('⛔ "Run the analysis when I say so." is held too — the veto is not one phrasing', async () => {
+    const routingAdapter = mockAdapter(textResult('Understood.'));
+    const { telemetry } = await runTurnExecutor(
+      payload('Run the analysis when I say so.'),
+      'req-first-run-deferred-2',
+      { routingAdapter, graphState: configuredGraph() },
+    );
+    expect(telemetry.turn_class).not.toBe('handler');
+  });
+
   it('a graph with NO option node declines rather than synthesising an unservable proposal', async () => {
     const routingAdapter = mockAdapter(textResult('There is nothing to compare yet.'));
     const emptyGraph = {

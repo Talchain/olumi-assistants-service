@@ -965,6 +965,51 @@ const IMPERATIVE_FIRST_RUN_PATTERNS: readonly RegExp[] = [
 ];
 
 /**
+ * ⛔ DEFERRAL / CONDITION VETO — an instruction the user has made CONDITIONAL
+ * is not an instruction to act now.
+ *
+ * Found by independent review (Codex, CHANGES_REQUIRED on this change), from a
+ * source-derived counterexample rather than from a corpus:
+ *
+ *     "Run the analysis only after I confirm."
+ *
+ * The first-run patterns match the prefix "Run the analysis", and the
+ * start-of-message left context licenses it, so without this veto the product
+ * would EXECUTE on a sentence whose whole point is to wait. That is the
+ * consent failure the negation veto already guards one direction of, and it is
+ * strictly worse than a miss: a declined instruction costs a clarification,
+ * an executed deferral runs the analysis the user asked us to hold.
+ *
+ * ⚠ SAME ACCEPTED OVER-REACH AS THE NEGATION VETO, and for the same reason. It
+ * is a bare word-PRESENCE test, not a scoped one, so a genuine unconditional
+ * instruction that merely CONTAINS one of these words is declined too — "Run
+ * the analysis once more" is already handled by the re-run arm, but e.g. "Run
+ * the analysis, if you can" falls through to the LLM router exactly as it did
+ * before this seam existed. That is the SAFE direction. Scoping it properly
+ * needs clause structure, which is the same problem this file's negation veto
+ * already declines to attempt with a wider regex. Do not attempt it here.
+ *
+ * ⚠ KNOWN GAP, NAMED, NOT CLOSED HERE: this veto is applied by
+ * {@link scanImperativeInstruction}, which only {@link looksLikeImperativeRunRequest}
+ * consults. {@link looksLikeImperativeRerun} keeps its own body and its own
+ * behaviour BYTE-UNCHANGED, because the pre-route it feeds is deliberately not
+ * altered by this change — so "Re-run the analysis only after I confirm."
+ * remains claimable by that older path. That is a PRE-EXISTING defect of the
+ * same class, now visible; closing it is its own change with its own evidence.
+ */
+const RUN_DEFERRAL_VETO_PATTERNS: readonly RegExp[] = [
+  // Explicitly conditional on a later act by the user.
+  /\bonly\s+(?:after|when|once|if)\b/i,
+  /\b(?:after|once|when|unless)\s+(?:i|we|you)\b/i,
+  /\bif\s+(?:i|we|you)\s+(?:confirm|say|agree|approve|decide|tell)\b/i,
+  // Deferred by ordering: "first …, then run", "before running".
+  /\bbefore\s+(?:i|we|you)\b/i,
+  /\bwait\s+(?:until|for|till)\b/i,
+  /\bhold\s+off\b/i,
+  /\bnot\s+yet\b/i,
+];
+
+/**
  * The shared scan. ONE implementation of the veto order and the
  * every-occurrence + verb-position rule, so the two imperative predicates
  * cannot drift on what counts as a refusal, a question or a verb position.
@@ -983,6 +1028,11 @@ function scanImperativeInstruction(
     if (re.test(trimmed)) return false;
   }
   for (const re of RERUN_INTERROGATIVE_VETO_PATTERNS) {
+    if (re.test(trimmed)) return false;
+  }
+  // A CONDITIONAL instruction is not an instruction to act now. See the
+  // RUN_DEFERRAL_VETO_PATTERNS header for the counterexample this closes.
+  for (const re of RUN_DEFERRAL_VETO_PATTERNS) {
     if (re.test(trimmed)) return false;
   }
   // Every OCCURRENCE is checked, not merely the first: one message can carry a
