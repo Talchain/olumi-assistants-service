@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { extractCompoundGoals } from '../extractor.js';
+import { deriveStatedConstraintFrame } from '../constraint-frame-evidence.js';
 
 const extract = (input: string) => extractCompoundGoals(input, { includeProxies: false }).constraints;
 
@@ -85,6 +86,52 @@ describe('explicit subject-first bound syntax', () => {
     'Do not keep Cost at most £1,300,000.',
   ])('withholds malformed, ambiguous or negated subjects without fallback guesses: %s', (input) => {
     expect(extract(input)).toEqual([]);
+  });
+
+  it.each([
+    ['Keep it under 10%.', '<=', 10, 0.1, '%'],
+    ['Keep it at or above £1.3m.', '>=', 1300000, 1300000, '£'],
+  ] as const)('retains numeric frame evidence without a bindable pronoun target: %s', (input, operator, rawValue, parsedValue, unit) => {
+    const result = extractCompoundGoals(input, { includeProxies: false });
+    expect(result.constraints).toEqual([]);
+    expect(result.unboundConstraintFrames).toHaveLength(1);
+    expect(result.unboundConstraintFrames[0]).toEqual({
+      operator, value: parsedValue, unit, valueFrame: 'level', sourceQuote: input.slice(0, -1),
+      sourceAmountSpan: { start: input.indexOf(unit === '%' ? '10%' : '£1.3m'), end: input.length - 1 },
+    });
+    expect(deriveStatedConstraintFrame(input, operator, rawValue)).toBe('level');
+    expect(deriveStatedConstraintFrame(input, operator, rawValue + 1)).toBeUndefined();
+    expect(deriveStatedConstraintFrame(input, operator === '<=' ? '>=' : '<=', rawValue)).toBeUndefined();
+  });
+
+  it.each([
+    'Do not keep it under 10%.',
+    'Keep Revenue or Cash under 10%.',
+    'Keep at or above 10%.',
+  ])('cannot borrow a frame from rejected or negated syntax: %s', (input) => {
+    expect(extractCompoundGoals(input).unboundConstraintFrames).toEqual([]);
+    expect(deriveStatedConstraintFrame(input, '<=', 10)).toBeUndefined();
+    expect(deriveStatedConstraintFrame(input, '>=', 10)).toBeUndefined();
+  });
+
+  it('keeps the existing frame-disagreement refusal with pronoun evidence', () => {
+    expect(deriveStatedConstraintFrame('Reduce marketing cost by 0% and keep it under 0%.', '<=', 0)).toBeUndefined();
+  });
+
+  it.each([
+    'Keep non-renewal rate from rising above 3%.',
+    'Keep nonessential spend from rising above £50k.',
+    'Keep gross margin from falling below 78%.',
+  ])('leaves prevention direction to the existing construction authority: %s', (input) => {
+    expect(extract(input)).toEqual([]);
+    expect(extractCompoundGoals(input).unboundConstraintFrames).toEqual([]);
+  });
+
+  it.each([
+    ['Keep Revenue from Subscriptions above £2m.', 'Revenue from Subscriptions'],
+    ['Keep "Revenue from rising" above £2m.', 'Revenue from rising'],
+  ])('preserves legitimate metric names containing from: %s', (input, targetName) => {
+    expect(extract(input)).toEqual([expect.objectContaining({ targetName, operator: '>=', value: 2000000 })]);
   });
 
   it.each([
