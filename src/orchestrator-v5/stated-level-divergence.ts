@@ -119,6 +119,27 @@
  *   · a note landing in the SAME batch as a real value change on that node;
  *   · a note whose node has no trustworthy `display_value` to quote.
  *
+ * ⛔⛔ AND IT CLAIMS ONLY WHAT IT PROVES — WHICH IS NARROWER THAN THE FIRST
+ * VERSION SAID, and the correction came from independent review (Codex,
+ * CHANGES_REQUIRED on this module's own PR).
+ *
+ * The copy used to read "a re-run still uses <display>". That asserted
+ * DOWNSTREAM CONSUMPTION, and this predicate establishes no such thing: it
+ * proves a prose-only op, an unchanged machine-authored stored value, and a
+ * quotable display string. It does NOT establish what the calculation
+ * consumes. ⭐ A factor can carry OPTION INTERVENTIONS that override the
+ * stored baseline — Paul's own afternoon model has one cost factor with option
+ * values 0 / 10,000 / 45,000 / 55,000 — so a single baseline display string
+ * cannot describe what each option's run would use, and a prose-only note on
+ * such a node passes every condition here.
+ *
+ * That is the EXACT distinction this module exists to protect: recorded is not
+ * used. Asserting consumption from a stored value would have committed, in the
+ * disclosure, the error the disclosure is about. The sentence is now bounded to
+ * the two facts that are proven — the note was recorded, and the stored value
+ * did not change — and naming what a run would consume is deliberately left to
+ * a consumed-input witness this module does not have and does not invent.
+ *
  * DISCLOSURE ONLY: nothing here writes to a graph, an op, or a value. Turning
  * a level word into a number is a different consent class and belongs to the
  * value path, which exists to get the unit and the derivation right. The chip
@@ -146,8 +167,17 @@ export interface StatedLevelDivergence {
    * a node without one is not a divergence.
    */
   readonly currentDisplay: string;
-  /** True when the node is an option (drives the affordance wording). */
-  readonly isOption: boolean;
+  /**
+   * The node's OWN kind, verbatim from the graph, or null when it declares
+   * none.
+   *
+   * ⚠ NOT a boolean. The first version carried `isOption` and the copy read
+   * `the ${isOption ? 'option' : 'factor'}` — which calls a goal, an outcome
+   * or a risk a "factor", because this detector does not gate on kind at all.
+   * Naming a node's kind wrongly in a sentence about provenance is the same
+   * error one level down, so the copy now uses the graph's own word, or none.
+   */
+  readonly kind: string | null;
 }
 
 function isPlainObject(v: unknown): v is Dict {
@@ -331,7 +361,7 @@ function detectOne(
     path: op.path,
     label,
     currentDisplay,
-    isOption: node.kind === 'option',
+    kind: typeof node.kind === 'string' && node.kind.trim().length > 0 ? node.kind.trim() : null,
   };
 }
 
@@ -387,7 +417,7 @@ export function detectStatedLevelDivergences(
  * apply that had moved the number alike.
  */
 export function buildStatedLevelDivergenceDescription(d: StatedLevelDivergence): string {
-  const kind = d.isOption ? 'option' : 'factor';
+  const subject = d.kind === null ? `"${d.label}"` : `the ${d.kind} "${d.label}"`;
   // ⚠ "A note", NOT "your note". What landed on the node is written by the
   // prose lane and may not be the person's wording — on the capture in this
   // module's header it re-tensed them. Calling the product's paraphrase theirs
@@ -395,8 +425,8 @@ export function buildStatedLevelDivergenceDescription(d: StatedLevelDivergence):
   // receipt that discloses it. The chat carrier quotes them; this one does not
   // claim to.
   return (
-    `Recorded a note on the ${kind} "${d.label}": wording only. ` +
-    `Its modelled value is unchanged, still ${d.currentDisplay}.`
+    `Recorded a note on ${subject}: wording only. ` +
+    `Its stored value is unchanged, still ${d.currentDisplay}.`
   );
 }
 
@@ -429,17 +459,17 @@ export function buildStatedLevelDivergenceNote(
   const quote = trimmedQuote.length > 0 ? trimmedQuote : null;
 
   const sentences = divergences.map((d) => {
-    const kind = d.isOption ? 'option' : 'factor';
+    const subject = d.kind === null ? `"${d.label}"` : `the ${d.kind} "${d.label}"`;
     // ⚠ The quote is attributed to the PERSON ("You said"), and the note to the
     // PRODUCT ("I recorded that ... as a note"). Two facts, kept apart. Saying
     // "your note" would attribute the prose lane's wording to them, which is
     // the provenance error this module exists to stop.
     const recorded = quote
-      ? `You said: "${quote}". I recorded that as a note on the ${kind} "${d.label}", not a value.`
-      : `I recorded that on the ${kind} "${d.label}" as a note, not a value.`;
+      ? `You said: "${quote}". I recorded that as a note on ${subject}, not a value.`
+      : `I recorded that on ${subject} as a note, not a value.`;
     return (
       `${recorded} ` +
-      `Its modelled value is unchanged, so a re-run still uses ${d.currentDisplay}. ` +
+      `Its stored value is unchanged, still ${d.currentDisplay}. ` +
       `Tell me the value you want and I will set it, or keep it as your own assessment and leave the number alone.`
     );
   });
