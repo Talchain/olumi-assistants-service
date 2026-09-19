@@ -18,6 +18,8 @@
 import { log } from "../../utils/telemetry.js";
 import type { GoalConstraintT } from "../../schemas/assist.js";
 import { extractDeadline } from "./deadline-extractor.js";
+import { FALL_VERB, RISE_VERB, FALL_PLUS_SRC, RISE_PLUS_SRC } from "./motion-grammar.js";
+export { FALL_VERB, RISE_VERB } from "./motion-grammar.js";
 import { mapQualitativeToProxy } from "./qualitative-proxy.js";
 import { fuzzyMatchNodeId } from "../../validators/structural-reconciliation.js";
 import {
@@ -294,7 +296,7 @@ function explicitBoundTarget(raw: string | undefined): string | null {
     // so legacy patterns cannot mint the opposite bound; the existing
     // construction authority owns its direction and subject. Reuse the
     // existing verb grammar, without excluding metric names containing "from".
-    || new RegExp(String.raw`\bfrom\s+(?:${FALL_VERB}|${RISE_VERB})$`, "i").test(name)
+    || new RegExp(String.raw`\bfrom\s+(?:${FALL_PLUS_SRC}|${RISE_PLUS_SRC}|${RISE_VERB})$`, "i").test(name)
   )) return null;
   return name;
 }
@@ -357,7 +359,6 @@ const UPPER_BOUND_PATTERNS = [
  * the ceiling being re-derived from the floor's own words.
  */
 export const NEGATION_LEAD = String.raw`(?:without|must\s+not|cannot|can't|shouldn't|should\s+not|won't|will\s+not|never)`;
-export const FALL_VERB = String.raw`(?:drop(?:ping|s)?|fall(?:ing|s)?|slip(?:ping|s)?|dip(?:ping|s)?)`;
 const NEGATED_FLOOR_PATTERNS = [
   // "without dropping gross margin below 78%"
   new RegExp(
@@ -413,7 +414,6 @@ const NEGATED_FLOOR_PATTERNS = [
  * matches the simple `X above Y` lower-bound pattern, so CLAIMING THE SPAN is
  * the only way to stop the floor being re-derived from the ceiling's own words.
  */
-export const RISE_VERB = String.raw`(?:go(?:ing|es)?|ris(?:e|es|ing)|climb(?:ing|s)?|grow(?:ing|s)?|increas(?:e|es|ing)|exceed(?:ing|s)?|creep(?:ing|s)?)`;
 const NEGATED_CEILING_PATTERNS = [
   // "without letting marketing go above £1.5m"
   new RegExp(
