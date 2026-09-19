@@ -2677,7 +2677,13 @@ export const TelemetryEvents = {
   //   assumption_source: 'coaching_summary' | 'strengthen_item_detail'
   //                    | 'strengthen_item_label' | 'bias_finding'
   //                    | 'coaching_bias_signal' | 'uncertainty_driver'
-  //                    | 'deterministic_fallback',
+  //                    | 'convergent_drivers' | 'deterministic_fallback',
+  //     ⚠ `convergent_drivers` was MISSING from this list while the value was
+  //     already being emitted. This union is a COMMENT — there is no Zod enum
+  //     behind it — so nothing failed, and a reader querying staging by source
+  //     would have concluded the value did not exist. Documented unions in this
+  //     block have gone stale before; when adding a source, add it here in the
+  //     same commit.
   //   coaching_summary_present: boolean,
   //   coaching_summary_passed_gate: boolean,
   //   coaching_summary_reject_reason: GateRejectReason | null,
