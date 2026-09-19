@@ -276,12 +276,11 @@ churn is \`value: 0.03\`, \`unit: "%"\`, \`value_scale: "unit_interval"\`),
 110% is \`value: 1.1\`), and \`raw_count\` for a plain count left in its own
 unit (6 engineers is \`value: 6\`, \`unit: "engineers"\`,
 \`value_scale: "raw_count"\`). This does not change any number you were already
-going to write; it records which convention you used. Under \`unit: "%"\` alone,
-\`4\` and \`0.04\` are both well formed and mean the same thing, so a reader has
-to guess — and a limit the user set in one convention cannot be compared against
-a level recorded in the other. Leave \`value_scale\` out if you genuinely cannot
-tell: an omission is read as "not declared" and nothing downstream will guess,
-whereas a wrong declaration is believed.
+going to write; it records which convention you used. \`unit: "%"\` alone does
+not say whether the number uses a decimal or whole-percent convention. A limit
+and a current reading must not be compared using different conventions. Leave \`value_scale\` out if you genuinely cannot
+tell: an omission means "not declared", not permission to infer a convention
+from the magnitude.
 On a \`goal\` carrying a number, set \`role\` to \`target\` when the number is what
 the user wants to REACH, and \`baseline\` when it is where they are NOW. That one
 word decides whether the number is registered as the success threshold, so an
@@ -315,57 +314,36 @@ when it changes the mechanism, exposes an important trade-off, or offers a
 useful way to learn. Do not add a near-duplicate merely to increase the count.
 
 Record what a quantity IS now. On a \`factor\`, \`risk\` or \`outcome\` claim, set
-\`value\` to the level that quantity sits at today, when you can say what that
-level is on a scale the brief supports. Use the user's own number when they gave
-one FOR THAT QUANTITY; otherwise give your own estimate. A number you estimate is
-recorded as yours, not as something they said.
-A \`risk\` and an \`outcome\` need this as much as a factor does, and more often
-than you would expect: a churn rate, a cost overrun, a margin or a satisfaction
-score is a measurable quantity with a level today, and it is usually the very
-thing the user set their limit ON. A limit is only ever checked by comparing it
-against that level, so a quantity you name with no level recorded is a limit the
-user set that nothing can check.
+\`value\` only when the quantity has a current level on a supported scale and
+there is a defensible basis for that level. An estimate is recorded as yours,
+not as something the user said. A risk or outcome may name a measured quantity
+or a possible event; its kind or label alone does not establish a current level.
+Do not invent a current level merely to make a limit checkable.
 \`current\`, \`proposed\` and \`limit\` are three different things and a number
 belonging to one is not the level of another. "Reach £20k MRR" is a target,
 "keep churn under 4%" is a limit, and "we are proposing £59" is a proposal —
 none of them says what the quantity is TODAY. A subscriber count worked out from
 a revenue figure is not that figure, and the same number appearing nearby does
 not make it the same quantity.
-Leave \`value\` out where you cannot place the quantity on a scale the brief
-supports. A quantity that is genuinely qualitative, or genuinely unknown, stays
-that way: there is nothing to fill in and no count to satisfy. A \`risk\` that
-names a POSSIBILITY rather than a measure — "our tech lead leaves", "the vendor
-misses the deadline" — has no level today, so leave \`value\` out; only a risk
-that IS a measured quantity carries one.
-A LIKELIHOOD IS NOT A LEVEL, AND IT HAS ITS OWN FIELD. \`value\` is the level a
-measured quantity SITS AT; \`likelihood\` is the chance an event happens. Ask what
-the number ANSWERS: "how big is it right now" is a level and goes in \`value\`;
-"how likely is it" is a chance and goes in \`likelihood\`. Never put a chance in
-\`value\` — downstream reads \`value\` as a magnitude, so a limit the user set
-would be checked against a probability.
-Put the number somewhere. A risk carrying a number you file in neither field is
-the number lost.
-\`likelihood\` IS ALWAYS A PROBABILITY BETWEEN 0 AND 1. Never a percentage.
-"30%" is \`likelihood: 0.3\`; "4%" is \`likelihood: 0.04\`; "one in five" is
-\`likelihood: 0.2\`. This is NOT the convention \`value\` uses — under \`unit: "%"\`
-a \`value\` of 4 means four percent. The same string "4%" is therefore
-\`likelihood: 0.04\` in one field and \`value: 4, unit: "%"\` in the other, because
-they are different quantities: one is a chance, the other is a level on a scale
-that happens to be percent. Do not carry the convention across.
-Odds and frequencies are NOT likelihoods either. "twice a quarter" is a RATE,
-not a chance, and has no \`likelihood\`; "2 to 1 against" is odds — convert it or
-leave the field out, never write \`2\`.
-And a measure whose dimension genuinely IS a probability — a default rate
-running at 3%, a conversion rate — is a \`value\`, not a \`likelihood\`: it is the
-level something SITS AT today, not the chance of an event.
-Examples, and note that the unit does not decide it:
-- "Vendor slippage: 30%" — a chance. \`likelihood: 0.3\`, no \`value\`.
-- "Contract loss: 4%" — a chance. \`likelihood: 0.04\`, no \`value\`.
-- "Churn risk: 4%" — a MEASURE: churn is a rate that is running at 4% today.
-  \`value: 4\`, \`unit: "%"\`, no \`likelihood\`.
-- "Win rate 25%", "hit rate 30%" — MEASURES, not chances, despite the wording.
-- "We might lose the tech lead" — a chance you cannot put a number on. Neither
-  field; the risk still belongs in the model.
+Leave \`value\` out where the current level or its scale is unknown. Preserve
+qualitative risks and outcomes without filling in a number.
+
+A LIKELIHOOD IS NOT A CURRENT LEVEL. A chance that an event occurs must not be
+put in \`value\` for a measured current quantity. Keep the user's original
+probability statement and its qualifications in \`stated_items\`; do not replace
+that statement with an inferred current reading. The optional \`likelihood\`
+field can retain a clearly identified event probability in draft records only,
+as a decimal between 0 and 1. It is not projected into the saved model or used
+by analysis, so it is not a substitute for retaining the original statement.
+Do not invent a probability to populate it.
+Use the declared \`value_scale\` convention above for current measurements:
+"monthly churn is currently 4%" supports \`value: 0.04\`, \`unit: "%"\`,
+\`value_scale: "unit_interval"\`. "There is a 4% chance of losing the contract
+this year" identifies an event probability, not a current measurement.
+"Churn risk: 4%", "Vendor slippage: 30%" and "Contract loss: 4%" do not by
+themselves establish which role the number has. Preserve that ambiguity and the
+original wording; do not resolve it from the label, unit or magnitude alone.
+"We might lose the tech lead" remains a qualitative risk.
 
 Keep the user's stated requirements intact. Do not relax a deadline, budget or
 other limit without their invitation, or claim a proposal meets it when that is

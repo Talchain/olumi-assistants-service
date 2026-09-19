@@ -763,6 +763,16 @@ const SUPERSEDED_V19_INSTRUCTION_BYTES = 18083;
 const PREREGISTERED_V20_INSTRUCTION_SHA256 =
   "d28eedb9f44d5c2ba83c0cd4e2c3ada4ce2287b62d9185ebd2c5d70437349f5d";
 const PREREGISTERED_V20_INSTRUCTION_BYTES = 20736;
+
+// v21 source correction, 2026-09-19. UNRUN and unmeasured. Registered by reading
+// the literal source bytes, without importing or executing the instruction.
+// v20 above remains an immutable record of the reviewed candidate.
+const PREREGISTERED_V21_INSTRUCTION_SHA256 =
+  "d7df6589280035116884b548d59fbe5541388d31005c2b8a09ad12fd93ba4f47";
+const PREREGISTERED_V21_INSTRUCTION_BYTES = 19215;
+const PREREGISTERED_V21_SHAPE_SHA256 =
+  "cc4b8e5864ca62e32065ac26fc60adcb4ac490c36e8f463daa6c58bdc2427c3d";
+const PREREGISTERED_V21_SHAPE_BYTES = 14334;
 /**
  * SUPERSEDED — v18's bytes, the value ask, AND THE ARTEFACT EVERY 17 Sep
  * MEASUREMENT WAS TAKEN UNDER: both live v202 draws, Paul's manual test, and the
@@ -835,11 +845,19 @@ const SUPERSEDED_V12_INSTRUCTION_SHA256 =
   "9c3906151c4a6abec7906fc430c3c26bc8d6c92559a8e859401dd03b9682f232";
 const SUPERSEDED_V12_INSTRUCTION_BYTES = 12280;
 
-describe("the draft records instruction is the measured artefact", () => {
-  it("hashes to the PRE-REGISTERED v20 value at the pinned byte length", () => {
-    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V20_INSTRUCTION_SHA256);
+describe("the draft records instruction is the registered artefact", () => {
+  it("hashes to the UNRUN v21 source registration at the pinned byte length", () => {
+    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V21_INSTRUCTION_SHA256);
     expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).toBe(
-      PREREGISTERED_V20_INSTRUCTION_BYTES,
+      PREREGISTERED_V21_INSTRUCTION_BYTES,
+    );
+  });
+
+  it("keeps v20 identifiable separately from the unmeasured correction", () => {
+    expect(draftRecordsInstructionHash()).not.toBe(PREREGISTERED_V20_INSTRUCTION_SHA256);
+    expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).not.toBe(PREREGISTERED_V20_INSTRUCTION_BYTES);
+    expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).not.toBe(
+      "f64d91fbcb2535387b33138de3e8d57455d049ed9698d1790bcaad90baecb3d3",
     );
   });
 
@@ -1082,30 +1100,17 @@ describe("the draft records instruction is the measured artefact", () => {
     // to v18 (asserted in the next test). The edit is legible as "the model must
     // say which convention its number is in" without reading a diff.
     expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).toBe(
-      // v20 — the current-level ask reaching `risk` and `outcome`, and the
-      // possibility-vs-measure carve-out that keeps it from being an invention
-      // licence. The whole of the +666 bytes.
-      // ⚠ RE-PINNED with v20.2: the likelihood destination, the scale convention
-      // ([0,1] never a percentage, odds and frequencies excluded, a
-      // probability-DIMENSIONED measure is a `value`), and the cue-free
-      // exemplars. All shape-half; the connect half is unchanged.
-      "f64d91fbcb2535387b33138de3e8d57455d049ed9698d1790bcaad90baecb3d3",
+      // v21 source-only correction; the connect half is unchanged. UNRUN.
+      PREREGISTERED_V21_SHAPE_SHA256,
     );
-    // ⚠ RE-PINNED with v20.2. The three pins are ARITHMETICALLY RELATED and the
-    // relationship is the check: SHAPE + 1 (the joining newline) + CONNECT must
-    // equal the total, minus 1 for the `.trimEnd()`. Before this, 13868 + 1 +
-    // 4881 = 18750 against a pinned total of 19801 — a 1,052-byte shortfall that
-    // was EXACTLY the likelihood paragraph, so the sub-pin was v20.0's shape half
-    // left behind when the total was updated. A sub-pin that does not add up is a
-    // pin that stopped describing the artefact it names.
-    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(15855);
+    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(PREREGISTERED_V21_SHAPE_BYTES);
     expect(
       Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8") +
         1 +
         Buffer.byteLength(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8") -
         1,
       "the three pins no longer add up — one of them was updated without the others",
-    ).toBe(PREREGISTERED_V20_INSTRUCTION_BYTES);
+    ).toBe(PREREGISTERED_V21_INSTRUCTION_BYTES);
     // WITHDRAWN — v20.0's shape half, the value this pin USED to name, kept
     // beside the live one exactly as every entry below it is. Asserted DISTINCT
     // for a DIFFERENT reason from those, and the difference is worth stating:
@@ -1723,9 +1728,9 @@ describe("v20 — the current-level ask reaches risk and outcome claims", () => 
     // guard, which is worse than no guard. Normalise whitespace and the
     // assertion survives any future reflow of the same sentence.
     const flat = DRAFT_RECORDS_INSTRUCTION.replace(/\s+/g, " ");
-    expect(flat).toContain("on a scale the brief supports");
+    expect(flat).toContain("a current level on a supported scale");
     expect(flat).toContain(
-      "A quantity that is genuinely qualitative, or genuinely unknown, stays",
+      "Preserve qualitative risks and outcomes without filling in a number",
     );
   });
 
