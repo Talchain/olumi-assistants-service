@@ -203,6 +203,44 @@ export function qualitativeBand(value: number): string {
   return "Very high";
 }
 
+/**
+ * ⭐ A PLACEHOLDER UNIT IS NOT A UNIT. The draft prompt instructs the model to
+ * put `unit: "scale"` on a qualitative factor that has no natural unit and to
+ * describe its level with a band word (served `draft_graph@v202`,
+ * EXTRACTION_RULES: *"very low / low / moderate / high / very high"*). The
+ * model never emits that band (`display_value_on_factors: missing` on every
+ * logged draft call), so the synthesis below is the only place the designed
+ * representation can come from — and until this set existed, the value-plus-
+ * unit branch rendered the placeholder as if it were a real unit: `"0.3 scale"`,
+ * measured on five of nine factors across two founder briefs (staging
+ * `b7c323c`, 19 Sep 2026). A number on an undefined scale tells a person
+ * nothing and invites them to check a figure that is not a measurement.
+ *
+ * MIRRORS the UI's `GENERIC_PLACEHOLDER_UNITS`
+ * (`DecisionGuideAI:src/utils/unitClassifier.ts`, #1486) — the same eight
+ * spellings the canvas already suppresses wherever it adopts
+ * `formatValueWithUnit`. Two repos, one list, no shared package to import it
+ * from: this is a hand-maintained cross-repo twin and is labelled as one. A
+ * spelling added on one side without the other shows up as a wire string the
+ * UI suppresses but CEE still emits, or vice versa — visible, never silent.
+ */
+const PLACEHOLDER_UNITS: ReadonlySet<string> = new Set([
+  "scale",
+  "index",
+  "score",
+  "normalised",
+  "normalized",
+  "norm",
+  "unit",
+  "units",
+]);
+
+/** True when `unit` names no real-world scale — see {@link PLACEHOLDER_UNITS}. */
+export function isPlaceholderUnit(unit: string | undefined): boolean {
+  if (!unit) return false;
+  return PLACEHOLDER_UNITS.has(unit.trim().toLowerCase());
+}
+
 // ============================================================================
 // synthesiseDisplayValue
 // ============================================================================
@@ -215,8 +253,13 @@ export function qualitativeBand(value: number): string {
  * 2. `raw_value` + percentage `unit` → `"3%"`
  * 3. `raw_value` + time `unit`       → `"42 days"`, `"18 months"`
  * 4. `raw_value` only                → `"500,000"` (thousands-separated)
- * 5. normalised `value` (0–1) + `factor_type` → `"Low (0.15)"` (qualitative band)
- * 6. normalised `value` only         → `"0.15"` (last resort)
+ * 5. normalised `value` (0–1) + PLACEHOLDER `unit` (`scale`, `score`, …)
+ *                                    → `"Moderate (0.3)"` (qualitative band —
+ *                                      a placeholder names no scale, so the
+ *                                      number is a rating, not a measurement)
+ * 6. `value` + real `unit`           → `"6 developers"`, `"18 months"`
+ * 7. normalised `value` (0–1) + `factor_type` → `"Low (0.15)"` (qualitative band)
+ * 8. normalised `value` only         → `"0.15"` (last resort)
  *
  * Returns `undefined` when there is no usable input.
  * Caps the output at 50 characters.
@@ -262,19 +305,27 @@ export function synthesiseDisplayValue(data: DisplayValueInput): string | undefi
       // Normalised percentage: multiply by 100 if ≤ 1
       const pct = value <= 1 ? parseFloat((value * 100).toFixed(2)) : parseFloat(value.toFixed(2));
       result = `${pct}%`;
+    } else if (isPlaceholderUnit(unit) && value >= 0 && value <= 1) {
+      // Priority 5: a placeholder unit on a unit-interval level is a qualitative
+      // rating. Render the product's own band (the same `qualitativeBand` the
+      // composers import), never `"0.3 scale"`. Bounded to [0, 1] on purpose:
+      // outside the interval the number is not a rating, and a raw magnitude
+      // beside the placeholder has already taken the raw path above.
+      const displayValue = parseFloat(value.toFixed(2));
+      result = `${qualitativeBand(value)} (${displayValue})`;
     } else if (unit) {
-      // Priority 5: value with unit (e.g. "6 developers", "18 months").
+      // Priority 6: value with unit (e.g. "6 developers", "18 months").
       // Covers cases where data.value holds a raw count/quantity rather than
       // a 0-1 normalised score, and raw_value was not separately populated.
       const display = formatPlainNumber(value);
       result = `${display} ${unit}`;
     } else if (factorType) {
-      // Priority 6: qualitative band from factor_type
+      // Priority 7: qualitative band from factor_type
       const band = qualitativeBand(Math.min(1, Math.max(0, value)));
       const displayValue = parseFloat(value.toFixed(2));
       result = `${band} (${displayValue})`;
     } else {
-      // Priority 7: bare normalised value
+      // Priority 8: bare normalised value
       result = String(parseFloat(value.toFixed(2)));
     }
   }
