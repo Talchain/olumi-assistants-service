@@ -505,6 +505,17 @@ export function createSetFactorValueHandler(): HandlerFn {
           handler_id: 'set_factor_value',
           target_id: targetId,
           rejection_reason: preEvaluation.reason,
+          // THE PRECISE SENTENCE REACHES THE USER (coaching lane, 17 Sep 2026).
+          // `error-boundary.ts` builds details as
+          //     ...(err.userGuidance ? { specific_issue: err.userGuidance } : {}),
+          //     ...(err.details ?? {}),
+          // so `details` is spread SECOND and wins. Without this line the
+          // predicate's authored sentence was REPLACED by the generic guidance
+          // phrase — not truncated, replaced, one step before any length rule
+          // applies, which is why shortening the copy alone never fixed it.
+          // Every other throw site is unaffected: a site that does not set this
+          // key still falls back to `userGuidance` exactly as before.
+          specific_issue: preEvaluation.specific_issue,
         },
         userGuidance: SET_FACTOR_VALUE_USER_GUIDANCE,
       });

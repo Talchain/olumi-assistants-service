@@ -40,7 +40,7 @@ describe('unit_redeclares_scale', () => {
     if (!r.ok) {
       expect(r.reason).toBe<ProposalRejectionReason>('unit_redeclares_scale');
       expect(r.specific_issue).toBe(
-        'This factor is recorded without a unit, so applying a value in % would change what it measures.',
+        'This factor has no unit recorded, so a value in % would change what it measures.',
       );
     }
   });
@@ -109,7 +109,7 @@ describe('cap_redeclares_scale', () => {
     if (!r.ok) {
       expect(r.reason).toBe<ProposalRejectionReason>('cap_redeclares_scale');
       expect(r.specific_issue).toBe(
-        'This factor is recorded without an upper limit, so applying this change would set one and rescale the factor.',
+        'This factor has no upper limit recorded, so setting one here would rescale it.',
       );
     }
   });
@@ -206,7 +206,7 @@ describe('the execute-time backstop applies the SAME gates', () => {
         factorObservedValue: 0.65,
         inputHasUnit: true,
       }),
-    ).toThrow(/recorded without a unit/);
+    ).toThrow(/no unit recorded/);
   });
 
   it('evaluatePostOperatorFactorValue forwards the fields (not silently dropped)', () => {

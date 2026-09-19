@@ -712,7 +712,11 @@ function evaluateFactorValueProposalImpl(
       // "the value given was 1.2999999999999998" — never echo computed
       // arithmetic back to a user.)
       specific_issue:
-        `This factor is recorded without a unit, so applying a value in ${unit} ` +
+        // 79 chars of skeleton: under the composer's 100-char budget even for
+        // an 18-character unit. Was 94 + `${unit}`, which truncated mid-word
+        // for any unit of 7+ characters ("engineers", "customers") while a
+        // currency fixture passed. Now reachable, so now length-bound.
+        `This factor has no unit recorded, so a value in ${unit} ` +
         `would change what it measures.`,
     };
   }
@@ -726,8 +730,10 @@ function evaluateFactorValueProposalImpl(
       ok: false,
       reason: 'cap_redeclares_scale',
       specific_issue:
-        `This factor is recorded without an upper limit, so applying this change ` +
-        `would set one and rescale the factor.`,
+        // 78 chars, no interpolation. Was 109 with ZERO interpolations, so it
+        // truncated for every single input the moment it became reachable.
+        `This factor has no upper limit recorded, so setting one here ` +
+        `would rescale it.`,
     };
   }
 
@@ -855,9 +861,13 @@ function evaluateFactorValueProposalImpl(
         effectiveUnit !== undefined
           ? `${rawInput} looks like a proportion, not a value in ${effectiveUnit}. ` +
             `Tell me the amount in ${effectiveUnit}.`
-          : `${rawInput} looks like a proportion, but this factor is recorded as an amount` +
-            `${typeof factorObservedRawValue === 'number' ? ` (currently ${factorObservedRawValue})` : ''}. ` +
-            `Tell me the amount you want.`,
+          : // 74 chars of skeleton, 92 even with an 18-digit float. The
+            // "(currently X)" clause is dropped deliberately: at 109 + two
+            // interpolations this branch reached ~123 and would have been cut
+            // mid-word. A complete sentence that names the remedy beats a
+            // longer one the user never sees the end of.
+            `${rawInput} reads as a proportion; this factor records an amount. ` +
+            `Tell me the amount.`,
     };
   }
 
@@ -921,7 +931,16 @@ function evaluateFactorValueProposalImpl(
         return {
           ok: false,
           reason: 'bare_number_outside_cap',
-          specific_issue: `Value ${effectiveRaw} is outside the factor's expected range [0, ${cap}] and no unit was given.`,
+          // FORMAT THE NUMBER, like `value_exceeds_cap` immediately below.
+          // `effectiveRaw` is the RESULT of `applyFactorValueOperator`, so on a
+          // delta it is raw float arithmetic: 0.7 + 0.6 renders as
+          // `1.2999999999999998` — 18 characters of noise this file already has
+          // a regression pin about, and enough to push the sentence past the
+          // composer's 100-char budget now that it actually reaches the user.
+          // `formatNumber` bounds it to `1.3`.
+          specific_issue:
+            `Value ${formatValueWithUnit(effectiveRaw)} is outside this factor's ` +
+            `range [0, ${formatValueWithUnit(cap)}], and no unit was given.`,
         };
       }
       // ⚠ THE SENTENCE THIS REPLACES WAS FALSE. A unit-bearing negative took
