@@ -345,7 +345,8 @@ export type AiTaskLifecycleId =
   | 'explain_diff'
   | 'rolling_summary'
   | 'decision_review_decompose'
-  | 'readiness_value_estimate';
+  | 'readiness_value_estimate'
+  | 'option_factor_map';
 
 export type AiTaskExecutionState =
   | 'live_router'
@@ -533,6 +534,12 @@ export const AI_TASK_LIFECYCLE: Readonly<
     note:
       'The readiness value-batch estimate producer calls the shared Anthropic chat boundary with its code-constant prompt and structured-output schema. Reached on a readiness turn only when the value-preserving repair path found nothing AND at least VALUE_BATCH_MIN_CELLS settable cells are open, so a below-floor turn makes no call at all.',
   },
+  option_factor_map: {
+    executable: true,
+    state: 'dedicated_adapter',
+    note:
+      'The draft-seam option mapping re-ask (unified pipeline Stage 3b) calls the shared Anthropic chat boundary with its code-constant prompt and structured-output schema. Reached on a draft turn ONLY when the drafter left an option with no option\u2192factor edge and no interventions WHILE a sibling option carries a mapping, and only while the request budget still affords OPTION_FACTOR_MAP_MIN_BUDGET_MS \u2014 so an ordinary well-formed draft makes no call at all.',
+  },
 };
 
 export type RuntimeAiTaskId =
@@ -549,6 +556,7 @@ export type RuntimeAiTaskId =
   | 'rolling_summary'
   | 'decision_review_decompose'
   | 'readiness_value_estimate'
+  | 'option_factor_map'
   | 'm2_graph_review'
   | 'draft_quality_review';
 
@@ -767,6 +775,33 @@ export const RUNTIME_AI_TASK_AUTHORITY = {
       'VALUE_ESTIMATE_OUTPUT_SCHEMA (Anthropic Structured Outputs) + a strict Zod re-parse that requires declined_reason on a null value, and an identity filter to the cells asked',
     fallback:
       'LLM_MODEL then FALLBACK_ANTHROPIC_MODEL; a non-Anthropic assignment fails before the shared network boundary and the readiness turn degrades to the per-cell chip',
+    promotionGate: 'none_no_real_pack',
+  },
+  /**
+   * \u26a0 THE SECOND DEDICATED CHAIN WITH NO CHECKED-IN MODEL OF ITS OWN, and
+   * the row says so for the same reason `readiness_value_estimate` does.
+   *
+   * `anthropicOptionFactorMapCall` passes NO explicit model, so
+   * `chatWithAnthropic` resolves `LLM_MODEL -> FALLBACK_ANTHROPIC_MODEL`. The
+   * consequence is written down rather than left to be rediscovered: with
+   * `LLM_MODEL` pointing at another provider the call fails closed at the shared
+   * boundary, Stage 3b logs `model_error` and the DRAFT IS UNCHANGED \u2014 the
+   * connectivity repair, the disclosure sentence and the ranking exclusion are
+   * all exactly what they are today. Nothing the user reads becomes wrong; a
+   * class of option simply stops being rescued. Giving this task its own env key
+   * and checked-in default is a behaviour change and belongs in its own lane.
+   */
+  option_factor_map: {
+    hasExecutablePath: true,
+    modelAuthority: 'dedicated_anthropic_chain',
+    checkedInModel: null,
+    promptAuthority: 'code_constant',
+    promptTask: null,
+    promptIdentity: 'code_hash',
+    structuredContract:
+      'OPTION_FACTOR_MAP_OUTPUT_SCHEMA (Anthropic Structured Outputs) + a strict Zod re-parse that requires declined_reason on an empty factor list, and an identity filter to the options asked and the factors offered',
+    fallback:
+      'LLM_MODEL then FALLBACK_ANTHROPIC_MODEL; a non-Anthropic assignment fails before the shared network boundary and the draft proceeds unchanged through the connectivity repair',
     promotionGate: 'none_no_real_pack',
   },
   m2_graph_review: {

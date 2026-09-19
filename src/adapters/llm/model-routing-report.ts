@@ -139,6 +139,21 @@ const DEDICATED_MODEL_CHAINS: Record<
     whitespaceMeansUnset: false,
     requiredProvider: 'anthropic',
   },
+  /**
+   * Same posture as the row above, and NOT a copy-paste oversight:
+   * `anthropicOptionFactorMapCall` also sends no explicit model, so the GLOBAL
+   * `LLM_MODEL` is genuinely what it reads. `requiredProvider: 'anthropic'`
+   * makes a non-Anthropic assignment report `configuration_error` here, which
+   * is what the call does at runtime.
+   */
+  option_factor_map: {
+    configuredModel: () => config.llm.model,
+    envKey: 'LLM_MODEL',
+    defaultModel: FALLBACK_ANTHROPIC_MODEL,
+    defaultKey: 'FALLBACK_ANTHROPIC_MODEL',
+    whitespaceMeansUnset: false,
+    requiredProvider: 'anthropic',
+  },
 };
 
 export function resolveConfiguredProvider(): ConfiguredProvider {
