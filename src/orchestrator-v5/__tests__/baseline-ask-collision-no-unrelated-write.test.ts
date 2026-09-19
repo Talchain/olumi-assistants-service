@@ -509,7 +509,7 @@ describe('a reply that names its own subject is not the collision case', () => {
  * each strips exactly one conjunct of the grant: the object, the authority, and
  * the live question.
  */
-function proposesConstraintOnNodeAdapter(nodeId: string, label: string, value: number) {
+function proposesConstraintOnNodeAdapter(nodeId: string, label: string, value: number, includeUnit = true) {
   return {
     chatWithTools: vi
       .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
@@ -528,7 +528,7 @@ function proposesConstraintOnNodeAdapter(nodeId: string, label: string, value: n
             parameters: [
               { name: 'constraint_type', value: 'at_most', source: 'user_explicit' },
               { name: 'value', value, source: 'user_explicit' },
-              { name: 'unit', value: '%', source: 'user_explicit' },
+              ...(includeUnit ? [{ name: 'unit', value: '%', source: 'user_explicit' }] : []),
             ],
             cited_context_fields: [],
           },
@@ -626,6 +626,26 @@ describe('compound baseline answer and independently requested limit', () => {
     });
     expect(graphWrites()).toHaveLength(1);
     expect(constraintsOn(stateAfterTurn(), TARGET_ID)[0]).toMatchObject({ value: 10, value_frame: 'level' });
+    expect(baselineOn(stateAfterTurn(), TARGET_ID)).toBe(0.3);
+  });
+
+  it.each([false, true])('keeps trailing baseline qualifiers separate from the limit instruction (competing: %s)', async (competing) => {
+    const graph = prepare(competing);
+    await runTurnExecutor(payload('Churn rate is 30% today. Set the limit to at most 25%.'), 'req-qualified-compound', {
+      routingAdapter: proposesConstraintOnNodeAdapter(TARGET_ID, TARGET_LABEL, 25), graphState: graph,
+    });
+    expect(graphWrites()).toHaveLength(1);
+    expect(constraintsOn(stateAfterTurn(), TARGET_ID)[0]).toMatchObject({ value: 25, unit: '%', value_frame: 'level' });
+    expect(baselineOn(stateAfterTurn(), TARGET_ID)).toBe(0.3);
+  });
+
+  it('retains existing unit inheritance when the proposal omits the unchanged percent unit', async () => {
+    const graph = prepare(true);
+    await runTurnExecutor(payload(compound), 'req-compound-inherit-unit', {
+      routingAdapter: proposesConstraintOnNodeAdapter(TARGET_ID, TARGET_LABEL, 25, false), graphState: graph,
+    });
+    expect(graphWrites()).toHaveLength(1);
+    expect(constraintsOn(stateAfterTurn(), TARGET_ID)[0]).toMatchObject({ value: 25, unit: '%', value_frame: 'level' });
     expect(baselineOn(stateAfterTurn(), TARGET_ID)).toBe(0.3);
   });
 

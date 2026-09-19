@@ -12,6 +12,8 @@ describe('independent instruction on a baseline-answer turn', () => {
   it.each([
     'Churn rate is 30%. Set the limit to at most 25%.',
     'Churn rate is at 30%. Set the limit to at most 25%.',
+    'Churn rate is 30% today. Set the limit to at most 25%.',
+    'Churn rate is 30% right now. Set the limit to at most 25%.',
     'Churn rate is 30%. Keep churn under 25%.',
   ])('binds the independent percentage limit: %s', (message) => {
     expect(hasBaselineIndependentMutationWarrant(message)).toBe(true);

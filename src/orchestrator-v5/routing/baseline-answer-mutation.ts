@@ -1,4 +1,4 @@
-import { extractStatedCurrentLevels, subjectBindsToLabel } from '../../cee/factor-extraction/stated-level.js';
+import { omitStatedCurrentLevels, subjectBindsToLabel } from '../../cee/factor-extraction/stated-level.js';
 import { extractCompoundGoals, normaliseConstraintUnits } from '../../cee/compound-goal/index.js';
 import { valuesMatch } from '../../utils/reduction-framing.js';
 import { runExtraction } from '../context/cqe/extract-quantities.js';
@@ -14,12 +14,7 @@ export interface BaselineLimitChange {
 
 /** Reuse the mutation warrant on the words outside the observed statements. */
 export function baselineIndependentInstruction(message: string): string {
-  let remaining = message;
-  for (const statement of extractStatedCurrentLevels(message).reverse()) {
-    remaining = remaining.slice(0, statement.index) + ' '.repeat(statement.matchedText.length) +
-      remaining.slice(statement.index + statement.matchedText.length);
-  }
-  return remaining.trim().replace(/^[.,;!\s]+/, '');
+  return omitStatedCurrentLevels(message).trim().replace(/^[.,;!\s]+/, '');
 }
 
 export function hasBaselineIndependentMutationWarrant(message: string): boolean {

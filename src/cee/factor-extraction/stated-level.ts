@@ -484,6 +484,20 @@ export function extractStatedCurrentLevels(text: string): StatedCurrentLevel[] {
   return results;
 }
 
+/** Mask observed statements, including the answer grammar's trailing qualifiers. */
+export function omitStatedCurrentLevels(text: string): string {
+  const trailingQualifiers = new RegExp(`^(?:\\s+${QUALIFIER_ALT}\\b)*`, 'i');
+  let remaining = text;
+  for (const statement of extractStatedCurrentLevels(text).reverse()) {
+    const coreEnd = statement.index + statement.matchedText.length;
+    const qualifiers = trailingQualifiers.exec(text.slice(coreEnd))?.[0] ?? '';
+    const end = coreEnd + qualifiers.length;
+    remaining = remaining.slice(0, statement.index) + ' '.repeat(end - statement.index) +
+      remaining.slice(end);
+  }
+  return remaining;
+}
+
 /**
  * Conservative singular fold, mirroring `pluraliseUnit`'s caution
  * (d1-shared/format-confirmation.ts): only a regular trailing "-s" on a word

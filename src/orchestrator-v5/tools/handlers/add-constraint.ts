@@ -525,8 +525,7 @@ export function createAddConstraintHandler(): HandlerFn {
         : undefined;
       if (requestedLimitChange !== undefined &&
           (proposedParams.constraint_type !== requestedLimitChange.constraint_type ||
-            !valuesMatch(proposedParams.value, requestedLimitChange.value) ||
-            proposedParams.unit !== requestedLimitChange.unit)) {
+            !valuesMatch(proposedParams.value, requestedLimitChange.value))) {
         throw new D1HandlerError('PARAMETER_INVALID',
           'The proposed limit does not match the independent instruction in the baseline answer.',
           { userGuidance: ADD_CONSTRAINT_USER_GUIDANCE });
@@ -743,6 +742,12 @@ export function createAddConstraintHandler(): HandlerFn {
               : targetNode.observed_state?.unit !== undefined
                 ? targetNode.observed_state.unit
                 : undefined;
+
+      if (requestedLimitChange !== undefined && resolvedUnit !== requestedLimitChange.unit) {
+        throw new D1HandlerError('PARAMETER_INVALID',
+          'The proposed limit units do not match the independent instruction in the baseline answer.',
+          { userGuidance: ADD_CONSTRAINT_USER_GUIDANCE });
+      }
 
       // ⛔ AND TWO UNITS THAT DISAGREE ARE REFUSED, NOT SILENTLY PICKED. An
       // explicit unit that contradicts the moved row's own is two different
