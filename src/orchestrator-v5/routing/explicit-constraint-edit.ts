@@ -25,17 +25,25 @@ export type ExplicitConstraintEdit =
 
 const completeText = (text: string): string => text.trim().replace(/[.!]\s*$/, '').trim();
 
+const explicitConstraintCandidates = (message: string) =>
+  extractCompoundGoals(message, { includeProxies: false }).constraints.filter((candidate) =>
+    candidate.provenance === 'explicit' && !candidate.deadlineMetadata && candidate.valueFrame === 'level');
+
+/** Decides only whether canonical binding needs a read; it grants no write authority. */
+export function mayContainExplicitConstraintEdit(message: string): boolean {
+  return explicitConstraintCandidates(message).length > 0;
+}
+
 /** A complete named requirement owns a constraint write, never a current-value edit. */
 export function resolveExplicitConstraintEdit(
   message: string,
   graph: { readonly nodes: readonly ConstraintEditNode[]; readonly edges: TypedChipGraphView['edges'] } | null,
 ): ExplicitConstraintEdit {
   if (!graph) return { status: 'unmatched' };
-  const candidates = extractCompoundGoals(message, { includeProxies: false }).constraints;
+  const candidates = explicitConstraintCandidates(message);
   const ready: ProposalAction[] = [];
   let claimed = false;
   for (const candidate of candidates) {
-    if (candidate.provenance !== 'explicit' || candidate.deadlineMetadata || candidate.valueFrame !== 'level') continue;
     const direct = completeText(candidate.sourceQuote) === completeText(message);
     const matches = graph.nodes.filter((node) => node.label &&
       subjectBindsToLabel(candidate.targetName.split(/\s+/), node.label));
