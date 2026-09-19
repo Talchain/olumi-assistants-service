@@ -123,7 +123,7 @@ import {
 import { enforceRepairVocabularyDenylist } from "../shared/repair-vocabulary-denylist.js";
 import { buildNoOpRecoveryChips } from "./edit-graph-noop-chips.js";
 import { buildEditClarifyFallbackParts } from "../../orchestrator-v5/compose/edit-clarify-response.js";
-import { classifyUnappliedEditFrame, composeUnappliedEditReply } from "../../orchestrator-v5/compose/unapplied-edit-reply.js";
+import { classifyUnappliedEditFrame, composeUnappliedEditReply, isValueEditableTarget } from "../../orchestrator-v5/compose/unapplied-edit-reply.js";
 // ROADMAP 2.427 — the no-op preservation path is the one surface where the edit
 // LLM's own prose reaches the user verbatim, so it is the one surface that can
 // still advise a phrasing the product refuses. See the trip test below.
@@ -2745,6 +2745,46 @@ export async function handleEditGraph(
       // means "I have no offer of my own", NOT "emit nothing" — the generic
       // label chips (which carry no number) still ship, and the user always
       // keeps an affordance.
+      // ⭐⭐ A SUBSTITUTED CHIP MUST NOT CONTRADICT THE TEXT ABOVE IT.
+      //
+      // `buildEditClarifyFallbackParts` fills its label chips FACTORS FIRST
+      // AND THEN OPTIONS, up to three (`edit-clarify-response.ts`
+      // `selectEditClarifyTargets`). That is correct for its own copy, which
+      // invites "factor, edge, option, or value". It is WRONG under a reply
+      // that has just said setting a value is something we can only do on a
+      // factor: on a graph carrying FEWER THAN THREE factors the substitution
+      // selects an option and the user reads
+      //
+      //   "...that's an option, not a factor, and setting a value is
+      //    something I can only do on a factor."
+      //   [ Change Deploy the AI chatbot ] → "For Deploy the AI chatbot,
+      //                                        what value should we use?"
+      //
+      // ⚠ NEWLY REACHABLE. Before the `value_edit_unsupported_kind` branch the
+      // composer's chips were non-empty on this input, so this substitution
+      // never ran on it. Milder than the defect that branch fixes — the chip
+      // carries no number and routes to the conversational lane, not to
+      // `set_factor_value` — but it names a capability the sentence above it
+      // has just withheld.
+      //
+      // ⚠ AND IT IS INVISIBLE AT OR ABOVE THE 3-CAP: with three or more
+      // factors an option chip can never be selected, so a three-factor
+      // fixture reads the same green whether this restriction exists or not.
+      // The wiring spec pins it on a graph with FEWER THAN THREE factors.
+      //
+      // DERIVED, NOT MIRRORED (CLAUDE.md trap 12): the restriction reuses the
+      // SAME chip builder and the SAME predicate the composer asked
+      // (`isValueEditableTarget`, backed by the handler's own
+      // `SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS`). No second chip-minting site,
+      // and no second copy of the selection rules.
+      //
+      // FAIL-SAFE ON AN EMPTY RESULT: with no value-editable node at all,
+      // `buildEditClarifyFallbackParts([])` returns the CANCEL chip, so the
+      // branch still carries an affordance and never becomes the chip-less
+      // dead end Lane 22 fixed.
+      const valueEditableNodes = (
+        context.graph.nodes as ReadonlyArray<{ id: string; kind: string; label: string }>
+      ).filter((node) => isValueEditableTarget(node));
       const clarifyFallback =
         genericFallback === null
           ? null
@@ -2755,7 +2795,9 @@ export async function handleEditGraph(
                 chips:
                   unappliedEditReply.chips.length > 0
                     ? unappliedEditReply.chips
-                    : genericFallback.chips,
+                    : unappliedEditReply.text_limits_value_edits_to_factors
+                      ? buildEditClarifyFallbackParts(valueEditableNodes).chips
+                      : genericFallback.chips,
               };
       const assistantText = noOpClarificationPreserved
         ? noOpCandidate

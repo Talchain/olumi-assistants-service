@@ -95,6 +95,24 @@ function makeContext(): ConversationContext {
           observed_state: { value: 0.5, raw_value: 500000, unit: '£' },
         },
         { id: 'opt_lead', kind: 'option', label: 'Hire a Tech Lead' },
+        // ⭐⭐ A SCHEMA-VALID OPTION THAT CARRIES A VALUE. `opt_lead` above has
+        // none, and that absence is the only reason an option was ever spared
+        // a factor-value chip: with no `observed_state` it resolves to the
+        // unknown-scale branch, which emits none. `NodeV3Schema` puts
+        // `observed_state` on the NODE, not on a factor-shaped subtype, so
+        // this shape is valid. ⚠ CORRECTED: an earlier version of this comment
+        // said the shipped `src/**/*.json` corpus "already carries one" on
+        // `risk`/`outcome` (1/95, 3/81). Those nodes carry a value in [0,1]
+        // but also a `unit`/`cap`, so they resolve `measured`; ZERO non-factor
+        // nodes in that corpus reach `unit_interval`. This node is
+        // CONSTRUCTED to reach the numeric-chip branch. The kinds' real
+        // exposure today is the copy promise, which the same guard closes.
+        {
+          id: 'opt_ai',
+          kind: 'option',
+          label: 'Deploy the AI chatbot',
+          observed_state: { value: 0.3 },
+        },
       ],
       edges: [
         {
@@ -244,6 +262,64 @@ describe('handleEditGraph no-op — the witnessed collapse, and its repair', () 
     }
   });
 
+  it('⭐ WIRING — an OPTION carrying a value is offered no factor-value chip, and still keeps an affordance', async () => {
+    // The counterexample proven through the REAL handler, not the composer
+    // alone. Two halves, and the second is the one the composer spec is
+    // structurally blind to: the composer returns an EMPTY chip list and
+    // `edit-graph.ts` substitutes the generic label chips, so "no numeric
+    // offer" must not become the chip-less dead end Lane 22 already fixed.
+    const message = 'Change Deploy the AI chatbot to low.';
+    const result = await handleEditGraph(
+      makeContext(),
+      message,
+      makeNoOpAdapter(),
+      'req',
+      'turn',
+    );
+    const text = result.assistantText ?? '';
+
+    // We still say which node we understood — the fix is not a silent drop.
+    expect(text).toContain('Deploy the AI chatbot');
+    // ...and we make no claim about a scale, and promise no value write that
+    // `set_factor_value` would refuse.
+    expect(text).not.toMatch(/0–1 scale/);
+    expect(text).not.toMatch(/Give me the value and I'll write it/);
+
+    // No chip writes a number into an option.
+    const chips = result.suggestedActions ?? [];
+    for (const c of chips) {
+      const m = (c as { message?: string; prompt?: string }).message ?? (c as { prompt?: string }).prompt ?? '';
+      expect(m, `chip offers a value on an option: ${m}`).not.toMatch(
+        /Set Deploy the AI chatbot to [0-9]/,
+      );
+    }
+    // The affordance survives.
+    expect(chips.length, 'the option branch became a chip-less dead end').toBeGreaterThan(0);
+  });
+
+  it('⭐ WIRING — OPPOSITE DIRECTION: a real FACTOR still gets its numeric offer through the same handler', async () => {
+    // A guard that closes the option case by suppressing chips on real factors
+    // would be a worse defect than the one it fixes. Same handler, same graph,
+    // opposite expectation — a probe that answered the same for both would
+    // prove nothing about the discrimination.
+    const result = await handleEditGraph(
+      makeContext(),
+      WITNESSED_MESSAGES.W2,
+      makeNoOpAdapter(),
+      'req',
+      'turn',
+    );
+    const chips = result.suggestedActions ?? [];
+    const numericOffers = chips.filter((c) =>
+      /Set Team coordination overhead to [0-9]/.test(
+        (c as { message?: string; prompt?: string }).message ??
+          (c as { prompt?: string }).prompt ??
+          '',
+      ),
+    );
+    expect(numericOffers.length).toBeGreaterThan(0);
+  });
+
   it('⭐ WIRING — a £ factor is never told it is on a 0–1 scale, and is offered no bare number', async () => {
     // The F1 harm, proven through the REAL handler rather than the composer
     // alone. Before the field-path fix this reply claimed a 0-1 scale on a
@@ -336,5 +412,153 @@ describe('handleEditGraph no-op — the witnessed collapse, and its repair', () 
     );
     expect(result.noOpClarificationPreserved).toBe(true);
     expect(result.assistantText).toBe(q);
+  });
+
+  // ═══ REVIEW FINDING 2 (CEE #1351) — THE SUBSTITUTED CHIPS ══════════════
+  //
+  // The kind-refusal branch returns EMPTY chips and `edit-graph.ts`
+  // substitutes the generic label chips, which are filled factors-first and
+  // then OPTIONS up to three. `makeContext()` above has EXACTLY THREE factors
+  // — at the selector's cap — so an option chip can never be selected in it
+  // and the contradiction is STRUCTURALLY INVISIBLE to every test that uses
+  // it. These use a graph with FEWER THAN THREE factors, which is the only
+  // shape that can exhibit it.
+  //
+  // Reachability of that shape, measured over every `*.json` under `src/`:
+  // 4 of 32 graphs carry at least one option and fewer than three factors.
+
+  /** One factor, one valued option — BELOW the selector's 3-cap. */
+  function makeSparseContext(): ConversationContext {
+    return {
+      graph: {
+        nodes: [
+          { id: 'goal_1', kind: 'goal', label: 'Launch on time' },
+          {
+            id: 'factor_tco',
+            kind: 'factor',
+            label: 'Team coordination overhead',
+            observed_state: { value: 0.3 },
+          },
+          {
+            id: 'opt_ai',
+            kind: 'option',
+            label: 'Deploy the AI chatbot',
+            observed_state: { value: 0.3 },
+          },
+        ],
+        edges: [],
+      },
+      messages: [{ role: 'user', content: 'x' }],
+      scenario_id: '11111111-2222-3333-4444-555555555555',
+      framing: { stage: 'evaluate' },
+      analysis_response: null,
+    } as unknown as ConversationContext;
+  }
+
+  /** An option and no factor at all — the empty-restriction fail-safe. */
+  function makeNoFactorContext(): ConversationContext {
+    return {
+      graph: {
+        nodes: [
+          { id: 'goal_1', kind: 'goal', label: 'Launch on time' },
+          {
+            id: 'opt_ai',
+            kind: 'option',
+            label: 'Deploy the AI chatbot',
+            observed_state: { value: 0.3 },
+          },
+        ],
+        edges: [],
+      },
+      messages: [{ role: 'user', content: 'x' }],
+      scenario_id: '11111111-2222-3333-4444-555555555555',
+      framing: { stage: 'evaluate' },
+      analysis_response: null,
+    } as unknown as ConversationContext;
+  }
+
+  const chipMessage = (c: unknown): string =>
+    (c as { message?: string; prompt?: string }).message ??
+    (c as { prompt?: string }).prompt ??
+    '';
+
+  it('⭐ WIRING — the substituted chips never offer a value on the OPTION the copy has just refused', async () => {
+    const ctx = makeSparseContext();
+
+    // ⭐ PRECONDITION PINNED IN-TEST. Without this the assertion below could
+    // pass because the selector never picks an option in this graph at all —
+    // a guard agreeing with itself (CLAUDE.md trap 13b). This proves the
+    // UNRESTRICTED substitution WOULD have offered the option, so the
+    // restriction is what removes it and not the fixture.
+    const unrestricted = buildEditClarifyFallbackParts(
+      ctx.graph?.nodes as ReadonlyArray<{ id: string; kind: string; label: string }>,
+    );
+    expect(
+      unrestricted.chips.some((c) => chipMessage(c).includes('Deploy the AI chatbot')),
+      'fixture cannot exhibit the defect: the unrestricted chips carry no option',
+    ).toBe(true);
+
+    const result = await handleEditGraph(
+      ctx,
+      'Change Deploy the AI chatbot to low.',
+      makeNoOpAdapter(),
+      'req',
+      'turn',
+    );
+
+    // The copy makes the claim…
+    expect(result.assistantText ?? '').toMatch(/only do on a factor/);
+    // …and nothing beneath it contradicts the claim.
+    const chips = result.suggestedActions ?? [];
+    for (const c of chips) {
+      expect(
+        chipMessage(c),
+        `a chip offers a value on the option the copy just refused: ${chipMessage(c)}`,
+      ).not.toContain('Deploy the AI chatbot');
+    }
+    // The affordance survives, and it names a node the value lane will write.
+    expect(chips.length, 'the branch became a chip-less dead end').toBeGreaterThan(0);
+    expect(chips.some((c) => chipMessage(c).includes('Team coordination overhead'))).toBe(true);
+  });
+
+  it('⭐ WIRING — OPPOSITE DIRECTION: a branch that makes no kind claim keeps its option chip', async () => {
+    // The restriction is scoped to the copy that CLAIMS a factor-only limit.
+    // A blanket suppression would be a different behaviour change on every
+    // other empty-chip branch — and it would read identically green here
+    // without this arm. Same graph, same handler, opposite expectation.
+    const result = await handleEditGraph(
+      makeSparseContext(),
+      'Change Team coordination overhead',
+      makeNoOpAdapter(),
+      'req',
+      'turn',
+    );
+    const text = result.assistantText ?? '';
+    expect(text).not.toMatch(/only do on a factor/);
+    const chips = result.suggestedActions ?? [];
+    expect(
+      chips.some((c) => chipMessage(c).includes('Deploy the AI chatbot')),
+      'the restriction leaked onto a branch that makes no kind claim',
+    ).toBe(true);
+  });
+
+  it('⭐ WIRING — FAIL-SAFE: with no value-editable node at all the branch still carries an affordance', async () => {
+    // `buildEditClarifyFallbackParts([])` returns the cancel chip, so an empty
+    // restriction is not the chip-less dead end Lane 22 fixed. Unreached in
+    // the shipped corpus (0 of 32 graphs carry an option and zero factors),
+    // which is why it is pinned rather than assumed.
+    const result = await handleEditGraph(
+      makeNoFactorContext(),
+      'Change Deploy the AI chatbot to low.',
+      makeNoOpAdapter(),
+      'req',
+      'turn',
+    );
+    expect(result.assistantText ?? '').toMatch(/only do on a factor/);
+    const chips = result.suggestedActions ?? [];
+    expect(chips.length, 'no affordance at all').toBeGreaterThan(0);
+    for (const c of chips) {
+      expect(chipMessage(c)).not.toContain('Deploy the AI chatbot');
+    }
   });
 });
