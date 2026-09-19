@@ -1154,8 +1154,15 @@ export function deriveGoalTargetCandidate(
    * their own success criterion was decided by how the model phrased a display
    * string. On the witnessed session the goal was labelled "Ideally, We'd Like
    * to Be Offered More" — the brief's softest final clause — while the brief
-   * said "We're raising 1.3 million, and we need all of it." The refusal was
-   * correct and ended the chain; the chain is what was wrong.
+   * carried the amount they were raising, in full, and said they needed all of
+   * it. The refusal was correct and ended the chain; the chain is what was
+   * wrong.
+   *
+   * ⚠ The brief's sentence is PARAPHRASED above, deliberately. Spelling the
+   * magnitude word out enrols this file in `magnitude-alphabet.union.test.ts`,
+   * which scans `src/` bytes and cannot tell a prose mention from a lookup —
+   * it REDs the required check (third occurrence of this class on 19 Sep).
+   * Reword; do not widen that guard's manifest to admit a docblock.
    *
    * ⛔ THIS WIDENS WHEN WE ASK, NEVER WHAT WE WRITE, and that is the whole
    * safety case under Codex's #1328 ruling. `composeGoalTargetQuestion`
