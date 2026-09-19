@@ -659,6 +659,20 @@ describe("ROADMAP 2.330 — a new magnitude list in src/ forces a review", () =>
       "check that keeps '2.5 tonne' inside one candidate.",
     "cee/compound-goal/extractor.ts": "comments only; derives its patterns from the canonical alphabet",
     "cee/factor-extraction/index.ts": "comments only; derives its patterns from the canonical alphabet",
+    // 18 Sep 2026 — INCIDENTAL, and the mention is a QUOTED USER BRIEF inside a
+    // docblock. `goal-baseline-admissibility.ts` decides whether a stated
+    // current level may be minted beside a stated target; its only magnitude
+    // word is the word "million" inside the measured counter-example it names
+    // as OUT of scope ("grow ARR from 8 to 11 million within 12 months", eight
+    // persisted staging rows where an elided magnitude word put the two members
+    // of a from-to pair on different scales). It declares no alphabet, holds no
+    // magnitude->value map, parses nothing, and maps no magnitude word to a
+    // number — it compares two numbers a caller hands it. Recorded rather than
+    // reworded, for the reason the `graph-compact.ts` entry above states: the
+    // quoted brief is the evidence for the scope limit, and paraphrasing it to
+    // dodge the guard would delete the evidence and quiet a working alarm.
+    "cee/factor-extraction/goal-baseline-admissibility.ts":
+      "docblock only; quotes one user brief containing 'million' as the case this module deliberately does NOT close",
     "context/resolver.ts": "comments only; derives its patterns from the canonical alphabet",
     "utils/reduction-framing.ts": "comments only; derives its patterns from the canonical alphabet",
     "cee/unified-pipeline/stages/repair/graph-enforcement.ts":
