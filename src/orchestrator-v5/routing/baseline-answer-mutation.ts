@@ -39,10 +39,13 @@ export function deriveBaselineLimitChange(
 ): BaselineLimitChange | undefined {
   if (!hasBaselineIndependentMutationWarrant(message)) return undefined;
   const instruction = baselineIndependentInstruction(message);
+  const completeInstruction = instruction.replace(/[.!]\s*$/, '').trim();
   const parsed = normaliseConstraintUnits(
     extractCompoundGoals(instruction, { includeProxies: false }).constraints,
   ).filter((c) => c.deadlineMetadata === undefined && c.valueFrame === 'level' &&
     c.provenance === 'explicit' && (c.unit === '%' || c.unit === 'fraction') &&
+    // A truncated quote may omit a period or other qualifier on the amount.
+    c.sourceQuote.replace(/[.!]\s*$/, '').trim() === completeInstruction &&
     hasBaselineIndependentMutationWarrant(c.sourceQuote) &&
     subjectBindsToLabel(c.targetName.split(/\s+/), targetLabel) &&
     !competingLabels.some((label) => subjectBindsToLabel(c.targetName.split(/\s+/), label)));
