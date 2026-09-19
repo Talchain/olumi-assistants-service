@@ -279,7 +279,9 @@ describe('POST /orchestrate/v2/turn — renew expired limit, then confirm the fr
 
   it('the expired offer’s own stored chip message renews the same tuple without applying it', async () => {
     const original = storedPendings[0]!;
-    if (original.action.kind !== 'apply_proposed_change') throw new Error('Expected proposal fixture');
+    if (original.action.kind !== 'apply_proposed_change' || original.action.__legacy_no_public_copy === true) {
+      throw new Error('Expected an emitted proposal with public replay copy');
+    }
     const body = await post(original.action.public_message, {
       source: 'chip_click', chip: { id: original.chip_id, action_type: 'add_constraint' },
     });
@@ -328,7 +330,9 @@ describe('POST /orchestrate/v2/turn — renew expired limit, then confirm the fr
     { name: 'constraint action with another chip identity', actionType: 'add_constraint', wrongId: true },
   ])('$name cannot renew an expired constraint by replaying its message', async ({ actionType, wrongId }) => {
     const original = storedPendings[0]!;
-    if (original.action.kind !== 'apply_proposed_change') throw new Error('Expected proposal fixture');
+    if (original.action.kind !== 'apply_proposed_change' || original.action.__legacy_no_public_copy === true) {
+      throw new Error('Expected an emitted proposal with public replay copy');
+    }
     const before = structuredClone(storedGraph);
     const response = await app.inject({
       method: 'POST', url: '/orchestrate/v2/turn',
