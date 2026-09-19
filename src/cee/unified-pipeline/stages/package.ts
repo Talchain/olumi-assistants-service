@@ -1158,6 +1158,14 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
       model: ctx.llmMeta.model ?? ctx.draftAdapter?.model,
       promptVersion: ctx.llmMeta.prompt_version,
       storeOutput: true,
+      // Admin-only evidence of this pre-V3, pre-persistence boundary. It is not
+      // attached to the public raw trace or allowed to seed goalConstraints.
+      ...(ctx.llmMeta.raw_draft_lineage ? {
+        draftLineage: {
+          receipt: ctx.llmMeta.raw_draft_lineage,
+          goalConstraints: ctx.goalConstraints,
+        },
+      } : {}),
     });
   }
 

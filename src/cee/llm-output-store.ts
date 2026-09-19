@@ -11,6 +11,23 @@
  */
 
 import { createHash } from "node:crypto";
+import type { DraftLineageReceipt } from './draft/records/lineage.js';
+
+export interface StoredDraftLineage {
+  adapter: DraftLineageReceipt;
+  pipeline: {
+    boundary: 'post_repair_package_before_v3_and_persistence';
+    /** Hash of this entry's parsedJson, not the canonical analysis graph hash. */
+    snapshot_sha256: string;
+    goal_constraints: unknown;
+    canonical_save: 'not_witnessed_here';
+  };
+}
+
+interface DraftLineageStorageInput {
+  receipt: DraftLineageReceipt;
+  goalConstraints: unknown;
+}
 
 /** Default TTL: 1 hour */
 const DEFAULT_TTL_MS = 60 * 60 * 1000;
@@ -38,6 +55,8 @@ export interface LLMOutputEntry {
   model?: string;
   /** Prompt version */
   promptVersion?: string;
+  /** Sensitive lineage is retrievable only through the existing admin route. */
+  draftLineage?: StoredDraftLineage;
 }
 
 /** In-memory store with TTL */
@@ -136,6 +155,7 @@ export function storeLLMOutput(
   options?: {
     model?: string;
     promptVersion?: string;
+    draftLineage?: DraftLineageStorageInput;
   }
 ): { outputHash: string; nodeCount: number; edgeCount: number } {
   // Check if already stored (idempotent)
@@ -177,12 +197,23 @@ export function storeLLMOutput(
     requestId,
     outputHash,
     rawText,
-    parsedJson,
+    parsedJson: options?.draftLineage ? structuredClone(parsedJson) : parsedJson,
     nodeCount,
     edgeCount,
     storedAt: Date.now(),
     model: options?.model,
     promptVersion: options?.promptVersion,
+    ...(options?.draftLineage ? {
+      draftLineage: {
+        adapter: structuredClone(options.draftLineage.receipt),
+        pipeline: {
+          boundary: 'post_repair_package_before_v3_and_persistence' as const,
+          snapshot_sha256: createHash('sha256').update(JSON.stringify(parsedJson) ?? 'null').digest('hex'),
+          goal_constraints: structuredClone(options.draftLineage.goalConstraints ?? null),
+          canonical_save: 'not_witnessed_here' as const,
+        },
+      },
+    } : {}),
   });
 
   return { outputHash, nodeCount, edgeCount };
@@ -213,6 +244,7 @@ export function buildLLMRawTrace(
     model?: string;
     promptVersion?: string;
     storeOutput?: boolean;
+    draftLineage?: DraftLineageStorageInput;
   }
 ): {
   text: string;
@@ -242,6 +274,7 @@ export function buildLLMRawTrace(
     const stored = storeLLMOutput(requestId, rawText, parsedJson, {
       model: options?.model,
       promptVersion: options?.promptVersion,
+      draftLineage: options?.draftLineage,
     });
     outputHash = stored.outputHash;
     nodeCount = stored.nodeCount;

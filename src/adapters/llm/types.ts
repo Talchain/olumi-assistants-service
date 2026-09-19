@@ -10,6 +10,7 @@ import type { DocPreview } from "../../services/docProcessing.js";
 import type { CorrectionCollector } from "../../cee/corrections.js";
 import type { ObservabilityCollector } from "../../cee/observability/index.js";
 import type { SystemPromptMeta } from "./prompt-loader.js";
+import type { DraftLineageReceipt } from "../../cee/draft/records/lineage.js";
 import type { BuiltDraftAttachment } from "./draft-attachment.js";
 
 /**
@@ -173,6 +174,8 @@ export interface DraftGraphResult {
     raw_output_preview?: string;
     raw_llm_text?: string;
     raw_llm_json?: unknown;
+    /** Internal only: stored by package with raw output, exposed by the admin route. */
+    raw_draft_lineage?: DraftLineageReceipt;
   };
   usage: UsageMetrics;
 }

@@ -2,6 +2,8 @@ import Anthropic from "@anthropic-ai/sdk";
 import { Agent, fetch as undiciFetch } from "undici";
 import { HTTP_CLIENT_TIMEOUT_MS, DRAFT_LLM_TIMEOUT_MS, UNDICI_CONNECT_TIMEOUT_MS, DRAFT_THROUGHPUT_FLOOR_TOKENS_PER_S, DRAFT_TTFB_SAFETY_OVERHEAD_S, viableRunawayRetryFloorTokens } from "../../config/timeouts.js";
 import { config } from "../../config/index.js";
+import { GIT_COMMIT_SHA } from "../../version.js";
+import { captureDraftLineage, draftRequestIdentity, type DraftRequestIdentity } from "../../cee/draft/records/lineage.js";
 import type { DocPreview } from "../../services/docProcessing.js";
 import type { GraphT, NodeT, EdgeT } from "../../schemas/graph.js";
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../config/graphCaps.js";
@@ -994,6 +996,7 @@ export async function draftGraphWithAnthropic(
 
     let useStructuredOutputs = structuredOutputsEnabled;
     let { body } = buildCallParams(useStructuredOutputs);
+    let sentDraftRequestIdentity = draftRequestIdentity(body);
 
     /**
      * C1 + C2 (Lane C, 2026-07-23): stream ONE draft generation and detect the
@@ -1216,6 +1219,8 @@ export async function draftGraphWithAnthropic(
       }
 
       try {
+        // Capture the actual attempt, including retry sampling/token changes.
+        sentDraftRequestIdentity = draftRequestIdentity(attemptBody);
         const stream = apiClient.messages.stream(attemptBody, {
           signal: perAttempt.signal,
           headers: { "Idempotency-Key": attemptIdempotencyKey },
@@ -2033,6 +2038,10 @@ export async function draftGraphWithAnthropic(
     // in place looking like a bound, the call takes it out of the picture and is
     // held by two limits the completion module owns and states — an output
     // ceiling and a hard wall-clock abort.
+    const decodedRecordsInput = structuredClone(rawJson);
+    const initialRecords = structuredClone(seam.records);
+    let completionRequestIdentity: DraftRequestIdentity | null = null;
+    let completionOutputText: string | null = null;
     let activeRecords = seam.records;
     let activeProjection = seam.projection;
     const completionAsk = enumerateCompletionAsk(seam.records, seam.projection);
@@ -2063,23 +2072,26 @@ export async function draftGraphWithAnthropic(
           records: seam.records,
           ask: completionAsk,
         });
+        const completionBody = {
+          model,
+          max_tokens: RECORDS_COMPLETION_MAX_TOKENS,
+          temperature: draftTemperature,
+          messages: [{ role: "user", content: completionPrompt }],
+          ...(useStructuredOutputs
+            ? { output_config: { format: { type: "json_schema", schema: buildRecordsCompletionSchema() } } }
+            : {}),
+          thinking: { type: "disabled" },
+        } as Anthropic.MessageCreateParamsNonStreaming;
+        completionRequestIdentity = draftRequestIdentity(completionBody);
         const completionMessage = await getClient().messages.create(
-          {
-            model,
-            max_tokens: RECORDS_COMPLETION_MAX_TOKENS,
-            temperature: draftTemperature,
-            messages: [{ role: "user", content: completionPrompt }],
-            ...(useStructuredOutputs
-              ? { output_config: { format: { type: "json_schema", schema: buildRecordsCompletionSchema() } } }
-              : {}),
-            thinking: { type: "disabled" },
-          } as Anthropic.MessageCreateParamsNonStreaming,
+          completionBody,
           { signal: ac.signal },
         );
         const completionText = (completionMessage.content ?? [])
           .filter((b: { type: string }) => b.type === "text")
           .map((b: unknown) => (b as { text: string }).text)
           .join("");
+        completionOutputText = completionText;
         // Plain parse, not the draft path's `safeExtractJson`: that helper throws
         // an `UpstreamNonJsonError` carrying a 500-char slice of the response,
         // which is the right behaviour for a draft that must fail loudly and the
@@ -2249,6 +2261,34 @@ export async function draftGraphWithAnthropic(
       projection: activeProjection,
       instructionSha256: draftRecordsInstructionHash(),
       grammarSha256: draftRecordsGrammarHash(),
+    });
+    const draftLineage = captureDraftLineage({
+      code_sha: GIT_COMMIT_SHA,
+      prompt: {
+        base_prompt_hash: promptMeta.prompt_hash ?? null,
+        base_prompt_version: promptMeta.prompt_version ?? null,
+        instruction_sha256: recordsSidecar.instruction_sha256,
+        grammar_sha256: recordsSidecar.grammar_sha256,
+      },
+      draft_request: sentDraftRequestIdentity,
+      providerText: jsonText,
+      decodedInput: decodedRecordsInput,
+      salvagedFromTruncation: salvagedFromTruncation,
+      initial_records: initialRecords,
+      selected_records: activeRecords,
+      completion: {
+        attempted: completionMeta.attempted === true,
+        kept: completionMeta.kept === true,
+        request: completionRequestIdentity,
+        output_text: completionOutputText,
+      },
+      projection: {
+        graph: activeProjection.graph,
+        bindings: recordsSidecar.bindings,
+        refusals: recordDisclosures,
+        constraints: activeProjection.goalConstraints,
+        constraint_carriage: 'diagnostic_only_not_forwarded_to_pipeline',
+      },
     });
     log.info({
       event: "cee.draft.records_projected",
@@ -2681,6 +2721,7 @@ export async function draftGraphWithAnthropic(
         // Always include raw output for LLM observability trace (preview + full text for storage)
         raw_output_preview: rawPreview,
         raw_llm_text: rawTextFull,
+        raw_draft_lineage: draftLineage,
         // Only include parsed JSON when unsafe capture is enabled (admin-gated)
         ...(unsafeCaptureEnabled ? {
           raw_llm_json: rawOutput.output,
