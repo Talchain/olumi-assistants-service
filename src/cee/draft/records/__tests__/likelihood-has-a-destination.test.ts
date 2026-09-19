@@ -1,0 +1,210 @@
+/**
+ * ⭐⭐ A LIKELIHOOD HAS A DESTINATION — and the point is that this is MEASURABLE.
+ *
+ * v20.1 told the model to leave `value` OUT when a risk's only number was a
+ * likelihood. That instruction could never be evaluated: measured on the live
+ * corpus, **135 of 28,055 risk nodes carry any value at all**, so a correct
+ * suppression and a model that simply had no number are THE SAME OBSERVATION,
+ * against a baseline dominating the signal 200:1. No corpus and no rewording
+ * fixes that — it is the shape of the ask, not the wording.
+ *
+ * Routing fixes it twice: models route more reliably than they withhold, and a
+ * routed value is a POSITIVE signal you can count over banked draws — a
+ * population count, not a model run.
+ *
+ * ⚠ These tests assert the GRAMMAR AND THE INSTRUCTION, which is all that can
+ * be asserted offline. Whether the model actually routes is a question about
+ * the model and is rowed for when the testing pause lifts. A green file here is
+ * NOT evidence that routing works — it is evidence that routing is POSSIBLE,
+ * which it previously was not.
+ */
+
+import { readFileSync } from 'node:fs';
+
+import { describe, expect, it } from 'vitest';
+
+import { DRAFT_RECORDS_INSTRUCTION } from '../instruction.js';
+import {
+  ANTHROPIC_OPTIONAL_PARAM_LIMIT,
+  SERIALIZED_BYTES_BUDGET,
+  buildDraftClaimItemSchema,
+  buildDraftRecordsSchema,
+  countOptionalParams,
+  draftClaimSchemaKeys,
+} from '../grammar.js';
+
+function claimProps(): Record<string, unknown> {
+  const schema = buildDraftClaimItemSchema() as { properties?: Record<string, unknown> };
+  const props = schema.properties ?? {};
+  expect(Object.keys(props).length, 'claim schema has no properties — this probe is blind').toBeGreaterThan(0);
+  return props;
+}
+
+describe('a likelihood has somewhere to go', () => {
+  it('the grammar declares `likelihood` on a claim', () => {
+    const props = claimProps();
+    expect(props.likelihood).toEqual({ type: 'number' });
+    // POSITIVE CONTROL on the same probe: a field that was always there. Without
+    // it, a broken walk would read every field as absent and the assertion above
+    // would be the only thing failing, which reads as a missing field rather
+    // than a blind test.
+    expect(props.value).toEqual({ type: 'number' });
+  });
+
+  it('`likelihood` and `value` are DIFFERENT fields, never merged', () => {
+    // The trap-21 split this whole change exists for. If a later tidy-up folds
+    // them, a probability starts being read downstream as a magnitude and a
+    // user's limit gets checked against a chance.
+    const props = claimProps();
+    expect(Object.keys(props)).toContain('likelihood');
+    expect(Object.keys(props)).toContain('value');
+    expect(props.likelihood).not.toBe(props.value);
+  });
+
+  it('the instruction ROUTES rather than asking for silence', () => {
+    // The distinction that makes the ask measurable. "leave it out" is
+    // unobservable against a 99.5%-empty baseline; "put it here" is countable.
+    expect(DRAFT_RECORDS_INSTRUCTION).toContain('likelihood');
+    expect(DRAFT_RECORDS_INSTRUCTION).toContain('Put the number somewhere');
+  });
+
+  it('the exemplars are CUE-FREE, so a lexical shortcut cannot satisfy them', () => {
+    // v20.1's three negative exemplars all contained the word "chance", so the
+    // cheapest generalisation available to a model was the KEYWORD rather than
+    // the test. A likelihood in a real brief is usually written without one.
+    expect(DRAFT_RECORDS_INSTRUCTION).toContain('Vendor slippage: 30%');
+    expect(DRAFT_RECORDS_INSTRUCTION).toContain('Contract loss: 4%');
+    // …and the case that defeats a lexical AND a unit rule: a measure-word and
+    // a risk-word together, on a risk node, at the same unit as the chances.
+    expect(DRAFT_RECORDS_INSTRUCTION).toContain('Churn risk: 4%');
+    // The inverse class — a genuine measure wearing probability clothes.
+    expect(DRAFT_RECORDS_INSTRUCTION).toContain('Win rate 25%');
+  });
+
+  it('⚠ THE GRAMMAR BUDGET STILL HOLDS — a field is not free', () => {
+    // Anthropic's structured-outputs compiler enforces these, so a field added
+    // without checking does not fail a test, it fails EVERY DRAFT AT RUNTIME.
+    // The repo's own limits, read rather than restated.
+    const schema = buildDraftRecordsSchema();
+    expect(countOptionalParams(schema)).toBeLessThanOrEqual(ANTHROPIC_OPTIONAL_PARAM_LIMIT);
+    expect(Buffer.byteLength(JSON.stringify(schema), 'utf8')).toBeLessThanOrEqual(SERIALIZED_BYTES_BUDGET);
+    // …and the key is genuinely in the claim's key list, not just the object.
+    expect(draftClaimSchemaKeys()).toContain('likelihood');
+  });
+});
+
+/**
+ * ⭐⭐ B1 — THE FIELD MUST SURVIVE THE SEAM, AND WITHOUT THIS IT DID NOT.
+ *
+ * `seam.ts` rebuilds every claim FIELD BY FIELD, and the wire Zod is
+ * `.passthrough()` — so a field the grammar admits and the rebuild does not
+ * NAME validates and then vanishes, with nothing RED anywhere. An independent
+ * seat measured it as a discriminating pair: base `grammar=15 carried=15
+ * dropped=none`, head `grammar=16 carried=15 dropped=['likelihood']`.
+ *
+ * ⛔ AND IT KILLED THE REASON THE FIELD EXISTS. `likelihood` was added because
+ * ROUTING is falsifiable where WITHHOLDING is not — a populated `likelihood` is
+ * countable over banked draws, a correct suppression is invisible against a
+ * 99.5%-empty baseline. The `wire_histogram` loops over the REBUILT records, so
+ * the bucket would have counted zero for ever: **the countable signal could not
+ * be counted.** The feature would have shipped with a hollow justification.
+ *
+ * This is the general class — a field-by-field rebuild plus a permissive schema
+ * — found at a seam rather than at the V3 transform, where it was first looked
+ * for and refuted.
+ */
+describe('the routed field survives the seam', () => {
+  it('a claim carrying `likelihood` keeps it through the seam rebuild', async () => {
+    const mod = (await import('../seam.js')) as Record<string, unknown>;
+    const src = readFileSync(
+      new URL('../seam.ts', import.meta.url),
+      'utf8',
+    );
+    // Bound to the REBUILD SITE by identity, not to a behaviour another line
+    // could satisfy: the rebuild names each field it keeps, so the assertion is
+    // that this field is named there.
+    expect(
+      src.includes('claim.likelihood !== undefined ? { likelihood: claim.likelihood }'),
+      'seam.ts rebuilds claims field-by-field and no longer names `likelihood`. ' +
+        'The wire Zod is .passthrough(), so the field will VALIDATE and then ' +
+        'VANISH, and the histogram that justifies the field will count zero for ever.',
+    ).toBe(true);
+    expect(mod, 'seam module failed to load — this probe is blind').toBeDefined();
+  });
+
+  it('CONTRAST: the sibling fields the rebuild already named are still named', () => {
+    // Without this the assertion above would pass identically against a file
+    // that had been rewritten to name everything, or to name nothing and be
+    // matched by a stale string.
+    const src = readFileSync(new URL('../seam.ts', import.meta.url), 'utf8');
+    for (const f of ['value_scale', 'sets_to', 'unit', 'is_baseline']) {
+      expect(src.includes(`claim.${f} !== undefined`), `${f} vanished from the rebuild`).toBe(true);
+    }
+  });
+});
+
+/**
+ * ⛔⛔ THE UNIT IS WITHHELD ON `risk` AND `outcome` — AND WITHHOLDING IT
+ * PRESERVES A USER-STATED BASELINE THAT WRITING IT DESTROYED.
+ *
+ * `add-constraint.ts:1074-1084` mints `observed_state {value: frac, baseline:
+ * frac, unit: 'fraction', cap: 1}` on a risk or outcome FROM THE USER'S OWN
+ * STATEMENT ("keep churn under 4%"), and its eligibility requires
+ * `existingObserved?.unit === undefined || === 'fraction'`. A drafted
+ * `unit: "%"` arriving first makes that false, and TWO things are lost in one
+ * write: the 2.877 baseline mint, and the 2.918 question that would have ASKED
+ * the user for the level.
+ *
+ * ⇒ The trade was strictly bad: a value the USER stated swapped for one the
+ * model guessed, on the exact axis `material_parameters_user_stated` gates —
+ * which is what caps the analysis mode at `quantified_provisional`.
+ *
+ * ⚠ Found by an independent seat, not by this PR's own tests, every one of
+ * which passed. The guards that caught all three blocking findings were the
+ * seam's completeness probe, the grammar hash pin and the instruction's
+ * half-pins — none written by this PR and none consulted before the push.
+ */
+describe('the unit is withheld on the kinds the constraint seam owns', () => {
+  const claim = (kind: string) => ({
+    claim_kind: kind,
+    label: `${kind} node`,
+    value: 4,
+    unit: '%',
+  });
+
+  it('a `risk` claim carries its LEVEL but not its unit', async () => {
+    const { projectDraftRecords } = (await import('../projector.js')) as Record<string, unknown> as {
+      projectDraftRecords?: (r: unknown) => unknown;
+    };
+    // Bound to the SOURCE, because the projector's entry point is not stable
+    // across revisions and a behavioural probe that cannot resolve it would
+    // pass by being blind.
+    const src = readFileSync(new URL('../projector.ts', import.meta.url), 'utf8');
+    expect(
+      src.includes('nodeKind !== "risk" && nodeKind !== "outcome"'),
+      'the projector writes `unit` on risk/outcome again. That disables the ' +
+        'user-stated baseline mint in add-constraint.ts AND the question that ' +
+        'would have asked the user for the level.',
+    ).toBe(true);
+    expect(projectDraftRecords ?? true, 'projector module failed to load').toBeTruthy();
+    void claim;
+  });
+
+  it('CONTRAST: the level and the authorship stamp are still written', () => {
+    // Without this the assertion above would pass against a projector that had
+    // stopped writing `node.data` altogether — which would "fix" B3 by
+    // removing the feature.
+    const src = readFileSync(new URL('../projector.ts', import.meta.url), 'utf8');
+    expect(src).toContain('raw_value: claim.value');
+    expect(src).toContain('extractionType: "inferred"');
+  });
+
+  it('the wire histogram carries a `likelihood_by_kind` bucket', () => {
+    // Without it the field's own falsifiability argument is hollow: a routed
+    // value is only countable if something counts it, and the bucket must read
+    // the REBUILT records — the rebuild dropped this field once already.
+    const src = readFileSync(new URL('../seam.ts', import.meta.url), 'utf8');
+    expect(src).toContain('likelihood_by_kind: likelihoodByKind');
+    expect(src).toContain('claim.likelihood === undefined');
+  });
+});

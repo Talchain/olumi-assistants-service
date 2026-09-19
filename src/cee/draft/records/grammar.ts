@@ -550,6 +550,37 @@ export interface DraftInferenceClaim {
    */
   value_scale?: DraftRecordValueScale;
   /**
+   * ⭐⭐ A LIKELIHOOD'S DESTINATION — `risk` claims only, and it exists because
+   * ASKING FOR SILENCE IS UNMEASURABLE.
+   *
+   * v20's carve-out told the model to leave `value` OUT when a risk's only
+   * number is how likely it is. That instruction cannot be evaluated, ever:
+   * measured on the live corpus, **135 of 28,055 risk nodes carry any value at
+   * all**, so a correct suppression and a model that simply had no number are
+   * THE SAME OBSERVATION, against a baseline that dominates the signal 200:1.
+   * No corpus and no rewording fixes that — it is the shape of the ask.
+   *
+   * Routing fixes it twice over: models route more reliably than they withhold (⚠ ASSUMPTION — ASSERTED, NOT
+   * EVIDENCED. No citation exists for it anywhere in this repo; it is a shared
+   * intuition between two sessions and nothing more. It must NOT be read as
+   * standing beside the falsifiability argument below, which IS evidenced.),
+   * and a routed value is a POSITIVE signal countable over banked draws — a
+   * population count, not a model run.
+   *
+   * ⚠ NOT `value`, and they must never be merged. `value` answers *"how big is
+   * this quantity right now"*; this answers *"how likely is this event"*. One
+   * is a level on the node's own scale, the other is a probability of
+   * occurrence — the same trap-21 split as `strength` vs `sets_to` above. A
+   * likelihood written into `value` is read downstream as a MAGNITUDE, so a
+   * user's limit gets checked against a probability.
+   *
+   * ⚠ CEE-INTERNAL. The grammar is the model-facing schema and changes NEVER on
+   * a `@talchain/schemas` train (see this file's header). Nothing projects this
+   * onto a node yet, deliberately: this increment buys the destination and the
+   * measurement. Carrying it onward is a separate change with its own evidence.
+   */
+  likelihood?: number;
+  /**
    * `causal_link` FROM AN OPTION ONLY — the value the target factor takes if
    * that option is chosen, in the factor's own unit. Becomes an entry in the
    * option node's `OptionData.interventions` (`schemas/graph.ts:163`), which is
@@ -690,6 +721,10 @@ export function buildDraftClaimItemSchema(): Record<string, unknown> {
       // What convention `value`/`sets_to` are written in. See the interface
       // note: `unit` says what it is measured in, this says what it means.
       value_scale: { type: "string", enum: [...DRAFT_RECORD_VALUE_SCALES] },
+      // `risk` claims only — HOW LIKELY the thing is, never how big it is.
+      // See the interface note: this exists so a likelihood has a DESTINATION
+      // rather than being asked for as silence.
+      likelihood: { type: "number" },
       // Option→factor intervention level. See the interface note: named apart
       // from `strength` on purpose.
       sets_to: { type: "number" },

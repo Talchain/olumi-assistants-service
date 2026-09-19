@@ -1140,6 +1140,52 @@ const CLAIM_KIND_TO_NODE_KIND: Readonly<Record<string, ProjectedNode["kind"] | n
 };
 
 /**
+ * ⭐⭐ THE NODE KINDS THAT CAN CARRY A LEVEL — the carrier half of instruction
+ * v20, and it ships WITH the ask because an ask without a carrier is deleted.
+ *
+ * Every quantity a claim carries — `value`, `unit`, `value_scale` — was read
+ * inside `if (nodeKind === "factor")`, so a level on a `risk` or an `outcome`
+ * claim was projected NOWHERE. The grammar always permitted it
+ * (`buildDraftClaimItemSchema()` scopes `value`/`unit`/`value_scale` to no
+ * kind); only this branch refused it.
+ *
+ * ⚠ AND THE REFUSAL FELL ON EXACTLY THE KINDS USERS ATTACH LIMITS TO. Measured
+ * `observed_state.value` presence by kind on both live v202 draws: factor 7 of
+ * 9, risk 0 of 3, outcome 0 of 3 (contrast control is the factor row — the probe
+ * discriminates). ISL then names the consequence in terms:
+ * `CONSTRAINT_NOT_CONVERTIBLE` — *"a 'level' frame requires constraint target
+ * node X to carry observed_state.baseline … but it carries NO observed_state at
+ * all"* — 13 of 13 in the banked journey corpus, after which PLoT withholds
+ * goal-fit and CEE withholds the leading option.
+ *
+ * ── WHY THESE THREE AND NOT MORE ───────────────────────────────────────────
+ * These are the kinds that name a QUANTITY WITH A CURRENT LEVEL. Excluded, each
+ * for a stated reason rather than by omission:
+ *   · `option` — an option carries INTERVENTIONS, not a level of its own; its
+ *     number travels on the `causal_link` leaving it, and the `is_baseline`
+ *     branch immediately above already serves it. Widening here would mint a
+ *     phantom baseline on every alternative.
+ *   · `causal_link` — maps to `null` above and mints no node, so a value on one
+ *     is discarded before this code is reached.
+ * `prior` needs no entry: it already maps to `"factor"`.
+ *
+ * ⚠ DOWNSTREAM, STATED RATHER THAN DISCOVERED. PLoT treats `goal | outcome |
+ * risk` as a probability domain normalised to [0,1]
+ * (`normalisation/constraint-filter.ts:41`, `:121`), so a level on one of these
+ * kinds is read on a [0,1] scale and a value outside it raises
+ * `plot.constraint_out_of_domain` — a warn-don't-drop gate that forwards anyway.
+ * This change does not touch that gate and does not claim every level is safe;
+ * it makes the level REACH the node, which is the precondition ISL states. CEE
+ * #1556 is the complementary half, making an out-of-domain limit legible to the
+ * user. Complementary, not competing.
+ */
+const LEVEL_BEARING_CLAIM_NODE_KINDS: ReadonlySet<ProjectedNode["kind"]> = new Set([
+  "factor",
+  "risk",
+  "outcome",
+]);
+
+/**
  * ⭐⭐ THE UNRESCUABLE EDGE SHAPES — the only edges this projector refuses.
  *
  * ── WHY THE PROJECTOR CHECKS EDGE SHAPE AT ALL ─────────────────────────────
@@ -3325,7 +3371,7 @@ function projectOnce(
     if (nodeKind === "option" && typeof claim.is_baseline === "boolean") {
       node.is_baseline = claim.is_baseline;
     }
-    if (nodeKind === "factor") {
+    if (LEVEL_BEARING_CLAIM_NODE_KINDS.has(nodeKind)) {
       // ⚠ THE MODEL'S DECLARED `category` IS DELIBERATELY NOT PROPAGATED.
       //
       // Derived at the consumer's bytes, and measured live before this line was
@@ -3411,7 +3457,74 @@ function projectOnce(
         // lets SAFETY 2 refuse a £ limit welded to a %-measured factor. The
         // refuted earlier attempt BORROWED this from a cited figure; this takes
         // only what the model said, and still earns no `extractionType`.
-        node.data = { value: claim.value, ...(claim.unit ? { unit: claim.unit } : {}) };
+        // ⛔⛔ `extractionType: "inferred"` IS LOAD-BEARING, AND ITS ABSENCE WAS A
+        // FALSE AUTHORSHIP CLAIM. The comment above says this value "earns no
+        // `extractionType`", meaning it should read as the machine's. The
+        // OPPOSITE happened: `transforms/schema-v3.ts:366` resolves an ABSENT
+        // extractionType to `brief_extraction`, which
+        // `graph-readiness/obligation-provenance.ts:145` maps to **user_stated**.
+        // So every value the MODEL added was counted as the USER's.
+        //
+        // ⚠ AND IT IS NOT CosMETIC — it moves a product decision. Measured by an
+        // adversarial review on BOTH live v202 draws: one levelled material
+        // risk/outcome flips `semanticQualitySufficient` and takes the readiness
+        // mode from `quantified_provisional` ("Olumi cannot name a leader,
+        // everything here is its own estimate") to `comparative_leader` — naming
+        // a leader on a number Olumi invented. That is precisely the harm that
+        // gate exists to prevent.
+        //
+        // ⭐ THE CORRECT VALUE IS NOT A JUDGEMENT CALL — IT IS THE GRAMMAR'S OWN
+        // DEFINITION. `claims` is "one entry for each thing YOU are adding that
+        // the user did not say" (instruction.ts). A claim-projected value is the
+        // model's, by construction. `stated_items` are the user's and keep
+        // `brief_extraction`, which is true of them.
+        //
+        // ⚠ `raw_value` MOVED CARRIER TOO, and it was silently dropped: this
+        // wrote it to `observed_state.raw_value` while `schema-v3.ts:405` reads
+        // `node.data.raw_value`. So a risk levelled `7` for "7% churn" reached
+        // the wire as a bare `7` on a kind PLoT normalises to [0,1], with the
+        // corroborating magnitude gone and PLoT's domain gate keyed on the
+        // CONSTRAINT's threshold rather than the node's level — nothing checked
+        // it. Written to both carriers, as the file already does elsewhere.
+        node.data = {
+          value: claim.value,
+          raw_value: claim.value,
+          extractionType: "inferred",
+          // ⛔⛔ THE UNIT IS WITHHELD ON `risk` AND `outcome`, AND WITHHOLDING IT
+          // IS THE POINT — WRITING IT REPLACED A USER-STATED BASELINE WITH A
+          // MACHINE-GUESSED ONE.
+          //
+          // `add-constraint.ts:1074-1084` mints `observed_state {value: frac,
+          // baseline: frac, unit: 'fraction', cap: 1}` on a risk or outcome
+          // FROM THE USER'S OWN STATEMENT ("keep churn under 4%"), and its
+          // eligibility requires `existingObserved?.unit === undefined ||
+          // === 'fraction'`. A drafted `unit: "%"` arriving first makes that
+          // false, so TWO things are lost in one write: the 2.877 baseline mint,
+          // and the 2.918 question that would have ASKED the user for the level.
+          //
+          // ⇒ The trade is strictly bad. It swaps a value the USER stated for
+          // one the model guessed — on the exact axis
+          // `material_parameters_user_stated` gates, which is what caps the
+          // analysis mode at `quantified_provisional`. The level still travels;
+          // only the unit is withheld, and only on the two kinds that seam owns.
+          //
+          // ⚠ AND THE CONJUNCT IT WOULD HAVE BROKEN IS CORRECT, NOT A PROXY.
+          // The mint declares the IDENTITY SCALE (`'fraction'` + `cap: 1`) so
+          // PLoT's `deriveRange` resolves `explicit_cap [0,1]`; a second,
+          // different unit declaration on the same node is two scale claims
+          // about one quantity — the class that produces "a confident wrong
+          // number", which that function's own docblock names.
+          //
+          // ⚠ THE PRINCIPLED FIX IS NOT THIS ONE AND IS DELIBERATELY NOT TAKEN
+          // HERE. The draft path could emit the SAME convention the constraint
+          // seam mints (`{value: 0.04, unit: 'fraction'}` for "4%"), which would
+          // let both paths agree instead of one standing down. That is a scale
+          // CONVERSION on the seam this lane has been burned by four times, and
+          // it needs an outside corpus and an independent seat. Rowed, not slipped in.
+          ...(claim.unit && nodeKind !== "risk" && nodeKind !== "outcome"
+            ? { unit: claim.unit }
+            : {}),
+        };
         node.observed_state = { value: claim.value, raw_value: claim.value };
       } else if (claim.unit !== undefined) {
         // ⛔⛔ A UNIT WITHOUT A LEVEL, AND THIS IS THE COMMON CASE — the branch

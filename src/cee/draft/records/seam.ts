@@ -160,6 +160,24 @@ const InferenceClaimWire = z.object({
   // projector inferring the convention from magnitudes, which is the defect
   // v10 exists to remove.
   value_scale: z.enum(DRAFT_RECORD_VALUE_SCALES).optional(),
+  // ⭐⭐ DECLARED HERE TOO, AND THE OMISSION WAS A SECOND LAYER OF THE SAME
+  // DEFECT. `likelihood` was added to the model-facing JSON Schema and to
+  // `DraftInferenceClaim`, and the rebuild below was then taught to name it —
+  // and it still did not compile, because THIS schema is what `parsed.data`
+  // is typed from. Undeclared here, the field arrives as passthrough-unknown
+  // (`{}`) and cannot be assigned to a `number`.
+  //
+  // ⚠ THE TYPE ERROR WAS THE ONLY THING THAT CAUGHT IT, and only because the
+  // rebuild is a CONVERSION rather than an assertion (see this function's own
+  // note above). Had the rebuild used `as`, the field would have validated,
+  // been named, compiled, and still arrived `undefined` at the projector.
+  //
+  // ⚠ `.passthrough()` IS WHY THIS IS SILENT. It admits the field at runtime,
+  // so nothing REDs at validation; the wire carries a value that the typed
+  // surface does not know exists. A `.strict()` schema would have rejected it
+  // loudly — which is worse for tolerance and better for this class, and is a
+  // trade this seam has already made deliberately.
+  likelihood: z.number().optional(),
   // `option_refinement` only — grammar design note 5.
   is_baseline: z.boolean().optional(),
 }).passthrough();
@@ -282,6 +300,21 @@ export function projectDraftRecords(
       ...(claim.sets_to !== undefined ? { sets_to: claim.sets_to } : {}),
       ...(claim.unit !== undefined ? { unit: claim.unit } : {}),
       ...(claim.value_scale !== undefined ? { value_scale: claim.value_scale } : {}),
+      // ⭐⭐ CARRIED, AND ITS ABSENCE WAS THE WHOLE POINT OF THE FIELD BEING LOST.
+      //
+      // This rebuild names every field it keeps, and the wire Zod is
+      // `.passthrough()` — so a field the model emits and this line does not
+      // name VALIDATES and then VANISHES. Nothing REDs. Measured as a
+      // discriminating pair before the fix: base `grammar=15 carried=15
+      // dropped=none`, head `grammar=16 carried=15 dropped=['likelihood']`.
+      //
+      // ⚠ AND IT KILLED THE REASON `likelihood` EXISTS. The field was added
+      // because ROUTING is falsifiable and WITHHOLDING is not — a populated
+      // `likelihood` is countable over banked draws, whereas a correct
+      // suppression is invisible against a 99.5%-empty baseline. The histogram
+      // below loops over THESE REBUILT RECORDS, so without this line the bucket
+      // counts zero for ever and the countable signal cannot be counted.
+      ...(claim.likelihood !== undefined ? { likelihood: claim.likelihood } : {}),
       ...(claim.is_baseline !== undefined ? { is_baseline: claim.is_baseline } : {}),
     })),
   };
@@ -349,10 +382,29 @@ export function projectDraftRecords(
   // enum and every value below is a count. No value, no unit, no label, no
   // `source_quote`.
   const valueScaleByKind: Record<string, { declared: number; absent: number }> = {};
+  // ⭐⭐ `likelihood_by_kind` IS THE FIELD'S OWN JUSTIFICATION MADE COLLECTABLE.
+  //
+  // `likelihood` exists because ROUTING is falsifiable where WITHHOLDING is
+  // not: a populated value is countable over banked draws, whereas a correct
+  // suppression is invisible against a baseline where 135 of 28,055 risks carry
+  // any value at all. **Without a bucket the countable signal cannot be
+  // counted, and the argument for the field is hollow.**
+  //
+  // ⚠ Counted on the REBUILT records, exactly as `value_scale_by_kind` is — the
+  // same array the seam ships — so the number describes what actually left CEE
+  // rather than what the model emitted before the rebuild. That distinction is
+  // not academic here: the rebuild dropped this very field once, and a counter
+  // reading the pre-rebuild claims would have reported a healthy rate for a
+  // value no consumer ever received.
+  const likelihoodByKind: Record<string, { routed: number; absent: number }> = {};
   for (const claim of records.claims) {
     const bucket = (valueScaleByKind[claim.claim_kind] ??= { declared: 0, absent: 0 });
     if (claim.value_scale === undefined) bucket.absent += 1;
     else bucket.declared += 1;
+
+    const lb = (likelihoodByKind[claim.claim_kind] ??= { routed: 0, absent: 0 });
+    if (claim.likelihood === undefined) lb.absent += 1;
+    else lb.routed += 1;
   }
   log.info(
     {
@@ -362,6 +414,7 @@ export function projectDraftRecords(
       claim_count: records.claims.length,
       stated_count: records.stated_items.length,
       value_scale_by_kind: valueScaleByKind,
+      likelihood_by_kind: likelihoodByKind,
     },
     "Draft record set accepted at the seam",
   );

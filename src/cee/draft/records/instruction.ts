@@ -314,11 +314,17 @@ prompts to think, not a checklist to populate. Include a plausible alternative
 when it changes the mechanism, exposes an important trade-off, or offers a
 useful way to learn. Do not add a near-duplicate merely to increase the count.
 
-Record what a quantity IS now. On a \`factor\` claim, set \`value\` to the level
-that quantity sits at today, when you can say what that level is on a scale the
-brief supports. Use the user's own number when they gave one FOR THAT QUANTITY;
-otherwise give your own estimate. A number you estimate is recorded as yours,
-not as something they said.
+Record what a quantity IS now. On a \`factor\`, \`risk\` or \`outcome\` claim, set
+\`value\` to the level that quantity sits at today, when you can say what that
+level is on a scale the brief supports. Use the user's own number when they gave
+one FOR THAT QUANTITY; otherwise give your own estimate. A number you estimate is
+recorded as yours, not as something they said.
+A \`risk\` and an \`outcome\` need this as much as a factor does, and more often
+than you would expect: a churn rate, a cost overrun, a margin or a satisfaction
+score is a measurable quantity with a level today, and it is usually the very
+thing the user set their limit ON. A limit is only ever checked by comparing it
+against that level, so a quantity you name with no level recorded is a limit the
+user set that nothing can check.
 \`current\`, \`proposed\` and \`limit\` are three different things and a number
 belonging to one is not the level of another. "Reach £20k MRR" is a target,
 "keep churn under 4%" is a limit, and "we are proposing £59" is a proposal —
@@ -327,7 +333,39 @@ a revenue figure is not that figure, and the same number appearing nearby does
 not make it the same quantity.
 Leave \`value\` out where you cannot place the quantity on a scale the brief
 supports. A quantity that is genuinely qualitative, or genuinely unknown, stays
-that way: there is nothing to fill in and no count to satisfy.
+that way: there is nothing to fill in and no count to satisfy. A \`risk\` that
+names a POSSIBILITY rather than a measure — "our tech lead leaves", "the vendor
+misses the deadline" — has no level today, so leave \`value\` out; only a risk
+that IS a measured quantity carries one.
+A LIKELIHOOD IS NOT A LEVEL, AND IT HAS ITS OWN FIELD. \`value\` is the level a
+measured quantity SITS AT; \`likelihood\` is the chance an event happens. Ask what
+the number ANSWERS: "how big is it right now" is a level and goes in \`value\`;
+"how likely is it" is a chance and goes in \`likelihood\`. Never put a chance in
+\`value\` — downstream reads \`value\` as a magnitude, so a limit the user set
+would be checked against a probability.
+Put the number somewhere. A risk carrying a number you file in neither field is
+the number lost.
+\`likelihood\` IS ALWAYS A PROBABILITY BETWEEN 0 AND 1. Never a percentage.
+"30%" is \`likelihood: 0.3\`; "4%" is \`likelihood: 0.04\`; "one in five" is
+\`likelihood: 0.2\`. This is NOT the convention \`value\` uses — under \`unit: "%"\`
+a \`value\` of 4 means four percent. The same string "4%" is therefore
+\`likelihood: 0.04\` in one field and \`value: 4, unit: "%"\` in the other, because
+they are different quantities: one is a chance, the other is a level on a scale
+that happens to be percent. Do not carry the convention across.
+Odds and frequencies are NOT likelihoods either. "twice a quarter" is a RATE,
+not a chance, and has no \`likelihood\`; "2 to 1 against" is odds — convert it or
+leave the field out, never write \`2\`.
+And a measure whose dimension genuinely IS a probability — a default rate
+running at 3%, a conversion rate — is a \`value\`, not a \`likelihood\`: it is the
+level something SITS AT today, not the chance of an event.
+Examples, and note that the unit does not decide it:
+- "Vendor slippage: 30%" — a chance. \`likelihood: 0.3\`, no \`value\`.
+- "Contract loss: 4%" — a chance. \`likelihood: 0.04\`, no \`value\`.
+- "Churn risk: 4%" — a MEASURE: churn is a rate that is running at 4% today.
+  \`value: 4\`, \`unit: "%"\`, no \`likelihood\`.
+- "Win rate 25%", "hit rate 30%" — MEASURES, not chances, despite the wording.
+- "We might lose the tech lead" — a chance you cannot put a number on. Neither
+  field; the risk still belongs in the model.
 
 Keep the user's stated requirements intact. Do not relax a deadline, budget or
 other limit without their invitation, or claim a proposal meets it when that is
