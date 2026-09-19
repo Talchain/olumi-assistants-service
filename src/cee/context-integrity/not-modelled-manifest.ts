@@ -182,6 +182,45 @@ export interface NotModelledManifest {
   readonly quantities: {
     readonly total: number;
     readonly in_model: number;
+    /**
+     * THE `in_model` VERDICT SPLIT BY THE ROUTE THAT REACHED IT.
+     *
+     * `classify()` gives `in_model` two structurally different ways, and
+     * `QuantityVerdict`'s own comment concedes the fold ("carried as a value,
+     * cap, unit OR LABEL"):
+     *
+     *   ANCHORED   `matchCandidate()` named a modelled quantity whose VALUE
+     *              equals the user's figure under a compatible unit. The item
+     *              carries `matched_node_id`. Something computes with it.
+     *
+     *   UNANCHORED `appearsInStrings()` — a case-insensitive substring test of
+     *              the literal against every non-prose string in the graph.
+     *              `matched_node_id` is null. The CHARACTERS occur somewhere;
+     *              no quantity carries the figure as a value.
+     *
+     * Measured on the four committed cold-read captures: 11 of 18 `in_model`
+     * verdicts (61%) name no node. Measured on the deployed product: a brief
+     * saying "59 per month" against an option labelled "…from 49 to 79 per
+     * month" produced `verdict: "in_model", matched_node_id: null`, and the
+     * coaching then told the user about "the £59/£63 option" — a price the
+     * model does not hold. A reader treating `in_model` as "the model holds
+     * this value" had no field to read that would have stopped it. Now it has.
+     *
+     * ⛔ WHY TWO COUNTS AND NOT A FOURTH `QuantityVerdict`. The verdict is
+     * WIRE-VISIBLE. A consumer pinned to an older `@talchain/schemas` silently
+     * DROPS a field it does not know — so an additive count degrades to the
+     * status quo ante — but an unknown ENUM MEMBER can fail validation
+     * outright, taking the whole payload with it. The two failure modes are not
+     * comparable, and the safe one is the one that is chosen here. The union
+     * stays exactly three members, asserted by execution in
+     * `not-modelled-manifest.anchored-vs-unanchored.test.ts`.
+     *
+     * Disjoint and exhaustive: `in_model_anchored + in_model_unanchored`
+     * always equals `in_model`. Like every tally here they count EVERY quantity
+     * found, not just the `MAX_ITEMS` slice reported in `items`.
+     */
+    readonly in_model_anchored: number;
+    readonly in_model_unanchored: number;
     readonly prose_only: number;
     readonly absent: number;
     readonly truncated: boolean;
@@ -1684,14 +1723,23 @@ export function deriveNotModelledManifest(
     STATED_KINDS.map((k) => [k, 0]),
   ) as Record<StatedKind, number>;
   let inModel = 0;
+  // Split by ROUTE, at the one place the route is still visible. `matched` is
+  // the candidate `matchCandidate()` named; by construction of `classify` a
+  // non-null `matched` occurs only on an `in_model` verdict, so the two
+  // counters partition `inModel` rather than merely correlating with it.
+  let inModelAnchored = 0;
+  let inModelUnanchored = 0;
   let proseOnly = 0;
   let absent = 0;
 
   for (const q of quantities) {
     const { verdict, matched } = classify(q, surfaces);
     if (matched !== null) matchedNodeIds.add(matched.nodeId);
-    if (verdict === "in_model") inModel += 1;
-    else if (verdict === "prose_only") proseOnly += 1;
+    if (verdict === "in_model") {
+      inModel += 1;
+      if (matched !== null) inModelAnchored += 1;
+      else inModelUnanchored += 1;
+    } else if (verdict === "prose_only") proseOnly += 1;
     else absent += 1;
     if (items.length < MAX_ITEMS) {
       const statedKind = classifyStatedKind(q, spans);
@@ -1718,6 +1766,8 @@ export function deriveNotModelledManifest(
       // Tallies count EVERY quantity found, not just the reported slice.
       total: quantities.length,
       in_model: inModel,
+      in_model_anchored: inModelAnchored,
+      in_model_unanchored: inModelUnanchored,
       prose_only: proseOnly,
       absent,
       truncated: quantities.length > items.length,
