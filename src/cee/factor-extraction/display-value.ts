@@ -102,6 +102,31 @@ function isCurrencyUnit(unit: string | undefined): boolean {
   return CURRENCY_SYMBOLS.has(unit) || unit === "GBP" || unit === "USD" || unit === "EUR";
 }
 
+/**
+ * The unit vocabulary this module renders as a DURATION.
+ *
+ * ⚠ ONE DEFINITION, TWO READERS. `formatBound` decides whether to print
+ * `"8 months"` from this; the normalised-domain guard in
+ * `synthesiseRangeDisplayValue` decides whether it may print anything at all.
+ * They were one regex and a copy of it away from being a hand-maintained
+ * mirror — and a guard that recognised a unit the formatter did not (or the
+ * reverse) would suppress the wrong rows silently. Named once, read twice.
+ */
+const TIME_UNIT_PATTERN = /^(?:days?|weeks?|months?|years?|hrs?|hours?)$/i;
+
+/**
+ * ⚠ A TYPE PREDICATE, not a `boolean`, and that is load-bearing rather than
+ * stylistic. `formatBound`'s time branch reads `unit.toLowerCase()`, and the
+ * inline `unit && /…/.test(unit)` it used to carry did that narrowing for it.
+ * Replacing the inline test with a plain-`boolean` helper compiled clean under
+ * `pnpm typecheck` in every other call site and REDDED only here — so the
+ * narrowing is stated in the signature, where the compiler enforces it.
+ */
+function isTimeUnit(unit: string | undefined): unit is string {
+  if (!unit) return false;
+  return TIME_UNIT_PATTERN.test(unit);
+}
+
 // ============================================================================
 // Number Formatting
 // ============================================================================
@@ -349,6 +374,15 @@ export function synthesiseRangeDisplayValue(
   // 0..100 (both render as "0% to 100%"), including the one-sided
   // "Up to 1" / "At least 0" degenerate forms. Real-world units (currency,
   // time, counts) are untouched — a 0..1 range there is a genuine quantity.
+  //
+  // ⚠⚠ THAT LAST SENTENCE HAS NOW BEEN REFUTED TWICE, AND IS KEPT ONLY AS THE
+  // RECORD OF WHAT WAS BELIEVED. Currency fell to row 2.1207 at a banked
+  // capture; TIME fell to the `Cash Runway` capture of 19 Sep 2026. Both are
+  // handled by their own limbs below, which decline inside the normalised
+  // magnitude domain rather than widen this guard — widening it would also
+  // swallow the genuine `[0, N>1]` spans this one is careful to keep.
+  // COUNTS are the only member still standing, and they are standing on no
+  // evidence either way: nobody has measured one.
   const isDomainScale = !unit || unit === "%";
   if (isDomainScale) {
     const domainMax = unit === "%" && ((hasMax && rangeMax! > 1) || (hasMin && rangeMin! > 1))
@@ -406,6 +440,68 @@ export function synthesiseRangeDisplayValue(
   // through to `£-0.4` — the sign-asymmetry that cost CEE #891 a 100,000x
   // suppression. The test is on |value|.
   if (isCurrencyUnit(unit)) {
+    const withinNormalisedDomain =
+      (!hasMin || Math.abs(rangeMin!) <= 1) && (!hasMax || Math.abs(rangeMax!) <= 1);
+    if (withinNormalisedDomain) return undefined;
+  }
+
+  // ⭐⭐ AND THE SAME IS TRUE OF A TIME UNIT — row 2.1207's defect, one unit
+  // family over, measured in the product owner's own session.
+  //
+  // MEASURED, 19 Sep 2026, scenario `34678f42`, build `c5e1060`, debug export
+  // `olumi-debug-73d5c152-20260919.json`, `full_graph.factors[2]`. Against a
+  // brief stating **"under 18 months of runway"**:
+  //
+  //     { "label": "Cash Runway", "category": "external",
+  //       "observed_state": null,  ->  display_value "0.45 to 1 months" }
+  //
+  // ── WHY THIS IS NOT A NEW JUDGEMENT ABOUT SCALE ──────────────────────────
+  // The guard above declares, as fact, *"Real-world units (currency, time,
+  // counts) are untouched — a 0..1 range there is a genuine quantity."* Row
+  // 2.1207 refuted the CURRENCY half at a banked capture and wrote, of what it
+  // left standing, *"It is true of time and counts, where a prior is authored
+  // on the real scale."* THAT residue is what this capture refutes. Both
+  // producers of a `prior` are on record, at this tip, emitting bounds that are
+  // not on a duration scale:
+  //
+  //   1. THE MODEL. `Prompts/canonical/draft_graph.txt:466-469` gives the
+  //      EXTERNAL node shape as `prior: {distribution, range_min: 0.0,
+  //      range_max: 1.0}` with NO unit, and `:472-479` is the entire anchoring
+  //      table — `"low", "limited" -> 0.0 | 0.4` … `"high", "intense" ->
+  //      0.6 | 1.0`. Every row is a dimensionless 0–1 coordinate.
+  //   2. `synthesisePriorFromBaseline` (`unified-pipeline/stages/repair/
+  //      unreachable-factors.ts:208`) derives the range from the factor's own
+  //      `observed_state.value` — the NORMALISED one. The same session's
+  //      `Sales Cycle Duration` carries `{value: 0.45, raw_value: 4.5, unit:
+  //      "months"}`, so a time factor's `value` is normalised and a prior
+  //      derived from it is too.
+  //
+  // ── WHAT IS CLAIMED, AND WHAT IS NOT ─────────────────────────────────────
+  // Only the region where this function CANNOT TELL a dimensionless anchoring
+  // coordinate from a genuine sub-unit duration. Outside it — `[3, 8]`,
+  // `[0.5, 8]`, `[-18, 0.5]` — the bound is real-scale evidence and renders
+  // exactly as before. Inside it the function declines, which is the behaviour
+  // its two sibling guards already ship (DGAI #342(2) and row 2.1207).
+  //
+  // COUNTS ARE DELIBERATELY NOT INCLUDED. A blanket "every real-world unit"
+  // predicate would need a hand-maintained exclusion list for the units that
+  // GENUINELY live in [0,1] — `scale`, `index`, `probability` — which is the
+  // mirror this estate keeps paying for. No capture has been measured for a
+  // count unit; when one is, it gets its own limb and its own corpus.
+  //
+  // Two opposite harms, and they are not symmetric (trap 22b):
+  //   • rendering it  → a LIE about a number the user never wrote — here ~40x
+  //     out against a figure they had already typed;
+  //   • declining it  → a genuine sub-unit duration loses its display, a
+  //     DEGRADATION, and one bounded the same way row 2.1207 bounded its own:
+  //     a time quantity that HAS an observed value reaches
+  //     `synthesiseDisplayValue` down Path B of `transforms/schema-v3.ts:780`.
+  //     This branch only ever sees the prior-only case.
+  //
+  // ⚠ MAGNITUDE, NOT SIGN — same reasoning as the currency limb. A predicate
+  // written `<= 1` passes `-18` straight through as "normalised" and would
+  // silently suppress a real bound; the test is on |value|.
+  if (isTimeUnit(unit)) {
     const withinNormalisedDomain =
       (!hasMin || Math.abs(rangeMin!) <= 1) && (!hasMax || Math.abs(rangeMax!) <= 1);
     if (withinNormalisedDomain) return undefined;
@@ -591,7 +687,7 @@ export function synthesiseRangeDisplayValue(
       const pct = parseFloat((n * percentMultiplier).toFixed(2));
       return `${pct}%`;
     }
-    if (unit && /^(?:days?|weeks?|months?|years?|hrs?|hours?)$/i.test(unit)) {
+    if (isTimeUnit(unit)) {
       const rounded = parseFloat(n.toFixed(1));
       const display = rounded % 1 === 0 ? String(rounded | 0) : String(rounded);
       return `${display} ${unit.toLowerCase()}`;
