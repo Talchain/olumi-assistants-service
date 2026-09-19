@@ -551,6 +551,7 @@ import { resolveRelativeFactorDelta } from './routing/resolve-relative-factor-de
 import { HANDLER_VALIDATION_REGISTRY } from './routing/validation-registry.js';
 import {
   hasMutationSignal,
+  looksLikeImperativeRerun,
   looksLikeImperativeRunRequest,
 } from './routing/analytical-intent.js';
 import {
@@ -8246,18 +8247,13 @@ export async function runTurnExecutor(
       // turn behaves exactly as it does now. The decline is emitted with a
       // reason so "did not read as a re-run" and "read as one but could not be
       // served" are distinguishable in ops rather than both being silence.
-      // ⭐ WIDENED 2026-09-19 FROM RE-RUN TO ANY RUN INSTRUCTION, on a deployed
-      // witness. Capture `5376e928` @ 14:37:55Z, build `fd65f971`: the user
-      // typed "Run the analysis.", the turn returned `turn_kind: null` in 10.5s
-      // and NO ANALYSIS RAN; the Run chip worked 31s later. The predicate below
-      // used to require a repetition marker, so a FIRST run had no LLM-free
-      // path from typed text at all. Everything else in this block — the
-      // mutation-signal gate, the option-node precondition, the registry
-      // executability test and the decline-with-a-reason fall-through — is
-      // unchanged and now covers both cases.
+      // ⚠ THIS PRE-ROUTE STAYS RE-RUN-ONLY, DELIBERATELY. A first-run
+      // instruction is handled AFTER the router instead — see the
+      // FIRST-RUN FALLBACK at the proposal-convergence seam below, and the
+      // note there for why widening this gate was the wrong placement.
       if (
         routingResult === undefined &&
-        looksLikeImperativeRunRequest(payload.message) &&
+        looksLikeImperativeRerun(payload.message) &&
         !hasMutationSignal(payload.message)
       ) {
         // Target entity: any option node. The registry declares
@@ -9673,6 +9669,99 @@ export async function runTurnExecutor(
             routingResult.type === 'tool_call'
               ? routingResult.orientationText
               : routingResult.text;
+        }
+      }
+
+      // ⭐ FIRST-RUN FALLBACK — the router ran and elected NOTHING on a plain
+      // instruction to run the analysis.
+      //
+      // WITNESS. Deployed staging, capture `5376e928`, 2026-09-19T14:37:55Z,
+      // build `fd65f971`. The user typed "Run the analysis." The turn took
+      // 10.5s, came back `turn_kind: null`, and NO ANALYSIS RAN. Thirty-one
+      // seconds later the same user clicked the Run chip and it worked. Two
+      // turns earlier the product had itself written 'Say "run the analysis"
+      // or just say yes, and I will.' The wire proves the router ran and
+      // declined: that turn carries `prompt_identity routing@121` and no
+      // `decision_review`, while both successful runs in the same session are
+      // chip_click and carry `decision_review@v16` with no routing entry.
+      //
+      // ⚠ WHY HERE AND NOT AT THE PRE-ROUTE ABOVE — measured, after getting it
+      // wrong. Widening the pre-route's predicate to cover a first run made 23
+      // tests across 9 files RED, and they were right to fail: a pre-route
+      // claims the turn BEFORE the router, so it silently disabled every
+      // mechanism that depends on an election existing — the target-repair path
+      // (whose own case is literally "Run analysis." with an invented target),
+      // the recoverable-validator paths, and the observability wiring that
+      // counts routing calls. Those specs use a run-shaped sentence as an
+      // incidental base payload, and bypassing the router changed what they
+      // were measuring. **The router must still run. This seam only acts on
+      // what it returned.**
+      //
+      // SCOPE, and each conjunct is load-bearing: the router produced TEXT
+      // rather than a tool call (so no election is ever pre-empted and the
+      // B2 re-election above, which requires `tool_call`, is disjoint from
+      // this); the message is an imperative run instruction under the same
+      // vetoes as the re-run pre-route; and it carries no mutation signal.
+      // Everything else — the option-node precondition, the registry
+      // executability test, and the decline-with-a-reason telemetry — is the
+      // pre-route's, read from the same helpers rather than re-implemented.
+      if (
+        routingResult.type !== 'tool_call' &&
+        looksLikeImperativeRunRequest(payload.message) &&
+        !hasMutationSignal(payload.message)
+      ) {
+        const firstRunTargetEntity = resolveRunAnalysisTargetEntity(graphStateForTurn?.nodes);
+        const firstRunValidationRegistry =
+          options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY;
+        const firstRunHandlerRegistry = options.handlerRegistry ?? getDefaultRegistry();
+        const firstRunHandlerExecutable =
+          firstRunValidationRegistry.run_analysis !== undefined &&
+          resolveHandler(firstRunHandlerRegistry, 'run_analysis') !== null;
+
+        if (firstRunTargetEntity !== null && firstRunHandlerExecutable) {
+          // The router's own call count is PRESERVED, not zeroed: the LLM call
+          // genuinely happened on this turn and the observability lane counts
+          // it. Only the proposal is synthesised.
+          const priorCalls = routingResult.llmCallCount;
+          const firstRunUsage: UsageMetrics = { input_tokens: 0, output_tokens: 0 };
+          routingResult = {
+            type: 'tool_call',
+            proposal: {
+              intent_class: 'execute',
+              action: {
+                handler_id: 'run_analysis',
+                entity: firstRunTargetEntity,
+                parameters: [],
+                cited_context_fields: ['graph.options'],
+              },
+            },
+            orientationText: '',
+            rawResult: {
+              content: [],
+              stop_reason: 'tool_use',
+              usage: firstRunUsage,
+              model: 'deterministic-first-run-fallback',
+              latencyMs: 0,
+            },
+            llmCallCount: priorCalls,
+            droppedActions: [],
+          } satisfies RoutingToolCallResult;
+          llmCallsUsed = priorCalls;
+          sonnetTextForLog = '';
+          emit(TelemetryEvents.V5RunAnalysisImperativePreRoute, {
+            request_id: requestId,
+            scenario_id: context.session_id,
+            outcome: 'routed',
+            reason: 'first_run_after_no_election',
+          });
+        } else {
+          emit(TelemetryEvents.V5RunAnalysisImperativePreRoute, {
+            request_id: requestId,
+            scenario_id: context.session_id,
+            outcome: 'fell_through',
+            reason:
+              firstRunTargetEntity === null ? 'no_option_target' : 'handler_unavailable',
+          });
         }
       }
     } catch (error) {
