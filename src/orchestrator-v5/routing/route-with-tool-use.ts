@@ -1186,6 +1186,37 @@ function enforceForcedExecute(
 // Exported for Context-v2 S0 budget measurement (turn-executor): the routing
 // call site measures the EXACT embedded prompt bytes by re-running this pure
 // builder, rather than approximating over a compact pack serialisation.
+/**
+ * Does the model-facing analysis projection actually SERIALISE simulation
+ * shares on this turn?
+ *
+ * ⚠ STRUCTURAL, NEVER LINGUISTIC, and derived from the bytes the coach will
+ *   read rather than from a status token. `llmFacing.analysis` is the
+ *   display-safe projection (`model-facing-context-pack.ts` surfaces
+ *   `display_analysis` under that key). No share in the pack means no number
+ *   to misread, so no definition is owed — the same co-located-conditional
+ *   rule `MARGIN_MEANING_INSTRUCTION` follows.
+ *
+ * ⛔ A SHARE IS A DISPLAY STRING HERE, NOT A DECIMAL, and my first cut tested
+ *    for a number. `DisplaySafeAnalysisOption.win_probability` is typed
+ *    `string` and formatted `"86%"` / `">99%"` / `"<1%"`
+ *    (`format/format-analysis-for-context.ts:39-48`) — the raw decimal never
+ *    reaches this projection. The check therefore matched nothing on a real
+ *    pack, and my own spec agreed with it because the fixture I wrote carried
+ *    `0.55`. A fixture written from my head is not evidence about the wire
+ *    (CLAUDE.md trap 16); the derived `prompt-pack-sanction` gate, which
+ *    assembles a REAL pack, is what caught it.
+ */
+function displayAnalysisCarriesSimulationShares(analysis: unknown): boolean {
+  const options = (analysis as { readonly options?: unknown } | null | undefined)?.options;
+  if (!Array.isArray(options)) return false;
+  return options.some((option) => {
+    if (option === null || typeof option !== 'object') return false;
+    const share = (option as { readonly win_probability?: unknown }).win_probability;
+    return typeof share === 'string' && share.trim().length > 0;
+  });
+}
+
 export function buildUserMessage(contextPack: ContextPack, message: string): string {
   // Design principle: raw model values stay in structured state for
   // handlers, telemetry, freshness hashing, and edit_graph dispatch;
@@ -1271,6 +1302,24 @@ export function buildUserMessage(contextPack: ContextPack, message: string): str
     (llmFacing.analysis as { readonly margin?: unknown } | null | undefined)?.margin !== null
   ) {
     parts.push('', MARGIN_MEANING_INSTRUCTION);
+  }
+  // ⭐⭐ WHAT A SIMULATION SHARE IS. The SAME mechanism as the margin block
+  // directly above — emitted by the condition that SERIALISES the shares, so a
+  // number and its definition cannot travel apart — and the reason it is here
+  // rather than on the provisional arm is in
+  // {@link SIMULATION_SHARE_MEANING_INSTRUCTION}: a single figure the person
+  // typed crosses the admission floor and used to take this sentence with it.
+  //
+  // ⚠ ONE SENTENCE, ONE OWNER — and a derived gate is what settled the shape.
+  //   My first cut left the reading in the provisional block and suppressed
+  //   this one on that arm. `prompt-pack-sanction.gate`'s EMISSION check REDs
+  //   on that: a code-owned instruction that no maximal pack can render is
+  //   either dead or mutually exclusive with a sibling, and it refuses both.
+  //   It was right. The reading now lives here alone and is emitted whenever
+  //   the shares are, on EVERY admission arm; the provisional block keeps only
+  //   its qualification lines. No duplication, no exclusion, no drift.
+  if (displayAnalysisCarriesSimulationShares(llmFacing.analysis)) {
+    parts.push('', SIMULATION_SHARE_MEANING_INSTRUCTION);
   }
   // Coaching Context Pack v1 (CEE_COACHING_CONTEXT_PROMPT_ENABLED): a narrow,
   // additive receive-vs-author instruction, appended ONLY when the deterministic
@@ -1865,7 +1914,12 @@ export const PROVISIONAL_FIGURES_INSTRUCTION = [
   '- You MAY discuss the comparison, including the figures, and you SHOULD, when the person is asking about it. Do not refuse to engage.',
   '- Qualify it every time: say plainly that the figures are provisional and rest on estimates nobody has confirmed yet.',
   '- Do not present the comparison as a settled ranking, a recommendation, or a result the person can act on without reviewing the inputs.',
-  '- A simulation share is how often an option scored highest against the goal, not the probability that the goal is achieved. Do not restate it as a chance of success.',
+  // ⚠ THE READING LINE MOVED, and it moved because it was true on a population
+  //   this block never reaches. See {@link SIMULATION_SHARE_MEANING_INSTRUCTION}:
+  //   one figure the person types into their brief crosses the admission floor
+  //   and lifts this whole block, which used to take "a share is not a chance of
+  //   success" with it. It is now emitted by the condition that serialises the
+  //   shares, so this arm still receives it — from its own owner, exactly once.
   '- No winner or contest framing. Discuss goal fit and what is still uncertain.',
   '- Say what would firm it up — which estimates matter most and what evidence would settle them.',
   '- Do not expose status tokens, internal fields or admission modes.',
@@ -1910,6 +1964,45 @@ export const MARGIN_MEANING_INSTRUCTION = [
   '- It is NOT an outcome gap, NOT an effect size, and NOT the probability that the leader does better by that amount. Two options can differ in share while their outcomes barely differ.',
   '- Discuss it as a difference in how often each option came top, and say what it does not settle. Do not restate it as the size of the advantage.',
   '- The figures come from estimates in this model, so the gap moves when those estimates change. Prefer discussing what would narrow or widen it.',
+  '- Do not expose field names, status tokens or internal identifiers.',
+].join('\n');
+
+/**
+ * ⭐⭐⭐ WHAT A SIMULATION SHARE IS — the half of the provisional block that is
+ * true whoever authored the estimates.
+ *
+ * ⛔ THE REGRESSION THIS CLOSES, and it is a consequence of a fix rather than
+ *    of a bug. `PROVISIONAL_FIGURES_INSTRUCTION` carries two kinds of line
+ *    under one condition:
+ *      · qualification — "every estimate is machine-authored", "do not present
+ *        this as a settled ranking". True only while nothing in the model is
+ *        the person's own.
+ *      · reading — "a simulation share is how often an option scored highest
+ *        against the goal, not the probability that the goal is achieved".
+ *        True of every run that produced a share.
+ *    Both are gated on `analysis_context.status === 'provisional_figures'`,
+ *    which is set only when the admission caps at `quantified_provisional`.
+ *    The admission floor is `material_parameters_user_stated > 0`, so ONE
+ *    figure a person types into their brief moves their run off that arm and
+ *    takes the reading with it. Dropping the qualification is the point;
+ *    dropping the reading leaves the coach free to call a 55% share a 55%
+ *    chance of success, on the very run the person is most likely to act on.
+ *
+ * ⚠ IT SAYS WHAT THE NUMBER MEANS AND RESTRICTS NOTHING. The provisional
+ *   block's "no winner or contest framing" and "not a settled ranking" lines
+ *   are deliberately NOT repeated here: on this arm the product is entitled to
+ *   name a leading option, and quietly re-imposing a restriction the admission
+ *   lifted would be the over-suppression trade running backwards.
+ *
+ * ⚠ THE SENTENCE IS LIFTED, NOT REWRITTEN. It is the ratified line from
+ *   `PROVISIONAL_FIGURES_INSTRUCTION`, so the two blocks cannot drift into
+ *   telling the coach two different things about one number.
+ */
+export const SIMULATION_SHARE_MEANING_INSTRUCTION = [
+  '## What a simulation share is (deterministic authority)',
+  "Each option's percentage in `analysis` is how often that option scored highest against the goal across the simulated runs.",
+  '- A simulation share is how often an option scored highest against the goal, not the probability that the goal is achieved. Do not restate it as a chance of success.',
+  '- It is not a confidence in the evidence either. The figures come from estimates in this model, so they move when those estimates change.',
   '- Do not expose field names, status tokens or internal identifiers.',
 ].join('\n');
 
