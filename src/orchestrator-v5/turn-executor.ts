@@ -551,7 +551,7 @@ import { resolveRelativeFactorDelta } from './routing/resolve-relative-factor-de
 import { HANDLER_VALIDATION_REGISTRY } from './routing/validation-registry.js';
 import {
   hasMutationSignal,
-  looksLikeImperativeRerun,
+  looksLikeImperativeRunRequest,
 } from './routing/analytical-intent.js';
 import {
   evaluateAnalysisElection,
@@ -8246,9 +8246,18 @@ export async function runTurnExecutor(
       // turn behaves exactly as it does now. The decline is emitted with a
       // reason so "did not read as a re-run" and "read as one but could not be
       // served" are distinguishable in ops rather than both being silence.
+      // ⭐ WIDENED 2026-09-19 FROM RE-RUN TO ANY RUN INSTRUCTION, on a deployed
+      // witness. Capture `5376e928` @ 14:37:55Z, build `fd65f971`: the user
+      // typed "Run the analysis.", the turn returned `turn_kind: null` in 10.5s
+      // and NO ANALYSIS RAN; the Run chip worked 31s later. The predicate below
+      // used to require a repetition marker, so a FIRST run had no LLM-free
+      // path from typed text at all. Everything else in this block — the
+      // mutation-signal gate, the option-node precondition, the registry
+      // executability test and the decline-with-a-reason fall-through — is
+      // unchanged and now covers both cases.
       if (
         routingResult === undefined &&
-        looksLikeImperativeRerun(payload.message) &&
+        looksLikeImperativeRunRequest(payload.message) &&
         !hasMutationSignal(payload.message)
       ) {
         // Target entity: any option node. The registry declares
