@@ -703,7 +703,7 @@ export function runCompoundGoals(ctx: StageContext): void {
       dropped_count: unbindable.length,
       target_names: unbindableAsks.map((i) => i.metric_text),
       graph_node_count: existingNodeIdList.length,
-    }, `${unbindableAsks.length} stated limit(s) matched no node on the model — asking the user which part they apply to`);
+    }, `${unbindableAsks.length} stated limit(s) could not be attached to a node — asking the user which part they apply to`);
   }
 
   // ⚠ THE MINT IS A THIRD PRODUCER, AND THIS RETURN HAS TO KNOW IT. The live
