@@ -295,9 +295,16 @@ describe('unbindable is a strict subset of rejected_no_match', () => {
 
   it('a mixed brief keeps the relation, with the gap exactly the temporal row', () => {
     const brief = 'We must ship the migration within 18 months and keep churn under 5%.';
-    const { r } = remap(brief, FACTOR_ONLY);
-    expect(r.rejected_no_match).toBe(4);
-    expect(r.unbindable).toHaveLength(3);
+    const { ex, r } = remap(brief, FACTOR_ONLY);
+    // One precise churn subject replaces the former overlapping guesses.
+    expect(ex.constraints).toHaveLength(2);
+    expect(ex.constraints.filter(c => c.deadlineMetadata !== undefined)).toHaveLength(1);
+    expect(r.rejected_no_match).toBe(2);
+    expect(r.unbindable).toHaveLength(1);
+    expect(r.unbindable[0]).toMatchObject({
+      targetName: 'churn', targetNodeId: 'fac_churn', operator: '<=', value: 0.05,
+      sourceQuote: 'keep churn under 5%',
+    });
     expect(
       r.unbindable.every((c) => c.deadlineMetadata === undefined),
       'no deadline-bearing row may reach the ask channel',

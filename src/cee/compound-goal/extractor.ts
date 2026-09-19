@@ -118,6 +118,10 @@ export interface ExtractedGoalConstraint {
   };
 }
 
+/** Parsed numeric semantics only: deliberately carries no bindable target. */
+export type UnboundConstraintFrameEvidence = Pick<ExtractedGoalConstraint,
+  "operator" | "value" | "unit" | "valueFrame" | "sourceQuote" | "sourceAmountSpan">;
+
 export interface CompoundGoalExtractionResult {
   /** Primary goal target (from goal verbs) */
   primaryGoal?: {
@@ -128,6 +132,8 @@ export interface CompoundGoalExtractionResult {
   };
   /** Extracted constraints (from subordinate clauses) */
   constraints: ExtractedGoalConstraint[];
+  /** Pronoun-bound syntax may attest a frame, but cannot author a graph binding. */
+  unboundConstraintFrames: UnboundConstraintFrameEvidence[];
   /** Whether compound goals were detected */
   isCompound: boolean;
   /** Warnings about extraction */
@@ -274,15 +280,21 @@ const _VAL = `${AMT}(?:\\s*(?:\\/\\s*(?:month|year|quarter|week|day|hr|hour))|\\
 const EDIT_BOUND_OPERATOR = String.raw`(?:at\s+or\s+(?:above|below)|at\s+(?:least|most)|above|below|under|over|to)`;
 const QUOTED_EDIT_SUBJECT = String.raw`(?:"[^"\r\n]+"|“[^”\r\n]+”|'[^'\r\n]+')`;
 const EDIT_BOUND_SUBJECT = String.raw`(?:${QUOTED_EDIT_SUBJECT}|(?!\s*${QUOTED_EDIT_SUBJECT})(?:(?!\b(?:keep(?:ing)?|set)\b|\b${EDIT_BOUND_OPERATOR}\s+${_VAL})[^\r\n.!?;,:])*?)`;
+const UNBOUND_EDIT_SUBJECT = /^(?:it|this|that|these|those|them)$/i;
 
 function explicitBoundTarget(raw: string | undefined): string | null {
   const text = raw?.trim() ?? "";
   const quoted = /^(?:"[^"\r\n]+"|“[^”\r\n]+”|'[^'\r\n]+')$/.test(text);
   const name = (quoted ? text.slice(1, -1) : text).trim();
-  if (!name || /^(?:it|this|that|these|those|them|at|above|below|under|over)$/i.test(name)) return null;
+  if (!name || /^(?:at|above|below|under|over)$/i.test(name)) return null;
   if (!quoted && (
     !/^[\p{L}\p{N}_][\p{L}\p{N}_'’-]*(?:[ \t]+[\p{L}\p{N}_][\p{L}\p{N}_'’-]*)*$/u.test(name)
     || /\b(?:and|or)\b/i.test(name)
+    // A prevention construction is not a metric name. Keep its span claimed
+    // so legacy patterns cannot mint the opposite bound; the existing
+    // construction authority owns its direction and subject. Reuse the
+    // existing verb grammar, without excluding metric names containing "from".
+    || new RegExp(String.raw`\bfrom\s+(?:${FALL_VERB}|${RISE_VERB})$`, "i").test(name)
   )) return null;
   return name;
 }
@@ -1218,6 +1230,7 @@ function extractUpperBoundConstraints(
   brief: string,
   claimed: Span[],
   pass: "edit" | "legacy",
+  unboundFrames: UnboundConstraintFrameEvidence[] = [],
 ): ExtractedGoalConstraint[] {
   const constraints: ExtractedGoalConstraint[] = [];
 
@@ -1280,7 +1293,7 @@ function extractUpperBoundConstraints(
       const { value, unit } = parseValue(valueStr);
       const targetNodeId = generateNodeId(targetName.trim());
 
-      constraints.push({
+      const constraint: ExtractedGoalConstraint = {
         targetName: targetName.trim(),
         targetNodeId,
         operator: "<=",
@@ -1298,7 +1311,13 @@ function extractUpperBoundConstraints(
         // Absolute LEVEL on the metric's own scale (the stated bound is the
         // target quantity itself, not a change to it).
         valueFrame: "level",
-      });
+      };
+      if (editAmount !== undefined && UNBOUND_EDIT_SUBJECT.test(targetName)) {
+        const { operator, value, unit, valueFrame, sourceQuote, sourceAmountSpan } = constraint;
+        unboundFrames.push({ operator, value, unit, valueFrame, sourceQuote, sourceAmountSpan });
+      } else {
+        constraints.push(constraint);
+      }
     }
   }
 
@@ -1312,6 +1331,7 @@ function extractLowerBoundConstraints(
   brief: string,
   claimed: Span[],
   pass: "edit" | "legacy",
+  unboundFrames: UnboundConstraintFrameEvidence[] = [],
 ): ExtractedGoalConstraint[] {
   const constraints: ExtractedGoalConstraint[] = [];
 
@@ -1385,7 +1405,7 @@ function extractLowerBoundConstraints(
       const { value, unit } = parseValue(valueStr);
       const targetNodeId = generateNodeId(targetName.trim());
 
-      constraints.push({
+      const constraint: ExtractedGoalConstraint = {
         targetName: targetName.trim(),
         targetNodeId,
         operator: ">=",
@@ -1403,7 +1423,13 @@ function extractLowerBoundConstraints(
         // Absolute LEVEL on the metric's own scale (the stated bound is the
         // target quantity itself, not a change to it).
         valueFrame: "level",
-      });
+      };
+      if (editAmount !== undefined && UNBOUND_EDIT_SUBJECT.test(targetName)) {
+        const { operator, value, unit, valueFrame, sourceQuote, sourceAmountSpan } = constraint;
+        unboundFrames.push({ operator, value, unit, valueFrame, sourceQuote, sourceAmountSpan });
+      } else {
+        constraints.push(constraint);
+      }
     }
   }
 
@@ -2238,8 +2264,9 @@ export function extractCompoundGoals(
   const claimed: Span[] = [...floorClaimed, ...ceilingClaimed];
   // A complete edit owns its quoted subject before either direction's looser
   // patterns can read an opposite-direction bound inside that subject.
-  const upperEdits = extractUpperBoundConstraints(brief, claimed, "edit");
-  const lowerEdits = extractLowerBoundConstraints(brief, claimed, "edit");
+  const unboundConstraintFrames: UnboundConstraintFrameEvidence[] = [];
+  const upperEdits = extractUpperBoundConstraints(brief, claimed, "edit", unboundConstraintFrames);
+  const lowerEdits = extractLowerBoundConstraints(brief, claimed, "edit", unboundConstraintFrames);
   const upperBound = [...upperEdits, ...extractUpperBoundConstraints(brief, claimed, "legacy")];
   const lowerBound = [...lowerEdits, ...extractLowerBoundConstraints(brief, claimed, "legacy")];
   // NOUN forms ("a £50,000 cap"). Runs AFTER the bound patterns and claims
@@ -2293,6 +2320,7 @@ export function extractCompoundGoals(
   return {
     primaryGoal,
     constraints,
+    unboundConstraintFrames,
     isCompound,
     warnings,
   };
