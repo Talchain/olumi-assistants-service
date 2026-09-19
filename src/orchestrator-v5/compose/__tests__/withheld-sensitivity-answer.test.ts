@@ -304,6 +304,73 @@ describe('the withhold guarantee is unchanged', () => {
     expect(out.text).not.toContain('Bundle New Pro Feature');
     expect(textAssertsLeadingOption(out.text)).toBe(false);
   });
+
+  /**
+   * ⭐⭐⭐ A FINITE THRESHOLD IS NOT A LIKELIHOOD, AND PRODUCER ORDER IS NOT A
+   * RANKING.
+   *
+   * The first cut of the concrete branch called the first two entries "the most
+   * likely single factors to reach a tipping point, so they are the clearest
+   * ones to test". `FlipEntry` carries no likelihood, no probability of
+   * reaching a threshold and no investigation priority; `readFlipEntries`
+   * preserves PRODUCER ORDER and `summariseFlipEntries` establishes only that
+   * at least one finite threshold exists. The claim was manufactured by
+   * `.slice(0, 2)`.
+   *
+   * The reordered twin is the discriminator: the SAME measured entries in a
+   * different producer order must not change what the product CLAIMS about
+   * them. Which factors are named may still follow order — that is a subset,
+   * and the copy now says so — but no factor may be called most likely or best
+   * to test on the strength of where the producer happened to put it.
+   */
+  const THREE = [
+    { factor_id: 'f1', factor_label: 'Monthly Churn Rate', flip_value: 0.041 },
+    { factor_id: 'f2', factor_label: 'Engineering Capacity', flip_value: 12 },
+    { factor_id: 'f3', factor_label: 'Cash Runway', flip_value: 7 },
+  ];
+  const REORDERED = [THREE[2]!, THREE[0]!, THREE[1]!];
+
+  const PRIORITY_CLAIM = /most likely|clearest|best to test|worth testing first|top factor/i;
+
+  it.each([
+    ['producer order [A,B,C]', THREE],
+    ['⭐ THE REORDERED TWIN [C,A,B]', REORDERED],
+  ])('%s: names factors without claiming a likelihood or an investigation priority', (_name, entries) => {
+    const out = project(LEADER_ANSWER, {
+      projection: projection([{ factor_label: 'Cash Runway', sensitivity_value: 0.4 }]),
+      flipSummary: flipSummary('concrete', entries),
+    } as WithheldSensitivityEvidence);
+
+    // The supported claim, and only it.
+    expect(out.text).toContain('The analysis found single-factor tipping points');
+    expect(out.text).not.toMatch(PRIORITY_CLAIM);
+    // Three exist and two are named, so the copy must disclose the subset
+    // rather than let two stand in for the set.
+    expect(out.text).toContain('several factors, including');
+    // The withheld voice's standing bans are untouched by this delta.
+    expect(out.text).not.toContain('would lead instead');
+    expect(textAssertsLeadingOption(out.text)).toBe(false);
+  });
+
+  it('a single finite threshold states the found tipping point, with no superlative', () => {
+    const out = project(LEADER_ANSWER, {
+      projection: projection([{ factor_label: 'Cash Runway', sensitivity_value: 0.4 }]),
+      flipSummary: flipSummary('concrete', [THREE[0]!]),
+    } as WithheldSensitivityEvidence);
+    expect(out.text).toContain('The analysis found a single-factor tipping point for Monthly Churn Rate.');
+    expect(out.text).not.toMatch(PRIORITY_CLAIM);
+    expect(out.text).not.toContain('several factors');
+  });
+
+  it('exactly two, with none omitted, does not say "including"', () => {
+    const out = project(LEADER_ANSWER, {
+      projection: projection([{ factor_label: 'Cash Runway', sensitivity_value: 0.4 }]),
+      flipSummary: flipSummary('concrete', [THREE[0]!, THREE[1]!]),
+    } as WithheldSensitivityEvidence);
+    expect(out.text).toContain('tipping points for Monthly Churn Rate and Engineering Capacity.');
+    expect(out.text).not.toContain('including');
+    expect(out.text).not.toMatch(PRIORITY_CLAIM);
+  });
 });
 
 describe('the body may not presuppose a result the read could not establish', () => {

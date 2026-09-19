@@ -932,16 +932,34 @@ export function composeWithheldSensitivityBody(
       // sentence that follows this one in the permitted voice is deliberately
       // NOT reproduced: it names the option that would lead, which is precisely
       // what the withheld verdict forbids.
-      const named = flip.entries
-        .filter((e) => typeof e.flip_value === 'number' && Number.isFinite(e.flip_value))
-        .slice(0, 2);
+      // ⛔ NO LIKELIHOOD AND NO INVESTIGATION RANKING. The first cut said these
+      // were "the most likely single factors to reach a tipping point, so they
+      // are the clearest ones to test". `FlipEntry` carries neither quantity:
+      // `readFlipEntries` preserves PRODUCER ORDER, `summariseFlipEntries`
+      // establishes only that at least one finite threshold exists, and
+      // `filterFlipSummaryEntries` removes option-controlled factors without
+      // adding any ranking. So the claim was manufactured by `.slice(0, 2)`
+      // over an arbitrary order — reordering the SAME measured entries
+      // [A,B,C] → [C,A,B] changed which factors the product called most
+      // likely. A finite threshold says a flip was FOUND at a value, not that
+      // the factor is likely to reach it.
+      const withThreshold = flip.entries.filter(
+        (e) => typeof e.flip_value === 'number' && Number.isFinite(e.flip_value),
+      );
+      const named = withThreshold.slice(0, 2);
+      // "including" when more exist, so naming a subset does not imply the
+      // subset is distinguished. Order still decides WHICH are named; it no
+      // longer decides what is CLAIMED about them.
+      const more = withThreshold.length > named.length;
       if (named.length === 1) {
         sentences.push(
-          `${named[0]!.factor_label} is the most likely single factor to reach a tipping point, so it is the clearest one to test.`,
+          `The analysis found a single-factor tipping point for ${named[0]!.factor_label}.`,
         );
       } else if (named.length >= 2) {
         sentences.push(
-          `${named[0]!.factor_label} and ${named[1]!.factor_label} are the most likely single factors to reach a tipping point, so they are the clearest ones to test.`,
+          more
+            ? `The analysis found single-factor tipping points for several factors, including ${named[0]!.factor_label} and ${named[1]!.factor_label}.`
+            : `The analysis found single-factor tipping points for ${named[0]!.factor_label} and ${named[1]!.factor_label}.`,
         );
       }
     }
