@@ -133,13 +133,56 @@ export interface OpenProposalInput {
   readonly proposed_in_turn: string;
 }
 
+/**
+ * Deep-equal over an operation list, by the store's own serialisation.
+ *
+ * The store's header says operations are "Opaque here — the mutation path owns
+ * their meaning", so comparing them structurally is the only comparison this
+ * module is entitled to make. `JSON.stringify` is exact for the shape the store
+ * persists: it round-trips through `deps.state.save` as JSON already, so any
+ * value it cannot represent could not have been stored in the first place.
+ */
+function sameOperations(
+  a: readonly ProposalOperation[],
+  b: readonly ProposalOperation[],
+): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
 /** Record a proposal the assistant has put to the user. Not consent. */
 export function openProposal(store: ProposalStore, input: OpenProposalInput): ProposalStore {
   assertState(isNonEmpty(input.id), 'proposal id is required');
   assertState(input.operations.length > 0, 'a proposal with no operations is not a proposal');
   assertState(isNonEmpty(input.model_revision), 'model_revision is required — consent binds to a specific state of the model');
   assertState(isNonEmpty(input.proposed_in_turn), 'proposed_in_turn is required');
-  assertState(!store.proposals.some((p) => p.id === input.id), `duplicate proposal id: ${input.id}`);
+
+  // ⭐ A RETRY OF THE SAME TURN IS A NO-OP, NOT AN ERROR — and this was found by
+  // an adversarial review AFTER the change that made it reachable.
+  //
+  // Proposal ids are `proposal-<turnId>-<index>`, and `turnId` is the PAYLOAD's
+  // turn id (it was the per-attempt request id until it was changed so a retry
+  // would reuse the applier's `(scenario_id, turn_id)` idempotency key). Stable
+  // ids are the point. But that made a client retry of the same logical turn —
+  // the exact case the change was for — re-propose with an id already in the
+  // persisted store, and this assertion threw. Nothing catches it: the
+  // controller has NO FALLBACK by design, so every later retry of that turn id
+  // failed the same way, permanently.
+  //
+  // A regression introduced in the name of retry safety, which is why it is
+  // worth the paragraph.
+  //
+  // The distinction that matters: the SAME offer arriving twice is the retry
+  // working as intended, so it is idempotent. The same id carrying DIFFERENT
+  // operations is a genuine id-minting defect and must still be loud — silently
+  // keeping the first would show the user one change and hold another.
+  const existing = store.proposals.find((p) => p.id === input.id);
+  if (existing !== undefined) {
+    assertState(
+      sameOperations(existing.operations, input.operations),
+      `duplicate proposal id with different operations: ${input.id}`,
+    );
+    return store;
+  }
   return {
     proposals: [
       ...store.proposals,

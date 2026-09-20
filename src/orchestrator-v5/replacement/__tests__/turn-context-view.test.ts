@@ -23,7 +23,12 @@ import { describe, expect, it } from 'vitest';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import { reconcileScenarioAnalysisFacts } from '../../context/reconcile-scenario-analysis-facts.js';
-import { createReadResultsTool, READ_RESULTS_NO_ANALYSIS, READ_RESULTS_RECORD_UNREADABLE } from '../read-tools.js';
+import {
+  createReadResultsTool,
+  READ_RESULTS_NO_ANALYSIS,
+  READ_RESULTS_NO_FIGURES_ON_RECORD,
+  READ_RESULTS_RECORD_UNREADABLE,
+} from '../read-tools.js';
 import type { EnrichedTurnContext } from '../../build-turn-context.js';
 import { projectTurnContext, REPLACEMENT_HISTORY_TURN_CAP } from '../turn-context-view.js';
 
@@ -89,6 +94,21 @@ function runAnalysisFact(over: Record<string, unknown> = {}): HandlerFact {
       ...over,
     },
   } as unknown as HandlerFact;
+}
+
+/**
+ * A fact whose `result` genuinely OMITS `enrichment`.
+ *
+ * ⚠ NOT the same as `runAnalysisFact({ enrichment: undefined })`: that leaves
+ * the KEY present with an undefined value, which does not survive the carrier's
+ * JSON-safety check, so the fact never arrives and the state under test is
+ * never reached. Production absence is an absent key. Measured, not assumed —
+ * the first draft used the undefined form and the carrier degraded instead.
+ */
+function runAnalysisFactWithoutEnrichment(): HandlerFact {
+  const f = runAnalysisFact() as unknown as { result: Record<string, unknown> };
+  const { enrichment: _dropped, ...rest } = f.result;
+  return { ...f, result: rest } as unknown as HandlerFact;
 }
 
 /** An attested `complete` carrier, built the way production builds one. */
@@ -373,5 +393,106 @@ describe('history is a reference window, and says what it is', () => {
       null,
     );
     expect(view.history).toEqual([{ role: 'assistant', content: 'only the reply survived' }]);
+  });
+});
+
+describe('⛔ THE FIFTH STATE — a run on record that carries no readable figures', () => {
+  /**
+   * THIS ONE WAS MISSED WHEN THE FOUR STATES WERE ENUMERATED, and an
+   * adversarial review found it one branch after the fix. It is the SAME
+   * defect the four states exist to prevent, surviving inside the fix:
+   *
+   * `isSuccessfulRunAnalysisFact` treats a fact with no readable status as a
+   * LEGACY fact and returns true, so a `run_analysis` fact whose
+   * `result.enrichment` is absent is SELECTED. The snapshot then carried
+   * `enrichment: null` with `recordReadOk: true`, fell through to
+   * READ_RESULTS_NO_ANALYSIS, and told the user nothing had ever been
+   * computed — while the same selected fact drove freshness to `fresh`.
+   *
+   * The sentence and the envelope contradicted each other, which is exactly
+   * what this module's header claims cannot happen.
+   */
+  it('is selected, is NOT reported as "never computed", and the envelope agrees', async () => {
+    const view = projectTurnContext(
+      contextWith({
+        scenario_analysis_fact_set: attestedSet([runAnalysisFactWithoutEnrichment()]),
+      }),
+      GRAPH_HASH,
+      null,
+    );
+
+    // The fact IS selected — this is what makes the state reachable at all.
+    // ⚠ Freshness comes back `unknown`, NOT `fresh`, and that is the code being
+    // careful rather than a defect: the option-identity guard resolves the
+    // analysed identities from `enrichment.option_comparison[].option_id`, and
+    // with no enrichment it cannot, so the verdict stays indeterminate. The
+    // assertion that matters is that it does NOT claim the scenario was never
+    // analysed — `none` is the verdict that would contradict the sentence.
+    expect(view.freshness.freshness).not.toBe('none');
+    expect(view.freshness.reason).not.toBe('no_successful_run_analysis_fact');
+    expect(view.snapshot).not.toBeNull();
+    expect(view.snapshot?.recordReadOk).toBe(true);
+    expect(view.snapshot?.enrichment).toBeNull();
+
+    const said = await resultOf(view.snapshot);
+    expect(said).toBe(READ_RESULTS_NO_FIGURES_ON_RECORD);
+    // The precise harm, pinned as strings.
+    expect(said).not.toBe(READ_RESULTS_NO_ANALYSIS);
+    expect(said).not.toBe(READ_RESULTS_RECORD_UNREADABLE);
+    expect(said).not.toContain('never computed');
+    expect(said).not.toContain('NO ANALYSIS HAS BEEN RUN');
+    // ⭐ THE PROPERTY THE HEADER CLAIMS: the sentence and the envelope must not
+    // contradict. The envelope does not say "never analysed"; nor may the
+    // sentence.
+    expect(said).toContain('AN ANALYSIS IS ON RECORD');
+  });
+
+  it('BOUNDS THE STATE: a non-object enrichment cannot reach this path at all', async () => {
+    // ⚠ WRITTEN AS A CONTRAST, MEASURED AS A BOUND — and the correction is the
+    // point. The first draft asserted that `enrichment: 'not an object'`
+    // reached the same state. It does not: `HandlerFactSchema` requires an
+    // OBJECT (`result.enrichment: Expected object, received string`), so the
+    // durable contract is invalid, the carrier degrades, and the honest answer
+    // is the UNREADABLE sentence instead.
+    //
+    // So the schema bounds the state space: `enrichment` is either an object or
+    // the fact never reaches the carrier. ABSENT is the one reachable shape
+    // that yields no figures — which is why the test above is the whole of the
+    // fifth state, not one example of it.
+    const view = projectTurnContext(
+      contextWith({
+        scenario_analysis_fact_set: attestedSet([runAnalysisFact({ enrichment: 'not an object' })]),
+      }),
+      GRAPH_HASH,
+      null,
+    );
+    expect(view.snapshot?.recordReadOk).toBe(false);
+    expect(await resultOf(view.snapshot)).toBe(READ_RESULTS_RECORD_UNREADABLE);
+  });
+
+  it('an EMPTY enrichment object is a real enrichment, and still never says "never computed"', async () => {
+    // `{}` IS an object, so the schema accepts it and the projection passes it
+    // through as a genuine enrichment. `read_results` then leads with the
+    // currency verdict and names every missing section as missing, which is
+    // honest. Pinned so a future "tidy up the empty case" cannot quietly route
+    // it back to the never-computed sentence.
+    const view = projectTurnContext(
+      contextWith({ scenario_analysis_fact_set: attestedSet([runAnalysisFact({ enrichment: {} })]) }),
+      GRAPH_HASH,
+      null,
+    );
+    expect(view.snapshot?.enrichment).toEqual({});
+    const said = await resultOf(view.snapshot);
+    expect(said).not.toContain('never computed');
+    expect(said).not.toBe(READ_RESULTS_NO_ANALYSIS);
+  });
+
+  it('CONTRAST — all three no-figures sentences are distinct, so none can absorb another', () => {
+    const all = [
+      READ_RESULTS_NO_ANALYSIS,
+      READ_RESULTS_RECORD_UNREADABLE,
+      READ_RESULTS_NO_FIGURES_ON_RECORD,
+    ];
+    expect(new Set(all).size).toBe(3);
   });
 });

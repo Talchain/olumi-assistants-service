@@ -264,6 +264,19 @@ const RECORD_UNREADABLE: RunReason = {
     'current, and that is the only thing running it guarantees here.',
 };
 
+/**
+ * A run is on record and holds no usable results. Distinct from FIRST_RUN
+ * because the user has already paid for one, and from RECORD_UNREADABLE
+ * because the read succeeded — see `READ_RESULTS_NO_FIGURES_ON_RECORD`.
+ */
+const NO_FIGURES_ON_RECORD: RunReason = {
+  summary: 'Re-run the analysis — the run on record holds no readable results',
+  why:
+    'AN ANALYSIS IS ON RECORD FOR THIS MODEL AND IT CARRIES NO READABLE RESULTS. Do not say ' +
+    'nothing has ever been computed — a run exists, it simply holds no figures anyone can read. ' +
+    'That is what running it again would fix, and it is the reason to give the user.',
+};
+
 const FIRST_RUN: RunReason = {
   summary: 'Run the analysis — nothing has been computed for this model yet',
   why:
@@ -311,11 +324,26 @@ export function createRunAnalysisTool(deps: RunAnalysisToolDeps): AgentTool {
     // `read_results` used to make.
     const recordUnreadable =
       snapshot !== null && snapshot !== undefined && snapshot.recordReadOk === false;
+    // A run IS on record but carries no readable figures — the fifth state.
+    // `FIRST_RUN` would assert "NO ANALYSIS HAS EVER BEEN RUN", which is false
+    // here, and it is the paid half of that false claim: offering to spend on a
+    // first run when what is actually needed is a re-run.
+    // Same narrowing as `read_results`: only a real currency verdict over a
+    // SELECTED fact supports "a run exists". `none` means none was selected.
+    const runOnRecordWithoutFigures =
+      snapshot !== null &&
+      snapshot !== undefined &&
+      snapshot.recordReadOk !== false &&
+      !hasAnalysis &&
+      snapshot.freshness !== null &&
+      snapshot.freshness !== 'none';
     const reason = hasAnalysis
       ? reasonForRerun(snapshot)
       : recordUnreadable
         ? RECORD_UNREADABLE
-        : FIRST_RUN;
+        : runOnRecordWithoutFigures
+          ? NO_FIGURES_ON_RECORD
+          : FIRST_RUN;
     const exclusion = exclusionDisclosure(admission);
 
     return {

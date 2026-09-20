@@ -115,12 +115,16 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import type { AnalysisEnrichment } from '@talchain/schemas/boundary';
 
 import type { EnrichedTurnContext } from '../build-turn-context.js';
-import { isReconciledScenarioAnalysisFactSet } from '../context/reconcile-scenario-analysis-facts.js';
+import {
+  isReconciledScenarioAnalysisFactSet,
+  isScenarioAnalysisReasoningAuthority,
+} from '../context/reconcile-scenario-analysis-facts.js';
 import {
   deriveAnalysisFreshness,
   selectRunAnalysisFact,
   type FreshnessDerivation,
 } from '../context/freshness.js';
+import { extractGraphOptionIds } from '../context/option-identity.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
 import type { AnalysisSnapshot } from './read-tools.js';
 
@@ -157,16 +161,17 @@ export interface ReplacementTurnContextView {
   readonly history: Array<{ role: 'user' | 'assistant'; content: string }>;
 }
 
-function optionIdsOf(graph: GraphStateIngress | null | undefined): readonly string[] | null {
-  if (graph == null || !Array.isArray(graph.nodes)) return null;
-  const ids = graph.nodes
-    .filter((n): n is typeof n & { kind: 'option'; id: string } => {
-      const rec = n as { kind?: unknown; id?: unknown };
-      return rec.kind === 'option' && typeof rec.id === 'string';
-    })
-    .map((n) => n.id);
-  return ids.length > 0 ? ids : null;
-}
+/**
+ * ⛔ WAS A HAND-ROLLED READER, AND IT WAS NARROWER THAN THE PRODUCER.
+ *
+ * It read `nodes[].kind === 'option'` only. The canonical
+ * `extractGraphOptionIds` reads that AND the top-level `options[]` array, which
+ * its own docstring calls "the CEEGraphResponseV3 / ISL ingress shape — what
+ * production sends". So the hand-rolled version returned null on exactly the
+ * shape that matters, and the option-identity freshness guard silently did not
+ * fire. A second derivation, in the file whose anti-rederivation entry this
+ * branch added — which is the joke an adversarial review had to point out.
+ */
 
 /**
  * The analysis facts this turn is entitled to reason from, and whether the
@@ -187,10 +192,19 @@ function analysisFactsFrom(context: EnrichedTurnContext): {
     // trust, so we do not report on what exists.
     return { facts: [], readOk: false };
   }
-  if (set.status === 'degraded') return { facts: [], readOk: false };
+  // ⭐ THE ALLOW-LIST GATE, NOT `!== 'degraded'`. This file had the deny-list
+  // form, and `reconcile-scenario-analysis-facts.ts` names that exact mistake
+  // in the gate's own docstring: "a `!== 'degraded'` written at each call site
+  // would have admitted it silently at all of them". A status added later must
+  // be excluded here until someone states the case for it — otherwise it
+  // arrives as `readOk: true` and its facts go straight into what the model
+  // tells the user. Caught by an adversarial review, in the one file whose
+  // anti-rederivation entry this same branch added.
+  //
   // 'complete' and 'capped' both carry the NEWEST facts; `capped` additionally
   // discloses that older history exists behind them, which does not affect
   // "what is the latest analysis".
+  if (!isScenarioAnalysisReasoningAuthority(set)) return { facts: [], readOk: false };
   return { facts: set.facts, readOk: true };
 }
 
@@ -272,7 +286,7 @@ export function projectTurnContext(
   }
 
   const { facts, readOk } = analysisFactsFrom(context);
-  const freshness = deriveAnalysisFreshness(facts, currentGraphHash, optionIdsOf(graph), {
+  const freshness = deriveAnalysisFreshness(facts, currentGraphHash, extractGraphOptionIds(graph), {
     priorFactsReadOk: readOk,
   });
 

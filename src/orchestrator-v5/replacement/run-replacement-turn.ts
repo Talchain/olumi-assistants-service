@@ -308,6 +308,9 @@ export async function runReplacementTurn(
     return { ...composed, toolsCalled: [], iterations: 0, applied };
   }
 
+  // Writes this turn AUTHORISED and sent, as distinct from `applied`, which
+  // also carries prior turns' reconciled writes. See the refusal below.
+  let acceptedThisTurn = 0;
   const acceptTool: AgentTool | null =
     deps.applyOperations === undefined
       ? null
@@ -381,7 +384,16 @@ export async function runReplacementTurn(
             // identical four-turn runs at temperature 0 diverged materially on
             // this branch, so anything that must hold EVERY time cannot be a
             // sentence the model is asked to respect.
-            if (applied.length > 0) {
+            // ⚠ SCOPED TO WRITES THIS TURN AUTHORISED, not to `applied.length`.
+            // The reconciliation block above ALSO pushes to `applied` when it
+            // resolves a PRIOR turn's in-flight proposal — under that prior
+            // turn's idempotency key, i.e. a different `(scenario_id, turn_id)`.
+            // Keying on `applied.length` therefore refused a legitimate FIRST
+            // accept on this turn, with copy that said a change had "already
+            // been saved on this turn" when none had. Found by adversarial
+            // review; the guard was over-broad relative to its own stated
+            // justification, which is about a second append under ONE turn id.
+            if (acceptedThisTurn > 0) {
               return {
                 type: 'refused',
                 content:
@@ -484,6 +496,9 @@ export async function runReplacementTurn(
               applied_at: input.now,
             });
             applied.push({ proposalId, receiptId: outcome.receiptId });
+            // Counts ONLY writes this turn authorised and sent, which is the
+            // population the one-write-per-turn constraint is about.
+            acceptedThisTurn += 1;
             if (outcome.newModelRevision !== undefined) newModelRevision = outcome.newModelRevision;
 
             // The ONLY place an `authorised_change` is ever written, and it

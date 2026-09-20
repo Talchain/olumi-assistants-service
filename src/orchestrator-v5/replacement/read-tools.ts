@@ -442,6 +442,34 @@ export const READ_RESULTS_RECORD_UNREADABLE =
   'do not reason as if figures existed, and offer to try again.';
 
 /**
+ * THE FIFTH STATE: a run IS on record, and it carries no readable figures.
+ *
+ * ⛔ THIS ONE WAS MISSED WHEN THE OTHER FOUR WERE ENUMERATED, AND AN ADVERSARIAL
+ * REVIEW FOUND IT ONE BRANCH LATER — which is worth recording, because it is the
+ * SAME defect the four states were written to fix, surviving inside the fix.
+ *
+ * A `run_analysis` fact whose `result.enrichment` is absent or not an object is
+ * still SELECTED: `isSuccessfulRunAnalysisFact` treats a missing status as a
+ * legacy fact and returns true, and the transport field is `z.record(...)`, so
+ * absence is representable. The snapshot then carried `enrichment: null` with
+ * `recordReadOk: true` — which fell through to
+ * {@link READ_RESULTS_NO_ANALYSIS} and told the user nothing had ever been
+ * computed, WHILE the same selected fact drove the freshness derivation to
+ * `fresh`. The sentence and the envelope contradicted each other, which is
+ * precisely what `turn-context-view.ts` claims in its header cannot happen.
+ *
+ * "We looked and found nothing" and "we looked, found a run, and it carries no
+ * numbers" are different facts with different remedies — the second is worth
+ * re-running, the first is worth running for the first time.
+ */
+export const READ_RESULTS_NO_FIGURES_ON_RECORD =
+  'AN ANALYSIS IS ON RECORD FOR THIS MODEL, BUT IT CARRIES NO READABLE RESULTS — ' +
+  'no probabilities, no outcome ranges, no comparison between the options. ' +
+  'Do NOT say nothing has ever been computed: a run exists. Say that the run on ' +
+  'record holds no usable figures, do not reason as if figures existed, and ' +
+  'offer to run it again so there is something to read.';
+
+/**
  * The currency line, which always comes first.
  *
  * Four verdicts, and three of them are NOT 'fresh'. Each gets its own sentence
@@ -752,11 +780,28 @@ export function createReadResultsTool(deps: ReadResultsDeps): AgentTool {
     // ⭐ THREE OUTCOMES WITHOUT FIGURES, AND THEY ARE NOT THE SAME SENTENCE.
     // A snapshot whose caller could not read the record must never be reported
     // as "never computed" — see `AnalysisSnapshot.recordReadOk`.
-    if (snapshot !== null && snapshot !== undefined && snapshot.recordReadOk === false) {
+    if (snapshot === null || snapshot === undefined) {
+      // We looked, through a reader we trust, and there is no run on record.
+      return { type: 'result', content: READ_RESULTS_NO_ANALYSIS };
+    }
+    if (snapshot.recordReadOk === false) {
       return { type: 'result', content: READ_RESULTS_RECORD_UNREADABLE };
     }
-    if (snapshot === null || snapshot === undefined || snapshot.enrichment === null) {
-      return { type: 'result', content: READ_RESULTS_NO_ANALYSIS };
+    if (snapshot.enrichment === null) {
+      // ⚠ THE PREDICATE IS NARROWER THAN "enrichment is null", and two
+      // pre-existing tests caught it being too broad — which is the doctrine
+      // about auditing a predicate's DOMAIN doing its job.
+      //
+      // `freshness: 'none'` means the derivation selected NO fact, so there is
+      // no run on record and "never computed" is the true sentence. `null`
+      // means the caller established no currency at all and is entitled to no
+      // claim either way. Only a real verdict over a SELECTED fact — fresh,
+      // stale, or an indeterminate `unknown` — supports "a run exists".
+      const runOnRecord = snapshot.freshness !== null && snapshot.freshness !== 'none';
+      return {
+        type: 'result',
+        content: runOnRecord ? READ_RESULTS_NO_FIGURES_ON_RECORD : READ_RESULTS_NO_ANALYSIS,
+      };
     }
 
     const enrichment = snapshot.enrichment;
