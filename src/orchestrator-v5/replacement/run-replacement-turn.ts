@@ -154,10 +154,82 @@ export async function runReplacementTurn(
   let proposals = markStaleForRevision(input.proposals, input.modelRevision);
   let memory = input.memory;
 
-  // An unresolved save owns the turn. Nothing is asked of the model at all:
-  // spending a call to produce prose that will be discarded is waste, and any
-  // prose it produced would be written without knowing what happened.
-  const outstanding = needsReconciliation(proposals);
+  const applied: { proposalId: string; receiptId: string }[] = [];
+  let newModelRevision: string | undefined;
+
+  // ── RESOLVING AN UNKNOWN SAVE ───────────────────────────────────────────
+  //
+  // ⚠ THIS BLOCK EXISTS BECAUSE ITS ABSENCE BRICKED THE CONVERSATION, and it
+  // was found by asking "what have I built that is WORSE than what it
+  // replaces?" rather than by review.
+  //
+  // As first written, a thrown save left the proposal `apply_in_flight`
+  // forever. Nothing could resolve it: `recordApplied` needs a receipt,
+  // `recordApplyFailed` needs an affirmative failure, and the only caller of
+  // either was the accept tool — which is reached through the agent loop,
+  // which this function returned before ever running. Reproduced by
+  // execution: after the throw, FIVE later turns with a perfectly healthy
+  // write path each returned the reconciliation notice and the proposal was
+  // still outstanding. A permanently stuck conversation is a worse product
+  // than the one being replaced.
+  //
+  // The resolution is the mechanism already built for it. `beginApply`
+  // recorded an idempotency key BEFORE the write, so retrying with THAT SAME
+  // KEY is safe by construction: a write path honouring the key either
+  // returns the original receipt or performs the work exactly once. That is
+  // the entire reason the key is written before the mutation rather than
+  // after.
+  //
+  // So every turn retries, and each retry can only move the proposal towards
+  // a definite answer. A still-thrown retry stays unknown and is tried again
+  // next turn — unresolved, but never stuck.
+  let outstanding = needsReconciliation(proposals);
+  if (outstanding.length > 0 && deps.applyOperations !== undefined) {
+    for (const p of outstanding) {
+      if (p.idempotency_key === undefined) continue;
+      const summary = p.operations.map((o) => o.summary).join('; ');
+      try {
+        const outcome = await deps.applyOperations({
+          proposalId: p.id,
+          idempotencyKey: p.idempotency_key,
+          operations: p.operations,
+          modelRevision: p.model_revision,
+        });
+        if (outcome.ok) {
+          proposals = recordApplied(proposals, p.id, {
+            receipt_id: outcome.receiptId,
+            applied_at: input.now,
+          });
+          applied.push({ proposalId: p.id, receiptId: outcome.receiptId });
+          if (outcome.newModelRevision !== undefined) newModelRevision = outcome.newModelRevision;
+          memory = recordItem(memory, {
+            id: `change-${p.id}`,
+            kind: 'authorised_change',
+            text: summary,
+            source_turn_id: input.turnId,
+            recorded_at: input.now,
+            proposal_id: p.id,
+            receipt_id: outcome.receiptId,
+          });
+        } else {
+          proposals = recordApplyFailed(proposals, p.id, {
+            reason: outcome.reason,
+            failed_at: input.now,
+          });
+        }
+      } catch {
+        // Still unknown. Left in flight deliberately: the next turn retries
+        // under the same key. Swallowed rather than thrown because a
+        // reconciliation failure must not also destroy this turn.
+      }
+    }
+    outstanding = needsReconciliation(proposals);
+  }
+
+  // Only a save whose outcome is STILL unknown owns the turn. Nothing is
+  // asked of the model: spending a call to produce prose that will be
+  // discarded is waste, and any prose it produced would be written without
+  // knowing what happened.
   if (outstanding.length > 0) {
     const composed = composeTurn({
       loopResult: { text: '', proposed: [], accepted: [], toolsCalled: [], iterations: 0, haltedAtCeiling: false },
@@ -168,11 +240,8 @@ export async function runReplacementTurn(
       now: input.now,
       idFor: input.idFor,
     });
-    return { ...composed, toolsCalled: [], iterations: 0, applied: [] };
+    return { ...composed, toolsCalled: [], iterations: 0, applied };
   }
-
-  const applied: { proposalId: string; receiptId: string }[] = [];
-  let newModelRevision: string | undefined;
 
   const acceptTool: AgentTool | null =
     deps.applyOperations === undefined
