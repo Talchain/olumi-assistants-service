@@ -2885,7 +2885,19 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // that runs after a save may already have been sent is how you build
     // "updated, then denied" out of the migration itself.
     // ═══════════════════════════════════════════════════════════════════════
-    if (config.features.replacementCoachEnabled && ingress.kind === 'message') {
+    // ⛔ COMPOSER TURNS ONLY. `kind: 'message'` INCLUDES CHIP CLICKS — `source`
+    // is a property of that variant and its members are 'composer' and 'chip'
+    // (plus the legacy 'chip_click' the retired path still matches at :3479,
+    // BELOW this branch). Without this narrowing the layer swallowed every
+    // typed chip, including the only affordance that actually runs an
+    // analysis — and it can neither run one nor save anything. A manual test
+    // on 20 Sep drove chips constantly ("Set effect on…", "Link X to Y",
+    // "Run a pre-mortem"), so this was not a corner case.
+    // Caught by the adversarial review, not by any test here.
+    const isComposerTurn =
+      ingress.kind === 'message' &&
+      (ingress.source === undefined || ingress.source === 'composer');
+    if (config.features.replacementCoachEnabled && isComposerTurn) {
       const graphNow = extensions.graphState;
       const hasModel =
         graphNow != null && Array.isArray(graphNow.nodes) && graphNow.nodes.length > 0;
@@ -2968,14 +2980,28 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
 
         await commitDirectAnswer(shaped.response, {
           scenario_id: ingress.scenario_id,
-          turn_id: requestId,
+          // ⛔ `ingress.turn_id`, NOT `requestId`. The idempotency key is
+          // (scenario_id, turn_id); requestId comes from a request HEADER or
+          // a fresh uuid and bears no relation to the payload, so using it
+          // broke the key and desynchronised the turn row from the fence row.
+          // Every one of the nine peer call sites uses `ingress.turn_id`.
+          turn_id: ingress.turn_id,
           turn_class: 'direct_answer',
           handler_id: null,
           request_hash: computeRequestHash(ingress),
+          // Without this the row persists an assistant_message beside a NULL
+          // user_message, so the conversation reads back half-missing.
+          userMessage: ingress.message,
           llm_calls_used: turn.iterations,
           duration_ms: Date.now() - startedAt,
           handler_facts: [],
-          graph: extensions.graphState,
+          // ⛔ `graph` DELIBERATELY OMITTED. Passing it makes
+          // `graphWasProvided(metadata.graph)` true (commit.ts:1086, 1160),
+          // which sets `writesGraph` and OVERWRITES `scenarios.graph` with
+          // the client's bytes — on a turn whose own comment says it performs
+          // no mutation. This controller never mutates the graph, so it has
+          // nothing to persist. It was the only exit in this file writing the
+          // canonical graph without the invariant baseline.
         });
 
         return await sendFinalised200(reply, requestId, 'replacement_controller', shaped.response, {
