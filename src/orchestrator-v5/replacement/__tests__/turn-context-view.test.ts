@@ -111,14 +111,33 @@ function attestedSet(facts: readonly HandlerFact[]) {
   });
 }
 
+/**
+ * `prior_facts` is an ARRAY that also carries two named members
+ * (`HandlerFactsWithRecentMutationHistory`). Built here rather than passed as a
+ * bare `[]` so the fixture is the shape production hands the projection.
+ */
+function factsWindow(facts: readonly HandlerFact[] = []) {
+  return Object.assign([...facts], {
+    recent_mutation_facts: [] as readonly HandlerFact[],
+    recent_changes_status: 'complete' as const,
+  });
+}
+
 function contextWith(over: Partial<EnrichedTurnContext>): EnrichedTurnContext {
   return {
     session_id: SCENARIO,
     prior_turns: [],
-    prior_facts: [],
+    prior_facts: factsWindow(),
     prior_facts_read_ok: true,
     ...over,
   } as unknown as EnrichedTurnContext;
+}
+
+/** The sentence `read_results` actually hands the model for a given snapshot. */
+async function resultOf(snapshot: ReturnType<typeof projectTurnContext>['snapshot']): Promise<string> {
+  const outcome = await createReadResultsTool({ getAnalysis: () => snapshot }).execute({});
+  if (outcome.type !== 'result') throw new Error(`expected a result, got ${outcome.type}`);
+  return outcome.content;
 }
 
 describe('the four states a conversation layer must tell apart', () => {
@@ -236,7 +255,7 @@ describe('⭐ the window trap — the defect this projection exists to avoid', (
     // ═══════════════════════════════════════════════════════════════════════
     const view = projectTurnContext(
       contextWith({
-        prior_facts: [],
+        prior_facts: factsWindow(),
         prior_facts_read_ok: true,
         scenario_analysis_fact_set: attestedSet([runAnalysisFact()]),
       }),
@@ -256,7 +275,7 @@ describe('⭐ the window trap — the defect this projection exists to avoid', (
     // the other proves the window is not.
     const view = projectTurnContext(
       contextWith({
-        prior_facts: [runAnalysisFact()] as never,
+        prior_facts: factsWindow([runAnalysisFact()]) as never,
         prior_facts_read_ok: true,
         scenario_analysis_fact_set: attestedSet([]),
       }),
@@ -268,20 +287,17 @@ describe('⭐ the window trap — the defect this projection exists to avoid', (
 });
 
 describe('what the tools actually say — the sentence the user gets', () => {
-  it('an unreadable record says SO, and does not claim nothing was computed', () => {
+  it('an unreadable record says SO, and does not claim nothing was computed', async () => {
     const view = projectTurnContext(null, GRAPH_HASH, null);
-    const out = createReadResultsTool({ getAnalysis: () => view.snapshot }).execute(
-      {},
-      { requestId: 'r', now: '2026-09-20T00:00:00.000Z' } as never,
-    );
-    expect(out).toEqual({ type: 'result', content: READ_RESULTS_RECORD_UNREADABLE });
+    const out = await resultOf(view.snapshot);
+    expect(out).toBe(READ_RESULTS_RECORD_UNREADABLE);
     // The precise harm, pinned as a string: the old wiring emitted the
     // sentence below on exactly this input, with an instruction to repeat it.
-    expect(out.type === 'result' && out.content).not.toBe(READ_RESULTS_NO_ANALYSIS);
-    expect(out.type === 'result' && out.content).not.toContain('never computed');
+    expect(out).not.toBe(READ_RESULTS_NO_ANALYSIS);
+    expect(out).not.toContain('never computed');
   });
 
-  it('CONTRAST — a genuinely empty scenario still gets the "never computed" sentence, which is TRUE there', () => {
+  it('CONTRAST — a genuinely empty scenario still gets the "never computed" sentence, which is TRUE there', async () => {
     // Without this control the assertion above would pass on a tool that had
     // simply stopped emitting READ_RESULTS_NO_ANALYSIS at all — which would be
     // a different defect, not a fix.
@@ -290,24 +306,18 @@ describe('what the tools actually say — the sentence the user gets', () => {
       GRAPH_HASH,
       null,
     );
-    const out = createReadResultsTool({ getAnalysis: () => view.snapshot }).execute(
-      {},
-      { requestId: 'r', now: '2026-09-20T00:00:00.000Z' } as never,
-    );
-    expect(out).toEqual({ type: 'result', content: READ_RESULTS_NO_ANALYSIS });
+    const out = await resultOf(view.snapshot);
+    expect(out).toBe(READ_RESULTS_NO_ANALYSIS);
   });
 
-  it('a current analysis reaches the model as figures, not as silence', () => {
+  it('a current analysis reaches the model as figures, not as silence', async () => {
     const view = projectTurnContext(
       contextWith({ scenario_analysis_fact_set: attestedSet([runAnalysisFact()]) }),
       GRAPH_HASH,
       null,
     );
-    const out = createReadResultsTool({ getAnalysis: () => view.snapshot }).execute(
-      {},
-      { requestId: 'r', now: '2026-09-20T00:00:00.000Z' } as never,
-    );
-    const content = out.type === 'result' ? out.content : '';
+    const out = await resultOf(view.snapshot);
+    const content = out;
     expect(content).toContain('ANALYSIS IS CURRENT');
     expect(content).not.toContain('NO ANALYSIS HAS BEEN RUN');
     // The producer's own separation verdict, reported rather than inferred.
