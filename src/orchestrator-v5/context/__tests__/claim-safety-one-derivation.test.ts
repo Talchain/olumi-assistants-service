@@ -149,6 +149,11 @@ describe('the permission and the state come from ONE selection (B2)', () => {
     expect(v).toEqual({
       may_name_leading_option: false,
       constraint_verdict_state: 'unevaluated',
+      // A new member of this verdict (see `MayNameLeadingOptionVerdict`). These
+      // whole-object assertions are what made it visible the moment it was added,
+      // which is the behaviour to keep: a field appearing without a decision here
+      // is the drift the shape assertion exists to catch.
+      separation_withhold: 'separation_unavailable',
       provenance: 'scenario_fact',
     });
   });
@@ -159,6 +164,7 @@ describe('the permission and the state come from ONE selection (B2)', () => {
     expect(readMayNameLeadingOptionVerdict([], scopeWith(null, false))).toEqual({
       may_name_leading_option: true,
       constraint_verdict_state: null,
+      separation_withhold: null,
       provenance: 'no_analysis_exists',
     });
     // A failed read on a short scenario does NOT prove emptiness. A malformed
@@ -172,6 +178,7 @@ describe('the permission and the state come from ONE selection (B2)', () => {
     ).toEqual({
       may_name_leading_option: false,
       constraint_verdict_state: null,
+      separation_withhold: null,
       provenance: 'fail_closed_unavailable',
     });
     // The degraded fail-closed branch: we withhold precisely BECAUSE we could
@@ -185,6 +192,7 @@ describe('the permission and the state come from ONE selection (B2)', () => {
     ).toEqual({
       may_name_leading_option: false,
       constraint_verdict_state: null,
+      separation_withhold: null,
       provenance: 'fail_closed_truncated',
     });
   });

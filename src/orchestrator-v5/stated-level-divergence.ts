@@ -150,6 +150,12 @@
  */
 
 import type { SuggestedAction } from '../orchestrator/types.js';
+import {
+  offersForBand,
+  recogniseLevelIn,
+  resolveFactorScale,
+  type FactorScale,
+} from './compose/unapplied-edit-reply.js';
 import { isLabelEcho } from '../cee/transforms/label-echo.js';
 
 type Dict = Record<string, unknown>;
@@ -178,6 +184,35 @@ export interface StatedLevelDivergence {
    * error one level down, so the copy now uses the graph's own word, or none.
    */
   readonly kind: string | null;
+  /**
+   * The level the person's OWN prose named ("Very high"), or null when it
+   * named none. Drives the offer chips in
+   * {@link buildStatedLevelDivergenceActions}.
+   *
+   * ⛔ A RECOGNISED BAND, NEVER AN INTERPRETED VALUE. This records which band
+   * they said; it does not decide what that band is worth. Resolved by
+   * `recogniseLevelIn`, whose vocabulary is owned by `unapplied-edit-reply.ts`.
+   */
+  readonly statedLevel: string | null;
+  /**
+   * ⭐⭐ THE FACTOR'S SCALE, read by the ONE existing resolver, so a band chip
+   * is offered only where the band is a real quantity.
+   *
+   * ⛔ THE DEFECT THIS CLOSES, and it shipped in this file's first cut. The
+   * band offers were built by copying `offersForBand` and leaving behind the
+   * gate that guards it — `resolveUnappliedEditUnderstanding` offers a number
+   * only when `resolveFactorScale(node) === 'unit_interval'`. Without it,
+   * *"Annual Salary is very high"*, on a node whose observed state is
+   * **£85,000**, earned chips reading **Set Annual Salary to 0.8 / 0.9**.
+   * Nothing establishes that 0.8 denotes that measured amount, and a person
+   * clicking the chip does not make it so: consent to a wrongly framed offer
+   * repairs nothing, it only launders the frame.
+   *
+   * ⚠ IMPORTED, NOT RESTATED. `measured` / `unit_interval` / `unknown` is the
+   * existing vocabulary and this file adds no second taxonomy — the whole
+   * cause here was a second copy of one decision.
+   */
+  readonly scale: FactorScale;
 }
 
 function isPlainObject(v: unknown): v is Dict {
@@ -362,6 +397,36 @@ function detectOne(
     label,
     currentDisplay,
     kind: typeof node.kind === 'string' && node.kind.trim().length > 0 ? node.kind.trim() : null,
+    statedLevel: recogniseLevelIn(firstProse(value, proseKeys) ?? ''),
+    // The node is in hand here, so the scale is read from the SAME object the
+    // rest of this detection is about.
+    //
+    // ⚠ AN EXPLICIT PROJECTION, NOT A DOUBLE CAST. Casting the node straight
+    // to the resolver's parameter type compiled and read cleanly, and the CI
+    // forbidden-boundary ratchet correctly refused it (59 > baseline 58). The
+    // gate is right, and the exemption comment it offers would have been the
+    // wrong use of it: a double cast here asserts a shape nothing checks,
+    // whereas naming the six fields states exactly what the resolver reads
+    // and fails at the type level if that ever changes.
+    //
+    // ⛔ AND THE PATTERN IS DELIBERATELY NOT SPELLED IN THIS COMMENT. That
+    // scanner counts occurrences in TEXT, so a docblock explaining the defect
+    // would trip the very gate it is explaining — the third instance of that
+    // class in one night, after a provenance literal and a spelled magnitude
+    // word. In this estate the token IS the interface.
+    //
+    // Every field below is optional and defensively parsed in
+    // `resolveFactorScale`, so a node missing all of them resolves `unknown`
+    // — which withholds the offer, the fail-safe direction.
+    scale: resolveFactorScale({
+      id: op.path,
+      kind: typeof node.kind === 'string' ? node.kind : '',
+      label,
+      observed_state: node.observed_state,
+      data: node.data,
+      unit: node.unit,
+      cap: node.cap,
+    }),
   };
 }
 
@@ -493,6 +558,40 @@ export function buildStatedLevelDivergenceActions(
   for (const d of divergences) {
     if (seen.has(d.path)) continue;
     seen.add(d.path);
+    // ⭐ THE OFFER, when their own prose named a band. "Set <label> to <n>" —
+    // `set` is already a value-lane verb, so this replays into the path that
+    // WORKS and stamps the value with the person's own authorship provenance.
+    // It deliberately does not widen the routing gate, which is a
+    // consent-semantics change owned elsewhere.
+    //
+    // ⚠ THE PROVENANCE LITERAL IS DELIBERATELY NOT SPELLED HERE. The
+    // 2.714 revert guard derives its REVIEWED manifest from which `src/`
+    // files carry that token, so naming it in PROSE enrols this file and REDs
+    // the required check — which is exactly what it did. Widening the manifest
+    // to quiet a comment would be the wrong repair: the manifest is the list
+    // of files reviewed for being allowed to STAMP authorship, and this file
+    // stamps nothing.
+    // ⭐ THE GATE, REUSED NOT REBUILT. A number may be offered ONLY where the
+    // band is real: the person's own word bounded it AND the factor is
+    // provably on the 0-1 scale that word maps to. This is the identical
+    // condition `resolveUnappliedEditUnderstanding` applies
+    // (`unapplied-edit-reply.ts`: `band !== null && scale === 'unit_interval'`),
+    // and copying `offersForBand` without it is exactly what put
+    // "Set Annual Salary to 0.8" in front of someone whose salary is £85,000.
+    //
+    // `measured` and `unknown` keep the generic clarification below and lose
+    // only the numeric chips — fewer claims, never more.
+    if (d.statedLevel !== null && d.scale === 'unit_interval') {
+      for (const n of offersForBand(d.statedLevel)) {
+        actions.push({
+          label: `Set ${d.label} to ${n}`,
+          prompt: `Set ${d.label} to ${n}`,
+          role: 'facilitator',
+        });
+      }
+    }
+    // KEPT, always. The offered points are two of the band's; a person who
+    // means a different number must not have to fight the chips for it.
     actions.push({
       label: `Set a value for ${d.label}`,
       prompt: `What value should ${d.label} take?`,

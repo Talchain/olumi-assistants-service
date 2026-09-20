@@ -515,7 +515,10 @@ import {
 import { pickLatestDecisionReview } from './coaching/pick-decision-review.js';
 import { pickLatestFactorEvppiPriorityGuidance } from './coaching/select-factor-evppi.js';
 import { pickLatestRawRobustness } from './coaching/pick-raw-robustness.js';
-import { separationEstablishedFromRobustness } from './compose/analysis-state-v1.js';
+import {
+  separationEstablishedFromRobustness,
+  type SeparationWithhold,
+} from './compose/analysis-state-v1.js';
 import { pickLatestDefaultedAssumptions } from './coaching/pick-defaulted-assumptions.js';
 import { applyDefaultedValueEgress } from './compose/defaulted-value-egress.js';
 import { applyBlockedSlotClaimGuard } from './compose/blocked-slot-claim-guard.js';
@@ -1982,6 +1985,51 @@ export async function runTurnExecutor(
     claimSafetyScope,
   );
   let mayNameLeadingOptionForRun = mayNameLeadingOptionVerdictForRun.may_name_leading_option;
+  /**
+   * ⭐⭐ THE SEPARATION PERMISSION, HELD APART FROM THE CONSTRAINT ONE.
+   *
+   * `mayNameLeadingOptionForRun` above is ENTITLEMENT and nothing else: it
+   * resolves to the persisted CONSTRAINT verdict and says nothing about whether
+   * this result told the arms apart. The published claim is
+   * `permitted = entitled && separates` (`composeLeaderClaim`), so the wire has
+   * always had both halves while the deterministic gates in this file consulted
+   * only the first.
+   *
+   * ⚠ MEASURED CONSEQUENCE, 19 Sep, request `1a5b1051`: the advice gate matched,
+   * reported `leading_option_withheld: false`, and the turn answered *"the
+   * analysis currently favours … with a probability of 64%"* — while the
+   * response published `leader_claim.permitted: false`,
+   * `withheld_reason: "separation_unavailable"`. One surface named a leader the
+   * other withheld, in one payload. Independently traced to the same cause in
+   * Core's source review of the archived CEE build.
+   *
+   * ⛔ IT IS A SECOND VARIABLE, NOT A SECOND CONJUNCT ON THE FIRST. Folding it
+   * into `mayNameLeadingOptionForRun` would give one boolean two meanings and
+   * cost every downstream reader the ability to say WHICH permission withheld —
+   * which is precisely what the person needs told. Freshness, admission,
+   * feasibility and separation stay four answers to four questions.
+   *
+   * `null` = separation did not withhold (or was never derived on this turn),
+   * which is the value every path that does not reach the derivation keeps. The
+   * forgotten value is therefore today's behaviour.
+   */
+  /**
+   * ⭐ READ OFF THE VERDICT, NOT DERIVED HERE — so the gate's two permissions
+   * describe ONE analysis. `readMayNameLeadingOptionVerdict` selects with
+   * `selectClaimBearingRunAnalysisFact` over the window UNION the scenario
+   * scope; the obvious local alternative, `pickLatestRawRobustness(prior_facts)`,
+   * selects with `selectRunAnalysisFact`, which that file records as filtering
+   * out `partial`/`degraded` — a documented FAIL-OPEN for this exact question.
+   * Two selectors would have let the gate read entitlement off one fact and
+   * separation off another.
+   *
+   * A function, not a snapshot: `mayNameLeadingOptionVerdictForRun` is
+   * REASSIGNED post-dispatch (see the `mayNameLeadingOptionForRun =` line
+   * further down), and a `const` captured up here would silently answer for the
+   * pre-dispatch fact at both gates.
+   */
+  const separationWithholdForRun = (): SeparationWithhold | null =>
+    mayNameLeadingOptionVerdictForRun.separation_withhold;
   // F2 — the STATE behind the permission, read off the SAME fact array by the
   // SAME content-based selector, at the SAME point. The ContextPack input gate
   // below needs it to choose between the ratified-condition note and the
@@ -2311,6 +2359,18 @@ export async function runTurnExecutor(
         : {}),
       ...(sourceBoundRecovery !== undefined ? { sourceBoundRecovery } : {}),
       ...(holdForDegrade !== undefined ? { liveHold: holdForDegrade } : {}),
+      // The person's own words, so a withheld answer can still name what it
+      // was asked about. Read ONLY for that; `resolveDegradeSubject` is a
+      // containment test over labels already on `readinessNodes` above, never
+      // a parser. Witness: the risk chip at 18:59:05 on 19 Sep returned the
+      // unsubjected sentence and the person never asked again.
+      question: payload.message,
+      // The boundary that was actually crossed — the same value emitted to
+      // telemetry immediately above — so the degrade can hold back the one
+      // barred claim instead of every kind of help. Witness: trace `a01280f1`
+      // at 18:49:58 on 19 Sep, where "What would you advise?" earned a 12.2s
+      // answer that was replaced in full by the caveat and the re-run offer.
+      ...(verdict.violation !== undefined ? { violation: verdict.violation } : {}),
     });
     return {
       assistant_text: degrade.assistant_text,
@@ -2973,11 +3033,11 @@ export async function runTurnExecutor(
       //    through the SAME reader — one selection, not two populations.
       const admissionPermitsLeaderNaming =
         analysisReadyPermitsLeaderNaming(analysisReadyForTurn);
-      const separationEstablishedForRun = separationEstablishedFromRobustness(
-        pickLatestRawRobustness(
-          promptAnalysisSourceFact === null ? [] : [promptAnalysisSourceFact],
-        ),
+      const rawRobustnessForRun = pickLatestRawRobustness(
+        promptAnalysisSourceFact === null ? [] : [promptAnalysisSourceFact],
       );
+      const separationEstablishedForRun =
+        separationEstablishedFromRobustness(rawRobustnessForRun);
       const provisionalAdmissionModeForRun: PermittedAnalysisMode | null =
         !admissionPermitsLeaderNaming &&
         separationEstablishedForRun &&
@@ -12906,7 +12966,15 @@ export async function runTurnExecutor(
       const needsWithheldExplanationProjection =
         proposedHandlerId !== 'explain_from_structure' ||
         textAssertsLeadingOption(confirmationText);
-      if (isExplanationHandler && !mayNameLeadingOptionForRun && needsWithheldExplanationProjection) {
+      // ⭐ BOTH PERMISSIONS, READ SEPARATELY. The gate used to fire on
+      // entitlement alone, so a turn that was entitled but whose arms never
+      // separated walked straight past it and answered with a leader. Each
+      // disjunct keeps its own identity all the way to the sentence the person
+      // reads — see `separationWithholdForRun`'s declaration for the measured
+      // payload where the two surfaces disagreed inside one response.
+      const leaderClaimWithheldForRun =
+        !mayNameLeadingOptionForRun || separationWithholdForRun() !== null;
+      if (isExplanationHandler && leaderClaimWithheldForRun && needsWithheldExplanationProjection) {
         // Read the STATE off the SAME fact the permission came from, via the
         // SAME canonical selector — so the sentence and the permission describe
         // one analysis. Labels come from the persisted `goal_constraints`, the
@@ -12935,6 +13003,38 @@ export async function runTurnExecutor(
           // rest of this executor reads the brief from; absent ⇒ the quote
           // stands down, never a fabricated attribution.
           context.scenarioBriefText,
+          // ⭐ THE RUN'S OWN SENSITIVITY EVIDENCE, so a REPLACED answer still
+          // answers the question that was asked.
+          //
+          // Measured on two real sessions (`olumi-debug-73d5c152-20260919`,
+          // `olumi-debug-6edb1cdb-20260917`): a `what_would_flip` turn whose
+          // verdict withheld served ONLY the opening plus the constraint
+          // disclosure — the user asked what could change the outcome and was
+          // told about an unrelated limit. Both carry
+          // `claim_safety.withheld_projection_reason = "leader_claim_replaced"`.
+          //
+          // SCOPED TO `what_would_flip` ON PURPOSE. This body answers "what
+          // could change the outcome"; on `explain_results` or
+          // `explain_from_structure` that is a different question, and copy
+          // that answers a question the user did not ask is the defect one
+          // door along. Those handlers keep today's behaviour exactly.
+          //
+          // The two reads are the SAME ones the permitted deterministic voice
+          // uses on this turn — `analysisProjection` and the
+          // `filterFlipSummaryEntries`-filtered summary, so an option-pinned
+          // lever is never named as a thing to test. Undefined on any other
+          // handler ⇒ no body ⇒ byte-identical to today.
+          proposedHandlerId === 'what_would_flip'
+            ? {
+                projection: analysisProjection,
+                flipSummary: routedFlipSummaryFiltered,
+              }
+            : null,
+          // The separation half. `composeWithheldReasonTail` consults it ONLY
+          // where the constraint half is silent — the producer's own ordering
+          // — so every constraint-withheld turn stays byte-identical and the
+          // new voices reach only the population that previously had no tail.
+          separationWithholdForRun(),
         );
         // ROADMAP 1.233 — record the outcome WHETHER OR NOT it changed the
         // text. `null` (the initial value) means the gate never ran; a
@@ -15466,7 +15566,13 @@ export async function runTurnExecutor(
     // PERMITTED ⇒ no-op, byte-identical. Same short-circuit shape (and same
     // reason) as `guardLeadingOptionClaimsAtEgress`'s
     // `if (opts.mayNameLeadingOption) return response;`.
-    if (mayNameLeadingOptionForRun) return;
+    // ⭐ PERMITTED NOW MEANS BOTH HALVES, because the published claim always
+    // did (`permitted = entitled && separates`). Entitlement alone let an
+    // unseparated run keep a leader sentence that the same payload's
+    // `leader_claim.permitted: false` contradicted. The guard below still only
+    // touches answers that ASSERT a leader (`textAssertsLeadingOption`), so an
+    // answer that claims nothing is untouched either way.
+    if (mayNameLeadingOptionForRun && separationWithholdForRun() === null) return;
     // ═══════════════════════════════════════════════════════════════════════
     // ⚠ THE SCOPE, AND THE MEASURED REASON FOR IT — do not widen without
     // re-running `turn-executor-compound-edit-disclosure.test.ts`.
@@ -15640,6 +15746,12 @@ export async function runTurnExecutor(
       // copy pass the brief, or the finalise chokepoint would keep making the
       // unverified attribution the in-flow gate now refuses to make.
       context.scenarioBriefText,
+      undefined,
+      // Both doors pass the separation half, for the same reason they both
+      // pass the brief: a chokepoint that substituted the cause-free tail
+      // while the in-flow gate named the cause would make the answer depend on
+      // which door the turn came through.
+      separationWithholdForRun(),
     );
     // Structurally unreachable given the `textAssertsLeadingOption` check above
     // (the projection branches on the SAME predicate), but asserted rather than

@@ -37,6 +37,7 @@ import {
   RECENT_CHANGES_INSTRUCTION,
   RUN_DELTA_INSTRUCTION,
   MARGIN_MEANING_INSTRUCTION,
+  SIMULATION_SHARE_MEANING_INSTRUCTION,
 } from '../route-with-tool-use.js';
 import { observeSerialisedPack } from '../../context/__tests__/observe-serialised-pack.js';
 import { ANALYSIS_NOT_CURRENT_NOTE } from '../../format/format-analysis-for-context.js';
@@ -172,6 +173,19 @@ function subtractMandatoryAuthorityDelta(message: string): string {
   const withoutMargin = message.replace(`\n\n${MARGIN_MEANING_INSTRUCTION}`, '');
   expect(withoutMargin).not.toBe(message);
   message = withoutMargin;
+  // ⭐ THE FIFTH MANDATORY BLOCK — the margin block's sibling, and subtracted
+  // for the identical reason. What a SIMULATION SHARE is, emitted by the
+  // condition that serialises the shares, which this fixture carries. It used
+  // to live inside `PROVISIONAL_FIGURES_INSTRUCTION` and therefore reached
+  // only runs the admission capped; a single figure a person types into their
+  // brief crosses that floor and took the sentence with it. Same non-vacuity
+  // guard: exactly-once first, then assert the subtraction actually removed
+  // something, so a replace that matched nothing cannot silently re-pin the
+  // golden.
+  expect(message.split(SIMULATION_SHARE_MEANING_INSTRUCTION)).toHaveLength(2);
+  const withoutShareReading = message.replace(`\n\n${SIMULATION_SHARE_MEANING_INSTRUCTION}`, '');
+  expect(withoutShareReading).not.toBe(message);
+  message = withoutShareReading;
   const marker = `\n\n${GRAPH_CONTEXT_INSTRUCTION}\n\n${DISPLAY_GRAPH_INSTRUCTION}\n\n${RECENT_CHANGES_INSTRUCTION}`;
   const jsonStart = message.indexOf('{');
   const jsonEnd = message.indexOf(marker);
