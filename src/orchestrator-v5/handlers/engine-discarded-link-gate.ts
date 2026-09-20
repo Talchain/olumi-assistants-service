@@ -53,13 +53,15 @@
  * class it did not come in on. The spec here is PLoT's rule, which is symmetric
  * over option/decision **incidence**, so the predicate is:
  *
- *     incident to an option or a decision  AND  not a shape `ALLOWED_EDGES` admits
+ *     incident to an option or a decision  AND  nothing else carries its meaning
  *
- * `ALLOWED_EDGES` (`validators/graph-validator.types.ts:293-302`) is IMPORTED, not
- * copied — the two shapes it admits that touch a non-causal node are
- * `decision → option` and `option → factor`. Both are harmless: the first is pure
- * scaffolding carrying no causal claim, and the second is the structural companion
- * of an intervention, which is the route that does reach the engine. Everything
+ * ⚠ **THIS PREDICATE USED TO READ `ALLOWED_EDGES`, AND THAT WAS THE DEFECT.** CEE
+ * legality and engine survival are two questions (trap 21); they agreed when this
+ * module was written and later diverged, silently disarming the gate on the very
+ * shape of its own P0. The exemption is now derived from the CARRIER — see
+ * {@link ENGINE_CARRIED_SHAPES}. The two carried shapes are `decision → option`
+ * (pure scaffolding, no causal claim) and `option → factor` (the structural
+ * companion of an intervention, the route that does reach the engine). Everything
  * else incident to an option or a decision is deleted with nothing carrying it.
  *
  * ## NAMED RESIDUAL — a known gap, pinned rather than hidden
@@ -223,13 +225,67 @@ function resolveNode(
 }
 
 /**
- * Is this kind pair one `ALLOWED_EDGES` admits? Kind pair ONLY — see the NAMED
- * RESIDUAL on the module header for why factor categories are deliberately not
- * read here.
+ * ⭐⭐ TWO QUESTIONS, NAMED APART (CLAUDE.md trap 21) — and this split exists
+ * because they were one list and it silently disarmed this gate.
+ *
+ *   `ALLOWED_EDGES` answers  — *may CEE's graph hold this edge?*
+ *   THIS set answers         — *does this edge's meaning reach the ENGINE?*
+ *
+ * They agreed when this module was written, which is why the header above says
+ * "the two shapes it admits that touch a non-causal node are `decision → option`
+ * and `option → factor`". A later change added `option → risk` to `ALLOWED_EDGES`
+ * as a retained hypothesis — correct for CEE, and **not** a carrier. Because the
+ * admission test read `ALLOWED_EDGES`, the gate stopped firing on the exact shape
+ * of its own witnessed P0, and its suite collected zero tests rather than failing.
+ *
+ * So the exemption is now DERIVED FROM THE CARRIER, not from legality. A shape is
+ * exempt only when something other than the edge carries its meaning past
+ * `filterOptionNodes`:
+ *
+ *   · `decision → option` — pure scaffolding. It asserts no causal claim, so
+ *     nothing is lost when the edge is stripped.
+ *   · `option → factor`   — the structural companion of an intervention. The
+ *     VALUE travels in the option's `interventions` map, carried in
+ *     `body.options` OUTSIDE `body.graph`, which the filter never touches.
+ *
+ * Everything else incident to an option is deleted with nothing carrying it —
+ * `option → risk` included. That is the spec, and it is symmetric over incidence
+ * exactly as PLoT's rule is (trap 13d: write the guard against the spec, never
+ * against the failure mode in hand).
  */
-function admittedByAllowedEdges(fromKind: string | null, toKind: string | null): boolean {
+const ENGINE_CARRIED_SHAPES: ReadonlySet<string> = new Set([
+  'decision→option',
+  'option→factor',
+]);
+
+/**
+ * An exemption may only name a shape CEE actually admits. Asserted at module load,
+ * same doctrine as the check above: exempting a shape the graph cannot hold would
+ * be dead reasoning that silently widens over time.
+ *
+ * ⚠ The OTHER direction is deliberately NOT asserted here. A new option-incident
+ * entry in `ALLOWED_EDGES` that has no carrier must make this gate FIRE, not make
+ * the service fail to boot — firing is the safe outcome and is the whole point of
+ * the module. That direction is pinned by the suite instead, which REDs with the
+ * offending shape named.
+ */
+for (const shape of ENGINE_CARRIED_SHAPES) {
+  const [fromKind, toKind] = shape.split('→');
+  if (!ALLOWED_EDGES.some((r) => r.fromKind === fromKind && r.toKind === toKind)) {
+    throw new Error(
+      `engine-discarded-link-gate: exemption '${shape}' is not an edge CEE admits`,
+    );
+  }
+}
+
+/**
+ * Does this edge's meaning survive `filterOptionNodes` by some carrier other than
+ * the edge itself? Kind pair ONLY — see the NAMED RESIDUAL on the module header
+ * for why factor categories are deliberately not read here.
+ */
+function hasEngineCarrier(fromKind: string | null, toKind: string | null): boolean {
   if (fromKind === null || toKind === null) return false;
-  return ALLOWED_EDGES.some((r) => r.fromKind === fromKind && r.toKind === toKind);
+  return ENGINE_CARRIED_SHAPES.has(`${fromKind}→${toKind}`);
 }
 
 /** Endpoints of an `add_edge` op — `value.from`/`value.to`, else the `a::b` path. */
@@ -270,7 +326,7 @@ export function findEngineDiscardedLinks(
     const fromGated = GATED_INCIDENT_KINDS.has(from.kind);
     const toGated = GATED_INCIDENT_KINDS.has(to.kind);
     if (!fromGated && !toGated) continue;
-    if (admittedByAllowedEdges(from.kind, to.kind)) continue;
+    if (hasEngineCarrier(from.kind, to.kind)) continue;
     found.push({
       fromLabel: from.label,
       toLabel: to.label,

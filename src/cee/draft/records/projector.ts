@@ -1163,7 +1163,11 @@ const LEVEL_BEARING_CLAIM_NODE_KINDS: ReadonlySet<ProjectedNode["kind"]> = new S
  *                          the option already has a factor target. Flag-gated
  *                          (`optionShortcutRepair`, default true), so the
  *                          projector stays out of it.
- *   option → constraint    `fixOptionRiskShortcut` (:1223-1390) handles it.
+ *   option → constraint    RETAINED as an unresolved hypothesis on the real edge.
+ *                          No handler rewires it; analysis readiness derives
+ *                          `needs_user_mapping` and asks the user. (The former
+ *                          `fixOptionRiskShortcut` was removed with the arbitrary
+ *                          substitution policy — do not reinstate a rewrite here.)
  *   factor → constraint    legal as `factor → risk` (rule :299) — see the
  *                          normalisation note below.
  *   constraint → goal      legal as `risk → goal` (rule :301). The v3

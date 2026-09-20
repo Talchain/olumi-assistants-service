@@ -1155,8 +1155,14 @@ function appendSemanticIssues(
       .filter((id): id is string => typeof id === 'string'),
   );
   for (const option of payload.options) {
-    if (option.status === 'ready' || coveredOptionIds.has(option.option_id)) continue;
+    if (option.status === 'ready') continue;
     const mapping = option.status === 'needs_user_mapping';
+    // A missing magnitude and an unresolved relationship are independent.
+    // The former can be waived for an already-valued option; it must not hide
+    // the latter. Deduplicate mapping only against that same obligation.
+    if (mapping
+      ? out.some((issue) => issue.option_id === option.option_id && issue.code === 'OPTION_NEEDS_MAPPING')
+      : coveredOptionIds.has(option.option_id)) continue;
     out.push({
       issue_id: `semantic_${out.length + 1}`,
       code: mapping ? 'OPTION_NEEDS_MAPPING' : 'OPTION_NEEDS_ENCODING',

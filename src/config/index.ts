@@ -633,7 +633,7 @@ const ConfigSchema = z.object({
     moeSpikeEnabled: booleanString.default(false), // MOE_SPIKE_ENABLED — shadow-mode brief quality specialist (never surfaces to users)
     orchestratorStreaming: booleanString.default(false), // ENABLE_ORCHESTRATOR_STREAMING — SSE streaming for orchestrator turns
     strictPromptValidation: booleanString.default(false), // CEE_STRICT_PROMPT_VALIDATION — throw on error-severity prompt-zone violations
-    optionShortcutRepair: booleanString.default(true), // ENABLE_OPTION_SHORTCUT_REPAIR — deterministic option→risk and option→goal shortcut handlers
+    optionShortcutRepair: booleanString.default(true), // ENABLE_OPTION_SHORTCUT_REPAIR — deterministic option→goal shortcut handler (option→risk is retained, never rewired)
     deterministicRoutingV2: booleanString.default(false), // CEE_DETERMINISTIC_ROUTING_V2 — v2 deterministic routing patterns (parameter assignment hardening, chip passthrough, system event text)
     artefactAppendixEnabled: booleanString.default(false), // CEE_ARTEFACT_APPENDIX_ENABLED — inject artefact design appendix when artefact generation is likely
     artefactRenderingEnabled: booleanString.default(false), // CEE_ARTEFACT_RENDERING_ENABLED — when false, artefact blocks are suppressed with fallback commentary
