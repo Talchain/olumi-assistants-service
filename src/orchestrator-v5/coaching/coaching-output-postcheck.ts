@@ -1082,6 +1082,68 @@ const subjectBoundDegradeText = (subject: string): string =>
   'Please ask me what you’d like to inspect or change next.';
 
 /**
+ * ⭐⭐⭐ THE ANSWER TO A QUESTION THE MODEL CANNOT ANSWER — the one violation
+ * where "ask me something else" is the wrong reply.
+ *
+ * MEASURED, staging 19 Sep, scenario `26b908ee`, 18:59:05, request `90854480`.
+ * The person clicked the product's OWN chip — **"How likely is this?"** — on
+ * the risk *Dilution and Control Risk*:
+ *
+ *     v5.post_analysis_advice_gate  matched=false  unmatched_reason=no_advice_signal
+ *     v5.coaching.output_postcheck  violation=unsupported_evidence_or_confidence_claim
+ *                                   freshness=fresh  usable_for_chips=true  blocked=false
+ *
+ * The advice gate has no class for a likelihood question, so the turn fell to
+ * the model, which invented a confidence claim, which this post-check correctly
+ * barred. Every guard worked. And the person, having pressed a button the
+ * product offered them, was told that something was unsafe and invited to ask
+ * about something else. **They never asked again.**
+ *
+ * ⚠ WHY THIS IS NOT THE SAME AS THE SWEPT COPY ABOVE. For every other
+ * always-on violation, "that response was not safe as-is" is the whole honest
+ * story: the model said something it should not have, and the person's next
+ * move is genuinely open. For THIS violation the person asked a specific,
+ * answerable-sounding question and the product declined it. Handing them a
+ * blank prompt makes the decline read as a malfunction rather than as a limit,
+ * and it wastes the one thing the turn definitely established.
+ *
+ * ⛔ WHAT THIS COPY MAY NOT DO, and each ban is a defect this estate has
+ * already paid for:
+ *
+ *   · IT MAY NOT SAY THE QUANTITY IS ABSENT. Risk nodes in the captures carry
+ *     `data: {}`, so the temptation is "there is no likelihood recorded". But
+ *     {@link ReadinessRecoveryNode} is `{ id, kind, label }` — this function
+ *     CANNOT SEE a node's data, so that sentence would be an absence claim from
+ *     an instrument that cannot observe presence (trap 13). What is genuinely
+ *     known here is the VIOLATION: the answer would have outrun the evidence.
+ *     The copy is warranted by that and by nothing else.
+ *
+ *   · IT MAY NOT PROMISE TO RECORD THE PERSON'S ESTIMATE. "Tell me and I'll
+ *     save it against the risk" is the obvious warm ending and it would be the
+ *     RESEARCH CTA REBUILT (CLAUDE.md: a visible affordance that terminates in
+ *     refusal). Whether a probability can be persisted onto a risk node is
+ *     Core's question and is not settled. So the invitation is to REASON from
+ *     their view, which this turn can genuinely do, not to store it.
+ *
+ *   · IT MAY NOT NAME AN OPTION, carry a value, unit, hash or freshness claim.
+ *     Unchanged from the swept copy — {@link resolveDegradeSubject} refuses
+ *     every `option` node and refuses on ambiguity.
+ *
+ * Both endings offer moves that WORK on the very next turn with no new
+ * capability: state a belief, or ask what the model does hold.
+ */
+const OUTRAN_THE_EVIDENCE_TAIL =
+  'Tell me what you already believe about it and we can reason from that, ' +
+  'or ask me what the model does record about it.';
+
+const evidenceClaimDegradeText = (subject: string | undefined): string =>
+  subject === undefined
+    ? 'My answer would have claimed more than the model supports, so I\u2019ve held it back. ' +
+      OUTRAN_THE_EVIDENCE_TAIL
+    : `My answer about \u201c${subject}\u201d would have claimed more than the model ` +
+      `supports, so I\u2019ve held it back. ${OUTRAN_THE_EVIDENCE_TAIL}`;
+
+/**
  * The ONE entity the question names, or `undefined`.
  *
  * ⚠ IT IS A CONTAINMENT TEST OVER LABELS THE GRAPH ALREADY CARRIES, not a
@@ -1142,6 +1204,15 @@ export function buildCoachingDegradeResponse(
     // A real answer outranks naming the subject; naming the subject outranks
     // saying nothing about it. See `subjectBoundDegradeText`.
     const subject = resolveDegradeSubject(opts.question, opts.readinessNodes);
+    // ONE violation gets its own ending, because for that one the swept copy's
+    // "ask me something else" is the wrong reply to a question the person was
+    // invited to ask. Every other violation is byte-identical.
+    if (opts.violation === 'unsupported_evidence_or_confidence_claim') {
+      return {
+        assistant_text: evidenceClaimDegradeText(subject),
+        suggested_actions: [],
+      };
+    }
     return {
       assistant_text: subject === undefined ? NEUTRAL_DEGRADE_TEXT : subjectBoundDegradeText(subject),
       suggested_actions: [],
