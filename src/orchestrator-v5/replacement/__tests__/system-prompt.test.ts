@@ -58,6 +58,24 @@ describe('the doctrine states the product this is, not the one it was', () => {
    * paragraph otherwise made of measured numbers. And it wrote the whole
    * reply in markdown, which the prompt already said not to do, loosely.
    */
+  /**
+   * Found by the third live scenario. Told "I don't buy the churn link, I
+   * think you're overcomplicating this", it replied "Which churn link
+   * specifically?" — reasonable on its face, and a complete dodge of the
+   * accusation. A reasoning partner that cannot defend its own reasoning is
+   * not one.
+   */
+  it('requires a challenge to be answered before anything is asked back', () => {
+    expect(SYSTEM_PROMPT_DOCTRINE).toContain('WHEN THEY CHALLENGE YOU, ANSWER THE CHALLENGE');
+    expect(SYSTEM_PROMPT_DOCTRINE).toContain('Only then ask anything');
+    expect(SYSTEM_PROMPT_DOCTRINE).toContain('is actually a dodge');
+  });
+
+  it('allows exactly one question per reply, and says why two lose one', () => {
+    expect(SYSTEM_PROMPT_DOCTRINE).toContain('AT MOST ONE question per reply');
+    expect(SYSTEM_PROMPT_DOCTRINE).toContain('you will not know which');
+  });
+
   it('forbids explaining an absence it cannot explain', () => {
     expect(SYSTEM_PROMPT_DOCTRINE).toContain('NEVER EXPLAIN AN ABSENCE YOU CANNOT EXPLAIN');
     expect(SYSTEM_PROMPT_DOCTRINE).toContain('Do not offer a likely reason');
