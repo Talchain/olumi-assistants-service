@@ -14,6 +14,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { EMPTY_CONVERSATION_MEMORY, liveItemsOfKind, recordItem } from '../conversation-memory.js';
 import {
   EMPTY_PROPOSAL_STORE,
+  MAX_APPLY_ATTEMPTS,
   appliedProposals,
   needsReconciliation,
   openProposals,
@@ -578,5 +579,94 @@ describe('an unknown save resolves itself on the next turn', () => {
     );
     expect(r.text).toContain('not come back confirmed');
     expect(needsReconciliation(r.proposals)).toHaveLength(1);
+  });
+});
+
+/**
+ * THE RETRY IS BOUNDED, because its safety rests on a precondition this layer
+ * cannot check.
+ *
+ * Retrying under the original idempotency key is safe only if the write path
+ * honours that key. That is a property of another module — declared as a hard
+ * precondition on `ApplyOperations` and asked for explicitly in the Core
+ * request — and asserting properties of other modules is a mistake this
+ * account has been caught making. So it gets a blast radius: a write path
+ * that silently ignores the key costs at most three attempts, not one per
+ * turn for the life of the conversation.
+ */
+describe('the retry is bounded', () => {
+  it('sends a save at most MAX_APPLY_ATTEMPTS times, however many turns pass', async () => {
+    let sends = 0;
+    const alwaysDown: ApplyOperations = async () => { sends += 1; throw new Error('down'); };
+
+    const t1 = await runReplacementTurn(baseInput({ turnId: 't1' }), {
+      chatWithTools: scripted([call('set_option_effect', {}), say('shall I?')]),
+      applyOperations: alwaysDown,
+    });
+    const id = openProposals(t1.proposals)[0]!.id;
+    let st = await runReplacementTurn(
+      baseInput({ turnId: 't2', message: 'yes go ahead', proposals: t1.proposals, memory: t1.memory }),
+      {
+        chatWithTools: scripted([
+          call(ACCEPT_TOOL_NAME, { proposal_id: id, user_agreement_quote: 'yes go ahead' }),
+          say('ok'),
+        ]),
+        applyOperations: alwaysDown,
+      },
+    );
+    // Ten further turns. Without the cap this would be twelve sends.
+    for (let n = 3; n <= 12; n += 1) {
+      st = await runReplacementTurn(
+        baseInput({ turnId: `t${n}`, message: 'q', proposals: st.proposals, memory: st.memory }),
+        { chatWithTools: scripted([say('never reached')]), applyOperations: alwaysDown },
+      );
+    }
+    expect(sends).toBe(MAX_APPLY_ATTEMPTS);
+    // Still honest about not knowing — bounded is not the same as resolved.
+    expect(st.text).toContain('not come back confirmed');
+    expect(needsReconciliation(st.proposals)).toHaveLength(1);
+  });
+
+  it('CONTRAST: a path that recovers within the cap still resolves — the cap does not break the retry', async () => {
+    let sends = 0;
+    const recovers: ApplyOperations = async () => {
+      sends += 1;
+      if (sends < MAX_APPLY_ATTEMPTS) throw new Error('down');
+      return { ok: true, receiptId: 'r-eventual' };
+    };
+    const t1 = await runReplacementTurn(baseInput({ turnId: 't1' }), {
+      chatWithTools: scripted([call('set_option_effect', {}), say('shall I?')]),
+      applyOperations: recovers,
+    });
+    const id = openProposals(t1.proposals)[0]!.id;
+    let st = await runReplacementTurn(
+      baseInput({ turnId: 't2', message: 'yes go ahead', proposals: t1.proposals, memory: t1.memory }),
+      {
+        chatWithTools: scripted([
+          call(ACCEPT_TOOL_NAME, { proposal_id: id, user_agreement_quote: 'yes go ahead' }),
+          say('ok'),
+        ]),
+        applyOperations: recovers,
+      },
+    );
+    // Attempt 1 was the accept itself and attempt 2 the first retry, both
+    // thrown; attempt 3 is the last the cap allows, and it succeeds. The
+    // boundary is deliberately exercised at exactly MAX_APPLY_ATTEMPTS — a
+    // cap that resolved comfortably inside its own limit would not prove
+    // the limit is off-by-one correct.
+    st = await runReplacementTurn(
+      baseInput({ turnId: 't3', message: 'q', proposals: st.proposals, memory: st.memory }),
+      { chatWithTools: scripted([say('never reached')]), applyOperations: recovers },
+    );
+    expect(st.text).toContain('not come back confirmed');
+
+    st = await runReplacementTurn(
+      baseInput({ turnId: 't4', message: 'q', proposals: st.proposals, memory: st.memory }),
+      { chatWithTools: scripted([say('recovered')]), applyOperations: recovers },
+    );
+    expect(sends).toBe(MAX_APPLY_ATTEMPTS);
+    expect(st.text).toBe('recovered');
+    expect(needsReconciliation(st.proposals)).toHaveLength(0);
+    expect(st.applied).toHaveLength(1);
   });
 });
