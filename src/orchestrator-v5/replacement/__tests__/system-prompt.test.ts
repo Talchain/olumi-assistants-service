@@ -52,6 +52,23 @@ describe('the doctrine states the product this is, not the one it was', () => {
     expect(SYSTEM_PROMPT_DOCTRINE).toContain('A close result is a finding, not a failure');
   });
 
+  /**
+   * Both found by a live run, not by review. Shown an analysis covering two
+   * of three options, the assistant guessed why the third was missing — in a
+   * paragraph otherwise made of measured numbers. And it wrote the whole
+   * reply in markdown, which the prompt already said not to do, loosely.
+   */
+  it('forbids explaining an absence it cannot explain', () => {
+    expect(SYSTEM_PROMPT_DOCTRINE).toContain('NEVER EXPLAIN AN ABSENCE YOU CANNOT EXPLAIN');
+    expect(SYSTEM_PROMPT_DOCTRINE).toContain('Do not offer a likely reason');
+    expect(SYSTEM_PROMPT_DOCTRINE).toContain('reads as another measured number');
+  });
+
+  it('bans markdown explicitly, not just headings', () => {
+    expect(SYSTEM_PROMPT_DOCTRINE).toContain('no markdown, no asterisks for emphasis');
+    expect(SYSTEM_PROMPT_DOCTRINE).toContain('no bold');
+  });
+
   it('bans internal vocabulary on screen — "the held change has lapsed"', () => {
     expect(SYSTEM_PROMPT_DOCTRINE).toContain('no identifiers, no status names, no field names');
     expect(SYSTEM_PROMPT_DOCTRINE).toContain('no talk of things lapsing or being held');

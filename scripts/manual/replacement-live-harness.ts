@@ -64,6 +64,52 @@ const GRAPH = {
   ],
 } as never;
 
+/**
+ * SCENARIO 2 — the science the product computed and showed nobody.
+ *
+ * The live sessions produced eight ranked "if this link is wrong, X wins at
+ * p=0.52" statements, full outcome distributions and a downside per option,
+ * and put NONE of it in front of the user. These three turns ask for exactly
+ * those three things. Shape is the real contract; every digit is invented.
+ */
+const ANALYSIS = {
+  enrichment: {
+    confidence_tier: 'fair',
+    option_comparison: [
+      {
+        option_id: 'opt-raise-new', option_label: 'Raise prices for new customers only',
+        status: 'computed', win_probability: 0.63,
+        outcome: { mean: 0.42, std: 0.21, p10: 0.11, p50: 0.4, p90: 0.74, n_samples: 4000, percentiles_source: 'samples' },
+        downside: { p05: -0.03, cvar_10: -0.07, expected_regret: 0.05 },
+      },
+      {
+        option_id: 'opt-hold', option_label: 'Hold current pricing',
+        status: 'computed', win_probability: 0.37,
+        outcome: { mean: 0.29, std: 0.18, p10: 0.04, p50: 0.27, p90: 0.58, n_samples: 4000, percentiles_source: 'samples' },
+        downside: { p05: -0.12, cvar_10: -0.19, expected_regret: 0.18 },
+      },
+    ],
+    robustness: {
+      near_tie: { is_tie: false, top_option_id: 'opt-raise-new', second_option_id: 'opt-hold', tied_option_ids: [], gap: 0.26, threshold: 0.1 },
+      fragile_edges: [
+        { edge_id: 'fac-churn->out-rev', from_id: 'fac-churn', to_id: 'out-rev', from_label: 'Monthly churn rate', to_label: 'Annual recurring revenue', switch_probability: 0.21, alternative_winner_id: 'opt-hold', alternative_winner_label: 'Hold current pricing' },
+        { edge_id: 'fac-arpu->out-rev', from_id: 'fac-arpu', to_id: 'out-rev', from_label: 'Average revenue per user', to_label: 'Annual recurring revenue', switch_probability: 0.58, marginal_switch_probability: 0.16, alternative_winner_id: 'opt-hold', alternative_winner_label: 'Hold current pricing' },
+      ],
+      robust_edges: [],
+    },
+    decision_evpi: 0.034,
+  },
+  freshness: 'fresh',
+  freshnessReason: 'graph_hash_match',
+  computedAt: '2026-09-20T09:00:00.000Z',
+} as never;
+
+const RESULTS_TURNS = [
+  'So which option should we go with?',
+  'How confident should I be in that?',
+  "What's the worst case if we get it wrong?",
+];
+
 const applied: unknown[] = [];
 const TURNS = [
   // 1. An OBSERVATION. The measured failure: 9 of 26 turns treated this as an
@@ -78,12 +124,16 @@ const TURNS = [
 ];
 
 async function main(): Promise<void> {
+  const resultsMode = process.env.SCENARIO === 'results';
+  const script = resultsMode ? RESULTS_TURNS : TURNS;
+  const getAnalysis = (): never | null => (resultsMode ? ANALYSIS : null);
+
   let memory = EMPTY_CONVERSATION_MEMORY;
   let proposals = EMPTY_PROPOSAL_STORE;
   const history: Parameters<typeof runReplacementTurn>[0]['history'] = [];
 
-  for (let i = 0; i < TURNS.length; i += 1) {
-    const message = TURNS[i]!.replace(/&apos;/g, "'");
+  for (let i = 0; i < script.length; i += 1) {
+    const message = script[i]!.replace(/&apos;/g, "'");
     const r = await runReplacementTurn(
       {
         message,
@@ -94,7 +144,7 @@ async function main(): Promise<void> {
         workspaceSummary: summariseWorkspace(GRAPH),
         tools: [
           createReadWorkspaceTool({ getGraph: () => GRAPH, requestId: 'live' }),
-          createReadResultsTool({ getAnalysis: () => null }),
+          createReadResultsTool({ getAnalysis }),
           createSetOptionEffectTool({ getGraph: () => GRAPH }),
         ],
         turnId: `turn-${i + 1}`,

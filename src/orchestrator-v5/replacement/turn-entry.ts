@@ -52,6 +52,7 @@ import {
   type ConversationMemory,
 } from './conversation-memory.js';
 import { EMPTY_PROPOSAL_STORE, type ProposalStore } from './proposal-store.js';
+import { createRunAnalysisTool } from './run-analysis-tool.js';
 import { createSetOptionEffectTool } from './propose-tools.js';
 import { scrubKnownIdentifiers } from './scrub-identifiers.js';
 import { createReadResultsTool, createReadWorkspaceTool, type AnalysisSnapshot } from './read-tools.js';
@@ -198,6 +199,12 @@ export async function handleReplacementTurn(
     createReadWorkspaceTool({ getGraph: input.getGraph, requestId: input.requestId }),
     createReadResultsTool({ getAnalysis: input.getAnalysis }),
     createSetOptionEffectTool({ getGraph: input.getGraph }),
+    // Also unconditional. A user must always be able to ask for the analysis,
+    // and the tool itself decides whether running one is warranted — it
+    // refuses when the model is not ready (returning the checker's own open
+    // questions) and when a current result already exists (pointing at
+    // read_results instead of spending again).
+    createRunAnalysisTool({ getGraph: input.getGraph, getAnalysis: input.getAnalysis }),
     ...(deps.proposeTools ?? []),
   ];
 
