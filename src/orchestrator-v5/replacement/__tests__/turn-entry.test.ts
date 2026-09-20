@@ -162,6 +162,12 @@ describe('the read tools are always present', () => {
     // can forget to pass it.
     expect(seen[0]).toContain('set_option_effect');
     expect(seen[0]).toContain('run_analysis');
+    // Also not optional. A model that can read the workspace but cannot add
+    // the node the user just named has to refuse the most ordinary request
+    // there is.
+    expect(seen[0]).toContain('add_factor');
+    expect(seen[0]).toContain('add_option');
+    expect(seen[0]).toContain('add_link');
   });
 
   it('carries prior state into the prompt so the conversation does not restart each turn', async () => {

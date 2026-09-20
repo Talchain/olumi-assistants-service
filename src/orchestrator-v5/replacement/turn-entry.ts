@@ -54,6 +54,11 @@ import {
 import { EMPTY_PROPOSAL_STORE, type ProposalStore } from './proposal-store.js';
 import { createRunAnalysisTool } from './run-analysis-tool.js';
 import { createSetOptionEffectTool } from './propose-tools.js';
+import {
+  createAddEdgeTool,
+  createAddFactorTool,
+  createAddOptionTool,
+} from './structure-tools.js';
 import { scrubKnownIdentifiers } from './scrub-identifiers.js';
 import { createReadResultsTool, createReadWorkspaceTool, type AnalysisSnapshot } from './read-tools.js';
 import {
@@ -205,6 +210,14 @@ export async function handleReplacementTurn(
     // questions) and when a current result already exists (pointing at
     // read_results instead of spending again).
     createRunAnalysisTool({ getGraph: input.getGraph, getAnalysis: input.getAnalysis }),
+    // The structure tools, also unconditional. A model that can read the
+    // workspace and set an effect but cannot add the node the user just named
+    // has to answer "I can't do that" to the most ordinary request there is —
+    // the same shape of dead end `set_option_effect` was built to close. All
+    // three propose only; none can write.
+    createAddFactorTool({ getGraph: input.getGraph }),
+    createAddOptionTool({ getGraph: input.getGraph }),
+    createAddEdgeTool({ getGraph: input.getGraph }),
     ...(deps.proposeTools ?? []),
   ];
 
