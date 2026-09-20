@@ -241,6 +241,12 @@ export async function handleReplacementTurn(
     },
     {
       chatWithTools: deps.chatWithTools,
+      // The durability barrier. Called before any write leaves, so the
+      // idempotency key is on disk before the work is sent. Without it no
+      // write is sent at all — see `ReplacementTurnDeps.checkpoint`.
+      checkpoint: async ({ memory, proposals }) => {
+        await deps.state.save(input.scenarioId, { version: 1, memory, proposals });
+      },
       ...(deps.applyOperations === undefined ? {} : { applyOperations: deps.applyOperations }),
       ...(deps.maxIterations === undefined ? {} : { maxIterations: deps.maxIterations }),
     },

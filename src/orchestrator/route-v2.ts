@@ -2928,7 +2928,22 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             history: [],
             getGraph: () => extensions.graphState,
             getAnalysis: () => null,
-            modelRevision: computeRequestHash(ingress),
+            // ⛔ WAS `computeRequestHash(ingress)`, WHICH WAS A REAL BUG.
+            // That hash is MESSAGE-DEPENDENT, so every turn produced a
+            // different "model revision" and `markStaleForRevision` staled
+            // every open proposal on the very next turn. The core journey is
+            // "offer a change, the user agrees ON A LATER TURN" — this made
+            // that impossible by construction, and no offline test caught it
+            // because they all pass a fixed revision.
+            //
+            // Caught in review (Codex, 20 Sep). The revision must describe
+            // the GRAPH, which is the thing a proposal is actually bound to.
+            // Same canonical hash the egress stamps as `graph_hash` and the
+            // freshness envelope uses, so the two cannot disagree.
+            modelRevision:
+              computeAnalysisAffectingGraphHash(
+                extensions.graphState as Parameters<typeof computeAnalysisAffectingGraphHash>[0],
+              ) ?? 'graph-unhashable',
             turnId: requestId,
             requestId,
             now: new Date().toISOString(),

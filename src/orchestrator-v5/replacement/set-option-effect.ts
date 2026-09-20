@@ -169,10 +169,34 @@ export function setOptionEffect(input: SetOptionEffectInput): SetOptionEffectRes
   // No range, no referent. Refusing here is what stops the model converting a
   // pair of real numbers into a normalised one it chose — which reads as
   // helpfulness and is a fabricated input to the comparison.
-  const factorRange = (factor as { range?: { range_min?: unknown; range_max?: unknown } }).range;
-  const hasRange =
-    typeof factorRange?.range_min === 'number' && typeof factorRange?.range_max === 'number';
-  if (!hasRange) {
+  //
+  // ⛔ THIS READ WAS WRONG WHEN FIRST WRITTEN, AND WRONG IN THE WORST WAY: it
+  // looked for `range.range_min`, a combination declared in NO schema in this
+  // repo. `PriorSchema` is `{distribution, range_min, range_max}`
+  // (schemas graph.d.ts:260-263) and the separate `range` field is
+  // `{min, max}` (:275-278). So the guard added to stop the model inventing a
+  // number instead refused EVERY REAL FACTOR — a worse defect than the one it
+  // fixed, and invisible here because every fixture in this suite was written
+  // to match the code rather than the contract.
+  //
+  // Found by the lane building `add_factor`, which measured all three cases
+  // discriminating and wrote the finding into a docblock rather than working
+  // around it. Reading that docblock instead of overruling it is the only
+  // reason this was caught.
+  //
+  // Both DECLARED spellings are now accepted, because both are real and
+  // different producers write different ones.
+  const asRecord = factor as {
+    prior?: { range_min?: unknown; range_max?: unknown };
+    range?: { min?: unknown; max?: unknown };
+  };
+  const bounds =
+    typeof asRecord.prior?.range_min === 'number' && typeof asRecord.prior?.range_max === 'number'
+      ? { lo: asRecord.prior.range_min, hi: asRecord.prior.range_max }
+      : typeof asRecord.range?.min === 'number' && typeof asRecord.range?.max === 'number'
+        ? { lo: asRecord.range.min, hi: asRecord.range.max }
+        : null;
+  if (bounds === null) {
     return {
       ok: false,
       refusal: {

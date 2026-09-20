@@ -123,6 +123,30 @@ export interface ApplyOperations {
 
 export interface ReplacementTurnDeps {
   readonly chatWithTools: ChatWithToolsLike;
+  /**
+   * Persist the state RIGHT NOW, before a write is sent.
+   *
+   * ⛔ WITHOUT THIS THE RETRY IS NOT DURABLE, and the whole idempotency
+   * argument collapses. The key and the attempt count are recorded in memory
+   * by `beginApply`, and the turn's state is only saved when the turn ends —
+   * so a crash between sending the write and finishing the turn loses both.
+   * The next turn then loads a proposal that never went in flight, mints a
+   * FRESH key, and sends the work again. One uncertain write becomes two,
+   * which is the exact harm the key exists to prevent.
+   *
+   * Caught in review (Codex, 20 Sep): "the key and attempt count are saved
+   * only after the external write; a crash can lose both and restart the cap
+   * with a new key." Correct, and not visible to any offline test, because
+   * the fake store cannot crash between two statements.
+   *
+   * If this is absent, or if it THROWS, no write is sent at all. Refusing to
+   * write is always recoverable; writing something we might not remember
+   * having written is not.
+   */
+  readonly checkpoint?: (state: {
+    readonly memory: ConversationMemory;
+    readonly proposals: ProposalStore;
+  }) => Promise<void>;
   /** Absent means read-only: no `accept_proposal` tool is offered at all, and
    *  the prompt says so rather than letting the model discover it. */
   readonly applyOperations?: ApplyOperations;
@@ -219,6 +243,16 @@ export async function runReplacementTurn(
       if (isRetryExhausted(p)) continue;
       proposals = recordApplyAttempt(proposals, p.id);
       const summary = p.operations.map((o) => o.summary).join('; ');
+      // The incremented attempt count must reach disk before the retry goes
+      // out, for the same reason the key must: otherwise a crash resets the
+      // cap and the bound is not a bound.
+      if (deps.checkpoint === undefined) break;
+      try {
+        await deps.checkpoint({ memory, proposals });
+      } catch {
+        break;
+      }
+
       try {
         const outcome = await deps.applyOperations({
           proposalId: p.id,
@@ -299,6 +333,19 @@ export async function runReplacementTurn(
             },
           },
           execute: async (raw) => {
+            // Checked FIRST, before a single state change. Without somewhere
+            // durable to record that a save has started, nothing may be
+            // authorised, put in flight, or sent — leaving a proposal marked
+            // in-flight for a write that was never sent is its own small lie.
+            if (deps.checkpoint === undefined) {
+              return {
+                type: 'refused',
+                content:
+                  'I cannot save that safely right now — there is no way to record that I have started, ' +
+                  'so a failure could lose track of whether it went through. Nothing has changed. ' +
+                  'Tell the user you cannot save at the moment.',
+              };
+            }
             const proposalId = typeof raw.proposal_id === 'string' ? raw.proposal_id : '';
             const quote = typeof raw.user_agreement_quote === 'string' ? raw.user_agreement_quote : '';
 
@@ -342,6 +389,19 @@ export async function runReplacementTurn(
               apply_started_at: input.now,
               current_model_revision: input.modelRevision,
             });
+
+            // Durability barrier. The key is in `proposals` now; it must be
+            // on disk BEFORE the write leaves, or a crash loses it.
+            try {
+              await deps.checkpoint({ memory, proposals });
+            } catch {
+              return {
+                type: 'refused',
+                content:
+                  'I could not record that I was about to save, so I have not sent it. Nothing has ' +
+                  'changed. Tell the user the save did not go through and they can try again.',
+              };
+            }
 
             let outcome: Awaited<ReturnType<ApplyOperations>>;
             try {

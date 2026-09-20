@@ -28,6 +28,7 @@ import {
   ACCEPT_TOOL_NAME,
   runReplacementTurn,
   type ApplyOperations,
+  type ReplacementTurnDeps,
   type ReplacementTurnInput,
 } from '../run-replacement-turn.js';
 
@@ -53,6 +54,10 @@ const call = (name: string, input: Record<string, unknown>): Reply => ({
 });
 
 /** The change the model offers: one option's effect on one factor. */
+/** Tests get a working checkpoint; production gets one from the store. A
+ *  write is REFUSED without one, which is pinned separately below. */
+const ck = async (): Promise<void> => undefined;
+
 const OFFERED_OPS = [
   { op: 'update_node', path: '/nodes/opt-parity/data/interventions/f-churn', value: 0.4 },
 ];
@@ -125,7 +130,7 @@ describe('the connected journey', () => {
           call('set_option_effect', {}),
           say('If full parity cut churn by 0.4 of its range, that is a big claim — shall I put it in?'),
         ]),
-        applyOperations: write,
+        checkpoint: ck, applyOperations: write,
       },
     );
     expect(seen).toHaveLength(0);
@@ -151,7 +156,7 @@ describe('the connected journey', () => {
           call(ACCEPT_TOOL_NAME, { proposal_id: proposalId, user_agreement_quote: 'Yes, go ahead' }),
           say("Done — that's saved."),
         ]),
-        applyOperations: write,
+        checkpoint: ck, applyOperations: write,
       },
     );
 
@@ -183,7 +188,7 @@ describe('the connected journey', () => {
         turnId: 'turn-4', message: 'What did we change?', memory: after.memory,
         proposals: after.proposals, modelRevision: 'rev-2',
       }),
-      { chatWithTools: t4model, applyOperations: write },
+      { chatWithTools: t4model, checkpoint: ck, applyOperations: write },
     );
     const prompt = t4model.calls[0]!.system;
     expect(prompt).toContain('THE USER AUTHORISED AND THIS WAS SAVED');
@@ -196,7 +201,7 @@ describe('consent is checked against the actual user turn', () => {
   async function acceptWith(quote: string, message: string, write = okWrite()) {
     const t1 = await runReplacementTurn(baseInput({ turnId: 't1' }), {
       chatWithTools: scripted([call('set_option_effect', {}), say('shall I?')]),
-      applyOperations: write,
+      checkpoint: ck, applyOperations: write,
     });
     const id = openProposals(t1.proposals)[0]!.id;
     const model = scripted([
@@ -205,7 +210,7 @@ describe('consent is checked against the actual user turn', () => {
     ]);
     const t2 = await runReplacementTurn(
       baseInput({ turnId: 't2', message, proposals: t1.proposals, memory: t1.memory }),
-      { chatWithTools: model, applyOperations: write },
+      { chatWithTools: model, checkpoint: ck, applyOperations: write },
     );
     return { t2, model, id };
   }
@@ -238,7 +243,7 @@ describe('the accept tool refuses what it cannot honour, and says what to do ins
   it('names what IS waiting when the id is wrong', async () => {
     const t1 = await runReplacementTurn(baseInput({ turnId: 't1' }), {
       chatWithTools: scripted([call('set_option_effect', {}), say('shall I?')]),
-      applyOperations: okWrite(),
+      checkpoint: ck, applyOperations: okWrite(),
     });
     const model = scripted([
       call(ACCEPT_TOOL_NAME, { proposal_id: 'made-up', user_agreement_quote: 'yes' }),
@@ -246,7 +251,7 @@ describe('the accept tool refuses what it cannot honour, and says what to do ins
     ]);
     await runReplacementTurn(
       baseInput({ turnId: 't2', message: 'yes', proposals: t1.proposals, memory: t1.memory }),
-      { chatWithTools: model, applyOperations: okWrite() },
+      { chatWithTools: model, checkpoint: ck, applyOperations: okWrite() },
     );
     const fed = JSON.stringify(model.calls[1]!.messages);
     expect(fed).toContain('No change with that id is waiting');
@@ -263,7 +268,7 @@ describe('the accept tool refuses what it cannot honour, and says what to do ins
   it('does not present an offer the model has moved past as still live', async () => {
     const t1 = await runReplacementTurn(baseInput({ turnId: 't1' }), {
       chatWithTools: scripted([call('set_option_effect', {}), say('shall I?')]),
-      applyOperations: okWrite(),
+      checkpoint: ck, applyOperations: okWrite(),
     });
     const live = scripted([say('x')]);
     await runReplacementTurn(
@@ -271,7 +276,7 @@ describe('the accept tool refuses what it cannot honour, and says what to do ins
         turnId: 't2', message: 'and what about margin?', proposals: t1.proposals,
         memory: t1.memory, modelRevision: 'rev-MOVED',
       }),
-      { chatWithTools: live, applyOperations: okWrite() },
+      { chatWithTools: live, checkpoint: ck, applyOperations: okWrite() },
     );
     const prompt = live.calls[0]!.system;
     expect(prompt).not.toContain('WAITING ON THEM');
@@ -292,7 +297,7 @@ describe('the accept tool refuses what it cannot honour, and says what to do ins
         turnId: 't2b', message: 'and what about margin?', proposals: t1.proposals,
         memory: t1.memory,
       }),
-      { chatWithTools: same, applyOperations: okWrite() },
+      { chatWithTools: same, checkpoint: ck, applyOperations: okWrite() },
     );
     expect(same.calls[0]!.system).toContain('WAITING ON THEM');
   });
@@ -308,7 +313,7 @@ describe('the accept tool refuses what it cannot honour, and says what to do ins
     const write = vi.fn(okWrite());
     const t1 = await runReplacementTurn(baseInput({ turnId: 't1' }), {
       chatWithTools: scripted([call('set_option_effect', {}), say('shall I?')]),
-      applyOperations: write,
+      checkpoint: ck, applyOperations: write,
     });
     const id = openProposals(t1.proposals)[0]!.id;
     const gone = withdrawProposal(t1.proposals, id);
@@ -318,7 +323,7 @@ describe('the accept tool refuses what it cannot honour, and says what to do ins
     ]);
     const t2 = await runReplacementTurn(
       baseInput({ turnId: 't2', message: 'yes go ahead', proposals: gone, memory: t1.memory }),
-      { chatWithTools: model, applyOperations: write },
+      { chatWithTools: model, checkpoint: ck, applyOperations: write },
     );
     expect(t2.applied).toHaveLength(0);
     expect(write).not.toHaveBeenCalled();
@@ -331,7 +336,7 @@ describe('the accept tool refuses what it cannot honour, and says what to do ins
     const write = vi.fn(okWrite());
     const t1 = await runReplacementTurn(baseInput({ turnId: 't1' }), {
       chatWithTools: scripted([call('set_option_effect', {}), say('shall I?')]),
-      applyOperations: write,
+      checkpoint: ck, applyOperations: write,
     });
     const id = openProposals(t1.proposals)[0]!.id;
     const t2 = await runReplacementTurn(
@@ -344,7 +349,7 @@ describe('the accept tool refuses what it cannot honour, and says what to do ins
           call(ACCEPT_TOOL_NAME, { proposal_id: id, user_agreement_quote: 'yes go ahead' }),
           say('ok'),
         ]),
-        applyOperations: write,
+        checkpoint: ck, applyOperations: write,
       },
     );
     expect(t2.applied).toHaveLength(0);
@@ -356,7 +361,7 @@ describe('the three save outcomes stay apart', () => {
   async function saveWith(write: ApplyOperations) {
     const t1 = await runReplacementTurn(baseInput({ turnId: 't1' }), {
       chatWithTools: scripted([call('set_option_effect', {}), say('shall I?')]),
-      applyOperations: write,
+      checkpoint: ck, applyOperations: write,
     });
     const id = openProposals(t1.proposals)[0]!.id;
     const model = scripted([
@@ -365,7 +370,7 @@ describe('the three save outcomes stay apart', () => {
     ]);
     const t2 = await runReplacementTurn(
       baseInput({ turnId: 't2', message: 'yes go ahead', proposals: t1.proposals, memory: t1.memory }),
-      { chatWithTools: model, applyOperations: write },
+      { chatWithTools: model, checkpoint: ck, applyOperations: write },
     );
     return { t2, model };
   }
@@ -401,7 +406,7 @@ describe('the three save outcomes stay apart', () => {
       baseInput({
         turnId: 't3', message: 'so did that work?', proposals: t2.proposals, memory: t2.memory,
       }),
-      { chatWithTools: next, applyOperations: stillDown as unknown as ApplyOperations },
+      { chatWithTools: next, checkpoint: ck, applyOperations: stillDown as unknown as ApplyOperations },
     );
     expect(next.calls).toHaveLength(0);
     expect(t3.mustReconcile).toHaveLength(1);
@@ -439,7 +444,7 @@ describe('one save per agreement', () => {
     const write = vi.fn(okWrite());
     const t1 = await runReplacementTurn(baseInput({ turnId: 't1' }), {
       chatWithTools: scripted([call('set_option_effect', {}), say('shall I?')]),
-      applyOperations: write,
+      checkpoint: ck, applyOperations: write,
     });
     const id = openProposals(t1.proposals)[0]!.id;
     const twice: Reply = {
@@ -451,7 +456,7 @@ describe('one save per agreement', () => {
     };
     const t2 = await runReplacementTurn(
       baseInput({ turnId: 't2', message: 'yes', proposals: t1.proposals, memory: t1.memory }),
-      { chatWithTools: scripted([twice, say('done')]), applyOperations: write },
+      { chatWithTools: scripted([twice, say('done')]), checkpoint: ck, applyOperations: write },
     );
     expect(write).toHaveBeenCalledTimes(1);
     expect(t2.applied).toHaveLength(1);
@@ -478,7 +483,7 @@ describe('an unknown save resolves itself on the next turn', () => {
     const boom: ApplyOperations = async () => { throw new Error('socket hang up'); };
     const t1 = await runReplacementTurn(baseInput({ turnId: 't1' }), {
       chatWithTools: scripted([call('set_option_effect', {}), say('shall I?')]),
-      applyOperations: boom,
+      checkpoint: ck, applyOperations: boom,
     });
     const id = openProposals(t1.proposals)[0]!.id;
     const t2 = await runReplacementTurn(
@@ -488,7 +493,7 @@ describe('an unknown save resolves itself on the next turn', () => {
           call(ACCEPT_TOOL_NAME, { proposal_id: id, user_agreement_quote: 'yes go ahead' }),
           say('ok'),
         ]),
-        applyOperations: boom,
+        checkpoint: ck, applyOperations: boom,
       },
     );
     expect(needsReconciliation(t2.proposals)).toHaveLength(1);
@@ -502,7 +507,7 @@ describe('an unknown save resolves itself on the next turn', () => {
     const healthy: ApplyOperations = async (a) => { seen.push(a.idempotencyKey); return { ok: true, receiptId: 'r-late' }; };
     await runReplacementTurn(
       baseInput({ turnId: 't3', message: 'an ordinary question', proposals: before.proposals, memory: before.memory }),
-      { chatWithTools: scripted([say('a normal answer')]), applyOperations: healthy },
+      { chatWithTools: scripted([say('a normal answer')]), checkpoint: ck, applyOperations: healthy },
     );
     expect(seen).toEqual([keyAtRest]);
   });
@@ -512,7 +517,7 @@ describe('an unknown save resolves itself on the next turn', () => {
     const model = scripted([say('a normal answer')]);
     const r = await runReplacementTurn(
       baseInput({ turnId: 't3', message: 'an ordinary question', proposals: before.proposals, memory: before.memory }),
-      { chatWithTools: model, applyOperations: okWrite('r-late') },
+      { chatWithTools: model, checkpoint: ck, applyOperations: okWrite('r-late') },
     );
     expect(r.text).toBe('a normal answer');
     expect(r.text).not.toContain('not come back confirmed');
@@ -524,7 +529,7 @@ describe('an unknown save resolves itself on the next turn', () => {
     const before = await stuck();
     const r = await runReplacementTurn(
       baseInput({ turnId: 't3', message: 'q', proposals: before.proposals, memory: before.memory }),
-      { chatWithTools: scripted([say('x')]), applyOperations: okWrite('r-late') },
+      { chatWithTools: scripted([say('x')]), checkpoint: ck, applyOperations: okWrite('r-late') },
     );
     expect(r.applied).toEqual([{ proposalId: before.id, receiptId: 'r-late' }]);
     const change = liveItemsOfKind(r.memory, 'authorised_change');
@@ -538,7 +543,7 @@ describe('an unknown save resolves itself on the next turn', () => {
       baseInput({ turnId: 't3', message: 'q', proposals: before.proposals, memory: before.memory }),
       {
         chatWithTools: scripted([say('a normal answer')]),
-        applyOperations: async () => ({ ok: false, reason: 'the graph moved under us' }),
+        checkpoint: ck, applyOperations: async () => ({ ok: false, reason: 'the graph moved under us' }),
       },
     );
     expect(needsReconciliation(r.proposals)).toHaveLength(0);
@@ -557,14 +562,14 @@ describe('an unknown save resolves itself on the next turn', () => {
     };
     const t3 = await runReplacementTurn(
       baseInput({ turnId: 't3', message: 'q', proposals: before.proposals, memory: before.memory }),
-      { chatWithTools: scripted([say('never reached')]), applyOperations: flaky },
+      { chatWithTools: scripted([say('never reached')]), checkpoint: ck, applyOperations: flaky },
     );
     expect(t3.text).toContain('not come back confirmed');
     expect(needsReconciliation(t3.proposals)).toHaveLength(1);
 
     const t4 = await runReplacementTurn(
       baseInput({ turnId: 't4', message: 'q again', proposals: t3.proposals, memory: t3.memory }),
-      { chatWithTools: scripted([say('recovered')]), applyOperations: flaky },
+      { chatWithTools: scripted([say('recovered')]), checkpoint: ck, applyOperations: flaky },
     );
     expect(t4.text).toBe('recovered');
     expect(needsReconciliation(t4.proposals)).toHaveLength(0);
@@ -601,7 +606,7 @@ describe('the retry is bounded', () => {
 
     const t1 = await runReplacementTurn(baseInput({ turnId: 't1' }), {
       chatWithTools: scripted([call('set_option_effect', {}), say('shall I?')]),
-      applyOperations: alwaysDown,
+      checkpoint: ck, applyOperations: alwaysDown,
     });
     const id = openProposals(t1.proposals)[0]!.id;
     let st = await runReplacementTurn(
@@ -611,14 +616,14 @@ describe('the retry is bounded', () => {
           call(ACCEPT_TOOL_NAME, { proposal_id: id, user_agreement_quote: 'yes go ahead' }),
           say('ok'),
         ]),
-        applyOperations: alwaysDown,
+        checkpoint: ck, applyOperations: alwaysDown,
       },
     );
     // Ten further turns. Without the cap this would be twelve sends.
     for (let n = 3; n <= 12; n += 1) {
       st = await runReplacementTurn(
         baseInput({ turnId: `t${n}`, message: 'q', proposals: st.proposals, memory: st.memory }),
-        { chatWithTools: scripted([say('never reached')]), applyOperations: alwaysDown },
+        { chatWithTools: scripted([say('never reached')]), checkpoint: ck, applyOperations: alwaysDown },
       );
     }
     expect(sends).toBe(MAX_APPLY_ATTEMPTS);
@@ -636,7 +641,7 @@ describe('the retry is bounded', () => {
     };
     const t1 = await runReplacementTurn(baseInput({ turnId: 't1' }), {
       chatWithTools: scripted([call('set_option_effect', {}), say('shall I?')]),
-      applyOperations: recovers,
+      checkpoint: ck, applyOperations: recovers,
     });
     const id = openProposals(t1.proposals)[0]!.id;
     let st = await runReplacementTurn(
@@ -646,7 +651,7 @@ describe('the retry is bounded', () => {
           call(ACCEPT_TOOL_NAME, { proposal_id: id, user_agreement_quote: 'yes go ahead' }),
           say('ok'),
         ]),
-        applyOperations: recovers,
+        checkpoint: ck, applyOperations: recovers,
       },
     );
     // Attempt 1 was the accept itself and attempt 2 the first retry, both
@@ -656,17 +661,100 @@ describe('the retry is bounded', () => {
     // the limit is off-by-one correct.
     st = await runReplacementTurn(
       baseInput({ turnId: 't3', message: 'q', proposals: st.proposals, memory: st.memory }),
-      { chatWithTools: scripted([say('never reached')]), applyOperations: recovers },
+      { chatWithTools: scripted([say('never reached')]), checkpoint: ck, applyOperations: recovers },
     );
     expect(st.text).toContain('not come back confirmed');
 
     st = await runReplacementTurn(
       baseInput({ turnId: 't4', message: 'q', proposals: st.proposals, memory: st.memory }),
-      { chatWithTools: scripted([say('recovered')]), applyOperations: recovers },
+      { chatWithTools: scripted([say('recovered')]), checkpoint: ck, applyOperations: recovers },
     );
     expect(sends).toBe(MAX_APPLY_ATTEMPTS);
     expect(st.text).toBe('recovered');
     expect(needsReconciliation(st.proposals)).toHaveLength(0);
     expect(st.applied).toHaveLength(1);
+  });
+});
+
+/**
+ * THE DURABILITY BARRIER — caught in review (Codex, 20 Sep), and invisible to
+ * every offline test before it, because a fake store cannot crash between
+ * two statements.
+ *
+ * `beginApply` records the idempotency key in memory; the turn's state is
+ * saved when the turn ENDS. So a crash between sending the write and
+ * finishing the turn loses the key, the next turn mints a fresh one, and the
+ * work is sent twice — the exact harm the key exists to prevent.
+ *
+ * The key must therefore be on disk BEFORE the write leaves, and if it
+ * cannot be, no write is sent. Refusing to write is recoverable; writing
+ * something we might not remember writing is not.
+ */
+describe('nothing is written until the intention to write is durable', () => {
+  async function acceptWithCheckpoint(
+    checkpoint: ReplacementTurnDeps['checkpoint'],
+    write: ApplyOperations,
+  ) {
+    const t1 = await runReplacementTurn(baseInput({ turnId: 't1' }), {
+      chatWithTools: scripted([call('set_option_effect', {}), say('shall I?')]),
+      checkpoint: ck, applyOperations: write,
+    });
+    const id = openProposals(t1.proposals)[0]!.id;
+    const model = scripted([
+      call(ACCEPT_TOOL_NAME, { proposal_id: id, user_agreement_quote: 'yes go ahead' }),
+      say('ok'),
+    ]);
+    const t2 = await runReplacementTurn(
+      baseInput({ turnId: 't2', message: 'yes go ahead', proposals: t1.proposals, memory: t1.memory }),
+      { chatWithTools: model, ...(checkpoint === undefined ? {} : { checkpoint }), applyOperations: write },
+    );
+    return { t2, model };
+  }
+
+  it('sends NO write when there is no way to record having started, and changes NOTHING', async () => {
+    const write = vi.fn(okWrite());
+    const { t2, model } = await acceptWithCheckpoint(undefined, write);
+    expect(write).not.toHaveBeenCalled();
+    expect(t2.applied).toHaveLength(0);
+    // Checked before any state change, so the proposal is not left marked
+    // in-flight for a write that never went — that would be its own lie.
+    expect(needsReconciliation(t2.proposals)).toHaveLength(0);
+    expect(openProposals(t2.proposals)).toHaveLength(1);
+    expect(JSON.stringify(model.calls[1]!.messages)).toContain('cannot save that safely');
+  });
+
+  it('sends NO write when the checkpoint fails, and says nothing changed', async () => {
+    const write = vi.fn(okWrite());
+    const { t2, model } = await acceptWithCheckpoint(async () => { throw new Error('disk gone'); }, write);
+    expect(write).not.toHaveBeenCalled();
+    expect(t2.applied).toHaveLength(0);
+    const fed = JSON.stringify(model.calls[1]!.messages);
+    expect(fed).toContain('could not record that I was about to save');
+    expect(fed).toContain('Nothing has changed');
+  });
+
+  it('checkpoints BEFORE the write, with the key already recorded', async () => {
+    const order: string[] = [];
+    let keyAtCheckpoint: string | undefined;
+    const checkpoint: ReplacementTurnDeps['checkpoint'] = async ({ proposals }) => {
+      order.push('checkpoint');
+      keyAtCheckpoint = needsReconciliation(proposals)[0]?.idempotency_key;
+    };
+    const write: ApplyOperations = async (a) => {
+      order.push('write');
+      // The key the write carries must be the one already persisted.
+      expect(keyAtCheckpoint).toBe(a.idempotencyKey);
+      return { ok: true, receiptId: 'r1' };
+    };
+    const { t2 } = await acceptWithCheckpoint(checkpoint, write);
+    expect(order).toEqual(['checkpoint', 'write']);
+    expect(keyAtCheckpoint).toBeTruthy();
+    expect(t2.applied).toHaveLength(1);
+  });
+
+  it('CONTRAST: with a working checkpoint the save proceeds exactly as before', async () => {
+    const { t2 } = await acceptWithCheckpoint(ck, okWrite('r-ok'));
+    expect(t2.applied).toHaveLength(1);
+    expect(t2.applied[0]?.receiptId).toBe('r-ok');
   });
 });
