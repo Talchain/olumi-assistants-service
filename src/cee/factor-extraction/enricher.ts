@@ -1780,7 +1780,14 @@ function deriveGoalTargetCandidateFromLabel(
       brief_span: candidate.brief_span,
       unit: candidate.unit,
     },
-    `Goal target candidate derived from the goal label (${candidate.binding}); nothing written`,
+    // ⚠ "from the goal label" was true of every arm until the unlabelled-goal
+    // arm existed, and is false of it — that arm fires precisely BECAUSE the
+    // label named nothing. A log line that misreports which route produced a
+    // record is how the next reader draws the wrong conclusion from a real
+    // event, so the sentence now names the route rather than assuming it.
+    candidate.binding === "unlabelled_goal"
+      ? `Goal target candidate: the label names no figure and the brief states one, so the person will be asked (${candidate.binding}); nothing written`
+      : `Goal target candidate derived from the goal label (${candidate.binding}); nothing written`,
   );
   return candidate;
 }
