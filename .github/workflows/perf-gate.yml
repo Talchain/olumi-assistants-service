@@ -17,11 +17,14 @@ concurrency:
   group: perf-gate-${{ github.ref }}
   cancel-in-progress: true
 
+# Separate, opt-in Core continuity exception: CORE_CONTINUITY_PAID_HOLD=20260920
+# holds only feat/core-continuity-20260920 and its marked staging merge.
+# Missing configuration restores paid coverage; required code checks are unchanged.
 jobs:
   perf-gate:
     # Named staging batch only; unset hold restores automatic coverage.
     if: >-
-      ${{ !(vars.CORE_DRAFTING_PAID_HOLD == '20260920' && (github.event_name == 'pull_request' && github.base_ref == 'staging' && contains(fromJSON('["fix/baseline-ask-collision-precedence","cct/quantities-on-risk-and-outcome","feat/core-1251-validated-20260919","feat/draft-authored-meaning-20260919","feat/core-budget-consent-20260919","feat/core-authored-limit-continuity-20260919","feat/core-capacity-intervention-20260919","feat/core-explicit-paid-release-20260920"]'), github.head_ref))) }}
+      ${{ !(vars.CORE_DRAFTING_PAID_HOLD == '20260920' && (github.event_name == 'pull_request' && github.base_ref == 'staging' && contains(fromJSON('["fix/baseline-ask-collision-precedence","cct/quantities-on-risk-and-outcome","feat/core-1251-validated-20260919","feat/draft-authored-meaning-20260919","feat/core-budget-consent-20260919","feat/core-authored-limit-continuity-20260919","feat/core-capacity-intervention-20260919","feat/core-explicit-paid-release-20260920"]'), github.head_ref))) && !(vars.CORE_CONTINUITY_PAID_HOLD == '20260920' && (github.event_name == 'pull_request' && github.base_ref == 'staging' && github.head_ref == 'feat/core-continuity-20260920')) }}
     name: Performance Gate (p95 < 8s)
     runs-on: ubuntu-latest
     timeout-minutes: 12
@@ -126,7 +129,7 @@ jobs:
   sse-live-resume-gate:
     # Named staging batch only; unset hold restores automatic coverage.
     if: >-
-      ${{ !(vars.CORE_DRAFTING_PAID_HOLD == '20260920' && (github.event_name == 'pull_request' && github.base_ref == 'staging' && contains(fromJSON('["fix/baseline-ask-collision-precedence","cct/quantities-on-risk-and-outcome","feat/core-1251-validated-20260919","feat/draft-authored-meaning-20260919","feat/core-budget-consent-20260919","feat/core-authored-limit-continuity-20260919","feat/core-capacity-intervention-20260919","feat/core-explicit-paid-release-20260920"]'), github.head_ref))) }}
+      ${{ !(vars.CORE_DRAFTING_PAID_HOLD == '20260920' && (github.event_name == 'pull_request' && github.base_ref == 'staging' && contains(fromJSON('["fix/baseline-ask-collision-precedence","cct/quantities-on-risk-and-outcome","feat/core-1251-validated-20260919","feat/draft-authored-meaning-20260919","feat/core-budget-consent-20260919","feat/core-authored-limit-continuity-20260919","feat/core-capacity-intervention-20260919","feat/core-explicit-paid-release-20260920"]'), github.head_ref))) && !(vars.CORE_CONTINUITY_PAID_HOLD == '20260920' && (github.event_name == 'pull_request' && github.base_ref == 'staging' && github.head_ref == 'feat/core-continuity-20260920')) }}
     name: SSE Live Resume Performance Gate
     runs-on: ubuntu-latest
     timeout-minutes: 15

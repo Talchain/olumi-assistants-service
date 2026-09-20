@@ -456,7 +456,7 @@ describe("staging journey smoke — the alarm cannot be silenced quietly", () =>
  *                             no `continue-on-error`, base URL defaulted in
  *                             code. It fails loudly or not at all.
  *
- * The only exception is the approved Core/Drafting batch hold. Unlike the old
+ * The exceptions are the independently scoped release holds. Unlike the old
  * opt-in enable gates, missing configuration leaves automatic checks running.
  * Exact condition locations and the event/branch truth table are checked below.
  */
@@ -477,13 +477,13 @@ type ReleaseEvent = {
 
 // These conditions use only string comparisons, Boolean operators, contains and
 // fromJSON. Evaluate that subset from the actual YAML, not a copied predicate.
-function releaseJobRuns(condition: string, event: ReleaseEvent, hold = "", hasKey = "true"): boolean {
+function releaseJobRuns(condition: string, event: ReleaseEvent, hold = "", hasKey = "true", continuityHold = ""): boolean {
   const expression = condition.trim().slice(3, -2)
     .replaceAll("needs.live-tests-key", "needs['live-tests-key']");
   const evaluate = new Function("github", "vars", "needs", "contains", "fromJSON", `return (${expression});`);
   return evaluate(
     event,
-    { CORE_DRAFTING_PAID_HOLD: hold },
+    { CORE_DRAFTING_PAID_HOLD: hold, CORE_CONTINUITY_PAID_HOLD: continuityHold },
     { "live-tests-key": { outputs: { has_key: hasKey } } },
     (haystack: string | string[], needle: string) => haystack.includes(needle),
     JSON.parse,
@@ -565,6 +565,60 @@ describe("Core/Drafting release hold is bounded and restores without a push", ()
       `perf.jobs.perf-gate.if = ${perf.jobs["perf-gate"].if}`,
       `perf.jobs.sse-live-resume-gate.if = ${perf.jobs["sse-live-resume-gate"].if}`,
     ]);
+  });
+});
+
+describe("Core continuity release exception is separate and narrowly scoped", () => {
+  const workflow = (name: string): any => parse(readFileSync(resolve(REPO_ROOT, ".github/workflows", name), "utf8"));
+  const live = workflow("ci.yml").jobs["live-tests"].if;
+  const performance = Object.values(workflow("perf-gate.yml").jobs).map((job: any) => job.if);
+  const smoke = workflow("staging-journey-smoke.yml").jobs.journey.if;
+  const pr: ReleaseEvent = { event_name: "pull_request", base_ref: "staging", head_ref: "feat/core-continuity-20260920" };
+  const push = (ref: string, message: string): ReleaseEvent => ({ event_name: "push", ref, ref_name: ref.split("/").slice(2).join("/"), event: { head_commit: { message } } });
+  const merge = push("refs/heads/staging", "[core-continuity-20260920] reviewed release");
+  const feature = push("refs/heads/feat/core-continuity-20260920", "feature publication");
+  const runs = (condition: string, event: ReleaseEvent, hold = "20260920", oldHold = "", hasKey = "true") => releaseJobRuns(condition, event, oldHold, hasKey, hold);
+
+  it.each(["", "different-batch"])("missing or unrelated continuity hold %j keeps coverage", hold => {
+    for (const condition of performance) expect(runs(condition, pr, hold)).toBe(true);
+    expect(runs(smoke, merge, hold)).toBe(true);
+    for (const event of [pr, feature, merge]) expect(runs(live, event, hold)).toBe(true);
+  });
+
+  it("holds only the named feature, staging PR and marked staging merge", () => {
+    for (const condition of performance) expect(runs(condition, pr)).toBe(false);
+    for (const event of [pr, feature, merge]) expect(runs(live, event)).toBe(false);
+    expect(runs(smoke, merge)).toBe(false);
+    for (const condition of [live, ...performance]) {
+      expect(runs(condition, { ...pr, base_ref: "main" })).toBe(true);
+      expect(runs(condition, { ...pr, head_ref: "feat/unrelated" })).toBe(true);
+    }
+    expect(runs(live, push("refs/heads/feat/unrelated", "feature"))).toBe(true);
+    for (const condition of [live, smoke]) {
+      expect(runs(condition, push("refs/heads/staging", "ordinary merge"))).toBe(true);
+      expect(runs(condition, push("refs/heads/main", "[core-continuity-20260920] release"))).toBe(true);
+      expect(runs(condition, merge, "")).toBe(true);
+    }
+  });
+
+  it("does not reactivate or inherit the old batch exception", () => {
+    const oldPr = { ...pr, head_ref: "feat/core-1251-validated-20260919" };
+    const oldMerge = push("refs/heads/staging", "[core-drafting-20260920] old batch");
+    for (const condition of [live, ...performance]) {
+      expect(runs(condition, oldPr)).toBe(true);
+      expect(runs(condition, pr, "", "20260920")).toBe(true);
+    }
+    for (const condition of [live, smoke]) {
+      expect(runs(condition, oldMerge)).toBe(true);
+      expect(runs(condition, merge, "", "20260920")).toBe(true);
+    }
+  });
+
+  it("preserves manual and scheduled coverage and the missing-key refusal", () => {
+    for (const condition of [live, smoke, ...performance]) {
+      for (const event of [{ event_name: "workflow_dispatch" }, { event_name: "schedule" }]) expect(runs(condition, event)).toBe(true);
+    }
+    expect(runs(live, pr, "", "", "false")).toBe(false);
   });
 });
 

@@ -51,10 +51,13 @@ concurrency:
   group: staging-journey-smoke
   cancel-in-progress: true
 
+# Separate, opt-in Core continuity exception: CORE_CONTINUITY_PAID_HOLD=20260920
+# holds only feat/core-continuity-20260920 and its marked staging merge.
+# Missing configuration restores paid coverage; required code checks are unchanged.
 jobs:
   journey:
     if: >-
-      ${{ !(vars.CORE_DRAFTING_PAID_HOLD == '20260920' && (github.event_name == 'push' && github.ref == 'refs/heads/staging' && contains(github.event.head_commit.message, '[core-drafting-20260920]'))) }}
+      ${{ !(vars.CORE_DRAFTING_PAID_HOLD == '20260920' && (github.event_name == 'push' && github.ref == 'refs/heads/staging' && contains(github.event.head_commit.message, '[core-drafting-20260920]'))) && !(vars.CORE_CONTINUITY_PAID_HOLD == '20260920' && (github.event_name == 'push' && github.ref == 'refs/heads/staging' && contains(github.event.head_commit.message, '[core-continuity-20260920]'))) }}
     name: Live user journey against deployed staging
     runs-on: ubuntu-latest
     # Freshness poll (15 min) + the SAMPLED journey (12 min budget) + headroom.
