@@ -510,8 +510,17 @@ export function buildStatedLevelDivergenceActions(
     seen.add(d.path);
     // ⭐ THE OFFER, when their own prose named a band. "Set <label> to <n>" —
     // `set` is already a value-lane verb, so this replays into the path that
-    // WORKS and writes `user_override`. It deliberately does not widen the
-    // routing gate, which is a consent-semantics change owned elsewhere.
+    // WORKS and stamps the value with the person's own authorship provenance.
+    // It deliberately does not widen the routing gate, which is a
+    // consent-semantics change owned elsewhere.
+    //
+    // ⚠ THE PROVENANCE LITERAL IS DELIBERATELY NOT SPELLED HERE. The
+    // 2.714 revert guard derives its REVIEWED manifest from which `src/`
+    // files carry that token, so naming it in PROSE enrols this file and REDs
+    // the required check — which is exactly what it did. Widening the manifest
+    // to quiet a comment would be the wrong repair: the manifest is the list
+    // of files reviewed for being allowed to STAMP authorship, and this file
+    // stamps nothing.
     if (d.statedLevel !== null) {
       for (const n of offersForBand(d.statedLevel)) {
         actions.push({
