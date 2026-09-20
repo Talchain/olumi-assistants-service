@@ -12613,6 +12613,33 @@ export async function runTurnExecutor(
           // rest of this executor reads the brief from; absent ⇒ the quote
           // stands down, never a fabricated attribution.
           context.scenarioBriefText,
+          // ⭐ THE RUN'S OWN SENSITIVITY EVIDENCE, so a REPLACED answer still
+          // answers the question that was asked.
+          //
+          // Measured on two real sessions (`olumi-debug-73d5c152-20260919`,
+          // `olumi-debug-6edb1cdb-20260917`): a `what_would_flip` turn whose
+          // verdict withheld served ONLY the opening plus the constraint
+          // disclosure — the user asked what could change the outcome and was
+          // told about an unrelated limit. Both carry
+          // `claim_safety.withheld_projection_reason = "leader_claim_replaced"`.
+          //
+          // SCOPED TO `what_would_flip` ON PURPOSE. This body answers "what
+          // could change the outcome"; on `explain_results` or
+          // `explain_from_structure` that is a different question, and copy
+          // that answers a question the user did not ask is the defect one
+          // door along. Those handlers keep today's behaviour exactly.
+          //
+          // The two reads are the SAME ones the permitted deterministic voice
+          // uses on this turn — `analysisProjection` and the
+          // `filterFlipSummaryEntries`-filtered summary, so an option-pinned
+          // lever is never named as a thing to test. Undefined on any other
+          // handler ⇒ no body ⇒ byte-identical to today.
+          proposedHandlerId === 'what_would_flip'
+            ? {
+                projection: analysisProjection,
+                flipSummary: routedFlipSummaryFiltered,
+              }
+            : null,
         );
         // ROADMAP 1.233 — record the outcome WHETHER OR NOT it changed the
         // text. `null` (the initial value) means the gate never ran; a
