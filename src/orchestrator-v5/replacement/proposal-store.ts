@@ -89,7 +89,9 @@ export interface Proposal {
   readonly stale_reason?: 'model_revision_moved';
   readonly stale_from_status?: ProposalStatus;  /** Set when the write path affirmatively reported the save did not land.
    *  Distinct from an unknown outcome, which stays in flight. */
-  readonly last_apply_failure?: { readonly reason: string; readonly failed_at: string };
+  readonly last_apply_failure?: { readonly reason: string; readonly failed_at: string };  /** How many times a save has been SENT for this proposal, including the
+   *  first. Bounds the retry loop — see {@link MAX_APPLY_ATTEMPTS}. */
+  readonly apply_attempts?: number;
 }
 
 export interface ProposalStore {
@@ -323,6 +325,39 @@ export function describeForUser(p: Proposal): string {
     case 'withdrawn':
       return 'set aside';
   }
+}
+
+/**
+ * How many times a save may be sent for one proposal before this layer stops
+ * retrying and leaves the question open for the user.
+ *
+ * WHY A CAP EXISTS. Retrying an unknown save under its original idempotency
+ * key is safe ONLY IF the write path honours that key. This layer cannot
+ * enforce that — it is a property of another module, declared as a hard
+ * precondition on `ApplyOperations`. A precondition you depend on and cannot
+ * check deserves a blast radius.
+ *
+ * With the cap, a write path that silently ignores the key costs at most
+ * three attempts instead of one per turn for the life of the conversation.
+ * Without it, the retry that fixed a bricked conversation would be strictly
+ * WORSE than the bricking wherever that precondition failed.
+ *
+ * Three rather than one: a transient fault genuinely does clear on a second
+ * or third attempt, and resolving those without troubling the user is the
+ * whole point of retrying.
+ */
+export const MAX_APPLY_ATTEMPTS = 3;
+
+/** Count a save being sent. Called before each attempt, including the first. */
+export function recordApplyAttempt(store: ProposalStore, id: string): ProposalStore {
+  const p = find(store, id);
+  return replace(store, { ...p, apply_attempts: (p.apply_attempts ?? 0) + 1 });
+}
+
+/** True when this proposal has exhausted its attempts and must not be sent
+ *  again without a human deciding. */
+export function isRetryExhausted(p: Proposal): boolean {
+  return (p.apply_attempts ?? 0) >= MAX_APPLY_ATTEMPTS;
 }
 
 /**

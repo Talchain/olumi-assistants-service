@@ -64,11 +64,13 @@ import { recordItem, type ConversationMemory } from './conversation-memory.js';
 import {
   authoriseProposal,
   beginApply,
+  isRetryExhausted,
   markStaleForRevision,
   needsReconciliation,
   openProposals,
   operationsToApply,
   recordApplied,
+  recordApplyAttempt,
   recordApplyFailed,
   type ProposalOperation,
   type ProposalStore,
@@ -81,11 +83,35 @@ import type { ToolResponseBlock } from '../../adapters/llm/types.js';
  * Core's authoritative write. Three outcomes, kept apart on purpose.
  *
  * A thrown error means UNKNOWN and is handled as such — the proposal stays in
- * flight and the next turn reconciles before claiming anything.
+ * flight and the next turn retries under the same key.
+ *
+ * ⛔⛔ THE ONE REQUIREMENT THIS LAYER CANNOT ENFORCE, AND DEPENDS ON ABSOLUTELY
+ * ─────────────────────────────────────────────────────────────────────────
+ * **THE IMPLEMENTATION MUST BE IDEMPOTENT UNDER `idempotencyKey`.** Two calls
+ * carrying the same key must perform the work AT MOST ONCE, and the second
+ * must return the SAME receipt as the first rather than applying again.
+ *
+ * This is not a nicety. When a save's outcome is unknown, every later turn
+ * retries under the key recorded before the original write. If the key is
+ * ignored, that turns ONE uncertain write into a REPEATED one — strictly
+ * worse than the defect the retry was added to fix, and silent.
+ *
+ * ⚠ It is also a claim about somebody else's module, made before that module
+ * exists, which is a mistake this account has made before and been caught
+ * making. So it is stated here as a hard precondition rather than assumed,
+ * and it is stated again in
+ * `output/session-analysis-20260920/CORE-PERSISTENCE-REQUEST.md`.
+ *
+ * IF YOUR WRITE PATH CANNOT HONOUR THE KEY, DO NOT PASS `applyOperations`.
+ * With it absent this layer proposes but never saves, says so in the prompt,
+ * and keeps an unknown save honestly unresolved rather than retrying into a
+ * duplicate. A degraded product beats a product that silently writes twice.
  */
 export interface ApplyOperations {
   (input: {
     readonly proposalId: string;
+    /** MUST make the call idempotent — see the contract above. Retried
+     *  verbatim on every turn until the outcome is known. */
     readonly idempotencyKey: string;
     readonly operations: readonly ProposalOperation[];
     readonly modelRevision: string;
@@ -187,6 +213,11 @@ export async function runReplacementTurn(
   if (outstanding.length > 0 && deps.applyOperations !== undefined) {
     for (const p of outstanding) {
       if (p.idempotency_key === undefined) continue;
+      // Bounded. The retry is safe only if the write path honours the key,
+      // which this layer cannot check — so a precondition it depends on and
+      // cannot verify gets a blast radius rather than a free loop.
+      if (isRetryExhausted(p)) continue;
+      proposals = recordApplyAttempt(proposals, p.id);
       const summary = p.operations.map((o) => o.summary).join('; ');
       try {
         const outcome = await deps.applyOperations({
@@ -305,6 +336,7 @@ export async function runReplacementTurn(
             // Bound to what was OFFERED. Not re-derived from the conversation.
             const bound = operationsToApply(proposals, proposalId);
             const idempotencyKey = input.idFor('idempotency', applied.length);
+            proposals = recordApplyAttempt(proposals, proposalId);
             proposals = beginApply(proposals, proposalId, {
               idempotency_key: idempotencyKey,
               apply_started_at: input.now,
