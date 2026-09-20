@@ -184,13 +184,21 @@ export interface ReplacementTurnContextView {
 function analysisFactsFrom(context: EnrichedTurnContext): {
   readonly facts: readonly HandlerFact[];
   readonly readOk: boolean;
+  /**
+   * Does `facts` cover the scenario's WHOLE analysis history?
+   *
+   * `false` for a `capped` carrier, which by its own definition carries the
+   * newest rows and discloses that older ones exist behind them. Only a
+   * complete history can support "this model has never been analysed".
+   */
+  readonly complete: boolean;
 } {
   const set = context.scenario_analysis_fact_set;
   if (!isReconciledScenarioAnalysisFactSet(set, context.session_id)) {
     // Not attested: either omitted, or an object that did not come from the
     // authority boundary. Fail weak — we did not look through a reader we
     // trust, so we do not report on what exists.
-    return { facts: [], readOk: false };
+    return { facts: [], readOk: false, complete: false };
   }
   // ⭐ THE ALLOW-LIST GATE, NOT `!== 'degraded'`. This file had the deny-list
   // form, and `reconcile-scenario-analysis-facts.ts` names that exact mistake
@@ -204,8 +212,10 @@ function analysisFactsFrom(context: EnrichedTurnContext): {
   // 'complete' and 'capped' both carry the NEWEST facts; `capped` additionally
   // discloses that older history exists behind them, which does not affect
   // "what is the latest analysis".
-  if (!isScenarioAnalysisReasoningAuthority(set)) return { facts: [], readOk: false };
-  return { facts: set.facts, readOk: true };
+  if (!isScenarioAnalysisReasoningAuthority(set)) {
+    return { facts: [], readOk: false, complete: false };
+  }
+  return { facts: set.facts, readOk: true, complete: set.status === 'complete' };
 }
 
 /**
@@ -224,6 +234,26 @@ function unreadableFreshness(currentGraphHash: string | null): FreshnessDerivati
     graph_hash_at_run: null,
     current_graph_hash: currentGraphHash,
     computed_at: null,
+  };
+}
+
+/**
+ * The snapshot that says "nothing successful in what I can read, and there is
+ * more I cannot". Distinct from `null` (nothing, anywhere, and we saw it all)
+ * and from `recordReadOk: false` (we could not look at all).
+ *
+ * `recordReadOk` stays TRUE: the read succeeded. What is incomplete is the
+ * HISTORY, not the read, and collapsing the two would re-flatten a distinction
+ * this module exists to keep.
+ */
+function historyIncompleteSnapshot(): AnalysisSnapshot {
+  return {
+    enrichment: null,
+    freshness: null,
+    freshnessReason: 'history_incomplete',
+    computedAt: null,
+    recordReadOk: true,
+    historyComplete: false,
   };
 }
 
@@ -285,7 +315,7 @@ export function projectTurnContext(
     };
   }
 
-  const { facts, readOk } = analysisFactsFrom(context);
+  const { facts, readOk, complete } = analysisFactsFrom(context);
   const freshness = deriveAnalysisFreshness(facts, currentGraphHash, extractGraphOptionIds(graph), {
     priorFactsReadOk: readOk,
   });
@@ -296,9 +326,23 @@ export function projectTurnContext(
 
   const selected = selectRunAnalysisFact(facts);
   if (selected === null) {
-    // STATE 1. We looked, through a reader we trust, at the whole scenario.
-    // "Nothing has been computed" is now a claim we can actually support.
-    return { snapshot: null, freshness, history: historyFrom(context) };
+    // ⛔ TWO DIFFERENT ANSWERS, AND ONLY ONE OF THEM IS "NEVER".
+    //
+    // A COMPLETE carrier with no successful run supports the categorical
+    // claim: we looked at the whole scenario and there is nothing. A CAPPED
+    // carrier does not — it holds the newest rows and announces that older
+    // ones exist behind them, so recent failures can hide an older success
+    // past the cap. Reporting that as "never computed" is a claim about the
+    // whole scenario drawn from a window that says it is partial.
+    //
+    // Found by the independent reviewer. It is the same categorical-absence
+    // defect as the fifth state, escaping through completeness rather than
+    // through readability.
+    return {
+      snapshot: complete ? null : historyIncompleteSnapshot(),
+      freshness,
+      history: historyFrom(context),
+    };
   }
 
   const rawEnrichment = (selected.fact.result as { enrichment?: unknown }).enrichment;

@@ -98,12 +98,26 @@ export function reconciliationNotice(pending: readonly Proposal[]): string {
   // Caught by reading the text back against the code after the cap landed,
   // which is the check that should follow every behaviour change to a
   // module that talks to the user.
+  // ⚠ AND THE EXHAUSTED ENDING HAS BEEN WRONG TWICE, IN OPPOSITE DIRECTIONS.
+  //
+  // First it promised "Let me confirm what actually happened first" after the
+  // cap had stopped it checking. That was corrected to an invitation — "tell
+  // me and I will take your word for it and carry on" — which was ALSO a
+  // promise the controller could not keep: the turn short-circuited before the
+  // agent loop, so the user's answer was never read, and every later reply got
+  // the same notice. Returned as a P1 by the independent reviewer.
+  //
+  // An exhausted proposal now moves to the terminal `unresolved` status, so
+  // this notice is spoken ONCE and the conversation carries on. It therefore
+  // names what is true and what would settle it, and asks for nothing it
+  // cannot act on.
   const exhausted = pending.every((p) => isRetryExhausted(p));
   return exhausted
     ? opening +
-        `I have tried to confirm ${one ? 'it' : 'them'} several times and cannot get an answer, so I have ` +
-        `stopped trying rather than risk saving ${one ? 'it' : 'them'} twice. Please check whether the change ` +
-        `is there, and tell me — I will take your word for it and carry on from whichever it is.`
+        `I tried several times to confirm ${one ? 'it' : 'them'} and could not get an answer, so I have ` +
+        `stopped rather than risk saving ${one ? 'it' : 'them'} twice. I do not know whether ${one ? 'it' : 'they'} ` +
+        `landed, and I will not guess. Check the model to see whether the change is there — and we can carry ` +
+        `on either way; I simply cannot record this one as saved or not saved.`
     : opening + `I am checking what actually happened, and will tell you as soon as I know.`;
 }
 

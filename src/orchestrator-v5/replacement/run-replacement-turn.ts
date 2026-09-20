@@ -72,6 +72,7 @@ import {
   recordApplied,
   recordApplyAttempt,
   recordApplyFailed,
+  recordUnresolved,
   type ProposalOperation,
   type ProposalStore,
 } from './proposal-store.js';
@@ -288,6 +289,23 @@ export async function runReplacementTurn(
         // reconciliation failure must not also destroy this turn.
       }
     }
+    // ⛔ ABANDON WHAT WE HAVE STOPPED CHECKING, so the turn is not owned by it
+    // forever.
+    //
+    // `isRetryExhausted` stops the retry but left the proposal
+    // `apply_in_flight`, so `needsReconciliation` kept returning it and the
+    // short-circuit below owned EVERY later turn — same notice, no model call,
+    // no way out. The notice even invited the user to answer, and nothing ever
+    // read the answer. The mechanism built to stop the product lying ended up
+    // bricking the conversation instead. Returned as a P1 by the independent
+    // reviewer, and correct.
+    //
+    // Moving to the terminal `unresolved` claims nothing about whether the
+    // write landed — which remains genuinely unknown — while letting the
+    // conversation continue.
+    for (const p of needsReconciliation(proposals)) {
+      if (isRetryExhausted(p)) proposals = recordUnresolved(proposals, p.id, { at: input.now });
+    }
     outstanding = needsReconciliation(proposals);
   }
 
@@ -308,8 +326,9 @@ export async function runReplacementTurn(
     return { ...composed, toolsCalled: [], iterations: 0, applied };
   }
 
-  // Writes this turn AUTHORISED and sent, as distinct from `applied`, which
-  // also carries prior turns' reconciled writes. See the refusal below.
+  // Write attempts this turn has COMMITTED TO DISPATCHING, as distinct from
+  // `applied`, which counts successful returns and also carries prior turns'
+  // reconciled writes. Reserved before the write leaves — see the refusal.
   let acceptedThisTurn = 0;
   const acceptTool: AgentTool | null =
     deps.applyOperations === undefined
@@ -384,7 +403,7 @@ export async function runReplacementTurn(
             // identical four-turn runs at temperature 0 diverged materially on
             // this branch, so anything that must hold EVERY time cannot be a
             // sentence the model is asked to respect.
-            // ⚠ SCOPED TO WRITES THIS TURN AUTHORISED, not to `applied.length`.
+            // ⚠ SCOPED TO WRITE ATTEMPTS THIS TURN DISPATCHED, not to `applied.length`.
             // The reconciliation block above ALSO pushes to `applied` when it
             // resolves a PRIOR turn's in-flight proposal — under that prior
             // turn's idempotency key, i.e. a different `(scenario_id, turn_id)`.
@@ -447,6 +466,27 @@ export async function runReplacementTurn(
               current_model_revision: input.modelRevision,
             });
 
+            // ⛔ THE TURN'S ONE WRITE ATTEMPT IS RESERVED HERE — BEFORE DISPATCH,
+            // NOT AFTER A SUCCESSFUL RETURN.
+            //
+            // A receipt count is not an attempt guard, and this is the second
+            // time that distinction has been got wrong on this branch. The
+            // first version counted `applied.length`, which increments only on
+            // success; so if accept A sent its write and THREW, the catch below
+            // returned a refused tool result with the count still zero, the
+            // agent loop carried on through the remaining tool calls, and an
+            // already-offered B could be accepted too — both minting the same
+            // key index. An exactly-once writer would then hand A's receipt
+            // back for B's different operations and this controller would
+            // record B as applied. That is the "Updated Monthly Churn Rate" lie
+            // with a receipt attached.
+            //
+            // Reserving at the point of COMMITMENT closes it for all three
+            // outcomes — ok, affirmative failure, and unknown — because the
+            // question the guard must answer is "has this turn already
+            // dispatched a write?", not "has one already succeeded?".
+            acceptedThisTurn += 1;
+
             // Durability barrier. The key is in `proposals` now; it must be
             // on disk BEFORE the write leaves, or a crash loses it.
             try {
@@ -496,9 +536,6 @@ export async function runReplacementTurn(
               applied_at: input.now,
             });
             applied.push({ proposalId, receiptId: outcome.receiptId });
-            // Counts ONLY writes this turn authorised and sent, which is the
-            // population the one-write-per-turn constraint is about.
-            acceptedThisTurn += 1;
             if (outcome.newModelRevision !== undefined) newModelRevision = outcome.newModelRevision;
 
             // The ONLY place an `authorised_change` is ever written, and it

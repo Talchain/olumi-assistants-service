@@ -2947,20 +2947,39 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       // surface blanks. Answering a question well and wiping their results
       // while doing it is not a trade worth making.
       //
-      // Carrying the payload through instead would be the better fix and is
-      // the THIRD increment's work: `extensions.analysisState` is an
-      // `AnalysisStateIngress`, NOT an `AnalysisReadyPayload`, and there are
-      // two different objects in this estate called "readiness" — the compact
-      // one type-checks where the full one is meant and is empty at runtime.
-      // Guessing between them on a user-visible surface is how a symptom gets
-      // shipped, so the branch declines instead and says why.
+      // ⭐⭐ RESOLVED — THE DECLINE IS NOW CONDITIONAL ON THE ONLY THING IT WAS
+      // EVER ABOUT: whether this exit can carry the readiness payload.
       //
-      // Cost of declining: an analyse-stage turn gets the retired coaching
-      // path. Removing this condition is a one-line change once the payload
-      // is carried through properly.
+      // The paragraph above said carrying it through "would be the better fix
+      // and is the THIRD increment's work", because `extensions.analysisState`
+      // is an `AnalysisStateIngress`, NOT an `AnalysisReadyPayload`, and the
+      // two objects called "readiness" in this estate type-check for each
+      // other while one is empty at runtime. That hazard is real and is NOT
+      // taken on here: the payload comes from
+      // `buildCanonicalAnalysisReadyFromGraph`, the estate's single spelling
+      // of the FULL payload, derived from the graph — `analysisState` is never
+      // consulted, so there is nothing to guess between.
+      //
+      // Re-derived at the DEPLOYED UI `fd992149`, not inherited: the clearing
+      // branch is `} else if (responseIsAnalyseShaped(response)) {`
+      // (applyV5State.ts:2020), and an `else if` is reached ONLY when the
+      // response carried no `analysis_ready` key at all. Carry the key and the
+      // slice is never cleared. So the decline's premise was correct and is
+      // now answerable rather than permanent.
+      //
+      // ⚠ CONDITIONAL, NOT REMOVED, AND THAT IS THE WHOLE CARE. The builder
+      // returns `undefined` for a graph it cannot assess. Shipping an
+      // analyse-stage turn WITHOUT the payload is exactly the measured defect
+      // — the user's readiness and results surface blanks — so that case still
+      // declines and still gets the retired path. The condition admits
+      // precisely the turns this exit can serve without wiping anything.
       const isAnalyseStage = ingress.stage === 'analyse';
+      const analysisReadyForExit =
+        extensions.graphState != null
+          ? buildCanonicalAnalysisReadyFromGraph(extensions.graphState)
+          : undefined;
 
-      if (hasModel && !isAnalyseStage) {
+      if (hasModel && (!isAnalyseStage || analysisReadyForExit !== undefined)) {
         // Fail loud, not half-working. Without a durable store a user's
         // agreement can land on an instance that never saw the offer.
         const replacementStore = getReplacementStateStore();
@@ -3149,9 +3168,11 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           // and left `enforceLeadingOptionClaimsAtWire`'s option-roster
           // FALLBACK with nothing to fall back to — the stand-down the roster
           // fix exists to prevent.
-          ...(extensions.graphState != null
-            ? { analysisReady: buildCanonicalAnalysisReadyFromGraph(extensions.graphState) }
-            : {}),
+          // Computed ONCE, above, because the decline condition reads it too:
+          // building it twice would be two answers to "can this turn carry
+          // readiness?", and the branch would then admit a turn the exit
+          // cannot actually serve.
+          ...(analysisReadyForExit !== undefined ? { analysisReady: analysisReadyForExit } : {}),
           // ⭐ A REAL ANSWER, DECLARED AS ONE.
           //
           // Omitted, it defaulted to substantive-by-absence and tripped the

@@ -27,6 +27,7 @@ import {
   createReadResultsTool,
   READ_RESULTS_NO_ANALYSIS,
   READ_RESULTS_NO_FIGURES_ON_RECORD,
+  READ_RESULTS_NONE_IN_READABLE_HISTORY,
   READ_RESULTS_RECORD_UNREADABLE,
 } from '../read-tools.js';
 import type { EnrichedTurnContext } from '../../build-turn-context.js';
@@ -494,5 +495,82 @@ describe('⛔ THE FIFTH STATE — a run on record that carries no readable figur
       READ_RESULTS_NO_FIGURES_ON_RECORD,
     ];
     expect(new Set(all).size).toBe(3);
+  });
+});
+
+describe('⛔ THE SIXTH STATE — nothing successful in a record that says it is incomplete', () => {
+  /**
+   * Found by the independent reviewer, and it is the categorical-absence claim
+   * escaping through COMPLETENESS rather than through readability.
+   *
+   * A `capped` carrier holds the newest `SCENARIO_ANALYSIS_FACT_CAP` rows and
+   * is, in its own words, "the disclosure that older history exists behind
+   * them … never a claim of completeness". So a run of recent FAILURES can
+   * push an older successful run past the cap. The selector then finds no
+   * eligible success in the prefix, and the projection returned `null` — which
+   * `read_results` reports as "not withheld, simply never computed".
+   *
+   * ⚠ ADDED AFTER A SURVIVING MUTANT. Replacing `complete ? null :
+   * historyIncompleteSnapshot()` with a bare `null` left every test green, so
+   * the fix was unpinned. A fix without a biting test is a fix nobody can keep.
+   */
+  function cappedCarrierOfFailures() {
+    // 21 rows is the LOOKAHEAD the contract demands when total_count exceeds
+    // the cap; `total_count` above the cap is what makes the status `capped`.
+    const facts = Array.from({ length: 21 }, () =>
+      runAnalysisFact({ enrichment: { analysis_status: 'failed' } }),
+    );
+    return reconcileScenarioAnalysisFacts({
+      scenarioId: SCENARIO,
+      hotWindowFacts: [],
+      hotWindowFactsWithIdentity: [],
+      durableRead: {
+        status: 'ok',
+        scenario_id: SCENARIO,
+        query_limit: 21,
+        total_count: 40,
+        facts: facts.map((fact, index) => ({
+          fact,
+          fact_row_id: `analysis-fact-${index}`,
+          fact_created_at: `2026-09-${String(10 + (index % 20)).padStart(2, '0')}T12:00:00.000Z`,
+        })),
+      },
+    });
+  }
+
+  it('does NOT report "never computed" when the record announces older history', async () => {
+    const carrier = cappedCarrierOfFailures();
+    // The precondition this case needs — assert it, or the test proves nothing
+    // about the capped branch.
+    expect(carrier.status).toBe('capped');
+
+    const view = projectTurnContext(
+      contextWith({ scenario_analysis_fact_set: carrier }),
+      GRAPH_HASH,
+      null,
+    );
+
+    expect(view.snapshot).not.toBeNull();
+    expect(view.snapshot?.historyComplete).toBe(false);
+    // The read SUCCEEDED — it is the history that is partial, not the read.
+    expect(view.snapshot?.recordReadOk).toBe(true);
+
+    const said = await resultOf(view.snapshot);
+    expect(said).toBe(READ_RESULTS_NONE_IN_READABLE_HISTORY);
+    expect(said).not.toBe(READ_RESULTS_NO_ANALYSIS);
+    expect(said).not.toContain('never computed');
+  });
+
+  it('CONTRAST — a COMPLETE carrier with no success DOES license "never computed"', async () => {
+    // The discriminating half. Without it the assertion above would pass on a
+    // projection that had simply stopped ever returning null — which would
+    // destroy the one state that can honestly say "never".
+    const view = projectTurnContext(
+      contextWith({ scenario_analysis_fact_set: attestedSet([]) }),
+      GRAPH_HASH,
+      null,
+    );
+    expect(view.snapshot).toBeNull();
+    expect(await resultOf(view.snapshot)).toBe(READ_RESULTS_NO_ANALYSIS);
   });
 });

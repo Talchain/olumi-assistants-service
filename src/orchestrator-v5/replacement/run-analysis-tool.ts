@@ -277,6 +277,19 @@ const NO_FIGURES_ON_RECORD: RunReason = {
     'That is what running it again would fix, and it is the reason to give the user.',
 };
 
+/**
+ * No success in the readable window, and the window says there is more.
+ * FIRST_RUN would assert "NO ANALYSIS HAS EVER BEEN RUN" from a partial view.
+ */
+const NONE_IN_READABLE_HISTORY: RunReason = {
+  summary: 'Run the analysis — no current result, and the older history is not fully readable',
+  why:
+    'NO SUCCESSFUL ANALYSIS APPEARS IN THE PART OF THIS HISTORY I CAN READ, and that history is ' +
+    'incomplete — older runs may exist beyond it. Do not say the model has never been analysed. ' +
+    'Running it now produces a result that is certainly current, which is the honest reason to ' +
+    'offer it here.',
+};
+
 const FIRST_RUN: RunReason = {
   summary: 'Run the analysis — nothing has been computed for this model yet',
   why:
@@ -337,13 +350,17 @@ export function createRunAnalysisTool(deps: RunAnalysisToolDeps): AgentTool {
       !hasAnalysis &&
       snapshot.freshness !== null &&
       snapshot.freshness !== 'none';
+    const historyIncomplete =
+      snapshot !== null && snapshot !== undefined && snapshot.historyComplete === false;
     const reason = hasAnalysis
       ? reasonForRerun(snapshot)
       : recordUnreadable
         ? RECORD_UNREADABLE
-        : runOnRecordWithoutFigures
-          ? NO_FIGURES_ON_RECORD
-          : FIRST_RUN;
+        : historyIncomplete
+          ? NONE_IN_READABLE_HISTORY
+          : runOnRecordWithoutFigures
+            ? NO_FIGURES_ON_RECORD
+            : FIRST_RUN;
     const exclusion = exclusionDisclosure(admission);
 
     return {

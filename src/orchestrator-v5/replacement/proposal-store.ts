@@ -64,6 +64,22 @@ export type ProposalStatus =
   | 'authorised'
   | 'apply_in_flight'
   | 'applied'
+  /**
+   * TERMINAL AND HONEST: the outcome could not be established, and we have
+   * stopped trying.
+   *
+   * ⛔ IT EXISTS BECAUSE `apply_in_flight` WAS A ONE-WAY DOOR. A proposal whose
+   * retries were exhausted stayed in flight, so `needsReconciliation` returned
+   * it on EVERY later turn, the controller short-circuited before the agent
+   * loop, and the user got the same notice forever with no model call. The
+   * conversation was bricked by the mechanism meant to keep it honest.
+   *
+   * This status says the one thing that is true — nobody knows whether that
+   * write landed — while letting the conversation continue. It is NOT
+   * `applied` and NOT a failure: claiming either would be the guess this whole
+   * module refuses to make.
+   */
+  | 'unresolved'
   | 'stale'
   | 'withdrawn';
 
@@ -92,6 +108,8 @@ export interface Proposal {
   readonly last_apply_failure?: { readonly reason: string; readonly failed_at: string };  /** How many times a save has been SENT for this proposal, including the
    *  first. Bounds the retry loop — see {@link MAX_APPLY_ATTEMPTS}. */
   readonly apply_attempts?: number;
+  /** Set when the retries were exhausted and we stopped. See `unresolved`. */
+  readonly unresolved_at?: string;
 }
 
 export interface ProposalStore {
@@ -336,6 +354,36 @@ export function needsReconciliation(store: ProposalStore): readonly Proposal[] {
   return store.proposals.filter((p) => p.status === 'apply_in_flight');
 }
 
+/**
+ * Stop trying, and say so — the exit from {@link ProposalStatus} `unresolved`'s
+ * docblock.
+ *
+ * Called only when {@link isRetryExhausted} holds, so the cap is the single
+ * authority on when to give up and this function does not re-decide it.
+ */
+export function recordUnresolved(
+  store: ProposalStore,
+  id: string,
+  opts: { readonly at: string },
+): ProposalStore {
+  const p = find(store, id);
+  assertState(
+    p.status === 'apply_in_flight',
+    `only a save in flight can become unresolved, and this one is "${p.status}"`,
+  );
+  assertState(
+    isRetryExhausted(p),
+    'a save may only be abandoned once its attempts are exhausted — the cap is the authority',
+  );
+  return replace(store, { ...p, status: 'unresolved', unresolved_at: opts.at });
+}
+
+/** Proposals abandoned with an unknown outcome. Rendered so the user can see
+ *  that one exists rather than discovering it later. */
+export function unresolvedProposals(store: ProposalStore): readonly Proposal[] {
+  return store.proposals.filter((p) => p.status === 'unresolved');
+}
+
 /** Proposals a "yes" could still attach to. Excludes stale and in-flight. */
 export function openProposals(store: ProposalStore): readonly Proposal[] {
   return store.proposals.filter((p) => p.status === 'open');
@@ -361,6 +409,11 @@ export function describeForUser(p: Proposal): string {
       return 'you agreed to this and it is about to be saved';
     case 'apply_in_flight':
       return 'the save was started and I have not confirmed the outcome yet';
+    case 'unresolved':
+      // Says the unknown plainly and does not resolve it in either direction.
+      // "failed" and "saved" are both guesses here, and the whole point of the
+      // status is that nobody is entitled to either.
+      return 'the save was started and its outcome could never be confirmed — it may or may not be in the model';
     case 'applied':
       return 'saved';
     case 'stale':

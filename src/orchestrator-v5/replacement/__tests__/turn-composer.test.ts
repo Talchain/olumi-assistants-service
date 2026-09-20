@@ -212,12 +212,28 @@ describe('the notice says what is actually still happening', () => {
     expect(text).not.toContain('stopped trying');
   });
 
-  it('once the attempts are exhausted it says it has STOPPED, and asks the user', () => {
+  it('once the attempts are exhausted it says it has STOPPED, and promises nothing it cannot do', () => {
     const text = reconciliationNotice(inFlight(MAX_APPLY_ATTEMPTS).proposals);
-    expect(text).toContain('stopped trying rather than risk saving it twice');
-    expect(text).toContain('Please check whether the change is there');
+    expect(text).toContain('stopped rather than risk saving it twice');
+    expect(text).toContain('Check the model to see whether the change is there');
     // The promise it can no longer keep must be gone.
     expect(text).not.toContain('I am checking what actually happened');
+
+    // ⛔ THE ENDING HAS BEEN WRONG TWICE, IN OPPOSITE DIRECTIONS, AND BOTH
+    // WERE PINNED BY A GREEN TEST AT THE TIME.
+    //
+    // v1 promised "Let me confirm what actually happened first" after the cap
+    // had stopped it checking. v2 corrected that to an INVITATION — "tell me
+    // and I will take your word for it and carry on" — which was also a
+    // promise the controller could not keep: the turn short-circuited before
+    // the agent loop, so the user's reply was never read and every later reply
+    // got the same notice. An independent reviewer returned it as a P1.
+    //
+    // So the two dead phrasings are pinned as forbidden, not merely absent.
+    expect(text).not.toContain('take your word for it');
+    expect(text).not.toContain('Let me confirm');
+    // It must state the unknown rather than resolve it in either direction.
+    expect(text).toContain('I do not know whether it landed');
   });
 
   it('either way it still refuses to claim the change landed or did not', () => {

@@ -18,6 +18,7 @@ import {
   appliedProposals,
   needsReconciliation,
   openProposals,
+  unresolvedProposals,
   withdrawProposal,
   type ProposalStore,
 } from '../proposal-store.js';
@@ -627,9 +628,29 @@ describe('the retry is bounded', () => {
       );
     }
     expect(sends).toBe(MAX_APPLY_ATTEMPTS);
-    // Still honest about not knowing — bounded is not the same as resolved.
-    expect(st.text).toContain('not come back confirmed');
-    expect(needsReconciliation(st.proposals)).toHaveLength(1);
+
+    // ⛔ THIS ASSERTION USED TO PIN THE BRICKING AS CORRECT, and that is worth
+    // recording rather than quietly rewriting.
+    //
+    // It read:
+    //   expect(st.text).toContain('not come back confirmed');
+    //   expect(needsReconciliation(st.proposals)).toHaveLength(1);
+    //
+    // i.e. after the cap, the proposal was STILL in flight and the notice was
+    // STILL owning the turn — on turn twelve, and on every turn after it, with
+    // no model call. The test was true of the code and the code was wrong: an
+    // independent reviewer returned it as a P1, because the notice also
+    // invited the user to answer and nothing ever read the answer.
+    //
+    // Bounded is not the same as resolved — that part was right, and it still
+    // holds below: the outcome is never claimed in either direction. What
+    // changed is that an abandoned save stops owning the conversation.
+    expect(unresolvedProposals(st.proposals)).toHaveLength(1);
+    expect(needsReconciliation(st.proposals)).toHaveLength(0);
+    expect(appliedProposals(st.proposals)).toHaveLength(0);
+    // The conversation is back: the final turn reached the model.
+    expect(st.text).toBe('never reached');
+    expect(st.iterations).toBeGreaterThan(0);
   });
 
   it('CONTRAST: a path that recovers within the cap still resolves — the cap does not break the retry', async () => {
@@ -895,5 +916,170 @@ describe('one turn, one write — the applier makes a second save silently lossy
     expect(writes.length).toBe(1);
     expect(appliedProposals(t2.proposals).length).toBe(1);
     expect(JSON.stringify(single.calls.at(-1)?.messages ?? [])).not.toContain('ONE CHANGE PER TURN');
+  });
+});
+
+describe('⛔ an exhausted save must stop owning the turn — the bricking the cap created', () => {
+  /**
+   * `isRetryExhausted` stopped the retry but left the proposal
+   * `apply_in_flight`, so `needsReconciliation` returned it on EVERY later
+   * turn, the controller short-circuited before the agent loop, and the user
+   * got the same notice forever with no model call. The notice even invited
+   * them to answer, and nothing read the answer.
+   *
+   * Returned as a P1 by the independent reviewer. The mechanism built to stop
+   * the product lying was bricking the conversation instead.
+   */
+  it('gives up after the cap, moves to `unresolved`, and the NEXT turn runs normally', async () => {
+    const alwaysThrows: ApplyOperations = async () => {
+      throw new Error('the write path is down');
+    };
+
+    // Turn 1 — offer, and accept so the proposal goes in flight and throws.
+    const t1 = await runReplacementTurn(baseInput({ message: 'what would parity do?' }), {
+      chatWithTools: scripted([call('set_option_effect', {}), say('Offered.')]),
+      checkpoint: ck,
+      applyOperations: okWrite(),
+    });
+    const waiting = openProposals(t1.proposals);
+    expect(waiting.length).toBe(1);
+
+    let state = reload(t1);
+    const t2 = await runReplacementTurn(
+      baseInput({ message: 'yes please', turnId: 'turn-2', ...state }),
+      {
+        chatWithTools: scripted([
+          { content: [{ type: 'tool_use', id: 'a1', name: ACCEPT_TOOL_NAME, input: { proposal_id: waiting[0]!.id, user_agreement_quote: 'yes please' } }], stop_reason: 'tool_use' },
+          say('Checking.'),
+        ]),
+        checkpoint: ck,
+        applyOperations: alwaysThrows,
+      },
+    );
+    expect(needsReconciliation(t2.proposals).length).toBe(1);
+
+    // Turns 3..N — the retry keeps throwing until the cap is reached.
+    state = reload(t2);
+    let last = t2;
+    for (let n = 3; n <= 3 + MAX_APPLY_ATTEMPTS; n++) {
+      last = await runReplacementTurn(
+        baseInput({ message: 'any news?', turnId: `turn-${n}`, ...state }),
+        { chatWithTools: scripted([say('normal answer')]), checkpoint: ck, applyOperations: alwaysThrows },
+      );
+      state = reload(last);
+    }
+
+    // THE PROPERTY: it is abandoned, not still in flight, and it claims
+    // NEITHER outcome.
+    const abandoned = unresolvedProposals(last.proposals);
+    expect(abandoned.length).toBe(1);
+    expect(appliedProposals(last.proposals).length).toBe(0);
+    expect(needsReconciliation(last.proposals).length).toBe(0);
+
+    // AND THE CONVERSATION IS BACK: a later turn reaches the model and answers
+    // the user, instead of replaying the notice with zero iterations.
+    const after = await runReplacementTurn(
+      baseInput({ message: 'so what about pricing?', turnId: 'turn-99', ...reload(last) }),
+      { chatWithTools: scripted([say('A real answer about pricing.')]), checkpoint: ck, applyOperations: alwaysThrows },
+    );
+    expect(after.iterations).toBeGreaterThan(0);
+    expect(after.text).toBe('A real answer about pricing.');
+    expect(after.text).not.toContain('Before anything else');
+  });
+
+  it('CONTRAST — before the cap it DOES still own the turn, which is correct', async () => {
+    // Without this the assertion above would pass on a controller that had
+    // simply stopped reconciling at all — a different defect, not a fix.
+    const t1 = await runReplacementTurn(baseInput({ message: 'what would parity do?' }), {
+      chatWithTools: scripted([call('set_option_effect', {}), say('Offered.')]),
+      checkpoint: ck,
+      applyOperations: okWrite(),
+    });
+    const waiting = openProposals(t1.proposals);
+    const t2 = await runReplacementTurn(
+      baseInput({ message: 'yes please', turnId: 'turn-2', ...reload(t1) }),
+      {
+        chatWithTools: scripted([
+          { content: [{ type: 'tool_use', id: 'a1', name: ACCEPT_TOOL_NAME, input: { proposal_id: waiting[0]!.id, user_agreement_quote: 'yes please' } }], stop_reason: 'tool_use' },
+          say('Checking.'),
+        ]),
+        checkpoint: ck,
+        applyOperations: async () => { throw new Error('down'); },
+      },
+    );
+    const t3 = await runReplacementTurn(
+      baseInput({ message: 'any news?', turnId: 'turn-3', ...reload(t2) }),
+      { chatWithTools: scripted([say('should not be reached')]), checkpoint: ck, applyOperations: async () => { throw new Error('down'); } },
+    );
+    expect(t3.iterations).toBe(0);
+    expect(unresolvedProposals(t3.proposals).length).toBe(0);
+  });
+});
+
+describe('⛔ the turn\'s write attempt is reserved BEFORE dispatch, not after success', () => {
+  it('a first write that THROWS still blocks a second acceptance in the same turn', async () => {
+    // The first version of this guard counted `applied.length`, which
+    // increments only on success. So an uncertain first write left the count
+    // at zero, the loop carried on, and a second acceptance minted the SAME
+    // key index — an exactly-once writer would then return the first's receipt
+    // for the second's different operations. Returned as a P1 by the
+    // independent reviewer.
+    function alternating(): AgentTool {
+      let n = 0;
+      return {
+        kind: 'propose',
+        definition: { name: 'set_option_effect', description: 'p', input_schema: { type: 'object', properties: {} } },
+        execute: () => {
+          n += 1;
+          return { type: 'proposed', summary: `change ${n}`, operations: [{ op: 'update_node', path: `/n/${n}`, value: 0.4 }] };
+        },
+      };
+    }
+    const t1 = await runReplacementTurn(
+      baseInput({ message: 'two things', tools: [alternating()] }),
+      {
+        chatWithTools: scripted([
+          call('set_option_effect', {}),
+          { content: [{ type: 'tool_use', id: 't2', name: 'set_option_effect', input: {} }], stop_reason: 'tool_use' },
+          say('Both offered.'),
+        ]),
+        checkpoint: ck,
+        applyOperations: okWrite(),
+      },
+    );
+    const waiting = openProposals(t1.proposals);
+    expect(waiting.length).toBe(2);
+
+    const keys: string[] = [];
+    const model = scripted([
+      {
+        content: [
+          { type: 'tool_use', id: 'a1', name: ACCEPT_TOOL_NAME, input: { proposal_id: waiting[0]!.id, user_agreement_quote: 'yes to both' } },
+          { type: 'tool_use', id: 'a2', name: ACCEPT_TOOL_NAME, input: { proposal_id: waiting[1]!.id, user_agreement_quote: 'yes to both' } },
+        ],
+        stop_reason: 'tool_use',
+      },
+      say('Done what I could.'),
+    ]);
+    const t2 = await runReplacementTurn(
+      baseInput({ message: 'yes to both', turnId: 'turn-2', ...reload(t1) }),
+      {
+        chatWithTools: model,
+        checkpoint: ck,
+        applyOperations: async (a) => {
+          keys.push(a.idempotencyKey);
+          throw new Error('uncertain');   // the FIRST write throws
+        },
+      },
+    );
+
+    // THE PROPERTY: exactly one write was dispatched, however many the model
+    // accepted — so two proposals can never share one key index.
+    expect(keys.length).toBe(1);
+    expect(new Set(keys).size).toBe(1);
+    // The second is untouched: not applied, not in flight.
+    expect(appliedProposals(t2.proposals).length).toBe(0);
+    expect(needsReconciliation(t2.proposals).length).toBe(1);
+    expect(JSON.stringify(model.calls.at(-1)?.messages ?? [])).toContain('ONE CHANGE PER TURN');
   });
 });

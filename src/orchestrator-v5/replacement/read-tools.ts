@@ -409,6 +409,21 @@ export interface AnalysisSnapshot {
    * one idea is how a distinction stops being checked.
    */
   readonly recordReadOk?: boolean;
+  /**
+   * Does the record the caller read cover the scenario's WHOLE analysis
+   * history?
+   *
+   * `false` means the caller read a bounded window that ANNOUNCES older runs
+   * behind it, so "no successful analysis here" cannot be widened to "never
+   * analysed". Omitted is treated as `true`, matching `recordReadOk`: a caller
+   * that read everything need not say so, and one that did not must.
+   *
+   * Separate from `recordReadOk` because the questions are different — that
+   * one asks whether the read SUCCEEDED, this one asks how much it COVERED —
+   * and a single flag for both would re-flatten exactly the distinction this
+   * type exists to hold.
+   */
+  readonly historyComplete?: boolean;
 }
 
 export interface ReadResultsDeps {
@@ -440,6 +455,33 @@ export const READ_RESULTS_RECORD_UNREADABLE =
   'exist and be current. Nothing here establishes either way. Say that you ' +
   'cannot reach the results right now rather than saying none were computed, ' +
   'do not reason as if figures existed, and offer to try again.';
+
+/**
+ * THE SIXTH STATE: nothing successful in the part of the record we can read,
+ * and the record itself says there is more.
+ *
+ * ⛔ FOUND BY THE INDEPENDENT REVIEWER, and it is the categorical-absence claim
+ * escaping through a different door than the fifth state did.
+ *
+ * `ScenarioAnalysisFactSet` has a `capped` status: `facts` carries the NEWEST
+ * `SCENARIO_ANALYSIS_FACT_CAP` rows and the status is, in the carrier's own
+ * words, "the disclosure that older history exists behind them … never a claim
+ * of completeness". So a scenario whose recent runs all failed can push an
+ * older SUCCESSFUL run past the cap. The selector then finds no eligible
+ * success in the prefix and the projection returned `null` — which
+ * `read_results` reports as "not withheld, simply never computed".
+ *
+ * That is a claim about the WHOLE scenario made from a window that announces
+ * itself as partial. Record existence, readable results, run outcome and
+ * completeness are four different questions, and only a COMPLETE carrier with
+ * no success in it can answer the fourth one "never".
+ */
+export const READ_RESULTS_NONE_IN_READABLE_HISTORY =
+  'NO SUCCESSFUL ANALYSIS APPEARS IN THE PART OF THIS MODEL\'S HISTORY I CAN READ, and that ' +
+  'history is INCOMPLETE — older runs exist beyond what is available to me. So this is not a ' +
+  'statement that the model has never been analysed; it may have been, further back than I can ' +
+  'see. Say exactly that, do not reason as if figures existed, and offer to run it now so there ' +
+  'is a current result.';
 
 /**
  * THE FIFTH STATE: a run IS on record, and it carries no readable figures.
@@ -781,11 +823,16 @@ export function createReadResultsTool(deps: ReadResultsDeps): AgentTool {
     // A snapshot whose caller could not read the record must never be reported
     // as "never computed" — see `AnalysisSnapshot.recordReadOk`.
     if (snapshot === null || snapshot === undefined) {
-      // We looked, through a reader we trust, and there is no run on record.
+      // We looked, through a reader we trust, at the WHOLE scenario, and there
+      // is no run on record. This is the only state that licenses "never".
       return { type: 'result', content: READ_RESULTS_NO_ANALYSIS };
     }
     if (snapshot.recordReadOk === false) {
       return { type: 'result', content: READ_RESULTS_RECORD_UNREADABLE };
+    }
+    if (snapshot.historyComplete === false && snapshot.enrichment === null) {
+      // Read fine, found no success — but the record says there is more.
+      return { type: 'result', content: READ_RESULTS_NONE_IN_READABLE_HISTORY };
     }
     if (snapshot.enrichment === null) {
       // ⚠ THE PREDICATE IS NARROWER THAN "enrichment is null", and two
