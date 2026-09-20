@@ -388,14 +388,19 @@ describe('the three save outcomes stay apart', () => {
     expect(fed).toContain('do not say it saved or that it did not');
   });
 
-  it('an unresolved save owns the next turn, and spends no model call at all', async () => {
-    const { t2 } = await saveWith(async () => { throw new Error('socket hang up'); });
+  it('a STILL-unresolved save owns the next turn, and spends no model call at all', async () => {
+    // The write path is still down on the next turn, so the retry cannot
+    // settle it and the outcome stays genuinely unknown. (Handed a HEALTHY
+    // write path this turn resolves and proceeds — which is the point of the
+    // retry, and is pinned in "an unknown save resolves itself" below.)
+    const stillDown = async (): Promise<never> => { throw new Error('socket hang up'); };
+    const { t2 } = await saveWith(stillDown as unknown as ApplyOperations);
     const next = scripted([say('this must never be reached')]);
     const t3 = await runReplacementTurn(
       baseInput({
         turnId: 't3', message: 'so did that work?', proposals: t2.proposals, memory: t2.memory,
       }),
-      { chatWithTools: next, applyOperations: okWrite() },
+      { chatWithTools: next, applyOperations: stillDown as unknown as ApplyOperations },
     );
     expect(next.calls).toHaveLength(0);
     expect(t3.mustReconcile).toHaveLength(1);
@@ -450,5 +455,128 @@ describe('one save per agreement', () => {
     expect(write).toHaveBeenCalledTimes(1);
     expect(t2.applied).toHaveLength(1);
     expect(appliedProposals(t2.proposals)).toHaveLength(1);
+  });
+});
+
+/**
+ * A CONVERSATION MUST NEVER GET PERMANENTLY STUCK.
+ *
+ * This was a real defect in this file, found by asking what had been built
+ * that is WORSE than what it replaces, and reproduced by execution: a thrown
+ * save left the proposal `apply_in_flight` with nothing able to resolve it,
+ * so every later turn — five of them, with a perfectly healthy write path —
+ * returned the reconciliation notice. A bricked conversation is worse than
+ * the product being replaced.
+ *
+ * The resolution uses the mechanism already built: `beginApply` records the
+ * idempotency key BEFORE the write, so a retry under that same key is safe
+ * by construction. That is the entire reason the key is written first.
+ */
+describe('an unknown save resolves itself on the next turn', () => {
+  async function stuck(): Promise<{ proposals: ProposalStore; memory: ConversationMemory; id: string }> {
+    const boom: ApplyOperations = async () => { throw new Error('socket hang up'); };
+    const t1 = await runReplacementTurn(baseInput({ turnId: 't1' }), {
+      chatWithTools: scripted([call('set_option_effect', {}), say('shall I?')]),
+      applyOperations: boom,
+    });
+    const id = openProposals(t1.proposals)[0]!.id;
+    const t2 = await runReplacementTurn(
+      baseInput({ turnId: 't2', message: 'yes go ahead', proposals: t1.proposals, memory: t1.memory }),
+      {
+        chatWithTools: scripted([
+          call(ACCEPT_TOOL_NAME, { proposal_id: id, user_agreement_quote: 'yes go ahead' }),
+          say('ok'),
+        ]),
+        applyOperations: boom,
+      },
+    );
+    expect(needsReconciliation(t2.proposals)).toHaveLength(1);
+    return { proposals: t2.proposals, memory: t2.memory, id };
+  }
+
+  it('retries under the SAME idempotency key — which is why the key is written before the write', async () => {
+    const before = await stuck();
+    const keyAtRest = needsReconciliation(before.proposals)[0]!.idempotency_key;
+    const seen: string[] = [];
+    const healthy: ApplyOperations = async (a) => { seen.push(a.idempotencyKey); return { ok: true, receiptId: 'r-late' }; };
+    await runReplacementTurn(
+      baseInput({ turnId: 't3', message: 'an ordinary question', proposals: before.proposals, memory: before.memory }),
+      { chatWithTools: scripted([say('a normal answer')]), applyOperations: healthy },
+    );
+    expect(seen).toEqual([keyAtRest]);
+  });
+
+  it('a resolved save lets the turn proceed normally — no notice, and the model IS called', async () => {
+    const before = await stuck();
+    const model = scripted([say('a normal answer')]);
+    const r = await runReplacementTurn(
+      baseInput({ turnId: 't3', message: 'an ordinary question', proposals: before.proposals, memory: before.memory }),
+      { chatWithTools: model, applyOperations: okWrite('r-late') },
+    );
+    expect(r.text).toBe('a normal answer');
+    expect(r.text).not.toContain('not come back confirmed');
+    expect(needsReconciliation(r.proposals)).toHaveLength(0);
+    expect(model.calls).toHaveLength(1);
+  });
+
+  it('the late receipt is recorded, so the record can substantiate the change', async () => {
+    const before = await stuck();
+    const r = await runReplacementTurn(
+      baseInput({ turnId: 't3', message: 'q', proposals: before.proposals, memory: before.memory }),
+      { chatWithTools: scripted([say('x')]), applyOperations: okWrite('r-late') },
+    );
+    expect(r.applied).toEqual([{ proposalId: before.id, receiptId: 'r-late' }]);
+    const change = liveItemsOfKind(r.memory, 'authorised_change');
+    expect(change).toHaveLength(1);
+    expect(change[0]?.receipt_id).toBe('r-late');
+  });
+
+  it('an affirmative "it did not land" also unsticks it, without recording a change', async () => {
+    const before = await stuck();
+    const r = await runReplacementTurn(
+      baseInput({ turnId: 't3', message: 'q', proposals: before.proposals, memory: before.memory }),
+      {
+        chatWithTools: scripted([say('a normal answer')]),
+        applyOperations: async () => ({ ok: false, reason: 'the graph moved under us' }),
+      },
+    );
+    expect(needsReconciliation(r.proposals)).toHaveLength(0);
+    expect(r.applied).toHaveLength(0);
+    expect(liveItemsOfKind(r.memory, 'authorised_change')).toHaveLength(0);
+    expect(r.text).toBe('a normal answer');
+  });
+
+  it('a retry that throws again stays unknown and says so — but is tried again, not abandoned', async () => {
+    const before = await stuck();
+    let attempts = 0;
+    const flaky: ApplyOperations = async () => {
+      attempts += 1;
+      if (attempts < 2) throw new Error('still down');
+      return { ok: true, receiptId: 'r-eventual' };
+    };
+    const t3 = await runReplacementTurn(
+      baseInput({ turnId: 't3', message: 'q', proposals: before.proposals, memory: before.memory }),
+      { chatWithTools: scripted([say('never reached')]), applyOperations: flaky },
+    );
+    expect(t3.text).toContain('not come back confirmed');
+    expect(needsReconciliation(t3.proposals)).toHaveLength(1);
+
+    const t4 = await runReplacementTurn(
+      baseInput({ turnId: 't4', message: 'q again', proposals: t3.proposals, memory: t3.memory }),
+      { chatWithTools: scripted([say('recovered')]), applyOperations: flaky },
+    );
+    expect(t4.text).toBe('recovered');
+    expect(needsReconciliation(t4.proposals)).toHaveLength(0);
+    expect(attempts).toBe(2);
+  });
+
+  it('with NO write path it cannot retry, and still refuses to guess — the honest stuck state', async () => {
+    const before = await stuck();
+    const r = await runReplacementTurn(
+      baseInput({ turnId: 't3', message: 'q', proposals: before.proposals, memory: before.memory }),
+      { chatWithTools: scripted([say('never reached')]) },
+    );
+    expect(r.text).toContain('not come back confirmed');
+    expect(needsReconciliation(r.proposals)).toHaveLength(1);
   });
 });
