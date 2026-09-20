@@ -292,6 +292,55 @@ export function summariseWorkspace(graph: GraphStateIngress | null | undefined):
 }
 
 /**
+ * The tools this controller offers, in one place.
+ *
+ * ⛔ EXTRACTED BECAUSE THE SECOND COPY WAS ALREADY WRONG. The live harness
+ * hand-listed them, and its own comment records the first time that drifted:
+ * `remember` was wired here and missing there, so a live run showed the model
+ * never calling it and the obvious reading — "it ignores the tool" — was
+ * wrong. It was never offered one. At the time of this extraction the harness
+ * was missing FOUR of the eight, including `run_analysis` and all three
+ * structure tools, so every live judgement about what the model does with them
+ * was a judgement about tools it could not see.
+ *
+ * A hand-maintained mirror fails silently and always reads as green. There is
+ * now nothing to keep in step: both callers call this.
+ */
+export function buildReplacementTools(args: {
+  readonly getGraph: ReplacementEntryInput['getGraph'];
+  readonly getAnalysis: ReplacementEntryInput['getAnalysis'];
+  /** Read fresh on each call — the record grows during a turn. */
+  readonly getMemory: () => ConversationMemory;
+  readonly requestId?: string;
+  readonly proposeTools?: readonly AgentTool[];
+}): AgentTool[] {
+  return [
+    createReadWorkspaceTool({ getGraph: args.getGraph, requestId: args.requestId }),
+    createReadResultsTool({ getAnalysis: args.getAnalysis }),
+    // Unconditional. Without it the durable record holds only what the
+    // ASSISTANT did, and "retain new evidence" — the first increment's whole
+    // promise — has no mechanism behind it.
+    createRememberTool({ getMemory: args.getMemory }),
+    createSetOptionEffectTool({ getGraph: args.getGraph }),
+    // Also unconditional. A user must always be able to ask for the analysis,
+    // and the tool itself decides whether running one is warranted — it
+    // refuses when the model is not ready (returning the checker's own open
+    // questions) and when a current result already exists (pointing at
+    // read_results instead of spending again).
+    createRunAnalysisTool({ getGraph: args.getGraph, getAnalysis: args.getAnalysis }),
+    // The structure tools, also unconditional. A model that can read the
+    // workspace and set an effect but cannot add the node the user just named
+    // has to answer "I can't do that" to the most ordinary request there is —
+    // the same shape of dead end `set_option_effect` was built to close. All
+    // three propose only; none can write.
+    createAddFactorTool({ getGraph: args.getGraph }),
+    createAddOptionTool({ getGraph: args.getGraph }),
+    createAddEdgeTool({ getGraph: args.getGraph }),
+    ...(args.proposeTools ?? []),
+  ];
+}
+
+/**
  * Run one turn on the replacement controller.
  *
  * Loads state, runs the turn, saves state, returns what the route should send.
@@ -341,30 +390,13 @@ export async function handleReplacementTurn(
   // conflict too rather than quietly overwrite the winner.
   let revision: ReplacementStateRevision | null = loaded.revision;
 
-  const tools: AgentTool[] = [
-    createReadWorkspaceTool({ getGraph: input.getGraph, requestId: input.requestId }),
-    createReadResultsTool({ getAnalysis: input.getAnalysis }),
-    // Unconditional. Without it the durable record holds only what the
-    // ASSISTANT did, and "retain new evidence" — the first increment's whole
-    // promise — has no mechanism behind it.
-    createRememberTool({ getMemory: () => prior.memory }),
-    createSetOptionEffectTool({ getGraph: input.getGraph }),
-    // Also unconditional. A user must always be able to ask for the analysis,
-    // and the tool itself decides whether running one is warranted — it
-    // refuses when the model is not ready (returning the checker's own open
-    // questions) and when a current result already exists (pointing at
-    // read_results instead of spending again).
-    createRunAnalysisTool({ getGraph: input.getGraph, getAnalysis: input.getAnalysis }),
-    // The structure tools, also unconditional. A model that can read the
-    // workspace and set an effect but cannot add the node the user just named
-    // has to answer "I can't do that" to the most ordinary request there is —
-    // the same shape of dead end `set_option_effect` was built to close. All
-    // three propose only; none can write.
-    createAddFactorTool({ getGraph: input.getGraph }),
-    createAddOptionTool({ getGraph: input.getGraph }),
-    createAddEdgeTool({ getGraph: input.getGraph }),
-    ...(deps.proposeTools ?? []),
-  ];
+  const tools: AgentTool[] = buildReplacementTools({
+    getGraph: input.getGraph,
+    getAnalysis: input.getAnalysis,
+    getMemory: () => prior.memory,
+    ...(input.requestId === undefined ? {} : { requestId: input.requestId }),
+    ...(deps.proposeTools === undefined ? {} : { proposeTools: deps.proposeTools }),
+  });
 
   const result = await runReplacementTurn(
     {

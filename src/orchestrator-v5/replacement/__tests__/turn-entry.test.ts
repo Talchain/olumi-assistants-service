@@ -13,6 +13,7 @@ import type { ToolResponseBlock } from '../../../adapters/llm/types.js';
 import {
   EMPTY_REPLACEMENT_STATE,
   ReplacementStateConflictError,
+  buildReplacementTools,
   ReplacementTurnFailure,
   decodeReplacementState,
   handleReplacementTurn,
@@ -451,5 +452,56 @@ describe('what the user establishes reaches the record and the next prompt', () 
     expect(system).toContain('Churn is 3% a month');
     // And it is NOT filed as something the assistant merely suggested.
     expect(system).not.toContain('YOU SUGGESTED (not agreed, not applied):\n- Churn is 3% a month');
+  });
+});
+
+/**
+ * ⛔ THE SECOND COPY OF THIS LIST WAS ALREADY WRONG WHEN IT WAS FOUND.
+ *
+ * The live harness hand-listed the tools and was missing FOUR of the eight —
+ * `run_analysis` and all three structure tools — so every live judgement about
+ * what the model does with them was a judgement about tools it was never
+ * offered. Its own comment records an earlier instance of the same drift with
+ * `remember`. Both callers now call `buildReplacementTools`, so there is no
+ * mirror left to keep in step.
+ *
+ * This pins the SET by name, because the extraction removes the drift between
+ * copies and cannot notice a tool quietly dropped from the one remaining list.
+ * Deriving the expectation from the function under test would be the same
+ * function agreeing with itself.
+ */
+describe('the tool list is built in ONE place, and every tool is offered', () => {
+  const NAMES = [
+    'read_workspace',
+    'read_results',
+    'remember',
+    'set_option_effect',
+    'run_analysis',
+    'add_factor',
+    'add_option',
+    'add_link',
+  ];
+
+  function build(proposeTools?: AgentTool[]) {
+    return buildReplacementTools({
+      getGraph: () => null,
+      getAnalysis: () => null,
+      getMemory: () => EMPTY_CONVERSATION_MEMORY,
+      requestId: 'req-1',
+      ...(proposeTools === undefined ? {} : { proposeTools }),
+    });
+  }
+
+  it('offers exactly the eight tools, by name and in order', () => {
+    expect(build().map((t) => t.definition.name)).toEqual(NAMES);
+  });
+
+  it('appends caller-supplied propose tools AFTER the standing set, without displacing any', () => {
+    const extra: AgentTool = {
+      kind: 'propose',
+      definition: { name: 'extra_tool', description: 'x', input_schema: { type: 'object', properties: {} } },
+      execute: () => ({ type: 'proposed', summary: 's', operations: [] }),
+    };
+    expect(build([extra]).map((t) => t.definition.name)).toEqual([...NAMES, 'extra_tool']);
   });
 });

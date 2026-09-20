@@ -39,12 +39,9 @@ if (process.env.OLUMI_LIVE_HARNESS !== '1') {
 
 import { runReplacementTurn } from '../../src/orchestrator-v5/replacement/run-replacement-turn.js';
 import { anthropicChatWithTools } from '../../src/orchestrator-v5/replacement/wiring.js';
-import { createReadWorkspaceTool, createReadResultsTool } from '../../src/orchestrator-v5/replacement/read-tools.js';
-import { createSetOptionEffectTool } from '../../src/orchestrator-v5/replacement/propose-tools.js';
-import { createRememberTool } from '../../src/orchestrator-v5/replacement/remember-tool.js';
 import { EMPTY_CONVERSATION_MEMORY } from '../../src/orchestrator-v5/replacement/conversation-memory.js';
 import { EMPTY_PROPOSAL_STORE } from '../../src/orchestrator-v5/replacement/proposal-store.js';
-import { summariseWorkspace } from '../../src/orchestrator-v5/replacement/turn-entry.js';
+import { buildReplacementTools, summariseWorkspace } from '../../src/orchestrator-v5/replacement/turn-entry.js';
 
 const GRAPH = {
   nodes: [
@@ -164,24 +161,35 @@ async function main(): Promise<void> {
         proposals,
         modelRevision: 'rev-1',
         workspaceSummary: summariseWorkspace(GRAPH),
-        tools: [
-          createReadWorkspaceTool({ getGraph: () => GRAPH, requestId: 'live' }),
-          createReadResultsTool({ getAnalysis }),
-          createSetOptionEffectTool({ getGraph: () => GRAPH }),
-          // ⚠ This list is hand-built and MUST track turn-entry.ts. It did
-          // not once: `remember` was wired into the entry point and missing
-          // here, so a live run showed the model never calling it and the
-          // obvious conclusion — "it ignores the tool" — was wrong. It was
-          // never offered one. A probe that cannot see the thing it is
-          // testing returns a confident, wrong answer.
-          createRememberTool({ getMemory: () => memory }),
-        ],
+        tools: buildReplacementTools({
+          getGraph: () => GRAPH,
+          getAnalysis,
+          getMemory: () => memory,
+          requestId: 'live',
+        }),
         turnId: `turn-${i + 1}`,
         now: new Date().toISOString(),
         idFor: (p, n) => `${p}-t${i + 1}-${n}`,
       },
       {
         chatWithTools: anthropicChatWithTools(),
+        // ⛔ WITHOUT THIS THE HEADLINE METRIC BELOW IS STRUCTURALLY ZERO, AND
+        // THE HARNESS REPORTED THAT AS A RESULT ABOUT THE MODEL.
+        //
+        // The accept tool refuses before touching anything when no checkpoint
+        // is injected — correctly, because a save it cannot record having
+        // started is a save it might repeat. So every run of this harness
+        // printed `WRITES SENT TO THE MUTATION PATH: 0`, and "increment 2 is
+        // live-verified" was read off an instrument that could not have
+        // reported anything else.
+        //
+        // In-memory, and that is the honest scope: it proves the controller's
+        // ORDERING (the key is recorded before the write leaves), not that any
+        // store is durable. A real store is `supabase-state-store.ts`.
+        checkpoint: async ({ memory: m, proposals: pr }) => {
+          memory = m;
+          proposals = pr;
+        },
         applyOperations: async (a) => { applied.push(a); return { ok: true, receiptId: `receipt-${i}` }; },
       },
     );
@@ -199,5 +207,26 @@ async function main(): Promise<void> {
   }
   console.log(`${'='.repeat(78)}\nWRITES SENT TO THE MUTATION PATH: ${applied.length}`);
   console.log(JSON.stringify(applied, null, 2).slice(0, 900));
+
+  // ⛔ AN EXPECTATION, SO THE METRIC CAN FAIL. A run whose script asks for a
+  // change and sends no write is a FAILED run, not a quiet one — and the
+  // previous version could only ever print zero, so nobody could tell the two
+  // apart. Opt in per script, because a read-only script sending no write is
+  // correct.
+  const expectWrites = process.env.HARNESS_EXPECT_WRITES;
+  if (expectWrites !== undefined) {
+    const wanted = Number(expectWrites);
+    if (!Number.isFinite(wanted)) {
+      console.error(`HARNESS_EXPECT_WRITES must be a number, got: ${expectWrites}`);
+      process.exit(1);
+    }
+    if (applied.length < wanted) {
+      console.error(
+        `\nHARNESS FAILED ITS OWN EXPECTATION: wanted at least ${wanted} write(s), sent ${applied.length}.`,
+      );
+      process.exit(1);
+    }
+    console.log(`\nEXPECTATION MET: ${applied.length} write(s) >= ${wanted}.`);
+  }
 }
 main().catch((e: unknown) => { console.error('HARNESS FAILED:', e); process.exit(1); });
