@@ -29,6 +29,7 @@
 import { describe, it, expect } from "vitest";
 import { creditUserTypedFigures } from "../enricher.js";
 import type { GraphT, NodeT } from "../../../schemas/graph.js";
+import { UNIT_SCALE_CLASS_TOKENS } from "../../draft/records/unit-scale-class.js";
 
 /** The user's own words, from capture `d9c4066c` (19 Sep 2026). */
 const CAPTURED_BRIEF = [
@@ -198,6 +199,64 @@ describe("the figures the user typed are credited to the user", () => {
     const graph = graphOf([factor("ab78e513", "Monthly Churn Rate", 0.04, "pp")]);
     expect(creditUserTypedFigures(graph, CAPTURED_BRIEF)).toBe(0);
     expect(publishedSource(byId(graph, "ab78e513"))).toBe("cee_inference");
+  });
+
+  /**
+   * ⭐⭐⭐ THE REVIEW'S FINDING, AND THE ONE THE ABBREVIATION TWIN ABOVE CANNOT SEE.
+   *
+   * `"pp"` was refused for the RIGHT reason only by accident of spelling.
+   * `classifyUnitScaleClass` routes `pp`/`ppt`/`pps` to `percentage_points` but
+   * sends the SPELLED-OUT `"percentage point(s)"` to `percent` through its prefix
+   * layer — a rowed, deliberate one-way door in that file. So the shortcut
+   * credited the person with percentage points they never wrote, and the twin
+   * above scored green while it happened.
+   *
+   * ⚠ Trap 22b in one pair: `"pp"` and `"percentage points"` are the SAME
+   * quantity written two ways, and the original guard answered them differently.
+   * A twin that shares the defect's blind spot is not a twin.
+   */
+  it("⭐ the SPELLED-OUT twin: \"percentage points\" is not a spelling of percent either", () => {
+    const graph = graphOf([factor("ab78e513", "Monthly Churn Rate", 0.04, "percentage points")]);
+    expect(creditUserTypedFigures(graph, CAPTURED_BRIEF)).toBe(0);
+    expect(publishedSource(byId(graph, "ab78e513"))).toBe("cee_inference");
+  });
+
+  it("⭐ ...and the singular, which reaches `percent` by the same prefix", () => {
+    const graph = graphOf([factor("ab78e513", "Monthly Churn Rate", 0.04, "percentage point")]);
+    expect(creditUserTypedFigures(graph, CAPTURED_BRIEF)).toBe(0);
+    expect(publishedSource(byId(graph, "ab78e513"))).toBe("cee_inference");
+  });
+
+  /**
+   * ⛔ THE DOOR-CLOSING GUARD. This boundary derives its vocabulary from
+   * `UNIT_SCALE_CLASS_TOKENS`, which is the right way round — but derivation
+   * proves AGREEMENT and is structurally blind to the table being WRONG
+   * (trap 12d). The specific way it could go wrong here is someone closing the
+   * rowed one-way door in the PERMISSIVE direction by adding a spelled-out
+   * percentage-point token to the `percent` row. That is a legitimate product
+   * decision about display frames and a false-attribution defect at THIS seam,
+   * so it must not pass silently.
+   *
+   * This asserts the requirement directly against the table, not through the
+   * pass, so it REDs on the edit itself rather than on a downstream symptom.
+   */
+  it("⛔ no spelled-out percentage-point token may join the percent row", () => {
+    const percentRow = UNIT_SCALE_CLASS_TOKENS.find(([c]) => c === "percent");
+    expect(percentRow).toBeDefined();
+    const offending = percentRow![1].filter((tok) => /^percentage\s+point/i.test(tok.trim()));
+    expect(offending).toEqual([]);
+  });
+
+  /**
+   * The narrowing's own control. If this REDs, the exact-token read has stopped
+   * discriminating and every case above would pass for the wrong reason
+   * (trap 13b: a guard whose discrimination depends on something nothing pins).
+   */
+  it("the exact-token read still admits the percent family it is supposed to", () => {
+    const percentRow = UNIT_SCALE_CLASS_TOKENS.find(([c]) => c === "percent");
+    expect(percentRow![1]).toEqual(expect.arrayContaining(["%", "percent"]));
+    const pointsRow = UNIT_SCALE_CLASS_TOKENS.find(([c]) => c === "percentage_points");
+    expect(pointsRow![1]).toEqual(expect.arrayContaining(["pp"]));
   });
 
   it("credits a value the brief states for a DIFFERENT entity to NOBODY", () => {

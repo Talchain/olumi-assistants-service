@@ -28,8 +28,9 @@ import { formatEdgeId } from "../corrections.js";
 import { DEFAULT_EXISTS_PROBABILITY } from "@talchain/schemas";
 import { synthesiseDisplayValue } from "./display-value.js";
 import {
-  classifyUnitScaleClass,
+  UNIT_SCALE_CLASS_TOKENS,
   unitPinnedScaleFrame,
+  type UnitScaleClass,
 } from "../draft/records/unit-scale-class.js";
 import { sameUnit } from "../../utils/currency-alphabet.js";
 import {
@@ -759,9 +760,38 @@ export function creditUserTypedFigures(
  *   · {@link sameUnit} normalises currency spellings to their code and compares
  *     — and is explicitly NOT a conversion, so a genuine currency difference
  *     still compares unequal;
- *   · {@link classifyUnitScaleClass} answers the percent-family question, so
+ *   · {@link UNIT_SCALE_CLASS_TOKENS} answers the percent-family question, so
  *     `"%"` and `"percent"` correspond while `"%"` and `"pp"` do not, because
  *     percentage points are a different frame rather than a spelling of one.
+ *
+ * ── ⚠⚠ WHY THE EXACT-TOKEN TABLE AND NOT `classifyUnitScaleClass`, WHICH IS
+ * THE OBVIOUS CALL AND IS WRONG AT THIS BOUNDARY. The review found it: change
+ * the `"pp"` twin below to the SPELLED-OUT `"percentage points"` and the
+ * classifier shortcut let it through as `percent`, crediting the person with a
+ * quantity they did not write. That is not a bug in the classifier. It is the
+ * rowed one-way door `unit-scale-class.ts` documents by name — `pp`/`ppt`/`pps`
+ * classify as `percentage_points`, while the spelled-out forms reach `percent`
+ * through the PREFIX layer, deliberately, because that is what the predicates it
+ * replaced did and closing the asymmetry moves live frames.
+ *
+ * The category error was mine, and it is trap 21 exactly: `classifyUnitScaleClass`
+ * answers **"which DISPLAY FRAME family is this token in?"** and I asked it
+ * **"are these the same QUANTITY?"**. Those diverge precisely here — percent and
+ * percentage points share a frame family and are different quantities ("churn
+ * rose 4 percentage points" is not "churn is 4 percent").
+ *
+ * So this boundary consults the classifier's EXACT-TOKEN layer instead, which is
+ * exported for exactly this ("EXPORTED SO ITS GUARD CAN BE DERIVED FROM IT").
+ * Still one vocabulary, still no third copy — a NARROWER read of the same
+ * authority. The scale-family policy and the rowed door are untouched; nothing
+ * here changes a frame, a value, or what any other caller sees.
+ *
+ * ⚠ IT IS STRICTLY NARROWER THAN WHAT IT REPLACES, so it can only WITHHOLD
+ * credits, never add one — the safe direction for a pass that feeds the
+ * admission census. The measured cost: a unit like `"% churn"` (a real spelling
+ * in this estate) no longer corresponds with `"%"`, because it is not an exact
+ * token. That is a real credit withheld, and it is the same trade this docblock
+ * already takes below for a missing unit.
  *
  * ── FAILS CLOSED. A unit missing on either side is NOT correspondence, so the
  * node keeps the provenance it already had. That is deliberate: this pass only
@@ -770,6 +800,14 @@ export function creditUserTypedFigures(
  * withheld when a producer omits a unit; the alternative is crediting the
  * person with a quantity they did not write.
  */
+function exactScaleClassOf(unit: string): UnitScaleClass | undefined {
+  const token = unit.trim().toLowerCase();
+  for (const [scaleClass, tokens] of UNIT_SCALE_CLASS_TOKENS) {
+    if (tokens.some((t) => t.toLowerCase() === token)) return scaleClass;
+  }
+  return undefined;
+}
+
 function unitsCorrespond(
   nodeUnit: string | undefined,
   figureUnit: string | undefined,
@@ -777,8 +815,8 @@ function unitsCorrespond(
   if (typeof nodeUnit !== "string" || nodeUnit.trim().length === 0) return false;
   if (typeof figureUnit !== "string" || figureUnit.trim().length === 0) return false;
   if (sameUnit(nodeUnit, figureUnit)) return true;
-  const nodeClass = classifyUnitScaleClass(nodeUnit);
-  return nodeClass !== "unknown" && nodeClass === classifyUnitScaleClass(figureUnit);
+  const nodeClass = exactScaleClassOf(nodeUnit);
+  return nodeClass !== undefined && nodeClass === exactScaleClassOf(figureUnit);
 }
 
   let credited = 0;
