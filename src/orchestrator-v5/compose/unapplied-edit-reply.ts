@@ -393,6 +393,35 @@ const LEVEL_SYNONYMS: ReadonlyMap<string, string> = new Map([
   ['very high', 'Very high'],
 ]);
 
+/**
+ * The level a person's own prose NAMES, or null.
+ *
+ * ⚠ LONGEST MATCH, NOT FIRST MATCH. "very high" contains "high", so a
+ * first-match scan reads the witnessed sentence as the wrong band and offers
+ * the wrong numbers — a quieter version of the interpretation this ruling
+ * forbids. Keys are sorted by length before scanning.
+ *
+ * ⛔ THIS RECOGNISES, IT DOES NOT INTERPRET. It returns the BAND the person
+ * named; it never decides what that band is worth. The number is always the
+ * person's pick from the offered points.
+ *
+ * Deliberately NOT anchored on "to <level>" the way {@link LEVEL_REQUEST_PATTERN}
+ * is: that pattern serves an explicit request ("set it to high"), while this
+ * serves a statement ("quality is very high"), which is the shape the
+ * witnessed capture carries.
+ */
+export function recogniseLevelIn(text: string): string | null {
+  if (typeof text !== 'string' || text.length === 0) return null;
+  const hay = text.toLowerCase();
+  const words = [...LEVEL_SYNONYMS.keys()].sort((a, b) => b.length - a.length);
+  for (const w of words) {
+    if (new RegExp(`\\b${w.replace(/ /g, '\\s+')}\\b`, 'i').test(hay)) {
+      return LEVEL_SYNONYMS.get(w)!;
+    }
+  }
+  return null;
+}
+
 const LEVEL_REQUEST_PATTERN =
   /\bto\s+(very\s+high|low|moderate|medium|mid|high)\b/i;
 
@@ -405,7 +434,14 @@ const OFFER_GRID: readonly number[] = Object.freeze([
   0.1, 0.2, 0.3, 0.4, 0.6, 0.7, 0.8, 0.9,
 ]);
 
-function offersForBand(band: string): readonly number[] {
+/**
+ * ⭐ EXPORTED so the stated-level disclosure can offer the SAME points without
+ * a second copy of this vocabulary. `stated-level-divergence.ts` answers a
+ * different question (prose landed, number did not move) but must offer the
+ * identical grid, and a private duplicate of a band table is this estate's
+ * dominant defect. One owner, two callers.
+ */
+export function offersForBand(band: string): readonly number[] {
   return OFFER_GRID.filter((v) => qualitativeBand(v) === band).slice(0, 2);
 }
 

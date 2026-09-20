@@ -150,6 +150,10 @@
  */
 
 import type { SuggestedAction } from '../orchestrator/types.js';
+import {
+  offersForBand,
+  recogniseLevelIn,
+} from './compose/unapplied-edit-reply.js';
 import { isLabelEcho } from '../cee/transforms/label-echo.js';
 
 type Dict = Record<string, unknown>;
@@ -178,6 +182,16 @@ export interface StatedLevelDivergence {
    * error one level down, so the copy now uses the graph's own word, or none.
    */
   readonly kind: string | null;
+  /**
+   * The level the person's OWN prose named ("Very high"), or null when it
+   * named none. Drives the offer chips in
+   * {@link buildStatedLevelDivergenceActions}.
+   *
+   * ⛔ A RECOGNISED BAND, NEVER AN INTERPRETED VALUE. This records which band
+   * they said; it does not decide what that band is worth. Resolved by
+   * `recogniseLevelIn`, whose vocabulary is owned by `unapplied-edit-reply.ts`.
+   */
+  readonly statedLevel: string | null;
 }
 
 function isPlainObject(v: unknown): v is Dict {
@@ -362,6 +376,7 @@ function detectOne(
     label,
     currentDisplay,
     kind: typeof node.kind === 'string' && node.kind.trim().length > 0 ? node.kind.trim() : null,
+    statedLevel: recogniseLevelIn(firstProse(value, proseKeys) ?? ''),
   };
 }
 
@@ -493,6 +508,21 @@ export function buildStatedLevelDivergenceActions(
   for (const d of divergences) {
     if (seen.has(d.path)) continue;
     seen.add(d.path);
+    // ⭐ THE OFFER, when their own prose named a band. "Set <label> to <n>" —
+    // `set` is already a value-lane verb, so this replays into the path that
+    // WORKS and writes `user_override`. It deliberately does not widen the
+    // routing gate, which is a consent-semantics change owned elsewhere.
+    if (d.statedLevel !== null) {
+      for (const n of offersForBand(d.statedLevel)) {
+        actions.push({
+          label: `Set ${d.label} to ${n}`,
+          prompt: `Set ${d.label} to ${n}`,
+          role: 'facilitator',
+        });
+      }
+    }
+    // KEPT, always. The offered points are two of the band's; a person who
+    // means a different number must not have to fight the chips for it.
     actions.push({
       label: `Set a value for ${d.label}`,
       prompt: `What value should ${d.label} take?`,
