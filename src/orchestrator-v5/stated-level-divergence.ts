@@ -155,7 +155,6 @@ import {
   recogniseLevelIn,
   resolveFactorScale,
   type FactorScale,
-  type UnappliedEditNode,
 } from './compose/unapplied-edit-reply.js';
 import { isLabelEcho } from '../cee/transforms/label-echo.js';
 
@@ -400,11 +399,34 @@ function detectOne(
     kind: typeof node.kind === 'string' && node.kind.trim().length > 0 ? node.kind.trim() : null,
     statedLevel: recogniseLevelIn(firstProse(value, proseKeys) ?? ''),
     // The node is in hand here, so the scale is read from the SAME object the
-    // rest of this detection is about. `as` narrows a structurally-checked
-    // record to the resolver's input shape; every field it reads is optional
-    // and defensively parsed there, so a node missing them resolves `unknown`
+    // rest of this detection is about.
+    //
+    // ⚠ AN EXPLICIT PROJECTION, NOT A DOUBLE CAST. Casting the node straight
+    // to the resolver's parameter type compiled and read cleanly, and the CI
+    // forbidden-boundary ratchet correctly refused it (59 > baseline 58). The
+    // gate is right, and the exemption comment it offers would have been the
+    // wrong use of it: a double cast here asserts a shape nothing checks,
+    // whereas naming the six fields states exactly what the resolver reads
+    // and fails at the type level if that ever changes.
+    //
+    // ⛔ AND THE PATTERN IS DELIBERATELY NOT SPELLED IN THIS COMMENT. That
+    // scanner counts occurrences in TEXT, so a docblock explaining the defect
+    // would trip the very gate it is explaining — the third instance of that
+    // class in one night, after a provenance literal and a spelled magnitude
+    // word. In this estate the token IS the interface.
+    //
+    // Every field below is optional and defensively parsed in
+    // `resolveFactorScale`, so a node missing all of them resolves `unknown`
     // — which withholds the offer, the fail-safe direction.
-    scale: resolveFactorScale(node as unknown as UnappliedEditNode),
+    scale: resolveFactorScale({
+      id: op.path,
+      kind: typeof node.kind === 'string' ? node.kind : '',
+      label,
+      observed_state: node.observed_state,
+      data: node.data,
+      unit: node.unit,
+      cap: node.cap,
+    }),
   };
 }
 
