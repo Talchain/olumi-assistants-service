@@ -232,10 +232,33 @@ export function recordApplied(
   return replace(store, { ...p, status: 'applied', receipt_id: opts.receipt_id, applied_at: opts.applied_at });
 }
 
-/** The user changed their mind, or the assistant retracted. */
+/**
+ * The user changed their mind, or the assistant retracted.
+ *
+ * ⚠ CANCELLATION IS NOT ROLLBACK, AND THIS FUNCTION GOT THAT WRONG ONCE.
+ *
+ * As first written, this refused only `applied` — so an `apply_in_flight`
+ * proposal could be withdrawn, which silently removed it from
+ * {@link needsReconciliation} while its write may already have landed. The
+ * store would then hold no record that anything was outstanding, and the
+ * conversation would be free to say the change did not happen. That is the
+ * "updated then denied" defect arriving through the cancel path instead of
+ * the save path.
+ *
+ * The reasoning was already written out, correctly, in
+ * {@link markStaleForRevision} directly below — and was not applied here.
+ * Caught by review (Codex, 20 Sep 2026), not by this module's own suite,
+ * which is why the case is now pinned by two tests and a mutant.
+ *
+ * An unknown outcome survives every state change except reconciliation.
+ */
 export function withdrawProposal(store: ProposalStore, id: string): ProposalStore {
   const p = find(store, id);
   assertState(p.status !== 'applied', 'an applied change cannot be withdrawn here — it needs a reversing change with its own consent');
+  assertState(
+    p.status !== 'apply_in_flight',
+    'a save that is already in flight cannot be withdrawn — its outcome is unknown, and cancelling it here would discard that fact. Reconcile it first, then withdraw or reverse whatever actually happened',
+  );
   return replace(store, { ...p, status: 'withdrawn' });
 }
 
@@ -298,4 +321,39 @@ export function describeForUser(p: Proposal): string {
     case 'withdrawn':
       return 'set aside';
   }
+}
+
+/**
+ * The exact operations a "yes" authorised — the ONLY thing that may be applied.
+ *
+ * WHY THIS EXISTS AS A FUNCTION RATHER THAN A FIELD READ
+ * ------------------------------------------------------
+ * The tempting shape is: user agrees, the assistant re-derives the change from
+ * the conversation, and applies that. It is tempting because it looks more
+ * responsive — the re-derivation can incorporate whatever the user said in the
+ * same breath as "yes". It is also how a user consents to one thing and gets
+ * another, and no test of the mutation path can see it, because the operation
+ * it receives is perfectly valid.
+ *
+ * So consent binds to the operations as they were offered, and the apply path
+ * takes them from here. Anything the user added alongside their yes is a NEW
+ * proposal, offered and agreed on its own terms.
+ *
+ * Refuses on any status other than `authorised`:
+ *  · `open`        — not agreed yet
+ *  · `stale`       — the model moved; the offer must be made again
+ *  · `apply_in_flight` / `applied` — already sent; re-sending is the
+ *                    double-apply this store exists to prevent
+ *  · `withdrawn`   — retracted
+ */
+export function operationsToApply(
+  store: ProposalStore,
+  id: string,
+): { readonly operations: readonly ProposalOperation[]; readonly model_revision: string } {
+  const p = find(store, id);
+  assertState(
+    p.status === 'authorised',
+    `only an authorised proposal can be applied, and this one is "${p.status}"`,
+  );
+  return { operations: p.operations, model_revision: p.model_revision };
 }

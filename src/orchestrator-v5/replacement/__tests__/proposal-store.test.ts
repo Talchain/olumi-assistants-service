@@ -18,6 +18,7 @@ import {
   needsReconciliation,
   openProposal,
   openProposals,
+  operationsToApply,
   recordApplied,
   withdrawProposal,
   type ProposalStore,
@@ -212,5 +213,84 @@ describe('purity and identity', () => {
 
   it('refuses any operation on an unknown proposal', () => {
     expect(() => withdrawProposal(EMPTY_PROPOSAL_STORE, 'nope')).toThrow(ProposalStateError);
+  });
+});
+
+/**
+ * Found by review, not by this suite — which is the reason these two cases
+ * exist. `withdrawProposal` refused only `applied`, so a save whose outcome
+ * was unknown could be cancelled out of existence.
+ */
+describe('cancellation is not rollback', () => {
+  function inFlight(): ProposalStore {
+    return beginApply(authorised(), 'p1', {
+      idempotency_key: 'key-1',
+      apply_started_at: T,
+      current_model_revision: REV_A,
+    });
+  }
+
+  it('refuses to withdraw a save that is already in flight', () => {
+    expect(() => withdrawProposal(inFlight(), 'p1')).toThrow(ProposalStateError);
+    expect(() => withdrawProposal(inFlight(), 'p1')).toThrow(/outcome is unknown/);
+  });
+
+  it('the unknown outcome survives the attempt — it is still awaiting reconciliation', () => {
+    const store = inFlight();
+    try {
+      withdrawProposal(store, 'p1');
+    } catch {
+      /* expected */
+    }
+    expect(needsReconciliation(store)).toHaveLength(1);
+    expect(needsReconciliation(store)[0]?.idempotency_key).toBe('key-1');
+  });
+
+  it('a proposal that was never sent can still be withdrawn — the guard is narrow', () => {
+    // Contrast control. Without this, a guard that refused EVERY withdrawal
+    // would pass the two cases above while breaking the feature.
+    const withdrawn = withdrawProposal(proposed(), 'p1');
+    expect(openProposals(withdrawn)).toHaveLength(0);
+    expect(needsReconciliation(withdrawn)).toHaveLength(0);
+  });
+
+  it('an authorised but unsent proposal can still be withdrawn', () => {
+    expect(() => withdrawProposal(authorised(), 'p1')).not.toThrow();
+  });
+});
+
+/**
+ * Consent binds to the operations as they were OFFERED.
+ *
+ * The failure this prevents is subtle and invisible downstream: the user says
+ * yes, the assistant re-derives the change from the conversation, and applies
+ * something adjacent to what was shown. The mutation path receives a valid
+ * operation and cannot tell.
+ */
+describe('consent binds to the exact executable change', () => {
+  it('returns the stored operations and the revision they were bound to', () => {
+    const got = operationsToApply(authorised(), 'p1');
+    expect(got.operations).toEqual([
+      { kind: 'set_factor_value', summary: 'Set Monthly Churn Rate to 0.03' },
+    ]);
+    expect(got.model_revision).toBe(REV_A);
+  });
+
+  it('refuses a proposal that has not been agreed to', () => {
+    expect(() => operationsToApply(proposed(), 'p1')).toThrow(/only an authorised proposal/);
+  });
+
+  it('refuses to hand out the operations a second time once a save is in flight', () => {
+    const flying = beginApply(authorised(), 'p1', {
+      idempotency_key: 'key-1',
+      apply_started_at: T,
+      current_model_revision: REV_A,
+    });
+    expect(() => operationsToApply(flying, 'p1')).toThrow(/apply_in_flight/);
+  });
+
+  it('refuses a stale proposal — the model moved, so the offer must be made again', () => {
+    const stale = markStaleForRevision(authorised(), REV_B);
+    expect(() => operationsToApply(stale, 'p1')).toThrow(/stale/);
   });
 });
