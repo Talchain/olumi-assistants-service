@@ -21,6 +21,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { buildCoachingDegradeResponse } from '../coaching-output-postcheck.js';
+import { textNamesLeadingOption } from '../../compose/leading-option-egress-guard.js';
 import type { CoachingStatePack } from '../../context/canonical-analysis-state.js';
 
 /** Fresh, usable, unblocked — the state the captured turn was actually in. */
@@ -128,6 +129,38 @@ describe('a question the model cannot answer gets an answer, not a blank prompt'
       readinessNodes: RISK_NODES,
     });
     expect(none.assistant_text).toContain('was not safe to show as-is');
+  });
+
+  /**
+   * ⭐ THE COPY MUST SURVIVE ITS OWN EGRESS. This text ships on turns where a
+   * claim was just barred, so a leader word in it would be caught by the very
+   * guard family that barred the claim — and the person would be deflected all
+   * over again, which is the defect this change exists to remove.
+   *
+   * `withheld-reason-tail.ts` enforces the equivalent at MODULE LOAD for its
+   * voices. This file has no such probe, so the check lives here instead of
+   * nowhere.
+   *
+   * ⚠ WITH A POSITIVE CONTROL, because an absence assertion whose instrument
+   * cannot see a presence proves nothing (trap 13).
+   */
+  it('⭐ neither shape trips the shared leader vocabulary', () => {
+    expect(
+      textNamesLeadingOption('Option A comes out ahead of Option B'),
+      'positive control: the guard must be able to SEE a leader claim',
+    ).toBe(true);
+
+    const withSubject = buildCoachingDegradeResponse(FRESH_USABLE, {
+      violation: 'unsupported_evidence_or_confidence_claim',
+      question: 'How likely is this?  Dilution and Control Risk',
+      readinessNodes: RISK_NODES,
+    }).assistant_text;
+    const noSubject = buildCoachingDegradeResponse(FRESH_USABLE, {
+      violation: 'unsupported_evidence_or_confidence_claim',
+    }).assistant_text;
+
+    expect(textNamesLeadingOption(withSubject)).toBe(false);
+    expect(textNamesLeadingOption(noSubject)).toBe(false);
   });
 
   it('a state-UNSAFE pack still takes its trust template — this arm is fresh-only', () => {
