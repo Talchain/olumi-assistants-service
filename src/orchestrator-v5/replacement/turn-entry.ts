@@ -53,6 +53,7 @@ import {
 } from './conversation-memory.js';
 import { EMPTY_PROPOSAL_STORE, type ProposalStore } from './proposal-store.js';
 import { createSetOptionEffectTool } from './propose-tools.js';
+import { scrubKnownIdentifiers } from './scrub-identifiers.js';
 import { createReadResultsTool, createReadWorkspaceTool, type AnalysisSnapshot } from './read-tools.js';
 import {
   runReplacementTurn,
@@ -238,8 +239,14 @@ export async function handleReplacementTurn(
     );
   }
 
+  // Identifiers out, by identity against THIS graph — never by a pattern over
+  // English. The shared egress scrub matches a pattern and was measured
+  // rewriting nine of seventeen ordinary business sentences into
+  // ungrammatical text; see scrub-identifiers.ts.
+  const assistantText = scrubKnownIdentifiers(result.text, input.getGraph() ?? null);
+
   return {
-    assistantText: result.text,
+    assistantText,
     state: next,
     applied: result.applied,
     mustReconcile: result.mustReconcile,
