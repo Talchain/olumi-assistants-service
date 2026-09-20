@@ -6,9 +6,20 @@ import { transformNodeToV3 } from "../../transforms/schema-v3.js";
 import { creditUserTypedFigures } from "../enricher.js";
 
 function publishedSource(node: GraphT["nodes"][number]) {
+  expect(node.kind).toBe("factor");
+  const {
+    goal_threshold, goal_threshold_raw, goal_threshold_unit,
+    goal_threshold_cap, goal_baseline, goal_baseline_raw, ...factor
+  } = node;
+  // These real projected factors have no goal-only fields. Verify that before
+  // crossing the legacy V1 boundary, whose goal fields do not admit null.
+  expect([
+    goal_threshold, goal_threshold_raw, goal_threshold_unit,
+    goal_threshold_cap, goal_baseline, goal_baseline_raw,
+  ]).toEqual(Array(6).fill(undefined));
   const data = FactorData.parse(node.data);
   expect(data).toEqual(node.data);
-  return transformNodeToV3({ ...node, data }).observed_state?.source;
+  return transformNodeToV3({ ...factor, data }).observed_state?.source;
 }
 
 function projectedClaim(role: DraftRecordRole, unbased = false, movement = false) {
