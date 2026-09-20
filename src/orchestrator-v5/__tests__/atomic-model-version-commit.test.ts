@@ -829,7 +829,13 @@ describe("V5ModelVersionCommitted — a committed version is observable", () => 
     // content-free contract: a PREFIX of the identity hash, never the whole one
     const prefix = e.graph_identity_hash_prefix as string;
     expect(prefix).toMatch(/^[0-9a-f]{16}$/);
-    const full = computeGraphIdentityHash(GRAPH).value;
+    // `computeGraphIdentityHash` returns `GraphIdentityHash | null`. PIN the
+    // precondition rather than asserting it away with `!`: if the fixture ever
+    // stopped hashing, a bare `!` would make this test fail on a confusing
+    // line instead of saying what actually broke.
+    const fullHash = computeGraphIdentityHash(GRAPH as never);
+    expect(fullHash).not.toBeNull();
+    const full = fullHash!.value;
     expect(full.startsWith(prefix)).toBe(true);
     expect(prefix.length).toBeLessThan(full.length);
   });
