@@ -52,6 +52,7 @@ import {
   type ConversationMemory,
 } from './conversation-memory.js';
 import { EMPTY_PROPOSAL_STORE, type ProposalStore } from './proposal-store.js';
+import { createSetOptionEffectTool } from './propose-tools.js';
 import { createReadResultsTool, createReadWorkspaceTool, type AnalysisSnapshot } from './read-tools.js';
 import {
   runReplacementTurn,
@@ -109,8 +110,9 @@ export interface ReplacementEntryDeps {
   readonly state: ReplacementStateStore;
   /** Absent means this turn cannot save. Said in the prompt, not discovered. */
   readonly applyOperations?: ApplyOperations;
-  /** Change tools beyond the built-in accept. Injected so the tool set is a
-   *  decision made at the call site and visible in one place. */
+  /** Change tools BEYOND the standard set. `set_option_effect` is always
+   *  present — its absence is what ended a live session, so it is not a thing
+   *  a call site can forget to pass. */
   readonly proposeTools?: readonly AgentTool[];
   readonly maxIterations?: number;
 }
@@ -193,6 +195,7 @@ export async function handleReplacementTurn(
   const tools: AgentTool[] = [
     createReadWorkspaceTool({ getGraph: input.getGraph, requestId: input.requestId }),
     createReadResultsTool({ getAnalysis: input.getAnalysis }),
+    createSetOptionEffectTool({ getGraph: input.getGraph }),
     ...(deps.proposeTools ?? []),
   ];
 

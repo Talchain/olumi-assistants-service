@@ -152,6 +152,9 @@ describe('the read tools are always present', () => {
     await handleReplacementTurn(entryInput(), { chatWithTools: spy, state: memoryStore() });
     expect(seen[0]).toContain('read_workspace');
     expect(seen[0]).toContain('read_results');
+    // Not optional. Its absence is what ended a live session, so no call site
+    // can forget to pass it.
+    expect(seen[0]).toContain('set_option_effect');
   });
 
   it('carries prior state into the prompt so the conversation does not restart each turn', async () => {
