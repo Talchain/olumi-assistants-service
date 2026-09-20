@@ -245,6 +245,25 @@ function reasonForRerun(snapshot: AnalysisSnapshot): RunReason {
   };
 }
 
+/**
+ * The record could not be read, so nothing is known about what exists.
+ *
+ * Kept apart from {@link FIRST_RUN} for the same reason `read_results` keeps
+ * its two no-figures sentences apart: FIRST_RUN asserts "NO ANALYSIS HAS EVER
+ * BEEN RUN on this model", and offering to SPEND on that basis when the record
+ * was simply unreadable is the product charging for an answer it may already
+ * hold. Running is still a legitimate offer here — it is the justification that
+ * has to be true.
+ */
+const RECORD_UNREADABLE: RunReason = {
+  summary: 'Run the analysis — what is on record could not be read on this turn',
+  why:
+    'THE ANALYSIS RECORD COULD NOT BE READ. That is not a finding that nothing has been ' +
+    'computed — an analysis may exist and may even be current; nothing here establishes ' +
+    'either way. Say that plainly. Running it would produce a result that is certainly ' +
+    'current, and that is the only thing running it guarantees here.',
+};
+
 const FIRST_RUN: RunReason = {
   summary: 'Run the analysis — nothing has been computed for this model yet',
   why:
@@ -286,7 +305,17 @@ export function createRunAnalysisTool(deps: RunAnalysisToolDeps): AgentTool {
       return { type: 'refused', content: RUN_ANALYSIS_ALREADY_CURRENT };
     }
 
-    const reason = hasAnalysis ? reasonForRerun(snapshot) : FIRST_RUN;
+    // "We could not look" is not "nothing is there". Offering to spend real
+    // compute on the grounds that nothing has ever been computed, when the read
+    // simply failed, is the paid-for half of the same false claim
+    // `read_results` used to make.
+    const recordUnreadable =
+      snapshot !== null && snapshot !== undefined && snapshot.recordReadOk === false;
+    const reason = hasAnalysis
+      ? reasonForRerun(snapshot)
+      : recordUnreadable
+        ? RECORD_UNREADABLE
+        : FIRST_RUN;
     const exclusion = exclusionDisclosure(admission);
 
     return {

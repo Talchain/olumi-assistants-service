@@ -20,25 +20,54 @@
  * · `mayNameLeadingOptionProvenance === 'fail_closed_unavailable'` makes the
  *   egress wipe text, blocks, chips and insights together.
  *
- * WHY THE CLAIM PERMISSION IS HONEST HERE RATHER THAN OPTIMISTIC
- * --------------------------------------------------------------
- * In the retired path the permission is a verdict computed over a stored
- * analysis fact, because prose could name a leader from anywhere. In this
- * layer the model's ONLY route to a figure is `read_results`, which reports
- * what the analysis actually contains and says plainly when nothing has run.
- * So the permission tracks a simpler fact: does an analysis exist for this
- * turn to have read?
+ * ⛔⛔ THIS MODULE NO LONGER DECIDES THE CLAIM PERMISSION, AND THE REASON IS
+ * THAT ITS ARGUMENT FOR DOING SO WAS WRONG IN PRACTICE.
+ * ---------------------------------------------------------------------------
+ * It used to take `analysisExists: boolean` and emit
+ * `mayNameLeadingOption: analysisExists`, on this reasoning:
  *
- * ⚠ THE LIMIT OF THAT ARGUMENT, STATED RATHER THAN IMPLIED. It rests on
- * `read_results` being the only source of a figure, which is a property of
- * the tool set this layer assembles — not something enforced by the type
- * system. A future tool that returns a number without that discipline breaks
- * it silently. That is a review obligation on every new read tool, and it is
- * the reason `AgentTool.kind` exists at all.
+ *   ~~In the retired path the permission is a verdict computed over a stored
+ *   analysis fact, because prose could name a leader from anywhere. In this
+ *   layer the model's ONLY route to a figure is `read_results` … So the
+ *   permission tracks a simpler fact: does an analysis exist for this turn to
+ *   have read?~~
+ *
+ * The argument is coherent. What defeated it is that **the route had no way to
+ * answer its own question**: the only production call site passed the literal
+ * `analysisExists: false`, so the permission was a CONSTANT wearing a verdict's
+ * name. Every replacement turn shipped `mayNameLeadingOption: false` with
+ * provenance `no_analysis_exists`, which meant:
+ *
+ *   · `enforceLeadingOptionClaimsAtWire` entered its withhold branch on EVERY
+ *     turn — measured, 8 of 22 ordinary coaching sentences rewritten, one of
+ *     them into a dangling anaphora ("No single option can be put forward yet.
+ *     It also costs more, which you said matters.");
+ *   · the wire published `leader_claim.withheld_reason:
+ *     'constraint_verdict_withheld'` — "WE LOOKED AND DECLINED" — for a turn
+ *     that evaluated no constraint at all;
+ *   · and `route-egress-claim-safety-marking.drift.test.ts` REDs on it, in its
+ *     own words: "an exit hardcoded its claim-safety permission."
+ *
+ * Two questions had been collapsed into one name (CLAUDE.md trap 21): "does an
+ * analysis exist?" and "may this turn name a leading option?". They are
+ * answered by different authorities and only the second belongs on the wire.
+ *
+ * So the permission now comes from the estate's canonical derivation, spread
+ * into the exit's ctx as `...(await claimSafety.forExit())` exactly as twenty
+ * other exits do, and this module does not express an opinion about it. The
+ * "does an analysis exist?" question still matters — but to the MODEL, through
+ * `read_results`, which is where it was always supposed to be answered.
+ *
+ * ⚠ THE LIMIT OF THE ORIGINAL ARGUMENT IS STILL WORTH KEEPING, because it
+ * applies to the tool set regardless of who owns the permission: it rests on
+ * `read_results` being the only source of a figure, which is a property of the
+ * tool set this layer assembles — not something enforced by the type system. A
+ * future tool that returns a number without that discipline breaks it
+ * silently. That is a review obligation on every new read tool, and it is the
+ * reason `AgentTool.kind` exists at all.
  */
 
 import type { OlumiResponse } from '@talchain/schemas/boundary';
-import type { MayNameLeadingOptionProvenance } from '../context/claim-safety-read.js';
 import type { ReplacementEntryResult } from './turn-entry.js';
 
 export interface ShapeRunResultInput {
@@ -51,17 +80,11 @@ export interface ShapeRunResultInput {
   readonly commitPerformed: boolean;
   /** Set ONLY when `commitPerformed` is false. `'GRAPH_DIVERGED'` yields 409. */
   readonly failureType?: string | null;
-  /** True when an analysis exists for this scenario — not whether the model
-   *  read it. Absence is `no_analysis_exists`, which is the honest state and
-   *  is NOT one of the wiping provenances. */
-  readonly analysisExists: boolean;
   readonly wallClockMs: number;
 }
 
 export interface ShapedRunResult {
   readonly response: OlumiResponse;
-  readonly mayNameLeadingOption: boolean;
-  readonly mayNameLeadingOptionProvenance: MayNameLeadingOptionProvenance;
   readonly telemetry: {
     readonly stages_completed: string[];
     readonly response_emitted: true;
@@ -106,8 +129,6 @@ export function shapeRunResult(input: ShapeRunResultInput): ShapedRunResult {
 
   return {
     response,
-    mayNameLeadingOption: input.analysisExists,
-    mayNameLeadingOptionProvenance: input.analysisExists ? 'scenario_fact' : 'no_analysis_exists',
     telemetry: {
       stages_completed: stagesFor(turn),
       response_emitted: true,

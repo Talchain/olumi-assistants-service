@@ -386,6 +386,29 @@ export interface AnalysisSnapshot {
   readonly freshnessReason?: string | null;
   /** ISO timestamp the analysis was computed at, when known. */
   readonly computedAt?: string | null;
+  /**
+   * ⭐ DID THE READ OF THE ANALYSIS RECORD SUCCEED?
+   *
+   * `false` means WE COULD NOT LOOK — the store threw, the scenario fact
+   * carrier came back degraded, or the turn context could not be built. It is
+   * NOT the same as looking and finding nothing, and the difference is the
+   * whole reason this field exists.
+   *
+   * Without it, `enrichment: null` was one word for two different worlds and
+   * the tool asserted the wrong one: `READ_RESULTS_NO_ANALYSIS` tells the model
+   * an analysis was "not withheld, simply never computed" AND instructs it to
+   * say so plainly. On a failed read that is a positive claim about the world
+   * that nobody is in a position to make.
+   *
+   * Omitted is treated as `true` — every existing caller supplies a snapshot
+   * only when it HAS one, so silence there means "I looked". A caller that
+   * could not look must say so explicitly.
+   *
+   * Deliberately the estate's existing vocabulary: `prior_facts_read_ok` and
+   * `newest_analysis_fact_read_ok` mean exactly this, and a third spelling of
+   * one idea is how a distinction stops being checked.
+   */
+  readonly recordReadOk?: boolean;
 }
 
 export interface ReadResultsDeps {
@@ -398,6 +421,25 @@ export const READ_RESULTS_NO_ANALYSIS =
   'There are no probabilities, no outcome ranges and no comparison between the ' +
   'options — not withheld, simply never computed. Say so plainly rather than ' +
   'reasoning as if figures existed.';
+
+/**
+ * THE FOURTH STATE: the record could not be read.
+ *
+ * Kept apart from {@link READ_RESULTS_NO_ANALYSIS} because that sentence makes
+ * a POSITIVE claim — nothing was ever computed — and instructs the model to
+ * repeat it. On a failed read that claim is unsupported, and it is the
+ * user-facing half of the defect this layer exists to end: a product telling
+ * someone their completed analysis never happened.
+ *
+ * Says what is and is not known, and prescribes an action the user can take,
+ * because "I don't know" with no next step is its own kind of dead end.
+ */
+export const READ_RESULTS_RECORD_UNREADABLE =
+  'THE ANALYSIS RECORD COULD NOT BE READ on this turn, so there are no results ' +
+  'to report. This is NOT a statement that no analysis exists — it may well ' +
+  'exist and be current. Nothing here establishes either way. Say that you ' +
+  'cannot reach the results right now rather than saying none were computed, ' +
+  'do not reason as if figures existed, and offer to try again.';
 
 /**
  * The currency line, which always comes first.
@@ -707,6 +749,12 @@ function coverageSection(enrichment: AnalysisEnrichment): string[] {
 export function createReadResultsTool(deps: ReadResultsDeps): AgentTool {
   const execute = (): AgentToolOutcome => {
     const snapshot = deps.getAnalysis();
+    // ⭐ THREE OUTCOMES WITHOUT FIGURES, AND THEY ARE NOT THE SAME SENTENCE.
+    // A snapshot whose caller could not read the record must never be reported
+    // as "never computed" — see `AnalysisSnapshot.recordReadOk`.
+    if (snapshot !== null && snapshot !== undefined && snapshot.recordReadOk === false) {
+      return { type: 'result', content: READ_RESULTS_RECORD_UNREADABLE };
+    }
     if (snapshot === null || snapshot === undefined || snapshot.enrichment === null) {
       return { type: 'result', content: READ_RESULTS_NO_ANALYSIS };
     }

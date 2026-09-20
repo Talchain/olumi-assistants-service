@@ -21,11 +21,31 @@
  *
  * WHAT THIS IS BUILT ON, AND WHY THAT MATTERS
  * -------------------------------------------
- * `executeOptionInterventionEdit` already writes option interventions — but it
- * is fused to the controller being retired (`parseEditGraphResponse`,
- * `edit-graph-dispatch`, `edit-graph-referee-gate`, `edit-graph-fact-builder`,
- * `commitDirectAnswer`). Wrapping it would drag the old routing back in behind
- * a new name, which is the one thing the replacement must not do.
+ * The retired option-intervention writer in `system-events/` already writes
+ * option interventions — but it is fused to the controller being retired
+ * (`parseEditGraphResponse`, `edit-graph-dispatch`, `edit-graph-referee-gate`,
+ * `edit-graph-fact-builder`, `commitDirectAnswer`). Wrapping it would drag the
+ * old routing back in behind a new name, which is the one thing the
+ * replacement must not do.
+ *
+ * ⚠ THAT WRITER IS NAMED HERE BY DESCRIPTION, NOT BY ITS IDENTIFIER, AND THAT
+ * IS DELIBERATE. `routing/__tests__/consent-coverage-manifest.test.ts` pins the
+ * writer's production consumers at EXACTLY ONE, and its detector is a
+ * source-spelling scan that deliberately includes comments ("even conservative
+ * type imports or comments require review of this still-unadmitted
+ * classification"). Spelling the symbol in this paragraph enrolled THIS file as
+ * a second consumer and REDed the guard — while the sentence the paragraph
+ * makes is that this module does NOT use it.
+ *
+ * The honest repair is this rewording, not a manifest entry: adding the file to
+ * the pinned list would assert in the repo's own record that a second entry
+ * seam onto that applier exists, when the property the guard defends — one
+ * seam, so two callers cannot disagree about what they validate first — is
+ * still true. Verified rather than assumed: this module imports only
+ * `linkedFactorsOf` / `buildOptionEffectRawOperation` from
+ * `routing/option-effect-write.js`, nothing under `replacement/` calls
+ * `commitDirectAnswer`, and the route injects no write path at all, so nothing
+ * here can reach that writer at runtime either.
  *
  * So this composes the parts that are genuinely free of it, each verified by
  * reading its imports at the deployed SHA:

@@ -464,6 +464,25 @@ describe("ROADMAP 2.330 — a new magnitude list in src/ forces a review", () =>
     // genuine sibling lookup and it must move to SIBLING_VALUE_LOOKUPS.
     'cee/structure/compound-goal-label.ts':
       'detection vocabulary only — spells magnitude words but assigns no numeric value and parses no magnitudes',
+    // 20 Sep 2026 — INCIDENTAL, and the mention is PRODUCT COPY rather than
+    // code. `orchestrator-v5/replacement/system-prompt.ts` is the replacement
+    // conversation layer's prompt text. It declares no alphabet, holds no
+    // magnitude->value map, parses nothing, and never converts a magnitude word
+    // into a number: it does not read amounts at all, it TELLS THE MODEL HOW TO
+    // WRITE THEM. The two triggers are the word `thousand` in a docstring
+    // sentence about prompt length, and `million` inside the writing rule
+    // itself — `Write amounts in full: "£2.4 million", not "£2.4m"`.
+    // ⚠ RECORDED RATHER THAN REWORDED, and here that is not merely house style:
+    // the rule exists because a letter suffix "gets split apart when displayed
+    // and reads as a typo" on the deployed UI. Rewording the example to dodge
+    // this guard would edit a measured display fix out of the product to quiet
+    // an alarm, which is the worst available trade. This entry IS the review the
+    // guard asked for.
+    // ⚠ If this file ever maps a magnitude word to a NUMBER — a converter in the
+    // prompt layer, say — it becomes a genuine sibling lookup and must move to
+    // SIBLING_VALUE_LOOKUPS.
+    'orchestrator-v5/replacement/system-prompt.ts':
+      'incidental — prompt COPY that instructs the model to write amounts in full; declares no alphabet, parses nothing, and maps no magnitude word to a number',
     // ROADMAP 2.1051 — INCIDENTAL. The direction gate holds no magnitude list
     // of its own: it IMPORTS `AMT` and `parseValue` from the extractor
     // precisely so it cannot drift from them. Its only magnitude words sit in

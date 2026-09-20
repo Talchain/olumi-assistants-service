@@ -29,6 +29,10 @@ import { describe, expect, it } from 'vitest';
 import { sanitiseOlumiResponseForEgress } from '../../compose/output-safety.js';
 import { validateEgress } from '../../../validators/b1.js';
 import { shapeRunResult } from '../to-run-result.js';
+import {
+  ANALYSIS_AUTHORITY_UNAVAILABLE_NOTICE,
+  enforceAnalysisAuthorityUnavailableAtEgress,
+} from '../../compose/analysis-authority-unavailable-notice.js';
 import type { ReplacementEntryResult } from '../turn-entry.js';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 
@@ -60,7 +64,6 @@ function throughEgress(text: string, over: Partial<typeof CTX> = {}): OlumiRespo
     turn: turn(text),
     stage: 'frame',
     commitPerformed: true,
-    analysisExists: true,
     wallClockMs: 1234,
   });
   const ctx = { ...CTX, ...over };
@@ -128,21 +131,86 @@ describe('the assistant text reaches the wire unchanged', () => {
 });
 
 describe('the fields that decide whether the response is wiped', () => {
-  it('the provenance this controller sets is not the one that wipes the response', () => {
-    // `fail_closed_unavailable` is the single member of seven that triggers
-    // the analysis-authority wipe. Named here so a change to shapeRunResult
-    // that reached for it would fail loudly rather than blank a turn.
-    const withAnalysis = shapeRunResult({
-      turn: turn('x'), stage: 'frame', commitPerformed: true, analysisExists: true, wallClockMs: 1,
+  it('this controller expresses NO opinion about the claim permission — the exit inherits it', () => {
+    // ⛔ THIS TEST REPLACES ONE THAT PINNED THE OPPOSITE, AND THE REPLACEMENT
+    // IS THE POINT.
+    //
+    // It used to assert that `shapeRunResult` emits `scenario_fact` when
+    // `analysisExists` is true and `no_analysis_exists` when it is false, and
+    // that neither is the wiping provenance. Every one of those assertions
+    // passed. They were all true. And the property they certified was
+    // worthless, because the ONLY production call site passed the literal
+    // `analysisExists: false` — so the "verdict" was a constant, and the test
+    // proved a mapping nothing exercised.
+    //
+    // That is this estate's signature test defect in miniature: a green
+    // assertion over an input space the product never visits (CLAUDE.md trap
+    // 16-inverse — a fixture you wrote yourself is not evidence about the
+    // wire). The permission now comes from the canonical turn-entry read,
+    // spread into the exit as `...(await claimSafety.forExit())`, and the
+    // honest thing for this module to assert is that it no longer has an
+    // opinion to be wrong about.
+    const shaped = shapeRunResult({
+      turn: turn('x'), stage: 'frame', commitPerformed: true, wallClockMs: 1,
     });
-    const without = shapeRunResult({
-      turn: turn('x'), stage: 'frame', commitPerformed: true, analysisExists: false, wallClockMs: 1,
+    expect(Object.keys(shaped).sort()).toEqual(['response', 'telemetry']);
+    expect(shaped).not.toHaveProperty('mayNameLeadingOption');
+    expect(shaped).not.toHaveProperty('mayNameLeadingOptionProvenance');
+  });
+
+  it('⚠ the exit IS wipeable under one inherited provenance, and that was chosen', () => {
+    // ═══════════════════════════════════════════════════════════════════════
+    // A DELIBERATE BEHAVIOUR CHANGE, PINNED SO IT IS NOT REDISCOVERED AS A BUG.
+    //
+    // While the exit passed a hardcoded permission, `fail_closed_unavailable`
+    // was unreachable here and the analysis-authority wipe could never fire on
+    // a coaching answer. Inheriting the canonical verdict makes it reachable:
+    // `readMayNameLeadingOptionVerdict` returns it when the scenario-scoped
+    // analysis read FAILED and the turn window was not truncated. Combined
+    // with `answerKind: 'substantive'`, the whole reply — text, blocks, chips,
+    // insights — is then replaced by ANALYSIS_AUTHORITY_UNAVAILABLE_NOTICE.
+    //
+    // ⭐ WHY NO EXEMPTION WAS ADDED, since one was considered and is the
+    // tempting move: this layer's `read_results` now says the unreadable case
+    // in its own, more precise words, so a bypass looked justified. It is not.
+    // The wipe's stated justification is that substantive prose "may contain
+    // arbitrary model prose, including the exact false claim this guard closes
+    // ('no analysis has run')" — and a TOOL refusal cannot bind what the model
+    // writes from its own head. Carving out the newest, least-proven exit from
+    // an existing safety guard, to protect that exit's own output, is the move
+    // this estate keeps paying for. The cost is losing one good answer on a
+    // genuine store outage; the notice is honest and names a next step.
+    //
+    // The two conditions are NOT the same, which is what keeps the honest
+    // sentence reachable in the common case: this exit's snapshot reports
+    // "could not read" whenever the scenario fact CARRIER is absent, degraded
+    // or unattested, while the wipe needs the narrower scenario-scoped
+    // newest-fact READ to have failed. Where only the former holds, no wipe
+    // fires and `read_results`' precise sentence ships.
+    // ═══════════════════════════════════════════════════════════════════════
+    const shaped = shapeRunResult({
+      turn: turn('A good answer about something else entirely.'),
+      stage: 'frame',
+      commitPerformed: true,
+      wallClockMs: 1,
     });
-    expect(withAnalysis.mayNameLeadingOptionProvenance).toBe('scenario_fact');
-    expect(without.mayNameLeadingOptionProvenance).toBe('no_analysis_exists');
-    for (const p of [withAnalysis, without]) {
-      expect(p.mayNameLeadingOptionProvenance).not.toBe('fail_closed_unavailable');
-    }
+    const wiped = enforceAnalysisAuthorityUnavailableAtEgress(shaped.response, {
+      answerKind: 'substantive',
+      egressOk: true,
+    });
+    expect(wiped.mode).toBe('substantive_replaced');
+    expect(wiped.response.assistant_text).toBe(ANALYSIS_AUTHORITY_UNAVAILABLE_NOTICE);
+
+    // DISCRIMINATING CONTROL: the same call under the other answerKind
+    // preserves the text and appends. Without this the assertion above could
+    // pass on an enforcement that replaces everything unconditionally, and
+    // would tell us nothing about which lever decides it.
+    const preserved = enforceAnalysisAuthorityUnavailableAtEgress(shaped.response, {
+      answerKind: 'functional',
+      egressOk: true,
+    });
+    expect(preserved.mode).toBe('functional_preserved');
+    expect(preserved.response.assistant_text).toContain('A good answer about something else');
   });
 
   it('every stage the ingress can carry passes egress validation', () => {
@@ -153,7 +221,7 @@ describe('the fields that decide whether the response is wiped', () => {
     // side would blank every turn on this path.
     for (const stage of ['frame', 'analyse', 'decide', 'review'] as const) {
       const shaped = shapeRunResult({
-        turn: turn('A real answer.'), stage, commitPerformed: true, analysisExists: true, wallClockMs: 1,
+        turn: turn('A real answer.'), stage, commitPerformed: true, wallClockMs: 1,
       });
       const r = validateEgress(sanitiseOlumiResponseForEgress(shaped.response, CTX), 'req-1');
       expect(r.ok, `stage "${stage}" must pass egress validation`).toBe(true);
@@ -162,7 +230,7 @@ describe('the fields that decide whether the response is wiped', () => {
 
   it('commit_performed is true on the success path — false would ship a non-200', () => {
     const shaped = shapeRunResult({
-      turn: turn('x'), stage: 'frame', commitPerformed: true, analysisExists: true, wallClockMs: 1,
+      turn: turn('x'), stage: 'frame', commitPerformed: true, wallClockMs: 1,
     });
     expect(shaped.telemetry.commit_performed).toBe(true);
     expect(shaped.telemetry.failure_type).toBeNull();

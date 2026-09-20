@@ -429,7 +429,44 @@ describe('withheld-leader enforcement — the roster must survive a graph-less e
       //    retry offer `draft_failure_retry` ("Try again" / "Yes, try building
       //    the model again from what I have shared."), an instruction to redo
       //    the DRAFT. It names no option and carries no leader claim.
-      expect(calls.length).toBe(28);
+      //
+      // ⭐⭐ 2026-09-20, 28 -> 29: the REPLACEMENT CONVERSATION CONTROLLER
+      // (`'replacement_controller'`, route-v2), and this one is UNLIKE the four
+      // above on every axis that matters. Stated plainly, because a bump whose
+      // comment reads like its predecessors' would be the mirror this tripwire
+      // exists to prevent:
+      //
+      //  · it ships a NON-NULL graph — the first admission in that class since
+      //    the roster fix landed. The other four qualified partly BECAUSE
+      //    `graph: null` made the question moot; here it does not.
+      //  · its copy is ARBITRARY LLM PROSE from a coaching agent that holds a
+      //    `read_results` tool, and it is marked `answerKind: 'substantive'`.
+      //    It is therefore the first admitted exit that is deliberately IN the
+      //    prose lane and whose text CAN name a leading option. That is not an
+      //    oversight being waved through: naming a leader when an analysis
+      //    supports it is the capability the layer exists to deliver.
+      //
+      // WHAT MAKES IT SAFE IS NOT ITS COPY BUT ITS WIRING, and both halves were
+      // added for this bump rather than assumed:
+      //  · it inherits the canonical permission via `claimSafety.forExit()`,
+      //    like every other non-execute exit. It previously passed a hardcoded
+      //    `false` derived from a literal `analysisExists: false` — a CONSTANT
+      //    wearing a verdict's name, which armed the withhold branch on every
+      //    single turn and rewrote ordinary coaching sentences into dangling
+      //    anaphora. A permanently-armed gate is not a safe gate; it is an
+      //    alarm nobody can act on.
+      //  · it now threads `analysisReady`, so the roster FALLBACK this file
+      //    exists to defend actually has a second source. Without it the
+      //    enforcer would stand down on `mode: 'roster_unavailable'` whenever
+      //    the client sent no graph — the exact stand-down this fix closed,
+      //    reintroduced on a new exit.
+      //
+      // ⚠ FOR THE NEXT READER: the graph this exit hands the enforcer is the
+      // CLIENT-ECHOED `extensions.graphState`, not a server-derived one. That
+      // is a real limitation of the roster on this path and it is shared with
+      // the other five armed exits (see the file header). It is recorded here,
+      // not fixed here.
+      expect(calls.length).toBe(29);
       // #1246's additional exit is a functional recorded-answer refusal, not
       // a new claim authority. It still funnels through the shared finalizer,
       // forwards claim safety, and uses only the canonical repair graph roster.

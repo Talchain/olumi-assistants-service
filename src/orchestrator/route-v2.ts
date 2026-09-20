@@ -133,6 +133,7 @@ import { validateEgress } from '../validators/b1.js';
 import { runTurnExecutor } from '../orchestrator-v5/turn-executor.js';
 import { handleReplacementTurn } from '../orchestrator-v5/replacement/turn-entry.js';
 import { shapeRunResult } from '../orchestrator-v5/replacement/to-run-result.js';
+import { projectTurnContext } from '../orchestrator-v5/replacement/turn-context-view.js';
 import {
   ReplacementNotConfiguredError,
   anthropicChatWithTools,
@@ -2866,6 +2867,39 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     const { requestId, ingress, extensions } = pre.context;
 
     // ═══════════════════════════════════════════════════════════════════════
+    // ⭐ T1 CLAIM SAFETY — THE TURN-ENTRY READ (ROADMAP 1.233 finish-line
+    // criterion 2 / 1.349 P1-2). Constructed at the top of the handler, before
+    // the FIRST dispatch branch — which since the replacement controller
+    // landed means above it, not here — so EVERY exit below can inherit ONE
+    // answer, and so the replacement branch can share the same memoised
+    // context read instead of opening a second one.
+    //
+    // Until this landed, seventeen exits handed the finaliser a hardcoded
+    // permission of `true` on the premise that "this path runs no
+    // analysis, so it withheld no claim". That premise is false: the
+    // permission belongs to the fact the response DISPLAYS, not to the work
+    // this turn performed — and an edit turn is handed the prior analysis as
+    // context. Live-confirmed 28 Jul (a withheld analysis, then an edit turn
+    // that came back `true`). Because the Layer-3 guard short-circuits on
+    // `true`, that literal was an explicit licence for the alarm not to look.
+    //
+    // LAZY: the resolver reads nothing until an exit asks. The `turn_executor`
+    // path never asks (it carries its own post-dispatch verdict via
+    // `run.mayNameLeadingOption`), so the hot path is unchanged.
+    //
+    // `null` for system events, and that is DERIVED rather than chosen:
+    // `buildTurnContext` is typed `MessageTurnPayload` and reads
+    // `payload.message`, which the `system_event` union member does not have —
+    // which is itself why this file dispatches that family before the
+    // TurnExecutor. The resolver answers `false` /
+    // `fail_closed_no_turn_context` there: we could not look, so we withhold.
+    // ═══════════════════════════════════════════════════════════════════════
+    const claimSafety: TurnClaimSafetyResolver = createTurnClaimSafetyResolver(
+      ingress.kind === 'message' ? ingress : null,
+      requestId,
+    );
+
+    // ═══════════════════════════════════════════════════════════════════════
     // ⭐ REPLACEMENT CONVERSATION CONTROLLER — ONE CONTROLLER PER TURN
     //
     // Placed HERE, immediately after the turn fence is claimed and before the
@@ -2933,13 +2967,54 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         if (replacementStore === null) throw new ReplacementNotConfiguredError();
 
         const startedAt = Date.now();
+
+        // ═══════════════════════════════════════════════════════════════════
+        // ⭐⭐ ONE CONTEXT READ, FOUR CONSUMERS — and it replaces two literals
+        // that were telling users a measurable falsehood.
+        //
+        // `getAnalysis: () => null` and `history: []` were hardcoded here. The
+        // first is the worse of the two and it was not merely a gap: a null
+        // snapshot makes `read_results` return "NO ANALYSIS HAS BEEN RUN on
+        // this model … not withheld, simply never computed. Say so plainly" —
+        // an INSTRUCTION TO ASSERT IT — on a scenario whose analysis finished
+        // minutes earlier, while `run_analysis` offered to spend real compute
+        // re-running the answer the product already held. Reachable with
+        // nothing but the flag on, and reachable EXACTLY when an analysis is
+        // fresh (CEE promotes the wire stage to 'decide' only on a fresh run,
+        // and this branch declines the 'analyse' stage).
+        //
+        // `claimSafety.turnContext()` is the SAME memoised read that
+        // `forExit()` below uses for the claim permission, so this costs the
+        // turn one context read, not two, and there is exactly one answer in
+        // play about what this scenario holds.
+        //
+        // `projectTurnContext` maps it to four states and keeps "we could not
+        // look" apart from "nothing is there" — see its header for why that
+        // distinction is the whole point. It reads the SCENARIO-scoped fact
+        // carrier rather than the ~20-turn `prior_facts` window, because the
+        // window reproduces the same lie on any conversation long enough to
+        // age the analysis out of it.
+        // ═══════════════════════════════════════════════════════════════════
+        const currentGraphHash =
+          computeAnalysisAffectingGraphHash(
+            extensions.graphState as Parameters<typeof computeAnalysisAffectingGraphHash>[0],
+          ) ?? null;
+        const contextView = projectTurnContext(
+          await claimSafety.turnContext(),
+          currentGraphHash,
+          extensions.graphState,
+        );
+
         const turn = await handleReplacementTurn(
           {
             scenarioId: ingress.scenario_id,
             message: ingress.message,
-            history: [],
+            // Reference, not memory. Anything load-bearing lives in the
+            // durable `ConversationMemory` via the `remember` tool, which no
+            // window cap can truncate — see `turn-context-view.ts`.
+            history: contextView.history,
             getGraph: () => extensions.graphState,
-            getAnalysis: () => null,
+            getAnalysis: () => contextView.snapshot,
             // ⛔ WAS `computeRequestHash(ingress)`, WHICH WAS A REAL BUG.
             // That hash is MESSAGE-DEPENDENT, so every turn produced a
             // different "model revision" and `markStaleForRevision` staled
@@ -2952,10 +3027,11 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             // the GRAPH, which is the thing a proposal is actually bound to.
             // Same canonical hash the egress stamps as `graph_hash` and the
             // freshness envelope uses, so the two cannot disagree.
-            modelRevision:
-              computeAnalysisAffectingGraphHash(
-                extensions.graphState as Parameters<typeof computeAnalysisAffectingGraphHash>[0],
-              ) ?? 'graph-unhashable',
+            //
+            // Read from the SAME `currentGraphHash` the analysis view was
+            // derived against, so "is this analysis current?" and "is this
+            // proposal still valid?" are questions about one object.
+            modelRevision: currentGraphHash ?? 'graph-unhashable',
             turnId: requestId,
             requestId,
             now: new Date().toISOString(),
@@ -2974,7 +3050,6 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           turn,
           stage: ingress.stage,
           commitPerformed: true,
-          analysisExists: false,
           wallClockMs: Date.now() - startedAt,
         });
 
@@ -3007,8 +3082,76 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         return await sendFinalised200(reply, requestId, 'replacement_controller', shaped.response, {
           graph: (extensions.graphState ?? null) as GraphV3T | null,
           userMessage: ingress.message,
-          mayNameLeadingOption: shaped.mayNameLeadingOption,
-          mayNameLeadingOptionProvenance: shaped.mayNameLeadingOptionProvenance,
+          // ⛔ WAS A HARDCODED PERMISSION — a literal `analysisExists` of false
+          // upstream, which made the claim permission a permanent negative. It
+          // armed `enforceLeadingOptionClaimsAtWire`'s withhold branch on EVERY
+          // replacement turn and published `withheld_reason:
+          // 'constraint_verdict_withheld'` — "we looked and declined" — for a
+          // turn that evaluated no constraint. Measured: 8 of 22 ordinary
+          // coaching sentences rewritten, one into a dangling anaphora.
+          //
+          // ⚠ AND NOTE HOW THIS COMMENT IS WORDED. Naming the permission field
+          // beside a literal — even in prose — enrols this call site in the
+          // guard's scanner and REDs it, because the scanner reads the whole
+          // argument span as text. Third instance of that class in this change
+          // alone (the magnitude alphabet and the consent manifest were the
+          // others). Describe the old value; do not spell it.
+          //
+          // This is the same canonical derivation twenty other exits inherit,
+          // memoised with the context read above, and it is what
+          // `route-egress-claim-safety-marking.drift.test.ts` asks for by name.
+          //
+          // ⚠ IT MAKES THIS EXIT WIPEABLE, AND THAT WAS CHOSEN RATHER THAN
+          // OVERLOOKED. The canonical read can return `fail_closed_unavailable`
+          // (scenario-scoped analysis read failed, window not truncated), which
+          // with `answerKind: 'substantive'` below replaces the whole reply
+          // with the analysis-authority notice. Previously unreachable here,
+          // because the permission was a constant. An exemption was considered
+          // and refused: see the pinned reasoning in
+          // `replacement/__tests__/egress-byte-identity.test.ts`.
+          ...(await claimSafety.forExit()),
+          // ⭐ THE FRESHNESS FOR THE GRAPH THIS EXIT IS SHIPPING.
+          //
+          // Not `exitFreshness` — that one arrives in the spread above and
+          // describes the PERSISTED graph, which the finaliser correctly
+          // ignores while a graph is in scope. Without this key
+          // `analysis_state.run_state` fell back to `unknown_degraded` /
+          // `no_graph_this_turn`, a cause whose contract text says "no graph
+          // was in scope", on a branch whose entry condition is that a graph
+          // EXISTS — beside a `graph_hash` computed from that same graph.
+          //
+          // Same derivation object the model's own `read_results` answered
+          // from, so the sentence the user reads and the envelope the UI reads
+          // cannot disagree about whether the analysis is current.
+          freshness: contextView.freshness,
+          // The readiness verdict the UI gates its Run affordance on. Every
+          // other graph-bearing exit carries one; without it this layer left
+          // the readiness surface with no server verdict for a whole session,
+          // and left `enforceLeadingOptionClaimsAtWire`'s option-roster
+          // FALLBACK with nothing to fall back to — the stand-down the roster
+          // fix exists to prevent.
+          ...(extensions.graphState != null
+            ? { analysisReady: buildCanonicalAnalysisReadyFromGraph(extensions.graphState) }
+            : {}),
+          // ⭐ A REAL ANSWER, DECLARED AS ONE.
+          //
+          // Omitted, it defaulted to substantive-by-absence and tripped the
+          // functional-marking drift guard. The choice is not free-form: the
+          // guard asks for `'functional'` for functional copy and
+          // `'substantive'` for a real answer, and this is a coaching answer
+          // written by a model holding a `read_results` tool. CEE's own
+          // classifier for free-form coach prose (`turn-executor.ts`) reaches
+          // the same verdict for the same shape.
+          //
+          // ⚠ CONSEQUENCE, STATED RATHER THAN DISCOVERED LATER: below
+          // ANSWER_SHAPE_COLLAPSE_FLOOR_CHARS (3,150) the two choices are
+          // byte-identical on the wire, so for the measured 900–2,200 char
+          // range this is behaviourally free. Above it, progressive disclosure
+          // reflows the text into headline + body. That is a real rewrite of
+          // this layer's own prose and it is accepted deliberately: the
+          // alternative is not "untouched", it is the UI's own blunt 3,000
+          // char truncation.
+          answerKind: 'substantive',
           // Identifiers were already removed BY IDENTITY against this turn's
           // graph. The shared pattern scrub rewrites ordinary English, so it
           // must not run over this text a second time.
@@ -3017,35 +3160,6 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       }
     }
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // ⭐ T1 CLAIM SAFETY — THE TURN-ENTRY READ (ROADMAP 1.233 finish-line
-    // criterion 2 / 1.349 P1-2). Constructed HERE, before the first dispatch
-    // branch, so EVERY exit below can inherit ONE answer.
-    //
-    // Until this landed, seventeen exits handed the finaliser a hardcoded
-    // permission of `true` on the premise that "this path runs no
-    // analysis, so it withheld no claim". That premise is false: the
-    // permission belongs to the fact the response DISPLAYS, not to the work
-    // this turn performed — and an edit turn is handed the prior analysis as
-    // context. Live-confirmed 28 Jul (a withheld analysis, then an edit turn
-    // that came back `true`). Because the Layer-3 guard short-circuits on
-    // `true`, that literal was an explicit licence for the alarm not to look.
-    //
-    // LAZY: the resolver reads nothing until an exit asks. The `turn_executor`
-    // path never asks (it carries its own post-dispatch verdict via
-    // `run.mayNameLeadingOption`), so the hot path is unchanged.
-    //
-    // `null` for system events, and that is DERIVED rather than chosen:
-    // `buildTurnContext` is typed `MessageTurnPayload` and reads
-    // `payload.message`, which the `system_event` union member does not have —
-    // which is itself why this file dispatches that family before the
-    // TurnExecutor. The resolver answers `false` /
-    // `fail_closed_no_turn_context` there: we could not look, so we withhold.
-    // ═══════════════════════════════════════════════════════════════════════
-    const claimSafety: TurnClaimSafetyResolver = createTurnClaimSafetyResolver(
-      ingress.kind === 'message' ? ingress : null,
-      requestId,
-    );
 
     // v0.7.0 schema: ingress is a discriminated union on `kind`. System events
     // (patch_accepted / patch_dismissed / direct_graph_edit / chip_click /
