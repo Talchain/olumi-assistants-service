@@ -2890,7 +2890,31 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       const hasModel =
         graphNow != null && Array.isArray(graphNow.nodes) && graphNow.nodes.length > 0;
 
-      if (hasModel) {
+      // ⛔ ANALYSE-STAGE TURNS ARE DECLINED, and the reason is a measured
+      // user-visible defect rather than caution.
+      //
+      // Derived from the DEPLOYED UI build fd992149 (confirmed against its
+      // own version.json): a response carrying `stage_indicator: "analyse"`
+      // with no `analysis_ready` payload CLEARS `ceeAnalysisReady`
+      // (applyV5State.ts:2020-2029, responseIsAnalyseShaped at :2474). The
+      // message bubble is unaffected, but the user's readiness and results
+      // surface blanks. Answering a question well and wiping their results
+      // while doing it is not a trade worth making.
+      //
+      // Carrying the payload through instead would be the better fix and is
+      // the THIRD increment's work: `extensions.analysisState` is an
+      // `AnalysisStateIngress`, NOT an `AnalysisReadyPayload`, and there are
+      // two different objects in this estate called "readiness" — the compact
+      // one type-checks where the full one is meant and is empty at runtime.
+      // Guessing between them on a user-visible surface is how a symptom gets
+      // shipped, so the branch declines instead and says why.
+      //
+      // Cost of declining: an analyse-stage turn gets the retired coaching
+      // path. Removing this condition is a one-line change once the payload
+      // is carried through properly.
+      const isAnalyseStage = ingress.stage === 'analyse';
+
+      if (hasModel && !isAnalyseStage) {
         // Fail loud, not half-working. Without a durable store a user's
         // agreement can land on an instance that never saw the offer.
         const replacementStore = getReplacementStateStore();
