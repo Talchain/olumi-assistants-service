@@ -258,6 +258,42 @@ const EXPECTED: Record<string, Record<string, number>> = {
     // hash, and the healthy-empty/degraded distinction is preserved exactly as
     // the note above requires.
     'src/orchestrator-v5/system-events/dispatch.ts': 7,
+    // 2026-09-20 replacement conversation layer: +2 (import + one call) — and
+    // it is admitted for a DERIVED reason, not by symmetry with the four
+    // post-commit seams above. It is not a post-commit seam at all; this layer
+    // never writes the graph.
+    //
+    // WHY THE CONTEXT'S OWN VALUE CANNOT BE READ HERE. `build-turn-context`
+    // publishes `persisted_analysis_freshness`, derived against the PERSISTED
+    // graph and the bounded turn window. This exit needs the currency of the
+    // analysis against (a) the graph IN SCOPE ON THIS TURN, which is the
+    // client-echoed `extensions.graphState` the exit is shipping, and (b) the
+    // SCENARIO-scoped fact carrier rather than the ~20-turn window.
+    //
+    // Both differences are load-bearing and each is enforced by another guard:
+    //   · `route-egress-analysis-state-freshness.drift.test.ts` REDs if this
+    //     exit reaches for the persisted-graph derivation (`exitFreshness`)
+    //     while a graph is in scope — its message says so by name. Reading
+    //     `persisted_analysis_freshness` here would be that mistake wearing a
+    //     different field name.
+    //   · reading the WINDOW instead of the scenario carrier reproduces the
+    //     defect `build-turn-context.ts` already records once: "a run_analysis
+    //     fact whose parent turn had aged out was invisible". On this path that
+    //     surfaces as the product telling a user their analysis never happened.
+    //
+    // So this is the same shape the turn-executor already carries deliberately:
+    // it keeps `routingFreshness` (window, policy) apart from
+    // `promptAnalysisFreshness` (scenario carrier, model-facing) because they
+    // answer different questions. This is the third question — what the WIRE
+    // says about the graph this exit is shipping — and one derivation feeds
+    // both the model-facing snapshot and `analysis_state`, so the sentence the
+    // user reads and the envelope the UI reads cannot disagree.
+    //
+    // ⚠ NOT PRECEDENT, and the way to take this count DOWN is known: if the
+    // canonical context frame ever publishes a scenario-carrier derivation
+    // against the in-scope graph, this call site should read it and this entry
+    // should go to 0. Do not add a fifth ad-hoc site instead.
+    'src/orchestrator-v5/replacement/turn-context-view.ts': 2,
     // 2026-07-22 Lane C3: +2 (import + one call) — the typed add-option
     // transaction pre-route derives the PRE-edit frame freshness for its
     // referee gate against `computeAnalysisAffectingGraphHash(persistedGraph)`
