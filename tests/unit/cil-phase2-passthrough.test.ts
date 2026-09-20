@@ -179,19 +179,25 @@ describe("Task 1F-i: Repair synthetic edge completeness", () => {
   /**
    * Required fields on every synthetic edge.
    */
-  const REQUIRED_SYNTHETIC_EDGE_FIELDS = [
-    "from",
-    "to",
-    "strength_mean",
-    "strength_std",
-    "belief_exists",
-    "effect_direction",
-    "origin",
-    "provenance_source",
-    "provenance",
-  ];
+  /**
+   * ⚠ NAMED RESIDUAL — this guard lost its subject, and it is recorded rather than
+   * quietly deleted.
+   *
+   * `REQUIRED_SYNTHETIC_EDGE_FIELDS` pinned that every synthetic repair edge carried
+   * its full field set. `simpleRepair`'s only synthetic-edge producers were the
+   * orphan-wiring paths this increment removes, so `src/services/repair.ts` now mints
+   * ZERO `origin: "repair"` edges and the list has no subject on THIS entry point.
+   *
+   * Synthetic repair edges still exist elsewhere — `terminal-bridge.ts:284`,
+   * `status-quo-fix.ts:247`, `graph-enforcement.ts:599` and the `factor → goal` split
+   * at `deterministic-sweep.ts:1555,1563` — all reached through the unified pipeline,
+   * not through `simpleRepair`. Re-establishing field completeness against that entry
+   * point is owed work, and is deliberately NOT faked here: a version of this guard
+   * pointed at `simpleRepair` asserted over an empty set and passed by testing nothing
+   * (its non-zero control caught that, which is why the control existed).
+   */
 
-  it("wireOrphansToGoal produces edges with all required fields", () => {
+  it("repair does NOT invent an outcome → goal link for an unreachable goal", () => {
     // Graph with orphaned outcome that needs wiring to goal
     const graph: GraphT = Graph.parse({
       version: "1",
@@ -219,21 +225,22 @@ describe("Task 1F-i: Repair synthetic edge completeness", () => {
 
     const repaired = simpleRepair(graph);
 
-    // Find the synthetic edge from out_1 to goal_1
-    const syntheticEdge = repaired.edges.find(
-      (e) => e.from === "out_1" && e.to === "goal_1"
-    );
-    expect(syntheticEdge).toBeDefined();
+    // INVERTED. Repair no longer invents an outcome -> goal link to make an
+    // unreachable goal analysable: a fabricated edge is a causal claim the user
+    // never made, which is the defect this increment removes. The orphan stays
+    // an orphan and validation reports it, rather than the model quietly
+    // acquiring a relationship nobody authored.
+    expect(
+      repaired.edges.find((e) => e.from === "out_1" && e.to === "goal_1"),
+    ).toBeUndefined();
 
-    for (const field of REQUIRED_SYNTHETIC_EDGE_FIELDS) {
-      expect(syntheticEdge).toHaveProperty(field);
-    }
-    expect(syntheticEdge!.origin).toBe("repair");
-    expect(syntheticEdge!.provenance_source).toBe("synthetic");
-    expect(syntheticEdge!.provenance).toContain("wireOrphansToGoal");
+    // And nothing else was fabricated in its place — the guard is over the
+    // WHOLE repair output, not just the one pair, so a differently-shaped
+    // substitute cannot pass here (trap 13d: assert the spec, not the symptom).
+    expect(repaired.edges.filter((e) => e.origin === "repair")).toEqual([]);
   });
 
-  it("wireOrphansFromCausalChain produces edges with all required fields", () => {
+  it("repair does NOT invent an inbound causal edge to complete a chain", () => {
     // Graph with outcome that has edge TO goal but no INBOUND edge from factor
     const graph: GraphT = Graph.parse({
       version: "1",
@@ -261,18 +268,14 @@ describe("Task 1F-i: Repair synthetic edge completeness", () => {
 
     const repaired = simpleRepair(graph);
 
-    // Find the synthetic edge from fac_1 to out_1
-    const syntheticEdge = repaired.edges.find(
-      (e) => e.from === "fac_1" && e.to === "out_1"
-    );
-    expect(syntheticEdge).toBeDefined();
-
-    for (const field of REQUIRED_SYNTHETIC_EDGE_FIELDS) {
-      expect(syntheticEdge).toHaveProperty(field);
-    }
-    expect(syntheticEdge!.origin).toBe("repair");
-    expect(syntheticEdge!.provenance_source).toBe("synthetic");
-    expect(syntheticEdge!.provenance).toContain("wireOrphansFromCausalChain");
+    // INVERTED, same reason as the sibling above: an inbound causal edge is not
+    // invented to complete a chain. Selecting a source factor without
+    // establishing its causal relevance is precisely the substitution this
+    // increment removes.
+    expect(
+      repaired.edges.find((e) => e.from === "fac_1" && e.to === "out_1"),
+    ).toBeUndefined();
+    expect(repaired.edges.filter((e) => e.origin === "repair")).toEqual([]);
   });
 });
 
