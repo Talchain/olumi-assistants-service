@@ -179,6 +179,13 @@ function priorRunAnalysisFact(mayName: boolean): Record<string, unknown> {
       },
       enrichment: {
         analysis_status: 'completed',
+        // ⚠ ADDED. This builder carried no `robustness`, so its "PERMITTED"
+        // arm was in fact `separation_unavailable` on the published claim
+        // (`permitted = entitled && separates`) and its positive control
+        // depended on a leader sentence the wire already withheld. Giving the
+        // fixture a separated run makes `mayName` the ONLY variable between
+        // the two arms, which is what both controls claim to isolate.
+        robustness: { level: 'high', near_tie: { is_tie: false } },
         option_comparison: [
           {
             option_id: 'opt_hire',

@@ -296,11 +296,17 @@ describe('F1 — a withheld analysis must not be displayed under a newer fact’
     expect(readMayNameLeadingOptionVerdict([permittedOnly], ARRAY_ONLY)).toEqual({
       may_name_leading_option: true,
       constraint_verdict_state: 'evaluated_feasible',
+      // A new member of this verdict (see `MayNameLeadingOptionVerdict`). These
+      // whole-object assertions are what made it visible the moment it was added,
+      // which is the behaviour to keep: a field appearing without a decision here
+      // is the drift the shape assertion exists to catch.
+      separation_withhold: 'separation_unavailable',
       provenance: 'scenario_fact',
     });
     expect(readMayNameLeadingOptionVerdict([FACT_A_SUCCESSFUL_WITHHELD], ARRAY_ONLY)).toEqual({
       may_name_leading_option: false,
       constraint_verdict_state: 'unevaluated',
+      separation_withhold: 'separation_unavailable',
       provenance: 'scenario_fact',
     });
   });
@@ -369,6 +375,7 @@ describe('F1 — a withheld analysis must not be displayed under a newer fact’
     expect(readMayNameLeadingOptionVerdict([], ARRAY_ONLY)).toEqual({
       may_name_leading_option: true,
       constraint_verdict_state: null,
+      separation_withhold: null,
       provenance: 'no_analysis_exists',
     });
   });
@@ -500,11 +507,13 @@ describe('F1 — the window/scenario asymmetry, on inputs the loader should not 
     expect(readMayNameLeadingOptionVerdict([FACT_B_PARTIAL_PERMITTED], scopeOf(null))).toEqual({
       may_name_leading_option: true,
       constraint_verdict_state: 'evaluated_feasible',
+      separation_withhold: 'separation_unavailable',
       provenance: 'scenario_fact',
     });
     expect(readMayNameLeadingOptionVerdict([FACT_A_SUCCESSFUL_WITHHELD], scopeOf(null))).toEqual({
       may_name_leading_option: false,
       constraint_verdict_state: 'unevaluated',
+      separation_withhold: 'separation_unavailable',
       provenance: 'scenario_fact',
     });
   });
