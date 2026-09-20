@@ -3032,7 +3032,26 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             // derived against, so "is this analysis current?" and "is this
             // proposal still valid?" are questions about one object.
             modelRevision: currentGraphHash ?? 'graph-unhashable',
-            turnId: requestId,
+            // ⛔ `ingress.turn_id`, NOT `requestId`, AND THIS IS LOAD-BEARING
+            // ONCE A WRITE PATH IS INJECTED.
+            //
+            // `turnId` feeds `idFor`, which mints this layer's proposal ids and
+            // its idempotency keys. `requestId` comes from a request HEADER or
+            // a fresh uuid, so it changes on every HTTP attempt at the same
+            // logical turn — which would mint a NEW proposal id and a NEW
+            // idempotency key for a client retry of one turn.
+            //
+            // Core has since confirmed the conversational applier's contract
+            // (`append_turn_atomic_v3`/v4): idempotency is
+            // `ON CONFLICT (scenario_id, turn_id) DO NOTHING`, and on a replay
+            // it SKIPS CAS and returns the existing row id — the "returns the
+            // original receipt" half of this layer's precondition, satisfied
+            // directly, by the payload's turn id. Keying our own retry off
+            // anything else would sit beside that guarantee instead of on it.
+            //
+            // The commit metadata below already uses `ingress.turn_id`; this is
+            // the same identity, and the two must not disagree.
+            turnId: ingress.turn_id,
             requestId,
             now: new Date().toISOString(),
           },
