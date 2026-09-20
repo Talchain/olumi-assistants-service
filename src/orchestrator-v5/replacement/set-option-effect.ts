@@ -166,43 +166,73 @@ export function setOptionEffect(input: SetOptionEffectInput): SetOptionEffectRes
     };
   }
 
-  // No range, no referent. Refusing here is what stops the model converting a
-  // pair of real numbers into a normalised one it chose — which reads as
-  // helpfulness and is a fabricated input to the comparison.
+  // ── WHAT A REAL FACTOR CARRIES, DERIVED FROM CAPTURED WIRE ──────────────
   //
-  // ⛔ THIS READ WAS WRONG WHEN FIRST WRITTEN, AND WRONG IN THE WORST WAY: it
-  // looked for `range.range_min`, a combination declared in NO schema in this
-  // repo. `PriorSchema` is `{distribution, range_min, range_max}`
-  // (schemas graph.d.ts:260-263) and the separate `range` field is
-  // `{min, max}` (:275-278). So the guard added to stop the model inventing a
-  // number instead refused EVERY REAL FACTOR — a worse defect than the one it
-  // fixed, and invisible here because every fixture in this suite was written
-  // to match the code rather than the contract.
+  // This read has now been wrong TWICE, and both times because the fixture
+  // encoded the author's model of the producer rather than the producer.
   //
-  // Found by the lane building `add_factor`, which measured all three cases
-  // discriminating and wrote the finding into a docblock rather than working
-  // around it. Reading that docblock instead of overruling it is the only
-  // reason this was caught.
+  //   v1 read `range.{range_min, range_max}` — a combination declared in no
+  //   schema. It refused every real factor, disabling the tool whose absence
+  //   ended a live session.
   //
-  // Both DECLARED spellings are now accepted, because both are real and
-  // different producers write different ones.
-  const asRecord = factor as {
-    prior?: { range_min?: unknown; range_max?: unknown };
+  //   v2 accepted `prior.{range_min, range_max}` or `range.{min, max}`,
+  //   derived from the SCHEMAS. Still wrong: measured against 13 factor nodes
+  //   from three real captures, `range` appears on ZERO and `prior` on ONE.
+  //   It would have accepted 1 of 13.
+  //
+  // `GraphStateIngress` is `.passthrough()`, so the schemas were never the
+  // whole story and reading them harder could not have found this. What real
+  // factors actually carry, all three captures agreeing:
+  //
+  //   · `scale_frame` — a NUMBER that is the range MAXIMUM, minimum implied 0.
+  //     Present with a real unit (£, months, weeks, contacts per week), and
+  //     `observed_state.raw_value / scale_frame === observed_state.value` held
+  //     in 6 of 6 cases. This is the producer's own normalisation basis.
+  //   · `unit: 'scale'` and NO scale_frame — the factor is already normalised
+  //     to [0, 1]; `observed_state.value` is the value. 5 of 13.
+  //   · `prior: {distribution, range_min, range_max}` — a genuinely stated
+  //     range. 1 of 13, carrying 0 to 0.13.
+  //
+  // ⛔ AN IGNORANCE PRIOR IS NOT A RANGE. `buildUnquantifiedPrior()` writes
+  // `{uniform, 0, 1, prior_is_unquantified: true}` — U(0,1) meaning "nobody
+  // has said". Accepting it would let an effect be set against a range no
+  // human stated, which is the exact fabrication this guard exists to
+  // prevent, arriving through the guard. Refused by name.
+  //
+  // `range.{min, max}` is kept because the contract declares it, even though
+  // no capture shows one: absence from three captures is not proof it never
+  // appears, and a declared field costs one branch to honour.
+  const f = factor as {
+    prior?: { range_min?: unknown; range_max?: unknown; prior_is_unquantified?: unknown };
     range?: { min?: unknown; max?: unknown };
+    scale_frame?: unknown;
+    observed_state?: { unit?: unknown; value?: unknown };
   };
-  const bounds =
-    typeof asRecord.prior?.range_min === 'number' && typeof asRecord.prior?.range_max === 'number'
-      ? { lo: asRecord.prior.range_min, hi: asRecord.prior.range_max }
-      : typeof asRecord.range?.min === 'number' && typeof asRecord.range?.max === 'number'
-        ? { lo: asRecord.range.min, hi: asRecord.range.max }
-        : null;
+
+  const unquantified = f.prior?.prior_is_unquantified === true;
+  const bounds: { lo: number; hi: number } | null = unquantified
+    ? null
+    : typeof f.prior?.range_min === 'number' && typeof f.prior?.range_max === 'number'
+      ? { lo: f.prior.range_min, hi: f.prior.range_max }
+      : typeof f.scale_frame === 'number' && Number.isFinite(f.scale_frame) && f.scale_frame > 0
+        ? { lo: 0, hi: f.scale_frame }
+        : typeof f.range?.min === 'number' && typeof f.range?.max === 'number'
+          ? { lo: f.range.min, hi: f.range.max }
+          : f.observed_state?.unit === 'scale' && typeof f.observed_state?.value === 'number'
+            ? { lo: 0, hi: 1 }
+            : null;
+
   if (bounds === null) {
     return {
       ok: false,
       refusal: {
         reason: 'factor_has_no_range',
-        message:
-          `${labelOf(factor, factorId)} has no range set, and an option's effect is a share of that ` +
+        message: unquantified
+          ? `${labelOf(factor, factorId)} has a placeholder range that nobody has stated — it is ` +
+            `recorded as "could be anything from 0 to 1", which is not a range an effect can be ` +
+            `measured against. Ask the user what the lowest and highest values really are; do not ` +
+            `treat the placeholder as if it were their answer.`
+          : `${labelOf(factor, factorId)} has no range set, and an option's effect is a share of that ` +
           `range — so there is nothing to express the effect against yet. Ask what the lowest and ` +
           `highest values are for ${labelOf(factor, factorId)}, then this can be set. Do not convert ` +
           `figures into a share yourself.`,
