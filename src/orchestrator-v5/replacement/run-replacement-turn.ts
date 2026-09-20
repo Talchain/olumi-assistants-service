@@ -147,7 +147,7 @@ export interface ReplacementTurnInput {
   readonly unavailable?: readonly string[];
   readonly turnId: string;
   readonly now: string;
-  readonly idFor: (purpose: 'proposal' | 'suggestion' | 'idempotency', index: number) => string;
+  readonly idFor: (purpose: 'proposal' | 'suggestion' | 'idempotency' | 'remembered', index: number) => string;
 }
 
 export interface ReplacementTurnResult extends ComposeTurnResult {
@@ -263,7 +263,7 @@ export async function runReplacementTurn(
   // knowing what happened.
   if (outstanding.length > 0) {
     const composed = composeTurn({
-      loopResult: { text: '', proposed: [], accepted: [], toolsCalled: [], iterations: 0, haltedAtCeiling: false },
+      loopResult: { text: '', proposed: [], accepted: [], remembered: [], toolsCalled: [], iterations: 0, haltedAtCeiling: false },
       memory,
       proposals,
       modelRevision: input.modelRevision,
@@ -422,6 +422,22 @@ export async function runReplacementTurn(
     },
     { chatWithTools: deps.chatWithTools, ...(deps.maxIterations === undefined ? {} : { maxIterations: deps.maxIterations }) },
   );
+
+  // What the user established this turn goes into the record BEFORE the turn
+  // is composed, so a later reader sees it alongside everything else from
+  // this turn rather than a turn late. Ids are deterministic and injected.
+  loopResult.remembered.forEach((batch, batchIndex) => {
+    batch.items.forEach((item, itemIndex) => {
+      memory = recordItem(memory, {
+        id: input.idFor('remembered', batchIndex * 100 + itemIndex),
+        kind: item.kind,
+        text: item.text,
+        source_turn_id: input.turnId,
+        recorded_at: input.now,
+        ...(item.supersedes === undefined ? {} : { supersedes: item.supersedes }),
+      });
+    });
+  });
 
   const composed = composeTurn({
     loopResult,

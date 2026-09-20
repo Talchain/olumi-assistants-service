@@ -41,6 +41,7 @@ import { runReplacementTurn } from '../../src/orchestrator-v5/replacement/run-re
 import { anthropicChatWithTools } from '../../src/orchestrator-v5/replacement/wiring.js';
 import { createReadWorkspaceTool, createReadResultsTool } from '../../src/orchestrator-v5/replacement/read-tools.js';
 import { createSetOptionEffectTool } from '../../src/orchestrator-v5/replacement/propose-tools.js';
+import { createRememberTool } from '../../src/orchestrator-v5/replacement/remember-tool.js';
 import { EMPTY_CONVERSATION_MEMORY } from '../../src/orchestrator-v5/replacement/conversation-memory.js';
 import { EMPTY_PROPOSAL_STORE } from '../../src/orchestrator-v5/replacement/proposal-store.js';
 import { summariseWorkspace } from '../../src/orchestrator-v5/replacement/turn-entry.js';
@@ -167,6 +168,13 @@ async function main(): Promise<void> {
           createReadWorkspaceTool({ getGraph: () => GRAPH, requestId: 'live' }),
           createReadResultsTool({ getAnalysis }),
           createSetOptionEffectTool({ getGraph: () => GRAPH }),
+          // ⚠ This list is hand-built and MUST track turn-entry.ts. It did
+          // not once: `remember` was wired into the entry point and missing
+          // here, so a live run showed the model never calling it and the
+          // obvious conclusion — "it ignores the tool" — was wrong. It was
+          // never offered one. A probe that cannot see the thing it is
+          // testing returns a confident, wrong answer.
+          createRememberTool({ getMemory: () => memory }),
         ],
         turnId: `turn-${i + 1}`,
         now: new Date().toISOString(),
@@ -181,7 +189,11 @@ async function main(): Promise<void> {
     proposals = r.proposals;
     history.push({ role: 'user', content: message }, { role: 'assistant', content: r.text });
 
+    const record = r.memory.items
+      .filter((it) => it.status === 'live' && it.kind !== 'ai_suggestion')
+      .map((it) => `${it.kind}: ${it.text}`);
     console.log(`\n${'='.repeat(78)}\nTURN ${i + 1}  ·  tools: [${r.toolsCalled.join(', ') || 'none'}]  ·  iterations: ${r.iterations}  ·  applied: ${r.applied.length}`);
+    if (record.length > 0) console.log(`RECORD: ${record.join(' | ')}`);
     console.log(`USER: ${message}`);
     console.log(`\nOLUMI: ${r.text}\n`);
   }
