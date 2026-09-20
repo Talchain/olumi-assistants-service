@@ -131,6 +131,13 @@ import type { CanonicalContextFrame } from '../orchestrator-v5/context/frame/ind
 import { computeResponseHash } from '../utils/response-hash.js';
 import { validateEgress } from '../validators/b1.js';
 import { runTurnExecutor } from '../orchestrator-v5/turn-executor.js';
+import { handleReplacementTurn } from '../orchestrator-v5/replacement/turn-entry.js';
+import { shapeRunResult } from '../orchestrator-v5/replacement/to-run-result.js';
+import {
+  ReplacementNotConfiguredError,
+  anthropicChatWithTools,
+  getReplacementStateStore,
+} from '../orchestrator-v5/replacement/wiring.js';
 import {
   dispatchSystemEvent,
   type DispatchSystemEventResult,
@@ -976,6 +983,17 @@ async function sendFinalised200(
      *     `readMayNameLeadingOptionVerdict`.
      * Never re-derived here (CLAUDE.md trap #12).
      */
+    /**
+     * The caller has already removed identifiers from `assistant_text` by
+     * IDENTITY against this turn's graph, so the pattern scrub must not run
+     * over it again.
+     *
+     * Set by the replacement controller only. Absent everywhere else, so the
+     * retired path is byte-identical. See `EgressSanitiseOpts` for the
+     * measurement that made it necessary: the pattern arm rewrites ordinary
+     * English, and it is unconditional.
+     */
+    readonly assistantTextAlreadyIdentifierSafe?: boolean;
     readonly mayNameLeadingOption: boolean;
     /**
      * WHERE the permission above came from (2026-07-27).
@@ -1217,15 +1235,18 @@ async function sendFinalised200(
     exitPath,
     userMessage: ctx.userMessage,
     mayNameLeadingOption: ctx.mayNameLeadingOption,
+    ...(ctx.assistantTextAlreadyIdentifierSafe === true ? { assistantTextAlreadyIdentifierSafe: true } : {}),
   });
   const egress = validateEgress(candidateSanitised, requestId);
   let wireBody = egress.ok
     ? finaliseV5Response(
-        sanitiseOlumiResponseForEgress(egress.value, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
+        sanitiseOlumiResponseForEgress(egress.value, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption,
+    ...(ctx.assistantTextAlreadyIdentifierSafe === true ? { assistantTextAlreadyIdentifierSafe: true } : {}) }),
         finaliserContext,
       )
     : finaliseV5Response(
-        sanitiseOlumiResponseForEgress(egress.fallback, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
+        sanitiseOlumiResponseForEgress(egress.fallback, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption,
+    ...(ctx.assistantTextAlreadyIdentifierSafe === true ? { assistantTextAlreadyIdentifierSafe: true } : {}) }),
         finaliserContext,
       );
   if (!egress.ok) {
@@ -1298,7 +1319,8 @@ async function sendFinalised200(
       _timings: timingsBlock,
     };
     wireBody = finaliseV5Response(
-      sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
+      sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption,
+    ...(ctx.assistantTextAlreadyIdentifierSafe === true ? { assistantTextAlreadyIdentifierSafe: true } : {}) }),
       finaliserContext,
     );
   }
@@ -1369,7 +1391,8 @@ async function sendFinalised200(
       _diagnostic_trace: stampedTrace,
     };
     wireBody = finaliseV5Response(
-      sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
+      sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption,
+    ...(ctx.assistantTextAlreadyIdentifierSafe === true ? { assistantTextAlreadyIdentifierSafe: true } : {}) }),
       finaliserContext,
     );
   }
@@ -1439,7 +1462,8 @@ async function sendFinalised200(
         _context_summary: contextSummary,
       };
       wireBody = finaliseV5Response(
-        sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
+        sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption,
+    ...(ctx.assistantTextAlreadyIdentifierSafe === true ? { assistantTextAlreadyIdentifierSafe: true } : {}) }),
         finaliserContext,
       );
     }
@@ -1465,7 +1489,8 @@ async function sendFinalised200(
       _reasoning: ctx.reasoning,
     };
     wireBody = finaliseV5Response(
-      sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
+      sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption,
+    ...(ctx.assistantTextAlreadyIdentifierSafe === true ? { assistantTextAlreadyIdentifierSafe: true } : {}) }),
       finaliserContext,
     );
   }
@@ -1540,7 +1565,8 @@ async function sendFinalised200(
       _answer_shape: ctx.answerShape,
     };
     const withShape = finaliseV5Response(
-      sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
+      sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption,
+    ...(ctx.assistantTextAlreadyIdentifierSafe === true ? { assistantTextAlreadyIdentifierSafe: true } : {}) }),
       finaliserContext,
     );
     const derivedText = shapeDerivedText;
@@ -1647,7 +1673,8 @@ async function sendFinalised200(
         _answer_shape: synth,
       };
       const withSynth = finaliseV5Response(
-        sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
+        sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption,
+    ...(ctx.assistantTextAlreadyIdentifierSafe === true ? { assistantTextAlreadyIdentifierSafe: true } : {}) }),
         finaliserContext,
       );
       const synthFinalText =
@@ -1739,6 +1766,7 @@ async function sendFinalised200(
     requestId,
     exitPath,
     mayNameLeadingOption: ctx.mayNameLeadingOption,
+    ...(ctx.assistantTextAlreadyIdentifierSafe === true ? { assistantTextAlreadyIdentifierSafe: true } : {}),
     // Read ONLY for the option ROSTER — "which options exist", never "which one
     // leads". The gate enters only when the prose NAMES one of this scenario's
     // own options, which is what spares "sales leads improved" and every other
@@ -1974,6 +2002,7 @@ async function sendFinalised200(
     requestId,
     exitPath,
     mayNameLeadingOption: ctx.mayNameLeadingOption,
+    ...(ctx.assistantTextAlreadyIdentifierSafe === true ? { assistantTextAlreadyIdentifierSafe: true } : {}),
     // Threaded so the ALARM's scope matches the ENFORCER's exactly. The enforcer
     // above conjoins `analysis_admission.permitted_analysis_mode`; an alarm that
     // did not would short-circuit on the entitlement alone and report nothing on
@@ -2835,6 +2864,93 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // handle bound. See turn-fence-prehandler.ts.
     await admitCurrentTurnFence();
     const { requestId, ingress, extensions } = pre.context;
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // ⭐ REPLACEMENT CONVERSATION CONTROLLER — ONE CONTROLLER PER TURN
+    //
+    // Placed HERE, immediately after the turn fence is claimed and before the
+    // first dispatch branch, because this is the earliest point at which the
+    // payload is validated, `extensions` is available, and no LLM call and no
+    // mutation has happened. Branching above the fence would mean running
+    // without an admitted handle, so a concurrent turn could supersede this
+    // one silently.
+    //
+    // WHAT IT DELIBERATELY DOES NOT TAKE. Turns with no graph yet fall
+    // through to the retired path, which owns drafting. Swallowing those
+    // would take the whole draft-graph pipeline offline behind a coaching
+    // flag — a different team's capability, retired by accident.
+    //
+    // NO FALLBACK. If this controller throws, the turn fails AS this
+    // controller. It does not fall through to the retired routing. A fallback
+    // that runs after a save may already have been sent is how you build
+    // "updated, then denied" out of the migration itself.
+    // ═══════════════════════════════════════════════════════════════════════
+    if (config.features.replacementCoachEnabled && ingress.kind === 'message') {
+      const graphNow = extensions.graphState;
+      const hasModel =
+        graphNow != null && Array.isArray(graphNow.nodes) && graphNow.nodes.length > 0;
+
+      if (hasModel) {
+        // Fail loud, not half-working. Without a durable store a user's
+        // agreement can land on an instance that never saw the offer.
+        const replacementStore = getReplacementStateStore();
+        if (replacementStore === null) throw new ReplacementNotConfiguredError();
+
+        const startedAt = Date.now();
+        const turn = await handleReplacementTurn(
+          {
+            scenarioId: ingress.scenario_id,
+            message: ingress.message,
+            history: [],
+            getGraph: () => extensions.graphState,
+            getAnalysis: () => null,
+            modelRevision: computeRequestHash(ingress),
+            turnId: requestId,
+            requestId,
+            now: new Date().toISOString(),
+          },
+          {
+            chatWithTools: anthropicChatWithTools(),
+            state: replacementStore,
+          },
+        );
+
+        // The turn is written to `v5_conversation_turns` like any other, so
+        // history, debug exports and every existing observability path keep
+        // working. Graph mutation is NOT done here — a save only ever happens
+        // through the injected write path, under the user's consent.
+        const shaped = shapeRunResult({
+          turn,
+          stage: ingress.stage,
+          commitPerformed: true,
+          analysisExists: false,
+          wallClockMs: Date.now() - startedAt,
+        });
+
+        await commitDirectAnswer(shaped.response, {
+          scenario_id: ingress.scenario_id,
+          turn_id: requestId,
+          turn_class: 'direct_answer',
+          handler_id: null,
+          request_hash: computeRequestHash(ingress),
+          llm_calls_used: turn.iterations,
+          duration_ms: Date.now() - startedAt,
+          handler_facts: [],
+          graph: extensions.graphState,
+        });
+
+        return await sendFinalised200(reply, requestId, 'replacement_controller', shaped.response, {
+          graph: (extensions.graphState ?? null) as GraphV3T | null,
+          userMessage: ingress.message,
+          mayNameLeadingOption: shaped.mayNameLeadingOption,
+          mayNameLeadingOptionProvenance: shaped.mayNameLeadingOptionProvenance,
+          // Identifiers were already removed BY IDENTITY against this turn's
+          // graph. The shared pattern scrub rewrites ordinary English, so it
+          // must not run over this text a second time.
+          assistantTextAlreadyIdentifierSafe: true,
+        });
+      }
+    }
 
     // ═══════════════════════════════════════════════════════════════════════
     // ⭐ T1 CLAIM SAFETY — THE TURN-ENTRY READ (ROADMAP 1.233 finish-line

@@ -313,6 +313,14 @@ export interface V5ClaimSafety {
 }
 
 export type V5DiagnosticExitPath =
+  /**
+   * The replacement conversation controller (CEE_REPLACEMENT_COACH_ENABLED).
+   * One controller per turn: a turn that takes this exit ran none of the
+   * routing branches below it, and a turn that ran any of them did not take
+   * this exit. Distinguishable in the trace precisely so the two can never be
+   * confused when reading a session back.
+   */
+  | 'replacement_controller'
   | 'draft_graph'
   | 'turn_executor'
   | 'chip_click'
