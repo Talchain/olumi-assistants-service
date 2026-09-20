@@ -62,9 +62,15 @@ export class ReplacementNotConfiguredError extends Error {
  * Thinking is off for the same reason plus latency; it is a dial to turn
  * later against a measured question, not a default to inherit.
  */
-export function anthropicChatWithTools(model: string): ChatWithToolsLike {
+export function anthropicChatWithTools(model?: string): ChatWithToolsLike {
   return async ({ system, messages, tools }) => {
-    const result = await chatWithToolsAnthropic({ system, messages, tools, model, temperature: 0 });
+    const result = await chatWithToolsAnthropic({
+      system,
+      messages,
+      tools,
+      temperature: 0,
+      ...(model === undefined || model.trim().length === 0 ? {} : { model }),
+    });
     return { content: result.content, stop_reason: result.stop_reason };
   };
 }
