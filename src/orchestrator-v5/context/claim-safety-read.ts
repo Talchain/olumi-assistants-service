@@ -676,7 +676,29 @@ function narrowToProjectedAnalysis(
   if (projected.fact === entitlementFact) return entitlement;
 
   const displayed = readMayNameLeadingOptionVerdictForFact(projected.fact);
-  if (displayed.may_name_leading_option) return entitlement;
+  if (displayed.may_name_leading_option) {
+    // ⚠⚠ THE ENTITLEMENT ANSWER STANDS HERE. THE SEPARATION ANSWER DOES NOT.
+    //
+    // This branch used to `return entitlement` whole, and adding
+    // `separation_withhold` to the verdict quietly made that wrong: the
+    // entitling fact and the DISPLAYED fact are different analyses on this
+    // path, and separation is a fact about the one being DISPLAYED.
+    //
+    // The reachable cell, named by the review: entitling fact B is newer and
+    // `partial` with robustness, displayed fact A is older and `completed`
+    // WITHOUT it. Returning B's `separation_withhold: null` says the arms of A
+    // were told apart when nothing measured them — a FALSE PERMISSION, so the
+    // gates stand down and a leader claim about A survives. That is the exact
+    // defect this whole change exists to stop, reintroduced by the change
+    // itself.
+    //
+    // ⭐ It is the same rule the `constraint_verdict_state` field below was
+    // created to enforce — "permission, state and disclosure copy must all
+    // originate from the ONE selected fact" — and I broke it on the one path
+    // that returns early. The boolean and its provenance are still the
+    // entitlement's, because entitlement genuinely is B's question to answer.
+    return { ...entitlement, separation_withhold: displayed.separation_withhold };
+  }
 
   return {
     may_name_leading_option: false,

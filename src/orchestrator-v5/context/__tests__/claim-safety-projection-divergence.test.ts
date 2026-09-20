@@ -84,6 +84,8 @@ function analysisFact(opts: {
   readonly verdict: { may_name_leading_option: boolean; constraint_verdict_state: string } | null;
   readonly leader: 'opt_a' | 'opt_b';
   readonly leaderProbability: number;
+  /** Opt-in: give this fact a robustness block, i.e. arms actually told apart. */
+  readonly separated?: boolean;
 }): HandlerFact {
   const other = opts.leader === 'opt_a' ? 'opt_b' : 'opt_a';
   return {
@@ -103,6 +105,9 @@ function analysisFact(opts: {
       ...(opts.verdict === null ? {} : { constraint_verdict: opts.verdict }),
       enrichment: {
         analysis_status: opts.status,
+        ...(opts.separated === true
+          ? { robustness: { level: 'high', near_tie: { is_tie: false } } }
+          : {}),
         option_comparison: [
           {
             option_id: opts.leader,
@@ -516,5 +521,101 @@ describe('F1 — the window/scenario asymmetry, on inputs the loader should not 
       separation_withhold: 'separation_unavailable',
       provenance: 'scenario_fact',
     });
+  });
+});
+
+/**
+ * ⭐⭐⭐ THE REVIEW'S FINDING — the change that added `separation_withhold`
+ * reintroduced, on ONE early-return path, exactly the defect it exists to stop.
+ *
+ * `narrowToProjectedAnalysis` returns `entitlement` WHOLE when the displayed
+ * fact permits. That was correct while the verdict carried only entitlement and
+ * a constraint state. It stopped being correct the moment a SEPARATION answer
+ * rode along, because on this path the entitling fact and the displayed fact
+ * are DIFFERENT ANALYSES, and separation is a fact about the one on screen.
+ *
+ * The reachable cell: B is newer, `partial`, and separated; A is older,
+ * `completed`, and never had its arms measured. `selectRunAnalysisFact` filters
+ * partials, so A is DISPLAYED while B supplies the entitlement. Handing back
+ * B's `separation_withhold: null` asserts A's arms were told apart — a FALSE
+ * PERMISSION, which stands the gates down and lets a leader claim about A
+ * survive.
+ *
+ * ⚠ It is the same rule `constraint_verdict_state` was moved onto this verdict
+ * to enforce: permission, state and disclosure copy from ONE fact.
+ */
+describe('F1 — the SEPARATION answer follows the DISPLAYED fact, not the entitling one', () => {
+  /** Local copy: the sibling block's helper is scoped to that describe. */
+  const scopeOf = (fact: HandlerFact | null): ClaimSafetyScenarioScope => ({
+    newestAnalysisFact: fact,
+    readOk: true,
+    windowTruncated: false,
+  });
+
+  const A_COMPLETED_PERMITTED_UNSEPARATED = analysisFact({
+    status: 'completed',
+    computed_at: '2026-09-19T10:00:00.000Z',
+    verdict: PERMITTED,
+    leader: 'opt_a',
+    leaderProbability: 0.7,
+  });
+  const B_PARTIAL_PERMITTED_SEPARATED = analysisFact({
+    status: 'partial',
+    computed_at: '2026-09-19T11:00:00.000Z',
+    verdict: PERMITTED,
+    leader: 'opt_b',
+    leaderProbability: 0.66,
+    separated: true,
+  });
+
+  it('⭐ a separated newer PARTIAL must not lend its separation to an unseparated displayed analysis', () => {
+    const v = readMayNameLeadingOptionVerdict(
+      [A_COMPLETED_PERMITTED_UNSEPARATED],
+      scopeOf(B_PARTIAL_PERMITTED_SEPARATED),
+    );
+    // Entitlement is genuinely B's question and is unchanged.
+    expect(v.may_name_leading_option).toBe(true);
+    // Separation is A's question. Before the correction this read `null`.
+    expect(
+      v.separation_withhold,
+      'the displayed analysis never had its arms measured; B cannot vouch for it',
+    ).toBe('separation_unavailable');
+  });
+
+  it('CONTROL: when the displayed fact IS separated, nothing is withheld', () => {
+    const aSeparated = analysisFact({
+      status: 'completed',
+      computed_at: '2026-09-19T10:00:00.000Z',
+      verdict: PERMITTED,
+      leader: 'opt_a',
+      leaderProbability: 0.7,
+      separated: true,
+    });
+    const v = readMayNameLeadingOptionVerdict([aSeparated], scopeOf(B_PARTIAL_PERMITTED_SEPARATED));
+    expect(v.may_name_leading_option).toBe(true);
+    expect(v.separation_withhold, 'the guard must not withhold on a separated run').toBeNull();
+  });
+
+  it('CONTROL: the inverse cannot leak either — unseparated B, separated A', () => {
+    const aSeparated = analysisFact({
+      status: 'completed',
+      computed_at: '2026-09-19T10:00:00.000Z',
+      verdict: PERMITTED,
+      leader: 'opt_a',
+      leaderProbability: 0.7,
+      separated: true,
+    });
+    const bUnseparated = analysisFact({
+      status: 'partial',
+      computed_at: '2026-09-19T11:00:00.000Z',
+      verdict: PERMITTED,
+      leader: 'opt_b',
+      leaderProbability: 0.66,
+    });
+    // A is displayed and separated, so the answer is A's: nothing withheld.
+    // Without the correction this would have read B's `separation_unavailable`
+    // and withheld a claim that was entitled — the opposite-direction twin.
+    const v = readMayNameLeadingOptionVerdict([aSeparated], scopeOf(bUnseparated));
+    expect(v.separation_withhold).toBeNull();
   });
 });
