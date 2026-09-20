@@ -83,7 +83,7 @@ describe("captured causal repair boundary", () => {
   });
 
   it("carries the unresolved effect through canonical projection, save and reopen, and refuses incomplete comparison", () => {
-    const projection = projectGraphAndOptionsToV3(simpleRepair(fixture()));
+    const projection = projectGraphAndOptionsToV3(simpleRepair(fixture()) as never);
     const saved = projectGraphForPersistence({ ...projection.graph, options: projection.options });
     const reopened = JSON.parse(JSON.stringify(saved));
     const parsed = GraphV3.parse(reopened);
@@ -118,14 +118,14 @@ describe("captured causal repair boundary", () => {
       from: edge.from === original ? nonCanonical : edge.from,
       to: edge.to === original ? nonCanonical : edge.to,
     }));
-    const projection = projectGraphAndOptionsToV3(simpleRepair(graph));
+    const projection = projectGraphAndOptionsToV3(simpleRepair(graph) as never);
     const risk = projection.graph.nodes.find((node) => node.kind === "risk")!;
     expect(projection.graph.edges.find((edge) => edge.from === ids.two && edge.to === risk.id)).toBeDefined();
     expect(projection.graph.edges.some((edge) => edge.from === risk.id && edge.to === ids.outcome)).toBe(true);
   });
 
   it("unrelated edits and a changed coefficient do not resolve the missing intervention mapping", () => {
-    const projection = projectGraphAndOptionsToV3(simpleRepair(fixture()));
+    const projection = projectGraphAndOptionsToV3(simpleRepair(fixture()) as never);
     const graph = GraphV3.parse(projection.graph);
     const relation = graph.edges.find((edge) => edge.from === ids.two && edge.to === ids.risk)!;
     const edits = applyPatchOperations(graph, [
@@ -137,7 +137,7 @@ describe("captured causal repair boundary", () => {
   });
 
   it("explicit removal affects only its intended relationship and preserves the remaining risk mechanism", () => {
-    const projection = projectGraphAndOptionsToV3(simpleRepair(fixture()));
+    const projection = projectGraphAndOptionsToV3(simpleRepair(fixture()) as never);
     const graph = GraphV3.parse(projection.graph);
     const relation = graph.edges.find((edge) => edge.from === ids.two && edge.to === ids.risk)!;
     const discarded = applyPatchOperations(graph, [{ op: "remove_edge", path: `${relation.from}::${relation.to}` }]);
@@ -149,7 +149,7 @@ describe("captured causal repair boundary", () => {
   });
 
   it("keeps risk mapping independent of an offered missing magnitude on the same valued option", () => {
-    const projection = projectGraphAndOptionsToV3(simpleRepair(fixture()));
+    const projection = projectGraphAndOptionsToV3(simpleRepair(fixture()) as never);
     const graph = GraphV3.parse(projection.graph);
     const originalEffect = graph.edges.find((edge) => edge.from === ids.two && edge.to === ids.velocity)!;
     graph.edges.push({ ...structuredClone(originalEffect), to: ids.architecture });
