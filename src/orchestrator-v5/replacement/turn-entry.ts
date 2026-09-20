@@ -136,6 +136,7 @@ export interface ReplacementEntryResult {
   readonly applied: ReplacementTurnResult['applied'];
   readonly mustReconcile: ReplacementTurnResult['mustReconcile'];
   readonly toolsCalled: readonly string[];
+  readonly iterations: number;
   readonly incomplete: boolean;
   readonly newModelRevision?: string;
 }
@@ -243,6 +244,7 @@ export async function handleReplacementTurn(
     applied: result.applied,
     mustReconcile: result.mustReconcile,
     toolsCalled: result.toolsCalled,
+    iterations: result.iterations,
     incomplete: result.incomplete,
     ...(result.newModelRevision === undefined ? {} : { newModelRevision: result.newModelRevision }),
   };

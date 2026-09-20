@@ -126,6 +126,8 @@ export interface ReplacementTurnInput {
 
 export interface ReplacementTurnResult extends ComposeTurnResult {
   readonly toolsCalled: readonly string[];
+  /** Model round-trips this turn. Reported as `llm_calls_used`. */
+  readonly iterations: number;
   /** Proposals that actually persisted this turn, with their receipts. The
    *  only honest basis for an "I changed X" sentence anywhere downstream. */
   readonly applied: readonly { readonly proposalId: string; readonly receiptId: string }[];
@@ -166,7 +168,7 @@ export async function runReplacementTurn(
       now: input.now,
       idFor: input.idFor,
     });
-    return { ...composed, toolsCalled: [], applied: [] };
+    return { ...composed, toolsCalled: [], iterations: 0, applied: [] };
   }
 
   const applied: { proposalId: string; receiptId: string }[] = [];
@@ -333,6 +335,7 @@ export async function runReplacementTurn(
   return {
     ...composed,
     toolsCalled: loopResult.toolsCalled,
+    iterations: loopResult.iterations,
     applied,
     ...(newModelRevision === undefined ? {} : { newModelRevision }),
   };
