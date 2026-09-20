@@ -174,7 +174,89 @@ describe('a factor with no range cannot take an effect', () => {
  * Every case here is derived from the schema declarations, not from the
  * implementation, and the last one is the control that would have caught it.
  */
-describe('the range is read with the spellings the contract actually declares', () => {
+describe('the range is read from the shapes REAL factors carry', () => {
+  /**
+   * ⛔ THE FIXTURE USED TO ENCODE MY MODEL OF THE PRODUCER, NOT THE PRODUCER,
+   * and that is how this read was wrong TWICE — first against a combination
+   * no schema declares, then against the schemas, which `GraphStateIngress`
+   * being `.passthrough()` meant were never the whole story.
+   *
+   * Every shape below comes from THREE REAL CAPTURES of the deployed product
+   * (13 factor nodes). `range` appeared on ZERO of them; `prior` on one.
+   *
+   * ⚠ SHAPES ONLY. Every digit here is invented — this repository is public
+   * and the captures carry real business figures.
+   */
+  function factorWith(extra: Record<string, unknown>): EffectGraph {
+    return {
+      nodes: [
+        { id: OPT, kind: 'option', label: 'O' },
+        { id: PRICE, kind: 'factor', label: 'Plan Price', ...extra },
+      ],
+      edges: [{ from: OPT, to: PRICE }],
+    } as unknown as EffectGraph;
+  }
+  const call = (g: EffectGraph) => setOptionEffect({ graph: g, optionId: OPT, factorId: PRICE, value: 0.5 });
+
+  it('accepts scale_frame — the producer\'s own normalisation basis, 6 of 13 captured factors', () => {
+    // Captured shape: raw_value / scale_frame === observed_state.value, which
+    // held in 6 of 6 cases carrying one.
+    expect(call(factorWith({
+      scale_frame: 40,
+      observed_state: { value: 0.25, raw_value: 10, unit: 'units per week', source: 'cee_inference' },
+    })).ok).toBe(true);
+  });
+
+  it('accepts an already-normalised scale factor — 5 of 13 captured factors', () => {
+    expect(call(factorWith({
+      observed_state: { value: 0.3, unit: 'scale', source: 'cee_inference' },
+      display_value: '0.3 scale',
+    })).ok).toBe(true);
+  });
+
+  it('accepts a genuinely STATED prior — 1 of 13 captured factors', () => {
+    expect(call(factorWith({
+      prior: { distribution: 'uniform', range_min: 0, range_max: 0.4 },
+      display_value: '0% to 40%',
+    })).ok).toBe(true);
+  });
+
+  it('accepts the declared range.{min,max}, unseen in captures but in the contract', () => {
+    expect(call(factorWith({ range: { min: 0, max: 10 } })).ok).toBe(true);
+  });
+
+  it('⛔ REFUSES an ignorance prior — U(0,1) means nobody has said', () => {
+    // buildUnquantifiedPrior() writes exactly this. Accepting it would let an
+    // effect be set against a range no human stated — the fabrication this
+    // guard exists to prevent, arriving through the guard.
+    const r = call(factorWith({
+      prior: { distribution: 'uniform', range_min: 0, range_max: 1, prior_is_unquantified: true },
+    }));
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.refusal.reason).toBe('factor_has_no_range');
+    expect(r.refusal.message).toContain('placeholder range that nobody has stated');
+    expect(r.refusal.message).toContain('do not treat the placeholder as if it were their answer');
+  });
+
+  it('CONTROL: the spelling this reader used to REQUIRE is not what makes a factor usable', () => {
+    // `range.{range_min,range_max}` is declared nowhere and appeared in zero
+    // captures. If this ever passes, the original bug is back.
+    const r = call(factorWith({ range: { range_min: 0, range_max: 10 } }));
+    expect(r.ok).toBe(false);
+  });
+
+  it('still refuses a factor carrying none of them', () => {
+    expect(call(factorWith({})).ok).toBe(false);
+    expect(call(factorWith({ observed_state: { value: 0.3, unit: 'scale' }, scale_frame: 0 })).ok).toBe(true);
+  });
+
+  it('a half prior is not a range', () => {
+    expect(call(factorWith({ prior: { distribution: 'uniform', range_min: 0 } })).ok).toBe(false);
+  });
+});
+
+describe('SUPERSEDED — the schema-derived reading, kept only as a control', () => {
   function factorWith(extra: Record<string, unknown>): EffectGraph {
     return {
       nodes: [
