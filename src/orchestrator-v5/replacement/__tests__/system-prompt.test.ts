@@ -42,6 +42,19 @@ describe('the doctrine states the product this is, not the one it was', () => {
     expect(SYSTEM_PROMPT_DOCTRINE).toContain('only when they have asked for a change');
   });
 
+  /**
+   * Found live: the remember tool was built, wired and unused. Across four
+   * turns including a textbook user fact ("churn went from 3% to 4.4%") the
+   * model never called it, because nothing told it to. A capability the
+   * model does not know it has is the same as one that does not exist.
+   */
+  it('instructs the model to record what the user establishes, in the same turn', () => {
+    expect(SYSTEM_PROMPT_DOCTRINE).toContain('WRITE DOWN WHAT THEY ESTABLISH, IN THE SAME TURN');
+    expect(SYSTEM_PROMPT_DOCTRINE).toContain('record it with the remember tool');
+    expect(SYSTEM_PROMPT_DOCTRINE).toContain('Not later, and not only the ones that seem important');
+    expect(SYSTEM_PROMPT_DOCTRINE).toContain('the clearest possible signal that you were not listening');
+  });
+
   it('refuses to flatten a qualified option into its generic version', () => {
     expect(SYSTEM_PROMPT_DOCTRINE).toContain('the qualifier IS the option');
     expect(SYSTEM_PROMPT_DOCTRINE).toContain('do not silently propose the flattened change');

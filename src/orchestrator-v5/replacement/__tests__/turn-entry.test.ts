@@ -162,6 +162,7 @@ describe('the read tools are always present', () => {
     // can forget to pass it.
     expect(seen[0]).toContain('set_option_effect');
     expect(seen[0]).toContain('run_analysis');
+    expect(seen[0]).toContain('remember');
     // Also not optional. A model that can read the workspace but cannot add
     // the node the user just named has to refuse the most ordinary request
     // there is.
@@ -203,5 +204,41 @@ describe('without a write path the turn says so', () => {
       applyOperations: async () => ({ ok: true, receiptId: 'r1' }),
     });
     expect(system).not.toContain('saving a change to the model on this turn');
+  });
+});
+
+/**
+ * The end-to-end path for the thing the first increment actually promises:
+ * what the user establishes survives into the next turn's prompt.
+ */
+describe('what the user establishes reaches the record and the next prompt', () => {
+  it('a remembered fact is stored, and is rendered as THEIRS on the following turn', async () => {
+    const store = memoryStore();
+    const remembering: ChatWithToolsLike = async ({ messages }) => {
+      const alreadyCalled = JSON.stringify(messages).includes('tool_result');
+      if (alreadyCalled) return say('Noted.');
+      return {
+        content: [{
+          type: 'tool_use', id: 'r1', name: 'remember',
+          input: { items: [{ kind: 'user_fact', text: 'Churn is 3% a month' }] },
+        }],
+        stop_reason: 'tool_use',
+      };
+    };
+    const first = await handleReplacementTurn(
+      entryInput({ message: 'Churn is 3% a month, for what it is worth.' }),
+      { chatWithTools: remembering, state: store },
+    );
+    expect(first.state.memory.items.some((i) => i.text === 'Churn is 3% a month')).toBe(true);
+
+    let system = '';
+    const spy: ChatWithToolsLike = async (a) => { system = a.system; return say('ok'); };
+    await handleReplacementTurn(entryInput({ turnId: 'turn-2', message: 'and now?' }), {
+      chatWithTools: spy, state: store,
+    });
+    expect(system).toContain('THE USER STATED AS FACT');
+    expect(system).toContain('Churn is 3% a month');
+    // And it is NOT filed as something the assistant merely suggested.
+    expect(system).not.toContain('YOU SUGGESTED (not agreed, not applied):\n- Churn is 3% a month');
   });
 });

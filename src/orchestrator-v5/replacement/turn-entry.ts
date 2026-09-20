@@ -53,6 +53,7 @@ import {
 } from './conversation-memory.js';
 import { EMPTY_PROPOSAL_STORE, type ProposalStore } from './proposal-store.js';
 import { createRunAnalysisTool } from './run-analysis-tool.js';
+import { createRememberTool } from './remember-tool.js';
 import { createSetOptionEffectTool } from './propose-tools.js';
 import {
   createAddEdgeTool,
@@ -203,6 +204,10 @@ export async function handleReplacementTurn(
   const tools: AgentTool[] = [
     createReadWorkspaceTool({ getGraph: input.getGraph, requestId: input.requestId }),
     createReadResultsTool({ getAnalysis: input.getAnalysis }),
+    // Unconditional. Without it the durable record holds only what the
+    // ASSISTANT did, and "retain new evidence" — the first increment's whole
+    // promise — has no mechanism behind it.
+    createRememberTool({ getMemory: () => prior.memory }),
     createSetOptionEffectTool({ getGraph: input.getGraph }),
     // Also unconditional. A user must always be able to ask for the analysis,
     // and the tool itself decides whether running one is warranted — it

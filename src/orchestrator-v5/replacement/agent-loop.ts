@@ -42,12 +42,17 @@ export interface AgentTool {
    * `propose` returns operations for the user to consent to. It MUST NOT
    * mutate anything; the loop asserts the shape but cannot police side
    * effects, so this is also a review obligation on each tool.
+   * `remember` writes what the USER established into the durable record. It
+   * touches no graph and needs no consent — recording that someone said
+   * something is not a change to their model. It may never record an
+   * assistant suggestion or an authorised change: the composer owns the
+   * first and only a receipt can produce the second.
    * `accept` records that the user agreed to a proposal ALREADY OFFERED, by
    * its id. It never invents a change: the operations come from the store,
    * exactly as they were shown. This is the only kind whose effect can reach
    * the graph, and it can only reach it along a path the user has seen.
    */
-  readonly kind: 'read' | 'propose' | 'accept';
+  readonly kind: 'read' | 'propose' | 'accept' | 'remember';
   readonly execute: (input: Record<string, unknown>) => Promise<AgentToolOutcome> | AgentToolOutcome;
 }
 
@@ -70,12 +75,38 @@ export type AgentToolOutcome =
       readonly summary: string;
       readonly content?: string;
     }
+  /** Things the user established this turn, for the durable record. */
+  | {
+      readonly type: 'remembered';
+      readonly items: readonly RememberedItem[];
+      readonly content?: string;
+    }
   | { readonly type: 'refused'; readonly content: string };
+
+/** A kind this layer will record on the user's behalf. Deliberately excludes
+ *  `ai_suggestion` and `authorised_change`. */
+export type RememberableKind =
+  | 'user_fact'
+  | 'user_preference'
+  | 'open_question'
+  | 'disagreement';
+
+export interface RememberedItem {
+  readonly kind: RememberableKind;
+  readonly text: string;
+  /** Id of an earlier item this corrects. Same kind only. */
+  readonly supersedes?: string;
+}
 
 export interface ProposedChange {
   readonly tool: string;
   readonly summary: string;
   readonly operations: readonly Record<string, unknown>[];
+}
+
+export interface RememberedBatch {
+  readonly tool: string;
+  readonly items: readonly RememberedItem[];
 }
 
 export interface AcceptedProposal {
@@ -116,6 +147,8 @@ export interface AgentLoopResult {
   readonly proposed: readonly ProposedChange[];
   /** Proposals the user agreed to on this turn, by id. */
   readonly accepted: readonly AcceptedProposal[];
+  /** What the user established this turn, for the durable record. */
+  readonly remembered: readonly RememberedBatch[];
   /** Tools actually called, in order — for the receipt and for telemetry. */
   readonly toolsCalled: readonly string[];
   readonly iterations: number;
@@ -188,6 +221,7 @@ export async function runAgentLoop(
   const messages = [...input.messages];
   const proposed: ProposedChange[] = [];
   const accepted: AcceptedProposal[] = [];
+  const remembered: RememberedBatch[] = [];
   const toolsCalled: string[] = [];
 
   let iterations = 0;
@@ -202,7 +236,7 @@ export async function runAgentLoop(
 
     const uses = toolUsesOf(response.content);
     if (response.stop_reason !== 'tool_use' || uses.length === 0) {
-      return { text: lastText, proposed, accepted, toolsCalled, iterations, haltedAtCeiling: false };
+      return { text: lastText, proposed, accepted, remembered, toolsCalled, iterations, haltedAtCeiling: false };
     }
 
     // Echo the assistant's own blocks back before the results — the tool-use
@@ -232,6 +266,24 @@ export async function runAgentLoop(
           tool_use_id: use.id,
           content: `The ${use.name} tool failed: ${err instanceof Error ? err.message : String(err)}`,
           is_error: true,
+        });
+        continue;
+      }
+
+      if (outcome.type === 'remembered') {
+        if (tool.kind !== 'remember') {
+          throw new AgentLoopError(
+            `tool "${use.name}" is declared "${tool.kind}" but wrote to the record — only a "remember" tool may do that`,
+          );
+        }
+        remembered.push({ tool: use.name, items: outcome.items });
+        results.push({
+          type: 'tool_result',
+          tool_use_id: use.id,
+          content:
+            outcome.content ??
+            `Recorded, as ${outcome.items.length === 1 ? 'one item' : `${outcome.items.length} items`}. ` +
+              `This is now part of what the conversation has established and will be there next turn.`,
         });
         continue;
       }
@@ -287,5 +339,5 @@ export async function runAgentLoop(
 
   // The ceiling stopped us. `lastText` may be mid-thought, so the caller is
   // told explicitly rather than left to present a truncated turn as finished.
-  return { text: lastText, proposed, accepted, toolsCalled, iterations, haltedAtCeiling: true };
+  return { text: lastText, proposed, accepted, remembered, toolsCalled, iterations, haltedAtCeiling: true };
 }
