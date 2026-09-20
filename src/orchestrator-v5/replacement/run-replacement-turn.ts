@@ -346,6 +346,51 @@ export async function runReplacementTurn(
                   'Tell the user you cannot save at the moment.',
               };
             }
+            // ⛔⛔ ONE TURN, ONE WRITE — A PROPERTY OF THE APPLIER, NOT A
+            // PREFERENCE, AND THE SECOND WRITE FAILS SILENTLY AND TOTALLY.
+            //
+            // The conversational applier is `append_turn_atomic_v4/v5`, whose
+            // idempotency is `ON CONFLICT (scenario_id, turn_id) DO NOTHING`.
+            // Read at the migration bytes
+            // (`20260806120000_v5_turn_fence_first_write_exemption.sql`), the
+            // conflict arm does this:
+            //
+            //   ON CONFLICT (scenario_id, turn_id) DO NOTHING
+            //   RETURNING id INTO v_turn_id;
+            //   IF NOT FOUND THEN
+            //     SELECT id INTO v_turn_id FROM v5_conversation_turns ...
+            //     RETURN v_turn_id;        <-- everything below is SKIPPED
+            //
+            // Below that RETURN sit the `UPDATE scenarios SET graph`, the
+            // handler-facts insert loop and the brief update. So a SECOND
+            // append under the same turn id does not merely return the first
+            // call's receipt: its graph, its facts and its brief are never
+            // written at all, and the call hands back a valid-looking row id.
+            // The model would then be told the second change was saved, on a
+            // turn where it reached nothing — the "Updated Monthly Churn Rate"
+            // lie this whole layer exists to kill, regenerated at the
+            // database.
+            //
+            // The right end state is ONE apply carrying BOTH operation sets.
+            // That is not built. Until it is, refusing the second accept is
+            // the honest behaviour: the user is told plainly that one change
+            // went through and the other needs another turn, which is a
+            // smaller harm than a confident false receipt.
+            //
+            // ⚠ IT LIVES IN THE TOOL, NOT THE PROMPT, DELIBERATELY. Two
+            // identical four-turn runs at temperature 0 diverged materially on
+            // this branch, so anything that must hold EVERY time cannot be a
+            // sentence the model is asked to respect.
+            if (applied.length > 0) {
+              return {
+                type: 'refused',
+                content:
+                  'ONE CHANGE PER TURN. A change has already been saved on this turn, and a second ' +
+                  'save would not reach the model — it would look like it had. Tell the user which ' +
+                  'change was saved, that the other has NOT been, and offer to make it next.',
+              };
+            }
+
             const proposalId = typeof raw.proposal_id === 'string' ? raw.proposal_id : '';
             const quote = typeof raw.user_agreement_quote === 'string' ? raw.user_agreement_quote : '';
 

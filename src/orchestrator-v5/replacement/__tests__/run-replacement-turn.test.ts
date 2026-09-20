@@ -758,3 +758,142 @@ describe('nothing is written until the intention to write is durable', () => {
     expect(t2.applied[0]?.receiptId).toBe('r-ok');
   });
 });
+
+describe('one turn, one write — the applier makes a second save silently lossy', () => {
+  /**
+   * The conversational applier's idempotency is
+   * `ON CONFLICT (scenario_id, turn_id) DO NOTHING`, and its conflict arm
+   * RETURNs before `UPDATE scenarios SET graph` and before the handler-facts
+   * insert loop (`20260806120000_v5_turn_fence_first_write_exemption.sql`).
+   *
+   * So a second append under one turn id writes NOTHING and hands back a
+   * valid-looking row id. The adversarial review found this as "two accepts in
+   * one turn share one idempotency key"; the real applier makes it worse than
+   * the review could see, because the loss is total and silent rather than a
+   * mis-attributed receipt.
+   *
+   * Pinned as a REFUSAL rather than prompt wording: two identical four-turn
+   * runs at temperature 0 diverged materially on this branch, so anything that
+   * must hold every time cannot be a sentence the model is asked to respect.
+   */
+  /** One tool, a DIFFERENT change each time it is called — the agent loop
+   *  refuses two tools sharing a name, and two distinct proposals is the
+   *  precondition this case needs. */
+  function alternatingOffer(): AgentTool {
+    let n = 0;
+    return {
+      kind: 'propose',
+      definition: {
+        name: 'set_option_effect',
+        description: 'propose an option effect',
+        input_schema: { type: 'object', properties: {} },
+      },
+      execute: () => {
+        n += 1;
+        return {
+          type: 'proposed',
+          summary: `Set what Full Parity does to factor ${n} to 0.${n}`,
+          operations: [
+            { op: 'update_node', path: `/nodes/opt-parity/data/interventions/f-${n}`, value: 0.4 },
+          ],
+        };
+      },
+    };
+  }
+
+  it('saves the first accept and REFUSES the second, naming what did not land', async () => {
+    // Turn 1 — two distinct changes are offered and left waiting.
+    const t1 = await runReplacementTurn(
+      baseInput({
+        message: 'what would full parity do?',
+        tools: [alternatingOffer()],
+      }),
+      {
+        chatWithTools: scripted([
+          call('set_option_effect', {}),
+          { content: [{ type: 'tool_use', id: 'tu2', name: 'set_option_effect', input: {} }], stop_reason: 'tool_use' },
+          say('I have put both to you.'),
+        ]),
+        checkpoint: ck,
+        applyOperations: okWrite(),
+      },
+    );
+    const waiting = openProposals(t1.proposals);
+    expect(waiting.length, 'two distinct offers must be waiting for the case to exist').toBe(2);
+
+    // Turn 2 — the user agrees to both, and the model accepts both in one reply.
+    const writes: Parameters<ApplyOperations>[0][] = [];
+    const model = scripted([
+          {
+            content: [
+              { type: 'tool_use', id: 'a1', name: ACCEPT_TOOL_NAME, input: { proposal_id: waiting[0]!.id, user_agreement_quote: 'yes, do both please' } },
+              { type: 'tool_use', id: 'a2', name: ACCEPT_TOOL_NAME, input: { proposal_id: waiting[1]!.id, user_agreement_quote: 'yes, do both please' } },
+            ],
+            stop_reason: 'tool_use',
+          },
+      say('Done what I could.'),
+    ]);
+    const t2 = await runReplacementTurn(
+      baseInput({
+        message: 'yes, do both please',
+        turnId: 'turn-2',
+        ...reload(t1),
+      }),
+      {
+        chatWithTools: model,
+        checkpoint: ck,
+        applyOperations: async (arg) => {
+          writes.push(arg);
+          return { ok: true, receiptId: `receipt-${writes.length}` };
+        },
+      },
+    );
+
+    // THE PROPERTY: exactly one write leaves, however many accepts the model emits.
+    expect(writes.length, 'a second append on one turn id would write nothing at all').toBe(1);
+    expect(appliedProposals(t2.proposals).length).toBe(1);
+
+    // And the second proposal is still WAITING — not applied, not lost.
+    expect(openProposals(t2.proposals).length).toBe(1);
+
+    // The refusal reaches the MODEL as a tool result — it is not on the
+    // returned turn, which is why this reads the recorded request rather than
+    // the response. The model has to be told which change did not land, or it
+    // cannot tell the user the truth about it.
+    const fedBack = JSON.stringify(model.calls.at(-1)?.messages ?? []);
+    expect(fedBack).toContain('ONE CHANGE PER TURN');
+    expect(fedBack).toContain('has NOT been');
+  });
+
+  it('CONTROL — a single accept in a turn still saves normally', async () => {
+    // Without this the assertion above would pass on a tool that had simply
+    // stopped accepting anything, which would be a different defect.
+    const t1 = await runReplacementTurn(baseInput({ message: 'what would parity do?' }), {
+      chatWithTools: scripted([call('set_option_effect', {}), say('Offered.')]),
+      checkpoint: ck,
+      applyOperations: okWrite(),
+    });
+    const waiting = openProposals(t1.proposals);
+    expect(waiting.length).toBe(1);
+
+    const writes: Parameters<ApplyOperations>[0][] = [];
+    const single = scripted([
+      { content: [{ type: 'tool_use', id: 'a1', name: ACCEPT_TOOL_NAME, input: { proposal_id: waiting[0]!.id, user_agreement_quote: 'yes please' } }], stop_reason: 'tool_use' },
+      say('Saved.'),
+    ]);
+    const t2 = await runReplacementTurn(
+      baseInput({ message: 'yes please', turnId: 'turn-2', ...reload(t1) }),
+      {
+        chatWithTools: single,
+        checkpoint: ck,
+        applyOperations: async (arg) => {
+          writes.push(arg);
+          return { ok: true, receiptId: 'receipt-1' };
+        },
+      },
+    );
+    expect(writes.length).toBe(1);
+    expect(appliedProposals(t2.proposals).length).toBe(1);
+    expect(JSON.stringify(single.calls.at(-1)?.messages ?? [])).not.toContain('ONE CHANGE PER TURN');
+  });
+});
