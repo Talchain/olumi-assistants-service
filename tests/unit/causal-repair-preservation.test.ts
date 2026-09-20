@@ -148,4 +148,25 @@ describe("captured causal repair boundary", () => {
     expect(() => applyPatchOperations(graph, [{ op: "remove_edge", path: "unrelated_missing_edge" }])).toThrow();
   });
 
+  it("keeps risk mapping independent of an offered missing magnitude on the same valued option", () => {
+    const projection = projectGraphAndOptionsToV3(simpleRepair(fixture()));
+    const graph = GraphV3.parse(projection.graph);
+    const originalEffect = graph.edges.find((edge) => edge.from === ids.two && edge.to === ids.velocity)!;
+    graph.edges.push({ ...structuredClone(originalEffect), to: ids.architecture });
+    const admission = resolveRunAdmission(projectGraphForPersistence(graph));
+    expect(admission.assessment.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ option_id: ids.two, factor_id: ids.architecture,
+        code: "MISSING_OPTION_VALUE", obligation: "offered" }),
+    ]));
+    expect(admission.assessment.blockingIssues.some((issue) =>
+      issue.option_id === ids.two && issue.code === "OPTION_NEEDS_MAPPING",
+    )).toBe(true);
+    expect(admission.willProceed).toBe(false);
+    const discardedRisk = applyPatchOperations(graph, [{
+      op: "remove_edge", path: `${ids.two}::${ids.risk}`,
+    }]);
+    // Existing compute-discard waiver still covers the unrelated offered value.
+    expect(resolveRunAdmission(projectGraphForPersistence(discardedRisk)).willProceed).toBe(true);
+  });
+
 });
