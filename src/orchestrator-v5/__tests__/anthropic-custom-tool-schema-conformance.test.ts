@@ -65,6 +65,13 @@ import {
   type StructuralEditGrounding,
 } from '../tools/propose-structural-edit.js';
 
+import { EMPTY_CONVERSATION_MEMORY } from '../replacement/conversation-memory.js';
+import { createSetOptionEffectTool } from '../replacement/propose-tools.js';
+import { createReadResultsTool, createReadWorkspaceTool } from '../replacement/read-tools.js';
+import { createRememberTool } from '../replacement/remember-tool.js';
+import { createRunAnalysisTool } from '../replacement/run-analysis-tool.js';
+import { createAddEdgeTool, createAddFactorTool, createAddOptionTool } from '../replacement/structure-tools.js';
+
 const SRC_ROOT = join(fileURLToPath(new URL('../../', import.meta.url)));
 
 /** A grounded add-option model, so its tool schema is built the way it is served. */
@@ -129,6 +136,18 @@ const SERVED_TOOL_SCHEMAS: readonly {
     label: 'propose_add_option',
     schema: buildProposeAddOptionTool(ADD_OPTION_GROUNDING).input_schema,
   },
+  // ── The replacement conversation layer ──────────────────────────────
+  // Built exactly as the turn path builds them. Registering the FILES below
+  // satisfies completeness; only these entries make the sweep actually LOOK
+  // at the schemas.
+  { label: 'read_workspace', schema: createReadWorkspaceTool({ getGraph: () => null }).definition.input_schema },
+  { label: 'read_results', schema: createReadResultsTool({ getAnalysis: () => null }).definition.input_schema },
+  { label: 'set_option_effect', schema: createSetOptionEffectTool({ getGraph: () => null }).definition.input_schema },
+  { label: 'run_analysis', schema: createRunAnalysisTool({ getGraph: () => null, getAnalysis: () => null }).definition.input_schema },
+  { label: 'remember', schema: createRememberTool({ getMemory: () => EMPTY_CONVERSATION_MEMORY }).definition.input_schema },
+  { label: 'add_factor', schema: createAddFactorTool({ getGraph: () => null }).definition.input_schema },
+  { label: 'add_option', schema: createAddOptionTool({ getGraph: () => null }).definition.input_schema },
+  { label: 'add_link', schema: createAddEdgeTool({ getGraph: () => null }).definition.input_schema },
 ];
 
 /**
@@ -145,6 +164,18 @@ const SERVED_TOOL_SCHEMAS: readonly {
  */
 const TOOL_SCHEMA_CONSTRUCTION_FILES: readonly string[] = [
   'adapters/llm/anthropic.ts',
+  // The replacement conversation layer. Unregistered until now, which is
+  // why this check was red — and the cost was not theoretical: `remember`
+  // 400'd live on a nested object missing `additionalProperties`, the exact
+  // failure this file exists to prevent and had already prevented twice for
+  // `propose_structural_edit`. Outside the registry, the guard could not see
+  // the layer at all.
+  'orchestrator-v5/replacement/propose-tools.ts',
+  'orchestrator-v5/replacement/read-tools.ts',
+  'orchestrator-v5/replacement/remember-tool.ts',
+  'orchestrator-v5/replacement/run-analysis-tool.ts',
+  'orchestrator-v5/replacement/run-replacement-turn.ts',
+  'orchestrator-v5/replacement/structure-tools.ts',
   'orchestrator-v5/routing/open-frame-intake.ts',
   'orchestrator-v5/routing/tool-schema.ts',
   'orchestrator-v5/tools/propose-structural-edit.ts',
@@ -237,6 +268,27 @@ describe('⭐⭐ 2.655 — every custom tool schema Anthropic is sent is API-con
     },
   );
 
+/**
+ * Tools that genuinely take NO arguments.
+ *
+ * ⚠ THE TWO RULES ABOVE AND BELOW ARE MUTUALLY UNSATISFIABLE FOR SUCH A TOOL,
+ * and that is a gap in this file rather than a defect in the tool. One demands
+ * `additionalProperties: false` on every object; the other forbids exactly
+ * that on an object declaring no properties. A read tool taking no input can
+ * satisfy neither, and before the replacement layer there was no such tool
+ * here to notice it.
+ *
+ * The closed-to-nothing rule exists to catch an object that OUGHT to carry
+ * fields and declares none — where `{}` is a silent composer failure. For a
+ * tool whose only legal payload really is `{}`, that is the correct schema.
+ * Two different questions were sharing one predicate.
+ *
+ * Membership is EXPLICIT and top-level only, so adding a tool here is a
+ * deliberate act a reviewer can see, and a nested empty bag is still caught
+ * everywhere — including inside these tools.
+ */
+const PARAMETERLESS_TOOLS: readonly string[] = ['read_workspace', 'read_results', 'run_analysis'];
+
   it('⭐ no object is closed to nothing (a tool that can only ever emit `{}`)', () => {
     // The other way to satisfy the assertion above is `additionalProperties:
     // false` on an object that declares NO properties. That is worse than the
@@ -246,6 +298,9 @@ describe('⭐⭐ 2.655 — every custom tool schema Anthropic is sent is API-con
     const closedToNothing = SERVED_TOOL_SCHEMAS.flatMap((t) =>
       objectNodesIn(t.schema)
         .filter((n) => n.additionalProperties === false && n.propertyCount === 0)
+        // A declared parameterless tool may have an empty TOP-LEVEL object —
+        // and only that. A nested empty bag inside one is still a defect.
+        .filter((n) => !(n.path === '$' && PARAMETERLESS_TOOLS.includes(t.label)))
         .map((n) => `${t.label} ${n.path}`),
     );
     expect(
@@ -254,6 +309,31 @@ describe('⭐⭐ 2.655 — every custom tool schema Anthropic is sent is API-con
         'they permit is `{}`. Closing an open bag is not a fix for the 400 — ' +
         'declare the fields it legitimately carries instead.',
     ).toEqual([]);
+  });
+
+  it('every tool claiming to be parameterless really is — the exemption cannot be abused', () => {
+    // Without this, PARAMETERLESS_TOOLS would be a way to silence the rule on
+    // a tool that DOES take arguments, which is the failure the rule exists
+    // to catch. Derived from the schema, not from the list.
+    for (const label of PARAMETERLESS_TOOLS) {
+      const entry = SERVED_TOOL_SCHEMAS.find((t) => t.label === label);
+      expect(entry, `${label} is exempted but is not a served tool`).toBeDefined();
+      const props = (entry?.schema as { properties?: Record<string, unknown> })?.properties ?? {};
+      expect(
+        Object.keys(props),
+        `${label} is exempted from the closed-to-nothing rule but DECLARES arguments. ` +
+          'Either it is not parameterless, or those arguments can never be sent.',
+      ).toEqual([]);
+    }
+  });
+
+  it('a tool that DOES take arguments cannot use the exemption (negative control)', () => {
+    // The exemption is keyed on the label, so prove it does not fire for a
+    // tool outside the list with the same shape.
+    const notExempt = objectNodesIn({ type: 'object', properties: {}, additionalProperties: false })
+      .filter((n) => n.additionalProperties === false && n.propertyCount === 0)
+      .filter((n) => !(n.path === '$' && PARAMETERLESS_TOOLS.includes('some_other_tool')));
+    expect(notExempt).toHaveLength(1);
   });
 
   it('the closed-to-nothing screen can SEE a violation (positive control)', () => {

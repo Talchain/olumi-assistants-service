@@ -54,6 +54,7 @@ export function createSetOptionEffectTool(deps: ProposeToolDeps): AgentTool {
         'This proposes only: nothing is saved until they agree.',
       input_schema: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           option_id: { type: 'string', description: 'The option whose effect is being set.' },
           factor_id: { type: 'string', description: 'The factor it affects.' },
