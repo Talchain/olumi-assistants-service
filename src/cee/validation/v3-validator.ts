@@ -217,6 +217,7 @@ function validateNodes(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
  */
 const ALLOWED_EDGE_PATTERNS: Array<{ from: string; to: string }> = [
   { from: "decision", to: "option" },  // Decision branches to options
+  { from: "option", to: "risk" },    // Retained hypothesis, not a configured intervention
   { from: "option", to: "factor" },    // Options set controllable factors
   { from: "factor", to: "outcome" },
   { from: "factor", to: "risk" },

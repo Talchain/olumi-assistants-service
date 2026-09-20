@@ -682,11 +682,16 @@ export function buildAnalysisReadyPayload(
   graph: GraphV3T,
   context: AnalysisReadyContext = {}
 ): AnalysisReadyPayloadT & { _fallback_meta?: AnalysisReadyFallbackMeta } {
-  // Read retained effects from the saved node, so stale options[] mirrors cannot
-  // erase the outstanding question or promote a partially specified alternative.
+  // Keep qualitative option→risk hypotheses on their existing editable edge.
+  // A causal coefficient is not an intervention level; other numeric effects
+  // cannot resolve this missing mapping. Derive from the graph so no optional
+  // flag or stale options[] mirror can accidentally grant calculation readiness.
   const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
   options = options.map((option) => {
-    const unresolved = nodeById.get(option.id)?.unresolved_causal_edges ?? [];
+    const unresolved = graph.edges.filter((edge) =>
+      edge.from === option.id && nodeById.get(edge.to)?.kind === "risk"
+      && edge.edge_type !== "bidirected",
+    );
     if (unresolved.length === 0) return option;
     return {
       ...option,

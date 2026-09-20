@@ -286,7 +286,6 @@ function projectNode(raw: unknown): NodeProjection {
     'goal_threshold_cap',
     'intercept',
     'encoding_map',
-    'unresolved_causal_edges',
   ] as const) {
     if (r[key] !== undefined) out[key] = r[key];
   }

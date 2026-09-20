@@ -18,8 +18,8 @@
  *
  * Only outcome and risk nodes are budget-enforced. Goal/factor/option/etc
  * are excluded as targets. Only factor/action → outcome/risk causal edges are
- * rescaled — option→outcome/risk are INVALID_EDGE_TYPE violations and must not
- * be rescaled (masking the defect). Structural, bridge, and bidirected edges
+ * rescaled — option edges are intervention hypotheses, not causal inputs
+ * to this budget. Structural, bridge, and bidirected edges
  * are also excluded.
  *
  * Edge format support: V1_FLAT (strength_mean/strength_std) and LEGACY (weight)
@@ -264,14 +264,10 @@ const ENFORCEABLE_KINDS = new Set(["outcome", "risk"]);
  * - "factor" — standard causal source (only valid causal inbound at final topology).
  * - "action" — treated as option upstream; included defensively.
  *
- * "option" is explicitly EXCLUDED:
- *   option→outcome and option→risk are INVALID_EDGE_TYPE violations per the
- *   allowed-edge matrix (validateTopology in graph-validator.ts). The deterministic
- *   sweep removes them via fixOptionOutcomeShortcut / fixOptionRiskShortcut but can
- *   defer survivors to LLM repair. If they still survive to enforcement, rescaling
- *   them would make invalid topology look numerically safe — masking the defect
- *   instead of surfacing it. Post-enforcement validation will flag them as
- *   INVALID_EDGE_TYPE errors and block packaging (see applyDeterministicEnforcement).
+ * "option" is explicitly excluded: option→risk is a retained hypothesis awaiting
+ * an intervention mapping, and option→outcome remains unsupported topology.
+ * Neither is a causal input to rescale. Readiness owns the former; topology
+ * validation owns the latter.
  */
 const RESCALABLE_SOURCE_KINDS = new Set(["factor", "action"]);
 
@@ -335,7 +331,7 @@ export function readEdgeStd(edge: EdgeT, format: EdgeFormat): number | undefined
 /**
  * True iff the edge is a causal inbound edge eligible for budget rescaling.
  * Valid: factor→outcome, factor→risk, action→outcome, action→risk.
- * Excluded: option→outcome/risk (INVALID_EDGE_TYPE — see RESCALABLE_SOURCE_KINDS),
+ * Excluded: option→outcome/risk (see RESCALABLE_SOURCE_KINDS),
  *           bidirected edges, bridge edges (outcome/risk→goal), scaffolding.
  */
 function isRescalableInbound(

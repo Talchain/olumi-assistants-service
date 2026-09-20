@@ -11,7 +11,6 @@
  * - Bucket C: Semantic, LLM-only (NO_PATH_TO_GOAL, CYCLE_DETECTED, etc.)
  */
 
-import { retainOptionRiskRelations } from "../../../../services/repair.js";
 import type { StageContext } from "../../types.js";
 import type { GraphT, NodeT, EdgeT } from "../../../../schemas/graph.js";
 import { isDirectedEdge } from "../../../../schemas/graph.js";
@@ -1662,7 +1661,7 @@ function canReachGoalViaAllowed(
  * path to goal via allowed edge patterns (outcome→goal or outcome→factor→...→goal).
  *
  * Only handles the option→outcome pattern. All other forbidden patterns
- * (option→goal, option→risk, decision→outcome, etc.) remain Bucket C for LLM repair.
+ * (option→goal, decision→outcome, etc.) remain Bucket C for LLM repair.
  *
  * Returns repair records for removed edges plus a count of non-eligible
  * forbidden edges that were skipped (flagged for LLM repair).
@@ -1735,32 +1734,6 @@ export function fixOptionOutcomeShortcut(graph: GraphT): {
 /** Normalise V3 "action" kind to "option" for topology matching. */
 function normaliseKind(kind: string): string {
   return kind === "action" ? "option" : kind;
-}
-
-// ---------------------------------------------------------------------------
-// Proactive: option→risk shortcut removal
-// ---------------------------------------------------------------------------
-
-/** Retain option→risk meaning for clarification; never invent a factor bridge. */
-export function fixOptionRiskShortcut(graph: GraphT, _format: EdgeFormat): {
-  repairs: Repair[];
-  removedCount: number;
-  rerouted: number;
-  skippedCount: number;
-} {
-  const retained = retainOptionRiskRelations(graph);
-  graph.nodes = retained.graph.nodes;
-  graph.edges = retained.graph.edges;
-  return {
-    repairs: retained.retainedCount > 0 ? [{
-      code: "OPTION_RISK_RELATION_RETAINED",
-      path: "nodes.unresolved_causal_edges",
-      action: "Retained option effects pending a supported intervention mapping",
-    }] : [],
-    removedCount: retained.retainedCount,
-    rerouted: 0,
-    skippedCount: 0,
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -2455,24 +2428,8 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
     }, `Removed ${optionOutcomeResult.removedCount} option→outcome shortcut(s)`);
   }
 
-  // Step 4e: Option→risk shortcut removal — gated by ENABLE_OPTION_SHORTCUT_REPAIR.
-  // Removes option→risk edges by removing (when valid path exists) or rerouting
-  // through a controllable factor.
-  let optionRiskResult = { repairs: [] as Repair[], removedCount: 0, rerouted: 0, skippedCount: 0 };
-  if (config.features.optionShortcutRepair) {
-    optionRiskResult = fixOptionRiskShortcut(graph, format);
-    allRepairs.push(...optionRiskResult.repairs);
-
-    if (optionRiskResult.removedCount > 0) {
-      log.info({
-        event: "cee.deterministic_sweep.option_risk_shortcut",
-        request_id: ctx.requestId,
-        removed_count: optionRiskResult.removedCount,
-        rerouted: optionRiskResult.rerouted,
-        skipped_count: optionRiskResult.skippedCount,
-      }, `Fixed ${optionRiskResult.removedCount} option→risk shortcut(s)`);
-    }
-  }
+  // Option→risk hypotheses remain in the model. Readiness owns their missing
+  // mapping; a factor bridge must come from an explicit model edit.
 
   // Step 4f: Option→goal shortcut removal — gated by ENABLE_OPTION_SHORTCUT_REPAIR.
   // Removes option→goal edges by removing (when valid path exists) or rerouting
@@ -2658,9 +2615,9 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
       factor_goal_splits: factorGoalResult.splitCount,
       option_outcome_shortcuts_removed: optionOutcomeResult.removedCount,
       option_outcome_shortcuts_skipped: optionOutcomeResult.skippedCount,
-      option_risk_shortcuts_removed: optionRiskResult.removedCount,
-      option_risk_shortcuts_rerouted: optionRiskResult.rerouted,
-      option_risk_shortcuts_skipped: optionRiskResult.skippedCount,
+      option_risk_shortcuts_removed: 0,
+      option_risk_shortcuts_rerouted: 0,
+      option_risk_shortcuts_skipped: 0,
       option_goal_shortcuts_removed: optionGoalResult.removedCount,
       option_goal_shortcuts_rerouted: optionGoalResult.rerouted,
       option_goal_shortcuts_skipped: optionGoalResult.skippedCount,

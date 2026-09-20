@@ -4,11 +4,13 @@ import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../config/graphCaps.js";
 
 /**
  * Allowed edge patterns (closed-world).
- * These match the v4 prompt EDGE_TABLE.
+ * Storage includes option→risk hypotheses. The shared analysis-readiness
+ * authority withholds them until their intervention mapping is resolved.
  */
 export const ALLOWED_EDGE_PATTERNS: Array<{ from: string; to: string }> = [
   { from: "decision", to: "option" },
   { from: "option", to: "factor" },
+  { from: "option", to: "risk" },
   { from: "factor", to: "outcome" },
   { from: "factor", to: "risk" },
   { from: "factor", to: "factor" },
@@ -71,11 +73,13 @@ function isEdgeAllowed(fromKind: string, toKind: string): boolean {
  *                         edge-direction-validator.ts: "options intervene on factors,
  *                         not reverse"). Deferring them would leave an unrepairable
  *                         invalid edge to fail at the gate. They stay deleted.
- *   - `option→outcome`, `option→risk`, `option→goal` have conditional downstream
+ *   - `option→outcome` and `option→goal` have conditional downstream
  *     handlers, and `outcome→outcome` / `risk→risk` / `decision→*` are owned by the
  *     sweep's own remover — all of which also DELETE, so there is no disagreement to
  *     resolve. (The conditional handlers' skip-paths are a narrower, separate
  *     question; see the PR body. Not changed here.)
+ *   - `option→risk` is retained in storage; analysis readiness owns its missing
+ *     intervention mapping, so it is not deferred to a destructive repair.
  *
  * ADDING TO THIS LIST IS A POLICY CHANGE: an entry asserts that some downstream
  * authority WILL repair the pattern on every path that reaches it. Derive that at the
@@ -136,36 +140,6 @@ export function countEdgePatternViolations(
 // =============================================================================
 // Connectivity Repair Helpers
 // =============================================================================
-
-/** Retain unsupported option effects without choosing a substitute cause or value. */
-export function retainOptionRiskRelations(graph: GraphT): { graph: GraphT; retainedCount: number } {
-  const kinds = new Map(graph.nodes.map((node) => [node.id, node.kind]));
-  const retained = graph.edges.filter((edge) =>
-    (kinds.get(edge.from) === "option" || kinds.get(edge.from) === "action")
-    && kinds.get(edge.to) === "risk",
-  );
-  if (retained.length === 0) return { graph, retainedCount: 0 };
-  const retainedSet = new Set(retained);
-  return {
-    graph: {
-      ...graph,
-      nodes: graph.nodes.map((node) => {
-        const incoming = retained.filter((edge) => edge.from === node.id);
-        if (incoming.length === 0) return node;
-        const unresolved = [...(node.unresolved_causal_edges ?? [])];
-        for (const edge of incoming) {
-          // Repeated repair must not duplicate the retained original relation.
-          if (!unresolved.some((prior) => JSON.stringify(prior) === JSON.stringify(edge))) {
-            unresolved.push({ ...edge });
-          }
-        }
-        return { ...node, unresolved_causal_edges: unresolved };
-      }),
-      edges: graph.edges.filter((edge) => !retainedSet.has(edge)),
-    },
-    retainedCount: retained.length,
-  };
-}
 
 /**
  * Get nodes reachable from decision nodes via BFS
@@ -355,7 +329,6 @@ export function simpleRepair(
   opts?: SimpleRepairOptions
 ): GraphT {
   const deferSweepOwnedPatterns = opts?.deferSweepOwnedPatterns === true;
-  g = retainOptionRiskRelations(g).graph;
   // Separate protected and unprotected nodes
   const protectedNodes = g.nodes.filter((n) => PROTECTED_KINDS.has(n.kind));
   const unprotectedNodes = g.nodes.filter((n) => !PROTECTED_KINDS.has(n.kind));
