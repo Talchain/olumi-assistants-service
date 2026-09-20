@@ -158,6 +158,13 @@ const RUN_ANALYSIS_FACT: Record<string, unknown> = {
       constraint_verdict_state: 'evaluated_feasible',
     },
     enrichment: {
+      // ⚠ ADDED. This fixture expressed robustness only through
+      // `robustness_synthesis`, which the advice gate reads for its own band —
+      // and which appears in **0 of 41** real September captures. The separation
+      // permission reads `enrichment.robustness`, so without this the fixture
+      // describes a run whose arms were never told apart, and the deterministic
+      // answer it asserts is one the wire withholds. Completed, not relaxed.
+      robustness: { level: 'high', near_tie: { is_tie: false } },
       analysis_status: 'completed',
       option_comparison: [
         {

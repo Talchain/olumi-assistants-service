@@ -25,6 +25,11 @@
  * PURE. No I/O, no logging, no mutation.
  */
 
+import {
+  separationWithholdFromRobustness,
+  type SeparationWithhold,
+} from '../compose/analysis-state-v1.js';
+import { readRawRobustnessSignals } from '../coaching/pick-raw-robustness.js';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import {
@@ -223,6 +228,34 @@ export interface MayNameLeadingOptionVerdict {
    * default the way the boolean's `false` does.
    */
   readonly constraint_verdict_state: ConstraintVerdictState | null;
+  /**
+   * ⭐⭐ THE SEPARATION HALF, OFF THE SAME SELECTED FACT — added for the same
+   * reason `constraint_verdict_state` is here, and the docstring above is its
+   * warrant: *"permission, constraint state and disclosure copy must all
+   * originate from the ONE selected fact, or the product withholds correctly
+   * and then explains the wrong reason."*
+   *
+   * ⚠ WHY IT COULD NOT BE READ AT THE CONSUMER. The obvious implementation is
+   * `pickLatestRawRobustness(context.prior_facts)` at the gate. That is a
+   * DIFFERENT SELECTION: it uses `selectRunAnalysisFact`, which this file's own
+   * comment records as filtering out `partial` and `degraded` — a documented
+   * FAIL-OPEN for exactly this question — while the entitlement above uses
+   * `selectClaimBearingRunAnalysisFact` over the window UNION the scenario
+   * scope. Two selectors, two facts, and a gate reading one permission from
+   * each would be the P0 this field's sibling was created to close, rebuilt at
+   * a new address.
+   *
+   * ⛔ IT IS NOT A CONJUNCT ON THE BOOLEAN ABOVE. That boolean is ENTITLEMENT
+   * and must keep meaning only that. Freshness, admission, feasibility and
+   * separation are four questions; folding any two of them into one flag costs
+   * every consumer the ability to say WHICH one withheld, which is precisely
+   * what the person needs told.
+   *
+   * `null` means separation did NOT withhold on this fact — including on the
+   * branches where no fact was selected at all, where the entitlement is
+   * already `false` and the constraint voice owns the explanation.
+   */
+  readonly separation_withhold: SeparationWithhold | null;
 }
 
 /**
@@ -404,14 +437,21 @@ export function readMayNameLeadingOptionVerdictForFact(
     return {
       may_name_leading_option: false,
       constraint_verdict_state: null,
+      separation_withhold: null,
       provenance: 'fail_closed_uninterpretable',
     };
   }
   return {
-    // ONE fact, both answers, one narrow. Two `fact_type` checks would be two
-    // chances to narrow differently on a single fact.
+    // ONE fact, ALL THREE answers, one narrow. Two `fact_type` checks would be
+    // two chances to narrow differently on a single fact.
     may_name_leading_option: readMayNameLeadingOptionFromResult(fact.result),
     constraint_verdict_state: readConstraintVerdictStateFromResult(fact.result),
+    // Same fact, same narrow, the producer's own discrimination.
+    separation_withhold: separationWithholdFromRobustness(
+      readRawRobustnessSignals(
+        (fact.result as { enrichment?: { robustness?: unknown } }).enrichment?.robustness,
+      ),
+    ),
     provenance: 'scenario_fact',
   };
 }
@@ -534,6 +574,9 @@ export function readMayNameLeadingOptionVerdict(
       // honest "not recorded" — inventing a cause for a withhold whose whole
       // justification is that we could not look would be a fabricated one.
       constraint_verdict_state: null,
+      // Same reasoning, same answer: no fact, no separation reading. The
+      // entitlement is already `false`, so the constraint voice explains it.
+      separation_withhold: null,
       provenance: scope.windowTruncated
         ? 'fail_closed_truncated'
         : 'fail_closed_unavailable',
@@ -547,6 +590,10 @@ export function readMayNameLeadingOptionVerdict(
   return {
     may_name_leading_option: true,
     constraint_verdict_state: null,
+    // No analysis exists, so nothing separated and nothing failed to. `null`
+    // keeps this branch's genuinely honest `true` exactly as honest: a
+    // scenario with no analysis has nothing to withhold on either axis.
+    separation_withhold: null,
     provenance: 'no_analysis_exists',
   };
 }
@@ -629,7 +676,29 @@ function narrowToProjectedAnalysis(
   if (projected.fact === entitlementFact) return entitlement;
 
   const displayed = readMayNameLeadingOptionVerdictForFact(projected.fact);
-  if (displayed.may_name_leading_option) return entitlement;
+  if (displayed.may_name_leading_option) {
+    // ⚠⚠ THE ENTITLEMENT ANSWER STANDS HERE. THE SEPARATION ANSWER DOES NOT.
+    //
+    // This branch used to `return entitlement` whole, and adding
+    // `separation_withhold` to the verdict quietly made that wrong: the
+    // entitling fact and the DISPLAYED fact are different analyses on this
+    // path, and separation is a fact about the one being DISPLAYED.
+    //
+    // The reachable cell, named by the review: entitling fact B is newer and
+    // `partial` with robustness, displayed fact A is older and `completed`
+    // WITHOUT it. Returning B's `separation_withhold: null` says the arms of A
+    // were told apart when nothing measured them — a FALSE PERMISSION, so the
+    // gates stand down and a leader claim about A survives. That is the exact
+    // defect this whole change exists to stop, reintroduced by the change
+    // itself.
+    //
+    // ⭐ It is the same rule the `constraint_verdict_state` field below was
+    // created to enforce — "permission, state and disclosure copy must all
+    // originate from the ONE selected fact" — and I broke it on the one path
+    // that returns early. The boolean and its provenance are still the
+    // entitlement's, because entitlement genuinely is B's question to answer.
+    return { ...entitlement, separation_withhold: displayed.separation_withhold };
+  }
 
   return {
     may_name_leading_option: false,
@@ -640,6 +709,10 @@ function narrowToProjectedAnalysis(
     // reason") rebuilt at a new address. Permission, state and disclosure copy
     // still originate from ONE fact; F1 only changes WHICH fact that is.
     constraint_verdict_state: displayed.constraint_verdict_state,
+    // THE DISPLAYED FACT'S separation too, for the identical reason given
+    // directly above for the state. All three answers keep coming from ONE
+    // fact; F1 only changes which one.
+    separation_withhold: displayed.separation_withhold,
     provenance: 'fail_closed_projected_analysis',
   };
 }

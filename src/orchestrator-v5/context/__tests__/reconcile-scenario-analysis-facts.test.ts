@@ -387,6 +387,11 @@ describe('reconcileScenarioAnalysisFacts', () => {
     ).toEqual({
       may_name_leading_option: false,
       constraint_verdict_state: null,
+      // A new member of this verdict (see `MayNameLeadingOptionVerdict`). These
+      // whole-object assertions are what made it visible the moment it was added,
+      // which is the behaviour to keep: a field appearing without a decision here
+      // is the drift the shape assertion exists to catch.
+      separation_withhold: 'separation_unavailable',
       provenance: 'scenario_fact',
     });
 
@@ -416,6 +421,7 @@ describe('reconcileScenarioAnalysisFacts', () => {
     ).toEqual({
       may_name_leading_option: false,
       constraint_verdict_state: null,
+      separation_withhold: null,
       provenance: 'fail_closed_unavailable',
     });
   });

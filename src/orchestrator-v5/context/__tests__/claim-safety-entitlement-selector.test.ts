@@ -263,6 +263,11 @@ describe('P0 REPRO: a withheld PARTIAL analysis must not be entitled to name a l
     expect(v).toEqual({
       may_name_leading_option: true,
       constraint_verdict_state: null,
+      // A new member of this verdict (see `MayNameLeadingOptionVerdict`). These
+      // whole-object assertions are what made it visible the moment it was added,
+      // which is the behaviour to keep: a field appearing without a decision here
+      // is the drift the shape assertion exists to catch.
+      separation_withhold: null,
       provenance: 'no_analysis_exists',
     });
   });
