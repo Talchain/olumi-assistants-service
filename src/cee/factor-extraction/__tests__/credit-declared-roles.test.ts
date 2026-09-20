@@ -1,9 +1,15 @@
 import { describe, expect, it } from "vitest";
-import type { GraphT } from "../../../schemas/graph.js";
+import { FactorData, type GraphT } from "../../../schemas/graph.js";
 import type { DraftRecordRole, DraftRecordSet } from "../../draft/records/grammar.js";
 import { projectRecordsToGraph } from "../../draft/records/projector.js";
 import { transformNodeToV3 } from "../../transforms/schema-v3.js";
 import { creditUserTypedFigures } from "../enricher.js";
+
+function publishedSource(node: GraphT["nodes"][number]) {
+  const data = FactorData.parse(node.data);
+  expect(data).toEqual(node.data);
+  return transformNodeToV3({ ...node, data }).observed_state?.source;
+}
 
 function projectedClaim(role: DraftRecordRole, unbased = false, movement = false) {
   const quote = movement ? "Reduce churn rate from 6% to 4%" : {
@@ -48,7 +54,7 @@ describe("provenance credit respects the records' current-value authority", () =
       expect(creditUserTypedFigures(graph, brief)).toBe(0);
       const after = graph.nodes.find(node => node.id === claim.id)!;
       expect(after.data).toEqual(claim.data);
-      expect(transformNodeToV3(after).observed_state?.source).toBe("cee_inference");
+      expect(publishedSource(after)).toBe("cee_inference");
     },
   );
 
@@ -58,14 +64,14 @@ describe("provenance credit respects the records' current-value authority", () =
     const after = graph.nodes.find(node => node.id === claim.id)!;
     expect(after.data?.value).toBe(0.04);
     expect(after.data?.raw_value).toBe(4);
-    expect(transformNodeToV3(after).observed_state?.source).toBe("brief_extraction");
+    expect(publishedSource(after)).toBe("brief_extraction");
   });
 
   it("does not credit an unbased sibling with another node's protected target", () => {
     const { graph, brief, claim } = projectedClaim("target", true);
     expect(creditUserTypedFigures(graph, brief)).toBe(0);
     const after = graph.nodes.find(node => node.id === claim.id)!;
-    expect(transformNodeToV3(after).observed_state?.source).toBe("cee_inference");
+    expect(publishedSource(after)).toBe("cee_inference");
   });
 
   it.each(["target", "baseline"] as const)(
@@ -75,7 +81,7 @@ describe("provenance credit respects the records' current-value authority", () =
       expect(creditUserTypedFigures(graph, brief)).toBe(role === "baseline" ? 1 : 0);
       const after = graph.nodes.find(node => node.id === claim.id)!;
       expect(after.data?.value).toBe(role === "baseline" ? 0.06 : 0.04);
-      expect(transformNodeToV3(after).observed_state?.source).toBe(
+      expect(publishedSource(after)).toBe(
         role === "baseline" ? "brief_extraction" : "cee_inference",
       );
     },
