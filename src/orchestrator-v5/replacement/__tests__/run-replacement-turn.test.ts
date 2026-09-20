@@ -213,7 +213,7 @@ describe('consent is checked against the actual user turn', () => {
       baseInput({ turnId: 't2', message, proposals: t1.proposals, memory: t1.memory }),
       { chatWithTools: model, checkpoint: ck, applyOperations: write },
     );
-    return { t2, model, id };
+    return { t2, model };
   }
 
   it('saves when the quote is the user\'s own words', async () => {
@@ -373,7 +373,7 @@ describe('the three save outcomes stay apart', () => {
       baseInput({ turnId: 't2', message: 'yes go ahead', proposals: t1.proposals, memory: t1.memory }),
       { chatWithTools: model, checkpoint: ck, applyOperations: write },
     );
-    return { t2, model };
+    return { t2, model, id };
   }
 
   it('an affirmative "it did not save" records no change and tells the model so', async () => {
@@ -729,7 +729,7 @@ describe('nothing is written until the intention to write is durable', () => {
       baseInput({ turnId: 't2', message: 'yes go ahead', proposals: t1.proposals, memory: t1.memory }),
       { chatWithTools: model, ...(checkpoint === undefined ? {} : { checkpoint }), applyOperations: write },
     );
-    return { t2, model };
+    return { t2, model, id };
   }
 
   it('sends NO write when there is no way to record having started, and changes NOTHING', async () => {
@@ -752,6 +752,40 @@ describe('nothing is written until the intention to write is durable', () => {
     const fed = JSON.stringify(model.calls[1]!.messages);
     expect(fed).toContain('could not record that I was about to save');
     expect(fed).toContain('Nothing has changed');
+  });
+
+  /**
+   * ⛔ THE SAME REQUIREMENT AS THE NO-CHECKPOINT CASE ABOVE, WHICH THIS PATH
+   * DID NOT MEET. `beginApply` runs before the checkpoint, so a checkpoint
+   * that THREW left the proposal in flight for a write that never left. The
+   * refusal above says "Nothing has changed" and was true of the graph and
+   * false of the state in the same turn.
+   */
+  it('leaves NOTHING in flight when the checkpoint fails — the offer simply stands', async () => {
+    const { t2, id } = await acceptWithCheckpoint(async () => { throw new Error('disk gone'); }, okWrite());
+    expect(needsReconciliation(t2.proposals)).toHaveLength(0);
+    expect(openProposals(t2.proposals)).toHaveLength(1);
+    // Bound by IDENTITY: the SAME offer is still acceptable, not a new one a
+    // value predicate would also have matched.
+    expect(openProposals(t2.proposals)[0]!.id).toBe(id);
+  });
+
+  /**
+   * The consequence, measured rather than reasoned: with the proposal left in
+   * flight, `needsReconciliation` returns it and the SHORT-CIRCUIT at the top
+   * of the next turn owns that turn — no model call, and a notice about an
+   * unknown save for a write that was never sent. With no writer injected
+   * (the posture at this head) nothing can ever resolve it.
+   */
+  it('and the NEXT turn is an ordinary turn, not a reconciliation notice', async () => {
+    const { t2 } = await acceptWithCheckpoint(async () => { throw new Error('disk gone'); }, okWrite());
+    const next = scripted([say('a normal answer')]);
+    const t3 = await runReplacementTurn(
+      baseInput({ turnId: 't3', message: 'what were we saying?', ...reload(t2) }),
+      { chatWithTools: next, checkpoint: ck },
+    );
+    expect(next.calls).toHaveLength(1);
+    expect(t3.text).toContain('a normal answer');
   });
 
   it('checkpoints BEFORE the write, with the key already recorded', async () => {

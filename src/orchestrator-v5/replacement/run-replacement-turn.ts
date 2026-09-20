@@ -450,6 +450,17 @@ export async function runReplacementTurn(
 
             const summary = target.operations.map((o) => o.summary).join('; ');
 
+            // ⛔ THE ROLLBACK POINT. Everything from here to the checkpoint is
+            // state this turn has NOT yet earned the right to keep: the
+            // authorisation, the attempt count and the in-flight marker all
+            // presuppose a durable record that the save started. If the
+            // checkpoint refuses, this snapshot is restored so the proposal
+            // goes back to being an unaccepted offer — which is what the
+            // refusal text tells the user, and what this tool's own opening
+            // comment already required ("leaving a proposal marked in-flight
+            // for a write that was never sent is its own small lie").
+            const beforeAuthorise = proposals;
+
             proposals = authoriseProposal(proposals, proposalId, {
               authorised_in_turn: input.turnId,
               authorised_at: input.now,
@@ -492,6 +503,25 @@ export async function runReplacementTurn(
             try {
               await deps.checkpoint({ memory, proposals });
             } catch {
+              // ⛔ ROLL BACK, OR THE REFUSAL BELOW IS FALSE WITHIN ONE TURN.
+              //
+              // `beginApply` has already moved the proposal to in-flight. Left
+              // there, `needsReconciliation` returns it: with a writer injected
+              // a LATER turn dispatches the write this turn told the user it had
+              // not sent, and with no writer injected the reconciliation notice
+              // owns every later turn and the conversation is stuck — a save
+              // that never left, reported forever as one whose outcome is
+              // unknown. Nothing was dispatched, so there is nothing to
+              // reconcile and no uncertainty to carry; the honest state is the
+              // one before the user's "yes" was acted on, and the offer stands
+              // for them to accept again.
+              //
+              // The turn's write reservation is deliberately NOT released. It
+              // answers "has this turn committed to dispatching?", and a second
+              // accept after a store that just refused us is a risk this turn
+              // has no way to price. Refusing it is a gap; admitting it would be
+              // a second uncertain write.
+              proposals = beforeAuthorise;
               return {
                 type: 'refused',
                 content:

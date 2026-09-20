@@ -309,9 +309,15 @@ describe('a link that cannot be made says which one would work', () => {
       expect(out.type, `${rule.fromKind} -> ${rule.toKind} should be admitted`).toBe('proposed');
       admitted += 1;
     }
-    // A non-zero, EXPECTED count: without this the loop could admit nothing
-    // and still pass. Eight rules, all six kinds present in the fixture.
-    expect(admitted).toBe(8);
+    // ⛔ DERIVED, NOT COPIED — this line was the literal `8` and CI caught it
+    // the day staging added `option -> risk` and `risk -> outcome` (#1637).
+    // The count is not decoration: the `continue` above SKIPS any rule whose
+    // kinds the fixture has no node for, so without it a new rule could be
+    // silently unexercised while the loop still passed. Comparing against the
+    // matrix's own length is what makes that skip fail loudly, and it moves
+    // with the product's topology instead of having to be remembered.
+    expect(ALLOWED_EDGES.length).toBeGreaterThan(0);
+    expect(admitted).toBe(ALLOWED_EDGES.length);
   });
 });
 
