@@ -48,6 +48,8 @@ const GOAL_KINDS = new Set(['goal']);
 interface ReadNode {
   readonly id: string;
   readonly kind: string;
+  /** `is_baseline: true` — the Status Quo option. See THE BASELINE CONFOUND below. */
+  readonly isBaseline: boolean;
 }
 
 interface ReadEdge {
@@ -86,7 +88,13 @@ export function readGraph(value: unknown): ReadGraph | null {
     const id = typeof n.id === 'string' ? n.id : null;
     const kind = typeof n.kind === 'string' ? n.kind : typeof n.type === 'string' ? n.type : null;
     if (id === null || kind === null) continue;
-    nodes.push({ id, kind });
+    // Shape-tolerant like every other read here: the flag rides the node on the
+    // V3 wire (`cee-v3.ts:248`) but a boundary transform may nest it under
+    // `data`. Absent ⇒ false, which reproduces the pre-2026-09-14 behaviour
+    // exactly for any graph that carries no baseline.
+    const nested = n.data && typeof n.data === 'object' ? (n.data as Record<string, unknown>) : undefined;
+    const isBaseline = n.is_baseline === true || nested?.is_baseline === true;
+    nodes.push({ id, kind, isBaseline });
   }
   const edges: ReadEdge[] = [];
   for (const raw of candidate.edges) {
@@ -126,6 +134,9 @@ export function computeDraftCoverage(value: unknown): DraftCoverageFacts | null 
   }
 
   const optionIds = graph.nodes.filter((n) => OPTION_KINDS.has(n.kind)).map((n) => n.id);
+  const baselineIds = new Set(
+    graph.nodes.filter((n) => OPTION_KINDS.has(n.kind) && n.isBaseline).map((n) => n.id),
+  );
   const goalIds = new Set(graph.nodes.filter((n) => GOAL_KINDS.has(n.kind)).map((n) => n.id));
 
   // Which factors lie on an option → … → goal path, and which options reach
@@ -194,6 +205,47 @@ export function computeDraftCoverage(value: unknown): DraftCoverageFacts | null 
     if (optionIds.length > 0 && count === optionIds.length) sharedFactorCount += 1;
   }
 
+  // ⭐⭐ THE BASELINE CONFOUND — two facts wearing one number, and this module
+  // already documents the identical hazard one field over for `causal_waist`
+  // ("Zero-because-no-goal and zero-because-the-options-share-no-dimension are
+  // TWO DIFFERENT FACTS wearing one number"). The same hazard lives in
+  // `private_factor_count` and was undocumented until it produced a false
+  // finding on 2026-09-14.
+  //
+  // ⛔ MEASURED, and the mechanism is not subtle. The served draft prompt
+  // MANDATES a Status Quo option (v201:804 "Exactly one option has
+  // is_baseline: true") and REQUIRES it to keep its factor edges even though it
+  // changes nothing (v201:163 STATUS QUO PATH OVERRIDE; v201:285 "one-hot factor
+  // sets -- Status Quo MUST connect to all indicators"). So the estate's most
+  // common HEALTHY shape — N options each with its own lever, plus a Status Quo
+  // holding those levers at baseline — gives every lever an option-count of 2
+  // and scores `private_factor_count = 0`.
+  //
+  // Proved by deletion on nine real staging drafts of one brief (2026-09-14,
+  // `walk-b1-131836`): removing only the `is_baseline` node and its edges moves
+  // res9 from 0 to 4, and each of the other eight up by exactly 1 — every other
+  // field unchanged. The prompt's OWN canonical annotated example, which is
+  // maximally option-specific, also scores 0 and goes to 3 the same way.
+  //
+  // ⭐ NAMED APART RATHER THAN REDEFINED (trap 21). `private_factor_count` keeps
+  // its exact meaning so four days of telemetry stay comparable and no dashboard
+  // silently shifts under a reader. The honest measure gets its OWN name, and it
+  // is the one the redraw tie-break consumes — see `isMaterallyRicher`.
+  const deviatingOptionIds = new Set(
+    optionIds.filter((id) => kindById.get(id) !== undefined && !baselineIds.has(id)),
+  );
+  let deviatingPrivateFactorCount = 0;
+  if (deviatingOptionIds.size > 0) {
+    for (const [factorId, _count] of optionsPerWaistFactor) {
+      let reachedByDeviating = 0;
+      for (const [optionId, reached] of waistByOption) {
+        if (!deviatingOptionIds.has(optionId)) continue;
+        if (reached.has(factorId)) reachedByDeviating += 1;
+      }
+      if (reachedByDeviating === 1) deviatingPrivateFactorCount += 1;
+    }
+  }
+
   return {
     option_count: optionIds.length,
     factor_count: graph.nodes.filter((n) => FACTOR_KINDS.has(n.kind)).length,
@@ -203,6 +255,7 @@ export function computeDraftCoverage(value: unknown): DraftCoverageFacts | null 
     edge_count: graph.edges.length,
     causal_waist: waist.size,
     private_factor_count: privateFactorCount,
+    deviating_private_factor_count: deviatingPrivateFactorCount,
     shared_factor_count: sharedFactorCount,
     max_causal_depth: longestOptionToGoalDepth(optionIds, adjacency, goalIds),
   };
@@ -313,8 +366,13 @@ export function isMaterallyRicher(
   if (b === null) return false;
   if (a === null) return true;
   if (b.causal_waist !== a.causal_waist) return b.causal_waist > a.causal_waist;
-  if (b.private_factor_count !== a.private_factor_count) {
-    return b.private_factor_count > a.private_factor_count;
+  // ⭐ THE HONEST FIELD, not `private_factor_count`. The latter is suppressed by
+  // the mandatory Status Quo's factor edges (see THE BASELINE CONFOUND in
+  // `computeDraftCoverage`), so ordering draws by it ranked them partly on how
+  // many decorative baseline edges the model happened to emit — which two
+  // clauses of the served prompt disagree about, making it close to a coin-flip.
+  if (b.deviating_private_factor_count !== a.deviating_private_factor_count) {
+    return b.deviating_private_factor_count > a.deviating_private_factor_count;
   }
   if (b.max_causal_depth !== a.max_causal_depth) return b.max_causal_depth > a.max_causal_depth;
   return false;
