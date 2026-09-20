@@ -62,18 +62,26 @@ const GRAPH = {
       display_value: '0.12 %',
     },
     /**
-     * ⛔ THE REVIEW'S WITNESS, SOURCE-DERIVED — the measured negative control.
-     * A salary is a magnitude, not a position on 0-1, so "very high" about it
-     * bounds nothing this product can encode. Offering `Set Annual Salary to
-     * 0.8` would ask the person to confirm a frame nobody established, and
-     * their click would launder it into evidence.
+     * ⛔ THE REVIEW'S WITNESS (comment 5746659704), as a MEASURED negative
+     * control. A salary is a magnitude, not a position on 0-1, so "very high"
+     * about it bounds nothing this product can encode. Offering
+     * `Set Annual Salary to 0.8` would ask the person to confirm a frame
+     * nobody established, and their click would launder it into evidence.
+     *
+     * ⚠ THE FIGURE IS DELIBERATELY SYNTHETIC AND THE REVIEW'S REAL ONE IS NOT
+     * REPRODUCED HERE. This repository is PUBLIC, the witness was derived from
+     * a real captured session, and the test's discriminating power is in the
+     * SHAPE — a measured `£` magnitude with a level word about it — never in
+     * the digits. A round placeholder keeps the control exact and puts no real
+     * salary in a public tree. (Sibling remediation the same night: UI #1787,
+     * a real model readable on a public branch.)
      */
     {
       id: 'salary',
       kind: 'factor',
       label: 'Annual Salary',
-      observed_state: { value: 85000, unit: '£', source: 'cee_inference' },
-      display_value: '£85,000',
+      observed_state: { value: 100000, unit: '£', source: 'cee_inference' },
+      display_value: '£100,000',
     },
   ],
 };
