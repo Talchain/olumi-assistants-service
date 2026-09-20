@@ -29,6 +29,7 @@ function loop(over: Partial<AgentLoopResult> = {}): AgentLoopResult {
     text: 'Here is what I think.',
     proposed: [],
     accepted: [],
+    remembered: [],
     toolsCalled: [],
     iterations: 1,
     haltedAtCeiling: false,
