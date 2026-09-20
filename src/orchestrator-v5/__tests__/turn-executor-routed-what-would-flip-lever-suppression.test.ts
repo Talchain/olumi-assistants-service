@@ -173,6 +173,14 @@ function priorRunAnalysisFact(graph: typeof READY_GRAPH | typeof UNPINNED_GRAPH)
         constraint_verdict_state: 'evaluated_feasible',
       },
       enrichment: {
+      // ⚠ ADDED. These fixtures expressed robustness only through
+      // `robustness_synthesis`, which the advice gate reads for its own
+      // band — and which appears in **0 of 41** real September captures.
+      // The separation permission reads `enrichment.robustness`, so without
+      // this the fixture describes a run whose arms were never told apart,
+      // and the deterministic answer it asserts is one the wire withholds.
+      // Completing it, not relaxing the assertion.
+      robustness: { level: 'high', near_tie: { is_tie: false } },
         analysis_status: 'computed',
         margin_pp: 24,
         option_comparison: [
@@ -322,6 +330,14 @@ function priorFactWithDriversAndFlip(
         constraint_verdict_state: 'evaluated_feasible',
       },
       enrichment: {
+      // ⚠ ADDED. These fixtures expressed robustness only through
+      // `robustness_synthesis`, which the advice gate reads for its own
+      // band — and which appears in **0 of 41** real September captures.
+      // The separation permission reads `enrichment.robustness`, so without
+      // this the fixture describes a run whose arms were never told apart,
+      // and the deterministic answer it asserts is one the wire withholds.
+      // Completing it, not relaxing the assertion.
+      robustness: { level: 'high', near_tie: { is_tie: false } },
         analysis_status: 'computed',
         margin_pp: 24,
         option_comparison: [
@@ -499,6 +515,14 @@ describe('P0b-2 — routed what_would_flip suppresses option-pinned levers (chip
           constraint_verdict_state: 'evaluated_feasible',
         },
         enrichment: {
+        // ⚠ ADDED. These fixtures expressed robustness only through
+        // `robustness_synthesis`, which the advice gate reads for its own
+        // band — and which appears in **0 of 41** real September captures.
+        // The separation permission reads `enrichment.robustness`, so without
+        // this the fixture describes a run whose arms were never told apart,
+        // and the deterministic answer it asserts is one the wire withholds.
+        // Completing it, not relaxing the assertion.
+        robustness: { level: 'high', near_tie: { is_tie: false } },
           analysis_status: 'computed',
           margin_pp: 24,
           option_comparison: [

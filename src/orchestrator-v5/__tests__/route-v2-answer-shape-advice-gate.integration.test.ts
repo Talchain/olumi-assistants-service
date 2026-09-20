@@ -142,6 +142,14 @@ function makeFreshRunAnalysisFact(): Record<string, unknown> {
       graph_hash_at_run: READY_GRAPH_HASH,
       computed_at: new Date(Date.now() - 60_000).toISOString(),
       enrichment: {
+      // ⚠ ADDED. These fixtures expressed robustness only through
+      // `robustness_synthesis`, which the advice gate reads for its own
+      // band — and which appears in **0 of 41** real September captures.
+      // The separation permission reads `enrichment.robustness`, so without
+      // this the fixture describes a run whose arms were never told apart,
+      // and the deterministic answer it asserts is one the wire withholds.
+      // Completing it, not relaxing the assertion.
+      robustness: { level: 'high', near_tie: { is_tie: false } },
         analysis_status: 'completed',
         option_comparison: [
           { option_id: 'opt_hire', option_label: 'Hire', win_probability: 0.72, outcome_mean: 0.5 },
