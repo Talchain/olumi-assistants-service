@@ -163,6 +163,10 @@ const NO_TURN_CONTEXT_VERDICT: MayNameLeadingOptionVerdict = {
   // "not recorded"; inventing a cause for a withhold whose entire justification
   // is that we could not look would be a fabricated one.
   constraint_verdict_state: null,
+  // Same answer on the separation axis, same reason. The entitlement is
+  // already `false` here, so the constraint voice owns the explanation and a
+  // separation code would name a cause nobody measured.
+  separation_withhold: null,
   provenance: 'fail_closed_no_turn_context',
 };
 

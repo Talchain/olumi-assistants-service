@@ -104,6 +104,7 @@
  */
 
 import { textAssertsLeadingOption } from './leading-option-egress-guard.js';
+import { type SeparationWithhold } from './analysis-state-v1.js';
 import { composeWithheldReasonTail } from './withheld-reason-tail.js';
 import {
   MAY_NAME_LEADING_OPTION,
@@ -311,6 +312,7 @@ export function projectExplanationAnswerForWithheldClaim(
   analysisExistenceProven: boolean,
   brief?: string | null,
   sensitivity?: WithheldSensitivityEvidence | null,
+  separation?: SeparationWithhold | null,
 ): WithheldExplanationProjection {
   const original = typeof answerText === 'string' ? answerText : '';
 
@@ -352,8 +354,14 @@ export function projectExplanationAnswerForWithheldClaim(
   // one is the one a future caller silently forgets, and the forgotten value
   // would be the unsafe one — the same doctrine
   // `EgressSanitiseOpts.mayNameLeadingOption` applies.
+  // ⭐ THE SEPARATION AXIS RIDES THE SAME FRESHNESS GATE, deliberately.
+  // `conditionsAreCurrent` is not a constraint-only guard: a separation answer
+  // read off a run the graph has since moved past names a distance that no
+  // longer describes the model in front of the person. Same reasoning, same
+  // gate, and standing down costs the cause-free tail exactly as it does for
+  // the constraint voices.
   const reason = conditionsAreCurrent
-    ? composeWithheldReasonTail(state, constraints, brief)
+    ? composeWithheldReasonTail(state, constraints, brief, separation)
     : null;
   // `null` for the two PERMITTING states (a correct caller cannot reach them —
   // it owns the permission) and for a stale run. Falling back to the cause-free

@@ -174,7 +174,35 @@ const PRIOR_RUN_ANALYSIS_TURN = {
  * nothing else, so any behavioural difference between the two arms is
  * attributable to the verdict and to nothing in the fixture.
  */
+/**
+ * ⚠ `separated` DEFAULTS TO TRUE, AND THE DEFAULT IS THE POINT.
+ *
+ * This builder used to stamp only the CONSTRAINT verdict, so every fact it
+ * produced carried no `robustness` and was therefore `separation_unavailable`
+ * on the published claim (`permitted = entitled && separates`). That was
+ * invisible while the gates read entitlement alone; it is not any more. A
+ * completed analysis normally HAS robustness, so producing one by default is
+ * both the realistic fixture and the one that keeps the permitted controls
+ * meaning what their names say. A test that wants the stripped shape — the
+ * confined `auto_post_draft` shape — asks for it explicitly.
+ */
 function priorRunAnalysisFact(verdict: {
+  may_name_leading_option: boolean;
+  constraint_verdict_state: string;
+  separated?: boolean;
+}): Record<string, unknown> {
+  const fact = priorRunAnalysisFactInner(verdict);
+  if (verdict.separated !== false) {
+    const result = fact.result as Record<string, unknown>;
+    (result.enrichment as Record<string, unknown>).robustness = {
+      level: 'high',
+      near_tie: { is_tie: false },
+    };
+  }
+  return fact;
+}
+
+function priorRunAnalysisFactInner(verdict: {
   may_name_leading_option: boolean;
   constraint_verdict_state: string;
 }): Record<string, unknown> {
@@ -621,6 +649,34 @@ describe('route-level: the rerun no-op explanation answer on a WITHHELD turn', (
       // And no withheld copy leaked onto a permitted turn.
       expect(turn.assistantText).not.toContain('no option can be put forward yet');
       expect(turn.assistantText).not.toContain('No single option can be put forward');
+    });
+
+    /**
+     * ⭐⭐⭐ THE SEPARATION TWIN of the control directly above. Same fixture,
+     * same Sonnet answer, ONE field different: no `robustness`, which is the
+     * shape a confined `auto_post_draft` run arrives in.
+     *
+     * The constraint PERMITS here. Entitlement alone would serve the leader
+     * sentence — which is exactly what request `1a5b1051` did on 19 Sep while
+     * the same response published `withheld_reason: "separation_unavailable"`.
+     */
+    it('\u2b50 SEPARATION TWIN: constraint-permitted but UNSEPARATED does NOT ship the leader answer', async () => {
+      priorFacts = [
+        priorRunAnalysisFact({
+          may_name_leading_option: true,
+          constraint_verdict_state: 'evaluated_feasible',
+          separated: false,
+        }),
+      ];
+      const turn = await rerunTurn(app);
+      expect(
+        turn.assistantText,
+        'a run whose arms were never told apart cannot put one of them ahead',
+      ).not.toContain('comes out ahead');
+      // ...and the person is told WHY, with something to do about it — not
+      // handed the cause-free tail.
+      expect(turn.assistantText).toMatch(/not established on this run/i);
+      expect(turn.assistantText).toMatch(/run the analysis/i);
     });
 
     it('UNSTAMPED fact FAILS CLOSED — an unreadable verdict withholds', async () => {
