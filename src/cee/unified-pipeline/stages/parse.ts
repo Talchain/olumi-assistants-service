@@ -893,6 +893,7 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
   ctx.recordDisclosures = (draftResult as any).record_disclosures;
   // Goal constraints passthrough: LLM-emitted constraints merged with regex in Stage 4
   ctx.llmGoalConstraints = (draftResult as any).goal_constraints;
+  ctx.recordConstraintCandidates = draftResult.record_constraint_candidates;
 
   // Graph shape assertion — must come before createEdgeFieldStash()
   if (!Array.isArray((graph as any).nodes) || !Array.isArray((graph as any).edges)) {

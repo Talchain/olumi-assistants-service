@@ -187,6 +187,7 @@ export const NOTICE_KIND_BY_REASON: Record<
   // is not a threshold — and the producer keeps them apart because the detailed
   // V3 channel can say which; this channel cannot.
   stated_target_value_dropped: "target_not_modelled_as_threshold",
+  stated_figure_not_current_value: "other",
 
   // ── HONESTLY UNCLASSIFIED ─────────────────────────────────────────────────
   // "The projected option set exceeded `MAX_OPTIONS` … and this refinement was
