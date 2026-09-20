@@ -53,9 +53,12 @@ describe('the opt-out, scoped to assistant_text only', () => {
   });
 
   it('still scrubs the OTHER fields — the opt-out is not a blanket disable', () => {
-    const withChip = res('plain text', {
-      suggested_actions: [{ id: 'a1', label: MANGLED, kind: 'chip' }],
-    } as Partial<OlumiResponse>);
+    const withChip: OlumiResponse = {
+      ...res('plain text'),
+      suggested_actions: [
+        { id: 'a1', label: MANGLED, kind: 'chip' },
+      ] as unknown as OlumiResponse['suggested_actions'],
+    };
     const out = sanitiseOlumiResponseForEgress(withChip, {
       ...OPTS,
       assistantTextAlreadyIdentifierSafe: true,
