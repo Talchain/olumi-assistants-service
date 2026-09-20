@@ -134,10 +134,16 @@ describe('state is saved before the reply is returned', () => {
     };
     // No write happened on this turn, so the flag is false — the contrast
     // that proves the flag tracks the write rather than the failure.
-    const err = await handleReplacementTurn(entryInput(), {
-      chatWithTools: scripted([say('x')]), state: store,
-    }).catch((e: unknown) => e as ReplacementTurnFailure);
+    let err: unknown;
+    try {
+      await handleReplacementTurn(entryInput(), { chatWithTools: scripted([say('x')]), state: store });
+    } catch (e) {
+      err = e;
+    }
     expect(err).toBeInstanceOf(ReplacementTurnFailure);
+    // Narrowed by the assertion above, not by a cast — a cast here would let
+    // the field disappear from the type without this test noticing.
+    if (!(err instanceof ReplacementTurnFailure)) throw new Error('expected the typed failure');
     expect(err.mayHaveWritten).toBe(false);
   });
 });
