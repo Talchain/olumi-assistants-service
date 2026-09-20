@@ -161,6 +161,7 @@ describe('the read tools are always present', () => {
     // Not optional. Its absence is what ended a live session, so no call site
     // can forget to pass it.
     expect(seen[0]).toContain('set_option_effect');
+    expect(seen[0]).toContain('run_analysis');
   });
 
   it('carries prior state into the prompt so the conversation does not restart each turn', async () => {

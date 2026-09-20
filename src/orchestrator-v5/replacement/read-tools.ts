@@ -671,6 +671,33 @@ function informationValueSection(enrichment: AnalysisEnrichment): string[] {
 }
 
 /**
+ * What this comparison covers — and the one thing it cannot tell you.
+ *
+ * FOUND BY A LIVE RUN. Shown an analysis covering two of a model's three
+ * options, the assistant wrote that the third "doesn't appear in the results
+ * at all, which suggests it's not been set up yet or performs so poorly it's
+ * not in contention." The first half is a fact; the second is a guess, and it
+ * was delivered in the same breath, in a paragraph otherwise made of measured
+ * numbers. That is the most damaging shape a fabrication can take.
+ *
+ * The cause is a gap, not a bad model: this tool sees the ANALYSIS, never the
+ * graph, so it cannot know which options exist and were left out. It can say
+ * exactly that, and naming the limit is what removes the space to invent one.
+ */
+function coverageSection(enrichment: AnalysisEnrichment): string[] {
+  const options = optionRows(enrichment);
+  if (options.length === 0) return [];
+  const named = options
+    .map((o) => text(o['option_label']) ?? text(o['option_id']) ?? 'an unnamed option')
+    .join(', ');
+  return [
+    `WHAT THIS COMPARISON COVERS: ${options.length} option${options.length === 1 ? '' : 's'} — ${named}.`,
+    'If the model holds any option not in that list, it was not compared, and THIS TOOL ' +
+      'CANNOT TELL YOU WHY. Do not offer a reason. Say it was not included and offer to find out.',
+  ];
+}
+
+/**
  * The analysis a model can reason from, with its currency stated first.
  *
  * Nothing is summarised away. If the producer computed it, it is here; if the
@@ -694,6 +721,7 @@ export function createReadResultsTool(deps: ReadResultsDeps): AgentTool {
     lines.push(...separationSection(enrichment), '');
     lines.push(...fragileEdgeSection(enrichment), '');
     lines.push(...informationValueSection(enrichment));
+    lines.push('', ...coverageSection(enrichment));
 
     return { type: 'result', content: lines.join('\n') };
   };
