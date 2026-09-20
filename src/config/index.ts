@@ -640,6 +640,7 @@ const ConfigSchema = z.object({
     diagnosticTraceEnabled: booleanString.default(false), // CEE_DIAGNOSTIC_TRACE_ENABLED — attach _diagnostic_trace to V2 response envelopes
     draftSubstageDetail: booleanString.default(false), // CEE_DRAFT_SUBSTAGE_DETAIL — emit the COMPLETE draft substage timing set on _diagnostic_trace (ROADMAP 1.77 F1); OFF = the historical 4-key subset, byte-identical
     deterministicOrchestratorEnabled: booleanString.default(true), // CEE_DETERMINISTIC_ORCHESTRATOR_ENABLED — three-layer deterministic intelligence pipeline
+    replacementCoachEnabled: booleanString.default(false), // CEE_REPLACEMENT_COACH_ENABLED — route conversational turns to the replacement agent controller instead of the V5 routing classifier. Requires a durable replacement-state store; the branch refuses loudly without one rather than half-working.
     v6DualDraftEnabled: booleanString.default(false), // CEE_V6_DUAL_DRAFT_ENABLED — V6 dual-model draft: M2 review + deterministic merge after M1 draft, before commit (default OFF; producer-agnostic enrichment stage in draft-graph-dispatch)
     // CEE_PIPELINE_V4_ENABLED — V1 route-registration flag only.
     //
@@ -1594,6 +1595,7 @@ function parseConfig(): Config {
       draftSubstageDetail: env.CEE_DRAFT_SUBSTAGE_DETAIL,
       deterministicOrchestratorEnabled: env.CEE_DETERMINISTIC_ORCHESTRATOR_ENABLED,
       pipelineV4Enabled: env.CEE_PIPELINE_V4_ENABLED,
+      replacementCoachEnabled: env.CEE_REPLACEMENT_COACH_ENABLED,
       v6DualDraftEnabled: env.CEE_V6_DUAL_DRAFT_ENABLED,
       graphCasMode: env.CEE_V5_GRAPH_CAS_MODE,
       graphCasRpc: env.CEE_V5_GRAPH_CAS_RPC,
