@@ -12,8 +12,11 @@ const GRAPH = {
   nodes: [
     { id: 'd1', kind: 'decision', label: 'Question' },
     { id: 'o1', kind: 'option', label: 'Full Parity' },
-    { id: 'f1', kind: 'factor', label: 'Monthly Churn Rate', range: { range_min: 0, range_max: 0.2 } },
-    { id: 'f2', kind: 'factor', label: 'Gross Margin', range: { range_min: 0, range_max: 1 } },
+    // Declared spellings only — one of each. The fixture used to carry
+    // `range.{range_min,range_max}`, which no schema declares, and that is
+    // how the guard shipped refusing every real factor.
+    { id: 'f1', kind: 'factor', label: 'Monthly Churn Rate', prior: { distribution: 'uniform', range_min: 0, range_max: 0.2 } },
+    { id: 'f2', kind: 'factor', label: 'Gross Margin', range: { min: 0, max: 1 } },
   ],
   edges: [{ from: 'o1', to: 'f1' }],
 } as unknown as EffectGraph;

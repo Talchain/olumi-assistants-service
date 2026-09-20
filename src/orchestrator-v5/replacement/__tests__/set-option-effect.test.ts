@@ -20,8 +20,10 @@ function graph(): EffectGraph {
     nodes: [
       { id: DECISION, kind: 'decision', label: 'Question' },
       { id: OPT, kind: 'option', label: 'Increase Price for New Customers Only' },
-      { id: PRICE, kind: 'factor', label: 'Plan Price', range: { range_min: 0, range_max: 100 } },
-      { id: CHURN, kind: 'factor', label: 'Churn Rate', range: { range_min: 0, range_max: 0.2 } },
+      // The DECLARED spellings, one each, so the fixture cannot drift back
+      // to matching the code instead of the contract.
+      { id: PRICE, kind: 'factor', label: 'Plan Price', prior: { distribution: 'uniform', range_min: 0, range_max: 100 } },
+      { id: CHURN, kind: 'factor', label: 'Churn Rate', range: { min: 0, max: 0.2 } },
     ],
     edges: [
       { from: DECISION, to: OPT },
@@ -159,5 +161,55 @@ describe('a factor with no range cannot take an effect', () => {
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.refusal.reason).toBe('factor_has_no_range');
+  });
+});
+
+/**
+ * ⛔ THE FIXTURE USED TO MATCH THE CODE INSTEAD OF THE CONTRACT, and that is
+ * how the range guard shipped reading `range.range_min` — a combination
+ * declared in NO schema. `PriorSchema` is `{distribution, range_min,
+ * range_max}`; the separate `range` field is `{min, max}`. The guard written
+ * to stop the model inventing a number therefore refused EVERY REAL FACTOR.
+ *
+ * Every case here is derived from the schema declarations, not from the
+ * implementation, and the last one is the control that would have caught it.
+ */
+describe('the range is read with the spellings the contract actually declares', () => {
+  function factorWith(extra: Record<string, unknown>): EffectGraph {
+    return {
+      nodes: [
+        { id: OPT, kind: 'option', label: 'O' },
+        { id: PRICE, kind: 'factor', label: 'Plan Price', ...extra },
+      ],
+      edges: [{ from: OPT, to: PRICE }],
+    } as unknown as EffectGraph;
+  }
+  const call = (g: EffectGraph) => setOptionEffect({ graph: g, optionId: OPT, factorId: PRICE, value: 0.5 });
+
+  it('accepts PriorSchema — prior.{range_min, range_max}', () => {
+    expect(call(factorWith({ prior: { distribution: 'uniform', range_min: 0, range_max: 10 } })).ok).toBe(true);
+  });
+
+  it('accepts the range field — range.{min, max}', () => {
+    expect(call(factorWith({ range: { min: 0, max: 10 } })).ok).toBe(true);
+  });
+
+  it('CONTROL: refuses range.{range_min, range_max} — the spelling no schema declares', () => {
+    // This is the exact shape the guard used to REQUIRE. It must not be the
+    // thing that makes a factor usable, or the bug is back.
+    const r = call(factorWith({ range: { range_min: 0, range_max: 10 } }));
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.refusal.reason).toBe('factor_has_no_range');
+  });
+
+  it('still refuses a factor with no bounds at all under either spelling', () => {
+    const r = call(factorWith({}));
+    expect(r.ok).toBe(false);
+  });
+
+  it('a half range under either spelling is not a range', () => {
+    expect(call(factorWith({ prior: { distribution: 'uniform', range_min: 0 } })).ok).toBe(false);
+    expect(call(factorWith({ range: { min: 0 } })).ok).toBe(false);
   });
 });
