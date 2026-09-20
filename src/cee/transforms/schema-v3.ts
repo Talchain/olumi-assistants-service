@@ -330,6 +330,7 @@ export function transformNodeToV3(
     kind: mapKindToV3(node.kind),
     label: cleanedLabel,
     description: node.body,
+    ...(node.unresolved_causal_edges?.length ? { unresolved_causal_edges: node.unresolved_causal_edges } : {}),
     // Preserve category field (V12.4+) for factor nodes
     category: node.category,
     // Preserve goal threshold fields (V14+) for goal nodes.
@@ -1301,6 +1302,16 @@ export function transformGraphToV3(graph: V1Graph): GraphTransformResult {
   const projectedNodeIdBySourceId = new Map(
     graph.nodes.map((node, index) => [node.id, v3Nodes[index]?.id ?? node.id]),
   );
+
+  for (const node of v3Nodes) {
+    if (!node.unresolved_causal_edges) continue;
+    node.unresolved_causal_edges = node.unresolved_causal_edges.map((edge) => ({
+      ...edge,
+      from: projectedNodeIdBySourceId.get(edge.from) ?? edge.from,
+      to: projectedNodeIdBySourceId.get(edge.to) ?? edge.to,
+    }));
+  }
+
 
   // Keep ALL valid edges (including decision→option and option→factor)
   const validEdges = graph.edges.filter(

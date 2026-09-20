@@ -13,6 +13,7 @@
  */
 
 import { z } from "zod";
+import { UnresolvedCausalEdge } from "./graph.js";
 import type { ValidationMetadata } from "../cee/validation-pipeline/types.js";
 import { GoalConstraintSchema } from "./assist.js";
 import { CausalClaimsArraySchema } from "./causal-claims.js";
@@ -194,6 +195,7 @@ export const NodeV3 = z.object({
   label: z.string(),
   /** Optional description */
   description: z.string().optional(),
+  unresolved_causal_edges: z.array(UnresolvedCausalEdge).optional(),
   /** Quantitative data for factor nodes */
   observed_state: ObservedStateV3.optional(),
   /** Factor category (V12.4+): controllable, observable, external - only for factor nodes */

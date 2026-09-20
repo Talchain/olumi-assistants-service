@@ -12,6 +12,7 @@
  */
 
 import type { z } from "zod";
+import type { NodeT } from "../../schemas/graph.js";
 import { GoalThresholdFrame } from "@talchain/schemas";
 import type { GoalThresholdCapProvenance } from "../../utils/goal-threshold-cap.js";
 import { deriveStrengthStd, type ProvenanceObject } from "./strength-derivation.js";
@@ -98,6 +99,7 @@ export function isOptionData(data: V1NodeData | undefined): data is V1OptionData
 }
 
 export interface V1Node {
+  unresolved_causal_edges?: NodeT["unresolved_causal_edges"];
   id: string;
   kind: string;
   label?: string;

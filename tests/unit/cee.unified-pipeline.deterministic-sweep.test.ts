@@ -2803,13 +2803,13 @@ describe("fixOptionRiskShortcut", () => {
     const result = fixOptionRiskShortcut(graph, "V1_FLAT");
     expect(result.removedCount).toBe(1);
     expect(result.rerouted).toBe(0);
-    expect(result.repairs[0].code).toBe("FORBIDDEN_EDGE_AUTO_FIXED");
+    expect(result.repairs[0].code).toBe("OPTION_RISK_RELATION_RETAINED");
     // Forbidden edge removed, 3 edges remain
     expect(graph.edges).toHaveLength(3);
     expect(graph.edges.some((e: any) => e.from === "opt_a" && e.to === "risk_1")).toBe(false);
   });
 
-  it("reroutes option→risk when risk has no goal path and option has controllable factor", () => {
+  it("retains option→risk when risk has no goal path and option has controllable factor", () => {
     // Risk does NOT reach goal — must reroute via factor
     const graph: any = {
       nodes: [
@@ -2827,14 +2827,14 @@ describe("fixOptionRiskShortcut", () => {
 
     const result = fixOptionRiskShortcut(graph, "V1_FLAT");
     expect(result.removedCount).toBe(1);
-    expect(result.rerouted).toBe(1);
-    // Forbidden edge removed, new factor→risk added
+    expect(result.rerouted).toBe(0);
+    // The original effect is retained without a replacement parent.
     expect(graph.edges.some((e: any) => e.from === "opt_a" && e.to === "risk_1")).toBe(false);
-    expect(graph.edges.some((e: any) => e.from === "fac_1" && e.to === "risk_1")).toBe(true);
+    expect(graph.edges.some((e: any) => e.from === "fac_1" && e.to === "risk_1")).toBe(false);
   });
 
-  it("reroutes option→risk when risk reaches goal but no factor→risk bridge exists", () => {
-    // Risk reaches goal but option has no compliant bridge — reroute via factor
+  it("retains option→risk when risk reaches goal but no factor→risk bridge exists", () => {
+    // Risk reaches goal; the missing intervention mapping remains explicit.
     const graph: any = {
       nodes: [
         { id: "opt_a", kind: "option", label: "A" },
@@ -2851,10 +2851,10 @@ describe("fixOptionRiskShortcut", () => {
 
     const result = fixOptionRiskShortcut(graph, "V1_FLAT");
     expect(result.removedCount).toBe(1);
-    expect(result.rerouted).toBe(1); // Rerouted via Case 3 (no bridge, factor available)
+    expect(result.rerouted).toBe(0);
     expect(graph.edges.some((e: any) => e.from === "opt_a" && e.to === "risk_1")).toBe(false);
-    // New factor→risk edge created
-    expect(graph.edges.some((e: any) => e.from === "fac_1" && e.to === "risk_1")).toBe(true);
+    // No factor→risk edge is invented.
+    expect(graph.edges.some((e: any) => e.from === "fac_1" && e.to === "risk_1")).toBe(false);
   });
 
   it("handles multiple forbidden option→risk edges", () => {
@@ -2910,8 +2910,8 @@ describe("fixOptionRiskShortcut", () => {
     expect(graph.edges).toHaveLength(3);
   });
 
-  it("defers to LLM when no controllable factor exists and risk has no goal path", () => {
-    // No factor, no goal path — cannot fix, defer
+  it("retains the unresolved relation when no factor or goal path exists", () => {
+    // No factor or goal path may be invented.
     const graph: any = {
       nodes: [
         { id: "opt_a", kind: "option", label: "A" },
@@ -2925,11 +2925,10 @@ describe("fixOptionRiskShortcut", () => {
     };
 
     const result = fixOptionRiskShortcut(graph, "V1_FLAT");
-    expect(result.removedCount).toBe(0);
-    expect(result.skippedCount).toBe(1);
-    // Edge preserved for LLM
-    expect(graph.edges).toHaveLength(1);
-    expect(graph.edges.some((e: any) => e.from === "opt_a" && e.to === "risk_1")).toBe(true);
+    expect(result.removedCount).toBe(1);
+    expect(result.skippedCount).toBe(0);
+    expect(graph.edges).toHaveLength(0);
+    expect(graph.nodes[0].unresolved_causal_edges).toEqual([{ from: "opt_a", to: "risk_1", strength_mean: 0.5 }]);
   });
 
   it("handles V3 'action' kind as equivalent to 'option'", () => {

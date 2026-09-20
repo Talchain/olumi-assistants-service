@@ -304,11 +304,18 @@ export const ConstraintNodeData = z.object({
  */
 export const NodeData = z.union([OptionData, ConstraintNodeData, FactorData]);
 
+/** A proposed option effect that has no safe intervention mapping yet. */
+export const UnresolvedCausalEdge = z.object({
+  from: z.string().min(1),
+  to: z.string().min(1),
+}).passthrough();
+
 export const Node = z.object({
   id: z.string().min(1),
   kind: NodeKind,
   label: z.string().optional(),
   body: z.string().max(200).optional(),
+  unresolved_causal_edges: z.array(UnresolvedCausalEdge).optional(),
   /**
    * Factor category classification (V12.4+).
    * Only applies to factor nodes. Optional for backward compatibility.

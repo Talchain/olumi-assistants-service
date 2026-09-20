@@ -182,7 +182,8 @@ export function transformOptionToAnalysisReady(
     option.status,
     hasNonNumericRaw,
     connectedFactorCount,
-    isBaseline
+    isBaseline,
+    option.unresolved_targets?.length ?? 0
   );
 
   const result: OptionForAnalysisT = {
@@ -681,6 +682,22 @@ export function buildAnalysisReadyPayload(
   graph: GraphV3T,
   context: AnalysisReadyContext = {}
 ): AnalysisReadyPayloadT & { _fallback_meta?: AnalysisReadyFallbackMeta } {
+  // Read retained effects from the saved node, so stale options[] mirrors cannot
+  // erase the outstanding question or promote a partially specified alternative.
+  const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
+  options = options.map((option) => {
+    const unresolved = nodeById.get(option.id)?.unresolved_causal_edges ?? [];
+    if (unresolved.length === 0) return option;
+    return {
+      ...option,
+      status: "needs_user_mapping",
+      unresolved_targets: [...new Set([...(option.unresolved_targets ?? []), ...unresolved.map((edge) => edge.to)])],
+      user_questions: [...new Set([...(option.user_questions ?? []), ...unresolved.map((edge) =>
+        `How does ${option.label} change ${nodeById.get(edge.to)?.label ?? edge.to}? The proposed relationship is retained, but its mechanism and value still need clarification.`,
+      )])],
+    };
+  });
+
   // Build factor node lookup and node kind map
   const factorNodeMap = new Map<string, NodeV3T>();
   const nodeKindLookup = new Map<string, string>();

@@ -4,7 +4,7 @@
  * Two deterministic repairs applied AFTER the clarifier (which can replace
  * ctx.graph with a refined graph) and before structural-parse:
  *
- *   1. fixBridgeChaining  — removes forbidden outcome↔risk edges, adds goal bridges
+ *   1. fixBridgeChaining  — retains supported risk→outcome links; repairs other bridge chains
  *                            with sign-correct semantics (outcome→goal +, risk→goal −)
  *   2. applyBudgetRescale — scales causal inbound edges (factor/action→outcome/risk)
  *                            so Σ|mean| ≤ BUDGET_TARGET
@@ -538,6 +538,7 @@ export function fixBridgeChaining(
       toKind !== undefined &&
       ENFORCEABLE_KINDS.has(fromKind) &&
       ENFORCEABLE_KINDS.has(toKind) &&
+      !(fromKind === "risk" && toKind === "outcome") &&
       edge.to !== goalNode.id;
 
     if (isForbiddenChain) toRemove.add(i);

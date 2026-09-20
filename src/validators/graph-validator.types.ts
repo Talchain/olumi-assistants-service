@@ -310,6 +310,7 @@ export const ALLOWED_EDGES: AllowedEdgeRule[] = [
   { fromKind: "factor", toKind: "risk" },
   { fromKind: "outcome", toKind: "goal" },
   { fromKind: "risk", toKind: "goal" },
+  { fromKind: "risk", toKind: "outcome" },
 ];
 
 /**

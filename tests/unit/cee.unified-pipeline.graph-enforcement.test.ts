@@ -707,7 +707,7 @@ describe("fixBridgeChaining", () => {
     const graph = makeGraph({
       nodes: [
         { id: "fac_1", kind: "factor" },
-        { id: "risk_1", kind: "risk" }, { id: "out_1", kind: "outcome" },
+        { id: "risk_1", kind: "risk" }, { id: "out_1", kind: "risk" },
         { id: "goal_1", kind: "goal" },
       ],
       edges: [
@@ -742,7 +742,7 @@ describe("fixBridgeChaining", () => {
     expect(outGoal.effect_direction).toBe("positive");
   });
 
-  it("removes risk→outcome edge", () => {
+  it("preserves the supported risk→outcome edge", () => {
     const graph = makeGraph({
       nodes: [
         { id: "fac_1", kind: "factor" },
@@ -755,8 +755,8 @@ describe("fixBridgeChaining", () => {
         { from: "risk_1", to: "out_1", strength_mean: -0.3, strength_std: 0.08 },
       ],
     });
-    expect(fixBridgeChaining(graph, "V1_FLAT").removedCount).toBe(1);
-    expect(graph.edges.find((e: any) => e.from === "risk_1" && e.to === "out_1")).toBeUndefined();
+    expect(fixBridgeChaining(graph, "V1_FLAT").removedCount).toBe(0);
+    expect(graph.edges.find((e: any) => e.from === "risk_1" && e.to === "out_1")).toMatchObject({ strength_mean: -0.3, strength_std: 0.08 });
   });
 
   it("removes outcome→outcome (belt-and-suspenders)", () => {
@@ -925,7 +925,7 @@ describe("fixBridgeChaining", () => {
       edges: [
         // forbidden bridge: out_orphan → out_other  (outcome→outcome)
         { from: "out_orphan", to: "out_other", strength_mean: 0.0, strength_std: 0.0 },
-        // forbidden bridge: risk_orphan → out_other  (risk→outcome)
+        // Supported risk→outcome relation stays intact.
         { from: "risk_orphan", to: "out_other", strength_mean: 0.0, strength_std: 0.0 },
       ],
     });
@@ -936,7 +936,8 @@ describe("fixBridgeChaining", () => {
     const outGoal = graph.edges.find((e: any) => e.from === "out_orphan" && e.to === "goal_1");
     expect(outGoal.strength_mean).toBe(0.3);
     const riskGoal = graph.edges.find((e: any) => e.from === "risk_orphan" && e.to === "goal_1");
-    expect(riskGoal.strength_mean).toBe(-0.3);
+    expect(riskGoal).toBeUndefined();
+    expect(graph.edges.find((e: any) => e.from === "risk_orphan" && e.to === "out_other")).toBeDefined();
   });
 
   it("emits telemetry with edge_from, edge_to, repair_method", () => {
@@ -980,7 +981,8 @@ describe("fixBridgeChaining", () => {
     const kindOf = (id: string) => graph.nodes.find((n: any) => n.id === id)?.kind;
     const remaining = graph.edges.filter((e: any) => {
       const fk = kindOf(e.from), tk = kindOf(e.to);
-      return ["outcome", "risk"].includes(fk) && ["outcome", "risk"].includes(tk) && e.to !== "goal_1";
+      return ["outcome", "risk"].includes(fk) && ["outcome", "risk"].includes(tk)
+        && !(fk === "risk" && tk === "outcome") && e.to !== "goal_1";
     });
     expect(remaining).toHaveLength(0);
   });
