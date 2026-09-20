@@ -135,6 +135,15 @@ function runAnalysisFact(opts: {
       },
       enrichment: {
         analysis_status: opts.status,
+        // ⚠ ADDED because this builder produced facts with no `robustness`,
+        // which the published claim reads as `separation_unavailable` —
+        // `permitted = entitled && separates`. The OVER-SUPPRESSION CONTROL
+        // below flips ONE member (`mayName`) and calls the result "PERMITTED";
+        // that stopped being true once the gates read both halves. The
+        // one-member-flipped property is restored by giving every fact from
+        // this builder a separated run, so the control still isolates exactly
+        // what its comment says it isolates.
+        robustness: { level: 'high', near_tie: { is_tie: false } },
         option_comparison: [
           {
             option_id: opts.leaderId,

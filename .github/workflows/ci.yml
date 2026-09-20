@@ -544,7 +544,9 @@ jobs:
     name: Live LLM Integration Tests
     runs-on: ubuntu-latest
     needs: [unit-tests, live-tests-key]
-    if: ${{ needs.live-tests-key.outputs.has_key == 'true' }}
+    # The named release hold applies only to paid tests, never the required code gate.
+    if: >-
+      ${{ needs.live-tests-key.outputs.has_key == 'true' && !(vars.CORE_DRAFTING_PAID_HOLD == '20260920' && ((github.event_name == 'pull_request' && github.base_ref == 'staging' && contains(fromJSON('["fix/baseline-ask-collision-precedence","cct/quantities-on-risk-and-outcome","feat/core-1251-validated-20260919","feat/draft-authored-meaning-20260919","feat/core-budget-consent-20260919","feat/core-authored-limit-continuity-20260919","feat/core-capacity-intervention-20260919","feat/core-explicit-paid-release-20260920"]'), github.head_ref)) || (github.event_name == 'push' && github.ref == 'refs/heads/staging' && contains(github.event.head_commit.message, '[core-drafting-20260920]')) || (github.event_name == 'push' && contains(fromJSON('["fix/baseline-ask-collision-precedence","cct/quantities-on-risk-and-outcome","feat/core-1251-validated-20260919","feat/draft-authored-meaning-20260919","feat/core-budget-consent-20260919","feat/core-authored-limit-continuity-20260919","feat/core-capacity-intervention-20260919","feat/core-explicit-paid-release-20260920"]'), github.ref_name)))) }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
