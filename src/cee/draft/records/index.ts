@@ -77,6 +77,7 @@ export type {
   RecordProvenance,
   DroppedRecordRef,
   RecordProjection,
+  RecordConstraintCandidate,
   ProjectedNode,
   ProjectedEdge,
   ProjectedGraph,

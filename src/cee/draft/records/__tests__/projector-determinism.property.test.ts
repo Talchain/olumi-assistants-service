@@ -296,6 +296,7 @@ describe("C-K1 control: the battery is running on something", () => {
       "constraint_direction_unstated",
       "stated_target_not_represented_as_threshold",
       "stated_target_value_dropped",
+      "stated_figure_not_current_value",
       "parallel_intervention_conflict",
     ]);
     const refReasons = b.dropped.map((d) => d.reason).filter((r) => !NON_REF_NOTICES.has(r));

@@ -198,6 +198,14 @@ brief: do not paraphrase, tidy, translate or summarise it. Use \`kind\`:
   When the user HAS said what they are trying to achieve, that is the goal.
   Quote it, even if it is unquantified, modest or awkwardly worded, and even if
   you can see a sharper objective behind it. Theirs is the one that counts.
+  When they distinguish a necessary result from optional improvement, put the
+  necessary result first among the \`goal\` records. Keep the optional upside
+  separate; it must not replace the result they say they need. Keep their
+  explanation of what happens if that result is missed as a \`cause\`, with
+  any inferred \`risk\` or \`outcome\` referring to it through \`basis\`.
+  Preserve the qualification or condition in each verbatim quote. A reported
+  wish, disputed demand or suggestion is not an adopted objective merely
+  because the user mentions it. Do not resolve competing priorities for them.
 - \`option\` — a course of action the user named: something they could DO.
   An option is something you can CARRY OUT. If the span is instead something
   that can be TRUE or FALSE, it is not an option however much it is shaped like
@@ -263,12 +271,22 @@ brief: do not paraphrase, tidy, translate or summarise it. Use \`kind\`:
   out when nothing you emitted measures that quantity: an omission is read as
   "not stated" and costs nothing, and a wrong index binds the user's limit to the
   wrong number.
+  A limit must be one the user adopts, not merely a number or someone else's
+  proposal they report. Keep acceptance, rejection and uncertainty in the
+  \`source_quote\`; if the bounded quantity or direction is unresolved, retain
+  that wording without inventing a numeric limit or a target reference.
 - \`cause\` — an explanation the user offered for why something is happening: a
   hypothesis, whoever holds it. Keep every one the brief carries. See the
   \`option\` entry above for why a cause is never an option.
-- \`figure\` — a quantity the user stated
-Set \`value\` and \`unit\` when the user gave a number. Do not invent a number the
+- \`figure\` — a quantity or comparison of quantities the user stated. Preserve
+  an ordering in \`source_quote\` without turning it into measured distances.
+Set \`value\` when the user gave a number, and \`unit\` when they stated its unit.
+Do not invent a number the
 user did not state, and do not round or rescale one they did.
+If the currency or unit is missing, leave \`unit\` out; do not infer it from the
+topic, location, another quantity or a model estimate. Keep the original amount
+and any uncertainty in the quote. Use a contiguous verbatim span long enough to
+retain the referent and qualifications, never a reconstructed quotation.
 Set \`value_scale\` whenever you set a number, to say WHAT THE NUMBER MEANS —
 \`unit_interval\` for a share or a bounded percentage written as a decimal (3%
 churn is \`value: 0.03\`, \`unit: "%"\`, \`value_scale: "unit_interval"\`),
@@ -285,6 +303,10 @@ On a \`goal\` carrying a number, set \`role\` to \`target\` when the number is w
 the user wants to REACH, and \`baseline\` when it is where they are NOW. That one
 word decides whether the number is registered as the success threshold, so an
 unstated \`role\` on a current reading is read as a target and inverts the goal.
+Keep current readings, desired targets and adopted limits in separate records,
+even when they use the same number. Use \`role: "constraint"\` for an adopted
+limit and \`role: "context"\` for a figure that establishes neither a current
+reading nor an adopted target or limit. Reporting a view does not adopt it.
 On an \`option\` that is the status quo — doing nothing, continuing as-is,
 deferring without action, or keeping the current course — set
 \`is_baseline: true\`, whatever its wording. Set \`is_baseline: false\` on the
@@ -461,6 +483,9 @@ the brief does tell you: the scale of the numbers already in it, and the
 direction and rough size of the change this option describes. Keep the factor's
 own unit, and keep your estimates consistent across the options, so the
 comparison between them means something.
+An ordinal statement alone supplies an ordering, not a scale or numeric gaps.
+Keep that statement and its conditions in the cited \`stated_items\`; do not
+turn the ordering alone into \`sets_to\` values, probabilities or scale endpoints.
 
 Leave \`sets_to\` out only where you genuinely cannot form a defensible estimate
 even from the brief's own scale. That is a truthful answer, and it also stops the
