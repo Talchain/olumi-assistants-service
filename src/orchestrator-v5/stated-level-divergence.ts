@@ -153,6 +153,9 @@ import type { SuggestedAction } from '../orchestrator/types.js';
 import {
   offersForBand,
   recogniseLevelIn,
+  resolveFactorScale,
+  type FactorScale,
+  type UnappliedEditNode,
 } from './compose/unapplied-edit-reply.js';
 import { isLabelEcho } from '../cee/transforms/label-echo.js';
 
@@ -192,6 +195,25 @@ export interface StatedLevelDivergence {
    * `recogniseLevelIn`, whose vocabulary is owned by `unapplied-edit-reply.ts`.
    */
   readonly statedLevel: string | null;
+  /**
+   * ⭐⭐ THE FACTOR'S SCALE, read by the ONE existing resolver, so a band chip
+   * is offered only where the band is a real quantity.
+   *
+   * ⛔ THE DEFECT THIS CLOSES, and it shipped in this file's first cut. The
+   * band offers were built by copying `offersForBand` and leaving behind the
+   * gate that guards it — `resolveUnappliedEditUnderstanding` offers a number
+   * only when `resolveFactorScale(node) === 'unit_interval'`. Without it,
+   * *"Annual Salary is very high"*, on a node whose observed state is
+   * **£85,000**, earned chips reading **Set Annual Salary to 0.8 / 0.9**.
+   * Nothing establishes that 0.8 denotes that measured amount, and a person
+   * clicking the chip does not make it so: consent to a wrongly framed offer
+   * repairs nothing, it only launders the frame.
+   *
+   * ⚠ IMPORTED, NOT RESTATED. `measured` / `unit_interval` / `unknown` is the
+   * existing vocabulary and this file adds no second taxonomy — the whole
+   * cause here was a second copy of one decision.
+   */
+  readonly scale: FactorScale;
 }
 
 function isPlainObject(v: unknown): v is Dict {
@@ -377,6 +399,12 @@ function detectOne(
     currentDisplay,
     kind: typeof node.kind === 'string' && node.kind.trim().length > 0 ? node.kind.trim() : null,
     statedLevel: recogniseLevelIn(firstProse(value, proseKeys) ?? ''),
+    // The node is in hand here, so the scale is read from the SAME object the
+    // rest of this detection is about. `as` narrows a structurally-checked
+    // record to the resolver's input shape; every field it reads is optional
+    // and defensively parsed there, so a node missing them resolves `unknown`
+    // — which withholds the offer, the fail-safe direction.
+    scale: resolveFactorScale(node as unknown as UnappliedEditNode),
   };
 }
 
@@ -521,7 +549,17 @@ export function buildStatedLevelDivergenceActions(
     // to quiet a comment would be the wrong repair: the manifest is the list
     // of files reviewed for being allowed to STAMP authorship, and this file
     // stamps nothing.
-    if (d.statedLevel !== null) {
+    // ⭐ THE GATE, REUSED NOT REBUILT. A number may be offered ONLY where the
+    // band is real: the person's own word bounded it AND the factor is
+    // provably on the 0-1 scale that word maps to. This is the identical
+    // condition `resolveUnappliedEditUnderstanding` applies
+    // (`unapplied-edit-reply.ts`: `band !== null && scale === 'unit_interval'`),
+    // and copying `offersForBand` without it is exactly what put
+    // "Set Annual Salary to 0.8" in front of someone whose salary is £85,000.
+    //
+    // `measured` and `unknown` keep the generic clarification below and lose
+    // only the numeric chips — fewer claims, never more.
+    if (d.statedLevel !== null && d.scale === 'unit_interval') {
       for (const n of offersForBand(d.statedLevel)) {
         actions.push({
           label: `Set ${d.label} to ${n}`,

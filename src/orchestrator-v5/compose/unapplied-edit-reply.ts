@@ -194,7 +194,7 @@ export interface UnappliedEditNode {
  * A numeric claim is licensed by POSITIVE EVIDENCE, never by the absence of
  * counter-evidence.
  */
-type FactorScale = 'measured' | 'unit_interval' | 'unknown';
+export type FactorScale = 'measured' | 'unit_interval' | 'unknown';
 
 function firstString(...candidates: readonly unknown[]): string | undefined {
   for (const c of candidates) {
@@ -228,8 +228,16 @@ function asRecord(v: unknown): Record<string, unknown> | undefined {
  * because they are FAIL-SAFE: a hit can move a factor from `unit_interval` to
  * `measured`, i.e. towards fewer numeric claims and fewer chips, never towards
  * more.
+ *
+ * ⭐ EXPORTED so the stated-level divergence chips consult THIS answer rather
+ * than minting a second one. The review that forced it is worth recording:
+ * that surface copied `offersForBand` and left this gate behind, so
+ * *"Annual Salary is very high"* — a node whose observed state is £85,000 —
+ * earned chips reading **Set Annual Salary to 0.8 / 0.9**. Nothing established
+ * that 0.8 meant that measured quantity, and consent to a wrongly framed chip
+ * does not repair the meaning. One gate, two consumers.
  */
-function resolveFactorScale(node: UnappliedEditNode): FactorScale {
+export function resolveFactorScale(node: UnappliedEditNode): FactorScale {
   const observed = asRecord(node.observed_state);
   const data = asRecord(node.data);
 

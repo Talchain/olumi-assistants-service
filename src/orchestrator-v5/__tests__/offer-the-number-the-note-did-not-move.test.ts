@@ -46,8 +46,13 @@ const GRAPH = {
       id: 'cc057894',
       kind: 'factor',
       label: 'Product Quality',
-      observed_state: { value: 0.5, unit: 'scale', source: 'cee_inference' },
-      display_value: '0.5 scale',
+      // ⚠ NO `unit`, DELIBERATELY. `resolveFactorScale` answers `measured` the
+      // moment a unit, `raw_value` or `cap` is present — so a node carrying
+      // `unit: 'scale'` is NOT unit-interval, and the band chips must not be
+      // offered for it. This fixture is the genuinely unit-interval positive
+      // case the review asked for; the measured negative control is below.
+      observed_state: { value: 0.5, source: 'cee_inference' },
+      display_value: '0.5',
     },
     {
       id: 'other',
@@ -55,6 +60,20 @@ const GRAPH = {
       label: 'Trial-to-Paid Conversion Rate',
       observed_state: { value: 0.12, unit: '%', source: 'cee_inference' },
       display_value: '0.12 %',
+    },
+    /**
+     * ⛔ THE REVIEW'S WITNESS, SOURCE-DERIVED — the measured negative control.
+     * A salary is a magnitude, not a position on 0-1, so "very high" about it
+     * bounds nothing this product can encode. Offering `Set Annual Salary to
+     * 0.8` would ask the person to confirm a frame nobody established, and
+     * their click would launder it into evidence.
+     */
+    {
+      id: 'salary',
+      kind: 'factor',
+      label: 'Annual Salary',
+      observed_state: { value: 85000, unit: '£', source: 'cee_inference' },
+      display_value: '£85,000',
     },
   ],
 };
@@ -82,7 +101,7 @@ describe('a note that left the number alone offers the number', () => {
     const { divergences } = actionsFor(WITNESSED_PROSE);
     expect(divergences).toHaveLength(1);
     expect(divergences[0]!.label).toBe('Product Quality');
-    expect(divergences[0]!.currentDisplay).toBe('0.5 scale');
+    expect(divergences[0]!.currentDisplay).toBe('0.5');
   });
 
   it('⭐ THE WITNESS: the person is offered points in the band their own word named', () => {
@@ -159,5 +178,76 @@ describe('a note that left the number alone offers the number', () => {
         expect([0.1, 0.2, 0.3, 0.4, 0.6, 0.7, 0.8, 0.9]).toContain(n);
       }
     }
+  });
+});
+
+describe('a band chip is offered only where the band is a real quantity', () => {
+  /**
+   * ⛔⛔ THE REVIEW'S P1, REPRODUCED. The first cut copied `offersForBand` and
+   * left behind the gate that guards it, so a MEASURED factor earned numeric
+   * chips on the 0-1 scale. `resolveUnappliedEditUnderstanding` has always
+   * gated this on `resolveFactorScale === 'unit_interval'`; this surface now
+   * consults the same function rather than a second copy of the decision.
+   */
+  it('⛔ MEASURED: "Annual Salary is very high" on £85,000 offers NO band numbers', () => {
+    const divergences = detectStatedLevelDivergences(
+      [{ op: 'update_node', path: 'salary', value: { note: 'Annual Salary is very high' } }],
+      GRAPH,
+      ['note'],
+    );
+    expect(divergences, 'the divergence itself is still detected').toHaveLength(1);
+
+    // ⭐ THE LEAK ASSERTION COMES FIRST, ON PURPOSE. Checking `scale` first
+    // would make this test RED at pristine merely because the field is new,
+    // which proves nothing about the behaviour. Asserting the OFFERS first
+    // means the pristine failure is the defect itself — "Set Annual Salary to
+    // 0.8" reaching a person whose salary is £85,000.
+    const actions = buildStatedLevelDivergenceActions(divergences);
+    const numeric = actions.filter((a) => /Set Annual Salary to [0-9]/.test(a.label));
+    expect(numeric, 'no 0-1 point may be proposed for a measured amount').toEqual([]);
+    expect(divergences[0]!.scale).toBe('measured');
+    // ...and the person is NOT left with nothing: the generic clarification
+    // survives, which is the whole reason suppression is safe here.
+    expect(actions.some((a) => a.label === 'Set a value for Annual Salary')).toBe(true);
+  });
+
+  it('⭐ UNIT-INTERVAL: the same prose on a genuinely 0-1 factor still offers the band', () => {
+    const divergences = detectStatedLevelDivergences(
+      [{ op: 'update_node', path: 'cc057894', value: { note: 'Product Quality is very high' } }],
+      GRAPH,
+      ['note'],
+    );
+    expect(divergences[0]!.scale).toBe('unit_interval');
+    const actions = buildStatedLevelDivergenceActions(divergences);
+    expect(
+      actions.filter((a) => /Set Product Quality to [0-9]/.test(a.label)).length,
+      'the gate must not suppress the case it was written to allow',
+    ).toBeGreaterThan(0);
+  });
+
+  /**
+   * The third answer is its own case. `unknown` is not `unit_interval`, and
+   * treating absence as permission is how a guard quietly stops guarding.
+   */
+  it('⛔ UNKNOWN scale offers no band numbers either', () => {
+    const graph = {
+      nodes: [
+        {
+          id: 'mystery',
+          kind: 'factor',
+          label: 'Mystery Factor',
+          observed_state: { value: 42, source: 'cee_inference' },
+          display_value: '42',
+        },
+      ],
+    };
+    const divergences = detectStatedLevelDivergences(
+      [{ op: 'update_node', path: 'mystery', value: { note: 'Mystery Factor is very high' } }],
+      graph,
+      ['note'],
+    );
+    const actions = buildStatedLevelDivergenceActions(divergences);
+    expect(actions.filter((a) => /Set Mystery Factor to [0-9]/.test(a.label))).toEqual([]);
+    expect(divergences[0]!.scale).toBe('unknown');
   });
 });
