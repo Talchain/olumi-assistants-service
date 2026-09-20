@@ -42,8 +42,12 @@ export interface AgentTool {
    * `propose` returns operations for the user to consent to. It MUST NOT
    * mutate anything; the loop asserts the shape but cannot police side
    * effects, so this is also a review obligation on each tool.
+   * `accept` records that the user agreed to a proposal ALREADY OFFERED, by
+   * its id. It never invents a change: the operations come from the store,
+   * exactly as they were shown. This is the only kind whose effect can reach
+   * the graph, and it can only reach it along a path the user has seen.
    */
-  readonly kind: 'read' | 'propose';
+  readonly kind: 'read' | 'propose' | 'accept';
   readonly execute: (input: Record<string, unknown>) => Promise<AgentToolOutcome> | AgentToolOutcome;
 }
 
@@ -58,12 +62,26 @@ export type AgentToolOutcome =
       readonly operations: readonly Record<string, unknown>[];
       readonly content?: string;
     }
+  /** The user agreed to a proposal that was already put to them. Carries the
+   *  id, never a change — a re-derived operation is a different decision. */
+  | {
+      readonly type: 'accepted';
+      readonly proposal_id: string;
+      readonly summary: string;
+      readonly content?: string;
+    }
   | { readonly type: 'refused'; readonly content: string };
 
 export interface ProposedChange {
   readonly tool: string;
   readonly summary: string;
   readonly operations: readonly Record<string, unknown>[];
+}
+
+export interface AcceptedProposal {
+  readonly tool: string;
+  readonly proposal_id: string;
+  readonly summary: string;
 }
 
 export interface ChatWithToolsLike {
@@ -96,6 +114,8 @@ export interface AgentLoopResult {
   readonly text: string;
   /** Changes awaiting the user's yes. The caller opens these as proposals. */
   readonly proposed: readonly ProposedChange[];
+  /** Proposals the user agreed to on this turn, by id. */
+  readonly accepted: readonly AcceptedProposal[];
   /** Tools actually called, in order — for the receipt and for telemetry. */
   readonly toolsCalled: readonly string[];
   readonly iterations: number;
@@ -167,6 +187,7 @@ export async function runAgentLoop(
   const definitions = input.tools.map((t) => t.definition);
   const messages = [...input.messages];
   const proposed: ProposedChange[] = [];
+  const accepted: AcceptedProposal[] = [];
   const toolsCalled: string[] = [];
 
   let iterations = 0;
@@ -181,7 +202,7 @@ export async function runAgentLoop(
 
     const uses = toolUsesOf(response.content);
     if (response.stop_reason !== 'tool_use' || uses.length === 0) {
-      return { text: lastText, proposed, toolsCalled, iterations, haltedAtCeiling: false };
+      return { text: lastText, proposed, accepted, toolsCalled, iterations, haltedAtCeiling: false };
     }
 
     // Echo the assistant's own blocks back before the results — the tool-use
@@ -215,13 +236,33 @@ export async function runAgentLoop(
         continue;
       }
 
+      if (outcome.type === 'accepted') {
+        // Only an `accept` tool may record consent. A propose or read tool
+        // doing so would turn an offer into an agreement without the user,
+        // which is the whole failure this layer exists to prevent.
+        if (tool.kind !== 'accept') {
+          throw new AgentLoopError(
+            `tool "${use.name}" is declared "${tool.kind}" but recorded the user's consent — only an "accept" tool may do that`,
+          );
+        }
+        accepted.push({ tool: use.name, proposal_id: outcome.proposal_id, summary: outcome.summary });
+        results.push({
+          type: 'tool_result',
+          tool_use_id: use.id,
+          content:
+            outcome.content ??
+            `The user's agreement to "${outcome.summary}" is recorded against that exact proposal.`,
+        });
+        continue;
+      }
+
       if (outcome.type === 'proposed') {
         // A read tool returning a proposal is a programming error, and a
         // silent one: it would put operations in front of a user under a name
         // that implies nothing was staged.
         if (tool.kind !== 'propose') {
           throw new AgentLoopError(
-            `tool "${use.name}" is declared "read" but returned a proposal — a read must not stage operations`,
+            `tool "${use.name}" is declared "${tool.kind}" but returned a proposal — only a "propose" tool may stage operations`,
           );
         }
         proposed.push({ tool: use.name, summary: outcome.summary, operations: outcome.operations });
@@ -246,5 +287,5 @@ export async function runAgentLoop(
 
   // The ceiling stopped us. `lastText` may be mid-thought, so the caller is
   // told explicitly rather than left to present a truncated turn as finished.
-  return { text: lastText, proposed, toolsCalled, iterations, haltedAtCeiling: true };
+  return { text: lastText, proposed, accepted, toolsCalled, iterations, haltedAtCeiling: true };
 }

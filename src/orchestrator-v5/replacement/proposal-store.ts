@@ -87,7 +87,9 @@ export interface Proposal {
   readonly applied_at?: string;
   /** Set when the revision moved under an un-applied proposal. */
   readonly stale_reason?: 'model_revision_moved';
-  readonly stale_from_status?: ProposalStatus;
+  readonly stale_from_status?: ProposalStatus;  /** Set when the write path affirmatively reported the save did not land.
+   *  Distinct from an unknown outcome, which stays in flight. */
+  readonly last_apply_failure?: { readonly reason: string; readonly failed_at: string };
 }
 
 export interface ProposalStore {
@@ -321,6 +323,40 @@ export function describeForUser(p: Proposal): string {
     case 'withdrawn':
       return 'set aside';
   }
+}
+
+/**
+ * The mutation path came back and said, affirmatively, that it did NOT land.
+ *
+ * This is the third outcome, and it must be kept apart from the other two.
+ *  · a receipt            → `applied`. It happened.
+ *  · an affirmative "no"  → here. It did not happen, and a retry is safe.
+ *  · nothing, or a throw  → stays `apply_in_flight`. UNKNOWN, and the only
+ *                           honest move is to reconcile before saying anything.
+ *
+ * Only call this when the write path has actually told you the write did not
+ * land. A timeout, a dropped connection or a thrown error is NOT that: it is
+ * the unknown case, and routing it here would assert something nobody knows —
+ * which is the "updated then denied" defect with the sign flipped.
+ *
+ * Returns to `authorised` and KEEPS the idempotency key, so a retry is the
+ * same write rather than a second one.
+ */
+export function recordApplyFailed(
+  store: ProposalStore,
+  id: string,
+  opts: { readonly reason: string; readonly failed_at: string },
+): ProposalStore {
+  const p = find(store, id);
+  assertState(
+    p.status === 'apply_in_flight',
+    `only a save in flight can be reported as failed, and this one is "${p.status}"`,
+  );
+  return replace(store, {
+    ...p,
+    status: 'authorised',
+    last_apply_failure: { reason: opts.reason, failed_at: opts.failed_at },
+  });
 }
 
 /**
