@@ -772,3 +772,99 @@ describe("model-version receipt — degrade, never throw (gate 5)", () => {
     expect(result.modelVersionReceipt).not.toBeNull();
   });
 });
+
+/**
+ * ⛔ A COMMITTED MODEL VERSION WAS INVISIBLE TO TELEMETRY.
+ *
+ * `V5ModelVersionCreated` reads like a success signal and is in fact a SKIP
+ * ALARM — the two `VERSIONABLE` tests above pin that by asserting ZERO of it on
+ * the paths where a version IS written. So nothing at all was emitted when a
+ * version was committed, and the durable receipt's existence could not be
+ * established from telemetry.
+ *
+ * Measured against deployed staging: `v5.model_versions.version_created = 0`
+ * across the whole service for 30 hours while `v5.graph_cas.evaluated` read
+ * 100+ in the same window. The natural reading of that zero — "the versioned
+ * write path is never taken" — is the opposite of what it means.
+ *
+ * ⭐ These bind to the STATUS and to the EVENT NAME, never to a bare call
+ * count: a count-only test would have passed throughout the defect, because
+ * the skip alarm was emitting the whole time.
+ */
+describe("V5ModelVersionCommitted — a committed version is observable", () => {
+  let emitSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    emitSpy = vi.spyOn(telemetry, "emit").mockImplementation(() => undefined);
+  });
+  afterEach(() => emitSpy.mockRestore());
+
+  function eventsNamed(name: string): Array<Record<string, unknown>> {
+    return emitSpy.mock.calls
+      .filter((c: readonly unknown[]) => c[0] === name)
+      .map((c: readonly unknown[]) => c[1] as Record<string, unknown>);
+  }
+  const committed = () =>
+    eventsNamed(telemetry.TelemetryEvents.V5ModelVersionCommitted);
+  const skipAlarm = () =>
+    eventsNamed(telemetry.TelemetryEvents.V5ModelVersionCreated);
+
+  it("a committed version emits status 'committed' with the version number and a 16-hex hash PREFIX", async () => {
+    const { store, writes } = capturingStore({ receipt: true });
+    await commitDirectAnswer(composed(), { ...META, graph: GRAPH }, store);
+
+    // precondition PINNED IN-TEST: without a planned version this case could
+    // pass by taking a path that emits nothing.
+    expect(writes[0]?.modelVersion).toBeDefined();
+
+    const events = committed();
+    expect(events).toHaveLength(1);
+    const e = events[0]!;
+    expect(e.status).toBe("committed");
+    expect(e.scenario_id).toBe(SCENARIO_ID);
+    expect(e.turn_id).toBe(TURN_ID);
+    expect(e.version_number).toBe(1);
+    expect(e.provenance).toBe("commit");
+
+    // content-free contract: a PREFIX of the identity hash, never the whole one
+    const prefix = e.graph_identity_hash_prefix as string;
+    expect(prefix).toMatch(/^[0-9a-f]{16}$/);
+    const full = computeGraphIdentityHash(GRAPH).value;
+    expect(full.startsWith(prefix)).toBe(true);
+    expect(prefix.length).toBeLessThan(full.length);
+  });
+
+  it("⛔ THE SKIP ALARM STAYS SILENT on that same commit — the two events are not interchangeable", async () => {
+    const { store } = capturingStore({ receipt: true });
+    await commitDirectAnswer(composed(), { ...META, graph: GRAPH }, store);
+
+    // This is the regression this whole design exists to avoid: folding the
+    // success arm into `version_created` would fire the skip alarm on the
+    // product's most common shape.
+    expect(skipAlarm()).toHaveLength(0);
+    expect(committed()).toHaveLength(1);
+  });
+
+  it("a PLANNED version whose append returns no receipt gets its OWN status, not folded into either neighbour", async () => {
+    const { store, writes } = capturingStore({ receipt: false });
+    await commitDirectAnswer(composed(), { ...META, graph: GRAPH }, store);
+
+    expect(writes[0]?.modelVersion).toBeDefined();
+    const events = committed();
+    expect(events).toHaveLength(1);
+    expect(events[0]!.status).toBe("no_receipt");
+    expect(events[0]!.version_number).toBeNull();
+    expect(events[0]!.graph_identity_hash_prefix).toBeNull();
+  });
+
+  it("⭐ CONTRAST CONTROL — with versioning off, NEITHER event fires, so neither is a constant", async () => {
+    setFlag(false);
+    const { store, writes } = capturingStore({ receipt: true });
+    await commitDirectAnswer(composed(), { ...META, graph: GRAPH }, store);
+
+    // precondition PINNED IN-TEST: no version was planned on this path
+    expect(writes[0]?.modelVersion).toBeUndefined();
+    expect(committed()).toHaveLength(0);
+    expect(skipAlarm()).toHaveLength(0);
+  });
+});
