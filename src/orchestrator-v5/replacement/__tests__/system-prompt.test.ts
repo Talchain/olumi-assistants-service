@@ -76,6 +76,28 @@ describe('the doctrine states the product this is, not the one it was', () => {
     expect(SYSTEM_PROMPT_DOCTRINE).toContain('you will not know which');
   });
 
+  /**
+   * All three derived from the DEPLOYED UI build (fd992149, confirmed against
+   * its own version.json), not from the source alone.
+   *
+   * The first is the dangerous one: MessageBubble returns null when the text
+   * trips a non-conversational predicate AND blocks are empty. Blocks are
+   * ALWAYS empty for this controller, so an apologetic opening makes the
+   * whole message disappear with no error anywhere.
+   */
+  it('forbids the openings that make the interface delete the message', () => {
+    expect(SYSTEM_PROMPT_DOCTRINE).toContain('REMOVES THE MESSAGE ENTIRELY');
+    expect(SYSTEM_PROMPT_DOCTRINE).toContain("I received your message but couldn't");
+  });
+
+  it('requires amounts in full, because a letter suffix is split when displayed', () => {
+    expect(SYSTEM_PROMPT_DOCTRINE).toContain('"£2.4 million", not "£2.4m"');
+  });
+
+  it('forbids line openings that the renderer turns into list markers', () => {
+    expect(SYSTEM_PROMPT_DOCTRINE).toContain('Never begin a line with a hyphen, an asterisk, or a number followed by a full stop');
+  });
+
   it('forbids explaining an absence it cannot explain', () => {
     expect(SYSTEM_PROMPT_DOCTRINE).toContain('NEVER EXPLAIN AN ABSENCE YOU CANNOT EXPLAIN');
     expect(SYSTEM_PROMPT_DOCTRINE).toContain('Do not offer a likely reason');
