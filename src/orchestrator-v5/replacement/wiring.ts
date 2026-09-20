@@ -27,28 +27,62 @@
  * additive table, no change to `append_turn_atomic_v2`, no contract change.
  */
 
+import { createClient } from '@supabase/supabase-js';
+
 import { chatWithToolsAnthropic } from '../../adapters/llm/anthropic.js';
+import { SupabaseReplacementStateStore } from './supabase-state-store.js';
 import type { ChatWithToolsLike } from './agent-loop.js';
 import type { ReplacementStateStore } from './turn-entry.js';
 
-let store: ReplacementStateStore | null = null;
+let override: ReplacementStateStore | null = null;
+let cached: ReplacementStateStore | null = null;
 
-/** Install the durable store. Called once at boot by whoever owns storage. */
+/**
+ * Install a store explicitly. Tests and any future owner of storage use this;
+ * production does not, because {@link getReplacementStateStore} builds the
+ * real one lazily from the environment.
+ *
+ * `null` clears BOTH the override and the cached instance, so a test cannot
+ * leave a live client behind for the next one.
+ */
 export function setReplacementStateStore(next: ReplacementStateStore | null): void {
-  store = next;
+  override = next;
+  if (next === null) cached = null;
 }
 
+/**
+ * The durable store, or `null` when the environment cannot supply one.
+ *
+ * A lazy singleton rather than boot wiring, matching the sibling adapters
+ * (`rolling-summary`, `brief-provenance`, `decision-records`). A boot step is
+ * something a deployment can forget; a lazy factory cannot be forgotten, only
+ * left unconfigured — and unconfigured is visible, because the caller refuses
+ * the turn by name instead of degrading quietly.
+ */
 export function getReplacementStateStore(): ReplacementStateStore | null {
-  return store;
+  if (override !== null) return override;
+  if (cached !== null) return cached;
+  // eslint-disable-next-line no-restricted-syntax -- call-time read by design, mirroring rolling-summary/index.ts
+  const url = process.env.SUPABASE_URL;
+  // eslint-disable-next-line no-restricted-syntax -- call-time read by design, mirroring rolling-summary/index.ts
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !serviceRoleKey) return null;
+  cached = new SupabaseReplacementStateStore(
+    createClient(url, serviceRoleKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    }),
+  );
+  return cached;
 }
 
 export class ReplacementNotConfiguredError extends Error {
   constructor() {
     super(
-      'CEE_REPLACEMENT_COACH_ENABLED is on but no durable replacement-state store is installed. ' +
+      'CEE_REPLACEMENT_COACH_ENABLED is on but no durable replacement-state store could be built: ' +
+        'SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must both be set. ' +
         'This layer will not run on process-local state: on a multi-instance deployment a user\'s ' +
         'agreement would intermittently land on an instance that never saw the offer. ' +
-        'Install one with setReplacementStateStore() at boot, or turn the flag off.',
+        'Set them, or turn the flag off.',
     );
     this.name = 'ReplacementNotConfiguredError';
   }
