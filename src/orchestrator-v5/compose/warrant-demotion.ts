@@ -42,6 +42,7 @@ import {
   SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS,
   SetFactorValueValueSchema,
 } from '../tools/handlers/set-factor-value.js';
+import { isUnitAmbiguousConstraintValue } from '../tools/handlers/add-constraint.js';
 import {
   AddConstraintTypeSchema,
   AddConstraintValueSchema,
@@ -208,6 +209,108 @@ export function findUnsupportedOfferTargetKind(
       ? rawLabel.trim()
       : targetId;
   return { nodeKind, label };
+}
+
+/**
+ * ⭐⭐ UNIT-SUFFICIENCY PRECONDITION — the FOURTH sibling, and the one the
+ * measured failure needed.
+ *
+ * ── THE WITNESS (deployed staging, 20 Sep 2026) ───────────────────────────
+ * The product offered "a limit keeping <a risk> at or below 30 … Say the word
+ * and I will make it." The user replied *"Yes, treat it as a 0-1 fraction of
+ * revenue at risk, so 30% is 0.3. Please go ahead."* — and nothing happened;
+ * the graph hash never moved and the held change lapsed two turns later.
+ *
+ * The obvious reading was that the confirmation predicate was too narrow. It
+ * is not: a held change replays from its STORED parameters and never re-reads
+ * the message, so honouring that sentence as a bare "yes" would have written
+ * 30 and discarded the user's 0.3. The gate was right to refuse it.
+ *
+ * ⛔ THE REAL DEFECT IS ONE TURN EARLIER: **the offer could not have been
+ * honoured by ANY answer.** `add_constraint`'s Gate-1 throws on a unit-less
+ * value outside [0,1] targeting a probability-domain node, and `formatBound`
+ * renders a stored unit — the offer read "at or below 30", bare — so a plain
+ * "yes" would have reached the handler and thrown. The user supplied the unit
+ * unprompted because the offer's own wording left it missing. **They were
+ * answering a question the product had not asked.**
+ *
+ * ── WHY NOT `OFFER_REQUIRED_PARAMETERS` ───────────────────────────────────
+ * Because that was already considered and rejected, in terms: its comment
+ * records that `unit` is "deliberately NOT required, because requiring them
+ * would suppress legitimate offers". That judgement is correct and stands — a
+ * unit-less "at most 30" on a headcount factor is perfectly good. The
+ * condition here is not "unit is missing"; it is the handler's own compound
+ * precondition, which is false for exactly those legitimate offers.
+ *
+ * ── DERIVED, NOT MIRRORED ─────────────────────────────────────────────────
+ * The predicate is `isUnitAmbiguousConstraintValue`, IMPORTED from the handler
+ * that throws on it. One expression, two callers; a change to the rule moves
+ * both in the same commit (CLAUDE.md trap 12). Same shape as
+ * `findUnsupportedOfferTargetKind` consuming
+ * `SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS`.
+ *
+ * ── FAIL-OPEN ON IGNORANCE, NEVER ON KNOWLEDGE ────────────────────────────
+ * Returns non-null ONLY on positive knowledge that the resumer would throw.
+ * Four fail-opens, each because this site cannot know the answer:
+ *   · target not in the graph we hold — the kind is unknown;
+ *   · value not a number — `findInsufficientOfferParameters` already owns it;
+ *   · a goal with `at_least` — the handler may stamp a threshold cap that
+ *     EXEMPTS the value (`capToStamp`), and that computation lives in the
+ *     handler. Not knowing, this does not refuse;
+ *   · any other intent.
+ * Suppressing a legitimate offer would be a worse defect than the one this
+ * closes.
+ */
+export interface UnitLookupNode {
+  readonly id?: unknown;
+  readonly kind?: unknown;
+  readonly observed_state?: { readonly cap?: unknown } | null;
+  readonly goal_threshold_cap?: unknown;
+}
+
+export function findUnitAmbiguousOffer(
+  action: ProposalAction,
+  graphNodes: readonly UnitLookupNode[],
+): { readonly label: string; readonly value: number } | null {
+  if (action.handler_id !== 'add_constraint') return null;
+
+  const rawUnit = param(action, 'unit')?.value;
+  const unit =
+    typeof rawUnit === 'string' && rawUnit.trim().length > 0 ? rawUnit.trim() : undefined;
+
+  const value = param(action, 'value')?.value;
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+
+  const targetId = action.entity.id;
+  if (typeof targetId !== 'string' || targetId.length === 0) return null;
+  const targetNode = graphNodes.find((n) => typeof n.id === 'string' && n.id === targetId);
+  if (targetNode === undefined) return null;
+  const targetKind = targetNode.kind;
+  if (typeof targetKind !== 'string' || targetKind.length === 0) return null;
+
+  // The goal + `at_least` combination is the one the handler may exempt with a
+  // stamped threshold cap. This site cannot compute that, so it does not
+  // refuse — see the header's fail-open list.
+  if (targetKind === 'goal' && param(action, 'constraint_type')?.value === 'at_least') {
+    return null;
+  }
+
+  if (
+    !isUnitAmbiguousConstraintValue({
+      unit,
+      value,
+      targetKind,
+      observedCap: targetNode.observed_state?.cap,
+      goalThresholdCap: targetNode.goal_threshold_cap,
+    })
+  ) {
+    return null;
+  }
+
+  const rawLabel = action.entity.label;
+  const label =
+    typeof rawLabel === 'string' && rawLabel.trim().length > 0 ? rawLabel.trim() : targetId;
+  return { label, value };
 }
 
 /**

@@ -345,6 +345,7 @@ import { buildConstraintTargetCorrection } from './compose/constraint-target-cor
 import {
   buildWarrantDemotion,
   buildIncompleteOfferRefusalText,
+  findUnitAmbiguousOffer,
   findUnsupportedOfferTargetKind,
   isProductMintedOfferCopy,
   type PersistedConstraintRow,
@@ -11414,6 +11415,13 @@ export async function runTurnExecutor(
           action,
           offerTargetKindNodes,
         );
+        // UNIT-SUFFICIENCY PRECONDITION — the fourth sibling. Same node source,
+        // same question shape: would the resumer refuse this? See
+        // `findUnitAmbiguousOffer` for the 20 Sep witness, in which the product
+        // offered a limit no answer could have applied and the user supplied
+        // the missing unit unprompted, one turn too late for anything to read
+        // it.
+        const unitAmbiguous = findUnitAmbiguousOffer(action, offerTargetKindNodes);
 
         const demotion = buildWarrantDemotion(action, existingConstraints, payload.message);
         const graphHashForProposal =
@@ -11449,6 +11457,19 @@ export async function runTurnExecutor(
               unsupportedTargetKind.nodeKind,
             ),
           ];
+        } else if (unitAmbiguous !== null) {
+          // ASK THE QUESTION AT THE OFFER, not after the confirm. The handler
+          // WILL throw on this one (`isUnitAmbiguousConstraintValue`, the same
+          // predicate it throws on), so an offer here promises a change no
+          // answer could deliver — and the user cannot tell that from the copy,
+          // because `formatBound` renders a unit-less bound as a bare number.
+          //
+          // No chip and no pending: there is nothing resumable, and emitting
+          // one would rebuild the dead end by another door. The copy is the
+          // `unit` parameter's OWN ratified phrasing, so this introduces no new
+          // vocabulary and names a move the user can actually make.
+          demotionOutcome = 'emit_refused:unit_ambiguous_probability_domain';
+          demotionText = buildIncompleteOfferRefusalText('unit', action.entity.label);
         } else if (!demotion.ok && demotion.reason === 'required_parameter_missing') {
           // PARAMETER-SUFFICIENCY PRECONDITION — the third sibling of the
           // registry-executable and target-kind checks. The handler requires a
