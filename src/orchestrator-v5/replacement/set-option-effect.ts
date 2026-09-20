@@ -58,7 +58,22 @@ export type SetOptionEffectRefusal =
       /** What the user CAN set, so the conversation offers a route rather than a dead end. */
       readonly linkable: readonly { readonly id: string; readonly label: string }[];
     }
-  | { readonly reason: 'value_out_of_range'; readonly message: string };
+  | { readonly reason: 'value_out_of_range'; readonly message: string }
+  | {
+      /**
+       * The factor has no declared range, so "a share of the range" has no
+       * referent and any number here would be invented.
+       *
+       * FOUND BY A LIVE RUN, NOT BY REVIEW. Two identical four-turn
+       * conversations at temperature 0 diverged on exactly this: one asked
+       * the user for the range, and the other silently translated "churn
+       * went from 3% to 4.4%" into 0.47 and offered it as theirs. The prompt
+       * forbids inventing a number; the prompt was followed once out of
+       * twice. A rule that matters cannot live only in the prompt.
+       */
+      readonly reason: 'factor_has_no_range';
+      readonly message: string;
+    };
 
 export interface SetOptionEffectSuccess {
   readonly ok: true;
@@ -147,6 +162,26 @@ export function setOptionEffect(input: SetOptionEffectInput): SetOptionEffectRes
             ? `It does affect: ${linked.map((f) => f.label).join(', ')}.`
             : `It does not yet affect anything — it needs a link to a factor first.`),
         linkable: linked,
+      },
+    };
+  }
+
+  // No range, no referent. Refusing here is what stops the model converting a
+  // pair of real numbers into a normalised one it chose — which reads as
+  // helpfulness and is a fabricated input to the comparison.
+  const factorRange = (factor as { range?: { range_min?: unknown; range_max?: unknown } }).range;
+  const hasRange =
+    typeof factorRange?.range_min === 'number' && typeof factorRange?.range_max === 'number';
+  if (!hasRange) {
+    return {
+      ok: false,
+      refusal: {
+        reason: 'factor_has_no_range',
+        message:
+          `${labelOf(factor, factorId)} has no range set, and an option's effect is a share of that ` +
+          `range — so there is nothing to express the effect against yet. Ask what the lowest and ` +
+          `highest values are for ${labelOf(factor, factorId)}, then this can be set. Do not convert ` +
+          `figures into a share yourself.`,
       },
     };
   }

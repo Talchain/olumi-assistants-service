@@ -12,8 +12,8 @@ const GRAPH = {
   nodes: [
     { id: 'd1', kind: 'decision', label: 'Question' },
     { id: 'o1', kind: 'option', label: 'Full Parity' },
-    { id: 'f1', kind: 'factor', label: 'Monthly Churn Rate' },
-    { id: 'f2', kind: 'factor', label: 'Gross Margin' },
+    { id: 'f1', kind: 'factor', label: 'Monthly Churn Rate', range: { range_min: 0, range_max: 0.2 } },
+    { id: 'f2', kind: 'factor', label: 'Gross Margin', range: { range_min: 0, range_max: 1 } },
   ],
   edges: [{ from: 'o1', to: 'f1' }],
 } as unknown as EffectGraph;
@@ -93,5 +93,29 @@ describe('the description is a prompt and carries the rule the model kept breaki
     expect(d).toContain('not to fill in a number they have not given you');
     expect(d).toContain('do not estimate one and offer it as theirs');
     expect(d).toContain('nothing is saved until they agree');
+  });
+});
+
+/**
+ * The guard the live run produced. See set-option-effect.test.ts for the
+ * measurement: two identical runs, one of which invented the number.
+ */
+describe('a factor with no range is refused at the tool, not left to the prompt', () => {
+  it('refuses and tells the model to ask for the range instead of converting figures itself', async () => {
+    const noRange = createSetOptionEffectTool({
+      getGraph: () =>
+        ({
+          nodes: [
+            { id: 'o1', kind: 'option', label: 'Full Parity' },
+            { id: 'f9', kind: 'factor', label: 'Support Cost' },
+          ],
+          edges: [{ from: 'o1', to: 'f9' }],
+        }) as unknown as EffectGraph,
+    });
+    const out = await noRange.execute({ option_id: 'o1', factor_id: 'f9', value: 0.47 });
+    expect(out.type).toBe('refused');
+    if (out.type !== 'refused') return;
+    expect(out.content).toContain('has no range set');
+    expect(out.content).toContain('Do not convert figures into a share yourself');
   });
 });
