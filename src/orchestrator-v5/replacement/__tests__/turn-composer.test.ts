@@ -13,6 +13,7 @@ import {
   authoriseProposal,
   beginApply,
   recordApplyAttempt,
+  type ProposalStore,
   openProposal,
   openProposals,
 } from '../proposal-store.js';
