@@ -260,8 +260,12 @@ export function computeAnalysisReadyStatusWithReason(
   originalStatus: "ready" | "needs_user_mapping" | "needs_encoding" | undefined,
   hasNonNumericRaw: boolean,
   connectedFactorCount: number,
-  isBaseline = false
+  isBaseline = false,
+  unresolvedTargetCount = 0
 ): AnalysisReadyStatusResult {
+  if (unresolvedTargetCount > 0) {
+    return { status: "needs_user_mapping", reason: "A proposed effect still needs a supported mapping" };
+  }
   // ⭐ THE SINGLE ADJUDICATION OF "this option has no effect value yet".
   //
   // It decides WHICH QUESTION the repair flow puts to the user, and the two

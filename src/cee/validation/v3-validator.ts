@@ -217,12 +217,14 @@ function validateNodes(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
  */
 const ALLOWED_EDGE_PATTERNS: Array<{ from: string; to: string }> = [
   { from: "decision", to: "option" },  // Decision branches to options
+  { from: "option", to: "risk" },    // Retained hypothesis, not a configured intervention
   { from: "option", to: "factor" },    // Options set controllable factors
   { from: "factor", to: "outcome" },
   { from: "factor", to: "risk" },
   { from: "factor", to: "factor" },    // Target must be exogenous (checked separately)
   { from: "outcome", to: "goal" },
   { from: "risk", to: "goal" },
+  { from: "risk", to: "outcome" },
 ];
 
 // Canonical strength range for CEE edges
@@ -299,7 +301,7 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
       } else {
         // Exactly 1 outgoing - verify it goes to goal
         const targetKind = nodeKindMap.get(outgoing[0]);
-        if (targetKind !== "goal") {
+        if (targetKind !== "goal" && !(node.kind === "risk" && targetKind === "outcome")) {
           warnings.push({
             code: `${node.kind.toUpperCase()}_NOT_CONNECTED_TO_GOAL`,
             severity: "warn",

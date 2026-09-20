@@ -50,6 +50,17 @@ import { buildRunDelta } from '../coaching/build-run-delta.js';
 import { PRESENT_PAIR } from '../context/__tests__/run-delta-fixtures.js';
 
 const SCENARIO_ID = '55555555-5555-4555-8555-555555555555';
+const DURABLE_PAIR = PRESENT_PAIR.map((fact, index) => ({
+  ...fact,
+  fact_version: 1,
+  result: {
+    ...fact.result,
+    scenario_id: SCENARIO_ID,
+    summary: 'Prior comparison',
+    leading_option_id: index === 0 ? 'opt-b' : 'opt-a',
+  },
+}));
+
 
 const GRAPH = {
   schema_version: 'v3',
@@ -86,8 +97,15 @@ vi.mock('../session/index.js', () => ({
     ],
     // THE ONE THING THIS SUITE VARIES: the persisted fact chain the turn's
     // leader-claim entitlement and the run_delta pair are both derived from.
-    readFactsFor: async () => PRESENT_PAIR,
+    readFactsFor: async () => [],
     readFactsWithTurnFor: async () => [],
+    readScenarioRunAnalysisFactsFor: async () => ({
+      facts: DURABLE_PAIR.map((fact, index) => ({
+        fact, fact_row_id: `durable-${index}`,
+        fact_created_at: (fact.result as { computed_at: string }).computed_at,
+      })),
+      total_count: DURABLE_PAIR.length,
+    }),
     invalidateScoped: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     storeDraftGraph: async () => undefined,
@@ -176,7 +194,7 @@ describe('run_delta leader ids survive the turn-executor → assembler hop', () 
    * leaves it GREEN. One biting mutant would only prove sensitivity to
    * something; the pair proves sensitivity to THIS call site.
    */
-  it('WIRE — an entitled turn carries the leader ids into the pack the model receives', async () => {
+  it('WIRE — durable runs outside the conversation window carry the permitted comparison into the model pack', async () => {
     const serialised = await renderThroughTurnExecutor();
 
     const delta = serialised.run_delta as Record<string, unknown> | undefined;
