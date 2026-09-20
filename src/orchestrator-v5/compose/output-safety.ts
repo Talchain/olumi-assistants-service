@@ -230,6 +230,34 @@ export interface EgressSanitiseOpts {
    * sibling is fixing two files over.
    */
   readonly mayNameLeadingOption: boolean;
+
+  /**
+   * The caller has ALREADY removed identifiers from `assistant_text`, by
+   * identity against this turn's graph, and the pattern scrub must not run
+   * over it again.
+   *
+   * WHY THIS EXISTS. `sanitiseUserFacingText` has a pattern arm as well as an
+   * identity arm, and the pattern arm rewrites ordinary English. Measured on
+   * 20 Sep by extracting its regexes and executing them: nine of seventeen
+   * ordinary business sentences came back changed, e.g.
+   *   "Improve the decision-making-process across teams."
+   *     -> "Improve the the relevant decision across teams."
+   * Any three-part hyphenated compound beginning with one of twelve common
+   * words trips it, and the capitalisation is lost with it.
+   *
+   * SCOPE, STATED NARROWLY. This skips the entity-id scrub for
+   * `assistant_text` and NOTHING else. Chips, suggested actions and every
+   * other field are scrubbed exactly as before, and the redaction-marker net
+   * still runs over the assistant text. It is `undefined` for every existing
+   * caller, so the retired path's behaviour is byte-identical.
+   *
+   * ⚠ IT IS NOT A FIX FOR THE PATTERN ARM, which is still wrong for every
+   * caller that does not set this. That is a separate, larger change: a
+   * predicate over natural language needs a corpus from real captures rather
+   * than from an author's head, and this estate has already spent four rounds
+   * oscillating on one of those.
+   */
+  readonly assistantTextAlreadyIdentifierSafe?: boolean;
 }
 
 /**
@@ -295,7 +323,11 @@ export function sanitiseOlumiResponseForEgress(
     ...response,
     // The redaction-marker net runs AFTER the entity-id scrub, so it sees the
     // same bytes the wire would carry rather than a pre-scrub draft.
-    assistant_text: assertNoRedactionMarkerInAssistantText(collect(response.assistant_text), {
+    assistant_text: assertNoRedactionMarkerInAssistantText(
+      opts.assistantTextAlreadyIdentifierSafe === true
+        ? response.assistant_text
+        : collect(response.assistant_text),
+      {
       requestId: opts.requestId,
       exitPath: opts.exitPath,
     }),
