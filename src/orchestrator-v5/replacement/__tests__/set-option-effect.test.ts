@@ -20,8 +20,8 @@ function graph(): EffectGraph {
     nodes: [
       { id: DECISION, kind: 'decision', label: 'Question' },
       { id: OPT, kind: 'option', label: 'Increase Price for New Customers Only' },
-      { id: PRICE, kind: 'factor', label: 'Plan Price' },
-      { id: CHURN, kind: 'factor', label: 'Churn Rate' },
+      { id: PRICE, kind: 'factor', label: 'Plan Price', range: { range_min: 0, range_max: 100 } },
+      { id: CHURN, kind: 'factor', label: 'Churn Rate', range: { range_min: 0, range_max: 0.2 } },
     ],
     edges: [
       { from: DECISION, to: OPT },
@@ -103,5 +103,61 @@ describe('the value is bounded, and the tool never invents one', () => {
   it.each([0, 0.5, 1])('accepts the boundary and mid value %s', (v) => {
     const r = setOptionEffect({ graph: graph(), optionId: OPT, factorId: PRICE, value: v });
     expect(r.ok).toBe(true);
+  });
+});
+
+/**
+ * FOUND BY A LIVE RUN, NOT BY REVIEW.
+ *
+ * Two identical four-turn conversations at temperature 0 diverged here. One
+ * asked the user what range churn runs over; the other converted "churn went
+ * from 3% to 4.4%" into 0.47 and offered it as the user's own figure. The
+ * prompt forbids inventing a number, and the prompt was obeyed once out of
+ * twice — so the rule moved out of the prompt and into this refusal.
+ */
+describe('a factor with no range cannot take an effect', () => {
+  function graphWithoutRange(): EffectGraph {
+    return {
+      nodes: [
+        { id: DECISION, kind: 'decision', label: 'Question' },
+        { id: OPT, kind: 'option', label: 'Increase Price for New Customers Only' },
+        { id: PRICE, kind: 'factor', label: 'Plan Price' },
+      ],
+      edges: [{ from: OPT, to: PRICE }],
+    } as unknown as EffectGraph;
+  }
+
+  it('refuses, because "a share of the range" has no referent', () => {
+    const r = setOptionEffect({ graph: graphWithoutRange(), optionId: OPT, factorId: PRICE, value: 0.47 });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.refusal.reason).toBe('factor_has_no_range');
+  });
+
+  it('names the next move and forbids the conversion the model tried to make', () => {
+    const r = setOptionEffect({ graph: graphWithoutRange(), optionId: OPT, factorId: PRICE, value: 0.47 });
+    if (r.ok) throw new Error('expected a refusal');
+    expect(r.refusal.message).toContain('has no range set');
+    expect(r.refusal.message).toContain('lowest and highest values');
+    expect(r.refusal.message).toContain('Do not convert figures into a share yourself');
+  });
+
+  it('CONTRAST: the same call with a range present succeeds — the guard is about the range, not the value', () => {
+    const r = setOptionEffect({ graph: graph(), optionId: OPT, factorId: PRICE, value: 0.47 });
+    expect(r.ok).toBe(true);
+  });
+
+  it('a partial range is not a range — one bound alone cannot normalise anything', () => {
+    const half = {
+      nodes: [
+        { id: OPT, kind: 'option', label: 'O' },
+        { id: PRICE, kind: 'factor', label: 'Plan Price', range: { range_min: 0 } },
+      ],
+      edges: [{ from: OPT, to: PRICE }],
+    } as unknown as EffectGraph;
+    const r = setOptionEffect({ graph: half, optionId: OPT, factorId: PRICE, value: 0.5 });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.refusal.reason).toBe('factor_has_no_range');
   });
 });

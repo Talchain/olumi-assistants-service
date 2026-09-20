@@ -91,10 +91,22 @@ export class ReplacementNotConfiguredError extends Error {
 /**
  * The model call.
  *
- * `temperature: 0` because this layer is evaluated by replay, and a
- * conversation you cannot replay is one you cannot measure a change to.
- * Thinking is off for the same reason plus latency; it is a dial to turn
- * later against a measured question, not a default to inherit.
+ * `temperature: 0` to reduce variance. Thinking is off for latency; it is a
+ * dial to turn later against a measured question, not a default to inherit.
+ *
+ * ⚠ CORRECTION, 20 Sep. This comment previously said temperature 0 made the
+ * layer "evaluated by replay, and a conversation you cannot replay is one you
+ * cannot measure a change to". That is FALSE and was measured false the same
+ * day: two identical four-turn conversations at temperature 0 diverged
+ * materially — one proposed a value, the other declined and asked a question
+ * instead. Temperature 0 is not determinism.
+ *
+ * The consequence is not cosmetic. An evaluation of this layer CANNOT be a
+ * single replayed transcript; it has to be a distribution over runs, with the
+ * property being asserted stated as a rate. And any behaviour that must hold
+ * EVERY time belongs in a tool's refusal, not in the prompt — which is why
+ * `set_option_effect` now refuses a factor with no range rather than asking
+ * the model nicely not to invent one.
  */
 export function anthropicChatWithTools(model?: string): ChatWithToolsLike {
   return async ({ system, messages, tools }) => {
