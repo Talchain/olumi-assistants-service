@@ -39,6 +39,7 @@ import {
 } from './conversation-memory.js';
 import {
   describeForUser,
+  isRetryExhausted,
   needsReconciliation,
   openProposal,
   type Proposal,
@@ -80,13 +81,30 @@ export interface ComposeTurnResult {
 export function reconciliationNotice(pending: readonly Proposal[]): string {
   const one = pending.length === 1;
   const list = pending.map((p) => `“${p.operations.map((o) => o.summary).join('; ')}”`).join(', ');
-  return (
+  const opening =
     `Before anything else: ${one ? 'a change I started saving' : 'some changes I started saving'} ` +
     `${one ? 'has' : 'have'} not come back confirmed — ${list}. ` +
-    `I will not tell you ${one ? 'it' : 'they'} landed or ${one ? 'it' : 'they'} didn't until I have checked, ` +
-    `because guessing either way risks telling you something untrue or saving it twice. ` +
-    `Let me confirm what actually happened first.`
-  );
+    `I will not tell you ${one ? 'it' : 'they'} landed or ${one ? 'it' : 'they'} didn't until I know, ` +
+    `because guessing either way risks telling you something untrue or saving it twice. `;
+
+  // ⚠ THE ENDING HAS TO MATCH WHAT IS ACTUALLY STILL HAPPENING.
+  //
+  // This notice used to end "Let me confirm what actually happened first" in
+  // every case. Once the retry cap was added that became a LIE in exactly the
+  // situation where honesty matters most: the attempts are exhausted, nothing
+  // is still checking, and the sentence promises otherwise. A notice whose
+  // whole purpose is to refuse to say something untrue cannot end on one.
+  //
+  // Caught by reading the text back against the code after the cap landed,
+  // which is the check that should follow every behaviour change to a
+  // module that talks to the user.
+  const exhausted = pending.every((p) => isRetryExhausted(p));
+  return exhausted
+    ? opening +
+        `I have tried to confirm ${one ? 'it' : 'them'} several times and cannot get an answer, so I have ` +
+        `stopped trying rather than risk saving ${one ? 'it' : 'them'} twice. Please check whether the change ` +
+        `is there, and tell me — I will take your word for it and carry on from whichever it is.`
+    : opening + `I am checking what actually happened, and will tell you as soon as I know.`;
 }
 
 const INCOMPLETE_NOTICE =

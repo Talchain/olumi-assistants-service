@@ -9,8 +9,10 @@ import type { AgentLoopResult } from '../agent-loop.js';
 import { EMPTY_CONVERSATION_MEMORY, liveItemsOfKind } from '../conversation-memory.js';
 import {
   EMPTY_PROPOSAL_STORE,
+  MAX_APPLY_ATTEMPTS,
   authoriseProposal,
   beginApply,
+  recordApplyAttempt,
   openProposal,
   openProposals,
 } from '../proposal-store.js';
@@ -176,5 +178,51 @@ describe('a pending proposal is described in plain language', () => {
     expect(line).toContain('Set X on Y to 1');
     expect(line).toContain('waiting for you to say yes');
     expect(line).not.toContain('_');
+  });
+});
+
+/**
+ * A NOTICE WHOSE PURPOSE IS REFUSING TO SAY SOMETHING UNTRUE CANNOT END ON
+ * SOMETHING UNTRUE.
+ *
+ * The notice used to end "Let me confirm what actually happened first" in
+ * every case. When the retry cap landed that became false in precisely the
+ * situation where honesty matters most: attempts exhausted, nothing still
+ * checking, and the sentence promising otherwise. Found by reading the text
+ * back against the code after changing the behaviour behind it.
+ */
+describe('the notice says what is actually still happening', () => {
+  function inFlight(attempts: number): ProposalStore {
+    let s = openProposal(EMPTY_PROPOSAL_STORE, {
+      id: 'p1',
+      operations: [{ kind: 'set_factor_value', summary: 'Set Monthly Churn Rate to 0.03' }],
+      model_revision: REV, proposed_at: NOW, proposed_in_turn: 't1',
+    });
+    s = authoriseProposal(s, 'p1', { authorised_in_turn: 't2', authorised_at: NOW, current_model_revision: REV });
+    s = beginApply(s, 'p1', { idempotency_key: 'k1', apply_started_at: NOW, current_model_revision: REV });
+    for (let i = 0; i < attempts; i += 1) s = recordApplyAttempt(s, 'p1');
+    return s;
+  }
+
+  it('while it is still retrying, it says it is checking', () => {
+    const text = reconciliationNotice(inFlight(1).proposals);
+    expect(text).toContain('I am checking what actually happened');
+    expect(text).not.toContain('stopped trying');
+  });
+
+  it('once the attempts are exhausted it says it has STOPPED, and asks the user', () => {
+    const text = reconciliationNotice(inFlight(MAX_APPLY_ATTEMPTS).proposals);
+    expect(text).toContain('stopped trying rather than risk saving it twice');
+    expect(text).toContain('Please check whether the change is there');
+    // The promise it can no longer keep must be gone.
+    expect(text).not.toContain('I am checking what actually happened');
+  });
+
+  it('either way it still refuses to claim the change landed or did not', () => {
+    for (const attempts of [1, MAX_APPLY_ATTEMPTS]) {
+      const text = reconciliationNotice(inFlight(attempts).proposals);
+      expect(text).toContain("will not tell you it landed or it didn't until I know");
+      expect(text).toContain('Set Monthly Churn Rate to 0.03');
+    }
   });
 });
