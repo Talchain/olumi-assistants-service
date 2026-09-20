@@ -69,6 +69,8 @@ export interface ProposedChange {
    * time.
    */
   readonly params: Readonly<Record<string, unknown>>;
+  /** Frame independently extracted from the user's original constraint statement. */
+  readonly constraint_value_frame?: import('@talchain/schemas').GoalThresholdFrameType;
   /**
    * Optional graph entity ids the proposal targets. Threaded into
    * `preconditions.target_entity_ids` so the resumer can invalidate

@@ -27,7 +27,11 @@ import {
 // The grammar's own enums, imported rather than restated: the v12 route test
 // binds to the source of truth so a widening there fails this test loud, instead
 // of leaving a hand-copied list to drift (CLAUDE.md trap 12).
-import { DRAFT_RECORD_STATED_KINDS, DRAFT_RECORD_CLAIM_KINDS } from "../grammar.js";
+import {
+  DRAFT_RECORD_STATED_KINDS,
+  DRAFT_RECORD_CLAIM_KINDS,
+  buildDraftClaimItemSchema,
+} from "../grammar.js";
 
 /**
  * HISTORIC — v2. The bytes served on every run measured up to and including
@@ -703,9 +707,89 @@ const WITHDRAWN_V11_INSTRUCTION_BYTES = 11171;
  * would let those findings read as findings about v19, which is the version
  * written to remove their cause.
  */
-const PREREGISTERED_V19_INSTRUCTION_SHA256 =
+const SUPERSEDED_V19_INSTRUCTION_SHA256 =
   "7acd2273ab99654c2d54f553f2d611d2e932d96fecf4a76974cece2a5defca83";
-const PREREGISTERED_V19_INSTRUCTION_BYTES = 18083;
+const SUPERSEDED_V19_INSTRUCTION_BYTES = 18083;
+
+/**
+ * ⭐ PRE-REGISTERED — v20, frozen 2026-09-18 BEFORE any run was spent on it.
+ *
+ * v20 makes ONE change: the current-level ask, which was scoped to `factor`
+ * claims, now also reaches `risk` and `outcome` claims — the node kinds users
+ * attach their limits to — and says explicitly that a risk naming a POSSIBILITY
+ * rather than a measure still carries no level. See the `describe` block at the
+ * foot of this file for the full derivation and the measured chain from the
+ * missing level to the withheld recommendation.
+ *
+ * ⚠ STATUS AT THE TIME OF PINNING: UNMEASURED ON A LIVE DRAW. The gap it closes
+ * is measured (risk 0 of 3, outcome 0 of 3, factor 7 of 9 across both v202 draws;
+ * risk 0/14, outcome 0/10, factor 34/34 on the starter boards) and the downstream
+ * consequence is measured at ISL's and PLoT's own bytes. Whether the model
+ * ANSWERS the widened ask is not — a grammar field is an opportunity, not an
+ * outcome, and the same is true of an instruction sentence. A reader must not
+ * infer a result from the existence of this pin.
+ *
+ * ⚠ v19's VALUE STAYS AND IS ASSERTED DISTINCT. v19 is the artefact #1562
+ * shipped; every measurement taken after 2026-09-17T23:39Z belongs to it.
+ * Re-pointing this literal would let those findings read as findings about v20 —
+ * the version written to remove their cause.
+ */
+/**
+ * ⚠ RE-PINNED WITHIN v20, BEFORE v20 EVER SHIPPED — so no measurement is being
+ * re-attributed. The first v20 bytes (`2d54395e…` / 18749) were never served and
+ * never measured against: the PR carrying them was still open when the carve-out
+ * defect below was found, so there is no finding anywhere that belongs to them.
+ * That is the ONLY condition under which re-pointing a version literal is honest,
+ * and it is why the superseded values below are kept rather than replaced.
+ *
+ * WHAT CHANGED AND WHY: the possibility-vs-measure carve-out had a blind spot.
+ * Its examples were all UNNUMBERED possibilities ("our tech lead leaves"), so it
+ * never addressed a possibility carrying a LIKELIHOOD — while the positive
+ * guidance invites a value whenever the level is "sayable on a scale", and a 30%
+ * chance is sayable. Measured by Core on the live corpus, negative control 0:
+ * of the 135 risk nodes carrying any `observed_state`, **58 (43%) carry a
+ * probability-shaped unit**. v20.1 adds the discriminating TEST rather than more
+ * examples, because more examples would share the same blind spot.
+ *
+ * ⚠ NOT YET VALIDATED AGAINST A MODEL. Whether the test discriminates FOR A
+ * MODEL cannot be settled by reading it (CLAUDE.md trap 22c — this is the second
+ * attempt at this predicate from the same head that got it wrong first). It is
+ * shipped anyway because it is strictly better than the wording it replaces and
+ * because **only 135 of 28,055 risks carry any value today**, so the population
+ * being wrong about is small and growing — the cheapest moment to be wrong.
+ * The corpus run is rowed with an explicit trigger: when Paul lifts the testing
+ * pause.
+ */
+const PREREGISTERED_V20_INSTRUCTION_SHA256 =
+  "d28eedb9f44d5c2ba83c0cd4e2c3ada4ce2287b62d9185ebd2c5d70437349f5d";
+const PREREGISTERED_V20_INSTRUCTION_BYTES = 20736;
+
+// v21 source correction, 2026-09-19. UNRUN and unmeasured. Registered by reading
+// the literal source bytes, without importing or executing the instruction.
+// v20 above remains an immutable record of the reviewed candidate.
+const PREREGISTERED_V21_INSTRUCTION_SHA256 =
+  "d7df6589280035116884b548d59fbe5541388d31005c2b8a09ad12fd93ba4f47";
+const PREREGISTERED_V21_INSTRUCTION_BYTES = 19215;
+const PREREGISTERED_V21_SHAPE_SHA256 =
+  "cc4b8e5864ca62e32065ac26fc60adcb4ac490c36e8f463daa6c58bdc2427c3d";
+const PREREGISTERED_V21_SHAPE_BYTES = 14334;
+
+// v22 authored-meaning correction, 2026-09-19. Unmeasured on model output.
+// Existing record kinds retain necessary versus optional goals, conditional
+// consequences and separate numeric roles. The connect half keeps ordinal
+// evidence distinct from a defensible numeric estimate. Pins identify source
+// bytes only; they do not establish generation quality or saved-model fidelity.
+// v21 above remains immutable. These values are read from literal source bytes
+// without importing or executing the instruction.
+const PREREGISTERED_V22_INSTRUCTION_SHA256 =
+  "9313d1ee7ce6a726338513e9fc7d20ef145047f2c216c69b87bbb8d84fdb7537";
+const PREREGISTERED_V22_INSTRUCTION_BYTES = 21107;
+const PREREGISTERED_V22_SHAPE_SHA256 =
+  "8fc0646a79586581a0c8faeb7ad54f627a76bfd63807db784ba511fc33c96d7d";
+const PREREGISTERED_V22_SHAPE_BYTES = 15992;
+const PREREGISTERED_V22_CONNECT_SHA256 =
+  "1e2ba3c6992c9525f268d8621b2c37f9f9aac687f1edb0e3867360fba4e8274e";
+const PREREGISTERED_V22_CONNECT_BYTES = 5115;
 /**
  * SUPERSEDED — v18's bytes, the value ask, AND THE ARTEFACT EVERY 17 Sep
  * MEASUREMENT WAS TAKEN UNDER: both live v202 draws, Paul's manual test, and the
@@ -778,11 +862,39 @@ const SUPERSEDED_V12_INSTRUCTION_SHA256 =
   "9c3906151c4a6abec7906fc430c3c26bc8d6c92559a8e859401dd03b9682f232";
 const SUPERSEDED_V12_INSTRUCTION_BYTES = 12280;
 
-describe("the draft records instruction is the measured artefact", () => {
-  it("hashes to the PRE-REGISTERED v19 value at the pinned byte length", () => {
-    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V19_INSTRUCTION_SHA256);
+describe("the draft records instruction is the registered artefact", () => {
+  it("hashes to the unmeasured v22 source registration at the pinned byte length", () => {
+    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V22_INSTRUCTION_SHA256);
     expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).toBe(
-      PREREGISTERED_V19_INSTRUCTION_BYTES,
+      PREREGISTERED_V22_INSTRUCTION_BYTES,
+    );
+  });
+
+  it("keeps v21 identifiable separately from the authored-meaning correction", () => {
+    expect(draftRecordsInstructionHash()).not.toBe(PREREGISTERED_V21_INSTRUCTION_SHA256);
+    expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).not.toBe(PREREGISTERED_V21_INSTRUCTION_BYTES);
+    expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).not.toBe(
+      PREREGISTERED_V21_SHAPE_SHA256,
+    );
+    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).not.toBe(PREREGISTERED_V21_SHAPE_BYTES);
+  });
+
+  it("keeps v20 identifiable separately from the unmeasured correction", () => {
+    expect(draftRecordsInstructionHash()).not.toBe(PREREGISTERED_V20_INSTRUCTION_SHA256);
+    expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).not.toBe(PREREGISTERED_V20_INSTRUCTION_BYTES);
+    expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).not.toBe(
+      "f64d91fbcb2535387b33138de3e8d57455d049ed9698d1790bcaad90baecb3d3",
+    );
+  });
+
+  it("is DISTINCT from the SUPERSEDED v19 bytes, so #1562's measurements stay its own", () => {
+    // v19 is what #1562 shipped. The `declared_scale` producer stamp, the
+    // grammar-v10 `value_scale` slot and every number taken after
+    // 2026-09-17T23:39Z are measurements OF v19. None may be re-attributed to
+    // the version written to widen the ask they exposed.
+    expect(draftRecordsInstructionHash()).not.toBe(SUPERSEDED_V19_INSTRUCTION_SHA256);
+    expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).not.toBe(
+      SUPERSEDED_V19_INSTRUCTION_BYTES,
     );
   });
 
@@ -1014,10 +1126,46 @@ describe("the draft records instruction is the measured artefact", () => {
     // to v18 (asserted in the next test). The edit is legible as "the model must
     // say which convention its number is in" without reading a diff.
     expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).toBe(
-      // v19 — `value_scale`, the whole of the +944 bytes.
+      // v22 changes both halves; model generation remains unmeasured.
+      PREREGISTERED_V22_SHAPE_SHA256,
+    );
+    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(PREREGISTERED_V22_SHAPE_BYTES);
+    expect(
+      Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8") +
+        1 +
+        Buffer.byteLength(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8") -
+        1,
+      "the three pins no longer add up — one of them was updated without the others",
+    ).toBe(PREREGISTERED_V22_INSTRUCTION_BYTES);
+    // WITHDRAWN — v20.0's shape half, the value this pin USED to name, kept
+    // beside the live one exactly as every entry below it is. Asserted DISTINCT
+    // for a DIFFERENT reason from those, and the difference is worth stating:
+    // NOTHING WAS EVER SERVED UNDER IT, so there are no draws to keep
+    // attributable. It is here so the shape half cannot silently revert to
+    // v20.0's text — the state this pin spent four commits describing while the
+    // artefact had already moved past it.
+    //
+    // Derived, not copied: `instruction.ts` at `16efa439` (the v20.0 commit)
+    // hashes its shape half to exactly this value at exactly 13,868 bytes, and
+    // its connect half to 4,881 — unchanged through v21.
+    expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).not.toBe(
+      "5725ccb7ee993820b3a9c44009272732c0119bc8604a6c254bbb6409fa4c14d6",
+    );
+    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).not.toBe(13868);
+    // SUPERSEDED — v19's shape half, the bytes #1562 shipped and the bytes every
+    // measurement taken after 2026-09-17T23:39Z belongs to.
+    //
+    // ⚠⚠ AND THE SHAPE HALF HAS NOW MOVED AGAIN IN v20, while the CONNECT half is
+    // byte-identical to v19 (`8418e5e0…` / 4,881, asserted in the next test).
+    // v20 is shape-half in its entirety: WHICH claim kinds are asked for a level,
+    // and which risks have no level to give, are both statements about what goes
+    // in a field, not about how two records connect. That asymmetry is legible
+    // here without reading the diff, which is the entire reason the halves are
+    // pinned apart.
+    expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).not.toBe(
       "a11f46f861777aaf3fd3b7477de688fcfbb0687ce26a05e0ead9f2d094df4d5d",
     );
-    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(13202);
+    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).not.toBe(13202);
     // SUPERSEDED — v18's shape half, the bytes every 17 Sep measurement was
     // taken under.
     expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).not.toBe(
@@ -1088,7 +1236,7 @@ describe("the draft records instruction is the measured artefact", () => {
     );
   });
 
-  it("pins the v5 CONNECT half independently, so the half that changed is legible", () => {
+  it("pins the CONNECT half independently, so the half that changed is legible", () => {
     // v4 changes the connect half too: "chain the option the USER named" replaces
     // v3's "an option_refinement IS an option needing its own chain". That v3
     // sentence closed one direction of a defect and opened its mirror — the model
@@ -1108,11 +1256,14 @@ describe("the draft records instruction is the measured artefact", () => {
     // replaced was false at `f18d941b`.
     expect(
       createHash("sha256").update(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8").digest("hex"),
-      // v17 — the own-chain rule and the ceiling-not-quota clarification. The
-      // FIRST change to the connect half since v13, so a diff here is legible as
-      // exactly that rather than as drift.
-    ).toBe("8418e5e048d3f9ea0c8d0ee61914c5c5b8c2a54a2e601a2958284f73749b1c64");
-    expect(Buffer.byteLength(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8")).toBe(4881);
+    ).toBe(PREREGISTERED_V22_CONNECT_SHA256);
+    expect(Buffer.byteLength(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8")).toBe(PREREGISTERED_V22_CONNECT_BYTES);
+    // v18-v21's connect half remains separately identifiable. v22 adds the
+    // ordinal-evidence guard without changing the option or connectivity rules.
+    expect(
+      createHash("sha256").update(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8").digest("hex"),
+    ).not.toBe("8418e5e048d3f9ea0c8d0ee61914c5c5b8c2a54a2e601a2958284f73749b1c64");
+    expect(Buffer.byteLength(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8")).not.toBe(4881);
     // HISTORIC — the v6/v7/v8/v9 connect half, asserted DISTINCT. Every draw in
     // the 1-of-23 measurement was served these bytes.
     expect(
@@ -1510,5 +1661,121 @@ describe("the instruction says nothing it must not say", () => {
   it("keeps both balancing sentences in the connect half", () => {
     expect(DRAFT_RECORDS_CONNECT_INSTRUCTION).toContain("Do not emit a factor you cannot connect.");
     expect(DRAFT_RECORDS_CONNECT_INSTRUCTION).toContain("But never drop something the user\nstated");
+  });
+});
+
+/* ===========================================================================
+ * v20 — THE CURRENT-LEVEL ASK REACHES THE NODE KINDS USERS ATTACH LIMITS TO.
+ *
+ * ⭐ THE DEFECT, measured on two independent corpora and settled at three
+ * services' bytes (2026-09-18).
+ *
+ * The instruction's quantity rule is scoped to ONE claim kind — *"Record what a
+ * quantity IS now. **On a `factor` claim**, set `value` to the level that
+ * quantity sits at today"*. Nothing asks an `outcome` or a `risk` claim for one.
+ * The GRAMMAR is not the constraint: `buildDraftClaimItemSchema()` declares
+ * `value`, `unit` and `value_scale` on the claim item with NO kind scoping, so
+ * every claim kind can already carry them. The ask is what is missing.
+ *
+ * ⚠ AND A SECOND INSTRUCTION ACTIVELY ROUTES MEASURABLE QUANTITIES AWAY FROM
+ * THE ONE KIND THAT IS ASKED. The same file says *"Name a result an `outcome`
+ * and a downside a `risk`. Do not file either as a `factor`"* — so "Pro
+ * Subscriber Churn Rate", a quantity with a perfectly good level today, is
+ * correctly filed as a `risk` and then never asked what that level is. Two
+ * rules answering different questions, neither aware of the other (trap 21).
+ *
+ * MEASURED — `observed_state.value` presence by node kind:
+ *   · both live v202 draws (`output/olumi-evidence-20260917-inert-quantities/`):
+ *       factor 7 of 9 · risk 0 of 3 · outcome 0 of 3 · goal 0 of 2
+ *   · the starter boards, independently, 17 Sep: factor 34/34 · risk 0/14 ·
+ *       outcome 0/10 · decision 0/5
+ *   The contrast control is the factor row: the probe discriminates.
+ *
+ * WHY IT COSTS THE USER THE ANSWER, traced producer -> wire -> consumer:
+ *   · a user's limit attaches to a `risk`/`outcome` node ("Pro Subscriber Churn
+ *     Rate"; "Budget Overrun", both `kind: risk` on live captures);
+ *   · ISL then emits `CONSTRAINT_NOT_CONVERTIBLE` in terms — *"A 'level' frame
+ *     requires constraint target node X to carry `observed_state.baseline` to
+ *     convert the level into the samples' frame, but it carries NO
+ *     `observed_state` at all"* — 13 of 13 in the banked journey corpus;
+ *   · PLoT classifies the target `sample_frame_unanchored` (13 of 13, recovered
+ *     from its own message prose — PLoT never logs the reason) and withholds
+ *     goal-fit under `CONSTRAINT_TARGET_UNRELIABLE`;
+ *   · CEE reads that off the wire and sets `leader_claim.permitted: false`,
+ *     `withheld_reason: constraint_verdict_withheld` — 21 of the 55 withheld
+ *     turns in a 59-turn corpus.
+ *   · The user asked for a recommendation and got none.
+ *
+ * ⚠ WHAT THIS CHANGE IS NOT. It does not widen what may be INVENTED. The two
+ * governing sentences are untouched and are asserted below: the quantity is
+ * recorded only *"on a scale the brief supports"*, and *"Leave `value` out where
+ * you cannot place the quantity"*. A qualitative risk stays qualitative. The
+ * invention surface does widen by construction — more kinds may now carry a
+ * number — which is why the do-not-invent prohibition is re-asserted here rather
+ * than assumed, and why this wants an independent seat.
+ *
+ * ⚠ v19's VALUE STAYS AND IS ASSERTED DISTINCT. v19 is the artefact `#1562`
+ * shipped and the one every post-merge measurement belongs to. Re-pointing the
+ * literal would let those findings read as findings about v20 — the version
+ * written to remove their cause.
+ * ========================================================================= */
+
+describe("v20 — the current-level ask reaches risk and outcome claims", () => {
+  /**
+   * RED-FIRST. At v19 this fails: the only kind named by the quantity rule is
+   * `factor`. It is written against the SPEC ("a claim that names a measurable
+   * quantity is asked for today's level"), not against the failure in hand.
+   */
+  it("asks a risk claim for the level it sits at today", () => {
+    const quantitySection = DRAFT_RECORDS_INSTRUCTION.slice(
+      DRAFT_RECORDS_INSTRUCTION.indexOf("Record what a quantity IS now."),
+      DRAFT_RECORDS_INSTRUCTION.indexOf("Keep the user's stated requirements intact."),
+    );
+    expect(quantitySection.length).toBeGreaterThan(0);
+    expect(quantitySection).toMatch(/`risk`/);
+  });
+
+  it("asks an outcome claim for the level it sits at today", () => {
+    const quantitySection = DRAFT_RECORDS_INSTRUCTION.slice(
+      DRAFT_RECORDS_INSTRUCTION.indexOf("Record what a quantity IS now."),
+      DRAFT_RECORDS_INSTRUCTION.indexOf("Keep the user's stated requirements intact."),
+    );
+    expect(quantitySection.length).toBeGreaterThan(0);
+    expect(quantitySection).toMatch(/`outcome`/);
+  });
+
+  /**
+   * THE COMPLEMENT, and it is the half that stops this becoming an invention
+   * licence. Widening WHICH kinds are asked must not widen WHETHER a number may
+   * be made up. Both governing clauses must survive verbatim.
+   */
+  it("keeps the brief-supported-scale limit that stops the widening inventing numbers", () => {
+    // ⚠ MATCH ON REFLOWED TEXT, NOT ON THE LITERAL. The instruction is a wrapped
+    // template literal, so "on a scale the brief supports" is split by a newline
+    // in the source. My first version of this assertion matched the unwrapped
+    // string and RED-ed on a clause that was present — a false negative in the
+    // guard, which is worse than no guard. Normalise whitespace and the
+    // assertion survives any future reflow of the same sentence.
+    const flat = DRAFT_RECORDS_INSTRUCTION.replace(/\s+/g, " ");
+    expect(flat).toContain("a current level on a supported scale");
+    expect(flat).toContain(
+      "Preserve qualitative risks and outcomes without filling in a number",
+    );
+  });
+
+  it("still forbids inventing a number the user did not state", () => {
+    const flat = DRAFT_RECORDS_INSTRUCTION.replace(/\s+/g, " ");
+    expect(flat).toContain("Do not invent a number the user did not state");
+  });
+
+  /**
+   * The grammar was never the constraint — pinned so a future reader does not
+   * re-derive it, and so a kind-scoping regression in the grammar REDs here.
+   */
+  it("is possible at all because the grammar scopes value/unit/value_scale to no kind", () => {
+    const props = (buildDraftClaimItemSchema() as { properties: Record<string, unknown> })
+      .properties;
+    expect(Object.keys(props)).toEqual(expect.arrayContaining(["value", "unit", "value_scale"]));
+    expect(DRAFT_RECORD_CLAIM_KINDS).toEqual(expect.arrayContaining(["risk", "outcome", "factor"]));
   });
 });

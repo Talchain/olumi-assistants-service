@@ -70,6 +70,7 @@ import {
 } from './edit-graph-referee-gate.js';
 import { detectOptionOwnValueSubstitution } from '../routing/option-observed-state-substitution.js';
 import { elideCascadeRedundantRemoveEdges } from '../graph-management/cascade-removes.js';
+import { propagateConfirmedInterventionRemovals } from '../graph-management/confirmed-intervention-removals.js';
 import type { FrameFreshness } from '../graph-management/types.js';
 import type { PendingAction } from '../session/pending-action.js';
 import { buildReadinessRecoveryChip } from '../coaching/readiness-recovery.js';
@@ -571,6 +572,18 @@ export function executeGmHeldResume(input: GmHeldExecuteInput): GmHeldExecuteOut
     );
     return { status: 'apply_failed', reason: 'apply_error' };
   }
+
+  // A confirmed removal must also leave the option representation consumed by
+  // analysis. Ordinary missing node fields do not authorise mirror deletion.
+  const interventionRemoval = propagateConfirmedInterventionRemovals({
+    beforeGraph: input.currentGraph,
+    afterGraph: mutatedGraph,
+    operations: opsToApply,
+  });
+  if (interventionRemoval.status === 'refused') {
+    return { status: 'apply_failed', reason: 'incomplete_apply' };
+  }
+  mutatedGraph = interventionRemoval.graph;
 
   // GraphV3 views for the receipt + downstream honesty plumbing. Both
   // parses succeed by construction (applyAndValidateMutation validated the

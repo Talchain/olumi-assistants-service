@@ -15,7 +15,7 @@
  *   - Repeated "yes" after a successful apply does NOT double-dispatch
  *     (the new turn's pending_actions snapshot does not carry the
  *     proposal anymore).
- *   - Expired pending action commits the lapsed-recovery copy.
+ *   - An expired offer without its target identity pin requests safe restatement.
  *   - Dismissal phrases commit "OK, no change made." with the
  *     negative-control gate honoured.
  *   - Safety-string filter on every emitted text.
@@ -546,10 +546,13 @@ describe('Proposed-change route-level — recovery branches commit deterministic
     vi.clearAllMocks();
   });
 
-  it('expired proposal + "yes" emits recovery copy and does NOT dispatch the handler', async () => {
+  it('expired constraint without its target identity pin requests restatement without applying or renewing it', async () => {
     pendingActionsForRead = [
       applyProposedPendingAction({ expiresAtIso: '2024-01-01T00:00:00.000Z' }),
     ];
+    // The target exists, but this legacy fixture has only a graph-hash
+    // precondition. It cannot establish the exact identity needed for renewal.
+    expect(pendingActionsForRead[0]!.preconditions.target_entity_ids).toBeUndefined();
     const adapter = throwingRoutingAdapter();
     const result = await runTurnExecutor(payload('yes'), 'req-expired', {
       routingAdapter: adapter,
@@ -557,7 +560,15 @@ describe('Proposed-change route-level — recovery branches commit deterministic
     });
     expect(adapter.chatWithTools).not.toHaveBeenCalled();
     expect(addConstraintCalls).toHaveLength(0);
-    expect(result.response.assistant_text).toMatch(/lapsed|no longer/i);
+    expect(result.response.assistant_text).toContain('That offer expired');
+    expect(result.response.assistant_text).toContain('cannot safely renew it');
+    expect(result.response.assistant_text).toContain('Nothing has changed');
+    expect(result.response.assistant_text).toContain('Please restate the limit and the quantity it applies to');
+    expect(result.response.suggested_actions ?? []).toHaveLength(0);
+    expect(appendCalls).toHaveLength(1);
+    expect(appendCalls[0]!.graph).toBeUndefined();
+    expect(appendCalls[0]!.handler_facts ?? []).toHaveLength(0);
+    expect(appendCalls[0]!.pending_actions ?? []).toHaveLength(0);
   });
 
   it('dismissal "no" with a live apply_proposed_change emits "OK, no change made." and does NOT dispatch', async () => {

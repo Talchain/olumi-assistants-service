@@ -869,6 +869,10 @@ function unitsCorrespond(
       // (4) …naming THIS subject, by the module's own two selection rules.
       if (!node.label || !labelsMatch(node.label, factor.label)) return false;
       if (hasUnboundQuantityLabel(node, factor)) return false;
+      // Crediting a current estimate requires the same declared-role authority
+      // as installing its value. A literal target or limit remains non-current,
+      // including when another node owns that protected quantity.
+      if (selectEnhanceTarget([node], factor, graph.nodes).node !== node) return false;
       // (5) …written inside THIS node's own sentence, where the node has one…
       if (!enhanceWriteIsSpanContained(node, factor, brief)) return false;
       // (6) …and, whether or not it has one, named by the user in the sentence
@@ -876,8 +880,11 @@ function unitsCorrespond(
       // `inferLabel`'s cross-bullet guess crediting the competitor's £5m to a
       // churn factor — see `labelIsNamedInFigureSentence`.
       if (!labelIsNamedInFigureSentence(node.label, factor, brief)) return false;
-      // (7) …and the level must BE that figure. Identity, not resemblance.
-      if (factor.value !== level) return false;
+      // (7) Credit a current figure, not a directional row's proposed endpoint.
+      // Its baseline is extracted separately; counting both would duplicate the
+      // same current evidence and trip the ambiguity guard below.
+      const currentValue = statedCurrentRaw(factor);
+      if (factor.value !== currentValue || currentValue !== level) return false;
       // (7b) …IN THE SAME FRAME. Identity of the number is not identity of the
       // quantity — see `unitsCorrespond`. Missing or conflicting units retain
       // the provenance the node already had; nothing here changes a value.
@@ -1114,6 +1121,7 @@ interface DeclaredFigure {
   readonly value: number;
   readonly unit?: string;
   readonly source_quote?: string;
+  readonly role?: string;
 }
 
 /**
@@ -1273,20 +1281,48 @@ function figureAlreadyPlacedBy(
 function selectEnhanceTarget(
   existingFactors: readonly NodeT[],
   factor: ExtractedFactor,
+  allNodes: readonly NodeT[],
 ): { readonly node?: NodeT; readonly refusedBy?: NodeT } {
   const candidates = existingFactors.filter((n) => n.label && labelsMatch(n.label, factor.label));
   if (candidates.length === 0) return {};
 
-  const bound = candidates.find((n) => {
+  // A declared target, limit or context can support a causal factor without being its current
+  // value. Preserve that distinction when enrichment supplies missing data;
+  // otherwise it reinstates the observation the records projector withheld.
+  const currentReading = {
+    ...factor, value: statedCurrentRaw(factor),
+    baseline: undefined, rangeMin: undefined, rangeMax: undefined,
+  };
+  const eligible = candidates.filter((n) => {
+    const role = (n.data as { role?: unknown } | undefined)?.role;
+    if (role !== undefined && role !== "baseline") return false;
+    const declared = declaredBasisFigures(n);
+    if (declared === undefined) return true;
+    const targets = declared.filter((d) => d.role !== undefined && d.role !== "baseline");
+    return !figureIsDeclared(targets, currentReading) ||
+      figureIsDeclared(declared.filter((d) => d.role === undefined || d.role === "baseline"), currentReading);
+  });
+  const bound = eligible.find((n) => {
     const declared = declaredBasisFigures(n);
     return declared !== undefined && figureIsDeclared(declared, factor);
   });
   if (bound !== undefined) return { node: bound };
 
-  const undeclared = candidates.find((n) => declaredBasisFigures(n) === undefined);
+  const protectedQuantity = allNodes.find((n) => {
+    const declared = declaredBasisFigures(n);
+    const matchedText = canonicaliseSpan(factor.matchedText ?? "");
+    return declared !== undefined &&
+      figureIsDeclared(declared.filter(d => d.role !== undefined && d.role !== "baseline" &&
+        matchedText.length > 0 && d.source_quote !== undefined &&
+        canonicaliseSpan(d.source_quote).includes(matchedText)), currentReading) &&
+      !figureIsDeclared(declared.filter(d => d.role === undefined || d.role === "baseline"), currentReading);
+  });
+  if (protectedQuantity !== undefined) return { refusedBy: protectedQuantity };
+
+  const undeclared = eligible.find((n) => declaredBasisFigures(n) === undefined);
   if (undeclared !== undefined) return { node: undeclared };
 
-  // Every candidate declared a basis and none of them names this figure.
+  // No candidate admits this figure as a current value in its declared basis.
   return { refusedBy: candidates[0] };
 }
 
@@ -1452,7 +1488,7 @@ export function enrichGraphWithFactors(
     // Same selection as the async twin, so the two cannot drift apart on the
     // one question they both answer (see `selectEnhanceTarget`). This path
     // keeps no warnings array, so the refusal is logged and counted only.
-    const selection = selectEnhanceTarget(existingFactors, factor);
+    const selection = selectEnhanceTarget(existingFactors, factor, graph.nodes);
 
     if (selection.refusedBy !== undefined) {
       factorsSkipped++;
@@ -1466,7 +1502,7 @@ export function enrichGraphWithFactors(
           refusedUnit: factor.unit,
           refusedMatchedText: factor.matchedText,
         },
-        `Refusing to write "${factor.matchedText}" onto "${selection.refusedBy.id}": the records do not base that node on it`,
+        `Refusing to write "${factor.matchedText}" onto "${selection.refusedBy.id}": the records do not declare it as a current value for that node`,
       );
       continue;
     }
@@ -2463,7 +2499,7 @@ export async function enrichGraphWithFactorsAsync(
 
     // ⭐⭐⭐ WHICH SUBJECT THIS FIGURE BELONGS TO — answered from the records'
     // own declared basis, not from label overlap. See `selectEnhanceTarget`.
-    const selection = selectEnhanceTarget(existingFactors, factor);
+    const selection = selectEnhanceTarget(existingFactors, factor, graph.nodes);
 
     if (selection.refusedBy !== undefined) {
       // The records name the figures this node is based on, and this is not one
@@ -2473,7 +2509,7 @@ export async function enrichGraphWithFactorsAsync(
       // an unbindable magnitude belongs.
       factorsSkipped++;
       warnings.push(
-        `"${factor.matchedText}" was not written to "${selection.refusedBy.label}": that factor is not based on it.`,
+        `"${factor.matchedText}" was not written to "${selection.refusedBy.label}": the records do not declare it as a current value for that factor.`,
       );
       log.info(
         {
@@ -2486,7 +2522,7 @@ export async function enrichGraphWithFactorsAsync(
           refusedMatchedText: factor.matchedText,
           declaredBasis: declaredBasisFigures(selection.refusedBy),
         },
-        `Refusing to write "${factor.matchedText}" onto "${selection.refusedBy.id}": the records do not base that node on it`,
+        `Refusing to write "${factor.matchedText}" onto "${selection.refusedBy.id}": the records do not declare it as a current value for that node`,
       );
       continue;
     }
