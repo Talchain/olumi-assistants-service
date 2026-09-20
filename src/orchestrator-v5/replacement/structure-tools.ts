@@ -391,6 +391,7 @@ export function createAddFactorTool(deps: StructureToolDeps): AgentTool {
         'estimate them. This proposes only: nothing is saved until they agree.',
       input_schema: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           label: { type: 'string', description: 'What the user calls this quantity.' },
           range_min: {
@@ -483,6 +484,7 @@ export function createAddOptionTool(deps: StructureToolDeps): AgentTool {
         'expect to follow this with add_link. This proposes only: nothing is saved until they agree.',
       input_schema: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           label: { type: 'string', description: 'What the user calls this course of action.' },
           parent_decision_id: {
@@ -618,6 +620,7 @@ export function createAddEdgeTool(deps: StructureToolDeps): AgentTool {
         'user; if you do not have them, ask. This proposes only: nothing is saved until they agree.',
       input_schema: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           from_id: { type: 'string', description: 'The node the link starts at — the cause.' },
           to_id: { type: 'string', description: 'The node the link ends at — what is affected.' },
