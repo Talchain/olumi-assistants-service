@@ -52,20 +52,36 @@ describe('the opt-out, scoped to assistant_text only', () => {
     expect(out.assistant_text).toBe(MANGLED);
   });
 
-  it('still scrubs the OTHER fields — the opt-out is not a blanket disable', () => {
-    const withChip: OlumiResponse = {
-      ...res('plain text'),
+  /**
+   * ⛔ THIS TEST WAS VACUOUS, and it was the one pinning the PR's central
+   * scope claim. It asserted `if (label !== undefined) expect(label)...` —
+   * and the chip finalizer DROPS that chip, so `label` was always undefined
+   * and the assertion never ran. A test that cannot fail, guarding the claim
+   * that mattered most. Found by adversarial review, not by the suite.
+   *
+   * The replacement asserts the scope claim DIRECTLY and unconditionally:
+   * turning the opt-out on changes `assistant_text` and NOTHING ELSE. That
+   * is exactly what "scoped to assistant_text only" means, it cannot pass
+   * vacuously, and it fails if the opt-out ever becomes a blanket disable.
+   */
+  it('changes assistant_text and NOTHING else — the scope claim, asserted directly', () => {
+    const withChip = res(MANGLED, {
       suggested_actions: [
         { id: 'a1', label: MANGLED, kind: 'chip' },
       ] as unknown as OlumiResponse['suggested_actions'],
-    };
-    const out = sanitiseOlumiResponseForEgress(withChip, {
+    });
+    const on = sanitiseOlumiResponseForEgress(withChip, {
       ...OPTS,
       assistantTextAlreadyIdentifierSafe: true,
     });
-    const label = (out.suggested_actions[0] as { label?: string } | undefined)?.label;
-    // The chip went through the scrub even though the assistant text did not.
-    if (label !== undefined) expect(label).not.toBe(MANGLED);
+    const off = sanitiseOlumiResponseForEgress(withChip, OPTS);
+
+    // Every other field identical...
+    expect({ ...on, assistant_text: '' }).toEqual({ ...off, assistant_text: '' });
+    // ...and that one field genuinely differs, so this cannot pass on a
+    // sanitiser that simply stopped touching anything.
+    expect(on.assistant_text).toBe(MANGLED);
+    expect(off.assistant_text).not.toBe(MANGLED);
   });
 
   it('is undefined for existing callers, so their behaviour is unchanged', () => {
