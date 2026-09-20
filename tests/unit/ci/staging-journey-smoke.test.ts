@@ -380,18 +380,16 @@ describe("staging journey smoke — the alarm cannot be silenced quietly", () =>
     }
   });
 
-  it("has NO conditional gate on the job or the smoke step", () => {
-    // `if: vars.SMOKE_SCHEDULE_ENABLED == 'true'` is precisely what made
-    // nightly-smoke skip 8 of its last 8 runs while looking healthy.
-    expect(job.if, "job is conditionally gated — it can be disabled by leaving a variable unset").toBeUndefined();
+  it("only the explicit batch hold can defer the job; the smoke step stays unconditional", () => {
+    // The truth table below proves absent configuration runs the alarm.
+    expect(job.if).toContain("!(vars.CORE_DRAFTING_PAID_HOLD == '20260920'");
     expect(requireSmokeStep().if).toBeUndefined();
   });
 
-  it("no `if:` anywhere in the workflow reads a repo variable", () => {
-    // Walk the PARSED tree, not the raw text: the file's own comments explain
-    // the `if: vars.X == 'true'` anti-pattern, and a raw regex would match the
-    // explanation rather than a real gate. Structure is the source of truth.
-    expect(findVarGatedConditions(wf, "workflow")).toEqual([]);
+  it("the named job hold is the only variable condition", () => {
+    expect(findVarGatedConditions(wf, "workflow")).toEqual([
+      `workflow.jobs.journey.if = ${job.if}`,
+    ]);
   });
 
   it("runs on push to staging, not only on a schedule", () => {
@@ -458,12 +456,117 @@ describe("staging journey smoke — the alarm cannot be silenced quietly", () =>
  *                             no `continue-on-error`, base URL defaulted in
  *                             code. It fails loudly or not at all.
  *
- * An empty list is a materially stronger end state than a justified one: any
- * NEWLY-ADDED `vars.*` gate now fails this suite immediately, with no
- * precedent to point at. Re-populating this object should require the same
- * argument the three entries above could not survive.
+ * The only exception is the approved Core/Drafting batch hold. Unlike the old
+ * opt-in enable gates, missing configuration leaves automatic checks running.
+ * Exact condition locations and the event/branch truth table are checked below.
  */
-const VAR_GATE_OPT_OUTS: Record<string, string> = {};
+const VAR_GATE_OPT_OUTS: Record<string, string> = {
+  "ci.yml": "Explicit Core/Drafting paid-test hold; required code gate never held",
+  "perf-gate.yml": "Explicit Core/Drafting staging-PR hold; other runs unchanged",
+  "staging-journey-smoke.yml": "Explicit marked-batch hold; absent variable runs the alarm",
+};
+
+type ReleaseEvent = {
+  event_name: string;
+  base_ref?: string;
+  head_ref?: string;
+  ref?: string;
+  ref_name?: string;
+  event?: { head_commit?: { message: string } };
+};
+
+// These conditions use only string comparisons, Boolean operators, contains and
+// fromJSON. Evaluate that subset from the actual YAML, not a copied predicate.
+function releaseJobRuns(condition: string, event: ReleaseEvent, hold = "", hasKey = "true"): boolean {
+  const expression = condition.trim().slice(3, -2)
+    .replaceAll("needs.live-tests-key", "needs['live-tests-key']");
+  const evaluate = new Function("github", "vars", "needs", "contains", "fromJSON", `return (${expression});`);
+  return evaluate(
+    event,
+    { CORE_DRAFTING_PAID_HOLD: hold },
+    { "live-tests-key": { outputs: { has_key: hasKey } } },
+    (haystack: string | string[], needle: string) => haystack.includes(needle),
+    JSON.parse,
+  );
+}
+
+describe("Core/Drafting release hold is bounded and restores without a push", () => {
+  const workflow = (name: string): any => parse(readFileSync(resolve(REPO_ROOT, ".github/workflows", name), "utf8"));
+  const ci = workflow("ci.yml");
+  const perf = workflow("perf-gate.yml");
+  const smoke = workflow("staging-journey-smoke.yml");
+  const approved = "20260920";
+  const batchBranches = [
+    "fix/baseline-ask-collision-precedence", "cct/quantities-on-risk-and-outcome",
+    "feat/core-1251-validated-20260919", "feat/draft-authored-meaning-20260919",
+    "feat/core-budget-consent-20260919", "feat/core-authored-limit-continuity-20260919",
+    "feat/core-capacity-intervention-20260919", "feat/core-explicit-paid-release-20260920",
+  ];
+  const pr = (head = batchBranches[0], base = "staging"): ReleaseEvent => ({ event_name: "pull_request", base_ref: base, head_ref: head });
+  const push = (message = "[core-drafting-20260920] reviewed release", refName = "staging"): ReleaseEvent => ({
+    event_name: "push", ref_name: refName, ref: `refs/heads/${refName}`, event: { head_commit: { message } },
+  });
+
+  it("only the paid CI job is variable-gated; required code checks retain their gate", () => {
+    expect(findVarGatedConditions(ci, "ci")).toEqual([`ci.jobs.live-tests.if = ${ci.jobs["live-tests"].if}`]);
+    expect(ci.jobs["unit-tests"].if).toBeUndefined();
+    expect(ci.jobs["unit-tests"].steps.some((step: any) => step.run === "pnpm test:required")).toBe(true);
+    expect(ci.on.push.branches).toEqual(["main", "staging", "feat/**"]);
+    expect(ci.on.pull_request.branches).toEqual(["main", "staging"]);
+  });
+
+  it.each(["", "different-batch"])("absent or unrelated hold %j keeps automatic coverage", hold => {
+    for (const job of Object.values(perf.jobs) as Array<{ if: string }>) expect(releaseJobRuns(job.if, pr(), hold)).toBe(true);
+    expect(releaseJobRuns(smoke.jobs.journey.if, push(), hold)).toBe(true);
+    expect(releaseJobRuns(ci.jobs["live-tests"].if, pr(), hold)).toBe(true);
+  });
+
+  it.each(batchBranches)("holds paid PR/feature calls for named branch %s only", branch => {
+    for (const job of Object.values(perf.jobs) as Array<{ if: string }>) {
+      expect(releaseJobRuns(job.if, pr(branch), approved)).toBe(false);
+      expect(releaseJobRuns(job.if, pr(branch, "main"), approved)).toBe(true);
+    }
+    expect(releaseJobRuns(ci.jobs["live-tests"].if, pr(branch), approved)).toBe(false);
+    expect(releaseJobRuns(ci.jobs["live-tests"].if, push("feature", branch), approved)).toBe(false);
+    expect(releaseJobRuns(ci.jobs["live-tests"].if, pr(branch, "main"), approved)).toBe(true);
+  });
+
+  it("unrelated staging PRs and feature branches are not held", () => {
+    for (const job of Object.values(perf.jobs) as Array<{ if: string }>) expect(releaseJobRuns(job.if, pr("feat/unrelated"), approved)).toBe(true);
+    expect(releaseJobRuns(ci.jobs["live-tests"].if, pr("feat/unrelated"), approved)).toBe(true);
+    expect(releaseJobRuns(ci.jobs["live-tests"].if, push("feature", "feat/unrelated"), approved)).toBe(true);
+  });
+
+  it("only explicitly marked staging merges are held; clearing the variable restores them", () => {
+    for (const condition of [smoke.jobs.journey.if, ci.jobs["live-tests"].if]) {
+      expect(releaseJobRuns(condition, push(), approved)).toBe(false);
+      expect(releaseJobRuns(condition, push("ordinary merge"), approved)).toBe(true);
+      expect(releaseJobRuns(condition, push(), "")).toBe(true);
+    }
+  });
+
+  it("preserves explicit smoke/performance dispatch and unrelated production triggers", () => {
+    for (const job of Object.values(perf.jobs) as Array<{ if: string }>) {
+      for (const event of [{ event_name: "workflow_dispatch" }, { event_name: "schedule" }, push("ordinary", "main")]) {
+        expect(releaseJobRuns(job.if, event, approved)).toBe(true);
+      }
+    }
+    expect(releaseJobRuns(smoke.jobs.journey.if, { event_name: "workflow_dispatch" }, approved)).toBe(true);
+    expect(smoke.on.workflow_dispatch.inputs.expect_sha).toBeDefined();
+  });
+
+  it("never turns missing live-LLM credentials into permission", () => {
+    for (const hold of [approved, ""]) expect(releaseJobRuns(ci.jobs["live-tests"].if, pr(), hold, "false")).toBe(false);
+  });
+
+  it("does not exempt additional performance jobs from the scope checks", () => {
+    expect(Object.keys(perf.jobs).sort()).toEqual(["perf-gate", "sse-live-resume-gate"]);
+    expect(findVarGatedConditions(perf, "perf")).toEqual([
+      `perf.jobs.perf-gate.if = ${perf.jobs["perf-gate"].if}`,
+      `perf.jobs.sse-live-resume-gate.if = ${perf.jobs["sse-live-resume-gate"].if}`,
+    ]);
+  });
+});
 
 describe("no NEW workflow may gate itself on an unset repo variable", () => {
   const WORKFLOW_DIR = resolve(REPO_ROOT, ".github/workflows");
