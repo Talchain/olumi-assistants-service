@@ -711,6 +711,79 @@ describe('the retry is bounded', () => {
  * cannot be, no write is sent. Refusing to write is recoverable; writing
  * something we might not remember writing is not.
  */
+/**
+ * ⛔ THE MEASURED FAILURE, BROUGHT BACK FROM THE DEPLOYED PRODUCT.
+ *
+ * 20 Sep, staging, this controller's flag OFF. The assistant offered a limit
+ * "at or below 30 … Say the word and I will make it", and the user replied:
+ *
+ *   "Yes, treat it as a 0-1 fraction of revenue at risk, so 30% is 0.3.
+ *    Please go ahead."
+ *
+ * The retired path refused it, and a code trace settled that refusing was
+ * CORRECT: a held change replays from its stored operations and never re-reads
+ * the message, so honouring that as a bare "yes" writes the OFFER's number and
+ * discards the USER's. This controller had the same exposure and no equivalent
+ * guard — its only test was that the quote be the user's own words, and that
+ * sentence passes it.
+ */
+describe("an acceptance that names its own number is not agreement to THIS offer", () => {
+  async function acceptWith(message: string, quote: string) {
+    const write = vi.fn(okWrite());
+    const t1 = await runReplacementTurn(baseInput({ turnId: 't1' }), {
+      chatWithTools: scripted([call('set_option_effect', {}), say('shall I?')]),
+      checkpoint: ck, applyOperations: write,
+    });
+    const id = openProposals(t1.proposals)[0]!.id;
+    const model = scripted([
+      call(ACCEPT_TOOL_NAME, { proposal_id: id, user_agreement_quote: quote }),
+      say('ok'),
+    ]);
+    const t2 = await runReplacementTurn(
+      baseInput({ turnId: 't2', message, proposals: t1.proposals, memory: t1.memory }),
+      { chatWithTools: model, checkpoint: ck, applyOperations: write },
+    );
+    return { t2, model, write, id };
+  }
+
+  it('refuses the walk\'s real message and sends NO write', async () => {
+    const { t2, model, write } = await acceptWith(
+      'Yes, treat it as a 0-1 fraction of revenue at risk, so 30% is 0.3. Please go ahead.',
+      'Please go ahead',
+    );
+    expect(write).not.toHaveBeenCalled();
+    expect(t2.applied).toHaveLength(0);
+    // The offer is still there to be re-made at the user's number, not withdrawn.
+    expect(openProposals(t2.proposals)).toHaveLength(1);
+    const fed = JSON.stringify(model.calls[1]!.messages);
+    expect(fed).toContain('names a number this offer does not carry');
+  });
+
+  it('CONTRAST: a bare agreement with no number of its own still saves', async () => {
+    const { t2, write } = await acceptWith('yes go ahead', 'yes go ahead');
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(t2.applied).toHaveLength(1);
+  });
+
+  it("CONTRAST: naming the OFFER'S OWN number is agreement, not a restatement", async () => {
+    // `OFFERED_OPS` carries 0.4 and the summary renders it, so this is the
+    // user repeating the offer back — the guard must not fire on that.
+    const { t2, write } = await acceptWith('yes, set it to 0.4', 'yes, set it to 0.4');
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(t2.applied).toHaveLength(1);
+  });
+
+  it('refuses an ordinal too, and says so honestly rather than guessing', async () => {
+    // "option 2" is a REFERENCE, not a value — and this guard cannot tell the
+    // two apart, by design. Pinned so the cost of that choice is visible and
+    // cannot be mistaken for an oversight.
+    const { t2, write } = await acceptWith('yes, option 2', 'yes, option 2');
+    expect(write).not.toHaveBeenCalled();
+    expect(openProposals(t2.proposals)).toHaveLength(1);
+    expect(t2.applied).toHaveLength(0);
+  });
+});
+
 describe('nothing is written until the intention to write is durable', () => {
   async function acceptWithCheckpoint(
     checkpoint: ReplacementTurnDeps['checkpoint'],

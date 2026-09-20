@@ -186,6 +186,55 @@ export interface ReplacementTurnResult extends ComposeTurnResult {
   readonly newModelRevision?: string;
 }
 
+/**
+ * Every digit run in a string, in order. Lexical, not linguistic — this
+ * deliberately does no parsing, no unit inference and no arithmetic.
+ */
+function digitRuns(text: string): string[] {
+  return text.match(/\d+(?:[.,]\d+)*/g) ?? []
+}
+
+/**
+ * ⛔ DOES THE USER'S MESSAGE NAME A NUMBER THE OFFER DOES NOT?
+ *
+ * Measured on the DEPLOYED product, 20 Sep: the assistant offered "a limit
+ * keeping … at or below 30 … Say the word and I will make it", and the user
+ * replied *"Yes, treat it as a 0-1 fraction of revenue at risk, so 30% is 0.3.
+ * Please go ahead."* The retired path REFUSED that, and refusing was CORRECT —
+ * a held change replays from its stored operations and never re-reads the
+ * message, so honouring it as a bare "yes" would have written the offer's own
+ * number and silently discarded the user's. This controller has the same
+ * exposure and had no equivalent guard: `accept_proposal` required only that
+ * the quote be the user's words, and "so 30% is 0.3. Please go ahead" is
+ * exactly that.
+ *
+ * ⚠ DELIBERATELY NOT A PREDICATE OVER ENGLISH. CLAUDE.md's trap 22f records
+ * four rounds of oscillation on one such predicate in this estate, and 22c
+ * rules that the author's own corpus cannot bound one. So this asks a LEXICAL
+ * question with no interpretation in it — is there a digit run here that the
+ * offer does not itself contain? — and fails CLOSED. It cannot tell "0.3" the
+ * new value from "option 2" the reference, and it does not try: both are
+ * refused, and a refusal costs one turn in which the model re-offers at the
+ * user's number. A gap, never a lie.
+ *
+ * The comparison is against the offer's OWN rendered summaries and values, so
+ * "yes, 30" against an offer of 30 still accepts.
+ */
+function namesANumberTheOfferDoesNot(
+  message: string,
+  operations: readonly { readonly summary: string; readonly value?: unknown }[],
+): boolean {
+  const inMessage = digitRuns(message)
+  if (inMessage.length === 0) return false
+  const offered = new Set(
+    operations.flatMap((o) => [
+      ...digitRuns(o.summary),
+      ...(o.value === undefined || o.value === null ? [] : digitRuns(String(o.value))),
+    ]),
+  )
+  return inMessage.some((d) => !offered.has(d))
+}
+
 /** Whitespace- and case-insensitive containment. Nothing cleverer. */
 function quotedFromMessage(quote: string, message: string): boolean {
   const norm = (s: string): string => s.toLowerCase().replace(/\s+/g, ' ').trim();
@@ -445,6 +494,20 @@ export async function runReplacementTurn(
                 content:
                   'Those are not the user\'s words on this turn, so this is not agreement I can act on. ' +
                   'Quote what they actually said, or ask them directly.',
+              };
+            }
+
+            // ⛔ AN ACCEPTANCE THAT NAMES ITS OWN NUMBER IS NOT AN ACCEPTANCE
+            // OF THIS OFFER. See `namesANumberTheOfferDoesNot` for the measured
+            // case and for why this asks a lexical question rather than a
+            // linguistic one.
+            if (namesANumberTheOfferDoesNot(input.message, target.operations)) {
+              return {
+                type: 'refused',
+                content:
+                  `The user's message names a number this offer does not carry, so agreeing to the ` +
+                  `offer as it stands would save MY value and discard THEIRS. Nothing has been saved. ` +
+                  `Offer the change again at the number they gave, and let them agree to that.`,
               };
             }
 
