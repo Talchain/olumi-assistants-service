@@ -67,7 +67,8 @@ vi.mock('../session/index.js', () => ({
       }));
     },
     readScenarioRunAnalysisFactsFor: async (_scenarioId: string, limit: number) => {
-      const facts = (((global as Record<string, unknown>).__test_prior_facts ?? []) as Array<
+      if ((global as Record<string, unknown>).__test_durable_read_failed) throw new Error('durable read failed');
+      const facts = (((global as Record<string, unknown>).__test_durable_facts ?? (global as Record<string, unknown>).__test_prior_facts ?? []) as Array<
         Record<string, unknown>
       >).filter(
         (fact) => fact.fact_type === 'run_analysis' && fact.noop !== true,
@@ -99,10 +100,13 @@ vi.mock('../session/index.js', () => ({
     delete (global as Record<string, unknown>).__test_prior_turns;
     delete (global as Record<string, unknown>).__test_prior_facts;
     delete (global as Record<string, unknown>).__test_persisted_graph;
+    delete (global as Record<string, unknown>).__test_durable_facts;
+    delete (global as Record<string, unknown>).__test_durable_read_failed;
   },
 }));
 
 const { runTurnExecutor } = await import('../turn-executor.js');
+const { OLUMI_ACTION_TOOL_NAME } = await import('../routing/tool-schema.js');
 
 // ---------------------------------------------------------------------------
 // Test fixtures
@@ -360,6 +364,77 @@ describe('turn-executor freshness — canonical persisted graph (H3 fix)', () =>
     delete (global as Record<string, unknown>).__test_prior_turns;
     delete (global as Record<string, unknown>).__test_prior_facts;
     delete (global as Record<string, unknown>).__test_persisted_graph;
+    delete (global as Record<string, unknown>).__test_durable_facts;
+    delete (global as Record<string, unknown>).__test_durable_read_failed;
+  });
+
+  it.each([
+    ['fresh', PRE_EDIT_GRAPH, PRE_EDIT_HASH],
+    ['stale', POST_EDIT_GRAPH, POST_EDIT_HASH],
+  ] as const)('keeps an analysis outside the conversation window %s in routing and response', async (expected, savedGraph, currentHash) => {
+    installPriorRunAnalysisFact(PRE_EDIT_HASH);
+    const state = global as Record<string, unknown>;
+    state.__test_durable_facts = state.__test_prior_facts;
+    state.__test_prior_facts = [];
+    const prior = (state.__test_prior_turns as Array<Record<string, unknown>>)[0]!;
+    state.__test_prior_turns = Array.from({ length: 20 }, (_, i) => ({
+      ...prior, id: `recent-conversation-${i}`, turn_class: 'direct_answer', handler_id: null,
+    }));
+    state.__test_persisted_graph = savedGraph;
+    const result = await runTurnExecutor(
+      { ...BASE_PAYLOAD, message: 'Help me consider the trade-offs.' },
+      `req-history-${expected}`,
+      { routingAdapter: mockRoutingAdapter(async () => mkTextResult('Consider the uncertainty.')), graphState: PRE_EDIT_GRAPH as never },
+    );
+    expect(findContextPackEvent()?.data.analysis_freshness).toBe(expected);
+    expect(findPreHandlerFreshnessEvent()?.data).toMatchObject({
+      freshness: expected, graph_hash_at_run: PRE_EDIT_HASH, current_graph_hash: currentHash,
+    });
+    expect(result.turn_outcome?.analysis_freshness).toBe(expected);
+  });
+
+  it('retains the stale durable result on the captured wrong-kind validation exit', async () => {
+    installPriorRunAnalysisFact(PRE_EDIT_HASH);
+    const state = global as Record<string, unknown>;
+    state.__test_durable_facts = state.__test_prior_facts;
+    state.__test_prior_facts = [];
+    state.__test_persisted_graph = POST_EDIT_GRAPH;
+    const invalidAction = {
+      intent_class: 'execute',
+      action: {
+        handler_id: 'set_factor_value',
+        entity: { id: 'opt_a', kind: 'option', resolution_status: 'resolved', resolution_method: 'id_match' },
+        parameters: [{ name: 'value', value: 1, operator: 'set', source: 'user_explicit' }],
+        cited_context_fields: ['graph.options'],
+      },
+    };
+    const result = await runTurnExecutor(
+      { ...BASE_PAYLOAD, message: 'I think we should go for full parity.' },
+      'req-old-analysis-invalid-kind',
+      { routingAdapter: mockRoutingAdapter(async () => ({
+        ...mkTextResult(''), stop_reason: 'tool_use',
+        content: [{ type: 'tool_use', id: 'parity', name: OLUMI_ACTION_TOOL_NAME, input: invalidAction }],
+      })), graphState: POST_EDIT_GRAPH as never },
+    );
+    expect(result.telemetry.validation_error_code).toBe('ENTITY_KIND_MISMATCH');
+    expect(result.turn_outcome?.graph_mutated).toBe(false);
+    const wire = finaliseV5Response(result.response, { analysisReady: result.analysisReady, freshness: result.freshness });
+    expect(result.freshness).toMatchObject({ freshness: 'stale', graph_hash_at_run: PRE_EDIT_HASH });
+    expect(wire.analysis_state?.run_state).toMatchObject({ kind: 'complete_stale' });
+  });
+
+  it('does not resurrect hot-window analysis when the durable read fails', async () => {
+    installPriorRunAnalysisFact(PRE_EDIT_HASH);
+    const state = global as Record<string, unknown>;
+    state.__test_durable_read_failed = true;
+    state.__test_persisted_graph = PRE_EDIT_GRAPH;
+    const result = await runTurnExecutor(
+      { ...BASE_PAYLOAD, message: 'Help me consider the trade-offs.' },
+      'req-durable-unavailable',
+      { routingAdapter: mockRoutingAdapter(async () => mkTextResult('Consider the uncertainty.')), graphState: PRE_EDIT_GRAPH as never },
+    );
+    expect(findPreHandlerFreshnessEvent()?.data.freshness).toBe('unknown');
+    expect(result.turn_outcome?.analysis_freshness).toBe('unknown');
   });
 
   it('marks STALE when persisted graph diverges from request graphState (client lag)', async () => {
@@ -612,10 +687,9 @@ describe('turn-executor freshness — canonical persisted graph (H3 fix)', () =>
     OlumiResponseSchema.parse(finalised);
   });
 
-  it('same reload with NO prior analysis (freshness none) still omits analysis_ready', async () => {
-    // Counter-pin: synthesis only carries an existing verdict about a prior
-    // analysis. With no run_analysis fact the verdict is 'none' and the
-    // wire stays clean — no block is invented.
+  it('same reload with an authoritative empty analysis history still omits analysis_ready', async () => {
+    // An authoritative empty durable result history proves absence independently
+    // of the graph read. Neither malformed graph nor request data invent a run.
     (global as Record<string, unknown>).__test_persisted_graph = {
       nodes: 'not-an-array',
       edges: [],
@@ -637,7 +711,7 @@ describe('turn-executor freshness — canonical persisted graph (H3 fix)', () =>
       analysisReady: run.analysisReady,
       ...(run.freshness ? { freshness: run.freshness } : {}),
     });
-    expect('analysis_ready' in finalised).toBe(false);
+    expect(finalised.analysis_ready).toBeUndefined();
     OlumiResponseSchema.parse(finalised);
   });
 
@@ -662,10 +736,10 @@ describe('turn-executor freshness — canonical persisted graph (H3 fix)', () =>
 
     const evt = findPreHandlerFreshnessEvent();
     expect(evt, 'pre-handler freshness telemetry event should fire').toBeDefined();
-    // Without a persisted graph the fallback hashes the request graph —
-    // and that matches the prior fact's hash so freshness is 'fresh'.
-    expect(evt!.data.freshness).toBe('fresh');
-    expect(evt!.data.current_graph_hash).toBe(PRE_EDIT_HASH);
+    // The request graph stays provisional; a matching hash cannot reactivate
+    // an orphaned result without a valid canonical graph.
+    expect(evt!.data.freshness).toBe('unknown');
+    expect(evt!.data.current_graph_hash).toBeNull();
     expect(findContextPackEvent()?.data.graph_context_status).toBe('provisional');
     expect(findContextPackEvent()?.data.graph_context_reason).toBe(
       'persisted_absent_request_valid',
