@@ -17,6 +17,7 @@ import {
   appliedProposals,
   needsReconciliation,
   openProposals,
+  withdrawProposal,
   type ProposalStore,
 } from '../proposal-store.js';
 import type { ConversationMemory } from '../conversation-memory.js';
@@ -249,6 +250,80 @@ describe('the accept tool refuses what it cannot honour, and says what to do ins
     const fed = JSON.stringify(model.calls[1]!.messages);
     expect(fed).toContain('No change with that id is waiting');
     expect(fed).toContain('Full Parity');
+  });
+
+  /**
+   * Found by a surviving mutant. Removing `markStaleForRevision` left the
+   * whole suite green, because the store's own revision check refused the
+   * save anyway. But the PROMPT is built from the same store — so without the
+   * marking, the model is shown a dead offer as though it were live and will
+   * talk about it. Defence in depth is not a reason to leave a layer unpinned.
+   */
+  it('does not present an offer the model has moved past as still live', async () => {
+    const t1 = await runReplacementTurn(baseInput({ turnId: 't1' }), {
+      chatWithTools: scripted([call('set_option_effect', {}), say('shall I?')]),
+      applyOperations: okWrite(),
+    });
+    const live = scripted([say('x')]);
+    await runReplacementTurn(
+      baseInput({
+        turnId: 't2', message: 'and what about margin?', proposals: t1.proposals,
+        memory: t1.memory, modelRevision: 'rev-MOVED',
+      }),
+      { chatWithTools: live, applyOperations: okWrite() },
+    );
+    const prompt = live.calls[0]!.system;
+    expect(prompt).not.toContain('WAITING ON THEM');
+
+    // But the RECORD that it was suggested survives, and must. The offer
+    // going stale is a fact about what can still be agreed to; it does not
+    // unsay the suggestion, and a conversation that forgot having raised it
+    // would be the context loss this layer exists to fix. Two different
+    // things that a coarser assertion would have collapsed.
+    expect(prompt).toContain('YOU SUGGESTED (not agreed, not applied)');
+    expect(prompt).toContain('Full Parity');
+
+    // Contrast control: at the SAME revision the offer IS presented, so this
+    // pair cannot both pass on a prompt that simply stopped showing offers.
+    const same = scripted([say('x')]);
+    await runReplacementTurn(
+      baseInput({
+        turnId: 't2b', message: 'and what about margin?', proposals: t1.proposals,
+        memory: t1.memory,
+      }),
+      { chatWithTools: same, applyOperations: okWrite() },
+    );
+    expect(same.calls[0]!.system).toContain('WAITING ON THEM');
+  });
+
+  /**
+   * Also found by a surviving mutant. Widening the tool's view from "waiting"
+   * to "every proposal" left the suite green, because the store threw on the
+   * bad transition and the loop turned the throw into an error tool result.
+   * That works, but what the model is handed is an exception message rather
+   * than a usable refusal — and a withdrawn change must read as withdrawn.
+   */
+  it('refuses a withdrawn change in plain terms, without a thrown error reaching the model', async () => {
+    const write = vi.fn(okWrite());
+    const t1 = await runReplacementTurn(baseInput({ turnId: 't1' }), {
+      chatWithTools: scripted([call('set_option_effect', {}), say('shall I?')]),
+      applyOperations: write,
+    });
+    const id = openProposals(t1.proposals)[0]!.id;
+    const gone = withdrawProposal(t1.proposals, id);
+    const model = scripted([
+      call(ACCEPT_TOOL_NAME, { proposal_id: id, user_agreement_quote: 'yes go ahead' }),
+      say('ok'),
+    ]);
+    const t2 = await runReplacementTurn(
+      baseInput({ turnId: 't2', message: 'yes go ahead', proposals: gone, memory: t1.memory }),
+      { chatWithTools: model, applyOperations: write },
+    );
+    expect(t2.applied).toHaveLength(0);
+    expect(write).not.toHaveBeenCalled();
+    const fed = JSON.stringify(model.calls[1]!.messages);
+    expect(fed).toContain('There is nothing waiting to be agreed to');
+    expect(fed).not.toContain('ProposalStateError');
   });
 
   it('will not save an offer the model has moved past — a stale proposal is not waiting', async () => {

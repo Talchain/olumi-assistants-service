@@ -293,4 +293,24 @@ describe('consent binds to the exact executable change', () => {
     const stale = markStaleForRevision(authorised(), REV_B);
     expect(() => operationsToApply(stale, 'p1')).toThrow(/stale/);
   });
+
+  /**
+   * The four cases above left two of the six statuses untested, and a mutant
+   * that accepted `applied` survived the whole suite. A predicate over an
+   * enum is only pinned when every member is named.
+   */
+  it('refuses an already-applied proposal — re-issuing its operations IS the double-apply', () => {
+    const done = recordApplied(
+      beginApply(authorised(), 'p1', {
+        idempotency_key: 'key-1', apply_started_at: T, current_model_revision: REV_A,
+      }),
+      'p1',
+      { receipt_id: 'r1', applied_at: T },
+    );
+    expect(() => operationsToApply(done, 'p1')).toThrow(/applied/);
+  });
+
+  it('refuses a withdrawn proposal', () => {
+    expect(() => operationsToApply(withdrawProposal(authorised(), 'p1'), 'p1')).toThrow(/withdrawn/);
+  });
 });
