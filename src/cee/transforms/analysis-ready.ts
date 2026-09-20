@@ -39,6 +39,7 @@ import { classifyEncodedInterventionAdmissibility } from "../../orchestrator/sha
 // Two readiness paths deciding independently which edges the repair invented is
 // the two-authorities shape this estate keeps paying for (trap 21).
 import { isRepairAuthoredOptionFactorEdge } from "../../graph/repair-authored-edge.js";
+import { resolveScaleFrame } from "../../orchestrator-v5/tools/handlers/d1-shared/scale-frame.js";
 
 // ============================================================================
 // Types
@@ -514,7 +515,8 @@ function buildInterventionDetail(
   factorId: string,
   normalisedValue: number,
   factorNode: NodeV3T | undefined,
-  interventionDisplayValue?: string,
+  intervention: OptionV3T["interventions"][string] | undefined,
+  carriedRawValue: number | string | boolean | undefined,
 ): InterventionDetail {
   // ⚠ F3 (Codex, 2026-08-13) — AN OPTION'S RECEIPT USED TO DESCRIBE THE FACTOR,
   // NOT THE OPTION. Every branch below returned the FACTOR's
@@ -540,7 +542,12 @@ function buildInterventionDetail(
   // was live. The corpus never varied two options on one factor — CLAUDE.md
   // trap 22, and the reason the RED fixtures below do exactly that.
   const os = factorNode?.observed_state;
-  const unit = os?.unit;
+  const unit = intervention?.unit ?? os?.unit;
+  const sameUnit = intervention?.unit === undefined || os?.unit === undefined ||
+    intervention.unit === os.unit;
+  const interventionDisplayValue = typeof intervention?.display_value === "string"
+    ? intervention.display_value : undefined;
+  const usesPercentageDisplay = unit === "%";
   const factorType = factorNode?.factor_type ?? os?.factor_type;
 
   // Is this option sitting AT the factor's observed state? Only then does a
@@ -548,7 +555,7 @@ function buildInterventionDetail(
   // intervention. This is what keeps the baseline/status-quo option rendering
   // exactly as before while a genuinely different lever stops borrowing it.
   const sitsAtObservedState =
-    typeof os?.value === "number" && os.value === normalisedValue;
+    sameUnit && typeof os?.value === "number" && os.value === normalisedValue;
 
   // The magnitude THIS option's level denotes, or null when the record settles
   // no denominator (zero baseline, no `raw_value`, no `observed_state`). Null
@@ -566,10 +573,32 @@ function buildInterventionDetail(
   // recorded `raw_value` is returned DIRECTLY — no arithmetic to be dirty.
   // (The pre-existing `{0.5, 5}` fixtures round-trip exactly, which is why the
   // first version of this suite could not see it — trap 22, again.)
-  const ownRawValue =
-    sitsAtObservedState && typeof os?.raw_value === "number"
-      ? os.raw_value
-      : magnitudeUnderScale(normalisedValue, unit, resolveMagnitudeScale(os));
+  // The native option quantity survives in raw_interventions even when a zero
+  // baseline cannot identify a divisor (19 Sep capture: £10000 beside .05).
+  // Consume that option-owned carrier before trying to invert a calculation.
+  // Percent raw carriers still include both record conventions (.18 and 18);
+  // no per-intervention declaration reaches this boundary. Preserve their
+  // existing scale-based display route instead of treating every raw as 18%.
+  const carriedNativeValue = !usesPercentageDisplay && typeof carriedRawValue === "number" &&
+    Number.isFinite(carriedRawValue) ? carriedRawValue : null;
+  let ownRawValue = carriedNativeValue;
+  if (ownRawValue === null && sameUnit) {
+    if (sitsAtObservedState && typeof os?.raw_value === "number" && Number.isFinite(os.raw_value)) {
+      ownRawValue = os.raw_value;
+    } else {
+      const scale = resolveMagnitudeScale(os);
+      const storedFrame = factorNode?.scale_frame;
+      if (typeof storedFrame === "number" && Number.isFinite(storedFrame) && storedFrame > 1) {
+        const frame = resolveScaleFrame({ storedFrame, value: os?.value, raw_value: os?.raw_value });
+        // Conflicting conversion evidence cannot license a native amount.
+        if (frame !== undefined && (scale.kind !== "cap" || scale.cap === frame)) {
+          ownRawValue = magnitudeUnderScale(normalisedValue, unit, { kind: "frame", frame });
+        }
+      } else {
+        ownRawValue = magnitudeUnderScale(normalisedValue, unit, scale);
+      }
+    }
+  }
 
   const ownFields = {
     normalised_value: normalisedValue,
@@ -577,11 +606,11 @@ function buildInterventionDetail(
     ...(unit !== undefined && { unit }),
   };
 
-  // Highest priority: display_value on the intervention itself (LLM/enricher-
-  // supplied). This lets the draft prompt provide per-intervention display
-  // strings without having to mutate factor node state. It is already
-  // per-intervention, so it is the option's own and is kept verbatim.
-  if (interventionDisplayValue && interventionDisplayValue.trim().length > 0) {
+  // A carried native amount owns its numeric presentation. A display string
+  // can be a stale projection of the same intervention; it must not override
+  // the amount or require us to parse free text to decide which one is true.
+  // With no native carrier, retain the existing per-intervention text route.
+  if (carriedNativeValue === null && interventionDisplayValue && interventionDisplayValue.trim().length > 0) {
     const factorLabel = (factorNode?.label ?? "").toLowerCase().trim();
     if (!isLabelEcho(factorLabel, interventionDisplayValue)) {
       return {
@@ -594,7 +623,8 @@ function buildInterventionDetail(
   // Prefer LLM/enricher-provided display_value on the factor node — but ONLY
   // when this option sits at the factor's observed state (see above). For any
   // other lever it is the status quo wearing the option's name.
-  if (factorNode?.display_value && sitsAtObservedState) {
+  if (factorNode?.display_value && sitsAtObservedState &&
+      (carriedNativeValue === null || carriedNativeValue === os?.raw_value)) {
     const factorLabel = (factorNode.label ?? "").toLowerCase().trim();
     if (!isLabelEcho(factorLabel, factorNode.display_value)) {
       return {
@@ -611,7 +641,10 @@ function buildInterventionDetail(
   const synthesised = synthesiseDisplayValue({
     value: normalisedValue,
     raw_value: ownRawValue ?? undefined,
-    unit,
+    // An unresolved calculation level is not a native amount. The percentage
+    // fallback has its own existing convention; other units require a native
+    // magnitude before a dimensional suffix can truthfully be displayed.
+    unit: ownRawValue !== null || usesPercentageDisplay ? unit : undefined,
     factor_type: factorType,
   });
 
@@ -956,10 +989,9 @@ export function buildAnalysisReadyPayload(
         : (interventionEntry as { value?: unknown })?.value;
       if (typeof numericValue !== 'number') continue;
       const v3Intervention = v3Option?.interventions?.[factorId];
-      const llmDisplayValue = v3Intervention && typeof (v3Intervention as { display_value?: unknown }).display_value === 'string'
-        ? (v3Intervention as { display_value: string }).display_value
-        : undefined;
-      details[factorId] = buildInterventionDetail(factorId, numericValue, factorNode, llmDisplayValue);
+      details[factorId] = buildInterventionDetail(
+        factorId, numericValue, factorNode, v3Intervention, analysisOpt.raw_interventions?.[factorId],
+      );
     }
     analysisOpt.intervention_details = details;
 

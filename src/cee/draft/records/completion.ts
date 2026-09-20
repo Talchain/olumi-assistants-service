@@ -1439,7 +1439,18 @@ export function renderLegalEdgeVocabulary(): string {
 /** Render the record set for the model, with the exact indices its references must use. */
 function renderRecordsForAsk(records: DraftRecordSet): string {
   const stated = records.stated_items
-    .map((s, i) => `  stated_items[${i}] ${s.kind}: ${JSON.stringify(s.source_quote)}${typeof s.value === "number" ? ` (value ${s.value}${s.unit ? ` ${s.unit}` : ""})` : ""}`)
+    .map((s, i) => {
+      // Keep the declared interpretation visible while completion repairs links.
+      // A quote and magnitude alone do not distinguish a current level from a
+      // target, or identify which quantity a stated limit bounds.
+      const declared = [
+        ...(s.role !== undefined ? [`role=${s.role}`] : []),
+        ...(s.direction !== undefined ? [`direction=${s.direction}`] : []),
+        ...(s.applies_to_stated !== undefined ? [`applies_to_stated=stated_items[${s.applies_to_stated}]`] : []),
+        ...(s.applies_to_claim !== undefined ? [`applies_to_claim=claims[${s.applies_to_claim}]`] : []),
+      ];
+      return `  stated_items[${i}] ${s.kind}: ${JSON.stringify(s.source_quote)}${typeof s.value === "number" ? ` (value ${s.value}${s.unit ? ` ${s.unit}` : ""})` : ""}${declared.length > 0 ? ` [${declared.join(", ")}]` : ""}`;
+    })
     .join("\n");
   const claims = records.claims
     .map((c, i) => {
@@ -1629,6 +1640,9 @@ export function buildRecordsCompletionPrompt(args: {
     "numbers already in it, and the direction and rough size of the change this option describes.",
     "Keep the factor's own unit, and keep your estimates consistent across the options, so the",
     "comparison between them means something.",
+    "An ordinal statement alone supplies an ordering, not a scale or numeric gaps.",
+    "Keep that statement and its conditions in the cited `stated_items`; do not",
+    "turn the ordering alone into `sets_to` values, probabilities or scale endpoints.",
     "",
     "Leave `sets_to` out only where you genuinely cannot form a defensible estimate even from the",
     "brief's own scale. That is a truthful answer, and it also stops the analysis running on that",

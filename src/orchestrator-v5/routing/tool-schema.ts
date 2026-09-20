@@ -181,7 +181,28 @@ export const OLUMI_ACTION_TOOL = {
               '• what_would_flip — answer sensitivity / robustness questions ' +
               '("what would change this outcome?", "how robust is this result?"). ' +
               'Requires a prior analysis run; if none exists the handler will ' +
-              'respond with a prompt to run analysis first. No mutation. You ' +
+              'respond with a prompt to run analysis first. No mutation. ' +
+              // ⭐ THE ENTITY KIND IS STATED BECAUSE OMITTING IT COST TWO LIVE
+              // TURNS. Deployed staging, 2026-09-19 14:33:14Z and 14:35:44Z,
+              // build b7c323c: the router proposed `kind: 'edge'` for
+              // what_would_flip and the validator refused it
+              // (ENTITY_KIND_MISMATCH, accepted_kinds ['goal','option','node']).
+              // The user saw "I couldn't match that to anything in your model"
+              // twice, 13.7s and 12.2s. That is 2 of the day's 5 handler
+              // elections lost to a CONTRACT DISAGREEMENT, not to a bad answer:
+              // this schema offers `edge` in the global kind enum and teaches
+              // below that an edge denotes a causal link, while saying nothing
+              // here about which kinds this handler takes. The model obeyed the
+              // schema. ⚠ And the validator cannot rescue it — its entity-kind
+              // repair is explicitly skipped for `kind === 'edge'`
+              // (routing/validator.ts:403-405), because an edge id is the
+              // composite "source→target" and does not resolve by id. So the
+              // only place this can be fixed WITHOUT inventing which endpoint
+              // the user meant is here, by telling the model.
+              // The sentence mirrors adjust_edge_strength's, which states its
+              // kind and has never produced this failure.
+              'Target the goal, an option, or a node — NEVER an edge; to ask ' +
+              'about a causal link, target the node the link points at. You ' +
               'MUST populate `explanation.answer_text` with your complete ' +
               'sensitivity explanation: cite margins, top drivers, robustness ' +
               'band, and what changes would alter the outcome. Do not use ' +

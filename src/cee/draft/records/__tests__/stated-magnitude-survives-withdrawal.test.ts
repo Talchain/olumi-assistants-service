@@ -140,8 +140,10 @@ describe("M1a — a withdrawn stated figure keeps its magnitude on the disclosur
       expect(Object.prototype.hasOwnProperty.call(d, "unit")).toBe(false);
     }
 
-    // And every non-connectivity disclosure is untouched by this change.
-    const others = result.projection.dropped.filter((d) => d.reason !== "unconnected_to_goal");
+    // Other disclosures, excluding explicit non-current quantities, carry no magnitude.
+    const others = result.projection.dropped.filter((d) =>
+      !["unconnected_to_goal", "stated_target_not_represented_as_threshold", "stated_figure_not_current_value"].includes(d.reason),
+    );
     expect(others.length).toBeGreaterThan(0);
     for (const d of others) {
       expect(Object.prototype.hasOwnProperty.call(d, "value"), `${d.reason} gained a value`).toBe(
