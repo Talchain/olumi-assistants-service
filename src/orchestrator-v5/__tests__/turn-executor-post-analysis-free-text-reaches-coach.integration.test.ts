@@ -79,6 +79,23 @@ vi.mock('../session/index.js', () => ({
     append: async () => ({ id: `row-${randomUUID()}` }),
     readRecent: async () => mockState.priorTurns,
     readFactsFor: async () => mockState.priorFacts,
+    // Durable analysis authority (reconcile-scenario-analysis-facts.ts) matches
+    // hot facts to their persisted identity BY REFERENCE, so the with-turn read
+    // must return THE SAME fact objects, each carrying fact_row_id AND
+    // fact_created_at. Omitting either leaves the identified count at 0, which
+    // is indistinguishable from omitting the method. A store with no
+    // readScenarioRunAnalysisFactsFor reads as durable_unavailable, so freshness
+    // degrades to 'unknown' even when there are no analysis facts at all.
+    readFactsWithTurnFor: async () =>
+      (await import('./helpers/durable-analysis-store-double.js')).hotFactsWithTurn(
+        mockState.priorFacts,
+        'test-prior-turn-row',
+      ),
+    readScenarioRunAnalysisFactsFor: async (scenarioId: string) =>
+      (await import('./helpers/durable-analysis-store-double.js')).durableAnalysisPage(
+        mockState.priorFacts,
+        scenarioId,
+      ),
     invalidateScoped: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     storeDraftGraph: async () => undefined,

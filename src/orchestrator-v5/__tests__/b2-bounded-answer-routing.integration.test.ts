@@ -43,7 +43,20 @@ vi.mock('../session/index.js', () => ({
             },
           ],
     readFactsFor: async () => priorFacts,
-    readFactsWithTurnFor: async () => [],
+    // An empty with-turn read routes fetchPriorFacts down the legacy fallback,
+    // so the hot window carries no persisted identity and the durable analysis
+    // authority degrades to hot_window_contract_invalid. Mirror production:
+    // the SAME fact objects, each with fact_row_id AND fact_created_at.
+    readFactsWithTurnFor: async () =>
+      (await import('./helpers/durable-analysis-store-double.js')).hotFactsWithTurn(
+        priorFacts,
+        'test-prior-turn-row',
+      ),
+    readScenarioRunAnalysisFactsFor: async (scenarioId: string) =>
+      (await import('./helpers/durable-analysis-store-double.js')).durableAnalysisPage(
+        priorFacts,
+        scenarioId,
+      ),
     readMostRecentPendingActions: async () => [],
     invalidateScoped: async () => ({ scope: { kind: 'structural' }, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' }, entries_invalidated: [] }),

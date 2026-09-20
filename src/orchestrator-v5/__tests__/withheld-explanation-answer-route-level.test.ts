@@ -205,7 +205,19 @@ function priorRunAnalysisFact(verdict: {
 function priorRunAnalysisFactInner(verdict: {
   may_name_leading_option: boolean;
   constraint_verdict_state: string;
+  separated?: boolean;
 }): Record<string, unknown> {
+  // ⚠ `separated` is a HARNESS parameter — it selects whether the builder
+  // attaches `enrichment.robustness`; it is not part of the wire verdict.
+  // `ConstraintVerdictSchema` is `.strict()` with exactly
+  // { may_name_leading_option, constraint_verdict_state }, so spreading the
+  // whole argument made the fact fail HandlerFactSchema, and the durable
+  // analysis authority rejected the page as `durable_contract_invalid`.
+  // Nothing this fixture asserts depends on the flag being persisted.
+  const wireVerdict = {
+    may_name_leading_option: verdict.may_name_leading_option,
+    constraint_verdict_state: verdict.constraint_verdict_state,
+  };
   return {
     fact_type: 'run_analysis',
     fact_version: 1,
@@ -216,7 +228,7 @@ function priorRunAnalysisFactInner(verdict: {
       summary: 'Prior analysis result',
       graph_hash_at_run: READY_GRAPH_HASH,
       computed_at: new Date(Date.now() - 60_000).toISOString(),
-      constraint_verdict: verdict,
+      constraint_verdict: wireVerdict,
       enrichment: {
         analysis_status: 'completed',
         option_comparison: [
@@ -251,6 +263,23 @@ vi.mock('../session/index.js', () => ({
     append: async () => ({ id: `row-${randomUUID()}` }),
     readRecent: async () => priorTurns,
     readFactsFor: async () => priorFacts,
+    // Durable analysis authority (reconcile-scenario-analysis-facts.ts) matches
+    // hot facts to their persisted identity BY REFERENCE, so the with-turn read
+    // must return THE SAME fact objects, each carrying fact_row_id AND
+    // fact_created_at. Omitting either leaves the identified count at 0, which
+    // is indistinguishable from omitting the method. A store with no
+    // readScenarioRunAnalysisFactsFor reads as durable_unavailable, so freshness
+    // degrades to 'unknown' even when there are no analysis facts at all.
+    readFactsWithTurnFor: async () =>
+      (await import('./helpers/durable-analysis-store-double.js')).hotFactsWithTurn(
+        priorFacts,
+        'test-prior-turn-row',
+      ),
+    readScenarioRunAnalysisFactsFor: async (scenarioId: string) =>
+      (await import('./helpers/durable-analysis-store-double.js')).durableAnalysisPage(
+        priorFacts,
+        scenarioId,
+      ),
     loadGraph: async () => READY_GRAPH,
     loadGraphAndBriefText: async () => ({ graph: READY_GRAPH, briefText: null }),
     ensureScenarioExists: async (_id: string, userId: string | null) => ({ user_id: userId }),

@@ -26,6 +26,36 @@ import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 
 type G = Record<string, unknown>;
 
+/**
+ * One builder for BOTH fact reads, so the hot identities and the durable page
+ * can never disagree about a row's id or timestamp.
+ *
+ * A function DECLARATION, so it is hoisted and callable from the hoisted
+ * `vi.mock` factory below.
+ */
+function identifiedFactsFor(
+  ids: readonly string[],
+): Array<{ fact: HandlerFact; turn_id: string; fact_row_id: string; fact_created_at: string }> {
+  const map = ((global as G).__test_facts_by_row ?? new Map()) as Map<string, HandlerFact[]>;
+  const out: Array<{
+    fact: HandlerFact;
+    turn_id: string;
+    fact_row_id: string;
+    fact_created_at: string;
+  }> = [];
+  for (const id of ids) {
+    (map.get(id) ?? []).forEach((fact, index) => {
+      out.push({
+        fact,
+        turn_id: id,
+        fact_row_id: `${id}-fact-${index}`,
+        fact_created_at: '2026-04-30T01:00:00.000Z',
+      });
+    });
+  }
+  return out;
+}
+
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
     append: async () => ({ id: 'mock-row-id' }),
@@ -36,16 +66,22 @@ vi.mock('../session/index.js', () => ({
       for (const id of ids) out.push(...(map.get(id) ?? []));
       return out;
     },
-    readFactsWithTurnFor: async (ids: readonly string[]) => {
-      const map = ((global as G).__test_facts_by_row ?? new Map()) as Map<string, HandlerFact[]>;
-      const out: Array<{ fact: HandlerFact; turn_id: string; fact_created_at: string }> = [];
-      for (const id of ids) {
-        for (const fact of map.get(id) ?? []) {
-          out.push({ fact, turn_id: id, fact_created_at: '2026-04-30T01:00:00.000Z' });
-        }
-      }
-      return out;
-    },
+    // ⚠ `fact_row_id` is load-bearing: the durable analysis authority matches
+    // hot facts to their persisted twin by row id, and without one the
+    // identified count silently stays at 0.
+    readFactsWithTurnFor: async (ids: readonly string[]) => identifiedFactsFor(ids),
+    // Scenario-scoped, so it spans EVERY seeded row, not just the recent
+    // window. Same builder as the with-turn read ⇒ the ids and timestamps
+    // cannot disagree (a disagreement is a snapshot_conflict).
+    readScenarioRunAnalysisFactsFor: async (scenarioId: string) =>
+      (
+        await import('./helpers/durable-analysis-store-double.js')
+      ).durablePageFromIdentified(
+        identifiedFactsFor([
+          ...(((global as G).__test_facts_by_row ?? new Map()) as Map<string, HandlerFact[]>).keys(),
+        ]),
+        scenarioId,
+      ),
     invalidateScoped: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     storeDraftGraph: async () => undefined,

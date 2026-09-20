@@ -78,12 +78,17 @@ vi.mock('../session/index.js', () => ({
     // and silently disables the proposed-change synthesis idempotency
     // lookback. Mirror production by emitting one entry per fact, bound
     // to the prior turn's row id and atomic-write timestamp.
+    // ⚠ `fact_row_id` is load-bearing — see helpers/durable-analysis-store-double.ts.
     readFactsWithTurnFor: async () =>
-      mockedPriorFacts.map((fact) => ({
-        fact,
-        turn_id: 'mock-prior-handler-row',
-        fact_created_at: '2026-04-17T11:00:00.000Z',
-      })),
+      (await import('./helpers/durable-analysis-store-double.js')).hotFactsWithTurn(
+        mockedPriorFacts,
+        'mock-prior-handler-row',
+      ),
+    readScenarioRunAnalysisFactsFor: async (scenarioId: string) =>
+      (await import('./helpers/durable-analysis-store-double.js')).durableAnalysisPage(
+        mockedPriorFacts,
+        scenarioId,
+      ),
     invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
   }),

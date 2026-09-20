@@ -53,6 +53,21 @@ vi.mock('../session/index.js', () => ({
       return { id: `row-${writes.length}` };
     },
     readRecent: async () => [priorRow], readFactsFor: async () => priorFacts,
+    // The durable analysis authority matches hot facts to their persisted twin
+    // BY REFERENCE, so the with-turn read must return THE SAME objects with
+    // fact_row_id AND fact_created_at. A store without
+    // readScenarioRunAnalysisFactsFor reads as durable_unavailable, which
+    // degrades freshness to 'unknown'.
+    readFactsWithTurnFor: async () =>
+      (await import('./helpers/durable-analysis-store-double.js')).hotFactsWithTurn(
+        priorFacts,
+        'test-prior-turn-row',
+      ),
+    readScenarioRunAnalysisFactsFor: async (scenarioId: string) =>
+      (await import('./helpers/durable-analysis-store-double.js')).durableAnalysisPage(
+        priorFacts,
+        scenarioId,
+      ),
     invalidateScoped: async () => ({ scope: { kind: 'structural' }, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' }, entries_invalidated: [] }),
     storeDraftGraph: async () => undefined,
@@ -99,6 +114,13 @@ beforeEach(() => {
   priorFacts = [{ fact_type: 'run_analysis', fact_version: 1, noop: false, result: {
     scenario_id: SCENARIO, graph_hash_at_run: computeAnalysisAffectingGraphHash(savedGraph),
     computed_at: '2026-09-06T18:00:00.000Z', enrichment: { analysis_status: 'completed' },
+    // `leading_option_id` is `z.string().nullable()` — a REQUIRED key whose
+    // value may be null. Omitting it made this fixture fail HandlerFactSchema
+    // outright, so the durable analysis authority rejected the page
+    // (`durable_contract_invalid`) and freshness read 'unknown'. `null` is the
+    // schema-valid spelling of exactly what the sentence below asserts: no
+    // ranking permission. Nothing is weakened by making it explicit.
+    leading_option_id: null,
     summary: 'Synthetic prior run; no ranking permission is asserted by this fixture.',
   } }];
 });

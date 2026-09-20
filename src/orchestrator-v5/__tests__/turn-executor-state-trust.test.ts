@@ -48,7 +48,14 @@ const BASE_PAYLOAD = makeMessagePayload({
 let mockedPriorFacts: HandlerFact[] = [];
 let mockedPersistedGraph: GraphStateIngress;
 
-vi.mock('../session/index.js', () => ({
+vi.mock('../session/index.js', async () => {
+  // Opt-in, spec-local: the durable scenario `run_analysis` authority now
+  // decides freshness, and it matches hot facts to their persisted identity BY
+  // REFERENCE. See helpers/durable-analysis-store-double.ts.
+  const { hotFactsWithTurn, durableAnalysisPage } = await import(
+    './helpers/durable-analysis-store-double.js'
+  );
+  return {
   getSessionStore: () => ({
     append: async () => ({ id: 'mock-row-id' }),
     readRecent: async () => [
@@ -79,19 +86,21 @@ vi.mock('../session/index.js', () => ({
     // and silently disables the proposed-change synthesis idempotency
     // lookback. Mirror production by emitting one entry per fact, bound
     // to the prior turn's row id and atomic-write timestamp.
+    // ⚠ `fact_row_id` is load-bearing: without it
+    // `parseIdentifiedRunAnalysisFact` returns null, the identified count stays
+    // at 0, and the outcome is indistinguishable from omitting this method.
     readFactsWithTurnFor: async () =>
-      mockedPriorFacts.map((fact) => ({
-        fact,
-        turn_id: 'mock-prior-handler-row',
-        fact_created_at: '2026-04-17T11:00:00.000Z',
-      })),
+      hotFactsWithTurn(mockedPriorFacts, 'mock-prior-handler-row'),
+    readScenarioRunAnalysisFactsFor: async () =>
+      durableAnalysisPage(mockedPriorFacts, SCENARIO_ID),
     loadGraph: async () => mockedPersistedGraph,
     loadGraphAndBriefText: async () => ({ graph: mockedPersistedGraph, briefText: null }),
     invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
   }),
   resetSessionStoreForTests: () => {},
-}));
+  };
+});
 
 const { runTurnExecutor } = await import('../turn-executor.js');
 const { OLUMI_ACTION_TOOL_NAME } = await import('../routing/tool-schema.js');

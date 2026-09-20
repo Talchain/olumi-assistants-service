@@ -218,6 +218,19 @@ vi.mock('../session/index.js', () => ({
         turn_id: PRIOR_TURN.id,
         fact_created_at: d.at,
       })),
+    // Same rows, same ids, same timestamps as the with-turn read above — the
+    // reconciler cross-checks them and a disagreement is a snapshot_conflict.
+    readScenarioRunAnalysisFactsFor: async (scenarioId: string) =>
+      (
+        await import('./helpers/durable-analysis-store-double.js')
+      ).durablePageFromIdentified(
+        state.dated.map((d, index) => ({
+          fact: d.fact,
+          fact_row_id: `fact-row-${index}`,
+          fact_created_at: d.at,
+        })) as never,
+        scenarioId,
+      ),
     readRecentAppliedMutationFactsFor: async (_scenarioId: string, limit: number) =>
       state.dated.slice(0, limit).map((d, index) => ({
         fact: d.fact,

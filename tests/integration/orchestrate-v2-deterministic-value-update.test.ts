@@ -126,6 +126,23 @@ vi.mock('../../src/orchestrator-v5/session/index.js', async (importOriginal) => 
               ]
             : [],
         readFactsFor: async () => mockedPriorFacts as never,
+        // Durable analysis authority (reconcile-scenario-analysis-facts.ts) matches
+        // hot facts to their persisted identity BY REFERENCE, so the with-turn read
+        // must return THE SAME fact objects, each carrying fact_row_id AND
+        // fact_created_at. Omitting either leaves the identified count at 0, which
+        // is indistinguishable from omitting the method. A store with no
+        // readScenarioRunAnalysisFactsFor reads as durable_unavailable, so freshness
+        // degrades to 'unknown' even when there are no analysis facts at all.
+        readFactsWithTurnFor: async () =>
+          (await import('../../src/orchestrator-v5/__tests__/helpers/durable-analysis-store-double.js')).hotFactsWithTurn(
+            mockedPriorFacts as never,
+            'test-prior-turn-row',
+          ),
+        readScenarioRunAnalysisFactsFor: async (scenarioId: string) =>
+          (await import('../../src/orchestrator-v5/__tests__/helpers/durable-analysis-store-double.js')).durableAnalysisPage(
+            mockedPriorFacts as never,
+            scenarioId,
+          ),
       }),
     resetSessionStoreForTests: () => {},
   };

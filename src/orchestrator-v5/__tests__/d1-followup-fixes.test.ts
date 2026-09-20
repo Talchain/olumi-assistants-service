@@ -257,6 +257,10 @@ describe('P0-2 — loadScenarioSnapshotForRunAnalysis surfaces goal_constraints'
       append: async () => ({ id: 'mock-row-id' }),
       readRecent: async () => [],
       readFactsFor: async () => [],
+      readFactsWithTurnFor: async () => [],
+      // Authoritative empty history. Omitting this method reads as
+      // durable_unavailable, which degrades freshness to 'unknown'.
+      readScenarioRunAnalysisFactsFor: async () => ({ facts: [], total_count: 0 }),
       invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' as const }),
       invalidateAll: async () => ({ caches_invalidated: 0, scoped_to: 'session' as const }),
       storeDraftGraph: async () => undefined,
@@ -288,6 +292,10 @@ describe('P0-2 — loadScenarioSnapshotForRunAnalysis surfaces goal_constraints'
       append: async () => ({ id: 'mock-row-id' }),
       readRecent: async () => [],
       readFactsFor: async () => [],
+      readFactsWithTurnFor: async () => [],
+      // Authoritative empty history. Omitting this method reads as
+      // durable_unavailable, which degrades freshness to 'unknown'.
+      readScenarioRunAnalysisFactsFor: async () => ({ facts: [], total_count: 0 }),
       invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' as const }),
       invalidateAll: async () => ({ caches_invalidated: 0, scoped_to: 'session' as const }),
       storeDraftGraph: async () => undefined,
@@ -428,6 +436,42 @@ const mockState: {
   priorFacts: [],
 };
 
+/**
+ * Production parity: `SupabaseSessionStore.readFactsFor` delegates to
+ * `readFactsWithTurnFor` (single source of truth). The mockState in this file
+ * already carries paired `priorTurns` / `priorFacts` arrays — bind each fact to
+ * its corresponding turn by index, matching the way each test setup populates
+ * them in lockstep.
+ *
+ * A function DECLARATION, so it is hoisted and therefore callable from the
+ * hoisted `vi.mock` factory below. Both fact reads go through it, so the hot
+ * identities and the durable page cannot disagree. ⚠ The fallback timestamp is
+ * derived from the index, NOT `new Date()`: two calls to a clock-based fallback
+ * return different instants and the reconciler reads that as a
+ * `snapshot_conflict`.
+ */
+function priorFactsWithTurn(): readonly {
+  fact: (typeof mockState.priorFacts)[number];
+  turn_id: string;
+  fact_row_id: string;
+  fact_created_at: string;
+}[] {
+  return mockState.priorFacts.map((fact, idx) => {
+    const turn = mockState.priorTurns[idx] as
+      | { id?: string; created_at?: string }
+      | undefined;
+    return {
+      fact,
+      turn_id: turn?.id ?? '',
+      // ⚠ Load-bearing: without a persisted row id the fact cannot be matched
+      // to its durable twin and the identified count silently stays at 0.
+      fact_row_id: `d1-fact-row-${idx}`,
+      fact_created_at:
+        turn?.created_at ?? new Date(Date.parse('2026-04-17T11:00:00.000Z') - idx * 1000).toISOString(),
+    };
+  });
+}
+
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
     append: async (write: { graph?: unknown; handler_id?: unknown; handler_facts?: unknown }) => {
@@ -444,17 +488,13 @@ vi.mock('../session/index.js', () => ({
     // empty `turn_id` / current timestamp if the arrays are misaligned
     // (no test currently sets that up, but the guard keeps the helper
     // defensive).
-    readFactsWithTurnFor: async () =>
-      mockState.priorFacts.map((fact, idx) => {
-        const turn = mockState.priorTurns[idx] as
-          | { id?: string; created_at?: string }
-          | undefined;
-        return {
-          fact,
-          turn_id: turn?.id ?? '',
-          fact_created_at: turn?.created_at ?? new Date().toISOString(),
-        };
-      }),
+    readFactsWithTurnFor: async () => priorFactsWithTurn(),
+    // The durable scenario authority is built from the SAME rows, so the two
+    // reads agree on fact_row_id and fact_created_at. A disagreement is a
+    // snapshot_conflict and degrades exactly like a missing field.
+    readScenarioRunAnalysisFactsFor: async (scenarioId: string) =>
+      (await import('./helpers/durable-analysis-store-double.js'))
+        .durablePageFromIdentified(priorFactsWithTurn(), scenarioId),
     invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     invalidateAll: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     storeDraftGraph: async () => undefined,

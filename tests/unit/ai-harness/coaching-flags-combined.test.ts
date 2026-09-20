@@ -72,6 +72,26 @@ vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
     // exist only for Cap-1's prior run_analysis turn row.
     readFactsFor: async (rowIds: readonly string[]) =>
       Array.isArray(rowIds) && rowIds.includes(PRIOR_RA_TURN.id) ? mockState.priorFacts : [],
+    // Durable analysis authority (reconcile-scenario-analysis-facts.ts) matches
+    // hot facts to their persisted identity BY REFERENCE, so the with-turn read
+    // must return THE SAME fact objects, each carrying fact_row_id AND
+    // fact_created_at. Omitting either leaves the identified count at 0, which
+    // is indistinguishable from omitting the method. A store with no
+    // readScenarioRunAnalysisFactsFor reads as durable_unavailable, so freshness
+    // degrades to 'unknown' even when there are no analysis facts at all.
+    readFactsWithTurnFor: async (rowIds: readonly string[]) =>
+      (await import('../../../src/orchestrator-v5/__tests__/helpers/durable-analysis-store-double.js')).hotFactsWithTurn(
+        Array.isArray(rowIds) && rowIds.includes(PRIOR_RA_TURN.id) ? mockState.priorFacts : [],
+        'test-prior-turn-row',
+      ),
+    // The durable read is SCENARIO-keyed, not row-keyed: only Cap-1's scenario
+    // owns the prior run_analysis fact, matching the scenario-keyed discipline
+    // the comment above this mock establishes.
+    readScenarioRunAnalysisFactsFor: async (scenarioId: string) =>
+      (await import('../../../src/orchestrator-v5/__tests__/helpers/durable-analysis-store-double.js')).durableAnalysisPage(
+        scenarioId === SCENARIO_ID ? mockState.priorFacts : [],
+        scenarioId,
+      ),
     invalidateScoped: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     storeDraftGraph: async () => undefined,

@@ -87,19 +87,38 @@ function asPriorFacts(forRowIds: readonly string[]): readonly Record<string, unk
 // proposed-change synthesis idempotency lookback — masking a real
 // production code path. Each fact carries forward its parent turn's row
 // id and atomic-write timestamp.
+// ⚠ `fact_row_id` is load-bearing for the durable scenario analysis authority:
+// it matches hot facts to their persisted twin, and without it the identified
+// count silently stays at 0 — indistinguishable from not implementing this read.
 function asPriorFactsWithTurn(
   forRowIds: readonly string[],
-): readonly { fact: Record<string, unknown>; turn_id: string; fact_created_at: string }[] {
+): readonly {
+  fact: Record<string, unknown>
+  turn_id: string
+  fact_row_id: string
+  fact_created_at: string
+}[] {
   return [...persistence.turns]
     .filter((t) => forRowIds.includes(t.id))
     .reverse()
     .flatMap((t) =>
-      t.handler_facts.map((fact) => ({
+      t.handler_facts.map((fact, index) => ({
         fact,
         turn_id: t.id,
+        fact_row_id: `${t.id}-fact-${index}`,
         fact_created_at: t.created_at,
       })),
     )
+}
+
+/**
+ * The durable scenario read is NOT bounded to the recent turn window, so it
+ * spans every persisted turn. Built from the same rows as
+ * {@link asPriorFactsWithTurn} so the two reads cannot disagree about a row's
+ * id or timestamp (a disagreement is a `snapshot_conflict`).
+ */
+function allPriorFactsWithTurn(): ReturnType<typeof asPriorFactsWithTurn> {
+  return asPriorFactsWithTurn(persistence.turns.map((t) => t.id))
 }
 
 vi.mock('../session/index.js', () => ({
@@ -123,6 +142,13 @@ vi.mock('../session/index.js', () => ({
     readFactsFor: async (rowIds: readonly string[]) => asPriorFacts(rowIds),
     readFactsWithTurnFor: async (rowIds: readonly string[]) =>
       asPriorFactsWithTurn(rowIds),
+    readScenarioRunAnalysisFactsFor: async (scenarioId: string) =>
+      (
+        await import('./helpers/durable-analysis-store-double.js')
+      ).durablePageFromIdentified(
+        allPriorFactsWithTurn() as never,
+        scenarioId,
+      ),
     invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     invalidateAll: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     storeDraftGraph: async () => undefined,

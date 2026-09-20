@@ -53,6 +53,11 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 const appendCalls: Array<unknown> = [];
 const priorTurnRows: Array<unknown> = [];
 const priorFactRows: Array<HandlerFact> = [];
+const durableFactRows: Array<HandlerFact> = [];
+function identifiedFact(fact: HandlerFact) {
+  const result = fact.result as { computed_at?: string; graph_hash_at_run?: string };
+  return { fact, fact_row_id: `row-${result.graph_hash_at_run}`, fact_created_at: result.computed_at! };
+}
 /**
  * The persisted graph. Null by default — a MISSING method and a method that
  * returns null are different states, and only the second is a store that
@@ -69,6 +74,12 @@ vi.mock('../session/index.js', () => ({
     },
     readRecent: async () => priorTurnRows,
     readFactsFor: async () => priorFactRows,
+    readFactsWithTurnFor: async () => priorFactRows.map((fact) => ({ ...identifiedFact(fact), turn_id: 'row-prior-1' })),
+    readScenarioRunAnalysisFactsFor: async () => ({
+      facts: [...durableFactRows, ...priorFactRows].map(identifiedFact)
+        .sort((a, b) => b.fact_created_at.localeCompare(a.fact_created_at)),
+      total_count: durableFactRows.length + priorFactRows.length,
+    }),
     invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
     invalidateAll: async () => ({
       scope: { kind: 'structural' as const },
@@ -179,7 +190,17 @@ function makeGoldenResponse(): V2RunResponseEnvelope {
 
 function makeScenarioSnapshot(): RunAnalysisScenarioSnapshot {
   return {
-    graph: { nodes: [{ id: 'g', kind: 'goal' }], edges: [] },
+    graph: {
+      nodes: [
+        { id: 'g', kind: 'goal', label: 'Outcome' },
+        { id: 'f', kind: 'factor', label: 'Capacity' },
+        { id: 'opt_a', kind: 'option', label: 'A', interventions: { f: 1 } },
+        { id: 'opt_b', kind: 'option', label: 'B', interventions: { f: 0 } },
+      ],
+      edges: [
+        { from: 'f', to: 'g', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1 },
+      ],
+    },
     options: [
       { id: 'opt_a', option_id: 'opt_a', label: 'A', interventions: { f: 1 } },
       { id: 'opt_b', option_id: 'opt_b', label: 'B', interventions: { f: 0 } },
@@ -255,7 +276,8 @@ beforeEach(() => {
   appendCalls.length = 0;
   priorTurnRows.length = 0;
   priorFactRows.length = 0;
-  graphHolder.persisted = null;
+  durableFactRows.length = 0;
+  graphHolder.persisted = makeScenarioSnapshot().graph;
   setTestSink(() => {});
 });
 
@@ -265,10 +287,10 @@ afterEach(() => {
 });
 
 describe('finalizeRun → TurnExecutorRunResult.priorFacts (the run_delta basis)', () => {
-  it('RERUN → the basis CONTAINS the run this turn just completed, and that run is `pair.current`', async () => {
+  it('RERUN replaces a durable result outside the conversation window with the newly committed result', async () => {
     seedPriorTurn('row-prior-1', 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', '2026-07-15T00:00:00.000Z');
     const seeded = priorRunFact('hash-prior', '2026-07-15T00:00:00.000Z');
-    priorFactRows.push(seeded);
+    durableFactRows.push(seeded);
 
     const result = await runTurnExecutor(BASE_PAYLOAD, 'req-rd-rerun', {
       routingAdapter: mockRoutingAdapter(RUN_ANALYSIS_TOOL_CALL_INPUT),

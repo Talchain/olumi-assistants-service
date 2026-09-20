@@ -195,6 +195,19 @@ const RUN_ANALYSIS_FACT: Record<string, unknown> = {
   },
 };
 
+/**
+ * ONE persisted occurrence of the prior analysis, shared by the with-turn read
+ * and the durable scenario read. Fixed identity and a fixed timestamp: the
+ * reconciler cross-checks the two reads, so a clock-derived value would make
+ * them disagree and degrade the set to `snapshot_conflict`.
+ */
+const PRIOR_ANALYSIS_IDENTIFIED_FACT = {
+  fact: RUN_ANALYSIS_FACT,
+  turn_id: PRIOR_ANALYSIS_ROW_ID,
+  fact_row_id: `${PRIOR_ANALYSIS_ROW_ID}-fact-0`,
+  fact_created_at: '2026-04-17T11:00:00.000Z',
+};
+
 vi.mock('../rolling-summary/index.js', () => ({
   getRollingSummaryStore: () => ({
     loadSummary: async () => null,
@@ -238,16 +251,17 @@ vi.mock('../session/index.js', () => ({
       harness.replayAppendedHistory ? harness.appendedRows.length + 1 : 1,
     readFactsFor: async (turnRowIds: readonly string[]) =>
       turnRowIds.includes(PRIOR_ANALYSIS_ROW_ID) ? [RUN_ANALYSIS_FACT] : [],
+    // ⚠ Two changes, both load-bearing for the durable analysis authority:
+    // `fact_row_id` (without it the identified count silently stays at 0), and
+    // a FIXED timestamp — `Date.now()` returns a different instant on each
+    // call, so the durable page and the hot identity would disagree and the
+    // reconciler would report a snapshot_conflict.
     readFactsWithTurnFor: async (turnRowIds: readonly string[]) =>
-      turnRowIds.includes(PRIOR_ANALYSIS_ROW_ID)
-        ? [
-            {
-              fact: RUN_ANALYSIS_FACT,
-              turn_id: PRIOR_ANALYSIS_ROW_ID,
-              fact_created_at: new Date(Date.now() - 60_000).toISOString(),
-            },
-          ]
-        : [],
+      turnRowIds.includes(PRIOR_ANALYSIS_ROW_ID) ? [PRIOR_ANALYSIS_IDENTIFIED_FACT] : [],
+    readScenarioRunAnalysisFactsFor: async (scenarioId: string) =>
+      (
+        await import('./helpers/durable-analysis-store-double.js')
+      ).durablePageFromIdentified([PRIOR_ANALYSIS_IDENTIFIED_FACT], scenarioId),
     readNewestAnalysisFactFor: async () => RUN_ANALYSIS_FACT,
     invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     invalidateAll: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),

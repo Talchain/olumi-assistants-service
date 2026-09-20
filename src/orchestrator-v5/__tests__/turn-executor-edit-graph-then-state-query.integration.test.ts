@@ -111,6 +111,17 @@ vi.mock('../session/index.js', () => ({
       mockState.priorFacts.map((fact, index) =>
         identifiedMockFact(fact, index, 'window'),
       ),
+    // Derived from the SAME rows as the with-turn read, so the durable page
+    // and the hot identities agree on fact_row_id and fact_created_at.
+    readScenarioRunAnalysisFactsFor: async (scenarioId: string) =>
+      (
+        await import('./helpers/durable-analysis-store-double.js')
+      ).durablePageFromIdentified(
+        mockState.priorFacts.map((fact, index) =>
+          identifiedMockFact(fact, index, 'window'),
+        ) as never,
+        scenarioId,
+      ),
     readRecentAppliedMutationFactsFor: async (_scenarioId: string, limit: number) => {
       if (mockState.durableMutationReadFails) {
         throw new Error('simulated durable mutation receipt read failure');
