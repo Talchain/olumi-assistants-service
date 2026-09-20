@@ -3,14 +3,16 @@
  * "Yes, make that update now" work on the turn after the offer.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { EMPTY_CONVERSATION_MEMORY, recordItem } from '../conversation-memory.js';
-import { EMPTY_PROPOSAL_STORE } from '../proposal-store.js';
+import { EMPTY_PROPOSAL_STORE, type Proposal } from '../proposal-store.js';
+import { ACCEPT_TOOL_NAME, type ApplyOperations } from '../run-replacement-turn.js';
 import type { ChatWithToolsLike } from '../agent-loop.js';
 import type { ToolResponseBlock } from '../../../adapters/llm/types.js';
 import {
   EMPTY_REPLACEMENT_STATE,
+  ReplacementStateConflictError,
   ReplacementTurnFailure,
   decodeReplacementState,
   handleReplacementTurn,
@@ -27,12 +29,46 @@ function scripted(replies: { content: ToolResponseBlock[]; stop_reason: 'end_tur
 }
 const say = (text: string) => ({ content: [{ type: 'text' as const, text }], stop_reason: 'end_turn' as const });
 
-function memoryStore(initial: ReplacementState = EMPTY_REPLACEMENT_STATE): ReplacementStateStore & { saved: ReplacementState[] } {
+/**
+ * A store that ENFORCES the token, so a turn that mismanaged its own
+ * revision would fail here rather than pass by accident. A permissive fake
+ * would let the checkpoint-then-final pair "work" even if the entry point
+ * never advanced the token it holds.
+ */
+function memoryStore(
+  initial: ReplacementState = EMPTY_REPLACEMENT_STATE,
+): ReplacementStateStore & { saved: ReplacementState[]; readonly revision: string } {
   const saved: ReplacementState[] = [];
+  let current = initial;
+  let revision = 'rev-0';
+  let minted = 0;
   return {
     saved,
-    load: async () => (saved.length > 0 ? saved[saved.length - 1]! : initial),
-    save: async (_id, s) => { saved.push(s); },
+    get revision() { return revision; },
+    load: async () => ({ state: current, revision }),
+    save: async (id, s, expected) => {
+      if (expected !== revision) throw new ReplacementStateConflictError(id, expected);
+      current = s;
+      saved.push(s);
+      revision = `rev-${(minted += 1)}`;
+      return revision;
+    },
+  };
+}
+
+/** Loads fine; every write loses the race. Records what token each attempt
+ *  carried, so "did the turn stop writing?" is answerable by count. */
+function losingStore(
+  initial: ReplacementState = EMPTY_REPLACEMENT_STATE,
+): ReplacementStateStore & { attempts: Array<string | null> } {
+  const attempts: Array<string | null> = [];
+  return {
+    attempts,
+    load: async () => ({ state: initial, revision: 'rev-0' }),
+    save: async (id, _s, expected) => {
+      attempts.push(expected);
+      throw new ReplacementStateConflictError(id, expected);
+    },
   };
 }
 
@@ -119,7 +155,7 @@ describe('state is saved before the reply is returned', () => {
 
   it('a failed save is a hard failure, not a silently unsaved turn', async () => {
     const store: ReplacementStateStore = {
-      load: async () => EMPTY_REPLACEMENT_STATE,
+      load: async () => ({ state: EMPTY_REPLACEMENT_STATE, revision: null }),
       save: async () => { throw new Error('connection reset'); },
     };
     await expect(
@@ -129,7 +165,7 @@ describe('state is saved before the reply is returned', () => {
 
   it('a failed save after a write reports that a write may have landed', async () => {
     const store: ReplacementStateStore = {
-      load: async () => EMPTY_REPLACEMENT_STATE,
+      load: async () => ({ state: EMPTY_REPLACEMENT_STATE, revision: null }),
       save: async () => { throw new Error('connection reset'); },
     };
     // No write happened on this turn, so the flag is false — the contrast
@@ -145,6 +181,181 @@ describe('state is saved before the reply is returned', () => {
     // the field disappear from the type without this test noticing.
     if (!(err instanceof ReplacementTurnFailure)) throw new Error('expected the typed failure');
     expect(err.mayHaveWritten).toBe(false);
+    // A transport failure is not a conflict. Named apart because they lead
+    // to different words: "the store is broken" vs "another turn won".
+    expect(err.stateConflict).toBe(false);
+  });
+
+});
+
+// ── optimistic concurrency ──────────────────────────────────────────────
+
+/** An offer already on the books, bound to the revision the turn runs at. */
+const OPEN_PROPOSAL: Proposal = {
+  id: 'prop-open',
+  status: 'open',
+  operations: [
+    { kind: 'set_option_effect', summary: 'Set what Full Parity does to Monthly Churn Rate to 0.4' },
+  ],
+  model_revision: 'rev-1',
+  proposed_at: T,
+  proposed_in_turn: 'turn-0',
+};
+
+/** A write whose outcome is UNKNOWN: no receipt, and it never enters
+ *  `applied`. This is the state `mayHaveWritten` exists for. */
+const IN_FLIGHT_PROPOSAL: Proposal = {
+  ...OPEN_PROPOSAL,
+  id: 'prop-in-flight',
+  status: 'apply_in_flight',
+  authorised_in_turn: 'turn-0',
+  authorised_at: T,
+  idempotency_key: 'idem-0',
+  apply_started_at: T,
+  apply_attempts: 1,
+};
+
+function withProposal(p: Proposal): ReplacementState {
+  return { version: 1, memory: EMPTY_CONVERSATION_MEMORY, proposals: { proposals: [p] } };
+}
+const withOpenProposal = (): ReplacementState => withProposal(OPEN_PROPOSAL);
+
+function acceptingInput() {
+  return entryInput({ turnId: 'turn-1', message: 'Yes, go ahead and make that change.' });
+}
+
+/** Accepts the standing offer, then answers. The quote is the user's own
+ *  words from `acceptingInput`, because consent is checked against the turn. */
+function acceptingModel(): ChatWithToolsLike {
+  return scripted([
+    {
+      content: [
+        {
+          type: 'tool_use',
+          id: 'a1',
+          name: ACCEPT_TOOL_NAME,
+          input: { proposal_id: 'prop-open', user_agreement_quote: 'Yes, go ahead' },
+        },
+      ],
+      stop_reason: 'tool_use',
+    },
+    say('Done.'),
+  ]);
+}
+
+describe('a turn built from a stale read cannot dispatch a write', () => {
+  it('a conflict at the PRE-DISPATCH CHECKPOINT sends nothing', async () => {
+    // The harm: turn A and turn B both read; A moves the row; B then
+    // authorises an offer that no longer exists as B saw it. The checkpoint
+    // is where B finds out, and it finds out BEFORE the write leaves.
+    const store = losingStore(withOpenProposal());
+    const write = vi.fn<ApplyOperations>(async () => ({ ok: true, receiptId: 'receipt-1' }));
+
+    await handleReplacementTurn(acceptingInput(), {
+      chatWithTools: acceptingModel(),
+      state: store,
+      applyOperations: write,
+    }).catch(() => undefined);
+
+    // Bound to the dispatch itself, not to a downstream symptom.
+    expect(write).not.toHaveBeenCalled();
+    // And it tried — the refusal is the store's answer, not a turn that
+    // never reached the barrier.
+    expect(store.attempts.length).toBeGreaterThan(0);
+  });
+
+  it('CONTRAST: the SAME turn against a store that accepts the token DOES dispatch', async () => {
+    // ⭐ The discriminating half. A store that refused every save would pass
+    // the test above and be worthless; only this pair shows the refusal is
+    // the TOKEN's doing. Everything is identical except the store.
+    const write = vi.fn<ApplyOperations>(async () => ({ ok: true, receiptId: 'receipt-1' }));
+
+    const r = await handleReplacementTurn(acceptingInput(), {
+      chatWithTools: acceptingModel(),
+      state: memoryStore(withOpenProposal()),
+      applyOperations: write,
+    });
+
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(write.mock.calls[0]?.[0]?.proposalId).toBe('prop-open');
+    expect(r.applied.map((a) => a.receiptId)).toEqual(['receipt-1']);
+  });
+
+  it('saves twice in one turn without conflicting with ITSELF — the token chains', async () => {
+    // The checkpoint-then-final pair is ordinary, and a turn that held its
+    // ORIGINAL token for the second write would be refused by its own store,
+    // so no write would ever complete. `memoryStore` enforces the token; a
+    // permissive fake could not observe this.
+    const store = memoryStore(withOpenProposal());
+
+    const r = await handleReplacementTurn(acceptingInput(), {
+      chatWithTools: acceptingModel(),
+      state: store,
+      applyOperations: async () => ({ ok: true, receiptId: 'receipt-1' }),
+    });
+
+    expect(r.applied.map((a) => a.proposalId)).toEqual(['prop-open']);
+    // Checkpoint AND final, both accepted, in one turn.
+    expect(store.saved).toHaveLength(2);
+    expect(store.revision).toBe('rev-2');
+  });
+});
+
+describe('what the caller is told differs at the two save points', () => {
+  it('an END-OF-TURN conflict with nothing in flight: the turn is lost, nothing is uncertain', async () => {
+    // Read-only turn — the route's current posture. Nothing was dispatched,
+    // so the honest thing is "say that again", not "I cannot tell you".
+    let err: unknown;
+    try {
+      await handleReplacementTurn(entryInput(), {
+        chatWithTools: scripted([say('The churn assumption is doing all the work here.')]),
+        state: losingStore(),
+      });
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(ReplacementTurnFailure);
+    if (!(err instanceof ReplacementTurnFailure)) throw new Error('expected the typed failure');
+    expect(err.stateConflict).toBe(true);
+    expect(err.mayHaveWritten).toBe(false);
+    expect(err.message).toContain('another turn');
+  });
+
+  it('an END-OF-TURN conflict with a write IN FLIGHT: may have written, and says so', async () => {
+    // ⛔ The case the old code got wrong. `applied` holds writes WITH
+    // RECEIPTS; a write whose outcome is unknown has none and never enters
+    // it. Reading only `applied` reported `mayHaveWritten: false` on the one
+    // state that exists to mean "we do not know".
+    //
+    // No `applyOperations` here, so nothing is retried and the in-flight
+    // proposal is carried straight through — the read-only route's shape.
+    let err: unknown;
+    try {
+      await handleReplacementTurn(entryInput(), {
+        chatWithTools: scripted([say('ok')]),
+        state: losingStore(withProposal(IN_FLIGHT_PROPOSAL)),
+      });
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(ReplacementTurnFailure);
+    if (!(err instanceof ReplacementTurnFailure)) throw new Error('expected the typed failure');
+    expect(err.mayHaveWritten).toBe(true);
+    expect(err.stateConflict).toBe(true);
+  });
+
+  it('CONTRAST: the same in-flight state saves cleanly when the token is current', async () => {
+    // Pins the precondition rather than trusting the outcome: the in-flight
+    // proposal is what made the flag true above, and on its own it does NOT
+    // make the turn fail. Without this, a turn that failed for any reason at
+    // all would satisfy the test above.
+    const store = memoryStore(withProposal(IN_FLIGHT_PROPOSAL));
+    const r = await handleReplacementTurn(entryInput(), {
+      chatWithTools: scripted([say('ok')]),
+      state: store,
+    });
+    expect(r.mustReconcile.map((p) => p.id)).toEqual(['prop-in-flight']);
+    expect(store.saved).toHaveLength(1);
   });
 });
 

@@ -86,15 +86,107 @@ export const EMPTY_REPLACEMENT_STATE: ReplacementState = {
 };
 
 /**
+ * An opaque optimistic-concurrency token for one scenario's stored row.
+ *
+ * Compared for EQUALITY only. Never parsed, ordered, or done arithmetic on —
+ * a caller that reads meaning into it has built a second, undeclared contract
+ * with whatever produced it.
+ */
+export type ReplacementStateRevision = string;
+
+/**
+ * What a read returns: the state, and the token that read saw.
+ *
+ * `revision` is `null` when and only when NO ROW EXISTED at read time. It is
+ * NOT null for a row we could not decode — an unrecognised row still has a
+ * revision, and a recovery save must UPDATE it rather than try to create a
+ * row that is already there.
+ */
+export interface LoadedReplacementState {
+  readonly state: ReplacementState;
+  readonly revision: ReplacementStateRevision | null;
+}
+
+/**
+ * The stored row moved between the read this write was built from and the
+ * write itself. Another turn for this scenario got there first.
+ *
+ * Thrown by `save`, NOT by `load`, and deliberately distinct from
+ * `ReplacementStateStoreError`: a conflict means the database worked
+ * perfectly and refused a stale write, which is a different fact about the
+ * world from "the database was unreachable" and leads to different words for
+ * the user. Declared here, beside the contract it belongs to, rather than in
+ * the adapter — the semantics are the contract's, and the adapter imports
+ * this file already.
+ */
+export class ReplacementStateConflictError extends Error {
+  readonly scenarioId: string;
+  readonly expectedRevision: ReplacementStateRevision | null;
+
+  constructor(
+    scenarioId: string,
+    expectedRevision: ReplacementStateRevision | null,
+    options?: ErrorOptions,
+  ) {
+    super(
+      `conversation state for scenario ${scenarioId} was written by another turn ` +
+        `(this write was built from revision ${expectedRevision ?? 'NONE (first turn)'})`,
+      options,
+    );
+    this.name = 'ReplacementStateConflictError';
+    this.scenarioId = scenarioId;
+    this.expectedRevision = expectedRevision;
+  }
+}
+
+/**
  * Core's contract. Two calls, both keyed by scenario.
  *
  * `save` must be durable and visible to every instance before the next turn
  * can start, because the next turn's "yes" depends on it. An optimistic local
  * cache is fine; a local-only store is not.
+ *
+ * ⛔⛔ WHY THIS IS COMPARE-AND-SWAP AND NOT AN UNCONDITIONAL UPSERT
+ * ─────────────────────────────────────────────────────────────────────────
+ * The first version of this contract was last-writer-wins, and its safety
+ * was ASSERTED from the existence of the turn fence rather than measured.
+ * The assertion is refuted at the bytes: `admitCurrentTurnFence`
+ * (`turn-fence-prehandler.ts:128-150`) returns `Promise<void>`, records a
+ * generation and NEVER ABORTS, and `turn-fence.ts:23-28` scopes enforcement
+ * to "ONLY writes that carry a graph". It claims a generation; it does not
+ * hold a lock across these two upserts. So two turns for one scenario can
+ * both read, and the older snapshot can overwrite the newer one — destroying
+ * a remembered fact, an open proposal, or a completed receipt, silently and
+ * with both writes reporting success. Reproduced by execution before this
+ * contract was changed.
+ *
+ * Hence: every write carries the token its state was READ under, and a store
+ * MUST refuse it if the row has moved since. A store that ignores
+ * `expectedRevision` satisfies the types and reintroduces the defect, so the
+ * spec pins the refusal with a discriminating pair (stale token rejected /
+ * current token accepted against the SAME store) rather than with a rejection
+ * test alone — a store that rejects everything is worthless and passes the
+ * rejection test.
  */
 export interface ReplacementStateStore {
-  load(scenarioId: string): Promise<ReplacementState>;
-  save(scenarioId: string, state: ReplacementState): Promise<void>;
+  load(scenarioId: string): Promise<LoadedReplacementState>;
+  /**
+   * Write `state` if and only if the row still carries `expectedRevision`
+   * (or, when that is `null`, if and only if no row exists yet).
+   *
+   * Returns the NEW token, so a caller that saves twice in one turn — which
+   * the checkpoint makes ordinary — can chain its own writes without
+   * conflicting with itself.
+   *
+   * @throws {ReplacementStateConflictError} the row moved; nothing was written.
+   * @throws Error transport/permission failure; whether anything was written
+   *   is unknown, and the caller must treat it as such.
+   */
+  save(
+    scenarioId: string,
+    state: ReplacementState,
+    expectedRevision: ReplacementStateRevision | null,
+  ): Promise<ReplacementStateRevision>;
 }
 
 /**
@@ -155,13 +247,26 @@ export interface ReplacementEntryResult {
  * `mayHaveWritten` is the field that matters. When it is true the caller must
  * NOT retry, must NOT fall back to another controller, and must not tell the
  * user either that it saved or that it did not — the next turn reconciles.
+ *
+ * `stateConflict` says WHY, and the two answer different questions, so they
+ * are named apart rather than folded together: `mayHaveWritten` is about the
+ * GRAPH (did a mutation go out?), `stateConflict` is about the CONVERSATION
+ * STATE (was this turn's snapshot stale?). A conflict with nothing in flight
+ * is the benign case — another turn for this scenario won, this turn's
+ * thinking is lost, and the user should be told to say it again. A conflict
+ * with something in flight is the dangerous one, and `mayHaveWritten` is what
+ * carries that.
  */
 export class ReplacementTurnFailure extends Error {
   readonly mayHaveWritten: boolean;
-  constructor(message: string, mayHaveWritten: boolean) {
+  /** True when the save was refused because the row had moved, rather than
+   *  because the store could not be reached. */
+  readonly stateConflict: boolean;
+  constructor(message: string, mayHaveWritten: boolean, stateConflict = false) {
     super(message);
     this.name = 'ReplacementTurnFailure';
     this.mayHaveWritten = mayHaveWritten;
+    this.stateConflict = stateConflict;
   }
 }
 
@@ -193,13 +298,48 @@ export function summariseWorkspace(graph: GraphStateIngress | null | undefined):
  * The save happens BEFORE the response is returned: a reply that references a
  * proposal the next turn cannot find is the "Yes, make that update now"
  * failure, and the ordering is the whole guard against it.
+ *
+ * TWO SAVE POINTS, TWO DIFFERENT ANSWERS TO A CONFLICT
+ * ─────────────────────────────────────────────────────────────────────────
+ * Both carry the token this turn read. They are NOT the same situation and
+ * must not be handled as one:
+ *
+ *   1. THE PRE-DISPATCH CHECKPOINT — a conflict here happens BEFORE anything
+ *      leaves. The save throws, `run-replacement-turn.ts` catches it and
+ *      returns a refusal to the model, and NO WRITE IS DISPATCHED. The turn
+ *      still completes and still answers; the user is told, in the model's
+ *      own reply, that the save did not go through, nothing has changed, and
+ *      they can ask again. Nothing is uncertain, because nothing was sent.
+ *
+ *   2. THE END-OF-TURN SAVE — a conflict here happens AFTER the turn has run,
+ *      so a write may already have gone out under a checkpoint that
+ *      succeeded. This throws {@link ReplacementTurnFailure} with
+ *      `stateConflict: true`, and with `mayHaveWritten` set from whether a
+ *      write is applied or in flight. When `mayHaveWritten` is false the
+ *      honest thing to tell the user is that this reply could not be
+ *      remembered and they should say it again; when it is true the caller
+ *      must say NEITHER that it saved nor that it did not, and must not
+ *      retry — the next turn reconciles against the winner's state.
+ *
+ * ⚠ NOT SETTLED BY THIS CHANGE: no caller reads `mayHaveWritten` yet.
+ * `route-v2.ts` does not catch {@link ReplacementTurnFailure} at all, so both
+ * cases currently surface as a failed turn. The distinction is carried
+ * correctly on the error; turning it into two different user-visible
+ * sentences is a route-layer change and is NOT done here.
  */
 export async function handleReplacementTurn(
   input: ReplacementEntryInput,
   deps: ReplacementEntryDeps,
 ): Promise<ReplacementEntryResult> {
   const loaded = await deps.state.load(input.scenarioId);
-  const prior = decodeReplacementState(loaded);
+  const prior = decodeReplacementState(loaded.state);
+
+  // The token every write this turn is built from. It advances on each
+  // successful save so the turn does not conflict with itself, and it
+  // DELIBERATELY does not advance on a failed one: a snapshot that lost a
+  // race is stale for the rest of the turn, so the end-of-turn save must
+  // conflict too rather than quietly overwrite the winner.
+  let revision: ReplacementStateRevision | null = loaded.revision;
 
   const tools: AgentTool[] = [
     createReadWorkspaceTool({ getGraph: input.getGraph, requestId: input.requestId }),
@@ -244,8 +384,22 @@ export async function handleReplacementTurn(
       // The durability barrier. Called before any write leaves, so the
       // idempotency key is on disk before the work is sent. Without it no
       // write is sent at all — see `ReplacementTurnDeps.checkpoint`.
+      //
+      // ⛔ AND THIS IS NOW ALSO THE CONCURRENCY BARRIER. A conflict here
+      // THROWS, and `run-replacement-turn.ts` turns a throwing checkpoint
+      // into a refusal that sends NOTHING — which is the correct answer to
+      // "another turn moved this scenario under us": the proposal we were
+      // about to authorise was read from a snapshot that no longer exists,
+      // so dispatching against it would apply a change the user agreed to
+      // in a state that has since changed. Refusing to write is always
+      // recoverable; the user is told the save did not go through and can
+      // ask again, on a turn that will load the winner's state.
       checkpoint: async ({ memory, proposals }) => {
-        await deps.state.save(input.scenarioId, { version: 1, memory, proposals });
+        revision = await deps.state.save(
+          input.scenarioId,
+          { version: 1, memory, proposals },
+          revision,
+        );
       },
       ...(deps.applyOperations === undefined ? {} : { applyOperations: deps.applyOperations }),
       ...(deps.maxIterations === undefined ? {} : { maxIterations: deps.maxIterations }),
@@ -259,14 +413,28 @@ export async function handleReplacementTurn(
   };
 
   try {
-    await deps.state.save(input.scenarioId, next);
+    await deps.state.save(input.scenarioId, next, revision);
   } catch (err) {
     // A save that did not land means the next turn cannot honour a "yes", and
     // — worse — cannot see a proposal whose write DID land. If anything was
     // applied this turn, that is an unknown the caller must not paper over.
+    //
+    // ⛔ `applied` ALONE IS NOT THE RIGHT TEST, and it was the test here
+    // before. `applied` holds writes with RECEIPTS. A write whose outcome is
+    // UNKNOWN has no receipt and never enters it — it sits in
+    // `mustReconcile`, and that is precisely the case where a write may have
+    // landed. Reading only `applied` reported `mayHaveWritten: false` on the
+    // one state that exists to mean "we do not know". Both are checked now,
+    // and the second is the load-bearing one.
+    const mayHaveWritten = result.applied.length > 0 || result.mustReconcile.length > 0;
+    const stateConflict = err instanceof ReplacementStateConflictError;
     throw new ReplacementTurnFailure(
-      `the conversation state did not save: ${err instanceof Error ? err.message : String(err)}`,
-      result.applied.length > 0,
+      stateConflict
+        ? `the conversation state was not saved: another turn for this scenario wrote it while ` +
+          `this one was running, so this turn's state is stale and was refused`
+        : `the conversation state did not save: ${err instanceof Error ? err.message : String(err)}`,
+      mayHaveWritten,
+      stateConflict,
     );
   }
 

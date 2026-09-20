@@ -35,6 +35,14 @@
  * is genuinely a single statement. It also keeps the proposal to Core at one
  * additive table with no function to grant, review or version.
  *
+ * ⚠ That argument survived the move to compare-and-swap, and it is worth
+ * saying why rather than leaving it to be re-litigated. CAS here is still
+ * ONE statement — a single conditional `UPDATE ... WHERE scenario_id = $1
+ * AND revision = $2`, whose atomicity is the row lock Postgres takes anyway.
+ * It needs no transaction and no function, because there is no second row to
+ * keep consistent with it. What it DID need was a way to see how many rows
+ * the statement matched, which is why every write here carries `.select()`.
+ *
  * ────────────────────────────────────────────────────────────────────────
  * THE ONE DISTINCTION THIS FILE EXISTS TO HOLD: MALFORMED ≠ UNREACHABLE.
  * ────────────────────────────────────────────────────────────────────────
@@ -60,24 +68,46 @@
  *     next "yes, make that update now" resolves against. A failed turn the
  *     user can retry is strictly better than a destroyed one they cannot.
  *
+ *   A STALE WRITE (write path only) → THROW ReplacementStateConflictError.
+ *     The database was reached and worked perfectly; it refused a write
+ *     built from a snapshot that has since moved. That is a third fact
+ *     about the world, not a flavour of the second, and it leads to
+ *     different words for the user — "another turn got there first, say
+ *     that again" rather than "the store is broken". It is typed apart for
+ *     that reason, and `handleReplacementTurn` reads the type.
+ *
  * An implementation that cannot tell these apart — `try { … } catch { return
  * EMPTY }` is the tempting one — reads as correct against the malformed case
- * and quietly converts every outage into data loss. The spec pins the two
- * with a discriminating pair for exactly that reason.
+ * and quietly converts every outage into data loss. The spec pins them with
+ * discriminating pairs for exactly that reason.
  */
+
+import { randomUUID } from 'node:crypto';
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { log } from '../../utils/telemetry.js';
 import {
   EMPTY_REPLACEMENT_STATE,
+  ReplacementStateConflictError,
   decodeReplacementState,
+  type LoadedReplacementState,
   type ReplacementState,
+  type ReplacementStateRevision,
   type ReplacementStateStore,
 } from './turn-entry.js';
 
 /** The table the proposed migration creates. One row per scenario. */
 export const REPLACEMENT_STATE_TABLE = 'v5_replacement_state';
+
+/** The optimistic-concurrency token column. Opaque to everything above this
+ *  file — see the header for why it is not `updated_at`. */
+export const REPLACEMENT_STATE_REVISION_COLUMN = 'revision';
+
+/** PostgreSQL unique-violation. On the INSERT arm this means a row for this
+ *  scenario appeared between our read and our write, which is a conflict and
+ *  not a fault. */
+const UNIQUE_VIOLATION = '23505';
 
 interface SupabaseErrorLike {
   readonly message?: string;
@@ -132,10 +162,24 @@ export class ReplacementStateStoreError extends Error {
  * type that says so. It is also why no double cast appears anywhere in this
  * file — there is nothing to force, because nothing is being asserted.
  */
-function readStateColumn(row: unknown): unknown {
+function readColumn(row: unknown, column: string): unknown {
   if (row === null || typeof row !== 'object' || Array.isArray(row)) return undefined;
   const record: Record<string, unknown> = { ...row };
-  return record.state;
+  return record[column];
+}
+
+/**
+ * The row's concurrency token, or `null` if it does not carry a usable one.
+ *
+ * `null` here is FAIL-CLOSED, not fail-open: the caller will then attempt an
+ * INSERT, which the primary key refuses because the row exists, so a row
+ * whose `revision` is missing or null produces a loud conflict rather than a
+ * silent unconditional overwrite. That is the correct direction for a
+ * half-applied migration.
+ */
+function readRevisionColumn(row: unknown): ReplacementStateRevision | null {
+  const raw = readColumn(row, REPLACEMENT_STATE_REVISION_COLUMN);
+  return typeof raw === 'string' && raw.trim().length > 0 ? raw : null;
 }
 
 export class SupabaseReplacementStateStore implements ReplacementStateStore {
@@ -150,10 +194,10 @@ export class SupabaseReplacementStateStore implements ReplacementStateStore {
    * `single()` would manufacture a PGRST116 for the most ordinary case this
    * store has.
    */
-  async load(scenarioId: string): Promise<ReplacementState> {
+  async load(scenarioId: string): Promise<LoadedReplacementState> {
     const { data, error } = await this.client
       .from(REPLACEMENT_STATE_TABLE)
-      .select('state')
+      .select(`state, ${REPLACEMENT_STATE_REVISION_COLUMN}`)
       .eq('scenario_id', scenarioId)
       .maybeSingle();
 
@@ -166,9 +210,16 @@ export class SupabaseReplacementStateStore implements ReplacementStateStore {
       );
     }
 
-    if (data === null || data === undefined) return EMPTY_REPLACEMENT_STATE;
+    // No row. `revision: null` is what tells `save` to CREATE rather than
+    // update, and it is the only case in which it may.
+    if (data === null || data === undefined) {
+      return { state: EMPTY_REPLACEMENT_STATE, revision: null };
+    }
 
-    const stored = readStateColumn(data);
+    const stored = readColumn(data, 'state');
+    // Read from the SAME response as the state. A token fetched separately
+    // would describe a row this read never saw.
+    const revision = readRevisionColumn(data);
 
     // The decoder is documented and tested as unthrowable, and everything it
     // can receive here came out of jsonb — plain data whose property access
@@ -193,42 +244,104 @@ export class SupabaseReplacementStateStore implements ReplacementStateStore {
       );
     }
 
-    return decoded;
+    // ⚠ The revision is returned even when the state did not decode. An
+    // unrecognised row is still A ROW: the recovery write must UPDATE it
+    // under its current token, not attempt an INSERT that the primary key
+    // would refuse on every later turn — which would turn one bad row into a
+    // permanently unwritable scenario.
+    return { state: decoded, revision };
   }
 
   /**
-   * Upsert on the primary key. Last-writer-wins, which is safe only while
-   * the turn fence serialises turns per scenario — if that stops being true
-   * this needs `updated_at` as an optimistic-concurrency token instead.
+   * Compare-and-swap on `revision`. NOT an upsert.
    *
-   * `updated_at` is written EXPLICITLY and that is load-bearing: the
-   * column's `DEFAULT now()` fires on INSERT only, so an upsert that omitted
-   * it would leave every scenario's timestamp frozen at row creation and
-   * quietly useless for the one thing a timestamp is for.
+   * ⛔ WHY THE UPSERT HAD TO GO. It was last-writer-wins, and its safety was
+   * asserted from the existence of the turn fence rather than measured. The
+   * fence does not serialise these writes — `admitCurrentTurnFence` returns
+   * `Promise<void>` and never aborts, and its enforcement is scoped to
+   * "ONLY writes that carry a graph". Two turns for one scenario could both
+   * read, and the older snapshot could overwrite the newer one, destroying a
+   * remembered fact, an open proposal or a completed receipt while BOTH
+   * writes reported success. See {@link ReplacementStateStore} for the
+   * contract this now implements.
    *
-   * Client clock, not server clock, because PostgREST cannot express `now()`
-   * inside an upsert body. Flagged to Core: a `BEFORE UPDATE` trigger would
-   * make this server-authoritative, at the cost of a trigger to review.
+   * WHY A DEDICATED `revision` COLUMN AND NOT `updated_at`. `updated_at` is
+   * a CLIENT CLOCK value (PostgREST cannot express `now()` in a write body),
+   * and a concurrency token has exactly two requirements: it must differ
+   * from its predecessor on every write, and it must not collide between
+   * writers. A client timestamp guarantees neither. Two saves inside one
+   * millisecond — an ordinary checkpoint-then-final pair — produce the SAME
+   * ISO string, so the CAS compares equal and admits a write it should have
+   * refused; and this service runs more than one instance, so clock skew can
+   * make the token go BACKWARDS between writers. Both failures are silent
+   * and both look exactly like success. A random uuid minted per write has
+   * neither property, and it leaves `updated_at` meaning the one thing a
+   * timestamp should mean. The cost is one additive column.
+   *
+   * `updated_at` is still written EXPLICITLY, which remains load-bearing:
+   * the column's `DEFAULT now()` fires on INSERT only, so an UPDATE that
+   * omitted it would freeze every scenario's timestamp at row creation.
    */
-  async save(scenarioId: string, state: ReplacementState): Promise<void> {
-    const { error } = await this.client.from(REPLACEMENT_STATE_TABLE).upsert(
-      {
-        scenario_id: scenarioId,
-        state,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'scenario_id' },
-    );
+  async save(
+    scenarioId: string,
+    state: ReplacementState,
+    expectedRevision: ReplacementStateRevision | null,
+  ): Promise<ReplacementStateRevision> {
+    const nextRevision = randomUUID();
+    const updatedAt = new Date().toISOString();
+
+    // `.select()` is not decoration. Without it PostgREST returns no body,
+    // and a conditional UPDATE that matched NOTHING is then indistinguishable
+    // from one that matched a row — which is precisely the silent success
+    // this whole change exists to remove.
+    const { data, error } =
+      expectedRevision === null
+        ? await this.client
+            .from(REPLACEMENT_STATE_TABLE)
+            .insert({
+              scenario_id: scenarioId,
+              state,
+              [REPLACEMENT_STATE_REVISION_COLUMN]: nextRevision,
+              updated_at: updatedAt,
+            })
+            .select(REPLACEMENT_STATE_REVISION_COLUMN)
+        : await this.client
+            .from(REPLACEMENT_STATE_TABLE)
+            .update({
+              state,
+              [REPLACEMENT_STATE_REVISION_COLUMN]: nextRevision,
+              updated_at: updatedAt,
+            })
+            .eq('scenario_id', scenarioId)
+            .eq(REPLACEMENT_STATE_REVISION_COLUMN, expectedRevision)
+            .select(REPLACEMENT_STATE_REVISION_COLUMN);
 
     if (error) {
+      // A primary-key violation on the INSERT arm is the first-turn race: a
+      // row for this scenario appeared between our read and our write. The
+      // database worked; it refused a stale write. That is a CONFLICT, and
+      // calling it a store fault would tell the caller the wrong thing about
+      // whether a retry is sane.
+      if (errCode(error) === UNIQUE_VIOLATION) {
+        throw new ReplacementStateConflictError(scenarioId, expectedRevision, { cause: error });
+      }
       // handleReplacementTurn turns this into a ReplacementTurnFailure and
       // decides what the user may be told, because only it knows whether
       // anything was applied this turn. This layer's job is to fail loudly
       // and carry the code, not to interpret it.
       throw new ReplacementStateStoreError(
-        `${REPLACEMENT_STATE_TABLE} upsert failed for scenario ${scenarioId}: ${errMsg(error)}`,
+        `${REPLACEMENT_STATE_TABLE} write failed for scenario ${scenarioId}: ${errMsg(error)}`,
         { cause: error, code: errCode(error) },
       );
     }
+
+    // ZERO ROWS AFFECTED, NO ERROR. This is the whole point: the filter
+    // matched nothing, so the row moved and the write did not happen. It
+    // must NOT resolve.
+    if (!Array.isArray(data) || data.length === 0) {
+      throw new ReplacementStateConflictError(scenarioId, expectedRevision);
+    }
+
+    return nextRevision;
   }
 }

@@ -43,11 +43,74 @@
 --   fix, reintroduced as a deployment artefact, and intermittent, which
 --   is the worst form.
 --
--- Concurrency: last-writer-wins on scenario_id. Asserted safe from the
---   existence of the turn fence (admitCurrentTurnFence serialises turns
---   per scenario), NOT from a measurement. If any path runs two turns
---   for one scenario concurrently, this needs updated_at as an
---   optimistic-concurrency token instead.
+-- ------------------------------------------------------------
+-- CONCURRENCY: OPTIMISTIC, ON THE `revision` COLUMN.
+--
+-- ⛔ AMENDED. THE PREVIOUS NOTE HERE WAS WRONG AND SAID SO HONESTLY.
+--    It read: "last-writer-wins on scenario_id. Asserted safe from the
+--    existence of the turn fence (admitCurrentTurnFence serialises turns
+--    per scenario), NOT from a measurement."
+--
+--    The assertion is REFUTED at the bytes. admitCurrentTurnFence
+--    (src/orchestrator-v5/turn-fence-prehandler.ts:128-150) returns
+--    Promise<void>, records a generation on the slot, and NEVER ABORTS
+--    the request; and src/orchestrator-v5/turn-fence.ts:23-28 scopes
+--    fence enforcement to "ONLY writes that carry a graph". It claims a
+--    generation. It does not hold a lock, and it does not cover this
+--    table at all. Two turns for one scenario can therefore both read,
+--    and the older snapshot can overwrite the newer one — destroying a
+--    remembered fact, an open proposal, or a completed receipt, while
+--    BOTH writes report success. Reproduced by execution.
+--
+-- WHAT THE DESIGN NOW REQUIRES OF THIS SCHEMA — all three, or the
+-- guarantee is not there:
+--
+--   1. `revision` exists, is NOT NULL, and every row has one. The writer
+--      (SupabaseReplacementStateStore.save) mints a FRESH uuid on every
+--      write and filters the UPDATE on the one it read:
+--          UPDATE v5_replacement_state
+--             SET state = $1, revision = $2, updated_at = $3
+--           WHERE scenario_id = $4 AND revision = $5
+--       RETURNING revision;
+--      Zero rows returned = another turn won = the write is REFUSED and
+--      the caller is told. The DEFAULT is for rows created by anything
+--      other than that writer; it is not the mechanism.
+--
+--   2. The first write for a scenario is an INSERT, not an upsert, so
+--      the PRIMARY KEY is load-bearing: two first turns racing must give
+--      one 23505, which the adapter reports as a conflict. Do not add
+--      ON CONFLICT DO UPDATE anywhere against this table.
+--
+--   3. `revision` must CHANGE on every write. It is deliberately NOT
+--      updated_at: that value comes from a CLIENT clock (PostgREST
+--      cannot express now() in a write body), two saves in the same
+--      millisecond — the ordinary checkpoint-then-final pair — collide,
+--      and this service runs several instances whose clocks can skew
+--      backwards. Either failure admits a stale write silently.
+--
+-- ⚠ NOT REQUIRED, AND DELIBERATELY NOT ADDED: a BEFORE UPDATE trigger
+--    that maintains `revision` server-side. It would be strictly more
+--    correct against a hand-written UPDATE, and it is a trigger for Core
+--    to own, review and version. Core: add one if you would rather not
+--    depend on the writer. The adapter works either way, because it
+--    reads back the value it filtered on rather than assuming it.
+--
+-- ROLLBACK
+--   Forward-only is not available here: the adapter SELECTs `revision`
+--   and writes it, so schema and code must move together.
+--     · To roll back the COLUMN only (leaving data):
+--         ALTER TABLE public.v5_replacement_state DROP COLUMN revision;
+--       This makes every load fail with PGRST204 (unknown column) and
+--       every write fail with it too — loudly, and BEFORE any state is
+--       written. That is the intended direction: the flag
+--       (CEE_REPLACEMENT_COACH_ENABLED) refuses turns rather than
+--       silently reverting to last-writer-wins. Roll the code back in
+--       the same window.
+--     · To roll back this migration entirely (the table holds nothing
+--       any other subsystem reads):
+--         DROP TABLE IF EXISTS public.v5_replacement_state;
+--   Both are safe to run with the flag OFF, which is its default.
+-- ------------------------------------------------------------
 -- ============================================================
 
 -- ------------------------------------------------------------
@@ -70,8 +133,20 @@
 CREATE TABLE IF NOT EXISTS v5_replacement_state (
   scenario_id text PRIMARY KEY,
   state jsonb NOT NULL,
+  -- The optimistic-concurrency token. See CONCURRENCY above: the writer
+  -- mints a fresh value on every write and filters on the one it read,
+  -- so a write built from a stale snapshot matches zero rows and is
+  -- refused. The DEFAULT only covers rows created by something other
+  -- than that writer — it is not the mechanism.
+  revision uuid NOT NULL DEFAULT gen_random_uuid(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
+
+-- Idempotent re-run against a table created before `revision` existed.
+-- CREATE TABLE IF NOT EXISTS above is a no-op on an existing table, so
+-- without this the column would silently never appear.
+ALTER TABLE public.v5_replacement_state
+  ADD COLUMN IF NOT EXISTS revision uuid NOT NULL DEFAULT gen_random_uuid();
 
 -- ------------------------------------------------------------
 -- 2. ⚠ ADDED BY THE IMPLEMENTING LANE — NOT IN THE ORIGINAL REQUEST.
@@ -112,10 +187,20 @@ GRANT  ALL ON public.v5_replacement_state TO service_role;
 COMMENT ON TABLE public.v5_replacement_state IS
   'V5 replacement conversation layer: durable per-scenario state for the '
   'replacement controller (CEE_REPLACEMENT_COACH_ENABLED). One row per '
-  'scenario, last-writer-wins, written only by the service role via '
-  'SupabaseReplacementStateStore. Must be visible to every instance '
-  'before the next turn starts — the next turn''s "yes, make that update '
-  'now" resolves against it.';
+  'scenario, written only by the service role via '
+  'SupabaseReplacementStateStore, under OPTIMISTIC CONCURRENCY on the '
+  '`revision` column — never last-writer-wins, and never ON CONFLICT DO '
+  'UPDATE. Must be visible to every instance before the next turn starts '
+  '— the next turn''s "yes, make that update now" resolves against it.';
+
+COMMENT ON COLUMN public.v5_replacement_state.revision IS
+  'Optimistic-concurrency token. The writer mints a fresh uuid on every '
+  'write and filters its UPDATE on the value it read; zero rows matched '
+  'means another turn wrote first and the write is REFUSED. Opaque — '
+  'compared for equality only, never ordered. Deliberately not updated_at, '
+  'which is a client clock: two saves in one millisecond collide and '
+  'multi-instance clock skew can move it backwards, and either admits a '
+  'stale write silently.';
 
 COMMENT ON COLUMN public.v5_replacement_state.state IS
   'ReplacementState: { version: 1, memory, proposals }. Read through '
@@ -135,7 +220,22 @@ COMMENT ON COLUMN public.v5_replacement_state.updated_at IS
 --     FROM information_schema.columns
 --    WHERE table_schema = 'public' AND table_name = 'v5_replacement_state';
 --     -- Expected: scenario_id text NO null; state jsonb NO null;
+--     --           revision uuid NO gen_random_uuid();
 --     --           updated_at timestamptz NO now().
+--
+--   -- The concurrency guarantee itself, which the column's existence does
+--   -- NOT establish. Run both arms; a store that admits the first is
+--   -- last-writer-wins whatever the schema says.
+--   INSERT INTO v5_replacement_state (scenario_id, state)
+--        VALUES ('probe-cas', '{"version":1,"memory":{"items":[]},"proposals":{"proposals":[]}}');
+--   -- stale arm — expect UPDATE 0
+--   UPDATE v5_replacement_state SET state = '{"stale":true}', revision = gen_random_uuid()
+--    WHERE scenario_id = 'probe-cas' AND revision = '00000000-0000-0000-0000-000000000000';
+--   -- current arm (the DISCRIMINATING control: this one must be UPDATE 1)
+--   UPDATE v5_replacement_state SET state = '{"fresh":true}', revision = gen_random_uuid()
+--    WHERE scenario_id = 'probe-cas'
+--      AND revision = (SELECT revision FROM v5_replacement_state WHERE scenario_id = 'probe-cas');
+--   DELETE FROM v5_replacement_state WHERE scenario_id = 'probe-cas';
 --
 --   SELECT relrowsecurity FROM pg_class
 --    WHERE oid = 'public.v5_replacement_state'::regclass;

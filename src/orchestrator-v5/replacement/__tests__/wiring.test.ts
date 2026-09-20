@@ -12,8 +12,8 @@ import {
 } from '../wiring.js';
 
 const fake: ReplacementStateStore = {
-  load: async () => EMPTY_REPLACEMENT_STATE,
-  save: async () => undefined,
+  load: async () => ({ state: EMPTY_REPLACEMENT_STATE, revision: null }),
+  save: async () => 'rev-1',
 };
 
 afterEach(() => {
