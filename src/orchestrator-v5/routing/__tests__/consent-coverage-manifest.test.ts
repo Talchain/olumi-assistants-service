@@ -174,6 +174,31 @@ describe('DERIVED: the manifest of durable graph writers OUTSIDE the executor co
     // affordance that moves cells the user did not individually name needs its
     // own answer. The mutation referee is still NOT evidence of consent.
     INTERNAL_OPTION_WRITER,
+    // ADMITTED — the replacement conversation layer's `applyOperations` port.
+    // A BATCH writer, and therefore exactly the case the entry above says must
+    // not inherit the per-cell exemption. So it is admitted on its own terms:
+    //
+    // WHAT SUPPLIES CONSENT. Not this module, and not the mutation referee
+    // (which "is still NOT evidence of consent", above, and is deliberately
+    // not invoked there). The controller that injects this port refuses
+    // `open → applied` outright; consent must name the user turn that gave it;
+    // the operations applied are taken from the store EXACTLY as they were
+    // shown, never re-derived from the message; and an acceptance naming a
+    // number the offer does not itself carry is refused. So consent is settled
+    // before the call, over a set the user saw, and bound to the model revision
+    // it was given against — which this module re-checks against the STORE
+    // rather than trusting the controller's snapshot.
+    //
+    // WHY `detectWithheldConsent` STILL COULD NOT COVER IT: that predicate
+    // reads the user's own words on a turn, and this port is called with a
+    // proposal id and an operation list, on a turn whose message the controller
+    // has already adjudicated. Running it here would ask a question that has
+    // been answered, with less evidence than the layer that answered it.
+    //
+    // NOT REACHABLE TODAY: the consuming controller is behind a default-off
+    // flag whose route injects no write path, so nothing constructs this port
+    // in production. Recorded now rather than on the day it is wired.
+    'orchestrator-v5/apply-operations.ts',
   ];
 
   function walk(dir: string, out: string[] = []): string[] {
