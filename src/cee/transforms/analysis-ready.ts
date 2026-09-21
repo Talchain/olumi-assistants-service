@@ -708,22 +708,55 @@ export function buildAnalysisReadyPayload(
   graph: GraphV3T,
   context: AnalysisReadyContext = {}
 ): AnalysisReadyPayloadT & { _fallback_meta?: AnalysisReadyFallbackMeta } {
-  // Keep qualitative option→risk hypotheses on their existing editable edge.
-  // A causal coefficient is not an intervention level; other numeric effects
-  // cannot resolve this missing mapping. Derive from the graph so no optional
-  // flag or stale options[] mirror can accidentally grant calculation readiness.
+  // Keep qualitative option→risk hypotheses on their existing editable edge, and
+  // DISCLOSE them — but never enforce one as a blocker.
+  //
+  // ⭐⭐ WHY THIS NO LONGER DEMOTES, MEASURED RATHER THAN ARGUED. The demotion
+  // that used to live here had no correct branch:
+  //
+  //   1. It could not distinguish an edge the USER drew from one the product
+  //      drew itself, because there is nothing to distinguish. NO non-test
+  //      producer in this tree writes `origin: "user"` on an edge (contrast
+  //      control: `origin: "repair"` has exactly one, `fixStatusQuoConnectivity`),
+  //      and the V3 transform defaults to `"ai"` (`schema-v3.ts:1225`). Every
+  //      option→risk edge reaching readiness is therefore machine-authored, so
+  //      the refusal fell ENTIRELY on the product's own hypotheses — the precise
+  //      thing ROADMAP 2.1266 forbids twenty lines below: "THE PRODUCT MUST NOT
+  //      BILL THE USER FOR ITS OWN INVENTIONS."
+  //
+  //   2. The only case it could legitimately have caught — an option we know
+  //      nothing about — is ALREADY caught upstream by `computeOptionStatus`
+  //      (Priority 1: no interventions). Pinned by a coverage test, so this is
+  //      proven to lose nothing rather than assumed to.
+  //
+  //   3. The edge is a no-op at the compute in any case: PLoT strips every edge
+  //      incident to an `option` node before the engine
+  //      (`plot-lite-service` `src/normalisation/option-filter.ts:93-97`).
+  //      `option.interventions` is the only channel by which an option touches a
+  //      factor. STATIC READ of that repo — why this is correct, not why it is
+  //      safe; what makes it safe is the coverage test above.
+  //
+  // WITNESS: Paul's manual test, 21 Sep 2026, served `01f282d`. Three options,
+  // every one carrying two fully resolved interventions; two demoted here, and
+  // the payload reported `may_run: false` while its own reason set said
+  // "nothing is required of you".
+  //
+  // ⛔ `unresolved_targets` IS DELIBERATELY NOT WRITTEN. It is a BLOCKER carrier
+  // with a second producer (`extraction/intervention-extractor.ts`, meaning "an
+  // intervention names a factor absent from the graph"), and writing it here
+  // would re-demote through `computeOptionStatus` Priority 2 — restoring the
+  // refusal by another route, under someone else's meaning. The question is the
+  // disclosure; the target list is the demand.
   const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
   options = options.map((option) => {
-    const unresolved = graph.edges.filter((edge) =>
+    const unquantified = graph.edges.filter((edge) =>
       edge.from === option.id && nodeById.get(edge.to)?.kind === "risk"
       && edge.edge_type !== "bidirected",
     );
-    if (unresolved.length === 0) return option;
+    if (unquantified.length === 0) return option;
     return {
       ...option,
-      status: "needs_user_mapping",
-      unresolved_targets: [...new Set([...(option.unresolved_targets ?? []), ...unresolved.map((edge) => edge.to)])],
-      user_questions: [...new Set([...(option.user_questions ?? []), ...unresolved.map((edge) =>
+      user_questions: [...new Set([...(option.user_questions ?? []), ...unquantified.map((edge) =>
         `How does ${option.label} change ${nodeById.get(edge.to)?.label ?? edge.to}? The proposed relationship is retained, but its mechanism and value still need clarification.`,
       )])],
     };
@@ -1272,8 +1305,18 @@ export function buildAnalysisReadyPayload(
     ...pickGoalThresholdTrio(goalNode),
   };
 
-  // Add user_questions when status is needs_user_mapping
-  // (uniqueQuestions is guaranteed to be non-empty due to fallback above)
+  // ⭐ THE DISCLOSURE IS EMITTED ON ITS OWN TERMS, NOT BEHIND THE BLOCKER.
+  //
+  // This used to be gated ENTIRELY on `payload.status === "needs_user_mapping"`,
+  // which coupled the explanation to the refusal: any change that lifted a block
+  // silently DELETED the sentence explaining why the relationship is unquantified,
+  // leaving the user with a Run affordance and no account of what is missing. The
+  // two are now independent — the block is a demand, the question is information.
+  //
+  // The validator's rule is one-directional (`needs_user_mapping` REQUIRES
+  // questions; questions do not imply `needs_user_mapping`), and no consumer in
+  // the tree reads the presence of `user_questions` as "blocked" — derived, with
+  // the full consumer list, not assumed. So widening emission cannot trip it.
   if (payload.status === "needs_user_mapping") {
     // Generate questions for unreachable factors if needed
     if (unreachableControllableBlockers.length > 0 && uniqueQuestions.length === 0) {
@@ -1284,6 +1327,8 @@ export function buildAnalysisReadyPayload(
         `Which options should affect: ${factorLabels.join(", ")}?`
       );
     }
+  }
+  if (uniqueQuestions.length > 0) {
     payload.user_questions = uniqueQuestions;
   }
 

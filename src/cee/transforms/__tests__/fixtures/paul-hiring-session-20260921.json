@@ -1,0 +1,462 @@
+{
+ "_README": [
+  "CAPTURE-DERIVED REGRESSION WITNESS \u2014 Paul's manual test, 21 Sep 2026.",
+  "Source: olumi-debug-65fdde46-20260921.json, served CEE build 01f282d.",
+  "Observed at the wire: analysis_ready.may_run=false, status=needs_user_mapping, NO blockers key,",
+  "  two of three options blocked though all three carry two resolved interventions.",
+  "\u26a0 `category` IS CARRIED AND IS LOAD-BEARING: 'Developer Hiring Market Tightness' is `external`,",
+  "  so it must NOT trip the unreachable-controllable blocker. An earlier draft of this fixture",
+  "  dropped `category`, a DIFFERENT branch fired, and the test measured the wrong refusal.",
+  "LIMITATION, STATED: the bundle carries the PLoT-shaped graph, which has NO `origin` and no",
+  "  `edge_type`. `origin: \"ai\"` is the V3 transform's documented default (`schema-v3.ts:1225`)",
+  "  and NO non-test producer writes `origin: \"user\"` (measured; contrast control: `\"repair\"`",
+  "  has one producer). Intervention `source`/`target_match`/`value_confidence` are required by",
+  "  InterventionV3 and absent from the bundle; `match_type: \"exact_id\"` is load-bearing because",
+  "  `\"semantic\"` would demote via computeOptionStatus Priority 5 and the witness would not reproduce.",
+  "`edge_type: \"directed\"` and `exists_probability` are required by GraphV3 and come from the bundle's `belief_exists`/`exists_probability`; the PLoT-shaped export does not name edge_type. \"directed\" is load-bearing: the demotion filter excluded \"bidirected\"."
+ ],
+ "goal_node_id": "0dde265b",
+ "graph": {
+  "edges": [
+   {
+    "edge_type": "directed",
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "from": "00f89f37",
+    "origin": "ai",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "to": "5fa16524"
+   },
+   {
+    "edge_type": "directed",
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "from": "00f89f37",
+    "origin": "ai",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "to": "8b8722a8"
+   },
+   {
+    "edge_type": "directed",
+    "effect_direction": "negative",
+    "exists_probability": 0.8,
+    "from": "0b1c1aa5",
+    "origin": "ai",
+    "strength": {
+     "mean": 0.45,
+     "std": 0.10799999999999998
+    },
+    "to": "0dde265b"
+   },
+   {
+    "edge_type": "directed",
+    "effect_direction": "positive",
+    "exists_probability": 0.8,
+    "from": "26219e6f",
+    "origin": "ai",
+    "strength": {
+     "mean": 0.49259259259259247,
+     "std": 0.11822222222222217
+    },
+    "to": "2fd31114"
+   },
+   {
+    "edge_type": "directed",
+    "effect_direction": "positive",
+    "exists_probability": 0.8,
+    "from": "2fad8248",
+    "origin": "ai",
+    "strength": {
+     "mean": 0.5,
+     "std": 0.11999999999999998
+    },
+    "to": "0dde265b"
+   },
+   {
+    "edge_type": "directed",
+    "effect_direction": "positive",
+    "exists_probability": 0.8,
+    "from": "2fd31114",
+    "origin": "ai",
+    "strength": {
+     "mean": 0.85,
+     "std": 0.20399999999999996
+    },
+    "to": "0dde265b"
+   },
+   {
+    "edge_type": "directed",
+    "effect_direction": "positive",
+    "exists_probability": 0.8,
+    "from": "5fa16524",
+    "origin": "ai",
+    "strength": {
+     "mean": 0.3,
+     "std": 0.072
+    },
+    "to": "c8acb70a"
+   },
+   {
+    "edge_type": "directed",
+    "effect_direction": "positive",
+    "exists_probability": 0.8,
+    "from": "8b8722a8",
+    "origin": "ai",
+    "strength": {
+     "mean": 0.75,
+     "std": 0.17999999999999997
+    },
+    "to": "2fad8248"
+   },
+   {
+    "edge_type": "directed",
+    "effect_direction": "positive",
+    "exists_probability": 0.8,
+    "from": "8b8722a8",
+    "origin": "ai",
+    "strength": {
+     "mean": 0.4574074074074074,
+     "std": 0.10977777777777775
+    },
+    "to": "2fd31114"
+   },
+   {
+    "edge_type": "directed",
+    "effect_direction": "negative",
+    "exists_probability": 0.8,
+    "from": "9036e025",
+    "origin": "ai",
+    "strength": {
+     "mean": 0.5,
+     "std": 0.11999999999999998
+    },
+    "to": "c8acb70a"
+   },
+   {
+    "edge_type": "directed",
+    "effect_direction": "positive",
+    "exists_probability": 0.8,
+    "from": "be215545",
+    "origin": "ai",
+    "strength": {
+     "mean": 0.55,
+     "std": 0.132
+    },
+    "to": "0b1c1aa5"
+   },
+   {
+    "edge_type": "directed",
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "from": "be215545",
+    "origin": "ai",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "to": "26219e6f"
+   },
+   {
+    "edge_type": "directed",
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "from": "be215545",
+    "origin": "ai",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "to": "5fa16524"
+   },
+   {
+    "edge_type": "directed",
+    "effect_direction": "negative",
+    "exists_probability": 0.8,
+    "from": "c8acb70a",
+    "origin": "ai",
+    "strength": {
+     "mean": 0.35,
+     "std": 0.08399999999999998
+    },
+    "to": "0dde265b"
+   },
+   {
+    "edge_type": "directed",
+    "effect_direction": "positive",
+    "exists_probability": 0.8,
+    "from": "e70301eb",
+    "origin": "ai",
+    "strength": {
+     "mean": 0.2,
+     "std": 0.05
+    },
+    "to": "0b1c1aa5"
+   },
+   {
+    "edge_type": "directed",
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "from": "e70301eb",
+    "origin": "ai",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "to": "5fa16524"
+   },
+   {
+    "edge_type": "directed",
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "from": "e70301eb",
+    "origin": "ai",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "to": "8b8722a8"
+   },
+   {
+    "edge_type": "directed",
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "from": "f937361a",
+    "origin": "ai",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "to": "00f89f37"
+   },
+   {
+    "edge_type": "directed",
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "from": "f937361a",
+    "origin": "ai",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "to": "be215545"
+   },
+   {
+    "edge_type": "directed",
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "from": "f937361a",
+    "origin": "ai",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "to": "e70301eb"
+   }
+  ],
+  "nodes": [
+   {
+    "id": "0b1c1aa5",
+    "kind": "risk",
+    "label": "Coordination Overhead Risk"
+   },
+   {
+    "id": "0dde265b",
+    "kind": "goal",
+    "label": "Increase Productivity"
+   },
+   {
+    "category": "controllable",
+    "display_value": "Moderate (0.35)",
+    "id": "26219e6f",
+    "kind": "factor",
+    "label": "Delivery Throughput",
+    "observed_state": {
+     "declared_scale": "unit_interval",
+     "extractionType": "inferred",
+     "factor_type": "other",
+     "source": "cee_inference",
+     "uncertainty_drivers": [],
+     "value": 0.35
+    }
+   },
+   {
+    "id": "2fad8248",
+    "kind": "outcome",
+    "label": "Code Quality & Architecture"
+   },
+   {
+    "id": "2fd31114",
+    "kind": "outcome",
+    "label": "Team Productivity Gain"
+   },
+   {
+    "category": "controllable",
+    "display_value": "\u00a380k",
+    "id": "5fa16524",
+    "kind": "factor",
+    "label": "Hiring & Salary Cost",
+    "observed_state": {
+     "declared_scale": "unit_interval",
+     "extractionType": "inferred",
+     "factor_type": "other",
+     "raw_value": 80000,
+     "source": "cee_inference",
+     "uncertainty_drivers": [],
+     "unit": "\u00a3",
+     "value": 0.4
+    }
+   },
+   {
+    "category": "controllable",
+    "display_value": "40%",
+    "id": "8b8722a8",
+    "kind": "factor",
+    "label": "Team Technical Capability",
+    "observed_state": {
+     "declared_scale": "unit_interval",
+     "extractionType": "inferred",
+     "factor_type": "other",
+     "raw_value": 40,
+     "source": "cee_inference",
+     "uncertainty_drivers": [],
+     "unit": "%",
+     "value": 0.4
+    }
+   },
+   {
+    "category": "external",
+    "id": "9036e025",
+    "kind": "factor",
+    "label": "Developer Hiring Market Tightness"
+   },
+   {
+    "id": "c8acb70a",
+    "kind": "risk",
+    "label": "Onboarding & Ramp-Up Delay"
+   },
+   {
+    "id": "f937361a",
+    "kind": "decision",
+    "label": "Question"
+   },
+   {
+    "id": "00f89f37",
+    "interventions": {
+     "5fa16524": {
+      "display_value": "\u00a395k",
+      "raw_value": 95000,
+      "source": "cee_hypothesis",
+      "target_match": {
+       "confidence": "high",
+       "match_type": "exact_id",
+       "node_id": "5fa16524"
+      },
+      "unit": "\u00a3",
+      "value": 0.475,
+      "value_confidence": "medium"
+     },
+     "8b8722a8": {
+      "display_value": "65%",
+      "raw_value": 65,
+      "source": "cee_hypothesis",
+      "target_match": {
+       "confidence": "high",
+       "match_type": "exact_id",
+       "node_id": "8b8722a8"
+      },
+      "unit": "%",
+      "value": 0.65,
+      "value_confidence": "medium"
+     }
+    },
+    "is_baseline": false,
+    "kind": "option",
+    "label": "Hire One Senior Developer"
+   },
+   {
+    "id": "be215545",
+    "interventions": {
+     "26219e6f": {
+      "display_value": "0.75",
+      "raw_value": 0.75,
+      "source": "cee_hypothesis",
+      "target_match": {
+       "confidence": "high",
+       "match_type": "exact_id",
+       "node_id": "26219e6f"
+      },
+      "value": 0.75,
+      "value_confidence": "medium"
+     },
+     "5fa16524": {
+      "display_value": "\u00a3130k",
+      "raw_value": 130000,
+      "source": "cee_hypothesis",
+      "target_match": {
+       "confidence": "high",
+       "match_type": "exact_id",
+       "node_id": "5fa16524"
+      },
+      "unit": "\u00a3",
+      "value": 0.65,
+      "value_confidence": "medium"
+     }
+    },
+    "is_baseline": false,
+    "kind": "option",
+    "label": "Two Developers"
+   },
+   {
+    "id": "e70301eb",
+    "interventions": {
+     "5fa16524": {
+      "display_value": "\u00a390k",
+      "raw_value": 90000,
+      "source": "cee_hypothesis",
+      "target_match": {
+       "confidence": "high",
+       "match_type": "exact_id",
+       "node_id": "5fa16524"
+      },
+      "unit": "\u00a3",
+      "value": 0.45,
+      "value_confidence": "medium"
+     },
+     "8b8722a8": {
+      "display_value": "85%",
+      "raw_value": 85,
+      "source": "cee_hypothesis",
+      "target_match": {
+       "confidence": "high",
+       "match_type": "exact_id",
+       "node_id": "8b8722a8"
+      },
+      "unit": "%",
+      "value": 0.85,
+      "value_confidence": "medium"
+     }
+    },
+    "is_baseline": false,
+    "kind": "option",
+    "label": "Hire a Tech Lead"
+   }
+  ],
+  "schema_version": "3.0"
+ },
+ "observed_wire": {
+  "blockers_key_present": false,
+  "may_run": false,
+  "option_status": {
+   "Hire One Senior Developer": "ready",
+   "Hire a Tech Lead": "needs_user_mapping",
+   "Two Developers": "needs_user_mapping"
+  },
+  "status": "needs_user_mapping"
+ }
+}
