@@ -121,6 +121,41 @@ describe('declaration vs inference — agree, absent, contradict', () => {
   // asserted to behave as it did then.
   const unitOf = (n: Record<string, unknown>) => n.unit;
 
+  it('⭐ DISCRIMINATING CASE — a SURVIVING ratio declaration on a NON-% unit KEEPS its unit', () => {
+    // ⚠⚠ THE ONLY SHAPE WHERE THE TWO SPELLINGS OF THIS LIMB DISAGREE, and
+    // without it the limb is unguarded: an independent reviewer deleted the
+    // `resolved === "ratio"` disjunct and ALL 508 tests stayed green, because
+    // every other case uses data where the inference and the resolved value
+    // give the same answer. That is the third time this one expression changed
+    // with nothing able to notice.
+    //
+    // `unit: "engineers"` means `declaredScaleOf` cannot reach its `ratio` arm
+    // (`unit === "%"` only), so it ABSTAINS and the declaration survives. Keyed
+    // on the resolved scale, the withhold would fire and delete the unit —
+    // measured, that rendered "0.45 to 1" where base rendered
+    // "0.45 to 1 engineers". Keyed on the inference, as it is, the unit stays.
+    //
+    // ⭐ And the direction matters: the withholding exists to stop a MAGNITUDE
+    // SNIFF rendering a wrong '%'. A surviving declaration is what makes the
+    // formatter skip that sniff, so withholding there destroys the correct
+    // answer to guard against a guess that no longer happens.
+    const n = afterRepair({ value: 0.9, raw_value: 0.9, unit: 'engineers' }, { declared_scale: 'ratio' });
+    expect(n.declared_scale, 'the inference abstains, so the declaration stands').toBe('ratio');
+    expect(unitOf(n), 'a non-% unit is never the hazard this withholding guards').toBe('engineers');
+  });
+
+  it('CONTRADICTION (raw_count vs inferred ratio) clears — the pair the corpus was missing', () => {
+    // The enum cell an independent review found uncovered. `unit: "%"`,
+    // `value > 1`, `raw_value !== value` is the only shape that infers `ratio`.
+    const n = afterRepair(
+      { value: 1.68, unit: '%', raw_value: 168 },
+      { declared_scale: 'raw_count', observed_state: { value: 1.68, declared_scale: 'raw_count' } },
+    );
+    expect(n.declared_scale).toBeUndefined();
+    expect((n.observed_state as Record<string, unknown> | undefined)?.declared_scale).toBeUndefined();
+    expect(unitOf(n), 'the inference said ratio, so the sniff hazard is real and the unit is withheld').toBeUndefined();
+  });
+
   it('WITHHOLD — declared unit_interval contradicted by an inferred ratio still withholds', () => {
     // The regression case. Keying the withhold on the RESOLVED scale alone
     // clears the declaration and then shows the unit, which is the render the

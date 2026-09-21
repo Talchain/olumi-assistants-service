@@ -702,29 +702,43 @@ export function handleUnreachableFactors(
       // two branches read as independent conditions when they are in fact the
       // two halves of one decision. Nested, the shape says what it does: a
       // stated unit either displays or is withheld-and-recorded.
-      // ⭐⭐ WITHHOLD ON *ANY* REASON TO THINK RATIO — resolved OR inferred.
+      // ⭐⭐ THE WITHHOLD STAYS KEYED ON THE *INFERENCE*, WHICH IS EXACTLY WHAT
+      // IT READ BEFORE THIS CHANGE. It is deliberately NOT the resolved scale,
+      // and I got this wrong twice before measuring it.
       //
-      // ⚠ THE OBVIOUS VERSION OF THIS LINE IS A REGRESSION, and I wrote it
-      // before catching it. `scale` used to be whatever `declaredScaleOf`
-      // returned; keying the withhold on the RESOLVED value alone looks like
-      // the tidy one-source fix, and it silently changes one pre-existing case:
+      // ⚠ WHY THE RESOLVED SCALE IS THE WRONG KEY, at the bytes:
       //
-      //     declared `unit_interval` + inferred `ratio`
-      //       before -> inference won, unit WITHHELD
-      //       resolved-only -> contradiction clears it, unit SHOWN
+      //   1. THE HAZARD IS `%`-ONLY, AND THE OLD GATE WAS TOTAL BY
+      //      CONSTRUCTION. `declaredScaleOf`'s only `ratio` arm is
+      //      `unit === "%" && value > 1`, so the withhold could never fire on a
+      //      non-percent unit. A MODEL DECLARATION IS UNIT-BLIND, so keying on
+      //      it suppressed `engineers`, `£`, `months`, `x` — measured: a stated
+      //      figure with `unit: "engineers"` declared `ratio` rendered
+      //      "0.45 to 1 engineers" at base and "0.45 to 1" here. Declaring the
+      //      scale cost the user their unit. The repair row it logs is also
+      //      false for those: it says "the '%' formatter resolves bounds by
+      //      magnitude", and that branch is gated on `unit === "%"`.
       //
-      // and showing it is precisely what the withholding exists to prevent —
-      // `display-value.ts` resolves a '%' by MAGNITUDE SNIFF, so a ratio-scale
-      // prior of [0.56, 1.68] renders "56% to 1.68%". Clearing the declaration
-      // is the right answer to "what scale is this?"; it is NOT a licence to
-      // start rendering a unit we previously judged unsafe. Two questions
-      // (trap 21): what do we CLAIM the scale is, and is it safe to show the
-      // unit. The contradiction makes us less certain, not more.
+      //   2. A SURVIVING DECLARATION MAKES THE FORMATTER SAFE — which INVERTS
+      //      the reason for withholding. `schema-v3.ts` passes
+      //      `declared_scale` into `synthesiseRangeDisplayValue` and
+      //      `display-value.ts` uses it to pick the multiplier and SKIP the
+      //      magnitude sniff. So where a `ratio` declaration stands, the sniff
+      //      never happens and the unit is safe to show; withholding there
+      //      throws away the correct render ("56% to 168%" became
+      //      "0.56 to 1.68").
       //
-      // The disjunction preserves every pre-existing case exactly, and answers
-      // the one new case (a declaration surviving an abstention) in the safe
-      // direction. Pinned in `declaration-beats-inference.test.ts`.
-      const withholdUnit = (node as any).declared_scale === "ratio" || inferred === "ratio";
+      // The hazard is "the formatter has NO declaration and must sniff" — the
+      // cleared and undeclared cases — and that is precisely `inferred`. Two
+      // questions, one expression (trap 21): what we CLAIM the scale is, and
+      // whether the formatter is about to guess.
+      //
+      // ⚠ AND IT NEEDS ITS OWN DISCRIMINATING CASE, because the behavioural
+      // tests cannot see this limb: an independent reviewer deleted the extra
+      // disjunct and all 508 tests stayed green. A surviving `ratio`
+      // declaration on a NON-`%` unit is the only shape where the two spellings
+      // disagree, and it is pinned below.
+      const withholdUnit = inferred === "ratio";
       if (data.unit !== undefined) {
         if (!withholdUnit) {
           (node as any).unit = data.unit;
