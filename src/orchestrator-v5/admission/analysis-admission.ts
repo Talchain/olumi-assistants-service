@@ -1045,30 +1045,62 @@ function deriveMode(
  * DERIVED SHAPE: `Record<SemanticVerdictCause, …>` means a new cause FAILS
  * TYPECHECK here rather than falling into a silent default (trap 12).
  */
+/**
+ * ⛔⛔ THESE MESSAGES MAY NOT FRAME OLUMI'S JOB AS NAMING A LEADER.
+ *
+ * All four previously did — "no comparison to draw a leader from", "no option
+ * can be called the leader" (x2), and worst, "so a leading option can be
+ * named", which promises a leader once the conditions are met. Measured on the
+ * live wire 21 Sep 2026: the `all_machine_authored` message was the ONLY
+ * leader-framed string in a real staging turn's payload, so this is the copy a
+ * user actually meets when the gate withholds.
+ *
+ * Paul's standing product ruling: Olumi does not select a winner or recommend
+ * an option, in any wording. It may say an option is more likely to produce a
+ * stated outcome or to meet the user's goal, and what evidence would change
+ * that. The claim is always about the LIKELIHOOD OF AN OUTCOME, never the
+ * superiority of an option — so "no leader yet" is the wrong refusal: it
+ * implies a leader exists and is being withheld.
+ *
+ * ⚠ THE TRUTH CONDITIONS ARE UNCHANGED. Each message says exactly what it said
+ * before about what is missing and what the user must do; only the claim being
+ * withheld is restated in goal-likelihood terms.
+ *
+ * ⭐ `comparative_leader` (the MODE enum) is deliberately untouched. It is an
+ * internal identifier, never shown, and the live prompt makes the same
+ * distinction: "winner and runner_up are INPUT KEY NAMES ONLY".
+ */
 const SEMANTIC_REASON: Readonly<
   Record<SemanticVerdictCause, { code: AdmissionReasonCode; message: string }>
 > = {
   no_comparison_substrate: {
     code: 'NO_COMPARISON_SUBSTRATE',
     message:
-      'Nothing in this model connects the options to your goal, so there is no comparison to draw a leader from.',
+      'Nothing in this model connects the options to your goal, so this run cannot say how likely any option is to reach it.',
   },
   all_machine_authored: {
     code: 'CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED',
     message:
-      'Every estimate this comparison rests on is Olumi’s, not yours. Figures can be shown as provisional, but no option can be called the leader and no result can be called stable or robust until you have set at least one of them.',
+      'Every estimate this comparison rests on is Olumi’s, not yours. Figures can be shown as provisional, but until you have set at least one of them this run cannot say how likely any option is to reach your goal, and no result can be called stable or robust.',
   },
   user_stated_not_material: {
     code: 'USER_STATED_PARAMETERS_NOT_MATERIAL',
     message:
-      'The values you have set sit outside what this comparison turns on, so every estimate behind it is still Olumi’s. Figures can be shown as provisional, but no option can be called the leader until you have set a value on a factor one of the options changes, or somewhere on the chain from there to your goal.',
+      'The values you have set sit outside what this comparison turns on, so every estimate behind it is still Olumi’s. Figures can be shown as provisional, but this run cannot say how likely any option is to reach your goal until you have set a value on a factor one of the options changes, or somewhere on the chain from there to your goal.',
   },
   material_user_stated: {
     code: 'CONFIDENCE_PARAMETERS_PARTLY_USER_STATED',
     message:
-      'At least one of the estimates this comparison rests on is yours, so a leading option can be named.',
+      'At least one of the estimates this comparison rests on is yours, so this run can say how likely each option is to reach your goal.',
   },
 };
+
+/**
+ * Test-visibility alias. Exported so the doctrine guard asserts against the
+ * MAP THAT IS SERVED rather than a second copy that could drift from it
+ * (trap 12). Not referenced by production code.
+ */
+export const SEMANTIC_REASON_FOR_TESTS = SEMANTIC_REASON;
 
 /**
  * The sentence for each MODE.

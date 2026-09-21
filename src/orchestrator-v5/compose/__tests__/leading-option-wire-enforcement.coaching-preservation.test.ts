@@ -273,12 +273,12 @@ const CAPTURED = {
         {
           "field": "semantic_quality_sufficient",
           "code": "USER_STATED_PARAMETERS_NOT_MATERIAL",
-          "message": "The values you have set sit outside what this comparison turns on, so every estimate behind it is still Olumi’s. Figures can be shown as provisional, but no option can be called the leader until you have set a value on a factor one of the options changes, or somewhere on the chain from there to your goal."
+          "message": "The values you have set sit outside what this comparison turns on, so every estimate behind it is still Olumi’s. Figures can be shown as provisional, but this run cannot say how likely any option is to reach your goal until you have set a value on a factor one of the options changes, or somewhere on the chain from there to your goal."
         },
         {
           "field": "permitted_analysis_mode",
           "code": "USER_STATED_PARAMETERS_NOT_MATERIAL",
-          "message": "The values you have set sit outside what this comparison turns on, so every estimate behind it is still Olumi’s. Figures can be shown as provisional, but no option can be called the leader until you have set a value on a factor one of the options changes, or somewhere on the chain from there to your goal."
+          "message": "The values you have set sit outside what this comparison turns on, so every estimate behind it is still Olumi’s. Figures can be shown as provisional, but this run cannot say how likely any option is to reach your goal until you have set a value on a factor one of the options changes, or somewhere on the chain from there to your goal."
         }
       ],
       "graph_hash": "f0944ec2af452dc9adff8d6841c122f58d2e1b0a6fd73b9a09d67e416b20bae0",

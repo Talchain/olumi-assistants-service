@@ -9,7 +9,7 @@
  *
  *     analysis_ready.analysis_admission.permitted_analysis_mode = "comparative_leader"
  *     reason CONFIDENCE_PARAMETERS_PARTLY_USER_STATED — "At least one of the
- *     estimates this comparison rests on is yours, so a leading option can be named."
+ *     estimates this comparison rests on is yours, so this run can say how likely each option is to reach your goal."
  *
  *     blocks[].summary — "... Nothing in it is confirmed yet, so no option is
  *     put forward and no result is called reliable."
