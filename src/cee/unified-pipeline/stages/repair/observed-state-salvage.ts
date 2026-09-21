@@ -60,6 +60,7 @@ export interface ObservedStateSalvageResult {
   declined_reason?:
     | "issue_outside_observed_state"
     | "no_observed_state_issues"
+    | "would_strip_constraint"
     | "reparse_still_failed";
 }
 
@@ -112,6 +113,36 @@ export function salvageObservedState(
   const nodes = Array.isArray(graph?.nodes) ? (graph!.nodes as Array<Record<string, unknown>>) : null;
   if (nodes === null) {
     return { salvaged: false, stripped: [], declined_reason: "no_observed_state_issues" };
+  }
+
+  // ⛔ A CONSTRAINT NODE IS NEVER STRIPPED — the salvage declines wholesale and
+  // the 500 stands. A constraint's `observed_state` carries its THRESHOLD: shed
+  // it and the node still renders, so the user is shown a model whose own limit
+  // has quietly stopped being expressed. For a brief like "£20k MRR within 12
+  // months while keeping monthly churn under 4%", that is the user's stated
+  // constraint vanishing with no refusal to see.
+  //
+  // ⚠ THIS IS A BET ON AN UNMEASURED POPULATION, DECLINED. The complete Render
+  // census over 30h (hasMore:false) found 18 `structural_parse.failed` events,
+  // 22 of 22 issues at `observed_state`/`invalid_union` — and it CANNOT say how
+  // many were constraints, because every issue message is the bare string
+  // "Invalid input" and `path` carries the node INDEX, not its kind. So nobody
+  // can show a constraint has ever been stripped, and nobody can show one has
+  // not. Declining costs nothing against the measured population if constraints
+  // never appear there, and if they do it surfaces as
+  // `stripped_constraint_nodes` without a single user having seen a model
+  // missing its own limit. Disclosure can then be built on evidence instead of
+  // speculation. (Reviewer's position on #1674; accepted.)
+  //
+  // Declines WHOLESALE rather than skipping the node: that node's
+  // `observed_state` would still be invalid, so a partial strip cannot re-parse
+  // anyway, and a half-stripped graph is a state no caller ever produces.
+  for (const i of indices) {
+    const node = nodes[i];
+    if (node === undefined || node === null || typeof node !== "object") continue;
+    if (node.kind === "constraint") {
+      return { salvaged: false, stripped: [], declined_reason: "would_strip_constraint" };
+    }
   }
 
   // Take a shallow copy of each targeted node so a failed re-parse leaves the

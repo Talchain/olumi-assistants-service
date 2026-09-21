@@ -96,6 +96,66 @@ describe('observed_state salvage — an optional field must not destroy the mode
     expect(graph.nodes[0]).toHaveProperty('observed_state'); // and nothing was shed
   });
 
+  it('T7 a CONSTRAINT node is never stripped — the salvage declines and the 500 stands', () => {
+    // A constraint's `observed_state` carries its THRESHOLD. Shed it and the
+    // node still renders, so the user sees a model whose own limit has quietly
+    // stopped being expressed — for "£20k MRR while keeping churn under 4%",
+    // that is the user's stated constraint vanishing with no refusal to see.
+    //
+    // The complete 30h Render census cannot say whether a constraint has ever
+    // reached this path (every issue message is the bare "Invalid input" and
+    // `path` carries the node INDEX, not its kind), so shipping a silent strip
+    // would be a bet on an unmeasured population. Declining costs nothing if
+    // constraints never appear, and surfaces them if they do.
+    const graph = graphWith({
+      id: 'con_churn',
+      kind: 'constraint',
+      label: 'Monthly churn under 4%',
+      observed_state: { unit: '%' },
+    });
+    expect(issueCodesFor(graph)).toEqual(['invalid_union']); // precondition: the salvageable code
+
+    const ctx = ctxFor(graph);
+    runStructuralParse(ctx);
+
+    expect(ctx.earlyReturn?.statusCode).toBe(400);            // the 500 stands
+    expect(graph.nodes[0]).toHaveProperty('observed_state');  // nothing was shed
+  });
+
+  it('T8 DISCRIMINATING TWIN of T7: the same shape as a FACTOR is salvaged', () => {
+    // Differs from T7 in `kind` and NOTHING else — same label, same malformed
+    // observed_state, same Zod code. So T7 binds to the node's KIND, not to
+    // something incidental about its shape.
+    const graph = graphWith({
+      id: 'con_churn',
+      kind: 'factor',
+      label: 'Monthly churn under 4%',
+      observed_state: { unit: '%' },
+    });
+    expect(issueCodesFor(graph)).toEqual(['invalid_union']); // same precondition as T7
+
+    const ctx = ctxFor(graph);
+    runStructuralParse(ctx);
+
+    expect(ctx.earlyReturn).toBeUndefined();
+    expect(graph.nodes[0]).not.toHaveProperty('observed_state');
+  });
+
+  it('T9 a constraint ANYWHERE in the batch declines the WHOLE salvage', () => {
+    // Wholesale, not per-node: that constraint's observed_state would still be
+    // invalid, so a partial strip cannot re-parse, and a half-stripped graph is
+    // a state no caller ever produces.
+    const graph = graphWith(
+      FACTOR({ unit: '%' }),
+      { id: 'con_x', kind: 'constraint', label: 'Limit', observed_state: {} },
+    );
+    const ctx = ctxFor(graph);
+    runStructuralParse(ctx);
+
+    expect(ctx.earlyReturn?.statusCode).toBe(400);
+    expect(graph.nodes[0]).toHaveProperty('observed_state'); // the factor kept its field too
+  });
+
   it('T3 an issue ANYWHERE ELSE still 400s and sheds nothing', () => {
     const graph = graphWith({ id: 'f1', label: 'no kind' });  // `kind` is required
     const ctx = ctxFor(graph);
