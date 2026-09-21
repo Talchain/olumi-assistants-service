@@ -150,11 +150,62 @@ describe('fail-open on ignorance, never on knowledge', () => {
     }
   });
 
-  it('does not refuse a GOAL with at_least — the handler may stamp a cap this site cannot compute', () => {
+  const GOAL_AT_LEAST = [
+    { name: 'constraint_type', value: 'at_least' },
+    { name: 'value', value: 30 },
+  ];
+
+  it('does not refuse a FRESH GOAL at_least — the value would change, so a cap stamp is still possible', () => {
+    expect(
+      findUnitAmbiguousOffer(action(GOAL_AT_LEAST, 'g-arr'), [{ id: 'g-arr', kind: 'goal' }]),
+    ).toBeNull();
+  });
+
+  // ⭐⭐ THE PAIR THE REVIEW REQUIRED. The fail-open above was too wide: the
+  // handler exempts goal + `at_least` only when `capToStamp` is non-null, and
+  // that is null whenever `stampGoalThreshold` is false — including a
+  // VALUE-IDENTICAL RESTATEMENT, where the row or the node's threshold channel
+  // already holds this value. The handler then still throws, so an offer built
+  // on it is one no confirmation could apply.
+  it('REFUSES a GOAL at_least that merely RESTATES an existing unit-less row', () => {
     expect(
       findUnitAmbiguousOffer(
-        action([{ name: 'constraint_type', value: 'at_least' }, { name: 'value', value: 30 }], 'g-arr'),
+        action(GOAL_AT_LEAST, 'g-arr'),
         [{ id: 'g-arr', kind: 'goal' }],
+        [{ node_id: 'g-arr', operator: 'at_least', value: 30, unit: undefined }],
+      ),
+    ).not.toBeNull();
+  });
+
+  it("REFUSES a GOAL at_least that restates the NODE's own unit-less threshold channel", () => {
+    // The handler's second limb (`nodeChannelUnchanged`) — a different carrier
+    // for the same fact, and it must refuse identically or the gate is
+    // half-closed.
+    expect(
+      findUnitAmbiguousOffer(action(GOAL_AT_LEAST, 'g-arr'), [
+        { id: 'g-arr', kind: 'goal', goal_threshold_raw: 30, goal_threshold_unit: undefined },
+      ]),
+    ).not.toBeNull();
+  });
+
+  it('CONTRAST: a restatement at a DIFFERENT value can still stamp, so it stays offered', () => {
+    // Without this twin the two refusals above are consistent with a gate that
+    // simply stopped exempting goals at all.
+    expect(
+      findUnitAmbiguousOffer(
+        action(GOAL_AT_LEAST, 'g-arr'),
+        [{ id: 'g-arr', kind: 'goal' }],
+        [{ node_id: 'g-arr', operator: 'at_least', value: 45, unit: undefined }],
+      ),
+    ).toBeNull();
+  });
+
+  it('CONTRAST: an identical restatement WITH a fitting cap is interpretable and stays offered', () => {
+    expect(
+      findUnitAmbiguousOffer(
+        action(GOAL_AT_LEAST, 'g-arr'),
+        [{ id: 'g-arr', kind: 'goal', goal_threshold_cap: 100 }],
+        [{ node_id: 'g-arr', operator: 'at_least', value: 30, unit: undefined }],
       ),
     ).toBeNull();
   });

@@ -11421,7 +11421,11 @@ export async function runTurnExecutor(
         // offered a limit no answer could have applied and the user supplied
         // the missing unit unprompted, one turn too late for anything to read
         // it.
-        const unitAmbiguous = findUnitAmbiguousOffer(action, offerTargetKindNodes);
+        const unitAmbiguous = findUnitAmbiguousOffer(
+          action,
+          offerTargetKindNodes,
+          existingConstraints,
+        );
 
         const demotion = buildWarrantDemotion(action, existingConstraints, payload.message);
         const graphHashForProposal =

@@ -266,11 +266,16 @@ export interface UnitLookupNode {
   readonly kind?: unknown;
   readonly observed_state?: { readonly cap?: unknown } | null;
   readonly goal_threshold_cap?: unknown;
+  /** The node's own goal-threshold channel — the handler's
+   *  `nodeChannelUnchanged` limb reads exactly these two. */
+  readonly goal_threshold_raw?: unknown;
+  readonly goal_threshold_unit?: unknown;
 }
 
 export function findUnitAmbiguousOffer(
   action: ProposalAction,
   graphNodes: readonly UnitLookupNode[],
+  existingConstraints: readonly PersistedConstraintRow[] = [],
 ): { readonly label: string; readonly value: number } | null {
   if (action.handler_id !== 'add_constraint') return null;
 
@@ -288,11 +293,53 @@ export function findUnitAmbiguousOffer(
   const targetKind = targetNode.kind;
   if (typeof targetKind !== 'string' || targetKind.length === 0) return null;
 
-  // The goal + `at_least` combination is the one the handler may exempt with a
-  // stamped threshold cap. This site cannot compute that, so it does not
-  // refuse — see the header's fail-open list.
+  // ⭐⭐ THE GOAL + `at_least` FAIL-OPEN, NARROWED — it was too wide, and the
+  // review is right about why.
+  //
+  // The handler throws on `isUnitAmbiguousConstraintValue(...) && capToStamp
+  // === null` (`add-constraint.ts:1084-1093`), and `capToStamp` is non-null
+  // ONLY when `stampGoalThreshold` is true — which is
+  // `ownsGoalThresholdChannel && !valueUnchanged` (`:1037`). My first version
+  // returned null for EVERY goal + `at_least` action on the grounds that this
+  // site cannot compute the stamp. But one limb of it IS computable here, and
+  // it is the limb that decides: `valueUnchanged`.
+  //
+  // A VALUE-IDENTICAL RESTATEMENT sets `valueUnchanged` true, so
+  // `stampGoalThreshold` is false, so `capToStamp` is null, so the handler
+  // throws — and the old blanket return let the product offer that change
+  // anyway. The handler's comment says so in terms: the guard "deliberately
+  // fires even when the ambiguous row is ALREADY persisted and the turn is a
+  // value-identical restatement".
+  //
+  // So the fail-open now survives only where a stamp is still POSSIBLE (the
+  // value would genuinely change). `ownsGoalThresholdChannel` depends on
+  // turn machinery this site has no access to, so its absence can still make a
+  // permitted offer un-appliable — that residue is unchanged and is the only
+  // remaining fail-open in this branch, deliberately in the permissive
+  // direction (a false refusal costs a clarifying round-trip; a false offer
+  // costs a change no answer can apply).
+  //
+  // ⚠ The two limbs below mirror the handler's own `rowValueUnchanged` /
+  // `nodeChannelUnchanged` (`:1011-1023`), read from the SAME persisted
+  // sources the resuming handler will load.
   if (targetKind === 'goal' && param(action, 'constraint_type')?.value === 'at_least') {
-    return null;
+    const existingRow = existingConstraints.find(
+      (row) => row.node_id === targetId && row.operator === 'at_least',
+    );
+    const rowValueUnchanged =
+      existingRow !== undefined && existingRow.value === value && existingRow.unit === unit;
+    const nodeChannelUnchanged =
+      typeof targetNode.goal_threshold_raw === 'number' &&
+      targetNode.goal_threshold_raw === value &&
+      targetNode.goal_threshold_unit === unit;
+    // ⚠ `unit` here is the PARAMETER's unit, while the handler resolves
+    // params → existing row → observed_state. The divergence is benign in the
+    // only direction that matters: wherever that resolution SUCCEEDS the scale
+    // is asserted, `isUnitAmbiguousConstraintValue` is false, and this function
+    // returns null below regardless of which branch reached it.
+    if (!(rowValueUnchanged || nodeChannelUnchanged)) return null;
+    // Falls through: the restatement cannot stamp, so the handler will throw
+    // unless the ambiguity check below clears it on its own terms.
   }
 
   if (
@@ -471,6 +518,10 @@ export interface PersistedConstraintRow {
   readonly node_id?: unknown;
   readonly operator?: unknown;
   readonly label?: unknown;
+  /** Present on real rows; read by the unit-sufficiency precondition to
+   *  reproduce the handler's `rowValueUnchanged` test. */
+  readonly value?: unknown;
+  readonly unit?: unknown;
 }
 
 export type WarrantDemotionBuild =
