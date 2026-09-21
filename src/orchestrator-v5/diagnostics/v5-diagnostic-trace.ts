@@ -441,6 +441,30 @@ export interface V5ClaimSafety {
     | null;
 }
 
+/**
+ * ⭐⭐ NO PRODUCTION READER BRANCHES ON THIS VALUE, AND THAT IS DELIBERATE.
+ *
+ * Measured: 34 write sites, and **zero** production consumers compare it
+ * (`exit_path ===`, `switch`) — every other mention is prose. Telemetry states
+ * the same contract: *"bounded `exit_path` only — no user copy. Diagnostic-
+ * only."* It is a routing TAG for reading a session back, never a control
+ * signal.
+ *
+ * ⚠ SAID HERE BECAUSE NOTHING ELSE CAN SAY IT. The union's only other consumer
+ * is DERIVED — `type V5ExitPath = Exclude<V5DiagnosticExitPath,
+ * 'draft_graph_error'>` (`route-v2.ts:745`) — so a new member flows through
+ * automatically with no hand-maintained twin to drift. That is the right shape
+ * and it has a cost: **precisely because it is derived, nothing REDs when a
+ * member is added.** Derivation proves the copies agree; it can never prove a
+ * consumer HANDLES the new value (CLAUDE.md trap 12d).
+ *
+ * ⇒ So an unhandled-by-design member and an overlooked one are
+ * indistinguishable to the next reader unless someone writes down which this
+ * is. **This is by design.** Adding a member requires no consumer change.
+ * ⛔ If that ever stops being true — if any reader must behave differently per
+ * exit — this comment is the thing to delete, and the obligation needs a real
+ * guard rather than a derivation.
+ */
 export type V5DiagnosticExitPath =
   | 'draft_graph'
   | 'turn_executor'
