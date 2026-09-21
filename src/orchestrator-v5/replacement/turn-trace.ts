@@ -54,6 +54,38 @@ export type ReplacementRefusalCode =
   /** The write returned without the proof of commit. */
   | 'no_receipt';
 
+/**
+ * ⭐ THE CAUSE BEHIND A REFUSAL CODE, where one exists outside this module.
+ *
+ * Six of the nine refusal codes ARE their own cause — `quote_not_from_message`
+ * says everything there is to say. Three do not: `write_failed`,
+ * `write_outcome_unknown` and `checkpoint_refused` are the shapes where a
+ * SUBSYSTEM WE DO NOT OWN told us why, and until now that sentence reached the
+ * model and then died. The durable record kept only the token, so nothing
+ * reading it afterwards could tell a revision conflict from a validation
+ * refusal from a transport error — which is the difference between "retry" and
+ * "never retry".
+ *
+ * ⚠ `cause` is NULL, not an empty string, when the code genuinely IS the cause.
+ * Absence must read as "there was nothing more to say", never as "we lost it" —
+ * so a reader can distinguish the two without consulting this comment.
+ */
+export interface ReplacementRefusal {
+  readonly code: ReplacementRefusalCode;
+  /** Bounded, single-line, adapter-supplied. Null when the code is the cause. */
+  readonly cause: string | null;
+}
+
+/**
+ * Cap for {@link ReplacementRefusal.cause}. This is a DURABLE record and the
+ * string arrives from an adapter or an exception, so it is bounded on the way
+ * in rather than trusted: an unbounded error message can carry a stack trace,
+ * a payload echo, or a whole graph. Truncation is marked with an ellipsis so a
+ * reader can tell a short message from a cut one — a truncated string and a
+ * terse one are otherwise byte-identical.
+ */
+export const MAX_REFUSAL_CAUSE = 200;
+
 /** How the turn ended. */
 export type ReplacementTurnOutcome =
   /** An unresolved prior save owned the turn; no model call was made. */
@@ -74,7 +106,12 @@ export interface ReplacementTurnTrace {
   /** Operation kinds the accepted proposal intended — kinds only, never values. */
   readonly intended_operation_kinds: readonly string[];
   readonly tools_called: readonly string[];
+  /** Codes only. DERIVED from {@link refusal_details} at `finish()`, never
+   *  accumulated alongside it — two lists maintained in parallel is the
+   *  hand-maintained mirror this estate keeps paying for (trap 12). */
   readonly refusals: readonly ReplacementRefusalCode[];
+  /** The same refusals, each carrying its cause where a subsystem supplied one. */
+  readonly refusal_details: readonly ReplacementRefusal[];
   /** True once this turn committed to DISPATCHING a write, whatever followed. */
   readonly write_attempted: boolean;
   /** True only on a proof of commit. `write_attempted && !write_committed`
@@ -94,7 +131,7 @@ export interface ReplacementTurnTrace {
  * supposed to observe.
  */
 export interface ReplacementTraceRecorder {
-  refused(code: ReplacementRefusalCode): void;
+  refused(code: ReplacementRefusalCode, cause?: string | null): void;
   accepted(proposalId: string, operationKinds: readonly string[]): void;
   writeAttempted(): void;
   writeCommitted(receiptId: string): void;
@@ -108,11 +145,26 @@ export interface ReplacementTraceRecorder {
   }): ReplacementTurnTrace;
 }
 
+/**
+ * Bound an adapter-supplied cause for durable storage. Collapses newlines so a
+ * stack trace cannot reshape the record, trims, and marks truncation.
+ * Returns null for absent/blank input so "nothing to say" and "lost it" stay
+ * distinguishable at the field.
+ */
+function boundCause(cause: string | null | undefined): string | null {
+  if (typeof cause !== 'string') return null;
+  const flat = cause.replace(/\s+/g, ' ').trim();
+  if (flat.length === 0) return null;
+  return flat.length <= MAX_REFUSAL_CAUSE
+    ? flat
+    : `${flat.slice(0, MAX_REFUSAL_CAUSE - 1)}\u2026`;
+}
+
 export function createReplacementTraceRecorder(args: {
   readonly correlationId: string;
   readonly modelRevision: string;
 }): ReplacementTraceRecorder {
-  const refusals: ReplacementRefusalCode[] = [];
+  const refusals: ReplacementRefusal[] = [];
   let acceptedProposalId: string | null = null;
   let intendedOperationKinds: readonly string[] = [];
   let writeAttempted = false;
@@ -121,8 +173,8 @@ export function createReplacementTraceRecorder(args: {
   let newModelRevision: string | null = null;
 
   return {
-    refused(code) {
-      refusals.push(code);
+    refused(code, cause) {
+      refusals.push({ code, cause: boundCause(cause) });
     },
     accepted(proposalId, operationKinds) {
       acceptedProposalId = proposalId;
@@ -148,7 +200,8 @@ export function createReplacementTraceRecorder(args: {
         accepted_proposal_id: acceptedProposalId,
         intended_operation_kinds: intendedOperationKinds,
         tools_called: [...fin.toolsCalled],
-        refusals: [...refusals],
+        refusals: refusals.map((r) => r.code),
+        refusal_details: refusals.map((r) => Object.freeze({ ...r })),
         write_attempted: writeAttempted,
         write_committed: writeCommitted,
         receipt_id: receiptId,

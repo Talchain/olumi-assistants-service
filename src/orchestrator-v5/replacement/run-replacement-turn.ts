@@ -715,7 +715,7 @@ export async function runReplacementTurn(
             } catch (err) {
               // UNKNOWN. It stays in flight; the next turn reconciles. The
               // model is told exactly this, so it cannot resolve it either way.
-              trace.refused('write_outcome_unknown');
+              trace.refused('write_outcome_unknown', err instanceof Error ? err.message : String(err));
               return {
                 type: 'refused',
                 content:
@@ -730,7 +730,7 @@ export async function runReplacementTurn(
                 reason: outcome.reason,
                 failed_at: input.now,
               });
-              trace.refused('write_failed');
+              trace.refused('write_failed', outcome.reason);
               return {
                 type: 'refused',
                 content: `It did not save: ${outcome.reason}. Nothing has changed. Tell the user what happened.`,
