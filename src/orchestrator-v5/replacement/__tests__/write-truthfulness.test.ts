@@ -121,3 +121,86 @@ describe('the lie this exists to stop', () => {
     }
   });
 });
+
+
+/**
+ * ⭐⭐ A RECEIPT FOR ONE WRITE MUST NEVER LICENSE A CLAIM ABOUT ANOTHER.
+ *
+ * THE DEFECT: `writeTruthfulnessOf` tested `write_committed && receipt_id`
+ * FIRST and returned immediately, so `refusals` was never read on a turn that
+ * held a receipt. A turn that saved change A and had change B refused returned
+ * `committed`, the prose passed through untouched, and the model's "Done — I
+ * have made those changes." was published verbatim about BOTH.
+ *
+ * This is the worst shape in the whole module: it is not a missing
+ * qualification, it is a TRUE receipt used as evidence for a FALSE claim, and
+ * the user has a citable id to point at if they doubt it.
+ *
+ * ⚠ THE WEAKER RESIDUAL WINS. If one other write is definitely refused and a
+ * third is unknown, the turn may NOT say the others failed — it does not know
+ * that. `unknown` dominates `refused` for exactly the reason the module's
+ * header gives: "it did not save" and "I cannot tell whether it saved" are
+ * different claims, and only one of them is honest here.
+ */
+describe('mixed outcomes — a receipt does not short-circuit the judgement', () => {
+  const committedWith = (refusals: string[]): WriteTruthfulness =>
+    writeTruthfulnessOf(
+      trace({
+        write_attempted: true,
+        write_committed: true,
+        receipt_id: 'rcp-1',
+        refusals: refusals as never,
+      }),
+    );
+
+  it('a receipt alongside a DEFINITE refusal is mixed, never committed', () => {
+    const o = committedWith(['write_failed']);
+    expect(o.kind, 'a refused sibling write must not be reported as committed').toBe('mixed');
+    expect(o).toMatchObject({ receiptId: 'rcp-1', residual: 'refused' });
+  });
+
+  it('a receipt alongside an UNKNOWN-outcome write cannot claim the other failed', () => {
+    const o = committedWith(['write_outcome_unknown']);
+    expect(o).toMatchObject({ kind: 'mixed', residual: 'unknown' });
+  });
+
+  it('when both a definite refusal and an unknown are present, the WEAKER residual wins', () => {
+    expect(committedWith(['write_failed', 'no_receipt'])).toMatchObject({
+      kind: 'mixed',
+      residual: 'unknown',
+    });
+  });
+
+  it('the prose is REPLACED, so a model sentence claiming both saved cannot survive', () => {
+    const claim = 'Done — I have made those changes.';
+    for (const refusals of [['write_failed'], ['no_receipt']]) {
+      const out = constrainProseToWriteOutcome(claim, committedWith(refusals));
+      expect(out, `mixed outcome must not publish ${JSON.stringify(claim)}`).not.toBe(claim);
+      expect(out.length).toBeGreaterThan(0);
+    }
+  });
+
+  /**
+   * ⭐ THE FAIL-SAFE FOR CODES THAT DO NOT EXIST YET. The module's stated
+   * default is `unknown` so that any refusal code added later lands on "I
+   * cannot tell you" rather than on a confident sentence. That guarantee has
+   * to hold beside a receipt too — otherwise every code added after today
+   * re-opens the short-circuit this block exists to close.
+   */
+  it('an UNRECOGNISED refusal code beside a receipt is still mixed, never committed', () => {
+    expect(committedWith(['some_code_invented_after_today'])).toMatchObject({
+      kind: 'mixed',
+      residual: 'unknown',
+    });
+  });
+
+  /** ⭐ CONTRAST CONTROL. A clean commit must STILL pass through untouched —
+   *  a "fix" that simply stopped trusting receipts would pass every case above
+   *  and destroy the one behaviour this module exists to permit. */
+  it('a clean commit with NO refusals still passes through untouched', () => {
+    const o = committedWith([]);
+    expect(o).toMatchObject({ kind: 'committed', receiptId: 'rcp-1' });
+    const prose = 'Done — I have made that change.';
+    expect(constrainProseToWriteOutcome(prose, o)).toBe(prose);
+  });
+});

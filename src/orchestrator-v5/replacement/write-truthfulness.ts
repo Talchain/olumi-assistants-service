@@ -31,7 +31,13 @@ export type WriteTruthfulness =
   | { readonly kind: 'no_write' }
   | { readonly kind: 'committed'; readonly receiptId: string }
   | { readonly kind: 'refused' }
-  | { readonly kind: 'unknown' };
+  | { readonly kind: 'unknown' }
+  /**
+   * At least one write COMMITTED and at least one other did not — the turn
+   * holds a real receipt AND a refusal. `residual` describes the OTHER writes,
+   * never the committed one.
+   */
+  | { readonly kind: 'mixed'; readonly receiptId: string; readonly residual: 'refused' | 'unknown' };
 
 /**
  * Refusal codes that mean the write DEFINITELY did not happen — the request
@@ -56,14 +62,39 @@ const MAY_HAVE_WRITTEN = new Set(['write_outcome_unknown', 'no_receipt']);
 export function writeTruthfulnessOf(
   trace: Pick<ReplacementTurnTrace, 'write_attempted' | 'write_committed' | 'receipt_id' | 'refusals'>,
 ): WriteTruthfulness {
-  // A receipt IS the commit proof. Holding one, the reply may say so.
-  if (trace.write_committed && trace.receipt_id !== null && trace.receipt_id.trim() !== '') {
-    return { kind: 'committed', receiptId: trace.receipt_id };
-  }
-  if (!trace.write_attempted) return { kind: 'no_write' };
+  // ⛔⛔ A RECEIPT DOES NOT SHORT-CIRCUIT THIS. The committed test used to run
+  // FIRST and return, so `refusals` was never read on a turn holding a
+  // receipt: a turn that saved change A while change B was refused reported
+  // `committed`, the prose passed through untouched, and "Done — I have made
+  // those changes." was published about BOTH. That is the worst shape in this
+  // module — a TRUE receipt used as evidence for a FALSE claim, with a citable
+  // id attached to it. The codes are therefore classified BEFORE any verdict.
   const codes = new Set<string>(trace.refusals);
-  for (const c of MAY_HAVE_WRITTEN) if (codes.has(c)) return { kind: 'unknown' };
-  for (const c of DEFINITELY_NOT_WRITTEN) if (codes.has(c)) return { kind: 'refused' };
+  const mayHaveWritten = [...MAY_HAVE_WRITTEN].some((c) => codes.has(c));
+  const definitelyNotWritten = [...DEFINITELY_NOT_WRITTEN].some((c) => codes.has(c));
+  const receiptId =
+    trace.write_committed && trace.receipt_id !== null && trace.receipt_id.trim() !== ''
+      ? trace.receipt_id
+      : null;
+
+  if (receiptId !== null) {
+    // ⚠ THE WEAKER RESIDUAL WINS. With both a definite refusal and an unknown
+    // in the same turn, the reply may NOT say the others failed — it does not
+    // know that. Same reason the module's default is `unknown`: "it did not
+    // save" and "I cannot tell whether it saved" are different claims.
+    if (mayHaveWritten) return { kind: 'mixed', receiptId, residual: 'unknown' };
+    if (definitelyNotWritten) return { kind: 'mixed', receiptId, residual: 'refused' };
+    // An UNRECOGNISED code beside a receipt is still a mixed turn. Falling back
+    // to `committed` here would re-open the exact hole above for every refusal
+    // code added after today, which is the failure mode this module's default
+    // exists to prevent.
+    if (codes.size > 0) return { kind: 'mixed', receiptId, residual: 'unknown' };
+    return { kind: 'committed', receiptId };
+  }
+
+  if (!trace.write_attempted) return { kind: 'no_write' };
+  if (mayHaveWritten) return { kind: 'unknown' };
+  if (definitelyNotWritten) return { kind: 'refused' };
   return { kind: 'unknown' };
 }
 
@@ -94,6 +125,15 @@ export function proseForWriteOutcome(outcome: WriteTruthfulness): string | null 
         'I sent that change and did not get confirmation back, so I cannot tell you whether it ' +
         'saved. I have not recorded it as made — please reload before you rely on it.'
       );
+    case 'mixed':
+      // Names BOTH halves. Reporting only the failure would be as false as
+      // reporting only the success: the user has a part-changed model and
+      // needs to know that before deciding what to redo.
+      return outcome.residual === 'refused'
+        ? 'I saved part of that, but not all of it — one change went through and another did not, ' +
+            'so your model has only part of what you asked for. Ask me again and I will retry the rest.'
+        : 'I saved part of that. I sent the rest and did not get confirmation back, so I cannot tell ' +
+            'you whether it saved — please reload before you rely on it.';
   }
 }
 
