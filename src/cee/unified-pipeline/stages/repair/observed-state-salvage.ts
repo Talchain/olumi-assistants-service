@@ -85,6 +85,14 @@ function observedStateNodeIndices(issues: ReadonlyArray<ZodIssue>): number[] | n
     // `custom` issue would therefore OVERRIDE that ruling. It declines instead.
     // The 2026-09-21 census recorded 20 of 20 issues as `invalid_union`, so
     // this narrowing costs nothing against the measured population.
+    //
+    // ⚠ THIS NARROWING RESTS ON A ZOD INTERNAL, AND IS NOT THE ONLY GUARD. A
+    // malformed constraint reports `custom` rather than `invalid_union` only
+    // because `ZodUnion._parse` returns dirty-first. If that behaviour ever
+    // changes, that case arrives here AS `invalid_union` and this check stops
+    // refusing it — at which point the CONSTRAINT DECLINE below is what still
+    // catches it. The two guards overlap by design; do not remove one on the
+    // grounds that the other covers the case.
     if (issue?.code !== "invalid_union") return null;
     const idx = path[2];
     if (typeof idx !== "number" || !Number.isInteger(idx) || idx < 0) return null;
@@ -185,15 +193,26 @@ export function salvageObservedState(
   // ⚠ HONEST NOTE ON COVERAGE: the mutant that deletes this restore SURVIVES
   // the suite (M2, 2026-09-21). That is not a gap in the tests but a property
   // of today's schema: no refinement anywhere in the chain depends on
-  // `observed_state` being PRESENT — the only three are `uncertainty_drivers`
-  // duplicates (graph.ts:189), FactorObservedState's own metadata rule (:267)
-  // and the edge from/to rule (:577) — so once every issue is an
-  // `invalid_union` at an observed_state path, stripping those paths cannot
-  // leave a different rule failing, and this branch is unreachable.
-  // It is KEPT rather than deleted because "unreachable under today's schema"
-  // is not "unreachable": the day someone adds a cross-field refinement that
-  // reads observed_state, this is what stops a half-stripped graph reaching
-  // the 500 path in a state its caller never produced.
+  // `observed_state` being PRESENT. Complete manifest of `src/schemas/*.ts` —
+  // NINE refinements across FOUR files, not the three an earlier version of
+  // this comment claimed: working-set.ts 3 (node-count cap, edge-count cap,
+  // "at least one actionable element"), cee.ts 2 (request-mode rules),
+  // cee-v3.ts 1 (`uncertainty_drivers` duplicates), graph.ts 3 (:189
+  // duplicates, :267 FactorObservedState's own metadata rule, :577 edge
+  // from/to). Only :267 touches `observed_state`, and it fires only when the
+  // field is PRESENT and malformed. So stripping cannot leave a different rule
+  // failing, and this branch is unreachable.
+  //
+  // It is KEPT rather than deleted purely as insurance against a FUTURE
+  // refinement that reads `observed_state` — "unreachable under today's schema"
+  // is not "unreachable".
+  //
+  // ⛔ DO NOT restate this as "the restore is what stops a half-stripped graph
+  // reaching the 500 path". That claim was made here and MEASURED FALSE:
+  // deleting the path guard AND this restore leaves the suite 10/10 green, and
+  // the half-strip only becomes observable when the `invalid_union` CODE guard
+  // is ALSO removed (then T2 and T4 RED). What actually stands between today's
+  // code and a half-stripped graph is the CODE guard, not this restore.
   for (const [i, value] of originals) {
     (nodes[i] as Record<string, unknown>).observed_state = value;
   }
