@@ -55,6 +55,7 @@ import { describe, it, expect } from "vitest";
 
 import { assessCanonicalAnalysisReadiness } from "../../../orchestrator/tools/analysis-ready-helper.js";
 import type { GraphV3T } from "../../../schemas/cee-v3.js";
+import { buildAnalysisReadyPayload } from "../analysis-ready.js";
 import { computeAnalysisReadyStatusWithReason } from "../option-status.js";
 
 const CAPTURE = JSON.parse(
@@ -279,5 +280,57 @@ describe("a risk-blocked option is asked about the risk, not about a factor", ()
       (i) => i.option_id === EMPTIED_ID && i.code === "OPTION_NEEDS_MAPPING",
     );
     expect(issues.map((i) => i.message).join(" ")).toContain("Choose which factor");
+  });
+});
+
+/**
+ * ⭐ THE LAST LINE BEFORE THE WIRE, and it must be able to fail.
+ *
+ * `buildAnalysisReadyPayload` is EXPORTED and called directly, and both of
+ * today's production callers already name the need upstream — so a mutant that
+ * removes the projection's own `nameMappingNeed` call SURVIVES against the
+ * graph-driven cases above. A guard nothing can fail is a guard that rots
+ * (CLAUDE.md trap 13c: a survivor is a claim, and equivalence must be
+ * demonstrated, not asserted).
+ *
+ * This binds the guard to the function's own contract instead: a producer that
+ * hands it a blocked option naming nothing must not get that option back
+ * unexplained. It is what makes the rule hold for the NEXT producer, rather
+ * than only for the two that exist today.
+ */
+describe("the projection is the last line before the wire", () => {
+  const GOAL_ID = CAPTURE.draft_graph.nodes.find((n) => n.kind === "goal")?.id ?? "";
+
+  it("HARNESS: the capture supplies a goal", () => {
+    expect(GOAL_ID).not.toBe("");
+  });
+
+  it("a blocked option handed in naming nothing is not passed through unexplained", () => {
+    const graph = {
+      ...CAPTURE.draft_graph,
+      edges: CAPTURE.draft_graph.edges.filter((e) => e.from !== EMPTIED_ID),
+    };
+    const node = CAPTURE.draft_graph.nodes.find((n) => n.id === EMPTIED_ID);
+    expect(node).toBeDefined();
+
+    // A producer that computed the status and wrote no obligation.
+    const payload = buildAnalysisReadyPayload(
+      [
+        {
+          id: EMPTIED_ID,
+          label: node?.label ?? EMPTIED_ID,
+          status: "needs_user_mapping",
+          interventions: {},
+        },
+      ],
+      GOAL_ID,
+      graph,
+    );
+
+    const projected = payload.options.find((o) => o.id === EMPTIED_ID);
+    expect(projected?.status).toBe("needs_user_mapping");
+    const questions = (projected as { user_questions?: string[] } | undefined)?.user_questions ?? [];
+    expect(questions.length).toBeGreaterThan(0);
+    expect(questions.some((q) => q.includes(node?.label ?? ""))).toBe(true);
   });
 });
