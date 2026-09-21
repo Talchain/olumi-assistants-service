@@ -313,11 +313,29 @@ export const GM_STALE_ASSISTANT_TEXT =
   'than applying it against the wrong baseline. Tell me the change once ' +
   'more and I will work it out against the model as it stands now.';
 
-/** rejected — integrity/safety failure. provisional_doctrine_v0. */
+/**
+ * rejected — integrity/safety failure. provisional_doctrine_v0.
+ *
+ * ⛔⛔ THIS SENTENCE MAKES NO CAUSAL CLAIM, AND THAT IS THE POINT. An earlier
+ * revision of this lane replaced it with "I put a change together from that and
+ * it did not fit the model as it stands". Measured at the real gate (21 Sep
+ * 2026; the derivation is committed as R2a/R2b in
+ * `rejected-edit-states-its-cause.test.ts`): EIGHT codes reach this arm through
+ * this gate's producer and only TWO carry a specific sentence, so the other SIX
+ * — and every code not yet measured — inherit whatever stands here. On
+ * `BATCH_CAP_EXCEEDED` no model-fit assessment ever runs (the whole batch is
+ * refused in O(1) on its LENGTH, before a single envelope is parsed). On
+ * `UNKNOWN_KIND` the claim is false twice over: nothing was put together, and
+ * the envelope never parsed. A generic arm is read by every code that is not
+ * specifically handled, so it may only assert what is true of ALL of them:
+ * the attempt failed and nothing changed.
+ *
+ * ⭐ Specificity belongs in {@link GM_REJECTED_COPY_BY_BLOCKER_CODE}, per code,
+ * where the claim can be checked against what the check actually established.
+ */
 export const GM_REJECTED_ASSISTANT_TEXT =
-  'I put a change together from that and it did not fit the model as it ' +
-  'stands, so the model is unchanged. I can try a different version, or ' +
-  'talk through what I would suggest instead.';
+  "I couldn't take that change forward, so the model is unchanged. Tell me " +
+  'a different way you would like to change it and I will try again.';
 
 /**
  * ⭐⭐⭐ WHY THE REJECTED ARM STOPPED BEING MUTE.
@@ -362,8 +380,36 @@ export const GM_REJECTED_ASSISTANT_TEXT =
  * validation", "top-level `options`"), which this lane's copy rules forbid.
  * The CODE is the stable join; the sentence is written here.
  *
- * Unmapped codes fall back to {@link GM_REJECTED_ASSISTANT_TEXT}, which is
- * still truthful and still carries the onward chip.
+ * Unmapped codes fall back to {@link GM_REJECTED_ASSISTANT_TEXT}, which makes
+ * no causal claim and is therefore true of every code that reaches this arm.
+ *
+ * ────────────────────────────────────────────────────────────────────────────
+ * ⭐⭐ WHAT ACTUALLY REACHES THIS ARM — DERIVED BY EXECUTION, NOT BY READING.
+ *
+ * Driving the real `evaluateEditGraphMutations` over this gate's own producer
+ * (21 Sep 2026; R2a/R2b pin it), the `rejected` arm is reached by:
+ *
+ *   ENTITY_NOT_FOUND · ENTITY_ID_COLLISION      ← mapped below
+ *   UNKNOWN_KIND · SCHEMA_INVALID · BATCH_CAP_EXCEEDED · ENGINE_CLAIM_IN_TEXT
+ *   · FIELD_NOT_ALLOWED · PIPELINE_OWNED_FIELD  ← generic
+ *
+ * and, at the referee but NOT through this gate's producer (which always writes
+ * `envelope_version: 1`, a non-empty `base_graph_hash` and a full `provenance`
+ * block): UNKNOWN_ENVELOPE_VERSION · BASE_HASH_MISSING · MISSING_PROVENANCE ·
+ * EVIDENCE_POINTER_MISSING. GRAPH_INVARIANT_VIOLATED is reachable in principle
+ * from the three build seams (referee.ts:336/368/417); no probe input produced
+ * it, so it is recorded as UNMEASURED, not as absent.
+ *
+ * ⚠ FIVE ENTRIES WERE REMOVED FROM THIS MAP, FOR THE REASON THE NOTE BELOW
+ * ALREADY GAVE ABOUT `OPTION_ID_COLLISION`. READINESS_DOWNGRADE,
+ * ADD_OPTION_APPLY_UNWIRED, OPTION_TOP_LEVEL_OPTIONS_DIVERGENCE,
+ * GRAPH_OPTIONS_MALFORMED and CURRENT_GRAPH_UNREADABLE every one resolves to
+ * `verdict: 'held'` and never to `rejected` (referee.ts:245/299/306/351/379/432).
+ * They could not fire, so they were a hand-maintained mirror implying coverage
+ * this arm does not have — the exact hazard the `OPTION_ID_COLLISION` note
+ * names, which sat five lines ABOVE five instances of it. Their sentences
+ * are not lost: they belong with whichever arm consumes the HELD verdict, and
+ * should be reintroduced there against a measurement, not here.
  */
 export const GM_REJECTED_COPY_BY_BLOCKER_CODE: Readonly<Record<string, string>> =
   Object.freeze({
@@ -395,26 +441,6 @@ export const GM_REJECTED_COPY_BY_BLOCKER_CODE: Readonly<Record<string, string>> 
     ENTITY_ID_COLLISION:
       'What I tried to add clashes with something already in the model, so ' +
       'the model is unchanged. I can talk through what I would suggest instead.',
-    READINESS_DOWNGRADE:
-      'That change would have left the model less ready to analyse than it ' +
-      'is now, so the model is unchanged. I can try a version that keeps it ' +
-      'analysable, or talk through what I would suggest instead.',
-    ADD_OPTION_APPLY_UNWIRED:
-      'I could not connect that option to anything the analysis measures, so ' +
-      'the model is unchanged. Tell me which factor it changes, or I can talk ' +
-      'through what I would suggest instead.',
-    OPTION_TOP_LEVEL_OPTIONS_DIVERGENCE:
-      'That change left the options on the board disagreeing with the ones ' +
-      'the analysis uses, so the model is unchanged. I can try a different ' +
-      'version, or talk through what I would suggest instead.',
-    GRAPH_OPTIONS_MALFORMED:
-      'I could not read the current options well enough to change them ' +
-      'safely, so the model is unchanged. I can talk through what I would ' +
-      'suggest instead.',
-    CURRENT_GRAPH_UNREADABLE:
-      'I could not read the current model well enough to change it safely, ' +
-      'so the model is unchanged. I can talk through what I would suggest ' +
-      'instead.',
   });
 
 /**
@@ -447,10 +473,56 @@ export const GM_REJECTED_COPY_BY_BLOCKER_CODE: Readonly<Record<string, string>> 
  */
 
 /**
- * Pick the user-facing cause for a rejected batch. Falls back loudly rather
- * than inventing: an unmapped code keeps the generic sentence, which is true.
+ * ⛔⛔⛔ A MAPPED SENTENCE IS ONLY TRUE OF A BATCH THAT CANNOT HAVE CASCADED.
+ *
+ * Measured at the real gate, 21 Sep 2026 (R2c/R2d/R2e pin all three cases).
+ * Two operations, order swapped:
+ *
+ *   [add_node "X",  add_edge→X]  → governing `held`      (no claim made)
+ *   [add_edge→X,    add_node "X"] → governing `rejected`, ENTITY_NOT_FOUND
+ *       → "The part I tried to change is not in the model... I can try again
+ *          on something that is there."
+ *
+ * Nothing was wrong with the user's node reference. `advanceBatchGraph`
+ * (referee.ts:504-508) never advances the working view past a rejected OR a
+ * held envelope, and `gi = firstIndexOf(verdicts, governing)` below picks the
+ * governing verdict by BATCH POSITION, not by causality — so the edge is
+ * judged against a graph the sibling that supplies its endpoint has not been
+ * allowed to reach. A confident sentence about a node-reference problem that
+ * never existed, and a prescription ("try again on something that is there")
+ * that would send the user to fix the one part that was correct.
+ *
+ * ⚠ THE SAME MEASUREMENT REFUTED THE REMEDY THIS FIX WAS COMMISSIONED WITH.
+ * The specified predicate was `verdictCounts.rejected === 1`. It is NOT
+ * sufficient — measured, three cases:
+ *
+ *   [add_edge→X, add_node "X"]            {rejected:1, held:1} → PASSES it
+ *   [add_node "D", add_node "D"]          {rejected:1, held:1} → PASSES it
+ *   [add_edge→Y, add_node "Y" (bad copy)] {rejected:2}         → fails it
+ *
+ * Only the third — the case the review happened to hold — is caught, because
+ * there the sibling was rejected for its OWN reason. The cascade is driven by
+ * a sibling that did not ADVANCE THE VIEW, and a held sibling does not advance
+ * it either. The second case is a second instance on the other mapped code:
+ * ENTITY_ID_COLLISION claims the addition "clashes with something already in
+ * the model" when it clashes only with a sibling that has not been applied.
+ *
+ * ⭐ So the predicate is the batch's ENVELOPE COUNT, which is the sequencing
+ * unit: with exactly one envelope there is no sibling, the verdict is judged
+ * against the pristine frame graph, and the mapped sentence says exactly what
+ * the check established. Multi-envelope batches fall back to the causally
+ * silent generic — a GAP, not a LIE (trap 22b: dropping a claim and inventing
+ * one are not symmetrical harms).
+ *
+ * `envelopeCount` is a REQUIRED parameter on purpose: a future caller that
+ * forgets the cascade question fails to compile rather than silently
+ * reintroducing the confident sentence.
  */
-export function selectRejectedAssistantText(blockerCode: unknown): string {
+export function selectRejectedAssistantText(
+  blockerCode: unknown,
+  envelopeCount: number,
+): string {
+  if (envelopeCount !== 1) return GM_REJECTED_ASSISTANT_TEXT;
   return typeof blockerCode === 'string'
     && Object.prototype.hasOwnProperty.call(GM_REJECTED_COPY_BY_BLOCKER_CODE, blockerCode)
     ? (GM_REJECTED_COPY_BY_BLOCKER_CODE[blockerCode] as string)
@@ -1358,8 +1430,12 @@ export function evaluateEditGraphMutations(input: EditGmEvaluationInput): EditGm
         // The reason was ALREADY on `publicReason` at this line and was going
         // only to the machine block, telemetry and the log. It now reaches the
         // person, phrased about my own attempt rather than their request.
+        // `verdicts.length` — NOT `verdictCounts.rejected` — is the cascade
+        // question: a sibling that does not ADVANCE the working view can cause
+        // this rejection whatever its own verdict was. See the selector.
         assistantText: selectRejectedAssistantText(
           (publicReason as { blocker_code?: unknown } | null)?.blocker_code,
+          verdicts.length,
         ),
         // Deliberately still `[]` — see the deferral note above the copy map.
         suggestedActions: [],

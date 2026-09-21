@@ -289,15 +289,29 @@ describe('live verdict routing', () => {
     );
     expect(d.governing).toBe('rejected');
     expect(d.blockApply).toBe(true);
-    // ⭐ THIS ASSERTION USED TO READ `toBe(GM_REJECTED_ASSISTANT_TEXT)`, AND ITS
-    // FAILURE IS THE FIX. The generic sentence answered every rejection
-    // identically — including, on a witnessed staging session, an ADVICE
-    // request and an EDIT request byte-for-byte alike. The reason was already
-    // here: note the very next line asserts `blocker_code` on the SAME object.
-    // The cause was computed, attached, logged, and withheld only from the
-    // person reading the reply.
-    expect(d.assistantText).toBe(GM_REJECTED_COPY_BY_BLOCKER_CODE.ENTITY_ID_COLLISION);
-    expect(d.assistantText).not.toBe(GM_REJECTED_ASSISTANT_TEXT);
+    // ⛔⛔ THIS BATCH HAS TWO ENVELOPES, SO THE SPECIFIC SENTENCE IS WITHHELD,
+    // AND THAT IS DELIBERATE EVEN THOUGH THE COLLISION HERE IS GENUINE.
+    //
+    // `f-spend` really does exist in the pristine fixture, so "clashes with
+    // something already in the model" happens to be TRUE of this batch. But
+    // this arm cannot tell it apart from `[add_node D, add_node D]`, where the
+    // clash is with a sibling `advanceBatchGraph` put into the working view and
+    // which is itself only HELD — nothing applied, nothing "already in the
+    // model". Distinguishing the two needs per-entity causality across the
+    // batch (which envelope creates the id the failing one names), which this
+    // arm does not have. Measured 21 Sep 2026: no positional or count-based
+    // proxy separates them — `verdictCounts.rejected === 1` holds in BOTH, and
+    // so does `firstIndexOf(verdicts, governing) === 0` in the reverse-order
+    // edge cascade.
+    //
+    // So a multi-envelope batch keeps the causally silent sentence: a GAP,
+    // never a LIE. The specific cause still ships on single-envelope batches
+    // (see the DISTINCT-label case below, and R2e in
+    // `rejected-edit-states-its-cause.test.ts`), which is where the witnessed
+    // defect's remedy is provably true. Recovering it for multi-op batches is
+    // a separate, reviewed change that adds the entity-level analysis.
+    expect(d.verdictCounts.rejected, 'the insufficient predicate holds here too').toBe(1);
+    expect(d.assistantText).toBe(GM_REJECTED_ASSISTANT_TEXT);
     expect(d.publicReason).toMatchObject({ verdict: 'rejected', blocker_code: 'ENTITY_ID_COLLISION' });
     // NEVER RefereeVerdict.candidate internals on the public reason.
     expect(Object.keys(d.publicReason!)).not.toContain('candidate');
@@ -326,6 +340,12 @@ describe('live verdict routing', () => {
     expect(text, 'must not assert a duplicate displayed name').not.toMatch(/that name|same name|already called/i);
     expect(text, 'must not prescribe a rename that cannot work').not.toMatch(/different name|rename/i);
     expect(text, 'but must still say nothing changed').toContain('unchanged');
+    // ⭐ ONE ENVELOPE, so no sibling can have created the id: the specific
+    // cause is provably true here and IS stated. This is the discriminating
+    // half of the pair whose other half is the two-envelope case above — it
+    // fails if the fix ever degrades into deleting the map outright.
+    expect(text).toBe(GM_REJECTED_COPY_BY_BLOCKER_CODE.ENTITY_ID_COLLISION);
+    expect(text).not.toBe(GM_REJECTED_ASSISTANT_TEXT);
     // Still no chips: the atomicity guard's posture is unchanged by this fix.
     expect(d.suggestedActions).toEqual([]);
   });

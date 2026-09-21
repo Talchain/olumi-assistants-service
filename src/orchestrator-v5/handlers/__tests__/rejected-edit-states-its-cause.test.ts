@@ -24,13 +24,71 @@
  * a reviewer must fetch it rather than read `gh pr diff`, which renders it
  * binary.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
 import {
   GM_REJECTED_ASSISTANT_TEXT,
   GM_REJECTED_COPY_BY_BLOCKER_CODE,
+  evaluateEditGraphMutations,
   selectRejectedAssistantText,
 } from '../edit-graph-referee-gate.js';
+import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
+import * as telemetry from '../../../utils/telemetry.js';
+
+// ── the real gate, driven end to end ──────────────────────────────────────
+
+/**
+ * ⭐⭐ THE FIRST VERSION OF THIS SPEC CALLED `evaluateEditGraphMutations` ZERO
+ * TIMES. Every assertion ran against the copy map and the selector in
+ * isolation, so the WIRING — that these codes are the ones the referee puts on
+ * a `rejected` verdict, and that the selector sees them — was pinned by
+ * nothing. Its R1b "precondition" test hardcoded three code NAMES as "real
+ * codes the referee emits"; one of them, `READINESS_DOWNGRADE`, resolves only
+ * to `verdict: 'held'` and could never reach this arm. A precondition asserted
+ * from the author's head is the thing the precondition was meant to prevent.
+ *
+ * Everything below R2 drives the REAL function against a real graph.
+ */
+const GRAPH = {
+  nodes: [
+    { id: 'g-profit', kind: 'goal', label: 'Profit' },
+    { id: 'd-choice', kind: 'decision', label: 'Which plan' },
+    { id: 'f-spend', kind: 'factor', label: 'Marketing spend', observed_state: { value: 0.4 } },
+    { id: 'f-reach', kind: 'factor', label: 'Audience reach', observed_state: { value: 0.5 } },
+    { id: 'o-a', kind: 'option', label: 'Plan A', interventions: { 'f-spend': { value: 0.6 } } },
+    { id: 'o-b', kind: 'option', label: 'Plan B', interventions: { 'f-reach': { value: 0.3 } } },
+  ],
+  edges: [
+    { from: 'd-choice', to: 'o-a', strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' },
+    { from: 'd-choice', to: 'o-b', strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' },
+    { from: 'o-a', to: 'f-spend', strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' },
+    { from: 'o-b', to: 'f-reach', strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' },
+    { from: 'f-spend', to: 'g-profit', strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' },
+    { from: 'f-reach', to: 'g-profit', strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' },
+  ],
+};
+
+const GRAPH_HASH = computeAnalysisAffectingGraphHash(GRAPH as never);
+if (GRAPH_HASH === null) throw new Error('fixture must hash');
+
+function gate(operations: readonly unknown[]) {
+  return evaluateEditGraphMutations({
+    mode: 'live',
+    operations: operations as never,
+    currentGraph: GRAPH,
+    currentGraphHash: GRAPH_HASH!,
+    baseGraphHash: GRAPH_HASH!,
+    freshness: 'none',
+    scenarioId: 'scn-rejected-cause',
+    turnId: 'turn-rejected-cause',
+    requestId: 'req-rejected-cause',
+  });
+}
+
+function blockerCodeOf(d: ReturnType<typeof gate>): string | null {
+  const code = (d.publicReason as { blocker_code?: unknown } | null)?.blocker_code;
+  return typeof code === 'string' ? code : null;
+}
 
 const ALL_COPY = [
   GM_REJECTED_ASSISTANT_TEXT,
@@ -42,24 +100,28 @@ const ALL_COPY = [
 describe('R1 — a known cause is stated, an unknown one falls back truthfully', () => {
   it('R1a a mapped blocker code gets its OWN sentence, not the generic one', () => {
     for (const code of Object.keys(GM_REJECTED_COPY_BY_BLOCKER_CODE)) {
-      const text = selectRejectedAssistantText(code);
+      const text = selectRejectedAssistantText(code, 1);
       expect(text, `${code} must be distinguishable`).not.toBe(GM_REJECTED_ASSISTANT_TEXT);
       expect(text).toBe(GM_REJECTED_COPY_BY_BLOCKER_CODE[code]);
     }
   });
 
-  it('R1b PRECONDITION: the mapped codes are real codes the referee emits', () => {
-    // A map keyed on invented codes would pass R1a while never firing in
-    // production — a guard agreeing with itself.
-    for (const code of ['ENTITY_NOT_FOUND', 'ENTITY_ID_COLLISION', 'READINESS_DOWNGRADE']) {
-      expect(Object.keys(GM_REJECTED_COPY_BY_BLOCKER_CODE)).toContain(code);
+  it('R1c an UNMAPPED code falls back to the generic sentence, which is still true', () => {
+    for (const unknown of ['SOME_FUTURE_CODE', '', null, undefined, 42, {}]) {
+      expect(selectRejectedAssistantText(unknown, 1)).toBe(GM_REJECTED_ASSISTANT_TEXT);
     }
   });
 
-  it('R1c an UNMAPPED code falls back to the generic sentence, which is still true', () => {
-    for (const unknown of ['SOME_FUTURE_CODE', '', null, undefined, 42, {}]) {
-      expect(selectRejectedAssistantText(unknown)).toBe(GM_REJECTED_ASSISTANT_TEXT);
-    }
+  it('R1e ⛔ THE GENERIC SENTENCE MAKES NO CAUSAL CLAIM — it is read by codes that refute one', () => {
+    // It is the sentence for EVERY unmapped code, so it may assert only what
+    // is true of all of them. `BATCH_CAP_EXCEEDED` refuses on the batch's
+    // LENGTH before any envelope is parsed (referee.ts:558-561) and
+    // `UNKNOWN_KIND` never parsed the envelope at all — so "I put a change
+    // together" and "it did not fit the model" are both false there.
+    const t = GM_REJECTED_ASSISTANT_TEXT.toLowerCase();
+    expect(t, 'must not claim a change was assembled').not.toMatch(/put a change together|built a change|prepared a change/);
+    expect(t, 'must not claim a model-fit assessment ran').not.toMatch(/did not fit|does not fit|doesn't fit/);
+    expect(t, 'but must still say nothing changed').toContain('unchanged');
   });
 
   it('R1d every sentence still states that nothing changed', () => {
@@ -67,6 +129,120 @@ describe('R1 — a known cause is stated, an unknown one falls back truthfully',
     for (const text of ALL_COPY) {
       expect(text.toLowerCase(), text.slice(0, 40)).toContain('unchanged');
     }
+  });
+});
+
+// ── R2 — driven through the REAL gate: wiring, and the cascade ─────────────
+
+describe('R2 — the real gate, not the map in isolation', () => {
+  let emitSpy: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    emitSpy = vi.spyOn(telemetry, 'emit').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    emitSpy.mockRestore();
+  });
+
+  it('R2a PRECONDITION, DERIVED: every mapped code is one the referee really puts on `rejected`', () => {
+    // Replaces a hardcoded list of three code names, one of which
+    // (`READINESS_DOWNGRADE`) resolves only to `held` and could never fire
+    // here. Each case below is a REAL operation through the REAL gate; the
+    // codes are read off the decision, never asserted from memory.
+    const emitted = new Map<string, string>();
+    for (const [name, ops] of [
+      ['rename a node that is not there', [{ op: 'update_node', path: 'no-such-node', value: { label: 'X' } }]],
+      ['add a node at an id already taken', [{ op: 'add_node', path: 'f-spend', value: { id: 'f-spend', kind: 'factor', label: 'Team morale' } }]],
+    ] as ReadonlyArray<readonly [string, readonly unknown[]]>) {
+      const d = gate(ops);
+      expect(d.governing, name).toBe('rejected');
+      const code = blockerCodeOf(d);
+      expect(code, `${name} must carry a blocker code`).not.toBeNull();
+      emitted.set(code!, name);
+      // the WIRING: the decision's own text is the map's entry for its own code
+      expect(d.assistantText, name).toBe(GM_REJECTED_COPY_BY_BLOCKER_CODE[code!]);
+    }
+    // Both directions: every mapped key was witnessed, and every witnessed
+    // code is mapped. A map entry no operation can produce would fail here.
+    expect([...emitted.keys()].sort()).toEqual(
+      Object.keys(GM_REJECTED_COPY_BY_BLOCKER_CODE).sort(),
+    );
+  });
+
+  it('R2b an unmapped code reaches the person as the generic sentence, at the real gate', () => {
+    for (const [name, ops] of [
+      ['an op kind that never parsed (UNKNOWN_KIND)', [{ op: 'exotic_future_op', path: 'x' }]],
+      [
+        'a batch refused on its length (BATCH_CAP_EXCEEDED)',
+        Array.from({ length: 9 }, (_, i) => ({
+          op: 'add_node',
+          path: `n${i}`,
+          value: { id: `n${i}`, kind: 'factor', label: `N${i}` },
+        })),
+      ],
+    ] as ReadonlyArray<readonly [string, readonly unknown[]]>) {
+      const d = gate(ops);
+      expect(d.governing, name).toBe('rejected');
+      expect(d.assistantText, name).toBe(GM_REJECTED_ASSISTANT_TEXT);
+    }
+  });
+
+  it('R2c ⛔ ORDER-SWAPPED SIBLINGS MUST NOT PRODUCE A CONFIDENT CAUSE — the cascade', () => {
+    // The same two operations, in both orders. `advanceBatchGraph`
+    // (referee.ts:504-508) does not advance the working view past a held or
+    // rejected envelope, so in the reverse order the edge is judged against a
+    // graph its own sibling was never allowed to reach. Nothing was wrong with
+    // the node reference.
+    const addNode = { op: 'add_node', path: 'n-x', value: { id: 'n-x', kind: 'factor', label: 'New factor' } };
+    const addEdge = { op: 'add_edge', path: 'e', value: { from: 'n-x', to: 'g-profit' } };
+
+    const forward = gate([addNode, addEdge]);
+    expect(forward.governing, 'forward order is held, and claims nothing').toBe('held');
+
+    const reverse = gate([addEdge, addNode]);
+    expect(reverse.governing).toBe('rejected');
+    expect(blockerCodeOf(reverse), 'the cascade really does surface as ENTITY_NOT_FOUND').toBe(
+      'ENTITY_NOT_FOUND',
+    );
+
+    // ⚠ THE PRECONDITION THAT MAKES THIS TEST DISCRIMINATE, PINNED IN-TEST:
+    // the commissioned remedy was `verdictCounts.rejected === 1`. If this
+    // batch ever stops satisfying it, the test would pass for the wrong
+    // reason — so assert that it DOES satisfy it and is caught anyway.
+    expect(
+      reverse.verdictCounts.rejected,
+      'a rejected-count predicate would let this through, which is why it is not the predicate',
+    ).toBe(1);
+
+    expect(
+      reverse.assistantText,
+      'must not name a cause a sibling created',
+    ).toBe(GM_REJECTED_ASSISTANT_TEXT);
+    expect(reverse.assistantText ?? '').not.toMatch(/not in the model/i);
+    expect(reverse.assistantText ?? '').not.toMatch(/something that is there/i);
+  });
+
+  it('R2d the same cascade on the OTHER mapped code — a clash with a sibling, not with the model', () => {
+    // `[add_node D, add_node D]`: the second collides only because
+    // `advanceBatchGraph` put the first into the working view, and the first
+    // is merely HELD — nothing has been applied. "clashes with something
+    // already in the model" would be false.
+    const dup = { op: 'add_node', path: 'n-dup', value: { id: 'n-dup', kind: 'factor', label: 'Duplicate' } };
+    const d = gate([dup, dup]);
+    expect(d.governing).toBe('rejected');
+    expect(blockerCodeOf(d)).toBe('ENTITY_ID_COLLISION');
+    expect(d.verdictCounts.rejected, 'again passes the rejected-count predicate').toBe(1);
+    expect(d.assistantText).toBe(GM_REJECTED_ASSISTANT_TEXT);
+    expect(d.assistantText ?? '').not.toMatch(/already in the model/i);
+  });
+
+  it('R2e ⭐ THE OTHER HALF OF THE PAIR: a SINGLE-envelope batch keeps its specific cause', () => {
+    // Without this, R2c/R2d would also pass if the fix had simply deleted the
+    // map. The gap must be exactly the cascade, not the whole capability.
+    const d = gate([{ op: 'update_node', path: 'no-such-node', value: { label: 'X' } }]);
+    expect(d.governing).toBe('rejected');
+    expect(d.verdictCounts.rejected).toBe(1);
+    expect(d.assistantText).toBe(GM_REJECTED_COPY_BY_BLOCKER_CODE.ENTITY_NOT_FOUND);
+    expect(d.assistantText).not.toBe(GM_REJECTED_ASSISTANT_TEXT);
   });
 });
 
