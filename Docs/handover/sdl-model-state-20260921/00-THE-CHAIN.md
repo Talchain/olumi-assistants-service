@@ -71,12 +71,39 @@ button (`assist.v1.scenario-versions.ts:866`) and the collab round
 logs a typed `DR001` refusal (`capture.ts:412-449`). Model versions have no
 equivalent anywhere in TS.
 
-**Verdict: FIX — but it is a product decision, not a bug.** Guest refusal is
-deliberate, documented design (`20260705120000:44,95,127` — *"D3 Branch A;
-guests refused"*). The mismatch is that **guests are the dominant PoC usage**
-(ⓂⒹ 2,455 guest scenarios in 7 days) while the model-state layer requires
-sign-in. `claim_guest_scenario` exists; **UNVERIFIED whether claiming backfills
-any history.** That question decides whether this is a bug or an accepted limit.
+**Verdict: FIX — and it is a REAL GAP, not merely a product decision.** Guest
+refusal is deliberate, documented design (`20260705120000:44,95,127` — *"D3
+Branch A; guests refused"*), and the mismatch is that **guests are the dominant
+PoC usage** (ⓂⒹ 2,455 guest scenarios in 7 days) while the model-state layer
+requires sign-in.
+
+### ⭐ ANSWERED 21 Sep — claiming does NOT backfill
+
+`claim_guest_scenario`, read from the **DEPLOYED** body (`pg_get_functiondef`):
+
+| it updates | it does NOT touch |
+|---|---|
+| `scenarios.user_id` | `model_versions` |
+| `v5_conversation_turns.user_id` | `current_model_version_id` |
+| `v5_handler_facts.user_id` | `create_model_version` |
+| appends a `guest_claimed` journey event | `owner_user_id` |
+
+All four negatives probed explicitly. **A guest who signs in acquires the
+scenario, its turns and its facts — and ZERO version history for everything
+they did beforehand.** That history is not deferred; it was never created, and
+nothing later creates it. With the peer lane's measurement that the RPC has
+**0 uses**, the promotion path exists, has never been exercised, and would not
+recover history if it were.
+
+The earlier framing — *"deliberate design, so perhaps acceptable"* — is
+**WITHDRAWN**. Guest work is both unversioned and unrecoverable.
+
+⭐ Side effect for D11: `claim_guest_scenario` **does** raise `22023` on a
+colliding event id, with the same reasoning `create_decision_record` uses. Two
+of three writers get this right; `create_model_version` alone silently skips the
+append and returns the colliding id anyway. **D11 moves from "an inconsistency"
+to "an outlier".**
+
 
 ---
 
@@ -195,8 +222,8 @@ because it targets a feature branch where the required check does not dispatch.
 
 ## Unresolved questions for the successor
 
-1. **Does `claim_guest_scenario` backfill version history?** Decides whether
-   DEFECT 1 is a bug or an accepted limit. Highest-value question here.
+1. ~~Does `claim_guest_scenario` backfill version history?~~ **ANSWERED: NO.**
+   DEFECT 1 is a genuine gap, not an accepted limit. See DEFECT 1 above.
 2. **Which service created and owns `scenarios`?** It has no `CREATE TABLE` in
    this repo (contrast control: `model_versions` does). CEE only `ALTER`s it.
 3. **Is `p_cas_enforce` actually `'enforce'` on staging?** Code default is

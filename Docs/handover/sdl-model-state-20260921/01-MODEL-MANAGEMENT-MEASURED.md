@@ -142,7 +142,14 @@ Relevant RPCs present: `create_model_version`, `restore_model_version`,
 `store_draft_graph`, `store_analysis_and_log`, `get_latest_analysis_version`,
 `claim_guest_scenario`, `append_scenario_event`, `ensure_scenario_exists`.
 
-⭐ **`claim_guest_scenario` exists** — so guest→owner promotion is a designed
-flow. **UNVERIFIED:** whether claiming a guest scenario backfills any version
-history, or whether all pre-claim history is permanently absent. That is the
-question that decides whether the guest gate is a bug or an accepted limit.
+⛔ **`claim_guest_scenario` does NOT backfill version history — ANSWERED 21 Sep
+from the DEPLOYED body.** It updates `scenarios.user_id`,
+`v5_conversation_turns.user_id`, `v5_handler_facts.user_id` and appends a
+`guest_claimed` journey event. It touches `model_versions`,
+`current_model_version_id`, `create_model_version` and `owner_user_id` — **none
+of them** (all four probed). A guest who signs in gets the scenario, turns and
+facts, and **zero version history for everything they did before**. The peer
+lane measured the RPC at **0 uses**, so the path exists, has never run, and
+would not recover history if it did.
+
+**This makes DEFECT 1 a genuine gap, not an accepted limit.**
