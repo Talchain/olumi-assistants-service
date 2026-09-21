@@ -75,6 +75,20 @@ const WITNESSED = [
   { name: 'value', value: 30 },
 ];
 
+/**
+ * ⛔⛔ FIXTURE VOCABULARY CORRECTED, 21 Sep — and the correction IS the finding.
+ *
+ * Three fixtures here spelled `operator: 'at_least'`. A persisted row NEVER
+ * carries the parameter word: `TYPE_TO_OPERATOR` maps `at_least` to `'>='`.
+ * The production lookup in `findUnitAmbiguousOffer` matched the WORD, so it
+ * could not hit a real row and that whole limb was dead — and these fixtures
+ * spelled the same wrong word, so the suite agreed with the defect and
+ * certified a limb that never ran in production.
+ *
+ * A self-authored fixture encodes the author's model of the producer, which is
+ * exactly why it confirms instead of testing. Bound to the real vocabulary now;
+ * the production side imports `TYPE_TO_OPERATOR` rather than restating it.
+ */
 describe('the offer the user could not have accepted', () => {
   it('REFUSES the witnessed offer: a unit-less 30 on a risk', () => {
     const found = findUnitAmbiguousOffer(action(WITNESSED), [RISK_NODE]);
@@ -172,7 +186,7 @@ describe('fail-open on ignorance, never on knowledge', () => {
       findUnitAmbiguousOffer(
         action(GOAL_AT_LEAST, 'g-arr'),
         [{ id: 'g-arr', kind: 'goal' }],
-        [{ node_id: 'g-arr', operator: 'at_least', value: 30, unit: undefined }],
+        [{ node_id: 'g-arr', operator: '>=', value: 30, unit: undefined }],
       ),
     ).not.toBeNull();
   });
@@ -195,7 +209,7 @@ describe('fail-open on ignorance, never on knowledge', () => {
       findUnitAmbiguousOffer(
         action(GOAL_AT_LEAST, 'g-arr'),
         [{ id: 'g-arr', kind: 'goal' }],
-        [{ node_id: 'g-arr', operator: 'at_least', value: 45, unit: undefined }],
+        [{ node_id: 'g-arr', operator: '>=', value: 45, unit: undefined }],
       ),
     ).toBeNull();
   });
@@ -205,7 +219,7 @@ describe('fail-open on ignorance, never on knowledge', () => {
       findUnitAmbiguousOffer(
         action(GOAL_AT_LEAST, 'g-arr'),
         [{ id: 'g-arr', kind: 'goal', goal_threshold_cap: 100 }],
-        [{ node_id: 'g-arr', operator: 'at_least', value: 30, unit: undefined }],
+        [{ node_id: 'g-arr', operator: '>=', value: 30, unit: undefined }],
       ),
     ).toBeNull();
   });

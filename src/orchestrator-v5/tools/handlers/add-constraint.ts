@@ -118,7 +118,15 @@ export const AddConstraintValueSchema = z.number().finite();
 export const AddConstraintLabelSchema = z.string().min(1);
 export const AddConstraintUnitSchema = z.string().min(1);
 
-const TYPE_TO_OPERATOR: Record<'at_least' | 'at_most', '>=' | '<='> = {
+/**
+ * ⭐ EXPORTED for the offer-side precondition, for the same reason
+ * {@link resolveConstraintUnit} is: a persisted row carries `'>='`/`'<='`,
+ * NEVER the words `'at_least'`/`'at_most'`. `findUnitAmbiguousOffer` matched
+ * the WORDS, so its existing-row lookup could never hit and that whole limb
+ * was dead — and its own fixtures encoded the same wrong vocabulary, so the
+ * suite agreed with it. Import the map; do not spell the operators.
+ */
+export const TYPE_TO_OPERATOR: Record<'at_least' | 'at_most', '>=' | '<='> = {
   at_least: '>=',
   at_most: '<=',
 };
@@ -146,6 +154,47 @@ const TYPE_TO_OPERATOR: Record<'at_least' | 'at_most', '>=' | '<='> = {
 // it through `toEntityKind` and asserts the routing registry's
 // `accepted_entity_kinds` matches exactly, so the registry can no longer
 // drift into refusing a target this handler would have accepted.
+/**
+ * ⭐⭐ THE UNIT PRECEDENCE, DEFINED ONCE AND EXPORTED — because a second copy
+ * of it shipped a FALSE REFUSAL.
+ *
+ * `findUnitAmbiguousOffer` (`compose/warrant-demotion.ts`) decides whether to
+ * CONSTRUCT an offer, and it must refuse exactly when this handler would
+ * refuse — no more. It read only the PARAMETER's unit while this handler
+ * resolves FOUR sources, so an offer was withheld for "raise my ARR floor
+ * 250k → 300k" — a unit the handler would have resolved from the existing row
+ * — and the capability was lost silently.
+ *
+ * ⛔ That is the trade this estate rejects: a disclosed refusal bought with a
+ * silent capability loss. Caught in review, not by my own corpus, and the
+ * corpus could not see it — no fixture carried `observed_state.unit`, and
+ * `UnitLookupNode` did not even declare the field.
+ *
+ * So the precedence lives HERE, beside the handler that owns it, and the offer
+ * side IMPORTS it rather than restating it. Restating is what broke it
+ * (CLAUDE.md trap 12 — derive, never mirror).
+ *
+ * Order is load-bearing and is the handler's own: an explicit parameter beats
+ * the row being changed, which beats a moved row's prior state, which beats
+ * the destination's metadata. `sourceRow` sits where `existing` sits for an
+ * ordinary update — it IS the prior state of the thing being changed — and so
+ * ranks ahead of any destination metadata.
+ */
+export function resolveConstraintUnit(sources: {
+  readonly paramUnit?: string | undefined;
+  readonly existingUnit?: string | undefined;
+  readonly sourceRowUnit?: string | undefined;
+  readonly observedUnit?: string | undefined;
+}): string | undefined {
+  return sources.paramUnit !== undefined
+    ? sources.paramUnit
+    : sources.existingUnit !== undefined
+      ? sources.existingUnit
+      : sources.sourceRowUnit !== undefined
+        ? sources.sourceRowUnit
+        : sources.observedUnit;
+}
+
 export const ALLOWED_TARGET_KINDS: readonly string[] = [
   'factor',
   'outcome',
@@ -779,16 +828,14 @@ export function createAddConstraintHandler(): HandlerFn {
       // `sourceRow.unit` sits exactly where `existing.unit` sits for an
       // ordinary update — it IS the prior state of the thing being changed —
       // and therefore AHEAD of any destination metadata.
-      const resolvedUnit =
-        params.unit !== undefined
-          ? params.unit
-          : existing?.unit !== undefined
-            ? existing.unit
-            : sourceRow?.unit !== undefined
-              ? sourceRow.unit
-              : targetNode.observed_state?.unit !== undefined
-                ? targetNode.observed_state.unit
-                : undefined;
+      // ⭐ ONE definition, shared with the offer-side precondition. See
+      // `resolveConstraintUnit`'s header for why this is not inlined here.
+      const resolvedUnit = resolveConstraintUnit({
+        paramUnit: params.unit,
+        existingUnit: existing?.unit,
+        sourceRowUnit: sourceRow?.unit,
+        observedUnit: targetNode.observed_state?.unit,
+      });
 
       if (requestedLimitChange !== undefined && resolvedUnit !== requestedLimitChange.unit) {
         throw new D1HandlerError('PARAMETER_INVALID',

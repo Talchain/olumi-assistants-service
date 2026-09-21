@@ -56,6 +56,7 @@ import {
   findInsufficientOfferParameters,
   buildIncompleteOfferRefusalText,
   OFFER_REQUIRED_PARAMETERS,
+  findUnitAmbiguousOffer,
 } from '../warrant-demotion.js';
 import { tryShortConfirmResume } from '../../routing/deterministic-short-confirm.js';
 import type { PendingAction } from '../../session/pending-action.js';
@@ -332,5 +333,108 @@ describe('offer sufficiency — the required-parameter table', () => {
 
   it('returns null for an action it has no authority over, rather than refusing blind', () => {
     expect(findInsufficientOfferParameters(action('add_factor', []))).toBeNull();
+  });
+});
+
+/**
+ * ⭐⭐ THE FALSE REFUSAL — this predicate refused offers the handler would have
+ * ACCEPTED, and the suite above could not see it.
+ *
+ * Found in review, measured beside the real handler:
+ *   NODE_UNIT_PRESENT   offerRefuses=true   handlerThrew=false   ← FALSE REFUSAL
+ *   NODE_UNIT_ABSENT    offerRefuses=true   handlerThrew=true    ← control
+ *   existing-row unit   offerRefuses=true   handlerThrew=false   ← FALSE REFUSAL
+ *
+ * Cause: this function read ONLY the parameter's unit, while the handler
+ * resolves FOUR sources. "Raise my ARR floor 250k → 300k" — an ordinary
+ * phrasing whose unit the handler resolves from the existing row — had its
+ * offer withheld and the capability was lost silently.
+ *
+ * ⛔ A disclosed refusal bought with a silent capability loss is the trade this
+ * estate rejects, and the question I had asked the reviewer to answer — does
+ * it narrow a fail-open or WIDEN a fail-closed? — came back with the bad
+ * answer.
+ *
+ * ⚠⚠ WHY MY OWN CORPUS WAS BLIND, which matters more than the bug: no fixture
+ * carried `observed_state.unit`, and `UnitLookupNode` DID NOT DECLARE THE
+ * FIELD. A corpus that omits a class the contract admits cannot certify the
+ * code over that class — and a type that omits it makes the omission
+ * invisible. Both are fixed here.
+ *
+ * ⚠ A SECOND defect found while fixing the first: the existing-row lookup
+ * matched `operator === 'at_least'`, a string a persisted row NEVER carries
+ * (`TYPE_TO_OPERATOR` maps it to `'>='`). The limb was dead, and the fixtures
+ * encoded the same wrong vocabulary — so the suite agreed with it.
+ */
+describe('the offer must refuse EXACTLY where the handler refuses — no more', () => {
+  const AMBIGUOUS_VALUE = 300_000; // outside [0,1]: ambiguous iff no unit resolves
+
+  const arrAction = () =>
+    action(
+      'add_constraint',
+      [
+        // ⚠ `at_most`, NOT `at_least`, and the reason is a real discrimination
+        // problem rather than a preference. A goal + `at_least` whose value
+        // would CHANGE takes the narrowed fail-open branch above and returns
+        // null whatever the unit does — so it cannot tell a resolved unit from
+        // an unresolved one, and a control built on it would pass vacuously.
+        // The first version of this block did exactly that and both controls
+        // failed, which is how it was caught.
+        { name: 'constraint_type', value: 'at_most' },
+        { name: 'value', value: AMBIGUOUS_VALUE },
+        // ⛔ NO `unit` parameter — that is the whole point. The handler
+        // resolves it from elsewhere; this predicate used not to.
+      ],
+      { id: 'g-arr', kind: 'goal', label: 'ARR' },
+    );
+
+  it('NODE_UNIT_PRESENT: a unit on the node is resolvable, so the offer must NOT be refused', () => {
+    expect(
+      findUnitAmbiguousOffer(
+        arrAction(),
+        [{ id: 'g-arr', kind: 'goal', observed_state: { unit: 'GBP' } }],
+        [],
+      ),
+      'the handler resolves this unit from observed_state and accepts — withholding the offer is a silent capability loss',
+    ).toBeNull();
+  });
+
+  /**
+   * ⚠ THE CONTROL, and without it the assertion above is not evidence: if this
+   * predicate had simply been disabled, every case would return null and the
+   * test above would pass by testing nothing (trap 13).
+   */
+  it('NODE_UNIT_ABSENT: with no unit anywhere the handler DOES throw, so the refusal must stand', () => {
+    expect(
+      findUnitAmbiguousOffer(
+        arrAction(),
+        [{ id: 'g-arr', kind: 'goal', observed_state: {} }],
+        [],
+      ),
+      'the predicate must still refuse where the handler genuinely would — or it discriminates nothing',
+    ).not.toBeNull();
+  });
+
+  it('EXISTING ROW: "raise my ARR floor 250k → 300k" — the row supplies the unit, so no refusal', () => {
+    expect(
+      findUnitAmbiguousOffer(arrAction(), [{ id: 'g-arr', kind: 'goal' }], [
+        // ⭐ `'<='`, the operator a persisted row ACTUALLY carries. Spelling
+        // the parameter word here is what made the old lookup look correct.
+        { node_id: 'g-arr', operator: '<=', value: 250_000, unit: 'GBP' },
+      ]),
+      'the handler resolves the unit from the existing row and accepts',
+    ).toBeNull();
+  });
+
+  it('the row lookup matches the PERSISTED operator vocabulary, not the parameter words', () => {
+    // Same row, mis-spelled operator: it must NOT be found, so the unit does
+    // not resolve, so the refusal stands. This is the dead-limb defect stated
+    // as a behaviour rather than a comment.
+    expect(
+      findUnitAmbiguousOffer(arrAction(), [{ id: 'g-arr', kind: 'goal' }], [
+        { node_id: 'g-arr', operator: 'at_most', value: 250_000, unit: 'GBP' },
+      ]),
+      "a parameter word is not an operator any row carries — it must not resolve a unit",
+    ).not.toBeNull();
   });
 });
