@@ -61,6 +61,29 @@ const StatedItemWire = z.object({
   value: z.number().optional(),
   unit: z.string().optional(),
   role: z.enum(DRAFT_RECORD_ROLES).optional(),
+  // The convention the user's number is written in. Optional and additive,
+  // exactly as the claims-side twin: absence means UNDECLARED, never
+  // `unit_interval`.
+  // ⛔⛔ `.catch(undefined)` — A MALFORMED VALUE DEGRADES TO ABSENCE, NEVER TO A
+  // DEAD DRAFT. Same ruling `applies_to_*` above carries, for the same reason:
+  // `value_scale` is an OPTIONAL ENHANCEMENT whose ABSENCE is defined as
+  // byte-identical to the behaviour before it existed, so absence IS the honest
+  // degradation and failing the whole record set to reach it is
+  // disproportionate.
+  //
+  // MEASURED on this tree, with a positive control AND a contrast control, on
+  // the shape the prompt-only fallback can produce (no grammar attached, so
+  // nothing enforces the enum provider-side):
+  //
+  //   valid                    -> ok, value_scale carried
+  //   value_scale: "percent"   -> ok=false, "not_a_record_set"      <<<
+  //   applies_to_stated: "0"   -> ok        (its `.catch` absorbs it)
+  //   kind: "nonsense"         -> ok=false  (a DISCRIMINATOR still refuses,
+  //                                          and must — that is the contrast)
+  //
+  // One out-of-enum string on ONE stated item loses the ENTIRE draft — every
+  // quote, figure and limit — over a field that did not exist last week.
+  value_scale: z.enum(DRAFT_RECORD_VALUE_SCALES).optional().catch(undefined),
   direction: z.enum(DRAFT_RECORD_DIRECTIONS).optional(),
   // `option` only — grammar design note 5.
   is_baseline: z.boolean().optional(),
@@ -159,7 +182,12 @@ const InferenceClaimWire = z.object({
   // halves of one quantity; carrying one without the other would leave the
   // projector inferring the convention from magnitudes, which is the defect
   // v10 exists to remove.
-  value_scale: z.enum(DRAFT_RECORD_VALUE_SCALES).optional(),
+  // ⚠ THE SAME `.catch(undefined)`, applied to the v10 twin. PRE-EXISTING, not
+  // introduced here — but it is the identical field, the identical harm and two
+  // words away, and leaving one of two instances tolerant would read as a
+  // deliberate asymmetry when it is not one. Named rather than done silently:
+  // if a loud failure was wanted here, this is the line to argue with.
+  value_scale: z.enum(DRAFT_RECORD_VALUE_SCALES).optional().catch(undefined),
   // ⭐⭐ DECLARED HERE TOO, AND THE OMISSION WAS A SECOND LAYER OF THE SAME
   // DEFECT. `likelihood` was added to the model-facing JSON Schema and to
   // `DraftInferenceClaim`, and the rebuild below was then taught to name it —
@@ -280,6 +308,7 @@ export function projectDraftRecords(
       ...(item.value !== undefined ? { value: item.value } : {}),
       ...(item.unit !== undefined ? { unit: item.unit } : {}),
       ...(item.role !== undefined ? { role: item.role } : {}),
+      ...(item.value_scale !== undefined ? { value_scale: item.value_scale } : {}),
       ...(item.direction !== undefined ? { direction: item.direction } : {}),
       ...(item.is_baseline !== undefined ? { is_baseline: item.is_baseline } : {}),
       ...(item.applies_to_stated !== undefined ? { applies_to_stated: item.applies_to_stated } : {}),
@@ -394,6 +423,28 @@ export function projectDraftRecords(
     if (claim.likelihood === undefined) lb.absent += 1;
     else lb.routed += 1;
   }
+  // ⭐⭐ THE STATED SIDE IS COUNTED TOO, AND IT HAD TO BE ADDED IN THE SAME
+  // CHANGE AS THE FIELD.
+  //
+  // The claims twin shipped MEASURED-INERT: `value_scale` declared on 0 of 89
+  // claims across two live draws, and `declared_scale` present on 0 of 92 nodes
+  // across nine real sessions. That is the entire reason the stated field
+  // exists. Shipping it without extending this counter would recreate exactly
+  // the state that docblock above complains about — a carrier nobody can tell
+  // is empty — and the next lane would have to re-derive the rate by hand from
+  // debug exports, which is how the claims side went a whole release unnoticed.
+  //
+  // ⚠ Counted over VALUED stated items only. A record with no number cannot
+  // declare a convention for it, so pooling it with ones that can would read as
+  // a producer failure when it is a structural absence — the same distinction
+  // the per-kind split above exists to preserve.
+  const statedValueScaleByKind: Record<string, { declared: number; absent: number }> = {};
+  for (const item of records.stated_items) {
+    if (typeof item.value !== "number") continue;
+    const bucket = (statedValueScaleByKind[item.kind] ??= { declared: 0, absent: 0 });
+    if (item.value_scale === undefined) bucket.absent += 1;
+    else bucket.declared += 1;
+  }
   log.info(
     {
       event: "cee.draft.records.wire_histogram",
@@ -402,6 +453,7 @@ export function projectDraftRecords(
       claim_count: records.claims.length,
       stated_count: records.stated_items.length,
       value_scale_by_kind: valueScaleByKind,
+      stated_value_scale_by_kind: statedValueScaleByKind,
       likelihood_by_kind: likelihoodByKind,
     },
     "Draft record set accepted at the seam",

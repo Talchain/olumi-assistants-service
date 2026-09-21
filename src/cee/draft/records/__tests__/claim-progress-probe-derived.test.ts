@@ -299,14 +299,32 @@ const HISTORIC_V10_GRAMMAR_SHA256 =
  * unchanged) and NO union (0, unchanged). The headroom is now THREE optional
  * parameters — the next field is a decision, not a habit.
  */
+/**
+ * SUPERSEDED — the grammar in which `value_scale` existed on `claims[]` ONLY.
+ *
+ * Kept, not overwritten. Every draft between v10 and v11 emitted this hash, and
+ * the measurement that motivated v11 — `declared_scale` present on 0 of 92
+ * nodes across 9 real sessions, 19-21 Sep 2026 — is evidence ABOUT THIS
+ * GRAMMAR. Re-pointing the literal would let that finding read as a finding
+ * about v11, which is the artefact intended to fix it.
+ */
+const SUPERSEDED_V10_GRAMMAR_SHA256 =
+  "bfbbe10037f2d52e603c6b3f0389adc61f62febce3f48748fb035a5ede2835a5";
+
 const PINNED_GRAMMAR_SHA256 =
-  // ⚠ RE-PINNED with v20.2 (`likelihood`). This hash is over
+  // ⚠ RE-PINNED with v11 (`value_scale` on `stated_items`). This hash is over
   // `JSON.stringify(buildDraftRecordsSchema())` — the BUILT OBJECT the adapter
   // attaches, not the file — so it moves when a FIELD is added and cannot move
   // for a comment. That is what makes it the strongest of the three pins, and
   // it is why adding a grammar field moves it while the instruction pins move
-  // independently: 1451 -> 1482 bytes.
-  "bfbbe10037f2d52e603c6b3f0389adc61f62febce3f48748fb035a5ede2835a5";
+  // independently: 1482 -> 1559 bytes.
+  //
+  // ⭐ THE BUDGET WAS MEASURED BEFORE THE FIELD WAS ADDED, NOT AFTER: predicted
+  // 1559 bytes / 22 optional params from the schema's own shape, then confirmed
+  // against `measureDraftRecordsSchemaBudget()` — the authority — which agreed
+  // to the byte. 2 optional slots remain against Anthropic's 24, so the next
+  // field is a decision and not a habit.
+  "321681de308163b4b9420cdcf873e668cd16830d022874eac0f2f920ef30ad88";
 
 describe("the claim-progress probe is derived from the grammar", () => {
   it("hashes to the PRE-REGISTERED v11 grammar the provider receives", () => {
@@ -323,6 +341,11 @@ describe("the claim-progress probe is derived from the grammar", () => {
     // the x137.5 churn carry emitted `c7132480…`, and that evidence must stay
     // attributable to the grammar that produced it.
     expect(draftRecordsGrammarHash()).not.toBe(HISTORIC_V9_GRAMMAR_SHA256);
+    // v10 kept distinct for the same reason, and it is the one that matters
+    // most right now: the `declared_scale` 0-of-92 census was measured against
+    // v10, so that evidence must stay attributable to the grammar in which the
+    // user's own numbers had nowhere to declare.
+    expect(draftRecordsGrammarHash()).not.toBe(SUPERSEDED_V10_GRAMMAR_SHA256);
     // v10 kept distinct for the same reason, and it is the value `staging`
     // serves: every draft taken before the `likelihood` destination emitted
     // `d4f4201d…`, including every draw behind the measured risk 0/3 and

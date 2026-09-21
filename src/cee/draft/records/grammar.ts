@@ -464,6 +464,36 @@ export interface DraftStatedItem {
   value?: number;
   unit?: string;
   role?: DraftRecordRole;
+  /**
+   * ⭐⭐ WHAT THE USER'S OWN NUMBER MEANS — the twin of `claims[].value_scale`,
+   * and its absence is why that field was measured INERT.
+   *
+   * v10 gave the MODEL somewhere to declare its convention and gave the USER
+   * nowhere. `stated_items` is `additionalProperties: false`, so this was not
+   * an unused field: it was UNEMITTABLE. Meanwhile `instruction.ts` taught the
+   * whole vocabulary — and both worked examples — inside the `stated_items`
+   * section, i.e. pointed at the one shape that could not answer.
+   *
+   * ⚠ MEASURED, 9 real sessions 19-21 Sep 2026, over the saved graphs:
+   *   `declared_scale` present ................... 0 of 92 nodes
+   *   valued nodes whose `unit` is a SCALE WORD .. 18 of 18
+   *       `"scale"` x17 · `"unit_interval"` x1
+   * The model uses `unit` correctly wherever a real unit exists (£, %, months,
+   * weeks, contacts per week) and reaches for it as a convention slot when it
+   * has nothing else — once emitting `unit: "unit_interval"`, a member of THIS
+   * enum, into the unit field. Two questions under one name is trap 21, and
+   * `unit` was carrying both.
+   *
+   * ⛔ NOTHING IS INFERRED HERE. This is the model DECLARING, exactly as
+   * `claims[].value_scale` is. The earlier attempt to BORROW a unit from a
+   * figure cited in `basis` was killed by review with two reproductions; the
+   * same rule applies with the same force. Absence means UNDECLARED and MUST
+   * NOT be read as `unit_interval` — the contract's own failure semantics.
+   *
+   * Optional and additive, exactly as `unit` was: an older consumer drops an
+   * unknown field silently, where a new enum member fails validation outright.
+   */
+  value_scale?: DraftRecordValueScale;
   /** `constraint` only. */
   direction?: DraftRecordDirection;
   /**
@@ -617,6 +647,11 @@ export function buildDraftRecordsSchema(): Record<string, unknown> {
             value: { type: "number" },
             unit: { type: "string" },
             role: { type: "string", enum: [...DRAFT_RECORD_ROLES] },
+            // What convention `value` is written in. See the interface note:
+            // `unit` says what it is MEASURED IN, this says what it MEANS.
+            // Built from the SAME constant as the claims side, so the two
+            // shapes cannot answer the question differently (trap 12).
+            value_scale: { type: "string", enum: [...DRAFT_RECORD_VALUE_SCALES] },
             direction: { type: "string", enum: [...DRAFT_RECORD_DIRECTIONS] },
             // Design note 5. `option` only; the projector ignores it elsewhere.
             is_baseline: { type: "boolean" },
