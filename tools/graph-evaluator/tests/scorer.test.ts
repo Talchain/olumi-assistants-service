@@ -784,7 +784,10 @@ describe("scorer — failed responses", () => {
 
 describe("scorer — overall_score", () => {
   it("THE WEIGHTS SUM TO EXACTLY 1.0 — a stronger invariant than any single term", () => {
-    const total = Object.values(RUBRIC_WEIGHTS).reduce((a, b) => a + b, 0);
+    // `as const` narrows each weight to its own literal type, so the accumulator
+    // must be widened explicitly — vitest transpiles without typechecking, so this
+    // was only visible to tsc.
+    const total = (Object.values(RUBRIC_WEIGHTS) as number[]).reduce((a, b) => a + b, 0);
     expect(total).toBeCloseTo(1.0, 10);
   });
 

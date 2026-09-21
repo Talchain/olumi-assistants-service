@@ -1,0 +1,39 @@
+{
+  "_comment": "WP1 DIAGNOSTIC SCOPE, NOT THE REPO GATE. The gate is `npm run typecheck` (tsconfig.json, include src+tests+scripts). That gate does not complete in this local environment - MEASURED at >9 minutes with 0% CPU, and measured the same way on the PRE-WP1 tree, so it is not a WP1 regression; the cost is the openai/@anthropic-ai/zod type graphs reached through src/adapters and src/providers. This config carries the IDENTICAL compilerOptions (typeRoots added so it can live here) and narrows the program to the WP1 files plus their imports, so WP1 type errors are catchable locally. It caught one: Object.values(RUBRIC_WEIGHTS).reduce over an `as const` weight map, which vitest cannot see because it transpiles without typechecking. Never cite this in place of the gate.",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "Node16",
+    "moduleResolution": "node16",
+    "lib": [
+      "ES2022"
+    ],
+    "strict": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "types": [
+      "node"
+    ],
+    "outDir": "dist",
+    "rootDir": ".",
+    "typeRoots": [
+      "./node_modules/@types"
+    ]
+  },
+  "include": [],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "results"
+  ],
+  "files": [
+    "src/trust-gates.ts",
+    "src/scorer.ts",
+    "src/io.ts",
+    "src/types.ts",
+    "tests/trust-gates.test.ts",
+    "tests/scorer.test.ts",
+    "tests/rubric-invariant.test.ts"
+  ]
+}
