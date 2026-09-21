@@ -226,7 +226,7 @@ export function setOptionEffect(input: SetOptionEffectInput): SetOptionEffectRes
     prior?: { range_min?: unknown; range_max?: unknown; prior_is_unquantified?: unknown };
     range?: { min?: unknown; max?: unknown };
     scale_frame?: unknown;
-    observed_state?: { unit?: unknown; value?: unknown };
+    observed_state?: { unit?: unknown; value?: unknown; cap?: unknown };
   };
 
   const unquantified = f.prior?.prior_is_unquantified === true;
@@ -236,6 +236,37 @@ export function setOptionEffect(input: SetOptionEffectInput): SetOptionEffectRes
       ? { lo: f.prior.range_min, hi: f.prior.range_max }
       : typeof f.scale_frame === 'number' && Number.isFinite(f.scale_frame) && f.scale_frame > 0
         ? { lo: 0, hi: f.scale_frame }
+        // ⭐ `observed_state.cap` — ADDED, AND THE OMISSION HAD A MEASURED COST.
+        //
+        // The census above lists what three real captures carry, and `cap` was
+        // not among them — so it was never added. Simulated over 555 real
+        // factors by the Core lane: **242 refused `factor_has_no_range`, and 94
+        // of those carry a positive `observed_state.cap`.** Nearly a fifth of
+        // every refusal this tool makes was a capability loss, not a guard.
+        //
+        // ⛔ THIS IS NOT THE cap/frame CONFLATION, AND THE DISTINCTION IS RULED.
+        // A cap divides AND CLAMPS and exempts the factor from the analysis
+        // baseline gate; a frame divides with neither, and is derived from the
+        // baseline plus every sibling magnitude — a property of the magnitude
+        // SET, not of the node. Three modules rule them different questions
+        // (`schemas/graph.ts:420-435`, `projector.ts:1307`,
+        // `set-factor-value.ts:538-543`, the last citing trap 21 by name).
+        //
+        // What makes reading both safe HERE is that `bounds` is a PRESENCE
+        // check and nothing else: its only consumer is the null test below, and
+        // it never divides, clamps or converts. The question this arm answers is
+        // "is there ANY stated basis against which a share is meaningful?" —
+        // and a cap is one. Order therefore has no behavioural consequence
+        // today; it is placed after `scale_frame` so that where the producer's
+        // own basis exists it remains the one named.
+        //
+        // ⚠ `> 0` is load-bearing: `cap === 0` is the MODAL cap value in the
+        // estate (247 occurrences) and is not a usable basis. A zero cap must
+        // keep failing the presence test, not yield `{lo: 0, hi: 0}`.
+        : typeof f.observed_state?.cap === 'number'
+          && Number.isFinite(f.observed_state.cap)
+          && f.observed_state.cap > 0
+          ? { lo: 0, hi: f.observed_state.cap }
         : typeof f.range?.min === 'number' && typeof f.range?.max === 'number'
           ? { lo: f.range.min, hi: f.range.max }
           : f.observed_state?.unit === 'scale' && typeof f.observed_state?.value === 'number'

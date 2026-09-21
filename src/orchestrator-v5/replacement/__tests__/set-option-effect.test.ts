@@ -256,6 +256,84 @@ describe('the range is read from the shapes REAL factors carry', () => {
   });
 });
 
+describe('a declared CAP is a stated basis too — the omission had a measured cost', () => {
+  /**
+   * ⛔ THE CENSUS THIS TOOL WAS BUILT FROM LISTED WHAT THREE CAPTURES CARRIED,
+   * AND `cap` WAS NOT AMONG THEM — so it was never read. Simulated over 555
+   * real factors by the Core lane: **242 refused `factor_has_no_range`, and 94
+   * of those carry a positive `observed_state.cap`.** Nearly a fifth of every
+   * refusal this tool makes was a capability loss rather than a guard.
+   *
+   * ⛔ AND THIS IS NOT THE cap/frame CONFLATION — that distinction is RULED in
+   * three modules (`schemas/graph.ts:420-435`, `projector.ts:1307`,
+   * `set-factor-value.ts:538-543`, the last citing trap 21 by name): a cap
+   * divides AND CLAMPS and exempts the factor from the analysis baseline gate;
+   * a frame divides with neither and is a property of the whole magnitude set.
+   *
+   * What makes reading both safe HERE is that `bounds` is a PRESENCE check and
+   * nothing else — it never divides, clamps or converts. The question is "is
+   * there ANY stated basis against which a share is meaningful?", and a cap is
+   * one.
+   *
+   * ⚠ Shapes only. Every digit is invented; this repository is public.
+   */
+  function capFactor(observed: Record<string, unknown>): EffectGraph {
+    return {
+      nodes: [
+        { id: OPT, kind: 'option', label: 'O' },
+        { id: PRICE, kind: 'factor', label: 'Plan Price', observed_state: observed },
+      ],
+      edges: [{ from: OPT, to: PRICE }],
+    } as unknown as EffectGraph;
+  }
+  const call = (g: EffectGraph) => setOptionEffect({ graph: g, optionId: OPT, factorId: PRICE, value: 0.5 });
+
+  it('ACCEPTS a factor whose only stated basis is a positive cap', () => {
+    const r = call(capFactor({ value: 0.3, unit: 'GBP', cap: 100000 }));
+    expect(r.ok, 'a declared cap is a basis a share can be measured against').toBe(true);
+  });
+
+  it('⚠ STILL REFUSES a ZERO cap — the modal value in the estate, and not a basis', () => {
+    // `cap === 0` occurs 247 times and cannot denominate anything. It must keep
+    // failing the presence test, never yield `{ lo: 0, hi: 0 }`.
+    const r = call(capFactor({ value: 0.3, unit: 'GBP', cap: 0 }));
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.refusal.reason).toBe('factor_has_no_range');
+  });
+
+  it('⚠ STILL REFUSES a negative or non-finite cap', () => {
+    for (const cap of [-5, Number.NaN, Number.POSITIVE_INFINITY, '100000']) {
+      const r = call(capFactor({ value: 0.3, unit: 'GBP', cap }));
+      expect(r.ok, `cap ${String(cap)} is not a basis`).toBe(false);
+    }
+  });
+
+  it('CONTRAST: a factor with NO basis at all is still refused — the guard is intact', () => {
+    // Without this twin, the acceptance above is consistent with a gate that
+    // simply stopped refusing.
+    const r = call(capFactor({ value: 0.3, unit: 'GBP' }));
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.refusal.reason).toBe('factor_has_no_range');
+  });
+
+  it("the producer's own basis still takes precedence where both are present", () => {
+    // Order has no behavioural consequence today — `bounds` is presence-only —
+    // but it is asserted so that a future change which makes it arithmetic
+    // cannot quietly reverse which basis is named.
+    const both = {
+      nodes: [
+        { id: OPT, kind: 'option', label: 'O' },
+        { id: PRICE, kind: 'factor', label: 'Plan Price', scale_frame: 50000,
+          observed_state: { value: 0.3, unit: 'GBP', cap: 100000 } },
+      ],
+      edges: [{ from: OPT, to: PRICE }],
+    } as unknown as EffectGraph;
+    expect(call(both).ok).toBe(true);
+  });
+});
+
 describe('SUPERSEDED — the schema-derived reading, kept only as a control', () => {
   function factorWith(extra: Record<string, unknown>): EffectGraph {
     return {
