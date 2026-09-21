@@ -755,3 +755,90 @@ describe('declared draft percentages retain the baseline question', () => {
     expect(outcome.__elicit_baseline).toBeUndefined();
   });
 });
+
+/**
+ * ⭐⭐ THE GOAL CAN NEVER BE MADE MEASURABLE — and the product says so out loud.
+ *
+ * Measured 21 Sep 2026 by EXECUTING Paul's own sentence against this handler,
+ * after the lane's queue recorded the opposite ("all three needed mechanisms
+ * are already built ... it should have elicited the level from him"). The
+ * handler does not throw and does not misbehave:
+ *
+ *   "gain at least 20 new enterprise customers by the end of the year"
+ *     → goal_threshold_raw 20, unit "customers"   — the target IS stamped
+ *     → observed_state.baseline undefined          — correctly not invented
+ *     → __elicit_baseline undefined                — AND NOTHING ASKS FOR ONE
+ *     → "Success target set: Revenue at least 20 customers. I'll flag how your
+ *        options score against it ONCE THE ANALYSIS CAN MEASURE THIS GOAL."
+ *
+ * The reply names the missing precondition and then never requests it. The
+ * baseline is what makes the goal measurable; elicitation is the remedy this
+ * product designed for a missing baseline; and `mintEligible`'s second
+ * conjunct is `(kind === 'outcome' || kind === 'risk')`, so the remedy is
+ * structurally unreachable for a goal. Downstream, ISL withholds the
+ * recommendation with `missing_goal_baseline` — measured on a complex brief on
+ * 19 Sep, and this is where that baseline was silently never obtained.
+ *
+ * ⛔ THIS FILE DOES NOT FIX IT, DELIBERATELY. `mintEligible` is a ten-conjunct
+ * predicate over natural language, and widening one is how this estate has
+ * repeatedly traded one silent failure for its mirror image (traps 22b/22f).
+ * A count baseline ("we have eight today") is also a different PARSING problem
+ * from the percentage one the mint was built for — not the same fix wearing a
+ * wider gate. So the gap is recorded HERE, in the suite, where it REDs the
+ * moment someone changes it in either direction. A gap a suite can see is
+ * honest; a gap invisible to it is how this shipped.
+ */
+describe('2.918 — the elicitation cell EXCLUDES goals, so a goal target can never be baselined', () => {
+  it("Paul's sentence: the target is stamped, no baseline is invented, and NO question is asked", async () => {
+    const outcome = await runTurn({
+      message: 'gain at least 20 new enterprise customers by the end of the year',
+      targetId: 'g-revenue',
+      kind: 'goal',
+      constraintType: 'at_least',
+      value: 20,
+      unit: 'customers',
+    });
+    const goal = node(outcome.mutated_graph as GraphV3T, 'g-revenue') as {
+      goal_threshold_raw?: number;
+      observed_state?: { baseline?: number };
+    };
+
+    // The commit itself is correct and is NOT what is broken here.
+    expect(goal.goal_threshold_raw).toBe(20);
+    expect(goal.observed_state?.baseline).toBeUndefined();
+
+    // ⛔ THE GAP: the one thing that would make the goal measurable is never requested.
+    expect(outcome.__elicit_baseline).toBeUndefined();
+  });
+
+  /**
+   * THE DISCRIMINATING PAIR (trap 19). Absence alone proves nothing — this
+   * probe must be shown capable of SEEING an elicitation, and the two arms must
+   * differ in exactly one field, or the silence could be the unit, the edges,
+   * the frame or the fixture rather than the kind.
+   */
+  it('ISOLATES THE CONJUNCT: one identical cell asks as an outcome and goes silent as a goal', async () => {
+    const asOutcome = await runTurn({
+      message: 'Keep churn rate under 10%.',
+      targetId: 'o-churn-rate',
+      value: 10,
+      unit: '%',
+    });
+    // POSITIVE CONTROL: the elicitation demonstrably fires on this exact cell.
+    expect(asOutcome.__elicit_baseline?.target_id).toBe('o-churn-rate');
+
+    const graph = graphWithConstraintTargets();
+    (node(graph, 'o-churn-rate') as { kind: string }).kind = 'goal'; // the ONLY change
+    const asGoal = await runTurn({
+      message: 'Keep churn rate under 10%.',
+      targetId: 'o-churn-rate',
+      kind: 'goal',
+      value: 10,
+      unit: '%',
+      graph,
+    });
+
+    // Same label, same edges, same unit, same frame, same value, same message.
+    expect(asGoal.__elicit_baseline).toBeUndefined();
+  });
+});
