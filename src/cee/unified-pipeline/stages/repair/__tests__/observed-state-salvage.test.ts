@@ -278,6 +278,29 @@ describe('observed_state salvage — an optional field must not destroy the mode
     expect(declineReasonFor(graph)).toBe('issue_outside_observed_state');
   });
 
+  it('T17 THE EVERY-ISSUE RULE: a mix declines WITHOUT touching anything', () => {
+    // ⭐ THIS IS THE DOMINANCE ARGUMENT, AND IT WAS UNBOUND. The whole safety
+    // case for this module is "it only acts when EVERY issue is an
+    // `invalid_union` at an observed_state path". Relaxing EVERY to SOME is
+    // OBSERVATIONALLY EQUIVALENT on outcome — a foreign issue still yields
+    // strip -> reparse-fails -> restore -> decline -> 400 — so no assertion
+    // about the status code or the graph can catch it.
+    //
+    // The ONLY signal that separates them is WHICH decline happened:
+    //   EVERY (correct) -> declines BEFORE touching a node: issue_outside_observed_state
+    //   SOME  (mutant)  -> strips, re-parses, restores:      reparse_still_failed
+    //
+    // So the discriminated decline reasons are not cosmetic; they are the
+    // instrument that makes the dominance argument testable at all.
+    const graph = graphWith(
+      FACTOR({ unit: '%' }),                 // invalid_union at observed_state
+      { id: 'f2', label: 'no kind' },        // invalid_type — FOREIGN
+    );
+    expect(issueCodesFor(graph).sort()).toEqual(['invalid_type', 'invalid_union']); // precondition
+
+    expect(declineReasonFor(graph)).toBe('issue_outside_observed_state');
+  });
+
   it('T3 an issue ANYWHERE ELSE still 400s and sheds nothing', () => {
     const graph = graphWith({ id: 'f1', label: 'no kind' });  // `kind` is required
     const ctx = ctxFor(graph);
