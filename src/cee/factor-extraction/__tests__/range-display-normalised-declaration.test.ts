@@ -195,6 +195,31 @@ describe("a declared unit_interval prior is not rendered beside a user-scale uni
    * evidence about its own scale and renders exactly as before, whatever a
    * stale declaration says.
    */
+  /**
+   * ⚠ MAGNITUDE, NOT SIGN — and this case exists because a mutant PROVED the
+   * earlier suite could not see it. Replacing `Math.abs(rangeMin!) <= 1` with
+   * `rangeMin! <= 1` SURVIVED all six preceding tests: every bound in them is
+   * non-negative, so the asymmetry was invisible. A corpus with the same
+   * asymmetry as the code is a guard agreeing with itself (trap 13d), and this
+   * is the exact shape that cost CEE #891 a 100,000x suppression.
+   *
+   * A bound of -5 is OUTSIDE the normalised magnitude domain, so it is
+   * real-scale evidence and must render whatever a stale declaration says. The
+   * unsigned predicate would read it as "within the domain" and silently
+   * suppress a real range — a GAP traded for the LIE this limb closes, which is
+   * the trade trap 22b exists to forbid.
+   */
+  it("NEGATIVE HALF: a bound below -1 is out of domain by MAGNITUDE and still renders", () => {
+    expect(
+      synthesiseRangeDisplayValue(
+        { distribution: "uniform", range_min: -5, range_max: 0.8 },
+        "ratio",
+        undefined,
+        "unit_interval",
+      ),
+    ).toBe("-5 to 0.8 ratio");
+  });
+
   it("NEGATIVE HALF: a real-scale range outside the normalised domain still renders", () => {
     expect(
       synthesiseRangeDisplayValue(
