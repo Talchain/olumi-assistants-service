@@ -28,7 +28,7 @@ import { Command } from "commander";
 import { config as loadDotenv } from "dotenv";
 import { readBriefs, readModels } from "../../src/io.js";
 import { getProvider } from "../../src/providers/index.js";
-import type { LLMResult, ModelConfig as ProviderModelConfig } from "../../src/providers/types.js";
+import type { LLMResult } from "../../src/providers/types.js";
 import type { Brief, ModelConfig } from "../../src/types.js";
 import {
   loadRichSchema,
@@ -42,12 +42,16 @@ import {
 import { checkWidenerImmutability, validateSourceBinding } from "../../src/source-binding.js";
 import { omissionCounts, richToParsedGraph } from "../../src/rich-to-graph.js";
 import { selectDskForBrief, type DskSelection } from "./dsk-allowlist.js";
+import {
+  checkDskGrounding,
+  estimateCost,
+  withRichSchema,
+  type PricedConfig,
+} from "./arm-helpers.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const TOOL_ROOT = resolve(HERE, "..", "..");
 const REPO_ROOT = resolve(TOOL_ROOT, "..", "..");
-
-const SCHEMA_NAME = "rich_decision_model";
 
 type ArmName = "builder" | "widener" | "claude-rich";
 type CallRole = "builder" | "widener" | "critic";
@@ -90,88 +94,6 @@ interface RunResult {
   rich_model: RichDecisionModel | null;
   graph: unknown;
   error: string | null;
-}
-
-// =============================================================================
-// Pricing
-// =============================================================================
-
-interface PricedConfig extends ModelConfig {
-  pricing_verified?: boolean;
-}
-
-/**
- * Cost for one call, or null when we do not actually know the rate.
- *
- * A 0 in a cost column reads as "free" and gets compared against real numbers.
- * Terra and Sol ship placeholder pricing precisely so nobody silently fills it.
- */
-export function estimateCost(config: PricedConfig, result: LLMResult): number | null {
-  const pricing = config.pricing;
-  if (pricing == null) return null;
-  if (config.pricing_verified === false) return null;
-  if (pricing.source.trim().toLowerCase().startsWith("unknown")) return null;
-  const input = result.input_tokens ?? 0;
-  const output = result.output_tokens ?? 0;
-  return (input / 1_000_000) * pricing.input_per_1m + (output / 1_000_000) * pricing.output_per_1m;
-}
-
-// =============================================================================
-// Schema injection
-// =============================================================================
-
-/**
- * Attach the strict v0 grammar to a COPY of the model config.
- *
- * The two providers are NOT symmetric and the difference is a 400:
- *   OpenAI    params.text.format = {type, name, strict, schema}   (Responses API)
- *   Anthropic output_config.format = {type, schema}               (no name, no strict)
- */
-export function withRichSchema(
-  config: ModelConfig,
-  schema: Record<string, unknown>,
-): ProviderModelConfig {
-  const copy = JSON.parse(JSON.stringify(config)) as ProviderModelConfig;
-  if (config.provider === "anthropic") {
-    copy.output_config = { format: { type: "json_schema", schema } };
-    return copy;
-  }
-  copy.params = {
-    ...(copy.params ?? {}),
-    text: { format: { type: "json_schema", name: SCHEMA_NAME, strict: true, schema } },
-  };
-  return copy;
-}
-
-// =============================================================================
-// DSK grounding
-// =============================================================================
-
-/** Any dsk_ref outside the allowlist is a grounding failure and counts against the arm. */
-export function checkDskGrounding(
-  model: RichDecisionModel,
-  allowlist: readonly string[],
-): ValidationResult {
-  const allowed = new Set(allowlist);
-  const failures = [];
-  const sources: Array<[string, string[]]> = [
-    ...model.factors.map((f): [string, string[]] => [f.id, f.dsk_refs]),
-    ...model.outcomes.map((o): [string, string[]] => [o.id, o.dsk_refs]),
-    ...model.causal_links.map((l): [string, string[]] => [l.id, l.dsk_refs]),
-    ...model.notes.map((n, i): [string, string[]] => [n.about_id ?? `note[${i}]`, n.dsk_refs]),
-  ];
-  for (const [itemId, refs] of sources) {
-    for (const ref of refs) {
-      if (!allowed.has(ref)) {
-        failures.push({
-          gate: "DSK1_ref_not_in_allowlist",
-          item_id: itemId,
-          detail: `cites '${ref}', which was not in the ${allowlist.length}-id allowlist supplied to the prompt`,
-        });
-      }
-    }
-  }
-  return { ok: failures.length === 0, failures };
 }
 
 // =============================================================================
