@@ -174,3 +174,59 @@ export function traceAccountsForItsWrite(trace: ReplacementTurnTrace): boolean {
   if (!trace.write_attempted) return true;
   return trace.write_committed || trace.refusals.length > 0;
 }
+
+/**
+ * ⭐⭐ DID THIS REPLY CLAIM A CHANGE THE TURN CANNOT PROVE IT MADE?
+ *
+ * Demonstrated, not inferred: scripting the model to say "I've updated the
+ * model" on a turn where the write was REFUSED sends that claim to the caller
+ * verbatim. There is no truthfulness guard on this layer's exit —
+ * `applyEgressForbiddenPhraseGuard` is the DENIAL guard (0 occurrences in
+ * `route-v2.ts`) and `response-finaliser.ts` never touches `assistant_text`.
+ *
+ * ⛔ THIS IS NOT THAT GUARD, AND DELIBERATELY SO. Suppressing or rewriting the
+ * claim means choosing what the product says instead, which is a copy decision
+ * and not mine to take. What IS takeable without a ruling is making the lie
+ * COUNTABLE: a turn that asserts a change while holding no receipt is recorded
+ * as exactly that, every time, in the per-turn record.
+ *
+ * The permission rule this measures, stated so the eventual remedy has a
+ * definition to be judged against: **a reply may not assert a change was made
+ * unless the turn holds a commit proof.** The proof is `receipt_id` —
+ * `applied[].receiptId`, already threaded. ⛔ NEVER `commitPerformed`:
+ * `route-v2.ts:3089` is a literal `true` about the conversation row, not about
+ * a graph change.
+ *
+ * ⚠⚠ THIS IS A FLOOR, NOT A COUNT, AND MUST BE READ AS ONE. Both detectors are
+ * pattern-based and 4 of 8 plausible false-success sentences are missed by
+ * BOTH — the structural one anchors on graph NOUNS, so a VALUE claim ("the
+ * budget is now set to £50k") falls outside it, and value claims are exactly
+ * what this layer produces. The known-missed set is pinned in the tests so the
+ * size of the blind spot is visible rather than assumed. **A zero here means
+ * "no PATTERN matched", never "the reply was honest".**
+ *
+ * Two detectors rather than one because they answer different questions: one
+ * matches success PHRASING, the other matches structural completion claims
+ * with a conditional-offer carve-out. Either hitting is enough; neither
+ * subsumes the other.
+ */
+export function detectUnbackedChangeClaim(
+  assistantText: string,
+  trace: Pick<ReplacementTurnTrace, 'receipt_id'>,
+  detectors: {
+    readonly findSuccessClaimHit: (text: string) => string | null;
+    readonly containsStructuralSuccessClaim: (text: string) => boolean;
+  },
+): string | null {
+  // A receipt IS the commit proof. Holding one, any claim of change is true,
+  // and no amount of phrasing analysis is needed or wanted.
+  if (trace.receipt_id !== null) return null;
+  const phrase = detectors.findSuccessClaimHit(assistantText);
+  if (phrase !== null) return phrase;
+  // The structural detector returns a boolean, so there is no phrase to name.
+  // A stable token rather than an invented excerpt — the record says WHICH
+  // detector fired, and never manufactures a quotation the text may not hold.
+  return detectors.containsStructuralSuccessClaim(assistantText)
+    ? 'structural_completion_claim'
+    : null;
+}
