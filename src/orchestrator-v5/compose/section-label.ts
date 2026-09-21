@@ -43,6 +43,39 @@ export function sectionLabel(label: string): string {
 }
 
 /**
+ * `sectionHeader('Options on the canvas')` → `'**Options on the canvas**'`
+ *
+ * ⭐ A HEADER, NOT A LEAD-IN — AND THE DIFFERENCE IS THE COPY, NOT THE STYLE.
+ *
+ * `sectionLabel` exists for `Limit to confirm:` — a label that INTRODUCES the
+ * clause after it, where the colon is part of the sentence the author wrote.
+ * "Options on the canvas" and "What the model is weighing" are not that. They
+ * head a section, and `sectionLabel` would render them as
+ * `**Options on the canvas:**` — a colon no author wrote. Marking is supposed
+ * to change how copy renders, never what it says.
+ *
+ * ⚠ THE COLON'S SECOND JOB, AND WHOSE CLAIM THIS RESTS ON. The note at the top
+ * of this file says the panel "keys its paragraph gap" on the marked label. The
+ * panel workstream — who own `safeRichText` and the component — state that a
+ * **bold** lead opens the paragraph gap on its own, so the colon is not doing
+ * that work. That is their component, so their reading of it is the best
+ * evidence available; it is recorded here as THEIR claim rather than something
+ * measured on this side. If it turns out to be wrong the failure is cosmetic (a
+ * bold header with no gap above it) and not a correctness defect — which is why
+ * this ships without blocking on a render witness.
+ *
+ * ⛔ The whole-phrase rule from the top of this file applies UNCHANGED. This
+ * wraps a complete header and never a fragment, so it cannot produce the two
+ * BLIND cases that make the leader-claim guard miss a claim it must redact.
+ * `__tests__/section-label-is-guard-safe.test.ts` runs the real matcher over
+ * headers too, for exactly that reason.
+ */
+export function sectionHeader(header: string): string {
+  const trimmed = header.trim().replace(/:+$/, '');
+  return `${BOLD}${trimmed}${BOLD}`;
+}
+
+/**
  * ⭐ THE INVERSE, AND IT EXISTS BECAUSE MARKING BROKE THREE READERS.
  *
  * Marking a label changes bytes that OTHER code already parses. Measured, not

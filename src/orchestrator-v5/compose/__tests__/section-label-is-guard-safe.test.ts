@@ -16,7 +16,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { textNamesLeadingOption } from '../leading-option-egress-guard.js';
-import { sectionLabel } from '../section-label.js';
+import { sectionHeader, sectionLabel } from '../section-label.js';
 
 /** Every label this lane emits, from the composers themselves. */
 const LABELS = [
@@ -90,5 +90,58 @@ describe('marking a label leaves the redactor’s verdict unchanged', () => {
     // A caller that already typed the colon must not produce a double one.
     expect(sectionLabel('Limit to confirm:')).toBe('**Limit to confirm:**');
     expect(sectionLabel('  Worth a look  ')).toBe('**Worth a look:**');
+  });
+});
+
+/**
+ * ⭐ THE SAME PARITY PROPERTY FOR HEADERS, RUN THROUGH THE SAME LIVE MATCHER.
+ *
+ * `sectionHeader` differs from `sectionLabel` only by omitting the colon, and a
+ * colon is not what makes markup safe — wrapping a COMPLETE phrase is. Asserting
+ * that here rather than reasoning it from the diff, because the one time this
+ * lane reasoned about marker safety instead of running the matcher, the
+ * conclusion was wrong (see the header of this file).
+ */
+const HEADERS = [
+  'Options on the canvas',
+  'What the model is weighing',
+  'Where this could turn',
+] as const;
+
+describe('marking a HEADER leaves the redactor’s verdict unchanged', () => {
+  it.each(HEADERS)('%s — parity on bodies the guard SEES', (header) => {
+    for (const body of SEEN_BODIES) {
+      const plain = `${header} ${body}`;
+      const marked = `${sectionHeader(header)} ${body}`;
+      expect(textNamesLeadingOption(marked)).toBe(textNamesLeadingOption(plain));
+    }
+  });
+
+  it.each(HEADERS)('%s — parity on bodies the guard does NOT see', (header) => {
+    for (const body of UNSEEN_BODIES) {
+      const plain = `${header} ${body}`;
+      const marked = `${sectionHeader(header)} ${body}`;
+      expect(textNamesLeadingOption(marked)).toBe(textNamesLeadingOption(plain));
+    }
+  });
+
+  // ⛔ THE POINT OF THE WHOLE VARIANT: a header must render bold WITHOUT
+  // acquiring punctuation its author never wrote. `sectionLabel` would say
+  // "Options on the canvas:" — different copy, not different styling.
+  it('emits no colon, where sectionLabel would add one', () => {
+    expect(sectionHeader('Options on the canvas')).toBe('**Options on the canvas**');
+    expect(sectionLabel('Options on the canvas')).toBe('**Options on the canvas:**');
+  });
+
+  it('is idempotent about a colon the caller already typed', () => {
+    expect(sectionHeader('Options on the canvas:')).toBe('**Options on the canvas**');
+    expect(sectionHeader('  Options on the canvas::  ')).toBe('**Options on the canvas**');
+  });
+
+  // CONTROL: the positive controls must actually fire, or every parity
+  // assertion above passes for the wrong reason (nothing is ever seen).
+  it('CONTROL: the guard genuinely sees the SEEN bodies', () => {
+    for (const body of SEEN_BODIES) expect(textNamesLeadingOption(body)).toBe(true);
+    for (const body of UNSEEN_BODIES) expect(textNamesLeadingOption(body)).toBe(false);
   });
 });
