@@ -134,8 +134,17 @@ export function salvageObservedState(
     return { salvaged: false, stripped: [], declined_reason: "no_observed_state_issues" };
   }
 
-  const reparsed = DraftGraphOutput.safeParse(input);
-  if (reparsed.success) {
+  // ⚠ `.parse()` in a try/catch for the same reason as the caller: suites that
+  // mock `DraftGraphOutput` expose only `.parse`, and `.safeParse` would throw
+  // a TypeError rather than report a parse failure.
+  let reparseSucceeded = false;
+  try {
+    DraftGraphOutput.parse(input);
+    reparseSucceeded = true;
+  } catch {
+    reparseSucceeded = false;
+  }
+  if (reparseSucceeded) {
     return { salvaged: true, stripped };
   }
 

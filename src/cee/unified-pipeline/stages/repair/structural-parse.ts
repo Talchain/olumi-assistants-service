@@ -65,13 +65,22 @@ export function runStructuralParse(ctx: StageContext): void {
     goal_constraints: ctx.goalConstraints,
   };
 
-  const parsed = DraftGraphOutput.safeParse(input);
-  if (parsed.success) return;
+  // ⚠ `.parse()` in a try/catch, NOT `.safeParse()`. 33 suites mock
+  // `DraftGraphOutput` with an object exposing only `.parse`, so calling
+  // `.safeParse` here throws `TypeError: DraftGraphOutput.safeParse is not a
+  // function` and takes them all down. The thrown ZodError carries the same
+  // `issues`, so nothing is lost by reading it from the catch.
+  let zodError: { issues?: ZodIssue[] } | undefined;
+  try {
+    DraftGraphOutput.parse(input);
+    return;
+  } catch (error) {
+    zodError = (error as { issues?: ZodIssue[] })?.issues ? (error as { issues?: ZodIssue[] }) : undefined;
+  }
 
-  const zodError = parsed.error;
-  const issues = zodError.issues ?? [];
+  const issues = zodError?.issues ?? [];
   const issueCount = issues.length;
-  const firstIssues = extractZodIssues(zodError, 3);
+  const firstIssues = zodError ? extractZodIssues(zodError as never, 3) : [];
   const unionDetail = unionBranchDetail(issues);
 
   // Only reached on a path whose current outcome is a guaranteed 500, and only
