@@ -131,7 +131,25 @@ describe('the assistant text reaches the wire unchanged', () => {
 });
 
 describe('the fields that decide whether the response is wiped', () => {
-  it('this controller expresses NO opinion about the claim permission — the exit inherits it', () => {
+  it('this controller expresses NO opinion about the LEADING-OPTION claim permission — the exit inherits it', () => {
+    // ⚠⚠ WHICH CLAIM. Named in the title after a reviewer showed the old
+    // wording invited a conflation, and they were right: "the claim
+    // permission" reads as though it covers every claim this layer can make.
+    // It does not. What the exit inherits is `claimSafety.forExit()` —
+    // `{ mayNameLeadingOption, mayNameLeadingOptionProvenance, exitFreshness }`
+    // (`turn-claim-safety.ts:314-324`). **That is the LEADER claim.**
+    //
+    // ⛔ THE *SAVE* CLAIM IS A DIFFERENT QUESTION AND IS NOT COVERED HERE OR
+    // ANYWHERE ON THIS EXIT. A reply asserting a change was made travels
+    // verbatim — `to-run-result.ts` passes `assistant_text` through, and no
+    // truthfulness guard runs on this path. Two claims under one word is trap
+    // 21, and this sentence was the place it would have been inherited.
+    //
+    // The save claim is now MEASURED rather than guarded, in
+    // `__tests__/unbacked-change-claim.test.ts` and the per-turn record's
+    // `claimed_change_without_receipt`. Measured is not guarded; the remedy is
+    // a copy decision and is not this lane's to take.
+
     // ⛔ THIS TEST REPLACES ONE THAT PINNED THE OPPOSITE, AND THE REPLACEMENT
     // IS THE POINT.
     //
