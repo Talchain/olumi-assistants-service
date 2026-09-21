@@ -4,6 +4,7 @@ import { composeValidationFailure } from '../validation-failure-responses.js';
 import type { ComposeContext } from '../types.js';
 import type { GraphLookup, ValidationError } from '../../routing/validator.js';
 import type { HandlerValidationRegistry } from '../../routing/validator.js';
+import { bareNumberOutsideCapIssue } from './derive-producer-refusal.js';
 
 const REGISTRY: HandlerValidationRegistry = {
   run_analysis: {
@@ -696,18 +697,34 @@ describe('composeValidationFailure — PARAMETER_INVALID value_exceeds_cap (item
 
 describe('composeValidationFailure — PARAMETER_INVALID remaining rejection reasons (item A1, 1.16)', () => {
   it('bare_number_outside_cap → renders the sanitised issue', () => {
+    // DERIVED from the real predicate, not re-typed. The hardcoded string this
+    // replaces went stale when the producer collapsed its two range arms onto
+    // one shared sentence, and nothing went red: this test builds the
+    // producer's output itself, so it cannot observe the producer changing.
+    const issue = bareNumberOutsideCapIssue(250_000, 200_000);
     const { response, template_id } = composeFor({
       code: 'PARAMETER_INVALID',
       message: 'outside range',
       details: {
         parameter: 'value',
         rejection_reason: 'bare_number_outside_cap',
-        issue: "Value 250000 is outside the factor's expected range [0, 200000] and no unit was given.",
+        issue,
         handler_id: 'set_factor_value',
       },
     });
     expect(template_id).toBe('parameter_invalid_bare_number_outside_cap');
-    expect(response.assistant_text).toContain('250000');
+    // The WHOLE producer sentence reaches the user. This is the assertion that
+    // cannot go stale: it spells no copy, so a copy change moves it too.
+    expect(response.assistant_text).toContain(issue);
+    // ⚠ DELIBERATELY '250,000', NOT '250000'. The producer now renders the
+    // magnitude through `formatValueWithUnit`, which groups thousands. The
+    // pair below is the discrimination: the grouped form must be present AND
+    // the ungrouped form absent, so reverting the formatting REDs here rather
+    // than shipping a raw `250000` to a user. (The composer's currency example
+    // does NOT depend on these digits — it is selected from `details.unit` via
+    // `valueExampleForUnit`, so this assertion is about the magnitude only.)
+    expect(response.assistant_text).toContain('250,000');
+    expect(response.assistant_text).not.toContain('250000');
     expect(response.assistant_text).not.toContain('needs to be a valid value');
     expect(response.suggested_actions.length).toBeGreaterThan(0);
   });
@@ -1269,5 +1286,79 @@ describe('composeValidationFailure — no id-like tokens leak', () => {
     for (const chip of response.suggested_actions) {
       expect(chip.label).toBe('that option');
     }
+  });
+});
+
+/**
+ * THE DRIFT GUARD — bind the composer to the PRODUCER, not to a copy of it.
+ *
+ * ⚠ THE DEFECT THIS EXISTS FOR. Three fixtures in this estate carried the
+ * `bare_number_outside_cap` sentence as a hand-typed `issue:` string. The
+ * producer's copy changed (two range arms collapsed onto one shared helper,
+ * and the magnitude gained thousands separators) and **none of the three went
+ * red** — they construct the producer's output themselves, so they were never
+ * coupled to it. They went on asserting composer behaviour over a sentence the
+ * producer can no longer emit, and the suite applauded.
+ *
+ * The three call sites now derive (`derive-producer-refusal.ts`). This block is
+ * the standing guard: it takes whatever the producer emits TODAY and requires
+ * the composer to deliver it to the user WHOLE. It spells no copy, so it cannot
+ * itself go stale — a copy change moves the expectation with it.
+ *
+ * ⚠ IT ASSERTS SURVIVAL, NOT THE CONSTANT. `sanitiseForUser`'s 100-character
+ * budget is module-private, and re-typing `100` here would be a fourth copy of
+ * exactly the kind of number this file is trying to stop duplicating — and
+ * blind in the direction a tightening change moves. Instead the sentence is run
+ * through the real consumer and required back unchanged.
+ */
+describe('bare_number_outside_cap — the producer sentence reaches the user whole (drift guard)', () => {
+  function composeIssue(issue: string) {
+    return composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'outside range',
+      details: {
+        parameter: 'value',
+        rejection_reason: 'bare_number_outside_cap',
+        issue,
+        handler_id: 'set_factor_value',
+      },
+    });
+  }
+
+  // Typed as tuples so `value`/`cap` stay `number`; a bare array literal here
+  // widens every column to `string | number` and the call below stops
+  // type-checking (invisible to vitest, which erases types before running).
+  const CAP_CASES: ReadonlyArray<readonly [string, number, number]> = [
+    ['a money-scale cap', 250_000, 200_000],
+    ['a 0-1 unitless cap', 250_000, 1],
+    // A long cap exercises the widest skeleton this predicate can reach — the
+    // case a small-number fixture hides, and the one that truncates first.
+    ['a long cap', 987_654_321, 123_456_789],
+  ];
+
+  it.each(CAP_CASES)('%s: the composed text carries the producer sentence unchanged', (_label, value, cap) => {
+    const issue = bareNumberOutsideCapIssue(value, cap);
+    const { response, template_id } = composeIssue(issue);
+
+    expect(template_id).toBe('parameter_invalid_bare_number_outside_cap');
+    // WHOLE. Fails on any truncation, and on the composer swapping in generic
+    // copy. No copy is re-typed, so a producer copy change moves this with it.
+    expect(response.assistant_text).toContain(issue);
+    expect(response.assistant_text).not.toContain('...');
+  });
+
+  /**
+   * POSITIVE CONTROL (trap 13): without this, the assertions above could pass
+   * vacuously if the composer had simply stopped truncating. This proves the
+   * budget is real and that `toContain(issue)` is a check that CAN fail — so a
+   * future producer sentence that outgrows the budget REDs above rather than
+   * silently shipping a half-sentence to a user.
+   */
+  it('CONTROL: a sentence past the composer budget IS truncated, so the guard above can fail', () => {
+    const overLong = `Value ${'9'.repeat(200)} is outside this factor's range.`;
+    const { response } = composeIssue(overLong);
+
+    expect(response.assistant_text).not.toContain(overLong);
+    expect(response.assistant_text).toContain('...');
   });
 });

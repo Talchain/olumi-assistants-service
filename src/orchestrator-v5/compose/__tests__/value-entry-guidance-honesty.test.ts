@@ -45,6 +45,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { composeValidationFailure } from '../validation-failure-responses.js';
+import { bareNumberOutsideCapIssue } from './derive-producer-refusal.js';
 import type { ComposeContext } from '../types.js';
 import type { ValidationError, HandlerValidationRegistry } from '../../routing/validator.js';
 
@@ -276,13 +277,16 @@ describe('D2 — no currency example for a factor that has no currency', () => {
   });
 
   it('CONTROL (money must survive): bare_number_outside_cap on a £ factor keeps its money example', () => {
+    // DERIVED from the real predicate (see `derive-producer-refusal.ts`). The
+    // example under test is chosen from `details.unit`, never from the issue
+    // sentence, so deriving the sentence cannot weaken this control.
     const { response, template_id } = compose({
       code: 'PARAMETER_INVALID',
       message: 'outside range',
       details: {
         parameter: 'value',
         rejection_reason: 'bare_number_outside_cap',
-        issue: "Value 250000 is outside the factor's expected range [0, 200000] and no unit was given.",
+        issue: bareNumberOutsideCapIssue(250_000, 200_000),
         handler_id: 'set_factor_value',
         unit: '£',
       },
@@ -292,13 +296,16 @@ describe('D2 — no currency example for a factor that has no currency', () => {
   });
 
   it('TWIN: bare_number_outside_cap on a UNITLESS factor gets the scale, not a currency', () => {
+    // DERIVED, and the 0-1 cap matters: this is the unitless twin of the £
+    // control above, so the sentence must be one the predicate really emits
+    // for a bare number against a 0-1 factor.
     const { response } = compose({
       code: 'PARAMETER_INVALID',
       message: 'outside range',
       details: {
         parameter: 'value',
         rejection_reason: 'bare_number_outside_cap',
-        issue: "Value 250000 is outside the factor's expected range [0, 1] and no unit was given.",
+        issue: bareNumberOutsideCapIssue(250_000, 1),
         handler_id: 'set_factor_value',
       },
     });
