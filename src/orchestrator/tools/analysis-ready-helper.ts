@@ -419,7 +419,16 @@ function readRawInterventions(value: unknown): OptionV3T['raw_interventions'] | 
  * record; it deliberately omits `source`, and the outward projection below
  * drops `extraction_metadata`. No synthetic provenance reaches the wire.
  */
-function projectOptionForCanonicalBuilder(
+/**
+ * EXPORTED FOR OBSERVATION. This is the producer that decides an option's
+ * `status` on the PERSISTED-graph readiness path, and it is the only place a
+ * `needs_user_mapping` V3 option is minted from a raw graph record. The
+ * invariant `v3-validator.ts` declares over that pair (`MISSING_USER_QUESTIONS`)
+ * cannot be guarded through `assessCanonicalAnalysisReadiness`, because the wire
+ * projection below carries neither `unresolved_targets` nor `user_questions`.
+ * Nothing else about this function changes with the export.
+ */
+export function projectOptionForCanonicalBuilder(
   candidate: unknown,
   factorIds: ReadonlySet<string>,
 ): OptionV3T | null {
