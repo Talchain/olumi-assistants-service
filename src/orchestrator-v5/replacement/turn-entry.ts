@@ -62,6 +62,10 @@ import {
 } from './structure-tools.js';
 import { scrubKnownIdentifiers } from './scrub-identifiers.js';
 import { detectUnbackedChangeClaim } from './turn-trace.js';
+import {
+  constrainProseToWriteOutcome,
+  writeTruthfulnessOf,
+} from './write-truthfulness.js';
 // The REAL detectors the rest of the estate uses — never a local
 // re-implementation, which would drift from what actually runs (trap 12).
 import { findSuccessClaimHit } from '../compose/forbidden-user-facing-phrases.js';
@@ -471,7 +475,20 @@ export async function handleReplacementTurn(
   // the reply CLAIMED, and the claim must be read off the text the USER reads
   // — i.e. after scrubbing — not off the raw model output. `scrubKnownIdentifiers`
   // is pure, so moving it earlier changes nothing but the order.
-  const assistantText = scrubKnownIdentifiers(result.text, input.getGraph() ?? null);
+  const composedText = scrubKnownIdentifiers(result.text, input.getGraph() ?? null);
+
+  // ⭐⭐ THE WRITE-TRUTHFULNESS ENFORCEMENT POINT. Every failure arm in
+  // `run-replacement-turn.ts` returns a tool result INSTRUCTING the model what
+  // to say; the model's prose was then published verbatim. An instruction is
+  // not a guarantee, and the gap was measured: on a refused, unknown or
+  // receipt-less write this layer could tell a user "That's saved."
+  //
+  // This reads the STRUCTURED OUTCOME off the trace — never the phrasing — so
+  // it cannot be defeated by a sentence the claim detectors do not match, which
+  // is the whole reason the detector below is a floor and not a guard.
+  // `unknown` stays distinct from `refused`: see write-truthfulness.ts.
+  const writeOutcome = writeTruthfulnessOf(result.trace);
+  const assistantText = constrainProseToWriteOutcome(composedText, writeOutcome);
 
   // ⭐⭐ WHAT THE REPLY CLAIMED, AGAINST WHAT THE TURN CAN PROVE. A reply may
   // not assert a change was made unless the turn holds a commit proof, and the
