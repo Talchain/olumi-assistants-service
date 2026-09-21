@@ -103,6 +103,22 @@ function scanRepo(ident: string): Record<string, number> {
 const EXPECTED: Record<string, Record<string, number>> = {
   deriveAnalysisFreshness: {
     'src/orchestrator-v5/context/freshness.ts': 1, // authority (definition)
+    // 21 Sep 2026 — NEW APPROVED SEAM, with the justification this map demands.
+    // The replacement conversation controller BYPASSES THE TURN-EXECUTOR BY
+    // DESIGN, so there is no CanonicalContextFrame for it to read from: the
+    // remedy this guard normally prescribes ("read it off the frame you already
+    // hold") is not available on that path, because the frame is built at the
+    // turn-executor finalise seam the controller never reaches.
+    //
+    // It is NOT a second opinion. `turn-context-view.ts` reads everything off
+    // `EnrichedTurnContext` and calls the ESTATE'S OWN `deriveAnalysisFreshness`
+    // with the estate's own inputs — one derivation, the canonical function,
+    // no re-implementation. Its own docblock states this and cites trap 12.
+    //
+    // ⚠ WHEN THE CONTROLLER IS WIRED THROUGH THE FRAME, THIS ENTRY MUST GO —
+    // it is approved because the frame is unreachable there, not because the
+    // controller is entitled to derive. Re-check it at that migration.
+    'src/orchestrator-v5/replacement/turn-context-view.ts': 2,
     'src/orchestrator-v5/build-turn-context.ts': 2, // approved seam (routing/coaching freshness)
     'src/orchestrator-v5/context/canonical-analysis-state.ts': 2, // approved seam (canonical-state composition)
     // 2026-07-08 lane-34: +1 — the GM held-execute resume re-derives wire
