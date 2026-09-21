@@ -81,6 +81,16 @@ export type ProposalStatus =
    */
   | 'unresolved'
   | 'stale'
+  /**
+   * TERMINAL: the user changed the offer rather than accepting or rejecting it,
+   * and this proposal has been replaced by the amended one it names.
+   *
+   * ⛔ IT IS NOT `withdrawn`. Withdrawn means the change is off the table;
+   * superseded means the change is still wanted with different numbers. A user
+   * who says "yes, but make it 0.6" has not rejected anything, and telling them
+   * their change was "set aside" would be false.
+   */
+  | 'superseded'
   | 'withdrawn';
 
 export interface Proposal {
@@ -110,6 +120,13 @@ export interface Proposal {
   readonly apply_attempts?: number;
   /** Set when the retries were exhausted and we stopped. See `unresolved`. */
   readonly unresolved_at?: string;
+  /** Set on the ORIGINAL when amended: the id of the proposal replacing it. */
+  readonly superseded_by?: string;
+  /** Set on the AMENDMENT: the id of the proposal it replaces. */
+  readonly amends?: string;
+  readonly amended_at?: string;
+  /** Names the user turn whose words asked for the change. Never inferred. */
+  readonly amended_in_turn?: string;
 }
 
 export interface ProposalStore {
@@ -317,6 +334,100 @@ export function recordApplied(
  *
  * An unknown outcome survives every state change except reconciliation.
  */
+export interface AmendProposalInput {
+  /** The AMENDMENT's own id. A new proposal, not a mutation of the old one. */
+  readonly amended_id: string;
+  readonly operations: readonly ProposalOperation[];
+  readonly amended_at: string;
+  readonly amended_in_turn: string;
+  readonly current_model_revision: string;
+}
+
+/**
+ * ⭐ THE THIRD VERB. The user neither accepted nor rejected — they changed it.
+ *
+ * ⛔⛔ WHY THIS EXISTS RATHER THAN A WIDER CONFIRMATION PREDICATE, which is the
+ * fix that suggests itself and is WRONG. An authorised change replays from its
+ * STORED OPERATIONS and never re-reads the user's message. So widening the
+ * confirm predicate to accept "yes, make it 0.6" writes the OFFER's number and
+ * discards the user's — and issues a receipt saying it saved what they asked
+ * for. A silent wrong write with a truthful-looking confirmation is strictly
+ * worse than a refusal, which is why the predicate is RIGHT to refuse a value
+ * restatement and why the remedy belongs here instead.
+ *
+ * ⛔⛔ AND THE RULE THAT MAKES IT SAFE: THE AMENDMENT DOES NOT INHERIT CONSENT.
+ * It opens at `'open'`. Authorisation binds to SPECIFIC OPERATIONS at a
+ * specific revision (see {@link authoriseProposal}); once the operations
+ * change, the earlier consent does not cover them, and carrying it across would
+ * reintroduce the exact harm above by another route. Whether the same user
+ * message ALSO authorises the amended operations is a question for the caller,
+ * which can read the message; this store cannot, and must not guess.
+ *
+ * Amendable from `open` or `authorised` only. An in-flight save cannot be
+ * changed — the bytes are already gone — and an applied change needs a
+ * reversing change with its own consent, the same rule withdraw follows.
+ */
+export function amendProposal(
+  store: ProposalStore,
+  id: string,
+  input: AmendProposalInput,
+): ProposalStore {
+  assertState(isNonEmpty(input.amended_id), 'the amendment needs its own id');
+  assertState(input.amended_id !== id, 'an amendment is a new proposal, so it cannot reuse the id it replaces');
+  assertState(input.operations.length > 0, 'an amendment with no operations is a withdrawal, not an amendment');
+  assertState(isNonEmpty(input.amended_in_turn), 'amended_in_turn is required — an amendment names the user turn that asked for it');
+
+  const p = find(store, id);
+
+  // Retry-safe, on the same reasoning as openProposal: the SAME amendment
+  // arriving twice is a client retry working as intended. A different one
+  // against an already-superseded proposal is a genuine defect and stays loud.
+  if (p.status === 'superseded') {
+    const already = store.proposals.find((q) => q.id === p.superseded_by);
+    assertState(
+      p.superseded_by === input.amended_id
+        && already !== undefined
+        && sameOperations(already.operations, input.operations),
+      `proposal "${id}" was already amended by "${p.superseded_by ?? '(unknown)'}"`,
+    );
+    return store;
+  }
+
+  assertState(
+    p.status === 'open' || p.status === 'authorised',
+    `cannot amend a proposal in status "${p.status}"`,
+  );
+  assertState(
+    !sameOperations(p.operations, input.operations),
+    'an amendment must change the operations — identical operations mean nothing was amended',
+  );
+  // Same rule authorise follows, for the same reason: an amendment is consent
+  // work against a specific model state. `markStaleForRevision` normally moves
+  // a proposal to `stale` first, so this is the belt to that braces — but a
+  // caller that skips it must not get a silent pass.
+  assertState(
+    p.model_revision === input.current_model_revision,
+    'the model changed after this was proposed — re-propose against the current revision rather than amending stale work',
+  );
+
+  const superseded: Proposal = { ...p, status: 'superseded', superseded_by: input.amended_id };
+  const amendment: Proposal = {
+    id: input.amended_id,
+    // ⛔ NOT `authorised`, whatever `p.status` was. See the docblock.
+    status: 'open',
+    operations: input.operations,
+    model_revision: input.current_model_revision,
+    proposed_at: input.amended_at,
+    proposed_in_turn: input.amended_in_turn,
+    amends: id,
+    amended_at: input.amended_at,
+    amended_in_turn: input.amended_in_turn,
+  };
+  return {
+    proposals: [...store.proposals.map((q) => (q.id === id ? superseded : q)), amendment],
+  };
+}
+
 export function withdrawProposal(store: ProposalStore, id: string): ProposalStore {
   const p = find(store, id);
   assertState(p.status !== 'applied', 'an applied change cannot be withdrawn here — it needs a reversing change with its own consent');
@@ -418,6 +529,10 @@ export function describeForUser(p: Proposal): string {
       return 'saved';
     case 'stale':
       return 'the model has changed since I offered this, so I need to put it to you again';
+    case 'superseded':
+      // Never "set aside": the user still wants the change, with different
+      // numbers. See the status docblock.
+      return 'replaced by the amended version you asked for';
     case 'withdrawn':
       return 'set aside';
   }
