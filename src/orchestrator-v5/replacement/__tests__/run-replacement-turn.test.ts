@@ -784,6 +784,89 @@ describe("an acceptance that names its own number is not agreement to THIS offer
   });
 });
 
+/**
+ * ⛔ A SUCCESS THAT CARRIES NO PROOF OF COMMIT.
+ *
+ * ⚠ I FIRST WROTE THIS TEST FOR THE WRONG REASON, AND THE WRONG REASON IS
+ * WORTH KEEPING. I read a missing receipt as "a guest, whose write landed
+ * anyway", and was about to model it as a new terminal state. Core settled it
+ * at the migration bytes instead: `turn_row_id` is the proof of commit, and
+ * the VERSION receipt is separate provenance. A null version receipt means a
+ * guest or a genuine no-op — both successful, known outcomes — and every real
+ * failure RAISES. There is no silent-failure arm to model.
+ *
+ * So the field this layer records is the COMMIT proof, a guest gets an honest
+ * "saved" through the ordinary path, and an empty value here can only be an
+ * adapter that broke its contract.
+ *
+ * Without the boundary check, `recordApplied`'s assert throws AFTER
+ * `beginApply` has run. The agent loop catches it, so the turn survives — but
+ * the model is told a tool "failed" with an internal assertion string, and the
+ * proposal's fate is decided by an exception rather than by this file.
+ */
+describe('a save that reports success but cites nothing', () => {
+  async function acceptWithWriter(write: ApplyOperations) {
+    const t1 = await runReplacementTurn(baseInput({ turnId: 't1' }), {
+      chatWithTools: scripted([call('set_option_effect', {}), say('shall I?')]),
+      checkpoint: ck, applyOperations: okWrite(),
+    });
+    const id = openProposals(t1.proposals)[0]!.id;
+    const model = scripted([
+      call(ACCEPT_TOOL_NAME, { proposal_id: id, user_agreement_quote: 'yes go ahead' }),
+      say('ok'),
+    ]);
+    const t2 = await runReplacementTurn(
+      baseInput({ turnId: 't2', message: 'yes go ahead', proposals: t1.proposals, memory: t1.memory }),
+      { chatWithTools: model, checkpoint: ck, applyOperations: write },
+    );
+    return { t2, model };
+  }
+
+  it('does NOT record it as applied, and does not claim either outcome', async () => {
+    const { t2, model } = await acceptWithWriter(async () => ({ ok: true, receiptId: '' }));
+    expect(t2.applied).toHaveLength(0);
+    const fed = JSON.stringify(model.calls[1]!.messages);
+    expect(fed).toContain('carried nothing I can cite');
+    // The forbidden claims, in both directions — this is the whole point.
+    expect(fed).not.toContain('SAVED.');
+    expect(fed).not.toContain('It did not save');
+  });
+
+  it('a blank-space receipt is the same case, not a different one', async () => {
+    const { t2 } = await acceptWithWriter(async () => ({ ok: true, receiptId: '   ' }));
+    expect(t2.applied).toHaveLength(0);
+  });
+
+  it('CONTRAST: a real receipt still records the change and says so', async () => {
+    const { t2, model } = await acceptWithWriter(okWrite('receipt-real'));
+    expect(t2.applied).toHaveLength(1);
+    expect(t2.applied[0]?.receiptId).toBe('receipt-real');
+    expect(JSON.stringify(model.calls[1]!.messages)).toContain('SAVED.');
+  });
+
+  it('is left IN FLIGHT, so the bounded retry owns it rather than a new state', async () => {
+    // Deliberate, and the alternative was considered: resolving it here would
+    // claim an outcome, and abandoning it would need `unresolved` BEFORE the
+    // cap, whose own assert exists to stop exactly that. A fixed adapter
+    // resolves it on a later turn; a still-broken one exhausts the cap and
+    // becomes `unresolved`. No new state, no claim in either direction.
+    const { t2 } = await acceptWithWriter(async () => ({ ok: true, receiptId: '' }));
+    expect(needsReconciliation(t2.proposals)).toHaveLength(1);
+  });
+
+  it('CONTRAST: a later turn with a WORKING adapter resolves it and records the change', async () => {
+    // The discriminating twin — without it, "left in flight" is consistent
+    // with a proposal that can never resolve at all.
+    const { t2 } = await acceptWithWriter(async () => ({ ok: true, receiptId: '' }));
+    const t3 = await runReplacementTurn(
+      baseInput({ turnId: 't3', message: 'any news?', ...reload(t2) }),
+      { chatWithTools: scripted([say('done')]), checkpoint: ck, applyOperations: okWrite('commit-9') },
+    );
+    expect(t3.applied.map((a) => a.receiptId)).toEqual(['commit-9']);
+    expect(needsReconciliation(t3.proposals)).toHaveLength(0);
+  });
+});
+
 describe('nothing is written until the intention to write is durable', () => {
   async function acceptWithCheckpoint(
     checkpoint: ReplacementTurnDeps['checkpoint'],

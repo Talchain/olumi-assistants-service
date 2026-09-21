@@ -117,6 +117,24 @@ export interface ApplyOperations {
     readonly operations: readonly ProposalOperation[];
     readonly modelRevision: string;
   }): Promise<
+    /**
+     * ⭐ `receiptId` IS THE PROOF OF COMMIT — the turn row id — NOT the model
+     * version receipt. Core settled the distinction at the migration bytes
+     * (21 Sep) and it is load-bearing here.
+     *
+     * `append_turn_atomic_v5` returns a NULL VERSION RECEIPT on exactly two
+     * paths — a guest, and a genuine no-op where the incoming graph already
+     * equals the head. Both are SUCCESSFUL, KNOWN outcomes: the turn, the
+     * graph and every ordinary side effect committed. Every real failure
+     * RAISES (`MV409`, `MV422`, `OLGC1`); there is no silent-failure arm.
+     *
+     * So an adapter must feed this field the COMMIT id, and may cite the
+     * version receipt separately as provenance when there is one. Feeding it
+     * the version receipt instead would make every guest turn — the ordinary
+     * first-time path, and the one this lane's deployed evidence was gathered
+     * on — look like a save that could not be substantiated, for writes that
+     * all landed.
+     */
     | { readonly ok: true; readonly receiptId: string; readonly newModelRevision?: string }
     | { readonly ok: false; readonly reason: string }
   >;
@@ -233,6 +251,15 @@ function namesANumberTheOfferDoesNot(
     ]),
   )
   return inMessage.some((d) => !offered.has(d))
+}
+
+/**
+ * A receipt that can substantiate a claim. Empty, blank or absent cannot —
+ * see the accept tool's use of this for why that is a contract question and
+ * not a state to model here.
+ */
+function isNonEmptyReceipt(receiptId: unknown): receiptId is string {
+  return typeof receiptId === 'string' && receiptId.trim().length > 0
 }
 
 /** Whitespace- and case-insensitive containment. Nothing cleverer. */
@@ -621,6 +648,36 @@ export async function runReplacementTurn(
               return {
                 type: 'refused',
                 content: `It did not save: ${outcome.reason}. Nothing has changed. Tell the user what happened.`,
+              };
+            }
+
+            // ⛔ NO PROOF OF COMMIT IS AN ADAPTER CONTRACT VIOLATION — and
+            // Core settled at the migration bytes what it is NOT.
+            //
+            // I first read a missing receipt as "guest, and the write landed
+            // anyway", and built a terminal state for it. Wrong, and Core's
+            // answer is better than my fix: `turn_row_id` is the proof of
+            // commit; the VERSION receipt is separate provenance about model
+            // versioning. A null version receipt means guest or a genuine
+            // no-op — both successful, known outcomes. Every real failure
+            // RAISES (`MV409`, `MV422`, `OLGC1`); there is no silent-failure
+            // arm. So `proposal-store.ts`'s "a change without a receipt is a
+            // claim" is true of the COMMIT and false of the version receipt,
+            // and the field below must be fed the commit proof.
+            //
+            // ⇒ An empty value here can therefore only be an adapter that
+            // broke its contract, never a guest. It is left IN FLIGHT rather
+            // than resolved either way: the bounded retry already owns that
+            // case, so a fixed adapter resolves it on a later turn and a
+            // still-broken one exhausts the cap and becomes `unresolved`. No
+            // new state, and no claim in either direction.
+            if (!isNonEmptyReceipt(outcome.receiptId)) {
+              return {
+                type: 'refused',
+                content:
+                  'The save came back as done but carried nothing I can cite for it, so I cannot ' +
+                  'record it as made. Tell the user plainly that you are checking, and do not say ' +
+                  'it saved or that it did not.',
               };
             }
 
