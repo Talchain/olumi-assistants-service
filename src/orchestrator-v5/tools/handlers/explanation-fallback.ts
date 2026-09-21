@@ -17,7 +17,28 @@
  * Copy rules:
  *  - Sentence case, British English.
  *  - No em dashes (use commas or full stops).
- *  - No tone words like winner or recommended; say leading option, performs best.
+ *  - ⭐ PAUL'S RULING, 21 Sep 2026, VERBATIM: "It's not a leading option. It's
+ *    the option from the causal analysis that either is most likely to happen
+ *    or, if we can provide this, is most likely to achieve the user's goal. We
+ *    are a reasoning enhancement tool, not a causal analysis tool. We are
+ *    giving them information to improve their critical and creative thinking,
+ *    not recommending options."
+ *    This supersedes the previous rule here ("no tone words like winner or
+ *    recommended; say leading option, performs best"). That rule was right that
+ *    winner/recommended are wrong and WRONG that "leading option" is the safe
+ *    substitute: it is still a league-table noun, and "performs best" is a
+ *    superlative with NO STATED REFERENT — best at what?
+ *    ⛔ So: never `winner`, `recommended`, `leading option`, `performs best`,
+ *    `sits in second place`, or any clause adjudicating whether a lead is
+ *    "meaningful". State the MEASUREMENT and let the reader judge it.
+ *    ⭐ The referent is DERIVED, not chosen. At the producer — ISL
+ *    `robustness_analyzer_v2.py:1078-1092` with the field description at
+ *    `robustness_v2.py:851` ("P(this option is best)") — `win_probability` is
+ *    the fraction of Monte Carlo draws in which that option produced the
+ *    HIGHEST VALUE AT THE USER'S OWN GOAL NODE (`request.goal_node_id`), ties
+ *    split equally. So it is goal-referenced, and naming the goal is the whole
+ *    point: "came out highest on {goal}" is a measurement the reader can argue
+ *    with; "performs best" is a verdict they can only accept or reject.
  *  - No internal vocabulary; never reference graph internals or pipeline stages.
  *  - One next-step nudge at the end so the response is actionable.
  */
@@ -379,13 +400,13 @@ export function composeRobustnessVerdict(
     } else if (marginCat === 'clear' && finiteMargin !== null) {
       margin_clause =
         mode === 'explain'
-          ? `${quoteLabel(runner.label)} sits in second place${runnerPFragment}, so the lead is meaningful rather than marginal.`
+          ? `${quoteLabel(runner.label)} came out highest less often${runnerPFragment}.`
           : `${quoteLabel(runner.label)} is the most likely contender to overtake it${runnerPFragment}.`;
     } else {
       // indeterminate: no finite margin and not a near-tie.
       margin_clause =
         mode === 'explain'
-          ? `${quoteLabel(runner.label)} sits in second place${runnerPFragment}.`
+          ? `${quoteLabel(runner.label)} came out highest less often${runnerPFragment}.`
           : `${quoteLabel(runner.label)} is the most likely contender to overtake it.`;
     }
   }
@@ -523,13 +544,22 @@ export function composeExplainResultsFallback(
   validationBeatText?: string | null,
   rawRobustness?: RawRobustnessSignals | null,
   defaultedAssumptions?: DefaultedAssumptionsSignal | null,
+  /**
+   * ⭐ THE GOAL THE PROBABILITY IS ABOUT. Threaded from
+   * `StructureProjectionSummary.goal_label` (a DIFFERENT object from the
+   * analysis projection, which carries no goal). Optional: absent ⇒ the
+   * sentence says "your goal" rather than inventing a referent. Never
+   * default it to a label from elsewhere — a wrong goal is worse than a
+   * generic one, because the reader cannot tell it is wrong.
+   */
+  goalLabel?: string | null,
 ): string {
   if (!projection || !projection.leading_option) {
     // Defensive — the handler should not reach this branch without a
     // projection because the precondition bypass already guards the
     // no-analysis case. If the assembler produced no leading option even
     // with an analysis fact present, fall through to a generic line.
-    return 'The analysis has finished, but the leading option could not be summarised from the available data. Would you like to explore what would change this result?';
+    return 'The analysis has finished, but it could not be summarised from the available data. Would you like to explore what would change this result?';
   }
 
   const leading = projection.leading_option;
@@ -557,7 +587,9 @@ export function composeExplainResultsFallback(
   // ran, and keeps prose ordering decisions in one place.
 
   sentences.push(
-    `${leading.label} performs best, with a probability of ${formatProbability(leading.probability)}.`,
+    goalLabel
+      ? `Across the futures we sampled, ${leading.label} came out highest on ${goalLabel} with a probability of ${formatProbability(leading.probability)}.`
+      : `Across the futures we sampled, ${leading.label} came out highest on your goal with a probability of ${formatProbability(leading.probability)}.`,
   );
 
   if (verdict.margin_clause !== null) {
