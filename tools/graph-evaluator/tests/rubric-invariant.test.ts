@@ -97,6 +97,15 @@ const SAMPLE_VALUES: Record<string, unknown> = {
   goal_threshold_raw: 20000,
   goal_threshold_unit: "£",
   goal_threshold_cap: 40000,
+  // A member of GOAL_THRESHOLD_CAP_PROVENANCE (src/utils/goal-threshold-cap.ts),
+  // chosen to be COHERENT WITH THE QUAD ABOVE rather than picked at random:
+  // `inherited` is rule 1, "a compatible, strictly larger cap an earlier
+  // registration set", and 40000 > 20000 with no formula relationship implied.
+  // The other two members assert formulas this fixture does not satisfy —
+  // `metric_scale` claims a 0-100 scale, and `target_derived_headroom` claims
+  // cap === raw * 1.25 (25000, not 40000). An incoherent sample would be a
+  // fixture asserting something untrue about the producer.
+  goal_threshold_cap_provenance: "inherited",
   goal_threshold_frame: "cee_v1",
   goal_baseline: 0.3,
   goal_baseline_raw: 12000,
@@ -204,6 +213,22 @@ describe("rubric invariant — the rubric scores only model-permitted fields", (
   it.each(FORBIDDEN_GOAL_FIELDS)(
     "a graph carrying `%s` scores identically to one without it",
     (field) => {
+      // PIN THE PRECONDITION IN-TEST. `SAMPLE_VALUES[field]` is `undefined` for
+      // any field absent from the map, so the mutation below would assign
+      // `undefined` and this case would PASS BY TESTING NOTHING — an equality
+      // assertion between two identically-scored graphs. That is exactly what
+      // happened when CEE added `goal_threshold_cap_provenance` in #1604: the
+      // sibling "has a sample value" test went red while THIS case reported a
+      // green tick for a field it was not exercising. A guard whose
+      // discrimination depends on a fixture that nothing pins is a guard
+      // agreeing with itself; assert the precondition where the assertion that
+      // depends on it lives, not only in a separate test.
+      expect(
+        SAMPLE_VALUES[field],
+        `No sample value for \`${field}\`, so this case would mutate the goal node ` +
+        `with \`undefined\` and assert nothing. Add one to SAMPLE_VALUES.`
+      ).toBeDefined();
+
       const baseline = score(makeResponse(postCutDraft()), hostileBrief());
 
       const mutated = postCutDraft();
