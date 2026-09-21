@@ -60,7 +60,20 @@ interface AppendWrite {
 }
 const appendCalls: AppendWrite[] = [];
 let persistedGraph: unknown = null;
-const pendingActionsForRead: readonly PendingAction[] = [];
+/**
+ * ⛔⛔ THIS WAS A `const [] `, AND THAT IS WHY THE FIRST VERSION OF THIS FILE
+ * COULD NOT SEE THE DEFECT IT WAS WRITTEN TO CLOSE (trap 22).
+ *
+ * `context.most_recent_pending_actions` is populated from exactly this store
+ * method (`build-turn-context.ts:1441`), and `commitTurn` threads it into every
+ * commit as `priorPendingActions` (`turn-executor.ts:1695`). Pinning it to `[]`
+ * ran all four original tests in the ONE session state where "nothing is
+ * waiting on your reply" happens to be true, so the corpus excluded the only
+ * class in which the sentence could be false. It is a `let`, reset per test, so
+ * every case in this file can observe the state — and the pair below exercises
+ * it.
+ */
+let mockedPriorPendings: readonly PendingAction[] = [];
 
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
@@ -74,7 +87,7 @@ vi.mock('../session/index.js', () => ({
     readFactsFor: async () => [],
     readFactsWithTurnFor: async () => [],
     readRecentAppliedMutationFactsFor: async () => [],
-    readMostRecentPendingActions: async () => pendingActionsForRead,
+    readMostRecentPendingActions: async () => mockedPriorPendings,
     invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     invalidateAll: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     storeDraftGraph: async () => undefined,
@@ -183,6 +196,20 @@ function proposalChips(response: {
  * The thing an acceptance would have to find. Bound by `action.kind`, which is
  * what `tryShortConfirmResume` matches on — not by "something was stored".
  */
+function committedPendings(): Array<Record<string, unknown>> {
+  return appendCalls.flatMap((c) =>
+    Array.isArray(c.pending_actions) ? (c.pending_actions as Array<Record<string, unknown>>) : [],
+  );
+}
+
+function committedPendingKinds(): string[] {
+  return appendCalls
+    .flatMap((c) =>
+      Array.isArray(c.pending_actions) ? (c.pending_actions as Array<Record<string, unknown>>) : [],
+    )
+    .map((p) => String((p as { action?: { kind?: unknown } }).action?.kind));
+}
+
 function committedProposalPendings(): Array<Record<string, unknown>> {
   return appendCalls
     .flatMap((c) =>
@@ -207,6 +234,7 @@ beforeEach(() => {
   events = [];
   appendCalls.length = 0;
   persistedGraph = null;
+  mockedPriorPendings = [];
   setTestSink((eventName, data) => events.push({ event: eventName, data }));
 });
 
@@ -276,5 +304,151 @@ describe('an offer with no resumable pending must not close with a promise', () 
       routingAdapter: completeAddConstraintAdapter(),
     });
     expect(response.suggested_actions ?? []).toEqual([]);
+  });
+});
+
+/**
+ * ⭐⭐⭐ THE CLASS THE FIRST VERSION OF THIS FILE COULD NOT SEE.
+ *
+ * The block above pins what THIS BRANCH kept. The withdrawal copy originally
+ * went further and asserted "…so nothing is waiting on your reply…", which is a
+ * claim about what THE COMMIT PERSISTS — and those are different sets:
+ *
+ *   turn-executor.ts:1695   every `commitTurn` threads
+ *                           `priorPendingActions: context.most_recent_pending_actions`
+ *   commit.ts:1289-1310     `finalPendings = [...chipDerivedPending, ...survivingPrior]`
+ *   commit.ts:565-571       the hash-invalidation rule needs a NON-EMPTY
+ *                           `currentGraphHash`; the `no_graph_hash` branch has
+ *                           none, so a prior proposal is never invalidated there
+ *
+ * So on the very branch this file pins, a prior `apply_proposed_change` survives
+ * the demotion commit untouched and `tryShortConfirmResume` will still resolve a
+ * bare "yes" against it. Trap 21 inside the remedy: the guard answers "did THIS
+ * branch keep anything?" and the sentence answered "is anything waiting?".
+ *
+ * ⛔ THE REMEDY WAS TO DELETE THE CLAIM, NOT TO WIDEN THE SET. Measured on the
+ * journey below with `[...demotionPending, ...context.most_recent_pending_actions]`
+ * fed to the guard: it then KEEPS the promise, so turn 2 said "a limit keeping
+ * "Customer Churn Rate" at or below 7 … Say the word and I will make it." and the
+ * "yes" returned "Added constraint: Customer Acquisition Cost must be at most
+ * 500 GBP." — a promise about one change honoured by writing another, with a
+ * receipt. That is the `d8a908b3` class. A sentence that makes no claim about a
+ * set cannot be wrong about one.
+ */
+describe('a withdrawal must not claim anything about what the SESSION is holding', () => {
+  /**
+   * The words that make a claim about session state. Bound as STRINGS the user
+   * would read, not via the exported constant — a guard that imports the
+   * constant it is checking agrees with itself (trap 13b).
+   */
+  const SESSION_STATE_CLAIMS = ['nothing is waiting', 'waiting on your reply'] as const;
+
+  /** Mint a real prior proposal by running the offer turn WITH a graph. */
+  async function mintLiveProposal(requestId: string): Promise<PendingAction[]> {
+    const { response } = await runTurnExecutor(payload(READ_UTTERANCE), requestId, {
+      routingAdapter: completeAddConstraintAdapter(),
+      graphState: buildChurnGraph(),
+    });
+    // PRECONDITION PIN — if minting ever stops working, every arm below would
+    // silently collapse into "no prior pending" and agree for the wrong reason.
+    expect(demotionOutcomes()).toEqual(['offered']);
+    expect(response.assistant_text).toContain(PROMISE);
+    const minted = committedProposalPendings() as unknown as PendingAction[];
+    expect(minted).toHaveLength(1);
+    return minted;
+  }
+
+  it('⭐ THE DISCRIMINATING PAIR — two arms differing ONLY in a live prior pending', async () => {
+    // ── mint, then reset so the pair starts from an identical observation ──
+    const prior = await mintLiveProposal('req-owp-pair-mint');
+    events = [];
+    appendCalls.length = 0;
+    persistedGraph = null;
+
+    // ── ARM A: nothing live from an earlier turn ──
+    mockedPriorPendings = [];
+    const armA = await runTurnExecutor(payload(READ_UTTERANCE), 'req-owp-pair-a', {
+      routingAdapter: completeAddConstraintAdapter(),
+    });
+    const armADemotion = demotionOutcomes();
+    const armAPersisted = committedPendingKinds();
+
+    events = [];
+    appendCalls.length = 0;
+    persistedGraph = null;
+
+    // ── ARM B: identical in every respect EXCEPT a live prior proposal ──
+    mockedPriorPendings = prior;
+    const armB = await runTurnExecutor(payload(READ_UTTERANCE), 'req-owp-pair-b', {
+      routingAdapter: completeAddConstraintAdapter(),
+    });
+    const armBDemotion = demotionOutcomes();
+    const armBPersisted = committedPendingKinds();
+
+    // ── PRECONDITION PIN (trap 13b) — the arms must genuinely differ in the
+    // ── set the COMMIT persists, or the assertions below are a tautology.
+    expect(armADemotion).toEqual(['emit_refused:no_graph_hash']);
+    expect(armBDemotion).toEqual(['emit_refused:no_graph_hash']);
+    expect(armAPersisted).toEqual([]);
+    expect(armBPersisted).toEqual(['apply_proposed_change']);
+
+    // ── THE CLAIM: neither arm says anything about what is waiting, so the
+    // ── copy cannot be false in the arm where something is.
+    for (const [arm, text] of [
+      ['A', armA.response.assistant_text],
+      ['B', armB.response.assistant_text],
+    ] as const) {
+      for (const claim of SESSION_STATE_CLAIMS) {
+        expect(text, `arm ${arm} must make no claim about session state`).not.toContain(claim);
+      }
+      // …and the promise stays withdrawn in BOTH. This is what REDs if anyone
+      // "fixes" the guard by feeding it the persisted set: arm B would keep a
+      // promise about a change this turn did not keep.
+      expect(text, `arm ${arm} must not promise to act on a "yes"`).not.toContain(PROMISE);
+    }
+  });
+
+  it('⭐ THE JOURNEY — a withdrawal must not deny a pending that a bare "yes" then honours', async () => {
+    // ── T1: the product offers WITH a graph and mints the pending itself.
+    const minted = await mintLiveProposal('req-owp-journey-t1');
+
+    // ── T2: same session, no usable graph for the turn. The branch declines to
+    // ── emit — and the commit carries the T1 proposal forward regardless.
+    events = [];
+    appendCalls.length = 0;
+    persistedGraph = null;
+    mockedPriorPendings = minted;
+    const t2 = await runTurnExecutor(payload('Remind me what the options are'), 'req-owp-journey-t2', {
+      routingAdapter: completeAddConstraintAdapter(),
+    });
+    const t2Persisted = committedPendings() as unknown as PendingAction[];
+
+    // PRECONDITION PIN — the branch is named, and something IS waiting.
+    expect(demotionOutcomes()).toEqual(['emit_refused:no_graph_hash']);
+    expect(t2Persisted.map((p) => p.action.kind)).toEqual(['apply_proposed_change']);
+
+    // ── T3: a bare "yes", with the graph back.
+    events = [];
+    appendCalls.length = 0;
+    mockedPriorPendings = t2Persisted;
+    const t3 = await runTurnExecutor(payload('yes'), 'req-owp-journey-t3', {
+      routingAdapter: completeAddConstraintAdapter(),
+      graphState: buildChurnGraph(),
+    });
+
+    // PRECONDITION PIN — the "yes" really does land a write. Without this the
+    // T2 assertion below would pass just as well against a session where
+    // nothing was ever resumable (trap 13).
+    expect(appendCalls.some((c) => c.graph !== undefined && c.graph !== null)).toBe(true);
+    expect(t3.response.assistant_text).toContain('Customer Churn Rate');
+
+    // ── THE CLAIM: given that write, T2 must not have denied that anything
+    // ── was waiting. A denial with a write behind it moves the user's model.
+    for (const claim of SESSION_STATE_CLAIMS) {
+      expect(t2.response.assistant_text).not.toContain(claim);
+    }
+    // The withdrawal itself is still made — this is not "put the promise back".
+    expect(t2.response.assistant_text).not.toContain(PROMISE);
+    expect(t2.response.assistant_text).toContain('could not put it forward');
   });
 });
