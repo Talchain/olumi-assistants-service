@@ -649,17 +649,34 @@ export async function runReplacementTurn(
             // OF THIS OFFER. See `namesANumberTheOfferDoesNot` for the measured
             // case and for why this asks a lexical question rather than a
             // linguistic one.
-            // ⚠ OVER THE WHOLE SET, NOT THE PRIMARY. A user replying "yes, but
-            // make the SMB one 0.6" to a set of eight offers is changing one of
-            // them; checking only the first would let the other seven — and the
-            // one they just changed — be written at MY numbers with a receipt
-            // saying it saved what they asked for. The question the guard asks
-            // is "does their message name a number that NO offer in this set
-            // carries?", which is the correct generalisation of the single
-            // case: a number none of the offers hold cannot be an acceptance of
-            // any of them.
-            const allOperations = targets.flatMap((p) => [...p.operations]);
-            if (namesANumberTheOfferDoesNot(input.message, allOperations)) {
+            // ⛔⛔ PER MEMBER, AND THE OBVIOUS GENERALISATION IS THE WRONG ONE —
+            // I WROTE IT FIRST AND A SURVIVING MUTANT CAUGHT IT.
+            //
+            // The tempting move is to flatten every member's operations into
+            // one list and ask the existing question of that. It reads like the
+            // natural extension and it is strictly WEAKER: the predicate
+            // refuses when the message names a digit run the offer does not
+            // carry, so pooling eight offers pools eight numbers and the
+            // message has eight chances to coincide. Measured on the captured
+            // graph, the offers render 0, 0.075, 0.38, 0.4 and 0.76 — so
+            // *"yes, but make the cost one 0.4"* finds `0.4` in a DIFFERENT
+            // offer's summary, passes, and writes all eight at MY numbers
+            // including the one they just changed. That is the exact harm this
+            // guard exists to prevent, arriving through the set.
+            //
+            // ⭐ SO IT IS ASKED OF EACH MEMBER SEPARATELY AND ANY REFUSAL
+            // REFUSES THE SET — the intersection, not the union. This is also
+            // the only generalisation that is IDENTICAL to today's behaviour
+            // for a single proposal ("every member" is "the one member"), so
+            // the existing path cannot drift under it. And it reuses the
+            // predicate unchanged rather than minting a second one, which
+            // CLAUDE.md trap 22f rules is how a predicate over user text starts
+            // oscillating.
+            //
+            // It fails CLOSED, deliberately: a set accept mentioning any number
+            // the members do not all carry costs one turn in which the model
+            // re-offers. A gap, never a lie.
+            if (targets.some((p) => namesANumberTheOfferDoesNot(input.message, p.operations))) {
               trace.refused('acceptance_names_other_number');
               return {
                 type: 'refused',
@@ -670,7 +687,7 @@ export async function runReplacementTurn(
               };
             }
 
-            const summary = allOperations.map((o) => o.summary).join('; ');
+            const summary = targets.flatMap((p) => p.operations.map((o) => o.summary)).join('; ');
 
             // ⛔ THE ROLLBACK POINT. Everything from here to the checkpoint is
             // state this turn has NOT yet earned the right to keep: the

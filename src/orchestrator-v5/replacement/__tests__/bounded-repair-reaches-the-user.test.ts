@@ -348,6 +348,88 @@ describe('they can change any single part without losing the rest', () => {
     expect(openProposals(t2.proposals), 'every offer still stands').toHaveLength(8);
   });
 
+  it('DISCRIMINATING — a number the PRIMARY carries but a sibling does not still refuses the set', async () => {
+    // ⭐ THIS CASE EXISTS BECAUSE A MUTANT SURVIVED WITHOUT IT.
+    //
+    // The case above cannot tell "ask the guard of the primary" from "ask it
+    // of every member": 0.61 is carried by neither, so both refuse. The
+    // discriminating shape is a number the PRIMARY does carry and a sibling
+    // does not — under primary-only the whole set writes at MY numbers; under
+    // per-member it refuses. Measured on the capture: the first offer renders
+    // `0` and a sibling renders `0.075`, and the digit-run regex treats those
+    // as different runs.
+    const { seen, write } = okWriter();
+    const t1 = await offerTheSet(write);
+    const waiting = openProposals(t1.proposals);
+    const ids = waiting.map((p) => p.id);
+
+    // Pins its own precondition, so this cannot pass by testing nothing.
+    const primarySummary = waiting[0]!.operations.map((o) => o.summary).join(' ');
+    expect(primarySummary, 'the primary really does render a bare 0').toMatch(/(^|\s)0$/);
+    expect(
+      waiting.some((p) => !p.operations.some((o) => / 0$/.test(o.summary))),
+      'and at least one sibling really does not',
+    ).toBe(true);
+
+    const carried = reload(t1);
+    const t2 = await runReplacementTurn(
+      baseInput({
+        turnId: 'turn-2',
+        message: 'Yes, save them all, and keep the status quo one at 0.',
+        memory: carried.memory,
+        proposals: carried.proposals,
+      }),
+      {
+        chatWithTools: scripted([
+          call(ACCEPT_TOOL_NAME, {
+            proposal_id: ids[0],
+            also_accept_ids: ids.slice(1),
+            user_agreement_quote: 'Yes, save them all',
+          }),
+          say('...'),
+        ]),
+        checkpoint: ck,
+        applyOperations: write,
+      },
+    );
+
+    expect(write, 'the set must not go through on a number only the primary carries').not.toHaveBeenCalled();
+    expect(seen).toHaveLength(0);
+    expect(t2.trace?.refusals ?? []).toContain('acceptance_names_other_number');
+    expect(openProposals(t2.proposals)).toHaveLength(8);
+  });
+
+  it('CONTRAST — a single accept mentioning that same number still goes through', async () => {
+    // The other half of the pair. Without it, the case above is equally
+    // satisfied by a guard that refuses every acceptance carrying any digit —
+    // and the single-proposal path must be UNCHANGED by this work.
+    const { seen, write } = okWriter();
+    const t1 = await offerTheSet(write);
+    const ids = openProposals(t1.proposals).map((p) => p.id);
+    const carried = reload(t1);
+
+    const t2 = await runReplacementTurn(
+      baseInput({
+        turnId: 'turn-2',
+        message: 'Yes, keep the status quo one at 0.',
+        memory: carried.memory,
+        proposals: carried.proposals,
+      }),
+      {
+        chatWithTools: scripted([
+          call(ACCEPT_TOOL_NAME, { proposal_id: ids[0], user_agreement_quote: 'Yes, keep the status quo one at 0.' }),
+          say('Saved.'),
+        ]),
+        checkpoint: ck,
+        applyOperations: write,
+      },
+    );
+
+    expect(write, 'one member, one number, its own — accepted').toHaveBeenCalledTimes(1);
+    expect(seen[0]!.operations).toHaveLength(1);
+    expect(t2.applied).toHaveLength(1);
+  });
+
   it('a set naming something that is not waiting saves NONE of it', async () => {
     // Every member or none. A partial accept is the harm the whole field
     // exists to remove.
