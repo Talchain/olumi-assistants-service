@@ -58,8 +58,8 @@ const FACTOR = (observed_state?: unknown) => {
 
 const graphWith = (...nodes: Array<Record<string, unknown>>) => ({ nodes, edges: [] as unknown[] });
 
-const ctxFor = (graph: unknown): StageContext =>
-  ({ graph, requestId: 'req-test' } as unknown as StageContext);
+const ctxFor = (graph: unknown, goalConstraints?: unknown): StageContext =>
+  ({ graph, requestId: 'req-test', goalConstraints } as unknown as StageContext);
 
 const issueCodesFor = (graph: unknown): string[] => {
   const r = DraftGraphOutput.safeParse({ graph });
@@ -122,7 +122,87 @@ describe('observed_state salvage — an optional field must not destroy the mode
     expect(graph.nodes[0]).toHaveProperty('observed_state');  // nothing was shed
   });
 
-  it('T8 DISCRIMINATING TWIN of T7: the same shape as a FACTOR is salvaged', () => {
+  it('T13 ROLE: a goal_constraints TARGET is never stripped, whatever its kind', () => {
+    // THE CASE `kind` MISSED. `buildParameterUncertaintiesV3`'s passes are both
+    // factor-only, so an outcome or risk target must carry its OWN
+    // `observed_state.value` (`constraint-write-admissibility.ts:47-52`). Lose
+    // it and PLoT logs `plot.constraint_no_observed_value` with "ISL may use
+    // base=0.0" — the user's threshold compared against a FABRICATED ZERO,
+    // which that file calls "worse than not checked".
+    const graph = graphWith({
+      id: 'ab78e513', kind: 'factor', label: 'Monthly churn',
+      observed_state: { unit: '%' },
+    });
+    const goalConstraints = [
+      { constraint_id: 'c1', node_id: 'ab78e513', operator: '<=' as const, value: 0.04 },
+    ];
+    // PRECONDITION: the graph's only defect is the observed_state, so the
+    // decline below can only come from the ROLE check.
+    expect(issueCodesFor(graph)).toEqual(['invalid_union']);
+
+    const ctx = ctxFor(graph, goalConstraints);
+    runStructuralParse(ctx);
+
+    expect(ctx.earlyReturn?.statusCode).toBe(400);
+    expect(graph.nodes[0]).toHaveProperty('observed_state');
+  });
+
+  it('T14 DISCRIMINATING TWIN of T13: the same node, NOT a constraint target, IS salvaged', () => {
+    // Byte-identical to T13 except `goal_constraints` does not name it. So T13
+    // binds to the ROLE and not to the id, the label, or the kind.
+    const graph = graphWith({
+      id: 'ab78e513', kind: 'factor', label: 'Monthly churn',
+      observed_state: { unit: '%' },
+    });
+    // ⚠ PRECONDITION PIN (trap 13b). The first version of this fixture omitted
+    // `operator` and `value`, which GoalConstraintSchema REQUIRES — so it added
+    // an issue OUTSIDE observed_state and the salvage declined for a reason that
+    // had nothing to do with the role check. T13 would then have passed with the
+    // guard deleted. Both fixtures are now valid, and asserted so here.
+    const otherTarget = [
+      { constraint_id: 'c1', node_id: 'some_other_node', operator: '<=' as const, value: 0.04 },
+    ];
+    expect(issueCodesFor(graph)).toEqual(['invalid_union']); // the ONLY issue is the field
+
+    const ctx = ctxFor(graph, otherTarget);
+    runStructuralParse(ctx);
+
+    expect(ctx.earlyReturn).toBeUndefined();
+    expect(graph.nodes[0]).not.toHaveProperty('observed_state');
+  });
+
+  it('T15 SHAPE: a constraint-SHAPED observed_state on a FACTOR is never stripped', () => {
+    // Reproduced at review on all seven non-constraint kinds: a
+    // `{metadata:{operator}}` observed_state was shed because the guard asked
+    // the node what KIND it was instead of what its observed_state CARRIED.
+    const graph = graphWith({
+      id: 'f_mislabelled', kind: 'factor', label: 'Mislabelled threshold',
+      observed_state: { metadata: { operator: '>' } },
+    });
+    const ctx = ctxFor(graph);
+    runStructuralParse(ctx);
+
+    expect(ctx.earlyReturn?.statusCode).toBe(400);
+    expect(graph.nodes[0]).toHaveProperty('observed_state');
+  });
+
+  it('T16 DISCRIMINATING TWIN of T15: the same factor WITHOUT metadata IS salvaged', () => {
+    // Differs from T15 only in the presence of the `metadata` key, so T15 binds
+    // to the SHAPE. This is the twin the reviewer asked for in place of the
+    // kind-keyed one: re-cut on shape, or it pins the wrong axis and keeps
+    // passing while the hazard is live.
+    const graph = graphWith({
+      id: 'f_mislabelled', kind: 'factor', label: 'Mislabelled threshold',
+      observed_state: { unit: '%' },
+    });
+    const ctx = ctxFor(graph);
+    runStructuralParse(ctx);
+
+    expect(ctx.earlyReturn).toBeUndefined();
+    expect(graph.nodes[0]).not.toHaveProperty('observed_state');
+  });
+
+  it('T8 KIND (weakest axis, kept as well not instead): the same shape as a FACTOR is salvaged', () => {
     // Differs from T7 in `kind` and NOTHING else — same label, same malformed
     // observed_state, same Zod code. So T7 binds to the node's KIND, not to
     // something incidental about its shape.

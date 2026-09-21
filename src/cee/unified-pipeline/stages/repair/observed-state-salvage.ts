@@ -108,8 +108,28 @@ function observedStateNodeIndices(issues: ReadonlyArray<ZodIssue>): number[] | n
  * On success the caller's `graph.nodes[i].observed_state` have been DELETED
  * in place, so downstream stages and the response see the salvaged model.
  */
+/**
+ * Node ids named as `goal_constraints[].node_id`. These carry a user-stated
+ * threshold on whatever kind of node the drafter put it on.
+ *
+ * ⚠ TOTAL AND FAIL-SAFE: anything it cannot read yields an EMPTY set, which
+ * makes hazard test 1 decline nothing. That is deliberate — tests 2 and 3 still
+ * run, and a guard that threw here would turn an unreadable input into a lost
+ * model, which is the harm this whole module exists to prevent.
+ */
+function goalConstraintNodeIds(goalConstraints: unknown): ReadonlySet<string> {
+  const ids = new Set<string>();
+  if (!Array.isArray(goalConstraints)) return ids;
+  for (const entry of goalConstraints) {
+    if (entry === null || typeof entry !== "object") continue;
+    const id = (entry as Record<string, unknown>).node_id;
+    if (typeof id === "string" && id.length > 0) ids.add(id);
+  }
+  return ids;
+}
+
 export function salvageObservedState(
-  input: { graph?: unknown },
+  input: { graph?: unknown; goal_constraints?: unknown },
   issues: ReadonlyArray<ZodIssue>,
 ): ObservedStateSalvageResult {
   const indices = observedStateNodeIndices(issues);
@@ -145,9 +165,46 @@ export function salvageObservedState(
   // Declines WHOLESALE rather than skipping the node: that node's
   // `observed_state` would still be invalid, so a partial strip cannot re-parse
   // anyway, and a half-stripped graph is a state no caller ever produces.
+  // ⛔ KEYED ON THE HAZARD, NOT ON `node.kind`. An earlier version declined only
+  // when `kind === "constraint"` and was WRONG: the hazard lives in the
+  // `observed_state` SHAPE and in the node's ROLE, neither of which `kind`
+  // decides. Reproduced at review: an `observed_state` of
+  // `{metadata:{operator:">"}}` was still SHED on factor, risk, outcome, goal,
+  // option, decision and action — all seven of the other kinds.
+  //
+  // ⚠ WHY A NON-CONSTRAINT NODE CAN HOLD A THRESHOLD. `translator-v3.ts`'s
+  // `buildParameterUncertaintiesV3` passes are BOTH factor-only, "which is why
+  // an `outcome` or `risk` target has to carry its own `observed_state.value`"
+  // (`d1-shared/constraint-write-admissibility.ts:47-52`). And losing that value
+  // is not a missing check — `:41-44` records that PLoT then logs
+  // `plot.constraint_no_observed_value` and "ISL may use base=0.0", i.e. the
+  // user's threshold is compared against a FABRICATED ZERO, which that file
+  // itself calls "worse than not checked".
+  //
+  // Three independent hazard tests, any one of which declines:
+  const constraintTargetIds = goalConstraintNodeIds(input.goal_constraints);
   for (const i of indices) {
     const node = nodes[i];
     if (node === undefined || node === null || typeof node !== "object") continue;
+
+    // 1. ROLE — the node is a `goal_constraints[]` target, so it carries a
+    //    threshold regardless of its kind. This is the case `kind` missed.
+    const nodeId = typeof node.id === "string" ? node.id : null;
+    if (nodeId !== null && constraintTargetIds.has(nodeId)) {
+      return { salvaged: false, stripped: [], declined_reason: "would_strip_constraint" };
+    }
+
+    // 2. SHAPE — the `observed_state` carries a `metadata` key, i.e. it is
+    //    constraint-shaped whatever the node calls itself. This is the
+    //    broken-operator hazard `schemas/graph.ts:255-259` exists to refuse.
+    const obs = node.observed_state;
+    if (obs !== null && typeof obs === "object" && "metadata" in (obs as Record<string, unknown>)) {
+      return { salvaged: false, stripped: [], declined_reason: "would_strip_constraint" };
+    }
+
+    // 3. KIND — kept as well, not instead. It is the weakest of the three and
+    //    the only one that was here before; removing it would narrow the guard
+    //    on the strength of the other two being complete, which is not proven.
     if (node.kind === "constraint") {
       return { salvaged: false, stripped: [], declined_reason: "would_strip_constraint" };
     }
