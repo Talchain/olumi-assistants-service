@@ -182,8 +182,9 @@ describe('the replacement controller binds consent to the STORE, not the request
   it('⭐ the token handed to the controller is the STORE-derived one', async () => {
     const res = await post(app);
     if (res.statusCode !== 200) {
-      // eslint-disable-next-line no-console
-      console.error('BODY:', res.body.slice(0, 600));
+      // Surfaced on failure only: a bare `expected 500 to be 200` tells you
+      // nothing about WHY, and this route's failures are all typed.
+      expect(res.body, 'the route errored — body included so the cause is visible').toBe('');
     }
     expect(res.statusCode).toBe(200);
     expect(handleReplacementTurnMock, 'the controller must have been reached').toHaveBeenCalledTimes(1);
