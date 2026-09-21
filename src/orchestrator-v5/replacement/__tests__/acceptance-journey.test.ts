@@ -85,15 +85,53 @@ const ck = async (): Promise<void> => undefined;
  * needing values on three factors), and the shape a single prose offer has to
  * become before anything can accept it.
  *
- * ⚠ The money figure is carried in its NATIVE magnitude. The session's
- * `Advertising Budget Allocated` reached the wire as `value: 0.3` with
- * `raw_value: 30000` beside it; a proposal that stores only the normalised
- * form cannot produce a receipt the user recognises.
+ * ⛔⛔ THE OPERATION SHAPE IS THE PRODUCER'S, AND MY FIRST VERSION WAS A
+ * CORRUPTING ONE. It staged `value: 5000, unit: '£'` — a NATIVE magnitude in
+ * the `value` slot — and this test ASSERTED it surviving verbatim, i.e. it
+ * pinned the corruption as the desired behaviour. `native-quantity-operation.ts`
+ * says why in terms: *"it names the field `value`, which is the ENCODED
+ * magnitude the engine computes on. Writing a native `95000` there would move a
+ * `[0,1]` intervention to 95,000 and corrupt the causal model."*
+ *
+ * Derived from the two real emitters instead of my own head:
+ *   · ENCODED  — `buildOptionEffectRawOperation` (`option-effect-write.ts:1434`)
+ *                emits `value: { value: n }`, a whole-object replacement.
+ *   · NATIVE   — `buildNativeQuantityOperation` (`native-quantity-operation.ts`)
+ *                emits `value: { ...carried, raw_value: n, unit }` and never
+ *                touches the encoded value: **the native rides BESIDE it.**
+ *
+ * So `value` is an OBJECT, never a scalar, and there is no top-level `unit`.
+ * This is the estate's self-authored-fixture trap: a shape I invented agreed
+ * with my model of the writer and would have shipped a receipt for a write that
+ * corrupts the model it claims to have updated.
  */
 const OFFERED_OPS = [
-  { op: 'update_node', path: '/nodes/opt-limited-test/data/interventions/f-quality', value: 0.55, unit: 'scale' },
-  { op: 'update_node', path: '/nodes/opt-limited-test/data/interventions/f-budget', value: 5000, unit: '£' },
-  { op: 'update_node', path: '/nodes/opt-limited-test/data/interventions/f-time', value: 0.15, unit: 'unit_interval' },
+  {
+    op: 'update_node',
+    path: '/nodes/opt-limited-test/data/interventions/f-quality',
+    value: { value: 0.55 },
+    old_value: null,
+    impact: 'moderate',
+    rationale: 'Sets the effect value for AI Tool + Limited Budget Test on Campaign Strategic Quality.',
+  },
+  {
+    // ⭐ THE NATIVE ONE. £5,000 rides as `raw_value` + `unit`, beside an encoded
+    // value this operation deliberately does not touch.
+    op: 'update_node',
+    path: '/nodes/opt-limited-test/data/interventions/f-budget',
+    value: { raw_value: 5000, unit: '£' },
+    old_value: null,
+    impact: 'moderate',
+    rationale: 'Records the £ figure the user gave, for the model value to be derived from.',
+  },
+  {
+    op: 'update_node',
+    path: '/nodes/opt-limited-test/data/interventions/f-time',
+    value: { value: 0.15 },
+    old_value: null,
+    impact: 'moderate',
+    rationale: 'Sets the effect value for AI Tool + Limited Budget Test on Founder Time Commitment.',
+  },
 ];
 
 const OFFER_SUMMARY =
@@ -191,10 +229,16 @@ describe('the acceptance journey the deployed product could not complete', () =>
     // ── 4 + 5. the operations sent are the ones OFFERED, byte for byte ────
     // Bound by identity to the offer, never re-derived from the message: the
     // native £5,000 and the entity path both survive unchanged.
-    // Byte-identical to what was staged — including `5000` with `unit: '£'`,
-    // never a normalised 0.3 re-derived from anywhere.
+    // Byte-identical to what was staged.
     expect(seen[0]!.operations).toEqual(offered[0]!.operations);
     expect(seen[0]!.operations[0]!.detail).toEqual({ operations: OFFERED_OPS });
+    // ⭐ AND THE NATIVE FIGURE IS IN THE SLOT THE WRITER READS IT FROM, which is
+    // the part a shape I invented got wrong: £5,000 as `raw_value` beside an
+    // untouched encoded value, never as `value` — which the engine computes on.
+    const budgetOp = (seen[0]!.operations[0]!.detail as { operations: Array<Record<string, unknown>> })
+      .operations.find((o) => String(o.path).endsWith('f-budget'))!;
+    expect(budgetOp.value).toEqual({ raw_value: 5000, unit: '£' });
+    expect(budgetOp.value).not.toHaveProperty('value');
     expect(seen[0]!.proposalId).toBe(proposalId);
     expect(seen[0]!.modelRevision).toBe('rev-1');
     expect(seen[0]!.idempotencyKey, 'a key the writer can dedupe on').toBeTruthy();
