@@ -134,6 +134,39 @@ const LEADER_CLAIM_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re:
   { code: 'ahead', re: /\b(?:is|are|was|were)\s+ahead\b/i },
   { code: 'top_choice', re: /\btop\s+(?:choice|option)\b/i },
   /**
+   * ⭐ THIRD RECORDED DIVERGENCE — and it is the same shape as the second,
+   * arriving from the OPPOSITE direction: not a model phrasing this list never
+   * imagined, but a DELIBERATE COPY CHANGE that walked out from under it.
+   *
+   * Paul ruled on 21 Sep 2026 that "leading option" is the wrong concept —
+   * the product states what the option came out highest ON, and never
+   * adjudicates. So `composeExplainResultsFallback` now emits:
+   *
+   *   "Across the futures we sampled, {label} came out highest on {goal} with
+   *    a probability of 62%."
+   *
+   * Checked pattern by pattern, that sentence matched NOTHING above: no
+   * `leads`, no `leading option`, no `the lead`, no `ahead`, no `best option`.
+   * ⛔ AND THE CHANGE ALSO DELETED ITS OWN INCIDENTAL CATCH — the old
+   * neighbouring clause "so the lead is meaningful rather than marginal" was
+   * tripping `the_lead` and redacting the whole answer. Removing the
+   * editorialising sentence removed the only thing seeing the claim beside it.
+   *
+   * That is precisely the hole the second divergence documents: a leader claim
+   * caught only by its neighbours is not caught at all. Measured with a
+   * contrast control — this spec passes 15/15 at staging and failed on 30
+   * producer outputs at the copy change's head, every one of them this
+   * sentence.
+   *
+   * ⚠ THE CLAIM ITSELF IS LEGITIMATE. This entry is not saying the producer is
+   * wrong — the producer is now RIGHT, and the module docstring's "fix the
+   * producer, do not widen the guard" does not apply to a correct sentence in
+   * new words. The alarm must be able to FIND a legitimate claim in order to
+   * REDACT it on the turns where naming a leader is withheld. A vocabulary
+   * that cannot see the product's current phrasing is not an alarm.
+   */
+  { code: 'came_out_highest', re: /\bcame\s+out\s+highest\b/i },
+  /**
    * SECOND RECORDED DIVERGENCE from the walk's matcher — and the one that
    * makes this list able to see the defect it was extended for.
    *
