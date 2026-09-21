@@ -268,3 +268,102 @@ describe('G3 — resolveScenarioAnalysisSupersession: the same-current-graph con
     ).toBeUndefined();
   });
 });
+
+/**
+ * ⚠⚠ CONJUNCT 4 IS VACUOUS WHEN BOTH HASHES ARE `null`, AND ITS SAFETY IS AN
+ * INVARIANT IN A DIFFERENT MODULE. Pinned here so a change over there REDs here.
+ *
+ * The conjunct is `scenarioFreshness.current_graph_hash !== windowFreshness.current_graph_hash`.
+ * `FreshnessDerivation.current_graph_hash` is `string | null`, and `null !== null`
+ * is `false` — so with no graph on either side the conjunct PASSES. It proves
+ * agreement, not that a graph was compared, and its STATED meaning ("computed
+ * against the SAME current graph") is not what it enforces in that state.
+ *
+ * It is harmless today, and the reason is not in this file: `deriveAnalysisFreshness`
+ * cannot reach `fresh` when the current hash is null, because **TWO** guards
+ * above the `===` comparison short-circuit first (`freshness.ts`: the fact's own
+ * `graph_hash_at_run === null` branch, and the `currentGraphHash === null`
+ * branch). So the worst the both-null path can do is adopt an `unknown` or
+ * `stale` verdict, both of which are at least as honest as the `never_run` they
+ * replace.
+ *
+ * ⚠ THE COUNT IS TWO, NOT ONE, AND IT WAS MEASURED. Removing EITHER guard alone
+ * leaves the other protecting — both single-guard mutants were run and the pin
+ * below correctly stayed GREEN, because neither reaches `fresh`. Only the
+ * compound mutant (both dropped) reaches `null === null` and REDs it. An earlier
+ * write-up of this vacuity named one guard; the safety is a CONJUNCTION, and a
+ * pin demonstrated against the wrong mutant would have looked discriminating
+ * while proving nothing (trap 13c: a mutant kit validates sensitivity, never
+ * correctness).
+ *
+ * ⚠ THAT IS A GUARD WHOSE SAFETY RESTS ON SOMEONE ELSE'S INVARIANT, which is
+ * CLAUDE.md trap 12b's decay pattern: the day a null-hash derivation is allowed
+ * to reach `fresh`, this conjunct silently stops protecting anything and ships
+ * `analysis_ready.freshness: 'fresh'` about a graph it cannot identify. The
+ * cases below make that day RED instead of silent — and they assert the SPEC
+ * ("never adopt `fresh` about a graph we cannot name"), not the failure mode in
+ * hand (trap 13d).
+ */
+describe('G3 — conjunct 4 with NO graph on either side (the pinned vacuity)', () => {
+  /** A saved analysis whose own hash is missing too — the legacy-fact shape. */
+  const DURABLE_HASHLESS_FACT: readonly HandlerFact[] = [
+    (() => {
+      const fact = runAnalysisFact(ANALYSED_HASH) as unknown as {
+        result: Record<string, unknown>;
+      };
+      return {
+        ...(fact as unknown as Record<string, unknown>),
+        result: { ...fact.result, graph_hash_at_run: null },
+      } as unknown as HandlerFact;
+    })(),
+  ];
+
+  it('DOCUMENTS THE VACUITY: both hashes null passes conjunct 4 and the supersession FIRES', () => {
+    // Not an endorsement — a record of what the code does, so the next reader
+    // is not surprised by it and the contrast below has something to contrast.
+    const windowNoGraph = windowNone(null);
+    const durableNoGraph = deriveAnalysisFreshness(DURABLE_HASHLESS_FACT, null, undefined, {
+      priorFactsReadOk: true,
+    });
+    expect(windowNoGraph.current_graph_hash).toBeNull();
+    expect(durableNoGraph.current_graph_hash).toBeNull();
+
+    const out = resolveScenarioAnalysisSupersession({
+      windowFreshness: windowNoGraph,
+      scenarioFreshness: durableNoGraph,
+    });
+    expect(out?.freshness).toBe(durableNoGraph);
+  });
+
+  it('⭐ THE PIN: a verdict adopted with NO current graph can never claim `fresh`', () => {
+    // This is the assertion that carries the safety, and it is deliberately
+    // stated over the whole class rather than over one fixture: every fact
+    // shape this estate admits, derived against a null current hash, must
+    // produce a verdict the supersession may adopt without lying. The moment
+    // `deriveAnalysisFreshness` lets any of them reach `fresh`, this REDs.
+    const factShapes: ReadonlyArray<readonly [string, readonly HandlerFact[]]> = [
+      ['durable fact WITH a run hash', DURABLE_WITH_FACT],
+      ['durable fact WITHOUT a run hash', DURABLE_HASHLESS_FACT],
+    ];
+    for (const [label, facts] of factShapes) {
+      const derived = deriveAnalysisFreshness(facts, null, undefined, {
+        priorFactsReadOk: true,
+      });
+      expect(derived.current_graph_hash, label).toBeNull();
+      expect(
+        derived.freshness,
+        `${label}: a null current graph hash must never derive \`fresh\` — conjunct 4 cannot catch it`,
+      ).not.toBe('fresh');
+
+      // …and therefore neither can anything the seam adopts from it.
+      const out = resolveScenarioAnalysisSupersession({
+        windowFreshness: windowNone(null),
+        scenarioFreshness: derived,
+      });
+      expect(
+        out?.freshness.freshness,
+        `${label}: the supersession must not put \`fresh\` on the wire about an unidentifiable graph`,
+      ).not.toBe('fresh');
+    }
+  });
+});

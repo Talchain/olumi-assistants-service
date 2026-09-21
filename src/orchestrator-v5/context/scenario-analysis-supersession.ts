@@ -28,15 +28,34 @@
  * two readers (`analysis_ready.freshness` and `analysis_state`). Every other
  * reader keeps the wire-bound verdict, unchanged and unrepointed.
  *
- * ⭐ WHY THE ASYMMETRY IS SOUND — the superset argument, derived, not assumed.
- * `context.prior_facts` holds the facts of the last N *turns*; the durable
- * carrier holds the newest `SCENARIO_ANALYSIS_FACT_CAP` **`run_analysis` facts
- * scenario-wide** (`context/reconcile-scenario-analysis-facts.ts`). FOR
- * `run_analysis` FACTS SPECIFICALLY the durable set is therefore a SUPERSET of
- * the hot window's. It can only ever FIND a fact the window lost; it can never
- * lose one the window has. So a durable verdict may correct a hot-window
- * `none` ("nothing has ever run") and may correct NOTHING ELSE — and it may
- * never turn a hot-window verdict INTO `none`.
+ * ⭐ WHY THE ASYMMETRY IS SOUND. **CONJUNCT 2 CARRIES THE GUARANTEE. The
+ * superset argument below is the motivation, and it is NOT load-bearing** —
+ * stated precisely because an earlier version of this docstring leaned on the
+ * superset property as the safety argument, which claims more than the code
+ * needs and more than the property actually holds.
+ *
+ * The MOTIVATION: `context.prior_facts` holds the facts of the last N *turns*;
+ * the durable carrier holds the newest `SCENARIO_ANALYSIS_FACT_CAP`
+ * **`run_analysis` facts scenario-wide**
+ * (`context/reconcile-scenario-analysis-facts.ts`). For `run_analysis` facts
+ * specifically the durable set is USUALLY a superset of the hot window's, so it
+ * can find a fact the window lost.
+ *
+ * ⚠ WHERE THE SUPERSET PROPERTY FAILS, and why nothing rests on it: on a
+ * **capped** page whose newest `SCENARIO_ANALYSIS_FACT_CAP` `run_analysis` facts
+ * are ALL failures while the hot window still holds an older SUCCESS, the
+ * durable set is not a superset for selection purposes. That state is harmless
+ * anyway, because it yields a durable `none` (declined by conjunct 3) beside a
+ * window verdict that is not `none` (declined by conjunct 2). **The safety comes
+ * from the conjuncts, not from the set relation.**
+ *
+ * THE GUARANTEE, as the code actually enforces it: conjunct 2 admits exactly one
+ * window verdict — `none` — and `none` is the only verdict whose correction can
+ * never destroy information, because it asserts that NOTHING exists. `fresh`,
+ * `stale` and `unknown` are all claims about THIS turn's graph that the window
+ * is entitled to make, and each is left untouched. Conjunct 3 then forbids
+ * replacing it WITH `none`. Between them the precedence is one-way by
+ * construction, whatever the two sets happen to contain.
  */
 
 import type { FreshnessDerivation } from './freshness.js';
