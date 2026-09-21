@@ -499,9 +499,14 @@ const KNOWN_OPEN_USER_STATED_VIOLATIONS: readonly string[] = [
  * `observed` (an EXTRACTION stamp) are NOT members of the observed-state
  * vocabulary: putting either on a FACTOR's `observed_state.source` makes the
  * graph parse `SCHEMA_INVALID`. That is a fixture-vocabulary error, not
- * evidence that user-stated structure is unbuildable — six declared stamps
- * (`explicit`, `user`, `user_override`, `user_confirmed`, `brief_extraction`,
- * `panel_elicited`) build it, and all six reproduce this axis identically.
+ * evidence that user-stated structure is unbuildable — five declared stamps
+ * (`explicit`, `user`, `user_override`, `brief_extraction`, `panel_elicited`)
+ * build it, and all five reproduce this axis identically.
+ *
+ * ⚠ `user_confirmed` was a SIXTH until 20 Sep 2026, when it was re-ruled
+ * `user_ratified` — confirming an Olumi estimate is not authoring it. It no
+ * longer builds this axis, and the count here is corrected rather than left to
+ * read as a stale mirror.
  */
 function buildStamped(specs: readonly OptionSpec[], optStamp: string, facStamp: string) {
   const options = specs.map((spec, i) => {

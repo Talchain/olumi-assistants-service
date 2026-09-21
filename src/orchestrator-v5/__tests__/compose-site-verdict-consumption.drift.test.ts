@@ -1780,8 +1780,25 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // TAIL_PATTERN, so appending it anywhere earlier here would compose a
     // summary the egress allowlist rejects and the user would silently receive
     // the bare template.
+    //
+    // The withheld-SEPARABILITY disclosure adds a SEVENTH slot, appended after
+    // the participation one. Same treatment for the same reasons — the pin is
+    // UPDATED RATHER THAN LOOSENED — with one difference worth recording,
+    // because it is the first slot for which it is true: this tail is NOT in
+    // TAIL_PATTERN at all. It is registered LAST in
+    // `TEMPLATE_SUFFIX_DISCLOSURE_GRAMMARS`, i.e. on the TEMPLATE branch only,
+    // because it ships exclusively where `computeHeadline` returned
+    // `text: null` under `options_not_separable`. So the ordering constraint it
+    // protects is against `TEMPLATE_SUFFIX_ONLY_REGEX` rather than against
+    // TAIL_PATTERN — and it is just as real: registered last, appended
+    // anywhere earlier, the egress allowlist rejects the composed summary and
+    // the user silently receives the bare template.
+    //
+    // ⚠ The `gated` stance is unaffected: `summary` is still "withheld-able
+    // headline, else a locked template", and this tail can only ever ride the
+    // locked-template arm.
     expect(RUN_ANALYSIS).toContain(
-      'const summary = `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}`;',
+      'const summary = `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}${separabilityDisclosure}`;',
     );
     expect(RUN_ANALYSIS).toContain('assistant_text: summary,');
     // ONE verdict, TWO consumers — the property that makes this `gated` rather

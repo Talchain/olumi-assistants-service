@@ -230,7 +230,14 @@ export function truncateGraphJson(graph: EditCompactGraph, maxBytes: number): st
  */
 export function renderRecentConversationForEdit(
   messages: readonly { role: 'user' | 'assistant'; content: string }[],
-  maxChars: number = 4000,
+  // ⚠ PINNED, not re-spelled (CLAUDE.md trap 12). This default WAS a bare
+  // `4000` literal sitting beside an exported constant of the same value,
+  // which the conformance suite pins but which nothing connected to this
+  // renderer — so the structural composer, which relies on this default,
+  // would have silently kept 4,000 if the exported constant ever moved, with
+  // no red anywhere. Default parameters evaluate at CALL time, so the
+  // constant's declaration below this point is fine.
+  maxChars: number = EDIT_CONTEXT_CONVERSATION_DEFAULT_CHARS,
 ): string {
   return renderRecentConversationForEditWithMeta(messages, maxChars).text;
 }
@@ -238,7 +245,8 @@ export function renderRecentConversationForEdit(
 /** Metadata form of {@link renderRecentConversationForEdit} (S0 telemetry). */
 export function renderRecentConversationForEditWithMeta(
   messages: readonly { role: 'user' | 'assistant'; content: string }[],
-  maxChars: number = 4000,
+  /** Pinned to the exported constant — see {@link renderRecentConversationForEdit}. */
+  maxChars: number = EDIT_CONTEXT_CONVERSATION_DEFAULT_CHARS,
 ): { text: string; dropped: number; originalChars: number } {
   if (messages.length === 0) return { text: '', dropped: 0, originalChars: 0 };
 

@@ -38,8 +38,12 @@ import { resolveRunAdmission } from '../../../orchestrator-v5/tools/handlers/ana
 import { assessRouteAdmission } from '../canonical-readiness.js';
 import {
   DECLARED_VALUE_SOURCE_STAMPS,
+  STRUCTURE_PROVENANCE_VALUES,
   classifyValueSource,
+  earnsAuthorshipCredit,
+  isStructureProvenance,
   obligationFor,
+  reflectsAHumanAct,
   structureProvenance,
   structureProvenanceOfEffect,
 } from '../obligation-provenance.js';
@@ -402,5 +406,89 @@ describe('the route publishes ONE admission answer', () => {
     );
     expect(required.length).toBeGreaterThan(0);
     expect(required.map((i) => i.message)).toContain(route.blocker_reason);
+  });
+});
+
+// ============================================================================
+// `user_ratified` — RATIFICATION IS NOT AUTHORSHIP (ruled 20 Sep 2026)
+// ============================================================================
+
+/**
+ * ⭐ THE RULING THIS BLOCK PINS, and the ground it rests on.
+ *
+ * `user_confirmed` and `user_assumption` classified as `user_stated` until this
+ * change — swept in with the `user_*` family, never ruled. Note the asymmetry
+ * that gave it away: `brief_extraction` two lines above them carries a written
+ * justification for its classification; those two carried none.
+ *
+ * The consequence was not cosmetic. `analysis-admission.ts` counts `user_stated`
+ * into `material_parameters_user_stated`, and **ONE** such parameter lifts the
+ * whole model to `comparative_leader`. So one click on one Olumi estimate
+ * converted a fully machine-authored model into one licensed to name a winner —
+ * while the product's own shipped sentence says *"…until you have **set** at
+ * least one of them"*. **Set. Not confirm.** The mapping made a published
+ * sentence false, and that is the decisive ground; the rest is supporting.
+ *
+ * `user_assumption` rides with it for the same reason read the other way round:
+ * an assumption the user invented is not a value they know.
+ *
+ * ⚠ AND WHAT THE RULING DOES *NOT* SAY. Confirmation is a genuine human act and
+ * must not be discarded — {@link reflectsAHumanAct} is the predicate for every
+ * threshold that is about REVIEW rather than AUTHORSHIP, and
+ * `not-modelled-manifest.ts` reads it so that a confirmed value is still never
+ * described back to the user as Olumi's invention. Two questions, two
+ * predicates, named apart (CLAUDE.md trap 21).
+ */
+describe('user_ratified — ratification is a human act, and it is not authorship', () => {
+  it('⭐ `user_confirmed` is ratification, NOT authorship', () => {
+    expect(classifyValueSource('user_confirmed')).toBe('user_ratified');
+  });
+
+  it('⭐ `user_assumption` is ratification too — a declared guess is not a known value', () => {
+    expect(classifyValueSource('user_assumption')).toBe('user_ratified');
+  });
+
+  it('CONTRAST CONTROL — the genuinely authored stamps are UNMOVED', () => {
+    // Without this the two assertions above are consistent with having broken
+    // the whole table. The direction that must never invert is this one.
+    for (const stamp of ['user', 'user_override', 'user_edited', 'user_calibration',
+      'panel_elicited', 'brief_extraction', 'explicit']) {
+      expect(classifyValueSource(stamp), `${stamp} must still be authorship`).toBe('user_stated');
+    }
+    expect(classifyValueSource('cee_inference')).toBe('ai_drafted');
+    expect(classifyValueSource('cee_repair')).toBe('system_repaired');
+  });
+
+  it('ratification earns no authorship credit, and is still a human act', () => {
+    expect(earnsAuthorshipCredit('user_ratified')).toBe(false);
+    expect(reflectsAHumanAct('user_ratified')).toBe(true);
+    // The TWIN in both directions, so neither predicate can have collapsed into
+    // a constant: authorship earns both, and the machine classes earn neither.
+    expect(earnsAuthorshipCredit('user_stated')).toBe(true);
+    expect(reflectsAHumanAct('user_stated')).toBe(true);
+    for (const p of ['ai_drafted', 'system_repaired', 'unattributed'] as const) {
+      expect(earnsAuthorshipCredit(p), p).toBe(false);
+      expect(reflectsAHumanAct(p), p).toBe(false);
+    }
+  });
+
+  it('a ratified gap may be OFFERED, never DEMANDED — INV-P6 unchanged by the widening', () => {
+    expect(obligationFor('user_ratified')).toBe('offered');
+    // Pinned against the allowlist's direction: only authorship demands.
+    expect(obligationFor('user_stated')).toBe('required');
+  });
+
+  it('the derived validator ACCEPTS the new member — the JSONB boundary is not left behind', () => {
+    expect(isStructureProvenance('user_ratified')).toBe(true);
+    expect([...STRUCTURE_PROVENANCE_VALUES]).toContain('user_ratified');
+    // CONTRAST: the validator still refuses a member the union does not declare.
+    expect(isStructureProvenance('user_telepathically_endorsed')).toBe(false);
+  });
+
+  it('classification stays TOTAL — no declared stamp fell into `unattributed` on the way', () => {
+    const unclassified = DECLARED_VALUE_SOURCE_STAMPS.filter(
+      (stamp) => classifyValueSource(stamp) === 'unattributed',
+    );
+    expect(unclassified).toEqual([]);
   });
 });

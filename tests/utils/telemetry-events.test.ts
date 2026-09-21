@@ -520,7 +520,11 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V5CandidateMutationRejected: "v5.candidate_mutation.rejected",
         V5CandidateMutationClarifyRequired: "v5.candidate_mutation.clarify_required",
         // Lane 8 — Model Management commit-seam version hook (CEE_MODEL_VERSIONS_ENABLED)
+        // ⚠ `version_created` is a SKIP ALARM despite its name — its only emit
+        // carries `status: 'skipped'`. A committed version is reported by
+        // `V5ModelVersionCommitted` below. See the note in telemetry.ts.
         V5ModelVersionCreated: "v5.model_versions.version_created",
+        V5ModelVersionCommitted: "v5.model_versions.version_committed",
         // Wave-1 Lane C (PR4) — collab write refused at the route/service
         // boundary; the only trace of a refusal. Log-only (see debugOnlyEvents).
         V5CollabWriteRefused: "v5.collab.write_refused",
@@ -1894,6 +1898,22 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // an incomplete envelope, which is a producer question, not a
         // writer-health one, and folding the two hides whichever is smaller.
         TelemetryEvents.V5BriefProvenanceStored,
+        // Model Management — a committed model version. Content-free (ids, a
+        // closed-enum status, a version number, a 16-hex hash PREFIX). No
+        // Datadog mapping until a dashboard consumes it, on the same reasoning
+        // as the entry above — and the mapping to add when one does is a RATIO,
+        // `committed` over (`committed` + `no_receipt`), never a bare count of
+        // `committed`: a count rises and falls with analysis TRAFFIC rather
+        // than with the health of the version writer, so a busy day with a
+        // broken writer and a quiet day with a working one look identical.
+        //
+        // ⚠ It must be its OWN series, never folded into
+        // `v5.model_versions.version_created`. That event's name reads like a
+        // success signal and is in fact a SKIP ALARM — two tests in
+        // `atomic-model-version-commit.test.ts` assert ZERO of it on the
+        // versionable paths. Summing them would make a skip and a commit
+        // indistinguishable, which is the defect this event exists to close.
+        TelemetryEvents.V5ModelVersionCommitted,
       ];
 
       for (const event of allEvents) {
@@ -2420,6 +2440,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.candidate_mutation.rejected",
         "v5.candidate_mutation.clarify_required",
         "v5.model_versions.version_created",
+        "v5.model_versions.version_committed",
         // ROADMAP 3.1 — Decision Records commit-seam capture hook
         // (unconditional since #539 deleted CEE_DECISION_RECORD_CAPTURE)
         "v5.decision_records.record_captured",

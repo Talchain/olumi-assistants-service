@@ -140,6 +140,11 @@ import {
   buildAnalysisResultHeadline,
   describeAnalysisHeadline,
 } from '../../coaching/analysis-result-headline.js';
+// ⭐ THE WITHHELD-SEPARABILITY DISCLOSURE. See its module docstring: the
+// headline builder computed `separation` and `contenders`, withheld the
+// headline ON them, and then discarded both — so this handler could only ever
+// emit the locked template on the one population that most needs the reason.
+import { buildSeparabilityDisclosure } from '../../coaching/separability-disclosure.js';
 
 // `PLOT_SLOW_LIKELY_MS` lives in the shared `../../telemetry/turn-timings.js`
 // module so the turn-executor (error-path reconstruction) can apply the
@@ -2058,7 +2063,42 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // (trap 21), and it would corrupt the scaffold rate every dashboard reads.
     // A dedicated event is a registered-telemetry change with its own
     // validation gate; it belongs in its own PR, not bundled here.
-    const summary = `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}`;
+    // ⭐ HOISTED. `describeAnalysisHeadline` is pure and shares ALL internal
+    // computation with `buildAnalysisResultHeadline` (its own docstring), so
+    // moving it above the summary changes nothing it returns — it is moved
+    // because the summary now needs the withhold reason the builder threw away.
+    // The telemetry site below reuses THIS descriptor rather than computing a
+    // second one: two derivations of one verdict is how two surfaces end up
+    // disagreeing inside one response (trap 12).
+    const headlineDescriptor = describeAnalysisHeadline(headlineInput);
+    // ⭐⭐ THE REASON, ON THE RUN TURN. Empty on every path but
+    // `options_not_separable`, so every other run is byte-identical.
+    //
+    // ⚠ APPENDED LAST, AND THAT WAS A DECISION, NOT A DEFAULT. Reading first —
+    // immediately after the template, ahead of the six input-quality suffixes —
+    // is arguably better for the person, and it was built that way and then
+    // changed back. Three source-drift pins
+    // (`run-analysis-intake-wiring.drift.test.ts:60`,
+    // `run-analysis-objective-contradiction-wiring.test.ts:145`,
+    // `compose-site-verdict-consumption.drift.test.ts:1784`) encode the
+    // contiguity of the existing chain, every one of the six siblings appends
+    // last, and `TEMPLATE_SUFFIX_DISCLOSURE_GRAMMARS` must be registered in THIS
+    // order or `TEMPLATE_SUFFIX_ONLY_REGEX` rejects the composed text. Moving a
+    // shared, pinned ordering for a position I could not support with a
+    // measurement — the co-occurrence rate of the six suffixes with
+    // `options_not_separable` is NOT measured — is trap 22d's shape: a small
+    // reorder on a pinned seam carries the same class of risk as a large one.
+    // If someone measures that co-occurrence and it is high, moving this to the
+    // front is a one-line change plus three pin updates, and it should be made.
+    //
+    // ⚠ It can only co-occur with the TEMPLATE, never with a headline:
+    // `separability_withhold` is non-null only where `computeHeadline` returned
+    // `text: null`. That is what makes registering it on the template branch of
+    // the egress allowlist — and NOT in `TAIL_PATTERN` — correct.
+    const separabilityDisclosure = buildSeparabilityDisclosure(
+      headlineDescriptor.separability_withhold,
+    );
+    const summary = `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}${separabilityDisclosure}`;
 
     // V5 link-safe response floor: when the deterministic headline builder
     // picks Case-E ("{label} currently leads.") because stronger cases
@@ -2066,7 +2106,6 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // dashboards can track how often the floor saves users from the bland
     // locked template. Same pure descriptor source as the builder; never
     // includes raw user text, labels, prose, arrays, or nested objects.
-    const headlineDescriptor = describeAnalysisHeadline(headlineInput);
     if (headlineDescriptor.case === 'E') {
       emit(TelemetryEvents.V5HeadlineFellBack, {
         request_id: invocation.requestId,
