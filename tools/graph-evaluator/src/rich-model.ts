@@ -116,6 +116,13 @@ export interface RichHorizon {
 export interface RichDecision {
   question: string;
   horizon: RichHorizon;
+  /**
+   * id of the outcome the goal is measured by. Added to the contract by the
+   * bake-off lane on 2026-09-22 after PLoT refused every honest projected model
+   * with NO_EFFECTIVE_PATH_TO_GOAL; null only when the brief names no
+   * measurable goal.
+   */
+  goal_measured_by: string | null;
 }
 
 export interface RichUserFact {
@@ -434,6 +441,47 @@ export function assertSchemaMirrorsTypes(path: string = RICH_SCHEMA_PATH): void 
       )}]; missing in rich-model.ts: [${extra.join(", ")}]`,
     );
   }
+
+  // NESTED required lists too. ⚠ A TOP-LEVEL-ONLY CHECK IS NOT ENOUGH — measured
+  // 2026-09-22: the bake-off lane added `decision.goal_measured_by` to the
+  // contract, the top-level list did not move, and the strict zod parser would
+  // have rejected every conforming model with no drift warning at all.
+  const errors: string[] = [];
+  walkRequired(schema, "", errors);
+  if (errors.length > 0) {
+    throw new Error(`[assertSchemaMirrorsTypes] contract/type drift:\n  ${errors.join("\n  ")}`);
+  }
+}
+
+/**
+ * Every property named `required` anywhere in the contract must be parseable by
+ * the zod mirror. This runs the mirror against a SYNTHETIC minimal instance
+ * derived from the schema, so an added or removed field shows up as a parse
+ * error naming the path, rather than as a silent runtime rejection.
+ */
+function walkRequired(schema: Record<string, unknown>, path: string, errors: string[]): void {
+  const props = schema["properties"];
+  if (props === null || typeof props !== "object") return;
+  const required = Array.isArray(schema["required"]) ? schema["required"].map(String) : [];
+  const declared = Object.keys(props as Record<string, unknown>);
+  const missingFromRequired = declared.filter((k) => !required.includes(k));
+  if (missingFromRequired.length > 0) {
+    // Strict-mode schemas require every declared property; a drift here means
+    // the contract stopped being strict-mode compatible.
+    errors.push(
+      `${path || "<root>"}: properties not in 'required' (strict mode needs all): [${missingFromRequired.join(", ")}]`,
+    );
+  }
+  for (const [key, value] of Object.entries(props as Record<string, unknown>)) {
+    if (value === null || typeof value !== "object") continue;
+    const child = value as Record<string, unknown>;
+    const childPath = path === "" ? key : `${path}.${key}`;
+    walkRequired(child, childPath, errors);
+    const items = child["items"];
+    if (items !== null && typeof items === "object") {
+      walkRequired(items as Record<string, unknown>, `${childPath}[]`, errors);
+    }
+  }
 }
 
 // =============================================================================
@@ -572,7 +620,13 @@ const noteSchema = z
 
 export const richDecisionModelSchema = z
   .object({
-    decision: z.object({ question: z.string(), horizon: horizonSchema }).strict(),
+    decision: z
+      .object({
+        question: z.string(),
+        horizon: horizonSchema,
+        goal_measured_by: z.string().nullable(),
+      })
+      .strict(),
     user_facts: z.array(userFactSchema),
     options: z.array(optionSchema),
     factors: z.array(factorSchema),

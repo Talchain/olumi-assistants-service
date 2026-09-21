@@ -7,10 +7,11 @@
   "params": {},
   "target_mode": "deep",
   "pricing": {
-    "input_per_1m": 0,
-    "output_per_1m": 0,
-    "source": "unknown — fill from OpenAI pricing page"
+    "input_per_1m": 4.0,
+    "output_per_1m": 20.0,
+    "source": "OpenAI pricing page, verified 2026-09-22 by the WP3 peer lane"
   },
-  "pricing_verified": false,
-  "_note": "Arm D challenger on the hard subset. ⛔ PRICING IS UNVERIFIED AND MUST BE FILLED BEFORE ANY COST CLAIM — the zeroes are placeholders, not a measurement. est_cost_usd is emitted as null while pricing_verified is false. No reasoning_effort is pinned here: Sol's default effort is what the plan compares, and pinning one would silently make it a different candidate."
+  "pricing_verified": true,
+  "_note": "Arm D challenger on the hard subset. PRICING VERIFIED 2026-09-22 ($4/$20 per 1M) — supplied by the peer lane that read the OpenAI pricing page; not re-derived in this session. timeout_ms 300000 for the same measured reason as Terra. No reasoning_effort is pinned: Sol's default effort is what the plan compares, and pinning one would silently make it a different candidate.",
+  "timeout_ms": 300000
 }

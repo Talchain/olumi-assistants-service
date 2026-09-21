@@ -8,10 +8,11 @@
   "reasoning_effort": "high",
   "target_mode": "deep",
   "pricing": {
-    "input_per_1m": 0,
-    "output_per_1m": 0,
-    "source": "unknown — fill from OpenAI pricing page"
+    "input_per_1m": 2.0,
+    "output_per_1m": 12.0,
+    "source": "OpenAI pricing page, verified 2026-09-22 by the WP3 peer lane"
   },
-  "pricing_verified": false,
-  "_note": "Arm C widener. ⛔ PRICING IS UNVERIFIED AND MUST BE FILLED BEFORE ANY COST CLAIM. The zeroes are placeholders, NOT a measurement and NOT free: the runner emits est_cost_usd null (never 0) for any model with pricing_verified false, because a 0 in a cost column reads as a finding. ASSUMPTION carried from PLAN-v2 escalation 1: 'Terra High' = gpt-5.6-terra with reasoning effort high; no temperature is sent (reasoning models in this estate ship params {} — see models/gpt-5.4.json)."
+  "pricing_verified": true,
+  "_note": "Arm C widener. PRICING VERIFIED 2026-09-22 ($2/$12 per 1M) — supplied by the peer lane that read the OpenAI pricing page; not re-derived in this session. timeout_ms is 300000 because reasoning effort 'high' over the v0 grammar plus a builder model MEASURED past the 60s provider default and returned 'timeout' (output/model-gen-20260921/wp3/smoke/widener/pricing-staging/run-1, 60007ms). ASSUMPTION carried from PLAN-v2 escalation 1: 'Terra High' = gpt-5.6-terra with reasoning effort high.",
+  "timeout_ms": 300000
 }

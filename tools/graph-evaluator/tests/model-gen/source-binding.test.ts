@@ -31,6 +31,7 @@ import { parseRichModel, type RichDecisionModel } from "../../src/rich-model.js"
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = join(HERE, "fixtures", "pricing-builder-wp0.json");
+const FIXTURE_CURRENT = join(HERE, "fixtures", "pricing-builder-20260922.json");
 const BRIEF_FIXTURE = join(HERE, "fixtures", "pricing-staging.md");
 const LIVE_BRIEF = join(HERE, "..", "..", "briefs", "pricing-staging.md");
 
@@ -38,8 +39,20 @@ function briefBody(path: string): string {
   return matter(readFileSync(path, "utf-8")).content.trim();
 }
 
+/**
+ * The WP0 capture PREDATES `decision.goal_measured_by`, which the bake-off lane
+ * added to the contract on 2026-09-22. It is therefore loaded WITHOUT the strict
+ * parser — deliberately, so the binding gates can still be tested against a
+ * capture that exercises a qualitative factor. That the strict parser REJECTS
+ * it is itself asserted below.
+ */
 function loadFixture(): RichDecisionModel {
-  return parseRichModel(readFileSync(FIXTURE, "utf-8"));
+  return JSON.parse(readFileSync(FIXTURE, "utf-8")) as RichDecisionModel;
+}
+
+/** A real gpt-4.1 capture under the CURRENT contract (2026-09-22, run-2). */
+function loadCurrentFixture(): RichDecisionModel {
+  return parseRichModel(readFileSync(FIXTURE_CURRENT, "utf-8"));
 }
 
 /** Deep clone so a mutant can never leak into another test. */
@@ -57,10 +70,21 @@ describe("fixture integrity", () => {
     expect(briefBody(LIVE_BRIEF)).toBe(BRIEF);
   });
 
-  it("parses as a v0 rich model", () => {
-    const model = loadFixture();
+  it("the current-contract capture parses under the strict parser", () => {
+    const model = loadCurrentFixture();
     expect(model.user_facts).toHaveLength(6);
     expect(model.constraints[0].operator).toBe("<");
+    expect(model.decision.goal_measured_by).toBe("out1");
+  });
+
+  it("the strict parser REJECTS the pre-2026-09-22 capture, naming the added field", () => {
+    // Fails loud, as designed: a contract change must not pass silently.
+    expect(() => parseRichModel(readFileSync(FIXTURE, "utf-8"))).toThrow(/goal_measured_by/);
+  });
+
+  it("the pre-2026-09-22 capture still binds cleanly (the gates do not read that field)", () => {
+    const result = validateSourceBinding(BRIEF, loadFixture());
+    expect(result.failures).toEqual([]);
   });
 });
 
@@ -97,8 +121,8 @@ describe("number reading", () => {
 });
 
 describe("validateSourceBinding — contrast control", () => {
-  it("PASSES on the real WP0 builder output", () => {
-    const result = validateSourceBinding(BRIEF, loadFixture());
+  it("PASSES on the real current-contract builder output", () => {
+    const result = validateSourceBinding(BRIEF, loadCurrentFixture());
     expect(result.failures).toEqual([]);
     expect(result.ok).toBe(true);
   });

@@ -54,6 +54,8 @@ type CallRole = "builder" | "widener" | "critic";
 
 interface CallRecord {
   role: CallRole;
+  /** TRUE when this record was REPLAYED from a previous run, not spent again. */
+  reused?: boolean;
   model_id: string;
   model: string;
   provider: string;
@@ -240,6 +242,8 @@ interface ArmContext {
   schema: Record<string, unknown>;
   dskMode: "on" | "off";
   outDir: string;
+  /** Replay a previous builder call instead of re-spending it (see --reuse-builder). */
+  reuseBuilder: boolean;
 }
 
 async function runOne(ctx: ArmContext, brief: Brief, run: number): Promise<RunResult> {
@@ -273,15 +277,17 @@ async function runOne(ctx: ArmContext, brief: Brief, run: number): Promise<RunRe
   }
 
   // --- builder call ---------------------------------------------------------
-  const builder = await makeCall(
-    "builder",
-    ctx.builderConfig,
-    ctx.schema,
-    ctx.builderPrompt,
-    brief.body,
-  );
+  // REUSE: a widener that timed out must not force the builder call to be paid
+  // for twice. The replayed record keeps the ORIGINAL latency/tokens/cost and is
+  // stamped reused:true, so no summary can read a replay as a fresh measurement.
+  const replay = ctx.reuseBuilder ? await loadPreviousBuilder(runDir) : null;
+  const builder =
+    replay ??
+    (await makeCall("builder", ctx.builderConfig, ctx.schema, ctx.builderPrompt, brief.body));
   result.calls.push(builder.record);
-  await writeFile(join(runDir, "builder-raw.json"), JSON.stringify(builder.raw, null, 2));
+  if (replay == null) {
+    await writeFile(join(runDir, "builder-raw.json"), JSON.stringify(builder.raw, null, 2));
+  }
   if (builder.parseIssues != null) {
     await writeFile(
       join(runDir, "builder-parse-issues.json"),
@@ -388,6 +394,37 @@ async function runOne(ctx: ArmContext, brief: Brief, run: number): Promise<RunRe
   return result;
 }
 
+/**
+ * Replay the builder call recorded in a previous run of this exact
+ * (arm, brief, run), or null when there is nothing to replay.
+ *
+ * Returns the ORIGINAL cost and latency. Inventing zeroes here, or re-timing the
+ * file read as if it were the call, would make a replayed run look cheaper and
+ * faster than the one it is standing in for.
+ */
+async function loadPreviousBuilder(runDir: string): Promise<CallOutcome | null> {
+  const modelPath = join(runDir, "builder-model.json");
+  const resultPath = join(runDir, "result.json");
+  if (!existsSync(modelPath) || !existsSync(resultPath)) return null;
+  const previous = JSON.parse(await readFile(resultPath, "utf-8")) as RunResult;
+  const record = previous.calls.find((c) => c.role === "builder");
+  if (record == null) return null;
+  const model = parseRichModel(await readFile(modelPath, "utf-8"));
+  return {
+    record: { ...record, reused: true },
+    raw: {
+      ok: true,
+      text: null,
+      error: null,
+      provider: record.provider,
+      model: record.model,
+      latency_ms: record.latency_ms,
+    },
+    model,
+    parseIssues: null,
+  };
+}
+
 async function finalise(result: RunResult, runDir: string): Promise<void> {
   const costs = result.calls.map((c) => c.est_cost_usd);
   result.est_cost_usd_total = costs.some((c) => c == null)
@@ -426,13 +463,19 @@ function printSummary(rows: Array<RunResult | { skipped: RunResult }>): void {
     const latency = r.calls.reduce((a, c) => a + c.latency_ms, 0);
     const input = r.calls.reduce((a, c) => a + (c.input_tokens ?? 0), 0);
     const output = r.calls.reduce((a, c) => a + (c.output_tokens ?? 0), 0);
+    const replayed = r.calls.some((c) => c.reused === true);
+    // A failure must never be able to print as "ok": the non-success status is
+    // read off the first failing CALL, and a replay is labelled as a replay.
+    const firstFailure = r.calls.find((c) => c.status !== "success");
     const status = skipped
       ? "SKIP(cached)"
       : r.error != null
         ? "ERROR"
-        : r.calls.every((c) => c.status === "success")
-          ? "ok"
-          : (r.calls.find((c) => c.status !== "success")?.status ?? "ok");
+        : firstFailure != null
+          ? firstFailure.status
+          : replayed
+            ? "ok(replayed)"
+            : "ok";
     const counts = r.projection_omission_counts;
     console.log(
       [
@@ -491,6 +534,11 @@ async function main(): Promise<void> {
     .option("--dsk <mode>", "on | off", "off")
     .option("--env-file <path>", "extra dotenv file to load (never printed)")
     .option("--force", "re-run and overwrite an existing result.json", false)
+    .option(
+      "--reuse-builder",
+      "replay the builder call recorded in a previous run of the same (arm,brief,run) instead of spending it again",
+      false,
+    )
     .option("--dry-run", "plan the calls and print them; spend nothing", false)
     .parse();
 
@@ -543,6 +591,7 @@ async function main(): Promise<void> {
     schema,
     dskMode,
     outDir: resolve(String(opts["out"])),
+    reuseBuilder: opts["reuseBuilder"] === true,
   };
 
   if (arm === "widener" && ctx.widenerConfig == null) {
@@ -570,7 +619,8 @@ async function main(): Promise<void> {
         continue;
       }
       const result = await runOne(ctx, brief, run);
-      calls += result.calls.length;
+      // Count SPEND, not records: a replayed builder is not a call made.
+      calls += result.calls.filter((c) => c.reused !== true).length;
       rows.push(result);
     }
   }
@@ -581,7 +631,7 @@ async function main(): Promise<void> {
     throw new Error("Zero rows produced — that is a hard error, not an empty pass.");
   }
   printSummary(rows);
-  console.log(`\nmodel calls spent this invocation: ${calls}`);
+  console.log(`\nmodel calls SPENT this invocation: ${calls} (replayed builder calls are not counted)`);
   console.log(`results: ${ctx.outDir}`);
 }
 

@@ -28,8 +28,22 @@ import { parseRichModel, type RichDecisionModel } from "../../src/rich-model.js"
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = join(HERE, "fixtures", "pricing-builder-wp0.json");
 
+/**
+ * Loaded WITHOUT the strict parser: this capture predates
+ * `decision.goal_measured_by` (added to the contract 2026-09-22) and is kept
+ * precisely because it exercises a qualitative factor, which the later capture
+ * does not. The projection reads no field that changed.
+ * `source-binding.test.ts` asserts the strict parser rejects it.
+ */
 function loadFixture(): RichDecisionModel {
-  return parseRichModel(readFileSync(FIXTURE, "utf-8"));
+  return JSON.parse(readFileSync(FIXTURE, "utf-8")) as RichDecisionModel;
+}
+
+/** A real gpt-4.1 capture under the CURRENT contract (2026-09-22, run-2). */
+function loadCurrentFixture(): RichDecisionModel {
+  return parseRichModel(
+    readFileSync(join(HERE, "fixtures", "pricing-builder-20260922.json"), "utf-8"),
+  );
 }
 function clone(m: RichDecisionModel): RichDecisionModel {
   return JSON.parse(JSON.stringify(m)) as RichDecisionModel;
@@ -281,6 +295,18 @@ describe("provenance — the fail-open shape, inverted", () => {
     expect(laundered).toEqual([]);
     // Positive control: the probe can see something — some node IS from_brief.
     expect(graph.nodes.some((n) => n.provenance === "from_brief")).toBe(true);
+  });
+});
+
+describe("the current-contract capture projects the same way", () => {
+  it("strict < is disclosed, placeholders are flagged, and provenance is always explicit", () => {
+    const { graph, report } = richToParsedGraph(loadCurrentFixture());
+    expect(graph.goal_constraints[0].strictness).toBe("strict");
+    expect(report.disclosures).toHaveLength(1);
+    expect(graph.edges.every((e) => e.magnitude_placeholder === true)).toBe(true);
+    expect(
+      graph.nodes.every((n) => n.provenance === "from_brief" || n.provenance === "ai_inferred"),
+    ).toBe(true);
   });
 });
 
