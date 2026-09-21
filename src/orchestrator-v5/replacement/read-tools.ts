@@ -69,6 +69,7 @@ import {
 import { orderFragilityPriorityRows } from '../../orchestrator/shared/fragile-edge-authority.js';
 
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
+import { resolveFactorRange, describeRange } from './factor-range.js';
 import type { AnalysisFreshness } from '../context/freshness.js';
 import type { GoalConstraintT } from '../../schemas/assist.js';
 import type { AgentTool, AgentToolOutcome } from './agent-loop.js';
@@ -142,6 +143,22 @@ interface CompactNodeView {
   readonly label?: unknown;
   readonly value?: unknown;
   readonly unit?: unknown;
+  /**
+   * ⭐ THE NATIVE MAGNITUDE — EMITTED BY THE COMPACTOR ALL ALONG, DROPPED HERE.
+   *
+   * `compactGraph` sets `value` from `observed_state.value` (the NORMALISED
+   * share) and `unit` from `observed_state.unit` (the NATIVE unit), and emits
+   * `raw_value` beside them. This view declared the first two and not the
+   * third, so the line this file rendered read
+   *
+   *     Enterprise AE Headcount Cost — value 0.76 £
+   *
+   * for a factor whose actual value is £380,000. A normalised share wearing a
+   * currency symbol is not an incomplete statement, it is a false one — and
+   * it was the model's only view of the quantity. Measured on the committed
+   * capture, 21 Sep 2026.
+   */
+  readonly raw_value?: unknown;
   readonly is_baseline?: unknown;
   readonly description?: unknown;
   readonly intervention_summary?: unknown;
@@ -165,8 +182,32 @@ function compactNodes(outcome: CompactGraphOutcome): readonly CompactNodeView[] 
  */
 const KINDS_WITH_OWN_VALUE = new Set(['factor', 'risk', 'outcome', 'goal']);
 
-/** One node line: what it is, what it is worth, and what it sets. */
-function describeNode(node: CompactNodeView): string {
+/**
+ * One node line: what it is, what it is worth, WHAT RANGE THAT IS OF, and
+ * what it sets.
+ *
+ * ⭐⭐ THE RANGE IS WHY THIS FUNCTION TAKES A SECOND ARGUMENT.
+ *
+ * `set_option_effect` asks for an effect as a share of a factor's range in
+ * [0, 1]. Until 21 Sep 2026 this view showed a factor's value and unit and NO
+ * RANGE, so a user saying "£59" left the model with no way to produce that
+ * share except to guess what the range was — and a guessed range yields a
+ * confidently wrong intervention carrying the user's own consent, which is
+ * strictly worse than refusing.
+ *
+ * ⚠ THE RANGE CANNOT COME THROUGH THE COMPACTOR. `compactGraph` keeps
+ * `value / raw_value / unit / cap` and drops `prior` and `scale_frame`, which
+ * is where a range actually lives. So the ingress node is read directly,
+ * beside the compaction rather than through it — the same shape, and for the
+ * same reason, as the goal target a few lines below, which `compactGraph`
+ * also discards.
+ *
+ * ⚠ THE RANGE IS RESOLVED BY THE SAME FUNCTION THE WRITE USES. Not a second
+ * reading of the same fields: `resolveFactorRange` is imported by this file
+ * and by `set-option-effect.ts`, so the range the model is SHOWN is the range
+ * the tool will ACCEPT, by construction rather than by maintenance.
+ */
+function describeNode(node: CompactNodeView, ingress?: unknown): string {
   const id = text(node.id);
   const label = text(node.label);
   const head = `${label === null ? '(unlabelled)' : label}${id === null ? '' : ` [${id}]`}`;
@@ -176,11 +217,46 @@ function describeNode(node: CompactNodeView): string {
   const kind = text(node.kind);
   if (kind !== null && KINDS_WITH_OWN_VALUE.has(kind)) {
     const value = finite(node.value);
-    if (value === null) {
+    const native = finite(node.raw_value);
+    const unit = text(node.unit);
+    if (value === null && native === null) {
       parts.push('no value set');
+    } else if (native !== null && value !== null && native !== value) {
+      // Both known and genuinely different: state the quantity a person would
+      // recognise FIRST, and the stored share after it, in the vocabulary
+      // `graph-compact.ts` already uses for an option's interventions — so
+      // the two sections of this same output cannot describe one magnitude
+      // two ways.
+      parts.push(`value ${num(native)}${unit === null ? '' : ` ${unit}`} (model value ${num(value)})`);
     } else {
-      const unit = text(node.unit);
-      parts.push(`value ${num(value)}${unit === null ? '' : ` ${unit}`}`);
+      const shown = native ?? value;
+      parts.push(`value ${num(shown as number)}${unit === null ? '' : ` ${unit}`}`);
+    }
+  }
+
+  // ── THE RANGE ──────────────────────────────────────────────────────────
+  //
+  // Factors only. A risk or an outcome carries a quantity but nothing sets an
+  // effect ON one through `set_option_effect`, so printing a range there
+  // would spend context on a question nobody asks.
+  if (kind === 'factor' && ingress !== undefined) {
+    const range = resolveFactorRange(ingress);
+    if (range.ok) {
+      parts.push(`range ${describeRange(range.bounds, text(node.unit))}`);
+    } else if (range.absence === 'unquantified_placeholder') {
+      // ⛔ NAMED, NOT SILENT. U(0,1) is a placeholder meaning "nobody has
+      // said". Printing it as a range would hand the model a fabrication to
+      // convert against; printing nothing would let it read the absence as
+      // "no range needed". Both were live failure modes.
+      parts.push(
+        'range NOT STATED — it carries a placeholder "could be anything from 0 to 1", '
+        + 'which nobody asserted. Ask for the real lowest and highest before setting any effect on it',
+      );
+    } else {
+      parts.push(
+        'no range set, so an effect on it cannot be expressed as a share yet — ask for the '
+        + 'lowest and highest values first',
+      );
     }
   }
 
@@ -202,9 +278,46 @@ function describeNode(node: CompactNodeView): string {
   return parts.length === 0 ? `  - ${head}` : `  - ${head} — ${parts.join('; ')}`;
 }
 
-function section(title: string, nodes: readonly CompactNodeView[]): string[] {
+function section(
+  title: string,
+  nodes: readonly CompactNodeView[],
+  ingressById?: ReadonlyMap<string, unknown>,
+): string[] {
   if (nodes.length === 0) return [];
-  return [`${title} (${nodes.length}):`, ...nodes.map(describeNode)];
+  return [
+    `${title} (${nodes.length}):`,
+    ...nodes.map((n) => {
+      // ⚠ BY IDENTITY. The ingress node is found by its id, never by position
+      // or by matching a value a sibling could carry too — a range read off
+      // the wrong factor is exactly the confidently-wrong number this whole
+      // change exists to stop (CLAUDE.md trap 19).
+      const id = text(n.id);
+      return describeNode(n, id === null ? undefined : ingressById?.get(id));
+    }),
+  ];
+}
+
+/**
+ * Index the INGRESS nodes by id, for the fields the compactor drops.
+ *
+ * Duplicate ids are not resolved to "the first one": a duplicate is not a
+ * referent, so both are dropped and the line falls back to saying no range is
+ * set. Silence is the correct answer when identity is ambiguous.
+ */
+function ingressNodesById(graph: GraphStateIngress): ReadonlyMap<string, unknown> {
+  const raw = (graph as { nodes?: unknown }).nodes;
+  if (!Array.isArray(raw)) return new Map();
+  const seen = new Map<string, unknown>();
+  const duplicated = new Set<string>();
+  for (const node of raw as readonly unknown[]) {
+    if (node === null || typeof node !== 'object') continue;
+    const id = (node as { id?: unknown }).id;
+    if (typeof id !== 'string' || id.length === 0) continue;
+    if (seen.has(id)) duplicated.add(id);
+    seen.set(id, node);
+  }
+  for (const id of duplicated) seen.delete(id);
+  return seen;
 }
 
 function ofKind(nodes: readonly CompactNodeView[], kind: string): readonly CompactNodeView[] {
@@ -329,9 +442,13 @@ export function createReadWorkspaceTool(deps: ReadWorkspaceDeps): AgentTool {
       }
     }
 
+    // The ingress index carries what the compactor drops — `prior` and
+    // `scale_frame`, i.e. wherever a factor's range actually lives.
+    const ingressById = ingressNodesById(graph);
+
     lines.push(...goalSection(graph, nodes));
     lines.push(...section('OPTIONS', options));
-    lines.push(...section('FACTORS', factors));
+    lines.push(...section('FACTORS', factors, ingressById));
     lines.push(...section('RISKS', risks));
     lines.push(...section('OUTCOMES', outcomes));
     lines.push(...section('OTHER NODES', others));

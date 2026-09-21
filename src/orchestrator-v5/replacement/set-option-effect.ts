@@ -63,6 +63,13 @@
  */
 
 import { linkedFactorsOf, buildOptionEffectRawOperation } from '../routing/option-effect-write.js';
+import {
+  resolveFactorRange,
+  shareOfRange,
+  roundShare,
+  describeRange,
+  type FactorBounds,
+} from './factor-range.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
 
 /** The minimum graph shape this tool reads. Deliberately narrow. */
@@ -79,6 +86,41 @@ export type SetOptionEffectRefusal =
       readonly linkable: readonly { readonly id: string; readonly label: string }[];
     }
   | { readonly reason: 'value_out_of_range'; readonly message: string }
+  | {
+      /**
+       * A native figure was given that does not sit inside the factor's own
+       * range — "£600,000" on a factor framed to £500,000.
+       *
+       * This is NOT the same refusal as a share outside [0, 1], and collapsing
+       * them would tell the user the wrong thing: the number they said is
+       * perfectly sensible, it is the FRAME that disagrees with it, and the
+       * next move is to check the frame rather than to restate the figure.
+       */
+      readonly reason: 'native_value_outside_factor_range';
+      readonly message: string;
+      /** What the range actually is, so the conversation can quote it back. */
+      readonly range: string;
+    }
+  | {
+      /**
+       * ⭐ THE GUESS, CAUGHT.
+       *
+       * Both a native figure and a share were supplied, and converting the
+       * native figure against the factor's REAL range does not produce that
+       * share. There is exactly one way to reach this state: the share was
+       * computed against a range the model did not have and therefore
+       * invented.
+       *
+       * It is refused rather than silently corrected, and the refusal carries
+       * the true share. A silent correction would teach nothing and would
+       * leave the model's own reasoning — which the user is reading in the
+       * surrounding sentence — still quoting the invented range.
+       */
+      readonly reason: 'share_disagrees_with_native_value';
+      readonly message: string;
+      /** The share the factor's own range actually yields. */
+      readonly derived_value: number;
+    }
   | {
       /**
        * The factor has no declared range, so "a share of the range" has no
@@ -104,6 +146,22 @@ export interface SetOptionEffectSuccess {
   readonly option_label: string;
   readonly factor_label: string;
   readonly value: number;
+  /**
+   * ⭐ WHAT THE USER MUST SEE BEFORE THEY AGREE.
+   *
+   * A share is not a quantity anybody said. When the user gave a figure in
+   * their own units — "£59" — the encoded 0.000118 is a derivation, and
+   * consent to a derivation the user cannot check is not consent. These carry
+   * the figure they actually said and the range it was measured against, so
+   * the proposal put to them can restate both.
+   *
+   * Absent when no native figure was given: then the share IS what the user
+   * said, and there is nothing to restate.
+   */
+  readonly native_value?: number;
+  readonly native_unit?: string;
+  /** The range the share was taken of, rendered for a person. */
+  readonly range?: string;
 }
 
 export type SetOptionEffectResult =
@@ -116,13 +174,51 @@ export interface SetOptionEffectInput {
   readonly factorId: string;
   /** Normalised effect in [0, 1]. The conversation is responsible for having
    *  established what the number means before it gets here — this tool does
-   *  not invent one, and refuses anything outside the interval. */
-  readonly value: number;
+   *  not invent one, and refuses anything outside the interval.
+   *
+   *  ⚠ OPTIONAL ONLY WHEN `nativeValue` IS GIVEN, and the contract is
+   *  UNCHANGED: this is still the encoded share, still refused outside
+   *  [0, 1], and a native magnitude must never be written here (see
+   *  `routing/native-quantity-operation.ts`, which states in terms why a
+   *  native figure in the encoded slot corrupts the causal model). */
+  readonly value?: number;
+  /**
+   * ⭐ THE FIGURE THE USER ACTUALLY SAID, IN THEIR OWN UNITS — £59, 3 months.
+   *
+   * THE DEFECT THIS CLOSES. The model's view of the workspace showed a
+   * factor's value and unit and NOT its range, so expressing £59 as a share
+   * was structurally impossible to do correctly: the only route to a number
+   * was to guess the range, and a guessed range produces a confidently wrong
+   * intervention WITH A RECEIPT — strictly worse than a refusal.
+   *
+   * The repair is not to ask the model to guess more carefully. It is to stop
+   * asking it to guess: it passes the user's own figure through, and this
+   * tool — which can read the factor — does the arithmetic. The range is now
+   * also shown in `read_workspace`, from the SAME function that converts
+   * here, so what the model sees and what this accepts cannot drift apart.
+   */
+  readonly nativeValue?: number;
 }
 
 function labelOf(node: { readonly label?: unknown } | undefined, fallback: string): string {
   const l = node?.label;
   return typeof l === 'string' && l.trim().length > 0 ? l : fallback;
+}
+
+/**
+ * The factor's NATIVE unit — the one a person speaks in (£, months).
+ *
+ * ⚠ `'scale'` is not a unit anybody says; it is the producer's word for
+ * "already normalised". It is dropped rather than printed, so a confirmation
+ * never asks a user to agree to "0.3 scale".
+ */
+function unitOf(node: unknown): string | null {
+  if (node === null || typeof node !== 'object') return null;
+  const os = (node as { observed_state?: { unit?: unknown } }).observed_state;
+  const u = os?.unit;
+  if (typeof u !== 'string') return null;
+  const trimmed = u.trim();
+  return trimmed.length === 0 || trimmed === 'scale' ? null : trimmed;
 }
 
 /**
@@ -133,9 +229,15 @@ function labelOf(node: { readonly label?: unknown } | undefined, fallback: strin
  * the graph, including the decision node, which was called "Question".
  */
 export function setOptionEffect(input: SetOptionEffectInput): SetOptionEffectResult {
-  const { graph, optionId, factorId, value } = input;
+  const { graph, optionId, factorId, value, nativeValue } = input;
 
-  if (!Number.isFinite(value) || value < 0 || value > 1) {
+  // ⚠ THE [0,1] CHECK KEEPS ITS PLACE — FIRST — ON EVERY PATH THAT EXISTED
+  // BEFORE. A native figure cannot be checked until the factor is resolved
+  // (its range lives on the node), so that arm alone defers; the share-only
+  // path is byte-unchanged, which is what keeps the existing refusal order,
+  // and the tests pinning it, honest rather than merely still passing.
+  const hasNative = typeof nativeValue === 'number';
+  if (!hasNative && (!Number.isFinite(value) || value! < 0 || value! > 1)) {
     return {
       ok: false,
       refusal: {
@@ -186,99 +288,30 @@ export function setOptionEffect(input: SetOptionEffectInput): SetOptionEffectRes
     };
   }
 
-  // ── WHAT A REAL FACTOR CARRIES, DERIVED FROM CAPTURED WIRE ──────────────
+  // ── WHAT RANGE IS THIS A SHARE OF? ─────────────────────────────────────
   //
-  // This read has now been wrong TWICE, and both times because the fixture
-  // encoded the author's model of the producer rather than the producer.
+  // ⭐ THE DERIVATION MOVED OUT, AND THE MOVE IS THE FIX.
   //
-  //   v1 read `range.{range_min, range_max}` — a combination declared in no
-  //   schema. It refused every real factor, disabling the tool whose absence
-  //   ended a live session.
+  // This chain used to live here, inline, and it was the ONLY place in the
+  // service that could answer "what is this factor's range?". `read-tools.ts`
+  // — the model's own view of the workspace — showed a factor's value and
+  // unit and no range at all, so the model was asked to express £59 as a
+  // share of something it could not see.
   //
-  //   v2 accepted `prior.{range_min, range_max}` or `range.{min, max}`,
-  //   derived from the SCHEMAS. Still wrong: measured against 13 factor nodes
-  //   from three real captures, `range` appears on ZERO and `prior` on ONE.
-  //   It would have accepted 1 of 13.
-  //
-  // `GraphStateIngress` is `.passthrough()`, so the schemas were never the
-  // whole story and reading them harder could not have found this. What real
-  // factors actually carry, all three captures agreeing:
-  //
-  //   · `scale_frame` — a NUMBER that is the range MAXIMUM, minimum implied 0.
-  //     Present with a real unit (£, months, weeks, contacts per week), and
-  //     `observed_state.raw_value / scale_frame === observed_state.value` held
-  //     in 6 of 6 cases. This is the producer's own normalisation basis.
-  //   · `unit: 'scale'` and NO scale_frame — the factor is already normalised
-  //     to [0, 1]; `observed_state.value` is the value. 5 of 13.
-  //   · `prior: {distribution, range_min, range_max}` — a genuinely stated
-  //     range. 1 of 13, carrying 0 to 0.13.
-  //
-  // ⛔ AN IGNORANCE PRIOR IS NOT A RANGE. `buildUnquantifiedPrior()` writes
-  // `{uniform, 0, 1, prior_is_unquantified: true}` — U(0,1) meaning "nobody
-  // has said". Accepting it would let an effect be set against a range no
-  // human stated, which is the exact fabrication this guard exists to
-  // prevent, arriving through the guard. Refused by name.
-  //
-  // `range.{min, max}` is kept because the contract declares it, even though
-  // no capture shows one: absence from three captures is not proof it never
-  // appears, and a declared field costs one branch to honour.
-  const f = factor as {
-    prior?: { range_min?: unknown; range_max?: unknown; prior_is_unquantified?: unknown };
-    range?: { min?: unknown; max?: unknown };
-    scale_frame?: unknown;
-    observed_state?: { unit?: unknown; value?: unknown; cap?: unknown };
-  };
+  // Writing a second copy into `read-tools.ts` would have made the range
+  // SHOWN and the range ACCEPTED two independently maintained answers to one
+  // question, free to drift, with every symptom of the drift looking exactly
+  // like the guessing this exists to stop. One function, imported by both:
+  // `factor-range.ts` carries the full captured-wire census and the reasoning
+  // for each arm.
+  const range = resolveFactorRange(factor);
 
-  const unquantified = f.prior?.prior_is_unquantified === true;
-  const bounds: { lo: number; hi: number } | null = unquantified
-    ? null
-    : typeof f.prior?.range_min === 'number' && typeof f.prior?.range_max === 'number'
-      ? { lo: f.prior.range_min, hi: f.prior.range_max }
-      : typeof f.scale_frame === 'number' && Number.isFinite(f.scale_frame) && f.scale_frame > 0
-        ? { lo: 0, hi: f.scale_frame }
-        // ⭐ `observed_state.cap` — ADDED, AND THE OMISSION HAD A MEASURED COST.
-        //
-        // The census above lists what three real captures carry, and `cap` was
-        // not among them — so it was never added. Simulated over 555 real
-        // factors by the Core lane: **242 refused `factor_has_no_range`, and 94
-        // of those carry a positive `observed_state.cap`.** Nearly a fifth of
-        // every refusal this tool makes was a capability loss, not a guard.
-        //
-        // ⛔ THIS IS NOT THE cap/frame CONFLATION, AND THE DISTINCTION IS RULED.
-        // A cap divides AND CLAMPS and exempts the factor from the analysis
-        // baseline gate; a frame divides with neither, and is derived from the
-        // baseline plus every sibling magnitude — a property of the magnitude
-        // SET, not of the node. Three modules rule them different questions
-        // (`schemas/graph.ts:420-435`, `projector.ts:1307`,
-        // `set-factor-value.ts:538-543`, the last citing trap 21 by name).
-        //
-        // What makes reading both safe HERE is that `bounds` is a PRESENCE
-        // check and nothing else: its only consumer is the null test below, and
-        // it never divides, clamps or converts. The question this arm answers is
-        // "is there ANY stated basis against which a share is meaningful?" —
-        // and a cap is one. Order therefore has no behavioural consequence
-        // today; it is placed after `scale_frame` so that where the producer's
-        // own basis exists it remains the one named.
-        //
-        // ⚠ `> 0` is load-bearing: `cap === 0` is the MODAL cap value in the
-        // estate (247 occurrences) and is not a usable basis. A zero cap must
-        // keep failing the presence test, not yield `{lo: 0, hi: 0}`.
-        : typeof f.observed_state?.cap === 'number'
-          && Number.isFinite(f.observed_state.cap)
-          && f.observed_state.cap > 0
-          ? { lo: 0, hi: f.observed_state.cap }
-        : typeof f.range?.min === 'number' && typeof f.range?.max === 'number'
-          ? { lo: f.range.min, hi: f.range.max }
-          : f.observed_state?.unit === 'scale' && typeof f.observed_state?.value === 'number'
-            ? { lo: 0, hi: 1 }
-            : null;
-
-  if (bounds === null) {
+  if (!range.ok) {
     return {
       ok: false,
       refusal: {
         reason: 'factor_has_no_range',
-        message: unquantified
+        message: range.absence === 'unquantified_placeholder'
           ? `${labelOf(factor, factorId)} has a placeholder range that nobody has stated — it is ` +
             `recorded as "could be anything from 0 to 1", which is not a range an effect can be ` +
             `measured against. Ask the user what the lowest and highest values really are; do not ` +
@@ -291,17 +324,139 @@ export function setOptionEffect(input: SetOptionEffectInput): SetOptionEffectRes
     };
   }
 
+  const bounds: FactorBounds = range.bounds;
+  const nativeUnit = unitOf(factor);
+  const renderedRange = describeRange(bounds, nativeUnit);
+
+  // ── THE CONVERSION, DONE HERE RATHER THAN GUESSED UPSTREAM ─────────────
+  //
+  // When the user gave a figure in their own units, the share is DERIVED from
+  // the factor's own range rather than accepted from the model. That is the
+  // whole repair: the layer that can read the range is the layer that does
+  // the arithmetic, so there is no step at which a range has to be imagined.
+  let effective: number;
+  if (hasNative) {
+    const derived = shareOfRange(nativeValue as number, bounds);
+    if (derived === null) {
+      return {
+        ok: false,
+        refusal: {
+          reason: 'factor_has_no_range',
+          message: `${labelOf(factor, factorId)} has a range of zero width (${renderedRange}), so a ` +
+            `share of it has no meaning. Ask what the lowest and highest values really are.`,
+        },
+      };
+    }
+    if (derived < 0 || derived > 1) {
+      return {
+        ok: false,
+        refusal: {
+          reason: 'native_value_outside_factor_range',
+          message:
+            `${String(nativeValue)}${nativeUnit === null ? '' : ` ${nativeUnit}`} is outside the range ` +
+            `recorded for ${labelOf(factor, factorId)}, which runs ${renderedRange}. Do not rescale it ` +
+            `to fit — either the figure or the range is wrong, and only the user can say which. Put ` +
+            `the range to them and ask.`,
+          range: renderedRange,
+        },
+      };
+    }
+
+    const rounded = roundShare(derived);
+
+    // ⭐ BOTH SUPPLIED AND THEY DISAGREE — the guess, caught in the act.
+    //
+    // ⚠ THE TOLERANCE IS TIGHT ON PURPOSE. The only legitimate gap between a
+    // model's share and this one is float dirt in the same division, which
+    // lands many orders below 1e-9. A loose tolerance here would be a guard
+    // too slack to bite: a range guessed as 0–400,000 instead of 0–500,000
+    // yields 0.95 against 0.76, and anything that admits that admits
+    // everything this check exists for.
+    if (typeof value === 'number' && Number.isFinite(value) && Math.abs(value - rounded) > 1e-9) {
+      return {
+        ok: false,
+        refusal: {
+          reason: 'share_disagrees_with_native_value',
+          message:
+            `${String(nativeValue)}${nativeUnit === null ? '' : ` ${nativeUnit}`} is ${String(rounded)} ` +
+            `of ${labelOf(factor, factorId)}'s range (${renderedRange}), not ${String(value)}. The share ` +
+            `you sent was measured against a different range from the one on the model. Use the range ` +
+            `shown in the workspace, and do not offer the user a number derived from any other.`,
+          derived_value: rounded,
+        },
+      };
+    }
+    effective = rounded;
+  } else {
+    effective = value as number;
+  }
+
   const optionLabel = labelOf(option, optionId);
   const factorLabel = labelOf(factor, factorId);
 
+  // ⛔ THE ENCODED SLOT STILL RECEIVES THE SHARE, AND ONLY THE SHARE.
+  //
+  // `buildOptionEffectRawOperation` writes `value: { value: n }` at
+  // `/nodes/<option>/data/interventions/<factor>` — the ENCODED magnitude the
+  // engine computes on. A native figure written there moves a [0,1]
+  // intervention to 380,000 and corrupts the causal model;
+  // `routing/native-quantity-operation.ts` exists because of that exact harm
+  // and says so in terms. The native figure rides in the SUMMARY, which is
+  // what the user reads before agreeing — it never enters the operation.
+  const operations = [
+    buildOptionEffectRawOperation({ optionId, optionLabel, factorId, factorLabel, value: effective }),
+  ];
+
+  // ── THE CONFIRMATION SENTENCE ──────────────────────────────────────────
+  //
+  // ⭐ CONSENT TO A DERIVATION YOU CANNOT CHECK IS NOT CONSENT.
+  //
+  // Before this, a user who said "£59" was asked to agree to "Set what X does
+  // to Y to 0.000118" — a number they never said, derived from a range they
+  // were never shown, by arithmetic nobody stated. If the range was wrong the
+  // proposal was still perfectly well-formed, and agreeing to it produced a
+  // wrong model carrying a receipt of the user's own consent. That is the
+  // precise harm the consent layer exists to prevent, and it was reachable
+  // THROUGH the consent layer.
+  //
+  // So where a figure was converted, the summary restates all three parts —
+  // what they said, what it was measured against, and what is being stored —
+  // and the user can refuse on any of them.
+  // ⛔⛔ THE RANGE IS DELIBERATELY *NOT* IN THIS STRING, AND LEAVING IT IN
+  // WOULD HAVE OPENED A CONSENT HOLE INSIDE THE CONFIRMATION BUILT TO CLOSE
+  // ONE. Caught before it shipped; recorded so nobody adds it back.
+  //
+  // `namesANumberTheOfferDoesNot` (`run-replacement-turn.ts:279`) accepts a
+  // user's agreement only when every digit run in THEIR message also appears
+  // in this summary — the offer's own rendered string. Its purpose is that
+  // "yes, make it 60" must NOT accept an offer of 59, because a held proposal
+  // replays from its STORED patch and never re-reads the message: accepting
+  // would save MY number and discard THEIRS, with a receipt.
+  //
+  // The first draft of this summary read "…on Cost's range of 0 to 500000 £
+  // is 0.76". That puts `500000` into the offer's digit set — so "yes, make
+  // it 500000" would have passed the guard and committed 0.76, i.e. £380,000,
+  // against a user who had just asked for half a million. The range bounds
+  // are numbers the offer MENTIONS but is not ABOUT.
+  //
+  // So this string names exactly the two numbers this offer IS about: what
+  // the user said, and what will be stored. The range travels in the tool's
+  // model-facing result instead, and the model states it in its own sentence
+  // — which the guard does not read, because the guard's question is about
+  // what the USER said.
+  const summary = hasNative
+    ? `Set what ${optionLabel} does to ${factorLabel} to ` +
+      `${String(nativeValue)}${nativeUnit === null ? '' : ` ${nativeUnit}`}, stored as ${String(effective)}`
+    : `Set what ${optionLabel} does to ${factorLabel} to ${String(effective)}`;
+
   return {
     ok: true,
-    operations: [
-      buildOptionEffectRawOperation({ optionId, optionLabel, factorId, factorLabel, value }),
-    ],
-    summary: `Set what ${optionLabel} does to ${factorLabel} to ${value}`,
+    operations,
+    summary,
     option_label: optionLabel,
     factor_label: factorLabel,
-    value,
+    value: effective,
+    ...(hasNative ? { native_value: nativeValue as number, range: renderedRange } : {}),
+    ...(hasNative && nativeUnit !== null ? { native_unit: nativeUnit } : {}),
   };
 }

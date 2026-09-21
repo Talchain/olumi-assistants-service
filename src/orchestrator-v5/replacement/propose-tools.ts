@@ -52,6 +52,11 @@ export function createSetOptionEffectTool(deps: ProposeToolDeps): AgentTool {
         'Use this when the user has told you what an option does — not to fill in a number they have ' +
         'not given you. If you do not know the value, ask; do not estimate one and offer it as theirs. ' +
         'This proposes only: nothing is saved until they agree. ' +
+        '⭐ IF THE USER GAVE A FIGURE IN THEIR OWN UNITS — "£59", "three months" — PUT IT IN ' +
+        'native_value AND LEAVE value OUT. read_workspace shows you each factor\'s range, and this ' +
+        'tool converts against that same range, so you never have to work the share out yourself. ' +
+        'Never convert a figure by hand: if the range you used is wrong the number still looks ' +
+        'perfectly reasonable, and the user agrees to a receipt for a model that is quietly wrong. ' +
         'If they are changing a number you already offered — "yes, but make it 0.6" — set ' +
         'amends_proposal_id to that offer instead of accepting it. Accepting saves the number YOU ' +
         'offered, not the one they just said.',
@@ -63,7 +68,18 @@ export function createSetOptionEffectTool(deps: ProposeToolDeps): AgentTool {
           factor_id: { type: 'string', description: 'The factor it affects.' },
           value: {
             type: 'number',
-            description: "Between 0 and 1 — the share of the factor's range this option moves it by.",
+            description:
+              "Between 0 and 1 — the share of the factor's range this option moves it by. Give this "
+              + 'ONLY when the user spoke in shares. If they gave a figure in real units, use '
+              + 'native_value instead and leave this out.',
+          },
+          native_value: {
+            type: 'number',
+            description:
+              'The figure the user actually said, in the factor\'s own units — 59 for "£59", 3 for '
+              + '"three months". The share is worked out from the range on the model, so their number '
+              + 'reaches the graph without you having to convert it. What they said and what gets '
+              + 'stored are both put back to them before anything is saved.',
           },
           amends_proposal_id: {
             type: 'string',
@@ -72,7 +88,11 @@ export function createSetOptionEffectTool(deps: ProposeToolDeps): AgentTool {
               + 'waiting offer. It is replaced, and the new number goes back to them to agree.',
           },
         },
-        required: ['option_id', 'factor_id', 'value'],
+        // ⚠ `value` IS NO LONGER REQUIRED, AND THE CONTRACT IS UNCHANGED.
+        // It is still the encoded share and still refused outside [0, 1]; it
+        // is simply not the only way to say what the user meant. A call with
+        // neither number is refused below by name rather than defaulting.
+        required: ['option_id', 'factor_id'],
       },
     },
     execute: (raw): AgentToolOutcome => {
@@ -81,9 +101,31 @@ export function createSetOptionEffectTool(deps: ProposeToolDeps): AgentTool {
 
       const optionId = typeof raw.option_id === 'string' ? raw.option_id : '';
       const factorId = typeof raw.factor_id === 'string' ? raw.factor_id : '';
-      const value = typeof raw.value === 'number' ? raw.value : Number.NaN;
+      const hasNative = typeof raw.native_value === 'number';
+      const hasShare = typeof raw.value === 'number';
 
-      const result = setOptionEffect({ graph, optionId, factorId, value });
+      // Neither number given: refused by name. `value` used to be required by
+      // the schema, so its absence arrived here as NaN and fell into the
+      // out-of-range refusal — which would now say "I was given NaN" about a
+      // call whose real problem is that it said nothing about the size of the
+      // effect at all.
+      if (!hasNative && !hasShare) {
+        return {
+          type: 'refused',
+          content:
+            'That call says which option and which factor but not how much. Give native_value if the '
+            + 'user spoke in real units, or value if they spoke in shares of the range. Do not pick a '
+            + 'number yourself — ask them.',
+        };
+      }
+
+      const result = setOptionEffect({
+        graph,
+        optionId,
+        factorId,
+        ...(hasShare ? { value: raw.value as number } : {}),
+        ...(hasNative ? { nativeValue: raw.native_value as number } : {}),
+      });
       if (!result.ok) {
         // The refusal message already names the next move; the reason code is
         // appended for the model, not for the user, and never surfaces as-is.
@@ -107,11 +149,27 @@ export function createSetOptionEffectTool(deps: ProposeToolDeps): AgentTool {
         summary: result.summary,
         operations: result.operations,
         ...(amends !== undefined ? { amends } : {}),
-        content: amends !== undefined
+        // ⭐ THE RANGE REACHES THE USER THROUGH THE MODEL'S OWN SENTENCE, NOT
+        // THROUGH THE OFFER STRING. It is not in `result.summary` on purpose
+        // — see the block in `set-option-effect.ts` explaining how putting it
+        // there would let a user naming a RANGE BOUND accept an offer about a
+        // different number. Here it is instruction to the model, and the
+        // model says it in prose, so the user can check the conversion while
+        // the acceptance guard's digit set stays exactly the offer's own two
+        // numbers.
+        content: (result.native_value !== undefined
+          ? `You gave their figure in their own units and it was converted against the range on the `
+            + `model: ${result.factor_label} runs ${result.range}, so `
+            + `${String(result.native_value)}${result.native_unit === undefined ? '' : ` ${result.native_unit}`} `
+            + `is ${String(result.value)} of it. TELL THEM BOTH — the figure they gave and the range it `
+            + `was measured against — before they agree. If that range is not what they meant, they must `
+            + `be able to say so now, not discover it later in a result. `
+          : '')
+          + (amends !== undefined
           ? `This replaces the earlier offer. Put the NEW number to them in their own terms and wait `
             + `for them to agree — it is not saved yet, and the earlier one can no longer be accepted.`
           : `This affects the comparison between ${result.option_label} and the other options through `
-            + `${result.factor_label}. Say what it means for their decision, not just that you have offered it.`,
+            + `${result.factor_label}. Say what it means for their decision, not just that you have offered it.`),
       };
     },
   };
