@@ -629,6 +629,25 @@ export interface GraphPatchBlockData {
       extraction_metadata?: Record<string, unknown>;
       raw_interventions?: Record<string, unknown>;
       status_reason?: string;
+      /**
+       * What this option still needs, in the user's own terms — including the
+       * option→risk hypothesis named by label (#1670).
+       *
+       * ⭐ `status_reason` ALREADY RODE HERE AND IS NOT A SUBSTITUTE. It carries
+       * "A proposed effect still needs a supported mapping", which names no
+       * factor, no risk and no option, so a blocked turn reached the user with
+       * nothing to act on. Declared in `AnalysisReadyPayloadSchema`'s option
+       * shape since #1670 but ABSENT FROM THIS TYPE — the divergence
+       * `canonical-readiness-record-carry.test.ts:353` already records as
+       * "in `.shape`, absent from TYPE".
+       */
+      user_questions?: string[];
+      /**
+       * The ids {@link user_questions} refers to. The question names the risk in
+       * prose; this is the only machine-readable handle on WHICH edge it means,
+       * so carrying the sentence without it leaves a consumer unable to act.
+       */
+      unresolved_targets?: string[];
     }>;
     goal_node_id: string;
     status: string;

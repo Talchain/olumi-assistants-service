@@ -1047,6 +1047,40 @@ export function extractAnalysisReady(
     if (typeof o.status_reason === 'string') {
       built.status_reason = o.status_reason;
     }
+    // ⭐⭐ THE ASK THE PRODUCT ALREADY WROTE, CARRIED THE LAST HOP.
+    //
+    // This builder is a HAND-MAINTAINED field list, so a field the canonical
+    // record produces is dropped unless it is named here. #1670 taught
+    // `buildAnalysisReadyPayload` to name what a blocked option needs —
+    // including the option→risk hypothesis, by label — and its suite passes,
+    // because `mapping-need-survives-to-the-wire.test.ts` asserts on that
+    // builder's RETURN VALUE, one stage above this projection. So the questions
+    // existed on every refusing turn and reached nobody.
+    //
+    // Measured on the user's own draw (deployed `5104b24`, capture
+    // 2026-09-21T13:57:40Z): the canonical record held
+    //   "How does Two Developers change Coordination & Management Overhead? The
+    //    proposed relationship is retained, but its mechanism and value still
+    //    need clarification."
+    // while the wire payload shipped `status: needs_user_mapping` with
+    // `user_questions: null` on BOTH blocked options, beside the admission's own
+    // "Olumi filled in the gaps here itself… nothing is required of you".
+    // `analysis-ready.ts:1467` calls that combination invalid in so many words:
+    // "Status is 'needs_user_mapping' but no user_questions provided".
+    //
+    // ⛔ THIS DOES NOT ADMIT THE RUN, AND MUST NOT. Whether an option→risk gap
+    // may proceed is a SEPARATE question, ruled on three times with
+    // discriminating controls in `tests/unit/causal-repair-preservation.test.ts`
+    // and supported by PLoT stripping option-incident edges before the engine.
+    // That refusal stands. This only stops it arriving mute.
+    if (Array.isArray(o.user_questions) && o.user_questions.length > 0) {
+      const questions = o.user_questions.filter((q): q is string => typeof q === 'string');
+      if (questions.length > 0) built.user_questions = questions;
+    }
+    if (Array.isArray(o.unresolved_targets) && o.unresolved_targets.length > 0) {
+      const targets = o.unresolved_targets.filter((t): t is string => typeof t === 'string');
+      if (targets.length > 0) built.unresolved_targets = targets;
+    }
 
     options.push(built);
   }

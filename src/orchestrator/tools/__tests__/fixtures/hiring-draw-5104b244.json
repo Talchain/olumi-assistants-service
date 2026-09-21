@@ -1,0 +1,1276 @@
+{
+ "_README": "Captured from the user's own staging draw, request-level bundle before-5104b244-hiring, captured_at 2026-09-21T13:57:40Z, against deployed build_sha 5104b24 (#1670's merge commit). Brief: 'Should I hire a Tech lead or two developers to increase productivity?'. NOT self-authored: every node, edge and intervention is as the deployed drafter produced it. The wire payload for this exact draw carried status needs_user_mapping on two options with user_questions null and blockers null.",
+ "build_sha": "5104b24",
+ "captured_at": "2026-09-21T13:57:40Z",
+ "graph": {
+  "edge_count": 28,
+  "edges": [
+   {
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "from": "00f89f37",
+    "origin": "ai",
+    "provenance": {
+     "reasoning": "Model-inferred causal link (records projector)",
+     "source": "cee_hypothesis"
+    },
+    "provenance_display": "ai_inferred",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "to": "6de60859"
+   },
+   {
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "from": "00f89f37",
+    "origin": "ai",
+    "provenance": {
+     "reasoning": "Model-inferred causal link (records projector)",
+     "source": "cee_hypothesis"
+    },
+    "provenance_display": "ai_inferred",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "to": "e001604a"
+   },
+   {
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "from": "00f89f37",
+    "origin": "ai",
+    "provenance": {
+     "reasoning": "Model-inferred causal link (records projector)",
+     "source": "cee_hypothesis"
+    },
+    "provenance_display": "ai_inferred",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "to": "ee1012d0"
+   },
+   {
+    "effect_direction": "positive",
+    "exists_probability": 0.8,
+    "from": "117944d2",
+    "origin": "ai",
+    "provenance": {
+     "reasoning": "Model-inferred causal link (records projector)",
+     "source": "cee_hypothesis"
+    },
+    "provenance_display": "ai_inferred",
+    "strength": {
+     "mean": 0.55,
+     "std": 0.132
+    },
+    "to": "0dde265b",
+    "validation": {
+     "bias_correction": {
+      "exists_probability_offset": 0,
+      "strength_mean_offset": 0.125,
+      "strength_std_offset": 0
+     },
+     "contested_reasons": [],
+     "distance_to_goal": 0,
+     "evoi_impact": null,
+     "evoi_rank": null,
+     "max_divergence": 0.6666666666666666,
+     "pass1": {
+      "exists_probability": 0,
+      "strength_mean": 0.55,
+      "strength_std": 0
+     },
+     "pass1_missing": false,
+     "pass2": {
+      "basis": "structural_inference",
+      "exists_probability": 0.9,
+      "lint_corrected": true,
+      "needs_user_input": true,
+      "reasoning": "Increasing delivery speed directly boosts productivity by enabling more work completion.",
+      "strength_mean": 0.25,
+      "strength_std": 0.1
+     },
+     "pass2_adjusted": {
+      "exists_probability": 0.9,
+      "strength_mean": 0.375,
+      "strength_std": 0.1
+     },
+     "pass2_missing": false,
+     "resolved_by": "default",
+     "resolved_value": null,
+     "sign_unstable": false,
+     "status": "agreed",
+     "user_action": "pending",
+     "validation_lint_log": [
+      {
+       "after": 0.25,
+       "before": 0.4,
+       "code": "LINT_BUDGET_RESCALE",
+       "edge_key": "117944d2->0dde265b"
+      }
+     ],
+     "was_shown": false
+    }
+   },
+   {
+    "effect_direction": "negative",
+    "exists_probability": 0.8,
+    "from": "1426549f",
+    "origin": "ai",
+    "provenance": {
+     "reasoning": "Model-inferred causal link (records projector)",
+     "source": "cee_hypothesis"
+    },
+    "provenance_display": "ai_inferred",
+    "strength": {
+     "mean": -0.35,
+     "std": 0.08399999999999998
+    },
+    "to": "0dde265b",
+    "validation": {
+     "bias_correction": {
+      "exists_probability_offset": 0,
+      "strength_mean_offset": 0.125,
+      "strength_std_offset": 0
+     },
+     "contested_reasons": [
+      "raw_magnitude"
+     ],
+     "distance_to_goal": 0,
+     "evoi_impact": null,
+     "evoi_rank": null,
+     "max_divergence": 0.6666666666666666,
+     "pass1": {
+      "exists_probability": 0,
+      "strength_mean": -0.35,
+      "strength_std": 0
+     },
+     "pass1_missing": false,
+     "pass2": {
+      "basis": "structural_inference",
+      "exists_probability": 0.9,
+      "lint_corrected": true,
+      "needs_user_input": true,
+      "reasoning": "Higher skill gaps and attrition reduce productive output by causing disruptions and knowledge loss.",
+      "strength_mean": -0.1875,
+      "strength_std": 0.1
+     },
+     "pass2_adjusted": {
+      "exists_probability": 0.9,
+      "strength_mean": -0.0625,
+      "strength_std": 0.1
+     },
+     "pass2_missing": false,
+     "resolved_by": "default",
+     "resolved_value": null,
+     "sign_unstable": false,
+     "status": "contested",
+     "user_action": "pending",
+     "validation_lint_log": [
+      {
+       "after": -0.1875,
+       "before": -0.3,
+       "code": "LINT_BUDGET_RESCALE",
+       "edge_key": "1426549f->0dde265b"
+      }
+     ],
+     "was_shown": false
+    }
+   },
+   {
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "from": "4242a3ba",
+    "origin": "ai",
+    "provenance": {
+     "reasoning": "Model-inferred causal link (records projector)",
+     "source": "cee_hypothesis"
+    },
+    "provenance_display": "ai_inferred",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "to": "6de60859"
+   },
+   {
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "from": "4242a3ba",
+    "origin": "ai",
+    "provenance": {
+     "reasoning": "Model-inferred causal link (records projector)",
+     "source": "cee_hypothesis"
+    },
+    "provenance_display": "ai_inferred",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "to": "e001604a"
+   },
+   {
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "from": "4242a3ba",
+    "origin": "ai",
+    "provenance": {
+     "reasoning": "Model-inferred causal link (records projector)",
+     "source": "cee_hypothesis"
+    },
+    "provenance_display": "ai_inferred",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "to": "ee1012d0"
+   },
+   {
+    "effect_direction": "positive",
+    "exists_probability": 0.8,
+    "from": "6aa26be0",
+    "origin": "ai",
+    "provenance": {
+     "reasoning": "Model-inferred causal link (records projector)",
+     "source": "cee_hypothesis"
+    },
+    "provenance_display": "ai_inferred",
+    "strength": {
+     "mean": 0.8,
+     "std": 0.19199999999999995
+    },
+    "to": "0dde265b",
+    "validation": {
+     "bias_correction": {
+      "exists_probability_offset": 0,
+      "strength_mean_offset": 0.125,
+      "strength_std_offset": 0
+     },
+     "contested_reasons": [
+      "strength_band_change"
+     ],
+     "distance_to_goal": 0,
+     "evoi_impact": null,
+     "evoi_rank": null,
+     "max_divergence": 1,
+     "pass1": {
+      "exists_probability": 0,
+      "strength_mean": 0.8,
+      "strength_std": 0
+     },
+     "pass1_missing": false,
+     "pass2": {
+      "basis": "structural_inference",
+      "exists_probability": 0.95,
+      "lint_corrected": true,
+      "needs_user_input": false,
+      "reasoning": "Team productivity output encapsulates effective work done and directly lifts overall productivity.",
+      "strength_mean": 0.375,
+      "strength_std": 0.1
+     },
+     "pass2_adjusted": {
+      "exists_probability": 0.95,
+      "strength_mean": 0.5,
+      "strength_std": 0.1
+     },
+     "pass2_missing": false,
+     "resolved_by": "default",
+     "resolved_value": null,
+     "sign_unstable": false,
+     "status": "contested",
+     "user_action": "pending",
+     "validation_lint_log": [
+      {
+       "after": 0.375,
+       "before": 0.6,
+       "code": "LINT_BUDGET_RESCALE",
+       "edge_key": "6aa26be0->0dde265b"
+      }
+     ],
+     "was_shown": false
+    }
+   },
+   {
+    "effect_direction": "negative",
+    "exists_probability": 0.8,
+    "from": "6d84ee1b",
+    "origin": "ai",
+    "provenance": {
+     "reasoning": "Model-inferred causal link (records projector)",
+     "source": "cee_hypothesis"
+    },
+    "provenance_display": "ai_inferred",
+    "strength": {
+     "mean": -0.45,
+     "std": 0.10799999999999998
+    },
+    "to": "0dde265b",
+    "validation": {
+     "bias_correction": {
+      "exists_probability_offset": 0,
+      "strength_mean_offset": 0.125,
+      "strength_std_offset": 0
+     },
+     "contested_reasons": [
+      "raw_magnitude"
+     ],
+     "distance_to_goal": 0,
+     "evoi_impact": null,
+     "evoi_rank": null,
+     "max_divergence": 0.775,
+     "pass1": {
+      "exists_probability": 0,
+      "strength_mean": -0.45,
+      "strength_std": 0
+     },
+     "pass1_missing": false,
+     "pass2": {
+      "basis": "structural_inference",
+      "exists_probability": 0.9,
+      "lint_corrected": true,
+      "needs_user_input": true,
+      "reasoning": "Increased coordination overhead diverts effort away from productive tasks.",
+      "strength_mean": -0.1875,
+      "strength_std": 0.1
+     },
+     "pass2_adjusted": {
+      "exists_probability": 0.9,
+      "strength_mean": -0.0625,
+      "strength_std": 0.1
+     },
+     "pass2_missing": false,
+     "resolved_by": "default",
+     "resolved_value": null,
+     "sign_unstable": false,
+     "status": "contested",
+     "user_action": "pending",
+     "validation_lint_log": [
+      {
+       "after": -0.1875,
+       "before": -0.3,
+       "code": "LINT_BUDGET_RESCALE",
+       "edge_key": "6d84ee1b->0dde265b"
+      }
+     ],
+     "was_shown": false
+    }
+   },
+   {
+    "effect_direction": "positive",
+    "exists_probability": 0.8,
+    "from": "6de60859",
+    "origin": "ai",
+    "provenance": {
+     "reasoning": "Model-inferred causal link (records projector)",
+     "source": "cee_hypothesis"
+    },
+    "provenance_display": "ai_inferred",
+    "strength": {
+     "mean": 0.35,
+     "std": 0.08399999999999998
+    },
+    "to": "117944d2",
+    "validation": {
+     "bias_correction": {
+      "exists_probability_offset": 0,
+      "strength_mean_offset": 0.125,
+      "strength_std_offset": 0
+     },
+     "contested_reasons": [
+      "strength_band_change"
+     ],
+     "distance_to_goal": 1,
+     "evoi_impact": null,
+     "evoi_rank": null,
+     "max_divergence": 0.75,
+     "pass1": {
+      "exists_probability": 0,
+      "strength_mean": 0.35,
+      "strength_std": 0
+     },
+     "pass1_missing": false,
+     "pass2": {
+      "basis": "domain_prior",
+      "exists_probability": 0.9,
+      "lint_corrected": false,
+      "needs_user_input": true,
+      "reasoning": "More raw development capacity increases delivery speed by providing additional coding resources.",
+      "strength_mean": 0.6,
+      "strength_std": 0.15
+     },
+     "pass2_adjusted": {
+      "exists_probability": 0.9,
+      "strength_mean": 0.725,
+      "strength_std": 0.15
+     },
+     "pass2_missing": false,
+     "resolved_by": "default",
+     "resolved_value": null,
+     "sign_unstable": false,
+     "status": "contested",
+     "user_action": "pending",
+     "validation_lint_log": [],
+     "was_shown": false
+    }
+   },
+   {
+    "effect_direction": "positive",
+    "exists_probability": 0.8,
+    "from": "6de60859",
+    "origin": "ai",
+    "provenance": {
+     "reasoning": "Model-inferred causal link (records projector)",
+     "source": "cee_hypothesis"
+    },
+    "provenance_display": "ai_inferred",
+    "strength": {
+     "mean": 0.4354166666666666,
+     "std": 0.10449999999999998
+    },
+    "to": "6aa26be0",
+    "validation": {
+     "bias_correction": {
+      "exists_probability_offset": 0,
+      "strength_mean_offset": 0.125,
+      "strength_std_offset": 0
+     },
+     "contested_reasons": [
+      "strength_band_change"
+     ],
+     "distance_to_goal": 1,
+     "evoi_impact": null,
+     "evoi_rank": null,
+     "max_divergence": 0.7791666666666667,
+     "pass1": {
+      "exists_probability": 0,
+      "strength_mean": 0.4354166666666666,
+      "strength_std": 0
+     },
+     "pass1_missing": false,
+     "pass2": {
+      "basis": "domain_prior",
+      "exists_probability": 0.9,
+      "lint_corrected": false,
+      "needs_user_input": true,
+      "reasoning": "Increasing raw development capacity adds to the team's overall output capacity.",
+      "strength_mean": 0.7,
+      "strength_std": 0.15
+     },
+     "pass2_adjusted": {
+      "exists_probability": 0.9,
+      "strength_mean": 0.825,
+      "strength_std": 0.15
+     },
+     "pass2_missing": false,
+     "resolved_by": "default",
+     "resolved_value": null,
+     "sign_unstable": false,
+     "status": "contested",
+     "user_action": "pending",
+     "validation_lint_log": [],
+     "was_shown": false
+    }
+   },
+   {
+    "effect_direction": "positive",
+    "exists_probability": 0.8,
+    "from": "be215545",
+    "origin": "ai",
+    "provenance": {
+     "reasoning": "Model-inferred causal link (records projector)",
+     "source": "cee_hypothesis"
+    },
+    "provenance_display": "ai_inferred",
+    "strength": {
+     "mean": 0.6,
+     "std": 0.144
+    },
+    "to": "6d84ee1b",
+    "validation": {
+     "bias_correction": {
+      "exists_probability_offset": 0,
+      "strength_mean_offset": 0.125,
+      "strength_std_offset": 0
+     },
+     "contested_reasons": [],
+     "distance_to_goal": 1,
+     "evoi_impact": null,
+     "evoi_rank": null,
+     "max_divergence": 0.6666666666666666,
+     "pass1": {
+      "exists_probability": 0,
+      "strength_mean": 0.6,
+      "strength_std": 0
+     },
+     "pass1_missing": false,
+     "pass2": {
+      "basis": "domain_prior",
+      "exists_probability": 0.9,
+      "lint_corrected": true,
+      "needs_user_input": true,
+      "reasoning": "Adding two developers substantially increases coordination and management workload.",
+      "strength_mean": 0.5445544554455446,
+      "strength_std": 0.15
+     },
+     "pass2_adjusted": {
+      "exists_probability": 0.9,
+      "strength_mean": 0.6695544554455446,
+      "strength_std": 0.15
+     },
+     "pass2_missing": false,
+     "resolved_by": "default",
+     "resolved_value": null,
+     "sign_unstable": false,
+     "status": "agreed",
+     "user_action": "pending",
+     "validation_lint_log": [
+      {
+       "after": 0.5445544554455446,
+       "before": 0.55,
+       "code": "LINT_BUDGET_RESCALE",
+       "edge_key": "be215545->6d84ee1b"
+      }
+     ],
+     "was_shown": false
+    }
+   },
+   {
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "from": "be215545",
+    "origin": "ai",
+    "provenance": {
+     "reasoning": "Model-inferred causal link (records projector)",
+     "source": "cee_hypothesis"
+    },
+    "provenance_display": "ai_inferred",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "to": "6de60859"
+   },
+   {
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "from": "be215545",
+    "origin": "ai",
+    "provenance": {
+     "reasoning": "Model-inferred causal link (records projector)",
+     "source": "cee_hypothesis"
+    },
+    "provenance_display": "ai_inferred",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "to": "e001604a"
+   },
+   {
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "from": "be215545",
+    "origin": "ai",
+    "provenance": {
+     "reasoning": "Model-inferred causal link (records projector)",
+     "source": "cee_hypothesis"
+    },
+    "provenance_display": "ai_inferred",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "to": "ee1012d0"
+   },
+   {
+    "effect_direction": "positive",
+    "exists_probability": 0.8,
+    "from": "e001604a",
+    "origin": "ai",
+    "provenance": {
+     "reasoning": "Model-inferred causal link (records projector)",
+     "source": "cee_hypothesis"
+    },
+    "provenance_display": "ai_inferred",
+    "strength": {
+     "mean": 0.35,
+     "std": 0.08399999999999998
+    },
+    "to": "1426549f",
+    "validation": {
+     "bias_correction": {
+      "exists_probability_offset": 0,
+      "strength_mean_offset": 0.125,
+      "strength_std_offset": 0
+     },
+     "contested_reasons": [
+      "sign_flip"
+     ],
+     "distance_to_goal": 1,
+     "evoi_impact": null,
+     "evoi_rank": null,
+     "max_divergence": 1,
+     "pass1": {
+      "exists_probability": 0,
+      "strength_mean": 0.35,
+      "strength_std": 0
+     },
+     "pass1_missing": false,
+     "pass2": {
+      "basis": "domain_prior",
+      "exists_probability": 0.8,
+      "lint_corrected": false,
+      "needs_user_input": true,
+      "reasoning": "Higher onboarding investment reduces skill gaps and attrition risk by improving new hire ramp-up.",
+      "strength_mean": -0.4,
+      "strength_std": 0.15
+     },
+     "pass2_adjusted": {
+      "exists_probability": 0.8,
+      "strength_mean": -0.275,
+      "strength_std": 0.15
+     },
+     "pass2_missing": false,
+     "resolved_by": "default",
+     "resolved_value": null,
+     "sign_unstable": true,
+     "status": "contested",
+     "user_action": "pending",
+     "validation_lint_log": [],
+     "was_shown": false
+    }
+   },
+   {
+    "effect_direction": "negative",
+    "exists_probability": 0.8,
+    "from": "e70301eb",
+    "origin": "ai",
+    "provenance": {
+     "reasoning": "Model-inferred causal link (records projector)",
+     "source": "cee_hypothesis"
+    },
+    "provenance_display": "ai_inferred",
+    "strength": {
+     "mean": -0.3,
+     "std": 0.072
+    },
+    "to": "6d84ee1b",
+    "validation": {
+     "bias_correction": {
+      "exists_probability_offset": 0,
+      "strength_mean_offset": 0.125,
+      "strength_std_offset": 0
+     },
+     "contested_reasons": [],
+     "distance_to_goal": 1,
+     "evoi_impact": null,
+     "evoi_rank": null,
+     "max_divergence": 0.6666666666666666,
+     "pass1": {
+      "exists_probability": 0,
+      "strength_mean": -0.3,
+      "strength_std": 0
+     },
+     "pass1_missing": false,
+     "pass2": {
+      "basis": "domain_prior",
+      "exists_probability": 0.85,
+      "lint_corrected": true,
+      "needs_user_input": true,
+      "reasoning": "A tech lead reduces coordination overhead by guiding and organizing the team.",
+      "strength_mean": -0.45544554455445546,
+      "strength_std": 0.15
+     },
+     "pass2_adjusted": {
+      "exists_probability": 0.85,
+      "strength_mean": -0.33044554455445546,
+      "strength_std": 0.15
+     },
+     "pass2_missing": false,
+     "resolved_by": "default",
+     "resolved_value": null,
+     "sign_unstable": false,
+     "status": "agreed",
+     "user_action": "pending",
+     "validation_lint_log": [
+      {
+       "after": -0.45544554455445546,
+       "before": -0.46,
+       "code": "LINT_BUDGET_RESCALE",
+       "edge_key": "e70301eb->6d84ee1b"
+      }
+     ],
+     "was_shown": false
+    }
+   },
+   {
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "from": "e70301eb",
+    "origin": "ai",
+    "provenance": {
+     "reasoning": "Model-inferred causal link (records projector)",
+     "source": "cee_hypothesis"
+    },
+    "provenance_display": "ai_inferred",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "to": "6de60859"
+   },
+   {
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "from": "e70301eb",
+    "origin": "ai",
+    "provenance": {
+     "reasoning": "Model-inferred causal link (records projector)",
+     "source": "cee_hypothesis"
+    },
+    "provenance_display": "ai_inferred",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "to": "e001604a"
+   },
+   {
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "from": "e70301eb",
+    "origin": "ai",
+    "provenance": {
+     "reasoning": "Model-inferred causal link (records projector)",
+     "source": "cee_hypothesis"
+    },
+    "provenance_display": "ai_inferred",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "to": "ee1012d0"
+   },
+   {
+    "effect_direction": "positive",
+    "exists_probability": 0.8,
+    "from": "ee1012d0",
+    "origin": "ai",
+    "provenance": {
+     "reasoning": "Model-inferred causal link (records projector)",
+     "source": "cee_hypothesis"
+    },
+    "provenance_display": "ai_inferred",
+    "strength": {
+     "mean": 0.55,
+     "std": 0.132
+    },
+    "to": "117944d2",
+    "validation": {
+     "bias_correction": {
+      "exists_probability_offset": 0,
+      "strength_mean_offset": 0.125,
+      "strength_std_offset": 0
+     },
+     "contested_reasons": [],
+     "distance_to_goal": 1,
+     "evoi_impact": null,
+     "evoi_rank": null,
+     "max_divergence": 0.6666666666666666,
+     "pass1": {
+      "exists_probability": 0,
+      "strength_mean": 0.55,
+      "strength_std": 0
+     },
+     "pass1_missing": false,
+     "pass2": {
+      "basis": "domain_prior",
+      "exists_probability": 0.85,
+      "lint_corrected": false,
+      "needs_user_input": true,
+      "reasoning": "Strong technical direction streamlines architecture decisions, speeding up delivery.",
+      "strength_mean": 0.4,
+      "strength_std": 0.15
+     },
+     "pass2_adjusted": {
+      "exists_probability": 0.85,
+      "strength_mean": 0.525,
+      "strength_std": 0.15
+     },
+     "pass2_missing": false,
+     "resolved_by": "default",
+     "resolved_value": null,
+     "sign_unstable": false,
+     "status": "agreed",
+     "user_action": "pending",
+     "validation_lint_log": [],
+     "was_shown": false
+    }
+   },
+   {
+    "effect_direction": "negative",
+    "exists_probability": 0.8,
+    "from": "ee1012d0",
+    "origin": "ai",
+    "provenance": {
+     "reasoning": "Model-inferred causal link (records projector)",
+     "source": "cee_hypothesis"
+    },
+    "provenance_display": "ai_inferred",
+    "strength": {
+     "mean": -0.4,
+     "std": 0.09599999999999997
+    },
+    "to": "1426549f",
+    "validation": {
+     "bias_correction": {
+      "exists_probability_offset": 0,
+      "strength_mean_offset": 0.125,
+      "strength_std_offset": 0
+     },
+     "contested_reasons": [],
+     "distance_to_goal": 1,
+     "evoi_impact": null,
+     "evoi_rank": null,
+     "max_divergence": 0.6666666666666666,
+     "pass1": {
+      "exists_probability": 0,
+      "strength_mean": -0.4,
+      "strength_std": 0
+     },
+     "pass1_missing": false,
+     "pass2": {
+      "basis": "domain_prior",
+      "exists_probability": 0.9,
+      "lint_corrected": false,
+      "needs_user_input": true,
+      "reasoning": "Better technical direction reduces skill gaps and attrition by mentoring and clear standards.",
+      "strength_mean": -0.5,
+      "strength_std": 0.15
+     },
+     "pass2_adjusted": {
+      "exists_probability": 0.9,
+      "strength_mean": -0.375,
+      "strength_std": 0.15
+     },
+     "pass2_missing": false,
+     "resolved_by": "default",
+     "resolved_value": null,
+     "sign_unstable": false,
+     "status": "agreed",
+     "user_action": "pending",
+     "validation_lint_log": [],
+     "was_shown": false
+    }
+   },
+   {
+    "effect_direction": "positive",
+    "exists_probability": 0.8,
+    "from": "ee1012d0",
+    "origin": "ai",
+    "provenance": {
+     "reasoning": "Model-inferred causal link (records projector)",
+     "source": "cee_hypothesis"
+    },
+    "provenance_display": "ai_inferred",
+    "strength": {
+     "mean": 0.5145833333333333,
+     "std": 0.12349999999999997
+    },
+    "to": "6aa26be0",
+    "validation": {
+     "bias_correction": {
+      "exists_probability_offset": 0,
+      "strength_mean_offset": 0.125,
+      "strength_std_offset": 0
+     },
+     "contested_reasons": [],
+     "distance_to_goal": 1,
+     "evoi_impact": null,
+     "evoi_rank": null,
+     "max_divergence": 0.6666666666666666,
+     "pass1": {
+      "exists_probability": 0,
+      "strength_mean": 0.5145833333333333,
+      "strength_std": 0
+     },
+     "pass1_missing": false,
+     "pass2": {
+      "basis": "domain_prior",
+      "exists_probability": 0.85,
+      "lint_corrected": false,
+      "needs_user_input": true,
+      "reasoning": "Clear technical direction increases team output by reducing rework and improving code quality.",
+      "strength_mean": 0.3,
+      "strength_std": 0.15
+     },
+     "pass2_adjusted": {
+      "exists_probability": 0.85,
+      "strength_mean": 0.425,
+      "strength_std": 0.15
+     },
+     "pass2_missing": false,
+     "resolved_by": "default",
+     "resolved_value": null,
+     "sign_unstable": false,
+     "status": "agreed",
+     "user_action": "pending",
+     "validation_lint_log": [],
+     "was_shown": false
+    }
+   },
+   {
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "from": "f937361a",
+    "origin": "default",
+    "provenance": {
+     "reasoning": "Decision-to-option scaffold minted by the projector",
+     "source": "cee_hypothesis"
+    },
+    "provenance_display": "ai_inferred",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "to": "00f89f37"
+   },
+   {
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "from": "f937361a",
+    "origin": "default",
+    "provenance": {
+     "reasoning": "Decision-to-option scaffold minted by the projector",
+     "source": "cee_hypothesis"
+    },
+    "provenance_display": "ai_inferred",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "to": "4242a3ba"
+   },
+   {
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "from": "f937361a",
+    "origin": "default",
+    "provenance": {
+     "reasoning": "Decision-to-option scaffold minted by the projector",
+     "source": "cee_hypothesis"
+    },
+    "provenance_display": "ai_inferred",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "to": "be215545"
+   },
+   {
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "from": "f937361a",
+    "origin": "default",
+    "provenance": {
+     "reasoning": "Decision-to-option scaffold minted by the projector",
+     "source": "cee_hypothesis"
+    },
+    "provenance_display": "ai_inferred",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "to": "e70301eb"
+   }
+  ],
+  "node_count": 13,
+  "nodes": [
+   {
+    "id": "00f89f37",
+    "interventions": {
+     "6de60859": {
+      "raw_value": 0.65,
+      "reasoning": "Olumi estimate via edge 6b97f7f8; this option\u2192factor effect is not bound to a stated option record",
+      "source": "cee_hypothesis",
+      "target_match": {
+       "confidence": "high",
+       "match_type": "exact_id",
+       "node_id": "6de60859"
+      },
+      "value": 0.65,
+      "value_confidence": "low"
+     },
+     "e001604a": {
+      "raw_value": 80000,
+      "reasoning": "Olumi estimate via edge e0709fbd; this option\u2192factor effect is not bound to a stated option record",
+      "source": "cee_hypothesis",
+      "target_match": {
+       "confidence": "high",
+       "match_type": "exact_id",
+       "node_id": "e001604a"
+      },
+      "unit": "\u00a3",
+      "value": 0.4,
+      "value_confidence": "low"
+     },
+     "ee1012d0": {
+      "raw_value": 0.55,
+      "reasoning": "Olumi estimate via edge 2137372e; this option\u2192factor effect is not bound to a stated option record",
+      "source": "cee_hypothesis",
+      "target_match": {
+       "confidence": "high",
+       "match_type": "exact_id",
+       "node_id": "ee1012d0"
+      },
+      "unit": "%",
+      "value": 0.55,
+      "value_confidence": "low"
+     }
+    },
+    "kind": "option",
+    "label": "Hire One Senior Developer",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "0dde265b",
+    "kind": "goal",
+    "label": "Increase Productivity",
+    "label_authored": true,
+    "provenance": "from_brief",
+    "source_quote": "increase productivity"
+   },
+   {
+    "id": "117944d2",
+    "kind": "outcome",
+    "label": "Delivery Speed",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "1426549f",
+    "kind": "risk",
+    "label": "Skill Gap & Attrition Risk",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "4242a3ba",
+    "interventions": {
+     "6de60859": {
+      "raw_value": 0.4,
+      "reasoning": "Olumi estimate via edge 7940302e; this option\u2192factor effect is not bound to a stated option record",
+      "source": "cee_hypothesis",
+      "target_match": {
+       "confidence": "high",
+       "match_type": "exact_id",
+       "node_id": "6de60859"
+      },
+      "value": 0.4,
+      "value_confidence": "low"
+     },
+     "e001604a": {
+      "raw_value": 0,
+      "reasoning": "Olumi estimate via edge 7bba1f7a; this option\u2192factor effect is not bound to a stated option record",
+      "source": "cee_hypothesis",
+      "target_match": {
+       "confidence": "high",
+       "match_type": "exact_id",
+       "node_id": "e001604a"
+      },
+      "unit": "\u00a3",
+      "value": 0,
+      "value_confidence": "low"
+     },
+     "ee1012d0": {
+      "raw_value": 0.3,
+      "reasoning": "Olumi estimate via edge e3684676; this option\u2192factor effect is not bound to a stated option record",
+      "source": "cee_hypothesis",
+      "target_match": {
+       "confidence": "high",
+       "match_type": "exact_id",
+       "node_id": "ee1012d0"
+      },
+      "unit": "%",
+      "value": 0.3,
+      "value_confidence": "low"
+     }
+    },
+    "is_baseline": true,
+    "kind": "option",
+    "label": "Status Quo (No New Hire)",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "6aa26be0",
+    "kind": "outcome",
+    "label": "Team Productivity Output",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "6d84ee1b",
+    "kind": "risk",
+    "label": "Coordination & Management Overhead",
+    "provenance": "ai_inferred"
+   },
+   {
+    "category": "controllable",
+    "display_value": "Moderate (0.4)",
+    "id": "6de60859",
+    "kind": "factor",
+    "label": "Raw Development Capacity",
+    "observed_state": {
+     "declared_scale": "unit_interval",
+     "extractionType": "inferred",
+     "factor_type": "other",
+     "source": "cee_inference",
+     "uncertainty_drivers": [],
+     "value": 0.4
+    },
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "be215545",
+    "interventions": {
+     "6de60859": {
+      "raw_value": 0.85,
+      "reasoning": "Olumi estimate via edge 86dcf337; no stated figure is cited for this option\u2192factor effect",
+      "source": "cee_hypothesis",
+      "target_match": {
+       "confidence": "high",
+       "match_type": "exact_id",
+       "node_id": "6de60859"
+      },
+      "value": 0.85,
+      "value_confidence": "low"
+     },
+     "e001604a": {
+      "raw_value": 140000,
+      "reasoning": "Olumi estimate via edge c8fa5b0f; no stated figure is cited for this option\u2192factor effect",
+      "source": "cee_hypothesis",
+      "target_match": {
+       "confidence": "high",
+       "match_type": "exact_id",
+       "node_id": "e001604a"
+      },
+      "unit": "\u00a3",
+      "value": 0.7,
+      "value_confidence": "low"
+     },
+     "ee1012d0": {
+      "raw_value": 0.35,
+      "reasoning": "Olumi estimate via edge 6e876a13; no stated figure is cited for this option\u2192factor effect",
+      "source": "cee_hypothesis",
+      "target_match": {
+       "confidence": "high",
+       "match_type": "exact_id",
+       "node_id": "ee1012d0"
+      },
+      "unit": "%",
+      "value": 0.35,
+      "value_confidence": "low"
+     }
+    },
+    "kind": "option",
+    "label": "Two Developers",
+    "label_authored": true,
+    "provenance": "from_brief",
+    "source_quote": "two developers"
+   },
+   {
+    "category": "controllable",
+    "display_value": "\u00a360k",
+    "id": "e001604a",
+    "kind": "factor",
+    "label": "Hiring & Onboarding Cost",
+    "observed_state": {
+     "declared_scale": "unit_interval",
+     "extractionType": "inferred",
+     "factor_type": "other",
+     "raw_value": 60000,
+     "source": "cee_inference",
+     "uncertainty_drivers": [],
+     "unit": "\u00a3",
+     "value": 0.3
+    },
+    "provenance": "ai_inferred",
+    "scale_frame": 200000
+   },
+   {
+    "id": "e70301eb",
+    "interventions": {
+     "6de60859": {
+      "raw_value": 0.5,
+      "reasoning": "Olumi estimate via edge 11df7830; no stated figure is cited for this option\u2192factor effect",
+      "source": "cee_hypothesis",
+      "target_match": {
+       "confidence": "high",
+       "match_type": "exact_id",
+       "node_id": "6de60859"
+      },
+      "value": 0.5,
+      "value_confidence": "low"
+     },
+     "e001604a": {
+      "raw_value": 90000,
+      "reasoning": "Olumi estimate via edge cc30b33f; no stated figure is cited for this option\u2192factor effect",
+      "source": "cee_hypothesis",
+      "target_match": {
+       "confidence": "high",
+       "match_type": "exact_id",
+       "node_id": "e001604a"
+      },
+      "unit": "\u00a3",
+      "value": 0.45,
+      "value_confidence": "low"
+     },
+     "ee1012d0": {
+      "raw_value": 0.85,
+      "reasoning": "Olumi estimate via edge 9e6813e7; no stated figure is cited for this option\u2192factor effect",
+      "source": "cee_hypothesis",
+      "target_match": {
+       "confidence": "high",
+       "match_type": "exact_id",
+       "node_id": "ee1012d0"
+      },
+      "unit": "%",
+      "value": 0.85,
+      "value_confidence": "low"
+     }
+    },
+    "kind": "option",
+    "label": "Hire a Tech Lead",
+    "label_authored": true,
+    "provenance": "from_brief",
+    "source_quote": "hire a Tech lead"
+   },
+   {
+    "category": "controllable",
+    "display_value": "30%",
+    "id": "ee1012d0",
+    "kind": "factor",
+    "label": "Team Technical Direction",
+    "observed_state": {
+     "declared_scale": "unit_interval",
+     "extractionType": "inferred",
+     "factor_type": "other",
+     "raw_value": 30,
+     "source": "cee_inference",
+     "uncertainty_drivers": [],
+     "unit": "%",
+     "value": 0.3
+    },
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "f937361a",
+    "kind": "decision",
+    "label": "Question",
+    "label_placeholder": true,
+    "provenance": "ai_inferred"
+   }
+  ]
+ }
+}
