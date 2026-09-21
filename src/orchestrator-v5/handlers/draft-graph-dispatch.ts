@@ -568,11 +568,34 @@ function buildPostDraftChips(params: {
         label: 'Review model',
         message: 'Walk me through the model so I can review it before running the analysis.',
       },
-      {
-        id: 'chip_prompt_assumptions',
-        label: 'What assumptions matter most?',
-        message: 'Which assumptions in this model matter most to check before I run the analysis?',
-      },
+      // ⛔⛔ `chip_prompt_assumptions` WAS REMOVED HERE, AND IT MUST NOT COME
+      // BACK UNTIL A HANDLER EXISTS.
+      //
+      // WITNESSED ON STAGING, 21 Sep 2026: clicking "What assumptions matter
+      // most?" returned *"That question did not pin down a single part of your
+      // model... I will not guess at what it affects."* The chip offered
+      // exactly what its own router declines to serve, on the FIRST draft turn.
+      //
+      // Mechanism: with no `action_type` the UI posts `message` verbatim, and
+      // the router classifies a MODEL-WIDE question into the single-subject
+      // explanation path, which refuses by design and CORRECTLY — it will not
+      // invent a subject. The refusal is not the bug; the offer is.
+      //
+      // ⛔ THE TWO TEMPTING FIXES ARE BOTH WRONG, and were both rejected:
+      //   1. Type it `challenge_assumption` — that intent is POST-analysis
+      //      (DSK-P-003 requires a completed run); this chip precedes one.
+      //   2. Type it `analysis_readiness` so it reaches the readiness arm.
+      //      That arm answers a DIFFERENT question — what is still unpinned,
+      //      not which assumptions matter most — so the label would promise
+      //      one thing and the product would answer another. Dressing an
+      //      adjacent answer as the asked-for one is the same dishonesty as
+      //      the refusal, just harder to notice.
+      //
+      // There is no pre-analysis model-wide assumptions handler. Until one
+      // exists, offering the affordance is a promise the product cannot keep,
+      // and not offering it is the honest state. The content is NOT lost: the
+      // same draft turn already states its assumptions in prose, via the
+      // "Assumption to check" / "One assumption worth checking" bullets.
     ];
   }
   const recovery = buildReadinessRecoveryChip(

@@ -1118,7 +1118,7 @@ describe('dispatchDraftGraph — post-draft chips (V5 review)', () => {
     vi.clearAllMocks();
   });
 
-  it('emits the three-chip post-draft coaching set when analysis_ready.status === "ready"', async () => {
+  it('emits the two-chip post-draft coaching set when analysis_ready.status === "ready"', async () => {
     (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
       .mockResolvedValue(makeCommitResult(true) as Awaited<ReturnType<typeof commitDirectAnswer>>);
     (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
@@ -1131,7 +1131,7 @@ describe('dispatchDraftGraph — post-draft chips (V5 review)', () => {
       request: STUB_REQUEST,
     });
 
-    expect(result.response.suggested_actions).toHaveLength(3);
+    expect(result.response.suggested_actions).toHaveLength(2);
     // Run analysis stays the primary action chip with the existing
     // handler-dispatchable action_type. Order matters — the UI surfaces the
     // first chip as primary.
@@ -1148,13 +1148,15 @@ describe('dispatchDraftGraph — post-draft chips (V5 review)', () => {
     });
     expect(result.response.suggested_actions[1].action_type).toBeUndefined();
     expect(typeof result.response.suggested_actions[1].message).toBe('string');
-    // What assumptions matter most? — second conversational chip.
-    expect(result.response.suggested_actions[2]).toMatchObject({
-      id: 'chip_prompt_assumptions',
-      label: 'What assumptions matter most?',
-    });
-    expect(result.response.suggested_actions[2].action_type).toBeUndefined();
-    expect(typeof result.response.suggested_actions[2].message).toBe('string');
+    // ⛔ NO THIRD CHIP. `chip_prompt_assumptions` was retired: untyped, the UI
+    // posted its message verbatim and the router refused it as a model-wide
+    // question, so the chip offered what the product cannot serve before an
+    // analysis has run. This asserts its ABSENCE by id, not merely a length,
+    // so re-adding it under any label fails here.
+    expect(
+      result.response.suggested_actions.map((a) => a.id),
+      'no chip may promise a capability with no handler at this stage',
+    ).not.toContain('chip_prompt_assumptions');
   });
 
   it('fails closed to model review when analysis_ready is absent', async () => {
@@ -1640,12 +1642,11 @@ describe('dispatchDraftGraph — gated-hybrid coaching wiring', () => {
       `${realisticSummary}\n\n${MODEL_VARIANCE_NOTE}`,
     );
 
-    // 2. The three-chip set is still emitted (chip generation is
+    // 2. The two-chip set is still emitted (chip generation is
     //    independent of which assistant_text source fired).
-    expect(result.response.suggested_actions).toHaveLength(3);
+    expect(result.response.suggested_actions).toHaveLength(2);
     expect(result.response.suggested_actions[0].id).toBe('chip_action_run_analysis');
     expect(result.response.suggested_actions[1].id).toBe('chip_prompt_review_model');
-    expect(result.response.suggested_actions[2].id).toBe('chip_prompt_assumptions');
 
     // 3. stage_indicator advances to 'analyse' as on the normal
     //    success path — the summary replacement does not change the
