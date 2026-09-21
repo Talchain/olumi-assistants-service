@@ -558,6 +558,41 @@ export function evaluateFactorValueProposal(
   return evaluateFactorValueProposalImpl(input, false);
 }
 
+/**
+ * The ONE sentence for `bare_number_outside_cap`, shared by both range arms.
+ *
+ * ⚠ IT IS A FUNCTION BECAUSE THE TWO ARMS ALREADY DRIFTED ONCE. #1333 split the
+ * range check into a FLOOR arm and a CEILING arm, each with its own
+ * `bare_number_outside_cap` return and its own copy of this sentence. A later
+ * branch formatted the number — and its single hunk landed on the FLOOR arm
+ * only, because that is where the conflict-free merge put it. The CEILING arm,
+ * which is the arm a delta overshooting the cap actually takes, kept the
+ * unformatted `${effectiveRaw}` and went on rendering `1.2999999999999998`.
+ *
+ * Nothing REDed: `git merge` was clean, and each arm was self-consistent. The
+ * defect existed only in the merged tree, which is the one tree neither side
+ * had run. Two returns carrying the same reason and the same sentence is a
+ * hand-maintained mirror (CLAUDE.md trap 12); this collapses it to one, so a
+ * copy or formatting change cannot reach one arm and miss the other.
+ *
+ * `formatValueWithUnit` with no unit is `formatNumber`, which bounds a float
+ * artifact to 4 decimal places and trims trailing zeros — `1.2999999999999998`
+ * becomes `1.3`. `effectiveRaw` is the RESULT of `applyFactorValueOperator`, so
+ * on a delta it is raw IEEE754 arithmetic the user never typed. Never echo
+ * computed arithmetic back to a user.
+ *
+ * Length is bounded and pinned: the skeleton is 67 characters, so the sentence
+ * stays inside the composer's 100-character `sanitiseForUser` budget for any
+ * value/cap pair this predicate can reach. See the regression pin in
+ * `precise-refusal-survives-the-boundary.test.ts`.
+ */
+function bareNumberOutsideCapSentence(value: number, cap: number): string {
+  return (
+    `Value ${formatValueWithUnit(value)} is outside this factor's ` +
+    `range [0, ${formatValueWithUnit(cap)}], and no unit was given.`
+  );
+}
+
 function evaluateFactorValueProposalImpl(
   input: EvaluateFactorValueProposalInput,
   suppressBareRatioGate: boolean,
@@ -931,16 +966,7 @@ function evaluateFactorValueProposalImpl(
         return {
           ok: false,
           reason: 'bare_number_outside_cap',
-          // FORMAT THE NUMBER, like `value_exceeds_cap` immediately below.
-          // `effectiveRaw` is the RESULT of `applyFactorValueOperator`, so on a
-          // delta it is raw float arithmetic: 0.7 + 0.6 renders as
-          // `1.2999999999999998` — 18 characters of noise this file already has
-          // a regression pin about, and enough to push the sentence past the
-          // composer's 100-char budget now that it actually reaches the user.
-          // `formatNumber` bounds it to `1.3`.
-          specific_issue:
-            `Value ${formatValueWithUnit(effectiveRaw)} is outside this factor's ` +
-            `range [0, ${formatValueWithUnit(cap)}], and no unit was given.`,
+          specific_issue: bareNumberOutsideCapSentence(effectiveRaw, cap),
         };
       }
       // ⚠ THE SENTENCE THIS REPLACES WAS FALSE. A unit-bearing negative took
@@ -979,7 +1005,7 @@ function evaluateFactorValueProposalImpl(
         return {
           ok: false,
           reason: 'bare_number_outside_cap',
-          specific_issue: `Value ${effectiveRaw} is outside the factor's expected range [0, ${cap}] and no unit was given.`,
+          specific_issue: bareNumberOutsideCapSentence(effectiveRaw, cap),
         };
       }
       // Format via the shared helper so currency prefixes render correctly

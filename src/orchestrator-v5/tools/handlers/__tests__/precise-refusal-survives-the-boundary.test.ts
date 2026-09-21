@@ -40,7 +40,13 @@ import { evaluateFactorValueProposal } from '../d1-shared/evaluate-factor-value-
 import { HandlerInvocationFailedError } from '../../handler-errors.js';
 import { SET_FACTOR_VALUE_USER_GUIDANCE } from '../d1-shared/user-guidance.js';
 import type { ProposalAction } from '../../../routing/types.js';
-import type { ComposeContext, StageType } from '../../../compose/types.js';
+// `StageType` is a BOUNDARY type and comes from the contract, exactly as
+// `handler-failure-responses.ts` (the composer called below) imports it.
+// `compose/types.js` exports `ComposeContext` but has never exported
+// `StageType`, so naming it there type-errors under the Typecheck Drift job —
+// invisible to vitest, which erases `import type` before the file runs.
+import type { StageType } from '@talchain/schemas/boundary';
+import type { ComposeContext } from '../../../compose/types.js';
 
 /** The composer's own budget. Named here so the pin moves if the budget moves. */
 const COMPOSER_BUDGET = 100;

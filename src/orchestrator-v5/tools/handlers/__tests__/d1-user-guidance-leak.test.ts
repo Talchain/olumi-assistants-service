@@ -122,6 +122,48 @@ function assertNoLeakage(label: string, issue: string): void {
   }
 }
 
+/**
+ * For the seams that now carry the PREDICATE'S OWN sentence rather than the
+ * curated constant (`set_factor_value` threads `preEvaluation.specific_issue`
+ * through `details`, 17 Sep 2026).
+ *
+ * ⚠ THIS EXISTS BECAUSE ITS FIRST DRAFT COULD NOT FAIL. The identity pin these
+ * cases used to carry was replaced by `assertNoLeakage(...)` — which duplicated
+ * the call on the very next line, label apart — and `expect(issue.length)
+ * .toBeGreaterThan(0)`, which `captureSpecificIssue` already guarantees by
+ * throwing on an empty string. Two assertions, zero discrimination: deleting
+ * the threading in `set-factor-value.ts` left both GREEN.
+ *
+ * Measured at the merged tree: of the six cases in this block, only TWO reach a
+ * specific sentence. The other four still carry the constant verbatim and keep
+ * their original `toBe` pins — a pin that still holds is not a pin to remove.
+ *
+ * Two claims, and each fails on a different thing:
+ *   · NOT the generic phrase — REDs if the threading is removed or regressed.
+ *   · Names `mustName` — binds the sentence to THIS case by a value only this
+ *     case supplies (CLAUDE.md trap 19: identity, never a predicate another
+ *     object could satisfy). A sentence that stopped interpolating, or that
+ *     belonged to a sibling case, fails here while still passing the first.
+ *
+ * Deliberately NOT an exact-copy pin: this file's charter is the leak panel,
+ * and the wording is pinned at the predicate in
+ * `evaluate-factor-value-proposal-scale-redeclaration.test.ts` and at the wire
+ * in the route-v2 integration spec. A third copy here would be a
+ * hand-maintained mirror (trap 12), not extra safety.
+ */
+function expectPreciseNotGeneric(label: string, issue: string, mustName: string): void {
+  expect(
+    issue,
+    `${label}: expected the predicate's own sentence, got the generic constant — ` +
+      `the specific_issue threading in set-factor-value.ts has regressed`,
+  ).not.toBe(SET_FACTOR_VALUE_USER_GUIDANCE);
+  expect(
+    issue.includes(mustName),
+    `${label}: sentence must name "${mustName}" — this case's own value, which ` +
+      `binds the assertion to THIS refusal rather than to any non-generic string — got: ${issue}`,
+  ).toBe(true);
+}
+
 // ---------------------------------------------------------------------------
 // add_constraint — exercise every recoverable D1 throw
 // ---------------------------------------------------------------------------
@@ -264,15 +306,7 @@ describe('set_factor_value — userGuidance leak panel', () => {
       }),
       graph,
     });
-    // 17 Sep 2026 — this used to assert the carried sentence EQUALS the
-      // canonical phrase. It no longer does: `set_factor_value` now threads the
-      // predicate's own specific sentence through `details.specific_issue`, so
-      // what reaches the user is precise rather than generic. That makes THIS
-      // panel more load-bearing, not less — an arbitrary authored sentence now
-      // flows where only a curated constant used to, and the leak panel below
-      // is what polices it. Assert the panel, and that the sentence is real.
-      assertNoLeakage('set_factor_value', issue);
-      expect(issue.length).toBeGreaterThan(0);
+    expect(issue).toBe(SET_FACTOR_VALUE_USER_GUIDANCE);
     assertNoLeakage('set_factor_value:entity-not-found', issue);
   });
 
@@ -289,15 +323,7 @@ describe('set_factor_value — userGuidance leak panel', () => {
       }),
       graph,
     });
-    // 17 Sep 2026 — this used to assert the carried sentence EQUALS the
-      // canonical phrase. It no longer does: `set_factor_value` now threads the
-      // predicate's own specific sentence through `details.specific_issue`, so
-      // what reaches the user is precise rather than generic. That makes THIS
-      // panel more load-bearing, not less — an arbitrary authored sentence now
-      // flows where only a curated constant used to, and the leak panel below
-      // is what polices it. Assert the panel, and that the sentence is real.
-      assertNoLeakage('set_factor_value', issue);
-      expect(issue.length).toBeGreaterThan(0);
+    expect(issue).toBe(SET_FACTOR_VALUE_USER_GUIDANCE);
     assertNoLeakage('set_factor_value:kind-mismatch', issue);
   });
 
@@ -307,15 +333,7 @@ describe('set_factor_value — userGuidance leak panel', () => {
       proposal: proposal({ parameters: [] }),
       graph,
     });
-    // 17 Sep 2026 — this used to assert the carried sentence EQUALS the
-      // canonical phrase. It no longer does: `set_factor_value` now threads the
-      // predicate's own specific sentence through `details.specific_issue`, so
-      // what reaches the user is precise rather than generic. That makes THIS
-      // panel more load-bearing, not less — an arbitrary authored sentence now
-      // flows where only a curated constant used to, and the leak panel below
-      // is what polices it. Assert the panel, and that the sentence is real.
-      assertNoLeakage('set_factor_value', issue);
-      expect(issue.length).toBeGreaterThan(0);
+    expect(issue).toBe(SET_FACTOR_VALUE_USER_GUIDANCE);
     assertNoLeakage('set_factor_value:missing-value', issue);
   });
 
@@ -329,15 +347,7 @@ describe('set_factor_value — userGuidance leak panel', () => {
       }),
       graph,
     });
-    // 17 Sep 2026 — this used to assert the carried sentence EQUALS the
-      // canonical phrase. It no longer does: `set_factor_value` now threads the
-      // predicate's own specific sentence through `details.specific_issue`, so
-      // what reaches the user is precise rather than generic. That makes THIS
-      // panel more load-bearing, not less — an arbitrary authored sentence now
-      // flows where only a curated constant used to, and the leak panel below
-      // is what polices it. Assert the panel, and that the sentence is real.
-      assertNoLeakage('set_factor_value', issue);
-      expect(issue.length).toBeGreaterThan(0);
+    expectPreciseNotGeneric('set_factor_value:cap-exceeded', issue, '150%');
     assertNoLeakage('set_factor_value:cap-exceeded', issue);
   });
 
@@ -349,15 +359,7 @@ describe('set_factor_value — userGuidance leak panel', () => {
       }),
       graph,
     });
-    // 17 Sep 2026 — this used to assert the carried sentence EQUALS the
-      // canonical phrase. It no longer does: `set_factor_value` now threads the
-      // predicate's own specific sentence through `details.specific_issue`, so
-      // what reaches the user is precise rather than generic. That makes THIS
-      // panel more load-bearing, not less — an arbitrary authored sentence now
-      // flows where only a curated constant used to, and the leak panel below
-      // is what polices it. Assert the panel, and that the sentence is real.
-      assertNoLeakage('set_factor_value', issue);
-      expect(issue.length).toBeGreaterThan(0);
+    expectPreciseNotGeneric('set_factor_value:ambiguous-bare-number', issue, '5,000');
     assertNoLeakage('set_factor_value:ambiguous-bare-number', issue);
   });
 
@@ -367,15 +369,7 @@ describe('set_factor_value — userGuidance leak panel', () => {
       proposal: proposal(),
       graph: null,
     });
-    // 17 Sep 2026 — this used to assert the carried sentence EQUALS the
-      // canonical phrase. It no longer does: `set_factor_value` now threads the
-      // predicate's own specific sentence through `details.specific_issue`, so
-      // what reaches the user is precise rather than generic. That makes THIS
-      // panel more load-bearing, not less — an arbitrary authored sentence now
-      // flows where only a curated constant used to, and the leak panel below
-      // is what polices it. Assert the panel, and that the sentence is real.
-      assertNoLeakage('set_factor_value', issue);
-      expect(issue.length).toBeGreaterThan(0);
+    expect(issue).toBe(SET_FACTOR_VALUE_USER_GUIDANCE);
     assertNoLeakage('set_factor_value:precondition-unmet', issue);
   });
 });
