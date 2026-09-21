@@ -1135,8 +1135,33 @@ function appendSemanticIssues(
       .filter((key): key is string => key !== null),
   );
   const seenExact = new Set(out.map(exactKey));
-  for (const [index, blocker] of (payload.blockers ?? []).entries()) {
-    const issue = blockerIssue(blocker, out.length + index, payload.status);
+  for (const blocker of payload.blockers ?? []) {
+    // ⭐⭐ `out.length` ALONE IS THE ORDINAL — adding the loop index double-counts,
+    // and the `semantic_` prefix is minted from TWO counters, so the overrun
+    // COLLIDES rather than merely skipping numbers.
+    //
+    // MEASURED on session `95b92672` (21 Sep 2026). The repair proposal shipped
+    // `issue_ids: ["semantic_1","semantic_3","semantic_5","semantic_4","semantic_5"]`,
+    // where `semantic_5` named two different unresolved inputs of two different
+    // KINDS — an `option_effect_value` on "Founder Time Commitment" and an
+    // `option_mapping` on "Hire a Marketing Manager".
+    //
+    // `out` grows by one on every push below, so it is already the count of
+    // issues minted so far; `out.length + index` advanced it a second time and
+    // emitted the sparse odd sequence 1, 3, 5 …, which runs into the range the
+    // option loop at the foot of this function is about to take with
+    // `semantic_${out.length + 1}`. Both arms now read the one counter.
+    //
+    // ⚠ IT MUST BE RE-READ PER ITERATION, NOT CAPTURED. `blockerIssue` returns
+    // null for an unrecognised carrier and two `continue`s below skip a push;
+    // an ordinal derived from the loop position would keep advancing through a
+    // skip and leave the same overrun behind.
+    //
+    // ⚠ FIXED AT THE CALL SITE, NOT IN `blockerIssue`. That mapper is exported
+    // and its two other production callers (`compose/analysis-state-v1.ts:521`,
+    // `routing/readiness-summary.ts:174`) already pass a plain per-list index —
+    // correct for them, since each mints into a list it owns.
+    const issue = blockerIssue(blocker, out.length, payload.status);
     if (!issue) continue;
     const pair = optionFactorKey(issue);
     // The semantic producer sees an unencoded raw carrier as a missing value.
