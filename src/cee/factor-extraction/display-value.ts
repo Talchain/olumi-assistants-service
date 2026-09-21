@@ -356,6 +356,25 @@ export function synthesiseRangeDisplayValue(
   unit?: string,
   _factorType?: string,
   declaredScale?: string,
+  /**
+   * ⭐⭐ NORMALISATION EVIDENCE FROM THE NODE — the discriminator that
+   * `declaredScale` alone CANNOT supply, because `declared_scale` has three
+   * writers and two of them mean different things by it (trap 21).
+   *
+   * Derived by the caller from the node's own fields, never from a magnitude:
+   * `scale_frame !== undefined` (pass 3d writes it on EVERY framed factor and
+   * its own comment makes "absent ⇒ never framed" a true statement), a `cap`,
+   * or a `raw_value` that DIFFERS from the stored value
+   * (`normalise-factor-value.ts:14-18`: "when `cap` is absent, value =
+   * raw_value", so `raw_value !== value` MEANS normalised).
+   *
+   * ⚠ ABSENCE FAILS OPEN, DELIBERATELY. `undefined`/`false` keeps the
+   * pre-2.1208 behaviour exactly, so a caller that does not hold the evidence
+   * can only ever UNDER-suppress. Suppressing a display is a degradation; the
+   * defect this limb exists to close is a LIE, and the two do not get to share
+   * a default (trap 22b — a gap and a lie cannot share one window).
+   */
+  boundsAreNormalised?: boolean,
 ): string | undefined {
   const { range_min: rangeMin, range_max: rangeMax, distribution } = prior;
 
@@ -543,11 +562,60 @@ export function synthesiseRangeDisplayValue(
   // list for the units that GENUINELY live in [0,1] — `scale`, `index`,
   // `probability` — which is the mirror this estate keeps paying for."* That
   // objection is correct, and keying on the DECLARATION dissolves it rather
-  // than paying it: `declaredScaleOf` (`repair/unreachable-factors.ts:318-382`)
-  // returns `unit_interval` ONLY on NORMALISATION EVIDENCE — a cap, or a
-  // `raw_value` that differs from `value`. A genuine sub-unit quantity has
-  // neither and is therefore never declared, so this limb cannot reach it.
-  // That is demonstrated against the real producer, not argued, in
+  // than paying it — but ONLY once the declaration is paired with the evidence
+  // below, and the first version of this limb was not.
+  //
+  // ⛔⛔⛔ THE SENTENCE THAT USED TO SIT HERE WAS FALSE, AND IT DELETED A
+  // CORRECT DISPLAY. CORRECTED IN PLACE RATHER THAN QUIETLY DROPPED, because
+  // the next reader will otherwise re-derive it — it is a very plausible
+  // sentence. Withdrawn text, verbatim:
+  //
+  //   ~~`declaredScaleOf` (`repair/unreachable-factors.ts:318-382`) returns
+  //   `unit_interval` ONLY on NORMALISATION EVIDENCE — a cap, or a `raw_value`
+  //   that differs from `value`. A genuine sub-unit quantity has neither and is
+  //   therefore never declared, so this limb cannot reach it.~~
+  //
+  // The claim about `declaredScaleOf` is true. The claim about the LIMB is
+  // false, because ⭐ `declared_scale` HAS THREE WRITERS AND THEY DO NOT MEAN
+  // THE SAME THING BY IT (trap 21 — two concepts under one name, with no
+  // duplicated symbol to grep for):
+  //
+  //   1. `draft/records/projector.ts:3402` — `node.declared_scale =
+  //      claim.value_scale`, i.e. THE MODEL'S OWN WORD, stamped with no
+  //      normalisation anywhere. The served, UNGATED instruction
+  //      (`draft/records/instruction.ts:291`, pushed unconditionally at
+  //      `adapters/llm/anthropic.ts:525`) defines the member to the model as
+  //      *"`unit_interval` for **a share** or a bounded percentage written as a
+  //      decimal"* — so "a share" is EXACTLY what this writer emits it for.
+  //   2. `draft/records/projector.ts:4317` — pass 3d's legitimising overwrite.
+  //      It is normalisation-backed, and it runs ONLY inside
+  //      `if (frame !== undefined)` — i.e. only when the magnitudes EXCEEDED 1.
+  //   3. `repair/unreachable-factors.ts:582` — `declaredScaleOf`, which is
+  //      normalisation-evidence-only exactly as the withdrawn text said, and
+  //      which ABSTAINS on a genuine sub-unit quantity rather than CLEARING
+  //      writer 1's declaration.
+  //
+  // So in the sub-unit case — the very class the withdrawn text called
+  // unreachable — writer 2 never runs and writer 3 abstains, and the model's
+  // raw "a share" declaration arrives here untouched. MEASURED through
+  // `projectRecordsToGraph` → `handleUnreachableFactors` → `transformNodeToV3`
+  // on `{value: 0.4, unit: "share", value_scale: "unit_interval"}`:
+  // `"0.2 to 0.6 share"` before this limb, ABSENT after it — and repair has
+  // already deleted `data.value`, so the factor then carries no value and no
+  // range at all. Reproduced identically for `proportion`, `fraction`, `rate`,
+  // `ratio`, `index`.
+  //
+  // ⭐ THE FIX IS TO STOP ASKING THE WORD AND START ASKING THE EVIDENCE.
+  // `boundsAreNormalised` is derived by the caller from the node's own
+  // `scale_frame` / `cap` / `raw_value !== value` — all three present on the
+  // witnessed NRR node, all three ABSENT on a genuine declared share, measured
+  // through the same chain. It costs the fix nothing: for writer 3, a
+  // non-percent `unit_interval` declaration IMPLIES a cap or a differing
+  // `raw_value` (read `declaredScaleOf`'s two return sites), and both are
+  // promoted to node level at `unreachable-factors.ts:575-579` under the same
+  // conditions — so every pair writer 3 declares still declines.
+  //
+  // That is demonstrated against ALL THREE writers, not argued, in
   // `__tests__/range-display-normalised-declaration.test.ts`.
   //
   // The contract defines the member being read: `unit_interval` is *"a
@@ -583,8 +651,22 @@ export function synthesiseRangeDisplayValue(
   // asymmetry that cost CEE #891 a 100,000x suppression). A real-scale range
   // is evidence about its own scale and renders as before, whatever a stale
   // declaration says.
+  //
+  // ⚠ A BARE NUMBER IS NOT THE HARM. `unit !== undefined && unit.length > 0`
+  // is load-bearing, not defensive: the defect is normalised bounds WEARING
+  // THE USER'S OWN UNIT WORD, and with no unit word there is no false claim to
+  // make. Suppressing there would be a pure degradation. Pinned, because the
+  // shape is live — the projector records a real v202 draw with
+  // `Team Churn Rate {uniform, 0.02, 0.22}`, unit absent.
+  //
+  // ⚠ AND `rangeMax` IS A SEPARATE CONJUNCT, NOT DECORATION. A STRADDLING pair
+  // like `[0.5, 8]` has a real-scale upper bound: it is evidence about its own
+  // scale and must render. Dropping this term suppresses it silently, and
+  // straddles are the exact class this estate has already been burned by
+  // ("56% to 1.68%", "100% to 25%"). Both conjuncts are pinned by name.
   if (
-    declaredScale === "unit_interval"
+    boundsAreNormalised === true
+    && declaredScale === "unit_interval"
     && unit !== undefined
     && unit.length > 0
     && !isPercentScaledUnit(unit)

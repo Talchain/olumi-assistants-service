@@ -315,12 +315,39 @@ export function formatStatedMagnitude(
  * Returns a `DeclaredScale` literal or undefined. Deliberately NOT typed
  * against a local string union: the vocabulary belongs to the contract.
  */
+/**
+ * ⭐⭐ THE BASIS RIDES WITH THE SCALE, BECAUSE THE WORD ALONE IS AMBIGUOUS
+ * ACROSS PRODUCERS (added 21 Sep 2026, adversarial review of #1648).
+ *
+ * `declared_scale` has THREE writers. `draft/records/projector.ts:3402` stamps
+ * the MODEL'S OWN `value_scale`, and the served ungated instruction defines
+ * `unit_interval` to the model as *"a share"* — a genuine sub-unit quantity on
+ * the unit's own scale. This function's `unit_interval` is a different thing
+ * on two of its three arms: a number that was DIVIDED. A consumer reading only
+ * the word cannot tell them apart, and one that tried deleted a correct
+ * `"0.2 to 0.6 share"` display.
+ *
+ * So the basis is returned with the member rather than re-derived downstream
+ * (trap 12: a consumer re-spelling this predicate is the mirror), and it is
+ * NOT a synonym for the scale:
+ *   · `normalisation`    — a cap, or a `raw_value` that differs from `value`.
+ *     The bounds are on a normalised scale, not the unit's.
+ *   · `unit_convention`  — the `%` arms. `0.03` for "3% churn" is a genuine
+ *     sub-unit quantity and nothing was divided; the `> 1` ratio arm is the
+ *     mandated un-normalised encoding. Stamping these as normalisation would
+ *     be a manufactured attestation.
+ */
+type DeclaredScaleDecision = {
+  scale: "unit_interval" | "ratio";
+  basis: "normalisation" | "unit_convention";
+};
+
 function declaredScaleOf(
   value: number,
   unit: string | undefined,
   cap: number | undefined,
   rawValue: number | undefined,
-): "unit_interval" | "ratio" | undefined {
+): DeclaredScaleDecision | undefined {
   if (!Number.isFinite(value)) return undefined;
   // A percentage-style metric carrying a value above 1 is the ratio case the
   // draft prompt mandates ("can this metric meaningfully exceed 100%?").
@@ -362,7 +389,7 @@ function declaredScaleOf(
   // "57.5% to 172.5%" — the honest reading of a raw-scale pair.
   if (unit === "%" && value > 1) {
     const unNormalised = rawValue !== undefined && rawValue === value;
-    if (!unNormalised) return "ratio";
+    if (!unNormalised) return { scale: "ratio", basis: "unit_convention" };
   }
   const inUnitInterval = value >= 0 && value <= 1;
   if (!inUnitInterval) return undefined;
@@ -374,10 +401,14 @@ function declaredScaleOf(
   // be classified — a bare `0` or `1` is a legal count and a legal proportion.
   // The relationship between value and raw_value is different evidence, and it
   // is the evidence this producer actually holds.
-  if (cap !== undefined) return "unit_interval";
-  if (rawValue !== undefined && rawValue !== value) return "unit_interval";
-  // A percentage within the unit interval is a proportion.
-  if (unit === "%") return "unit_interval";
+  if (cap !== undefined) return { scale: "unit_interval", basis: "normalisation" };
+  if (rawValue !== undefined && rawValue !== value) {
+    return { scale: "unit_interval", basis: "normalisation" };
+  }
+  // A percentage within the unit interval is a proportion. ⚠ NOTHING WAS
+  // DIVIDED HERE — "3% churn" arrives as 0.03 by the prompt's own encoding, so
+  // the bounds ARE on the unit's scale and the basis is the unit convention.
+  if (unit === "%") return { scale: "unit_interval", basis: "unit_convention" };
   return undefined;
 }
 
@@ -647,16 +678,117 @@ export function handleUnreachableFactors(
       // in hand: the first corpus used `ratio`, the ONE member where the
       // declaration and the inference render identically, so it could not have
       // seen this. Three members, three disagreement pairs.
-      const declared = (node as any).declared_scale;
-      const inferred = declaredScaleOf(originalValue ?? NaN, data.unit, data.cap, data.raw_value);
-      if (declared === undefined) {
-        if (inferred !== undefined) (node as any).declared_scale = inferred;
-      } else if (inferred !== undefined && inferred !== declared) {
+      //
+      // ══ REBASE OF #1648 ONTO #1653, 21 Sep 2026 — BOTH FIXES LIVE HERE ═════
+      //
+      // ⭐⭐ TWO QUESTIONS, ONE SEAM (trap 21). Named apart, not collapsed:
+      //   · the block above answers ARBITRATION — "several authorities have
+      //     said what convention this number is in; which survives?"
+      //   · the stamp below answers MEANING — "the surviving answer is
+      //     `unit_interval`; was the number DIVIDED, or is it on the unit's
+      //     own scale?"
+      // Neither covers the other. #1653 governs the WRITE of `declared_scale`;
+      // #1648 gives a READER the discriminator the word alone cannot carry.
+      //
+      // ⚠ THE COUNT IN THE LIST ABOVE IS SHORT BY ONE, and the derived census
+      // in `range-display-normalised-declaration.test.ts` is the authority, not
+      // this comment. At this tip: FOUR writer classes over SIX assignment
+      // sites — the USER (`projector.ts:2918-2919`), the MODEL
+      // (`projector.ts:3424`), pass 3d's normalisation-backed rewrite
+      // (`projector.ts:4339-4340`) and `declaredScaleOf` here. Pass 3d only
+      // RELABELS a declaration that already exists, which is why the list above
+      // — written about authorities that ANSWER the question — reads three; as
+      // a statement about WRITERS it is four. The guard is correct either way:
+      // pass 3d's output arrives here as `declaredIncoming` like any other.
+      //
+      // ⚠ THE LOCAL NAME `declared` MEANT TWO DIFFERENT THINGS ON THE TWO
+      // SIDES OF THIS CONFLICT — the INCOMING declaration on #1653's, the
+      // `declaredScaleOf` DECISION on #1648's. Same identifier, opposite
+      // referents, and resolving toward either one silently type-checks against
+      // the other's uses. Both are renamed (`declaredIncoming` / `decision`) so
+      // the seam cannot re-form.
+      //
+      // ── RULING 1: THE BASIS IS STAMPED WHENEVER THE EVIDENCE EXISTS, EVEN
+      //    WHERE A DECLARATION SURVIVES AND THE INFERENCE MERELY AGREES.
+      //
+      // The basis is a fact about the NUMBER — a `cap`, or a `raw_value` that
+      // differs from `value` — not about who wrote the word down. Where both
+      // authorities say `unit_interval` and the number was nonetheless DIVIDED,
+      // the display harm is exactly the one #1648 exists to stop; declining to
+      // stamp because someone also wrote the word would be reading the word,
+      // which is the defect named in that PR's own title.
+      //
+      // ⭐ And it is the only choice that does not SILENTLY NARROW #1648: before
+      // this rebase #1648 overwrote unconditionally, so it stamped on the
+      // agree-class too. Not stamping here would drop part of #1648 while the
+      // suite stayed green — the failure mode this resolution was written to
+      // guard.
+      //
+      // ⚠ It cannot over-suppress the genuine sub-unit quantity, and the reason
+      // is structural rather than careful: `declaredScaleOf(0.4, "share", …)`
+      // returns UNDEFINED, so there is no decision and no basis to stamp. The
+      // `"0.2 to 0.6 share"` display is protected by the ABSENCE of an
+      // inference, not by this branch — which is why W1's case below still
+      // pins `declared_scale_basis` undefined.
+      //
+      // ── RULING 2: ON CONTRADICTION THE BASIS GOES WITH THE DECLARATION, ON
+      //    EVERY CARRIER.
+      //
+      // #1653's ruling is that neither answer survives: the node becomes
+      // UNDECLARED. A `declared_scale_basis` left behind would be an
+      // attestation about the convention of a number that no longer HAS a
+      // declared convention — a dangling fact, and a stamp is trusted where a
+      // gap is visibly a gap. Absence is the contract's own safe state, so the
+      // basis is deleted alongside, from `node` and from `observed_state`.
+      //
+      // ⚠ Behaviourally neutral TODAY and deliberately so: #1648's display limb
+      // requires `declared_scale === "unit_interval"`, which this branch has
+      // just removed, and `schema-v3.ts`'s `boundsAreNormalised` disjunction
+      // still reads `scale_frame` / `cap` / `raw_value !== value` independently.
+      // The delete buys honesty for the next reader, not a different render —
+      // and the next reader is the one who inherits a dangling field as truth
+      // (trap 20). `observed_state` is cleared too because nothing today writes
+      // the basis there and the carriers must not be able to drift apart the
+      // moment something does, which is what `declared-scale-carriage.test.ts`
+      // pins for `declared_scale` itself.
+      const declaredIncoming = (node as any).declared_scale;
+      const decision = declaredScaleOf(originalValue ?? NaN, data.unit, data.cap, data.raw_value);
+      const inferred = decision?.scale;
+      const normalisationEvidence = decision?.basis === "normalisation";
+      if (declaredIncoming === undefined) {
+        if (inferred !== undefined) {
+          (node as any).declared_scale = inferred;
+          // ⭐⭐ THE BASIS IS STAMPED AT THE ONLY MOMENT IT IS STILL DERIVABLE.
+          // `data.value` is deleted a few lines below and `data` itself usually
+          // goes with it, so a downstream consumer asking "was this number
+          // DIVIDED?" has `raw_value` and nothing to compare it against.
+          // Measured before this line existed: a reclassified factor carrying
+          // `raw_value 1.04` with no surviving `observed_state` rendered
+          // "0.26 to 0.78 ratio" again — the exact defect 2.1208 closes.
+          //
+          // ⚠ ABSENCE FAILS OPEN, deliberately and in the safe direction: a
+          // consumer that sees no basis renders as it did before 2.1208, so a
+          // writer that forgets to stamp can only ever UNDER-suppress. It can
+          // never delete a correct display, which is the harm this whole
+          // correction exists to stop.
+          if (normalisationEvidence) {
+            (node as any).declared_scale_basis = "normalisation";
+          }
+        }
+      } else if (inferred !== undefined && inferred !== declaredIncoming) {
         // Both carriers, or they drift — `declared-scale-carriage.test.ts`
         // pins that they may not.
         delete (node as any).declared_scale;
         const os = (node as any).observed_state;
         if (os && typeof os === "object") delete os.declared_scale;
+        // RULING 2 — the attestation cannot outlive its subject.
+        delete (node as any).declared_scale_basis;
+        if (os && typeof os === "object") delete os.declared_scale_basis;
+      } else if (normalisationEvidence) {
+        // RULING 1 — the declaration SURVIVES (it agrees, or nothing contests
+        // it) and the number was nonetheless normalised. The evidence is the
+        // subject here, not the word.
+        (node as any).declared_scale_basis = "normalisation";
       }
 
       // ⚠ THE UNIT IS WITHHELD ON RATIO SCALE, DELIBERATELY, AND IT IS RECORDED.
