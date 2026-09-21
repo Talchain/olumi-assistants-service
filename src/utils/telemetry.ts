@@ -1517,13 +1517,53 @@ export const TelemetryEvents = {
   V5CandidateMutationClarifyRequired: "v5.candidate_mutation.clarify_required",
 
   // Model Management (CEE_MODEL_VERSIONS_ENABLED) — commit-seam version hook.
-  // Emitted AFTER a durable graph-bearing commit when the fire-and-forget
-  // saveVersion call resolves. Content-free: scenario/turn ids, outcome
-  // status ('ok' | 'deduped' | 'disabled' | 'conflict' | 'error'),
-  // version_number, 16-hex-prefixed graph_identity_hash, error code — never
-  // graph content or labels. Non-blocking contract: emit/save failures log
-  // and NEVER affect the turn result.
+  // Emitted AFTER a durable graph-bearing commit, from the post-success block
+  // in `commit.ts` — never at decision time (Codex C8-A review defect 5).
+  // Content-free: scenario/turn ids, a status, version_number, 16-hex-prefixed
+  // graph_identity_hash, error code — never graph content or labels.
+  // Non-blocking contract: emit failures log and NEVER affect the turn result.
+  //
+  // ⛔⛔ THIS EVENT IS A SKIP ALARM. ITS NAME SAYS THE OPPOSITE. Its only emit
+  // carries `status: 'skipped'` with a `skip_reason`, and two tests in
+  // `atomic-model-version-commit.test.ts` deliberately assert ZERO of it on the
+  // versionable paths — "emitting a skip here would keep the alarm firing on
+  // the product's most common edge shape". DO NOT add a success arm to it; a
+  // committed version is reported by `V5ModelVersionCommitted` below.
+  //
+  // ⚠ Consequence for anyone reading a dashboard: a ZERO here means "no skip
+  // was recorded", NEVER "no version exists". Measured 20 Sep 2026, staging
+  // read zero over 30 hours while `v5.graph_cas.evaluated` read 100+ in the
+  // same window, and the natural reading of that zero was the opposite of the
+  // truth. The status enum this comment used to advertise
+  // ('ok' | 'deduped' | 'conflict' | 'error') was never emitted by any code.
+  //
+  // ⚠ The sentence this replaced also said "when the fire-and-forget saveVersion
+  // call resolves". That path is no longer how a conversational commit writes a
+  // version — it is `append_turn_atomic_v5`, in the same transaction as the turn.
   V5ModelVersionCreated: "v5.model_versions.version_created",
+
+  // ⭐ Model Management — a model version WAS committed (or was planned and the
+  // append returned no receipt). Emitted from the post-durable block in
+  // `commit.ts`, never at decision time.
+  //
+  // ⛔ WHY THIS IS A SEPARATE EVENT FROM THE ONE ABOVE, which is the whole
+  // point: `version_created` READS like a success signal and is in fact a SKIP
+  // ALARM — `atomic-model-version-commit.test.ts` pins that by asserting ZERO
+  // of it on the versionable paths, because "emitting a skip here would keep
+  // the alarm firing on the product's most common edge shape". Folding a
+  // success arm into it would have broken that alarm for every consumer
+  // counting it. Two questions, two names.
+  //
+  // Before this existed nothing was emitted when a version WAS written, so the
+  // durable receipt could not be observed at all: staging read
+  // `version_created = 0` for 30 hours while `v5.graph_cas.evaluated` read
+  // 100+, and the natural reading of that zero was the opposite of the truth.
+  //
+  // Statuses: 'committed' (a version row exists; version_number and the 16-hex
+  // hash prefix are set) | 'no_receipt' (planned, but v5 was not the selected
+  // RPC). Content-free: ids, status, version number, hash PREFIX. Non-blocking:
+  // an emit failure logs and never affects the turn result.
+  V5ModelVersionCommitted: "v5.model_versions.version_committed",
 
   // Wave-1 Lane C (PR4 collaboration) — a collab write was REFUSED at the
   // route/service boundary (invalid participant token, closed round,
