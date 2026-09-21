@@ -309,6 +309,33 @@ function quotedFromMessage(quote: string, message: string): boolean {
 
 export const ACCEPT_TOOL_NAME = 'accept_proposal';
 
+/**
+ * The accept tool's input schema, hoisted out of the tool literal so the
+ * Anthropic custom-tool conformance sweep can actually reach it.
+ *
+ * It was constructed inline, which made it invisible to that sweep: the guard
+ * could see the FILE constructs a schema but had no way to read the schema it
+ * built. A schema the conformance check cannot load is a schema nobody checks.
+ */
+export const ACCEPT_TOOL_INPUT_SCHEMA = {
+  type: 'object',
+  // ⛔ REQUIRED, AND OMITTING IT FAILS EXACTLY AS `true` DOES. Anthropic:
+  // "For 'object' type, 'additionalProperties' must be explicitly set to
+  // false". This schema had the key absent, so the accept tool would have been
+  // rejected outright the moment the flag turned on — found by the conformance
+  // sweep only once this file was wired into it, which is the whole argument
+  // for registering a new tool's schema rather than just listing its file.
+  additionalProperties: false,
+  properties: {
+    proposal_id: { type: 'string', description: 'The waiting change they agreed to.' },
+    user_agreement_quote: {
+      type: 'string',
+      description: "The user's own words agreeing, copied exactly from their latest message.",
+    },
+  },
+  required: ['proposal_id', 'user_agreement_quote'],
+} as const;
+
 export async function runReplacementTurn(
   input: ReplacementTurnInput,
   deps: ReplacementTurnDeps,
@@ -476,18 +503,7 @@ export async function runReplacementTurn(
               'Record that the user has agreed to a change you previously offered, and save it. ' +
               'Only for a change already put to them and still waiting — it saves exactly what was ' +
               'shown and nothing else. If they want something different, offer that instead.',
-            input_schema: {
-              type: 'object',
-              properties: {
-                proposal_id: { type: 'string', description: 'The waiting change they agreed to.' },
-                user_agreement_quote: {
-                  type: 'string',
-                  description:
-                    "The user's own words agreeing, copied exactly from their latest message.",
-                },
-              },
-              required: ['proposal_id', 'user_agreement_quote'],
-            },
+            input_schema: ACCEPT_TOOL_INPUT_SCHEMA,
           },
           execute: async (raw) => {
             // Checked FIRST, before a single state change. Without somewhere
