@@ -468,6 +468,31 @@ describe('the offer must refuse EXACTLY where the handler refuses — no more', 
  *
  * One case settles it: two sources present and disagreeing, asserting WHICH
  * unit came back by its consequence.
+ *
+ * ── ⭐ AND THE MAPPING RISK IS PER PARAMETER, SO IT WAS MEASURED PER
+ *    PARAMETER, rather than assumed from this one case ──────────────────────
+ *
+ * A reviewer's refinement, and it is right: a case exercising
+ * row→`existingUnit` cannot observe a slip in param→`paramUnit`. So the
+ * correct size is one case per mapping THIS call site actually populates —
+ * not four by default, and not one. Each mapping was dropped in turn and the
+ * suites re-run:
+ *
+ *   paramUnit     mapping dropped → 1 test REDs   already guarded
+ *   existingUnit  mapping dropped → 2 tests RED   guarded by the case below
+ *   observedUnit  mapping dropped → 1 test REDs   already guarded
+ *
+ * ⇒ **All three populated mappings are individually guarded, so no further
+ * cases are warranted.** Recorded here as a measurement so it is not
+ * re-derived, and because "we added one case" and "every mapping is covered"
+ * are different claims and only the second is true.
+ *
+ * ⛔ THE FOURTH PARAMETER IS NOT POPULATED FROM THIS CALL SITE AND CANNOT BE.
+ * `sourceRowUnit` is the prior state of a MOVED row (`corrects_node_id`),
+ * which this site cannot load — it is passed `undefined` deliberately. There
+ * is no mapping to slip, so there is nothing to cover; the residue is a
+ * possible FALSE OFFER on a correction, which is the permissive direction and
+ * is named at the call site rather than hidden.
  */
 describe('this call site maps its own sources onto the right parameters', () => {
   it('the existing ROW unit wins over the NODE observed unit — proving the mapping, not the order', async () => {
