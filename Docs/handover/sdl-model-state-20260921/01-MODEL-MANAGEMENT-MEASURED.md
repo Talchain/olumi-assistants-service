@@ -84,13 +84,28 @@ got.
 | NULL (pre-column legacy) | 562 |
 | **total** | **3,929** |
 
-Only **296 committed mutations in the estate's entire history** produced a
-version. Versions are overwhelmingly created **once, at scenario creation**.
+⛔⛔ **CORRECTED 21 Sep — my original reading of this table was WRONG.**
 
-⚠ So even fixing the guest gate would not give you usable version history —
-the mutation→version path is itself barely exercised. **UNVERIFIED** whether
-that is because mutations rarely commit or because commits rarely version;
-that is the next measurement.
+I wrote that "only 296 committed mutations ever produced a version" and framed
+it as a second defect. It is not. `creation_kind` is decided in SQL as
+**`initial` iff the scenario has no versions yet, else `committed_mutation`** —
+measured: `initial` is **3,056 rows, ALL at `version_number = 1`**;
+`committed_mutation` is **296 rows, ALL at `version_number > 1`**.
+
+So the split is **"first version" vs "later version", not "versioned" vs
+"bypassed"**. Every one of those 3,056 first versions WAS created by a
+committed mutation; it is merely labelled `initial`. The 296 is the count of
+scenarios that were edited again after their first commit — a product-usage
+fact, not a reliability defect.
+
+⭐ **Versioning is coherent wherever it is reached.** `current_model_version_id`
+is set on **3,468** scenarios and `model_versions` covers exactly **3,468**
+distinct scenarios — no aggregate pointer drift. And owned scenarios that hold
+a graph but no version total **89, with ZERO since 31 Aug** (clustered
+27–30 Aug); the apparently-recent ones all have `graph IS NULL`, which is
+correctly unversioned.
+
+**The guest gate (DEFECT 1) is therefore the only systematic versioning gap.**
 
 `mutation_id`: 3,367 set / 562 NULL (the NULLs align with the legacy
 `creation_kind IS NULL` cohort).

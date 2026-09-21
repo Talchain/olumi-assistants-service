@@ -161,6 +161,8 @@ Three distinct mechanisms, only one of which is a defect:
 
 | # | finding | verdict |
 |---|---|---|
+| ⓂⒹ | **`CEE_V5_GRAPH_CAS_RPC = enforce` on staging** (Render env, verified) — so DEFECT 2 is live-reachable, not theoretical. `CEE_MODEL_VERSIONS_ENABLED=true`, `CEE_REQUIRE_USER_JWT=true` | — |
+| ⓂⒹ | **Migration ledger read**: `supabase_migrations.schema_migrations` holds `20260824200000` and **neither `20260920210000` nor `20260920220000`**. Newest applied is `20260918014756` | confirms both fixes are unapplied |
 | D5 | `constraint_unevaluated` can return `codes: []` on **two of three** routes (`constraint-feasibility.ts:918-920`, `:947-954`) — the consumer cannot tell "producer said nothing" from "CEE found a constraint the producer never scored" | FIX |
 | D6 | ⓂⒹ `scenarios.analysis`, `analysis_status`, `latest_analysis_summary`, `analysis_invalidated_at` are **dead columns** — NULL/`'none'` on every row measured. Positive control: `analysis_provenance` (186 B) and `graph_identity_hash` ARE populated in the same query | PARK (remove later) |
 | D7 | ⓂⒹ **Two version vocabularies**: `model_versions` (3,929) and `canvas_versions` (46). Establish which is authoritative before building comparison | FIX first |
