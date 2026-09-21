@@ -46,6 +46,9 @@ function recordsFor(priceLevel: number, restatementPrice: number, label = MINE):
     stated_items: [
       { kind: "goal", source_quote: "reach £20k MRR within 12 months" },
       { kind: "option", source_quote: label },
+      // The user's own CEILING, bound to the churn factor — the second speech
+      // act in his brief, and the one the draft collapsed into a choice.
+      { kind: "constraint", source_quote: "keeping monthly churn under 4%", applies_to_claim: 1, direction: "ceiling", value: 0.04 },
     ],
     claims: [
       { claim_kind: "factor", label: PRICE },
@@ -121,6 +124,35 @@ describe("a generated restatement of the user's option is not an option", () => 
     const { options } = project(recordsFor(59, 54));
     expect(options.map((o) => o.label)).toContain(RESTATEMENT);
     expect(options.map((o) => o.label)).toContain(MINE);
+  });
+
+  it("⭐ the user's option keeps its OWN provenance and its OWN figure", () => {
+    // The whole point of withdrawing rather than absorbing: his £59 must remain
+    // HIS, singly owned, so the downstream authorship gates can credit it.
+    const { graph } = projectRecordsToGraph(recordsFor(59, 59)) as unknown as {
+      graph: { nodes: Node[] };
+      provenance: Record<string, { provenance_class?: string }>;
+    };
+    const { provenance } = projectRecordsToGraph(recordsFor(59, 59)) as unknown as {
+      provenance: Record<string, { provenance_class?: string }>;
+    };
+    const mine = graph.nodes.find((n) => n.kind === "option" && n.label === MINE);
+    expect(mine, "the user's option must survive").toBeDefined();
+    expect(
+      provenance[mine!.id]?.provenance_class,
+      "and it must still read as the user's own, not as an inference",
+    ).toBe("stated");
+  });
+
+  it("⛔ a stated churn CEILING stays a constraint — it never becomes an intervention", () => {
+    // "keeping monthly churn under 4%" is a limit ON churn. It must never be
+    // projected as something an option SETS, which would make the user appear to
+    // have chosen the very rate he capped — and on his live draw one generated
+    // level (0.045) BREACHED it.
+    const { options, named } = project(recordsFor(59, 59));
+    for (const o of options) {
+      expect(Object.keys(named(o)), `"${o.label}" must not intervene on churn`).not.toContain(CHURN);
+    }
   });
 
   it("⭐ a PERTURBED equivalent brief behaves identically", () => {

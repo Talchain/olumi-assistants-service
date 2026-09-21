@@ -4952,100 +4952,70 @@ function findUndevelopedDuplicates(projection: OneProjection): DemoteDecision[] 
  * the branch stacking; on `staging` it is enforced by nothing but this note.
  */
 /**
- * ⭐⭐ A MODEL OPTION THAT SEMANTICALLY RESTATES THE USER'S OWN IS NOT AN OPTION.
+ * ⭐⭐ YOU DO NOT CHOOSE THE THING YOU ARE CAPPING.
  *
- * ── THE WITNESSED DEFECT (the user's live pricing draw, `9077a1e3`, 2026-09-21)
- * Brief: *"should we increase the Pro plan price from £49 to £59 per month with
- * the next Pro feature release?"*. The drafter emitted his sentence as a STATED
- * option AND a titled MODEL option of the SAME proposal:
+ * A factor the user CONSTRAINED must never also be something an option SETS.
  *
- *   "increase the Pro plan price from £49 to £59 …"  STATED  price 59
- *   "Raise Price to £59 with Feature Release"        MODEL   price 59, churn 0.045
+ * ── THE WITNESSED DEFECT (live staging draw `9077a1e3`, 2026-09-21) ────────
+ * Brief: *"reaching £20k MRR within 12 months WHILE KEEPING MONTHLY CHURN UNDER
+ * 4%, should we increase the Pro plan price from £49 to £59…"*. Two different
+ * speech acts: a CHOICE about price, a LIMIT on churn. The draft collapsed them
+ * — three of four options were given a direct `Monthly Churn Rate` intervention:
  *
- * `findUndevelopedDuplicates` never fired: it groups on the FULL intervention
- * signature and the two differ by that churn entry, so both reached the wire and
- * the user's £59 had no single owner.
+ *   Hold Price at £49          churn 0.03
+ *   Raise Price to £59 …       churn 0.045   ← BREACHES the user's own 4% ceiling
+ *   Gradual Price Step to £54  churn 0.033
  *
- * ⛔ WITHDRAW, DO NOT ABSORB — AND THE DIFFERENCE IS SEMANTIC, NOT COSMETIC.
- * An earlier attempt copied the restatement's extra interventions onto the
- * stated option before withdrawing it. That deduplicates the GRAPH while
- * preserving the WRONG MEANING: the 0.045 is an Olumi-invented figure, and
- * churn is a DOWNSTREAM CONSEQUENCE of a price change, never something a pricing
- * option SETS. Absorbing it converts a machine hypothesis into a user choice and
- * makes the user appear to have chosen a churn rate — which on that draw
- * BREACHED the 4% ceiling he himself stated. A model's expectation about churn
- * belongs on the causal chain (price → churn), where it stays a hypothesis that
- * can be argued with; the constraint "monthly churn under 4%" stays a constraint
- * on churn. Neither becomes an intervention on his option.
+ * while `goal_constraints` simultaneously carried `{ node_id: churn, operator:
+ * "<=", value: 0.04, provenance: "explicit" }` quoting his words verbatim.
  *
- * ⭐ WHAT SURVIVES IS EXACTLY ONE OPTION, AND IT IS HIS. The restatement is
- * withdrawn through the EXISTING demotion machinery — the same `DemoteDecision`
- * path `findUndevelopedDuplicates` uses — so re-projection, edge repair and the
- * fixed point are unchanged. The user's option keeps its own figure, its own
- * provenance and its price-only intervention.
+ * ⭐ WHY THIS IS THE ROOT AND NOT A TIDY-UP.
+ *   · It INVENTS A CHOICE THE USER DID NOT MAKE. Those levels are Olumi's, and
+ *     pinning them as interventions asserts he selected a churn rate — one of
+ *     them the very rate he forbade.
+ *   · It is the reason his £59 lost its owner. `findUndevelopedDuplicates`
+ *     already withdraws a MODEL option duplicating a STATED one
+ *     (`undeveloped_duplicate_of_stated`), but it groups on the FULL
+ *     intervention signature, so this extra entry made the restatement look
+ *     structurally distinct and it survived. Two options then claimed £59, the
+ *     brief-authority gate correctly refused to credit a figure with no single
+ *     owner, and the product told him "every estimate this comparison rests on
+ *     is Olumi's, not yours" about the number he wrote.
+ *   · And it is why the fix belongs HERE rather than in the demote:
+ *     `r1-audit-remediation.regression.test.ts` ROOT 2(d) forbids a demote that
+ *     "collapses genuinely distinct meaning". Removing the ILLEGITIMATE
+ *     intervention leaves the restatement genuinely indistinct, so the EXISTING
+ *     rule withdraws it on its own grounds and nothing is weakened.
  *
- * ⛔ IT CAN ONLY EVER WITHDRAW A MODEL OPTION. A `stated` option is never a
- * candidate, so no user-authored content can be removed by this rule, and the
- * user-authorship gates downstream are left to fail closed exactly as they do.
+ * ⛔ THE CONSTRAINT IS NOT DELETED, AND NEITHER IS THE CONCEPT. The factor keeps
+ * every causal edge it has, the constraint stays a constraint on it, and a
+ * model's expectation about where churn lands remains a hypothesis on the causal
+ * chain — arguable, and never mistaken for the user's choice.
+ *
+ * ⚠ SCOPED TO CONSTRAINED FACTORS ONLY. An option that sets a factor nobody
+ * capped is untouched, so this cannot narrow a genuine alternative.
  */
-function findSemanticRestatements(projection: OneProjection): DemoteDecision[] {
+function dropInterventionsOnConstrainedFactors(projection: OneProjection): void {
   // Same precondition as the sibling passes, read from the gate (trap 13b).
-  if (!projection.graph.nodes.some((n) => n.kind === "goal")) return [];
+  if (!projection.graph.nodes.some((n) => n.kind === "goal")) return;
 
-  type IvMap = Record<string, unknown>;
-  const ivOf = (n: Record<string, unknown>): IvMap | null => {
-    const data = n.data as { interventions?: unknown } | undefined;
-    const nested = data?.interventions;
-    if (nested !== null && typeof nested === "object" && !Array.isArray(nested)) return nested as IvMap;
-    const direct = n.interventions;
-    if (direct !== null && typeof direct === "object" && !Array.isArray(direct)) return direct as IvMap;
-    return null;
-  };
-  const magnitudeOf = (entry: unknown): number | null => {
-    if (typeof entry === "number" && Number.isFinite(entry)) return entry;
-    if (entry !== null && typeof entry === "object" && !Array.isArray(entry)) {
-      const v = (entry as { value?: unknown }).value;
-      if (typeof v === "number" && Number.isFinite(v)) return v;
-    }
-    return null;
-  };
-  /** The (factor, magnitude) pairs an option claims. */
-  const claimsOf = (iv: IvMap | null): Set<string> => {
-    const out = new Set<string>();
-    for (const [factorId, entry] of Object.entries(iv ?? {})) {
-      const m = magnitudeOf(entry);
-      if (m !== null) out.add(`${factorId}=${m}`);
-    }
-    return out;
-  };
+  const constrained = new Set<string>();
+  for (const row of (projection.goalConstraints ?? []) as Array<Record<string, unknown>>) {
+    const id = row?.node_id;
+    if (typeof id === "string" && id.length > 0) constrained.add(id);
+  }
+  if (constrained.size === 0) return;
 
-  const statedClaims: Set<string> = new Set();
-  const modelOptions: Array<{ id: string; claims: Set<string> }> = [];
   for (const raw of projection.graph.nodes) {
     const node = raw as unknown as Record<string, unknown>;
     if (node.kind !== "option") continue;
-    const id = node.id as string;
-    const claims = claimsOf(ivOf(node));
-    // The SAME two authorities the sibling repair uses: minted-from-a-claim is a
-    // MODEL option; a `stated` provenance class is the user's own.
-    if (projection.optionClaimIndexById.has(id)) modelOptions.push({ id, claims });
-    else if (projection.provenance[id]?.provenance_class === "stated") {
-      for (const c of claims) statedClaims.add(c);
+    const data = node.data as { interventions?: Record<string, unknown> } | undefined;
+    const iv = data?.interventions;
+    if (iv === null || iv === undefined || typeof iv !== "object") continue;
+    for (const factorId of Object.keys(iv)) {
+      if (constrained.has(factorId)) delete iv[factorId];
     }
   }
-  if (statedClaims.size === 0) return [];
-
-  const out: DemoteDecision[] = [];
-  for (const candidate of modelOptions) {
-    // A RESTATEMENT claims the SAME FIGURE on the SAME FACTOR the user stated.
-    // An option moving that factor to a DIFFERENT level is a real alternative
-    // and is never touched — that is the contrast this rule must preserve.
-    if (![...candidate.claims].some((c) => statedClaims.has(c))) continue;
-    const claimIndex = projection.optionClaimIndexById.get(candidate.id);
-    if (claimIndex === undefined) continue;
-    out.push({ claimIndex, reason: "semantic_restatement_of_stated_option" } as unknown as DemoteDecision);
-  }
-  return out;
 }
 
 function repairStatedOptionTargets(projection: OneProjection): void {
@@ -5117,15 +5087,16 @@ export function projectRecordsToGraph(
   // Absorb BEFORE the duplicate pass reads signatures: a restatement whose extra
   // effects have moved onto the user's option now shares its signature, so the
   // existing withdrawal is a clean dedup rather than a content loss.
+  // Drop consequence-interventions BEFORE signatures are read, so a restatement
+  // is judged on the structure it legitimately has.
+  dropInterventionsOnConstrainedFactors(projection);
   for (let pass = 0; pass < claimCount; pass++) {
-    // Two independent grounds for withdrawal, unioned so one pass settles both:
-    // an undeveloped duplicate of another MODEL option, and a MODEL option that
-    // semantically restates the USER'S own. Neither can touch a stated option.
-    const decisions = [...findUndevelopedDuplicates(projection), ...findSemanticRestatements(projection)];
+    const decisions = findUndevelopedDuplicates(projection);
     if (decisions.length === 0) break;
     for (const d of decisions) demoted.set(d.claimIndex, d);
     projection = projectOnce(records, demoted, brief, completionBoundary);
     repairStatedOptionTargets(projection);
+    dropInterventionsOnConstrainedFactors(projection);
   }
   // The internal binding is not part of the contract: consumers get the same
   // graph/provenance/disclosures and the explicitly declared constraint carriers.
