@@ -189,6 +189,63 @@ const REVIEWED: Readonly<Record<string, string>> = {
   // wrote — i.e. precisely the ones the entries above establish as truthful.
   "cee/transforms/provenance-display.ts":
     "reader only — maps the stamp to the display vocabulary (from_brief/ai_inferred/user_set) that reaches the LLM context; the literal is a lookup key, the module has no write path, and the two synthesised-from-extractionType literals DEFER so it can only act on a genuine user-edit writer's stamp",
+  // ── The analysis-admission census. Reviewed 21 Sep 2026 against this guard's
+  // ── one truth condition, while registering it for the provenance-widening
+  // ── lane (PR #1642).
+  //
+  // WHY IT ENTERED THE SET. The literal appears EXACTLY ONCE, on a `//` line in
+  // `censusConfidenceParameters`' docblock, inside the note re-measuring the
+  // ratified arm as machine-authored: it names `user_override` as the control
+  // the ratified arm is DISTINCT from. No occurrence of any kind elsewhere in
+  // 1,264 lines.
+  //
+  // ⛔⛔ AND "IT IS ONLY A COMMENT" IS NOT THE JUSTIFICATION — DO NOT INHERIT
+  // THAT SHORTCUT. Comment-stripping `set-factor-value.ts`, the manifest's own
+  // STAMP SITE, leaves ZERO occurrences of the literal: it writes through the
+  // named constant `USER_EDIT_SOURCE`. So a file can carry the literal only in
+  // prose and still stamp, and a file can stamp while carrying it nowhere at
+  // all. Comment-only explains WHY the guard fired; it cannot settle whether
+  // the module writes. The justification below rests on execution instead.
+  //
+  // A READER, AND NOT A WRITER OF ANYTHING. `censusConfidenceParameters` is a
+  // counter: it walks nodes and edges, asks `obligation-provenance.ts` who
+  // authored each, and returns a fresh `SemanticQualitySignals` of integers
+  // plus node ids. Measured 21 Sep 2026 on a four-arm fixture varying ONE byte
+  // (`fac_churn.observed_state.source` = user_confirmed / user_override /
+  // cee_inference / absent): with the input graph DEEP-FROZEN the census and
+  // `comparisonSubstrate` complete without throwing and the graph's JSON is
+  // byte-unchanged on all four arms — a write would throw under ES-module
+  // strict mode, and a deliberately inserted stamp mutant REDs that assertion.
+  // No output on any arm contains the literal, while the user_override arm's
+  // INPUT does, so the probe can see a presence.
+  //
+  // IT DERIVES NO AUTHORSHIP RULE OF ITS OWN, which is the load-bearing fact.
+  // The only `StructureProvenance` literal in its compiled code is
+  // `'unattributed'`, splitting the machine bucket from the nobody-stamped-it
+  // one; every authorship decision routes through `earnsAuthorshipCredit`.
+  // Demonstrated rather than read: widening THAT predicate to admit
+  // `user_ratified` moves this census's counters, and widening it to admit a
+  // different member (`system_repaired`) leaves them untouched — the census is
+  // bound to the shared rule, not holding a second opinion about it.
+  //
+  // ⚠ THE DIRECTION OF HARM IS THE DANGEROUS ONE, AND IT IS NOT THE SAME AS
+  // THE FOUR READER ENTRIES ABOVE — stated rather than inherited, because the
+  // similar wording invites exactly that. Those four can only WITHDRAW an
+  // obligation, widen a sampling band, withhold our own claim, or mislabel a
+  // display. This census gates `semanticQualitySufficient`, where a SINGLE
+  // parameter counted as the user's lifts the whole model to
+  // `comparative_leader`. A permissive mis-read here would license a stronger
+  // claim than the evidence supports. Its protection is NOT a safe failure
+  // direction; it is that the authorship threshold is decided in exactly one
+  // place and this module imports it. If that delegation is ever replaced by a
+  // local predicate, this entry stops being true and must be re-reviewed.
+  //
+  // ⚠ It does inherit an untruthful stamp like every reader here: a value
+  // wrongly stamped `user_override` upstream classifies as `user_stated` and is
+  // counted as the user's. That is an argument for keeping the WRITERS' entries
+  // honest, not for giving this one a write path it does not have.
+  "orchestrator-v5/admission/analysis-admission.ts":
+    "comment only, and NOT a writer — the literal appears once in censusConfidenceParameters' docblock naming the control the ratified arm differs from; the module is a pure counter with no write path (proven on a deep-frozen graph across four arms) and derives no authorship rule of its own, delegating every authorship decision to earnsAuthorshipCredit. ⚠ Unlike the reader entries above its failure direction is NOT safe — a permissive mis-read would license comparative_leader — so the delegation, not the direction, is what makes it sound",
 };
 
 /**
