@@ -1,0 +1,2080 @@
+/**
+ * Shared graph adapters for analysis_ready.
+ *
+ * `buildCanonicalAnalysisReadyFromGraph` is the sole whole-status projection:
+ * it adapts persisted/request graph carriers, then delegates semantics to the
+ * pipeline's `buildAnalysisReadyPayload`. The legacy structural helper below
+ * remains exported only for compatibility tests and per-option diagnostics.
+ */
+
+import { GraphV3, OptionStatusV3 } from "../../schemas/cee-v3.js";
+import type { GraphV3T, OptionV3T } from "../../schemas/cee-v3.js";
+import type { GraphPatchBlockData } from "../types.js";
+import { log } from "../../utils/telemetry.js";
+import {
+  buildAnalysisReadyPayload,
+  labelMatchesBaseline,
+} from "../../cee/transforms/analysis-ready.js";
+import { pickGoalThresholdTrio } from "../../utils/goal-threshold-trio.js";
+// The PUBLISHED blocker contract, used to decide which rows the refusal carrier
+// may keep. Imported rather than restated: a hand-copied field list here would
+// be a mirror of the schema and would drift the first time a field is added.
+import { AnalysisBlocker, AnalysisBlockerType, blockedIdentityCarrier } from "../../schemas/analysis-ready.js";
+import type { AnalysisBlockerTypeT } from "../../schemas/analysis-ready.js";
+import {
+  validateGraphStructure,
+  CURRENT_STATE_VIOLATION_MESSAGES,
+  type StructuralViolationCode,
+} from "../graph-structure-validator.js";
+// ⚠ CYCLE, DELIBERATE AND FUNCTION-LEVEL. `analysis-ready-core` imports
+// `assessCanonicalAnalysisReadiness` from THIS file, so this edge closes a loop.
+// It is safe because neither side touches the other during module evaluation —
+// both are hoisted function declarations, used only at call time. The
+// alternative was to re-derive `willProceed` here, which would mint the second
+// admission predicate this estate keeps paying for.
+import { resolveRunAdmission } from "../../orchestrator-v5/tools/handlers/analysis-ready-core.js";
+import { analysisAdmissionFrom } from "../../orchestrator-v5/admission/analysis-admission.js";
+import { encodeOptionInterventionsForEdit } from "./encode-option-interventions.js";
+import { stableStringify } from "../context/stable-stringify.js";
+// ⭐ ROADMAP 2.1266 — shared with the draft-path builder in
+// `cee/transforms/analysis-ready.ts`. See the kernel's header for why the
+// discriminator is `origin` and not `provenance.source` (measured: the V3
+// transform coerces `"synthetic"` to `"cee_hypothesis"`).
+//
+// Re-imported here as a VALUE (it had been reduced to the prose reference at
+// :882 when the adjacency build moved). It is read for DISCLOSURE only — to
+// tell the user that a link already exists and whose inference it is — and
+// never to decide status. The status decision stays where it is, with exactly
+// one owner. See `appendSemanticIssues` for why those are different questions.
+import { isRepairAuthoredOptionFactorEdge } from "../../graph/repair-authored-edge.js";
+// ⭐ INV-P6 — the SOLE derivation of "may this gap be demanded of the user?".
+// Type-only for the vocabulary, value import for the classifier; the classifier
+// module imports `CanonicalReadinessIssue` back as a TYPE, so there is no runtime
+// cycle (`import type` is erased).
+import {
+  classifyIssueObligation,
+  type ObligationClass,
+  type StructureProvenance,
+} from "../../cee/graph-readiness/obligation-provenance.js";
+
+// ============================================================================
+// Types
+// ============================================================================
+
+export type CanonicalReadinessIssueCategory =
+  | 'graph_structure'
+  | 'option_values'
+  | 'option_mapping'
+  | 'numeric_integrity'
+  | 'internal';
+
+export type CanonicalReadinessIssueCode =
+  | StructuralViolationCode
+  | 'NO_GRAPH'
+  | 'SCHEMA_INVALID'
+  | 'OPTION_INTERVENTION_UNRESOLVABLE'
+  | 'NO_CAP_UNRECOVERABLE'
+  | 'UNIT_MISMATCH'
+  | 'OPTION_NEEDS_MAPPING'
+  | 'OPTION_NEEDS_ENCODING'
+  | 'MISSING_OPTION_VALUE'
+  | 'AMBIGUOUS_OPTION_VALUE'
+  | 'MISSING_OPTION_CONNECTION'
+  | 'CONSTRAINT_REVIEW_REQUIRED'
+  | 'UNREACHABLE_CONTROLLABLE_FACTOR'
+  | 'INTERNAL_ERROR';
+
+export interface CanonicalReadinessIssue {
+  readonly issue_id: string;
+  readonly code: CanonicalReadinessIssueCode;
+  readonly category: CanonicalReadinessIssueCategory;
+  readonly message: string;
+  readonly repairability: 'safe_canonicalisation' | 'human_input_required';
+  readonly option_id?: string;
+  readonly option_label?: string;
+  readonly factor_id?: string;
+  readonly factor_label?: string;
+  /**
+   * Who authored the structure this issue is raised over
+   * (`graph-readiness/obligation-provenance.ts` is the sole derivation).
+   *
+   * Additive and always populated by `assessCanonicalAnalysisReadiness`. Rides
+   * `readiness_issues[]`, `analysisReady.readiness_issues[]` and the route body,
+   * so every surface can tell the product's own contributions from the user's
+   * without deriving a second opinion.
+   */
+  readonly provenance?: StructureProvenance;
+  /**
+   * Whether this gap may be put to the user as a DEMAND (`required`) or only as
+   * an OFFER (`offered`) — INV-P6.
+   *
+   * ⚠ THE FIELD IS THE POINT. Before it, every blocker was rendered as a demand
+   * because nothing distinguished them, so the product asked the user to supply
+   * effect values for links, options and factors it had invented itself. A
+   * surface that cannot see this field cannot avoid that.
+   */
+  readonly obligation?: ObligationClass;
+  /**
+   * True when the run will proceed by EXCLUDING or HOLDING the option this issue
+   * names — i.e. the exclusion answers it, not the user.
+   *
+   * Stamped by `resolveRunAdmission`, not by the assessor: only the admission
+   * knows the exclusion plan. An offer that is made while this is true must say
+   * so out loud ("Run analysis — I'll leave out Option B"), which is the whole
+   * reason it is carried per-blocker rather than as one response-level boolean.
+   */
+  readonly waived_by_exclusion?: boolean;
+}
+
+export interface CanonicalReadinessRepairChange {
+  readonly change_id: string;
+  readonly kind: 'canonicalise_option_interventions';
+  readonly option_id: string;
+  readonly option_label: string;
+  readonly description: string;
+}
+
+export interface CanonicalReadinessRequiredInput {
+  readonly issue_id: string;
+  readonly kind: 'model_structure' | 'option_mapping' | 'option_effect_value' | 'value_scale' | 'constraint_review';
+  readonly prompt: string;
+  readonly option_id?: string;
+  readonly factor_id?: string;
+  /**
+   * `required` = this may be put to the user as a question. `offered` = the gap is
+   * over structure OLUMI authored, so the product may offer to work it through but
+   * may never demand it (INV-P6).
+   *
+   * ⚠ THE ARRAY IS STILL COMPLETE — this is a MARK, not a filter. The name
+   * `unresolved_inputs` predates the distinction; an `offered` entry is an
+   * unresolved input Olumi owes itself, not one the user owes Olumi.
+   *
+   * ⭐ THE CONSUMER CHANGE THIS ENABLES, AND IT IS NOT IN THIS MODULE: the surface
+   * that COMPOSES the question must ask only for `required` entries. Until it
+   * reads this field, the marking is carried and unread — deliberately, because
+   * this module is the authority on whose gap it is and not on what is said to the
+   * user, and because a second lane owns the repair-ask composition seam.
+   */
+  readonly obligation?: ObligationClass;
+  /** Who authored the structure this input is over. */
+  readonly provenance?: StructureProvenance;
+}
+
+/**
+ * One complete, reviewable plan for a genuinely multi-blocker state. Complete
+ * means every known issue is represented either by a value-preserving change
+ * or by an explicit human input. It never means that Olumi invented the
+ * missing judgement, relationship, scale, or scalar.
+ */
+export interface CanonicalReadinessRepairProposal {
+  readonly proposal_version: 'readiness_repair_v1';
+  readonly complete: true;
+  readonly issue_ids: string[];
+  readonly changes: CanonicalReadinessRepairChange[];
+  readonly unresolved_inputs: CanonicalReadinessRequiredInput[];
+}
+
+export type AnalysisReadyPayload = NonNullable<GraphPatchBlockData['analysis_ready']> & {
+  /** Exhaustive structural + semantic issues from the canonical assessment. */
+  readonly readiness_issues?: CanonicalReadinessIssue[];
+  /** Present only for two-or-more blocking issues. */
+  readonly repair_proposal?: CanonicalReadinessRepairProposal;
+};
+
+export interface CanonicalReadinessAssessment {
+  readonly analysisReady: AnalysisReadyPayload | undefined;
+  readonly issues: readonly CanonicalReadinessIssue[];
+  readonly blockingIssues: readonly CanonicalReadinessIssue[];
+  readonly repairProposal: CanonicalReadinessRepairProposal | null;
+  /** Strict value-preserving canonical graph admitted to Run, else null. */
+  readonly canonicalGraph: unknown | null;
+  /** Candidate containing every currently safe carrier canonicalisation. */
+  readonly proposedGraph: unknown | null;
+  readonly repairedForAnalysis: boolean;
+  readonly safeToAnalyse: boolean;
+}
+
+// ============================================================================
+// Intervention Extraction
+// ============================================================================
+
+/**
+ * Extract a normalised numeric value (0-1 scale) from an intervention entry.
+ * Handles both flat numbers and InterventionV3 objects `{ value: number, ... }`.
+ * Extracts `.value` (the normalised numeric), NOT `.raw_value`.
+ * @internal Exported for testing.
+ */
+export function extractNumericIntervention(v: unknown): number | undefined {
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (v && typeof v === 'object' && 'value' in v) {
+    const inner = (v as Record<string, unknown>).value;
+    if (typeof inner === 'number' && Number.isFinite(inner)) return inner;
+  }
+  return undefined;
+}
+
+/**
+ * Merge intervention values from all known locations on an option node.
+ *
+ * Scope: the canonical graph adapter and the quarantined compatibility helper
+ * both need to read historical intervention carriers. Do not add whole-status
+ * policy here; the canonical rule lives in `buildAnalysisReadyPayload`.
+ *
+ * Sources (in precedence order — first write wins per factor_id):
+ * 1. `node.data.interventions` — prompt-taught canonical edit location (wins on conflict)
+ * 2. `node["data/interventions/<fac_id>"]` — slash-keyed flat entries from scalar wrapping
+ * 3. `node.interventions` — top-level passthrough (fallback only)
+ *
+ * data.interventions wins over top-level because edit_graph writes to
+ * data.interventions per the prompt, while top-level may contain stale
+ * values from a prior pipeline run.
+ *
+ * Fix 1A: the read path consults all three sources unconditionally. Previously
+ * Sources 1+2 were gated behind CEE_EDIT_INTERVENTION_ROUTING_ENABLED, which
+ * caused add_option (and any other handler that rebuilds a synthetic graph
+ * post-mutation) to silently lose existing options' interventions whenever
+ * the flag was off and those options happened to carry interventions at
+ * `data.interventions` rather than the top-level field. The flag still gates
+ * where future writers WRITE slash-keyed entries, but the read side must
+ * always consider every known location.
+ *
+ * @internal Exported for testing.
+ */
+export function mergeInterventionSources(nodeAny: Record<string, unknown>): Record<string, number> | undefined {
+  const merged: Record<string, number> = {};
+  let found = false;
+
+  // Source 1 (highest precedence): node.data.interventions — canonical edit location
+  const data = nodeAny.data;
+  if (data && typeof data === 'object') {
+    const dataInterventions = (data as Record<string, unknown>).interventions;
+    if (dataInterventions && typeof dataInterventions === 'object') {
+      for (const [k, v] of Object.entries(dataInterventions as Record<string, unknown>)) {
+        const num = extractNumericIntervention(v);
+        if (num !== undefined) {
+          merged[k] = num;
+          found = true;
+          log.info(
+            { event: 'analysis_ready.intervention_merged', source: 'data.interventions', factor_id: k },
+            `analysis_ready merged intervention from data.interventions: ${k}`,
+          );
+        }
+      }
+    }
+  }
+
+  // Source 2: flat slash-keyed entries like "data/interventions/fac_1"
+  for (const [k, v] of Object.entries(nodeAny)) {
+    const match = k.match(/^data\/interventions\/(.+)$/);
+    if (!match) continue;
+    const facId = match[1];
+    if (facId in merged) continue; // data.interventions already set
+    const num = extractNumericIntervention(v);
+    if (num !== undefined) {
+      merged[facId] = num;
+      found = true;
+      log.info(
+        { event: 'analysis_ready.intervention_merged', source: 'slash_keyed', factor_id: facId, field_from: k },
+        `analysis_ready merged intervention from slash-keyed entry: ${k}`,
+      );
+    }
+  }
+
+  // Source 3 (lowest precedence): top-level node.interventions — fallback
+  if (nodeAny.interventions && typeof nodeAny.interventions === 'object') {
+    for (const [k, v] of Object.entries(nodeAny.interventions as Record<string, unknown>)) {
+      if (k in merged) continue; // higher-precedence source already set
+      const num = extractNumericIntervention(v);
+      if (num !== undefined) {
+        merged[k] = num;
+        found = true;
+      }
+    }
+  }
+
+  return found ? merged : undefined;
+}
+
+/**
+ * Returns true exactly when `extractNumericIntervention(v)` would return a
+ * finite number — bare finite number, or object with a finite numeric
+ * `.value`. Mirrors that function's acceptance predicate VERBATIM (same
+ * `typeof === 'object'` + `'value' in v` test, no extra array special-casing)
+ * so the object-preserving merge below selects the same source and the same
+ * factor set as the numeric `mergeInterventionSources`.
+ * @internal Exported for testing.
+ */
+export function hasFiniteInterventionValue(v: unknown): boolean {
+  if (typeof v === 'number') return Number.isFinite(v);
+  if (v && typeof v === 'object' && 'value' in v) {
+    const inner = (v as Record<string, unknown>).value;
+    return typeof inner === 'number' && Number.isFinite(inner);
+  }
+  return false;
+}
+
+/**
+ * Object-preserving sibling of `mergeInterventionSources`.
+ *
+ * `mergeInterventionSources` collapses each entry to a bare number via
+ * `extractNumericIntervention`, discarding `raw_value` / `unit` / `cap` /
+ * `value_type`. The CEE → PLoT egress value-scale protection
+ * (`plot-intervention-scale.ts`) needs those fields to decide raw vs
+ * normalised, so this returns the ORIGINAL intervention entry (object or bare
+ * number) per factor_id.
+ *
+ * Precedence and membership are IDENTICAL to `mergeInterventionSources`: same
+ * source order (1 `data.interventions` > 2 slash-keyed > 3 top-level
+ * `interventions`), same container guards (`typeof === 'object'`), and the same
+ * per-entry acceptance predicate (`hasFiniteInterventionValue`, which mirrors
+ * `extractNumericIntervention`). The two therefore produce the SAME key set and
+ * pick from the SAME source per factor_id — verified by a parity test. The only
+ * difference is the value shape (original entry vs bare number) and the
+ * empty-result encoding (`{}` here vs `undefined` there). Keep in sync.
+ * Read-only: never mutates the node.
+ * @internal Exported for the egress projection + testing.
+ */
+export function mergeInterventionSourceObjects(
+  nodeAny: Record<string, unknown>,
+): Record<string, unknown> {
+  const merged: Record<string, unknown> = {};
+
+  // Source 1 (highest precedence): node.data.interventions
+  const data = nodeAny.data;
+  if (data && typeof data === 'object') {
+    const dataInterventions = (data as Record<string, unknown>).interventions;
+    if (dataInterventions && typeof dataInterventions === 'object') {
+      for (const [k, v] of Object.entries(dataInterventions as Record<string, unknown>)) {
+        if (!(k in merged) && hasFiniteInterventionValue(v)) merged[k] = v;
+      }
+    }
+  }
+
+  // Source 2: flat slash-keyed entries like "data/interventions/fac_1"
+  for (const [k, v] of Object.entries(nodeAny)) {
+    const match = k.match(/^data\/interventions\/(.+)$/);
+    if (!match) continue;
+    const facId = match[1];
+    if (facId in merged) continue;
+    if (hasFiniteInterventionValue(v)) merged[facId] = v;
+  }
+
+  // Source 3 (lowest precedence): top-level node.interventions
+  if (nodeAny.interventions && typeof nodeAny.interventions === 'object') {
+    for (const [k, v] of Object.entries(nodeAny.interventions as Record<string, unknown>)) {
+      if (k in merged) continue;
+      if (hasFiniteInterventionValue(v)) merged[k] = v;
+    }
+  }
+
+  return merged;
+}
+
+// ============================================================================
+// Canonical persisted-graph projection
+// ============================================================================
+
+type Dict = Record<string, unknown>;
+
+function isPlainObject(value: unknown): value is Dict {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function readNonEmptyString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
+}
+
+/**
+ * DERIVED, NOT RESTATED. This previously spelled out `'ready' | 'needs_user_mapping'
+ * | 'needs_encoding'` — a second hand-maintained copy of `OptionStatusV3`, in the
+ * same file as the blocker-vocabulary copy and with the same silent failure mode:
+ * a member added to the enum would fall through to `undefined` with nothing red.
+ * Parsing against the schema means the two cannot disagree at all.
+ */
+function readOptionStatus(value: unknown): OptionV3T['status'] | undefined {
+  const parsed = OptionStatusV3.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
+}
+
+function readRawInterventions(value: unknown): OptionV3T['raw_interventions'] | undefined {
+  if (!isPlainObject(value)) return undefined;
+  const out: NonNullable<OptionV3T['raw_interventions']> = {};
+  for (const [factorId, raw] of Object.entries(value)) {
+    if (typeof raw === 'number' || typeof raw === 'string' || typeof raw === 'boolean') {
+      out[factorId] = raw;
+    }
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * Adapt one persisted option carrier (canonical top-level option first,
+ * option-node fallback second) into the input shape consumed by
+ * `buildAnalysisReadyPayload`.
+ *
+ * Persisted option nodes sometimes carry only `{value}` rather than the full
+ * InterventionV3 provenance record. Readiness needs the value and the exact
+ * factor identity, not invented provenance. The adapter therefore adds only a
+ * transient exact-id target match so the canonical builder can consume the
+ * record; it deliberately omits `source`, and the outward projection below
+ * drops `extraction_metadata`. No synthetic provenance reaches the wire.
+ */
+function projectOptionForCanonicalBuilder(
+  candidate: unknown,
+  factorIds: ReadonlySet<string>,
+): OptionV3T | null {
+  if (!isPlainObject(candidate)) return null;
+  const id = readNonEmptyString(candidate.id);
+  const label = readNonEmptyString(candidate.label);
+  if (!id || !label) return null;
+
+  const interventions: Record<string, unknown> = {};
+  // Read every historical carrier through the documented per-factor
+  // precedence table. Selecting `candidate.interventions` as a whole bundle
+  // used to let a stale top-level mirror hide a newer data/slash-keyed value
+  // (and also dropped factors that existed only in those higher-priority
+  // carriers). `mergeInterventionSourceObjects` is the single source selector:
+  // data.interventions > data/interventions/<id> > top-level interventions.
+  const sourceBundle = mergeInterventionSourceObjects(candidate);
+  for (const [factorId, raw] of Object.entries(sourceBundle)) {
+    if (!factorIds.has(factorId)) continue;
+    const value = extractNumericIntervention(raw);
+    if (value === undefined) continue;
+    const carried = isPlainObject(raw) ? raw : {};
+    interventions[factorId] = {
+      ...carried,
+      value,
+      target_match: isPlainObject(carried.target_match)
+        ? carried.target_match
+        : { node_id: factorId, match_type: 'exact_id', confidence: 'high' },
+    };
+  }
+
+  const rawInterventions = readRawInterventions(candidate.raw_interventions);
+  const explicitStatus = readOptionStatus(candidate.status);
+  // ⚠ CONNECTIVITY IS DELIBERATELY NOT CONSULTED HERE ANY MORE — SUPERSEDED.
+  //
+  // This fallback used to carry `connectedFactorIds.size > 0 ? 'needs_encoding'`,
+  // making it a SECOND producer of the same field. It was reachable only from
+  // this persisted-graph path, so the draft path (a fresh user's first turn)
+  // decided the same question with no connectivity input and disagreed on
+  // identical graph shapes — measured `needs_user_mapping` on 9/9 captured draws
+  // where every non-ready option was in fact connected.
+  //
+  // `computeAnalysisReadyStatusWithReason` (`cee/transforms/option-status.ts`)
+  // is the single owner now, and `buildAnalysisReadyPayload` — which every
+  // readiness path funnels through, and which holds the graph — feeds it the
+  // repair-excluded connected-factor count. Re-adding a limb here would restore
+  // the divergence, not defend against it.
+  const status: OptionV3T['status'] = explicitStatus
+    ?? (rawInterventions && Object.values(rawInterventions).some((value) => typeof value !== 'number')
+      ? 'needs_encoding'
+      : Object.keys(interventions).length > 0
+        ? 'ready'
+        : 'needs_user_mapping');
+
+  return {
+    id,
+    label,
+    status,
+    interventions: interventions as OptionV3T['interventions'],
+    ...(rawInterventions ? { raw_interventions: rawInterventions } : {}),
+    ...(Array.isArray(candidate.unresolved_targets)
+      ? {
+          unresolved_targets: candidate.unresolved_targets.filter(
+            (value): value is string => typeof value === 'string',
+          ),
+        }
+      : {}),
+    ...(Array.isArray(candidate.user_questions)
+      ? {
+          user_questions: candidate.user_questions.filter(
+            (value): value is string => typeof value === 'string',
+          ),
+        }
+      : {}),
+    ...(candidate.is_baseline === true || candidate.is_baseline === false
+      ? { is_baseline: candidate.is_baseline }
+      : {}),
+  };
+}
+
+function projectCanonicalPayloadToWire(
+  payload: ReturnType<typeof buildAnalysisReadyPayload>,
+): AnalysisReadyPayload {
+  return {
+    options: payload.options.map((option) => {
+      const interventions: Record<string, number> = {};
+      for (const [factorId, raw] of Object.entries(option.interventions)) {
+        const value = extractNumericIntervention(raw);
+        if (value !== undefined) interventions[factorId] = value;
+      }
+      return {
+        option_id: option.id,
+        label: option.label,
+        status: option.status,
+        interventions,
+        // The canonical builder has already run baseline detection for every
+        // option. Preserve that complete result on the wire: absence means
+        // "the producer did not evaluate this field", while `false` means it
+        // did and this option is not the baseline. Downstream admission and
+        // readback rely on that distinction.
+        is_baseline: option.is_baseline === true,
+        ...(option.intervention_details !== undefined
+          ? { intervention_details: option.intervention_details }
+          : {}),
+        ...(option.raw_interventions !== undefined
+          ? { raw_interventions: option.raw_interventions }
+          : {}),
+        ...(option.status_reason !== undefined ? { status_reason: option.status_reason } : {}),
+      };
+    }),
+    goal_node_id: payload.goal_node_id,
+    status: payload.status,
+    ...(payload.blockers !== undefined ? { blockers: payload.blockers } : {}),
+    ...(payload.model_adjustments !== undefined
+      ? { model_adjustments: payload.model_adjustments }
+      : {}),
+    ...(payload.goal_threshold !== undefined ? { goal_threshold: payload.goal_threshold } : {}),
+    ...pickGoalThresholdTrio(payload),
+    ...(payload.bias_findings !== undefined ? { bias_findings: payload.bias_findings } : {}),
+  };
+}
+
+function sameJson(left: unknown, right: unknown): boolean {
+  try {
+    return stableStringify(left) === stableStringify(right);
+  } catch {
+    return left === right;
+  }
+}
+
+function optionRecordById(graph: unknown, id: string): Dict | null {
+  if (!isPlainObject(graph) || !Array.isArray(graph.nodes)) return null;
+  const found = graph.nodes.find(
+    (node) => isPlainObject(node) && node.kind === 'option' && node.id === id,
+  );
+  return isPlainObject(found) ? found : null;
+}
+
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+interface UnresolvedOptionDetail {
+  readonly code: 'NO_CAP_UNRECOVERABLE' | 'UNIT_MISMATCH' | 'OPTION_INTERVENTION_UNRESOLVABLE';
+  readonly factorId?: string;
+  readonly factorLabel?: string;
+}
+
+/** Refines the encoder's defer without second-guessing its defer decision. */
+function classifyUnresolvedOption(
+  graph: unknown,
+  optionId: string,
+): UnresolvedOptionDetail {
+  const generic = (factorId?: string, factorLabel?: string): UnresolvedOptionDetail => ({
+    code: 'OPTION_INTERVENTION_UNRESOLVABLE',
+    ...(factorId ? { factorId } : {}),
+    ...(factorLabel ? { factorLabel } : {}),
+  });
+  try {
+    if (!isPlainObject(graph) || !Array.isArray(graph.nodes)) {
+      return generic();
+    }
+    const option = graph.nodes.find(
+      (node) => isPlainObject(node) && node.kind === 'option' && node.id === optionId,
+    );
+    if (!isPlainObject(option)) return generic();
+    const factorById = new Map<string, Dict>();
+    for (const node of graph.nodes) {
+      if (isPlainObject(node) && node.kind === 'factor' && typeof node.id === 'string') {
+        factorById.set(node.id, node);
+      }
+    }
+    // Recover factor identity with the encoder's carrier precedence. This does
+    // not re-decide whether the option is unresolved—the strict encoder already
+    // did that—it only lets semantic blockers be compared at option×factor
+    // granularity instead of collapsing every factor on the same option.
+    const candidates = new Map<string, unknown>();
+    if (isPlainObject(option.data) && isPlainObject(option.data.interventions)) {
+      for (const [factorId, raw] of Object.entries(option.data.interventions)) {
+        candidates.set(factorId, raw);
+      }
+    }
+    for (const [key, raw] of Object.entries(option)) {
+      const match = key.match(/^data\/interventions\/(.+)$/);
+      if (match?.[1] && !candidates.has(match[1])) candidates.set(match[1], raw);
+    }
+    if (isPlainObject(option.interventions)) {
+      for (const [factorId, raw] of Object.entries(option.interventions)) {
+        if (!candidates.has(factorId)) candidates.set(factorId, raw);
+      }
+    }
+    if (candidates.size === 0 && Array.isArray(graph.edges)) {
+      const targets = graph.edges
+        .filter(
+          (edge): edge is Dict =>
+            isPlainObject(edge)
+            && edge.from === optionId
+            && typeof edge.to === 'string'
+            && factorById.has(edge.to),
+        )
+        .map((edge) => edge.to as string);
+      const hasNodeLevelIntent = finiteNumber(option.value) !== undefined
+        || finiteNumber(option.raw_value) !== undefined;
+      if (hasNodeLevelIntent && targets.length === 1) {
+        candidates.set(targets[0]!, {
+          value: option.value,
+          raw_value: option.raw_value,
+          unit: option.unit,
+          cap: option.cap,
+        });
+      }
+    }
+
+    let firstGeneric: UnresolvedOptionDetail | null = null;
+    for (const [factorId, raw] of candidates) {
+      if (isPlainObject(raw) && finiteNumber(raw.value) !== undefined) continue;
+      const factor = factorById.get(factorId);
+      const factorLabel = readNonEmptyString(factor?.label) ?? undefined;
+      if (firstGeneric === null) firstGeneric = generic(factorId, factorLabel);
+      if (!isPlainObject(raw) || finiteNumber(raw.raw_value) === undefined || !factor) continue;
+      const observed = isPlainObject(factor.observed_state) ? factor.observed_state : undefined;
+      const sourceUnit = readNonEmptyString(raw.unit);
+      const factorUnit = readNonEmptyString(observed?.unit);
+      if (sourceUnit && factorUnit && sourceUnit.toLowerCase() !== factorUnit.toLowerCase()) {
+        return { code: 'UNIT_MISMATCH', factorId, ...(factorLabel ? { factorLabel } : {}) };
+      }
+      if (finiteNumber(raw.cap) === undefined && finiteNumber(observed?.cap) === undefined) {
+        return { code: 'NO_CAP_UNRECOVERABLE', factorId, ...(factorLabel ? { factorLabel } : {}) };
+      }
+    }
+    return firstGeneric ?? generic();
+  } catch {
+    return generic();
+  }
+}
+
+/**
+ * Project ONE structural violation onto a canonical readiness issue.
+ *
+ * ⚠ CURRENT-STATE VOICE, DELIBERATELY. This runs when a graph the user ALREADY
+ * HAS is loaded and assessed — nothing has been proposed and nothing is about
+ * to change. It read the PREVIEW copy until 2026-08-20, so an untouched model
+ * reported "This change would leave a node with no connections." /"The model
+ * would have no decision node.", and `summariseReadiness` then wrapped that
+ * inside "Here's what's still open before this can run cleanly: …" — a
+ * conditional about an edit that does not exist, inside a frame that promises
+ * to describe the model as it stands.
+ *
+ * The preview voice is still correct on the EDIT path (`edit-graph.ts:3000`,
+ * `:3012`), where the patch really was rejected and never applied. Both come
+ * from one owner, `VIOLATION_COPY` — see graph-structure-validator.ts.
+ */
+function structuralIssue(
+  code: StructuralViolationCode,
+  ordinal: number,
+): CanonicalReadinessIssue {
+  return {
+    issue_id: `structural_${ordinal + 1}`,
+    code,
+    category: 'graph_structure',
+    message: CURRENT_STATE_VIOLATION_MESSAGES[code],
+    repairability: 'human_input_required',
+  };
+}
+
+/** Everything the per-type message composers are allowed to see. */
+interface BlockerMessageContext {
+  readonly suffix: string;
+  readonly optionId: string | undefined;
+  readonly factorId: string | undefined;
+  readonly producerMessage: string | undefined;
+}
+
+interface BlockerIssueShape {
+  readonly code: CanonicalReadinessIssueCode;
+  readonly category: CanonicalReadinessIssueCategory;
+  readonly message: (context: BlockerMessageContext) => string;
+}
+
+/**
+ * ⭐⭐ THE ANTI-MIRROR. One entry per member of the PUBLISHED blocker vocabulary,
+ * keyed BY that vocabulary.
+ *
+ * This replaced a four-case `switch (blockerType)` whose `default` returned
+ * `null`. That switch was a hand-maintained copy of `AnalysisBlockerType`
+ * (`schemas/analysis-ready.ts`) sitting inside the estate's single named
+ * readiness authority — and `blockerType` reaches it as a bare `string` (it is
+ * read off untyped wire bytes through `readNonEmptyString`), so TypeScript could
+ * not check the switch for exhaustiveness. A member added to the enum would have
+ * fallen straight through to `default`, and all THREE call sites drop a `null`:
+ * `appendSemanticIssues` here, `mapWireBlockers` in `compose/analysis-state-v1.ts`,
+ * and `readiness-summary.ts`. The blocker would have vanished from every
+ * readiness surface with nothing red anywhere. The drift read as green.
+ *
+ * `satisfies Record<AnalysisBlockerTypeT, BlockerIssueShape>` is what closes it:
+ * a member added to the enum is now a COMPILE ERROR here until it is handled, and
+ * a key here that the enum does not publish is a compile error too. The two
+ * statements cannot silently disagree in either direction.
+ *
+ * ⚠ AND A COMPILE-TIME CHECK IS NOT THE WHOLE JOB — it proves the copies AGREE,
+ * never that the LIST IS RIGHT. `blocker-type-wire-corpus.test.ts` supplies the
+ * other half from recorded wire captures rather than from this file.
+ */
+const BLOCKER_ISSUE_BY_TYPE = {
+  missing_value: {
+    code: 'MISSING_OPTION_VALUE',
+    category: 'option_values',
+    // ⭐⭐ THE PAIR-SCOPED CASE IS THE ONE CLASS WHOSE PRODUCER AUTHORS PROSE FIT
+    // FOR A USER — so it is the one class that keeps it.
+    //
+    // `analysis-ready.ts:817` emits, for an option×factor pair:
+    //   `Factor "CRM Annual Licence Cost" is currently 50,000. What should
+    //    option "Switch to HubSpot" set it to?`
+    // It names both scopes, gives the factor's CURRENT VALUE in the factor's own
+    // display units, and asks the question the user must answer. The substitute
+    // below names the scopes and nothing else.
+    //
+    // ⚠ THE OTHER THREE CLASSES DELIBERATELY DO NOT GET THIS, AND THAT IS A
+    // MEASURED CALL, NOT TIMIDITY. A blanket rule would trade one truthfulness
+    // defect for three:
+    //   · `ambiguous_value` emits "…its analysis-scale source binding is
+    //     unresolved" — internal jargon;
+    //   · the factor-only `missing_value` (`analysis-ready.ts:1124`) emits
+    //     "Factor …  is not connected to any option" — a DIAGNOSIS with no
+    //     remedy, where the composed sentence gives one;
+    //   · `constraint_dropped` emits an internal constraint id and reason.
+    // (A)'s messages were never written to be the live user-facing sentence;
+    // only this one is. The canned copy is at least written for a human, so
+    // replacing it with jargon would be worse than the defect.
+    //
+    // THE DISCRIMINATOR IS STRUCTURAL, NEVER PROSE (trap 22f). The two
+    // `missing_value` producers are told apart by whether the blocker names an
+    // OPTION — `:817` always does, `:1124` never does. A field-presence test
+    // cannot oscillate the way a natural-language classifier would.
+    message: ({ suffix, optionId, factorId, producerMessage }) =>
+      optionId && factorId && producerMessage
+        ? producerMessage
+        : `Choose the missing effect value${suffix}.`,
+  },
+  ambiguous_value: {
+    code: 'AMBIGUOUS_OPTION_VALUE',
+    category: 'option_values',
+    message: ({ suffix }) => `Confirm the effect value${suffix}.`,
+  },
+  missing_connection: {
+    code: 'MISSING_OPTION_CONNECTION',
+    category: 'option_mapping',
+    message: ({ suffix }) => `Choose the missing connection${suffix}.`,
+  },
+  constraint_dropped: {
+    code: 'CONSTRAINT_REVIEW_REQUIRED',
+    category: 'option_values',
+    message: ({ suffix }) => `Review the unresolved constraint${suffix}.`,
+  },
+} as const satisfies Record<AnalysisBlockerTypeT, BlockerIssueShape>;
+
+/**
+ * Lookup built from the TABLE'S OWN KEYS, deliberately — not from
+ * `AnalysisBlockerType.options`.
+ *
+ * ⚠ THIS DISTINCTION IS LOAD-BEARING AND IT IS EASY TO GET BACKWARDS. Building
+ * the map by walking the enum would make `MAPPED_BLOCKER_TYPES` a restatement of
+ * the enum rather than a reading of the table, so the guard would be comparing
+ * the enum with itself — a guard agreeing with itself, which is exactly the
+ * shape this whole change exists to remove. Reading the table's keys is what
+ * makes the two sides independent, so a divergence is genuinely observable.
+ *
+ * `Object.entries` returns own enumerable keys only, so a blocker carrying
+ * `blocker_type: "constructor"` or `"__proto__"` resolves to nothing rather than
+ * reaching an inherited property.
+ */
+const BLOCKER_ISSUE_LOOKUP: ReadonlyMap<string, BlockerIssueShape> = new Map(
+  Object.entries(BLOCKER_ISSUE_BY_TYPE as Record<string, BlockerIssueShape>),
+);
+
+/** The published vocabulary, exposed for the derived guard. Never restated. */
+export const PUBLISHED_BLOCKER_TYPES: readonly string[] = AnalysisBlockerType.options;
+
+/** Exported so the guard can assert the table's KEYS against the enum in BOTH
+ *  directions — a behavioural probe alone cannot see an extra key. */
+export const MAPPED_BLOCKER_TYPES: readonly string[] = [...BLOCKER_ISSUE_LOOKUP.keys()];
+
+/**
+ * Map ONE wire `analysis_ready` blocker onto a canonical readiness issue.
+ *
+ * EXPORTED for the `analysis_state` composer (schemas 0.46.0), which needs the
+ * same code/category/message/repairability verdict for the wire contract's
+ * `AnalysisBlocker`. Imported rather than re-implemented on purpose: two
+ * mappers would be two authorities on what `missing_connection` means, and the
+ * estate's chronic defect is exactly that shape. Returns `null` for a blocker
+ * whose `blocker_type` this mapper does not recognise — a caller drops it
+ * rather than inventing a category for it.
+ */
+export function blockerIssue(
+  blocker: unknown,
+  ordinal: number,
+  status: string,
+): CanonicalReadinessIssue | null {
+  if (!isPlainObject(blocker)) return null;
+  const blockerType = readNonEmptyString(blocker.blocker_type);
+  const optionId = readNonEmptyString(blocker.option_id) ?? undefined;
+  const optionLabel = readNonEmptyString(blocker.option_label) ?? undefined;
+  const factorId = readNonEmptyString(blocker.factor_id) ?? undefined;
+  const factorLabel = readNonEmptyString(blocker.factor_label) ?? undefined;
+  /**
+   * ⭐ THE PRODUCER'S OWN USER-FACING SENTENCE — CARRIED, NOT REPLACED.
+   *
+   * The shared contract is explicit that this string is "the producer-authored,
+   * user-facing sentence for this blocker, rendered VERBATIM. CEE owns all
+   * user-facing language; a consumer must not rewrite, summarise, truncate for
+   * meaning, or SYNTHESISE A SUBSTITUTE WHEN IT DISLIKES THE WORDING." This
+   * mapper was doing exactly that — discarding it and composing its own.
+   *
+   * ⚠ USED FOR ONE CLASS ONLY. See {@link blockerIssue}'s pair-scoped branch.
+   */
+  const producerMessage = readNonEmptyString(blocker.message) ?? undefined;
+  const suffix = optionLabel && factorLabel
+    ? ` for "${optionLabel}" on "${factorLabel}"`
+    : optionLabel
+      ? ` for "${optionLabel}"`
+      : factorLabel
+        ? ` for "${factorLabel}"`
+        : '';
+  const common = {
+    issue_id: `semantic_${ordinal + 1}`,
+    repairability: 'human_input_required' as const,
+    ...(optionId ? { option_id: optionId } : {}),
+    ...(optionLabel ? { option_label: optionLabel } : {}),
+    ...(factorId ? { factor_id: factorId } : {}),
+    ...(factorLabel ? { factor_label: factorLabel } : {}),
+  };
+  if (status === 'needs_user_mapping' && !optionId && factorId) {
+    return {
+      ...common,
+      code: 'UNREACHABLE_CONTROLLABLE_FACTOR',
+      category: 'option_mapping',
+      message: `Choose which option changes${suffix} and by how much.`,
+    };
+  }
+  // A carrier with no usable `blocker_type` at all is malformed, not
+  // off-contract. Its handling is unchanged: inventing a blocker out of noise
+  // would be a different defect from the one being fixed here.
+  if (blockerType === null) return null;
+
+  const mapped = BLOCKER_ISSUE_LOOKUP.get(blockerType);
+  if (mapped) {
+    return {
+      ...common,
+      code: mapped.code,
+      category: mapped.category,
+      message: mapped.message({ suffix, optionId, factorId, producerMessage }),
+    };
+  }
+
+  // ⚠ OFF-CONTRACT, AND IT IS SURFACED RATHER THAN DROPPED — the behavioural
+  // half of this repair. The old `default: return null` discarded a gap the
+  // producer had genuinely detected, on all three surfaces, in silence.
+  //
+  // The direction is FAIL-SAFE by choice: this build cannot CHARACTERISE the
+  // gap, so it must not go on claiming the model is ready. `internal` is
+  // hard-blocking in `assessCanonicalAnalysisReadiness`, so the run refuses
+  // loudly instead of waiving something new — the same direction
+  // `analysis-ready-core.ts` states for its own unreachable-code removals.
+  //
+  // Unreachable from any in-repo producer at this tip (the table is exhaustive
+  // over the enum, enforced by `satisfies`). It exists for what a compile-time
+  // check cannot reach: bytes from a DIFFERENT build, or an untyped passthrough
+  // — which is precisely how blockers arrive at
+  // `mapWireBlockers(blockers: readonly unknown[])`.
+  log.warn(
+    { blocker_type: blockerType, status },
+    'analysis_ready blocker carries a blocker_type outside the published AnalysisBlockerType vocabulary; surfacing it as an internal readiness fault rather than dropping it',
+  );
+  return {
+    ...common,
+    code: 'INTERNAL_ERROR',
+    category: 'internal',
+    message: producerMessage ?? `Review the unresolved blocker${suffix}.`,
+  };
+}
+
+/**
+ * Stamp `provenance` + `obligation` onto every issue in an array, in place.
+ *
+ * ⚠ IN PLACE, ON PURPOSE. These arrays are already referenced by
+ * `blockingIssues`, `allIssues` and (through `allIssues`) by
+ * `analysisReady.readiness_issues[]`. Returning a new array would leave three
+ * readers holding unstamped copies — the objects are shared, so a partial stamp
+ * is worse than none: a surface reading `obligation === undefined` would treat an
+ * `offered` gap as a demand and the defect would look fixed in the tests that
+ * happen to read the stamped array.
+ */
+function stampObligationsInPlace(issues: CanonicalReadinessIssue[], graph: unknown): void {
+  for (let i = 0; i < issues.length; i += 1) {
+    const decision = classifyIssueObligation(issues[i], graph);
+    issues[i] = {
+      ...issues[i],
+      provenance: decision.provenance,
+      obligation: decision.obligation,
+    };
+  }
+}
+
+function requiredInputForIssue(
+  issue: CanonicalReadinessIssue,
+): CanonicalReadinessRequiredInput | null {
+  if (issue.repairability !== 'human_input_required') return null;
+  const kind: CanonicalReadinessRequiredInput['kind'] =
+    issue.category === 'graph_structure'
+      ? 'model_structure'
+      : issue.code === 'CONSTRAINT_REVIEW_REQUIRED'
+        ? 'constraint_review'
+        : issue.category === 'option_mapping'
+          ? 'option_mapping'
+          : issue.category === 'numeric_integrity'
+            || issue.code === 'NO_CAP_UNRECOVERABLE'
+            || issue.code === 'UNIT_MISMATCH'
+            ? 'value_scale'
+            : 'option_effect_value';
+  return {
+    issue_id: issue.issue_id,
+    kind,
+    prompt: issue.message,
+    ...(issue.option_id ? { option_id: issue.option_id } : {}),
+    ...(issue.factor_id ? { factor_id: issue.factor_id } : {}),
+    // Carried from the issue, never re-derived: one authority, one answer.
+    ...(issue.obligation ? { obligation: issue.obligation } : {}),
+    ...(issue.provenance ? { provenance: issue.provenance } : {}),
+  };
+}
+
+/**
+ * Build the canonical whole-graph readiness payload from request, mutated, or
+ * persisted graph bytes.
+ *
+ * This is the sole graph-to-whole-status projection for V5 Run admission. It
+ * delegates the status decision to `buildAnalysisReadyPayload`, including its
+ * unreachable-controllable-factor rule, instead of maintaining a second
+ * graph-only status algorithm. Canonical top-level `options[]` wins when it is
+ * present; option nodes are a conservative persistence/legacy fallback.
+ */
+function projectSemanticAnalysisReadyFromGraph(
+  graph: unknown,
+): AnalysisReadyPayload | undefined {
+  const parsed = GraphV3.safeParse(graph);
+  if (!parsed.success) return undefined;
+
+  const rawGraph: Dict = isPlainObject(graph)
+    ? graph
+    : { nodes: parsed.data.nodes, edges: parsed.data.edges };
+  const goalNodes = parsed.data.nodes.filter((node) => node.kind === 'goal');
+  const suppliedGoalId = readNonEmptyString(rawGraph.goal_node_id);
+  const goalNodeId = suppliedGoalId && goalNodes.some((node) => node.id === suppliedGoalId)
+    ? suppliedGoalId
+    : goalNodes[0]?.id;
+  if (!goalNodeId) return undefined;
+
+  const factorIds = new Set(
+    parsed.data.nodes.filter((node) => node.kind === 'factor').map((node) => node.id),
+  );
+  const rawNodes = Array.isArray(rawGraph.nodes) ? rawGraph.nodes : parsed.data.nodes;
+  const optionNodeRecords = rawNodes.filter(
+    (node): node is Dict => isPlainObject(node) && node.kind === 'option',
+  );
+  const optionNodeIds = new Set(
+    optionNodeRecords
+      .map((node) => readNonEmptyString(node.id))
+      .filter((id): id is string => id !== null),
+  );
+  // The repair-excluded option→factor adjacency this function used to build for
+  // `projectOptionForCanonicalBuilder` is GONE, with the status limb that read
+  // it — see the note there. `buildAnalysisReadyPayload` (called below) derives
+  // the identical set from the same graph, through the same
+  // `isRepairAuthoredOptionFactorEdge` authority, and is the single owner of the
+  // status decision for BOTH readiness paths. Two surfaces deciding
+  // independently which edges the repair invented was trap 21's shape.
+
+  const projectedTopLevel = Array.isArray(rawGraph.options)
+    ? rawGraph.options
+        .map((option) => projectOptionForCanonicalBuilder(option, factorIds))
+        .filter(
+          (option): option is OptionV3T => option !== null && optionNodeIds.has(option.id),
+        )
+    : [];
+  const topLevelIdCounts = new Map<string, number>();
+  for (const option of projectedTopLevel) {
+    topLevelIdCounts.set(option.id, (topLevelIdCounts.get(option.id) ?? 0) + 1);
+  }
+  const topLevelById = new Map(
+    projectedTopLevel
+      .filter((option) => topLevelIdCounts.get(option.id) === 1)
+      .map((option) => [option.id, option]),
+  );
+  const projectedTopLevelIds = new Set(projectedTopLevel.map((option) => option.id));
+
+  // A top-level options array owns order only when it is an exact UNIQUE-ID
+  // bijection with the option nodes. Length equality is insufficient: two
+  // copies of opt_a can have the same length as {opt_a,opt_b}, silently drop
+  // opt_b, and make the whole-status producer reason over the wrong choice
+  // set. Invalid/unknown rows were already filtered above, so equality of both
+  // unique sets plus both raw lengths proves the exact one-to-one cover.
+  const topLevelIsExactOptionNodeBijection =
+    projectedTopLevel.length === optionNodeRecords.length
+    && projectedTopLevelIds.size === projectedTopLevel.length
+    && optionNodeIds.size === optionNodeRecords.length
+    && projectedTopLevelIds.size === optionNodeIds.size
+    && [...optionNodeIds].every((id) => projectedTopLevelIds.has(id));
+
+  // Preserve the producer's canonical option order when it completely covers
+  // the option-node set exactly once. A partial/stale/duplicated mirror falls
+  // back to node order and fills each missing entry from that node, never
+  // silently dropping an arm.
+  const options = topLevelIsExactOptionNodeBijection
+    ? projectedTopLevel
+    : optionNodeRecords
+        .map((node) => {
+          const id = readNonEmptyString(node.id);
+          return id
+            ? topLevelById.get(id)
+              ?? projectOptionForCanonicalBuilder(node, factorIds)
+            : null;
+        })
+        .filter((option): option is OptionV3T => option !== null);
+
+  const canonical = buildAnalysisReadyPayload(options, goalNodeId, parsed.data);
+  return projectCanonicalPayloadToWire(canonical);
+}
+
+/**
+ * How many DISTINCT factors the deterministic connectivity repair wired each
+ * option to — links the PRODUCT drew for itself.
+ *
+ * ⚠ THIS IS NOT A SECOND OPINION ABOUT STATUS, AND THE DISTINCTION IS THE
+ * WHOLE POINT. `connectedFactorCount` (`cee/transforms/option-status.ts:276`)
+ * deliberately EXCLUDES these edges, so the product can never count its own
+ * wiring as a mapping the user made; that exclusion is correct, is documented
+ * at its own site, and is untouched here. The question this map answers is a
+ * different one: *"has the product already drawn a link here that it is about
+ * to ask the user to draw from scratch?"* Answering it is presentation, not
+ * adjudication — trap 21, where two authorities under similar names were
+ * reconciled instead of being named apart.
+ *
+ * Derived through `isRepairAuthoredOptionFactorEdge`, the ONE authority, so a
+ * second definition of "the repair invented this edge" cannot appear here.
+ * `origin` survives the `GraphV3` parse (`schemas/cee-v3.ts:380`,
+ * `origin: z.string().optional()`) — verified at the bytes, because a stripped
+ * field would make this map read empty forever and the disclosure would go
+ * silently dark rather than fail loud.
+ */
+function repairWiredFactorCountByOption(graph: GraphV3T): ReadonlyMap<string, number> {
+  const nodeKindById = new Map(graph.nodes.map((node) => [node.id, node.kind] as const));
+  const targetsByOption = new Map<string, Set<string>>();
+  for (const edge of graph.edges) {
+    if (!isRepairAuthoredOptionFactorEdge(edge, nodeKindById)) continue;
+    const targets = targetsByOption.get(edge.from) ?? new Set<string>();
+    targets.add(edge.to);
+    targetsByOption.set(edge.from, targets);
+  }
+  return new Map([...targetsByOption].map(([id, targets]) => [id, targets.size] as const));
+}
+
+/**
+ * The mapping ask, plus the disclosure it needs when the product has already
+ * wired this option itself.
+ *
+ * ⭐ THE ASK IS UNCHANGED AND IS STILL THE FIRST SENTENCE, VERBATIM. The user
+ * genuinely has not said which factor this option moves, so the question is
+ * correct in KIND and must keep being put — suppressing it, or counting repair
+ * edges as connections to make it disappear, would inflate readiness and
+ * silence a legitimate question. What was wrong is that it was asked FROM
+ * SCRATCH about an option the product had already wired, which reads as the
+ * product not knowing its own state.
+ *
+ * ⚠ IT DISCLOSES RATHER THAN ASKING FOR CONFIRMATION, AND THAT IS DELIBERATE.
+ * The repair wires each disconnected option to the UNION of every factor the
+ * connected options target (`stages/repair/status-quo-fix.ts:162-192`), so the
+ * link is a connectivity fallback, not a considered judgement about THIS
+ * option. Inviting the user to "confirm" it would ask them to bless an
+ * arbitrary link the product holds no evidence for — a worse failure than the
+ * one being fixed. Naming it, disowning it, and leaving the choice open is the
+ * honest form.
+ */
+function optionMappingAsk(label: string, repairWiredFactorCount: number): string {
+  const ask = `Choose which factor "${label}" changes and by how much.`;
+  if (repairWiredFactorCount <= 0) return ask;
+  const factors = repairWiredFactorCount === 1
+    ? "one factor"
+    : `${repairWiredFactorCount} factors`;
+  return `${ask} Olumi has already linked it to ${factors} to keep the model connected, but that link is Olumi's own inference rather than a mapping you stated, and it carries no effect value.`;
+}
+
+function appendSemanticIssues(
+  payload: AnalysisReadyPayload | undefined,
+  out: CanonicalReadinessIssue[],
+  repairWiredFactorCount: ReadonlyMap<string, number> = new Map<string, number>(),
+): void {
+  if (!payload || payload.status === 'ready') return;
+  const exactKey = (issue: CanonicalReadinessIssue): string => [
+    issue.option_id ?? '',
+    issue.factor_id ?? '',
+    issue.code,
+  ].join('::');
+  const optionFactorKey = (issue: CanonicalReadinessIssue): string | null =>
+    issue.option_id && issue.factor_id
+      ? `${issue.option_id}::${issue.factor_id}`
+      : null;
+  const strictEncoderPairs = new Set(
+    out
+      .filter((issue) =>
+        issue.code === 'NO_CAP_UNRECOVERABLE'
+        || issue.code === 'UNIT_MISMATCH'
+        || issue.code === 'OPTION_INTERVENTION_UNRESOLVABLE')
+      .map(optionFactorKey)
+      .filter((key): key is string => key !== null),
+  );
+  const seenExact = new Set(out.map(exactKey));
+  for (const [index, blocker] of (payload.blockers ?? []).entries()) {
+    const issue = blockerIssue(blocker, out.length + index, payload.status);
+    if (!issue) continue;
+    const pair = optionFactorKey(issue);
+    // The semantic producer sees an unencoded raw carrier as a missing value.
+    // When the strict encoder has already named that exact option×factor, they
+    // are two views of one blocker. Do not suppress any other factor or any
+    // distinct blocker code on the same pair.
+    if (issue.code === 'MISSING_OPTION_VALUE' && pair && strictEncoderPairs.has(pair)) continue;
+    const key = exactKey(issue);
+    if (seenExact.has(key)) continue;
+    seenExact.add(key);
+    out.push(issue);
+  }
+  const coveredOptionIds = new Set(
+    out
+      .map((issue) => issue.option_id)
+      .filter((id): id is string => typeof id === 'string'),
+  );
+  for (const option of payload.options) {
+    if (option.status === 'ready' || coveredOptionIds.has(option.option_id)) continue;
+    const mapping = option.status === 'needs_user_mapping';
+    out.push({
+      issue_id: `semantic_${out.length + 1}`,
+      code: mapping ? 'OPTION_NEEDS_MAPPING' : 'OPTION_NEEDS_ENCODING',
+      category: mapping ? 'option_mapping' : 'option_values',
+      message: mapping
+        ? optionMappingAsk(
+            option.label,
+            repairWiredFactorCount.get(option.option_id) ?? 0,
+          )
+        : `Choose how "${option.label}" should be represented on the effect scale.`,
+      repairability: 'human_input_required',
+      option_id: option.option_id,
+      option_label: option.label,
+    });
+  }
+}
+
+/**
+ * The sole whole-model readiness assessment. It exhaustively records every
+ * structural and semantic issue, while separately identifying the carrier
+ * normalisations that are safe because they preserve user-supplied values.
+ * Both the wire projection and Run admission are adapters over this record.
+ */
+export function assessCanonicalAnalysisReadiness(
+  graph: unknown,
+): CanonicalReadinessAssessment {
+  try {
+    if (graph === null || graph === undefined) {
+      const issue: CanonicalReadinessIssue = {
+        issue_id: 'graph_1',
+        code: 'NO_GRAPH',
+        category: 'graph_structure',
+        message: 'Draft or save a model first, then run analysis.',
+        repairability: 'human_input_required',
+      };
+      return {
+        analysisReady: undefined,
+        issues: [issue],
+        blockingIssues: [issue],
+        repairProposal: null,
+        canonicalGraph: null,
+        proposedGraph: null,
+        repairedForAnalysis: false,
+        safeToAnalyse: false,
+      };
+    }
+
+    // Strict encoding is the Run candidate: any unresolvable option keeps it
+    // out. The empty touched set is the proposal candidate: it canonicalises
+    // every safely expressible carrier while deliberately leaving unresolved
+    // options alone, so one bad option cannot hide safe work on another.
+    const strictEncoding = encodeOptionInterventionsForEdit(graph);
+    const proposalEncoding = encodeOptionInterventionsForEdit(graph, new Set<string>());
+    const proposalGraph = proposalEncoding.graph;
+    const parsed = GraphV3.safeParse(proposalGraph);
+    if (!parsed.success) {
+      const issue: CanonicalReadinessIssue = {
+        issue_id: 'graph_1',
+        code: 'SCHEMA_INVALID',
+        category: 'graph_structure',
+        message: 'This graph cannot be analysed because its structure is invalid.',
+        repairability: 'human_input_required',
+      };
+      return {
+        analysisReady: undefined,
+        issues: [issue],
+        blockingIssues: [issue],
+        repairProposal: null,
+        canonicalGraph: null,
+        proposedGraph: null,
+        repairedForAnalysis: false,
+        safeToAnalyse: false,
+      };
+    }
+
+    const labels = new Map(
+      parsed.data.nodes.map((node) => [node.id, node.label] as const),
+    );
+    const changes: CanonicalReadinessRepairChange[] = [];
+    const carrierIssues: CanonicalReadinessIssue[] = [];
+    for (const node of parsed.data.nodes) {
+      if (node.kind !== 'option') continue;
+      const before = optionRecordById(graph, node.id);
+      const after = optionRecordById(proposalGraph, node.id);
+      if (!before || !after || sameJson(before, after)) continue;
+      const issueId = `carrier_${carrierIssues.length + 1}`;
+      carrierIssues.push({
+        issue_id: issueId,
+        code: 'OPTION_NEEDS_ENCODING',
+        category: 'option_values',
+        message: `Store the existing effect values for "${node.label}" in the canonical format.`,
+        repairability: 'safe_canonicalisation',
+        option_id: node.id,
+        option_label: node.label,
+      });
+      changes.push({
+        change_id: `canonicalise_${changes.length + 1}`,
+        kind: 'canonicalise_option_interventions',
+        option_id: node.id,
+        option_label: node.label,
+        description: `Canonicalise the existing effect values for "${node.label}" without changing them.`,
+      });
+    }
+
+    const blockingIssues: CanonicalReadinessIssue[] = [];
+    for (const optionId of strictEncoding.unresolvedOptionIds) {
+      const label = labels.get(optionId);
+      const detail = classifyUnresolvedOption(graph, optionId);
+      const code = detail.code;
+      const message = code === 'NO_CAP_UNRECOVERABLE'
+        ? label
+          ? `Review the effect values for "${label}"; a real bound is required before its raw value can be normalised.`
+          : 'Review the option effect values; a real bound is required before the raw value can be normalised.'
+        : code === 'UNIT_MISMATCH'
+          ? label
+            ? `Review the effect values for "${label}"; the supplied unit does not match the factor.`
+            : 'Review the option effect values; the supplied unit does not match the factor.'
+          : label
+            ? `Review the effect values for "${label}"; at least one value cannot be safely interpreted yet.`
+            : 'Review the option effect values; at least one value cannot be safely interpreted yet.';
+      blockingIssues.push({
+        issue_id: `numeric_${blockingIssues.length + 1}`,
+        code,
+        category: code === 'OPTION_INTERVENTION_UNRESOLVABLE'
+          ? 'numeric_integrity'
+          : 'option_values',
+        message,
+        repairability: 'human_input_required',
+        option_id: optionId,
+        ...(label ? { option_label: label } : {}),
+        ...(detail.factorId ? { factor_id: detail.factorId } : {}),
+        ...(detail.factorLabel ? { factor_label: detail.factorLabel } : {}),
+      });
+    }
+    const structural = validateGraphStructure(parsed.data);
+    structural.violations.forEach((violation, index) => {
+      blockingIssues.push(structuralIssue(violation.code, index));
+    });
+
+    const semantic = projectSemanticAnalysisReadyFromGraph(proposalGraph);
+    // Derived from `parsed.data` — the SAME graph `projectSemanticAnalysisReadyFromGraph`
+    // reads, schema-validated, so the disclosure can never describe a different
+    // model than the ask it rides on.
+    appendSemanticIssues(
+      semantic,
+      blockingIssues,
+      repairWiredFactorCountByOption(parsed.data),
+    );
+
+    // ⭐ INV-P6 — stamp provenance + obligation on EVERY issue, at the one point
+    // where the complete issue set exists.
+    //
+    // In place, and against the CALLER'S graph rather than `proposalGraph`: the
+    // canonicalisation may promote a carrier, but provenance is a fact about what
+    // the user gave us, so it is read from the model as it arrived. Stamping here
+    // rather than at each mint site is deliberate — four separate mints feed these
+    // arrays (carrier, numeric, structural, semantic), and a per-mint stamp is
+    // exactly the hand-maintained mirror that goes stale when a fifth is added.
+    stampObligationsInPlace(carrierIssues, graph);
+    stampObligationsInPlace(blockingIssues, graph);
+
+    const allIssues = [...carrierIssues, ...blockingIssues];
+    const proposal: CanonicalReadinessRepairProposal | null =
+      blockingIssues.length >= 2
+        ? {
+            proposal_version: 'readiness_repair_v1',
+            complete: true,
+            issue_ids: allIssues.map((issue) => issue.issue_id),
+            changes,
+            // ⭐ EVERY input is still listed, and each one now says WHETHER IT MAY
+            // BE DEMANDED.
+            //
+            // ⚠ MY FIRST VERSION FILTERED `offered` INPUTS OUT HERE, AND TWO
+            // EXISTING TESTS WERE RIGHT TO GO RED. `unresolved_inputs.length ===
+            // blockingIssues.length` is the machine-checkable form of this
+            // proposal's `complete: true` claim, and dropping entries while keeping
+            // that flag would have replaced a truthful invariant with a weaker one
+            // — a more "complete-looking" payload that is less true than the thing
+            // it replaced.
+            //
+            // Marking, not filtering, is also the right SEAM: this module is the
+            // authority on WHOSE gap it is; the surface that composes the question
+            // decides what to put to the user. Filtering here would have made this
+            // module hold an opinion about presentation, and would have silently
+            // removed the offered gap from a payload whose whole purpose is to be a
+            // complete record.
+            unresolved_inputs: blockingIssues
+              .map(requiredInputForIssue)
+              .filter((input): input is CanonicalReadinessRequiredInput => input !== null),
+          }
+        : null;
+
+    const hardBlocked = blockingIssues.some(
+      (issue) => issue.category === 'graph_structure'
+        || issue.category === 'numeric_integrity'
+        || issue.category === 'internal',
+    );
+    const analysisReady = semantic
+      ? {
+          ...semantic,
+          ...(hardBlocked
+            ? { status: 'blocked', blocked_reason: blockingIssues[0]?.code ?? 'INTERNAL_ERROR' }
+            : {}),
+          ...(allIssues.length > 0 ? { readiness_issues: allIssues } : {}),
+          ...(proposal ? { repair_proposal: proposal } : {}),
+        }
+      : {
+          ...blockedIdentityCarrier(),
+          blocked_reason: blockingIssues[0]?.code ?? 'INTERNAL_ERROR',
+          readiness_issues: allIssues,
+          ...(proposal ? { repair_proposal: proposal } : {}),
+        };
+    const safeToAnalyse = blockingIssues.length === 0 && analysisReady?.status === 'ready';
+    const strictCanonicalGraph = strictEncoding.unresolvedOptionIds.length === 0
+      ? strictEncoding.graph
+      : null;
+    return {
+      analysisReady,
+      issues: allIssues,
+      blockingIssues,
+      repairProposal: proposal,
+      canonicalGraph: safeToAnalyse ? strictCanonicalGraph : null,
+      proposedGraph: changes.length > 0 ? proposalGraph : null,
+      repairedForAnalysis:
+        safeToAnalyse && strictCanonicalGraph !== null && !sameJson(graph, strictCanonicalGraph),
+      safeToAnalyse,
+    };
+  } catch {
+    const issue: CanonicalReadinessIssue = {
+      issue_id: 'internal_1',
+      code: 'INTERNAL_ERROR',
+      category: 'internal',
+      message: 'This graph could not be checked safely. Review it before analysis.',
+      repairability: 'human_input_required',
+    };
+    return {
+      analysisReady: undefined,
+      issues: [issue],
+      blockingIssues: [issue],
+      repairProposal: null,
+      canonicalGraph: null,
+      proposedGraph: null,
+      repairedForAnalysis: false,
+      safeToAnalyse: false,
+    };
+  }
+}
+
+/**
+ * Thin wire adapter over the canonical assessment, carrying the run path's OWN
+ * admission answer as {@link AnalysisReadyPayload.may_run}.
+ *
+ * ⭐ WHY `status` IS NOT ENOUGH, AND WHY THIS IS NOT A SECOND PREDICATE.
+ *
+ * `status` answers *"is this model ready as it stands?"*. The client gates its
+ * `run_analysis` chip on `status === 'ready'`, which is the STRICTER question —
+ * so on the turn where the readiness loop says *"that's enough to run, I'll
+ * leave the others out and say so"* the chip is filtered out, because that turn
+ * is `needs_user_input` WITH an admitting run path. Measured on the
+ * `live-4day-week` capture: one unconfigured option gives
+ * `status: needs_user_input, willProceed: TRUE`, while two and three give
+ * `needs_user_input, willProceed: false` — one status, both verdicts, which is
+ * exactly why no reading of `status` can recover the answer.
+ *
+ * `may_run` is NOT a new rule. It is `resolveRunAdmission(...).willProceed` —
+ * literally the boolean `build-turn-context.ts` throws `AnalysisNotReadyError`
+ * on — published so a consumer stops reconstructing an admission rule it cannot
+ * see. The same predicate already surfaces as `may_run` on the
+ * `/assist/v1/graph-readiness` route (`canonical-readiness.ts:400`); this is the
+ * same field, same name, same source, on the turn payload.
+ *
+ * ⚠ ONE ASSESSMENT, NOT TWO. `resolveRunAdmission` EXPOSES the assessment it
+ * derived from precisely so a caller needing both does not run the assessor
+ * twice — two independent assessments of one graph could disagree, which is the
+ * hazard `analysis-ready-core` exists to remove. Read the payload off
+ * `admission.assessment`, never from a second `assessCanonicalAnalysisReadiness`
+ * call.
+ *
+ * ⚠ ABSENCE, NOT `'unknown'`. The route's {@link MayRun} is three-valued because
+ * a caller may fail to REACH it; a turn payload has no such case — CEE holds the
+ * graph. Here the field is a plain boolean, and its ABSENCE (an older producer)
+ * is the signal a consumer must fall back on, which is why it stays optional.
+ */
+export function buildCanonicalAnalysisReadyFromGraph(
+  graph: unknown,
+): AnalysisReadyPayload | undefined {
+  return canonicalAnalysisReadyFrom(resolveRunAdmission(graph), graph);
+}
+
+/**
+ * ⭐⭐ THE ONE SPELLING OF THE CANONICAL PAYLOAD — for a caller that ALREADY
+ * holds the admission.
+ *
+ * ⚠⚠ THIS EXISTS BECAUSE THE SECOND SPELLING HAD ALREADY DRIFTED, AND A GUARD
+ * CAUGHT IT RATHER THAN A REVIEWER. `build-turn-context.ts` built the refusal's
+ * carrier inline as `{ ...admission.assessment.analysisReady, may_run }`, with a
+ * comment asserting that this *"is literally `buildCanonicalAnalysisReadyFromGraph`'s
+ * body, so the carrier is byte-identical to the canonical projection"*. That was
+ * true when written. The moment the canonical builder gained one field the
+ * sentence became false, and
+ * `handlers/__tests__/analysis-refusal-loader-throw-carries-identity.test.ts`
+ * REDed on the byte-identity it pins.
+ *
+ * Two spellings of one shape is this estate's signature defect (three
+ * `blockedIdentityCarrier` literals, two `generateGraphHash` twins). The fix is
+ * not to add the missing field at the second site — that keeps two sites. It is
+ * for both to call this, so the drift is structurally impossible.
+ *
+ * ⚠ IT TAKES THE ADMISSION, NOT THE GRAPH, so the caller does not re-resolve.
+ * `graph` is used only for the provenance census and MUST be the same graph
+ * `admission` was resolved over, or the two halves describe different models.
+ */
+export function canonicalAnalysisReadyFrom(
+  admission: ReturnType<typeof resolveRunAdmission>,
+  graph: unknown,
+): AnalysisReadyPayload | undefined {
+  const payload = admission.assessment.analysisReady;
+  if (!payload) return undefined;
+  // ⭐ ONE ADMISSION OBJECT, TWO PUBLISHED VIEWS. `may_run` is the run verdict a
+  // consumer already gates on; `analysis_admission` is the same verdict plus the
+  // claim-strength bound nothing expressed before. Both are derived from THIS
+  // `admission` — never from a second resolve — so they are structurally
+  // incapable of disagreeing about one graph.
+  return {
+    ...payload,
+    may_run: admission.willProceed,
+    analysis_admission: analysisAdmissionFrom(admission, graph),
+  };
+}
+
+/**
+ * CARRY the CANONICAL-ONLY fields onto a payload that was built by some OTHER
+ * projection of the same graph. A carry, never a second derivation.
+ *
+ * The canonical-only set is `may_run`, `readiness_issues`, `repair_proposal` and
+ * `analysis_admission` — the fields the canonical authority computes that no
+ * other producer does. It was named `carryCanonicalRunAdmission` when `may_run` was the only
+ * member; the name is now the general one, because a function that carries an
+ * exhaustive issue record while calling itself a run-admission carry is the
+ * mis-naming this module keeps paying for.
+ *
+ * ⭐⭐ WHY THE OTHER TWO JOINED, AND WHY A SPREAD WOULD NOT HAVE DONE IT.
+ *
+ * `analysis_ready` reached consumers in two shapes on one graph (measured on a
+ * four-valueless-factor graph, both producers driven):
+ *
+ *   canonical (`buildCanonicalAnalysisReadyFromGraph`)
+ *       8 blockers · 8 readiness_issues · repair_proposal PRESENT
+ *   pipeline  (`cee/transforms/analysis-ready.ts`)
+ *       8 blockers · 0 readiness_issues · repair_proposal ABSENT
+ *
+ * ⚠ THE ATTRIBUTION IS THE LOAD-BEARING PART. The two fields are NOT dropped by
+ * `extractAnalysisReady`. The pipeline builds its payload by calling
+ * `buildAnalysisReadyPayload` DIRECTLY (`cee/transforms/schema-v3.ts:1595`), and
+ * that producer never computes either field — zero occurrences of both names in
+ * the file, contrast control `blockers` = 20 in the same sweep. A re-projection
+ * cannot drop what was never in the body it re-projects, so making
+ * `extractAnalysisReady` spread instead of naming fields would NOT have
+ * recovered them. Carrying from the authority that DOES compute them is the only
+ * fix that works, and it is why this function grew rather than that one.
+ *
+ * THE COST OF NOT CARRYING — ONE consumer, named precisely:
+ *   · `summariseReadiness` (`routing/readiness-summary.ts:200,210`) gated its
+ *     multi-item branch on `repair_proposal` and told a user *"One factor still
+ *     has no value set"* while FOUR had none — a silent 4x under-report,
+ *     wire-witnessed twice. That consumer carries a local compensation today.
+ *     It is the only consumer this carry is written for.
+ *
+ * ⚠ A SECOND HARMED CONSUMER WAS CLAIMED HERE AND IS REFUTED — recorded so it is
+ * not re-derived. `evaluateReadiness` (`coaching/coaching-state.ts:301`) takes a
+ * GRAPH, not a payload, and calls `buildCanonicalAnalysisReadyFromGraph` ITSELF
+ * at `:312`; the `readiness` it reads at `:332` is therefore ALWAYS canonical.
+ * Both production call sites (`coaching-state.ts:288`,
+ * `coaching-lifecycle.ts:183`) pass a graph, and no call site anywhere passes a
+ * payload. It cannot receive a pipeline-shaped payload, was never harmed, and
+ * nothing here changes it. A function that consumes a graph is not a consumer of
+ * this seam, however similar the field name looks.
+ *
+ * ⭐ WHY THIS EXISTS, AND WHY IT IS NOT A SECOND STAMPER.
+ *
+ * The draft path does not always build its payload here. When the unified pipeline
+ * supplies `analysis_ready`, `draft-graph.ts` uses `extractAnalysisReady`, which is
+ * by its own comment a NAMED-FIELD RE-PROJECTION: it rebuilds the payload key by key,
+ * so an additive field that is not named is silently dropped. `may_run` is not named
+ * there, and CANNOT be — the pipeline does not know the admission rule. The result
+ * was a draft turn with no verdict at all, on the one turn where a fresh user first
+ * meets the Analyse control (witnessed on the deployed build: absent 9 of 9).
+ *
+ * ⚠ THE VALUE IS READ, NOT COMPUTED. `canonical` must be the output of
+ * {@link buildCanonicalAnalysisReadyFromGraph} FOR THE SAME GRAPH, so the verdict
+ * published here is byte-for-byte the one that turn's canonical build already
+ * produced. Deriving it again — even from the same predicate — would put two
+ * computations of one fact in the tree, which is the hazard `analysis-ready-core`
+ * exists to remove. Pass the canonical payload; never re-assess.
+ *
+ * ⚠ IDENTITY WHEN THERE IS NOTHING TO CARRY. Returns the payload UNCHANGED (same
+ * reference) when the canonical build produced no verdict, or when the payload
+ * already carries that exact verdict. So the path that already builds canonically is
+ * provably not perturbed by this function, and a graph the canonical authority could
+ * not assess yields ABSENCE — the honest "unknown", which the consumer doctrine
+ * (`may_run !== false`) turns into its existing fallback. Absence is never
+ * synthesised into `false`: inventing a refusal out of an assessor failure is the
+ * false-BLOCK harm the field was published to end.
+ *
+ * ⚠⚠ WHAT THIS DELIBERATELY DOES NOT COVER — READ THIS BEFORE "FIXING" IT.
+ *
+ * A graph that does not parse as V3 has NO canonical payload to carry from.
+ * `draft-graph.ts:403` sets `graphOutput = isGraphV3(graph) ? graph : null` and
+ * `:421` builds the canonical payload ONLY when `graphOutput` is non-null, so on
+ * that path `canonical` arrives `undefined` and this function returns the
+ * pipeline-shaped payload UNCHANGED.
+ *
+ * THAT IS THE INTENDED BEHAVIOUR, NOT AN OVERSIGHT. The alternative is to
+ * re-derive `readiness_issues` from `blockers` here so the hole is filled — and
+ * that would put a SECOND authority on what an issue is into the tree, mint a
+ * record no assessment produced, and do it precisely on the graphs the canonical
+ * authority could not understand, i.e. where a derivation is least trustworthy.
+ * A payload that is visibly pipeline-shaped is a true statement about a graph we
+ * could not assess; a back-filled one is a confident wrong answer. The gap is
+ * pinned as `graph_not_parseable_as_v3` in the KNOWN-NOT-COVERED set in
+ * `__tests__/canonical-readiness-record-carry.test.ts`, which REDs if that set
+ * grows OR shrinks — so this limit cannot silently change scope.
+ */
+export function carryCanonicalOnlyFields(
+  payload: NonNullable<GraphPatchBlockData['analysis_ready']>,
+  canonical: AnalysisReadyPayload | undefined,
+): NonNullable<GraphPatchBlockData['analysis_ready']> {
+  if (!canonical) return payload;
+
+  const patch: Record<string, unknown> = {};
+
+  const mayRun = canonical.may_run;
+  if (mayRun !== undefined && payload.may_run !== mayRun) patch.may_run = mayRun;
+
+  // ⚠ REFERENCE comparison, not deep equality. When `payload` IS the canonical
+  // build (every non-pipeline path), these are the SAME array/object, so no
+  // patch is produced and the identity guarantee below holds by construction.
+  // A deep comparison would be slower and would buy nothing: two structurally
+  // equal records from two different assessments would still be one authority
+  // disagreeing with itself, which is a defect to surface, not to smooth over.
+  const issues = canonical.readiness_issues;
+  if (issues !== undefined && payload.readiness_issues !== issues) {
+    patch.readiness_issues = issues;
+  }
+
+  const proposal = canonical.repair_proposal;
+  if (proposal !== undefined && payload.repair_proposal !== proposal) {
+    patch.repair_proposal = proposal;
+  }
+
+  // ⚠ `analysis_admission` JOINS THE CANONICAL-ONLY SET FOR THE SAME REASON THE
+  // OTHER THREE DID: the unified pipeline cannot compute it (it does not know
+  // the admission rule, and `extractAnalysisReady` is a NAMED-FIELD
+  // re-projection that drops anything it does not list), so without this carry
+  // the draft turn — the one turn where a fresh user first meets the Analyse
+  // control, and the turn the 3 Sep journey broke on — would ship no verdict at
+  // all. REFERENCE comparison, like its neighbours: when `payload` IS the
+  // canonical build these are the same object and no patch is produced.
+  const admission = canonical.analysis_admission;
+  if (admission !== undefined && payload.analysis_admission !== admission) {
+    patch.analysis_admission = admission;
+  }
+
+  if (Object.keys(patch).length === 0) return payload;
+  return { ...payload, ...patch };
+}
+
+// ============================================================================
+// Readiness Computation
+// ============================================================================
+
+/**
+ * Compute legacy structural option readiness from a graph.
+ *
+ * @deprecated Compatibility/test detail only. Production Run admission and
+ * whole-status consumers must use `buildCanonicalAnalysisReadyFromGraph`.
+ *
+ * Returns undefined if no goal node exists (cannot determine readiness).
+ *
+ * Status logic (mirrors src/cee/transforms/analysis-ready.ts):
+ * - "ready": all options have at least one numeric intervention
+ * - "needs_user_mapping": some options lack numeric interventions
+ * - "needs_user_input": fewer than 2 options
+ */
+export function computeStructuralReadiness(
+  graph: GraphV3T,
+): AnalysisReadyPayload | undefined {
+  const goalNode = graph.nodes.find((n) => n.kind === 'goal');
+  if (!goalNode) return undefined;
+
+  const optionNodes = graph.nodes.filter((n) => n.kind === 'option');
+
+  // Build edge map from options to factors for intervention lookup
+  const optionToFactors = new Map<string, Set<string>>();
+  for (const edge of graph.edges) {
+    // Edges from option nodes to factor/goal nodes represent interventions
+    const sourceNode = graph.nodes.find((n) => n.id === edge.from);
+    if (sourceNode?.kind === 'option') {
+      if (!optionToFactors.has(edge.from)) {
+        optionToFactors.set(edge.from, new Set());
+      }
+      optionToFactors.get(edge.from)!.add(edge.to);
+    }
+  }
+
+  const options: AnalysisReadyPayload['options'] = [];
+
+  for (const opt of optionNodes) {
+    const nodeAny = opt as Record<string, unknown>;
+    const interventions = mergeInterventionSources(nodeAny);
+    const connectedFactors = optionToFactors.get(opt.id) ?? new Set<string>();
+
+    // Option is ready if it has numeric interventions or connected factors
+    const hasNumericInterventions = interventions != null
+      && Object.keys(interventions).length > 0
+      && Object.values(interventions).every((v) => typeof v === 'number');
+
+    let status: string;
+    if (hasNumericInterventions) {
+      status = 'ready';
+    } else if (connectedFactors.size > 0) {
+      // Connected but no encoded interventions yet
+      status = 'needs_encoding';
+    } else {
+      status = 'needs_user_mapping';
+    }
+
+    options.push({
+      option_id: opt.id,
+      label: opt.label,
+      status,
+      interventions: interventions ?? {},
+    });
+  }
+
+  // === is_baseline detection (CEE-2) ===
+  // Mirror the detection logic from buildAnalysisReadyPayload:
+  // Priority 1: node-level is_baseline flag from LLM
+  // Priority 2: label keyword match via shared BASELINE_KEYWORDS
+  // Non-matching options get explicit false (not omitted) so downstream can
+  // distinguish "detected as not baseline" from "detection didn't run".
+  let baselineIdx: number | null = null;
+  for (let i = 0; i < optionNodes.length; i++) {
+    if ((optionNodes[i] as Record<string, unknown>).is_baseline === true) {
+      baselineIdx = i;
+      break;
+    }
+  }
+  if (baselineIdx === null) {
+    for (let i = 0; i < options.length; i++) {
+      if (labelMatchesBaseline(options[i].label)) {
+        baselineIdx = i;
+        break;
+      }
+    }
+  }
+  for (let i = 0; i < options.length; i++) {
+    options[i].is_baseline = i === baselineIdx;
+  }
+
+  // Determine overall status
+  let payloadStatus: string;
+  if (options.length < 2) {
+    payloadStatus = 'needs_user_input';
+  } else if (options.some((o) => o.status === 'needs_user_mapping')) {
+    payloadStatus = 'needs_user_mapping';
+  } else if (options.some((o) => o.status === 'needs_encoding')) {
+    payloadStatus = 'needs_encoding';
+  } else {
+    payloadStatus = 'ready';
+  }
+
+  return {
+    options,
+    goal_node_id: goalNode.id,
+    status: payloadStatus,
+    ...(goalNode.goal_threshold != null && { goal_threshold: goalNode.goal_threshold }),
+    // ROADMAP 2.315(a) — the raw target trio, carried verbatim from the goal
+    // node's attested mint. RAW-ANCHORED via the shared rule, so this mirror
+    // cannot drift from the primary builder's.
+    ...pickGoalThresholdTrio(goalNode),
+  };
+}
+
+// ============================================================================
+// Refusal (ROADMAP 2.1085 (root 2.1041) / golden-journey EXT-2)
+//
+// ⚠ CITATION NOTE, so this is not "corrected" back. Every comment in this
+// change set originally cited **2.1091**. That is the DETERMINISTIC ADVICE
+// GATE row and carries no mixed-scale content. The mixed-scale family is
+// **2.1085** (analysis-seam mixed-scale guard), root **2.1041**
+// (zero-baseline convention). Row 2.1134(b) records the correction, made
+// 14 Aug — it had itself carried the wrong id until then, which is how the
+// mis-citation propagated into this lane's brief and from there into ~29
+// comments. `run-analysis.ts`'s own "THE COPY (row 2.1091…)" header is the
+// same mis-citation, still uncorrected and deliberately left alone here
+// (out of this change's scope — rowed, not silently edited).
+// ============================================================================
+
+/**
+ * The status the readiness vocabulary already reserves for "something
+ * prevents this analysis". Its documented semantics live on
+ * `AnalysisReadyStatus` in `src/schemas/analysis-ready.ts` and it is already
+ * on the wire — `synthesiseFreshnessOnlyAnalysisReady` emits it for the
+ * transport-recovery carrier. Nothing new is minted here.
+ */
+/**
+ * ⚠ DERIVED FROM THE CARRIER, NOT SPELLED AGAIN. Until the shared factory
+ * landed, this constant and the three carrier literals each wrote `'blocked'`
+ * independently — and the refusal carrier read this constant while the other two
+ * did not, so "the status the blocked carrier ships" had two sources that only
+ * happened to agree. Reading it off `blockedIdentityCarrier()` makes that
+ * structural: the constant cannot drift from the payload it describes, because
+ * it IS the payload's value. (No cycle: this module already imports the factory.)
+ */
+export const ANALYSIS_READY_BLOCKED_STATUS = blockedIdentityCarrier().status;
+
+/**
+ * Build the typed readiness state for a REFUSED analyse turn.
+ *
+ * WHY THIS EXISTS (witnessed on staging 2026-08-13, golden journey EXT-2):
+ * when the analyse handler refuses — the mixed-scale gate, the baseline-scale
+ * gate, the scale postcondition, or any other RECOVERABLE_HANDLER_CAUSE — the
+ * turn recovers as a graceful 200 carrying honest PROSE and nothing a machine
+ * can read. On the chip-click arm no `analysis_ready` shipped at all; on the
+ * routed arm the pre-dispatch structural payload shipped unrevised, so the
+ * wire said `status: 'ready'` about a run CEE had just declined to perform.
+ * Absent and confidently-wrong are the two halves of one defect: the refusal
+ * had no representation in the readiness vocabulary.
+ *
+ * ⚠ WHY THIS LIVES HERE AND NOWHERE ELSE (ROADMAP 2.1135). Refusal readiness
+ * shares the module that owns the canonical graph adapter, so a blocked turn
+ * cannot drift into a separate wire vocabulary.
+ *
+ * ⚠⚠ THE SHAPE IS A PRESENT-BUT-EMPTY CARRIER, AND THAT IS A CORRECTION.
+ * The first version of this helper CARRIED the real structural options onto
+ * the refusal, reasoning that an empty block would discard consumer state.
+ * An adversarial review measured what that does on the DEPLOYED UI: real
+ * options flip `DecisionOverviewCard` from `unassessed` to `needs_input`,
+ * which auto-expands "Olumi needs a little more from you" — with no
+ * `user_questions` — mis-describing a SCALE refusal as a framing gap, and the
+ * payload is then echoed back to CEE and persisted to sessionStorage.
+ * Shipping a new false surface in order to deliver an honest wire field is
+ * the wrong trade. This is the shape `synthesiseFreshnessOnlyAnalysisReady`
+ * already puts on the wire and the UI already handles.
+ *
+ * ⚠ ROADMAP 2.1134(a), DERIVED AT THE REGISTER BYTES rather than paraphrased,
+ * because the first version cited it for something it does not say. The row
+ * withdraws a claimed defect between `analysis_ready.options[].status` (CEE:
+ * "do we have user-warranted values?") and `enrichment.option_comparison[]
+ * .status` (ISL/PLoT: "did this arm compute?"), and its ruling is *"Name them
+ * apart; do not reconcile"* — forcing agreement would have broken
+ * `isRecommendableOption`. It says NOTHING about refusal turns and does NOT
+ * require options to be carried on one. A refusal turn produces no
+ * `option_comparison` and names no leader, so there is nothing to reconcile
+ * and `isRecommendableOption` has nothing to read. The row's genuine
+ * requirement survives here as a stronger property: this function writes NO
+ * per-option status at all.
+ *
+ * ⚠ `options` and `goal_node_id` are PRESENT-but-empty, never dropped. Both
+ * are REQUIRED at the boundary (`@talchain/schemas` `OlumiResponseSchema`
+ * declares `options: z.array(z.unknown())` and `goal_node_id: z.string()`),
+ * so omitting either fails egress validation and destroys the whole turn.
+ * Pinned by a test.
+ *
+ * ⭐⭐ THE PRESENT-BUT-EMPTY CARRIER IS NOW CONDITIONAL, AND THE CONDITION IS THE
+ * WHOLE POINT (measured on staging 18 Aug 2026, builds `1f5eb2b` and
+ * `10d0aba5`; the core two-turn journey failed on 4 of 13 runs).
+ *
+ * WHAT WAS MEASURED. Turn 1 drafted a healthy model — `goal:1`, `option:4`,
+ * `analysis_ready.goal_node_id = "378f195a"`, four options. Turn 2 came back
+ * `status="blocked" goal_node_id="" options=[] blocked_reason="MISSING_OPTION_VALUE"`
+ * with NO `readiness_issues`, NO `bias_findings`, freshness
+ * `unknown/no_successful_run_analysis_fact` — and **`graph_hash` IDENTICAL to
+ * turn 1's**. That key set is this function and no other producer; that
+ * freshness pair is `clampRefusalFreshness` and no other producer; and the
+ * identical hash proves the read returned exactly the model that was committed.
+ * The turn had routed to the analyse handler, the handler correctly refused
+ * (the fresh draft's options carry no effect values — the PASSING runs of the
+ * same journey report `MISSING_OPTION_VALUE` issues too, in varying numbers
+ * across runs), and this carrier then REPLACED the turn's structural readiness
+ * with an empty one.
+ *
+ * TWO CORRECT PIECES, ONE HARM (CLAUDE.md trap 21). Withdrawing the verdict is
+ * right. The empty carrier was ALSO right for the case the adversarial review
+ * MEASURED — a model that is complete, refused only by a scale gate, where
+ * shipping real options flips `DecisionOverviewCard` from `unassessed` to
+ * `needs_input` and auto-expands "Olumi needs a little more from you" over a
+ * gap that does not exist. Neither piece is wrong; the pair is.
+ *
+ * ⚠⚠ THE DISCRIMINATOR WAS `status`, AND `status` CANNOT SEPARATE THE TWO CASES.
+ * WITHDRAWN, measured at staging tip c24bfe37 with production code untouched:
+ *
+ *   class                                       | status           | may_run
+ *   --------------------------------------------|------------------|--------
+ *   A mid-session, ONE un-encoded option         | needs_user_input | TRUE
+ *     (#942's own ADDED_OPTION_GRAPH — the case  |                  |
+ *      the empty carrier exists to protect)      |                  |
+ *   B complete model, every option valued        | ready            | true
+ *   C fresh draft, NO option valued (the defect) | needs_user_input | FALSE
+ *
+ * BOTH cases the estate needs separated are `needs_user_input`; the `ready`
+ * term fires on NEITHER and gives A and C the SAME answer. That was invisible
+ * only because the chip arm never passed the second argument, leaving this
+ * function exactly ONE live caller — so two live tests could assert opposite
+ * answers to one question and both stay green.
+ *
+ * ⭐ AND THIS FILE ALREADY KNEW. `buildCanonicalAnalysisReadyFromGraph`'s doc
+ * block ~300 lines above records the same fact from an INDEPENDENT capture:
+ * *"one unconfigured option gives `status: needs_user_input, willProceed:
+ * TRUE`, while two and three give `needs_user_input, willProceed: false` — one
+ * status, both verdicts, which is exactly why no reading of `status` can
+ * recover the answer."* The guard contradicted its own module's doctrine.
+ *
+ * THE DISCRIMINATOR IS THE ADMISSION VERDICT — `may_run`, i.e.
+ * `resolveRunAdmission(...).willProceed`, the boolean `build-turn-context.ts`
+ * throws `AnalysisNotReadyError` on. The question this function answers is
+ * *"is this refusal ABOUT the model?"*:
+ *
+ *   · `may_run === true`  → the analysis COULD have proceeded, so the refusal
+ *     came from somewhere else and the model's identity is not the answer. The
+ *     empty carrier is right, and this is exactly what #942/RED-3 pinned.
+ *   · `may_run === false` → the refusal IS about model readiness, so the
+ *     identity is precisely what the user needs in order to fix it.
+ *
+ * ⚠ ABSENCE CARRIES, AND THAT IS A CHOICE. `may_run` is optional and two
+ * `turn-executor` sites assign readiness without the canonical stamp
+ * (`current.assessment?.analysisReady`, `readback.analysisReady`), so a
+ * present-but-unstamped payload is constructible. Absence falls toward
+ * CARRYING: the degeneracy guard below already refuses a degenerate payload —
+ * it is verbatim the UI's own accept predicate — so carrying can never ship
+ * something the consumer discards, whereas withholding the identity on a
+ * refusal that needed it IS the defect being fixed. It is also the polarity the
+ * rest of the estate mandates for this field: *"absence means an older
+ * producer, never 'no'"*. (At this tip those two sites sit in closures that end
+ * in `return finalizeRun()`, so they cannot reach this guard — the pin is
+ * DEFENSIVE, and it is here because one mutable `analysisReadyForTurn` is
+ * shared across eight assignment sites in a 14,000-line function.)
+ *
+ * ⚠ `status === 'ready'` IS KEPT AS A SECOND SUFFICIENT REASON, and that is a
+ * measurement rather than a hedge: an 18-case sweep at this tip found the
+ * (`ready` AND `may_run === false`) cell EMPTY, so the two terms cannot
+ * disagree on anything reachable, and keeping it preserves the pin for a
+ * `ready` projection that carries no verdict at all. What is withdrawn is the
+ * claim that it is THE discriminator. Its original reasoning, still sound as a
+ * second reason:
+ *
+ *   · structural NOT ready → "this model needs input" is TRUE. Preserving the
+ *     model's identity is then strictly more truthful than denying it, and the
+ *     reviewers' harm cannot occur, because the card would be describing a real
+ *     gap. On a FRESH follow-up turn the empty carrier preserves no user state
+ *     at all — it IS the user's only readiness payload, and it asserts a
+ *     goal-less, option-less model while the canonical persisted state it was
+ *     projected from holds a goal and four options. That is P5 — a product
+ *     claim about the user's model contradicted by its own authoritative read.
+ *   · structural `ready`   → "needs input" would be FALSE. The empty carrier
+ *     stays, exactly as the review required.
+ *
+ * This is P3's mirror: a producer may replace a consumer's payload only with
+ * something AT LEAST AS TRUE. Completeness is not truth, and neither is
+ * emptiness.
+ *
+ * WHAT IS CARRIED, AND WHAT IS STILL REFUSED. `options` and `goal_node_id` are
+ * the model's IDENTITY, and `blockers` is the REPAIR ROUTE — both come from the
+ * canonical readiness authority and neither is composed here. Every other field
+ * — bias findings, model adjustments, readiness issues, repair proposals — is
+ * OUTPUT this turn declined to produce, and is dropped.
+ *
+ * ⚠ `blockers` WAS IN THAT DROPPED LIST UNTIL NOW, and the sentence read
+ * "blockers, bias findings, …". That was right about the OUTPUT class and wrong
+ * about this member: a blocker is not something the turn declined to compute —
+ * it is the reason the turn refused, already written down. Dropping it is what
+ * left `analysis_state.run_state.blockers` empty
+ * (`compose/analysis-state-v1.ts:493` calls `mapWireBlockers(input.readiness
+ * ?.blockers)`, and `mapWireBlockers(undefined)` returns `[]`), which
+ * `chip-click-dispatch.ts:709-714` already records as ONE defect with the
+ * missing identity rather than two.
+ * ROADMAP 2.1134(a)'s surviving requirement holds unchanged: this function
+ * writes no per-option status of its own. A refusal turn produces no
+ * `option_comparison` and names no leader, so there is nothing for
+ * `isRecommendableOption` to read and nothing to reconcile.
+ *
+ * The one-argument call is BYTE-IDENTICAL to the previous behaviour, so callers
+ * with no structural payload are unchanged.
+ *
+ * ⚠ THE CHIP ARM IS NO LONGER ONE OF THEM. It used to pass one argument, on the
+ * stated grounds that a user clicking "Run analysis" mid-session is the case the
+ * empty carrier was measured for. That reasoning was right about the CASE and
+ * wrong about the ARM: mid-session is class A above and is now held bare by
+ * `may_run === true`, on the same shared rule the routed arm uses. A user
+ * clicking the same chip on a FRESH DRAFT is class C, and the one-argument call
+ * denied that user's model exists — the defect this table was measured to fix.
+ * Both arms now ask one question of one authority (CLAUDE.md trap 21).
+ *
+ * @param blockedReason Stable, SPECIFIC code. Callers derive it with
+ *                     `blockedReasonForHandlerFailure`, which cannot return
+ *                     an empty or generic value.
+ * @param structuralReadiness The readiness this turn already projected from the
+ *                     canonical graph, when it has one. Consulted ONLY for the
+ *                     model's identity, and ONLY when the admission verdict did
+ *                     NOT admit (`may_run !== true`), the projection is not
+ *                     `ready`, and it actually carries an identity to preserve.
+ */
+export function buildAnalysisRefusalReadiness(
+  blockedReason: string,
+  // The BASE wire payload, deliberately NOT this module's `AnalysisReadyPayload`
+  // (which narrows `readiness_issues[].code` to `CanonicalReadinessIssueCode`).
+  // Callers hold the base type, and this function reads only `status`,
+  // `goal_node_id` and `options` — none of them narrowed — so requiring the
+  // narrower type here would force a cast at the call site for a field this
+  // function never touches.
+  structuralReadiness?: NonNullable<GraphPatchBlockData['analysis_ready']>,
+): AnalysisReadyPayload {
+  const refusal: AnalysisReadyPayload = {
+    ...blockedIdentityCarrier(),
+    blocked_reason: blockedReason,
+  };
+  // `!` not `=== undefined`: the parameter is optional at compile time, but a
+  // `null` reaching it at runtime would throw on the property reads below and
+  // take the WHOLE TURN down — a crash traded for a payload defect. Type safety
+  // is not runtime safety at a boundary this load-bearing.
+  if (!structuralReadiness) return refusal;
+  // ⭐ THE DEGENERACY GUARD IS THE CONSUMER'S OWN ACCEPT PREDICATE, verified at
+  // the bytes on DecisionGuideAI staging `a4fd5485`. `normaliseV5AnalysisReady`
+  // (`src/v5/applyV5State.ts:233-234`) rejects a payload with:
+  //     if (typeof goalNodeId !== 'string' || goalNodeId.length === 0) return undefined
+  //     if (!Array.isArray(obj.options) || obj.options.length === 0) return undefined
+  // — the same four conditions as below. So this function preserves EXACTLY what
+  // the mounted consumer accepts and drops EXACTLY what it would discard anyway.
+  // That is not a coincidence worth leaving unrecorded: it means the rule cannot
+  // ship a payload the UI silently throws away, and it is the reason a
+  // degenerate structural payload is no better than the empty carrier — without
+  // this the branch would report success on a no-op and the guard would be
+  // agreeing with itself.
+  const goalNodeId = structuralReadiness.goal_node_id;
+  const options = structuralReadiness.options;
+  if (
+    structuralReadiness.may_run === true
+    || structuralReadiness.status === 'ready'
+    || typeof goalNodeId !== 'string'
+    || goalNodeId.length === 0
+    || !Array.isArray(options)
+    || options.length === 0
+  ) {
+    return refusal;
+  }
+  // ⭐ AND THE REPAIR ROUTE, WHICH IS ALREADY WRITTEN.
+  //
+  // Identity alone answers *"what is being refused?"*. It does not answer
+  // *"what do I do about it?"* — and until now the only thing that crossed was
+  // `nextStep`, which on a four-blocker draft reads "Review all 4 readiness
+  // issues together before analysis": a COUNT, offered where four routes were
+  // already in hand.
+  //
+  // `blockers[]` IS those routes, authored by the semantic projector at the
+  // same moment as the identity, one row per option × factor, each naming the
+  // option label, the factor label, the factor's current value and a
+  // `suggested_action`. NOTHING IS COMPOSED HERE. A second renderer of the same
+  // fact is the mirror defect this module exists to prevent; this is the same
+  // carry as `goal_node_id` and `options`, from the same payload, one line up.
+  //
+  // ⚠ SCOPED TO THE IDENTITY BRANCH ON PURPOSE. Everything above this line
+  // returns the bare carrier, and blockers must not soften that: the admitting
+  // case (`may_run === true`) and the `ready` case have no refusal to explain,
+  // and #1126 measured what happens when a complete model is described as
+  // needing input.
+  //
+  // ⚠ CARRIED ONLY WHEN THE PRODUCER HAS SOME. Absence stays absence — an
+  // empty array is never substituted for "nothing specific to name", because a
+  // manufactured blocker is exactly the invention this whole seam refuses. A
+  // refusal that cannot name a pair says nothing rather than something empty.
+  //
+  // ⚠ THIS ARMS A GUARD RATHER THAN BYPASSING ONE. On the routed arm
+  // `turn-executor.ts:12750` feeds `analysisReadyForTurn?.blockers` to
+  // `applyBlockedSlotClaimGuard`, which today short-circuits `no_blockers` on a
+  // refusal because the field is absent. Populating it lets that guard do the
+  // job it was written for — removing a claim that a value exists where the
+  // payload's own readiness says it does not. The chip arm has no such guard
+  // and needs none: its refusal text is template-composed and LLM-free, so
+  // there is no model claim for it to contradict.
+  // ⭐ SHAPE-CHECKED AGAINST THE CONTRACT, AND THE EXISTING PINS ARE WHY.
+  //
+  // Two #1126 specs attach `blockers: [{ kind: 'missing_value' }]` to a payload
+  // and assert it does not reach the wire. When this carry was first written
+  // without a shape check, BOTH went red — and they were RIGHT to. That object
+  // is not an `AnalysisBlocker`: no `factor_id`, no `factor_label`, no
+  // `message`, no `suggested_action`, and `kind` is not even the field name.
+  // It is a SMUGGLE FIXTURE, and the property it pins — this carrier passes
+  // through nothing it was merely handed — is exactly right and must survive.
+  //
+  // So the rule is not "carry `.blockers`". It is CARRY THE PRODUCER'S OWN
+  // AUTHORED ROWS: only entries that satisfy the published `AnalysisBlocker`
+  // contract, parsed BY that schema rather than by a hand-copied field list
+  // here (a mirror of a contract is the drift this estate keeps paying for).
+  // Anything else is dropped exactly as `bias_findings`, `model_adjustments`,
+  // `readiness_issues` and `repair_proposal` are.
+  //
+  // ⚠ WHAT CHANGED IN THE RULING, STATED PLAINLY RATHER THAN EDITED AWAY: those
+  // two specs grouped `blockers` with "OUTPUT this turn did not produce". That
+  // is right about bias findings and adjustments and wrong about this member —
+  // a blocker is not work the turn declined to do, it is THE REASON IT REFUSED,
+  // minted by the same assessment as the identity. The specs stay green
+  // UNTOUCHED because their fixtures are malformed; the real-graph pins that
+  // enumerate the key set do change, deliberately, and say so.
+  const authored = Array.isArray(structuralReadiness.blockers)
+    ? structuralReadiness.blockers.filter(
+        (blocker): blocker is NonNullable<typeof blocker> =>
+          AnalysisBlocker.safeParse(blocker).success,
+      )
+    : [];
+  return {
+    ...refusal,
+    goal_node_id: goalNodeId,
+    options,
+    // Absence stays absence. An empty array is never substituted for "nothing
+    // specific to name" — a manufactured blocker is the invention this seam
+    // refuses, and an empty `blockers` reads to a consumer as "checked, none",
+    // which is a different and false claim.
+    ...(authored.length > 0 ? { blockers: authored } : {}),
+  };
+}

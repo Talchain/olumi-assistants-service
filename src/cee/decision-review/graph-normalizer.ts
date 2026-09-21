@@ -13,10 +13,13 @@
  * and deriving parameter_uncertainties for ISL sensitivity analysis.
  */
 
+import type { KnownObservedStateSourceLiteral } from '@talchain/schemas';
+
 import type { GraphV1 } from '../../contracts/plot/engine.js';
 import { logger } from '../../utils/simple-logger.js';
 import { deriveValueUncertainty, type ExtractionType } from '../transforms/value-uncertainty-derivation.js';
 import type { ParameterUncertainty } from '../transforms/schema-v2.js';
+import { extractionTypeForSource } from './value-source-extraction-type.js';
 
 /**
  * Conservative default coefficient of variation (20%)
@@ -31,12 +34,43 @@ const STD_FLOOR = 0.01;
 
 /**
  * V3 observed_state format (may be present on nodes from CEE output)
+ * Includes all V3 fields to ensure they are preserved during normalisation.
  */
 interface ObservedStateV3 {
   value: number;
   baseline?: number;
   unit?: string;
-  source?: 'brief_extraction' | 'cee_inference';
+  /**
+   * How the value entered the model.
+   *
+   * ⚠ THIS USED TO BE A HAND-WRITTEN `'brief_extraction' | 'cee_inference'` —
+   * a TWO-member mirror of a TWELVE-member contract enum (CLAUDE.md trap 12),
+   * and it is why the width fallback below looked exhaustive while silently
+   * bucketing ten literals as `inferred`. It is now derived from the contract.
+   *
+   * The type is widened to `string` beyond the known literals on purpose: the
+   * shared contract declares the WIRE field as `z.string()` and states that a
+   * consumer must classify an unknown stamp as neutral rather than refuse or
+   * guess. `extractionTypeForSource` is the one place that classification
+   * happens.
+   */
+  source?: KnownObservedStateSourceLiteral | (string & {});
+  /** Raw value before normalization (preserves original extraction) */
+  raw_value?: number;
+  /** Upper bound/cap for the value (e.g., "up to £500k" → cap is 500000) */
+  cap?: number;
+  /**
+   * How the value was extracted.
+   *
+   * ⚠ Also formerly a hand-written mirror — a THREE-member one, omitting
+   * `observed`. Derived from `ExtractionType`, the type the multiplier table is
+   * itself keyed on, so the two cannot drift.
+   */
+  extractionType?: ExtractionType;
+  /** Factor type classification for downstream enrichment */
+  factor_type?: 'cost' | 'price' | 'time' | 'probability' | 'revenue' | 'demand' | 'quality' | 'other';
+  /** 1-2 short phrases explaining sources of epistemic uncertainty */
+  uncertainty_drivers?: string[];
 }
 
 /**
@@ -106,9 +140,16 @@ export function normalizeGraphForISL(graph: GraphV1): NormalizedGraphForISL {
       return node;
     }
 
-    // Get extraction metadata for uncertainty derivation
-    const extractionType = nodeWithState.data?.extractionType ??
-      (nodeWithState.observed_state?.source === 'brief_extraction' ? 'explicit' : 'inferred');
+    // Get extraction metadata for uncertainty derivation.
+    //
+    // The pipeline's own `data.extractionType` stamp still wins when present —
+    // it is written by the producer that can actually tell a range from a
+    // point. The FALLBACK is where the polarity defect lived: see
+    // `value-source-extraction-type.ts` for the full 12-literal mapping, the
+    // typecheck-completeness guard, and why this must NOT be exported to PLoT.
+    const extractionType: ExtractionType =
+      (nodeWithState.data?.extractionType as ExtractionType | undefined) ??
+      extractionTypeForSource(nodeWithState.observed_state?.source);
     const confidence = nodeWithState.data?.confidence;
     const range = nodeWithState.data?.range;
 
@@ -122,7 +163,7 @@ export function normalizeGraphForISL(graph: GraphV1): NormalizedGraphForISL {
       // Has extraction metadata, use derivation formula
       const result = deriveValueUncertainty({
         value: effectiveValue,
-        extractionType: extractionType as ExtractionType,
+        extractionType,
         confidence,
         rangeMin: range?.min,
         rangeMax: range?.max,
@@ -151,14 +192,15 @@ export function normalizeGraphForISL(graph: GraphV1): NormalizedGraphForISL {
       };
     }
 
-    // If node has observed_state.value, copy to data format with std
+    // If node has observed_state.value, copy ALL observed_state fields to data format
+    // Use spread to preserve V3 fields (raw_value, cap, factor_type, uncertainty_drivers)
     normalizedCount++;
     return {
       ...node,
       data: {
-        value: nodeWithState.observed_state!.value,
-        baseline: nodeWithState.observed_state!.baseline,
-        unit: nodeWithState.observed_state!.unit,
+        // Spread all observed_state fields first
+        ...nodeWithState.observed_state,
+        // Then override/add computed fields
         extractionType: extractionType,
         value_std: valueStd,
       },

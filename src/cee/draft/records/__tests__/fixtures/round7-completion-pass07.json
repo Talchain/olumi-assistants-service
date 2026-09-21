@@ -1,0 +1,513 @@
+{
+ "__PROVENANCE__": {
+  "what": "A HISTORIC CAPTURE. The model's real pass-1 record set and its real completion-pass claims, decoded from the round-7 acceptance block's redacting-proxy captures (2026-08-12).",
+  "APPEND_ONLY": "This file is EVIDENCE, not a fixture to keep current. It records what the model actually emitted on a dated build. Add new captures; never edit these bytes to make a test pass.",
+  "draft_capture": "2026-08-12T04-52-45-674Z_0024.json",
+  "completion_capture": "2026-08-12T04-53-13-695Z_0025.json",
+  "draft_started_at": "2026-08-12T04:52:45.674Z",
+  "completion_started_at": "2026-08-12T04:53:13.695Z",
+  "run": 16,
+  "brief": "B1",
+  "scenario": "4844d7e4",
+  "live_outcome": "FAIL 500 \u00b7 requestId 5dd2c1dc \u2014 MISSING_BRIDGE\u00d71 \u00b7 NO_PATH_TO_GOAL\u00d74 \u00b7 NO_EFFECT_PATH\u00d74",
+  "round7_completion_pass_log": "ask 5\u21928 \u00b7 nodes 6\u21929 \u00b7 edges 4\u219212 \u00b7 kept=false"
+ },
+ "records": {
+  "stated_items": [
+   {
+    "kind": "goal",
+    "source_quote": "get to \u00a320m ARR by end of FY28 without dropping gross margin below 78%",
+    "value": 20,
+    "unit": "\u00a3m ARR"
+   },
+   {
+    "kind": "constraint",
+    "source_quote": "gross margin below 78%",
+    "value": 78,
+    "unit": "%",
+    "direction": "floor"
+   },
+   {
+    "kind": "figure",
+    "source_quote": "85-person regtech SaaS doing \u00a311.2m ARR",
+    "value": 11.2,
+    "unit": "\u00a3m ARR"
+   },
+   {
+    "kind": "figure",
+    "source_quote": "growing about 28% year on year",
+    "value": 28,
+    "unit": "% YoY growth"
+   },
+   {
+    "kind": "figure",
+    "source_quote": "UK new-logo growth slowed to 9% over the last two quarters",
+    "value": 9,
+    "unit": "% new-logo growth"
+   },
+   {
+    "kind": "figure",
+    "source_quote": "UK market is maybe 70% penetrated for our segment",
+    "value": 70,
+    "unit": "% market penetration"
+   },
+   {
+    "kind": "figure",
+    "source_quote": "TAM is supposedly \u20ac400m",
+    "value": 400,
+    "unit": "\u20acm"
+   },
+   {
+    "kind": "figure",
+    "source_quote": "BaFin licensing will take 9 to 14 months",
+    "value": 9,
+    "unit": "months (min)"
+   },
+   {
+    "kind": "figure",
+    "source_quote": "legal quoted us \u20ac250k for the process",
+    "value": 250,
+    "unit": "\u20ack"
+   },
+   {
+    "kind": "figure",
+    "source_quote": "maybe 6 local hires \u2014 say \u20ac900k a year fully loaded",
+    "value": 900,
+    "unit": "\u20ack/year"
+   },
+   {
+    "kind": "figure",
+    "source_quote": "We have \u00a33.1m cash",
+    "value": 3.1,
+    "unit": "\u00a3m cash"
+   },
+   {
+    "kind": "figure",
+    "source_quote": "breakeven plus or minus \u00a3100k a quarter",
+    "value": 100,
+    "unit": "\u00a3k/quarter variance"
+   },
+   {
+    "kind": "constraint",
+    "source_quote": "we cannot hire more than 8 people total next year",
+    "value": 8,
+    "unit": "headcount",
+    "direction": "ceiling"
+   },
+   {
+    "kind": "constraint",
+    "source_quote": "marketing spend is capped at \u00a31.5m",
+    "value": 1.5,
+    "unit": "\u00a3m",
+    "direction": "ceiling"
+   },
+   {
+    "kind": "figure",
+    "source_quote": "our UK compliance content localises to the German regime with about 60% reuse",
+    "value": 60,
+    "unit": "% content reuse"
+   },
+   {
+    "kind": "figure",
+    "source_quote": "CTO says it's more like 40%, and if he's right the engineering cost roughly doubles",
+    "value": 40,
+    "unit": "% content reuse (CTO estimate)"
+   },
+   {
+    "kind": "figure",
+    "source_quote": "two existing customers (both UK banks with Frankfurt operations) have said they'd sponsor a pilot",
+    "value": 2,
+    "unit": "pilot sponsors"
+   },
+   {
+    "kind": "figure",
+    "source_quote": "NRR is 112%",
+    "value": 112,
+    "unit": "% NRR"
+   },
+   {
+    "kind": "figure",
+    "source_quote": "Priya's cohort model in the June board pack says \u00a315.8m by FY28 on expansion alone",
+    "value": 15.8,
+    "unit": "\u00a3m ARR"
+   },
+   {
+    "kind": "option",
+    "source_quote": "push into Germany next year"
+   },
+   {
+    "kind": "option",
+    "source_quote": "double down on the UK"
+   },
+   {
+    "kind": "option",
+    "source_quote": "partner with a local player like Regnology instead of going direct"
+   },
+   {
+    "kind": "figure",
+    "source_quote": "two US competitors raised big rounds in Q2"
+   }
+  ],
+  "claims": [
+   {
+    "claim_kind": "factor",
+    "label": "UK Expansion Investment",
+    "basis": [
+     1,
+     12,
+     13
+    ],
+    "category": "controllable",
+    "value": 0.5,
+    "sets_to": 0.5
+   },
+   {
+    "claim_kind": "factor",
+    "label": "Germany Direct Entry Investment",
+    "basis": [
+     7,
+     8,
+     9,
+     10
+    ],
+    "category": "controllable",
+    "value": 0
+   },
+   {
+    "claim_kind": "factor",
+    "label": "Germany Partnership Route",
+    "basis": [
+     21
+    ],
+    "category": "controllable",
+    "value": 0
+   },
+   {
+    "claim_kind": "factor",
+    "label": "Engineering Localisation Cost",
+    "basis": [
+     14,
+     15
+    ],
+    "category": "observable",
+    "value": 0.5
+   },
+   {
+    "claim_kind": "factor",
+    "label": "Cash Runway Adequacy",
+    "basis": [
+     10,
+     11
+    ],
+    "category": "observable",
+    "value": 0.62
+   },
+   {
+    "claim_kind": "factor",
+    "label": "Headcount Capacity Used",
+    "basis": [
+     12
+    ],
+    "category": "observable",
+    "value": 0
+   },
+   {
+    "claim_kind": "factor",
+    "label": "German Competitive Window",
+    "basis": [
+     22
+    ],
+    "category": "external",
+    "value": 0.5
+   },
+   {
+    "claim_kind": "factor",
+    "label": "UK Market Saturation",
+    "basis": [
+     5
+    ],
+    "category": "observable",
+    "value": 0.7
+   },
+   {
+    "claim_kind": "option_refinement",
+    "label": "Germany Direct (2027)",
+    "basis": [
+     19
+    ],
+    "effect": "positive"
+   },
+   {
+    "claim_kind": "option_refinement",
+    "label": "UK Depth Focus",
+    "basis": [
+     20
+    ],
+    "effect": "positive"
+   },
+   {
+    "claim_kind": "option_refinement",
+    "label": "Germany via Partnership (Regnology-style)",
+    "basis": [
+     21
+    ],
+    "effect": "positive"
+   },
+   {
+    "claim_kind": "option_refinement",
+    "label": "Defer Germany 12 Months (CFO path)",
+    "basis": [
+     19,
+     22
+    ],
+    "effect": "positive"
+   },
+   {
+    "claim_kind": "causal_link",
+    "label": "Germany Direct Investment drives ARR from new market",
+    "basis": [
+     7,
+     8,
+     9
+    ],
+    "from_claim": 1,
+    "to_claim": 0,
+    "effect": "positive",
+    "strength": 0.55
+   },
+   {
+    "claim_kind": "causal_link",
+    "label": "Germany Direct Investment increases cash burn risk",
+    "basis": [
+     8,
+     9,
+     10,
+     11
+    ],
+    "from_claim": 1,
+    "to_claim": 4,
+    "effect": "negative",
+    "strength": 0.65
+   },
+   {
+    "claim_kind": "causal_link",
+    "label": "Germany Direct Investment consumes headcount capacity",
+    "basis": [
+     9,
+     12
+    ],
+    "from_claim": 1,
+    "to_claim": 5,
+    "effect": "positive",
+    "strength": 0.75
+   },
+   {
+    "claim_kind": "causal_link",
+    "label": "Engineering localisation cost amplifies Germany direct burn",
+    "basis": [
+     14,
+     15
+    ],
+    "from_claim": 3,
+    "to_claim": 4,
+    "effect": "negative",
+    "strength": 0.5
+   },
+   {
+    "claim_kind": "causal_link",
+    "label": "UK investment drives ARR through expansion and new logos",
+    "basis": [
+     18
+    ],
+    "from_claim": 0,
+    "to_claim": 0,
+    "effect": "positive",
+    "strength": 0.6
+   },
+   {
+    "claim_kind": "causal_link",
+    "label": "UK market saturation limits new-logo upside",
+    "basis": [
+     4,
+     5
+    ],
+    "from_claim": 7,
+    "to_claim": 0,
+    "effect": "negative",
+    "strength": 0.45
+   },
+   {
+    "claim_kind": "causal_link",
+    "label": "Partnership route reduces cash burn vs direct",
+    "basis": [
+     21,
+     10
+    ],
+    "from_claim": 2,
+    "to_claim": 4,
+    "effect": "positive",
+    "strength": 0.35
+   },
+   {
+    "claim_kind": "causal_link",
+    "label": "Partnership route reduces headcount pressure",
+    "basis": [
+     12,
+     21
+    ],
+    "from_claim": 2,
+    "to_claim": 5,
+    "effect": "positive",
+    "strength": 0.4
+   },
+   {
+    "claim_kind": "causal_link",
+    "label": "Partnership route yields lower ARR upside than direct",
+    "basis": [
+     21
+    ],
+    "from_claim": 2,
+    "to_claim": 0,
+    "effect": "positive",
+    "strength": 0.3
+   },
+   {
+    "claim_kind": "causal_link",
+    "label": "German competitive window closing raises cost of delay",
+    "basis": [
+     22
+    ],
+    "from_claim": 6,
+    "to_claim": 0,
+    "effect": "negative",
+    "strength": 0.35
+   },
+   {
+    "claim_kind": "causal_link",
+    "label": "Cash runway adequacy gates ability to sustain Germany investment",
+    "basis": [
+     10,
+     11
+    ],
+    "from_claim": 4,
+    "to_claim": 0,
+    "effect": "positive",
+    "strength": 0.5
+   },
+   {
+    "claim_kind": "causal_link",
+    "label": "Headcount capacity consumed reduces UK delivery quality and growth",
+    "basis": [
+     12
+    ],
+    "from_claim": 5,
+    "to_claim": 0,
+    "effect": "negative",
+    "strength": 0.3
+   },
+   {
+    "claim_kind": "causal_link",
+    "label": "Pilot sponsors de-risk Germany direct entry revenue",
+    "basis": [
+     16
+    ],
+    "from_claim": 1,
+    "to_claim": 0,
+    "effect": "positive",
+    "strength": 0.25
+   },
+   {
+    "claim_kind": "prior",
+    "label": "BaFin licensing timeline uncertainty (9-14 months) delays first Germany ARR",
+    "basis": [
+     7
+    ],
+    "value": 0.6
+   },
+   {
+    "claim_kind": "prior",
+    "label": "German TAM likely 50-100% of stated \u20ac400m figure",
+    "basis": [
+     6
+    ],
+    "value": 0.5
+   },
+   {
+    "claim_kind": "prior",
+    "label": "NRR of 112% supports UK expansion ARR floor of ~\u00a315.8m by FY28",
+    "basis": [
+     18,
+     19
+    ]
+   }
+  ]
+ },
+ "completion": {
+  "claims": [
+   {
+    "claim_kind": "causal_link",
+    "label": "Germany Direct option sets Germany Direct Investment level",
+    "from_stated": 19,
+    "to_claim": 1,
+    "effect": "positive",
+    "sets_to": 1150
+   },
+   {
+    "claim_kind": "causal_link",
+    "label": "Germany Direct Investment drives ARR toward goal",
+    "from_claim": 1,
+    "to_stated": 0,
+    "effect": "positive",
+    "strength": 0.6
+   },
+   {
+    "claim_kind": "causal_link",
+    "label": "UK Depth option sets UK Expansion Investment level",
+    "from_stated": 20,
+    "to_claim": 0,
+    "effect": "positive",
+    "sets_to": 1500
+   },
+   {
+    "claim_kind": "causal_link",
+    "label": "UK Expansion Investment drives ARR toward goal",
+    "from_claim": 0,
+    "to_stated": 0,
+    "effect": "positive",
+    "strength": 0.7
+   },
+   {
+    "claim_kind": "causal_link",
+    "label": "Germany Partnership option sets Partnership Investment level",
+    "from_stated": 21,
+    "to_claim": 2,
+    "effect": "positive",
+    "sets_to": 500
+   },
+   {
+    "claim_kind": "causal_link",
+    "label": "Germany Partnership Investment drives ARR toward goal",
+    "from_claim": 2,
+    "to_stated": 0,
+    "effect": "positive",
+    "strength": 0.4
+   },
+   {
+    "claim_kind": "causal_link",
+    "label": "Defer Germany option sets UK Expansion Investment level",
+    "from_claim": 11,
+    "to_claim": 0,
+    "effect": "positive",
+    "sets_to": 1500
+   },
+   {
+    "claim_kind": "causal_link",
+    "label": "Deferred UK expansion drives ARR toward goal",
+    "from_claim": 0,
+    "to_stated": 0,
+    "effect": "positive",
+    "strength": 0.65
+   }
+  ]
+ }
+}

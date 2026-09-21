@@ -19,13 +19,24 @@ import type {
 } from "../../schemas/cee-v3.js";
 import { parseNumericValue, resolveRelativeValue, type ParsedValue } from "./numeric-parser.js";
 import { matchInterventionToFactor } from "./factor-matcher.js";
+import { NEGATION_SCREEN_RE } from "../compound-goal/direction-gate.js";
+import {
+  classifyAmountAgainstBrief,
+  findStatedAmounts,
+  readUnit,
+  resolveMagnitudeScale,
+} from "../provenance/stated-amounts.js";
+import {
+  bindStatedItemToBrief,
+  bindingEarnsBriefClaim,
+} from "../provenance/brief-binding.js";
 import { normalizeToId } from "../utils/id-normalizer.js";
 import {
   computeOptionStatus,
   categorizeUserQuestions,
   type StatusComputationInput,
 } from "../transforms/option-status.js";
-import { log } from "../../utils/telemetry.js";
+import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
 
 /**
  * Raw extracted intervention before graph matching.
@@ -57,6 +68,59 @@ export interface EdgeHint {
   weight?: number;
 }
 
+/** Existing intervention fields carried from the deterministic records projector. */
+export interface V4InterventionBinding {
+  raw_value: number;
+  unit?: string;
+  source: "brief_extraction" | "cee_hypothesis";
+  reasoning: string;
+  /**
+   * ⭐⭐ THIS BINDING IS A RECEIPT, NOT AN AUTHORITY CLAIM — and the flag exists
+   * because the two are gated identically and must not be.
+   *
+   * Set by the projector when a magnitude equals no cited stated figure but the
+   * claim (or its inheritable target-factor basis) cited figures anyway: the
+   * value is COMPOSED from the user's numbers rather than copied from one. The
+   * receipt exists so the live `confirm_value` ask can see the case.
+   *
+   * ⛔ It must NOT suppress this module's own brief-authority routes.
+   * `bindDirectStatedMagnitude` matches against `stated_items`;
+   * `classifyAmountAgainstBrief` scans the BRIEF TEXT. Those are DIFFERENT SETS,
+   * so a number the user typed verbatim can be absent from `stated_items` and
+   * still be genuinely stated — measured on the `"GBP 55,000"` spelling, which
+   * is the convention in the scenario that motivated this whole change. Gating
+   * the brief routes on mere presence of a binding withdrew attribution from a
+   * number the user wrote and asked them to confirm it: the F2 falsehood
+   * reopened from the other side, and a WORSE harm than the defect being fixed.
+   * (CLAUDE.md trap 21 — two questions under one condition.)
+   *
+   * ⚠ NO LONGER THE GATE — see {@link V4InterventionBinding.withholds_brief_authority}.
+   * Exempting ONE branch from a predicate that asked the wrong question only
+   * held while that branch was the only exception; it stopped holding the
+   * moment the projector minted a third binding kind. This remains the
+   * composed branch's receipt marker, which is a separate fact.
+   */
+  composed_citation?: true;
+  /**
+   * ⭐⭐ THE ONLY CONDITION UNDER WHICH A BINDING MAY CLOSE THIS MODULE'S
+   * BRIEF-AUTHORITY ROUTES — an OPT-IN, set by the projector on the receipts
+   * that report a genuine contest over ownership (candidates that cannot be
+   * resolved to one stated item; a figure a rival option would equally claim).
+   *
+   * ⛔ MERE PRESENCE OF A BINDING IS NOT IT, and reading it that way was the
+   * defect. `bindDirectStatedMagnitude` matches `stated_items`;
+   * `classifyAmountAgainstBrief` scans the BRIEF TEXT. DIFFERENT SETS — a number
+   * the user typed verbatim can be absent from `stated_items` and still be
+   * genuinely stated. Once the projector began stamping UNCITED magnitudes
+   * (so an unattributed number stops passing as a fact), the presence test
+   * started re-attributing those figures to Olumi at low confidence, in a
+   * sentence saying no figure was cited. Wrongly claiming a user's value is far
+   * worse than omitting one of ours, and this is the third direction from which
+   * that same harm has now arrived.
+   */
+  withholds_brief_authority?: true;
+}
+
 /**
  * Option with interventions after extraction and matching.
  *
@@ -86,6 +150,8 @@ export interface ExtractedOption {
     source: "brief_extraction" | "cee_hypothesis" | "user_specified";
     brief_quote?: string;
   };
+  /** Marks the status-quo / baseline option (v191+). Exactly one option should be true. */
+  is_baseline?: boolean;
 }
 
 /**
@@ -289,6 +355,38 @@ function cleanTargetText(text: string): string {
   return text
     .replace(/^(the|a|an)\s+/i, "")
     .replace(/\s+(level|amount|value)$/i, "")
+    // ⭐ TRAILING PREPOSITIONS ARE A TOKENISER ARTEFACT, NOT PART OF THE NAME.
+    //
+    // Every target group above is `(\w+(?:\s+\w+)?)` — greedy over TWO words —
+    // so `increase price by 20%` captures `"price by"`, not `"price"`. With a
+    // one-word factor name that string can never reach the exact_id or
+    // exact_label limbs: `normalizeText("price by") === "price_by"` matches
+    // neither `factor_price` nor the label `"Price"`. It only ever landed via
+    // the semantic limb — which is exactly the limb the value path must now
+    // refuse.
+    //
+    // ⚠⚠ THE JUSTIFICATION THIS COMMENT ORIGINALLY CARRIED WAS WRONG, AND THE
+    // CORRECTION IS THE POINT. It claimed an 82-case corpus showed the strip
+    // recovering "34 previously-correct extractions" otherwise lost to the
+    // refusal. Re-measured against 355 REAL CAPTURED GRAPHS (1,182 records): a
+    // mutant removing this strip left 1,182 of 1,182 records IDENTICAL —
+    // 0 recovered, 0 cost — with a positive control proving this function is on
+    // the live path. The 34 was a property of a self-authored corpus and is
+    // INERT on real captures.
+    //
+    // The strip is kept because it is correct on its own terms and provably
+    // costless, not because it rescues anything: a trailing preposition is not
+    // part of a factor's name, and `normalizeText("price by") === "price_by"`
+    // matches neither `factor_price` nor the label "Price". But NOTHING in this
+    // PR's value rests on it. A corpus drawn from one head cannot see the class
+    // that head did not imagine — and, as here, it can equally MANUFACTURE a
+    // class that does not exist. Do not restore the old figure.
+    //
+    // Repeated until stable: `of the` and similar can leave a second trailing
+    // stop word behind the first. A target that is nothing BUT prepositions
+    // collapses to "" and is dropped by the `targetText &&` guard at the call
+    // site (and by SKIP_WORDS), which is the correct outcome.
+    .replace(/(\s+(by|to|at|of|from|for|with|in|on))+$/i, "")
     .trim();
 }
 
@@ -477,6 +575,376 @@ function formatRelativeDescription(value: ParsedValue): string {
 }
 
 /**
+ * CLAUSE BOUNDARIES, for deciding what a denial GOVERNS.
+ *
+ * A sentence is too coarse. The frozen B1 brief settles it: "Staying on
+ * Salesforce costs us nothing extra up front, and our annual Salesforce
+ * licensing is £45,000." A sentence-scoped window puts "nothing" in front of
+ * £45,000 and would refuse the one figure the product already gets RIGHT.
+ * Coordinators are therefore boundaries too — but only SOMETIMES, and the
+ * exception is the whole of {@link clauseWindow}.
+ *
+ * ⚠ THE LOOKAHEAD `\.(?!\d)` IS LOAD-BEARING: an unguarded `.` treats the
+ * decimal point of "£1.5m" as a sentence end, shrinking the window and so
+ * LOSING a denial that really does govern — the unsafe direction. This is the
+ * same decimal-point cut that truncated a magnitude guard's input in CLAUDE.md
+ * trap 22.
+ *
+ * ⚠⚠ AND THE MATCHING LOOKBEHIND HAD TO GO, BECAUSE IT DELETED SENTENCE ENDS.
+ * This was spelled `(?<!\d)\.(?!\d)` — guarded on BOTH sides. The lookahead
+ * alone already excludes every decimal point (in "1.5" the `.` is followed by a
+ * digit); the lookbehind adds nothing to that and instead swallows the full
+ * stop of every sentence that ENDS in a number — which is most sentences that
+ * state money. Measured on this module's own frozen brief: in
+ * "…licensing is £45,000. We will not switch." the `.` after £45,000 was NOT a
+ * boundary, so with a forward window a denial in the NEXT sentence reached
+ * backwards into this one. Caught by an over-refusal control
+ * ("We cannot delay past Q3. The migration budget is £20,000."), not by
+ * inspection — the two guards look symmetrical and only one of them is doing a
+ * job.
+ */
+const HARD_BOUNDARY_SRC = String.raw`\.(?!\d)|[!?;\n]`;
+const COORDINATOR_SRC = String.raw`,\s*(?:and|or|but)\b|\s(?:and|or|but)\s`;
+const CLAUSE_BOUNDARY = new RegExp(`${HARD_BOUNDARY_SRC}|${COORDINATOR_SRC}`, "gi");
+const IS_COORDINATOR = new RegExp(`^(?:${COORDINATOR_SRC})$`, "i");
+
+/**
+ * THE DENIAL SCREEN — CONSUMED FROM THE ESTATE'S AUTHORITY, NOT MINTED HERE.
+ *
+ * ⚠ WHY THIS IS NOT A NEW LEXICON (CLAUDE.md trap 21 / the two
+ * `generateGraphHash` twins). `compound-goal/direction-gate.ts` already owns
+ * this estate's negation-and-prevention alphabet. It is the survivor of the
+ * FOUR-ROUND oscillation on exactly this shape of predicate, it carries the
+ * contraction forms three outside corpora in a row missed, it narrows `no` to
+ * `no(?=\s)` so `no-show` is not a negation, and it is guarded BOTH by a union
+ * assertion against the extractor's two lead lists AND by an external
+ * vocabulary sweep with its own KNOWN set. Re-typing any of that here would
+ * mint a twin that drifts. It is composed by SOURCE, so an alternative added
+ * there is live here the instant it lands, with nothing to sync.
+ *
+ * ⚠ THE LOCAL ADDITIONS ARE THE THREE THINGS THAT AUTHORITY DOES NOT COVER,
+ * and each is required by a case measured at the wire, not imagined:
+ *   · `nothing|neither|nor|exclud*` — `no(?=\s)` cannot match "nothing", and
+ *     the frozen brief's own "costs us nothing extra up front" is the
+ *     discriminator that stops this window being sentence-scoped;
+ *   · `declin*|instead of|rather than` — this module's original marker carried
+ *     them and they are load-bearing ("the budget was declined by finance");
+ *   · `\w+n['’]t` — the estate's list spells contractions with the STRAIGHT
+ *     apostrophe only, and real briefs are typed with the curly one.
+ *
+ * ⚠⚠ THE APOSTROPHE IS MANDATORY, AND ITS OPTIONALITY WAS A LIVE DEFECT.
+ * This module previously spelled that alternative `\b\w+n['’]?t\b`. With the
+ * apostrophe OPTIONAL it matches every English word ending in "nt" —
+ * *Procurement*, *amount*, *payment*, *current*, *percent*, *investment*,
+ * *commitment*, *segment*, *client*, *point*. Measured at the wire on
+ * `419a9684`: "Procurement authorised the £20,000 migration purchase" — a
+ * plain, unnegated assertion of the user's own figure — was REFUSED, because
+ * the word *Procurement* read as a contracted negation. It cost coverage
+ * silently and it would have cost far more once the window widened.
+ */
+const LOCAL_DENIAL_SRC = String.raw`\b(?:nothing|neither|nor|exclud\w*|declin\w*|instead\s+of|rather\s+than)\b|\b\w+n['’]t\b`;
+
+/** Any token that makes an amount's clause unsafe to read as the user's own assertion. */
+export const DENIAL_SCREEN_RE = new RegExp(
+  `${NEGATION_SCREEN_RE.source}|${LOCAL_DENIAL_SRC}`,
+  "i",
+);
+
+/**
+ * Does an amount END at `position` (ignoring trailing whitespace)?
+ * Used to recognise a COORDINAND — see {@link clauseWindow}.
+ */
+function amountEndsAt(
+  amounts: readonly { readonly index: number; readonly matchedText: string }[],
+  text: string,
+  position: number,
+): boolean {
+  let end = position;
+  while (end > 0 && /\s/.test(text.charAt(end - 1))) end--;
+  return amounts.some((a) => a.index + a.matchedText.length === end);
+}
+
+/** Does an amount BEGIN at `position` (ignoring leading whitespace)? */
+function amountStartsAt(
+  amounts: readonly { readonly index: number }[],
+  text: string,
+  position: number,
+): boolean {
+  let start = position;
+  while (start < text.length && /\s/.test(text.charAt(start))) start++;
+  return amounts.some((a) => a.index === start);
+}
+
+/**
+ * THE CLAUSE THIS AMOUNT SITS IN — SPANNING BOTH SIDES OF IT.
+ *
+ * ⚠ BOTH SIDES, BECAUSE ENGLISH DENIES IN BOTH DIRECTIONS. A backward-only
+ * window is blind to every postposed denial, and those are ordinary English,
+ * not edge cases: "The £20,000 migration budget was declined by finance", "The
+ * £20,000 migration was never approved", "A £20,000 migration is off the
+ * table". Measured at the wire on `419a9684`, all three were attributed to the
+ * user at `value_confidence: high`.
+ *
+ * ⚠⚠ A COORDINATOR MUST NOT CUT A GOVERNING DENIAL OFF A COORDINAND, AND THAT
+ * IS THE DECISIVE CASE. Measured at `419a9684`, these two sentences — the same
+ * words, the same governing negation, only the ORDER of two figures changed —
+ * produced OPPOSITE provenance for £20,000:
+ *
+ *     "We will not approve £20,000 or £45,000."   ->  cee_hypothesis   (right)
+ *     "We will not approve £45,000 or £20,000."   ->  brief_extraction (a lie)
+ *
+ * because `\s(?:and|or|but)\s` cut "not" off the second coordinand. An answer
+ * that changes when only the ORDER changes is an answer about the WINDOW, not
+ * about the sentence.
+ *
+ * ⚠⚠⚠ AND THE DISCRIMINATOR IS STRUCTURAL, NOT A LENGTH CLIFF. The estate
+ * ended its four-round oscillation on a natural-language predicate whose only
+ * discriminators were "two arbitrary length constants with hard cliffs on
+ * either side" (trap 22f), so a character budget is the one thing this must
+ * not be. The question a coordinator poses is grammatical and has a
+ * grammatical answer: IS THE THING IT JOINS A COORDINAND OF THIS AMOUNT, OR AN
+ * INDEPENDENT CLAUSE? A coordinand of an amount is an amount — so the test is
+ * simply whether an amount sits against the coordinator's far side, and it is
+ * answered by this module's OWN authority ({@link findStatedAmounts}), with no
+ * lexicon and nothing to keep in sync:
+ *
+ *     "not approve £45,000 | or | £20,000"          far side IS an amount  -> join
+ *     "nothing extra up front | , and | our ..."    far side is a CLAUSE   -> cut
+ *
+ * The second is the frozen brief's own £45,000 sentence, and cutting there is
+ * what keeps the one figure the product already gets right.
+ */
+function clauseWindow(
+  text: string,
+  amountIndex: number,
+  amountLength: number,
+): { readonly start: number; readonly end: number } {
+  const amounts = findStatedAmounts(text);
+
+  // ── BACKWARDS: the last boundary that is not joining a coordinand ────────
+  const before = text.slice(0, amountIndex);
+  const backward = new RegExp(CLAUSE_BOUNDARY.source, CLAUSE_BOUNDARY.flags);
+  const hits: { index: number; text: string }[] = [];
+  for (let m = backward.exec(before); m !== null; m = backward.exec(before)) {
+    hits.push({ index: m.index, text: m[0] });
+  }
+  let start = 0;
+  for (let i = hits.length - 1; i >= 0; i--) {
+    const hit = hits[i]!;
+    if (IS_COORDINATOR.test(hit.text) && amountEndsAt(amounts, text, hit.index)) continue;
+    start = hit.index + hit.text.length;
+    break;
+  }
+
+  // ── FORWARDS: the first boundary that is not joining a coordinand ────────
+  const afterFrom = amountIndex + amountLength;
+  const after = text.slice(afterFrom);
+  const forward = new RegExp(CLAUSE_BOUNDARY.source, CLAUSE_BOUNDARY.flags);
+  let end = text.length;
+  for (let m = forward.exec(after); m !== null; m = forward.exec(after)) {
+    const at = afterFrom + m.index;
+    if (IS_COORDINATOR.test(m[0]) && amountStartsAt(amounts, text, at + m[0].length)) continue;
+    end = at;
+    break;
+  }
+
+  return { start, end };
+}
+
+/**
+ * Does a denial govern the clause this amount sits in?
+ *
+ * ⚠ WHY THIS IS A REFUSAL AND NOT A PARSE (coordinator ruling, 2026-08-24).
+ * Three residual classes reach this route, and they are NOT one class:
+ *   · wrong-factor  ("Q4 bookings lost" takes the migration cost)   — accepted
+ *   · third-party   ("a competitor paid £20,000")                   — accepted
+ *   · DENIED        ("we will NOT spend £20,000")                   — REFUSED here
+ * The first two put a real number on the wrong object; the user's own figure
+ * still reaches the model. The third MANUFACTURES USER EVIDENCE OUT OF THE
+ * USER'S EXPLICIT DENIAL — it reads their refusal as their statement, which is
+ * the one case where this fix would be worse than the loss it repairs.
+ *
+ * ⚠ AND IT IS DELIBERATELY NOT A NEGATION PREDICATE. This estate oscillated
+ * FOUR consecutive rounds on exactly that shape, each round fixing one
+ * direction and opening the other, and the ruling that ended it was: where
+ * direction cannot be determined, make the ambiguity the product rather than
+ * guess (CLAUDE.md trap 22f). So this detector is ALLOWED TO MISS. It is not
+ * extended verb-by-verb when it does: the residual misses are recorded instead,
+ * in the frozen KNOWN-DROPPED set in
+ * `__tests__/stated-magnitude-denial.test.ts`, whose pin is DERIVED by running
+ * the corpus and therefore REDs if that set grows OR shrinks. A gap recorded in
+ * the suite is honest; a gap invisible to it is how four rounds happened.
+ *
+ * ⚠⚠ THE ASYMMETRY, STATED THE RIGHT WAY ROUND. An earlier version of this
+ * comment said "a miss degrades to today's behaviour, never to a lie" and used
+ * that to license the direction. THAT IS INVERTED, and it is inverted about the
+ * one thing the comment exists to settle:
+ *   · a FALSE POSITIVE — refusing an amount the user did assert — degrades to
+ *     today's behaviour (`cee_hypothesis` / low), a disownment this product
+ *     already serves on most draws. That is the cheap direction.
+ *   · a FALSE NEGATIVE — MISSING a denial — is exactly the lie: it stamps
+ *     `brief_extraction` / high on a figure the user refused.
+ * So a MISS is the expensive failure, not the safe one, and the asymmetry
+ * argues for refusing WIDELY rather than for tolerating misses. The inverted
+ * sentence survived into the code and was being used to justify the unsafe
+ * direction — which is why it is corrected here at the source and not only in a
+ * PR description nobody inherits.
+ */
+function denialGovernsAmount(
+  briefText: string,
+  amountIndex: number,
+  amountLength: number,
+): boolean {
+  const { start, end } = clauseWindow(briefText, amountIndex, amountLength);
+  return DENIAL_SCREEN_RE.test(briefText.slice(start, end));
+}
+
+/**
+ * THE CARRIED RAW MAGNITUDE IS ALREADY IN MAGNITUDE SPACE — IT NEEDS NO DENOMINATOR.
+ *
+ * WHY THIS EXISTS (B1-b, derived at CEE `d1da670` against live wire captures).
+ * `classifyAmountAgainstBrief` is asked about the NORMALISED level, so it must
+ * de-normalise through the factor's `observed_state` to recover a magnitude.
+ * Measured on the deployed build across 11 VALID fresh-guest draws of one frozen
+ * brief (12 run; one excluded for using an earlier classifier):
+ * the factors CEE mints carry `observed_state = {value: 0.5, source:
+ * "cee_inference"}` — no `cap`, no `raw_value` — so `resolveMagnitudeScale`
+ * returns `unknown`, the level cannot be de-normalised, and the verdict is
+ * `undecidable` for EVERY factor in the model. That makes the `statedInBrief`
+ * route to `brief_extraction` STRUCTURALLY DEAD for this class of brief, leaving
+ * the LLM-emitted `v4InterventionBindings` as the only surviving route — an
+ * unpinned per-factor model judgement. So whether the user's own stated figure is
+ * attributed to them is settled by a coin flip, while the figure itself sits in
+ * `carriedRaw`, unread, a few lines away.
+ *
+ * The asymmetry this estate already states is the whole justification: "a MATCH is
+ * decisive whatever the denominator — if the number appears in the text, the user
+ * wrote it". A RAW magnitude is the case where the denominator is not merely
+ * unknown but IRRELEVANT.
+ *
+ * ⚠ THIS FUNCTION INVENTS NOTHING. It answers one question — "did the user write
+ * THIS magnitude, and in which denomination?" — and answers it by asking the
+ * estate's EXISTING authority ({@link classifyAmountAgainstBrief}) once per
+ * candidate denomination rather than re-implementing magnitude comparison beside
+ * it (CLAUDE.md trap 21 / the two `generateGraphHash` twins). The
+ * `{kind: "identity"}` scale is not a claim about the factor's encoding; it is how
+ * this module spells "the number I am handing you IS the magnitude".
+ *
+ * FAIL-CLOSED IN THREE DIRECTIONS, each a refusal rather than a guess:
+ *   · no brief, or no stated amount of this magnitude ⇒ `null` — the user did not
+ *     write it, the model chose it, and the caller keeps saying so;
+ *   · a PLAIN or percent amount of the same magnitude also appears ("20,000
+ *     licences" beside "£20,000") ⇒ `null`. The kind is genuinely ambiguous and a
+ *     currency claim would be a fabrication about which quantity the user meant;
+ *   · two different currencies of the same magnitude ("£20,000" and "$20,000")
+ *     ⇒ `null`, for the same reason.
+ * Returning `null` always leaves the caller exactly where it already was.
+ */
+function resolveStatedDenominationForRawMagnitude(
+  rawMagnitude: number,
+  briefText: string | null | undefined,
+  declaredUnit: string | null | undefined,
+): { readonly unit: string; readonly matchedText: string } | null {
+  if (typeof rawMagnitude !== "number" || !Number.isFinite(rawMagnitude)) return null;
+
+  // ⚠ THE FACTOR'S OWN DENOMINATION IS EVIDENCE, AND THE FIRST VERSION OF THIS
+  // FUNCTION THREW IT AWAY. That defect is worth stating precisely, because it is
+  // the exact MIRROR of the one this route exists to fix.
+  //
+  // `magnitudeAppearsInBrief` enforces three rules that all key off the unit the
+  // CALLER declares: it scales the target by `readUnit(unit).multiplier`; it
+  // requires `amount.currencyCode === reading.currencyCode`; and it skips every
+  // currency amount when the unit reads as `plain`. The first version asked that
+  // authority about a currency code DERIVED FROM THE BRIEF instead of the
+  // factor's own, so all three rules were answered about a denomination the
+  // factor never claimed — and the authority dutifully said "stated".
+  // Measured on that head, brief "£20,000" throughout:
+  //   unit "USD"/"$"    -> brief_extraction, unit "$"  (cross-currency fabrication)
+  //   unit "£m"         -> brief_extraction            (raw 20000 under £m denotes
+  //                                                     £20,000,000,000 — 10^6 out)
+  //   unit "%"/"customers" -> brief_extraction         (a different quantity entirely)
+  // The user would be shown the "from brief" badge, the low-confidence warning
+  // would disappear, and the reasoning would tell them they wrote £20,000 on a
+  // dollar-denominated factor. Delegating to an authority does not inherit its
+  // guarantees unless you hand it the evidence those guarantees are computed from.
+  const declared = readUnit(declaredUnit);
+  const hasDeclaredUnit = typeof declaredUnit === "string" && declaredUnit.trim().length > 0;
+  if (hasDeclaredUnit) {
+    // A magnitude letter means the raw is NOT in magnitude space, so comparing it
+    // against the brief is a 10^n error rather than a comparison.
+    if (declared.multiplier !== 1) return null;
+    // NOTE — a non-currency declared unit ("%", "customers", "headcount") needs no
+    // guard of its own HERE: `readUnit` leaves `currencyCode` undefined for every
+    // such unit, so the currency-identity refusal below rejects it on every
+    // candidate. An explicit `declared.kind !== "currency"` check was written here
+    // first and MEASURED EQUIVALENT — removing it left the percent and
+    // unreadable-unit cases (R4/R5) green — so it is removed rather than shipped as
+    // a branch no test can kill, following this module's own precedent for the
+    // unreachable confidence boost. If the identity refusal below is ever narrowed,
+    // this duty must be picked up again explicitly.
+  }
+
+  // ⚠ ZERO IS THE MODEL'S COMMONEST DEFAULT AND MAY NOT BE RELABELLED.
+  // `transforms/analysis-ready.ts` already rules on exactly this question — "Zero
+  // is already represented exactly on the analysis scale and is the valid
+  // status-quo control ... and must never be relabelled as the stated switch
+  // cost" — and skips zero for that reason. A brief that happens to write "£0"
+  // would otherwise let every status-quo zero in the model claim the user's
+  // authorship. Adopted from that ruling rather than invented here.
+  if (rawMagnitude === 0) return null;
+
+  // The magnitude IS the magnitude — say so to the shared classifier.
+  const IDENTITY = { kind: "identity" } as const;
+
+  // A same-magnitude PLAIN (or percent) statement makes the KIND ambiguous.
+  // `readUnit(undefined)` reads as `plain`, which is exactly the question asked.
+  if (classifyAmountAgainstBrief(rawMagnitude, undefined, briefText, IDENTITY) === "stated") {
+    return null;
+  }
+
+  // Candidate denominations are only those the BRIEF ITSELF spells — never a
+  // default, and never one this module chose.
+  const denominations = new Map<string, string>();
+  for (const amount of findStatedAmounts(briefText)) {
+    if (amount.kind !== "currency" || amount.currencyCode === undefined) continue;
+    if (denominations.has(amount.currencyCode)) continue;
+    // The user's OWN spelling of the denomination, taken from the text they wrote.
+    const symbol = /^\s*([^\d\s.,-]+)/.exec(amount.matchedText)?.[1];
+    denominations.set(amount.currencyCode, symbol ?? amount.currencyCode);
+  }
+
+  const hits: { readonly unit: string; readonly matchedText: string }[] = [];
+  for (const [code, unit] of denominations) {
+    // CURRENCY IDENTITY IS REQUIRED — a £-denominated value is not made
+    // brief-backed by a $-denominated statement. Where the factor declares its
+    // own currency, only that currency may license the claim.
+    if (hasDeclaredUnit && declared.currencyCode !== code) continue;
+    if (classifyAmountAgainstBrief(rawMagnitude, code, briefText, IDENTITY) !== "stated") continue;
+    const occurrences = findStatedAmounts(briefText).filter(
+      (a) =>
+        a.kind === "currency" &&
+        a.currencyCode === code &&
+        Math.abs(a.magnitude - rawMagnitude) <=
+          Math.max(Number.EPSILON, Math.abs(rawMagnitude) * 1e-9),
+    );
+    // FAIL-CLOSED ACROSS OCCURRENCES: if ANY statement of this magnitude is
+    // denied, the brief does not unambiguously assert it, so nothing here may
+    // claim the user did. One denial is enough to withdraw the claim.
+    if (
+      typeof briefText === "string" &&
+      occurrences.some((a) => denialGovernsAmount(briefText, a.index, a.matchedText.length))
+    ) {
+      return null;
+    }
+    const quoted = occurrences[0];
+    hits.push({ unit, matchedText: quoted?.matchedText.trim() ?? `${unit}${rawMagnitude}` });
+  }
+
+  // Exactly one denomination, or we cannot honestly name one.
+  return hits.length === 1 ? hits[0] : null;
+}
+
+/**
  * Build interventions directly from V4 prompt data.
  *
  * V4 prompt instructs LLM to return option nodes with `data.interventions`
@@ -493,9 +961,13 @@ function buildInterventionsFromV4Data(
   optionId: string,
   optionLabel: string,
   v4Interventions: Record<string, number>,
-  factors: NodeV3T[]
+  factors: NodeV3T[],
+  briefText?: string,
+  v4RawInterventions?: Record<string, number>,
+  v4InterventionBindings?: Record<string, V4InterventionBinding>,
 ): ExtractedOption {
   const interventions: Record<string, InterventionV3T> = {};
+  const rawInterventions: Record<string, RawInterventionValueT> = {};
   const factorIds = new Set(factors.map((f) => f.id));
   const missingFactors: string[] = [];
 
@@ -513,18 +985,203 @@ function buildInterventionsFromV4Data(
     // Get factor node for context
     const factor = factors.find((f) => f.id === factorId);
 
-    interventions[factorId] = {
-      value,
-      unit: factor?.observed_state?.unit,
-      source: "brief_extraction", // V4 prompt extracts from brief
-      target_match: {
-        node_id: factorId,
-        match_type: "exact_id", // LLM provided exact ID
-        confidence: "high", // Direct from V4 prompt = high confidence
-      },
-      value_confidence: "high",
-      reasoning: "Direct from V4 prompt data.interventions",
-    };
+    // ROADMAP 2.972 — THE PROVENANCE CLAIM IS EARNED, NOT ASSUMED.
+    //
+    // This branch used to stamp `brief_extraction` / `value_confidence: "high"`
+    // on EVERY value, with the comment "V4 prompt extracts from brief". That
+    // comment described the prompt's INTENT, never the values that arrive: the
+    // 2026-08-08 context-integrity trace measured 47 of 47 interventions
+    // carrying model-chosen normalised lever levels (0.8, 0.75, 0.45 …) that
+    // appear nowhere in the user's words, all stamped brief-extracted at high
+    // confidence.
+    //
+    // The value is ALWAYS kept — only its unearned label is withdrawn, and only
+    // in the weaker direction. `target_match.confidence` is untouched: it
+    // answers a DIFFERENT question ("did the LLM name a factor that exists?"),
+    // and `exact_id` genuinely is a high-confidence target match (trap 21 —
+    // do not align the defaults of two different questions).
+    // ⚠ WS-A ITEM 1(a) — THE PREDICATE WAS CORRECT AND POINTED AT THE WRONG
+    // BYTES (CLAUDE.md trap 13d). `value` here is the NORMALISED lever level
+    // (0.72), and the brief states RAW magnitudes (£18,000). Without the
+    // producer's own declared denominator the comparison could only ever fire
+    // if the LLM emitted a raw magnitude — which it does not: measured over
+    // the archived corpus at CEE `8e3ad916`, 0 of 117 intervention values
+    // exceeded 1 and 117 of 117 were disowned, while the £0 status-quo
+    // baseline was stamped `brief_extraction` (L2B-VARIANCE.md §2.4/§2.6).
+    //
+    // `cap` sits one line below `unit` on the SAME `observed_state` and was
+    // already in scope. Passing it asks the predicate about the magnitude the
+    // encoding denotes (`level × cap`) rather than about the lever level, and
+    // the de-normalisation itself delegates to the estate's shared inverse —
+    // see `denormalisedMagnitude`.
+    //
+    // ⚠ WHAT THIS PREDICATE ACTUALLY GUARANTEES (corrected at the review of
+    // #944; the previous sentence here claimed it "can only ever restore a
+    // claim about a magnitude the user really did state", which is STRONGER
+    // THAN THE CODE). The scan is over the WHOLE brief and is not bound to the
+    // factor the intervention targets. So a model-INVENTED level earns
+    // `brief_extraction` / high whenever its de-normalised magnitude appears
+    // ANYWHERE in the brief: measured, level 0.5 on a `{0.4, 40}` factor is
+    // stamped "stated" against the sentence "we serve 50 customers", which is
+    // about a different quantity entirely. UNIT-KIND COMPATIBILITY GUARDS THIS
+    // (a currency level needs a currency statement in the same currency, a
+    // percent needs a percent); FACTOR-LABEL BINDING DOES NOT EXIST. This is
+    // #873's pre-existing design, widened by necessity when the frame path
+    // made the predicate able to fire at all on capless factors. The residual
+    // is rowed separately — it is NOT closed here.
+    // ⚠ F2 (Codex, 2026-08-13) — THE CAP IS ONLY ONE OF THREE DENOMINATORS, AND
+    // PASSING IT ALONE MADE THE PRODUCT CALL THE USER'S OWN NUMBER "INFERRED".
+    //
+    // The fix above was correct about capped factors and silently wrong about
+    // capless FRAMED ones, which is the shape the records projector writes for
+    // every magnitude-scaled baseline (`{value: raw/frame, raw_value: raw}`,
+    // projector.ts:1667 — the frame is deliberately NOT persisted). With no
+    // `cap`, `denormalisedMagnitude` returns null and the `?? value` fallback
+    // compared the NORMALISED LEVEL against the brief's RAW magnitudes:
+    // measured at pristine on the brief "Plan A sets the support headcount to
+    // 80 … currently 40", `isAmountStatedInBrief(0.8, …)` is FALSE while
+    // `isAmountStatedInBrief(80, …)` is true. So the user's own "80" was
+    // stamped `cee_hypothesis` / low / "this amount is not stated in the
+    // brief" — a false claim about words the user typed, rendered by the UI as
+    // "inferred" with a warning.
+    //
+    // `resolveMagnitudeScale` asks the factor's WHOLE `observed_state` which of
+    // the producers' conventions it is in, recovering a capless frame through
+    // the estate's single authority (`recoverScaleFrame`) rather than minting a
+    // second one. The verdict is THREE-STATE because the honest answer
+    // sometimes is "we cannot tell": where the record settles no denominator
+    // (a zero baseline, no `raw_value`), a non-match proves nothing, and
+    // claiming the amount is absent from the brief would be the same false
+    // claim in a different case. Confidence stays low either way — only the
+    // sentence changes, and only from a falsehood to an admission.
+    const observedState = factor?.observed_state;
+    const unit = observedState?.unit;
+    const scale = resolveMagnitudeScale(observedState);
+    const verdict = classifyAmountAgainstBrief(value, unit, briefText, scale);
+    const statedInBrief = verdict === "stated";
+
+    const binding = v4InterventionBindings?.[factorId];
+    const carriedRaw = v4RawInterventions?.[factorId];
+    const boundQuote = binding?.reasoning.match(
+      /^Direct causal value bound by edge \S+ to stated_items\[\d+\]: (.+)$/s,
+    )?.[1];
+    const bindingIsVerified =
+      binding !== undefined &&
+      binding.source === "brief_extraction" &&
+      carriedRaw === binding.raw_value &&
+      bindingEarnsBriefClaim(
+        bindStatedItemToBrief({
+          quote: boundQuote,
+          value: binding.raw_value,
+          unit: binding.unit,
+          brief: briefText,
+        }),
+      );
+
+    if (typeof carriedRaw === "number" && Number.isFinite(carriedRaw)) {
+      rawInterventions[factorId] = carriedRaw;
+    }
+
+    if (bindingIsVerified) {
+      interventions[factorId] = {
+        value,
+        raw_value: binding.raw_value,
+        ...(binding.unit !== undefined ? { unit: binding.unit } : {}),
+        source: "brief_extraction",
+        target_match: {
+          node_id: factorId,
+          match_type: "exact_id",
+          confidence: "high",
+        },
+        value_confidence: "high",
+        reasoning: binding.reasoning,
+      };
+    } else {
+      // B1-b — THE STATED MAGNITUDE ROUTE.
+      //
+      // Reached only when there is no verified edge binding. `statedInBrief`
+      // above asks about the NORMALISED level and is therefore silent whenever
+      // the factor records no scale — which, measured on the deployed build, is
+      // every factor minted for a fresh brief. `carriedRaw` is the magnitude the
+      // model actually emitted for this factor and needs no denominator, so it
+      // can be checked directly. This ONLY EVER UPGRADES A DISOWNMENT INTO AN
+      // ATTRIBUTION, and only when the user demonstrably wrote that magnitude:
+      // it cannot invent a value (the value is unchanged either way), cannot
+      // fire without a brief, and refuses on any ambiguity of denomination.
+      const rawIsFinite = typeof carriedRaw === "number" && Number.isFinite(carriedRaw);
+      // ⚠ THE GATE IS `undecidable`, NOT `!statedInBrief`. The justification for
+      // this whole route is that an UNKNOWN denominator makes the question
+      // unanswerable — never that a decided answer may be overturned. `not_stated`
+      // IS a decided answer: the authority had the denominator, did the
+      // comparison, and found the magnitude absent from the brief. Firing there
+      // would overturn a correct refusal, which is the fabrication direction.
+      // The first version gated on `!statedInBrief`, which lumps the two together
+      // — the invariant written against the failure mode instead of the spec
+      // (CLAUDE.md trap 13d).
+      // ⭐⭐ ONLY A RECEIPT THAT CONTESTS THE BRIEF MAY WITHDRAW BRIEF AUTHORITY.
+      //
+      // Both routes below used to gate on `binding === undefined`, which asked
+      // "did the projector write anything?" when the question they mean is "may
+      // this value still earn the user's authorship?". Once the projector began
+      // recording a receipt for a COMPOSED magnitude, mere presence of a binding
+      // started suppressing both — and the two authorities read DIFFERENT SETS:
+      // the projector matches `stated_items`, `classifyAmountAgainstBrief` scans
+      // the BRIEF TEXT. Measured on the `"GBP 55,000"` spelling (the convention
+      // in the motivating scenario): a figure the user typed verbatim, absent
+      // from `stated_items`, went `brief_extraction`/high -> `cee_hypothesis`/low
+      // plus a confirm-value ask. That is the F2 falsehood reopened from the
+      // other side, and worse than the defect the receipt was added to fix —
+      // wrongly claiming a user's value is far worse than omitting one of ours.
+      // (CLAUDE.md trap 21: two questions under one condition; trap 13d: write
+      // the gate against the SPEC, not the shape the first case happened to take.)
+      //
+      // ⭐⭐ AND EXEMPTING ONE BRANCH WAS NOT THE FIX — IT ONLY MOVED THE DEFECT.
+      // `composed_citation !== true` still answered "did the projector write
+      // anything, other than that one case?", so it held only while the composed
+      // branch was the sole exception. The projector then minted a THIRD kind:
+      // an UNCITED magnitude, stamped `cee_hypothesis` so an unattributed number
+      // stops masquerading as a fact. That receipt reports the absence of a
+      // cited stated ITEM. It says nothing about the brief TEXT — and it landed
+      // on the suppressing side, re-attributing the user's own figures to Olumi
+      // on the dominant path. The gate is therefore now an OPT-IN, asserted by
+      // the producer on the two branches that report a genuine contest, so a
+      // future fourth binding kind fails OPEN (attribution preserved) rather
+      // than silently closed.
+      const bindingWithholdsBriefRoutes = binding?.withholds_brief_authority === true;
+
+      const statedDenomination =
+        !bindingWithholdsBriefRoutes && verdict === "undecidable" && rawIsFinite
+          ? resolveStatedDenominationForRawMagnitude(carriedRaw as number, briefText, unit)
+          : null;
+
+      const earnsBriefClaim =
+        !bindingWithholdsBriefRoutes && (statedInBrief || statedDenomination !== null);
+
+      interventions[factorId] = {
+        value,
+        ...(rawIsFinite ? { raw_value: carriedRaw } : {}),
+        unit: binding?.unit ?? unit ?? statedDenomination?.unit,
+        source: earnsBriefClaim ? "brief_extraction" : "cee_hypothesis",
+        target_match: {
+          node_id: factorId,
+          match_type: "exact_id", // LLM provided exact ID
+          confidence: "high", // Direct from V4 prompt = high confidence
+        },
+        value_confidence: earnsBriefClaim ? "high" : "low",
+        reasoning:
+          // A value that EARNS the brief claim must not carry the receipt's
+          // "not itself a stated figure" sentence — that would be a false
+          // statement about a number the user demonstrably wrote.
+          (earnsBriefClaim ? undefined : binding?.reasoning) ??
+          (verdict === "stated"
+            ? "Direct from V4 prompt data.interventions; the amount is stated in the brief"
+            : statedDenomination !== null
+              ? `Stated magnitude carried for this factor; the brief states ${statedDenomination.matchedText}`
+              : verdict === "not_stated"
+                ? "Model-chosen intervention level; this amount is not stated in the brief"
+                : "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief"),
+      };
+    }
   }
 
   const hasInterventions = Object.keys(interventions).length > 0;
@@ -534,6 +1191,7 @@ function buildInterventionsFromV4Data(
     id: optionId,
     label: optionLabel,
     interventions,
+    ...(Object.keys(rawInterventions).length > 0 ? { raw_interventions: rawInterventions } : {}),
     status,
     unresolved_targets: missingFactors.length > 0 ? missingFactors : undefined,
     provenance: {
@@ -554,6 +1212,12 @@ function buildInterventionsFromV4Data(
  * @param edgeHints - Optional V1 edges from this option to factors (high-confidence targets)
  * @param v4Interventions - Optional direct interventions from V4 prompt
  * @param nodeId - Optional node ID from graph (used to ensure option.id matches node.id)
+ * @param briefText - The text the user submitted, as sent/persisted. ROADMAP 2.972:
+ *   READ-ONLY EVIDENCE, never a source of values. It is used solely to decide
+ *   whether an intervention value the MODEL chose may keep the claim
+ *   `source: "brief_extraction"`. Absent ⇒ no value can earn the claim (the
+ *   fail-closed direction). Nothing is ever extracted FROM it here — that is
+ *   the reverted 2.714 seam and it stays reverted.
  * @returns Extracted option with matched interventions
  */
 export function extractInterventionsForOption(
@@ -565,7 +1229,10 @@ export function extractInterventionsForOption(
   existingIds: Set<string> = new Set(),
   edgeHints: EdgeHint[] = [],
   v4Interventions?: Record<string, number>,
-  nodeId?: string
+  nodeId?: string,
+  briefText?: string,
+  v4RawInterventions?: Record<string, number>,
+  v4InterventionBindings?: Record<string, V4InterventionBinding>,
 ): ExtractedOption {
   // Use node ID if provided (ensures option.id matches graph node.id)
   // Fallback to normalized label for backwards compatibility
@@ -574,7 +1241,15 @@ export function extractInterventionsForOption(
   // V4 prompt: If interventions are provided directly, use them (high confidence)
   if (v4Interventions && Object.keys(v4Interventions).length > 0) {
     const factors = nodes.filter((n) => n.kind === "factor");
-    return buildInterventionsFromV4Data(id, optionLabel, v4Interventions, factors);
+    return buildInterventionsFromV4Data(
+      id,
+      optionLabel,
+      v4Interventions,
+      factors,
+      briefText,
+      v4RawInterventions,
+      v4InterventionBindings,
+    );
   }
 
   // Fallback: Extract interventions from text (legacy path)
@@ -602,16 +1277,64 @@ export function extractInterventionsForOption(
   const unresolvedTargets: string[] = [];
   const userQuestions: string[] = [];
   let hasNonNumericRaw = false;
+  // Several INTERVENTION_PATTERNS can match one phrase (`set price to 40` hits
+  // both the leading-verb rule and the bare `<target> to <N>` rule), so an
+  // undeduplicated refusal asked the user the same question twice about the
+  // same factor. Keyed on the FACTOR, not the target text, because two
+  // different target strings can resolve to one factor.
+  const refusedFactorIds = new Set<string>();
 
   for (const raw of allRaw) {
     const matchResult = matchInterventionToFactor(raw.target_text, nodes, edges, goalNodeId);
 
-    // Boost confidence if the matched factor is in the edge hints
+    // An edge hint says "this option and this factor are CONNECTED". A
+    // `match_type` says "the user's text NAMED this factor". They are two
+    // different questions, and this variable answers only the first — so it may
+    // suppress the path-to-goal question below, and nothing else.
+    //
+    // ⚠ It used to overwrite `match_type` with `exact_id` and `confidence` with
+    // `high`. That laundered a weak semantic guess into the strongest possible
+    // provenance claim, destroying the only evidence a downstream consumer had
+    // for distrusting the mapping — and it routed the value straight past
+    // `determineOptionStatus`'s resolved/unresolved rule, which counts ONLY
+    // exact_id and exact_label as resolved. Measured at CEE `51704f12`: "Cut
+    // price by 15%" against a graph whose only factor was "Churn Rate" emitted
+    // `churn := 0.102` stamped `match_type: exact_id, value_confidence: high,
+    // source: brief_extraction` (CLAUDE.md trap 21 — two questions under one
+    // field; trap 14 — an honest label overwritten by a false one).
+    //
+    // The confidence boost went with it: `matchInterventionToFactor` already
+    // returns "high" for BOTH exact limbs, so after the semantic refusal below
+    // the boost could never fire on a surviving branch. It is removed rather
+    // than left in — an unreachable guard is a branch no test can kill.
     const isHintedFactor = matchResult.node_id && hintedFactorIds.has(matchResult.node_id);
-    const effectiveConfidence = isHintedFactor && matchResult.confidence !== "high"
-      ? "high" as const  // Boost to high if hinted
-      : matchResult.confidence;
 
+    // ⭐ THE PROSE FALLBACK MAY NOT AUTHOR A USER LEVER FROM A GUESS.
+    //
+    // This whole block runs ONLY when the canonical record projection stated no
+    // magnitude for this option (`buildInterventionsFromV4Data` early-returns
+    // above whenever `v4Interventions` is non-empty, and `projector.ts` omits
+    // the key entirely for an option with no stated magnitude — "THE PROJECTOR
+    // INVENTS NOTHING HERE"). So every value emitted here is one the canonical
+    // layer had no warrant for, and the two paths are mutually exclusive: prose
+    // extraction can never recover a magnitude the canonical path would also
+    // have produced.
+    //
+    // `determineOptionStatus` already declares the rule — "Both exact_id AND
+    // exact_label matches count as resolved. Only semantic matches or unmatched
+    // targets block ready status" — but it applied it to STATUS while the VALUE
+    // path wrote the intervention regardless. The value now obeys the same rule.
+    // A semantic match becomes an unresolved target and a question, which is the
+    // honest shape: where the mapping cannot be determined, make the ambiguity
+    // the product rather than guessing (CLAUDE.md trap 22f).
+    // ⚠ THE GUARD SITS INSIDE, AFTER THE BASELINE CHECK, AND THE ORDER IS
+    // LOAD-BEARING. Placed before this block it also pre-empted the P1-CEE-1
+    // relative-without-baseline limb — which ALREADY refuses to emit a value
+    // and asks the better question ("What is the current Cost?"). The guard
+    // would have replaced a specific, useful question with a generic one while
+    // preventing no wrong value at all, and it broke
+    // `p1-cee-verification.test.ts`'s baseline-prompt case exactly there. A
+    // refusal belongs only where a value would OTHERWISE BE WRITTEN.
     if (matchResult.matched && matchResult.node_id && raw.value) {
       const baseline = matchResult.matched_node?.observed_state?.value;
       const hasBaseline = baseline !== undefined;
@@ -630,16 +1353,48 @@ export function extractInterventionsForOption(
         continue; // Do not emit intervention
       }
 
+      if (matchResult.match_type === "semantic") {
+        // ⚠ THE COPY MAKES A CLAIM ABOUT US, AND BOTH EASY PHRASINGS ARE FALSE.
+        //
+        // (a) It must NOT quote the extracted target back as the user's words.
+        // `target_text` is a TOKENISER OUTPUT, not a phrase the user wrote —
+        // the greedy two-word target group produced "price by" from "Increase
+        // price by 20%". Telling someone what they said, using a string they
+        // did not write, is the defect three lanes closed today, arriving from
+        // the inside. The question names the FACTOR WE MATCHED — a fact we own
+        // — and never reconstructs the user's phrasing.
+        //
+        // (b) It must NOT say "not confident enough". Across the refusals this
+        // guard produces, matcher confidence runs high=47, medium=36, low=1 —
+        // we are usually VERY confident and are refusing on PRINCIPLE, because
+        // a meaning-only match is not a user's instruction however strong the
+        // similarity score. Reporting a policy as a confidence state claims a
+        // condition we are not in. Say the true thing.
+        if (!refusedFactorIds.has(matchResult.node_id!)) {
+          refusedFactorIds.add(matchResult.node_id!);
+          unresolvedTargets.push(raw.target_text);
+          userQuestions.push(
+            `Should this option change "${matchResult.matched_node?.label ?? matchResult.node_id}"? ` +
+              `We matched it by meaning rather than by name, and we do not set a value from a ` +
+              `meaning-only match — so please confirm the factor and the value.`
+          );
+        }
+        continue; // Do not emit intervention
+      }
+
       // Resolve relative values if we have observed_state
       let finalValue = raw.value.value;
       if (raw.value.isRelative && hasBaseline) {
         finalValue = resolveRelativeValue(raw.value, baseline);
       }
 
+      // The match type and confidence are reported AS MEASURED. Only exact_id
+      // and exact_label reach this line (semantic refused above), and
+      // `matchInterventionToFactor` returns "high" for both.
       const targetMatch: TargetMatchT = {
         node_id: matchResult.node_id,
-        match_type: isHintedFactor ? "exact_id" : matchResult.match_type as "exact_id" | "exact_label" | "semantic",
-        confidence: effectiveConfidence,
+        match_type: matchResult.match_type as "exact_id" | "exact_label" | "semantic",
+        confidence: matchResult.confidence,
       };
 
       interventions[matchResult.node_id] = {
@@ -651,12 +1406,6 @@ export function extractInterventionsForOption(
         reasoning: raw.original_segment,
       };
 
-      // Generate question if low confidence or no path to goal (unless boosted by hint)
-      if (effectiveConfidence === "low") {
-        userQuestions.push(
-          `Is "${raw.target_text}" correctly mapped to the factor "${matchResult.matched_node?.label || matchResult.node_id}"?`
-        );
-      }
       if (!matchResult.has_path_to_goal && !isHintedFactor) {
         userQuestions.push(
           `The factor "${matchResult.matched_node?.label || matchResult.node_id}" doesn't have a path to the goal. Is this correct?`
@@ -698,10 +1447,26 @@ export function extractInterventionsForOption(
     // Try to match to a factor node
     const matchResult = matchInterventionToFactor(cat.target_text, nodes, edges, goalNodeId);
 
-    // Determine factor ID - use matched node or generate from target
-    const factorId = matchResult.matched && matchResult.node_id
-      ? matchResult.node_id
-      : normalizeToId(`factor_${cat.target_text}`, new Set(Object.keys(interventions)));
+    // P0 FIX: Only create intervention if we matched an EXISTING factor
+    // Never invent factor IDs that don't exist in the graph
+    //
+    // ⭐ EXTENDED: a SEMANTIC match is refused for the same reason the numeric
+    // limb above refuses one — it names a factor the user's text did not name,
+    // and this path only runs where the canonical projection stated nothing.
+    // The categorical limb is the sharper case of the two: when it finds no
+    // default encoding it writes `value: 0` as a placeholder, so a semantic
+    // mis-match here does not merely set the wrong factor — it sets the wrong
+    // factor to ZERO, which the analysis reads as a deliberate lever position.
+    if (!matchResult.matched || !matchResult.node_id || matchResult.match_type === "semantic") {
+      // No usable match - add to unresolved targets, don't create fake factor ID
+      unresolvedTargets.push(cat.target_text);
+      userQuestions.push(
+        `Which factor should "${cat.raw_categorical_value}" (${cat.target_text}) apply to?`
+      );
+      continue;
+    }
+
+    const factorId = matchResult.node_id;
 
     // Try to get a default encoding
     const defaultEncoding = getDefaultEncoding(
@@ -714,20 +1479,15 @@ export function extractInterventionsForOption(
     rawInterventions[factorId] = cat.raw_categorical_value;
     hasNonNumericRaw = hasNonNumericRaw || typeof cat.raw_categorical_value !== "number";
 
+    // Build target match for the matched factor
+    const targetMatch: TargetMatchT = {
+      node_id: matchResult.node_id,
+      match_type: matchResult.match_type as "exact_id" | "exact_label" | "semantic",
+      confidence: matchResult.confidence,
+    };
+
     if (defaultEncoding !== undefined) {
       // We have a default encoding - create intervention with raw_value
-      const targetMatch: TargetMatchT = matchResult.matched && matchResult.node_id
-        ? {
-            node_id: matchResult.node_id,
-            match_type: matchResult.match_type as "exact_id" | "exact_label" | "semantic",
-            confidence: matchResult.confidence,
-          }
-        : {
-            node_id: factorId,
-            match_type: "semantic" as const,
-            confidence: "low" as const,
-          };
-
       interventions[factorId] = {
         value: defaultEncoding,
         source: cat.source,
@@ -745,30 +1505,22 @@ export function extractInterventionsForOption(
         );
       }
     } else {
-      // No default encoding - mark as needing encoding
-      // Still create a placeholder intervention with value=0
-      const targetMatch: TargetMatchT = matchResult.matched && matchResult.node_id
-        ? {
-            node_id: matchResult.node_id,
-            match_type: matchResult.match_type as "exact_id" | "exact_label" | "semantic",
-            confidence: matchResult.confidence,
-          }
-        : {
-            node_id: factorId,
-            match_type: "semantic" as const,
-            confidence: "low" as const,
-          };
-
-      interventions[factorId] = {
-        value: 0, // Placeholder - needs encoding
-        source: cat.source,
-        target_match: targetMatch,
-        value_confidence: "low",
-        reasoning: cat.original_segment,
-        raw_value: cat.raw_categorical_value,
-        value_type: cat.value_type,
-      };
-
+      // ⛔ NO ENCODING ⇒ NO INTERVENTION. This branch used to write
+      // `value: 0` as a "placeholder", reached here by an exact_id or
+      // exact_label match — so closing the semantic route left this door open
+      // to the SAME harm: a factor pinned to zero.
+      //
+      // Nothing downstream can tell a placeholder zero from a deliberate one.
+      // `mergeInterventionSourceObjects` admits any finite number, so the zero
+      // reaches the analysis loader and is evaluated as the lever position the
+      // user chose — and zero is not a neutral value: for a cost, a rate or a
+      // headcount it is the most extreme position available.
+      //
+      // The RAW value is still recorded above (`rawInterventions[factorId]`),
+      // which is the honest half — we know WHAT was said, we just have no
+      // number for it yet. That sets `hasNonNumericRaw`, so the option resolves
+      // to `needs_encoding` and the question below asks for the encoding.
+      // Nothing is lost except a fabricated number.
       userQuestions.push(
         `How should "${cat.raw_categorical_value}" be encoded numerically for "${cat.target_text}"?`
       );
@@ -874,6 +1626,9 @@ function determineOptionStatus(
  * @param edges - Graph edges
  * @param goalNodeId - Goal node ID
  * @param edgeHints - Optional V1 edges from option→factor for improved targeting
+ * @param briefText - The text the user submitted (ROADMAP 2.972). See
+ *   {@link extractInterventionsForOption} — read-only provenance evidence,
+ *   never a value source.
  * @returns Array of extracted options
  */
 export function extractOptionsFromNodes(
@@ -883,11 +1638,15 @@ export function extractOptionsFromNodes(
     description?: string;
     body?: string;
     v4Interventions?: Record<string, number>;
+    v4RawInterventions?: Record<string, number>;
+    v4InterventionBindings?: Record<string, V4InterventionBinding>;
+    is_baseline?: boolean;
   }>,
   allNodes: NodeV3T[],
   edges: EdgeV3T[],
   goalNodeId: string,
-  edgeHints: EdgeHint[] = []
+  edgeHints: EdgeHint[] = [],
+  briefText?: string
 ): ExtractedOption[] {
   const results: ExtractedOption[] = [];
   const usedIds = new Set<string>();
@@ -908,8 +1667,15 @@ export function extractOptionsFromNodes(
       usedIds,
       hintsForOption,
       node.v4Interventions,
-      node.id
+      node.id,
+      briefText,
+      node.v4RawInterventions,
+      node.v4InterventionBindings,
     );
+    // Carry is_baseline from the source node (v191+)
+    if (node.is_baseline !== undefined) {
+      option.is_baseline = node.is_baseline;
+    }
     usedIds.add(option.id);
     results.push(option);
   }
@@ -918,24 +1684,75 @@ export function extractOptionsFromNodes(
 }
 
 /**
+ * Normalise option interventions to ensure non-null object.
+ * Centralises the ?? {} guard pattern at a single ingest point.
+ *
+ * ## Normalisation Architecture
+ *
+ * There are two entry points for options into the system:
+ * 1. **Extraction path**: Options created via toOptionV3() → normalised here
+ * 2. **Validation path**: Raw LLM responses via validateV3Response() → normalised there
+ *
+ * Both paths call this function, ensuring all options have interventions: {} before
+ * downstream processing. The ?? {} guards in validators remain as belt-and-suspenders.
+ *
+ * ## Telemetry
+ *
+ * Emits `InterventionsMissingDefaulted` when interventions are missing and:
+ * - status is not 'needs_user_mapping' (expected to have interventions)
+ * - status is missing/unknown (data quality issue)
+ */
+export function normaliseOptionInterventions<T extends { interventions?: Record<string, unknown> | null; id?: string; status?: string }>(
+  option: T
+): T & { interventions: Record<string, unknown> } {
+  const wasMissing = option.interventions == null;
+
+  // Emit telemetry if interventions missing and status suggests they should exist
+  // Also emit with "unknown" status when status field itself is missing (data quality signal)
+  if (wasMissing) {
+    const status = option.status ?? "unknown";
+    if (status !== "needs_user_mapping") {
+      emit(TelemetryEvents.InterventionsMissingDefaulted, {
+        option_id: option.id ?? "unknown",
+        option_status: status,
+      });
+    }
+  }
+
+  return {
+    ...option,
+    interventions: option.interventions ?? {},
+  };
+}
+
+/**
  * Convert extracted option to V3 schema format.
  * Includes raw_interventions for Raw+Encoded pattern support.
+ * Normalises interventions to ensure non-null object (single normalisation point).
  */
 export function toOptionV3(extracted: ExtractedOption): OptionV3T {
+  // Normalise interventions at the creation point
+  const normalised = normaliseOptionInterventions(extracted);
+
   const result: OptionV3T = {
-    id: extracted.id,
-    label: extracted.label,
-    description: extracted.description,
-    status: extracted.status,
-    interventions: extracted.interventions,
-    unresolved_targets: extracted.unresolved_targets,
-    user_questions: extracted.user_questions,
-    provenance: extracted.provenance,
+    id: normalised.id,
+    label: normalised.label,
+    description: normalised.description,
+    status: normalised.status,
+    interventions: normalised.interventions,
+    unresolved_targets: normalised.unresolved_targets,
+    user_questions: normalised.user_questions,
+    provenance: normalised.provenance,
   };
 
   // Add raw_interventions if present (Raw+Encoded pattern)
   if (extracted.raw_interventions && Object.keys(extracted.raw_interventions).length > 0) {
     result.raw_interventions = extracted.raw_interventions;
+  }
+
+  // Carry is_baseline through if set (v191+)
+  if (extracted.is_baseline !== undefined) {
+    result.is_baseline = extracted.is_baseline;
   }
 
   return result;
@@ -1013,7 +1830,7 @@ export function getExtractionStatistics(options: ExtractedOption[]): ExtractionS
       stats.raw_interventions_total += Object.keys(option.raw_interventions).length;
     }
 
-    for (const intervention of Object.values(option.interventions)) {
+    for (const intervention of Object.values(option.interventions ?? {})) {
       stats.interventions_total++;
 
       // Track match types

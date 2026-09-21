@@ -1,0 +1,16 @@
+{
+  "id": "rt-03-market-size-uk-fintech",
+  "name": "UK fintech market size",
+  "description": "Query for UK fintech market size and growth rate data",
+  "query": "What is the current size of the UK fintech market and projected growth rate for 2024-2027? Include total addressable market figures.",
+  "context_hint": "Decision model for market entry into UK fintech. Need to calibrate the market_size and market_growth factors.",
+  "target_factor": "UK Fintech Market Size",
+  "expected": {
+    "min_findings_length": 100,
+    "min_source_count": 1,
+    "must_contain_keywords": ["UK", "fintech", "market"],
+    "expects_numeric_values": true,
+    "expects_confidence_note": true,
+    "forbidden_substrings": []
+  }
+}

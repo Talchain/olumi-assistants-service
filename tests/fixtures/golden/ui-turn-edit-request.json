@@ -1,0 +1,41 @@
+{
+  "message": "Add a factor for environmental impact that negatively affects profit",
+  "scenario_id": "scn-edit-001",
+  "client_turn_id": "ct-edit-001",
+  "conversation_history": [
+    {
+      "role": "user",
+      "content": "Build me a decision model for expanding the business"
+    },
+    {
+      "role": "assistant",
+      "content": "Here's your decision model with the key factors identified.",
+      "tool_calls": [
+        { "name": "edit_graph", "input": { "edit_description": "Create initial decision model" } }
+      ]
+    },
+    {
+      "role": "user",
+      "content": "Looks good, apply it"
+    },
+    {
+      "role": "assistant",
+      "content": "Great, I've applied the changes to your model."
+    }
+  ],
+  "graph_state": {
+    "nodes": [
+      { "id": "goal_1", "kind": "goal", "label": "Maximize Profit" },
+      { "id": "opt_1", "kind": "option", "label": "Expand East" },
+      { "id": "opt_2", "kind": "option", "label": "Expand West" },
+      { "id": "fac_1", "kind": "factor", "label": "Market Size" },
+      { "id": "fac_2", "kind": "factor", "label": "Competition" },
+      { "id": "fac_3", "kind": "factor", "label": "Cost of Entry" }
+    ],
+    "edges": [
+      { "from": "fac_1", "to": "goal_1", "strength": { "mean": 0.8, "std": 0.1 } },
+      { "from": "fac_2", "to": "goal_1", "strength": { "mean": -0.4, "std": 0.15 } },
+      { "from": "fac_3", "to": "goal_1", "strength": { "mean": -0.6, "std": 0.1 } }
+    ]
+  }
+}

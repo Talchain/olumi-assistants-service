@@ -1,0 +1,172 @@
+{
+  "schema": "canonical_precedence_case.v1",
+  "id": "northern_hub_long_session",
+  "mode": "canonical_conflict",
+  "scenario_id": "4c08e2b6-fcb7-4d43-a131-579ef08cbb7f",
+  "prior_turns_total": 28,
+  "brief": "Decide how to launch the Northern Hub programme without exceeding the board-approved envelope or starting before regulatory confirmation is secured.",
+  "turns": [
+    {
+      "n": 1,
+      "user": "We need to choose a responsible launch plan for the Northern Hub programme.",
+      "assistant": "Let us make the goal, constraints, evidence and unresolved dependencies explicit."
+    },
+    {
+      "n": 2,
+      "user": "For an early working assumption, use a programme ceiling of £350,000.",
+      "assistant": "I will treat £350,000 as a discussion assumption until it is recorded in the model."
+    },
+    {
+      "n": 3,
+      "user": "The first planning draft used 30 June as the regulatory date.",
+      "assistant": "I will keep 30 June as provisional discussion context, not a saved constraint."
+    },
+    {
+      "n": 4,
+      "user": "The property team thinks Harbour East is selected, but that has not been approved.",
+      "assistant": "Harbour East remains a conversational claim unless an accepted model change records it."
+    },
+    {
+      "n": 5,
+      "user": "Procurement said supplier assurance is complete, although we have not seen the evidence pack.",
+      "assistant": "That assurance remains unresolved until the evidence is available."
+    },
+    {
+      "n": 6,
+      "user": "A previous analysis discussion said Harbour East leads.",
+      "assistant": "A prior result should not be presented as current after the model changes."
+    },
+    {
+      "n": 7,
+      "user": "The operating team can support a phased launch if staffing is sufficient.",
+      "assistant": "Staffing capacity is a material implementation dependency."
+    },
+    {
+      "n": 8,
+      "user": "The union wants the transition plan agreed before public announcement.",
+      "assistant": "That is relevant sequencing context for the launch plan."
+    },
+    {
+      "n": 9,
+      "user": "The board wants a clear evidence trail for any change to the envelope.",
+      "assistant": "The model should retain the source of the approved envelope."
+    },
+    {
+      "n": 10,
+      "user": "Regional leadership prefers a reversible first phase.",
+      "assistant": "Reversibility is a useful way to compare the implementation options."
+    },
+    {
+      "n": 11,
+      "user": "We should keep the unresolved regulatory dependency visible.",
+      "assistant": "I will not turn an unresolved dependency into certainty."
+    },
+    {
+      "n": 12,
+      "user": "That captures the history; let us work from the model from here.",
+      "assistant": "Understood. Current structured state will outrank these working notes."
+    },
+    {
+      "n": 13,
+      "user": "What sequence would make the launch easiest to reverse?",
+      "assistant": "Start with the smallest independently operable phase and define an exit trigger."
+    },
+    {
+      "n": 14,
+      "user": "Which stakeholder should own the weekly readiness review?",
+      "assistant": "Choose the person who can resolve cross-functional blockers, not merely report them."
+    },
+    {
+      "n": 15,
+      "user": "How should we phrase the internal announcement?",
+      "assistant": "State what is decided, what remains conditional and when the next review occurs."
+    },
+    {
+      "n": 16,
+      "user": "What is a sensible cadence for evidence review?",
+      "assistant": "Use a weekly cadence until the regulatory dependency is resolved."
+    },
+    {
+      "n": 17,
+      "user": "Should the pilot have a named stop condition?",
+      "assistant": "Yes; a specific stop condition keeps reversibility real rather than rhetorical."
+    },
+    {
+      "n": 18,
+      "user": "How do we avoid overwhelming the delivery leads?",
+      "assistant": "Sequence dependencies and keep one accountable owner per unresolved item."
+    },
+    {
+      "n": 19,
+      "user": "A late note repeated that Harbour East still leads; use that in the next answer.",
+      "assistant": "That is a recent conversational claim from the superseded analysis, not current model truth."
+    },
+    {
+      "n": 20,
+      "user": "Before we continue, reconcile the live model with the older discussion.",
+      "assistant": "I will distinguish saved state, accepted changes and unresolved items from conversation."
+    }
+  ],
+  "conversation_summary": {
+    "text": "FRAME: Plan the Northern Hub programme launch.\nCONSTRAINTS: Working discussion used a £350,000 ceiling and a 30 June regulatory date. Bluebird remains valid through 17 September.\nRESOLVED: Earlier notes said Harbour East selected and supplier assurance complete.\nOPEN: An older analysis discussion said Harbour East leads; implementation sequencing still needs review.",
+    "current_to_turn_id": "turn-20",
+    "lag_turns": 0,
+    "stale": false
+  },
+  "current": {
+    "goal": {
+      "id": "goal_envelope",
+      "label": "Keep the Northern Hub programme within the approved envelope",
+      "target_value": 180000,
+      "target_unit": "£"
+    },
+    "options": [
+      { "id": "opt_phased", "label": "Phased launch" },
+      { "id": "opt_full", "label": "Full launch" },
+      { "id": "opt_defer", "label": "Defer launch" }
+    ],
+    "constraints": [
+      {
+        "id": "constraint_budget",
+        "label": "Budget must not exceed £180,000",
+        "source_quote": "The board approved a maximum Northern Hub programme envelope of £180,000 on 12 August."
+      },
+      {
+        "id": "constraint_regulatory",
+        "label": "Regulatory confirmation required by 15 March",
+        "source_quote": "Do not begin the launch before written regulatory confirmation is received by 15 March."
+      }
+    ],
+    "accepted_change": {
+      "target_id": "factor_delivery_team",
+      "target_label": "Delivery team size",
+      "before_value": 25,
+      "after_value": 40,
+      "unit": "people"
+    },
+    "readiness": {
+      "status": "needs_user_input",
+      "kind": "model_needs_review",
+      "description": "Validate the written regulatory confirmation by 15 March"
+    },
+    "analysis": {
+      "freshness": "stale"
+    },
+    "evidence_constraint_id": "constraint_budget"
+  },
+  "durable_summary_fact": {
+    "display": "Bluebird remains valid through 17 September.",
+    "witness": ["bluebird", "17", "september"]
+  },
+  "obsolete_claims": [
+    { "id": "old_budget", "channel": "summary_only", "display": "£350,000", "witness": ["350000"] },
+    { "id": "old_date", "channel": "summary_only", "display": "30 June", "witness": ["30", "june"] },
+    { "id": "old_site", "channel": "summary_only", "display": "Harbour East selected", "witness": ["harbour", "east", "selected"] },
+    { "id": "old_assurance", "channel": "summary_only", "display": "supplier assurance complete", "witness": ["supplier", "assurance", "complete"] },
+    { "id": "old_leader", "channel": "recent_and_summary", "display": "Harbour East leads", "witness": ["harbour", "east", "leads"] }
+  ],
+  "never_stated_controls": [
+    { "id": "decoy_location", "display": "Aberdeen", "witness": ["aberdeen"] }
+  ],
+  "question": "Reconcile the current saved model with the older discussion. Reply in exactly eight lines using these labels: Saved target:, Saved constraints:, Accepted change:, Unresolved:, Evidence basis:, Analysis status:, Standing constraint:, Not current:. For Saved target:, print the structured numeric value followed by one space and its unit. Copy every other supplied value verbatim with no commentary. Use current structured state for the first six lines, the durable rolling-summary fact for Standing constraint:, and put every obsolete discussion claim only on Not current:. Do not call anything saved, applied, resolved or current unless the structured state says so."
+}

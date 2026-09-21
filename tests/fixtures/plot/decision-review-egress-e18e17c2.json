@@ -1,0 +1,192 @@
+{
+  "brief": "We must decide whether to hold seat price at 49 or raise it to 59, to grow MRR without losing accounts.",
+  "brief_hash": "84d3749025cda708",
+  "graph": {
+    "nodes": [
+      {
+        "id": "goal_mrr",
+        "label": "Grow MRR",
+        "kind": "goal"
+      },
+      {
+        "id": "factor_price",
+        "label": "Seat Price Level",
+        "kind": "factor"
+      },
+      {
+        "id": "factor_sens",
+        "label": "Customer Price Sensitivity",
+        "kind": "factor"
+      }
+    ],
+    "edges": [
+      {
+        "id": "factor_price->goal_mrr",
+        "from": "factor_price",
+        "to": "goal_mrr",
+        "strength": {
+          "mean": 0.5,
+          "std": 0.15
+        },
+        "exists_probability": 0.9
+      },
+      {
+        "id": "factor_sens->goal_mrr",
+        "from": "factor_sens",
+        "to": "goal_mrr",
+        "strength": {
+          "mean": -0.4,
+          "std": 0.15
+        },
+        "exists_probability": 0.9
+      }
+    ]
+  },
+  "isl_results": {
+    "option_comparison": [
+      {
+        "option_id": "opt_one_dev",
+        "option_label": "Hire One Developer (Reduced Commitment)",
+        "win_probability": 0.0007083333333333334,
+        "expected_outcome": 0.10179725550865354
+      },
+      {
+        "option_id": "opt_status_quo",
+        "option_label": "No New Hire (Status Quo)",
+        "win_probability": 0.002833333333333333,
+        "expected_outcome": -0.00039679435638067785
+      },
+      {
+        "option_id": "opt_tech_lead",
+        "option_label": "Hire One Tech Lead",
+        "win_probability": 0.59025,
+        "expected_outcome": 0.25559011544614935
+      },
+      {
+        "option_id": "opt_two_devs",
+        "option_label": "Hire Two Developers",
+        "win_probability": 0.40620833333333334,
+        "expected_outcome": 0.20399130537368776
+      }
+    ],
+    "factor_sensitivity": [
+      {
+        "factor_id": "fac_hiring_cost",
+        "factor_label": "fac_hiring_cost",
+        "elasticity": -0.014698333393406733,
+        "confidence": 0.3815
+      },
+      {
+        "factor_id": "fac_team_maturity",
+        "factor_label": "fac_team_maturity",
+        "elasticity": 0.00973884763603252,
+        "confidence": 0.3891
+      }
+    ],
+    "fragile_edges": [
+      {
+        "edge_id": "fac_tech_lead->out_technical_quality",
+        "from": "fac_tech_lead",
+        "to": "out_technical_quality",
+        "switch_probability": 0.61,
+        "marginal_switch_probability": 0.23
+      },
+      {
+        "edge_id": "out_technical_quality->goal_productivity",
+        "from": "out_technical_quality",
+        "to": "goal_productivity",
+        "switch_probability": 0.569,
+        "marginal_switch_probability": 0.21
+      },
+      {
+        "edge_id": "fac_dev_headcount->risk_coordination",
+        "from": "fac_dev_headcount",
+        "to": "risk_coordination",
+        "switch_probability": 0.487,
+        "marginal_switch_probability": 0
+      },
+      {
+        "edge_id": "fac_dev_headcount->out_technical_quality",
+        "from": "fac_dev_headcount",
+        "to": "out_technical_quality",
+        "switch_probability": 0.375,
+        "marginal_switch_probability": 0.05
+      },
+      {
+        "edge_id": "risk_coordination->goal_productivity",
+        "from": "risk_coordination",
+        "to": "goal_productivity",
+        "switch_probability": 0.307,
+        "marginal_switch_probability": 0.28
+      },
+      {
+        "edge_id": "out_throughput->goal_productivity",
+        "from": "out_throughput",
+        "to": "goal_productivity",
+        "switch_probability": 0.281,
+        "marginal_switch_probability": 0.03
+      },
+      {
+        "edge_id": "fac_dev_headcount->out_throughput",
+        "from": "fac_dev_headcount",
+        "to": "out_throughput",
+        "switch_probability": 0.075,
+        "marginal_switch_probability": 0.42
+      }
+    ],
+    "robustness": {
+      "recommendation_stability": 0.59025,
+      "flip_risk_category": "unknown",
+      "is_robust": false
+    }
+  },
+  "deterministic_coaching": {
+    "readiness": "close_call",
+    "headline_type": "high_uncertainty",
+    "evidence_gaps": [
+      {
+        "factor_id": "factor_sens",
+        "factor_label": "Customer Price Sensitivity",
+        "confidence": 0.5,
+        "voi": 0.4
+      },
+      {
+        "factor_id": "fac_hiring_cost",
+        "factor_label": "Hiring and Salary Cost",
+        "confidence": 0.44075,
+        "voi": 0.29349871628961427
+      },
+      {
+        "factor_id": "fac_team_maturity",
+        "factor_label": "Team Technical Maturity",
+        "confidence": 0.44455,
+        "voi": 0.19314553005409252
+      }
+    ],
+    "model_critiques": [
+      {
+        "type": "DOMINANT_FACTOR",
+        "severity": "warn",
+        "message": "One factor dominates. What would change if Customer Price Sensitivity had less influence?",
+        "suggested_action": "Consider whether Customer Price Sensitivity's importance is evidence-based or assumed",
+        "affected_node_ids": [
+          "factor_sens"
+        ]
+      }
+    ]
+  },
+  "winner": {
+    "id": "opt_tech_lead",
+    "label": "Hire One Tech Lead",
+    "win_probability": 0.59025,
+    "outcome_mean": 0.25559011544614935
+  },
+  "runner_up": {
+    "id": "opt_two_devs",
+    "label": "Hire Two Developers",
+    "win_probability": 0.40620833333333334,
+    "outcome_mean": 0.20399130537368776
+  },
+  "flip_threshold_data": [],
+  "margin": 0.18404166666666671
+}

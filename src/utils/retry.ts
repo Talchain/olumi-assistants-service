@@ -1,4 +1,5 @@
 import { emit, TelemetryEvents } from "./telemetry.js";
+import { RETRY_BASE_DELAY_MS, RETRY_MAX_DELAY_MS, RETRY_MAX_ATTEMPTS } from "../config/timeouts.js";
 
 /**
  * Retry configuration options
@@ -18,9 +19,9 @@ export interface RetryConfig {
  * - ±20% jitter to prevent thundering herd
  */
 export const DEFAULT_RETRY_CONFIG: RetryConfig = {
-  maxAttempts: 3,
-  baseDelayMs: 250,
-  maxDelayMs: 5000,
+  maxAttempts: RETRY_MAX_ATTEMPTS,
+  baseDelayMs: RETRY_BASE_DELAY_MS,
+  maxDelayMs: RETRY_MAX_DELAY_MS,
   backoffFactor: 2,
   jitterPercent: 20,
 };

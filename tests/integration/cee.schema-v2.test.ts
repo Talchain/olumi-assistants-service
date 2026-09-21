@@ -30,6 +30,55 @@ vi.mock("../../src/cee/structure/index.js", () => ({
     defaultStrengthCount: 0,
     defaultStrengthPercentage: 0,
   }),
+  detectStrengthClustering: () => ({
+    detected: false,
+    coefficientOfVariation: 0,
+    edgeCount: 0,
+  }),
+  detectGoalLayerStrengthClustering: () => ({
+    detected: false,
+    coefficientOfVariation: 0,
+    edgeCount: 0,
+  }),
+  detectSameLeverOptions: () => ({
+    detected: false,
+    maxOverlapPercentage: 0,
+    overlappingOptionPairs: [],
+  }),
+  detectMissingBaseline: () => ({
+    detected: false,
+    hasBaseline: false,
+  }),
+  detectGoalNoBaselineValue: () => ({
+    detected: false,
+    goalHasValue: false,
+  }),
+  detectZeroExternalFactors: () => ({
+    detected: false,
+    factorCount: 0,
+    externalCount: 0,
+  }),
+  checkGoalConnectivity: () => ({
+    status: "full",
+    disconnectedOptions: [],
+    weakPaths: [],
+  }),
+  computeModelQualityFactors: () => ({
+    estimate_confidence: 0.5,
+    strength_variation: 0,
+    range_confidence_coverage: 0,
+    has_baseline_option: false,
+  }),
+  detectOptionSimilarity: () => ({
+    detected: false,
+    critiques: [],
+    warnings: [],
+    validationIssues: [],
+  }),
+  detectMissingCounterfactual: () => ({
+    detected: false,
+    hasCounterfactual: false,
+  }),
   normaliseDecisionBranchBeliefs: (graph: unknown) => graph,
   validateAndFixGraph: (graph: unknown) => ({
     graph,
@@ -40,6 +89,12 @@ vi.mock("../../src/cee/structure/index.js", () => ({
       decisionBranchesNormalized: false,
     },
     warnings: [],
+  }),
+  fixNonCanonicalStructuralEdges: (graph: unknown) => ({
+    graph,
+    fixedEdgeCount: 0,
+    fixedEdgeIds: [],
+    repairs: [],
   }),
   // Goal inference utilities
   hasGoalNode: (graph: any) => {
@@ -446,11 +501,20 @@ describe("GET /assist/v1/draft-graph?schema=v2", () => {
         expect(defaultBody.nodes[0]).toHaveProperty("kind");
       }
 
-      // V2 edges should have effect_direction, V1 should not, V3 should
+      // V2/V3 edges should have effect_direction; on V1 it is OPTIONAL
+      // (EffectDirection.optional() in src/schemas/graph.ts) — deterministic
+      // repairs write it into v1 graphs (enforcement bridge edges always;
+      // canonicalStructuralEdge on structural edges since the 422 fix), so
+      // the old `not.toHaveProperty` assertion only held while edges[0]
+      // happened to escape repair. Assert the schema contract instead: if
+      // present it must be a valid direction.
       // V3 has edges at root level, V1/V2 have graph.edges
       if (v1Body.graph.edges.length > 0) {
-        expect(v1Body.graph.edges[0]).not.toHaveProperty("effect_direction");
-        expect(v1Body.graph.edges[0]).not.toHaveProperty("strength_std");
+        const v1Direction = v1Body.graph.edges[0].effect_direction;
+        if (v1Direction !== undefined) {
+          expect(["positive", "negative"]).toContain(v1Direction);
+        }
+        // V1 schema now includes strength_std (added by simpleRepair synthetic edges)
       }
       if (v2Body.graph.edges.length > 0) {
         expect(v2Body.graph.edges[0]).toHaveProperty("effect_direction");
@@ -458,7 +522,7 @@ describe("GET /assist/v1/draft-graph?schema=v2", () => {
       }
       if (defaultBody.edges.length > 0) {
         expect(defaultBody.edges[0]).toHaveProperty("effect_direction");
-        expect(defaultBody.edges[0]).toHaveProperty("strength_std");
+        expect(defaultBody.edges[0]).toHaveProperty("strength.std");
       }
     });
   });

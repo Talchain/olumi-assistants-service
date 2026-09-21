@@ -1,0 +1,687 @@
+/**
+ * P0 (2026-07-15, DGAI issue #340 / debug bundle olumi-debug-4605a72b) —
+ * held proposals must survive the turn boundary THROUGH THE ROUTE.
+ *
+ * Live-wire failure being reproduced (Paul's exact sequence):
+ *   1. CEE holds a multi-part GM proposal: "I'm holding the change to add
+ *      'Wasted Time Searching for Co-Founder' and 2 more changes ... Reply
+ *      yes to continue ...". The hold persists an `apply_proposed_change`
+ *      pending with the executable batch (this part WORKS today).
+ *   2. The user clicks the UI's own confirmation chip. The chip replays its
+ *      LABEL TEXT as the user message (`source: 'chip_click'`, no proposal
+ *      reference — the boundary chip enum cannot even carry one).
+ *   3. The consent-clarity NAMED chip copy ("Add 'X' and 2 more changes")
+ *      contains an edit verb + digits BY CONSTRUCTION, so it fails BOTH
+ *      anchored confirmation regexes gating the route-level proposal-confirm
+ *      suppressor — route-v2's edit heuristic hijacks the turn into
+ *      `dispatchEditGraph` (the V4 edit LLM), which never reads pendings.
+ *      The user gets "I've drafted a change that fits your description, but
+ *      I need the specifics..." and the held proposal is never applied.
+ *
+ * These tests drive `POST /orchestrate/v2/turn` with the REAL TurnExecutor
+ * (mocked LLM router + session store; `dispatchEditGraph` mocked purely as a
+ * mis-dispatch detector) and assert the WIRING: the confirm turn must reach
+ * the executor's held-resume path and produce a durable commit carrying the
+ * applied graph + an `edit_graph` receipt fact — not a clarify, not an LLM
+ * round-trip.
+ *
+ * RED-first: the chip-label, chip-message and typed-exact-copy cases FAIL on
+ * base 96f0934378be (routed to dispatchEditGraph). The free-text "yes" case
+ * pins the already-working executor path. The unrelated-edit cases pin
+ * conservatism: a live hold must NEVER hijack a genuinely new edit command.
+ *
+ * Mocking strategy mirrors `route-v2-signature-loop.test.ts`; the GM hold
+ * fixture mirrors `gm-held-execute-route-level.test.ts`.
+ */
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+import Fastify from 'fastify';
+import type { FastifyInstance } from 'fastify';
+
+import { computeAnalysisAffectingGraphHash } from '../../orchestrator-v5/context/graph-hash.js';
+import { GraphV3 } from '../../schemas/cee-v3.js';
+import type { PendingAction } from '../../orchestrator-v5/session/pending-action.js';
+import { _resetConfigCache } from '../../config/index.js';
+import { TurnSource } from '@talchain/schemas/boundary';
+import {
+  buildGmHeldPublicCopy,
+  describeHeldOperationsSubject,
+} from '../../orchestrator-v5/handlers/edit-graph-referee-gate.js';
+
+const dispatchEditGraphMock = vi.fn();
+vi.mock('../../orchestrator-v5/handlers/edit-graph-dispatch.js', () => ({
+  dispatchEditGraph: dispatchEditGraphMock,
+}));
+
+// Mutable per-test session-store behaviour.
+let pendingActionsForRead: readonly PendingAction[] = [];
+
+const appendMock = vi.fn().mockResolvedValue({ id: 'mock-row-id' });
+vi.mock('../../orchestrator-v5/session/index.js', () => ({
+  getSessionStore: () => ({
+    append: appendMock,
+    readRecent: async () => [],
+    readFactsFor: async () => [],
+    readFactsWithTurnFor: async () => [],
+    readScenarioRunAnalysisFactsFor: async () => ({ facts: [], total_count: 0 }),
+    invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
+    invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
+    ensureScenarioExists: async (_id: string, userId: string) => ({ user_id: userId }),
+    storeDraftGraph: async () => undefined,
+    loadGraph: async () => STRICT_GRAPH,
+    loadGraphAndBriefText: async () => ({ graph: STRICT_GRAPH, briefText: null }),
+    readMostRecentPendingActions: async () => pendingActionsForRead,
+    hasPriorTurns: async () => true,
+  }),
+  resetSessionStoreForTests: () => {},
+  SessionReadError: class SessionReadError extends Error {},
+}));
+
+// The deterministic held-resume path must make ZERO LLM calls; any call on
+// the apply cases is a wiring failure and must fail the test loudly. The
+// mis-dispatch cases stub dispatchEditGraph, so they never reach this either.
+const chatWithToolsMock = vi.fn().mockImplementation(async () => {
+  throw new Error('LLM router must NOT be called on a deterministic held-proposal resume');
+});
+vi.mock('../../adapters/llm/router.js', () => ({
+  getAdapter: () => ({
+    name: 'test',
+    model: 'test-model',
+    chat: async () => ({ content: 'reply', usage: { input_tokens: 1, output_tokens: 1 } }),
+    chatWithTools: chatWithToolsMock,
+  }),
+  getAdapterWithResolution: () => ({
+    adapter: {
+      name: 'test',
+      model: 'test-model',
+      chat: async () => ({ content: 'reply', usage: { input_tokens: 1, output_tokens: 1 } }),
+      chatWithTools: chatWithToolsMock,
+    },
+    resolution: { task: 'narrate', resolved_model: 'test-model', resolution_source: 'task_default' as const },
+  }),
+  getMaxTokensFromConfig: () => undefined,
+}));
+
+vi.mock('../../adapters/llm/prompt-loader.js', () => ({
+  getSystemPrompt: async () => 'test system prompt',
+}));
+
+vi.mock('../../config/index.js', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../config/index.js')>();
+  return {
+    ...original,
+    config: new Proxy(original.config as object, {
+      get(target, prop) {
+        if (prop === 'features') {
+          return new Proxy(Reflect.get(target, prop) as object, {
+            get(featTarget, featProp) {
+              if (featProp === 'pipelineV4Enabled') return false;
+              return Reflect.get(featTarget, featProp);
+            },
+          });
+        }
+        return Reflect.get(target, prop);
+      },
+    }),
+  };
+});
+
+const { ceeOrchestratorRouteV2 } = await import('../../orchestrator/route-v2.js');
+
+const SCENARIO_ID = '77777777-7777-4777-8777-777777777777';
+const GM_PROPOSAL_REF = 'gmh_paulsholdref';
+
+/**
+ * Strict GraphV3 fixture (must pass BOTH GraphV3 and the ingress parse) —
+ * the persisted graph the hold was pinned against AND the request
+ * graph_state on the confirm turn (the graph did not move in between).
+ */
+const STRICT_GRAPH = {
+  nodes: [
+    { id: 'opt-a', kind: 'option', label: 'Find a co-founder' },
+    { id: 'goal-g', kind: 'goal', label: 'Launch the venture' },
+    {
+      id: 'fac-marketing',
+      kind: 'factor',
+      label: 'Marketing',
+      observed_state: { value: 0.1, raw_value: 5, cap: 50 },
+    },
+    {
+      id: 'fac-revenue',
+      kind: 'factor',
+      label: 'Revenue',
+      observed_state: { value: 0.2, raw_value: 10, cap: 50 },
+    },
+  ],
+  edges: [
+    {
+      from: 'fac-marketing',
+      to: 'goal-g',
+      strength: { mean: 0.5, std: 0.1 },
+      exists_probability: 0.9,
+      effect_direction: 'positive',
+    },
+    {
+      from: 'fac-revenue',
+      to: 'goal-g',
+      strength: { mean: 0.4, std: 0.1 },
+      exists_probability: 0.9,
+      effect_direction: 'positive',
+    },
+  ],
+};
+{
+  const parsed = GraphV3.safeParse(STRICT_GRAPH);
+  if (!parsed.success) {
+    throw new Error('Fixture failed GraphV3.safeParse: ' + JSON.stringify(parsed.error.issues));
+  }
+}
+const GRAPH_HASH =
+  computeAnalysisAffectingGraphHash(
+    STRICT_GRAPH as unknown as Parameters<typeof computeAnalysisAffectingGraphHash>[0],
+  ) ?? 'h_unset';
+
+/**
+ * The held batch — Paul's shape: one add plus two more changes. All three
+ * ops are independently valid against STRICT_GRAPH so the confirm-time
+ * re-referee accepts the batch.
+ */
+const HELD_OPERATIONS = [
+  {
+    op: 'add_node',
+    path: 'fac-wasted-time',
+    value: {
+      id: 'fac-wasted-time',
+      kind: 'factor',
+      label: 'Wasted time searching for a co-founder',
+    },
+  },
+  { op: 'update_node', path: 'fac-marketing', value: { description: 'Quarterly ad budget' } },
+  { op: 'update_node', path: 'fac-revenue', value: { description: 'Monthly recurring revenue' } },
+];
+
+/**
+ * The consent-clarity NAMED public copy exactly as `buildGmHeldPublicCopy`
+ * mints it for this batch (CHANGESET HONESTY 1.134: the subject enumerates
+ * EVERY operation — the pre-mechanism "and 2 more changes" collapse is
+ * dead). The chip LABEL is what the UI replays on click (DGAI #340); the
+ * MESSAGE is the "Yes, ..." variant a typed confirmation may repeat
+ * verbatim.
+ */
+const HELD_CHIP_LABEL =
+  "Add factor 'Wasted time searching for a co-founder', " +
+  "update the description of 'Marketing' and update the description of 'Revenue'";
+const HELD_CHIP_MESSAGE =
+  "Yes, add factor 'Wasted time searching for a co-founder', " +
+  "update the description of 'Marketing' and update the description of 'Revenue'.";
+
+/** Deterministic clarify copy for a confirm with no live proposal (route-v2). */
+const NO_LIVE_PROPOSAL_TEXT =
+  "I don't have a pending suggested update to apply. " +
+  'Tell me what you want to change, or ask what could change the outcome.';
+
+function gmHeldPending(overrides: { expiresAtIso?: string; graphHash?: string } = {}): PendingAction {
+  return {
+    id: 'pa-gm-held-paul',
+    scenario_id: SCENARIO_ID,
+    chip_id: GM_PROPOSAL_REF,
+    action: {
+      kind: 'apply_proposed_change',
+      proposal_ref: GM_PROPOSAL_REF,
+      inline_patch: {
+        handler_id: 'graph_management_held_v1',
+        apply_wiring: 'held_execute_v1',
+        candidate_id: 'cand-paul-hold',
+        candidate_kind: 'add_node',
+        mutation_class: 'structural',
+        blocker_code: 'STRUCTURAL_APPLY_HELD',
+        base_hash_match: true,
+        params: {},
+        target_entity_ids: [],
+        operations: HELD_OPERATIONS,
+        operations_count: HELD_OPERATIONS.length,
+      },
+      public_label: HELD_CHIP_LABEL,
+      public_message: HELD_CHIP_MESSAGE,
+    },
+    preconditions: { graph_hash: overrides.graphHash ?? GRAPH_HASH },
+    expires_at_turn_count: 4,
+    expires_at_iso: overrides.expiresAtIso ?? '2099-12-31T23:59:59.000Z',
+    emitted_at_iso: '2026-07-15T20:00:00.000Z',
+  } as PendingAction;
+}
+
+// Use the producer's actual persisted/rendered copy, not a test-authored alias.
+// A rename label is itself a structural command; its replay must resume THIS
+// batch rather than asking the edit LLM to draft another one (#1231 / #644 P2-2).
+function renameHold(newLabel = 'Acquisition spend') {
+  const operations = [{ op: 'update_node', path: 'fac-marketing', value: { label: newLabel } }];
+  const copy = buildGmHeldPublicCopy(describeHeldOperationsSubject(operations, STRICT_GRAPH));
+  const base = gmHeldPending();
+  if (base.action.kind !== 'apply_proposed_change' || base.action.__legacy_no_public_copy === true) {
+    throw new Error('Rename hold requires the standard persisted public-copy fixture');
+  }
+  const pending: PendingAction = {
+    ...base,
+    action: {
+      ...base.action,
+      public_label: copy.label,
+      public_message: copy.message,
+      inline_patch: {
+        ...base.action.inline_patch,
+        candidate_kind: 'rename_node',
+        mutation_class: 'tunable',
+        blocker_code: null,
+        operations,
+        operations_count: operations.length,
+      },
+    },
+  };
+  return { copy, pending, newLabel };
+}
+
+function expectAppliedRenameHold(newLabel: string): void {
+  expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+  expect(chatWithToolsMock).not.toHaveBeenCalled();
+  expect(appendMock).toHaveBeenCalledTimes(1);
+  const write = appendMock.mock.calls[0]![0] as Record<string, unknown>;
+  expect(write.graph).toEqual({
+    ...STRICT_GRAPH,
+    nodes: STRICT_GRAPH.nodes.map((node) => node.id === 'fac-marketing' ? { ...node, label: newLabel } : node),
+  });
+  expect(write.handler_facts).toEqual([
+    expect.objectContaining({ fact_type: 'edit_graph' }),
+  ]);
+  // Consumed once; no replacement pending or second hold is minted.
+  expect(write.pending_actions).toEqual([]);
+}
+
+function makeEditGraphMockResult(assistantText = 'Mocked edit pipeline reply.') {
+  return {
+    response: {
+      response_version: 2 as const,
+      assistant_text: assistantText,
+      blocks: [] as const,
+      suggested_actions: [] as const,
+      insights: [] as const,
+      stage_indicator: 'analyse' as const,
+    },
+    commitPerformed: true,
+  };
+}
+
+function payload(overrides: Record<string, unknown>): Record<string, unknown> {
+  return {
+    kind: 'message',
+    turn_id: '33333333-3333-4333-8333-333333333333',
+    scenario_id: SCENARIO_ID,
+    stage: 'analyse',
+    message: 'placeholder',
+    turn_class: 'decide',
+    source: 'composer',
+    graph_state: STRICT_GRAPH,
+    ...overrides,
+  };
+}
+
+/** Assert the durable commit carries the APPLIED hold: mutated graph + receipt fact. */
+function expectAppliedHoldCommit(): void {
+  expect(appendMock).toHaveBeenCalledTimes(1);
+  const write = appendMock.mock.calls[0]![0] as Record<string, unknown>;
+  const graph = write.graph as { nodes?: Array<Record<string, unknown>> } | undefined;
+  expect(graph).toBeDefined();
+  const added = graph!.nodes!.find((n) => n.id === 'fac-wasted-time');
+  expect(added).toBeDefined();
+  expect(added!.label).toBe('Wasted time searching for a co-founder');
+  const marketing = graph!.nodes!.find((n) => n.id === 'fac-marketing');
+  expect(marketing!.description).toBe('Quarterly ad budget');
+  const facts = write.handler_facts as ReadonlyArray<Record<string, unknown>>;
+  expect(facts).toHaveLength(1);
+  expect(facts[0]!.fact_type).toBe('edit_graph');
+}
+
+describe('POST /orchestrate/v2/turn — held proposal survives the confirm turn (P0, DGAI #340)', () => {
+  let app: FastifyInstance;
+
+  beforeAll(async () => {
+    vi.stubEnv('CEE_GRAPH_MANAGEMENT_MODE', 'live');
+    _resetConfigCache();
+    app = Fastify();
+    await ceeOrchestratorRouteV2(app);
+    await app.ready();
+  });
+  afterAll(async () => {
+    await app.close();
+    vi.unstubAllEnvs();
+    _resetConfigCache();
+  });
+  beforeEach(() => {
+    dispatchEditGraphMock.mockReset();
+    dispatchEditGraphMock.mockResolvedValue(makeEditGraphMockResult());
+    appendMock.mockClear();
+    chatWithToolsMock.mockClear();
+    pendingActionsForRead = [gmHeldPending()];
+  });
+
+  /**
+   * ⭐⭐ #1231 REVIEW CORRECTION — THE SOURCE UNION, NOT ONE MEMBER OF IT.
+   *
+   * These twins drove `chip_click` only, and the guard they were written to
+   * pin was bound to `chip_click` only, so they agreed with each other and
+   * with nothing else. MEASURED at the deployed UI (`staging` d20de935,
+   * buildPayload.ts:148-164): a chip is promoted to `chip_click` ONLY when it
+   * carries a published, CEE-accepted `action_type` — and the held-confirm
+   * chip carries none, so it arrives as `source: 'chip'`. The feature was
+   * therefore dark on the ONLY ingress real users hit, and a full-union
+   * measurement at the PR head confirmed it: `chip` and `retry` both
+   * dispatched a second draft where the pre-#1231 base had applied the hold.
+   *
+   * `retry` belongs on the replayed side by DERIVATION, not by symmetry: the
+   * UI's `retryLast` resends `lastUserInputRef.current.message` verbatim with
+   * `source: 'retry'` (useConversation.ts:5604), and that ref is written on
+   * every non-hidden user send INCLUDING chip clicks (:3584-3596). So a retry
+   * can carry this very chip label — click the rename chip, the turn fails,
+   * "Try again" — with its chip provenance erased by the contract (no `chip`
+   * sub-object is permitted on a retry).
+   */
+  const REPLAYED_SOURCES = ['chip', 'chip_click', 'retry'] as const;
+  const FRESHLY_AUTHORED_SOURCES = ['composer'] as const;
+
+  it('precondition: these matrices cover the WHOLE contract source union', () => {
+    // From the CONTRACT, never from the routing code under test. A fifth
+    // member REDs here until it is adjudicated into one arm — the fail-loud
+    // replacement for the hand-written subset that caused this correction.
+    expect([...REPLAYED_SOURCES, ...FRESHLY_AUTHORED_SOURCES].sort())
+      .toEqual([...TurnSource.options].sort());
+  });
+
+  it.each(
+    REPLAYED_SOURCES.flatMap((source) =>
+      (['label', 'message'] as const).map((field) => [source, field] as const),
+    ),
+  )(
+    'the emitted rename chip replayed via source=%s (%s) resumes the exact held rename, never redrafts',
+    async (source, field) => {
+      const held = renameHold();
+      expect(held.copy.label).toBe("Rename 'Marketing' to 'Acquisition spend'");
+      pendingActionsForRead = [held.pending];
+      const res = await app.inject({
+        method: 'POST', url: '/orchestrate/v2/turn',
+        payload: payload({ message: held.copy[field], source }),
+      });
+      expect(res.statusCode).toBe(200);
+      expectAppliedRenameHold(held.newLabel);
+      expect(JSON.parse(res.body).assistant_text).toContain('Confirmed:');
+    },
+  );
+
+  /**
+   * ⭐⭐ THE SECOND HALF, AND IT IS NOT SYMMETRY — IT WAS MEASURED.
+   *
+   * Widening only the edit-lane guard reproduced, on `chip` and `retry`, the
+   * exact defect this PR's author had already found and fixed for `chip_click`:
+   * route-level EXPIRY is enforced inside `resolveProposalConfirmAtRoute`, and
+   * a replay that is excluded from the edit lane but NOT admitted to that gate
+   * skips the expiry check with it — so a DEAD hold resumed and APPLIED
+   * ("Confirmed: rename 'Marketing' to …") instead of returning the honest
+   * clarification. Measured before the second half landed:
+   *   chip → applied=true, retry → applied=true, chip_click → honest text.
+   * This matrix is what makes that regression impossible to reintroduce for
+   * any member of the union.
+   */
+  it.each(REPLAYED_SOURCES)(
+    'an EXPIRED rename hold cannot be revived or redrafted by a source=%s replay',
+    async (source) => {
+      const held = renameHold();
+      pendingActionsForRead = [{ ...held.pending, expires_at_iso: '2020-01-01T00:00:00.000Z' }];
+      const res = await app.inject({
+        method: 'POST', url: '/orchestrate/v2/turn',
+        payload: payload({ message: held.copy.label, source }),
+      });
+      expect(res.statusCode).toBe(200);
+      // Not redrafted...
+      expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+      expect(chatWithToolsMock).not.toHaveBeenCalled();
+      // ...and not silently applied from a dead hold — the honest clarification.
+      expect(JSON.parse(res.body).assistant_text).toBe(NO_LIVE_PROPOSAL_TEXT);
+      for (const [write] of appendMock.mock.calls) {
+        expect((write as Record<string, unknown>).graph).toBeUndefined();
+      }
+    },
+  );
+
+  /**
+   * ⭐ THE DISCRIMINATING TWIN. Same held fixture, same string, `source` the
+   * only difference: the freshly-authored member must still DISPATCH, so the
+   * typed rename gain #1231 exists for is provably untouched by the widening.
+   * Without this arm, classifying every source as a replay would pass every
+   * assertion above.
+   */
+  it.each(FRESHLY_AUTHORED_SOURCES)(
+    'the same string TYPED via source=%s is a fresh command and still dispatches',
+    async (source) => {
+      const held = renameHold();
+      pendingActionsForRead = [held.pending];
+      const res = await app.inject({
+        method: 'POST', url: '/orchestrate/v2/turn',
+        payload: payload({ message: held.copy.label, source }),
+      });
+      expect(res.statusCode).toBe(200);
+      expect(dispatchEditGraphMock).toHaveBeenCalledTimes(1);
+      for (const [write] of appendMock.mock.calls) {
+        expect((write as Record<string, unknown>).graph).toBeUndefined();
+      }
+    },
+  );
+
+  it.each(['label', 'message'] as const)(
+    'a long rename uses the emitted clamped %s/full message contract to resume its hold',
+    async (field) => {
+      const held = renameHold('International audience campaign acquisition spend');
+      expect(held.copy.detail).toBeDefined();
+      expect(held.copy.label).not.toBe(held.copy.detail);
+      pendingActionsForRead = [held.pending];
+      for (const source of REPLAYED_SOURCES) {
+        dispatchEditGraphMock.mockClear();
+        appendMock.mockClear();
+        pendingActionsForRead = [held.pending];
+        const res = await app.inject({
+          method: 'POST', url: '/orchestrate/v2/turn',
+          payload: payload({ message: held.copy[field], source }),
+        });
+        expect(res.statusCode).toBe(200);
+        expectAppliedRenameHold(held.newLabel);
+      }
+    },
+  );
+
+  it('the emitted rename label cannot revive an expired hold or redraft it', async () => {
+    const held = renameHold();
+    pendingActionsForRead = [{ ...held.pending, expires_at_iso: '2020-01-01T00:00:00.000Z' }];
+    const res = await app.inject({
+      method: 'POST', url: '/orchestrate/v2/turn',
+      payload: payload({ message: held.copy.label, source: 'chip_click' }),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+    expect(chatWithToolsMock).not.toHaveBeenCalled();
+    expect(JSON.parse(res.body).assistant_text).toBe(NO_LIVE_PROPOSAL_TEXT);
+    for (const [write] of appendMock.mock.calls) {
+      expect(write.graph).toBeUndefined();
+      expect(write.handler_facts ?? []).toEqual([]);
+      expect(write.pending_actions ?? []).toEqual([]);
+    }
+  });
+
+  it('a fresh typed quoted rename still dispatches without consuming a different live hold', async () => {
+    const held = renameHold();
+    pendingActionsForRead = [held.pending];
+    const res = await app.inject({
+      method: 'POST', url: '/orchestrate/v2/turn',
+      payload: payload({ message: "Rename 'Revenue' to 'Recurring income'", source: 'composer' }),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(dispatchEditGraphMock).toHaveBeenCalledTimes(1);
+    expect(chatWithToolsMock).not.toHaveBeenCalled();
+    expect(appendMock).not.toHaveBeenCalled();
+    expect(JSON.parse(res.body).assistant_text).not.toContain('Confirmed:');
+  });
+
+  /**
+   * ⭐⭐ #1231 — A RENAME CHIP WHOSE HOLD IS NOT IN THE LIVE SET MUST NOT
+   * REDRAFT. This test previously asserted the opposite (edit dispatch), on
+   * the premise that such a click is an "unrelated rename chip" the user
+   * should get a fresh draft from. DERIVED REFUTATION (rg -a over src/,
+   * tests excluded, with a contrast control on the sibling verbs
+   * link/remove/adjust which returns many hits — so the probe can see this
+   * syntax class): the ONLY producer of `rename 'X' to 'Y'` copy in the
+   * service is describe-changeset.ts:257, and its only chip consumer is
+   * `buildGmHeldPublicCopy` — the held-proposal CONFIRM chip's label. There
+   * is no other rename-shaped affordance for a user to click. So a rename
+   * chip that matches no live proposal is not an unrelated command; it is a
+   * STALE CONFIRM CHIP (its hold consumed, swept, or superseded), and
+   * dispatching the edit lane for it drafts a SECOND hold and renders ANOTHER
+   * confirm chip — the loop this PR exists to close.
+   *
+   * The genuine conservatism claim this test was reaching for — a live hold
+   * must never hijack a genuinely NEW command — is pinned by its sibling
+   * above, which types the same string from the composer and still dispatches.
+   * That sibling is also this test's DISCRIMINATING TWIN: identical string,
+   * `source` the only difference, opposite outcomes.
+   */
+  it.each(REPLAYED_SOURCES)(
+    'a rename chip (source=%s) matching no live hold reaches the coach, never a second draft',
+    async (source) => {
+    pendingActionsForRead = [renameHold().pending];
+    const res = await app.inject({
+      method: 'POST', url: '/orchestrate/v2/turn',
+      payload: payload({ message: "Rename 'Revenue' to 'Recurring income'", source }),
+    });
+    // No second hold: the sole structural-proposal producer is never called.
+    expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+    // POSITIVE CONTROL — without it this negative would also pass if the turn
+    // had failed before routing. The coach IS the destination, and in THIS
+    // suite the coach adapter is a deliberate throw ("must NOT be called on a
+    // deterministic held-proposal resume"), so reaching it is observed as the
+    // call plus the harness's 500. Both are asserted so neither can drift into
+    // meaning something else.
+    expect(chatWithToolsMock).toHaveBeenCalled();
+    expect(res.statusCode).toBe(500);
+    // Nothing applied, and no consent acquired from the unrelated live hold.
+    for (const [write] of appendMock.mock.calls) {
+      expect((write as Record<string, unknown>).graph).toBeUndefined();
+    }
+  },
+  );
+
+  // ── Paul's exact sequence: the chip replays its LABEL text ─────────────
+  it("chip click replaying the hold chip's LABEL applies the held batch (no edit-LLM hijack, zero LLM calls)", async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: payload({ message: HELD_CHIP_LABEL, source: 'chip_click' }),
+    });
+    expect(res.statusCode).toBe(200);
+    // The edit heuristic must NOT claim the confirm turn.
+    expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+    // Deterministic resume: zero LLM calls.
+    expect(chatWithToolsMock).not.toHaveBeenCalled();
+    // Durable commit carries the applied graph + edit_graph receipt fact.
+    expectAppliedHoldCommit();
+    // The wire reply is the named applied receipt, keeping the hold-turn
+    // promise — never the "I need the specifics" clarify Paul got.
+    const body = JSON.parse(res.body);
+    expect(body.assistant_text).toContain('Confirmed:');
+    expect(body.assistant_text).toContain('Wasted time searching for a co-founder');
+    expect(body.assistant_text).not.toContain('I need the specifics');
+  });
+
+  // ── The chip's MESSAGE variant ("Yes, add ...") replayed on the wire ───
+  it("chip click replaying the hold chip's MESSAGE applies the held batch", async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: payload({ message: HELD_CHIP_MESSAGE, source: 'chip_click' }),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+    expect(chatWithToolsMock).not.toHaveBeenCalled();
+    expectAppliedHoldCommit();
+  });
+
+  // ── The same copy TYPED by the user (no chip metadata at all) ──────────
+  it('typing the exact "Yes, add ..." confirmation applies the held batch', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: payload({ message: HELD_CHIP_MESSAGE, source: 'composer' }),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+    expect(chatWithToolsMock).not.toHaveBeenCalled();
+    expectAppliedHoldCommit();
+  });
+
+  // ── The copy promise: "Reply yes to continue" must be TRUE ─────────────
+  it('free-text "yes" applies the held batch (the hold copy promise)', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: payload({ message: 'yes', source: 'composer' }),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+    expect(chatWithToolsMock).not.toHaveBeenCalled();
+    expectAppliedHoldCommit();
+    const body = JSON.parse(res.body);
+    expect(body.assistant_text).toContain('Confirmed:');
+  });
+
+  // ── Conservatism: a live hold must never hijack unrelated turns ────────
+  it('an unrelated typed edit command while a hold is live still routes to the edit pipeline (no hijack)', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: payload({
+        message: 'Add a risk for supplier delays affecting the launch',
+        source: 'composer',
+      }),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(dispatchEditGraphMock).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(res.body);
+    expect(body.assistant_text).not.toContain('Confirmed:');
+  });
+
+  it('an unrelated CHIP click with an edit-verb label while a hold is live still routes to the edit pipeline', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: payload({
+        message: 'Add a risk for supplier delays affecting the launch',
+        source: 'chip_click',
+      }),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(dispatchEditGraphMock).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(res.body);
+    expect(body.assistant_text).not.toContain('Confirmed:');
+  });
+
+  // ── Honest expiry: a dead hold's chip resolves to the clarify, never a
+  //    silent edit-LLM draft and never a false apply ──────────────────────
+  it('replaying the chip label after the hold expired returns the deterministic clarify (no apply, no edit dispatch)', async () => {
+    pendingActionsForRead = [gmHeldPending({ expiresAtIso: '2020-01-01T00:00:00.000Z' })];
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: payload({ message: HELD_CHIP_LABEL, source: 'chip_click' }),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+    const body = JSON.parse(res.body);
+    expect(body.assistant_text).toBe(NO_LIVE_PROPOSAL_TEXT);
+    // Nothing applied, nothing drafted.
+    const writes = appendMock.mock.calls.map((c) => c[0] as Record<string, unknown>);
+    for (const w of writes) expect(w.graph).toBeUndefined();
+  });
+});

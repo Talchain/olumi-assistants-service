@@ -1,0 +1,39 @@
+{
+  "id": "rg-06-controllable-missing-data",
+  "name": "CONTROLLABLE_MISSING_DATA — factor missing data field",
+  "description": "A controllable factor has no data field. Repair must add the canonical data stub.",
+  "brief": "We need to decide on our marketing spend level for the next quarter.",
+  "graph": {
+    "nodes": [
+      {"id": "dec_marketing", "kind": "decision", "label": "Marketing Budget Decision"},
+      {"id": "opt_increase", "kind": "option", "label": "Increase Spend", "data": {"interventions": {"fac_marketing_spend": 1.0}}},
+      {"id": "opt_maintain", "kind": "option", "label": "Maintain Spend", "data": {"interventions": {"fac_marketing_spend": 0.5}}},
+      {"id": "fac_marketing_spend", "kind": "factor", "label": "Marketing Spend Level", "category": "controllable"},
+      {"id": "fac_brand_awareness", "kind": "factor", "label": "Brand Awareness", "category": "observable", "data": {"value": 0.45, "extractionType": "observed"}},
+      {"id": "out_lead_volume", "kind": "outcome", "label": "Lead Volume"},
+      {"id": "goal_pipeline", "kind": "goal", "label": "Build Sales Pipeline"}
+    ],
+    "edges": [
+      {"from": "dec_marketing", "to": "opt_increase", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "dec_marketing", "to": "opt_maintain", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_increase", "to": "fac_marketing_spend", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_maintain", "to": "fac_marketing_spend", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "fac_marketing_spend", "to": "out_lead_volume", "strength": {"mean": 0.65, "std": 0.18}, "exists_probability": 0.82, "effect_direction": "positive"},
+      {"from": "fac_brand_awareness", "to": "out_lead_volume", "strength": {"mean": 0.45, "std": 0.20}, "exists_probability": 0.75, "effect_direction": "positive"},
+      {"from": "out_lead_volume", "to": "goal_pipeline", "strength": {"mean": 0.70, "std": 0.15}, "exists_probability": 0.90, "effect_direction": "positive"}
+    ]
+  },
+  "violations": [
+    {"code": "CONTROLLABLE_MISSING_DATA", "node_or_edge": "fac_marketing_spend", "detail": "Controllable factor fac_marketing_spend has no data field."}
+  ],
+  "expected": {
+    "violations_addressed": ["CONTROLLABLE_MISSING_DATA"],
+    "preserve_node_ids": ["dec_marketing", "opt_increase", "opt_maintain", "fac_marketing_spend", "fac_brand_awareness", "out_lead_volume", "goal_pipeline"],
+    "forbidden_edges": [],
+    "required_edges": [],
+    "no_bridge_edges": false,
+    "preserve_bidirected": false,
+    "check_external_prior": false,
+    "no_json_comments": true
+  }
+}

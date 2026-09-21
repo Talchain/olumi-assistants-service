@@ -1,0 +1,34 @@
+-- ============================================================
+-- Context Architecture v2 S4 — rolling summary — break-glass rollback
+-- Matches: 20260712120000_v5_rolling_summary.sql
+-- Status: DO NOT APPLY automatically.
+-- ============================================================
+--
+-- The `.do-not-apply` suffix ensures Supabase migration tooling skips this
+-- file. Apply manually only when the rolling-summary substrate must be
+-- removed (misbehaving RPC, security concern, or withdrawing the feature).
+--
+-- The forward migration is fully additive: it ADDED one nullable column to
+-- scenarios and created two SECURITY DEFINER RPCs. No existing column, row,
+-- policy, or function was modified, so rollback is self-contained.
+--
+-- 2026-07-13 note: the forward DRAFT was amended pre-execution twice
+-- (composite monotonic guard — Codex r2 fix 3; then the RS001 shape guard
+-- extended to validate the primary composite key updated_turn_created_at —
+-- PR #442 round-2 review MINOR-3). Both are function-BODY only; the
+-- SIGNATURES are unchanged, so the DROP statements below still match and no
+-- rollback change is required.
+--
+-- ⚠️  DATA NOTE: rolling_summary is DERIVED, disposable state — it is
+--     regenerated from the persisted turn history on the next summariser
+--     pass. Dropping the column loses nothing that cannot be rebuilt. It is
+--     NOT calibration data (contrast decision_records). No export needed.
+--
+-- Order: drop the functions first (they reference the column), then the
+-- column.
+
+DROP FUNCTION IF EXISTS public.get_rolling_summary(uuid);
+DROP FUNCTION IF EXISTS public.upsert_rolling_summary(uuid, jsonb, timestamptz);
+
+ALTER TABLE public.scenarios
+  DROP COLUMN IF EXISTS rolling_summary;

@@ -1,135 +1,120 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import { DraftGraphInput, type DraftGraphInputT } from "../schemas/assist.js";
+import { extractZodIssues } from "../schemas/llmExtraction.js";
 import { sanitizeDraftGraphInput } from "./assist.draft-graph.js";
-import { finaliseCeeDraftResponse, buildCeeErrorResponse } from "../cee/validation/pipeline.js";
-import { resolveCeeRateLimit } from "../cee/config/limits.js";
+import { buildCeeErrorResponse } from "../cee/validation/pipeline.js";
+import { enforceRateBuckets } from "../cee/config/limits.js";
 import { getRequestId } from "../utils/request-id.js";
 import { getRequestKeyId, getRequestCallerContext } from "../plugins/auth.js";
 import { contextToTelemetry } from "../context/index.js";
 import { emit, log, TelemetryEvents } from "../utils/telemetry.js";
+import { countCollidingOptionLabels } from "../orchestrator-v5/routing/option-effect-write.js";
 import { logCeeCall } from "../cee/logging.js";
-import { config } from "../config/index.js";
-import { assessBriefReadiness } from "../cee/validation/readiness.js";
+import { config, isProduction } from "../config/index.js";
+import { safeEqual } from "../utils/hash.js";
+import { evaluatePreflightDecision } from "../cee/validation/preflight-decision.js";
+import type { PreflightRejectPayload, NeedsClarificationPayload, PreflightDecision } from "../cee/validation/preflight-decision.js";
+import { formatBriefHeader } from "../cee/signals/brief-header.js";
+import { detectCurrency, buildCurrencyInstruction } from "../cee/signals/currency-signal.js";
 import {
   parseSchemaVersion,
-  transformResponseToV2,
-  transformResponseToV3,
-  validateStrictModeV3,
 } from "../cee/transforms/index.js";
+import { runUnifiedPipeline } from "../cee/unified-pipeline/index.js";
+import type { DraftCoachingWire } from "../orchestrator/types.js";
 
-// Simple in-memory rate limiter for CEE Draft My Model
-// Keyed by API key ID when available, otherwise client IP
-const WINDOW_MS = 60_000;
-// Guardrail to prevent unbounded growth of the in-memory bucket map.
-const MAX_BUCKETS = 10_000;
-// Buckets older than this are considered idle and may be evicted when MAX_BUCKETS is exceeded.
-const MAX_BUCKET_AGE_MS = WINDOW_MS * 10;
-// Only prune every N requests to amortize O(n) cost
-const PRUNE_INTERVAL = 100;
+// ============================================================================
+// Response contract — discriminated union on `status`
+// ============================================================================
+//
+// The draft-graph endpoint returns one of three shapes.
+// PLoT passes all three variants through unchanged.
+// The UI should handle each variant as a distinct state (not an error).
+//
+// Discriminant field: `status` (top-level key, always present in 200 responses)
+//
+//   DraftGraphSuccessResponse     status: "ok"                 — graph generated (HTTP 200)
+//   NeedsClarificationPayload     status: "needs_clarification" — show guidance  (HTTP 200)
+//   DraftGraphErrorResponse                                     — hard error      (HTTP 400)
+//
+// NeedsClarificationPayload is defined in preflight-decision.ts and re-used here.
 
-type BucketState = {
-  count: number;
-  windowStart: number;
-};
-
-const ceeDraftBuckets = new Map<string, BucketState>();
-let pruneCounter = 0;
-let oldestKnownTimestamp = Date.now();
-
-function pruneBuckets(map: Map<string, BucketState>, now: number): void {
-  // Early exit: skip if under threshold and no old buckets exist
-  if (map.size <= MAX_BUCKETS && now - oldestKnownTimestamp <= MAX_BUCKET_AGE_MS) {
-    return;
-  }
-
-  // Amortize pruning: only run expensive iteration every N calls
-  pruneCounter++;
-  if (pruneCounter < PRUNE_INTERVAL && map.size <= MAX_BUCKETS) {
-    return;
-  }
-  pruneCounter = 0;
-
-  // Track new oldest timestamp during iteration
-  let newOldest = now;
-
-  // First pass: drop buckets that have been idle for multiple windows.
-  for (const [key, state] of map) {
-    if (now - state.windowStart > MAX_BUCKET_AGE_MS) {
-      map.delete(key);
-    } else if (state.windowStart < newOldest) {
-      newOldest = state.windowStart;
-    }
-  }
-
-  oldestKnownTimestamp = newOldest;
-
-  if (map.size <= MAX_BUCKETS) return;
-
-  // As a last resort, drop the oldest keys until we are back under the cap.
-  let toRemove = map.size - MAX_BUCKETS;
-  for (const key of map.keys()) {
-    if (toRemove <= 0) break;
-    map.delete(key);
-    toRemove -= 1;
-  }
+/** Graph-generated success response (V1 shape — V3 is flat nodes/edges at root).
+ *
+ *  Notable wire fields the UI consumes (set by Stage 5 + V3 boundary):
+ *    - `coaching` — typed `DraftCoachingWire` from `src/orchestrator/types.ts`
+ *      (summary may be null; widening_log / bias_signals are OMITTED — not
+ *      null — when absent, matching the V3 schema's optional-undefined
+ *      semantics). Shape decision: we reuse the V3 schema's existing
+ *      `coaching` field rather than introducing a parallel `draft_coaching`
+ *      root, since the V3 schema already passes the same shape verbatim.
+ *    - each node carries `provenance: 'from_brief' | 'ai_inferred' | 'user_set'`
+ *    - each edge carries `provenance_display` with the same enum, sibling of
+ *      the structured `provenance.source` (which stays untouched).
+ */
+export interface DraftGraphSuccessResponse {
+  status?: "ok";
+  graph: Record<string, unknown>;
+  /** Display-shape coaching projection. Absent on error/clarification paths. */
+  coaching?: DraftCoachingWire;
+  [key: string]: unknown;
 }
 
-function checkCeeDraftLimit(key: string, limit: number): { allowed: boolean; retryAfterSeconds: number } {
-  const now = Date.now();
-  pruneBuckets(ceeDraftBuckets, now);
-  let state = ceeDraftBuckets.get(key);
-
-  if (!state) {
-    state = { count: 0, windowStart: now };
-    ceeDraftBuckets.set(key, state);
-  }
-
-  if (now - state.windowStart >= WINDOW_MS) {
-    state.count = 0;
-    state.windowStart = now;
-  }
-
-  if (state.count >= limit) {
-    const resetAt = state.windowStart + WINDOW_MS;
-    const diffMs = Math.max(0, resetAt - now);
-    const retryAfterSeconds = Math.max(1, Math.ceil(diffMs / 1000));
-    return { allowed: false, retryAfterSeconds };
-  }
-
-  state.count += 1;
-  return { allowed: true, retryAfterSeconds: 0 };
+/** Hard-error response body (HTTP 400 / 429 / 500). */
+export interface DraftGraphErrorResponse {
+  schema: "cee.error.v1";
+  code: string;
+  message: string;
+  retryable: boolean;
+  details?: Record<string, unknown>;
+  request_id?: string;
 }
+
+/**
+ * Discriminated union of all possible response bodies from /assist/v1/draft-graph.
+ *
+ * Discriminate on `status`:
+ *   - `"needs_clarification"` → NeedsClarificationPayload (HTTP 200)
+ *   - `undefined | "ok"`      → DraftGraphSuccessResponse (HTTP 200)
+ *   - absent + `code` field   → DraftGraphErrorResponse   (HTTP 400/429/500)
+ */
+export type DraftGraphResponse =
+  | import("../cee/validation/preflight-decision.js").NeedsClarificationPayload
+  | DraftGraphSuccessResponse
+  | DraftGraphErrorResponse;
+
+// Rate limiting for CEE Draft My Model uses the shared tiered bucket
+// (enforceRateBuckets, draft tier) — see src/cee/config/limits.ts. The former
+// inline bucket twin was removed in favour of the single derived limiter.
 
 export default async function route(app: FastifyInstance) {
-  const DRAFT_RATE_LIMIT_RPM = resolveCeeRateLimit("CEE_DRAFT_RATE_LIMIT_RPM");
   const FEATURE_VERSION = config.cee.draftFeatureVersion || "draft-model-1.0.0";
 
-  function isUnsafeCaptureRequested(req: any): boolean {
+  function isUnsafeCaptureRequested(req: FastifyRequest): boolean {
     const query = (req.query as Record<string, unknown>) ?? {};
     const unsafeQuery = query.unsafe;
-    const unsafeHeader = req.headers?.["x-olumi-unsafe"];
+    const unsafeHeader = req.headers["x-olumi-unsafe"];
     return unsafeQuery === "1" || unsafeQuery === "true" || unsafeHeader === "1" || unsafeHeader === "true";
   }
 
-  function isAdminAuthorized(req: any): boolean {
-    const providedKey = req.headers?.["x-admin-key"] as string | undefined;
+  function isAdminAuthorized(req: FastifyRequest): boolean {
+    const providedKey = req.headers["x-admin-key"] as string | undefined;
     if (!providedKey) return false;
     const adminKey = config.prompts?.adminApiKey;
     const adminKeyRead = config.prompts?.adminApiKeyRead;
-    return Boolean((adminKey && providedKey === adminKey) || (adminKeyRead && providedKey === adminKeyRead));
+    return Boolean((adminKey && safeEqual(providedKey, adminKey)) || (adminKeyRead && safeEqual(providedKey, adminKeyRead)));
   }
 
   app.post("/assist/v1/draft-graph", async (req, reply) => {
     const start = Date.now();
     const requestId = getRequestId(req);
 
-    const rawBody = req.body as any;
+    const rawBody = req.body as Record<string, unknown> | undefined;
     const hasSeed =
-      rawBody && typeof rawBody === "object" && typeof (rawBody as any).seed === "string";
+      rawBody && typeof rawBody === "object" && typeof rawBody.seed === "string";
     const hasArchetypeHint =
       rawBody &&
       typeof rawBody === "object" &&
-      typeof (rawBody as any).archetype_hint === "string";
+      typeof rawBody.archetype_hint === "string";
 
     const keyId = getRequestKeyId(req) || undefined;
     const apiKeyPresent = Boolean(keyId);
@@ -144,9 +129,14 @@ export default async function route(app: FastifyInstance) {
       api_key_present: apiKeyPresent,
     });
 
-    // Per-feature rate limiting for CEE Draft My Model
-    const rateKey = keyId || req.ip || "unknown";
-    const { allowed, retryAfterSeconds } = checkCeeDraftLimit(rateKey, DRAFT_RATE_LIMIT_RPM);
+    // Per-feature rate limiting for CEE Draft My Model (shared draft-tier bucket,
+    // fail-closed, sanctioned-key aware). Draft carries no scenario dimension.
+    const { allowed, retryAfterSeconds } = enforceRateBuckets({
+      feature: "draft_graph",
+      envVarName: "CEE_DRAFT_RATE_LIMIT_RPM",
+      keyId,
+      ip: req.ip,
+    });
     if (!allowed) {
       const errorBody = buildCeeErrorResponse("CEE_RATE_LIMIT", "CEE Draft My Model rate limit exceeded", {
         retryable: true,
@@ -183,7 +173,7 @@ export default async function route(app: FastifyInstance) {
       const errorBody = buildCeeErrorResponse("CEE_VALIDATION_FAILED", "invalid input", {
         retryable: false,
         requestId,
-        details: { field_errors: parsed.error.flatten() },
+        details: { field_errors: parsed.error.flatten(), first_issues: extractZodIssues(parsed.error, 3) },
       });
 
       emit(TelemetryEvents.CeeDraftGraphFailed, {
@@ -213,24 +203,36 @@ export default async function route(app: FastifyInstance) {
     const baseInput = sanitizeDraftGraphInput(parsed.data, req.body) as DraftGraphInputT & {
       seed?: string;
       archetype_hint?: string;
+      include_debug?: boolean;
+      flags?: Record<string, unknown>;
+      raw_output?: boolean;
+      briefSignalsHeader?: string;
+      bias_signals?: Array<{ type: string; confidence: string; evidence: string }>;
+      currencyInstruction?: string;
     };
 
     const unsafeCaptureEnabled = isUnsafeCaptureRequested(req) && isAdminAuthorized(req);
     // Override any client-provided include_debug. Unsafe capture is admin-only.
-    (baseInput as any).include_debug = unsafeCaptureEnabled;
+    baseInput.include_debug = unsafeCaptureEnabled;
     if (unsafeCaptureEnabled) {
-      const existingFlags = typeof (baseInput as any).flags === "object" && (baseInput as any).flags !== null
-        ? ((baseInput as any).flags as Record<string, unknown>)
+      const existingFlags = typeof baseInput.flags === "object" && baseInput.flags !== null
+        ? baseInput.flags
         : undefined;
-      (baseInput as any).flags = {
+      baseInput.flags = {
         ...(existingFlags ?? {}),
         unsafe_capture: true,
       };
     }
 
-    // Preflight validation - check brief readiness before LLM call
+    // Preflight validation — delegates all policy ladder decisions to the
+    // shared evaluatePreflightDecision() function (no duplicated logic here).
+    let preflightDecision: PreflightDecision | undefined;
     if (config.cee.preflightEnabled) {
-      const readiness = assessBriefReadiness(baseInput.brief);
+      const decision = preflightDecision = evaluatePreflightDecision(baseInput.brief, {
+        preflightStrict: config.cee.preflightStrict,
+        preflightReadinessThreshold: config.cee.preflightReadinessThreshold,
+      });
+      const { readiness } = decision;
 
       // Log readiness assessment
       log.info({
@@ -242,22 +244,48 @@ export default async function route(app: FastifyInstance) {
         event: "cee.preflight.assessed",
       }, `Brief readiness: ${readiness.level} (score: ${readiness.score})`);
 
-      // If strict mode and readiness below threshold, reject with guidance
-      if (config.cee.preflightStrict && readiness.score < config.cee.preflightReadinessThreshold) {
+      // Emit structured preflight outcome telemetry (cee.preflight.completed).
+      // Fields come from the shared decision object — identical from both routes.
+      emit(TelemetryEvents.PreflightCompleted, {
+        ...telemetryCtx,
+        ...decision.telemetry,
+      });
+
+      // Emit BriefSignals telemetry (only when signals were computed — skipped on reject)
+      if (decision.briefSignals) {
+        emit(TelemetryEvents.CeeBriefSignals, {
+          ...telemetryCtx,
+          signals_version: "v1",
+          brief_strength: decision.briefSignals.brief_strength,
+          option_count_estimate: decision.briefSignals.option_count_estimate,
+          has_explicit_goal: decision.briefSignals.has_explicit_goal,
+          has_measurable_target: decision.briefSignals.has_measurable_target,
+          baseline_state: decision.briefSignals.baseline_state,
+          has_constraints: decision.briefSignals.has_constraints,
+          has_risks: decision.briefSignals.has_risks,
+          bias_signals: decision.briefSignals.bias_signals.map((b) => b.type),
+          word_count: decision.briefSignals.word_count,
+          numeric_anchor_count: decision.briefSignals.numeric_anchor_count,
+          questions_shown_count: (decision.payload as unknown as Record<string, unknown>)?.clarification_questions
+            ? ((decision.payload as unknown as Record<string, unknown>).clarification_questions as unknown[]).length
+            : 0,
+          readiness_score: decision.telemetry.readiness_score,
+          action: decision.action,
+        });
+      }
+
+      if (decision.action === "reject") {
+        const p = decision.payload as PreflightRejectPayload;
+
         const errorBody = buildCeeErrorResponse(
           "CEE_VALIDATION_FAILED",
-          readiness.summary,
+          p.message,
           {
-            retryable: true,
+            retryable: false,
             requestId,
             details: {
-              rejection_reason: "preflight_rejected",
-              readiness_score: readiness.score,
-              readiness_level: readiness.level,
-              factors: readiness.factors,
-              suggested_questions: readiness.suggested_questions,
-              preflight_issues: readiness.preflight.issues,
-              hint: "Please provide a clearer decision statement or answer the suggested questions",
+              rejection_reason: p.rejection_reason,
+              preflight_issues: p.preflight_issues,
             },
           }
         );
@@ -267,7 +295,7 @@ export default async function route(app: FastifyInstance) {
           latency_ms: Date.now() - start,
           readiness_score: readiness.score,
           readiness_level: readiness.level,
-          factors: readiness.factors,
+          rejection_reason: p.rejection_reason,
         });
 
         logCeeCall({
@@ -282,12 +310,39 @@ export default async function route(app: FastifyInstance) {
         reply.header("X-CEE-API-Version", "v1");
         reply.header("X-CEE-Feature-Version", FEATURE_VERSION);
         reply.header("X-CEE-Request-ID", requestId);
-        reply.header("X-CEE-Readiness-Score", readiness.score.toString());
         reply.code(400);
         return reply.send(errorBody);
       }
 
-      // If readiness is low but not strict mode, log warning and continue
+      if (decision.action === "clarify") {
+        const p = decision.payload as NeedsClarificationPayload;
+
+        emit(TelemetryEvents.PreflightRejected, {
+          ...telemetryCtx,
+          latency_ms: Date.now() - start,
+          readiness_score: readiness.score,
+          readiness_level: readiness.level,
+          rejection_reason: "underspecified",
+        });
+
+        logCeeCall({
+          requestId,
+          capability: "cee_draft_graph",
+          latencyMs: Date.now() - start,
+          status: "ok",
+          httpStatus: 200,
+        });
+
+        reply.header("X-CEE-API-Version", "v1");
+        reply.header("X-CEE-Feature-Version", FEATURE_VERSION);
+        reply.header("X-CEE-Request-ID", requestId);
+        reply.header("X-CEE-Readiness-Score", readiness.score.toString());
+        reply.code(200);
+        return reply.send(p);
+      }
+
+      // action === "proceed": brief is valid and ready (or strict mode off).
+      // Low readiness but not in strict mode — log and continue to generation.
       if (readiness.level === "not_ready" || readiness.level === "needs_clarification") {
         log.warn({
           request_id: requestId,
@@ -371,104 +426,125 @@ export default async function route(app: FastifyInstance) {
       }
     }
 
-    const { statusCode, body, headers } = await finaliseCeeDraftResponse(baseInput, req.body, req);
+    // ── Thread BriefSignals into pipeline input ────────────────────────
+    if (preflightDecision?.briefSignals) {
+      if (config.cee.briefSignalsHeaderEnabled) {
+        baseInput.briefSignalsHeader = formatBriefHeader(preflightDecision.briefSignals);
+      }
+      if (preflightDecision.briefSignals.bias_signals.length > 0) {
+        baseInput.bias_signals = preflightDecision.briefSignals.bias_signals;
+      }
+    }
 
-    // Check for schema version request via query parameter
-    // Default is V3 (includes analysis_ready) - V1/V2 are deprecated
+    // ── Currency context signal ──────────────────────────────────────
+    // Detect currency from brief and build instruction for LLM prompts.
+    // Always runs — lightweight string scan (<5ms).
+    const currencySignal = detectCurrency(baseInput.brief);
+    baseInput.currencyInstruction = buildCurrencyInstruction(currencySignal);
+
+    // ── Unified pipeline ──────────────────────────────────────────────
     const schemaVersion = parseSchemaVersion((req.query as Record<string, unknown>)?.schema);
     const strictMode = (req.query as Record<string, unknown>)?.strict === "true";
 
-    // Log deprecation warning for legacy schema versions
-    if (schemaVersion === "v1" || schemaVersion === "v2") {
-      log.warn({
-        request_id: requestId,
-        schema_version: schemaVersion,
-        event: "cee.deprecated_schema_requested",
-      }, `Deprecated schema ${schemaVersion} requested - consider upgrading to V3 for analysis_ready support`);
+    // Client disconnect detection.
+    // IMPORTANT: Check socket.destroyed, NOT req.raw.destroyed.
+    // req.raw (IncomingMessage) is always destroyed after Fastify reads the POST body.
+    // The TCP socket remains alive until the client actually disconnects.
+    const pipelineAbortController = new AbortController();
+    const socket = req.raw?.socket;
+    let socketCloseHandler: (() => void) | undefined;
+    if (socket && !socket.destroyed) {
+      socketCloseHandler = () => pipelineAbortController.abort();
+      socket.once("close", socketCloseHandler);
     }
 
-    reply.header("X-CEE-API-Version", schemaVersion);
-    reply.header("X-CEE-Feature-Version", FEATURE_VERSION);
-    reply.header("X-CEE-Request-ID", requestId);
+    // Gate raw_output: only honoured in non-production or with admin auth
+    const rawOutputRequested = baseInput.raw_output === true;
+    const rawOutputAllowed = rawOutputRequested && (!isProduction() || isAdminAuthorized(req));
+    if (rawOutputRequested && !rawOutputAllowed) {
+      log.warn({ requestId, event: "cee.raw_output.suppressed" }, "raw_output=true suppressed in production without admin auth");
+    }
 
-    if (headers) {
-      for (const [key, value] of Object.entries(headers)) {
-        reply.header(key, value);
+    try {
+      const result = await runUnifiedPipeline(baseInput, req.body, req, {
+        schemaVersion,
+        strictMode,
+        includeDebug: unsafeCaptureEnabled,
+        rawOutput: rawOutputAllowed,
+        refreshPrompts: (req.query as Record<string, unknown>)?.supa === "1",
+        forceDefault: (req.query as Record<string, unknown>)?.forceDefault === "1",
+        signal: pipelineAbortController.signal,
+        requestStartMs: start,
+      });
+
+      reply.header("X-CEE-API-Version", schemaVersion);
+      reply.header("X-CEE-Feature-Version", FEATURE_VERSION);
+      reply.header("X-CEE-Request-ID", requestId);
+      if (result.headers) {
+        for (const [k, v] of Object.entries(result.headers)) reply.header(k, v);
       }
-    }
 
-    reply.code(statusCode);
-
-    // Log response delivery attempt for debugging premature close issues
-    log.info({
-      request_id: requestId,
-      returned_response: true,
-      status_code: statusCode,
-      latency_ms: Date.now() - start,
-      is_error: statusCode >= 400,
-      schema_version: schemaVersion,
-    }, "Draft-graph response ready for delivery");
-
-    // Transform to requested schema if response is successful
-    if (statusCode === 200 && body && typeof body === "object" && "graph" in body) {
-      if (schemaVersion === "v3") {
-        // DEBUG: Log V1 trace.pipeline before transform
-        const v1Trace = (body as any).trace;
-        log.info({
+      // Emit succeeded/failed telemetry for observability (previously in Pipeline B finaliser)
+      if (result.statusCode === 200) {
+        const body = result.body as Record<string, unknown>;
+        const graph = body.graph as Record<string, unknown> | undefined;
+        const trace = body.trace as Record<string, unknown> | undefined;
+        const quality = trace?.quality as Record<string, unknown> | undefined;
+        const llmQuality = trace?.llm_quality as Record<string, unknown> | undefined;
+        const graphNodes = graph?.nodes;
+        const graphEdges = graph?.edges;
+        emit(TelemetryEvents.CeeDraftGraphSucceeded, {
           request_id: requestId,
-          v1_trace_keys: v1Trace ? Object.keys(v1Trace) : [],
-          v1_has_pipeline: !!(v1Trace?.pipeline),
-          v1_pipeline_status: v1Trace?.pipeline?.status,
-          event: "cee.pipeline.debug.v1",
-        }, `[DEBUG] V1 trace before V3 transform`);
-
-        const v3Body = transformResponseToV3(body as any, {
-          brief: baseInput.brief,
-          requestId,
-          strictMode,
+          latency_ms: Date.now() - start,
+          quality_overall: typeof quality?.overall === "number" ? quality.overall : 0,
+          graph_nodes: Array.isArray(graphNodes) ? graphNodes.length : 0,
+          graph_edges: Array.isArray(graphEdges) ? graphEdges.length : 0,
+          has_validation_issues: Array.isArray(body.validation_issues) && body.validation_issues.length > 0,
+          any_truncated: Boolean(trace?.any_truncated),
+          draft_warning_count: typeof trace?.draft_warning_count === "number" ? trace.draft_warning_count : 0,
+          uncertain_node_count: typeof trace?.uncertain_node_count === "number" ? trace.uncertain_node_count : 0,
+          simplification_applied: Boolean(trace?.simplification_applied),
+          cost_usd: typeof llmQuality?.cost_usd === "number" ? llmQuality.cost_usd : 0,
+          engine_provider: typeof llmQuality?.provider === "string" ? llmQuality.provider : "unknown",
+          engine_model: typeof llmQuality?.model === "string" ? llmQuality.model : "unknown",
+          // ⭐⭐ THE FREQUENCY INSTRUMENT for the duplicate-option-label dead end.
+          //
+          // Emitted at DRAFT-EMISSION time rather than only where the defect
+          // bites, and WITH ITS DENOMINATOR (`option_count`), because a bare
+          // numerator cannot produce a rate. The dead end was journey-witnessed
+          // and its mechanism proven, but its FREQUENCY was unmeasurable from
+          // the in-repo corpus: 0 collisions in 112 graphs bounds it at only
+          // ~2.7% at 95%, which cannot distinguish "1 in 200" from "never".
+          // These two fields answer that from production within a staging week.
+          //
+          // ⚠ NO LABEL IS EMITTED — option labels are user-authored content.
+          option_label_collision_count: Array.isArray(graphNodes)
+            ? countCollidingOptionLabels(
+                (graphNodes as Array<Record<string, unknown>>)
+                  .filter((n) => n?.kind === "option")
+                  .map((n) => (typeof n.label === "string" ? n.label : "")),
+              )
+            : 0,
+          option_count: Array.isArray(graphNodes)
+            ? (graphNodes as Array<Record<string, unknown>>).filter((n) => n?.kind === "option").length
+            : 0,
         });
-
-        // DEBUG: Log V3 trace.pipeline after transform
-        log.info({
+      } else if (result.statusCode >= 400) {
+        const body = result.body as Record<string, unknown>;
+        emit(TelemetryEvents.CeeDraftGraphFailed, {
           request_id: requestId,
-          v3_trace_keys: v3Body.trace ? Object.keys(v3Body.trace) : [],
-          v3_has_pipeline: !!(v3Body.trace?.pipeline),
-          v3_pipeline_status: (v3Body.trace as any)?.pipeline?.status,
-          event: "cee.pipeline.debug.v3",
-        }, `[DEBUG] V3 trace after transform`);
-
-        // Validate in strict mode
-        if (strictMode) {
-          try {
-            validateStrictModeV3(v3Body);
-          } catch (err) {
-            log.warn({
-              request_id: requestId,
-              error: (err as Error).message,
-            }, "V3 strict mode validation failed");
-            // In strict mode, return 422 with validation errors
-            reply.code(422);
-            return reply.send({
-              error: {
-                code: "CEE_V3_VALIDATION_FAILED",
-                message: (err as Error).message,
-                validation_warnings: v3Body.validation_warnings,
-              },
-            });
-          }
-        }
-
-        log.debug({ request_id: requestId, schema_version: "v3" }, "Transformed response to v3 schema");
-        return reply.send(v3Body);
+          latency_ms: Date.now() - start,
+          error_code: typeof body.code === "string" ? body.code : "UNKNOWN",
+          http_status: result.statusCode,
+        });
       }
 
-      if (schemaVersion === "v2") {
-        const v2Body = transformResponseToV2(body as any);
-        log.debug({ request_id: requestId, schema_version: "v2" }, "Transformed response to v2 schema");
-        return reply.send(v2Body);
+      reply.code(result.statusCode);
+      return reply.send(result.body);
+    } finally {
+      if (socket && socketCloseHandler) {
+        socket.removeListener("close", socketCloseHandler);
       }
     }
-
-    return reply.send(body);
   });
 }

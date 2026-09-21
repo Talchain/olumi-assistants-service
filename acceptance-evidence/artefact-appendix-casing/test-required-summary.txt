@@ -1,0 +1,60 @@
+ [32m✓[39m tests/unit/cee.validation-pipeline/bias-correction.test.ts [2m([22m[2m13 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m tests/unit/cee.clarifier.question-selector.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/pipeline/phase1-stuck-detector.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m tests/unit/cee.explain.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 1[2mms[22m[39m
+ [32m✓[39m tests/unit/cee.validation-pipeline/topology-utils.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 2[2mms[22m[39m
+ [32m✓[39m src/orchestrator-v5/context/__tests__/context-summary-redaction.proof.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m tests/unit/cee.diagnostics-cli.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m tests/validation/cee.openapi-shape.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m src/orchestrator-v5/__tests__/budgets.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m tests/unit/cee.bias-library.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 2[2mms[22m[39m
+ [32m✓[39m tests/unit/anthropic-graph-schema-grammar-budget.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+ [32m✓[39m src/orchestrator-v5/routing/__tests__/composer-liveness-ownership.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m tests/unit/cee.comparison-detector.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator-v5/edit-templates/add-risk-template.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 2[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/validation/stage-fallbacks.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/input-length.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m tests/unit/cee.complexity-cap.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m tests/unit/v5-journey-replay/mutation-ack-pattern.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/deterministic/draft-graph-timeout.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/pipeline/phase5-stage-transition.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m tests/unit/cee.numerical-validator.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+ [32m✓[39m tests/unit/cee.team.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 2[2mms[22m[39m
+ [32m✓[39m sdk/typescript/src/ceeEngineOrchestratorExample.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m tests/unit/v5.prompt-loader.normalization-content-preserving.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m tests/unit/v5-journey-replay/format-timings.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/deterministic/add-factor-risk.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 2[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/brief-intelligence/primary-gap.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 2[2mms[22m[39m
+ [32m✓[39m src/orchestrator-v5/__tests__/fixtures.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+ [32m✓[39m tests/unit/service-version.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 2[2mms[22m[39m
+ [32m✓[39m sdk/typescript/src/ceeDecisionReviewFixture.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 2[2mms[22m[39m
+ [32m✓[39m tests/unit/cee.options.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m tests/unit/cee.prompt-lint.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+ [32m✓[39m src/orchestrator-v5/tools/__tests__/registry.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+ [32m✓[39m sdk/typescript/src/ceeCalibrationExample.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+ [32m✓[39m tests/validation/cee.decision-review.builder.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 2[2mms[22m[39m
+ [32m✓[39m src/orchestrator-v5/session/__tests__/invalidation.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 2[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/deterministic/post-analysis-policy.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+ [32m✓[39m tests/unit/cee.branch-probability-validator.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 2[2mms[22m[39m
+ [32m✓[39m tests/version.regression.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 3[2mms[22m[39m
+ [32m✓[39m tests/unit/v5.tool-schema.stability.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 2[2mms[22m[39m
+ [2m[90m↓[39m[22m tests/unit/anthropic.prompt-cache.test.ts [2m([22m[2m5 tests[22m[2m | [22m[33m5 skipped[39m[2m)[22m
+ [2m[90m↓[39m[22m tests/unit/sse-state.test.ts [2m([22m[2m22 tests[22m[2m | [22m[33m22 skipped[39m[2m)[22m
+ [2m[90m↓[39m[22m tests/validation/golden-briefs-runner.test.ts [2m([22m[2m5 tests[22m[2m | [22m[33m5 skipped[39m[2m)[22m
+ [2m[90m↓[39m[22m src/orchestrator-v5/compose/__tests__/graph-patch-clean-payload.test.ts [2m([22m[2m11 tests[22m[2m | [22m[33m11 skipped[39m[2m)[22m
+{"level":30,"time":1783578445280,"pid":84204,"hostname":"Mac.net","event":"v5.routing_prompt_loaded","prompt_version":"v40","prompt_hash":"75fb1e81b41b82e9","system_chars":21439,"msg":"V5 routing prompt loaded"}
+ [32m✓[39m src/orchestrator-v5/routing/__tests__/routing-max-tokens-caps.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 1[2mms[22m[39m
+{"level":30,"time":1783578445840,"pid":84206,"hostname":"Mac.net","event":"v5.routing_prompt_loaded","prompt_version":"v40","prompt_hash":"75fb1e81b41b82e9","system_chars":21439,"msg":"V5 routing prompt loaded"}
+{"level":30,"time":1783578445850,"pid":84207,"hostname":"Mac.net","event":"v5.routing_prompt_loaded","prompt_version":"v40","prompt_hash":"75fb1e81b41b82e9","system_chars":21439,"msg":"V5 routing prompt loaded"}
+{"level":30,"time":1783578445879,"pid":84211,"hostname":"Mac.net","event":"v5.routing_prompt_loaded","prompt_version":"v40","prompt_hash":"75fb1e81b41b82e9","system_chars":21439,"msg":"V5 routing prompt loaded"}
+{"level":30,"time":1783578445880,"pid":84213,"hostname":"Mac.net","event":"v5.routing_prompt_loaded","prompt_version":"v40","prompt_hash":"75fb1e81b41b82e9","system_chars":21439,"msg":"V5 routing prompt loaded"}
+ [2m[90m↓[39m[22m tests/chaos/disconnect.test.ts [2m([22m[2m12 tests[22m[2m | [22m[33m12 skipped[39m[2m)[22m
+ [2m[90m↓[39m[22m tests/chaos/redis-blip.test.ts [2m([22m[2m15 tests[22m[2m | [22m[33m15 skipped[39m[2m)[22m
+ [2m[90m↓[39m[22m tests/unit/assist.v1.draft-graph.constraint-blockers.test.ts [2m([22m[2m4 tests[22m[2m | [22m[33m4 skipped[39m[2m)[22m
+ [2m[90m↓[39m[22m tests/unit/cee.draft-failures.gating.test.ts [2m([22m[2m2 tests[22m[2m | [22m[33m2 skipped[39m[2m)[22m
+
+[2m Test Files [22m [1m[32m991 passed[39m[22m[2m | [22m[33m8 skipped[39m[90m (999)[39m
+[2m      Tests [22m [1m[32m19419 passed[39m[22m[2m | [22m[33m99 skipped[39m[2m | [22m[90m13 todo[39m[90m (19531)[39m
+[2m   Start at [22m 07:26:46
+[2m   Duration [22m 39.58s[2m (transform 22.08s, setup 24.79s, collect 165.91s, tests 69.76s, environment 73ms, prepare 4.87s)[22m
+

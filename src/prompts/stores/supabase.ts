@@ -17,7 +17,9 @@ import type {
   PromptListFilter,
   GetCompiledOptions,
   ActivePromptResult,
+  PromptMutationPrecondition,
 } from './interface.js';
+import { PromptMutationConflictError } from './interface.js';
 import type {
   PromptDefinition,
   CreatePromptRequest,
@@ -27,9 +29,24 @@ import type {
   ApprovalRequest,
   CompiledPrompt,
   PromptTestCase,
+  PromptVariable,
 } from '../schema.js';
 import { computeContentHash, interpolatePrompt } from '../schema.js';
 import { log, emit, TelemetryEvents } from '../../utils/telemetry.js';
+import {
+  PROMPT_OBSERVATION_CAPABILITY,
+  type ObservationType,
+  type ObservationsResult,
+  type PromptObservation,
+  type PromptObservationCapability,
+  type ProvidesPromptObservationCapability,
+} from './observations.js';
+
+export type {
+  ObservationType,
+  ObservationsResult,
+  PromptObservation,
+} from './observations.js';
 
 function getJwtClaim(token: string, claim: string): string | undefined {
   const parts = token.split('.');
@@ -44,6 +61,199 @@ function getJwtClaim(token: string, claim: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Decode a JSON-list column that PostgREST may deliver EITHER as a JSON string
+ * OR as an already-parsed JS value.
+ *
+ * WHY THIS EXISTS (P0, ~2.5h prompt-store outage). Three call sites here wrote
+ * `JSON.parse(x || '[]')`. For one row `test_cases` arrived as a JS ARRAY `[]`
+ * rather than the string `"[]"` this file's `VersionRow` type asserted. An
+ * empty array is TRUTHY, so `||` did not substitute the fallback;
+ * `JSON.parse([])` coerces via `String([]) === ''` and throws
+ * `SyntaxError: Unexpected end of JSON input`.
+ *
+ * Blast radius was TOTAL for the task: `list({ taskId })` decodes EVERY version
+ * row before any version pointer is consulted, so one poisoned row disabled
+ * every version of `draft_graph` and a staging-pointer rollback could not help.
+ *
+ * ONE helper, called from all three sites, deliberately: three copies of one
+ * predicate is the hand-maintained mirror this estate keeps paying for — and
+ * the sibling `stores/postgres.ts` proves the point, having carried a
+ * `typeof === 'string'` guard at two of its three sites all along while this
+ * file carried it at none.
+ *
+ * Tolerates, by design: a JSON string, an empty string, `null`/`undefined`, and
+ * an already-parsed array. Anything else that is not decodable to a list yields
+ * `[]` rather than throwing — a prompt row is not worth taking the store down
+ * for.
+ *
+ * ⚠ AND THE SECOND HALF, WHICH THE FIRST VERSION OF THIS HELPER OMITTED. As
+ * first written, the `catch` and the trailing `return []` emitted NOTHING, so a
+ * row holding `test_cases: {}` degraded to `[]` with no log at any level.
+ * **That is the same silent degradation the incident was — a guard that logs
+ * nothing and continues is the same outage with better manners.**
+ *
+ * ⚠⚠ WHAT THAT SECOND HALF DELIVERS, AND EXACTLY WHERE IT STOPS. An earlier
+ * version of this docblock said the caller's health surface "now reports a
+ * store failure loudly (see `promptStoreDegradationReasons`)". **That was
+ * false, and it was false about the one thing this helper is read for.** State
+ * it plainly, in both directions:
+ *
+ * COVERED — an undecodable column is ATTRIBUTABLE. `parseJsonColumn` below
+ * emits `TelemetryEvents.PromptStoreJsonColumnDegraded`, writes a separate
+ * `log.error` (level 50) naming `column`, `prompt_id`, `version`, `reason` and
+ * `value_type`, and — where Datadog is configured — increments
+ * `prompt.store.jsonb_column_degraded_total` with bounded `column`/`reason`
+ * tags (see the arm in `utils/telemetry.ts`). Ops can alert on that counter or
+ * on the ERROR level. Whether such an alert is actually CONFIGURED is not
+ * established here.
+ *
+ * NOT COVERED — it is not PREVENTABLE, and health does not move. Nothing
+ * throws, so `loadPrompt`'s catch is never reached; `fallbackReason` therefore
+ * never becomes `fetch_error`; `coverage.fetch_error` stays empty;
+ * `promptStoreDegradationReasons()` returns `[]`; and
+ * `critical_prompt_fetch_error` **cannot fire for this class**. `/healthz`
+ * continues to answer 200 with `prompts_ready: true` and `degraded: false`.
+ * The prompt still serves — this is ancillary list metadata, not prompt body —
+ * but do not read the alarm wired in this PR as covering it.
+ *
+ * NOT COVERED — no consumer can branch on it. `malformed`, `unavailable` and
+ * `known-empty` are three distinct states, and only the last may honestly
+ * author `[]`. `PromptVersionSchema` types BOTH columns as ordinary
+ * `z.array(...).default([])` (schema.ts), so past the governed Zod boundary a
+ * substituted `[]` is BYTE-IDENTICAL to a genuinely empty column. **There is
+ * no channel for "unknown" and this change does not build one.** The telemetry
+ * above is the only surviving discriminator, and it is an observability
+ * signal, not a program-branchable one.
+ *
+ * NOT COVERED — this is a SUPABASE decoder contract, not a store-independent
+ * guarantee. The sibling `stores/postgres.ts` has different tolerance at the
+ * same seam and raises none of these signals.
+ */
+
+/** Why a column could not be established as a list. */
+type JsonColumnDegradationReason =
+  /** Decoded fine and is simply not a list (`{}`, `42`, `true`, `"null"`). */
+  | 'jsonb_not_array'
+  /** A string that is not valid JSON at all. */
+  | 'jsonb_unparseable';
+
+/**
+ * The decode OUTCOME as a first-class value.
+ *
+ * **FAILURE TO KNOW IS NOT KNOWLEDGE THAT NOTHING EXISTS.** Three outcomes must
+ * stay distinguishable and only the first may author `[]`:
+ *
+ *   - `known_empty`          — read successfully, genuinely nothing there
+ *   - `known_with_survivors` — read partially, these specific items survived
+ *   - `unavailable`          — could not establish what was there
+ *
+ * `known` below covers the first (`items.length === 0`) and the ordinary
+ * populated case. **`known_with_survivors` is NOT REACHABLE here and is named
+ * only to be excluded**: a JSON list decodes whole or not at all, and this
+ * helper performs no per-item validation, so there is nothing to salvage. That
+ * is why the degradation event carries no survivor or recovery field — an
+ * event reporting survivors it never had is a lie the payload cannot support.
+ *
+ * Note the `unavailable` variant carries NO `items`. The decoder therefore
+ * cannot author an empty list for a read it could not make; the substitution
+ * happens once, visibly, in `parseJsonColumn` below, where it is emitted and
+ * logged.
+ */
+type JsonColumnDecode<T> =
+  | { readonly outcome: 'known'; readonly items: T[] }
+  | { readonly outcome: 'unavailable'; readonly reason: JsonColumnDegradationReason };
+
+/** Pure decode. No telemetry, no substitution — just the outcome. */
+function decodeJsonColumn<T>(value: unknown): JsonColumnDecode<T> {
+  if (value == null) return { outcome: 'known', items: [] };
+  if (Array.isArray(value)) return { outcome: 'known', items: value as T[] };
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed === '') return { outcome: 'known', items: [] };
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(trimmed) as unknown;
+    } catch {
+      return { outcome: 'unavailable', reason: 'jsonb_unparseable' };
+    }
+    // `"null"`, `"{}"` and `"42"` all parse CLEANLY and are still not lists —
+    // they never touch the catch, which is why a corpus of "malformed JSON"
+    // alone cannot cover this branch.
+    return Array.isArray(parsed)
+      ? { outcome: 'known', items: parsed as T[] }
+      : { outcome: 'unavailable', reason: 'jsonb_not_array' };
+  }
+  return { outcome: 'unavailable', reason: 'jsonb_not_array' };
+}
+
+/** Identity of the column being read, so the event names the offending row. */
+interface JsonColumnContext {
+  readonly column: 'variables' | 'test_cases';
+  readonly promptId: string;
+  readonly version: number;
+}
+
+function parseJsonColumn<T>(value: unknown, context: JsonColumnContext): T[] {
+  const decoded = decodeJsonColumn<T>(value);
+  if (decoded.outcome === 'known') return decoded.items;
+
+  // UNAVAILABLE. The `[]` returned below is a SUBSTITUTE, not a reading.
+  //
+  // ⚠ THE HONEST SCOPE OF WHAT THIS DELIVERS — READ BEFORE QUOTING IT.
+  // This makes the degradation ATTRIBUTABLE. It does NOT make it PREVENTABLE,
+  // and no consumer can branch on it. Traced end to end:
+  //   - `PromptVersionSchema` types both columns `z.array(...).default([])`
+  //     (schema.ts) — the published type has no channel for "unknown";
+  //   - `GovernedPromptStore.detachPromptDefinition` re-parses through Zod, and
+  //     a substituted `[]` parses CLEANLY, so the one boundary that could have
+  //     failed loud passes it through frozen;
+  //   - the only reader of `PromptVersion.testCases` tree-wide is the admin UI,
+  //     which cannot tell a substituted `[]` from a genuinely empty column.
+  // So `known_empty` and `unavailable` arrive BYTE-IDENTICAL at every consumer.
+  // The telemetry below is the ONLY surviving discriminator, and it is an
+  // observability signal, not a program-branchable one. Claiming otherwise is
+  // exactly how the sibling PR #1286 shipped a three-state model that collapsed
+  // at its durable boundary — true of the local type, false of the outcome.
+  //
+  // ⚠ AND THE CONSEQUENCE THAT IS WORSE THAN UNOBSERVABILITY: the admin UI does
+  // a READ-MODIFY-WRITE over `testCases`. A substituted `[]` read there, plus
+  // one added test case, PATCHes a single-element array over the undecodable
+  // column — turning a transient decode failure into permanent data loss. That
+  // hazard lives in the admin route, not here, and is reported rather than
+  // fixed by this lane; it is the reason this event exists at all.
+  // Rowed as issue #1297, with the full chain: the read at
+  // `routes/admin.ui.ts:2752`, the modify at `:2814` (and the delete at
+  // `:2849`), the whole-array PATCH at `:2818-2828`, and the unconditional
+  // column overwrite in `updateTestCases` at `stores/supabase.ts:742`.
+  // ⚠ Note the direction: before this helper existed an undecodable column
+  // THREW, so the admin never reached that write. Making the store tolerant
+  // made the write REACHABLE. That is an argument for fixing #1297, not for
+  // restoring the throw — one poisoned row must not disable a whole task.
+  //
+  // It is emitted AND logged at ERROR because `emit()` writes via `log.info`
+  // (utils/telemetry.ts), and during the incident five level-30 events fired
+  // per probe and nothing paged — level is load-bearing, which is the same
+  // reason `loader.ts` raises its store-failure log to ERROR. The Datadog arm
+  // for this event (utils/telemetry.ts) is what gives ops something to alert
+  // on; without it the signal reaches a log line and nothing else.
+  const payload = {
+    column: context.column,
+    prompt_id: context.promptId,
+    version: context.version,
+    reason: decoded.reason,
+    value_type: typeof value,
+    outcome: 'unavailable' as const,
+  };
+  emit(TelemetryEvents.PromptStoreJsonColumnDegraded, payload);
+  log.error(
+    { event: TelemetryEvents.PromptStoreJsonColumnDegraded, ...payload },
+    `Prompt store column '${context.column}' is undecodable (${decoded.reason}); ` +
+      'substituting an empty list — this is NOT evidence the column was empty',
+  );
+  return [];
 }
 
 /**
@@ -66,6 +276,8 @@ interface PromptRow {
   status: string;
   active_version: number;
   staging_version: number | null;
+  design_version: string | null;
+  model_config: { staging?: string; production?: string } | null;
   tags: string[];
   created_at: string;
   updated_at: string;
@@ -75,7 +287,13 @@ interface VersionRow {
   prompt_id: string;
   version: number;
   content: string;
-  variables: string; // JSON string
+  /**
+   * JSON string OR an already-parsed list. The declared type used to be plain
+   * `string`, which is exactly what made the P0 invisible: the type asserted a
+   * guarantee PostgREST does not make, so `JSON.parse(...)` looked safe at
+   * every call site. Read it through `parseJsonColumn`, never directly.
+   */
+  variables: string | unknown[] | null;
   created_by: string | null;
   created_at: string;
   change_note: string | null;
@@ -83,7 +301,8 @@ interface VersionRow {
   requires_approval: boolean;
   approved_by: string | null;
   approved_at: string | null;
-  test_cases: string; // JSON string
+  /** JSON string OR an already-parsed list — see `variables` above. */
+  test_cases: string | unknown[] | null;
 }
 
 interface ObservationRow {
@@ -99,40 +318,29 @@ interface ObservationRow {
 }
 
 /**
- * Observation types for prompt feedback
- */
-export type ObservationType = 'note' | 'rating' | 'failure' | 'success';
-
-/**
- * Prompt observation for tracking feedback and issues
- */
-export interface PromptObservation {
-  id?: string;
-  promptId: string;
-  version: number;
-  observationType: ObservationType;
-  content?: string;
-  rating?: number; // 1-5
-  payloadHash?: string;
-  createdBy?: string;
-  createdAt?: string;
-}
-
-/**
- * Result of getObservations including aggregated rating
- */
-export interface ObservationsResult {
-  observations: PromptObservation[];
-  averageRating: number | null;
-  totalCount: number;
-}
-
-/**
  * Supabase-backed prompt store
  */
-export class SupabasePromptStore implements IPromptStore {
+export class SupabasePromptStore
+  implements IPromptStore, ProvidesPromptObservationCapability
+{
   private client: SupabaseClient | null = null;
   private config: SupabaseStoreConfig;
+
+  /**
+   * Publish only the observation operations to the governance boundary. The
+   * frozen closures cannot be used to recover this store or its prompt
+   * mutation methods.
+   */
+  readonly [PROMPT_OBSERVATION_CAPABILITY]: PromptObservationCapability =
+    Object.freeze({
+      listObservations: (promptId: string) => this.getObservations(promptId),
+      getObservationVersion: (promptId: string, version: number) =>
+        this.getObservations(promptId, version),
+      addObservation: (
+        observation: Omit<PromptObservation, 'id' | 'createdAt'>,
+      ) => this.addObservation(observation),
+      deleteObservation: (id: string) => this.deleteObservation(id),
+    });
 
   constructor(config: Omit<SupabaseStoreConfig, 'type'>) {
     this.config = { ...config, type: 'supabase' };
@@ -216,6 +424,8 @@ export class SupabasePromptStore implements IPromptStore {
       task_id: request.taskId,
       status: 'draft',
       active_version: 1,
+      design_version: request.designVersion ?? null,
+      model_config: request.modelConfig ?? null,
       tags: request.tags ?? [],
       created_at: now,
       updated_at: now,
@@ -340,7 +550,11 @@ export class SupabasePromptStore implements IPromptStore {
   /**
    * Update prompt metadata
    */
-  async update(id: string, request: UpdatePromptRequest): Promise<PromptDefinition> {
+  async update(
+    id: string,
+    request: UpdatePromptRequest,
+    precondition?: PromptMutationPrecondition,
+  ): Promise<PromptDefinition> {
     const client = this.ensureInitialized();
 
     const existing = await this.get(id);
@@ -358,11 +572,11 @@ export class SupabasePromptStore implements IPromptStore {
         .neq('id', id);
 
       if (prodPrompts && prodPrompts.length > 0) {
-        // Demote existing production prompt
-        await client
-          .from('cee_prompts')
-          .update({ status: 'staging', updated_at: new Date().toISOString() })
-          .eq('id', prodPrompts[0].id);
+        throw new Error(
+          `Cannot set prompt '${id}' to production: task '${existing.taskId}' ` +
+            `already has a production prompt ('${prodPrompts[0].id}'). ` +
+            'Archive or demote the existing production prompt first.',
+        );
       }
     }
 
@@ -376,11 +590,23 @@ export class SupabasePromptStore implements IPromptStore {
     if (request.tags !== undefined) updateData.tags = request.tags;
     if (request.activeVersion !== undefined) updateData.active_version = request.activeVersion;
     if (request.stagingVersion !== undefined) updateData.staging_version = request.stagingVersion;
+    if (request.designVersion !== undefined) updateData.design_version = request.designVersion;
+    if (request.modelConfig !== undefined) updateData.model_config = request.modelConfig;
 
-    const { error } = await client.from('cee_prompts').update(updateData).eq('id', id);
+    let updateQuery = client.from('cee_prompts').update(updateData).eq('id', id);
+    if (precondition) {
+      updateQuery = updateQuery.eq(
+        'updated_at',
+        precondition.expectedUpdatedAt,
+      );
+    }
+    const { data: updatedRows, error } = await updateQuery.select('id');
 
     if (error) {
       throw new Error(`Failed to update prompt: ${error.message}`);
+    }
+    if (precondition && (!updatedRows || updatedRows.length === 0)) {
+      throw new PromptMutationConflictError(id);
     }
 
     log.info({ promptId: id }, 'Prompt updated');
@@ -426,7 +652,11 @@ export class SupabasePromptStore implements IPromptStore {
   /**
    * Rollback to a previous version
    */
-  async rollback(id: string, request: RollbackRequest): Promise<PromptDefinition> {
+  async rollback(
+    id: string,
+    request: RollbackRequest,
+    precondition?: PromptMutationPrecondition,
+  ): Promise<PromptDefinition> {
     const client = this.ensureInitialized();
 
     const existing = await this.get(id);
@@ -439,16 +669,26 @@ export class SupabasePromptStore implements IPromptStore {
       throw new Error(`Version ${request.targetVersion} not found`);
     }
 
-    const { error } = await client
+    let rollbackQuery = client
       .from('cee_prompts')
       .update({
         active_version: request.targetVersion,
         updated_at: new Date().toISOString(),
       })
       .eq('id', id);
+    if (precondition) {
+      rollbackQuery = rollbackQuery.eq(
+        'updated_at',
+        precondition.expectedUpdatedAt,
+      );
+    }
+    const { data: updatedRows, error } = await rollbackQuery.select('id');
 
     if (error) {
       throw new Error(`Failed to rollback: ${error.message}`);
+    }
+    if (precondition && (!updatedRows || updatedRows.length === 0)) {
+      throw new PromptMutationConflictError(id);
     }
 
     log.info(
@@ -538,7 +778,11 @@ export class SupabasePromptStore implements IPromptStore {
   /**
    * Delete a prompt
    */
-  async delete(id: string, hard = false): Promise<void> {
+  async delete(
+    id: string,
+    hard = false,
+    precondition?: PromptMutationPrecondition,
+  ): Promise<void> {
     const client = this.ensureInitialized();
 
     const existing = await this.get(id);
@@ -548,19 +792,39 @@ export class SupabasePromptStore implements IPromptStore {
 
     if (hard) {
       // Hard delete - cascade will handle versions
-      const { error } = await client.from('cee_prompts').delete().eq('id', id);
+      let deleteQuery = client.from('cee_prompts').delete().eq('id', id);
+      if (precondition) {
+        deleteQuery = deleteQuery.eq(
+          'updated_at',
+          precondition.expectedUpdatedAt,
+        );
+      }
+      const { data: deletedRows, error } = await deleteQuery.select('id');
       if (error) {
         throw new Error(`Failed to delete prompt: ${error.message}`);
+      }
+      if (precondition && (!deletedRows || deletedRows.length === 0)) {
+        throw new PromptMutationConflictError(id);
       }
       log.info({ promptId: id }, 'Prompt hard deleted');
     } else {
       // Soft delete - archive
-      const { error } = await client
+      let archiveQuery = client
         .from('cee_prompts')
         .update({ status: 'archived', updated_at: new Date().toISOString() })
         .eq('id', id);
+      if (precondition) {
+        archiveQuery = archiveQuery.eq(
+          'updated_at',
+          precondition.expectedUpdatedAt,
+        );
+      }
+      const { data: archivedRows, error } = await archiveQuery.select('id');
       if (error) {
         throw new Error(`Failed to archive prompt: ${error.message}`);
+      }
+      if (precondition && (!archivedRows || archivedRows.length === 0)) {
+        throw new PromptMutationConflictError(id);
       }
       log.info({ promptId: id }, 'Prompt archived');
     }
@@ -576,15 +840,30 @@ export class SupabasePromptStore implements IPromptStore {
   ): Promise<CompiledPrompt | null> {
     const client = this.ensureInitialized();
 
-    // Find production prompt for task
+    // Find prompt for task (exclude archived, allow draft/staging/production)
+    // Version selection is controlled by stagingVersion vs activeVersion, not prompt status
+    // Raw-adapter compatibility only. Production callers are wrapped by
+    // GovernedPromptStore, which performs immutable canonical-id election and
+    // never delegates task election to this query.
     const { data: prompts, error: promptError } = await client
       .from('cee_prompts')
       .select('*')
       .eq('task_id', taskId)
-      .eq('status', 'production')
+      .neq('status', 'archived')
+      .order('updated_at', { ascending: false }) // Most recently updated first
       .limit(1);
 
     if (promptError || !prompts || prompts.length === 0) {
+      // Log why we're returning null - this is critical for diagnosing cache warming failures
+      log.warn({
+        event: 'prompt_store.getCompiled.no_prompt',
+        taskId,
+        useStaging: options?.useStaging,
+        hasError: !!promptError,
+        errorMessage: promptError?.message,
+        errorCode: (promptError as any)?.code,
+        promptCount: prompts?.length ?? 0,
+      }, `getCompiled returning null: ${promptError ? 'query error' : 'no prompt found for task'}`);
       return null;
     }
 
@@ -600,11 +879,28 @@ export class SupabasePromptStore implements IPromptStore {
       .single();
 
     if (versionError || !versions) {
+      // Log why version lookup failed
+      log.warn({
+        event: 'prompt_store.getCompiled.no_version',
+        taskId,
+        promptId: prompt.id,
+        targetVersion,
+        useStaging: options?.useStaging,
+        stagingVersion: prompt.staging_version,
+        activeVersion: prompt.active_version,
+        hasError: !!versionError,
+        errorMessage: versionError?.message,
+        errorCode: (versionError as any)?.code,
+      }, `getCompiled returning null: ${versionError ? 'version query error' : 'version not found'}`);
       return null;
     }
 
     const version = versions as VersionRow;
-    const versionVariables = JSON.parse(version.variables || '[]');
+    const versionVariables = parseJsonColumn<PromptVariable>(version.variables, {
+      column: 'variables',
+      promptId: prompt.id,
+      version: version.version,
+    });
     const content = interpolatePrompt(version.content, variables, versionVariables);
 
     return {
@@ -612,6 +908,7 @@ export class SupabasePromptStore implements IPromptStore {
       version: version.version,
       content,
       compiledAt: new Date().toISOString(),
+      modelConfig: prompt.model_config ?? undefined,
     };
   }
 
@@ -621,11 +918,15 @@ export class SupabasePromptStore implements IPromptStore {
   async getActivePromptForTask(taskId: string): Promise<ActivePromptResult | null> {
     const client = this.ensureInitialized();
 
+    // Find prompt for task (exclude archived, allow draft/staging/production)
+    // Raw-adapter compatibility only; GovernedPromptStore owns production
+    // canonical election and never delegates task election to this query.
     const { data: prompts, error } = await client
       .from('cee_prompts')
       .select('*')
       .eq('task_id', taskId)
-      .eq('status', 'production')
+      .neq('status', 'archived')
+      .order('updated_at', { ascending: false }) // Most recently updated first
       .limit(1);
 
     if (error || !prompts || prompts.length === 0) {
@@ -657,13 +958,19 @@ export class SupabasePromptStore implements IPromptStore {
       status: prompt.status as PromptDefinition['status'],
       activeVersion: prompt.active_version,
       stagingVersion: prompt.staging_version ?? undefined,
+      designVersion: prompt.design_version ?? undefined,
+      modelConfig: prompt.model_config ?? undefined,
       tags: prompt.tags ?? [],
       createdAt: prompt.created_at,
       updatedAt: prompt.updated_at,
       versions: versions.map((v) => ({
         version: v.version,
         content: v.content,
-        variables: JSON.parse(v.variables || '[]'),
+        variables: parseJsonColumn<PromptVariable>(v.variables, {
+          column: 'variables',
+          promptId: prompt.id,
+          version: v.version,
+        }),
         createdBy: v.created_by ?? 'system',
         createdAt: v.created_at,
         changeNote: v.change_note ?? undefined,
@@ -671,7 +978,11 @@ export class SupabasePromptStore implements IPromptStore {
         requiresApproval: v.requires_approval ?? false,
         approvedBy: v.approved_by ?? undefined,
         approvedAt: v.approved_at ?? undefined,
-        testCases: JSON.parse(v.test_cases || '[]'),
+        testCases: parseJsonColumn<PromptTestCase>(v.test_cases, {
+          column: 'test_cases',
+          promptId: prompt.id,
+          version: v.version,
+        }),
       })),
     };
   }

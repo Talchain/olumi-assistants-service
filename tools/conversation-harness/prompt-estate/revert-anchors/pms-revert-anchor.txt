@@ -1,0 +1,10 @@
+116
+# orchestrator_default staging revert anchor (coach-arm promotion COMPLETED, 2026-07-16)
+# ANCHOR STAYS v116 per the ratified completion path: served staging is now v117
+#   (amended Arm B, hash 08c0338d149eb9bc, 23,350c, promoted + behaviourally adjudicated
+#   KEEP — evidence acceptance-evidence/coach-arm-b-2026-07-16/00-STAGE.md RESUME section).
+#   A revert of v117 lands here: PATCH stagingVersion->116 + POST /admin/prompts/reload
+#   + re-verify hash cf8fb56904f2b788 from REAL turn logs (>=8 calls, multi-instance).
+# v116 identity: hash cf8fb56904f2b788, 21,958c (verified on-wire 2026-07-16, turn
+#   813051df / scenario da24487f, and re-verified at resume R0: turn 44f4931b / scenario ca40dd22).
+# prod activeVersion=113 — untouched by this promotion (rides the 2.19 cutover batch).

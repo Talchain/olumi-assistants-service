@@ -15,15 +15,22 @@
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { config } from '../config/index.js';
-import { log, emit, hashIP } from '../utils/telemetry.js';
 import { PROMPT_TASKS } from '../constants/prompt-tasks.js';
+import { verifyIPAllowed, verifyAdminKey } from '../middleware/admin-auth.js';
+import { ADMIN_TOAST_DURATION_MS } from '../config/timeouts.js';
+import { config } from '../config/index.js';
 
 /**
- * Generate HTML options for task dropdown from canonical PROMPT_TASKS registry.
- * This ensures admin UI stays in sync with all registered prompt tasks.
+ * Generate HTML options for task dropdown from the canonical PROMPT_TASKS
+ * registry, which is itself derived from `CeeTaskIdSchema`. This is the ONLY
+ * production consumer of PROMPT_TASKS, so it is the surface where registry
+ * drift became user-visible: a task absent here cannot be selected when
+ * creating a prompt, even though the API would accept it.
+ *
+ * Exported for tests/unit/prompt-tasks-registry.test.ts, which asserts the
+ * rendered dropdown covers every task the create endpoint accepts.
  */
-function generateTaskOptions(): string {
+export function generateTaskOptions(): string {
   return PROMPT_TASKS.map(task => `<option value="${task}">${task}</option>`).join('\n                    ');
 }
 
@@ -34,64 +41,6 @@ function generateTaskFilterOptions(): string {
   const allTasksOption = '<option value="">All Tasks</option>';
   const taskOptions = PROMPT_TASKS.map(task => `<option value="${task}">${task}</option>`).join('\n                    ');
   return `${allTasksOption}\n                    ${taskOptions}`;
-}
-
-/**
- * Telemetry event for blocked IP access
- */
-const AdminUIIPBlocked = 'admin.ui.ip.blocked' as const;
-
-/**
- * Parse and cache allowed IPs from config
- */
-function getAllowedIPs(): Set<string> | null {
-  const allowedIPsConfig = config.prompts?.adminAllowedIPs;
-  if (!allowedIPsConfig || allowedIPsConfig.trim() === '') {
-    return null; // No restriction
-  }
-
-  return new Set(
-    allowedIPsConfig
-      .split(',')
-      .map((ip) => ip.trim())
-      .filter((ip) => ip.length > 0)
-  );
-}
-
-/**
- * Check if request IP is allowed to access admin UI
- * Returns true if allowed, sends error response if blocked
- */
-function verifyIPAllowed(request: FastifyRequest, reply: FastifyReply): boolean {
-  const allowedIPs = getAllowedIPs();
-
-  // No IP restriction configured
-  if (!allowedIPs) {
-    return true;
-  }
-
-  const requestIP = request.ip;
-
-  // Check if IP is in allowlist (including localhost variants)
-  const isAllowed =
-    allowedIPs.has(requestIP) ||
-    (requestIP === '::1' && allowedIPs.has('127.0.0.1')) ||
-    (requestIP === '127.0.0.1' && allowedIPs.has('::1'));
-
-  if (!isAllowed) {
-    // Use hashed IP in telemetry/logs to avoid PII leakage
-    const ipHash = hashIP(requestIP);
-    emit(AdminUIIPBlocked, {
-      ip_hash: ipHash,
-      path: request.url,
-      allowedCount: allowedIPs.size,
-    });
-    log.warn({ ip_hash: ipHash, path: request.url }, 'Admin UI access blocked by IP allowlist');
-    reply.status(403).send('Forbidden: IP not allowed');
-    return false;
-  }
-
-  return true;
 }
 
 /**
@@ -228,6 +177,14 @@ function generateAdminUI(): string {
     }
     .alert-error { background: #fee2e2; color: #dc2626; }
     .alert-success { background: #d1fae5; color: #065f46; }
+    .alert-warning { background: #fef3c7; color: #92400e; }
+    /* Harness fidelity disclosure — what a result here is, and is not, evidence
+       of. Sits directly under the PASSED/FAILED verdict because that verdict is
+       the thing being over-read. */
+    .harness-fidelity { border-left: 3px solid #d97706; font-size: 0.8rem; line-height: 1.45; }
+    .harness-fidelity strong { display: block; margin-bottom: 4px; }
+    .harness-fidelity .hf-divergence { margin-top: 6px; }
+    .harness-fidelity .hf-sent { margin-top: 6px; font-family: monospace; font-size: 0.72rem; opacity: 0.85; }
     .modal {
       position: fixed;
       top: 0;
@@ -297,6 +254,8 @@ function generateAdminUI(): string {
       to { transform: translateX(0); opacity: 1; }
     }
     .btn-warning { background: #d97706; color: white; }
+    .btn-staging { background: #f59e0b; color: white; }
+    .btn-staging:hover { background: #d97706; }
     pre {
       background: #f3f4f6;
       padding: 15px;
@@ -728,7 +687,8 @@ function generateAdminUI(): string {
                         <th>ID</th>
                         <th>Task</th>
                         <th>Status</th>
-                        <th>Active Version</th>
+                        <th>Revision</th>
+                        <th>Design Version</th>
                         <th>Updated</th>
                         <th>Actions</th>
                       </tr>
@@ -741,7 +701,8 @@ function generateAdminUI(): string {
                           <td>
                             <span class="status" :class="'status-' + prompt.status" x-text="prompt.status"></span>
                           </td>
-                          <td x-text="'v' + prompt.activeVersion"></td>
+                          <td x-text="prompt.activeVersion"></td>
+                          <td x-text="prompt.designVersion || '-'"></td>
                           <td x-text="formatDate(prompt.updatedAt)"></td>
                           <td>
                             <button class="btn btn-secondary btn-sm" @click="viewPrompt(prompt)">View</button>
@@ -778,13 +739,30 @@ function generateAdminUI(): string {
                 <template x-if="selectedTestPromptId && selectedTestPrompt">
                   <div>
                     <div class="flex mb-2" style="justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-                      <div>
-                        <label>Version</label>
-                        <select x-model="selectedTestVersionNum" @change="loadTestCasesForVersion()" style="width: auto; margin-left: 10px;">
-                          <template x-for="v in selectedTestPrompt.versions" :key="v.version">
-                            <option :value="v.version" x-text="'v' + v.version + (v.version === selectedTestPrompt.activeVersion ? ' (active)' : '')"></option>
-                          </template>
-                        </select>
+                      <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                        <div>
+                          <label>Version</label>
+                          <select x-model="selectedTestVersionNum" @change="loadTestCasesForVersion()" style="width: auto; margin-left: 10px;">
+                            <template x-for="v in selectedTestPrompt.versions" :key="v.version">
+                              <option :value="v.version" x-text="'v' + v.version + (v.version === selectedTestPrompt.activeVersion ? ' (production)' : '') + (selectedTestPrompt.stagingVersion && v.version === selectedTestPrompt.stagingVersion ? ' (staging)' : '')"></option>
+                            </template>
+                          </select>
+                        </div>
+                        <template x-if="selectedTestPrompt.stagingVersion && parseInt(selectedTestVersionNum, 10) === selectedTestPrompt.stagingVersion && parseInt(selectedTestVersionNum, 10) !== selectedTestPrompt.activeVersion">
+                          <div style="font-size: 0.8rem; padding: 4px 8px; background: #fef3c7; border: 1px solid #f59e0b; border-radius: 4px; color: #92400e;">
+                            Testing v<span x-text="selectedTestVersionNum"></span> (staging version) - this version will be used in staging environment
+                          </div>
+                        </template>
+                        <template x-if="parseInt(selectedTestVersionNum, 10) !== selectedTestPrompt.activeVersion && (!selectedTestPrompt.stagingVersion || parseInt(selectedTestVersionNum, 10) !== selectedTestPrompt.stagingVersion)">
+                          <div style="font-size: 0.8rem; padding: 4px 8px; background: #e5e7eb; border: 1px solid #9ca3af; border-radius: 4px; color: #4b5563;">
+                            Testing v<span x-text="selectedTestVersionNum"></span> (draft) - not in use anywhere
+                          </div>
+                        </template>
+                        <template x-if="parseInt(selectedTestVersionNum, 10) === selectedTestPrompt.activeVersion">
+                          <div style="font-size: 0.8rem; padding: 4px 8px; background: #dcfce7; border: 1px solid #22c55e; border-radius: 4px; color: #166534;">
+                            Testing v<span x-text="selectedTestVersionNum"></span> (production version) - this version is live
+                          </div>
+                        </template>
                       </div>
                       <div class="flex" style="gap: 8px; flex-wrap: wrap;">
                         <button class="btn btn-primary btn-sm" @click="showTestCaseModal = true; resetTestCaseForm()">+ Add Test Case</button>
@@ -810,13 +788,64 @@ function generateAdminUI(): string {
                         <div class="flex" style="gap: 15px; flex-wrap: wrap; align-items: center;">
                           <div style="display: flex; align-items: center; gap: 6px;">
                             <label style="font-size: 0.85rem; font-weight: 500;">Model:</label>
-                            <select x-model="llmModelOverride" style="padding: 4px 8px; font-size: 0.85rem; border-radius: 4px; border: 1px solid #d1d5db;" @focus="loadAvailableModels()">
+                            <select x-model="llmModelOverride" style="padding: 4px 8px; font-size: 0.85rem; border-radius: 4px; border: 1px solid #d1d5db;" @focus="loadAvailableModels()" @change="saveModelPreference()">
                               <option value="">Default</option>
                               <template x-for="m in llmAvailableModels" :key="m.id">
                                 <option :value="m.id" x-text="m.id + ' (' + m.provider + ')'"></option>
                               </template>
                             </select>
+                            <button type="button" @click="openModelAvailabilityModal()" class="btn btn-secondary btn-sm" style="padding: 2px 8px; font-size: 0.75rem;" title="Check model availability from providers">
+                              Verify
+                            </button>
                           </div>
+                          <!-- Reasoning Effort (only for OpenAI reasoning models) -->
+                          <template x-if="isReasoningModelSelected()">
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                              <label style="font-size: 0.85rem; font-weight: 500;">Reasoning Effort:</label>
+                              <select x-model="llmReasoningEffort" style="padding: 4px 8px; font-size: 0.85rem; border-radius: 4px; border: 1px solid #d1d5db;">
+                                <option value="low">Low</option>
+                                <option value="medium">Medium</option>
+                                <option value="high">High</option>
+                              </select>
+                            </div>
+                          </template>
+                          <!-- Extended Thinking Budget (only for Anthropic models with extended thinking) -->
+                          <template x-if="supportsExtendedThinkingSelected()">
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                              <label style="font-size: 0.85rem; font-weight: 500;">Thinking Budget:</label>
+                              <input type="number" x-model.number="llmBudgetTokens" placeholder="none" min="1024" max="128000" step="1024"
+                                     style="width: 100px; padding: 4px 8px; font-size: 0.85rem; border-radius: 4px; border: 1px solid #d1d5db;">
+                              <span style="font-size: 0.75rem; color: #6b7280;">tokens</span>
+                            </div>
+                          </template>
+                          <!-- Temperature (only for non-reasoning models) -->
+                          <template x-if="supportsTemperature()">
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                              <label style="font-size: 0.85rem; font-weight: 500;">Temperature:</label>
+                              <input type="number" x-model.number="llmTemperature" min="0" max="2" step="0.1" placeholder="0"
+                                     style="width: 70px; padding: 4px 8px; font-size: 0.85rem; border-radius: 4px; border: 1px solid #d1d5db;">
+                            </div>
+                          </template>
+                          <!-- Max Tokens Override -->
+                          <div style="display: flex; align-items: center; gap: 6px;">
+                            <label style="font-size: 0.85rem; font-weight: 500;">Max Tokens:</label>
+                            <input type="number" x-model.number="llmMaxTokensOverride" placeholder="default" min="100" max="32768"
+                                   style="width: 90px; padding: 4px 8px; font-size: 0.85rem; border-radius: 4px; border: 1px solid #d1d5db;">
+                          </div>
+                          <!-- Seed (for reproducibility) -->
+                          <div style="display: flex; align-items: center; gap: 6px;">
+                            <label style="font-size: 0.85rem; font-weight: 500;">Seed:</label>
+                            <input type="number" x-model.number="llmSeed" placeholder="random" min="0" max="2147483647"
+                                   style="width: 110px; padding: 4px 8px; font-size: 0.85rem; border-radius: 4px; border: 1px solid #d1d5db;">
+                          </div>
+                          <!-- Top P (nucleus sampling) - only for non-reasoning models -->
+                          <template x-if="supportsTemperature()">
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                              <label style="font-size: 0.85rem; font-weight: 500;">Top P:</label>
+                              <input type="number" x-model.number="llmTopP" placeholder="1.0" min="0" max="1" step="0.05"
+                                     style="width: 70px; padding: 4px 8px; font-size: 0.85rem; border-radius: 4px; border: 1px solid #d1d5db;">
+                            </div>
+                          </template>
                           <div style="display: flex; align-items: center; gap: 6px;">
                             <input type="checkbox" id="skipRepairs" x-model="llmSkipRepairs" style="width: 16px; height: 16px;">
                             <label for="skipRepairs" style="font-size: 0.85rem;">Skip repairs (raw LLM output)</label>
@@ -900,11 +929,14 @@ function generateAdminUI(): string {
                           </div>
                           <div class="flex" style="gap: 5px; flex-wrap: wrap;">
                             <button class="btn btn-secondary btn-sm" @click="runSingleTestCase(tc)">Run (Dry)</button>
-                            <button class="btn btn-llm btn-sm" @click="runSingleTestCaseWithLLM(tc)" :disabled="tc.llmRunning">
+                            <button class="btn btn-llm btn-sm" @click="runSingleTestCaseWithLLM(tc)" :disabled="tc.llmRunning || llmRateLimitCooldown > 0">
                               <template x-if="tc.llmRunning">
                                 <span><span class="spinner"></span></span>
                               </template>
-                              <template x-if="!tc.llmRunning">
+                              <template x-if="!tc.llmRunning && llmRateLimitCooldown > 0">
+                                <span>Wait <span x-text="llmRateLimitCooldown"></span>s</span>
+                              </template>
+                              <template x-if="!tc.llmRunning && llmRateLimitCooldown === 0">
                                 <span>Run with LLM</span>
                               </template>
                             </button>
@@ -955,6 +987,28 @@ function generateAdminUI(): string {
                               <span class="text-muted" style="font-size: 0.75rem;" x-text="tc.llmResult.timestamp"></span>
                             </div>
                             <div class="llm-results-body">
+                              <!--
+                                HARNESS FIDELITY DISCLOSURE.
+                                Rendered from the SERVER's payload
+                                (harness_fidelity), never restated here: a copy in
+                                this file would drift from the route the first time
+                                the route changed, and a stale disclosure reads as
+                                current. Placed ABOVE the error/success split on
+                                purpose — a failed run is exactly when a
+                                composition gap gets misread as a bad prompt.
+                              -->
+                              <template x-if="tc.llmResult.fullResponse?.harness_fidelity">
+                                <div class="alert alert-warning harness-fidelity" style="padding: 10px;">
+                                  <strong>What this result is evidence of</strong>
+                                  <div x-text="tc.llmResult.fullResponse.harness_fidelity.notice"></div>
+                                  <template x-for="d in (tc.llmResult.fullResponse.harness_fidelity.divergences || [])" :key="d">
+                                    <div class="hf-divergence" x-text="d"></div>
+                                  </template>
+                                  <div class="hf-sent"
+                                       x-text="'sent: ' + (tc.llmResult.fullResponse.harness_fidelity.system_blocks_sent ?? '?') + ' system block(s) · structured-outputs grammar: ' + (tc.llmResult.fullResponse.harness_fidelity.structured_outputs_grammar_sent === undefined ? '?' : (tc.llmResult.fullResponse.harness_fidelity.structured_outputs_grammar_sent ? 'yes' : 'no')) + ' · reply parsed as: ' + tc.llmResult.fullResponse.harness_fidelity.output_parsed_as"></div>
+                                </div>
+                              </template>
+
                               <!-- Error Display -->
                               <template x-if="tc.llmResult.error">
                                 <div class="alert alert-error" style="padding: 10px; font-size: 0.85rem;" x-text="tc.llmResult.error"></div>
@@ -991,6 +1045,21 @@ function generateAdminUI(): string {
                                       <div class="llm-metric">
                                         <span class="llm-metric-label">Model:</span>
                                         <span class="llm-metric-value" x-text="tc.llmResult.model"></span>
+                                      </div>
+                                    </template>
+                                    <!--
+                                      FINISH REASON. On the response envelope all
+                                      along and rendered nowhere, so a reply cut
+                                      off at max_tokens and a genuinely poor prompt
+                                      looked identical: both arrive as a short or
+                                      unparseable draft. Warn-coloured on anything
+                                      that is not a clean stop, because that is the
+                                      case where the prompt is not the culprit.
+                                    -->
+                                    <template x-if="tc.llmResult.finishReason">
+                                      <div class="llm-metric" :class="['end_turn', 'stop'].includes(tc.llmResult.finishReason) ? 'llm-metric-good' : 'llm-metric-warn'">
+                                        <span class="llm-metric-label">Finish:</span>
+                                        <span class="llm-metric-value" x-text="tc.llmResult.finishReason"></span>
                                       </div>
                                     </template>
                                   </div>
@@ -1076,16 +1145,26 @@ function generateAdminUI(): string {
                                     </div>
                                   </template>
 
-                                  <!-- Raw Output Preview -->
-                                  <template x-if="tc.llmResult.rawOutputPreview">
+                                  <!-- Raw Output -->
+                                  <template x-if="tc.llmResult.rawOutputPreview || tc.llmResult.rawOutputFull">
                                     <div class="collapsible-section">
                                       <div class="collapsible-header" @click="tc.llmResult.showRaw = !tc.llmResult.showRaw">
-                                        <span>Raw LLM Output Preview</span>
+                                        <span>Raw LLM Output</span>
                                         <span x-text="tc.llmResult.showRaw ? '▼' : '▶'"></span>
                                       </div>
                                       <template x-if="tc.llmResult.showRaw">
                                         <div class="collapsible-content">
-                                          <pre x-text="tc.llmResult.rawOutputPreview"></pre>
+                                          <div style="margin-bottom: 8px; display: flex; gap: 8px; align-items: center;">
+                                            <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
+                                              <input type="checkbox" x-model="tc.llmResult.showFullOutput" style="cursor: pointer;">
+                                              <span>Show Full Output</span>
+                                            </label>
+                                            <template x-if="tc.llmResult.rawOutputFull">
+                                              <span style="color: #6b7280; font-size: 0.85rem;" x-text="'(' + tc.llmResult.rawOutputFull.length + ' chars)'"></span>
+                                            </template>
+                                            <button class="btn btn-secondary btn-sm" @click="navigator.clipboard.writeText(tc.llmResult.rawOutputFull || tc.llmResult.rawOutputPreview); $dispatch('toast', {message: 'Copied to clipboard', type: 'success'})" style="margin-left: auto;">Copy</button>
+                                          </div>
+                                          <pre style="max-height: 500px; overflow: auto;" x-text="tc.llmResult.showFullOutput ? tc.llmResult.rawOutputFull : tc.llmResult.rawOutputPreview"></pre>
                                         </div>
                                       </template>
                                     </div>
@@ -1206,15 +1285,53 @@ function generateAdminUI(): string {
                 <p class="text-muted">Status:
                   <span class="status" :class="'status-' + selectedPrompt.status" x-text="selectedPrompt.status"></span>
                 </p>
+                <p class="text-muted">Design Version:
+                  <span x-text="selectedPrompt.designVersion || '-'"></span>
+                </p>
               </div>
-              <div>
+              <div style="display: flex; flex-direction: column; gap: 8px;">
                 <select x-model="selectedPrompt.status" @change="updatePromptStatus()">
                   <option value="draft">Draft</option>
                   <option value="staging">Staging</option>
                   <option value="production">Production</option>
                   <option value="archived">Archived</option>
                 </select>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <input type="text" x-model="selectedPrompt.designVersion" placeholder="e.g., v22"
+                         style="width: 80px; padding: 4px 8px; font-size: 0.85rem; border-radius: 4px; border: 1px solid #d1d5db;">
+                  <button class="btn btn-secondary btn-sm" @click="updateDesignVersion()">Save</button>
+                </div>
               </div>
+            </div>
+
+            <!-- Model Configuration -->
+            <div class="mt-2 mb-2" style="padding: 12px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0;">
+              <h4 style="margin: 0 0 10px 0; font-size: 0.9rem; color: #475569;">Model Configuration</h4>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                <div>
+                  <label style="font-size: 0.8rem; color: #64748b; display: block; margin-bottom: 4px;">Staging Model</label>
+                  <select x-model="selectedPrompt.modelConfig.staging" @change="updateModelConfig()"
+                          style="width: 100%; padding: 6px 8px; font-size: 0.85rem; border-radius: 4px; border: 1px solid #d1d5db;">
+                    <option value="">Use task default</option>
+                    <template x-for="m in llmAvailableModels" :key="m.id">
+                      <option :value="m.id" x-text="m.id + ' (' + m.provider + ')'"></option>
+                    </template>
+                  </select>
+                </div>
+                <div>
+                  <label style="font-size: 0.8rem; color: #64748b; display: block; margin-bottom: 4px;">Production Model</label>
+                  <select x-model="selectedPrompt.modelConfig.production" @change="updateModelConfig()"
+                          style="width: 100%; padding: 6px 8px; font-size: 0.85rem; border-radius: 4px; border: 1px solid #d1d5db;">
+                    <option value="">Use task default</option>
+                    <template x-for="m in llmAvailableModels" :key="m.id">
+                      <option :value="m.id" x-text="m.id + ' (' + m.provider + ')'"></option>
+                    </template>
+                  </select>
+                </div>
+              </div>
+              <p style="margin: 8px 0 0 0; font-size: 0.75rem; color: #94a3b8;">
+                Set environment-specific models. Leave empty to use task defaults.
+              </p>
             </div>
 
             <h3 class="mt-2 mb-2">Versions</h3>
@@ -1230,10 +1347,13 @@ function generateAdminUI(): string {
                   <div class="text-muted" x-text="'by ' + version.createdBy"></div>
                   <div class="flex" style="gap: 5px; margin-top: 5px; flex-wrap: wrap;">
                     <template x-if="version.version === selectedPrompt.activeVersion">
-                      <span class="status status-production">Active</span>
+                      <span class="status status-production">Production</span>
+                    </template>
+                    <template x-if="selectedPrompt.stagingVersion && version.version === selectedPrompt.stagingVersion">
+                      <span class="status status-staging">Staging</span>
                     </template>
                     <template x-if="version.requiresApproval && version.approvedBy">
-                      <span class="status status-production" x-text="'Approved by ' + version.approvedBy"></span>
+                      <span class="status status-approved" x-text="'Approved by ' + version.approvedBy"></span>
                     </template>
                     <template x-if="version.requiresApproval && !version.approvedBy">
                       <span class="status status-draft">Needs Approval</span>
@@ -1246,12 +1366,35 @@ function generateAdminUI(): string {
             <h3 class="mt-2 mb-2">Content (v<span x-text="selectedVersionNum"></span>)</h3>
             <pre x-text="getVersionContent(selectedVersionNum)"></pre>
 
+            <!-- Version status badges -->
+            <div class="flex mt-2 mb-2" style="gap: 8px;">
+              <template x-if="selectedVersionNum == selectedPrompt.activeVersion">
+                <span style="background: #22c55e; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem;">PRODUCTION</span>
+              </template>
+              <template x-if="selectedPrompt.stagingVersion && selectedVersionNum == selectedPrompt.stagingVersion">
+                <span style="background: #f59e0b; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem;">STAGING</span>
+              </template>
+            </div>
+
             <div class="flex mt-2" style="flex-wrap: wrap;">
               <button class="btn btn-secondary" @click="openNewVersionWithContent()">+ New Version</button>
               <template x-if="selectedPrompt.versions.length >= 2">
                 <button class="btn btn-secondary" @click="openCompareModal()">Compare Versions</button>
               </template>
-              <template x-if="selectedVersionNum !== selectedPrompt.activeVersion">
+              <!-- Set as Staging: available for any version not currently staging -->
+              <template x-if="selectedVersionNum != selectedPrompt.stagingVersion">
+                <button class="btn btn-staging" @click="setAsStaging()">
+                  Set v<span x-text="selectedVersionNum"></span> as Staging
+                </button>
+              </template>
+              <!-- Promote to Production: available for staging version or any newer version -->
+              <template x-if="selectedVersionNum != selectedPrompt.activeVersion && (selectedVersionNum == selectedPrompt.stagingVersion || selectedVersionNum > selectedPrompt.activeVersion)">
+                <button class="btn btn-primary" @click="promoteToProduction()">
+                  Promote to Production
+                </button>
+              </template>
+              <!-- Rollback: only for older versions not in staging -->
+              <template x-if="selectedVersionNum < selectedPrompt.activeVersion && selectedVersionNum != selectedPrompt.stagingVersion">
                 <button class="btn btn-warning" @click="rollbackToVersion()">
                   Rollback to v<span x-text="selectedVersionNum"></span>
                 </button>
@@ -1373,7 +1516,7 @@ function generateAdminUI(): string {
                 <label>Version A</label>
                 <select x-model="compareVersionA" @change="loadComparison()">
                   <template x-for="v in selectedPrompt.versions" :key="v.version">
-                    <option :value="v.version" x-text="'v' + v.version + (v.version === selectedPrompt.activeVersion ? ' (active)' : '')"></option>
+                    <option :value="v.version" x-text="'v' + v.version + (v.version === selectedPrompt.activeVersion ? ' (production)' : '') + (selectedPrompt.stagingVersion && v.version === selectedPrompt.stagingVersion ? ' (staging)' : '')"></option>
                   </template>
                 </select>
               </div>
@@ -1381,7 +1524,7 @@ function generateAdminUI(): string {
                 <label>Version B</label>
                 <select x-model="compareVersionB" @change="loadComparison()">
                   <template x-for="v in selectedPrompt.versions" :key="v.version">
-                    <option :value="v.version" x-text="'v' + v.version + (v.version === selectedPrompt.activeVersion ? ' (active)' : '')"></option>
+                    <option :value="v.version" x-text="'v' + v.version + (v.version === selectedPrompt.activeVersion ? ' (production)' : '') + (selectedPrompt.stagingVersion && v.version === selectedPrompt.stagingVersion ? ' (staging)' : '')"></option>
                   </template>
                 </select>
               </div>
@@ -1453,7 +1596,7 @@ function generateAdminUI(): string {
                 <label>Version A</label>
                 <select x-model="llmCompareVersionA">
                   <template x-for="v in selectedTestPrompt.versions" :key="v.version">
-                    <option :value="v.version" x-text="'v' + v.version + (v.version === selectedTestPrompt.activeVersion ? ' (active)' : '')"></option>
+                    <option :value="v.version" x-text="'v' + v.version + (v.version === selectedTestPrompt.activeVersion ? ' (production)' : '') + (selectedTestPrompt.stagingVersion && v.version === selectedTestPrompt.stagingVersion ? ' (staging)' : '')"></option>
                   </template>
                 </select>
               </div>
@@ -1461,7 +1604,7 @@ function generateAdminUI(): string {
                 <label>Version B</label>
                 <select x-model="llmCompareVersionB">
                   <template x-for="v in selectedTestPrompt.versions" :key="v.version">
-                    <option :value="v.version" x-text="'v' + v.version + (v.version === selectedTestPrompt.activeVersion ? ' (active)' : '')"></option>
+                    <option :value="v.version" x-text="'v' + v.version + (v.version === selectedTestPrompt.activeVersion ? ' (production)' : '') + (selectedTestPrompt.stagingVersion && v.version === selectedTestPrompt.stagingVersion ? ' (staging)' : '')"></option>
                   </template>
                 </select>
               </div>
@@ -1502,11 +1645,29 @@ function generateAdminUI(): string {
                   </template>
                 </div>
 
+                <!--
+                  HARNESS FIDELITY DISCLOSURE (comparison view). This panel is
+                  where prompt-iteration verdicts get drawn — "version B is
+                  better" — so the composition limit belongs here too, not only in
+                  the single-run panel. Rendered from whichever arm returned a
+                  payload; both arms run the same harness, so either is
+                  representative. Server prose, not a local copy.
+                -->
+                <template x-if="llmCompareResults.versionA.harnessFidelity || llmCompareResults.versionB.harnessFidelity">
+                  <div class="alert alert-warning harness-fidelity" style="padding: 10px; margin-bottom: 12px;">
+                    <strong>What this comparison is evidence of</strong>
+                    <div x-text="(llmCompareResults.versionA.harnessFidelity || llmCompareResults.versionB.harnessFidelity).notice"></div>
+                    <template x-for="d in ((llmCompareResults.versionA.harnessFidelity || llmCompareResults.versionB.harnessFidelity).divergences || [])" :key="d">
+                      <div class="hf-divergence" x-text="d"></div>
+                    </template>
+                  </div>
+                </template>
+
                 <div class="version-compare-results">
                   <!-- Version A Results -->
                   <div class="compare-panel">
                     <div class="compare-panel-header">
-                      Version <span x-text="llmCompareVersionA"></span>
+                      Version <span x-text="llmCompareResults.versionA.versionNum || llmCompareVersionA"></span>
                       <template x-if="llmCompareResults.versionA.success">
                         <span class="test-result-pass"> (Success)</span>
                       </template>
@@ -1546,6 +1707,16 @@ function generateAdminUI(): string {
                             <span class="llm-metric-label">Latency:</span>
                             <span class="llm-metric-value" x-text="llmCompareResults.versionA.latencyMs + 'ms'"></span>
                           </div>
+                          <!--
+                            A truncated arm and a worse prompt look identical in
+                            node/edge counts. Show why the reply stopped.
+                          -->
+                          <template x-if="llmCompareResults.versionA.finishReason">
+                            <div class="llm-metric" :class="['end_turn', 'stop'].includes(llmCompareResults.versionA.finishReason) ? 'llm-metric-good' : 'llm-metric-warn'">
+                              <span class="llm-metric-label">Finish:</span>
+                              <span class="llm-metric-value" x-text="llmCompareResults.versionA.finishReason"></span>
+                            </div>
+                          </template>
                           <template x-if="llmCompareResults.versionA.tokenUsage">
                             <div class="llm-metric">
                               <span class="llm-metric-label">Tokens:</span>
@@ -1559,6 +1730,28 @@ function generateAdminUI(): string {
                               <span class="validation-badge validation-badge-warning" x-text="'⚠ ' + (llmCompareResults.versionA.validationWarnings || 0)"></span>
                             </span>
                           </div>
+                          <!-- Expandable validation issues -->
+                          <template x-if="llmCompareResults.versionA.validationIssues?.length > 0">
+                            <div class="collapsible-section" style="margin-top: 8px;">
+                              <div class="collapsible-header" @click="llmCompareResults.versionA.showValidation = !llmCompareResults.versionA.showValidation" style="cursor: pointer; padding: 4px 8px; background: #f3f4f6; border-radius: 4px;">
+                                <span x-text="llmCompareResults.versionA.showValidation ? '▼' : '▶'"></span>
+                                <span style="margin-left: 4px;">Show Issues</span>
+                              </div>
+                              <template x-if="llmCompareResults.versionA.showValidation">
+                                <div style="margin-top: 8px; font-size: 0.85rem;">
+                                  <template x-for="issue in llmCompareResults.versionA.validationIssues" :key="issue.code + (issue.affected_node_id || '')">
+                                    <div class="validation-issue" :class="'severity-' + issue.severity" style="padding: 6px; margin-bottom: 4px; border-left: 3px solid; border-radius: 2px;">
+                                      <div style="font-weight: 600;"><span x-text="issue.severity === 'error' ? '●' : '⚠'"></span> <span x-text="issue.code"></span></div>
+                                      <div x-text="issue.message" style="margin-top: 2px;"></div>
+                                      <template x-if="issue.suggestion">
+                                        <div style="color: #059669; margin-top: 2px;">Fix: <span x-text="issue.suggestion"></span></div>
+                                      </template>
+                                    </div>
+                                  </template>
+                                </div>
+                              </template>
+                            </div>
+                          </template>
                         </div>
                       </template>
                     </div>
@@ -1567,7 +1760,7 @@ function generateAdminUI(): string {
                   <!-- Version B Results -->
                   <div class="compare-panel">
                     <div class="compare-panel-header">
-                      Version <span x-text="llmCompareVersionB"></span>
+                      Version <span x-text="llmCompareResults.versionB.versionNum || llmCompareVersionB"></span>
                       <template x-if="llmCompareResults.versionB.success">
                         <span class="test-result-pass"> (Success)</span>
                       </template>
@@ -1619,6 +1812,16 @@ function generateAdminUI(): string {
                               <span class="compare-delta" :class="llmCompareResults.deltas.latency < 0 ? 'compare-delta-better' : 'compare-delta-worse'" x-text="(llmCompareResults.deltas.latency > 0 ? '+' : '') + llmCompareResults.deltas.latency + 'ms'"></span>
                             </template>
                           </div>
+                          <!--
+                            A truncated arm and a worse prompt look identical in
+                            node/edge counts. Show why the reply stopped.
+                          -->
+                          <template x-if="llmCompareResults.versionB.finishReason">
+                            <div class="llm-metric" :class="['end_turn', 'stop'].includes(llmCompareResults.versionB.finishReason) ? 'llm-metric-good' : 'llm-metric-warn'">
+                              <span class="llm-metric-label">Finish:</span>
+                              <span class="llm-metric-value" x-text="llmCompareResults.versionB.finishReason"></span>
+                            </div>
+                          </template>
                           <template x-if="llmCompareResults.versionB.tokenUsage">
                             <div class="llm-metric">
                               <span class="llm-metric-label">Tokens:</span>
@@ -1640,6 +1843,28 @@ function generateAdminUI(): string {
                               </template>
                             </span>
                           </div>
+                          <!-- Expandable validation issues -->
+                          <template x-if="llmCompareResults.versionB.validationIssues?.length > 0">
+                            <div class="collapsible-section" style="margin-top: 8px;">
+                              <div class="collapsible-header" @click="llmCompareResults.versionB.showValidation = !llmCompareResults.versionB.showValidation" style="cursor: pointer; padding: 4px 8px; background: #f3f4f6; border-radius: 4px;">
+                                <span x-text="llmCompareResults.versionB.showValidation ? '▼' : '▶'"></span>
+                                <span style="margin-left: 4px;">Show Issues</span>
+                              </div>
+                              <template x-if="llmCompareResults.versionB.showValidation">
+                                <div style="margin-top: 8px; font-size: 0.85rem;">
+                                  <template x-for="issue in llmCompareResults.versionB.validationIssues" :key="issue.code + (issue.affected_node_id || '')">
+                                    <div class="validation-issue" :class="'severity-' + issue.severity" style="padding: 6px; margin-bottom: 4px; border-left: 3px solid; border-radius: 2px;">
+                                      <div style="font-weight: 600;"><span x-text="issue.severity === 'error' ? '●' : '⚠'"></span> <span x-text="issue.code"></span></div>
+                                      <div x-text="issue.message" style="margin-top: 2px;"></div>
+                                      <template x-if="issue.suggestion">
+                                        <div style="color: #059669; margin-top: 2px;">Fix: <span x-text="issue.suggestion"></span></div>
+                                      </template>
+                                    </div>
+                                  </template>
+                                </div>
+                              </template>
+                            </div>
+                          </template>
                         </div>
                       </template>
                     </div>
@@ -1719,6 +1944,150 @@ function generateAdminUI(): string {
           </div>
         </div>
       </template>
+
+      <!-- Model Availability Modal -->
+      <template x-if="showModelAvailabilityModal">
+        <div class="modal" @click.self="showModelAvailabilityModal = false">
+          <div class="modal-content" style="max-width: 900px; max-height: 80vh; overflow-y: auto;">
+            <div class="flex justify-between align-center mb-2">
+              <h2>Model Availability</h2>
+              <span class="close" @click="showModelAvailabilityModal = false">&times;</span>
+            </div>
+
+            <template x-if="modelAvailabilityLoading">
+              <div class="text-center p-4">
+                <span class="spinner"></span> Loading model availability from providers...
+              </div>
+            </template>
+
+            <template x-if="!modelAvailabilityLoading">
+              <div>
+                <!-- Error Summary -->
+                <template x-if="modelErrorSummary && modelErrorSummary.potential_deprecations.length > 0">
+                  <div style="background: #fef2f2; border: 1px solid #ef4444; border-radius: 6px; padding: 12px; margin-bottom: 16px;">
+                    <h4 style="color: #dc2626; margin-bottom: 8px;">Potential Deprecations Detected</h4>
+                    <p style="font-size: 0.85rem; color: #7f1d1d;">
+                      The following models have had recent errors that may indicate deprecation:
+                    </p>
+                    <ul style="margin: 8px 0; padding-left: 20px;">
+                      <template x-for="model in modelErrorSummary.potential_deprecations" :key="model">
+                        <li style="color: #dc2626;" x-text="model"></li>
+                      </template>
+                    </ul>
+                  </div>
+                </template>
+
+                <!-- OpenAI Models -->
+                <div style="margin-bottom: 20px;">
+                  <h3 style="margin-bottom: 10px; padding-bottom: 6px; border-bottom: 2px solid #10b981;">
+                    OpenAI Models
+                    <template x-if="modelAvailabilityData.openai">
+                      <span style="font-weight: normal; font-size: 0.85rem; color: #6b7280;">
+                        (fetched <span x-text="new Date(modelAvailabilityData.openai.fetched_at).toLocaleTimeString()"></span>)
+                      </span>
+                    </template>
+                  </h3>
+
+                  <template x-if="modelAvailabilityData.openai && modelAvailabilityData.openai.registry_status">
+                    <div>
+                      <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+                        <thead>
+                          <tr style="background: #f3f4f6;">
+                            <th style="padding: 8px; text-align: left; border-bottom: 1px solid #e5e7eb;">Model ID</th>
+                            <th style="padding: 8px; text-align: center; border-bottom: 1px solid #e5e7eb;">Registry</th>
+                            <th style="padding: 8px; text-align: center; border-bottom: 1px solid #e5e7eb;">Provider</th>
+                            <th style="padding: 8px; text-align: center; border-bottom: 1px solid #e5e7eb;">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <template x-for="m in modelAvailabilityData.openai.registry_status" :key="m.model_id">
+                            <tr :style="m.status === 'missing_from_provider' ? 'background: #fef2f2;' : (m.status === 'not_in_registry' ? 'background: #fffbeb;' : '')">
+                              <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; font-family: monospace;" x-text="m.model_id"></td>
+                              <td style="padding: 8px; text-align: center; border-bottom: 1px solid #e5e7eb;">
+                                <span x-text="m.in_registry ? (m.enabled ? '✓ Enabled' : '○ Disabled') : '–'"></span>
+                              </td>
+                              <td style="padding: 8px; text-align: center; border-bottom: 1px solid #e5e7eb;">
+                                <span x-text="m.available_from_provider ? '✓ Available' : '✗ Not Found'"></span>
+                              </td>
+                              <td style="padding: 8px; text-align: center; border-bottom: 1px solid #e5e7eb;">
+                                <span :class="getModelStatusClass(m.status)" x-text="getModelStatusText(m.status)"></span>
+                              </td>
+                            </tr>
+                          </template>
+                        </tbody>
+                      </table>
+                    </div>
+                  </template>
+
+                  <template x-if="!modelAvailabilityData.openai">
+                    <p class="text-muted">Failed to fetch OpenAI models. Check API key configuration.</p>
+                  </template>
+                </div>
+
+                <!-- Anthropic Models -->
+                <div>
+                  <h3 style="margin-bottom: 10px; padding-bottom: 6px; border-bottom: 2px solid #8b5cf6;">
+                    Anthropic Models
+                    <span style="font-weight: normal; font-size: 0.85rem; color: #6b7280;">(curated list - no API available)</span>
+                  </h3>
+
+                  <template x-if="modelAvailabilityData.anthropic && modelAvailabilityData.anthropic.registry_status">
+                    <div>
+                      <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+                        <thead>
+                          <tr style="background: #f3f4f6;">
+                            <th style="padding: 8px; text-align: left; border-bottom: 1px solid #e5e7eb;">Model ID</th>
+                            <th style="padding: 8px; text-align: center; border-bottom: 1px solid #e5e7eb;">Registry</th>
+                            <th style="padding: 8px; text-align: center; border-bottom: 1px solid #e5e7eb;">Known Model</th>
+                            <th style="padding: 8px; text-align: center; border-bottom: 1px solid #e5e7eb;">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <template x-for="m in modelAvailabilityData.anthropic.registry_status" :key="m.model_id">
+                            <tr :style="m.status === 'missing_from_provider' ? 'background: #fef2f2;' : (m.status === 'not_in_registry' ? 'background: #fffbeb;' : '')">
+                              <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; font-family: monospace;" x-text="m.model_id"></td>
+                              <td style="padding: 8px; text-align: center; border-bottom: 1px solid #e5e7eb;">
+                                <span x-text="m.in_registry ? (m.enabled ? '✓ Enabled' : '○ Disabled') : '–'"></span>
+                              </td>
+                              <td style="padding: 8px; text-align: center; border-bottom: 1px solid #e5e7eb;">
+                                <span x-text="m.available_from_provider ? '✓ Known' : '? Unknown'"></span>
+                              </td>
+                              <td style="padding: 8px; text-align: center; border-bottom: 1px solid #e5e7eb;">
+                                <span :class="getModelStatusClass(m.status)" x-text="getModelStatusText(m.status)"></span>
+                              </td>
+                            </tr>
+                          </template>
+                        </tbody>
+                      </table>
+                    </div>
+                  </template>
+
+                  <template x-if="!modelAvailabilityData.anthropic">
+                    <p class="text-muted">Failed to fetch Anthropic models.</p>
+                  </template>
+                </div>
+
+                <!-- Legend -->
+                <div style="margin-top: 16px; padding: 10px; background: #f9fafb; border-radius: 6px; font-size: 0.8rem;">
+                  <strong>Status Legend:</strong>
+                  <span class="validation-badge validation-badge-info" style="margin-left: 8px;">OK</span> - Model is registered and available
+                  <span class="validation-badge validation-badge-error" style="margin-left: 8px;">NOT FOUND</span> - Model in registry but not available from provider (may be deprecated)
+                  <span class="validation-badge validation-badge-warning" style="margin-left: 8px;">New</span> - Model available from provider but not in registry
+                  <span class="validation-badge" style="margin-left: 8px;">Disabled</span> - Model in registry but disabled
+                </div>
+              </div>
+            </template>
+
+            <div class="flex mt-2" style="gap: 8px;">
+              <button class="btn btn-primary" @click="openModelAvailabilityModal()" :disabled="modelAvailabilityLoading">
+                <template x-if="modelAvailabilityLoading"><span class="spinner"></span></template>
+                Refresh
+              </button>
+              <button class="btn btn-secondary" @click="showModelAvailabilityModal = false">Close</button>
+            </div>
+          </div>
+        </div>
+      </template>
     </div>
   </div>
 
@@ -1786,9 +2155,21 @@ function generateAdminUI(): string {
         llmModelOverride: '',
         llmSkipRepairs: false,
         llmAvailableModels: [],
+        // LLM parameter overrides (null = use model default)
+        llmReasoningEffort: 'medium',
+        llmBudgetTokens: null, // Anthropic extended thinking budget
+        llmTemperature: null,
+        llmMaxTokensOverride: null,
+        llmSeed: null,
+        llmTopP: null,
         // Rate limit handling
         llmRateLimitCooldown: 0,
         llmRateLimitTimer: null,
+        // Model availability checking
+        showModelAvailabilityModal: false,
+        modelAvailabilityLoading: false,
+        modelAvailabilityData: { openai: null, anthropic: null },
+        modelErrorSummary: null,
         // Abort controllers for cancellation
         llmAbortController: null,
 
@@ -1808,7 +2189,7 @@ function generateAdminUI(): string {
         },
 
         // Toast notification system
-        showToast(message, type = 'info', duration = 4000) {
+        showToast(message, type = 'info', duration = ${ADMIN_TOAST_DURATION_MS}) {
           const id = ++this.toastId;
           this.toasts.push({ id, message, type });
           setTimeout(() => {
@@ -1821,17 +2202,32 @@ function generateAdminUI(): string {
           const json = JSON.stringify(issue, null, 2);
           navigator.clipboard.writeText(json).then(() => {
             this.showToast('Copied issue to clipboard', 'success', 2000);
-          }).catch(() => {
+          }).catch((e) => {
+            console.error('copy_to_clipboard failed:', e);
             this.showToast('Failed to copy', 'error');
           });
         },
 
-        // Initialize - check for saved session
+        // Initialize - check for saved session and restore preferences
         init() {
           const savedKey = sessionStorage.getItem('adminApiKey');
           if (savedKey) {
             this.apiKey = savedKey;
             this.authenticate();
+          }
+          // Restore saved model preference
+          const savedModel = localStorage.getItem('admin_llm_model_preference');
+          if (savedModel) {
+            this.llmModelOverride = savedModel;
+          }
+        },
+
+        // Save model preference to localStorage when changed
+        saveModelPreference() {
+          if (this.llmModelOverride) {
+            localStorage.setItem('admin_llm_model_preference', this.llmModelOverride);
+          } else {
+            localStorage.removeItem('admin_llm_model_preference');
           }
         },
 
@@ -1846,12 +2242,14 @@ function generateAdminUI(): string {
               sessionStorage.setItem('adminApiKey', this.apiKey);
               this.showToast('Logged in successfully', 'success');
               this.loadPrompts();
+              this.loadAvailableModels(); // Pre-load models so saved preference displays correctly
             } else {
               sessionStorage.removeItem('adminApiKey');
               const data = await res.json();
               this.error = data.message || 'Authentication failed';
             }
           } catch (e) {
+            console.error('authenticate failed:', e);
             this.error = 'Failed to connect to server';
           }
         },
@@ -1885,6 +2283,7 @@ function generateAdminUI(): string {
               this.error = data.message || 'Failed to load prompts';
             }
           } catch (e) {
+            console.error('load_prompts failed:', e);
             this.error = 'Failed to load prompts';
           }
           this.loading = false;
@@ -1911,22 +2310,40 @@ function generateAdminUI(): string {
               this.showToast(data.message || 'Failed to create prompt', 'error');
             }
           } catch (e) {
+            console.error('create_prompt failed:', e);
             this.showToast('Failed to create prompt', 'error');
           }
         },
 
         viewPrompt(prompt) {
           // Clone the prompt and store previous status for potential revert
-          this.selectedPrompt = { ...prompt, _previousStatus: prompt.status };
-          this.selectedVersionNum = prompt.activeVersion;
+          // Ensure modelConfig is initialized for the UI
+          this.selectedPrompt = {
+            ...prompt,
+            _previousStatus: prompt.status,
+            modelConfig: prompt.modelConfig || { staging: '', production: '' }
+          };
+          // Default to staging version if set, otherwise production version
+          // This encourages testing staging versions first in the admin UI
+          this.selectedVersionNum = prompt.stagingVersion || prompt.activeVersion;
+          // Load available models for the model config dropdowns
+          this.loadAvailableModels();
         },
 
         editPrompt(prompt) {
           // Open view modal AND pre-fill new version with current content for editing
-          this.selectedPrompt = { ...prompt, _previousStatus: prompt.status };
-          this.selectedVersionNum = prompt.activeVersion;
-          // Pre-fill the new version form with current content
-          const currentContent = this.getVersionContent(prompt.activeVersion);
+          // Ensure modelConfig is initialized for the UI
+          this.selectedPrompt = {
+            ...prompt,
+            _previousStatus: prompt.status,
+            modelConfig: prompt.modelConfig || { staging: '', production: '' }
+          };
+          // Default to staging version if set, otherwise production version
+          this.selectedVersionNum = prompt.stagingVersion || prompt.activeVersion;
+          // Load available models for the model config dropdowns
+          this.loadAvailableModels();
+          // Pre-fill the new version form with current content (from selected version)
+          const currentContent = this.getVersionContent(this.selectedVersionNum);
           this.newVersion = {
             content: currentContent,
             changeNote: '',
@@ -1973,7 +2390,7 @@ function generateAdminUI(): string {
                 'X-Admin-Key': this.apiKey
               },
               body: JSON.stringify({
-                version: this.selectedVersionNum,
+                version: parseInt(this.selectedVersionNum, 10),
                 approvedBy: 'admin-ui',
                 notes: 'Approved via admin UI'
               })
@@ -1994,6 +2411,7 @@ function generateAdminUI(): string {
               this.showToast(data.message || 'Failed to approve version', 'error');
             }
           } catch (e) {
+            console.error('approve_version failed:', e);
             this.showToast('Failed to approve version', 'error');
           }
         },
@@ -2031,7 +2449,68 @@ function generateAdminUI(): string {
               }
             }
           } catch (e) {
+            console.error('update_status failed:', e);
             this.showToast('Failed to update status', 'error');
+          }
+        },
+
+        async updateDesignVersion() {
+          this.error = null;
+          try {
+            const res = await fetch('/admin/prompts/' + this.selectedPrompt.id, {
+              method: 'PATCH',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Admin-Key': this.apiKey
+              },
+              body: JSON.stringify({ designVersion: this.selectedPrompt.designVersion || null })
+            });
+            if (res.ok) {
+              this.showToast('Design version updated to ' + (this.selectedPrompt.designVersion || '(none)'), 'success');
+              this.loadPrompts();
+            } else {
+              const data = await res.json();
+              this.showToast(data.message || 'Failed to update design version', 'error');
+            }
+          } catch (e) {
+            console.error('update_design_version failed:', e);
+            this.showToast('Failed to update design version', 'error');
+          }
+        },
+
+        async updateModelConfig() {
+          this.error = null;
+          try {
+            // Clean up modelConfig - convert empty strings to undefined
+            const modelConfig = {
+              staging: this.selectedPrompt.modelConfig?.staging || undefined,
+              production: this.selectedPrompt.modelConfig?.production || undefined
+            };
+            // If both are undefined, send null to clear the config
+            const payload = (modelConfig.staging || modelConfig.production)
+              ? { modelConfig }
+              : { modelConfig: null };
+
+            const res = await fetch('/admin/prompts/' + this.selectedPrompt.id, {
+              method: 'PATCH',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Admin-Key': this.apiKey
+              },
+              body: JSON.stringify(payload)
+            });
+            if (res.ok) {
+              const stagingModel = modelConfig.staging || 'task default';
+              const prodModel = modelConfig.production || 'task default';
+              this.showToast('Model config updated: staging=' + stagingModel + ', production=' + prodModel, 'success');
+              this.loadPrompts();
+            } else {
+              const data = await res.json();
+              this.showToast(data.message || 'Failed to update model config', 'error');
+            }
+          } catch (e) {
+            console.error('update_model_config failed:', e);
+            this.showToast('Failed to update model config', 'error');
           }
         },
 
@@ -2068,6 +2547,7 @@ function generateAdminUI(): string {
               this.showToast(data.message || 'Failed to approve version', 'error');
             }
           } catch (e) {
+            console.error('approve_and_promote failed:', e);
             this.showToast('Failed to approve version', 'error');
           }
         },
@@ -2104,12 +2584,96 @@ function generateAdminUI(): string {
               this.showToast(data.message || 'Failed to create version', 'error');
             }
           } catch (e) {
+            console.error('create_version failed:', e);
             this.showToast('Failed to create version', 'error');
           }
         },
 
+        async setAsStaging() {
+          if (!confirm('Set version ' + this.selectedVersionNum + ' as the staging version?\\n\\nThis will NOT affect production traffic.')) return;
+
+          this.error = null;
+          try {
+            const res = await fetch('/admin/prompts/' + this.selectedPrompt.id, {
+              method: 'PATCH',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Admin-Key': this.apiKey
+              },
+              body: JSON.stringify({
+                stagingVersion: this.selectedVersionNum
+              })
+            });
+            if (res.ok) {
+              const updated = await res.json();
+              this.selectedPrompt = updated;
+              this.showToast('v' + this.selectedVersionNum + ' is now the staging version', 'success');
+              this.loadPrompts();
+            } else {
+              const data = await res.json();
+              this.showToast(data.message || 'Failed to set staging version', 'error');
+            }
+          } catch (e) {
+            console.error('set_staging_version failed:', e);
+            this.showToast('Failed to set staging version', 'error');
+          }
+        },
+
+        async promoteToProduction() {
+          // Stronger confirmation for production promotion
+          const currentProd = this.selectedPrompt.activeVersion;
+          const newProd = this.selectedVersionNum;
+
+          const confirmMsg = 'PROMOTE TO PRODUCTION\\n\\n' +
+            'Current production: v' + currentProd + '\\n' +
+            'New production: v' + newProd + '\\n\\n' +
+            'This will IMMEDIATELY affect ALL live traffic.\\n\\n' +
+            'Type "PROMOTE" to confirm:';
+
+          const userInput = prompt(confirmMsg);
+          if (userInput !== 'PROMOTE') {
+            if (userInput !== null) {
+              this.showToast('Promotion cancelled - confirmation text did not match', 'warning');
+            }
+            return;
+          }
+
+          this.error = null;
+          try {
+            const res = await fetch('/admin/prompts/' + this.selectedPrompt.id + '/rollback', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Admin-Key': this.apiKey
+              },
+              body: JSON.stringify({
+                targetVersion: this.selectedVersionNum,
+                rolledBackBy: 'admin-ui',
+                reason: 'Promoted to production via admin UI'
+              })
+            });
+            if (res.ok) {
+              const updated = await res.json();
+              this.selectedPrompt = updated;
+              this.showToast('v' + this.selectedVersionNum + ' is now in PRODUCTION', 'success');
+              this.loadPrompts();
+            } else {
+              const data = await res.json();
+              this.showToast(data.message || 'Failed to promote to production', 'error');
+            }
+          } catch (e) {
+            console.error('promote_to_production failed:', e);
+            this.showToast('Failed to promote to production', 'error');
+          }
+        },
+
+        // Legacy function - kept for backwards compatibility
+        async activateVersion() {
+          return this.promoteToProduction();
+        },
+
         async rollbackToVersion() {
-          if (!confirm('Rollback to version ' + this.selectedVersionNum + '?')) return;
+          if (!confirm('Rollback to version ' + this.selectedVersionNum + '? This will revert to an older version.')) return;
 
           this.error = null;
           try {
@@ -2135,36 +2699,56 @@ function generateAdminUI(): string {
               this.showToast(data.message || 'Failed to rollback', 'error');
             }
           } catch (e) {
+            console.error('rollback failed:', e);
             this.showToast('Failed to rollback', 'error');
           }
         },
 
         // ========== Test Case Management ==========
-        async loadTestCasesForPrompt() {
+        async loadTestCasesForPrompt(preserveVersion = false) {
           if (!this.selectedTestPromptId) {
             this.selectedTestPrompt = null;
             this.currentTestCases = [];
             return;
           }
+          // Save current version if we need to preserve it (convert to number for comparison)
+          const currentVersion = preserveVersion ? parseInt(this.selectedTestVersionNum, 10) : null;
           try {
             const res = await fetch('/admin/prompts/' + this.selectedTestPromptId, {
               headers: { 'X-Admin-Key': this.apiKey }
             });
             if (res.ok) {
               this.selectedTestPrompt = await res.json();
-              this.selectedTestVersionNum = this.selectedTestPrompt.activeVersion;
-              this.loadTestCasesForVersion();
+              // Use $nextTick to wait for Alpine to render the dropdown options
+              // before setting the selected version, avoiding race conditions
+              this.$nextTick(() => {
+                // If preserving version, keep the current selection
+                // Otherwise default to staging version (if set), then production version
+                // This encourages testing staging versions first
+                if (currentVersion !== null && !isNaN(currentVersion)) {
+                  // Validate the version still exists (compare numbers)
+                  const versionExists = this.selectedTestPrompt.versions.some(v => v.version === currentVersion);
+                  this.selectedTestVersionNum = versionExists ? currentVersion : (this.selectedTestPrompt.stagingVersion || this.selectedTestPrompt.activeVersion);
+                } else {
+                  // Default to staging version if set, otherwise production
+                  this.selectedTestVersionNum = this.selectedTestPrompt.stagingVersion || this.selectedTestPrompt.activeVersion;
+                }
+                this.loadTestCasesForVersion();
+              });
             } else {
               this.showToast('Failed to load prompt', 'error');
             }
           } catch (e) {
+            console.error('refresh_prompt failed:', e);
             this.showToast('Failed to load prompt', 'error');
           }
         },
 
         loadTestCasesForVersion() {
           if (!this.selectedTestPrompt) return;
-          const version = this.selectedTestPrompt.versions.find(v => v.version === this.selectedTestVersionNum);
+          // Convert to number for comparison (Alpine.js select may return string)
+          const versionNum = parseInt(this.selectedTestVersionNum, 10);
+          const version = this.selectedTestPrompt.versions.find(v => v.version === versionNum);
           this.currentTestCases = version?.testCases || [];
         },
 
@@ -2201,6 +2785,7 @@ function generateAdminUI(): string {
           try {
             variables = JSON.parse(this.testCaseForm.variablesJson || '{}');
           } catch (e) {
+            console.error('parse_test_variables failed:', e);
             this.showToast('Invalid JSON for variables', 'error');
             return;
           }
@@ -2238,7 +2823,7 @@ function generateAdminUI(): string {
                 'X-Admin-Key': this.apiKey
               },
               body: JSON.stringify({
-                version: this.selectedTestVersionNum,
+                version: parseInt(this.selectedTestVersionNum, 10),
                 testCases: updatedTestCases,
               })
             });
@@ -2246,13 +2831,14 @@ function generateAdminUI(): string {
               this.currentTestCases = updatedTestCases;
               this.showTestCaseModal = false;
               this.showToast(this.editingTestCase ? 'Test case updated' : 'Test case added', 'success');
-              // Reload the prompt to get updated data
-              await this.loadTestCasesForPrompt();
+              // Reload the prompt to get updated data, preserving the current version
+              await this.loadTestCasesForPrompt(true);
             } else {
               const data = await res.json();
               this.showToast(data.message || 'Failed to save test case', 'error');
             }
           } catch (e) {
+            console.error('save_test_case failed:', e);
             this.showToast('Failed to save test case', 'error');
           }
         },
@@ -2270,7 +2856,7 @@ function generateAdminUI(): string {
                 'X-Admin-Key': this.apiKey
               },
               body: JSON.stringify({
-                version: this.selectedTestVersionNum,
+                version: parseInt(this.selectedTestVersionNum, 10),
                 testCases: updatedTestCases,
               })
             });
@@ -2282,6 +2868,7 @@ function generateAdminUI(): string {
               this.showToast(data.message || 'Failed to delete test case', 'error');
             }
           } catch (e) {
+            console.error('delete_test_case failed:', e);
             this.showToast('Failed to delete test case', 'error');
           }
         },
@@ -2302,7 +2889,7 @@ function generateAdminUI(): string {
                 'X-Admin-Key': this.apiKey
               },
               body: JSON.stringify({
-                version: this.selectedTestVersionNum,
+                version: parseInt(this.selectedTestVersionNum, 10),
                 input: { brief: tc.input },
                 variables: tc.variables || {},
                 dry_run: true,
@@ -2331,6 +2918,7 @@ function generateAdminUI(): string {
               this.showToast(data.message || 'Test failed', 'error');
             }
           } catch (e) {
+            console.error('run_test_case failed:', e);
             tc.lastResult = 'fail';
             tc.lastOutput = { error: 'Network or server error', timestamp: new Date().toISOString() };
             this.showToast('Test execution failed', 'error');
@@ -2351,6 +2939,90 @@ function generateAdminUI(): string {
             }
           } catch (e) {
             console.warn('Failed to load available models:', e);
+          }
+        },
+
+        // Check if currently selected model is a reasoning model
+        isReasoningModelSelected() {
+          if (!this.llmModelOverride) return false;
+          if (!Array.isArray(this.llmAvailableModels)) return false;
+          const model = this.llmAvailableModels.find(m => m && m.id === this.llmModelOverride);
+          return model?.is_reasoning ?? false;
+        },
+
+        // Check if currently selected model supports temperature
+        supportsTemperature() {
+          if (!this.llmModelOverride) return true; // Default models support temperature
+          if (!Array.isArray(this.llmAvailableModels)) return true;
+          const model = this.llmAvailableModels.find(m => m && m.id === this.llmModelOverride);
+          return model?.supports_temperature ?? true;
+        },
+
+        // Check if currently selected model supports extended thinking (Anthropic)
+        supportsExtendedThinkingSelected() {
+          if (!this.llmModelOverride) return false;
+          if (!Array.isArray(this.llmAvailableModels)) return false;
+          const model = this.llmAvailableModels.find(m => m && m.id === this.llmModelOverride);
+          return model?.supports_extended_thinking ?? false;
+        },
+
+        // Open model availability modal and fetch data
+        async openModelAvailabilityModal() {
+          this.showModelAvailabilityModal = true;
+          this.modelAvailabilityLoading = true;
+          this.modelAvailabilityData = { openai: null, anthropic: null };
+          this.modelErrorSummary = null;
+
+          try {
+            // Fetch OpenAI, Anthropic availability, and error summary in parallel
+            const [openaiRes, anthropicRes, errorsRes] = await Promise.all([
+              fetch('/admin/v1/available-models/openai', {
+                headers: { 'X-Admin-Key': this.apiKey },
+              }),
+              fetch('/admin/v1/available-models/anthropic', {
+                headers: { 'X-Admin-Key': this.apiKey },
+              }),
+              fetch('/admin/v1/model-errors', {
+                headers: { 'X-Admin-Key': this.apiKey },
+              }),
+            ]);
+
+            if (openaiRes.ok) {
+              this.modelAvailabilityData.openai = await openaiRes.json();
+            }
+            if (anthropicRes.ok) {
+              this.modelAvailabilityData.anthropic = await anthropicRes.json();
+            }
+            if (errorsRes.ok) {
+              this.modelErrorSummary = await errorsRes.json();
+            }
+          } catch (e) {
+            console.error('Failed to fetch model availability:', e);
+            this.showToast('Failed to fetch model availability', 'error');
+          } finally {
+            this.modelAvailabilityLoading = false;
+          }
+        },
+
+        // Get status badge class for model availability
+        getModelStatusClass(status) {
+          switch (status) {
+            case 'ok': return 'validation-badge validation-badge-info';
+            case 'missing_from_provider': return 'validation-badge validation-badge-error';
+            case 'not_in_registry': return 'validation-badge validation-badge-warning';
+            case 'disabled': return 'validation-badge';
+            default: return 'validation-badge';
+          }
+        },
+
+        // Get human-readable status text
+        getModelStatusText(status) {
+          switch (status) {
+            case 'ok': return 'OK';
+            case 'missing_from_provider': return 'NOT FOUND';
+            case 'not_in_registry': return 'New (not in registry)';
+            case 'disabled': return 'Disabled';
+            default: return status;
           }
         },
 
@@ -2377,6 +3049,15 @@ function generateAdminUI(): string {
         },
 
         async runSingleTestCaseWithLLM(tc) {
+          // Debug: log function entry
+          console.log('runSingleTestCaseWithLLM called', { tc, selectedTestPromptId: this.selectedTestPromptId, selectedTestPrompt: this.selectedTestPrompt });
+
+          if (!tc) {
+            this.showToast('Error: Test case not found', 'error');
+            console.error('tc is undefined');
+            return;
+          }
+
           if (!this.selectedTestPromptId || !this.selectedTestPrompt) {
             this.showToast('Please select a prompt before running tests', 'warning');
             return;
@@ -2398,9 +3079,10 @@ function generateAdminUI(): string {
 
           try {
             // Build request for new admin endpoint
+            // Ensure version is a number (Alpine.js select may convert to string)
             const requestBody = {
               prompt_id: this.selectedTestPromptId,
-              version: this.selectedTestVersionNum,
+              version: parseInt(this.selectedTestVersionNum, 10),
               brief: tc.input,
               options: {},
             };
@@ -2413,6 +3095,36 @@ function generateAdminUI(): string {
             // Add skip repairs option
             if (this.llmSkipRepairs) {
               requestBody.options.skip_repairs = true;
+            }
+
+            // Add reasoning effort for OpenAI reasoning models
+            if (this.isReasoningModelSelected() && this.llmReasoningEffort) {
+              requestBody.options.reasoning_effort = this.llmReasoningEffort;
+            }
+
+            // Add budget_tokens for Anthropic extended thinking models
+            if (this.supportsExtendedThinkingSelected() && this.llmBudgetTokens !== null && this.llmBudgetTokens > 0) {
+              requestBody.options.budget_tokens = Number(this.llmBudgetTokens);
+            }
+
+            // Add temperature for non-reasoning models (null means use default, but 0 is valid)
+            if (this.supportsTemperature() && this.llmTemperature !== null && this.llmTemperature !== '') {
+              requestBody.options.temperature = Number(this.llmTemperature);
+            }
+
+            // Add max tokens override if specified
+            if (this.llmMaxTokensOverride !== null && this.llmMaxTokensOverride !== '' && this.llmMaxTokensOverride > 0) {
+              requestBody.options.max_tokens = Number(this.llmMaxTokensOverride);
+            }
+
+            // Add seed for reproducibility if specified
+            if (this.llmSeed !== null && this.llmSeed !== '' && this.llmSeed >= 0) {
+              requestBody.options.seed = Number(this.llmSeed);
+            }
+
+            // Add top_p for non-reasoning models if specified
+            if (this.supportsTemperature() && this.llmTopP !== null && this.llmTopP !== '') {
+              requestBody.options.top_p = Number(this.llmTopP);
             }
 
             const res = await fetch('/admin/v1/test-prompt-llm', {
@@ -2467,6 +3179,8 @@ function generateAdminUI(): string {
                 repairsApplied,
                 latencyMs: pipeline.total_duration_ms ?? llmData.duration_ms ?? 0,
                 tokenUsage: llmData.token_usage,
+                // Truncation vs a bad prompt: indistinguishable without this.
+                finishReason: llmData.finish_reason,
                 model: llmData.model,
                 provider: llmData.provider,
                 stages,
@@ -2483,6 +3197,7 @@ function generateAdminUI(): string {
                 },
                 showStages: false,
                 showRaw: false,
+                showFullOutput: false,
                 showTrace: false,
                 showGraph: false,
                 showValidation: result.validation?.error_count > 0, // Auto-expand if errors
@@ -2511,7 +3226,7 @@ function generateAdminUI(): string {
                 success: false,
                 timestamp: new Date().toISOString(),
                 requestId: data.request_id || requestId,
-                error: data.error || data.message || 'Unknown error',
+                error: data.message || data.error || 'Unknown error',
                 fullResponse: data,
               };
               this.showToast('LLM test failed: ' + tc.llmResult.error, 'error');
@@ -2528,6 +3243,7 @@ function generateAdminUI(): string {
               });
             }
           } catch (e) {
+            console.error('run_llm_test failed:', e);
             clearTimeout(timeoutId);
             const isTimeout = e.name === 'AbortError';
             tc.llmResult = {
@@ -2616,11 +3332,14 @@ function generateAdminUI(): string {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 120000);
 
+            // Ensure version is a number (Alpine.js select converts to string)
+            const versionNum = parseInt(version, 10);
+
             try {
               // Use new admin endpoint with actual version specification
               const requestBody = {
                 prompt_id: this.selectedTestPromptId,
-                version: version,
+                version: versionNum,
                 brief: this.llmCompareBrief,
                 options: {},
               };
@@ -2628,6 +3347,36 @@ function generateAdminUI(): string {
               // Add model override if set
               if (this.llmModelOverride) {
                 requestBody.options.model = this.llmModelOverride;
+              }
+
+              // Add reasoning effort for OpenAI reasoning models
+              if (this.isReasoningModelSelected() && this.llmReasoningEffort) {
+                requestBody.options.reasoning_effort = this.llmReasoningEffort;
+              }
+
+              // Add budget_tokens for Anthropic extended thinking models
+              if (this.supportsExtendedThinkingSelected() && this.llmBudgetTokens !== null && this.llmBudgetTokens > 0) {
+                requestBody.options.budget_tokens = Number(this.llmBudgetTokens);
+              }
+
+              // Add temperature for non-reasoning models
+              if (this.supportsTemperature() && this.llmTemperature !== null && this.llmTemperature !== '') {
+                requestBody.options.temperature = Number(this.llmTemperature);
+              }
+
+              // Add max tokens override if specified
+              if (this.llmMaxTokensOverride !== null && this.llmMaxTokensOverride !== '' && this.llmMaxTokensOverride > 0) {
+                requestBody.options.max_tokens = Number(this.llmMaxTokensOverride);
+              }
+
+              // Add seed for reproducibility if specified
+              if (this.llmSeed !== null && this.llmSeed !== '' && this.llmSeed >= 0) {
+                requestBody.options.seed = Number(this.llmSeed);
+              }
+
+              // Add top_p for non-reasoning models if specified
+              if (this.supportsTemperature() && this.llmTopP !== null && this.llmTopP !== '') {
+                requestBody.options.top_p = Number(this.llmTopP);
               }
 
               const res = await fetch('/admin/v1/test-prompt-llm', {
@@ -2671,20 +3420,30 @@ function generateAdminUI(): string {
                   repairsApplied: (pipeline.repairs_applied || []).length,
                   latencyMs: pipeline.total_duration_ms ?? llmData.duration_ms ?? 0,
                   tokenUsage: llmData.token_usage,
+                  finishReason: llmData.finish_reason,
+                  // The comparison panel is where prompt-iteration verdicts get
+                  // drawn, so it needs the same disclosure the single-run panel
+                  // shows. Carried from the payload, not restated.
+                  harnessFidelity: data.harness_fidelity,
                   model: llmData.model,
                   provider: llmData.provider,
                   nodeCounts: pipeline.node_counts,
                   validationErrors: result.validation?.error_count ?? 0,
                   validationWarnings: result.validation?.warning_count ?? 0,
+                  validationIssues: result.validation?.issues || [],
+                  showValidation: false,
                 };
               } else {
+                // Prefer detailed message over generic error type
+                const errorMsg = data.message || data.error || 'Unknown error';
                 return {
                   success: false,
                   version: version,
-                  error: data.error || data.message || 'Unknown error',
+                  error: errorMsg,
                 };
               }
             } catch (e) {
+              console.error('run_comparison_test failed:', e);
               clearTimeout(timeoutId);
               const isTimeout = e.name === 'AbortError';
               return {
@@ -2711,9 +3470,10 @@ function generateAdminUI(): string {
           // Check if prompts are actually different
           const promptsAreDifferent = resultA.promptHash !== resultB.promptHash;
 
+          // Use version from result objects (captured at call time) to avoid any async timing issues
           this.llmCompareResults = {
-            versionA: { ...resultA, versionNum: this.llmCompareVersionA },
-            versionB: { ...resultB, versionNum: this.llmCompareVersionB },
+            versionA: { ...resultA, versionNum: resultA.version },
+            versionB: { ...resultB, versionNum: resultB.version },
             promptsAreDifferent,
             deltas: {
               nodeCount: (resultB.nodeCount ?? 0) - (resultA.nodeCount ?? 0),
@@ -2740,6 +3500,7 @@ function generateAdminUI(): string {
             const stored = localStorage.getItem('cee_test_history_' + this.selectedTestPromptId);
             this.testHistory = stored ? JSON.parse(stored) : [];
           } catch (e) {
+            console.error('load_test_history failed:', e);
             this.testHistory = [];
           }
         },
@@ -2750,7 +3511,9 @@ function generateAdminUI(): string {
             let history = [];
             try {
               history = JSON.parse(localStorage.getItem(key) || '[]');
-            } catch (e) {}
+            } catch (e) {
+              console.error('persist_test_history failed:', e);
+            }
 
             history.push(item);
 
@@ -2803,8 +3566,317 @@ function generateAdminUI(): string {
               this.comparisonData = null;
             }
           } catch (e) {
+            console.error('load_comparison failed:', e);
             this.showToast('Failed to load comparison', 'error');
             this.comparisonData = null;
+          }
+        },
+
+        formatDate(iso) {
+          if (!iso) return '';
+          const d = new Date(iso);
+          return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        }
+      };
+    }
+  </script>
+</body>
+</html>`;
+}
+
+/**
+ * Generate the admin dashboard HTML.
+ * Displays prompt status, model routing, and environment info.
+ * Calls /admin/prompts/verify and /admin/models/routing internally via fetch.
+ */
+function generateDashboardUI(): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Olumi Admin Dashboard</title>
+  <script defer src="${ALPINE_CDN_URL}"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f5f5f5;
+      color: #333;
+      line-height: 1.6;
+    }
+    .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+    header {
+      background: #1a1a2e;
+      color: white;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    header h1 { font-size: 1.5rem; }
+    header p { color: #aaa; font-size: 0.9rem; margin-top: 4px; }
+    header nav { margin-top: 12px; }
+    header nav a { color: #a5b4fc; font-size: 0.9rem; text-decoration: none; margin-right: 16px; }
+    header nav a:hover { color: white; }
+    .card {
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    .card h2 { margin-bottom: 15px; color: #1a1a2e; font-size: 1.2rem; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #eee; }
+    th { background: #f9fafb; font-weight: 600; }
+    tr:last-child td { border-bottom: none; }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 0.75rem;
+      font-weight: 500;
+    }
+    .badge-store { background: #dbeafe; color: #1e40af; }
+    .badge-default { background: #f3f4f6; color: #6b7280; }
+    .badge-env { background: #d1fae5; color: #065f46; }
+    .badge-openai { background: #fef3c7; color: #92400e; }
+    .badge-anthropic { background: #ede9fe; color: #5b21b6; }
+    .badge-unknown { background: #fee2e2; color: #dc2626; }
+    .badge-on { background: #d1fae5; color: #065f46; }
+    .badge-off { background: #f3f4f6; color: #6b7280; }
+    .form-row { display: flex; gap: 10px; margin-bottom: 15px; align-items: flex-end; }
+    input {
+      padding: 8px 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 0.9rem;
+      flex: 1;
+    }
+    .btn {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    .btn-primary { background: #4f46e5; color: white; }
+    .btn-primary:hover { opacity: 0.85; }
+    .error { color: #dc2626; font-size: 0.9rem; margin-top: 8px; }
+    .loading { color: #6b7280; font-size: 0.9rem; }
+    .meta { font-size: 0.78rem; color: #9ca3af; margin-top: 8px; }
+    .env-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 12px;
+    }
+    .env-item {
+      background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+      padding: 10px 14px;
+    }
+    .env-item .label { font-size: 0.75rem; color: #6b7280; font-weight: 600; text-transform: uppercase; }
+    .env-item .value { font-size: 0.9rem; margin-top: 2px; }
+    code { font-family: monospace; background: #f3f4f6; padding: 1px 5px; border-radius: 3px; font-size: 0.85rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="container">
+      <h1>Olumi Admin Dashboard</h1>
+      <p>Prompt status &bull; Model routing &bull; Environment</p>
+      <nav>
+        <a href="/admin">Prompt Manager</a>
+        <a href="/admin/dashboard">Dashboard</a>
+      </nav>
+    </div>
+  </header>
+
+  <div class="container" x-data="dashboard()">
+
+    <!-- Auth -->
+    <div class="card" x-show="!loaded">
+      <h2>Admin Key</h2>
+      <div class="form-row">
+        <input type="password" x-model="apiKey" placeholder="X-Admin-Key" @keydown.enter="load()" />
+        <button class="btn btn-primary" @click="load()">Load</button>
+      </div>
+      <div class="error" x-show="authError" x-text="authError"></div>
+    </div>
+
+    <template x-if="loaded">
+      <div>
+
+        <!-- Environment info -->
+        <div class="card">
+          <h2>Environment</h2>
+          <div class="env-grid">
+            <div class="env-item">
+              <div class="label">NODE_ENV</div>
+              <div class="value"><code x-text="env.node_env || '—'"></code></div>
+            </div>
+            <template x-for="flag in env.feature_flags" :key="flag.name">
+              <div class="env-item">
+                <div class="label" x-text="flag.name"></div>
+                <div class="value">
+                  <span class="badge" :class="flag.enabled ? 'badge-on' : 'badge-off'" x-text="flag.enabled ? 'on' : 'off'"></span>
+                </div>
+              </div>
+            </template>
+          </div>
+          <div class="meta" x-text="'Loaded at ' + env.timestamp"></div>
+        </div>
+
+        <!-- Model routing -->
+        <div class="card">
+          <h2>Model Routing</h2>
+          <div x-show="modelsLoading" class="loading">Loading…</div>
+          <div x-show="modelsError" class="error" x-text="modelsError"></div>
+          <template x-if="!modelsLoading && !modelsError">
+            <div>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Task</th>
+                    <th>Model</th>
+                    <th>Provider</th>
+                    <th>Source</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="row in models.tasks" :key="row.task">
+                    <tr>
+                      <td><code x-text="row.task"></code></td>
+                      <td x-text="row.model"></td>
+                      <td>
+                        <span class="badge"
+                          :class="row.provider === 'anthropic' ? 'badge-anthropic' : row.provider === 'openai' ? 'badge-openai' : 'badge-unknown'"
+                          x-text="row.provider"></span>
+                      </td>
+                      <td>
+                        <span class="badge"
+                          :class="row.source === 'env_override' ? 'badge-env' : 'badge-default'"
+                          x-text="row.source === 'env_override' ? 'env override' : 'default'"></span>
+                      </td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+              <div class="meta">Default provider: <code x-text="models.default_provider"></code> &bull; <span x-text="models.timestamp"></span></div>
+            </div>
+          </template>
+        </div>
+
+        <!-- Prompt status -->
+        <div class="card">
+          <h2>Prompt Status</h2>
+          <div x-show="promptsLoading" class="loading">Loading…</div>
+          <div x-show="promptsError" class="error" x-text="promptsError"></div>
+          <template x-if="!promptsLoading && !promptsError">
+            <div>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Prompt ID</th>
+                    <th>Source</th>
+                    <th>Store Version</th>
+                    <th>Content Hash</th>
+                    <th>Length</th>
+                    <th>Loaded At</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="p in prompts.prompts" :key="p.prompt_id">
+                    <tr>
+                      <td><code x-text="p.prompt_id"></code></td>
+                      <td>
+                        <span class="badge"
+                          :class="p.source === 'store' ? 'badge-store' : 'badge-default'"
+                          x-text="p.source"></span>
+                      </td>
+                      <td x-text="p.store_version ?? '—'"></td>
+                      <td><code x-text="p.content_hash ? p.content_hash.slice(0, 12) + '…' : '—'"></code></td>
+                      <td x-text="p.content_length ?? '—'"></td>
+                      <td x-text="p.loaded_at ? formatDate(p.loaded_at) : '—'"></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+              <div class="meta" x-text="'Snapshot at ' + prompts.snapshot_at"></div>
+            </div>
+          </template>
+        </div>
+
+      </div>
+    </template>
+  </div>
+
+  <script>
+    function dashboard() {
+      return {
+        apiKey: '',
+        loaded: false,
+        authError: '',
+
+        env: {},
+        models: {},
+        prompts: {},
+        modelsLoading: false,
+        modelsError: '',
+        promptsLoading: false,
+        promptsError: '',
+
+        async load() {
+          this.authError = '';
+          if (!this.apiKey) { this.authError = 'Enter admin key'; return; }
+          await Promise.all([this.loadEnv(), this.loadModels(), this.loadPrompts()]);
+          if (!this.authError) this.loaded = true;
+        },
+
+        async loadEnv() {
+          try {
+            const res = await fetch('/admin/dashboard/env', {
+              headers: { 'X-Admin-Key': this.apiKey }
+            });
+            if (res.status === 401 || res.status === 403) {
+              this.authError = 'Invalid admin key';
+              return;
+            }
+            this.env = await res.json();
+          } catch (e) {
+            this.authError = 'Failed to load environment info';
+          }
+        },
+
+        async loadModels() {
+          this.modelsLoading = true;
+          this.modelsError = '';
+          try {
+            const res = await fetch('/admin/models/routing', {
+              headers: { 'X-Admin-Key': this.apiKey }
+            });
+            if (!res.ok) { this.modelsError = 'Failed to load model routing (' + res.status + ')'; return; }
+            this.models = await res.json();
+          } catch (e) {
+            this.modelsError = 'Network error loading models';
+          } finally {
+            this.modelsLoading = false;
+          }
+        },
+
+        async loadPrompts() {
+          this.promptsLoading = true;
+          this.promptsError = '';
+          try {
+            const res = await fetch('/admin/prompts/verify', {
+              headers: { 'X-Admin-Key': this.apiKey }
+            });
+            if (!res.ok) { this.promptsError = 'Failed to load prompt status (' + res.status + ')'; return; }
+            this.prompts = await res.json();
+          } catch (e) {
+            this.promptsError = 'Network error loading prompts';
+          } finally {
+            this.promptsLoading = false;
           }
         },
 
@@ -2847,5 +3919,65 @@ export async function adminUIRoutes(app: FastifyInstance): Promise<void> {
       .header('Referrer-Policy', 'strict-origin-when-cross-origin')
       .header('X-XSS-Protection', '1; mode=block')
       .send(generateAdminUI());
+  });
+
+  /**
+   * GET /admin/dashboard - Prompt & model status dashboard
+   *
+   * Visual dashboard showing active prompt metadata, model routing per task,
+   * and key feature flag status. Requires admin key via Alpine.js prompt.
+   */
+  app.get('/admin/dashboard', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!verifyIPAllowed(request, reply)) return;
+
+    return reply
+      .type('text/html')
+      .header('Content-Security-Policy', CSP_HEADER)
+      .header('X-Content-Type-Options', 'nosniff')
+      .header('X-Frame-Options', 'DENY')
+      .header('Referrer-Policy', 'strict-origin-when-cross-origin')
+      .header('X-XSS-Protection', '1; mode=block')
+      .header('Cache-Control', 'no-store')
+      .send(generateDashboardUI());
+  });
+
+  /**
+   * GET /admin/dashboard/env - Environment info for dashboard
+   *
+   * Returns NODE_ENV and key feature flags read from config (not raw env).
+   * Requires admin key.
+   */
+  app.get('/admin/dashboard/env', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!verifyAdminKey(request, reply, 'read')) return;
+
+    let nodeEnv: string;
+    let dskEnabled: boolean;
+    let anthropicPromptCacheEnabled: boolean;
+    let zone2RegistryEnabled: boolean;
+
+    try {
+      nodeEnv = config.server.nodeEnv ?? 'unknown';
+      dskEnabled = config.features.dskEnabled ?? false;
+      anthropicPromptCacheEnabled = config.promptCache.anthropicEnabled ?? false;
+      zone2RegistryEnabled = config.features.zone2Registry ?? false;
+    } catch {
+      nodeEnv = 'unknown';
+      dskEnabled = false;
+      anthropicPromptCacheEnabled = false;
+      zone2RegistryEnabled = false;
+    }
+
+    return reply
+      .header('Cache-Control', 'no-store')
+      .status(200)
+      .send({
+      node_env: nodeEnv,
+      feature_flags: [
+        { name: 'DSK_ENABLED', enabled: dskEnabled },
+        { name: 'ANTHROPIC_PROMPT_CACHE_ENABLED', enabled: anthropicPromptCacheEnabled },
+        { name: 'CEE_ZONE2_REGISTRY_ENABLED', enabled: zone2RegistryEnabled },
+      ],
+      timestamp: new Date().toISOString(),
+    });
   });
 }

@@ -1,0 +1,686 @@
+/**
+ * Decision-language confirmation formatters for D1 handlers.
+ *
+ * Rules per correction #5:
+ *   - Percentages: no space before "%".  "5%" not "5 %".
+ *   - Currency: no space between symbol and number. "£50,000" not "£ 50,000".
+ *   - Other units: single space.          "12 months", "800 customers".
+ *   - Edge strengths: never raw decimals — always influence-band words via
+ *     `bandFromMagnitude` (already shared, do not duplicate).
+ */
+
+import {
+  bandFromMagnitude,
+  NEAR_ZERO_INFLUENCE_THRESHOLD,
+} from '../../../format/influence-bands.js';
+import type { PendingAction } from '../../../session/pending-action.js';
+import {
+  durationNotEvaluatedSentence,
+  UNMEASURED_TARGET_CONSEQUENCE_AT_WRITE,
+  UNMEASURED_TARGET_LEAD_IN,
+  unmeasuredTargetRepairAsk,
+} from '../../../coaching/constraint-gap-copy.js';
+
+const NO_SPACE_UNITS = new Set(['%']);
+const PREFIX_UNITS = new Set(['£', '$', '€', '¥']);
+
+/**
+ * Render a number with a unit suffix or prefix. Returns the bare number
+ * (toString) when no unit is supplied. Numbers ≥ 1000 get thousands
+ * separators (`Intl.NumberFormat('en-GB')`) so "£50000" displays as
+ * "£50,000".
+ */
+export function formatValueWithUnit(value: number, unit?: string): string {
+  const numStr = formatNumber(value);
+  if (!unit) return numStr;
+  if (NO_SPACE_UNITS.has(unit)) return `${numStr}${unit}`;
+  if (PREFIX_UNITS.has(unit)) return `${unit}${numStr}`;
+  return `${numStr} ${pluraliseUnit(unit, value)}`;
+}
+
+/**
+ * Grammatically agree a space-separated unit with its count: singular form
+ * when |value| === 1 ("1 month", not "1 months"); the supplied plural form
+ * otherwise ("12 months", "0 months", "2 months").
+ *
+ * Conservative by design — only collapses a regular trailing "-s" on an
+ * alphabetic unit of 4+ characters, and never for "-ss"/"-us"/"-is" endings
+ * (e.g. "status", "analysis", "bonus") or abbreviations shorter than 4 chars
+ * (e.g. "bps"). Symbol / no-space / prefix units never reach here (handled by
+ * the caller). Irregular plurals (e.g. "people") are intentionally left
+ * untouched: rare in the decision domain and better readable-but-imperfect
+ * than mangled. Only the documented "1 months" → "1 month" class is fixed.
+ */
+function pluraliseUnit(unit: string, value: number): string {
+  if (Math.abs(value) !== 1) return unit;
+  if (/[a-z]{3,}s$/i.test(unit) && !/(?:ss|us|is)$/i.test(unit)) {
+    return unit.replace(/s$/i, '');
+  }
+  return unit;
+}
+
+function formatNumber(n: number): string {
+  if (!Number.isFinite(n)) return String(n);
+  // Trim trailing zeros after up to 4 decimal places so 0.05 stays "0.05"
+  // rather than "0.0500" but 5 stays "5".
+  const fixed = Math.abs(n) >= 1000
+    ? new Intl.NumberFormat('en-GB').format(n)
+    : Number.isInteger(n)
+      ? n.toString()
+      : n.toFixed(4).replace(/\.?0+$/, '');
+  return fixed;
+}
+
+export interface FactorChangeInput {
+  readonly label: string;
+  readonly before: { readonly raw_value: number; readonly unit?: string };
+  readonly after: { readonly raw_value: number; readonly unit?: string };
+}
+
+export function formatFactorChange(input: FactorChangeInput): string {
+  const before = formatValueWithUnit(input.before.raw_value, input.before.unit);
+  const after = formatValueWithUnit(input.after.raw_value, input.after.unit);
+  return `Updated ${input.label} from ${before} to ${after}.`;
+}
+
+/**
+ * One-sided "set" confirmation for when the prior value is unresolvable (a
+ * raw-value-less factor whose scale can't be reliably recovered). Omits the
+ * "from X" clause entirely rather than fabricating a numeric prior (a "from 0"
+ * would be a false claim). Only used on `set` — deltas require a resolved
+ * current value and reject otherwise.
+ */
+export function formatFactorValueSet(input: {
+  readonly label: string;
+  readonly after: { readonly raw_value: number; readonly unit?: string };
+}): string {
+  const after = formatValueWithUnit(input.after.raw_value, input.after.unit);
+  return `Updated ${input.label} to ${after}.`;
+}
+
+/**
+ * Honest receipt for when a proposed factor value is IDENTICAL to the one
+ * already persisted (Gate-1 claim integrity). `formatFactorChange` implies
+ * a fresh commit; shipping it for a value that did not change produces the
+ * self-refuting "Updated X from 0.8 to 0.8." — the fact channel already
+ * knows it is a no-op (`SetFactorValueHandlerFact.noop === true`) but the
+ * text channel ignored it and narrated a change regardless.
+ *
+ * Same discipline as `formatConstraintUnchanged` (ROADMAP 1.19(a)), which
+ * fixed this exact divergence for add_constraint: deliberately avoids a
+ * sentence-leading commit verb ("Updated"/"Set"), so the sentence cannot
+ * be misread as a receipt for work done. The value is still named — the
+ * user asked for a specific number and is owed confirmation that it is
+ * the number in the model.
+ */
+export function formatFactorValueUnchanged(input: {
+  readonly label: string;
+  readonly after: { readonly raw_value: number; readonly unit?: string };
+}): string {
+  const value = formatValueWithUnit(input.after.raw_value, input.after.unit);
+  return `${input.label} is already set to ${value}.`;
+}
+
+export interface ConstraintAddedInput {
+  readonly targetLabel: string;
+  readonly operator: '>=' | '<=';
+  readonly value: number;
+  readonly unit?: string;
+}
+
+const OPERATOR_PHRASE: Record<'>=' | '<=', string> = {
+  '>=': 'at least',
+  '<=': 'at most',
+};
+
+export function formatConstraintAdded(input: ConstraintAddedInput): string {
+  const phrase = OPERATOR_PHRASE[input.operator];
+  const value = formatValueWithUnit(input.value, input.unit);
+  return `Added constraint: ${input.targetLabel} must be ${phrase} ${value}.`;
+}
+
+export function formatConstraintUpdated(input: ConstraintAddedInput): string {
+  const phrase = OPERATOR_PHRASE[input.operator];
+  const value = formatValueWithUnit(input.value, input.unit);
+  return `Updated constraint: ${input.targetLabel} must be ${phrase} ${value}.`;
+}
+
+/**
+ * Honest re-registration receipt for when a restated constraint value is
+ * IDENTICAL to what is already persisted (ROADMAP 1.19(a) — receipt
+ * claim-integrity). `formatConstraintUpdated` implies a fresh commit;
+ * shipping it for a value that did not actually change is a false
+ * "updated" claim — the fact channel already knows it is a no-op
+ * (`AddConstraintHandlerFact.noop === true`) but the text channel
+ * previously ignored that and always claimed "Updated" whenever a prior
+ * constraint existed, regardless of whether the value differed.
+ * Deliberately avoids a sentence-leading commit verb ("Updated"/"Set").
+ */
+export function formatConstraintUnchanged(input: ConstraintAddedInput): string {
+  const phrase = OPERATOR_PHRASE[input.operator];
+  const value = formatValueWithUnit(input.value, input.unit);
+  return `${input.targetLabel} is already constrained to be ${phrase} ${value}.`;
+}
+
+/**
+ * Overnight review F8(b) — distinct receipt for a restatement whose VALUE
+ * is unchanged but whose LABEL differs from what is persisted. Neither
+ * `formatConstraintUpdated` ("Updated constraint: …") — which implies a
+ * value change that did not happen — nor `formatConstraintUnchanged`
+ * ("… is already constrained …") — which implies nothing changed at all,
+ * when the label in fact did — is honest here. `label` is excluded from
+ * the add_constraint value-sameness predicate precisely so this case can
+ * be named on its own terms.
+ */
+export function formatConstraintLabelUpdated(input: ConstraintAddedInput): string {
+  const phrase = OPERATOR_PHRASE[input.operator];
+  const value = formatValueWithUnit(input.value, input.unit);
+  return `Updated the label to ${input.targetLabel} — the constraint (must be ${phrase} ${value}) is unchanged.`;
+}
+
+/**
+ * ⭐⭐ THE RECEIPT MAY NOT CLAIM AN ENFORCEMENT THAT WILL NOT HAPPEN.
+ *
+ * Appended to whichever constraint receipt applies when the limit's TARGET NODE
+ * records no value, so the compute path cannot evaluate the row that was just
+ * written. Measured on staging 14 Sep 2026 (debug export `44e349fa`): the
+ * product said "Added constraint: …", PLoT logged
+ * `plot.constraint_no_observed_value` and `constraint_analysis_absent` for
+ * every option, and the truth reached the user TWO TURNS LATER on the rerun.
+ * The admissibility test itself lives in
+ * `constraint-write-admissibility.ts`, derived at PLoT's own
+ * `classifyConstraintPu` bytes.
+ *
+ * ⚠ EVERY WORD HERE IS REUSED, NOT WRITTEN. The lead-in, the repair ask and its
+ * residual disclosure are the run_analysis-time `unmeasured_target` voice's own
+ * ratified copy, imported from `constraint-gap-copy.ts` so the two moments
+ * cannot drift into saying different things about one fact. The ONLY change is
+ * the consequence's TENSE — after a run the true sentence is "It was not part of
+ * the comparison"; before one there is no comparison to be absent from.
+ *
+ * ⚠ AND IT IS DELIBERATELY NOT A FRESH DIAGNOSIS. The repair asks for the
+ * REFERENT (point the limit at a part of the model that carries a number)
+ * rather than asserting that a missing baseline is the cause — which is the
+ * discipline the sibling voices already document, and the reason this reuses
+ * their sentence instead of inventing a units-or-baseline instruction the
+ * observable does not support.
+ *
+ * No sentence-leading commit verb, no engine names, no ids, no em dash.
+ */
+export function formatConstraintNotCheckable(input: { readonly targetLabel: string }): string {
+  return (
+    `${UNMEASURED_TARGET_LEAD_IN}this limit: ${input.targetLabel} has no number ` +
+    `recorded against it${UNMEASURED_TARGET_CONSEQUENCE_AT_WRITE}` +
+    `${unmeasuredTargetRepairAsk(1)}`
+  );
+}
+
+/**
+ * ⭐⭐ THE LIMIT MOVED — SAY SO, NAMING BOTH ENDS.
+ *
+ * A correction REMOVES the row on one node and writes it on another. Before
+ * this, that turn produced `formatConstraintAdded` ("Added constraint: …") and
+ * `fact.result.before = null`: a row was destroyed and BOTH channels narrated
+ * a fresh add. An independent copy audit found it. Under-reporting a deletion
+ * is the same class as over-claiming a write — the user cannot see what their
+ * model now says.
+ *
+ * Names the node it LEFT as well as the one it landed on, because "moved" with
+ * one end named is exactly as ambiguous as not saying it.
+ */
+export function formatConstraintMoved(input: {
+  readonly fromLabel: string;
+  readonly toLabel: string;
+  readonly label: string;
+}): string {
+  return (
+    `Moved that limit off ${input.fromLabel} and onto ${input.toLabel}: `
+    + `${input.label}. It is no longer recorded against ${input.fromLabel}.`
+  );
+}
+
+/**
+ * ⭐ THE TIME CONDITION IS RECORDED AS DESCRIPTION, AND SAYS SO.
+ *
+ * `goal_constraints[]` rows carry `{operator, value, unit}` and no temporal
+ * field at any schema version, so a span the user stated ("for more than 3
+ * months") survives only inside the label and is never evaluated. On the
+ * witnessed session the stored rule was "churn ≤ 7%", which is NOT what the
+ * user said: a one-month spike is fine by their meaning and violates the row.
+ *
+ * This states that, scoped to THIS limit. It does not claim the timing is
+ * unmodelled everywhere — a deadline can still reach the model by other routes
+ * (`extractDeadline`) — and it does not imply any temporal calculation works.
+ * The span is quoted verbatim from the label so the user can see which words
+ * were kept as wording.
+ */
+export function formatConstraintDurationNotEvaluated(input: {
+  readonly span: string;
+}): string {
+  return durationNotEvaluatedSentence(input.span);
+}
+
+/**
+ * ROADMAP 2.877 (link 2) — receipt fragment for the stated-baseline mint.
+ * Appended to whichever constraint receipt applies when the SAME turn also
+ * recorded the target's user-stated current level as its observed baseline.
+ *
+ * Two honesty jobs at once: (a) the user stated two facts (a bound and a
+ * level) and is owed confirmation of both; (b) on an otherwise-unchanged
+ * restatement turn the mint is the ONLY change, and the F9 discipline
+ * (receipt and analysis-affecting hash must agree) forbids narrating that
+ * turn as a pure no-op. Deliberately verb-led by "Noted" rather than
+ * "Updated"/"Set": the level is recorded as context, not committed as a
+ * constraint, and the receipt must not claim otherwise.
+ */
+export function formatBaselineNoted(input: {
+  readonly targetLabel: string;
+  readonly value: number;
+  readonly unit?: string;
+}): string {
+  const value = formatValueWithUnit(input.value, input.unit);
+  return `Noted ${input.targetLabel} is currently at ${value}.`;
+}
+
+/**
+ * ROADMAP 2.918 — the interrogative dual of `formatBaselineNoted`, appended
+ * to the constraint receipt on the SAME cell when there was no stated level
+ * to note: the bound is saved (the receipt before this fragment says so), and
+ * ONE concrete, answerable question asks for the current level. Honest about
+ * why (ISL's level conversion genuinely cannot run without a baseline —
+ * `CONSTRAINT_NOT_CONVERTIBLE / missing_target_baseline`), names the target
+ * so an elliptical answer has an identity to bind through, and says
+ * "percentage" because that is the shape the analysis needs. Leak-safe: no
+ * handler ids, no parameter names, no internal tokens, no em dash.
+ *
+ * ⚠ CORRECTED BY R2918B (2026-08-30). This comment used to close with "the
+ * extractor's v1 grammar is percent-only — an answer without '%' cannot
+ * mint". That was true when written and is FALSE as of R2918B: the grammar
+ * now hears a bare number, so "30" binds exactly as "30%" does. The sentence
+ * is corrected rather than deleted because it is the sentence R2918B's own PR
+ * body cites as the written evidence of the defect — the ask KNEW its answers
+ * could not be heard, in a comment, and shipped anyway. Leaving it standing
+ * would have left the module asserting a constraint the same commit removed.
+ * The copy below still says "percentage", which remains the right ASK: it is
+ * the unambiguous shape, and R2918B widens what the product will ACCEPT
+ * without narrowing what it requests.
+ */
+export function formatBaselineElicitation(input: { readonly targetLabel: string }): string {
+  return (
+    `To test that bound, the analysis also needs to know where ${input.targetLabel} stands today. ` +
+    `Roughly what percentage is ${input.targetLabel} at right now?`
+  );
+}
+
+/**
+ * R2918B — THE RE-ASK, for an answer the product could not read.
+ *
+ * The 2.918 ask ABOVE noted in writing that the extractor's grammar was
+ * percent-only and that "an answer without '%' cannot mint" — see the
+ * correction on that function, which this commit also had to make. The
+ * mitigation was to hope the user typed the symbol, and when they did not, the
+ * reply landed NOWHERE and nothing ever said why. R2918B removes the first half
+ * of that (a bare number is now an answer) and this removes the second: where an
+ * answer is genuinely unreadable, the product says so and says what shape it
+ * needs, instead of guessing or going silent.
+ *
+ * SCOPE, and it is the whole safety argument: this is emitted ONLY for a
+ * message the classifier judged an ATTEMPTED answer. A message that ignores the
+ * question keeps the pre-2.918 behaviour exactly, because a re-ask that fired
+ * on every non-answer would hijack "run the analysis" and every other thing a
+ * user says next.
+ *
+ * Leak-safe on the same terms as the ask: no handler ids, no parameter names,
+ * no internal tokens, no em dash, and no leading-decimal numeral in the
+ * example copy (the raw-decimal egress rule).
+ */
+/**
+ * THE DISAMBIGUATION ASK, for a number that answers two open questions.
+ *
+ * THE DEFECT IT CLOSES, wire-witnessed on the deployed build. The product asks
+ * "Roughly what percentage is X at right now?" while a second question about an
+ * option effect is still live. A bare number answers the SHAPE of both, so the
+ * elliptical carry correctly refuses to guess which. It then fell through in
+ * SILENCE to a lane that does not refuse, and the number was written as an
+ * effect value on a node the user had never been asked about, disclosed only in
+ * the receipt. The user answered one question and got a value minted somewhere
+ * else.
+ *
+ * The exit is to ASK, not to guess better. Two open questions and one bare
+ * number is genuinely undetermined, and no threshold over the user's own text
+ * settles it: tuning one would trade this harm for its mirror, which is the
+ * oscillation pattern this estate has paid for repeatedly. Where direction
+ * cannot be determined, Olumi asks.
+ *
+ * SCOPE, and it is the whole safety argument: this is emitted ONLY for a
+ * message the SHARED classifier judged an answer to the baseline question
+ * (`bound` or `unresolved`). An INSTRUCTION that happens to carry a number
+ * ("set the pilot's effect on cost to 0.3") classifies `not_an_answer`, is
+ * never claimed here, and still reaches the edit lane exactly as it does today.
+ * A user with a live baseline question may still ask for an effect to be set.
+ *
+ * It states that nothing changed, and that is TRUE by construction rather than
+ * by promise: the caller returns before any handler runs and commits without a
+ * `pending_actions` override, so both questions stay live and no write occurs.
+ *
+ * Leak-safe on the same terms as the ask and the re-ask: no handler ids, no
+ * parameter names, no internal tokens, no em dash, and no raw decimal in the
+ * example copy.
+ */
+export function formatBaselineAskCollision(input: {
+  readonly targetLabel: string;
+  readonly competing: readonly PendingAction[];
+}): string {
+  // Name the OTHER question concretely where its own persisted fields say what
+  // it asked; stay truthfully generic otherwise. No kind list is mirrored here:
+  // an unrecognised kind falls to the generic phrasing, which is correct for
+  // every kind rather than stale for a new one.
+  const named = input.competing
+    .map((pa) =>
+      pa.action.kind === 'elicit_option_effect'
+        ? `the effect of "${pa.action.option_label}" on "${pa.action.factor_label}"`
+        : null,
+    )
+    .find((d): d is string => d !== null);
+  const other = named ?? 'the other question I asked just before this';
+  return (
+    `Two of my questions are open at once, and a number on its own could answer ` +
+    `either of them. Nothing has changed. ` +
+    `Did you mean the current level of ${input.targetLabel}, or ${other}? ` +
+    `Naming it is enough, for example "${input.targetLabel} is 30%".`
+  );
+}
+
+export function formatBaselineReask(input: {
+  readonly targetLabel: string;
+  readonly reason: 'out_of_range' | 'ambiguous_scale' | 'unreadable';
+}): string {
+  const ask = `What percentage is ${input.targetLabel} at right now?`;
+  switch (input.reason) {
+    case 'out_of_range':
+      return (
+        `That is outside the range I can use for a current level. ` +
+        `It needs to sit between 0 and 100 percent. ${ask}`
+      );
+    case 'ambiguous_scale':
+      return (
+        `I could not tell what scale that is on, and guessing would be a ` +
+        `hundredfold difference. Give it to me as a percentage, for example ` +
+        `30 or 30%. ${ask}`
+      );
+    case 'unreadable':
+    default:
+      return (
+        `I could not read a single current level for ${input.targetLabel} in ` +
+        `that. One number is enough, for example 30 or 30%. ${ask}`
+      );
+  }
+}
+
+/**
+ * ⭐⭐ THE EFFECT-SLOT RE-ASK — {@link formatBaselineReask}'s SHAPE, applied to
+ * the option×factor effect ask.
+ *
+ * ⚠⚠ THIS COMMENT USED TO SAY "generalised … rather than re-invented beside
+ * it", AND THAT WAS FALSE OF THE CODE UNDER IT. This is a second function with
+ * a second reason vocabulary standing next to the first, and the two sets are
+ * DIFFERENTLY-NAMED TWINS — this estate's chronic defect (CLAUDE.md trap 21),
+ * asserted away by the one sentence a reader would check it against:
+ *
+ *     out_of_range      (baseline)  ≡  out_of_scale       (effect)
+ *     ambiguous_scale   (baseline)  ≡  scale_ambiguous    (effect)
+ *     unreadable        (baseline)  ≡  no_quantity        (effect)
+ *
+ * The producers diverge with them: `classifyElicitedBaselineAnswer` mints the
+ * left column, `resolveAnswerForKnownSlot` mints the right.
+ *
+ * NOT RECONCILED HERE, and the reason is scope rather than merit: the left
+ * column is the baseline-elicitation seam (R2918B), owned elsewhere, with its
+ * own suite and its own live callers, and renaming across it from this lane is
+ * exactly the "while we're here" widening the scope rule bans. Recorded as a
+ * finding for whoever owns both seams together. What this comment must not do
+ * is claim the fold already happened.
+ *
+ * THE DEFECT IT CLOSES. Measured at `915da5a3`, nine of nine unrecognised
+ * replies to the effect ask received the BYTE-IDENTICAL demand back. The cause
+ * is structural, not a copy oversight: `projectReadinessRecovery` is a pure
+ * function of `(analysisReady, nodes)` and never receives the user's message,
+ * so it composes the ask from the GRAPH — which has not changed — rather than
+ * from the EXCHANGE, which has. A second ask computed from an unchanged input
+ * is necessarily the first ask again. The founder hit exactly this: he typed
+ * `25%` and got "I couldn't tell what value to use." Twice.
+ *
+ * ⭐ SO EVERY ARM QUOTES THE USER. That is what makes the second ask provably
+ * different from the first: the first ask cannot quote a reply that did not
+ * exist yet, so a composer that always quotes cannot emit the opening demand
+ * again. The difference is structural, not a matter of remembering to vary the
+ * wording.
+ *
+ * ⚠ PERCENTAGES, NEVER RAW DECIMALS. `RAW_DECIMAL_RE`
+ * (`belief-elicitation/beta-posterior.ts`) bans leading-decimal probabilities
+ * from user-facing prose, and the estate's own instruction is "use the
+ * PERCENTAGE form ('35%', never '0.35')". It is also the ratified product
+ * ruling: a strategic user must never be asked to understand the internal
+ * normalised coefficient scale. So the internal `0.25` is rendered `25%`.
+ *
+ * Leak-safe on the same terms as its sibling: no handler ids, no parameter
+ * names, no internal tokens, no em dash.
+ */
+export function formatEffectSlotReask(input: {
+  readonly heardText: string;
+  /** The canonical 0–1 spelling. Rendered as a percentage, never emitted raw. */
+  readonly suggestedModelUnitText: string;
+  readonly reason: 'imprecise_quantity' | 'scale_ambiguous';
+  readonly optionLabel: string;
+  readonly factorLabel: string;
+  /**
+   * How many times this cell has now been asked. 1 on the first ask.
+   *
+   * ⚠ THE SECOND ASK MUST NOT BE THE FIRST ASK AGAIN, and this is what makes
+   * that structural rather than remembered: from attempt 2 the copy OPENS by
+   * acknowledging the previous exchange, which the opening ask cannot do
+   * because it has nothing to acknowledge.
+   */
+  readonly attempt?: number;
+}): string {
+  const parsed = Number(input.suggestedModelUnitText);
+  const percent = Number.isFinite(parsed) ? Math.round(parsed * 100) : null;
+  const cell = `"${input.optionLabel}" on "${input.factorLabel}"`;
+  const attempt = Math.max(1, Math.floor(input.attempt ?? 1));
+  // ⭐⭐ THIRD ATTEMPT: A DIFFERENT STRATEGY, NOT A THIRD PHRASING.
+  //
+  // Two rounds of explaining the scale have not landed, so the third stops
+  // explaining and reduces the exchange to a binary the user can close in one
+  // word. Placed BEFORE the reason switch deliberately: at this point the
+  // distinction between "I could not tell which scale" and "I will not round
+  // your approximation" has stopped being useful to the person typing.
+  //
+  // ⚠ AND IT PLATEAUS HERE, ON PURPOSE AND ON THE RECORD. Attempts 4, 5 and 6
+  // repeat this sentence for an identical reply. Endless novelty is not the
+  // goal and would be noise; what the product owes is that the SECOND ask is
+  // not the first and the THIRD is not the second, which is where the
+  // information actually is. The plateau is pinned by name in
+  // `effect-slot-reask-differs.test.ts` so it stays a decision rather than
+  // becoming an accident — and REDs if the escalation band moves.
+  if (attempt >= 3 && percent !== null) {
+    return (
+      `I do not want to keep asking you the same thing. I read "${input.heardText}" `
+      + `and my best reading of it is ${percent}%. Reply ${percent}% and I will record `
+      + `that for ${cell}, or give me any other percentage and I will use that instead.`
+    );
+  }
+  // From the second attempt the product says so, and changes strategy: it stops
+  // restating the scale and offers the single figure as something to accept.
+  const opener = attempt >= 2 ? `I am still not certain I have this right. ` : '';
+  if (percent === null) {
+    return (
+      `${opener}I read "${input.heardText}" but could not turn it into a level for ${cell}. ` +
+      `Give it to me as a percentage, for example 60%.`
+    );
+  }
+  switch (input.reason) {
+    case 'scale_ambiguous':
+      return (
+        `${opener}You wrote "${input.heardText}", and I could not tell which scale you meant. ` +
+        `Read as a percentage that is ${percent}% of the top for ${cell}. ` +
+        `Reply ${percent}% to confirm, or give me the percentage you intended.`
+      );
+    case 'imprecise_quantity':
+    default:
+      return (
+        `${opener}I read "${input.heardText}" as roughly ${percent}%, but I will not record ` +
+        `an approximation as your figure for ${cell}. ` +
+        `Reply ${percent}% to confirm, or give me the percentage you want.`
+      );
+  }
+}
+
+/**
+ * Receipt for a goal-target set through the add_constraint goal-threshold
+ * join (lane CEE-W5 Mission B). Names the target honestly and states only
+ * what durably happened (the threshold is stamped on the goal node in the
+ * same committed write). provisional_doctrine_v0.
+ *
+ * Lane 22 honesty fix: the previous second sentence promised "The next
+ * analysis will score your options against this target." — FALSE for
+ * every goal-target registration today (goal-fit is deterministically
+ * suppressed for goal nodes without a value channel; the PLoT
+ * threshold-normalisation fix and the target_base doctrine implementation
+ * are both pending). The receipt now promises only what the system can
+ * honour: the target is saved, and goal fit is flagged once the analysis
+ * can score it. The conditional "once" keeps the second sentence outside
+ * the goal-target claim class (goal-target-receipt-guard
+ * NEGATION_CONDITIONAL_RE) while sentence one remains guarded.
+ */
+export function formatGoalTargetSet(input: {
+  readonly goalLabel: string;
+  readonly value: number;
+  readonly unit?: string;
+}): string {
+  const value = formatValueWithUnit(input.value, input.unit);
+  return `Success target set: ${input.goalLabel} at least ${value}. I'll flag how your options score against it once the analysis can measure this goal.`;
+}
+
+/**
+ * Honest re-registration receipt for when a restated success target is
+ * IDENTICAL to what is already persisted (ROADMAP 1.19(a) — receipt
+ * claim-integrity, single-goal re-registration). `formatGoalTargetSet`
+ * unconditionally reads as a fresh registration event; shipping it when
+ * the target did not actually change borrows the pre-existing threshold
+ * to narrate a commit that did not happen this turn.
+ *
+ * Overnight review N1: carries the same "at least" operator qualifier as
+ * `formatGoalTargetSet` — the registered contract is `>=`, and the bare
+ * value alone ("already 15%") under-specifies it, reading as an exact
+ * target rather than a floor.
+ */
+export function formatGoalTargetUnchanged(input: {
+  readonly goalLabel: string;
+  readonly value: number;
+  readonly unit?: string;
+}): string {
+  const value = formatValueWithUnit(input.value, input.unit);
+  return `${input.goalLabel}'s success target is already at least ${value} — no need to change it.`;
+}
+
+export interface EdgeAdjustmentInput {
+  readonly fromLabel: string;
+  readonly toLabel: string;
+  readonly beforeMean: number;
+  readonly afterMean: number;
+  /** Explicit persisted directions are required to describe zero honestly. */
+  readonly beforeDirection?: 'positive' | 'negative';
+  readonly afterDirection?: 'positive' | 'negative';
+}
+
+/**
+ * Decision-language edge adjustment confirmation. Uses `bandFromMagnitude`
+ * for strength and surfaces direction reversal explicitly. Never emits
+ * the raw mean.
+ */
+export function formatEdgeAdjustment(input: EdgeAdjustmentInput): string {
+  const beforeBand = describeBandWithDirection(input.beforeMean);
+  const afterBand = describeBandWithDirection(input.afterMean);
+
+  const beforeDirection =
+    input.beforeDirection ?? (input.beforeMean < 0 ? 'negative' : 'positive');
+  const afterDirection =
+    input.afterDirection ?? (input.afterMean < 0 ? 'negative' : 'positive');
+  const directionFlipped = beforeDirection !== afterDirection;
+
+  // A zero mean has no numeric sign, but the canonical model deliberately
+  // retains direction for a later non-zero adjustment. Do not narrate a
+  // meaningless "no influence → no influence" band change or infer positive.
+  if (
+    input.beforeMean === 0 &&
+    input.afterMean === 0 &&
+    directionFlipped
+  ) {
+    return (
+      `Adjusted the direction of the link between ${input.fromLabel} and ` +
+      `${input.toLabel} to ${afterDirection}. Its strength remains zero, so ` +
+      `it currently has no material influence.`
+    );
+  }
+
+  const tail = directionFlipped
+    ? input.afterMean === 0
+      ? ` Its strength is now zero; the stored direction is ${afterDirection}.`
+      : input.beforeMean === 0
+        ? ''
+        : ` Direction reversed: now ${afterDirection}.`
+    : '';
+
+  return `Adjusted the link between ${input.fromLabel} and ${input.toLabel} from ${beforeBand} to ${afterBand}.${tail}`;
+}
+
+/**
+ * Honest receipt for an edge-strength proposal that matches the strength
+ * already persisted (Gate-1 claim integrity). The counterpart to
+ * `formatFactorValueUnchanged` for the edge handler, which had the same
+ * fact/text divergence: `adjust-edge-strength.ts` computed `noop` for its
+ * fact but always narrated via `formatEdgeAdjustment`, yielding the
+ * false "Adjusted the link between A and B from moderate to moderate."
+ *
+ * No sentence-leading commit verb. Near-zero means take a "has no
+ * material influence" phrasing because the band noun does not read as a
+ * predicate complement ("is already no material influence" is not
+ * English).
+ */
+export function formatEdgeStrengthUnchanged(input: {
+  readonly fromLabel: string;
+  readonly toLabel: string;
+  readonly mean: number;
+}): string {
+  const link = `The link between ${input.fromLabel} and ${input.toLabel}`;
+  if (Math.abs(input.mean) < NEAR_ZERO_INFLUENCE_THRESHOLD) {
+    return `${link} already has no material influence.`;
+  }
+  return `${link} is already ${describeBandWithDirection(input.mean)}.`;
+}
+
+/**
+ * Receipt for an explicit `confirm_current` edge-strength act. Unlike an
+ * ordinary numeric no-op, confirmation changes provenance: the human has
+ * adopted the current model value as their judgement. It deliberately repeats
+ * neither a number nor a direction; the strict expected-before check proves
+ * which current value was confirmed, and omitting both avoids reconstructing
+ * either one from display state (especially at zero, whose direction is not
+ * recoverable from sign).
+ */
+export function formatEdgeStrengthConfirmed(input: {
+  readonly fromLabel: string;
+  readonly toLabel: string;
+}): string {
+  return (
+    `Confirmed the current strength of the link between ${input.fromLabel} ` +
+    `and ${input.toLabel} as your judgement.`
+  );
+}
+
+function describeBandWithDirection(mean: number): string {
+  const abs = Math.abs(mean);
+  if (abs < NEAR_ZERO_INFLUENCE_THRESHOLD) return 'no material influence';
+  const band = bandFromMagnitude(abs);
+  return mean < 0 ? `${band} (negative)` : band;
+}

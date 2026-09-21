@@ -11,15 +11,41 @@
 
 import type { GraphT, NodeT, EdgeT, FactorDataT, NodeDataT } from "../../schemas/graph.js";
 import {
+  BRIEF_EXTRACTION_CONFIRM_DRIVER,
+  briefExtractionQuote,
+} from "./brief-extraction-claim.js";
+import {
   extractFactors,
   extractFactorsOrchestrated,
   generateFactorId,
+  isUnidentifiedQuantityLabel,
   type ExtractedFactor,
 } from "./index.js";
 import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
 import { config } from "../../config/index.js";
 import type { CorrectionCollector } from "../corrections.js";
 import { formatEdgeId } from "../corrections.js";
+import { DEFAULT_EXISTS_PROBABILITY } from "@talchain/schemas";
+import { synthesiseDisplayValue } from "./display-value.js";
+import {
+  UNIT_SCALE_CLASS_TOKENS,
+  unitPinnedScaleFrame,
+  type UnitScaleClass,
+} from "../draft/records/unit-scale-class.js";
+import { sameUnit } from "../../utils/currency-alphabet.js";
+import {
+  CEE_GOAL_THRESHOLD_FRAME,
+  resolveGoalThresholdCapWithProvenance,
+  type GoalThresholdCapProvenance,
+} from "../../utils/goal-threshold-cap.js";
+import {
+  deriveGoalTargetFromLabel,
+  deriveGoalTargetCandidate,
+  unitIsTemporal,
+  type GoalTargetCandidate,
+  type GoalLabelTargetRefusal,
+} from "./goal-label-target.js";
+import { admitGoalBaseline } from "./goal-baseline-admissibility.js";
 
 /**
  * Type guard to check if node data is FactorData (not OptionData)
@@ -45,6 +71,874 @@ export interface EnrichmentResult {
 }
 
 /**
+ * Synonym groups for semantic label matching.
+ * Each group contains terms that refer to the same concept.
+ */
+const SYNONYM_GROUPS = [
+  ["price", "cost", "fee", "expense"],
+  ["budget", "investment", "funding", "spend", "capital"],
+  ["churn", "attrition", "turnover", "retention"],
+  ["conversion", "upgrade", "signup", "acquisition"],
+  ["revenue", "income", "sales", "earnings"],
+  ["growth", "increase", "expansion", "scale"],
+  ["user", "customer", "subscriber", "client"],
+  ["target", "goal", "objective", "threshold"],
+  ["rate", "percentage", "ratio", "proportion"],
+  ["time", "duration", "period", "timeline"],
+];
+
+/** Target/goal synonym group for identifying quantities that should be goal thresholds */
+const TARGET_GOAL_SYNONYMS = ["target", "goal", "objective", "threshold"];
+
+/**
+ * Patterns that indicate the label is a metric/KPI rather than a goal threshold.
+ * These should NOT be redirected to goal_threshold even if they contain target/goal words.
+ */
+const METRIC_CONTEXT_PATTERNS = [
+  /\brate\b/i,         // "target completion rate", "goal attainment rate"
+  /\bmarket\b/i,       // "target market", "target segment"
+  /\bsegment\b/i,      // "target segment churn"
+  /\baudience\b/i,     // "target audience"
+  /\bcustomer\s+type/i,// "target customer type"
+  /\bcompletion\b/i,   // "goal completion rate"
+  /\battainment\b/i,   // "goal attainment"
+  /\bscore\b/i,        // "goal score"
+  /\blevel\b/i,        // "threshold level"
+];
+
+/**
+ * Check if a label refers to a target/goal quantity (should be goal_threshold, not a factor).
+ *
+ * Criteria for redirection:
+ * 1. Label contains target/goal/objective/threshold
+ * 2. Label does NOT contain metric/KPI context patterns
+ * 3. Label is short (likely "Target 800" not "Target Market Segment Analysis")
+ */
+function isTargetGoalLabel(label: string): boolean {
+  const normalized = label.toLowerCase().trim();
+
+  // Must contain a goal/target synonym
+  const hasGoalSynonym = TARGET_GOAL_SYNONYMS.some((term) => normalized.includes(term));
+  if (!hasGoalSynonym) return false;
+
+  // Reject if it looks like a metric/KPI rather than a goal quantity
+  const looksLikeMetric = METRIC_CONTEXT_PATTERNS.some((pattern) => pattern.test(normalized));
+  if (looksLikeMetric) return false;
+
+  // Reject if label is too long (likely a descriptive factor, not a simple target quantity)
+  // "Target 800 customers" is 3 words; "Target market segment churn rate" is 5+ words
+  const wordCount = normalized.split(/\s+/).length;
+  if (wordCount > 4) return false;
+
+  return true;
+}
+
+/**
+ * Compute a normalisation cap for a large FACTOR-NODE value (display/model
+ * normalisation for regular factor nodes — NOT goal thresholds).
+ * Uses order-of-magnitude rounding: 800 → 1000, 50000 → 100000.
+ *
+ * NOTE (cap-doctrine unification, ROADMAP 1.18): the goal-threshold
+ * redirection branch below does NOT use this function — it delegates to
+ * the shared `resolveGoalThresholdCap` doctrine (../../utils/goal-threshold-cap.js)
+ * so a goal target scores identically via the draft (this file) and chat
+ * (add_constraint handler) registration paths. This function remains the
+ * cap for plain factor nodes (enhance/create branches below), a separate,
+ * unrelated concern (factor display legibility, not goal-fit scoring).
+ */
+function computeNormalisationCap(rawValue: number): number {
+  if (rawValue <= 0) return 1;
+  // Round up to next order of magnitude
+  const orderOfMagnitude = Math.pow(10, Math.ceil(Math.log10(rawValue)));
+  // ⭐ THE CAP MUST LEAVE HEADROOM, AND ON A ROUND NUMBER IT DID NOT
+  // (ROADMAP 2.1131). `Math.ceil(log10(100000))` is 5 exactly, so a factor
+  // stated at £100,000 — a round number, which is how people state budgets —
+  // received `cap: 100000`, normalised to exactly **1.0**, and sat on its own
+  // ceiling: every later edge of that value is `value_exceeds_cap` and the
+  // user is told to extend a scale the extraction had already pinned them to.
+  // That is the 3 Sep failure's second half. A cap equal to the value is not a
+  // scale, it is a wall at the only point on it.
+  //
+  // ⚠ THE FIX IS DELIBERATELY THE SMALLEST ONE: an exact power of ten goes ONE
+  // rung up, and every other value keeps the cap it had. Widening the ladder
+  // generally would move live normalised values for every factor in the estate
+  // and change ISL's inputs wholesale; this moves only the class that had zero
+  // headroom, where any change is an improvement in the same direction.
+  return orderOfMagnitude === rawValue ? orderOfMagnitude * 10 : orderOfMagnitude;
+}
+
+/**
+ * The cap for an extracted factor, and the ONE place a RANGE's scale is
+ * decided (ROADMAP 2.1131).
+ *
+ * ⚠⚠ NEVER DERIVE A SCALE FROM THE POINT WHEN THE USER STATED A RANGE. The
+ * enricher normalises against `computeNormalisationCap(factor.value)`, and for
+ * a range `factor.value` is the MIDPOINT — so "£80k-120k" would have been
+ * scaled against 100,000 and the user's own upper bound, £120,000, would fall
+ * OUTSIDE the factor's own stated range. The scale has to cover what the user
+ * wrote, not the point this service picked out of it.
+ *
+ * ⚠ AND WHY THIS IS NOT MERELY THE 3 SEP BUG'S SYMPTOM (trap 23). Fixing the
+ * magnitude alone makes THAT brief work and leaves this alive for every other
+ * range: the cap would still be derived from a number the user never typed.
+ * The extraction defect and the scale defect are two defects; closing one does
+ * not close the other, and the corpus asserts them separately.
+ *
+ * ⚠ WHAT THIS DOES **NOT** CLOSE, stated so nobody reads it as more than it is.
+ * An unconfirmed POINT extraction still mints an enforced cap: the 3 Sep factor
+ * carried `uncertainty_drivers: ["Extracted from brief — confirm value"]` and
+ * its cap was enforced against the user's correction anyway. Making an
+ * unconfirmed extraction's cap advisory rather than enforced is a change at
+ * `orchestrator-v5/tools/handlers/d1-shared/evaluate-factor-value-proposal.ts`
+ * §6 and its three call sites — a different seam, owned elsewhere this wave.
+ * This lane stops at the boundary and names it (ROADMAP 2.1132).
+ */
+function computeExtractedFactorCap(factor: {
+  readonly value: number;
+  readonly baseline?: number;
+  readonly rangeMax?: number;
+}): number {
+  // ⭐ THE STATED STARTING LEVEL IS A MAGNITUDE THE USER WROTE, so the ceiling
+  // covers it — this header's own rule ("the scale has to cover what the user
+  // wrote"), applied to the member it was missing rather than restated.
+  //
+  // It matters in ONE direction and only there: a DECREASE puts the stated
+  // level ABOVE the target. Measured at pristine, "cut the unit cost from £150
+  // to £90" yielded `{raw_value: 90, baseline: 150, cap: 100}` — so once the
+  // node carries its stated £150 it normalises to 1.5 and sits off the top of
+  // its own scale, which is the "baseline ABOVE its own cap" defect
+  // `index.ts:1075` already names on the goal path.
+  //
+  // An INCREASE is unaffected (the target is already the larger), and a factor
+  // with no stated baseline is untouched — `Math.max` over an absent member
+  // cannot move a ceiling.
+  const stated =
+    typeof factor.baseline === "number" && Number.isFinite(factor.baseline)
+      ? factor.baseline
+      : factor.value;
+  const withStated = Math.max(factor.value, stated);
+  const ceiling =
+    typeof factor.rangeMax === "number" && Number.isFinite(factor.rangeMax)
+      ? Math.max(factor.rangeMax, withStated)
+      : withStated;
+  return computeNormalisationCap(ceiling);
+}
+
+/**
+ * ⭐⭐ THE RAW MAGNITUDE THE FACTOR IS AT TODAY — the ONE answer, for all four
+ * of this file's node-construction sites.
+ *
+ * ── THE DEFECT THIS CLOSES ─────────────────────────────────────────────────
+ * A `from X to Y` brief is extracted as `{value: Y, baseline: X}`
+ * (`index.ts:2203/2227/2275`), so `value` holds the PROPOSED level — the
+ * type's own comment calls it *"Current or proposed value"*, two questions
+ * under one name (trap 21). Writing it into the node's current-level fields
+ * shows the user their target as the present state of their business: Paul's
+ * *"increase the Pro plan price from £49 to £59"* rendered as **£49 → shown as
+ * £59** on 5 of 6 drafts, measured on the deployed build 11 Sep.
+ *
+ * ── WHY THIS IS THE WRITER'S DEFECT AND NOT THE DISPLAY'S ──────────────────
+ * `synthesiseDisplayValue` documents itself as rendering *"a factor's current
+ * value"* and reads `raw_value` first; the records projector — the OTHER
+ * writer of the same pair — puts the CURRENT level there
+ * (`projector.ts:3503`), saying that is *"what keeps '£50,000' true on
+ * screen"*. Two writers of one pair disagreed about which level it holds. The
+ * display renders faithfully what it is given; this makes what it is given
+ * true, so every reader (display, the edit path's delta operators, the
+ * analysis, `OPTION_NO_OP`) is corrected at the definition site instead of
+ * each consumer growing a private opinion (trap 12).
+ *
+ * ── THE SCALE, AND WHY NO FRAME IS RESOLVED HERE ───────────────────────────
+ * This is the PRODUCER: `factor.value` and `factor.baseline` arrive from one
+ * regex match, in ONE unit system, both raw or both already-fractional. So
+ * there is nothing to reconcile and no divisor to choose — the number is
+ * returned as-is and the caller applies the SAME `cap` it was already about to
+ * apply to `factor.value`. `resolveScaleFrame` exists to RECOVER a frame
+ * downstream from a `{value, raw_value}` pair; reaching for it here would be
+ * the second opinion, not the reuse. What IS asserted, in
+ * `factor-current-level-is-the-stated-baseline.test.ts`, is that the pair this
+ * writes is one `resolveScaleFrame` recovers the same frame from — so #1453's
+ * `readFactorBaselineLevel` and `data.value` give ONE answer and the false
+ * `OPTION_NO_OP` cannot return.
+ *
+ * ── THE EQUAL CASE FALLS THROUGH, DELIBERATELY ─────────────────────────────
+ * Requiring the two to DIFFER keeps this to the case where `baseline` states
+ * something `value` does not, matching the precedence `graph-validator.ts`
+ * settled in #1453. A factor with no stated baseline — the majority path — is
+ * returned untouched.
+ */
+function statedCurrentRaw(factor: {
+  readonly value: number;
+  readonly baseline?: number;
+}): number {
+  return typeof factor.baseline === "number" &&
+    Number.isFinite(factor.baseline) &&
+    factor.baseline !== factor.value
+    ? factor.baseline
+    : factor.value;
+}
+
+/**
+ * Infer factor_type from unit and value characteristics.
+ */
+function inferFactorType(
+  unit: string | undefined,
+  label: string
+): "cost" | "price" | "time" | "probability" | "revenue" | "demand" | "quality" | "other" {
+  const labelLower = label.toLowerCase();
+
+  // Check unit first
+  if (unit === "%") return "probability";
+  if (unit && ["£", "$", "€", "GBP", "USD", "EUR"].includes(unit)) {
+    // Currency - check label for specifics
+    if (labelLower.includes("cost") || labelLower.includes("expense") || labelLower.includes("budget")) {
+      return "cost";
+    }
+    if (labelLower.includes("price") || labelLower.includes("fee")) {
+      return "price";
+    }
+    if (labelLower.includes("revenue") || labelLower.includes("income") || labelLower.includes("sales")) {
+      return "revenue";
+    }
+    // ⭐⭐ AN UNRECOGNISED CURRENCY LABEL IS NOT A COST — IT IS UNCLASSIFIED.
+    //
+    // This read `return "cost"` and called it "Default for currency". It is the
+    // one branch in this function that answers a question it has not been given
+    // the evidence to answer: every other unknown falls through to `"other"` at
+    // the end, and only money guesses.
+    //
+    // WITNESSED, not hypothesised. On the 2026-09-08 22:38 pricing run
+    // (`render-cee-initial-request.json`, request 0b3925bf, telemetry
+    // `extraction_mode: "regex-only"`), a £20k REVENUE target reached the graph
+    // as `factor_type:'cost'` on "Pro Feature Value Perception" — the brief's
+    // prefix carried no revenue/price/cost term, so the three checks above all
+    // missed and this line supplied a positive claim about the kind of money.
+    // "Reach £20k MRR" is not a cost, and nothing in the brief said it was.
+    //
+    // ⚠ `"other"` IS NOT A NEW TYPE AND NOT A DROPPED AMOUNT. It is already the
+    // declared member of `FactorType` for "not classified", and already what
+    // `unified-pipeline/stages/repair/deterministic-sweep.ts:482` assigns to any
+    // factor that arrives without one — so this agrees with the existing repair
+    // rather than inventing a vocabulary. The value, raw_value, unit and cap are
+    // untouched: the amount still reaches analysis, only the unsupported claim
+    // about WHICH kind of money it is is withheld.
+    //
+    // ⚠ AND IT IS NOT AN ABSENCE — though not for the reason first given here.
+    // A currency factor carrying `raw_value` NEVER REACHES the `factorType`
+    // branch at all, so its type cannot affect its rendering.
+    // `synthesiseDisplayValue` sets `result` in the Priority 1–4 block
+    // (`raw_value` present + a currency prefix → Priority 1), and the entire
+    // Priority 5–7 block is guarded by `result === undefined`. Priority 6
+    // (`else if (factorType)`) sits inside that guard AND behind
+    // `else if (unit)` — so it is DOUBLY unreachable for this class: once by
+    // the guard, and again because a currency factor always carries a unit.
+    //
+    // ⚠ CORRECTION (reviewer, #1417): this comment previously read
+    // "`display-value.ts:246` branches on `else if (factorType)` — truthiness,
+    // not identity … Returning `undefined` would have changed rendering".
+    // The CONCLUSION held but the MECHANISM was false, and false in the
+    // expensive direction: it deters a correct future simplification. For a
+    // currency factor with `raw_value`, `"cost"`, `"other"` and `undefined`
+    // all render IDENTICALLY. That is why the regression ASSERTS an identical
+    // `display_value` rather than arguing it.
+    return "other";
+  }
+
+  // Check label patterns
+  if (labelLower.includes("customer") || labelLower.includes("user") || labelLower.includes("subscriber")) {
+    return "demand";
+  }
+  if (labelLower.includes("time") || labelLower.includes("duration") || labelLower.includes("period")) {
+    return "time";
+  }
+  if (labelLower.includes("rate") || labelLower.includes("churn") || labelLower.includes("conversion")) {
+    return "probability";
+  }
+
+  return "other";
+}
+
+/**
+ * ⭐⭐ THE STATED CURRENCY, WRITTEN ONTO A FACTOR THE MODEL ALREADY VALUED.
+ *
+ * ── THE DEFECT THIS CLOSES ─────────────────────────────────────────
+ * Paul's *"increase the Pro plan price from £49 to £59"* reached the graph as
+ * `{value: 0.49, raw_value: 49}` with NO `unit` — so `inferFactorType` fell
+ * through its currency branch to `"other"` (`:342`), the UI routed a price down
+ * its qualitative tier-label path, and the `raw_value: 49` sitting on the node
+ * became structurally unreachable because the UI's denormalise path requires a
+ * non-null unit. One missing field, both harms.
+ *
+ * The extractor had the unit all along: the founder's verbatim brief yields
+ * `{label: "Price", value: 59, baseline: 49, unit: "£"}`, and `schema-v3.ts:398`
+ * ships a unit faithfully when one exists. It was never LOST — it was never
+ * WRITTEN, because the caller's `hasFactorData` gate treats "the model gave this
+ * node a level" as "the model gave this node complete data". Two questions under
+ * one name (trap 21).
+ *
+ * ── WHY THIS IS BOUND BY IDENTITY AND NOT BY A VALUE PREDICATE ────────────
+ * The unit is written ONLY when the node's own `raw_value` IS the magnitude this
+ * factor states (`statedCurrentRaw`). "The brief mentions £ somewhere" would
+ * stamp a currency onto any similarly-labelled quantity (trap 19); requiring the
+ * magnitudes to be the same number makes the write a TRANSCRIPTION of one span
+ * rather than an inference across two. It also scopes the change to exactly the
+ * class the harm lives in — an unreachable `raw_value` IS the harm — so a factor
+ * with no `raw_value` is deliberately left alone rather than given a "£0.49".
+ *
+ * ── ADDITIVE ONLY ────────────────────────────────────────────────
+ * This may ADD an absent field; it may never move a number and never overwrite a
+ * unit or a `factor_type` the model stated. `cap` is deliberately NOT written:
+ * an extracted cap is ENFORCED downstream against the user's own later
+ * correction (see `computeExtractedFactorCap`'s header), so minting one here
+ * would constrain an edit the user has not made yet. The span gate is REUSED
+ * rather than re-derived, so this cannot stamp a figure from a sentence that is
+ * not the node's own (trap 12).
+ *
+ * @returns `true` when a unit was written.
+ */
+function backfillStatedUnit(
+  enrichedGraph: GraphT,
+  existingNode: NodeT,
+  factor: ExtractedFactor,
+  brief: string,
+  collector?: CorrectionCollector
+): boolean {
+  if (factor.unit === undefined) return false;
+
+  const nodeIndex = enrichedGraph.nodes.findIndex((n) => n.id === existingNode.id);
+  if (nodeIndex < 0) return false;
+
+  const node = enrichedGraph.nodes[nodeIndex];
+  const data = node.data;
+  if (!isFactorData(data)) return false;
+
+  // Never overwrite a stated unit. This function may only ADD.
+  if (data.unit !== undefined) return false;
+
+  // ⭐ IDENTITY, NOT A VALUE PREDICATE (trap 19).
+  const raw = data.raw_value;
+  // ⚠ THIS LINE IS AN EQUIVALENT MUTANT, AND THAT IS MEASURED, NOT ASSUMED.
+  // Deleting it leaves all five specs GREEN and `tsc -p tsconfig.build.json`
+  // CLEAN, because the identity comparison below already rejects `undefined`
+  // and `NaN` (`undefined !== 49`). It is kept because it states the
+  // precondition the next line only implies — but it discriminates nothing, so
+  // do not read it as a guard that bites. (An equivalent mutant must be
+  // demonstrated, never asserted — trap 13c.)
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return false;
+  if (raw !== statedCurrentRaw(factor)) return false;
+
+  // The same gate the enhance path uses — reused, not re-derived.
+  if (!enhanceWriteIsSpanContained(existingNode, factor, brief)) return false;
+
+  const nextData: FactorDataT = {
+    ...data,
+    unit: factor.unit,
+    // `factor_type` is derived FROM the unit, so the two are one defect and one
+    // fix. Classified against the NODE's own label: this write keeps the model's
+    // node and its level, so the node is the subject the type describes.
+    ...(data.factor_type === undefined
+      ? { factor_type: inferFactorType(factor.unit, existingNode.label ?? factor.label) }
+      : {}),
+  };
+
+  enrichedGraph.nodes[nodeIndex] = { ...node, data: nextData };
+
+  log.info(
+    {
+      event: "cee.factor_enrichment.unit_backfilled",
+      nodeId: existingNode.id,
+      unit: factor.unit,
+      rawValue: raw,
+      factorType: nextData.factor_type,
+    },
+    `Wrote the brief's stated unit "${factor.unit}" onto "${existingNode.id}"`
+  );
+
+  if (collector) {
+    collector.addByStage(
+      11, // Stage 11: Factor Enrichment
+      "node_modified",
+      { node_id: existingNode.id, kind: "factor" },
+      `Backfilled the stated unit on a model-valued factor`,
+      data,
+      nextData
+    );
+  }
+
+  return true;
+}
+
+/**
+ * ⭐⭐⭐ THE USER TYPED THIS NUMBER, SO WE MUST NOT REPORT IT AS OUR OWN GUESS.
+ *
+ * ── THE DEFECT, MEASURED AT THE BYTES (capture `d9c4066c`, 19 Sep 2026)
+ * The user wrote *"conversion rate from trial to paid is 12%"* and *"Our churn
+ * rate is 4% monthly"*. Both reached the graph as factors carrying **exactly**
+ * those figures — `{value: 0.12, unit: "%"}` and `{value: 0.04, unit: "%"}` —
+ * and both carried `extractionType: "inferred"`. `schema-v3.ts:458` maps that
+ * to `observed_state.source: "cee_inference"`, and the product then tells the
+ * user, on every analysis, that *every estimate behind them is machine-authored
+ * and unconfirmed*. **That sentence is false for the two numbers they typed
+ * themselves**, and `brief_extraction` appeared on 0 of the capture's 6 valued
+ * factors.
+ *
+ * ── ⚠ WHERE THE STAMP COMES FROM, DERIVED RATHER THAN ASSUMED
+ * Not from this module and not from the record projector. `schema-v3.ts:458`'s
+ * default for an ABSENT `extractionType` is `brief_extraction`, so a declined
+ * brief-claim cannot produce `cee_inference`; and `provenance-display.ts:117`
+ * records that a literal search for a written `cee_inference` finds no writer.
+ * The only way to that stamp is `data.extractionType === "inferred"`, which the
+ * MODEL writes because the served prompt teaches it
+ * (`defaults-v187.ts:407`, "Inferred: no value stated → extractionType:
+ * 'inferred'"). The model transcribed the user's figures correctly and then
+ * labelled them as its own inference. The enhance branch above could not
+ * correct that, because it runs only when the node has NO value
+ * (`hasFactorData`), and these nodes had one.
+ *
+ * ── WHY POSITIONAL, AND NOT A MAGNITUDE COMPARISON
+ * The obvious repair — ask whether this value is "stated in the brief" — is a
+ * measured dead end. `isAmountStatedInBrief` scans a whole text for a
+ * magnitude, and teaching it percent↔fraction equivalence re-opens a
+ * deliberately-closed fabrication: B3's *"up to £7.2m a year if attach were
+ * 100%"* would certify a binary lever set to 1 (`stated-amounts.ts:61-63`).
+ * Nor can the model's `unit` discriminate: it is a free string on a
+ * `.passthrough()` object and the false-positive record carries none.
+ *
+ * This takes the route this module already ratified instead
+ * (`enhanceWriteIsSpanContained`): **the figure must be a literal span of the
+ * user's own bytes, and it must lie inside this node's own sentence.** Offsets
+ * are scale-blind, so no scale frame can defeat them. Measured on the real
+ * spans: `soleStatedQuantityInSpan` and this gate both refuse *"up to £7.2m a
+ * year if attach were 100%"* POSITIONALLY — it carries two quantities and the
+ * span test never reaches a value at all.
+ *
+ * ── THE CONJUNCTION, AND WHAT EACH LIMB IS FOR
+ *   1. the node's own level is a finite number      — the thing being described;
+ *   2. it is stamped `inferred`                     — we only ever correct a
+ *      machine-authored claim UPWARD; `explicit`, `range` and `observed` are
+ *      never touched, so this cannot withdraw an existing claim;
+ *   3. `matchedText` is a literal span of the brief — the figure is the user's
+ *      BYTES, not the model's opinion (and `extractFactors` sets it from the
+ *      regex match's own `m[0]`, so the span exists by construction);
+ *   4. `enhanceWriteIsSpanContained`                — the ratified subject gate:
+ *      on a stated node the figure must sit inside that node's own sentence;
+ *   5. the extractor's value EQUALS the node's level exactly — binding by
+ *      IDENTITY, never by a predicate another figure could satisfy (trap 19).
+ *      This is what stops the brief's competitor `£5m` — which `inferLabel`
+ *      really does label "Churn Rate" on this very brief — from crediting the
+ *      churn factor: 5000000 ≠ 0.04. It also means this can only ever fire
+ *      where the two sides ALREADY agree on the scale convention, so it cannot
+ *      import a scale-frame error.
+ * Limb 3's precondition is asserted, not assumed: a `matchedText` the brief
+ * does not contain is not a position, and returns false.
+ *
+ * ── ⚠⚠ IT CROSSES THE ADMISSION FLOOR. MEASURED, NOT ESTIMATED.
+ * `brief_extraction` classifies as user-stated in the analysis-admission
+ * census, `analysis-admission.ts:900/935` turn
+ * `material_parameters_user_stated > 0` into `semanticSufficient`, and
+ * `deriveMode` turns that into `comparative_leader` — **the licence to name a
+ * leading option.** Run against capture `d9c4066c`'s own nodes and its 39
+ * edges, through `censusConfidenceParameters`:
+ *
+ *     material_parameters_total        31  →  31   (unchanged)
+ *     material_parameters_user_stated   0  →   2
+ *     semanticQualitySufficient     false  →  true
+ *     semanticVerdictCause  all_machine_authored → material_user_stated
+ *
+ * So this does not merely relabel a badge: **it moves that run from
+ * `quantified_provisional` to `comparative_leader`.** It stamps 2 of the 6
+ * valued factors — Trial-to-Paid Conversion Rate and Monthly Churn Rate — and
+ * leaves the other 4 alone, their model-normalised levels (0, 0.4, 0.4, 0.5)
+ * matching no figure the user wrote. That is the correct direction *if* the
+ * stamps are true, and it is exactly why the conjunction above is narrow: a
+ * wrong stamp here would let the product name a winner off a number nobody
+ * confirmed. ⚠ Scope of that measurement, stated so it is not read wider: the
+ * debug bundle flattens node KINDS, so goal/decision/risk were re-derived from
+ * ids and labels to rebuild the topology. The direction and the flip are
+ * robust; the exact total of 31 is only as good as that reconstruction.
+ *
+ * ── WHY A STANDALONE PASS, AND NOT A LIMB OF THE ENRICHMENT LOOP
+ * Measured, after trying the loop first — it failed on BOTH captured factors
+ * for two independent reasons, and each is a property of enrichment that this
+ * question does not share:
+ *   · `enrichGraphWithFactorsAsync` returns EARLY when every option's
+ *     interventions are complete ("the FACTOR side is genuinely complete"), and
+ *     the capture is exactly that shape, so the loop never ran at all. Note the
+ *     precedent already inside that early exit: ROADMAP 2.281 had to carve the
+ *     goal-target mint out of it for the same reason — the exit is scoped to
+ *     "does this graph need VALUES?", and it was silently swallowing a
+ *     different question. This is a third.
+ *   · `selectEnhanceTarget` picks ONE candidate per extracted figure and gives
+ *     up, so the brief's `12%` consumed the only seat that `4%` could have used
+ *     and the churn factor was never offered its own figure.
+ * Neither applies to a provenance correction: it writes one key per node, two
+ * nodes cannot contend for it, and a graph whose values are complete is exactly
+ * a graph whose values may still be miscredited.
+ *
+ * ── AMBIGUITY REFUSES (trap 22f)
+ * A node is credited only when EXACTLY ONE extracted figure earns it. Two
+ * candidates is a question, not a fact, and this writes nothing rather than
+ * pick. On the measured brief that rule does real work: `4%` is extracted twice
+ * — once as `Churn Rate` and once under `inferLabel`'s fallback label `Rate` —
+ * and `hasUnboundQuantityLabel` (reused, not re-derived) discards the fallback,
+ * leaving exactly one.
+ *
+ * ── WHAT IT DELIBERATELY DOES NOT DO
+ * It writes ONE key. It never mints, rescales, re-labels or alters a value, a
+ * unit, a cap or a baseline — where correspondence cannot be proven it writes
+ * nothing at all, and the node keeps today's behaviour exactly.
+ */
+/**
+ * The brief sentence a figure was written in, or `undefined`.
+ *
+ * ⚠ THE SPLIT DELIBERATELY DOES NOT CUT ON A BARE `.`, and that is not
+ * fussiness: CLAUDE.md trap 22 records a guard that could never fire because
+ * the window handed to it was cut at the first `[.!?]` — **which is also the
+ * decimal point** — so an amount written `£1.5m` was truncated to `1` before
+ * the guard ever looked. A terminator here must be followed by whitespace or
+ * the end of the text, so `£7.2m` and `0.04` survive intact. Newlines also
+ * terminate, because this estate's briefs are bulleted and a bullet is a
+ * sentence.
+ *
+ * ⚠ AND THE EXAMPLE ABOVE IS WRITTEN `£1.5m` ON PURPOSE. Spelling the
+ * magnitude word out would enrol this file in
+ * `utils/__tests__/magnitude-alphabet.union.test.ts`'s scan — it REDed on
+ * exactly that, from prose, on this change. A derived guard cannot tell a
+ * mention from a use, and this module holds no magnitude lookup, so the fix
+ * is to stop saying the word rather than to widen the manifest.
+ */
+/**
+ * Is the occurrence of `needle` at `at` a WHOLE figure, or a fragment of a
+ * longer one?
+ *
+ * ⚠ THIS IS NOT DEFENSIVENESS — IT IS THE DEFECT A REVIEW MEASURED IN THIS
+ * FILE. `"4%"` is a substring of `"14%"`, `"2%"` of `"12%"`, `"£2m"` of
+ * `"£12m"`. Resolved by plain `.includes`, the figure `4%` in
+ * *"Gross margin sits at 14% today. Churn is 4% per month."* binds to the
+ * MARGIN sentence — so `labelIsNamedInFigureSentence`, which this file's own
+ * docblock calls "the limb that closes this pass's one measured hole", was
+ * being asked its question about a sentence the figure was never written in.
+ * A character adjacent to the needle that could continue a number means the
+ * match is inside a larger one.
+ */
+function isWholeFigureOccurrence(haystack: string, needle: string, at: number): boolean {
+  const isDigit = (c: string | undefined): boolean => c !== undefined && c >= "0" && c <= "9";
+  // A separator CONTINUES a number only when digits sit on both sides of it —
+  // `12,500` and `1.5`. The comma in `"… is 12%, which we believe …"` does not,
+  // and an earlier cut of this rule refused that occurrence and silently
+  // dropped the capture's own 12%. Measured, not reasoned: the headline pin in
+  // this file's spec went 2 credits to 1.
+  const separatorInsideNumber = (sepAt: number, digitAt: number): boolean =>
+    (haystack[sepAt] === "." || haystack[sepAt] === ",") && isDigit(haystack[digitAt]);
+  // Only a needle that BEGINS with a digit can be the tail of a longer number,
+  // and only one that ENDS with a digit can be its head. `12%` cannot be
+  // extended rightwards by anything, so nothing to its right is asked about.
+  if (/^[0-9]/.test(needle)) {
+    if (isDigit(haystack[at - 1])) return false;
+    if (separatorInsideNumber(at - 1, at - 2)) return false;
+  }
+  if (/[0-9]$/.test(needle)) {
+    const end = at + needle.length;
+    if (isDigit(haystack[end])) return false;
+    if (separatorInsideNumber(end, end + 1)) return false;
+  }
+  return true;
+}
+
+function briefSentenceContaining(brief: string, matchedText: string): string | undefined {
+  const needle = canonicaliseSpan(matchedText);
+  if (needle.length === 0) return undefined;
+  // ⚠ AMBIGUITY REFUSES, the same rule this pass already applies to earners.
+  // A figure written in two sentences names no single sentence, so there is no
+  // subject evidence to read and nothing is credited. Under-claiming is the
+  // chosen direction throughout this module: the cost is a badge, never a
+  // value.
+  const hits: string[] = [];
+  for (const sentence of brief.split(/(?<=[.!?])\s+|[\n\r]+/)) {
+    const canonical = canonicaliseSpan(sentence);
+    for (let at = canonical.indexOf(needle); at !== -1; at = canonical.indexOf(needle, at + 1)) {
+      if (isWholeFigureOccurrence(canonical, needle, at)) {
+        hits.push(sentence);
+        break;
+      }
+    }
+  }
+  return hits.length === 1 ? hits[0] : undefined;
+}
+
+/** The content tokens of a label: lowercase, alphanumeric, two characters or more. */
+function labelTokens(label: string): readonly string[] {
+  return label
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((t) => t.length >= 2);
+}
+
+/**
+ * ⭐⭐⭐ DID THE USER NAME THIS FACTOR IN THE SENTENCE WHERE THEY WROTE THIS
+ * FIGURE? — the mirror of `enhanceWriteIsSpanContained`, and the limb that
+ * closes this pass's one measured hole.
+ *
+ * That gate asks whether the FIGURE lies inside the NODE's own sentence. It can
+ * only ask that of a node that HAS a sentence — a stated item with a
+ * `source_quote`. A model-drafted factor has none, so the gate returns `true`
+ * vacuously and the subject binding falls back entirely to `labelsMatch` over
+ * `inferLabel`'s guess. **Measured on this very brief, that is not good
+ * enough:** `inferLabel` labels the competitor's `£5m` — *"A competitor just
+ * raised £5m and is hiring aggressively"* — **"Churn Rate"**, because its
+ * window reaches back into the previous bullet. A first cut of this pass
+ * therefore credited a churn factor carrying 5,000,000 as the user's own
+ * figure: the exact £8.5m-class harm `enhanceWriteIsSpanContained` exists to
+ * stop, arriving through the one door that gate cannot watch.
+ *
+ * So where the node has no span of its own, the FIGURE's span supplies one, and
+ * the question is turned round: every content token of the node's label must
+ * appear in the sentence the user wrote the figure in. It is the same
+ * positional evidence read from the other end, it needs no value and no scale,
+ * and it is asked of EVERY node rather than only the span-less ones — one rule,
+ * no branch on node shape, and no vacuous arm left for the next figure to walk
+ * through.
+ *
+ * ⚠ IT UNDER-CLAIMS, AND THAT IS THE CHOSEN DIRECTION. A user who names a
+ * factor in one sentence and gives its number in the next is refused. Nothing
+ * is lost but a badge; the value, unit and label are untouched, and the failure
+ * is toward telling the user we guessed when in fact they told us — the safe
+ * half of the pair (trap 22b).
+ */
+function labelIsNamedInFigureSentence(
+  nodeLabel: string,
+  factor: ExtractedFactor,
+  brief: string,
+): boolean {
+  const sentence = briefSentenceContaining(brief, factor.matchedText ?? "");
+  if (sentence === undefined) return false;
+  const haystack = new Set(labelTokens(sentence));
+  const tokens = labelTokens(nodeLabel);
+  if (tokens.length === 0) return false;
+  return tokens.every((t) => haystack.has(t));
+}
+
+export function creditUserTypedFigures(
+  graph: GraphT,
+  brief: string,
+  collector?: CorrectionCollector,
+): number {
+  if (typeof brief !== "string" || brief.trim().length === 0) return 0;
+
+  const canonicalBrief = canonicaliseSpan(brief);
+  let extracted: readonly ExtractedFactor[];
+  try {
+    // Regex-only by construction — this is `extractFactors`, never the
+    // orchestrated variant, so the pass makes no provider call and cannot make
+    // a graph's provenance depend on a model's availability.
+    extracted = extractFactors(brief);
+  } catch {
+    return 0;
+  }
+  if (extracted.length === 0) return 0;
+
+/**
+ * ⭐⭐⭐ DOES THE NODE HOLD THE SAME QUANTITY THE USER WROTE?
+ *
+ * ── THE DEFECT THIS CLOSES. Every other limb of the crediting pass can be
+ * satisfied by a NAKED NUMBER: the span is real, the label matches, the tokens
+ * sit in the sentence, and the identity test compares `factor.value === level`.
+ * None of them reads a unit. So a node labelled "Churn Rate" holding
+ * `{ value: 0.04, unit: "£" }` earns the same credit from the brief sentence
+ * *"Our monthly churn rate is 4%."* — and the projection then keeps that frame
+ * while stamping the figure as the person's own. They wrote a percentage. The
+ * node says four pence. Identical naked numbers are not identical quantities.
+ *
+ * ── WHY THIS IS NOT COSMETIC. A credited figure counts toward
+ * `material_parameters_user_stated` in the analysis-admission census, so a
+ * false credit can lift a run across the admission floor and license
+ * comparative material on evidence the person never supplied.
+ *
+ * ── WHAT COUNTS AS CORRESPONDENCE, AND WHY IT IS BORROWED, NOT WRITTEN HERE.
+ * Two existing authorities answer this and a third copy of unit vocabulary is
+ * the hand-maintained mirror this estate keeps paying for:
+ *   · {@link sameUnit} normalises currency spellings to their code and compares
+ *     — and is explicitly NOT a conversion, so a genuine currency difference
+ *     still compares unequal;
+ *   · {@link UNIT_SCALE_CLASS_TOKENS} answers the percent-family question, so
+ *     `"%"` and `"percent"` correspond while `"%"` and `"pp"` do not, because
+ *     percentage points are a different frame rather than a spelling of one.
+ *
+ * ── ⚠⚠ WHY THE EXACT-TOKEN TABLE AND NOT `classifyUnitScaleClass`, WHICH IS
+ * THE OBVIOUS CALL AND IS WRONG AT THIS BOUNDARY. The review found it: change
+ * the `"pp"` twin below to the SPELLED-OUT `"percentage points"` and the
+ * classifier shortcut let it through as `percent`, crediting the person with a
+ * quantity they did not write. That is not a bug in the classifier. It is the
+ * rowed one-way door `unit-scale-class.ts` documents by name — `pp`/`ppt`/`pps`
+ * classify as `percentage_points`, while the spelled-out forms reach `percent`
+ * through the PREFIX layer, deliberately, because that is what the predicates it
+ * replaced did and closing the asymmetry moves live frames.
+ *
+ * The category error was mine, and it is trap 21 exactly: `classifyUnitScaleClass`
+ * answers **"which DISPLAY FRAME family is this token in?"** and I asked it
+ * **"are these the same QUANTITY?"**. Those diverge precisely here — percent and
+ * percentage points share a frame family and are different quantities ("churn
+ * rose 4 percentage points" is not "churn is 4 percent").
+ *
+ * So this boundary consults the classifier's EXACT-TOKEN layer instead, which is
+ * exported for exactly this ("EXPORTED SO ITS GUARD CAN BE DERIVED FROM IT").
+ * Still one vocabulary, still no third copy — a NARROWER read of the same
+ * authority. The scale-family policy and the rowed door are untouched; nothing
+ * here changes a frame, a value, or what any other caller sees.
+ *
+ * ⚠ IT IS STRICTLY NARROWER THAN WHAT IT REPLACES, so it can only WITHHOLD
+ * credits, never add one — the safe direction for a pass that feeds the
+ * admission census. The measured cost: a unit like `"% churn"` (a real spelling
+ * in this estate) no longer corresponds with `"%"`, because it is not an exact
+ * token. That is a real credit withheld, and it is the same trade this docblock
+ * already takes below for a missing unit.
+ *
+ * ── FAILS CLOSED. A unit missing on either side is NOT correspondence, so the
+ * node keeps the provenance it already had. That is deliberate: this pass only
+ * ever corrects upward, and declining to upgrade is a gap, while upgrading on
+ * an unestablished frame is a false attribution. The cost is a real credit
+ * withheld when a producer omits a unit; the alternative is crediting the
+ * person with a quantity they did not write.
+ */
+function exactScaleClassOf(unit: string): UnitScaleClass | undefined {
+  const token = unit.trim().toLowerCase();
+  for (const [scaleClass, tokens] of UNIT_SCALE_CLASS_TOKENS) {
+    if (tokens.some((t) => t.toLowerCase() === token)) return scaleClass;
+  }
+  return undefined;
+}
+
+function unitsCorrespond(
+  nodeUnit: string | undefined,
+  figureUnit: string | undefined,
+): boolean {
+  if (typeof nodeUnit !== "string" || nodeUnit.trim().length === 0) return false;
+  if (typeof figureUnit !== "string" || figureUnit.trim().length === 0) return false;
+  if (sameUnit(nodeUnit, figureUnit)) return true;
+  const nodeClass = exactScaleClassOf(nodeUnit);
+  return nodeClass !== undefined && nodeClass === exactScaleClassOf(figureUnit);
+}
+
+  let credited = 0;
+
+  for (let nodeIndex = 0; nodeIndex < graph.nodes.length; nodeIndex++) {
+    const node = graph.nodes[nodeIndex];
+    if (node.kind !== "factor") continue;
+
+    const data = node.data;
+    if (!isFactorData(data)) continue;
+
+    // (1) The node must carry a level for a figure to BE.
+    const level = data.value;
+    if (typeof level !== "number" || !Number.isFinite(level)) continue;
+
+    // (2) Correct upward only. A node that already claims the brief, a range or
+    // an observation is left exactly as it is — this can never WITHDRAW a claim.
+    if (data.extractionType !== "inferred") continue;
+
+    const earners = extracted.filter((factor) => {
+      // (3) The figure must be a literal span of the user's own bytes.
+      const matched = canonicaliseSpan(factor.matchedText ?? "");
+      if (matched.length === 0) return false;
+      if (!canonicalBrief.includes(matched)) return false;
+      // (3a) ⛔ AND IT MUST BE A NUMBER THE USER WROTE, NOT ONE THIS SERVICE
+      // CALCULATED FROM WHAT THEY WROTE. A range extraction carries the user's
+      // genuine span alongside a value that is `rangePointEstimate`'s MIDPOINT
+      // (`utils/amount-range.ts`, `(min + max) / 2`). Measured by executing
+      // `extractFactors` at this head: *"Our monthly churn rate runs 3% to 5%
+      // depending on the cohort."* yields `{ value: 0.04, matchedText: "3% to
+      // 5%", extractionType: "range" }` — and the digit `4` appears NOWHERE in
+      // that brief. Every other limb passes on such a factor (the span is
+      // real, the label matches, the tokens are in the sentence, and a node
+      // sitting at 0.04 satisfies the identity test), so without this line the
+      // pass credits OUR OWN ARITHMETIC to the user. Accepting a value this
+      // service derived does not make its origin a user measurement.
+      //
+      // ⚠ SCOPE, STATED: this reads the factor's OWN shape — its range bounds
+      // and its declared type — rather than a list of the loops that mint
+      // midpoints, because such a list is a hand-maintained mirror. It still
+      // fails OPEN for a future derivation that sets neither marker; that is
+      // the known limit of this limb and not a claim about all derived values.
+      if (
+        factor.extractionType === "range" ||
+        factor.rangeMin !== undefined ||
+        factor.rangeMax !== undefined
+      ) {
+        return false;
+      }
+      // (4) …naming THIS subject, by the module's own two selection rules.
+      if (!node.label || !labelsMatch(node.label, factor.label)) return false;
+      if (hasUnboundQuantityLabel(node, factor)) return false;
+      // Crediting a current estimate requires the same declared-role authority
+      // as installing its value. A literal target or limit remains non-current,
+      // including when another node owns that protected quantity.
+      if (selectEnhanceTarget([node], factor, graph.nodes).node !== node) return false;
+      // (5) …written inside THIS node's own sentence, where the node has one…
+      if (!enhanceWriteIsSpanContained(node, factor, brief)) return false;
+      // (6) …and, whether or not it has one, named by the user in the sentence
+      // the figure itself was written in. This is the limb that stops
+      // `inferLabel`'s cross-bullet guess crediting the competitor's £5m to a
+      // churn factor — see `labelIsNamedInFigureSentence`.
+      if (!labelIsNamedInFigureSentence(node.label, factor, brief)) return false;
+      // (7) Credit a current figure, not a directional row's proposed endpoint.
+      // Its baseline is extracted separately; counting both would duplicate the
+      // same current evidence and trip the ambiguity guard below.
+      const currentValue = statedCurrentRaw(factor);
+      if (factor.value !== currentValue || currentValue !== level) return false;
+      // (7b) …IN THE SAME FRAME. Identity of the number is not identity of the
+      // quantity — see `unitsCorrespond`. Missing or conflicting units retain
+      // the provenance the node already had; nothing here changes a value.
+      return unitsCorrespond(
+        (data as { unit?: unknown }).unit as string | undefined,
+        factor.unit,
+      );
+    });
+
+    if (earners.length !== 1) {
+      if (earners.length > 1) {
+        log.info(
+          {
+            event: "cee.factor_enrichment.figure_credit_ambiguous",
+            nodeId: node.id,
+            candidates: earners.map((f) => f.matchedText),
+          },
+          `Refusing to credit "${node.id}": ${earners.length} figures in the brief could be this level`,
+        );
+      }
+      continue;
+    }
+
+    const earner = earners[0]!;
+    const nextData: FactorDataT = { ...data, extractionType: "explicit" };
+    graph.nodes[nodeIndex] = { ...node, data: nextData };
+    credited++;
+
+    log.info(
+      {
+        event: "cee.factor_enrichment.figure_credited_to_user",
+        nodeId: node.id,
+        matchedText: earner.matchedText,
+        value: level,
+      },
+      `"${earner.matchedText}" is the user's own figure, so "${node.id}" no longer reports it as machine-authored`,
+    );
+
+    if (collector) {
+      collector.addByStage(
+        11, // Stage 11: Factor Enrichment
+        "node_modified",
+        { node_id: node.id, kind: "factor" },
+        `Credited a figure the user typed in the brief`,
+        data,
+        nextData,
+      );
+    }
+  }
+
+  return credited;
+}
+
+/**
  * Check if two labels refer to the same concept
  */
 function labelsMatch(label1: string, label2: string): boolean {
@@ -63,23 +957,465 @@ function labelsMatch(label1: string, label2: string): boolean {
   // Substring match (e.g., "price" matches "pro plan price")
   if (n1.includes(n2) || n2.includes(n1)) return true;
 
-  // Common synonyms
-  const synonymGroups = [
-    ["price", "cost", "fee"],
-    ["churn", "attrition", "turnover"],
-    ["conversion", "upgrade", "signup"],
-    ["revenue", "income", "sales"],
-    ["growth", "increase", "expansion"],
-    ["user", "customer", "subscriber"],
-  ];
-
-  for (const group of synonymGroups) {
+  // Check synonym groups
+  for (const group of SYNONYM_GROUPS) {
     const has1 = group.some((s) => n1.includes(s));
     const has2 = group.some((s) => n2.includes(s));
     if (has1 && has2) return true;
   }
 
   return false;
+}
+
+/**
+ * `inferLabel` uses Value/Rate/Factor when it cannot identify the quantity.
+ * Those fallback words can select a longer qualitative label by substring,
+ * but do not establish that the number measures that node. Even a shared
+ * sentence/source quote cannot supply the missing semantic identity.
+ * Keep exact-label behaviour and identified quantities unchanged; refuse the
+ * selected write (including replacement-node creation) rather than guessing.
+ */
+function hasUnboundQuantityLabel(node: NodeT, factor: ExtractedFactor): boolean {
+  // ⚠ The `/^(?:value|rate|factor)$/` that used to be spelled here was a second
+  // copy of `inferLabel`'s fallback vocabulary. It now consumes the producer's
+  // own list (`UNIDENTIFIED_QUANTITY_LABELS`, index.ts) so the two cannot drift.
+  return isUnidentifiedQuantityLabel(factor.label)
+    && node.label?.trim().toLowerCase() !== factor.label.trim().toLowerCase();
+}
+
+/**
+ * ⭐⭐ THE STATED QUOTE ON A PROJECTED NODE, OR `undefined`.
+ *
+ * ⚠ READ FROM AN UNTYPED KEY ON PURPOSE. `Node` (`schemas/graph.ts:306`)
+ * declares no `provenance` field — it is `.passthrough()`, and the record
+ * projector writes provenance through that gap
+ * (`draft/records/projector.ts:2233`). So this cannot be a typed property
+ * access, and the narrowing below is the validation.
+ *
+ * ⚠ THE TWO PROJECTION PATHS DIFFER, AND THAT DIFFERENCE IS THIS GATE'S WHOLE
+ * DOMAIN — derived at the producer, not inferred from a label:
+ *   - a STATED item mints `{ provenance_class: "stated", source_quote, … }`
+ *     (`projector.ts:2233`), so the user's own span is retrievable;
+ *   - a CLAIM mints `{ provenance_class: "ai_inferred", basis, unbased }`
+ *     (`projector.ts:2673`) and carries **no quote at all**.
+ * A claim-derived factor therefore returns `undefined` here and keeps today's
+ * behaviour exactly. Absence means "no span to check", never "empty span".
+ */
+function statedSourceQuote(node: NodeT): string | undefined {
+  const provenance = (node as { provenance?: unknown }).provenance;
+  if (typeof provenance !== "object" || provenance === null) return undefined;
+  const quote = (provenance as { source_quote?: unknown }).source_quote;
+  return typeof quote === "string" && quote.trim().length > 0 ? quote : undefined;
+}
+
+/** Collapse whitespace runs so a quote still matches a brief that wrapped it. */
+function canonicaliseSpan(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * ⭐⭐⭐ POSITIONAL SPAN CONTAINMENT — the ONE rejection test on the enhance
+ * write. TRUE means "this figure was written inside this node's own sentence",
+ * and only a TRUE lets the enhance branch stamp a value as the user's.
+ *
+ * ── THE HARM IT STOPS (measured on deployed staging, 3 Sep 2026)
+ * A founder with £8k MRR was shown **£8.5m** on a factor about his own time.
+ * `labelsMatch` is a bidirectional SUBSTRING test over labels stripped of
+ * non-alphanumerics, and a stated `cause` node's label is a VERBATIM brief
+ * sentence — here 118 characters of it. Any short extracted label occurring
+ * anywhere inside that sentence matches it, so a factor labelled "Retention",
+ * carrying the COMPETITOR's £5m from a different paragraph, selected the
+ * founder-time node and overwrote it in one `data` write: it bound the wrong
+ * magnitude, minted `cap: 1e7` around it, and stamped `extractionType:
+ * "explicit"` — certifying a number the user never wrote as his own words.
+ * Node `27c23ebb`, confirmed a stated `cause` by hash preimage:
+ * `sha8("cause", <that sentence>) === "27c23ebb"` (`projector.ts:2120`).
+ *
+ * ── WHY POSITIONAL, AND NOT A MAGNITUDE CHECK
+ * Offsets are SCALE-BLIND, and that is the point. The magnitude route
+ * (`isAmountStatedInBrief`) declines every percentage, because percents are
+ * stored as fractions and it deliberately refuses percent↔fraction
+ * equivalence — routing the stamp through it would strip a founder's own "4%"
+ * of its user-stated provenance, re-attributing the user's numbers to us. A
+ * span test cannot make that mistake: it never looks at the value.
+ *
+ * ── WHY CONTAINMENT AND NOT AN OFFSET COMPARISON (corrected premise)
+ * The obvious form is `quoteStart <= match.index < quoteStart + len`.
+ * **`ExtractedFactor` carries no `match.index`** — `extractFactors` has it at
+ * every pattern site and discards it (`index.ts:41-60`). Adding one would mean
+ * editing every extractor site, which is exactly the range work open in
+ * CEE #1327. So containment is computed on the STRINGS, which is equivalent
+ * ONLY WHERE `matchedText` IS ITSELF A LITERAL SPAN OF THIS BRIEF: given that,
+ * and given the quote is a literal span too, "some occurrence of the matched
+ * text lies inside the quote's span" holds precisely when the quote contains
+ * that text as a substring, and containment is then the more permissive of the
+ * two — it accepts ANY occurrence rather than one chosen index.
+ *
+ * That premise holds on the REGEX path by construction and nowhere else: every
+ * regex site sets `matchedText` to the match's own `m[0]`/`match[0]` over the
+ * brief (`index.ts` 1678-2195, `stated-level.ts:433`, `stated-amounts.ts:190`),
+ * so an occurrence exists at `m.index` by definition.
+ *
+ * ⚠ NON-COVERAGE — THE LLM-FIRST PATH. `llm-extractor.ts:286` sets
+ * `matchedText` to the MODEL-AUTHORED `source_quote`, and `merge.ts` spreads
+ * `...llmFactor`, so it arrives here verbatim. Nothing constrains it to be a
+ * span of the brief: `LLMFactorSchema` admits `source_quote: z.string().max(200)`
+ * with NO substring refinement (pinned by
+ * `__tests__/llm-source-quote-has-no-span-guarantee.test.ts`), and the only
+ * brief-facing check on this path, `validateAgainstBrief` (`resolver.ts:400`),
+ * compares NUMERIC VALUES and merely WARNS — `llm-extractor.ts:198-213` drops
+ * nothing. The prompt asks for "Exact text from brief" (`llm-extractor.ts:81`),
+ * which is an instruction, not a guarantee.
+ *
+ * So on that path a paraphrased quote has NO occurrence in the brief at all.
+ * The offset comparison has no defined verdict there (there is no `match.index`
+ * to test), while the five lines below still reach `canonicalQuote.includes` and
+ * return FALSE. The two gates therefore do not range over the same domain, and
+ * "strictly more permissive" is NOT a property of this function as written: an
+ * LLM factor whose figure genuinely was written inside the node's own sentence
+ * can be refused because the model rephrased its own quote (`canonicaliseSpan`
+ * collapses whitespace only — it does not fold case). Such a refusal is not a
+ * positional measurement; it is an accident of the model's wording.
+ *
+ * That refusal is left STANDING rather than gated, deliberately, because the two
+ * errors are not symmetric: a false refusal writes nothing and the figure is
+ * still surfaced by `deriveNotModelledManifest` below, whereas a false accept
+ * stamps a number the user never wrote as the user's own words — the measured
+ * harm above. Weakening the gate for unplaceable quotes is a product judgement
+ * with a live cost in the other direction, so it is rowed on the PR, not taken
+ * here. THIS PARAGRAPH IS A RATIONALE, NOT A VERIFIED CLAIM: no test asserts
+ * the LLM-path refusal, because the predicate is not exported.
+ *
+ * ── WHAT IT DELIBERATELY DOES NOT DO
+ * It never rewrites, rescales or re-labels anything, and it does not touch
+ * `labelsMatch`, which stays the candidate GENERATOR and the dedup predicate.
+ * On a refusal the enhance branch writes NOTHING and does not fall through to
+ * node creation, so no duplicate is minted. The figure is not silently
+ * dropped: `deriveNotModelledManifest` already names unmodelled brief
+ * magnitudes to the user, and that is where an unbindable £5m belongs.
+ */
+function enhanceWriteIsSpanContained(
+  node: NodeT,
+  factor: ExtractedFactor,
+  brief: string
+): boolean {
+  const quote = statedSourceQuote(node);
+  // Span-less (claim-derived) node: nothing to contain against. Unchanged.
+  if (quote === undefined) return true;
+
+  const canonicalBrief = canonicaliseSpan(brief);
+  const canonicalQuote = canonicaliseSpan(quote);
+  // The quote is not a literal span of this brief, so no offset window exists
+  // to test against. Refusing here would be a guess, not a measurement.
+  if (!canonicalBrief.includes(canonicalQuote)) return true;
+
+  const matched = canonicaliseSpan(factor.matchedText ?? "");
+  // No matched text means no span to place. Unchanged.
+  if (matched.length === 0) return true;
+
+  return canonicalQuote.includes(matched);
+}
+
+/** A stated figure a claim declared itself to be based on (`projector.ts`). */
+interface DeclaredFigure {
+  readonly value: number;
+  readonly unit?: string;
+  readonly source_quote?: string;
+  readonly role?: string;
+}
+
+/**
+ * ⭐⭐ THE STATED FIGURES THIS NODE IS BASED ON, OR `undefined`.
+ *
+ * Read from an untyped key for the same reason `statedSourceQuote` is: `Node`
+ * declares no `provenance` field — it is `.passthrough()`, and the record
+ * projector writes provenance through that gap.
+ *
+ * ⚠ `undefined` MEANS "THIS NODE DECLARES NOTHING", never "declares none".
+ * Absence is the unknown case and must never be read as an exclusion — it is
+ * what an LLM-authored graph, a structural node, or an `unbased` claim returns.
+ */
+function declaredBasisFigures(node: NodeT): readonly DeclaredFigure[] | undefined {
+  const provenance = (node as { provenance?: unknown }).provenance;
+  if (typeof provenance !== "object" || provenance === null) return undefined;
+  const raw = (provenance as { basis_figures?: unknown }).basis_figures;
+  if (!Array.isArray(raw)) return undefined;
+  const figures = raw.filter(
+    (f): f is DeclaredFigure =>
+      typeof f === "object" &&
+      f !== null &&
+      typeof (f as DeclaredFigure).value === "number" &&
+      Number.isFinite((f as DeclaredFigure).value),
+  );
+  return figures.length > 0 ? figures : undefined;
+}
+
+/** Equal to within float noise, scaled to the magnitudes being compared. */
+function sameMagnitude(a: number, b: number): boolean {
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return false;
+  return Math.abs(a - b) <= Math.max(Math.abs(a), Math.abs(b), 1) * 1e-9;
+}
+
+/**
+ * ⭐⭐⭐ IS THIS FIGURE ONE THE NODE IS BASED ON? — the SEMANTIC test that
+ * replaces label overlap as the thing deciding which subject a number lands on.
+ *
+ * Every level the extractor can be carrying is offered, because a `from X to Y`
+ * brief arrives as `{value: Y, baseline: X}` and a range as `{rangeMin,
+ * rangeMax}`: the user stated all of them, and the records name them
+ * individually, so any one of them establishes the subject.
+ *
+ * ⚠ THE PERCENT CASE IS NOT A SPECIAL CASE, IT IS THE SAME MAGNITUDE TWICE.
+ * A stated "4%" is recorded as `{value: 4, unit: "%"}` and extracted as the
+ * FRACTION `0.04`. Comparing those raw would refuse a user their own stated
+ * figure — the exact harm this function exists to prevent, arriving through the
+ * denominator instead of through the label.
+ *
+ * ⚠ AND THE DIVISOR IS ASKED FOR, NEVER ASSUMED. `unitPinnedScaleFrame` is this
+ * estate's ONE authority on unit-pinned scales, and it ABSTAINS on exactly the
+ * case an inline `unit === "%"` gets wrong: this repo's own producer convention
+ * already stores "4%" as `{value: 0.04}`, so dividing again is a 100× lie. When
+ * it abstains, the declared value is compared as it stands — which is the
+ * correct reading of an already-levelled figure. Reusing it also keeps this out
+ * of the KNOWN-UNMIGRATED inline-percent registry that `unit-scale-class`
+ * pins — a guard that REDs when that set grows, and did.
+ */
+function figureIsDeclared(
+  declared: readonly DeclaredFigure[],
+  factor: ExtractedFactor,
+): boolean {
+  const levels = [factor.value, factor.baseline, factor.rangeMin, factor.rangeMax].filter(
+    (v): v is number => typeof v === "number" && Number.isFinite(v),
+  );
+  if (levels.length === 0) return false;
+  return declared.some((d) => {
+    const frame = unitPinnedScaleFrame(d.unit, d.value);
+    const spellings = frame === undefined ? [d.value] : [d.value, d.value / frame];
+    return spellings.some((s) => levels.some((l) => sameMagnitude(l, s)));
+  });
+}
+
+/**
+ * ⭐⭐⭐ WHICH EXISTING FACTOR THIS FIGURE BELONGS TO — and the answer "none of
+ * them", which `find()` could not express.
+ *
+ * ── THE DEFECT THIS REPLACES (two fresh drafts, 14 Sep 2026)
+ * The selection was `existingFactors.find((n) => labelsMatch(n.label, factor.label))`.
+ * `labelsMatch` is a bidirectional substring test over labels stripped of
+ * non-alphanumerics, plus synonym groups holding BOTH `["price", …]` and
+ * `["churn", …]`. A factor node labelled "Price-Driven Churn Rate" therefore
+ * matches an extracted "Price", and being FIRST in the array it won: the user's
+ * £49 was stamped onto the factor measuring churn — `unit: "£"`, `raw_value:
+ * 49`, `extractionType: "explicit"` — while "Pro Plan Monthly Price", the node
+ * the records actually bind those figures to, was left with no value at all.
+ * The figure was not merely misplaced; it was CONSUMED, so the right subject
+ * could never receive it.
+ *
+ * Two properties of that selection made it wrong, and neither is fixable by a
+ * better string test:
+ *   - it is ORDER-DEPENDENT — swapping two nodes in the array moves the user's
+ *     price onto a different subject, and a correct binding cannot depend on
+ *     array position;
+ *   - it asks a question about LABELS when the records already answered the
+ *     question about SUBJECTS.
+ *
+ * ── WHY `enhanceWriteIsSpanContained` DID NOT CATCH IT
+ * That gate is the designated rejection test, but it opens
+ * `if (quote === undefined) return true` — and a claim-derived node has no
+ * `source_quote` by construction (`projector.ts` mints `ai_inferred` with
+ * `basis`/`unbased` and no quote). It was vacuous for precisely the nodes the
+ * model invents, which is every factor in the measured drafts. It still runs
+ * below, unchanged, for the stated nodes it was written for.
+ *
+ * ── THE THREE ANSWERS, AND WHY "REFUSE" HAD TO BE ONE OF THEM
+ * A node that declares `basis_figures` has already answered which stated
+ * figures it is based on. So:
+ *   - a candidate that NAMES this figure is the target;
+ *   - if every candidate declares a basis and none names it, the records have
+ *     said NO, and the answer is REFUSE — not "fall back to the label overlap",
+ *     which is the mechanism that gave the wrong answer;
+ *   - if no candidate declares a basis, nothing has been established and
+ *     behaviour is UNCHANGED (the span gate still applies).
+ *
+ * ⚠ BOUNDARY, STATED RATHER THAN PAPERED OVER: a node with no declared basis —
+ * an `unbased` claim, or any LLM-authored graph that never went through the
+ * record projector — still selects by `labelsMatch`, and the cross-subject
+ * write remains reachable there. This closes the path the harm was measured on
+ * and does not claim more.
+ */
+/**
+ * ⭐⭐⭐ THE NODE THE RECORDS ALREADY PLACED THIS FIGURE ON, or `undefined` —
+ * the same question `selectEnhanceTarget` asks, put to the CREATE branch.
+ *
+ * ── THE SECOND SITE, MEASURED ON THE SAME DRAFT
+ * The enhance branch is not the only way a figure reaches the wrong subject.
+ * `extractFactors` labels by proximity, and in "…keeping monthly churn under 4%
+ * and reaching £20k MRR within 12 months" it returns the £20k MRR goal figure
+ * under the label **"Churn Rate"**. No existing factor matched, so the create
+ * branch below minted a NEW node — `factor_churn_rate_0`, labelled "Churn
+ * Rate", denominated `unit: "£"`, `raw_value: 20000`, badged
+ * `extractionType: "explicit"`. A churn factor measured in pounds, invented
+ * from the user's revenue target, and certified as their own words.
+ *
+ * ── WHY THE ANSWER IS "DO NOT MINT", NOT "MINT IT SOMEWHERE BETTER"
+ * The records already say where £20k belongs: the outcome "Monthly Recurring
+ * Revenue" declares it (`basis: [0, 5]`), as does the goal it serves. A figure
+ * the model has already attached to a subject does not need a second, rival
+ * node invented for it by a regex — that is how one stated quantity becomes two
+ * disagreeing nodes. Minting nothing is not a loss: `deriveNotModelledManifest`
+ * still names every unmodelled brief magnitude to the user.
+ *
+ * ⚠ SCOPE: this ranges over ALL nodes, not just factors, precisely because the
+ * placing node is usually an outcome or a goal rather than a factor.
+ */
+function figureAlreadyPlacedBy(
+  nodes: readonly NodeT[],
+  factor: ExtractedFactor,
+): NodeT | undefined {
+  return nodes.find((n) => {
+    const declared = declaredBasisFigures(n);
+    return declared !== undefined && figureIsDeclared(declared, factor);
+  });
+}
+
+function selectEnhanceTarget(
+  existingFactors: readonly NodeT[],
+  factor: ExtractedFactor,
+  allNodes: readonly NodeT[],
+): { readonly node?: NodeT; readonly refusedBy?: NodeT } {
+  const candidates = existingFactors.filter((n) => n.label && labelsMatch(n.label, factor.label));
+  if (candidates.length === 0) return {};
+
+  // A declared target, limit or context can support a causal factor without being its current
+  // value. Preserve that distinction when enrichment supplies missing data;
+  // otherwise it reinstates the observation the records projector withheld.
+  const currentReading = {
+    ...factor, value: statedCurrentRaw(factor),
+    baseline: undefined, rangeMin: undefined, rangeMax: undefined,
+  };
+  const eligible = candidates.filter((n) => {
+    const role = (n.data as { role?: unknown } | undefined)?.role;
+    if (role !== undefined && role !== "baseline") return false;
+    const declared = declaredBasisFigures(n);
+    if (declared === undefined) return true;
+    const targets = declared.filter((d) => d.role !== undefined && d.role !== "baseline");
+    return !figureIsDeclared(targets, currentReading) ||
+      figureIsDeclared(declared.filter((d) => d.role === undefined || d.role === "baseline"), currentReading);
+  });
+  const bound = eligible.find((n) => {
+    const declared = declaredBasisFigures(n);
+    return declared !== undefined && figureIsDeclared(declared, factor);
+  });
+  if (bound !== undefined) return { node: bound };
+
+  const protectedQuantity = allNodes.find((n) => {
+    const declared = declaredBasisFigures(n);
+    const matchedText = canonicaliseSpan(factor.matchedText ?? "");
+    return declared !== undefined &&
+      figureIsDeclared(declared.filter(d => d.role !== undefined && d.role !== "baseline" &&
+        matchedText.length > 0 && d.source_quote !== undefined &&
+        canonicaliseSpan(d.source_quote).includes(matchedText)), currentReading) &&
+      !figureIsDeclared(declared.filter(d => d.role === undefined || d.role === "baseline"), currentReading);
+  });
+  if (protectedQuantity !== undefined) return { refusedBy: protectedQuantity };
+
+  const undeclared = eligible.find((n) => declaredBasisFigures(n) === undefined);
+  if (undeclared !== undefined) return { node: undeclared };
+
+  // No candidate admits this figure as a current value in its declared basis.
+  return { refusedBy: candidates[0] };
+}
+
+/**
+ * Check if units are compatible for duplicate detection.
+ * Units match if: both undefined, both equal, or one undefined and semantic label matches.
+ */
+function unitsCompatible(existingUnit: string | undefined, extractedUnit: string | undefined): boolean {
+  // Both undefined = compatible (unitless values)
+  if (existingUnit === undefined && extractedUnit === undefined) return true;
+  // Both defined and equal
+  if (existingUnit !== undefined && extractedUnit !== undefined && existingUnit === extractedUnit) return true;
+  // Mismatch: one has unit, other doesn't, or different units
+  return false;
+}
+
+/**
+ * Check if an extracted quantity is already covered by an existing LLM-generated factor.
+ * Uses value matching (with tolerance) AND unit compatibility to avoid false matches.
+ */
+function isQuantityCoveredByExistingFactor(
+  extracted: ExtractedFactor,
+  existingFactors: NodeT[]
+): { covered: boolean; matchedNode?: NodeT; matchReason?: string } {
+  for (const node of existingFactors) {
+    if (node.kind !== "factor" || !node.data) continue;
+    if (!isFactorData(node.data)) continue;
+    const data = node.data;
+
+    // For numeric comparisons, require unit compatibility to avoid 5% vs $5 false matches
+    const unitsMatch = unitsCompatible(data.unit, extracted.unit);
+
+    // Match on value within 10% tolerance (requires compatible units)
+    if (unitsMatch && data.value !== undefined && extracted.value !== undefined) {
+      const tolerance = Math.abs(data.value * 0.1);
+      if (Math.abs(data.value - extracted.value) <= tolerance) {
+        return { covered: true, matchedNode: node, matchReason: "value_match" };
+      }
+    }
+
+    // Match on raw_value within 10% tolerance (requires compatible units)
+    if (unitsMatch && data.raw_value !== undefined && extracted.value !== undefined) {
+      const tolerance = Math.abs(data.raw_value * 0.1);
+      if (Math.abs(data.raw_value - extracted.value) <= tolerance) {
+        return { covered: true, matchedNode: node, matchReason: "raw_value_match" };
+      }
+    }
+
+    // Match on cap value within 10% tolerance (requires compatible units)
+    if (unitsMatch && data.cap !== undefined && extracted.value !== undefined) {
+      const tolerance = Math.abs(data.cap * 0.1);
+      if (Math.abs(data.cap - extracted.value) <= tolerance) {
+        return { covered: true, matchedNode: node, matchReason: "cap_match" };
+      }
+    }
+
+    // Match on unit + semantic label overlap (using synonym groups)
+    if (data.unit && extracted.unit && data.unit === extracted.unit && node.label) {
+      if (labelsMatch(node.label, extracted.label)) {
+        return { covered: true, matchedNode: node, matchReason: "unit_label_match" };
+      }
+    }
+  }
+  return { covered: false };
+}
+
+/**
+ * Infer factor category from graph edge structure.
+ * - controllable: Has incoming edge from option node
+ * - observable: Has data.value but no option edge, or has outbound edges
+ * - external: No edges and no clear state
+ */
+function inferCategoryFromEdges(
+  nodeId: string,
+  edges: EdgeT[],
+  nodes: NodeT[]
+): "controllable" | "observable" | "external" {
+  const optionNodeIds = new Set(
+    nodes.filter((n) => n.kind === "option").map((n) => n.id)
+  );
+
+  // Check for incoming edges from option nodes
+  const hasInboundOptionEdge = edges.some(
+    (e) => e.to === nodeId && optionNodeIds.has(e.from)
+  );
+  if (hasInboundOptionEdge) return "controllable";
+
+  // Check for any outbound edges (indicates observable influence)
+  const hasOutboundEdge = edges.some((e) => e.from === nodeId);
+  if (hasOutboundEdge) return "observable";
+
+  // Default to external for isolated factors
+  return "external";
 }
 
 /**
@@ -149,12 +1485,35 @@ export function enrichGraphWithFactors(
   for (const factor of qualified) {
     if (factorsAdded >= maxFactors) break;
 
-    // Check if a similar factor already exists
-    const existingNode = existingFactors.find(
-      (n) => n.label && labelsMatch(n.label, factor.label)
-    );
+    // Same selection as the async twin, so the two cannot drift apart on the
+    // one question they both answer (see `selectEnhanceTarget`). This path
+    // keeps no warnings array, so the refusal is logged and counted only.
+    const selection = selectEnhanceTarget(existingFactors, factor, graph.nodes);
+
+    if (selection.refusedBy !== undefined) {
+      factorsSkipped++;
+      log.info(
+        {
+          event: "cee.factor_enrichment.refused_off_basis",
+          nodeId: selection.refusedBy.id,
+          nodeLabel: selection.refusedBy.label,
+          refusedLabel: factor.label,
+          refusedValue: factor.value,
+          refusedUnit: factor.unit,
+          refusedMatchedText: factor.matchedText,
+        },
+        `Refusing to write "${factor.matchedText}" onto "${selection.refusedBy.id}": the records do not declare it as a current value for that node`,
+      );
+      continue;
+    }
+
+    const existingNode = selection.node;
 
     if (existingNode) {
+      if (hasUnboundQuantityLabel(existingNode, factor)) {
+        factorsSkipped++;
+        continue;
+      }
       // Enhance existing factor with data if it doesn't have meaningful values
       // Check for actual numeric data, not just existence of data object
       // Use type guard to ensure we're checking FactorData properties (not OptionData)
@@ -166,7 +1525,10 @@ export function enrichGraphWithFactors(
         const nodeIndex = enrichedGraph.nodes.findIndex((n) => n.id === existingNode.id);
         if (nodeIndex >= 0) {
           const factorData: FactorDataT = {
-            value: factor.value,
+            // ⭐ Where the factor IS, not where the brief proposes to move it.
+            // This writer stores no cap, so the stated level stays in its own
+            // units — `statedCurrentRaw`'s header has the derivation.
+            value: statedCurrentRaw(factor),
             baseline: factor.baseline,
             unit: factor.unit,
             // Include extraction metadata for value_std derivation
@@ -198,9 +1560,32 @@ export function enrichGraphWithFactors(
     }
 
     // Create new factor node
+    // ⭐⭐⭐ THE RECORDS MAY HAVE ALREADY PLACED THIS FIGURE ON A SUBJECT.
+    // Minting a rival factor for it is how one stated quantity becomes two
+    // disagreeing nodes — and how the £20k MRR goal figure became a factor
+    // called "Churn Rate" denominated in pounds. See `figureAlreadyPlacedBy`.
+    const placedBy = figureAlreadyPlacedBy(graph.nodes, factor);
+    if (placedBy !== undefined) {
+      factorsSkipped++;
+      log.info(
+        {
+          event: "cee.factor_enrichment.refused_already_placed",
+          nodeId: placedBy.id,
+          nodeLabel: placedBy.label,
+          refusedLabel: factor.label,
+          refusedValue: factor.value,
+          refusedUnit: factor.unit,
+          refusedMatchedText: factor.matchedText,
+        },
+        `Refusing to mint "${factor.label}" for "${factor.matchedText}": the records already place that figure on "${placedBy.id}"`,
+      );
+      continue;
+    }
+
     const nodeId = generateFactorId(factor.label, factorsAdded);
     const factorData: FactorDataT = {
-      value: factor.value,
+      // ⭐ Where the factor IS — see `statedCurrentRaw`.
+      value: statedCurrentRaw(factor),
       baseline: factor.baseline,
       unit: factor.unit,
       // Include extraction metadata for value_std derivation
@@ -230,10 +1615,16 @@ export function enrichGraphWithFactors(
       const newEdge: EdgeT = {
         from: nodeId,
         to: targetId,
-        belief: factor.confidence,
+        belief: factor.confidence ?? DEFAULT_EXISTS_PROBABILITY,
+        belief_exists: factor.confidence ?? DEFAULT_EXISTS_PROBABILITY,
+        strength_mean: 0.5,
+        strength_std: 0.2,
+        effect_direction: "positive",
+        origin: "enrichment",
+        defaulted: true,
         provenance: {
           source: "hypothesis",
-          quote: `Extracted from brief: "${factor.matchedText}"`,
+          quote: briefExtractionQuote(factor.matchedText),
         },
         provenance_source: "hypothesis",
       };
@@ -270,12 +1661,687 @@ export function enrichGraphWithFactors(
  * Extended enrichment result with LLM metadata
  */
 export interface EnrichmentResultAsync extends EnrichmentResult {
-  /** Extraction mode used (llm-first or regex-only) */
-  extractionMode: "llm-first" | "regex-only";
+  /**
+   * Extraction mode used.
+   *
+   * ROADMAP 2.281 — `v4_complete_skip` means what it says and ONLY what it
+   * says: nothing was written. When the factor-side skip fires but the
+   * goal-target redirect still mints a threshold, the mode is
+   * `v4_factor_skip_goal_minted`, because a run that changed the graph must
+   * not report itself as a complete skip. (The re-witness found the wire
+   * carrying no `goal_threshold` at all while the trace claimed a clean
+   * "complete skip" — the label was true about factors and silent about the
+   * thing that actually mattered.)
+   */
+  extractionMode:
+    | "llm-first"
+    | "regex-only"
+    | "v4_complete_skip"
+    | "v4_factor_skip_goal_minted";
   /** Whether LLM extraction succeeded (if LLM mode used) */
   llmSuccess?: boolean;
   /** Any warnings from extraction */
   warnings: string[];
+  /**
+   * ATTESTATION (ROADMAP 2.281): the ids of goal nodes whose `goal_threshold`
+   * THIS run minted, derived at the mint site itself — never a hand list, never
+   * re-inferred by a later stage from the shape of the data.
+   *
+   * Stage 4b (threshold-sweep) consumes it. Its "possibly model-inferred"
+   * heuristic — round raw + digit-free label ⇒ strip — cannot distinguish a
+   * model's invention from a user's stated target, and post-#789 the enricher
+   * is the ONLY draft mint, so on a digit-free goal label that heuristic could
+   * only ever delete a number the USER supplied. This list is what lets the
+   * sweep tell the two apart from the RECORD of what happened, rather than by
+   * guessing from the number's appearance.
+   */
+  goalThresholdsMinted: string[];
+  /**
+   * ROUND 6 (CEE #1328) — the figure the goal LABEL names, when the brief
+   * contains it and nothing else minted a target: a CANDIDATE for the
+   * orchestration seam to ask the user about, never a write. Carried to
+   * `ctx.goal_target_candidate` by `stages/enrich.ts`; one name, one hop,
+   * one reader. Absent when the label names no figure the brief contains, or
+   * when a typed target is already on the node.
+   */
+  goal_target_candidate?: GoalTargetCandidate;
+}
+
+/**
+ * Confidence-filter + dedupe the raw extraction into the list the enricher
+ * will actually consume.
+ *
+ * HOISTED (ROADMAP 2.281) so the full path and the factor-skip path qualify
+ * candidates through ONE implementation. Two copies of this logic would be
+ * exactly the `generateGraphHash` twins defect: they would agree on the day
+ * they were written and drift silently thereafter, and the drift would show
+ * up as a goal threshold that appears on one draft shape and not another.
+ */
+function qualifyExtractedFactors(
+  extracted: ExtractedFactor[],
+  minConfidence: number,
+): ExtractedFactor[] {
+  const confidenceFiltered = extracted.filter((f) => f.confidence >= minConfidence);
+
+  // Dedupe extracted factors against each other before injection
+  // Same value + same unit = duplicate, or matching labels (e.g., "Churn" vs "Churn Rate")
+  const qualified: ExtractedFactor[] = [];
+  for (const factor of confidenceFiltered) {
+    // Indices of every already-qualified factor this one collides with as
+    // "the same quantity" (unit-compatible + value within 10%, or matching
+    // labels). The predicate is byte-identical to the pre-2.299 `.some`.
+    const collidingIdx: number[] = [];
+    for (let i = 0; i < qualified.length; i++) {
+      const existing = qualified[i];
+
+      // Check unit compatibility first
+      if (!unitsCompatible(existing.unit, factor.unit)) continue;
+
+      // ⭐⭐⭐ NUMERIC PROXIMITY IS ONLY EVIDENCE OF SAMENESS WHEN AT LEAST ONE
+      // SIDE NAMED NO SUBJECT (measured on the wire, Render
+      // srv-d4slpaili9vc73eiq4og, 17 Sep 17:58:34Z and 18:00:34Z).
+      //
+      // A pricing brief put three prices and a churn figure in one paragraph.
+      // `inferLabel`'s 50-character lookbehind bound the prices to "Churn Rate";
+      // the correctly-labelled {Plan Price, 59} then arrived and was DISCARDED
+      // as a duplicate — `cee.factor_extraction.dedupe_within_extraction`,
+      // skippedLabel "Plan Price", skippedValue 59 — because a wrongly-labelled
+      // factor already held 59 and the value limb below carried NO label
+      // condition at all. So the failure did not merely mislabel a number: it
+      // deleted the correct factor to keep the incorrect one, and a
+      // required-fields guard saw a factor carrying a value and called it
+      // healthy. "More fields populated" is the wrong success metric.
+      //
+      // ⛔ THE FIX IS NOT A BETTER SUBJECT-INFERENCE RULE OVER PROSE. This
+      // estate has already spent four rounds oscillating on one such predicate
+      // (CLAUDE.md trap 22f); a fifth rule is the forbidden move. The
+      // discriminator used here is STRUCTURAL and comes from the extractor's own
+      // record: `isUnidentifiedQuantityLabel` is true exactly when `inferLabel`
+      // found NO context word and fell back to naming the quantity's shape
+      // ("Value"/"Rate"/"Factor"). When BOTH sides name a subject and those
+      // names do not match, a shared number is not evidence they are the same
+      // quantity — the labels are, and the label limb below is what decides it.
+      // When either side named nothing, proximity is still the best available
+      // reading and the limb applies unchanged (this is what keeps ROADMAP
+      // 2.299's {Factor, 6M} vs {Target, 6M} collision collapsing).
+      const eitherSideNamedNoSubject =
+        isUnidentifiedQuantityLabel(existing.label) || isUnidentifiedQuantityLabel(factor.label);
+
+      // Check value within 10% tolerance
+      let isDuplicate = false;
+      if (eitherSideNamedNoSubject && existing.value !== undefined && factor.value !== undefined) {
+        const tolerance = Math.abs(existing.value * 0.1);
+        if (Math.abs(existing.value - factor.value) <= tolerance) {
+          isDuplicate = true;
+        }
+      }
+
+      // Check label similarity (e.g., "Churn" vs "Churn Rate")
+      if (!isDuplicate && labelsMatch(existing.label, factor.label)) {
+        isDuplicate = true;
+      }
+
+      if (isDuplicate) collidingIdx.push(i);
+    }
+
+    if (collidingIdx.length === 0) {
+      qualified.push(factor);
+      continue;
+    }
+
+    // ROADMAP 2.299 — the collision is decided by ROLE, then CONFIDENCE, and
+    // only on a full tie by push order. The pre-2.299 rule was push order
+    // ALONE ("first wins"), which let `genericRange` — an earlier, LOWER
+    // confidence, generic extraction — swallow the user's stated Target when
+    // a range midpoint landed within 10% of it (#791's collision brief: the
+    // user said "our target is 6000000", the product rendered "Target: Not
+    // set"). Only a goal/target-labelled factor can reach the goal-threshold
+    // mint, so at equal value the Target IS the more truthful reading of the
+    // quantity; among equals, the extractor's own confidence ranks them.
+    // The challenger must beat EVERY collider — losing to any one of them
+    // means an incumbent already covers this quantity better.
+    const supersedes = collidingIdx.every((i) => {
+      const incumbent = qualified[i];
+      const challengerIsTarget = isTargetGoalLabel(factor.label);
+      const incumbentIsTarget = isTargetGoalLabel(incumbent.label);
+      if (challengerIsTarget !== incumbentIsTarget) return challengerIsTarget;
+      // ⭐ SECOND RUNG ON THE SAME ROLE AXIS: a factor that NAMES its subject
+      // beats one that admits it could not identify one. Without this, the
+      // surviving collision above is decided by confidence alone — and both
+      // sides of a "Value 59" / "Plan Price 59" collision carry the same 0.6
+      // inferred confidence, so the generic label wins on push order and the
+      // named one is discarded. That is the same harm one rung down from the
+      // measured defect, and the module already rules this way at the write
+      // seam (`hasUnboundQuantityLabel`): a fallback word "does not establish
+      // that the number measures that node".
+      const challengerNamesSubject = !isUnidentifiedQuantityLabel(factor.label);
+      const incumbentNamesSubject = !isUnidentifiedQuantityLabel(incumbent.label);
+      if (challengerNamesSubject !== incumbentNamesSubject) return challengerNamesSubject;
+      return factor.confidence > incumbent.confidence;
+    });
+
+    if (supersedes) {
+      // Replace the first collider IN PLACE (list position — and therefore
+      // everything downstream that is order-sensitive — is preserved), and
+      // drop any further colliders: the quantity has one survivor.
+      const superseded = qualified[collidingIdx[0]];
+      qualified[collidingIdx[0]] = factor;
+      for (let j = collidingIdx.length - 1; j >= 1; j--) {
+        qualified.splice(collidingIdx[j], 1);
+      }
+      log.debug(
+        {
+          keptLabel: factor.label,
+          keptValue: factor.value,
+          supersededLabel: superseded.label,
+          supersededValue: superseded.value,
+          event: "cee.factor_extraction.dedupe_superseded",
+        },
+        `Extracted factor "${factor.label}" superseded colliding "${superseded.label}"`
+      );
+    } else {
+      log.debug(
+        {
+          skippedLabel: factor.label,
+          skippedValue: factor.value,
+          event: "cee.factor_extraction.dedupe_within_extraction",
+        },
+        `Skipping duplicate extracted factor: "${factor.label}"`
+      );
+    }
+  }
+
+  return qualified;
+}
+
+/**
+ * THE ENRICHER'S mint of `goal_threshold` on the draft path.
+ *
+ * ⚠⚠ IT IS NOT THE ONLY ONE, AND AN EARLIER VERSION OF THIS DOC SAID IT WAS.
+ * `applyStatedGoalTarget` (`cee/draft/records/projector.ts:1312`) mints the
+ * same five fields from the model's STATED GOAL RECORD. That sibling read as
+ * absent because `stripModelAuthoredGoalThreshold` deleted its output before
+ * this function ever saw it — and **#1339 removed that strip on the Anthropic
+ * path**, so on that provider the projector now mints FIRST and this function
+ * is the fallback. The strip is deliberately retained on the OpenAI path
+ * (`adapters/llm/openai.ts`), where this remains the only surviving mint.
+ *
+ * The false premise was not a careless sentence: it was derived by a
+ * SINGLE-STAGE measurement (running `extractFactors` over the brief), which is
+ * structurally incapable of seeing a mint two stages upstream — CLAUDE.md trap
+ * 16-inverse, reachability within one stage is not reachability in the system.
+ *
+ * Mutates `enrichedGraph.nodes[goalNodeIndex]` in place (the caller owns the
+ * clone) and returns whether it minted. Returns `false` — writing nothing —
+ * when the goal node already carries an upstream target, which is the
+ * pre-existing "first writer wins" rule.
+ *
+ * ROADMAP 2.281 — extracted verbatim from the enrichment loop so the
+ * factor-skip path can reach it. Every line of arithmetic and every stamped
+ * field below is unchanged from the in-loop version; only its address moved.
+ */
+/**
+ * ⭐ EXPORTED FOR ITS GUARD, and the reason is that the harm it now refuses is
+ * NOT REACHABLE THROUGH `enrichGraphWithFactorsAsync(graph, brief)`.
+ *
+ * Measured: `extractFactors("Our target is 12 months.")` returns
+ * `{label:"Target", value:12}` with **NO unit** — the regex path never emits a
+ * temporal unit at all, so no brief string can drive a duration-united factor
+ * into this function. The unit that produced the live defect
+ * (`goal_threshold_unit: "months"`, 2/5 draws on staging `50cb5d5f`) comes from
+ * the LLM-assisted factor path, which a unit test cannot call.
+ *
+ * So the screen is exercised against the shape the WIRE demonstrated, injected
+ * directly, with its contrast twin (`unit: "£"` must still mint) proving the
+ * route was narrowed and not broken. Testing the predicate alone would be
+ * "presence of a guard is not coverage of its input" (trap 22b); this tests the
+ * function that writes.
+ */
+export function applyGoalTargetRedirect(
+  enrichedGraph: GraphT,
+  goalNodeIndex: number,
+  factor: ExtractedFactor,
+  collector?: CorrectionCollector,
+): boolean {
+  const currentGoalNode = enrichedGraph.nodes[goalNodeIndex];
+  if (currentGoalNode.goal_threshold !== undefined) return false;
+
+  // ⚠ THE DEFERRAL LIVES HERE, NOT IN THE LABEL ROUTE, DELIBERATELY. The factor
+  // route and the label-route fallback added by this change both pass through this
+  // one point; gating only the caller would leave the factor route committing the
+  // identical harm through a door nothing watches (trap 22b).
+
+  // ⭐⭐ AN UPSTREAM MINT THAT RESOLVED NO CAP STILL WROTE THE USER'S TARGET.
+  //
+  // `projector.ts:1335` writes `goal_threshold_raw` UNCONDITIONALLY and writes
+  // `goal_threshold`/`_cap`/`_frame` only `if (cap !== null)`. The cap resolver
+  // ends `if (raw > 0) return raw * 1.25; return null`
+  // (`utils/goal-threshold-cap.ts`), so a STATED TARGET OF ZERO resolves null
+  // and leaves a PARTIAL QUAD: raw written, threshold absent.
+  //
+  // Guarding on `goal_threshold` alone therefore misses it, and this function
+  // goes on to overwrite the user's stated zero with whatever the extracted
+  // factor carries — in the witnessed case, THE CURRENT LEVEL they were trying
+  // to move away from. A goal labelled "Cut Churn From 4% To Zero" shipped
+  // `goal_threshold_raw: 4`. That is not a mislabelled value; it CONTRADICTS
+  // the user's stated intent with the number they explicitly rejected.
+  //
+  // ⚠ THE PREDICATE IS THE CONSUMER'S, NOT `!== undefined`. `goal_threshold_raw`
+  // is `z.number().nullable().optional()` (`schemas/graph.ts:344`), and
+  // `null !== undefined` is TRUE — so an `!== undefined` guard would DEFER TO A
+  // NULL and suppress a legitimate mint, trading this lie for a gap. This is
+  // `pickGoalThresholdTrio`'s own anchor test (`utils/goal-threshold-trio.ts`),
+  // which is what decides whether a raw value actually rides to a consumer:
+  // defer exactly when one would.
+  //
+  // The zero is DEFERRED TO, not discarded — it stays on the node as
+  // `goal_threshold_raw: 0` and still rides the trio, so the target remains
+  // explicit and recoverable while `goal_threshold` stays honestly unresolved.
+  if (
+    typeof currentGoalNode.goal_threshold_raw === "number" &&
+    Number.isFinite(currentGoalNode.goal_threshold_raw)
+  ) {
+    return false;
+  }
+
+  // ── ⛔⛔ A DEADLINE IS NOT A SUCCESS TARGET, AND THIS FUNCTION SHIPPED ONE ──
+  //
+  // MEASURED, 5 identical draws on staging `50cb5d5f` (2026-09-14), brief
+  // "Given our goal of reaching £20k MRR within 12 months while keeping monthly
+  // churn under 4%, …". In 2 of the 5 the goal node "Reach £20k MRR Within 12
+  // Months" shipped:
+  //
+  //     goal_threshold_raw: 12   goal_threshold_unit: "months"
+  //     goal_threshold_cap: 15   goal_threshold: 0.8
+  //
+  // — arithmetic confirmed against `resolveGoalThresholdCap` (12 × 1.25 = 15,
+  // 12 / 15 = 0.8), so the route is this function and not an inference. The
+  // product then reported `goal_target_stated: true` and ISL scored every
+  // option's `probability_of_goal` against **twelve months** on a node measured
+  // in £. The other 3 of 5 carried no threshold at all.
+  //
+  // ⚠ NOTE WHICH WAY THAT CUTS. "Target not captured" is a visible gap; a
+  // registered deadline is a CONFIDENT LIE wearing the same field, and the user
+  // has no way to tell them apart. A lie outranks a gap — this module's sibling
+  // `goal-label-target.ts` excluded temporal quantities for exactly this reason
+  // ("Admitting it here would mint `goal_threshold_raw: 18, unit: 'months'`
+  // onto a node measured in £") while the factor route beside it, which is the
+  // one that actually fires, never had the screen. Trap 22b: one harm closed on
+  // one route and left open on its neighbour, and neither route's tests can see
+  // the other.
+  //
+  // ⚠ THE QUESTION IS ASKED OF THE QUANTITY'S OWN UNIT, NOT OF A NEARBY WORD.
+  // "4% year on year" and "£200k year on year" are a percentage and a sum of
+  // money measured annually, not durations; classifying by an adjacent time
+  // word deleted attested targets when the sibling module tried it. `unitIsTemporal`
+  // composes the shared `TIME_UNIT_ALT` vocabulary and is anchor-asserted at
+  // load, so it cannot decay into a silent always-false (trap 15).
+  //
+  // ⭐ AND THE REFUSAL CASCADES USEFULLY. Both callers reach this function from
+  // inside a scan over extracted factors, so declining a duration lets a later
+  // non-temporal target quantity have its turn instead of the deadline
+  // consuming the single mint. The refusal removes a lie without closing a door.
+  if (unitIsTemporal(factor.unit)) {
+    log.info(
+      {
+        goalNodeId: currentGoalNode.id,
+        factor_label: factor.label,
+        factor_unit: factor.unit,
+        factor_value: factor.value,
+        event: "cee.factor_enrichment.goal_threshold_refused_temporal",
+      },
+      `Refused a temporal quantity as the goal threshold on "${currentGoalNode.id}" — a deadline is not a success target`,
+    );
+    return false;
+  }
+
+  // Full delegation to the SAME cap doctrine as the chat-path
+  // add_constraint handler (cap-doctrine unification, ROADMAP 1.18):
+  // an existing compatible cap wins, '%' always normalises against
+  // 100, else 25% headroom above the raw target. Deliberately NOT
+  // computeNormalisationCap (order-of-magnitude) — that diverged
+  // from the chat path and scored the same target up to ~5x
+  // differently depending on registration path.
+  //
+  // Regex extraction (cee/factor-extraction/index.ts) pre-divides
+  // percentages into a 0-1 fraction before this code runs, whereas
+  // resolveGoalThresholdCap's '%' branch — and the chat path's own
+  // convention — expects the RAW PERCENT NUMBER (15 for "15%"), the
+  // same "value stored in USER UNITS" convention add-constraint.ts
+  // uses for goal_threshold_raw. Reconstruct it here so BOTH paths
+  // register an IDENTICAL contract (raw/unit/cap/threshold), not
+  // just a coincidentally-equal goal_threshold: without this a 15%
+  // target registered via the draft path persisted
+  // goal_threshold_raw=0.15 (fraction, wrong display units) and no
+  // cap, while the chat path persisted raw=15/cap=100 — a
+  // draft-vs-chat parity break in the DISPLAY contract even though
+  // the scored 0.15 threshold happened to coincide.
+  const rawForResolver = factor.unit === "%" ? factor.value * 100 : factor.value;
+
+  let normalizedValue = factor.value;
+  let rawValue: number | undefined;
+  let cap: number | undefined;
+  let capProvenance: GoalThresholdCapProvenance | undefined;
+
+  const resolvedCapWithProvenance = resolveGoalThresholdCapWithProvenance(
+    currentGoalNode.goal_threshold_cap,
+    rawForResolver,
+    factor.unit,
+    currentGoalNode.goal_threshold_unit,
+  );
+  // ROADMAP 2.273 — the user-stated CURRENT LEVEL, carried by the same
+  // extraction match that produced the target (so the two numbers are
+  // provably about the same metric) and reconstructed into the SAME raw
+  // convention as the target above.
+  const rawBaseline =
+    factor.baseline === undefined
+      ? undefined
+      : factor.unit === "%"
+        ? factor.baseline * 100
+        : factor.baseline;
+
+  let normalizedBaseline: number | undefined;
+
+  if (resolvedCapWithProvenance !== null) {
+    cap = resolvedCapWithProvenance.cap;
+    // Captured from the SAME resolution as the cap, never re-derived — a second
+    // resolution can disagree with the cap the graph was actually scored
+    // against (the cap doctrine is order-dependent).
+    capProvenance = resolvedCapWithProvenance.provenance;
+    rawValue = rawForResolver;
+    normalizedValue = rawForResolver / cap;
+    // THE SHARED DENOMINATOR. Divided by the very same `cap` on
+    // the same branch, so threshold and baseline cannot drift onto
+    // different scales — ISL's `threshold − baseline + intercept` is
+    // only meaningful when both operands were scored against one cap,
+    // and a mismatch there yields a confident WRONG probability rather
+    // than an error.
+    //
+    // ⭐⭐ AND THE SHARED DENOMINATOR IS NOT THE WHOLE QUESTION (ROADMAP
+    // 2.1160). One cap makes the two numbers COMMENSURABLE; it does not
+    // make the pair EXPRESSIBLE. The chat path's twin writer takes its
+    // baseline from `extractGoalTargetWithBaseline`, which refuses a
+    // DECREASING pair by name (`index.ts:1771-1782`, ROADMAP 2.353 review
+    // A2) because `goal_threshold_frame` is the code constant 'level' and
+    // ISL asks `P(level >= threshold)` — a target below its stated current
+    // level inverts the question and returns a confident wrong answer. This
+    // route consulted no such rule, and stamped one: MEASURED on staging
+    // (`public.scenarios`, 2026-09-10 22:05:08Z) a goal carrying
+    // `goal_threshold_raw 2`, `cap 2.5` and a stated level of 14 shipped
+    // `observed_state.baseline 5.6` — five weeks AFTER the sibling refusal
+    // landed. Trap 22b: one harm closed on one route, left open on its
+    // neighbour, invisible to both routes' tests.
+    //
+    // The rule is IMPORTED, never restated — two derivations of one doctrine
+    // drift and the drift reads as green (trap 12).
+    //
+    // ⚠ ONLY THE BASELINE IS WITHHELD. `goal_threshold`, `_raw`, `_unit` and
+    // `_cap` are stamped below exactly as before, so the user's own figure
+    // still reaches the screen ("Target: £90" stays true). Without a
+    // baseline, `transforms/schema-v3.ts:405` builds no `observed_state`,
+    // ISL refuses with `missing_goal_baseline` and the ranking is withheld —
+    // the same honest refusal the `else` branch below already relies on.
+    if (rawBaseline === undefined) {
+      normalizedBaseline = undefined;
+    } else {
+      const admission = admitGoalBaseline({
+        rawTarget: rawForResolver,
+        rawBaseline,
+        cap,
+      });
+      if (admission.admitted) {
+        normalizedBaseline = admission.normalised;
+      } else {
+        normalizedBaseline = undefined;
+        log.info(
+          {
+            goalNodeId: currentGoalNode.id,
+            factor_label: factor.label,
+            factor_unit: factor.unit,
+            raw_target: rawForResolver,
+            raw_baseline: rawBaseline,
+            cap,
+            refusal: admission.reason,
+            event: "cee.factor_enrichment.goal_baseline_withheld",
+          },
+          `Withheld the stated current level on "${currentGoalNode.id}" (${admission.reason}) — the target is registered, the probability is not`,
+        );
+      }
+    }
+  } else {
+    rawValue = rawForResolver;
+    // No sound denominator exists, so the target itself is registered
+    // un-normalised. Carrying a normalised baseline beside an
+    // un-normalised threshold would be exactly the cross-scale
+    // subtraction guarded against above — so the baseline is omitted
+    // too, and ISL keeps refusing honestly.
+    normalizedBaseline = undefined;
+  }
+
+  // Update goal node with threshold fields
+  enrichedGraph.nodes[goalNodeIndex] = {
+    ...currentGoalNode,
+    goal_threshold: normalizedValue,
+    goal_threshold_raw: rawValue,
+    goal_threshold_unit: factor.unit ?? "count",
+    goal_threshold_cap: cap,
+    // WHICH RULE produced that denominator. Carried from the same resolution,
+    // and only when a cap exists for it to describe. On
+    // `target_derived_headroom` the cap is `raw * 1.25`, which makes
+    // `goal_threshold` the constant 0.8 for every target — a consumer cannot
+    // fail closed on a denominator it cannot see.
+    ...(capProvenance !== undefined && {
+      goal_threshold_cap_provenance: capProvenance,
+    }),
+    // ROADMAP 2.258 — attest the FRAME beside the number. A CODE
+    // CONSTANT: the arithmetic three lines up is `raw / cap`, an
+    // absolute LEVEL on the metric's own scale, so `'level'` is true
+    // here by construction and is never derived from `factor`, from the
+    // brief, or from anything a model wrote.
+    goal_threshold_frame: CEE_GOAL_THRESHOLD_FRAME,
+    // Only ever present when the brief STATED a current level. No
+    // inference, no default, no derivation from the target.
+    ...(normalizedBaseline !== undefined && {
+      goal_baseline: normalizedBaseline,
+      goal_baseline_raw: rawBaseline,
+    }),
+  };
+
+  log.info(
+    {
+      goalNodeId: currentGoalNode.id,
+      goal_threshold: normalizedValue,
+      goal_threshold_raw: rawValue,
+      goal_threshold_cap: cap,
+      originalLabel: factor.label,
+      wasNormalized: cap !== undefined,
+      event: "cee.factor_enrichment.goal_threshold_set",
+    },
+    `Redirected target quantity to goal_threshold on "${currentGoalNode.id}"`
+  );
+
+  // Record correction for goal threshold set (Stage 11: Factor Enrichment)
+  if (collector) {
+    collector.addByStage(
+      11, // Stage 11: Factor Enrichment
+      "node_modified",
+      { node_id: currentGoalNode.id, kind: "goal" },
+      `Set goal_threshold from extracted target quantity`,
+      { id: currentGoalNode.id },
+      {
+        id: currentGoalNode.id,
+        goal_threshold: normalizedValue,
+        goal_threshold_raw: rawValue,
+        goal_threshold_cap: cap,
+      }
+    );
+  }
+
+  return true;
+}
+
+/**
+ * THE FALLBACK ROUTE — ROUND 6: A CANDIDATE, NOT A MINT.
+ *
+ * ⭐ WHY THIS ROUTE EXISTS. `isTargetGoalLabel` decides whether the user's
+ * stated target becomes typed data by asking whether a REGEX-INFERRED FACTOR
+ * LABEL contains one of four substrings. MEASURED at `f4c8f501` against the
+ * 3 Sep founder brief: 21 extracted factors, ZERO carrying any of the four
+ * words, and the £30,000 target extracted under the label `"Customer Count"`.
+ * The mint was UNREACHABLE for that brief and the target shipped as label
+ * prose with all four typed fields null.
+ *
+ * ⛔ WHY IT NO LONGER WRITES. Rounds 1–5 tried to decide, from the label and
+ * the brief alone, whether a figure that OCCURS in the brief was STATED as
+ * this goal's target. Sixteen defects in one evening, and the round-five tweak
+ * run in advance oscillated (see `goal-label-target.ts` ROUND 6 block). Codex's
+ * decisive case — "We rejected the proposal to reach £64k MRR." — returned
+ * `ok: true` and was written as the user's target on both routes. The label is
+ * MODEL-authored; a number read from it is a suggestion, never authority to
+ * write. So this route now derives a CANDIDATE and writes nothing. The
+ * orchestration seam asks the user through `elicit_goal_target` — whose
+ * pending record carries no value field, so only the user's answer, through
+ * the ONE canonical success-target writer, becomes `goal_threshold`.
+ *
+ * FIRST WRITER WINS still holds one level up: a node that already carries a
+ * typed target (`goal_threshold`, or the finite `goal_threshold_raw` the
+ * projector always writes — including the PARTIAL quad a stated zero leaves)
+ * yields no candidate, so the projector and factor routes are untouched.
+ *
+ * Returns the candidate, or `undefined`, and logs the reason either way.
+ */
+function deriveGoalTargetCandidateFromLabel(
+  enrichedGraph: GraphT,
+  goalNodeIndex: number,
+  brief: string,
+): GoalTargetCandidate | undefined {
+  const goalNode = enrichedGraph.nodes[goalNodeIndex];
+  if (!goalNode) return undefined;
+
+  if (
+    goalNode.goal_threshold !== undefined ||
+    (typeof goalNode.goal_threshold_raw === "number" && Number.isFinite(goalNode.goal_threshold_raw))
+  ) {
+    log.info(
+      {
+        event: "cee.factor_enrichment.goal_target_candidate_suppressed",
+        goalNodeId: goalNode.id,
+        reason: "threshold_already_set",
+      },
+      "Goal label candidate not derived: a typed target is already on the node",
+    );
+    return undefined;
+  }
+
+  const context = { goalSourceQuote: statedSourceQuote(goalNode) };
+  const candidate = deriveGoalTargetCandidate(goalNode.id, goalNode.label, brief, context);
+  if (candidate === undefined) {
+    const derived = deriveGoalTargetFromLabel(goalNode.label, brief, context);
+    logGoalLabelRefusal(
+      goalNode.id,
+      derived.ok ? "quantity_not_attested" : derived.refusal,
+      derived.ok ? undefined : derived.briefQuote,
+    );
+    return undefined;
+  }
+
+  log.info(
+    {
+      event: "cee.factor_enrichment.goal_target_candidate",
+      goalNodeId: goalNode.id,
+      binding: candidate.binding,
+      reason: candidate.reason,
+      label_span: candidate.label_span,
+      brief_span: candidate.brief_span,
+      unit: candidate.unit,
+    },
+    // ⚠ "from the goal label" was true of every arm until the unlabelled-goal
+    // arm existed, and is false of it — that arm fires precisely BECAUSE the
+    // label named nothing. A log line that misreports which route produced a
+    // record is how the next reader draws the wrong conclusion from a real
+    // event, so the sentence now names the route rather than assuming it.
+    candidate.binding === "unlabelled_goal"
+      ? `Goal target candidate: the label names no figure and the brief states one, so the person will be asked (${candidate.binding}); nothing written`
+      : `Goal target candidate derived from the goal label (${candidate.binding}); nothing written`,
+  );
+  return candidate;
+}
+
+/** Fail loud on every non-mint, with the reason, never a silence. */
+function logGoalLabelRefusal(
+  goalNodeId: string,
+  refusal: GoalLabelTargetRefusal,
+  briefSpan?: string,
+): void {
+  log.info(
+    {
+      event: "cee.factor_enrichment.goal_threshold_label_refused",
+      goalNodeId,
+      refusal,
+      // The occurrence the refusal is ABOUT, when the figure was found in the
+      // brief in a role other than this goal's target (round 5). Absent for the
+      // scanner-level refusals, which have no occurrence to name.
+      ...(briefSpan !== undefined && { brief_span: briefSpan }),
+    },
+    `Goal target not minted from the goal label: ${refusal}`,
+  );
+}
+
+/**
+ * The goal-target redirect, run WITHOUT the factor side.
+ *
+ * ROADMAP 2.281 — the repair. `allOptionsHaveInterventions` is a sound reason
+ * to stop re-extracting FACTORS (the model already supplied them); it was
+ * never a reason to skip the GOAL TARGET, which is a number the USER stated
+ * and which no amount of model-supplied intervention data can substitute for.
+ * Because the skip fires on every well-formed draft, the mint at
+ * `applyGoalTargetRedirect` was unreachable in production: the re-witness
+ * measured `goal_threshold` ×0 on the wire across three scenario classes,
+ * with ISL never asked.
+ *
+ * DELIBERATELY REGEX-ONLY (`extractFactors`, never `extractFactorsOrchestrated`):
+ *   1. #789's doctrine is that no model authors a threshold. The goal target is
+ *      a user-stated number and is read deterministically.
+ *   2. The skip exists partly to avoid the LLM extraction pass on complete
+ *      drafts. Reintroducing that call here would change the cost profile of
+ *      every well-formed draft, which this repair has no mandate to do.
+ */
+function mintGoalTargetOnly(
+  graph: GraphT,
+  brief: string,
+  minConfidence: number,
+  collector?: CorrectionCollector,
+): { graph: GraphT; mintedGoalId: string | undefined; goalTargetCandidate: GoalTargetCandidate | undefined } {
+  const goalNodeIndex = graph.nodes.findIndex((n) => n.kind === "goal");
+  if (goalNodeIndex < 0) return { graph, mintedGoalId: undefined, goalTargetCandidate: undefined };
+
+  const target = qualifyExtractedFactors(extractFactors(brief), minConfidence).find((f) =>
+    isTargetGoalLabel(f.label),
+  );
+
+  // Clone before writing — the skip path returns the caller's own graph object
+  // when nothing is minted, and must not mutate it when something is.
+  const enrichedGraph: GraphT = {
+    ...graph,
+    nodes: [...graph.nodes],
+    edges: [...graph.edges],
+  };
+
+  // ⚠ NO EARLY RETURN ON `!target` ANY MORE. That return is what made the mint
+  // unreachable for the 3 Sep founder brief: `isTargetGoalLabel` matched none
+  // of its 21 extracted factor labels, so the skip path gave up before ever
+  // looking at the goal node — whose label carried the target in plain sight.
+  const minted = target
+    ? applyGoalTargetRedirect(enrichedGraph, goalNodeIndex, target, collector)
+    : false;
+  if (minted) {
+    return { graph: enrichedGraph, mintedGoalId: enrichedGraph.nodes[goalNodeIndex].id, goalTargetCandidate: undefined };
+  }
+
+  // ROUND 6: the label route derives a CANDIDATE and writes nothing, so the
+  // caller's graph object is returned untouched.
+  const goalTargetCandidate = deriveGoalTargetCandidateFromLabel(graph, goalNodeIndex, brief);
+  return { graph, mintedGoalId: undefined, goalTargetCandidate };
 }
 
 /**
@@ -289,9 +2355,68 @@ export interface EnrichmentResultAsync extends EnrichmentResult {
 export async function enrichGraphWithFactorsAsync(
   graph: GraphT,
   brief: string,
-  options: { minConfidence?: number; maxFactors?: number; collector?: CorrectionCollector } = {}
+  options: { minConfidence?: number; maxFactors?: number; collector?: CorrectionCollector; modelOverride?: string } = {}
 ): Promise<EnrichmentResultAsync> {
-  const { minConfidence = 0.6, maxFactors = 10, collector } = options;
+  const { minConfidence = 0.6, maxFactors = 10, collector, modelOverride } = options;
+
+  // Early exit: skip extraction when LLM provides complete V4 intervention data
+  const optionNodes = graph.nodes.filter(n => n.kind === "option");
+  if (optionNodes.length > 0) {
+    const factorNodes = graph.nodes.filter(n => n.kind === "factor");
+    const factorMap = new Map(factorNodes.map(n => [n.id, n]));
+    const allOptionsHaveInterventions = optionNodes.every(n => {
+      if (!n.data || !('interventions' in n.data)) return false;
+      const interventions = (n.data as { interventions: Record<string, number> }).interventions;
+      const entries = Object.entries(interventions);
+      // Must have at least one intervention, all targets must reference existing factors
+      // with quantitative data (value defined) — otherwise enrichment may need to fill gaps
+      return entries.length > 0 && entries.every(([factorId]) => {
+        const factor = factorMap.get(factorId);
+        return factor?.data && 'value' in factor.data;
+      });
+    });
+
+    if (allOptionsHaveInterventions) {
+      // The FACTOR side is genuinely complete — this log line is unchanged, so
+      // the existing Render/telemetry signature for the factor skip still reads
+      // exactly as it did.
+      log.info(
+        { optionCount: optionNodes.length, event: "cee.factor_enrichment.v4_complete_skip" },
+        "Skipping factor enrichment: all options have complete V4 interventions"
+      );
+
+      // ROADMAP 2.281 — but the GOAL TARGET is never covered by option
+      // interventions, so it must still be minted. This is the half of the
+      // early exit that was silently swallowing the user's stated target on
+      // every well-formed draft.
+      const goalOnly = mintGoalTargetOnly(graph, brief, minConfidence, collector);
+      const minted = goalOnly.mintedGoalId !== undefined;
+
+      if (minted) {
+        emit(TelemetryEvents.FactorExtractionComplete, {
+          factors_added: 0,
+          factors_enhanced: 0,
+          factors_skipped: 0,
+          goal_thresholds_set: 1,
+          total_extracted: 0,
+          extraction_mode: "v4_factor_skip_goal_minted",
+        });
+      }
+
+      return {
+        graph: goalOnly.graph,
+        factorsAdded: 0,
+        factorsEnhanced: 0,
+        factorsSkipped: 0,
+        // Honest naming: only claim a COMPLETE skip when the run really did
+        // write nothing.
+        extractionMode: minted ? "v4_factor_skip_goal_minted" : "v4_complete_skip",
+        warnings: [],
+        goalThresholdsMinted: goalOnly.mintedGoalId ? [goalOnly.mintedGoalId] : [],
+        ...(goalOnly.goalTargetCandidate !== undefined && { goal_target_candidate: goalOnly.goalTargetCandidate }),
+      };
+    }
+  }
 
   // Check feature flag for LLM-first extraction
   let useLLMFirst = false;
@@ -308,7 +2433,7 @@ export async function enrichGraphWithFactorsAsync(
 
   if (useLLMFirst) {
     // Use orchestrated extraction (LLM-first with regex fallback)
-    const result = await extractFactorsOrchestrated(brief);
+    const result = await extractFactorsOrchestrated(brief, { modelOverride });
     extracted = result.factors;
     extractionMode = result.mode;
     llmSuccess = result.llmSuccess;
@@ -328,8 +2453,9 @@ export async function enrichGraphWithFactorsAsync(
     extracted = extractFactors(brief);
   }
 
-  // Filter by confidence
-  const qualified = extracted.filter((f) => f.confidence >= minConfidence);
+  // Filter by confidence, then dedupe — ONE implementation, shared with the
+  // factor-skip path's goal-target selection (ROADMAP 2.281).
+  const qualified = qualifyExtractedFactors(extracted, minConfidence);
 
   // Get existing factor labels (case-insensitive)
   const existingFactors = graph.nodes.filter((n) => n.kind === "factor");
@@ -337,9 +2463,16 @@ export async function enrichGraphWithFactorsAsync(
     existingFactors.map((n) => n.label?.toLowerCase() || "")
   );
 
+  // Find the goal node for potential goal_threshold redirection
+  const goalNode = graph.nodes.find((n) => n.kind === "goal");
+  const goalNodeIndex = goalNode ? graph.nodes.findIndex((n) => n.id === goalNode.id) : -1;
+
   let factorsAdded = 0;
   let factorsEnhanced = 0;
   let factorsSkipped = 0;
+  let goalThresholdsSet = 0;
+  const goalThresholdsMinted: string[] = [];
+  let goalTargetCandidate: GoalTargetCandidate | undefined;
 
   // Deep clone the graph to avoid mutation
   const enrichedGraph: GraphT = {
@@ -351,12 +2484,61 @@ export async function enrichGraphWithFactorsAsync(
   for (const factor of qualified) {
     if (factorsAdded >= maxFactors) break;
 
-    // Check if a similar factor already exists
-    const existingNode = existingFactors.find(
-      (n) => n.label && labelsMatch(n.label, factor.label)
-    );
+    // Step 1: Check if this is a target/goal quantity that should be goal_threshold
+    // Redirect to goal node instead of injecting as a factor
+    if (isTargetGoalLabel(factor.label) && goalNode && goalNodeIndex >= 0) {
+      if (applyGoalTargetRedirect(enrichedGraph, goalNodeIndex, factor, collector)) {
+        goalThresholdsSet++;
+        goalThresholdsMinted.push(goalNode.id);
+        continue; // Don't inject as factor
+      }
+      // goal_threshold was ALREADY set — fall through and treat this factor
+      // like any other (unchanged pre-2.281 behaviour).
+    }
+
+
+    // ⭐⭐⭐ WHICH SUBJECT THIS FIGURE BELONGS TO — answered from the records'
+    // own declared basis, not from label overlap. See `selectEnhanceTarget`.
+    const selection = selectEnhanceTarget(existingFactors, factor, graph.nodes);
+
+    if (selection.refusedBy !== undefined) {
+      // The records name the figures this node is based on, and this is not one
+      // of them. Writing it anyway is how the user's £49 reached their churn
+      // factor. Write NOTHING, and do NOT fall through to node creation — the
+      // figure is still surfaced by `deriveNotModelledManifest`, which is where
+      // an unbindable magnitude belongs.
+      factorsSkipped++;
+      warnings.push(
+        `"${factor.matchedText}" was not written to "${selection.refusedBy.label}": the records do not declare it as a current value for that factor.`,
+      );
+      log.info(
+        {
+          event: "cee.factor_enrichment.refused_off_basis",
+          nodeId: selection.refusedBy.id,
+          nodeLabel: selection.refusedBy.label,
+          refusedLabel: factor.label,
+          refusedValue: factor.value,
+          refusedUnit: factor.unit,
+          refusedMatchedText: factor.matchedText,
+          declaredBasis: declaredBasisFigures(selection.refusedBy),
+        },
+        `Refusing to write "${factor.matchedText}" onto "${selection.refusedBy.id}": the records do not declare it as a current value for that node`,
+      );
+      continue;
+    }
+
+    const existingNode = selection.node;
 
     if (existingNode) {
+      if (hasUnboundQuantityLabel(existingNode, factor)) {
+        factorsSkipped++;
+        warnings.push(`Quantity "${factor.matchedText}" has no identified measure for "${existingNode.label}"; its value was left unchanged.`);
+        log.info(
+          { event: "cee.factor_enrichment.refused_unbound_quantity", nodeId: existingNode.id, extractedLabel: factor.label },
+          "Refusing to bind a fallback quantity label to a different factor",
+        );
+        continue;
+      }
       // Enhance existing factor with data if it doesn't have meaningful values
       // Use type guard to ensure we're checking FactorData properties (not OptionData)
       const hasFactorData = isFactorData(existingNode.data) && (
@@ -364,12 +2546,51 @@ export async function enrichGraphWithFactorsAsync(
         existingNode.data.baseline !== undefined
       );
       if (!hasFactorData) {
+        // ⭐⭐⭐ THE SPAN GATE. `labelsMatch` above GENERATED this candidate; this
+        // is the one test that can REJECT it. A stated node may only be stamped
+        // with a figure written inside its own sentence. See
+        // `enhanceWriteIsSpanContained` for the harm, the derivation and why
+        // this is positional rather than a magnitude comparison.
+        if (!enhanceWriteIsSpanContained(existingNode, factor, brief)) {
+          factorsSkipped++;
+          log.info(
+            {
+              refusedLabel: factor.label,
+              refusedValue: factor.value,
+              refusedMatchedText: factor.matchedText,
+              nodeId: existingNode.id,
+              event: "cee.factor_enrichment.refused_out_of_span",
+            },
+            `Refusing to enhance "${existingNode.id}": "${factor.matchedText}" lies outside the node's own stated span`
+          );
+          continue;
+        }
         const nodeIndex = enrichedGraph.nodes.findIndex((n) => n.id === existingNode.id);
         if (nodeIndex >= 0) {
+          // Apply normalisation for large non-percentage values.
+          // ⭐ The level stored is where the factor IS, not where the brief
+          // proposes to move it (`statedCurrentRaw`). The cap is unchanged in
+          // kind and still covers every magnitude the user wrote, so the
+          // option's own target stays inside the scale.
+          const currentRaw = statedCurrentRaw(factor);
+          let normalizedValue = currentRaw;
+          let rawValue: number | undefined;
+          let cap: number | undefined;
+
+          if (factor.unit !== "%" && currentRaw > 1) {
+            // Large absolute value - normalise using cap
+            cap = computeExtractedFactorCap(factor);
+            rawValue = currentRaw;
+            normalizedValue = currentRaw / cap;
+          }
+
+          const inferredFactorType = inferFactorType(factor.unit, factor.label);
           const factorData: FactorDataT = {
-            value: factor.value,
+            value: normalizedValue,
             baseline: factor.baseline,
             unit: factor.unit,
+            raw_value: rawValue,
+            cap: cap,
             extractionType: factor.extractionType,
             confidence: factor.confidence,
             rangeMin: factor.rangeMin,
@@ -377,6 +2598,16 @@ export async function enrichGraphWithFactorsAsync(
             range: factor.rangeMin !== undefined && factor.rangeMax !== undefined
               ? { min: factor.rangeMin, max: factor.rangeMax }
               : undefined,
+            factor_type: inferredFactorType,
+            uncertainty_drivers: [BRIEF_EXTRACTION_CONFIRM_DRIVER],
+            // Synthesise display_value when the LLM hasn't provided one (CEE-1 fallback)
+            display_value: synthesiseDisplayValue({
+              value: normalizedValue,
+              raw_value: rawValue,
+              unit: factor.unit,
+              factor_type: inferredFactorType,
+              cap,
+            }),
           };
           const beforeData = enrichedGraph.nodes[nodeIndex].data;
           enrichedGraph.nodes[nodeIndex] = {
@@ -398,7 +2629,16 @@ export async function enrichGraphWithFactorsAsync(
           }
         }
       } else {
-        factorsSkipped++;
+        // ⭐⭐ A PARTIAL DATA BLOCK IS NOT A COMPLETE ONE. `hasFactorData` above
+        // asks whether the model gave this node a LEVEL; it has never asked
+        // whether it gave it a UNIT. A model-valued factor therefore discarded
+        // the extractor's `unit: "£"` and rendered a price as a coarse band.
+        // See `backfillStatedUnit` for the derivation and the identity binding.
+        if (backfillStatedUnit(enrichedGraph, existingNode, factor, brief, collector)) {
+          factorsEnhanced++;
+        } else {
+          factorsSkipped++;
+        }
       }
       continue;
     }
@@ -409,12 +2649,81 @@ export async function enrichGraphWithFactorsAsync(
       continue;
     }
 
-    // Create new factor node
+    // Check if quantity is already covered by an LLM-generated factor
+    const coverageCheck = isQuantityCoveredByExistingFactor(factor, existingFactors);
+    if (coverageCheck.covered) {
+      factorsSkipped++;
+      log.info(
+        {
+          skippedLabel: factor.label,
+          skippedValue: factor.value,
+          matchedNodeId: coverageCheck.matchedNode?.id,
+          matchedNodeLabel: coverageCheck.matchedNode?.label,
+          matchReason: coverageCheck.matchReason,
+          event: "cee.factor_enrichment.skipped_duplicate",
+        },
+        `Skipping factor injection: "${factor.label}" covered by LLM factor "${coverageCheck.matchedNode?.id}"`
+      );
+      continue;
+    }
+
+    // Step 2: Apply normalisation for large non-percentage values.
+    // ⭐ See `statedCurrentRaw`: the node carries where the factor IS, and the
+    // brief's target reaches the analysis on the OPTION's intervention.
+    const currentRaw = statedCurrentRaw(factor);
+    let normalizedValue = currentRaw;
+    let rawValue: number | undefined;
+    let cap: number | undefined;
+
+    if (factor.unit !== "%" && currentRaw > 1) {
+      // Large absolute value - normalise using cap
+      cap = computeExtractedFactorCap(factor);
+      rawValue = currentRaw;
+      normalizedValue = currentRaw / cap;
+
+      log.debug(
+        {
+          label: factor.label,
+          rawValue: currentRaw,
+          cap,
+          normalizedValue,
+          event: "cee.factor_enrichment.normalised",
+        },
+        `Normalised factor value: ${currentRaw} / ${cap} = ${normalizedValue}`
+      );
+    }
+
+    // Create new factor node with V3 fields
+    // ⭐⭐⭐ THE RECORDS MAY HAVE ALREADY PLACED THIS FIGURE ON A SUBJECT.
+    // Minting a rival factor for it is how one stated quantity becomes two
+    // disagreeing nodes — and how the £20k MRR goal figure became a factor
+    // called "Churn Rate" denominated in pounds. See `figureAlreadyPlacedBy`.
+    const placedBy = figureAlreadyPlacedBy(graph.nodes, factor);
+    if (placedBy !== undefined) {
+      factorsSkipped++;
+      log.info(
+        {
+          event: "cee.factor_enrichment.refused_already_placed",
+          nodeId: placedBy.id,
+          nodeLabel: placedBy.label,
+          refusedLabel: factor.label,
+          refusedValue: factor.value,
+          refusedUnit: factor.unit,
+          refusedMatchedText: factor.matchedText,
+        },
+        `Refusing to mint "${factor.label}" for "${factor.matchedText}": the records already place that figure on "${placedBy.id}"`,
+      );
+      continue;
+    }
+
     const nodeId = generateFactorId(factor.label, factorsAdded);
+    const newFactorType = inferFactorType(factor.unit, factor.label);
     const factorData: FactorDataT = {
-      value: factor.value,
+      value: normalizedValue,
       baseline: factor.baseline,
       unit: factor.unit,
+      raw_value: rawValue,
+      cap: cap,
       extractionType: factor.extractionType,
       confidence: factor.confidence,
       rangeMin: factor.rangeMin,
@@ -422,13 +2731,50 @@ export async function enrichGraphWithFactorsAsync(
       range: factor.rangeMin !== undefined && factor.rangeMax !== undefined
         ? { min: factor.rangeMin, max: factor.rangeMax }
         : undefined,
+      // V3 fields for injected factors
+      factor_type: newFactorType,
+      uncertainty_drivers: [BRIEF_EXTRACTION_CONFIRM_DRIVER],
+      // Synthesise display_value when the LLM hasn't provided one (CEE-1 fallback)
+      display_value: synthesiseDisplayValue({
+        value: normalizedValue,
+        raw_value: rawValue,
+        unit: factor.unit,
+        factor_type: newFactorType,
+        cap,
+      }),
     };
+
+    // Connect to relevant node first (needed for category inference)
+    const targetId = findConnectionTarget(graph, factor);
+    const newEdge: EdgeT | null = targetId
+      ? {
+          from: nodeId,
+          to: targetId,
+          belief: factor.confidence ?? 0.8,
+          belief_exists: factor.confidence ?? 0.8,
+          strength_mean: 0.5,
+          strength_std: 0.2,
+          effect_direction: "positive",
+          origin: "enrichment",
+          defaulted: true,
+          provenance: {
+            source: "hypothesis",
+            quote: briefExtractionQuote(factor.matchedText),
+          },
+          provenance_source: "hypothesis",
+        }
+      : null;
+
+    // Infer category from edge structure
+    const allEdges = newEdge ? [...enrichedGraph.edges, newEdge] : enrichedGraph.edges;
+    const category = inferCategoryFromEdges(nodeId, allEdges, enrichedGraph.nodes);
 
     const newNode: NodeT = {
       id: nodeId,
       kind: "factor",
       label: factor.label,
       data: factorData,
+      category,
     };
 
     enrichedGraph.nodes.push(newNode);
@@ -440,25 +2786,14 @@ export async function enrichGraphWithFactorsAsync(
         11, // Stage 11: Factor Enrichment
         "node_added",
         { node_id: nodeId, kind: "factor" },
-        `Added factor node extracted from brief`,
+        `Added factor node extracted from brief (category: ${category})`,
         undefined,
-        { id: nodeId, kind: "factor", label: factor.label }
+        { id: nodeId, kind: "factor", label: factor.label, category }
       );
     }
 
-    // Connect to relevant node
-    const targetId = findConnectionTarget(graph, factor);
-    if (targetId) {
-      const newEdge: EdgeT = {
-        from: nodeId,
-        to: targetId,
-        belief: factor.confidence,
-        provenance: {
-          source: "hypothesis",
-          quote: `Extracted from brief: "${factor.matchedText}"`,
-        },
-        provenance_source: "hypothesis",
-      };
+    // Add the edge to the graph
+    if (newEdge) {
       enrichedGraph.edges.push(newEdge);
 
       // Record correction for added factor edge (Stage 11: Factor Enrichment)
@@ -466,7 +2801,7 @@ export async function enrichGraphWithFactorsAsync(
         collector.addByStage(
           11, // Stage 11: Factor Enrichment
           "edge_added",
-          { edge_id: formatEdgeId(nodeId, targetId) },
+          { edge_id: formatEdgeId(nodeId, targetId!) },
           `Added edge connecting factor to ${targetId}`,
           undefined,
           { from: nodeId, to: targetId, belief: factor.confidence }
@@ -477,12 +2812,22 @@ export async function enrichGraphWithFactorsAsync(
     factorsAdded++;
   }
 
+  // ── THE FALLBACK: the goal node's own label — a CANDIDATE, never a write ──
+  // Runs only when the loop above minted nothing, so the factor route keeps
+  // precedence and FIRST WRITER WINS is unchanged. See
+  // `deriveGoalTargetCandidateFromLabel` for why the loop can miss an ordinary
+  // quantified target entirely, and why the label route no longer mints.
+  if (goalThresholdsSet === 0 && goalNode && goalNodeIndex >= 0) {
+    goalTargetCandidate = deriveGoalTargetCandidateFromLabel(enrichedGraph, goalNodeIndex, brief);
+  }
+
   // Emit telemetry
-  if (factorsAdded > 0 || factorsEnhanced > 0) {
+  if (factorsAdded > 0 || factorsEnhanced > 0 || goalThresholdsSet > 0) {
     emit(TelemetryEvents.FactorExtractionComplete, {
       factors_added: factorsAdded,
       factors_enhanced: factorsEnhanced,
       factors_skipped: factorsSkipped,
+      goal_thresholds_set: goalThresholdsSet,
       total_extracted: extracted.length,
       extraction_mode: extractionMode,
       llm_success: llmSuccess,
@@ -494,6 +2839,7 @@ export async function enrichGraphWithFactorsAsync(
       factorsAdded,
       factorsEnhanced,
       factorsSkipped,
+      goalThresholdsSet,
       totalExtracted: extracted.length,
       extractionMode,
       llmSuccess,
@@ -509,5 +2855,7 @@ export async function enrichGraphWithFactorsAsync(
     extractionMode,
     llmSuccess,
     warnings,
+    goalThresholdsMinted,
+    ...(goalTargetCandidate !== undefined && { goal_target_candidate: goalTargetCandidate }),
   };
 }

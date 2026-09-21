@@ -16,9 +16,11 @@ import type { IPromptStore } from './stores/interface.js';
 import { PostgresPromptStore } from './stores/postgres.js';
 import { SupabasePromptStore } from './stores/supabase.js';
 import { FilePromptStore } from './stores/file.js';
+import { governPromptStore } from './stores/governed.js';
 import { getDefaultPrompts } from './loader.js';
+import { getPromptStore } from './store.js';
 import { log } from '../utils/telemetry.js';
-import { config } from '../config/index.js';
+import { config, shouldUseStagingPrompts } from '../config/index.js';
 
 /**
  * Fallback cooldown duration in milliseconds (30 seconds)
@@ -152,6 +154,16 @@ export class PromptRepository implements IPromptReader, IPromptWriter {
   }
 
   private createPrimaryStore(): IPromptStore {
+    // The production repository, runtime loader, status routes and admin
+    // mutations must share one governed store instance. Independent backend
+    // objects (especially FilePromptStore, which holds an in-memory snapshot)
+    // made startup seeding invisible to the runtime until process restart.
+    // Explicit constructor arguments remain isolated for repository tests and
+    // migration tools.
+    if (!this.connectionString && !this.fileStorePath) {
+      return getPromptStore();
+    }
+
     const storeType = this.getConfiguredStoreType();
 
     if (storeType === 'supabase') {
@@ -160,7 +172,7 @@ export class PromptRepository implements IPromptReader, IPromptWriter {
       if (!url || !serviceRoleKey) {
         throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required when PROMPTS_STORE_TYPE=supabase');
       }
-      return new SupabasePromptStore({ url, serviceRoleKey });
+      return governPromptStore(new SupabasePromptStore({ url, serviceRoleKey }));
     }
 
     if (storeType === 'postgres') {
@@ -168,19 +180,19 @@ export class PromptRepository implements IPromptReader, IPromptWriter {
       if (!connStr) {
         throw new Error('PROMPTS_POSTGRES_URL is required when PROMPTS_STORE_TYPE=postgres');
       }
-      return new PostgresPromptStore({
+      return governPromptStore(new PostgresPromptStore({
         connectionString: connStr,
         poolSize: config.prompts?.postgresPoolSize ?? 10,
         ssl: config.prompts?.postgresSsl ?? false,
-      });
+      }));
     }
 
     const filePath = this.fileStorePath ?? config.prompts?.storePath ?? 'data/prompts.json';
-    return new FilePromptStore({
+    return governPromptStore(new FilePromptStore({
       filePath,
       backupEnabled: config.prompts?.backupEnabled ?? true,
       maxBackups: config.prompts?.maxBackups ?? 10,
-    });
+    }));
   }
 
   private async initializeStore(): Promise<void> {
@@ -377,19 +389,36 @@ export class PromptRepository implements IPromptReader, IPromptWriter {
   async warmCache(): Promise<void> {
     if (!this.store) return;
 
+    const useStaging = shouldUseStagingPrompts();
+
     try {
-      const allPrompts = await this.store.list({ status: 'production' });
+      // Status is metadata; it does not elect served bytes. Derive the task set
+      // from storage, then ask the governed boundary for each canonical row.
+      // Iterating raw rows and overwriting a Map made duplicate-task election
+      // depend on backend result order, bypassing the canonical authority.
+      const allPrompts = await this.store.list();
+      const taskIds = [
+        ...new Set(allPrompts.map((prompt) => prompt.taskId as CeeTaskId)),
+      ].sort();
 
-      for (const prompt of allPrompts) {
-        const taskId = prompt.taskId as CeeTaskId;
-        const activeVersion = prompt.versions.find(v => v.version === prompt.activeVersion);
+      for (const taskId of taskIds) {
+        const active = await this.store.getActivePromptForTask(taskId);
+        if (!active) continue;
+        const prompt = active.prompt;
 
-        if (activeVersion) {
-          const contentHash = activeVersion.contentHash ?? computeContentHash(activeVersion.content);
+        // In staging mode, prefer staging version; otherwise use active version
+        const targetVersionNum = useStaging && prompt.stagingVersion
+          ? prompt.stagingVersion
+          : prompt.activeVersion;
+
+        const targetVersion = prompt.versions.find(v => v.version === targetVersionNum);
+
+        if (targetVersion) {
+          const contentHash = targetVersion.contentHash ?? computeContentHash(targetVersion.content);
 
           this.cache.set(taskId, {
             prompt,
-            version: prompt.activeVersion,
+            version: targetVersionNum,
             contentHash,
             cachedAt: Date.now(),
           });
@@ -399,7 +428,8 @@ export class PromptRepository implements IPromptReader, IPromptWriter {
       log.info({
         event: 'prompt.cache.warmed',
         count: this.cache.size,
-      }, 'Prompt cache warmed');
+        useStaging,
+      }, useStaging ? 'Prompt cache warmed (staging mode)' : 'Prompt cache warmed (production mode)');
     } catch (error) {
       log.warn({
         event: 'prompt.cache.warm_failed',
@@ -494,21 +524,64 @@ export class PromptRepository implements IPromptReader, IPromptWriter {
     let seeded = 0;
     let skipped = 0;
 
+    // PMS migration: the v5 routing prompt (task_id 'routing') is registered
+    // as a code-level default fallback only. Manual seeding into PMS is
+    // performed out-of-band; the brief explicitly forbids auto-seeding
+    // routing into Supabase on startup. Skip it here.
+    // 'm2_graph_review': its registered default is a FAIL-CLOSED sentinel
+    // (src/cee/dual-draft/prompt-sentinel.ts), not usable prompt copy —
+    // auto-seeding it would create a 'production' store row containing the
+    // sentinel and invert the provisioning model (Paul authors the real copy
+    // as a fresh store prompt, which clears the sentinel). Same discipline as
+    // the 'routing' file-based slot.
+    // 'orchestrator': the operator-managed PMS row for this task IS the V5
+    // routing/orchestrator system prompt (~22k chars — PMS_TASK_ALIAS in
+    // src/prompts/tracked.ts resolves 'routing' to 'orchestrator' for store
+    // lookups). Its registered code default, however, is the LEGACY cf-v28
+    // V4 mega-prompt (~57k chars). Auto-seeding that default into a FRESH
+    // store (file store / ':memory:' in tests, or a new deployment with
+    // PROMPTS_ENABLED=true) put the 57,643-char coach prompt on the
+    // orchestrator row; buildRoutingPromptSnapshot() then resolved it as the
+    // routing prompt (source=store) and the [18,500–22,000] size guard
+    // correctly refused to start the server — the permanent CI
+    // admin.models/admin.routes "Routing prompt size 57643" startup reds.
+    // Skipping the seed lets a PMS-miss fall through to the guard-safe v40
+    // routing default, exactly as the alias design in tracked.ts intends.
+    // Existing operator-authored rows (e.g. the production Supabase row)
+    // are unaffected — seeding never touched them.
+    const SEED_BLOCKLIST = new Set<CeeTaskId>(['routing', 'm2_graph_review', 'orchestrator']);
+
     for (const taskId of taskIds) {
+      if (SEED_BLOCKLIST.has(taskId)) {
+        log.debug({
+          event: 'prompt.seed.skipped',
+          task_id: taskId,
+          reason: 'seed_blocklist_no_auto_seed',
+        }, `Skipping seed - ${taskId} is in the no-auto-seed blocklist`);
+        skipped++;
+        continue;
+      }
       const content = defaults[taskId];
       if (!content) continue;
 
       // Check if prompt already exists for this task
+      // Skip seeding if any prompt for this task is in production, staging, OR archived status
+      // - production/staging: prevents unwanted versions when prompts are being actively edited
+      // - archived: respects explicit cleanup/removal decisions (see: prompt v150 incident)
       const existing = await this.store!.list({ taskId });
-      const hasProduction = existing.some(p => p.status === 'production');
+      const blockingPrompt = existing.find(p =>
+        p.status === 'production' || p.status === 'staging' || p.status === 'archived'
+      );
 
-      if (hasProduction && !force) {
-        // Non-destructive: skip if production prompt exists
+      if (blockingPrompt && !force) {
+        // Non-destructive: skip if any managed prompt exists
         log.debug({
           event: 'prompt.seed.skipped',
           task_id: taskId,
-          reason: 'production_exists',
-        }, 'Skipping seed - production prompt exists');
+          reason: 'managed_prompt_exists',
+          blocking_prompt_id: blockingPrompt.id,
+          blocking_status: blockingPrompt.status,
+        }, `Skipping seed - ${blockingPrompt.status} prompt exists: ${blockingPrompt.id}`);
         skipped++;
         continue;
       }

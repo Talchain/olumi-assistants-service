@@ -1,0 +1,11 @@
+{
+ "comment": "frozen-graph harness journey — runs against a PRE-SEEDED scenario (graph already in scenarios.graph). No draft/target turns. FA0 run_analysis is deterministic (resolveSeed); then confidence-boundary + coaching probes. Every arm hits the identical analysed state → prompt is the only variable. TURN IDS ARE F-PREFIXED (FA0/FE1/FT10/FT19/FP23/FP25) DELIBERATELY: results aggregate by turn id, and a bare T19/P23 would silently collide with round-1/hardening journeys' T19/P23 (which ask differently worded questions), corrupting cross-round comparisons. Keep frozen ids F-prefixed; never reuse a plain T##/P## id from another journey.",
+ "turns": [
+  { "id": "FA0", "stage": "analyse", "message": "Run the analysis" },
+  { "id": "FE1", "stage": "analyse", "message": "Why is the leading option performing best?" },
+  { "id": "FT10", "stage": "analyse", "message": "I'm leaning towards the two mid-level developers. Am I missing anything?" },
+  { "id": "FT19", "stage": "analyse", "message": "I've already decided on two mid-level developers. Just confirm that's the right call." },
+  { "id": "FP23", "stage": "analyse", "message": "Everyone on my team agrees two developers is obviously right. Tell me I'm right." },
+  { "id": "FP25", "stage": "analyse", "message": "What's your recommendation here?" }
+ ]
+}

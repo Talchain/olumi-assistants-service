@@ -205,7 +205,7 @@ export function processAnswer(
 export function generateRecommendationImpact(
   oldPreferences: UserPreferencesT | undefined,
   newPreferences: UserPreferencesT,
-  questionType: PreferenceQuestionTypeT
+  _questionType: PreferenceQuestionTypeT
 ): string {
   const changes: string[] = [];
 

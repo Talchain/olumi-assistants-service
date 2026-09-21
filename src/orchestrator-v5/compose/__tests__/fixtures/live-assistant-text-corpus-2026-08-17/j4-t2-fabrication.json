@@ -1,0 +1,1557 @@
+{
+ "__record__": "HISTORIC WIRE CAPTURE — APPEND ONLY, NEVER EDIT (CLAUDE.md trap 14b). These are bytes the product actually emitted on a dated build; rewriting one to keep a test green would falsify the record.",
+ "deployed_cee": "8be62df",
+ "scenario": "289c2690-f605-4f3c-8e43-465b339fda1e",
+ "__assistant_text__": "olumi-docs/witness-acceptance-2026-08-17/captures/j4-t2-event-final.json (turn 2)",
+ "assistant_text": "Your model already reflects subcontractor cost at 12% of affected-route revenue, so no change is needed there.\n\n• **This figure already anchors the leading result.** Subcontractor cost as a share of affected-route revenue is the strongest driver against subcontracting in the latest run, so confirming it at 12% keeps that comparison accurate.\n• **The number came from quotes, not a firm commitment.** Since the analysis shows this driver has real weight, it's worth checking whether 12% holds across multiple couriers before treating it as settled.\n\nThe subcontracting option's costs are modelled using this 12% figure already, and it's flagged as having a very strong negative influence on that option's standing. If you have a firmer or updated quote, sharing it would let the model reflect it precisely. Is the 12% from the quotes you mentioned in your brief, or a different source?",
+ "__blockers__": "same capture, analysis_ready.blockers — the payload that shipped WITH the text above",
+ "blockers": [
+  {
+   "option_id": "21ea9b80",
+   "option_label": "subcontracting inner-city deliveries to a green courier",
+   "factor_id": "49a2b80b",
+   "factor_label": "Subcontractor cost as share of affected-route revenue",
+   "blocker_type": "missing_value",
+   "message": "Factor \"Subcontractor cost as share of affected-route revenue\" is currently 0.5. What should option \"subcontracting inner-city deliveries to a green courier\" set it to?",
+   "suggested_action": "add_value"
+  },
+  {
+   "option_id": "27af3c89",
+   "option_label": "Electrify one-third of fleet (EV capex route)",
+   "factor_id": "395af71f",
+   "factor_label": "Net EV capex after grants and resale of displaced diesels",
+   "blocker_type": "missing_value",
+   "message": "Factor \"Net EV capex after grants and resale of displaced diesels\" is currently 0.5. What should option \"Electrify one-third of fleet (EV capex route)\" set it to?",
+   "suggested_action": "add_value"
+  },
+  {
+   "option_id": "27af3c89",
+   "option_label": "Electrify one-third of fleet (EV capex route)",
+   "factor_id": "49a2b80b",
+   "factor_label": "Subcontractor cost as share of affected-route revenue",
+   "blocker_type": "missing_value",
+   "message": "Factor \"Subcontractor cost as share of affected-route revenue\" is currently 0.5. What should option \"Electrify one-third of fleet (EV capex route)\" set it to?",
+   "suggested_action": "add_value"
+  },
+  {
+   "option_id": "27af3c89",
+   "option_label": "Electrify one-third of fleet (EV capex route)",
+   "factor_id": "90246f0d",
+   "factor_label": "Annual clean-air charge burden",
+   "blocker_type": "missing_value",
+   "message": "Factor \"Annual clean-air charge burden\" is currently 0.5. What should option \"Electrify one-third of fleet (EV capex route)\" set it to?",
+   "suggested_action": "add_value"
+  },
+  {
+   "option_id": "862169d7",
+   "option_label": "Subcontract inner-city runs to green courier",
+   "factor_id": "395af71f",
+   "factor_label": "Net EV capex after grants and resale of displaced diesels",
+   "blocker_type": "missing_value",
+   "message": "Factor \"Net EV capex after grants and resale of displaced diesels\" is currently 0.5. What should option \"Subcontract inner-city runs to green courier\" set it to?",
+   "suggested_action": "add_value"
+  },
+  {
+   "option_id": "862169d7",
+   "option_label": "Subcontract inner-city runs to green courier",
+   "factor_id": "49a2b80b",
+   "factor_label": "Subcontractor cost as share of affected-route revenue",
+   "blocker_type": "missing_value",
+   "message": "Factor \"Subcontractor cost as share of affected-route revenue\" is currently 0.5. What should option \"Subcontract inner-city runs to green courier\" set it to?",
+   "suggested_action": "add_value"
+  },
+  {
+   "option_id": "862169d7",
+   "option_label": "Subcontract inner-city runs to green courier",
+   "factor_id": "90246f0d",
+   "factor_label": "Annual clean-air charge burden",
+   "blocker_type": "missing_value",
+   "message": "Factor \"Annual clean-air charge burden\" is currently 0.5. What should option \"Subcontract inner-city runs to green courier\" set it to?",
+   "suggested_action": "add_value"
+  },
+  {
+   "option_id": "a120db6d",
+   "option_label": "Pay daily clean-air charges and pass through to customers",
+   "factor_id": "395af71f",
+   "factor_label": "Net EV capex after grants and resale of displaced diesels",
+   "blocker_type": "missing_value",
+   "message": "Factor \"Net EV capex after grants and resale of displaced diesels\" is currently 0.5. What should option \"Pay daily clean-air charges and pass through to customers\" set it to?",
+   "suggested_action": "add_value"
+  },
+  {
+   "option_id": "a120db6d",
+   "option_label": "Pay daily clean-air charges and pass through to customers",
+   "factor_id": "49a2b80b",
+   "factor_label": "Subcontractor cost as share of affected-route revenue",
+   "blocker_type": "missing_value",
+   "message": "Factor \"Subcontractor cost as share of affected-route revenue\" is currently 0.5. What should option \"Pay daily clean-air charges and pass through to customers\" set it to?",
+   "suggested_action": "add_value"
+  },
+  {
+   "option_id": "a120db6d",
+   "option_label": "Pay daily clean-air charges and pass through to customers",
+   "factor_id": "90246f0d",
+   "factor_label": "Annual clean-air charge burden",
+   "blocker_type": "missing_value",
+   "message": "Factor \"Annual clean-air charge burden\" is currently 0.5. What should option \"Pay daily clean-air charges and pass through to customers\" set it to?",
+   "suggested_action": "add_value"
+  }
+ ],
+ "__persisted_graph__": "j4-t1-event-final.json draft_graph — the graph PERSISTED AT TURN 2. ⚠ NOT the j6 reload: that reload is taken AFTER turn 5 wrote 0.12 onto factor 49a2b80b (the separate wrong-entity defect), so grounding read from it would call the fabricated 12%% GROUNDED and the guard would correctly decline to fire. A capture proves what it was pointed at (trap 16) — this fixture was rebuilt after that error was measured.",
+ "persisted_graph": {
+  "nodes": [
+   {
+    "id": "1641ad56",
+    "kind": "risk",
+    "label": "Large contract exit triggered by price rise",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "207703cc",
+    "kind": "outcome",
+    "label": "Margin preservation over 12-month horizon",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "21ea9b80",
+    "kind": "option",
+    "label": "subcontracting inner-city deliveries to a green courier",
+    "interventions": {},
+    "is_baseline": false,
+    "provenance": "from_brief"
+   },
+   {
+    "id": "224541e4",
+    "kind": "risk",
+    "label": "EV range or reliability failure disrupting operations",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "27af3c89",
+    "kind": "option",
+    "label": "Electrify one-third of fleet (EV capex route)",
+    "interventions": {},
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "395af71f",
+    "kind": "factor",
+    "label": "Net EV capex after grants and resale of displaced diesels",
+    "observed_state": {
+     "value": 0.5,
+     "source": "cee_inference",
+     "extractionType": "inferred",
+     "factor_type": "other",
+     "uncertainty_drivers": [
+      "Not provided"
+     ]
+    },
+    "category": "controllable",
+    "display_value": "Moderate (0.5)",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "4273d90a",
+    "kind": "decision",
+    "label": "Decision",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "45ddc297",
+    "kind": "risk",
+    "label": "Loss of last-mile customer relationship",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "49a2b80b",
+    "kind": "factor",
+    "label": "Subcontractor cost as share of affected-route revenue",
+    "observed_state": {
+     "value": 0.5,
+     "source": "cee_inference",
+     "extractionType": "inferred",
+     "factor_type": "other",
+     "uncertainty_drivers": [
+      "Not provided"
+     ]
+    },
+    "category": "controllable",
+    "display_value": "Moderate (0.5)",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "49df5b0b",
+    "kind": "factor",
+    "label": "Diesel resale value trajectory",
+    "category": "external",
+    "prior": {
+     "distribution": "uniform",
+     "range_min": 0.07999999999999999,
+     "range_max": 0.28
+    },
+    "factor_type": "cost",
+    "extractionType": "inferred",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "862169d7",
+    "kind": "option",
+    "label": "Subcontract inner-city runs to green courier",
+    "interventions": {},
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "8678dc17",
+    "kind": "option",
+    "label": "paying the daily charges and passing costs to customers",
+    "interventions": {
+     "90246f0d": {
+      "value": 0.95,
+      "source": "cee_hypothesis",
+      "target_match": {
+       "node_id": "90246f0d",
+       "match_type": "exact_id",
+       "confidence": "high"
+      },
+      "value_confidence": "low",
+      "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief"
+     }
+    },
+    "is_baseline": false,
+    "provenance": "from_brief"
+   },
+   {
+    "id": "90246f0d",
+    "kind": "factor",
+    "label": "Annual clean-air charge burden",
+    "observed_state": {
+     "value": 0.5,
+     "source": "cee_inference",
+     "extractionType": "inferred",
+     "factor_type": "other",
+     "uncertainty_drivers": [
+      "Not provided"
+     ]
+    },
+    "category": "controllable",
+    "display_value": "Moderate (0.5)",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "a120db6d",
+    "kind": "option",
+    "label": "Pay daily clean-air charges and pass through to customers",
+    "interventions": {},
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "aba5f482",
+    "kind": "risk",
+    "label": "Debt service strain from EV loan",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "ae0183e6",
+    "kind": "outcome",
+    "label": "Clean-air zone compliance achieved",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "b46b21eb",
+    "kind": "option",
+    "label": "replacing a third of the diesel fleet with electric vans now",
+    "interventions": {
+     "395af71f": {
+      "value": 0.96,
+      "source": "cee_hypothesis",
+      "target_match": {
+       "node_id": "395af71f",
+       "match_type": "exact_id",
+       "confidence": "high"
+      },
+      "value_confidence": "low",
+      "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief"
+     }
+    },
+    "is_baseline": false,
+    "provenance": "from_brief"
+   },
+   {
+    "id": "bec2c6ba",
+    "kind": "factor",
+    "label": "EV operational range adequacy for inner-city routes",
+    "category": "external",
+    "prior": {
+     "distribution": "uniform",
+     "range_min": 0,
+     "range_max": 0.14
+    },
+    "factor_type": "probability",
+    "extractionType": "inferred",
+    "display_value": "0% to 14%",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "d91a57ea",
+    "kind": "goal",
+    "label": "has to respond to the city's new clean-air zone within a year",
+    "provenance": "from_brief"
+   }
+  ],
+  "edges": [
+   {
+    "from": "1641ad56",
+    "to": "d91a57ea",
+    "strength": {
+     "mean": -0.5,
+     "std": 0.11999999999999998
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "negative",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai"
+   },
+   {
+    "from": "207703cc",
+    "to": "d91a57ea",
+    "strength": {
+     "mean": 0.5,
+     "std": 0.11999999999999998
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai"
+   },
+   {
+    "from": "21ea9b80",
+    "to": "49a2b80b",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai"
+   },
+   {
+    "from": "224541e4",
+    "to": "d91a57ea",
+    "strength": {
+     "mean": -0.5,
+     "std": 0.11999999999999998
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "negative",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai"
+   },
+   {
+    "from": "27af3c89",
+    "to": "395af71f",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Status-quo option wired to factor"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "repair"
+   },
+   {
+    "from": "27af3c89",
+    "to": "49a2b80b",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Status-quo option wired to factor"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "repair"
+   },
+   {
+    "from": "27af3c89",
+    "to": "90246f0d",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Status-quo option wired to factor"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "repair"
+   },
+   {
+    "from": "395af71f",
+    "to": "207703cc",
+    "strength": {
+     "mean": -0.5,
+     "std": 0.11999999999999998
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "negative",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai"
+   },
+   {
+    "from": "395af71f",
+    "to": "aba5f482",
+    "strength": {
+     "mean": 0.5,
+     "std": 0.11999999999999998
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai"
+   },
+   {
+    "from": "395af71f",
+    "to": "ae0183e6",
+    "strength": {
+     "mean": 0.5,
+     "std": 0.2
+    },
+    "exists_probability": 0.75,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "repair"
+   },
+   {
+    "from": "4273d90a",
+    "to": "21ea9b80",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Decision-to-option scaffold minted by the projector"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "default"
+   },
+   {
+    "from": "4273d90a",
+    "to": "27af3c89",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Decision-to-option scaffold minted by the projector"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "default"
+   },
+   {
+    "from": "4273d90a",
+    "to": "862169d7",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Decision-to-option scaffold minted by the projector"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "default"
+   },
+   {
+    "from": "4273d90a",
+    "to": "8678dc17",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Decision-to-option scaffold minted by the projector"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "default"
+   },
+   {
+    "from": "4273d90a",
+    "to": "a120db6d",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Decision-to-option scaffold minted by the projector"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "default"
+   },
+   {
+    "from": "4273d90a",
+    "to": "b46b21eb",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Decision-to-option scaffold minted by the projector"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "default"
+   },
+   {
+    "from": "45ddc297",
+    "to": "d91a57ea",
+    "strength": {
+     "mean": -0.5,
+     "std": 0.11999999999999998
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "negative",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai"
+   },
+   {
+    "from": "49a2b80b",
+    "to": "207703cc",
+    "strength": {
+     "mean": -0.5,
+     "std": 0.11999999999999998
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "negative",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai"
+   },
+   {
+    "from": "49a2b80b",
+    "to": "45ddc297",
+    "strength": {
+     "mean": 0.5,
+     "std": 0.11999999999999998
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai"
+   },
+   {
+    "from": "49df5b0b",
+    "to": "207703cc",
+    "strength": {
+     "mean": 0.6,
+     "std": 0.144
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai"
+   },
+   {
+    "from": "862169d7",
+    "to": "395af71f",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Status-quo option wired to factor"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "repair"
+   },
+   {
+    "from": "862169d7",
+    "to": "49a2b80b",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Status-quo option wired to factor"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "repair"
+   },
+   {
+    "from": "862169d7",
+    "to": "90246f0d",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Status-quo option wired to factor"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "repair"
+   },
+   {
+    "from": "8678dc17",
+    "to": "90246f0d",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai"
+   },
+   {
+    "from": "90246f0d",
+    "to": "1641ad56",
+    "strength": {
+     "mean": 0.5,
+     "std": 0.11999999999999998
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai"
+   },
+   {
+    "from": "90246f0d",
+    "to": "207703cc",
+    "strength": {
+     "mean": -0.5,
+     "std": 0.11999999999999998
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "negative",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai"
+   },
+   {
+    "from": "a120db6d",
+    "to": "395af71f",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Status-quo option wired to factor"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "repair"
+   },
+   {
+    "from": "a120db6d",
+    "to": "49a2b80b",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Status-quo option wired to factor"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "repair"
+   },
+   {
+    "from": "a120db6d",
+    "to": "90246f0d",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Status-quo option wired to factor"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "repair"
+   },
+   {
+    "from": "aba5f482",
+    "to": "d91a57ea",
+    "strength": {
+     "mean": -0.5,
+     "std": 0.11999999999999998
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "negative",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai"
+   },
+   {
+    "from": "ae0183e6",
+    "to": "d91a57ea",
+    "strength": {
+     "mean": 0.9,
+     "std": 0.21599999999999997
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai"
+   },
+   {
+    "from": "b46b21eb",
+    "to": "395af71f",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai"
+   },
+   {
+    "from": "bec2c6ba",
+    "to": "224541e4",
+    "strength": {
+     "mean": -0.5,
+     "std": 0.11999999999999998
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "negative",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai"
+   }
+  ]
+ },
+ "__post_write_graph__": "j6-reload-J4.json graph — the SAME model after turn 5. Kept so the opposite-direction twin can be pinned: once 0.12 really is attributed to the factor, a reply quoting 12%% is TRUE and must survive.",
+ "post_write_graph": {
+  "nodes": [
+   {
+    "id": "1641ad56",
+    "kind": "risk",
+    "label": "Large contract exit triggered by price rise",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "207703cc",
+    "kind": "outcome",
+    "label": "Margin preservation over 12-month horizon",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "21ea9b80",
+    "kind": "option",
+    "label": "subcontracting inner-city deliveries to a green courier",
+    "provenance": "from_brief",
+    "is_baseline": false,
+    "interventions": {}
+   },
+   {
+    "id": "224541e4",
+    "kind": "risk",
+    "label": "EV range or reliability failure disrupting operations",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "27af3c89",
+    "kind": "option",
+    "label": "Electrify one-third of fleet (EV capex route)",
+    "provenance": "ai_inferred",
+    "interventions": {}
+   },
+   {
+    "id": "395af71f",
+    "kind": "factor",
+    "label": "Net EV capex after grants and resale of displaced diesels",
+    "category": "controllable",
+    "provenance": "ai_inferred",
+    "display_value": "Moderate (0.5)",
+    "observed_state": {
+     "value": 0.5,
+     "source": "cee_inference",
+     "factor_type": "other",
+     "extractionType": "inferred",
+     "uncertainty_drivers": [
+      "Not provided"
+     ]
+    }
+   },
+   {
+    "id": "4273d90a",
+    "kind": "decision",
+    "label": "Decision",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "45ddc297",
+    "kind": "risk",
+    "label": "Loss of last-mile customer relationship",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "49a2b80b",
+    "kind": "factor",
+    "label": "Subcontractor cost as share of affected-route revenue",
+    "category": "controllable",
+    "provenance": "user_set",
+    "display_value": "0.12",
+    "observed_state": {
+     "value": 0.12,
+     "source": "user_override"
+    }
+   },
+   {
+    "id": "49df5b0b",
+    "kind": "factor",
+    "label": "Diesel resale value trajectory",
+    "prior": {
+     "range_max": 0.28,
+     "range_min": 0.07999999999999999,
+     "distribution": "uniform"
+    },
+    "category": "external",
+    "provenance": "ai_inferred",
+    "factor_type": "cost",
+    "extractionType": "inferred"
+   },
+   {
+    "id": "862169d7",
+    "kind": "option",
+    "label": "Subcontract inner-city runs to green courier",
+    "provenance": "ai_inferred",
+    "interventions": {}
+   },
+   {
+    "id": "8678dc17",
+    "kind": "option",
+    "label": "paying the daily charges and passing costs to customers",
+    "provenance": "from_brief",
+    "is_baseline": false,
+    "interventions": {
+     "90246f0d": {
+      "value": 0.95,
+      "source": "cee_hypothesis",
+      "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+      "target_match": {
+       "node_id": "90246f0d",
+       "confidence": "high",
+       "match_type": "exact_id"
+      },
+      "value_confidence": "low"
+     }
+    }
+   },
+   {
+    "id": "90246f0d",
+    "kind": "factor",
+    "label": "Annual clean-air charge burden",
+    "category": "controllable",
+    "provenance": "ai_inferred",
+    "display_value": "Moderate (0.5)",
+    "observed_state": {
+     "value": 0.5,
+     "source": "cee_inference",
+     "factor_type": "other",
+     "extractionType": "inferred",
+     "uncertainty_drivers": [
+      "Not provided"
+     ]
+    }
+   },
+   {
+    "id": "a120db6d",
+    "kind": "option",
+    "label": "Pay daily clean-air charges and pass through to customers",
+    "provenance": "ai_inferred",
+    "interventions": {}
+   },
+   {
+    "id": "aba5f482",
+    "kind": "risk",
+    "label": "Debt service strain from EV loan",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "ae0183e6",
+    "kind": "outcome",
+    "label": "Clean-air zone compliance achieved",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "b46b21eb",
+    "kind": "option",
+    "label": "replacing a third of the diesel fleet with electric vans now",
+    "provenance": "from_brief",
+    "is_baseline": false,
+    "interventions": {
+     "395af71f": {
+      "value": 0.96,
+      "source": "cee_hypothesis",
+      "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+      "target_match": {
+       "node_id": "395af71f",
+       "confidence": "high",
+       "match_type": "exact_id"
+      },
+      "value_confidence": "low"
+     }
+    }
+   },
+   {
+    "id": "bec2c6ba",
+    "kind": "factor",
+    "label": "EV operational range adequacy for inner-city routes",
+    "prior": {
+     "range_max": 0.14,
+     "range_min": 0,
+     "distribution": "uniform"
+    },
+    "category": "external",
+    "provenance": "ai_inferred",
+    "factor_type": "probability",
+    "display_value": "0% to 14%",
+    "extractionType": "inferred"
+   },
+   {
+    "id": "d91a57ea",
+    "kind": "goal",
+    "label": "has to respond to the city's new clean-air zone within a year",
+    "provenance": "from_brief"
+   }
+  ],
+  "edges": [
+   {
+    "to": "d91a57ea",
+    "from": "1641ad56",
+    "origin": "ai",
+    "strength": {
+     "std": 0.11999999999999998,
+     "mean": -0.5
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "effect_direction": "negative",
+    "exists_probability": 0.8,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "d91a57ea",
+    "from": "207703cc",
+    "origin": "ai",
+    "strength": {
+     "std": 0.11999999999999998,
+     "mean": 0.5
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "49a2b80b",
+    "from": "21ea9b80",
+    "origin": "ai",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "d91a57ea",
+    "from": "224541e4",
+    "origin": "ai",
+    "strength": {
+     "std": 0.11999999999999998,
+     "mean": -0.5
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "effect_direction": "negative",
+    "exists_probability": 0.8,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "395af71f",
+    "from": "27af3c89",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Status-quo option wired to factor"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "49a2b80b",
+    "from": "27af3c89",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Status-quo option wired to factor"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "90246f0d",
+    "from": "27af3c89",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Status-quo option wired to factor"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "207703cc",
+    "from": "395af71f",
+    "origin": "ai",
+    "strength": {
+     "std": 0.11999999999999998,
+     "mean": -0.5
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "effect_direction": "negative",
+    "exists_probability": 0.8,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "aba5f482",
+    "from": "395af71f",
+    "origin": "ai",
+    "strength": {
+     "std": 0.11999999999999998,
+     "mean": 0.5
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "ae0183e6",
+    "from": "395af71f",
+    "origin": "repair",
+    "strength": {
+     "std": 0.2,
+     "mean": 0.5
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.75,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "21ea9b80",
+    "from": "4273d90a",
+    "origin": "default",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Decision-to-option scaffold minted by the projector"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "27af3c89",
+    "from": "4273d90a",
+    "origin": "default",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Decision-to-option scaffold minted by the projector"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "862169d7",
+    "from": "4273d90a",
+    "origin": "default",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Decision-to-option scaffold minted by the projector"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "8678dc17",
+    "from": "4273d90a",
+    "origin": "default",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Decision-to-option scaffold minted by the projector"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "a120db6d",
+    "from": "4273d90a",
+    "origin": "default",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Decision-to-option scaffold minted by the projector"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "b46b21eb",
+    "from": "4273d90a",
+    "origin": "default",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Decision-to-option scaffold minted by the projector"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "d91a57ea",
+    "from": "45ddc297",
+    "origin": "ai",
+    "strength": {
+     "std": 0.11999999999999998,
+     "mean": -0.5
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "effect_direction": "negative",
+    "exists_probability": 0.8,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "207703cc",
+    "from": "49a2b80b",
+    "origin": "ai",
+    "strength": {
+     "std": 0.11999999999999998,
+     "mean": -0.5
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "effect_direction": "negative",
+    "exists_probability": 0.8,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "45ddc297",
+    "from": "49a2b80b",
+    "origin": "ai",
+    "strength": {
+     "std": 0.11999999999999998,
+     "mean": 0.5
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "207703cc",
+    "from": "49df5b0b",
+    "origin": "ai",
+    "strength": {
+     "std": 0.144,
+     "mean": 0.6
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "395af71f",
+    "from": "862169d7",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Status-quo option wired to factor"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "49a2b80b",
+    "from": "862169d7",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Status-quo option wired to factor"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "90246f0d",
+    "from": "862169d7",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Status-quo option wired to factor"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "90246f0d",
+    "from": "8678dc17",
+    "origin": "ai",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "1641ad56",
+    "from": "90246f0d",
+    "origin": "ai",
+    "strength": {
+     "std": 0.11999999999999998,
+     "mean": 0.5
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "207703cc",
+    "from": "90246f0d",
+    "origin": "ai",
+    "strength": {
+     "std": 0.11999999999999998,
+     "mean": -0.5
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "effect_direction": "negative",
+    "exists_probability": 0.8,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "395af71f",
+    "from": "a120db6d",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Status-quo option wired to factor"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "49a2b80b",
+    "from": "a120db6d",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Status-quo option wired to factor"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "90246f0d",
+    "from": "a120db6d",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Status-quo option wired to factor"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "d91a57ea",
+    "from": "aba5f482",
+    "origin": "ai",
+    "strength": {
+     "std": 0.11999999999999998,
+     "mean": -0.5
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "effect_direction": "negative",
+    "exists_probability": 0.8,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "d91a57ea",
+    "from": "ae0183e6",
+    "origin": "ai",
+    "strength": {
+     "std": 0.21599999999999997,
+     "mean": 0.9
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "395af71f",
+    "from": "b46b21eb",
+    "origin": "ai",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "224541e4",
+    "from": "bec2c6ba",
+    "origin": "ai",
+    "strength": {
+     "std": 0.11999999999999998,
+     "mean": -0.5
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "effect_direction": "negative",
+    "exists_probability": 0.8,
+    "provenance_display": "ai_inferred"
+   }
+  ]
+ }
+}

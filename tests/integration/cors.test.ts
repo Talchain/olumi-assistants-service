@@ -1,6 +1,10 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import Fastify, { FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
+import {
+  isAllowedBrowserOrigin,
+  OLUMI_STAGING_ORIGIN,
+} from "../../src/security/browser-origin-policy.js";
 
 describe("CORS integration", () => {
   let app: FastifyInstance;
@@ -11,14 +15,23 @@ describe("CORS integration", () => {
     "http://localhost:5173",
     "http://localhost:5174",
     "http://localhost:3000",
+    OLUMI_STAGING_ORIGIN,
   ];
 
   beforeAll(async () => {
     app = Fastify({ logger: false });
 
-    // Register CORS with strict allowlist
+    const allowedOriginSet = new Set(ALLOWED_ORIGINS);
+
+    // Register CORS with the production browser-origin predicate.
     await app.register(cors, {
-      origin: ALLOWED_ORIGINS,
+      origin: (origin, callback) => {
+        callback(
+          null,
+          typeof origin === "string" &&
+            isAllowedBrowserOrigin(origin, allowedOriginSet),
+        );
+      },
     });
 
     // Test endpoints
@@ -158,6 +171,24 @@ describe("CORS integration", () => {
       expect(response.statusCode).toBe(204); // No Content
       expect(response.headers["access-control-allow-origin"]).toBe("https://olumi.app");
       expect(response.headers["access-control-allow-methods"]).toBeDefined();
+    });
+
+    it("should handle OPTIONS preflight for an immutable Olumi deploy", async () => {
+      const immutableOrigin =
+        "https://6a91550f3af620000895d1e5--olumi.netlify.app";
+      const response = await app.inject({
+        method: "OPTIONS",
+        url: "/test",
+        headers: {
+          origin: immutableOrigin,
+          "access-control-request-method": "POST",
+        },
+      });
+
+      expect(response.statusCode).toBe(204);
+      expect(response.headers["access-control-allow-origin"]).toBe(
+        immutableOrigin,
+      );
     });
 
     it("should reject OPTIONS preflight for disallowed origin", async () => {

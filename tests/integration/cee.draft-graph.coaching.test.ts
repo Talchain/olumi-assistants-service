@@ -1,0 +1,355 @@
+/**
+ * CEE v1 Draft Graph Coaching Passthrough Integration Test
+ *
+ * Ensures the coaching field from the LLM adapter survives the entire unified
+ * pipeline (parse → context → package → V3 transform) and appears in the
+ * HTTP response at /assist/v1/draft-graph?schema=v3.
+ */
+
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import type { FastifyInstance } from "fastify";
+
+// ── Test data ────────────────────────────────────────────────────────────────
+
+const TEST_COACHING = {
+  summary: "Consider strengthening causal links between pricing factors",
+  strengthen_items: [
+    {
+      id: "s1",
+      label: "Price-Revenue Link",
+      detail: "Add supporting market data to strengthen the causal connection",
+      action_type: "evidence_needed",
+    },
+    {
+      id: "s2",
+      label: "Demand Elasticity",
+      detail: "Consider adding demand sensitivity as a separate factor",
+      action_type: "structural_improvement",
+      bias_category: "anchoring_bias",
+    },
+  ],
+};
+
+const TEST_GRAPH = {
+  version: "1",
+  default_seed: 42,
+  nodes: [
+    { id: "goal_1", kind: "goal", label: "Increase Revenue" },
+    { id: "dec_1", kind: "decision", label: "Pricing Strategy" },
+    { id: "opt_1", kind: "option", label: "Raise Prices" },
+    { id: "opt_2", kind: "option", label: "Lower Prices" },
+    { id: "fac_1", kind: "factor", label: "Price Level", data: { value: 100, extractionType: "explicit" } },
+    { id: "out_1", kind: "outcome", label: "Revenue" },
+  ],
+  edges: [
+    { from: "dec_1", to: "opt_1" },
+    { from: "dec_1", to: "opt_2" },
+    { from: "opt_1", to: "fac_1" },
+    { from: "opt_2", to: "fac_1" },
+    {
+      from: "fac_1",
+      to: "out_1",
+      strength_mean: 0.7,
+      strength_std: 0.1,
+      belief_exists: 0.9,
+      effect_direction: "positive",
+    },
+    {
+      from: "out_1",
+      to: "goal_1",
+      strength_mean: 0.8,
+      strength_std: 0.15,
+      belief_exists: 0.95,
+      effect_direction: "positive",
+    },
+  ],
+  meta: {
+    roots: ["dec_1"],
+    leaves: ["goal_1"],
+    suggested_positions: {},
+    source: "assistant",
+  },
+};
+
+// ── Environment ──────────────────────────────────────────────────────────────
+
+vi.stubEnv("LLM_PROVIDER", "fixtures");
+
+// ── Mocks ────────────────────────────────────────────────────────────────────
+
+// Mock validateClient to avoid calling real engine
+vi.mock("../../src/services/validateClient.js", () => ({
+  validateGraph: vi.fn().mockResolvedValue({ ok: true, violations: [], normalized: undefined }),
+}));
+
+// Mock structure module to avoid warnings/repairs interfering
+vi.mock("../../src/cee/structure/index.js", () => ({
+  detectStructuralWarnings: vi.fn().mockReturnValue({
+    warnings: [],
+    uncertainNodeIds: [],
+  }),
+  detectUniformStrengths: () => ({
+    detected: false,
+    totalEdges: 0,
+    defaultStrengthCount: 0,
+    defaultStrengthPercentage: 0,
+  }),
+  detectStrengthClustering: () => ({
+    detected: false,
+    coefficientOfVariation: 0,
+    edgeCount: 0,
+  }),
+  detectGoalLayerStrengthClustering: () => ({
+    detected: false,
+    coefficientOfVariation: 0,
+    edgeCount: 0,
+  }),
+  detectSameLeverOptions: () => ({
+    detected: false,
+    maxOverlapPercentage: 0,
+    overlappingOptionPairs: [],
+  }),
+  detectMissingBaseline: () => ({
+    detected: false,
+    hasBaseline: false,
+  }),
+  detectGoalNoBaselineValue: () => ({
+    detected: false,
+    goalHasValue: false,
+  }),
+  detectZeroExternalFactors: () => ({
+    detected: false,
+    factorCount: 0,
+    externalCount: 0,
+  }),
+  checkGoalConnectivity: () => ({
+    status: "full",
+    disconnectedOptions: [],
+    weakPaths: [],
+  }),
+  computeModelQualityFactors: () => ({
+    estimate_confidence: 0.5,
+    strength_variation: 0,
+    range_confidence_coverage: 0,
+    has_baseline_option: false,
+  }),
+  detectOptionSimilarity: () => ({
+    detected: false,
+    critiques: [],
+    warnings: [],
+    validationIssues: [],
+  }),
+  detectMissingCounterfactual: () => ({
+    detected: false,
+    hasCounterfactual: false,
+  }),
+  normaliseDecisionBranchBeliefs: (graph: unknown) => graph,
+  validateAndFixGraph: (graph: unknown) => ({
+    graph,
+    valid: true,
+    fixes: {
+      singleGoalApplied: false,
+      outcomeBeliefsFilled: 0,
+      decisionBranchesNormalized: false,
+    },
+    warnings: [],
+  }),
+  fixNonCanonicalStructuralEdges: (graph: unknown) => ({
+    graph,
+    fixedEdgeCount: 0,
+    fixedEdgeIds: [],
+    repairs: [],
+  }),
+  hasGoalNode: (graph: any) => {
+    if (!graph || !Array.isArray(graph.nodes)) return false;
+    return graph.nodes.some((n: any) => n.kind === "goal");
+  },
+  ensureGoalNode: (graph: any) => ({
+    graph,
+    goalAdded: false,
+    inferredFrom: undefined,
+    goalNodeId: undefined,
+  }),
+}));
+
+// Shared mock draftGraph so tests can override per-call via mockResolvedValueOnce
+const mockDraftGraph = vi.fn().mockResolvedValue({
+  graph: TEST_GRAPH,
+  rationales: [],
+  coaching: TEST_COACHING,
+  usage: { input_tokens: 0, output_tokens: 0 },
+  meta: {
+    model: "fixture-v1",
+    prompt_version: "fixture:coaching_test",
+    temperature: 0,
+    token_usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+    finish_reason: "fixture",
+    provider_latency_ms: 0,
+    node_kinds_raw_json: ["goal", "decision", "option", "option", "factor", "outcome"],
+  },
+});
+
+const mockRepairGraph = vi.fn().mockResolvedValue({
+  graph: TEST_GRAPH,
+  rationales: [],
+  usage: { input_tokens: 0, output_tokens: 0 },
+});
+
+// Override full router module — provides all exports needed by server build
+const coachingMockAdapter = {
+  name: "fixtures",
+  model: "fixture-v1",
+  draftGraph: mockDraftGraph,
+  repairGraph: mockRepairGraph,
+  suggestOptions: vi.fn().mockResolvedValue({ options: [] }),
+  clarifyBrief: vi.fn().mockResolvedValue({ questions: [], usage: { input_tokens: 0, output_tokens: 0 } }),
+  critiqueGraph: vi.fn().mockResolvedValue({ critique: "", usage: { input_tokens: 0, output_tokens: 0 } }),
+  chat: vi.fn().mockResolvedValue({ message: "", usage: { input_tokens: 0, output_tokens: 0 } }),
+  explainDiff: vi.fn().mockResolvedValue({ explanation: "", usage: { input_tokens: 0, output_tokens: 0 } }),
+};
+vi.mock("../../src/adapters/llm/router.js", () => ({
+  getAdapter: () => coachingMockAdapter,
+  // v5-maintenance: pipeline parse stage needs getAdapterWithResolution.
+  getAdapterWithResolution: (task?: string) => ({
+    adapter: coachingMockAdapter,
+    resolution: {
+      task,
+      resolved_model: "fixture-v1",
+      resolution_source: "task_default" as const,
+    },
+  }),
+  resolveConfiguredRouterPlan: (task?: string) => ({
+    kind: "single" as const,
+    task,
+    assignment: {
+      model: "fixture-v1",
+      provider: "fixtures" as const,
+      declaredProvider: null,
+      registryModelId: null,
+      availability: "fixture_only" as const,
+      config: null,
+    },
+    resolutionSource: "llm_model_fallback" as const,
+    sourceKey: "PROVIDER_DEFAULT_MODELS.fixtures",
+  }),
+  getAdapterForProvider: vi.fn(),
+  getMaxTokensFromConfig: vi.fn().mockReturnValue(undefined),
+  warmProviderConfigCache: vi.fn().mockResolvedValue({ loaded: false, path: "" }),
+  resetAdapterCache: vi.fn(),
+}));
+
+import { build } from "../../src/server.js";
+import { cleanBaseUrl } from "../helpers/env-setup.js";
+
+describe("POST /assist/v1/draft-graph (CEE v1) - coaching passthrough", () => {
+  let app: FastifyInstance;
+
+  beforeAll(async () => {
+    vi.stubEnv("ASSIST_API_KEYS", "cee-key-coaching");
+    vi.stubEnv("CEE_DRAFT_FEATURE_VERSION", "draft-model-test");
+    vi.stubEnv("CEE_DRAFT_RATE_LIMIT_RPM", "5");
+    vi.stubEnv("CEE_DRAFT_STRUCTURAL_WARNINGS_ENABLED", "false");
+    // Coaching passthrough is wired through the unified pipeline
+    vi.stubEnv("CEE_UNIFIED_PIPELINE_ENABLED", "true");
+
+    cleanBaseUrl();
+    app = await build();
+    await app.ready();
+  });
+
+  afterAll(async () => {
+    await app.close();
+    vi.unstubAllEnvs();
+  });
+
+  it("coaching field survives pipeline to V3 HTTP response", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/assist/v1/draft-graph?schema=v3",
+      headers: { "X-Olumi-Assist-Key": "cee-key-coaching" },
+      payload: {
+        brief: "Pricing decision affecting revenue with multiple causal links and strategic factors.",
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as any;
+
+    // coaching must be present at the top level of the V3 response
+    expect(body.coaching).toBeDefined();
+    expect(body.coaching.summary).toBe(TEST_COACHING.summary);
+    // 2 from LLM + 1 auto-injected status_quo coaching item (no baseline option in graph)
+    expect(body.coaching.strengthen_items).toHaveLength(3);
+
+    // Verify individual strengthen_items survive intact.
+    //
+    // CHANGED 2026-07-24 (draft-honesty lane). This block previously asserted
+    // that the LLM's raw `action_type: "evidence_needed"` /
+    // `"structural_improvement"` and `bias_category: "anchoring_bias"` reached
+    // the wire unchanged — none of which are members of
+    // `StrengthenItemActionType` / `BiasType`. That pass-through IS the live
+    // defect the day-3 drafting matrix caught (8 of 9 successful drafts stamped
+    // `verification_status: failed_degraded`, "Response does not conform to
+    // expected schema"). The test's real subject — coaching SURVIVING the
+    // pipeline to the V3 response — is unchanged and still asserted via id +
+    // label; only the enum-conformance expectations move onto the contract.
+    //
+    // Note the deliberate asymmetry: an unrecognised action CATEGORY is coerced
+    // to the generic canonical member, but an unrecognised BIAS is DROPPED, not
+    // re-labelled — a bias name is a claim about the user's reasoning.
+    const items = body.coaching.strengthen_items;
+    expect(items[0]).toMatchObject({
+      id: "s1",
+      label: "Price-Revenue Link",
+      action_type: "add_constraint",
+    });
+    expect(items[1]).toMatchObject({
+      id: "s2",
+      label: "Demand Elasticity",
+      action_type: "add_constraint",
+    });
+    expect(items[1].bias_category).toBeUndefined();
+    // Auto-injected by STATUS_QUO_ABSENT coaching injection
+    expect(items[2]).toMatchObject({
+      id: "str_status_quo",
+      label: "Add baseline option",
+      action_type: "add_option",
+    });
+  });
+
+  it("response without coaching omits the field cleanly", async () => {
+    // Override the shared mock to return no coaching for this single call
+    mockDraftGraph.mockResolvedValueOnce({
+      graph: TEST_GRAPH,
+      rationales: [],
+      // no coaching field
+      usage: { input_tokens: 0, output_tokens: 0 },
+      meta: {
+        model: "fixture-v1",
+        prompt_version: "fixture:no_coaching",
+        temperature: 0,
+        token_usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+        finish_reason: "fixture",
+        provider_latency_ms: 0,
+        node_kinds_raw_json: ["goal", "decision", "option", "option", "factor", "outcome"],
+      },
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/assist/v1/draft-graph?schema=v3",
+      headers: { "X-Olumi-Assist-Key": "cee-key-coaching" },
+      payload: {
+        brief: "A straightforward pricing decision about revenue strategy for the business.",
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as any;
+
+    // coaching is auto-injected by STATUS_QUO_ABSENT even when adapter doesn't include it
+    // (no status quo option in graph → pipeline adds str_status_quo item)
+    expect(body.coaching).toBeDefined();
+    expect(body.coaching.strengthen_items.some((i: any) => i.id === "str_status_quo")).toBe(true);
+  });
+});

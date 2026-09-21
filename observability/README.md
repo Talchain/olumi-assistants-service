@@ -73,8 +73,6 @@ curl -X POST ... -d @alerts/legacy-provenance.json
 
 ### Quality
 - **Quality Tier Distribution:** High (≥0.9), Medium (≥0.7), Low (<0.7)
-- **Fallback Reason Mix:** Why drafts fell back to simple repair
-- **Repair Fallback Rate:** Percentage of repairs that failed
 - **Confidence Distribution:** Heat map of draft confidence scores
 
 ### Cost
@@ -143,8 +141,7 @@ curl -X POST ... -d @alerts/legacy-provenance.json
 1. Check traffic volume spike
 2. Review token usage (brief complexity)
 3. Verify prompt cache hit rate (should be >60%)
-4. Check repair fallback rate increase
-5. Confirm Anthropic pricing unchanged
+4. Confirm Anthropic pricing unchanged
 
 ---
 
@@ -181,11 +178,8 @@ TelemetryEvents = {
   FixtureShown: "assist.draft.fixture_shown",
   FixtureReplaced: "assist.draft.fixture_replaced",
   ValidationFailed: "assist.draft.validation_failed",
-  RepairAttempted: "assist.draft.repair_attempted",
-  RepairStart: "assist.draft.repair_start",
-  RepairSuccess: "assist.draft.repair_success",
-  RepairPartial: "assist.draft.repair_partial",
-  RepairFallback: "assist.draft.repair_fallback",
+  // assist.draft.repair_* quintet deleted with the draft path's LLM repair
+  // (ROADMAP 2.731/2.732)
   LegacyProvenance: "assist.draft.legacy_provenance",
   Stage: "assist.draft.stage",
 }
@@ -219,10 +213,6 @@ All metrics use the prefix `olumi.assistants.`
 | `draft.sse.errors` | counter | error_code | SSE stream errors |
 | `draft.validation.failed` | counter | - | Validation failures |
 | `draft.validation.violations` | gauge | - | Number of validation violations |
-| `draft.repair.attempted` | counter | - | Repair attempts |
-| `draft.repair.success` | counter | - | Successful repairs |
-| `draft.repair.partial` | counter | - | Partial repairs (some violations fixed) |
-| `draft.repair.fallback` | counter | reason | Repairs that fell back to simple repair |
 | `draft.legacy_provenance.occurrences` | counter | - | Legacy provenance detections |
 | `draft.legacy_provenance.percentage` | gauge | - | Percentage of edges using legacy format |
 | `draft.fixture.shown` | counter | - | Fixture shown to user (2.5s timeout) |

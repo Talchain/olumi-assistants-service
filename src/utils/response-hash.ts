@@ -28,6 +28,17 @@ export const RESPONSE_HASH_LENGTH = 12;
  * - Primitives: pass through (string, number, boolean)
  *
  * This matches the UI implementation for cross-service hash consistency.
+ *
+ * The accumulator is a null-prototype object (`Object.create(null)`), NOT a
+ * plain `{}` — mirroring `stableStringify` (src/orchestrator/context/
+ * stable-stringify.ts). `JSON.parse` of wire JSON yields an OWN enumerable
+ * `__proto__` key when the payload contains one, and `Object.keys` enumerates
+ * it; on a plain object `sorted['__proto__'] = …` hits the inherited
+ * accessor's setter and the key silently vanishes, so two payloads differing
+ * only in `__proto__` would hash identically (a hash collision). A
+ * null-prototype accumulator has no such setter, so `__proto__` round-trips
+ * as a normal own property. Output is byte-identical to the previous
+ * behaviour for every payload without an own `__proto__` key.
  */
 export function canonicalizeJson(value: unknown): unknown {
   // null → null
@@ -42,7 +53,7 @@ export function canonicalizeJson(value: unknown): unknown {
 
   // Object: sort keys and recursively canonicalize values, skip undefined
   if (value && typeof value === "object") {
-    const sorted: Record<string, unknown> = {};
+    const sorted: Record<string, unknown> = Object.create(null);
     const keys = Object.keys(value).sort();
 
     for (const key of keys) {

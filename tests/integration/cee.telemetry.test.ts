@@ -57,6 +57,12 @@ function expectSucceededShape(data: Record<string, any>) {
       "cost_usd",
       "engine_provider",
       "engine_model",
+      // ⭐ THE DUPLICATE-OPTION-LABEL FREQUENCY INSTRUMENT. Emitted at
+      // draft-emission time WITH its denominator, because a bare numerator
+      // cannot produce a rate. No label is emitted — option labels are
+      // user-authored content.
+      "option_label_collision_count",
+      "option_count",
     ].sort()
   );
   expect(typeof data.request_id).toBe("string");
@@ -72,6 +78,8 @@ function expectSucceededShape(data: Record<string, any>) {
   expect(typeof data.cost_usd).toBe("number");
   expect(typeof data.engine_provider).toBe("string");
   expect(typeof data.engine_model).toBe("string");
+  expect(typeof data.option_label_collision_count).toBe("number");
+  expect(typeof data.option_count).toBe("number");
 }
 
 function expectFailedShape(data: Record<string, any>) {

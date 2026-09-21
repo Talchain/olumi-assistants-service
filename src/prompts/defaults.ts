@@ -8,15 +8,86 @@
  * Registration happens during server initialization before routes are loaded.
  */
 
-import { registerDefaultPrompt } from './loader.js';
+import { readFileSync } from 'node:fs';
+import { resolve as pathResolve } from 'node:path';
+import { registerDefaultPrompt } from './default-registry.js';
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from '../config/graphCaps.js';
+import { getDraftGraphPromptV8, DRAFT_GRAPH_PROMPT_V8, GRAPH_OUTPUT_SCHEMA_V8, OPENAI_STRUCTURED_CONFIG_V8 } from './defaults-v8.js';
+import { getDraftGraphPromptV12, DRAFT_GRAPH_PROMPT_V12 } from './defaults-v12.js';
+import { getDraftGraphPromptV15, DRAFT_GRAPH_PROMPT_V15 } from './defaults-v15.js';
+import { getDraftGraphPromptV19, DRAFT_GRAPH_PROMPT_V19 } from './defaults-v19.js';
+import { getDraftGraphPromptV22, DRAFT_GRAPH_PROMPT_V22 } from './defaults-v22.js';
+import { getEnrichFactorsPrompt, ENRICH_FACTORS_PROMPT } from './enrich-factors.js';
+import { getOrchestratorPromptV28, ORCHESTRATOR_PROMPT_CF_V28 } from './orchestrator-cf-v28.js';
+import { getDraftGraphPromptV187, DRAFT_GRAPH_PROMPT_V187 } from './defaults-v187.js';
+import { getEditGraphPromptV6, EDIT_GRAPH_PROMPT_V6 } from './edit-graph-v6.js';
+import { M2_PROMPT_NOT_PROVISIONED_SENTINEL } from '../cee/dual-draft/prompt-sentinel.js';
+import { log } from '../utils/telemetry.js';
+
+// ============================================================================
+// Prompt Version Selection
+// ============================================================================
+
+/**
+ * Supported prompt versions for draft_graph.
+ * Use PROMPT_VERSION env var to select: 'v187' (default) or legacy versions.
+ *
+ * Examples:
+ *   PROMPT_VERSION=v187 -> Use v187 (production: construction flow, structural rules, annotated example)
+ *   PROMPT_VERSION=v19  -> Use v19 (deprecated: bidirected edges, goal constraints, causal claims)
+ *   PROMPT_VERSION=v15  -> Use v15 (deprecated: superseded by v19)
+ *   PROMPT_VERSION=v12  -> Use v12 (deprecated: superseded by v15)
+ *   PROMPT_VERSION=v22  -> Use v22 (deprecated: was misnumbering of v12 development)
+ *   PROMPT_VERSION=v8   -> Use v8.2 (deprecated: superseded by v12)
+ *   PROMPT_VERSION=v6   -> Use v6.0.2 (deprecated: verbose, explicit checklist)
+ */
+export type PromptVersion = 'v6' | 'v8' | 'v12' | 'v15' | 'v19' | 'v22' | 'v187';
+
+const VALID_VERSIONS = new Set<PromptVersion>(['v6', 'v8', 'v12', 'v15', 'v19', 'v22', 'v187']);
+const DEFAULT_VERSION: PromptVersion = 'v187';
+
+/**
+ * Get the configured prompt version from environment.
+ * Returns the version string and whether it was explicitly set.
+ */
+export function getPromptVersion(): { version: PromptVersion; explicit: boolean } {
+  // eslint-disable-next-line no-restricted-syntax -- Prompt version override for testing
+  const envValue = process.env.PROMPT_VERSION?.toLowerCase().trim();
+
+  if (!envValue) {
+    return { version: DEFAULT_VERSION, explicit: false };
+  }
+
+  // Normalize: accept 'v6', '6', 'v8', '8' etc.
+  const normalized = envValue.startsWith('v') ? envValue : `v${envValue}`;
+
+  if (VALID_VERSIONS.has(normalized as PromptVersion)) {
+    return { version: normalized as PromptVersion, explicit: true };
+  }
+
+  log.warn(
+    { envValue, defaultVersion: DEFAULT_VERSION },
+    `Invalid PROMPT_VERSION "${envValue}", falling back to "${DEFAULT_VERSION}"`
+  );
+  return { version: DEFAULT_VERSION, explicit: false };
+}
+
+// Re-export v8 schema for adapters that need it
+export { GRAPH_OUTPUT_SCHEMA_V8, OPENAI_STRUCTURED_CONFIG_V8 };
 
 // ============================================================================
 // Draft Graph Prompt
 // ============================================================================
 
 // ============================================================================
-// CEE Draft Graph Prompt v6.0.2
+// CEE Draft Graph Prompt v6.0.2 [DEPRECATED]
+//
+// DEPRECATION NOTICE: v6 is superseded by v22 as of 2026-01-27.
+// v22 provides Monte Carlo-optimized parameters, scale discipline,
+// and improved causal reasoning. v6 is retained for backward compatibility
+// and A/B testing but should not be used for new deployments.
+//
+// Original v6 features:
 // - effect_direction required on all edges
 // - Options must differ in interventions
 // - Outcome/risk outdegree exactly 1 to goal
@@ -580,7 +651,7 @@ If any check fails, regenerate the graph internally and output only the final va
 <CONSTRAINTS>
 LIMITS:
 - Maximum {{maxNodes}} nodes (default: 50)
-- Maximum {{maxEdges}} edges (default: 200)
+- Maximum {{maxEdges}} edges (default: 100)
 
 NUMERIC RANGES:
 - strength.mean: [-1.0, +1.0] (never exactly 0)
@@ -633,62 +704,334 @@ Respond ONLY with valid JSON.`;
 // Repair Graph Prompt
 // ============================================================================
 
-const REPAIR_GRAPH_PROMPT = `You are an expert at fixing decision graph violations.
+// ============================================================================
+// Repair Graph Prompt v6
+//
+// CHANGELOG (v6):
+// - Minimal-diff philosophy: fix only what's broken, preserve everything else
+// - Violation-targeted: specific fixes for each violation code
+// - Aligned with deterministic repair pipeline (simpleRepair handles connectivity)
+// - Structured rationales for debuggability
+// - Canonical edge values for new edges
+// - Contrastive examples showing over-editing anti-patterns
+// ============================================================================
 
-## Your Task
-Fix the graph to resolve ALL violations. Common fixes:
-- Remove cycles (decision graphs must be DAGs)
-- Remove isolated nodes (all nodes must be connected)
-- Ensure edge endpoints reference valid node IDs
-- Ensure belief values are between 0 and 1
-- Ensure node kinds are valid (goal, decision, option, outcome, risk, factor)
-- Maintain graph topology where possible
+/**
+ * Version identifier for the repair graph fallback prompt.
+ * Used for telemetry when prompt admin is unavailable.
+ */
+export const REPAIR_GRAPH_PROMPT_VERSION = 'v6';
 
-## CRITICAL: Closed-World Edge Rules (v4)
+const REPAIR_GRAPH_PROMPT = `<ROLE>
+You repair causal decision graphs that failed validation. Your job is to make
+the MINIMUM changes needed to resolve every violation while preserving the
+graph's causal meaning.
+
+Stakes: Over-editing destroys the user's model. Renaming IDs breaks downstream
+references. Changing edge semantics silently alters simulation results. Every
+unnecessary change is a bug.
+
+CORE RULE: FIX what's broken — PRESERVE everything else.
+Minimal edits. No restructuring unless required. No cosmetic changes.
+</ROLE>
+
+<REPAIR_PRINCIPLES>
+1. MINIMAL DIFF: Change only what each violation requires. If a violation needs
+   one new edge, add one edge. Do not reorganise the graph.
+
+2. PRESERVE IDS: Never rename node IDs. Never change node kinds unless the
+   violation explicitly requires it (e.g., INVALID_EDGE_TYPE caused by wrong kind).
+
+3. PRESERVE PARAMETERS: Do not modify strength.mean, strength.std, or
+   exists_probability on edges that are not cited in a violation.
+
+4. ONE FIX PER VIOLATION: Address each violation independently. If fixes
+   conflict, prefer the fix that changes fewer elements.
+
+5. REACHABILITY IS MOSTLY DETERMINISTIC: The system wires orphaned
+   outcomes/risks to goals and prunes unreachable factors automatically.
+   For reachability violations: do not add mediator nodes, do not rewire
+   outcomes/risks (the system handles this). For unreachable factors,
+   prefer removing the factor unless it is clearly central to the brief.
+
+6. STRUCTURAL EDGES ARE NORMALISED AUTOMATICALLY: Do not modify
+   decision→option or option→factor edges unless the violation
+   specifically requires it.
+</REPAIR_PRINCIPLES>
+
+<TOPOLOGY_RULES>
 Only these edge patterns are ALLOWED:
 
-| From     | To       | Meaning                              |
-|----------|----------|--------------------------------------|
-| decision | option   | Decision frames this option          |
-| option   | factor   | Option sets factor value             |
-| factor   | outcome  | Factor influences outcome            |
-| factor   | risk     | Factor influences risk               |
-| factor   | factor   | Factor affects another factor        |
-| outcome  | goal     | Outcome contributes to goal          |
-| risk     | goal     | Risk contributes to goal             |
+| From     | To       | Required Values                                    |
+|----------|----------|----------------------------------------------------|
+| decision | option   | mean=1.0, std=0.01, exists_probability=1.0         |
+| option   | factor   | mean=1.0, std=0.01, exists_probability=1.0         |
+| factor   | outcome  | Causal (varied parameters)                         |
+| factor   | risk     | Causal (varied parameters)                         |
+| factor   | factor   | Causal (varied parameters)                         |
+| outcome  | goal     | Positive direction (mean > 0)                      |
+| risk     | goal     | Negative direction (mean < 0)                      |
 
-**ALL other edge patterns are PROHIBITED and must be removed or fixed.**
+ALL other edge patterns are PROHIBITED and must be removed or rerouted.
 
-Correct topology: Decision → Options → Factors → Outcomes/Risks → Goal
+COMMON PROHIBITED PATTERNS AND FIXES:
+| Prohibited Edge    | Fix                                                  |
+|--------------------|------------------------------------------------------|
+| option → outcome   | Insert factor between: option → fac_new → outcome    |
+| option → goal      | Insert factor + outcome: opt → fac → out → goal      |
+| factor → goal      | Insert outcome: factor → out_new → goal              |
+| goal → anything    | Remove edge (goal is terminal sink)                  |
+| outcome → option   | Remove edge (reverse causation)                      |
 
-**PROHIBITED edges to REMOVE:**
-- option → outcome (WRONG: use option → factor → outcome)
-- option → goal (WRONG: use option → factor → outcome → goal)
-- factor → goal (WRONG: use factor → outcome → goal)
-- factor → decision (factors don't cause decisions)
-- factor → option (factors influence outcomes via factors, not options)
-- goal → anything (goal is terminal sink)
-- outcome → option (outcomes don't cause options)
+When inserting a new factor node:
+- ID: fac_[descriptive_name] (lowercase, underscores)
+- kind: "factor"
+- category: "external" (safest default — no data assumptions)
+- label: Brief descriptive label
+- No data field (external factors have none)
 
-## Output Format (JSON)
+When inserting a new outcome node:
+- ID: out_[descriptive_name]
+- kind: "outcome"
+- label: Brief descriptive label
+- No data field
+
+CANONICAL VALUES FOR NEW EDGES:
+| Edge Type           | mean | std  | exists_probability | effect_direction |
+|---------------------|------|------|--------------------|------------------|
+| Structural          | 1.0  | 0.01 | 1.0               | positive         |
+| New causal (positive)| 0.5 | 0.20 | 0.75               | positive         |
+| New causal (negative)| -0.5| 0.20 | 0.75               | negative         |
+| Outcome → goal      | 0.7  | 0.15 | 0.90              | positive         |
+| Risk → goal         | -0.5 | 0.15 | 0.90              | negative         |
+</TOPOLOGY_RULES>
+
+<VIOLATION_REFERENCE>
+You will receive specific violation codes. Here is how to fix each:
+
+TIER 1 — STRUCTURAL:
+| Code                    | Fix                                                    |
+|-------------------------|--------------------------------------------------------|
+| MISSING_GOAL            | Add goal node + wire all outcomes/risks to it          |
+| MISSING_DECISION        | Add decision node + wire to all options                |
+| INSUFFICIENT_OPTIONS    | Add status quo option with baseline interventions      |
+| MISSING_BRIDGE          | Add outcome node + wire relevant factors to it + to goal|
+| NODE_LIMIT_EXCEEDED     | Remove least-connected unprotected nodes               |
+| EDGE_LIMIT_EXCEEDED     | Remove weakest edges (lowest exists_probability)       |
+| INVALID_EDGE_REF        | Remove edge (references non-existent node)             |
+
+TIER 2 — TOPOLOGY:
+| Code                    | Fix                                                    |
+|-------------------------|--------------------------------------------------------|
+| GOAL_HAS_OUTGOING       | Remove outgoing edges from goal                        |
+| DECISION_HAS_INCOMING   | Remove incoming edges to decision                      |
+| INVALID_EDGE_TYPE       | Reroute per PROHIBITED PATTERNS table above            |
+| CYCLE_DETECTED          | Remove the weakest edge in the cycle                   |
+
+TIER 3 — REACHABILITY:
+| Code                    | Fix                                                    |
+|-------------------------|--------------------------------------------------------|
+| UNREACHABLE_FROM_DECISION| Add smallest direct missing edge to connect node to causal chain. Do not wire outcomes/risks to goal (handled deterministically). |
+| NO_PATH_TO_GOAL         | Add missing causal edge factor→outcome if needed. Do not add outcome/risk→goal edges (handled deterministically). |
+
+TIER 4 — FACTOR DATA:
+| Code                         | Fix                                               |
+|------------------------------|---------------------------------------------------|
+| CONTROLLABLE_MISSING_DATA    | Add data: {value: 1.0, extractionType: "inferred", factor_type: "other", uncertainty_drivers: ["Not specified"]} |
+| OBSERVABLE_MISSING_DATA      | Add data: {value: 1.0, extractionType: "inferred"}|
+
+TIER 5 — SEMANTIC:
+| Code                              | Fix                                          |
+|-----------------------------------|----------------------------------------------|
+| NO_EFFECT_PATH                    | Add missing causal edge along path            |
+| OPTIONS_IDENTICAL                 | Differentiate at least one intervention value |
+| STRUCTURAL_EDGE_NOT_CANONICAL     | Set mean=1.0, std=0.01, exists_probability=1.0|
+
+TIER 6 — NUMERIC:
+| Code         | Fix                                                          |
+|--------------|--------------------------------------------------------------|
+| NAN_VALUE    | Replace NaN with canonical default for that edge type        |
+</VIOLATION_REFERENCE>
+
+<OUTPUT_SCHEMA>
+Return a single JSON object. No markdown fences, no preamble.
+
 {
   "nodes": [
+    // Complete list of ALL nodes (preserved + any new ones)
     { "id": "goal_1", "kind": "goal", "label": "..." },
     { "id": "dec_1", "kind": "decision", "label": "..." },
-    { "id": "opt_1", "kind": "option", "label": "..." },
-    { "id": "fac_1", "kind": "factor", "label": "..." },
+    { "id": "opt_1", "kind": "option", "label": "...", "data": {"interventions": {...}} },
+    { "id": "fac_1", "kind": "factor", "label": "...", "category": "controllable", "data": {...} },
     { "id": "out_1", "kind": "outcome", "label": "..." }
   ],
   "edges": [
-    { "from": "dec_1", "to": "opt_1", "belief": 1.0 },
-    { "from": "opt_1", "to": "fac_1", "belief": 1.0 },
-    { "from": "fac_1", "to": "out_1", "belief": 0.7 },
-    { "from": "out_1", "to": "goal_1", "belief": 0.8 }
+    // Complete list of ALL edges (preserved + any new/modified ones)
+    { "from": "dec_1", "to": "opt_1", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive" }
   ],
-  "rationales": []
+  "rationales": [
+    // One entry per violation addressed
+    {
+      "violation_code": "UNREACHABLE_FROM_DECISION",
+      "node_or_edge": "out_profit_margin",
+      "action": "Added edge fac_revenue → out_profit_margin (mean=0.5, std=0.20, exists_probability=0.75)",
+      "elements_changed": 1
+    }
+  ]
 }
 
-Respond ONLY with valid JSON matching this structure.`;
+RATIONALES RULES:
+- One rationale per violation (not per edit — group related edits under one violation)
+- action: Plain description of what changed
+- elements_changed: Count of nodes + edges added, removed, or modified
+- If a violation required no fix (already resolved by fixing another), include:
+  action: "Resolved by fix for [other_violation_code]", elements_changed: 0
+
+OUTPUT: Complete graph (all nodes + all edges) — not a diff. The validator
+re-runs on your complete output. Omitting unchanged nodes/edges causes new
+INVALID_EDGE_REF violations.
+</OUTPUT_SCHEMA>
+
+<CONTRASTIVE_EXAMPLES>
+// —— OVER-EDITING ————————————————————————————————————————————————
+// Violation: UNREACHABLE_FROM_DECISION on fac_competition
+
+// ✗ BAD: Restructures the entire graph
+//    Renames fac_competition → fac_competitive_pressure
+//    Moves edges from other factors
+//    Changes strength values on unrelated edges
+
+// ✓ GOOD: Adds one edge
+//    Adds: fac_market_entry → fac_competition (mean=-0.4, std=0.22, exists_probability=0.75)
+//    Everything else untouched
+
+// —— PROHIBITED EDGE ————————————————————————————————————————————
+// Violation: INVALID_EDGE_TYPE on option → outcome
+
+// ✗ BAD: Deletes both the option and outcome nodes
+// ✗ BAD: Reverses the edge to outcome → option
+
+// ✓ GOOD: Inserts mediating factor
+//    Adds node: fac_intervention_effect (kind=factor, category=external)
+//    Replaces edge: opt_a → out_revenue
+//    With edges: opt_a → fac_intervention_effect, fac_intervention_effect → out_revenue
+
+// —— NO_PATH_TO_GOAL ———————————————————————————————————————————
+// Violation: NO_PATH_TO_GOAL on out_market_share
+
+// ✗ BAD: Removes out_market_share entirely
+// ✗ BAD: Adds out_market_share → dec_1 (wrong direction)
+
+// ✓ GOOD: Adds bridge edge
+//    Adds: out_market_share → goal_growth (mean=0.7, std=0.15, exists_probability=0.90)
+
+// —— CYCLE ———————————————————————————————————————————————————————
+// Violation: CYCLE_DETECTED involving fac_a → fac_b → fac_a
+
+// ✗ BAD: Removes both edges (breaks connectivity)
+
+// ✓ GOOD: Removes the weaker edge
+//    fac_a → fac_b: exists_probability=0.85 (keep)
+//    fac_b → fac_a: exists_probability=0.60 (remove — weaker link)
+
+// —— ID PRESERVATION ————————————————————————————————————————————
+// ✗ BAD: Renames fac_market_timing → fac_timing (breaks downstream refs)
+// ✓ GOOD: Keeps fac_market_timing exactly as received
+</CONTRASTIVE_EXAMPLES>
+
+<ANNOTATED_EXAMPLE>
+// INPUT: Graph with 2 violations:
+// 1. INVALID_EDGE_TYPE: opt_expand → out_revenue (prohibited: option→outcome)
+// 2. NO_PATH_TO_GOAL: risk_operational has no edge to goal_growth
+
+// REPAIR OUTPUT:
+{
+  "nodes": [
+    {"id": "dec_expansion", "kind": "decision", "label": "European Market Expansion"},
+    {"id": "opt_expand", "kind": "option", "label": "Enter European Market",
+     "data": {"interventions": {"fac_market_entry": 1, "fac_investment": 0.8}}},
+    {"id": "opt_hold", "kind": "option", "label": "Focus on Domestic",
+     "data": {"interventions": {"fac_market_entry": 0, "fac_investment": 0.2}}},
+    {"id": "fac_market_entry", "kind": "factor", "label": "Market Entry (0/1)",
+     "category": "controllable",
+     "data": {"value": 0, "extractionType": "inferred", "factor_type": "other",
+              "uncertainty_drivers": ["Market readiness unvalidated"]}},
+    {"id": "fac_investment", "kind": "factor", "label": "Expansion Investment (0–1, share of £500k cap)",
+     "category": "controllable",
+     "data": {"value": 0.2, "extractionType": "inferred", "factor_type": "cost",
+              "uncertainty_drivers": ["Vendor quotes pending"]}},
+    {"id": "fac_competition", "kind": "factor", "label": "Competitive Intensity",
+     "category": "external"},
+    {"id": "out_revenue", "kind": "outcome", "label": "Revenue Growth"},
+    {"id": "risk_operational", "kind": "risk", "label": "Operational Complexity"},
+    {"id": "goal_growth", "kind": "goal", "label": "Double Revenue with Manageable Risk"}
+  ],
+  "edges": [
+    // PRESERVED — structural edges (unchanged)
+    {"from": "dec_expansion", "to": "opt_expand", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+    {"from": "dec_expansion", "to": "opt_hold", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+    {"from": "opt_expand", "to": "fac_market_entry", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+    {"from": "opt_expand", "to": "fac_investment", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+    {"from": "opt_hold", "to": "fac_market_entry", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+    {"from": "opt_hold", "to": "fac_investment", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+
+    // PRESERVED — causal edges (unchanged)
+    {"from": "fac_competition", "to": "out_revenue", "strength": {"mean": -0.4, "std": 0.22}, "exists_probability": 0.75, "effect_direction": "negative"},
+    {"from": "fac_market_entry", "to": "risk_operational", "strength": {"mean": 0.6, "std": 0.18}, "exists_probability": 0.88, "effect_direction": "positive"},
+
+    // PRESERVED — bridge edge (unchanged)
+    {"from": "out_revenue", "to": "goal_growth", "strength": {"mean": 0.85, "std": 0.10}, "exists_probability": 0.95, "effect_direction": "positive"},
+
+    // FIX 1: Replaced opt_expand → out_revenue (prohibited) with factor path
+    // REMOVED: {"from": "opt_expand", "to": "out_revenue", ...}
+    // ADDED: fac_market_entry already has edge to out_revenue via fac_competition path,
+    //        so add direct causal link:
+    {"from": "fac_market_entry", "to": "out_revenue", "strength": {"mean": 0.7, "std": 0.15}, "exists_probability": 0.85, "effect_direction": "positive"},
+
+    // FIX 2: risk_operational had no path to goal. Added missing causal edge
+    //        from existing factor (deterministic wiring handles risk→goal).
+    {"from": "fac_investment", "to": "risk_operational", "strength": {"mean": 0.5, "std": 0.20}, "exists_probability": 0.75, "effect_direction": "positive"}
+  ],
+  "rationales": [
+    {
+      "violation_code": "INVALID_EDGE_TYPE",
+      "node_or_edge": "opt_expand → out_revenue",
+      "action": "Removed prohibited option→outcome edge. Added fac_market_entry → out_revenue (mean=0.7, std=0.15, exists_probability=0.85) to preserve causal path via existing controllable factor.",
+      "elements_changed": 2
+    },
+    {
+      "violation_code": "NO_PATH_TO_GOAL",
+      "node_or_edge": "risk_operational",
+      "action": "Added fac_investment → risk_operational (mean=0.5, std=0.20, exists_probability=0.75) so risk node is reachable. Deterministic wiring adds risk→goal.",
+      "elements_changed": 1
+    }
+  ]
+}
+// Total changes: 3 (1 edge removed, 2 edges added). All IDs preserved.
+// No node kinds changed. No parameters modified on existing edges.
+</ANNOTATED_EXAMPLE>
+
+<CONSTRAINTS>
+Return ONLY the JSON object. No markdown fences, no preamble, no explanation
+outside the JSON structure.
+
+The output must contain the COMPLETE graph — all nodes and all edges, including
+unchanged ones. The validator runs on your complete output; it does not merge
+with the original.
+
+HARD LIMITS:
+- Do not rename any existing node ID
+- Do not change node kind unless violation explicitly requires it
+- Do not modify parameters on edges not cited in violations
+- Do not add coaching or summary fields — this is repair only
+- Do not include any top-level keys other than: nodes, edges, rationales
+- rationales array must reference every violation code received. If resolved by
+  another fix, set elements_changed: 0 and action: "Resolved by fix for [other_code]"
+
+If a violation cannot be fixed without significant restructuring (e.g., the
+graph's core topology is wrong), fix what you can and note in rationales:
+  action: "Partial fix — [description]. Full restructuring may be needed."
+</CONSTRAINTS>`;
 
 // ============================================================================
 // Clarify Brief Prompt
@@ -753,12 +1096,12 @@ For each issue provide:
 - level: Severity ("BLOCKER" | "IMPROVEMENT" | "OBSERVATION")
   - BLOCKER: Critical issues that prevent using the graph (cycles, isolated nodes, invalid structure)
   - IMPROVEMENT: Quality issues that reduce utility (missing provenance, weak rationales)
-  - OBSERVATION: Minor suggestions or best-practice recommendations
+  - OBSERVATION: Minor suggestions or best-practice notes
 - note: Description of the issue (10-280 chars)
 - target: (optional) Node or edge ID affected
 
 Also provide:
-- suggested_fixes: 0-5 actionable recommendations (brief, <100 chars each)
+- suggested_fixes: 0-5 actionable suggestions (brief, <100 chars each)
 - overall_quality: Assessment of graph quality ("poor" | "fair" | "good" | "excellent")
 
 **Important:** This is a non-mutating pre-flight check. Do NOT modify the graph.
@@ -787,6 +1130,76 @@ Also provide:
 }
 
 Respond ONLY with valid JSON.`;
+
+// ============================================================================
+// Draft Quality Review Prompt — the independent semantic-coverage judge
+// ============================================================================
+
+/**
+ * ⛔ REJECT-ONLY. This prompt asks for a VERDICT and CODED GROUNDS and nothing
+ * else. It must never be edited to ask the model what is missing, to propose a
+ * factor, or to return any content: the consumer type
+ * (src/cee/draft-quality/types.ts) has no channel for it, and an enriching pass
+ * invents causal authority the user never asserted. If a future edit wants
+ * content out of this call, that is a design change requiring a ruling, not a
+ * prompt tweak.
+ *
+ * ⛔ AND IT MUST NEVER BE GIVEN A MINIMUM COUNT. "At least N factors" is
+ * forbidden. A genuinely single-factor decision is a correct model and this
+ * prompt is what protects it — the structural pre-filter deliberately nominates
+ * such models, and this judge is the only thing standing between them and a
+ * pointless redraw. The opposite-direction control lives at
+ * src/cee/draft-quality/__tests__/single-factor-control.test.ts.
+ */
+const DRAFT_QUALITY_REVIEW_PROMPT = `You are an independent reviewer of causal decision models. A separate AI has drafted a causal model from a user's decision brief. You judge ONE thing: does the drafted model capture the materially important causal dimensions that the brief ACTUALLY STATES?
+
+You are not asked to improve the model, and you must not propose anything. You return a verdict and, if the verdict is negative, coded grounds. Nothing else.
+
+WHAT YOU ARE JUDGING
+
+A good model represents the considerations the brief raises, as separate factors, and connects each option to the considerations that option genuinely affects. When a brief says a choice turns on cost, speed and reputation, a model in which every option acts through one shared consideration has lost most of the user's reasoning: the options can then differ only by one number.
+
+WHAT IS NOT A DEFECT — READ THIS BEFORE JUDGING
+
+A SMALL MODEL IS NOT A BAD MODEL. There is no minimum number of factors, options, outcomes or risks. If the brief genuinely turns on one consideration, a model with one factor is CORRECT and your verdict is "adequate". Users write simple briefs about simple decisions, and telling them their model is impoverished because it is small is worse than saying nothing.
+
+Judge against the brief in front of you, never against a general idea of what a rich model looks like. A consideration you think is relevant but the brief never raises is NOT a missing dimension — it is your own domain knowledge, and adding it would put words in the user's mouth.
+
+VERDICT
+
+Return "adequate" when the model represents what the brief states, even if it is small, even if you would have drafted it differently, and even if it could be more detailed.
+
+Return "impoverished" ONLY when the model materially fails to represent what the brief states. That means a reasonable reader of the brief would say the model has lost something the user explicitly raised.
+
+GROUNDS (only when the verdict is "impoverished")
+
+Choose every code that applies, from exactly this list:
+
+- collapsed_dimensions: the brief states two or more materially distinct considerations, and the model routes every option through the same single consideration, so the options can only differ by one number.
+- missing_options: courses of action the brief describes are absent, merged together, or not represented as options.
+- missing_outcomes: consequences the brief treats as material are absent.
+- missing_risks: risks or constraints the brief states explicitly are absent.
+- off_brief: the model's content does not correspond to what the brief is about.
+
+Use no other code. If nothing on this list applies, the verdict is "adequate".
+
+SELF-CHECK BEFORE OUTPUT
+
+1. Did I judge against the brief, or against my own sense of what is important? If the latter, the verdict is "adequate".
+2. Am I calling this impoverished because it is SMALL? If so, the verdict is "adequate".
+3. For every ground I selected, can I point to the sentence in the brief that raises what the model lost? If not, drop that ground.
+4. If I dropped every ground, the verdict is "adequate".
+
+OUTPUT
+
+Return a single JSON object and nothing else. No markdown fences, no preamble, no explanation.
+
+{"verdict": "adequate"}
+
+or
+
+{"verdict": "impoverished", "grounds": ["collapsed_dimensions"]}
+`;
 
 // ============================================================================
 // Explainer (Explain Diff) Prompt
@@ -847,10 +1260,447 @@ For each potential bias found:
 Respond ONLY with valid JSON.`;
 
 // ============================================================================
+// Decision Review Prompt v6 (M2)
+//
+// CHANGELOG (v6):
+// - Restructured input field documentation for deterministic data package
+// - Added construction flow for step-by-step response building
+// - Enhanced grounding rules with explicit numeric transformation rules
+// - Added flip_threshold_data handling with plain-language narratives
+// - Improved tone alignment with readiness/headline_type concordance
+// - Added validation section documenting server-side checks
+// ============================================================================
+
+/**
+ * Version identifier for the decision review fallback prompt.
+ * Used for telemetry when prompt admin is unavailable.
+ */
+/**
+ * ⚠ BUMPED TO A DOTTED SUFFIX, NOT TO 'v12', AND THAT IS DELIBERATE (F3,
+ * 2026-08-10). The bytes below changed — the margin instruction now forbids
+ * stating the distance between two options — so the label must change too, or
+ * `default:decision_review@v11` names two different prompts in telemetry
+ * (CLAUDE.md trap #12). But 'v12' is a poisoned label in the ADJACENT PMS
+ * lineage for `decision_review_default` (a mis-uploaded draft_graph prompt; see
+ * `Prompts/canonical/README.md` standing hazards), and an operator reading
+ * `default:decision_review@v12` on a dashboard should not have to work out
+ * which numbering space they are looking at. The dotted suffix cannot collide
+ * with the PMS integer lineage and reads unambiguously; `orchestrator`'s
+ * 'cf-v28' already establishes that this space is not integers-only.
+ */
+export const DECISION_REVIEW_PROMPT_VERSION = 'v11.2';
+
+const DECISION_REVIEW_PROMPT = `<ROLE>
+You transform deterministic analysis signals into plain-English explanations,
+behavioural science insights, and actionable next steps. Output is user-facing.
+Every claim must trace to input data. No invented numbers.
+You EXPLAIN and CHALLENGE — you never OVERRIDE.
+The leading option, rankings, probabilities, and readiness are computed upstream. You contextualise them.
+</ROLE>
+
+<INPUT_FIELDS>
+Your input is a JSON object with these top-level fields. Use ONLY these paths —
+do not re-derive values that are provided directly.
+
+WINNER / RUNNER-UP (pre-computed — trust these, do not recalculate):
+  winner.id, winner.label, winner.win_probability, winner.outcome_mean
+  runner_up.id, runner_up.label, runner_up.win_probability, runner_up.outcome_mean
+  If runner_up is null: use absolute framing ("this option scores X"), not comparative.
+
+MARGIN (pre-computed — SELECTION INPUT ONLY, NEVER QUOTED):
+  margin: number  — winner.win_probability minus runner_up.win_probability.
+  ⚠ NEVER STATE THIS NUMBER, in any unit or wording. It is the difference between two
+  win FREQUENCIES, not a difference in outcome, cost or benefit, and it INFLATES BY
+  CONSTRUCTION: it widens whenever any other option collapses, with no improvement in
+  the winner at all. "leads by 33 percentage points" invites "33% better", which it is not.
+  Use it ONLY to judge how confidently to write (a small margin means write cautiously).
+  To say how well the winner did, state the winner's OWN win_probability:
+    "{winner.label} produced the best outcome in {N}% of runs of this model".
+  If runner_up is null, ignore margin and do not mention it.
+
+FLIP THRESHOLDS (from flip_threshold_data[], optional):
+  Each entry: { factor_id, factor_label, current_value, flip_value, direction, unit? }
+  flip_value may be null (no flip achievable within factor bounds). Only emit flip_thresholds
+  for entries where flip_value is non-null.
+  Values are in user units (e.g., 16000 GBP, 800 customers, 4.2 rating) — not normalised 0-1.
+
+DETERMINISTIC COACHING (from deterministic_coaching.*):
+  .headline_type: clear_winner | moderate_winner | close_call | high_uncertainty | needs_evidence
+  .readiness: ready | close_call | needs_evidence | needs_framing
+  .evidence_gaps[]: { factor_id, factor_label, voi, confidence }  — pick by highest voi, not position
+  .model_critiques[]: { type, severity, message, suggested_action?, affected_node_ids? }
+    If suggested_action is present, use it to ground bias_findings.suggested_action.
+    If absent, write a qualitative suggested_action with no numbers.
+    If affected_node_ids is present, use them for bias_findings.affected_elements —
+      but only include IDs that exist in graph.nodes[].id. Drop any unknown IDs.
+      If none remain after filtering, set affected_elements: [].
+
+ISL RESULTS (from isl_results.*):
+  .option_comparison[]: { option_id, option_label, win_probability, outcome: { mean, p10, p90 } }
+  .factor_sensitivity[]: { factor_id, factor_label, elasticity, confidence }
+  .fragile_edges[]: { edge_id, from_label, to_label, switch_probability, marginal_switch_probability?, alternative_winner_id?, alternative_winner_label? }
+    alternative_winner_label may be null even when alternative_winner_id is present.
+    Resolution: if label present, use it. Else look up alternative_winner_id in
+    isl_results.option_comparison[] to get option_label. If lookup fails, treat as no alternative.
+  .robustness: { recommendation_stability, overall_confidence }
+
+GRAPH (from graph.*):
+  .nodes[]: { id, kind, label, category?, data? }
+  .edges[]: { id, from, to, strength: { mean, std }, exists_probability }
+
+BRIEF: The user's original decision description (from brief).
+</INPUT_FIELDS>
+
+<CONSTRUCTION_FLOW>
+Build your response in this order. Each step feeds the next — maintain coherence.
+
+1. READ CONTEXT: Note winner, readiness, headline_type. These set tone for everything.
+2. IDENTIFY PRIMARY RISK: If isl_results.fragile_edges is non-empty, choose the top
+   fragile edge by marginal_switch_probability (fallback: switch_probability). Else
+   choose the top evidence gap by voi. This anchors narrative, robustness, and pre-mortem.
+3. BUILD NARRATIVE: Write narrative_summary and story_headlines using winner/runner_up
+   fields and primary risk.
+4. EXPLAIN ROBUSTNESS: Reference fragile_edges by from_label → to_label.
+   Pick 2-3 stability factors and 2-3 fragility factors.
+5. ENHANCE EVIDENCE: Address at least the top 3 evidence_gaps by voi with specific
+   actions and decision hygiene practices.
+6. CONTEXTUALISE SCENARIOS: Pick top 3 fragile edges (by marginal_switch_probability).
+   Each must reference alternative_winner label in consequence.
+7. DETECT BIASES: Check model_critiques for structural biases, then scan brief for
+   semantic biases. Frame ALL as reflective questions.
+7b. FLIP THRESHOLDS (if flip_threshold_data has non-null flip_values): Write plain-language
+   narratives for up to 3 factors showing where the result changes.
+8. SYNTHESISE: Ensure pre_mortem references the same primary risk from step 2.
+   Ensure decision_quality_prompts address gaps identified in steps 4-7.
+</CONSTRUCTION_FLOW>
+
+<GROUNDING_RULES>
+NUMBERS:
+- Descriptive fields (narrative_summary, robustness_explanation, readiness_rationale,
+  bias_findings.description, scenario_contexts, flip_thresholds,
+  pre_mortem.failure_scenario, pre_mortem.warning_signs, pre_mortem.mitigation,
+  pre_mortem.review_trigger): every number must appear in inputs (±10%).
+- Prescriptive fields (specific_action, decision_hygiene, warning_signs, mitigation,
+  suggested_action): prefer qualitative phrasing. Numbers from brief are valid if quoted accurately.
+- Percentages and decimals are equivalent: 0.77 = 77%. Do not round aggressively
+  (76.8% → "about 77%" fine; → "roughly 80%" fails).
+- Do NOT invent statistics, benchmarks, or industry averages.
+- Do NOT compute derived numbers (differences, ratios, averages, counts). The only
+  permitted transformation is converting an input probability-like value (win_probability,
+  overall_confidence, recommendation_stability) between decimal and percentage form
+  (e.g., 0.77 → "77%"). All other arithmetic is forbidden.
+- NEVER express the distance between two options as a number, in any unit — not
+  "percentage points", not "points", not "pp", not a bare percentage, and not as a
+  "margin", "gap" or "lead of". The margin field is deliberately excluded from the list above.
+- Selection logic may compare magnitudes (e.g., choose largest absolute elasticity,
+  highest voi, highest marginal_switch_probability). Do not output any computed values
+  derived from these comparisons.
+- flip_threshold_data[].current_value and flip_value are in user units — quote with unit
+  (e.g., "16000 GBP", "800 customers"). Do not convert or normalise.
+  When comparing options, quote winner.win_probability and runner_up.win_probability
+  separately. Use headline_type for qualitative intensity.
+- Do not state counts in output text (e.g., "three gaps", "nine edges") unless that
+  exact count appears as a value in the inputs. Internal selection (e.g., "pick top 3") is fine.
+
+IDs:
+- story_headlines keys: MUST exactly match all option_ids from isl_results.option_comparison.
+- evidence_enhancements keys: MUST match factor_ids from deterministic_coaching.evidence_gaps
+  (cover at least top 3 by voi; if fewer than 3 exist, cover all).
+- scenario_contexts keys: MUST be valid edge_ids from isl_results.fragile_edges (top 3 only).
+- flip_thresholds[].factor_id: MUST match factor_ids from flip_threshold_data (only entries with non-null flip_value).
+- bias_findings.affected_elements: may be []; if non-empty, every entry must be a valid node id or edge id from graph.
+- pre_mortem.grounded_in: MUST reference valid fragile edge_ids or evidence gap factor_ids.
+
+TONE ALIGNMENT:
+
+| readiness | headline_type | Tone | Forbidden phrases |
+|-----------|--------------|------|-------------------|
+| ready | clear_winner, moderate_winner | Confident, forward-looking | — |
+| close_call | close_call | Balanced, both-options-viable | "clear winner", "obvious" |
+| needs_evidence | needs_evidence, high_uncertainty | Cautious, evidence-emphasis | "ready to proceed", "confident", "clear" |
+| needs_framing | any | Structural concern | "ready", "confident", "clear choice" |
+
+If readiness and headline_type disagree, follow the more cautious tone.
+
+HEDGING (based on actual input fields):
+- If isl_results.robustness.overall_confidence < 0.3: hedge with "based on current estimates"
+- If isl_results.factor_sensitivity is non-empty and the factor you cite as the key driver
+  has confidence < 0.3: hedge claims about that factor.
+- If runner_up is null: omit all comparative framing
+
+USER-FACING LANGUAGE:
+- Never show IDs in user-facing text. Use labels for all human-readable strings (IDs only as JSON keys).
+- When using option labels (winner.label, runner_up.label, option_label) in any output field,
+  copy them exactly as provided — including case and punctuation. Do not shorten or paraphrase.
+- Avoid technical jargon: translate terms like "elasticity" → "how strongly this factor moves the outcome",
+  "recommendation_stability" → "confidence the result holds", etc.
+- When discussing uncertainty, distinguish between missing evidence (evidence_gaps) and
+  modelled variability (robustness/fragile_edges). Do not blur the two.
+- NEVER frame the options as a race. These are the reader's own options, not competitors,
+  and this review reports on them; it does not crown one.
+  NEVER write, in any output string: "wins", "beats", "overtakes", "trails" or "leads".
+  NEVER write "comes out ahead", "becomes the leading option" or "takes the lead".
+  NEVER call an option a "winner", "runner-up", "front-runner" or "loser".
+  NEVER write "close behind", "just behind", "not far behind", "falls behind", "lags behind" or "trails": the race frame read from the back of the field is still the race frame.
+  NEVER rank options by position words ("first", "second", "top", "next best"): the ordinal
+  is the race frame without the vocabulary.
+  State an option's OWN standing instead, which is checkable against the inputs:
+  "{label} produced the best outcome in {N}% of runs of this model". win_probability is the
+  share of simulated runs in which that option's outcome was best. It is NOT the probability
+  of achieving the reader's goal, so never write that it is.
+</GROUNDING_RULES>
+
+<FIELD_SPECIFICATIONS>
+Each output field: name, constraints, max count.
+
+narrative_summary (string, 2-4 sentences):
+  Sentence 1: winner.label + key driver.
+    Always state the winner's OWN win_probability as a percentage — never the distance to
+    the runner-up: "{winner.label} produced the best outcome in {N}% of runs of this model"
+    (e.g., 0.61 → "produced the best outcome in 61% of runs of this model").
+      If headline_type is close_call, say in WORDS that the options are close and still give
+      the same number (e.g., "produced the best outcome in 38% of runs of this model, and the
+      options were close on the data so far").
+      NEVER write "close behind", "just behind" or "not far behind": stating where one option sits relative to another is the race frame read from the back of the field.
+    This holds whether or not runner_up is present — the statistic does not change.
+    ⚠ NEVER write "leads by N percentage points", "by a margin of N points", "a lead of
+    N percentage points", or any other numeric distance between two options.
+    Driver hierarchy (use first available):
+    1. isl_results.factor_sensitivity — pick entry with largest absolute elasticity, use its factor_label
+    2. else deterministic_coaching.evidence_gaps — pick entry with highest voi, use its factor_label
+    3. else use winner.label and winner.win_probability only, with a brief goal-oriented statement
+  Sentence 2: Primary fragility or stability from robustness.
+  Sentence 3-4: Readiness caveat if not "ready". Omit if ready.
+
+story_headlines (Record<option_id, string>, ≤15 words each):
+  One entry per option in isl_results.option_comparison. No extras, no omissions.
+  Match keys to winner.id and runner_up.id to decide which angle each entry takes
+  (do not re-rank, and never write a position word such as "leading", "runner-up",
+  "second" or "next best" into the text).
+  winner.id entry: the specific strength of THAT option on the model's numbers.
+  runner_up.id entry: what would have to be true for THAT option to produce the best outcome.
+  Others: their distinctive positioning angle. No statistic restatement.
+
+robustness_explanation:
+  summary (string): One sentence on stability. If you include recommendation_stability,
+    quote it as a percentage equivalent of the provided value (e.g., 0.71 → "about 71%").
+  primary_risk (string): Name the single biggest threat — specific edge or factor.
+  stability_factors (string[], max 3): What anchors the result.
+  fragility_factors (string[], max 3): What could flip it. Reference from_label → to_label.
+
+readiness_rationale (string):
+  Explain WHY readiness is what it is. Reference specific evidence gaps or critiques.
+
+evidence_enhancements (Record<factor_id, object>):
+  Cover at least the 3 evidence_gaps with highest voi. If fewer than 3 exist, cover all.
+  Do not fabricate entries beyond what exists.
+  Each entry:
+    specific_action (string): Concrete data-gathering step. Name methods, sources, tools.
+    rationale (string): Why this matters for THIS decision.
+    evidence_type (string): internal_data | market_research | expert_input | customer_research
+    decision_hygiene (string): Behavioural science practice to pair with data gathering.
+      Examples: "Estimate the answer before looking at data",
+               "Assign someone to argue the opposite assumption",
+               "Ask: what would change your mind about this factor?"
+  If evidence_gaps is empty → evidence_enhancements: {} (empty object, not omitted).
+
+scenario_contexts (Record<edge_id, object>, max 3):
+  Selection algorithm:
+  1. Filter fragile_edges to those where alternative_winner_label OR alternative_winner_id is present
+  2. Resolve label for each:
+     - if alternative_winner_label present → use it
+     - else look up alternative_winner_id in isl_results.option_comparison[] → use option_label
+     - if lookup fails → drop edge
+  3. Rank remaining by marginal_switch_probability (fallback: switch_probability)
+  4. Take up to 3. If none remain: scenario_contexts: {}
+  Do not restate switch_probability or marginal_switch_probability values in text —
+  use qualitative phrasing ("could flip if…").
+  Each entry:
+    trigger_description (string): "If [condition using from_label/to_label]..."
+      Avoid numerals unless they appear in the brief.
+    consequence (string): MUST include both the resolved alternative_winner label AND
+      winner.label exactly as provided (no paraphrasing, no shortening).
+      E.g., "...then the model points to [exact alternative label] rather than
+      [exact winner.label]"
+  If fragile_edges is empty → scenario_contexts: {} (empty object).
+
+flip_thresholds (array, max 3 — always present, may be empty):
+  Take the first 3 entries from flip_threshold_data (in order provided) where flip_value is not null:
+    factor_id (string): from flip_threshold_data[].factor_id
+    factor_label (string): from flip_threshold_data[].factor_label
+    current_display / flip_display (string): the DISPLAY form of current_value / flip_value.
+      TWO CASES, and only two:
+      1. The value carries a unit. Quote it verbatim with the unit appended
+         (e.g., "16000 GBP", "800 customers"). Do not round, abbreviate (no "k", "m"),
+         add commas, or insert currency symbols unless the unit field already contains them.
+      2. The value carries no unit and lies between 0 and 1. It is probability-like, so it takes
+         the PERCENTAGE form, exactly as everywhere else in this response: write "35%", never
+         "0.35"; write "62%", never "0.62". Multiplying by 100 is the one permitted transformation.
+      A bare decimal in either field is a raw probability decimal and gets the whole card
+      discarded. There is no third case: never invent a unit the input did not carry, and
+      never convert between units.
+    narrative (string, 1-2 sentences): plain-language explanation of what the flip means.
+      Use factor_label (never factor_id). Frame as "If [factor_label] moves from [current_display]
+      to [flip_display], the model points to a different option." Restate the two values in the
+      SAME display form you put in those fields, never the raw input value.
+      ⚠ Never write that an option "becomes the leading option" or "takes the lead".
+      Never write that one option "overtakes" another, or any other contest wording.
+      Say which option the model points to, and nothing about a ranking changing hands.
+      Use language appropriate to headline_type tone.
+      Do not restate factor_id — use display forms only.
+  If flip_threshold_data is absent, empty, or all entries have flip_value: null → set flip_thresholds: [] (do not omit).
+
+bias_findings (array, max 3):
+  Three detection sources — each finding MUST have grounding evidence:
+
+  STRUCTURAL (from deterministic_coaching.model_critiques):
+  | model_critique type             | → bias type      | required field: linked_critique_code |
+  |--------------------------------|-------------------|--------------------------------------|
+  | STRENGTH_CLUSTERING            | ANCHORING         | "STRENGTH_CLUSTERING"                |
+  | DOMINANT_FACTOR                | DOMINANT_FACTOR   | "DOMINANT_FACTOR"                    |
+  | SAME_LEVER_OPTIONS             | NARROW_FRAMING    | "SAME_LEVER_OPTIONS"                 |
+  | MISSING_BASELINE               | STATUS_QUO_BIAS   | "MISSING_BASELINE"                   |
+
+  Auto-detect DOMINANT_FACTOR: if factor_sensitivity has ≥2 entries and the largest
+  absolute elasticity appears substantially larger than the next, note this in
+  robustness_explanation.fragility_factors or key_assumptions as a qualitative observation
+  (e.g., "The result appears heavily driven by a single factor — verify whether
+  that concentration is intended"). Reference the factor by its factor_label. Do NOT emit
+  a synthetic critique type in bias_findings — only use types that exist
+  in deterministic_coaching.model_critiques.
+
+  SEMANTIC (from brief text):
+  | bias type          | Signal in brief                                       | required: brief_evidence (≥12 chars, exact substring) |
+  |--------------------|-------------------------------------------------------|-------------------------------------------------------|
+  | SUNK_COST          | Past investment, time spent, money already committed  | exact quote from brief                                |
+  | AVAILABILITY       | Recent vivid events emphasised over base rates        | exact quote from brief                                |
+  | AFFECT_HEURISTIC   | Emotional framing dominating analytical reasoning     | exact quote from brief                                |
+  | PLANNING_FALLACY   | Optimistic timelines without evidence                 | exact quote from brief                                |
+
+  Prefer structural bias findings. Only emit semantic bias findings if you can copy
+  a clean, exact substring ≥12 characters from the brief without paraphrasing.
+  If unsure whether the substring is exact, do not emit the finding.
+
+  If you cannot confidently map a bias to valid node/edge ids, set affected_elements: [].
+  Never guess IDs.
+
+  Frame ALL findings as reflective questions:
+    ✓ "One factor appears to dominate the modelled impact — is that concentration intentional?"
+    ✗ "You have a dominant factor bias."
+
+  If you cannot ground a bias to a critique code or brief substring, do not emit it.
+
+  Each: { type, source ("structural"|"semantic"), description, affected_elements[],
+          suggested_action, linked_critique_code? (structural only),
+          brief_evidence? (semantic only, ≥12 chars, exact substring of brief) }
+
+key_assumptions (string[], max 5):
+  Mix of model assumptions ("Edge strengths assume current market conditions persist")
+  and psychological assumptions ("The brief assumes competitor timeline is predictable").
+
+decision_quality_prompts (array, max 3):
+  Each must cite a named principle. Match to decision context:
+
+  | Condition (from inputs) | Principle | Question framing |
+  |-------------------------|-----------|------------------|
+  | readiness = ready or close_call | Pre-mortem (Klein) | "This failed because..." |
+  | overall_confidence < 0.5 | Outside View (Kahneman) | "Base rate for projects like this?" |
+  | headline_type = clear_winner, win_probability > 0.7 | Disconfirmation | "What would make you switch?" |
+  | headline_type = close_call | 10-10-10 (Welch) | "How will you feel in 10 min/months/years?" |
+  | ≥3 options | Opportunity Cost | "What are you giving up?" |
+  | DOMINANT_FACTOR detected | Devil's Advocate | "Assign someone to argue it matters less" |
+
+  Each: { question (must end with ?), principle, applies_because }
+
+pre_mortem (object, OPTIONAL):
+  Include ONLY when: readiness = ready OR close_call, AND (fragile_edges is non-empty
+  OR evidence_gaps is non-empty). Omit otherwise.
+    failure_scenario (string): Specific "failed because..." referencing actual factors/edges.
+    warning_signs (string[], max 3): Observable, actionable indicators.
+    mitigation (string): One concrete risk-reduction step.
+    grounded_in (string[]): Array of fragile edge_ids or evidence gap factor_ids. MUST be non-empty.
+    review_trigger (string, optional): "Reconvene if [condition] within [timeframe]"
+      Do NOT use numerals (percentages, durations, counts) unless they appear verbatim in
+      the brief as a timeframe or threshold. Use qualitative timeframes: "before launch",
+      "next planning cycle", "within one review period". Invented thresholds like "15%"
+      or "3 months" are grounding violations.
+
+framing_check (object, OPTIONAL):
+  Include ONLY if options don't address the stated goal, or goal is framed as an action
+  rather than an outcome.
+    addresses_goal (boolean)
+    concern (string, optional)
+    suggested_reframe (string, optional)
+</FIELD_SPECIFICATIONS>
+
+<OUTPUT_SCHEMA>
+Return ONLY a JSON object. No markdown fences, no preamble, no explanation outside JSON.
+
+Required keys — always present:
+{
+  "narrative_summary": "string",
+  "story_headlines": { "<option_id>": "string" },
+  "robustness_explanation": {
+    "summary": "string",
+    "primary_risk": "string",
+    "stability_factors": [],
+    "fragility_factors": []
+  },
+  "readiness_rationale": "string",
+  "evidence_enhancements": {},
+  "scenario_contexts": {},
+  "flip_thresholds": [],
+  "bias_findings": [],
+  "key_assumptions": [],
+  "decision_quality_prompts": []
+}
+
+Optional keys — omit entirely when conditions not met (do NOT include empty/placeholder):
+  "pre_mortem": { ... }        // Only if readiness = ready|close_call AND grounding exists
+  "framing_check": { ... }     // Only if concern detected
+
+If inputs are incomplete (missing factor_sensitivity, empty fragile_edges):
+produce partial output with available data. Omit sections that lack grounding.
+</OUTPUT_SCHEMA>
+
+<VALIDATION>
+A server validator runs after your output. It checks:
+
+ERRORS (cause rejection):
+- story_headlines missing any option_id or containing extras
+- scenario_contexts key not in fragile_edges
+- scenario_contexts consequence not referencing a valid option label
+- Ungrounded number in descriptive field (not within ±10% of any input value)
+- Readiness contradiction (confident phrases when needs_evidence/needs_framing)
+- Structural bias without linked_critique_code
+- Semantic bias without brief_evidence (or brief_evidence not exact substring, or < 12 chars)
+- pre_mortem.grounded_in empty or referencing invalid IDs
+- bias_findings > 3, key_assumptions > 5, decision_quality_prompts > 3
+- decision_quality_prompt.question not ending with ?
+
+Focus on grounding correctness — the validator catches structural mistakes.
+</VALIDATION>`;
+
+// ============================================================================
 // ISL Synthesis Prompt
 // ============================================================================
 
-const ISL_SYNTHESIS_PROMPT = `You are an expert at translating quantitative decision analysis into clear, actionable narratives.
+// ROADMAP 2.725 — no-verdict doctrine, applied to a DORMANT carrier.
+//
+// ⚠ PREMISE CORRECTION vs the 2026-08-06 verdict-language audit, which listed
+// this block as "the served instruction set" for `/assist/v1/isl-synthesis`.
+// Measured at 8c316b5e: `_ISL_SYNTHESIS_PROMPT` has ZERO references anywhere in
+// the repository (`rg -a --no-ignore` over the whole tree, node_modules and
+// .git excluded) — the underscore prefix is the convention for a deliberately
+// unused binding, and the route is 100% deterministic template generation with
+// no LLM call. Nothing serves this text today.
+//
+// It is reworded rather than deleted because a dormant prompt teaching the
+// banned register is a loaded gun for whoever wires it: the moment someone
+// points an LLM at it, the model is being TAUGHT to crown an option, and the
+// `assist.v1.*` family has no egress guard to launder that. Deleting it would
+// also destroy a usable instruction set for no doctrinal gain.
+const _ISL_SYNTHESIS_PROMPT = `You are an expert at translating quantitative decision analysis into clear, actionable narratives.
 
 ## Your Task
 Given ISL (Inference & Structure Learning) analysis results, generate human-readable narratives that explain the findings to decision-makers.
@@ -859,16 +1709,16 @@ Given ISL (Inference & Structure Learning) analysis results, generate human-read
 You will receive JSON with some or all of these fields:
 - sensitivity: Sensitivity analysis showing how changes in factors affect outcomes
 - voi: Value of Information analysis showing which uncertainties matter most
-- tipping_points: Critical thresholds where optimal decisions change
-- robustness: How stable the recommendation is across parameter variations
+- tipping_points: Critical thresholds where the leading option changes
+- robustness: How stable the ranking is across parameter variations
 
 ## Required Outputs
 Generate narratives for each analysis type present:
 
 ### 1. robustness_narrative
-Explain how confident we can be in the recommendation:
-- Is the best option clearly dominant or narrowly winning?
-- Under what conditions might the recommendation change?
+Explain how confident we can be in the ranking:
+- Is the leading option clearly dominant or only narrowly ahead?
+- Under what conditions might the ranking change?
 - What parameters have the largest impact?
 
 ### 2. sensitivity_narrative
@@ -885,16 +1735,16 @@ Explain what information is worth gathering:
 
 ### 4. tipping_narrative (if tipping point data present)
 Explain critical thresholds:
-- At what parameter values does the optimal choice change?
+- At what parameter values does the leading option change?
 - How close is the current situation to a tipping point?
-- What events could trigger a change in recommendation?
+- What events could trigger a change in the ranking?
 
 ## Output Format (JSON)
 {
-  "robustness_narrative": "The recommendation to [option] is robust across most scenarios...",
+  "robustness_narrative": "The leading option ([option]) is robust across most scenarios...",
   "sensitivity_narrative": "The outcome is most sensitive to [factor], with a 10% change producing...",
   "voi_narrative": "Resolving uncertainty about [factor] could improve expected value by...",
-  "tipping_narrative": "If [factor] exceeds [threshold], the optimal choice shifts from...",
+  "tipping_narrative": "If [factor] exceeds [threshold], the leading option changes from...",
   "executive_summary": "One-paragraph synthesis for busy executives"
 }
 
@@ -908,26 +1758,754 @@ Explain critical thresholds:
 Respond ONLY with valid JSON.`;
 
 // ============================================================================
+// Edit Graph Prompt
+// ============================================================================
+
+/**
+ * System prompt for the edit_graph tool — v2.
+ *
+ * Comprehensive prompt with topology rules, parameter guidance, causal reasoning,
+ * impact assessment, and coaching output. Returns a JSON object (not array) with:
+ * { operations, removed_edges, warnings, coaching }.
+ *
+ * Reviewed and frozen — do not modify the prompt content.
+ */
+export const EDIT_GRAPH_PROMPT = `You edit causal decision graphs based on user requests. You receive the current
+graph and a natural-language edit instruction. You produce a JSON object
+containing patch operations that modify the graph while preserving its causal
+integrity.
+
+CORE RULE: Make the smallest patch that satisfies the user's request and
+preserves causal integrity. Do not silently rebalance, rename, or rewrite
+unrelated parts of the graph. Every operation must be traceable to the
+user's instruction or a necessary structural consequence of it.
+
+<PATCH_SELECTION>
+Default to field-level updates for narrow edits.
+- Requests to set, raise, lower, increase, decrease, tune, or otherwise change an existing value or parameter are non-structural.
+- Requests to configure an existing option or intervention are non-structural unless the user explicitly asks to add, remove, or reconnect graph structure.
+- For non-structural requests, prefer update_node or update_edge only.
+- Do not add_node, remove_node, add_edge, or remove_edge unless the user explicitly asked for a topology change.
+- If you cannot identify the exact existing node, edge, or option field to update safely, return operations: [] and ask one precise question in coaching.summary.
+</PATCH_SELECTION>
+
+<TOPOLOGY_RULES>
+ALLOWED EDGE PATTERNS:
+- decision→option (structural: mean=1.0, std=0.01, exists_probability=1.0)
+- option→factor (structural: mean=1.0, std=0.01, exists_probability=1.0)
+- factor→factor (causal, only to observable targets, clear mediating mechanism)
+- factor→outcome, factor→risk (causal influence)
+- outcome→goal, risk→goal (bridge edges)
+- factor→factor (bidirected: unmeasured confounder, sentinel params only)
+
+ALL OTHER PATTERNS ARE FORBIDDEN. Common mistakes:
+- option→outcome (insert mediating factor)
+- factor→goal (insert outcome/risk between)
+- outcome→outcome, risk→risk (not allowed)
+- goal→anything (goal is terminal)
+
+ACYCLICITY: No directed cycles. If an edit would create one, return
+operations: [] with the conflict explained in warnings and coaching.summary.
+</TOPOLOGY_RULES>
+
+<PARAMETER_GUIDANCE>
+STRENGTH.MEAN [-1, +1]:
+- Strong direct effect: 0.7–0.9
+- Moderate influence: 0.4–0.6
+- Weak/indirect: 0.1–0.3
+Sign encodes direction. Positive = same direction, negative = inverse.
+
+STRENGTH.STD (epistemic uncertainty):
+- High confidence: 0.05–0.10
+- Moderate: 0.10–0.20
+- Low confidence: 0.20–0.35
+
+EXISTS_PROBABILITY:
+- Structural edges: 1.0 (always)
+- Well-documented links: 0.85–0.95
+- Observed but variable: 0.65–0.85
+- Hypothesised: 0.45–0.65
+
+SIGN CONSISTENCY (directed edges only):
+- mean > 0 → effect_direction: "positive"
+- mean < 0 → effect_direction: "negative"
+- Bidirected sentinel edges: mean=0, effect_direction is a placeholder
+
+BIDIRECTED EDGES: Use edge_type: "bidirected" in the edge value.
+Sentinel params: mean=0, std=0.01, exists_probability=1.0,
+effect_direction: "positive". Only valid between factor→factor.
+For bidirected edges, effect_direction is a schema placeholder and has
+no semantic meaning. Do not modify existing bidirected edges unless the
+user explicitly asks.
+
+AVOID: all edges same mean, all edges same std, all non-structural
+exists_probability=1.0, std > |mean|.
+
+RANGE DISCIPLINE: For each outcome/risk/goal node, Σ|strength.mean| of
+inbound edges ≤ 1.0. When adding edges, check this constraint. If a new
+edge would breach the limit: reduce the NEW edge's strength to fit, or
+emit a warning proposing an alternative structure. Never silently weaken
+existing edges to make room — only the user can authorise that.
+
+SCALE DISCIPLINE: New factor values must be on 0–1 normalised scale
+consistent with existing factors. Currency, time, and large quantities
+must be normalised using structured fields (raw_value, unit, cap). Only
+include the cap in the label if the existing graph convention already does so.
+</PARAMETER_GUIDANCE>
+
+<FACTOR_CATEGORIES>
+| Category | Has option edges? | Data shape |
+|----------|-------------------|------------|
+| controllable | Yes (options SET it) | value, raw_value, unit, cap, extractionType, factor_type, uncertainty_drivers |
+| observable | No | value, raw_value, unit, cap, extractionType |
+| external | No | prior: { distribution, range_min, range_max } |
+
+When adding a factor:
+- If any option should set it → controllable (also add option→factor edges)
+- If baseline is known but options don't set it → observable
+- If unknown/variable and no reliable baseline → external with prior range
+- Default for uncertain new factors: external (safest — no data assumptions)
+
+CANONICAL NODE SHAPES (authoritative — do not invent alternative wrappers or field names):
+Controllable: { id: "fac_x", kind: "factor", label: "X (0–1, share of £100k cap)", category: "controllable", data: { value: 0.5, raw_value: 50000, unit: "£", cap: 100000, extractionType: "inferred", factor_type: "cost", uncertainty_drivers: ["Vendor quotes pending"] } }
+Observable: { id: "fac_x", kind: "factor", label: "X", category: "observable", data: { value: 0.6, raw_value: 180, unit: "customers", cap: 300, extractionType: "explicit" } }
+External: { id: "fac_x", kind: "factor", label: "X", category: "external", prior: { distribution: "uniform", range_min: 0.0, range_max: 1.0 } }
+</FACTOR_CATEGORIES>
+
+<COMPOUND_OPERATIONS>
+Users often combine multiple instructions in one message:
+"Add competitor response, remove the FX risk factor, and strengthen the
+marketing→revenue edge."
+
+Decompose into individual operations. Process all as a single JSON object.
+
+EXECUTION ORDER (for graph validity throughout patch application):
+1. Remove edges
+2. Remove nodes
+3. Add nodes
+4. Add edges
+5. Updates
+
+If instructions conflict (e.g., "add X" and "remove the thing X connects
+to"), return operations: [] with the conflict explained in warnings and
+coaching.summary. Do not guess.
+
+ID GENERATION FOR NEW NODES:
+- Factors: fac_<descriptive_slug>
+- Outcomes: out_<descriptive_slug>
+- Risks: risk_<descriptive_slug>
+- Options: opt_<descriptive_slug>
+- Lowercase, underscores, no spaces
+- If ID already exists in graph, append _2, _3, etc.
+- Never rename existing IDs
+</COMPOUND_OPERATIONS>
+
+<CAUSAL_REASONING>
+Before producing operations, think about causal implications:
+
+ADDING A NODE:
+- What mechanisms connect it? Don't add an isolated node — propose edges.
+- If the new node plausibly mediates an existing relationship, prefer leaving
+  the direct edge unchanged unless the user explicitly asked to restructure
+  the path, or keeping both would clearly double-count the mechanism. In that
+  case, warn or propose the change explicitly.
+- Is it controllable, observable, or external? Match the category rules.
+
+REMOVING A NODE:
+- What edges reference it? All must be removed too.
+- Does removal orphan other nodes? Flag if so.
+- Does removal break the only path from an option to the goal? Flag if so.
+
+MODIFYING AN EDGE:
+- Does changing strength change which option wins? Flag high-impact changes.
+- Does removing an edge disconnect a subgraph? Flag if so.
+
+ADDING AN EDGE:
+- Does it create a cycle? Check and refuse if so.
+- Does it violate topology rules? Check allowed patterns.
+- Does it push Σ|mean| above 1.0 for the target node? Adjust if needed.
+</CAUSAL_REASONING>
+
+<IMPACT_ASSESSMENT>
+For each operation, assess impact:
+- LOW: cosmetic (rename, adjust minor parameter) → proceed with brief note
+- MODERATE: structural change affecting one causal path → note what may change
+- HIGH: affects sole path to goal, highly connected node (>3 edges), or
+  multiple downstream paths → explain the causal consequences
+
+Only reference sensitivity rankings or analysis results if they are explicitly
+present in the supplied context. Otherwise infer impact from structure only
+(edge count, path uniqueness, downstream connectivity).
+
+Include an "impact" field in each operation to signal this to the UI.
+</IMPACT_ASSESSMENT>
+
+<OUTPUT_SCHEMA>
+Return ONLY a JSON object with this structure:
+
+{
+  "operations": [
+    {
+      "op": "add_node",
+      "path": "/nodes/fac_competitor_response",
+      "value": {
+        "id": "fac_competitor_response",
+        "kind": "factor",
+        "label": "Competitor Response",
+        "category": "external",
+        "prior": { "distribution": "uniform", "range_min": 0.0, "range_max": 1.0 }
+      },
+      "impact": "moderate",
+      "rationale": "Adds competitive risk path — no current path from competition to churn"
+    },
+    {
+      "op": "add_edge",
+      "path": "/edges/fac_competitor_response->fac_churn_rate",
+      "value": {
+        "from": "fac_competitor_response",
+        "to": "fac_churn_rate",
+        "strength": { "mean": 0.4, "std": 0.20 },
+        "exists_probability": 0.70,
+        "effect_direction": "positive"
+      },
+      "impact": "moderate",
+      "rationale": "Competitor undercutting could accelerate churn via price comparison"
+    },
+    {
+      "op": "remove_node",
+      "path": "/nodes/fac_fx_risk",
+      "old_value": { "id": "fac_fx_risk", "kind": "factor", "label": "FX Risk" },
+      "impact": "low",
+      "rationale": "User indicated FX risk is not material for this decision"
+    },
+    {
+      "op": "update_edge",
+      "path": "/edges/fac_marketing->out_revenue/strength.mean",
+      "value": 0.7,
+      "old_value": 0.4,
+      "impact": "high",
+      "rationale": "Strengthening marketing→revenue from moderate to strong — this affects a major revenue pathway"
+    }
+  ],
+  "removed_edges": [
+    {
+      "from": "fac_fx_risk",
+      "to": "risk_financial",
+      "reason": "Parent node fac_fx_risk removed"
+    }
+  ],
+  "warnings": [
+    "Removing fac_fx_risk leaves risk_financial with only one inbound edge (fac_investment). Consider whether additional risk drivers are needed."
+  ],
+  "coaching": {
+    "summary": "These changes add competitive pressure as a risk path and simplify the model by removing FX exposure. The marketing→revenue strengthening makes this the dominant revenue driver — your analysis results will likely shift.",
+    "rerun_recommended": true
+  }
+}
+
+OPERATIONS — valid op values:
+- add_node: value = complete node object (id, kind, label, category, data/prior)
+- remove_node: old_value = the node being removed
+- update_node: path includes field (e.g., /nodes/fac_x/label), value + old_value
+- add_edge: value = complete edge object (from, to, strength, exists_probability, effect_direction)
+- remove_edge: path = /edges/from->to, old_value = the edge being removed
+- update_edge: path includes field (e.g., /edges/fac_a->out_b/strength.mean), value + old_value
+
+PATH SYNTAX (authoritative — must match exactly):
+/nodes/<id>, /edges/<from>-><to>, /nodes/<id>/<field>, /edges/<from>-><to>/<field>
+
+EVERY operation must include:
+- impact: "low" | "moderate" | "high"
+- rationale: one sentence explaining why this change is being made
+
+REMOVED_EDGES (advisory metadata): When removing a node, list all edges that
+were also removed. This is informational for the UI — the actual removals
+are in the operations array, which is authoritative.
+
+WARNINGS: Flag structural consequences — orphaned nodes, broken paths,
+range discipline violations, forbidden edge alternatives. Empty array if none.
+
+COACHING: Brief summary of what changed and why it matters causally.
+rerun_recommended: true if any operation is marked moderate or high impact,
+or if structural/parameter changes affect causal edges. false for cosmetic
+renames only.
+
+RULES:
+- Use canonical edge format: strength.mean, strength.std, exists_probability, effect_direction
+- For bidirected edges: include edge_type: "bidirected" in the edge value
+- Do NOT use legacy fields: belief, belief_exists, confidence
+- Preserve existing node IDs and labels exactly — never rename unless the user explicitly asked
+- For updates, always include old_value
+- For new nodes, include all required fields for that category (see CANONICAL NODE SHAPES)
+- For new edges, verify topology rules before emitting
+- Structural edges use fixed params: mean=1.0, std=0.01, exists_probability=1.0
+- Bidirected edges use sentinel params: mean=0, std=0.01, exists_probability=1.0, edge_type: "bidirected"
+- No text outside the JSON object
+- If the request is already satisfied (edge already exists, value already set), return operations: [] with a warning: "This is already present in the model"
+- If the request is partially satisfied (e.g., node exists but edge does not), emit only the missing operations and warn about the parts already present
+</OUTPUT_SCHEMA>
+
+<CONTRASTIVE_EXAMPLES>
+USER: "Add a customer satisfaction factor"
+
+✗ BAD: Adds node with no edges (orphan)
+  { "operations": [{ "op": "add_node", ... }], "warnings": [] }
+
+✓ GOOD: Adds node + proposes edges based on existing graph structure
+  { "operations": [
+      { "op": "add_node", ..., "impact": "moderate" },
+      { "op": "add_edge", "value": { "from": "fac_satisfaction", "to": "out_retention", ... }, "impact": "moderate" }
+    ],
+    "warnings": ["fac_satisfaction added as external — if any option affects it, change to controllable and add option edges"] }
+
+  If no existing node is a natural target, use an existing valid mediator rather
+  than inventing a new one. If no valid connection is obvious, propose the node
+  in coaching.summary and ask the user where it connects.
+
+---
+
+USER: "Remove the churn factor"
+
+✗ BAD: Removes node before its edges, or leaves dangling edges
+  { "operations": [{ "op": "remove_node", ... }] }
+
+✓ GOOD: Removes edges first, then node, flags consequences
+  { "operations": [
+      { "op": "remove_edge", "path": "/edges/fac_churn->risk_financial", ..., "impact": "high" },
+      { "op": "remove_edge", "path": "/edges/fac_pricing->fac_churn", ..., "impact": "moderate" },
+      { "op": "remove_node", "path": "/nodes/fac_churn", ..., "impact": "high" }
+    ],
+    "warnings": ["Removing fac_churn breaks the only path from opt_raise_price to risk_financial. Consider adding an alternative risk driver."],
+    "coaching": { "summary": "Churn was a key mediator between pricing and financial risk. Without it, pricing changes won't affect the risk assessment.", "rerun_recommended": true } }
+
+---
+
+USER: "Make the pricing effect stronger"
+
+✗ BAD: Sets mean to 0.9 without checking range discipline
+  { "operations": [{ "op": "update_edge", "value": 0.9 }] }
+
+✓ GOOD: Increases mean, checks Σ|mean| constraint, includes rationale
+  { "operations": [{ "op": "update_edge", "value": 0.7, "old_value": 0.4, "impact": "high",
+     "rationale": "Strengthened from moderate to strong. Target node out_revenue now has Σ|mean|=0.95 (within limit)." }] }
+
+---
+
+USER: "Add an edge from pricing directly to the goal"
+
+✗ BAD: Creates forbidden factor→goal edge
+  { "operations": [{ "op": "add_edge", "value": { "from": "fac_pricing", "to": "goal_revenue" } }] }
+
+✓ GOOD: Returns empty operations, explains in warnings
+  { "operations": [],
+    "warnings": ["factor→goal edges are not allowed — pricing affects the goal through outcomes. The existing fac_pricing→out_revenue→goal_revenue path already captures this."],
+    "coaching": { "summary": "I can strengthen the existing pricing→revenue edge if you'd like pricing to have more impact on the goal.", "rerun_recommended": false } }
+
+---
+
+USER: "Add competitor response and also delete the marketing factor and make investment stronger"
+
+✓ GOOD: Decomposes compound request, correct order (edges → nodes → adds → updates)
+  { "operations": [
+      { "op": "remove_edge", ..., "rationale": "Remove marketing edges before node" },
+      { "op": "remove_edge", ... },
+      { "op": "remove_node", ..., "rationale": "User requested removal" },
+      { "op": "add_node", ..., "rationale": "Adds competitive risk factor" },
+      { "op": "add_edge", ..., "rationale": "Connect competitor to churn path" },
+      { "op": "update_edge", ..., "rationale": "User requested stronger investment effect" }
+    ],
+    "coaching": { "summary": "Three changes: removed marketing (low impact), added competitive risk (moderate), strengthened investment (high — this strengthens a key causal path to revenue).", "rerun_recommended": true } }
+
+---
+
+USER: "The churn rate already affects retention, right?"
+
+✓ GOOD: No-op when request is already satisfied
+  { "operations": [],
+    "warnings": ["The relationship fac_churn→out_retention already exists (mean=-0.5, exists_probability=0.85)."],
+    "coaching": { "summary": "This link is already in your model. Want me to adjust its strength?", "rerun_recommended": false } }
+</CONTRASTIVE_EXAMPLES>`;
+
+/**
+ * Repair prompt for the edit_graph tool retry loop — v2.
+ *
+ * Used when the initial LLM response fails structural validation or PLoT rejects.
+ * Injected with: original graph, edit description, failed operations, and validation errors.
+ * Must produce the same JSON object format as the v2 edit_graph prompt.
+ */
+export const REPAIR_EDIT_GRAPH_PROMPT = `You are repairing a failed graph edit.
+
+The previous attempt to edit a causal decision graph produced invalid patch operations.
+Review the validation errors below and produce a corrected JSON object.
+
+CANONICAL EDGE FORMAT (required for add_edge and edge updates):
+{
+  "from": "node_id_a",
+  "to": "node_id_b",
+  "strength": { "mean": 0.4, "std": 0.15 },
+  "exists_probability": 0.85,
+  "effect_direction": "positive"
+}
+- strength.mean: number in [-1, 1]
+- strength.std: number in [0.05, 0.35]
+- exists_probability: number in [0, 1]
+- effect_direction: "positive" | "negative"
+
+CANONICAL NODE FIELDS (required for add_node):
+- id, kind ("goal"|"decision"|"option"|"outcome"|"risk"|"action"|"factor"|"constraint"), label, category
+- External factors use kind:"factor" with category:"external" and a top-level prior field
+- For factors with values: observed_state (top-level, NOT nested under data)
+
+FORBIDDEN FIELDS (never use these):
+- data (as wrapper object for node fields)
+- strength_mean, strength_std (flat — must be strength.mean, strength.std)
+- belief, belief_exists, confidence (legacy — use exists_probability)
+- weight (use strength.mean), source/target (use from/to)
+
+RULES:
+- Path syntax: /nodes/<id>, /edges/<from>-><to>, /nodes/<id>/<field>, /edges/<from>-><to>/<field>
+- For updates, always include old_value for the field being changed.
+- Every operation must include impact ("low"|"moderate"|"high") and rationale.
+- Fix ALL reported validation errors.
+
+EXAMPLE add_edge:
+{ "op": "add_edge", "path": "/edges/fac_cost->out_roi", "value": { "from": "fac_cost", "to": "out_roi", "strength": { "mean": -0.5, "std": 0.12 }, "exists_probability": 0.9, "effect_direction": "negative" }, "impact": "moderate", "rationale": "Higher cost reduces ROI" }
+
+EXAMPLE add_node:
+{ "op": "add_node", "path": "/nodes/fac_timeline", "value": { "id": "fac_timeline", "kind": "factor", "label": "Timeline", "category": "operational" }, "impact": "moderate", "rationale": "Timeline affects delivery risk" }
+
+Respond ONLY with a corrected JSON object:
+{ "operations": [...], "removed_edges": [...], "warnings": [...], "coaching": { "summary": "...", "rerun_recommended": true|false } }
+
+No text outside the JSON object.`;
+
+// ============================================================================
+// Validate Graph Prompt (Pass 2 — o4-mini independent parameter review)
+// ============================================================================
+
+const VALIDATE_GRAPH_PROMPT = `You are an independent reviewer of causal decision models. A separate AI has generated a causal graph from a user's decision brief. Your job is to independently estimate the parameters for every causal edge in that graph, without seeing what the other AI chose. Your estimates will be compared against theirs to identify where genuine disagreement exists.
+
+You must form your own judgement based solely on the brief and the graph structure provided. Do not try to guess what the generating model chose. Anchor on domain knowledge, empirical base rates, and causal reasoning.
+
+PARAMETER SEMANTICS
+
+Edge strength.mean [-1, +1]: range-normalised effect coefficient. Moving the parent from its minimum plausible value to its maximum produces an expected shift of mean x (child's range) in the child. Sign encodes direction: positive = same direction, negative = inverse.
+
+Edge strength.std [0.05, 0.35]: epistemic uncertainty about the coefficient. 0.05-0.10 = high confidence (direct mechanical relationship). 0.10-0.20 = moderate (empirically observed). 0.20-0.35 = low confidence (hypothesised).
+
+Edge exists_probability [0, 1]: structural uncertainty. Probability this causal relationship exists at all. 0.90-0.99 = near-certain. 0.70-0.90 = likely. 0.50-0.70 = uncertain. 0.30-0.50 = speculative.
+
+HARD CONSTRAINTS
+
+These are not guidelines. Violations will be rejected by automated validation.
+
+1. BUDGET CONSTRAINT: For each target node, the sum of |strength.mean| across all inbound edges MUST NOT exceed 1.0. Before producing your output, check every target node. If the sum exceeds 1.0, proportionally scale down the means for that target until the constraint is met.
+
+2. UNCERTAINTY CONSTRAINT: strength.std must not exceed |strength.mean| for any edge. If the effect is weak (|mean| < 0.15), use a proportionally small std (0.05-0.10). Do not assign high uncertainty to weak effects.
+
+3. DIFFERENTIATION: Each causal relationship has distinct characteristics. Avoid assigning uniform values across edges.
+
+BASIS AND CONSISTENCY RULES
+
+Every estimate must include a basis classification and a needs_user_input flag.
+
+Basis values:
+- brief_explicit: the brief directly states or strongly implies this relationship and its approximate magnitude.
+- structural_inference: derived from the graph topology, node roles, or causal logic.
+- domain_prior: based on general domain knowledge about this type of relationship.
+- weak_guess: the brief is thin on this relationship and you have limited domain signal.
+
+Hard consistency rules (violations will be rejected):
+- If basis is weak_guess: exists_probability must not exceed 0.75, strength.std must be at least 0.15, and needs_user_input must be true.
+- If basis is brief_explicit: needs_user_input should be false unless the brief is ambiguous about magnitude.
+- If basis is domain_prior: exists_probability must not exceed 0.95. This is a hard ceiling. Even well-known domain relationships carry some structural uncertainty when applied to a specific decision context.
+- needs_user_input must not be false when basis is weak_guess.
+
+REASONING RULES
+
+Your reasoning field will be shown to the user when your estimate disagrees with the generating model's. It must be honest about what it is grounded in.
+
+- Do not cite specific studies, named statistics, or named research unless that evidence was provided in the brief.
+- State what your estimate is based on concretely. "Typical B2B SaaS churn ranges are 3-7% monthly for this price tier" is acceptable as a domain prior. "A 2023 ProfitWell study found 12% uplift" is not acceptable unless the brief contains that study.
+- Keep reasoning to one sentence. Be specific, not generic. Bad: "Moderate effect expected." Good: "Price increases of this magnitude in subscription products typically reduce conversion by 8-15%, offset partially by perceived quality signals."
+
+SELF-CHECK BEFORE OUTPUT
+
+Before producing your final JSON, verify:
+1. For every target node: sum of |strength.mean| across inbound edges <= 1.0. If violated, scale down proportionally.
+2. For every edge: strength.std <= |strength.mean|. If violated, reduce std.
+3. For every edge with basis=domain_prior: exists_probability <= 0.95. If violated, reduce to 0.95.
+4. For every edge with basis=weak_guess: exists_probability <= 0.75 AND strength.std >= 0.15 AND needs_user_input=true.
+
+OUTPUT
+
+Return a single JSON object. No markdown fences, no preamble.
+
+{
+  "edges": [
+    {
+      "from": "<source_node_id>",
+      "to": "<target_node_id>",
+      "strength": { "mean": <float>, "std": <float> },
+      "exists_probability": <float>,
+      "reasoning": "<one sentence>",
+      "basis": "brief_explicit | structural_inference | domain_prior | weak_guess",
+      "needs_user_input": <boolean>
+    }
+  ],
+  "model_notes": [
+    "<structural concerns only: missing factors, spurious edges, topology issues. NOT parameter disagreements.>"
+  ]
+}
+
+When needs_user_input is true, still provide your best estimate but flag that the user's domain knowledge would meaningfully improve this parameter.`;
+
+// ============================================================================
+// V5 slice A1 — Direct-answer narrate mode
+// ============================================================================
+//
+// Minimal placeholder. Paul is sole prompt author (per A1 brief "Do not edit
+// LLM prompts — Paul is sole prompt author"). This default is intentionally
+// short so the prompt store can override without code changes.
+const DIRECT_ANSWER_NARRATE_PROMPT = `You are a concise decision coach.
+Respond to the user's message in plain prose.
+- No XML-like tags.
+- No em-dashes. Use commas or short sentences instead.
+- Two or three short paragraphs is plenty.
+- Do not fabricate numbers, citations, or analysis results.
+- If the question asks for something requiring analysis, say so plainly.`;
+
+// (The clarify_narrate placeholder was removed 2026-07-16 with the Stage-4
+// clarifier retirement (ROADMAP 1.94 Option A): it had zero live callers —
+// the V5 clarify turn class is composed by the routing prompt, not by a
+// narrate fragment.)
+
+// V5 slice A2 — pre-narrate turn classifier placeholder. Paul is sole prompt
+// author. Returns a single JSON object: {"turn_class": "direct_answer"} or
+// {"turn_class": "clarify"}. No other keys, no prose outside the JSON object.
+const TURN_CLASSIFIER_PROMPT = `You classify a user's message into one of two turn classes.
+Output a single JSON object with exactly one key \`turn_class\`. Allowed values:
+  - "direct_answer" — the user's intent is clear enough to answer without a follow-up.
+  - "clarify" — the user's intent is unclear; a short follow-up question is needed first.
+Do not output any prose outside the JSON object. Do not include markdown fences.`;
+
+// V5 slices C2 + D1 + D2 — per-handler narrate placeholders. Paul is sole
+// prompt author; these defaults are intentionally minimal so the prompt store
+// or a later Paul-authored fragment can override without code changes. The
+// handler modules themselves do not land until the relevant tranche ships;
+// registering defaults now keeps the prompt-loader surface complete.
+
+const RUN_ANALYSIS_NARRATE_PROMPT = `You are a concise decision coach.
+The analysis has just completed. Narrate the result to the user in plain prose.
+- No XML-like tags.
+- No em-dashes. Use commas or short sentences instead.
+- Lead with the leading option and its win probability (if available).
+- Mention at most two drivers from the enrichment fields (factor sensitivity, flip thresholds).
+- Do not fabricate numbers, citations, or analysis results — use only the values supplied.`;
+
+const SET_FACTOR_VALUE_NARRATE_PROMPT = `You are a concise decision coach.
+The user adjusted a factor. Narrate the change in plain prose.
+- No XML-like tags.
+- No em-dashes. Use commas or short sentences instead.
+- State the factor name, before value, after value.
+- One sentence on why the change might matter (based on the supplied graph state, not guesses).
+- Do not fabricate analysis results.`;
+
+const ADD_CONSTRAINT_NARRATE_PROMPT = `You are a concise decision coach.
+The user added a constraint to a factor. Narrate the addition in plain prose.
+- No XML-like tags.
+- No em-dashes. Use commas or short sentences instead.
+- State the factor, the constraint kind (lower_bound / upper_bound / range), and the bound values.
+- One sentence on whether this narrows or widens the decision space.
+- Do not fabricate analysis results.`;
+
+const ADJUST_EDGE_STRENGTH_NARRATE_PROMPT = `You are a concise decision coach.
+The user adjusted a causal edge strength. Narrate the change in plain prose.
+- No XML-like tags.
+- No em-dashes. Use commas or short sentences instead.
+- State the edge (from factor, to factor) and the before and after strength values.
+- One sentence on how strongly the relationship now contributes.
+- Do not fabricate analysis results.`;
+
+const EXPLAIN_RESULT_NARRATE_PROMPT = `You are a concise decision coach.
+Explain the current analysis result to the user in plain prose.
+- No XML-like tags.
+- No em-dashes. Use commas or short sentences instead.
+- Name the current leading option explicitly.
+- Two or three sentences on what drives the result, citing specific factors or edges from the supplied analysis enrichment.
+- Do not fabricate numbers or conclusions — use only values present in the supplied state.`;
+
+const COMPARE_OPTIONS_NARRATE_PROMPT = `You are a concise decision coach.
+Compare the user's options side by side in plain prose.
+- No XML-like tags.
+- No em-dashes. Use commas or short sentences instead.
+- Name every option explicitly.
+- For each option, one short sentence on its strengths and one on its weaknesses, grounded in supplied values.
+- Do not fabricate numbers or conclusions.`;
+
+const WHAT_WOULD_FLIP_NARRATE_PROMPT = `You are a concise decision coach.
+Narrate which factor changes would flip the current leading option in plain prose.
+- No XML-like tags.
+- No em-dashes. Use commas or short sentences instead.
+- For each flip scenario in the supplied data, state the factor, the threshold value, and what it flips to.
+- If no flip scenarios exist, say so plainly in one sentence.
+- Do not fabricate thresholds — use only values present in the supplied analysis.`;
+
+// ============================================================================
 // Registration Function
 // ============================================================================
 
 /**
  * Register all default prompts.
  * Called during server initialization to populate the fallback registry.
+ *
+ * The draft_graph prompt version is selected via PROMPT_VERSION env var:
+ * - v187 (default): Benchmarked production prompt with construction flow, structural rules, annotated example
+ * - v19 (deprecated): Bidirected edges, goal constraints, causal claims (superseded by v187)
+ * - v15 (deprecated): External priors, goal thresholds, coaching (superseded by v19)
+ * - v12 (deprecated): Factor metadata, scale discipline (superseded by v15)
+ * - v22 (deprecated): Was misnumbering during v12 development
+ * - v8 (deprecated): Concise v8.2, superseded by v12
+ * - v6 (deprecated): Verbose v6.0.2 with explicit checklist
  */
 export function registerAllDefaultPrompts(): void {
-  // Interpolate graph caps into draft prompt
-  const draftPromptWithCaps = DRAFT_GRAPH_PROMPT
-    .replace(/\{\{maxNodes\}\}/g, String(GRAPH_MAX_NODES))
-    .replace(/\{\{maxEdges\}\}/g, String(GRAPH_MAX_EDGES));
+  // Select draft_graph prompt version based on env var
+  const { version, explicit } = getPromptVersion();
+
+  let draftPromptWithCaps: string;
+  if (version === 'v187') {
+    draftPromptWithCaps = getDraftGraphPromptV187();
+    log.info(
+      { version, explicit },
+      `Using draft_graph prompt v187 (${explicit ? 'explicitly configured' : 'default'})`
+    );
+  } else if (version === 'v19') {
+    draftPromptWithCaps = getDraftGraphPromptV19();
+    log.info(
+      { version, explicit },
+      `Using draft_graph prompt v19 [DEPRECATED - use v187] (${explicit ? 'explicitly configured' : 'env override'})`
+    );
+  } else if (version === 'v15') {
+    draftPromptWithCaps = getDraftGraphPromptV15();
+    log.info(
+      { version, explicit },
+      `Using draft_graph prompt v15 [DEPRECATED - use v19] (${explicit ? 'explicitly configured' : 'env override'})`
+    );
+  } else if (version === 'v12') {
+    draftPromptWithCaps = getDraftGraphPromptV12();
+    log.info(
+      { version, explicit },
+      `Using draft_graph prompt v12 [DEPRECATED - use v15] (${explicit ? 'explicitly configured' : 'env override'})`
+    );
+  } else if (version === 'v22') {
+    draftPromptWithCaps = getDraftGraphPromptV22();
+    log.info(
+      { version, explicit },
+      `Using draft_graph prompt v22 [DEPRECATED - use v15] (${explicit ? 'explicitly configured' : 'env override'})`
+    );
+  } else if (version === 'v8') {
+    draftPromptWithCaps = getDraftGraphPromptV8();
+    log.info(
+      { version, explicit },
+      `Using draft_graph prompt v8.2 [DEPRECATED - use v15] (${explicit ? 'explicitly configured' : 'env override'})`
+    );
+  } else {
+    // v6.0.2 (deprecated)
+    draftPromptWithCaps = DRAFT_GRAPH_PROMPT
+      .replace(/\{\{maxNodes\}\}/g, String(GRAPH_MAX_NODES))
+      .replace(/\{\{maxEdges\}\}/g, String(GRAPH_MAX_EDGES));
+    log.info(
+      { version, explicit },
+      `Using draft_graph prompt v6.0.2 [DEPRECATED] (${explicit ? 'explicitly configured' : 'env override'})`
+    );
+  }
 
   registerDefaultPrompt('draft_graph', draftPromptWithCaps);
   registerDefaultPrompt('suggest_options', SUGGEST_OPTIONS_PROMPT);
+  // ⚠⚠ FULLY ORPHANED AS OF ROADMAP 2.763. The 2.731 note below is superseded:
+  // its two named survivors are both gone — (a) the default-OFF
+  // orchestrator-validation gate (substep 1b) was removed by 2.740a (#851),
+  // and (b) the legacy graph-orchestrator repair limbs went with it. 2.763
+  // then removed `LLMAdapter.repairGraph` itself, so `getSystemPrompt(
+  // 'repair_graph')` now has ZERO callers anywhere in `src/`.
+  // History: 0/12 successes over a full 7-day efficacy window (2.731);
+  // 0 invocations across 398 executions while armed (2.740a).
+  //
+  // WHY THE REGISTRATION STAYS (deliberate, not oversight): the PMS row
+  // `repair_graph` (v6, gpt-4.1) is operator-managed, lives OUTSIDE this repo,
+  // and its retirement is PAUL-GATED. `repair_graph` is still a member of
+  // `CRITICAL_PMS_TASKS` (src/prompts/estate.ts) — which `/healthz` gates on —
+  // and of `logStartupHealthCheck`'s `coreRoutes` (prompt-loader.ts). Deleting
+  // this registration alone would make boot warn about a fallback that no
+  // longer exists while healthz still gated on the row. The prompt estate and
+  // the PMS row must be retired TOGETHER, in one deliberate move, via
+  // RETIRED_PMS_TASKS / RETIRED_PMS_ROWS.
+  // Until then: this constant is INERT — nothing can resolve it, and there is
+  // no longer any code path that can make an LLM repair call. Do NOT wire one.
   registerDefaultPrompt('repair_graph', REPAIR_GRAPH_PROMPT);
   registerDefaultPrompt('clarify_brief', CLARIFY_BRIEF_PROMPT);
   registerDefaultPrompt('critique_graph', CRITIQUE_GRAPH_PROMPT);
+  // DEPRECATED: explainer and bias_check prompts are registered but never loaded
+  // via getSystemPrompt(). bias_check route uses detectBiases() directly; explainer
+  // has no route. Kept for prompt-store schema completeness — remove when task IDs
+  // are retired from PROMPT_TASKS.
   registerDefaultPrompt('explainer', EXPLAINER_PROMPT);
   registerDefaultPrompt('bias_check', BIAS_CHECK_PROMPT);
+  registerDefaultPrompt('enrich_factors', getEnrichFactorsPrompt());
+  registerDefaultPrompt('decision_review', DECISION_REVIEW_PROMPT);
+  registerDefaultPrompt('edit_graph', getEditGraphPromptV6());
+  registerDefaultPrompt('repair_edit_graph', REPAIR_EDIT_GRAPH_PROMPT);
+  registerDefaultPrompt('orchestrator', getOrchestratorPromptV28());
+  registerDefaultPrompt('validate_graph', VALIDATE_GRAPH_PROMPT);
+  registerDefaultPrompt('draft_quality_review', DRAFT_QUALITY_REVIEW_PROMPT);
+  // V5 routing prompt (v40) — registered from on-disk Prompts/v40.txt as the
+  // PMS default fallback. Manual seeding into PMS is performed out-of-band;
+  // this registration is the in-memory default fallback only. Path resolution
+  // uses `process.cwd()` to mirror the established repo pattern for external
+  // data files (see src/orchestrator-v5/routing/prompt-loader.ts:62, dsk-loader.ts,
+  // routing-log.ts) — Render's working directory is the repo root, and Prompts/
+  // is NOT copied into dist/ at build time, so relative-to-source paths break
+  // in production. Tests also run with cwd=repo-root.
+  const v40Path = pathResolve(process.cwd(), 'Prompts', 'v40.txt');
+  const ROUTING_PROMPT_V40_TEXT = readFileSync(v40Path, 'utf-8');
+  registerDefaultPrompt('routing', ROUTING_PROMPT_V40_TEXT);
+  // V5 slice A1 — narrate-mode placeholder. Paul is sole author of the final
+  // fragment; this default is intentionally minimal so the prompt store / Paul
+  // can override it without code changes. Additive entry; pre-existing callers
+  // unaffected.
+  registerDefaultPrompt('direct_answer_narrate', DIRECT_ANSWER_NARRATE_PROMPT);
+  // V5 slice A2 — pre-narrate turn classifier placeholder; Paul authors
+  // final content. (clarify_narrate removed 2026-07-16 — zero live callers.)
+  registerDefaultPrompt('turn_classifier', TURN_CLASSIFIER_PROMPT);
+  // V5 slices C2 + D1 + D2 (Phase 0 wiring) — handler-narrate placeholders.
+  // Handler modules do not land until the relevant tranche. Registering
+  // defaults now keeps the prompt-loader surface complete; Paul remains sole
+  // author of the real content.
+  registerDefaultPrompt('run_analysis_narrate', RUN_ANALYSIS_NARRATE_PROMPT);
+  registerDefaultPrompt('set_factor_value_narrate', SET_FACTOR_VALUE_NARRATE_PROMPT);
+  registerDefaultPrompt('add_constraint_narrate', ADD_CONSTRAINT_NARRATE_PROMPT);
+  registerDefaultPrompt('adjust_edge_strength_narrate', ADJUST_EDGE_STRENGTH_NARRATE_PROMPT);
+  registerDefaultPrompt('explain_result_narrate', EXPLAIN_RESULT_NARRATE_PROMPT);
+  registerDefaultPrompt('compare_options_narrate', COMPARE_OPTIONS_NARRATE_PROMPT);
+  registerDefaultPrompt('what_would_flip_narrate', WHAT_WOULD_FLIP_NARRATE_PROMPT);
+  // V6 dual-draft M2 graph review — FAIL-CLOSED sentinel, not a placeholder
+  // prompt. Unlike the narrate placeholders above (which are minimal but
+  // usable), this default must never reach a live model call: the dual-draft
+  // stage checks for the sentinel and refuses to run while it resolves
+  // (degrade reason `prompt_not_provisioned`), even with the feature flag ON.
+  // Paul authors the real content via the PMS lane; the prompt store override
+  // clears the sentinel without code changes.
+  registerDefaultPrompt('m2_graph_review', M2_PROMPT_NOT_PROVISIONED_SENTINEL);
+
+  // Log prompt versions at registration (read from actually-registered content)
+  log.info({
+    orchestrator: 'cf-v28',
+    draft_graph: version,
+    edit_graph: 'v6',
+    decision_review: DECISION_REVIEW_PROMPT_VERSION,
+    repair_graph: REPAIR_GRAPH_PROMPT_VERSION,
+    routing: 'v40',
+  }, 'Prompt fallback defaults registered');
 
   // Note: These tasks don't have LLM prompts (deterministic/algorithmic):
   // - isl_synthesis: Uses template-based narrative generation (no LLM)
@@ -938,14 +2516,59 @@ export function registerAllDefaultPrompts(): void {
 
 /**
  * Get the raw prompt templates (for testing/migration)
+ * Note: v6/v8/v22 contain {{maxNodes}}/{{maxEdges}} placeholders that must be resolved.
+ * v12/v15 have hardcoded limits for prompt admin compatibility.
+ * Call getDraftGraphPromptByVersion() for resolved prompts.
  */
 export const PROMPT_TEMPLATES = {
-  draft_graph: DRAFT_GRAPH_PROMPT,
+  draft_graph: DRAFT_GRAPH_PROMPT_V187,
+  draft_graph_v187: DRAFT_GRAPH_PROMPT_V187,
+  draft_graph_v19: DRAFT_GRAPH_PROMPT_V19, // deprecated - superseded by v187
+  draft_graph_v15: DRAFT_GRAPH_PROMPT_V15, // deprecated - superseded by v19
+  draft_graph_v12: DRAFT_GRAPH_PROMPT_V12, // deprecated - superseded by v15
+  draft_graph_v22: DRAFT_GRAPH_PROMPT_V22, // deprecated - was misnumbering
+  draft_graph_v8: DRAFT_GRAPH_PROMPT_V8, // deprecated - superseded by v12
+  draft_graph_v6: DRAFT_GRAPH_PROMPT, // deprecated
   suggest_options: SUGGEST_OPTIONS_PROMPT,
   repair_graph: REPAIR_GRAPH_PROMPT,
   clarify_brief: CLARIFY_BRIEF_PROMPT,
   critique_graph: CRITIQUE_GRAPH_PROMPT,
   explainer: EXPLAINER_PROMPT,
   bias_check: BIAS_CHECK_PROMPT,
+  enrich_factors: ENRICH_FACTORS_PROMPT,
+  decision_review: DECISION_REVIEW_PROMPT,
+  edit_graph: EDIT_GRAPH_PROMPT_V6,
+  repair_edit_graph: REPAIR_EDIT_GRAPH_PROMPT,
+  orchestrator: ORCHESTRATOR_PROMPT_CF_V28,
+  draft_quality_review: DRAFT_QUALITY_REVIEW_PROMPT,
   // Note: isl_synthesis is deterministic (template-based, no LLM) - prompt kept for reference only
 } as const;
+
+/**
+ * Get prompt template by version.
+ * Useful for A/B testing or explicit version selection in tests.
+ */
+export function getDraftGraphPromptByVersion(version: PromptVersion): string {
+  if (version === 'v187') {
+    return getDraftGraphPromptV187();
+  }
+  if (version === 'v19') {
+    return getDraftGraphPromptV19();
+  }
+  if (version === 'v15') {
+    return getDraftGraphPromptV15();
+  }
+  if (version === 'v12') {
+    return getDraftGraphPromptV12();
+  }
+  if (version === 'v22') {
+    return getDraftGraphPromptV22();
+  }
+  if (version === 'v8') {
+    return getDraftGraphPromptV8();
+  }
+  // v6 (deprecated)
+  return DRAFT_GRAPH_PROMPT
+    .replace(/\{\{maxNodes\}\}/g, String(GRAPH_MAX_NODES))
+    .replace(/\{\{maxEdges\}\}/g, String(GRAPH_MAX_EDGES));
+}

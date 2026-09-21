@@ -168,7 +168,7 @@ describe("CEE Pre-Decision Checks", () => {
       const nudges = generateFramingNudges(graph, "We need to decide immediately!");
       const timeNudge = nudges.find(n => n.type === "time_pressure");
       expect(timeNudge).toBeDefined();
-      expect(timeNudge?.severity).toBe("warning");
+      expect(timeNudge?.severity).toBe("warn");
     });
 
     it("warns about sunk cost language", () => {
@@ -176,7 +176,7 @@ describe("CEE Pre-Decision Checks", () => {
       const nudges = generateFramingNudges(graph, "We have already invested $1M in this project");
       const sunkCostNudge = nudges.find(n => n.type === "sunk_cost");
       expect(sunkCostNudge).toBeDefined();
-      expect(sunkCostNudge?.severity).toBe("warning");
+      expect(sunkCostNudge?.severity).toBe("warn");
     });
 
     it("prompts about scope when many options", () => {
@@ -248,7 +248,7 @@ describe("CEE Pre-Decision Checks", () => {
         expect(nudge.id).toBeTruthy();
         expect(nudge.type).toBeTruthy();
         expect(nudge.message).toBeTruthy();
-        expect(["info", "warning"]).toContain(nudge.severity);
+        expect(["info", "warn"]).toContain(nudge.severity);
       });
     });
   });

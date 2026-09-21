@@ -1,17 +1,13 @@
 /**
- * Tests for SSE Resume functionality (v1.8.0)
+ * Tests for SSE Streaming helpers (v1.8.0)
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   streamDraftGraph,
-  resumeDraftGraph,
-  extractResumeTokenFromEvent,
 } from "./sse.js";
 import type {
   SseEvent,
-  SseStageEvent,
-  SseResumeEvent,
 } from "./types.js";
 import { OlumiAPIError, OlumiNetworkError, OlumiConfigError } from "./errors.js";
 
@@ -19,47 +15,13 @@ import { OlumiAPIError, OlumiNetworkError, OlumiConfigError } from "./errors.js"
 const mockFetch = vi.fn();
 global.fetch = mockFetch as any;
 
-describe("SSE Resume", () => {
+describe("SSE Streaming", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
-  });
-
-  describe("extractResumeTokenFromEvent", () => {
-    it("should extract token from resume event", () => {
-      const event: SseResumeEvent = {
-        type: "resume",
-        data: {
-          token: "eyJyZXF1ZXN0X2lkIjoiYWJjMTIzIiwic3RlcCI6IkRSQUZUSU5HIiwic2VxIjoxfQ.signature",
-        },
-      };
-
-      const token = extractResumeTokenFromEvent(event);
-      expect(token).toBe("eyJyZXF1ZXN0X2lkIjoiYWJjMTIzIiwic3RlcCI6IkRSQUZUSU5HIiwic2VxIjoxfQ.signature");
-    });
-
-    it("should return null for non-resume events", () => {
-      const stageEvent: SseStageEvent = {
-        type: "stage",
-        data: {
-          stage: "DRAFTING",
-        },
-      };
-
-      expect(extractResumeTokenFromEvent(stageEvent)).toBeNull();
-    });
-
-    it("should return null for heartbeat events", () => {
-      const heartbeatEvent: SseEvent = {
-        type: "heartbeat",
-        data: null,
-      };
-
-      expect(extractResumeTokenFromEvent(heartbeatEvent)).toBeNull();
-    });
   });
 
   describe("streamDraftGraph", () => {
@@ -77,13 +39,10 @@ describe("SSE Resume", () => {
       ).rejects.toThrow(OlumiConfigError);
     });
 
-    it("should stream SSE events with API key auth", async () => {
-      // Mock SSE response
+    it("should stream SSE events with API key auth to v1 endpoint", async () => {
+      // Mock SSE response (v1 stream — no resume token)
       const sseData = `event: stage
 data: {"stage":"DRAFTING"}
-
-event: resume
-data: {"token":"test-token-123"}
 
 event: stage
 data: {"stage":"COMPLETE","payload":{"schema":"draft-graph.v1","graph":{"schema":"graph.v1","nodes":[],"edges":[]},"rationales":[]}}
@@ -119,9 +78,9 @@ data: {"stage":"COMPLETE","payload":{"schema":"draft-graph.v1","graph":{"schema"
         events.push(event);
       }
 
-      // Verify fetch was called with correct params
+      // Verify fetch was called with v1 URL
       expect(mockFetch).toHaveBeenCalledWith(
-        "https://api.example.com/assist/draft-graph/stream",
+        "https://api.example.com/assist/v1/draft-graph/stream",
         expect.objectContaining({
           method: "POST",
           headers: expect.objectContaining({
@@ -132,22 +91,14 @@ data: {"stage":"COMPLETE","payload":{"schema":"draft-graph.v1","graph":{"schema"
       );
 
       // Verify events
-      expect(events).toHaveLength(3);
+      expect(events).toHaveLength(2);
       expect(events[0].type).toBe("stage");
-      expect(events[1].type).toBe("resume");
-      expect(events[2].type).toBe("stage");
-
-      // Verify resume token extraction
-      const token = extractResumeTokenFromEvent(events[1]);
-      expect(token).toBe("test-token-123");
+      expect(events[1].type).toBe("stage");
     });
 
     it("should stream SSE events with HMAC auth", async () => {
       const sseData = `event: stage
 data: {"stage":"DRAFTING"}
-
-event: resume
-data: {"token":"test-token-456"}
 
 `;
 
@@ -184,9 +135,9 @@ data: {"token":"test-token-456"}
         events.push(event);
       }
 
-      // Verify fetch was called with HMAC headers
+      // Verify fetch was called with v1 URL and HMAC headers
       expect(mockFetch).toHaveBeenCalledWith(
-        "https://api.example.com/assist/draft-graph/stream",
+        "https://api.example.com/assist/v1/draft-graph/stream",
         expect.objectContaining({
           method: "POST",
           headers: expect.objectContaining({
@@ -197,7 +148,7 @@ data: {"token":"test-token-456"}
         })
       );
 
-      expect(events).toHaveLength(2);
+      expect(events).toHaveLength(1);
     });
 
     it("should handle abort signal", async () => {
@@ -258,6 +209,36 @@ data: {"token":"test-token-456"}
       ).rejects.toThrow(OlumiAPIError);
     });
 
+    it("should extract retry_after_seconds from SSE-framed 429 response", async () => {
+      // v1 stream sends 429 with SSE framing:
+      // writeHead(429, SSE_HEADERS) + writeStage({ stage: "COMPLETE", payload: errorBody })
+      const sseFramed429 = `event: stage\ndata: {"stage":"COMPLETE","payload":{"schema":"error.v1","code":"CEE_RATE_LIMIT","message":"Rate limit exceeded","details":{"retry_after_seconds":15}}}\n\n`;
+
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 429,
+        statusText: "Too Many Requests",
+        text: async () => sseFramed429,
+      });
+
+      let thrownError: any;
+      try {
+        const stream = streamDraftGraph(
+          { baseUrl: "https://api.example.com", apiKey: "test-key" },
+          { brief: "Test" }
+        );
+        const iterator = stream[Symbol.asyncIterator]();
+        await iterator.next();
+      } catch (e) {
+        thrownError = e;
+      }
+
+      expect(thrownError).toBeInstanceOf(OlumiAPIError);
+      expect(thrownError.statusCode).toBe(429);
+      // retry_after_seconds must be accessible for the reconnect backoff
+      expect(thrownError.details?.retry_after_seconds).toBe(15);
+    });
+
     it("should handle heartbeat events", async () => {
       const sseData = `event: stage
 data: {"stage":"DRAFTING"}
@@ -301,7 +282,77 @@ data: {"stage":"COMPLETE"}
       expect(events).toHaveLength(3);
       expect(events[1].type).toBe("heartbeat");
     });
-    
+
+    it("should parse event: error events", async () => {
+      const sseData = `event: error
+data: {"code":"CEE_VALIDATION_FAILED","reason":"SCHEMA_VALIDATION_FAILED","message":"Invalid input","details":{"field_errors":{}}}
+
+`;
+
+      const mockReader = {
+        read: vi
+          .fn()
+          .mockResolvedValueOnce({
+            done: false,
+            value: new TextEncoder().encode(sseData),
+          })
+          .mockResolvedValueOnce({ done: true, value: undefined }),
+        releaseLock: vi.fn(),
+      };
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        body: { getReader: () => mockReader },
+      });
+
+      const events: SseEvent[] = [];
+      const stream = streamDraftGraph(
+        { baseUrl: "https://api.example.com", apiKey: "test-key" },
+        { brief: "Test" }
+      );
+      for await (const event of stream) events.push(event);
+
+      expect(events).toHaveLength(1);
+      expect(events[0].type).toBe("error");
+      expect((events[0] as any).data.code).toBe("CEE_VALIDATION_FAILED");
+    });
+
+    it("should parse event: needs_clarification events", async () => {
+      const sseData = `event: needs_clarification
+data: {"clarification_questions":["What is the budget?","What is the timeline?"],"readiness_score":0.3}
+
+`;
+
+      const mockReader = {
+        read: vi
+          .fn()
+          .mockResolvedValueOnce({
+            done: false,
+            value: new TextEncoder().encode(sseData),
+          })
+          .mockResolvedValueOnce({ done: true, value: undefined }),
+        releaseLock: vi.fn(),
+      };
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        body: { getReader: () => mockReader },
+      });
+
+      const events: SseEvent[] = [];
+      const stream = streamDraftGraph(
+        { baseUrl: "https://api.example.com", apiKey: "test-key" },
+        { brief: "Test" }
+      );
+      for await (const event of stream) events.push(event);
+
+      expect(events).toHaveLength(1);
+      expect(events[0].type).toBe("needs_clarification");
+      expect((events[0] as any).data.clarification_questions).toHaveLength(2);
+    });
+
     it("should invoke onDegraded callback when X-Olumi-Degraded header is present", async () => {
       const sseData = `event: stage
 data: {"stage":"DRAFTING"}
@@ -345,240 +396,6 @@ data: {"stage":"DRAFTING"}
 
       expect(onDegraded).toHaveBeenCalledTimes(1);
       expect(onDegraded).toHaveBeenCalledWith("redis");
-    });
-  });
-
-  describe("resumeDraftGraph", () => {
-    it("should resume with valid token", async () => {
-      const sseData = `event: stage
-data: {"stage":"DRAFTING","payload":{"schema":"draft-graph.v1","graph":{"schema":"graph.v1","nodes":[],"edges":[]},"rationales":[]}}
-
-event: stage
-data: {"stage":"COMPLETE","payload":{"schema":"draft-graph.v1","graph":{"schema":"graph.v1","nodes":[],"edges":[]},"rationales":[]}}
-
-: heartbeat
-
-`;
-
-      const mockReader = {
-        read: vi
-          .fn()
-          .mockResolvedValueOnce({
-            done: false,
-            value: new TextEncoder().encode(sseData),
-          })
-          .mockResolvedValueOnce({ done: true, value: undefined }),
-        releaseLock: vi.fn(),
-      };
-
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        body: {
-          getReader: () => mockReader,
-        },
-      });
-
-      const result = await resumeDraftGraph(
-        { baseUrl: "https://api.example.com", apiKey: "test-key" },
-        { token: "test-resume-token" }
-      );
-
-      // Verify fetch was called with resume token header
-      expect(mockFetch).toHaveBeenCalledWith(
-        "https://api.example.com/assist/draft-graph/resume",
-        expect.objectContaining({
-          method: "POST",
-          headers: expect.objectContaining({
-            "X-Resume-Token": "test-resume-token",
-            "X-Olumi-Assist-Key": "test-key",
-          }),
-        })
-      );
-
-      // Verify result
-      expect(result.events).toHaveLength(3);
-      expect(result.replayedCount).toBe(2); // Excludes heartbeat
-      expect(result.completed).toBe(false); // No complete event
-    });
-
-    it("should detect completed stream", async () => {
-      const sseData = `event: complete
-data: {"schema":"draft-graph.v1","graph":{"schema":"graph.v1","nodes":[],"edges":[]},"rationales":[]}
-
-`;
-
-      const mockReader = {
-        read: vi
-          .fn()
-          .mockResolvedValueOnce({
-            done: false,
-            value: new TextEncoder().encode(sseData),
-          })
-          .mockResolvedValueOnce({ done: true, value: undefined }),
-        releaseLock: vi.fn(),
-      };
-
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        body: {
-          getReader: () => mockReader,
-        },
-      });
-
-      const result = await resumeDraftGraph(
-        { baseUrl: "https://api.example.com", apiKey: "test-key" },
-        { token: "test-token" }
-      );
-
-      expect(result.completed).toBe(true);
-      expect(result.events[0].type).toBe("complete");
-    });
-
-    it("should handle 426 error for expired state", async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        status: 426,
-        text: async () =>
-          JSON.stringify({
-            schema: "error.v1",
-            code: "INTERNAL",
-            message: "Stream state expired",
-            details: { upgrade: "resume=unsupported" },
-          }),
-      });
-
-      try {
-        await resumeDraftGraph(
-          { baseUrl: "https://api.example.com", apiKey: "test-key" },
-          { token: "expired-token" }
-        );
-        // Should not reach here
-        expect.fail("Expected resumeDraftGraph to throw");
-      } catch (error) {
-        expect(error).toBeInstanceOf(OlumiAPIError);
-        expect((error as OlumiAPIError).statusCode).toBe(426);
-      }
-    });
-
-    it("should handle 401 error for invalid token", async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        status: 401,
-        text: async () =>
-          JSON.stringify({
-            schema: "error.v1",
-            code: "BAD_INPUT",
-            message: "Invalid resume token: INVALID_SIGNATURE",
-          }),
-      });
-
-      await expect(
-        resumeDraftGraph(
-          { baseUrl: "https://api.example.com", apiKey: "test-key" },
-          { token: "invalid-token" }
-        )
-      ).rejects.toThrow(OlumiAPIError);
-    });
-
-    it("should use HMAC auth when secret provided", async () => {
-      const sseData = `event: complete
-data: {}
-
-`;
-
-      const mockReader = {
-        read: vi
-          .fn()
-          .mockResolvedValueOnce({
-            done: false,
-            value: new TextEncoder().encode(sseData),
-          })
-          .mockResolvedValueOnce({ done: true, value: undefined }),
-        releaseLock: vi.fn(),
-      };
-
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        body: {
-          getReader: () => mockReader,
-        },
-      });
-
-      await resumeDraftGraph(
-        {
-          baseUrl: "https://api.example.com",
-          apiKey: "",
-          hmacSecret: "test-secret",
-        },
-        { token: "test-token" }
-      );
-
-      // Verify HMAC headers
-      expect(mockFetch).toHaveBeenCalledWith(
-        "https://api.example.com/assist/draft-graph/resume",
-        expect.objectContaining({
-          headers: expect.objectContaining({
-            "X-Olumi-Signature": expect.any(String),
-            "X-Olumi-Timestamp": expect.any(String),
-            "X-Olumi-Nonce": expect.any(String),
-          }),
-        })
-      );
-    });
-
-    it("should handle network errors", async () => {
-      mockFetch.mockRejectedValueOnce(new TypeError("Network error"));
-
-      await expect(
-        resumeDraftGraph(
-          { baseUrl: "https://api.example.com", apiKey: "test-key" },
-          { token: "test-token" }
-        )
-      ).rejects.toThrow(OlumiNetworkError);
-    });
-
-    it("should count only non-heartbeat events in replay count", async () => {
-      const sseData = `event: stage
-data: {"stage":"DRAFTING"}
-
-: heartbeat
-
-event: stage
-data: {"stage":"COMPLETE"}
-
-: heartbeat
-
-`;
-
-      const mockReader = {
-        read: vi
-          .fn()
-          .mockResolvedValueOnce({
-            done: false,
-            value: new TextEncoder().encode(sseData),
-          })
-          .mockResolvedValueOnce({ done: true, value: undefined }),
-        releaseLock: vi.fn(),
-      };
-
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        body: {
-          getReader: () => mockReader,
-        },
-      });
-
-      const result = await resumeDraftGraph(
-        { baseUrl: "https://api.example.com", apiKey: "test-key" },
-        { token: "test-token" }
-      );
-
-      expect(result.events).toHaveLength(4); // 2 stage + 2 heartbeat
-      expect(result.replayedCount).toBe(2); // Only stage events
     });
   });
 

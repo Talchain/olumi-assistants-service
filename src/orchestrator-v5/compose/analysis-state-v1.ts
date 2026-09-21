@@ -1,0 +1,976 @@
+/**
+ * ANALYSIS-STATE AUTHORITY, STEP 3 — compose `AnalysisStateV1` (schemas 0.46.0).
+ *
+ * WHAT THIS IS. One composed verdict per turn answering "what is the state of
+ * the analysis, and what may a surface claim about it". Today every surface
+ * derives its own answer from a different subset of the payload and the
+ * derivations disagree — the estate has shipped a confirmation that withheld a
+ * leading option while the coaching sentence beneath it named one. A verdict
+ * composed ONCE by the producer is the structural fix: every surface reads the
+ * same fields, so two surfaces cannot disagree about a fact neither derives.
+ *
+ * WHAT THIS IS NOT. It computes nothing new. Every member is a projection of a
+ * value the turn had already computed — the canonical analysis state
+ * (`context/canonical-analysis-state.ts`), the freshness derivation, the
+ * readiness payload, the constraint-feasibility entitlement, and the engine's
+ * own robustness signals as they appear on the wire. No LLM call, no engine
+ * call, no store read, no graph walk. That is a deliberate constraint, not an
+ * accident of scope: a composed verdict that re-derives its inputs would be a
+ * seventh authority rather than the single one.
+ *
+ * ─── PRODUCER OF RECORD, per contract member ────────────────────────────────
+ *
+ *   run_state            CanonicalAnalysisState.freshness / .status
+ *                        + FreshnessDerivation.reason (cause axes)
+ *                        + FreshnessDerivation.refusal_declared (the `refused`
+ *                          branch — see below)
+ *   readiness.status     CanonicalAnalysisState.status
+ *   readiness.blockers   the wire blockers, mapped by `blockerIssue` — the
+ *                        SAME mapper #983's canonical readiness assessor uses,
+ *                        imported rather than re-implemented, so the two can
+ *                        never disagree about what a blocker means
+ *   leader_claim         CEE `MAY_NAME_LEADING_OPTION` entitlement (threaded as
+ *                        `mayNameLeadingOption`, already required on every V5
+ *                        exit and read fail-closed) ∧ the engine's own
+ *                        `near_tie` separation
+ *   robustness           the engine's `enrichment.robustness` as it ships
+ *   the five predicates  CanonicalAnalysisState; unavailable when an adopted
+ *                        run-fact binding cannot be confirmed
+ *   contradictions       CanonicalAnalysisState.contradictions
+ *
+ * ─── `refused`, and why it is signalled rather than inferred ────────────────
+ *
+ * `refused` says: THIS TURN DECLINED TO ANALYSE, so any result on screen is
+ * from an earlier run whose currency this turn does not vouch for. Today that
+ * situation is expressed by three signals that do not add up to one state —
+ * a `blocked` readiness, a clamped `unknown` freshness, and the instruction to
+ * retain the prior result — and the contradiction that produces is the defect
+ * this contract exists to close.
+ *
+ * The refusal is carried EXPLICITLY on the freshness derivation
+ * (`refusal_declared`) rather than inferred from `freshness_reason`, because
+ * `clampRefusalFreshness` EARLY-RETURNS an already-stale or already-unknown
+ * derivation untouched. On that path the refusal reason never appears, so a
+ * reason-sniffing implementation reports `complete_stale` and the product goes
+ * on vouching for a result the turn refused to stand behind. The explicit flag
+ * is set on BOTH clamp branches; the early-return case has its own test.
+ *
+ * ─── STATED LIMITS (visible in a green suite, not assumed closed) ───────────
+ *
+ * L-A. `running` HAS EXACTLY ONE PRODUCER, AND ITS SCOPE IS NARROW.
+ *      ⚠⚠ THIS LIMIT HAS NOW FLIPPED THREE TIMES AND THE HISTORY IS KEPT
+ *      (trap 14): "no producer" → "EXACTLY ONE" (ROADMAP 2.1271) → "no
+ *      producer" (#1298 deleted the auto-run) → "EXACTLY ONE" again, because
+ *      #1298's deletion was reverted on 2026-09-01: the founder confirmed the
+ *      post-draft analysis is deliberate, and the real gap was that it was
+ *      never labelled AI-only. VERIFY THE PRODUCER COUNT AT YOUR TIP rather
+ *      than trusting any of these four sentences — it is one `rg -a` for
+ *      `kind: 'running'` over `src/`, with `kind: 'never_run'` as the contrast
+ *      control in the same sweep.
+ *      ⚠ THIS LIMIT USED TO READ "`running` has NO PRODUCER at this step and is
+ *      therefore never emitted … emitting it would require an async run
+ *      registry that does not exist". The first clause is now false and the
+ *      second was always narrower than it sounded, so both are corrected here
+ *      rather than deleted (trap 14).
+ *
+ *      The general claim it made is still TRUE: a synchronous turn cannot
+ *      discover, at compose time, that some OTHER request's run is in flight.
+ *      No registry exists and this producer does not invent one.
+ *
+ *      What it missed is the ONE case where the turn composing the verdict is
+ *      itself the turn that STARTED the run: a fresh admissible draft schedules
+ *      a provisional auto-run (`handlers/auto-run-after-draft.ts`, ROADMAP
+ *      2.1271). That turn does not need a registry — it knows, from its own
+ *      admission decision, that a run is beginning. `autoRunInFlight` carries
+ *      exactly that knowledge and nothing wider: it is threaded ONLY by the
+ *      draft exit, ONLY when the same `resolveRunAdmission` verdict that gates
+ *      the scheduler said the run will proceed, and it carries the START
+ *      instant as an observation rather than a compose-time clock read.
+ *
+ *      So the arm is emitted iff the composing turn is the run's own trigger.
+ *      Every other turn still cannot say `running`, and still does not.
+ * L-B. `robustness.factors_that_flip_leader` is NEVER emitted. Absent means
+ *      "the flip analysis was not computed"; `[]` would mean "it was computed
+ *      and nothing flips" — opposite claims. The only flip evidence reachable
+ *      here is keyed by factor LABEL and the contract requires IDs, so either
+ *      value would be a fabricated finding.
+ * L-C. `leader_claim.permitted` FAILS CLOSED when the separation half is
+ *      unknown, carrying `withheld_reason: 'separation_unavailable'`. The
+ *      contract defines `permitted` as a conjunction true only when BOTH
+ *      halves hold, and an unknown half is not a held half. CONSEQUENCE, named
+ *      here because step 7 is where it bites: on a turn that displays a PRIOR
+ *      analysis without re-shipping its `analysis_result` block, the separation
+ *      half is unreadable at this seam, so `permitted` is false.
+ *
+ *      ⚠⚠ THIS LIMIT'S LICENCE HAS LAPSED, AND THE OLD TEXT IS CORRECTED RATHER
+ *      THAN DELETED (trap 14). It used to end: "Nothing consumes this field
+ *      yet; a UI conjunct built on it (step 7) must first settle whether the
+ *      separation verdict should be persisted with the fact."
+ *
+ *      **BOTH CLAUSES ARE NOW FALSE.** Swept at UI `staging` 13b8676d
+ *      (2026-08-26), contrast control in the same run:
+ *        - ⚠⚠ **THE CONSUMER NAMED HERE HAS MOVED — RE-POINTED 2026-09-18, and
+ *          the old text is corrected rather than deleted (trap 14).** It read:
+ *          *"`canvas/state/analysisStateSelector.ts:671` reads
+ *          `wire.leader_claim.permitted && run_state.kind === 'complete_current'`"*.
+ *          Re-swept at UI `staging` **af4370a0**: that file still EXISTS and
+ *          contains **ZERO** occurrences of `permitted` (contrast control in the
+ *          same run: `leader_claim` is read in 15 non-test UI files, so the probe
+ *          is sighted). **The live read is
+ *          `lib/coherence/crossSurfaceCoherence.ts` →
+ *          `producerWithholdsLeaderClaim`**, reached from
+ *          `canvas/hydrate/applyScenarioAnalysisRead.ts` (import, then
+ *          `'leader_claim_withheld'`). Its body is `state?.leader_claim
+ *          ?.permitted === false` — so the substance of the finding STANDS: the
+ *          step-7 conjunct was built, the question was not settled, and the
+ *          consumer still reads `permitted` as a permission.
+ *
+ *          ⭐ THE DURABLE REFERENCE IS THE SYMBOL, NOT THE LINE, for the same
+ *          reason the sibling bullet below already gives about `:863`/`:872`:
+ *          these are UI-repo coordinates this CEE module cannot verify at build
+ *          time, so they rot silently. A stale pointer reads as CONSIDERED and
+ *          sends the next session to the wrong file — which is how CLAUDE.md's
+ *          readiness-authority line sat wrong from 19 Aug to 18 Sep. Cite
+ *          `producerWithholdsLeaderClaim` by name; re-derive the line if you
+ *          need one.
+ *        - `lib/coherence/crossSurfaceCoherence.ts` (the EMISSION site; the
+ *          nearby `:863` cited in the first draft of this note is the GUARD,
+ *          not the emission — a review measured the emission at `:872`. Both
+ *          numbers are UI-repo line numbers this CEE module cannot verify at
+ *          build time, so the durable reference is the emitted string below,
+ *          not either line) emits
+ *          `withheld_leader_claim_with_named_conditional_winner` on exactly
+ *          this payload; its own `:408` records it is "NOT YET ENFORCED in the
+ *          Compare tab". The detector for this defect exists and is dark.
+ *
+ *      A DOCUMENTED LIMIT WHOSE ENABLING CONDITION LAPSED IS WORSE THAN AN
+ *      UNDOCUMENTED ONE, because it reads as considered. The condition that
+ *      would void it was named precisely and nothing re-surfaced it when it
+ *      fired.
+ *
+ *      RE-STATED ENABLING CONDITION, so the next lane inherits a live one:
+ *      this limit is acceptable ONLY while consumers treat
+ *      `separation_unavailable` as NOT EVALUATED (see
+ *      `LEADER_CLAIM_REASON_KINDS`) rather than as a withheld permission. A3
+ *      currently does NOT — it reads `permitted` as a permission. Closing that,
+ *      and turning on the dark detector, is ROWED to a UI lane; this producer
+ *      is deliberately non-breaking for the current readers.
+ * L-D. The three DISCLOSED LIMITS the contract itself pins (L1 permitted vs
+ *      withheld_reason, L2 usability vs run_state, L3 contradictions semantics)
+ *      stay disclosed. This producer invents no cross-field rule the
+ *      adjudication has not ratified — in particular it does NOT force the
+ *      usability booleans to agree with `run_state`; they are copied from the
+ *      canonical verdict as computed.
+ */
+
+import type {
+  AnalysisBlocker,
+  AnalysisLeaderClaim,
+  AnalysisRobustness,
+  AnalysisRunState,
+  AnalysisStateV1,
+  OlumiResponse,
+} from '@talchain/schemas/boundary';
+
+import { blockerIssue } from '../../orchestrator/tools/analysis-ready-helper.js';
+import type { CanonicalAnalysisState } from '../context/canonical-analysis-state.js';
+import type { FreshnessDerivation } from '../context/freshness.js';
+import { readRawRobustnessSignals } from '../coaching/pick-raw-robustness.js';
+import type { RawRobustnessSignals } from '../coaching/pick-raw-robustness.js';
+import { compareAnalysisRunFactIdentity } from '../context/analysis-interpretation-identity.js';
+import {
+  projectAnalysisSummaryForWithheldClaim,
+  projectTransportEnrichmentForWithheldClaim,
+} from './withheld-claim-projection.js';
+
+/**
+ * The readiness status this producer emits when the turn supplied no readiness
+ * at all. CEE-owned vocabulary (the contract's `readiness.status` is a free
+ * string by design — the vocabulary lives with the producer). It says exactly
+ * what is true: no readiness verdict was supplied on this turn. It is NOT a
+ * synonym for `blocked`, and a consumer must not treat it as one.
+ */
+export const READINESS_STATUS_UNSUPPLIED = 'unknown';
+
+/** `blocked_reason` emitted when a blocked verdict arrived without one. */
+export const BLOCKED_REASON_UNSPECIFIED = 'analysis_blocked_unspecified';
+
+/** `reason_code` emitted when a refusal arrived without a specific reason. */
+export const REFUSAL_REASON_UNSPECIFIED = 'analysis_refused_unspecified';
+
+/** `withheld_reason` codes. Producer-owned; a consumer maps them to its copy. */
+export const WITHHELD_CONSTRAINT_VERDICT = 'constraint_verdict_withheld';
+export const WITHHELD_NEAR_TIE = 'options_do_not_separate';
+export const WITHHELD_SEPARATION_UNAVAILABLE = 'separation_unavailable';
+export const WITHHELD_RUN_IDENTITY_UNCONFIRMED = 'analysis_run_identity_unconfirmed';
+export const WITHHELD_RUN_IDENTITY_CONFLICT = 'analysis_run_identity_conflict';
+
+/**
+ * ⭐ TWO DIFFERENT FACTS WEAR THE SAME `withheld_reason` FIELD (S6, 2026-08-26).
+ *
+ * WIRE-WITNESSED on the stale route: `leader_claim.permitted: false,
+ * withheld_reason: 'separation_unavailable'` shipped beside
+ * `claim_safety.may_name_leading_option: true`, while the prose named the
+ * leader. Read as a permission that reads as a contradiction. It is not one:
+ *
+ *   - `constraint_verdict_withheld` / `options_do_not_separate` mean
+ *     **WE LOOKED AND DECLINED**. A leader must not be named.
+ *   - `separation_unavailable` means **WE DID NOT LOOK.** The separation half
+ *     was unreadable at this seam (see L-C). It is an ABSENCE OF EVIDENCE, and
+ *     it carries no verdict about whether a leader may be named — the
+ *     entitlement question is answered elsewhere, by CEE's claim-safety read.
+ *
+ * Collapsing those two into "withheld" is what makes the capture look like a
+ * contradiction, and it is the read a consumer makes by default because the
+ * FIELD IS CALLED `withheld_reason`. The kind below is the producer's own
+ * declaration of which it means, so a consumer never has to infer it from the
+ * code string.
+ *
+ * ⚠ THIS DOES NOT ALIGN THE TWO AUTHORITIES, DELIBERATELY. `permitted` and
+ * `may_name_leading_option` answer DIFFERENT questions — "are both halves
+ * provable on this payload?" versus "is this turn entitled?" — and making one
+ * call the other is exactly how the #709/#737 defect was created (one PR added
+ * a display-scoped conjunct to a verdict-scoped predicate, and nothing in the
+ * code or the names said the questions differed). Naming the concepts apart is
+ * the fix; reconciling their defaults is the trap.
+ */
+export type LeaderClaimReasonKind = 'not_evaluated' | 'withheld' | 'unknown';
+
+/**
+ * The SINGLE source for both the code list and the classification. Every code
+ * this producer can emit appears here exactly once with its kind.
+ *
+ * ⚠⚠ THE GUARANTEE THIS COMMENT USED TO STATE WAS FALSE, AND IS CORRECTED
+ * RATHER THAN DELETED (trap 14). It read: "minting a fourth code without
+ * classifying it is a type error at the mint site rather than an unclassified
+ * reason reaching a consumer." Measured by minting a fourth `WITHHELD_*`
+ * constant and classifying it nowhere: `pnpm typecheck` **exit 0, zero
+ * errors** — the type below is `Record<string, …>`, an OPEN index signature, so
+ * there is no mint site to fail. A positive control (an injected type error in
+ * this same file) exited 2, so the probe could see a presence.
+ *
+ * ⭐ WHERE IT ACTUALLY FAILS NOW, and it is a TEST, not the compiler: the
+ * COMPLETENESS case in `__tests__/leader-claim-not-evaluated.test.ts` derives
+ * the minted list from this module's own namespace (every exported
+ * `WITHHELD_*` string) and asserts each is classified here. Proven by the
+ * mutant pair: it passes at pristine and REDs on the unclassified fourth code
+ * that the previous hand-written list survived.
+ *
+ * Runtime was never at risk either way — an unclassified code falls to
+ * `'unknown'` and fail-closed. It was the GUARANTEE that was wrong, which is
+ * the same "documented limit that reads as considered" defect this file is
+ * correcting one level up.
+ */
+export const LEADER_CLAIM_REASON_KINDS: Readonly<
+  Record<string, Exclude<LeaderClaimReasonKind, 'unknown'>>
+> = {
+  [WITHHELD_CONSTRAINT_VERDICT]: 'withheld',
+  [WITHHELD_NEAR_TIE]: 'withheld',
+  [WITHHELD_SEPARATION_UNAVAILABLE]: 'not_evaluated',
+  [WITHHELD_RUN_IDENTITY_UNCONFIRMED]: 'not_evaluated',
+  [WITHHELD_RUN_IDENTITY_CONFLICT]: 'not_evaluated',
+};
+
+/**
+ * Classify a `withheld_reason`. An unrecognised code is `'unknown'` and is
+ * NEVER folded into either real kind: a consumer must not read a code this
+ * producer did not mint as a licence to name a leader, nor as a positive claim
+ * that the separation was evaluated.
+ *
+ * ⚠ `hasOwnProperty.call`, NOT a bare index read. A bare
+ * `LEADER_CLAIM_REASON_KINDS[reason]` resolves INHERITED keys, so
+ * `'constructor'` / `'toString'` / `'__proto__'` returned a prototype member
+ * where this signature promises a `LeaderClaimReasonKind` — the `?? 'unknown'`
+ * fallback never fired. Fail-closed held (no prototype member equals
+ * `'withheld'`), so the runtime impact was nil and the TYPE claim was the
+ * defect. This is the guard the subsystem already uses for exactly this lookup
+ * at `orchestrator/context/constraint-feasibility.ts:937`; new code diverging
+ * from it is how one subsystem ends up with two answers to one question.
+ */
+export function leaderClaimReasonKind(reason: string | null | undefined): LeaderClaimReasonKind {
+  if (typeof reason !== 'string') return 'unknown';
+  return Object.prototype.hasOwnProperty.call(LEADER_CLAIM_REASON_KINDS, reason)
+    ? LEADER_CLAIM_REASON_KINDS[reason]!
+    : 'unknown';
+}
+
+/**
+ * Did the product actually evaluate the separation on THIS payload?
+ *
+ * ⚠⚠ READS THE PAYLOAD, NOT THE REASON CODE — AND THE FIRST VERSION READ THE
+ * CODE, WHICH MADE THE EXACT FALSE CLAIM THIS MODULE EXISTS TO PREVENT.
+ * It was `leaderClaimReasonKind(reason) === 'withheld'`. The reason code CANNOT
+ * answer this question, because `composeLeaderClaim` chooses `!entitled` FIRST:
+ * in the cell `entitled=false ∧ separationKnown=false` the claim carries
+ * `constraint_verdict_withheld` — a "we looked and declined" code — while
+ * `rawRobustness` is null and nothing was measured. Executed at `d097e596`:
+ * `{rawRobustness: null, separationWasActuallyEvaluated: false,
+ * separationWasEvaluated_says: TRUE}`. Same defect class as the witnessed one,
+ * opposite sign. (The code string itself is correct for its own question and is
+ * unchanged: `!entitled` genuinely is the first failing half.)
+ *
+ * ⭐ THE PAYLOAD IS THE AUTHORITY, and this producer already states it: the
+ * `separation` field is emitted IFF the separation was computed, and its
+ * ABSENCE is the deliberate signal for "not computed" (see `ABSENCE IS
+ * DISTINCT` in `composeLeaderClaim`). That is a fact about what was measured;
+ * the reason code is a fact about which half failed first. Two questions.
+ *
+ * FAIL-CLOSED: a missing, non-string, or unminted `separation` value cannot
+ * support a positive claim that anything was measured.
+ */
+export function separationWasEvaluated(
+  claim: { readonly separation?: unknown } | null | undefined,
+): boolean {
+  if (claim === null || typeof claim !== 'object') return false;
+  const separation = (claim as { readonly separation?: unknown }).separation;
+  return typeof separation === 'string' && SEPARATION_STATEMENTS.has(separation);
+}
+
+/** `separation` statements. Producer-owned; absence means "not computed". */
+export const SEPARATION_SEPARATED = 'separated';
+export const SEPARATION_NEAR_TIE = 'near_tie';
+
+/**
+ * The separation statements this producer can emit, DERIVED from the constants
+ * above rather than retyped, so `separationWasEvaluated` cannot drift from what
+ * `composeLeaderClaim` actually writes (trap 12). Membership is what licenses
+ * the positive claim "a separation was computed on this payload".
+ */
+const SEPARATION_STATEMENTS: ReadonlySet<string> = new Set([
+  SEPARATION_SEPARATED,
+  SEPARATION_NEAR_TIE,
+]);
+
+/**
+ * STEP 4 / ROADMAP 2.1264 — the freshness derivation that is TRUE of a turn
+ * exit which carried no analysis context at all.
+ *
+ * WHY A DERIVATION AND NOT A HAND-WRITTEN `run_state`. Every value in the
+ * emitted verdict — the run state, the five usability predicates, the
+ * contradiction list — then comes out of the ONE implementation that computes
+ * them for every other turn (`assembleCanonicalState`, reached via
+ * `canonicalStateFromFreshness`) rather than out of a second literal that a
+ * future change to the predicate rules would silently leave behind. A
+ * hand-built minimal object here would be the hand-maintained mirror (trap 12)
+ * sitting directly beside the code it mirrors.
+ *
+ * ⚠ WHEN IT IS REACHED — NARROWED BY THE PR #1004 REVIEW, AND THE OLD TEXT WAS
+ * OVER-BROAD (trap 14). It used to say this derivation covers "the clarify-family
+ * exits", full stop. It does not, and must not: those exits now carry the
+ * persisted-graph derivation their own claim-safety read produced
+ * (`TurnExitStamp.exitFreshness`), because on a POST-ANALYSIS clarification turn
+ * this state would DEGRADE a verdict CEE already knew was current — the
+ * self-inflicted degradation the review blocked. This derivation is the LAST
+ * resort: no canonical state, no per-turn derivation, and no exit derivation
+ * either, i.e. genuinely nothing was looked at (today: the `system_event` family,
+ * which passes a `null` payload to the resolver, and non-route callers).
+ *
+ * WHY EACH MEMBER IS TRUE of that residual case, not merely convenient:
+ *   - `freshness: 'unknown'`      the turn classified nothing;
+ *   - `reason: 'current_graph_hash_unavailable'` no graph was in scope, so the
+ *                                current graph hash genuinely could not be
+ *                                computed. `composeRunState` maps exactly this
+ *                                reason to `unknown_degraded` /
+ *                                `no_graph_this_turn`, whose contract text is
+ *                                "no graph was in scope, so there was nothing
+ *                                to classify";
+ *   - `selected_fact_index: null` no fact was selected, which is what drives
+ *                                every usability predicate to false;
+ *   - the three remaining members are null because there is no fact and no
+ *                                graph to take a hash or a timestamp from.
+ *
+ * ⚠ AND WHAT IT IS DELIBERATELY *NOT*: `never_run`. The step-4 brief asked for
+ * `never_run` on these exits. The vendored contract declares that state as "No
+ * analysis has ever been run for this model", licensing a consumer to render
+ * the pre-analysis affordance — a claim about the SCENARIO'S WHOLE HISTORY that
+ * an exit with no fact read cannot support. On a scenario that does hold a
+ * completed analysis it would send the UI to the pre-analysis affordance over a
+ * real result: the contradiction class this contract exists to close,
+ * manufactured by its own fix. `never_run` stays reserved for the case a fact
+ * read actually returned nothing (`freshness: 'none'`), which is the only place
+ * the positive claim is earned.
+ *
+ * ⭐ AND THAT PLACE NOW EXISTS ON THESE EXITS. With `exitFreshness` threaded, a
+ * graph-less exit on a never-analysed scenario DOES have a real fact read behind
+ * it and DOES emit `never_run` — the brief's requested state, arrived at by
+ * earning the claim rather than by asserting it.
+ *
+ * ⚠ HOLD IT LOCALLY — NEVER ASSIGN IT TO `ctx.freshness`.
+ * `current_graph_hash_unavailable` is a member of
+ * `FRESHNESS_ONLY_SYNTHESIS_REASONS`, so a turn whose `ctx.freshness` carries
+ * it ALSO gets a synthesised freshness-only `analysis_ready` block whose status
+ * is `blocked`. Threading this derivation onto the context would therefore add
+ * a second top-level key and a fabricated blocked claim to every clarification
+ * turn. Pinned by a named test with a positive control on the synthesis path.
+ */
+export const NO_ANALYSIS_CONTEXT_DERIVATION: FreshnessDerivation = Object.freeze({
+  freshness: 'unknown',
+  reason: 'current_graph_hash_unavailable',
+  selected_fact_index: null,
+  graph_hash_at_run: null,
+  current_graph_hash: null,
+  computed_at: null,
+});
+
+export interface AnalysisStateComposeInput {
+  /**
+   * Optional adoption seam: a caller that has read a scenario's facts supplies
+   * the selected fact's original result fields. Scenario scope comes from the
+   * request, independently of the fact. Never use the current graph hash here.
+   * Absence preserves callers that cannot yet supply a fact; it proves no C2
+   * binding. This is not a persisted or versioned interpretation record.
+   */
+  readonly runFactBinding?: {
+    readonly scenarioId: string | undefined;
+    readonly selectedResult: unknown;
+  };
+  /**
+   * The turn's canonical analysis verdict. `null` ⇒ this producer has no
+   * verdict to supply and emits NOTHING — contract-licensed absence, which
+   * means "no verdict was supplied" and is distinct from every emitted state.
+   *
+   * ⚠ THE V5 FINALISER NO LONGER PASSES `null` (ROADMAP 2.1264): a turn exit
+   * with no analysis context now composes a verdict from
+   * {@link NO_ANALYSIS_CONTEXT_DERIVATION} instead, so that absence on the WIRE
+   * means only "this CEE build predates the field". The `null` branch stays
+   * because this composer is not V5-only property, and it stays under test
+   * rather than becoming untested dead code.
+   */
+  readonly canonical: CanonicalAnalysisState | null;
+  /** The freshness derivation the canonical verdict was built from. */
+  readonly freshness?: FreshnessDerivation;
+  /** The readiness payload this turn ships, for `blocked_reason` and blockers. */
+  readonly readiness?: {
+    readonly status?: unknown;
+    readonly blocked_reason?: unknown;
+    readonly blockers?: readonly unknown[];
+    /**
+     * The canonical assessor's own itemised issues. Declared here because this
+     * composer READS them as a fallback source of wire blockers — see
+     * {@link issuesAsWireBlockers}. Typed `unknown[]` for the same reason
+     * `blockers` is: the payload reaching this composer comes from several
+     * producers at several schema versions.
+     */
+    readonly readiness_issues?: readonly unknown[];
+  };
+  /**
+   * CEE's constraint entitlement for this turn (`MAY_NAME_LEADING_OPTION`),
+   * threaded from the dispatch path. Fail-closed: anything other than an
+   * explicit `true` is read as "not entitled".
+   */
+  readonly mayNameLeadingOption?: boolean;
+  /** The engine's own robustness signals as they appear on this turn's wire. */
+  readonly rawRobustness: RawRobustnessSignals | null;
+  /**
+   * ROADMAP 2.1271 — THE ONE PRODUCER OF `run_state.kind === 'running'`.
+   *
+   * Present iff THIS turn has itself started a provisional analysis that is now
+   * in flight (today: the fresh-draft auto-run). See L-A above for why that is
+   * the only case a synchronous turn can honestly claim, and
+   * `orchestrator/route-v2.ts`'s draft exit for the single threading site.
+   *
+   * `startedAt` MUST be the instant the run was started, as a UTC ISO-8601
+   * string. It is validated with the same {@link utcIsoOrNull} the
+   * `complete_*` branches use, and for the same reason: the contract declares
+   * `started_at` as `z.string().datetime()` at RUNTIME (the generated `.d.ts`
+   * widens it to `string`, so TypeScript alone will NOT stop a bad value — it
+   * would fail egress validation and destroy the turn). An unusable timestamp
+   * therefore FALLS THROUGH to the ordinary derivation rather than being
+   * replaced by a fabricated `now`: a synthesised start instant would be read
+   * as provenance, and the contract's own text forbids inferring a finish time
+   * from it.
+   */
+  readonly autoRunInFlight?: { readonly startedAt: string };
+}
+
+function readNonEmptyString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
+}
+
+/**
+ * Zod's `.datetime()` (no options) accepts UTC only — a `Z` suffix, no offset.
+ * A `computed_at` that does not satisfy it cannot ride a `complete_*` branch,
+ * so the verdict degrades VISIBLY rather than failing egress validation and
+ * destroying the turn.
+ */
+const UTC_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
+
+function utcIsoOrNull(value: unknown): string | null {
+  const s = readNonEmptyString(value);
+  if (s === null || !UTC_ISO.test(s)) return null;
+  return Number.isNaN(Date.parse(s)) ? null : s;
+}
+
+/**
+ * Map the wire blockers onto the contract's blocker shape.
+ *
+ * DERIVED, NOT MIRRORED: `blockerIssue` is the mapper #983's canonical
+ * readiness assessor already uses to turn a wire blocker into a
+ * code/category/message/repairability issue. Importing it means the wire
+ * contract and the assessor cannot drift into two different answers about what
+ * `missing_connection` means. `issue_id` is dropped — it is the assessor's
+ * internal correlation handle and the contract's blocker is `.strict()`.
+ */
+export function mapWireBlockers(
+  blockers: readonly unknown[] | undefined,
+  status: string,
+): AnalysisBlocker[] {
+  if (!Array.isArray(blockers) || blockers.length === 0) return [];
+  const out: AnalysisBlocker[] = [];
+  blockers.forEach((blocker, index) => {
+    const issue = blockerIssue(blocker, index, status);
+    if (issue === null) return;
+    const { issue_id: _correlationHandle, ...rest } = issue;
+    out.push(rest);
+  });
+  return out;
+}
+
+/**
+ * ⭐⭐ THE SECOND SOURCE — CARRIED, NOT DERIVED. CEE HAD ALREADY NAMED THE GAP.
+ *
+ * THE DEFECT, AND IT IS THE FIRST CLICK A COLLABORATOR MAKES. A fresh guest on
+ * the seeded model presses the board's primary CTA. The run is CORRECTLY
+ * refused, and the product says *"Olumi needs something more from this model
+ * before the next analysis. Ask in the chat and it will explain what is
+ * missing."* That is the `unspecified` rung of the UI's `composeBlockedReason`,
+ * whose FIRST line is `if (blockers.length === 0) return [unspecified]`. The
+ * rung is correct for a verdict carrying nothing nameable. This verdict was not
+ * one.
+ *
+ * MEASURED ON CEE STAGING (60 `cee.analysis_ready.built` events over two
+ * hours): 8 returned `status: needs_user_mapping` with `blockerCount: 0` while
+ * carrying `optionsNeedingMapping: 1` and `userQuestionCount: 2`. Reproduced
+ * from the 19 Aug capture corpus — `assessCanonicalAnalysisReadiness` on
+ * draw-5's `e405d56a` returns, AT PRISTINE:
+ *
+ *   analysisReady.blockers   = []
+ *   readiness_issues         = [ … , { code: 'OPTION_NEEDS_MAPPING',
+ *                                      option_id: 'e405d56a',
+ *                                      message: 'Choose which factor "Status
+ *                                        Quo: Hold current strategy" changes
+ *                                        and by how much.' } ]
+ *
+ * ⭐ SO NOTHING NEEDED DERIVING. `appendSemanticIssues`
+ * (`analysis-ready-helper.ts:941`) already walks every non-ready option that no
+ * blocker covers and authors exactly the sentence the user needs. It writes it
+ * into `readiness_issues`. This composer read ONLY `blockers`, so the one
+ * surface that had the answer was the one surface the UI could not see.
+ *
+ * ⚠⚠ THE FIRST ATTEMPT AT THIS FIX MINTED A SECOND AUTHORITY, AND THE SUITE
+ * CAUGHT IT. Emitting fresh option-scoped blockers inside
+ * `transforms/analysis-ready.ts` made `payload.blockers` non-empty, which fed
+ * `appendSemanticIssues`' own `coveredOptionIds` set and SUPPRESSED its better
+ * copy — `option-status-connected-but-numberless.test.ts` REDed on its pinned
+ * precondition. Two producers of one sentence is this estate's chronic defect;
+ * the fix is to CARRY the existing one, never to author a rival.
+ *
+ * ⚠ FALLBACK, NEVER A MERGE. `blockers` wins whenever it yields anything. These
+ * are the SAME gaps seen from the assessor's side, so appending both would show
+ * the user one gap twice and inflate every downstream count.
+ *
+ * ⚠⚠ NO `obligation` FILTER, AND THAT IS A MEASURED CALL THAT REVERSED THIS
+ * FUNCTION'S FIRST VERSION. It filtered `obligation === 'offered'`, copying the
+ * rule the UI applies in `readinessAuthoredRefusalItems`. Measured on the
+ * 19 Aug corpus, EVERY option-scoped issue is `obligation: 'offered'` —
+ * including the `MISSING_OPTION_VALUE` issues whose blockers already ship on
+ * the wire today (`provenance` is `unattributed` on a draft graph, and an
+ * unattributable structure cannot be demanded of the user). So the filter
+ * (a) left the mute refusal exactly as mute, fixing nothing, and (b) disagreed
+ * with `mapWireBlockers`, which applies NO obligation filter — meaning the
+ * meaning of `readiness.blockers` would have depended on WHICH source happened
+ * to populate it. Two rules for one wire field is the trap-21 shape. The
+ * demand-vs-offer decision belongs to the consumer, which already makes it.
+ *
+ * ⚠ `waived_by_exclusion` IS still dropped, and it is a different question.
+ * It is not about how to RENDER a gap; it states that this gap is not what
+ * stands in the way — the run will proceed by excluding or holding that option.
+ * Naming it as the reason for a refusal would name a non-reason. It is
+ * `undefined` throughout the corpus above, so this branch is covered by a unit
+ * case rather than by the captures, and that is stated rather than implied.
+ *
+ * ⚠ THE FIELD SET IS AN ALLOW-LIST, NOT A SPREAD-AND-DELETE. The contract's
+ * `AnalysisBlocker` is `.strict()` at 0.54.0 AND 0.55.0 (both vendored tarballs
+ * read; the schema is byte-identical across them). A `CanonicalReadinessIssue`
+ * additionally carries `issue_id`, `provenance`, `obligation` and
+ * `waived_by_exclusion` — every one of which would REJECT the whole block at
+ * the consumer. Picking the eight permitted fields by name means a new field
+ * added upstream is dropped here rather than silently breaking the wire.
+ */
+export function issuesAsWireBlockers(issues: readonly unknown[] | undefined): AnalysisBlocker[] {
+  if (!Array.isArray(issues) || issues.length === 0) return [];
+  const out: AnalysisBlocker[] = [];
+  for (const raw of issues) {
+    if (typeof raw !== 'object' || raw === null) continue;
+    const issue = raw as Record<string, unknown>;
+    if (issue.waived_by_exclusion === true) continue;
+    const code = readNonEmptyString(issue.code);
+    const category = readNonEmptyString(issue.category);
+    const message = readNonEmptyString(issue.message);
+    const repairability = readNonEmptyString(issue.repairability);
+    // All four are REQUIRED by the contract. An issue missing any of them
+    // cannot be rendered as a blocker, and inventing a default would put a
+    // fabricated category in front of a user.
+    if (!code || !category || !message || !repairability) continue;
+    const optionId = readNonEmptyString(issue.option_id);
+    const optionLabel = readNonEmptyString(issue.option_label);
+    const factorId = readNonEmptyString(issue.factor_id);
+    const factorLabel = readNonEmptyString(issue.factor_label);
+    out.push({
+      code,
+      category,
+      message,
+      repairability,
+      ...(optionId ? { option_id: optionId } : {}),
+      ...(optionLabel ? { option_label: optionLabel } : {}),
+      ...(factorId ? { factor_id: factorId } : {}),
+      ...(factorLabel ? { factor_label: factorLabel } : {}),
+    });
+  }
+  return out;
+}
+
+/**
+ * The wire blocker list for this turn: the producer's own `blockers` when it
+ * itemised any, and the canonical assessor's owed `readiness_issues` when it
+ * did not.
+ *
+ * ONE FUNCTION, THREE CALL SITES. The three `readiness:` literals below would
+ * otherwise each need the fallback spelled out, and a fourth arm added later
+ * would quietly get the old behaviour — the mute refusal, back again on one
+ * path only.
+ */
+function wireBlockers(
+  readiness: AnalysisStateComposeInput['readiness'],
+  status: string,
+): AnalysisBlocker[] {
+  const stated = mapWireBlockers(readiness?.blockers, status);
+  if (stated.length > 0) return stated;
+  return issuesAsWireBlockers(readiness?.readiness_issues);
+}
+
+function composeRunState(input: AnalysisStateComposeInput): AnalysisRunState {
+  const canonical = input.canonical as CanonicalAnalysisState;
+  const freshness = input.freshness;
+
+  // 1. REFUSAL FIRST. A refusal turn also carries a `blocked` readiness (the
+  //    refusal builder emits one), so testing `blocked` before `refused` would
+  //    collapse the new state into the old one — the exact conflation this
+  //    contract exists to end. Order is load-bearing and is pinned by a test.
+  if (freshness?.refusal_declared === true) {
+    return {
+      kind: 'refused',
+      reason_code:
+        readNonEmptyString(input.readiness?.blocked_reason) ?? REFUSAL_REASON_UNSPECIFIED,
+    };
+  }
+
+  // 2. The MODEL is unanalysable — a statement about the model, not a failure
+  //    of the engine.
+  if (canonical.status === 'blocked') {
+    return {
+      kind: 'blocked',
+      reason_code:
+        readNonEmptyString(input.readiness?.blocked_reason) ?? BLOCKED_REASON_UNSPECIFIED,
+      blockers: wireBlockers(input.readiness, 'blocked'),
+    };
+  }
+
+  // 2b. A RUN THIS TURN STARTED IS IN FLIGHT (ROADMAP 2.1271).
+  //
+  // ⚠ THE POSITION IS LOAD-BEARING IN BOTH DIRECTIONS AND IS PINNED BY TESTS.
+  //
+  // BELOW refusal and blocked. Those two describe THIS TURN'S refusal and THE
+  // MODEL'S unanalysability, and neither can co-occur with a proceeding run
+  // under the sanctioned threading (`willProceed` is false on an inadmissible
+  // model). If either combination ever did become reachable, the refusal /
+  // blocked statement is the truer one — it says why nothing useful can come
+  // back — so the fail-safe direction is to let them win.
+  //
+  // ABOVE `never_run` and above every `complete_*` / `unknown_*` branch, and
+  // for two different reasons:
+  //   · `never_run` claims "no analysis has ever been run … a consumer renders
+  //     the pre-analysis affordance" (contract text). On a draft whose
+  //     provisional run is already in flight that invites the user to start an
+  //     analysis that is running — the exact mild dishonesty this arm removes.
+  //   · a `complete_*` verdict would present an EARLIER run's numbers as this
+  //     turn's outcome. The contract's own `running` text settles it: "Any
+  //     result currently on screen is from an EARLIER run: a consumer may keep
+  //     showing it but must mark it as superseded-pending, and must not present
+  //     it as the outcome of the run now in flight."
+  //
+  // An unusable timestamp falls through rather than fabricating one — see
+  // `autoRunInFlight`'s docstring.
+  const runStartedAt = utcIsoOrNull(input.autoRunInFlight?.startedAt);
+  if (runStartedAt !== null) return { kind: 'running', started_at: runStartedAt };
+
+  // 3. Nothing has ever run.
+  if (canonical.freshness === 'none') return { kind: 'never_run' };
+
+  const computedAt = utcIsoOrNull(canonical.computed_at);
+
+  if (canonical.freshness === 'fresh') {
+    // A complete branch REQUIRES a timestamp. Without a usable one the honest
+    // verdict is that the producer cannot classify the fact, not a fabricated
+    // "now" — a synthesised timestamp would be read as provenance.
+    return computedAt !== null
+      ? { kind: 'complete_current', computed_at: computedAt }
+      : { kind: 'unknown_degraded', cause: 'legacy_fact' };
+  }
+
+  if (canonical.freshness === 'stale') {
+    if (computedAt === null) return { kind: 'unknown_degraded', cause: 'legacy_fact' };
+    // The two causes carry DIFFERENT remedies: re-running after a graph change
+    // recomputes against new structure, whereas an options change invalidates
+    // the comparison itself. Collapsing them loses the only actionable half.
+    return {
+      kind: 'complete_stale',
+      computed_at: computedAt,
+      cause:
+        canonical.freshness_reason === 'analysed_options_diverged'
+          ? 'options_changed'
+          : 'graph_changed',
+    };
+  }
+
+  // 4. `unknown` — the honest absence of a verdict, emitted in preference to
+  //    guessing one. Each cause carries a different honest sentence.
+  switch (canonical.freshness_reason) {
+    case 'legacy_fact_missing_hash':
+      return { kind: 'unknown_degraded', cause: 'legacy_fact' };
+    case 'current_graph_hash_unavailable':
+      return { kind: 'unknown_degraded', cause: 'no_graph_this_turn' };
+    case 'analysis_refused_currency_unverified':
+      return { kind: 'unknown_degraded', cause: 'refusal_unverified' };
+    default:
+      // `derivation_failed` (the fact store could not be read) and
+      // `invariant_failed` (a persisted fact failed its own integrity check)
+      // are both "the store did not give us something we could classify".
+      return { kind: 'unknown_degraded', cause: 'store_unreadable' };
+  }
+}
+
+/**
+ * ⭐ ONE DEFINITION OF "THIS RESULT SEPARATED THE ARMS".
+ *
+ * Exported because a SECOND consumer now needs the same answer: the receiving
+ * decision in `turn-executor.ts` must not tell the coach that options are
+ * separable when they are not. The independent review of `39557a98` found
+ * exactly that — the receiving branch was reading the CONSTRAINT verdict
+ * (entitlement) and treating it as separation.
+ *
+ * A copy in the caller would be CLAUDE.md trap 12 in its purest form: two lists,
+ * one of which gets the next fix. `composeLeaderClaim` below remains the sole
+ * author of the PUBLISHED `analysis_state.leader_claim.separation`; this is the
+ * predicate it uses, named so others can ask the same question rather than
+ * invent a second calculator.
+ *
+ * ⚠ UNKNOWN IS NOT SEPARATED. `null` signals mean no separation statement was
+ *   computed — never "the options do not separate", and never permission.
+ */
+export function separationEstablishedFromRobustness(
+  raw: RawRobustnessSignals | null,
+): boolean {
+  return raw !== null && !raw.near_tie_is_tie;
+}
+
+/**
+ * The two ways the SEPARATION half can withhold, as the producer's own codes.
+ * `null` means separation did not withhold — it says nothing about the other
+ * permissions, which are separate questions with separate answers.
+ */
+export type SeparationWithhold =
+  | typeof WITHHELD_NEAR_TIE
+  | typeof WITHHELD_SEPARATION_UNAVAILABLE;
+
+/**
+ * ⭐ WHICH separation code this run earns — extracted so a CONSUMER can name the
+ * reason the wire publishes instead of deriving a second opinion about it.
+ *
+ * `composeLeaderClaim` below now calls this for its own `withheld_reason`, so
+ * there is ONE discrimination, not a producer's and a consumer's near-copy that
+ * drift apart (trap 12). If this estate ever changes what counts as a near tie,
+ * the sentence the user reads changes with it, in the same commit, or not at
+ * all.
+ *
+ * ⚠ THE ABSENCE/PRESENCE SPLIT IS THE WHOLE POINT AND IT IS NOT COSMETIC.
+ * `raw === null` means WE DID NOT LOOK; `near_tie_is_tie` means we looked and
+ * they were too close. Those warrant different sentences and different next
+ * steps — one asks for a run, the other asks the person what matters to them —
+ * and collapsing them into "separation failed" is exactly the universal
+ * permission flag this seam must not grow.
+ */
+export function separationWithholdFromRobustness(
+  raw: RawRobustnessSignals | null,
+): SeparationWithhold | null {
+  if (separationEstablishedFromRobustness(raw)) return null;
+  return raw !== null ? WITHHELD_NEAR_TIE : WITHHELD_SEPARATION_UNAVAILABLE;
+}
+
+function composeLeaderClaim(input: AnalysisStateComposeInput): AnalysisLeaderClaim {
+  const entitled = input.mayNameLeadingOption === true;
+  const raw: RawRobustnessSignals | null = input.rawRobustness;
+  const separationKnown = raw !== null;
+  const separates = separationEstablishedFromRobustness(raw);
+
+  const claim: {
+    permitted: boolean;
+    withheld_reason?: string;
+    separation?: string;
+  } = { permitted: entitled && separates };
+
+  if (!claim.permitted) {
+    // ONE reason, chosen by which half failed first, so a consumer is never
+    // told "the options do not separate" about a turn whose CEE verdict
+    // withheld the claim for an unrelated reason.
+    // ⚠ `separationWithholdFromRobustness` is the SAME discrimination a consumer
+    // reads, called here so the published code and the explained code cannot
+    // disagree. `!` is sound only because this branch runs when
+    // `permitted === false`, and with `entitled === true` that forces
+    // `separates === false`, which is exactly when the helper returns non-null.
+    claim.withheld_reason = !entitled
+      ? WITHHELD_CONSTRAINT_VERDICT
+      : separationWithholdFromRobustness(raw)!;
+  }
+  // ABSENCE IS DISTINCT: omitted means no separation statement was computed,
+  // never "the options do not separate".
+  if (separationKnown) {
+    claim.separation = raw.near_tie_is_tie ? SEPARATION_NEAR_TIE : SEPARATION_SEPARATED;
+  }
+  return claim;
+}
+
+function composeRobustness(input: AnalysisStateComposeInput): AnalysisRobustness {
+  const level = input.rawRobustness?.level ?? null;
+  // See L-B: `factors_that_flip_leader` is deliberately never emitted.
+  return level !== null ? { aggregate_level: level } : {};
+}
+
+/**
+ * Compose the turn's `analysis_state`, or `undefined` when there is no verdict
+ * to supply.
+ *
+ * Pure and allocation-light: it reads already-computed values and builds one
+ * object. It performs no I/O and calls no model.
+ */
+export function composeAnalysisStateV1(
+  input: AnalysisStateComposeInput,
+): AnalysisStateV1 | undefined {
+  const canonical = input.canonical;
+  if (canonical === null) return undefined;
+
+  const readinessStatus =
+    readNonEmptyString(canonical.status) ?? READINESS_STATUS_UNSUPPLIED;
+
+  const binding = input.runFactBinding === undefined ? undefined : compareAnalysisRunFactIdentity(
+    input.runFactBinding.selectedResult,
+    {
+      scenario_id: input.runFactBinding.scenarioId,
+      graph_hash_at_run: canonical.graph_hash_at_run,
+      computed_at: canonical.computed_at,
+    },
+  );
+  if (binding !== undefined && binding.status !== 'match') {
+    const reason = binding.status === 'mismatch'
+      ? WITHHELD_RUN_IDENTITY_CONFLICT
+      : WITHHELD_RUN_IDENTITY_UNCONFIRMED;
+    // The existing schema uses store_unreadable for an uninterpretable fact
+    // as well as a failed store read (composeRunState's invariant_failed arm).
+    // Do not emit complete_current or never_run from a failed identity join.
+    // Original facts and freshness inputs are read-only; this is presentation.
+    const lifecycle = composeRunState(input);
+    const runState = lifecycle.kind === 'refused' || lifecycle.kind === 'blocked' || lifecycle.kind === 'running'
+      ? lifecycle
+      : { kind: 'unknown_degraded' as const, cause: 'store_unreadable' as const };
+    return {
+      run_state: runState,
+      readiness: { status: readinessStatus, blockers: wireBlockers(input.readiness, readinessStatus) },
+      leader_claim: { permitted: false, withheld_reason: reason },
+      robustness: {},
+      usable_for_prose: false,
+      usable_for_chips: false,
+      usable_for_followup: false,
+      requires_rerun: false,
+      blocked_unusable: lifecycle.kind === 'blocked' && canonical.blockedUnusable,
+      contradictions: [...canonical.contradictions, `${reason}:${binding.reason}`],
+    };
+  }
+
+  return {
+    run_state: composeRunState(input),
+    readiness: {
+      status: readinessStatus,
+      // An EMPTY list here is a positive claim: readiness was assessed and
+      // nothing is blocking. It is distinct from `analysis_state` being absent.
+      blockers: wireBlockers(input.readiness, readinessStatus),
+    },
+    leader_claim: composeLeaderClaim(input),
+    robustness: composeRobustness(input),
+    // The five predicates are COPIED from the canonical verdict, never
+    // recomputed: a consumer that re-derives them re-opens the divergence this
+    // contract closes, and so would a second derivation here.
+    usable_for_prose: canonical.usableForProse,
+    usable_for_chips: canonical.usableForChips,
+    usable_for_followup: canonical.usableForFollowupContext,
+    requires_rerun: canonical.requiresRerun,
+    blocked_unusable: canonical.blockedUnusable,
+    // The producer's OWN self-report. Empty means it found none — never a
+    // consistency guarantee (contract limit L3, left disclosed).
+    contradictions: [...canonical.contradictions],
+  };
+}
+
+/**
+ * The analysis block follows the composed binding verdict. Conflicting facts
+ * cannot supply a result for this run. Unconfirmed legacy binding retains its
+ * available figures but cannot supply a leader designation. The fact remains
+ * intact in both cases. This does not police other response prose or coaching.
+ */
+export function projectAnalysisBlocksForRunBinding(
+  blocks: OlumiResponse['blocks'],
+  state: AnalysisStateV1,
+): OlumiResponse['blocks'] {
+  const reason = state.leader_claim.withheld_reason;
+  if (reason === WITHHELD_RUN_IDENTITY_CONFLICT) {
+    return blocks.filter((block) => block.type !== 'analysis_result');
+  }
+  if (reason !== WITHHELD_RUN_IDENTITY_UNCONFIRMED) return blocks;
+  return blocks.map((block) => {
+    if (block.type !== 'analysis_result') return block;
+    return {
+      ...block,
+      leading_option_id: null,
+      summary: projectAnalysisSummaryForWithheldClaim(block.summary),
+      ...(block.enrichment === undefined ? {} : {
+        enrichment: projectTransportEnrichmentForWithheldClaim(block.enrichment),
+      }),
+    };
+  });
+}
+
+/**
+ * Read the engine's robustness signals off the response body as it will ship.
+ *
+ * Read from the WIRE rather than from the fact so the verdict describes what
+ * the consumer actually receives: when the withheld-claim projection has
+ * redacted `near_tie`, the separation half is genuinely unknown to the
+ * consumer, and `leader_claim` must say so rather than assert a separation the
+ * payload no longer carries.
+ */
+export function readRawRobustnessFromResponseBody(
+  response: unknown,
+): RawRobustnessSignals | null {
+  if (response == null || typeof response !== 'object') return null;
+  const blocks = (response as { blocks?: unknown }).blocks;
+  if (!Array.isArray(blocks)) return null;
+  for (const block of blocks) {
+    if (block == null || typeof block !== 'object') continue;
+    const enrichment = (block as { enrichment?: unknown }).enrichment;
+    if (enrichment == null || typeof enrichment !== 'object') continue;
+    const signals = readRawRobustnessSignals(
+      (enrichment as Record<string, unknown>)['robustness'],
+    );
+    if (signals !== null) return signals;
+  }
+  return null;
+}

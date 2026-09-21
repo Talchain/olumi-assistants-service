@@ -10,7 +10,9 @@ import { cleanBaseUrl } from "../helpers/env-setup.js";
 // Mock dotenv/config to prevent loading .env file during tests
 vi.mock("dotenv/config", () => ({}));
 
-describe("Legacy SSE Flag", () => {
+// Skipped: v0 /assist/draft-graph route archived — returns 410 Gone. Tests should target /assist/v1/draft-graph
+// TODO: ISSUE-9011 — Legacy SSE flag suite parked
+describe.skip("Legacy SSE Flag", () => {
   const originalEnv = { ...process.env };
 
   afterEach(() => {

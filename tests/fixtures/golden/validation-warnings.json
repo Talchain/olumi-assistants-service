@@ -1,0 +1,77 @@
+{
+  "name": "validation-warnings",
+  "description": "Validation passes with warnings. Tests Tier 2 semantic assertions for warning detection.",
+  "brief": "Should we expand into the European market or focus on North America?",
+  "endpoint": "draft_graph",
+  "recorded_response": {
+    "graph": {
+      "version": "1",
+      "default_seed": 42,
+      "nodes": [
+        { "id": "decision_1", "kind": "decision", "label": "Should we expand into Europe or focus on North America?" },
+        { "id": "opt_europe", "kind": "option", "label": "Expand into European market" },
+        { "id": "opt_north_america", "kind": "option", "label": "Focus on North America" },
+        { "id": "fac_market_size", "kind": "factor", "label": "Market Size", "category": "controllable" },
+        { "id": "fac_regulatory", "kind": "factor", "label": "Regulatory Complexity", "category": "observable" },
+        { "id": "fac_competition", "kind": "factor", "label": "Competitive Landscape", "category": "external" },
+        { "id": "outcome_revenue", "kind": "outcome", "label": "Revenue Growth" },
+        { "id": "risk_currency", "kind": "risk", "label": "Currency exchange risk" },
+        { "id": "goal_1", "kind": "goal", "label": "Maximize market share and revenue" }
+      ],
+      "edges": [
+        { "from": "decision_1", "to": "opt_europe", "strength_mean": 1, "strength_std": 0.01, "belief_exists": 1, "effect_direction": "positive" },
+        { "from": "decision_1", "to": "opt_north_america", "strength_mean": 1, "strength_std": 0.01, "belief_exists": 1, "effect_direction": "positive" },
+        { "from": "opt_europe", "to": "fac_market_size", "strength_mean": 1, "strength_std": 0.08, "belief_exists": 1, "effect_direction": "positive" },
+        { "from": "fac_market_size", "to": "outcome_revenue", "strength_mean": 1.5, "strength_std": 0.2, "belief_exists": 0.85, "effect_direction": "positive" },
+        { "from": "fac_regulatory", "to": "outcome_revenue", "strength_mean": -0.4, "strength_std": 0.15, "belief_exists": 0.45, "effect_direction": "negative" },
+        { "from": "fac_competition", "to": "outcome_revenue", "strength_mean": -0.3, "strength_std": 0.18, "belief_exists": 0.7, "effect_direction": "negative" },
+        { "from": "outcome_revenue", "to": "goal_1", "strength_mean": 0.9, "strength_std": 0.1, "belief_exists": 1, "effect_direction": "positive" },
+        { "from": "risk_currency", "to": "goal_1", "strength_mean": 0.3, "strength_std": 0.25, "belief_exists": 0.6, "effect_direction": "positive" }
+      ],
+      "meta": { "roots": [], "leaves": [], "suggested_positions": {}, "source": "assistant" }
+    },
+    "validation": {
+      "passed": true,
+      "errors": [],
+      "warnings": [
+        {
+          "code": "STRENGTH_OUT_OF_RANGE",
+          "severity": "warning",
+          "message": "Edge strength_mean (1.5) exceeds valid range [-1, 1]",
+          "path": "edges[3]",
+          "context": { "from": "fac_market_size", "to": "outcome_revenue", "strength_mean": 1.5 }
+        },
+        {
+          "code": "LOW_EDGE_CONFIDENCE",
+          "severity": "warning",
+          "message": "Edge belief_exists (0.45) is below recommended threshold (0.5)",
+          "path": "edges[4]",
+          "context": { "from": "fac_regulatory", "to": "outcome_revenue", "belief_exists": 0.45 }
+        },
+        {
+          "code": "STRUCTURAL_EDGE_NOT_CANONICAL",
+          "severity": "warning",
+          "message": "Structural edge has non-canonical std (0.08 != 0.01)",
+          "path": "edges[2]",
+          "context": { "from": "opt_europe", "to": "fac_market_size", "strength_std": 0.08 }
+        },
+        {
+          "code": "RISK_POSITIVE_POLARITY",
+          "severity": "warning",
+          "message": "Risk node has positive effect_direction; risks typically have negative impact",
+          "path": "edges[7]",
+          "context": { "from": "risk_currency", "to": "goal_1", "effect_direction": "positive" }
+        }
+      ]
+    }
+  },
+  "assertions": {
+    "has_decision_node": true,
+    "has_goal_node": true,
+    "option_count_gte": 2,
+    "validation_passes": true,
+    "validation_error_count": 0,
+    "validation_warning_count_gte": 3,
+    "validation_has_warning_codes": ["STRENGTH_OUT_OF_RANGE", "LOW_EDGE_CONFIDENCE", "STRUCTURAL_EDGE_NOT_CANONICAL"]
+  }
+}

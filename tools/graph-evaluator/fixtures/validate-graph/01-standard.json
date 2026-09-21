@@ -1,0 +1,58 @@
+{
+  "id": "vg-01-standard",
+  "name": "Standard mid-complexity graph with numeric anchors",
+  "description": "8 causal edges, 2 bridge edges, 1 external factor. Brief provides explicit numeric anchors. Expect: all edges estimated, budget met, mix of brief_explicit and domain_prior bases.",
+  "brief": "We're deciding whether to expand into the European market. Our current North American revenue is $12M ARR. Market research estimates a 15-25% increase in total addressable market from EU expansion. Hiring costs will increase by $1.2M annually for a 10-person EU team. Customer acquisition cost in EU is estimated at 1.8x our current NA CAC of $850. We expect EU churn to be 20% higher than our current 5% monthly rate due to less brand recognition. Currency exposure adds risk — EUR/USD fluctuations of ±8% are typical annually.",
+  "graph": {
+    "nodes": [
+      {"id": "dec_expansion", "kind": "decision", "label": "EU Market Expansion"},
+      {"id": "opt_expand", "kind": "option", "label": "Expand to EU", "data": {"interventions": {"fac_hiring": 0.9, "fac_marketing": 0.7}}},
+      {"id": "opt_stay", "kind": "option", "label": "Stay NA Only", "data": {"interventions": {"fac_hiring": 0.2, "fac_marketing": 0.3}}},
+      {"id": "fac_hiring", "kind": "factor", "label": "EU Hiring Investment", "category": "controllable", "data": {"value": 0.0, "unit": "USD", "factor_type": "cost"}},
+      {"id": "fac_marketing", "kind": "factor", "label": "EU Marketing Spend", "category": "controllable", "data": {"value": 0.0, "unit": "USD", "factor_type": "cost"}},
+      {"id": "fac_brand", "kind": "factor", "label": "EU Brand Recognition", "category": "observable", "data": {"value": 0.2, "factor_type": "awareness"}},
+      {"id": "fac_fx", "kind": "factor", "label": "EUR/USD Exchange Rate", "category": "external", "prior": {"distribution": "normal", "range_min": 0.92, "range_max": 1.08}},
+      {"id": "out_tam", "kind": "outcome", "label": "Total Addressable Market"},
+      {"id": "out_cac", "kind": "outcome", "label": "Customer Acquisition Cost"},
+      {"id": "out_churn", "kind": "outcome", "label": "EU Customer Churn Rate"},
+      {"id": "risk_fx_loss", "kind": "risk", "label": "FX Translation Loss"},
+      {"id": "goal_arr", "kind": "goal", "label": "Maximise Net ARR Growth"}
+    ],
+    "edges": [
+      {"from": "dec_expansion", "to": "opt_expand", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "dec_expansion", "to": "opt_stay", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_expand", "to": "fac_hiring", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_expand", "to": "fac_marketing", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_stay", "to": "fac_hiring", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_stay", "to": "fac_marketing", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "fac_hiring", "to": "out_tam", "strength": {"mean": 0.35, "std": 0.12}, "exists_probability": 0.85, "effect_direction": "positive"},
+      {"from": "fac_marketing", "to": "out_tam", "strength": {"mean": 0.45, "std": 0.15}, "exists_probability": 0.90, "effect_direction": "positive"},
+      {"from": "fac_marketing", "to": "out_cac", "strength": {"mean": -0.50, "std": 0.18}, "exists_probability": 0.88, "effect_direction": "negative"},
+      {"from": "fac_brand", "to": "out_cac", "strength": {"mean": -0.30, "std": 0.15}, "exists_probability": 0.75, "effect_direction": "negative"},
+      {"from": "fac_brand", "to": "out_churn", "strength": {"mean": -0.40, "std": 0.12}, "exists_probability": 0.82, "effect_direction": "negative"},
+      {"from": "fac_hiring", "to": "out_churn", "strength": {"mean": -0.25, "std": 0.10}, "exists_probability": 0.70, "effect_direction": "negative"},
+      {"from": "fac_marketing", "to": "fac_brand", "strength": {"mean": 0.55, "std": 0.15}, "exists_probability": 0.88, "effect_direction": "positive"},
+      {"from": "fac_fx", "to": "risk_fx_loss", "strength": {"mean": 0.70, "std": 0.20}, "exists_probability": 0.92, "effect_direction": "positive"},
+      {"from": "out_tam", "to": "goal_arr", "strength": {"mean": 0.50, "std": 0.12}, "exists_probability": 0.95, "effect_direction": "positive"},
+      {"from": "out_cac", "to": "goal_arr", "strength": {"mean": -0.25, "std": 0.10}, "exists_probability": 0.90, "effect_direction": "negative"},
+      {"from": "out_churn", "to": "goal_arr", "strength": {"mean": -0.20, "std": 0.08}, "exists_probability": 0.88, "effect_direction": "negative"},
+      {"from": "risk_fx_loss", "to": "goal_arr", "strength": {"mean": -0.15, "std": 0.08}, "exists_probability": 0.80, "effect_direction": "negative"}
+    ]
+  },
+  "expected": {
+    "in_scope_edges": [
+      {"from": "fac_hiring", "to": "out_tam"},
+      {"from": "fac_marketing", "to": "out_tam"},
+      {"from": "fac_marketing", "to": "out_cac"},
+      {"from": "fac_brand", "to": "out_cac"},
+      {"from": "fac_brand", "to": "out_churn"},
+      {"from": "fac_hiring", "to": "out_churn"},
+      {"from": "fac_marketing", "to": "fac_brand"},
+      {"from": "fac_fx", "to": "risk_fx_loss"},
+      {"from": "out_tam", "to": "goal_arr"},
+      {"from": "out_cac", "to": "goal_arr"},
+      {"from": "out_churn", "to": "goal_arr"},
+      {"from": "risk_fx_loss", "to": "goal_arr"}
+    ]
+  }
+}

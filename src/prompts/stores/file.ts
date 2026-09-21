@@ -14,7 +14,9 @@ import type {
   GetCompiledOptions,
   ActivePromptResult,
   FileStoreConfig,
+  PromptMutationPrecondition,
 } from './interface.js';
+import { PromptMutationConflictError } from './interface.js';
 import type {
   PromptDefinition,
   CreatePromptRequest,
@@ -278,6 +280,8 @@ export class FilePromptStore implements IPromptStore {
         },
       ],
       activeVersion: 1,
+      designVersion: request.designVersion,
+      modelConfig: request.modelConfig,
       tags: request.tags,
       createdAt: now,
       updatedAt: now,
@@ -320,12 +324,22 @@ export class FilePromptStore implements IPromptStore {
     return prompts.sort((a, b) => a.id.localeCompare(b.id));
   }
 
-  async update(id: string, request: UpdatePromptRequest): Promise<PromptDefinition> {
+  async update(
+    id: string,
+    request: UpdatePromptRequest,
+    precondition?: PromptMutationPrecondition,
+  ): Promise<PromptDefinition> {
     const data = this.ensureInitialized();
     const prompt = data.prompts[id];
 
     if (!prompt) {
       throw new Error(`Prompt '${id}' not found`);
+    }
+    if (
+      precondition &&
+      prompt.updatedAt !== precondition.expectedUpdatedAt
+    ) {
+      throw new PromptMutationConflictError(id);
     }
 
     // Validate version numbers if provided
@@ -365,6 +379,8 @@ export class FilePromptStore implements IPromptStore {
       status: request.status ?? prompt.status,
       activeVersion: request.activeVersion ?? prompt.activeVersion,
       stagingVersion: request.stagingVersion === null ? undefined : (request.stagingVersion ?? prompt.stagingVersion),
+      designVersion: request.designVersion ?? prompt.designVersion,
+      modelConfig: request.modelConfig !== undefined ? request.modelConfig : prompt.modelConfig,
       tags: request.tags ?? prompt.tags,
       updatedAt: new Date().toISOString(),
     };
@@ -420,12 +436,22 @@ export class FilePromptStore implements IPromptStore {
     return validated;
   }
 
-  async rollback(id: string, request: RollbackRequest): Promise<PromptDefinition> {
+  async rollback(
+    id: string,
+    request: RollbackRequest,
+    precondition?: PromptMutationPrecondition,
+  ): Promise<PromptDefinition> {
     const data = this.ensureInitialized();
     const prompt = data.prompts[id];
 
     if (!prompt) {
       throw new Error(`Prompt '${id}' not found`);
+    }
+    if (
+      precondition &&
+      prompt.updatedAt !== precondition.expectedUpdatedAt
+    ) {
+      throw new PromptMutationConflictError(id);
     }
 
     const targetVersion = prompt.versions.find(v => v.version === request.targetVersion);
@@ -560,12 +586,22 @@ export class FilePromptStore implements IPromptStore {
     return validated;
   }
 
-  async delete(id: string, hard = false): Promise<void> {
+  async delete(
+    id: string,
+    hard = false,
+    precondition?: PromptMutationPrecondition,
+  ): Promise<void> {
     const data = this.ensureInitialized();
     const prompt = data.prompts[id];
 
     if (!prompt) {
       throw new Error(`Prompt '${id}' not found`);
+    }
+    if (
+      precondition &&
+      prompt.updatedAt !== precondition.expectedUpdatedAt
+    ) {
+      throw new PromptMutationConflictError(id);
     }
 
     if (hard) {
@@ -591,9 +627,10 @@ export class FilePromptStore implements IPromptStore {
   ): Promise<CompiledPrompt | null> {
     const data = this.ensureInitialized();
 
-    // Find production prompt for this task
+    // Find prompt for this task (exclude archived, allow draft/staging/production)
+    // Version selection is controlled by stagingVersion vs activeVersion, not prompt status
     const prompt = Object.values(data.prompts).find(
-      p => p.taskId === taskId && p.status === 'production'
+      p => p.taskId === taskId && p.status !== 'archived'
     );
 
     if (!prompt) {
@@ -624,6 +661,7 @@ export class FilePromptStore implements IPromptStore {
       content,
       compiledAt: new Date().toISOString(),
       variables,
+      modelConfig: prompt.modelConfig,
     };
 
     emit(TelemetryEvents.PromptCompiled, {
@@ -638,8 +676,9 @@ export class FilePromptStore implements IPromptStore {
   async getActivePromptForTask(taskId: string): Promise<ActivePromptResult | null> {
     const data = this.ensureInitialized();
 
+    // Find prompt for this task (exclude archived, allow draft/staging/production)
     const prompt = Object.values(data.prompts).find(
-      p => p.taskId === taskId && p.status === 'production'
+      p => p.taskId === taskId && p.status !== 'archived'
     );
 
     if (!prompt) {

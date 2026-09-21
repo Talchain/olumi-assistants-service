@@ -88,10 +88,18 @@ Client --> Assistants Service --> CEE --> LLM (Claude)
 ## Testing
 
 ```bash
-pnpm test              # All tests
+pnpm test              # All tests (golden-path e2e self-skip without env vars)
 pnpm test:watch        # Watch mode
 pnpm test:live         # Live LLM tests (requires API key)
 pnpm test --coverage   # With coverage
+
+# Golden-path e2e tests (require live staging APIs)
+RUN_E2E_GOLDEN=1 CEE_BASE_URL=https://cee-staging.onrender.com \
+  CEE_API_KEY=<key> pnpm test tests/integration/golden-path-e2e.test.ts
+
+# Golden-path v2 e2e tests (12-step deterministic orchestrator journey)
+RUN_E2E_GOLDEN_V2=1 CEE_BASE_URL=https://cee-staging.onrender.com \
+  CEE_API_KEY=<key> pnpm test tests/integration/golden-path-v2-e2e.test.ts
 ```
 
 **Status:** 544/544 passing

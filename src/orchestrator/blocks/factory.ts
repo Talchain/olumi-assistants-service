@@ -1,0 +1,371 @@
+/**
+ * Block Factory
+ *
+ * Creates ConversationBlock instances with deterministic or ephemeral IDs.
+ *
+ * Deterministic IDs (content-addressed, idempotent):
+ * - FactBlock: fact_type + facts + lineage.response_hash + lineage.seed
+ * - ReviewCardBlock: canonicalised card payload (sorted keys)
+ * - BriefBlock: canonicalised brief payload (sorted keys)
+ * - GraphPatchBlock: patch_type + operations + applied_graph_hash
+ *   (sort keys within each op, but preserve array order — operation sequence is meaningful)
+ *   Excludes: status, summary, rejection.message, timestamps
+ *
+ * Ephemeral IDs (random, non-deterministic):
+ * - FramingBlock: randomUUID
+ * - CommentaryBlock: randomUUID
+ *
+ * Format: blk_<type>_<16-char-hex>
+ */
+
+import { createHash, randomUUID } from "node:crypto";
+import { stableStringify } from "../context/stable-stringify.js";
+import type {
+  TypedConversationBlock,
+  BlockProvenance,
+  BlockAction,
+  GraphPatchBlockData,
+  FactBlockData,
+  CommentaryBlockData,
+  SupportingRef,
+  BriefBlockData,
+  ReviewCardBlockData,
+  FramingBlockData,
+  EvidenceBlockData,
+  ArtefactBlockData,
+  DecisionStage,
+} from "../types.js";
+import type {
+  ComparisonBlockData,
+  PremortemBlockData,
+  FlipAnalysisBlockData,
+  ProposalBlockData,
+  ExerciseBlockData,
+} from "../deterministic/types.js";
+
+// ============================================================================
+// ID Generation
+// ============================================================================
+
+function deterministicId(type: string, ...parts: string[]): string {
+  const hash = createHash('sha256')
+    .update(parts.join('|'))
+    .digest('hex')
+    .substring(0, 16);
+  return `blk_${type}_${hash}`;
+}
+
+function ephemeralId(type: string): string {
+  const hex = randomUUID().replace(/-/g, '').substring(0, 16);
+  return `blk_${type}_${hex}`;
+}
+
+// ============================================================================
+// Provenance Helper
+// ============================================================================
+
+function makeProvenance(trigger: string, turnId: string): BlockProvenance {
+  return {
+    trigger,
+    turn_id: turnId,
+    timestamp: new Date().toISOString(),
+  };
+}
+
+// ============================================================================
+// Block Factories
+// ============================================================================
+
+/**
+ * Create a GraphPatchBlock.
+ *
+ * Deterministic ID from: patch_type + canonicalised operations + applied_graph_hash.
+ * Sort keys within each operation, but preserve array order.
+ * Excludes: status, summary, rejection.message, timestamps.
+ *
+ * `originatingTrigger` identifies the tool or system event that produced the
+ * patch (e.g. "tool:add_option", "tool:set_factor_value",
+ * "system:patch_accepted"). Defaults to "tool:draft_graph" for callers that
+ * haven't been migrated yet; every new call site should pass an explicit
+ * trigger so audit trails and telemetry can attribute patches accurately.
+ */
+export function createGraphPatchBlock(
+  data: GraphPatchBlockData,
+  turnId: string,
+  relatedElements?: { node_ids?: string[]; edge_ids?: string[] },
+  actions?: BlockAction[],
+  originatingTrigger: string = 'tool:draft_graph',
+): TypedConversationBlock {
+  // Hash input: patch_type + operations (sorted keys, preserved order) + graph hash
+  const opsForHash = data.operations.map((op) => ({
+    op: op.op,
+    path: op.path,
+    value: op.value,
+    old_value: op.old_value,
+  }));
+
+  const blockId = deterministicId(
+    'graph_patch',
+    data.patch_type,
+    stableStringify(opsForHash),
+    data.applied_graph_hash ?? '',
+  );
+
+  return {
+    block_id: blockId,
+    block_type: 'graph_patch',
+    data,
+    provenance: makeProvenance(originatingTrigger, turnId),
+    ...(relatedElements && { related_elements: relatedElements }),
+    ...(actions && { actions }),
+  };
+}
+
+/**
+ * Create a FactBlock.
+ *
+ * Deterministic ID from: fact_type + facts + response_hash + seed.
+ */
+export function createFactBlock(
+  data: FactBlockData,
+  turnId: string,
+  responseHash?: string,
+  seed?: number,
+  relatedElements?: { node_ids?: string[]; edge_ids?: string[] },
+): TypedConversationBlock {
+  const blockId = deterministicId(
+    'fact',
+    data.fact_type,
+    stableStringify(data.facts),
+    responseHash ?? '',
+    seed !== undefined ? String(seed) : '',
+  );
+
+  return {
+    block_id: blockId,
+    block_type: 'fact',
+    data,
+    provenance: makeProvenance('tool:run_analysis', turnId),
+    ...(relatedElements && { related_elements: relatedElements }),
+  };
+}
+
+/**
+ * Create a ReviewCardBlock.
+ *
+ * Deterministic ID from: canonicalised card payload.
+ */
+export function createReviewCardBlock(
+  card: unknown,
+  turnId: string,
+  actions?: BlockAction[],
+): TypedConversationBlock {
+  const blockId = deterministicId(
+    'review_card',
+    stableStringify(card),
+  );
+
+  const data: ReviewCardBlockData = { card };
+
+  return {
+    block_id: blockId,
+    block_type: 'review_card',
+    data,
+    provenance: makeProvenance('tool:run_analysis', turnId),
+    ...(actions && { actions }),
+  };
+}
+
+/**
+ * Create a BriefBlock.
+ *
+ * Deterministic ID from: canonicalised brief payload.
+ */
+export function createBriefBlock(
+  brief: unknown,
+  turnId: string,
+  actions?: BlockAction[],
+): TypedConversationBlock {
+  const blockId = deterministicId(
+    'brief',
+    stableStringify(brief),
+  );
+
+  const data: BriefBlockData = { brief };
+
+  return {
+    block_id: blockId,
+    block_type: 'brief',
+    data,
+    provenance: makeProvenance('tool:generate_brief', turnId),
+    ...(actions && { actions }),
+  };
+}
+
+/**
+ * Create a CommentaryBlock.
+ *
+ * Ephemeral ID (commentary is context-dependent, not deterministic).
+ */
+export function createCommentaryBlock(
+  narrative: string,
+  turnId: string,
+  trigger: string,
+  supportingRefs: SupportingRef[] = [],
+  relatedElements?: { node_ids?: string[]; edge_ids?: string[] },
+): TypedConversationBlock {
+  const blockId = ephemeralId('commentary');
+
+  const data: CommentaryBlockData = { narrative, supporting_refs: supportingRefs };
+
+  return {
+    block_id: blockId,
+    block_type: 'commentary',
+    data,
+    provenance: makeProvenance(trigger, turnId),
+    ...(relatedElements && { related_elements: relatedElements }),
+  };
+}
+
+/**
+ * Create a FramingBlock.
+ *
+ * Ephemeral ID (framing evolves with conversation).
+ */
+export function createFramingBlock(
+  stage: DecisionStage,
+  turnId: string,
+  goal?: string,
+  constraints?: unknown[],
+): TypedConversationBlock {
+  const blockId = ephemeralId('framing');
+
+  const data: FramingBlockData = { stage };
+  if (goal !== undefined) {
+    data.goal = goal;
+  }
+  if (constraints !== undefined) {
+    data.constraints = constraints;
+  }
+
+  return {
+    block_id: blockId,
+    block_type: 'framing',
+    data,
+    provenance: makeProvenance('system', turnId),
+  };
+}
+
+/**
+ * Create an EvidenceBlock.
+ *
+ * Ephemeral ID (research results are context-dependent — claims extraction varies
+ * even for the same query due to web content changes).
+ *
+ * ⚠ ZERO CALLERS — exported but dead since 2026-07-22. Its only caller was the `research_topic`
+ * tool, deleted in `f957d6d8`. Verified: `git grep -n "createEvidenceBlock" -- .` over all 3,336
+ * tracked files → 1 hit, this definition (positive control: `createGraphPatchBlock` → 7 files).
+ * Note the provenance below still reads `tool:research_topic` — a tool that no longer exists.
+ *
+ * RETAINED DELIBERATELY as the constructor half of the spec for the research rebuild; see
+ * `docs-designs/RESEARCH-ARTEFACT-DESIGN-2026-07-25.md` (programme docs, sibling dir — untracked) §2.1. This comment exists because an
+ * exported-but-uncalled function reads as live to a grep — which is precisely how `f957d6d8`
+ * swept away working code. If you are here to delete it, that is a defensible call; make it
+ * knowing it is a spec, and take `EvidenceBlockData` and the design doc with it.
+ */
+export function createEvidenceBlock(
+  data: EvidenceBlockData,
+  turnId: string,
+): TypedConversationBlock {
+  const blockId = ephemeralId('evidence');
+
+  return {
+    block_id: blockId,
+    block_type: 'evidence',
+    data,
+    provenance: makeProvenance('tool:research_topic', turnId),
+  };
+}
+
+/**
+ * Create an ArtefactBlock.
+ *
+ * Ephemeral ID (artefact content is AI-generated per turn).
+ */
+export function createArtefactBlock(
+  data: ArtefactBlockData,
+  turnId: string,
+): TypedConversationBlock {
+  const blockId = ephemeralId('artefact');
+
+  return {
+    block_id: blockId,
+    block_type: 'artefact',
+    data,
+    provenance: makeProvenance('llm:xml', turnId),
+  };
+}
+
+// ============================================================================
+// Deterministic Pipeline Blocks
+// ============================================================================
+
+export function createComparisonBlock(
+  data: ComparisonBlockData,
+  turnId: string,
+): TypedConversationBlock {
+  return {
+    block_id: ephemeralId('comparison'),
+    block_type: 'comparison',
+    data,
+    provenance: makeProvenance('deterministic:compare_options', turnId),
+  };
+}
+
+export function createPremortemBlock(
+  data: PremortemBlockData,
+  turnId: string,
+): TypedConversationBlock {
+  return {
+    block_id: ephemeralId('premortem'),
+    block_type: 'premortem',
+    data,
+    provenance: makeProvenance('deterministic:run_premortem', turnId),
+  };
+}
+
+export function createFlipAnalysisBlock(
+  data: FlipAnalysisBlockData,
+  turnId: string,
+): TypedConversationBlock {
+  return {
+    block_id: ephemeralId('flip_analysis'),
+    block_type: 'flip_analysis',
+    data,
+    provenance: makeProvenance('deterministic:what_would_flip', turnId),
+  };
+}
+
+export function createProposalBlock(
+  data: ProposalBlockData,
+  turnId: string,
+): TypedConversationBlock {
+  return {
+    block_id: ephemeralId('proposal'),
+    block_type: 'proposal',
+    data,
+    provenance: makeProvenance('deterministic:confirmation', turnId),
+  };
+}
+
+export function createExerciseBlock(
+  data: ExerciseBlockData,
+  turnId: string,
+): TypedConversationBlock {
+  return {
+    block_id: ephemeralId('exercise'),
+    block_type: 'exercise',
+    data,
+    provenance: makeProvenance('deterministic:exercise', turnId),
+  };
+}

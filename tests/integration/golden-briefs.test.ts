@@ -149,8 +149,6 @@ vi.mock("../../src/adapters/llm/anthropic.js", () => {
     });
   });
 
-  const repairGraphWithAnthropic = vi.fn();
-
   // Create mock AnthropicAdapter class
   class AnthropicAdapter {
     readonly name = 'anthropic' as const;
@@ -170,15 +168,10 @@ vi.mock("../../src/adapters/llm/anthropic.js", () => {
         usage: mockUsage,
       };
     }
-
-    async repairGraph(args: any, _opts: any) {
-      return repairGraphWithAnthropic(args);
-    }
   }
 
   return {
     draftGraphWithAnthropic,
-    repairGraphWithAnthropic,
     AnthropicAdapter,
   };
 });
@@ -187,7 +180,9 @@ vi.mock("../../src/services/validateClient.js", () => ({
   validateGraph: vi.fn().mockResolvedValue({ ok: true, violations: [], normalized: null }),
 }));
 
-describe("Golden Brief Archetypes", () => {
+// Skipped: v0 /assist/draft-graph route archived — returns 410 Gone. Tests should target /assist/v1/draft-graph
+// TODO: ISSUE-9016 — Golden brief archetypes (separate from existing GOLDEN-001)
+describe.skip("Golden Brief Archetypes", () => {
   beforeAll(async () => {
     // Load all golden brief fixtures into map for mock lookups
     const fixtures = await Promise.all([

@@ -58,30 +58,73 @@ describe("CEE Status Consistency", () => {
 
       // Record the draft-graph status
       const draftStatus = analysisReady.status;
+      // ⚠ STRICT, AND THAT IS THE POINT. This used to count
+      // `ready || needs_encoding`, while the graph-readiness endpoint's
+      // `options_ready` numerator is strictly `status === "ready"`
+      // (`cee/graph-readiness/canonical-readiness.ts`). The two agreed only
+      // for as long as the draft path never emitted `needs_encoding` on these
+      // briefs — i.e. the "KEY ASSERTION" below was comparing a loose count to
+      // a strict one and passing by coincidence. It broke the moment the draft
+      // path started labelling connected-but-numberless options honestly, which
+      // is exactly the class of change this test exists to catch. Comparing the
+      // same predicate on both sides makes the claim mean what it says.
       const draftOptionsReady = analysisReady.options.filter(
+        (o) => o.status === "ready"
+      ).length;
+      // Kept as a distinct quantity because it answers a DIFFERENT question —
+      // "how many options are analysable or one value away" — and must never be
+      // silently equated with the readiness endpoint's numerator again.
+      const draftOptionsReadyOrEncodable = analysisReady.options.filter(
         (o) => o.status === "ready" || o.status === "needs_encoding"
       ).length;
 
       // Step 2: Call graph-readiness with a V1-style graph + analysis_ready
       // For V3 mode, graph-readiness reads options from analysis_ready
-      // Build V1-compatible graph (add fake nodes if needed for option validation)
-      // V3: nodes and edges are at root level now
+      // Build V1-compatible graph — strip V3-only fields (observed_state on factors
+      // uses a different shape than the V1 ConstraintObservedState schema expects)
       const v1Graph = {
         version: "1",
         default_seed: 17,
         nodes: [
-          ...draftResult.nodes,
-          // Add option nodes back (graph-readiness checks them against analysis_ready)
-          ...analysisReady.options.map((o: any) => ({
-            id: o.id,
-            kind: "option",
-            label: o.label,
+          // ⚠ THIS USED TO APPEND THE OPTIONS A SECOND TIME.
+          //
+          // `draftResult.nodes` ALREADY contains the option nodes (measured:
+          // a pricing-brief draft returns opt_1/opt_2 as kind "option"). The
+          // block that followed re-added every entry of
+          // `analysisReady.options` as a fresh node, so the readiness request
+          // carried DUPLICATE options — `options_total` of 4 for a 2-option
+          // model.
+          //
+          // That defect was invisible for as long as the route read options
+          // from `analysis_ready` rather than from the graph: the duplicates
+          // sat in a part of the payload nothing counted. The unification made
+          // the graph the authority, and the duplication surfaced immediately
+          // as 4-vs-2.
+          //
+          // Options now come through exactly once, from the draft's own nodes,
+          // carrying the `interventions` those nodes hold — the same carrier
+          // the deployed UI populates (DecisionGuideAI #734). Both endpoints
+          // therefore derive their answer from ONE model, which is the only
+          // thing that makes "consistency" a meaningful claim: two endpoints
+          // agreeing because one read the other's answer back off the wire was
+          // never consistency.
+          ...draftResult.nodes.map((n: any) => ({
+            id: n.id,
+            kind: n.kind,
+            label: n.label,
+            ...(n.data ? { data: n.data } : {}),
+            ...(n.category ? { category: n.category } : {}),
+            ...(n.kind === "option" &&
+            n.interventions &&
+            Object.keys(n.interventions).length > 0
+              ? { interventions: n.interventions }
+              : {}),
           })),
         ],
         edges: draftResult.edges.map((e: any) => ({
           from: e.from,
           to: e.to,
-          weight: Math.abs(e.strength_mean) || 0.5,
+          weight: Math.abs(e.strength?.mean) || 0.5,
         })),
         meta: draftResult.meta || {},
       };
@@ -109,6 +152,9 @@ describe("CEE Status Consistency", () => {
       // KEY ASSERTION: Both endpoints should agree on options_ready count
       expect(readinessOptionsReady).toBe(draftOptionsReady);
       expect(readinessOptionsTotal).toBe(analysisReady.options.length);
+      // The looser count can only ever be >= the strict one; if it ever drops
+      // below, a `needs_encoding` option has gone missing between the two.
+      expect(draftOptionsReadyOrEncodable).toBeGreaterThanOrEqual(draftOptionsReady);
 
       // Log for debugging
       console.log({
@@ -241,7 +287,7 @@ describe("CEE Status Consistency", () => {
           expect(option.status).toBe("needs_encoding");
 
           // Verify interventions are still numeric (placeholder values)
-          for (const [factorId, value] of Object.entries(option.interventions)) {
+          for (const [_factorId, value] of Object.entries(option.interventions)) {
             expect(typeof value).toBe("number");
           }
         }
@@ -252,13 +298,25 @@ describe("CEE Status Consistency", () => {
         (o) => o.status === "needs_encoding"
       );
       if (hasEncodingNeeded) {
-        // Payload status should be needs_encoding (unless blocked by needs_user_mapping)
-        expect(["needs_encoding", "needs_user_mapping"]).toContain(analysisReady.status);
+        // The payload-status ladder is
+        // `needs_user_input > needs_user_mapping > needs_encoding > ready`
+        // (`cee/transforms/analysis-ready.ts`). `needs_user_input` — the rung
+        // taken whenever per-option blockers exist — was missing from this set,
+        // so the assertion was unreachable until an option actually reached
+        // `needs_encoding` on this brief, and then rejected the CORRECT answer.
+        // A statuses-allowed list that omits the TOP of the producer's own
+        // priority order is a broken alarm, not a tighter check.
+        expect(["needs_user_input", "needs_encoding", "needs_user_mapping"])
+          .toContain(analysisReady.status);
       }
     });
 
-    it("graph-readiness treats needs_encoding as ready for analysis", async () => {
-      // Create a minimal graph with needs_encoding options
+    it("graph-readiness blocks needs_encoding options (post-2026-04-08)", async () => {
+      // After 2026-04-08, needs_encoding is a hard blocker. The run path
+      // (run-analysis.ts) checks numeric interventions directly and rejects
+      // empty/non-numeric ones; the readiness route must agree to avoid the
+      // false-positive "can run" → PLoT EMPTY_INTERVENTIONS divergence that
+      // motivated the intervention-lifecycle audit.
       const analysisReady: AnalysisReadyPayloadT = {
         options: [
           {
@@ -311,23 +369,11 @@ describe("CEE Status Consistency", () => {
       expect(readinessResponse.statusCode).toBe(200);
       const readinessResult = JSON.parse(readinessResponse.body);
 
-      // KEY: needs_encoding options should be counted as ready for analysis
-      // (they have placeholder values, so analysis CAN run)
-      expect(readinessResult.options_ready).toBe(2);
+      // needs_encoding options no longer count as ready.
+      expect(readinessResult.options_ready).toBe(0);
       expect(readinessResult.options_total).toBe(2);
-      expect(readinessResult.can_run_analysis).toBe(true);
-
-      // Confidence should be medium (not high) due to encoding warnings
-      expect(["high", "medium"]).toContain(readinessResult.confidence_level);
-
-      console.log({
-        test: "graph-readiness treats needs_encoding as ready",
-        options_ready: readinessResult.options_ready,
-        options_total: readinessResult.options_total,
-        can_run_analysis: readinessResult.can_run_analysis,
-        confidence_level: readinessResult.confidence_level,
-        confidence_explanation: readinessResult.confidence_explanation,
-      });
+      expect(readinessResult.can_run_analysis).toBe(false);
+      expect(readinessResult.blocker_reason).toBeDefined();
     });
   });
 
@@ -353,7 +399,22 @@ describe("CEE Status Consistency", () => {
       expect(analysisReady).toBeDefined();
       expect(analysisReady.options).toBeInstanceOf(Array);
       expect(analysisReady.goal_node_id).toBeDefined();
-      expect(["ready", "needs_user_mapping", "needs_encoding"]).toContain(analysisReady.status);
+      // ⚠ NOT AN ENUMERATION OF THE EMITTABLE SET. Listing every status
+      // `buildAnalysisReadyPayload` can return cannot fail, and this case is
+      // specifically about status CONSISTENCY — so assert implications that a
+      // wrong status would break. Both are one-directional on purpose:
+      // `blockers` may also be non-empty under `needs_user_mapping` (the
+      // unreachable-controllable-factor limb), so the converse does NOT hold
+      // and asserting it would be false.
+      if (analysisReady.status === "needs_user_input") {
+        // A payload demanding input must say what is missing.
+        expect(analysisReady.blockers?.length ?? 0).toBeGreaterThan(0);
+      }
+      if (analysisReady.status === "ready") {
+        // ...and a payload calling itself ready may not contain an option that
+        // still needs the user. This is the surface the run chip gates on.
+        expect(analysisReady.options.every((o) => o.status === "ready")).toBe(true);
+      }
 
       // Verify each option has valid structure
       for (const option of analysisReady.options) {

@@ -10,7 +10,6 @@
  */
 
 import type { components } from "../../generated/openapi.d.ts";
-import type { AssumptionExplanation } from "../../schemas/review.js";
 import type {
   DomainCompletenessResult,
   EvidenceQualityDistribution,

@@ -1,0 +1,18 @@
+ WARN  Issue while reading "/Users/paulslee/Documents/GitHub/olumi-assistants-service/.worktrees/receipt-honesty/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+ WARN  Issue while reading "/Users/paulslee/Documents/GitHub/olumi-assistants-service/.worktrees/receipt-honesty/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+
+> olumi-assistants-service@1.12.0 pretypecheck:src /Users/paulslee/Documents/GitHub/olumi-assistants-service/.worktrees/receipt-honesty
+> pnpm openapi:generate
+
+ WARN  Issue while reading "/Users/paulslee/Documents/GitHub/olumi-assistants-service/.worktrees/receipt-honesty/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+ WARN  Issue while reading "/Users/paulslee/Documents/GitHub/olumi-assistants-service/.worktrees/receipt-honesty/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+
+> olumi-assistants-service@1.12.0 openapi:generate /Users/paulslee/Documents/GitHub/olumi-assistants-service/.worktrees/receipt-honesty
+> openapi-typescript openapi.yaml -o src/generated/openapi.d.ts
+
+✨ openapi-typescript 7.10.1
+🚀 openapi.yaml → src/generated/openapi.d.ts [71.5ms]
+
+> olumi-assistants-service@1.12.0 typecheck:src /Users/paulslee/Documents/GitHub/olumi-assistants-service/.worktrees/receipt-honesty
+> tsc -p tsconfig.build.json --noEmit
+

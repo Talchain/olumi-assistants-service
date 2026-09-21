@@ -21,6 +21,14 @@ import { getRequestId } from "../utils/request-id.js";
 import { emit, TelemetryEvents } from "../utils/telemetry.js";
 import { getTimingSummary, getTiming, type DownstreamCallTiming } from "../utils/request-timing.js";
 import { GIT_COMMIT_SHORT } from "../version.js";
+import { readResponseHashMarkers } from "./response-hash.js";
+
+/** Metadata attached to each request for boundary tracing */
+interface BoundaryMeta {
+  payloadHash?: string;
+  clientBuild?: string;
+  incomingRequestId?: string;
+}
 
 /**
  * Service identifier for boundary logging
@@ -89,7 +97,7 @@ function getBodyMeta(request: FastifyRequest): { payload_bytes?: number; payload
 
   // Extract top-level keys from JSON body (if available)
   // Note: body may not be parsed yet in onRequest, so we handle gracefully
-  const body = (request as any).body;
+  const body = request.body;
   if (body && typeof body === "object" && !Array.isArray(body)) {
     result.payload_keys = Object.keys(body).sort();
   }
@@ -109,8 +117,8 @@ function formatDownstreamCallsHeader(calls: DownstreamCallTiming[]): string {
       const service = call.target;
       const status = call.status ?? 0;
       const elapsed = call.elapsed_ms;
-      const payloadHash = (call as any).payload_hash || "none";
-      const responseHash = (call as any).response_hash || "none";
+      const payloadHash = call.payload_hash || "none";
+      const responseHash = call.response_hash || "none";
       return `${service}:${status}:${elapsed}:${payloadHash}:${responseHash}`;
     })
     .join(";");
@@ -129,12 +137,12 @@ async function boundaryLoggingPluginImpl(fastify: FastifyInstance) {
     const bodyMeta = getBodyMeta(request);
 
     // Store for later use in boundary.response (preserves client metadata)
-    (request as any).boundaryMeta = {
+    // Use shared startTime from performance-monitoring plugin if available
+    (request as unknown as Record<string, unknown>).boundaryMeta = {
       payloadHash,
       clientBuild,
       incomingRequestId,
-      startTime: Date.now(),
-    };
+    } satisfies BoundaryMeta;
 
     // Emit boundary.request event with body metadata hints
     emit(TelemetryEvents.BoundaryRequest, {
@@ -159,7 +167,7 @@ async function boundaryLoggingPluginImpl(fastify: FastifyInstance) {
     reply.header(SERVICE_BUILD_HEADER, GIT_COMMIT_SHORT);
 
     // Add trace-received header (echo back received trace info)
-    const boundaryMeta = (request as any).boundaryMeta || {};
+    const boundaryMeta = ((request as unknown as Record<string, unknown>).boundaryMeta || {}) as BoundaryMeta;
     const incomingRequestId = boundaryMeta.incomingRequestId || "none";
     const incomingPayloadHash = boundaryMeta.payloadHash || "none";
     reply.header(TRACE_RECEIVED_HEADER, `${incomingRequestId}:${incomingPayloadHash}`);
@@ -177,13 +185,15 @@ async function boundaryLoggingPluginImpl(fastify: FastifyInstance) {
   // Hook: onResponse - emit boundary.response event
   fastify.addHook("onResponse", async (request: FastifyRequest, reply: FastifyReply) => {
     const requestId = getRequestId(request);
-    const boundaryMeta = (request as any).boundaryMeta || {};
-    const startTime = boundaryMeta.startTime || Date.now();
+    const boundaryMeta = ((request as unknown as Record<string, unknown>).boundaryMeta || {}) as BoundaryMeta;
+    // Use shared startTime from request (set by performance-monitoring or observability plugin)
+    const startTime = ((request as unknown as Record<string, unknown>).startTime as number | undefined) || Date.now();
     const elapsedMs = Date.now() - startTime;
 
-    // Get response hash (set by response-hash plugin)
-    const responseHash = (reply as any).responseHash;
-    const responseHashSkipped = (reply as any).responseHashSkipped;
+    // Get response hash markers (set by response-hash plugin via the
+    // typed accessors in plugins/response-hash.ts).
+    const { hash: responseHash, skipped: responseHashSkipped } =
+      readResponseHashMarkers(reply);
 
     // Get timing summary (set by request-timing utility)
     const timingSummary = getTimingSummary(request);
@@ -194,8 +204,8 @@ async function boundaryLoggingPluginImpl(fastify: FastifyInstance) {
       target: call.target,
       status: call.status,
       elapsed_ms: call.elapsed_ms,
-      payload_hash: (call as any).payload_hash,
-      response_hash: (call as any).response_hash,
+      payload_hash: call.payload_hash,
+      response_hash: call.response_hash,
     }));
 
     // Emit boundary.response event with preserved client metadata

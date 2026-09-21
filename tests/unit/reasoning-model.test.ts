@@ -23,12 +23,12 @@ describe("Reasoning Model Support", () => {
       expect(config?.provider).toBe("openai");
       expect(config?.tier).toBe("premium");
       expect(config?.enabled).toBe(true);
-      expect(config?.maxTokens).toBe(16384);
+      expect(config?.maxTokens).toBe(100000);
       expect(config?.averageLatencyMs).toBe(15000); // Reasoning takes longer
     });
 
     it("standard models do not have reasoning flag set", () => {
-      const standardModels = ["gpt-4o", "gpt-4o-mini", "claude-3-5-sonnet-20241022"];
+      const standardModels = ["gpt-4o", "gpt-4o-mini", "claude-sonnet-4-20250514"];
       for (const modelId of standardModels) {
         const config = getModelConfig(modelId);
         expect(config?.reasoning).toBeFalsy(); // undefined or false
@@ -54,12 +54,21 @@ describe("Reasoning Model Support", () => {
       expect(isReasoningModel("claude-3-5-sonnet-20241022")).toBe(false);
     });
 
-    it("returns false for unknown models (uses registry lookup, not string matching)", () => {
-      // Critical: ensure we use registry lookup, not string matching like startsWith("gpt-5")
+    it("returns false for unknown models not matching reasoning patterns", () => {
+      // These don't match known reasoning model patterns
       expect(isReasoningModel("gpt-5-unknown")).toBe(false);
-      expect(isReasoningModel("gpt-5.3")).toBe(false);
+      expect(isReasoningModel("gpt-5.3")).toBe(false); // Only gpt-5.2 is reasoning
       expect(isReasoningModel("thinking-model")).toBe(false);
-      expect(isReasoningModel("o1-preview")).toBe(false);
+      expect(isReasoningModel("reasoning-hypothetical")).toBe(false);
+    });
+
+    it("returns true for model variants matching reasoning patterns (safety fallback)", () => {
+      // Pattern-based fallback for unregistered model variants
+      // Better to use max_completion_tokens for potential reasoning models than to fail
+      expect(isReasoningModel("o1-turbo")).toBe(true); // Matches o1 pattern
+      expect(isReasoningModel("o1-2025-01")).toBe(true); // Dated variant
+      expect(isReasoningModel("o3-preview")).toBe(true); // Matches o3 pattern
+      expect(isReasoningModel("gpt-5.2-preview")).toBe(true); // Matches gpt-5.2 pattern
     });
   });
 
@@ -111,11 +120,20 @@ describe("Reasoning Model Support", () => {
     });
 
     it("reasoning field is optional and only set on reasoning models", () => {
+      // Reasoning models are o1, o1-mini, o1-preview, o3, o3-mini, gpt-5.2
+      const expectedReasoningModels = new Set([
+        "gpt-5.2",
+        "o1",
+        "o1-mini",
+        "o1-preview",
+        "o3",
+        "o3-mini",
+        "o4-mini",
+      ]);
       for (const [id, config] of Object.entries(MODEL_REGISTRY)) {
         if (config.reasoning) {
           expect(config.reasoning).toBe(true);
-          // Currently only gpt-5.2 should have reasoning: true
-          expect(id).toBe("gpt-5.2");
+          expect(expectedReasoningModels.has(id)).toBe(true);
         }
       }
     });

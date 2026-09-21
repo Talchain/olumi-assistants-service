@@ -1,0 +1,1387 @@
+/**
+ * ui_directive block builder — ROADMAP 2.27 / seamlessness R4 (CEE half,
+ * slice 1). UNCONDITIONAL since #539 deleted CEE_UI_DIRECTIVE_EMIT
+ * (Paul's 19 Jul no-dark-launch ruling; was live `true` on staging);
+ * invoked at the single call site in compose.ts::buildBlocksFromFacts —
+ * this builder is pure.
+ *
+ * ONE deterministic emission, ZERO LLM authorship: on a successful
+ * CURRENT-TURN run_analysis fact, point the UI at the analysis's
+ * recommended option with verb `highlight` and a single typed TargetRef.
+ * Only schema-required fields are populated — no free-text `note` (nothing
+ * for the egress scrubber to scrub; zero hallucination surface) and no
+ * `duration_ms` in this slice.
+ *
+ * Fail-closed (returns null, never a partial block):
+ *   - `noop: true` fact (analysis did not actually run);
+ *   - `leading_option_id` null/absent (no recommendation);
+ *   - recommended id unresolvable in `enrichment.graph.nodes[]` OR the
+ *     persisted-snapshot fallback (see buildGraphNodeLookup — the live
+ *     PLoT envelope carries no `graph` key, so in production the
+ *     fallback is the only real source) — the Phase-3 §0.1 invariant
+ *     applies: NEVER fall back to id-as-label;
+ *   - recommended id resolves to a non-option node kind (defensive: a
+ *     `leading_option_id` that names a factor/goal is upstream corruption,
+ *     not something to point the UI at);
+ *   - final safeParse against the strict boundary UiDirectiveBlockSchema
+ *     fails (validate-before-emit, same discipline as phase3-blocks.ts —
+ *     drop the block, never weaken the schema).
+ *
+ * Stale-analysis and fallback-recovery suppression live at the call site:
+ * compose.ts only invokes this inside the current-turn run_analysis branch
+ * with a verified `graph_hash_at_run` (the same gate the fresh Phase-3
+ * blocks use); prior-fact lifecycle rebuilds and recovery composers never
+ * reach this builder.
+ */
+
+import {
+  UiDirectiveBlockSchema,
+  type OlumiResponse,
+  type UiDirectiveBlock,
+  type UiDirectiveModelSectionIdLiteral,
+  type UiDirectiveVerbLiteral,
+} from '@talchain/schemas/boundary';
+
+// ROADMAP 2.640 — the remedy mapping's KEY SPACE is the readiness projection's
+// own item taxonomy, imported as a type so the mapping cannot drift from it
+// (see REMEDY_SECTION_BY_OPEN_ITEM_KIND: a new kind becomes a type error).
+import type { ReadinessOpenItem } from '../routing/readiness-summary.js';
+// Type-only, exactly like `ReadinessOpenItem` above: the gate owns the vocabulary
+// for what it named, this module owns the mapping to a UI surface. A type import
+// cannot create a runtime cycle between routing and compose.
+import type { AdviceGateFlipFocusSection } from '../routing/post-analysis-advice-gate.js';
+import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
+
+import {
+  liveLensExecutorAvailability,
+  type GraphNodeLookup,
+  type GraphNodeRef,
+} from './phase3-blocks.js';
+import { selectLens, type LensId } from './lens-selector.js';
+import type { JudgementSignals } from './judgement-signals.js';
+import { mayPresentLeaderClaimForFact } from './unrequested-analysis-confinement.js';
+import { emit, TelemetryEvents } from '../../utils/telemetry.js';
+
+/**
+ * Build the single recommended-option `ui_directive` block for a
+ * current-turn run_analysis fact, or null when any fail-closed condition
+ * holds. Deterministic: no LLM input, no clock, no randomness.
+ *
+ * `lookup` is the graph-node lookup the compose call site already built
+ * for this fact's Phase 3 blocks (review F2: one build per fact, shared
+ * between the Phase 3 rebuild and this builder). It carries the
+ * hash-gated persisted-snapshot fallback where the caller allowed it —
+ * in production that fallback is the only source that can resolve the
+ * option target, since the PLoT /v2/run envelope carries no `graph` key.
+ */
+export function buildRecommendedOptionUiDirective(
+  fact: RunAnalysisHandlerFact,
+  lookup: GraphNodeLookup,
+): UiDirectiveBlock | null {
+  if (fact.noop) return null;
+
+  const leadingOptionId = fact.result.leading_option_id;
+  if (typeof leadingOptionId !== 'string' || leadingOptionId.length === 0) {
+    return null;
+  }
+
+  const ref = lookup.get(leadingOptionId);
+  if (ref === undefined || ref.kind !== 'option') return null;
+
+  const candidate: UiDirectiveBlock = {
+    type: 'ui_directive',
+    verb: 'highlight',
+    targets: [{ id: ref.id, label: ref.label, kind: 'option' }],
+    source: LADDER_SOURCE,
+  };
+
+  const parsed = UiDirectiveBlockSchema.safeParse(candidate);
+  return parsed.success ? parsed.data : null;
+}
+
+/**
+ * 0.39.0 `source` provenance. EVERY row in this file is deterministic,
+ * fact-derived and CEE-authored, so every directive this module mints is
+ * `ladder` — never `gate`, never `composer`. Stamped so a capture, the UI and
+ * telemetry can distinguish a deterministic gesture from an LLM-proposed one;
+ * before this, CEE stamped nothing and no capture could tell them apart, which
+ * is the precondition for ever trusting a composer slot.
+ *
+ * ⚠ This is an ADDITIVE wire change: the emitted block gains a key. The exact
+ * key-set pin in `__tests__/ui-directive-emit.test.ts` is updated in the same
+ * commit — that pin exists to catch ACCIDENTAL field additions, and this one is
+ * deliberate.
+ */
+const LADDER_SOURCE = 'ladder' as const;
+
+/**
+ * ROADMAP 2.640 / UI-DIRECTIVE-0.38-DESIGN §3.4 — the SECOND authoring path,
+ * and the first non-ladder producer this service has ever had.
+ *
+ * ⚠ The paragraph above says the stamp is "`ladder` — never `gate`, never
+ * `composer`". That was true of every directive CEE emitted until this row and
+ * is now true only of the LADDER builders. `gate` is emitted by exactly one
+ * function — `buildGateRemedySectionDirective` — and `composer` still has no
+ * producer. The enum value was reserved for this path when 0.39.0 shipped
+ * (`UiDirectiveGestureSource`: "`gate` — the advice-gate deterministic
+ * per-class mapping (§3.4)"), so this fills a designed, previously-unbuilt
+ * contract slot rather than widening the wire.
+ *
+ * Why the distinction is load-bearing rather than cosmetic: a ladder directive
+ * rides a HANDLER FACT (the user did something and the gesture follows the
+ * result), whereas a gate directive rides a QUESTION the user asked that CEE
+ * answered deterministically without a fact. A capture that cannot tell those
+ * apart cannot tell whether a gesture followed an action or an enquiry, and
+ * telemetry counts them separately for exactly that reason.
+ */
+const GATE_SOURCE = 'gate' as const;
+
+// ============================================================================
+// Wave-4 δ2 — the focus / open_inspector emit policy (ROADMAP 1.202), extended
+// by Lane 2 (P3 UI agency, schemas 0.32.0) with the PANEL rows 5–6.
+// "The AI points at the graph — and opens the surface it is talking about."
+// A deterministic ladder over the fact class + entity kind — ZERO LLM
+// authorship of verb/target. At most ONE directive per turn (the caller's
+// `uiDirectiveEmitted` latch enforces N=1). Every drop is telemetered
+// (reason-tagged) so a suppression is never a silent no-op.
+//
+// §2.1 trigger table:
+//   1 · set_factor_value / adjust_edge_strength (applied) → open_inspector @ the
+//       mutated node/edge (label resolved from the persisted-snapshot lookup —
+//       the fact's `after` snapshot carries no label; add_constraint EXCLUDED).
+//   2a· run_analysis + a SURVIVING lens block whose OWN first target_ref is an
+//       EDGE → open_inspector @ that edge (PR2 COMPLETE LOOP, L3). SUPERSEDES
+//       row 3 for the three relationship lenses; can never contend with row 2,
+//       which is structurally unreachable for them. See the builder's comment.
+//   2 · run_analysis + a SURVIVING lens block + a resolvable subject → focus @
+//       the lens subject factor. SUPERSEDES the winner-highlight (D-53-1).
+//   3 · run_analysis, no lens (or lens subject unresolved) → the v1 highlight @
+//       the recommended option (unchanged — the regression-proof floor).
+//   4 · what_would_flip (precondition met) → focus @ the first flip factor.
+//   5 · explain_results, ANSWERED (`precondition_unmet` false) → open_panel @
+//       ui_target {kind:'tab', id:'results'} — the explanation opens the
+//       results surface it explains. GATE IS precondition_unmet, NOT `noop`:
+//       the live handler stamps noop:true on EVERY explain fact (it is a
+//       no-op handler — explain-results.ts:124/215), so a noop gate would be
+//       dead on arrival.
+//   6 · explain_from_structure + ≥1 CONTESTED edge in the turn's persisted
+//       graph (edges[].validation.status === 'contested', the two-pass
+//       validation verdict the Model tab's relationships section renders) →
+//       open_section @ ui_target {kind:'model_section', id:'relationships'}.
+//       Zero contested / absent / malformed graph → suppressed — never open a
+//       section with nothing remarkable.
+//   (A compare_options row was considered and WITHDRAWN: no V5 handler
+//   produces a compare_options fact — see the tools/handlers registry — so
+//   the row could never fire; a wired gesture nothing can trigger is the
+//   guarantee-theatre class.)
+//
+// Starvation analysis for the new rows: they are keyed to fact classes the
+// existing four rows never consume (explain_* facts return null today), so
+// rows 1–4 keep their gestures byte-identically; cross-fact contention stays
+// governed by the caller's existing first-emit-wins latch, and explain facts
+// never co-occur with run_analysis on a live turn (one handler per turn).
+// ============================================================================
+
+/** Reason tags for a suppressed directive — closed set, no user text. */
+type UiDirectiveSuppressReason =
+  | 'noop'
+  | 'no_recommendation'
+  | 'target_unresolved'
+  | 'lens_subject_unresolved'
+  | 'precondition_unmet'
+  /**
+   * The explanation was ANSWERED but carries a currency caveat (`stale` /
+   * `unconfirmed`), so the surface it would open is not trustworthy on its own.
+   *
+   * ⭐ WHY THIS IS ITS OWN TAG AND NOT FOLDED INTO `precondition_unmet`. The two
+   * answer different questions: `precondition_unmet` means the handler returned
+   * the deterministic template INSTEAD of an answer (the contract's own words);
+   * this one means the handler DID answer, and caveated it. Reusing the older
+   * tag would make the telemetry claim the turn produced no answer, and this
+   * estate has already paid for one tag whose meaning quietly changed under it
+   * (`no_flip_factor`, retired above). A dashboard should be able to tell
+   * "there was nothing to open" from "there was something, and we withheld it".
+   */
+  | 'staleness_caveated'
+  /**
+   * §2.1 row 4: the flip turn emitted no `set_factor_value` proposal, so there
+   * is no factor the product offered to change and nothing honest to point at.
+   *
+   * ⚠ REPLACES `no_flip_factor`, WHICH WAS A STANDING FALSE NEGATIVE (retired
+   * 14 Aug 2026). That tag was raised from a read of the deprecated legacy
+   * `flip_scenarios` field, which no producer writes, so it fired on EVERY real
+   * flip turn — including the many that DID emit a proposal. Telemetry
+   * therefore reported the flip gesture as permanently unavailable, which is
+   * exactly the shape that makes a live capability look dead in the numbers.
+   * The rename is deliberate: any dashboard or query still keyed to
+   * `no_flip_factor` should go silent rather than quietly inherit a tag whose
+   * meaning has changed. This one is TRUE when it fires.
+   */
+  | 'no_flip_proposal'
+  /**
+   * §2.1 row 6 (Lane 2, P3): explain_from_structure fired but the persisted
+   * graph carries no contested edge (or is absent/malformed — fail-closed
+   * collapses those to the same suppression: nothing remarkable to open).
+   */
+  | 'no_contested_edges'
+  /**
+   * T1 claim safety (ROADMAP 1.218): the turn's constraint verdict withholds
+   * the leading-option claim, so the row-3 winner HIGHLIGHT is not emitted.
+   * Distinct from `no_recommendation` on purpose — there IS a leader here and
+   * we are declining to point at it, which is a different operational fact
+   * from "the analysis produced none".
+   */
+  | 'leading_option_claim_withheld'
+  /**
+   * §2.1 row 7: the turn composed no card carrying a DISPATCHABLE entity
+   * reference, so there is nothing the assistant is demonstrably discussing to
+   * point at. Fail-closed — never point at nothing.
+   */
+  | 'no_discussed_entity'
+  /**
+   * ROADMAP 2.640 / §3.4 — the readiness gate's TOP blocking item does not map
+   * to one of the five Model-tab section ids, so there is no surface to open.
+   *
+   * This is the fail-closed arm and it fires on REAL, COMMON inputs, not just
+   * on malformed ones: `goal_threshold_missing` has no section (the five ids
+   * are options/factors/relationships/risks/modelcard — there is no goal
+   * section), and `option_needs_mapping` is deliberately unmapped pending a
+   * derivation of where an option-to-factor connection is actually created.
+   *
+   * Opening the WRONG section is worse than opening none: the gesture is an
+   * implicit claim that the remedy lives there, and a user sent to a surface
+   * where they cannot act learns the assistant's gestures are unreliable. This
+   * suppression keeps the answer's PROSE (which already names the blocker) and
+   * declines only the gesture.
+   */
+  | 'remedy_surface_unmapped'
+  /**
+   * The ambiguity highlight: the candidates carry no graph-entity id at all
+   * (neither carrier populated), so there is nothing to point at.
+   */
+  | 'ambiguity_no_candidate_entities'
+  /**
+   * The ambiguity highlight, and THE ONE WORTH WATCHING: the candidates DO name
+   * entities, but none of them resolves in the turn's persisted graph. That is
+   * the difference between "this turn had nothing to point at" and "this turn
+   * tried to point at entities the user's graph does not contain", and the
+   * second is a drift signal — a proposal outliving the nodes it targets, or a
+   * persisted read that came back degraded. Both suppress identically and would
+   * be indistinguishable without separate tags.
+   */
+  | 'ambiguity_targets_unresolved'
+  /**
+   * The ambiguity highlight: SOME candidates resolve and at least one does not,
+   * so a highlight would light a PROPER SUBSET of the options the numbered
+   * question lists — which reads as the answer to the question being asked.
+   *
+   * ⚠ THIS IS THE TAG TO COUNT. The mixed case is real and named upstream (a
+   * `run_analysis` or `what_would_flip` pending alongside a proposal carries no
+   * `target_entity_ids` at all), and its live FREQUENCY is unmeasured. Kept
+   * distinct from `ambiguity_targets_unresolved` precisely so it is countable:
+   * the two suppress identically, and merged into one tag the cost of this
+   * choice would be permanently invisible. A high rate here is the signal to
+   * revisit the charter, not a reason to weaken the gate silently.
+   */
+  | 'ambiguity_candidate_coverage_partial'
+  /**
+   * The ambiguity highlight: more resolvable candidates than the cap, so the
+   * gesture would flood the canvas rather than point at anything.
+   */
+  | 'ambiguity_too_many_targets'
+  /**
+   * The ambiguity highlight: the assembled block failed the strict boundary
+   * parse. Should be unreachable (every field is builder-controlled and the
+   * targets come from a kind-gated lookup), which is exactly why it is tagged
+   * rather than dropped silently — an unreachable arm that starts firing is a
+   * contract change nobody announced.
+   */
+  | 'ambiguity_schema_parse_failed';
+
+/**
+ * The `fact_type` tag for the ambiguity rows.
+ *
+ * ⚠ IT IS NOT A FACT TYPE, AND THAT IS THE POINT. Every other row in this file
+ * rides a `HandlerFact` and stamps its `fact_type`; this row exists precisely
+ * BECAUSE the ambiguity turn has no fact. The field is a plain `string` on the
+ * telemetry helper, so the honest tag is one that says which turn class emitted
+ * the gesture rather than borrowing a fact name this turn never produced.
+ */
+const AMBIGUITY_FACT_TYPE = 'ambiguity_clarification';
+
+function suppressDirective(factType: string, reason: UiDirectiveSuppressReason): null {
+  emit(TelemetryEvents.V5UiDirectiveSuppressed, { fact_type: factType, reason });
+  return null;
+}
+
+function emitDirective(factType: string, block: UiDirectiveBlock): UiDirectiveBlock {
+  emit(TelemetryEvents.V5UiDirectiveEmitted, {
+    fact_type: factType,
+    verb: block.verb,
+    // Graph verbs carry their target in targets[]; panel verbs (0.32.0) in
+    // ui_target. One of the two is always present on an emitted block.
+    target_kind: block.targets[0]?.kind ?? block.ui_target?.kind ?? null,
+    // 0.39.0 gesture provenance, on the TELEMETRY as well as the wire — a
+    // capture that can distinguish a deterministic gesture from an LLM-proposed
+    // one is the precondition for ever trusting a composer slot, and telemetry
+    // is where that distinction gets counted. Closed enum; no user text.
+    source: block.source ?? null,
+  });
+  return block;
+}
+
+/** Build + strict-validate a single-target directive, or null on schema failure. */
+function directiveFromRef(verb: UiDirectiveVerbLiteral, ref: GraphNodeRef): UiDirectiveBlock | null {
+  const candidate: UiDirectiveBlock = {
+    type: 'ui_directive',
+    verb,
+    targets: [{ id: ref.id, label: ref.label, kind: ref.kind }],
+    source: LADDER_SOURCE,
+  };
+  const parsed = UiDirectiveBlockSchema.safeParse(candidate);
+  return parsed.success ? parsed.data : null;
+}
+
+/**
+ * Build + strict-validate a PANEL directive (0.32.0 verbs), or null on schema
+ * failure. `targets` is empty by contract — the target lives in `ui_target`
+ * (the schema's cross-field rule enforces both halves; validate-before-emit
+ * keeps this builder honest against it).
+ */
+function directiveFromUiTarget(
+  verb: Extract<UiDirectiveVerbLiteral, 'open_panel' | 'open_section'>,
+  uiTarget: NonNullable<UiDirectiveBlock['ui_target']>,
+  // Defaulted to the ladder so every EXISTING call site keeps its exact bytes
+  // (this parameter is additive; the row-5/row-6 builders below pass nothing).
+  // Only the gate-remedy builder overrides it.
+  source: typeof LADDER_SOURCE | typeof GATE_SOURCE = LADDER_SOURCE,
+): UiDirectiveBlock | null {
+  const candidate: UiDirectiveBlock = {
+    type: 'ui_directive',
+    verb,
+    targets: [],
+    ui_target: uiTarget,
+    source,
+  };
+  const parsed = UiDirectiveBlockSchema.safeParse(candidate);
+  return parsed.success ? parsed.data : null;
+}
+
+/**
+ * §2.1 row 6 derivation — count the persisted graph's CONTESTED edges (the
+ * two-pass validation verdict: `edges[].validation.status === 'contested'`).
+ * Fail-closed on every malformed shape: absent graph, non-array edges,
+ * non-object edge/validation, any status other than the exact literal → 0.
+ * Exported for direct unit coverage.
+ */
+export function countContestedEdges(graph: unknown): number {
+  if (graph === null || typeof graph !== 'object') return 0;
+  const edges = (graph as { edges?: unknown }).edges;
+  if (!Array.isArray(edges)) return 0;
+  let count = 0;
+  for (const edge of edges) {
+    if (edge === null || typeof edge !== 'object') continue;
+    const validation = (edge as { validation?: unknown }).validation;
+    if (validation === null || typeof validation !== 'object') continue;
+    if ((validation as { status?: unknown }).status === 'contested') count += 1;
+  }
+  return count;
+}
+
+/**
+ * Wave-3 σ COMPOSITION (§Q3): a `focus` on a lens subject may fire ONLY when the
+ * lens's accompanying coaching block SURVIVED the prose/schema gate (and, when it
+ * carries a value, wave-3 σ) — i.e. is present in `freshBlocks`. When σ later
+ * drops a value-bearing lens block, this returns false and the paired directive
+ * drops with it (no "look here" at a caged number). The lens block is the unique
+ * `deterministic_signal` / `strengthen` coaching block.
+ */
+function findSurvivingLensBlock(
+  freshBlocks: OlumiResponse['blocks'],
+): OlumiResponse['blocks'][number] | undefined {
+  return freshBlocks.find(
+    (b) =>
+      b.type === 'coaching' &&
+      b.source === 'deterministic_signal' &&
+      b.coaching_kind === 'strengthen',
+  );
+}
+
+function hasSurvivingLensBlock(freshBlocks: OlumiResponse['blocks']): boolean {
+  return findSurvivingLensBlock(freshBlocks) !== undefined;
+}
+
+/**
+ * §2.1 ROW 2a (PR2 COMPLETE LOOP, L3) — THE CARD POINTS AT WHAT IT NAMES.
+ *
+ * THE GAP THIS CLOSES, derived at this tip rather than assumed. Every lens that
+ * points at a RELATIONSHIP — `fragile_edge_resolution` and the two judgement
+ * lenses — sets `subjectFactorId: null` in its evaluator
+ * (`lens-selector.ts::evaluateFragileEdgeResolution` / the two judgement
+ * evaluators), so `selection.subjectRef` is ABSENT and row 2's factor `focus` is
+ * STRUCTURALLY UNREACHABLE for them. They fall through to row 3, and the user
+ * reading *"the two drafting passes disagreed about the link from A to B"* is
+ * shown a `highlight` on the LEADING OPTION — or, on a withheld turn, nothing at
+ * all. The one card class that most needs "point at what I name" is the one the
+ * ladder never covered.
+ *
+ * (The design predicted row 2 "targets a FACTOR and cannot collide on kind".
+ * True, and weaker than the measured position: this row displaces ROW 3 for
+ * these lenses and can never contend with row 2.)
+ *
+ * VERB — `open_inspector`, NOT `focus`. It selects WITHOUT moving the camera
+ * (`applyV5State.ts`: `selectEdgeWithoutHistory`), and the user is mid-sentence
+ * in the card; yanking the viewport out from under them is the opposite of "act
+ * where the reasoning is". No new verb, no new schema field, no UI change.
+ *
+ * TARGET — the SURVIVING CARD'S OWN `target_refs[0]`, never a re-derivation from
+ * `selection.judgementEdge`. One derivation, two read points (the rule ROADMAP
+ * 2.211 already applies to `selectLens`, and the route row 7 established): the
+ * ref has already been resolved against the graph and has passed the block's own
+ * strict parse, so this row CANNOT point at an entity that does not exist and
+ * CANNOT disagree with the card the user is reading. Composing the id here from
+ * `${fromId}→${toId}` would be a second spelling of one identity — the
+ * `generateGraphHash`-twins shape.
+ *
+ * GATE — it reads the SURVIVING block list, so it inherits the σ/prose gate
+ * unchanged: a lens block that σ dropped is not in `freshBlocks`, and the
+ * directive drops with it. Never a "look here" at a card that did not ship.
+ *
+ * CLAIM SAFETY — deliberately NOT gated on the leader admission at all
+ * (`mayPresentLeaderClaimForFact`, and before it `mayNameLeadingOptionForFact`).
+ * An EDGE target names no option and asserts no leader, which is the same
+ * scoping row 3's own comment sets out for row 2's factor `focus` and row 7
+ * applies to factor/edge refs. A withheld turn keeps its pointer — and so does
+ * an unrequested one, for the same reason.
+ *
+ * Fail-closed: a lens block whose first ref is missing, malformed or not an edge
+ * returns null and the ladder continues to rows 2/3 exactly as before.
+ */
+function buildLensEdgeInspectorDirective(
+  freshBlocks: OlumiResponse['blocks'],
+): UiDirectiveBlock | null {
+  const lensBlock = findSurvivingLensBlock(freshBlocks);
+  if (lensBlock === undefined) return null;
+  const ref = readTargetRefs(lensBlock)[0];
+  if (ref === undefined || ref.kind !== 'edge') return null;
+  return directiveFromRef('open_inspector', ref);
+}
+
+/** §2.1 rows 2 + 3 — lens focus (supersedes) or the v1 winner-highlight floor. */
+function buildRunAnalysisDirective(
+  fact: RunAnalysisHandlerFact,
+  lookup: GraphNodeLookup,
+  freshBlocks: OlumiResponse['blocks'],
+  previousAnalysisLens?: LensId | null,
+  judgementSignals?: JudgementSignals,
+): UiDirectiveBlock | null {
+  if (fact.noop) return suppressDirective('run_analysis', 'noop');
+
+  // Row 2a (PR2 COMPLETE LOOP, L3) — an EDGE lens points at its own edge. Placed
+  // FIRST inside the run_analysis rows because it is strictly more specific than
+  // both of them: it fires only when the surviving card already carries an edge
+  // ref, and on exactly those turns rows 2 and 3 were pointing somewhere else
+  // (row 2 is unreachable for every edge lens — see the builder's own comment —
+  // and row 3 points at the leader, which the card is not about). It cannot
+  // displace rows 1/4/5/6: those key off different fact classes entirely.
+  const edgeInspector = buildLensEdgeInspectorDirective(freshBlocks);
+  if (edgeInspector !== null) return emitDirective('run_analysis', edgeInspector);
+
+  // Row 2 — the lens focus supersedes the winner highlight (D-53-1), gated on the
+  // lens block's σ/prose survival AND a resolvable subject id.
+  if (hasSurvivingLensBlock(freshBlocks)) {
+    // ⚠ ROADMAP 2.211 — THIS IS THE SECOND `selectLens` DERIVATION OF ONE TURN,
+    // and it MUST be handed the same `previousAnalysisLens` the block builder
+    // got. Without it the tie-break applies at one call site and not the other:
+    // the card would announce the pre-mortem lens while this directive told the
+    // canvas to focus the flip-risk lens's factor — two derivations of one fact
+    // disagreeing on one screen (CLAUDE.md trap 12/16). The executor injection
+    // is shared for the same reason (`liveLensExecutorAvailability`).
+    const selection = selectLens(fact, {
+      ...liveLensExecutorAvailability(),
+      previousAnalysisLens: previousAnalysisLens ?? null,
+      // ROADMAP 2.692 slice 2 — spread-if-present so the options object stays
+      // byte-identical for unthreaded callers.
+      ...(judgementSignals !== undefined ? { judgementSignals } : {}),
+    });
+    const subjectRef = selection?.subjectRef;
+    if (subjectRef !== undefined) {
+      const ref = lookup.get(subjectRef.id);
+      if (ref !== undefined && ref.kind === 'factor') {
+        const block = directiveFromRef('focus', ref);
+        if (block !== null) return emitDirective('run_analysis', block);
+      }
+      // Lens present + survived but the subject didn't resolve → fall through to
+      // the v1 highlight (the safe floor), never to nothing.
+    }
+  }
+
+  // Row 3 — the shipped v1 recommended-option highlight (byte-unchanged path when
+  // no lens is active: this IS the regression-proof floor).
+  //
+  // T1 CLAIM SAFETY (ROADMAP 1.218 / A1 ruling on row 1.215). GATED, and note
+  // which way round the live defect ran: the POST-#710 walk found the withheld
+  // bodies shipping `highlight → <the leader>` on 5/5, while every PERMITTED
+  // body shipped `focus → <a factor>` on 5/5. The one class of turn that must
+  // not name a leader was the only class telling the canvas to point at it —
+  // the inverse of the expected correlation, and not an accident: row 2's lens
+  // `focus` supersedes this highlight, and the lens block is itself
+  // leader-presuming, so layer 2 drops it on exactly these turns and the ladder
+  // falls through to here.
+  //
+  // Scoped to row 3 deliberately. Row 2's `focus` targets a FACTOR and asserts
+  // no leader; gating it too would cost the user their pointer on the turn they
+  // most need one, which is the over-suppression half of the acceptance
+  // criteria. Rows 1 and 4 (mutation / flip) never name a leader and are
+  // untouched.
+  //
+  // HONEST SIZING, so nobody scores this as the fix. ⚠ CORRECTED 4 Aug 2026
+  // (trap-14 — the previous sentence here had gone stale and was false): an
+  // earlier render probe found `highlight` produced no styling at the
+  // then-deployed UI tip, but highlight styling WORKS at the current tip (the
+  // UI routes highlight targets into the applied-edit pulse — one 2s ring;
+  // DGAI applyV5State.ts). The hygiene point stands on its own: a directive
+  // that says "point at the leader" must not be emitted by the turn that just
+  // declined to name one. The enrichment projection leak
+  // (compose/withheld-claim-projection.ts) was the user-visible half.
+  // ⭐ THE SHARED ADMISSION, not the constraint-verdict leaf. A directive that
+  // says "point at the leader" must not be emitted by a turn that declined to
+  // name one — and since the post-draft auto-run, "declined" has two
+  // independent causes: the constraint verdict, and nobody having asked for the
+  // analysis at all. `mayPresentLeaderClaimForFact` is the one place those
+  // compose; reading the leaf here would let an unrequested run highlight a
+  // recommended option beside a block that named none.
+  if (!mayPresentLeaderClaimForFact(fact)) {
+    return suppressDirective('run_analysis', 'leading_option_claim_withheld');
+  }
+  const highlight = buildRecommendedOptionUiDirective(fact, lookup);
+  if (highlight !== null) return emitDirective('run_analysis', highlight);
+  return suppressDirective('run_analysis', 'no_recommendation');
+}
+
+/** §2.1 row 1 — open_inspector on the mutated factor node / edge. */
+function buildMutationInspectorDirective(
+  fact: Extract<HandlerFact, { fact_type: 'set_factor_value' | 'adjust_edge_strength' }>,
+  lookup: GraphNodeLookup,
+): UiDirectiveBlock | null {
+  const { target_id, status } = fact.result;
+  // Only an APPLIED mutation — a noop inspector would imply a change that didn't
+  // happen (fail-closed).
+  if (status !== 'applied') return suppressDirective(fact.fact_type, 'noop');
+  if (typeof target_id !== 'string' || target_id.length === 0) {
+    return suppressDirective(fact.fact_type, 'target_unresolved');
+  }
+  // The mutation fact's `after` snapshot carries no label; resolve the node's
+  // label + kind from the persisted-snapshot lookup (labels are stable across
+  // set_factor_value / adjust_edge_strength). Miss → fail-closed.
+  const ref = lookup.get(target_id);
+  if (ref === undefined) return suppressDirective(fact.fact_type, 'target_unresolved');
+  const block = directiveFromRef('open_inspector', ref);
+  if (block === null) return suppressDirective(fact.fact_type, 'target_unresolved');
+  return emitDirective(fact.fact_type, block);
+}
+
+/** §2.1 row 5 (Lane 2, P3) — an ANSWERED explain_results turn opens the
+ *  results panel: `open_panel` @ {kind:'tab', id:'results'}. Gate is
+ *  `precondition_unmet` (NOT `noop` — always true on explain facts, see the
+ *  header). No auto-dock rides explain turns (auto-dock is driven by
+ *  run/results-status transitions in the UI), so this is not redundant. */
+function buildExplainResultsPanelDirective(
+  fact: Extract<HandlerFact, { fact_type: 'explain_results' }>,
+): UiDirectiveBlock | null {
+  if (fact.result.precondition_unmet === true) {
+    return suppressDirective('explain_results', 'precondition_unmet');
+  }
+  // ⚠⚠ THE SECOND GATE, ADDED WITH THE EXPLANATION-PRECONDITION NARROWING.
+  // Before that change, `stale`/`unconfirmed` took the blocking branch and so
+  // arrived here as `precondition_unmet: true` — the single gate above was
+  // total. The narrowing lets those verdicts REACH the answered branch, which
+  // flips the flag to false, and without this term the row would begin opening
+  // a panel of numbers the sentence above them has just called possibly-wrong.
+  //
+  // ⭐ THE PRINCIPLE, because it is what makes this a gate and not a
+  // preference: the caveat is carried IN WORDS; the panel is not. Opening an
+  // unmarked surface beside honest prose is the split this estate keeps paying
+  // for. The narrowing's own licence is explicitly for PROSE — `usableForProse`
+  // admits stale WITH a caveat, `usableForChips` is fresh-only — and a panel is
+  // nearer a chip than a sentence.
+  //
+  // Whether the results panel should ever open on stale state WITH ITS OWN
+  // MARKER is a real product question. It is rowed, not answered here.
+  if (fact.result.staleness_prefixed === true) {
+    return suppressDirective('explain_results', 'staleness_caveated');
+  }
+  const block = directiveFromUiTarget('open_panel', { kind: 'tab', id: 'results' });
+  if (block === null) return suppressDirective('explain_results', 'target_unresolved');
+  return emitDirective('explain_results', block);
+}
+
+/** §2.1 row 6 (Lane 2, P3) — explain_from_structure with ≥1 contested edge in
+ *  the turn's persisted graph opens the Model tab's relationships section:
+ *  `open_section` @ {kind:'model_section', id:'relationships'} (the UI
+ *  activates the diagnostics tab and auto-expands + scrolls the section).
+ *  Fail-closed to `no_contested_edges` on zero/absent/malformed. */
+function buildStructureContestedSectionDirective(
+  fact: Extract<HandlerFact, { fact_type: 'explain_from_structure' }>,
+  rawPersistedGraph: unknown,
+): UiDirectiveBlock | null {
+  if (countContestedEdges(rawPersistedGraph) === 0) {
+    return suppressDirective(fact.fact_type, 'no_contested_edges');
+  }
+  const block = directiveFromUiTarget('open_section', {
+    kind: 'model_section',
+    id: 'relationships',
+  });
+  if (block === null) return suppressDirective(fact.fact_type, 'target_unresolved');
+  return emitDirective(fact.fact_type, block);
+}
+
+// ============================================================================
+// ROADMAP 2.640 / UI-DIRECTIVE-0.38-DESIGN §3.4 — THE GATE-CLOSE REMEDY ROW.
+//
+// The capability, in one sentence: when a user asks why their model will not
+// run and CEE answers deterministically, the assistant also OPENS the section
+// where the blocker is fixed, instead of only describing it.
+//
+// This is not a ladder row. It rides no handler fact — it rides the
+// post-analysis advice gate's `readiness` class, which composes its answer from
+// `summariseReadiness` (routing/readiness-summary.ts) with zero LLM calls. The
+// gesture is therefore as deterministic as the prose it accompanies.
+//
+// ⚠ THE MAPPING IS DERIVED FROM BOTH PRODUCERS' BYTES, NOT FROM THIS LANE'S
+// READING (trap 13c: an expectation written from the author's model of a field
+// is a perfect score on the wrong exam). Each row below cites the producer
+// semantics on the CEE side AND the surface semantics on the UI side, and any
+// kind whose remedy surface could not be settled at the bytes is UNMAPPED
+// rather than guessed.
+// ============================================================================
+
+/**
+ * Telemetry's `fact_type` dimension is a free-form string on this event, and
+ * every existing emitter passes a real handler fact type. A gate directive has
+ * NO fact, so it passes this explicit sentinel rather than an empty string or a
+ * borrowed fact name — a dashboard that cannot separate gate gestures from
+ * fact-driven ones would silently merge two different populations.
+ */
+const GATE_REMEDY_FACT_TAG = 'advice_gate_readiness';
+
+/**
+ * `ReadinessOpenItem['kind']` → the Model-tab section id whose surface the
+ * remedy lives on, or `null` to emit no gesture.
+ *
+ * ⚠ TOTALITY IS DELIBERATE, AND IT IS THE POINT OF THE `null`s. This is a
+ * `Record` over the CLOSED kind union, so adding another kind to
+ * `ReadinessOpenItem` is a TYPE ERROR here rather than a silent fall-through to
+ * "no gesture". A hand-maintained subset that quietly stopped covering a new
+ * kind is precisely the drift class this estate keeps paying for (trap 12); an
+ * exhaustive record cannot go short without the compiler saying so.
+ *
+ * Producer semantics (CEE) — the canonical recovery projection in
+ * routing/readiness-summary.ts and the status enum's own doc comment at
+ * schemas/analysis-ready.ts:58–64. `goal_threshold_missing` remains a
+ * quarantined compatibility row. `too_few_options` is active only when the
+ * canonical issue record contains `FEWER_THAN_TWO_OPTIONS`; the producer never
+ * reconstructs either remedy from raw field presence.
+ * Surface semantics (UI) — the five section ids are rendered by
+ * ModelTabBody.tsx:780–845, one component per id.
+ */
+export const REMEDY_SECTION_BY_OPEN_ITEM_KIND: Record<
+  ReadinessOpenItem['kind'],
+  UiDirectiveModelSectionIdLiteral | null
+> = {
+  /**
+   * "you need at least 2 options before the analysis can compare them"
+   * (readiness-summary.ts:67–72). The remedy is to add an option, and options
+   * are rendered by `OptionsSection` — `makeSectionProps('options')`,
+   * ModelTabBody.tsx:785, fed `optionNodes={grouped.option}`.
+   */
+  too_few_options: 'options',
+  // A missing goal has no settled dedicated Model-tab section in the current
+  // contract. Preserve the typed remedy for coaching/copy while emitting no
+  // speculative UI gesture.
+  goal_node_missing: null,
+
+  /**
+   * "X is connected to factors but has no numeric values set"
+   * (readiness-summary.ts:81–87), whose status the schema defines as "Has raw
+   * values (categorical/boolean) awaiting numeric encoding"
+   * (analysis-ready.ts:62). The values in question are the OPTION's
+   * interventions, and `OptionsSection`'s own header states it renders "one row
+   * per intervention: Factor label | baseline ... → target value (EDITABLE)"
+   * (OptionsSection.tsx:2–7). So the surface that opens is the surface the
+   * number is typed into.
+   */
+  option_needs_encoding: 'options',
+
+  /**
+   * ⛔ DELIBERATELY UNMAPPED — "X isn't connected to any factors yet"
+   * (readiness-summary.ts:75–80).
+   *
+   * The remedy is to CREATE an option-to-factor connection, and this lane could
+   * not settle at the bytes whether a user creates that in `RelationshipsSection`
+   * (which renders `edges={causalEdges}`, and is where ContestedSection.tsx:96
+   * and PreAnalysisPanel.tsx:2304 both send edge work) or in `OptionsSection`
+   * (which renders the intervention rows that ARE an option's factor links).
+   * The two are different surfaces and only one is right.
+   *
+   * A directive is an implicit claim that the remedy lives where it points, so
+   * an unsettled row emits nothing and the user still gets the prose. Rowed for
+   * derivation; mapping it is a one-line change once the surface is settled.
+   */
+  option_needs_mapping: null,
+
+  /**
+   * ⛔ DELIBERATELY UNMAPPED — "the goal node doesn't have a measurable success
+   * threshold set" (readiness-summary.ts:90–96).
+   *
+   * There is NO goal section: the contract's five ids are options, factors,
+   * relationships, risks, modelcard (schemas 0.39.0 `UiDirectiveModelSectionId`,
+   * blocks.d.ts:1857). This row is not a gap in the mapping — it is the honest
+   * answer that the remedy surface does not exist in the enum, and it is why
+   * the builder must be able to decline.
+   */
+  goal_threshold_missing: null,
+
+  /**
+   * Canonical blocked/unknown/constraint recovery says only to review or
+   * resolve the model issue. No narrower surface is attested, so a gesture
+   * would add specificity the readiness authority did not provide.
+   */
+  model_needs_review: null,
+};
+
+/**
+ * ROADMAP 2.640 §3.4 row 1 — build the readiness gate's remedy gesture.
+ *
+ * `openItemKind` is the canonical recovery family from `open_items[0]`.
+ * `summariseReadiness` now emits at most one item from the shared recovery
+ * authority, so this module neither ranks nor reconstructs blockers.
+ *
+ * Returns `null` (telemetered) when the kind has no mapped surface, or when the
+ * built block fails strict boundary validation — never a partially-formed
+ * gesture. At most one directive is produced per call, and the gate path calls
+ * this at most once per turn (N=1 across the turn: a gate turn short-circuits
+ * before any ladder builder runs, because the ladder rides handler facts and a
+ * gate turn has none).
+ */
+export function buildGateRemedySectionDirective(
+  openItemKind: ReadinessOpenItem['kind'],
+): UiDirectiveBlock | null {
+  const sectionId = REMEDY_SECTION_BY_OPEN_ITEM_KIND[openItemKind];
+  if (sectionId === null) {
+    return suppressDirective(GATE_REMEDY_FACT_TAG, 'remedy_surface_unmapped');
+  }
+  const block = directiveFromUiTarget(
+    'open_section',
+    { kind: 'model_section', id: sectionId },
+    GATE_SOURCE,
+  );
+  if (block === null) return suppressDirective(GATE_REMEDY_FACT_TAG, 'target_unresolved');
+  return emitDirective(GATE_REMEDY_FACT_TAG, block);
+}
+
+/**
+ * Telemetry tag for the advice gate's FLIP gesture. Deliberately distinct from
+ * `GATE_REMEDY_FACT_TAG` and from the ladder's `what_would_flip` row: these are
+ * three different populations answering three different questions, and merging
+ * them would make it impossible to tell a gate answer that gestured from a
+ * routed handler turn that did — which is exactly the confusion that let §2.1
+ * row 4's standing false negative survive.
+ */
+const GATE_FLIP_FACT_TAG = 'advice_gate_what_would_flip';
+
+/**
+ * Open the Model-tab section the deterministic flip answer is ABOUT.
+ *
+ * ⭐ WHY THIS EXISTS AT ALL (measured 14 Aug 2026). The advice gate SHORT-CIRCUITS
+ * the turn and produces NO handler fact. The entire directive ladder is
+ * fact-keyed — rows 1-6 dispatch on `fact.fact_type` and row 7 is gated on
+ * `facts.length > 0` — so on the gate path EVERY row is structurally
+ * unreachable, and the fastest, best-grounded answer the product has was also
+ * the only one that could not gesture at anything. This is the gate path's own
+ * gesture, on the same seam and by the same precedent as
+ * `buildGateRemedySectionDirective` above.
+ *
+ * ⚠ WHAT IT CLAIMS, EXACTLY. Opening a section claims the answer's subject lives
+ * on that surface — nothing about which row, and nothing about what to do to it.
+ * That is the strongest honest claim available here: the gate cannot see node
+ * ids at all (see the ruling on `AdviceGateMatched.flip_focus_section`), so a
+ * `focus` on the named factor is not merely unimplemented, it is unsourceable
+ * from this seam without widening a deliberately label-only LLM-facing
+ * projection. A gesture that pointed at a node id derived from a label would be
+ * trap 19 wearing a directive's clothes.
+ *
+ * Not a mutation: opening a section proposes a place to look and changes no
+ * graph state, so it needs no consent warrant. Strictly ADDITIVE — every
+ * fail-closed arm still ships the prose.
+ */
+export function buildGateFlipSectionDirective(
+  section: AdviceGateFlipFocusSection,
+): UiDirectiveBlock | null {
+  const block = directiveFromUiTarget(
+    'open_section',
+    { kind: 'model_section', id: section },
+    GATE_SOURCE,
+  );
+  if (block === null) return suppressDirective(GATE_FLIP_FACT_TAG, 'target_unresolved');
+  return emitDirective(GATE_FLIP_FACT_TAG, block);
+}
+
+/**
+ * §2.1 row 4 — focus the factor the turn's own `set_factor_value` proposal
+ * offers to change ("Test <factor> at <N>").
+ *
+ * ⭐ WHY THE PROPOSAL IS THE AUTHORITY (measured, 14 Aug 2026). This row used
+ * to read `fact.result.flip_scenarios?.[0]?.factor_id`. `flip_scenarios` is a
+ * DEPRECATED LEGACY field — `WhatWouldFlipResultSchema` still admits it
+ * (optional) at schemas 0.40.0, so this was never a contract gap, but the
+ * schema's own comment says "new code populates only the no-op fields" and
+ * NEITHER producer (`tools/handlers/what-would-flip.ts:95`, `:223`) writes it.
+ * So the read was always `undefined` and this row suppressed `no_flip_factor`
+ * on EVERY real flip turn. Row 7 could not cover for it either: the flip branch
+ * pushes no blocks (`compose.ts:553-560`, `EMPTY_FRESH_BLOCKS`) and the
+ * lifecycle rebuild runs after row 7 by a deliberate ruling, so its scan found
+ * no dispatchable ref and suppressed `no_discussed_entity`. **A flip turn
+ * gestured at nothing at all** — verified end-to-end on both dispatch routes.
+ *
+ * `flipFocusFactorId` is the factor `selectFlipProposal` ACTUALLY chose for
+ * this turn's chip (`compose/flip-proposal.ts`), threaded down from the turn
+ * executor. Binding here rather than re-reading `flip_thresholds` is the whole
+ * point: that selection SKIPS entries which cannot render a safe proposal, so
+ * `flip_thresholds[0]` is frequently NOT the proposed factor. One derivation,
+ * two read points — sentence, chip and gesture provably agree, instead of two
+ * authorities that can disagree (trap 21).
+ *
+ * ⚠ THE ALTERNATIVE NOT TAKEN, and why. Populating `flip_scenarios` on the fact
+ * would also work and needs no threading. It is rejected deliberately: it
+ * resurrects a field the contract marks legacy, and it would re-derive the flip
+ * factor independently of the chip — reintroducing the exact disagreement this
+ * binding exists to prevent. If that field is ever revived for another reason,
+ * this row should still bind to the proposal.
+ *
+ * Fail-closed on every path: unmet precondition, no proposal on this turn, or
+ * an id the graph lookup cannot resolve to a factor.
+ */
+function buildFlipFocusDirective(
+  fact: Extract<HandlerFact, { fact_type: 'what_would_flip' }>,
+  lookup: GraphNodeLookup,
+  flipFocusFactorId?: string,
+): UiDirectiveBlock | null {
+  if (fact.result.precondition_unmet) {
+    return suppressDirective('what_would_flip', 'precondition_unmet');
+  }
+  // The SAME caveated-answer gate as row 5 — see the note there. The narrowing
+  // applies to BOTH explanation handlers, so this row flips identically; gating
+  // only its twin would point the user at a factor derived from an analysis the
+  // answer above just called possibly-wrong.
+  //
+  // ⚠ ORDERING, RECORDED RATHER THAN CHANGED: this gate sits BEFORE the
+  // `no_flip_proposal` check, so a caveated turn that ALSO had no proposal now
+  // reports `staleness_caveated` rather than `no_flip_proposal`. Both are true
+  // of such a turn and the emitted directive is identical (none) either way, so
+  // this is a telemetry-attribution nuance, not a behaviour difference. It is
+  // noted because it is the kind of silent re-attribution that later reads as a
+  // capability going quiet in a dashboard (cf. the retired `no_flip_factor`
+  // tag). Currency is checked first deliberately: it is a claim about whether
+  // the turn may point at ANYTHING, which outranks which thing it would point at.
+  if (fact.result.staleness_prefixed === true) {
+    return suppressDirective('what_would_flip', 'staleness_caveated');
+  }
+  if (typeof flipFocusFactorId !== 'string' || flipFocusFactorId.length === 0) {
+    return suppressDirective('what_would_flip', 'no_flip_proposal');
+  }
+  const ref = lookup.get(flipFocusFactorId);
+  if (ref === undefined || ref.kind !== 'factor') {
+    return suppressDirective('what_would_flip', 'target_unresolved');
+  }
+  const block = directiveFromRef('focus', ref);
+  if (block === null) return suppressDirective('what_would_flip', 'target_unresolved');
+  return emitDirective('what_would_flip', block);
+}
+
+// ============================================================================
+// §2.1 ROW 7 — THE DISCUSSED-ENTITY TAIL. "The workspace follows the
+// conversation." (P3 UI agency, component 3.)
+//
+// THE GAP THIS CLOSES: rows 1–6 are each keyed to a handler SIDE EFFECT — an
+// applied mutation, a completed analysis, a flip query, an answered explain. So
+// the assistant can point at what it just CHANGED or COMPUTED, and never at
+// what it is merely TALKING ABOUT. When a card says "your gross margin floor is
+// doing most of the work here", nothing on the canvas moves. That is precisely
+// what "beside the canvas, not on it" feels like.
+//
+// ⭐ THE ENTITY-RESOLUTION ROUTE, and why it is not prose-matching. This row
+// resolves NOTHING itself. It reuses an entity reference the composed cards
+// ALREADY carry — the FIRST DISPATCHABLE ref, scanning blocks in order — a
+// `TargetRef` that CEE resolved against the graph node lookup and that has
+// already passed the block's own strict parse.
+//
+// ⚠ NOT `target_refs[0]`, which is what this comment said until 10 Aug 2026.
+// The code has always skipped refs whose kind is outside
+// ROW7_DISPATCHABLE_KINDS (and options on a withheld turn), so a card carrying
+// `[goal, factor]` yields the FACTOR, not the goal. The code is the safer
+// behaviour; the comment overstated how simple the rule is, which matters
+// because "it is literally element zero" is the sentence a reader would use to
+// conclude that ref ORDER cannot affect this row. It can, and it does.
+//
+// Consequences:
+//   · it CANNOT point at an entity that does not exist (the ref came from the
+//     graph lookup, which is closed over real nodes/edges);
+//   · it CANNOT disagree with the card the user is reading, because it is the
+//     same ref object — one derivation, two read points, the rule ROADMAP 2.211
+//     already applies to `selectLens`;
+//   · verb and target stay DETERMINISTIC and CEE-authored. Zero LLM authorship
+//     of either, unchanged from rows 1–6.
+//
+// ⚠ DISCLOSURE ON REF PROVENANCE — NAMED, NOT CLOSED (ruling, 10 Aug 2026).
+// `target_refs` CARRIES NO PROVENANCE STAMP. Most are derived structurally (a
+// factor id → lookup: the evidence card, the lens subject, the flip-threshold
+// row), but TWO coaching builders in phase3-blocks.ts populate theirs via
+// `resolveProseEntityRefs`, which scans the card's own prose for graph node
+// LABELS. A row-7 directive therefore INHERITS whatever confidence that matcher
+// has. It is shipped and reviewed, with hard over-match rails — whole-phrase
+// both-ends-bounded matching, a minimum label length, generic-token rejection,
+// and a duplicate label resolving to NEITHER node — and it can only ever return
+// ids that exist in the graph.
+//
+// ⭐ RESOLVED IN PART, 10 Aug 2026 (ROADMAP 2.1023). `resolveProseEntityRefs`
+// used to return its refs in GRAPH LOOKUP order — the producer's node-array
+// order, invisible to the reader — so this row could focus the incidental
+// mention while the user read about the main subject ("your gross margin floor
+// is doing most of the work, though team ramp time matters a little too" →
+// focus @ Team ramp time, reproduced at the bytes). It now orders by FIRST
+// MENTION IN THE PROSE, so the gesture follows the sentence. That is a pure
+// reordering of the same set: this row's safety invariant is untouched — it
+// still cannot point at anything the card does not already point at.
+//
+// Row 7 deliberately does NOT try to distinguish the two provenances. A
+// hand-maintained list of "structural" builders would read correct on the day
+// it was written and drift silently the first time someone adds a builder —
+// the hand-maintained-mirror defect class. Stamping provenance ON `target_refs`
+// is a contract change and is sequenced separately; it is NOT this lane's to
+// invent. The gap is named here so the next reader inherits it.
+//
+// VERB: `focus` — bring into view. It asserts nothing about leadership (unlike
+// `highlight`), which is what makes it safe as a discussion gesture.
+//
+// N=1: this is a strict TAIL. The caller reaches it only when the
+// `uiDirectiveEmitted` latch is still unset, so a side-effect gesture ALWAYS
+// wins and row 7 can never displace one. Rows 1–6 are byte-unchanged apart from
+// the additive `source` stamp.
+//
+// ⚠ SCOPE — CURRENT-TURN FACTS ONLY. The caller invokes this BEFORE the
+// prior-fact lifecycle rebuild and gates it on `facts.length > 0`, so row 7
+// cannot fire on a turn the user did not initiate (a reload / session
+// rehydration). A directive is a response to something the user JUST DID;
+// moving their viewport otherwise is the workspace acting on its own
+// initiative. See the call site in compose.ts for the full ruling.
+// ============================================================================
+
+/**
+ * The `TargetRefKind`s row 7 will point at. DELIBERATELY NARROWER than the
+ * boundary union, which also carries `goal`, `risk`, `constraint` and
+ * `outcome`.
+ *
+ * Derived from what the shipped ladder DEMONSTRABLY dispatches, not from what
+ * the schema permits: rows 2/4 point at `factor`, row 3 at `option`, and row 1
+ * at whichever the graph lookup returns for a mutated target — which indexes
+ * edges as `kind: 'edge'` (phase3-blocks.ts::populateGraphNodeLookup pass 2), so
+ * `adjust_edge_strength` already ships edge targets. The four excluded kinds
+ * have NO shipped precedent, and `constraint` is explicitly a known dead end
+ * (the schema's own comment: "a schema-legal target with no renderer is a dead
+ * end — the `constraint` TargetRefKind defect class, ROADMAP 2.457(b)").
+ * Pointing at a target nothing renders is a gesture that silently does nothing.
+ */
+const ROW7_DISPATCHABLE_KINDS: ReadonlySet<string> = new Set(['factor', 'option', 'edge']);
+
+/** Telemetry `fact_type` tag for row 7. Row 7 is not keyed to a handler fact —
+ *  it is keyed to what the turn's cards discuss — so it needs its own tag, and
+ *  the tag is the ONLY way to tell a row-7 gesture from a row-2 one: both emit
+ *  `focus @ <factor>` and the block bytes are identical. */
+const DISCUSSED_ENTITY_TAG = 'discussed_entity';
+
+/** A block's `target_refs`, read defensively. Blocks that do not carry the
+ *  field (graph_patch, text, analysis_result, the directive itself) yield []. */
+function readTargetRefs(block: OlumiResponse['blocks'][number]): readonly GraphNodeRef[] {
+  const refs = (block as { target_refs?: unknown }).target_refs;
+  if (!Array.isArray(refs)) return [];
+  const out: GraphNodeRef[] = [];
+  for (const raw of refs) {
+    if (raw === null || typeof raw !== 'object') continue;
+    const { id, label, kind } = raw as { id?: unknown; label?: unknown; kind?: unknown };
+    if (typeof id !== 'string' || id.length === 0) continue;
+    if (typeof label !== 'string' || label.length === 0) continue;
+    if (typeof kind !== 'string') continue;
+    out.push({ id, label, kind } as GraphNodeRef);
+  }
+  return out;
+}
+
+/**
+ * §2.1 row 7 — point at the entity this turn's cards DISCUSS.
+ *
+ * `blocks` is the turn's composed block list (the caller passes what it has
+ * accumulated). `mayNameLeadingOption` is the turn's claim-safety verdict: when
+ * FALSE, an `option` target is skipped — the withheld-claim gate must bite here
+ * exactly as it does on row 3, because a directive that points at a leader the
+ * product is not entitled to name is a trust defect wearing a UI gesture. A
+ * FACTOR or EDGE target asserts no leader and stays permitted on those turns
+ * (the same scoping row 3's comment sets out for row 2's `focus`).
+ *
+ * Fail-closed and telemetered on every path: no card carries a dispatchable ref
+ * → `no_discussed_entity`; the only candidates were options on a withheld turn
+ * → `leading_option_claim_withheld`; schema parse failure →
+ * `target_unresolved`.
+ */
+export function buildDiscussedEntityUiDirective(
+  blocks: readonly OlumiResponse['blocks'][number][],
+  mayNameLeadingOption: boolean,
+): UiDirectiveBlock | null {
+  let withheldOptionSeen = false;
+
+  for (const block of blocks) {
+    for (const ref of readTargetRefs(block)) {
+      if (!ROW7_DISPATCHABLE_KINDS.has(ref.kind)) continue;
+      if (ref.kind === 'option' && !mayNameLeadingOption) {
+        // Do not point at an option this turn may not name. Keep scanning: a
+        // factor or edge later in the turn is still a legitimate target.
+        withheldOptionSeen = true;
+        continue;
+      }
+      const directive = directiveFromRef('focus', ref);
+      if (directive === null) {
+        return suppressDirective(DISCUSSED_ENTITY_TAG, 'target_unresolved');
+      }
+      return emitDirective(DISCUSSED_ENTITY_TAG, directive);
+    }
+  }
+
+  return suppressDirective(
+    DISCUSSED_ENTITY_TAG,
+    withheldOptionSeen ? 'leading_option_claim_withheld' : 'no_discussed_entity',
+  );
+}
+
+/**
+ * The §2.1 emit ladder (wave-4 rows 1–4; Lane 2 P3 rows 5–6). Dispatches on
+ * fact class; returns the SINGLE directive for this fact, or null
+ * (fail-closed, telemetered). The caller gates every call behind the
+ * `uiDirectiveEmitted` latch so at most one directive emits per turn (N=1).
+ * `lookup` resolves the target label/kind (built from the enrichment/persisted
+ * snapshot for run_analysis, or the persisted snapshot for mutation / flip
+ * turns); `freshBlocks` is consulted only for the row-2 σ gate;
+ * `rawPersistedGraph` only by row 6's contested-edge derivation (absent →
+ * fail-closed suppression, never a throw). `add_constraint` (UI drops the
+ * patch — fail-open avoided), `compare_options` (NO V5 producer exists — a row
+ * would be unreachable), and `edit_graph` return null with no telemetry noise.
+ */
+export function buildFocusInspectorDirective(
+  fact: HandlerFact,
+  lookup: GraphNodeLookup,
+  freshBlocks: OlumiResponse['blocks'],
+  previousAnalysisLens?: LensId | null,
+  rawPersistedGraph?: unknown,
+  // ROADMAP 2.692 slice 2 — the SAME judgement feed compose handed the lens
+  // surface, so this module's second `selectLens` derivation of the turn
+  // cannot disagree with the card about which lens won (the trap-12/16 rule
+  // this file already states for `previousAnalysisLens`).
+  judgementSignals?: JudgementSignals,
+  // §2.1 row 4 — the factor this turn's own flip proposal targets, as chosen by
+  // `selectFlipProposal` in the turn executor. Consumed ONLY by the
+  // `what_would_flip` row; every other row ignores it. Absent ⇒ that row fails
+  // closed (`no_flip_proposal`), so an unthreaded call site loses the gesture,
+  // never points at the wrong node.
+  flipFocusFactorId?: string,
+): UiDirectiveBlock | null {
+  switch (fact.fact_type) {
+    case 'run_analysis':
+      return buildRunAnalysisDirective(fact, lookup, freshBlocks, previousAnalysisLens, judgementSignals);
+    case 'set_factor_value':
+    case 'adjust_edge_strength':
+      return buildMutationInspectorDirective(fact, lookup);
+    case 'what_would_flip':
+      return buildFlipFocusDirective(fact, lookup, flipFocusFactorId);
+    case 'explain_results':
+      return buildExplainResultsPanelDirective(fact);
+    case 'explain_from_structure':
+      return buildStructureContestedSectionDirective(fact, rawPersistedGraph);
+    default:
+      // add_constraint (UI drops the patch — fail-open avoided), compare_options
+      // (no V5 producer — unreachable), explain_result (deprecated literal,
+      // historic rows only), edit_graph: no directive class.
+      //
+      // ⚠ `edit_graph` STAYS UNMAPPED HERE ON PURPOSE, and the reason is not the
+      // one it looks like. The configure-option repair chip exits on
+      // `exit_path: edit_graph` with NO directive, and the obvious repair is to
+      // give `edit_graph` a row in this switch. It would be DEAD CODE: that turn
+      // commits `handler_facts: []` (`edit-graph-dispatch.ts` builds a fact only
+      // when a mutation applied), so this switch never receives an `edit_graph`
+      // fact on the path that needs the gesture. The code would be live and the
+      // DATA could never reach it — CLAUDE.md trap 16-inverse.
+      //
+      // ⭐ AND NO GESTURE IS EMITTED ELSEWHERE FOR IT EITHER — the seam ships
+      // NONE, by decision. Two destinations were built and both were refuted by
+      // live drives: the canvas option inspector is read-only by policy (its
+      // controls sit in a `<fieldset disabled>`; a forced write produced zero
+      // wire calls), and the Model tab's `options` section has no value control
+      // on option rows at all (that row's `-value` testid resolves to an empty
+      // zero-height `<span>` where a FACTOR row gets a real `<button>`). With no
+      // surface that can accept the value, the honest answer is to ask for it in
+      // chat — where the user already is when the chip is clicked, and where a
+      // bare figure binds via `routing/repair-value-binding.ts`.
+      return null;
+  }
+}
+
+// ============================================================================
+// THE AMBIGUITY-CANDIDATE HIGHLIGHT — "point at what the question is about".
+//
+// Every builder above rides a HANDLER FACT: the user did something and the
+// gesture follows the result. That is a real coverage gap rather than a design
+// choice, and it is TURN-CLASS shaped. `buildBlocksFromFacts` is the only path
+// that can emit a directive, and it is gated on `facts.length > 0` — so the
+// deterministic clarify / ambiguity / refusal / no-analysis pre-routes, which
+// call `composeAnswer` with no facts at all, are STRUCTURALLY incapable of
+// gesturing. A fresh user spends their first several turns on exactly those
+// paths, and every one of them points at nothing.
+//
+// This builder covers ONE of them: the ambiguity clarification. When CEE asks
+// "which one did you mean?", it highlights the candidates it is asking about.
+//
+// WHY THIS ONE IS TRUTHFUL BY CONSTRUCTION. The candidate set is already
+// computed to BUILD the question — the numbered list the user reads is
+// rendered from the same proposals whose entities are highlighted here. The
+// gesture therefore asserts nothing the question does not already assert; it
+// relocates an assertion the user is already reading from the chat panel onto
+// the model it is about.
+//
+// ⚠ THE CHARTER CONSTRAINT, AND IT IS THE POINT OF THE SLICE RATHER THAN A
+// CAVEAT. Olumi's own contributions stay PROVISIONAL and DISTINGUISHABLE from
+// the user's, and this gesture exists to show what Olumi is UNCERTAIN about —
+// never to imply it has decided. That rules out more than it looks like:
+//   - `highlight` and NOT `focus`/`open_inspector`. The single-target verbs
+//     would have to CHOOSE one candidate to centre or open, which is precisely
+//     the decision the turn is asking the USER to make. `highlight` pulses
+//     every target equally and moves neither viewport nor selection.
+//   - NO ordering signal. `targets` is emitted in the candidate set's own
+//     order — the same order as the numbered list the user is reading — and
+//     carries no rank, no score, no "most likely" first.
+//   - NO `note`. The schema offers a caption slot; a caption here would be the
+//     natural place for a nudge ("probably this one"), and there is nothing to
+//     say that the numbered list does not already say. Zero free text is also
+//     zero hallucination surface and nothing for the egress scrubber to scrub.
+//
+// ⚠ `source` IS DELIBERATELY NOT STAMPED, and this is a REPORTED GAP rather
+// than an oversight. The 0.39.0 vocabulary is `ladder` | `gate` | `composer`,
+// and NONE of the three names this authoring path: `ladder` means fact-derived
+// (this row has no fact, which is the entire reason it exists), `gate` means
+// the advice-gate per-class mapping, and `composer` is defined at the contract
+// as "an LLM-PROPOSED gesture ... validated fail-closed". Stamping `composer`
+// on a fully deterministic gesture would tell every capture and every
+// telemetry consumer that an LLM authored it, which is false — and picking the
+// least-bad label to fill a required-looking slot is how a vocabulary stops
+// meaning anything. The enum's own absence semantics permit this: absence ⇔
+// "not stamped", and a consumer MUST NOT infer `ladder` from it. Omitting
+// asserts nothing. A fourth value for deterministic FACT-LESS pre-route
+// gestures is a schemas change and a separate, ratifiable decision; it is
+// named in this lane's report rather than smuggled in here.
+// ============================================================================
+
+/**
+ * Defensive upper bound on highlighted candidates.
+ *
+ * The UI pulses EVERY resolvable target, so an unbounded set would flood the
+ * canvas — the failure mode of a "point at it" gesture is not a wrong target
+ * but too many, at which point it points at nothing in particular. Live
+ * ambiguity sets are small by construction (they are the proposals whose
+ * labels the user's reply matched), and nothing in the pending-action store
+ * bounds them, so the bound is asserted HERE rather than assumed upstream.
+ * Over the cap the directive is suppressed entirely rather than truncated: a
+ * silently truncated highlight would point at a SUBSET of what the question
+ * asks about, which is the one outcome worse than no gesture.
+ */
+export const AMBIGUITY_HIGHLIGHT_MAX_TARGETS = 6;
+
+/**
+ * The graph entities one ambiguous candidate is about.
+ *
+ * ⚠ TWO CARRIERS, ONE CONCEPT — read BOTH. `PendingActionPreconditions
+ * .target_entity_ids` ("node/edge ids that must still exist for this action to
+ * be safe to resume") and `inline_patch.target_entity_ids` ("graph entities
+ * the patch targets") are differently-named twins of the same fact, written by
+ * different producers. Reading only one silently under-covers whichever
+ * proposals the other producer minted, and that under-coverage looks exactly
+ * like a candidate with no graph entity — i.e. it fails CLOSED and invisibly.
+ * The union is deduped against the graph lookup below, so a candidate carrying
+ * the id in both places contributes it once.
+ */
+interface AmbiguityCandidateSource {
+  /**
+   * ⚠ BOTH FIELDS ARE `unknown` ON PURPOSE — this is not laziness, and the
+   * typecheck gate proved it. `PendingAction.action` is a DISCRIMINATED UNION
+   * and only some variants carry `inline_patch` at all (a `set_factor_value`
+   * pending has no property in common with an `{ inline_patch }` shape, so
+   * TypeScript's weak-type check rejects the narrower structural type
+   * outright). Declaring the shape we WISH the carriers had would either not
+   * compile or force a cast that silently asserts a property the variant does
+   * not have. `unknown` + the total readers below state the honest contract:
+   * this builder accepts any pending and extracts ids where they exist.
+   */
+  readonly preconditions?: unknown;
+  readonly action?: unknown;
+}
+
+/** Narrow an unknown to a readable record, or null. */
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+/** Read a `target_entity_ids`-shaped field defensively (unknown → []). */
+function readEntityIds(raw: unknown): readonly string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((v): v is string => typeof v === 'string' && v.length > 0);
+}
+
+/**
+ * Collect the graph-entity ids the ambiguous candidates are about, ONE GROUP
+ * PER CANDIDATE, in candidate order (the order the numbered clarification lists
+ * them). Exactly one group per input candidate, always — `groups.length ===
+ * candidates.length` is the contract the builder counts on.
+ *
+ * ⚠ GROUPED RATHER THAN FLATTENED, AND THE SHAPE IS THE WHOLE POINT. A flat
+ * union answers "which entities are these candidates about?". The builder's
+ * question is a different one — "does EVERY option the question numbers have
+ * something to point at?" — and a flat list is structurally incapable of
+ * answering it: once the ids are merged, a candidate that contributed NOTHING
+ * is indistinguishable from one whose id another candidate also carries. The
+ * candidate boundary is the fact, so it is preserved here and collapsed by the
+ * builder only after coverage has been decided.
+ *
+ * ⚠ DEDUP IS WITHIN A CANDIDATE ONLY, and moving it would silently break the
+ * coverage test. An id carried on BOTH carriers of one candidate contributes
+ * once (that is the differently-named-twins case the interface documents).
+ * Cross-candidate dedup deliberately does NOT happen here — it is the builder's
+ * `seen` set, unchanged. Deduping across candidates here would empty the second
+ * group whenever two candidates legitimately name the same node, and the
+ * builder would read that as "candidate 2 has nothing to point at" and suppress
+ * a gesture that is entirely honest.
+ *
+ * Pure and total: any shape that is not what it claims to be contributes an
+ * EMPTY GROUP rather than throwing — this runs on a clarification turn, and a
+ * malformed pending must degrade to "no gesture", never to a failed turn. An
+ * empty group is not nothing: it records that a candidate EXISTS and carries no
+ * entity, which is exactly the fact the builder must see.
+ */
+export function collectAmbiguityCandidateEntityIds(
+  candidates: readonly AmbiguityCandidateSource[],
+): readonly (readonly string[])[] {
+  return candidates.map((cand) => {
+    const preconditions = asRecord(cand.preconditions);
+    const fromPreconditions =
+      preconditions === null ? [] : readEntityIds(preconditions.target_entity_ids);
+    const action = asRecord(cand.action);
+    const inlinePatch = action === null ? null : asRecord(action.inline_patch);
+    const fromInlinePatch =
+      inlinePatch === null ? [] : readEntityIds(inlinePatch.target_entity_ids);
+    const group: string[] = [];
+    for (const id of [...fromPreconditions, ...fromInlinePatch]) {
+      if (!group.includes(id)) group.push(id);
+    }
+    return group;
+  });
+}
+
+/**
+ * Build the ambiguity-candidate `highlight` directive, or null on any
+ * fail-closed condition. Deterministic: no LLM input, no clock, no randomness.
+ *
+ * ⚠ COVERAGE IS ALL-OR-NOTHING, AND THIS REVERSES A PREVIOUSLY RATIFIED
+ * POSITION. The first revision dropped unresolvable ids one at a time and
+ * suppressed only when the set emptied, so a MIXED candidate set — one option
+ * that is a graph node, one that is not — pulsed only the resolvable one. That
+ * is a highlight over a PROPER SUBSET of the options the numbered question
+ * lists, and on a turn whose entire purpose is to ask the user which option
+ * they meant, lighting one of two IMPLIES THE ANSWER. It is the same outcome
+ * the cap door above already refuses ("a silently truncated highlight would
+ * point at a SUBSET of what the question asks about, which is the one outcome
+ * worse than no gesture") — the two doors simply disagreed, and this one was
+ * wrong. Suppression here is not a new failure mode: it is exactly the
+ * behaviour that shipped before the gesture existed.
+ *
+ * Fail-closed (returns null, never a partial block):
+ *   - no candidate carries an entity id at all (nothing to point at);
+ *   - NO id resolves in `lookup` — the ids name entities that are not in the
+ *     graph the user is looking at, so a highlight would point at nothing.
+ *     ⚠ This is the load-bearing gate. `lookup` is built from the turn's
+ *     persisted graph and already drops any node whose kind is outside the
+ *     `TargetRefKind` union, so a resolved ref is an entity that EXISTS and is
+ *     addressable.
+ *   - ANY candidate contributes no resolved target while another does — the
+ *     partial-coverage arm described above, tagged separately so its live rate
+ *     is countable;
+ *   - more resolvable targets than `AMBIGUITY_HIGHLIGHT_MAX_TARGETS`;
+ *   - the final strict `UiDirectiveBlockSchema` parse fails (validate before
+ *     emit, the discipline every builder in this file follows — drop the
+ *     block, never weaken the schema).
+ *
+ * Labels come from the lookup, never from the proposal's chip copy and NEVER
+ * from the id (the Phase-3 §0.1 invariant): the chip label describes the
+ * CHANGE being offered ("Add a cost constraint"), whereas a TargetRef label
+ * names the ENTITY being pointed at. Using the chip's copy here would put a
+ * change-description on a node reference and make the two disagree on screen.
+ */
+export function buildAmbiguityCandidateUiDirective(
+  candidateEntityIdGroups: readonly (readonly string[])[],
+  lookup: GraphNodeLookup,
+): UiDirectiveBlock | null {
+  // `[].every()` is true, so a turn with no candidates at all lands here too —
+  // the same arm, and the same tag, as candidates carrying no entity ids.
+  if (candidateEntityIdGroups.every((group) => group.length === 0)) {
+    return suppressDirective(AMBIGUITY_FACT_TYPE, 'ambiguity_no_candidate_entities');
+  }
+
+  const targets: { id: string; label: string; kind: GraphNodeRef['kind'] }[] = [];
+  const seen = new Set<string>();
+  // Counted PER CANDIDATE, not per id: cross-candidate dedup below must not
+  // make a candidate look uncovered just because an earlier one already
+  // contributed the same node.
+  let candidatesWithNoResolvedTarget = 0;
+  for (const group of candidateEntityIdGroups) {
+    let resolvedInThisGroup = 0;
+    for (const id of group) {
+      const ref = lookup.get(id);
+      // Unresolvable ⇒ not in the graph the user is looking at ⇒ contributes
+      // nothing to THIS candidate's coverage.
+      if (ref === undefined) continue;
+      resolvedInThisGroup += 1;
+      if (seen.has(ref.id)) continue;
+      seen.add(ref.id);
+      targets.push({ id: ref.id, label: ref.label, kind: ref.kind });
+    }
+    if (resolvedInThisGroup === 0) candidatesWithNoResolvedTarget += 1;
+  }
+
+  if (targets.length === 0) {
+    return suppressDirective(AMBIGUITY_FACT_TYPE, 'ambiguity_targets_unresolved');
+  }
+  if (candidatesWithNoResolvedTarget > 0) {
+    return suppressDirective(AMBIGUITY_FACT_TYPE, 'ambiguity_candidate_coverage_partial');
+  }
+  if (targets.length > AMBIGUITY_HIGHLIGHT_MAX_TARGETS) {
+    return suppressDirective(AMBIGUITY_FACT_TYPE, 'ambiguity_too_many_targets');
+  }
+
+  const candidate: UiDirectiveBlock = {
+    type: 'ui_directive',
+    verb: 'highlight',
+    targets,
+  };
+
+  const parsed = UiDirectiveBlockSchema.safeParse(candidate);
+  if (!parsed.success) {
+    return suppressDirective(AMBIGUITY_FACT_TYPE, 'ambiguity_schema_parse_failed');
+  }
+  return emitDirective(AMBIGUITY_FACT_TYPE, parsed.data);
+}

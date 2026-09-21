@@ -1,0 +1,276 @@
+{
+  "response_version": 2,
+  "assistant_text": "Comparing two options: opening the Leeds location next quarter as planned, versus delaying the opening by 6 to 12 months.\n\nNo analysis has been run yet, so I can't yet say which performs better, but if you'd like, I can run it now to see how they compare.",
+  "blocks": [],
+  "suggested_actions": [
+    {
+      "id": "chip_prompt_configure_option",
+      "label": "Configure Open Leeds location next quarter as pla…",
+      "message": "Help me configure Open Leeds location next quarter as pla…."
+    }
+  ],
+  "insights": [],
+  "stage_indicator": "analyse",
+  "analysis_ready": {
+    "options": [
+      {
+        "option_id": "d8d2df15",
+        "label": "Open Leeds location next quarter as planned",
+        "status": "needs_user_mapping",
+        "interventions": {},
+        "is_baseline": false,
+        "status_reason": "No interventions extracted"
+      },
+      {
+        "option_id": "e75f367a",
+        "label": "Delay Leeds opening by 6–12 months",
+        "status": "ready",
+        "interventions": {
+          "93e38814": 0
+        },
+        "is_baseline": false,
+        "intervention_details": {
+          "93e38814": {
+            "display_value": "Low (0)",
+            "normalised_value": 0
+          }
+        },
+        "status_reason": "1 intervention(s) ready for analysis"
+      }
+    ],
+    "goal_node_id": "378f195a",
+    "status": "needs_user_input",
+    "blockers": [
+      {
+        "option_id": "d8d2df15",
+        "option_label": "Open Leeds location next quarter as planned",
+        "factor_id": "93e38814",
+        "factor_label": "Capital expenditure required to fit out and launch the Leeds site",
+        "blocker_type": "missing_value",
+        "message": "Factor \"Capital expenditure required to fit out and launch the Leeds site\" is currently 1. What should option \"Open Leeds location next quarter as planned\" set it to?",
+        "suggested_action": "add_value"
+      },
+      {
+        "option_id": "d8d2df15",
+        "option_label": "Open Leeds location next quarter as planned",
+        "factor_id": "a778feb6",
+        "factor_label": "Speed of launch — how quickly the new site opens",
+        "blocker_type": "missing_value",
+        "message": "Factor \"Speed of launch — how quickly the new site opens\" is currently 0.5. What should option \"Open Leeds location next quarter as planned\" set it to?",
+        "suggested_action": "add_value"
+      },
+      {
+        "option_id": "d8d2df15",
+        "option_label": "Open Leeds location next quarter as planned",
+        "factor_id": "d21b41d8",
+        "factor_label": "Operational capacity and staffing at the new location",
+        "blocker_type": "missing_value",
+        "message": "Factor \"Operational capacity and staffing at the new location\" is currently 0.5. What should option \"Open Leeds location next quarter as planned\" set it to?",
+        "suggested_action": "add_value"
+      }
+    ],
+    "bias_findings": [],
+    "readiness_issues": [
+      {
+        "issue_id": "semantic_1",
+        "repairability": "human_input_required",
+        "option_id": "d8d2df15",
+        "option_label": "Open Leeds location next quarter as planned",
+        "factor_id": "93e38814",
+        "factor_label": "Capital expenditure required to fit out and launch the Leeds site",
+        "code": "MISSING_OPTION_VALUE",
+        "category": "option_values",
+        "message": "Choose the missing effect value for \"Open Leeds location next quarter as planned\" on \"Capital expenditure required to fit out and launch the Leeds site\".",
+        "provenance": "unattributed",
+        "obligation": "offered"
+      },
+      {
+        "issue_id": "semantic_3",
+        "repairability": "human_input_required",
+        "option_id": "d8d2df15",
+        "option_label": "Open Leeds location next quarter as planned",
+        "factor_id": "a778feb6",
+        "factor_label": "Speed of launch — how quickly the new site opens",
+        "code": "MISSING_OPTION_VALUE",
+        "category": "option_values",
+        "message": "Choose the missing effect value for \"Open Leeds location next quarter as planned\" on \"Speed of launch — how quickly the new site opens\".",
+        "provenance": "unattributed",
+        "obligation": "offered"
+      },
+      {
+        "issue_id": "semantic_5",
+        "repairability": "human_input_required",
+        "option_id": "d8d2df15",
+        "option_label": "Open Leeds location next quarter as planned",
+        "factor_id": "d21b41d8",
+        "factor_label": "Operational capacity and staffing at the new location",
+        "code": "MISSING_OPTION_VALUE",
+        "category": "option_values",
+        "message": "Choose the missing effect value for \"Open Leeds location next quarter as planned\" on \"Operational capacity and staffing at the new location\".",
+        "provenance": "unattributed",
+        "obligation": "offered"
+      }
+    ],
+    "repair_proposal": {
+      "proposal_version": "readiness_repair_v1",
+      "complete": true,
+      "issue_ids": [
+        "semantic_1",
+        "semantic_3",
+        "semantic_5"
+      ],
+      "changes": [],
+      "unresolved_inputs": [
+        {
+          "issue_id": "semantic_1",
+          "kind": "option_effect_value",
+          "prompt": "Choose the missing effect value for \"Open Leeds location next quarter as planned\" on \"Capital expenditure required to fit out and launch the Leeds site\".",
+          "option_id": "d8d2df15",
+          "factor_id": "93e38814",
+          "obligation": "offered",
+          "provenance": "unattributed"
+        },
+        {
+          "issue_id": "semantic_3",
+          "kind": "option_effect_value",
+          "prompt": "Choose the missing effect value for \"Open Leeds location next quarter as planned\" on \"Speed of launch — how quickly the new site opens\".",
+          "option_id": "d8d2df15",
+          "factor_id": "a778feb6",
+          "obligation": "offered",
+          "provenance": "unattributed"
+        },
+        {
+          "issue_id": "semantic_5",
+          "kind": "option_effect_value",
+          "prompt": "Choose the missing effect value for \"Open Leeds location next quarter as planned\" on \"Operational capacity and staffing at the new location\".",
+          "option_id": "d8d2df15",
+          "factor_id": "d21b41d8",
+          "obligation": "offered",
+          "provenance": "unattributed"
+        }
+      ]
+    },
+    "computed_at": "2026-08-18T03:50:57.493Z",
+    "freshness": "none",
+    "freshness_reason": "no_successful_run_analysis_fact",
+    "current_graph_hash": "3a015ca1bce077ea"
+  },
+  "analysis_state": {
+    "run_state": {
+      "kind": "never_run"
+    },
+    "readiness": {
+      "status": "needs_user_input",
+      "blockers": [
+        {
+          "repairability": "human_input_required",
+          "option_id": "d8d2df15",
+          "option_label": "Open Leeds location next quarter as planned",
+          "factor_id": "93e38814",
+          "factor_label": "Capital expenditure required to fit out and launch the Leeds site",
+          "code": "MISSING_OPTION_VALUE",
+          "category": "option_values",
+          "message": "Choose the missing effect value for \"Open Leeds location next quarter as planned\" on \"Capital expenditure required to fit out and launch the Leeds site\"."
+        },
+        {
+          "repairability": "human_input_required",
+          "option_id": "d8d2df15",
+          "option_label": "Open Leeds location next quarter as planned",
+          "factor_id": "a778feb6",
+          "factor_label": "Speed of launch — how quickly the new site opens",
+          "code": "MISSING_OPTION_VALUE",
+          "category": "option_values",
+          "message": "Choose the missing effect value for \"Open Leeds location next quarter as planned\" on \"Speed of launch — how quickly the new site opens\"."
+        },
+        {
+          "repairability": "human_input_required",
+          "option_id": "d8d2df15",
+          "option_label": "Open Leeds location next quarter as planned",
+          "factor_id": "d21b41d8",
+          "factor_label": "Operational capacity and staffing at the new location",
+          "code": "MISSING_OPTION_VALUE",
+          "category": "option_values",
+          "message": "Choose the missing effect value for \"Open Leeds location next quarter as planned\" on \"Operational capacity and staffing at the new location\"."
+        }
+      ]
+    },
+    "leader_claim": {
+      "permitted": false,
+      "withheld_reason": "separation_unavailable"
+    },
+    "robustness": {},
+    "usable_for_prose": false,
+    "usable_for_chips": false,
+    "usable_for_followup": false,
+    "requires_rerun": false,
+    "blocked_unusable": false,
+    "contradictions": []
+  },
+  "graph_hash": "3a015ca1bce077ea",
+  "_diagnostic_trace": {
+    "llm_calls": [
+      {
+        "role": "routing",
+        "provider": "anthropic",
+        "model": "claude-sonnet-5",
+        "input_tokens": 4493,
+        "output_tokens": 84,
+        "cache_read_tokens": 13192,
+        "cache_creation_tokens": 0,
+        "latency_ms": 6234,
+        "stop_reason": null,
+        "thinking_enabled": false,
+        "error": null
+      }
+    ],
+    "prompt_identity": [
+      {
+        "task_id": "routing",
+        "prompt_id": "120",
+        "version": "120",
+        "hash": "adcc5128d4e6e6bc",
+        "source": "pms",
+        "is_staging": true
+      }
+    ],
+    "zone2_assembly": null,
+    "tool_policy": null,
+    "provider_resolution": [],
+    "structured_output_config": null,
+    "streaming_metrics": null,
+    "fallback_trace": [],
+    "benchmarking": {
+      "total_duration_ms": 7569,
+      "substage_timings": {
+        "route_classification_ms": 6234,
+        "prompt_assembly_ms": 127,
+        "persistence_ms": 116,
+        "finalisation_ms": 2
+      }
+    },
+    "correlation_ids": {
+      "request_id": "f3717841-5d6f-4a1a-855a-a6663296296a",
+      "scenario_id": "b0b6f54e-1f95-4b6c-b77d-cc48ddd20215",
+      "turn_id": "638a9584-08c7-4ec6-8b70-efac2bd72d9b",
+      "graph_hash": "9196f3c9ec711217",
+      "prompt_hash": "adcc5128d4e6e6bc",
+      "response_hash": "d37f2286d88c"
+    },
+    "environment": {
+      "build_sha": "83a1157",
+      "environment": "staging"
+    },
+    "exit_path": "turn_executor",
+    "trace_version": 1,
+    "claim_safety": {
+      "may_name_leading_option": true,
+      "verdict_provenance": "no_analysis_exists",
+      "withheld_projection_reason": null
+    }
+  },
+  "_answer_shape": {
+    "headline": "Comparing two options: opening the Leeds location next quarter as planned, versus delaying the opening by 6 to 12 months.",
+    "bullets": [],
+    "detail": "No analysis has been run yet, so I can't yet say which performs better, but if you'd like, I can run it now to see how they compare."
+  }
+}

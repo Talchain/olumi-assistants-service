@@ -1,0 +1,265 @@
+/**
+ * Shared Zod Schemas for LLM Adapter Responses
+ *
+ * These schemas define the common response structures used by both
+ * Anthropic and OpenAI adapters. Provider-specific extensions can
+ * use .extend() or .merge() on these base schemas.
+ */
+
+import { z } from "zod";
+import { GraphEvidenceSource, NodeKind, StructuredProvenance, NodeData, FactorCategory } from "../../schemas/graph.js";
+import { log } from "../../utils/telemetry.js";
+import { LLM_STRENGTH_STD_FLOOR } from "../../cee/constants.js";
+import { refineFiniteNumbers } from "../../validators/numeric-bounds.js";
+
+// ============================================================================
+// Edge Strength Validation Constants
+// ============================================================================
+
+/** Clamp strength_mean to [-1, 1] and log if out of range. Defence-in-depth; PLoT also enforces CLAMP_STRENGTH_MEAN. */
+function clampStrengthMean(val: number): number {
+  if (val < -1 || val > 1) {
+    const clamped = Math.max(-1, Math.min(1, val));
+    log.warn({
+      event: 'zod.strength_mean_clamped',
+      original: val,
+      clamped,
+    }, `strength_mean ${val} clamped to [−1, +1] → ${clamped}`);
+    return clamped;
+  }
+  return val;
+}
+
+/** Floor strength_std to LLM_STRENGTH_STD_FLOOR and log if below. Defence-in-depth; PLoT also enforces FLOOR_STRENGTH_STD. */
+function floorStrengthStd(val: number): number {
+  if (val < LLM_STRENGTH_STD_FLOOR) {
+    log.warn({
+      event: 'zod.strength_std_floored',
+      original: val,
+      floored: LLM_STRENGTH_STD_FLOOR,
+    }, `strength_std ${val} floored to ${LLM_STRENGTH_STD_FLOOR}`);
+    return LLM_STRENGTH_STD_FLOOR;
+  }
+  return val;
+}
+
+// ============================================================================
+// Base Node Schema
+// ============================================================================
+
+/**
+ * Base schema for graph nodes returned by LLM.
+ * Used by both Anthropic and OpenAI adapters.
+ */
+export const LLMNode = z.object({
+  id: z.string().min(1),
+  kind: NodeKind,
+  label: z.string().optional(),
+  body: z.string().max(200).optional(),
+  // Factor category (V12.4+): controllable, observable, external
+  category: FactorCategory.optional(),
+  // Node data depends on kind: FactorData for factors, OptionData (interventions) for options
+  data: NodeData.optional(),
+  // Goal node fields — must match draft-graph prompt GOAL THRESHOLD section
+  goal_threshold: z.number().optional(),
+  goal_threshold_raw: z.number().optional(),
+  goal_threshold_unit: z.string().optional(),
+  goal_threshold_cap: z.number().optional(),
+  // .passthrough() preserves additive fields the LLM may return that are not
+  // yet in the schema (same pattern as LLMEdge and Node in graph.ts).
+}).passthrough();
+
+export type LLMNodeT = z.infer<typeof LLMNode>;
+
+// ============================================================================
+// Edge Strength Schema (V4 format)
+// ============================================================================
+
+/**
+ * V4 edge strength schema (nested object from LLM).
+ * Represents probabilistic edge strength with mean and standard deviation.
+ *
+ * Validation (defence-in-depth — PLoT also enforces these):
+ * - mean: clamped to [-1, +1]
+ * - std: floored to LLM_STRENGTH_STD_FLOOR (0.001) — prevents zero-variance edges
+ */
+export const EdgeStrength = z.object({
+  mean: z.number().transform(clampStrengthMean),
+  std: z.number().transform(floorStrengthStd),
+}).optional();
+
+export type EdgeStrengthT = z.infer<typeof EdgeStrength>;
+
+// ============================================================================
+// Base Edge Schema
+// ============================================================================
+
+/**
+ * Base schema for graph edges returned by LLM.
+ * Supports both V4 format (strength object) and legacy format (weight).
+ */
+export const LLMEdge = z.object({
+  from: z.string().min(1),
+  to: z.string().min(1),
+  // V4 format (preferred) - from v4 prompt (nested)
+  strength: EdgeStrength,
+  exists_probability: z.number().min(0).max(1).optional(),
+  // V4 format (flat) - added by normaliseDraftResponse()
+  // Clamped/floored as defence-in-depth (PLoT also enforces CLAMP_STRENGTH_MEAN / FLOOR_STRENGTH_STD)
+  strength_mean: z.number().transform(clampStrengthMean).optional(),
+  strength_std: z.number().transform(floorStrengthStd).optional(),
+  belief_exists: z.number().optional(),
+  effect_direction: z.enum(["positive", "negative"]).optional(),
+  // Edge type: directed (default) or bidirected (unmeasured confounder). Phase 3A-trust.
+  edge_type: z.enum(["directed", "bidirected"]).optional(),
+  // Legacy format (deprecated, for backwards compatibility during transition)
+  weight: z.number().optional(),
+  belief: z.number().min(0).max(1).optional(),
+  provenance: StructuredProvenance.optional(),
+  provenance_source: GraphEvidenceSource.optional(),
+}).passthrough();
+
+export type LLMEdgeT = z.infer<typeof LLMEdge>;
+
+// ============================================================================
+// Draft Response Schema
+// ============================================================================
+
+/**
+ * Schema for draft graph responses from LLM.
+ * Contains nodes, edges, and optional rationales.
+ */
+export const LLMDraftResponse = z.object({
+  nodes: z.array(LLMNode),
+  edges: z.array(LLMEdge),
+  rationales: z.array(z.object({ target: z.string(), why: z.string(), provenance_source: z.string().optional() })).optional(),
+  // .passthrough() preserves additive fields (e.g. goal_constraints, future
+  // LLM output) so the normalisation → Zod pipeline doesn't silently drop them.
+  //
+  // W2E-2 finiteness gate: every number anywhere in the draft (including
+  // passthrough fields — legacy `weight`, `belief_exists`, goal thresholds,
+  // factor data) must be finite. Zod's z.number() already rejects NaN but
+  // accepts ±Infinity, which previously sailed through to the pipeline and
+  // on to PLoT/ISL. Runs AFTER the field transforms, so the long-standing
+  // strength clamp/floor convention (contract-declared ranges, mirrored by
+  // PLoT) is unchanged. A failure throws the adapter's existing
+  // `*_response_invalid_schema` error → existing retry convention; never a
+  // silent drop or clamp for contract-silent fields.
+}).passthrough().superRefine(refineFiniteNumbers);
+
+export type LLMDraftResponseT = z.infer<typeof LLMDraftResponse>;
+
+// ============================================================================
+// Repair Response Schema — REMOVED (ROADMAP 2.763)
+// ============================================================================
+//
+// `LLMRepairResponse` / `LLMRepairRationale` parsed the output of the LLM
+// graph-repair call. That call was retired with `LLMAdapter.repairGraph`
+// (2.731 removed the draft-path caller, 2.740a substep 1b's, 2.763 the
+// capability itself), so the schema had zero production readers left.
+// The deterministic repair (`simpleRepair`) has no LLM response to parse.
+
+// ============================================================================
+// Options Response Schema
+// ============================================================================
+
+/**
+ * Schema for options/suggestions responses from LLM.
+ */
+export const LLMOptionsResponse = z.object({
+  options: z.array(
+    z.object({
+      id: z.string().min(1),
+      title: z.string().min(3),
+      pros: z.array(z.string()).min(2).max(3),
+      cons: z.array(z.string()).min(2).max(3),
+      evidence_to_gather: z.array(z.string()).min(2).max(3),
+    }).passthrough()
+  ),
+}).passthrough();
+
+export type LLMOptionsResponseT = z.infer<typeof LLMOptionsResponse>;
+
+// ============================================================================
+// Clarify Response Schema
+// ============================================================================
+
+/**
+ * Schema for clarification question responses from LLM.
+ */
+export const LLMClarifyResponse = z.object({
+  questions: z.array(
+    z.object({
+      question: z.string().min(10),
+      choices: z.array(z.string()).optional(),
+      why_we_ask: z.string().min(20),
+      impacts_draft: z.string().min(20),
+    }).passthrough()
+  ).min(1).max(5),
+  confidence: z.number().min(0).max(1),
+  should_continue: z.boolean(),
+}).passthrough();
+
+export type LLMClarifyResponseT = z.infer<typeof LLMClarifyResponse>;
+
+// ============================================================================
+// Critique Response Schema (Anthropic-specific but exported for reuse)
+// ============================================================================
+
+/**
+ * Schema for graph critique responses from LLM.
+ */
+export const LLMCritiqueResponse = z.object({
+  issues: z.array(
+    z.object({
+      level: z.enum(["BLOCKER", "IMPROVEMENT", "OBSERVATION"]),
+      note: z.string().min(10).max(280),
+      /**
+       * The node or edge this finding is about.
+       *
+       * A GRAPH-WIDE finding has no single target — "both options converge to
+       * the same generic outcome" is a criticism of the topology, not of one
+       * node — and the model spells that as JSON `null`. `null` and ABSENT
+       * therefore mean the same thing here, so `null` is accepted and
+       * NORMALISED TO ABSENT rather than given a second name: `target?: string`
+       * is already this estate's spelling of an untargeted critique (see
+       * `CritiqueIssue` in ../types.ts and `CritiqueGraphOutput` in
+       * ../../schemas/assist.ts; the published contract expresses the same
+       * concept as an absent `affected_node_ids`). Nothing downstream ever sees
+       * a `null` target, and nothing new is minted.
+       *
+       * ⚠ Do NOT "fix" this by compelling the model to always name a target.
+       * That attributes a graph-wide criticism to a node that did not cause it
+       * — fabricated provenance, which is worse than the 500 this replaced.
+       *
+       * Nullability is scoped to THIS field alone: a null `note` or `level`
+       * remains a hard rejection, as does a non-string target (number, object,
+       * array, boolean). Closing the null case must not open the schema to junk.
+       */
+      target: z.string().nullish().transform((v) => v ?? undefined),
+    }).passthrough()
+  ),
+  suggested_fixes: z.array(z.string()).max(5),
+  overall_quality: z.enum(["poor", "fair", "good", "excellent"]).optional(),
+}).passthrough();
+
+export type LLMCritiqueResponseT = z.infer<typeof LLMCritiqueResponse>;
+
+// ============================================================================
+// ExplainDiff Response Schema (Anthropic-specific but exported for reuse)
+// ============================================================================
+
+/**
+ * Schema for explaining differences between graphs.
+ */
+export const LLMExplainDiffResponse = z.object({
+  rationales: z.array(
+    z.object({
+      target: z.string().min(1),
+      why: z.string().min(10).max(280),
+      provenance_source: z.string().optional(),
+    }).passthrough()
+  ).min(1),
+}).passthrough();
+
+export type LLMExplainDiffResponseT = z.infer<typeof LLMExplainDiffResponse>;

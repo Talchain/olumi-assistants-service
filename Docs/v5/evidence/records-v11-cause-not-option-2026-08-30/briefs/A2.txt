@@ -1,0 +1,1 @@
+Enterprise churn jumped from 8% to 19% this year and nobody agrees on the cause. The CS lead believes support response times have degraded, the head of product believes a competitor's new integration is pulling accounts away, and our CFO believes we simply raised prices too aggressively last renewal cycle. We need to understand this before we commit budget.

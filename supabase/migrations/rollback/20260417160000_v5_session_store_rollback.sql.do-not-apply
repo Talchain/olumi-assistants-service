@@ -1,0 +1,25 @@
+-- ============================================================
+-- V5 session store — break-glass rollback companion
+-- Matches: 20260417160000_v5_session_store.sql
+-- Status: DO NOT APPLY automatically.
+-- ============================================================
+--
+-- The `.do-not-apply` suffix ensures Supabase migration tooling skips this
+-- file. It exists as documentation and break-glass only. The standard
+-- Tranche 2 regression path is: flip the V5 feature flag OFF and leave the
+-- tables empty-but-present. Apply this file manually only when the tables
+-- themselves must go.
+--
+-- Order: function first, then fact table (FK child of v5_conversation_turns),
+-- then the turn table. Reverse of the migration order so foreign keys are
+-- respected.
+--
+-- Running this file is destructive. It drops function, constraints,
+-- indexes, RLS policies, and two tables. Make a fresh Supabase snapshot
+-- before executing in a staging or production environment.
+-- ============================================================
+
+DROP FUNCTION IF EXISTS append_turn_atomic(UUID, TEXT, TEXT, TEXT, TEXT, BOOLEAN, INTEGER, INTEGER, JSONB);
+
+DROP TABLE IF EXISTS v5_handler_facts;
+DROP TABLE IF EXISTS v5_conversation_turns;

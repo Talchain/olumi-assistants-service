@@ -1,0 +1,132 @@
+{
+  "schema": "canonical_precedence_case.v1",
+  "id": "supplier_continuity_long_session",
+  "mode": "summary_retention",
+  "scenario_id": "ad5c5a72-e962-40ee-87a9-f663b6d9945f",
+  "prior_turns_total": 20,
+  "brief": "Choose a resilient transition plan for the supplier consolidation programme while preserving the licence dependency that governs the cutover.",
+  "turns": [
+    {
+      "n": 1,
+      "user": "We are planning the supplier consolidation cutover.",
+      "assistant": "Let us retain the dependencies that could change the plan."
+    },
+    {
+      "n": 2,
+      "user": "The standing licence dependency is Bluebird and it remains valid through 17 September.",
+      "assistant": "Bluebird through 17 September is a standing constraint for later reasoning."
+    },
+    {
+      "n": 3,
+      "user": "The transition must remain reversible until the licence dependency is confirmed.",
+      "assistant": "I will keep reversibility linked to that unresolved dependency."
+    },
+    {
+      "n": 4,
+      "user": "We considered Aberdeen as the cutover venue, but rejected it and closed that thread.",
+      "assistant": "Aberdeen is resolved and should not influence the live plan."
+    },
+    {
+      "n": 5,
+      "user": "The service team prefers one migration wave rather than two.",
+      "assistant": "That preference should be tested against reversibility."
+    },
+    {
+      "n": 6,
+      "user": "Finance wants the cost exposure staged.",
+      "assistant": "Staged exposure is relevant to the implementation design."
+    },
+    {
+      "n": 7,
+      "user": "Customer support needs two weeks of parallel operation.",
+      "assistant": "Parallel operation is an implementation requirement."
+    },
+    {
+      "n": 8,
+      "user": "Security will review the access model before cutover.",
+      "assistant": "That review belongs in the readiness sequence."
+    },
+    {
+      "n": 9,
+      "user": "The vendor will nominate a technical lead.",
+      "assistant": "A named technical lead will clarify escalation ownership."
+    },
+    {
+      "n": 10,
+      "user": "Legal wants the data-processing schedule signed.",
+      "assistant": "That is another gating artefact for the transition."
+    },
+    {
+      "n": 11,
+      "user": "We should avoid treating preferences as hard constraints.",
+      "assistant": "Agreed; I will distinguish them explicitly."
+    },
+    {
+      "n": 12,
+      "user": "That is enough history; keep only what remains relevant.",
+      "assistant": "I will retain standing dependencies and drop resolved distractions."
+    },
+    {
+      "n": 13,
+      "user": "Who should chair the cutover review?",
+      "assistant": "Use the owner who can resolve cross-functional blockers."
+    },
+    {
+      "n": 14,
+      "user": "What should the weekly update contain?",
+      "assistant": "Show changed assumptions, open gates and accountable owners."
+    },
+    {
+      "n": 15,
+      "user": "Should we rehearse the rollback?",
+      "assistant": "Yes; rehearsal makes reversibility observable."
+    },
+    {
+      "n": 16,
+      "user": "How should we brief customer support?",
+      "assistant": "Explain the parallel-operation window and escalation route."
+    },
+    {
+      "n": 17,
+      "user": "What belongs on the steering dashboard?",
+      "assistant": "Include only live dependencies and decisions requiring action."
+    },
+    {
+      "n": 18,
+      "user": "How do we keep the cutover reversible?",
+      "assistant": "Define a rollback trigger and preserve the prior operating path."
+    },
+    {
+      "n": 19,
+      "user": "What should happen if a gate slips?",
+      "assistant": "Move the cutover rather than silently weakening the gate."
+    },
+    {
+      "n": 20,
+      "user": "Remind me which earlier dependency still matters.",
+      "assistant": "I will separate the standing dependency from resolved history."
+    }
+  ],
+  "conversation_summary": {
+    "text": "FRAME: Plan a reversible supplier consolidation cutover.\nCONSTRAINTS: Bluebird remains valid through 17 September.\nRESOLVED: Aberdeen was considered as a venue, rejected and closed; it must not influence the live plan.\nOPEN: Confirm the licence dependency before committing to the cutover date.",
+    "current_to_turn_id": "turn-20",
+    "lag_turns": 0,
+    "stale": false
+  },
+  "model": {
+    "goal": { "id": "goal_resilient_cutover", "label": "Deliver a resilient supplier cutover" },
+    "options": [
+      { "id": "opt_single_wave", "label": "Single-wave cutover" },
+      { "id": "opt_phased", "label": "Phased cutover" }
+    ]
+  },
+  "required_summary_fact": {
+    "display": "Bluebird remains valid through 17 September.",
+    "witness": ["bluebird", "17", "september"]
+  },
+  "resolved_irrelevant_fact": {
+    "display": "Aberdeen",
+    "witness": ["aberdeen"]
+  },
+  "question": "Which standing dependency from the earlier reasoning still governs the cutover? Reply in exactly one line beginning Standing constraint:. Do not repeat resolved or rejected ideas."
+}

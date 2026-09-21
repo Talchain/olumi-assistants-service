@@ -7,6 +7,7 @@
 import { z } from "zod";
 import { Graph } from "./graph.js";
 import { SAFE_REQUEST_ID_PATTERN, isValidRequestId } from "../utils/request-id.js";
+import { FactorEnrichment } from "./enrichment.js";
 
 // Re-export for consumers that import from this module
 export { SAFE_REQUEST_ID_PATTERN, isValidRequestId };
@@ -79,8 +80,8 @@ export const FragileEdge = z.object({
   edge_id: z.string(),
   from_label: z.string(),
   to_label: z.string(),
-  alternative_winner_id: z.string().optional(),
-  alternative_winner_label: z.string().optional(),
+  alternative_winner_id: z.string().nullable().optional(),
+  alternative_winner_label: z.string().nullable().optional(),
   switch_probability: z.number().min(0).max(1).optional(),
 });
 
@@ -334,7 +335,7 @@ export const PredictionBlock = BaseBlock.extend({
 export const StructuralWarning = z.object({
   id: z.string().min(1),
   type: z.string().min(1),
-  severity: z.enum(["info", "warning", "error"]),
+  severity: z.enum(["info", "warn", "error"]),
   message: z.string().min(1),
   affected_nodes: z.array(z.string()).optional(),
   affected_edges: z.array(z.string()).optional(),
@@ -701,6 +702,9 @@ export const ReviewResponse = z.object({
 
   /** Plain English rationale for the recommendation */
   rationale: Rationale.optional(),
+
+  /** Factor-level enrichments with observations and perspectives */
+  factor_enrichments: z.array(FactorEnrichment).optional(),
 });
 
 export type ReviewResponseT = z.infer<typeof ReviewResponse>;

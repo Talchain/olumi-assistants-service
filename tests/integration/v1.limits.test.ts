@@ -13,10 +13,15 @@ describe("GET /v1/limits", () => {
   let app: FastifyInstance;
 
   beforeAll(async () => {
-    // Configure API key and graph caps for deterministic tests
+    // Configure API key and graph caps for deterministic tests. LLM_PROVIDER
+    // must be stubbed too — the config default is "openai" (src/config/
+    // index.ts), and no OPENAI_API_KEY is present in this environment;
+    // without this, build() throws FATAL before reaching the routes under
+    // test (ROADMAP 1.30f investigation).
     vi.stubEnv("ASSIST_API_KEYS", "test-key-limits");
+    vi.stubEnv("LLM_PROVIDER", "fixtures");
     vi.stubEnv("GRAPH_MAX_NODES", "50");
-    vi.stubEnv("GRAPH_MAX_EDGES", "200");
+    vi.stubEnv("GRAPH_MAX_EDGES", "100");
     vi.stubEnv("RATE_LIMIT_RPM", "120");
     vi.stubEnv("SSE_RATE_LIMIT_RPM", "20");
 
@@ -39,7 +44,7 @@ describe("GET /v1/limits", () => {
     expect(response.statusCode).toBe(401);
     const body = response.json();
     expect(body.schema).toBe("error.v1");
-    expect(body.code).toBe("FORBIDDEN");
+    expect(body.code).toBe("UNAUTHENTICATED");
   });
 
   it("returns limits for authenticated key including graph caps", async () => {
@@ -65,6 +70,6 @@ describe("GET /v1/limits", () => {
 
     // Graph caps should reflect configured values
     expect(body.graph_max_nodes).toBe(50);
-    expect(body.graph_max_edges).toBe(200);
+    expect(body.graph_max_edges).toBe(100);
   });
 });

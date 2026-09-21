@@ -1,0 +1,39 @@
+{
+  "id": "rg-02-missing-goal",
+  "name": "MISSING_GOAL — no goal node",
+  "description": "Graph has no goal node. Repair must add a goal and wire outcomes/risks to it.",
+  "brief": "We are deciding whether to launch a new product line. We want to maximise net revenue.",
+  "graph": {
+    "nodes": [
+      {"id": "dec_launch", "kind": "decision", "label": "Product Launch Decision"},
+      {"id": "opt_launch", "kind": "option", "label": "Launch New Line", "data": {"interventions": {"fac_launch_invest": 1}}},
+      {"id": "opt_skip", "kind": "option", "label": "Skip Launch", "data": {"interventions": {"fac_launch_invest": 0}}},
+      {"id": "fac_launch_invest", "kind": "factor", "label": "Launch Investment Level", "category": "controllable", "data": {"value": 0, "extractionType": "inferred", "factor_type": "cost", "uncertainty_drivers": ["Budget not finalised"]}},
+      {"id": "fac_market_demand", "kind": "factor", "label": "Market Demand", "category": "external", "prior": {"distribution": "uniform", "range_min": 0.0, "range_max": 1.0}},
+      {"id": "out_sales", "kind": "outcome", "label": "Sales Volume"},
+      {"id": "risk_cost_overrun", "kind": "risk", "label": "Cost Overrun"}
+    ],
+    "edges": [
+      {"from": "dec_launch", "to": "opt_launch", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "dec_launch", "to": "opt_skip", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_launch", "to": "fac_launch_invest", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_skip", "to": "fac_launch_invest", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "fac_launch_invest", "to": "out_sales", "strength": {"mean": 0.65, "std": 0.18}, "exists_probability": 0.80, "effect_direction": "positive"},
+      {"from": "fac_launch_invest", "to": "risk_cost_overrun", "strength": {"mean": 0.50, "std": 0.20}, "exists_probability": 0.75, "effect_direction": "positive"},
+      {"from": "fac_market_demand", "to": "out_sales", "strength": {"mean": 0.55, "std": 0.20}, "exists_probability": 0.78, "effect_direction": "positive"}
+    ]
+  },
+  "violations": [
+    {"code": "MISSING_GOAL", "detail": "No goal node found in graph. At least one goal is required."}
+  ],
+  "expected": {
+    "violations_addressed": ["MISSING_GOAL"],
+    "preserve_node_ids": ["dec_launch", "opt_launch", "opt_skip", "fac_launch_invest", "fac_market_demand", "out_sales", "risk_cost_overrun"],
+    "forbidden_edges": [],
+    "required_edges": [],
+    "no_bridge_edges": false,
+    "preserve_bidirected": false,
+    "check_external_prior": false,
+    "no_json_comments": true
+  }
+}

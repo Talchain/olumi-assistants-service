@@ -1,0 +1,134 @@
+{
+  "name": "golden-journey-v1-defects",
+  "description": "RED-baseline fixture: a deterministic transcript that REPRODUCES the four lived post-analysis defects so the harness's blind-spot-closure invariants (A8–A11 + the A9/A2 context acceptance requirement) demonstrably fire. This is NOT a live capture — it encodes observed-defect shapes so the RED baseline is reproducible in CI and gives the CEE post-analysis-loop brief concrete regression targets. When the live product handles these turns correctly (clarify-without-claiming, fast deterministic turns, safe premortem, wire-surfaced context), each invariant turns green. Lived defects encoded: (1) phantom success on a non-committing edit → A8 gating fail; (2) AI-facing context not observable on the wire → A9 inconclusive acceptance requirement; (3) slow simple deterministic turn → A10 advisory; (4) premortem overclaiming → A11 advisory.",
+  "brief": "We are a 15-person engineering team weighing three options for scaling delivery over the next six months: hire two senior engineers locally, engage an offshore partner, or introduce tiered pricing to hire more gradually. Decision matters for Q3 roadmap commitments.",
+  "expected_milestones": [
+    { "step": "1_draft", "role": "draft", "expect": "draft returned; labels parseable (clean setup turn)", "components": ["context_management", "observability_recovery"], "invariants": ["A2", "A6"] },
+    { "step": "2_run_analysis", "role": "analysis", "expect": "analysis_ready with hash trio (clean setup turn — establishes the baseline graph hash)", "components": ["canonical_state", "observability_recovery"], "invariants": ["A1", "A3", "A6"] },
+    { "step": "9_mutate_intent", "role": "mutate_intent", "expect": "DEFECT 1 — claims a mutation ('Updated the Budget factor … now') while the graph hash is unchanged → A8 phantom-success (gating). DEFECT 3 — a simple deterministic turn (llm_calls=0) at 2300ms exceeds the deterministic latency budget → A10 advisory.", "components": ["typed_action_mutation", "ai_orchestration"], "invariants": ["A8", "A10"] },
+    { "step": "10_premortem", "role": "premortem", "expect": "DEFECT 4 — premortem overclaims by opening with a mutation/success claim on a discuss-only turn → A11 advisory.", "components": ["ai_orchestration"], "invariants": ["A11"] }
+  ],
+  "transcript": {
+    "note": "RED reproduction. diagnostic_trace_enabled=true so A6 stays green and the RED is attributable to the four lived defects, not missing observability. No _context_summary anywhere → A9 inconclusive (DEFECT 2 acceptance requirement).",
+    "diagnostic_trace_enabled": true,
+    "timing_debug_enabled": true,
+    "observations": [
+      {
+        "step": "1_draft",
+        "http_status": 200,
+        "body": {
+          "response_version": 2,
+          "assistant_text": "Your decision model is ready, with three options and a few cost and delivery factors. You can run the analysis whenever you're ready.",
+          "suggested_actions": [
+            { "id": "chip_run", "label": "Run analysis", "message": "Run analysis.", "action_type": "run_analysis" }
+          ],
+          "draft_graph": {
+            "nodes": [
+              { "id": "goal_delivery", "kind": "goal", "label": "Scale delivery for Q3" },
+              { "id": "opt_hire", "kind": "option", "label": "Hire two senior engineers" },
+              { "id": "opt_offshore", "kind": "option", "label": "Engage an offshore partner" },
+              { "id": "fac_budget", "kind": "factor", "label": "Budget" }
+            ],
+            "edges": [
+              { "from": "opt_hire", "to": "fac_budget" },
+              { "from": "fac_budget", "to": "goal_delivery" }
+            ]
+          },
+          "_diagnostic_trace": {
+            "exit_path": "draft_graph",
+            "correlation_ids": { "request_id": "req-1", "scenario_id": "scn-d", "turn_id": "turn-1" },
+            "coaching_delivery": { "handler": "draft_graph", "composer": "post_draft_narrative", "copy_source": "deterministic", "coaching_fields_used": [] }
+          },
+          "_timings": { "turn": { "total_ms": 51000, "build_turn_context_ms": 80 }, "draft_graph": { "total_ms": 50000, "parse_ms": 31000 } }
+        }
+      },
+      {
+        "step": "2_run_analysis",
+        "http_status": 200,
+        "body": {
+          "response_version": 2,
+          "assistant_text": "Analysis complete. Hire two senior engineers leads with about 62% probability against the goal, ahead of Engage an offshore partner.",
+          "suggested_actions": [
+            { "id": "chip_explain", "label": "Explain the result", "message": "Why does the leading option win?", "action_type": "explain_result" }
+          ],
+          "analysis_ready": {
+            "status": "ready",
+            "goal_node_id": "goal_delivery",
+            "computed_at": "2026-06-21T10:00:00.000Z",
+            "options": [
+              { "option_id": "opt_hire", "label": "Hire two senior engineers", "win_probability": 0.62 },
+              { "option_id": "opt_offshore", "label": "Engage an offshore partner", "win_probability": 0.26 }
+            ],
+            "freshness": "fresh",
+            "freshness_reason": "graph_hash_match",
+            "graph_hash_at_run": "aaaa1111bbbb2222",
+            "current_graph_hash": "aaaa1111bbbb2222",
+            "model_adjustments": []
+          },
+          "_diagnostic_trace": {
+            "exit_path": "chip_click",
+            "correlation_ids": { "request_id": "req-2", "scenario_id": "scn-d", "turn_id": "turn-2" },
+            "coaching_delivery": { "handler": "run_analysis", "composer": "analysis_result_headline", "copy_source": "plot_envelope", "coaching_fields_used": ["win_probability"] }
+          },
+          "_timings": { "turn": { "total_ms": 8000 }, "run_analysis": { "handler_total_ms": 7700, "plot_status": "computed" } }
+        }
+      },
+      {
+        "step": "9_mutate_intent",
+        "http_status": 200,
+        "body": {
+          "response_version": 2,
+          "assistant_text": "Updated the Budget factor so it carries more weight now. The Budget factor is more important in the model.",
+          "suggested_actions": [],
+          "analysis_ready": {
+            "status": "ready",
+            "goal_node_id": "goal_delivery",
+            "computed_at": "2026-06-21T10:00:00.000Z",
+            "options": [
+              { "option_id": "opt_hire", "label": "Hire two senior engineers", "win_probability": 0.62 },
+              { "option_id": "opt_offshore", "label": "Engage an offshore partner", "win_probability": 0.26 }
+            ],
+            "freshness": "fresh",
+            "freshness_reason": "graph_hash_match",
+            "graph_hash_at_run": "aaaa1111bbbb2222",
+            "current_graph_hash": "aaaa1111bbbb2222"
+          },
+          "_diagnostic_trace": {
+            "exit_path": "turn_executor",
+            "correlation_ids": { "request_id": "req-9", "scenario_id": "scn-d", "turn_id": "turn-9" },
+            "coaching_delivery": { "handler": "explain_result", "composer": "value_update_ack", "copy_source": "deterministic", "coaching_fields_used": [] }
+          },
+          "_timings": { "turn": { "total_ms": 2300, "llm_calls_used": 0 } }
+        }
+      },
+      {
+        "step": "10_premortem",
+        "http_status": 200,
+        "body": {
+          "response_version": 2,
+          "assistant_text": "Updated the model to be more robust against Budget shocks. The leading option is now guaranteed to be the right call.",
+          "suggested_actions": [],
+          "analysis_ready": {
+            "status": "ready",
+            "goal_node_id": "goal_delivery",
+            "computed_at": "2026-06-21T10:00:00.000Z",
+            "options": [
+              { "option_id": "opt_hire", "label": "Hire two senior engineers", "win_probability": 0.62 },
+              { "option_id": "opt_offshore", "label": "Engage an offshore partner", "win_probability": 0.26 }
+            ],
+            "freshness": "fresh",
+            "freshness_reason": "graph_hash_match",
+            "graph_hash_at_run": "aaaa1111bbbb2222",
+            "current_graph_hash": "aaaa1111bbbb2222"
+          },
+          "_diagnostic_trace": {
+            "exit_path": "turn_executor",
+            "correlation_ids": { "request_id": "req-10", "scenario_id": "scn-d", "turn_id": "turn-10" },
+            "coaching_delivery": { "handler": "explain_result", "composer": "premortem", "copy_source": "analysis_projection", "coaching_fields_used": ["win_probability"] }
+          },
+          "_timings": { "turn": { "total_ms": 6000, "llm_calls_used": 1 } }
+        }
+      }
+    ]
+  }
+}

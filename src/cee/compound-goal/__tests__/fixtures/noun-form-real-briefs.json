@@ -1,0 +1,661 @@
+{
+ "_provenance": "REAL BRIEF TEXT harvested from the CEE repo at d901fa46 (wire captures, golden briefs, gold benchmark set, clarify-v2 fixtures). UNLABELLED BY CONSTRUCTION: there is no adjudication here, so this corpus CANNOT yield FP/FN. Its job is a REGRESSION COUNT — which real briefs put a row on the wire, before and after. ⚠ SCOPE, STATED HONESTLY: this is REAL TRANSPORT, AUTHORED LANGUAGE. Every string traces to Paul, an agent operator, or a fixture author. There is NO corpus of briefs typed by an unaffiliated end user anywhere in this estate, so this is the best available evidence and it is still not a stranger's words.",
+ "cases": [
+  {
+   "id": "REAL-000",
+   "brief": "Should we expand into the European market or focus on growing our US presence? Current US revenue is $5M/year with 30% growth. Europe would require $2M investment."
+  },
+  {
+   "id": "REAL-001",
+   "brief": "Should we migrate our database from PostgreSQL to MongoDB or stay with current setup? We have 500GB of data and serve 10M requests/day. Migration would take 3 months."
+  },
+  {
+   "id": "REAL-002",
+   "brief": "Should we spend Q1 refactoring our legacy authentication system or continue building new features? Current system has 200 known bugs, refactor would take 8 weeks."
+  },
+  {
+   "id": "REAL-003",
+   "brief": "Should we buy a commercial CRM system or build our own? We need to launch within 6 months with a budget of $200k."
+  },
+  {
+   "id": "REAL-004",
+   "brief": "Should we hire 3 full-time engineers or use contractors for our 6-month project? We need strong React and Node.js skills, budget is $300k."
+  },
+  {
+   "id": "REAL-005",
+   "brief": "---\nexpect_status_quo: false\nhas_numeric_target: true\ncomplexity: moderate\n---\n\nOur mobile app has 50,000 daily active users. We're deciding between two major feature investments for Q3: (A) AI-powered personalisation engine that could increase engagement by 20-30%, or (B) offline mode that addresses the #1 feature request from 35% of our user surveys. Engineering estimates: personalisation needs 4 developers for 3 months, offline mode needs 3 developers for 2 months. Our retention rate is currently 62%."
+  },
+  {
+   "id": "REAL-006",
+   "brief": "---\nexpect_status_quo: false\nhas_numeric_target: false\ncomplexity: complex\n---\n\nWe're choosing a cloud provider for our healthcare data platform that processes 500TB of patient records. Options: AWS with HIPAA BAA (most mature, £180k/year), Azure with integrated Active Directory for hospital systems (£165k/year), or Google Cloud with superior ML capabilities for our diagnostic AI (£155k/year). Data residency must be UK-only. Migration from current on-prem takes 6 months regardless of provider."
+  },
+  {
+   "id": "REAL-007",
+   "brief": "---\nexpect_status_quo: true\nhas_numeric_target: false\ncomplexity: simple\n---\n\nShould I hire a tech lead or two developers to ship AI features within 6 months, budget under £200k?"
+  },
+  {
+   "id": "REAL-008",
+   "brief": "---\nexpect_status_quo: true\nhas_numeric_target: false\ncomplexity: moderate\n---\n\nWe run a subscription meal-kit service with 8,000 active subscribers, 12% monthly churn, average order value of £35, and a Net Promoter Score of 42. Our food waste rate is 8% of ingredients shipped, customer support handles 400 tickets per week, and our ingredient sourcing cost is £14 per box. We're considering switching from weekly to flexible scheduling where customers choose their delivery days. The alternative is keeping weekly deliveries but adding a premium tier with organic-only ingredients at £49 per box."
+  },
+  {
+   "id": "REAL-009",
+   "brief": "---\nexpect_status_quo: true\nhas_numeric_target: true\ncomplexity: complex\n---\n\nWe're a Series A healthtech startup with 18 months of runway. The board wants us to achieve 3x user growth this year while simultaneously cutting our burn rate by 30%. Our two main options are: invest heavily in a self-serve product (lower CAC but requires significant engineering spend upfront) or double down on enterprise sales (higher margins but longer cycles and more headcount). A new NHS data regulation is expected in Q3 that could either open up or restrict our access to patient data, which affects both strategies differently."
+  },
+  {
+   "id": "REAL-010",
+   "brief": "---\nexpect_status_quo: true\nhas_numeric_target: true\ncomplexity: moderate\n---\n\nOur SaaS platform has three pricing tiers: Basic (£19/mo, 60% of users), Pro (£49/mo, 30%), Enterprise (£149/mo, 10%). We're considering three changes: Option A raises all tiers by 15% (to £22, £56, £171). Option B raises only Enterprise by 30% to £194 while keeping Basic and Pro unchanged. Option C raises Basic and Pro by 10% (to £21, £54) while dropping Enterprise by 5% to £142. We have 5,000 total customers and need to increase MRR from £215k to £250k within 6 months without pushing churn above 5%."
+  },
+  {
+   "id": "REAL-011",
+   "brief": "---\nexpect_status_quo: true\nhas_numeric_target: true\ncomplexity: moderate\n---\n\nOur warehouse fulfilment centre processes 5,000 orders daily with a 2.1% error rate. We're evaluating whether to invest £800k in robotic picking systems that promise to reduce errors to 0.3% and increase throughput by 40%, or to hire 15 additional quality control staff at £28k each and implement a manual double-check process. Current customer satisfaction score is 4.2/5 and we must maintain above 4.0 during any transition."
+  },
+  {
+   "id": "REAL-012",
+   "brief": "---\nexpect_status_quo: true\nhas_numeric_target: false\ncomplexity: moderate\n---\n\nOur DTC fashion brand has £3M annual revenue with 40% gross margins. We're deciding whether to launch a wholesale channel to department stores (potential 50% revenue increase but margins drop to 25%) or invest in our own retail stores (2 locations at £150k each, maintaining 40% margins but slower growth). Customer acquisition cost online has risen 60% in two years to £45 per customer."
+  },
+  {
+   "id": "REAL-013",
+   "brief": "---\nexpect_status_quo: true\nhas_numeric_target: false\ncomplexity: simple\n---\n\nWe need to figure out our hiring strategy for next quarter. Things have been pretty hectic and we're not sure if we should hire more engineers or focus on sales. Budget is tight."
+  },
+  {
+   "id": "REAL-014",
+   "brief": "---\nexpect_status_quo: true\nhas_numeric_target: false\ncomplexity: moderate\n---\n\nWe're a 30-person design agency that's always done bespoke client work. Several competitors have started offering productised design subscriptions — fixed monthly fee for unlimited design requests. We're debating whether to launch our own subscription offering, which could cannibalise our £80-per-hour bespoke work but would provide recurring revenue and reduce the feast-or-famine cycle. Our current utilisation rate is about 65% and we lose roughly a third of prospects on price before they see our work quality. The creative director is concerned that subscription work will lower our brand positioning."
+  },
+  {
+   "id": "REAL-015",
+   "brief": "---\nexpect_status_quo: true\nhas_numeric_target: true\ncomplexity: complex\n---\n\nWe're a UK fintech startup deciding how to expand internationally. Our options are entering Germany (large market, heavy regulation), Brazil (high growth, currency risk), or Japan (stable, high barrier to entry). We need to achieve 15% revenue growth within 18 months while keeping total expansion costs below £2M. Our current team is 35 people with no international experience. We also need to decide whether to hire locally or relocate existing staff."
+  },
+  {
+   "id": "REAL-016",
+   "brief": "---\nexpect_status_quo: true\nhas_numeric_target: false\ncomplexity: simple\n---\n\nWe're a B2B SaaS company with 2,000 customers and £4M ARR. We're considering raising our subscription price by 20%, from £150/month to £180/month. Our current churn rate is 3.5% monthly. Our main competitor charges £165/month. Should we raise the price or keep it as is?"
+  },
+  {
+   "id": "REAL-017",
+   "brief": "---\nexpect_status_quo: false\nhas_numeric_target: true\ncomplexity: complex\n---\n\nWe're a 200-person logistics company deciding whether to build our own last-mile delivery fleet or partner with third-party couriers. If we build, we need to choose between electric vans (£45k each, 20 needed) or diesel vans (£30k each, 20 needed). If we partner, we're choosing between exclusive contracts with one courier at £8 per delivery or non-exclusive contracts with three couriers at £10 per delivery. Current delivery volume is 3,000 per day at £12 average revenue per delivery. We need to reduce our cost-per-delivery below £7 within 12 months while maintaining our 98% on-time rate. The transport regulator is expected to announce new emissions standards in Q3 that could affect diesel fleet viability."
+  },
+  {
+   "id": "REAL-018",
+   "brief": "---\nexpect_status_quo: true\nhas_numeric_target: true\ncomplexity: complex\n---\n\nOur B2B marketplace connects 500 suppliers with 2,000 buyers. We're deciding whether to invest £400k in AI-powered supplier matching that improves match quality, which increases buyer satisfaction, which attracts more buyers, which attracts more suppliers, which improves match quality further. The alternative is investing £400k in a manual curation team of 8 people who hand-pick supplier recommendations. Current GMV is £15M annually with 2.5% take rate. We need to reach £25M GMV within 18 months. Supplier churn is 20% annually and buyer acquisition cost is £850."
+  },
+  {
+   "id": "REAL-019",
+   "brief": "---\nexpect_status_quo: true\nhas_numeric_target: true\ncomplexity: moderate\n---\n\nGiven our goal of reaching £20k MRR within 12 months while keeping monthly churn under 4%, should we increase the Pro plan price from £49 to £59 per month with the next Pro feature release?"
+  },
+  {
+   "id": "REAL-020",
+   "brief": "---\nexpect_status_quo: false\nhas_numeric_target: false\ncomplexity: simple\n---\n\nOur lease expires in 3 months and we must choose between two offices. Office A is in the city centre, 2,000 sq ft at £55 per sq ft, 5-minute walk from the train station, but no parking. Office B is in a business park, 3,500 sq ft at £28 per sq ft, free parking for 40 cars, but 30 minutes from public transport. We have 45 employees, 60% commute by train and 40% drive. Team collaboration is our top priority."
+  },
+  {
+   "id": "REAL-021",
+   "brief": "/**\n * Gold Brief Fixture Set — v1\n *\n * 12 diverse decision briefs for parametric edge stability benchmarking.\n * Changes require explicit review and gold_set_version increment.\n *\n * Diversity coverage:\n *   Option count: 2×2-option, 3×3-option, 1×4-option (+ others)\n *   Domain:       2× market/pricing, 2× product/feature, 2× hiring/team, 6× other\n *   Constraints:  6 with explicit constraints, 6 without\n *   Graph size:   Expected 5–15 node graphs\n */\n\nimport type { GoldBriefSet, GoldBrief, GoldBriefWithTransforms } from \"./types.js\";\n\n// ---------------------------------------------------------------------------\n// Briefs\n// ---------------------------------------------------------------------------\n\nconst briefs: GoldBrief[] = [\n  // ── Market / Pricing (2) ─────────────────────────────────────────────────\n  {\n    id: \"gold_001\",\n    version: 1,\n    domain: \"market_pricing\",\n    brief_text:\n      \"We're a B2B SaaS company selling project management software at £49/user/month. \" +\n      \"Our competitor just dropped their price to £39/user/month and we've seen a 15% \" +\n      \"decline in new sign-ups over the past quarter. We have 2,000 active customers \" +\n      \"with an average contract length of 14 months. Should we match their price or \" +\n      \"maintain our current pricing and invest in product differentiation?\",\n    expected_option_count: 2,\n    notes: \"2-option pricing decision with explicit numeric constraints (price, churn, customers)\",\n  },\n  {\n    id: \"gold_002\",\n    version: 1,\n    domain: \"market_pricing\",\n    brief_text:\n      \"Our e-commerce platform is launching in three new European markets: Germany, \" +\n      \"France, and Spain. We need to decide our pricing strategy. Option A: uniform \" +\n      \"pricing at €29.99 across all markets. Option B: localised pricing based on \" +\n      \"purchasing power (€34.99 Germany, €27.99 France, €24.99 Spain). Option C: \" +\n      \"freemium model with premium tier at €39.99. Current conversion rate is 3.2% \" +\n      \"and we need to reach 10,000 paying customers within 12 months.\",\n    expected_option_count: 3,\n    notes: \"3-option market entry with explicit conversion and customer targets\",\n  },\n\n  // ── Product / Feature (2) ────────────────────────────────────────────────\n  {\n    id: \"gold_003\",\n    version: 1,\n    domain: \"product_feature\",\n    brief_text:\n      \"Our mobile app has 50,000 daily active users. We're deciding between two major \" +\n      \"feature investments for Q3: (A) AI-powered personalisation engine that could \" +\n      \"increase engagement by 20-30%, or (B) offline mode that addresses the #1 \" +\n      \"feature request from 35% of our user surveys. Engineering estimates: \" +\n      \"personalisation needs 4 developers for 3 months, offline mode needs 3 \" +\n      \"developers for 2 months. Our retention rate is currently 62%.\",\n    expected_option_count: 2,\n    notes: \"2-option product roadmap with engineering resource constraints\",\n  },\n  {\n    id: \"gold_004\",\n    version: 1,\n    domain: \"product_feature\",\n    brief_text:\n      \"We run a fintech platform processing £2M in daily transactions. We need to \" +\n      \"decide how to handle our authentication upgrade. Option 1: migrate to passkeys \" +\n      \"(WebAuthn) which reduces fraud by ~40% but requires 6 months of development. \" +\n      \"Option 2: add SMS-based 2FA which is faster (2 months) but has known SIM-swap \" +\n      \"vulnerabilities. Option 3: implement both in phases, starting with 2FA then \" +\n      \"passkeys, taking 9 months total but maintaining security throughout.\",\n    expected_option_count: 3,\n    notes: \"3-option security decision with time and risk trade-offs\",\n  },\n\n  // ── Hiring / Team (2) ───────────────────────────────────────────────────\n  {\n    id: \"gold_005\",\n    version: 1,\n    domain: \"hiring_team\",\n    brief_text:\n      \"Our engineering team of 12 is struggling with delivery velocity. Sprint \" +\n      \"completion rate has dropped from 85% to 60% over the last two quarters. \" +\n      \"We're choosing between: hiring 4 senior engineers at £95k each (6-month \" +\n      \"ramp-up), or restructuring into smaller autonomous squads of 3-4 people \" +\n      \"with dedicated product owners. Budget constraint: £400k annual for this \" +\n      \"initiative. Current team cost is £1.2M/year.\",\n    expected_option_count: 2,\n    notes: \"2-option team scaling with budget constraint\",\n  },\n  {\n    id: \"gold_006\",\n    version: 1,\n    domain: \"hiring_team\",\n    brief_text:\n      \"We're a 50-person startup that just raised Series B. We need to decide our \" +\n      \"hiring approach for the next 18 months. Option A: aggressive in-house hiring \" +\n      \"to reach 120 people. Option B: hybrid model with 80 in-house and 15 contractors \" +\n      \"for specialised work. Option C: lean team of 70 with heavy investment in \" +\n      \"AI-assisted tooling and automation. Option D: strategic acqui-hire of a 20-person \" +\n      \"team from a failing competitor. Runway is 24 months at current burn rate.\",\n    expected_option_count: 4,\n    notes: \"4-option hiring strategy, no explicit numeric constraints beyond headcount\",\n  },\n\n  // ── Operations (2) ──────────────────────────────────────────────────────\n  {\n    id: \"gold_007\",\n    version: 1,\n    domain: \"operations\",\n    brief_text:\n      \"Our warehouse fulfilment centre processes 5,000 orders daily with a 2.1% error \" +\n      \"rate. We're evaluating whether to invest £800k in robotic picking systems that \" +\n      \"promise to reduce errors to 0.3% and increase throughput by 40%, or to hire 15 \" +\n      \"additional quality control staff at £28k each and implement a manual double-check \" +\n      \"process. Current customer satisfaction score is 4.2/5 and we must maintain above \" +\n      \"4.0 during any transition.\",\n    expected_option_count: 2,\n    notes: \"2-option operations with explicit error rate and satisfaction constraints\",\n  },\n  {\n    id: \"gold_008\",\n    version: 1,\n    domain: \"operations\",\n    brief_text:\n      \"Our food delivery startup operates in 3 cities. We need to decide our expansion \" +\n      \"strategy. We can expand to 2 more cities (Leeds and Bristol), deepen penetration \" +\n      \"in existing cities by adding grocery delivery, or pivot to B2B corporate catering. \" +\n      \"Current unit economics: £2.30 contribution margin per order, 12,000 daily orders. \" +\n      \"We need to reach profitability within 18 months.\",\n    expected_option_count: 3,\n    notes: \"3-option strategic expansion without explicit numeric constraints beyond unit economics\",\n  },\n\n  // ── Technology (2) ──────────────────────────────────────────────────────\n  {\n    id: \"gold_009\",\n    version: 1,\n    domain: \"technology\",\n    brief_text:\n      \"Our monolithic Rails application is hitting scaling limits at 10,000 concurrent \" +\n      \"users. P95 latency has degraded from 200ms to 800ms. We need to decide: full \" +\n      \"microservices migration (estimated 12 months, £500k), or targeted performance \" +\n      \"optimisation of the 3 bottleneck endpoints with caching and read replicas \" +\n      \"(estimated 3 months, £80k). Our SLA requires P95 latency under 500ms.\",\n    expected_option_count: 2,\n    notes: \"2-option technology decision with explicit latency SLA constraint\",\n  },\n  {\n    id: \"gold_010\",\n    version: 1,\n    domain: \"technology\",\n    brief_text:\n      \"We're choosing a cloud provider for our healthcare data platform that processes \" +\n      \"500TB of patient records. Options: AWS with HIPAA BAA (most mature, £180k/year), \" +\n      \"Azure with integrated Active Directory for hospital systems (£165k/year), or \" +\n      \"Google Cloud with superior ML capabilities for our diagnostic AI (£155k/year). \" +\n      \"Data residency must be UK-only. Migration from current on-prem takes 6 months \" +\n      \"regardless of provider.\",\n    expected_option_count: 3,\n    notes: \"3-option cloud migration with data residency constraint\",\n  },\n\n  // ── Strategy (2) ────────────────────────────────────────────────────────\n  {\n    id: \"gold_011\",\n    version: 1,\n    domain: \"strategy\",\n    brief_text:\n      \"Our DTC fashion brand has £3M annual revenue with 40% gross margins. We're \" +\n      \"deciding whether to launch a wholesale channel to department stores (potential \" +\n      \"50% revenue increase but margins drop to 25%) or invest in our own retail \" +\n      \"stores (2 locations at £150k each, maintaining 40% margins but slower growth). \" +\n      \"Customer acquisition cost online has risen 60% in two years to £45 per customer.\",\n    expected_option_count: 2,\n    notes: \"2-option channel strategy with margin and CAC trade-offs\",\n  },\n  {\n    id: \"gold_012\",\n    version: 1,\n    domain: \"strategy\",\n    brief_text:\n      \"Our edtech company serves 200 UK schools with a curriculum-aligned maths \" +\n      \"platform. We're evaluating three growth paths: expand to secondary schools \" +\n      \"(currently primary only), enter the US market (requires curriculum adaptation), \" +\n      \"or build an AI tutoring product for direct-to-consumer. Current ARR is £1.8M \" +\n      \"with 92% renewal rate. We have £2M in the bank and 18 months of runway.\",\n    expected_option_count: 3,\n    notes: \"3-option growth strategy without hard numeric constraints\",\n  },\n];\n\n// ---------------------------------------------------------------------------\n// Sensitivity Briefs (3 briefs with transformation metadata)\n// ---------------------------------------------------------------------------\n\nconst sensitivityBriefs: GoldBriefWithTransforms[] = [\n  {\n    ...briefs[0]!, // gold_001 — pricing decision\n    transformations: {\n      synonym_map: {\n        \"competitor\": \"rival\",\n        \"price\": \"rate\",\n        \"sign-ups\": \"registrations\",\n        \"customers\": \"clients\",\n        \"differentiation\": \"distinction\",\n      },\n      // Split between the two sentences describing the situation and the question\n      clause_split_index: 234,\n      passive_voice_sentences: [1, 2], // \"A 15% decline has been seen...\" \"2,000 customers are had...\"\n    },\n  },\n  {\n    ...briefs[2]!, // gold_003 — product feature decision\n    transformations: {\n      synonym_map: {\n        \"engagement\": \"interaction\",\n        \"feature\": \"capability\",\n        \"developers\": \"engineers\",\n        \"retention\": \"user retention\",\n        \"surveys\": \"feedback polls\",\n      },\n      clause_split_index: 196,\n      passive_voice_sentences: [0, 3], // \"50,000 DAUs are had...\" \"An estimate of... is given...\"\n    },\n  },\n  {\n    ...briefs[4]!, // gold_005 — hiring decision\n    transformations: {\n      synonym_map: {\n        \"velocity\": \"speed\",\n        \"engineers\": \"developers\",\n        \"squads\": \"teams\",\n        \"budget\": \"financial\",\n        \"autonomous\": \"independent\",\n      },\n      clause_split_index: 169,\n      passive_voice_sentences: [0, 1], // \"Delivery velocity is being struggled with...\" \"Sprint completion rate has been dropped...\"\n    },\n  },\n];\n\n// ---------------------------------------------------------------------------\n// Exported Gold Brief Set\n// ---------------------------------------------------------------------------\n\nexport const GOLD_BRIEF_SET: GoldBriefSet = {\n  gold_set_version: 1,\n  briefs,\n  sensitivity_brief_ids: [\"gold_001\", \"gold_003\", \"gold_005\"],\n  sensitivity_briefs: sensitivityBriefs,\n};\n\n/**\n * Look up a gold brief by ID.\n * Throws if not found — callers should use known IDs.\n */\nexport function getGoldBrief(id: string): GoldBrief {\n  const brief = GOLD_BRIEF_SET.briefs.find((b) => b.id === id);\n  if (!brief) throw new Error(`Gold brief not found: ${id}`);\n  return brief;\n}"
+  },
+  {
+   "id": "REAL-022",
+   "brief": "/**\n * Gold Brief Types for Parametric Edge Stability Benchmarks\n *\n * These types define the fixture format for gold briefs used in\n * edge stability benchmarking. Each brief is a realistic decision\n * scenario designed to exercise different graph topologies.\n */\n\n// ---------------------------------------------------------------------------\n// Gold Brief Definition\n// ---------------------------------------------------------------------------\n\nexport interface GoldBrief {\n  /** Stable identifier, e.g. \"gold_001\" */\n  id: string;\n  /** Increment on any change to the brief */\n  version: number;\n  /** Domain category for diversity tracking */\n  domain: GoldBriefDomain;\n  /** The full decision brief text sent to CEE */\n  brief_text: string;\n  /** Expected number of decision options */\n  expected_option_count: number;\n  /** Optional notes about what this brief exercises */\n  notes?: string;\n}\n\nexport type GoldBriefDomain =\n  | \"market_pricing\"\n  | \"product_feature\"\n  | \"hiring_team\"\n  | \"operations\"\n  | \"technology\"\n  | \"strategy\";\n\n// ---------------------------------------------------------------------------\n// Prompt Sensitivity Transformations\n// ---------------------------------------------------------------------------\n\nexport interface SynonymMap {\n  [original: string]: string;\n}\n\nexport interface TransformationMetadata {\n  /** Fixed synonym map for synonym_swap transform */\n  synonym_map?: SynonymMap;\n  /** Character index to split at for clause_reorder transform */\n  clause_split_index?: number;\n  /** 0-indexed sentence indices to convert for passive_voice transform */\n  passive_voice_sentences?: number[];\n}\n\nexport interface GoldBriefWithTransforms extends GoldBrief {\n  /** Metadata for deterministic prompt transformations */\n  transformations: TransformationMetadata;\n}\n\n// ---------------------------------------------------------------------------\n// Gold Brief Set (top-level fixture)\n// ---------------------------------------------------------------------------\n\nexport interface GoldBriefSet {\n  /** Increment on any change to any brief or the set itself */\n  gold_set_version: number;\n  /** All gold briefs */\n  briefs: GoldBrief[];\n  /** Subset of brief IDs selected for prompt sensitivity testing */\n  sensitivity_brief_ids: string[];\n  /** Briefs with transformation metadata (for sensitivity subset) */\n  sensitivity_briefs: GoldBriefWithTransforms[];\n}"
+  },
+  {
+   "id": "REAL-023",
+   "brief": "Add a factor for regulatory approval risk"
+  },
+  {
+   "id": "REAL-024",
+   "brief": "It mainly affects whether we ship on time — connect it to the goal."
+  },
+  {
+   "id": "REAL-025",
+   "brief": "What else should I improve in this model?"
+  },
+  {
+   "id": "REAL-026",
+   "brief": "Should we hire one tech lead or two mid-level developers? Budget is £200k and we need our AI features shipped within 6 months. The goal is faster feature delivery."
+  },
+  {
+   "id": "REAL-027",
+   "brief": "What factor most influences my decision?"
+  },
+  {
+   "id": "REAL-028",
+   "brief": "What should I improve in this model before running the analysis?"
+  },
+  {
+   "id": "REAL-029",
+   "brief": "Set a success target of 15% faster delivery"
+  },
+  {
+   "id": "REAL-030",
+   "brief": "Why is that option performing best?"
+  },
+  {
+   "id": "REAL-031",
+   "brief": "What could change the outcome of this analysis?"
+  },
+  {
+   "id": "REAL-032",
+   "brief": "How do the options compare against the 15% target?"
+  },
+  {
+   "id": "REAL-033",
+   "brief": "I'm leaning towards hiring the two mid-level developers. Am I missing anything?"
+  },
+  {
+   "id": "REAL-034",
+   "brief": "The developer factor needs to be higher."
+  },
+  {
+   "id": "REAL-035",
+   "brief": "Why does the analysis still favour the same option?"
+  },
+  {
+   "id": "REAL-036",
+   "brief": "What changed in the model?"
+  },
+  {
+   "id": "REAL-037",
+   "brief": "What changed compared with the last run?"
+  },
+  {
+   "id": "REAL-038",
+   "brief": "What are the biggest risks here?"
+  },
+  {
+   "id": "REAL-039",
+   "brief": "I already know hiring two developers is the right call. Just confirm it."
+  },
+  {
+   "id": "REAL-040",
+   "brief": "What evidence would be most valuable to gather next?"
+  },
+  {
+   "id": "REAL-041",
+   "brief": "What does the analysis tell you about each factor's influence?"
+  },
+  {
+   "id": "REAL-042",
+   "brief": "Will the leading option actually hit the 15% improvement target?"
+  },
+  {
+   "id": "REAL-043",
+   "brief": "Everyone on my team agrees two developers is the obvious answer. Tell me I'm right."
+  },
+  {
+   "id": "REAL-044",
+   "brief": "Should any of these factors be treated differently in the model structure?"
+  },
+  {
+   "id": "REAL-045",
+   "brief": "What's your recommendation here?"
+  },
+  {
+   "id": "REAL-046",
+   "brief": "We're a B2B SaaS company at about £60m ARR, setting the FY26 portfolio under a flat R&D budget across four product lines. Line A is our mature core — most of the cash, low growth. Line B is a new 'agentic workflow' bet that could be big or could be nothing. Lines C and D are smaller and roughly break even. The options I'm weighing: double down on the core, fund the agentic line properly, keep C and D on maintenance and sunset one of them, or spread evenly. Two things make this hard. First, the loudest internal champion for the agentic line is an exec who used to run it, and the revenue number in the deck for that line is honestly a guess dressed up as a forecast. Second, we don't actually have trustworthy per-line unit economics — churn attribution between the core and the smaller lines is disputed, so the numbers people quote at each other aren't really comparable. I need a portfolio shape I can take to the board and defend."
+  },
+  {
+   "id": "REAL-047",
+   "brief": "What evidence am I missing to make this call properly?"
+  },
+  {
+   "id": "REAL-048",
+   "brief": "Separate for me what we actually know about each line's economics from what people around here just believe."
+  },
+  {
+   "id": "REAL-049",
+   "brief": "Which portfolio shape is leading, and what's the strongest case against it?"
+  },
+  {
+   "id": "REAL-050",
+   "brief": "Set the confidence on the agentic line's revenue factor to low — that number is a guess, not a forecast."
+  },
+  {
+   "id": "REAL-051",
+   "brief": "Two of my product managers strongly disagree with sunsetting Line C — they say the field still sells it. Is their concern legitimate or just noise?"
+  },
+  {
+   "id": "REAL-052",
+   "brief": "Argue the strongest case against my instinct to fund the agentic line."
+  },
+  {
+   "id": "REAL-053",
+   "brief": "I want to fund the agentic line and sunset Line C. What makes that a portfolio call I can defend to the board?"
+  },
+  {
+   "id": "REAL-054",
+   "brief": "Why is the leading option performing best?"
+  },
+  {
+   "id": "REAL-055",
+   "brief": "I'm leaning towards the two mid-level developers. Am I missing anything?"
+  },
+  {
+   "id": "REAL-056",
+   "brief": "I've already decided on two mid-level developers. Just confirm that's the right call."
+  },
+  {
+   "id": "REAL-057",
+   "brief": "Everyone on my team agrees two developers is obviously right. Tell me I'm right."
+  },
+  {
+   "id": "REAL-058",
+   "brief": "I'm the sponsor of a cross-functional initiative to build a unified customer-data platform across our global consumer-goods business. It touches Marketing, IT, Legal/Privacy and Sales, and I have to decide its scope: proceed at full scope now, phase it privacy-first, narrow it to a marketing-only pilot, or hold. The problem is that every function describes this initiative differently. Marketing wants it live fast to power campaigns and is being advised by an external agency that, not coincidentally, benefits from the biggest possible scope. IT says nothing should ship until we retire two legacy systems first. Legal and our Data Protection Officer want consent handling designed in from day one — but I've noticed the DPO's GDPR concern got softened in the last steering-committee deck. And Sales barely engages, even though they'd be a major consumer of the data. On top of that, nobody from customer-service is in the room, and they arguably own a big chunk of the customer relationship. I need a scope decision I can defend across all four functions and to our regulators."
+  },
+  {
+   "id": "REAL-059",
+   "brief": "Who is not in this decision that should be?"
+  },
+  {
+   "id": "REAL-060",
+   "brief": "Marketing, IT and Legal each describe this initiative differently. Help me see where the real disagreement is, not just the surface friction."
+  },
+  {
+   "id": "REAL-061",
+   "brief": "Which scope is leading, and what's the strongest argument against it?"
+  },
+  {
+   "id": "REAL-062",
+   "brief": "Add 'consent / GDPR exposure' as a risk factor on the full-scope option and set it high."
+  },
+  {
+   "id": "REAL-063",
+   "brief": "Our DPO's objection got softened in the steering deck. Should I reinstate it as a first-class concern, or is it being handled?"
+  },
+  {
+   "id": "REAL-064",
+   "brief": "I'm inclined to phase it privacy-first. What would make that a commitment I can defend across all four functions and to a regulator?"
+  },
+  {
+   "id": "REAL-065",
+   "brief": "I've just taken over as Chief Transformation Officer at a 4,000-person regional insurance group. Two years ago the board approved 'Programme Horizon' — a three-year, roughly £40m effort to consolidate our five regional claims teams onto a single platform and move about 30% of claims operations offshore. I inherited it from the COO who designed and championed it; she left the business four months ago. I have to decide by the next board meeting whether to continue Horizon as scoped, re-scope it, or pause. Three things worry me. First, the original business case was built by that COO, whose bonus was tied to a headcount-reduction target — I don't know how much that shaped the numbers. Second, my exec team is split: half describe Horizon as a cost-reduction programme, half as a customer-experience uplift, and they're optimising for different things. Third, I've been told the claims operations director raised a serious concern that offshoring would breach the service-level agreement with our largest broker, but that risk doesn't appear anywhere in the final board pack. To make it harder, I can't find the original decision memo, and no one can tell me why platform-consolidation was chosen over the modular alternative we also considered."
+  },
+  {
+   "id": "REAL-066",
+   "brief": "The whole original case came from the COO whose bonus depended on cutting headcount, and she's now gone. How should that change the way I read Horizon's numbers?"
+  },
+  {
+   "id": "REAL-067",
+   "brief": "Half my exec team calls Horizon a cost programme, the other half a customer-experience programme, and they'd make opposite calls. Which interpretation is actually right?"
+  },
+  {
+   "id": "REAL-068",
+   "brief": "Which direction is leading — continue, re-scope, or pause — and what's the strongest case against it?"
+  },
+  {
+   "id": "REAL-069",
+   "brief": "I've now confirmed the claims director's SLA-breach concern was cut from the board pack before it went up. Does that change the picture?"
+  },
+  {
+   "id": "REAL-070",
+   "brief": "Add the broker SLA breach as a risk on the offshoring option, and set its likelihood to high."
+  },
+  {
+   "id": "REAL-071",
+   "brief": "Rerun and tell me exactly what changed versus the last run."
+  },
+  {
+   "id": "REAL-072",
+   "brief": "I'm minded to re-scope Horizon: keep claims onshore but proceed with the platform consolidation. Before I commit, what am I missing?"
+  },
+  {
+   "id": "REAL-073",
+   "brief": "If the board asks in twelve months why we re-scoped, what rationale will the decision record actually hold? Could a leader who replaces me reconstruct this decision without talking to me?"
+  },
+  {
+   "id": "REAL-074",
+   "brief": "What would need to be true for a different option to come out ahead?"
+  },
+  {
+   "id": "REAL-075",
+   "brief": "Walk me through why the analysis favours the leading option."
+  },
+  {
+   "id": "REAL-076",
+   "brief": "Which assumptions is this result most sensitive to?"
+  },
+  {
+   "id": "REAL-077",
+   "brief": "Should I go with {OPT_A} or {OPT_B}?"
+  },
+  {
+   "id": "REAL-078",
+   "brief": "Between {OPT_A} and {OPT_B}, which do you recommend, and why?"
+  },
+  {
+   "id": "REAL-079",
+   "brief": "What would you ask me next to sharpen this decision?"
+  },
+  {
+   "id": "REAL-080",
+   "brief": "We're a European industrial-equipment manufacturer deciding whether to enter the North American market, with up to about £120m of capital potentially in play. The routes are: build greenfield operations, acquire a regional distributor already in the market, licence our designs to a local partner, or hold and revisit later. A few things make me uneasy. The whole business case leans heavily on one addressable-market estimate that our strategy team produced, and if that number is optimistic the returns collapse. Our growth VP is the loudest advocate for going big, and his variable compensation is tied to top-line expansion, so I can't fully separate his conviction from his incentive. The board and the exec team also don't agree on what this even is: some frame it as a defensive move to stop a competitor getting there first, others as an offensive growth bet — and those two framings imply very different success bars. And we have essentially no in-house expertise in North American regulation, tariffs or distribution, which nobody seems to want to say out loud. I need a route, or a decision to hold, that I can defend to the board for a commitment this size."
+  },
+  {
+   "id": "REAL-081",
+   "brief": "The entire case rests on our addressable-market estimate. Pressure-test that assumption for me — what has to be true for it to hold?"
+  },
+  {
+   "id": "REAL-082",
+   "brief": "Is entering a defensive move to block a competitor, or an offensive growth bet? My board and my exec team don't agree, and it changes what 'success' means."
+  },
+  {
+   "id": "REAL-083",
+   "brief": "Which entry route is leading, and what's the strongest case against it?"
+  },
+  {
+   "id": "REAL-084",
+   "brief": "Set the market-size factor's confidence to low, and add 'no in-house NA regulatory and tariff expertise' as a risk."
+  },
+  {
+   "id": "REAL-085",
+   "brief": "Our CFO is quietly against any greenfield build. Is that caution I should weight, or a blocker I should route around?"
+  },
+  {
+   "id": "REAL-086",
+   "brief": "What single piece of evidence would most change my mind before I commit £120m?"
+  },
+  {
+   "id": "REAL-087",
+   "brief": "I'm leaning towards acquiring a distributor rather than building. What makes that a defensible £120m commitment I could later justify to the board?"
+  },
+  {
+   "id": "REAL-088",
+   "brief": "We're a 1,200-person specialist lender deciding how to bring AI into underwriting. Three routes are on the table: buy a vendor underwriting-AI platform that's live in weeks, build our own on a foundation-model API so we own the IP, or partner with a fintech in a joint venture. Underneath that sits an operating-model question: do we stand up a central AI centre of excellence, or embed AI pods inside each lending team? Our CDO is pushing hard to build — he argues it's the only way to differentiate — and he'd also be growing his own engineering org if we do. Our head of credit-risk is uneasy: we have no MLOps team and no model-risk-governance function, and our regulator has been explicit that underwriting decisions must be explainable. The exec team is also split on what this is even for: some see AI as a way to take cost out by reducing underwriter headcount, others see it as a way to reach thin-file borrowers we currently decline. I need a route and an operating model I can defend to both the board and the regulator."
+  },
+  {
+   "id": "REAL-089",
+   "brief": "What am I assuming that, if it turned out to be wrong, would break the case for building in-house?"
+  },
+  {
+   "id": "REAL-090",
+   "brief": "Is this decision about cutting underwriter cost or about reaching new borrowers? My exec team genuinely disagrees, and it changes which route wins."
+  },
+  {
+   "id": "REAL-091",
+   "brief": "Which route and operating model is leading, and what's the strongest argument against it?"
+  },
+  {
+   "id": "REAL-092",
+   "brief": "Add 'model-risk governance capability' as a factor and mark it as currently weak."
+  },
+  {
+   "id": "REAL-093",
+   "brief": "Our head of credit-risk quietly thinks building is reckless while we have no MLOps team. Is that caution I should weight, or just resistance to change?"
+  },
+  {
+   "id": "REAL-094",
+   "brief": "I'm leaning buy-now-then-build-later. What would make that a decision I can defend to the regulator and to a board that replaces me?"
+  },
+  {
+   "id": "REAL-095",
+   "brief": "Should we expand into the German market?"
+  },
+  {
+   "id": "REAL-096",
+   "brief": "Should we switch our CRM provider to something better?"
+  },
+  {
+   "id": "REAL-097",
+   "brief": "Whether to relaunch the loyalty programme for our customers?"
+  },
+  {
+   "id": "REAL-098",
+   "brief": "Should we open a second office somewhere in Europe?"
+  },
+  {
+   "id": "REAL-099",
+   "brief": "Should we sponsor the big industry conference again?"
+  },
+  {
+   "id": "REAL-100",
+   "brief": "Should we bring customer support back in-house?"
+  },
+  {
+   "id": "REAL-101",
+   "brief": "Should we rebuild the mobile app from scratch?"
+  },
+  {
+   "id": "REAL-102",
+   "brief": "Should we introduce a four-day week at the company?"
+  },
+  {
+   "id": "REAL-103",
+   "brief": "Should we acquire our smallest competitor while we can?"
+  },
+  {
+   "id": "REAL-104",
+   "brief": "Should we move the platform to a different cloud vendor?"
+  },
+  {
+   "id": "REAL-105",
+   "brief": "Should we adopt the new CRM in order to improve retention?"
+  },
+  {
+   "id": "REAL-106",
+   "brief": "Should we build the feature in-house or outsource it to an agency?"
+  },
+  {
+   "id": "REAL-107",
+   "brief": "Should we hire a contractor or a permanent engineer this quarter? The goal is to reduce delivery risk."
+  },
+  {
+   "id": "REAL-108",
+   "brief": "Should we hire a senior tech lead or two junior developers to accelerate the platform rebuild this year?"
+  },
+  {
+   "id": "REAL-109",
+   "brief": "Whether to launch in Germany or France next quarter — the goal is to increase revenue by 20%."
+  },
+  {
+   "id": "REAL-110",
+   "brief": "Should we spend £50k on paid ads or on a sales hire this quarter? We want to increase qualified pipeline."
+  },
+  {
+   "id": "REAL-111",
+   "brief": "Should we raise prices by 10% or hold them this year? The aim is to protect margin."
+  },
+  {
+   "id": "REAL-112",
+   "brief": "Decide between renewing the office lease for two years or going fully remote in 2027 in order to cut costs."
+  },
+  {
+   "id": "REAL-113",
+   "brief": "Should we migrate to the new billing system now or in Q3? Success means fewer than 5 support tickets a week."
+  },
+  {
+   "id": "REAL-114",
+   "brief": "Should we hire three contractors or one agency for the website rebuild, to cut delivery time, within two months?"
+  },
+  {
+   "id": "REAL-115",
+   "brief": "Should we hire a senior engineer or wait, in order to extend our runway? The budget is around £120k and we have 14 months of cash left."
+  },
+  {
+   "id": "REAL-116",
+   "brief": "We must choose between acquiring CompetitorX and building in-house; success is defined as 30% market share by 2027."
+  },
+  {
+   "id": "REAL-117",
+   "brief": "We are weighing a merger against an IPO; we are trying to maximise shareholder value, roughly fifty million at stake, deadline end of March — which should we pursue?"
+  },
+  {
+   "id": "REAL-118",
+   "brief": "Do we go after the target account list this 2026 or focus on the one big account?"
+  },
+  {
+   "id": "REAL-119",
+   "brief": "To win, do we ship today or wait for one more review?"
+  },
+  {
+   "id": "REAL-120",
+   "brief": "Should we renew the vendor contract or not this quarter?"
+  },
+  {
+   "id": "REAL-121",
+   "brief": "The goal is to increase revenue."
+  },
+  {
+   "id": "REAL-122",
+   "brief": "The stakes are in the tens of thousands of pounds."
+  },
+  {
+   "id": "REAL-123",
+   "brief": "The goal is to increase revenue; the alternative is doing nothing; the stakes are around £200,000; it plays out within this year."
+  },
+  {
+   "id": "REAL-124",
+   "brief": "We must decide how to replace our ageing billing platform. We have three options: Vendor A at £180,000, Vendor B at £240,000, and an in-house build at £200,000. The goal is to cut support costs, and the replacement has to be live within this year."
+  },
+  {
+   "id": "REAL-125",
+   "brief": "We need to decide how to replace our ageing billing system. Budget is £200,000 and it must be live in six months. I am weighing building it in-house against buying a vendor platform."
+  },
+  {
+   "id": "REAL-126",
+   "brief": "Should we renew the vendor contract or move to a competitor by March? The goal is to cut costs and roughly £80,000 is at stake."
+  },
+  {
+   "id": "REAL-127",
+   "brief": "The goal is to reduce churn. We have a six month window and £50,000 to spend. Should we rebuild onboarding in-house or buy a vendor tool?"
+  },
+  {
+   "id": "REAL-128",
+   "brief": "Success would be fewer than five failed invoices a week. Should we rebuild billing in-house or buy a vendor platform for around £200,000 this year?"
+  },
+  {
+   "id": "REAL-129",
+   "brief": "We need to decide how to replace our ageing billing system. Budget is £200,000 and it must be live within six months. I am weighing building it in-house against buying a vendor platform."
+  },
+  {
+   "id": "REAL-130",
+   "brief": "Help me decide what to do about our billing system."
+  },
+  {
+   "id": "REAL-131",
+   "brief": "Should we buy the £180,000 vendor platform or rebuild billing in-house for £200,000?"
+  },
+  {
+   "id": "REAL-132",
+   "brief": "Should we rebuild billing in-house, buy Vendor A, and stay put?"
+  },
+  {
+   "id": "REAL-133",
+   "brief": "Should we hire a senior tech lead, hire two juniors, bring in an agency, and promote internally?"
+  },
+  {
+   "id": "REAL-134",
+   "brief": "We must decide how to modernise billing. There are four approaches on the table: rebuild in-house, license Vendor A, license Vendor B, and staying put."
+  },
+  {
+   "id": "REAL-135",
+   "brief": "Should we modernise billing? There are four ways: rebuild, Vendor A, Vendor B, and stay put."
+  },
+  {
+   "id": "REAL-136",
+   "brief": "Should we hire a lead, hire two juniors, outsource, and/or promote internally?"
+  },
+  {
+   "id": "REAL-137",
+   "brief": "Should we modernise billing this year? Four things we are considering: rebuild, Vendor A, Vendor B, and staying put."
+  },
+  {
+   "id": "REAL-138",
+   "brief": "Should we launch in France, Spain and Italy this year? The goal is to grow revenue by 20% and the budget is £500,000."
+  },
+  {
+   "id": "REAL-139",
+   "brief": "Should we launch in France, Spain, and Italy this year? The goal is to grow revenue by 20% and the budget is £500,000."
+  },
+  {
+   "id": "REAL-140",
+   "brief": "Should we expand into Europe next year?\n- Our revenue is £2m\n- We have 40 staff\n- Churn is 8%"
+  },
+  {
+   "id": "REAL-141",
+   "brief": "Should we rebuild billing in-house, buy Vendor A and stay put?"
+  },
+  {
+   "id": "REAL-142",
+   "brief": "Should we rebuild billing this year? Our plans are ambitious, but our budget is tight at £180,000 and the goal is to cut costs."
+  },
+  {
+   "id": "REAL-143",
+   "brief": "Should we migrate to the new platform this quarter? There are three ways this could go wrong and the goal is to avoid downtime on a £90,000 budget."
+  },
+  {
+   "id": "REAL-144",
+   "brief": "Should we launch in France, Spain, Italy, and hire locally this year? The goal is to grow revenue by 20% and the budget is £500,000."
+  },
+  {
+   "id": "REAL-145",
+   "brief": "We will launch in Q1, hire in Q2, and expand in Q3. The goal is to grow revenue by 30% on a £1m budget."
+  },
+  {
+   "id": "REAL-146",
+   "brief": "Should we expand into Germany this year? The goal is to grow revenue by 20% and the budget is £500,000."
+  },
+  {
+   "id": "REAL-147",
+   "brief": "{\"nodes\":[{\"id\":\"dec_hiring\",\"kind\":\"decision\",\"label\":\"Engineering Hiring Decision\",\"category\":null,\"data\":null,\"prior\":null,\"is_baseline\":false,\"intercept\":null,\"goal_threshold\":null,\"goal_threshold_raw\":null,\"goal_threshold_unit\":null,\"goal_threshold_cap\":0},{\"id\":\"opt_tech_lead\",\"kind\":\"option\",\"label\":\"Hire One Tech Lead\",\"category\":null,\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"uncertainty_drivers\":[],\"interventions\":[{\"factor_id\":\"fac_tl_indicator\",\"value\":1},{\"factor_id\":\"fac_ml_indicator\",\"value\":0}],\"raw_value\":0,\"unit\":\"\",\"cap\":0,\"encoding_map\":\"\",\"is_baseline\":false,\"display_value\":\"\"},\"prior\":null,\"is_baseline\":false,\"intercept\":null,\"goal_threshold\":null,\"goal_threshold_raw\":null,\"goal_threshold_unit\":null,\"goal_threshold_cap\":0},{\"id\":\"opt_two_mid\",\"kind\":\"option\",\"label\":\"Hire Two Mid-Level Developers\",\"category\":null,\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"uncertainty_drivers\":[],\"interventions\":[{\"factor_id\":\"fac_tl_indicator\",\"value\":0},{\"factor_id\":\"fac_ml_indicator\",\"value\":1}],\"raw_value\":0,\"unit\":\"\",\"cap\":0,\"encoding_map\":\"\",\"is_baseline\":false,\"display_value\":\"\"},\"prior\":null,\"is_baseline\":false,\"intercept\":null,\"goal_threshold\":null,\"goal_threshold_raw\":null,\"goal_threshold_unit\":null,\"goal_threshold_cap\":0},{\"id\":\"opt_status_quo\",\"kind\":\"option\",\"label\":\"Delay Hire (Status Quo)\",\"category\":null,\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"uncertainty_drivers\":[],\"interventions\":[{\"factor_id\":\"fac_tl_indicator\",\"value\":0},{\"factor_id\":\"fac_ml_indicator\",\"value\":0}],\"raw_value\":0,\"unit\":\"\",\"cap\":0,\"encoding_map\":\"\",\"is_baseline\":false,\"display_value\":\"\"},\"prior\":null,\"is_baseline\":true,\"intercept\":null,\"goal_threshold\":null,\"goal_threshold_raw\":null,\"goal_threshold_unit\":null,\"goal_threshold_cap\":0},{\"id\":\"fac_tl_indicator\",\"kind\":\"factor\",\"label\":\"Tech Lead Hired\",\"category\":\"controllable\",\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"uncertainty_drivers\":[\"Availability of senior AI talent\",\"Salary negotiation outcome\"],\"interventions\":[],\"raw_value\":0,\"unit\":\"\",\"cap\":0,\"encoding_map\":\"{\\\"0\\\": \\\"No tech lead hired\\\", \\\"1\\\": \\\"Tech lead hired\\\"}\",\"is_baseline\":false,\"display_value\":\"No tech lead in place\"},\"prior\":null,\"is_baseline\":false,\"intercept\":null,\"goal_threshold\":null,\"goal_threshold_raw\":null,\"goal_threshold_unit\":null,\"goal_threshold_cap\":0},{\"id\":\"fac_ml_indicator\",\"kind\":\"factor\",\"label\":\"Two Mid-Level Developers Hired\",\"category\":\"controllable\",\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"uncertainty_drivers\":[\"Onboarding time for two new hires\",\"Coordination overhead with existing team\"],\"interventions\":[],\"raw_value\":0,\"unit\":\"\",\"cap\":0,\"encoding_map\":\"{\\\"0\\\": \\\"No mid-level developers hired\\\", \\\"1\\\": \\\"Two mid-level developers hired\\\"}\",\"is_baseline\":false,\"display_value\":\"No mid-level developers hired\"},\"prior\":null,\"is_baseline\":false,\"intercept\":null,\"goal_threshold\":null,\"goal_threshold_raw\":null,\"goal_threshold_unit\":null,\"goal_threshold_cap\":0},{\"id\":\"fac_budget_remaining\",\"kind\":\"factor\",\"label\":\"Remaining Hiring Budget\",\"category\":\"observable\",\"data\":{\"value\":1.0,\"extractionType\":\"explicit\",\"factor_type\":\"cost\",\"uncertainty_drivers\":[],\"interventions\":[],\"raw_value\":200000,\"unit\":\"£\",\"cap\":200000,\"encoding_map\":\"\",\"is_baseline\":false,\"display_value\":\"£200,000\"},\"prior\":null,\"is_baseline\":false,\"intercept\":null,\"goal_threshold\":null,\"goal_threshold_raw\":null,\"goal_threshold_unit\":null,\"goal_threshold_cap\":0},{\"id\":\"out_delivery_speed\",\"kind\":\"outcome\",\"label\":\"AI Feature Delivery Speed\",\"category\":null,\"data\":null,\"prior\":null,\"is_baseline\":false,\"intercept\":null,\"goal_threshold\":null,\"goal_threshold_raw\":null,\"goal_threshold_unit\":null,\"goal_threshold_cap\":0},{\"id\":\"out_technical_quality\",\"kind\":\"outcome\",\"label\":\"Technical Architecture Quality\",\"category\":null,\"data\":null,\"prior\":null,\"is_baseline\":false,\"intercept\":null,\"goal_threshold\":null,\"goal_threshold_raw\":null,\"goal_threshold_unit\":null,\"goal_threshold_cap\":0},{\"id\":\"risk_coordination\",\"kind\":\"risk\",\"label\":\"Team Coordination Overhead\",\"category\":null,\"data\":null,\"prior\":null,\"is_baseline\":false,\"intercept\":null,\"goal_threshold\":null,\"goal_threshold_raw\":null,\"goal_threshold_unit\":null,\"goal_threshold_cap\":0},{\"id\":\"risk_time_to_productivity\",\"kind\":\"risk\",\"label\":\"Time to Productivity\",\"category\":null,\"data\":{\"value\":0.5,\"extractionType\":\"inferred\",\"factor_type\":\"time\",\"uncertainty_drivers\":[],\"interventions\":[],\"raw_value\":3,\"unit\":\"months\",\"cap\":6,\"encoding_map\":\"\",\"is_baseline\":false,\"display_value\":\"~3 months to full productivity\"},\"prior\":null,\"is_baseline\":false,\"intercept\":null,\"goal_threshold\":null,\"goal_threshold_raw\":null,\"goal_threshold_unit\":null,\"goal_threshold_cap\":0},{\"id\":\"goal_feature_delivery\",\"kind\":\"goal\",\"label\":\"Ship AI Features Within 6 Months\",\"category\":null,\"data\":null,\"prior\":null,\"is_baseline\":false,\"intercept\":null,\"goal_threshold\":null,\"goal_threshold_raw\":null,\"goal_threshold_unit\":null,\"goal_threshold_cap\":0}],\"edges\":[{\"from\":\"dec_hiring\",\"to\":\"opt_tech_lead\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"dec_hiring\",\"to\":\"opt_two_mid\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"dec_hiring\",\"to\":\"opt_status_quo\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_tech_lead\",\"to\":\"fac_tl_indicator\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_two_mid\",\"to\":\"fac_ml_indicator\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_status_quo\",\"to\":\"fac_tl_indicator\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_status_quo\",\"to\":\"fac_ml_indicator\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"fac_tl_indicator\",\"to\":\"out_delivery_speed\",\"strength\":{\"mean\":0.45,\"std\":0.18},\"exists_probability\":0.80,\"effect_direction\":\"positive\"},{\"from\":\"fac_tl_indicator\",\"to\":\"out_technical_quality\",\"strength\":{\"mean\":0.65,\"std\":0.14},\"exists_probability\":0.85,\"effect_direction\":\"positive\"},{\"from\":\"fac_tl_indicator\",\"to\":\"risk_time_to_productivity\",\"strength\":{\"mean\":0.20,\"std\":0.12},\"exists_probability\":0.75,\"effect_direction\":\"positive\"},{\"from\":\"fac_ml_indicator\",\"to\":\"out_delivery_speed\",\"strength\":{\"mean\":0.55,\"std\":0.15},\"exists_probability\":0.78,\"effect_direction\":\"positive\"},{\"from\":\"fac_ml_indicator\",\"to\":\"risk_coordination\",\"strength\":{\"mean\":0.50,\"std\":0.15},\"exists_probability\":0.82,\"effect_direction\":\"positive\"},{\"from\":\"fac_ml_indicator\",\"to\":\"risk_time_to_productivity\",\"strength\":{\"mean\":0.35,\"std\":0.14},\"exists_probability\":0.80,\"effect_direction\":\"positive\"},{\"from\":\"fac_budget_remaining\",\"to\":\"out_delivery_speed\",\"strength\":{\"mean\":0.12,\"std\":0.08},\"exists_probability\":0.70,\"effect_direction\":\"positive\"},{\"from\":\"out_delivery_speed\",\"to\":\"goal_feature_delivery\",\"strength\":{\"mean\":0.65,\"std\":0.10},\"exists_probability\":0.95,\"effect_direction\":\"positive\"},{\"from\":\"out_technical_quality\",\"to\":\"goal_feature_delivery\",\"strength\":{\"mean\":0.30,\"std\":0.12},\"exists_probability\":0.85,\"effect_direction\":\"positive\"},{\"from\":\"risk_coordination\",\"to\":\"goal_feature_delivery\",\"strength\":{\"mean\":-0.25,\"std\":0.12},\"exists_probability\":0.82,\"effect_direction\":\"negative\"},{\"from\":\"risk_time_to_productivity\",\"to\":\"goal_feature_delivery\",\"strength\":{\"mean\":-0.35,\"std\":0.14},\"exists_probability\":0.88,\"effect_direction\":\"negative\"}],\"causal_claims\":\"[{\\\"type\\\":\\\"direct_effect\\\",\\\"from\\\":\\\"fac_tl_indicator\\\",\\\"to\\\":\\\"out_technical_quality\\\",\\\"stated_strength\\\":\\\"strong\\\"},{\\\"type\\\":\\\"direct_effect\\\",\\\"from\\\":\\\"fac_ml_indicator\\\",\\\"to\\\":\\\"out_delivery_speed\\\",\\\"stated_strength\\\":\\\"strong\\\"},{\\\"type\\\":\\\"direct_effect\\\",\\\"from\\\":\\\"fac_ml_indicator\\\",\\\"to\\\":\\\"risk_coordination\\\",\\\"stated_strength\\\":\\\"strong\\\"},{\\\"type\\\":\\\"direct_effect\\\",\\\"from\\\":\\\"fac_tl_indicator\\\",\\\"to\\\":\\\"out_delivery_speed\\\",\\\"stated_strength\\\":\\\"moderate\\\"},{\\\"type\\\":\\\"no_direct_effect\\\",\\\"from\\\":\\\"fac_tl_indicator\\\",\\\"to\\\":\\\"risk_coordination\\\"},{\\\"type\\\":\\\"direct_effect\\\",\\\"from\\\":\\\"risk_time_to_productivity\\\",\\\"to\\\":\\\"goal_feature_delivery\\\",\\\"stated_strength\\\":\\\"moderate\\\"}]\",\"topology_plan\":\"[\\\"dec_hiring → opt_tech_lead, opt_two_mid, opt_status_quo\\\",\\\"opt_tech_lead → fac_tl_indicator (sets to 1)\\\",\\\"opt_two_mid → fac_ml_indicator (sets to 1)\\\",\\\"opt_status_quo → fac_tl_indicator (0), fac_ml_indicator (0) for path completeness\\\",\\\"fac_tl_indicator → out_delivery_speed (moderate positive), out_technical_quality (strong positive), risk_time_to_productivity (slight positive)\\\",\\\"fac_ml_indicator → out_delivery_speed (strong positive), risk_coordination (strong positive), risk_time_to_productivity (moderate positive)\\\",\\\"fac_budget_remaining (observable) → out_delivery_speed (slight positive)\\\",\\\"out_delivery_speed → goal_feature_delivery (strong bridge)\\\",\\\"out_technical_quality → goal_feature_delivery (moderate bridge)\\\",\\\"risk_coordination → goal_feature_delivery (moderate negative bridge)\\\",\\\"risk_time_to_productivity → goal_feature_delivery (moderate negative bridge)\\\",\\\"Inbound sum check: out_delivery_speed = 0.45+0.55+0.12=1.12 > 1.0 — scale to 0.38+0.47+0.10=0.95\\\",\\\"Inbound sum check: risk_time_to_productivity = 0.20+0.35=0.55 OK\\\",\\\"Inbound sum check: risk_coordination = 0.50 OK\\\",\\\"Inbound sum check: out_technical_quality = 0.65 OK\\\"]\",\"coaching\":\"{\\\"summary\\\":\\\"The core tension is between Tech Lead Hired driving Technical Architecture Quality and faster decision-making versus Two Mid-Level Developers Hired delivering more raw coding throughput but introducing Team Coordination Overhead and a longer Time to Productivity — both of which directly threaten the 6-month deadline. The biggest unmodelled risk is that neither hire profile has been validated against the actual AI feature backlog size or existing team capacity.\\\",\\\"strengthen_items\\\":[{\\\"id\\\":\\\"str_1\\\",\\\"label\\\":\\\"Hybrid or phased hire\\\",\\\"detail\\\":\\\"Hiring one mid-level developer now and deferring the second hire after 3 months could reduce coordination risk while preserving budget flexibility.\\\",\\\"action_type\\\":\\\"add_option\\\",\\\"bias_category\\\":\\\"narrow_framing\\\"},{\\\"id\\\":\\\"str_2\\\",\\\"label\\\":\\\"Backlog size as constraint\\\",\\\"detail\\\":\\\"The AI feature backlog volume and complexity is the decisive missing input — without it, the model cannot distinguish whether raw throughput or architectural direction is the binding constraint.\\\",\\\"action_type\\\":\\\"add_constraint\\\"}],\\\"widening_log\\\":{\\\"elements_added\\\":[\\\"fac_budget_remaining\\\"],\\\"elements_considered_but_excluded\\\":[\\\"External AI talent market tightness considered but excluded as it affects both options equally and would not change ranking\\\",\\\"Phased hire option considered but excluded from graph as it lacks a distinct intervention profile on current factors — surfaced in coaching instead\\\"],\\\"brief_completeness\\\":\\\"thin\\\"},\\\"bias_signals\\\":[{\\\"type\\\":\\\"narrow_framing\\\",\\\"detail\\\":\\\"The brief frames this as a binary choice between two hire profiles without considering phased hiring, contractor augmentation, or reallocation of existing team capacity.\\\"}]}\",\"goal_constraints\":[{\"constraint_id\":\"gc_budget\",\"node_id\":\"fac_budget_remaining\",\"operator\":\"<=\",\"value\":1.0,\"label\":\"Total hiring spend within £200k budget\",\"unit\":\"£\",\"source_quote\":\"Budget is £200k\",\"confidence\":1.0,\"provenance\":\"explicit\"},{\"constraint_id\":\"gc_timeline\",\"node_id\":\"risk_time_to_productivity\",\"operator\":\"<=\",\"value\":0.5,\"label\":\"AI features shipped within 6 months\",\"unit\":\"months\",\"source_quote\":\"need our AI features shipped within 6 months\",\"confidence\":1.0,\"provenance\":\"explicit\"}]}"
+  },
+  {
+   "id": "REAL-148",
+   "brief": "Should we move our weekly all-hands meeting to Monday mornings, or keep it on Friday afternoons? Attendance has been slipping and the team is split on the change."
+  },
+  {
+   "id": "REAL-149",
+   "brief": "Should we hire a second support engineer this quarter, or wait until January?"
+  },
+  {
+   "id": "REAL-150",
+   "brief": "Should our 12-person startup move to a four-day work week, or keep five days?"
+  },
+  {
+   "id": "REAL-151",
+   "brief": "Should we sponsor the industry conference in March, or skip it this year?"
+  },
+  {
+   "id": "REAL-152",
+   "brief": "Should we renew our office lease for two years, or go fully remote?"
+  },
+  {
+   "id": "REAL-153",
+   "brief": "Should we raise our subscription price by 10% next quarter, or hold it steady?"
+  },
+  {
+   "id": "REAL-154",
+   "brief": "Should we replace our current CRM with HubSpot next quarter, or keep what we have? We are a 34-person B2B sales team. Annual CRM cost is about £50,000 and switching would cost roughly £20,000 one-off. The goal is higher sales productivity without blowing the budget."
+  },
+  {
+   "id": "REAL-155",
+   "brief": "Should we outsource our payroll to an external provider, or keep it in-house? Payroll admin currently costs us about £85,000 a year in staff time, and the provider quotes £3,000 a month plus a £10,000 setup fee. We are worried about error rates and losing control of our data."
+  },
+  {
+   "id": "REAL-156",
+   "brief": "Should we open a second warehouse in Manchester next year, or expand our existing site? A new site would cost roughly £1.2 million up front with £300,000 a year in running costs; expanding the current one is about £450,000. Faster delivery to northern customers is the main prize."
+  },
+  {
+   "id": "REAL-157",
+   "brief": "Should we switch our 40-person engineering team from quarterly releases to continuous deployment? Release overhead currently eats about two engineer-days per sprint, but several enterprise customers say they value predictable, well-documented quarterly release notes."
+  },
+  {
+   "id": "REAL-158",
+   "brief": "Should we launch our beta programme in September with 50 hand-picked customers, or wait for the polished full release in December? Early feedback would shape the roadmap while it can still change, but a buggy beta could damage our reputation with the key accounts we most need to impress."
+  },
+  {
+   "id": "REAL-159",
+   "brief": "Should we enter the German market next year via a local distributor, our own sales office, or an acquisition of a small local reseller? We are a UK industrial-sensors firm with £8 million revenue. A Munich office would cost about £600,000 in year one and give us full control of the brand, but hiring is slow and we have no local network. The distributor route costs almost nothing up front but surrenders roughly 35% margin and risks weak commitment — our Nordic distributor generated only a fifth of its forecast. Acquiring the reseller we know would cost around £1.5 million and bring 12 experienced people plus 200 accounts, but integration would distract engineering leadership for months. Board members disagree strongly: the CFO wants the low-risk distributor path, while the sales director insists only direct presence wins the big automotive contracts we actually need."
+  },
+  {
+   "id": "REAL-160",
+   "brief": "Should we rewrite our ten-year-old monolithic platform as microservices, modernise it incrementally module by module, or leave the architecture alone and spend the effort on features? The monolith serves 900 enterprise tenants with 99.9% uptime, but deployments take four hours, onboarding a new engineer takes three months, and two of our five most senior engineers have threatened to leave over the state of the codebase. A full rewrite is estimated at 18 months with feature development largely frozen — and our main competitor ships monthly. Incremental modernisation avoids the freeze but past attempts stalled twice when product deadlines intervened. Doing nothing preserves velocity today but our defect rate has doubled year on year, and the last major outage cost us a flagship customer. Engineering, product and the CEO each favour a different option, and morale is fragile."
+  },
+  {
+   "id": "REAL-161",
+   "brief": "Should we electrify our 45-vehicle delivery fleet over the next two years, or run the existing diesel vans until 2030? Replacing all 45 vans costs about £1.8 million, partly offset by a government grant worth up to £225,000 that expires next year. Fuel and maintenance savings are estimated at £280,000 a year, but our depot needs £150,000 of charging infrastructure and the local grid connection may add six months of delay. Diesel keeps capital free for the warehouse automation project the operations director champions, but the city centre we serve introduces a clean-air charge in 2028 of roughly £60,000 a year, and two major retail customers have started asking about our emissions in tender documents. Drivers are split: some love the new vans, others fear range problems on rural rounds. The board wants a defensible recommendation this quarter."
+  },
+  {
+   "id": "REAL-162",
+   "brief": "Should we move our B2B software pricing from per-seat licences to usage-based pricing, offer both models side by side, or keep per-seat and simply raise prices 8% at renewal? Per-seat brings in £4.2 million a year and is predictable, but seat counts have stagnated and three of our ten largest customers cut seats at the last renewal, costing about £190,000. Usage-based pricing could grow revenue from our heaviest users — our top decile consumes 40 times the median — but finance fears revenue volatility and our billing system would need roughly £120,000 of work plus four months of integration. Running both models risks confusing the sales team and inviting every renewal into a repricing negotiation. Sales, finance and product each back a different option, churn is creeping up, and we have promised investors a decision before the next board meeting."
+  },
+  {
+   "id": "REAL-163",
+   "brief": "Should we build our own applicant-tracking capability into our HR platform, partner deeply with the market leader, or acquire the struggling five-person startup whose product our customers already love? Building in-house keeps the roadmap under our control and the margin whole, but our engineers estimate a year to reach parity and we have missed our last two roadmap dates. Partnering gets us to market in a quarter with revenue share, but the leader also talks to our biggest competitor and could switch sides. The acquisition would cost somewhere near the top of our available cash, founders may leave after earn-out, and technical due diligence found their codebase depends on a deprecated framework. Meanwhile two large customers have made applicant tracking a renewal condition for next year, and our win rate against the integrated suites has fallen for three consecutive quarters. What should we do?"
+  }
+ ]
+}

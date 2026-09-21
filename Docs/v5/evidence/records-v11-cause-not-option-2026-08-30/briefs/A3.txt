@@ -1,0 +1,1 @@
+Manufacturing defect rates have doubled since May. The plant manager thinks the new supplier's material is inconsistent, the quality lead thinks the night shift training was cut too short, and the engineering lead thinks the line speed increase is the real culprit. We have to decide whether to slow the line back down or keep it at current speed while we investigate.

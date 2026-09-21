@@ -24,7 +24,7 @@ describe("generateRobustnessSynthesis", () => {
 
       expect(result).not.toBeNull();
       expect(result?.headline).toBe(
-        "87% confident that Premium Pricing remains your best option"
+        "Premium Pricing stays in front in 87% of tested scenarios"
       );
     });
 
@@ -40,7 +40,7 @@ describe("generateRobustnessSynthesis", () => {
       const result = generateRobustnessSynthesis(data);
 
       expect(result?.headline).toBe(
-        "87% confident that Option A remains your best option"
+        "Option A stays in front in 87% of tested scenarios"
       );
     });
 
@@ -52,7 +52,7 @@ describe("generateRobustnessSynthesis", () => {
       const result = generateRobustnessSynthesis(data);
 
       expect(result?.headline).toBe(
-        "65% confidence in the current recommendation"
+        "The ranking holds in 65% of tested scenarios"
       );
     });
 
@@ -147,7 +147,7 @@ describe("generateRobustnessSynthesis", () => {
       const explanation = result?.assumption_explanations?.[0]?.explanation;
       expect(explanation).toContain("Market Size");
       expect(explanation).toContain("Growth");
-      expect(explanation).toContain("recommendation could change");
+      expect(explanation).toContain("ranking could change");
     });
 
     it("generates contextualised explanation for cost factors", () => {
@@ -574,7 +574,7 @@ describe("generateRobustnessSynthesis", () => {
       const result = generateRobustnessSynthesis(data);
 
       // Check headline
-      expect(result?.headline).toBe("87% confident that Premium Pricing remains your best option");
+      expect(result?.headline).toBe("Premium Pricing stays in front in 87% of tested scenarios");
 
       // Check assumption explanations - should have contextualised content
       expect(result?.assumption_explanations).toHaveLength(1);
@@ -604,7 +604,7 @@ describe("generateRobustnessSynthesis", () => {
 
       const result = generateRobustnessSynthesis(data, { includeFallbacks: false });
 
-      expect(result?.headline).toBe("75% confident that Option A remains your best option");
+      expect(result?.headline).toBe("Option A stays in front in 75% of tested scenarios");
       expect(result?.assumption_explanations).toBeUndefined();
       expect(result?.investigation_suggestions).toBeUndefined();
     });
@@ -621,7 +621,7 @@ describe("generateRobustnessSynthesis", () => {
 
       const result = generateRobustnessSynthesis(data);
 
-      expect(result?.headline).toBe("75% confident that Option A remains your best option");
+      expect(result?.headline).toBe("Option A stays in front in 75% of tested scenarios");
       // Fallback messages should be included for missing sections
       expect(result?.assumption_explanations?.[0]?.explanation).toContain("No critical assumptions");
       expect(result?.investigation_suggestions?.[0]?.suggestion).toContain("stable influence");
@@ -638,7 +638,7 @@ describe("generateRobustnessSynthesis", () => {
       const result = generateRobustnessSynthesis(data);
 
       expect(result?.headline).toBe(
-        "0% confident that Test remains your best option"
+        "Test stays in front in 0% of tested scenarios"
       );
     });
 
@@ -651,7 +651,7 @@ describe("generateRobustnessSynthesis", () => {
       const result = generateRobustnessSynthesis(data);
 
       expect(result?.headline).toBe(
-        "100% confident that Best Option remains your best option"
+        "Best Option stays in front in 100% of tested scenarios"
       );
     });
 

@@ -1,0 +1,522 @@
+{
+  "_provenance": "THE ADVERSARIAL REVIEWER'S CORPUS FOR CEE PR #1086, lifted verbatim. CLAUDE.md trap 22c: for a predicate over natural language the AUTHOR's corpus is a development aid and the REVIEWER's corpus is the load-bearing evidence. This file is that evidence, committed. Corpus A (60) is the reviewer's hand-written adversarial set, every firing class paired with a superficially-similar silent twin. Corpus R+ (12) are the REAL repo briefs the reviewer found the predicate firing on — real wire captures, the deployed-staging validation brief, gold benchmark briefs and clarify-v2 fixtures. `expect` is the REVIEWER's independent adjudication, not the author's and not the measured output. Cases may be ADDED here; none may be replaced, narrowed or re-authored to suit a fix.",
+  "_source": "evidence/implementation/CLAUDE-REVIEW-1086.md sections 1.4, 1.6, 1.7",
+  "cases": [
+    {
+      "id": "A1",
+      "origin": "reviewer-corpus-A",
+      "class": "substring",
+      "brief": "We are deciding how to deploy a £50,000 capital investment this year.",
+      "expect": "silent"
+    },
+    {
+      "id": "A2",
+      "origin": "reviewer-corpus-A",
+      "class": "substring",
+      "brief": "The plan adds £2m capacity across the two sites.",
+      "expect": "silent"
+    },
+    {
+      "id": "A3",
+      "origin": "reviewer-corpus-A",
+      "class": "substring",
+      "brief": "We employ 250 capable engineers across three offices.",
+      "expect": "silent"
+    },
+    {
+      "id": "A4",
+      "origin": "reviewer-corpus-A",
+      "class": "substring",
+      "brief": "The contract has a £3m escape clause we could invoke.",
+      "expect": "silent"
+    },
+    {
+      "id": "A5",
+      "origin": "reviewer-corpus-A",
+      "class": "substring",
+      "brief": "Marketing spent £40,000 budgeting for the relaunch last year.",
+      "expect": "silent"
+    },
+    {
+      "id": "A6",
+      "origin": "reviewer-corpus-A",
+      "class": "substring",
+      "brief": "We manage 12 capital projects in parallel.",
+      "expect": "silent"
+    },
+    {
+      "id": "A7",
+      "origin": "reviewer-corpus-A",
+      "class": "substring",
+      "brief": "Our 40% capture rate is the best in the sector.",
+      "expect": "silent"
+    },
+    {
+      "id": "A8",
+      "origin": "reviewer-corpus-A",
+      "class": "substring",
+      "brief": "The admin of 12 legacy systems costs us two FTEs.",
+      "expect": "silent"
+    },
+    {
+      "id": "A9",
+      "origin": "reviewer-corpus-A",
+      "class": "substring",
+      "brief": "A recap of 3 previous attempts is in the appendix.",
+      "expect": "silent"
+    },
+    {
+      "id": "A10",
+      "origin": "reviewer-corpus-A",
+      "class": "substring",
+      "brief": "We plan to recapitalise with £5m capital next year.",
+      "expect": "silent"
+    },
+    {
+      "id": "B1",
+      "origin": "reviewer-corpus-A",
+      "class": "descriptive",
+      "brief": "We have at least 50 staff in the delivery team today.",
+      "expect": "silent"
+    },
+    {
+      "id": "B2",
+      "origin": "reviewer-corpus-A",
+      "class": "descriptive",
+      "brief": "Revenue grew beyond £2m last year.",
+      "expect": "silent"
+    },
+    {
+      "id": "B3",
+      "origin": "reviewer-corpus-A",
+      "class": "descriptive",
+      "brief": "The team is capped at 4 people right now, which is why delivery is slow.",
+      "expect": "silent"
+    },
+    {
+      "id": "B4",
+      "origin": "reviewer-corpus-A",
+      "class": "descriptive",
+      "brief": "At least 200 customers churned in Q3.",
+      "expect": "silent"
+    },
+    {
+      "id": "B5",
+      "origin": "reviewer-corpus-A",
+      "class": "descriptive",
+      "brief": "The current ceiling of 30 seats was set by the old contract and has now lapsed.",
+      "expect": "silent"
+    },
+    {
+      "id": "C1",
+      "origin": "reviewer-corpus-A",
+      "class": "other-subject",
+      "brief": "Our main competitor has a budget of £2m for this category.",
+      "expect": "silent"
+    },
+    {
+      "id": "C2",
+      "origin": "reviewer-corpus-A",
+      "class": "other-subject",
+      "brief": "The previous project had a cap of £30,000 and still overran.",
+      "expect": "silent"
+    },
+    {
+      "id": "C3",
+      "origin": "reviewer-corpus-A",
+      "class": "other-subject",
+      "brief": "Under GDPR the fines can reach a maximum of £17,500,000.",
+      "expect": "silent"
+    },
+    {
+      "id": "C4",
+      "origin": "reviewer-corpus-A",
+      "class": "other-subject",
+      "brief": "The regulator says platforms cannot exceed 30 days for a response.",
+      "expect": "silent"
+    },
+    {
+      "id": "D1",
+      "origin": "reviewer-corpus-A",
+      "class": "hypothetical",
+      "brief": "If we had a cap of £50,000 we would have to drop the third option.",
+      "expect": "silent"
+    },
+    {
+      "id": "D2",
+      "origin": "reviewer-corpus-A",
+      "class": "negated",
+      "brief": "There is no hard limit of £50,000 on this programme.",
+      "expect": "silent"
+    },
+    {
+      "id": "D3",
+      "origin": "reviewer-corpus-A",
+      "class": "negated",
+      "brief": "We are not limited to £50,000 — finance has been flexible.",
+      "expect": "silent"
+    },
+    {
+      "id": "D4",
+      "origin": "reviewer-corpus-A",
+      "class": "negated",
+      "brief": "We do not have a budget of £50,000 yet, so treat cost as open.",
+      "expect": "silent"
+    },
+    {
+      "id": "D5",
+      "origin": "reviewer-corpus-A",
+      "class": "hypothetical",
+      "brief": "Suppose the board imposed a maximum of 12 hires; which option survives?",
+      "expect": "silent"
+    },
+    {
+      "id": "E1",
+      "origin": "reviewer-corpus-A",
+      "class": "question",
+      "brief": "Should we set a cap of £50,000 on this?",
+      "expect": "silent"
+    },
+    {
+      "id": "E2",
+      "origin": "reviewer-corpus-A",
+      "class": "question",
+      "brief": "Is a maximum of 12 people realistic for this rollout?",
+      "expect": "silent"
+    },
+    {
+      "id": "E3",
+      "origin": "reviewer-corpus-A",
+      "class": "question",
+      "brief": "Would a budget of £250,000 be enough?",
+      "expect": "silent"
+    },
+    {
+      "id": "F1",
+      "origin": "reviewer-corpus-A",
+      "class": "quoted",
+      "brief": "Legal quoted us \"you cannot exceed £250,000\" but that was for the old scope.",
+      "expect": "silent"
+    },
+    {
+      "id": "F2",
+      "origin": "reviewer-corpus-A",
+      "class": "quoted",
+      "brief": "The consultant said their budget of £2m was typical for this sector.",
+      "expect": "silent"
+    },
+    {
+      "id": "G1",
+      "origin": "reviewer-corpus-A",
+      "class": "soft",
+      "brief": "Ideally we'd stay under £50,000 but it is not fixed.",
+      "expect": "silent"
+    },
+    {
+      "id": "G2",
+      "origin": "reviewer-corpus-A",
+      "class": "soft",
+      "brief": "We'd prefer a cap of around £50,000 if we can get there.",
+      "expect": "silent"
+    },
+    {
+      "id": "G3",
+      "origin": "reviewer-corpus-A",
+      "class": "soft",
+      "brief": "Nice to have: a budget of £50,000 or thereabouts.",
+      "expect": "silent"
+    },
+    {
+      "id": "G4",
+      "origin": "reviewer-corpus-A",
+      "class": "soft",
+      "brief": "A maximum of 12 hires would be preferable, though we could stretch.",
+      "expect": "silent"
+    },
+    {
+      "id": "H1",
+      "origin": "reviewer-corpus-A",
+      "class": "true-positive",
+      "brief": "We are choosing a replacement supplier, with a £50,000 cap.",
+      "expect": "fire"
+    },
+    {
+      "id": "H2",
+      "origin": "reviewer-corpus-A",
+      "class": "true-positive",
+      "brief": "Total spend must not exceed £50,000.",
+      "expect": "fire"
+    },
+    {
+      "id": "H3",
+      "origin": "reviewer-corpus-A",
+      "class": "true-positive",
+      "brief": "Gross margin must not drop below 78%.",
+      "expect": "fire"
+    },
+    {
+      "id": "H4",
+      "origin": "reviewer-corpus-A",
+      "class": "true-positive",
+      "brief": "Headcount is capped at 12 for this programme.",
+      "expect": "fire"
+    },
+    {
+      "id": "H5",
+      "origin": "reviewer-corpus-A",
+      "class": "true-positive",
+      "brief": "We have a hard limit of £250,000 on the whole programme.",
+      "expect": "fire"
+    },
+    {
+      "id": "H6",
+      "origin": "reviewer-corpus-A",
+      "class": "true-positive",
+      "brief": "Deliver the migration without exceeding £120,000.",
+      "expect": "fire"
+    },
+    {
+      "id": "H7",
+      "origin": "reviewer-corpus-A",
+      "class": "true-positive",
+      "brief": "The budget of £120,000 is fixed and cannot move.",
+      "expect": "fire"
+    },
+    {
+      "id": "I1",
+      "origin": "reviewer-corpus-A",
+      "class": "exclusion-cost",
+      "brief": "Keep the total three-year cost below £2,500.",
+      "expect": "fire"
+    },
+    {
+      "id": "I2",
+      "origin": "reviewer-corpus-A",
+      "class": "exclusion-cost",
+      "brief": "We can spend up to £50,000 and no more.",
+      "expect": "fire"
+    },
+    {
+      "id": "I3",
+      "origin": "reviewer-corpus-A",
+      "class": "exclusion-cost",
+      "brief": "Our budget is £50,000.",
+      "expect": "fire"
+    },
+    {
+      "id": "I4",
+      "origin": "reviewer-corpus-A",
+      "class": "exclusion-cost",
+      "brief": "The budget for this is £50,000, hard.",
+      "expect": "fire"
+    },
+    {
+      "id": "I5",
+      "origin": "reviewer-corpus-A",
+      "class": "exclusion-cost",
+      "brief": "Stay within £50,000.",
+      "expect": "fire"
+    },
+    {
+      "id": "I6",
+      "origin": "reviewer-corpus-A",
+      "class": "exclusion-cost",
+      "brief": "Spend less than £50,000.",
+      "expect": "fire"
+    },
+    {
+      "id": "I7",
+      "origin": "reviewer-corpus-A",
+      "class": "exclusion-cost",
+      "brief": "It must come in under £50,000.",
+      "expect": "fire"
+    },
+    {
+      "id": "I8",
+      "origin": "reviewer-corpus-A",
+      "class": "exclusion-cost",
+      "brief": "Cost ceiling: £50,000.",
+      "expect": "fire"
+    },
+    {
+      "id": "I9",
+      "origin": "reviewer-corpus-A",
+      "class": "exclusion-cost",
+      "brief": "£50k max.",
+      "expect": "fire"
+    },
+    {
+      "id": "I10",
+      "origin": "reviewer-corpus-A",
+      "class": "exclusion-cost",
+      "brief": "We must not go over £50,000.",
+      "expect": "fire"
+    },
+    {
+      "id": "I11",
+      "origin": "reviewer-corpus-A",
+      "class": "exclusion-cost",
+      "brief": "Non-negotiable: the programme cannot cost more than £50,000.",
+      "expect": "fire"
+    },
+    {
+      "id": "I12",
+      "origin": "reviewer-corpus-A",
+      "class": "exclusion-cost",
+      "brief": "Delivery must complete no later than March 2027.",
+      "expect": "fire"
+    },
+    {
+      "id": "I13",
+      "origin": "reviewer-corpus-A",
+      "class": "exclusion-cost",
+      "brief": "We cannot lose any of our 40 existing staff.",
+      "expect": "fire"
+    },
+    {
+      "id": "J1",
+      "origin": "reviewer-corpus-A",
+      "class": "window",
+      "brief": "We must not exceed our remit, and last year we spent £2m on this.",
+      "expect": "silent"
+    },
+    {
+      "id": "J2",
+      "origin": "reviewer-corpus-A",
+      "class": "window",
+      "brief": "The board set a cap of scope creep; separately we invested £2m.",
+      "expect": "silent"
+    },
+    {
+      "id": "J3",
+      "origin": "reviewer-corpus-A",
+      "class": "window",
+      "brief": "Our budget of confidence is low but we will spend 40 days.",
+      "expect": "silent"
+    },
+    {
+      "id": "J4",
+      "origin": "reviewer-corpus-A",
+      "class": "window",
+      "brief": "Costs must not exceed the plan. Revenue reached £2m.",
+      "expect": "silent"
+    },
+    {
+      "id": "K1",
+      "origin": "reviewer-corpus-A",
+      "class": "quote",
+      "brief": "Our budget of £120,000 is fixed and headcount is capped at 12.",
+      "expect": "fire"
+    },
+    {
+      "id": "K2",
+      "origin": "reviewer-corpus-A",
+      "class": "quote",
+      "brief": "Spend at most £1.5 million on the rebuild.",
+      "expect": "fire"
+    },
+    {
+      "id": "K3",
+      "origin": "reviewer-corpus-A",
+      "class": "quote",
+      "brief": "We need at least 3 vendors, at most 5 vendors, and a cap of £80,000.",
+      "expect": "fire"
+    },
+    {
+      "id": "R1",
+      "origin": "reviewer-corpus-R+",
+      "class": "real-wire",
+      "source": "live-4day-week.captured.json (REAL WIRE)",
+      "brief": "We+re deciding whether to move our 40-person support team to a 4-day week next quarter. Current annual support cost is £1.8m and our CSAT is 87%. Do not let CSAT drop below 85% — that is a hard limit for the board. Total implementation spend must not exceed £250,000. Our ops lead thinks productivity will fall 10-15%, but the pilot data from our Manchester office showed a 4% rise. We+d keep hiring flat either way.",
+      "expect": "fire"
+    },
+    {
+      "id": "R2",
+      "origin": "reviewer-corpus-R+",
+      "class": "real",
+      "source": "tests/fixtures/golden-briefs/buy-vs-build.json",
+      "brief": "Should we buy a commercial CRM system or build our own? We need to launch within 6 months with a budget of $200k.",
+      "expect": "fire"
+    },
+    {
+      "id": "R3",
+      "origin": "reviewer-corpus-R+",
+      "class": "real",
+      "source": "clarify-v2 no_reask[19]",
+      "brief": "There are three ways this could go wrong and the goal is to avoid downtime on a £90,000 budget.",
+      "expect": "fire"
+    },
+    {
+      "id": "R4",
+      "origin": "reviewer-corpus-R+",
+      "class": "real",
+      "source": "memory-retention turn (mid-conversation)",
+      "brief": "Plan for at least 25 people on site from day one; that is the number the operations team gave me this morning.",
+      "expect": "fire"
+    },
+    {
+      "id": "R5",
+      "origin": "reviewer-corpus-R+",
+      "class": "real-wire",
+      "source": "b1-growth.cold-read.json (REAL WIRE)",
+      "brief": "I have the emails from May. Constraint: we cannot hire more than 8 people total next year, HR freeze from the board, and marketing spend is capped at £1.5m.",
+      "expect": "fire"
+    },
+    {
+      "id": "R6",
+      "origin": "reviewer-corpus-R+",
+      "class": "real",
+      "source": "harness/journeys/enterprise-market-entry.json",
+      "brief": "We're a European industrial-equipment manufacturer deciding whether to enter the North American market, with up to about £120m of capital potentially in play. The routes are: build greenfield operations, acquire a regional distributor already in the market, licence our designs to a local partner, or hold and revisit later.",
+      "expect": "silent"
+    },
+    {
+      "id": "R7",
+      "origin": "reviewer-corpus-R+",
+      "class": "real",
+      "source": "tools/graph-evaluator/briefs/hiring-staging.md (deployed-staging validation brief)",
+      "brief": "Should I hire a tech lead or two developers to ship AI features within 6 months, budget under £200k?",
+      "expect": "fire"
+    },
+    {
+      "id": "R8",
+      "origin": "reviewer-corpus-R+",
+      "class": "real",
+      "source": "clarify-v2 no_reask[14]/[15]/[20]/[22]",
+      "brief": "Should we expand into Germany this year? The goal is to grow revenue by 20% and the budget is £500,000.",
+      "expect": "fire"
+    },
+    {
+      "id": "R9",
+      "origin": "reviewer-corpus-R+",
+      "class": "real",
+      "source": "clarify-v2 no_reask[21]",
+      "brief": "Should we launch in Q1, hire in Q2, and expand in Q3. The goal is to grow revenue by 30% on a £1m budget.",
+      "expect": "fire"
+    },
+    {
+      "id": "R10",
+      "origin": "reviewer-corpus-R+",
+      "class": "real",
+      "source": "GOLD_BRIEF_SET gold_005",
+      "brief": "Our engineering team of 12 is struggling with delivery velocity. Sprint completion rate has dropped from 85% to 60% over the last two quarters. We're choosing between: hiring 4 senior engineers at £95k each (6-month ramp-up), or restructuring into smaller autonomous squads of 3-4 people with dedicated product owners. Budget constraint: £400k annual for this initiative. Current team cost is £1.2M/year.",
+      "expect": "fire"
+    },
+    {
+      "id": "R11",
+      "origin": "reviewer-corpus-R+",
+      "class": "real",
+      "source": "GOLD_BRIEF_SET gold_009",
+      "brief": "Our monolithic Rails application is hitting scaling limits at 10,000 concurrent users. P95 latency has degraded from 200ms to 800ms. We need to decide: full microservices migration (estimated 12 months, £500k), or targeted performance optimisation of the 3 bottleneck endpoints with caching and read replicas (estimated 3 months, £80k). Our SLA requires P95 latency under 500ms.",
+      "expect": "fire"
+    },
+    {
+      "id": "R12",
+      "origin": "reviewer-corpus-R+",
+      "class": "real-wire",
+      "source": "clarify-v2 wire capture L3 (descriptive grant)",
+      "brief": "The programme is backed by a government grant worth up to £225,000 over three years.",
+      "expect": "silent"
+    }
+  ]
+}

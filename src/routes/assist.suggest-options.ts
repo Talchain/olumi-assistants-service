@@ -1,7 +1,22 @@
 import type { FastifyInstance } from "fastify";
 import { SuggestOptionsInput, SuggestOptionsOutput, ErrorV1 } from "../schemas/assist.js";
-import { getAdapter } from "../adapters/llm/router.js";
+import { getAdapterWithResolution } from "../adapters/llm/router.js";
+import { getSystemPromptSnapshot } from "../adapters/llm/prompt-loader.js";
+import { shouldUseStagingPrompts } from "../config/index.js";
+import { ModelAssignmentError } from "../config/model-assignment.js";
+import { recordModelResolution } from "../orchestrator-v5/debug/turn-debug-store.js";
 import { emit, log, calculateCost, TelemetryEvents } from "../utils/telemetry.js";
+import { getRequestId } from "../utils/request-id.js";
+import { SUGGEST_OPTIONS_TIMEOUT_MS } from "../config/timeouts.js";
+import {
+  createObservabilityCollector,
+  createNoOpObservabilityCollector,
+  isObservabilityEnabled,
+  isRawIOCaptureEnabled,
+  type ObservabilityCollector,
+} from "../cee/observability/index.js";
+
+const CEE_VERSION = "v12.4";
 
 /**
  * POST /assist/suggest-options
@@ -13,6 +28,7 @@ export default async function route(app: FastifyInstance) {
   app.post("/assist/suggest-options", async (req, reply) => {
     const startTime = Date.now();
     const parsed = SuggestOptionsInput.safeParse(req.body);
+    const requestId = getRequestId(req as any);
 
     if (!parsed.success) {
       reply.code(400);
@@ -24,11 +40,60 @@ export default async function route(app: FastifyInstance) {
       }));
     }
 
+    // Observability: create collector if enabled via flag or include_debug
+    const includeDebug = (parsed.data as any).include_debug === true;
+    const observabilityEnabled = isObservabilityEnabled(includeDebug);
+    const rawIOEnabled = isRawIOCaptureEnabled(includeDebug);
+    const observabilityCollector: ObservabilityCollector = observabilityEnabled
+      ? createObservabilityCollector({
+          requestId,
+          ceeVersion: CEE_VERSION,
+          captureRawIO: rawIOEnabled,
+        })
+      : createNoOpObservabilityCollector(requestId);
+
     try {
       const existingOptions = parsed.data.graph_summary?.existing_options;
 
       // Get adapter via router (env-driven or config)
-      const adapter = getAdapter('suggest_options');
+      // Model selection priority: prompt config > task default
+      const promptSnapshot = await getSystemPromptSnapshot('suggest_options');
+      let modelOverride: string | undefined;
+      const promptMeta = promptSnapshot.meta;
+      const promptEnvironment = shouldUseStagingPrompts() ? 'staging' : 'production';
+      if (promptMeta.modelConfig) {
+        const promptModel = promptMeta.modelConfig[promptEnvironment];
+        if (promptModel) {
+          modelOverride = promptModel;
+          log.info({ task: 'suggest_options', env: promptEnvironment, promptModel, promptId: promptMeta.promptId }, 'Using model from prompt config');
+        }
+      }
+      const { adapter, resolution } = getAdapterWithResolution(
+        'suggest_options',
+        modelOverride,
+        modelOverride ? 'store_model_config' : undefined,
+      );
+      log.debug({
+        event: 'model.resolution',
+        task: resolution.task,
+        resolved_model: resolution.resolved_model,
+        provider: resolution.provider,
+        resolution_source: resolution.resolution_source,
+        request_id: requestId,
+      }, 'Model resolution recorded for LLM call');
+      recordModelResolution(requestId, requestId, {
+        task: resolution.task,
+        resolved_model: resolution.resolved_model,
+        provider: resolution.provider,
+        resolution_source: resolution.resolution_source,
+      });
+      const modelSelectionReason = resolution.resolution_source === 'store_model_config'
+        ? (promptEnvironment === 'staging' ? 'prompt_config_staging' : 'prompt_config_production')
+        : resolution.resolution_source === 'per_call'
+          ? 'explicit_override'
+          : resolution.resolution_source === 'task_default' || resolution.resolution_source === 'env_var'
+            ? 'task_default'
+            : 'provider_default';
 
       // Emit telemetry start event
       emit(TelemetryEvents.SuggestOptionsStart, {
@@ -45,8 +110,14 @@ export default async function route(app: FastifyInstance) {
           existingOptions,
         },
         {
-          requestId: `suggest_${Date.now()}`,
-          timeoutMs: 10000, // 10s timeout for suggestions
+          requestId,
+          timeoutMs: SUGGEST_OPTIONS_TIMEOUT_MS,
+          observabilityCollector,
+          preloadedSystemPrompt: {
+            operation: 'suggest_options',
+            content: promptSnapshot.content,
+            meta: promptSnapshot.meta,
+          },
         }
       );
 
@@ -54,6 +125,27 @@ export default async function route(app: FastifyInstance) {
       const sortedOptions = [...result.options].sort((a, b) => a.id.localeCompare(b.id));
 
       const durationMs = Date.now() - startTime;
+
+      // Record LLM call for observability
+      if (observabilityEnabled) {
+        observabilityCollector.recordLLMCall({
+          step: "suggest_options",
+          model: adapter.model,
+          provider: (adapter.name === "anthropic" || adapter.name === "openai") ? adapter.name : "anthropic",
+          model_selection_reason: modelSelectionReason,
+          tokens: {
+            input: result.usage.input_tokens,
+            output: result.usage.output_tokens,
+            total: result.usage.input_tokens + result.usage.output_tokens,
+          },
+          latency_ms: durationMs,
+          attempt: 1,
+          success: true,
+          started_at: new Date(startTime).toISOString(),
+          completed_at: new Date().toISOString(),
+          cache_hit: (result.usage.cache_read_input_tokens ?? 0) > 0,
+        });
+      }
 
       // Calculate cost from usage metrics
       const costUsd = calculateCost(
@@ -72,10 +164,30 @@ export default async function route(app: FastifyInstance) {
       });
 
       const output = SuggestOptionsOutput.parse({ options: sortedOptions });
+
+      // Attach observability data if enabled
+      if (observabilityEnabled) {
+        (output as any)._observability = observabilityCollector.build();
+      }
+
       return reply.send(output);
 
     } catch (error: unknown) {
       const err = error instanceof Error ? error : new Error("unexpected error");
+
+      if (error instanceof ModelAssignmentError) {
+        reply.code(400);
+        return reply.send(ErrorV1.parse({
+          schema: "error.v1",
+          code: "BAD_INPUT",
+          message: "invalid_model_configuration",
+          details: {
+            reason: error.code,
+            model: error.model,
+            hint: error.message,
+          },
+        }));
+      }
 
       // Capability error mapping (like clarifier/critique)
       if (err.message && err.message.includes("_not_supported")) {

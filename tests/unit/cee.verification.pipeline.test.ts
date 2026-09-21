@@ -55,7 +55,7 @@ describe("VerificationPipeline", () => {
     expect(typeof trace.verification.verification_latency_ms).toBe("number");
   });
 
-  it("surfaces branch_probabilities warnings in trace.verification when branches are unnormalised", async () => {
+  it("branch_probabilities validator is skipped — structural edges don't carry branch probabilities", async () => {
     const payload = buildMinimalDraftResponse();
 
     (payload.graph as any).nodes.push(
@@ -69,7 +69,7 @@ describe("VerificationPipeline", () => {
       { from: "dec_1", to: "opt_2", belief: 0.7 } as any,
     );
 
-    const { response, results } = await verificationPipeline.verify(
+    const { results } = await verificationPipeline.verify(
       payload,
       CEEDraftGraphResponseV1Schema,
       {
@@ -79,24 +79,12 @@ describe("VerificationPipeline", () => {
       },
     );
 
+    // Validator is now a no-op: decision→option edges are structural
+    // (belief_exists = existence certainty, not branch probability).
     const branchStage = results.find((r) => r.stage === "branch_probabilities");
     expect(branchStage).toBeDefined();
-    expect(branchStage?.severity).toBe("warning");
-    expect(branchStage?.code).toBe("BRANCH_PROBABILITIES_UNNORMALIZED");
-
-    const verification = (response as any).trace?.verification;
-    expect(verification).toBeDefined();
-    const issues = verification.issues_detected;
-    expect(Array.isArray(issues)).toBe(true);
-    expect(issues).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          stage: "branch_probabilities",
-          code: "BRANCH_PROBABILITIES_UNNORMALIZED",
-          severity: "warning",
-        }),
-      ]),
-    );
+    expect(branchStage?.skipped).toBe(true);
+    expect(branchStage?.severity).toBeUndefined();
   });
   it("throws on schema violation for missing required fields", async () => {
     // Missing required trace/quality fields
@@ -459,6 +447,92 @@ describe("VerificationPipeline", () => {
       );
 
       emitSpy.mockRestore();
+    });
+
+    it("logs diagnostic Zod issues on schema failure (paths and codes only)", async () => {
+      const logSpy = vi.spyOn(telemetry.log, "warn");
+
+      const invalid: any = {
+        graph: { nodes: [], edges: [] },
+        // Missing required trace/quality fields
+      };
+
+      await expect(
+        verificationPipeline.verify(
+          invalid,
+          CEEDraftGraphResponseV1Schema,
+          {
+            endpoint: "draft-graph",
+            requiresEngineValidation: false,
+            requestId: "req_diag_log",
+          },
+        ),
+      ).rejects.toThrow();
+
+      const diagCall = logSpy.mock.calls.find(
+        (call) => (call[0] as any)?.event === "cee.verification.schema_invalid_detail",
+      );
+      expect(diagCall).toBeDefined();
+      const diagData = diagCall![0] as any;
+      expect(diagData.error_count).toBeGreaterThan(0);
+      expect(Array.isArray(diagData.issues)).toBe(true);
+      expect(diagData.issues.length).toBeGreaterThan(0);
+      expect(diagData.issues.length).toBeLessThanOrEqual(5);
+      // Each issue should have path, code, message — no user content
+      for (const issue of diagData.issues) {
+        expect(issue).toHaveProperty("path");
+        expect(issue).toHaveProperty("code");
+        expect(issue).toHaveProperty("message");
+      }
+
+      logSpy.mockRestore();
+    });
+  });
+
+  describe("coaching.strengthen_items action_type", () => {
+    it("fails schema validation when strengthen_items lack action_type", async () => {
+      const payload = {
+        ...buildMinimalDraftResponse(),
+        coaching: {
+          summary: "Some coaching",
+          strengthen_items: [
+            { id: "str_1", label: "Add detail", detail: "More info needed" },
+          ],
+        },
+      };
+
+      await expect(
+        verificationPipeline.verify(
+          payload,
+          CEEDraftGraphResponseV1Schema,
+          { endpoint: "draft-graph", requiresEngineValidation: false, requestId: "req_action_type_missing" },
+        ),
+      ).rejects.toThrow();
+    });
+
+    it("passes schema validation when strengthen_items have action_type (v0.11.0 canonical enum)", async () => {
+      const payload = {
+        ...buildMinimalDraftResponse(),
+        coaching: {
+          summary: "Some coaching",
+          strengthen_items: [
+            // v0.11.0 schema amendment: StrengthenItemActionType is the
+            // canonical enum (add_option | add_constraint | add_risk |
+            // reframe_goal). Legacy "improve" was never a valid member;
+            // migrating to add_constraint preserves the test's intent
+            // (assert that a populated action_type survives the pipeline).
+            { id: "str_1", label: "Add detail", detail: "More info needed", action_type: "add_constraint" },
+          ],
+        },
+      };
+
+      const { response } = await verificationPipeline.verify(
+        payload,
+        CEEDraftGraphResponseV1Schema,
+        { endpoint: "draft-graph", requiresEngineValidation: false, requestId: "req_action_type_present" },
+      );
+
+      expect((response as any).coaching.strengthen_items[0].action_type).toBe("add_constraint");
     });
   });
 

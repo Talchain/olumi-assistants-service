@@ -13,6 +13,10 @@ on:
       - '.github/workflows/openapi-validation.yml'
   workflow_dispatch:  # Allow manual triggering for required status checks
 
+permissions:
+  contents: read
+  packages: read
+
 jobs:
   validate:
     name: Validate OpenAPI Spec
@@ -59,6 +63,8 @@ jobs:
       - name: Install dependencies
         if: steps.changes.outputs.relevant_changes == 'true'
         run: pnpm install --frozen-lockfile
+        env:
+          NPM_PACKAGES_TOKEN: ${{ secrets.NPM_PACKAGES_TOKEN }}
 
       - name: Validate OpenAPI spec
         if: steps.changes.outputs.relevant_changes == 'true'

@@ -10,6 +10,7 @@ import {
   LLMFactorExtractionResponseSchema,
   type LLMFactor,
   flattenZodErrors,
+  extractZodIssues,
 } from "../../schemas/llmExtraction.js";
 import {
   type ResolvedContext,
@@ -33,6 +34,8 @@ export interface LLMExtractionOptions {
   minConfidence?: number;
   /** Enable hallucination validation (default: true) */
   validateHallucinations?: boolean;
+  /** Optional model override (e.g., "claude-sonnet-4-20250514") */
+  modelOverride?: string;
 }
 
 export interface LLMExtractionResult {
@@ -52,7 +55,9 @@ export interface LLMExtractionResult {
 // Prompt Templates
 // ============================================================================
 
-const FACTOR_EXTRACTION_SYSTEM_PROMPT = `You are a quantitative analyst specializing in extracting numerical factors from business documents.
+// EXPORTED (content unchanged) so the prompt estate can report its hash —
+// see CODE_CONSTANT_PROMPTS in src/prompts/estate.ts.
+export const FACTOR_EXTRACTION_SYSTEM_PROMPT = `You are a quantitative analyst specializing in extracting numerical factors from business documents.
 
 Your task is to identify and extract all quantitative values from the provided brief that could be used in financial modeling or decision analysis.
 
@@ -103,16 +108,18 @@ Output JSON only:`;
  */
 async function callLLMForFactors(
   systemPrompt: string,
-  userPrompt: string
+  userPrompt: string,
+  modelOverride?: string
 ): Promise<unknown | null> {
   const result = await callLLMForExtraction(systemPrompt, userPrompt, {
     maxTokens: 2000,
     temperature: 0,
+    modelOverride,
   });
 
   if (!result.success || result.response === null) {
     log.debug(
-      { event: "cee.llm_factor_extraction.call_failed", error: result.error },
+      { event: "cee.llm_factor_extraction.call_failed", error: result.error, model_override: modelOverride },
       "LLM call failed, will fallback to regex"
     );
     return null;
@@ -138,6 +145,7 @@ export async function extractFactorsLLM(
     maxFactors = 20,
     minConfidence = 0.5,
     validateHallucinations = true,
+    modelOverride,
   } = options;
 
   const startTime = Date.now();
@@ -149,7 +157,7 @@ export async function extractFactorsLLM(
     const userPrompt = buildFactorExtractionUserPrompt(brief, context, maxFactors);
 
     // Call LLM
-    const rawResponse = await callLLMForFactors(systemPrompt, userPrompt);
+    const rawResponse = await callLLMForFactors(systemPrompt, userPrompt, modelOverride);
 
     if (rawResponse === null) {
       log.debug({ event: "cee.llm_factor_extraction.no_response" }, "LLM returned no response, falling back to regex");
@@ -170,6 +178,7 @@ export async function extractFactorsLLM(
         {
           event: "cee.llm_factor_extraction.parse_error",
           errors,
+          first_issues: extractZodIssues(parseResult.error, 3),
         },
         "LLM response failed schema validation"
       );
@@ -210,10 +219,45 @@ export async function extractFactorsLLM(
 
     const durationMs = Date.now() - startTime;
 
+    // ⭐⭐ THE PRE-FILTER COUNT, AND WHY A POST-FILTER COUNT ALONE CANNOT BE ACTED ON.
+    //
+    // MEASURED on staging, 17 Sep 2026, 16:00-19:00Z: this extractor is the
+    // PRIMARY path (`cee.factor_extraction.mode` reads `llm-first`), it ran 13
+    // times with ZERO failures, and **10 of those 13 returned
+    // `factorCount: 0`** — median 1284ms, max 3516ms, 21,812ms of latency in
+    // total. The three non-zero returns (4, 4, 5 factors) were also the three
+    // SLOWEST, which is consistent with them being the runs that actually
+    // produced output.
+    //
+    // ⛔ AND NOTHING IN THAT LOG COULD SAY WHY. `factorCount` is the count AFTER
+    // the confidence filter above, and `llmFactors.length` was never recorded,
+    // so "the model returned nothing" and "the model returned factors and every
+    // one fell below `minConfidence`" produce an IDENTICAL line. Those are
+    // different defects with different owners — a prompt problem versus a
+    // threshold decision — and the number that separates them was being
+    // discarded at the decision point.
+    //
+    // ⚠ NO BEHAVIOUR CHANGE. Three additional fields on an existing log line:
+    // the pre-filter count, the threshold in force, and the confidence values
+    // that were rejected. `rawFactorCount === 0` means the model said nothing;
+    // `rawFactorCount > 0 && factorCount === 0` means we filtered its answer
+    // away, and `rejectedConfidences` then says by how much.
+    //
+    // ⚠ CONFIDENCES ONLY, NEVER LABELS OR VALUES. This extractor reads the
+    // user's brief, so its factors carry the user's own quantities and wording.
+    // Every field added here is a COUNT or a bare number from a 0-1 scale; a
+    // confidence cannot leak a brief. Same rule the records seam's histogram
+    // holds itself to.
+    const rejectedConfidences = llmFactors
+      .filter((f) => f.confidence < minConfidence)
+      .map((f) => f.confidence);
     log.info(
       {
         event: "cee.llm_factor_extraction.complete",
         factorCount: factors.length,
+        rawFactorCount: llmFactors.length,
+        minConfidence,
+        rejectedConfidences,
         durationMs,
       },
       "LLM factor extraction complete"
@@ -255,7 +299,7 @@ export async function extractFactorsLLM(
 function convertLLMFactorToExtracted(
   llmFactor: LLMFactor,
   context: ResolvedContext,
-  index: number
+  _index: number
 ): ExtractedFactor {
   // Expand any abbreviations in the label
   const expandedLabel = expandAbbreviation(context, llmFactor.label);

@@ -1,0 +1,19 @@
+ WARN  Issue while reading "/private/tmp/claude-502/-Users-paulslee-Documents-GitHub/c2a1bad0-8c87-43c2-8748-4edbe88f4af0/scratchpad/cee-f7-verify/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+ WARN  Issue while reading "/private/tmp/claude-502/-Users-paulslee-Documents-GitHub/c2a1bad0-8c87-43c2-8748-4edbe88f4af0/scratchpad/cee-f7-verify/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+
+> olumi-assistants-service@1.12.0 pretypecheck:src /private/tmp/claude-502/-Users-paulslee-Documents-GitHub/c2a1bad0-8c87-43c2-8748-4edbe88f4af0/scratchpad/cee-f7-verify
+> pnpm openapi:generate
+
+ WARN  Issue while reading "/private/tmp/claude-502/-Users-paulslee-Documents-GitHub/c2a1bad0-8c87-43c2-8748-4edbe88f4af0/scratchpad/cee-f7-verify/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+ WARN  Issue while reading "/private/tmp/claude-502/-Users-paulslee-Documents-GitHub/c2a1bad0-8c87-43c2-8748-4edbe88f4af0/scratchpad/cee-f7-verify/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+
+> olumi-assistants-service@1.12.0 openapi:generate /private/tmp/claude-502/-Users-paulslee-Documents-GitHub/c2a1bad0-8c87-43c2-8748-4edbe88f4af0/scratchpad/cee-f7-verify
+> openapi-typescript openapi.yaml -o src/generated/openapi.d.ts
+
+✨ openapi-typescript 7.10.1
+🚀 openapi.yaml → src/generated/openapi.d.ts [107.8ms]
+
+> olumi-assistants-service@1.12.0 typecheck:src /private/tmp/claude-502/-Users-paulslee-Documents-GitHub/c2a1bad0-8c87-43c2-8748-4edbe88f4af0/scratchpad/cee-f7-verify
+> tsc -p tsconfig.build.json --noEmit
+
+EXIT=0

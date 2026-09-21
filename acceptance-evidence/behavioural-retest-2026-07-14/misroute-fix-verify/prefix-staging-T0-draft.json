@@ -1,0 +1,1357 @@
+{
+  "idx": 0,
+  "label": "DRAFT (messy brief)",
+  "latency_s": 68.535,
+  "status": 200,
+  "service_build": "2cda423",
+  "request": {
+    "kind": "message",
+    "turn_id": "3ed96bc6-3edf-4cae-a3d5-5732d8b7b667",
+    "scenario_id": "aa0d80ed-1201-4e2a-b3a1-2dbcd0ff6b11",
+    "user_id": "dea2e7db-fdf1-456f-8529-edea18592b88",
+    "message": "We're a 20-person B2B SaaS doing £2M ARR. I'm torn on whether to move upmarket to enterprise or double down on SMB. Enterprise means longer sales cycles and more support but bigger deals. I'm worried about spreading the team too thin. Help me think this through.",
+    "turn_class": "frame",
+    "stage": "frame",
+    "source": "composer"
+  },
+  "response": {
+    "response_version": 2,
+    "assistant_text": "I've built a first decision model for \"Grow Annual Recurring Revenue\".\n\nOptions compared\n• Move Upmarket to Enterprise\n• Hybrid: SMB Core with Enterprise Pilot\n• Double Down on SMB\n• Continue Current SMB Mix (Status Quo)\n\nWhat the model is weighing\n• Main trade-off: Current ARR balanced against Enterprise Sales Focus\n• Assumption to check: Quantify enterprise deal size\n• Worth a look: Model a dedicated enterprise hire\n\nYour brief covered the main points; adding detail on the lighter areas would sharpen the comparison.\n\nNext, run the analysis to see how the options compare and what could shift the outcome.",
+    "blocks": [],
+    "suggested_actions": [
+      {
+        "id": "chip_action_run_analysis",
+        "label": "Run analysis",
+        "message": "Run analysis.",
+        "action_type": "run_analysis"
+      },
+      {
+        "id": "chip_prompt_review_model",
+        "label": "Review model",
+        "message": "Walk me through the model so I can review it before running the analysis."
+      },
+      {
+        "id": "chip_prompt_assumptions",
+        "label": "What assumptions matter most?",
+        "message": "Which assumptions in this model matter most to check before I run the analysis?"
+      }
+    ],
+    "insights": [],
+    "stage_indicator": "analyse",
+    "draft_graph": {
+      "nodes": [
+        {
+          "id": "dec_segment",
+          "kind": "decision",
+          "label": "Market Segment Strategy",
+          "provenance": "ai_inferred"
+        },
+        {
+          "id": "fac_arr",
+          "kind": "factor",
+          "label": "Current ARR",
+          "category": "external",
+          "prior": {
+            "distribution": "uniform",
+            "range_min": 0.2,
+            "range_max": 0.6000000000000001
+          },
+          "extractionType": "explicit",
+          "display_value": "0.2 to 0.6",
+          "provenance": "from_brief"
+        },
+        {
+          "id": "fac_enterprise_focus",
+          "kind": "factor",
+          "label": "Enterprise Sales Focus",
+          "observed_state": {
+            "value": 0,
+            "source": "cee_inference",
+            "raw_value": 0,
+            "cap": 0,
+            "extractionType": "inferred",
+            "factor_type": "other",
+            "uncertainty_drivers": [
+              "No enterprise sales motion established",
+              "Deal conversion rates unknown"
+            ]
+          },
+          "category": "controllable",
+          "encoding_map": {
+            "0": "No enterprise focus",
+            "1": "Full enterprise focus"
+          },
+          "display_value": "No enterprise focus",
+          "provenance": "ai_inferred"
+        },
+        {
+          "id": "fac_market_conditions",
+          "kind": "factor",
+          "label": "Enterprise Market Receptivity",
+          "category": "external",
+          "prior": {
+            "distribution": "uniform",
+            "range_min": 0.3,
+            "range_max": 0.8
+          },
+          "display_value": "0.3 to 0.8",
+          "provenance": "ai_inferred"
+        },
+        {
+          "id": "fac_sales_capacity",
+          "kind": "factor",
+          "label": "Sales Team Capacity Utilisation",
+          "observed_state": {
+            "value": 0.5,
+            "unit": "scale",
+            "source": "cee_inference",
+            "raw_value": 0,
+            "cap": 0,
+            "extractionType": "inferred",
+            "factor_type": "other",
+            "uncertainty_drivers": [
+              "20-person team headcount constraint",
+              "Hiring speed uncertain"
+            ]
+          },
+          "category": "controllable",
+          "display_value": "Moderate capacity utilisation",
+          "provenance": "ai_inferred"
+        },
+        {
+          "id": "fac_smb_focus",
+          "kind": "factor",
+          "label": "SMB Sales and Marketing Focus",
+          "observed_state": {
+            "value": 0.5,
+            "unit": "scale",
+            "source": "cee_inference",
+            "raw_value": 0,
+            "cap": 0,
+            "extractionType": "inferred",
+            "factor_type": "other",
+            "uncertainty_drivers": [
+              "SMB market saturation unknown",
+              "Churn rate sensitivity to competition"
+            ]
+          },
+          "category": "controllable",
+          "display_value": "Moderate SMB focus",
+          "provenance": "ai_inferred"
+        },
+        {
+          "id": "fac_support_load",
+          "kind": "factor",
+          "label": "Customer Support Load",
+          "observed_state": {
+            "value": 0.5,
+            "unit": "scale",
+            "source": "cee_inference",
+            "raw_value": 0,
+            "cap": 0,
+            "extractionType": "inferred",
+            "factor_type": "other",
+            "uncertainty_drivers": [
+              "Enterprise support SLA requirements unknown",
+              "SMB self-serve capability unclear"
+            ]
+          },
+          "category": "controllable",
+          "display_value": "Moderate support load",
+          "provenance": "ai_inferred"
+        },
+        {
+          "id": "fac_team_size",
+          "kind": "factor",
+          "label": "Team Size",
+          "category": "external",
+          "prior": {
+            "distribution": "uniform",
+            "range_min": 0.2,
+            "range_max": 0.6000000000000001
+          },
+          "extractionType": "explicit",
+          "display_value": "0.2 to 0.6",
+          "provenance": "from_brief"
+        },
+        {
+          "id": "goal_arr",
+          "kind": "goal",
+          "label": "Grow Annual Recurring Revenue",
+          "provenance": "ai_inferred"
+        },
+        {
+          "id": "opt_enterprise",
+          "kind": "option",
+          "label": "Move Upmarket to Enterprise",
+          "interventions": {
+            "fac_enterprise_focus": {
+              "value": 1,
+              "source": "brief_extraction",
+              "target_match": {
+                "node_id": "fac_enterprise_focus",
+                "match_type": "exact_id",
+                "confidence": "high"
+              },
+              "value_confidence": "high",
+              "reasoning": "Direct from V4 prompt data.interventions"
+            },
+            "fac_smb_focus": {
+              "value": 0,
+              "unit": "scale",
+              "source": "brief_extraction",
+              "target_match": {
+                "node_id": "fac_smb_focus",
+                "match_type": "exact_id",
+                "confidence": "high"
+              },
+              "value_confidence": "high",
+              "reasoning": "Direct from V4 prompt data.interventions"
+            },
+            "fac_sales_capacity": {
+              "value": 0.6,
+              "unit": "scale",
+              "source": "brief_extraction",
+              "target_match": {
+                "node_id": "fac_sales_capacity",
+                "match_type": "exact_id",
+                "confidence": "high"
+              },
+              "value_confidence": "high",
+              "reasoning": "Direct from V4 prompt data.interventions"
+            },
+            "fac_support_load": {
+              "value": 0.75,
+              "unit": "scale",
+              "source": "brief_extraction",
+              "target_match": {
+                "node_id": "fac_support_load",
+                "match_type": "exact_id",
+                "confidence": "high"
+              },
+              "value_confidence": "high",
+              "reasoning": "Direct from V4 prompt data.interventions"
+            }
+          },
+          "is_baseline": false,
+          "provenance": "ai_inferred"
+        },
+        {
+          "id": "opt_hybrid",
+          "kind": "option",
+          "label": "Hybrid: SMB Core with Enterprise Pilot",
+          "interventions": {
+            "fac_enterprise_focus": {
+              "value": 0.4,
+              "source": "brief_extraction",
+              "target_match": {
+                "node_id": "fac_enterprise_focus",
+                "match_type": "exact_id",
+                "confidence": "high"
+              },
+              "value_confidence": "high",
+              "reasoning": "Direct from V4 prompt data.interventions"
+            },
+            "fac_smb_focus": {
+              "value": 0.6,
+              "unit": "scale",
+              "source": "brief_extraction",
+              "target_match": {
+                "node_id": "fac_smb_focus",
+                "match_type": "exact_id",
+                "confidence": "high"
+              },
+              "value_confidence": "high",
+              "reasoning": "Direct from V4 prompt data.interventions"
+            },
+            "fac_sales_capacity": {
+              "value": 0.5,
+              "unit": "scale",
+              "source": "brief_extraction",
+              "target_match": {
+                "node_id": "fac_sales_capacity",
+                "match_type": "exact_id",
+                "confidence": "high"
+              },
+              "value_confidence": "high",
+              "reasoning": "Direct from V4 prompt data.interventions"
+            },
+            "fac_support_load": {
+              "value": 0.55,
+              "unit": "scale",
+              "source": "brief_extraction",
+              "target_match": {
+                "node_id": "fac_support_load",
+                "match_type": "exact_id",
+                "confidence": "high"
+              },
+              "value_confidence": "high",
+              "reasoning": "Direct from V4 prompt data.interventions"
+            }
+          },
+          "is_baseline": false,
+          "provenance": "ai_inferred"
+        },
+        {
+          "id": "opt_smb",
+          "kind": "option",
+          "label": "Double Down on SMB",
+          "interventions": {
+            "fac_enterprise_focus": {
+              "value": 0,
+              "source": "brief_extraction",
+              "target_match": {
+                "node_id": "fac_enterprise_focus",
+                "match_type": "exact_id",
+                "confidence": "high"
+              },
+              "value_confidence": "high",
+              "reasoning": "Direct from V4 prompt data.interventions"
+            },
+            "fac_smb_focus": {
+              "value": 1,
+              "unit": "scale",
+              "source": "brief_extraction",
+              "target_match": {
+                "node_id": "fac_smb_focus",
+                "match_type": "exact_id",
+                "confidence": "high"
+              },
+              "value_confidence": "high",
+              "reasoning": "Direct from V4 prompt data.interventions"
+            },
+            "fac_sales_capacity": {
+              "value": 0.4,
+              "unit": "scale",
+              "source": "brief_extraction",
+              "target_match": {
+                "node_id": "fac_sales_capacity",
+                "match_type": "exact_id",
+                "confidence": "high"
+              },
+              "value_confidence": "high",
+              "reasoning": "Direct from V4 prompt data.interventions"
+            },
+            "fac_support_load": {
+              "value": 0.35,
+              "unit": "scale",
+              "source": "brief_extraction",
+              "target_match": {
+                "node_id": "fac_support_load",
+                "match_type": "exact_id",
+                "confidence": "high"
+              },
+              "value_confidence": "high",
+              "reasoning": "Direct from V4 prompt data.interventions"
+            }
+          },
+          "is_baseline": false,
+          "provenance": "ai_inferred"
+        },
+        {
+          "id": "opt_status_quo",
+          "kind": "option",
+          "label": "Continue Current SMB Mix (Status Quo)",
+          "interventions": {
+            "fac_enterprise_focus": {
+              "value": 0,
+              "source": "brief_extraction",
+              "target_match": {
+                "node_id": "fac_enterprise_focus",
+                "match_type": "exact_id",
+                "confidence": "high"
+              },
+              "value_confidence": "high",
+              "reasoning": "Direct from V4 prompt data.interventions"
+            },
+            "fac_smb_focus": {
+              "value": 0.5,
+              "unit": "scale",
+              "source": "brief_extraction",
+              "target_match": {
+                "node_id": "fac_smb_focus",
+                "match_type": "exact_id",
+                "confidence": "high"
+              },
+              "value_confidence": "high",
+              "reasoning": "Direct from V4 prompt data.interventions"
+            },
+            "fac_sales_capacity": {
+              "value": 0.5,
+              "unit": "scale",
+              "source": "brief_extraction",
+              "target_match": {
+                "node_id": "fac_sales_capacity",
+                "match_type": "exact_id",
+                "confidence": "high"
+              },
+              "value_confidence": "high",
+              "reasoning": "Direct from V4 prompt data.interventions"
+            },
+            "fac_support_load": {
+              "value": 0.5,
+              "unit": "scale",
+              "source": "brief_extraction",
+              "target_match": {
+                "node_id": "fac_support_load",
+                "match_type": "exact_id",
+                "confidence": "high"
+              },
+              "value_confidence": "high",
+              "reasoning": "Direct from V4 prompt data.interventions"
+            }
+          },
+          "is_baseline": false,
+          "provenance": "ai_inferred"
+        },
+        {
+          "id": "out_arr_growth",
+          "kind": "outcome",
+          "label": "ARR Growth",
+          "provenance": "ai_inferred"
+        },
+        {
+          "id": "out_deal_size",
+          "kind": "outcome",
+          "label": "Average Deal Size",
+          "provenance": "ai_inferred"
+        },
+        {
+          "id": "risk_sales_cycle",
+          "kind": "risk",
+          "label": "Extended Sales Cycle Drag",
+          "provenance": "ai_inferred"
+        },
+        {
+          "id": "risk_smb_churn",
+          "kind": "risk",
+          "label": "SMB Churn Exposure",
+          "provenance": "ai_inferred"
+        },
+        {
+          "id": "risk_team_strain",
+          "kind": "risk",
+          "label": "Team Overstretch Risk",
+          "provenance": "ai_inferred"
+        }
+      ],
+      "edges": [
+        {
+          "from": "dec_segment",
+          "to": "opt_enterprise",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "ai"
+        },
+        {
+          "from": "dec_segment",
+          "to": "opt_hybrid",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "ai"
+        },
+        {
+          "from": "dec_segment",
+          "to": "opt_smb",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "ai"
+        },
+        {
+          "from": "dec_segment",
+          "to": "opt_status_quo",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "ai"
+        },
+        {
+          "from": "fac_arr",
+          "to": "out_arr_growth",
+          "strength": {
+            "mean": 0.15,
+            "std": 0.08
+          },
+          "exists_probability": 0.9,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "ai"
+        },
+        {
+          "from": "fac_enterprise_focus",
+          "to": "out_deal_size",
+          "strength": {
+            "mean": 0.65,
+            "std": 0.15
+          },
+          "exists_probability": 0.85,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "ai"
+        },
+        {
+          "from": "fac_enterprise_focus",
+          "to": "risk_sales_cycle",
+          "strength": {
+            "mean": 0.6,
+            "std": 0.14
+          },
+          "exists_probability": 0.9,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "ai"
+        },
+        {
+          "from": "fac_enterprise_focus",
+          "to": "risk_team_strain",
+          "strength": {
+            "mean": 0.25576923076923075,
+            "std": 0.10230769230769231
+          },
+          "exists_probability": 0.82,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "ai"
+        },
+        {
+          "from": "fac_market_conditions",
+          "to": "out_deal_size",
+          "strength": {
+            "mean": 0.28,
+            "std": 0.18
+          },
+          "exists_probability": 0.72,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "ai"
+        },
+        {
+          "from": "fac_market_conditions",
+          "to": "risk_sales_cycle",
+          "strength": {
+            "mean": -0.2,
+            "std": 0.14
+          },
+          "exists_probability": 0.68,
+          "effect_direction": "negative",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "ai"
+        },
+        {
+          "from": "fac_sales_capacity",
+          "to": "out_arr_growth",
+          "strength": {
+            "mean": 0.25,
+            "std": 0.12
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "ai"
+        },
+        {
+          "from": "fac_sales_capacity",
+          "to": "risk_team_strain",
+          "strength": {
+            "mean": 0.32884615384615384,
+            "std": 0.095
+          },
+          "exists_probability": 0.88,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "ai"
+        },
+        {
+          "from": "fac_smb_focus",
+          "to": "out_arr_growth",
+          "strength": {
+            "mean": 0.4,
+            "std": 0.14
+          },
+          "exists_probability": 0.82,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "ai"
+        },
+        {
+          "from": "fac_smb_focus",
+          "to": "risk_smb_churn",
+          "strength": {
+            "mean": 0.3,
+            "std": 0.12
+          },
+          "exists_probability": 0.75,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "ai"
+        },
+        {
+          "from": "fac_support_load",
+          "to": "risk_team_strain",
+          "strength": {
+            "mean": 0.14615384615384616,
+            "std": 0.07307692307692308
+          },
+          "exists_probability": 0.85,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "ai"
+        },
+        {
+          "from": "fac_team_size",
+          "to": "risk_team_strain",
+          "strength": {
+            "mean": -0.2192307692307692,
+            "std": 0.08769230769230768
+          },
+          "exists_probability": 0.88,
+          "effect_direction": "negative",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "ai"
+        },
+        {
+          "from": "opt_enterprise",
+          "to": "fac_enterprise_focus",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "ai"
+        },
+        {
+          "from": "opt_enterprise",
+          "to": "fac_sales_capacity",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "ai"
+        },
+        {
+          "from": "opt_enterprise",
+          "to": "fac_smb_focus",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "ai"
+        },
+        {
+          "from": "opt_enterprise",
+          "to": "fac_support_load",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "ai"
+        },
+        {
+          "from": "opt_hybrid",
+          "to": "fac_enterprise_focus",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "ai"
+        },
+        {
+          "from": "opt_hybrid",
+          "to": "fac_sales_capacity",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "ai"
+        },
+        {
+          "from": "opt_hybrid",
+          "to": "fac_smb_focus",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "ai"
+        },
+        {
+          "from": "opt_hybrid",
+          "to": "fac_support_load",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "ai"
+        },
+        {
+          "from": "opt_smb",
+          "to": "fac_enterprise_focus",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "ai"
+        },
+        {
+          "from": "opt_smb",
+          "to": "fac_sales_capacity",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "ai"
+        },
+        {
+          "from": "opt_smb",
+          "to": "fac_smb_focus",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "ai"
+        },
+        {
+          "from": "opt_smb",
+          "to": "fac_support_load",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "ai"
+        },
+        {
+          "from": "opt_status_quo",
+          "to": "fac_enterprise_focus",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "ai"
+        },
+        {
+          "from": "opt_status_quo",
+          "to": "fac_sales_capacity",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "ai"
+        },
+        {
+          "from": "opt_status_quo",
+          "to": "fac_smb_focus",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "ai"
+        },
+        {
+          "from": "opt_status_quo",
+          "to": "fac_support_load",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "ai"
+        },
+        {
+          "from": "out_arr_growth",
+          "to": "goal_arr",
+          "strength": {
+            "mean": 0.7,
+            "std": 0.1
+          },
+          "exists_probability": 0.95,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "ai"
+        },
+        {
+          "from": "out_deal_size",
+          "to": "goal_arr",
+          "strength": {
+            "mean": 0.7,
+            "std": 0.15
+          },
+          "exists_probability": 0.9,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "repair"
+        },
+        {
+          "from": "risk_sales_cycle",
+          "to": "goal_arr",
+          "strength": {
+            "mean": -0.25,
+            "std": 0.12
+          },
+          "exists_probability": 0.85,
+          "effect_direction": "negative",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "ai"
+        },
+        {
+          "from": "risk_smb_churn",
+          "to": "goal_arr",
+          "strength": {
+            "mean": -0.2,
+            "std": 0.1
+          },
+          "exists_probability": 0.78,
+          "effect_direction": "negative",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "ai"
+        },
+        {
+          "from": "risk_team_strain",
+          "to": "goal_arr",
+          "strength": {
+            "mean": -0.35,
+            "std": 0.12
+          },
+          "exists_probability": 0.9,
+          "effect_direction": "negative",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "ai"
+        }
+      ],
+      "node_count": 18,
+      "edge_count": 37
+    },
+    "analysis_ready": {
+      "options": [
+        {
+          "option_id": "opt_enterprise",
+          "label": "Move Upmarket to Enterprise",
+          "status": "ready",
+          "interventions": {
+            "fac_enterprise_focus": 1,
+            "fac_smb_focus": 0,
+            "fac_sales_capacity": 0.6,
+            "fac_support_load": 0.75
+          },
+          "intervention_details": {
+            "fac_enterprise_focus": {
+              "display_value": "No enterprise focus",
+              "normalised_value": 1,
+              "raw_value": 0
+            },
+            "fac_smb_focus": {
+              "display_value": "Moderate SMB focus",
+              "normalised_value": 0,
+              "raw_value": 0,
+              "unit": "scale"
+            },
+            "fac_sales_capacity": {
+              "display_value": "Moderate capacity utilisation",
+              "normalised_value": 0.6,
+              "raw_value": 0,
+              "unit": "scale"
+            },
+            "fac_support_load": {
+              "display_value": "Moderate support load",
+              "normalised_value": 0.75,
+              "raw_value": 0,
+              "unit": "scale"
+            }
+          },
+          "extraction_metadata": {
+            "source": "brief_extraction",
+            "confidence": "high",
+            "reasoning": "Direct from V4 prompt data.interventions"
+          },
+          "status_reason": "4 intervention(s) ready for analysis"
+        },
+        {
+          "option_id": "opt_hybrid",
+          "label": "Hybrid: SMB Core with Enterprise Pilot",
+          "status": "ready",
+          "interventions": {
+            "fac_enterprise_focus": 0.4,
+            "fac_smb_focus": 0.6,
+            "fac_sales_capacity": 0.5,
+            "fac_support_load": 0.55
+          },
+          "intervention_details": {
+            "fac_enterprise_focus": {
+              "display_value": "No enterprise focus",
+              "normalised_value": 0.4,
+              "raw_value": 0
+            },
+            "fac_smb_focus": {
+              "display_value": "Moderate SMB focus",
+              "normalised_value": 0.6,
+              "raw_value": 0,
+              "unit": "scale"
+            },
+            "fac_sales_capacity": {
+              "display_value": "Moderate capacity utilisation",
+              "normalised_value": 0.5,
+              "raw_value": 0,
+              "unit": "scale"
+            },
+            "fac_support_load": {
+              "display_value": "Moderate support load",
+              "normalised_value": 0.55,
+              "raw_value": 0,
+              "unit": "scale"
+            }
+          },
+          "extraction_metadata": {
+            "source": "brief_extraction",
+            "confidence": "high",
+            "reasoning": "Direct from V4 prompt data.interventions"
+          },
+          "status_reason": "4 intervention(s) ready for analysis"
+        },
+        {
+          "option_id": "opt_smb",
+          "label": "Double Down on SMB",
+          "status": "ready",
+          "interventions": {
+            "fac_enterprise_focus": 0,
+            "fac_smb_focus": 1,
+            "fac_sales_capacity": 0.4,
+            "fac_support_load": 0.35
+          },
+          "intervention_details": {
+            "fac_enterprise_focus": {
+              "display_value": "No enterprise focus",
+              "normalised_value": 0,
+              "raw_value": 0
+            },
+            "fac_smb_focus": {
+              "display_value": "Moderate SMB focus",
+              "normalised_value": 1,
+              "raw_value": 0,
+              "unit": "scale"
+            },
+            "fac_sales_capacity": {
+              "display_value": "Moderate capacity utilisation",
+              "normalised_value": 0.4,
+              "raw_value": 0,
+              "unit": "scale"
+            },
+            "fac_support_load": {
+              "display_value": "Moderate support load",
+              "normalised_value": 0.35,
+              "raw_value": 0,
+              "unit": "scale"
+            }
+          },
+          "extraction_metadata": {
+            "source": "brief_extraction",
+            "confidence": "high",
+            "reasoning": "Direct from V4 prompt data.interventions"
+          },
+          "status_reason": "4 intervention(s) ready for analysis"
+        },
+        {
+          "option_id": "opt_status_quo",
+          "label": "Continue Current SMB Mix (Status Quo)",
+          "status": "ready",
+          "interventions": {
+            "fac_enterprise_focus": 0,
+            "fac_smb_focus": 0.5,
+            "fac_sales_capacity": 0.5,
+            "fac_support_load": 0.5
+          },
+          "is_baseline": true,
+          "intervention_details": {
+            "fac_enterprise_focus": {
+              "display_value": "No enterprise focus",
+              "normalised_value": 0,
+              "raw_value": 0
+            },
+            "fac_smb_focus": {
+              "display_value": "Moderate SMB focus",
+              "normalised_value": 0.5,
+              "raw_value": 0,
+              "unit": "scale"
+            },
+            "fac_sales_capacity": {
+              "display_value": "Moderate capacity utilisation",
+              "normalised_value": 0.5,
+              "raw_value": 0,
+              "unit": "scale"
+            },
+            "fac_support_load": {
+              "display_value": "Moderate support load",
+              "normalised_value": 0.5,
+              "raw_value": 0,
+              "unit": "scale"
+            }
+          },
+          "extraction_metadata": {
+            "source": "brief_extraction",
+            "confidence": "high",
+            "reasoning": "Direct from V4 prompt data.interventions"
+          },
+          "status_reason": "4 intervention(s) ready for analysis"
+        }
+      ],
+      "goal_node_id": "goal_arr",
+      "status": "ready",
+      "model_adjustments": [
+        {
+          "code": "category_reclassified",
+          "node_id": "fac_arr",
+          "field": "nodes[fac_arr].category",
+          "reason": "Reclassified unreachable factor \"Current ARR\" to external with synthesised prior [0.2, 0.6000000000000001]",
+          "source": "deterministic_sweep"
+        },
+        {
+          "code": "category_reclassified",
+          "node_id": "fac_market_conditions",
+          "field": "nodes[fac_market_conditions].category",
+          "reason": "Reclassified unreachable factor \"Enterprise Market Receptivity\" to external",
+          "source": "deterministic_sweep"
+        },
+        {
+          "code": "category_reclassified",
+          "node_id": "fac_team_size",
+          "field": "nodes[fac_team_size].category",
+          "reason": "Reclassified unreachable factor \"Team Size\" to external with synthesised prior [0.2, 0.6000000000000001]",
+          "source": "deterministic_sweep"
+        }
+      ],
+      "bias_findings": [],
+      "coaching_summary": "One assumption worth checking: Quantify enterprise deal size.",
+      "computed_at": "2026-07-13T23:28:18.849Z",
+      "freshness": "none",
+      "freshness_reason": "no_successful_run_analysis_fact",
+      "current_graph_hash": "8180d542f5a6a934"
+    },
+    "_diagnostic_trace": {
+      "llm_calls": [
+        {
+          "role": "draft_graph",
+          "provider": "anthropic",
+          "model": "claude-sonnet-4-6",
+          "input_tokens": 314,
+          "output_tokens": 5274,
+          "cache_read_tokens": null,
+          "cache_creation_tokens": null,
+          "latency_ms": 63851,
+          "stop_reason": "end_turn",
+          "thinking_enabled": false,
+          "error": null
+        }
+      ],
+      "prompt_identity": [
+        {
+          "task_id": "draft_graph",
+          "prompt_id": "draft_graph_default@v194 (staging)",
+          "version": "draft_graph_default@v194 (staging)",
+          "hash": "0e6671c83ccaa73c531449c1aea22b3afee3978bd1c9a933f66a49e4a059ae81",
+          "source": "pms",
+          "is_staging": true
+        }
+      ],
+      "zone2_assembly": null,
+      "tool_policy": null,
+      "provider_resolution": [
+        {
+          "task": "draft_graph",
+          "env_default_provider": "anthropic",
+          "env_model_override": null,
+          "prompt_config_model": null,
+          "resolved_model": "claude-sonnet-4-6",
+          "resolved_provider": "anthropic",
+          "switch_reason": null
+        }
+      ],
+      "structured_output_config": {
+        "enabled": true,
+        "api_shape": "tool_use",
+        "schema_hash": null,
+        "beta_header_present": false
+      },
+      "streaming_metrics": null,
+      "fallback_trace": [],
+      "benchmarking": {
+        "total_duration_ms": 67350,
+        "substage_timings": {
+          "llm_call_ms": 63851,
+          "parse_ms": 66361,
+          "repair_ms": 30,
+          "validation_ms": 0,
+          "persistence_ms": 766,
+          "total_handler_duration_ms": 66411,
+          "finalisation_ms": 1
+        }
+      },
+      "correlation_ids": {
+        "request_id": "fc04041a-f82b-4862-86de-b915c49b53c6",
+        "scenario_id": "aa0d80ed-1201-4e2a-b3a1-2dbcd0ff6b11",
+        "turn_id": "3ed96bc6-3edf-4cae-a3d5-5732d8b7b667",
+        "graph_hash": "8180d542f5a6a934",
+        "prompt_hash": "0e6671c83ccaa73c531449c1aea22b3afee3978bd1c9a933f66a49e4a059ae81",
+        "response_hash": "ea3b8c6a0dfa"
+      },
+      "pipeline_outcome": {
+        "graph_drafted": true,
+        "graph_structurally_valid": true,
+        "deterministic_sweep_violations": 0,
+        "verification_status": "skipped",
+        "validation_status": "skipped",
+        "enrichment_status": "complete",
+        "coaching_status": "complete",
+        "warnings": [],
+        "rescue_score": 13,
+        "factor_value_coverage": {
+          "total": 7,
+          "explicit": 0,
+          "inferred_with_evidence": 1,
+          "fallback_default": 6
+        },
+        "edge_strength_unique_count": 15,
+        "llm_repair": {
+          "triggered": false,
+          "outcome": "skipped",
+          "fallback_reason": null,
+          "attempts": 0
+        },
+        "repair_provenance": [
+          {
+            "rule": "OBSERVABLE_EXTRA_DATA",
+            "code": "OBSERVABLE_EXTRA_DATA",
+            "node_or_edge_id": "nodes[fac_arr].data",
+            "field": "graph",
+            "before": null,
+            "after": null,
+            "source": "fallback_default"
+          },
+          {
+            "rule": "OBSERVABLE_EXTRA_DATA",
+            "code": "OBSERVABLE_EXTRA_DATA",
+            "node_or_edge_id": "nodes[fac_team_size].data",
+            "field": "graph",
+            "before": null,
+            "after": null,
+            "source": "fallback_default"
+          },
+          {
+            "rule": "UNREACHABLE_FACTOR_RECLASSIFIED",
+            "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+            "node_or_edge_id": "nodes[fac_arr].category",
+            "field": "graph",
+            "before": null,
+            "after": null,
+            "source": "structure"
+          },
+          {
+            "rule": "UNREACHABLE_FACTOR_RECLASSIFIED",
+            "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+            "node_or_edge_id": "nodes[fac_market_conditions].category",
+            "field": "graph",
+            "before": null,
+            "after": null,
+            "source": "structure"
+          },
+          {
+            "rule": "UNREACHABLE_FACTOR_RECLASSIFIED",
+            "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+            "node_or_edge_id": "nodes[fac_team_size].category",
+            "field": "graph",
+            "before": null,
+            "after": null,
+            "source": "structure"
+          },
+          {
+            "rule": "INBOUND_BUDGET_RESCALED",
+            "code": "INBOUND_BUDGET_RESCALED",
+            "node_or_edge_id": "edges[*→risk_team_strain]",
+            "field": "graph",
+            "before": null,
+            "after": null,
+            "source": "structure"
+          }
+        ]
+      },
+      "environment": {
+        "build_sha": "2cda423",
+        "environment": "staging"
+      },
+      "exit_path": "draft_graph",
+      "trace_version": 1
+    }
+  }
+}

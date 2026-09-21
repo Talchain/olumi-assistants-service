@@ -8,7 +8,7 @@
  * - The error code is CEE_GRAPH_CONNECTIVITY_FAILED
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 
 // Mock the pipeline internals to expose checkConnectedMinimumStructure
 vi.mock("../../src/cee/structure/index.js", () => ({
@@ -23,6 +23,7 @@ vi.mock("../../src/cee/structure/index.js", () => ({
   })),
   hasGoalNode: vi.fn((g) => g?.nodes?.some((n: any) => n.kind === "goal")),
   ensureGoalNode: vi.fn((g) => ({ graph: g, goalAdded: false, goalNodeId: undefined, inferredFrom: undefined })),
+  detectZeroExternalFactors: vi.fn().mockReturnValue({ detected: false, factorCount: 0, externalCount: 0 }),
 }));
 
 // Import the connectivity check function (expose via test export or inline implementation)

@@ -1,0 +1,63 @@
+{
+  "name": "validation-blocker-connectivity",
+  "description": "Tests GOAL_CONNECTIVITY_NONE with blocker severity - options have no path to goal",
+  "brief": "Should we expand the product line or focus on existing products?",
+  "endpoint": "draft_graph",
+  "recorded_response": {
+    "graph": {
+      "version": "1",
+      "default_seed": 42,
+      "nodes": [
+        { "id": "decision_1", "kind": "decision", "label": "Expand or focus?" },
+        { "id": "opt_expand", "kind": "option", "label": "Expand product line" },
+        { "id": "opt_focus", "kind": "option", "label": "Focus on existing products" },
+        { "id": "fac_resources", "kind": "factor", "label": "Resource Allocation", "category": "controllable" },
+        { "id": "fac_market", "kind": "factor", "label": "Market Coverage", "category": "controllable" },
+        { "id": "outcome_growth", "kind": "outcome", "label": "Revenue Growth" },
+        { "id": "goal_1", "kind": "goal", "label": "Maximize business growth" }
+      ],
+      "edges": [
+        { "from": "decision_1", "to": "opt_expand", "strength_mean": 1, "strength_std": 0.01, "belief_exists": 1, "effect_direction": "positive" },
+        { "from": "decision_1", "to": "opt_focus", "strength_mean": 1, "strength_std": 0.01, "belief_exists": 1, "effect_direction": "positive" },
+        { "from": "opt_expand", "to": "fac_resources", "strength_mean": 1, "strength_std": 0.01, "belief_exists": 1, "effect_direction": "positive" },
+        { "from": "opt_focus", "to": "fac_market", "strength_mean": 1, "strength_std": 0.01, "belief_exists": 1, "effect_direction": "positive" },
+        { "from": "fac_resources", "to": "outcome_growth", "strength_mean": 0.6, "strength_std": 0.15, "belief_exists": 0.85, "effect_direction": "positive" },
+        { "from": "fac_market", "to": "outcome_growth", "strength_mean": 0.7, "strength_std": 0.12, "belief_exists": 0.9, "effect_direction": "positive" }
+      ],
+      "meta": { "roots": [], "leaves": [], "suggested_positions": {}, "source": "assistant" }
+    },
+    "validation": {
+      "passed": false,
+      "errors": [
+        {
+          "code": "NO_PATH_TO_GOAL",
+          "severity": "error",
+          "message": "Outcome node has no edge to goal",
+          "path": "edges",
+          "context": { "outcome_id": "outcome_growth", "goal_id": "goal_1" }
+        }
+      ],
+      "warnings": []
+    },
+    "draft_warnings": [
+      {
+        "id": "goal_connectivity_none",
+        "severity": "blocker",
+        "node_ids": ["opt_expand", "opt_focus"],
+        "affected_edge_ids": [],
+        "explanation": "No options have a valid path to the goal node.",
+        "fix_hint": "Connect each option to the goal via at least one factor or edge"
+      }
+    ]
+  },
+  "assertions": {
+    "has_decision_node": true,
+    "has_goal_node": true,
+    "option_count_gte": 2,
+    "validation_passes": false,
+    "validation_error_count_gte": 1,
+    "draft_warnings_has": [
+      { "id": "goal_connectivity_none", "severity": "blocker" }
+    ]
+  }
+}

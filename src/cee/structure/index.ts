@@ -1,8 +1,14 @@
 import type { components } from "../../generated/openapi.d.ts";
 import type { GraphV1 } from "../../contracts/plot/engine.js";
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../config/graphCaps.js";
+import { matchesStatusQuoLabel } from "./status-quo-patterns.js";
+import { buildCompoundGoalLabel } from "./compound-goal-label.js";
+import { buildOutcomeToGoalEdge } from "./goal-inference.js";
+import { deriveGoalObjectiveLabel } from "../draft/records/objective-label.js";
+import { createValidationIssue } from "../validation/classifier.js";
 
 type CEEStructuralWarningV1 = components["schemas"]["CEEStructuralWarningV1"];
+type CEEValidationIssue = components["schemas"]["CEEValidationIssue"];
 
 export interface StructuralMeta {
   had_cycles?: boolean;
@@ -62,6 +68,8 @@ export function detectStructuralWarnings(
       severity: "medium",
       node_ids: relatedIds,
       edge_ids: [],
+      affected_node_ids: relatedIds,
+      affected_edge_ids: [],
       explanation:
         "Graph contains no outcome nodes; decision consequences may not be fully represented.",
     } as CEEStructuralWarningV1);
@@ -86,6 +94,8 @@ export function detectStructuralWarnings(
         severity: "low",
         node_ids: capped,
         edge_ids: [],
+        affected_node_ids: capped,
+        affected_edge_ids: [],
         explanation:
           "Some nodes are not connected to any edges; they may not influence the decision.",
       } as CEEStructuralWarningV1);
@@ -101,6 +111,8 @@ export function detectStructuralWarnings(
       severity: "high",
       node_ids: cycleNodeIds,
       edge_ids: [],
+      affected_node_ids: cycleNodeIds,
+      affected_edge_ids: [],
       explanation:
         "Cycles were detected and automatically broken to enforce DAG structure; review these nodes for correctness.",
     } as CEEStructuralWarningV1);
@@ -137,6 +149,8 @@ export function detectStructuralWarnings(
       severity: "medium",
       node_ids: nodesList,
       edge_ids: backwardsEdgeIds,
+      affected_node_ids: nodesList,
+      affected_edge_ids: backwardsEdgeIds,
       explanation:
         "Some edges flow from outcome nodes back into decision or option nodes; this may invert cause and effect.",
     } as CEEStructuralWarningV1);
@@ -148,93 +162,27 @@ export function detectStructuralWarnings(
   };
 }
 
+/**
+ * Normalise decision→option branch beliefs so they sum to 1.0.
+ *
+ * **Important**: decision→option edges are *structural* — their
+ * `belief_exists` / `belief` field represents edge-existence certainty
+ * (always 1.0), NOT option-selection probability. This function therefore
+ * only normalises edges that carry an explicit `branch_weight` field,
+ * leaving `belief_exists` / `belief` untouched on structural edges.
+ *
+ * Prior to this fix the function divided `belief_exists` by the number of
+ * sibling options (e.g. 1.0 → 0.333 for 3 options), corrupting structural
+ * edge existence probability and forcing GDI to repair every graph.
+ */
 export function normaliseDecisionBranchBeliefs(
   graph: GraphV1 | undefined,
 ): GraphV1 | undefined {
-  if (!graph || !Array.isArray((graph as any).nodes) || !Array.isArray((graph as any).edges)) {
-    return graph;
-  }
-
-  const nodes = (graph as any).nodes as any[];
-  const edges = (graph as any).edges as any[];
-
-  const kinds = new Map<string, string>();
-  for (const node of nodes) {
-    const id = typeof (node as any)?.id === "string" ? ((node as any).id as string) : undefined;
-    const kind = typeof (node as any)?.kind === "string" ? ((node as any).kind as string) : undefined;
-    if (!id || !kind) continue;
-    kinds.set(id, kind);
-  }
-
-  const groups = new Map<string, number[]>();
-  for (let index = 0; index < edges.length; index += 1) {
-    const edge = edges[index] as any;
-    const from = typeof edge?.from === "string" ? (edge.from as string) : undefined;
-    const to = typeof edge?.to === "string" ? (edge.to as string) : undefined;
-    if (!from || !to) continue;
-
-    const fromKind = kinds.get(from);
-    const toKind = kinds.get(to);
-    if (fromKind === "decision" && toKind === "option") {
-      const existing = groups.get(from);
-      if (existing) {
-        existing.push(index);
-      } else {
-        groups.set(from, [index]);
-      }
-    }
-  }
-
-  if (groups.size === 0) {
-    return graph;
-  }
-
-  const epsilon = 0.01;
-  let mutated = false;
-  const normalisedEdges = edges.map((edge) => ({ ...(edge as any) }));
-
-  for (const indices of groups.values()) {
-    if (indices.length < 2) continue;
-
-    const numericIndices: number[] = [];
-    const values: number[] = [];
-
-    for (const edgeIndex of indices) {
-      // V4 fields take precedence, fallback to legacy for backwards compatibility
-      const raw = (normalisedEdges[edgeIndex] as any).belief_exists ?? (normalisedEdges[edgeIndex] as any).belief;
-      if (typeof raw === "number" && Number.isFinite(raw)) {
-        const clamped = Math.max(0, Math.min(1, raw));
-        numericIndices.push(edgeIndex);
-        values.push(clamped);
-      }
-    }
-
-    if (numericIndices.length < 2) continue;
-
-    const sum = values.reduce((acc, value) => acc + value, 0);
-    if (!(sum > 0)) continue;
-
-    if (Math.abs(sum - 1) <= epsilon) continue;
-
-    mutated = true;
-    for (let i = 0; i < numericIndices.length; i += 1) {
-      const edgeIndex = numericIndices[i];
-      const value = values[i];
-      const normalizedValue = value / sum;
-      // Write to both V4 and legacy fields during transition
-      (normalisedEdges[edgeIndex] as any).belief_exists = normalizedValue;
-      (normalisedEdges[edgeIndex] as any).belief = normalizedValue;
-    }
-  }
-
-  if (!mutated) {
-    return graph;
-  }
-
-  return {
-    ...(graph as any),
-    edges: normalisedEdges as any,
-  } as GraphV1;
+  // Decision→option edges are structural: belief_exists must stay 1.0.
+  // No branch_weight field exists in the current schema, so this function
+  // is intentionally a no-op until a dedicated selection-probability field
+  // is introduced.  Return the graph unchanged.
+  return graph;
 }
 
 /**
@@ -299,6 +247,42 @@ export interface SingleGoalResult {
   hadMultipleGoals: boolean;
   originalGoalCount: number;
   mergedGoalIds?: string[];
+  /**
+   * Maps each DEMOTED goal id to the primary goal id.
+   *
+   * ⚠ THE NAME AND THE OLD WORDING BOTH PREDATE THE §8 A3 RULING. This said
+   * "merged-away goal ID", and those nodes are no longer merged away — they
+   * survive as `outcome` nodes under their ORIGINAL ids. Nothing is renamed and
+   * nothing disappears; what the map now records is *"this id's KIND changed,
+   * and some of its edges moved"*.
+   *
+   * ⭐ THE ENTRIES ARE KEPT DELIBERATELY. Both consumers were read at the bytes,
+   * and the FIRST DRAFT OF THIS COMMENT GAVE THE WRONG REASON — corrected here
+   * rather than quietly, because a plausible-but-false rationale in a contract
+   * comment is what the next lane inherits:
+   *
+   *  1. `edge-identity.ts:131` `restoreEdgeFields` STRATEGY 3 — reverses this
+   *     map to recover a stash key when the current `from::to` misses. ⚠ I first
+   *     wrote that the OUTBOUND limb keeps this reachable. **That is wrong: the
+   *     outbound limb is effectively DEAD in the live pipeline.**
+   *     `fixGoalHasOutgoing` (`deterministic-sweep.ts:266`) deletes EVERY
+   *     goal-sourced edge at repair substep 1, and the merge is substep 4; the
+   *     projector independently refuses `goal->option|factor|risk|goal` via
+   *     `UNRESCUABLE_EDGE_SHAPES`. Measured: ZERO outbound-from-demoted edges
+   *     across the governed corpus. Strategy 3 does still fire for a TRUE
+   *     DUPLICATE, whose edges are redirected at both ends — but that is a
+   *     narrow path, not the general one.
+   *  2. `threshold-sweep.ts:85` — attestation transfer: the surviving primary
+   *     INHERITS the enricher-minted attestation of anything merged into it.
+   *     Additive; it never clears the other id. **This is the LIVE consumer and
+   *     the real reason the entries stay.**
+   *
+   * The map therefore covers BOTH classes of non-primary goal: duplicates (node
+   * deleted, edges redirected) and distinct objectives (node survives as an
+   * outcome). For a distinct objective nothing is renamed at all — the entry
+   * exists for the attestation transfer above.
+   */
+  nodeRenames?: Map<string, string>;
 }
 
 /**
@@ -315,16 +299,145 @@ function edgePriority(edge: any): number {
   return score;
 }
 
+const canonicalLabelText = (text: unknown): string =>
+  String(text ?? "").replace(/\s+/g, " ").trim();
+
 /**
- * Enforce single goal constraint.
- * If multiple goal nodes exist, merge them into a compound goal.
+ * Convert one non-primary goal node into the outcome node that carries its
+ * objective (quality bar §8 A3). Pure; the caller owns placement and edges.
  *
- * Strategy:
- * - Keep the first goal node as the primary
- * - Update its label to combine all goal labels
- * - Redirect all edges pointing to other goals to point to the primary
- * - Remove the duplicate goal nodes
- * - When deduplicating edges, prefer edges with provenance/metadata
+ * ⭐ THE LABEL RULE IS IDEMPOTENT BY CONSTRUCTION. `deriveGoalObjectiveLabel`
+ * runs ONLY where the label is still the verbatim quote, so:
+ *   · a projector-authored label ("Increase Productivity") is left alone —
+ *     re-deriving an already-authored string is a second transformation over
+ *     natural language, and this estate has ratified stopping at the first;
+ *   · a legacy/LLM-path label that IS the quote gets one authoring pass;
+ *   · a refusal (deliberation frame, discarded qualification, no concise form)
+ *     keeps the user's exact words. Refusal falls back to verbatim, never to a
+ *     guess — the deriver cannot emit a token the user did not write.
+ *
+ * ⚠ EVERY OTHER FIELD IS CARRIED THROUGH UNTOUCHED ON THE V1 NODE, and that is
+ * load-bearing for A2 conservation: the `goal_threshold` quad rides along, so a
+ * demoted objective's numerals survive in `label ∪ goal_threshold*` — the union
+ * the conservation rule is asserted over once `source_quote` is excluded from
+ * it. The quality bar's HARD rule is that no repair may discard a
+ * `goal_threshold` quad; before this it was discarded at the wire in every case.
+ *
+ * ⚠⚠ BUT "UNTOUCHED" IS A CLAIM ABOUT THIS FUNCTION, NOT ABOUT THE WIRE — AND
+ * THERE IS EXACTLY ONE EXCEPTION, NAMED HERE RATHER THAN LEFT TO BE DISCOVERED.
+ * `goal_baseline` is NOT a declared `NodeV3` field; it reaches V3 only through
+ * the `observed_state` limb at `transforms/schema-v3.ts:276`, and that limb is
+ * KIND-GATED: `node.kind === "goal" && node.goal_baseline != null`. A demoted
+ * node is `outcome`, so it does not take the limb and its `goal_baseline` is
+ * dropped at the transform even though this function preserved it. (The four
+ * `goal_threshold*` fields are copied by a separate, kind-INDEPENDENT block at
+ * `:246-249`, which is why the quad does survive — verified by execution, not
+ * by reading the neighbouring comment, whose "for goal nodes" wording describes
+ * intent rather than the gate.)
+ *
+ * That drop is not a harm: `observed_state` absence is the NORMAL state for an
+ * outcome node — organic outcomes carry none — and ISL's `missing_goal_baseline`
+ * refusal is raised against GOALS, which this node no longer is. Parity with an
+ * organic outcome, which is the acceptance bar for every other property here.
+ *
+ * `provenance_class` stays `stated`: the user DID state this objective, and A1
+ * is explicit that the class means *the user stated this*, not *this text is the
+ * user's*. `label_authored` beside it is what says the display string is ours.
+ * Three live readers key on `stated` and none of them is touched.
+ */
+function demoteGoalToOutcome(node: unknown): Record<string, unknown> {
+  const source = (node ?? {}) as Record<string, unknown>;
+  const provenance = (source.provenance ?? undefined) as Record<string, unknown> | undefined;
+  const quote = typeof provenance?.source_quote === "string" ? provenance.source_quote : undefined;
+  const currentLabel = typeof source.label === "string" ? source.label : "";
+
+  const labelIsStillTheQuote =
+    quote !== undefined && canonicalLabelText(currentLabel) === canonicalLabelText(quote);
+
+  const authored = labelIsStillTheQuote ? deriveGoalObjectiveLabel(quote!) : undefined;
+  const label = authored?.authored ? authored.label : currentLabel;
+  const labelAuthored =
+    authored?.authored === true || provenance?.label_authored === true;
+
+  return {
+    ...source,
+    kind: "outcome",
+    ...(label.length > 0 && { label }),
+    ...(provenance !== undefined && {
+      provenance: {
+        ...provenance,
+        ...(labelAuthored && { label_authored: true }),
+      },
+    }),
+  };
+}
+
+/**
+ * ⭐⭐ A NON-PRIMARY OBJECTIVE BECOMES AN OUTCOME NODE. IT IS NOT DELETED.
+ *
+ * ── THE RULING (quality bar §8 A3, Paul, 18 Aug 2026) ───────────────────────
+ * "A brief with multiple objectives yields ONE overarching goal node + SEPARATE
+ *  explicit outcome/criterion nodes carrying the distinct objectives/targets.
+ *  Not several goal roots; not objectives hidden in coaching; never a string
+ *  join. Exact user wording preserved as provenance."
+ *
+ * ── THE DEFECT THIS CLOSES, MEASURED AT THE WIRE ───────────────────────────
+ * This function kept `goalIds[0]` and FILTERED THE REST OUT, recording them in
+ * `merged_from` (labels) and `merged_goals` (full records). Both are stripped at
+ * the wire — `NodeV3` is a plain `z.object`, so undeclared keys are deleted by
+ * `GraphV3.safeParse` — and both have ZERO product readers (producer site and
+ * tests only, swept `rg -a` across the repo).
+ *
+ * So on the founder's own brief, driven through the real chain
+ * (`projectRecordsToGraph` → here → `projectGraphAndOptionsToV3` → `GraphV3`):
+ *
+ *   projected     goal "Spend Less" · goal "Increase Productivity" · goal "Maintain Code Quality"
+ *   at the wire   goal "Spend Less" — and the strings "productivity" and
+ *                 "code quality" reach **ZERO nodes**.
+ *
+ * Two of three objectives left the product entirely. `merged_goals` was not a
+ * preservation mechanism, it was a comment addressed to nobody.
+ *
+ * ── WHY `outcome`, AND WHY THIS TOPOLOGY IS DERIVED RATHER THAN INVENTED ────
+ * `outcome` is a canonical kind at every hop (`NodeKindV3`, `V3_VALID_KINDS`,
+ * `NODE_KIND_MAP`), and `ALLOWED_EDGES` (`validators/graph-validator.types.ts`
+ * :293-302) declares exactly one shape with `outcome` as a source:
+ * `{ fromKind: "outcome", toKind: "goal" }`. That is the edge minted here, built
+ * by `buildOutcomeToGoalEdge` — the SAME constructor `wireOutcomesToGoal` has
+ * always used for this shape, extracted rather than copied so the two cannot
+ * drift.
+ *
+ * ⚠ THE EDGE IS NOT OPTIONAL, and this is the P6 half. `validateReachability`
+ * (`graph-validator.ts:578-608`) exempts an outcome from `UNREACHABLE_FROM_DECISION`
+ * only when `canReachGoal.has(node.id)` — with the edge it is an `info` issue
+ * (`EXEMPT_UNREACHABLE_OUTCOME_RISK`, reason `isolated`); WITHOUT it the node is
+ * an `error`. A demoted objective with no edge would therefore manufacture a
+ * blocking obligation out of structure the system created, which P6 forbids by
+ * name. Adding the node also cannot create `MISSING_BRIDGE` — that error fires
+ * when outcomes and risks are BOTH absent, so a new outcome can only relieve it.
+ * And it mints no `MISSING_OPTION_VALUE`: that ask is keyed `option_id::factor_id`
+ * over option→factor pairs, which this edge is not.
+ *
+ * ── WHAT IS DELIBERATELY UNCHANGED ─────────────────────────────────────────
+ * The EDGE REDIRECT IS BYTE-IDENTICAL. Edges that pointed at a demoted goal
+ * still move to the primary, exactly as before, and are deduplicated exactly as
+ * before. This change is purely ADDITIVE — one node kept alive per demoted
+ * objective, plus one `outcome → goal` edge each. Letting the old edges follow
+ * the demoted node instead would produce `outcome → outcome` and `risk → outcome`
+ * shapes, which `ALLOWED_EDGES` does not admit; that is a different and larger
+ * change, and it is not this one.
+ *
+ * `merged_from` / `merged_goals` are also left in place. They are now redundant
+ * rather than load-bearing, but they are pinned by existing suites and removing
+ * them is a separate deletion with its own review.
+ *
+ * ── THE LABEL ──────────────────────────────────────────────────────────────
+ * Authored via the whitelist deriver, and IDEMPOTENT BY CONSTRUCTION: the
+ * deriver runs only when the label is still the verbatim quote. Where the
+ * projector already authored it ("increase productivity" → "Increase
+ * Productivity") the existing label stands untouched; where the deriver refuses
+ * (a deliberation-framed quote, a discarded qualification) the verbatim stands.
+ * Refusal falls back to the user's own words, never to a guess.
  */
 export function enforceSingleGoal(
   graph: GraphV1 | undefined,
@@ -360,37 +473,155 @@ export function enforceSingleGoal(
   const primaryId = goalIds[0];
   const otherGoalIds = new Set(goalIds.slice(1));
 
+  // ⭐⭐ THE DUPLICATE GUARD — §8 A3's amendment, and the one case where the
+  // BASE behaviour (delete + redirect both ends) was right all along.
+  //
+  // A3 gives each distinct objective its own outcome node. That reasoning
+  // presupposes the objectives ARE distinct. When the model emits the SAME goal
+  // twice — and it does: `12-similar-options` in the governed corpus carries two
+  // goals with byte-identical `source_quote` — demoting the second one produces
+  // TWO wire nodes with the identical quote (the user sees one objective twice)
+  // plus a synthetic `duplicate → primary` edge with invented magnitudes, i.e.
+  // the product asserting that the objective positively drives ITSELF, while the
+  // real drivers reach the goal only through that fabricated link.
+  //
+  // For a true duplicate, redirecting inbound edges is not misattribution — it
+  // is correct CONSOLIDATION. Both ends move to the primary, exactly as before.
+  //
+  // ⚠ THE DISCRIMINATOR IS EXACT CANONICAL EQUALITY OF `source_quote`, and it
+  // stays that way. A fuzzy same-objective predicate over natural language is
+  // the shape this estate has already burned four rounds oscillating on
+  // (trap 22f); whitespace normalisation is the whole of the cleverness here.
+  //
+  // ⚠ AND IT FAILS TOWARD PRESERVATION. An absent or empty quote never matches,
+  // so two quote-less goals (the legacy/LLM path) are treated as DISTINCT and
+  // both survive. Wrongly keeping an objective is a duplicate node; wrongly
+  // deleting one is the silent loss A3 exists to fix. Only one of those is
+  // recoverable by the user.
+  const primaryQuote = canonicalLabelText(
+    ((goalNodes[0] as any)?.provenance ?? {})?.source_quote,
+  );
+  const duplicateGoalIds = new Set(
+    goalNodes
+      .slice(1)
+      .filter(
+        (n) =>
+          primaryQuote.length > 0 &&
+          canonicalLabelText(((n as any)?.provenance ?? {})?.source_quote) === primaryQuote,
+      )
+      .map((n) => (n as any).id as string),
+  );
+  /** Non-primary goals that state a genuinely different objective. */
+  const distinctGoalIds = new Set(
+    [...otherGoalIds].filter((id) => !duplicateGoalIds.has(id)),
+  );
+
+  // Build nodeRenames map: each DEMOTED goal id → primary goal id. The node
+  // itself survives under this id as an outcome (§8 A3) — see the field's
+  // contract on `SingleGoalResult` for why the entries are still required.
+  const nodeRenames = new Map<string, string>();
+  for (const otherId of otherGoalIds) {
+    nodeRenames.set(otherId, primaryId);
+  }
+
   // Combine labels into compound goal
   const labels = goalNodes
     .map((g) => (g as any)?.label)
     .filter((l) => typeof l === "string" && l.length > 0);
-  const compoundLabel = labels.length > 1
-    ? `Compound Goal: ${labels.join(" + ")}`
-    : labels[0] || "Compound Goal";
+  // ⭐ THE LABEL IS NO LONGER A STRING JOIN BEHIND A REPAIR-ANNOUNCING PREFIX.
+  // `Compound Goal: A + B` told the user about an internal merge and read as
+  // machine output. `buildCompoundGoalLabel` picks a concise faithful label from
+  // the user's OWN objectives, keeps every verbatim original as provenance, and
+  // declines to shorten where that would drop a figure (the conservation rule).
+  // It does NOT paraphrase — authored restatement needs the served prompt, which
+  // is not in this repo — and it does not change WHICH goals merge.
+  const composed = buildCompoundGoalLabel(labels);
 
-  // Create updated nodes array
+  // ⭐⭐ `merged_from` / `merged_goals` ARE DELETED HERE, NOT KEPT ALONGSIDE.
+  //
+  // They were this function's answer to the quality bar's HARD rule that no
+  // repair may discard a `goal_threshold` quad. Measured, that answer never
+  // delivered: `NodeV3` is a plain `z.object`, so `GraphV3.safeParse` strips
+  // both keys, and a repo-wide `rg -a` finds ZERO product readers — the survivor
+  // set for those fields is `['id','kind','label']`, while the contrast control
+  // `source_quote`/`label_authored` DOES survive the same parse. The quad
+  // reached a V1-only field nothing reads, and only ONE of the four threshold
+  // fields was even copied into it (`goal_threshold`, never `_raw`/`_unit`/
+  // `_cap`).
+  //
+  // The demotion below IS the conservation mechanism `merged_from` was failing
+  // to be: the objective survives as a real node, carrying its FULL quad and its
+  // verbatim quote, and it crosses the wire. Keeping the old field beside the
+  // new one would leave two authorities for one concept with only one of them
+  // true — this estate's chronic defect, and the reason this is a deletion
+  // rather than a deprecation comment.
+
+  // Create updated nodes array.
+  //
+  // A non-primary goal is CONVERTED to an outcome node in place — same id, same
+  // provenance, same `goal_threshold` quad — rather than filtered away. Keeping
+  // the id is what lets the edge redirect below stay byte-identical while the
+  // objective itself survives to the wire.
   const updatedNodes = nodes.map((node) => {
     if ((node as any)?.id === primaryId) {
+      // Label only. `buildCompoundGoalLabel` still RETURNS `merged_from` — it is
+      // a pure selection function with its own suite and its `labels[0]` choice
+      // is what keeps `label_authored`/`source_quote` truthful on this node — but
+      // nothing is attached to the graph from it any more.
       return {
         ...(node as any),
-        label: compoundLabel,
+        label: composed.label,
       };
     }
+    if (distinctGoalIds.has((node as any)?.id)) {
+      return demoteGoalToOutcome(node);
+    }
     return node;
-  }).filter((node) => !otherGoalIds.has((node as any)?.id));
+  }).filter((node) => !duplicateGoalIds.has((node as any)?.id));
 
-  // Redirect edges from other goals to primary goal
+  // ⭐⭐ THE INBOUND REDIRECT IS GONE. THE USER'S STATED CAUSALITY IS PRESERVED.
+  //
+  // Technical-architect ruling, 18 Aug 2026. This block used to move BOTH ends
+  // of any edge touching a non-primary goal onto the primary. That was correct
+  // for a world where the secondary goal was DELETED and its edges had nowhere
+  // else to go. Once the node SURVIVES as an outcome, redirecting its INBOUND
+  // edges MISATTRIBUTES the user's own causal claims: the factor the user said
+  // drives "raise productivity" silently starts driving "cut cost", carrying the
+  // user's provenance while saying something the user never said.
+  //
+  // That is strictly worse than the loss it replaced. A deleted objective is
+  // visibly absent; a misattributed edge looks like the user's own claim, and
+  // nothing downstream can tell the difference. It is also exactly the
+  // fabricated-causality class the scientific ruling forbids.
+  //
+  // ⚠ ONLY THE INBOUND HALF GOES, AND THE ASYMMETRY IS DERIVED, NOT STYLISTIC.
+  // `ALLOWED_EDGES` (`validators/graph-validator.types.ts:293-302`) has NO rule
+  // with `goal` as a source, so an OUTBOUND `goal → decision` / `goal → factor`
+  // edge has no legal shape to survive into as `outcome → …`; those still move
+  // to the primary, exactly as before. The one exception is an edge that already
+  // pointed at the primary goal: preserving it yields `outcome → goal`, the one
+  // legal shape and precisely the contribution link this merge wants — whereas
+  // redirecting it would manufacture a `primary → primary` SELF-LOOP.
   const updatedEdges = edges.map((edge) => {
     const from = (edge as any)?.from;
     const to = (edge as any)?.to;
     const newEdge = { ...(edge as any) };
 
-    if (typeof from === "string" && otherGoalIds.has(from)) {
+    // A TRUE DUPLICATE is consolidated exactly as the base implementation did:
+    // BOTH ends move to the primary, because the two nodes are one objective.
+    if (typeof from === "string" && duplicateGoalIds.has(from)) {
       newEdge.from = primaryId;
     }
-    if (typeof to === "string" && otherGoalIds.has(to)) {
+    if (typeof to === "string" && duplicateGoalIds.has(to)) {
       newEdge.to = primaryId;
     }
+    // A DISTINCT objective survives, so only its OUTBOUND edges move — and not
+    // when they already land on the primary, where the edge IS the legal
+    // `outcome → goal` contribution and redirecting would make a self-loop.
+    if (typeof from === "string" && distinctGoalIds.has(from) && to !== primaryId) {
+      newEdge.from = primaryId;
+    }
+    // Inbound to a DISTINCT objective: NEVER redirected. This is the ruling.
 
     return newEdge;
   });
@@ -417,6 +648,21 @@ export function enforceSingleGoal(
     return edge;
   });
 
+  // Each demoted objective gets its `outcome → goal` edge. Appended AFTER the
+  // dedup above so the redirect/dedup behaviour it must not disturb has already
+  // finished, and guarded on the id actually surviving as an outcome.
+  const demotedOutcomeIds = updatedNodes
+    .filter((node) => distinctGoalIds.has((node as any)?.id) && (node as any)?.kind === "outcome")
+    .map((node) => (node as any).id as string);
+  const edgesWithDemotedOutcomes = [...dedupedEdges];
+  for (const outcomeId of demotedOutcomeIds) {
+    // Never a second edge where one already survived the redirect.
+    if (edgesWithDemotedOutcomes.some((e) => (e as any)?.from === outcomeId && (e as any)?.to === primaryId)) {
+      continue;
+    }
+    edgesWithDemotedOutcomes.push(buildOutcomeToGoalEdge(outcomeId, primaryId, "outcome") as any);
+  }
+
   // Update meta.roots to reflect single goal
   const updatedMeta = {
     ...((graph as any).meta || {}),
@@ -427,12 +673,13 @@ export function enforceSingleGoal(
     graph: {
       ...(graph as any),
       nodes: updatedNodes as any,
-      edges: dedupedEdges as any,
+      edges: edgesWithDemotedOutcomes as any,
       meta: updatedMeta,
     } as GraphV1,
     hadMultipleGoals: true,
     originalGoalCount: goalNodes.length,
     mergedGoalIds: goalIds,
+    nodeRenames,
   };
 }
 
@@ -550,6 +797,8 @@ export interface GraphValidationAndFixResult {
     singleGoalApplied: boolean;
     originalGoalCount?: number;
     mergedGoalIds?: string[];
+    /** Maps each merged-away goal ID to the primary goal ID. Only set when goals were actually merged. */
+    nodeRenames?: Map<string, string>;
     outcomeBeliefsFilled: number;
     decisionBranchesNormalized: boolean;
   };
@@ -633,6 +882,7 @@ export function validateAndFixGraph(
     singleGoalApplied: false,
     originalGoalCount: undefined as number | undefined,
     mergedGoalIds: undefined as string[] | undefined,
+    nodeRenames: undefined as Map<string, string> | undefined,
     outcomeBeliefsFilled: 0,
     decisionBranchesNormalized: false,
   };
@@ -645,6 +895,9 @@ export function validateAndFixGraph(
       fixes.singleGoalApplied = singleGoalResult.hadMultipleGoals;
       fixes.originalGoalCount = singleGoalResult.originalGoalCount;
       fixes.mergedGoalIds = singleGoalResult.mergedGoalIds;
+      if (singleGoalResult.hadMultipleGoals && singleGoalResult.nodeRenames?.size) {
+        fixes.nodeRenames = singleGoalResult.nodeRenames;
+      }
     }
   }
 
@@ -706,7 +959,11 @@ const STRUCTURAL_EDGE_TYPES = new Set(["decision-option", "option-factor"]);
 /**
  * Detect uniform edge strengths indicating LLM did not output varied coefficients.
  *
- * When >80% of CAUSAL edges have strength_mean === 0.5 (the default), this indicates
+ * ANSWERS: "did the model default every causal edge to the midpoint?" — a
+ * question about MAGNITUDE, so a defaulted edge counts whether it is +0.5 or
+ * -0.5. Polarity is not an input.
+ *
+ * When >80% of CAUSAL edges have |strength_mean| === 0.5 (the default), this indicates
  * the LLM failed to output the V4 `strength: {mean, std}` nested object and
  * the pipeline fell back to defaults. This defeats sensitivity analysis.
  *
@@ -778,7 +1035,17 @@ export function detectUniformStrengths(
     // Check V4 field (strength_mean) first, fallback to legacy (weight)
     const strength = edge?.strength_mean ?? edge?.weight ?? DEFAULT_STRENGTH;
 
-    if (typeof strength === "number" && Math.abs(strength - DEFAULT_STRENGTH) < EPSILON) {
+    // ⭐ COMPARE THE MAGNITUDE, NOT THE SIGNED VALUE.
+    // "Did the model default this edge to the midpoint?" is a question about
+    // magnitude: a defaulted edge is ±0.5 depending on its polarity, because
+    // reconciliation moves the stated `effect_direction`'s sign onto the
+    // magnitude. Measuring distance from +0.5 makes a defaulted NEGATIVE edge
+    // read as 1.0 away from the default, so it is not counted — and this
+    // function's own warning string ("N% of causal edges have default strength
+    // (0.5)") then reports a percentage that is not the true one.
+    // `validation/integrity-sentinel.ts:516-517` already takes the magnitude for
+    // this same question, for this same stated reason.
+    if (typeof strength === "number" && Math.abs(Math.abs(strength) - DEFAULT_STRENGTH) < EPSILON) {
       defaultStrengthCount++;
       const edgeId = edge?.id;
       if (typeof edgeId === "string" && affectedEdgeIds.length < 10) {
@@ -814,6 +1081,8 @@ export function detectUniformStrengths(
     severity: "medium",
     node_ids: [],
     edge_ids: affectedEdgeIds,
+    affected_node_ids: [],
+    affected_edge_ids: affectedEdgeIds,
     explanation: `${Math.round(defaultStrengthPercentage * 100)}% of causal edges have default strength (0.5). ` +
       `The LLM may not have output varied edge coefficients, which reduces sensitivity analysis accuracy. ` +
       `Consider reviewing edge strengths or refining the brief with more causal detail.`,
@@ -825,6 +1094,1239 @@ export function detectUniformStrengths(
     defaultStrengthCount,
     defaultStrengthPercentage,
     warning,
+  };
+}
+
+/**
+ * Canonical edge values for structural edges (decision→option, option→factor).
+ * These edges represent structural relationships, not causal influence,
+ * so they should have fixed values.
+ * T2: Strict canonical - exactly std=0.01, undefined triggers repair.
+ */
+const CANONICAL_STRUCTURAL_EDGE = {
+  mean: 1.0,
+  std: 0.01,    // Strict canonical (not a max)
+  prob: 1.0,
+  direction: "positive" as const,
+};
+
+/**
+ * PLoT-compatible repair record for tracking changes.
+ * T3: Matches PLoT's repairs_applied[] structure.
+ */
+export interface RepairRecord {
+  /** Field that was repaired: "strength.std", "strength.mean", "exists_probability" */
+  field: string;
+  /** Action taken: "clamped" | "defaulted" | "normalised" */
+  action: "clamped" | "defaulted" | "normalised";
+  /** Original value (null if undefined) */
+  from_value: number | string | null;
+  /** New canonical value */
+  to_value: number | string;
+  /** Human-readable explanation */
+  reason: string;
+  /** Edge ID (use actual edge.id, NOT from->to concatenation) */
+  edge_id: string;
+  /** Source node ID */
+  edge_from: string;
+  /** Target node ID */
+  edge_to: string;
+}
+
+/**
+ * Result of structural edge fix operation
+ */
+export interface StructuralEdgeFixResult {
+  graph: GraphV1;
+  fixedEdgeCount: number;
+  fixedEdgeIds: string[];
+  /** T3: PLoT-compatible repair records */
+  repairs: RepairRecord[];
+}
+
+/**
+ * Fix non-canonical structural edges (option→factor) to have canonical values.
+ *
+ * Structural edges represent structural relationships (option targets a factor),
+ * not causal influence. They should have:
+ * - strength_mean: 1.0
+ * - strength_std: 0.01
+ * - belief_exists: 1.0
+ * - effect_direction: "positive"
+ *
+ * This is a deterministic repair that does not require LLM intervention.
+ * T3: Returns PLoT-compatible RepairRecord array for each field repaired.
+ *
+ * @param graph - Graph to fix
+ * @returns Fixed graph with count of repaired edges and repair records
+ */
+export function fixNonCanonicalStructuralEdges(
+  graph: GraphV1 | undefined,
+): StructuralEdgeFixResult | undefined {
+  if (!graph || !Array.isArray((graph as any).nodes) || !Array.isArray((graph as any).edges)) {
+    return undefined;
+  }
+
+  const nodes = (graph as any).nodes as any[];
+  const edges = (graph as any).edges as any[];
+
+  // Build kind lookup
+  const kinds = new Map<string, string>();
+  for (const node of nodes) {
+    const id = typeof (node as any)?.id === "string" ? ((node as any).id as string) : undefined;
+    const kind = typeof (node as any)?.kind === "string" ? ((node as any).kind as string) : undefined;
+    if (id && kind) {
+      kinds.set(id, kind);
+    }
+  }
+
+  const fixedEdgeIds: string[] = [];
+  const repairs: RepairRecord[] = [];
+  let mutated = false;
+
+  const updatedEdges = edges.map((edge, index) => {
+    const from = (edge as any)?.from;
+    const to = (edge as any)?.to;
+    // T3: Use real edge.id to avoid multi-edge collisions
+    const edgeId = typeof (edge as any)?.id === "string"
+      ? ((edge as any).id as string)
+      : `${from}:${to}:structural:${index}`;
+
+    // Only fix option→factor edges (structural edges)
+    if (
+      typeof from === "string" &&
+      typeof to === "string" &&
+      kinds.get(from) === "option" &&
+      kinds.get(to) === "factor"
+    ) {
+      // Check if edge is already canonical
+      // T2: Strict canonical - exactly mean=1.0, std=0.01, prob=1.0, direction="positive"
+      const mean = (edge as any)?.strength_mean ?? (edge as any)?.weight;
+      const std = (edge as any)?.strength_std;
+      const prob = (edge as any)?.belief_exists ?? (edge as any)?.belief;
+      const direction = (edge as any)?.effect_direction;
+
+      const isCanonical =
+        mean === CANONICAL_STRUCTURAL_EDGE.mean &&
+        std === CANONICAL_STRUCTURAL_EDGE.std &&
+        prob === CANONICAL_STRUCTURAL_EDGE.prob &&
+        direction === CANONICAL_STRUCTURAL_EDGE.direction;
+
+      if (!isCanonical) {
+        mutated = true;
+        if (typeof (edge as any)?.id === "string") {
+          fixedEdgeIds.push((edge as any).id);
+        }
+
+        // T3: Track individual field repairs
+        if (mean !== CANONICAL_STRUCTURAL_EDGE.mean) {
+          repairs.push({
+            edge_id: edgeId,
+            edge_from: from,
+            edge_to: to,
+            field: "strength.mean",
+            action: mean === undefined ? "defaulted" : "normalised",
+            from_value: mean ?? null,
+            to_value: CANONICAL_STRUCTURAL_EDGE.mean,
+            reason: "Structural edge mean normalised to canonical value",
+          });
+        }
+        if (std !== CANONICAL_STRUCTURAL_EDGE.std) {
+          repairs.push({
+            edge_id: edgeId,
+            edge_from: from,
+            edge_to: to,
+            field: "strength.std",
+            action: std === undefined ? "defaulted" : "normalised",
+            from_value: std ?? null,
+            to_value: CANONICAL_STRUCTURAL_EDGE.std,
+            reason: "Structural edge std normalised to canonical value",
+          });
+        }
+        if (prob !== CANONICAL_STRUCTURAL_EDGE.prob) {
+          repairs.push({
+            edge_id: edgeId,
+            edge_from: from,
+            edge_to: to,
+            field: "exists_probability",
+            action: prob === undefined ? "defaulted" : "normalised",
+            from_value: prob ?? null,
+            to_value: CANONICAL_STRUCTURAL_EDGE.prob,
+            reason: "Structural edge exists_probability normalised to canonical value",
+          });
+        }
+        // Track effect_direction repair if not already positive
+        if (direction !== CANONICAL_STRUCTURAL_EDGE.direction) {
+          repairs.push({
+            edge_id: edgeId,
+            edge_from: from,
+            edge_to: to,
+            field: "effect_direction",
+            action: direction === undefined ? "defaulted" : "normalised",
+            from_value: direction ?? null,
+            to_value: CANONICAL_STRUCTURAL_EDGE.direction,
+            reason: "Structural edge effect_direction normalised to canonical value",
+          });
+        }
+
+        return {
+          ...(edge as any),
+          // V4 fields
+          strength_mean: CANONICAL_STRUCTURAL_EDGE.mean,
+          strength_std: CANONICAL_STRUCTURAL_EDGE.std,
+          belief_exists: CANONICAL_STRUCTURAL_EDGE.prob,
+          effect_direction: CANONICAL_STRUCTURAL_EDGE.direction,
+          // Legacy fields for backwards compatibility
+          weight: CANONICAL_STRUCTURAL_EDGE.mean,
+          belief: CANONICAL_STRUCTURAL_EDGE.prob,
+        };
+      }
+    }
+
+    return edge;
+  });
+
+  if (!mutated) {
+    return {
+      graph,
+      fixedEdgeCount: 0,
+      fixedEdgeIds: [],
+      repairs: [],  // T3: Empty array, not undefined
+    };
+  }
+
+  return {
+    graph: {
+      ...(graph as any),
+      edges: updatedEdges as any,
+    } as GraphV1,
+    fixedEdgeCount: fixedEdgeIds.length,
+    fixedEdgeIds,
+    repairs,  // T3: PLoT-compatible repair records
+  };
+}
+
+// =============================================================================
+// Quality Detection Functions (Phase 5: Pre-Analysis Validation)
+// =============================================================================
+
+/**
+ * Result of a strength-dispersion detector.
+ *
+ * `coefficientOfVariation` is the dispersion of edge MAGNITUDES:
+ *   CV = std(|strength|) / mean(|strength|)
+ * Sign is deliberately not measured here — direction is a separate semantic,
+ * carried by `effect_direction` and checked by the polarity guards. See
+ * `magnitudeCoefficientOfVariation` for why mixing the two was a defect.
+ */
+export interface StrengthClusteringResult {
+  detected: boolean;
+  coefficientOfVariation: number;
+  edgeCount: number;
+  warning?: CEEStructuralWarningV1;
+}
+
+/** A causal edge admitted to a dispersion population. */
+interface CausalEdgeSample {
+  id?: string;
+  /** strength_mean as it stands at Stage 5 (package): SIGNED. */
+  signed: number;
+  /** true when this edge's target is a goal node. */
+  intoGoal: boolean;
+}
+
+/**
+ * Coefficient of variation of edge MAGNITUDES.
+ *
+ * THE QUESTION THIS ANSWERS: "do these edges differ in HOW MUCH they matter?"
+ * — not "do they differ in sign".
+ *
+ * ⚠ WHY THIS IS A NAMED FUNCTION RATHER THAN THREE INLINE LINES.
+ * The shipped implementation computed the variance over the SIGNED strengths
+ * around the mean of the ABSOLUTE strengths — two different scales in one
+ * quotient, which is a coefficient of variation of nothing. Stage 2
+ * (`normaliseRiskCoefficients`, transforms/risk-normalisation.ts) forces every
+ * risk→goal and risk→outcome edge negative, and Stage 5 (`package`) is where
+ * the spread is measured — so on any graph carrying a risk edge each negative
+ * contributed a squared deviation of about (2 × mean)² instead of ~0, and the
+ * quotient was inflated far past any plausible threshold. Measured over a
+ * 21-artefact corpus spanning ~9 scenarios, the shipped arithmetic returned
+ * 0.954–1.669 and never once fell below its 0.3 threshold: a guard that ran on
+ * every draft and could not fire.
+ *
+ * The sign-free form below is the only coherent CV available here. A signed CV
+ * (`std(s) / mean(s)`) is undefined in practice for sign-mixed data, because the
+ * denominator passes through zero.
+ *
+ * @returns CV over magnitudes; 0 when every magnitude is 0 (treated as clustered
+ *          by callers, since a layer of zeroes carries no belief either).
+ */
+function magnitudeCoefficientOfVariation(signed: readonly number[]): number {
+  const magnitudes = signed.map(Math.abs);
+  const meanAbs = magnitudes.reduce((a, b) => a + b, 0) / magnitudes.length;
+  if (meanAbs === 0) return 0;
+  const variance =
+    magnitudes.reduce((sum, m) => sum + Math.pow(m - meanAbs, 2), 0) / magnitudes.length;
+  return Math.sqrt(variance) / meanAbs;
+}
+
+/**
+ * Collect the causal edges of a graph, tagged with whether each one points at
+ * the goal. Structural edges (decision→option, option→factor) are excluded:
+ * they are canonical wiring at 1.0/std 0.01 (`normaliseStructuralEdges`), not
+ * beliefs, and including them would swamp the causal signal.
+ */
+function collectCausalEdgeSamples(graph: GraphV1 | undefined): CausalEdgeSample[] {
+  if (!graph || !Array.isArray((graph as any).edges) || !Array.isArray((graph as any).nodes)) {
+    return [];
+  }
+
+  const nodes = (graph as any).nodes as any[];
+  const edges = (graph as any).edges as any[];
+
+  const nodeKindMap = new Map<string, string>();
+  for (const node of nodes) {
+    const id = typeof node?.id === "string" ? node.id : undefined;
+    const kind = typeof node?.kind === "string" ? node.kind : undefined;
+    if (id && kind) nodeKindMap.set(id, kind);
+  }
+
+  const samples: CausalEdgeSample[] = [];
+  for (const edge of edges) {
+    const from = edge?.from;
+    const to = edge?.to;
+    const fromKind = typeof from === "string" ? nodeKindMap.get(from) : undefined;
+    const toKind = typeof to === "string" ? nodeKindMap.get(to) : undefined;
+
+    if (fromKind && toKind && STRUCTURAL_EDGE_TYPES.has(`${fromKind}-${toKind}`)) continue;
+
+    const strength = edge?.strength_mean ?? edge?.weight ?? 0.5;
+    if (typeof strength !== "number" || !Number.isFinite(strength)) continue;
+
+    samples.push({
+      id: typeof edge?.id === "string" ? edge.id : undefined,
+      signed: strength,
+      intoGoal: toKind === "goal",
+    });
+  }
+  return samples;
+}
+
+/** Build the shared warning body for a dispersion detector. */
+function buildClusteringWarning(
+  id: "strength_clustering" | "goal_layer_strength_clustering",
+  edgeIds: string[],
+  explanation: string,
+  fixHint: string,
+): CEEStructuralWarningV1 {
+  const capped = edgeIds.slice(0, 10);
+  return {
+    id,
+    severity: "medium",
+    node_ids: [],
+    edge_ids: capped,
+    affected_node_ids: [],
+    affected_edge_ids: capped,
+    explanation,
+    fix_hint: fixHint,
+  };
+}
+
+const CLUSTERING_FIX_HINT =
+  "Review edge strengths — low variance suggests estimates may be rough approximations";
+
+/**
+ * THE QUESTION: "Across this whole causal graph, did the model differentiate how
+ * strongly things influence each other at all?"
+ *
+ * Fires when the coefficient of variation of causal edge MAGNITUDES falls below
+ * `threshold`. A graph whose every edge carries about the same weight cannot
+ * support a sensitivity analysis: nothing in it says what matters more than what.
+ *
+ * SCOPE, and why it is not sufficient on its own: this population is the whole
+ * graph, so a single flat LAYER inside an otherwise varied graph is invisible to
+ * it by construction. That is the founder-session pathology, and it is the
+ * question `detectGoalLayerStrengthClustering` answers instead. Both run.
+ *
+ * THRESHOLD, 0.3 — carried forward from the original implementation and now
+ * CALIBRATED rather than inherited. Over a 21-artefact corpus spanning ~9
+ * scenarios (12 B2 draws, one B2 raw draft, the founder session, four cold-read
+ * fixtures, three live draft captures) the magnitude CV of the whole causal
+ * population is 0.217–0.725, with an empirical gap between 0.229 and 0.345.
+ * 0.3 sits inside that gap and fires on 2 of 21 artefacts. n=21 over ~9
+ * scenarios is a small sample; treat the figure as provisional.
+ *
+ * Excludes structural edges (decision→option, option→factor).
+ */
+export function detectStrengthClustering(
+  graph: GraphV1 | undefined,
+  threshold: number = 0.3
+): StrengthClusteringResult {
+  const samples = collectCausalEdgeSamples(graph);
+  return evaluateDispersion(samples, threshold, "strength_clustering");
+}
+
+/**
+ * Threshold for the goal layer, calibrated separately — see the note on
+ * `detectGoalLayerStrengthClustering`. It is NOT 0.3: the goal layer is a
+ * small, high-stakes population whose healthy dispersion runs lower than the
+ * graph's, and reusing 0.3 would fire on 11 of 21 corpus artefacts.
+ */
+export const GOAL_LAYER_CLUSTERING_THRESHOLD = 0.15;
+
+/**
+ * THE QUESTION: "Does the model hold a differentiated belief about how much each
+ * outcome and risk matters to the goal the user actually asked about?"
+ *
+ * The population is exactly the causal edges whose target is a goal node. Those
+ * edges are what the option comparison is weighted by, so a flat goal layer
+ * means the model holds no belief about the one thing the user asked — while the
+ * product still computes a precise comparison over it.
+ *
+ * WHY A SECOND DETECTOR RATHER THAN A WIDER FIRST ONE. `detectStrengthClustering`
+ * and `detectUniformStrengths` both aggregate across the whole graph. A goal
+ * layer is structurally a minority of edges (5 of 15 in the founder session), so
+ * a flat goal layer inside a varied graph cannot move either aggregate past its
+ * threshold. Measured: on the founder session the whole-graph magnitude CV is
+ * 0.229 while the goal layer's is 0.000; across the four B2 draws that flatten
+ * the goal layer entirely, the whole-graph CV is 0.367–0.592 — comfortably
+ * "healthy" — while the goal layer is exactly 0.000. The two questions have
+ * different answers on the same graph, so they need different names.
+ *
+ * THRESHOLD, 0.15 — derived, not chosen. Over the same 21-artefact corpus the
+ * goal-layer magnitude CV is either 0.000 (five artefacts whose goal edges are
+ * all one magnitude, the founder session among them) or 0.091 (one near-flat
+ * band of 0.40–0.50), and then jumps to 0.221 and above for the fifteen
+ * artefacts whose goal layers are genuinely differentiated. 0.091 → 0.221 is the
+ * widest gap in the data; 0.15 is its midpoint, so it is the maximum-margin
+ * split. Any value in that interval classifies the corpus identically — the
+ * corpus cannot distinguish them, and this constant should be re-derived when a
+ * larger corpus exists. PROVISIONAL.
+ *
+ * Returns `detected: false` with `edgeCount: 0` when the graph has no goal node,
+ * and stays silent on a single goal edge: the dispersion of one number is not a
+ * fact about the model.
+ */
+export function detectGoalLayerStrengthClustering(
+  graph: GraphV1 | undefined,
+  threshold: number = GOAL_LAYER_CLUSTERING_THRESHOLD
+): StrengthClusteringResult {
+  const samples = collectCausalEdgeSamples(graph).filter(s => s.intoGoal);
+  return evaluateDispersion(samples, threshold, "goal_layer_strength_clustering");
+}
+
+/**
+ * Shared verdict for both dispersion detectors: measure, compare, and — only if
+ * the population is under-dispersed — build the warning that says so.
+ */
+function evaluateDispersion(
+  samples: CausalEdgeSample[],
+  threshold: number,
+  id: "strength_clustering" | "goal_layer_strength_clustering",
+): StrengthClusteringResult {
+  if (samples.length < 2) {
+    return { detected: false, coefficientOfVariation: 0, edgeCount: samples.length };
+  }
+
+  const edgeIds = samples.map(s => s.id).filter((x): x is string => typeof x === "string");
+  const signed = samples.map(s => s.signed);
+  const allZero = signed.every(s => s === 0);
+  const cv = magnitudeCoefficientOfVariation(signed);
+
+  const population = id === "goal_layer_strength_clustering" ? "goal-linkage" : "causal";
+
+  if (allZero) {
+    return {
+      detected: true,
+      coefficientOfVariation: 0,
+      edgeCount: samples.length,
+      warning: buildClusteringWarning(
+        id,
+        edgeIds,
+        `All ${population} edge strengths are zero — estimates may need review.`,
+        CLUSTERING_FIX_HINT,
+      ),
+    };
+  }
+
+  if (!(cv < threshold)) {
+    return { detected: false, coefficientOfVariation: cv, edgeCount: samples.length };
+  }
+
+  const explanation =
+    id === "goal_layer_strength_clustering"
+      ? `The ${samples.length} edges linking outcomes and risks to the goal carry near-identical ` +
+        `strengths (magnitude CV ${cv.toFixed(2)}, threshold ${threshold}). These are the ` +
+        `relationships the option comparison is weighted by, so the model holds no view on what ` +
+        `matters most to the stated goal.`
+      : `Edge strength CV is ${cv.toFixed(2)} (threshold: ${threshold}) — strengths are clustered.`;
+
+  return {
+    detected: true,
+    coefficientOfVariation: cv,
+    edgeCount: samples.length,
+    warning: buildClusteringWarning(id, edgeIds, explanation, CLUSTERING_FIX_HINT),
+  };
+}
+
+/**
+ * Result of same lever options detection.
+ */
+export interface SameLeverOptionsResult {
+  detected: boolean;
+  maxOverlapPercentage: number;
+  overlappingOptionPairs: Array<{ option1: string; option2: string; overlapPct: number }>;
+  warning?: CEEStructuralWarningV1;
+}
+
+/**
+ * Detect when options share >60% of intervention targets.
+ */
+export function detectSameLeverOptions(
+  graph: GraphV1 | undefined,
+  threshold: number = 0.6
+): SameLeverOptionsResult {
+  if (!graph || !Array.isArray((graph as any).nodes)) {
+    return { detected: false, maxOverlapPercentage: 0, overlappingOptionPairs: [] };
+  }
+
+  const nodes = (graph as any).nodes as any[];
+
+  // Get option nodes with interventions
+  const optionInterventions = new Map<string, Set<string>>();
+  for (const node of nodes) {
+    if (node?.kind !== "option") continue;
+    const optionId = node?.id;
+    if (typeof optionId !== "string") continue;
+
+    const rawInterventions = (node?.data as any)?.interventions;
+    // Handle both array (V1/V2) and object (V3) formats
+    const interventionValues = Array.isArray(rawInterventions)
+      ? rawInterventions
+      : rawInterventions && typeof rawInterventions === "object"
+        ? Object.values(rawInterventions) as any[]
+        : [];
+    const targets = new Set<string>();
+    for (const interv of interventionValues) {
+      const targetId = interv?.target_match?.node_id ?? interv?.target;
+      if (typeof targetId === "string") targets.add(targetId);
+    }
+    if (targets.size > 0) optionInterventions.set(optionId, targets);
+  }
+
+  const optionIds = Array.from(optionInterventions.keys());
+  if (optionIds.length < 2) {
+    return { detected: false, maxOverlapPercentage: 0, overlappingOptionPairs: [] };
+  }
+
+  const overlappingPairs: Array<{ option1: string; option2: string; overlapPct: number }> = [];
+  let maxOverlap = 0;
+
+  for (let i = 0; i < optionIds.length; i++) {
+    for (let j = i + 1; j < optionIds.length; j++) {
+      const targets1 = optionInterventions.get(optionIds[i])!;
+      const targets2 = optionInterventions.get(optionIds[j])!;
+      const intersection = new Set([...targets1].filter(t => targets2.has(t)));
+      const union = new Set([...targets1, ...targets2]);
+      const overlapPct = union.size > 0 ? intersection.size / union.size : 0;
+
+      if (overlapPct > maxOverlap) maxOverlap = overlapPct;
+      if (overlapPct > threshold) {
+        overlappingPairs.push({ option1: optionIds[i], option2: optionIds[j], overlapPct });
+      }
+    }
+  }
+
+  const detected = overlappingPairs.length > 0;
+
+  if (!detected) {
+    return { detected: false, maxOverlapPercentage: maxOverlap, overlappingOptionPairs: [] };
+  }
+
+  const affectedOptionIds = [...new Set(overlappingPairs.flatMap(p => [p.option1, p.option2]))];
+
+  return {
+    detected: true,
+    maxOverlapPercentage: maxOverlap,
+    overlappingOptionPairs: overlappingPairs,
+    warning: {
+      id: "same_lever_options" as any,
+      severity: "medium",
+      node_ids: affectedOptionIds,
+      edge_ids: [],
+      affected_node_ids: affectedOptionIds,
+      affected_edge_ids: [],
+      explanation: `${overlappingPairs.length} option pair(s) share >${Math.round(threshold * 100)}% intervention targets.`,
+      fix_hint: "Options share most intervention targets — consider differentiating approaches",
+    } as CEEStructuralWarningV1,
+  };
+}
+
+// ============================================================================
+// Option similarity detection (item 34)
+// ============================================================================
+
+/**
+ * Result of option similarity detection via Jaccard on outgoing edge targets.
+ *
+ * Distinct from detectSameLeverOptions which uses intervention targets.
+ * This function uses graph topology (outgoing edges to factor nodes).
+ *
+ * `validationIssues` contains canonical CEEValidationIssue items
+ * (type: "OPTION_SIMILARITY", severity: "info") for the critique pipeline.
+ * `warnings` is retained for backward compatibility with draft_warnings consumers.
+ */
+export interface OptionSimilarityResult {
+  detected: boolean;
+  critiques: Array<{ optionA: string; optionB: string; jaccard: number }>;
+  warnings: CEEStructuralWarningV1[];
+  validationIssues: CEEValidationIssue[];
+}
+
+/**
+ * Detect option pairs whose outgoing factor-edge targets are highly similar.
+ *
+ * Jaccard similarity: |A ∩ B| / |A ∪ B| on unique outgoing edge target sets.
+ * Only considers edges where from=option and to=factor node.
+ * If both options have zero factor edges, Jaccard is undefined — no critique.
+ *
+ * @param graph Graph to analyse
+ * @param threshold Jaccard threshold (default 0.8)
+ * @returns Max 2 critiques, sorted by descending Jaccard
+ */
+export function detectOptionSimilarity(
+  graph: GraphV1 | undefined,
+  threshold: number = 0.8,
+): OptionSimilarityResult {
+  if (!graph || !Array.isArray((graph as any).nodes)) {
+    return { detected: false, critiques: [], warnings: [], validationIssues: [] };
+  }
+
+  const nodes = (graph as any).nodes as any[];
+  const edges = (graph as any).edges as any[] ?? [];
+
+  // Build set of factor node IDs for filtering
+  const factorNodeIds = new Set<string>();
+  for (const node of nodes) {
+    if (node?.kind === "factor" && typeof node?.id === "string") {
+      factorNodeIds.add(node.id);
+    }
+  }
+
+  // Build option → unique outgoing factor-edge target sets
+  const optionTargets = new Map<string, Set<string>>();
+  const optionLabels = new Map<string, string>();
+  for (const node of nodes) {
+    if (node?.kind !== "option" || typeof node?.id !== "string") continue;
+    optionTargets.set(node.id, new Set());
+    optionLabels.set(node.id, node?.label ?? node.id);
+  }
+
+  for (const edge of edges) {
+    const from = typeof edge?.from === "string" ? edge.from : undefined;
+    const to = typeof edge?.to === "string" ? edge.to : undefined;
+    if (!from || !to) continue;
+    if (!optionTargets.has(from)) continue;
+    // Only count edges to factor nodes; ignore self-loops
+    if (from === to) continue;
+    if (!factorNodeIds.has(to)) continue;
+    optionTargets.get(from)!.add(to);
+  }
+
+  const optionIds = Array.from(optionTargets.keys());
+  if (optionIds.length < 2) {
+    return { detected: false, critiques: [], warnings: [], validationIssues: [] };
+  }
+
+  // Compute Jaccard for each pair
+  const pairs: Array<{ optionA: string; optionB: string; jaccard: number }> = [];
+  for (let i = 0; i < optionIds.length; i++) {
+    for (let j = i + 1; j < optionIds.length; j++) {
+      const setA = optionTargets.get(optionIds[i])!;
+      const setB = optionTargets.get(optionIds[j])!;
+      // If both empty, Jaccard is undefined — skip
+      if (setA.size === 0 && setB.size === 0) continue;
+      const intersection = new Set([...setA].filter(t => setB.has(t)));
+      const union = new Set([...setA, ...setB]);
+      const jaccard = union.size > 0 ? intersection.size / union.size : 0;
+      if (jaccard >= threshold) {
+        pairs.push({ optionA: optionIds[i], optionB: optionIds[j], jaccard });
+      }
+    }
+  }
+
+  if (pairs.length === 0) {
+    return { detected: false, critiques: [], warnings: [], validationIssues: [] };
+  }
+
+  // Sort by descending Jaccard, take top 2
+  pairs.sort((a, b) => b.jaccard - a.jaccard);
+  const topPairs = pairs.slice(0, 2);
+
+  // Canonical critique pipeline shape (type: uppercase, severity: "info")
+  const validationIssues: CEEValidationIssue[] = topPairs.map(p =>
+    createValidationIssue({
+      code: "OPTION_SIMILARITY",
+      message: `Options "${optionLabels.get(p.optionA)}" and "${optionLabels.get(p.optionB)}" affect the same factors (Jaccard ${p.jaccard.toFixed(2)}). Consider whether they represent genuinely different approaches.`,
+      details: { optionA: p.optionA, optionB: p.optionB, jaccard: p.jaccard },
+    }),
+  );
+
+  return {
+    detected: true,
+    critiques: topPairs,
+    warnings: [],
+    validationIssues,
+  };
+}
+
+/**
+ * Result of missing baseline detection.
+ */
+export interface MissingBaselineResult {
+  detected: boolean;
+  hasBaseline: boolean;
+  warning?: CEEStructuralWarningV1;
+}
+
+/**
+ * Detect when no status quo / baseline option exists.
+ * Uses shared matchesStatusQuoLabel() for label matching.
+ */
+export function detectMissingBaseline(graph: GraphV1 | undefined): MissingBaselineResult {
+  if (!graph || !Array.isArray((graph as any).nodes)) {
+    return { detected: false, hasBaseline: false };
+  }
+
+  const nodes = (graph as any).nodes as any[];
+
+  let hasBaseline = false;
+  for (const node of nodes) {
+    if (node?.kind !== "option") continue;
+    // Explicit semantic flag takes precedence over fuzzy text matching
+    if ((node?.data as any)?.is_status_quo === true) {
+      hasBaseline = true;
+      break;
+    }
+    const label = node?.label ?? "";
+    if (typeof label === "string" && matchesStatusQuoLabel(label)) {
+      hasBaseline = true;
+      break;
+    }
+  }
+
+  const optionIds = nodes.filter(n => n?.kind === "option").map(n => n?.id).filter(Boolean);
+
+  if (hasBaseline || optionIds.length === 0) {
+    return { detected: false, hasBaseline };
+  }
+
+  return {
+    detected: true,
+    hasBaseline: false,
+    warning: {
+      id: "missing_baseline",
+      severity: "low",
+      node_ids: optionIds,
+      edge_ids: [],
+      affected_node_ids: optionIds,
+      affected_edge_ids: [],
+      explanation: "No status quo / baseline option detected.",
+      fix_hint: "Add a status quo option to enable comparison with no action",
+    },
+  };
+}
+
+// ============================================================================
+// Missing counterfactual detection (item 35)
+// ============================================================================
+
+/**
+ * Result of missing counterfactual detection.
+ *
+ * `validationIssue` contains the canonical CEEValidationIssue
+ * (type: "MISSING_COUNTERFACTUAL", severity: "info") for the critique pipeline.
+ * `warning` is retained for backward compatibility with draft_warnings consumers.
+ */
+export interface MissingCounterfactualResult {
+  detected: boolean;
+  hasCounterfactual: boolean;
+  validationIssue?: CEEValidationIssue;
+}
+
+/**
+ * Detect when no status quo / baseline option exists (info-level critique).
+ *
+ * detectMissingCounterfactual supersedes detectMissingBaseline for status quo
+ * detection. Both retained during transition; consolidate post-pilot.
+ *
+ * Checks is_status_quo flag first (explicit semantics beat fuzzy text),
+ * then falls back to matchesStatusQuoLabel() on option labels.
+ */
+export function detectMissingCounterfactual(graph: GraphV1 | undefined): MissingCounterfactualResult {
+  if (!graph || !Array.isArray((graph as any).nodes)) {
+    return { detected: false, hasCounterfactual: false };
+  }
+
+  const nodes = (graph as any).nodes as any[];
+
+  let hasCounterfactual = false;
+  for (const node of nodes) {
+    if (node?.kind !== "option") continue;
+    // Explicit semantic flag takes precedence over fuzzy text matching
+    if ((node?.data as any)?.is_status_quo === true) {
+      hasCounterfactual = true;
+      break;
+    }
+    const label = node?.label ?? "";
+    if (typeof label === "string" && matchesStatusQuoLabel(label)) {
+      hasCounterfactual = true;
+      break;
+    }
+  }
+
+  const optionIds = nodes.filter(n => n?.kind === "option").map(n => n?.id).filter(Boolean);
+
+  if (hasCounterfactual || optionIds.length === 0) {
+    return { detected: false, hasCounterfactual };
+  }
+
+  return {
+    detected: true,
+    hasCounterfactual: false,
+    validationIssue: createValidationIssue({
+      code: "MISSING_COUNTERFACTUAL",
+      message: "No status quo or baseline option detected. Including a \"do nothing\" option helps measure whether any change is worth the risk.",
+    }),
+  };
+}
+
+/**
+ * Result of goal baseline value detection.
+ */
+export interface GoalNoBaselineValueResult {
+  detected: boolean;
+  goalHasValue: boolean;
+  goalNodeId?: string;
+  warning?: CEEStructuralWarningV1;
+}
+
+/**
+ * Detect when goal node has no observed_state.value.
+ */
+export function detectGoalNoBaselineValue(graph: GraphV1 | undefined): GoalNoBaselineValueResult {
+  if (!graph || !Array.isArray((graph as any).nodes)) {
+    return { detected: false, goalHasValue: false };
+  }
+
+  const nodes = (graph as any).nodes as any[];
+  const goalNodeId = (graph as any)?.goal_node_id;
+
+  let goalNode: any = null;
+  for (const node of nodes) {
+    if (node?.kind === "goal" || node?.id === goalNodeId) {
+      goalNode = node;
+      break;
+    }
+  }
+
+  if (!goalNode) {
+    return { detected: false, goalHasValue: false };
+  }
+
+  const observedValue = goalNode?.observed_state?.value ?? goalNode?.data?.observed_value ?? goalNode?.data?.value;
+  const hasValue = observedValue !== undefined && observedValue !== null;
+
+  if (hasValue) {
+    return { detected: false, goalHasValue: true, goalNodeId: goalNode.id };
+  }
+
+  return {
+    detected: true,
+    goalHasValue: false,
+    goalNodeId: goalNode.id,
+    warning: {
+      id: "goal_no_baseline_value" as any,
+      severity: "low",
+      node_ids: [goalNode.id],
+      edge_ids: [],
+      affected_node_ids: [goalNode.id],
+      affected_edge_ids: [],
+      explanation: "Goal node has no observed_state.value set.",
+      fix_hint: "Set goal node's observed_state.value to establish baseline for comparison",
+    } as CEEStructuralWarningV1,
+  };
+}
+
+/**
+ * Result of zero external factors detection.
+ */
+export interface ZeroExternalFactorsResult {
+  detected: boolean;
+  factorCount: number;
+  externalCount: number;
+  warning?: CEEStructuralWarningV1;
+}
+
+/**
+ * Detect when a graph has factor nodes but none with category === 'external'.
+ *
+ * Most real decisions are influenced by forces outside the decision-maker's
+ * control. A graph with zero external factors likely omits important context.
+ *
+ * Skips the check silently when any factor node has an undefined/missing
+ * category — we cannot reliably determine completeness in that case.
+ */
+export function detectZeroExternalFactors(graph: GraphV1 | undefined): ZeroExternalFactorsResult {
+  if (!graph || !Array.isArray((graph as any).nodes)) {
+    return { detected: false, factorCount: 0, externalCount: 0 };
+  }
+
+  const nodes = (graph as any).nodes as any[];
+  const factorNodes = nodes.filter((n) => n?.kind === "factor");
+
+  if (factorNodes.length === 0) {
+    // No factors at all — emit warning (graph is likely malformed)
+    return {
+      detected: true,
+      factorCount: 0,
+      externalCount: 0,
+      warning: {
+        id: "zero_external_factors",
+        severity: "medium",
+        node_ids: [],
+        edge_ids: [],
+        affected_node_ids: [],
+        affected_edge_ids: [],
+        explanation:
+          "No external (uncontrollable) factors detected. Most decisions are influenced by forces outside your control. Consider whether any outside events or actors could materially affect outcomes.",
+      } as CEEStructuralWarningV1,
+    };
+  }
+
+  // If any factor has an undefined category, skip silently
+  const hasUndefinedCategory = factorNodes.some(
+    (n) => n.category === undefined || n.category === null,
+  );
+  if (hasUndefinedCategory) {
+    return { detected: false, factorCount: factorNodes.length, externalCount: 0 };
+  }
+
+  const externalCount = factorNodes.filter((n) => n.category === "external").length;
+
+  if (externalCount > 0) {
+    return { detected: false, factorCount: factorNodes.length, externalCount };
+  }
+
+  const factorIds = factorNodes
+    .map((n) => n.id)
+    .filter((id): id is string => typeof id === "string")
+    .slice(0, 20);
+
+  return {
+    detected: true,
+    factorCount: factorNodes.length,
+    externalCount: 0,
+    warning: {
+      id: "zero_external_factors",
+      severity: "medium",
+      node_ids: factorIds,
+      edge_ids: [],
+      affected_node_ids: factorIds,
+      affected_edge_ids: [],
+      explanation:
+        "No external (uncontrollable) factors detected. Most decisions are influenced by forces outside your control. Consider whether any outside events or actors could materially affect outcomes.",
+    } as CEEStructuralWarningV1,
+  };
+}
+
+/**
+ * Result of goal connectivity check.
+ */
+export interface GoalConnectivityResult {
+  status: "full" | "partial" | "none";
+  disconnectedOptions: string[];
+  weakPaths: Array<{ option_id: string; path_strength: number; hop_count: number }>;
+  warning?: CEEStructuralWarningV1;
+}
+
+/**
+ * Check goal connectivity for all options.
+ * Returns status: full (all connected), partial (some connected), none (no connections).
+ */
+export function checkGoalConnectivity(graph: GraphV1 | undefined): GoalConnectivityResult {
+  if (!graph || !Array.isArray((graph as any).nodes) || !Array.isArray((graph as any).edges)) {
+    return { status: "none", disconnectedOptions: [], weakPaths: [] };
+  }
+
+  const nodes = (graph as any).nodes as any[];
+  const edges = (graph as any).edges as any[];
+  const goalNodeId = (graph as any)?.goal_node_id;
+
+  // Find goal node
+  let goalId: string | undefined;
+  for (const node of nodes) {
+    if (node?.kind === "goal" || node?.id === goalNodeId) {
+      goalId = node?.id;
+      break;
+    }
+  }
+
+  if (!goalId) {
+    const optionIds = nodes.filter(n => n?.kind === "option").map(n => n?.id).filter(Boolean);
+    // Sort for deterministic ordering
+    const sortedOptionIds = [...optionIds].sort() as string[];
+    return {
+      status: "none",
+      disconnectedOptions: sortedOptionIds,
+      weakPaths: [],
+      warning: {
+        id: "goal_connectivity_none",
+        severity: "blocker",
+        node_ids: sortedOptionIds,
+        edge_ids: [],
+        affected_node_ids: sortedOptionIds,
+        affected_edge_ids: [],
+        explanation: "No goal node found in graph.",
+        fix_hint: "Connect each option to the goal via at least one factor or edge",
+      },
+    };
+  }
+
+  // Build adjacency list
+  const adjacency = new Map<string, Array<{ to: string; strength: number }>>();
+  for (const edge of edges) {
+    const from = edge?.from;
+    const to = edge?.to;
+    if (typeof from !== "string" || typeof to !== "string") continue;
+    const strength = Math.abs(edge?.strength_mean ?? edge?.weight ?? 0.5);
+    if (!adjacency.has(from)) adjacency.set(from, []);
+    adjacency.get(from)!.push({ to, strength });
+  }
+
+  // Get option IDs
+  const optionIds = nodes.filter(n => n?.kind === "option").map(n => n?.id).filter(Boolean) as string[];
+
+  // BFS to find path from each option to goal
+  const disconnectedOptions: string[] = [];
+  const weakPaths: Array<{ option_id: string; path_strength: number; hop_count: number }> = [];
+
+  for (const optionId of optionIds) {
+    const visited = new Set<string>();
+    const queue: Array<{ node: string; strength: number; hops: number }> = [{ node: optionId, strength: 1, hops: 0 }];
+    let foundPath = false;
+    let bestPath: { strength: number; hops: number } | null = null;
+
+    while (queue.length > 0) {
+      const { node, strength, hops } = queue.shift()!;
+      if (node === goalId) {
+        foundPath = true;
+        if (!bestPath || strength > bestPath.strength) {
+          bestPath = { strength, hops };
+        }
+        continue;
+      }
+      if (visited.has(node)) continue;
+      visited.add(node);
+
+      const neighbors = adjacency.get(node) ?? [];
+      for (const { to, strength: edgeStrength } of neighbors) {
+        queue.push({ node: to, strength: strength * edgeStrength, hops: hops + 1 });
+      }
+    }
+
+    if (!foundPath) {
+      disconnectedOptions.push(optionId);
+    } else if (bestPath && bestPath.strength < 0.1) {
+      weakPaths.push({ option_id: optionId, path_strength: bestPath.strength, hop_count: bestPath.hops });
+    }
+  }
+
+  const status: "full" | "partial" | "none" =
+    disconnectedOptions.length === 0 ? "full" :
+    disconnectedOptions.length === optionIds.length ? "none" : "partial";
+
+  // Sort disconnected options for deterministic ordering
+  const sortedDisconnectedOptions = [...disconnectedOptions].sort();
+
+  const warning: CEEStructuralWarningV1 | undefined = status === "none" ? {
+    id: "goal_connectivity_none",
+    severity: "blocker",
+    node_ids: sortedDisconnectedOptions,
+    edge_ids: [],
+    // Deterministic order: goal first, then sorted option IDs
+    affected_node_ids: [goalId, ...sortedDisconnectedOptions],
+    affected_edge_ids: [],
+    explanation: `No options have a path to the goal node.`,
+    fix_hint: "Connect each option to the goal via at least one factor or edge",
+  } : undefined;
+
+  return { status, disconnectedOptions: sortedDisconnectedOptions, weakPaths, warning };
+}
+
+/**
+ * Compute model quality factors for a graph.
+ */
+export interface ModelQualityFactorsResult {
+  estimate_confidence: number;
+  strength_variation: number;
+  range_confidence_coverage: number;
+  has_baseline_option: boolean;
+}
+
+/**
+ * Compute model quality factors for the draft graph.
+ */
+export function computeModelQualityFactors(graph: GraphV1 | undefined): ModelQualityFactorsResult {
+  const defaultResult: ModelQualityFactorsResult = {
+    estimate_confidence: 0.5,
+    strength_variation: 0,
+    range_confidence_coverage: 0,
+    has_baseline_option: false,
+  };
+
+  if (!graph || !Array.isArray((graph as any).nodes) || !Array.isArray((graph as any).edges)) {
+    return defaultResult;
+  }
+
+  const nodes = (graph as any).nodes as any[];
+  const edges = (graph as any).edges as any[];
+
+  // ⭐⭐⭐ THE CV IS OVER MAGNITUDES, AND IT USED TO BE OVER SIGNED MEANS.
+  //
+  // This metric's declared purpose — stated in the prompt that consumes it —
+  // is to detect a model that HEDGED AT THE MIDPOINT: "Edge strengths show
+  // limited variation — AI may have hedged on midpoint". That is a claim about
+  // how far apart the STRENGTHS are, not about which way they point. Reading
+  // the signed mean answers a different question and answers it wrongly in two
+  // directions at once:
+  //
+  //   · two edges of IDENTICAL magnitude and opposite polarity manufacture
+  //     variation where there is none; and
+  //   · because the divisor is |mean(signed)|, a graph whose positives and
+  //     negatives balance drives the CV toward ZERO — so the metric reports
+  //     "the model hedged" on the MOST varied graphs. It is non-monotonic once
+  //     signs are mixed.
+  //
+  // ⚠ THIS BECAME REACHABLE WITH THE POLARITY FIX IN THIS PR, WHICH IS WHY IT
+  // IS FIXED HERE. Before it, a stated-negative relationship carried a POSITIVE
+  // mean, so the signed and unsigned readings agreed and the defect was latent.
+  //
+  // Measured on this PR's own governed baseline
+  // (`tools/graph-evaluator/governed/draft-graph-v5/baseline/
+  // run-b9389df-claude-sonnet-4-6.json`), replicating this function exactly —
+  // same reader, same population variance, same `?? 0.5` fallback — before and
+  // after the flip. STATE THE POPULATION, because it is not the edge count:
+  // the artefact holds 324 edges, but only 72 carry a `strength_mean` at all
+  // (0 nested, 252 with none), and STRP Rule 4 fires ONLY where a mean is
+  // present and disagrees with the stated direction. The `?? 0.5` fallback lives
+  // in each READER; the default is not materialised onto the edge until the
+  // Stage 6 boundary (`transforms/schema-v3.ts`), after this stage. So:
+  //
+  //     19 sign flips (17 of them on causal edges), and
+  //     **7 of the 14 cases cross the 0.3 threshold below**,
+  //
+  // each taking `estimate_confidence` up by +0.10 — cases 1, 2, 3, 4, 6, 7, 12.
+  // e.g. case 1: CV 0.221 → 1.317; case 4: 0.121 → 0.892; case 12: 0.100 → 0.531.
+  // The seven unaffected cases carry no `strength_mean` on any edge, so Rule 4
+  // cannot reach them.
+  //
+  // ⚠ AN EARLIER REVISION OF THIS COMMENT CLAIMED "70 sign flips (22%), 14 of 14
+  // cases". That figure is WITHDRAWN: it applied the sign to all 70 edges whose
+  // stated direction is negative, including the 252 that carry no mean, which is
+  // a population Rule 4 never touches. Anyone sizing follow-on work off it —
+  // #1330's fixture re-derivation, for one — would size it several times too
+  // large. Re-derive against the reader Rule 4 actually uses before quoting.
+  //
+  // The direction of the error is the one that matters: it RAISES a confidence
+  // figure on exactly the drafts the polarity fix touches. Control on the same
+  // corpus: with `Math.abs` applied, 0 of 14 cases move at all.
+  //
+  // ⚠ AND IT HAS TWO SIBLINGS ASKING THE SAME QUESTION on the same graph in the
+  // same stage — `detectUniformStrengths` (`package.ts:594`) and
+  // `detectStrengthClustering` (`package.ts:601`), both repaired alongside this
+  // one. Enumerating the PRODUCERS of a disagreement is not the same as
+  // enumerating the CONSUMERS of the sign this change newly populates.
+  //
+  // ⚠ It also corrects the metric for any graph that already carried a negative
+  // mean by another route. That is not a side effect to apologise for — it is
+  // the same question being answered consistently.
+  const strengths = edges
+    .map(e => e?.strength_mean ?? e?.weight ?? 0.5)
+    .filter(s => typeof s === "number" && Number.isFinite(s))
+    .map(s => Math.abs(s));
+
+  let strengthVariation = 0;
+  if (strengths.length > 1) {
+    const mean = strengths.reduce((a, b) => a + b, 0) / strengths.length;
+    const variance = strengths.reduce((sum, s) => sum + Math.pow(s - mean, 2), 0) / strengths.length;
+    const std = Math.sqrt(variance);
+    strengthVariation = mean !== 0 ? std / Math.abs(mean) : 0;
+  }
+
+  // Check for baseline option
+  const baselinePatterns = [/status\s*quo/i, /do\s*nothing/i, /no\s*action/i, /baseline/i, /current/i, /as\s*is/i];
+  const hasBaselineOption = nodes.some(n => {
+    if (n?.kind !== "option") return false;
+    const label = n?.label ?? "";
+    if (baselinePatterns.some(p => p.test(label))) return true;
+    if ((n?.data as any)?.is_status_quo === true) return true;
+    return false;
+  });
+
+  // Compute range confidence coverage (% of interventions with Priority 1-2 ranges)
+  // Per spec: only count 'explicit' or 'extracted' sources, NOT 'inferred*' or 'default'
+  const HIGH_CONFIDENCE_SOURCES = new Set(["explicit", "extracted", "brief", "context"]);
+
+  let totalInterventions = 0;
+  let interventionsWithHighConfidenceRanges = 0;
+
+  for (const node of nodes) {
+    if (node?.kind !== "option") continue;
+    const rawInterventions = (node?.data as any)?.interventions;
+    // Handle both array (V1/V2) and object (V3) formats
+    const interventionValues = Array.isArray(rawInterventions)
+      ? rawInterventions
+      : rawInterventions && typeof rawInterventions === "object"
+        ? Object.values(rawInterventions) as any[]
+        : [];
+    for (const interv of interventionValues) {
+      totalInterventions++;
+      // Check if intervention has a range with high-confidence source
+      const hasRange = interv?.range?.min !== undefined && interv?.range?.max !== undefined;
+      const hasExtractedRange = interv?.extracted_range?.min !== undefined && interv?.extracted_range?.max !== undefined;
+
+      if (hasRange || hasExtractedRange) {
+        // Check source - exclude inferred/default sources
+        const rangeSource = interv?.range_source ?? interv?.extracted_range?.source ?? "default";
+        const isHighConfidence = HIGH_CONFIDENCE_SOURCES.has(rangeSource) ||
+          // Also accept sources that don't start with 'inferred' or 'default'
+          (typeof rangeSource === "string" &&
+           !rangeSource.startsWith("inferred") &&
+           rangeSource !== "default");
+
+        if (isHighConfidence) {
+          interventionsWithHighConfidenceRanges++;
+        }
+      }
+    }
+  }
+
+  const rangeConfidenceCoverage = totalInterventions > 0 ? interventionsWithHighConfidenceRanges / totalInterventions : 0;
+
+  // Estimate overall confidence based on factors
+  const confidenceFactors = [
+    strengthVariation > 0.3 ? 0.8 : 0.5, // Higher variation = more confidence
+    hasBaselineOption ? 0.9 : 0.6,
+    rangeConfidenceCoverage > 0.5 ? 0.8 : 0.5,
+  ];
+  const estimateConfidence = confidenceFactors.reduce((a, b) => a + b, 0) / confidenceFactors.length;
+
+  return {
+    estimate_confidence: Math.round(estimateConfidence * 100) / 100,
+    strength_variation: Math.round(strengthVariation * 1000) / 1000,
+    range_confidence_coverage: Math.round(rangeConfidenceCoverage * 100) / 100,
+    has_baseline_option: hasBaselineOption,
   };
 }
 

@@ -1,0 +1,1991 @@
+/**
+ * V5 explain-stabilisation Task 4 — deterministic pre-route for value
+ * updates. Inserted into TurnExecutor's lifecycle BEFORE `routeWithToolUse`
+ * (the LLM call), to catch obvious value-update phrasings that prompt
+ * tuning has not been able to route reliably.
+ *
+ * SCOPE DEVIATION FROM ORIGINAL BRIEF (Paul, 2026-04-29, AskUserQuestion):
+ * The original brief specified an exact-match → `edit_graph` dispatch
+ * path. Paul chose "Always go to clarify (defer exact match)" because
+ * `edit_graph` is a system-layer dispatch at route-v2.ts requiring a
+ * FastifyRequest, which is not available inside `runTurnExecutor`.
+ * Wiring it cleanly from the turn-executor would require a separate
+ * architectural decision. The exact-match branch is therefore deferred to
+ * a follow-up brief. This pre-route's only output is a clarify dispatch —
+ * the user picks the intended factor from up to four chips, and the next
+ * turn (after the chip click) carries the disambiguated phrasing into
+ * Sonnet's normal routing path.
+ *
+ * Detection (all conditions must hold):
+ *   1. message contains an edit verb (`increase|decrease|reduce|raise|
+ *      lower|set|change|update|make|adjust`, word-boundary, case-insensitive)
+ *   2. CQE extracted at least one numeric value (we do NOT regex-parse
+ *      the message for numbers — F.6: code computes, LLM doesn't; CQE is
+ *      the canonical extractor)
+ *   3. graphLookup is available (no graph → no factor labels to match)
+ *   4. message does NOT contain a hypothetical phrase (`what if`, `what
+ *      would`, `how would`, `would it`, `if we`, `if I`, `suppose`,
+ *      `imagine`, `\btest\b`, `scenario`) — those phrasings should reach
+ *      the LLM so Sonnet can frame the right exploratory response.
+ *
+ * Label matching (substring first, Dice as fallback):
+ *   - Pass 1: substring match (case-insensitive, trimmed) — deterministic
+ *     and reliable for "Set <Factor Label> to <value>" prompts.
+ *   - Pass 2: bigramDice on candidates that did not substring-match,
+ *     threshold 0.4. Whole-message-vs-label, mirroring the entity
+ *     resolver's existing path.
+ *   - Candidate pool is TYPE-FILTERED to factor-kind node ids when the
+ *     caller supplies `factorNodeIds` (production always does): a
+ *     decision/outcome/risk/action node that shares tokens with the
+ *     message can never surface as a candidate for a value-update intent.
+ *
+ * Outcome (1.16b — auto-select vs. clarify boundary):
+ *   - Exactly ONE substring match (score 1.0) that clearly DOMINATES any
+ *     Dice runner-up (gap ≥ `AUTO_SELECT_DOMINANCE_MARGIN`, i.e. the best
+ *     Dice score is below 0.85) → auto-selected: `dispatch:
+ *     'set_factor_value'`, no clarify. A perfect substring hit is not
+ *     defeated by a weak Dice echo.
+ *   - Otherwise, at least one candidate qualifies → `dispatch: 'clarify'`
+ *     with up to four candidates sorted by score (substring matches
+ *     first). This still covers: multiple substring matches; a lone
+ *     Dice-only match (no substring evidence at all); and — the boundary
+ *     this fix preserves — a substring match with a Dice runner-up that
+ *     scores close enough (≥ 0.85) to be a genuine rival, e.g. two
+ *     near-duplicate factor labels.
+ *   - No candidate qualifies → `{ matched: false }` (LLM falls through).
+ */
+
+import {
+  CURRENCY_SYMBOL_SOURCE,
+  NUMERIC_SUFFIX_SOURCE,
+} from '../context/cqe/rules.js';
+import { preNormalise } from '../context/cqe/pre-normalise.js';
+import { applyWordNumberPrePass } from '../context/cqe/word-numbers.js';
+import type { QuantityExtractionResult } from '../context/cqe/schema-types.js';
+import { formatValueWithUnit } from '../tools/handlers/d1-shared/format-confirmation.js';
+import { ALLOWED_TARGET_KINDS as ADD_CONSTRAINT_ALLOWED_TARGET_KINDS } from '../tools/handlers/add-constraint.js';
+import type { GraphLookup } from './validator.js';
+import { bigramDice } from './validator.js';
+import {
+  collectOptionGuardLabels,
+  impliesOptionInterventionEdit,
+} from './option-intervention-guard.js';
+import { EDIT_VERB_BASES, hasExplicitNoModelChangeIntent } from './mutation-warrant.js';
+import { buildAnaphoricBindingDisclosure } from '../compose/edit-clarify-response.js';
+
+/**
+ * ⭐ EXPORTED 2026-08-05 so the calibration pre-route gates on the SAME edit
+ * verbs this detector does. A second copy would drift, and a drift here
+ * means one path treats "Set X to pretty likely" as an edit and the other
+ * does not (CLAUDE.md trap 12 — the hand-maintained mirror).
+ */
+/**
+ * DERIVED from `EDIT_VERB_BASES`, never re-listed. The veto in
+ * `mutation-warrant.ts` reads the same vocabulary, so a verb that can authorise
+ * a write here is always a verb that can forbid one there. They drifted apart
+ * once — overlapping on three of ten — and that gap was SENDABLE P0.
+ */
+/**
+ * The model's OWN ENTITY LABELS, handed to the no-change veto so a prohibition
+ * naming a factor is recognised as a prohibition about the model.
+ *
+ * ⭐ This closes the asymmetry that was SENDABLE P0 (24 Aug 2026): this file
+ * already resolves these very labels to AUTHORISE a write (see the
+ * `normMessage.includes(normLabel)` candidate scan below), while the veto could
+ * only see the four tokens {model, models, graph, graphs}. So
+ * "Whatever you do, don't set Rep Adoption Quality to 0.2" produced no veto
+ * candidate at all, the write went through, and the product replied
+ * "Updated Rep Adoption Quality from 0.7 to 0.2."
+ *
+ * The same graph, read the same way, for both directions.
+ */
+function modelEntityLabels(
+  graphLookup: GraphLookup | undefined,
+  factorNodeIds?: ReadonlySet<string>,
+): readonly string[] {
+  if (!graphLookup) return [];
+  try {
+    const out: string[] = [];
+    for (const entity of graphLookup.listEntitiesByKind('node')) {
+      // ⚠ NARROWED TOWARD THE POOL THE GRANT SIDE PREFERS. `listEntitiesByKind`
+      // buckets factor together with outcome/decision/risk/action, and the
+      // candidate scan below narrows to `factorNodeIds` before matching. Handing
+      // the veto the WIDER pool made naming a risk or outcome in a negative
+      // aside — "Don't increase Churn — set Growth to 0.9." — cancel an edit to
+      // an unrelated factor.
+      //
+      // ⚠ NOT "the same pool", and an earlier version of this comment said so
+      // wrongly. `set_factor_value` CAN reach a non-factor: there is a
+      // documented non-factor fallback below, and an unfiltered-pool fallback
+      // when the narrowed pool would empty. Measured: "Do not change Customer
+      // Churn Risk to 0.2." dispatches with a risk candidate, and the executor
+      // downgrades it to `refuse_non_factor_kind` downstream. So the veto's
+      // domain here is strictly NARROWER than the grant's — deliberately
+      // conservative, and the asymmetry is now in the safe direction.
+      const id = (entity as { id?: unknown }).id;
+      if (factorNodeIds && (typeof id !== 'string' || !factorNodeIds.has(id))) continue;
+      const label = (entity as { label?: unknown }).label;
+      if (typeof label === 'string' && label.trim().length > 0) out.push(label);
+    }
+    return out;
+  } catch {
+    // A lookup that cannot enumerate must not take the turn down; the veto
+    // simply falls back to its model-object vocabulary.
+    return [];
+  }
+}
+
+export const EDIT_VERB_PATTERN = new RegExp(
+  `\\b(${EDIT_VERB_BASES.join('|')})\\b`,
+  'i',
+);
+
+/**
+ * P0 V5 golden-path repair (Wave 2, Path B) — deictic reference patterns.
+ *
+ * Targets value-update phrasings that don't carry a label but DO carry a
+ * pointer ("that factor", "this factor", "the selected factor", "the
+ * highlighted one"). When the user clicked a factor on the canvas and
+ * then typed a deictic value-update, we can resolve deterministically
+ * without an LLM call — provided exactly one selected factor exists.
+ *
+ * Bare "it" is intentionally OUT of this list. Pronoun resolution
+ * across turns needs LLM coreference and is out of scope; a misfire on
+ * "set it to £30k" silently mutating the wrong factor is worse than
+ * falling through to clarify.
+ *
+ * Patterns are word-bounded so phrases like "do that" or "this morning"
+ * never match.
+ */
+const DEICTIC_REFERENCE_PATTERN =
+  /\b(?:(?:that|this) (?:factor|node|one)|(?:the (?:selected|highlighted|chosen)) (?:factor|node|one))\b/i;
+
+/**
+ * ⭐ C5 (6 Sep 2026) — does this message POINT AT the canvas selection?
+ *
+ * Exported so the route's recorded-ask pre-route consults THIS definition of
+ * "the selection owns the referent" instead of re-spelling it (trap 12). That
+ * gate withdrew a recorded option-effect ask on ANY selection, and an
+ * incidental one lost the user's answer; the deictic shapes above are the ones
+ * a selection genuinely claims. Bare "it" stays out, per the note above — a
+ * reply saying "it" has no selection-aware path to claim it, so a recorded ask
+ * remains its only deterministic antecedent.
+ *
+ * The pattern carries no `g` flag, so `.test` is stateless here.
+ */
+export function carriesDeicticReference(message: string): boolean {
+  return typeof message === 'string' && DEICTIC_REFERENCE_PATTERN.test(message);
+}
+
+/**
+ * V5 Golden Journey row 7 — strict "from <numeric> to <numeric>" anchor.
+ *
+ * History (PR #192 reviewer iteration log):
+ *   - Round 1: `/\bfrom\b[^.]*?\bto\b/i`. Failed on "from Q1 to Q2 by
+ *     £20k and headcount by 3" — anchors not bound to numeric tokens.
+ *   - Round 2: tightened suffix locally to `(?:k|m|bn?)?`. Failed on
+ *     "from £1b to £2b" — bare-`b` accepted locally but rejected by
+ *     CQE, so CQE emitted bare `1, 2` and the branch silently set the
+ *     factor to `£2`.
+ *   - Round 3: tightened currency locally as `[£$€¥]?`. Failed on
+ *     "from ¥1 to ¥2" — `¥` accepted locally but rejected by CQE
+ *     (`CURRENCY_SYMBOL = £|\$|€`). Same drift class as the suffix bug.
+ *   - Round 4 (current): the anchor reuses BOTH CQE source strings
+ *     verbatim — `CURRENCY_SYMBOL_SOURCE` for the optional prefix and
+ *     `NUMERIC_SUFFIX_SOURCE` for the optional multiplier. The two
+ *     grammars cannot drift again because there is no second copy.
+ *     Adding a new currency symbol or suffix word to CQE propagates
+ *     into routing automatically.
+ *
+ * The pattern requires DIGITS (optionally preceded by a CQE-recognised
+ * currency symbol and optionally followed by the CQE-canonical suffix
+ * grammar) immediately at BOTH anchors. Two side-by-side guarantees:
+ *   1. POSITION: the regex match proves the two anchors carry numeric
+ *      tokens with a CQE-recognised shape.
+ *   2. VALUE: CQE document-order trust — `nonNullQuantities[0]` is the
+ *      from-value, `nonNullQuantities[1]` is the to-value. Per AC.2
+ *      commentary, `raw_text` is post-normalised so an indexOf-based
+ *      re-locate is unreliable; the strict 2-quantity gate prevents
+ *      CQE-vs-regex count drift.
+ *
+ * Scope reminder: real CQE already MERGES well-formed "from <X> to <Y>"
+ * into ONE quantity with `operator='set'`, value=Y. This branch only
+ * fires when CQE did NOT merge — i.e. edge cases CQE didn't recognise
+ * (unsupported suffix, unsupported currency, malformed input). The
+ * branch is therefore an end-of-pipeline safety net for those exact
+ * cases, not the common path.
+ *
+ * Negative cases the AC.2 conservative skip still catches without
+ * change: range ("between X and Y"), disjunction ("by X or Y"), 3+
+ * quantities, any from/to where either side is non-numeric in
+ * CQE-recognised shape.
+ */
+const FROM_TO_NUMERIC_ANCHOR_PATTERN = new RegExp(
+  String.raw`\bfrom\s+(?:` +
+    CURRENCY_SYMBOL_SOURCE +
+    String.raw`)?\s*\d[\d,]*(?:\.\d+)?\s*(?:` +
+    NUMERIC_SUFFIX_SOURCE +
+    String.raw`)?\b[^.]*?\bto\s+(?:` +
+    CURRENCY_SYMBOL_SOURCE +
+    String.raw`)?\s*\d[\d,]*(?:\.\d+)?\s*(?:` +
+    NUMERIC_SUFFIX_SOURCE +
+    String.raw`)?\b`,
+  'i',
+);
+
+// Case-insensitive substring matches; some are anchored on word boundary
+// so "fastest" doesn't trigger `\btest\b` and "iframe" doesn't trigger
+// `imagine`. Multi-word phrases are unambiguous as substring matches.
+const HYPOTHETICAL_PATTERNS: readonly RegExp[] = [
+  /\bwhat if\b/i,
+  /\bwhat would\b/i,
+  /\bhow would\b/i,
+  /\bwould it\b/i,
+  /\bif we\b/i,
+  /\bif i\b/i,
+  /\bsuppose\b/i,
+  /\bimagine\b/i,
+  /\btest\b/i,
+  /\bscenario\b/i,
+];
+
+/**
+ * ⭐ ROADMAP 2.389a — EDGE-PHRASING NEGATIVE GATE, part 1 of 2.
+ *
+ * A noun that names a RELATIONSHIP rather than a quantity. Word-bounded, so a
+ * factor labelled "Linkage" or "Connectivity" is untouched.
+ *
+ * `strength` is deliberately ABSENT: a factor can legitimately be called
+ * "Brand Strength", and this list is one half of a conjunction — widening it
+ * with a word that appears in real factor labels would put the fast path at
+ * risk for no gain, since every measured edge sentence carries one of the
+ * nouns below anyway.
+ */
+const RELATIONSHIP_NOUN_PATTERN =
+  /\b(?:link|links|edge|edges|relationship|relationships|connection|connections|arrow|arrows|dependency|dependencies|influence|influences)\b/i;
+
+/**
+ * ⭐ EDGE-PHRASING NEGATIVE GATE, part 2 of 2 — the TWO-ENDPOINT shape.
+ *
+ * A connective (`to` / `and` / `on` / `between`) whose right-hand side opens
+ * with a WORD rather than a number, i.e. a second ENDPOINT rather than the
+ * value being set. This is what separates
+ *
+ *     "Make the link from Ad-Supported Model TO AD REVENUE 2"   ← two endpoints
+ *     "Set Broadband Connection Cost TO 40"                     ← one, then a value
+ *
+ * even though both carry a relationship noun. The negative lookahead spans an
+ * optional currency symbol so "to £6 million" reads as a value, not a label.
+ *
+ * ⚠ THIS IS A CONJUNCT, NEVER A GATE ON ITS OWN. `\bto\s+<word>` matches an
+ * enormous share of ordinary English ("Set the budget to about £300k"); it is
+ * only safe paired with the relationship noun above.
+ */
+const EDGE_ENDPOINT_JOIN_PATTERN = new RegExp(
+  String.raw`\b(?:to|and|on|between)\s+(?:the\s+)?(?!(?:` +
+    CURRENCY_SYMBOL_SOURCE +
+    String.raw`)?\s*\d)[a-z]`,
+  'i',
+);
+
+/**
+ * Does this sentence describe an EDGE between two named endpoints?
+ *
+ * Exported for the gate's own tests. A conjunction, not a phrase list: both
+ * the relationship noun AND the two-endpoint join must be present, which is
+ * what keeps ordinary factor updates on the deterministic fast path (see the
+ * preservation corpus in
+ * `__tests__/deterministic-value-update-edge-phrasing.test.ts`, drawn from
+ * this module's own existing tests).
+ */
+export function impliesEdgePhrasing(message: string): boolean {
+  return (
+    RELATIONSHIP_NOUN_PATTERN.test(message) && EDGE_ENDPOINT_JOIN_PATTERN.test(message)
+  );
+}
+
+/** Minimum bigramDice score to qualify as a fuzzy candidate. */
+const DICE_FLOOR = 0.4;
+
+/** Maximum number of clarify candidates to surface. */
+export const MAX_CANDIDATES = 4;
+
+/**
+ * How a candidate was selected — useful for routing diagnostics. `score: 0`
+ * alone is too implicit for telemetry, so each candidate carries an explicit
+ * source tag. `register` is a candidate the referent register bound
+ * (`tryAnaphoricValueUpdate` — BOTH of its forms: the bare pronoun and the
+ * bare quantity, which share one candidate); it never came from label
+ * evidence in the message, and the tag says so rather than borrowing
+ * `substring`.
+ */
+export type CandidateSource = 'substring' | 'dice' | 'register';
+
+export interface ValueUpdateCandidate {
+  readonly id: string;
+  readonly label: string;
+  readonly score: number;
+  readonly source: CandidateSource;
+  /**
+   * OPTIONAL 0-based character index in `message` where this
+   * candidate's label matched (substring matches only; Dice matches
+   * have no anchored match span). Reserved for a future CQE quantity-
+   * attribution step (Layer B proximity attribution, deferred per
+   * workstream stop condition — CQE `raw_text` is post-normalised and
+   * cannot be located reliably).
+   *
+   * Optional rather than required so existing test fixtures and any
+   * future caller that doesn't need attribution continue to compile;
+   * the production substring-match site DOES set it for forward-
+   * compatibility. Reviewer feedback (2026-05-20) flagged the
+   * required-version breaking 4 pre-existing test fixtures.
+   */
+  readonly labelMatchIndex?: number | null;
+}
+
+/**
+ * Optional telemetry tag for quantity-attribution paths. Added for the
+ * V5 row-7 "from X to Y" fix — when a 2-quantity message carries a
+ * literal `from <...> to <...>` anchor, the second quantity is the
+ * user's intended target value and the dispatch is tagged so routing
+ * logs can distinguish this branch from the single-quantity path.
+ *
+ * Kept on the dispatch result (not on `candidate.source`) because
+ * `source` describes how the candidate LABEL was resolved — extending
+ * that union would conflate label-match telemetry with
+ * quantity-attribution telemetry. The two concerns are independent.
+ */
+export type QuantityAttribution = 'from_to';
+
+export type ValueUpdateDispatch =
+  | { readonly matched: false; readonly skip_reason: SkipReason }
+  | {
+      readonly matched: true;
+      readonly dispatch: 'clarify';
+      readonly candidates: readonly ValueUpdateCandidate[];
+      readonly quantity: QuantityExtractionResult;
+      readonly attribution?: QuantityAttribution;
+    }
+  /**
+   * V5 D1 golden-path closure (A3.1): unambiguous match on exactly ONE
+   * substring candidate. The caller is responsible for verifying the
+   * candidate's NodeV3.kind === 'factor' against graph state before
+   * dispatching `set_factor_value` — GraphLookup buckets factor with
+   * outcome/decision/risk/action under EntityKind 'node', so this
+   * function cannot do the kind check itself.
+   *
+   * On a positive kind check the caller constructs a synthetic
+   * `RoutingToolCallResult` (proposal carrying handler_id
+   * 'set_factor_value', resolved entity, computed parameters) and
+   * lets the existing Step 2-7 lifecycle run unchanged. No LLM call,
+   * no bespoke handler invocation path.
+   *
+   * On a negative kind check the caller falls back to the clarify
+   * variant (same shape as the multi-match case).
+   */
+  | {
+      readonly matched: true;
+      readonly dispatch: 'set_factor_value';
+      readonly candidate: ValueUpdateCandidate;
+      readonly quantity: QuantityExtractionResult;
+      readonly attribution?: QuantityAttribution;
+    }
+  /**
+   * The user named a real graph node for a value-edit, we resolved it
+   * with certainty, and it is NOT a factor (risk / outcome / decision /
+   * action). Setting a value on a non-factor node is UNSUPPORTED by
+   * design — `set_factor_value` is the only value-setting handler and it
+   * rejects non-factor targets (`tools/handlers/set-factor-value.ts`
+   * ENTITY_KIND_MISMATCH); no `set_node_value`-style handler exists.
+   *
+   * This is deliberately NOT the `clarify` variant. `clarify` means "I
+   * could not tell WHICH entity you meant" — an ambiguity question whose
+   * candidate list is the answer. Here there is no ambiguity: we know
+   * exactly which node the user meant and we cannot perform the
+   * operation on it. Reusing `clarify` for this case produced the live
+   * dead-end defect (staging f31e3852, scenario 906d6aff…, 2026-07-15):
+   * "Set Key Talent Attrition to 0.8" on a risk node answered "I wasn't
+   * sure which factor you meant. Did you mean Key Talent Attrition?" —
+   * offering the user's own words back as the only choice, with a chip
+   * whose replay message was byte-identical to the message just sent. An
+   * unescapable loop, and it called a risk a "factor".
+   *
+   * The caller composes an honest refusal that names the node's real
+   * kind and the route that IS supported (`add_constraint` accepts
+   * risk/outcome/goal/factor targets — see
+   * `tools/handlers/add-constraint.ts` ALLOWED_TARGET_KINDS).
+   */
+  | {
+      readonly matched: true;
+      readonly dispatch: 'refuse_non_factor_kind';
+      readonly candidate: ValueUpdateCandidate;
+      /** The node's real NodeV3.kind, re-resolved from raw graph state. */
+      readonly node_kind: string;
+      readonly quantity: QuantityExtractionResult;
+      readonly attribution?: QuantityAttribution;
+    };
+
+export type SkipReason =
+  /**
+   * CQE reported `degraded: true` — at least one pattern rule did not run
+   * to completion, so a span's highest-fidelity reading may be missing and
+   * a lower-fidelity substitute may have taken its place.
+   *
+   * The headline failure is a DIFFERENT NUMBER arriving with full
+   * confidence — e.g. "increase by about 10%" yielding 10 instead of 0.1
+   * when the percentage rule (P6) is skipped and the absolute-quantity
+   * rule (P6b) claims the span, or "USD 1.2bn" yielding 1.2 instead of
+   * 1200000000 when the suffix rule (P8) is skipped and the compromise
+   * backstop claims it.
+   *
+   * The class is WIDER than those two cases: adversarial review found it
+   * spans 6-9 rules and at least four distinct corruption modes, and the
+   * modes are mutually inconsistent in what they perturb —
+   *
+   *   - magnitude change, count UNCHANGED (the two cases above);
+   *   - RANGE COLLAPSE, which DOES change the quantity count;
+   *   - OPERATOR FLIP (`set 42` -> `increment 42`) where the numeric value
+   *     is byte-identical and only the semantics move.
+   *
+   * So no guard on arity works (some modes hold count constant, others
+   * change it), no magnitude heuristic works (the operator flip changes no
+   * number at all), and `source` is unreliable (it stays `cqe` whenever a
+   * lower-priority rule, rather than the backstop, claims the span). The
+   * only signal that covers every mode is PROVENANCE: did every rule run?
+   * That is what this guard keys on. Falling through to LLM routing costs
+   * a round trip; applying a silently-wrong value costs the user's graph.
+   */
+  | 'degraded_extraction'
+  | 'no_edit_verb'
+  | 'explicit_no_model_change'
+  | 'no_quantity'
+  | 'no_graph'
+  | 'hypothetical_gate'
+  | 'no_candidate_match'
+  /**
+   * AC.2 — multiple non-null CQE quantities were extracted but
+   * attribution cannot resolve confidently to a unique quantity for
+   * the matched factor. The detector skips rather than guessing the
+   * "first non-null" quantity (which the staging 2fcd2221 bug class
+   * exposed as unsafe). Caller falls through to LLM routing, which
+   * produces a clarification chip.
+   */
+  | 'ambiguous_quantity'
+  /**
+   * Tier A #1 (edit-reliability, 2026-07-09) — FIX 2: the message implies
+   * an OPTION's intervention edit (`impliesOptionInterventionEdit`, the
+   * same detector `option-intervention-guard.ts` uses at STEP 2 validate)
+   * rather than a genuine factor-value change. Without this gate, this
+   * pre-route substring-matches the SHARED factor named in the message
+   * (e.g. "Set the Outsource option's Annual Support Cost to £135,000"
+   * matches "Annual Support Cost") and confidently auto-dispatches
+   * `set_factor_value` on it — the exact silent misroute the downstream
+   * guard exists to catch. That guard refuses the proposal and produces a
+   * clarify, but the clarify's replay text re-enters THIS SAME pre-route,
+   * which — still unaware of the option framing — synthesises the
+   * identical misrouted proposal again: a disambiguator loop the user can
+   * never escape, making the option-intervention edit unreachable.
+   *
+   * Skipping here (rather than only refusing downstream) breaks the loop
+   * at its source: the message reaches the LLM's edit_graph
+   * `option_configuration` routing with a clean slate, which is the path
+   * actually built to handle option interventions.
+   */
+  | 'option_intervention_edit'
+  /**
+   * ⭐ ROADMAP 2.389a — the message describes an EDGE, not a factor value.
+   *
+   * MEASURED live on staging `672b634`:
+   *   "Make the link from Ad-Supported Model to Ad Revenue 2"
+   *     → `set_factor_value`, `fac_ads_model` 0 → **2**, receipt "Applied".
+   * The user named a relationship; a factor was mutated, out of range, and
+   * the confirmation card was truthful in every field about an operation the
+   * user never requested. Of the routing defects surveyed on that build this
+   * was the only one that failed UNSAFE.
+   *
+   * ⚠ THE MECHANISM IS THE TYPE FILTER THAT WAS SUPPOSED TO PROTECT US.
+   * `factorNodeIds` narrows the candidate pool to factor-kind ids. An edge
+   * sentence names a factor at one end and a NON-factor (risk / outcome /
+   * goal) at the other, so the second endpoint is REMOVED FROM THE POOL and a
+   * two-label sentence collapses into a single substring match → score 1 →
+   * auto-select. The guard that stops non-factor nodes being mutated is
+   * exactly what makes an edge sentence look unambiguous.
+   *
+   * Skipping here hands the turn to the routing LLM, which was MEASURED
+   * getting this right (`adjust_edge_strength` proposed with the sign
+   * preserved; the out-of-range variant reaching the parameter-phrasing
+   * refusal — "Strength runs from minus one to plus one…" — with a "Try a
+   * different value" chip). This is one of the rare cases where the
+   * deterministic path is the LESS reliable one, because the sentence's
+   * grammar carries information the factor-label matcher cannot see.
+   *
+   * ⚠ THE GATE FAILS SAFE BY CONSTRUCTION, and the asymmetry is deliberate.
+   * Over-gating costs one LLM call on a path the LLM already handles.
+   * Under-gating mutates the wrong object and reports success. Where the
+   * predicate is uncertain it is written to gate.
+   */
+  | 'edge_phrasing_gate'
+  /**
+   * S2-L3 — a typed-chip mutation pre-route already synthesised the proposal
+   * from `chip.parameters` this turn, so the text parser is preempted (typed
+   * ahead of every string/shape heuristic). The caller supplies this skip
+   * without invoking the detector; it never originates inside this module.
+   */
+  | 'preempted_by_typed_chip';
+
+// (Earlier draft of this file declared a `QUANTITY_PROXIMITY_WINDOW`
+// constant for span-based attribution; that approach was abandoned at
+// implementation time because CQE's `raw_text` is post-normalised and
+// can't be located via `indexOf` reliably — see the inline comment
+// above the multi-quantity skip. The constant was removed; a future
+// Layer-B refinement that exposes stable CQE spans can reintroduce
+// proximity attribution.)
+
+/**
+ * P0 V5 golden-path repair (Wave 2): UI-side selection context, narrowed
+ * to factor-kind ids by the caller. The pre-route uses this as a strict
+ * tie-breaker only — never as the sole basis for a dispatch when the
+ * label evidence already resolves to one factor.
+ *
+ * Caller is responsible for the kind-filter (factor only). Selected
+ * options/risks/outcomes/decisions must be filtered out upstream so a
+ * non-factor selection can't silently update a factor.
+ */
+export type SelectedFactorIds = readonly string[];
+
+/**
+ * Minimum score gap a lower-ranked candidate must fall short by (relative
+ * to a top score of 1.0) for the top candidate to be treated as "clearly
+ * dominant" rather than "comparable / genuinely ambiguous". Mirrors
+ * `SUSPICIOUS_DICE_THRESHOLD` in validator.ts (0.15) — same intuition
+ * (a Dice delta under this margin is "too close to call"), reused here so
+ * the two independent ambiguity guards (this pre-route's auto-select vs.
+ * the validator's closer-match check) don't drift onto different notions
+ * of "close".
+ */
+const AUTO_SELECT_DOMINANCE_MARGIN = 0.15;
+
+export function tryDeterministicValueUpdate(
+  message: string,
+  parsedQuantities: readonly QuantityExtractionResult[],
+  graphLookup: GraphLookup | undefined,
+  selectedFactorIds: SelectedFactorIds = [],
+  /**
+   * OPTIONAL type filter — ids of factor-kind nodes in the graph. When
+   * provided, the label-matching candidate pool (built from
+   * `graphLookup.listEntitiesByKind('node')`, which buckets factor
+   * together with outcome/decision/risk/action — see the comment at the
+   * candidatesPool site below) is narrowed to ids in this set BEFORE
+   * substring/Dice matching runs. This is a value-update intent, so only
+   * factor nodes are valid targets; a decision/outcome/risk/action node
+   * that happens to share tokens with the message must never appear as a
+   * clarify chip or be counted toward the ambiguity guard below.
+   *
+   * Left undefined by callers that don't have factor-kind information
+   * (e.g. older test fixtures) — the pool is unfiltered in that case,
+   * preserving prior behaviour. Production caller (turn-executor.ts)
+   * always supplies it; it already computes the equivalent set
+   * (`factorIdSet`) for the selection-narrowing path, so this is the
+   * same set threaded one step earlier in the pipeline.
+   *
+   * FALLBACK: when this set is supplied but excludes every candidate
+   * that would otherwise match (no factor-kind node in the graph at
+   * all, or none of the factor-kind nodes share lexical material with
+   * the message), the pool falls back to unfiltered rather than
+   * declining the turn — see the candidatesPool site below for why.
+   */
+  factorNodeIds?: ReadonlySet<string>,
+  /**
+   * `CqeExtractionSummary.degraded` for the extraction that produced
+   * `parsedQuantities`. Defaults to `false` so existing callers and
+   * fixtures are unchanged; the production caller (turn-executor.ts)
+   * always threads the real value.
+   */
+  extractionDegraded: boolean = false,
+): ValueUpdateDispatch {
+  // Refuse to deterministically apply a value the extractor could not
+  // vouch for. Placed FIRST — ahead of every other gate — because the
+  // corruption is in `parsedQuantities` itself, so no downstream check
+  // (edit-verb, label match, quantity arity) can distinguish a degraded
+  // value from a sound one: they all see a well-formed number.
+  if (extractionDegraded) {
+    return { matched: false, skip_reason: 'degraded_extraction' };
+  }
+  if (!EDIT_VERB_PATTERN.test(message)) {
+    return { matched: false, skip_reason: 'no_edit_verb' };
+  }
+  if (hasExplicitNoModelChangeIntent(message, modelEntityLabels(graphLookup, factorNodeIds))) {
+    return { matched: false, skip_reason: 'explicit_no_model_change' };
+  }
+
+  // F.6: code computes, LLM doesn't. CQE is the canonical numeric
+  // extractor — if it found nothing, fall through to the LLM rather than
+  // re-running a regex here.
+  //
+  // We collect ALL non-null quantities (not just the first) because
+  // attribution to the matched factor (below, after candidates are
+  // resolved) needs the full set. Selection from this set happens via
+  // `selectAttributedQuantity` once we know the matched label's
+  // position. Until that step we hold a provisional `quantity` that
+  // covers the single-quantity case unchanged.
+  const nonNullQuantities = parsedQuantities.filter((q) => q.value !== null);
+  if (nonNullQuantities.length === 0) {
+    return { matched: false, skip_reason: 'no_quantity' };
+  }
+  // Provisional selection for the single-quantity case; replaced below
+  // when attribution runs over multiple quantities.
+  let quantity: QuantityExtractionResult = nonNullQuantities[0]!;
+
+  if (graphLookup === undefined) {
+    return { matched: false, skip_reason: 'no_graph' };
+  }
+
+  // Negative gate: hypothetical phrasings should reach the LLM. The
+  // pre-route is for explicit value updates, not exploratory scenarios.
+  for (const pat of HYPOTHETICAL_PATTERNS) {
+    if (pat.test(message)) {
+      return { matched: false, skip_reason: 'hypothetical_gate' };
+    }
+  }
+
+  // ⭐ ROADMAP 2.389a — negative gate: the message describes an EDGE.
+  //
+  // Must run BEFORE the candidate pool is built, for the same reason the
+  // option-intervention gate below does: once `factorNodeIds` has removed the
+  // non-factor endpoint, a two-endpoint sentence is INDISTINGUISHABLE from an
+  // unambiguous single-factor match — score 1, one candidate, auto-select.
+  // By the time the pool exists the evidence that would have stopped us is
+  // gone. See the `'edge_phrasing_gate'` SkipReason doc for the measured
+  // damage (`fac_ads_model` set to an out-of-range 2 under an "Applied"
+  // receipt) and for why the LLM is the better owner of this shape.
+  if (impliesEdgePhrasing(message)) {
+    return { matched: false, skip_reason: 'edge_phrasing_gate' };
+  }
+
+  // FIX 2 (Tier A #1, 2026-07-09) — negative gate: option-intervention
+  // framing should reach the LLM's option_configuration routing, not this
+  // factor-only pre-route. Must run BEFORE the candidate pool is built —
+  // see the SkipReason doc for why (this pre-route would otherwise
+  // substring-match the shared factor named alongside the option and
+  // confidently misroute onto it).
+  const guardLabels = collectOptionGuardLabels(graphLookup);
+  if (
+    impliesOptionInterventionEdit(
+      message,
+      guardLabels.optionLabels,
+      guardLabels.nonOptionLabels,
+    )
+  ) {
+    return { matched: false, skip_reason: 'option_intervention_edit' };
+  }
+
+  // Candidate pool: GraphLookup buckets factor / outcome / decision / risk
+  // / action node kinds together under EntityKind 'node' (per
+  // graph-lookup-adapter.ts:toEntityKind). The interface cannot
+  // disambiguate factor from outcome/risk inside the 'node' bucket by
+  // itself. When the caller supplies `factorNodeIds` (production always
+  // does — see the parameter doc above), we narrow the pool to factor-kind
+  // ids HERE, before any substring/Dice matching runs, so a decision /
+  // outcome / risk / action node that shares tokens with the message can
+  // never surface as a clarify chip or count toward the ambiguity guard
+  // below, PROVIDED at least one factor candidate is available (see the
+  // fallback note just below). This is a value-update intent — non-factor
+  // nodes are never valid targets for it.
+  const rawCandidatesPool = graphLookup.listEntitiesByKind('node');
+  if (rawCandidatesPool.length === 0) {
+    return { matched: false, skip_reason: 'no_candidate_match' };
+  }
+  const factorFilteredPool =
+    factorNodeIds === undefined
+      ? rawCandidatesPool
+      : rawCandidatesPool.filter((f) => factorNodeIds.has(f.id));
+  // Fallback-to-unfiltered rule: when the type filter would leave NOTHING
+  // to match against (the graph has no factor-kind node at all, or none
+  // of the factor-kind nodes share any lexical material with the
+  // message), fall back to the unfiltered pool rather than declining the
+  // turn outright. This preserves a pre-existing, separately-tested
+  // safety net: a single substring match that resolves to a non-factor
+  // node (e.g. "Set Customer Risk to 5" against a graph with no factor
+  // nodes) still dispatches `set_factor_value`, and the CALLER's
+  // downstream kind-check (turn-executor.ts, re-resolving NodeV3.kind on
+  // raw graph state) downgrades it to `clarify` with `downgrade_reason:
+  // 'non_factor_kind'` — a clearer recovery than silently falling through
+  // to the LLM. When at least one factor candidate DOES exist, the
+  // factor-only pool is used unconditionally and non-factor nodes never
+  // surface as candidates, satisfying the type-filter requirement without
+  // touching that separately-tested downgrade path.
+  const candidatesPool =
+    factorNodeIds !== undefined && factorFilteredPool.length === 0
+      ? rawCandidatesPool
+      : factorFilteredPool;
+  if (candidatesPool.length === 0) {
+    return { matched: false, skip_reason: 'no_candidate_match' };
+  }
+
+  const normMessage = message.trim().toLowerCase();
+  const substringMatches: ValueUpdateCandidate[] = [];
+  const remaining: Array<{ id: string; label: string | null }> = [];
+
+  for (const f of candidatesPool) {
+    if (f.label == null) {
+      // No label means we cannot anchor a substring or Dice match on this
+      // candidate — drop it from consideration.
+      continue;
+    }
+    const normLabel = f.label.trim().toLowerCase();
+    if (normLabel.length === 0) continue;
+    if (normMessage.includes(normLabel)) {
+      // Capture the lowercased-message index of the label match —
+      // used by the CQE quantity-attribution step (AC.2). The index
+      // corresponds 1:1 with the original-cased message index since
+      // `toLowerCase()` is character-preserving for the alphabets the
+      // detector targets.
+      const labelMatchIndex = normMessage.indexOf(normLabel);
+      substringMatches.push({
+        id: f.id,
+        label: f.label,
+        score: 1,
+        source: 'substring',
+        labelMatchIndex,
+      });
+    } else {
+      remaining.push(f);
+    }
+  }
+
+  const diceMatches: ValueUpdateCandidate[] = [];
+  for (const f of remaining) {
+    if (f.label == null) continue;
+    const score = bigramDice(message, f.label);
+    if (score >= DICE_FLOOR) {
+      // Dice matches have no anchored index — proximity attribution
+      // cannot use them and treats `labelMatchIndex: null` as
+      // "not attributable" (skips with `ambiguous_quantity`).
+      diceMatches.push({
+        id: f.id,
+        label: f.label,
+        score,
+        source: 'dice',
+        labelMatchIndex: null,
+      });
+    }
+  }
+  diceMatches.sort((a, b) => b.score - a.score);
+
+  const matched = [...substringMatches, ...diceMatches].slice(0, MAX_CANDIDATES);
+  if (matched.length === 0) {
+    // 1.16 item B — kind-gate clarify restore. The type filter (#383) is
+    // right for RANKING (non-factor nodes must never outrank or crowd
+    // factor candidates), but when the factor-filtered pool yields NO
+    // match at all, the user may have named a non-factor node directly
+    // ("Set Customer Churn Risk to 20%"). Before the filter, that message
+    // dispatched `set_factor_value` on the risk node and the CALLER's
+    // kind check downgraded it to the kind-gate clarify
+    // (`downgrade_reason: 'non_factor_kind'`) — a cheap deterministic
+    // recovery. The filter silently removed it: the message fell through
+    // to the LLM as `no_candidate_match`. Restore it narrowly: when the
+    // UNFILTERED pool contains exactly ONE substring match and it is a
+    // non-factor node, dispatch it so the caller's kind gate produces the
+    // clarify. Multiple matches or Dice-only evidence keep the
+    // conservative fall-through.
+    if (factorNodeIds !== undefined && candidatesPool !== rawCandidatesPool) {
+      const nonFactorSubstring: ValueUpdateCandidate[] = [];
+      for (const f of rawCandidatesPool) {
+        if (factorNodeIds.has(f.id)) continue; // factor pool already checked
+        if (f.label == null) continue;
+        const normLabel = f.label.trim().toLowerCase();
+        if (normLabel.length === 0) continue;
+        if (normMessage.includes(normLabel)) {
+          nonFactorSubstring.push({
+            id: f.id,
+            label: f.label,
+            score: 1,
+            source: 'substring',
+            labelMatchIndex: normMessage.indexOf(normLabel),
+          });
+        }
+      }
+      if (nonFactorSubstring.length === 1) {
+        // Feed the single non-factor match through the normal dispatch
+        // logic below (quantity attribution guard + single-substring
+        // dispatch) rather than returning early, so multi-quantity
+        // messages keep their conservative `ambiguous_quantity` skip.
+        substringMatches.push(nonFactorSubstring[0]!);
+        matched.push(nonFactorSubstring[0]!);
+      }
+    }
+    if (matched.length === 0) {
+      // Brief contract: "All candidates < 0.4 → { matched: false } (LLM
+      // falls through)". Pure semantic-synonym mismatches like "budget" →
+      // "Hiring and Staffing Cost" (bigramDice ~0.04, no shared lexical
+      // material) land here. KNOWN RESIDUAL RISK: Test G's exact
+      // "Increase the budget to £300k" prompt against a graph with no
+      // budget-keyworded label still falls through to the LLM, which has
+      // been observed to misroute. A robust fix needs either a curated
+      // synonym layer or LLM understanding — deferred.
+      return { matched: false, skip_reason: 'no_candidate_match' };
+    }
+  }
+
+  // AC.2 — multi-quantity ambiguity guard, with a narrow "from X to Y"
+  // exception (V5 row-7 fix). Plan-locked rule: silently applying the
+  // wrong quantity is worse than asking the user. The single-quantity
+  // case is unchanged.
+  //
+  // From/to exception: when the original message contains a literal
+  // `from <...> to <...>` anchor AND CQE extracted exactly 2 non-null
+  // quantities, the second quantity (the "to" value) is the user's
+  // intended final value. Operator is forced to `set` regardless of the
+  // sentence verb — "increase from £80,000 to £100,000" means SET to
+  // £100,000, not +£100,000. Range ("between X and Y"), disjunction
+  // ("by X or Y") and 3+ quantity messages keep the conservative skip
+  // because they do NOT carry the from/to anchor.
+  //
+  // CQE document-order trust: parsedQuantities preserves CQE extraction
+  // order, which mirrors document order. The from/to anchor presence is
+  // the safety gate; we do not re-locate quantities via raw_text indexOf
+  // because raw_text is post-normalised (see AC.2 commentary below).
+  //
+  // Conservative-fallback note for >2 or non-from/to multi-quantity:
+  // CQE's `raw_text` is post-normalised (commas stripped from numerals,
+  // P12 pattern captures the whole leading phrase, etc.) so proximity
+  // attribution by `indexOf(raw_text)` is unreliable in practice. We
+  // therefore take the conservative path the plan documents as the
+  // fallback: return `ambiguous_quantity` and let normal LLM routing
+  // produce a clarification. Layer A.2 (validator parity) is the safety
+  // net for anything the LLM later proposes.
+  let attribution: QuantityAttribution | undefined = undefined;
+  if (nonNullQuantities.length === 2 && FROM_TO_NUMERIC_ANCHOR_PATTERN.test(message)) {
+    quantity = {
+      ...nonNullQuantities[1]!,
+      operator: 'set',
+      direction: 'set',
+    };
+    attribution = 'from_to';
+  } else if (nonNullQuantities.length > 1) {
+    return { matched: false, skip_reason: 'ambiguous_quantity' };
+  }
+
+  // V5 D1 golden-path closure (A3.1) + 1.16b dominance fix: exactly ONE
+  // substring match is the gate for handler dispatch, PROVIDED it clearly
+  // dominates any Dice runner-up. A single Dice candidate (no substring
+  // match at all) still stays clarify because label confidence is too low
+  // — unchanged. Multi-substring-match stays clarify by definition —
+  // unchanged. The kind check (factor only) is the caller's responsibility
+  // when `factorNodeIds` isn't supplied — see the discriminated union docs.
+  //
+  // 1.16b (Demo-Gate usability defect): previously this branch required
+  // `diceMatches.length === 0`, so a PERFECT substring match (score 1.0)
+  // was defeated by ANY lower-quality Dice runner-up, however weak —
+  // forcing an unnecessary clarify even when the top match was obviously
+  // correct. The fix: a lone substring match still auto-selects as long as
+  // the best Dice runner-up isn't "close" to it. "Close" reuses the same
+  // 0.15 margin validator.ts's SUSPICIOUS_DICE_THRESHOLD uses for its own
+  // closer-match check (AUTO_SELECT_DOMINANCE_MARGIN, defined above) — a
+  // Dice score under 0.85 is a weak echo, not a genuine rival, and must
+  // not block the exact hit. A Dice score at/above 0.85 IS treated as
+  // comparable, so the genuinely-ambiguous case (e.g. two near-duplicate
+  // factor labels) still falls through to clarify below — the two guards
+  // coexist by construction, not by coincidence.
+  if (substringMatches.length === 1) {
+    const topDiceScore = diceMatches.length > 0 ? diceMatches[0]!.score : 0;
+    const isDominant = 1 - topDiceScore >= AUTO_SELECT_DOMINANCE_MARGIN;
+    if (isDominant) {
+      return {
+        matched: true,
+        dispatch: 'set_factor_value',
+        candidate: substringMatches[0],
+        quantity,
+        ...(attribution ? { attribution } : {}),
+      };
+    }
+  }
+
+  // P0 V5 golden-path repair (Wave 2, Path A — selection narrowing):
+  // when label evidence yields multiple candidates AND the UI selection
+  // intersects them at exactly one factor, treat the selection as a
+  // strict tie-breaker. Non-factor selections never appear here because
+  // the caller pre-filters to factor-kind ids. If the intersection is
+  // zero or > 1, fall through to clarify — never silently update a
+  // factor because some unrelated node was selected.
+  if (matched.length > 1 && selectedFactorIds.length > 0) {
+    const selectionSet = new Set(selectedFactorIds);
+    const narrowed = matched.filter((c) => selectionSet.has(c.id));
+    if (narrowed.length === 1) {
+      return {
+        matched: true,
+        dispatch: 'set_factor_value',
+        candidate: narrowed[0]!,
+        quantity,
+        ...(attribution ? { attribution } : {}),
+      };
+    }
+  }
+
+  return {
+    matched: true,
+    dispatch: 'clarify',
+    ...(attribution ? { attribution } : {}),
+    candidates: matched,
+    quantity,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// A1 multi-edit — compound value-update detection
+// ---------------------------------------------------------------------------
+
+/**
+ * One applied part of a compound value-update: a resolved factor candidate
+ * paired with the CQE quantity whose VALUE-TOKEN SPAN sits inside that
+ * label's bounded segment, plus the segment text itself (used by the batch
+ * preflight's per-part unit-family guard).
+ */
+export interface CompoundUpdatePart {
+  readonly candidate: ValueUpdateCandidate;
+  readonly quantity: QuantityExtractionResult;
+  /**
+   * The CQE-normalised message slice from this label's end to the next
+   * label's start (or the message end) — the region the part's value was
+   * paired from. The batch preflight runs `classifyValueUnitAgainstFactor`
+   * over THIS slice, so a dropped unit token ("5 agents") is judged against
+   * its own factor, never against another part's clause.
+   */
+  readonly segmentText: string;
+}
+
+export type CompoundSkipReason =
+  | 'degraded_extraction'
+  | 'no_edit_verb'
+  | 'explicit_no_model_change'
+  | 'no_graph'
+  | 'hypothetical_gate'
+  | 'option_intervention_edit'
+  /** Fewer than two non-null CQE quantities — the single-quantity path owns
+   *  this; a compound update needs at least two independent value edits. */
+  | 'not_compound'
+  /** Fewer than two DISTINCT factor labels substring-matched (also covers an
+   *  empty candidate pool) — nothing to pair a second value against. */
+  | 'too_few_labels'
+  /** A disjunction / range connective ("or", "between") is present — the
+   *  parts are not an unambiguous conjunction of independent value sets. */
+  | 'disjunction'
+  /** The message does not read as strict "label to <num>" segments in
+   *  document order (some label is not followed by a `to` connector before
+   *  the next label), so segment pairing cannot be trusted. */
+  | 'non_interleaved'
+  /** Some non-null quantity carries no value-token span (no digit-bearing
+   *  token in its match — e.g. "double it"), so segment containment cannot
+   *  be established. Refuse rather than fall back to order pairing. */
+  | 'missing_spans'
+  /** Some label's bounded segment does not contain EXACTLY ONE non-null
+   *  quantity (zero: "set A to current plan…" — the value is not a number;
+   *  two+: "…to 0.8 by March 2027"). Pairing would be a guess, so we bail
+   *  and the LLM owns the message. THE F2 FIX: a stray number OUTSIDE every
+   *  label's segment (a leading date, budget, age, version) is ignored, and
+   *  can never be misattributed as a factor value. */
+  | 'unpaired_label';
+
+export type CompoundValueUpdateDispatch =
+  | { readonly matched: false; readonly skip_reason: CompoundSkipReason }
+  | {
+      readonly matched: true;
+      readonly dispatch: 'compound_value_update';
+      readonly updates: readonly CompoundUpdatePart[];
+    };
+
+/**
+ * A1 multi-edit — detect a COMPOUND value update: two or more independent
+ * "label to <num>" edits in a single message ("Set A to 0.6 and B to 0.8").
+ *
+ * This is the sibling of {@link tryDeterministicValueUpdate}, invoked by the
+ * caller ONLY when the single-edit path bailed (its `nonNullQuantities.length
+ * > 1` guard returns `ambiguous_quantity`). The single path is deliberately
+ * conservative — silently applying the wrong quantity to a factor is worse
+ * than asking — so it refuses every multi-quantity message. This detector
+ * covers the safe, unambiguous subset: N distinct factor labels, N quantities,
+ * strict positional interleaving.
+ *
+ * THE SUBTLETY (why a naive split-on-"and" fails): the edit verb appears only
+ * in the FIRST segment. "Set A to 0.6 and B to 0.8" splits into "Set A to 0.6"
+ * (has verb) and "B to 0.8" (no verb) — a per-segment `EDIT_VERB_PATTERN` gate
+ * would reject the second half. So we do NOT split on the verb. Instead:
+ *
+ *   1. Substring-match DISTINCT factor labels (≥ 2) against the CQE-normalised
+ *      message, capturing each label's character bounds. The NORMALISED text
+ *      (preNormalise → word-number pre-pass) is the pairing coordinate space
+ *      because that is what CQE value-token spans are expressed in.
+ *   2. Validate strict "label to <num>" interleaving: each label must be
+ *      followed by a `to` connector before the next label begins, and the
+ *      message must carry no disjunction/range connective. This rejects the
+ *      "labels first, then values" shape ("Set A and B to 0.6 and 0.8").
+ *   3. Pair BY SEGMENT CONTAINMENT (the O-1 / Codex-F2 fix): label i's
+ *      segment runs from its label end to the next label's start (or the
+ *      message end). A quantity belongs to label i iff its VALUE-TOKEN SPAN
+ *      (`span_start`/`span_end`) lies inside that segment — i.e. the value
+ *      occurs AFTER its label, before the next. Every label must claim
+ *      EXACTLY ONE non-null quantity; zero or two+ bails (`unpaired_label`).
+ *      Quantities outside every segment (a leading "Using the 2026
+ *      forecast…", budgets, ages, versions) are ignored — the old global
+ *      document-order pairing durably wrote such strays into factors.
+ *
+ * Per-part VALUE validity (kind / range / cap / unit-family) is NOT checked
+ * here — the executor runs `preflightCompoundBatch` over ALL parts (the same
+ * validation the promoted primary gets) before ANY execution, applies the
+ * valid parts, and refuses the invalid ones by name (DISCLOSED-PARTIAL).
+ *
+ * Gates mirror {@link tryDeterministicValueUpdate}: degraded-extraction
+ * refusal, edit-verb presence, graph availability, the hypothetical negative
+ * gate, and the option-intervention negative gate all apply identically.
+ */
+export function tryCompoundValueUpdate(
+  message: string,
+  parsedQuantities: readonly QuantityExtractionResult[],
+  graphLookup: GraphLookup | undefined,
+  factorNodeIds?: ReadonlySet<string>,
+  extractionDegraded: boolean = false,
+): CompoundValueUpdateDispatch {
+  if (extractionDegraded) {
+    return { matched: false, skip_reason: 'degraded_extraction' };
+  }
+  if (!EDIT_VERB_PATTERN.test(message)) {
+    return { matched: false, skip_reason: 'no_edit_verb' };
+  }
+  if (hasExplicitNoModelChangeIntent(message, modelEntityLabels(graphLookup, factorNodeIds))) {
+    return { matched: false, skip_reason: 'explicit_no_model_change' };
+  }
+
+  const nonNullQuantities = parsedQuantities.filter((q) => q.value !== null);
+  if (nonNullQuantities.length < 2) {
+    // Single quantity (or none) → the single-edit path owns it.
+    return { matched: false, skip_reason: 'not_compound' };
+  }
+
+  if (graphLookup === undefined) {
+    return { matched: false, skip_reason: 'no_graph' };
+  }
+
+  for (const pat of HYPOTHETICAL_PATTERNS) {
+    if (pat.test(message)) {
+      return { matched: false, skip_reason: 'hypothetical_gate' };
+    }
+  }
+
+  const guardLabels = collectOptionGuardLabels(graphLookup);
+  if (
+    impliesOptionInterventionEdit(
+      message,
+      guardLabels.optionLabels,
+      guardLabels.nonOptionLabels,
+    )
+  ) {
+    return { matched: false, skip_reason: 'option_intervention_edit' };
+  }
+
+  // A disjunction ("or") or range ("between") connective means the parts are
+  // not an unambiguous conjunction of independent value sets — refuse.
+  if (/\b(?:or|between)\b/i.test(message)) {
+    return { matched: false, skip_reason: 'disjunction' };
+  }
+
+  // Build the factor-filtered candidate pool, identical to the single path:
+  // GraphLookup buckets factor/outcome/decision/risk/action under EntityKind
+  // 'node', so narrow to factor-kind ids when the caller supplies them (fall
+  // back to unfiltered only when the filter would empty the pool).
+  const rawCandidatesPool = graphLookup.listEntitiesByKind('node');
+  if (rawCandidatesPool.length === 0) {
+    return { matched: false, skip_reason: 'too_few_labels' };
+  }
+  const factorFilteredPool =
+    factorNodeIds === undefined
+      ? rawCandidatesPool
+      : rawCandidatesPool.filter((f) => factorNodeIds.has(f.id));
+  const candidatesPool =
+    factorNodeIds !== undefined && factorFilteredPool.length === 0
+      ? rawCandidatesPool
+      : factorFilteredPool;
+
+  // PAIRING COORDINATE SPACE (O-1): CQE value-token spans are offsets into
+  // the CQE-NORMALISED text (preNormalise → word-number pre-pass), not the
+  // raw message. Label positions must live in the SAME space for segment
+  // containment to mean anything, so we recompute the normalisation here —
+  // both steps are pure, deterministic, and sub-millisecond on the ≤2000-char
+  // input. Deriving (not caching) keeps this the single source of truth.
+  const normInput = applyWordNumberPrePass(preNormalise(message).text).text;
+  const normMessage = normInput.toLowerCase();
+
+  // Collect DISTINCT substring-matched labels (one candidate per factor id),
+  // each carrying its label length so segment boundaries can be computed.
+  const seenIds = new Set<string>();
+  const substringMatches: Array<{
+    candidate: ValueUpdateCandidate;
+    labelStart: number;
+    labelEnd: number;
+  }> = [];
+  for (const f of candidatesPool) {
+    if (f.label == null) continue;
+    const normLabel = f.label.trim().toLowerCase();
+    if (normLabel.length === 0) continue;
+    if (seenIds.has(f.id)) continue;
+    const idx = normMessage.indexOf(normLabel);
+    if (idx === -1) continue;
+    seenIds.add(f.id);
+    substringMatches.push({
+      candidate: {
+        id: f.id,
+        label: f.label,
+        score: 1,
+        source: 'substring',
+        labelMatchIndex: idx,
+      },
+      labelStart: idx,
+      labelEnd: idx + normLabel.length,
+    });
+  }
+
+  // A compound edit needs at least two labelled targets.
+  if (substringMatches.length < 2) {
+    return { matched: false, skip_reason: 'too_few_labels' };
+  }
+
+  // Sort by document position so segment i runs label i → label i+1.
+  substringMatches.sort((a, b) => a.labelStart - b.labelStart);
+
+  // Strict "label to <num>" interleaving: each label must be followed by a
+  // `to` connector before the next label begins (or the message end for the
+  // last label). This rejects "Set A and B to 0.6 and 0.8" — between the A and
+  // B labels there is only " and ", no `to`, so pairing (which would
+  // misattribute) is refused.
+  for (let i = 0; i < substringMatches.length; i++) {
+    const segStart = substringMatches[i]!.labelEnd;
+    const segEnd =
+      i + 1 < substringMatches.length
+        ? substringMatches[i + 1]!.labelStart
+        : normMessage.length;
+    const segment = normMessage.slice(segStart, segEnd);
+    if (!/\bto\b/.test(segment)) {
+      return { matched: false, skip_reason: 'non_interleaved' };
+    }
+  }
+
+  // SEGMENT PAIRING (the F2 fix). Every non-null quantity must carry a
+  // value-token span; refuse otherwise — order pairing is exactly the
+  // defect this replaced, so there is deliberately NO fallback to it.
+  if (
+    nonNullQuantities.some(
+      (q) => typeof q.span_start !== 'number' || typeof q.span_end !== 'number',
+    )
+  ) {
+    return { matched: false, skip_reason: 'missing_spans' };
+  }
+
+  const updates: CompoundUpdatePart[] = [];
+  for (let i = 0; i < substringMatches.length; i++) {
+    const m = substringMatches[i]!;
+    const segStart = m.labelEnd;
+    const segEnd =
+      i + 1 < substringMatches.length
+        ? substringMatches[i + 1]!.labelStart
+        : normMessage.length;
+    const inSegment = nonNullQuantities.filter(
+      (q) => q.span_start! >= segStart && q.span_end! <= segEnd,
+    );
+    if (inSegment.length !== 1) {
+      // Zero: this label's value is not a parseable number ("to current
+      // plan"). Two+: the segment carries extra numbers ("to 0.8 by March
+      // 2027"). Either way pairing would be a guess — the LLM owns it.
+      return { matched: false, skip_reason: 'unpaired_label' };
+    }
+    updates.push({
+      candidate: m.candidate,
+      quantity: inSegment[0]!,
+      segmentText: normInput.slice(segStart, segEnd),
+    });
+  }
+
+  return { matched: true, dispatch: 'compound_value_update', updates };
+}
+
+/**
+ * P0 V5 golden-path repair (Wave 2, Path B — selected-deictic).
+ *
+ * Detect deterministic value-update intent expressed via deictic
+ * reference + UI selection: "Update that factor to £30,000" with
+ * exactly one factor selected. Returns:
+ *   - `null` when the message has no deictic reference (caller should
+ *     fall through to label-based path A or LLM).
+ *   - A clarify dispatch when the deictic IS present but the selection
+ *     doesn't yield exactly one factor — never silently update a
+ *     non-factor and never guess.
+ *   - A set_factor_value dispatch when exactly one factor is selected
+ *     AND a quantity is parsed.
+ *
+ * Pronoun resolution across turns is intentionally not handled here.
+ * "Set it to £30k" without a selection still falls through to the LLM.
+ *
+ * Categorical / state updates ("update team maturity to mid-weight
+ * developers") are NOT supported by this path — there is no quantity,
+ * so the no_quantity gate triggers below and the message reaches the
+ * LLM. The handler set_factor_value rejects categorical proposals
+ * upstream; until the schema supports ordinal states, the LLM is the
+ * right fallback (it can clarify or route to another handler).
+ */
+export type DeicticDispatch =
+  // Degraded-extraction refusal — see the SkipReason doc above. The
+  // deictic path forks on the same `parsedQuantities` and dispatches
+  // `set_factor_value` just as the label path does, so it needs the same
+  // guard; fixing only the label path would leave the identical defect
+  // reachable via "set that factor to ...".
+  | { readonly matched: false; readonly skip_reason: 'degraded_extraction' }
+  | { readonly matched: false; readonly skip_reason: 'no_deictic' }
+  | { readonly matched: false; readonly skip_reason: 'no_edit_verb' }
+  | { readonly matched: false; readonly skip_reason: 'explicit_no_model_change' }
+  | { readonly matched: false; readonly skip_reason: 'no_quantity' }
+  | { readonly matched: false; readonly skip_reason: 'no_graph' }
+  | { readonly matched: false; readonly skip_reason: 'hypothetical_gate' }
+  | { readonly matched: false; readonly skip_reason: 'ambiguous_quantity' }
+  // FIX 2 (Tier A #1, 2026-07-09) — see the SkipReason doc above.
+  | { readonly matched: false; readonly skip_reason: 'option_intervention_edit' }
+  | {
+      readonly matched: true;
+      readonly dispatch: 'clarify_deictic';
+      readonly reason:
+        | 'no_factor_selected'
+        | 'multiple_factors_selected';
+      readonly quantity: QuantityExtractionResult;
+      readonly attribution?: QuantityAttribution;
+    }
+  | {
+      readonly matched: true;
+      readonly dispatch: 'set_factor_value';
+      readonly candidate: ValueUpdateCandidate;
+      readonly quantity: QuantityExtractionResult;
+      readonly attribution?: QuantityAttribution;
+    };
+
+/**
+ * Resolve a deictic value-update against UI selection. Caller passes
+ * factor-kinded selection (already filtered upstream) plus a label
+ * lookup function for the resolved id, so this function can produce a
+ * `ValueUpdateCandidate` with the human label for the receipt copy.
+ *
+ * The label lookup is supplied by the caller (rather than reading
+ * graphLookup here) because graphLookup buckets factor under the broader
+ * 'node' EntityKind and exposes labels indirectly; the caller already
+ * walks the graph for the factor-kind filter, so it has the labels in
+ * hand.
+ */
+export function tryDeicticValueUpdate(
+  message: string,
+  parsedQuantities: readonly QuantityExtractionResult[],
+  graphLookup: GraphLookup | undefined,
+  selectedFactorIds: SelectedFactorIds,
+  resolveFactorLabel: (id: string) => string | null,
+  /** See `tryDeterministicValueUpdate`'s parameter of the same name. */
+  extractionDegraded: boolean = false,
+): DeicticDispatch {
+  // Same refusal as the label path, for the same reason — first gate.
+  if (extractionDegraded) {
+    return { matched: false, skip_reason: 'degraded_extraction' };
+  }
+  if (!DEICTIC_REFERENCE_PATTERN.test(message)) {
+    return { matched: false, skip_reason: 'no_deictic' };
+  }
+  if (!EDIT_VERB_PATTERN.test(message)) {
+    return { matched: false, skip_reason: 'no_edit_verb' };
+  }
+  // ⚠ NO LABEL DOMAIN ON THE DEICTIC PATH, deliberately. This route resolves its
+  // target by POINTER ("that factor", "this one"), never by label, and it has no
+  // factor-kind information to narrow with — so handing it every node label
+  // would give the veto a domain strictly wider than anything this path can
+  // write, which is exactly the over-trigger the narrowing above exists to stop.
+  if (hasExplicitNoModelChangeIntent(message)) {
+    return { matched: false, skip_reason: 'explicit_no_model_change' };
+  }
+  for (const pat of HYPOTHETICAL_PATTERNS) {
+    if (pat.test(message)) {
+      return { matched: false, skip_reason: 'hypothetical_gate' };
+    }
+  }
+  // AC.2 — same conservative quantity policy as the main detector,
+  // with the same narrow "from X to Y" exception (V5 row-7 fix): when
+  // exactly 2 non-null quantities are extracted AND the original
+  // message carries a literal `from <...> to <...>` anchor, the second
+  // quantity is the user's intended target value and operator is forced
+  // to 'set'. Range / disjunction / 3+ quantities keep the conservative
+  // `ambiguous_quantity` skip because they do not carry the anchor.
+  // CQE `raw_text` is post-normalised so we do not re-locate
+  // quantities via indexOf — anchor presence is the safety gate.
+  const nonNullQuantities = parsedQuantities.filter((q) => q.value !== null);
+  if (nonNullQuantities.length === 0) {
+    return { matched: false, skip_reason: 'no_quantity' };
+  }
+  let quantity: QuantityExtractionResult;
+  let attribution: QuantityAttribution | undefined = undefined;
+  if (nonNullQuantities.length === 2 && FROM_TO_NUMERIC_ANCHOR_PATTERN.test(message)) {
+    quantity = {
+      ...nonNullQuantities[1]!,
+      operator: 'set',
+      direction: 'set',
+    };
+    attribution = 'from_to';
+  } else if (nonNullQuantities.length > 1) {
+    return { matched: false, skip_reason: 'ambiguous_quantity' };
+  } else {
+    quantity = nonNullQuantities[0]!;
+  }
+  if (graphLookup === undefined) {
+    return { matched: false, skip_reason: 'no_graph' };
+  }
+  // FIX 2 (Tier A #1, 2026-07-09) — same negative gate as
+  // `tryDeterministicValueUpdate`: a deictic factor reference combined
+  // with option-intervention framing ("Increase that factor within the
+  // Outsource option to £50k") must reach the LLM's option_configuration
+  // routing, not resolve deterministically onto the selected factor.
+  const guardLabels = collectOptionGuardLabels(graphLookup);
+  if (
+    impliesOptionInterventionEdit(
+      message,
+      guardLabels.optionLabels,
+      guardLabels.nonOptionLabels,
+    )
+  ) {
+    return { matched: false, skip_reason: 'option_intervention_edit' };
+  }
+  if (selectedFactorIds.length === 0) {
+    return {
+      matched: true,
+      dispatch: 'clarify_deictic',
+      reason: 'no_factor_selected',
+      quantity,
+      ...(attribution ? { attribution } : {}),
+    };
+  }
+  if (selectedFactorIds.length > 1) {
+    return {
+      matched: true,
+      dispatch: 'clarify_deictic',
+      reason: 'multiple_factors_selected',
+      quantity,
+      ...(attribution ? { attribution } : {}),
+    };
+  }
+  const id = selectedFactorIds[0]!;
+  const label = resolveFactorLabel(id);
+  if (label === null || label.trim().length === 0) {
+    // Defensive: factor exists in selection but lacks a label. Falling
+    // back to clarify rather than dispatching with a blank receipt.
+    return {
+      matched: true,
+      dispatch: 'clarify_deictic',
+      reason: 'no_factor_selected',
+      quantity,
+      ...(attribution ? { attribution } : {}),
+    };
+  }
+  return {
+    matched: true,
+    dispatch: 'set_factor_value',
+    candidate: { id, label, score: 1, source: 'substring', labelMatchIndex: null },
+    quantity,
+    ...(attribution ? { attribution } : {}),
+  };
+}
+
+
+// ---------------------------------------------------------------------------
+// Spec §4.3 (PR C of the referent stack) — the VALUE-BEARING anaphoric edit
+// ---------------------------------------------------------------------------
+
+/**
+ * The referent the register bound for this turn — resolved by the CALLER
+ * through the composer's `resolveAnaphoricReferent` (the one §4.2 authority)
+ * and handed in, or `null` when the register did not yield exactly one
+ * eligible candidate. This module never reads the register itself, so "the
+ * register is the only precondition" is testable here as "no binding → never
+ * matches".
+ */
+export interface AnaphoricValueBinding {
+  readonly id: string;
+  readonly label: string;
+  /** The register's kind for the node (`NodeKindV3` member for node refs). */
+  readonly kind: string;
+}
+
+/**
+ * Which message shape claimed the turn:
+ *   - `pronoun`       — an edit verb followed by a bare `it` / `this` / `that`
+ *                       and a quantity ("Set it to 100000.");
+ *   - `bare_quantity` — the whole message is one quantity ("100000", "£100k",
+ *                       "50%"), the natural reply to "What value would you
+ *                       like it set to?".
+ */
+export type AnaphoricValueForm = 'pronoun' | 'bare_quantity';
+
+export type AnaphoricSkipReason =
+  | 'degraded_extraction'
+  /** Neither the pronoun form nor the bare-quantity form — not this path's. */
+  | 'no_anaphor'
+  /** The shape matched but the register bound nothing: today's route stands. */
+  | 'no_binding'
+  | 'explicit_no_model_change'
+  | 'hypothetical_gate'
+  | 'no_quantity'
+  | 'ambiguous_quantity'
+  | 'no_graph'
+  | 'option_intervention_edit'
+  /**
+   * A canvas selection that is not the bound node. The register's selection
+   * rank has no producer yet (spec §3.5), so this path cannot tell a fresh
+   * click from a stale one; a foreign selection withdraws the claim and the
+   * turn keeps today's route.
+   */
+  | 'selection_conflict'
+  /**
+   * A bare quantity with a non-factor binding. The clarify branch in
+   * `turn-executor.ts` persists a `set_factor_value` pending for every
+   * candidate it is handed and runs its node-kind gate only on the
+   * `set_factor_value` dispatch, so a bare quantity bound to an option would
+   * persist a pending the handler cannot honour. Refused here instead.
+   */
+  | 'bare_quantity_needs_factor';
+
+export type AnaphoricValueDispatch =
+  | { readonly matched: false; readonly skip_reason: AnaphoricSkipReason }
+  /**
+   * The pronoun form: the caller promotes this into the label path's
+   * `set_factor_value` shape, and the executor's existing node-kind gate
+   * decides whether the bound node can take a value (an `option` binding
+   * reaches that gate and is refused there, disclosed).
+   */
+  | {
+      readonly matched: true;
+      readonly form: 'pronoun';
+      readonly dispatch: 'set_factor_value';
+      readonly candidate: ValueUpdateCandidate;
+      readonly quantity: QuantityExtractionResult;
+      /** `buildAnaphoricBindingDisclosure(label)` — its own sentence. */
+      readonly disclosure: string;
+      readonly attribution?: QuantityAttribution;
+    }
+  /**
+   * The bare-quantity form ASKS, naming the bound factor as the sole
+   * candidate. Measured at this head: the LABEL path refuses a bare quantity
+   * even for a NAMED target (`tryDeterministicValueUpdate('Sales Headcount
+   * Investment 100000', …)` → `no_edit_verb`), so the LABEL path applies no
+   * bare number, and this one does not start one either.
+   *
+   * ⚠ SCOPE — that is a claim about the LABEL path, NOT about the route.
+   * Seams dispatched BEFORE this pre-route DO bind a bare quantity when they
+   * hold an outstanding ask to bind it to: `resolveAnswerForKnownSlot`
+   * (`repair-value-binding.ts`) returns `{ kind: 'value' }` for a
+   * whole-message `'25%'` or `'0.25'` against the asked cell (pinned in the
+   * `slot-bound-effect-answer` acceptance table), and `readMissingValueAnswer`
+   * returns `{ kind: 'numeric', elliptical: true }` for a bare number, which
+   * `resolveRepairValueBinding` turns into a `bind` whenever
+   * `deriveOnScreenEffectAsk` is non-null — and a match there re-enters the
+   * edit dispatch (`orchestrator/route-v2.ts`), i.e. it can WRITE. Nothing
+   * here measures those seams.
+   */
+  | {
+      readonly matched: true;
+      readonly form: 'bare_quantity';
+      readonly dispatch: 'clarify';
+      readonly candidates: readonly ValueUpdateCandidate[];
+      readonly quantity: QuantityExtractionResult;
+    };
+
+/**
+ * The pronoun form, anchored to the START of the message: an optional run of
+ * closed-set openers ("OK,", "Yes", "Please"), an optional request frame
+ * ("can you", "please", "let's"), then an `EDIT_VERB_BASES` verb followed by
+ * a bare pronoun. The verb alternation is DERIVED from `EDIT_VERB_BASES`, the
+ * same vocabulary `EDIT_VERB_PATTERN` and the no-change veto read.
+ *
+ * ⚠ WHY A START ANCHOR OVER A CLOSED SET rather than an anywhere-match plus a
+ * negation list: the value path's own veto (`hasExplicitNoModelChangeIntent`)
+ * returns FALSE for "Don't set it to 5" (measured at this head), so a bare
+ * `\bset it\b` match would bind a refusal. A message that does not OPEN with
+ * the request cannot match here at all, and the failure direction is a SKIP —
+ * today's route — never a write. `repair-value-binding.ts` chose the same
+ * shape for the same reason: a full-message anchor over a closed set cannot
+ * creep, only decline.
+ */
+const ANAPHORIC_OPENER_SOURCE = String.raw`(?:(?:ok(?:ay)?|yes|yeah|sure|right|fine|great|thanks|please|now|then|just)[,!.]?\s+)*`;
+const ANAPHORIC_REQUEST_SOURCE = String.raw`(?:(?:can|could|would|will)\s+you\s+(?:please\s+)?|please\s+|let['’]?s\s+)?`;
+export const ANAPHORIC_VALUE_EDIT_PATTERN = new RegExp(
+  String.raw`^\s*` +
+    ANAPHORIC_OPENER_SOURCE +
+    ANAPHORIC_REQUEST_SOURCE +
+    String.raw`(?:${EDIT_VERB_BASES.join('|')})\s+(?:it|this|that)\b`,
+  'i',
+);
+
+/**
+ * The bare-quantity form: the WHOLE message is one quantity, in a shape whose
+ * value the extractor reads the way a reader would. Reuses CQE's own
+ * `CURRENCY_SYMBOL_SOURCE` and `NUMERIC_SUFFIX_SOURCE` verbatim, like the
+ * from/to anchor above, so the grammars cannot drift.
+ *
+ * ⚠ A MAGNITUDE SUFFIX IS ADMITTED ONLY AFTER A CURRENCY SYMBOL. Measured at
+ * this head: `extractQuantities('£100k')[0].value === 100000` but
+ * `extractQuantities('100k')[0].value === 100`. Claiming the bare "100k" would
+ * put 100 in the chip; it is left to today's route, and the spec pins it.
+ */
+export const BARE_QUANTITY_PATTERN = new RegExp(
+  String.raw`^\s*(?:(?:` +
+    CURRENCY_SYMBOL_SOURCE +
+    String.raw`)\s*\d[\d,]*(?:\.\d+)?\s*(?:` +
+    NUMERIC_SUFFIX_SOURCE +
+    String.raw`)?|\d[\d,]*(?:\.\d+)?\s*%?)\s*[.!]?\s*$`,
+  'i',
+);
+
+/**
+ * Spec §4.3, second paragraph — admit a bare `it` / `this` / `that` in the
+ * value path ONLY under the register precondition, disclosed.
+ *
+ * `DEICTIC_REFERENCE_PATTERN` excludes bare `it` because a misfire on
+ * "set it to £30k" silently mutating the wrong factor is worse than falling
+ * through. That refusal STANDS here for every turn where the caller hands in
+ * `binding: null` — the register did not yield exactly one eligible candidate
+ * at the top populated rank — and the skip is `no_binding`, so the twin is
+ * observable. Only a bound referent, and only the two message shapes above,
+ * reach a dispatch.
+ *
+ * Gate order mirrors `tryDeicticValueUpdate`: degraded extraction first, then
+ * the shape, then the binding, then the value path's own vetoes (no-change,
+ * hypothetical, quantity arity, graph, option-intervention framing), then the
+ * selection check. Every gate fails to a skip.
+ *
+ * `selectedNodeIds` is EVERY selected node id, not the factor-narrowed set the
+ * label path takes: any selection that is not the bound node withdraws the
+ * claim (see `selection_conflict`).
+ */
+export function tryAnaphoricValueUpdate(
+  message: string,
+  parsedQuantities: readonly QuantityExtractionResult[],
+  graphLookup: GraphLookup | undefined,
+  binding: AnaphoricValueBinding | null,
+  selectedNodeIds: readonly string[],
+  /** See `tryDeterministicValueUpdate`'s parameter of the same name. */
+  extractionDegraded: boolean = false,
+): AnaphoricValueDispatch {
+  if (extractionDegraded) {
+    return { matched: false, skip_reason: 'degraded_extraction' };
+  }
+  const form: AnaphoricValueForm | null = ANAPHORIC_VALUE_EDIT_PATTERN.test(message)
+    ? 'pronoun'
+    : BARE_QUANTITY_PATTERN.test(message)
+      ? 'bare_quantity'
+      : null;
+  if (form === null) {
+    return { matched: false, skip_reason: 'no_anaphor' };
+  }
+  if (binding === null) {
+    return { matched: false, skip_reason: 'no_binding' };
+  }
+  if (form === 'pronoun') {
+    // The veto's domain is the bound label plus the model-object vocabulary —
+    // the only entity this path can write.
+    if (hasExplicitNoModelChangeIntent(message, [binding.label])) {
+      return { matched: false, skip_reason: 'explicit_no_model_change' };
+    }
+    for (const pat of HYPOTHETICAL_PATTERNS) {
+      if (pat.test(message)) {
+        return { matched: false, skip_reason: 'hypothetical_gate' };
+      }
+    }
+  }
+  const nonNullQuantities = parsedQuantities.filter((q) => q.value !== null);
+  if (nonNullQuantities.length === 0) {
+    return { matched: false, skip_reason: 'no_quantity' };
+  }
+  let quantity: QuantityExtractionResult;
+  let attribution: QuantityAttribution | undefined = undefined;
+  if (
+    form === 'pronoun' &&
+    nonNullQuantities.length === 2 &&
+    FROM_TO_NUMERIC_ANCHOR_PATTERN.test(message)
+  ) {
+    quantity = { ...nonNullQuantities[1]!, operator: 'set', direction: 'set' };
+    attribution = 'from_to';
+  } else if (nonNullQuantities.length > 1) {
+    return { matched: false, skip_reason: 'ambiguous_quantity' };
+  } else {
+    quantity = nonNullQuantities[0]!;
+  }
+  if (graphLookup === undefined) {
+    return { matched: false, skip_reason: 'no_graph' };
+  }
+  if (form === 'pronoun') {
+    const guardLabels = collectOptionGuardLabels(graphLookup);
+    if (
+      impliesOptionInterventionEdit(
+        message,
+        guardLabels.optionLabels,
+        guardLabels.nonOptionLabels,
+      )
+    ) {
+      return { matched: false, skip_reason: 'option_intervention_edit' };
+    }
+  }
+  if (selectedNodeIds.some((id) => id !== binding.id)) {
+    return { matched: false, skip_reason: 'selection_conflict' };
+  }
+  const candidate: ValueUpdateCandidate = {
+    id: binding.id,
+    label: binding.label,
+    score: 1,
+    source: 'register',
+    labelMatchIndex: null,
+  };
+  if (form === 'bare_quantity') {
+    if (binding.kind !== 'factor') {
+      return { matched: false, skip_reason: 'bare_quantity_needs_factor' };
+    }
+    return { matched: true, form, dispatch: 'clarify', candidates: [candidate], quantity };
+  }
+  return {
+    matched: true,
+    form,
+    dispatch: 'set_factor_value',
+    candidate,
+    quantity,
+    disclosure: buildAnaphoricBindingDisclosure(binding.label),
+    ...(attribution ? { attribution } : {}),
+  };
+}
+
+/**
+ * User-facing clarification copy for the deictic-but-ambiguous path.
+ * British English, no internal terms.
+ */
+export function buildDeicticClarifyAssistantText(
+  reason: 'no_factor_selected' | 'multiple_factors_selected',
+): string {
+  if (reason === 'no_factor_selected') {
+    return (
+      `I wasn't sure which factor you meant. Please click the factor on ` +
+      `the canvas and try again, or tell me the factor's name.`
+    );
+  }
+  return (
+    `You have more than one factor selected, so I'm not sure which one to ` +
+    `update. Please select just the factor you want to change, or tell me ` +
+    `its name.`
+  );
+}
+
+/**
+ * Build the user-visible clarify prose. Kept here (not in compose) because
+ * the wording is specific to this pre-route and the helper has zero deps
+ * on the wider compose pipeline.
+ */
+export function buildClarifyAssistantText(
+  candidates: readonly ValueUpdateCandidate[],
+): string {
+  if (candidates.length === 1) {
+    const c = candidates[0];
+    return `I wasn't sure which factor you meant. Did you mean ${c.label}?`;
+  }
+  return `I wasn't sure which factor you meant. Did you mean one of these?`;
+}
+
+/**
+ * Article for a node-kind noun. Only the kinds NodeV3 defines reach here;
+ * 'outcome' and 'action' are the vowel-initial cases.
+ */
+function articleFor(kind: string): string {
+  return /^[aeiou]/i.test(kind) ? 'an' : 'a';
+}
+
+/**
+ * Can `add_constraint` actually accept a target of this kind?
+ *
+ * ONE predicate, exported, so the refusal PROSE and the refusal CHIP cannot
+ * disagree about whether the route they recommend exists. Two independent
+ * lookups of the same constant would agree today and drift the first time one
+ * of them grew a condition — the estate's dominant defect (CLAUDE.md trap 21:
+ * two authorities answering one question under similar names).
+ *
+ * Derived from the handler's own exported authority, never re-spelled here.
+ */
+export function isConstraintableKind(nodeKind: string): boolean {
+  return ADD_CONSTRAINT_ALLOWED_TARGET_KINDS.includes(nodeKind);
+}
+
+/**
+ * User-facing copy for the "you named a real node, but it isn't a factor and
+ * a value cannot be set on it" case (`dispatch: 'refuse_non_factor_kind'`).
+ *
+ * HONEST-REFUSAL-WITH-A-ROUTE, per coach doctrine V3 ("a dead end is a failed
+ * turn even when every sentence in it is true"). Three obligations:
+ *   1. Say plainly that the operation is not supported, and say WHY in the
+ *      user's terms (the node's real kind) — never re-describe a risk as a
+ *      "factor", which the old clarify copy did.
+ *   2. State the mutation status. ⚠ THIS BRANCH CARRIES ITS OWN HAND-COPIED
+ *      SENTENCE ("The model is unchanged so far.", below) — it does NOT import
+ *      `compose/edit-clarify-response.ts` LEAD_TEXT, and as of 26 Aug 2026 the
+ *      two have DIVERGED: LEAD_TEXT was rewritten to the turn-scoped
+ *      "I haven't changed anything from that." because "so far" is a
+ *      SESSION-scoped claim that the emitting branch has no state to support,
+ *      and it twice contradicted the product's own UI. This branch has the
+ *      same defect and is ROWED separately, deliberately out of that fix's
+ *      scope. Do not read the wording here as sanctioned.
+ *      Note the phrasings that read naturally here — "No change
+ *      was made", "nothing changed" — are BANNED by
+ *      FORBIDDEN_USER_FACING_PHRASES as state-mutation denials; the egress
+ *      guard replaces the whole response when one fires. Positive framing
+ *      only.
+ *   3. Name what IS available, so the turn has an exit:
+ *        - `add_constraint` genuinely accepts risk / outcome / goal / factor
+ *          targets (`tools/handlers/add-constraint.ts` ALLOWED_TARGET_KINDS,
+ *          whose doc cites exactly this use case: "keep churn risk below 5%");
+ *        - the factor labels actually present in THIS graph, which are the
+ *          only valid `set_factor_value` targets.
+ *
+ * Claim discipline: this copy deliberately does NOT say "risks have no value".
+ * That would be FALSE — `schemas/cee-v3.ts` does not gate `observed_state` by
+ * kind, and `cee/transforms/graph-data-integrity.ts` INTERCEPT_ELIGIBLE_KINDS
+ * includes 'risk', so risk nodes do carry values downstream. The true and
+ * narrower claim is that no operation sets a value on one DIRECTLY.
+ *
+ * `factorLabels` is the caller's canonical factor-label list (may be empty —
+ * a graph with no factor nodes at all drops the "for example" clause rather
+ * than inventing one).
+ */
+export function buildNonFactorKindRefusalText(
+  label: string,
+  nodeKind: string,
+  factorLabels: readonly string[],
+  /**
+   * The anaphoric binding disclosure ("Taking that as X.") when the refused
+   * candidate was bound from a bare pronoun by `tryAnaphoricValueUpdate`, so
+   * the refusal says what "it" was read as before saying why it is refused.
+   * `null` (the default) for the label path, whose message already names the
+   * node.
+   */
+  disclosure: string | null = null,
+): string {
+  const examples = factorLabels.slice(0, 2);
+  const exampleClause =
+    examples.length === 0
+      ? `You can set a value on any factor in your model.`
+      : examples.length === 1
+        ? `You can set a value on a factor instead — ${examples[0]}, for example.`
+        : `You can set a value on a factor instead — ${examples[0]} or ${examples[1]}, for example.`;
+  // ⚠ THE CONSTRAINT ROUTE IS NOT UNIVERSAL, AND OFFERING IT BLIND RECREATES
+  // THIS DEFECT ONE TURN ALONG. `add_constraint` accepts factor / outcome /
+  // goal / risk; it REJECTS decision, action and option — and those kinds
+  // reach this copy, because `modelEntityLabels` above buckets decision and
+  // action alongside factors when scanning candidates. Sending a user to an
+  // action that will also refuse them is the same harm as the offer this
+  // refusal replaces, so the sentence is gated on the recommending handler's
+  // OWN exported authority rather than assumed (CLAUDE.md trap 12: derived,
+  // never mirrored). Where the route does not exist the refusal simply stops
+  // after the factor route, which is always real.
+  const constraintClause = isConstraintableKind(nodeKind)
+    ? ` If you want to hold ${label} to a limit, ask me to add a constraint on it.`
+    : '';
+  return (
+    (disclosure === null ? '' : `${disclosure} `) +
+    `${label} is ${articleFor(nodeKind)} ${nodeKind}, not a factor, and I can't ` +
+    `set a value on ${articleFor(nodeKind)} ${nodeKind} directly. The model is unchanged so far. ` +
+    `${exampleClause}` +
+    constraintClause
+  );
+}
+
+/**
+ * The constraint CHIP that accompanies `buildNonFactorKindRefusalText`.
+ *
+ * ⚠ WHY THIS IS A FUNCTION AND NOT A CHIP LITERAL AT THE CALL SITE.
+ * The chip and the prose are two channels answering ONE question — "does the
+ * constraint route exist for this target?" — and until this builder existed
+ * they answered it in two places. One call site (the mutation-warrant demotion
+ * branch) gated its literal; its sibling (the `refuse_non_factor_kind` branch)
+ * did not, so on a `decision` or `action` target the assistant text WITHHELD
+ * the constraint route while the button directly beneath it OFFERED it, and
+ * clicking that button reached `add_constraint`, which throws on those kinds
+ * (`add-constraint.ts` ALLOWED_TARGET_KIND_SET). The response contradicted
+ * itself inside one turn — CLAUDE.md trap 21, two authorities under similar
+ * names — and no test could see it, because the chip array was built inline.
+ *
+ * Both channels now read `isConstraintableKind`, the recommending handler's
+ * OWN exported authority (trap 12: derived, never mirrored). Minting the chip
+ * here rather than at each call site is what makes that guarantee testable and
+ * keeps it from drifting the next time a call site is added.
+ *
+ * ⚠ THE TWO HARMS ARE NOT A THRESHOLD. Offering a route that will refuse (a
+ * lie) and withholding one that would have worked (a gap) are opposite harms,
+ * but they do not need opposite tuning here: this is exact set membership
+ * against the very constant the resumer throws on, so for any KNOWN kind both
+ * harms are zero simultaneously. They separate only on IGNORANCE — the caller
+ * spells an unresolvable kind with the sentinel `'node'`
+ * (turn-executor.ts, `typeof nodeKind?.kind === 'string' ? nodeKind.kind : 'node'`),
+ * which is not in the allowlist, so BOTH channels withhold. That is the gap
+ * direction, it is pre-existing, and it is deliberately shared: letting the
+ * chip fail open while the prose fails closed would rebuild the exact
+ * divergence this builder exists to abolish.
+ *
+ * Returns an ARRAY so both call sites spread it — an empty chip list is an
+ * established response shape in the executor, not a degenerate one.
+ */
+export function buildNonFactorKindRefusalConstraintChips(
+  label: string,
+  nodeKind: string,
+): ReadonlyArray<{ id: string; label: string; message: string }> {
+  if (!isConstraintableKind(nodeKind)) return [];
+  return [
+    {
+      id: 'chip_prompt_refuse_constraint',
+      label: `Add a constraint on ${label}`,
+      message: `Add a constraint on ${label}.`,
+    },
+  ];
+}
+
+/**
+ * Build prompt-replay messages for each candidate chip, preserving the
+ * user's original verb where possible.
+ *
+ * 1.16 item E — value-slot rendering. CQE's `raw_text` is the FULL pattern
+ * match (context/cqe/rules.ts `emit`: raw = match[0]), and the sentence-
+ * level patterns capture the whole leading phrase — so embedding raw_text
+ * produced "Set X to Set migration cost to £250k." (garbled copy whose
+ * replay also re-parses unreliably). The value slot now renders from the
+ * PARSED quantity via `mapCqeQuantityToProposalValue` (undoes CQE's
+ * pre-normalisation, e.g. percentage 0.25 → 25 '%') + `formatValueWithUnit`
+ * (canonical "£250,000" / "25%"); `raw_text` remains ONLY as the fallback
+ * for a null-value quantity. Delta operators keep their "by" preposition so
+ * the chip's replay re-parses as the same delta rather than silently
+ * flipping into an absolute set.
+ */
+export function buildClarifyChipMessage(
+  message: string,
+  candidate: ValueUpdateCandidate,
+  quantity: QuantityExtractionResult,
+): string {
+  const verbMatch = message.match(EDIT_VERB_PATTERN);
+  const verb = verbMatch ? verbMatch[0].toLowerCase() : 'set';
+  let valueText = '';
+  if (quantity.value != null) {
+    const { value, unit } = mapCqeQuantityToProposalValue(quantity);
+    valueText = formatValueWithUnit(value, unit);
+  } else if (quantity.raw_text) {
+    valueText = quantity.raw_text;
+  }
+  if (valueText === '') {
+    return `${capitalise(verb)} ${candidate.label}.`;
+  }
+  const preposition =
+    quantity.operator === 'increment' ||
+    quantity.operator === 'decrement' ||
+    quantity.operator === 'add'
+      ? 'by'
+      : 'to';
+  return `${capitalise(verb)} ${candidate.label} ${preposition} ${valueText}.`;
+}
+
+function capitalise(s: string): string {
+  if (s.length === 0) return s;
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+// ---------------------------------------------------------------------------
+// V5 D1 golden-path closure (A3.1) — proposal construction
+// ---------------------------------------------------------------------------
+
+/**
+ * Map CQE's internal `unit` (e.g. `'percentage'`, `'GBP'`,
+ * `'percentage_points'`) to a user-facing unit string the
+ * `set_factor_value` handler accepts (`'%'`, `'£'`, `'$'`, `'€'`, or
+ * the raw string when no canonical mapping exists).
+ *
+ * The handler's `normaliseFactorValue` interprets the unit + value as
+ * USER UNITS and divides by the factor's cap to derive model units.
+ * This means CQE's own pre-normalisation (e.g. `5%` → `value: 0.05`,
+ * `unit: 'percentage'`) MUST be undone here so the handler sees
+ * `value: 5, unit: '%'` and computes `5 / 100 = 0.05` correctly.
+ * Otherwise the handler would compute `0.05 / 100 = 0.0005` — silent
+ * double-normalisation.
+ */
+export function mapCqeQuantityToProposalValue(
+  quantity: QuantityExtractionResult,
+): { value: number; unit: string | undefined } {
+  if (quantity.value === null) {
+    // The pre-route gate already rejects null-value quantities, so
+    // this is unreachable in practice. Defensive default keeps the
+    // function total.
+    return { value: 0, unit: undefined };
+  }
+  switch (quantity.unit) {
+    case 'percentage':
+      // CQE pre-divides by 100. Multiply back to user units.
+      return { value: quantity.value * 100, unit: '%' };
+    case 'percentage_points':
+      // CQE keeps the raw number ("1 percentage point" → value: 1).
+      // Operator (decrease/increase) carries the delta semantics; the
+      // handler applies it to raw_value (user units) directly.
+      return { value: quantity.value, unit: '%' };
+    case 'GBP':
+      return { value: quantity.value, unit: '£' };
+    case 'USD':
+      return { value: quantity.value, unit: '$' };
+    case 'EUR':
+      return { value: quantity.value, unit: '€' };
+    case null:
+      return { value: quantity.value, unit: undefined };
+    default:
+      // Best-effort passthrough for time / metric / colloquial units.
+      // The shared `evaluateFactorValueProposal` predicate (called by
+      // both validator and handler) rejects with
+      // `rejection_reason: 'unit_mismatch'` when this proposal unit
+      // differs from the factor's stored unit. Production-canonical
+      // units (`%`, `£`, `$`, `€`) are mapped explicitly above; this
+      // default path therefore only fires for unmapped CQE units,
+      // which the unit_mismatch guard will catch if the factor has a
+      // stored unit at all.
+      return { value: quantity.value, unit: quantity.unit };
+  }
+}
+
+/**
+ * Derive the V5 routing `parameter_operator` from the CQE quantity's
+ * operator/direction hints, falling back to the matched edit verb in
+ * the message. The wire enum is `'set' | 'increase' | 'decrease' |
+ * 'multiply'`.
+ *
+ * Precedence:
+ *   1. CQE `operator` — the canonical truth. CQE distinguishes
+ *      "Increase budget TO £50,000" (operator: 'set', direction: 'up')
+ *      from "Increase budget BY £10k" (operator: 'increment',
+ *      direction: 'up'). The verb-flavoured `direction` is auxiliary
+ *      and would otherwise turn every `to`-value phrase into a delta.
+ *      `'set' → set`, `'increment' / 'add' → increase`,
+ *      `'decrement' → decrease`, `'multiply' → multiply`.
+ *   2. CQE `direction` (used only when operator is null):
+ *      `'up' → increase`, `'down' → decrease`, `'set' → set`.
+ *   3. Verb-from-message (set/change/update/make → set;
+ *      increase/raise → increase; reduce/decrease/lower → decrease;
+ *      adjust → set).
+ */
+export function deriveOperator(
+  message: string,
+  quantity: QuantityExtractionResult,
+): 'set' | 'increase' | 'decrease' | 'multiply' {
+  if (quantity.operator === 'set') return 'set';
+  if (quantity.operator === 'increment' || quantity.operator === 'add') return 'increase';
+  if (quantity.operator === 'decrement') return 'decrease';
+  if (quantity.operator === 'multiply') return 'multiply';
+  if (quantity.direction === 'up') return 'increase';
+  if (quantity.direction === 'down') return 'decrease';
+  if (quantity.direction === 'set') return 'set';
+
+  const verbMatch = message.match(EDIT_VERB_PATTERN);
+  const verb = verbMatch ? verbMatch[0].toLowerCase() : 'set';
+  if (verb === 'increase' || verb === 'raise') return 'increase';
+  if (verb === 'reduce' || verb === 'decrease' || verb === 'lower') return 'decrease';
+  return 'set';
+}

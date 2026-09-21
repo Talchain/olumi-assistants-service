@@ -23,6 +23,7 @@ import {
   aggregateInsights,
   generateImprovementGuidance,
   generateRationale,
+  enrichFactors,
   type BlockBuilderContext,
 } from "../services/review/index.js";
 import { computeQuality } from "../cee/quality/index.js";
@@ -36,6 +37,7 @@ import { getRequestKeyId, getRequestCallerContext } from "../plugins/auth.js";
 import { contextToTelemetry } from "../context/index.js";
 import { emit, log, TelemetryEvents } from "../utils/telemetry.js";
 import { logCeeCall } from "../cee/logging.js";
+import { scanPayloadForDoctrineHits } from "../services/doctrine/route-egress-doctrine-scan.js";
 import { getCeeFeatureRateLimiter } from "../cee/config/limits.js";
 import { config } from "../config/index.js";
 import type { GraphT } from "../schemas/graph.js";
@@ -158,7 +160,7 @@ export default async function route(app: FastifyInstance) {
 
     // Rate limiting using shared infrastructure
     const rateKey = keyId || req.ip || "unknown";
-    const { allowed, retryAfterSeconds } = rateLimiter.tryConsume(rateKey);
+    const { allowed, retryAfterSeconds } = rateLimiter.tryConsume(rateKey, keyId);
 
     if (!allowed) {
       const errorBody = buildReviewErrorResponse(
@@ -424,6 +426,60 @@ export default async function route(app: FastifyInstance) {
         stability: input.robustness_data?.recommendation_stability as number | undefined,
       });
 
+      // Enrich factors with validation guidance (when ISL sensitivity data available)
+      let factorEnrichments: ReviewResponseT["factor_enrichments"];
+      const factorSensitivity = input.robustness_data?.factor_sensitivity;
+      if (factorSensitivity && Array.isArray(factorSensitivity) && factorSensitivity.length > 0) {
+        // Check if ranks already provided by upstream (ISL) via importance_rank field
+        const hasExistingRanks = factorSensitivity.every(
+          (f) => typeof f.importance_rank === "number" && f.importance_rank >= 1
+        );
+
+        let sensitivityWithRanks: Array<{ factor_id: string; elasticity: number; rank: number }>;
+
+        if (hasExistingRanks) {
+          // Use existing ranks from ISL (importance_rank field)
+          sensitivityWithRanks = factorSensitivity.map((f) => ({
+            factor_id: f.factor_id,
+            elasticity: f.elasticity,
+            rank: f.importance_rank!,
+          }));
+        } else {
+          // Compute ranks from elasticity with deterministic tie-breaker
+          // Sort by elasticity descending, then factor_id ascending for stability
+          const sortedByElasticity = [...factorSensitivity].sort((a, b) => {
+            const elasticityDiff = b.elasticity - a.elasticity;
+            if (elasticityDiff !== 0) return elasticityDiff;
+            // Tie-breaker: sort by factor_id ascending for deterministic ordering
+            return a.factor_id.localeCompare(b.factor_id);
+          });
+          sensitivityWithRanks = sortedByElasticity.map((f, idx) => ({
+            factor_id: f.factor_id,
+            elasticity: f.elasticity,
+            rank: idx + 1,
+          }));
+        }
+
+        const enrichResult = await enrichFactors(
+          input.graph as GraphT,
+          sensitivityWithRanks,
+          { requestId }
+        );
+
+        if (enrichResult.success && enrichResult.enrichments.length > 0) {
+          factorEnrichments = enrichResult.enrichments;
+        }
+
+        // Log warnings but don't fail the request
+        if (enrichResult.warnings.length > 0) {
+          log.warn({
+            event: "cee.review.enrich_factors_warnings",
+            requestId,
+            warnings: enrichResult.warnings,
+          }, "Factor enrichment completed with warnings");
+        }
+      }
+
       // Build response
       const latencyMs = Date.now() - start;
 
@@ -499,6 +555,8 @@ export default async function route(app: FastifyInstance) {
         guidance_truncated: guidanceResult.truncated || undefined,
         // Plain English rationale for Results Panel
         rationale: rationale || undefined,
+        // Factor-level enrichments with observations and perspectives
+        factor_enrichments: factorEnrichments,
       };
 
       // Compute telemetry aggregates for dashboards (no raw content)
@@ -557,6 +615,8 @@ export default async function route(app: FastifyInstance) {
         insights_count: insights.length,
         improvement_guidance_count: improvementGuidance.length,
         has_rationale: Boolean(rationale),
+        has_factor_enrichments: Boolean(factorEnrichments),
+        factor_enrichments_count: factorEnrichments?.length ?? 0,
         // Enhanced aggregates (Task 5)
         insight_type_counts: insightTypeCounts,
         guidance_category_counts: guidanceCategoryCounts,
@@ -579,6 +639,32 @@ export default async function route(app: FastifyInstance) {
         status: assessment.level === "not_ready" ? "degraded" : "ok",
         httpStatus: 200,
       });
+
+      // ROADMAP 2.725 — doctrine coverage at route egress. The V5 guard scans
+      // only `assistant_text` on the turn path; no `assist.v1.*` route passes
+      // through it. ⚠ THIS IS 1 OF 2 MOUNTS ON A 31-PATH FAMILY (~6%) — read the
+      // SCOPE block in route-egress-doctrine-scan.ts, which names the 14 strings
+      // still surviving on 12 uncovered registered routes, before treating this
+      // route family as covered. NON-MUTATING by design — see that module for why
+      // importing the turn path's remedy would corrupt user-authored graph labels.
+      // The enforcement that stops a regression shipping is the fail-loud producer
+      // spec; this is the runtime observability half. The MOUNT itself is pinned by
+      // tests/integration/cee.route-egress-doctrine-mount.test.ts — delete this
+      // block and that spec REDs.
+      const doctrineHits = scanPayloadForDoctrineHits(response);
+      if (doctrineHits.length > 0) {
+        log.warn(
+          {
+            event: "cee.route_egress.doctrine_hit",
+            route: "/assist/v1/review",
+            request_id: requestId,
+            correlation_id: correlationId,
+            hit_count: doctrineHits.length,
+            hits: doctrineHits.slice(0, 10),
+          },
+          "verdict-language doctrine hit on assist.v1.review egress",
+        );
+      }
 
       reply.header("X-CEE-API-Version", "v1");
       reply.header("X-CEE-Feature-Version", FEATURE_VERSION);

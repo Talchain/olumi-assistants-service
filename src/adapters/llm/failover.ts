@@ -25,15 +25,19 @@ import type {
   SuggestOptionsResult,
   ExplainDiffArgs,
   ExplainDiffResult,
-  RepairGraphArgs,
-  RepairGraphResult,
   ClarifyBriefArgs,
   ClarifyBriefResult,
   CritiqueGraphArgs,
   CritiqueGraphResult,
+  ChatArgs,
+  ChatResult,
+  ChatWithToolsArgs,
+  ChatWithToolsResult,
+  ChatWithToolsStreamEvent,
   CallOpts,
   DraftStreamEvent,
 } from "./types.js";
+import { UnsupportedOperationError } from "./errors.js";
 
 /**
  * Failover adapter that tries multiple providers in sequence
@@ -43,7 +47,7 @@ export class FailoverAdapter implements LLMAdapter {
   readonly model: string;
 
   constructor(
-    private readonly adapters: LLMAdapter[],
+    adapters: LLMAdapter[],
     private readonly operation: string = "unknown"
   ) {
     if (adapters.length === 0) {
@@ -53,16 +57,24 @@ export class FailoverAdapter implements LLMAdapter {
     // Primary adapter determines name/model for telemetry
     this.name = `${adapters[0].name}-failover`;
     this.model = adapters[0].model;
+    this.adapters = [...adapters];
   }
+
+  private readonly adapters: readonly LLMAdapter[];
 
   /**
    * Get failover configuration metadata
    * Used by /v1/status for diagnostics
    */
-  getFailoverMetadata(): { enabled: true; providers: string[] } {
+  getFailoverMetadata(): {
+    enabled: true;
+    providers: string[];
+    topology: Array<{ provider: string; model: string }>;
+  } {
     return {
       enabled: true,
       providers: this.adapters.map((a) => a.name),
+      topology: this.adapters.map((a) => ({ provider: a.name, model: a.model })),
     };
   }
 
@@ -109,6 +121,20 @@ export class FailoverAdapter implements LLMAdapter {
         return result;
       } catch (error) {
         errors.push({ provider: adapter.name, error });
+
+        // M4 (Codex r2 pre-merge review): a client / budget abort must NOT
+        // trigger a paid cross-provider failover. If the external signal fired,
+        // stop here and propagate the current error instead of billing the next
+        // provider for a response nobody is awaiting. (The last-adapter path
+        // below already stops; this guards the retry BETWEEN attempts.)
+        const externalSignal = opts.signal ?? opts.abortSignal;
+        if (externalSignal?.aborted && !isLastAdapter) {
+          log.warn(
+            { operation, from: adapter.name, request_id: opts.requestId },
+            "Client abort during failover — suppressing cross-provider retry"
+          );
+          throw error;
+        }
 
         if (isLastAdapter) {
           // All adapters exhausted - aggregate all errors for debuggability
@@ -182,10 +208,6 @@ export class FailoverAdapter implements LLMAdapter {
     );
   }
 
-  async repairGraph(args: RepairGraphArgs, opts: CallOpts): Promise<RepairGraphResult> {
-    return this.withFailover("repair_graph", (adapter) => adapter.repairGraph(args, opts), opts);
-  }
-
   async clarifyBrief(args: ClarifyBriefArgs, opts: CallOpts): Promise<ClarifyBriefResult> {
     return this.withFailover(
       "clarify_brief",
@@ -207,6 +229,13 @@ export class FailoverAdapter implements LLMAdapter {
   }
 
   /**
+   * Chat completion with automatic failover
+   */
+  async chat(args: ChatArgs, opts: CallOpts): Promise<ChatResult> {
+    return this.withFailover("chat", (adapter) => adapter.chat(args, opts), opts);
+  }
+
+  /**
    * Stream support - delegates to primary adapter only
    * (Failover not supported for streaming to maintain simplicity)
    */
@@ -220,5 +249,45 @@ export class FailoverAdapter implements LLMAdapter {
     }
 
     yield* primary.streamDraftGraph(args, opts);
+  }
+
+  /**
+   * Native tool calling - delegates to primary adapter only
+   * (Failover not supported for tool calling — orchestrator needs consistent tool state)
+   */
+  async chatWithTools(
+    args: ChatWithToolsArgs,
+    opts: CallOpts
+  ): Promise<ChatWithToolsResult> {
+    const primary = this.adapters[0];
+    if (!primary.chatWithTools) {
+      throw new UnsupportedOperationError(
+        `Primary adapter ${primary.name} does not support chatWithTools`,
+        primary.name,
+        "chatWithTools"
+      );
+    }
+
+    return primary.chatWithTools(args, opts);
+  }
+
+  /**
+   * Streaming tool calling - delegates to primary adapter only
+   * (No mid-stream failover — let error propagate)
+   */
+  async *streamChatWithTools(
+    args: ChatWithToolsArgs,
+    opts: CallOpts,
+  ): AsyncIterable<ChatWithToolsStreamEvent> {
+    const primary = this.adapters[0];
+    if (!primary.streamChatWithTools) {
+      throw new UnsupportedOperationError(
+        `Primary adapter ${primary.name} does not support streamChatWithTools`,
+        primary.name,
+        "streamChatWithTools",
+      );
+    }
+
+    yield* primary.streamChatWithTools(args, opts);
   }
 }

@@ -9,6 +9,7 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import rateLimit from '@fastify/rate-limit';
+import { RateLimitedError, retryAfterSecondsFromRateLimitContext } from '../utils/errors.js';
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
 import Anthropic from '@anthropic-ai/sdk';
@@ -18,7 +19,137 @@ import { getPromptStore, isPromptStoreHealthy } from '../prompts/store.js';
 import { interpolatePrompt } from '../prompts/schema.js';
 import { log, emit, TelemetryEvents } from '../utils/telemetry.js';
 import { getRequestId } from '../utils/request-id.js';
-import { MODEL_REGISTRY, getModelConfig, getModelProvider } from '../config/models.js';
+import { MODEL_REGISTRY, isReasoningModel, anthropicTemperatureFor } from '../config/models.js';
+import { THINKING_CAPABLE_MODELS } from '../adapters/llm/anthropic-model-capabilities.js';
+import {
+  ModelAssignmentError,
+  resolveModelAssignment,
+  type ResolvedModelAssignment,
+} from '../config/model-assignment.js';
+import { requiresMaxCompletionTokens } from '../adapters/llm/openai.js';
+import { getDefaultModelForTask, isValidCeeTask } from '../config/model-routing.js';
+import { checkModelAvailability, getModelErrorSummary, recordModelError, fetchOpenAIModels, getAnthropicModels } from '../services/model-availability.js';
+import { verifyAdminKey } from '../middleware/admin-auth.js';
+import { ADMIN_LLM_TIMEOUT_MS, ADMIN_REASONING_TIMEOUT_MS, ADMIN_REASONING_HIGH_TIMEOUT_MS } from '../config/timeouts.js';
+
+/**
+ * Check if a model requires max_completion_tokens instead of max_tokens.
+ * This applies to reasoning models and all GPT-5.x models.
+ */
+function needsMaxCompletionTokens(model: string): boolean {
+  const assignment = resolveModelAssignment(model);
+  return assignment.provider === 'openai'
+    ? requiresMaxCompletionTokens(assignment.model)
+    : false;
+}
+
+/**
+ * Whether this model's API accepts `thinking: { type: 'enabled', budget_tokens }`.
+ *
+ * THE SAME AUTHORITY THE LIVE PATH CONSULTS. Every live Anthropic call site gates
+ * thinking on `isThinkingSupported` (adapters/llm/anthropic.ts:619-620), which
+ * reads `THINKING_CAPABLE_MODELS` — the set DERIVED from the live-probed
+ * capability map. This harness previously used `MODEL_REGISTRY.extendedThinking`
+ * instead, which `anthropic-model-capabilities.ts:47-52` records as measured WRONG
+ * IN BOTH DIRECTIONS on 2026-08-08 and explicitly says not to infer this verdict
+ * from: it claims `true` for claude-sonnet-5 (which returns HTTP 400 for
+ * `thinking.type:'enabled'`) and `false` for claude-sonnet-4-6 (which returns
+ * HTTP 200 and emits thinking blocks).
+ *
+ * The consequence was that the operator harness could not measure a prompt
+ * candidate against the model staging actually serves: `budget_tokens` passed
+ * local validation on sonnet-5 and was then 400'd by the API, and sonnet-4-6 was
+ * refused a thinking budget its API accepts. Two authorities answering one
+ * question under similar names is CLAUDE.md trap 21; there is now one.
+ */
+function acceptsThinkingBudget(model: string): boolean {
+  return THINKING_CAPABLE_MODELS.has(model);
+}
+
+/**
+ * THE HARNESS'S MOST CONSEQUENTIAL LIMIT, DISCLOSED AT THE POINT OF USE.
+ *
+ * This harness is an operator convenience, not a replica of any live path: it
+ * sends the prompt as a SINGLE system block with no structured-outputs grammar
+ * and parses the reply as `{nodes, edges}`. A limit stated only in a merged
+ * pull-request description is a trap for the next lane — the next lane reads the
+ * RESPONSE, not the PR — so this notice rides every response and the admin UI
+ * renders it from there. It has already cost us once: a measurement lane read
+ * 6 of 9 draws as "clean" through a grammar value that does not exist, because
+ * nothing on the wire said no grammar had been sent.
+ *
+ * Unconditional by design. It makes no claim that any OTHER task's composition
+ * matches its live path — "no established divergence" is not a fidelity finding,
+ * and phrasing it as one would be the overclaim this notice exists to stop.
+ */
+export const HARNESS_FIDELITY_NOTICE =
+  'This harness is NOT a replica of any live path. It sends the prompt as a single system ' +
+  'block with no structured-outputs grammar, and parses the reply as {nodes, edges}. Read a ' +
+  'result here as evidence about the prompt TEXT only, never as a prediction of live behaviour.';
+
+/**
+ * The established divergence for a `draft_graph` candidate on Anthropic.
+ *
+ * Derived at the bytes, and CITED so the next lane can check it rather than
+ * trust it. Note what is deliberately NOT asserted: the grammar half is stated
+ * with its condition (`CEE_ANTHROPIC_STRUCTURED_OUTPUTS`, a capable model,
+ * thinking off) rather than as a flat fact, because the deployed value of that
+ * flag lives in the Render dashboard and cannot be read from this tree
+ * (CLAUDE.md trap 18). The SECOND SYSTEM BLOCK carries no such caveat: it is
+ * pushed unconditionally, with no flag and no gate.
+ */
+const DRAFT_GRAPH_DIVERGENCE =
+  'draft_graph on Anthropic: this harness sends ONE system block and no structured-outputs ' +
+  'grammar. The live draft path sends TWO system blocks — it unconditionally appends ' +
+  'DRAFT_RECORDS_INSTRUCTION ("Do not emit a graph. Emit two lists instead.", ' +
+  'src/adapters/llm/anthropic.ts:517, no flag and no gate) — and, when ' +
+  'CEE_ANTHROPIC_STRUCTURED_OUTPUTS is on for a capable model with thinking off, a records ' +
+  'grammar in the output_config slot; a deterministic projector then turns those records back ' +
+  'into a graph after the call. So a draft_graph result HERE DOES NOT PREDICT LIVE BEHAVIOUR: ' +
+  'it measures the prompt against a composition production never runs, and a records-shaped ' +
+  'reply will fail this harness’s graph parse and read as a bad prompt.';
+
+/**
+ * The composition of a request body, READ OFF THE BODY that is about to be sent.
+ *
+ * Never a restated literal. The disclosure's whole value is that it cannot drift
+ * from the wire: the day a lane closes the two-block gap, these numbers move with
+ * it, and a hand-maintained "1" would have kept saying one — a stale disclosure
+ * reads as current and is worse than none (CLAUDE.md trap 12).
+ */
+interface RequestComposition {
+  system_blocks: number;
+  structured_outputs_grammar: boolean;
+}
+
+function deriveRequestComposition(body: Record<string, unknown>): RequestComposition {
+  const system = body.system;
+  const messages = Array.isArray(body.messages) ? body.messages : [];
+  const systemBlocks = Array.isArray(system)
+    ? system.length
+    : typeof system === 'string'
+      ? 1
+      : messages.filter((m) => (m as { role?: string } | null)?.role === 'system').length;
+
+  return {
+    system_blocks: systemBlocks,
+    // Anthropic's GA structured-outputs slot, and OpenAI's equivalent. Presence
+    // on the body, never an assumption about what the harness "should" send.
+    structured_outputs_grammar: 'output_config' in body || 'response_format' in body,
+  };
+}
+
+/**
+ * Check if a model doesn't support custom temperature values.
+ * GPT-5.x models only support temperature=1 (default).
+ */
+function doesNotSupportCustomTemperature(model: string): boolean {
+  const assignment = resolveModelAssignment(model);
+  return Boolean(
+    assignment.config?.reasoning ||
+      assignment.config?.rejectsSamplingParams,
+  );
+}
 
 // ============================================================================
 // Types
@@ -31,10 +162,17 @@ const TestPromptLLMRequestSchema = z.object({
   options: z.object({
     model: z.string().optional(),
     skip_repairs: z.boolean().optional(),
+    // LLM parameter overrides
+    reasoning_effort: z.enum(['low', 'medium', 'high']).optional(), // OpenAI reasoning models only
+    budget_tokens: z.number().int().positive().max(128000).optional(), // Anthropic extended thinking (thinking budget)
+    temperature: z.number().min(0).max(2).optional(),
+    max_tokens: z.number().int().positive().max(128000).optional(),
+    seed: z.number().int().optional(), // For reproducibility (OpenAI deterministic seed)
+    top_p: z.number().min(0).max(1).optional(), // Nucleus sampling (default 1.0)
   }).optional(),
 });
 
-type TestPromptLLMRequest = z.infer<typeof TestPromptLLMRequestSchema>;
+type _TestPromptLLMRequest = z.infer<typeof TestPromptLLMRequestSchema>;
 
 /**
  * Extended validation issue with rich metadata for debugging.
@@ -74,8 +212,12 @@ interface TestPromptLLMResponse {
       total: number;
     };
     finish_reason: string;
-    temperature: number;
+    temperature: number | null;
     max_tokens: number;
+    reasoning_effort?: 'low' | 'medium' | 'high';
+    budget_tokens?: number; // Anthropic extended thinking
+    seed?: number;
+    top_p?: number;
   };
 
   pipeline?: {
@@ -105,94 +247,36 @@ interface TestPromptLLMResponse {
       info_count: number;
     };
   };
+
+  /**
+   * WHAT THIS RESULT IS AND IS NOT EVIDENCE OF.
+   *
+   * Present on EVERY completed run, success or failure. It rides the payload —
+   * not just the admin UI — because the consumer that gets burned by the gap is
+   * as often a script as a person, and a UI-only banner would not have reached
+   * the measurement lane that read 6 of 9 draws as "clean" through a grammar
+   * value that does not exist.
+   */
+  harness_fidelity?: {
+    /** Read off the body sent to the provider SDK. Absent if no call was made. */
+    system_blocks_sent?: number;
+    /** Whether that body carried a structured-outputs grammar slot. */
+    structured_outputs_grammar_sent?: boolean;
+    /** How this harness interprets the reply, regardless of task. */
+    output_parsed_as: 'graph_nodes_edges';
+    /**
+     * ESTABLISHED divergences that apply to THIS run. An empty list is not a
+     * fidelity claim about the other paths — see `notice`.
+     */
+    divergences: string[];
+    /** Unconditional. True of every run this harness performs. */
+    notice: string;
+  };
 }
 
 // ============================================================================
 // Authentication helpers
 // ============================================================================
-
-type AdminPermission = 'read' | 'write';
-
-function getAllowedIPs(): Set<string> | null {
-  const allowedIPsConfig = config.prompts?.adminAllowedIPs;
-  if (!allowedIPsConfig || allowedIPsConfig.trim() === '') {
-    return null;
-  }
-
-  return new Set(
-    allowedIPsConfig
-      .split(',')
-      .map((ip) => ip.trim())
-      .filter((ip) => ip.length > 0)
-  );
-}
-
-function verifyIPAllowed(request: FastifyRequest, reply: FastifyReply): boolean {
-  const allowedIPs = getAllowedIPs();
-  if (!allowedIPs) return true;
-
-  const requestIP = request.ip;
-  const isAllowed =
-    allowedIPs.has(requestIP) ||
-    (requestIP === '::1' && allowedIPs.has('127.0.0.1')) ||
-    (requestIP === '127.0.0.1' && allowedIPs.has('::1'));
-
-  if (!isAllowed) {
-    reply.status(403).send({
-      error: 'ip_not_allowed',
-      message: 'Your IP address is not authorized for admin access',
-    });
-    return false;
-  }
-  return true;
-}
-
-function verifyAdminKey(
-  request: FastifyRequest,
-  reply: FastifyReply,
-  requiredPermission: AdminPermission = 'write'
-): boolean {
-  if (!verifyIPAllowed(request, reply)) return false;
-
-  const adminKey = config.prompts?.adminApiKey;
-  const adminKeyRead = config.prompts?.adminApiKeyRead;
-
-  if (!adminKey && !adminKeyRead) {
-    reply.status(503).send({
-      error: 'admin_not_configured',
-      message: 'Admin API is not configured',
-    });
-    return false;
-  }
-
-  const providedKey = request.headers['x-admin-key'] as string;
-  if (!providedKey) {
-    reply.status(401).send({
-      error: 'unauthorized',
-      message: 'Missing admin API key',
-    });
-    return false;
-  }
-
-  if (adminKey && providedKey === adminKey) return true;
-
-  if (adminKeyRead && providedKey === adminKeyRead) {
-    if (requiredPermission === 'write') {
-      reply.status(403).send({
-        error: 'forbidden',
-        message: 'Read-only key cannot perform write operations',
-      });
-      return false;
-    }
-    return true;
-  }
-
-  reply.status(401).send({
-    error: 'unauthorized',
-    message: 'Invalid admin API key',
-  });
-  return false;
-}
 
 function ensureStoreHealthy(reply: FastifyReply): boolean {
   if (!isPromptStoreHealthy()) {
@@ -241,8 +325,28 @@ function sanitizeErrorMessage(error: unknown): string {
 // LLM Call helpers
 // ============================================================================
 
-const LLM_TIMEOUT_MS = 120_000; // 2 minutes
-const REQUEST_TIMEOUT_MS = 150_000; // 2.5 minutes total
+/**
+ * Get appropriate timeout based on model type and reasoning effort.
+ */
+function getLLMTimeout(model: string, reasoningEffort?: 'low' | 'medium' | 'high'): number {
+  if (!isReasoningModel(model)) {
+    return ADMIN_LLM_TIMEOUT_MS;
+  }
+  // Reasoning models need more time, especially with HIGH effort
+  if (reasoningEffort === 'high') {
+    return ADMIN_REASONING_HIGH_TIMEOUT_MS;
+  }
+  return ADMIN_REASONING_TIMEOUT_MS;
+}
+
+interface LLMCallOptions {
+  temperature?: number | null;
+  maxTokens?: number;
+  reasoningEffort?: 'low' | 'medium' | 'high'; // OpenAI reasoning models
+  budgetTokens?: number; // Anthropic extended thinking (thinking budget)
+  seed?: number;
+  topP?: number;
+}
 
 interface LLMCallResult {
   success: boolean;
@@ -256,27 +360,54 @@ interface LLMCallResult {
     total: number;
   };
   finish_reason?: string;
-  temperature: number;
+  temperature: number | null;
   max_tokens: number;
   model: string;
   provider: string;
+  reasoning_effort?: 'low' | 'medium' | 'high'; // OpenAI reasoning models
+  budget_tokens?: number; // Anthropic extended thinking
+  seed?: number;
+  top_p?: number;
+  /**
+   * DERIVED from the body actually handed to the provider SDK — see
+   * `deriveRequestComposition`. Absent when no call was attempted (e.g. no API
+   * key), which is honest: "unknown" is not "one".
+   */
+  request_composition?: RequestComposition;
 }
 
 async function callLLMWithPrompt(
   systemPrompt: string,
   userContent: string,
   model: string,
+  options?: LLMCallOptions,
 ): Promise<LLMCallResult> {
   const startTime = Date.now();
-  const modelConfig = getModelConfig(model);
-  const provider = modelConfig?.provider ?? getModelProvider(model) ?? 'openai';
-  const maxTokens = modelConfig?.maxTokens ?? 4096;
-  const temperature = 0;
+  const assignment = resolveModelAssignment(model);
+  const modelConfig = assignment.config;
+  const provider = assignment.provider;
+
+  // Use provided maxTokens or fall back to model config
+  const maxTokens = options?.maxTokens ?? modelConfig?.maxTokens ?? 4096;
+
+  // Temperature: null means "not set" (use model default), 0 is valid for deterministic output
+  // Default to 0 for admin testing if not explicitly set
+  const temperature = options?.temperature ?? 0;
+
+  // Reasoning effort only applies to reasoning models
+  const reasoningEffort = options?.reasoningEffort;
+
+  // Extract seed and top_p for reproducibility and sampling control
+  const seed = options?.seed;
+  const topP = options?.topP;
+
+  // Extract budgetTokens for Anthropic extended thinking
+  const budgetTokens = options?.budgetTokens;
 
   if (provider === 'anthropic') {
-    return callAnthropicWithPrompt(systemPrompt, userContent, model, maxTokens, temperature, startTime);
+    return callAnthropicWithPrompt(systemPrompt, userContent, model, maxTokens, temperature, startTime, budgetTokens);
   } else {
-    return callOpenAIWithPrompt(systemPrompt, userContent, model, maxTokens, temperature, startTime);
+    return callOpenAIWithPrompt(systemPrompt, userContent, model, maxTokens, temperature, startTime, reasoningEffort, seed, topP);
   }
 }
 
@@ -285,8 +416,9 @@ async function callAnthropicWithPrompt(
   userContent: string,
   model: string,
   maxTokens: number,
-  temperature: number,
+  temperature: number | null,
   startTime: number,
+  budgetTokens?: number,
 ): Promise<LLMCallResult> {
   const apiKey = config.llm?.anthropicApiKey;
   if (!apiKey) {
@@ -303,39 +435,134 @@ async function callAnthropicWithPrompt(
 
   const client = new Anthropic({ apiKey });
   const abortController = new AbortController();
-  const timeoutId = setTimeout(() => abortController.abort(), LLM_TIMEOUT_MS);
+
+  // Extended thinking models need longer timeout AND streaming
+  // Anthropic requires streaming for operations that may take >10 minutes
+  const hasExtendedThinking = acceptsThinkingBudget(model) && budgetTokens !== undefined;
+  const effectiveTimeout = hasExtendedThinking ? ADMIN_REASONING_HIGH_TIMEOUT_MS : ADMIN_LLM_TIMEOUT_MS;
+  const timeoutId = setTimeout(() => abortController.abort(), effectiveTimeout);
+
+  // Effective temperature: default to 0 if null (deterministic for testing)
+  // Note: Extended thinking mode requires temperature=1.
+  //
+  // RIDER-A / D-60 (2026-07-24): models that REJECT explicit sampling params
+  // (Sonnet 5, Opus 4.7+, Fable 5) 400 on ANY temperature — this admin harness
+  // was the 5th #651-family call site missing the gate, so a decision_review A/B
+  // arm on claude-sonnet-5 could not even be measured. The temperature policy is
+  // now single-sourced in anthropicTemperatureFor (FINAL-SWEEP F2) so a call site
+  // physically cannot omit the gate again.
+  const effectiveTemperature: number | undefined = anthropicTemperatureFor(model, {
+    requested: temperature,
+    thinking: hasExtendedThinking,
+  });
+  // Reported value on the result envelope (number | null contract).
+  const reportedTemperature: number | null = effectiveTemperature ?? null;
+
+  // The composition ACTUALLY sent, read off the body built below. Hoisted so the
+  // error paths disclose it too: a failed run is precisely when a composition gap
+  // gets misread as a bad prompt.
+  let requestComposition: RequestComposition | undefined;
 
   try {
-    const response = await client.messages.create(
-      {
-        model,
-        max_tokens: maxTokens,
-        temperature,
-        system: systemPrompt,
-        messages: [{ role: 'user', content: userContent }],
-      },
-      {
+    // Build request params — send an EXPLICIT thinking posture, NEVER omit the
+    // field. This mirrors the LIVE draft path (adapters/llm/anthropic.ts:974-976)
+    // and exists for the reason its comment gives: a thinking-class model routed
+    // here — claude-sonnet-5 is the live `draft_graph` default and its own
+    // registry description says "adaptive thinking on by default" — runs ADAPTIVE
+    // thinking when `thinking` is absent, which burns the token budget invisibly.
+    // Omitting the field is therefore not "no thinking", it is "unmeasured
+    // thinking", and it made a sonnet-5 prompt candidate unmeasurable through this
+    // harness. Live-probed on the draft path: the API accepts
+    // `thinking:{type:'disabled'}` with and without output_config.
+    const thinkingParam = hasExtendedThinking
+      ? { thinking: { type: 'enabled' as const, budget_tokens: budgetTokens } }
+      : { thinking: { type: 'disabled' as const } };
+
+    // Use streaming for extended thinking (required by Anthropic for long operations)
+    // and also recommended for Opus models which can have long response times
+    const useStreaming = hasExtendedThinking || model.includes('opus');
+
+    // ONE body, shared by both transports — named rather than inlined twice so
+    // the fidelity disclosure can be DERIVED from it. `system` is a STRING here:
+    // that single block is the limit this harness discloses, and reading the
+    // count off the body means a lane that later appends the records block moves
+    // the disclosure with it, for free.
+    const requestBody = {
+      model,
+      max_tokens: maxTokens,
+      temperature: effectiveTemperature,
+      system: systemPrompt,
+      messages: [{ role: 'user' as const, content: userContent }],
+      ...thinkingParam,
+    };
+    requestComposition = deriveRequestComposition(requestBody);
+
+    let raw_output = '';
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let stopReason = 'unknown';
+
+    if (useStreaming) {
+      // Use streaming API for extended thinking and Opus models
+      const stream = client.messages.stream(requestBody, {
         signal: abortController.signal,
+      });
+
+      // Collect the streamed response
+      const response = await stream.finalMessage();
+
+      // Handle response - find the text content block
+      const textContent = response.content.find(c => c.type === 'text');
+      if (!textContent || textContent.type !== 'text') {
+        clearTimeout(timeoutId);
+        return {
+          success: false,
+          error: `No text content in response. Content types: ${response.content.map(c => c.type).join(', ')}`,
+          duration_ms: Date.now() - startTime,
+          temperature: reportedTemperature,
+          max_tokens: maxTokens,
+          model,
+          provider: 'anthropic',
+          budget_tokens: budgetTokens,
+          request_composition: requestComposition,
+        };
       }
-    );
+
+      raw_output = textContent.text;
+      inputTokens = response.usage.input_tokens;
+      outputTokens = response.usage.output_tokens;
+      stopReason = response.stop_reason ?? 'unknown';
+    } else {
+      // Use non-streaming for standard models
+      const response = await client.messages.create(requestBody, {
+        signal: abortController.signal,
+      });
+
+      // Handle response - find the text content block
+      const textContent = response.content.find(c => c.type === 'text');
+      if (!textContent || textContent.type !== 'text') {
+        clearTimeout(timeoutId);
+        return {
+          success: false,
+          error: `No text content in response. Content types: ${response.content.map(c => c.type).join(', ')}`,
+          duration_ms: Date.now() - startTime,
+          temperature: reportedTemperature,
+          max_tokens: maxTokens,
+          model,
+          provider: 'anthropic',
+          budget_tokens: budgetTokens,
+          request_composition: requestComposition,
+        };
+      }
+
+      raw_output = textContent.text;
+      inputTokens = response.usage.input_tokens;
+      outputTokens = response.usage.output_tokens;
+      stopReason = response.stop_reason ?? 'unknown';
+    }
 
     clearTimeout(timeoutId);
     const duration_ms = Date.now() - startTime;
-
-    const content = response.content[0];
-    if (content.type !== 'text') {
-      return {
-        success: false,
-        error: `Unexpected response type: ${content.type}`,
-        duration_ms,
-        temperature,
-        max_tokens: maxTokens,
-        model,
-        provider: 'anthropic',
-      };
-    }
-
-    const raw_output = content.text;
     const raw_output_hash = createHash('sha256').update(raw_output).digest('hex');
 
     return {
@@ -344,29 +571,58 @@ async function callAnthropicWithPrompt(
       raw_output_hash,
       duration_ms,
       token_usage: {
-        prompt: response.usage.input_tokens,
-        completion: response.usage.output_tokens,
-        total: response.usage.input_tokens + response.usage.output_tokens,
+        prompt: inputTokens,
+        completion: outputTokens,
+        total: inputTokens + outputTokens,
       },
-      finish_reason: response.stop_reason ?? 'unknown',
-      temperature,
+      finish_reason: stopReason,
+      temperature: reportedTemperature,
       max_tokens: maxTokens,
       model,
       provider: 'anthropic',
+      budget_tokens: budgetTokens,
+      request_composition: requestComposition,
     };
   } catch (error) {
     clearTimeout(timeoutId);
     const duration_ms = Date.now() - startTime;
     const isTimeout = error instanceof Error && error.name === 'AbortError';
+    const timeoutMinutes = Math.round(effectiveTimeout / 60000);
+
+    // Track model errors for deprecation detection
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    let errorType: 'not_found' | 'invalid_model' | 'deprecated' | 'rate_limit' | 'other' = 'other';
+
+    if (errorMessage.includes('404') || errorMessage.includes('not found') || errorMessage.includes('does not exist')) {
+      errorType = 'not_found';
+    } else if (errorMessage.includes('invalid model') || errorMessage.includes('invalid_model')) {
+      errorType = 'invalid_model';
+    } else if (errorMessage.includes('deprecated')) {
+      errorType = 'deprecated';
+    } else if (errorMessage.includes('rate limit') || errorMessage.includes('rate_limit')) {
+      errorType = 'rate_limit';
+    }
+
+    if (!isTimeout) {
+      recordModelError({
+        model_id: model,
+        provider: 'anthropic',
+        error_type: errorType,
+        error_message: errorMessage,
+        timestamp: new Date().toISOString(),
+      });
+    }
 
     return {
       success: false,
-      error: isTimeout ? 'LLM request timed out after 2 minutes' : sanitizeErrorMessage(error),
+      error: isTimeout ? `LLM request timed out after ${timeoutMinutes} minutes` : sanitizeErrorMessage(error),
       duration_ms,
-      temperature,
+      temperature: reportedTemperature,
       max_tokens: maxTokens,
       model,
       provider: 'anthropic',
+      budget_tokens: budgetTokens,
+      request_composition: requestComposition,
     };
   }
 }
@@ -376,8 +632,11 @@ async function callOpenAIWithPrompt(
   userContent: string,
   model: string,
   maxTokens: number,
-  temperature: number,
+  temperature: number | null,
   startTime: number,
+  reasoningEffort?: 'low' | 'medium' | 'high',
+  seed?: number,
+  topP?: number,
 ): Promise<LLMCallResult> {
   const apiKey = config.llm?.openaiApiKey;
   if (!apiKey) {
@@ -394,23 +653,63 @@ async function callOpenAIWithPrompt(
 
   const client = new OpenAI({ apiKey });
   const abortController = new AbortController();
-  const timeoutId = setTimeout(() => abortController.abort(), LLM_TIMEOUT_MS);
+  const effectiveTimeout = getLLMTimeout(model, reasoningEffort);
+  const timeoutId = setTimeout(() => abortController.abort(), effectiveTimeout);
+
+  // Determine if this is a reasoning model
+  const isReasoning = isReasoningModel(model);
+
+  // The composition ACTUALLY sent, read off the body built below (see the
+  // Anthropic arm for why this is derived rather than restated).
+  let requestComposition: RequestComposition | undefined;
 
   try {
-    const response = await client.chat.completions.create(
-      {
-        model,
-        max_tokens: maxTokens,
-        temperature,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userContent },
-        ],
-      },
-      {
-        signal: abortController.signal,
-      }
-    );
+    // Build request params - GPT-5.x and reasoning models need max_completion_tokens
+    const useMaxCompletionTokens = needsMaxCompletionTokens(model);
+    const tokenParam = useMaxCompletionTokens
+      ? { max_completion_tokens: maxTokens }
+      : { max_tokens: maxTokens };
+
+    // GPT-5.x and reasoning models don't support custom temperature
+    // temperature=null means don't send temperature at all (use model default)
+    const tempParam = doesNotSupportCustomTemperature(model)
+      ? {}
+      : temperature !== null
+        ? { temperature }
+        : {};
+
+    // Add reasoning_effort for reasoning models
+    const reasoningParam = isReasoning
+      ? { reasoning_effort: reasoningEffort ?? 'medium' }
+      : {};
+
+    // Add seed for reproducibility (OpenAI deterministic seed)
+    const seedParam = seed !== undefined ? { seed } : {};
+
+    // Add top_p for nucleus sampling (default is 1.0 when not specified)
+    const topPParam = topP !== undefined ? { top_p: topP } : {};
+
+    // Named rather than inlined so the fidelity disclosure is DERIVED from the
+    // body that goes to the SDK. Exactly one `system`-role message, and no
+    // `response_format` grammar — the same single-block limit the Anthropic arm
+    // discloses, counted rather than assumed.
+    const requestBody = {
+      model,
+      ...tokenParam,
+      ...tempParam,
+      ...reasoningParam,
+      ...seedParam,
+      ...topPParam,
+      messages: [
+        { role: 'system' as const, content: systemPrompt },
+        { role: 'user' as const, content: userContent },
+      ],
+    };
+    requestComposition = deriveRequestComposition(requestBody);
+
+    const response = await client.chat.completions.create(requestBody, {
+      signal: abortController.signal,
+    });
 
     clearTimeout(timeoutId);
     const duration_ms = Date.now() - startTime;
@@ -425,6 +724,7 @@ async function callOpenAIWithPrompt(
         max_tokens: maxTokens,
         model,
         provider: 'openai',
+        request_composition: requestComposition,
       };
     }
 
@@ -446,20 +746,50 @@ async function callOpenAIWithPrompt(
       max_tokens: maxTokens,
       model,
       provider: 'openai',
+      reasoning_effort: isReasoning ? (reasoningEffort ?? 'medium') : undefined,
+      seed,
+      top_p: topP,
+      request_composition: requestComposition,
     };
   } catch (error) {
     clearTimeout(timeoutId);
     const duration_ms = Date.now() - startTime;
     const isTimeout = error instanceof Error && error.name === 'AbortError';
+    const timeoutMinutes = Math.round(effectiveTimeout / 60000);
+
+    // Track model errors for deprecation detection
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    let errorType: 'not_found' | 'invalid_model' | 'deprecated' | 'rate_limit' | 'other' = 'other';
+
+    if (errorMessage.includes('404') || errorMessage.includes('not found') || errorMessage.includes('does not exist')) {
+      errorType = 'not_found';
+    } else if (errorMessage.includes('invalid model') || errorMessage.includes('invalid_model') || errorMessage.includes('model_not_found')) {
+      errorType = 'invalid_model';
+    } else if (errorMessage.includes('deprecated')) {
+      errorType = 'deprecated';
+    } else if (errorMessage.includes('rate limit') || errorMessage.includes('rate_limit')) {
+      errorType = 'rate_limit';
+    }
+
+    if (!isTimeout) {
+      recordModelError({
+        model_id: model,
+        provider: 'openai',
+        error_type: errorType,
+        error_message: errorMessage,
+        timestamp: new Date().toISOString(),
+      });
+    }
 
     return {
       success: false,
-      error: isTimeout ? 'LLM request timed out after 2 minutes' : sanitizeErrorMessage(error),
+      error: isTimeout ? `LLM request timed out after ${timeoutMinutes} minutes` : sanitizeErrorMessage(error),
       duration_ms,
       temperature,
       max_tokens: maxTokens,
       model,
       provider: 'openai',
+      request_composition: requestComposition,
     };
   }
 }
@@ -634,6 +964,46 @@ function parseGraphFromLLMOutput(raw_output: string): { success: boolean; graph?
       jsonText = jsonText.replace(/^```\n/, '').replace(/\n```$/, '');
     }
 
+    // Strip JavaScript-style comments that some models include in JSON output
+    // Remove single-line comments (// ...) but preserve URLs (http://, https://)
+    jsonText = jsonText.replace(/(?<![:"'])\/\/(?!\/)[^\n]*/g, '');
+    // Remove multi-line comments (/* ... */)
+    jsonText = jsonText.replace(/\/\*[\s\S]*?\*\//g, '');
+    // Clean up any trailing commas before closing brackets (common after comment removal)
+    jsonText = jsonText.replace(/,\s*([\]}])/g, '$1');
+
+    // Try to find JSON object if the text doesn't start with {
+    // Models sometimes add preamble text before the JSON
+    if (!jsonText.startsWith('{') && !jsonText.startsWith('[')) {
+      // Look for the first { that might be the start of JSON
+      const jsonStartIndex = jsonText.indexOf('{');
+      if (jsonStartIndex !== -1) {
+        // Find the matching closing brace by counting braces
+        let braceCount = 0;
+        let jsonEndIndex = -1;
+        for (let i = jsonStartIndex; i < jsonText.length; i++) {
+          if (jsonText[i] === '{') braceCount++;
+          else if (jsonText[i] === '}') {
+            braceCount--;
+            if (braceCount === 0) {
+              jsonEndIndex = i;
+              break;
+            }
+          }
+        }
+        if (jsonEndIndex !== -1) {
+          jsonText = jsonText.slice(jsonStartIndex, jsonEndIndex + 1);
+        }
+      } else {
+        // No JSON object found - model returned plain text
+        const preview = raw_output.slice(0, 100).replace(/\n/g, ' ');
+        return {
+          success: false,
+          error: `Model did not return JSON. Response starts with: "${preview}..."`,
+        };
+      }
+    }
+
     const parsed = JSON.parse(jsonText);
 
     // Extract nodes and edges
@@ -652,9 +1022,11 @@ function parseGraphFromLLMOutput(raw_output: string): { success: boolean; graph?
       graph: { nodes, edges, node_counts },
     };
   } catch (error) {
+    // Provide more helpful error message
+    const preview = raw_output.slice(0, 100).replace(/\n/g, ' ');
     return {
       success: false,
-      error: `Failed to parse graph: ${error instanceof Error ? error.message : String(error)}`,
+      error: `Failed to parse graph: ${error instanceof Error ? error.message : String(error)}. Response preview: "${preview}..."`,
     };
   }
 }
@@ -672,14 +1044,13 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
       const adminKey = request.headers['x-admin-key'] as string ?? '';
       return `admin_test:${adminKey.slice(0, 8)}:${request.ip}`;
     },
-    errorResponseBuilder: (_request, context) => {
-      const retryAfter = Math.ceil(context.ttl / 1000);
-      return {
-        error: 'rate_limit_exceeded',
-        message: 'Too many test requests. Please wait before running more tests.',
-        retry_after_seconds: retryAfter,
-      };
-    },
+    // ROADMAP 2.181 — @fastify/rate-limit THROWS this return value, so it MUST
+    // be an Error; a plain object is answered 500 INTERNAL. See RateLimitedError.
+    errorResponseBuilder: (_request, context) =>
+      new RateLimitedError(
+        retryAfterSecondsFromRateLimitContext(context),
+        'Too many test requests. Please wait before running more tests.',
+      ),
     addHeadersOnExceeding: {
       'x-ratelimit-limit': true,
       'x-ratelimit-remaining': true,
@@ -710,16 +1081,30 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
     // Validate request body
     const parseResult = TestPromptLLMRequestSchema.safeParse(request.body);
     if (!parseResult.success) {
+      // Extract human-readable error messages from Zod
+      const flattened = parseResult.error.flatten();
+      const fieldErrors = Object.entries(flattened.fieldErrors)
+        .map(([field, errors]) => `${field}: ${(errors as string[]).join(', ')}`)
+        .join('; ');
+      const formErrors = flattened.formErrors.join('; ');
+      const errorMessage = fieldErrors || formErrors || 'Invalid request body';
+
       return reply.status(400).send({
         error: 'validation_error',
-        message: 'Invalid request body',
-        details: parseResult.error.flatten(),
+        message: errorMessage,
+        details: flattened,
       });
     }
 
     const { prompt_id, version, brief, options } = parseResult.data;
     const skipRepairs = options?.skip_repairs ?? false;
     const modelOverride = options?.model;
+    const reasoningEffort = options?.reasoning_effort;
+    const budgetTokensOverride = options?.budget_tokens;
+    const temperatureOverride = options?.temperature;
+    const maxTokensOverride = options?.max_tokens;
+    const seedOverride = options?.seed;
+    const topPOverride = options?.top_p;
 
     log.info({
       request_id: requestId,
@@ -728,6 +1113,12 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
       brief_length: brief.length,
       skip_repairs: skipRepairs,
       model_override: modelOverride,
+      reasoning_effort: reasoningEffort,
+      budget_tokens: budgetTokensOverride,
+      temperature_override: temperatureOverride,
+      max_tokens_override: maxTokensOverride,
+      seed_override: seedOverride,
+      top_p_override: topPOverride,
       event: 'admin.test_prompt.started',
     }, 'Admin prompt test started');
 
@@ -757,33 +1148,146 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
       const contentHash = createHash('sha256').update(compiledContent).digest('hex');
 
       // Determine model to use
+      // Priority: explicit override > prompt modelConfig > task default >
+      // configured provider default. Provider follows the winning model inside
+      // callLLMWithPrompt(), matching the live router contract.
       let model = modelOverride;
-      if (!model) {
-        // Default models based on task
-        if (prompt.taskId === 'draft_graph') {
-          model = 'gpt-5.2';
-        } else {
-          model = 'gpt-4o-mini';
+      // Check prompt's per-prompt model configuration
+      if (!model && prompt.modelConfig) {
+        // Use environment-specific model based on prompt status
+        const env = prompt.status === 'production' ? 'production' : 'staging';
+        const promptModel = prompt.modelConfig[env];
+        if (promptModel) {
+          model = promptModel;
         }
       }
 
-      // Validate model if specified
-      if (modelOverride && !MODEL_REGISTRY[modelOverride]) {
+      // Fall back to task defaults if no prompt-specific model
+      if (!model && prompt.taskId && isValidCeeTask(prompt.taskId)) {
+        model = getDefaultModelForTask(prompt.taskId);
+      }
+
+      if (!model) {
+        // Operator harness fallback is explicit. It must not infer a model from
+        // the process-wide provider when the prompt task has no live route.
+        model = 'gpt-4o-mini';
+      }
+
+      let assignment: ResolvedModelAssignment;
+      try {
+        assignment = resolveModelAssignment(model);
+      } catch (error) {
+        if (!(error instanceof ModelAssignmentError)) throw error;
+        return reply.status(400).send({
+          error: error.code.toLowerCase(),
+          message: error.message,
+          model: error.model,
+          action:
+            'Choose an enabled registry model or an explicitly declared alias.',
+        });
+      }
+      model = assignment.model;
+
+      // Validate parameter combinations
+      const isReasoning = Boolean(assignment.config?.reasoning);
+      const supportsTemp = !doesNotSupportCustomTemperature(model);
+      const modelConfig = assignment.config;
+
+      // reasoning_effort is only valid for OpenAI reasoning models
+      if (reasoningEffort !== undefined && !isReasoning) {
         return reply.status(400).send({
           error: 'validation_error',
-          message: `Unknown model: ${modelOverride}. Available models: ${Object.keys(MODEL_REGISTRY).join(', ')}`,
+          message: `reasoning_effort is only valid for reasoning models. ${model} is not a reasoning model.`,
         });
+      }
+
+      // budget_tokens is only valid for models whose API accepts the
+      // `thinking:{type:'enabled',budget_tokens}` mechanism — the live-probed
+      // verdict, not MODEL_REGISTRY.extendedThinking (see acceptsThinkingBudget).
+      const hasExtThinking = acceptsThinkingBudget(model);
+      if (budgetTokensOverride !== undefined && !hasExtThinking) {
+        return reply.status(400).send({
+          error: 'validation_error',
+          message: `budget_tokens is only valid for Anthropic models that accept thinking.type='enabled'. ${model} does not — the request would be rejected by the API. Re-run without budget_tokens; the harness sends thinking:{type:'disabled'}, matching the live draft path.`,
+        });
+      }
+
+      // temperature is only valid for models that support it
+      if (temperatureOverride !== undefined && !supportsTemp) {
+        return reply.status(400).send({
+          error: 'validation_error',
+          message: `Temperature is not supported for model ${model}. This model uses fixed temperature.`,
+        });
+      }
+
+      // max_tokens must not exceed model limit
+      if (maxTokensOverride !== undefined && modelConfig) {
+        if (maxTokensOverride > modelConfig.maxTokens) {
+          return reply.status(400).send({
+            error: 'validation_error',
+            message: `max_tokens (${maxTokensOverride}) exceeds model limit (${modelConfig.maxTokens}) for ${model}`,
+          });
+        }
       }
 
       // Build user content (similar to production flow)
       const userContent = `## Brief\n${brief}`;
 
-      // Call LLM
-      const llmResult = await callLLMWithPrompt(compiledContent, userContent, model);
+      // Build LLM call options
+      const llmOptions: LLMCallOptions = {};
+      if (temperatureOverride !== undefined) {
+        llmOptions.temperature = temperatureOverride;
+      }
+      if (maxTokensOverride !== undefined) {
+        llmOptions.maxTokens = maxTokensOverride;
+      }
+      if (reasoningEffort !== undefined) {
+        llmOptions.reasoningEffort = reasoningEffort;
+      }
+      if (budgetTokensOverride !== undefined) {
+        llmOptions.budgetTokens = budgetTokensOverride;
+      }
+      if (seedOverride !== undefined) {
+        llmOptions.seed = seedOverride;
+      }
+      if (topPOverride !== undefined) {
+        llmOptions.topP = topPOverride;
+      }
+
+      // Call LLM with options
+      const llmResult = await callLLMWithPrompt(compiledContent, userContent, model, llmOptions);
+
+      // ── HARNESS FIDELITY: what this result is, and is not, evidence of ──────
+      //
+      // The divergence list is bound to the run (task + provider), NOT emitted
+      // as a constant banner: a banner would be a claim about a path this run
+      // never touched, and an always-on warning is an ignored warning. The
+      // `notice` is the unconditional half and is true of every run.
+      //
+      // Scope, stated precisely (CLAUDE.md trap 20): the ONLY divergence
+      // established at the bytes is `draft_graph` on Anthropic. An empty
+      // `divergences` therefore means "none established for this composition",
+      // never "this run is faithful" — which is exactly what `notice` says.
+      const harnessDivergences: string[] = [];
+      if (prompt.taskId === 'draft_graph' && llmResult.provider === 'anthropic') {
+        harnessDivergences.push(DRAFT_GRAPH_DIVERGENCE);
+      }
+
+      const harnessFidelity: NonNullable<TestPromptLLMResponse['harness_fidelity']> = {
+        output_parsed_as: 'graph_nodes_edges',
+        divergences: harnessDivergences,
+        notice: HARNESS_FIDELITY_NOTICE,
+      };
+      if (llmResult.request_composition) {
+        harnessFidelity.system_blocks_sent = llmResult.request_composition.system_blocks;
+        harnessFidelity.structured_outputs_grammar_sent =
+          llmResult.request_composition.structured_outputs_grammar;
+      }
 
       // Build response
       const response: TestPromptLLMResponse = {
         request_id: requestId,
+        harness_fidelity: harnessFidelity,
         success: llmResult.success,
         prompt: {
           id: prompt_id,
@@ -802,6 +1306,10 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
           finish_reason: llmResult.finish_reason ?? 'unknown',
           temperature: llmResult.temperature,
           max_tokens: llmResult.max_tokens,
+          reasoning_effort: llmResult.reasoning_effort,
+          budget_tokens: llmResult.budget_tokens,
+          seed: llmResult.seed,
+          top_p: llmResult.top_p,
         },
       };
 
@@ -850,6 +1358,12 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
             },
           };
 
+          // Mark test as failed if there are validation errors
+          if (errorCount > 0) {
+            response.success = false;
+            response.error = `Validation failed with ${errorCount} error(s)`;
+          }
+
           response.pipeline = {
             stages: [
               { name: 'llm_draft', status: 'success', duration_ms: llmResult.duration_ms },
@@ -864,6 +1378,8 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
             total_duration_ms: Date.now() - startTime,
           };
         } else {
+          // JSON parse failed - mark overall test as failed
+          response.success = false;
           response.error = graphParse.error;
           response.pipeline = {
             stages: [
@@ -924,12 +1440,40 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
   /**
    * GET /admin/v1/test-prompt-llm/models
    *
-   * List available models for testing.
+   * List available models for testing with capability flags.
+   *
+   * Query parameters:
+   * - include_provider_models: boolean - When true, fetches all available models from
+   *   provider APIs and includes models not in our registry (marked as source: 'provider')
+   *
+   * Response model fields:
+   * - source: 'registry' | 'provider' - Where the model comes from
+   * - in_registry: boolean - Whether the model is in our registry (for provider models)
    */
-  app.get('/admin/v1/test-prompt-llm/models', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.get('/admin/v1/test-prompt-llm/models', async (
+    request: FastifyRequest<{ Querystring: { include_provider_models?: string } }>,
+    reply: FastifyReply
+  ) => {
     if (!verifyAdminKey(request, reply, 'read')) return;
 
-    const models = Object.entries(MODEL_REGISTRY)
+    const includeProviderModels = request.query.include_provider_models === 'true';
+
+    // Type for model entries (supports both registry and provider-only models)
+    type ModelEntry = {
+      id: string;
+      provider: string;
+      tier: string;
+      description: string;
+      max_tokens: number;
+      is_reasoning: boolean;
+      supports_extended_thinking: boolean;
+      supports_temperature: boolean;
+      source: 'registry' | 'provider';
+      in_registry: boolean;
+    };
+
+    // Always include enabled registry models
+    const registryModels: ModelEntry[] = Object.entries(MODEL_REGISTRY)
       .filter(([_, config]) => config.enabled)
       .map(([id, config]) => ({
         id,
@@ -937,8 +1481,156 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
         tier: config.tier,
         description: config.description,
         max_tokens: config.maxTokens,
+        // Capability flags for UI to show/hide appropriate controls
+        is_reasoning: isReasoningModel(id),
+        supports_extended_thinking: acceptsThinkingBudget(id),
+        supports_temperature: !doesNotSupportCustomTemperature(id),
+        // Source tracking
+        source: 'registry' as const,
+        in_registry: true,
       }));
 
-    return reply.status(200).send({ models });
+    if (!includeProviderModels) {
+      return reply.status(200).send({ models: registryModels });
+    }
+
+    // Fetch all models from provider APIs
+    try {
+      const [openaiModels, anthropicModels] = await Promise.all([
+        fetchOpenAIModels(),
+        Promise.resolve(getAnthropicModels()),
+      ]);
+
+      // Create a set of registry model IDs for quick lookup
+      const registryModelIds = new Set(Object.keys(MODEL_REGISTRY));
+
+      // Add provider models that aren't in the registry
+      const providerOnlyModels: ModelEntry[] = [];
+
+      for (const model of openaiModels) {
+        if (!registryModelIds.has(model.id)) {
+          providerOnlyModels.push({
+            id: model.id,
+            provider: 'openai',
+            tier: 'unknown', // Provider models don't have tier classification
+            description: `OpenAI model (not in registry)`,
+            max_tokens: 4096, // Default, unknown for provider-only models
+            is_reasoning: false,
+            supports_extended_thinking: false,
+            supports_temperature: true,
+            source: 'provider',
+            in_registry: false,
+          });
+        }
+      }
+
+      for (const model of anthropicModels) {
+        if (!registryModelIds.has(model.id)) {
+          providerOnlyModels.push({
+            id: model.id,
+            provider: 'anthropic',
+            tier: 'unknown',
+            description: `Anthropic model (not in registry)`,
+            max_tokens: 4096,
+            is_reasoning: false,
+            supports_extended_thinking: false,
+            supports_temperature: true,
+            source: 'provider',
+            in_registry: false,
+          });
+        }
+      }
+
+      // Combine registry and provider-only models
+      const allModels = [...registryModels, ...providerOnlyModels];
+
+      // Sort: registry models first (by provider, then id), then provider-only models
+      allModels.sort((a, b) => {
+        if (a.source !== b.source) {
+          return a.source === 'registry' ? -1 : 1;
+        }
+        if (a.provider !== b.provider) {
+          return a.provider.localeCompare(b.provider);
+        }
+        return a.id.localeCompare(b.id);
+      });
+
+      return reply.status(200).send({
+        models: allModels,
+        provider_fetch: {
+          success: true,
+          openai_count: openaiModels.length,
+          anthropic_count: anthropicModels.length,
+          provider_only_count: providerOnlyModels.length,
+        },
+      });
+    } catch (error) {
+      // If provider fetch fails, still return registry models with an error note
+      log.warn({
+        event: 'admin.models.provider_fetch_failed',
+        error: error instanceof Error ? error.message : String(error),
+      }, 'Failed to fetch provider models, returning registry only');
+
+      return reply.status(200).send({
+        models: registryModels,
+        provider_fetch: {
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
+  });
+
+  /**
+   * GET /admin/v1/available-models/:provider
+   *
+   * Check model availability from provider API.
+   * Compares registry models against what's actually available from the provider.
+   *
+   * For OpenAI: Fetches from the models API
+   * For Anthropic: Uses curated list (no public API)
+   */
+  app.get('/admin/v1/available-models/:provider', async (
+    request: FastifyRequest<{ Params: { provider: string } }>,
+    reply: FastifyReply
+  ) => {
+    if (!verifyAdminKey(request, reply, 'read')) return;
+
+    const { provider } = request.params;
+
+    if (provider !== 'openai' && provider !== 'anthropic') {
+      return reply.status(400).send({
+        error: 'invalid_provider',
+        message: 'Provider must be "openai" or "anthropic"',
+      });
+    }
+
+    try {
+      const result = await checkModelAvailability(provider);
+      return reply.status(200).send(result);
+    } catch (error) {
+      log.error({
+        event: 'admin.available_models.error',
+        provider,
+        error: error instanceof Error ? error.message : String(error),
+      }, 'Failed to check model availability');
+
+      return reply.status(500).send({
+        error: 'fetch_failed',
+        message: `Failed to fetch available models: ${error instanceof Error ? error.message : String(error)}`,
+      });
+    }
+  });
+
+  /**
+   * GET /admin/v1/model-errors
+   *
+   * Get summary of model errors for deprecation detection.
+   */
+  app.get('/admin/v1/model-errors', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!verifyAdminKey(request, reply, 'read')) return;
+
+    const summary = getModelErrorSummary();
+    return reply.status(200).send(summary);
   });
 }

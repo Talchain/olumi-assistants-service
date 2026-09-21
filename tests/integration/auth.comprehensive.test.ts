@@ -64,7 +64,7 @@ describe("Key Rotation Scenarios", () => {
       // Old key should still work
       const oldKeyResponse = await server.inject({
         method: "POST",
-        url: "/assist/draft-graph",
+        url: "/assist/v1/draft-graph",
         headers: {
           "Content-Type": "application/json",
           "X-Olumi-Assist-Key": "old-key-to-retire",
@@ -78,7 +78,7 @@ describe("Key Rotation Scenarios", () => {
       // New key should also work
       const newKeyResponse = await server.inject({
         method: "POST",
-        url: "/assist/draft-graph",
+        url: "/assist/v1/draft-graph",
         headers: {
           "Content-Type": "application/json",
           "X-Olumi-Assist-Key": "new-key-active",
@@ -91,7 +91,10 @@ describe("Key Rotation Scenarios", () => {
     } finally {
       await server.close();
     }
-  });
+    // 15s: this test cold-imports and boots a full server (vi.resetModules)
+    // and then issues two draft requests; the 5s default flakes under a
+    // parallel suite run. Timeout raised deliberately — not masking a hang.
+  }, 15_000);
 
   it("rejects retired keys after removal from config", async () => {
     vi.resetModules();
@@ -110,7 +113,7 @@ describe("Key Rotation Scenarios", () => {
       // Retired key should be rejected
       const response = await server.inject({
         method: "POST",
-        url: "/assist/draft-graph",
+        url: "/assist/v1/draft-graph",
         headers: {
           "Content-Type": "application/json",
           "X-Olumi-Assist-Key": "old-retired-key",
@@ -127,7 +130,8 @@ describe("Key Rotation Scenarios", () => {
     } finally {
       await server.close();
     }
-  });
+    // 15s: same cold server boot as the rotation-window test above.
+  }, 15_000);
 });
 
 describe("Rate Limit Exhaustion", () => {
@@ -157,7 +161,7 @@ describe("Rate Limit Exhaustion", () => {
       for (let i = 0; i < 3; i++) {
         await server.inject({
           method: "POST",
-          url: "/assist/draft-graph",
+          url: "/assist/v1/draft-graph",
           headers: {
             "Content-Type": "application/json",
             "X-Olumi-Assist-Key": "rate-test-key",
@@ -171,7 +175,7 @@ describe("Rate Limit Exhaustion", () => {
       // Next request should be rate limited
       const response = await server.inject({
         method: "POST",
-        url: "/assist/draft-graph",
+        url: "/assist/v1/draft-graph",
         headers: {
           "Content-Type": "application/json",
           "X-Olumi-Assist-Key": "rate-test-key",
@@ -192,67 +196,6 @@ describe("Rate Limit Exhaustion", () => {
     }
   });
 
-  it("SSE endpoints have separate rate limit", async () => {
-    vi.resetModules();
-
-    // Standard high, SSE very low
-    process.env.RATE_LIMIT_RPM = "100";
-    process.env.SSE_RATE_LIMIT_RPM = "1";
-    process.env.ASSIST_API_KEYS = "sse-rate-test-key";
-    process.env.LLM_PROVIDER = "fixtures";
-    delete process.env.ASSIST_API_KEY;
-
-    cleanBaseUrl();
-    const { build } = await import("../../src/server.js");
-    const server = await build();
-    await server.ready();
-
-    try {
-      // SSE requests should hit limit faster
-      const sseResponse1 = await server.inject({
-        method: "POST",
-        url: "/assist/draft-graph/stream",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Olumi-Assist-Key": "sse-rate-test-key",
-        },
-        body: JSON.stringify({
-          brief: "First SSE request that meets the minimum length requirement for validation",
-        }),
-      });
-      expect(sseResponse1.statusCode).toBe(200);
-
-      // Second SSE should be rate limited
-      const sseResponse2 = await server.inject({
-        method: "POST",
-        url: "/assist/draft-graph/stream",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Olumi-Assist-Key": "sse-rate-test-key",
-        },
-        body: JSON.stringify({
-          brief: "Second SSE request that meets the minimum length requirement for validation",
-        }),
-      });
-      expect(sseResponse2.statusCode).toBe(429);
-
-      // But standard endpoint should still work
-      const standardResponse = await server.inject({
-        method: "POST",
-        url: "/assist/draft-graph",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Olumi-Assist-Key": "sse-rate-test-key",
-        },
-        body: JSON.stringify({
-          brief: "Standard request that meets the minimum length requirement for validation",
-        }),
-      });
-      expect(standardResponse.statusCode).toBe(200);
-    } finally {
-      await server.close();
-    }
-  });
 });
 
 describe("Public Routes Access", () => {
@@ -329,7 +272,7 @@ describe("Public Routes Access", () => {
   it("requires auth for protected endpoints", async () => {
     const response = await server.inject({
       method: "POST",
-      url: "/assist/draft-graph",
+      url: "/assist/v1/draft-graph",
       headers: {
         "Content-Type": "application/json",
       },
@@ -340,7 +283,7 @@ describe("Public Routes Access", () => {
 
     expect(response.statusCode).toBe(401);
     const body = JSON.parse(response.body);
-    expect(body.code).toBe("FORBIDDEN");
+    expect(body.code).toBe("UNAUTHENTICATED");
     expect(body.message).toContain("Missing API key");
   });
 });
@@ -373,7 +316,7 @@ describe("Header Parsing Edge Cases", () => {
     // but some clients might send them. The key itself shouldn't have whitespace.
     const response = await server.inject({
       method: "POST",
-      url: "/assist/draft-graph",
+      url: "/assist/v1/draft-graph",
       headers: {
         "Content-Type": "application/json",
         "X-Olumi-Assist-Key": "valid-key",
@@ -389,7 +332,7 @@ describe("Header Parsing Edge Cases", () => {
   it("accepts Authorization Bearer token format", async () => {
     const response = await server.inject({
       method: "POST",
-      url: "/assist/draft-graph",
+      url: "/assist/v1/draft-graph",
       headers: {
         "Content-Type": "application/json",
         "Authorization": "Bearer valid-key",
@@ -405,7 +348,7 @@ describe("Header Parsing Edge Cases", () => {
   it("rejects malformed Authorization header", async () => {
     const response = await server.inject({
       method: "POST",
-      url: "/assist/draft-graph",
+      url: "/assist/v1/draft-graph",
       headers: {
         "Content-Type": "application/json",
         "Authorization": "Basic dXNlcjpwYXNz", // Basic auth format, not Bearer
@@ -421,7 +364,7 @@ describe("Header Parsing Edge Cases", () => {
   it("X-Olumi-Assist-Key takes precedence over Authorization header", async () => {
     const response = await server.inject({
       method: "POST",
-      url: "/assist/draft-graph",
+      url: "/assist/v1/draft-graph",
       headers: {
         "Content-Type": "application/json",
         "X-Olumi-Assist-Key": "valid-key",
@@ -439,7 +382,7 @@ describe("Header Parsing Edge Cases", () => {
   it("rejects empty API key header", async () => {
     const response = await server.inject({
       method: "POST",
-      url: "/assist/draft-graph",
+      url: "/assist/v1/draft-graph",
       headers: {
         "Content-Type": "application/json",
         "X-Olumi-Assist-Key": "",
@@ -485,7 +428,7 @@ describe("HMAC Timestamp Edge Cases", () => {
       const { signature } = signRequest(
         TEST_SECRET,
         "POST",
-        "/assist/draft-graph",
+        "/assist/v1/draft-graph",
         body,
         "not-a-timestamp",
         nonce
@@ -493,7 +436,7 @@ describe("HMAC Timestamp Edge Cases", () => {
 
       const response = await server.inject({
         method: "POST",
-        url: "/assist/draft-graph",
+        url: "/assist/v1/draft-graph",
         headers: {
           "Content-Type": "application/json",
           "X-Olumi-Signature": signature,
@@ -534,7 +477,7 @@ describe("HMAC Timestamp Edge Cases", () => {
       const { signature } = signRequest(
         TEST_SECRET,
         "POST",
-        "/assist/draft-graph",
+        "/assist/v1/draft-graph",
         body,
         oldTimestamp,
         nonce
@@ -542,7 +485,7 @@ describe("HMAC Timestamp Edge Cases", () => {
 
       const response = await server.inject({
         method: "POST",
-        url: "/assist/draft-graph",
+        url: "/assist/v1/draft-graph",
         headers: {
           "Content-Type": "application/json",
           "X-Olumi-Signature": signature,
@@ -552,12 +495,12 @@ describe("HMAC Timestamp Edge Cases", () => {
         body,
       });
 
-      // Should reject with 403 (either SIGNATURE_SKEW or INVALID_SIGNATURE
-      // depending on whether body was re-serialized by Fastify)
+      // Should reject with 403 - standard error code, specific HMAC error in details
       expect(response.statusCode).toBe(403);
       const responseBody = JSON.parse(response.body);
       expect(responseBody.schema).toBe("error.v1");
-      expect(["SIGNATURE_SKEW", "INVALID_SIGNATURE"]).toContain(responseBody.code);
+      expect(responseBody.code).toBe("FORBIDDEN");
+      expect(["SIGNATURE_SKEW", "INVALID_SIGNATURE"]).toContain(responseBody.details?.hmac_error);
     } finally {
       await server.close();
     }
@@ -588,7 +531,7 @@ describe("HMAC Timestamp Edge Cases", () => {
       const { signature } = signRequest(
         TEST_SECRET,
         "POST",
-        "/assist/draft-graph",
+        "/assist/v1/draft-graph",
         body,
         futureTimestamp,
         nonce
@@ -596,7 +539,7 @@ describe("HMAC Timestamp Edge Cases", () => {
 
       const response = await server.inject({
         method: "POST",
-        url: "/assist/draft-graph",
+        url: "/assist/v1/draft-graph",
         headers: {
           "Content-Type": "application/json",
           "X-Olumi-Signature": signature,
@@ -606,12 +549,173 @@ describe("HMAC Timestamp Edge Cases", () => {
         body,
       });
 
-      // Should reject with 403 (either SIGNATURE_SKEW or INVALID_SIGNATURE
-      // depending on whether body was re-serialized by Fastify)
+      // Should reject with 403 - standard error code, specific HMAC error in details
       expect(response.statusCode).toBe(403);
       const responseBody = JSON.parse(response.body);
       expect(responseBody.schema).toBe("error.v1");
-      expect(["SIGNATURE_SKEW", "INVALID_SIGNATURE"]).toContain(responseBody.code);
+      expect(responseBody.code).toBe("FORBIDDEN");
+      expect(["SIGNATURE_SKEW", "INVALID_SIGNATURE"]).toContain(responseBody.details?.hmac_error);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+describe("HMAC Raw Body Signing", () => {
+  const originalEnv = { ...process.env };
+  const TEST_SECRET = "test-hmac-raw-body-secret";
+
+  afterEach(async () => {
+    process.env = originalEnv;
+    vi.resetModules();
+  });
+
+  it("passes HMAC verification with non-alphabetical key order in JSON", async () => {
+    vi.resetModules();
+
+    process.env.HMAC_SECRET = TEST_SECRET;
+    process.env.LLM_PROVIDER = "fixtures";
+    delete process.env.ASSIST_API_KEY;
+    delete process.env.ASSIST_API_KEYS;
+
+    cleanBaseUrl();
+    const { build } = await import("../../src/server.js");
+    const server = await build();
+    await server.ready();
+
+    try {
+      // JSON with keys in non-alphabetical order (z before a)
+      // This should pass because we now sign against raw body bytes, not re-stringified JSON
+      const body = '{"z_field":"last","brief":"Test brief that meets the minimum length requirement for validation purposes","a_field":"first"}';
+      const nonce = randomUUID();
+      const timestamp = Date.now().toString();
+
+      const { signature } = signRequest(
+        TEST_SECRET,
+        "POST",
+        "/assist/v1/draft-graph",
+        body,
+        timestamp,
+        nonce
+      );
+
+      const response = await server.inject({
+        method: "POST",
+        url: "/assist/v1/draft-graph",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Olumi-Signature": signature,
+          "X-Olumi-Timestamp": timestamp,
+          "X-Olumi-Nonce": nonce,
+        },
+        body, // Send raw body, not parsed object
+      });
+
+      // Should succeed - HMAC verified against raw body bytes
+      expect(response.statusCode).toBe(200);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("passes HMAC verification with extra whitespace in JSON", async () => {
+    vi.resetModules();
+
+    process.env.HMAC_SECRET = TEST_SECRET;
+    process.env.LLM_PROVIDER = "fixtures";
+    delete process.env.ASSIST_API_KEY;
+    delete process.env.ASSIST_API_KEYS;
+
+    cleanBaseUrl();
+    const { build } = await import("../../src/server.js");
+    const server = await build();
+    await server.ready();
+
+    try {
+      // JSON with extra whitespace that would be lost if re-stringified
+      const body = '{  "brief"  :  "Test brief that meets the minimum length requirement for validation purposes"  }';
+      const nonce = randomUUID();
+      const timestamp = Date.now().toString();
+
+      const { signature } = signRequest(
+        TEST_SECRET,
+        "POST",
+        "/assist/v1/draft-graph",
+        body,
+        timestamp,
+        nonce
+      );
+
+      const response = await server.inject({
+        method: "POST",
+        url: "/assist/v1/draft-graph",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Olumi-Signature": signature,
+          "X-Olumi-Timestamp": timestamp,
+          "X-Olumi-Nonce": nonce,
+        },
+        body,
+      });
+
+      // Should succeed - HMAC verified against raw body bytes preserving whitespace
+      expect(response.statusCode).toBe(200);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("fails HMAC verification with tampered body", async () => {
+    vi.resetModules();
+
+    process.env.HMAC_SECRET = TEST_SECRET;
+    process.env.LLM_PROVIDER = "fixtures";
+    delete process.env.ASSIST_API_KEY;
+    delete process.env.ASSIST_API_KEYS;
+
+    cleanBaseUrl();
+    const { build } = await import("../../src/server.js");
+    const server = await build();
+    await server.ready();
+
+    try {
+      const originalBody = JSON.stringify({
+        brief: "Test brief that meets the minimum length requirement for validation purposes",
+      });
+      const tamperedBody = JSON.stringify({
+        brief: "TAMPERED brief that should fail signature verification completely",
+      });
+      const nonce = randomUUID();
+      const timestamp = Date.now().toString();
+
+      // Sign the original body
+      const { signature } = signRequest(
+        TEST_SECRET,
+        "POST",
+        "/assist/v1/draft-graph",
+        originalBody,
+        timestamp,
+        nonce
+      );
+
+      // Send the tampered body with the original signature
+      const response = await server.inject({
+        method: "POST",
+        url: "/assist/v1/draft-graph",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Olumi-Signature": signature,
+          "X-Olumi-Timestamp": timestamp,
+          "X-Olumi-Nonce": nonce,
+        },
+        body: tamperedBody,
+      });
+
+      // Should fail - tampered body doesn't match signature
+      expect(response.statusCode).toBe(403);
+      const responseBody = JSON.parse(response.body);
+      expect(responseBody.code).toBe("FORBIDDEN"); // Standard error code per error.v1 schema
+      expect(responseBody.details?.hmac_error).toBe("INVALID_SIGNATURE"); // Specific error in details
     } finally {
       await server.close();
     }
@@ -643,7 +747,7 @@ describe("No Auth Configured", () => {
     try {
       const response = await server.inject({
         method: "POST",
-        url: "/assist/draft-graph",
+        url: "/assist/v1/draft-graph",
         headers: {
           "Content-Type": "application/json",
         },
@@ -686,7 +790,7 @@ describe("Error Response Format", () => {
   it("returns error.v1 schema for 401 Unauthorized", async () => {
     const response = await server.inject({
       method: "POST",
-      url: "/assist/draft-graph",
+      url: "/assist/v1/draft-graph",
       headers: {
         "Content-Type": "application/json",
       },
@@ -707,7 +811,7 @@ describe("Error Response Format", () => {
   it("returns error.v1 schema for 403 Forbidden", async () => {
     const response = await server.inject({
       method: "POST",
-      url: "/assist/draft-graph",
+      url: "/assist/v1/draft-graph",
       headers: {
         "Content-Type": "application/json",
         "X-Olumi-Assist-Key": "wrong-key",

@@ -1,0 +1,720 @@
+{
+  "nodes": [
+    {
+      "id": "dec_scaling",
+      "kind": "decision",
+      "label": "Engineering Team Scaling Strategy",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "fac_hiring_spend",
+      "kind": "factor",
+      "label": "Headcount Investment Level",
+      "observed_state": {
+        "value": 0.1,
+        "unit": "£",
+        "source": "cee_inference",
+        "raw_value": 20000,
+        "cap": 200000,
+        "extractionType": "inferred",
+        "factor_type": "cost",
+        "uncertainty_drivers": [
+          "Salary benchmarks and agency fees not specified",
+          "Offshore contract rates variable"
+        ]
+      },
+      "category": "controllable",
+      "display_value": "£20,000",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "fac_local_hire",
+      "kind": "factor",
+      "label": "Local Senior Hire Indicator",
+      "observed_state": {
+        "value": 0,
+        "source": "cee_inference",
+        "extractionType": "inferred",
+        "factor_type": "other",
+        "uncertainty_drivers": [
+          "Senior engineering talent availability in local market",
+          "Time-to-hire and onboarding duration"
+        ]
+      },
+      "category": "controllable",
+      "encoding_map": {
+        "0": "Not pursued",
+        "1": "Pursued"
+      },
+      "display_value": "No local senior hire pursued",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "fac_market_demand",
+      "kind": "factor",
+      "label": "Product Market Demand",
+      "category": "external",
+      "prior": {
+        "distribution": "uniform",
+        "range_min": 0.3,
+        "range_max": 0.8
+      },
+      "factor_type": "external",
+      "extractionType": "external",
+      "display_value": "0.3 to 0.8",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "fac_offshore",
+      "kind": "factor",
+      "label": "Offshore Partnership Indicator",
+      "observed_state": {
+        "value": 0,
+        "source": "cee_inference",
+        "extractionType": "inferred",
+        "factor_type": "other",
+        "uncertainty_drivers": [
+          "Partner quality and cultural alignment unknown",
+          "Coordination overhead across time zones"
+        ]
+      },
+      "category": "controllable",
+      "encoding_map": {
+        "0": "Not pursued",
+        "1": "Pursued"
+      },
+      "display_value": "No offshore partnership established",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "fac_team_size",
+      "kind": "factor",
+      "label": "Current Team Size",
+      "category": "external",
+      "prior": {
+        "distribution": "uniform",
+        "range_min": 0.3,
+        "range_max": 0.8999999999999999
+      },
+      "extractionType": "explicit",
+      "display_value": "0.3 to 0.9",
+      "provenance": "from_brief"
+    },
+    {
+      "id": "goal_q3_delivery",
+      "kind": "goal",
+      "label": "Meet Q3 Roadmap Commitments at Scale",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "opt_hire_local",
+      "kind": "option",
+      "label": "Hire Two Senior Engineers Locally",
+      "interventions": {
+        "fac_local_hire": {
+          "value": 1,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_local_hire",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_offshore": {
+          "value": 0,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_offshore",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_hiring_spend": {
+          "value": 0.8,
+          "unit": "£",
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_hiring_spend",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        }
+      },
+      "is_baseline": false,
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "opt_offshore",
+      "kind": "option",
+      "label": "Engage Offshore Partner",
+      "interventions": {
+        "fac_local_hire": {
+          "value": 0,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_local_hire",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_offshore": {
+          "value": 1,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_offshore",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_hiring_spend": {
+          "value": 0.3,
+          "unit": "£",
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_hiring_spend",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        }
+      },
+      "is_baseline": false,
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "opt_status_quo",
+      "kind": "option",
+      "label": "Continue with Current Team (Status Quo)",
+      "interventions": {
+        "fac_local_hire": {
+          "value": 0,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_local_hire",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_offshore": {
+          "value": 0,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_offshore",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_hiring_spend": {
+          "value": 0.1,
+          "unit": "£",
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_hiring_spend",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        }
+      },
+      "is_baseline": true,
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "opt_tiered_pricing",
+      "kind": "option",
+      "label": "Introduce Tiered Pricing to Fund Gradual Hiring",
+      "interventions": {
+        "fac_local_hire": {
+          "value": 0,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_local_hire",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_offshore": {
+          "value": 0,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_offshore",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_hiring_spend": {
+          "value": 0.4,
+          "unit": "£",
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_hiring_spend",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        }
+      },
+      "is_baseline": false,
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "out_delivery_capacity",
+      "kind": "outcome",
+      "label": "Q3 Roadmap Delivery Capacity",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "out_team_cohesion",
+      "kind": "outcome",
+      "label": "Team Integration and Cohesion",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "risk_budget_strain",
+      "kind": "risk",
+      "label": "Budget Strain on Runway",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "risk_coordination_overhead",
+      "kind": "risk",
+      "label": "Coordination and Communication Overhead",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "risk_time_to_productivity",
+      "kind": "risk",
+      "label": "Time to Productive Contribution",
+      "provenance": "ai_inferred"
+    }
+  ],
+  "edges": [
+    {
+      "from": "dec_scaling",
+      "to": "opt_hire_local",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "dec_scaling",
+      "to": "opt_offshore",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "dec_scaling",
+      "to": "opt_status_quo",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "dec_scaling",
+      "to": "opt_tiered_pricing",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "fac_hiring_spend",
+      "to": "out_delivery_capacity",
+      "strength": {
+        "mean": 0.15255474452554743,
+        "std": 0.06934306569343066
+      },
+      "exists_probability": 0.8,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "fac_hiring_spend",
+      "to": "risk_budget_strain",
+      "strength": {
+        "mean": 0.65,
+        "std": 0.12
+      },
+      "exists_probability": 0.92,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "fac_local_hire",
+      "to": "out_delivery_capacity",
+      "strength": {
+        "mean": 0.3813868613138686,
+        "std": 0.09708029197080292
+      },
+      "exists_probability": 0.82,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "fac_local_hire",
+      "to": "out_team_cohesion",
+      "strength": {
+        "mean": 0.45,
+        "std": 0.12
+      },
+      "exists_probability": 0.85,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "fac_local_hire",
+      "to": "risk_time_to_productivity",
+      "strength": {
+        "mean": 0.35,
+        "std": 0.15
+      },
+      "exists_probability": 0.88,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "fac_market_demand",
+      "to": "out_delivery_capacity",
+      "strength": {
+        "mean": 0.12481751824817516,
+        "std": 0.06934306569343066
+      },
+      "exists_probability": 0.7,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "fac_offshore",
+      "to": "out_delivery_capacity",
+      "strength": {
+        "mean": 0.20802919708029194,
+        "std": 0.12481751824817516
+      },
+      "exists_probability": 0.72,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "fac_offshore",
+      "to": "out_team_cohesion",
+      "strength": {
+        "mean": -0.25,
+        "std": 0.14
+      },
+      "exists_probability": 0.75,
+      "effect_direction": "negative",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "fac_offshore",
+      "to": "risk_coordination_overhead",
+      "strength": {
+        "mean": 0.6,
+        "std": 0.14
+      },
+      "exists_probability": 0.9,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "fac_team_size",
+      "to": "out_delivery_capacity",
+      "strength": {
+        "mean": 0.08321167883211678,
+        "std": 0.04854014598540146
+      },
+      "exists_probability": 0.88,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_hire_local",
+      "to": "fac_hiring_spend",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_hire_local",
+      "to": "fac_local_hire",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_offshore",
+      "to": "fac_hiring_spend",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_offshore",
+      "to": "fac_offshore",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_status_quo",
+      "to": "fac_hiring_spend",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_status_quo",
+      "to": "fac_local_hire",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_status_quo",
+      "to": "fac_offshore",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_tiered_pricing",
+      "to": "fac_hiring_spend",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "out_delivery_capacity",
+      "to": "goal_q3_delivery",
+      "strength": {
+        "mean": 0.65,
+        "std": 0.1
+      },
+      "exists_probability": 0.95,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "out_team_cohesion",
+      "to": "goal_q3_delivery",
+      "strength": {
+        "mean": 0.22,
+        "std": 0.1
+      },
+      "exists_probability": 0.85,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "risk_budget_strain",
+      "to": "goal_q3_delivery",
+      "strength": {
+        "mean": -0.2,
+        "std": 0.1
+      },
+      "exists_probability": 0.8,
+      "effect_direction": "negative",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "risk_coordination_overhead",
+      "to": "goal_q3_delivery",
+      "strength": {
+        "mean": -0.3,
+        "std": 0.12
+      },
+      "exists_probability": 0.85,
+      "effect_direction": "negative",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "risk_time_to_productivity",
+      "to": "goal_q3_delivery",
+      "strength": {
+        "mean": -0.4,
+        "std": 0.14
+      },
+      "exists_probability": 0.88,
+      "effect_direction": "negative",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    }
+  ],
+  "goal_node_id": "goal_q3_delivery"
+}

@@ -9,8 +9,15 @@
 
 import OpenAI from "openai";
 import Anthropic from "@anthropic-ai/sdk";
-import { config } from "../../config/index.js";
+import { config, getClientBlockedModels } from "../../config/index.js";
 import { log } from "../../utils/telemetry.js";
+import { isModelClientAllowed, getModelBlockReason } from "../../config/models.js";
+import {
+  ModelAssignmentError,
+  resolveModelAssignment,
+} from "../../config/model-assignment.js";
+import { AUXILIARY_MODEL_DEFAULTS } from "../../config/model-routing.js";
+import { EXTRACTION_TIMEOUT_MS } from "../../config/timeouts.js";
 
 // ============================================================================
 // Types
@@ -19,12 +26,14 @@ import { log } from "../../utils/telemetry.js";
 export interface ExtractionCallOptions {
   /** Request ID for telemetry */
   requestId?: string;
-  /** Timeout in milliseconds (default: 30000) */
+  /** Timeout in milliseconds (default: EXTRACTION_TIMEOUT_MS env var or 30000) */
   timeoutMs?: number;
   /** Maximum tokens to generate (default: 2000) */
   maxTokens?: number;
   /** Temperature (default: 0 for deterministic extraction) */
   temperature?: number;
+  /** Optional model override (e.g., "claude-sonnet-4-20250514") */
+  modelOverride?: string;
 }
 
 export interface ExtractionResult {
@@ -48,20 +57,36 @@ export interface ExtractionResult {
 // ============================================================================
 
 /**
- * Get the model to use for extraction tasks.
- * Priority: CEE_MODEL_EXTRACTION > CEE_MODEL_DRAFT > provider default
+ * Resolve the dedicated extraction assignment. Unlike the old fallback chain,
+ * this never inherits the drafting/global model: extraction is a live task and
+ * has its own checked-in landing point.
  */
-function getExtractionModel(provider: "openai" | "anthropic"): string {
-  // Prefer dedicated extraction model
-  if (config.cee.models.extraction) {
-    return config.cee.models.extraction;
-  }
-  // Fall back to draft model
-  if (config.cee.models.draft) {
-    return config.cee.models.draft;
-  }
-  // Provider defaults
-  return provider === "openai" ? "gpt-4o-mini" : "claude-3-5-sonnet-20241022";
+export function resolveExtractionAssignment(
+  configuredProvider: "openai" | "anthropic" | "fixtures",
+  modelOverride?: string,
+  configuredExtractionModel: string | undefined = config.cee.models.extraction,
+): {
+  model: string;
+  provider: "openai" | "anthropic" | "fixtures";
+  source: "per_call" | "env_var" | "task_default";
+} {
+  const model =
+    modelOverride ??
+    configuredExtractionModel ??
+    AUXILIARY_MODEL_DEFAULTS.extraction;
+  const source = modelOverride
+    ? "per_call"
+    : configuredExtractionModel
+      ? "env_var"
+      : "task_default";
+  const assignment = resolveModelAssignment(model, {
+    fixtures: configuredProvider === "fixtures",
+  });
+  return {
+    model: assignment.model,
+    provider: assignment.provider,
+    source,
+  };
 }
 
 // ============================================================================
@@ -213,11 +238,14 @@ async function callOpenAI(
   options: ExtractionCallOptions,
   abortSignal: AbortSignal
 ): Promise<ExtractionResult> {
-  const { timeoutMs = 30000, maxTokens = 2000, temperature = 0 } = options;
+  const { timeoutMs = EXTRACTION_TIMEOUT_MS, maxTokens = 2000, temperature = 0, modelOverride } = options;
 
   try {
     const client = getOpenAIClient();
-    const model = getExtractionModel("openai");
+    const model = resolveExtractionAssignment(
+      "openai",
+      modelOverride,
+    ).model;
 
     const responsePromise = client.chat.completions.create({
       model,
@@ -290,11 +318,14 @@ async function callAnthropic(
   options: ExtractionCallOptions,
   abortSignal: AbortSignal
 ): Promise<ExtractionResult> {
-  const { timeoutMs = 30000, maxTokens = 2000, temperature = 0 } = options;
+  const { timeoutMs = EXTRACTION_TIMEOUT_MS, maxTokens = 2000, temperature: _temperature = 0, modelOverride } = options;
 
   try {
     const client = getAnthropicClient();
-    const model = getExtractionModel("anthropic");
+    const model = resolveExtractionAssignment(
+      "anthropic",
+      modelOverride,
+    ).model;
 
     const responsePromise = client.messages.create({
       model,
@@ -384,16 +415,54 @@ export async function callLLMForExtraction(
   userPrompt: string,
   options: ExtractionCallOptions = {}
 ): Promise<ExtractionResult> {
-  const provider = getActiveProvider();
+  let provider = getActiveProvider();
   const startTime = Date.now();
   const abortController = new AbortController();
+
+  // Validate an explicit override before any provider call. Unknown, disabled
+  // or blocked ids fail deliberately; they never fall through to another model.
+  const effectiveModelOverride = options.modelOverride;
+  if (effectiveModelOverride && provider !== "fixtures") {
+    resolveModelAssignment(effectiveModelOverride);
+    const blockedModels = getClientBlockedModels();
+    if (!isModelClientAllowed(effectiveModelOverride, blockedModels)) {
+      const reason = getModelBlockReason(effectiveModelOverride, blockedModels);
+      throw new ModelAssignmentError(
+        'MODEL_CLIENT_BLOCKED',
+        effectiveModelOverride,
+        reason ?? `Model '${effectiveModelOverride}' is blocked for client use.`,
+      );
+    }
+  }
+
+  const assignment = resolveExtractionAssignment(provider, effectiveModelOverride);
+  if (assignment.provider !== provider) {
+    log.info(
+      {
+        event: "cee.extraction.provider_switch",
+        resolved_model: assignment.model,
+        resolution_source: assignment.source,
+        previous_provider: provider,
+        new_provider: assignment.provider,
+      },
+      "Switching provider to match resolved extraction model"
+    );
+    provider = assignment.provider;
+  }
+
+  // Pass the already-resolved model to the provider-specific call. This makes
+  // model and provider one atomic assignment rather than two fallback chains.
+  const validatedOptions = { ...options, modelOverride: assignment.model };
 
   log.debug(
     {
       event: "cee.extraction.call_start",
       provider,
-      requestId: options.requestId,
-      timeoutMs: options.timeoutMs ?? 30000,
+      requested_model_override: effectiveModelOverride,
+      resolved_model: assignment.model,
+      resolution_source: assignment.source,
+      requestId: validatedOptions.requestId,
+      timeoutMs: validatedOptions.timeoutMs ?? EXTRACTION_TIMEOUT_MS,
     },
     "Starting LLM extraction call"
   );
@@ -403,13 +472,13 @@ export async function callLLMForExtraction(
   try {
     switch (provider) {
       case "openai":
-        result = await callOpenAI(systemPrompt, userPrompt, options, abortController.signal);
+        result = await callOpenAI(systemPrompt, userPrompt, validatedOptions, abortController.signal);
         break;
       case "anthropic":
-        result = await callAnthropic(systemPrompt, userPrompt, options, abortController.signal);
+        result = await callAnthropic(systemPrompt, userPrompt, validatedOptions, abortController.signal);
         break;
       case "fixtures":
-        result = await callFixtures(systemPrompt, userPrompt, options);
+        result = await callFixtures(systemPrompt, userPrompt, validatedOptions);
         break;
       default:
         result = {
@@ -434,6 +503,8 @@ export async function callLLMForExtraction(
     {
       event: "cee.extraction.call_complete",
       provider,
+      resolved_model: assignment.model,
+      resolution_source: assignment.source,
       success: result.success,
       durationMs,
       inputTokens: result.usage?.input_tokens,

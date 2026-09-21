@@ -6,6 +6,9 @@
  */
 
 import { emit, TelemetryEvents, log } from "../../utils/telemetry.js";
+import { contentDigest } from "../../utils/redaction.js";
+import { resolveGoalThresholdCapWithProvenance } from "../../utils/goal-threshold-cap.js";
+import { buildUnquantifiedPrior, shouldPreserveModelPrior } from "../../cee/provenance/unquantified-factor.js";
 
 // ============================================================================
 // Types
@@ -97,6 +100,167 @@ export function normaliseNodeKind(kind: string): CanonicalNodeKind {
   return normalised;
 }
 
+// ============================================================================
+// STRINGIFIED AUX FIELDS (v8 — 2026-07-07 grammar-size fix, Lane 26)
+// The Anthropic draft schema declares coaching, causal_claims, and
+// topology_plan as `{ type: "string" }` JSON-string fields (see the GRAMMAR
+// BUDGET (v8) note in src/cee/draft/anthropic-graph-schema.ts) — the full
+// object subtrees pushed the compiled grammar past Anthropic's unpublished
+// size limit, 400-failing structured outputs on every draft. This ingress
+// parse converts the strings back to objects/arrays BEFORE Zod and every
+// downstream consumer (normalise-legacy-coaching, validateCausalClaims,
+// Stage 5 Package).
+// ============================================================================
+
+const STRINGIFIED_AUX_FIELDS = [
+  { key: 'coaching', expect: 'object' },
+  { key: 'causal_claims', expect: 'array' },
+  { key: 'topology_plan', expect: 'array' },
+] as const;
+
+/**
+ * Parse the v8 JSON-string aux fields in place.
+ *
+ * Shape-based and tolerant by design:
+ * - Field absent, or already an object/array (prompt-only fallback path,
+ *   OpenAI adapter, legacy fixtures) → untouched.
+ * - Valid JSON string of the expected shape → replaced with the parsed value.
+ * - Double-encoded string (model JSON-encoded the JSON string once more) →
+ *   parsed twice. A single parse can never yield a valid final shape when it
+ *   yields a string, so the second attempt is unambiguous.
+ * - Malformed JSON or wrong shape → the field is DROPPED. Downstream then
+ *   behaves exactly as when the LLM omits the field — Stage 5 emits the
+ *   canonical-empty coaching block; causal_claims / topology_plan are
+ *   omitted from the response — which is identical to today's prompt-only
+ *   fallback behaviour. Enforcement is therefore never worse than status
+ *   quo, while nodes/edges/goal_constraints gain full grammar enforcement.
+ */
+export function parseStringifiedAuxFields(obj: Record<string, unknown>): void {
+  for (const { key, expect } of STRINGIFIED_AUX_FIELDS) {
+    const raw = obj[key];
+    if (typeof raw !== 'string') continue;
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+      // Double-encoded edge case: unwrap exactly one extra layer.
+      if (typeof parsed === 'string') parsed = JSON.parse(parsed);
+    } catch {
+      parsed = undefined;
+    }
+
+    const shapeOk = expect === 'array'
+      ? Array.isArray(parsed)
+      : parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed);
+
+    if (shapeOk) {
+      obj[key] = parsed;
+    } else {
+      delete obj[key];
+      log.warn({
+        event: 'llm.normalisation.aux_field_parse_failed',
+        field: key,
+        expected_shape: expect,
+        raw_length: raw.length,
+        // Digest raw model output — never place it on the wire verbatim (see contentDigest).
+        raw_preview: contentDigest(raw),
+      }, `Draft aux field "${key}" was not a JSON-encoded ${expect} — dropped (canonical-empty default applies downstream)`);
+    }
+  }
+}
+
+/**
+ * Every field of the goal-threshold contract CEE mints for itself (ROADMAP
+ * 2.281). The quad the draft grammar used to declare, PLUS the attestation
+ * fields — `goal_threshold_frame` is the whole point of the exercise, and
+ * `goal_baseline*` are only sound when divided by the SAME cap on the SAME
+ * branch that produced the threshold (enricher.ts:699-719).
+ *
+ * DERIVED-BY-INTENT, not mirrored: this list is the fields no model may author,
+ * and the pinning test asserts it covers every `goal_*` field the node schema
+ * declares, so a new goal field added to `schemas/graph.ts` REDs rather than
+ * quietly becoming model-writable.
+ */
+export const CEE_MINTED_GOAL_FIELDS = [
+  'goal_threshold',
+  'goal_threshold_raw',
+  'goal_threshold_unit',
+  'goal_threshold_cap',
+  'goal_threshold_cap_provenance',
+  'goal_threshold_frame',
+  'goal_baseline',
+  'goal_baseline_raw',
+] as const;
+
+/** What a strip actually removed — returned so the caller can log it, never silent. */
+export interface GoalThresholdStripResult {
+  /** Node ids that carried at least one CEE-minted goal field. */
+  nodeIds: string[];
+  /** Field names actually removed, deduped, for telemetry. */
+  fields: string[];
+}
+
+/**
+ * Remove any model-authored goal-threshold contract from a DRAFT response.
+ *
+ * ── WHY THIS EXISTS ALONGSIDE THE GRAMMAR CUT (ROADMAP 2.281) ──────────────
+ * `buildDraftGraphSchema()` (cee/draft/anthropic-graph-schema.ts, v15) makes the
+ * quad UNEMITTABLE — but only when the grammar is actually sent. Structured
+ * outputs is conditional on `CEE_ANTHROPIC_STRUCTURED_OUTPUTS` (config default
+ * FALSE), a model allowlist, thinking being off, and no `so_reject` fallback
+ * having fired (anthropic.ts:792-798). On the prompt-only path there is NO
+ * GRAMMAR AT ALL, so the grammar cut alone would be inert on exactly the path
+ * the 2026-08-01 live witness measured. This strip is the layer that does not
+ * depend on that posture: it holds for every REAL provider draft call
+ * (anthropic.ts:1801, openai.ts:747).
+ *
+ * Neither layer is redundant. The grammar stops the tokens being generated (and
+ * so also saves the output tokens); this stops the value being persisted. The
+ * claim "the enricher is the only mint" is true because of BOTH.
+ *
+ * ── WHY THIS IS SAFE TO DO UNCONDITIONALLY *ON A DRAFT RESPONSE* ───────────
+ * A draft response is a from-scratch graph: `draftGraph` receives a brief, docs
+ * and an optional attachment — never an existing graph — and Stage 1 (Parse)
+ * runs BEFORE Stage 3 (Enrich) in the unified pipeline. So at this seam no
+ * legitimate, attested threshold can exist yet: anything present was written by
+ * the model. Deleting it cannot destroy a CEE-minted value because none has been
+ * minted.
+ *
+ * ⚠ AND WHY IT IS NOT WIRED INTO `normaliseDraftResponse` ITSELF. That function
+ * is SHARED with the repair_graph path (anthropic.ts:2624, openai.ts:1215),
+ * which runs at Stage 4 — i.e. AFTER Stage 3 has enriched. A strip there would
+ * delete a threshold the enricher had already minted and attested, turning this
+ * fix into the very defect it closes. The two seams are deliberately separate;
+ * do not "simplify" this by folding it into the normaliser.
+ *
+ * Mutates in place (the file's established style) and reports what it removed.
+ */
+export function stripModelAuthoredGoalThreshold(raw: unknown): GoalThresholdStripResult {
+  const result: GoalThresholdStripResult = { nodeIds: [], fields: [] };
+  if (!raw || typeof raw !== 'object') return result;
+  const nodes = (raw as Record<string, unknown>).nodes;
+  if (!Array.isArray(nodes)) return result;
+
+  const seenFields = new Set<string>();
+  for (const node of nodes as any[]) {
+    if (!node || typeof node !== 'object') continue;
+    let touched = false;
+    for (const field of CEE_MINTED_GOAL_FIELDS) {
+      // `in`, not a truthiness check: an explicit `null` (the shape the old
+      // nullable grammar taught) is still a model-authored key, and 0 is a
+      // legitimate threshold value that a truthiness test would skip.
+      if (field in node && node[field] !== undefined) {
+        delete node[field];
+        touched = true;
+        seenFields.add(field);
+      }
+    }
+    if (touched) result.nodeIds.push(String(node.id ?? '<unidentified>'));
+  }
+  result.fields = [...seenFields];
+  return result;
+}
+
 /**
  * Normalise all node kinds in a draft response before Zod validation.
  * Also coerces string numbers to actual numbers for belief/weight.
@@ -106,6 +270,50 @@ export function normaliseDraftResponse(raw: unknown): unknown {
 
   const obj = raw as Record<string, unknown>;
   let normalisedCount = 0;
+
+  // v8 stringified aux fields: must run before the coaching sentinel
+  // coercion below and before any Zod/downstream consumer sees the fields.
+  parseStringifiedAuxFields(obj);
+
+  // ========================================================================
+  // PRE-NORMALISATION DIAGNOSTIC: Capture raw LLM output shape for edge
+  // strength and factor data BEFORE any coercion/stripping runs.
+  // Helps distinguish "LLM didn't produce it" from "pipeline lost it".
+  // ========================================================================
+  if (Array.isArray(obj.edges)) {
+    const rawEdges = obj.edges as any[];
+    const withNestedStrength = rawEdges.filter((e: any) => e && typeof e.strength === 'object' && e.strength !== null).length;
+    const withFlatStrength = rawEdges.filter((e: any) => e && e.strength_mean !== undefined).length;
+    const withWeight = rawEdges.filter((e: any) => e && e.weight !== undefined).length;
+    log.debug({
+      event: 'llm.raw_diagnostic.edges',
+      edge_count: rawEdges.length,
+      with_nested_strength: withNestedStrength,
+      with_flat_strength_mean: withFlatStrength,
+      with_legacy_weight: withWeight,
+    }, `[RAW] Edge strengths before normalisation: ${withNestedStrength} nested, ${withFlatStrength} flat, ${withWeight} legacy out of ${rawEdges.length}`);
+  }
+  if (Array.isArray(obj.nodes)) {
+    const rawNodes = obj.nodes as any[];
+    const factors = rawNodes.filter((n: any) => n && (n.kind === 'factor' || n.kind === 'Factor'));
+    const withDataValue = factors.filter((n: any) => n.data && (typeof n.data.value === 'number' || typeof n.data.value === 'string')).length;
+    const withDataNull = factors.filter((n: any) => n.data && n.data.value === null).length;
+    const withNoData = factors.filter((n: any) => !n.data).length;
+    const withMetadataNoValue = factors.filter((n: any) => {
+      if (!n.data) return false;
+      const hasValue = typeof n.data.value === 'number' || typeof n.data.value === 'string';
+      const hasMeta = n.data.factor_type || n.data.extractionType || n.data.uncertainty_drivers;
+      return !hasValue && n.data.value !== null && hasMeta;
+    }).length;
+    log.debug({
+      event: 'llm.raw_diagnostic.factor_data',
+      factor_count: factors.length,
+      with_data_value: withDataValue,
+      with_data_value_null: withDataNull,
+      with_no_data: withNoData,
+      with_metadata_no_value: withMetadataNoValue,
+    }, `[RAW] Factor data before normalisation: ${withDataValue} have value, ${withDataNull} null, ${withNoData} no data, ${withMetadataNoValue} metadata-only out of ${factors.length}`);
+  }
 
   // Normalise node kinds
   if (Array.isArray(obj.nodes)) {
@@ -131,12 +339,296 @@ export function normaliseDraftResponse(raw: unknown): unknown {
     });
   }
 
+  // ========================================================================
+  // SENTINEL & NULL COERCION (v4 — 2026-04-02):
+  // The Anthropic schema uses plain (non-nullable) types for most fields
+  // to stay under the 16 union-param limit. The LLM emits sentinels
+  // (0, "", [], false) for inapplicable fields. We strip them here by
+  // node kind so downstream code sees undefined for absent fields.
+  // Null coercion is retained as a safety net for non-Anthropic providers.
+  // ========================================================================
+  if (Array.isArray(obj.nodes)) {
+    obj.nodes = (obj.nodes as any[]).map((node: any) => {
+      if (!node || typeof node !== 'object') return node;
+      const kind: string = node.kind ?? '';
+
+      // Top-level fields still using anyOf (category, data, prior)
+      if (node.category === null) node.category = undefined;
+      if (node.data === null) node.data = undefined;
+      if (node.prior === null) node.prior = undefined;
+
+      // ── Node-kind-aware stripping ────────────────────────────────
+      // goal_threshold* / goal_threshold_cap only meaningful on goal nodes
+      if (kind !== 'goal') {
+        node.goal_threshold = undefined;
+        node.goal_threshold_raw = undefined;
+        node.goal_threshold_unit = undefined;
+        node.goal_threshold_cap = undefined;
+        // Cleared WITH the cap it describes. A provenance surviving the
+        // denominator it was minted for is a claim about a number that is no
+        // longer there — and it reads as attested.
+        node.goal_threshold_cap_provenance = undefined;
+      } else {
+        if (node.goal_threshold === null) node.goal_threshold = undefined;
+        if (node.goal_threshold_raw === null) node.goal_threshold_raw = undefined;
+        if (node.goal_threshold_unit === null || node.goal_threshold_unit === '') node.goal_threshold_unit = undefined;
+        if (node.goal_threshold_cap === null) node.goal_threshold_cap = undefined;
+        if (
+          node.goal_threshold_cap === 0 &&
+          (node.goal_threshold_raw === null || node.goal_threshold_raw === undefined)
+        ) {
+          node.goal_threshold_cap = undefined;
+          node.goal_threshold_cap_provenance = undefined;
+        }
+
+        // ── ROADMAP 2.239: degenerate model-supplied cap ────────────────
+        // `goal_threshold_cap` is an LLM-WRITABLE draft field
+        // (cee/draft/anthropic-graph-schema.ts:299) and the LIVE draft
+        // prompt sanctions `cap >= raw` verbatim ("goal_threshold_cap:
+        // reference maximum (must be >= goal_threshold_raw)",
+        // prompts/defaults-v187.ts:294 — v187 is the live default;
+        // defaults.ts:2231 marks v19 deprecated/superseded). A model that
+        // takes the `=` produces `goal_threshold = raw/cap = 1.0` — the
+        // state utils/goal-threshold-cap.ts's own doctrine forbids, because
+        // ISL then scores P(sample >= the ceiling of the scale). Measured
+        // on the deployed build: 0.021 and exactly 0.0 across two options
+        // whose leader won 95% of scenarios (diagnosis §5 Finding B).
+        //
+        // ⚠ AND v187 IS STRICTLY WORSE THAN ITS PREDECESSOR HERE. v19
+        // carried a mitigating line — ":184 …prefer a headroom cap above
+        // the target (not cap = target, which forces goal_threshold = 1.0
+        // and eliminates probability spread)" — and **v187 has no such
+        // sentence anywhere**; :294 is a bare `>=`. The prompt got weaker
+        // while the code kept the same hole. Restoring that sentence to
+        // v187 is rowed separately; this guard must hold regardless of
+        // what any prompt version says, which is the reason it lives here
+        // and not only in the prompt.
+        //
+        // WHY HERE. This is the only seam that sees a model-authored
+        // threshold quad before it is persisted, for every REAL provider:
+        // `normaliseDraftResponse` is called by anthropic.ts :1801/:2624
+        // and openai.ts :747/:1215. (NOT literally every drafted graph —
+        // `FixturesAdapter.draftGraph`, router.ts:298-316, returns
+        // `fixtureGraph` WITHOUT normalising, so `LLM_PROVIDER=fixtures`
+        // never reaches this code. Zero blast radius, but it means no
+        // fixtures-backed end-to-end test can exercise it — the coverage
+        // below is unit-level against this function by necessity.)
+        // The three resolver-bearing paths — add_constraint's two sites and
+        // the factor-extraction enricher — are fixed by the `>` change in
+        // resolveGoalThresholdCap, but NONE runs on a quad the model wrote
+        // itself: the enricher's branch is gated on `goal_threshold ===
+        // undefined` (enricher.ts:649), and nothing anywhere recomputes
+        // goal_threshold from raw/cap for a goal node (every raw/cap
+        // recomputation site in src/ is a FACTOR site). Stage 4b
+        // (threshold-sweep) only DELETES — its contract declares
+        // `allowedModifications.node: []` — and does not fire on the live
+        // shape anyway (raw present, label carries digits). So without this
+        // block the fix would be provably partial while looking complete.
+        //
+        // ── THE TWO GATES, and why each is load-bearing ─────────────────
+        // (1) `gtCap <= gtRaw`. WITHOUT THIS THE REPAIR IS ITSELF A DEFECT
+        //     OF THE CLASS IT FIXES. `resolveGoalThresholdCap` evaluates
+        //     its '%' rule (raw 0-100 → cap 100) BEFORE the existing-cap
+        //     rule, so calling it unconditionally rewrites SOUND, strictly
+        //     -greater percentage caps: {raw 5, '%', cap 20, th 0.25} would
+        //     become th 0.05 (5x), {raw 80, '%', cap 1000, th 0.08} would
+        //     become th 0.8 (10x) — silently, on non-degenerate graphs, in
+        //     the OVER-OPTIMISTIC direction. This gate confines the repair
+        //     to caps that are equal to or below the target, i.e. exactly
+        //     the ones that cannot be a sound denominator.
+        // (2) the drafted threshold must actually BE `raw / cap`. v187's
+        //     MODEL UNIT TYPES table (:296-303) declares `goal_threshold`
+        //     is NOT raw/cap for two of its four rows — "NRR 110% → 1.10,
+        //     raw 110" and "3 hires → 3, raw 3". A model following the
+        //     prompt exactly, with the minimum cap the prompt permits
+        //     (cap = raw), would otherwise be rewritten to 0.8 and have a
+        //     correct, prompt-instructed threshold destroyed. Requiring the
+        //     raw/cap convention to hold means we only touch quads that are
+        //     using the normalisation this fix is about.
+        // Together the gates imply the drafted threshold is >= 1 - 1e-6 —
+        // i.e. the repair fires only on the "kills probability spread" state
+        // and nothing else. NOT >= 1.0 exactly: gate (1) gives r = raw/cap
+        // >= 1, so the tolerance below is 1e-6*r and gate (2) admits any
+        // threshold down to r*(1 - 1e-6), whose infimum over r >= 1 is
+        // 0.999999. That band is still the degenerate state (a threshold of
+        // 0.9999991 asks for the ceiling of the scale just as 1.0 does, and
+        // every case in it has cap <= raw), so the CONSEQUENCE is unchanged
+        // — but the bound is the stated one, and a later reader must not
+        // build on a strict >= 1.0 that does not hold.
+        // Tolerance mirrors the established convention for this same
+        // cross-check (SCALE_CONSISTENCY_TOLERANCE, relative,
+        // magnitude-scaled — src/orchestrator-v5/system-events/
+        // factor-value-edit.ts:82).
+        //
+        // Repairs the DENOMINATOR only — `goal_threshold_raw` and
+        // `goal_threshold_unit` (what the user actually asked for) are
+        // never rewritten. `unit`/`existingUnit` are deliberately the
+        // node's OWN goal_threshold_unit for both arguments: cap and raw
+        // are two numbers on one node under one declared unit, so there is
+        // no second unit to be incompatible with.
+        //
+        // DELIBERATELY NOT REPAIRED (each would be a different defect):
+        // a threshold that disagrees with an otherwise-sound raw/cap pair;
+        // a missing cap or a missing threshold (so this never MINTS a
+        // threshold, and never closes the enricher's `goal_threshold ===
+        // undefined` redirect branch); a non-positive or non-finite value.
+        const gtRaw = node.goal_threshold_raw;
+        const gtCap = node.goal_threshold_cap;
+        const gtVal = node.goal_threshold;
+        const usesRawOverCapConvention =
+          typeof gtRaw === 'number' && Number.isFinite(gtRaw) && gtRaw > 0 &&
+          typeof gtCap === 'number' && Number.isFinite(gtCap) && gtCap > 0 &&
+          typeof gtVal === 'number' && Number.isFinite(gtVal) &&
+          Math.abs(gtVal - gtRaw / gtCap) <=
+            1e-6 * Math.max(1, Math.abs(gtRaw / gtCap));
+        if (
+          usesRawOverCapConvention &&
+          // gate (1) — only a degenerate or undercutting denominator
+          (gtCap as number) <= (gtRaw as number)
+        ) {
+          const resolved = resolveGoalThresholdCapWithProvenance(
+            gtCap,
+            gtRaw,
+            node.goal_threshold_unit,
+            node.goal_threshold_unit,
+          );
+          const soundCap = resolved === null ? null : resolved.cap;
+          if (resolved !== null && soundCap !== null && soundCap !== gtCap) {
+            const before = { cap: gtCap, threshold: node.goal_threshold };
+            node.goal_threshold_cap = soundCap;
+            // ⭐ THE REPAIR MOVES THE DENOMINATOR, SO IT MUST MOVE THE CLAIM
+            // ABOUT THE DENOMINATOR. Leaving a provenance minted for `gtCap`
+            // beside the new `soundCap` would describe a number that has since
+            // moved — a declaration outliving its subject, which reads as
+            // attested and is strictly worse than no provenance at all.
+            node.goal_threshold_cap_provenance = resolved.provenance;
+            node.goal_threshold = gtRaw / soundCap;
+            log.info(
+              {
+                node_id: node.id,
+                goal_threshold_raw: gtRaw,
+                goal_threshold_unit: node.goal_threshold_unit,
+                cap_before: before.cap,
+                cap_after: soundCap,
+                threshold_before: before.threshold,
+                threshold_after: node.goal_threshold,
+                reason: gtCap === gtRaw ? 'cap_equals_raw' : 'cap_undercuts_raw',
+                event: 'cee.normalisation.goal_threshold_cap_repaired',
+              },
+              'Repaired a degenerate model-supplied goal_threshold_cap',
+            );
+          }
+        }
+      }
+
+      // is_baseline only meaningful on option nodes
+      if (kind !== 'option') {
+        node.is_baseline = undefined;
+      } else {
+        if (node.is_baseline === null) node.is_baseline = undefined;
+      }
+
+      // intercept only meaningful on factor nodes
+      if (kind !== 'factor') {
+        node.intercept = undefined;
+      } else {
+        if (node.intercept === null) node.intercept = undefined;
+      }
+
+      // ── Inner data fields: sentinel + null coercion ──────────────
+      if (node.data && typeof node.data === 'object') {
+        const d = node.data;
+        // Null safety net (non-Anthropic providers may still emit null)
+        if (d.value === null) d.value = undefined;
+        if (d.raw_value === null) d.raw_value = undefined;
+        if (d.cap === null) d.cap = undefined;
+        if (d.uncertainty_drivers === null) d.uncertainty_drivers = undefined;
+        if (d.interventions === null) d.interventions = undefined;
+        if (d.is_baseline === null) d.is_baseline = undefined;
+        // String sentinel coercion: "" → undefined
+        if (d.extractionType === null || d.extractionType === '') d.extractionType = undefined;
+        if (d.factor_type === null || d.factor_type === '') d.factor_type = undefined;
+        if (d.unit === null || d.unit === '') d.unit = undefined;
+        if (d.encoding_map === null || d.encoding_map === '') d.encoding_map = undefined;
+        if (d.display_value === null || d.display_value === '') d.display_value = undefined;
+
+        // Numeric coercion: LLMs may emit data.value / data.raw_value / data.cap
+        // as strings (e.g. "0.6", "180000"). Coerce to number so the downstream
+        // union-key check (typeof data.value === 'number') doesn't strip the
+        // entire data object, losing factor_type/extractionType/uncertainty_drivers.
+        if (typeof d.value === 'string') {
+          const parsed = Number(d.value);
+          if (!Number.isNaN(parsed)) {
+            d.value = parsed;
+          }
+        }
+        if (typeof d.raw_value === 'string') {
+          const parsed = Number(d.raw_value);
+          if (!Number.isNaN(parsed)) {
+            d.raw_value = parsed;
+          }
+        }
+        if (typeof d.cap === 'string') {
+          const parsed = Number(d.cap);
+          if (!Number.isNaN(parsed)) {
+            d.cap = parsed;
+          }
+        }
+      }
+      // Inner prior fields: sentinel + null coercion
+      if (node.prior && typeof node.prior === 'object') {
+        const p = node.prior;
+        if (p.distribution === null || p.distribution === '') p.distribution = undefined;
+        if (p.range_min === null) p.range_min = undefined;
+        if (p.range_max === null) p.range_max = undefined;
+      }
+      return node;
+    });
+  }
+
+  // Coerce sentinels/nulls in goal_constraints items
+  if (Array.isArray(obj.goal_constraints)) {
+    obj.goal_constraints = (obj.goal_constraints as any[]).filter((c: any) => {
+      if (!c || typeof c !== 'object') return false;
+      if (c.constraint_id === null || c.constraint_id === '') c.constraint_id = undefined;
+      if (c.operator === null || c.operator === '') c.operator = undefined;
+      if (c.value === null) c.value = undefined;
+      if (c.label === null || c.label === '') c.label = undefined;
+      // Optional string fields: sentinel coercion
+      if (c.unit === null || c.unit === '') c.unit = undefined;
+      if (c.source_quote === null || c.source_quote === '') c.source_quote = undefined;
+      if (c.provenance === null || c.provenance === '') c.provenance = undefined;
+      if (c.confidence === null) c.confidence = undefined;
+      return typeof c.node_id === 'string'; // drop items without valid node_id
+    });
+  }
+
+  // Coerce sentinels/nulls in coaching.strengthen_items
+  if (obj.coaching && typeof obj.coaching === 'object') {
+    const coaching = obj.coaching as Record<string, unknown>;
+    if (Array.isArray(coaching.strengthen_items)) {
+      coaching.strengthen_items = (coaching.strengthen_items as any[]).map((item: any) => {
+        if (!item || typeof item !== 'object') return item;
+        if (item.label === null || item.label === '') item.label = undefined;
+        if (item.detail === null || item.detail === '') item.detail = undefined;
+        return item;
+      });
+    }
+  }
+
   // Coerce string numbers to numbers for belief/weight on edges, and clamp to valid ranges
   // Also handle V4 format (strength.mean, strength.std, exists_probability)
   if (Array.isArray(obj.edges)) {
     obj.edges = obj.edges.map((edge: unknown) => {
       if (!edge || typeof edge !== 'object') return edge;
       const e = edge as Record<string, unknown>;
+
+      // Coerce required-nullable edge fields (null → undefined)
+      if (e.exists_probability === null) e.exists_probability = undefined;
+      if (e.effect_direction === null) e.effect_direction = undefined;
+      // Optional string fields: sentinel coercion
+      if (e.edge_type === null || e.edge_type === '') e.edge_type = undefined;
+      if (e.provenance_source === null || e.provenance_source === '') e.provenance_source = undefined;
 
       // ========================================================================
       // V4 FORMAT HANDLING: strength.mean/std and exists_probability
@@ -275,6 +767,136 @@ export function normaliseDraftResponse(raw: unknown): unknown {
         belief,
       };
     });
+
+    // [DIAGNOSTIC] Temporary: stratified edge field sample after V4 extraction.
+    // Samples 1 structural + 1 causal + 1 bridge edge to avoid sampling bias
+    // (previous .slice(0,3) always picked structural dec→opt edges without strength).
+    // Remove after confirming extraction behaviour on staging.
+    if ((obj.edges as any[]).length > 0) {
+      const allEdges = (obj.edges as any[]).filter((e: any) => e && typeof e === 'object');
+      const sorted = [...allEdges].sort((a: any, b: any) =>
+        `${a.from ?? ''}::${a.to ?? ''}`.localeCompare(`${b.from ?? ''}::${b.to ?? ''}`)
+      );
+      const mapEdge = (e: any) => ({
+        from: e.from,
+        to: e.to,
+        strength_mean: e.strength_mean ?? 'MISSING',
+        strength_nested: typeof e.strength === 'object' && e.strength !== null
+          ? { mean: e.strength.mean, std: e.strength.std }
+          : (e.strength === undefined ? 'UNDEFINED' : `TYPE:${typeof e.strength}`),
+        weight: e.weight ?? 'MISSING',
+        belief_exists: e.belief_exists ?? 'MISSING',
+      });
+      // Stratified: 1 structural (dec_/opt_ source), 1 causal (fac_ source), 1 bridge (→goal_ target)
+      // Falls back to first sorted edge if no prefixed IDs found
+      const structural = sorted.find((e: any) => e.from?.startsWith('dec_') || e.from?.startsWith('opt_'));
+      const causal = sorted.find((e: any) => e.from?.startsWith('fac_'));
+      const bridge = sorted.find((e: any) => e.to?.startsWith('goal_'));
+      const stratified = [structural, causal, bridge].filter(Boolean);
+      const diagSample = (stratified.length > 0 ? stratified : sorted.slice(0, 3)).map(mapEdge);
+
+      const withStrengthCount = allEdges.filter((e: any) => e.strength_mean !== undefined).length;
+      const withNestedCount = allEdges.filter((e: any) => typeof e.strength === 'object' && e.strength !== null).length;
+
+      log.debug(
+        {
+          event: 'llm.normalisation.post_extraction_diagnostic',
+          edge_count: allEdges.length,
+          edges_with_strength_mean: withStrengthCount,
+          edges_with_nested_strength: withNestedCount,
+          sample_edges: diagSample,
+        },
+        `[DIAGNOSTIC] Edge fields after V4 extraction: ${withStrengthCount}/${allEdges.length} have strength_mean`,
+      );
+    }
+  }
+
+  // ========================================================================
+  // NODE DATA NORMALISATION (single pass):
+  //  1. Convert array-form interventions → object-form on option nodes
+  //     (Anthropic structured outputs cannot produce Record<K,V>)
+  //  2. Strip empty/partial data objects that would fail the Zod NodeData
+  //     union (requires value, interventions, or operator)
+  // ========================================================================
+  if (Array.isArray(obj.nodes)) {
+    obj.nodes = (obj.nodes as any[]).map((node: any) => {
+      if (!node || typeof node !== 'object') return node;
+
+      // Step 1: Convert array-form interventions on option nodes
+      if (node.kind === 'option' && node.data && typeof node.data === 'object') {
+        const interventions = node.data.interventions;
+        if (Array.isArray(interventions)) {
+          const mapped: Record<string, number> = {};
+          for (const item of interventions) {
+            if (item && typeof item === 'object' && typeof item.factor_id === 'string' && typeof item.value === 'number') {
+              mapped[item.factor_id] = item.value;
+            }
+          }
+          if (Object.keys(mapped).length > 0) {
+            log.debug({
+              event: 'llm.normalisation.interventions_array_to_object',
+              node_id: node.id,
+              count: Object.keys(mapped).length,
+            }, `Converted array-form interventions to object for ${node.id}`);
+          }
+          node = { ...node, data: { ...node.data, interventions: mapped } };
+        }
+      }
+
+      // Step 1b: Strip interventions sentinel from non-option nodes.
+      // Anthropic structured outputs produces interventions: [] on all nodes due
+      // to the flat schema; only option nodes should retain interventions.
+      // Without this, the empty array keeps data alive after handleUnreachableFactors
+      // deletes data.value, causing Zod NodeData union failures (invalid_union).
+      // Uses key-presence ("in") rather than !== undefined so that null-coerced-
+      // to-undefined sentinels are also caught.
+      if (node.kind !== 'option' && node.data && typeof node.data === 'object' && "interventions" in node.data) {
+        const { interventions: _sentinel, ...restData } = node.data;
+        node = { ...node, data: Object.keys(restData).length > 0 ? restData : undefined };
+      }
+
+      // Step 2: Parse JSON-string encoding_map on factor nodes back to Record<string,string>.
+      // The Anthropic structured outputs schema emits encoding_map as a JSON string
+      // (additionalProperties:false makes dynamic-key objects impossible in structured outputs).
+      if (node.data && typeof node.data === 'object' && typeof node.data.encoding_map === 'string') {
+        try {
+          const parsed = JSON.parse(node.data.encoding_map);
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            node = { ...node, data: { ...node.data, encoding_map: parsed } };
+          } else {
+            // Valid JSON but wrong shape (array, primitive, null) — drop the field
+            const { encoding_map: _dropped, ...restData } = node.data;
+            node = { ...node, data: restData };
+          }
+        } catch {
+          // Malformed JSON — drop the field rather than propagating bad data
+          const { encoding_map: _dropped, ...restData } = node.data;
+          node = { ...node, data: restData };
+        }
+      }
+
+      // Step 3: Strip data objects that lack a union-discriminating key.
+      // Preserve data if it contains factor metadata (factor_type, extractionType,
+      // uncertainty_drivers, encoding_map) even when value is absent — the deterministic
+      // sweep fills value defaults and these metadata fields must survive.
+      const data = node.data;
+      if (data && typeof data === 'object') {
+        const hasUnionKey = typeof data.value === 'number' || data.interventions || data.operator;
+        const hasFactorMetadata = data.factor_type || data.extractionType || data.uncertainty_drivers || data.encoding_map;
+        if (!hasUnionKey && !hasFactorMetadata) {
+          const { data: _stripped, ...rest } = node;
+          log.debug({
+            event: 'llm.normalisation.empty_data_stripped',
+            node_id: node.id,
+            node_kind: node.kind,
+            data_keys: Object.keys(data),
+          }, `Stripped empty data object from ${node.id} (no value/interventions/operator/factor metadata)`);
+          return rest;
+        }
+      }
+
+      return node;
+    });
   }
 
   if (normalisedCount > 0) {
@@ -285,25 +907,75 @@ export function normaliseDraftResponse(raw: unknown): unknown {
 }
 
 /**
- * Ensure all controllable factors have baseline values (data.value).
+ * Ensure every controllable factor states its baseline — as a number if the
+ * model gave one, and otherwise as an EXPLICIT UNKNOWN.
  *
  * Controllable factors are factors with incoming option→factor edges.
- * When LLM fails to output data.value for a controllable factor,
- * we add a default value of 1.0 with extractionType: "inferred".
  *
- * This ensures ISL can compute sensitivity analysis.
+ * ── WHAT THIS FUNCTION USED TO DO, AND WHY IT STOPPED ──────────────────────
+ * It wrote `data.value = 0.5` with `extractionType: "inferred"` for every
+ * controllable factor the model left without a value, because
+ * `graph-validator.ts` treated a valueless factor as an INVALID GRAPH. The
+ * number was chosen to satisfy that gate and carried no information.
+ *
+ * It was never inert. ISL's elasticity is `(causal path gain) x (the factor's
+ * baseline) / (baseline outcome mean)`, so the placeholder is a multiplicative
+ * term in the headline sensitivity — measured against ISL `28fe0c95`, three
+ * factors at 0.5 produced identical elasticity to 17 s.f., and moving one to
+ * 0.8 scaled its elasticity by exactly 1.6. PLoT separately derives sigma as
+ * `|value| * 0.15`. Downstream the placeholder carried the SAME label as a
+ * genuinely reasoned estimate, because the `value_tier` stamp died at the CEE
+ * boundary.
+ *
+ * The gate now accepts an explicit unknown (`graph-validator.ts`
+ * `validateFactorData`), so the honest answer is finally expressible and this
+ * function gives it: no number, `prior: uniform(0,1)`, `prior_is_unquantified`.
+ *
+ * ⚠ THIS IS A GENERALISATION, NOT A SECOND MECHANISM. The shape and the
+ * wording come from `unquantified-factor.ts`, which `unreachable-factors.ts`
+ * also writes through. Two same-purpose mechanisms under different names is
+ * this estate's chronic defect.
+ *
+ * ⚠⚠ SAFETY NET AGREEMENT — THIS PARAGRAPH WAS FALSE, AND THE MARKING BELOW WAS
+ * A NO-OP ON THE DEPLOYED PRODUCT FOR THE WHOLE TIME IT STOOD. Superseded text:
+ * ~~`fixControllableMissingData()` (deterministic-sweep) still writes `0.5`, and
+ * it is gated on the validator reporting CONTROLLABLE_MISSING_DATA. Because the
+ * factors this function marks no longer raise that violation, it does not
+ * inherit this population.~~
+ *
+ * The relaxation in `graph-validator.ts::validateFactorData` exempts `value`
+ * ALONE — `extractionType`, `factor_type` and `uncertainty_drivers` stay
+ * required, and that file says so in terms. A factor the model emits BARE (the
+ * common shape on the real wire) therefore STILL raises
+ * CONTROLLABLE_MISSING_DATA after this function marks it, on those three fields.
+ * `fixControllableMissingData` gated on the CODE and never on WHICH fields were
+ * missing, so it fired and wrote the `0.5` back over the honest unknown.
+ *
+ * Measured on cee-staging, 6 fresh guest drafts, 2026-08-31: 19 of 20
+ * controllable factors carried `prior_is_unquantified: true` AND `value: 0.5` on
+ * the SAME node. The two writers were not disjoint; they were stacked.
+ *
+ * ⚠ AND THE PIN COULD NOT SEE IT. Block D of
+ * `provenance/__tests__/honest-unknown-factor.test.ts` asserted the coupling on
+ * a fixture that already carried all three other fields — the one shape where no
+ * violation survives. It was true as stated and blind to the shape that ships.
+ * The coupling is now enforced at the consumer instead of assumed here:
+ * `fixControllableMissingData` skips the value write when
+ * `factorIsExplicitlyUnquantified(node)`, and block H drives the composed
+ * W1 → validate → sweep path on a BARE factor.
  *
  * @param response - Draft graph response
- * @returns Response with baseline values ensured on controllable factors
+ * @returns Response with every controllable factor's baseline stated, and the
+ *          ids of those stated as UNKNOWN rather than as a number
  */
 export function ensureControllableFactorBaselines(response: unknown): {
   response: unknown;
-  defaultedFactors: string[];
+  unquantifiedFactors: string[];
 } {
-  const defaultedFactors: string[] = [];
+  const unquantifiedFactors: string[] = [];
 
   if (!response || typeof response !== 'object') {
-    return { response, defaultedFactors };
+    return { response, unquantifiedFactors };
   }
 
   const obj = response as Record<string, unknown>;
@@ -311,7 +983,7 @@ export function ensureControllableFactorBaselines(response: unknown): {
   const edges = obj.edges as Array<Record<string, unknown>> | undefined;
 
   if (!Array.isArray(nodes) || !Array.isArray(edges)) {
-    return { response, defaultedFactors };
+    return { response, unquantifiedFactors };
   }
 
   // Build set of controllable factor IDs (factors with incoming option→factor edges)
@@ -345,40 +1017,106 @@ export function ensureControllableFactorBaselines(response: unknown): {
       return node;
     }
 
-    // Check if node already has data.value
+    // Check if node already has data.value (coerce string → number if needed)
     const data = node.data as Record<string, unknown> | undefined;
+    if (data && typeof data.value === 'string') {
+      const parsed = Number(data.value);
+      if (!Number.isNaN(parsed)) {
+        // Return a new node with coerced value — avoid mutating the input
+        return { ...node, data: { ...data, value: parsed } };
+      }
+    }
     if (data && typeof data.value === 'number') {
       return node; // Already has value
     }
 
-    // Add default baseline value
-    defaultedFactors.push(nodeId);
-    log.info({
-      event: 'llm.normalisation.factor_baseline_defaulted',
-      factor_id: nodeId,
-      default_value: 1.0,
-      extraction_type: 'inferred',
-    }, `Controllable factor ${nodeId} missing data.value, defaulting to 1.0`);
+    // ⛔⛔ A MODEL-SUPPLIED PRIOR IS INFORMATION. DO NOT OVERWRITE IT.
+    //
+    // The first round of this change wrote the ignorance prior unconditionally,
+    // and that was a NEW information-loss path introduced by a fix for
+    // information loss. A model emitting `uniform(0.6, 1.0)` — centre 0.8 — had
+    // its prior replaced by `uniform(0, 1)` STAMPED `prior_is_unquantified`:
+    // a false claim of ignorance about a factor the model had information on,
+    // moving the centre to 0.5 on a quantity ISL's elasticity is linear in.
+    // Before this PR the prior survived, so it was a REGRESSION, not a gap.
+    //
+    // It is not hypothetical. The served prompt (v187 — NOT `defaults-v19.ts`,
+    // which is not the served prompt) teaches narrowed ranges, and a sweep of
+    // all five shipped starters found 14 priors, EVERY ONE `uniform` and EVERY
+    // ONE NARROWED (0.4–0.9, 0.25–0.75, 0.3–0.8, 0.265–0.795 …) — and ZERO at
+    // exactly (0,1). That is the corpus a tester meets.
+    //
+    // ⭐ THE THREE LEGITIMATE STATES, AND THIS BRANCH IS THE SECOND ONE.
+    // explicit user fact → PRESERVE (the return above) · defensible estimate,
+    // WITH its uncertainty → the estimate (here) · genuinely unknown → UNKNOWN
+    // (below). A stated distribution IS a stated level; it needs no value and
+    // it must not be relabelled as ignorance.
+    //
+    // The test is `shouldPreserveModelPrior`, NOT "has a prior". Two things are
+    // not information and must fall through to the honest unknown rather than be
+    // preserved: a malformed or degenerate prior (unusable), and a prior
+    // spanning the WHOLE unit interval — which the served prompt v187 teaches as
+    // the encoding for "unknown / no qualifier", i.e. the model saying it does
+    // not know. Preserving that unflagged is LESS disclosure than staging gave.
+    if (shouldPreserveModelPrior(node)) {
+      return node;
+    }
 
+    // ⛔ NO SUBSTITUTION. State the unknown instead of inventing a midpoint.
+    //
+    // The `value_tier: "fallback_default"` stamp is deliberately NOT written
+    // here any more: it tiers a VALUE, and there is now no value to tier. A
+    // stamp saying "this number is a fallback" on a node carrying no number
+    // would be a second, contradictory account of the same fact — and the
+    // discriminator downstream is `prior_is_unquantified`, which travels inside
+    // the prior it qualifies and cannot be orphaned.
+    // ⚠ AN UNUSABLE `value` MUST GO, NOT MERELY BE IGNORED. Reaching here means
+    // `data.value` is absent, or present and NOT coercible to a finite number
+    // (the two returns above take every usable case). The old code overwrote it
+    // with `0.5`; simply spreading `data` would now PRESERVE it — and the
+    // validator's `data?.value === undefined` gate reads a garbage string as
+    // "present", so it would ship a non-numeric level downstream under a clean
+    // validation. Dropping it is what makes the node's state honest AND
+    // well-formed; the explicit unknown is then the only account of the level.
+    const { value: _unusableValue, ...dataWithoutUnusableValue } = data ?? {};
+
+    unquantifiedFactors.push(nodeId);
+    log.info({
+      event: 'llm.normalisation.factor_baseline_left_unquantified',
+      factor_id: nodeId,
+      extraction_type: 'inferred',
+    }, `Controllable factor ${nodeId} has no stated value; left explicitly unquantified rather than defaulted`);
+
+    const existingType = data?.extractionType;
     return {
       ...node,
+      // MARK, NEVER SUPPRESS. The factor stays visibly present and carries
+      // maximal uncertainty — the one range over the unit interval that
+      // asserts nothing. Withholding the prior entirely would strip the node of
+      // support and leave any constraint targeting it evaluating trivially
+      // (P=1.0/P=0.0 at intercept=0), which is the failure the original prior
+      // synthesis was written to prevent.
+      prior: buildUnquantifiedPrior(),
       data: {
-        ...(data || {}),
-        value: 1.0,
-        extractionType: 'inferred',
+        ...dataWithoutUnusableValue,
+        // Preserve LLM-emitted extractionType if present; only default when
+        // truly absent — matches the guard in fixControllableMissingData().
+        // The validator requires this field independently of `value`, and the
+        // relaxation above is scoped to `value` alone.
+        extractionType: existingType ?? 'inferred',
       },
     };
   });
 
-  if (defaultedFactors.length > 0) {
+  if (unquantifiedFactors.length > 0) {
     emit(TelemetryEvents.FactorBaselineDefaulted, {
-      defaulted_count: defaultedFactors.length,
-      factor_ids: defaultedFactors,
+      defaulted_count: unquantifiedFactors.length,
+      factor_ids: unquantifiedFactors,
     });
   }
 
   return {
     response: { ...obj, nodes: updatedNodes },
-    defaultedFactors,
+    unquantifiedFactors,
   };
 }

@@ -1,0 +1,1437 @@
+{
+ "meta": {
+  "roots": [
+   "dec_hiring",
+   "fac_budget_remaining"
+  ],
+  "leaves": [
+   "goal_feature_delivery"
+  ],
+  "source": "assistant"
+ },
+ "edges": [
+  {
+   "to": "opt_status_quo",
+   "from": "dec_hiring",
+   "origin": "ai",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1,
+   "provenance_display": "ai_inferred"
+  },
+  {
+   "to": "opt_tech_lead",
+   "from": "dec_hiring",
+   "origin": "ai",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1,
+   "provenance_display": "ai_inferred"
+  },
+  {
+   "to": "opt_two_mid",
+   "from": "dec_hiring",
+   "origin": "ai",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1,
+   "provenance_display": "ai_inferred"
+  },
+  {
+   "to": "out_delivery_speed",
+   "from": "fac_budget_remaining",
+   "origin": "ai",
+   "strength": {
+    "std": 0.06785714285714285,
+    "mean": 0.10178571428571427
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 0.7,
+   "provenance_display": "ai_inferred"
+  },
+  {
+   "to": "out_delivery_speed",
+   "from": "fac_ml_indicator",
+   "origin": "ai",
+   "strength": {
+    "std": 0.12723214285714282,
+    "mean": 0.4665178571428571
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 0.78,
+   "provenance_display": "ai_inferred"
+  },
+  {
+   "to": "risk_coordination",
+   "from": "fac_ml_indicator",
+   "origin": "ai",
+   "strength": {
+    "std": 0.15,
+    "mean": 0.5
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 0.82,
+   "provenance_display": "ai_inferred"
+  },
+  {
+   "to": "risk_time_to_productivity",
+   "from": "fac_ml_indicator",
+   "origin": "ai",
+   "strength": {
+    "std": 0.14,
+    "mean": 0.35
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 0.8,
+   "provenance_display": "ai_inferred"
+  },
+  {
+   "to": "out_delivery_speed",
+   "from": "fac_tl_indicator",
+   "origin": "ai",
+   "strength": {
+    "std": 0.1526785714285714,
+    "mean": 0.38169642857142855
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 0.8,
+   "provenance_display": "ai_inferred"
+  },
+  {
+   "to": "out_technical_quality",
+   "from": "fac_tl_indicator",
+   "origin": "ai",
+   "strength": {
+    "std": 0.14,
+    "mean": 0.65
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 0.85,
+   "provenance_display": "ai_inferred"
+  },
+  {
+   "to": "risk_time_to_productivity",
+   "from": "fac_tl_indicator",
+   "origin": "ai",
+   "strength": {
+    "std": 0.12,
+    "mean": 0.2
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 0.75,
+   "provenance_display": "ai_inferred"
+  },
+  {
+   "to": "fac_ml_indicator",
+   "from": "opt_status_quo",
+   "origin": "ai",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1,
+   "provenance_display": "ai_inferred"
+  },
+  {
+   "to": "fac_tl_indicator",
+   "from": "opt_status_quo",
+   "origin": "ai",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1,
+   "provenance_display": "ai_inferred"
+  },
+  {
+   "to": "fac_tl_indicator",
+   "from": "opt_tech_lead",
+   "origin": "ai",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1,
+   "provenance_display": "ai_inferred"
+  },
+  {
+   "to": "fac_ml_indicator",
+   "from": "opt_two_mid",
+   "origin": "ai",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1,
+   "provenance_display": "ai_inferred"
+  },
+  {
+   "to": "goal_feature_delivery",
+   "from": "out_delivery_speed",
+   "origin": "ai",
+   "strength": {
+    "std": 0.1,
+    "mean": 0.65
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 0.95,
+   "provenance_display": "ai_inferred"
+  },
+  {
+   "to": "goal_feature_delivery",
+   "from": "out_technical_quality",
+   "origin": "ai",
+   "strength": {
+    "std": 0.12,
+    "mean": 0.3
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 0.85,
+   "provenance_display": "ai_inferred"
+  },
+  {
+   "to": "goal_feature_delivery",
+   "from": "risk_coordination",
+   "origin": "ai",
+   "strength": {
+    "std": 0.12,
+    "mean": -0.25
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "negative",
+   "exists_probability": 0.82,
+   "provenance_display": "ai_inferred"
+  },
+  {
+   "to": "goal_feature_delivery",
+   "from": "risk_time_to_productivity",
+   "origin": "ai",
+   "strength": {
+    "std": 0.14,
+    "mean": -0.35
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "negative",
+   "exists_probability": 0.88,
+   "provenance_display": "ai_inferred"
+  }
+ ],
+ "nodes": [
+  {
+   "id": "dec_hiring",
+   "kind": "decision",
+   "label": "Engineering Hiring Decision",
+   "provenance": "ai_inferred"
+  },
+  {
+   "id": "fac_budget_remaining",
+   "kind": "factor",
+   "label": "Remaining Hiring Budget",
+   "prior": {
+    "range_max": 1,
+    "range_min": 0,
+    "distribution": "uniform"
+   },
+   "category": "external",
+   "provenance": "from_brief",
+   "display_value": "0 to 1",
+   "extractionType": "explicit"
+  },
+  {
+   "id": "fac_ml_indicator",
+   "kind": "factor",
+   "label": "Two Mid-Level Developers Hired",
+   "category": "controllable",
+   "provenance": "ai_inferred",
+   "encoding_map": {
+    "0": "No mid-level developers hired",
+    "1": "Two mid-level developers hired"
+   },
+   "display_value": "No mid-level developers hired",
+   "observed_state": {
+    "cap": 0,
+    "value": 0,
+    "source": "cee_inference",
+    "raw_value": 0,
+    "factor_type": "other",
+    "extractionType": "inferred",
+    "uncertainty_drivers": [
+     "Onboarding time for two new hires",
+     "Coordination overhead with existing team"
+    ]
+   }
+  },
+  {
+   "id": "fac_tl_indicator",
+   "kind": "factor",
+   "label": "Tech Lead Hired",
+   "category": "controllable",
+   "provenance": "ai_inferred",
+   "encoding_map": {
+    "0": "No tech lead hired",
+    "1": "Tech lead hired"
+   },
+   "display_value": "No tech lead in place",
+   "observed_state": {
+    "cap": 0,
+    "value": 0,
+    "source": "cee_inference",
+    "raw_value": 0,
+    "factor_type": "other",
+    "extractionType": "inferred",
+    "uncertainty_drivers": [
+     "Availability of senior AI talent",
+     "Salary negotiation outcome"
+    ]
+   }
+  },
+  {
+   "id": "goal_feature_delivery",
+   "kind": "goal",
+   "label": "Ship AI Features Within 6 Months",
+   "provenance": "ai_inferred"
+  },
+  {
+   "id": "opt_status_quo",
+   "kind": "option",
+   "label": "Delay Hire (Status Quo)",
+   "provenance": "ai_inferred",
+   "is_baseline": false,
+   "interventions": {
+    "fac_ml_indicator": {
+     "value": 0,
+     "source": "brief_extraction",
+     "reasoning": "Direct from V4 prompt data.interventions",
+     "target_match": {
+      "node_id": "fac_ml_indicator",
+      "confidence": "high",
+      "match_type": "exact_id"
+     },
+     "value_confidence": "high"
+    },
+    "fac_tl_indicator": {
+     "value": 0,
+     "source": "brief_extraction",
+     "reasoning": "Direct from V4 prompt data.interventions",
+     "target_match": {
+      "node_id": "fac_tl_indicator",
+      "confidence": "high",
+      "match_type": "exact_id"
+     },
+     "value_confidence": "high"
+    }
+   }
+  },
+  {
+   "id": "opt_tech_lead",
+   "kind": "option",
+   "label": "Hire One Tech Lead",
+   "provenance": "ai_inferred",
+   "is_baseline": false,
+   "interventions": {
+    "fac_ml_indicator": {
+     "value": 0,
+     "source": "brief_extraction",
+     "reasoning": "Direct from V4 prompt data.interventions",
+     "target_match": {
+      "node_id": "fac_ml_indicator",
+      "confidence": "high",
+      "match_type": "exact_id"
+     },
+     "value_confidence": "high"
+    },
+    "fac_tl_indicator": {
+     "value": 1,
+     "source": "brief_extraction",
+     "reasoning": "Direct from V4 prompt data.interventions",
+     "target_match": {
+      "node_id": "fac_tl_indicator",
+      "confidence": "high",
+      "match_type": "exact_id"
+     },
+     "value_confidence": "high"
+    }
+   }
+  },
+  {
+   "id": "opt_two_mid",
+   "kind": "option",
+   "label": "Hire Two Mid-Level Developers",
+   "provenance": "ai_inferred",
+   "is_baseline": false,
+   "interventions": {
+    "fac_ml_indicator": {
+     "value": 1,
+     "source": "brief_extraction",
+     "reasoning": "Direct from V4 prompt data.interventions",
+     "target_match": {
+      "node_id": "fac_ml_indicator",
+      "confidence": "high",
+      "match_type": "exact_id"
+     },
+     "value_confidence": "high"
+    },
+    "fac_tl_indicator": {
+     "value": 0,
+     "source": "brief_extraction",
+     "reasoning": "Direct from V4 prompt data.interventions",
+     "target_match": {
+      "node_id": "fac_tl_indicator",
+      "confidence": "high",
+      "match_type": "exact_id"
+     },
+     "value_confidence": "high"
+    }
+   }
+  },
+  {
+   "id": "out_delivery_speed",
+   "kind": "outcome",
+   "label": "AI Feature Delivery Speed",
+   "provenance": "ai_inferred"
+  },
+  {
+   "id": "out_technical_quality",
+   "kind": "outcome",
+   "label": "Technical Architecture Quality",
+   "provenance": "ai_inferred"
+  },
+  {
+   "id": "risk_coordination",
+   "kind": "risk",
+   "label": "Team Coordination Overhead",
+   "provenance": "ai_inferred"
+  },
+  {
+   "id": "risk_time_to_productivity",
+   "kind": "risk",
+   "label": "Time to Productivity",
+   "provenance": "ai_inferred",
+   "display_value": "~3 months to full productivity",
+   "observed_state": {
+    "cap": 6,
+    "unit": "months",
+    "value": 0.5,
+    "source": "cee_inference",
+    "raw_value": 3,
+    "factor_type": "time",
+    "extractionType": "inferred",
+    "uncertainty_drivers": []
+   }
+  }
+ ],
+ "trace": {
+  "engine": {
+   "model": "claude-sonnet-4-6",
+   "version": "1.12.0",
+   "provider": "anthropic"
+  },
+  "pipeline": {
+   "enrich": {
+    "source": "unified_pipeline",
+    "called_count": 1,
+    "factors_added": 0,
+    "extraction_mode": "v4_complete_skip",
+    "factors_skipped": 0,
+    "factors_enhanced": 0
+   },
+   "repair": {
+    "edge_restore": {
+     "restoredCount": 0
+    },
+    "deterministic_sweep": {
+     "sweep_ran": true,
+     "status_quo": {
+      "fixed": false,
+      "marked_droppable": false
+     },
+     "edge_format": "V1_FLAT",
+     "graph_delta": {
+      "edges_after": 18,
+      "nodes_after": 12,
+      "edges_before": 18,
+      "nodes_before": 12
+     },
+     "rescue_score": 5,
+     "repairs_count": 2,
+     "sweep_version": "v3",
+     "bucket_summary": {
+      "a": 0,
+      "b": 1,
+      "c": 0
+     },
+     "violations_after": 0,
+     "llm_repair_needed": false,
+     "violations_before": 1,
+     "factor_goal_splits": 0,
+     "unreachable_factors": {
+      "reclassified": [
+       "fac_budget_remaining"
+      ],
+      "marked_droppable": []
+     },
+     "complexity_cap_pruned": 0,
+     "goal_threshold_stripped": 0,
+     "disconnected_options_after": [],
+     "disconnected_options_before": [],
+     "option_goal_shortcuts_removed": 0,
+     "option_goal_shortcuts_skipped": 0,
+     "option_risk_shortcuts_removed": 0,
+     "option_risk_shortcuts_skipped": 0,
+     "option_goal_shortcuts_rerouted": 0,
+     "option_risk_shortcuts_rerouted": 0,
+     "disconnected_observables_pruned": [],
+     "goal_threshold_possibly_inferred": 0,
+     "option_outcome_shortcuts_removed": 0,
+     "option_outcome_shortcuts_skipped": 0,
+     "remaining_forbidden_edges_removed": 0
+    },
+    "deterministic_enforcement": {
+     "ran": true,
+     "blocked": false,
+     "total_repairs": 1,
+     "nodes_rescaled": 1,
+     "bridge_chains_removed": 0,
+     "bridge_goal_edges_added": 0,
+     "edges_skipped_non_finite": 0,
+     "post_validation_error_count": 0,
+     "post_validation_warning_count": 0
+    }
+   },
+   "status": "success",
+   "llm_raw": {
+    "text": "{\"nodes\":[{\"id\":\"dec_hiring\",\"kind\":\"decision\",\"label\":\"Engineering Hiring Decision\",\"category\":null,\"data\":null,\"prior\":null,\"is_baseline\":false,\"intercept\":null,\"goal_threshold\":null,\"goal_threshold_raw\":null,\"goal_threshold_unit\":null,\"goal_threshold_cap\":0},{\"id\":\"opt_tech_lead\",\"kind\":\"option\",\"label\":\"Hire One Tech Lead\",\"category\":null,\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"uncertainty_drivers\":[],\"interventions\":[{\"factor_id\":\"fac_tl_indicator\",\"value\":1},{\"factor_id\":\"fac_ml_indicator\",\"value\":0}],\"raw_value\":0,\"unit\":\"\",\"cap\":0,\"encoding_map\":\"\",\"is_baseline\":false,\"display_value\":\"\"},\"prior\":null,\"is_baseline\":false,\"intercept\":null,\"goal_threshold\":null,\"goal_threshold_raw\":null,\"goal_threshold_unit\":null,\"goal_threshold_cap\":0},{\"id\":\"opt_two_mid\",\"kind\":\"option\",\"label\":\"Hire Two Mid-Level Developers\",\"category\":null,\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"uncertainty_drivers\":[],\"interventions\":[{\"factor_id\":\"fac_tl_indicator\",\"value\":0},{\"factor_id\":\"fac_ml_indicator\",\"value\":1}],\"raw_value\":0,\"unit\":\"\",\"cap\":0,\"encoding_map\":\"\",\"is_baseline\":false,\"display_value\":\"\"},\"prior\":null,\"is_baseline\":false,\"intercept\":null,\"goal_threshold\":null,\"goal_threshold_raw\":null,\"goal_threshold_unit\":null,\"goal_threshold_cap\":0},{\"id\":\"opt_status_quo\",\"kind\":\"option\",\"label\":\"Delay Hire (Status Quo)\",\"category\":null,\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"uncertainty_drivers\":[],\"interventions\":[{\"factor_id\":\"fac_tl_indicator\",\"value\":0},{\"factor_id\":\"fac_ml_indicator\",\"value\":0}],\"raw_value\":0,\"unit\":\"\",\"cap\":0,\"encoding_map\":\"\",\"is_baseline\":false,\"display_value\":\"\"},\"prior\":null,\"is_baseline\":true,\"intercept\":null,\"goal_threshold\":null,\"goal_threshold_raw\":null,\"goal_threshold_unit\":null,\"goal_threshold_cap\":0},{\"id\":\"fac_tl_indicator\",\"kind\":\"factor\",\"label\":\"Tech Lead Hired\",\"category\":\"controllable\",\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"uncertainty_drivers\":[\"Availability of senior AI talent\",\"Salary negotiation outcome\"],\"interventions\":[],\"raw_value\":0,\"unit\":\"\",\"cap\":0,\"encoding_map\":\"{\\\"0\\\": \\\"No tech lead hired\\\", \\\"1\\\": \\\"Tech lead hired\\\"}\",\"is_baseline\":false,\"display_value\":\"No tech lead in place\"},\"prior\":null,\"is_baseline\":false,\"intercept\":null,\"goal_threshold\":null,\"goal_threshold_raw\":null,\"goal_threshold_unit\":null,\"goal_threshold_cap\":0},{\"id\":\"fac_ml_indicator\",\"kind\":\"factor\",\"label\":\"Two Mid-Level Developers Hired\",\"category\":\"controllable\",\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"uncertainty_drivers\":[\"Onboarding time for two new hires\",\"Coordination overhead with existing team\"],\"interventions\":[],\"raw_value\":0,\"unit\":\"\",\"cap\":0,\"encoding_map\":\"{\\\"0\\\": \\\"No mid-level developers hired\\\", \\\"1\\\": \\\"Two mid-level developers hired\\\"}\",\"is_baseline\":false,\"display_value\":\"No mid-level developers hired\"},\"prior\":null,\"is_baseline\":false,\"intercept\":null,\"goal_threshold\":null,\"goal_threshold_raw\":null,\"goal_threshold_unit\":null,\"goal_threshold_cap\":0},{\"id\":\"fac_budget_remaining\",\"kind\":\"factor\",\"label\":\"Remaining Hiring Budget\",\"category\":\"observable\",\"data\":{\"value\":1.0,\"extractionType\":\"explicit\",\"factor_type\":\"cost\",\"uncertainty_drivers\":[],\"interventions\":[],\"raw_value\":200000,\"unit\":\"\u00a3\",\"cap\":200000,\"encoding_map\":\"\",\"is_baseline\":false,\"display_value\":\"\u00a3200,000\"},\"prior\":null,\"is_baseline\":false,\"intercept\":null,\"goal_threshold\":null,\"goal_threshold_raw\":null,\"goal_threshold_unit\":null,\"goal_threshold_cap\":0},{\"id\":\"out_delivery_speed\",\"kind\":\"outcome\",\"label\":\"AI Feature Delivery Speed\",\"category\":null,\"data\":null,\"prior\":null,\"is_baseline\":false,\"intercept\":null,\"goal_threshold\":null,\"goal_threshold_raw\":null,\"goal_threshold_unit\":null,\"goal_threshold_cap\":0},{\"id\":\"out_technical_quality\",\"kind\":\"outcome\",\"label\":\"Technical Architecture Quality\",\"category\":null,\"data\":null,\"prior\":null,\"is_baseline\":false,\"intercept\":null,\"goal_threshold\":null,\"goal_threshold_raw\":null,\"goal_threshold_unit\":null,\"goal_threshold_cap\":0},{\"id\":\"risk_coordination\",\"kind\":\"risk\",\"label\":\"Team Coordination Overhead\",\"category\":null,\"data\":null,\"prior\":null,\"is_baseline\":false,\"intercept\":null,\"goal_threshold\":null,\"goal_threshold_raw\":null,\"goal_threshold_unit\":null,\"goal_threshold_cap\":0},{\"id\":\"risk_time_to_productivity\",\"kind\":\"risk\",\"label\":\"Time to Productivity\",\"category\":null,\"data\":{\"value\":0.5,\"extractionType\":\"inferred\",\"factor_type\":\"time\",\"uncertainty_drivers\":[],\"interventions\":[],\"raw_value\":3,\"unit\":\"months\",\"cap\":6,\"encoding_map\":\"\",\"is_baseline\":false,\"display_value\":\"~3 months to full productivity\"},\"prior\":null,\"is_baseline\":false,\"intercept\":null,\"goal_threshold\":null,\"goal_threshold_raw\":null,\"goal_threshold_unit\":null,\"goal_threshold_cap\":0},{\"id\":\"goal_feature_delivery\",\"kind\":\"goal\",\"label\":\"Ship AI Features Within 6 Months\",\"category\":null,\"data\":null,\"prior\":null,\"is_baseline\":false,\"intercept\":null,\"goal_threshold\":null,\"goal_threshold_raw\":null,\"goal_threshold_unit\":null,\"goal_threshold_cap\":0}],\"edges\":[{\"from\":\"dec_hiring\",\"to\":\"opt_tech_lead\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"dec_hiring\",\"to\":\"opt_two_mid\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"dec_hiring\",\"to\":\"opt_status_quo\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_tech_lead\",\"to\":\"fac_tl_indicator\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_two_mid\",\"to\":\"fac_ml_indicator\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_status_quo\",\"to\":\"fac_tl_indicator\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_status_quo\",\"to\":\"fac_ml_indicator\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"fac_tl_indicator\",\"to\":\"out_delivery_speed\",\"strength\":{\"mean\":0.45,\"std\":0.18},\"exists_probability\":0.80,\"effect_direction\":\"positive\"},{\"from\":\"fac_tl_indicator\",\"to\":\"out_technical_quality\",\"strength\":{\"mean\":0.65,\"std\":0.14},\"exists_probability\":0.85,\"effect_direction\":\"positive\"},{\"from\":\"fac_tl_indicator\",\"to\":\"risk_time_to_productivity\",\"strength\":{\"mean\":0.20,\"std\":0.12},\"exists_probability\":0.75,\"effect_direction\":\"positive\"},{\"from\":\"fac_ml_indicator\",\"to\":\"out_delivery_speed\",\"strength\":{\"mean\":0.55,\"std\":0.15},\"exists_probability\":0.78,\"effect_direction\":\"positive\"},{\"from\":\"fac_ml_indicator\",\"to\":\"risk_coordination\",\"strength\":{\"mean\":0.50,\"std\":0.15},\"exists_probability\":0.82,\"effect_direction\":\"positive\"},{\"from\":\"fac_ml_indicator\",\"to\":\"risk_time_to_productivity\",\"strength\":{\"mean\":0.35,\"std\":0.14},\"exists_probability\":0.80,\"effect_direction\":\"positive\"},{\"from\":\"fac_budget_remaining\",\"to\":\"out_delivery_speed\",\"strength\":{\"mean\":0.12,\"std\":0.08},\"exists_probability\":0.70,\"effect_direction\":\"positive\"},{\"from\":\"out_delivery_speed\",\"to\":\"goal_feature_delivery\",\"strength\":{\"mean\":0.65,\"std\":0.10},\"exists_probability\":0.95,\"effect_direction\":\"positive\"},{\"from\":\"out_technical_quality\",\"to\":\"goal_feature_delivery\",\"strength\":{\"mean\":0.30,\"std\":0.12},\"exists_probability\":0.85,\"effect_direction\":\"positive\"},{\"from\":\"risk_coordination\",\"to\":\"goal_feature_delivery\",\"strength\":{\"mean\":-0.25,\"std\":0.12},\"exists_probability\":0.82,\"effect_direction\":\"negative\"},{\"from\":\"risk_time_to_productivity\",\"to\":\"goal_feature_delivery\",\"strength\":{\"mean\":-0.35,\"std\":0.14},\"exists_probability\":0.88,\"effect_direction\":\"negative\"}],\"causal_claims\":\"[{\\\"type\\\":\\\"direct_effect\\\",\\\"from\\\":\\\"fac_tl_indicator\\\",\\\"to\\\":\\\"out_technical_quality\\\",\\\"stated_strength\\\":\\\"strong\\\"},{\\\"type\\\":\\\"direct_effect\\\",\\\"from\\\":\\\"fac_ml_indicator\\\",\\\"to\\\":\\\"out_delivery_speed\\\",\\\"stated_strength\\\":\\\"strong\\\"},{\\\"type\\\":\\\"direct_effect\\\",\\\"from\\\":\\\"fac_ml_indicator\\\",\\\"to\\\":\\\"risk_coordination\\\",\\\"stated_strength\\\":\\\"strong\\\"},{\\\"type\\\":\\\"direct_effect\\\",\\\"from\\\":\\\"fac_tl_indicator\\\",\\\"to\\\":\\\"out_delivery_speed\\\",\\\"stated_strength\\\":\\\"moderate\\\"},{\\\"type\\\":\\\"no_direct_effect\\\",\\\"from\\\":\\\"fac_tl_indicator\\\",\\\"to\\\":\\\"risk_coordination\\\"},{\\\"type\\\":\\\"direct_effect\\\",\\\"from\\\":\\\"risk_time_to_productivity\\\",\\\"to\\\":\\\"goal_feature_delivery\\\",\\\"stated_strength\\\":\\\"moderate\\\"}]\",\"topology_plan\":\"[\\\"dec_hiring \u2192 opt_tech_lead, opt_two_mid, opt_status_quo\\\",\\\"opt_tech_lead \u2192 fac_tl_indicator (sets to 1)\\\",\\\"opt_two_mid \u2192 fac_ml_indicator (sets to 1)\\\",\\\"opt_status_quo \u2192 fac_tl_indicator (0), fac_ml_indicator (0) for path completeness\\\",\\\"fac_tl_indicator \u2192 out_delivery_speed (moderate positive), out_technical_quality (strong positive), risk_time_to_productivity (slight positive)\\\",\\\"fac_ml_indicator \u2192 out_delivery_speed (strong positive), risk_coordination (strong positive), risk_time_to_productivity (moderate positive)\\\",\\\"fac_budget_remaining (observable) \u2192 out_delivery_speed (slight positive)\\\",\\\"out_delivery_speed \u2192 goal_feature_delivery (strong bridge)\\\",\\\"out_technical_quality \u2192 goal_feature_delivery (moderate bridge)\\\",\\\"risk_coordination \u2192 goal_feature_delivery (moderate negative bridge)\\\",\\\"risk_time_to_productivity \u2192 goal_feature_delivery (moderate negative bridge)\\\",\\\"Inbound sum check: out_delivery_speed = 0.45+0.55+0.12=1.12 > 1.0 \u2014 scale to 0.38+0.47+0.10=0.95\\\",\\\"Inbound sum check: risk_time_to_productivity = 0.20+0.35=0.55 OK\\\",\\\"Inbound sum check: risk_coordination = 0.50 OK\\\",\\\"Inbound sum check: out_technical_quality = 0.65 OK\\\"]\",\"coaching\":\"{\\\"summary\\\":\\\"The core tension is between Tech Lead Hired driving Technical Architecture Quality and faster decision-making versus Two Mid-Level Developers Hired delivering more raw coding throughput but introducing Team Coordination Overhead and a longer Time to Productivity \u2014 both of which directly threaten the 6-month deadline. The biggest unmodelled risk is that neither hire profile has been validated against the actual AI feature backlog size or existing team capacity.\\\",\\\"strengthen_items\\\":[{\\\"id\\\":\\\"str_1\\\",\\\"label\\\":\\\"Hybrid or phased hire\\\",\\\"detail\\\":\\\"Hiring one mid-level developer now and deferring the second hire after 3 months could reduce coordination risk while preserving budget flexibility.\\\",\\\"action_type\\\":\\\"add_option\\\",\\\"bias_category\\\":\\\"narrow_framing\\\"},{\\\"id\\\":\\\"str_2\\\",\\\"label\\\":\\\"Backlog size as constraint\\\",\\\"detail\\\":\\\"The AI feature backlog volume and complexity is the decisive missing input \u2014 without it, the model cannot distinguish whether raw throughput or architectural direction is the binding constraint.\\\",\\\"action_type\\\":\\\"add_constraint\\\"}],\\\"widening_log\\\":{\\\"elements_added\\\":[\\\"fac_budget_remaining\\\"],\\\"elements_considered_but_excluded\\\":[\\\"External AI talent market tightness considered but excluded as it affects both options equally and would not change ranking\\\",\\\"Phased hire option considered but excluded from graph as it lacks a distinct intervention profile on current factors \u2014 surfaced in coaching instead\\\"],\\\"brief_completeness\\\":\\\"thin\\\"},\\\"bias_signals\\\":[{\\\"type\\\":\\\"narrow_framing\\\",\\\"detail\\\":\\\"The brief frames this as a binary choice between two hire profiles without considering phased hiring, contractor augmentation, or reallocation of existing team capacity.\\\"}]}\",\"goal_constraints\":[{\"constraint_id\":\"gc_budget\",\"node_id\":\"fac_budget_remaining\",\"operator\":\"<=\",\"value\":1.0,\"label\":\"Total hiring spend within \u00a3200k budget\",\"unit\":\"\u00a3\",\"source_quote\":\"Budget is \u00a3200k\",\"confidence\":1.0,\"provenance\":\"explicit\"},{\"constraint_id\":\"gc_timeline\",\"node_id\":\"risk_time_to_productivity\",\"operator\":\"<=\",\"value\":0.5,\"label\":\"AI features shipped within 6 months\",\"unit\":\"months\",\"source_quote\":\"need our AI features shipped within 6 months\",\"confidence\":1.0,\"provenance\":\"explicit\"}]}",
+    "truncated": true,
+    "char_count": 11880,
+    "output_hash": "703576799ae7b03435eb3873294996a3d107ac21e2f1dfe18a0921177147edd8",
+    "output_preview": "{\"nodes\":[{\"id\":\"dec_hiring\",\"kind\":\"decision\",\"label\":\"Engineering Hiring Decision\",\"category\":null,\"data\":null,\"prior\":null,\"is_baseline\":false,\"intercept\":null,\"goal_threshold\":null,\"goal_threshold_raw\":null,\"goal_threshold_unit\":null,\"goal_threshold_cap\":0},{\"id\":\"opt_tech_lead\",\"kind\":\"option\",\"label\":\"Hire One Tech Lead\",\"category\":null,\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"uncertainty_drivers\":[],\"interventions\":[{\"factor_id\":\"fac_tl_indicator\",\"value\":1},{\"factor_id\":\"fac_ml_indicator\",\"value\":0}],\"raw_value\":0,\"unit\":\"\",\"cap\":0,\"encoding_map\":\"\",\"is_baseline\":false,\"display_value\":\"\"},\"prior\":null,\"is_baseline\":false,\"intercept\":null,\"goal_threshold\":null,\"goal_threshold_raw\":null,\"goal_threshold_unit\":null,\"goal_threshold_cap\":0},{\"id\":\"opt_two_mid\",\"kind\":\"option\",\"label\":\"Hire Two Mid-Level Developers\",\"category\":null,\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"uncertainty_drivers\":[],\"interventions\":[{\"factor_id\":\"fac_tl_indicator\",\"value\":0},{\"factor_id\":\"fac_ml_indicator\",\"value\":1}],\"raw_value\":0,\"unit\":\"\",\"cap\":0,\"encoding_map\":\"\",\"is_baseline\":false,\"display_value\":\"\"},\"prior\":null,\"is_baseline\":false,\"intercept\":null,\"goal_threshold\":null,\"goal_threshold_raw\":null,\"goal_threshold_unit\":null,\"goal_threshold_cap\":0},{\"id\":\"opt_status_quo\",\"kind\":\"option\",\"label\":\"Delay Hire (Status Quo)\",\"category\":null,\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"uncertainty_drivers\":[],\"interventions\":[{\"factor_id\":\"fac_tl_indicator\",\"value\":0},{\"factor_id\":\"fac_ml_indicator\",\"value\":0}],\"raw_value\":0,\"unit\":\"\",\"cap\":0,\"encoding_map\":\"\",\"is_baseline\":false,\"display_value\":\"\"},\"prior\":null,\"is_baseline\":true,\"intercept\":null,\"goal_threshold\":null,\"goal_threshold_raw\":null,\"goal_threshold_unit\":null,\"goal_threshold_cap\":0},{\"id\":\"fac_tl_indicator\",\"kind\":\"factor\",\"label\":\"Tech Lead Hired\",\"category\":\"controllable\",\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"uncer",
+    "output_edge_count": 18,
+    "output_node_count": 12,
+    "full_output_available": true
+   },
+   "final_graph": {
+    "edge_count": 18,
+    "node_count": 12,
+    "node_kinds": [
+     "decision",
+     "factor",
+     "goal",
+     "option",
+     "outcome",
+     "risk"
+    ]
+   },
+   "llm_quality": {
+    "risk_coefficient_corrections": 0
+   },
+   "llm_metadata": {
+    "seed": 17,
+    "model": "claude-sonnet-4-6",
+    "max_tokens": 16384,
+    "duration_ms": 48261,
+    "instance_id": "b6b3cd84",
+    "prompt_hash": "0e6671c83ccaa73c531449c1aea22b3afee3978bd1c9a933f66a49e4a059ae81",
+    "temperature": 0,
+    "token_usage": {
+     "total_tokens": 3863,
+     "prompt_tokens": 286,
+     "completion_tokens": 3577
+    },
+    "cache_age_ms": 533215,
+    "cache_status": "stale",
+    "finish_reason": "end_turn",
+    "prompt_version": "draft_graph_default@v194 (staging)",
+    "response_chars": 11880,
+    "use_staging_mode": true,
+    "prompt_text_version": "v194",
+    "structured_outputs_used": true
+   },
+   "cee_provenance": {
+    "model": "claude-sonnet-4-6",
+    "commit": "bb84828",
+    "version": "1.12.0",
+    "model_id": "claude-sonnet-4-6",
+    "capability": "draft_graph",
+    "prompt_hash": "0e6671c83ccaa73c531449c1aea22b3afee3978bd1c9a933f66a49e4a059ae81",
+    "context_hash": "1ee85d5f46b6",
+    "pipeline_path": "unified",
+    "prompt_source": "supabase",
+    "prompt_version": "draft_graph_default@v194 (staging)",
+    "build_timestamp": "2026-07-09T14:22:08.485Z",
+    "prompt_store_version": 194,
+    "model_override_active": false,
+    "prompt_override_active": false,
+    "engine_base_url_configured": false
+   },
+   "llm_call_count": 1,
+   "repair_summary": {
+    "status_quo": {
+     "fixed": false,
+     "marked_droppable": false
+    },
+    "graph_delta": {
+     "edges_after": 18,
+     "nodes_after": 12,
+     "edges_before": 18,
+     "nodes_before": 12
+    },
+    "bucket_summary": {
+     "a": 0,
+     "b": 1,
+     "c": 0
+    },
+    "llm_repair_called": false,
+    "llm_repair_needed": false,
+    "status_quo_action": "none",
+    "unreachable_factors": {
+     "reclassified": [
+      "fac_budget_remaining"
+     ],
+     "marked_droppable": []
+    },
+    "edge_format_detected": "V1_FLAT",
+    "deterministic_repairs": [
+     {
+      "code": "OBSERVABLE_EXTRA_DATA",
+      "path": "nodes[fac_budget_remaining].data",
+      "action": "Removed factor_type, uncertainty_drivers, and empty interventions sentinel (extra for observable)"
+     },
+     {
+      "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+      "path": "nodes[fac_budget_remaining].category",
+      "action": "Reclassified unreachable factor \"Remaining Hiring Budget\" to external with synthesised prior [0, 1]",
+      "prior_synthesised": true,
+      "synthesised_range": {
+       "range_max": 1,
+       "range_min": 0
+      }
+     },
+     {
+      "code": "INBOUND_BUDGET_RESCALED",
+      "path": "edges[*\u2192out_delivery_speed]",
+      "action": "Rescaled 3 causal inbound edges from sum=1.120 to 0.95"
+     }
+    ],
+    "deterministic_sweep_ran": true,
+    "llm_repair_brief_included": false,
+    "llm_repair_skipped_reason": "deterministic_sweep_sufficient",
+    "remaining_violation_codes": [],
+    "remaining_violations_count": 0,
+    "deterministic_repairs_count": 3,
+    "deterministic_sweep_version": "v3",
+    "risk_coefficient_corrections": []
+   },
+   "field_deletions": {
+    "count": 4,
+    "events": [
+     {
+      "field": "data.factor_type",
+      "stage": "deterministic-sweep",
+      "reason": "OBSERVABLE_EXTRA_DATA",
+      "node_id": "fac_budget_remaining"
+     },
+     {
+      "field": "data.uncertainty_drivers",
+      "stage": "deterministic-sweep",
+      "reason": "OBSERVABLE_EXTRA_DATA",
+      "node_id": "fac_budget_remaining"
+     },
+     {
+      "field": "data.value",
+      "stage": "unreachable-factors",
+      "reason": "UNREACHABLE_FACTOR_RECLASSIFIED",
+      "node_id": "fac_budget_remaining"
+     },
+     {
+      "field": "data",
+      "stage": "unreachable-factors",
+      "reason": "UNREACHABLE_FACTOR_RECLASSIFIED",
+      "node_id": "fac_budget_remaining"
+     }
+    ],
+    "stages": [
+     "deterministic-sweep",
+     "unreachable-factors"
+    ],
+    "reasons": [
+     "OBSERVABLE_EXTRA_DATA",
+     "UNREACHABLE_FACTOR_RECLASSIFIED"
+    ]
+   },
+   "plan_annotation": {
+    "plan_id": "2489a860-685f-4ec6-a66a-ff04567eb0ea",
+    "model_id": "claude-sonnet-4-6",
+    "plan_hash": "06bc991685ff",
+    "confidence": {
+     "overall": 0.85,
+     "structure": 1,
+     "parameters": 1
+    },
+    "open_questions": [],
+    "prompt_version": "draft_graph_default@v194 (staging)",
+    "context_hash_v0": "a56e24ccc3aa",
+    "stage3_rationales": []
+   },
+   "stage_snapshots": {
+    "stage_1_parse": {
+     "goal_node_id": "goal_feature_delivery",
+     "goal_threshold": "absent",
+     "goal_threshold_cap": "absent",
+     "goal_threshold_raw": "absent",
+     "goal_threshold_unit": "absent",
+     "goal_constraints_count": 0
+    },
+    "stage_3_enrich": {
+     "goal_node_id": "goal_feature_delivery",
+     "goal_threshold": "absent",
+     "goal_threshold_cap": "absent",
+     "goal_threshold_raw": "absent",
+     "goal_threshold_unit": "absent",
+     "goal_constraints_count": 0
+    },
+    "stage_4_repair": {
+     "goal_node_id": "goal_feature_delivery",
+     "goal_threshold": "absent",
+     "goal_threshold_cap": "absent",
+     "goal_threshold_raw": "absent",
+     "goal_threshold_unit": "absent",
+     "goal_constraints_count": 1
+    },
+    "stage_5_package": {
+     "goal_node_id": "goal_feature_delivery",
+     "goal_threshold": "absent",
+     "goal_threshold_cap": "absent",
+     "goal_threshold_raw": "absent",
+     "goal_threshold_unit": "absent",
+     "goal_constraints_count": 1
+    },
+    "stage_4b_threshold_sweep": {
+     "goal_node_id": "goal_feature_delivery",
+     "goal_threshold": "absent",
+     "goal_threshold_cap": "absent",
+     "goal_threshold_raw": "absent",
+     "goal_threshold_unit": "absent",
+     "goal_constraints_count": 1
+    }
+   },
+   "threshold_sweep": {
+    "ran": true,
+    "codes": [],
+    "duration_ms": 0,
+    "goals_checked": 1,
+    "strips_applied": 0,
+    "warnings_emitted": 0
+   },
+   "diagnostic_checks": {
+    "cee_trace_present": true,
+    "llm_raw_available": true,
+    "intercept_populated": false,
+    "is_baseline_present": false,
+    "confidence_unique_values": [
+     0.7,
+     0.75,
+     0.78,
+     0.8,
+     0.82,
+     0.85,
+     0.88,
+     0.95
+    ],
+    "confidence_differentiated": true
+   },
+   "total_duration_ms": 48295,
+   "validation_summary": {
+    "status": "valid",
+    "missing_kinds": [],
+    "present_kinds": [
+     "decision",
+     "factor",
+     "goal",
+     "option",
+     "outcome",
+     "risk"
+    ],
+    "required_kinds": [
+     "goal",
+     "decision",
+     "option"
+    ]
+   },
+   "pipeline_checkpoints": [
+    {
+     "stage": "post_adapter_normalisation",
+     "edge_count": 18,
+     "node_count": 12,
+     "sample_edges": [
+      {
+       "to": "opt_status_quo",
+       "from": "dec_hiring",
+       "strength_std": 0.01,
+       "belief_exists": 1,
+       "strength_mean": 1,
+       "effect_direction": "positive"
+      },
+      {
+       "to": "out_delivery_speed",
+       "from": "fac_budget_remaining",
+       "strength_std": 0.08,
+       "belief_exists": 0.7,
+       "strength_mean": 0.12,
+       "effect_direction": "positive"
+      },
+      {
+       "to": "goal_feature_delivery",
+       "from": "out_delivery_speed",
+       "strength_std": 0.1,
+       "belief_exists": 0.95,
+       "strength_mean": 0.65,
+       "effect_direction": "positive"
+      }
+     ],
+     "edge_field_presence": {
+      "weight": 0,
+      "strength_std": 18,
+      "belief_exists": 18,
+      "strength_mean": 18,
+      "effect_direction": 18
+     },
+     "node_field_presence": {
+      "option_nodes_total": 3,
+      "options_with_interventions": 3
+     },
+     "nested_strength_detected": true
+    },
+    {
+     "stage": "post_stabilisation",
+     "edge_count": 18,
+     "node_count": 12,
+     "sample_edges": [
+      {
+       "to": "opt_status_quo",
+       "from": "dec_hiring",
+       "strength_std": 0.01,
+       "belief_exists": 1,
+       "strength_mean": 1,
+       "effect_direction": "positive"
+      },
+      {
+       "to": "out_delivery_speed",
+       "from": "fac_budget_remaining",
+       "strength_std": 0.06785714285714285,
+       "belief_exists": 0.7,
+       "strength_mean": 0.10178571428571427,
+       "effect_direction": "positive"
+      },
+      {
+       "to": "goal_feature_delivery",
+       "from": "out_delivery_speed",
+       "strength_std": 0.1,
+       "belief_exists": 0.95,
+       "strength_mean": 0.65,
+       "effect_direction": "positive"
+      }
+     ],
+     "edge_field_presence": {
+      "weight": 18,
+      "strength_std": 18,
+      "belief_exists": 18,
+      "strength_mean": 18,
+      "effect_direction": 18
+     },
+     "node_field_presence": {
+      "option_nodes_total": 3,
+      "options_with_interventions": 3
+     }
+    },
+    {
+     "stage": "pre_boundary",
+     "edge_count": 18,
+     "node_count": 12,
+     "sample_edges": [
+      {
+       "to": "opt_status_quo",
+       "from": "dec_hiring",
+       "strength_std": 0.01,
+       "belief_exists": 1,
+       "strength_mean": 1,
+       "effect_direction": "positive"
+      },
+      {
+       "to": "out_delivery_speed",
+       "from": "fac_budget_remaining",
+       "strength_std": 0.06785714285714285,
+       "belief_exists": 0.7,
+       "strength_mean": 0.10178571428571427,
+       "effect_direction": "positive"
+      },
+      {
+       "to": "goal_feature_delivery",
+       "from": "out_delivery_speed",
+       "strength_std": 0.1,
+       "belief_exists": 0.95,
+       "strength_mean": 0.65,
+       "effect_direction": "positive"
+      }
+     ],
+     "edge_field_presence": {
+      "weight": 18,
+      "strength_std": 18,
+      "belief_exists": 18,
+      "strength_mean": 18,
+      "effect_direction": 18
+     },
+     "node_field_presence": {
+      "option_nodes_total": 3,
+      "options_with_interventions": 3
+     }
+    }
+   ],
+   "pipeline_checkpoints_meta": {
+    "enabled": true,
+    "total_count": 3,
+    "adapter_count": 1,
+    "pipeline_count": 2
+   }
+  },
+  "request_id": "048db9b5-e9fc-4152-8c73-0f8a6e7df73b",
+  "correlation_id": "048db9b5-e9fc-4152-8c73-0f8a6e7df73b",
+  "repair_summary": {
+   "status_quo": {
+    "fixed": false,
+    "marked_droppable": false
+   },
+   "graph_delta": {
+    "edges_after": 18,
+    "nodes_after": 12,
+    "edges_before": 18,
+    "nodes_before": 12
+   },
+   "bucket_summary": {
+    "a": 0,
+    "b": 1,
+    "c": 0
+   },
+   "llm_repair_called": false,
+   "llm_repair_needed": false,
+   "status_quo_action": "none",
+   "unreachable_factors": {
+    "reclassified": [
+     "fac_budget_remaining"
+    ],
+    "marked_droppable": []
+   },
+   "edge_format_detected": "V1_FLAT",
+   "deterministic_repairs": [
+    {
+     "code": "OBSERVABLE_EXTRA_DATA",
+     "path": "nodes[fac_budget_remaining].data",
+     "action": "Removed factor_type, uncertainty_drivers, and empty interventions sentinel (extra for observable)"
+    },
+    {
+     "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+     "path": "nodes[fac_budget_remaining].category",
+     "action": "Reclassified unreachable factor \"Remaining Hiring Budget\" to external with synthesised prior [0, 1]",
+     "prior_synthesised": true,
+     "synthesised_range": {
+      "range_max": 1,
+      "range_min": 0
+     }
+    },
+    {
+     "code": "INBOUND_BUDGET_RESCALED",
+     "path": "edges[*\u2192out_delivery_speed]",
+     "action": "Rescaled 3 causal inbound edges from sum=1.120 to 0.95"
+    }
+   ],
+   "deterministic_sweep_ran": true,
+   "llm_repair_brief_included": false,
+   "llm_repair_skipped_reason": "deterministic_sweep_sufficient",
+   "remaining_violation_codes": [],
+   "remaining_violations_count": 0,
+   "deterministic_repairs_count": 3,
+   "deterministic_sweep_version": "v3",
+   "risk_coefficient_corrections": []
+  },
+  "transform_defaults": {
+   "defaults": [],
+   "total_defaults": 0,
+   "defaulted_edge_count": 0
+  }
+ },
+ "options": [
+  {
+   "id": "opt_status_quo",
+   "label": "Delay Hire (Status Quo)",
+   "status": "ready",
+   "provenance": {
+    "source": "brief_extraction"
+   },
+   "is_baseline": false,
+   "interventions": {
+    "fac_ml_indicator": {
+     "value": 0,
+     "source": "brief_extraction",
+     "reasoning": "Direct from V4 prompt data.interventions",
+     "target_match": {
+      "node_id": "fac_ml_indicator",
+      "confidence": "high",
+      "match_type": "exact_id"
+     },
+     "value_confidence": "high"
+    },
+    "fac_tl_indicator": {
+     "value": 0,
+     "source": "brief_extraction",
+     "reasoning": "Direct from V4 prompt data.interventions",
+     "target_match": {
+      "node_id": "fac_tl_indicator",
+      "confidence": "high",
+      "match_type": "exact_id"
+     },
+     "value_confidence": "high"
+    }
+   }
+  },
+  {
+   "id": "opt_tech_lead",
+   "label": "Hire One Tech Lead",
+   "status": "ready",
+   "provenance": {
+    "source": "brief_extraction"
+   },
+   "is_baseline": false,
+   "interventions": {
+    "fac_ml_indicator": {
+     "value": 0,
+     "source": "brief_extraction",
+     "reasoning": "Direct from V4 prompt data.interventions",
+     "target_match": {
+      "node_id": "fac_ml_indicator",
+      "confidence": "high",
+      "match_type": "exact_id"
+     },
+     "value_confidence": "high"
+    },
+    "fac_tl_indicator": {
+     "value": 1,
+     "source": "brief_extraction",
+     "reasoning": "Direct from V4 prompt data.interventions",
+     "target_match": {
+      "node_id": "fac_tl_indicator",
+      "confidence": "high",
+      "match_type": "exact_id"
+     },
+     "value_confidence": "high"
+    }
+   }
+  },
+  {
+   "id": "opt_two_mid",
+   "label": "Hire Two Mid-Level Developers",
+   "status": "ready",
+   "provenance": {
+    "source": "brief_extraction"
+   },
+   "is_baseline": false,
+   "interventions": {
+    "fac_ml_indicator": {
+     "value": 1,
+     "source": "brief_extraction",
+     "reasoning": "Direct from V4 prompt data.interventions",
+     "target_match": {
+      "node_id": "fac_ml_indicator",
+      "confidence": "high",
+      "match_type": "exact_id"
+     },
+     "value_confidence": "high"
+    },
+    "fac_tl_indicator": {
+     "value": 0,
+     "source": "brief_extraction",
+     "reasoning": "Direct from V4 prompt data.interventions",
+     "target_match": {
+      "node_id": "fac_tl_indicator",
+      "confidence": "high",
+      "match_type": "exact_id"
+     },
+     "value_confidence": "high"
+    }
+   }
+  }
+ ],
+ "quality": {
+  "safety": 8,
+  "overall": 9,
+  "coverage": 10,
+  "structure": 9,
+  "structural_proxy": 9
+ },
+ "_timings": {
+  "draft_graph": {
+   "parse_ms": 48273,
+   "total_ms": 48299,
+   "enrich_ms": 2,
+   "repair_ms": 15,
+   "package_ms": 3,
+   "boundary_ms": 4,
+   "normalise_ms": 1,
+   "parse_llm_ms": 48261,
+   "repair_fired": false,
+   "repair_reason": null,
+   "repair_attempts": 0,
+   "threshold_sweep_ms": 0,
+   "validation_pipeline_ms": 0
+  }
+ },
+ "coaching": {
+  "summary": "The core tension is between Tech Lead Hired driving Technical Architecture Quality and faster decision-making versus Two Mid-Level Developers Hired delivering more raw coding throughput but introducing Team Coordination Overhead and a longer Time to Productivity \u2014 both of which directly threaten the 6-month deadline. The biggest unmodelled risk is that neither hire profile has been validated against the actual AI feature backlog size or existing team capacity.",
+  "bias_signals": [
+   {
+    "type": "narrow_framing",
+    "detail": "The brief frames this as a binary choice between two hire profiles without considering phased hiring, contractor augmentation, or reallocation of existing team capacity."
+   }
+  ],
+  "widening_log": {
+   "elements_added": [
+    "fac_budget_remaining"
+   ],
+   "brief_completeness": "thin",
+   "elements_considered_but_excluded": [
+    "External AI talent market tightness considered but excluded as it affects both options equally and would not change ranking",
+    "Phased hire option considered but excluded from graph as it lacks a distinct intervention profile on current factors \u2014 surfaced in coaching instead"
+   ]
+  },
+  "strengthen_items": [
+   {
+    "id": "str_1",
+    "label": "Hybrid or phased hire",
+    "detail": "Hiring one mid-level developer now and deferring the second hire after 3 months could reduce coordination risk while preserving budget flexibility.",
+    "action_type": "add_option",
+    "bias_category": "narrow_framing"
+   },
+   {
+    "id": "str_2",
+    "label": "Backlog size as constraint",
+    "detail": "The AI feature backlog volume and complexity is the decisive missing input \u2014 without it, the model cannot distinguish whether raw throughput or architectural direction is the binding constraint.",
+    "action_type": "add_constraint"
+   }
+  ]
+ },
+ "goal_node_id": "goal_feature_delivery",
+ "causal_claims": [],
+ "topology_plan": [],
+ "analysis_ready": {
+  "status": "ready",
+  "options": [
+   {
+    "id": "opt_status_quo",
+    "label": "Delay Hire (Status Quo)",
+    "status": "ready",
+    "is_baseline": true,
+    "interventions": {
+     "fac_ml_indicator": {
+      "value": 0,
+      "source": "brief_extraction",
+      "display_value": "No mid-level developers hired"
+     },
+     "fac_tl_indicator": {
+      "value": 0,
+      "source": "brief_extraction",
+      "display_value": "No tech lead in place"
+     }
+    },
+    "status_reason": "2 intervention(s) ready for analysis",
+    "extraction_metadata": {
+     "source": "brief_extraction",
+     "reasoning": "Direct from V4 prompt data.interventions",
+     "confidence": "high"
+    },
+    "intervention_details": {
+     "fac_ml_indicator": {
+      "raw_value": 0,
+      "display_value": "No mid-level developers hired",
+      "normalised_value": 0
+     },
+     "fac_tl_indicator": {
+      "raw_value": 0,
+      "display_value": "No tech lead in place",
+      "normalised_value": 0
+     }
+    }
+   },
+   {
+    "id": "opt_tech_lead",
+    "label": "Hire One Tech Lead",
+    "status": "ready",
+    "interventions": {
+     "fac_ml_indicator": {
+      "value": 0,
+      "source": "brief_extraction",
+      "display_value": "No mid-level developers hired"
+     },
+     "fac_tl_indicator": {
+      "value": 1,
+      "source": "brief_extraction",
+      "display_value": "No tech lead in place"
+     }
+    },
+    "status_reason": "2 intervention(s) ready for analysis",
+    "extraction_metadata": {
+     "source": "brief_extraction",
+     "reasoning": "Direct from V4 prompt data.interventions",
+     "confidence": "high"
+    },
+    "intervention_details": {
+     "fac_ml_indicator": {
+      "raw_value": 0,
+      "display_value": "No mid-level developers hired",
+      "normalised_value": 0
+     },
+     "fac_tl_indicator": {
+      "raw_value": 0,
+      "display_value": "No tech lead in place",
+      "normalised_value": 1
+     }
+    }
+   },
+   {
+    "id": "opt_two_mid",
+    "label": "Hire Two Mid-Level Developers",
+    "status": "ready",
+    "interventions": {
+     "fac_ml_indicator": {
+      "value": 1,
+      "source": "brief_extraction",
+      "display_value": "No mid-level developers hired"
+     },
+     "fac_tl_indicator": {
+      "value": 0,
+      "source": "brief_extraction",
+      "display_value": "No tech lead in place"
+     }
+    },
+    "status_reason": "2 intervention(s) ready for analysis",
+    "extraction_metadata": {
+     "source": "brief_extraction",
+     "reasoning": "Direct from V4 prompt data.interventions",
+     "confidence": "high"
+    },
+    "intervention_details": {
+     "fac_ml_indicator": {
+      "raw_value": 0,
+      "display_value": "No mid-level developers hired",
+      "normalised_value": 1
+     },
+     "fac_tl_indicator": {
+      "raw_value": 0,
+      "display_value": "No tech lead in place",
+      "normalised_value": 0
+     }
+    }
+   }
+  ],
+  "goal_node_id": "goal_feature_delivery",
+  "bias_findings": [
+   {
+    "id": "authority_high_degree_node",
+    "code": "AUTHORITY_BIAS",
+    "targets": {
+     "node_ids": [
+      "fac_tl_indicator",
+      "dec_hiring",
+      "out_delivery_speed",
+      "out_technical_quality",
+      "risk_time_to_productivity",
+      "opt_status_quo",
+      "opt_tech_lead"
+     ]
+    },
+    "category": "other",
+    "citation": "Milgram (1963) - Journal of Abnormal and Social Psychology",
+    "node_ids": [
+     "fac_tl_indicator",
+     "dec_hiring",
+     "out_delivery_speed",
+     "out_technical_quality",
+     "risk_time_to_productivity",
+     "opt_status_quo",
+     "opt_tech_lead"
+    ],
+    "severity": "medium",
+    "mechanism": "Tendency to attribute greater accuracy to opinions of authority figures, regardless of content.",
+    "explanation": "One or more authority-labelled nodes are highly connected in the decision graph; this may overweight senior opinions.",
+    "confidence_band": "medium",
+    "micro_intervention": {
+     "steps": [
+      "Collect input anonymously before revealing who said what",
+      "Explicitly ask junior team members to share their view first"
+     ],
+     "estimated_minutes": 3
+    },
+    "structural_pattern": "Authority-labelled node has connections to three or more other nodes"
+   }
+  ],
+  "model_adjustments": [
+   {
+    "code": "category_reclassified",
+    "field": "nodes[fac_budget_remaining].category",
+    "reason": "Reclassified unreachable factor \"Remaining Hiring Budget\" to external with synthesised prior [0, 1]",
+    "source": "deterministic_sweep",
+    "node_id": "fac_budget_remaining"
+   }
+  ]
+ },
+ "draft_warnings": [
+  {
+   "id": "goal_no_baseline_value",
+   "edge_ids": [],
+   "fix_hint": "Set goal node's observed_state.value to establish baseline for comparison",
+   "node_ids": [
+    "goal_feature_delivery"
+   ],
+   "severity": "low",
+   "explanation": "Goal node has no observed_state.value set.",
+   "affected_edge_ids": [],
+   "affected_node_ids": [
+    "goal_feature_delivery"
+   ]
+  }
+ ],
+ "schema_version": "3.0",
+ "goal_constraints": [
+  {
+   "unit": "months",
+   "label": "Delivery deadline",
+   "value": 6,
+   "node_id": "goal_feature_delivery",
+   "operator": "<=",
+   "confidence": 0.95,
+   "provenance": "inferred",
+   "source_quote": "within 6 months",
+   "constraint_id": "constraint_goal_feature_delivery_max",
+   "deadline_metadata": {
+    "deadline_date": "2027-01-09",
+    "reference_date": "2026-07-09",
+    "assumed_reference_date": true
+   }
+  }
+ ],
+ "_pipeline_outcome": {
+  "warnings": [],
+  "llm_repair": {
+   "outcome": "skipped",
+   "attempts": 0,
+   "triggered": false,
+   "fallback_reason": null
+  },
+  "rescue_score": 5,
+  "graph_drafted": true,
+  "coaching_status": "complete",
+  "enrichment_status": "complete",
+  "repair_provenance": [
+   {
+    "code": "OBSERVABLE_EXTRA_DATA",
+    "rule": "OBSERVABLE_EXTRA_DATA",
+    "after": null,
+    "field": "graph",
+    "before": null,
+    "source": "fallback_default",
+    "node_or_edge_id": "nodes[fac_budget_remaining].data"
+   },
+   {
+    "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+    "rule": "UNREACHABLE_FACTOR_RECLASSIFIED",
+    "after": null,
+    "field": "graph",
+    "before": null,
+    "source": "structure",
+    "node_or_edge_id": "nodes[fac_budget_remaining].category"
+   },
+   {
+    "code": "INBOUND_BUDGET_RESCALED",
+    "rule": "INBOUND_BUDGET_RESCALED",
+    "after": null,
+    "field": "graph",
+    "before": null,
+    "source": "structure",
+    "node_or_edge_id": "edges[*\u2192out_delivery_speed]"
+   }
+  ],
+  "validation_status": "skipped",
+  "verification_status": "skipped",
+  "factor_value_coverage": {
+   "total": 3,
+   "explicit": 0,
+   "fallback_default": 1,
+   "inferred_with_evidence": 2
+  },
+  "graph_structurally_valid": true,
+  "edge_strength_unique_count": 10,
+  "deterministic_sweep_violations": 0
+ }
+}

@@ -239,7 +239,7 @@ export default async function route(app: FastifyInstance) {
       }
 
       // Process the answer
-      const { updated, impact } = processAnswer(
+      const { updated, impact: _impact } = processAnswer(
         question,
         input.answer,
         input.current_preferences

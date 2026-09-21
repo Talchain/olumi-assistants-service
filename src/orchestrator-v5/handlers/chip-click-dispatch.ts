@@ -1,0 +1,2367 @@
+/**
+ * V5 deterministic chip-click dispatch.
+ *
+ * When the UI sends a chip_click whose `action_type` is in the
+ * `DETERMINISTIC_CHIP_ACTION_TYPES` whitelist, we bypass Sonnet routing
+ * entirely — the user explicitly asked for the action, there's no
+ * classification ambiguity. Route-v2.ts detects this shape BEFORE
+ * TurnExecutor and calls `dispatchDeterministicChipClick`.
+ *
+ * Whitelisted action_types:
+ *   - `run_analysis`     — heavyweight NO-LLM compute handler,
+ *                          scenario-snapshot pre-load
+ *
+ * F2 CHANGE A: `explain_results` and `what_would_flip` are NO LONGER
+ * whitelisted. As explanation intents they must reach the coach LLM with the
+ * loaded conversation window, so they now fall through to TurnExecutor with a
+ * FORCED explanation intent (see `DETERMINISTIC_CHIP_ACTION_TYPES` below).
+ *
+ * Other chip.action_type values (set_factor_value, explain_result alias,
+ * explain_results, what_would_flip, compare_options, etc.) fall through to
+ * TurnExecutor, which either routes via Sonnet ORIENT (explanation intents are
+ * pinned by `chipClickForcedIntent`) or returns a typed FEATURE_NOT_ENABLED via
+ * the existing UNSUPPORTED_ACTION path.
+ *
+ * Why reinvoke the registered handler rather than TurnExecutor? TurnExecutor
+ * runs ORIENT (1 Sonnet call, ~12s) even for an already-classified chip
+ * click. That's wasted latency and tokens when the action is known. The
+ * handler registry entry is the same one TurnExecutor would dispatch to
+ * post-routing — we just skip steps 1-2 of the seven-step assembly and go
+ * straight to EXECUTE. COMMIT and COMPOSE still fire below.
+ *
+ * Trade-off for the V5 explanation handlers (`explain_results`,
+ * `what_would_flip`): on the chip-click path the handler does NOT receive
+ * Sonnet's `explanation.answer_text`, so it always uses the deterministic
+ * fallback (`composeExplainResultsFallback` / `composeWhatWouldFlipFallback`)
+ * sourced from the prior `run_analysis` handler-fact projection. We
+ * pre-populate `analysisProjection` from prior facts, plus
+ * `analysisFreshness` and `analysisReady`, so the precondition decision
+ * tree (`decideExplanationPrecondition`) reads the same signals it would
+ * have seen on the routed path. Net effect: faster, deterministic prose
+ * instead of Sonnet's per-turn answer text — acceptable per the Phase 2b
+ * brief because chip clicks are explicit user signals.
+ *
+ * LLM semantics: this path makes NO Sonnet classification call. The
+ * `run_analysis` handler itself does NOT call Sonnet either, but its
+ * decision_review enricher (V5 Group 1 Task B) MAY make one LLM call.
+ * The explanation handlers make zero LLM calls on the chip-click path.
+ * Tests that assert "no Sonnet routing" should spy on routeWithToolUse
+ * (not on the LLM adapter globally).
+ */
+
+import type { MessageTurnPayload, OlumiResponse, StageType } from '@talchain/schemas/boundary';
+import type { HandlerFact, V5ActionType } from '@talchain/schemas/orchestrator';
+
+import { config } from '../../config/index.js';
+import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
+import { applyEgressForbiddenPhraseGuard } from '../compose/forbidden-user-facing-phrases.js';
+import { applyProcessNarrationGuard } from '../compose/process-narration.js';
+import {
+  commitDirectAnswer,
+  computeRequestHash,
+  type CommitMetadata,
+} from '../commit.js';
+import { composeToolCallResponse, type AnswerKind } from '../compose.js';
+import {
+  buildTurnContext,
+  loadMostRecentPendingActions,
+  loadMostRecentPendingActionsIntegrityStrict,
+  loadScenarioSnapshotForRunAnalysis,
+} from '../build-turn-context.js';
+import type { PendingAction } from '../session/pending-action.js';
+import type { GraphV3T } from '../../schemas/cee-v3.js';
+import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
+import { extractGraphOptionIds } from '../context/option-identity.js';
+import {
+  buildAutoRunProvenance,
+  RUN_PROVENANCE_ENRICHMENT_KEY,
+} from '../context/run-initiator.js';
+import {
+  deriveAnalysisFreshness,
+  emitFreshnessTelemetry,
+  type FreshnessDerivation,
+} from '../context/freshness.js';
+import {
+  buildAnalysisRefusalFact,
+  isAnalysisRefusalContinuityCause,
+} from '../context/analysis-refusal-continuity.js';
+import { clampRefusalFreshness } from '../compose/analysis-ready-emit.js';
+import { ANALYSE_STAGE_INDICATOR } from '../compose/analysis-ready-emit.js';
+// T1 claim safety — THE shared fact-array read (ROADMAP 1.233). This file
+// neither derives the verdict nor re-implements the read (CLAUDE.md trap #12);
+// it calls the one function turn-executor's two read points call.
+import {
+  claimSafetyScopeFromContext,
+  readMayNameLeadingOptionVerdict,
+} from '../context/claim-safety-read.js';
+import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
+import { AnalysisNotReadyError } from '../tools/handlers/analysis-ready-core.js';
+import {
+  buildCanonicalAnalysisReadyFromGraph,
+  buildAnalysisRefusalReadiness,
+} from '../../orchestrator/tools/analysis-ready-helper.js';
+import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
+import { collectInterventionControlledFactorIds } from '../context/intervention-controlled-drivers.js';
+import {
+  createRegistry,
+  getDefaultPlotClient,
+  resolveHandler,
+  type HandlerRegistry,
+  type RunAnalysisScenarioSnapshot,
+  type ScenarioReader,
+} from '../tools/registry.js';
+import { HANDLER_VALIDATION_REGISTRY } from '../routing/validation-registry.js';
+import { applyCoachingSignal } from '../coaching/coaching-signal-application.js';
+import { applyDefaultedValueEgress } from '../compose/defaulted-value-egress.js';
+import { readDefaultedAssumptionsFromEnrichment } from '../coaching/pick-defaulted-assumptions.js';
+import { enrichRunAnalysisWithDecisionReview } from '../coaching/decision-review-enricher.js';
+import type { V5TurnTimings } from '../telemetry/turn-timings.js';
+import { generateChips } from '../compose/chip-generator.js';
+import {
+  blockedReasonForHandlerFailure,
+  HandlerInvocationFailedError,
+  HandlerResultInvalidError,
+} from '../tools/handler-errors.js';
+// V5 C5 — chip-click recoverable-cause escape repair. Reuse the SAME recovery
+// machinery the Sonnet/TurnExecutor path uses (no parallel recovery system).
+import { isRecoverableHandlerCause } from '../compose/recoverable-handler-causes.js';
+import { composeRecoverableHandlerResponse } from '../compose/recoverable-handler-response.js';
+import type { ComposeContext } from '../compose/types.js';
+
+/**
+ * Note on ingress state (graphState / analysisState):
+ * The run_analysis handler reads its scenario state via the injected
+ * `scenarioReader` (see createRunAnalysisHandler in tools/handlers/
+ * run-analysis.ts) — NOT from the HTTP request body. A chip-click
+ * payload does not need to thread graph_state or analysis_state into
+ * the handler; passing them here would have been dead weight and
+ * invited drift between ingress state and the scenario-read truth.
+ * This interface therefore does not accept those fields. If a future
+ * handler DOES need ingress-state passthrough, add the fields then,
+ * not now.
+ */
+
+/**
+ * R2 (2026-08-16) — the chip id carried by the SERVER-SYNTHESISED payload the
+ * post-draft auto-run dispatches with (auto-run-after-draft.ts). Exported so
+ * the synthesiser and any log reader share one identity; never emitted as a
+ * suggested_action.
+ */
+export const AUTO_RUN_POST_DRAFT_CHIP_ID = 'auto_run_post_draft';
+
+/**
+ * R2 — the CEE-authored key stamped into the run_analysis fact's open
+ * `enrichment` record when the run was auto-initiated after a fresh draft.
+ * Same carrier pattern as the decision_review enricher (a freshly-cloned
+ * record, PLoT keys preserved). NO schema change: `enrichment` is
+ * `z.record(z.unknown())` at every published contract version, so the stamp
+ * validates at the UI's deployed 0.43.0 pin and at 0.46.0 alike. It is NOT on
+ * the wire transport keep-list (`P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP` — which
+ * must stay element-for-element equal to the schemas package's
+ * CEE_UI_ENRICHMENT_KEEP_LIST), so today's UI sees an ordinary completed
+ * analysis: the graceful-degradation posture R2 requires. Surfacing it to the
+ * browser is a schemas-train keep-list change, deliberately not made here.
+ */
+// ⭐ MOVED to `../context/run-initiator.js` (2026-08-20) — the ONE owner of the
+// auto-run marker vocabulary, imported by the writer below AND by the coaching
+// layer's reader. Re-exported here so this module's existing consumers and
+// specs keep their import path (CLAUDE.md trap #12: one definition, no copies).
+export { RUN_PROVENANCE_ENRICHMENT_KEY };
+
+/**
+ * R2 — the user-visible provisional label. Opens the auto-run turn's
+ * assistant answer (stored copy and would-be wire copy alike), so a resumed
+ * conversation never presents the auto-run as something the user asked for.
+ * Deterministic template text: no graph labels, no counts, no leader claim.
+ *
+ * ── ⚠ HISTORY, KEPT RATHER THAN OVERWRITTEN (trap 14) ──────────────────────
+ * The whole auto-run was DELETED by #1298 (2026-09-01) on the reading that the
+ * founder's verdict — "far too focused on the analysis rather than enhancing
+ * reasoning" — named this mechanism. **That reading was wrong and the founder
+ * corrected it the same day:** the initial analysis exists to give richer
+ * material for critical and creative thinking, and is deliberate. What was
+ * actually wanted is the half #1298 did not build — making it unmistakable
+ * that this pass is AI-ONLY and UNCONFIRMED. So the behaviour is restored
+ * verbatim from `cb36b1ea^` and only this sentence is rewritten.
+ *
+ * ── WHY THIS WORDING, AND WHERE EVERY CLAUSE COMES FROM ────────────────────
+ * ⭐ NO NEW VOCABULARY WAS MINTED. The product already says "we guessed" in two
+ * registers (model-voice first person; third-person panel voice), and a third
+ * would be the drift this estate keeps paying for. This is the model-voice
+ * register, assembled from sentences already shipping:
+ *
+ *   · "a starting point to argue with, not an answer" — VERBATIM from
+ *     `MODEL_VARIANCE_NOTE` (`coaching/post-draft-narrative.ts`). Its docstring
+ *     warns against two hedges in a row; that warning is about the DRAFT reply,
+ *     and this is a different turn, so there is no double hedge.
+ *   · "tell me what I have got wrong and I will change it" — the correction
+ *     invitation from `context-integrity/brief-audit-answer.ts` ("If something
+ *     matters and is missing, tell me and I will add it") and the terminal
+ *     bridge's "review or replace it".
+ *   · "You have not confirmed any of it yet" — the confirmation register
+ *     (`canonical-readiness.ts`'s "review them whenever you like", the
+ *     "not yet confirmed" family). ⚠ THIS SLOT USED TO READ "Nothing in it
+ *     carries your judgement yet", derived from the "needs your judgement"
+ *     family (`turn-executor.ts`, `routing/readiness-intake.ts`). That
+ *     derivation was sound about the VOCABULARY and wrong about the CLAIM —
+ *     see the two-doors block below. Kept visible rather than deleted (trap
+ *     14) so the next author does not re-derive it from the same family.
+ *   · "where your brief gave me no figure I estimated one" — the
+ *     `estimated by Olumi` / `cee_inference` provenance register.
+ *
+ * ⭐⭐ WHAT IT DELIBERATELY DOES **NOT** SAY, AND THE ASYMMETRY THAT DECIDES IT.
+ * `context-integrity/not-modelled-manifest.ts`: "WRONGLY CLAIMING A USER'S
+ * VALUE AS OUR INVENTION IS FAR WORSE THAN WRONGLY OMITTING ONE OF OUR OWN
+ * INVENTIONS". ⚠⚠ THAT HARM HAS **TWO DOORS**, AND THIS SENTENCE WALKED
+ * THROUGH THE SECOND ONE AFTER THE FIRST WAS SHUT — both drafts are recorded
+ * because the second was written BY the author who had just rejected the first:
+ *
+ *   · ASSERTION form, rejected pre-merge: "the values it used are my own
+ *     estimates, not yours" — a blanket claim over every value.
+ *   · DENIAL form, shipped at `f7dc0524` and corrected here: "Nothing in it
+ *     carries your judgement yet" — the SAME false claim, reached by denying
+ *     the user's authorship instead of asserting ours.
+ *
+ * The denial is false on a common, WELL-SERVED path, not an edge: a brief that
+ * states figures. `graph-readiness/obligation-provenance.ts:143-146` is the
+ * authority and says so outright — "A brief is the user's own words, so a value
+ * extracted from it is user-stated, not inferred" (`brief_extraction` and
+ * `explicit` both map to `user_stated`), and `:195` adds "`explicit`/`observed`
+ * are the user's own figures". Those nodes display as `from_brief`
+ * (`transforms/provenance-display.ts:26`), so the model demonstrably DOES hold
+ * the user's own numbers, and the clause denied it. A figure-rich brief is MORE
+ * likely to clear `resolveRunAdmission`, so this is the served case.
+ *
+ * ⭐ THE RULE THAT REPLACES BOTH DRAFTS: **CLAIM CONFIRMATION, NEVER
+ * AUTHORSHIP.** "You have not confirmed any of it yet" is invariant to how much
+ * of the model came from the user — stating a figure in a brief is not
+ * confirming a model built from it — whereas any authorship claim's truth
+ * depends on the graph the sentence is attached to. The estimate clause stays
+ * CONDITIONALLY scoped ("where your brief gave me no figure"), so it is equally
+ * true of a brief that stated every figure and of one that stated none.
+ *
+ * ⭐ THIS ALSO COVERS THE NARROWER CLARIFY-V2 RESUME PATH, and for the same
+ * reason rather than by accident. That path drafts from an ANSWER-AUGMENTED
+ * brief (`orchestrator/route-v2.ts:4224`, legacy pending rounds only — round 1
+ * no longer arms new ones, `:4161`), so the model carries the user's own
+ * clarify answers. An authorship denial was false there too; a confirmation
+ * claim is not, because answering a question before the model existed is not
+ * confirming the model. NOT known-dropped — covered.
+ *
+ * ⚠ SCOPE — THIS SENTENCE REACHES THE CONVERSATION SURFACE ONLY. It rides the
+ * auto-run turn's `assistant_text`, so a resumed conversation reads it first
+ * (the "caveat first, top-down" contract `tools/handlers/staleness-prefix.ts`
+ * states). The numbers ALSO land on the canvas via
+ * `routes/scenario-graph-analysis-read.ts` → the UI's provisional-delivery
+ * hook, and THAT surface carries no label, because
+ * `RUN_PROVENANCE_ENRICHMENT_KEY` is not on the transport keep-list. Labelling
+ * the canvas is a UI change plus a schemas keep-list train — the boundary this
+ * lane stops at, reported rather than crossed.
+ *
+ * ⚠ AND IT IS A PROVENANCE CAVEAT, NOT A CURRENCY ONE (trap 21). It answers
+ * "has this had any user input?"; `StalenessCaveat` ('stale' | 'unconfirmed')
+ * answers "is this out of date?". Two different questions — do NOT reuse that
+ * module's `unconfirmed` for this, and do not align their defaults.
+ */
+export const AUTO_RUN_PROVISIONAL_DISCLOSURE =
+  'I ran a first analysis on the model I have just drafted. You have not confirmed any of it yet, and where your brief gave me no figure I estimated one. Treat it as a starting point to argue with, not an answer: tell me what I have got wrong and I will change it.';
+
+/**
+ * R2 — marks a dispatch as the post-draft auto-run rather than a user's chip
+ * click. Three behavioural consequences, each pinned in
+ * chip-click-dispatch-auto-run.test.ts, and NOTHING else changes:
+ *   1. the commit carries NO `userMessage` (the user typed nothing; NULL
+ *      user_message is the established system-event turn shape);
+ *   2. the run_analysis fact is stamped with `enrichment.run_provenance`;
+ *   3. the assistant answer opens with AUTO_RUN_PROVISIONAL_DISCLOSURE.
+ */
+export interface ChipClickAutoRunTrigger {
+  /** The fresh-draft turn this run was initiated for (provenance only). */
+  readonly draftTurnId: string;
+}
+
+/**
+ * ⭐⭐ STANDING INVARIANT FOR STATE-RECOVERY CODE (2.1353 r4):
+ *
+ *     FAILURE TO KNOW IS NOT KNOWLEDGE THAT NOTHING EXISTS
+ *     — AND, AT THIS SEAM, THAT BUYS ATTRIBUTION, NOT PREVENTION.
+ *
+ * ⚠⚠ READ THE LIMIT BEFORE THE PRINCIPLE, because the principle overclaims
+ * without it. Complete reader manifest for `CommitMetadata.priorPendingActions`
+ * in `commit.ts`, derived at this tip: the type declaration, and exactly TWO
+ * reads — both `metadata.priorPendingActions ?? []`. There is NO key-presence
+ * branch on this key anywhere (contrast control: the `!== undefined` /
+ * `hasOwnProperty` hits in that file are about `CommitMetadata.graph` and
+ * `decisionRecordFact`, not this one).
+ *
+ * THEREFORE AN OMITTED KEY IS BYTE-IDENTICAL TO `[]` AT EVERY CONSUMER, and the
+ * durable carry-forward outcome of `unavailable` is the SAME TOTAL WIPE as
+ * `known_empty`. The three states below are a true distinction in THIS MODULE
+ * and a distinction that DIES AT THE PERSISTED BOUNDARY.
+ *
+ * What this fix actually delivers, stated narrowly so no later reader inherits
+ * more: the loss becomes ATTRIBUTABLE — a distinct telemetry event naming it a
+ * loss instead of a recovery — and the round-3 defect of REPORTING a total loss
+ * as a partial recovery is closed. It does NOT prevent the wipe. Making the
+ * durable boundary preserve `unavailable` is a persisted-shape change with its
+ * own readers; it is a separate lane, deliberately not attempted here.
+ *
+ * `[]` is still a CLAIM about the world that a failed read has not earned, and
+ * that is why the state is modelled at all — but the only channel currently
+ * carrying it is telemetry.
+ *
+ * The prior-pending read therefore has THREE outcomes, not two, and they are
+ * modelled on WHAT IS TRUE ABOUT THE WORLD rather than on which error code
+ * fired. That distinction is the point: an error-code split fixes the label and
+ * re-opens the moment a new producer is added to the same code (which is how
+ * round 3 shipped a total loss labelled a partial recovery — `pending_actions_corrupt`
+ * has two producers, and only one of them can ever yield survivors).
+ *
+ *   known_empty           the read SUCCEEDED and there genuinely were none.
+ *                         The ONLY state permitted to author `[]`.
+ *   known_with_survivors  the read was partial; THESE actions survived and are
+ *                         carried. Never `[]` by construction (length >= 1).
+ *   unavailable           we could not establish what was there — unreadable
+ *                         column, wholly unparseable entries, store down, fetch
+ *                         failed. Threads nothing, and emits the LOSS event.
+ *                         ⚠ The omission does not change what is persisted (see
+ *                         the manifest above); it changes what is REPORTED.
+ *
+ * ⚠ This type is LOCAL to this dispatcher and is not offered as an estate-wide
+ * definition. Given the limit above it has not earned that status: a shared
+ * helper would export a distinction that dies at the first durable boundary it
+ * meets, and a confident claim in a docstring is how the next session gets a
+ * register row for work nobody validated.
+ */
+type PriorPendingsOutcome =
+  | { readonly state: 'known_empty' }
+  | { readonly state: 'known_with_survivors'; readonly pendings: readonly PendingAction[] }
+  | { readonly state: 'unavailable'; readonly reason: string };
+
+/**
+ * The single place the invariant above is enforced: what may this outcome hand
+ * to `CommitMetadata.priorPendingActions`?
+ *
+ * `null` means OMIT THE KEY. ⚠ NOT because that prevents the wipe — `commit.ts`
+ * reads this key as `?? []` at both of its two read sites, so omitted and `[]`
+ * are byte-identical downstream — but so the dispatcher never STATES an empty
+ * history it did not establish, and so the LOSS event beside it is true. The
+ * mapping is written once and read by the one threading site rather than being
+ * re-decided inline.
+ */
+function priorsToThread(
+  outcome: PriorPendingsOutcome,
+): readonly PendingAction[] | null {
+  switch (outcome.state) {
+    case 'known_empty':
+      return [];
+    case 'known_with_survivors':
+      return outcome.pendings;
+    case 'unavailable':
+      return null;
+  }
+}
+
+export interface DispatchChipClickRunAnalysisParams {
+  readonly payload: MessageTurnPayload;
+  readonly requestId: string;
+  /** Injectable registry for tests. Production uses the default singleton. */
+  readonly handlerRegistry?: HandlerRegistry;
+  /** R2 — present ONLY on the server-initiated post-draft auto-run. */
+  readonly autoRun?: ChipClickAutoRunTrigger;
+}
+
+/**
+ * Phase 2b — set of chip `action_type` values that bypass LLM routing.
+ *
+ * Membership criteria for inclusion:
+ *   1. The `action_type` is a registered V5 handler ID (see
+ *      `tools/registry.ts`'s `createRegistry`). Aliases like the
+ *      singular `'explain_result'` are NOT included — chip-emitter
+ *      surfaces the registered ID directly.
+ *   2. The handler can produce a useful answer without Sonnet's
+ *      pre-classified `explanation.answer_text`. The V5 explanation
+ *      handlers fall back to a deterministic projection-based composer
+ *      when `invocation.explanation` is absent — so they qualify.
+ *      Mutation handlers (set_factor_value, etc.) require validated
+ *      proposal parameters from the routing layer and must NOT be
+ *      whitelisted here.
+ *   3. The required handler input context (prior_facts, projection,
+ *      freshness, readiness) can be reconstructed from the scenario
+ *      snapshot + persisted facts WITHOUT a Sonnet call.
+ *
+ * If a future handler is whitelisted, validate per the brief's stop
+ * conditions: re-check that the routing-layer fields it consumes
+ * (`analysisProjection`, `analysisFreshness`, `analysisReady`,
+ * `explanation`) are EITHER unused OR can be pre-populated honestly
+ * from local state — otherwise the chip-click path will silently
+ * degrade UX.
+ */
+// F2 CHANGE A (2026-07-22) — `explain_results` and `what_would_flip` REMOVED
+// from this whitelist. They are now routed through the conversation-aware coach
+// path (route-v2 `detectChipClickForcedIntent` → TurnExecutor
+// `chipClickForcedIntent` → `routeWithToolUse` with a FORCED explanation
+// handler + thinking disabled) so the pill answer sees the loaded conversation
+// window instead of composing canned deterministic prose with zero LLM sight of
+// what the user just said. `run_analysis` STAYS — it is a genuine no-LLM compute
+// handler, not an explanation, so bypassing Sonnet for it is correct (and is
+// pinned by the test below). The deterministic composers
+// (`composeExplainResultsFallback` / `composeWhatWouldFlipFallback`) remain
+// wired as the ROUTED fallback (turn-executor), so the honesty guarantees are
+// unchanged — the coach authors the prose when its `answer_text` is valid, the
+// deterministic composer serves it otherwise.
+export const DETERMINISTIC_CHIP_ACTION_TYPES: ReadonlySet<V5ActionType> = new Set<V5ActionType>([
+  'run_analysis',
+]);
+
+/**
+ * Predicate guard: is the supplied chip `action_type` whitelisted for
+ * deterministic dispatch? Used by route-v2's gate so a single source of
+ * truth governs which chip clicks bypass TurnExecutor.
+ */
+export function isDeterministicChipClickActionType(actionType: string): boolean {
+  return DETERMINISTIC_CHIP_ACTION_TYPES.has(actionType as V5ActionType);
+}
+
+/**
+ * Richer-than-boolean failure carrier. On commit success the discriminator
+ * is 'ok'. On typed handler failure it is 'handler_failure' — the route
+ * maps these to specific BoundaryError codes (e.g. FEATURE_NOT_ENABLED
+ * for unreachable-upstream cases) rather than collapsing everything into
+ * INTERNAL_ERROR. This mirrors TurnExecutor's handling of
+ * HandlerInvocationFailedError / HandlerResultInvalidError and keeps the
+ * chip-click path observationally consistent with the Sonnet-routed path.
+ *
+ * V5 finaliser contract: every variant declares an optional `analysisReady`
+ * for type uniformity at the route-v2.ts call site. Chip-click does not
+ * mutate the canvas — the user clicked "Run analysis" on the existing
+ * graph — but Step 5 of the V5 golden path needs the wire response from
+ * Step 4 (the run_analysis chip-click) to carry `analysis_ready` so the
+ * model's gating logic sees a runnability signal.
+ *
+ * Single-source-of-truth: the `ok` outcome derives canonical readiness
+ * from the SAME `GraphV3T` reference the run_analysis handler operated
+ * on. The dispatcher pre-loads the scenario snapshot once via
+ * `loadScenarioSnapshotForRunAnalysis` and injects a one-shot
+ * `ScenarioReader` returning that exact snapshot — handler invocation
+ * and post-handler readiness derivation share the same in-memory graph
+ * reference, so a concurrent edit-graph dispatch from another session
+ * cannot drift the emission. Failure outcomes leave `analysisReady`
+ * undefined; in route-v2.ts those map to BoundaryError 500 anyway.
+ */
+export type DispatchChipClickRunAnalysisResult =
+  | {
+      readonly outcome: 'ok';
+      readonly response: OlumiResponse;
+      readonly commitPerformed: true;
+      readonly analysisReady?: AnalysisReadyPayload;
+      /** Snapshot graph for label resolution by central egress sanitiser. */
+      readonly graph: GraphV3T | null;
+      /** V5 state-trust freshness derivation. Post-dispatch — uses the
+       *  just-produced run_analysis fact and the snapshot graph so the
+       *  rerun chip-click wire response carries `freshness === 'fresh'`. */
+      readonly freshness?: import('../context/freshness.js').FreshnessDerivation;
+      /** ROADMAP 2.73 Fix C — decision_review call attribution for the
+       *  chip-click path (mirrors #476's executor wiring). Present ONLY
+       *  when the timings/trace gate is on AND the enricher's LLM call
+       *  actually RETURNED (sink populated) — never fabricated for a
+       *  skip / timeout. route-v2 threads it into sendFinalised200 so the
+       *  minimal diagnostic trace carries the decision_review llm_calls
+       *  entry, matching the routed path. */
+      readonly turnTimings?: V5TurnTimings;
+      /**
+       * ROADMAP 1.132 (F1) — the declared SUBSTANTIVE/FUNCTIONAL kind of this
+       * chip-click answer (see `AnswerKind`). `'substantive'` for the
+       * explain_results / what_would_flip explanations (progressive disclosure at
+       * egress); `'functional'` for the run_analysis receipt. route-v2 threads it
+       * into `sendFinalised200` so the egress synthesiser shapes the substantive
+       * chip answers exactly as it shapes the turn_executor advice-gate answers.
+       */
+      readonly answerKind?: AnswerKind;
+      /**
+       * T1 claim safety — may THIS chip-click turn name a leading option?
+       *
+       * The run_analysis chip runs a real analysis, so this path can withhold
+       * the leading-option claim exactly as the routed path can. READ from the
+       * stamp the run_analysis handler persisted on the fact; never re-derived
+       * (CLAUDE.md trap #12). route-v2 threads it into `sendFinalised200` so the
+       * layer-3 egress guard is armed on this path too — the coaching slot
+       * defect (#709) reached the wire through a dispatch path that had been
+       * overlooked, and the two paths must not drift again.
+       *
+       * ⚠ REQUIRED, NOT OPTIONAL — changed 2026-07-27 (WALK-2026-07-27-FINAL.md
+       * §11.6). While this was optional, route-v2's `ok` exit read
+       * `cc.mayNameLeadingOption ?? true` — the same `?? true` default the
+       * ROADMAP 1.233 hoist removed everywhere else, and the shape that made the
+       * Layer-3 alarm a licensed no-op on every exit that took it. Required is
+       * the same doctrine `tryRunComparisonGate` already applies: a new `ok`
+       * producer cannot re-open the leak by OMISSION, because omission no longer
+       * compiles.
+       *
+       * ⚠ AND THE WALK'S ACCOMPANYING CLAIM IS REFUTED, in the safe direction:
+       * that default was NOT "live-reachable for every non-`run_analysis` chip
+       * outcome". There are no non-`run_analysis` chip outcomes.
+       * `DETERMINISTIC_CHIP_ACTION_TYPES` has exactly one member (:160-162),
+       * `dispatchDeterministicChipClick` THROWS on anything else (:399-404), and
+       * route-v2 only calls it behind `isDeterministicChipClickActionType`. This
+       * union has ONE `outcome: 'ok'` producer and it always populated the
+       * field. The default was a LATENT re-arming point, like the sibling at
+       * route-v2.ts:4339 — not a live leak. Recorded because "live-reachable"
+       * and "reachable the day the whitelist grows" are different claims and
+       * only the second one was true.
+       */
+      readonly mayNameLeadingOption: boolean;
+    }
+  | { readonly outcome: 'commit_failed'; readonly response: OlumiResponse; readonly commitPerformed: false; readonly analysisReady?: undefined; readonly graph: GraphV3T | null }
+  | {
+      readonly outcome: 'handler_failure';
+      readonly response: OlumiResponse;
+      readonly commitPerformed: false;
+      readonly causeKind: string;
+      readonly retryable: boolean;
+      readonly analysisReady?: undefined;
+      readonly graph: GraphV3T | null;
+      /**
+       * P0 (analysis-500 diagnosis §8 FIX B, 2026-08-14) — THE DIAGNOSTIC THE
+       * WIRE USED TO DISCARD.
+       *
+       * The handler assembles PLoT's status and critique codes into
+       * `HandlerInvocationFailedError.details`; `route-v2.ts:2533` then built the
+       * 500's `preStageExtras` from `{ cause_kind, action_type }` alone and
+       * dropped the rest. Consequence, measured: the three banked 500 bodies were
+       * byte-identical at 1126 B, two entirely different PLoT dispositions
+       * produced the same bytes, and **naming the trigger required Render log
+       * access** (DIAGNOSIS §3, §7.1). This field closes that: the next
+       * occurrence is diagnosable from the response body.
+       *
+       * ALLOWLISTED, not the whole `details` object — see
+       * `WIRE_SAFE_FAILURE_DETAIL_KEYS`. `details` also carries PLoT-authored
+       * prose that interpolates the user's own option labels, and an error body
+       * is a channel that reaches logs and clients.
+       */
+      readonly diagnostics?: Readonly<Record<string, unknown>>;
+    }
+  | {
+      // V5 C5 — recoverable handler cause (RECOVERABLE_HANDLER_CAUSES, e.g.
+      // options_not_configured when an added option is not yet configured for
+      // analysis). The dispatcher composes a clean graceful body via the SAME
+      // composeRecoverableHandlerResponse machinery the Sonnet path uses;
+      // route-v2 maps this to a 200 (NOT the handler_failure → 500 path).
+      //
+      // ⚠ CORRECTED BY ROADMAP 2.1353. This field's contract USED to read
+      // "`commitPerformed:true` only for a science/readiness refusal, whose
+      // continuity marker is durably recorded. Other recovery classes preserve
+      // the historical false/no-commit shape." That conflated the durable
+      // REFUSAL FACT with the TURN ROW — see the long note at the emit site —
+      // and the consequence was that 7 of the 9 RECOVERABLE_HANDLER_CAUSES
+      // answered the user and left no trace, including the ask-shaped
+      // `options_not_configured` copy. `commitPerformed` now means exactly what
+      // it says: A TURN ROW LANDED. It is `true` for every recovered cause whose
+      // commit succeeded, and the refusal FACT still rides only on a continuity
+      // cause. Nothing on the chip-click `handler_recovered` path reads this
+      // field as a gate (route-v2's `!commitPerformed` 500s are on the DRAFT and
+      // EDIT dispatch results, not this one) — it is diagnostic here.
+      //
+      // ⚠ `analysisReady` USED TO BE `?: undefined` HERE, on the reasoning
+      // "no analysis ran, so the UI retains its prior store value". ROADMAP
+      // 2.1085 (root 2.1041) / golden-journey EXT-2 measured what that produces: the
+      // 2026-08-13 staging run's post-add-option `run_analysis` chip returned
+      // 200 with the honest mixed-scale refusal prose, `blocks: []`, and NO
+      // `analysis_ready` KEY AT ALL — neither admitted nor typed-blocked, so
+      // no consumer could act on the state. "Retains its prior value" was the
+      // wrong default: the prior value said the model was READY to analyse,
+      // and it no longer is. This outcome now carries the TYPED REFUSAL
+      // (`status: 'blocked'` + a specific `blocked_reason`) built by the live
+      // readiness writer. REQUIRED, not optional — omission must not compile,
+      // for the same reason `mayNameLeadingOption` was made required above:
+      // a new producer cannot silently re-open the gap.
+      readonly outcome: 'handler_recovered';
+      readonly response: OlumiResponse;
+      readonly commitPerformed: boolean;
+      readonly causeKind: string;
+      readonly analysisReady: AnalysisReadyPayload;
+      /**
+       * ROADMAP 2.1085 (root 2.1041) D2 — the freshness derivation for the PRIOR analysis
+       * against the CURRENT graph. Required for the same reason
+       * `analysisReady` is: `attachComputedAt` stamps freshness fields only
+       * when a derivation is supplied, and the deployed UI treats their
+       * absence as "cannot confirm whether this analysis is current". A
+       * refusal turn must not degrade the freshness strip as a side effect of
+       * reporting readiness honestly. `undefined` only where the snapshot
+       * could not be loaded (the same condition that leaves the `ok` exit's
+       * freshness underivable).
+       */
+      readonly freshness: FreshnessDerivation | undefined;
+      readonly graph: GraphV3T | null;
+    }
+  | {
+      readonly outcome: 'handler_result_invalid';
+      readonly response: OlumiResponse;
+      readonly commitPerformed: false;
+      readonly analysisReady?: undefined;
+      readonly graph: GraphV3T | null;
+    };
+
+/**
+ * P0 (analysis-500 diagnosis §8 FIX B, 2026-08-14) — the keys of
+ * `HandlerFailureDetails` that may travel on a wire error body.
+ *
+ * ⚠⚠ AN ALLOWLIST, NEVER A DENYLIST, AND THE DIRECTION IS THE SAFETY PROPERTY.
+ * `HandlerFailureDetails` has an index signature (`handler-errors.ts:93`), so any
+ * handler can add any key at any time. A denylist would silently pass each new
+ * one; this allowlist silently drops it. Dropping a useful diagnostic is a
+ * nuisance; publishing user content into an error channel is a defect.
+ *
+ * WHAT IS DELIBERATELY EXCLUDED, and why each one:
+ *   - `plot_status_reason`, `plot_user_message` — PLoT-AUTHORED PROSE. The
+ *     `run-analysis` composer already documents that `plot_user_message` "must
+ *     never be rendered" because no prose-safety gate exists on that path; an
+ *     error body is no safer than a rendered one.
+ *   - `first_option_label`, `missing_item_label`, `specific_issue`, `next_step` —
+ *     USER CONTENT verbatim or near-verbatim. PLoT's own blocker messages
+ *     interpolate option labels (`Option 'Hire two seniors' does not specify …`,
+ *     `preflight-v2.ts:191`), which is exactly how a person's business plan ends
+ *     up in a log aggregator.
+ *   - `scenario_id` — an identifier the caller already holds; no diagnostic gain.
+ *
+ * Everything admitted is machine-readable and bounded: enum-shaped codes,
+ * numeric statuses, booleans, and timing integers. `plot_critique_codes` is
+ * additionally shape-filtered at read time, because it is an array whose element
+ * shape is PLoT's to change.
+ */
+const WIRE_SAFE_FAILURE_DETAIL_KEYS: readonly string[] = [
+  'handler_id',
+  'downstream_http_status',
+  'downstream_http_status_parsed',
+  'plot_error_code',
+  'plot_primary_code',
+  'plot_critique_codes',
+  'plot_analysis_status',
+  'plot_blocker_code_known',
+  'plot_preflight_recovery',
+  'analysis_status',
+  'reason_code',
+  'plot_request_ms',
+  'handler_total_ms',
+  'plot_slow_likely',
+];
+
+/** Enum-shaped token — the only string shape a code field may carry. */
+const WIRE_SAFE_CODE_RE = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
+
+/**
+ * Project the allowlisted, shape-checked subset of a handler failure's details
+ * for the wire.
+ *
+ * String values must be enum-shaped: a `plot_primary_code` that arrived as a
+ * sentence is dropped rather than truncated, because a truncated sentence on an
+ * error body still leaks and additionally reads as a code. Returns `undefined`
+ * when nothing survived, so the response body gains no empty object.
+ */
+function pickWireSafeFailureDetails(
+  details: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, unknown>> | undefined {
+  const out: Record<string, unknown> = {};
+  for (const key of WIRE_SAFE_FAILURE_DETAIL_KEYS) {
+    if (!Object.prototype.hasOwnProperty.call(details, key)) continue;
+    const value = details[key];
+    if (typeof value === 'number' || typeof value === 'boolean') {
+      out[key] = value;
+      continue;
+    }
+    if (typeof value === 'string' && WIRE_SAFE_CODE_RE.test(value)) {
+      out[key] = value;
+      continue;
+    }
+    if (Array.isArray(value)) {
+      const codes = value.filter(
+        (v): v is string => typeof v === 'string' && WIRE_SAFE_CODE_RE.test(v),
+      );
+      if (codes.length > 0) out[key] = codes;
+    }
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * V5 C5 — chip-click recoverable-cause escape repair.
+ *
+ * Mirrors TurnExecutor's handler-recovery branch (turn-executor.ts) for the
+ * chip-click dispatch path. A handler invocation that fails with a RECOVERABLE
+ * cause (`RECOVERABLE_HANDLER_CAUSES` — e.g. `options_not_configured` when an
+ * added option is not yet configured for analysis) composes a clean graceful
+ * body via the SAME `composeRecoverableHandlerResponse` machinery, so route-v2
+ * can return a 200 instead of mapping the failure to a 500 BoundaryError.
+ *
+ * Cause-gated by the SHARED `isRecoverableHandlerCause` predicate (same locked
+ * set as the Sonnet path — the two cannot diverge on which causes recover).
+ * Returns `null` for FATAL causes so the caller keeps the existing
+ * `handler_failure` → 500 behaviour, and `null` on the impossible-state
+ * `fallback` template (cause on the recoverable list but no composer branch),
+ * matching TurnExecutor's fail-loud-to-500 guard. The recoverable response
+ * carries coaching text + a recovery chip; it never claims the option was
+ * configured and never writes `analysis_ready` onto the response body (the
+ * finaliser is still the sole stamping point).
+ *
+ * ROADMAP 2.1085 (root 2.1041): it DOES now return the typed refusal payload on the
+ * dispatch result, so route-v2 can hand it to the finaliser — plus the
+ * freshness derivation, without which `attachComputedAt` stamps a block
+ * carrying no freshness fields and the deployed UI overwrites a correct
+ * verdict with "Cannot confirm whether this analysis is current".
+ */
+/**
+ * ROADMAP 2.1085 (root 2.1041) D2 — the ONE freshness derivation for this dispatch path.
+ *
+ * Extracted so the `ok` exit and the `handler_recovered` exit cannot drift on
+ * how the verdict is computed. They differ only in WHICH facts they pass: the
+ * `ok` exit passes the post-dispatch chain (including the fact this turn just
+ * produced, which is what makes a rerun report `fresh`); the recovered exit
+ * derives against the prior chain because its refusal marker is persisted only
+ * after this verdict and must never masquerade as a computed result.
+ *
+ * Hash from the RAW persisted graph (parsed via GraphStateIngressSchema, the
+ * same parser turn-executor uses on follow-up explain turns). `snapshot.graph`
+ * is V3-parsed and `snapshot.options` is the PLoT projection — neither matches
+ * what turn-executor sees, so hashing either would surface false-stale. See
+ * run-analysis.ts §3.5 for the canonical explanation.
+ */
+function deriveChipClickFreshness(
+  cachedSnapshot: RunAnalysisScenarioSnapshot | null,
+  facts: readonly HandlerFact[],
+  /**
+   * CONTEXT/MEMORY V5 defect 4 — did the read that produced the PRIOR half of
+   * `facts` succeed? `false` ONLY on a thrown read; `undefined` ⇒ pre-fix
+   * behaviour.
+   *
+   * Threaded rather than derived here because this helper never reads the
+   * store — its callers own the read. On the post-dispatch call `facts` is the
+   * UNIFIED array (`[...enrichedFacts, ...context.prior_facts]`), so the flag
+   * describes only the prior half; that is sound, because the degraded branch
+   * in `deriveAnalysisFreshness` fires only when NO fact was selected at all,
+   * which on that path means `enrichedFacts` was empty too and the emptiness of
+   * the prior half is therefore genuinely unexplained.
+   */
+  priorFactsReadOk?: boolean,
+): FreshnessDerivation {
+  let currentGraphHash: string | null = null;
+  if (
+    cachedSnapshot?.rawPersistedGraph !== undefined &&
+    cachedSnapshot?.rawPersistedGraph !== null
+  ) {
+    const parsedForHash = GraphStateIngressSchema.safeParse(
+      cachedSnapshot.rawPersistedGraph,
+    );
+    if (parsedForHash.success) {
+      currentGraphHash = computeAnalysisAffectingGraphHash(parsedForHash.data);
+    }
+  }
+  return deriveAnalysisFreshness(
+    facts,
+    currentGraphHash,
+    // Option-identity guard (CEE_OPTION_IDENTITY_FRESHNESS_GUARD): read
+    // option IDs from the RAW persisted graph (covers the unparseable case
+    // the hash skips). undefined when off → byte-identical.
+    config.cee.optionIdentityFreshnessGuard
+      ? extractGraphOptionIds(cachedSnapshot?.rawPersistedGraph ?? null)
+      : undefined,
+    priorFactsReadOk === undefined ? undefined : { priorFactsReadOk },
+  );
+}
+
+async function tryComposeRecoverableChipOutcome(
+  err: HandlerInvocationFailedError,
+  graph: GraphV3T | null,
+  stage: StageType,
+  requestId: string,
+  scenarioId: string,
+  aborted: boolean,
+  freshness: FreshnessDerivation | undefined,
+  payload: MessageTurnPayload,
+  startedAt: number,
+  coachingState: CommitMetadata['coaching_state'],
+  /**
+   * The readiness this turn ALREADY projected from the canonical snapshot,
+   * before the handler was invoked — `deriveAnalysisReadyFromSnapshot`'s single
+   * per-turn derivation, the same one the success path, the chip generator and
+   * the wire response reuse. NOT a second assessment: passing it here is the
+   * whole point, because re-deriving would put two computations of one fact in
+   * the tree (`analysis-ready-core`'s "ONE assessment, not two").
+   *
+   * `buildAnalysisRefusalReadiness` decides from its `may_run` verdict whether
+   * this refusal is about the MODEL (carry the identity) or about something
+   * else (the empty carrier). See that function for the measured three-class
+   * table; the short version is that a mid-session refusal admits and stays
+   * bare, while a fresh draft's refusal does not admit and must name the model
+   * the user has to fix.
+   */
+  structuralReadiness: AnalysisReadyPayload | undefined,
+): Promise<
+  | Extract<
+      DispatchChipClickRunAnalysisResult,
+      { outcome: 'handler_recovered' | 'commit_failed' }
+    >
+  | null
+> {
+  // Budget-abort precedence (parity with TurnExecutor's
+  // `turnAbort.signal.aborted && isRecoverableHandlerCause(...)` short-circuit):
+  // if the turn budget already aborted, a recoverable cause MUST fail loud
+  // rather than be masked as a graceful recovery. NB only the FAIL-LOUD
+  // precedence is shared — the chip path surfaces this as the existing
+  // handler_failure → 500 (INTERNAL_ERROR, chip_click_run_analysis_handler_failed);
+  // it deliberately does NOT reproduce TurnExecutor's BUDGET_EXCEEDED wire
+  // classification (that would mean a new route outcome, out of scope). A
+  // timed-out turn is a degraded outcome, not a clean "needs configuration"
+  // recovery, so it must not emit a graceful body or recovery telemetry.
+  if (aborted) return null;
+  if (!isRecoverableHandlerCause(err.cause_kind)) return null;
+
+  // ComposeContext is unused by composeRecoverableHandlerResponse today (the
+  // body comes from the shared per-cause composer), but the signature requires
+  // it; pass the canonical validation registry the Sonnet path uses.
+  const recoveryCtx: ComposeContext = { handlerRegistry: HANDLER_VALIDATION_REGISTRY };
+  // ⚠ ROADMAP 2.1085 (root 2.1041) R1 — THE REFUSAL MUST BE ANALYSE-SHAPED.
+  //
+  // `composeRecoverableHandlerResponse` stamps `stage_indicator` from the
+  // REQUEST's stage, and the UI's "Run analysis" chip sends `stage: 'frame'`.
+  // Measured on the witnessed run (`20260813T190744Z-fresh-extended-7f2445`):
+  // BOTH T3 (a successful analysis) and T5B (the refusal) came back
+  // `stage_indicator: 'frame'`. T3 was harmless only because it carried an
+  // `analysis_result` block; the refusal carries none. A deployed-UI trace
+  // showed that combination — `stage_indicator !== 'analyse'` AND no
+  // `analysis_result` — takes the present-but-invalid path, which CLEARS ten
+  // fields that otherwise survive such a turn, including the user's
+  // `goalConstraints`, `draftCoaching` and `preAnalysisSensitivity`, plus the
+  // sessionStorage keys. So shipping the honest readiness block on a
+  // frame-shaped turn would have DESTROYED USER STATE.
+  //
+  // This dispatch path handles exactly one action (`run_analysis`), so every
+  // recovery reaching here IS an analyse turn and `'analyse'` is the honest
+  // stage — not a workaround. Scoped here rather than inside the shared
+  // composer, which also serves non-analyse handlers on the routed path.
+  const recovered = composeRecoverableHandlerResponse(err, recoveryCtx, ANALYSE_STAGE_INDICATOR);
+  void stage;
+
+  // Impossible-state guard — the cause is on the recoverable list but the
+  // composer has no per-cause branch (template_id === 'fallback'). That is a
+  // code bug, not a runtime fault: fall through to the fatal 500 path so the
+  // gap is visible, mirroring TurnExecutor.
+  if (recovered.template_id === 'fallback') {
+    log.error(
+      {
+        event: 'assert_recoverable_handler_fallback',
+        request_id: requestId,
+        scenario_id: scenarioId,
+        cause_kind: err.cause_kind,
+      },
+      'V5 chip_click hit recoverable composer fallback — cause on recoverable list but no template; returning typed failure (500)',
+    );
+    return null;
+  }
+
+  log.warn(
+    {
+      request_id: requestId,
+      scenario_id: scenarioId,
+      cause_kind: err.cause_kind,
+      retryable: err.retryable,
+      recoverable: true,
+    },
+    'V5 chip_click handler invocation failed — recoverable',
+  );
+
+  // Recovery telemetry — same cross-layer event the Sonnet path emits, so a
+  // single `v5.recovery_response` query finds recoveries across both layers.
+  emit(TelemetryEvents.RecoveryResponse, {
+    request_id: requestId,
+    scenario_id: scenarioId,
+    failure_origin: 'handler',
+    handler_cause_kind: err.cause_kind,
+    template_used: recovered.template_id,
+    chip_type: recovered.chip_type,
+    chip_count: recovered.response.suggested_actions.length,
+    retryable: err.retryable,
+  });
+
+  // ROADMAP 2.1085 (root 2.1041) / EXT-2 — the typed refusal.
+  //
+  // ⭐ THE STRUCTURAL PROJECTION IS HANDED IN, NOT DISCARDED. This call used to
+  // pass one argument, so the refusal was ALWAYS the empty carrier on this arm.
+  // The routed arm (`turn-executor.ts:10097`) has passed the two-argument form
+  // since #1023: the fix existed and shipped to one arm only, and the arm it
+  // missed is the one the deployed "Run analysis" chip actually takes.
+  //
+  // MEASURED CONSEQUENCE, two authenticated runs at deployed CEE c24bfe37: a
+  // signed-in user clicking "Run analysis" on a freshly drafted model received
+  // `status="blocked" goal_node_id="" options=[] blocked_reason=
+  // "MISSING_OPTION_VALUE"` with `blockers` ABSENT — a refusal naming no model
+  // and no blockers, so nothing downstream could say what to fix. That absence
+  // is also why `analysis_state.run_state.blockers` is `[]`: it is ONE defect,
+  // not two — `compose/analysis-state-v1.ts:486-493` calls
+  // `mapWireBlockers(input.readiness?.blockers)` and `mapWireBlockers(undefined)`
+  // returns `[]`.
+  //
+  // `buildAnalysisRefusalReadiness` — not this arm — decides which refusals keep
+  // the identity, from the admission verdict the projection already carries. So
+  // the mid-session case the empty carrier was measured for still gets the empty
+  // carrier (it ADMITS: `may_run === true`), and the rule lives with the
+  // vocabulary instead of being restated per arm. Restating it here is the
+  // two-arms-disagreeing defect (CLAUDE.md trap 21) that produced this bug.
+  //
+  // `graph` remains used only for label resolution downstream, exactly as before.
+  const blockedReason = blockedReasonForHandlerFailure(err);
+  // ⭐ AND WHEN THIS TURN HAS NO PROJECTION OF ITS OWN, READ THE ONE THE
+  // REFUSAL BROUGHT WITH IT.
+  //
+  // `structuralReadiness` is the `:955` binding, and `:955` is
+  // `cachedSnapshot ? derive(...) : undefined`. On the path where the LOADER
+  // ITSELF refused, `cachedSnapshot` is null by construction (`:904`) — so the
+  // arm passed `undefined` and `buildAnalysisRefusalReadiness` returned the
+  // bare carrier at its first line, before the `may_run` discriminator #1126
+  // gave it could be consulted. The rule was right and had nothing to rule on.
+  //
+  // That is exactly the path a signed-in user takes clicking "Run analysis" on
+  // a freshly drafted model, and it is why the fix that shipped to this arm did
+  // not close the case it was written for.
+  //
+  // Preference order is deliberate: a projection derived from THIS turn's
+  // snapshot wins, because it is the more current read. The verdict's payload
+  // is a fallback for the one case where no snapshot exists — and on that path
+  // the two cannot disagree, because there is only one.
+  //
+  // ⚠ `cause`, NOT `details`. `run-analysis.ts:337` preserves the original error
+  // as the standard ES2022 `cause`; `details` is an untyped telemetry record
+  // (`[key: string]: unknown`) that would give this read no type safety at all.
+  // No change is needed there — the link already exists.
+  const fromVerdict = err.cause instanceof AnalysisNotReadyError
+    ? err.cause.structuralReadiness
+    : undefined;
+  const analysisReady = buildAnalysisRefusalReadiness(
+    blockedReason,
+    structuralReadiness ?? fromVerdict,
+  );
+  // ROADMAP 2.1085 (root 2.1041) R2/R3 — clamp the verdict this carrier may
+  // report. See `clampRefusalFreshness` for why `fresh`/`none` are forbidden
+  // on a refusal turn and why the hash PAIR (not just the verdict) is broken.
+  const refusalFreshness = freshness ? clampRefusalFreshness(freshness) : undefined;
+  log.info(
+    {
+      event: 'v5.chip_click.analysis_ready_blocked',
+      request_id: requestId,
+      scenario_id: scenarioId,
+      cause_kind: err.cause_kind,
+      blocked_reason: blockedReason,
+      // forbidden-exempt: freshness VERDICT enum (fresh|stale|unknown|none) in a LOG line — honest null when the snapshot could not be loaded and no derivation exists, not a science-value fallback. Same shape and same reason as route-v2.ts's `analysis_ready_freshness` and turn-executor.ts:6334/6542/12084.
+      freshness: refusalFreshness?.freshness ?? null,
+      // forbidden-exempt: freshness REASON code in a LOG line — honest null when no derivation exists; a telemetry string, never a science value.
+      freshness_reason: refusalFreshness?.reason ?? null,
+      // forbidden-exempt: the PRE-clamp verdict in a LOG line — kept so the clamp is observable in production rather than silently rewriting a verdict; honest null when no derivation exists.
+      freshness_before_clamp: freshness?.freshness ?? null,
+    },
+    'V5 chip_click run_analysis refused — emitting a typed blocked readiness state',
+  );
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // ⭐⭐ ROADMAP 2.1353 — TWO QUESTIONS THAT WERE SHARING ONE PREDICATE.
+  //
+  // ⚠ THIS BLOCK USED TO READ `if (persistsRefusal) { …commit… }`, so ONE
+  // predicate decided BOTH of the following, and they are not the same question
+  // (CLAUDE.md trap 21 — two authorities under one name is this estate's
+  // chronic defect, and here it was one authority answering two):
+  //
+  //   Q1  "Does this refusal acquire ANALYSIS-REFUSAL CONTINUITY?" — i.e. does a
+  //       durable non-result `run_analysis` fact get written, so the freshness
+  //       and canonical selectors carry the refused attempt forward? That is
+  //       correctly narrow: only a science/readiness refusal is evidence about
+  //       the MODEL. A transient engine-busy or an args failure is not.
+  //
+  //   Q2  "Should this TURN be written to conversation history?" — i.e. does the
+  //       next turn's model get to see that this exchange happened at all? That
+  //       is not narrow. It is true of EVERY turn that produced a user-visible
+  //       answer.
+  //
+  // Answering Q2 with Q1's predicate meant 7 of the 9 RECOVERABLE_HANDLER_CAUSES
+  // shipped HTTP 200 with a composed reply and NO TURN ROW. The most
+  // user-visible of them is `options_not_configured`, whose copy is
+  //
+  //     "…it won't appear in the comparison until you tell me. Tell me what
+  //      {option} changes and I'll write it into the model."
+  //
+  // — the DEPLOYED post-add-option case. It solicits a reply and recorded
+  // nothing, so the reply arrived at a model with no memory of the request. Same
+  // defect class as ROADMAP 2.1352 (CEE #1213) fixed at the Stage-4A intercepts,
+  // reached through a different mechanism: this path DOES have a commit, it was
+  // simply gated on the wrong question.
+  //
+  // THE FIX IS TO NAME THE CONCEPTS APART, not to widen the continuity set. The
+  // refusal FACT still rides only on a continuity cause; the TURN ROW is now
+  // written for every recovered cause.
+  //
+  // ⚠ NO PENDING REFERENT IS ARMED, and that is a deliberate fail-closed, not an
+  // omission. The `options_not_configured` copy names an option by LABEL only —
+  // `details` carries `first_option_label` and `option_count` and NO id
+  // (`run-analysis.ts`, both throw sites) — so there is no cell identity to
+  // record, and a pending naming a bare label could not be bound by identity.
+  // Committing the turn gives the next turn the question in its conversation
+  // history, which is the half that is available here. Recording an id-bearing
+  // referent needs the throw sites to carry the option id, which is a separate
+  // change to a separate file.
+  // ══════════════════════════════════════════════════════════════════════════
+  const acquiresRefusalContinuity = isAnalysisRefusalContinuityCause(err.cause_kind);
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // ⭐⭐ ROUND-2 BLOCKER — A COMMIT THAT DOES NOT THREAD PRIORS *WIPES* THEM.
+  //
+  // `commit.ts` reads `metadata.priorPendingActions ?? []` (:1116/:1164) and
+  // writes the result to the new row's `pending_actions` column (:1377); the
+  // store then reads the NEWEST ROW ONLY (`supabase-store.ts` :2272-2277,
+  // `.limit(1)`). So a commit with no priors threaded does not "carry nothing
+  // forward" — it lands an authoritative row with an EMPTY pendings list and
+  // the user's live consent hold is gone. Silently: the F-HELD lapse notice is
+  // built by the carry-forward pass, which never ran.
+  //
+  // Before 2.1353 the seven non-continuity recoverable causes wrote NO ROW, so
+  // the hold survived on the previous row. Committing them without priors
+  // would therefore make those seven causes STRICTLY WORSE than the defect this
+  // PR set out to fix — trading the user's live proposal for this turn's
+  // memory, which is the exact inversion of the ordering this lane declared:
+  //
+  //     LOSING THE USER'S PROPOSAL  ≫  LOSING THE MEMORY  ≫  LOSING THE REFERENT
+  //
+  // ⚠ THE READ IS `…IntegrityStrict`, NOT `…Strict`. This commit becomes the
+  // NEWEST turn, so its pendings column supersedes the row we are reading. The
+  // tolerant variant returns the SURVIVORS of a partially-corrupt row and does
+  // not throw (`supabase-store.ts` :2305-2347) — which would silently drop the
+  // unreadable entries into a row that then becomes authoritative. Truncation
+  // is a lossy write here, so it must fail like a read failure.
+  //
+  // ⚠ A FAILED READ ABORTS THE COMMIT ENTIRELY, both halves of the split:
+  //   - non-continuity causes degrade to exactly the pre-2.1353 shape (a
+  //     graceful 200, no row) — the user keeps their proposal and loses only
+  //     this question's memory;
+  //   - continuity causes report `commit_failed` (→ typed 500), the same
+  //     escalation a failed commit has always produced on them, because the
+  //     durable refusal fact the freshness selectors depend on is equally
+  //     absent either way — BUT ONLY FOR THE STORE-UNAVAILABLE CLASS.
+  //
+  // ⚠⚠ THE ESCALATION IS SPLIT BY ERROR CODE, because this loader does NOT
+  // throw only on store-unavailability. An earlier version of this comment
+  // said it did; that was FALSE, and the falsity had teeth. `validation:
+  // 'strict'` ALSO throws `SessionReadError { code: 'pending_actions_corrupt' }`
+  // on a non-array column, on ANY entry `parsePendingAction` returns null for,
+  // and on a scenario mismatch (`supabase-store.ts` :2296-2299, :2345-2351).
+  // `parsePendingAction` returns null for any kind outside
+  // `RESUMABLE_ACTION_TYPES` (`pending-action.ts` :831) — and THIS change adds
+  // two kinds to that set, so the most plausible trigger is a ROLLBACK of this
+  // build over rows it has already written. None of those states would have
+  // failed the WRITE, so escalating them converts a graceful 200 refusal into
+  // a typed 500 on exactly the causes a user hits most.
+  //
+  // So: `pending_actions_corrupt` degrades to the graceful shape on BOTH
+  // halves. It does NOT relax the fail-closed no-commit — an unreadable row
+  // still aborts the commit, because committing over pendings this build
+  // cannot parse is the wipe. It only declines to turn a working answer into
+  // a hard failure, which is the same trade already stated at the
+  // commit-failure escalation below. (The shared helper
+  // `routing/persist-asked-question.ts:219` degrades on the same failure; this
+  // asymmetry is now removed rather than merely noted.)
+  // ══════════════════════════════════════════════════════════════════════════
+  let priorPendingActions: readonly PendingAction[] | null = null;
+  try {
+    priorPendingActions = await loadMostRecentPendingActionsIntegrityStrict(
+      scenarioId,
+      requestId,
+    );
+  } catch (priorReadError) {
+    // Duck-typed on `code`, deliberately NOT `instanceof SessionReadError`:
+    // a dozen suites mock that class as a bare `class extends Error {}`, so an
+    // identity check would silently stop discriminating under a mock.
+    const priorReadCode =
+      typeof (priorReadError as { code?: unknown } | null)?.code === 'string'
+        ? (priorReadError as { code: string }).code
+        : null;
+    const priorRowUnreadableNotStoreDown = priorReadCode === 'pending_actions_corrupt';
+    log.warn(
+      {
+        event: 'v5.recovered_turn_prior_pending_read_failed',
+        request_id: requestId,
+        scenario_id: scenarioId,
+        cause_kind: err.cause_kind,
+        acquires_refusal_continuity: acquiresRefusalContinuity,
+        prior_read_code: priorReadCode,
+        degraded_not_escalated: priorRowUnreadableNotStoreDown,
+        err:
+          priorReadError instanceof Error
+            ? { name: priorReadError.name, message: priorReadError.message }
+            : { message: String(priorReadError) },
+      },
+      'V5 chip_click run_analysis recovery — prior-pending read failed; not committing, because a commit without carry-forward would wipe live proposals',
+    );
+    if (acquiresRefusalContinuity && !priorRowUnreadableNotStoreDown) {
+      return {
+        outcome: 'commit_failed',
+        response: recovered.response,
+        commitPerformed: false,
+        graph,
+      };
+    }
+  }
+
+  let turnPersisted = false;
+  // ⭐ THE SHIPPED ANSWER MUST BE THE COMMITTED ANSWER (Codex #1286 verdict
+  // `5483244874`, issue (b): "actual commit lapse copy is missing from the
+  // dispatcher-returned answer").
+  //
+  // This path threads `priorPendingActions`, so `commitDirectAnswer`'s
+  // carry-forward pass can retire a live consent hold — and when it does it
+  // APPENDS the honest one-sentence F-HELD lapse notice to the response it
+  // persists, returning that amended copy as `CommitResult.response`
+  // (commit.ts, `buildHeldLapseNotice`). Returning the PRE-COMMIT object here
+  // wrote the notice to the turn row and never spoke it: the user's live
+  // proposal died silently and the row disagreed with the wire about what the
+  // user had been told. `commit.ts`'s own return-site docblock states the
+  // contract this now honours — callers that consume `CommitResult.response`
+  // surface it on the wire, so wire copy == durable copy.
+  let responseForWire = recovered.response;
+  if (priorPendingActions !== null) {
+    const refusalFact = acquiresRefusalContinuity
+      ? buildAnalysisRefusalFact({
+          scenarioId,
+          reasonCode: blockedReason,
+          graphHash: freshness?.current_graph_hash ?? null,
+        })
+      : null;
+    try {
+      const committed = await commitDirectAnswer(recovered.response, {
+        scenario_id: scenarioId,
+        turn_id: payload.turn_id,
+        turn_class: 'handler',
+        handler_id: 'run_analysis',
+        request_hash: computeRequestHash(payload),
+        llm_calls_used: 0,
+        duration_ms: Date.now() - startedAt,
+        handler_facts: refusalFact === null ? [] : [refusalFact],
+        // ⭐ THE ROUND-2 FIX. Without this key the chokepoint carries forward
+        // `[]` and this row — which becomes the newest — wipes every live
+        // pending. `pending_actions` is deliberately NOT pre-supplied: the
+        // chokepoint derives this turn's own pendings from the EGRESS-finalised
+        // chips, which is what keeps the "persisted pending ⟹ rendered chip"
+        // invariant true on the recovery chip this path emits.
+        priorPendingActions,
+        coaching_state: coachingState,
+        userMessage: payload.message,
+        contentGraph: graph,
+      });
+      turnPersisted = true;
+      // `?? recovered.response` is load-bearing, not defensive noise: ~100
+      // suites in this repo stub `commitDirectAnswer`, and a bare `vi.fn()`
+      // resolves to `undefined`. Reading `.response` unguarded would ship an
+      // undefined wire body on every one of those paths.
+      responseForWire = committed?.response ?? recovered.response;
+    } catch (commitError) {
+      log.error(
+        {
+          event: 'v5.state_commit_failed',
+          request_id: requestId,
+          scenario_id: scenarioId,
+          failure_origin: acquiresRefusalContinuity
+            ? 'analysis_refusal_continuity'
+            : 'recovered_turn_history',
+          cause_kind: err.cause_kind,
+          err:
+            commitError instanceof Error
+              ? { name: commitError.name, message: commitError.message }
+              : { message: String(commitError) },
+        },
+        'V5 chip_click run_analysis recovery could not be persisted',
+      );
+      // ⚠ THE COMMIT-FAILED ESCALATION STAYS BOUNDED TO THE CONTINUITY CAUSES.
+      // A failed commit on a continuity refusal loses DURABLE EVIDENCE the
+      // freshness selectors depend on, and that has always surfaced as
+      // `commit_failed` (→ a typed 500). A failed commit on the other recovered
+      // causes loses only this question's MEMORY, which is strictly less than
+      // the user loses today — so it degrades to the pre-2.1353 shape (a
+      // graceful 200 with no row) rather than converting a working 200 into a
+      // 500. Widening the escalation would make this repair capable of BREAKING
+      // a turn that works today, which is the wrong trade for a memory fix.
+      if (acquiresRefusalContinuity) {
+        return {
+          outcome: 'commit_failed',
+          response: recovered.response,
+          commitPerformed: false,
+          graph,
+        };
+      }
+    }
+  }
+
+  return {
+    outcome: 'handler_recovered',
+    response: responseForWire,
+    commitPerformed: turnPersisted,
+    causeKind: err.cause_kind,
+    analysisReady,
+    // ROADMAP 2.1085 (root 2.1041) D2 — the freshness verdict for the PRIOR
+    // analysis against the CURRENT graph. This turn ran nothing, so the
+    // verdict is derived from the prior fact chain only. Without it the
+    // finaliser stamps a freshness-free block and the deployed UI
+    // (analysisFreshness.ts) replaces a correct verdict with 'unknown' — the
+    // refusal turn would DEGRADE the freshness strip as a side effect of
+    // telling the truth about readiness. R2/R3: clamped to {stale, unknown}.
+    freshness: refusalFreshness,
+    graph,
+  };
+}
+
+/**
+ * Phase 2b — top-level dispatch entry point.
+ *
+ * Resolves the whitelisted handler from the registry and invokes it. Throws
+ * synchronously when `actionType` is not in the whitelist — callers (route-v2)
+ * gate on `isDeterministicChipClickActionType` first, so reaching this with
+ * an unwhitelisted value is a programming error rather than a runtime drift.
+ *
+ * Whitelist contract: `DETERMINISTIC_CHIP_ACTION_TYPES` has exactly ONE
+ * member — `run_analysis`. It is a genuine no-LLM compute handler (not an
+ * explanation), so bypassing Sonnet is correct; it keeps its heavyweight code
+ * path (scenario-snapshot pre-load, decision_review enrichment, single-source-
+ * of-truth analysisReady derivation).
+ *
+ * The analytical pills `explain_results` / `what_would_flip` are NO LONGER
+ * dispatched here (F2 CHANGE A, 2026-07-22 — see the whitelist declaration
+ * above). They are owned by the conversation-aware coach via TYPED FORCED
+ * INTENT (route-v2 `detectChipClickForcedIntent` → TurnExecutor
+ * `chipClickForcedIntent` → `routeWithToolUse` with a forced explanation
+ * handler + thinking disabled), with the deterministic composers
+ * (`composeExplainResultsFallback` / `composeWhatWouldFlipFallback`) serving
+ * as the routed BOUNDED FALLBACK when the coach's `answer_text` is invalid.
+ * No lightweight explanation path exists in this dispatcher any more.
+ */
+export async function dispatchDeterministicChipClick(
+  actionType: string,
+  params: DispatchChipClickRunAnalysisParams,
+): Promise<DispatchChipClickRunAnalysisResult> {
+  if (!DETERMINISTIC_CHIP_ACTION_TYPES.has(actionType as V5ActionType)) {
+    throw new Error(
+      `dispatchDeterministicChipClick: action_type '${actionType}' is not whitelisted ` +
+        `(allowed: ${Array.from(DETERMINISTIC_CHIP_ACTION_TYPES).join(', ')})`,
+    );
+  }
+  if (actionType === 'run_analysis') {
+    return dispatchChipClickRunAnalysis(params);
+  }
+  // Unreachable: the guard above rejects every action_type except the sole
+  // whitelisted `run_analysis`, which returns in the branch above. Retained as a
+  // defensive throw so a future whitelist expansion fails loud here rather than
+  // silently falling through to an undefined dispatch.
+  throw new Error(
+    `dispatchDeterministicChipClick: unhandled whitelisted action_type '${actionType}'`,
+  );
+}
+
+/**
+ * R2 — stamp auto-run provenance onto the run_analysis fact. Clone-and-spread
+ * per the decision_review enricher's rule: PLoT-originated enrichment keys are
+ * preserved verbatim; only the CEE-authored provenance key is added. Facts of
+ * any other type pass through untouched by reference.
+ */
+function stampAutoRunProvenance(
+  facts: readonly HandlerFact[],
+  draftTurnId: string,
+): readonly HandlerFact[] {
+  return facts.map((fact) => {
+    if (fact.fact_type !== 'run_analysis') return fact;
+    return {
+      ...fact,
+      result: {
+        ...fact.result,
+        enrichment: {
+          ...(fact.result.enrichment ?? {}),
+          [RUN_PROVENANCE_ENRICHMENT_KEY]: buildAutoRunProvenance(draftTurnId),
+        },
+      },
+    };
+  });
+}
+
+export async function dispatchChipClickRunAnalysis(
+  params: DispatchChipClickRunAnalysisParams,
+): Promise<DispatchChipClickRunAnalysisResult> {
+  const { payload, requestId, handlerRegistry } = params;
+  const startedAt = Date.now();
+
+  // Build the turn context using the same builder TurnExecutor uses, so the
+  // handler invocation is indistinguishable from a Sonnet-routed call.
+  const context = await buildTurnContext(payload, requestId);
+
+  // V5 finaliser contract — single-source-of-truth for the scenario graph.
+  //
+  // Pre-load the scenario snapshot ONCE here. The handler invocation uses
+  // a one-shot scenarioReader that returns this exact cached snapshot, and
+  // readiness derivation reads the same raw snapshot carrier before any
+  // science-bearing surface is composed. This guarantees the canonical
+  // readiness adapter operates on the exact graph the handler operates on,
+  // eliminating any TOCTOU window where a concurrent edit-graph dispatch
+  // from another session could change the persisted record between reads.
+  //
+  // Test path: if `handlerRegistry` is injected, the test owns the
+  // scenarioReader contract. We skip the production pre-load AND the
+  // readiness derivation in that case; readiness is therefore honestly
+  // unknown and every science-positive consumer fails closed.
+  let cachedSnapshot: RunAnalysisScenarioSnapshot | null = null;
+  let snapshotLoadError: unknown = null;
+  if (!handlerRegistry) {
+    try {
+      cachedSnapshot = await loadScenarioSnapshotForRunAnalysis(
+        payload.scenario_id,
+        requestId,
+      );
+    } catch (err) {
+      // Persistence read failed. Cache the error so the handler invocation
+      // re-throws it inside the registered ScenarioReader catch ladder,
+      // producing the same `HandlerInvocationFailedError('scenario_read_failed')`
+      // the production DEFAULT_SCENARIO_READER would have produced. We
+      // surface the load failure with a structured warning so the original
+      // baseline regression (analysis_ready missing) cannot recur as an
+      // unobservable false negative — the `analysis_ready_missing_reason`
+      // field tells operators exactly why the wire field is absent.
+      snapshotLoadError = err;
+      log.warn(
+        {
+          request_id: requestId,
+          scenario_id: payload.scenario_id,
+          analysis_ready_missing_reason: 'snapshot_load_failed',
+          err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+        },
+        'V5 chip_click run_analysis — pre-handler snapshot load failed; analysis_ready will be omitted',
+      );
+    }
+  }
+
+  const oneShotReader: ScenarioReader = async () => {
+    if (snapshotLoadError) throw snapshotLoadError;
+    if (!cachedSnapshot) {
+      // Defensive — should not be reachable in production (either snapshot
+      // loaded or error was cached). If the test path supplies a registry,
+      // this reader is never consulted.
+      throw new Error('V5 chip_click run_analysis — no cached snapshot');
+    }
+    return cachedSnapshot;
+  };
+
+  // Graph for the central egress sanitiser. Same single-source-of-truth
+  // contract as `cachedSnapshot.graph` used for readiness derivation
+  // (loadScenarioSnapshotForRunAnalysis already runs GraphV3.safeParse).
+  // Null on the test path or when snapshot load failed — sanitiser then
+  // falls back to prefix-aware generic wording.
+  const snapshotGraph: GraphV3T | null = (cachedSnapshot?.graph as GraphV3T | undefined) ?? null;
+  // Science-positive permission must come from the exact current canonical
+  // snapshot, not from the successful handler result. Derive it once from the
+  // same one-shot carrier the handler will consume, then reuse that verdict
+  // for chips, Phase 3 composition, and the wire response.
+  const analysisReady = cachedSnapshot
+    ? deriveAnalysisReadyFromSnapshot(cachedSnapshot, requestId, payload.scenario_id)
+    : undefined;
+
+  // Reuse the memoised default PLoT client so per-call registry
+  // construction does not also construct a fresh PLoTClientImpl (which
+  // holds undici dispatchers). The handler swap we need here is the
+  // ScenarioReader, not the PLoT transport.
+  const registry =
+    handlerRegistry ??
+    createRegistry({
+      scenarioReader: oneShotReader,
+      plotClient: getDefaultPlotClient(),
+    });
+  const handlerFn = resolveHandler(registry, 'run_analysis');
+  if (!handlerFn) {
+    // Safety net — the default registry registers run_analysis. If that
+    // invariant breaks, surface honestly via a commit-false result.
+    log.error(
+      { request_id: requestId },
+      'V5 chip_click dispatch — run_analysis handler missing from registry',
+    );
+    return {
+      outcome: 'commit_failed',
+      response: composeToolCallResponse({
+        answerKind: 'functional',
+        orientation: '',
+        confirmation: 'Could not run analysis. The analysis service is temporarily unavailable.',
+        coaching: null,
+        // ⚠ THE DERIVED STAGE, NOT THE CLIENT'S ECHO — AND THE LIMIT OF WHAT
+        // THAT BUYS, STATED PLAINLY.
+        //
+        // `context` came from `buildTurnContext` above, which is where the ONE
+        // stage authority (`context/derive-stage.ts`) runs. Reading
+        // `payload.stage` here re-echoed the client's own guess and could ship a
+        // stale `decide` the derivation had already corrected.
+        //
+        // ⚠ WHAT THIS DOES NOT FIX: `buildTurnContext` runs BEFORE the handler,
+        // so on a `run_analysis` chip click the analysis has NOT yet run when
+        // the stage is derived. The promotion to `decide` therefore CANNOT
+        // originate on the turn that completes the analysis — it lands on the
+        // next routed turn. This swap fixes the stale-`decide` echo only; the
+        // origination ordering is untouched and out of scope for this change.
+        stage: context.stage,
+        handlerFacts: [],
+      }),
+      commitPerformed: false,
+      graph: snapshotGraph,
+    };
+  }
+
+  const turnAbort = new AbortController();
+  const turnTimer = setTimeout(() => turnAbort.abort(), context.budgets.turn_ms);
+
+  // Response skeleton used for typed-failure paths where the handler never
+  // produced a usable outcome.
+  const failureResponse = composeToolCallResponse({
+    answerKind: 'functional',
+    orientation: '',
+    confirmation: 'Analysis could not complete.',
+    coaching: null,
+    // Derived stage, same authority as the composed exit below — see the
+    // note at the safety-net exit above for what this does and does not fix.
+    stage: context.stage,
+    handlerFacts: [],
+  });
+
+  try {
+    let outcome;
+    try {
+      outcome = await handlerFn({
+        context,
+        payload,
+        requestId,
+        signal: turnAbort.signal,
+        // Chip-click bypasses the routing layer, so there is no Sonnet
+        // orientation text to forward. Pass empty string; the run_analysis
+        // handler does not read this field, and the field is required by
+        // the HandlerInvocation contract added in 0.9.0 to support the
+        // V5 no-op handlers (which are never invoked via chip-click).
+        orientationText: '',
+        // proposal is also absent on the chip-click path — see HandlerInvocation
+        // JSDoc; the field is optional precisely for this dispatch.
+      });
+    } catch (err) {
+      // Mirror TurnExecutor's catch ladder so chip-click errors surface
+      // with the same typed granularity as Sonnet-routed errors.
+      if (err instanceof HandlerInvocationFailedError) {
+        // V5 C5 — recoverable causes (e.g. options_not_configured) compose a
+        // graceful 200 via the shared machinery instead of a 500. Cause-gated,
+        // and budget-gated (an aborted turn fails loud, parity with TurnExecutor).
+        // Fatal/aborted causes fall through to the handler_failure → 500 path.
+        const recovered = await tryComposeRecoverableChipOutcome(
+          err,
+          snapshotGraph,
+          // Source-consistency only: `tryComposeRecoverableChipOutcome`
+          // `void`s this parameter and composes with the literal
+          // ANALYSE_STAGE_INDICATOR, deliberately (ROADMAP 2.1085 — a
+          // non-analyse refusal with no analysis_result block makes the
+          // deployed UI clear ten fields of user state). Passing the derived
+          // stage changes no wire byte; it removes the last read of the
+          // client echo from this function so the wrong source cannot be
+          // resurrected here by a later reader.
+          context.stage,
+          requestId,
+          payload.scenario_id,
+          turnAbort.signal.aborted,
+          // ROADMAP 2.1085 (root 2.1041) D2 — PRIOR computed-result facts only:
+          // this turn's refusal marker is committed after this derivation and
+          // is not analysis output. Same derivation function the `ok` exit uses.
+          // Defect 4 — this refusal path derives from the PRIOR chain alone, so a
+          // degraded read here is exactly the "cannot tell" case that must not
+          // become "never analysed".
+          cachedSnapshot
+            ? deriveChipClickFreshness(
+                cachedSnapshot,
+                context.prior_facts,
+                context.prior_facts_read_ok,
+              )
+            : undefined,
+          payload,
+          startedAt,
+          context.coaching_state,
+          // The SAME single per-turn derivation computed above and reused by
+          // the chips, Phase 3 composition and the wire response — never a
+          // second assessment of the same graph.
+          analysisReady,
+        );
+        if (recovered) return recovered;
+        log.warn(
+          {
+            request_id: requestId,
+            scenario_id: payload.scenario_id,
+            cause_kind: err.cause_kind,
+            retryable: err.retryable,
+            message: err.message,
+          },
+          'V5 chip_click run_analysis — handler invocation failed (typed)',
+        );
+        return {
+          outcome: 'handler_failure',
+          response: failureResponse,
+          commitPerformed: false,
+          causeKind: err.cause_kind,
+          retryable: err.retryable,
+          graph: snapshotGraph,
+          // P0 FIX B — carry the diagnostic the wire used to discard.
+          diagnostics: pickWireSafeFailureDetails(err.details),
+        };
+      }
+      if (err instanceof HandlerResultInvalidError) {
+        log.error(
+          {
+            request_id: requestId,
+            scenario_id: payload.scenario_id,
+            message: err.message,
+          },
+          'V5 chip_click run_analysis — handler result invalid',
+        );
+        return {
+          outcome: 'handler_result_invalid',
+          response: failureResponse,
+          commitPerformed: false,
+          graph: snapshotGraph,
+        };
+      }
+      throw err;
+    }
+
+    // Decision_review enrichment — same behaviour as TurnExecutor's EXECUTE
+    // branch for run_analysis (V5 Group 1 Task B). Non-blocking; enricher
+    // internally guards its own timeout and never throws.
+    //
+    // V5 Phase 1 brief persistence (2026-05-02): the brief now sources
+    // from canonical state (`scenarios.brief_text`) via
+    // `EnrichedTurnContext.scenarioBriefText`, populated by
+    // `buildTurnContext` at line 147. The previous hardcoded
+    // `brief: null` made decision_review always skip with reason
+    // `no_brief` on the chip-click path — independently of TurnExecutor's
+    // parallel bug (defect B). Fixing both call sites atomically here.
+    //
+    // Latency gate (V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW): when this
+    // flag is false (the default), the chip-click run_analysis path
+    // skips the auto-fire so the click returns immediately on the
+    // deterministic PLoT analysis. `v5.decision_review.skipped` with
+    // reason `autofire_disabled` is emitted in place of the await.
+    let enrichedFacts: readonly HandlerFact[];
+    // ROADMAP 2.73 Fix C — decision_review call attribution parity with the
+    // executor path (#476). Gated exactly like the executor's sink: flag-off
+    // production passes no sink and allocates one empty object + one ternary,
+    // byte-identical behaviour otherwise.
+    const timingsEnabled =
+      config.cee.timingDebugEnabled || config.features.diagnosticTraceEnabled;
+    let chipTurnTimings: V5TurnTimings | undefined;
+    if (!config.cee.runAnalysisAwaitDecisionReview) {
+      const briefLength =
+        typeof context.scenarioBriefText === 'string'
+          ? context.scenarioBriefText.length
+          : 0;
+      const runAnalysisFact = outcome.handler_facts.find(
+        (f) => f.fact_type === 'run_analysis',
+      );
+      const enrichment =
+        runAnalysisFact && runAnalysisFact.fact_type === 'run_analysis'
+          ? runAnalysisFact.result.enrichment
+          : undefined;
+      const leadingOptionPresent =
+        runAnalysisFact !== undefined
+        && runAnalysisFact.fact_type === 'run_analysis'
+        && typeof runAnalysisFact.result.leading_option_id === 'string'
+        && runAnalysisFact.result.leading_option_id.length > 0;
+      emit(TelemetryEvents.V5DecisionReviewSkipped, {
+        request_id: requestId,
+        scenario_id: context.session_id,
+        reason: 'autofire_disabled',
+        brief_present: briefLength > 0,
+        brief_length: briefLength,
+        has_enrichment: enrichment !== undefined,
+        leading_option_present: leadingOptionPresent,
+      });
+      enrichedFacts = outcome.handler_facts;
+    } else {
+      // Wall-clock the await on the caller's clock and thread the call's
+      // model/tokens back via callTelemetrySink — the same #476 pattern the
+      // executor uses. The sink is populated ONLY when the LLM call
+      // RETURNED; a skip / timeout leaves it empty, so no phantom
+      // decision_review llm_calls entry is ever fabricated.
+      const decisionReviewStartedAt = timingsEnabled ? Date.now() : 0;
+      const callTelemetrySink: {
+        model?: string;
+        provider?: string;
+        input_tokens?: number;
+        output_tokens?: number;
+        prompt_hash?: string;
+        prompt_version?: string;
+        prompt_source?: string;
+      } = {};
+      enrichedFacts = await enrichRunAnalysisWithDecisionReview({
+        handlerFacts: outcome.handler_facts,
+        requestId,
+        scenarioId: context.session_id,
+        signal: turnAbort.signal,
+        brief: context.scenarioBriefText,
+        // ⭐ THE GRAPH THIS RUN ANALYSED, not the turn-start reread.
+        // `cachedSnapshot.rawPersistedGraph` is what the run handler submitted
+        // and hashed; `context.persistedGraph` is the graph as it stood when
+        // the TURN began, and on an edit-then-analyse turn those are different
+        // models. The same `?? context.persistedGraph` idiom is already used
+        // twice in this dispatcher (:1662, :1765) — this is the third reader of
+        // the same fact, not a new channel.
+        runGraph: cachedSnapshot?.rawPersistedGraph ?? context.persistedGraph,
+        ...(timingsEnabled ? { callTelemetrySink } : {}),
+        // D-ask-1 (2.11 P0-1) — P1-2: same scaffolded-placeholder
+        // disclosure threading as the turn-executor decision-review block —
+        // the review must never narrate placeholder numbers as user data.
+        ...(outcome.__scaffolded_options !== undefined
+          ? { scaffoldedOptions: outcome.__scaffolded_options }
+          : {}),
+      });
+      if (timingsEnabled && callTelemetrySink.model !== undefined) {
+        chipTurnTimings = {
+          decision_review_ms: Date.now() - decisionReviewStartedAt,
+          decision_review_model: callTelemetrySink.model,
+          decision_review_provider: callTelemetrySink.provider,
+          decision_review_input_tokens: callTelemetrySink.input_tokens,
+          decision_review_output_tokens: callTelemetrySink.output_tokens,
+          // Spread-guarded: an absent hash must leave the key absent, so a
+          // cache-miss call reports "identity unknown" rather than undefined
+          // masquerading as a recorded value.
+          ...(callTelemetrySink.prompt_hash !== undefined
+            ? { decision_review_prompt_hash: callTelemetrySink.prompt_hash }
+            : {}),
+          ...(callTelemetrySink.prompt_version !== undefined
+            ? { decision_review_prompt_version: callTelemetrySink.prompt_version }
+            : {}),
+          ...(callTelemetrySink.prompt_source !== undefined
+            ? { decision_review_prompt_source: callTelemetrySink.prompt_source }
+            : {}),
+        };
+      }
+    }
+
+    // ROADMAP 2.73 Fix A — STEP-5 coaching signal on the chip-click run
+    // path, via the SAME shared helper the turn-executor uses (this path
+    // previously composed `coaching: null` hardcoded, so a chip-driven
+    // first run or rerun shipped zero coaching prose by construction).
+    // contextPack is null on this path — the run_analysis branch signals
+    // never consult it. The returned facts carry the signal marker on the
+    // run_analysis fact and MUST be the array that chips/compose/commit see.
+    const coachingApplication = applyCoachingSignal({
+      proposedHandlerId: 'run_analysis',
+      outcome,
+      contextPack: null,
+      priorFacts: context.prior_facts,
+      handlerFacts: enrichedFacts,
+      analysisReady,
+      requestId,
+      scenarioId: context.session_id,
+      // ROADMAP 2.804 — the SAME scope builder this path's own claim-safety
+      // exit uses below, so the coaching slot and the response's
+      // `mayNameLeadingOption` cannot describe different scenarios. The helper
+      // derives the permission from `enrichedFacts ∪ prior_facts`, which is the
+      // same union the exit builds — one derivation, two read points.
+      claimSafetyScope: claimSafetyScopeFromContext(context),
+      // Same collector + raw-graph source the freshness derivation below
+      // uses (snapshot first, turn-context fallback on the test path).
+      interventionControlledFactorIds: collectInterventionControlledFactorIds(
+        cachedSnapshot?.rawPersistedGraph ?? context.persistedGraph,
+      ),
+    });
+    enrichedFacts = coachingApplication.handlerFacts;
+
+    // R2 — provisional provenance stamp, BEFORE the compose/commit seams so
+    // the persisted fact, the composed block source and the freshness read
+    // all see one fact object. The wire block's transport keep-list strips
+    // the key (see RUN_PROVENANCE_ENRICHMENT_KEY), so today's UI renders an
+    // ordinary completed analysis — the required graceful degradation.
+    if (params.autoRun !== undefined) {
+      enrichedFacts = stampAutoRunProvenance(enrichedFacts, params.autoRun.draftTurnId);
+    }
+
+    // V5 coaching parity — emit the same post-analysis suggested_actions
+    // the Sonnet-routed run_analysis path emits. Reuses the existing
+    // `generateChips` rule so chip-click and routed turns produce
+    // identical chip sets, including (when the current-turn
+    // decision_review enrichment carries a usable `specific_action`) the
+    // "What should we validate?" prompt chip.
+    //
+    // Honesty contract preserved from PR #190: `handlerFacts` is the
+    // current turn's `enrichedFacts` ONLY — no `priorFacts` rescue. If
+    // the current run_analysis has no usable
+    // decision_review.evidence_enhancements[].specific_action, the
+    // validation chip is suppressed.
+    //
+    // Other inputs:
+    //   - `analysis: null` — the post-run_analysis branch in
+    //     `generateChipsRaw` does not read this field; chip-click does
+    //     not build a `ContextPackAnalysis` projection. Passing null is
+    //     safe and matches the production-rule chip the post-run_analysis
+    //     branch emits (executable explain_results + what_would_flip).
+    //   - `priorFacts` — threaded so any future cross-turn rules in the
+    //     chip generator stay consistent with the routed path.
+    //   - `analysisReady` — the exact current canonical snapshot verdict.
+    //     Ordinary post-analysis chips do not require it, while the
+    //     factor-EVPPI priority chip requires exact `status === 'ready'`.
+    //   - `validationRegistry` — required for executable-chip
+    //     registry-presence validation (existing chip-generator contract).
+    const chipClickSuggestedActions = generateChips({
+      // The SAME value the response's `stage_indicator` carries below, so the
+      // pill and the coaching chips cannot disagree about which stage the
+      // user is in — the two-authorities defect the derivation removes.
+      stage: context.stage,
+      handlerFacts: enrichedFacts,
+      priorFacts: context.prior_facts,
+      analysis: null,
+      analysisReady,
+      validationRegistry: HANDLER_VALIDATION_REGISTRY,
+      // D-ask-1 (2.11 P0-1): scaffolded-placeholder disclosure channel —
+      // same threading as the routed path, so a chip-click run that only
+      // completed on disclosed defaults offers the configure chip first.
+      ...(outcome.__scaffolded_options !== undefined
+        ? { scaffoldedOptions: outcome.__scaffolded_options }
+        : {}),
+      // No-rank ruling (2026-08-14): same source as the routed path — the
+      // options the run left out, not the status quo it held.
+      ...(outcome.__excluded_options !== undefined
+        ? { excludedOptions: outcome.__excluded_options }
+        : {}),
+    });
+
+    // Compose the response using the same composer TurnExecutor uses. The
+    // chip-click confirmation template comes from the handler's registered
+    // validation-registry declaration.
+    const decl = HANDLER_VALIDATION_REGISTRY.run_analysis;
+    const confirmationText = typeof decl?.confirmation_template === 'function'
+      ? decl.confirmation_template(outcome)
+      : (decl?.confirmation_template ?? outcome.assistant_text);
+    // Review F1 — hash gate for the compose fallback. On this path the
+    // snapshot passed below is the EXACT object the handler hashed into
+    // `graph_hash_at_run` (one-shot reader, no second DB read), so the
+    // fact's own hash gates the fallback open by construction; passing it
+    // keeps the compose-side gate uniform with the routed path (where the
+    // handler and the turn context read the graph separately).
+    const composedRunFact = enrichedFacts.find(
+      (f) => f.fact_type === 'run_analysis',
+    );
+    const composedRunFactGraphHash =
+      composedRunFact !== undefined &&
+      composedRunFact.fact_type === 'run_analysis' &&
+      typeof composedRunFact.result.graph_hash_at_run === 'string'
+        ? composedRunFact.result.graph_hash_at_run
+        : null;
+    let response = composeToolCallResponse({
+      answerKind: 'functional',
+      orientation: '',  // no Sonnet orientation on chip clicks.
+      confirmation: confirmationText,
+      // ROADMAP 2.73 Fix A — was `coaching: null` hardcoded; the chip run
+      // path now joins the shared STEP-5 signal text (FIRST_ANALYSIS_COMPLETE
+      // on a first run, RERUN_ANALYSIS_COMPLETE with the compareRuns delta on
+      // a rerun) exactly as the routed path does.
+      coaching: coachingApplication.coachingText,
+      // Derived stage — same authority as `generateChips` above.
+      stage: context.stage,
+      handlerFacts: enrichedFacts,
+      suggested_actions: chipClickSuggestedActions,
+      // R4 lookup fix — persisted-snapshot fallback for graph-node
+      // ID→{label,kind} resolution (Phase 3 target_refs + the flag-gated
+      // ui_directive). The snapshot is the SAME reference the handler ran
+      // against (single-source-of-truth pre-load above); on the injected-
+      // registry test path fall back to the turn context's persisted graph.
+      persistedGraph: cachedSnapshot?.rawPersistedGraph ?? context.persistedGraph,
+      persistedGraphHash: composedRunFactGraphHash,
+      analysisReadyStatus: analysisReady?.status,
+      // ROADMAP 2.211 — the PRIOR fact array (this turn's `enrichedFacts`
+      // EXCLUDED), for the no-immediate-repeat lens tie-break. This path is the
+      // one the live walk exercised (the "Run analysis" chip) and it passes no
+      // `lifecycle` at all, so without this line the amendment would be dead on
+      // exactly the journey it was measured against. Already loaded for the turn
+      // — no extra DB read.
+      priorTurnFactsForLensHistory: context.prior_facts,
+    });
+
+    // R2 — the user-visible provisional label, PREPENDED before the egress
+    // guards below so the forbidden-phrase and defaulted-value seams qualify
+    // the text that actually ships/persists. Deterministic template copy;
+    // placed ahead of the receipt so a resumed conversation reads the honest
+    // framing first.
+    if (params.autoRun !== undefined) {
+      const receipt = response.assistant_text ?? '';
+      response = {
+        ...response,
+        assistant_text: receipt.length > 0
+          ? `${AUTO_RUN_PROVISIONAL_DISCLOSURE} ${receipt}`
+          : AUTO_RUN_PROVISIONAL_DISCLOSURE,
+      };
+    }
+
+    // ⭐⭐ PROCESS NARRATION — the third of the three finaliser sites, and it
+    // runs BEFORE the forbidden-phrase guard for the same ordering reason as
+    // in turn-executor: it is the guard that can substitute the whole reply,
+    // so its replacement copy must then be judged by the guard below rather
+    // than bypassing it. See `compose/process-narration.ts` for the two
+    // witnessed leaks (3 Sep 2026) and for why the branch-level
+    // `stripPlanningPreamble` could not cover them.
+    //
+    // ⚠ WHY HERE AT ALL, when neither witnessed leak came down this path.
+    // `DETERMINISTIC_CHIP_ACTION_TYPES` routes chip clicks around the turn
+    // executor entirely (see the F6 note below, which exists for exactly this
+    // reason), so a guard installed only in `finalizeRun` would be blind to
+    // every chip-initiated turn. Enumerating the paths that HAVE leaked is how
+    // the next emit path ships uncovered.
+    //
+    // ⚠⚠ IT DOES NOT COVER THE CHIP-CLICK DISPATCH FAMILY, AND THIS COMMENT
+    // SAID IT DID. The withdrawn sentence read: "this covers the chip-click
+    // DISPATCH FAMILY by construction — both of route-v2's `chip_click` exits
+    // (`:2855`, `:2937`) reach here." Resolved on the AST by an independent
+    // review: `:2855` is the `handler_recovered` exit, composed in
+    // `tryComposeRecoverableChipOutcome` [688-1130] and returned by
+    // `if (recovered) return recovered;` at `:1406` — out of a CATCH clause
+    // nested in the outer try, i.e. BEFORE this guard, which sits in that
+    // outer try's own body. Only `:2937`, the `ok` outcome, reaches here.
+    //
+    // So the guard is reachable on THREE of route-v2's 24 `sendFinalised200`
+    // exits, not four, and the structural property is per-EXIT rather than
+    // per-family. The measured enumeration of all twenty-one uncovered exits
+    // and `:2855`'s reason are in `enforceProcessNarrationGuard`'s docblock in
+    // `turn-executor.ts`.
+    //
+    // ⚠ AN EARLIER DRAFT OF THIS COMMENT ADDED "and it carries only static
+    // literals", inherited from the review rather than measured. FALSE: four
+    // of the nine `RECOVERABLE_HANDLER_CAUSES` interpolate. What is true is
+    // narrower and is stated, with its limits, in that docblock.
+    {
+      const guarded = applyProcessNarrationGuard(response.assistant_text ?? '');
+      if (guarded.rewritten) {
+        emit(TelemetryEvents.V5EgressProcessNarrationDetected, {
+          request_id: requestId,
+          scenario_id: payload.scenario_id,
+          marker: guarded.hit,
+          remedy: guarded.remedy,
+          dispatch_path: 'chip_click_finalise',
+          sentences_total: guarded.sentencesTotal,
+          sentences_removed: guarded.sentencesRemoved,
+          narration_length: guarded.narration.length,
+        });
+        response = { ...response, assistant_text: guarded.text };
+      }
+    }
+
+    // V5 stale-aware explain recovery — finaliser-level egress guard.
+    // Runs as the LAST step before the chip-click response is
+    // committed, so it backstops the confirmation template + any
+    // future fallback copy. An upstream hook would miss new emit
+    // paths added later; the finaliser hook cannot. See
+    // FORBIDDEN_USER_FACING_PHRASES for the contradiction list.
+    {
+      const guarded = applyEgressForbiddenPhraseGuard(response.assistant_text ?? '');
+      if (guarded.rewritten) {
+        emit(TelemetryEvents.V5EgressForbiddenPhraseDetected, {
+          request_id: requestId,
+          scenario_id: payload.scenario_id,
+          phrase: guarded.hit,
+          dispatch_path: 'chip_click_finalise',
+        });
+        response = { ...response, assistant_text: guarded.text };
+      }
+    }
+
+    /**
+     * F6 — THE DEFAULTED-VALUE EGRESS INVARIANT, DELIBERATELY DUPLICATED HERE.
+     *
+     * ⭐⭐ THE DUPLICATION IS THE POINT, AND THIS IS THE ONE EXIT THAT NEEDS IT.
+     * `DETERMINISTIC_CHIP_ACTION_TYPES` includes `run_analysis`, so the
+     * ANALYSIS-COMPLETION turn — the turn that ships "came out ahead in NN% of
+     * runs of this model" (`coaching/analysis-result-headline.ts`, reaching the
+     * user through the validation registry's confirmation template) — bypasses
+     * the turn executor entirely and therefore never meets
+     * `enforceDefaultedValueDisclosureGuard`. Without this block, the single
+     * most analysis-bearing sentence the product emits is the one sentence the
+     * invariant cannot see.
+     *
+     * The guard directly above is duplicated for exactly the same reason and
+     * says so; this follows its shape deliberately rather than inventing a
+     * second one.
+     *
+     * ⚠ WHY NOT MOVE THE WHOLE LAYER TO `sendFinalised200` INSTEAD — the
+     * alternative was measured and rejected on evidence, not on effort. Of the
+     * 20 route-level exits, NONE has a `run_analysis` fact in scope; a threaded
+     * parameter would be `null` at 19 of them, which is opt-out-by-omission
+     * wearing a required-parameter costume. Deriving it there from the
+     * memoised turn-claim-safety resolver would cover 18 — but NOT this one,
+     * because that resolver reads `context.prior_facts`, and on THIS turn the
+     * analysis has only just been produced: its fact is in `enrichedFacts`, not
+     * in prior_facts. That is the same execute-turn blind spot that made the
+     * executor guard read the wrong array. So the route-level relocation would
+     * add reach everywhere except the place the harm was actually measured.
+     *
+     * ⭐ AND IT COSTS NOTHING. `composedRunFact` is already in scope from the
+     * compose seam above — the enrichment is read straight off the fact this
+     * dispatch just produced, with no second DB read and no new parameter.
+     *
+     * Placed AFTER the forbidden-phrase guard (same ordering argument as the
+     * executor: whole-text substitutions run first, so this qualifies the text
+     * that actually ships) and BEFORE `commitDirectAnswer`, so the disclosed
+     * text is what gets persisted as well as what gets sent.
+     */
+    {
+      const defaulted =
+        composedRunFact !== undefined && composedRunFact.fact_type === 'run_analysis'
+          ? readDefaultedAssumptionsFromEnrichment(composedRunFact.result.enrichment)
+          : null;
+      if (defaulted !== null) {
+        const applied = applyDefaultedValueEgress(response.assistant_text ?? '', defaulted);
+        if (applied.changed) {
+          emit(TelemetryEvents.V5DefaultedValueEgressApplied, {
+            request_id: requestId,
+            scenario_id: payload.scenario_id,
+            dispatch_path: 'chip_click_finalise',
+            defaulted_count: defaulted.count,
+            disclosure_added: applied.disclosureAdded,
+            suppressed_count: applied.suppressed.length,
+            duplicates_removed: applied.duplicatesRemoved,
+          });
+          response = { ...response, assistant_text: applied.text };
+        }
+      }
+    }
+
+    log.info(
+      {
+        event: 'v5_fact_chain_commit',
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        turn_id: payload.turn_id,
+        turn_class: 'handler',
+        handler_id: 'run_analysis',
+        action_type: 'run_analysis',
+        raw_handler_fact_count: outcome.handler_facts.length,
+        enriched_handler_fact_count: enrichedFacts.length,
+        has_raw_run_analysis_fact: outcome.handler_facts.some(
+          (f) => f.fact_type === 'run_analysis',
+        ),
+        has_enriched_run_analysis_fact: enrichedFacts.some(
+          (f) => f.fact_type === 'run_analysis',
+        ),
+      },
+      'V5 chip-click: run_analysis fact persistence pre-commit',
+    );
+    log.debug(
+      {
+        event: 'v5_fact_chain_commit_detail',
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        turn_id: payload.turn_id,
+        action_type: 'run_analysis',
+        raw_fact_types: outcome.handler_facts.map((f) => f.fact_type),
+        enriched_fact_types: enrichedFacts.map((f) => f.fact_type),
+      },
+      'V5 chip-click: run_analysis fact persistence pre-commit (verbose)',
+    );
+
+    // ══════════════════════════════════════════════════════════════════════
+    // ⭐⭐⭐ THE SUCCESS COMMIT WAS THE LAST CHIP-CLICK WIPE SHARER (2.1353 r3)
+    //
+    // `commit.ts`'s own module docstring named this exact call site as a
+    // REMAINING wipe sharer — "`handlers/chip-click-dispatch.ts:1679`, in
+    // `dispatchChipClickRunAnalysis` (the run_analysis SUCCESS commit)". This
+    // is that repair. Mechanism, all three hops:
+    //
+    //   1. `commit.ts` reads `metadata.priorPendingActions ?? []` (:1136/:1183)
+    //      and writes the carry-forward result into the NEW row's
+    //      `pending_actions` column;
+    //   2. `supabase-store.ts` `readMostRecentPendingActions` selects
+    //      `.order('created_at', desc).limit(1)` — the NEWEST ROW ONLY;
+    //   3. so a commit that threads no priors does not "carry nothing
+    //      forward". It DELETES — and silently, because the F-HELD lapse
+    //      notice is built by the carry-forward pass, which never ran.
+    //
+    // MEASURED: a founder's recorded ask died 15 seconds after it was made,
+    // across ZERO user turns, to this wipe. Not TTL expiry.
+    // `elicit_option_effect` pendings measured 5 created / 0 ever matched.
+    //
+    // ⚠ `…IntegrityStrict`, NOT the tolerant variant — same reasoning as the
+    // recovery path above: this commit becomes the NEWEST row, so its pendings
+    // column supersedes the row being read. The tolerant loader returns the
+    // SURVIVORS of a partially-corrupt row without throwing, which would
+    // silently drop the unreadable entries into a row that then becomes
+    // authoritative. Truncation is a lossy write here.
+    //
+    // ⚠⚠ DELIBERATE DIVERGENCE FROM THE RECOVERY PATH'S FAIL-CLOSED CHOICE —
+    // STATED PLAINLY SO A REVIEWER CAN CHALLENGE IT. The recovery path ABORTS
+    // its commit when this read fails, on the ordering
+    //
+    //     LOSING THE USER'S PROPOSAL ≫ LOSING THE MEMORY ≫ LOSING THE REFERENT
+    //
+    // That ordering is right THERE and wrong HERE, because the two commits do
+    // not carry the same cargo. The recovery commit carries a refusal fact and
+    // this turn's memory. THIS commit carries the `run_analysis` FACT that the
+    // freshness chain and the rerun escape hatch read — refusing it converts a
+    // successful analysis into an unrecorded one, which breaks a DIFFERENT
+    // user-visible link ("rerun uses the correction") and can leave the user
+    // staring at a completed analysis the product has no record of.
+    //
+    // So on a failed read this path COMMITS ANYWAY and announces the risk
+    // loudly. That is a strict improvement on the status quo, in which this
+    // branch wiped live pendings SILENTLY, 100% of the time — the common path
+    // is now fully fixed and the rare path is at least observable. It is NOT
+    // a claim that losing a hold is acceptable; it is a claim that on THIS
+    // seam the two harms are close enough that the silent one must become
+    // visible before it is traded. If a reviewer judges the proposal strictly
+    // dominant here too, the change is a one-line early return and the loud
+    // event becomes the abort's telemetry.
+    // ══════════════════════════════════════════════════════════════════════
+    // Three states, not two — see `PriorPendingsOutcome`. A SUCCESSFUL strict
+    // read that returns nothing is the ONE state entitled to author `[]`:
+    // absence was actually established.
+    let priorOutcome: PriorPendingsOutcome;
+    try {
+      const strictPriors = await loadMostRecentPendingActionsIntegrityStrict(
+        payload.scenario_id,
+        requestId,
+      );
+      priorOutcome =
+        strictPriors.length === 0
+          ? { state: 'known_empty' }
+          : { state: 'known_with_survivors', pendings: strictPriors };
+    } catch (priorReadError) {
+      // Duck-typed on `code`, deliberately NOT `instanceof SessionReadError`:
+      // a dozen suites mock that class as a bare `class extends Error {}`, so
+      // an identity check would silently stop discriminating under a mock.
+      const priorReadCode =
+        typeof (priorReadError as { code?: unknown } | null)?.code === 'string'
+          ? (priorReadError as { code: string }).code
+          : null;
+      log.error(
+        {
+          event: 'v5.pending_wipe_risk_on_success_commit',
+          request_id: requestId,
+          scenario_id: payload.scenario_id,
+          turn_id: payload.turn_id,
+          auto_run: params.autoRun !== undefined,
+          prior_read_code: priorReadCode,
+          err:
+            priorReadError instanceof Error
+              ? { name: priorReadError.name, message: priorReadError.message }
+              : { message: String(priorReadError) },
+        },
+        'V5 chip_click run_analysis SUCCESS commit — prior-pending read failed; committing anyway ' +
+          'to keep the run_analysis fact durable, so any live pending on the prior row is at risk ' +
+          'from this commit',
+      );
+
+      // The authoritative read failed, so by default we DO NOT KNOW what was
+      // there. Only a salvage that actually returns something may move this.
+      priorOutcome = { state: 'unavailable', reason: priorReadCode ?? 'read_failed' };
+
+      // ══════════════════════════════════════════════════════════════════════
+      // ⭐ SURVIVORS BEAT A TOTAL WIPE — BUT ONLY WHEN THERE ARE SURVIVORS.
+      //
+      // ⚠⚠ ROUND 4 — `pending_actions_corrupt` HAS TWO PRODUCERS WITH OPPOSITE
+      // RECOVERY BEHAVIOUR, AND THE ROUND-3 VERSION OF THIS BLOCK KEYED ON THE
+      // CODE ALONE. Derived at `supabase-store.ts` at this tip:
+      //
+      //   PRODUCER A — `!Array.isArray(raw)` (:2307-2323)
+      //     strict   -> throws `pending_actions_corrupt` (:2319)
+      //     tolerant -> `return []` (:2322). ZERO SURVIVORS, ALWAYS.
+      //
+      //   PRODUCER B — parse failures / scenario mismatches (:2343-2373)
+      //     strict   -> throws `pending_actions_corrupt` (:2370)
+      //     tolerant -> returns the SURVIVORS (:2374) — a real recovery, but
+      //                 ONLY when at least one entry parsed. A row whose every
+      //                 entry is unreadable also yields ZERO.
+      //
+      // On both zero-survivor states the round-3 code assigned `[]`, threaded
+      // it, and `commit.ts` resolved that to a TOTAL WIPE — the exact outcome
+      // omitting the key produces, i.e. the very defect this PR exists to stop
+      // — while logging `…partial_recovery…` with `recovered_count: 0` and the
+      // words "recovered the readable survivors". A TOTAL LOSS REPORTED AS A
+      // RECOVERY, which is worse than the original silent wipe: a "recovered"
+      // event is what stops anyone investigating.
+      //
+      // THE DISCRIMINATOR IS THE RECOVERED COUNT, NOT THE PRODUCER. Keying on
+      // which producer threw would fix only producer A — the branch the review
+      // named — and leave producer B's all-unreadable row still lying. The
+      // claim being made is "we recovered something", so the count is what it
+      // must rest on. (`readMostRecentPendingActions` is also the only place
+      // that could tell the two apart, and it throws an identical code from
+      // both; naming them apart at the producer is the larger change, rowed,
+      // not taken here.)
+      //
+      // WHAT THE ZERO-SURVIVOR CASE DOES, AND WHY IT IS SAFE. The key stays
+      // OMITTED, which is what the threading site below already promises
+      // ("Omitted (not `[]`) when the read FAILED, so the wipe stays honestly
+      // attributable"). The durable outcome is the same carry-forward loss
+      // either way — and that is acceptable HERE, specifically, because in both
+      // zero-survivor states NOTHING WAS EVER REACHABLE: a non-array column and
+      // a row of wholly unparseable entries are equally unreadable to every
+      // consumer, so this commit destroys no live proposal that any code path
+      // could have resumed. The corrupt row itself is NOT deleted — this commit
+      // APPENDS a new turn row, and the read is `.limit(1)` on the newest — so
+      // the original bytes remain in the table for a later build with a wider
+      // parser. What changes is the CLAIM: the event now says the priors were
+      // LOST, so the loss is attributable instead of disguised.
+      //
+      // Aborting the commit instead was considered and REJECTED, on the cargo
+      // argument this path already makes below and which the review accepted:
+      // refusing the commit converts a successful analysis into an unrecorded
+      // one and breaks the rerun escape hatch, which is a strictly larger harm
+      // than superseding a row nothing could read.
+      //
+      // Tolerant-as-PRIMARY is correctly rejected above: this commit becomes the
+      // newest row, so a silent truncation would be a lossy write promoted to
+      // authoritative. That argument does NOT carry to tolerant-as-FALLBACK,
+      // because the alternative inside this catch is not lossless strict — it is
+      // `[]`, which `commit.ts` resolves to a TOTAL wipe. Truncation strictly
+      // dominates total wipe under this lane's own declared ordering:
+      //
+      //     LOSING THE USER'S PROPOSAL ≫ LOSING THE MEMORY ≫ LOSING THE REFERENT
+      //
+      // Scoped to `pending_actions_corrupt` deliberately. On store-down and DB
+      // error the tolerant path also yields `[]` (`fetchMostRecentPendingActions`
+      // returns `[]` on a falsy store and swallows throws), so widening the
+      // branch would buy nothing and would blur which failure we recovered from.
+      // `pending_actions_corrupt` fires on `parsePendingAction` returning null —
+      // i.e. PendingAction schema drift, this estate's named dominant risk — so
+      // it is not a rare-enough branch to leave wiping.
+      //
+      // The loud event above still fires either way: recovering survivors is not
+      // a reason to stop reporting that the authoritative read failed.
+      // ══════════════════════════════════════════════════════════════════════
+      if (priorReadCode === 'pending_actions_corrupt') {
+        try {
+          const salvaged = await loadMostRecentPendingActions(payload.scenario_id, requestId);
+          if (salvaged.length > 0) {
+            // A GENUINE partial recovery: at least one hold survived and is
+            // carried. This is the ONLY transition out of `unavailable`.
+            //
+            // ⚠ A salvage returning `[]` may NOT move us to `known_empty`. The
+            // tolerant loader returns `[]` for a non-array column, for wholly
+            // unparseable entries, for a missing store and for a failed read —
+            // none of which established that the history was empty. Treating
+            // that `[]` as knowledge is precisely the defect.
+            priorOutcome = { state: 'known_with_survivors', pendings: salvaged };
+            log.error(
+              {
+                event: 'v5.pending_wipe_partial_recovery_on_success_commit',
+                request_id: requestId,
+                scenario_id: payload.scenario_id,
+                turn_id: payload.turn_id,
+                recovered_count: salvaged.length,
+              },
+              'V5 chip_click run_analysis SUCCESS commit — recovered the readable survivors of a ' +
+                'corrupt pending row; entries this build cannot parse are dropped by this commit',
+            );
+          } else {
+            // ⭐ NOTHING WAS RECOVERABLE. `successPriorPendingActions` stays
+            // null so the key is OMITTED rather than threaded as `[]` — an
+            // unavailable read must not be published as an authoritative empty.
+            // The wording matches the payload: this is a LOSS, not a recovery.
+            log.error(
+              {
+                event: 'v5.pending_wipe_unrecoverable_on_success_commit',
+                request_id: requestId,
+                scenario_id: payload.scenario_id,
+                turn_id: payload.turn_id,
+                recovered_count: 0,
+              },
+              'V5 chip_click run_analysis SUCCESS commit — the prior pending row is unreadable and ' +
+                'NOTHING could be salvaged; any pendings it held are LOST to this commit. Not a ' +
+                'recovery: the row was already unreadable to every consumer, and its bytes remain ' +
+                'in the table because this commit appends a new newest row rather than deleting it',
+            );
+          }
+        } catch {
+          // Defence in depth only: `loadMostRecentPendingActions` swallows both
+          // a missing store and a read failure and resolves to `[]`, so at this
+          // tip it cannot throw. If a future change makes it throw, the key
+          // stays omitted and this is reported as the loss it is — never left
+          // to the reader to infer from silence.
+          log.error(
+            {
+              event: 'v5.pending_wipe_unrecoverable_on_success_commit',
+              request_id: requestId,
+              scenario_id: payload.scenario_id,
+              turn_id: payload.turn_id,
+              recovered_count: 0,
+              salvage_threw: true,
+            },
+            'V5 chip_click run_analysis SUCCESS commit — the salvage read itself failed; any ' +
+              'pendings on the prior row are LOST to this commit',
+          );
+        }
+      }
+    }
+
+    try {
+      const committed = await commitDirectAnswer(response, {
+        scenario_id: payload.scenario_id,
+        turn_id: payload.turn_id,
+        turn_class: 'handler',
+        handler_id: 'run_analysis',
+        request_hash: computeRequestHash(payload),
+        llm_calls_used: outcome.llm_calls_used,
+        duration_ms: Date.now() - startedAt,
+        handler_facts: enrichedFacts,
+        // V5 Stage 2B-1b: persist the turn-start (pre-dispatch) coaching snapshot.
+        coaching_state: context.coaching_state,
+        // V5 Conversation Context Reliability: persist the user's turn text;
+        // the assistant answer auto-derives from `response.assistant_text`.
+        // R2 — on the auto-run trigger the user typed NOTHING, so nothing may
+        // be stored as their words: omit the key entirely (capConversationText
+        // maps the absence to a NULL user_message — the established
+        // system-event turn shape). The synthesised payload.message exists
+        // only to satisfy the boundary contract and must never enter the
+        // conversation record as user speech.
+        ...(params.autoRun === undefined ? { userMessage: payload.message } : {}),
+        // ⭐ THE ROUND-3 FIX. Without this key the chokepoint carries forward
+        // `[]` and this row — which becomes the newest — wipes every live
+        // pending. Omitted (not `[]`) when the read FAILED, so the wipe stays
+        // honestly attributable to the read failure the loud event above
+        // names, rather than being disguised as a successful empty read.
+        // `pending_actions` is deliberately NOT pre-supplied: the chokepoint
+        // derives this turn's own pendings from the EGRESS-finalised chips,
+        // which is what keeps the "persisted pending ⟹ rendered chip"
+        // invariant true.
+        // `priorsToThread` is the single enforcement point of the invariant:
+        // `null` (OMIT) for `unavailable`, `[]` only for an established empty.
+        ...(priorsToThread(priorOutcome) !== null
+          ? { priorPendingActions: priorsToThread(priorOutcome)! }
+          : {}),
+        // Same GraphV3T the egress sanitiser uses for this turn — resolves
+        // entity-id labels in the stored assistant answer so stored == wire.
+        contentGraph: snapshotGraph,
+      });
+      // V5 state-trust: derive freshness POST-dispatch using the just-
+      // produced run_analysis fact + prior chain, against the snapshot
+      // graph. The chip-click rerun path is the user's escape hatch from
+      // a stale verdict — its wire response MUST report fresh.
+      const postDispatchFacts: readonly HandlerFact[] = [
+        ...enrichedFacts,
+        ...context.prior_facts,
+      ];
+      // Defect 4 — nearly always inert here (this turn's `enrichedFacts` are
+      // selected first), but it matters for a rerun that produced no usable
+      // run_analysis fact AND could not read the prior chain.
+      const freshness = deriveChipClickFreshness(
+        cachedSnapshot,
+        postDispatchFacts,
+        context.prior_facts_read_ok,
+      );
+      emitFreshnessTelemetry(
+        freshness,
+        {
+          request_id: requestId,
+          scenario_id: payload.scenario_id,
+          dispatch_path: 'chip_click_run_analysis',
+        },
+        {
+          prior_fact_count: context.prior_facts.length,
+          current_turn_fact_count: enrichedFacts.length,
+        },
+      );
+
+      return {
+        outcome: 'ok',
+        // ⭐ Same contract as the recovery exit above: ship the COMMITTED copy,
+        // so an F-HELD lapse notice the chokepoint attached reaches the user
+        // instead of being persisted into the turn row and never spoken.
+        //
+        // ⚠ SCOPE, STATED EXACTLY (CLAUDE.md trap 20). On `staging` this exit
+        // threads NO `priorPendingActions`, so its carry-forward is inert and
+        // this line changes nothing today. PR #1286 adds that threading, at
+        // which point this exit can build a notice and this line is what makes
+        // it audible. It is fixed here — rather than left for #1286 — because
+        // the two exits are ONE defect, and a harm closed on one path and left
+        // open on its neighbour is how the closed half gets re-opened
+        // (CLAUDE.md trap 21).
+        response: committed?.response ?? response,
+        commitPerformed: true,
+        analysisReady,
+        graph: snapshotGraph,
+        freshness,
+        // Fix C: present only when the decision_review LLM call returned
+        // under an enabled timings/trace gate (never fabricated).
+        ...(chipTurnTimings !== undefined ? { turnTimings: chipTurnTimings } : {}),
+        // ROADMAP 1.132 (F1) — the run_analysis chip response is a receipt +
+        // coaching blocks, not a prose answer: functional (stays plain).
+        answerKind: 'functional' as AnswerKind,
+        // T1 claim safety — READ off the just-produced run_analysis fact, using
+        // the SAME canonical selector the routed path uses. Never re-derived
+        // (CLAUDE.md trap #12). No fact ⇒ `true` (this turn withheld nothing);
+        // a fact with no stamp ⇒ `readMayNameLeadingOptionFromResult` fails
+        // CLOSED. (A6, 2026-07-27: this line used to name
+        // `readMayNameLeadingOption`, the legacy enrichment-only reader, which
+        // is NOT on this call chain and which answers `false` unconditionally
+        // on post-0.25.0 facts. The behaviour described was right; the reader
+        // named for it was not.)
+        //
+        // 2026-07-27 — this used to be an INLINE IIFE that was line-for-line the
+        // body of `readMayNameLeadingOptionForFacts`: same selector, same
+        // `null ⇒ true`, same `fact_type` narrow, same result reader, same input
+        // array. Identical behaviour, and that is the point — the shared reader's
+        // own docstring promises "a future third caller gets the same answer by
+        // construction rather than by a reviewer noticing", and this WAS that
+        // third caller, obtaining the right answer by copy instead. A copy is a
+        // hand-maintained mirror (trap #12): the day the shared reader's defaults
+        // change, this exit keeps the old ones and reads as green. Calling it is
+        // what makes the chip-click exit's permission the same permission by
+        // construction.
+        //
+        // 2026-07-27 (the scope fix) — and the SAME argument now forces the
+        // SCOPE to be shared too, not just the reader. `context.prior_facts` is
+        // a 20-turn window; the routed path's permission is derived from
+        // `[...prior_facts, the scenario's newest analysis fact]`. Passing the
+        // window alone here would make this exit's permission a different
+        // permission again — the exact divergence the paragraph above says
+        // calling the shared reader was meant to end, reintroduced one layer
+        // down. `enrichedFacts` usually carries this turn's fresh analysis and
+        // masks the difference; on a degraded analysis it does not, and that is
+        // precisely the turn you least want reading a stale-window `true`.
+        mayNameLeadingOption: readMayNameLeadingOptionVerdict(
+          [...enrichedFacts, ...context.prior_facts],
+          claimSafetyScopeFromContext(context),
+        ).may_name_leading_option,
+      };
+    } catch (err) {
+      log.error(
+        {
+          request_id: requestId,
+          scenario_id: payload.scenario_id,
+          err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+        },
+        'V5 chip_click run_analysis dispatch — commit failed',
+      );
+      return { outcome: 'commit_failed', response, commitPerformed: false, graph: snapshotGraph };
+    }
+  } finally {
+    clearTimeout(turnTimer);
+  }
+}
+
+function deriveAnalysisReadyFromSnapshot(
+  snapshot: RunAnalysisScenarioSnapshot,
+  requestId: string,
+  scenarioId: string,
+): AnalysisReadyPayload | undefined {
+  // Consume the raw persisted carrier so canonical top-level options survive
+  // the GraphV3 parse. Whole status comes from the same canonical builder as
+  // draft production, including unreachable controllable factors.
+  const readiness = buildCanonicalAnalysisReadyFromGraph(snapshot.rawPersistedGraph);
+  if (!readiness) {
+    // The canonical projection returns undefined when no goal node exists —
+    // a structural state that legitimately blocks readiness
+    // emission. Surface it as an observable signal so the original
+    // baseline regression (analysis_ready missing on Step 4) cannot
+    // recur as an unobservable false negative.
+    log.warn(
+      {
+        request_id: requestId,
+        scenario_id: scenarioId,
+        analysis_ready_missing_reason: 'no_goal_node',
+      },
+      'V5 chip_click run_analysis — canonical readiness projection returned undefined; analysis_ready omitted',
+    );
+  }
+  return readiness;
+}

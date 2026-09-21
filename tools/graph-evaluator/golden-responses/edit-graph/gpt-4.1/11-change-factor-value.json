@@ -1,0 +1,98 @@
+{
+  "brief_id": "11-change-factor-value",
+  "model": "gpt-4.1",
+  "prompt_hash": "sha256:2d6fcbc9d09869a271bc93df1b5bbb450a4a5ee3053d9395c3143b810c973cc5",
+  "response": {
+    "model_id": "gpt-4.1",
+    "brief_id": "11-change-factor-value",
+    "status": "success",
+    "raw_text": "{\n  \"topology_plan\": [\n    \"Locate fac_churn_rate node in the graph.\",\n    \"fac_churn_rate is observable; find its data.value and data.raw_value.\",\n    \"Current value is 0.03 (raw: 3, unit: %).\",\n    \"User requests to set churn rate to 5%.\",\n    \"Edit is non-structural (update_node only); no topology change needed.\",\n    \"Update fac_churn_rate data.value to 0.05 and data.raw_value to 5.\"\n  ],\n  \"operations\": [\n    {\n      \"op\": \"update_node\",\n      \"path\": \"/nodes/fac_churn_rate/data/value\",\n      \"value\": 0.05,\n      \"old_value\": 0.03,\n      \"impact\": \"low\",\n      \"rationale\": \"Sets churn rate to 5% per user request — reflects new observed value.\"\n    },\n    {\n      \"op\": \"update_node\",\n      \"path\": \"/nodes/fac_churn_rate/data/raw_value\",\n      \"value\": 5,\n      \"old_value\": 3,\n      \"impact\": \"low\",\n      \"rationale\": \"Aligns raw value with updated churn rate percentage.\"\n    }\n  ],\n  \"removed_edges\": [],\n  \"warnings\": [],\n  \"coaching\": {\n    \"summary\": \"The monthly churn rate has been updated to 5% to reflect recent data. No causal structure or outcome relationships were changed. Models using churn rate will show higher customer loss risk.\",\n    \"rerun_recommended\": true\n  }\n}",
+    "parsed_graph": {
+      "topology_plan": [
+        "Locate fac_churn_rate node in the graph.",
+        "fac_churn_rate is observable; find its data.value and data.raw_value.",
+        "Current value is 0.03 (raw: 3, unit: %).",
+        "User requests to set churn rate to 5%.",
+        "Edit is non-structural (update_node only); no topology change needed.",
+        "Update fac_churn_rate data.value to 0.05 and data.raw_value to 5."
+      ],
+      "operations": [
+        {
+          "op": "update_node",
+          "path": "/nodes/fac_churn_rate/data/value",
+          "value": 0.05,
+          "old_value": 0.03,
+          "impact": "low",
+          "rationale": "Sets churn rate to 5% per user request — reflects new observed value."
+        },
+        {
+          "op": "update_node",
+          "path": "/nodes/fac_churn_rate/data/raw_value",
+          "value": 5,
+          "old_value": 3,
+          "impact": "low",
+          "rationale": "Aligns raw value with updated churn rate percentage."
+        }
+      ],
+      "removed_edges": [],
+      "warnings": [],
+      "coaching": {
+        "summary": "The monthly churn rate has been updated to 5% to reflect recent data. No causal structure or outcome relationships were changed. Models using churn rate will show higher customer loss risk.",
+        "rerun_recommended": true
+      }
+    },
+    "extraction_attempted": false,
+    "latency_ms": 3667,
+    "input_tokens": 5060,
+    "output_tokens": 330,
+    "est_cost_usd": 0.01276,
+    "pricing_source": "api_usage",
+    "parsed_json": {
+      "topology_plan": [
+        "Locate fac_churn_rate node in the graph.",
+        "fac_churn_rate is observable; find its data.value and data.raw_value.",
+        "Current value is 0.03 (raw: 3, unit: %).",
+        "User requests to set churn rate to 5%.",
+        "Edit is non-structural (update_node only); no topology change needed.",
+        "Update fac_churn_rate data.value to 0.05 and data.raw_value to 5."
+      ],
+      "operations": [
+        {
+          "op": "update_node",
+          "path": "/nodes/fac_churn_rate/data/value",
+          "value": 0.05,
+          "old_value": 0.03,
+          "impact": "low",
+          "rationale": "Sets churn rate to 5% per user request — reflects new observed value."
+        },
+        {
+          "op": "update_node",
+          "path": "/nodes/fac_churn_rate/data/raw_value",
+          "value": 5,
+          "old_value": 3,
+          "impact": "low",
+          "rationale": "Aligns raw value with updated churn rate percentage."
+        }
+      ],
+      "removed_edges": [],
+      "warnings": [],
+      "coaching": {
+        "summary": "The monthly churn rate has been updated to 5% to reflect recent data. No causal structure or outcome relationships were changed. Models using churn rate will show higher customer loss risk.",
+        "rerun_recommended": true
+      }
+    }
+  },
+  "scores": {
+    "valid_json": true,
+    "correct_shape": true,
+    "operation_types_correct": false,
+    "topology_compliant": true,
+    "has_impact_rationale": true,
+    "correct_ordering": true,
+    "empty_ops_handled": true,
+    "coaching_present": true,
+    "path_syntax_valid": false
+  },
+  "overall": 0.8,
+  "captured_at": "2026-03-14T16:39:41.327Z"
+}

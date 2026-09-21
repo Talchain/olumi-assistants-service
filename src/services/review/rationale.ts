@@ -1,8 +1,22 @@
 /**
  * Rationale Generator
  *
- * Generates plain English explanations of why the recommended option
- * is suggested, using template-based generation for predictable latency.
+ * Generates plain English explanations of WHY the leading option leads,
+ * using template-based generation for predictable latency.
+ *
+ * ROADMAP 2.725 — the no-verdict doctrine, at the `assist.v1.review` producer.
+ * Founder's BINDING ruling: the product recommends what to INVESTIGATE, never
+ * what to CHOOSE. These templates used to say "{option} is recommended…" and
+ * "remaining the best choice in {stability}% of scenarios" — the advisory
+ * register verbatim, on a route the V5 egress guard never scanned.
+ *
+ * The rewrite is LANGUAGE-ONLY: every measured quantity (the driver, the goal,
+ * the stability percentage, the scenario count) survives unchanged. Ordering by
+ * measured goal-fit is analysis and stays; the crowning verb is what goes.
+ *
+ * The `recommendedOption` / `recommended_option` identifiers below are the
+ * PLoT robustness-data wire field names (schema-owned) and are deliberately
+ * untouched — this doctrine governs prose, not the contract.
  */
 
 export interface RationaleResult {
@@ -41,30 +55,33 @@ export interface RationaleContext {
 // Summary Templates
 // =============================================================================
 
-const SUMMARY_TEMPLATES = {
+export const SUMMARY_TEMPLATES = {
   with_driver_and_goal:
-    "{option} is recommended because {driver} has the strongest positive effect on {goal}.",
+    "{option} currently leads because {driver} has the strongest positive effect on {goal}.",
 
   with_driver_stability:
-    "{option} is recommended due to its favorable impact through {driver}, remaining the best choice in {stability}% of scenarios.",
+    "{option} currently leads, helped by its favorable impact through {driver}, and stays in front in {stability}% of scenarios.",
 
   with_driver_only:
-    "{option} is recommended due to its favorable impact on {driver}.",
+    "{option} currently leads, helped by its favorable impact on {driver}.",
 
   with_stability:
-    "{option} remains the best choice across {stability}% of scenarios analyzed.",
+    "{option} stays in front across {stability}% of scenarios analyzed.",
 
   with_goal_only:
-    "{option} is recommended as it best achieves {goal}.",
+    "{option} scores highest against {goal}.",
 
   minimal:
     "{option} shows the highest expected outcome based on the model.",
-};
+} as const;
 
-const GOAL_ALIGNMENT_TEMPLATES = {
+// The `strong` variant ('"{option}" shows the strongest path to "{goal}"…')
+// was removed by 2.725: it had ZERO call sites (`buildGoalAlignment` only ever
+// used `direct`) and crowned a path with a superlative. A dead template is a
+// loaded gun for the next consumer, so it is deleted rather than reworded.
+export const GOAL_ALIGNMENT_TEMPLATES = {
   direct: 'Choosing "{option}" directly supports achieving "{goal}".',
-  strong: '"{option}" shows the strongest path to "{goal}" through its key drivers.',
-};
+} as const;
 
 // =============================================================================
 // Rationale Generation

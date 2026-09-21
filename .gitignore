@@ -1,3 +1,7 @@
+# node_modules was partially TRACKED (4,360 files: .pnpm/ layout, .bin/ symlinks,
+# pnpm metadata) from before this ignore rule existed; untracked (index-only)
+# 2026-07-03. If it ever reappears in `git ls-files node_modules`, someone
+# force-added it -- remove with `git rm -r --cached node_modules`.
 node_modules
 dist
 src/generated
@@ -5,10 +9,15 @@ src/generated
 # Environment variables (never commit secrets!)
 .env
 .env.local
+.env.*.local
 
-# Duplicate files (macOS/editor backups)
+# Duplicate files (iCloud/macOS sync conflicts)
 * 2
 * 2.*
+* 3
+* 3.*
+* 4
+* 4.*
 .* 2
 tests/perf/_reports/
 
@@ -20,7 +29,26 @@ coverage/
 # Test output
 playwright-report/
 test-results/
+test-diagnostics/
+tests/staging/artifacts/
 
 # Editor/IDE
 .idea/
 .vscode/
+
+# Prevent prompt backup accumulation
+data/prompts.json.backup.*
+
+# Test-generated prompt store artifacts
+:memory:*
+
+# Graph evaluator results (keep .gitkeep)
+tools/graph-evaluator/results/*
+!tools/graph-evaluator/results/.gitkeep
+
+# V5 Phase 1b — local routing log accumulation (PoC fallback before
+# proper Supabase persistence)
+logs/
+
+# Lane scratch (never committed)
+LANE-PROGRESS-*.md

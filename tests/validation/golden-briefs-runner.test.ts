@@ -21,21 +21,19 @@ import type { GraphT } from "../../src/schemas/graph.js";
  * Run with: pnpm test:live
  */
 
-// Check for required environment variables
-if (process.env.LIVE_LLM !== "1") {
-  throw new Error("Golden brief validation requires LIVE_LLM=1. Run with: pnpm test:live");
-}
-
-if (!process.env.ANTHROPIC_API_KEY) {
-  throw new Error("Golden brief validation requires ANTHROPIC_API_KEY to be set. Run with: pnpm test:live");
-}
+// Gate: self-skip when env vars not set (discovered by vitest, shown as skipped)
+const SKIP_REASON = process.env.LIVE_LLM !== "1"
+  ? "Skipping golden-briefs-runner: LIVE_LLM not set (run with: pnpm test:live)"
+  : !process.env.ANTHROPIC_API_KEY
+    ? "Skipping golden-briefs-runner: ANTHROPIC_API_KEY not set"
+    : null;
 
 // No mocks for Anthropic - these tests use real API calls to validate against golden briefs
 vi.mock("../../src/services/validateClient.js", () => ({
   validateGraph: vi.fn().mockResolvedValue({ ok: true, violations: [], normalized: null }),
 }));
 
-describe("Golden Brief Validation Runner (M5)", () => {
+describe.skipIf(!!SKIP_REASON)("Golden Brief Validation Runner (M5)", () => {
   let fixtures: GoldenBriefFixture[] = [];
 
   beforeAll(async () => {

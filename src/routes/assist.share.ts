@@ -10,7 +10,7 @@ import type { FastifyInstance } from "fastify";
 import rateLimit from "@fastify/rate-limit";
 import { z } from "zod";
 import { Graph } from "../schemas/graph.js";
-import { buildErrorV1 } from "../utils/errors.js";
+import { buildErrorV1, RateLimitedError, retryAfterSecondsFromRateLimitContext } from "../utils/errors.js";
 import { getRequestId } from "../utils/request-id.js";
 import { TelemetryEvents, emit } from "../utils/telemetry.js";
 import {
@@ -48,14 +48,13 @@ export default async function route(app: FastifyInstance) {
       // Rate limit by IP for public share routes
       return `share:${request.ip}`;
     },
-    errorResponseBuilder: (_, context) => ({
-      schema: "error.v1",
-      code: "RATE_LIMITED",
-      message: "Too many requests. Please try again later.",
-      details: {
-        retry_after_seconds: Math.ceil(context.ttl / 1000),
-      },
-    }),
+    // ROADMAP 2.181 — @fastify/rate-limit THROWS this return value, so it MUST
+    // be an Error; a plain object is answered 500 INTERNAL. See RateLimitedError.
+    errorResponseBuilder: (_, context) =>
+      new RateLimitedError(
+        retryAfterSecondsFromRateLimitContext(context),
+        "Too many requests. Please try again later.",
+      ),
   });
 
   /**

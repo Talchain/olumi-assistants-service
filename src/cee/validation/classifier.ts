@@ -4,7 +4,68 @@ import { log } from "../../utils/telemetry.js";
 // Shared CEE types from OpenAPI
 export type CEEValidationIssue = components["schemas"]["CEEValidationIssue"];
 
-export type CeeSeverity = "error" | "warning" | "info";
+export type CeeSeverity = "error" | "warn" | "info";
+
+/**
+ * Structural warning severity levels for CEEStructuralWarningV1.
+ * Used for draft_warnings[] in the response.
+ */
+export type StructuralWarningSeverity = "low" | "medium" | "high" | "blocker";
+
+/**
+ * Canonical severity rank for structural warnings.
+ * Use this for all severity comparisons to ensure consistent ordering.
+ * blocker > high > medium > low
+ */
+export function severityRank(severity: StructuralWarningSeverity): number {
+  switch (severity) {
+    case "blocker": return 3;
+    case "high": return 2;
+    case "medium": return 1;
+    case "low": return 0;
+    default: {
+      // Exhaustive check - this ensures we handle all cases
+      const _exhaustive: never = severity;
+      return 0;
+    }
+  }
+}
+
+/**
+ * Compare two structural warning severities.
+ * Returns positive if a > b, negative if a < b, 0 if equal.
+ */
+export function compareSeverity(a: StructuralWarningSeverity, b: StructuralWarningSeverity): number {
+  return severityRank(a) - severityRank(b);
+}
+
+/**
+ * Canonical severity levels for all warnings.
+ * UI and downstream consumers should only see these values.
+ * Alias for StructuralWarningSeverity for semantic clarity.
+ */
+export type CanonicalSeverity = StructuralWarningSeverity;
+
+/**
+ * Translate v3-validator severity to canonical.
+ * Centralises mapping so UI doesn't need to handle multiple systems.
+ *
+ * Mapping:
+ * - error → blocker (blocks execution)
+ * - warn → medium (degrades quality, consistent with draft_warnings patterns)
+ * - info → low (informational)
+ * - unknown → medium (safe default)
+ */
+export function toCanonicalSeverity(
+  validatorSeverity: CeeSeverity | string
+): CanonicalSeverity {
+  switch (validatorSeverity) {
+    case "error": return "blocker";
+    case "warn": return "medium";
+    case "info": return "low";
+    default: return "medium";
+  }
+}
 
 // ERROR - Blocks engine execution
 const ERROR_CODES = [
@@ -55,6 +116,18 @@ const WARNING_CODES = [
   "IDENTICAL_OPTION_INTERVENTIONS",
   "EMPTY_INTERVENTIONS_READY",
   "INTERVENTION_TARGET_NO_PATH",
+  "INTERVENTION_NO_EDGE",
+  "EDGE_NO_INTERVENTION",
+  "INTERVENTION_KEY_MISMATCH",
+  // Pre-analysis validation warnings
+  "STRENGTH_CLUSTERING", // Edge strengths have low variance (CV < 0.3)
+  "SAME_LEVER_OPTIONS", // Options share >60% intervention targets
+  "MISSING_BASELINE", // No status quo option detected
+  "GOAL_NO_BASELINE_VALUE", // Goal node has no observed_state.value
+  "GOAL_DISCONNECTED", // No path from options to goal
+  "GOAL_CONNECTIVITY_NONE", // No options connected to goal (blocker severity)
+  "NORMALISATION_INPUT_INSUFFICIENT", // Insufficient data for intervention normalisation
+  "RANGE_DEGENERATE", // Intervention range is degenerate (min == max)
 ] as const;
 
 // INFO - Suggestions for improvement
@@ -69,6 +142,11 @@ const INFO_CODES = [
   "OUTCOME_MULTIPLE_OUTGOING_EDGES",
   "RISK_MULTIPLE_OUTGOING_EDGES",
   "MISSING_USER_QUESTIONS",
+  // Observability info codes
+  "EDGE_ORIGIN_DEFAULTED", // Edge origin was not set, defaulted to 'ai'
+  // Model critiques (items 34-35)
+  "OPTION_SIMILARITY", // Options share ≥80% outgoing edge targets (Jaccard)
+  "MISSING_COUNTERFACTUAL", // No status quo / baseline option detected
 ] as const;
 
 const ERROR_CODE_SET = new Set<string>(ERROR_CODES);
@@ -79,14 +157,14 @@ export function classifyIssueSeverity(code: string | undefined | null): CeeSever
   const normalized = typeof code === "string" ? code.toUpperCase() : "";
 
   if (ERROR_CODE_SET.has(normalized)) return "error";
-  if (WARNING_CODE_SET.has(normalized)) return "warning";
+  if (WARNING_CODE_SET.has(normalized)) return "warn";
   if (INFO_CODE_SET.has(normalized)) return "info";
 
   // Defensive default: unknown codes are treated as warnings so they do not block execution.
   if (normalized) {
     log.warn({ code: normalized }, "Unknown validation code encountered in CEE");
   }
-  return "warning";
+  return "warn";
 }
 
 export interface CeeValidationResult {
@@ -107,7 +185,7 @@ export function summariseValidationIssues(issues: CEEValidationIssue[]): CeeVali
     const sev = issue?.severity as CeeSeverity | undefined;
     if (sev === "error") {
       error_count += 1;
-    } else if (sev === "warning") {
+    } else if (sev === "warn") {
       warning_count += 1;
     } else if (sev === "info") {
       info_count += 1;
@@ -173,6 +251,9 @@ const SUGGESTION_MAP: Record<string, string> = {
   IDENTICAL_OPTION_INTERVENTIONS: "Options must differ in at least one intervention value",
   EMPTY_INTERVENTIONS_READY: "Add interventions or change status to 'needs_user_mapping'",
   INTERVENTION_TARGET_NO_PATH: "Ensure intervention target has a path to the goal node",
+  INTERVENTION_NO_EDGE: "Remove intervention or add option→factor edge — interventions must have structural support",
+  EDGE_NO_INTERVENTION: "Add intervention for this edge target or remove the option→factor edge",
+  INTERVENTION_KEY_MISMATCH: "Ensure intervention key matches target_match.node_id — they must be identical",
   INTERVENTION_TARGET_NOT_FOUND: "Ensure intervention target node exists in the graph",
   INTERVENTION_TARGET_NOT_FACTOR: "Interventions should target factor nodes",
   INTERVENTION_TARGET_DISCONNECTED: "Connect intervention target to the goal via causal path",
@@ -191,6 +272,20 @@ const SUGGESTION_MAP: Record<string, string> = {
   UNIT_MISMATCH_SUSPECTED: "Verify intervention and target units are compatible",
   LOW_CONFIDENCE_MATCH: "Review the target mapping for accuracy",
   DISCONNECTED_NODE: "Connect node to graph or remove it",
+  // Pre-analysis validation warnings
+  STRENGTH_CLUSTERING: "Review edge strengths — low variance suggests estimates may be rough approximations",
+  SAME_LEVER_OPTIONS: "Options share most intervention targets — consider differentiating approaches",
+  MISSING_BASELINE: "Add a status quo option to enable comparison with no action",
+  GOAL_NO_BASELINE_VALUE: "Set goal node's observed_state.value to establish baseline for comparison",
+  GOAL_DISCONNECTED: "Ensure all options have a causal path to the goal node",
+  GOAL_CONNECTIVITY_NONE: "Connect each option to the goal via at least one factor or edge",
+  NORMALISATION_INPUT_INSUFFICIENT: "Provide explicit ranges for interventions to enable normalisation",
+  RANGE_DEGENERATE: "Intervention min equals max — provide a valid range for sensitivity analysis",
+  // Observability info codes
+  EDGE_ORIGIN_DEFAULTED: "Edge origin was not specified — defaulted to 'ai' for LLM-generated edges",
+  // Model critiques (items 34-35)
+  OPTION_SIMILARITY: "Options affect the same factors — consider whether they represent genuinely different approaches",
+  MISSING_COUNTERFACTUAL: "No status quo or baseline option detected — including a 'do nothing' option helps measure whether any change is worth the risk",
 };
 
 /**

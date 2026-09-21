@@ -1,0 +1,2714 @@
+/**
+ * V5 post-analysis advice gate / deterministic post-analysis router.
+ *
+ * Deterministic pre-LLM dispatch surface for post-analysis free-text
+ * questions. Owns the single classification matrix for:
+ *
+ *   advice / next_step / update_advice / improvement
+ *     - "How should we improve this?" / "What should we update?"
+ *   readiness
+ *     - "Why is this only 35% ready?" / "What's blocking the analysis?"
+ *   meaning
+ *     - "What does this mean?" / "Help me interpret this"
+ *   evidence_gap
+ *     - "What's missing?" / "What evidence is missing?"
+ *   explain_results_free_text
+ *     - "Explain the results" / "Walk me through these results" — free-text
+ *       equivalent of the explain_results chip (latency Fix 2)
+ *   what_would_flip_free_text
+ *     - "What would flip this?" / "What would change the outcome?" — free-text
+ *       equivalent of the what_would_flip chip (latency Fix 2)
+ *
+ * The gate ONLY short-circuits when:
+ *   - a prior analysis is present AND
+ *   - analysis freshness is `'fresh'` (stale/unknown/none falls through) AND
+ *   - the user message is one of the supported classes AND
+ *   - the message does NOT carry a concrete graph-mutation signal AND
+ *   - the per-class required inputs are available
+ *
+ * When a class matches but its required inputs are missing, the gate
+ * returns `matched: false, reason: 'data_unavailable_for_class'` with
+ * `advice_class` and `missing_inputs` attached. Callers MUST fall
+ * through to Sonnet routing in that case — never emit weak deterministic
+ * copy from this surface.
+ *
+ * Composer copy invariants:
+ *   - no `\brecommendations?\b` / `\brecommended\b`
+ *   - no `\bthe\s+winners?\b` / `\bwinning\s+(option|probability|side|choice|outcome)\b`
+ *   - no raw IDs, no raw decimals, no readiness percentage
+ *   The egress guard (`FORBIDDEN_USER_FACING_PHRASES`) is the last line
+ *   of defence; this composer must already be clean by construction.
+ *
+ * Single source of truth for deterministic free-text post-analysis
+ * dispatch — do not duplicate the matcher in another file.
+ */
+
+import {
+  hasSufficientReadinessData,
+  summariseReadiness,
+  type ReadinessOpenItem,
+  type ReadinessSummary,
+} from './readiness-summary.js';
+import {
+  hasIndependentMutationSignal,
+  MUTATION_SIGNAL_PATTERNS,
+} from './analytical-intent.js';
+import { classifyStructuralClaim } from './mutation-language.js';
+// ROADMAP 2.278 — the single owner of "may copy claim this could flip?".
+import type { FlipClaimPosture } from '../context/flip-threshold-rows.js';
+import {
+  formatPercentagePoints,
+  formatProbability,
+} from '../format/format-analysis-value.js';
+import {
+  formatSensitivityDirection,
+  hasMaterialInfluence,
+} from '../format/sensitivity-phrases.js';
+import type { GraphPatchBlockData } from '../../orchestrator/types.js';
+import {
+  closenessLead,
+  describeRobustnessBand,
+  nearTieReasonByMargin,
+  quoteLabel,
+  type RawRobustnessSignals,
+} from '../coaching/robustness-honesty.js';
+import type { DefaultedAssumptionsSignal } from '../coaching/pick-defaulted-assumptions.js';
+import {
+  ATTESTED_NO_FLIP_SENTENCE,
+  composeRobustnessVerdict,
+  type RobustnessVerdict,
+  type RobustnessVerdictMode,
+} from '../tools/handlers/explanation-fallback.js';
+import { isSlugShapedEntityId } from '../../orchestrator/shared/output-safety.js';
+import { selectFragilityPriorityRow } from '../../orchestrator/shared/fragile-edge-authority.js';
+import {
+  describeValidationPriority,
+  isRenderableValidationEdge,
+} from '../coaching/validation-priority.js';
+import {
+  type FactorEvppiPriorityGuidanceDecision,
+} from '../coaching/select-factor-evppi.js';
+
+type AnalysisReadyPayload = NonNullable<GraphPatchBlockData['analysis_ready']>;
+
+/**
+ * S4 ROUND 4 — the ONE routing seam for every free-text composer in this file.
+ *
+ * Round 3 unified the two deterministic explanation FALLBACKS behind
+ * `composeRobustnessVerdict`. It missed these composers, which are the LIVE
+ * free-text surfaces, and they went on deriving their own verdict from
+ * `isNearTieByMargin` + `isRawFragile` + a bare `robustness_band` read. That
+ * re-derivation drifted in a specific, user-visible way: they treated a
+ * NEAR-TIE as evidence of FRAGILITY, so a `near_tie x stable` result was
+ * answered "The picture appears fragile" while the fallbacks — reading the same
+ * fields through the shared composer — called the same result a genuine dead
+ * heat whose individual scores are steady. Two live surfaces, one analysis,
+ * opposite verdicts.
+ *
+ * Margin and stability are ORTHOGONAL axes. A tiny gap says nothing about
+ * whether each option's own score is steady. Only the shared composer is
+ * allowed to decide either axis; this adapter is how that decision reaches a
+ * surface whose SENTENCES are its own.
+ *
+ * What may vary per surface: the wording, its length, and its voice. What may
+ * NOT vary: `margin_category` and `stability_category`. Every branch below
+ * reads them from the returned verdict; none re-derives them.
+ */
+function robustnessVerdictFor(
+  analysis: AdviceGateAnalysis,
+  rawRobustness: RawRobustnessSignals | null | undefined,
+  mode: RobustnessVerdictMode,
+): RobustnessVerdict {
+  return composeRobustnessVerdict(
+    {
+      leading_option: analysis.leading_option,
+      runner_up: analysis.runner_up ?? null,
+      margin_pp: analysis.margin_pp,
+      robustness_band: analysis.robustness_band,
+    },
+    rawRobustness ?? null,
+    mode,
+    // The verdict collapses its stability axis to `unknown` when the engine
+    // reports defaulted values, so EVERY branch below that reads
+    // `stability_category` stands down without knowing this rule exists.
+    analysis.defaulted_assumptions ?? null,
+  );
+}
+
+/**
+ * Which near-tie WORDING to use, once the shared verdict has already ruled that
+ * this IS a near-tie. `'margin'` supports the concrete "separated by one
+ * percentage point or less" phrasing; `'override'` must stay generic because
+ * the real gap may be wider than the threshold.
+ *
+ * This is a phrasing sub-discriminator, NOT a second verdict: it is only ever
+ * consulted when `verdict.margin_category === 'near_tie'`, and it can never
+ * turn a near-tie off or on.
+ */
+function nearTieWording(
+  verdict: RobustnessVerdict,
+  analysis: AdviceGateAnalysis,
+  rawRobustness: RawRobustnessSignals | null | undefined,
+): 'margin' | 'override' | null {
+  if (verdict.margin_category !== 'near_tie') return null;
+  return nearTieReasonByMargin(analysis.margin_pp, rawRobustness) ?? 'override';
+}
+
+export interface AdviceGateAnalysisOption {
+  readonly label: string;
+  /**
+   * Probability pass-through from the upstream `ContextPackAnalysis`.
+   * Optional so existing test fixtures and minimal callers stay valid;
+   * the enriched composers omit the probability fragment when this is
+   * absent or non-finite. Never recomputed — F.6 invariant.
+   */
+  readonly probability?: number;
+}
+
+export interface AdviceGateAnalysisDriver {
+  readonly factor_label: string;
+  readonly sensitivity_value?: number;
+}
+
+export interface AdviceGateAnalysisFragileEdge {
+  readonly from_label: string;
+  readonly to_label: string;
+}
+
+export interface AdviceGateAnalysis {
+  /**
+   * The ENGINE's own defaulted-value verdict for THIS analysis
+   * (`enrichment.defaulted_assumptions`, read by
+   * `coaching/pick-defaulted-assumptions.ts` off the same `run_analysis` fact
+   * every other grounding layer uses).
+   *
+   * ⭐ IT RIDES THE ANALYSIS, NOT THE TURN, AND THAT IS WHY IT NEEDS NO
+   * THREADING. Whether the numbers rest on defaulted inputs is a property OF
+   * this analysis, so it travels with it into all five `robustnessVerdictFor`
+   * call sites without a parallel parameter on every composer signature — a
+   * parallel parameter is exactly how `rawRobustness` once reached one composer
+   * and not its twin (the S4 drift), and this axis must not repeat it.
+   *
+   * Absent/`null` ⇒ no evidence of defaulting ⇒ byte-identical behaviour.
+   */
+  readonly defaulted_assumptions?: DefaultedAssumptionsSignal | null;
+  readonly status?: string;
+  readonly leading_option: AdviceGateAnalysisOption | null;
+  readonly runner_up?: AdviceGateAnalysisOption | null;
+  readonly margin_pp?: number | null;
+  readonly robustness_band?: string | null;
+  readonly top_drivers: readonly AdviceGateAnalysisDriver[];
+  readonly fragile_edges?: readonly AdviceGateAnalysisFragileEdge[];
+}
+
+/**
+ * Freshness verdict shape (mirrors FreshnessDerivation.freshness from
+ * `src/orchestrator-v5/context/freshness.ts`). Narrow union so the
+ * module stays free of orchestrator-internal type imports.
+ */
+export type AdviceGateFreshness = 'fresh' | 'stale' | 'unknown' | 'none';
+
+/**
+ * Narrow read-only view of the canonical analysis state usability predicates
+ * (mirrors the relevant subset of `CanonicalAnalysisState` from
+ * `context/canonical-analysis-state.ts`). Kept structural so this module stays
+ * free of orchestrator-internal type imports (same discipline as
+ * `AdviceGateFreshness`). Only the fields the safe-now fallback needs.
+ */
+export interface AdviceGateCanonicalState {
+  readonly status?: string | null;
+  /** Fresh (or stale-with-caveat) usable analysis exists for grounding prose. */
+  readonly usableForProse: boolean;
+  /** Analysis is blocked / unusable — the fallback must NOT compose from it. */
+  readonly blockedUnusable: boolean;
+}
+
+/**
+ * Narrow read-only view of a projected recent change (mirrors the
+ * user-safe `summary` of `RecentMutation` from `context/recent-changes.ts`).
+ * The summary is decision-language with no identifiers (enforced upstream).
+ */
+export interface AdviceGateRecentChange {
+  readonly summary: string;
+}
+
+/**
+ * Discriminated class of advice / coaching / readiness question matched
+ * from the user message. `advice` is the original PR #173 surface; the
+ * remaining classes are added by P0 deterministic post-analysis router.
+ */
+export type AdviceClass =
+  | 'advice'
+  | 'next_step'
+  | 'update_advice'
+  | 'improvement'
+  | 'readiness'
+  | 'meaning'
+  | 'evidence_gap'
+  | 'explain_results_free_text'
+  | 'what_would_flip_free_text';
+
+export interface AdviceGateInput {
+  readonly message: string;
+  readonly analysis: AdviceGateAnalysis | null | undefined;
+  /**
+   * Exact canonical analysis-ready payload for the current graph. Required by
+   * `readiness` and `evidence_gap` classes. Factor-EVPPI priority is permitted
+   * only by exact `status === 'ready'`; a known non-ready state owns the whole
+   * evidence-gap answer, while absent/null suppresses only that science branch.
+   */
+  readonly analysisReady?: AnalysisReadyPayload | null | undefined;
+  /**
+   * Freshness verdict from the turn-executor's analysis-freshness
+   * derivation. The gate ONLY short-circuits when freshness is
+   * `'fresh'` — stale/unknown/none MUST fall through so the existing
+   * stale-aware recovery surfaces can emit a stale-safe response.
+   */
+  readonly freshness: AdviceGateFreshness | null | undefined;
+  /**
+   * V5 coaching — verbatim `decision_review` enrichment from the latest
+   * successful run_analysis fact (as stored under
+   * `result.enrichment.decision_review`). When present, `evidence_gap`
+   * may read the exact `evidence_enhancements[factor_id].specific_action`
+   * selected by `factorEvppiGuidance`. It never ranks enhancement object
+   * order or assumptions. Caller threads this from
+   * `context.prior_facts` at gate time; current-turn run_analysis facts
+   * are not yet in prior_facts when the gate fires (the gate only matches
+   * when freshness === 'fresh', which requires a prior fact). Optional /
+   * undefined / null is safe — composers fall back to projection-only
+   * behaviour.
+   */
+  readonly decisionReview?: Record<string, unknown> | null | undefined;
+  /**
+   * Number-free exact-factor guidance from the same successful run. Its safe
+   * label comes from PLoT factor_sensitivity, so real EVPPI remains actionable
+   * when configuration-gated Decision Review is absent; a same-factor action is
+   * optional enrichment. This object cannot authorise itself: exact current
+   * canonical readiness and the gate's existing fresh verdict are independent
+   * positive permissions. Missing/undefined is fail-closed.
+   */
+  readonly factorEvppiGuidance?: FactorEvppiPriorityGuidanceDecision | null | undefined;
+  /**
+   * Raw robustness signals (`enrichment.robustness.level`,
+   * `enrichment.robustness.near_tie.is_tie`) from the latest successful
+   * run_analysis fact. Threaded by the turn-executor via
+   * `pickLatestRawRobustness` — the same canonical selector as
+   * `pickLatestDecisionReview`. Optional: composers fall back to the
+   * projected `analysis.robustness_band` and `analysis.margin_pp` when
+   * absent. When present, near-tie / fragile detection prefers the raw
+   * signal so canonicalisation losses (e.g. `very_low → unknown → null`)
+   * cannot silently swap fragile copy for confident copy.
+   */
+  readonly rawRobustness?: RawRobustnessSignals | null | undefined;
+  /**
+   * ROADMAP 2.278 — the selected run_analysis fact's OWN answer to "may this
+   * copy claim the result could flip?", derived from `enrichment.flip_thresholds[]`
+   * by `readFlipClaimPosture` and threaded by the turn-executor via
+   * `pickLatestFlipClaimPosture` (the same canonical selector family as
+   * `pickLatestRawRobustness` / `pickLatestDecisionReview`, so every grounding
+   * layer reads from ONE fact).
+   *
+   * WHY IT HAS TO BE THREADED AT ALL: this gate's composers see only the narrow
+   * {@link AdviceGateAnalysis} projection, which carries `robustness_band` and
+   * `fragile_edges` — robustness MARGINALS — but no flip evidence. That is the
+   * whole defect: two composers assert the result could change while the
+   * producer had attested it cannot. `explanation-fallback.ts` already gates its
+   * own version of these clauses; this brings the gate to parity.
+   *
+   * Absent / undefined is safe and is the backward-compatible default: composers
+   * emit their pre-2.278 copy byte-identically unless this says
+   * `attested_no_flip`.
+   */
+  readonly flipClaimPosture?: FlipClaimPosture | null | undefined;
+  /**
+   * AI Harness capability 1 (CEE_POST_ANALYSIS_LOOP_ENABLED). Canonical
+   * analysis-state usability predicates, threaded by the turn-executor ONLY
+   * when the post-analysis-loop flag is on. When present AND `usableForProse`
+   * (and not blocked), the gate may compose a grounded safe-now answer instead
+   * of returning `data_unavailable_for_class` for the relaxation-eligible
+   * classes. Absent / undefined (the flag-OFF default) → the relaxation branch
+   * is dead and the existing fall-through is byte-identical.
+   */
+  readonly canonicalState?: AdviceGateCanonicalState | null | undefined;
+  /**
+   * AI Harness capability 1. Recent successful mutations (decision-language
+   * summaries, no IDs) from `context.recent_changes`, threaded only when the
+   * flag is on. Used as safe-now grounding ("since your recent changes …").
+   * Absent / undefined is safe.
+   */
+  readonly recentChanges?: readonly AdviceGateRecentChange[] | null | undefined;
+}
+
+export type AdviceGateUnmatchedReason =
+  | 'no_analysis'
+  | 'not_fresh'
+  | 'mutation_signal'
+  | 'no_advice_signal'
+  | 'empty_message'
+  | 'data_unavailable_for_class'
+  /**
+   * The message asks for help THINKING about the user's problem, not for a
+   * reading of the analysis. The gate must never claim these: a matched turn
+   * commits with `llm_calls_used: 0` (`turn-executor.ts:8008`), so claiming a
+   * reasoning request answers it with a status report on the model and no
+   * model call at all. See `isReasoningRequest`.
+   */
+  | 'reasoning_request';
+
+/**
+ * Action chip emitted alongside a matched advice-gate response.
+ *
+ * ⚠ ROADMAP 2.229 — this doc comment used to say the shape "mirrors
+ * `FreshAnalysisFollowupSuggestedAction` in `fresh-analysis-followup-guard.ts`
+ * exactly". That guard was retired by founder ruling and its module deleted,
+ * so there is no longer a sibling to mirror: this declaration is now the sole
+ * definition of the shape, consumed by the turn-executor's
+ * `composeDirectAnswerResponse` call site. `action_type` is constrained to chips
+ * whose handlers run deterministically via `dispatchDeterministicChipClick`
+ * (no LLM call); no new action types are introduced here.
+ */
+export interface AdviceGateSuggestedAction {
+  readonly id: string;
+  readonly label: string;
+  readonly message: string;
+  readonly action_type: 'explain_results' | 'what_would_flip';
+}
+
+/**
+ * Coarse category of WHICH structured source the matched copy was composed
+ * from. Additive copy-source diagnostic (non-user-facing) so future traces can
+ * prove that structured coaching reached the user surface, and which surface.
+ * `decision_review` is the LLM-authored enrichment (only reachable when the
+ * auto-fire flag is on); the others are deterministic projections from the
+ * raw persisted PLoT analysis — the by-design fallback.
+ */
+export type AdviceGateCopySource =
+  | 'decision_review'
+  | 'factor_evppi'
+  | 'analysis_projection'
+  | 'fragile_edges'
+  | 'top_drivers'
+  | 'readiness'
+  // AI Harness capability 1 (CEE_POST_ANALYSIS_LOOP_ENABLED): the grounded
+  // safe-now fallback composed from canonical analysis state + readiness gaps
+  // + recent changes, used when the thin projection is blank but fresh usable
+  // state exists. Tier-1 safe-now content only (status/freshness/readiness/
+  // recent-changes/next-step) — never held science prose.
+  | 'canonical_rich';
+
+export interface AdviceGateMatched {
+  readonly matched: true;
+  readonly advice_class: AdviceClass;
+  readonly assistant_text: string;
+  readonly leading_option_label: string;
+  readonly top_driver_label: string | null;
+  /**
+   * Copy-source delivery diagnostics (additive, structural-only — never a
+   * label or value). `copy_source` is the dominant source the copy drew from;
+   * `coaching_fields_used` lists the projected analysis fields that were
+   * present and available to the composer. The turn-executor surfaces these
+   * on the `v5.post_analysis_advice_gate` telemetry event and (flag-gated) on
+   * the diagnostic trace.
+   */
+  readonly copy_source: AdviceGateCopySource;
+  readonly coaching_fields_used: readonly string[];
+  /**
+   * Per-class chip set computed at composition time. Always present
+   * (possibly empty). Per-class behaviour:
+   *   - `explain_results_free_text` / `meaning` / `advice` /
+   *     `next_step` / `update_advice` / `improvement` → one
+   *     `what_would_flip` chip (natural follow-up).
+   *   - `what_would_flip_free_text` → empty (prose already nudges the
+   *     user toward changing a factor and re-running).
+   *   - `readiness` / `evidence_gap` → empty (preserve PR #173 / PR #178
+   *     behaviour).
+   */
+  readonly suggested_actions: readonly AdviceGateSuggestedAction[];
+  /**
+   * ROADMAP 2.640 §3.4 — the kind of the TOP open readiness item behind this
+   * answer, present ONLY on the `readiness` class and only when the readiness
+   * projection had enough data to produce one.
+   *
+   * ⚠ CEE-INTERNAL. This never reaches the wire: it is consumed by
+   * `buildGateRemedySectionDirective` (compose/ui-directive.ts) to decide which
+   * Model-tab section to open, and the DIRECTIVE is what ships. Deliberately
+   * the raw KIND rather than a resolved section id — the gate should not carry
+   * knowledge of the UI's surfaces, and keeping the mapping in one place stops
+   * the prose and the gesture acquiring two different opinions about which
+   * blocker is top (trap 21: two authorities answering slightly different
+   * questions under similar names).
+   */
+  readonly remedy_open_item_kind?: ReadinessOpenItem['kind'];
+  /**
+   * The Model-tab section the `what_would_flip_free_text` answer is ABOUT —
+   * `relationships` when it named a fragile link, `factors` when it named the
+   * most influential factor. Present ONLY on that class, and only when the
+   * projection named a subject.
+   *
+   * ⚠ CEE-INTERNAL. Never reaches the wire: it is consumed by
+   * `buildGateFlipSectionDirective` (compose/ui-directive.ts) and the DIRECTIVE
+   * is what ships — the same shape, and the same reasoning, as
+   * {@link AdviceGateMatched.remedy_open_item_kind} directly above.
+   *
+   * ⭐⭐ WHY A SECTION AND NOT THE NODE ITSELF (measured 14 Aug 2026 — read this
+   * before "improving" it to a focus). Pointing at the exact factor would be the
+   * better gesture, and it is NOT AVAILABLE FROM THIS GATE: the gate's whole
+   * view of the analysis is {@link AdviceGateAnalysis}, whose driver rows are
+   * `{factor_label, sensitivity_value}` and whose fragile edges are
+   * `{from_label, to_label}`. Both are label-only BY RULING, not by oversight —
+   * `projectTopDrivers` strips `factor_id` deliberately (context-pack-assembler
+   * .ts:1695-1698) and `FragileEdge.from_id` is documented "INTERNAL ONLY —
+   * never serialised onto the wire or the strict-validated ContextPack output"
+   * (orchestrator/context/analysis-compact.ts:96-105). The ContextPack is
+   * LLM-facing and `.strict()`; widening it to carry ids is a scope decision
+   * this seam may not take unilaterally.
+   *
+   * The two shortcuts are both banned and both have cost this estate real time:
+   * re-reading the raw enrichment here would re-derive "which factor"
+   * independently of the sentence (trap 21), and resolving the label the gate
+   * already carries back to a node id is label-binding (trap 19). So the honest
+   * gesture is the one that needs NO identity: open the surface the sentence is
+   * about. It claims exactly that much and no more.
+   */
+  readonly flip_focus_section?: AdviceGateFlipFocusSection;
+}
+
+export interface AdviceGateUnmatched {
+  readonly matched: false;
+  readonly reason: AdviceGateUnmatchedReason;
+  /**
+   * Populated when reason === 'data_unavailable_for_class': the class
+   * that matched against the message text and the inputs that were
+   * required but absent. Threaded into telemetry so dashboards can
+   * see which class is producing fall-throughs.
+   */
+  readonly advice_class?: AdviceClass;
+  readonly missing_inputs?: readonly string[];
+}
+
+export type AdviceGateResult = AdviceGateMatched | AdviceGateUnmatched;
+
+/**
+ * Mutation-signal patterns: if ANY pattern fires, the gate yields control
+ * to normal routing (which validates and dispatches edit_graph for real
+ * mutations). The pattern array now lives in `./analytical-intent.ts` so
+ * sibling guards (stale-rerun, no-analysis, edit_graph no-op recovery)
+ * share the same negative gate. Behaviour is identical to PR #173 — the
+ * patterns themselves are unchanged.
+ */
+
+interface ClassPattern {
+  readonly advice_class: AdviceClass;
+  readonly pattern: RegExp;
+}
+
+/**
+ * Per-class advice patterns. Ordered by specificity — more specific
+ * classes (`readiness`, `meaning`, `evidence_gap`, the free-text chip
+ * equivalents) are evaluated BEFORE the broader `advice` / `next_step`
+ * patterns so a message like "what does the readiness mean?" routes to
+ * `readiness` rather than to `meaning`.
+ *
+ * Patterns are intentionally narrow — they target the exact phrasings
+ * the user brief lists. False positives are caught by the
+ * mutation-signal precedence rule above and by the per-class
+ * data-availability fallback below.
+ */
+const CLASS_PATTERNS: readonly ClassPattern[] = [
+  // ── readiness ────────────────────────────────────────────────────
+  // "why is this only 35% ready" / "why is the readiness so low"
+  {
+    advice_class: 'readiness',
+    pattern: /\bwhy\s+(?:is|are)\s+(?:this|the\s+(?:graph|model|decision|analysis|score))\s+(?:only|just|so)?\s*\d+\s*%?\s*ready\b/i,
+  },
+  // bare "why ... ready" — "why isn't this ready"
+  {
+    advice_class: 'readiness',
+    pattern: /\bwhy\s+(?:is|isn['’]?t|aren['’]?t|isn\s+t|aren\s+t|are\s+not|is\s+not)\b[^.?!\n]{0,40}\bready\b/i,
+  },
+  // "why is the readiness …" / "why is readiness …"
+  {
+    advice_class: 'readiness',
+    pattern: /\bwhy\s+is\s+(?:the\s+)?readiness\b/i,
+  },
+  // "what's blocking" / "what is blocking" / "what's stopping" / "what is preventing"
+  {
+    advice_class: 'readiness',
+    pattern: /\bwhat['’]?s?\s+(?:blocking|stopping|preventing|missing\s+for|holding\s+up)\b/i,
+  },
+  // "why can't we run" / "why can't this run"
+  {
+    advice_class: 'readiness',
+    pattern: /\bwhy\s+can['’]?t\s+(?:we|this|you|i|it)\b[^.?!\n]{0,40}\brun\b/i,
+  },
+  // "what needs to happen before" / "what's needed to run" / "what does it need"
+  {
+    advice_class: 'readiness',
+    pattern: /\bwhat\s+(?:needs\s+to\s+happen|is\s+needed|does\s+(?:it|this|the\s+model)\s+need)\b/i,
+  },
+  // "what's left to do" — readiness-class
+  {
+    advice_class: 'readiness',
+    pattern: /\bwhat['’]?s?\s+left\s+to\s+do\b/i,
+  },
+
+  // ── explain_results_free_text (latency Fix 2 — must precede `meaning` ─
+  //     because "walk me through the analysis" is more specific than the
+  //     bare `walk me through` pattern used for meaning).
+  // "explain the results" / "explain these results" / "explain the analysis"
+  {
+    advice_class: 'explain_results_free_text',
+    pattern: /\bexplain\s+(?:the|these|those|this|that)\s+(?:results?|analysis|outcomes?|findings?)\b/i,
+  },
+  // "walk me through (the|these) results"
+  {
+    advice_class: 'explain_results_free_text',
+    pattern: /\bwalk\s+me\s+through\s+(?:the|these|those|this|that)\s+(?:results?|analysis|outcomes?|findings?)\b/i,
+  },
+  // "tell me about (the|these) results"
+  {
+    advice_class: 'explain_results_free_text',
+    pattern: /\btell\s+me\s+about\s+(?:the|these|those|this|that)\s+(?:results?|analysis|outcomes?|findings?)\b/i,
+  },
+  // "what drove (this|that|the) (result|outcome|analysis|finding|answer)"
+  // New: gives the advice gate primary ownership of the present-tense
+  // "what drove" phrasing so the answer is composed inline rather than
+  // deferred to the fresh-followup catch-net's recap-and-chip.
+  {
+    advice_class: 'explain_results_free_text',
+    pattern: /\bwhat\s+drove\s+(?:this|that|the)\s+(?:result|outcome|analysis|finding|answer)\b/i,
+  },
+  // "why is <X> ahead / leading / in front / on top / the leader / the favourite"
+  // The brief lists "Why is Option A leading?" as a target phrase the
+  // advice gate must own, so "leading" sits in the predicate alongside
+  // the narrower set. The companion change in `analytical-intent.ts`
+  // broadens the shared `what_drove` classifier predicate the same way,
+  // so the sibling guards (stale-rerun, no-analysis, advice-gate
+  // data-unavailable fallback) all classify "leading" phrasings
+  // consistently — no more LLM-router fall-through for the brief's
+  // canonical questions in any freshness state.
+  {
+    advice_class: 'explain_results_free_text',
+    pattern: /\bwhy\s+is\b[^.?!\n]{1,40}\b(?:ahead|leading|in\s+front|on\s+top|the\s+leader|the\s+favourite|the\s+favorite)\b/i,
+  },
+
+  // ── meaning ──────────────────────────────────────────────────────
+  // "what does this mean" / "what does that mean" / "what does the analysis mean"
+  {
+    advice_class: 'meaning',
+    pattern: /\bwhat\s+do(?:es)?\s+(?:this|that|it|the\s+(?:analysis|result|outcome|number|score|finding|chart))\s+mean\b/i,
+  },
+  // "how should I read this" / "how do I interpret this"
+  {
+    advice_class: 'meaning',
+    pattern: /\bhow\s+(?:should|do)\s+(?:i|we)\s+(?:read|interpret|understand)\b/i,
+  },
+  // "help me interpret" / "help me understand"
+  {
+    advice_class: 'meaning',
+    pattern: /\bhelp\s+me\s+(?:interpret|understand|make\s+sense\s+of|read)\b/i,
+  },
+  // "walk me through (this|these|the|what)" — meaning, not advice. Narrower
+  // than the `explain_results_free_text` pattern above (which already
+  // matched "walk me through the results/analysis").
+  {
+    advice_class: 'meaning',
+    pattern: /\bwalk\s+me\s+through\b/i,
+  },
+  // "explain (this|that|what's going on|what happened)" — narrow meaning sense
+  {
+    advice_class: 'meaning',
+    pattern: /\bexplain\s+(?:this|that|what['’]?s\s+going\s+on|what\s+happened|the\s+(?:reasoning|logic))\b/i,
+  },
+
+  // ── what_would_flip_free_text (latency Fix 2 — free-text equivalent of the chip) ─
+  // "what would flip (this|the result|the outcome|things)"
+  {
+    advice_class: 'what_would_flip_free_text',
+    pattern: /\bwhat\s+would\s+flip\b/i,
+  },
+  // "what would change (the|this|that) (result|outcome|leading option|analysis)"
+  {
+    advice_class: 'what_would_flip_free_text',
+    pattern: /\bwhat\s+would\s+change\s+(?:(?:the|this|that)\s+(?:result|outcome|leading\s+option|analysis|ranking|order)|things)\b/i,
+  },
+  // "what would tip (this|the balance|the result)"
+  {
+    advice_class: 'what_would_flip_free_text',
+    pattern: /\bwhat\s+would\s+tip\b/i,
+  },
+  // "what would it take to (change|flip|reverse)"
+  {
+    advice_class: 'what_would_flip_free_text',
+    pattern: /\bwhat\s+would\s+it\s+take\s+to\s+(?:change|flip|reverse|move)\b/i,
+  },
+  // V5 post-analysis contract v1 (review round-4) — mirror of the
+  // classifier's "how (another) option (win|look better|come ahead)"
+  // pattern. Pre-round-4, this lived ONLY in `INTENT_PATTERNS`, so the
+  // fresh path missed it here and routed via fresh-followup-guard's
+  // catch-net (which delegates to the classifier) — same deterministic
+  // outcome but with thinner recap copy instead of the richer
+  // what_would_flip_free_text composer. Mirroring restores symmetry
+  // between fresh and stale paths.
+  {
+    advice_class: 'what_would_flip_free_text',
+    pattern: /\bhow\s+(?:could|can|would)\s+(?:another\s+)?option\s+(?:win|look\s+better|come\s+(?:out\s+)?ahead)\b/i,
+  },
+  // "what would/does/might need/have to change/happen/move/shift/differ"
+  // New: mirrors a `WHAT_WOULD_FLIP_STRIP_PATTERNS` entry in
+  // analytical-intent.ts so the advice gate's mutation-precedence
+  // strip-and-recheck logic continues to align. Captures the canonical
+  // "what would need to change for another option to look better?"
+  // phrasing the fresh-followup guard currently catches.
+  {
+    advice_class: 'what_would_flip_free_text',
+    pattern: /\bwhat\s+(?:would|do(?:es)?|might)\s+(?:need|have)\s+to\s+(?:change|happen|move|shift|differ)\b/i,
+  },
+  // V5 post-analysis contract v1 (review rounds 2 + 3) — `could/might/would`
+  // modal cousins. These previously lived ONLY in
+  // analytical-question-guard.ts ADDITIONAL_ANALYTICAL_QUESTION_PATTERNS
+  // (which covers the V4 route-v2 edit-dispatch path); the V5 advice gate
+  // anchored every flip-pattern on `what would CHANGE` (only "change",
+  // narrow noun set), so phrases like "What could change the outcome?",
+  // "What would move the result?", "What might shift the analysis?", or
+  // "How would the outcome change?" were falling through here to the
+  // broad routing LLM. Round-3 widening adds `would` alongside
+  // `could/might` so every modal alternation matches the analytical-
+  // question-guard grammar. Mirrored shape with the matching
+  // INTENT_PATTERNS.what_would_flip + WHAT_WOULD_FLIP_STRIP_PATTERNS
+  // entries in analytical-intent.ts so fresh-gate matching, stale-rerun-
+  // guard matching, and the mutation-precedence strip-and-recheck all
+  // stay symmetric.
+  {
+    advice_class: 'what_would_flip_free_text',
+    pattern: /\bwhat\s+(?:could|might|would)\s+change\s+(?:(?:the|this|that)\s+(?:result|results|outcome|outcomes|leading\s+option|analysis|ranking|order|balance|verdict|winner|winners)|things)\b/i,
+  },
+  {
+    advice_class: 'what_would_flip_free_text',
+    pattern: /\bwhat\s+(?:might|could|would)\s+(?:shift|move|alter|affect|tip|change)\s+(?:the\s+)?(?:result|results|outcome|outcomes|leading\s+option|analysis|ranking|order|balance|things|verdict|winner|winners)\b/i,
+  },
+  {
+    advice_class: 'what_would_flip_free_text',
+    pattern: /\bhow\s+(?:could|might|can|would)\s+(?:the\s+)?(?:result|results|outcome|outcomes|leading\s+option|analysis|ranking|order|balance|things|verdict|winner|winners)\s+(?:change|shift|move|flip|differ|reverse)\b/i,
+  },
+
+  // ── evidence_gap ─────────────────────────────────────────────────
+  // "what's missing" / "what is missing" — broader than the readiness
+  // "what's missing for" phrasing above (which routes to readiness).
+  {
+    advice_class: 'evidence_gap',
+    pattern: /\bwhat['’]?s?\s+missing\b(?!\s+for)/i,
+  },
+  // "what evidence is missing" / "what data is missing" / "what's the gap"
+  {
+    advice_class: 'evidence_gap',
+    pattern: /\bwhat\s+(?:evidence|data|information|info)\s+(?:is|are)\s+(?:missing|absent|lacking)\b/i,
+  },
+  // "what gaps" / "what's the gap" / "any gaps"
+  {
+    advice_class: 'evidence_gap',
+    pattern: /\b(?:what\s+gaps?|what['’]?s?\s+the\s+gaps?|any\s+gaps?)\b/i,
+  },
+  // "anything I'm missing" / "anything we're missing" / "anything missing"
+  {
+    advice_class: 'evidence_gap',
+    pattern: /\banything\s+(?:i['’]?m|we['’]?re|missing|else)\s*(?:missing)?\b/i,
+  },
+  // "what haven't we covered" / "what didn't we cover" — accept past-
+  // participle / past-tense suffixes via `\w*` so "covered" / "considered"
+  // / "accounted for" all match without a bare-stem boundary issue.
+  {
+    advice_class: 'evidence_gap',
+    pattern: /\bwhat\s+(?:haven['’]?t|didn['’]?t|hasn['’]?t)\s+(?:we|i)\b[^.?!\n]{0,40}\b(?:cover|consider|include|account)\w*\b/i,
+  },
+  // V5 coaching — validation / research / confidence-building / assumption-
+  // testing. Closes the gap where questions like "What should we validate?",
+  // "How do we build confidence?", "What assumptions should we test?" fell
+  // through every guard to the LLM router (~11s) with edit_graph misroute
+  // risk. Patterns are intentionally narrow: validation verbs (validate,
+  // verify, confirm, etc.) are required, so generic "What should I change?"
+  // continues to route to the broader `advice` class. Concrete mutations
+  // ("Set/Change X to Y") are rejected by MUTATION_SIGNAL_PATTERNS before
+  // reaching the classifier.
+
+  // "what should we validate" — modal-first order
+  {
+    advice_class: 'evidence_gap',
+    pattern: /\b(?:what|anything)\s+(?:should|could|can|might|do|would)\s+(?:we|i|you)\s+(?:validate|verify|confirm|de[-\s]?risk)\b/i,
+  },
+  // "anything we should validate" — pronoun-first order
+  {
+    advice_class: 'evidence_gap',
+    pattern: /\b(?:what|anything)\s+(?:we|i|you)\s+(?:should|could|can|might|need\s+to|have\s+to)\s+(?:validate|verify|confirm|de[-\s]?risk)\b/i,
+  },
+  // "what should we research" / "how should we investigate"
+  {
+    advice_class: 'evidence_gap',
+    pattern: /\b(?:what|how)\s+(?:should|do|can|could|might|would)\s+(?:we|i|you)\s+(?:research|investigate|explore|look\s+into)\b/i,
+  },
+  // "how do we build confidence" / "how can we increase confidence"
+  {
+    advice_class: 'evidence_gap',
+    pattern: /\b(?:how|what)\s+(?:do|can|should|could|might|would)\s+(?:we|i|you)\s+(?:build|increase|raise|strengthen|grow|improve)\s+(?:our\s+|the\s+|more\s+)?confidence\b/i,
+  },
+  // "what evidence should we gather" / "what data could we collect"
+  {
+    advice_class: 'evidence_gap',
+    pattern: /\bwhat\s+(?:evidence|data|information|info|signal|signals|proof)\s+(?:should|could|can|might|would|do)\s+(?:we|i|you)\s+(?:gather|collect|seek|pull|find|look\s+for|need|want)\b/i,
+  },
+  // "what assumptions should we test" / "what assumptions do we need to verify"
+  {
+    advice_class: 'evidence_gap',
+    pattern: /\bwhat\s+assumptions?\s+(?:should|could|can|might|do|would)\s+(?:we|i|you)\s+(?:need\s+to\s+|have\s+to\s+|want\s+to\s+|like\s+to\s+)?(?:test|verify|check|question|challenge|tested|verified)\b/i,
+  },
+  // "Do you have any recommendations on what we should validate or research..."
+  // — exact target phrasing from the workstream brief. Keep the same generic
+  // modal/pronoun grammar as the sibling requests: a wildcard here swallowed
+  // qualitative context ("how our two-person team should investigate") inside
+  // the match, where the surrounding-context check could not see it.
+  {
+    advice_class: 'evidence_gap',
+    pattern: /\b(?:any\s+)?recommendations?\s+(?:on|for|to|about)\s+(?:what|how)\s+(?:(?:should|could|can|might|would|do)\s+(?:we|i|you)|(?:we|i|you)\s+(?:should|could|can|might|need\s+to|have\s+to))\s+(?:validate|research|verify|test|investigate|confirm|gather)\b/i,
+  },
+
+  // ── improvement (must precede the broader 'how should we' advice pattern) ─
+  // "what should we improve" / "what can we improve" / "what could be improved"
+  {
+    advice_class: 'improvement',
+    pattern: /\bwhat\s+(?:should|can|could|might|would)\s+(?:we|i|you)\s+improve\b/i,
+  },
+  // "what could be improved" / "what can be improved"
+  {
+    advice_class: 'improvement',
+    pattern: /\bwhat\s+(?:could|can)\s+be\s+improved\b/i,
+  },
+  // "how can this be improved" / "how can we improve"
+  {
+    advice_class: 'improvement',
+    pattern: /\bhow\s+(?:can|could|might|should|do)\s+(?:we|i|you|this|it)\b[^.?!\n]{0,40}\bimprove(?:d)?\b/i,
+  },
+  // "how to improve" / "ways to improve"
+  {
+    advice_class: 'improvement',
+    pattern: /\b(?:how|ways?)\s+to\s+improve\b/i,
+  },
+
+  // ── update_advice (must precede broader 'how should we' advice) ─
+  // "how should we update this" / "how do we update this"
+  {
+    advice_class: 'update_advice',
+    pattern: /\bhow\s+(?:should|do|would|can|might)\s+(?:we|i|you)\s+update\s+(?:this|that|it|the\s+(?:model|graph|decision|analysis))\b/i,
+  },
+  // "what would you update" / "what should we update"
+  {
+    advice_class: 'update_advice',
+    pattern: /\bwhat\s+(?:would|should|could|do)\s+you\s+update\b/i,
+  },
+  // "should we change anything based on" / "should we update based on"
+  {
+    advice_class: 'update_advice',
+    pattern: /\bshould\s+(?:we|i)\s+(?:change|update|adjust|revise)\s+(?:anything|something|this|the\s+(?:model|graph|decision))\b/i,
+  },
+  // "how do you recommend we update" — canonical c952 misroute (kept here
+  // so the broader 'how should we' below also matches; this entry just
+  // pins it to update_advice for telemetry clarity).
+  {
+    advice_class: 'update_advice',
+    pattern: /\bhow\s+do\s+you\s+recommend\s+(?:we|i|us)\s+update\b/i,
+  },
+  // V5 post-analysis contract v1 — imperative change-advice. Closes the
+  // "Tell me what to change" gap where the message falls through to the
+  // broad routing LLM and risks an `edit_graph` misroute. Verb-object
+  // anchored on the right; never bare `\btell\s+me\b` (which would
+  // match off-topic chat). Mutation precedence (MUTATION_SIGNAL_PATTERNS
+  // above) still rejects "Tell me what to change Pricing to £100" before
+  // classification, so concrete edits route to the value-update gate.
+  {
+    advice_class: 'update_advice',
+    pattern: /\btell\s+me\s+what\s+(?:to|i\s+(?:should|need\s+to|can|could|might))\s+(?:change|update|adjust|fix|improve|edit)\b/i,
+  },
+  // "show me what to change" / "show me what i should update"
+  {
+    advice_class: 'update_advice',
+    pattern: /\bshow\s+me\s+what\s+(?:to|i\s+should)\s+(?:change|update|adjust|fix|improve|edit)\b/i,
+  },
+
+  // ── next_step ────────────────────────────────────────────────────
+  // "next step(s)" / "what's the next step"
+  {
+    advice_class: 'next_step',
+    pattern: /\bnext\s+steps?\b/i,
+  },
+  // "what's next" / "what comes next"
+  {
+    advice_class: 'next_step',
+    pattern: /\bwhat['’]?s?\s+(?:next|comes\s+next|the\s+next)\b/i,
+  },
+  // "where should we start" / "where do we go next"
+  {
+    advice_class: 'next_step',
+    pattern: /\bwhere\s+(?:should|do)\s+(?:we|i|you)\s+(?:start|go\s+next|begin)\b/i,
+  },
+
+  // ── advice (broadest — must be LAST) ─────────────────────────────
+  // "how should we / I / you …"
+  {
+    advice_class: 'advice',
+    pattern: /\bhow\s+(?:should|do|would|can|might)\s+(?:we|i|you)\b/i,
+  },
+  // "what should we / I / you …"
+  {
+    advice_class: 'advice',
+    pattern: /\bwhat\s+should\s+(?:we|i|you)\b/i,
+  },
+  // "what would you (recommend | suggest | advise | think | do)"
+  {
+    advice_class: 'advice',
+    pattern: /\bwhat\s+(?:would|do)\s+you\s+(?:recommend|suggest|advise|think|do)\b/i,
+  },
+  // "what factor / driver / thing / aspect / area / step / move …"
+  {
+    advice_class: 'advice',
+    pattern: /\bwhat\s+(?:factor|driver|thing|aspect|area|step|move)s?\b/i,
+  },
+  // "what's the best / right / most important / the priority"
+  {
+    advice_class: 'advice',
+    pattern: /\bwhat['’]?s?\s+(?:the\s+best|the\s+right|most\s+important|the\s+priority)\b/i,
+  },
+  // "where should we focus / look"
+  {
+    advice_class: 'advice',
+    pattern: /\bwhere\s+should\s+(?:we|i|you)\s+(?:focus|look)\b/i,
+  },
+  // "any suggestions / ideas / advice / thoughts"
+  {
+    advice_class: 'advice',
+    pattern: /\bany\s+(?:suggestions?|ideas?|advice|thoughts)\b/i,
+  },
+  // "can you recommend / suggest / advise / help me think"
+  {
+    advice_class: 'advice',
+    pattern: /\bcan\s+you\s+(?:recommend|suggest|advise|help\s+me\s+think)\b/i,
+  },
+  // V5 post-analysis contract v1 — bare-interrogative change-advice
+  // shapes. Same family as the imperative update_advice patterns above;
+  // labeled `advice` because these are generic "what do I do?" framings
+  // without explicit update context.
+  // "what do I change?" / "what do we adjust?"
+  {
+    advice_class: 'advice',
+    pattern: /\bwhat\s+do\s+(?:i|we)\s+(?:change|update|adjust|fix|edit)\b/i,
+  },
+  // "what needs to change" / "what needs changing" / "what needs to be updated"
+  {
+    advice_class: 'advice',
+    pattern: /\bwhat\s+needs\s+(?:to\s+(?:change|be\s+(?:changed|updated|adjusted|fixed))|changing|updating|adjusting)\b/i,
+  },
+  // "help me figure out what to change" / "help me decide what to update".
+  // Verbs (figure out / decide / work out) are distinct from the
+  // `meaning` class's "help me (interpret|understand|make sense of|read)"
+  // earlier in the array, so no cross-class collision.
+  {
+    advice_class: 'advice',
+    pattern: /\bhelp\s+me\s+(?:figure\s+out|decide|work\s+out)\s+what\s+to\s+(?:change|update|adjust|fix|improve|edit)\b/i,
+  },
+  // "give me something to change" / "give me a starting point to update"
+  {
+    advice_class: 'advice',
+    pattern: /\bgive\s+me\s+(?:something|a\s+starting\s+point|a\s+place\s+to\s+start)\s+to\s+(?:change|update|adjust|fix|improve)\b/i,
+  },
+  // "what's worth changing" / "what is worth updating"
+  {
+    advice_class: 'advice',
+    pattern: /\bwhat['’]?s\s+worth\s+(?:changing|updating|adjusting|fixing|improving|editing)\b/i,
+  },
+];
+
+/**
+ * Per-class required-input table. The gate consults this AFTER pattern
+ * matching: if a class fires but its required inputs are absent, the
+ * gate returns `data_unavailable_for_class` and the caller falls
+ * through to Sonnet. Never emit weak deterministic copy from a class
+ * whose data is missing.
+ */
+interface ClassRequirements {
+  readonly needs_leading_option: boolean;
+  readonly needs_top_driver: boolean;
+  readonly needs_runner_up: boolean;
+  readonly needs_analysis_ready: boolean;
+  readonly needs_fragile_edges: boolean;
+}
+
+const CLASS_REQUIREMENTS: Readonly<Record<AdviceClass, ClassRequirements>> = {
+  advice: {
+    needs_leading_option: true,
+    needs_top_driver: false,
+    needs_runner_up: false,
+    needs_analysis_ready: false,
+    needs_fragile_edges: false,
+  },
+  next_step: {
+    needs_leading_option: true,
+    needs_top_driver: false,
+    needs_runner_up: false,
+    needs_analysis_ready: false,
+    needs_fragile_edges: false,
+  },
+  update_advice: {
+    needs_leading_option: true,
+    needs_top_driver: false,
+    needs_runner_up: false,
+    needs_analysis_ready: false,
+    needs_fragile_edges: false,
+  },
+  improvement: {
+    needs_leading_option: true,
+    needs_top_driver: true,
+    needs_runner_up: false,
+    needs_analysis_ready: false,
+    needs_fragile_edges: false,
+  },
+  meaning: {
+    needs_leading_option: true,
+    needs_top_driver: false,
+    needs_runner_up: false,
+    needs_analysis_ready: false,
+    needs_fragile_edges: false,
+  },
+  readiness: {
+    needs_leading_option: false,
+    needs_top_driver: false,
+    needs_runner_up: false,
+    needs_analysis_ready: true,
+    needs_fragile_edges: false,
+  },
+  evidence_gap: {
+    needs_leading_option: false,
+    needs_top_driver: false,
+    needs_runner_up: false,
+    // Either readiness data OR top_drivers data is enough — see the
+    // mixed predicate inside the gate.
+    needs_analysis_ready: false,
+    needs_fragile_edges: false,
+  },
+  explain_results_free_text: {
+    needs_leading_option: true,
+    needs_top_driver: true,
+    needs_runner_up: false,
+    needs_analysis_ready: false,
+    needs_fragile_edges: false,
+  },
+  what_would_flip_free_text: {
+    needs_leading_option: true,
+    needs_top_driver: true,
+    needs_runner_up: false,
+    needs_analysis_ready: false,
+    needs_fragile_edges: false,
+  },
+};
+
+/**
+ * Defence-in-depth label-presence check. The composer interpolates
+ * `leading_option.label` and `top_drivers[0].factor_label` directly
+ * into prose without a length guard, so an empty / whitespace-only
+ * label would yield awkward double-spacing in user-facing copy.
+ * Treat empty / whitespace-only labels as "missing input" so the gate
+ * falls through cleanly via `data_unavailable_for_class` rather than
+ * emitting malformed prose. Production ContextPack assembly normalises
+ * labels, so this branch is rare — but the contract should be tight.
+ */
+function hasNonEmptyLabel(s: string | undefined | null): boolean {
+  return typeof s === 'string' && s.trim().length > 0;
+}
+
+/**
+ * True when `top_drivers[0]` exists AND its `factor_label` is a
+ * non-empty trimmed string. Bare `top_drivers.length > 0` is
+ * insufficient: the gap-list fall-through interpolates the label
+ * directly ("the strongest sensitivity is on `<label>`"), so a
+ * whitespace-only label would emit `"sensitivity is on   "`.
+ *
+ * Used by the gap-list fall-through inside `composeEvidenceGap` and
+ * by the per-class availability check so the renderability gate is
+ * uniform across the file.
+ */
+function hasRenderableTopDriver(analysis: AdviceGateAnalysis): boolean {
+  return hasRenderableTopDriverLabel(analysis);
+}
+
+/**
+ * Projection-shaped variant of {@link hasRenderableTopDriver}: true when the
+ * supplied analysis projection exposes a renderable top driver
+ * (`top_drivers[0].factor_label` is a non-empty trimmed string). Accepts the
+ * minimal structural shape shared by `AdviceGateAnalysis` and the ContextPack
+ * analysis projection so call sites can report `top_driver_present` from the
+ * SAME projection that powers `leading_option_present` — rather than from
+ * whether a particular advice class happened to consume a driver label (which
+ * left the telemetry reporting `false` on every non-match even when the
+ * projection carried drivers).
+ */
+export function hasRenderableTopDriverLabel(
+  analysis:
+    | { readonly top_drivers?: ReadonlyArray<{ readonly factor_label?: string | null }> }
+    | null
+    | undefined,
+): boolean {
+  return hasNonEmptyLabel(analysis?.top_drivers?.[0]?.factor_label);
+}
+
+/**
+ * DGAI #341 claim guard: the drivers the COMPOSERS may NAME in superlative
+ * claims ("the strongest sensitivity is on …", "the factor with the most
+ * influence …", "driven by …", "the order could shift with movement on …").
+ * A driver whose finite `sensitivity_value` sits below the shared near-zero
+ * threshold renders as "has little effect on the lead" — pairing that band
+ * with a superlative is the live #341 self-contradiction. Such drivers are
+ * omitted from prose; drivers WITHOUT a value stay nameable (no materiality
+ * verdict on missing data). Deliberately NOT used by the per-class
+ * availability requirements (`missing_inputs`) or the copy-source
+ * diagnostics — routing is unchanged; only what the copy asserts is gated.
+ */
+function nameableTopDrivers(
+  analysis: AdviceGateAnalysis,
+): readonly AdviceGateAnalysisDriver[] {
+  return analysis.top_drivers.filter((d) => hasMaterialInfluence(d.sensitivity_value));
+}
+
+/**
+ * Per-edge renderability check. Both endpoint labels are interpolated
+ * into prose (`"the link from <from> to <to>"`); a blank label on
+ * either side would emit a malformed sentence. Delegates to the shared
+ * predicate in `coaching/validation-priority.ts` so the advice-gate and
+ * handler-projection surfaces can never drift on what "renderable" means.
+ */
+function isRenderableFragileEdge(
+  edge: AdviceGateAnalysisFragileEdge,
+): boolean {
+  return isRenderableValidationEdge(edge);
+}
+
+/**
+ * Filtered view of `fragile_edges` keeping only entries whose endpoint
+ * labels are renderable. The composer iterates this list instead of
+ * the raw array so blank-labelled edges can never reach assistant text
+ * — even when the gate has passed via another signal (readiness or
+ * top driver) and a degraded `fragile_edges[0]` would otherwise leak
+ * through the slice-based loop.
+ *
+ * Returns an empty array when the source array is absent or all
+ * entries are unrenderable; callers can use `.length` for presence
+ * checks safely.
+ */
+function renderableFragileEdges(
+  analysis: AdviceGateAnalysis,
+): readonly AdviceGateAnalysisFragileEdge[] {
+  return analysis.fragile_edges?.filter(isRenderableFragileEdge) ?? [];
+}
+
+/** Canonical single-edge pick; projected rows without a metric retain their head. */
+function selectRenderableFragileEdge(
+  analysis: AdviceGateAnalysis,
+): AdviceGateAnalysisFragileEdge | undefined {
+  return selectFragilityPriorityRow(renderableFragileEdges(analysis));
+}
+
+/**
+ * The SUBJECT `composeWhatWouldFlip`'s beat 2 names — a fragile link, or (when
+ * no fragile edge is renderable) the single most influential factor.
+ *
+ * ⭐ ONE DERIVATION, TWO READ POINTS. `composeWhatWouldFlip` calls this to decide
+ * which sentence to write, and `deriveFlipFocusSection` calls it to decide which
+ * Model-tab section to open. They cannot disagree about what the answer is ABOUT,
+ * because there is only one selection and both read it. A second precedence list
+ * next to the composer's would be the two-authorities defect (CLAUDE.md trap 21)
+ * — the same defect §2.1 row 4 was rebuilt to remove, one layer up.
+ *
+ * Returns the SELECTED OBJECT rather than a tag so the composer keeps using the
+ * very row this chose; returning a tag would leave the composer free to re-index
+ * the array and drift.
+ *
+ * `null` when neither is available — the composer then writes no beat-2 sentence
+ * and no gesture is offered. Additive throughout: absence costs the answer nothing.
+ */
+type FlipFocusSelection =
+  | { readonly kind: 'fragile_edge'; readonly edge: AdviceGateAnalysisFragileEdge }
+  | { readonly kind: 'top_driver'; readonly driver: AdviceGateAnalysisDriver };
+
+function selectFlipFocus(analysis: AdviceGateAnalysis): FlipFocusSelection | null {
+  const edge = selectRenderableFragileEdge(analysis);
+  if (edge) return { kind: 'fragile_edge', edge };
+  const driver = nameableTopDrivers(analysis)[0];
+  if (driver) return { kind: 'top_driver', driver };
+  return null;
+}
+
+/**
+ * Model-tab section ids this gate may ask the workspace to open on a flip answer.
+ *
+ * ⚠ CEE-INTERNAL — this never reaches the wire. It is consumed by
+ * `buildGateFlipSectionDirective` (compose/ui-directive.ts), and the DIRECTIVE is
+ * what ships. Deliberately the SUBJECT's section rather than a resolved node id:
+ * see the ruling recorded on {@link AdviceGateMatched.flip_focus_section}.
+ *
+ * A strict subset of the contract's `UiDirectiveModelSectionId` enum
+ * (`options | factors | relationships | risks | modelcard`); the builder's
+ * parameter type is what enforces the subset relationship at compile time.
+ */
+export type AdviceGateFlipFocusSection = 'relationships' | 'factors';
+
+/**
+ * `FlipFocusSelection` → the Model-tab section the named subject lives on.
+ *
+ * TOTALITY IS DELIBERATE (the `Record` over the closed union): adding a third
+ * subject kind becomes a TYPE ERROR here rather than a silent fall-through to
+ * "no gesture" — the same discipline, and for the same trap-12 reason, as
+ * `REMEDY_SECTION_BY_OPEN_ITEM_KIND` in the directive builder.
+ *
+ * Surface semantics: a fragile edge IS a relationship, and `RelationshipsSection`
+ * is the surface that renders `edges={causalEdges}`; a top driver IS a factor.
+ * The gesture therefore opens the surface the sentence is about — no more, and
+ * it claims no more.
+ */
+const FLIP_FOCUS_SECTION_BY_SUBJECT: Record<
+  FlipFocusSelection['kind'],
+  AdviceGateFlipFocusSection
+> = {
+  fragile_edge: 'relationships',
+  top_driver: 'factors',
+};
+
+/**
+ * The gate's answer to "which surface is this flip answer about?".
+ *
+ * `undefined` for every class other than `what_would_flip_free_text`, and
+ * whenever the projection named no subject — the gesture is strictly ADDITIVE to
+ * the answer and never a precondition for it, so every fail-closed arm still
+ * ships the prose.
+ */
+function deriveFlipFocusSection(
+  cls: AdviceClass,
+  analysis: AdviceGateAnalysis,
+): AdviceGateFlipFocusSection | undefined {
+  if (cls !== 'what_would_flip_free_text') return undefined;
+  const focus = selectFlipFocus(analysis);
+  return focus === null ? undefined : FLIP_FOCUS_SECTION_BY_SUBJECT[focus.kind];
+}
+
+function evaluateAvailability(
+  cls: AdviceClass,
+  analysis: AdviceGateAnalysis,
+  analysisReady: AnalysisReadyPayload | null | undefined,
+  factorEvppiGuidance: FactorEvppiPriorityGuidanceDecision | null | undefined,
+): readonly string[] {
+  const reqs = CLASS_REQUIREMENTS[cls];
+  const missing: string[] = [];
+  if (
+    reqs.needs_leading_option
+    && (analysis.leading_option == null
+      || !hasNonEmptyLabel(analysis.leading_option.label))
+  ) {
+    missing.push('leading_option');
+  }
+  if (
+    reqs.needs_top_driver
+    && (analysis.top_drivers.length === 0
+      || !hasNonEmptyLabel(analysis.top_drivers[0]?.factor_label))
+  ) {
+    missing.push('top_driver');
+  }
+  if (
+    reqs.needs_runner_up
+    && (analysis.runner_up == null
+      || !hasNonEmptyLabel(analysis.runner_up.label))
+  ) {
+    missing.push('runner_up');
+  }
+  if (reqs.needs_analysis_ready && !hasSufficientReadinessData(analysisReady)) {
+    missing.push('analysis_ready');
+  }
+  // evidence_gap accepts readiness data, a renderable top driver, OR exact
+  // number-free factor-EVPPI guidance — fail only when all are missing. The driver check uses
+  // `hasRenderableTopDriver` (non-empty trimmed `factor_label`) so a
+  // whitespace-only label can't satisfy the gate and then make the
+  // gap-list fall-through emit "sensitivity is on   ". Matches the
+  // existing renderability contract for `needs_top_driver` classes
+  // above. Predicate semantics unchanged ('analysis_ready_or_top_drivers'
+  // key retained) — this is a strictly defensive tightening on what
+  // counts as "top driver available".
+  if (cls === 'evidence_gap') {
+    // A canonical non-ready status is itself sufficient authority for the
+    // readiness-only recovery branch. Do not require a complete optional
+    // detail carrier before honouring that blocker: the shared readiness
+    // projection has a deterministic generic recovery for sparse payloads.
+    const haveReadiness =
+      (analysisReady?.status !== undefined && analysisReady.status !== 'ready')
+      || hasSufficientReadinessData(analysisReady);
+    const haveDrivers = hasRenderableTopDriver(analysis);
+    // Factor-EVPPI is science PRIORITY advice, so freshness alone is not enough:
+    // the exact current canonical graph must also be analysis-ready. Unknown or
+    // non-ready state cannot be rescued by an otherwise-valid prior guidance
+    // object. Ordinary projection/readiness fallbacks remain available.
+    const haveEvppiGuidance =
+      analysisReady?.status === 'ready'
+      && factorEvppiGuidance?.outcome === 'selected';
+    if (!haveReadiness && !haveDrivers && !haveEvppiGuidance) {
+      missing.push('analysis_ready_or_top_drivers');
+    }
+  }
+  return missing;
+}
+
+/**
+ * Words that make a request a request about the ANALYSIS OUTPUT.
+ *
+ * Deliberately a CLOSED set drawn from this file's OWN existing patterns, not
+ * from the author's model of English (trap 22 — a corpus from the author's
+ * head cannot see the class the author did not imagine). Two groups:
+ *
+ *   1. The analysis NOUNS the sibling `meaning` / `explain_results_free_text`
+ *      patterns already enumerate (`:591`, `:563`).
+ *   2. The leader-POSITION vocabulary lifted verbatim from the
+ *      `explain_results_free_text` pattern at `:584`. "Why is X ahead" carries
+ *      no analysis noun but is unambiguously about the analysis, and without
+ *      this group the guard below would steal it.
+ *
+ * ⚠ HAND-MAINTAINED MIRROR (trap 12). It cannot be derived from
+ * `CLASS_PATTERNS` — those are regexes, and a regex-over-regexes extraction
+ * would be a second, drifting derivation. The completeness check is therefore
+ * a CORPUS, not a derivation: `advice-gate-reasoning-request.test.ts` drives
+ * every claimed-side twin through the real gate and REDs if any legitimate
+ * analysis question starts being declined.
+ */
+const ANALYSIS_REFERENT =
+  /\b(?:results?|analysis|analyses|outcomes?|findings?|numbers?|scores?|charts?|rankings?|probabilit(?:y|ies)|percentages?|margins?|simulations?|forecasts?|projections?|odds|ahead|leading|in\s+front|on\s+top|the\s+leader|the\s+favourite|the\s+favorite)\b/i;
+
+/**
+ * Openers that introduce a request for help reasoning. Every one of these is
+ * already matched by a `meaning`-class pattern above, EXCEPT the `us` variants
+ * — which the gate does not match today, so including them changes no
+ * outcome, only the honesty of the telemetry reason.
+ */
+const REASONING_HELP_OPENERS: readonly RegExp[] = [
+  /\bhelp\s+(?:me|us)\s+(?:interpret|understand|make\s+sense\s+of|read)\b/i,
+  /\bhow\s+(?:should|do|can)\s+(?:i|we)\s+(?:read|interpret|understand|think\s+about)\b/i,
+  /\bwalk\s+(?:me|us)\s+through\b/i,
+];
+
+/**
+ * A wh-word GOVERNED BY the opener — i.e. the thing the user wants understood
+ * is a CLAUSE ABOUT THE WORLD ("what's causing this", "why retention is
+ * slipping"), not a thing on screen.
+ *
+ * ⚠ Anchored with `^` and tested against the text AFTER the opener, never
+ * against the whole message. Scanning the whole message reads the opener's OWN
+ * interrogative as its object: "How should I read this" would match on its
+ * leading "How" and be declined, silently converting the ambiguous
+ * bare-demonstrative case (b) into case (c). Caught by the KNOWN-NOT-CLAIMED
+ * block, which is exactly what it is for.
+ */
+const WH_OBJECT = /^\W*(?:\w+\W+){0,2}?(?:what|why|whether|how|where|when|who|which)\b/i;
+
+/**
+ * True iff the message asks for help thinking about the user's PROBLEM.
+ *
+ * THREE cases, not two — the one-predicate-two-harms shape CEE #888 paid four
+ * oscillating rounds for (trap 22b/22f):
+ *
+ *   (a) an analysis referent is present  → NOT a reasoning request. The gate
+ *       keeps it and answers with grounded copy.
+ *   (b) a BARE DEMONSTRATIVE object ("help me understand this") → AMBIGUOUS,
+ *       and deliberately NOT claimed as a reasoning request. On a
+ *       post-analysis turn it is dominantly about the analysis; declining
+ *       would be a guess, and guessing here degrades every legitimate reading
+ *       request. Pinned as a KNOWN-NOT-CLAIMED set in the spec so the gap is
+ *       visible rather than silent.
+ *   (c) opener + wh-object + no analysis referent → a reasoning request.
+ *
+ * The two parameters are separate on purpose: a false positive here DROPS a
+ * grounded answer (a degradation — the turn still reaches the model), while a
+ * false negative serves a status report to someone who asked to think (the
+ * defect). They are different harms and cannot share one window.
+ */
+function isReasoningRequest(message: string): boolean {
+  if (ANALYSIS_REFERENT.test(message)) return false;
+  for (const opener of REASONING_HELP_OPENERS) {
+    const hit = opener.exec(message);
+    if (hit === null) continue;
+    // The object is what FOLLOWS the opener. Testing the remainder — never
+    // the whole message — is what keeps the opener's own "how"/"what" from
+    // being read as its own object.
+    if (WH_OBJECT.test(message.slice(hit.index + hit[0].length))) return true;
+  }
+  return false;
+}
+
+/** The evidence composer answers a scoped question, not arbitrary surrounding
+ * reasoning. Reuse the existing matched request span; only its ordinary polite
+ * preamble and generic analysis qualifiers may sit outside it. Anything else
+ * needs the existing contextual router (including reasons, constraints and a
+ * discussion instruction). This does not classify or discard that context. */
+function hasContextOutsideEvidenceRequest(message: string): boolean {
+  const requestPreamble = /^\s*(?:(?:please|do\s+you\s+have(?:\s+any)?)\s*)?$/i;
+  const requestQualifiers = /^(?:[\s?.!]|\b(?:first|next|here|further|this|in\s+this|in\s+our\s+decision|to\s+confirm\s+this|to\s+build\s+confidence\s+in\s+(?:our|this)\s+decision|or\s+research)\b)*$/i;
+  // The longer existing recommendation pattern may cover a whole request
+  // where an earlier short pattern covers only its inner question.
+  return !CLASS_PATTERNS.some(({ advice_class, pattern }) => {
+    if (advice_class !== 'evidence_gap') return false;
+    const hit = pattern.exec(message);
+    return hit !== null && requestPreamble.test(message.slice(0, hit.index))
+      && requestQualifiers.test(message.slice(hit.index + hit[0].length));
+  });
+}
+
+export function tryPostAnalysisAdviceGate(
+  input: AdviceGateInput,
+): AdviceGateResult {
+  const analysis = input.analysis;
+  if (!analysis) {
+    return { matched: false, reason: 'no_analysis' };
+  }
+  // Leading-option presence is no longer a pre-class signal: it lives
+  // in the per-class CLASS_REQUIREMENTS table and falls out of
+  // `evaluateAvailability()` as `missing_inputs: ['leading_option']`
+  // when a class that needs it doesn't have one. Classes that DON'T
+  // need a leading option (readiness, evidence_gap) proceed with no
+  // special-casing. Single uniform contract — every "missing input"
+  // surfaces through `data_unavailable_for_class` so dashboards see
+  // the class + the specific missing field.
+  if (input.freshness !== 'fresh') {
+    return { matched: false, reason: 'not_fresh' };
+  }
+  const message = input.message.trim();
+  if (message.length === 0) {
+    return { matched: false, reason: 'empty_message' };
+  }
+
+  // Classify first so the narrow `what_would_flip_free_text` mutation-
+  // overlap exception (mirroring PR #187 fresh-followup guard) can apply.
+  let matchedClass: AdviceClass | null = null;
+  for (const cp of CLASS_PATTERNS) {
+    if (cp.pattern.test(message)) {
+      matchedClass = cp.advice_class;
+      break;
+    }
+  }
+
+  // Mutation precedence: concrete edits MUST reach edit_graph dispatch.
+  // The broad MUTATION_SIGNAL_PATTERNS rejection applies to every class
+  // EXCEPT `what_would_flip_free_text`, which keeps the analytical
+  // capture when the mutation signal is fully explained by flip-pattern
+  // overlap (e.g. "change ... to look better" inside the canonical
+  // "what would need to change ... look better" phrasing).
+  // `hasIndependentMutationSignal` (PR #187) strips every
+  // `what_would_flip` pattern span before re-checking the verb-to-X
+  // mutation pattern, so a separate edit clause survives the strip and
+  // forces mutation precedence even within the exception. Net result:
+  // mutation precedence is preserved bit-for-bit for every existing
+  // test, AND the new "what would need to change for another option to
+  // look better?" phrasing falls correctly through to the advice gate
+  // composer rather than being misread as an edit.
+  for (const re of MUTATION_SIGNAL_PATTERNS) {
+    if (re.test(message)) {
+      const allowFlipException =
+        matchedClass === 'what_would_flip_free_text'
+        && !hasIndependentMutationSignal(message);
+      if (!allowFlipException) {
+        return { matched: false, reason: 'mutation_signal' };
+      }
+      break;
+    }
+  }
+
+  // Reasoning-request precedence. Placed HERE deliberately:
+  //  - AFTER `no_analysis` / `not_fresh` / `empty_message`, which are more
+  //    informative reasons and stay primary;
+  //  - AFTER mutation precedence, which is the gate's strongest existing rule —
+  //    a concrete edit must still reach edit_graph dispatch even when it is
+  //    wrapped in "help me understand …";
+  //  - BEFORE the `no_advice_signal` return, so a reasoning request the gate
+  //    would otherwise have claimed (`meaning`) AND one it would have dropped
+  //    silently both report the same honest reason.
+  //
+  // The turn falls through to the LLM router with the turn's context pack
+  // attached — which is the whole point: the user asked to think, so the model
+  // answers, grounded in the model state, instead of the gate reciting the
+  // standings with `llm_calls_used: 0`.
+  // Open-ended advice needs the user's context, beyond a standings summary.
+  // Specific analysis classes and mutation precedence have already been resolved.
+  if (matchedClass === 'advice' || isReasoningRequest(message)
+    || (matchedClass === 'evidence_gap' && hasContextOutsideEvidenceRequest(message))) {
+    return { matched: false, reason: 'reasoning_request' };
+  }
+
+  if (matchedClass === null) {
+    return { matched: false, reason: 'no_advice_signal' };
+  }
+
+  // Per-class data-availability check. `evaluateAvailability` enforces
+  // every requirement on the table — including `needs_leading_option`
+  // for the classes that need it. A missing leading_option falls out
+  // here as `missing_inputs: ['leading_option']` so the telemetry
+  // contract is uniform across every "missing input" failure mode.
+  const missing = evaluateAvailability(
+    matchedClass,
+    analysis,
+    input.analysisReady,
+    input.factorEvppiGuidance,
+  );
+  if (missing.length > 0) {
+    // AI Harness capability 1 (flag-gated by `input.canonicalState` presence —
+    // the turn-executor threads it ONLY when CEE_POST_ANALYSIS_LOOP_ENABLED is
+    // on). When the thin LLM-facing projection is missing a required label BUT
+    // fresh, usable canonical state + substantive safe-now content exist,
+    // compose a grounded deterministic answer instead of falling through
+    // `data_unavailable_for_class` → the slow generic LLM router. Returns null
+    // (→ unchanged fall-through) for the flag-off default and whenever there is
+    // no substantive safe-now content, so weak copy never leaves this surface.
+    const rich = tryComposeRichSafeNowFallback(matchedClass, input);
+    if (rich) return rich;
+    return {
+      matched: false,
+      reason: 'data_unavailable_for_class',
+      advice_class: matchedClass,
+      missing_inputs: missing,
+    };
+  }
+
+  const leadingLabel = analysis.leading_option?.label ?? '';
+  // DGAI #341: the composers bill this label as "the factor with the most
+  // influence here" — only a materially-influential driver may carry it.
+  const topDriverLabel = nameableTopDrivers(analysis)[0]?.factor_label ?? null;
+
+  /**
+   * ROADMAP 2.640 §3.4 — THE SINGLE derivation of "which blocker is top",
+   * shared by both matched-result construction sites below.
+   *
+   * `summariseReadiness` emits at most one canonical recovery family from the
+   * shared status/blocker projection. There is therefore no local ranking or
+   * reconstruction: the prose and the optional gesture consume the same item.
+   *
+   * Returns `undefined` for every non-readiness class and whenever the
+   * projection lacks the data — the gesture is additive to the answer and never
+   * a precondition for it.
+   */
+  const remedyOpenItemKind = ((): ReadinessOpenItem['kind'] | undefined => {
+    if (matchedClass !== 'readiness') return undefined;
+    if (!hasSufficientReadinessData(input.analysisReady)) return undefined;
+    const items = summariseReadiness(input.analysisReady!).open_items;
+    return items.length > 0 ? items[0].kind : undefined;
+  })();
+
+  /**
+   * The gesture's subject, from the SAME `selectFlipFocus` call the composer
+   * uses for its beat-2 sentence. Derived here (rather than inside the composer)
+   * only because the composer returns a string; the SELECTION is shared, which
+   * is the property that matters.
+   */
+  const flipFocusSection = deriveFlipFocusSection(matchedClass, analysis);
+
+  const composeInput: ComposeInput = {
+    leadingLabel,
+    topDriverLabel,
+    analysis,
+    analysisReady: input.analysisReady ?? undefined,
+    decisionReview: input.decisionReview ?? undefined,
+    factorEvppiGuidance: input.factorEvppiGuidance,
+    rawRobustness: input.rawRobustness ?? undefined,
+    flipClaimPosture: input.flipClaimPosture ?? undefined,
+  };
+  const assistantText = composeForClass(matchedClass, composeInput);
+  const { copy_source, coaching_fields_used } = describeCopySource(matchedClass, composeInput);
+
+  return {
+    matched: true,
+    advice_class: matchedClass,
+    assistant_text: assistantText,
+    leading_option_label: leadingLabel,
+    top_driver_label: topDriverLabel,
+    suggested_actions: suggestedActionsForClass(matchedClass),
+    // Conditional spread, not `remedy_open_item_kind: x ?? undefined` — under
+    // exactOptionalPropertyTypes an explicit `undefined` is not the same as an
+    // absent key, and callers distinguish "no remedy item" by absence.
+    ...(remedyOpenItemKind !== undefined
+      ? { remedy_open_item_kind: remedyOpenItemKind }
+      : {}),
+    // Same conditional-spread discipline as `remedy_open_item_kind` above, and
+    // for the same `exactOptionalPropertyTypes` reason: callers distinguish "no
+    // gesture" by the key being ABSENT, not by an explicit `undefined`.
+    ...(flipFocusSection !== undefined ? { flip_focus_section: flipFocusSection } : {}),
+    copy_source,
+    coaching_fields_used,
+  };
+}
+
+/**
+ * AI Harness capability 1 — relaxation-eligible classes for the grounded
+ * safe-now fallback. Advice / coaching / interpretation classes where, when the
+ * thin projection is blank, a status + readiness + recent-changes answer is
+ * materially better than the slow generic LLM route. `readiness` is excluded
+ * (it already composes from blockers via `composeReadiness`); the free-text
+ * explain/flip twins are excluded (they fall through to the deterministic
+ * fresh-followup chip, which is already non-LLM).
+ */
+const RICH_FALLBACK_CLASSES: ReadonlySet<AdviceClass> = new Set<AdviceClass>([
+  'advice',
+  'next_step',
+  'update_advice',
+  'improvement',
+  'meaning',
+  'evidence_gap',
+]);
+
+/**
+ * AI Harness capability 1 — grounded safe-now fallback (composer + guard).
+ *
+ * Fires ONLY when (a) the post-analysis-loop flag is on — the turn-executor
+ * threads `canonicalState` only then; (b) the matched class is relaxation-
+ * eligible; (c) the canonical analysis state is usable for prose and not
+ * blocked; and (d) there is SUBSTANTIVE safe-now content to surface (open
+ * readiness items or recent changes). Returns null otherwise, so the caller
+ * falls through to `data_unavailable_for_class` and never emits weak copy.
+ *
+ * Surfaces Tier-1 safe-now content ONLY — analysis currency, readiness gaps
+ * (`summariseReadiness`: quoted labels, no percentages), and recent-change
+ * summaries (decision-language, no IDs). NEVER held science prose (sensitivity
+ * / drivers / fragility / robustness band / flip).
+ *
+ * Fail-closed honesty: the composed text is re-checked with the precision-first
+ * `classifyStructuralClaim`; if it would read as a (false) first-person
+ * mutation-success claim, the fallback is abandoned (null) rather than emitted —
+ * so this surface can never introduce false-success language, independent of
+ * the always-on finaliser guard.
+ */
+function tryComposeRichSafeNowFallback(
+  cls: AdviceClass,
+  input: AdviceGateInput,
+): AdviceGateMatched | null {
+  if (!RICH_FALLBACK_CLASSES.has(cls)) return null;
+  const canonical = input.canonicalState;
+  if (!canonical || !canonical.usableForProse || canonical.blockedUnusable) {
+    return null;
+  }
+  const readiness: ReadinessSummary | null = hasSufficientReadinessData(
+    input.analysisReady,
+  )
+    ? summariseReadiness(input.analysisReady)
+    : null;
+  const openItems = readiness?.open_items ?? [];
+  const recentChanges = (input.recentChanges ?? []).filter(
+    (c) => typeof c.summary === 'string' && c.summary.trim().length > 0,
+  );
+  // Require substantive safe-now content — never emit a bare "analysis is
+  // current" line. With neither readiness gaps nor recent changes there is
+  // nothing grounded to add, so fall through (the module forbids weak copy).
+  if (openItems.length === 0 && recentChanges.length === 0) return null;
+
+  const assistantText = composeRichSafeNowAnswer(cls, openItems, recentChanges);
+
+  // Fail-closed: never let a (false) structural-success claim leave this path.
+  // Reuses the precision-first classifier (no new detector, no class widening).
+  const claim = classifyStructuralClaim({
+    assistantText,
+    handlerEmittedMutatedGraph: false,
+    proposedHandlerId: null,
+  });
+  if (claim.verdict === 'swap') return null;
+
+  const fields: string[] = ['canonical_state'];
+  if (openItems.length > 0) fields.push('readiness');
+  if (recentChanges.length > 0) fields.push('recent_changes');
+
+  return {
+    matched: true,
+    advice_class: cls,
+    assistant_text: assistantText,
+    // The thin projection was blank by definition on this path — surface honest
+    // empties for the diagnostic fields rather than a fabricated label.
+    leading_option_label: '',
+    top_driver_label: null,
+    suggested_actions: suggestedActionsForClass(cls),
+    // ROADMAP 2.640 §3.4 — the rich safe-now path can also serve `readiness`,
+    // and it composes its prose from THIS `openItems` array
+    // (`composeRichSafeNowAnswer` above), so the gesture is derived from the
+    // same array the sentence is. Deriving it from a second source here is how
+    // the two would start disagreeing.
+    ...(cls === 'readiness' && openItems.length > 0
+      ? { remedy_open_item_kind: openItems[0].kind }
+      : {}),
+    copy_source: 'canonical_rich',
+    coaching_fields_used: fields,
+  };
+}
+
+/**
+ * AI Harness capability 1 — PLACEHOLDER-SAFE COPY (pending final wording review).
+ *
+ * Neutral, structural, honest wording assembled from Tier-1 safe-now content
+ * only. Invariant-compliant by construction: no "recommend(ed)", no
+ * "winner/winning", no raw IDs, no raw decimals, no readiness percentage, and
+ * no first-person mutation-success phrasing. The gate only reaches this composer
+ * when freshness === 'fresh' and the canonical state is usable, so the
+ * "up to date" standing line is honest.
+ */
+function composeRichSafeNowAnswer(
+  cls: AdviceClass,
+  openItems: readonly ReadinessOpenItem[],
+  recentChanges: readonly AdviceGateRecentChange[],
+): string {
+  const sections: string[] = [openerForClass(cls)];
+  if (openItems.length > 0) sections.push(formatOpenItems(openItems));
+  if (recentChanges.length > 0) sections.push(formatRecentChanges(recentChanges));
+  // Safe next step. The accompanying chip (when present) is the primary
+  // affordance; this prose nudges without claiming or implying any change.
+  sections.push(
+    "When you're ready, you can re-run the analysis or look at what could change the outcome.",
+  );
+  return sections.join('\n\n');
+}
+
+/** Class-aware safe-now opener (placeholder copy). */
+function openerForClass(cls: AdviceClass): string {
+  switch (cls) {
+    case 'meaning':
+      return 'Your most recent analysis is up to date with the current model. Here is where things stand and what is still open.';
+    case 'evidence_gap':
+      return 'Your most recent analysis is up to date with the current model. Here is what would make it more complete.';
+    default:
+      return 'Your most recent analysis is up to date with the current model. Here is what you could firm up next.';
+  }
+}
+
+/** Render readiness open-items as safe-now prose (descriptions are user-safe). */
+function formatOpenItems(items: readonly ReadinessOpenItem[]): string {
+  if (items.length === 1) return `Still open: ${items[0].description}.`;
+  return ['A few things are still open:', ...items.map((it) => `• ${it.description}`)].join('\n');
+}
+
+/** Render recent-change summaries as safe-now context (decision-language, no IDs). */
+function formatRecentChanges(changes: readonly AdviceGateRecentChange[]): string {
+  const summaries = changes.map((c) => c.summary.trim());
+  if (summaries.length === 1) return `Recent change in view: ${summaries[0]}`;
+  return ['Recent changes in view:', ...summaries.map((s) => `• ${s}`)].join('\n');
+}
+
+/**
+ * Derive the copy-source delivery diagnostic for a matched class. Pure,
+ * additive, non-user-facing — mirrors the branch conditions the composers use
+ * so a trace can prove which structured source the copy drew from. Returns
+ * structural-only data (no labels, no values). For `evidence_gap` it re-checks
+ * the same precedence the composer applies (factor_evppi → readiness gaps →
+ * fragile edges → top driver → projection); the re-check is a cheap pure call.
+ */
+function describeCopySource(
+  cls: AdviceClass,
+  input: ComposeInput,
+): { copy_source: AdviceGateCopySource; coaching_fields_used: readonly string[] } {
+  const a = input.analysis;
+  const fields: string[] = [];
+  if (hasNonEmptyLabel(a.leading_option?.label)) fields.push('leading_option');
+  if (hasNonEmptyLabel(a.runner_up?.label)) fields.push('runner_up');
+  if (typeof a.margin_pp === 'number' && Number.isFinite(a.margin_pp)) fields.push('margin_pp');
+  if (hasNonEmptyLabel(a.robustness_band ?? undefined)) fields.push('robustness_band');
+  if (hasRenderableTopDriver(a)) fields.push('top_drivers');
+  if (renderableFragileEdges(a).length > 0) fields.push('fragile_edges');
+  if (input.rawRobustness != null) fields.push('raw_robustness');
+
+  let copy_source: AdviceGateCopySource;
+  if (cls === 'readiness') {
+    copy_source = 'readiness';
+  } else if (cls === 'evidence_gap') {
+    if (input.analysisReady?.status !== undefined && input.analysisReady.status !== 'ready') {
+      // A known canonical blocker outranks every analysis-derived evidence
+      // priority. The composer takes the same readiness-only branch below.
+      copy_source = 'readiness';
+    } else if (
+      input.analysisReady?.status === 'ready'
+      && composeFactorEvppiValidationGuidance(input.factorEvppiGuidance) != null
+    ) {
+      copy_source = 'factor_evppi';
+      fields.push('factor_evppi');
+      if (
+        input.factorEvppiGuidance?.outcome === 'selected'
+        && input.factorEvppiGuidance.specificAction !== null
+      ) fields.push('decision_review');
+    } else if (
+      input.analysisReady
+      && hasSufficientReadinessData(input.analysisReady)
+      && summariseReadiness(input.analysisReady).open_items.length > 0
+    ) {
+      copy_source = 'readiness';
+    } else if (renderableFragileEdges(a).length > 0) {
+      copy_source = 'fragile_edges';
+    } else if (hasRenderableTopDriver(a)) {
+      copy_source = 'top_drivers';
+    } else {
+      copy_source = 'analysis_projection';
+    }
+  } else if (cls === 'what_would_flip_free_text') {
+    // Mirror the composer precedence: a named flip threshold (decision_review)
+    // → the fragile edge it points at → the top driver → bare projection.
+    if (deriveFlipStatus(input.decisionReview).kind === 'flip_found') {
+      copy_source = 'decision_review';
+      fields.push('decision_review');
+    } else if (renderableFragileEdges(a).length > 0) {
+      copy_source = 'fragile_edges';
+    } else if (hasRenderableTopDriver(a)) {
+      copy_source = 'top_drivers';
+    } else {
+      copy_source = 'analysis_projection';
+    }
+  } else if (cls === 'explain_results_free_text' || cls === 'meaning') {
+    // The interpretation twins now name the specific fragile assumption when
+    // fragile_edges are renderable, then fall back to the top driver, then bare
+    // projection. Mirror that precedence so the diagnostic reports the richest
+    // structured source the copy drew from (content-free; no labels/values).
+    if (renderableFragileEdges(a).length > 0) {
+      copy_source = 'fragile_edges';
+    } else if (hasRenderableTopDriver(a)) {
+      copy_source = 'top_drivers';
+    } else {
+      copy_source = 'analysis_projection';
+    }
+  } else {
+    copy_source = 'analysis_projection';
+  }
+  return { copy_source, coaching_fields_used: fields };
+}
+
+/**
+ * Per-class chip set. Reuses the existing `what_would_flip` chip the
+ * fresh-followup guard already emits (PR #187) so DGAI rendering and
+ * the deterministic chip-click dispatch path stay aligned. No new
+ * action types.
+ */
+const WHAT_WOULD_FLIP_CHIP: AdviceGateSuggestedAction = Object.freeze({
+  id: 'chip_action_what_would_flip',
+  label: 'What could change the outcome?',
+  message: 'What could change the outcome of this analysis?',
+  action_type: 'what_would_flip' as const,
+});
+
+function suggestedActionsForClass(
+  cls: AdviceClass,
+): readonly AdviceGateSuggestedAction[] {
+  switch (cls) {
+    case 'explain_results_free_text':
+    case 'meaning':
+    case 'advice':
+    case 'next_step':
+    case 'update_advice':
+    case 'improvement':
+      return [WHAT_WOULD_FLIP_CHIP];
+    case 'what_would_flip_free_text':
+    case 'readiness':
+    case 'evidence_gap':
+      return [];
+  }
+}
+
+interface ComposeInput {
+  readonly leadingLabel: string;
+  readonly topDriverLabel: string | null;
+  readonly analysis: AdviceGateAnalysis;
+  readonly analysisReady: AnalysisReadyPayload | undefined;
+  readonly decisionReview: Record<string, unknown> | undefined;
+  readonly factorEvppiGuidance: FactorEvppiPriorityGuidanceDecision | null | undefined;
+  readonly rawRobustness: RawRobustnessSignals | null | undefined;
+  /** ROADMAP 2.278 — see {@link AdviceGateInput.flipClaimPosture}. */
+  readonly flipClaimPosture: FlipClaimPosture | undefined;
+}
+
+function composeForClass(cls: AdviceClass, input: ComposeInput): string {
+  switch (cls) {
+    case 'advice':
+    case 'next_step':
+    case 'update_advice':
+      return composeAdvice(
+        input.leadingLabel,
+        input.topDriverLabel,
+        input.analysis,
+        input.rawRobustness,
+        input.flipClaimPosture,
+      );
+    case 'improvement':
+      return composeImprovement(
+        input.leadingLabel,
+        input.topDriverLabel,
+        input.analysis,
+        input.rawRobustness,
+        input.flipClaimPosture,
+      );
+    case 'meaning':
+      return composeMeaning(
+        input.leadingLabel,
+        input.topDriverLabel,
+        input.analysis,
+        input.rawRobustness,
+        input.flipClaimPosture,
+      );
+    case 'readiness':
+      return composeReadiness(input.analysisReady);
+    case 'evidence_gap':
+      return composeEvidenceGap(
+        input.analysis,
+        input.analysisReady,
+        input.factorEvppiGuidance,
+      );
+    case 'explain_results_free_text':
+      return composeExplainResults(
+        input.leadingLabel,
+        input.analysis,
+        input.rawRobustness,
+        input.flipClaimPosture,
+      );
+    case 'what_would_flip_free_text':
+      return composeWhatWouldFlip(
+        input.leadingLabel,
+        input.analysis,
+        input.rawRobustness,
+        input.decisionReview,
+        // ROADMAP 2.278 continued — the FIFTH surface. Every sibling class
+        // above already receives this; the class whose question IS the flip
+        // question did not. See the beat-3 note in composeWhatWouldFlip.
+        input.flipClaimPosture,
+      );
+  }
+}
+
+/**
+ * Probability-fragment helper. Returns a trailing comma-prefixed clause
+ * (", with a probability of NN%") when the value is finite and in the
+ * `[0, 1]` range, empty string otherwise. Centralising the guard here
+ * keeps every enriched composer aligned on the same degrade-gracefully
+ * contract: if the upstream projection does not carry probability, the
+ * fragment is silently omitted rather than rendering "Not available".
+ */
+function probabilityFragment(p: number | undefined): string {
+  if (typeof p !== 'number' || !Number.isFinite(p) || p < 0 || p > 1) return '';
+  return `, with a probability of ${formatProbability(p)}`;
+}
+
+/**
+ * Margin-fragment helper.
+ *
+ * ⚠ ROADMAP 2.1067 — THIS IS NOW A GATE, NOT A DISPLAY VALUE, AND THE RETURNED
+ * STRING MUST NOT REACH `assistant_text`. Every caller below reads it for
+ * TRUTHINESS only: "is there a finite margin, i.e. may this surface state a
+ * standing at all?". Rendering it is what shipped the retired sentence family
+ * ("It sits ahead of X by N percentage points") from four composers in this
+ * file — the difference between two P(argmax) statistics, which inflates by
+ * construction when any third option collapses and is not a difference in
+ * outcome. This mirrors `coaching/analysis-result-headline.ts` exactly, where
+ * #906 kept `marginPointsText()` as a boolean gate at all three consumer sites
+ * and dropped it from every emitted string.
+ *
+ * It still returns the formatted string rather than a boolean because the
+ * finite/non-finite decision belongs in one place, and a `string | null` that
+ * nothing interpolates cannot be misread as data by accident — a new caller
+ * that DOES interpolate it fails `post-analysis-gap-statistic-producer-control`.
+ */
+function marginPpString(margin: number | null | undefined): string | null {
+  if (typeof margin !== 'number' || !Number.isFinite(margin)) return null;
+  return formatPercentagePoints(margin);
+}
+
+/**
+ * The runner-up STANDING sentence for the two short-register composers
+ * (`advice` and `meaning`), whose voice is one trailing clause rather than the
+ * fuller interpretive sentence `composeRobustnessVerdict` emits.
+ *
+ * ROADMAP 2.1067. Before this existed, `composeAdvice` and `composeMeaning`
+ * carried the same sentence twice, differing only in whether the label was
+ * quoted — so a reword had to be remembered in two places and neither was
+ * covered by a guard. The label arrives ALREADY RENDERED: both call sites
+ * pass `quoteLabel(runnerLabel)`.
+ *
+ * It reports the runner-up's OWN win share. The leading option's share is
+ * stated by both composers' openers one clause earlier, so the pair gives each
+ * option's own number and never their subtraction.
+ */
+function runnerUpStandingSentence(
+  renderedRunnerLabel: string,
+  runnerProbability: number | undefined,
+): string {
+  return `${renderedRunnerLabel} sits in second place${probabilityFragment(runnerProbability)}.`;
+}
+
+/**
+ * Driver sensitivity-direction fragment. Returns the prose phrase only
+ * when sensitivity_value is finite; otherwise empty string so the
+ * surrounding sentence drops the clause cleanly.
+ */
+function driverDirectionFragment(d: AdviceGateAnalysisDriver): string {
+  if (typeof d.sensitivity_value !== 'number' || !Number.isFinite(d.sensitivity_value)) return '';
+  return `, which ${formatSensitivityDirection(d.sensitivity_value)}`;
+}
+
+/**
+ * The single fragile-assumption sentence shared by the post-analysis composers
+ * (`explain_results` / `meaning` / `what_would_flip`). Quotes both endpoint
+ * labels; makes NO causal/sign claim — `fragile_edges` carry no direction, so
+ * this stays direction-honest by construction. The sentence is itself the
+ * "what to check", so `meaning` can name the assumption without a separate
+ * action block. Single source of truth so the three composers never drift.
+ */
+function describeFragileAssumption(edge: AdviceGateAnalysisFragileEdge): string {
+  return `One useful thing to check is the link from ${quoteLabel(edge.from_label)} to ${quoteLabel(edge.to_label)}: whether it holds as strongly as the model currently assumes.`;
+}
+
+/**
+ * Near-tie / closeness standing line shared by the interpretation twins
+ * (`explain_results` / `meaning`) so both read identically. Preserves the
+ * established `explain_results` wording (now with quoted labels): the margin
+ * path states the inclusive sub-1pp phrasing; the raw-override path stays
+ * generic ("treats them as a near-tie") because the margin may be wider than
+ * 1pp. Returns null when the result is not a near-tie or there is no runner-up
+ * to compare, so the caller emits its own clear-lead opener.
+ */
+function interpretationCloseness(
+  leadingLabel: string,
+  runnerLabel: string | null | undefined,
+  tieReason: 'margin' | 'override' | null,
+): string | null {
+  if (tieReason === null) return null;
+  if (typeof runnerLabel !== 'string' || runnerLabel.trim().length === 0) return null;
+  const lead = quoteLabel(leadingLabel);
+  const runner = quoteLabel(runnerLabel);
+  return tieReason === 'margin'
+    ? `The result is effectively tied: ${lead} and ${runner} are separated by one percentage point or less.`
+    : `The result is effectively tied: the analysis treats ${lead} and ${runner} as a near-tie.`;
+}
+
+/**
+ * Concrete "what to check next" Propose line shared across the post-analysis
+ * composers. The fragile path strengthens the named link; otherwise it names
+ * the most influential factor (the projection's top driver) when available,
+ * falling back to a neutral re-run prompt. Never implies that a single change
+ * will flip the result. The two constants are also reused verbatim by
+ * `composeWhatWouldFlip` so the phrasing has one home.
+ */
+const STRENGTHEN_LINK_NEXT_STEP =
+  'Strengthen the evidence behind that link, then re-run to see whether the lead holds.';
+const RERUN_INFLUENTIAL_NEXT_STEP =
+  'Re-run after adjusting the most influential factor to see whether the lead holds.';
+
+function interpretationNextStep(
+  hasNamedFragileEdge: boolean,
+  topDriverLabel: string | null,
+): string {
+  if (hasNamedFragileEdge) return STRENGTHEN_LINK_NEXT_STEP;
+  return topDriverLabel !== null
+    ? `Re-run after revisiting ${quoteLabel(topDriverLabel)}, the factor with the most influence here, to see whether the lead holds.`
+    : RERUN_INFLUENTIAL_NEXT_STEP;
+}
+
+// The "what to validate" sentence (beat 5) now lives in
+// `coaching/validation-priority.ts` (shared with the LLM `explain_results`
+// handler path — V5-LANE-B-STRUCTURAL-01). `describeValidationPriority` is
+// imported above and used verbatim by `composeExplainResults`, so this
+// composer's output is byte-for-byte unchanged by the extraction. See the
+// shared module for the in-flow vs standalone variant distinction.
+
+function composeAdvice(
+  leadingLabel: string,
+  topDriverLabel: string | null,
+  analysis: AdviceGateAnalysis,
+  rawRobustness: RawRobustnessSignals | null | undefined,
+  flipClaimPosture?: FlipClaimPosture | undefined,
+): string {
+  // A3 ruling: GATED, not consciously left. "it could change the result" is the
+  // same claim class as the rest of this family, and leaving one composer
+  // un-gated after a review flagged the family is the partial-sweep error the
+  // family exists to close.
+  const noFlip = flipClaimPosture === 'attested_no_flip';
+  // Readability sectioning: opener + margin form the lead paragraph; the
+  // closing actionable sentence is lifted into a `What to check next`
+  // bullet so the scannable next-step lands on its own line. The phrase
+  // wording inside the bullet is unchanged so existing `.toContain`
+  // pinning continues to match.
+  const probability = probabilityFragment(analysis.leading_option?.probability);
+  // Labels are QUOTED here, as they already are in `composeMeaning`,
+  // `composeExplainResults` and `composeWhatWouldFlip`. This composer was the
+  // odd one out: on the 2026-09-05 founder journey turn 3 (quoted) and turn 10
+  // (bare) narrated the SAME run with the SAME labels, and the bare one was not
+  // a grammatical sentence, because a node label can be a raw span of the
+  // user's brief ("The biggest thing to examine next is we believe is partly
+  // driven by product quality and…"). `quoteLabel` exists for exactly this.
+  const opener = `Based on this model, the analysis currently favours ${quoteLabel(leadingLabel)}${probability}.`;
+  const margin = marginPpString(analysis.margin_pp);
+  const runnerLabel = analysis.runner_up?.label;
+  // ROUND 4: `advice` makes no stability claim, but it DOES compose a margin
+  // sentence, so the margin axis is the shared composer's call here too. On a
+  // near-tie, a standing sentence frames a dead heat as a lead — and it
+  // contradicted the sibling surfaces calling the same run effectively tied.
+  // State the tie instead.
+  // ROADMAP 2.1067: `margin` gates, and no longer renders. The clear arm used
+  // to read " It sits ahead of ${runnerLabel} by ${margin}."; it now names the
+  // runner-up's OWN share, which pairs with the leader's share in `opener`.
+  const verdict = robustnessVerdictFor(analysis, rawRobustness, 'explain');
+  const marginClause =
+    runnerLabel && verdict.margin_category === 'near_tie'
+      ? ` It is effectively tied with ${quoteLabel(runnerLabel)}.`
+      : margin && runnerLabel
+        ? ` ${runnerUpStandingSentence(quoteLabel(runnerLabel), analysis.runner_up?.probability)}`
+        : '';
+  const lead = `${opener}${marginClause}`;
+  const nextStep = topDriverLabel
+    ? noFlip
+      ? `The biggest thing to examine next is ${quoteLabel(topDriverLabel)}, because it carries more of the margin than anything else.`
+      : `The biggest thing to examine next is ${quoteLabel(topDriverLabel)}, because it could change the result.`
+    : "Let me know which factor you'd like to look at next.";
+  return `${lead}\n\nWhat to check next\n• ${nextStep}`;
+}
+
+function composeImprovement(
+  leadingLabel: string,
+  topDriverLabel: string | null,
+  analysis: AdviceGateAnalysis,
+  rawRobustness: RawRobustnessSignals | null | undefined,
+  flipClaimPosture?: FlipClaimPosture | undefined,
+): string {
+  const noFlip = flipClaimPosture === 'attested_no_flip';
+  // Readability sectioning: opener + robustness qualifier form the lead
+  // paragraph; the "most useful thing to examine" sentence is lifted
+  // into a `What to check next` bullet. Phrase wording is unchanged so
+  // existing `.toContain('To improve confidence')` style pinning keeps
+  // matching.
+  const probability = probabilityFragment(analysis.leading_option?.probability);
+  // Quoted, matching every sibling composer — see `composeAdvice`.
+  const opener = `Based on this model, the analysis currently favours ${quoteLabel(leadingLabel)}${probability}.`;
+  // ROUND 4: routed through the shared composer. `improvement` is the one
+  // surface with NO closeness sentence of its own — its opener states the
+  // leader flatly — so on a near-tie this slot is the ONLY place honesty can
+  // land. Before round 4 it landed as "The picture appears fragile", which
+  // over-claimed fragility on a genuinely stable dead heat AND disagreed with
+  // the fallback narrating the same run. It now names the closeness (true on
+  // every near-tie cell) and reserves the fragility word for the stability axis.
+  const verdict = robustnessVerdictFor(analysis, rawRobustness, 'explain');
+  // Plain-language stability sentence — never the raw band token or the
+  // phrase "robustness band". The hedged "may not move the picture much" line
+  // is earned only when the verdict says the lead is not a near-tie AND the
+  // stability axis is stable or moderate.
+  const stabilityPhrase = describeRobustnessBand(analysis.robustness_band);
+  let robustness = '';
+  if (verdict.stability_category === 'fragile') {
+    // ROADMAP 2.278: the fragility CAVEAT is true (the robustness signal really
+    // is weak) but "could shift it" is a flippability claim. On an
+    // attested-no-flip run the instability is in the MARGIN, not the ranking.
+    robustness = noFlip
+      ? ' The picture appears fragile, so the size of the gap is sensitive to small adjustments — though no single factor we tested would change the order on its own.'
+      : ' The picture appears fragile, so even small adjustments could shift it.';
+  } else if (verdict.margin_category === 'near_tie') {
+    robustness =
+      verdict.stability_category === 'stable'
+        ? " The result is effectively tied, and each option's own score is individually stable, so this is a genuine dead heat rather than noise in the estimates."
+        : noFlip
+          ? ' The result is effectively tied, so the order rests on a fine margin — though no single factor we tested would change which option leads on its own.'
+          : ' The result is effectively tied, so smaller adjustments could change which option leads.';
+  } else if (
+    stabilityPhrase !== null
+    && (verdict.stability_category === 'stable' || verdict.stability_category === 'moderate')
+  ) {
+    robustness = ` This result looks ${stabilityPhrase}, so smaller adjustments may not move the picture much.`;
+  }
+  const lead = `${opener}${robustness}`;
+  const nextStep = topDriverLabel
+    ? `To improve confidence here, the most useful thing to examine is ${quoteLabel(topDriverLabel)}, because it has the most influence on the result.`
+    // `improvement` requires a top driver per CLASS_REQUIREMENTS, so this
+    // branch is unreachable in normal flow. Kept as a defensive default.
+    : 'To improve confidence, look at the most influential factor for this decision.';
+  return `${lead}\n\nWhat to check next\n• ${nextStep}`;
+}
+
+function composeMeaning(
+  leadingLabel: string,
+  topDriverLabel: string | null,
+  analysis: AdviceGateAnalysis,
+  rawRobustness: RawRobustnessSignals | null | undefined,
+  flipClaimPosture?: FlipClaimPosture | undefined,
+): string {
+  // A3: the posture was never threaded here, so "The order could shift with
+  // movement on X" shipped un-gated beside the gated fragility caveat.
+  const noFlip = flipClaimPosture === 'attested_no_flip';
+  // Vocabulary aligns with the workstream brief — "currently favours"
+  // opener and "appears to be driven by" attribution avoid the
+  // winner/leader-adjacent framing the previous wording carried.
+  //
+  // Near-tie honesty (shared with explain_results): on a sub-1pp margin OR a
+  // raw near_tie override, lead with the closeness line and DO NOT assert the
+  // result is "driven by" a single factor — a near-tie is not confidently
+  // single-driver. Off near-tie, the interpretive attribution is preserved.
+  //
+  // Grounding: when a specific fragile assumption exists it is named (that
+  // sentence is itself the "what to check"), so `meaning` stays interpretive —
+  // no `What to check next` action block. The closing meta-statement remains
+  // its own paragraph.
+  // ROUND 4: the near-tie verdict comes from the shared composer. `meaning`
+  // composes no stability sentence of its own, so routing it is about the
+  // MARGIN axis: it must not describe as a lead what the other surfaces are
+  // simultaneously calling a tie.
+  const verdict = robustnessVerdictFor(analysis, rawRobustness, 'explain');
+  const tieReason = nearTieWording(verdict, analysis, rawRobustness);
+  const probability = probabilityFragment(analysis.leading_option?.probability);
+  const margin = marginPpString(analysis.margin_pp);
+  const runnerLabel = analysis.runner_up?.label;
+  const topEdge = selectRenderableFragileEdge(analysis);
+  const sentences: string[] = [];
+
+  const closeness = interpretationCloseness(leadingLabel, runnerLabel, tieReason);
+  if (closeness !== null) {
+    sentences.push(closeness);
+    if (topDriverLabel) {
+      sentences.push(
+        noFlip
+          ? `No single factor we tested would change the order on its own, but ${quoteLabel(topDriverLabel)} moves the margin most.`
+          : `The order could shift with movement on ${quoteLabel(topDriverLabel)}.`,
+      );
+    }
+  } else {
+    // ROADMAP 2.1067: `margin` gates, and no longer renders. This read
+    // " It sits ahead of ${quoteLabel(runnerLabel)} by ${margin}."; it now
+    // states the runner-up's OWN share, pairing with the leader's share in the
+    // sentence it is appended to.
+    const marginSentence =
+      margin && runnerLabel
+        ? ` ${runnerUpStandingSentence(quoteLabel(runnerLabel), analysis.runner_up?.probability)}`
+        : '';
+    if (topDriverLabel) {
+      sentences.push(
+        `Based on this model, the analysis currently favours ${quoteLabel(leadingLabel)}${probability}, and the result appears to be driven by ${quoteLabel(topDriverLabel)}.${marginSentence}`,
+      );
+    } else {
+      sentences.push(
+        `Based on this model, the analysis currently favours ${quoteLabel(leadingLabel)}${probability}, given the model you've built so far.${marginSentence}`,
+      );
+    }
+  }
+
+  if (topEdge) {
+    sentences.push(describeFragileAssumption(topEdge));
+  }
+
+  const lead = sentences.join(' ');
+  const closer =
+    topDriverLabel !== null || closeness !== null
+      ? "The result reflects the model you've built so far, not a forecast."
+      : 'The result reflects your current setup, not a forecast.';
+  return `${lead}\n\n${closer}`;
+}
+
+function composeReadiness(
+  analysisReady: AnalysisReadyPayload | undefined,
+): string {
+  // Guarded by data-availability check; readiness payload is present
+  // here.
+  const summary: ReadinessSummary = summariseReadiness(analysisReady!);
+  if (summary.prose.length > 0) return summary.prose;
+  // Defensive: structural readiness reported nothing open. Surface a
+  // neutral, non-prescriptive line — the readiness percentage shown in
+  // DGAI may come from a different scorer, so we don't claim "all set".
+  return "Looking at the model structure here, the core pieces are in place. If the readiness score you're seeing is still low, it's likely picking up something outside the structural checks — let me know which factor you'd like to dig into.";
+}
+
+function composeEvidenceGap(
+  analysis: AdviceGateAnalysis,
+  analysisReady: AnalysisReadyPayload | undefined,
+  factorEvppiGuidance: FactorEvppiPriorityGuidanceDecision | null | undefined,
+): string {
+  // Canonical readiness is the positive permission for science priority. When
+  // the current graph is known non-ready, return ONLY its canonical recovery —
+  // do not mix an old analysis priority, fragile-edge narrative, or top-driver
+  // advice into the blocker response. Unknown readiness merely suppresses the
+  // EVPPI branch and leaves the existing non-science projection fallback intact.
+  if (
+    analysisReady?.status !== undefined
+    && analysisReady.status !== 'ready'
+  ) {
+    return composeReadiness(analysisReady);
+  }
+
+  // V5 science-to-reasoning: factor_evppi order/status selects the exact
+  // factor. A same-factor Decision Review action may enrich the result, but a
+  // deterministic label-grounded action keeps this producer→reasoning chain
+  // live when that enrichment is disabled, absent, or soft-failed.
+  const fromEvppi = analysisReady?.status === 'ready'
+    ? composeFactorEvppiValidationGuidance(factorEvppiGuidance)
+    : null;
+  if (fromEvppi != null) return fromEvppi;
+
+  const gaps: string[] = [];
+  if (analysisReady && hasSufficientReadinessData(analysisReady)) {
+    const summary = summariseReadiness(analysisReady);
+    for (const item of summary.open_items) {
+      gaps.push(item.description);
+    }
+  }
+  // Iterate over the renderability-filtered view so blank-labelled
+  // edges can't leak into the gap list. Bare `fragile_edges.slice(0, 2)`
+  // would emit `the link from "" to "B" is fragile...` if `[0]` had a
+  // missing label and the gate had passed via another signal.
+  const filteredEdges = renderableFragileEdges(analysis);
+  if (filteredEdges.length > 0) {
+    for (const edge of filteredEdges.slice(0, 2)) {
+      gaps.push(
+        `the link from ${quoteLabel(edge.from_label)} to ${quoteLabel(edge.to_label)} is fragile, so the analysis is sensitive to its true strength`,
+      );
+    }
+  }
+  // Influence is not the value of obtaining more evidence. Preserve the
+  // useful, material sensitivity labels without inventing a research ranking
+  // when neither scoped EVPPI guidance nor an actual gap is available.
+  const evidenceDrivers = nameableTopDrivers(analysis);
+  if (gaps.length === 0 && hasNonEmptyLabel(evidenceDrivers[0]?.factor_label)) {
+    const top = evidenceDrivers[0]!.factor_label.trim();
+    const labels = [top];
+    if (hasNonEmptyLabel(evidenceDrivers[1]?.factor_label)) {
+      const second = evidenceDrivers[1]!.factor_label.trim();
+      if (second.toLowerCase() !== top.toLowerCase()) {
+        labels.push(second);
+      }
+    }
+    return `The analysis is sensitive to ${labels.join(' and ')}. ` +
+      'Sensitivity alone does not establish where research would be most valuable. ' +
+      'We can examine the evidence behind these assumptions alongside the practical cost of checking them.';
+  }
+  if (gaps.length === 0) {
+    return "Looking at the analysis, there aren't obvious structural gaps right now. If you have a specific factor you're uncertain about, let me know and we can look at it together.";
+  }
+  if (gaps.length === 1) {
+    return `The biggest open gap right now is: ${gaps[0]}.`;
+  }
+  const bullets = gaps.map((g) => `• ${g}`).join('\n');
+  return `The biggest open gaps right now are:\n${bullets}`;
+}
+
+/**
+ * V5 coaching — compose validation/research guidance for the exact
+ * producer-ranked EVPPI factor. Decision Review may supply the action for that
+ * identity; otherwise deterministic label-grounded copy keeps the capability
+ * reachable without inventing a value or exposing an EVPPI magnitude.
+ *
+ * Copy-safety:
+ *   - opener: "The first evidence priority from this analysis is:" — the
+ *     priority is licensed by producer order/status, not LLM object order;
+ *     no `recommend*` / no `winner*` / no
+ *     sentence-leading instructional `Set/Updated/...` verbs (would trip
+ *     the false-success guard per feedback_success_claim_regex_instructional_set).
+ *   - an optional per-item action is the exact selected-factor
+ *     `specific_action`; otherwise the fallback asks for evidence/data/expert
+ *     judgement about the named factor's current estimate or range.
+ *   - assumptions and non-selected enhancements are never ranking fallbacks.
+ *
+ * Defensive shape parsing happened in the shared selector before this
+ * projection: malformed identity, label, or action carriers return a typed
+ * refusal and never leak raw payloads.
+ */
+function composeFactorEvppiValidationGuidance(
+  guidance: FactorEvppiPriorityGuidanceDecision | null | undefined,
+): string | null {
+  if (guidance?.outcome !== 'selected') return null;
+  if (guidance.specificAction !== null) {
+    return `The first evidence priority from this analysis is ${quoteLabel(guidance.factorLabel)}:\n• ${guidance.specificAction}`;
+  }
+  return `The first evidence priority from this analysis is ${quoteLabel(guidance.factorLabel)}. Review the evidence behind its current estimate or range, then gather relevant data or expert judgement to narrow that uncertainty.`;
+}
+
+function readRecord(value: unknown): Record<string, unknown> | null {
+  if (value == null) return null;
+  if (typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function composeExplainResults(
+  leadingLabel: string,
+  analysis: AdviceGateAnalysis,
+  rawRobustness: RawRobustnessSignals | null | undefined,
+  flipClaimPosture?: FlipClaimPosture | undefined,
+): string {
+  const noFlip = flipClaimPosture === 'attested_no_flip';
+  // Driver presence is guaranteed by CLASS_REQUIREMENTS; runner-up, margin,
+  // robustness, per-driver sensitivity and fragile edges are optional and
+  // degrade gracefully. Numerics are pass-through only — F.6 invariant.
+  //
+  // GQPV shape (parity with composeWhatWouldFlip): Ground (standing + drivers +
+  // the specific fragile assumption when present) → Quantify (probability,
+  // margin, robustness band — display-ready) → one robustness caveat → a
+  // concrete re-run Propose on EVERY path. Option/driver labels are quoted so
+  // "and"-containing labels stay readable.
+  //
+  // Near-tie honesty (shared interpretationCloseness): on |margin_pp| <= 1.0 OR
+  // a raw near_tie override, suppress the "meaningful rather than marginal"
+  // assertion and the confident stability claim. The margin path states the
+  // inclusive sub-1pp phrasing; the override path stays generic ("treats them
+  // as a near-tie") so we never claim a sub-1pp gap we cannot back.
+  // ROUND 4: the verdict comes from the shared composer, never from a local
+  // re-derivation. `tieReason` below only selects which near-tie SENTENCE to
+  // use once the verdict has already ruled that this is a near-tie.
+  const verdict = robustnessVerdictFor(analysis, rawRobustness, 'explain');
+  const tieReason = nearTieWording(verdict, analysis, rawRobustness);
+  const nearTie = verdict.margin_category === 'near_tie';
+  // DGAI #341: "driven by …" / "could shift with movement on …" / "the
+  // most-weighted factor" may only name materially-influential drivers.
+  const interpretationDrivers = nameableTopDrivers(analysis);
+  const driverA = interpretationDrivers[0];
+  const driverB = interpretationDrivers[1];
+  const runnerLabel = analysis.runner_up?.label;
+  // ROADMAP 2.1067: no local `margin` binding. The standing sentence is the
+  // shared verdict's `margin_clause`, which gates on the SAME finite-margin
+  // decision internally — a second local read of the margin here is how this
+  // composer came to render it.
+  const topEdge = selectRenderableFragileEdge(analysis);
+  const topDriverLabel = hasNonEmptyLabel(driverA?.factor_label)
+    ? driverA.factor_label
+    : null;
+  const sentences: string[] = [];
+
+  // 1/2. Standing — leader and confidence (shared near-tie honesty, quoted; else a quoted clear lead).
+  const closeness = interpretationCloseness(leadingLabel, runnerLabel, tieReason);
+  if (closeness !== null) {
+    sentences.push(closeness);
+  } else {
+    sentences.push(
+      `Based on this model, the analysis currently favours ${quoteLabel(leadingLabel)}${probabilityFragment(analysis.leading_option?.probability)}.`,
+    );
+    // ROADMAP 2.1067 — ONE OWNER FOR THIS SENTENCE. These two arms were
+    // copy-identical twins of `composeRobustnessVerdict`'s `explain` clear and
+    // indeterminate arms, and the duplication is exactly why one of them still
+    // rendered the retired gap magnitude ("That sits ahead of X by N percentage
+    // points") after #906 had retired it from the headline: a reword had two
+    // homes and the guard covered neither. The near-tie arm is NOT routed here —
+    // `interpretationCloseness` above owns this surface's tie wording, and the
+    // shared verdict has already ruled that this is not a near-tie.
+    if (verdict.margin_clause !== null) {
+      sentences.push(verdict.margin_clause);
+    }
+  }
+
+  // 3. Why it leads — drivers (quoted). Near-tie softens "driven by" to "could shift".
+  // ROADMAP 2.278 amendment A3 — this beat is the FOURTH unconsulted surface,
+  // and it is in the same function as the fragility caveat above: shipped
+  // together, un-gated, one answer said "no single factor would change which
+  // option leads" and the next sentence said "the order could shift with
+  // movement on X". `noFlip` was already bound here and simply not used.
+  if (driverA && driverB) {
+    sentences.push(
+      nearTie
+        ? noFlip
+          ? `No single factor we tested would change the order on its own, but ${quoteLabel(driverA.factor_label)}${driverDirectionFragment(driverA)} and ${quoteLabel(driverB.factor_label)}${driverDirectionFragment(driverB)} move the margin most.`
+          : `The order could shift with movement on ${quoteLabel(driverA.factor_label)}${driverDirectionFragment(driverA)}, or on ${quoteLabel(driverB.factor_label)}${driverDirectionFragment(driverB)}.`
+        : `The result appears to be driven by ${quoteLabel(driverA.factor_label)}${driverDirectionFragment(driverA)}, and ${quoteLabel(driverB.factor_label)}${driverDirectionFragment(driverB)}.`,
+    );
+  } else if (driverA) {
+    sentences.push(
+      nearTie
+        ? noFlip
+          ? `No single factor we tested would change the order on its own, but ${quoteLabel(driverA.factor_label)}${driverDirectionFragment(driverA)} moves the margin most.`
+          : `The order could shift with movement on ${quoteLabel(driverA.factor_label)}${driverDirectionFragment(driverA)}.`
+        : `The result appears to be driven by ${quoteLabel(driverA.factor_label)}${driverDirectionFragment(driverA)}.`,
+    );
+  }
+
+  // 4. What is fragile — name the specific fragile assumption when evidence
+  //    exists (shared with what_would_flip / meaning). No sign/causal claim —
+  //    direction-honest.
+  if (topEdge) {
+    sentences.push(describeFragileAssumption(topEdge));
+  }
+
+  // 5. What to validate: the single piece of evidence that would most improve
+  //    confidence. Points at the named fragile link when one exists, else the
+  //    most-weighted factor; omitted when neither is renderable (mirrors the
+  //    next-step fallback ladder, so no new required input is introduced).
+  const validation = describeValidationPriority(topEdge != null, topDriverLabel);
+  if (validation !== null) {
+    sentences.push(validation);
+  }
+
+  // Robustness caveat — a conditional aside between beats 5 and 6 (not one of
+  //    the numbered rhetorical beats). ROUND 4: every branch is selected by the
+  //    SHARED verdict's two categories. The ladder is ordered stability-first
+  //    precisely so fragility can never be inferred from the margin:
+  //
+  //      fragile band/raw   → the fragility warning (the most specific claim)
+  //      near-tie + stable  → the honest dual-axis reading: the GAP is inside
+  //                           noise, yet each option's OWN score is steady.
+  //                           Before round 4 this cell said "appears fragile",
+  //                           contradicting the fallback on the same analysis.
+  //      near-tie + other   → no stability sentence; the closeness line above
+  //                           already carries the caveat, and neither a
+  //                           fragility claim nor a reassurance is earned.
+  //      clear/indeterminate→ the band's own reassurance, honest only because
+  //                           the lead is NOT a near-tie.
+  if (verdict.stability_category === 'fragile') {
+    // ROADMAP 2.278 — see the sibling branch in composeImprovement. Same rule,
+    // same evidence, different voice.
+    sentences.push(
+      noFlip
+        ? 'The picture appears fragile, so the size of the gap is sensitive to the strongest factor — though no single factor we tested would change which option leads on its own.'
+        : 'The picture appears fragile, so even small adjustments to the strongest factor could change which option leads.',
+    );
+  } else if (nearTie) {
+    if (verdict.stability_category === 'stable') {
+      sentences.push(
+        "Each option's own score is individually stable, so this is a genuine dead heat rather than noise in the estimates.",
+      );
+    }
+  } else {
+    // Plain-language stability copy sourced from the SSOT describeRobustnessBand;
+    // WHICH line fires is the shared verdict's call, not a local band read.
+    const stabilityPhrase = describeRobustnessBand(analysis.robustness_band);
+    if (stabilityPhrase !== null) {
+      if (verdict.stability_category === 'stable') {
+        sentences.push(
+          `This result looks ${stabilityPhrase}, so this view should hold under reasonable variation.`,
+        );
+      } else if (verdict.stability_category === 'moderate') {
+        sentences.push(
+          `This result looks ${stabilityPhrase}, but it is worth checking the main assumptions before deciding.`,
+        );
+      }
+    }
+  }
+
+  // 6. Next action — a concrete re-run Propose on EVERY path; previously the
+  //    near-tie / fragile path emitted no next step at all. Point the next step at whatever
+  //    the body emphasised: when a fragile link was NAMED above
+  //    (describeFragileAssumption fires on any path with a renderable edge),
+  //    strengthen THAT link so priorities don't read split ("check the link …
+  //    but revisit the driver"); otherwise revisit the most influential factor.
+  //    Never implies a single change flips the result.
+  const lead = sentences.join(' ');
+  const nextStep = interpretationNextStep(topEdge != null, topDriverLabel);
+  return `${lead}\n\nWhat to check next\n• ${nextStep}`;
+}
+
+/**
+ * Reliable flip signal for the what-would-flip composer.
+ *
+ * `'flip_found'` is the ONLY reliable verdict we can read: a non-empty
+ * `decision_review.flip_thresholds` means the review surfaced at least one
+ * single-factor threshold. We never infer "no flip exists" from an empty /
+ * absent array — empty conflates "no flip in range" with "flip not computed"
+ * (`factor_sensitivity[].flip_threshold` is number-or-absent; the prompt emits
+ * `[]` for both cases). So everything else collapses to `'unknown'` and the
+ * composer stays honest-by-default (no flip claim either way).
+ *
+ * A factor is only named when its label is a clean DISPLAY label
+ * ({@link isCleanFactorLabel}) — the raw `factor_label` on the review payload
+ * is not guaranteed canonical, so an ID-shaped / blank label downgrades to
+ * `'unknown'` (omit the sentence) rather than risk leaking a token.
+ */
+type FlipStatus =
+  | { readonly kind: 'flip_found'; readonly factor_label: string }
+  | { readonly kind: 'unknown' };
+
+function isCleanFactorLabel(label: unknown): label is string {
+  if (typeof label !== 'string') return false;
+  const trimmed = label.trim();
+  if (trimmed.length === 0) return false;
+  if (!/[a-z]/i.test(trimmed)) return false; // must carry an actual word
+  if (isSlugShapedEntityId(trimmed)) return false; // reject ID-shaped tokens
+  return true;
+}
+
+function deriveFlipStatus(
+  decisionReview: Record<string, unknown> | undefined,
+): FlipStatus {
+  if (decisionReview == null) return { kind: 'unknown' };
+  const thresholds = decisionReview['flip_thresholds'];
+  if (!Array.isArray(thresholds) || thresholds.length === 0) {
+    return { kind: 'unknown' };
+  }
+  for (const raw of thresholds) {
+    const entry = readRecord(raw);
+    if (entry === null) continue;
+    const label = entry['factor_label'];
+    if (isCleanFactorLabel(label)) {
+      return { kind: 'flip_found', factor_label: label.trim() };
+    }
+  }
+  // Non-empty but no clean/safe label to name → omit the flip sentence.
+  return { kind: 'unknown' };
+}
+
+function composeWhatWouldFlip(
+  leadingLabel: string,
+  analysis: AdviceGateAnalysis,
+  rawRobustness: RawRobustnessSignals | null | undefined,
+  decisionReview: Record<string, unknown> | undefined,
+  flipClaimPosture?: FlipClaimPosture | undefined,
+): string {
+  // ROADMAP 2.278 continued (14 Aug 2026) — THE FIFTH, UNSWEPT SURFACE.
+  //
+  // 2.278 swept four composers (`advice`, `improvement`, `meaning`,
+  // `explain_results`) and its own suite enumerates exactly those four. It
+  // never reached THIS one — the composer whose entire job is to answer "what
+  // would change this result?" — because the sweep was aimed at surfaces that
+  // ASSERT flippability, and this composer's defect is the mirror image: it
+  // asserts nothing and OMITS the producer's attestation entirely.
+  //
+  // Witnessed on the deployed build (14 Aug, CEE 41156fc). Asked "What would
+  // have to change for another option to win?" on a run whose three
+  // `flip_thresholds` rows were ALL `flip_reason: "structurally_invariant"` /
+  // `no_flip_in_range: true`, THIS composer recited the lead and a link to
+  // check and said NOTHING about flip behaviour —
+  // `p1-conversation-derivation-2026-08-14/raw/run-1/step-Q2_WHAT_WOULD_CHANGE.json`
+  // (0 LLM calls; the advice gate owns the turn).
+  //
+  // THREE PATHS CAN ANSWER A FREE-TEXT FLIP QUESTION, AND ONLY THIS ONE WAS
+  // SILENT. Each citation names the capture it comes from, because an earlier
+  // draft of this comment attributed the second one to a CHIP CLICK and no such
+  // turn exists in any capture cited here (caught in review of #947; CLAUDE.md
+  // trap 16 — a capture proves what it was pointed at):
+  //   1. this composer, via `tryPostAnalysisAdviceGate` — silent (above);
+  //   2. the routed `what_would_flip` HANDLER, whose
+  //      `composeWhatWouldFlipFallback` states the attestation — witnessed on a
+  //      FREE-TEXT turn (`source: 'composer'`, `chip: null`) at
+  //      `deploy-witness-946-944-20260814T015916Z/step2-golden-journey/step-E7_FLIP_QUESTION.json`,
+  //      same deployed build, 01:59Z the same day;
+  //   3. a Sonnet-authored `answer_text`, which states it in its own words
+  //      ("Nothing in the tested range currently overturns this") —
+  //      `…/raw/run-1/step-Q3_OVERTURN.json`.
+  // Which path takes a turn is decided by whether the advice gate's narrow
+  // pattern matches, so the SILENT path is also the fastest and the one that
+  // fires on the tightest phrasings of the question.
+  const noFlip = flipClaimPosture === 'attested_no_flip';
+  // Top driver presence is guaranteed by CLASS_REQUIREMENTS; runner-up,
+  // margin, robustness and fragile edges are optional and degrade
+  // gracefully. Numerics pass-through only — F.6 invariant.
+  //
+  // Copy shape: (1) closeness/standing → (2) the specific fragile assumption
+  // worth checking → (3) an optional, provenance-safe flip-threshold pointer →
+  // (4) exactly ONE consolidated caveat → (5) a re-run nudge that never
+  // implies a single change flips the result.
+  // ROUND 4: routed through the shared composer in its `flip` voice — the same
+  // voice `composeWhatWouldFlipFallback` uses, so the chip-click fallback and
+  // the free-text answer to "what would flip this?" cannot disagree about
+  // either axis. `fragileSignal` still merges the two axes because this
+  // surface's single consolidated caveat covers "the lead is not safe" for
+  // BOTH reasons — but each axis is now the shared verdict's call, and the
+  // word "fragile" is never spoken off the margin axis.
+  const verdict = robustnessVerdictFor(analysis, rawRobustness, 'flip');
+  const tieReason = nearTieWording(verdict, analysis, rawRobustness);
+  const nearTie = verdict.margin_category === 'near_tie';
+  const fragileSignal = nearTie || verdict.stability_category === 'fragile';
+  const runnerLabel = analysis.runner_up?.label;
+  // ROADMAP 2.1067: no local `margin` binding — see the twin note in
+  // `composeExplainResults`. `closenessLead` below still receives the raw
+  // `analysis.margin_pp` because the near-tie wording is a DIFFERENT,
+  // separately-adjudicated surface (`robustness-honesty.ts`), untouched here.
+  // ⭐ THE SUBJECT OF BEAT 2, AND OF THE TURN'S GESTURE, FROM ONE SELECTION.
+  // `selectFlipFocus` holds the fragile-edge-then-top-driver precedence that
+  // used to live inline here; `deriveFlipFocusSection` reads the SAME call to
+  // choose which Model-tab section to open. Behaviour below is unchanged —
+  // `topEdge` is truthy on exactly the inputs the shared renderable-edge pick was
+  // — but the sentence and the gesture can no longer disagree about what the
+  // answer is about, because neither owns the choice (CLAUDE.md trap 21).
+  // DGAI #341: "the factor with the most influence on the result" may only
+  // name a materially-influential driver — `nameableTopDrivers` enforces that
+  // inside the shared selection.
+  const focus = selectFlipFocus(analysis);
+  const topEdge = focus?.kind === 'fragile_edge' ? focus.edge : undefined;
+  const driverA = focus?.kind === 'top_driver' ? focus.driver : undefined;
+  const flip = deriveFlipStatus(decisionReview);
+  const sentences: string[] = [];
+
+  // 1. Closeness / standing — lead with closeness on a near-tie, otherwise a
+  //    quoted clear-lead opener. Option labels are quoted so "and"-containing
+  //    labels stay readable.
+  const closeness = closenessLead({
+    leadingLabel,
+    runnerLabel,
+    tieReason,
+    marginPp: analysis.margin_pp,
+  });
+  if (closeness !== null) {
+    sentences.push(closeness);
+  } else {
+    sentences.push(
+      `Based on this model, ${quoteLabel(leadingLabel)} currently leads${probabilityFragment(analysis.leading_option?.probability)}.`,
+    );
+    // ROADMAP 2.1067 — ONE OWNER FOR THIS SENTENCE, the `flip` voice of
+    // `composeRobustnessVerdict`. These two arms were copy-identical twins of
+    // that composer's clear and indeterminate arms; the clear one still read
+    // "the lead of N percentage points would need to close", quantifying a gap
+    // between two win frequencies as if closing it were a distance. The
+    // near-tie arm is NOT routed here — `closenessLead` above owns this
+    // surface's tie wording.
+    if (verdict.margin_clause !== null) {
+      sentences.push(verdict.margin_clause);
+    }
+  }
+
+  // 2. Name the specific fragile assumption when evidence exists. No
+  //    direction/sign claim — `fragile_edges` carries none, so this stays
+  //    direction-honest by construction. Falls back to the single most
+  //    influential factor (top driver is guaranteed by CLASS_REQUIREMENTS)
+  //    with NO flip claim when no fragile edge is available.
+  if (topEdge) {
+    sentences.push(describeFragileAssumption(topEdge));
+  } else if (driverA) {
+    sentences.push(
+      `The factor with the most influence on the result is ${quoteLabel(driverA.factor_label)}.`,
+    );
+  }
+
+  // 3. Optional, provenance-safe flip-threshold pointer — only when the review
+  //    surfaced a named single-factor threshold with a clean label. We never
+  //    assert the result WILL change; we point at a signal to inspect.
+  if (flip.kind === 'flip_found') {
+    sentences.push(
+      `One threshold signal to inspect is ${quoteLabel(flip.factor_label)}.`,
+    );
+  } else if (noFlip) {
+    // ⭐ THE MISSING NEGATIVE ARM. The producer positively attested that no
+    // single factor reaches a tipping point in range; on the flip question that
+    // attestation IS the answer, so it is stated rather than omitted.
+    //
+    // The sentence is IMPORTED from `composeWhatWouldFlipFallback`'s owner, not
+    // restated, so the ADVICE-GATE and ROUTED-HANDLER answers to this one
+    // question cannot drift apart (this composer's header declares that
+    // invariant, though it calls the handler path "chip-click" — the composer is
+    // in fact reached on free text too, which is how it is witnessed above;
+    // trap 12 is why the constant moved rather than being copied).
+    //
+    // ⚠ STRICTLY `else if` — `flip_found` KEEPS PRECEDENCE, DELIBERATELY.
+    // The two inputs are different channels answering different questions
+    // (CLAUDE.md trap 21): `deriveFlipStatus` reads
+    // `decision_review.flip_thresholds`, while `flipClaimPosture` is derived
+    // from `enrichment.flip_thresholds[]` by `readFlipClaimPosture`. Where they
+    // disagree, the fail-safe reading is the one that does NOT deny
+    // flippability while naming a threshold to inspect — the exact
+    // self-contradicting answer 2.278's A3 arm exists to forbid. So a named
+    // threshold silences this arm; it never appears alongside one.
+    sentences.push(ATTESTED_NO_FLIP_SENTENCE);
+  }
+
+  // 4. Exactly one consolidated caveat. The if/else-if makes stacking
+  //    structurally impossible: a fragile/near-tie result gets the single
+  //    "provisional" caveat; an otherwise-stable result gets the stability
+  //    reassurance; moderate / unknown bands get nothing.
+  if (fragileSignal) {
+    sentences.push(
+      topEdge
+        ? 'Treat the lead as provisional until that assumption is strengthened.'
+        : 'Treat the lead as provisional until the key assumptions are checked.',
+    );
+  } else {
+    const stabilityPhrase = describeRobustnessBand(analysis.robustness_band);
+    if (stabilityPhrase !== null && verdict.stability_category === 'stable') {
+      sentences.push(
+        `This result looks ${stabilityPhrase}, so smaller changes are unlikely to change which option leads.`,
+      );
+    }
+  }
+
+  // 5. Re-run nudge — reframed so it never implies a single change flips the
+  //    result. Points at strengthening the named link when fragile, otherwise
+  //    a neutral re-run prompt.
+  const lead = sentences.join(' ');
+  const nextStep =
+    fragileSignal && topEdge ? STRENGTHEN_LINK_NEXT_STEP : RERUN_INFLUENTIAL_NEXT_STEP;
+  return `${lead}\n\nWhat to check next\n• ${nextStep}`;
+}

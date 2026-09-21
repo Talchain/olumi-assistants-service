@@ -1,0 +1,175 @@
+/**
+ * Stage 4: Repair — Orchestrator for repair substeps
+ *
+ * Calls each substep sequentially. Each substep is an individually
+ * exported function in its own file for testability.
+ *
+ * ORDERING INVARIANT — do not reorder substeps (except 1/1b swap below)
+ *
+ * 0.9 Auto-baseline dedup        — drops auto-injected status-quo/baseline options that
+ *                                  duplicate an explicit option's intervention signature.
+ *                                  No-op when no such collision exists; safe-conservative
+ *                                  rule (only fires when a non-baseline survives).
+ * 1.  Deterministic sweep        — resolves mechanical violations, unreachable factors, status quo
+ * 1.5 Options-identical bypass   — fail-fast gate for OPTIONS_IDENTICAL: emits a
+ *                                  clarification-shaped CEE_GRAPH_INVALID so the user is not
+ *                                  blocked behind a slow failure. Other Bucket C codes proceed
+ *                                  down the deterministic path (substep 2) and, if unfixable,
+ *                                  fail closed at the post-enforcement gate (9b).
+ * 1b. Orchestrator validation    — optional LLM-backed validation (gated), runs AFTER sweep
+ * 2.  PLoT validation            — external validation + deterministic normalisation.
+ *                                  (The gpt-4.1 LLM repair that used to run here for surviving
+ *                                  Bucket C was REMOVED — ROADMAP 2.731, 0/12 successes in the
+ *                                  7-day efficacy window at ~44.7s per failed turn.)
+ * 3. Edge ID stabilisation    — deterministic IDs BEFORE goal merge
+ * 4. Goal merge               — enforceSingleGoal, captures nodeRenames
+ * 5. Compound goals           — generates constraint nodes/edges
+ * 6. Late STRP                — Rules 3,5 with goalConstraints context
+ * 7. Edge field restoration   — restores V4 fields using stash + nodeRenames
+ * 8. Connectivity             — wires orphans to goal, ensures goal exists
+ * 9b. Deterministic enforcement — budget rescale + bridge chain repair (gated)
+ * 10. Structural parse        — DraftGraphOutput.parse safety net
+ *
+ * (Substep 9, the multi-turn clarifier, was RETIRED 2026-07-16 — ROADMAP 1.94
+ * Option A. It was verified triple-dead: its convergence gate suppressed
+ * question generation on 100% of firings, the V5 draft tool discarded its
+ * output, and the answer loop was unreachable. The 9b/10 labels are kept so
+ * historical traces and docs still line up.)
+ *
+ * Key dependencies:
+ * - 3 BEFORE 4: stable IDs before goal merge changes from/to
+ * - 4 BEFORE 7: nodeRenames from goal merge needed for stash restoration
+ * - 6 BEFORE 7: late STRP may modify edges that restoration must preserve
+ * - 7 AFTER all topology changes: restoration is the last edge mutation
+ * - 9b BEFORE 10: structural parse validates final graph state
+ *
+ * ⚠⚠ 5 → 6 IS STRONGER THAN AN ORDERING CONSTRAINT, AND IT IS USER-FACING.
+ * "Do not reorder" understates it. `runCompoundGoals` (5) and `runLateStrp` (6)
+ * must stay ADJACENT, and two further things must remain true:
+ *     (a) NOTHING MAY RUN BETWEEN THEM that changes the graph's node set, and
+ *     (b) NOTHING UPSTREAM MAY SEED `ctx.goalConstraints`.
+ * Substep 5 filters every constraint row to an EXACT existing node id (a
+ * hallucinated id is dropped there and logged `cee.compound_goal.llm_dropped`,
+ * never surfaced). Substep 6's Rule 3 then resolves those rows by exact match.
+ * Because nothing runs between them, the node set cannot move underneath the
+ * rows, so the match always hits and `dropped` stays 0.
+ *
+ * Weaken (a) or (b) and Rule 3 starts emitting `CONSTRAINT_DROPPED`, which
+ * `extractConstraintDropBlockers` (`cee/transforms/analysis-ready.ts`) turns
+ * into the ONLY ADVISORY member of `AnalysisBlockerType`. That blocker is
+ * injected onto an ALREADY-`ready` payload WITHOUT recomputing status
+ * (`stages/boundary.ts`) and reaches the wire unfiltered, where consumers gate
+ * on it. So this is a PRODUCT-VISIBLE constraint, not an internal tidiness one.
+ *
+ * ⭐ THE ALARM, so you find out where you broke it:
+ *    `__tests__/strp-constraint-resolution-adjacency.invariant.test.ts`
+ *    asserts all three — I1 adjacency, I2 no node-set change across the 5→6
+ *    boundary (insertion-proof), I3 `goalConstraints` unseeded on entry to 5.
+ *
+ * EARLY RETURN RULES:
+ * Substeps 1b, 9b, and 10 can set ctx.earlyReturn.
+ * Substep 2 normalises via simpleRepair (never early-returns).
+ * Substep 8 writes validationSummary (never early-returns).
+ * Substeps 1 and 3-7 are deterministic transforms that must not fail.
+ * The earlyReturn guards after substeps 1b and 2 are defensive only.
+ * 9b sets earlyReturn (422 CEE_GRAPH_INVALID) when post-enforcement validation
+ * finds blocking topology errors (severity="error") that survived all repair stages.
+ */
+
+import type { StageContext } from "../../types.js";
+import { log } from "../../../../utils/telemetry.js";
+
+import { runOrchestratorValidation } from "./orchestrator-validation.js";
+import { runAutoBaselineDedup } from "./auto-baseline-dedup.js";
+import { runDeterministicSweep } from "./deterministic-sweep.js";
+import { runOptionsIdenticalBypass } from "./options-identical-bypass.js";
+import { runPlotValidation } from "./plot-validation.js";
+import { runEdgeStabilisation } from "./edge-stabilisation.js";
+import { runGoalMerge } from "./goal-merge.js";
+import { runCompoundGoals } from "./compound-goals.js";
+import { runLateStrp } from "./late-strp.js";
+import { runEdgeRestoration } from "./edge-restoration.js";
+import { runConnectivity } from "./connectivity.js";
+import { runStructuralParse } from "./structural-parse.js";
+import { applyDeterministicEnforcement } from "./graph-enforcement.js";
+
+/**
+ * Stage 4: Run all repair substeps in order.
+ * Each substep modifies ctx.graph and/or sets ctx.earlyReturn.
+ */
+export async function runStageRepair(ctx: StageContext): Promise<void> {
+  if (!ctx.graph) return;
+
+  log.info({ requestId: ctx.requestId, stage: "repair" }, "Unified pipeline: Stage 4 (Repair) started");
+
+  // Substep 0.9: Auto-baseline dedup — drops options carrying an
+  // EXPLICIT `is_baseline === true` flag that duplicate another
+  // (non-explicit) option's intervention signature, BEFORE the
+  // deterministic sweep's OPTIONS_IDENTICAL check.
+  //
+  // Fires only when a duplicate-signature group contains BOTH an
+  // explicit-baseline option AND a non-explicit option (the
+  // load-bearing case from staging pricing-brief failures). Heuristic-
+  // only matches (label like "Status Quo", id ending `_status_quo`,
+  // etc.) emit a diagnostic-only telemetry event and FALL THROUGH to
+  // the PR #202 OPTIONS_IDENTICAL bypass — never silently delete a
+  // user-supplied option. Verified-passing fixtures (hiring brief)
+  // are unaffected because their baselines have distinct interventions
+  // and the validator never raises a collision in the first place.
+  // See auto-baseline-dedup.ts for the full safety contract.
+  runAutoBaselineDedup(ctx);
+
+  // Substep 1: Deterministic sweep — resolves mechanical violations,
+  // unreachable factors, status quo. Runs after 0.9 so mechanical
+  // fixes (NaN, sign, status quo wiring) are applied before
+  // orchestrator validation can 422 on issues the sweep can resolve.
+  // Sees the dedup'd graph from 0.9 — never raises OPTIONS_IDENTICAL
+  // for the explicit-baseline-duplicates-non-explicit case.
+  await runDeterministicSweep(ctx);
+
+  // Substep 1.5: Fail-fast gate for OPTIONS_IDENTICAL. Emits a fail-fast
+  // CEE_GRAPH_INVALID with a clarification-shaped recovery payload instead
+  // of letting the draft limp on to a later, less actionable failure.
+  // (Historically this gate existed to skip the ~30s `repair_graph` LLM
+  // call, which 2.731 has since removed for ALL Bucket C codes.)
+  // See options-identical-bypass.ts.
+  if (runOptionsIdenticalBypass(ctx)) {
+    return;
+  }
+
+  // Substep 1b: Orchestrator validation (gated by config.cee.orchestratorValidationEnabled)
+  await runOrchestratorValidation(ctx);
+  if (ctx.earlyReturn) return;
+
+  // Substep 2: PLoT validation + deterministic normalisation
+  // (LLM repair removed — ROADMAP 2.731)
+  await runPlotValidation(ctx);
+  if (ctx.earlyReturn) return;
+
+  // Substep 3: Edge ID stabilisation
+  runEdgeStabilisation(ctx);
+
+  // Substep 4: Goal merge (ONCE)
+  runGoalMerge(ctx);
+
+  // Substep 5: Compound goals
+  runCompoundGoals(ctx);
+
+  // Substep 6: Late STRP
+  runLateStrp(ctx);
+
+  // Substep 7: Edge field restoration (RISK-06 fix)
+  runEdgeRestoration(ctx);
+
+  // Substep 8: Connectivity + goal repair
+  runConnectivity(ctx);
+
+  // Substep 9b: Deterministic enforcement (budget rescale + bridge chain repair)
+  // Sets ctx.earlyReturn (422) if post-enforcement validation finds blocking
+  // topology errors (e.g. INVALID_EDGE_TYPE from surviving option shortcuts).
+  applyDeterministicEnforcement(ctx);
+  if (ctx.earlyReturn) return;
+
+  // Substep 10: Structural parse (Zod safety net)
+  runStructuralParse(ctx);
+}

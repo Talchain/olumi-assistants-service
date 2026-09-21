@@ -9,8 +9,6 @@ import { describe, it, expect } from "vitest";
 import {
   generateImprovementGuidance,
   type ImprovementGuidanceContext,
-  type ImprovementGuidanceItem,
-  type ImprovementGuidanceResult,
 } from "../../src/services/review/improvementGuidance.js";
 
 describe("generateImprovementGuidance", () => {
@@ -270,7 +268,7 @@ describe("generateImprovementGuidance", () => {
 
       const result = generateImprovementGuidance(context);
 
-      expect(result.items[0].reason).toBe("Structural improvement recommended");
+      expect(result.items[0].reason).toBe("Structural improvement suggested");
     });
   });
 

@@ -102,16 +102,25 @@ describe("P1 CEE Verification", () => {
       const v3Response = transformResponseToV3(response);
       const option = v3Response.options.find((o) => o.label === "Increase price by 20%");
 
-      // If baseline is extracted and used, status should be "ready"
-      // and intervention should contain absolute value (120)
-      if (option?.status === "ready") {
-        const intervention = option.interventions["factor_price"];
-        expect(intervention).toBeDefined();
-        expect(intervention?.value).toBe(120); // 100 * 1.2 = 120
-      } else {
-        // If not resolved, should still be needs_user_mapping (acceptable)
-        expect(option?.status).toBe("needs_user_mapping");
-      }
+      // ⚠ THIS ASSERTION WAS BRANCHED (`if ready … else expect needs_user_mapping`)
+      // AND THE ELSE LIMB WAS A TAUTOLOGY. While `cleanTargetText` left the
+      // greedy target group's trailing preposition in place, "Increase price by
+      // 20%" yielded target_text "price by", which matches the factor "Price"
+      // neither by id nor by label — so the else limb ran and asserted only
+      // that an unresolved option is unresolved. A deliberate throw inside the
+      // if-limb stayed GREEN, at identical test counts: the case had stopped
+      // testing resolution at all.
+      //
+      // The preposition strip makes the outcome DETERMINATE, so the branch is
+      // gone and the real behaviour is pinned unconditionally.
+      expect(option?.status).toBe("ready");
+      const intervention = option?.interventions["factor_price"];
+      expect(intervention).toBeDefined();
+      expect(intervention?.value).toBe(120); // 100 * 1.2 = 120
+      // Bind the resolution to its EVIDENCE, not just its result: the value is
+      // 120 because the factor was matched by NAME and the baseline was read
+      // from it — not because a meaning-only guess happened to land.
+      expect(intervention?.target_match.match_type).toBe("exact_id");
     });
   });
 
@@ -120,23 +129,23 @@ describe("P1 CEE Verification", () => {
   // ==========================================================================
   describe("Task 3: ID Collision Uses __2 Suffix", () => {
     it("uses double underscore (__2) for ID collisions, NOT single underscore (_2)", () => {
-      const existingIds = new Set(["Price"]);
+      const existingIds = new Set(["price"]);
       const newId = normalizeToId("Price", existingIds);
 
       // MUST use __2 (double underscore)
-      expect(newId).toBe("Price__2");
+      expect(newId).toBe("price__2");
       // MUST NOT use _2 (single underscore)
       expect(newId).not.toBe("price_2");
     });
 
     it("increments collision suffix correctly (__2, __3, __4, ...)", () => {
-      const existingIds = new Set(["Price", "Price__2", "Price__3"]);
+      const existingIds = new Set(["price", "price__2", "price__3"]);
       const newId = normalizeToId("Price", existingIds);
 
-      expect(newId).toBe("Price__4");
+      expect(newId).toBe("price__4");
     });
 
-    it("all generated IDs match regex ^[A-Za-z][A-Za-z0-9_-]*$", () => {
+    it("all generated IDs match canonical regex ^[a-z0-9_:]+$", () => {
       const testLabels = [
         "Price",
         "Price Premium",
@@ -147,7 +156,7 @@ describe("P1 CEE Verification", () => {
       ];
 
       const ids = normalizeLabelsToIds(testLabels);
-      const validIdRegex = /^[A-Za-z][A-Za-z0-9_-]*$/;
+      const validIdRegex = /^[a-z0-9_:]+$/;
 
       for (const id of ids) {
         expect(id).toMatch(validIdRegex);
@@ -158,9 +167,9 @@ describe("P1 CEE Verification", () => {
       const labels = ["Price", "Price Premium", "Price"];
       const ids = normalizeLabelsToIds(labels);
 
-      expect(ids[0]).toBe("Price");
+      expect(ids[0]).toBe("price");
       expect(ids[1]).toBe("price_premium");
-      expect(ids[2]).toBe("Price__2"); // Collision with first "Price"
+      expect(ids[2]).toBe("price__2"); // Collision with first "price"
     });
   });
 
@@ -192,7 +201,7 @@ describe("P1 CEE Verification", () => {
   // Task 5: Verify Strength Clamping
   // ==========================================================================
   describe("Task 5: Strength Clamping", () => {
-    it("clamps strength_mean to [-3, +3] range", () => {
+    it("clamps strength.mean to [-3, +3] range", () => {
       const response: V1DraftGraphResponse = {
         graph: {
           version: "1",
@@ -210,12 +219,12 @@ describe("P1 CEE Verification", () => {
       const v3Response = transformResponseToV3(response);
 
       for (const edge of v3Response.edges) {
-        expect(edge.strength_mean).toBeGreaterThanOrEqual(-3);
-        expect(edge.strength_mean).toBeLessThanOrEqual(3);
+        expect(edge.strength.mean).toBeGreaterThanOrEqual(-3);
+        expect(edge.strength.mean).toBeLessThanOrEqual(3);
       }
     });
 
-    it("ensures strength_std is > 0", () => {
+    it("ensures strength.std is > 0", () => {
       const response: V1DraftGraphResponse = {
         graph: {
           version: "1",
@@ -232,11 +241,11 @@ describe("P1 CEE Verification", () => {
       const v3Response = transformResponseToV3(response);
 
       for (const edge of v3Response.edges) {
-        expect(edge.strength_std).toBeGreaterThan(0);
+        expect(edge.strength.std).toBeGreaterThan(0);
       }
     });
 
-    it("caps strength_std at max(0.5, 2×|mean|)", () => {
+    it("caps strength.std at max(0.5, 2×|mean|)", () => {
       const response: V1DraftGraphResponse = {
         graph: {
           version: "1",
@@ -253,8 +262,8 @@ describe("P1 CEE Verification", () => {
       const v3Response = transformResponseToV3(response);
 
       for (const edge of v3Response.edges) {
-        const cap = Math.max(0.5, 2 * Math.abs(edge.strength_mean));
-        expect(edge.strength_std).toBeLessThanOrEqual(cap);
+        const cap = Math.max(0.5, 2 * Math.abs(edge.strength.mean));
+        expect(edge.strength.std).toBeLessThanOrEqual(cap);
       }
     });
   });
@@ -263,7 +272,7 @@ describe("P1 CEE Verification", () => {
   // Task 6: Verify Warning Severity Levels
   // ==========================================================================
   describe("Task 6: Warning Severity Levels", () => {
-    it("negligible edges (|mean| < 0.1) get severity 'info'", () => {
+    it("negligible edges (0.05 ≤ |mean| < 0.1) get severity 'info'", () => {
       const response: V1DraftGraphResponse = {
         graph: {
           version: "1",
@@ -272,8 +281,8 @@ describe("P1 CEE Verification", () => {
             { id: "factor_color", kind: "factor", label: "Background Color" },
           ],
           edges: [
-            // Very low weight = negligible strength
-            { from: "factor_color", to: "goal_revenue", weight: 0.05, belief: 0.9 },
+            // 0.07 is in the negligible range (0.05 ≤ x < 0.1)
+            { from: "factor_color", to: "goal_revenue", weight: 0.07, belief: 0.9 },
           ],
         },
       };
@@ -284,12 +293,11 @@ describe("P1 CEE Verification", () => {
         (w) => w.code === "EDGE_STRENGTH_NEGLIGIBLE"
       );
 
-      if (negligibleWarning) {
-        expect(negligibleWarning.severity).toBe("info");
-      }
+      expect(negligibleWarning).toBeDefined();
+      expect(negligibleWarning!.severity).toBe("info");
     });
 
-    it("low strength edges (0.1 ≤ |mean| < 0.5) get severity 'warning'", () => {
+    it("edge with |mean| = 0.04 triggers EDGE_STRENGTH_LOW", () => {
       const response: V1DraftGraphResponse = {
         graph: {
           version: "1",
@@ -298,7 +306,56 @@ describe("P1 CEE Verification", () => {
             { id: "factor_font", kind: "factor", label: "Font Choice" },
           ],
           edges: [
-            // Low but not negligible weight
+            { from: "factor_font", to: "goal_revenue", weight: 0.04, belief: 0.9 },
+          ],
+        },
+      };
+
+      const v3Response = transformResponseToV3(response);
+
+      const lowWarning = v3Response.validation_warnings?.find(
+        (w) => w.code === "EDGE_STRENGTH_LOW"
+      );
+
+      expect(lowWarning).toBeDefined();
+      expect(lowWarning!.severity).toBe("info");
+      expect(lowWarning!.details).toBeDefined();
+      expect(lowWarning!.details!.edge_id).toBe("factor_font->goal_revenue");
+      expect(lowWarning!.details!.mean).toBe(0.04);
+    });
+
+    it("edge with |mean| = 0.05 does NOT trigger EDGE_STRENGTH_LOW", () => {
+      const response: V1DraftGraphResponse = {
+        graph: {
+          version: "1",
+          nodes: [
+            { id: "goal_revenue", kind: "goal", label: "Revenue" },
+            { id: "factor_font", kind: "factor", label: "Font Choice" },
+          ],
+          edges: [
+            { from: "factor_font", to: "goal_revenue", weight: 0.05, belief: 0.9 },
+          ],
+        },
+      };
+
+      const v3Response = transformResponseToV3(response);
+
+      const lowWarning = v3Response.validation_warnings?.find(
+        (w) => w.code === "EDGE_STRENGTH_LOW"
+      );
+
+      expect(lowWarning).toBeUndefined();
+    });
+
+    it("edge with |mean| = 0.3 does NOT trigger EDGE_STRENGTH_LOW", () => {
+      const response: V1DraftGraphResponse = {
+        graph: {
+          version: "1",
+          nodes: [
+            { id: "goal_revenue", kind: "goal", label: "Revenue" },
+            { id: "factor_font", kind: "factor", label: "Font Choice" },
+          ],
+          edges: [
             { from: "factor_font", to: "goal_revenue", weight: 0.3, belief: 0.9 },
           ],
         },
@@ -310,9 +367,30 @@ describe("P1 CEE Verification", () => {
         (w) => w.code === "EDGE_STRENGTH_LOW"
       );
 
-      if (lowWarning) {
-        expect(lowWarning.severity).toBe("warning");
-      }
+      expect(lowWarning).toBeUndefined();
+    });
+
+    it("edge with |mean| = 0.1 emits neither LOW nor NEGLIGIBLE", () => {
+      const response: V1DraftGraphResponse = {
+        graph: {
+          version: "1",
+          nodes: [
+            { id: "goal_revenue", kind: "goal", label: "Revenue" },
+            { id: "factor_font", kind: "factor", label: "Font Choice" },
+          ],
+          edges: [
+            { from: "factor_font", to: "goal_revenue", weight: 0.1, belief: 0.9 },
+          ],
+        },
+      };
+
+      const v3Response = transformResponseToV3(response);
+
+      const strengthWarning = v3Response.validation_warnings?.find(
+        (w) => w.code === "EDGE_STRENGTH_LOW" || w.code === "EDGE_STRENGTH_NEGLIGIBLE"
+      );
+
+      expect(strengthWarning).toBeUndefined();
     });
   });
 });

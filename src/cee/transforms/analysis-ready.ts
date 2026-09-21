@@ -13,18 +13,45 @@
 import type {
   OptionV3T,
   GraphV3T,
+  NodeV3T,
 } from "../../schemas/cee-v3.js";
 import type {
   OptionForAnalysisT,
   AnalysisReadyPayloadT,
+  AnalysisReadyStatusT,
+  AnalysisBlockerT,
+  ModelAdjustmentT,
   ExtractionMetadataT,
 } from "../../schemas/analysis-ready.js";
 import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
 import { computeAnalysisReadyStatusWithReason } from "./option-status.js";
+import { synthesiseDisplayValue } from "../factor-extraction/display-value.js";
+import { isLabelEcho } from "./label-echo.js";
+import {
+  magnitudeUnderScale,
+  resolveMagnitudeScale,
+} from "../provenance/stated-amounts.js";
+import { readIsBaseline } from "../baseline-identity.js";
+import { pickGoalThresholdTrio } from "../../utils/goal-threshold-trio.js";
+import { classifyEncodedInterventionAdmissibility } from "../../orchestrator/shared/encoded-intervention-admissibility.js";
+// ⭐ ROADMAP 2.1266 — ONE authority on repair-authored option→factor edges,
+// shared with the V5 Run-admission projection in `analysis-ready-helper.ts`.
+// Two readiness paths deciding independently which edges the repair invented is
+// the two-authorities shape this estate keeps paying for (trap 21).
+import { isRepairAuthoredOptionFactorEdge } from "../../graph/repair-authored-edge.js";
+import { resolveScaleFrame } from "../../orchestrator-v5/tools/handlers/d1-shared/scale-frame.js";
 
 // ============================================================================
 // Types
 // ============================================================================
+
+/**
+ * F15: Fallback metadata from analysis-ready building — surfaced in trace.
+ */
+export interface AnalysisReadyFallbackMeta {
+  fallback_count: number;
+  fallback_sources: Array<{ optionId: string; factorId: string; source: string }>;
+}
 
 /**
  * Validation error for analysis-ready payload.
@@ -55,7 +82,27 @@ export interface AnalysisReadyValidationResult {
  * - Extracts raw_value from InterventionV3 to build raw_interventions
  * - Status logic: needs_encoding when raw values exist but aren't fully encoded
  */
-export function transformOptionToAnalysisReady(option: OptionV3T): OptionForAnalysisT {
+export function transformOptionToAnalysisReady(
+  option: OptionV3T,
+  /**
+   * How many factors this option is connected to by a NON-repair-authored
+   * option→factor edge. Supplied by `buildAnalysisReadyPayload`, the only
+   * producer that holds the graph. Defaults to 0 for the standalone
+   * single-option callers (which have no graph and therefore cannot know);
+   * every production path goes through `buildAnalysisReadyPayload` and passes
+   * the real count.
+   */
+  connectedFactorCount = 0,
+  /**
+   * Whether this option is the status-quo baseline. Supplied by
+   * `buildAnalysisReadyPayload`, the only producer that sees every option and
+   * can therefore run `detectBaselineOptionIndex`. Defaults to `false` for the
+   * standalone single-option callers, matching
+   * `analysable-option-gate.ts::isBaselineOption`'s strict `=== true`: a
+   * MISSING verdict must exclude rather than hold.
+   */
+  isBaseline = false,
+): OptionForAnalysisT {
   // Flatten interventions: Record<string, InterventionV3> -> Record<string, number>
   const interventions: Record<string, number> = {};
   // Build raw_interventions from raw_value fields (Raw+Encoded pattern)
@@ -63,16 +110,27 @@ export function transformOptionToAnalysisReady(option: OptionV3T): OptionForAnal
   let hasRawValues = false;
   let hasNonNumericRaw = false;
 
-  for (const [factorId, intervention] of Object.entries(option.interventions)) {
+  for (const [factorId, intervention] of Object.entries(option.interventions ?? {})) {
+    const encodedAdmissibility = classifyEncodedInterventionAdmissibility(intervention);
     // Extract the encoded numeric value (always required)
     interventions[factorId] = intervention.value;
+
+    // Explicit/mapped encoded carriers must prove one of the currently
+    // faithful representations before the whole-model producer can call the
+    // option ready. This also catches a claimed encoded type with no raw value.
+    if (encodedAdmissibility === 'inadmissible') {
+      hasNonNumericRaw = true;
+    }
 
     // Check for raw_value in the intervention (Raw+Encoded pattern)
     if (intervention.raw_value !== undefined) {
       rawInterventions[factorId] = intervention.raw_value;
       hasRawValues = true;
       // Track if we have non-numeric raw values (categorical/boolean)
-      if (typeof intervention.raw_value !== "number") {
+      if (
+        typeof intervention.raw_value !== "number"
+        && encodedAdmissibility !== 'admissible'
+      ) {
         hasNonNumericRaw = true;
       }
     }
@@ -93,7 +151,7 @@ export function transformOptionToAnalysisReady(option: OptionV3T): OptionForAnal
 
   // Build extraction metadata from first intervention's source/confidence
   let extractionMetadata: ExtractionMetadataT | undefined;
-  const firstIntervention = Object.values(option.interventions)[0];
+  const firstIntervention = Object.values(option.interventions ?? {})[0];
   if (firstIntervention) {
     extractionMetadata = {
       source: firstIntervention.source,
@@ -115,11 +173,16 @@ export function transformOptionToAnalysisReady(option: OptionV3T): OptionForAnal
   // Status rules:
   // - "ready": has interventions, no non-numeric raw values needing encoding
   // - "needs_encoding": has non-numeric raw values awaiting user encoding
-  // - "needs_user_mapping": no interventions or option explicitly needs mapping
+  // - "needs_user_mapping": no interventions AND no connected factor — the
+  //   product genuinely does not know which factor this option moves
+  // - "needs_encoding": no interventions but a connected factor — the mapping
+  //   exists; only the magnitude is outstanding
   const { status, reason: statusReason } = computeAnalysisReadyStatusWithReason(
     Object.keys(interventions).length,
     option.status,
-    hasNonNumericRaw
+    hasNonNumericRaw,
+    connectedFactorCount,
+    isBaseline
   );
 
   const result: OptionForAnalysisT = {
@@ -153,6 +216,452 @@ export interface AnalysisReadyContext {
   requestId?: string;
 }
 
+// ============================================================================
+// is_baseline Detection (Task 3 / CEE-2)
+// ============================================================================
+
+/**
+ * ⭐⭐ TIERED 2026-08-14 AFTER A MEASURED, DETERMINISTIC INVERSION. This list was
+ * ONE flat set of eleven entries and the detector took the first match by array
+ * index, so on the deployed build `41156fc` it flagged the CHANGE option as the
+ * status quo on 3 of 3 `B_crm` draws:
+ *
+ *     is_baseline: true   "replace our current CRM with HubSpot next quarter"
+ *     is_baseline: absent "keep what we have"        ← the ACTUAL status quo
+ *
+ * `"current"` matched inside *"replace our **current** CRM"* at index 0 and won
+ * before *"**keep** what we have"* was ever tested. `is_baseline` tells the
+ * analysis which option is the COMPARISON BASE, so an inverted flag corrupts
+ * every comparison the user then reads.
+ *
+ * ── WHY TIERING AND NOT A BETTER FLAT LIST (trap 22f) ───────────────────────
+ * The bare tokens below differ from the idioms in KIND, not in confidence. A
+ * change option must NAME the thing it is changing, so it contains
+ * "current"/"existing" as naturally as a status-quo option does — the token
+ * carries no discriminating power at all, in either direction. No reordering
+ * fixes that, and reordering is the "one more rule" this estate has burned four
+ * rounds on. The idioms are different: they are whole phrases asserting that
+ * NOTHING is done, and a change option cannot contain one without contradicting
+ * itself.
+ *
+ * ⚠ THE ASYMMETRY THAT SETS THE THRESHOLD (trap 22b). A missed baseline is a
+ * DISCLOSED GAP — the flag is absent, the analysis says so, nothing is asserted.
+ * A wrong baseline is a LIE that silently rebases every comparison. Not
+ * symmetric harms, so not a symmetric predicate: an ambiguous label yields NO
+ * baseline rather than a guessed one.
+ */
+export const BASELINE_IDIOMS = [
+  "status quo",
+  "do nothing",
+  "no change",
+  "as-is",
+  "as is",
+  "baseline",
+  // Multiword continuations. Whole phrases ONLY — the bare verbs "keep",
+  // "stay" and "remain" live in the ambiguous set below, and it is exactly the
+  // difference between "keep what we have" (a status quo) and "keep the rollout
+  // on schedule" (a change) that the whole phrase captures and the bare token
+  // cannot. "keep what we have" is the label that was measured LOSING to
+  // "replace our current CRM"; it is here so that case resolves correctly rather
+  // than merely stopping being wrong.
+  "keep what we have",
+  "keep things as they are",
+  "keep what we've got",
+  "leave things as they are",
+  "leave it as it is",
+  "carry on as we are",
+  "stay as we are",
+  "stay put",
+  "remain as-is",
+  "remain as is",
+  // ⭐⭐ CONTINUATION COLLOCATIONS — added because the first cut of this tiering
+  // CLOSED THE LIE AND OPENED A GAP, which is the trade trap 22b exists to stop
+  // anyone making silently. Demoting the bare tokens correctly refused
+  // "replace our current CRM", and it also lost "Maintain current strategy" and
+  // "Keep existing process" — labels that ARE the status quo and that the repo's
+  // own suite already pinned as detected.
+  //
+  // ⚠ AND THE FORM MATTERS MORE THAN THE MEMBERS. The obvious repair was a
+  // PARSER — "a continuation verb governing a current-state token" — and it was
+  // RUN BEFORE BEING COMMISSIONED (trap 22f(b)) against a corpus including
+  // adversarial cases written outside the original design. It scored 2 of 7
+  // WRONG: "stop maintaining the current system" and "migrate off our existing
+  // platform, keeping current integrations" both matched, i.e. it reopened the
+  // inversion in a new place. It was rejected rather than patched, because
+  // patching an oscillating predicate is the sunk cost this estate has paid four
+  // times.
+  //
+  // These are therefore CONTIGUOUS PHRASES, matched exactly as every idiom above
+  // is — not a verb-object relation. That is why they are narrow enough to be
+  // safe: "keeping current integrations" does not contain "keep current", and
+  // "maintaining the current system" does not contain "maintain current". The
+  // phrase form scored 14 of 14 on the same corpus, including both cases the
+  // parser failed. Pinned in `value-carriage-and-baseline.test.ts`, both
+  // directions.
+  "maintain current",
+  "maintain existing",
+  "keep current",
+  "keep existing",
+  "retain current",
+  "retain existing",
+  "continue as we are",
+  "continue with current",
+];
+
+/**
+ * Tokens that merely REFERENCE the current state. Retained as a named, exported
+ * set — NOT as detection input — because their exclusion is a DECISION with
+ * measured evidence behind it, and a deleted list would leave the next reader to
+ * rediscover why "current" is not baseline evidence. Asserted to be excluded by
+ * `analysis-ready.baseline-tiering` rather than left as a comment.
+ */
+export const AMBIGUOUS_CURRENT_STATE_TOKENS = [
+  "current",
+  "existing",
+  "stay",
+  "remain",
+  "keep",
+];
+
+/**
+ * @deprecated The flat union that produced the inversion above. Kept ONLY so a
+ * stale importer fails loudly at review rather than silently reverting to
+ * first-match-wins behaviour; nothing in the detection path reads it.
+ */
+export const BASELINE_KEYWORDS = [...BASELINE_IDIOMS, ...AMBIGUOUS_CURRENT_STATE_TOKENS];
+
+/**
+ * Detect which option, if any, represents the status-quo baseline.
+ *
+ * Detection order (highest confidence first):
+ * 1. Option has `is_baseline === true` set by the LLM (OptionV3T field).
+ * 2. Option label matches a BASELINE_KEYWORD at a word boundary.
+ *    If multiple options match rule 2, the first by array index wins.
+ * 3. No match → returns `null` (no baseline marked).
+ *
+ * @param options - V3 options in their original order
+ * @returns Index of the baseline option, or `null` if none detected
+ */
+/**
+ * Test whether a single label matches any BASELINE_KEYWORD at a word boundary.
+ * Shared between detectBaselineOptionIndex (CEE pipeline) and the persisted-
+ * graph canonical readiness adapter.
+ */
+export function labelMatchesBaseline(label: string): boolean {
+  const lower = label.toLowerCase();
+  for (const kw of BASELINE_IDIOMS) {
+    const escaped = kw.replace(/[-\s]/g, "[\\s\\-]");
+    const re = new RegExp(`(?<![a-z0-9\\-])${escaped}(?![a-z0-9\\-])`, "i");
+    if (re.test(lower)) return true;
+  }
+  return false;
+}
+
+function detectBaselineOptionIndex(options: OptionV3T[]): number | null {
+  // Priority 1: LLM-provided flag. Read via the shared baseline-identity
+  // reader (SINGLE SOURCE OF TRUTH) so this path reconciles the flag
+  // identically to schema-v3 + auto-baseline-dedup. OptionV3T is already
+  // flattened to the node-level surface, so this collapses to the same
+  // `=== true` check — but going through the shared reader keeps every
+  // baseline decision on one truth table.
+  for (let i = 0; i < options.length; i++) {
+    if (readIsBaseline({ is_baseline: options[i].is_baseline }) === true) return i;
+  }
+
+  // Priority 2: a baseline IDIOM, and only when exactly ONE option carries one.
+  //
+  // ⚠ UNIQUENESS IS PART OF THE PREDICATE, NOT A TIDY-UP. First-match-by-index
+  // over a set that several options can satisfy is not a detection, it is an
+  // arbitrary pick wearing a detection's name — which is precisely how
+  // "replace our current CRM" beat "keep what we have". Two options both
+  // asserting they change nothing is a degenerate draft, and there is no basis
+  // for preferring either; returning null says so instead of flipping a coin.
+  const idiomatic: number[] = [];
+  for (let i = 0; i < options.length; i++) {
+    if (labelMatchesBaseline(options[i].label)) idiomatic.push(i);
+  }
+  if (idiomatic.length === 1) return idiomatic[0]!;
+
+  // No idiom, or several — no baseline is claimed. The flag is then absent
+  // rather than wrong, and priority 1 above is the honest channel for the model
+  // to say what a label cannot: the records grammar carries `is_baseline`
+  // (grammar design note 5) precisely so this guess is no longer load-bearing.
+  return null;
+}
+
+// ============================================================================
+// Intervention Details (Task 4 / CEE-9)
+// ============================================================================
+
+/**
+ * A single intervention detail entry for a factor.
+ * Additive alongside the existing `interventions: Record<string, number>`.
+ */
+export interface InterventionDetail {
+  /** Human-readable display string (e.g. "5 developers", "£200k", "High (0.7)") */
+  display_value: string;
+  /** Mirrors `interventions[factorId]` — normalised numeric value */
+  normalised_value: number;
+  /** Pre-normalisation value when available */
+  raw_value?: number;
+  /** Unit string when available */
+  unit?: string;
+}
+
+// CEE-6 echo rule — MOVED to `./label-echo.js` (ROADMAP 2.384) when a sixth
+// consumer arrived from `orchestrator-v5/compose/`. Imported above; the five
+// call sites below are unchanged and still read ONE definition.
+
+/**
+ * Render a factor's CURRENT level for the blocker sentence
+ * `Factor "X" is currently …`.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * THE WITNESSED DEFECT (deployed CEE, 2026-08-26, two independent golden-journey
+ * runs, envelopes clean 20/20 — no `EGRESS_CONTRACT_VIOLATION`, no `degraded`)
+ *
+ *   message : 'Factor "CRM Annual Licence Cost" is currently 0.5. …'
+ *   node    : { observed_state: { value: 0.5, raw_value: 50000 },
+ *               scale_frame: 100000, display_value: "50,000" }   ← SAME PAYLOAD
+ *
+ * The sentence quoted the INTERNAL NORMALISED LEVEL while the node's own
+ * human-readable form sat in the same response body. The first instance is at
+ * `T1_DRAFT` with no edit involved, so it is not an edit-path artefact. The
+ * message whose entire job is to tell the user what to fix was showing them a
+ * number they never typed and cannot recognise.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * WHICH AUTHORITY SURVIVES
+ *
+ * The FACTOR'S OWN DISPLAY AUTHORITY is canonical for this sentence: the
+ * enricher's `display_value`, else the shared `synthesiseDisplayValue` ladder
+ * this file already uses for intervention receipts. The normalised level is
+ * unreachable from the sentence EXCEPT as the terminal honest fallback, which
+ * is reached only when the record settles nothing better. There is no
+ * compatibility branch — the old rendering is not selectable.
+ *
+ * Honest at the bottom rung is SAID, not encoded as an absence: `currentLevel`
+ * is a number by the caller's own guard and `synthesiseDisplayValue`'s priority
+ * 7 always renders one, so this function cannot return an empty string.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * ⚠ WHY THIS IS NOT THE F3 BORROWING DEFECT ONE LEVEL DOWN
+ *
+ * F3 banned an OPTION's receipt from borrowing the FACTOR's display string,
+ * because the factor's status quo is not that option's proposal. This sentence
+ * is different in kind: `is currently …` describes the FACTOR'S OWN OBSERVED
+ * STATE by construction, so the factor-scoped string is the truthful one — this
+ * is exactly the `sitsAtObservedState` condition `buildInterventionDetail`
+ * already requires before it will use `factorNode.display_value`.
+ *
+ * `levelCameFromObservedState` is what keeps the two apart. When the quoted
+ * level came instead from the V1 `data.value` passthrough, `observed_state`'s
+ * `raw_value`/`unit` describe a DIFFERENT number on an unsettled scale, and
+ * rendering through them would be borrowing with a citation. That branch keeps
+ * the bare level.
+ */
+function renderFactorCurrentLevel(
+  factorNode: NodeV3T,
+  currentLevel: number,
+  levelCameFromObservedState: boolean,
+): string {
+  const bareLevel = String(parseFloat(currentLevel.toFixed(2)));
+
+  // The level is not the observed state's — nothing on `observed_state`
+  // describes it, so nothing on `observed_state` may render it.
+  if (!levelCameFromObservedState) return bareLevel;
+
+  const os = factorNode.observed_state;
+  const factorLabel = (factorNode.label ?? "").toLowerCase().trim();
+
+  // Rung 1: the enricher/LLM's own string for this factor's current state.
+  if (factorNode.display_value && !isLabelEcho(factorLabel, factorNode.display_value)) {
+    return factorNode.display_value;
+  }
+
+  // Rung 2: the shared display authority, over the SAME record the level came
+  // from. Never a second derivation.
+  const synthesised = synthesiseDisplayValue({
+    value: currentLevel,
+    raw_value: os?.raw_value,
+    unit: os?.unit,
+    factor_type: factorNode.factor_type ?? os?.factor_type,
+  });
+  if (synthesised && !isLabelEcho(factorLabel, synthesised)) return synthesised;
+
+  // Rung 3, terminal: say the level plainly.
+  return bareLevel;
+}
+
+/**
+ * Build `intervention_details` for a single option using factor node metadata.
+ *
+ * For each intervention the caller provides `normalisedValue` (from
+ * `interventions[factorId]`) and, optionally, a matching factor node from the
+ * graph.  The display string is synthesised using the factor's display_value
+ * (from the enricher/LLM), raw_value, unit, and factor_type. If none of that
+ * is available the normalised value is rendered via the qualitative band.
+ *
+ * CEE-6 echo stripping: when the synthesised display string would be identical
+ * to the factor label (case-insensitive trim), fall back to a pure numeric/
+ * qualitative representation so the card interior doesn't just repeat the label.
+ *
+ * @param factorId - Factor node ID
+ * @param normalisedValue - Normalised numeric intervention value
+ * @param factorNode - Optional factor node from the V3 graph
+ * @returns An InterventionDetail entry
+ */
+function buildInterventionDetail(
+  factorId: string,
+  normalisedValue: number,
+  factorNode: NodeV3T | undefined,
+  intervention: OptionV3T["interventions"][string] | undefined,
+  carriedRawValue: number | string | boolean | undefined,
+): InterventionDetail {
+  // ⚠ F3 (Codex, 2026-08-13) — AN OPTION'S RECEIPT USED TO DESCRIBE THE FACTOR,
+  // NOT THE OPTION. Every branch below returned the FACTOR's
+  // `observed_state.raw_value` and, in the second branch, the FACTOR's
+  // `display_value` — the same bytes for EVERY option that touches the factor.
+  // On the brief "Plan A sets the support headcount to 80. Plan B sets it to
+  // 50. It is currently 40", Plan A (level .8) and Plan B (level .5) both
+  // showed `raw_value: 40` / "40": the status quo, presented as each option's
+  // proposal. `synthesiseDisplayValue` prioritises `raw_value` over `value`
+  // (display-value.ts:176), so the factor's raw won even though the option's
+  // own level was passed beside it.
+  //
+  // THE SPEC: a display value must describe ITS OWN intervention. So the
+  // option's magnitude is derived from the option's OWN level under the
+  // factor's scale — the same `resolveMagnitudeScale` / `recoverScaleFrame`
+  // authority the provenance seam uses, never a second derivation.
+  //
+  // ⚠ WHY THE TEST CORPUS COULD NOT SEE THIS: every pre-existing fixture sets
+  // the intervention level EQUAL to the factor's observed value (0.5 on a
+  // {0.5, 5} factor, 0.4 on a {0.4, 200000} factor). At equal levels the
+  // borrowed value and the derived value COINCIDE, so 21 `intervention_details`
+  // assertions and 18 `display_value` assertions all passed while the defect
+  // was live. The corpus never varied two options on one factor — CLAUDE.md
+  // trap 22, and the reason the RED fixtures below do exactly that.
+  const os = factorNode?.observed_state;
+  const unit = intervention?.unit ?? os?.unit;
+  const sameUnit = intervention?.unit === undefined || os?.unit === undefined ||
+    intervention.unit === os.unit;
+  const interventionDisplayValue = typeof intervention?.display_value === "string"
+    ? intervention.display_value : undefined;
+  const usesPercentageDisplay = unit === "%";
+  const factorType = factorNode?.factor_type ?? os?.factor_type;
+
+  // Is this option sitting AT the factor's observed state? Only then does a
+  // factor-scoped display string ("£200k") truthfully describe the option's
+  // intervention. This is what keeps the baseline/status-quo option rendering
+  // exactly as before while a genuinely different lever stops borrowing it.
+  const sitsAtObservedState =
+    sameUnit && typeof os?.value === "number" && os.value === normalisedValue;
+
+  // The magnitude THIS option's level denotes, or null when the record settles
+  // no denominator (zero baseline, no `raw_value`, no `observed_state`). Null
+  // means the receipt omits `raw_value` rather than borrowing the factor's —
+  // visible absence over confident wrongness.
+  //
+  // ⚠ FLOAT DIRT AT THE BASELINE (review of #944). The frame is RECOVERED as
+  // `raw / value`, so re-deriving the baseline as `value × (raw / value)` is a
+  // round-trip through binary floating point and does NOT always return the
+  // input: a factor observed at 29 with frame 100 yields
+  // `raw_value: 28.999999999999996` where the pre-fix receipt carried an exact
+  // 29. It fails for ~2.3% of producer-domain pairs and lands precisely on the
+  // STATUS-QUO option, i.e. the one case where the honest answer is already
+  // recorded verbatim. So where this option sits at the observed state, the
+  // recorded `raw_value` is returned DIRECTLY — no arithmetic to be dirty.
+  // (The pre-existing `{0.5, 5}` fixtures round-trip exactly, which is why the
+  // first version of this suite could not see it — trap 22, again.)
+  // The native option quantity survives in raw_interventions even when a zero
+  // baseline cannot identify a divisor (19 Sep capture: £10000 beside .05).
+  // Consume that option-owned carrier before trying to invert a calculation.
+  // Percent raw carriers still include both record conventions (.18 and 18);
+  // no per-intervention declaration reaches this boundary. Preserve their
+  // existing scale-based display route instead of treating every raw as 18%.
+  const carriedNativeValue = !usesPercentageDisplay && typeof carriedRawValue === "number" &&
+    Number.isFinite(carriedRawValue) ? carriedRawValue : null;
+  let ownRawValue = carriedNativeValue;
+  if (ownRawValue === null && sameUnit) {
+    if (sitsAtObservedState && typeof os?.raw_value === "number" && Number.isFinite(os.raw_value)) {
+      ownRawValue = os.raw_value;
+    } else {
+      const scale = resolveMagnitudeScale(os);
+      const storedFrame = factorNode?.scale_frame;
+      if (typeof storedFrame === "number" && Number.isFinite(storedFrame) && storedFrame > 1) {
+        const frame = resolveScaleFrame({ storedFrame, value: os?.value, raw_value: os?.raw_value });
+        // Conflicting conversion evidence cannot license a native amount.
+        if (frame !== undefined && (scale.kind !== "cap" || scale.cap === frame)) {
+          ownRawValue = magnitudeUnderScale(normalisedValue, unit, { kind: "frame", frame });
+        }
+      } else {
+        ownRawValue = magnitudeUnderScale(normalisedValue, unit, scale);
+      }
+    }
+  }
+
+  const ownFields = {
+    normalised_value: normalisedValue,
+    ...(ownRawValue !== null && { raw_value: ownRawValue }),
+    ...(unit !== undefined && { unit }),
+  };
+
+  // A carried native amount owns its numeric presentation. A display string
+  // can be a stale projection of the same intervention; it must not override
+  // the amount or require us to parse free text to decide which one is true.
+  // With no native carrier, retain the existing per-intervention text route.
+  if (carriedNativeValue === null && interventionDisplayValue && interventionDisplayValue.trim().length > 0) {
+    const factorLabel = (factorNode?.label ?? "").toLowerCase().trim();
+    if (!isLabelEcho(factorLabel, interventionDisplayValue)) {
+      return {
+        display_value: interventionDisplayValue,
+        ...ownFields,
+      };
+    }
+  }
+
+  // Prefer LLM/enricher-provided display_value on the factor node — but ONLY
+  // when this option sits at the factor's observed state (see above). For any
+  // other lever it is the status quo wearing the option's name.
+  if (factorNode?.display_value && sitsAtObservedState &&
+      (carriedNativeValue === null || carriedNativeValue === os?.raw_value)) {
+    const factorLabel = (factorNode.label ?? "").toLowerCase().trim();
+    if (!isLabelEcho(factorLabel, factorNode.display_value)) {
+      return {
+        display_value: factorNode.display_value,
+        ...ownFields,
+      };
+    }
+  }
+
+  // Synthesise from the option's OWN magnitude. When it is underivable,
+  // `raw_value` is undefined and `synthesiseDisplayValue` falls through to its
+  // normalised-value ladder (qualitative band / bare level) — which describes
+  // this option's own lever and borrows nothing.
+  const synthesised = synthesiseDisplayValue({
+    value: normalisedValue,
+    raw_value: ownRawValue ?? undefined,
+    // An unresolved calculation level is not a native amount. The percentage
+    // fallback has its own existing convention; other units require a native
+    // magnitude before a dimensional suffix can truthfully be displayed.
+    unit: ownRawValue !== null || usesPercentageDisplay ? unit : undefined,
+    factor_type: factorType,
+  });
+
+  const displayValue = synthesised ?? String(parseFloat(normalisedValue.toFixed(2)));
+
+  // CEE-6 echo check on the synthesised value — same single rule.
+  const factorLabel = (factorNode?.label ?? "").toLowerCase().trim();
+  const finalDisplay = isLabelEcho(factorLabel, displayValue)
+    ? String(parseFloat(normalisedValue.toFixed(2)))
+    : displayValue;
+
+  return {
+    display_value: finalDisplay,
+    ...ownFields,
+  };
+}
+
 /**
  * Build analysis-ready payload from V3 options and graph.
  *
@@ -171,14 +680,385 @@ export function buildAnalysisReadyPayload(
   goalNodeId: string,
   graph: GraphV3T,
   context: AnalysisReadyContext = {}
-): AnalysisReadyPayloadT {
-  // Transform all options
-  const analysisOptions = options.map(transformOptionToAnalysisReady);
+): AnalysisReadyPayloadT & { _fallback_meta?: AnalysisReadyFallbackMeta } {
+  // Build factor node lookup and node kind map
+  const factorNodeMap = new Map<string, NodeV3T>();
+  const nodeKindLookup = new Map<string, string>();
+  for (const node of graph.nodes) {
+    nodeKindLookup.set(node.id, node.kind);
+    if (node.kind === "factor") {
+      factorNodeMap.set(node.id, node);
+    }
+  }
+
+  // Build option→factor adjacency from V3 graph edges.
+  //
+  // ⛔ REPAIR-AUTHORED EDGES ARE EXCLUDED — ROADMAP 2.1266. THE PRODUCT MUST NOT
+  // BILL THE USER FOR ITS OWN INVENTIONS.
+  //
+  // `fixStatusQuoConnectivity` wires each DISCONNECTED option to the UNION of
+  // every factor the CONNECTED options target, so the graph acquires a path to
+  // goal and the draft is not lost at the 422 fail-closed gate
+  // (`repair/graph-enforcement.ts:665`, reached because `NO_PATH_TO_GOAL` is
+  // `severity: "error"` — `validators/graph-validator.ts:626`). Those edges carry
+  // no intervention value, and this loop used to mint one `MISSING_OPTION_VALUE`
+  // blocker for each of them: measured 14 asks on a brief-04-shaped graph
+  // (2 disconnected options × 7 union targets), asked in the user's own name
+  // ("What should option \"C\" set it to?") with nothing saying the product had
+  // drawn the link itself.
+  //
+  // ⚠ WHAT SUPPRESSING THEM DOES **NOT** DO — checked, because the dangerous
+  // outcome would be flipping the model to `ready` with a numerically inert
+  // option, i.e. the exact harm the NO-SILENT-INVENTION block below removed. It
+  // cannot: an option whose `interventions` are empty sets `hasIncompleteOptions`
+  // (:803-805), so `payloadStatus` falls to `needs_user_mapping` (:923) and
+  // `user_questions` carries the ONE true question — which factor does this
+  // option change, and by how much — instead of seven false ones. Fewer asks AND
+  // a non-ready model; nothing is analysed on invented magnitudes.
+  //
+  // The wiring itself stays disclosed: `STATUS_QUO_WIRED` rides
+  // `trace.pipeline.repair_summary.deterministic_repairs[]`
+  // (`stages/package.ts:751-752`), which the UI renders — see the adjudication in
+  // `stages/boundary.ts:31-40` for why it cannot become a `model_adjustments` row
+  // without a new `@talchain/schemas` contract member.
+  //
+  // `optionEdgeTargets` (:854) is DELIBERATELY left reading every edge: it
+  // answers a different question ("is this factor connected to any option at
+  // all?") and the repair's targets always carry a real edge from a connected
+  // option by construction, since the union is taken FROM those options.
+  const optionFactorAdj = new Map<string, string[]>();
+  for (const edge of graph.edges) {
+    if (nodeKindLookup.get(edge.from) === "option" && nodeKindLookup.get(edge.to) === "factor") {
+      if (isRepairAuthoredOptionFactorEdge(edge, nodeKindLookup)) continue;
+      const list = optionFactorAdj.get(edge.from) ?? [];
+      list.push(edge.to);
+      optionFactorAdj.set(edge.from, list);
+    }
+  }
+
+  // Transform all options.
+  //
+  // ⭐ THE OPTION→FACTOR ADJACENCY IS BUILT ABOVE THIS LINE ON PURPOSE, AND
+  // THAT ORDERING IS THE FIX. It used to be built ~70 lines BELOW, so every
+  // option's status was decided before this function — the only producer that
+  // holds the graph — knew whether the option was connected to anything. An
+  // option with a genuine option→factor edge and no magnitude therefore went
+  // out as `needs_user_mapping` ("choose which factor X changes and by how
+  // much"), asking the user to redo a mapping the product had already made,
+  // when the outstanding question was only the value. Measured on 9/9 captured
+  // draws (19 Aug 2026): every non-ready option was connected, and every one
+  // was mislabelled.
+  //
+  // `optionFactorAdj` already excludes repair-authored edges, so a lever the
+  // product wired for itself never counts as a mapping the user made.
+  // === is_baseline detection (CEE-2) ===
+  // Mark exactly one option as the status-quo baseline, based on LLM flag or
+  // label keyword matching.
+  //
+  // ⭐ THIS RUNS BEFORE THE MAP BELOW, AND THAT ORDERING IS THE FIX — the same
+  // shape as the adjacency hoist above it. `detectBaselineOptionIndex` used to
+  // be called immediately AFTER the map, so every option's status was decided
+  // by the one producer that holds the whole option set while the fact that one
+  // of them IS the status quo was still three lines away. The flag was in hand
+  // and arrived too late to be read: the baseline went out as
+  // `needs_user_mapping` ("choose which factor X changes and by how much") —
+  // a question with no answerable form for a status quo — while
+  // `analysable-option-gate.ts` read the very same flag and HELD the option as
+  // analysable. Two authorities, one object, opposite answers in one turn.
+  const baselineIdx = detectBaselineOptionIndex(options);
+
+  const analysisOptions = options.map((option, index) =>
+    transformOptionToAnalysisReady(
+      option,
+      (optionFactorAdj.get(option.id) ?? []).length,
+      index === baselineIdx,
+    ),
+  );
+
+  if (baselineIdx !== null) {
+    analysisOptions[baselineIdx].is_baseline = true;
+  }
+
+  // === Task 2A+2B: Factor value fallback + blocker emission ===
+  // For qualitative briefs, V3 options may have empty interventions because
+  // enrichment didn't set data.value on factor nodes. We recover values from
+  // the V3 factor node's observed_state or V1 data field (preserved via passthrough).
+  const blockers: AnalysisBlockerT[] = [];
+  // What we DECLINED to substitute, and from where. Recorded for the trace so
+  // the refusal is observable — an operator can see how often a current level
+  // was available and deliberately not used as an option's lever.
+  const declinedFallbacks: Array<{ optionId: string; factorId: string; source: string }> = [];
+
+  // For each analysis option, fill missing interventions from factor node values
+  for (let i = 0; i < analysisOptions.length; i++) {
+    const analysisOpt = analysisOptions[i];
+    const v3Option = options[i]; // Parallel array — same index
+    const connectedFactors = optionFactorAdj.get(v3Option.id) ?? [];
+
+    for (const factorId of connectedFactors) {
+      // Skip if option already has an intervention for this factor
+      if (analysisOpt.interventions[factorId] !== undefined) continue;
+
+      const factorNode = factorNodeMap.get(factorId);
+      if (!factorNode) continue;
+
+      // Task 6: Only skip if category is explicitly set to a non-controllable value.
+      // When category is undefined but an option→factor edge exists, treat as
+      // potentially controllable (the edge IS the signal).
+      if (factorNode.category && factorNode.category !== "controllable") continue;
+
+      // ⛔ NO SILENT INVENTION. This branch used to WRITE a value here —
+      // `observed_state.value`, else the V1 `data.value` passthrough — into an
+      // option that had none.
+      //
+      // Neither is a statement about THIS OPTION. `observed_state.value` is the
+      // factor's CURRENT level, i.e. what happens if nobody acts; writing it as
+      // the option's intervention asserts "this option sets churn to 0.12",
+      // which the user never said. It is invention with a citation, and it is
+      // the more persuasive kind because the number is real — just an answer to
+      // a different question (CLAUDE.md trap 21).
+      //
+      // Two measured consequences, both of which the refusal removes:
+      //  · Every option with no stated magnitude received the SAME value (the
+      //    shared baseline), so the analysis compared strategies that were
+      //    numerically identical while reporting itself ready.
+      //  · Public `options[]` showed `{}` while this copy showed a value, so
+      //    THE SET SHOWN AND THE SET ANALYSED WERE DIFFERENT OBJECTS WITH
+      //    DIFFERENT CONTENTS.
+      //
+      // A path that can only proceed by inventing must refuse, and say why.
+      // The blocker below is that refusal: it names the option, the factor and
+      // the action needed, so the gap is visible rather than papered over.
+      const factorLabel = factorNode.label ?? factorId ?? "Unknown factor";
+      const observedValue = factorNode.observed_state?.value;
+      const rawData = (factorNode as Record<string, unknown>).data;
+      const dataValue =
+        typeof rawData === "object" && rawData !== null && "value" in rawData
+          ? (rawData as { value: unknown }).value
+          : undefined;
+      const currentLevel =
+        typeof observedValue === "number"
+          ? observedValue
+          : typeof dataValue === "number"
+            ? dataValue
+            : undefined;
+      if (currentLevel !== undefined) {
+        declinedFallbacks.push({
+          optionId: analysisOpt.id,
+          factorId,
+          source: typeof observedValue === "number" ? "observed_state" : "data.value",
+        });
+      }
+
+      blockers.push({
+        option_id: analysisOpt.id,
+        option_label: analysisOpt.label,
+        factor_id: factorId,
+        factor_label: factorLabel,
+        blocker_type: "missing_value",
+        // Knowing the current level is genuinely useful to the user — it just
+        // is not an answer. Say both things rather than substituting one for
+        // the other.
+        // ⭐ THE LEVEL IS INTERNAL; THE USER READS A DISPLAY VALUE.
+        // Quoting `currentLevel` here put "is currently 0.5" in front of a user
+        // whose factor reads "50,000" everywhere else in the same payload — see
+        // `renderFactorCurrentLevel` for the witness and the authority order.
+        message:
+          currentLevel !== undefined
+            ? `Factor "${factorLabel}" is currently ${renderFactorCurrentLevel(
+                factorNode,
+                currentLevel,
+                typeof observedValue === "number",
+              )}. What should option "${analysisOpt.label}" set it to?`
+            : `Factor "${factorLabel}" needs a numeric value for option "${analysisOpt.label}"`,
+        suggested_action: "add_value",
+      });
+    }
+
+    // The records projector's direct-binding reasoning marks the subset of its
+    // numeric raw carriers that claim an explicit stated-option magnitude. Such
+    // a magnitude cannot license analysis unless the corresponding rich V3
+    // intervention still carries the same raw value and brief authority.
+    for (const [factorId, rawValue] of Object.entries(v3Option.raw_interventions ?? {})) {
+      if (typeof rawValue !== "number" || !Number.isFinite(rawValue)) continue;
+      // Zero is already represented exactly on the analysis scale and is the
+      // valid status-quo control in the motivating record. It needs no inferred
+      // denominator and must never be relabelled as the stated switch cost.
+      if (rawValue === 0) continue;
+
+      const intervention = v3Option.interventions?.[factorId];
+      const isDirectStatedMagnitude =
+        v3Option.provenance?.source === "brief_extraction" &&
+        /^Direct causal value (?:bound by edge|has unresolved stated-item binding)/.test(
+          intervention?.reasoning ?? "",
+        );
+      if (!isDirectStatedMagnitude) continue;
+      const bindingResolved =
+        intervention !== undefined &&
+        intervention.source === "brief_extraction" &&
+        intervention.raw_value === rawValue;
+      if (bindingResolved) continue;
+
+      const factorLabel = factorNodeMap.get(factorId)?.label ?? factorId;
+      blockers.push({
+        option_id: v3Option.id,
+        option_label: v3Option.label,
+        factor_id: factorId,
+        factor_label: factorLabel,
+        blocker_type: "ambiguous_value",
+        message: `Option "${v3Option.label}" states ${rawValue} for "${factorLabel}", but its analysis-scale source binding is unresolved`,
+        suggested_action: "confirm_value",
+      });
+    }
+
+    // ⛔ NOTHING RE-EVALUATES STATUS HERE ANY MORE, AND THAT IS THE POINT.
+    //
+    // A promotion block stood here: when the fallback had filled interventions
+    // it flipped this COPY to "ready" while public `options[]` — the object the
+    // team is shown — stayed `needs_user_mapping`. The product refused in the
+    // panel and offered an executable "Run the analysis" chip at the same
+    // moment: `chip-generator.ts` reads `input.analysisReady?.status` (:310)
+    // and gates the run chip on it (:358). ⚠ Note the hop — it reads the
+    // PAYLOAD status, never a per-option one (zero per-option status reads in
+    // that file). A per-option promotion reached the chip only because the
+    // payload status is derived from the option statuses. The causal chain is
+    // real; describing it as "the chip reads this status" was one hop short.
+    //
+    // ⚠ WHAT THIS DOES AND DOES NOT GUARANTEE — an earlier version of this
+    // comment claimed the two surfaces "cannot disagree BY CONSTRUCTION". That
+    // is FALSIFIED, and the falsifying call site is downstream of this file:
+    //
+    //   `repairFactorScaleConsistency` (`graph-data-integrity.ts:171-177`)
+    //   binds `v3Body.analysis_ready.options` and MUTATES
+    //   `option.interventions[factorId]` IN PLACE (:285-295). It runs at
+    //   `boundary.ts:63` — AFTER `transformResponseToV3` computed status at
+    //   :37 — and it never touches public `v3Body.options` (0 hits; contrast
+    //   control `analysis_ready.options` = 6, positive control `v3Body` = 18).
+    //
+    // So the honest, narrow claim: no KEY can be added to `interventions` after
+    // its status is computed, because the only writer that did so is gone. The
+    // broad claim does not hold — a later pass can still change a VALUE on this
+    // copy without changing the public one, so the two sets can diverge in
+    // CONTENT even while their statuses agree.
+    //
+    // "By construction" is exactly the class of claim one missed call site
+    // falsifies. State what the code supports.
+  }
+
+  // Task 7: Deduplicate blockers by (option_id, factor_id) pair
+  const blockerKeys = new Set<string>();
+  const dedupedBlockers: AnalysisBlockerT[] = [];
+  for (const blocker of blockers) {
+    const key = `${blocker.option_id ?? "_all_"}::${blocker.factor_id}`;
+    if (!blockerKeys.has(key)) {
+      blockerKeys.add(key);
+      dedupedBlockers.push(blocker);
+    }
+  }
+
+  if (declinedFallbacks.length > 0 || dedupedBlockers.length > 0) {
+    log.info({
+      event: "cee.analysis_ready.fallback_declined",
+      request_id: context.requestId,
+      declined_count: declinedFallbacks.length,
+      blocker_count: dedupedBlockers.length,
+      declined_sources: declinedFallbacks,
+    }, `analysis-ready: declined ${declinedFallbacks.length} factor-level substitution(s) rather than invent an option's lever, ${dedupedBlockers.length} blocker(s)`);
+  }
+  // === End Task 2A+2B ===
+
+  // === intervention_details (CEE-9 / CEE-6) ===
+  // Build a richer display-oriented map alongside the existing numeric-only
+  // `interventions`. Each entry includes a human-readable display_value, the
+  // normalised numeric value, and optional raw_value/unit from factor metadata.
+  // CEE-6 echo stripping is applied inside buildInterventionDetail.
+  for (let i = 0; i < analysisOptions.length; i++) {
+    const analysisOpt = analysisOptions[i];
+    const v3Option = options[i];
+    const interventionEntries = Object.entries(analysisOpt.interventions);
+    if (interventionEntries.length === 0) continue;
+
+    const details: Record<string, InterventionDetail> = {};
+    for (const [factorId, interventionEntry] of interventionEntries) {
+      const factorNode = factorNodeMap.get(factorId);
+      // Interventions may be a bare number or a rich { value, ... } object
+      // (from upstream transforms or a prior upgrade pass). Unwrap for
+      // detail building; the raw entry is kept as-is until the upgrade step.
+      const numericValue = typeof interventionEntry === 'number'
+        ? interventionEntry
+        : (interventionEntry as { value?: unknown })?.value;
+      if (typeof numericValue !== 'number') continue;
+      const v3Intervention = v3Option?.interventions?.[factorId];
+      details[factorId] = buildInterventionDetail(
+        factorId, numericValue, factorNode, v3Intervention, analysisOpt.raw_interventions?.[factorId],
+      );
+    }
+    analysisOpt.intervention_details = details;
+
+    // Upgrade pass: attach display_value directly onto each intervention
+    // object in the flat map, but ONLY when the display_value is materially
+    // different from the bare numeric representation. UI consumers read
+    // from analysis_ready.options[].interventions (unwrapping via
+    // unwrapInterventionValue); having display_value there avoids a
+    // separate intervention_details lookup. flattenInterventions on the
+    // CEE side (pre-PLoT) strips the wrapper back to a bare number, so
+    // inference is unaffected.
+    //
+    // Contract preservation: when buildInterventionDetail only has the
+    // numeric fallback to show (`String(parseFloat(n.toFixed(2)))`), the
+    // intervention stays a bare number. This keeps the common case (plain
+    // normalised factors without unit / LLM display_value) flat and
+    // preserves backward compatibility with callers that expect
+    // `interventions[factorId]` to be a number.
+    for (const [factorId, detail] of Object.entries(details)) {
+      if (!detail.display_value) continue;
+      const current = analysisOpt.interventions[factorId];
+      const numericValue = typeof current === 'number'
+        ? current
+        : typeof (current as { value?: unknown })?.value === 'number'
+          ? (current as { value: number }).value
+          : null;
+      if (numericValue == null) continue;
+      const bareFallback = String(parseFloat(numericValue.toFixed(2)));
+      // Skip upgrade when display_value is just the numeric fallback — no
+      // meaningful human-readable string was produced.
+      if (detail.display_value === bareFallback) continue;
+      const v3Intervention = v3Option?.interventions?.[factorId];
+      const source = v3Intervention && typeof (v3Intervention as { source?: unknown }).source === 'string'
+        ? (v3Intervention as { source: string }).source
+        : undefined;
+      (analysisOpt.interventions as Record<string, unknown>)[factorId] = {
+        value: numericValue,
+        ...(source ? { source } : {}),
+        display_value: detail.display_value,
+      };
+    }
+  }
+  // === End intervention_details ===
 
   // Determine status based on transformed options (Raw+Encoded pattern)
   // Priority: needs_user_mapping > needs_encoding > ready
+  // ⭐ THE HELD BASELINE IS EXEMPT FROM THE EMPTINESS LIMB — AND THIS IS NOT THE
+  // EDIT THE ⛔ NOTE ON `optionsNeedingMapping` BELOW BANS.
+  //
+  // That note protects the loose limb against being narrowed to a STATUS test,
+  // because the connected-but-numberless class must keep holding `payloadStatus`
+  // still while its `interventions` are provably `{}`. The limb stays loose here
+  // for every one of those options. What is carved out is exactly one option,
+  // by the same strict `is_baseline === true` predicate
+  // `analysable-option-gate.ts::isBaselineOption` uses to HOLD it for the run —
+  // an option whose emptiness is a complete statement rather than a missing one.
+  //
+  // ⚠ WITHOUT THIS, FIXING ONLY THE PER-OPTION STATUS MAKES THINGS WORSE, NOT
+  // BETTER: every option reports `ready`, `appendSemanticIssues` mints nothing,
+  // and the payload still says `needs_user_mapping` — a model blocked with ZERO
+  // blockers, the exact shape recorded at `compose/analysis-state-v1.ts`. The
+  // user would lose the (wrong) explanation and keep the (wrong) block.
+  const isHeldBaseline = (o: OptionForAnalysisT): boolean => o.is_baseline === true;
   const hasIncompleteOptions = analysisOptions.some(
-    (o) => o.status === "needs_user_mapping" || Object.keys(o.interventions).length === 0
+    (o) =>
+      o.status === "needs_user_mapping"
+      || (Object.keys(o.interventions).length === 0 && !isHeldBaseline(o))
   );
   const hasEncodingNeeded = analysisOptions.some(
     (o) => o.status === "needs_encoding"
@@ -199,7 +1079,11 @@ export function buildAnalysisReadyPayload(
   // This ensures the payload passes validation (needs_user_mapping requires user_questions)
   if (hasIncompleteOptions && uniqueQuestions.length === 0) {
     const incompleteOptionLabels = analysisOptions
-      .filter((o) => o.status === "needs_user_mapping" || Object.keys(o.interventions).length === 0)
+      .filter(
+        (o) =>
+          o.status === "needs_user_mapping"
+          || (Object.keys(o.interventions).length === 0 && !isHeldBaseline(o)),
+      )
       .map((o) => o.label)
       .slice(0, 3); // Limit to first 3 for readability
 
@@ -220,13 +1104,100 @@ export function buildAnalysisReadyPayload(
   const optionsNeedingEncoding = analysisOptions.filter(
     (o) => o.status === "needs_encoding"
   ).length;
+  // ⭐ STRICT, TO MATCH ITS SIBLING — AND THE REASON IS OBSERVABILITY, NOT TIDINESS.
+  //
+  // This counter kept a LOOSE predicate while `optionsNeedingEncoding` above is
+  // strict, so once a connected-but-numberless option became `needs_encoding` the
+  // SAME option was counted in BOTH: four counted on two options. Worse, an
+  // operator watching `optionsNeedingMapping` to confirm this change landed would
+  // have seen NO MOVEMENT AT ALL, because the `interventions` limb pins the count
+  // regardless of the status. A change justified by a 9/9 measurement would have
+  // shipped un-observable.
+  //
+  // ⛔ DO NOT propagate this edit to `hasIncompleteOptions` (:874-876). That
+  // predicate's loose limb is LOAD-BEARING: it is precisely what holds
+  // `payloadStatus` still for this class (their `interventions` is provably `{}`
+  // there), and the payload status is a user-visible gate input. These two look
+  // like the same predicate and answer different questions — telemetry counts a
+  // STATUS, admission counts an EMPTINESS.
   const optionsNeedingMapping = analysisOptions.filter(
-    (o) => o.status === "needs_user_mapping" || Object.keys(o.interventions).length === 0
+    (o) => o.status === "needs_user_mapping"
   ).length;
 
-  // Determine payload status (priority: needs_user_mapping > needs_encoding > ready)
-  let payloadStatus: "ready" | "needs_user_mapping" | "needs_encoding";
-  if (hasIncompleteOptions) {
+  // === Unreachable controllable factor check ===
+  // Check if any factor nodes in the graph have zero inbound option→factor edges
+  // AND zero factor→factor inbound edges from a factor that does have option edges.
+  // Only controllable factors (not external) trigger this blocker.
+  const optionEdgeTargets = new Set<string>();
+  for (const edge of graph.edges) {
+    if (nodeKindLookup.get(edge.from) === "option" && nodeKindLookup.get(edge.to) === "factor") {
+      optionEdgeTargets.add(edge.to);
+    }
+  }
+
+  // BFS through factor→factor edges to find transitively reachable factors
+  const factorForwardAdj = new Map<string, string[]>();
+  for (const edge of graph.edges) {
+    if (nodeKindLookup.get(edge.from) === "factor" && nodeKindLookup.get(edge.to) === "factor") {
+      const list = factorForwardAdj.get(edge.from) ?? [];
+      list.push(edge.to);
+      factorForwardAdj.set(edge.from, list);
+    }
+  }
+  const transitivelyReachableFactors = new Set<string>(optionEdgeTargets);
+  const bfsQueue = [...optionEdgeTargets];
+  while (bfsQueue.length > 0) {
+    const current = bfsQueue.shift()!;
+    for (const next of factorForwardAdj.get(current) ?? []) {
+      if (!transitivelyReachableFactors.has(next)) {
+        transitivelyReachableFactors.add(next);
+        bfsQueue.push(next);
+      }
+    }
+  }
+
+  // Build set of factors that already have interventions in the options
+  const factorsWithInterventions = new Set<string>();
+  for (const opt of analysisOptions) {
+    for (const factorId of Object.keys(opt.interventions ?? {})) {
+      factorsWithInterventions.add(factorId);
+    }
+  }
+
+  // Find unreachable controllable factors
+  const unreachableControllableBlockers: AnalysisBlockerT[] = [];
+  for (const node of graph.nodes) {
+    if (node.kind !== "factor") continue;
+    // Exclude constraint nodes by ID prefix (compound-goals creates constraint_* nodes with kind=constraint,
+    // but guard against any that might be mis-tagged as factor)
+    if (node.id.startsWith("constraint_")) continue;
+    if (transitivelyReachableFactors.has(node.id)) continue;
+    // Skip factors that already have mapped interventions (reachable via V3 option data)
+    if (factorsWithInterventions.has(node.id)) continue;
+    // Only controllable factors (or undefined category) trigger this blocker.
+    // External and observable factors are contextual — they influence outcomes but
+    // aren't intervention targets, so they're legitimate without option connections.
+    const category = node.category;
+    if (category === "external") continue;
+    if (category === "observable") continue;
+    // Only category === "controllable" or category === undefined triggers blocker
+    unreachableControllableBlockers.push({
+      factor_id: node.id,
+      factor_label: node.label ?? node.id,
+      blocker_type: "missing_value" as const,
+      message: `Factor "${node.label ?? node.id}" is not connected to any option`,
+      suggested_action: "add_value" as const,
+    });
+  }
+  // === End unreachable controllable factor check ===
+
+  // Determine payload status (priority: needs_user_input > needs_user_mapping > needs_encoding > ready)
+  let payloadStatus: AnalysisReadyStatusT;
+  if (dedupedBlockers.length > 0) {
+    payloadStatus = "needs_user_input";
+  } else if (unreachableControllableBlockers.length > 0) {
+    payloadStatus = "needs_user_mapping";
+  } else if (hasIncompleteOptions) {
     payloadStatus = "needs_user_mapping";
   } else if (hasEncodingNeeded) {
     payloadStatus = "needs_encoding";
@@ -234,16 +1205,49 @@ export function buildAnalysisReadyPayload(
     payloadStatus = "ready";
   }
 
+  // Look up goal node for threshold fields
+  const goalNode = graph.nodes.find((n) => n.id === goalNodeId);
+
   const payload: AnalysisReadyPayloadT = {
     options: analysisOptions,
     goal_node_id: goalNodeId,
     status: payloadStatus,
+    bias_findings: [],
+    ...(goalNode?.goal_threshold != null && { goal_threshold: goalNode.goal_threshold }),
+    // ROADMAP 2.315(a) — carry the RAW goal target beside the normalised one.
+    // `goal_threshold` alone left consumers unable to recover the user's own
+    // figure: a £800,000 target surfaced as "reaching ≥ 0.8 count".
+    // RAW-ANCHORED: raw may ride alone, cap and unit only alongside it, so a
+    // cap can never arm the consumer's `norm × cap` re-derivation (see
+    // utils/goal-threshold-trio.ts). Carried verbatim from the enricher's
+    // attested mint; never recomputed here.
+    ...pickGoalThresholdTrio(goalNode),
   };
 
   // Add user_questions when status is needs_user_mapping
   // (uniqueQuestions is guaranteed to be non-empty due to fallback above)
   if (payload.status === "needs_user_mapping") {
+    // Generate questions for unreachable factors if needed
+    if (unreachableControllableBlockers.length > 0 && uniqueQuestions.length === 0) {
+      const factorLabels = unreachableControllableBlockers
+        .map((b) => b.factor_label)
+        .slice(0, 3);
+      uniqueQuestions.push(
+        `Which options should affect: ${factorLabels.join(", ")}?`
+      );
+    }
     payload.user_questions = uniqueQuestions;
+  }
+
+  // Add blockers when status is needs_user_input (Task 2B, deduplicated per Task 7)
+  if (dedupedBlockers.length > 0) {
+    payload.blockers = dedupedBlockers;
+  }
+
+  // Add unreachable controllable factor blockers (informational, alongside existing blockers)
+  if (unreachableControllableBlockers.length > 0) {
+    if (!payload.blockers) payload.blockers = [];
+    payload.blockers.push(...unreachableControllableBlockers);
   }
 
   // Emit telemetry with option status breakdown for observability
@@ -257,7 +1261,22 @@ export function buildAnalysisReadyPayload(
     readyOptionsCount,
     optionsNeedingEncoding,
     optionsNeedingMapping,
+    // Task 2A+2B observability
+    declinedFallbackCount: declinedFallbacks.length,
+    blockerCount: dedupedBlockers.length,
   });
+
+  // F15: Attach fallback metadata for trace surfacing. `fallback_count` is now
+  // always 0 by construction — no value is ever substituted — and the sources
+  // list records what was DECLINED, so the trace shows the refusal happening
+  // rather than falling silent about a path that no longer fires.
+  if (declinedFallbacks.length > 0) {
+    // AnalysisReadyPayload uses .passthrough() — _fallback_meta is a runtime-only trace field
+    (payload as Record<string, unknown>)._fallback_meta = {
+      fallback_count: 0,
+      fallback_sources: declinedFallbacks,
+    };
+  }
 
   return payload;
 }
@@ -332,7 +1351,7 @@ export function validateAnalysisReadyPayload(
 
   // Rule 3: All intervention factor IDs must exist with kind="factor"
   for (const option of payload.options) {
-    for (const factorId of Object.keys(option.interventions)) {
+    for (const factorId of Object.keys(option.interventions ?? {})) {
       if (!factorNodeIds.has(factorId)) {
         // Check if it exists at all but with wrong kind
         if (allNodeIds.has(factorId)) {
@@ -353,20 +1372,31 @@ export function validateAnalysisReadyPayload(
     }
   }
 
-  // Rule 4: Intervention values must be numbers
+  // Rule 4: Intervention values must resolve to finite numbers.
+  //
+  // Interventions may be bare numbers (legacy shape) or rich
+  // { value, display_value?, source? } objects (presentation upgrade).
+  // Both resolve to the same numeric value for PLoT; we validate the
+  // resolved number rather than the wrapping shape.
   for (const option of payload.options) {
-    for (const [factorId, value] of Object.entries(option.interventions)) {
-      if (typeof value !== "number") {
+    for (const [factorId, entry] of Object.entries(option.interventions ?? {})) {
+      const numeric = typeof entry === 'number'
+        ? entry
+        : entry != null && typeof entry === 'object' && typeof (entry as { value?: unknown }).value === 'number'
+          ? (entry as { value: number }).value
+          : undefined;
+      if (numeric === undefined) {
         errors.push({
           code: "INTERVENTION_NOT_NUMBER",
-          message: `Intervention "${factorId}" in option "${option.id}" is not a number: ${typeof value}`,
+          message: `Intervention "${factorId}" in option "${option.id}" is not a number: ${typeof entry}`,
           field: `options[${option.id}].interventions.${factorId}`,
         });
+        continue;
       }
-      if (value === null || value === undefined || Number.isNaN(value)) {
+      if (!Number.isFinite(numeric)) {
         errors.push({
           code: "INTERVENTION_INVALID_NUMBER",
-          message: `Intervention "${factorId}" in option "${option.id}" has invalid number: ${value}`,
+          message: `Intervention "${factorId}" in option "${option.id}" has invalid number: ${numeric}`,
           field: `options[${option.id}].interventions.${factorId}`,
         });
       }
@@ -375,7 +1405,7 @@ export function validateAnalysisReadyPayload(
 
   // Rule 5: Status consistency
   const hasEmptyInterventions = payload.options.some(
-    (o) => Object.keys(o.interventions).length === 0
+    (o) => Object.keys(o.interventions ?? {}).length === 0
   );
 
   if (hasEmptyInterventions && payload.status === "ready") {
@@ -391,6 +1421,15 @@ export function validateAnalysisReadyPayload(
       code: "MISSING_USER_QUESTIONS",
       message: "Status is 'needs_user_mapping' but no user_questions provided",
       field: "user_questions",
+    });
+  }
+
+  // Rule 5b: needs_user_input requires blockers (Phase 2B)
+  if (payload.status === "needs_user_input" && (!payload.blockers || payload.blockers.length === 0)) {
+    errors.push({
+      code: "NEEDS_USER_INPUT_WITHOUT_BLOCKERS",
+      message: "Status is 'needs_user_input' but no blockers provided",
+      field: "blockers",
     });
   }
 
@@ -427,8 +1466,24 @@ export function validateAnalysisReadyPayload(
   }
 
   // Rule 7: Option-level status consistency with raw_interventions
+  //
+  // ⚠ SCOPED TO THE RAW+ENCODED CASE ONLY, and that bound is load-bearing.
+  // `needs_encoding` now has TWO legitimate causes (`option-status.ts`):
+  //   (a) a raw categorical/boolean value awaiting numeric encoding — this rule;
+  //   (b) a connected-but-numberless option, where the mapping exists and only
+  //       the magnitude is outstanding. (b) has NOTHING to encode yet, so
+  //       demanding `raw_interventions` of it fires on a correct payload.
+  // An alarm that reds on the healthy state is the broken alarm every lane
+  // learns to ignore, and this one emits telemetry
+  // (`AnalysisReadyValidationFailed`) plus a warn log on every draft. The
+  // discriminator is whether the option carries anything to encode at all: case
+  // (b) has neither interventions nor raws.
   for (const option of payload.options) {
     if (option.status === "needs_encoding") {
+      const hasNothingToEncode =
+        Object.keys(option.interventions ?? {}).length === 0
+        && (!option.raw_interventions || Object.keys(option.raw_interventions).length === 0);
+      if (hasNothingToEncode) continue;
       // Option claims to need encoding, should have raw_interventions
       if (!option.raw_interventions || Object.keys(option.raw_interventions).length === 0) {
         errors.push({
@@ -494,7 +1549,7 @@ export interface AnalysisReadySummary {
   optionCount: number;
   totalInterventions: number;
   averageInterventionsPerOption: number;
-  status: "ready" | "needs_user_mapping" | "needs_encoding";
+  status: "ready" | "needs_user_mapping" | "needs_encoding" | "needs_user_input" | "blocked";
   userQuestionCount: number;
   readyOptions: number;
   incompleteOptions: number;
@@ -523,4 +1578,178 @@ export function getAnalysisReadySummary(payload: AnalysisReadyPayloadT): Analysi
     readyOptions: payload.options.length - incompleteOptions,
     incompleteOptions,
   };
+}
+
+// ============================================================================
+// Model Adjustments Mapping (Task 2C)
+// ============================================================================
+
+/**
+ * STRP mutation code → user-facing ModelAdjustment code.
+ * Only codes with a mapping are surfaced; unmapped codes are internal-only.
+ */
+const STRP_CODE_MAP: Record<string, ModelAdjustmentT["code"]> = {
+  CATEGORY_OVERRIDE: "category_reclassified",
+  SIGN_CORRECTED: "risk_coefficient_corrected",
+  CONTROLLABLE_DATA_FILLED: "data_filled",
+  ENUM_VALUE_CORRECTED: "enum_corrected",
+};
+
+/**
+ * Graph correction type → user-facing ModelAdjustment code.
+ * Only the `edge_added` type from goal wiring/enrichment is surfaced.
+ */
+const CORRECTION_TYPE_MAP: Record<string, ModelAdjustmentT["code"]> = {
+  edge_added: "connectivity_repaired",
+};
+
+/**
+ * Minimal shape of an STRP mutation for mapping purposes.
+ * Avoids coupling to the full STRPMutation interface.
+ */
+interface MutationInput {
+  code: string;
+  node_id?: string;
+  edge_id?: string;
+  field: string;
+  before: unknown;
+  after: unknown;
+  reason: string;
+}
+
+/**
+ * Minimal shape of a graph correction for mapping purposes.
+ */
+interface CorrectionInput {
+  type: string;
+  target: { node_id?: string; edge_id?: string };
+  before?: unknown;
+  after?: unknown;
+  reason: string;
+}
+
+/**
+ * Map STRP mutations and graph corrections to user-facing model adjustments.
+ *
+ * Only mutations with a known mapping are surfaced. Unmapped internal codes
+ * (e.g., CONSTRAINT_REMAPPED) remain in trace.strp only.
+ *
+ * Task 10B: Malformed entries (missing code/type/reason) are skipped with a warning.
+ *
+ * @param strpMutations - STRP mutation records (from trace.strp.mutations)
+ * @param corrections - Graph correction records (from trace.corrections)
+ * @param nodeLabels - Optional lookup map from node ID → label for enrichment (Task 10A)
+ * @returns Model adjustments for the analysis_ready payload
+ */
+export function mapMutationsToAdjustments(
+  strpMutations?: MutationInput[],
+  corrections?: CorrectionInput[],
+  nodeLabels?: Map<string, string>,
+): ModelAdjustmentT[] {
+  const adjustments: ModelAdjustmentT[] = [];
+
+  for (const m of strpMutations ?? []) {
+    // Task 10B: Skip malformed entries
+    if (!m || typeof m.code !== "string" || typeof m.reason !== "string") {
+      log.warn({ mutation: m }, "Skipping malformed STRP mutation (missing code or reason)");
+      continue;
+    }
+    const code = STRP_CODE_MAP[m.code];
+    if (code) {
+      // Task 10A: Enrich with node label if available
+      const label = m.node_id ? nodeLabels?.get(m.node_id) : undefined;
+      const reason = label ? `${m.reason} (${label})` : m.reason;
+      adjustments.push({
+        code,
+        node_id: m.node_id,
+        edge_id: m.edge_id,
+        field: m.field,
+        before: m.before,
+        after: m.after,
+        reason,
+      });
+    } else {
+      log.debug({ strp_code: m.code, node_id: m.node_id }, "STRP mutation code not mapped to user-facing adjustment (internal-only)");
+    }
+  }
+
+  for (const c of corrections ?? []) {
+    // Task 10B: Skip malformed entries
+    if (!c || typeof c.type !== "string" || typeof c.reason !== "string") {
+      log.warn({ correction: c }, "Skipping malformed graph correction (missing type or reason)");
+      continue;
+    }
+    const code = CORRECTION_TYPE_MAP[c.type];
+    if (code) {
+      // Task 10A: Enrich with node label if available
+      const label = c.target?.node_id ? nodeLabels?.get(c.target.node_id) : undefined;
+      const reason = label ? `${c.reason} (${label})` : c.reason;
+      adjustments.push({
+        code,
+        node_id: c.target?.node_id,
+        edge_id: c.target?.edge_id,
+        field: c.type,
+        before: c.before,
+        after: c.after,
+        reason,
+      });
+    }
+  }
+
+  return adjustments;
+}
+
+// ============================================================================
+// Constraint-Drop Blocker Extraction
+// ============================================================================
+
+/**
+ * Extract STRP constraint-drop mutations as analysis_ready blockers.
+ *
+ * When STRP drops a constraint because the target node doesn't exist in the
+ * graph, the mutation has code "CONSTRAINT_DROPPED". This function converts
+ * those mutations into properly typed AnalysisBlocker entries so users see
+ * that their constraints were silently removed.
+ *
+ * Note: These blockers are informational — they do NOT change analysis_ready.status.
+ * The status is computed before constraint-drop blockers are injected, and is not
+ * recomputed afterwards. This is by design: dropped constraints mean the graph is
+ * still runnable, it just won't enforce those constraints.
+ *
+ * Field mapping:
+ * - factor_id: The target node_id the constraint referenced (from mutation.before)
+ * - factor_label: Same as factor_id (the node doesn't exist, so we have no label)
+ * - message: Includes constraint_id for traceability
+ *
+ * @param mutations - STRP mutation records (from trace.strp.mutations)
+ * @returns Deduplicated blocker entries for dropped constraints
+ */
+export function extractConstraintDropBlockers(
+  mutations: Array<{ code?: string; constraint_id?: string; before?: unknown; reason?: string }>,
+): AnalysisBlockerT[] {
+  const seen = new Set<string>();
+  const blockers: AnalysisBlockerT[] = [];
+
+  for (const m of mutations) {
+    if (m.code !== "CONSTRAINT_DROPPED") continue;
+
+    // Dedup by constraint_id (or target node_id if no constraint_id)
+    const dedupKey = m.constraint_id ?? (typeof m.before === "string" ? m.before : "");
+    if (seen.has(dedupKey)) continue;
+    seen.add(dedupKey);
+
+    // factor_id = target node_id (matches AnalysisBlocker schema: "Factor node ID")
+    const targetNodeId = typeof m.before === "string" ? m.before : "unknown";
+    const constraintLabel = m.constraint_id ? ` (${m.constraint_id})` : "";
+
+    blockers.push({
+      factor_id: targetNodeId,
+      factor_label: targetNodeId,
+      blocker_type: "constraint_dropped" as const,
+      message: `Constraint dropped${constraintLabel}: ${m.reason ?? "target node not found in graph"}`,
+      suggested_action: "review_constraint" as const,
+    });
+  }
+
+  return blockers;
 }

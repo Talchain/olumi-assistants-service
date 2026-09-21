@@ -1,0 +1,982 @@
+/**
+ * Stage 4 Substep 5: Compound goals
+ *
+ * Source: Pipeline B lines 1578-1628
+ * Extracts compound goals from brief, remaps constraint targets against
+ * actual graph nodes, and emits goal_constraints[] for the response.
+ *
+ * Constraint data lives only in goal_constraints[] — constraints are metadata,
+ * not causal factors, so they must NOT be emitted as graph nodes or edges
+ * (F.6: CEE generates, PLoT computes, UI displays).
+ */
+
+import type { StageContext } from "../../types.js";
+import {
+  extractCompoundGoals,
+  toGoalConstraints,
+  normaliseConstraintUnits,
+  remapConstraintTargets,
+} from "../../../compound-goal/index.js";
+import { partitionRiskFramedInversions } from "../../../compound-goal/risk-polarity.js";
+import type { ExtractedGoalConstraint } from "../../../compound-goal/index.js";
+import {
+  partitionUnprovenDirection,
+  detectUncoveredNegatedBounds,
+  detectorItem,
+  targetUnmatchedItem,
+  findProvenUncoveredBounds,
+  prepareBrief,
+  type ProvenUncoveredBound,
+  type DirectionUnresolvedItem,
+} from "../../../compound-goal/direction-gate.js";
+import { generateNodeId } from "../../../compound-goal/extractor.js";
+import { MINTABLE_TARGET_KINDS } from "../../../compound-goal/mintable-target-kinds.js";
+import { buildBoundDisplayName } from "../../../compound-goal/constraint-display-name.js";
+import { deriveStatedTargetBaselinePercent } from "../../../factor-extraction/stated-level.js";
+import { log } from "../../../../utils/telemetry.js";
+import {
+  compileRecordConstraint, sameRecordConstraintEvidence, recordConstraintDisclosure,
+  recordOwnsConstraintSource, recordOwnsConstruction,
+  type RecordConstraintDisposition,
+} from '../../../compound-goal/record-constraint-carrier.js';
+
+
+/**
+ * ROADMAP 2.349 (ROOT HALF) — a deadline is not a hard constraint, and
+ * `goal_constraints[]` is the one array that means "hard constraint".
+ *
+ * WHAT THIS CLOSES. `extractTemporalConstraints` mints a constraint from any
+ * time phrase in the brief ("…within 18 months" → `{operator:'<=', value:18,
+ * unit:'months', label:'Delivery deadline', provenance:'inferred'}`), and
+ * `remapConstraintTargets` step 0 then force-binds it to the GOAL node — a
+ * months-unit limit welded onto a node measured in £. From there it was
+ * persisted, forwarded to PLoT on every analysis run, deterministically
+ * deleted by PLoT (time is not a modelled dimension, so it cannot be), and
+ * finally read BACK by CEE's verdict as "a condition the user set that the
+ * engine did not check" — which withheld the leading option on EVERY run of
+ * EVERY brief containing a time phrase, unescapably, with three untruths in
+ * the copy. Diagnosis: `diagnosis-gap5-leader-null.md`.
+ *
+ * WHY THE FILTER LIVES HERE AND NOT IN THE EXTRACTOR. Two producers write this
+ * array — the regex extractor above and the LLM's own `goal_constraints[]`
+ * (`ctx.llmGoalConstraints`, whose schema declares `deadline_metadata`:
+ * `src/schemas/assist.ts`). Fixing only the regex path would leave the LLM
+ * path minting the identical unevaluable constraint, and the defect would
+ * return the first time the model emitted one. This is the single point BOTH
+ * sources pass through, so the rule is stated ONCE, over the merged set:
+ * a deadline-bearing entry never enters `goal_constraints[]`, whoever made it.
+ *
+ * WHAT IS NOT LOST. The extraction is untouched — `deadline_metadata` is still
+ * produced and still available to `generateConstraintNodes`; the time phrase
+ * is still in the brief and in the goal's own text; and the UI reads
+ * `goal_constraints` nowhere (audit-2262-model-tab.md: 0 occurrences). What is
+ * removed is only the entry's status as a WITHHOLD-TRIGGERING hard constraint
+ * — the one effect it had, and a purely destructive one.
+ *
+ * Detection is by `deadline_metadata` PRESENCE, which is the same signal
+ * PLoT's own DROP RULE 1 uses (`normalisation/constraint-filter.ts`). Same
+ * signal, same verdict, one hop earlier — so CEE stops asking the engine a
+ * question it has already published that it cannot answer.
+ *
+ * Pure. Exported for direct test.
+ */
+export function partitionTemporalNonBinding<T>(
+  constraints: readonly T[],
+): { binding: T[]; temporal: T[] } {
+  const binding: T[] = [];
+  const temporal: T[] = [];
+  for (const c of constraints) {
+    const meta =
+      c !== null && typeof c === "object"
+        ? (c as Record<string, unknown>).deadline_metadata
+        : undefined;
+    (meta !== undefined && meta !== null ? temporal : binding).push(c);
+  }
+  return { binding, temporal };
+}
+
+/**
+ * ROADMAP 2.932 (CEE limb, Codex external review R4 / MF2) — THE FRAME IS
+ * PROTECTED PAYLOAD.
+ *
+ * The merge below dedupes on `node_id::operator` and lets the LLM row win, for
+ * a real reason: it carries richer metadata (source_quote, confidence,
+ * provenance, better label). But the key says nothing about `value_frame`, so
+ * an LLM duplicate that carries none silently DESTROYED the one the regex
+ * extractor deterministically minted (#862) — and ISL then refuses the entire
+ * `constraint_analysis` block with `CONSTRAINT_FRAME_UNSPECIFIED`. Measured at
+ * `ed8aad89` by execution before the fix: brief "Keep churn under 5%" plus an
+ * LLM row on the same key ⇒ surviving row unframed.
+ *
+ * The rule is narrow ON PURPOSE. Reverting precedence wholesale would trade the
+ * lost frame for lost enrichment. Only the frame is protected; every other
+ * field still comes from the model.
+ *
+ * ⚠ AND IT FAILS CLOSED, WHICH IS THE HALF THAT MATTERS MOST. Sharing
+ * `node_id::operator` does NOT make two rows the same quantity: the regex row
+ * may hold `-0.15` from "reduce cost by 15%" (a DELTA) while the model's row
+ * holds `0.85` (a LEVEL) under the identical key. Carrying the frame across
+ * THAT pair would attest a level as a delta and hand ISL a confident WRONG
+ * probability — strictly worse than the gap being closed. So preservation
+ * requires the two rows to state the SAME NUMBER IN THE SAME UNIT, and
+ * otherwise leaves the model row unframed. No unit reconciliation is attempted:
+ * `0.05 fraction` and `5 %` may well be the same quantity, but deciding that is
+ * a guess, and the cost of refusing is one unframed constraint while the cost
+ * of guessing is a wrong number.
+ *
+ * A frame the MODEL supplied does not outrank a deterministic one on the same
+ * number: the draft LLM's `goal_constraints[]` is prompt-only and unenforced,
+ * so a frame appearing there is model prose, not an attestation.
+ *
+ * Pure. Exported for direct test.
+ */
+export function mergeWithProtectedFrame<T extends Record<string, unknown>>(
+  deterministic: T | undefined,
+  model: T,
+): T {
+  if (deterministic === undefined) return model;
+  const frame = deterministic.value_frame;
+
+  const detValue = deterministic.value;
+  const modelValue = model.value;
+  const sameNumber =
+    typeof detValue === "number" &&
+    typeof modelValue === "number" &&
+    Number.isFinite(detValue) &&
+    Number.isFinite(modelValue) &&
+    // Relative tolerance guards only the float round-trip; both sides are
+    // decimal literals in the producers' own units.
+    Math.abs(detValue - modelValue) <=
+      1e-9 * Math.max(1, Math.abs(detValue), Math.abs(modelValue));
+
+  const sameUnit = (deterministic.unit ?? undefined) === (model.unit ?? undefined);
+
+  if (!sameNumber || !sameUnit) return model;
+
+  let out: T = frame === undefined ? model : ({ ...model, value_frame: frame } as T);
+
+  // ⚠⚠ EVIDENCE IS PROTECTED PAYLOAD TOO — ROADMAP 2.1051, round-1 review.
+  //
+  // The merge is `node_id::operator` with "LLM overwrites on same key", so a
+  // model row carrying only a LABEL replaces a correct, QUOTE-BEARING
+  // deterministic row. Before the direction gate that was harmless: the
+  // survivor still had the right operator and value. It is no longer harmless,
+  // because the gate is fail-closed on evidence it cannot verify — so the
+  // overwrite DELETES the very quote that would have proven the row, and the
+  // user loses a limit the deterministic producer had read correctly. Measured
+  // on B1: the brief's only real constraint disappeared and the card read
+  // "Confirm the direction of this limit" about a bound nothing was unsure of.
+  //
+  // The evidence already exists on the row being overwritten, so carry it. This
+  // is the SAME argument as the frame above and it is gated on the SAME
+  // conjunction — same number, same unit — for the same reason: a quote that
+  // describes a DIFFERENT quantity is not evidence about this one, and
+  // attaching it would let the gate "prove" a direction from a sentence about
+  // another number. Fails closed on any mismatch.
+  //
+  // Model-supplied quotes still win when present: they are richer metadata, and
+  // this only fills a hole.
+  const detQuote = deterministic.source_quote;
+  const modelQuote = out.source_quote;
+  const modelHasQuote = typeof modelQuote === "string" && modelQuote.trim().length > 0;
+  if (typeof detQuote === "string" && detQuote.trim().length > 0 && !modelHasQuote) {
+    out = { ...out, source_quote: detQuote } as T;
+  }
+
+  return out;
+}
+
+/**
+ * ROADMAP 2.1051 (limb 2) — WHERE A MINTED BOUND IS ALLOWED TO LAND.
+ *
+ * ⚠⚠ MEASURED, NOT ASSUMED, AND THE MEASUREMENT CHANGED THE DESIGN. Against
+ * all three captured staging graphs the subject "CSAT" binds — through the
+ * SHARED fuzzy matcher, unmodified — to **`goal_4day_success`**, because the
+ * LLM labelled the goal node "Deliver 4-Day Week Within Budget and CSAT Floor"
+ * and the matcher's label fallback hits it. `out_csat` ("Customer Satisfaction
+ * Score") exists in every one of those graphs and is never reached.
+ *
+ * A percentage floor welded onto the GOAL node is precisely the unit-mismatch
+ * class that put `partitionTemporalNonBinding` at the top of this file: a limit
+ * measured in one dimension, bound to a node measured in another, then scored
+ * by an engine that cannot know the difference. A wrong row is strictly worse
+ * than the question the user gets today.
+ *
+ * So the mint binds against MEASURABLE nodes only. A numeric threshold is a
+ * bound on a measured quantity; a goal is the thing being achieved, an option
+ * is a course of action, and neither carries the metric's scale. This narrows
+ * only the NEW path — every existing producer keeps the binding behaviour it
+ * has always had.
+ */
+// ⭐ DERIVED, NOT DECLARED HERE ANY MORE. The draft-records projector now applies
+// the same rule to a model-supplied constraint reference, and two spellings of
+// one rule is trap 12. The constant moved to a zero-import leaf module (see its
+// header for why a leaf and not this file); this stage's use of it is unchanged.
+
+/**
+ * The node-id families the shared matcher will consider.
+ *
+ * ⚠⚠ AND THIS IS THE OTHER HALF OF THE SAME MEASUREMENT. `fuzzyMatchNodeId`
+ * refuses to cross node families (`structural-reconciliation.ts`: "if
+ * (constraintPrefix && nodePrefix && constraintPrefix !== nodePrefix)
+ * continue"), and `generateNodeId` stamps `fac_` on every extracted target. So
+ * a constraint on a metric the model chose to represent as an OUTCOME —
+ * `out_csat` — can never be stem-matched at all: `fac_csat` and `out_csat` are
+ * different families by construction. That is why "We must not let CSAT drop
+ * below 85%" — a phrasing the extractor's own lexicon DOES recognise — was
+ * still lost, and it is a defect with a much wider blast radius than the one
+ * this lane was commissioned to fix (rowed, not fixed here: fixing the shared
+ * matcher changes every producer's binding and is not this lane's to make).
+ *
+ * The mint therefore offers the subject in each family and requires the
+ * answers to AGREE. Exactly one distinct node across the families is a
+ * binding; zero is silence; two or more is an ambiguity, and an ambiguity
+ * resolves to the question the user was already going to be asked.
+ */
+const MINT_CANDIDATE_PREFIXES = ["fac", "out"] as const;
+
+/**
+ * Slugify a metric name under a chosen prefix.
+ *
+ * ⚠ THE EXTRACTOR'S OWN `generateNodeId`, IMPORTED RATHER THAN RE-SPELLED. This
+ * was a byte-identical copy of it, and the comment above already named the
+ * function it was copying — which is the hand-maintained mirror in its most
+ * literal form (CLAUDE.md trap 12). A slug rule that drifts between the minter
+ * and the extractor mints ids no node carries, silently.
+ */
+const candidateNodeId = generateNodeId;
+
+/**
+ * Turn a proven bound into an extractor-shaped row, or `null` when it cannot be
+ * bound to exactly one measurable node.
+ *
+ * Runs through the REAL `remapConstraintTargets` rather than resolving targets
+ * itself — the resolver is corpus-hardened, it is what every other producer
+ * goes through, and a second resolver here would be a mirror of it (trap 12).
+ */
+function bindProvenBound(
+  bound: ProvenUncoveredBound,
+  measurableNodeIds: string[],
+  measurableLabels: Map<string, string>,
+  requestId: string | undefined,
+): ExtractedGoalConstraint | null {
+  const operator = bound.direction === "floor" ? ">=" : "<=";
+  const resolved = new Set<string>();
+  let bindable: ExtractedGoalConstraint | null = null;
+
+  for (const prefix of MINT_CANDIDATE_PREFIXES) {
+    const candidate: ExtractedGoalConstraint = {
+      targetName: bound.subject,
+      targetNodeId: candidateNodeId(bound.subject, prefix),
+      operator,
+      value: bound.value,
+      unit: bound.unit,
+      label: buildBoundDisplayName(bound.subject, operator, bound.amount_text),
+      sourceQuote: bound.sentence,
+      // The construction proved the direction; it did not prove the model's
+      // confidence in the metric NAME. This is the same confidence the
+      // extractor assigns its own subject-bearing negated-floor rows.
+      confidence: 0.85,
+      provenance: "explicit",
+      // An absolute LEVEL on the metric's own scale: the construction states
+      // the quantity itself ("below 85%"), never a change to it.
+      valueFrame: "level",
+    };
+    const remap = remapConstraintTargets(
+      [candidate],
+      measurableNodeIds,
+      measurableLabels,
+      requestId,
+      // No goal node is offered: step 0's goal binding is reserved for temporal
+      // constraints, and a metric threshold is not one.
+      undefined,
+    );
+    const hit = remap.constraints[0];
+    if (hit) {
+      resolved.add(hit.targetNodeId);
+      bindable = hit;
+    }
+  }
+
+  // Exactly one node across every family, or nothing. Two different answers is
+  // an ambiguity, and an ambiguity is a question, not a row.
+  return resolved.size === 1 ? bindable : null;
+}
+
+export function runCompoundGoals(ctx: StageContext): void {
+  if (!ctx.graph) return;
+
+  // The brief NORMALISED AND SPLIT ONCE for the whole stage. The three
+  // direction-gate entry points below (`findProvenUncoveredBounds`,
+  // `partitionUnprovenDirection`, `detectUncoveredNegatedBounds`) each derived
+  // this independently, and the partition derived it AGAIN once per constraint
+  // row. Pure plumbing: each entry point prepares its own when the argument is
+  // absent, so the gate's behaviour is identical with or without it.
+  const preparedBrief = prepareBrief(ctx.effectiveBrief);
+
+  const compoundGoalResult = extractCompoundGoals(ctx.effectiveBrief, { includeProxies: false });
+
+  const graphNodes = (ctx.graph as any).nodes as Array<{ id: string; kind?: string; label?: string }>;
+  const existingNodeIds = new Set(graphNodes.map((n) => n.id));
+  const existingNodeIdList = [...existingNodeIds];
+
+  // Build label map for label-based fuzzy matching fallback
+  const nodeLabels = new Map<string, string>();
+  for (const n of graphNodes) {
+    if (n.label) nodeLabels.set(n.id, n.label);
+  }
+
+  // Find goal node ID for temporal constraint binding
+  const goalNode = graphNodes.find((n) => n.kind === "goal");
+  const goalNodeId = goalNode?.id;
+
+  // ── Regex-extracted constraints ──────────────────────────────────────
+  //
+  // ⚠⚠ HOISTED OUT OF THE BLOCK BELOW. The rows that fall off the remap's
+  // step 6 have to survive to the `ctx.directionUnresolved` assignment near the
+  // end of this function, and they are the whole point of the disclosure added
+  // here — see `unbindableAsks`.
+  let unbindable: ExtractedGoalConstraint[] = [];
+  let regexConstraints: any[] = [];
+  // Internal producer occurrence identity survives wire projection in a
+  // sideband only; goal_constraints remains the one executable representation.
+  const sourceAmountSpans = new Map<object, NonNullable<ExtractedGoalConstraint['sourceAmountSpan']>>();
+  if (compoundGoalResult.constraints.length > 0) {
+    const remapResult = remapConstraintTargets(
+      compoundGoalResult.constraints,
+      existingNodeIdList,
+      nodeLabels,
+      ctx.requestId,
+      goalNodeId,
+    );
+    if (remapResult.constraints.length > 0) {
+      const normalised = normaliseConstraintUnits(remapResult.constraints);
+      regexConstraints = toGoalConstraints(normalised);
+      regexConstraints.forEach((row, index) => {
+        const span = normalised[index]?.sourceAmountSpan;
+        if (span) sourceAmountSpans.set(row, span);
+      });
+    }
+    // ⚠ DEFENSIVE, AND THE ABSENT VALUE IS THE SAFE ONE. `unbindable` is new on
+    // `RemapResult`, and this stage is reached with a MOCKED
+    // `remapConstraintTargets` in several existing suites — a mock that returns
+    // the old three-field shape would otherwise throw here and take the whole
+    // draft down. Absent ⇒ no ask ⇒ exactly today's behaviour, never a crash
+    // and never a fabricated question.
+    unbindable = Array.isArray(remapResult.unbindable) ? remapResult.unbindable : [];
+
+    log.info({
+      event: "cee.compound_goal.regex_extracted",
+      request_id: ctx.requestId,
+      regex_count: regexConstraints.length,
+      constraints_remapped: remapResult.remapped,
+      constraints_rejected_junk: remapResult.rejected_junk,
+      constraints_rejected_no_match: remapResult.rejected_no_match,
+      is_compound: compoundGoalResult.isCompound,
+    }, `Regex extracted ${regexConstraints.length} constraint(s)`);
+  }
+
+  // Records carry an explicit target reference, but no attested value/frame.
+  // Compile those independently; never lend legacy LLM precedence to raw rows.
+  const recordDispositions = (ctx.recordConstraintCandidates ?? []).map((candidate) =>
+    compileRecordConstraint(candidate, ctx.effectiveBrief, graphNodes),
+  );
+  const initiallyValidated = recordDispositions.filter((d) => d.reason === 'record_constraint_validated');
+  for (const disposition of initiallyValidated) {
+    const row = disposition.canonical_constraint!;
+    if (initiallyValidated.some((other) => other !== disposition && (
+      (sameRecordConstraintEvidence(row, other.canonical_constraint!)
+        && row.node_id !== other.canonical_constraint!.node_id)
+      || (row.node_id === other.canonical_constraint!.node_id
+        && row.operator === other.canonical_constraint!.operator
+        && !sameRecordConstraintEvidence(row, other.canonical_constraint!))
+    ))) disposition.reason = 'record_constraint_binding_conflict';
+  }
+  const validatedRecords = recordDispositions.filter((d) => d.reason === 'record_constraint_validated');
+
+  // ── LLM-emitted constraints ─────────────────────────────────────────
+  // LLM constraints have richer metadata (source_quote, confidence,
+  // provenance) and take precedence when both sources produce a
+  // constraint for the same node_id + operator pair.
+  const llmEmitted = Array.isArray(ctx.llmGoalConstraints) ? ctx.llmGoalConstraints : [];
+  const llmConstraints = llmEmitted.filter(
+    (c: any) => c && typeof c === "object" && typeof c.node_id === "string"
+      && existingNodeIds.has(c.node_id),
+  );
+  const llmSkipped = llmEmitted.length - llmConstraints.length;
+
+  // Observability: the node-existence filter above is a SILENT drop. It was
+  // previously logged only when `llmConstraints.length > 0`, so a draft where
+  // EVERY LLM-emitted constraint failed the filter produced no telemetry at
+  // all — and the function then early-returns below, leaving
+  // `ctx.goalConstraints` undefined. That made two very different failures
+  // indistinguishable in staging logs:
+  //   (a) the model never emitted goal_constraints[]           -> prompt problem
+  //   (b) the model emitted them against unmatched node_ids    -> binding problem
+  // Both surface identically as an absent `draft_graph.goal_constraints`.
+  // Log unconditionally on emission, and WARN whenever anything was dropped,
+  // carrying the offending node_ids so (b) is diagnosable from logs alone.
+  if (llmSkipped > 0) {
+    log.warn({
+      event: "cee.compound_goal.llm_dropped",
+      request_id: ctx.requestId,
+      llm_emitted: llmEmitted.length,
+      llm_count: llmConstraints.length,
+      llm_skipped: llmSkipped,
+      skipped_node_ids: llmEmitted
+        .filter((c: any) => !llmConstraints.includes(c))
+        .map((c: any) => (c && typeof c === "object" ? (c.node_id ?? null) : null)),
+      graph_node_ids: existingNodeIdList,
+    }, `LLM emitted ${llmEmitted.length} constraint(s); ${llmSkipped} dropped — node_id does not match any graph node`);
+  } else if (llmConstraints.length > 0) {
+    log.info({
+      event: "cee.compound_goal.llm_emitted",
+      request_id: ctx.requestId,
+      llm_emitted: llmEmitted.length,
+      llm_count: llmConstraints.length,
+      llm_skipped: 0,
+    }, `LLM emitted ${llmConstraints.length} constraint(s) with valid node targets`);
+  }
+
+  // ── Merge: LLM wins on duplicate (node_id + operator) ────────────────
+  // The semantic identity of a constraint is its target node + operator.
+  // constraint_id is an implementation label, not a dedup key — regex and
+  // LLM will assign different IDs to the same semantic constraint.
+  // ⚠ NO EARLY RETURN HERE ANY MORE — ROADMAP 2.1051.
+  //
+  // This used to be `if (llm === 0 && regex === 0) return;`. It cannot be, now
+  // that the direction gate's unmatched-negation detector runs in this
+  // function: a DROPPED FLOOR means BOTH producers emitted nothing, which is
+  // exactly the state the old early return treated as "nothing to do". The
+  // audit's claim (g) — "Retention must not — even during migration — fall
+  // below 92%" — produces NO ROWS from either producer, and returning here
+  // meant the user's floor vanished in silence with nothing left to notice it.
+  //
+  // The empty case is now handled at the two sites that need it (the merge and
+  // the emission log), and the detector runs unconditionally below.
+  const bothProducersEmpty = llmConstraints.length === 0 && regexConstraints.length === 0
+    && validatedRecords.length === 0;
+
+  const merged = new Map<string, any>();
+  const dedupeKey = (c: any) => `${c.node_id}::${c.operator ?? ""}`;
+
+  // Regex first (lower priority)
+  for (const c of regexConstraints) {
+    merged.set(dedupeKey(c), c);
+  }
+  // LLM overwrites on same key (higher priority — richer metadata), EXCEPT the
+  // deterministic `value_frame`, which is an attestation rather than metadata
+  // and survives an unframed duplicate that states the same quantity. See
+  // `mergeWithProtectedFrame` for why it fails closed when they do not
+  // (ROADMAP 2.932).
+  for (const c of llmConstraints) {
+    const key = dedupeKey(c);
+    const deterministic = merged.get(key);
+    const row = mergeWithProtectedFrame(deterministic, c);
+    // Preserve occurrence identity only when this existing merge retained the
+    // deterministic quantity and its exact quote. A different model reading
+    // must not borrow the deterministic row's amount position.
+    const span = deterministic && sourceAmountSpans.get(deterministic);
+    if (span && row.source_quote === deterministic.source_quote
+      && sameRecordConstraintEvidence(deterministic, row)) sourceAmountSpans.set(row, span);
+    merged.set(key, row);
+  }
+
+  // A uniquely located complete records quote owns its quantity's source span,
+  // even if semantic compilation refuses it. Remove competing guesses before
+  // adding admitted candidates; a named refusal cannot execute via a fallback.
+  for (const [key, row] of merged) {
+    if (recordOwnsConstraintSource(recordDispositions, row, ctx.effectiveBrief, sourceAmountSpans.get(row))) merged.delete(key);
+  }
+
+  // The same attested statement has one target: the model's typed reference
+  // replaces only a regex guess about that exact quantity/evidence. No label
+  // matching or graph-node withdrawal happens here. Competing statements stay
+  // a named refusal rather than last-writer-wins.
+  for (const disposition of validatedRecords) {
+    const row = disposition.canonical_constraint!;
+    const existing = merged.get(dedupeKey(row));
+    if (existing && !sameRecordConstraintEvidence(row, existing)) {
+      disposition.reason = 'record_constraint_binding_conflict';
+      continue;
+    }
+    for (const [key, other] of merged) {
+      if (regexConstraints.includes(other) && sameRecordConstraintEvidence(row, other)) merged.delete(key);
+    }
+    merged.set(dedupeKey(row), row);
+  }
+
+  // ROADMAP 2.1051 (limb 2) — MINT FROM THE CONSTRUCTION VERDICT.
+  //
+  // The direction gate's construction table proves directions that NEITHER
+  // producer can mint a row for. Where it has proven one and no producer row
+  // carries that quantity, the honest output is the row, not a question.
+  //
+  // ⭐ WHY HERE, ABOVE THE THREE GATES RATHER THAN BELOW THEM. A minted row is
+  // a CANDIDATE, not a verdict. Inserting it into the merged set means it is
+  // screened by the temporal gate, the risk-polarity gate and the direction
+  // gate itself exactly like any producer row — so an ambiguous sentence still
+  // withholds it, a risk-framed reading still suppresses it, and a contested
+  // node still contests it. Appending it AFTER the partition would have
+  // smuggled a row past every screen this stage exists to apply.
+  //
+  // ⭐ AND WHY COVERAGE IS COMPUTED ON THE MERGED SET. If a producer emitted a
+  // row for this quantity and a gate then suppressed it, that suppression is a
+  // decision — minting a replacement would defeat it. "Covered" therefore means
+  // "a producer spoke for this number", not "a row survived".
+  // Preserve legacy producers' coverage contract. Records speak only for their
+  // located evidence, whether admitted or refused; lending their number to the
+  // old coverage API would suppress a different statement with the same value.
+  const recordRows = new Set(validatedRecords.map((d) => d.canonical_constraint));
+  const producerValues = [...merged.values()]
+    .filter((row) => !recordRows.has(row))
+    .map((c: any) => (typeof c?.value === "number" ? c.value : NaN))
+    .filter((v) => Number.isFinite(v));
+  const provenUncovered = findProvenUncoveredBounds(ctx.effectiveBrief, producerValues, preparedBrief)
+    .filter((bound) => !recordOwnsConstruction(recordDispositions, bound, ctx.effectiveBrief));
+  const mintedFromConstruction: any[] = [];
+  if (provenUncovered.length > 0) {
+    const measurable = graphNodes.filter((n) => MINTABLE_TARGET_KINDS.has(String(n.kind)));
+    const measurableNodeIds = measurable.map((n) => n.id);
+    const measurableLabels = new Map<string, string>();
+    for (const n of measurable) {
+      if (n.label) measurableLabels.set(n.id, n.label);
+    }
+    const bound = provenUncovered
+      .map((b) => bindProvenBound(b, measurableNodeIds, measurableLabels, ctx.requestId))
+      .filter((c): c is ExtractedGoalConstraint => c !== null);
+    if (bound.length > 0) {
+      for (const row of toGoalConstraints(normaliseConstraintUnits(bound))) {
+        const key = dedupeKey(row);
+        // The mint fills a hole. It never overwrites a producer.
+        if (merged.has(key)) continue;
+        merged.set(key, row);
+        mintedFromConstruction.push(row);
+      }
+    }
+    // FAIL LOUD, same contract as the gates below: ids, counts and rule names
+    // only. A silent mint would be indistinguishable from an extractor that
+    // suddenly started matching — the one thing a reader of these logs must be
+    // able to tell apart.
+    log.info({
+      event: "cee.compound_goal.minted_from_construction",
+      request_id: ctx.requestId,
+      proven_uncovered: provenUncovered.length,
+      minted_count: mintedFromConstruction.length,
+      unbound_count: provenUncovered.length - bound.length,
+      t1_ids: provenUncovered.map((b) => b.t1_id),
+      directions: provenUncovered.map((b) => b.direction),
+      minted_node_ids: mintedFromConstruction.map((c: any) => c?.node_id ?? null),
+      minted_operators: mintedFromConstruction.map((c: any) => c?.operator ?? null),
+    }, `${mintedFromConstruction.length} constraint(s) minted from a proven construction verdict; ${provenUncovered.length - bound.length} proven bound(s) could not be bound to a measurable node`);
+  }
+
+  // ROADMAP 2.349 — the single, source-agnostic gate. See
+  // `partitionTemporalNonBinding` for why it is here rather than in either
+  // producer, and for what it deliberately does NOT remove.
+  const { binding: notTemporal, temporal } = partitionTemporalNonBinding([...merged.values()]);
+
+  // ROADMAP 2.653 — THE SECOND source-agnostic gate, on the same merged set and
+  // for the same reason: a threshold the user stated as a RISK ("churn could
+  // rise above 3%") is not a requirement, and the operator both producers mint
+  // for it is the exact inverse of what the sentence means. The regex extractor
+  // keys on the word "above"; the draft prompt tells the model the identical
+  // comparator-only rule. One gate, both producers, stated once in
+  // `risk-polarity.ts` — which is also where the argument for SUPPRESSING
+  // rather than flipping is written out.
+  const { binding: notRiskFramed, inverted } = partitionRiskFramedInversions(notTemporal, ctx.effectiveBrief);
+
+  // ROADMAP 2.1051 — THE THIRD source-agnostic gate, on the same merged set and
+  // for the same reason the two above it exist: both producers are taught to
+  // map the comparator word to the operator and to ignore the negation that
+  // reverses it, so a user's floor reaches the wire as a ceiling. Fixing either
+  // producer alone leaves the other minting the identical lie.
+  //
+  // It runs AFTER the two gates above so temporal and risk-framed rows are
+  // already gone (no double-withholding), and BEFORE `mintStatedTargetBaselines`
+  // so baselines are minted only for rows that will actually ship.
+  //
+  // ⭐ THE PARTITION IS EXACT AND SAYS SO: every row lands in `proven`,
+  // `unresolved` or `nonLimit`, and the gate throws if the three do not sum to
+  // its input. There is no silent-drop path left in this stage.
+  // `nodeLabels` is the map already built at the top of this function for the
+  // remap's label-matching fallback — reused, not rebuilt, so the labels the
+  // clarification copy shows are the same ones the binding used.
+  const {
+    proven: binding,
+    unresolved: directionUnresolved,
+    nonLimit: directionNonLimit,
+  } = partitionUnprovenDirection(notRiskFramed as any[], ctx.effectiveBrief, nodeLabels, preparedBrief);
+
+  // Close each records declaration at this existing authority boundary. The
+  // receipt distinguishes semantic compilation from final gate admission.
+  const dispositionRow = (d: RecordConstraintDisposition, row: unknown): boolean =>
+    !!row && typeof row === 'object' && !!d.canonical_constraint
+    && (row as { node_id?: unknown }).node_id === d.canonical_constraint.node_id
+    && sameRecordConstraintEvidence(d.canonical_constraint, row as Record<string, unknown>);
+  for (const disposition of recordDispositions) {
+    if (disposition.reason !== 'record_constraint_validated') continue;
+    if (binding.some((row) => dispositionRow(disposition, row))) {
+      disposition.reason = 'record_constraint_admitted';
+    } else if (temporal.some((row) => dispositionRow(disposition, row))) {
+      disposition.reason = 'record_constraint_temporal_nonbinding';
+    } else if (inverted.some((entry) => dispositionRow(disposition, entry.constraint))) {
+      disposition.reason = 'record_constraint_risk_nonbinding';
+    } else if (directionNonLimit.some((entry) => dispositionRow(disposition, entry.constraint))) {
+      disposition.reason = 'record_constraint_non_limit';
+    } else if (directionUnresolved.some((entry) => dispositionRow(disposition, entry.constraint))) {
+      disposition.reason = 'record_constraint_direction_unproven';
+    } else {
+      disposition.reason = 'record_constraint_binding_conflict';
+    }
+  }
+  if (recordDispositions.length > 0) {
+    ctx.recordConstraintDispositions = recordDispositions;
+    const refused = recordDispositions.filter((d) => d.reason !== 'record_constraint_admitted');
+    if (refused.length > 0) {
+      ctx.recordDisclosures = [
+        ...(Array.isArray(ctx.recordDisclosures) ? ctx.recordDisclosures : []),
+        ...refused.map(recordConstraintDisclosure),
+      ];
+    }
+    log.info({
+      event: 'cee.compound_goal.records_compiled', request_id: ctx.requestId,
+      candidate_count: recordDispositions.length,
+      admitted_count: recordDispositions.length - refused.length,
+      dispositions: recordDispositions.map((d) => ({
+        stated_index: d.candidate.stated_index, node_id: d.candidate.constraint.node_id, reason: d.reason,
+      })),
+    }, 'Records constraints compiled through existing constraint gates');
+  }
+
+  // The unmatched-negation detector — the DROPPED-bound half of the same defect.
+  // Runs even when both producers emitted nothing (see the note at the merge).
+  // A bound is COVERED when a surviving row carries its quantity, or when a row
+  // from the same sentence was already withheld and therefore already carries
+  // its own question — otherwise the user would be asked twice about one limit.
+  const coveredValues = [
+    ...binding.map((c: any) => (typeof c?.value === 'number' ? c.value : NaN)),
+    ...directionUnresolved.map((u) => (typeof (u.constraint as any)?.value === 'number' ? (u.constraint as any).value : NaN)),
+    ...directionNonLimit.map((n) => (typeof (n.constraint as any)?.value === 'number' ? (n.constraint as any).value : NaN)),
+  ].filter((v) => Number.isFinite(v));
+  const detectorFindings = detectUncoveredNegatedBounds(
+    ctx.effectiveBrief,
+    coveredValues,
+    new Set<number>(),
+    preparedBrief,
+  );
+
+  if (temporal.length > 0) {
+    // FAIL LOUD, not silent (CLAUDE.md trap 12): a drop that leaves no trace
+    // is how the original force-bind survived unexamined for months. Ids and
+    // counts only — no labels, no thresholds, no user text.
+    log.info({
+      event: "cee.compound_goal.temporal_not_binding",
+      request_id: ctx.requestId,
+      dropped_count: temporal.length,
+      dropped_constraint_ids: temporal.map((c: any) => c?.constraint_id ?? null),
+      dropped_node_ids: temporal.map((c: any) => c?.node_id ?? null),
+      reason: "temporal_not_a_hard_constraint",
+    }, `${temporal.length} temporal constraint(s) withheld from goal_constraints[] — a deadline is not evaluable on a static causal graph`);
+  }
+
+  if (inverted.length > 0) {
+    // FAIL LOUD, same contract as the temporal gate above: ids, counts and the
+    // contradicted polarity only — no labels, no thresholds, no user text.
+    // A silent suppression here would be indistinguishable from an extractor
+    // that simply stopped matching, which is the one thing a reader of these
+    // logs must be able to tell apart.
+    log.info({
+      event: "cee.compound_goal.risk_framed_inversion_withheld",
+      request_id: ctx.requestId,
+      dropped_count: inverted.length,
+      dropped_constraint_ids: inverted.map((e) => (e.constraint as any)?.constraint_id ?? null),
+      dropped_node_ids: inverted.map((e) => (e.constraint as any)?.node_id ?? null),
+      dropped_operators: inverted.map((e) => (e.constraint as any)?.operator ?? null),
+      contradicted_polarities: inverted.map((e) => e.polarity),
+      reason: "operator_contradicts_risk_polarity_of_source_phrase",
+    }, `${inverted.length} constraint(s) withheld from goal_constraints[] — the operator contradicts the risk framing of the phrase it was minted from`);
+  }
+
+  // ROADMAP 2.1051 — FAIL LOUD, same contract as the two gates above: ids,
+  // counts, operators and RULE NAMES only. No labels, no thresholds, no user
+  // text. A silent withholding here would be indistinguishable from an
+  // extractor that simply stopped matching, which is the one thing a reader of
+  // these logs must be able to tell apart.
+  if (directionUnresolved.length > 0 || detectorFindings.length > 0 || directionNonLimit.length > 0) {
+    log.info({
+      event: "cee.compound_goal.direction_unresolved",
+      request_id: ctx.requestId,
+      withheld_count: directionUnresolved.length,
+      detector_count: detectorFindings.length,
+      non_limit_count: directionNonLimit.length,
+      constraint_ids: directionUnresolved.map((u) => (u.constraint as any)?.constraint_id ?? null),
+      node_ids: directionUnresolved.map((u) => (u.constraint as any)?.node_id ?? null),
+      operators: directionUnresolved.map((u) => (u.constraint as any)?.operator ?? null),
+      reasons: directionUnresolved.map((u) => u.reason),
+      non_limit_reasons: directionNonLimit.map((n) => n.reason),
+    }, `${directionUnresolved.length} constraint(s) withheld from goal_constraints[] — direction not proven; ${detectorFindings.length} stated bound(s) matched no row; ${directionNonLimit.length} row(s) declined as non-limits`);
+  }
+
+  // Stash the reusable unresolved records for the package stage to surface.
+  //
+  // ⚠ THE APPEND CANNOT HAPPEN HERE. `ctx.coaching` is REGENERATED wholesale by
+  // the Stage 4.5 coaching pass, so anything appended at Stage 4 is overwritten
+  // before it can reach a user. The package stage is the first point after that
+  // regeneration — see the append site there, and the spec that pins it.
+  //
+  // Internal only: this never becomes a wire field. If a future consumer needs
+  // the unresolved set on the wire, that is an additive `direction_unresolved[]`
+  // block beside `goal_constraints` on the draft_graph body — a schemas-train
+  // row, deliberately not assumed here.
+  // ⭐ THE THIRD SOURCE — A LIMIT THAT BOUND TO NOTHING (2026-08-30).
+  //
+  // WIRE-WITNESSED DEFECT, 10 runs of one brief across two deployed staging
+  // builds: "our support budget for the year is £240,000 … without going over
+  // budget" is extracted DETERMINISTICALLY every time and dropped at
+  // `remapConstraintTargets` step 6 in 8 of them, because two or more drafted
+  // node labels contain the word "budget" and the shared matcher binds only on
+  // a UNIQUE label hit. Before this, the only trace was the integer in the
+  // `constraints_rejected_no_match` log field above — nothing a user could see.
+  // The £240,000 reached no numeric field of the graph in any of the 8.
+  //
+  // ⭐ ASKING IS THE SANCTIONED EXIT, and it is the ONLY one available here.
+  // The ambiguity is genuine ("Annual Support Budget Consumed" and "Budget
+  // Overrun Risk" are both plausible), so the alternatives are both worse:
+  // widening the label predicate is the four-round oscillation trap, and
+  // narrowing the candidate set to the mint's {outcome,factor} was MEASURED in
+  // advance against all 10 real node sets — it removes the two bad bindings and
+  // buys four bindings to a factor whose values are MARGINAL in those very runs
+  // plus one to "Remaining Annual Budget", the opposite direction. That trades
+  // a silent gap for a confident wrong number.
+  //
+  // ⚠ THE ROW IS STILL DROPPED. This adds a question; it does not smuggle an
+  // unbound constraint onto the wire. Binding is sequenced AFTER the frame
+  // question (the target nodes carry `scale_frame: 200000` against a stated
+  // £240,000, i.e. 1.2 — outside the [0,1] range interventions use), and this
+  // change deliberately does not touch it.
+  //
+  // ⚠⚠ AND IT SPEAKS ONLY WHERE NOTHING ELSE DOES — A CORRECTED PREMISE THE
+  // EXISTING SUITE CAUGHT. The first version of this raised an ask for every
+  // step-6 drop, and `direction-gate-merge-boundary.test.ts` reddened on four
+  // cases. Two facts made it wrong:
+  //
+  //   (a) THE EXTRACTOR EMITS SEVERAL OVERLAPPING ROWS PER SENTENCE. Measured
+  //       at this tip: "Keep marketing spend under £1500000." yields THREE —
+  //       `marketing spend` (binds), `Keep marketing spend`, and a catch-all
+  //       `unspecified`. Asking per drop asks about a limit that a SIBLING ROW
+  //       FROM THE SAME SENTENCE just bound successfully.
+  //   (b) THE DIRECTION QUESTION OUTRANKS THIS ONE. "Don't let NRR drop below
+  //       78%" both fails to bind AND has an unproven direction. Asking the
+  //       referent instead of the direction would quietly undo ROADMAP 2.1051 —
+  //       and an unproven direction is a LIE RISK (a floor shipped as a
+  //       ceiling) where an unbound limit is a GAP. A lie outranks a gap.
+  //
+  // So the filter runs against everything that has ALREADY spoken for the
+  // quantity — surviving rows, withheld rows, declined rows and the detector's
+  // own findings — and this ask fires only on the residue. That makes the
+  // change strictly ADDITIVE: on every input where any other channel speaks,
+  // this stage's output is byte-identical to before.
+  //
+  // Deduped BY VALUE, keeping the first, because the extractor emits its more
+  // specific rows first — so "budget" wins over "unspecified" for the metric
+  // name the user is shown.
+  //
+  // APPENDED LAST so the two existing sources keep their positions in the
+  // renderer's first-three window.
+  const alreadyAsked = new Set<number>([
+    ...coveredValues,
+    ...detectorFindings
+      .map((f) => detectorItem(f).value)
+      .filter((v): v is number => typeof v === 'number' && Number.isFinite(v)),
+  ]);
+  const unbindableAsks: DirectionUnresolvedItem[] = [];
+  for (const c of unbindable) {
+    const value = typeof c?.value === 'number' && Number.isFinite(c.value) ? c.value : null;
+    if (value === null || alreadyAsked.has(value)) continue;
+    alreadyAsked.add(value);
+    unbindableAsks.push(targetUnmatchedItem(c));
+  }
+
+  ctx.directionUnresolved = [
+    ...directionUnresolved.map((u) => u.item),
+    ...detectorFindings.map((f) => detectorItem(f)),
+    ...unbindableAsks,
+  ];
+
+  if (unbindableAsks.length > 0) {
+    // FAIL LOUD, same contract as this stage's other gates: counts and target
+    // names only — no thresholds, no user text.
+    log.info({
+      event: "cee.compound_goal.target_unmatched_asked",
+      request_id: ctx.requestId,
+      unbindable_count: unbindableAsks.length,
+      dropped_count: unbindable.length,
+      target_names: unbindableAsks.map((i) => i.metric_text),
+      graph_node_count: existingNodeIdList.length,
+    }, `${unbindableAsks.length} stated limit(s) matched no node on the model — asking the user which part they apply to`);
+  }
+
+  // ⚠ THE MINT IS A THIRD PRODUCER, AND THIS RETURN HAS TO KNOW IT. The live
+  // defect is precisely the state where BOTH original producers emit nothing:
+  // returning here on that condition would build the row, log it, and then drop
+  // it on the floor one line before it was assigned — the silent-drop shape
+  // this stage's own comments were written to end.
+  if (bothProducersEmpty && mintedFromConstruction.length === 0) return;
+
+  ctx.goalConstraints = binding;
+
+  // ROADMAP 2.877 (link 2) — the DRAFT-path twin of the add_constraint
+  // stated-baseline mint. See `mintStatedTargetBaselines` for the rules; it
+  // runs HERE because this is the single place that holds the brief, the
+  // bound rows WITH their frames, and the mutable V1 graph at once (the
+  // enricher — the twin site the 2.877 brief nominated — writes no constraint
+  // rows and never sees the constraint→node binding; a corrected premise).
+  mintStatedTargetBaselines(
+    ctx.effectiveBrief,
+    binding,
+    ctx.graph as { nodes?: unknown[]; edges?: unknown[] },
+    ctx.requestId,
+  );
+
+  log.info({
+    event: "cee.compound_goal.integrated",
+    request_id: ctx.requestId,
+    constraint_count: ctx.goalConstraints.length,
+    from_regex: regexConstraints.length,
+    from_llm: llmConstraints.length,
+    from_records: recordDispositions.filter((d) => d.reason === 'record_constraint_admitted').length,
+    temporal_withheld: temporal.length,
+    risk_inversion_withheld: inverted.length,
+    direction_unresolved_withheld: directionUnresolved.length,
+    direction_non_limit: directionNonLimit.length,
+    direction_detector_asks: detectorFindings.length,
+  }, "Compound goal constraints emitted to goal_constraints[]");
+}
+
+/**
+ * ROADMAP 2.877 (link 2) — mint `observed_state.baseline` carriers for
+ * constraint targets whose CURRENT LEVEL the brief actually states.
+ *
+ * WHY: a level-framed constraint on an outcome/risk target refuses at ISL
+ * (`CONSTRAINT_NOT_CONVERTIBLE / missing_target_baseline`) because the
+ * level→sample-frame conversion reads `observed_state.baseline` on the TARGET
+ * node and no producer mints it. The chat path mints in `add_constraint`; this
+ * is the draft twin, sharing the SAME extractor
+ * (`factor-extraction/stated-level.ts`) so the two paths cannot drift.
+ *
+ * RELAY-ONLY, NEVER INVENTED: `deriveStatedTargetBaselinePercent` returns a
+ * number only for an actual present-state statement in the brief ("Churn is
+ * currently 12%."), bound to the target by its label. No statement ⇒ no mint ⇒
+ * the honest ISL refusal stands.
+ *
+ * THE DRAFT CELL — each conjunct derived from a consumer's bytes:
+ *   - `value_frame === 'level'`: deltas need no baseline; unframed rows must
+ *     keep failing closed at the frame hop;
+ *   - row unit 'fraction' with 0 ≤ value ≤ 1 — the pre-divided percent
+ *     convention `normaliseConstraintUnits` produces. A draft '%'-unit row
+ *     (value ≥ 1, i.e. ≥100%) is EXCLUDED: PLoT's unit_percent rung reads it
+ *     as a RAW percent (1.5 → 0.015) while the draft convention means a
+ *     fraction (150%) — a pre-existing cross-repo convention skew a baseline
+ *     must not convert into a confident wrong probability;
+ *   - target kind outcome|risk: factors get a PLoT ParameterUncertainty
+ *     (translator-v3.ts:674) that makes the conversion refuse — a baseline is
+ *     inert there (2.877 measured arm H). Goals have their own mint (2.273);
+ *   - no goal_threshold_cap anywhere on the node (node level or data level,
+ *     mirroring PLoT's collectGoalThresholdNodeMeta): that cap outranks the
+ *     deriveRange ladder rung this mint's shape relies on;
+ *   - NON-ROOT: ISL refuses roots (`root_target`) and reads a root's observed
+ *     value as its sample base — a root mint buys nothing and moves the
+ *     analysis instead;
+ *   - FILL-ONLY: existing `data.baseline` (whoever wrote it) is never
+ *     overwritten, and an existing carrier is only extended when its scale
+ *     fields agree with the minted shape.
+ *
+ * THE SHAPE {value: frac, baseline: frac, unit: 'fraction', cap: 1,
+ * extractionType: 'explicit'} is the V1 carrier `transformResponseToV3`'s
+ * factor-data branch projects into `observed_state` with
+ * `source: 'brief_extraction'` (verified by execution at this tip). cap 1
+ * declares the IDENTITY scale, so PLoT's deriveRange resolves [0,1] for this
+ * node and the 'fraction' row the mint serves normalises to itself — without
+ * it, deriveRange's inferred-baseline rung would turn baseline 0.12 into
+ * range [0,0.24] and rescale a 0.05 row into 0.208, a confident wrong number.
+ *
+ * Pure over its inputs (mutates only `graph.nodes[].data`). Exported for
+ * direct test. Returns the number of nodes minted.
+ */
+export function mintStatedTargetBaselines(
+  brief: string | null | undefined,
+  constraints: readonly unknown[],
+  graph: { nodes?: unknown[]; edges?: unknown[] } | null | undefined,
+  requestId?: string,
+): number {
+  if (typeof brief !== "string" || brief.trim() === "") return 0;
+  const nodes = Array.isArray(graph?.nodes) ? (graph!.nodes as Array<Record<string, any>>) : [];
+  const edges = Array.isArray(graph?.edges) ? (graph!.edges as Array<Record<string, any>>) : [];
+  if (nodes.length === 0) return 0;
+
+  let minted = 0;
+  for (const raw of constraints) {
+    if (raw === null || typeof raw !== "object") continue;
+    const row = raw as Record<string, any>;
+    if (row.value_frame !== "level") continue;
+    if (row.unit !== "fraction") continue;
+    if (typeof row.value !== "number" || !(row.value >= 0 && row.value <= 1)) continue;
+
+    const node = nodes.find((n) => n?.id === row.node_id);
+    if (!node) continue;
+    if (node.kind !== "outcome" && node.kind !== "risk") continue;
+    if (node.goal_threshold_cap != null || node.data?.goal_threshold_cap != null) continue;
+    if (!edges.some((e) => e?.to === node.id)) continue;
+
+    const data = node.data as Record<string, any> | undefined;
+    if (data !== undefined) {
+      if ("interventions" in data) continue; // option-shaped carrier — never a mint target
+      if (data.baseline !== undefined) continue; // fill-only
+      if (data.unit !== undefined && data.unit !== "fraction") continue;
+      if (data.cap !== undefined && data.cap !== 1) continue;
+    }
+
+    // Review B2, WIDENED by 2.960 R2 — a generic subject ("The rate is 12%")
+    // that binds MORE THAN ONE candidate label attests none of them, and the
+    // competing population is EVERY other labelled node whatever its kind:
+    // the old outcome/risk population mirrored the KIND gate, so a goal 'Win
+    // rate' or a factor 'Customer churn' was invisible to the ambiguity rule.
+    // Words do not read kinds. Same rule as the chat path so the two passes
+    // cannot disagree about ambiguity.
+    const statedPercent = deriveStatedTargetBaselinePercent(
+      brief,
+      typeof node.label === "string" ? node.label : undefined,
+      nodes
+        .filter((n) => n?.id !== node.id)
+        .map((n) => (typeof n?.label === "string" ? n.label : undefined)),
+    );
+    if (statedPercent === undefined) continue;
+
+    const frac = statedPercent / 100;
+    node.data = {
+      ...data,
+      value: frac,
+      baseline: frac,
+      unit: "fraction",
+      cap: 1,
+      raw_value: frac,
+      extractionType: "explicit",
+    };
+    minted += 1;
+
+    // FAIL LOUD, same contract as this stage's other gates: ids and numbers
+    // only, no labels, no user text.
+    log.info(
+      {
+        event: "cee.compound_goal.target_baseline_minted",
+        request_id: requestId,
+        node_id: node.id,
+        constraint_id: row.constraint_id ?? null,
+        baseline: frac,
+      },
+      "Stated current level minted as constraint-target baseline carrier",
+    );
+  }
+  return minted;
+}

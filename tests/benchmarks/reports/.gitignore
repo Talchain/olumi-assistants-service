@@ -1,0 +1,2 @@
+# Benchmark reports are generated artifacts — don't commit
+*.json

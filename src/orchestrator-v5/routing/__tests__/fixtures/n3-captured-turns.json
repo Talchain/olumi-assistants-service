@@ -1,0 +1,146 @@
+{
+  "_README": "REAL CAPTURED USER TURNS — recorded wire turns from dated journey-witness evidence. APPEND-ONLY: these are records of what users actually sent on dated builds (CLAUDE.md trap 14b). Never edit a message to keep it current; add new rows instead.",
+  "_derived": "2026-08-19, N-3 re-measurement lane, CEE staging 877affe2",
+  "turns": [
+    {
+      "id": "a1-turn1",
+      "origin": "olumi-docs/witness-998-2026-08-16/a1-turn1-request.json",
+      "source": "composer",
+      "expect": "demoted",
+      "message": "We're a 40-person B2B SaaS company doing about £3.2m ARR, growing 15% a year, which is slower than we'd like. The board wants a plan by end of quarter. We're weighing three moves: expanding into the German market (probably £400k up front for localisation, sales hires and compliance — our CEO thinks it could add £800k ARR within 18 months but our head of sales thinks that's optimistic); doubling down on UK mid-market with a partner channel (cheaper, maybe £150k, but partners take a 25% cut and we've never run a channel before); or building the analytics add-on customers keep asking for (two quarters of engineering time, roughly £250k in payroll, might lift retention from 88% to 92% and support a 10% price rise). We can't fund more than one properly. Cash runway is about 14 months. The team is nervous about spreading ourselves thin, and honestly we disagree about how price-sensitive our customers actually are. What should we do?"
+    },
+    {
+      "id": "a1-turn2",
+      "origin": "olumi-docs/witness-998-2026-08-16/a1-turn2-request.json",
+      "source": "chip",
+      "expect": "demoted",
+      "message": "Go ahead and draft the model."
+    },
+    {
+      "id": "a1-turn3",
+      "origin": "olumi-docs/witness-998-2026-08-16/a1-turn3-request.json",
+      "source": "chip_click",
+      "expect": "admitted",
+      "message": "Run analysis."
+    },
+    {
+      "id": "a2-turn1",
+      "origin": "olumi-docs/witness-998-2026-08-16/a2-turn1-request.json",
+      "source": "composer",
+      "expect": "demoted",
+      "message": "Our family-run logistics firm (120 drivers, £18m turnover, thin 4% margins) has to respond to the city's new clean-air zone within a year. We see three routes: replacing a third of the diesel fleet with electric vans now (about £2.1m capex, grants might cover 20%, but charging infrastructure at the depot is another £300k and our ops director doubts the range figures); paying the daily charges and passing costs to customers (roughly £190k a year, but two big contracts have clauses letting them exit if prices rise more than 5%); or subcontracting inner-city deliveries to a green courier (quotes suggest 12% of revenue on affected routes, we keep the trunk work, but we lose the customer relationship on the last mile). Diesel resale values are falling and nobody agrees how fast. The bank will lend but wants a plan. Which way should we jump?"
+    },
+    {
+      "id": "a2-turn2",
+      "origin": "olumi-docs/witness-998-2026-08-16/a2-turn2-request.json",
+      "source": "composer",
+      "expect": "demoted",
+      "message": "The subcontractor cost should be 12% of revenue on the affected routes."
+    },
+    {
+      "id": "a2-turn3",
+      "origin": "olumi-docs/witness-998-2026-08-16/a2-turn3-request.json",
+      "source": "composer",
+      "expect": "demoted",
+      "message": "Set it to 0.12."
+    },
+    {
+      "id": "a2-turn4",
+      "origin": "olumi-docs/witness-998-2026-08-16/a2-turn4-request.json",
+      "source": "composer",
+      "expect": "demoted",
+      "message": "For the subcontracting option, set the effect value on Subcontractor cost as share of affected revenue to 0.12 — a share, no unit."
+    },
+    {
+      "id": "b-turn1",
+      "origin": "olumi-docs/witness-998-2026-08-16/b-turn1-request.json",
+      "source": "composer",
+      "expect": "demoted",
+      "message": "We need to decide whether to move our data platform off our current vendor. The options are staying put, moving to a cheaper competitor, or bringing it in-house. Migration risk worries the team, and the in-house route needs hiring we have not scoped. We have not put numbers on any of this yet. What is the smartest path?"
+    },
+    {
+      "id": "j1r1-t1",
+      "origin": "olumi-docs/witness-acceptance-2026-08-17/captures/j1r1-t1-request.json",
+      "source": "composer",
+      "expect": "demoted",
+      "message": "We are a regional facilities-services firm, about 210 staff, mostly commercial cleaning and grounds maintenance across Yorkshire. Our biggest client, roughly a third of revenue, has told us they are putting the contract out to tender next spring. We are arguing about what to do: bid aggressively to keep it even if margins go to near zero; diversify fast by buying a small M&E maintenance firm we have been circling (the owner wants to retire, price not agreed, somewhere between £600k and £900k depending on who you ask); or invest in a sales push into the NHS estates market, which we have never sold into and whose procurement cycle scares us. Finance says cash is tight but will not put a number on it. The MD and the ops director disagree about whether we could even service NHS work with the current management layer. And nobody has agreed what success actually looks like — keeping revenue flat, protecting margin, or something else. We need a direction before the January board meeting."
+    },
+    {
+      "id": "j1r2-t1",
+      "origin": "olumi-docs/witness-acceptance-2026-08-17/captures/j1r2-t1-request.json",
+      "source": "composer",
+      "expect": "demoted",
+      "message": "I run product at a 60-person consumer fintech app, around 400k monthly actives, flat for six months. We can only staff one big bet properly this half and the exec team is split three ways. Growth wants to restart paid acquisition with a £300k budget — last time CAC blew out to £41 and we stopped, but they reckon with the new referral loop it lands nearer £25. The CEO wants to launch a paid premium tier at £7.99 a month; our own survey suggests maybe 4% of actives would convert in the first year, though nobody trusts the survey much. I want to rebuild onboarding instead: activation is 34% today, the redesign costs roughly £180k of engineering time over one quarter, and comparable fixes elsewhere lifted activation to around 45%. Retention is wobbling and the dashboards disagree about churn, which makes every argument circular. The board meets in six weeks and wants a single committed direction."
+    },
+    {
+      "id": "j3-t1",
+      "origin": "olumi-docs/witness-acceptance-2026-08-17/captures/j3-t1-request.json",
+      "source": "composer",
+      "expect": "demoted",
+      "message": "How do you decide which factors matter in the analysis?"
+    },
+    {
+      "id": "j4-t4-chip1",
+      "origin": "olumi-docs/witness-acceptance-2026-08-17/captures/j4-t4-chip1-request.json",
+      "source": "chip",
+      "expect": "demoted",
+      "message": "Set the subcontracting inner-city deliveries to a green courier option's effect on Subcontractor cost as share of affected-route revenue to 0.12."
+    },
+    {
+      "id": "j4-t5-diag",
+      "origin": "olumi-docs/witness-acceptance-2026-08-17/captures/j4-t5-diag-request.json",
+      "source": "composer",
+      "expect": "demoted",
+      "message": "For the subcontracting inner-city deliveries to a green courier option, set the effect value on Subcontractor cost as share of affected-route revenue to 0.12 — a share, no unit."
+    },
+    {
+      "id": "cj-analyse",
+      "origin": "olumi-docs/feedback-2026-08-16/COMPOSED-JOURNEY-WITNESS-2026-08-18-B.md:200",
+      "source": "composer",
+      "expect": "admitted",
+      "message": "Please run the analysis now."
+    },
+    {
+      "id": "cj-R1",
+      "origin": "olumi-docs/feedback-2026-08-16/COMPOSED-JOURNEY-WITNESS-2026-08-18-B.md:282",
+      "source": "composer",
+      "expect": "demoted",
+      "message": "That would push sales headcount up a lot, set it to 0.8."
+    },
+    {
+      "id": "cj-R2",
+      "origin": "olumi-docs/feedback-2026-08-16/COMPOSED-JOURNEY-WITNESS-2026-08-18-B.md:283",
+      "source": "composer",
+      "expect": "demoted",
+      "message": "Yes, that one — under the enterprise sales option."
+    },
+    {
+      "id": "cj-R3",
+      "origin": "olumi-docs/feedback-2026-08-16/COMPOSED-JOURNEY-WITNESS-2026-08-18-B.md:284",
+      "source": "composer",
+      "expect": "demoted",
+      "message": "0.8 — that's what the enterprise sales option should set Enterprise sales headcount and spend to."
+    },
+    {
+      "id": "cj-P1",
+      "origin": "olumi-docs/feedback-2026-08-16/COMPOSED-JOURNEY-WITNESS-2026-08-18-B.md:370",
+      "source": "composer",
+      "expect": "demoted",
+      "message": "Why did you add a status quo option? I never mentioned one — where did that come from?"
+    },
+    {
+      "id": "cj-P2",
+      "origin": "olumi-docs/feedback-2026-08-16/COMPOSED-JOURNEY-WITNESS-2026-08-18-B.md:384",
+      "source": "composer",
+      "expect": "demoted",
+      "message": "What is the status quo option based on? I don't remember mentioning it in my brief."
+    },
+    {
+      "id": "n101",
+      "origin": "olumi-docs/feedback-2026-08-16/ISSUE-LEDGER.md#N-101",
+      "source": "composer",
+      "expect": "demoted",
+      "message": "Doubling down on enterprise sales would push sales headcount up a lot - set it to 0.8."
+    }
+  ]
+}

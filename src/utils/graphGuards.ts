@@ -10,6 +10,7 @@
  */
 
 import type { GraphT, NodeT, EdgeT } from "../schemas/graph.js";
+import { isDirectedEdge } from "../schemas/graph.js";
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../config/graphCaps.js";
 import { log } from "./telemetry.js";
 import type { CorrectionCollector } from "../cee/corrections.js";
@@ -74,7 +75,9 @@ export function detectCycles(nodes: NodeT[], edges: EdgeT[]): string[][] {
   const nodeIds = new Set(nodes.map(n => n.id));
   const adjList = new Map<string, string[]>();
 
-  // Build adjacency list
+  // Build adjacency list — only directed edges participate in cycle detection.
+  // Bidirected edges (edge_type === 'bidirected') represent unmeasured confounders,
+  // not directed causal paths, and cannot form cycles.
   for (const node of nodes) {
     adjList.set(node.id, []);
   }
@@ -83,6 +86,7 @@ export function detectCycles(nodes: NodeT[], edges: EdgeT[]): string[][] {
     if (!nodeIds.has(edge.from) || !nodeIds.has(edge.to)) {
       continue; // Skip invalid edges
     }
+    if (!isDirectedEdge(edge)) continue; // Skip bidirected edges
     adjList.get(edge.from)!.push(edge.to);
   }
 
@@ -149,8 +153,9 @@ export function breakCycles(
       const from = cycle[cycle.length - 2];
       const to = cycle[cycle.length - 1];
 
-      // Find all edges with this from::to pair
-      const matchingEdges = edges.filter(e => e.from === from && e.to === to);
+      // Find all directed edges with this from::to pair.
+      // Bidirected edges must not be candidates for removal since they can't form cycles.
+      const matchingEdges = edges.filter(e => e.from === from && e.to === to && isDirectedEdge(e));
 
       // Remove only the first edge (by ID sort order) to be deterministic
       if (matchingEdges.length > 0) {
@@ -213,14 +218,17 @@ export function findIsolatedNodes(nodes: NodeT[], edges: EdgeT[]): string[] {
 /**
  * Node kinds that should never be pruned, even if isolated.
  * Goals and decisions are essential structural nodes that must be preserved.
+ * Options are required alternatives (validation requires at least 2).
  * Outcomes and risks are structurally required (validation requires at least one).
  * Pruning them hides connectivity bugs rather than fixing them.
+ *
+ * IMPORTANT: This must match PROTECTED_KINDS in src/services/repair.ts
  */
-const PROTECTED_KINDS = new Set(["goal", "decision", "outcome", "risk"]);
+const PROTECTED_KINDS = new Set(["goal", "decision", "option", "outcome", "risk", "factor"]);
 
 /**
  * Prune isolated nodes from graph.
- * Protected kinds (goal, decision, outcome, risk) are never pruned regardless of connectivity.
+ * Protected kinds (goal, decision, option, outcome, risk, factor) are never pruned regardless of connectivity.
  */
 export function pruneIsolatedNodes(
   nodes: NodeT[],
@@ -261,7 +269,7 @@ export function pruneIsolatedNodes(
       pruned_ids: Array.from(nodesToPrune),
       protected_count: protectedButIsolated.length,
       protected_ids: protectedButIsolated,
-    }, "Pruning isolated nodes (goal/decision protected)");
+    }, "Pruning isolated nodes (goal/decision/option/outcome/risk protected)");
   }
 
   // Record corrections for pruned nodes
@@ -293,7 +301,10 @@ export function calculateMeta(nodes: NodeT[], edges: EdgeT[]): {
   const hasIncoming = new Set<string>();
   const hasOutgoing = new Set<string>();
 
+  // Only directed edges determine roots/leaves.
+  // Bidirected edges are trust annotations, not causal flow.
   for (const edge of edges) {
+    if (!isDirectedEdge(edge)) continue; // Skip bidirected edges
     hasIncoming.add(edge.to);
     hasOutgoing.add(edge.from);
   }
@@ -338,8 +349,10 @@ function assignLayers(nodes: NodeT[], edges: EdgeT[]): string[][] {
     inDegree.set(node.id, 0);
   }
 
-  // Build adjacency list and in-degrees
+  // Build adjacency list and in-degrees — only directed edges participate in layout.
+  // Bidirected edges are trust annotations and do not define layer ordering.
   for (const edge of edges) {
+    if (!isDirectedEdge(edge)) continue; // Skip bidirected edges
     adjList.get(edge.from)?.push(edge.to);
     inDegree.set(edge.to, (inDegree.get(edge.to) || 0) + 1);
   }
@@ -460,7 +473,7 @@ export function enforceGraphCompliance(
 
   // 3. Break cycles to enforce DAG (Stage 22: Cycle Breaking)
   if (!isDAG(nodes, edges)) {
-    const edgesBefore = edges;
+    const _edgesBefore = edges;
     edges = breakCycles(nodes, edges, collector);
   }
 

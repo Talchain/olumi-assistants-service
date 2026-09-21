@@ -1,0 +1,2923 @@
+{
+  "_provenance": {
+    "capture": "PHASE0-EVIDENCE-2026-07-28/context-integrity-trace-2026-08-08/raw/2fa5e8b8-T2_COLD1.json",
+    "seam": "POST /bff/cee/scenarios/:id/graph (cold read)",
+    "captured_at": "2026-08-08",
+    "cee_build": "4b57b8f",
+    "scenario_id": "2fa5e8b8-e9d2-4827-8b19-3bb2fe8856bd",
+    "note": "Real deployed bytes. Reduced to the two fields the derivation consumes; neither is edited."
+  },
+  "brief_text": "Trying to decide whether we bet the next two quarters on the AI copilot or finally do the platform rewrite. Or neither — I keep going back and forth, and I'm writing this partly to think. The goal I actually care about is 15% ARR growth next year without engineering attrition getting worse.\n\nThe copilot: the prototype demoed at SKO got the best reaction I've seen in years. Sales swears it would lift win rate from 22% to 30% — that number came from Marcus polling 15 AEs on Slack, so treat accordingly. Pricing thinks we could charge +£15/seat/month on our 40,000 seats, so up to £7.2m a year if attach were 100%, which it won't be — 25% attach feels honest, call it £1.8m. Build estimate is 4 engineers for 6 months. Actually, Elena's team said 6 engineers for 8 months once you include evals and the safety review — use hers, she's usually right. LLM serving cost is the thing nobody can pin down: finance modelled £3 per seat per month, could be half that or triple depending on caching. Assumption: our data-processing agreements let us send customer CRM text to a model provider — legal has NOT confirmed this, and if it's wrong the whole thing is dead in enterprise, which is 60% of revenue.\n\nThe rewrite: the platform is 9 years old, deploys take 45 minutes, and we lost two staff engineers to it last year — the exit interviews say so explicitly. Infra says the monolith adds roughly 30% drag to every feature — that's the number the CTO keeps quoting, source unclear, possibly the 2024 DX survey. Rewrite = 10 engineers, 12 months, and history says double whatever engineering estimates on this codebase. If we don't do it, copilot velocity sits on the same slow foundation — so maybe rewrite first, then copilot. But the window: three competitors shipped copilots in the last two quarters, PMM says we're 12 months behind already, and waiting a year might mean entering dead.\n\nBudget: the board approved £2m for strategic initiatives. Realistically it's £1.2m after the security remediation eats its share, which it will. Deadline: the CEO said the copilot must demo at Camunda Days on 14 May 2027. Though honestly, if the rewrite is the right call the demo date shouldn't drive it — we could show smoke and mirrors. Second thought on revenue: I said 25% attach earlier, but enterprise procurement cycles mean year one is more like 10%, so £700k in year one — the £1.8m is a year-three number. The CPO wants the copilot, the CTO wants the rewrite, they've been at a standoff in every exec meeting since June, and I'm the tiebreak. Which way do we go?",
+  "graph": {
+    "meta": {
+      "roots": [
+        "dec_strategy",
+        "fac_budget",
+        "fac_legal_clearance",
+        "fac_llm_cost",
+        "fac_market_window"
+      ],
+      "leaves": [
+        "goal_arr_growth"
+      ],
+      "source": "assistant"
+    },
+    "edges": [
+      {
+        "to": "opt_copilot",
+        "from": "dec_strategy",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "opt_rewrite",
+        "from": "dec_strategy",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "opt_sequence",
+        "from": "dec_strategy",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "opt_status_quo",
+        "from": "dec_strategy",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "risk_budget_overrun",
+        "from": "fac_budget",
+        "origin": "ai",
+        "strength": {
+          "std": 0.10363636363636362,
+          "mean": -0.25909090909090904
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.12,
+            "strength_mean": -0.3,
+            "exists_probability": 0.88
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Greater budget directly reduces risk of overruns in strategic projects.",
+            "strength_std": 0.1,
+            "strength_mean": -0.3,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.9
+          },
+          "status": "agreed",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0,
+          "pass2_adjusted": {
+            "strength_std": 0.1064285714285714,
+            "strength_mean": -0.3,
+            "exists_probability": 0.8500000000000001
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0.006428571428571402,
+            "strength_mean_offset": 0,
+            "exists_probability_offset": -0.04999999999999993
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [],
+          "validation_lint_log": []
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.88,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "out_arr_uplift",
+        "from": "fac_copilot_build",
+        "origin": "ai",
+        "strength": {
+          "std": 0.2,
+          "mean": 0.55
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.2,
+            "strength_mean": 0.55,
+            "exists_probability": 0.72
+          },
+          "pass2": {
+            "basis": "brief_explicit",
+            "reasoning": "The prototype is expected to increase ARR by up to £1.8m, aligning with strong build–uplift linkage.",
+            "strength_std": 0.1,
+            "strength_mean": 0.7,
+            "lint_corrected": false,
+            "needs_user_input": false,
+            "exists_probability": 0.95
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.3333333333333333,
+          "pass2_adjusted": {
+            "strength_std": 0.1064285714285714,
+            "strength_mean": 0.7,
+            "exists_probability": 0.9
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0.006428571428571402,
+            "strength_mean_offset": 0,
+            "exists_probability_offset": -0.04999999999999993
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [
+            "strength_band_change"
+          ],
+          "validation_lint_log": []
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.72,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "risk_budget_overrun",
+        "from": "fac_copilot_build",
+        "origin": "ai",
+        "strength": {
+          "std": 0.12954545454545452,
+          "mean": 0.25909090909090904
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.15,
+            "strength_mean": 0.3,
+            "exists_probability": 0.82
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Allocating 6 engineers for 8 months against limited budget raises overrun risk by a moderate amount.",
+            "strength_std": 0.15,
+            "strength_mean": 0.4,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.9
+          },
+          "status": "agreed",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.20000000000000007,
+          "pass2_adjusted": {
+            "strength_std": 0.1564285714285714,
+            "strength_mean": 0.4,
+            "exists_probability": 0.8500000000000001
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0.006428571428571402,
+            "strength_mean_offset": 0,
+            "exists_probability_offset": -0.04999999999999993
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [],
+          "validation_lint_log": []
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.82,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "risk_legal_block",
+        "from": "fac_copilot_build",
+        "origin": "ai",
+        "strength": {
+          "std": 0.11874999999999997,
+          "mean": 0.5145833333333333
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.15,
+            "strength_mean": 0.65,
+            "exists_probability": 0.9
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Building the copilot without confirmed legal clearance moderately increases compliance block risk.",
+            "strength_std": 0.15,
+            "strength_mean": 0.3,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.8
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.7000000000000001,
+          "pass2_adjusted": {
+            "strength_std": 0.1564285714285714,
+            "strength_mean": 0.3,
+            "exists_probability": 0.7500000000000001
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0.006428571428571402,
+            "strength_mean_offset": 0,
+            "exists_probability_offset": -0.04999999999999993
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [
+            "strength_band_change"
+          ],
+          "validation_lint_log": []
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.9,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "risk_market_miss",
+        "from": "fac_copilot_build",
+        "origin": "ai",
+        "strength": {
+          "std": 0.15132743362831855,
+          "mean": -0.33628318584070793
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.18,
+            "strength_mean": -0.4,
+            "exists_probability": 0.8
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Starting copilot development reduces the chance of missing the competitive window.",
+            "strength_std": 0.15,
+            "strength_mean": -0.4,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.85
+          },
+          "status": "agreed",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0,
+          "pass2_adjusted": {
+            "strength_std": 0.1564285714285714,
+            "strength_mean": -0.4,
+            "exists_probability": 0.8
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0.006428571428571402,
+            "strength_mean_offset": 0,
+            "exists_probability_offset": -0.04999999999999993
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [],
+          "validation_lint_log": []
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.8,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "out_eng_velocity",
+        "from": "fac_eng_capacity",
+        "origin": "ai",
+        "strength": {
+          "std": 0.1,
+          "mean": 0.2
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.1,
+            "strength_mean": 0.2,
+            "exists_probability": 0.75
+          },
+          "pass2": {
+            "basis": "structural_inference",
+            "reasoning": "Allocated engineering capacity directly translates into feature velocity.",
+            "strength_std": 0.1,
+            "strength_mean": 0.6,
+            "lint_corrected": false,
+            "needs_user_input": false,
+            "exists_probability": 0.95
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.7999999999999999,
+          "pass2_adjusted": {
+            "strength_std": 0.1064285714285714,
+            "strength_mean": 0.6,
+            "exists_probability": 0.9
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0.006428571428571402,
+            "strength_mean_offset": 0,
+            "exists_probability_offset": -0.04999999999999993
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [
+            "raw_magnitude"
+          ],
+          "validation_lint_log": []
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.75,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "risk_attrition",
+        "from": "fac_eng_capacity",
+        "origin": "ai",
+        "strength": {
+          "std": 0.12,
+          "mean": -0.25
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.12,
+            "strength_mean": -0.25,
+            "exists_probability": 0.8
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Diverting large engineering capacity to a big project tends to increase attrition risk.",
+            "strength_std": 0.15,
+            "strength_mean": 0.5,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.85
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": true,
+          "max_divergence": 1,
+          "pass2_adjusted": {
+            "strength_std": 0.1564285714285714,
+            "strength_mean": 0.5,
+            "exists_probability": 0.8
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0.006428571428571402,
+            "strength_mean_offset": 0,
+            "exists_probability_offset": -0.04999999999999993
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [
+            "sign_flip",
+            "strength_band_change"
+          ],
+          "validation_lint_log": []
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.8,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "risk_legal_block",
+        "from": "fac_legal_clearance",
+        "origin": "ai",
+        "strength": {
+          "std": 0.11874999999999997,
+          "mean": -0.4354166666666666
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.15,
+            "strength_mean": -0.55,
+            "exists_probability": 0.85
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Legal clearance strongly lowers the risk of enterprise compliance blocking the copilot.",
+            "strength_std": 0.1,
+            "strength_mean": -0.7,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.9
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.3333333333333333,
+          "pass2_adjusted": {
+            "strength_std": 0.1064285714285714,
+            "strength_mean": -0.7,
+            "exists_probability": 0.8500000000000001
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0.006428571428571402,
+            "strength_mean_offset": 0,
+            "exists_probability_offset": -0.04999999999999993
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [
+            "strength_band_change"
+          ],
+          "validation_lint_log": []
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.85,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "out_arr_uplift",
+        "from": "fac_llm_cost",
+        "origin": "ai",
+        "strength": {
+          "std": 0.12,
+          "mean": -0.22
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.12,
+            "strength_mean": -0.22,
+            "exists_probability": 0.82
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Higher per-seat LLM costs directly reduce net ARR uplift from copilot revenue.",
+            "strength_std": 0.1,
+            "strength_mean": -0.3,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.9
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.3333333333333333,
+          "pass2_adjusted": {
+            "strength_std": 0.1064285714285714,
+            "strength_mean": -0.3,
+            "exists_probability": 0.8500000000000001
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0.006428571428571402,
+            "strength_mean_offset": 0,
+            "exists_probability_offset": -0.04999999999999993
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [
+            "strength_band_change"
+          ],
+          "validation_lint_log": []
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.82,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "risk_market_miss",
+        "from": "fac_market_window",
+        "origin": "ai",
+        "strength": {
+          "std": 0.11769911504424778,
+          "mean": -0.23539823008849556
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.14,
+            "strength_mean": -0.28,
+            "exists_probability": 0.75
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "A wider market window reduces the risk of being too late to launch.",
+            "strength_std": 0.15,
+            "strength_mean": -0.4,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.8
+          },
+          "status": "agreed",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.24,
+          "pass2_adjusted": {
+            "strength_std": 0.1564285714285714,
+            "strength_mean": -0.4,
+            "exists_probability": 0.7500000000000001
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0.006428571428571402,
+            "strength_mean_offset": 0,
+            "exists_probability_offset": -0.04999999999999993
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [],
+          "validation_lint_log": []
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.75,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "out_eng_velocity",
+        "from": "fac_rewrite_build",
+        "origin": "ai",
+        "strength": {
+          "std": 0.15,
+          "mean": 0.6
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.15,
+            "strength_mean": 0.6,
+            "exists_probability": 0.78
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "A full platform rewrite is expected to improve velocity by reducing architectural drag.",
+            "strength_std": 0.2,
+            "strength_mean": 0.4,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.85
+          },
+          "status": "agreed",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.3999999999999999,
+          "pass2_adjusted": {
+            "strength_std": 0.2064285714285714,
+            "strength_mean": 0.4,
+            "exists_probability": 0.8
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0.006428571428571402,
+            "strength_mean_offset": 0,
+            "exists_probability_offset": -0.04999999999999993
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [],
+          "validation_lint_log": []
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.78,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "risk_attrition",
+        "from": "fac_rewrite_build",
+        "origin": "ai",
+        "strength": {
+          "std": 0.15,
+          "mean": -0.35
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.15,
+            "strength_mean": -0.35,
+            "exists_probability": 0.75
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Major rewrites often demoralize teams and increase attrition risk.",
+            "strength_std": 0.2,
+            "strength_mean": 0.5,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.75
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": true,
+          "max_divergence": 1,
+          "pass2_adjusted": {
+            "strength_std": 0.2064285714285714,
+            "strength_mean": 0.5,
+            "exists_probability": 0.7000000000000001
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0.006428571428571402,
+            "strength_mean_offset": 0,
+            "exists_probability_offset": -0.04999999999999993
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [
+            "sign_flip"
+          ],
+          "validation_lint_log": []
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.75,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "risk_budget_overrun",
+        "from": "fac_rewrite_build",
+        "origin": "ai",
+        "strength": {
+          "std": 0.15545454545454543,
+          "mean": 0.43181818181818177
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.18,
+            "strength_mean": 0.5,
+            "exists_probability": 0.88
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Large-scale rewrites often exceed original budget estimates.",
+            "strength_std": 0.15,
+            "strength_mean": 0.3,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.9
+          },
+          "status": "agreed",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.4,
+          "pass2_adjusted": {
+            "strength_std": 0.1564285714285714,
+            "strength_mean": 0.3,
+            "exists_probability": 0.8500000000000001
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0.006428571428571402,
+            "strength_mean_offset": 0,
+            "exists_probability_offset": -0.04999999999999993
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [],
+          "validation_lint_log": []
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.88,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "risk_market_miss",
+        "from": "fac_rewrite_build",
+        "origin": "ai",
+        "strength": {
+          "std": 0.15132743362831855,
+          "mean": 0.3783185840707964
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.18,
+            "strength_mean": 0.45,
+            "exists_probability": 0.85
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Focusing on a slow rewrite can slightly increase the risk of missing the copilot market window.",
+            "strength_std": 0.08000000000000002,
+            "strength_mean": 0.1,
+            "lint_corrected": true,
+            "needs_user_input": true,
+            "exists_probability": 0.7
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.7,
+          "pass2_adjusted": {
+            "strength_std": 0.08642857142857141,
+            "strength_mean": 0.1,
+            "exists_probability": 0.65
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0.006428571428571402,
+            "strength_mean_offset": 0,
+            "exists_probability_offset": -0.04999999999999993
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [
+            "strength_band_change",
+            "existence_boundary_crossing"
+          ],
+          "validation_lint_log": [
+            {
+              "code": "LINT_STD_CLAMPED",
+              "after": 0.08000000000000002,
+              "before": 0.2,
+              "edge_key": "fac_rewrite_build->risk_market_miss"
+            }
+          ]
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.85,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "fac_copilot_build",
+        "from": "opt_copilot",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "fac_eng_capacity",
+        "from": "opt_copilot",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "fac_eng_capacity",
+        "from": "opt_rewrite",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "fac_rewrite_build",
+        "from": "opt_rewrite",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "fac_copilot_build",
+        "from": "opt_sequence",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "fac_eng_capacity",
+        "from": "opt_sequence",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "fac_rewrite_build",
+        "from": "opt_sequence",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "fac_copilot_build",
+        "from": "opt_status_quo",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "fac_eng_capacity",
+        "from": "opt_status_quo",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "fac_rewrite_build",
+        "from": "opt_status_quo",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "goal_arr_growth",
+        "from": "out_arr_uplift",
+        "origin": "ai",
+        "strength": {
+          "std": 0.12,
+          "mean": 0.55
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.12,
+            "strength_mean": 0.55,
+            "exists_probability": 0.9
+          },
+          "pass2": {
+            "basis": "structural_inference",
+            "reasoning": "Increased ARR uplift from the copilot directly contributes to overall ARR growth.",
+            "strength_std": 0.1,
+            "strength_mean": 0.21428571428571427,
+            "lint_corrected": true,
+            "needs_user_input": false,
+            "exists_probability": 0.95
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.6714285714285715,
+          "pass2_adjusted": {
+            "strength_std": 0.1064285714285714,
+            "strength_mean": 0.21428571428571427,
+            "exists_probability": 0.9
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0.006428571428571402,
+            "strength_mean_offset": 0,
+            "exists_probability_offset": -0.04999999999999993
+          },
+          "distance_to_goal": 0,
+          "contested_reasons": [
+            "strength_band_change"
+          ],
+          "validation_lint_log": [
+            {
+              "code": "LINT_BUDGET_RESCALE",
+              "after": 0.21428571428571427,
+              "before": 0.6,
+              "edge_key": "out_arr_uplift->goal_arr_growth"
+            }
+          ]
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.9,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "goal_arr_growth",
+        "from": "out_eng_velocity",
+        "origin": "ai",
+        "strength": {
+          "std": 0.12,
+          "mean": 0.25
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.12,
+            "strength_mean": 0.25,
+            "exists_probability": 0.8
+          },
+          "pass2": {
+            "basis": "structural_inference",
+            "reasoning": "Higher engineering velocity accelerates feature delivery, supporting ARR growth.",
+            "strength_std": 0.15,
+            "strength_mean": 0.17857142857142858,
+            "lint_corrected": true,
+            "needs_user_input": false,
+            "exists_probability": 0.9
+          },
+          "status": "agreed",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.14285714285714285,
+          "pass2_adjusted": {
+            "strength_std": 0.1564285714285714,
+            "strength_mean": 0.17857142857142858,
+            "exists_probability": 0.8500000000000001
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0.006428571428571402,
+            "strength_mean_offset": 0,
+            "exists_probability_offset": -0.04999999999999993
+          },
+          "distance_to_goal": 0,
+          "contested_reasons": [],
+          "validation_lint_log": [
+            {
+              "code": "LINT_BUDGET_RESCALE",
+              "after": 0.17857142857142858,
+              "before": 0.5,
+              "edge_key": "out_eng_velocity->goal_arr_growth"
+            }
+          ]
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "goal_arr_growth",
+        "from": "risk_attrition",
+        "origin": "ai",
+        "strength": {
+          "std": 0.14,
+          "mean": -0.35
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.14,
+            "strength_mean": -0.35,
+            "exists_probability": 0.88
+          },
+          "pass2": {
+            "basis": "structural_inference",
+            "reasoning": "Engineering attrition reduces delivery capacity and thus dampens ARR growth.",
+            "strength_std": 0.11428571428571431,
+            "strength_mean": -0.14285714285714288,
+            "lint_corrected": true,
+            "needs_user_input": false,
+            "exists_probability": 0.9
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.4142857142857142,
+          "pass2_adjusted": {
+            "strength_std": 0.12071428571428572,
+            "strength_mean": -0.14285714285714288,
+            "exists_probability": 0.8500000000000001
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0.006428571428571402,
+            "strength_mean_offset": 0,
+            "exists_probability_offset": -0.04999999999999993
+          },
+          "distance_to_goal": 0,
+          "contested_reasons": [
+            "strength_band_change"
+          ],
+          "validation_lint_log": [
+            {
+              "code": "LINT_BUDGET_RESCALE",
+              "after": -0.14285714285714288,
+              "before": -0.4,
+              "edge_key": "risk_attrition->goal_arr_growth"
+            },
+            {
+              "code": "LINT_STD_CLAMPED",
+              "after": 0.11428571428571431,
+              "before": 0.15,
+              "edge_key": "risk_attrition->goal_arr_growth"
+            }
+          ]
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.88,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "goal_arr_growth",
+        "from": "risk_budget_overrun",
+        "origin": "ai",
+        "strength": {
+          "std": 0.12,
+          "mean": -0.28
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.12,
+            "strength_mean": -0.28,
+            "exists_probability": 0.85
+          },
+          "pass2": {
+            "basis": "structural_inference",
+            "reasoning": "Budget overruns limit further investment and impair growth prospects.",
+            "strength_std": 0.11428571428571431,
+            "strength_mean": -0.14285714285714288,
+            "lint_corrected": true,
+            "needs_user_input": false,
+            "exists_probability": 0.85
+          },
+          "status": "agreed",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.2742857142857143,
+          "pass2_adjusted": {
+            "strength_std": 0.12071428571428572,
+            "strength_mean": -0.14285714285714288,
+            "exists_probability": 0.8
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0.006428571428571402,
+            "strength_mean_offset": 0,
+            "exists_probability_offset": -0.04999999999999993
+          },
+          "distance_to_goal": 0,
+          "contested_reasons": [],
+          "validation_lint_log": [
+            {
+              "code": "LINT_BUDGET_RESCALE",
+              "after": -0.14285714285714288,
+              "before": -0.4,
+              "edge_key": "risk_budget_overrun->goal_arr_growth"
+            },
+            {
+              "code": "LINT_STD_CLAMPED",
+              "after": 0.11428571428571431,
+              "before": 0.15,
+              "edge_key": "risk_budget_overrun->goal_arr_growth"
+            }
+          ]
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.85,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "goal_arr_growth",
+        "from": "risk_legal_block",
+        "origin": "ai",
+        "strength": {
+          "std": 0.15,
+          "mean": -0.4
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.15,
+            "strength_mean": -0.4,
+            "exists_probability": 0.88
+          },
+          "pass2": {
+            "basis": "structural_inference",
+            "reasoning": "A legal block on copilot delivery would significantly hinder ARR growth.",
+            "strength_std": 0.14285714285714288,
+            "strength_mean": -0.17857142857142858,
+            "lint_corrected": true,
+            "needs_user_input": false,
+            "exists_probability": 0.8
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.4428571428571429,
+          "pass2_adjusted": {
+            "strength_std": 0.14928571428571427,
+            "strength_mean": -0.17857142857142858,
+            "exists_probability": 0.7500000000000001
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0.006428571428571402,
+            "strength_mean_offset": 0,
+            "exists_probability_offset": -0.04999999999999993
+          },
+          "distance_to_goal": 0,
+          "contested_reasons": [
+            "strength_band_change"
+          ],
+          "validation_lint_log": [
+            {
+              "code": "LINT_BUDGET_RESCALE",
+              "after": -0.17857142857142858,
+              "before": -0.5,
+              "edge_key": "risk_legal_block->goal_arr_growth"
+            },
+            {
+              "code": "LINT_STD_CLAMPED",
+              "after": 0.14285714285714288,
+              "before": 0.2,
+              "edge_key": "risk_legal_block->goal_arr_growth"
+            }
+          ]
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.88,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "goal_arr_growth",
+        "from": "risk_market_miss",
+        "origin": "ai",
+        "strength": {
+          "std": 0.12,
+          "mean": -0.22
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.12,
+            "strength_mean": -0.22,
+            "exists_probability": 0.8
+          },
+          "pass2": {
+            "basis": "structural_inference",
+            "reasoning": "Missing the competitive market window reduces potential ARR growth.",
+            "strength_std": 0.11428571428571431,
+            "strength_mean": -0.14285714285714288,
+            "lint_corrected": true,
+            "needs_user_input": false,
+            "exists_probability": 0.9
+          },
+          "status": "agreed",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.15428571428571425,
+          "pass2_adjusted": {
+            "strength_std": 0.12071428571428572,
+            "strength_mean": -0.14285714285714288,
+            "exists_probability": 0.8500000000000001
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0.006428571428571402,
+            "strength_mean_offset": 0,
+            "exists_probability_offset": -0.04999999999999993
+          },
+          "distance_to_goal": 0,
+          "contested_reasons": [],
+          "validation_lint_log": [
+            {
+              "code": "LINT_BUDGET_RESCALE",
+              "after": -0.14285714285714288,
+              "before": -0.4,
+              "edge_key": "risk_market_miss->goal_arr_growth"
+            },
+            {
+              "code": "LINT_STD_CLAMPED",
+              "after": 0.11428571428571431,
+              "before": 0.15,
+              "edge_key": "risk_market_miss->goal_arr_growth"
+            }
+          ]
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.8,
+        "provenance_display": "ai_inferred"
+      }
+    ],
+    "nodes": [
+      {
+        "id": "dec_strategy",
+        "kind": "decision",
+        "label": "AI Copilot vs Platform Rewrite vs Neither",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "fac_budget",
+        "kind": "factor",
+        "label": "Available Strategic Budget",
+        "prior": {
+          "range_max": 0.8999999999999999,
+          "range_min": 0.3,
+          "distribution": "uniform"
+        },
+        "category": "external",
+        "provenance": "from_brief",
+        "display_value": "0.3 to 0.9",
+        "extractionType": "explicit"
+      },
+      {
+        "id": "fac_copilot_build",
+        "kind": "factor",
+        "label": "AI Copilot Investment",
+        "category": "controllable",
+        "provenance": "ai_inferred",
+        "encoding_map": {
+          "0": "Not pursued",
+          "1": "Fully pursued"
+        },
+        "display_value": "Low (0)",
+        "observed_state": {
+          "value": 0,
+          "source": "cee_inference",
+          "factor_type": "other",
+          "extractionType": "inferred",
+          "uncertainty_drivers": [
+            "Not provided"
+          ]
+        }
+      },
+      {
+        "id": "fac_eng_capacity",
+        "kind": "factor",
+        "label": "Engineering Capacity Allocated",
+        "category": "controllable",
+        "provenance": "ai_inferred",
+        "display_value": "Moderate (0.3)",
+        "observed_state": {
+          "value": 0.3,
+          "source": "cee_inference",
+          "factor_type": "other",
+          "extractionType": "inferred",
+          "uncertainty_drivers": [
+            "Rewrite and copilot compete for same engineers",
+            "Attrition risk changes available headcount"
+          ]
+        }
+      },
+      {
+        "id": "fac_legal_clearance",
+        "kind": "factor",
+        "label": "Data Processing Legal Clearance",
+        "prior": {
+          "range_max": 1,
+          "range_min": 0,
+          "distribution": "uniform"
+        },
+        "category": "external",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "fac_llm_cost",
+        "kind": "factor",
+        "label": "LLM Serving Cost per Seat",
+        "prior": {
+          "range_max": 0.9,
+          "range_min": 0.15,
+          "distribution": "uniform"
+        },
+        "category": "external",
+        "provenance": "ai_inferred",
+        "display_value": "0.15 to 0.9"
+      },
+      {
+        "id": "fac_market_window",
+        "kind": "factor",
+        "label": "Competitive Market Window",
+        "prior": {
+          "range_max": 0.6,
+          "range_min": 0.1,
+          "distribution": "uniform"
+        },
+        "category": "external",
+        "provenance": "ai_inferred",
+        "display_value": "0.1 to 0.6"
+      },
+      {
+        "id": "fac_rewrite_build",
+        "kind": "factor",
+        "label": "Platform Rewrite Investment",
+        "category": "controllable",
+        "provenance": "ai_inferred",
+        "encoding_map": {
+          "0": "Not pursued",
+          "1": "Fully pursued"
+        },
+        "display_value": "Low (0)",
+        "observed_state": {
+          "value": 0,
+          "source": "cee_inference",
+          "factor_type": "other",
+          "extractionType": "inferred",
+          "uncertainty_drivers": [
+            "Not provided"
+          ]
+        }
+      },
+      {
+        "id": "goal_arr_growth",
+        "kind": "goal",
+        "label": "Achieve 15% ARR Growth Without Worsening Attrition",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "opt_copilot",
+        "kind": "option",
+        "label": "Build AI Copilot Now",
+        "provenance": "ai_inferred",
+        "is_baseline": false,
+        "interventions": {
+          "fac_eng_capacity": {
+            "value": 0.5,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_eng_capacity",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_copilot_build": {
+            "value": 1,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_copilot_build",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_rewrite_build": {
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_rewrite_build",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          }
+        }
+      },
+      {
+        "id": "opt_rewrite",
+        "kind": "option",
+        "label": "Platform Rewrite First",
+        "provenance": "ai_inferred",
+        "is_baseline": false,
+        "interventions": {
+          "fac_eng_capacity": {
+            "value": 0.75,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_eng_capacity",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_copilot_build": {
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_copilot_build",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_rewrite_build": {
+            "value": 1,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_rewrite_build",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          }
+        }
+      },
+      {
+        "id": "opt_sequence",
+        "kind": "option",
+        "label": "Rewrite Then Copilot (Sequenced)",
+        "provenance": "ai_inferred",
+        "is_baseline": false,
+        "interventions": {
+          "fac_eng_capacity": {
+            "value": 0.6,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_eng_capacity",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_copilot_build": {
+            "value": 0.4,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_copilot_build",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_rewrite_build": {
+            "value": 1,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_rewrite_build",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          }
+        }
+      },
+      {
+        "id": "opt_status_quo",
+        "kind": "option",
+        "label": "Neither — Status Quo",
+        "provenance": "ai_inferred",
+        "is_baseline": true,
+        "interventions": {
+          "fac_eng_capacity": {
+            "value": 0.3,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_eng_capacity",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_copilot_build": {
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_copilot_build",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_rewrite_build": {
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_rewrite_build",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          }
+        }
+      },
+      {
+        "id": "out_arr_uplift",
+        "kind": "outcome",
+        "label": "ARR Uplift from Copilot Revenue",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "out_eng_velocity",
+        "kind": "outcome",
+        "label": "Engineering Velocity Improvement",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "risk_attrition",
+        "kind": "risk",
+        "label": "Engineering Attrition Risk",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "risk_budget_overrun",
+        "kind": "risk",
+        "label": "Budget Overrun Risk",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "risk_legal_block",
+        "kind": "risk",
+        "label": "Enterprise Legal Compliance Block",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "risk_market_miss",
+        "kind": "risk",
+        "label": "Competitive Window Miss",
+        "provenance": "ai_inferred"
+      }
+    ],
+    "trace": {
+      "engine": {
+        "model": "claude-sonnet-4-6",
+        "version": "1.12.0",
+        "provider": "anthropic"
+      },
+      "pipeline": {
+        "enrich": {
+          "source": "unified_pipeline",
+          "called_count": 1,
+          "factors_added": 0,
+          "extraction_mode": "v4_complete_skip",
+          "factors_skipped": 0,
+          "factors_enhanced": 0
+        },
+        "repair": {
+          "edge_restore": {
+            "restoredCount": 0
+          },
+          "deterministic_sweep": {
+            "sweep_ran": true,
+            "status_quo": {
+              "fixed": false,
+              "marked_droppable": false
+            },
+            "edge_format": "V1_FLAT",
+            "graph_delta": {
+              "edges_after": 34,
+              "nodes_after": 19,
+              "edges_before": 34,
+              "nodes_before": 19
+            },
+            "rescue_score": 18,
+            "repairs_count": 7,
+            "sweep_version": "v3",
+            "bucket_summary": {
+              "a": 0,
+              "b": 3,
+              "c": 0
+            },
+            "violations_after": 0,
+            "llm_repair_needed": false,
+            "violations_before": 3,
+            "factor_goal_splits": 0,
+            "unreachable_factors": {
+              "reclassified": [
+                "fac_budget",
+                "fac_legal_clearance",
+                "fac_llm_cost",
+                "fac_market_window"
+              ],
+              "marked_droppable": []
+            },
+            "complexity_cap_pruned": 0,
+            "goal_threshold_stripped": 0,
+            "disconnected_options_after": [],
+            "disconnected_options_before": [],
+            "option_goal_shortcuts_removed": 0,
+            "option_goal_shortcuts_skipped": 0,
+            "option_risk_shortcuts_removed": 0,
+            "option_risk_shortcuts_skipped": 0,
+            "option_goal_shortcuts_rerouted": 0,
+            "option_risk_shortcuts_rerouted": 0,
+            "disconnected_observables_pruned": [],
+            "goal_threshold_possibly_inferred": 0,
+            "option_outcome_shortcuts_removed": 0,
+            "option_outcome_shortcuts_skipped": 0,
+            "remaining_forbidden_edges_removed": 0
+          },
+          "deterministic_enforcement": {
+            "ran": true,
+            "blocked": false,
+            "total_repairs": 3,
+            "nodes_rescaled": 3,
+            "bridge_chains_removed": 0,
+            "bridge_goal_edges_added": 0,
+            "edges_skipped_non_finite": 0,
+            "post_validation_error_count": 0,
+            "post_validation_warning_count": 0
+          }
+        },
+        "status": "success",
+        "llm_raw": {
+          "text": "{\"nodes\":[{\"id\":\"dec_strategy\",\"kind\":\"decision\",\"label\":\"AI Copilot vs Platform Rewrite vs Neither\"},{\"id\":\"opt_copilot\",\"kind\":\"option\",\"label\":\"Build AI Copilot Now\",\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"interventions\":[{\"factor_id\":\"fac_copilot_build\",\"value\":1},{\"factor_id\":\"fac_rewrite_build\",\"value\":0},{\"factor_id\":\"fac_eng_capacity\",\"value\":0.5}]},\"is_baseline\":false},{\"id\":\"opt_rewrite\",\"kind\":\"option\",\"label\":\"Platform Rewrite First\",\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"interventions\":[{\"factor_id\":\"fac_copilot_build\",\"value\":0},{\"factor_id\":\"fac_rewrite_build\",\"value\":1},{\"factor_id\":\"fac_eng_capacity\",\"value\":0.75}]},\"is_baseline\":false},{\"id\":\"opt_sequence\",\"kind\":\"option\",\"label\":\"Rewrite Then Copilot (Sequenced)\",\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"interventions\":[{\"factor_id\":\"fac_copilot_build\",\"value\":0.4},{\"factor_id\":\"fac_rewrite_build\",\"value\":1},{\"factor_id\":\"fac_eng_capacity\",\"value\":0.6}]},\"is_baseline\":false},{\"id\":\"opt_status_quo\",\"kind\":\"option\",\"label\":\"Neither — Status Quo\",\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"interventions\":[{\"factor_id\":\"fac_copilot_build\",\"value\":0},{\"factor_id\":\"fac_rewrite_build\",\"value\":0},{\"factor_id\":\"fac_eng_capacity\",\"value\":0.3}]},\"is_baseline\":true},{\"id\":\"fac_copilot_build\",\"kind\":\"factor\",\"label\":\"AI Copilot Investment\",\"category\":\"controllable\",\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"encoding_map\":\"{\\\"0\\\": \\\"Not pursued\\\", \\\"1\\\": \\\"Fully pursued\\\"}\",\"is_baseline\":false},\"prior\":null},{\"id\":\"fac_rewrite_build\",\"kind\":\"factor\",\"label\":\"Platform Rewrite Investment\",\"category\":\"controllable\",\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"encoding_map\":\"{\\\"0\\\": \\\"Not pursued\\\", \\\"1\\\": \\\"Fully pursued\\\"}\",\"is_baseline\":false},\"prior\":null},{\"id\":\"fac_eng_capacity\",\"kind\":\"factor\",\"label\":\"Engineering Capacity Allocated\",\"category\":\"controllable\",\"data\":{\"value\":0.3,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"uncertainty_drivers\":[\"Rewrite and copilot compete for same engineers\",\"Attrition risk changes available headcount\"]},\"prior\":null},{\"id\":\"fac_budget\",\"kind\":\"factor\",\"label\":\"Available Strategic Budget\",\"category\":\"observable\",\"data\":{\"value\":0.6,\"extractionType\":\"explicit\",\"factor_type\":\"cost\",\"raw_value\":1200000,\"unit\":\"£\",\"cap\":2000000,\"is_baseline\":true},\"prior\":null},{\"id\":\"fac_llm_cost\",\"kind\":\"factor\",\"label\":\"LLM Serving Cost per Seat\",\"category\":\"external\",\"prior\":{\"distribution\":\"uniform\",\"range_min\":0.15,\"range_max\":0.9},\"is_baseline\":false},{\"id\":\"fac_legal_clearance\",\"kind\":\"factor\",\"label\":\"Data Processing Legal Clearance\",\"category\":\"external\",\"prior\":{\"distribution\":\"uniform\",\"range_min\":0.0,\"range_max\":1.0},\"is_baseline\":false},{\"id\":\"fac_market_window\",\"kind\":\"factor\",\"label\":\"Competitive Market Window\",\"category\":\"external\",\"prior\":{\"distribution\":\"uniform\",\"range_min\":0.1,\"range_max\":0.6},\"is_baseline\":false},{\"id\":\"out_arr_uplift\",\"kind\":\"outcome\",\"label\":\"ARR Uplift from Copilot Revenue\"},{\"id\":\"out_eng_velocity\",\"kind\":\"outcome\",\"label\":\"Engineering Velocity Improvement\"},{\"id\":\"risk_attrition\",\"kind\":\"risk\",\"label\":\"Engineering Attrition Risk\"},{\"id\":\"risk_budget_overrun\",\"kind\":\"risk\",\"label\":\"Budget Overrun Risk\"},{\"id\":\"risk_legal_block\",\"kind\":\"risk\",\"label\":\"Enterprise Legal Compliance Block\"},{\"id\":\"risk_market_miss\",\"kind\":\"risk\",\"label\":\"Competitive Window Miss\"},{\"id\":\"goal_arr_growth\",\"kind\":\"goal\",\"label\":\"Achieve 15% ARR Growth Without Worsening Attrition\",\"data\":null}],\"edges\":[{\"from\":\"dec_strategy\",\"to\":\"opt_copilot\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"dec_strategy\",\"to\":\"opt_rewrite\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"dec_strategy\",\"to\":\"opt_sequence\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"dec_strategy\",\"to\":\"opt_status_quo\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_copilot\",\"to\":\"fac_copilot_build\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_copilot\",\"to\":\"fac_eng_capacity\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_rewrite\",\"to\":\"fac_rewrite_build\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_rewrite\",\"to\":\"fac_eng_capacity\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_sequence\",\"to\":\"fac_copilot_build\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_sequence\",\"to\":\"fac_rewrite_build\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_sequence\",\"to\":\"fac_eng_capacity\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_status_quo\",\"to\":\"fac_copilot_build\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_status_quo\",\"to\":\"fac_rewrite_build\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_status_quo\",\"to\":\"fac_eng_capacity\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"fac_copilot_build\",\"to\":\"out_arr_uplift\",\"strength\":{\"mean\":0.55,\"std\":0.20},\"exists_probability\":0.72,\"effect_direction\":\"positive\"},{\"from\":\"fac_copilot_build\",\"to\":\"risk_legal_block\",\"strength\":{\"mean\":0.65,\"std\":0.15},\"exists_probability\":0.90,\"effect_direction\":\"positive\"},{\"from\":\"fac_copilot_build\",\"to\":\"risk_budget_overrun\",\"strength\":{\"mean\":0.30,\"std\":0.15},\"exists_probability\":0.82,\"effect_direction\":\"positive\"},{\"from\":\"fac_copilot_build\",\"to\":\"risk_market_miss\",\"strength\":{\"mean\":-0.40,\"std\":0.18},\"exists_probability\":0.80,\"effect_direction\":\"negative\"},{\"from\":\"fac_rewrite_build\",\"to\":\"out_eng_velocity\",\"strength\":{\"mean\":0.60,\"std\":0.15},\"exists_probability\":0.78,\"effect_direction\":\"positive\"},{\"from\":\"fac_rewrite_build\",\"to\":\"risk_attrition\",\"strength\":{\"mean\":-0.35,\"std\":0.15},\"exists_probability\":0.75,\"effect_direction\":\"negative\"},{\"from\":\"fac_rewrite_build\",\"to\":\"risk_budget_overrun\",\"strength\":{\"mean\":0.50,\"std\":0.18},\"exists_probability\":0.88,\"effect_direction\":\"positive\"},{\"from\":\"fac_rewrite_build\",\"to\":\"risk_market_miss\",\"strength\":{\"mean\":0.45,\"std\":0.18},\"exists_probability\":0.85,\"effect_direction\":\"positive\"},{\"from\":\"fac_eng_capacity\",\"to\":\"risk_attrition\",\"strength\":{\"mean\":-0.25,\"std\":0.12},\"exists_probability\":0.80,\"effect_direction\":\"negative\"},{\"from\":\"fac_eng_capacity\",\"to\":\"out_eng_velocity\",\"strength\":{\"mean\":0.20,\"std\":0.10},\"exists_probability\":0.75,\"effect_direction\":\"positive\"},{\"from\":\"fac_budget\",\"to\":\"risk_budget_overrun\",\"strength\":{\"mean\":-0.30,\"std\":0.12},\"exists_probability\":0.88,\"effect_direction\":\"negative\"},{\"from\":\"fac_llm_cost\",\"to\":\"out_arr_uplift\",\"strength\":{\"mean\":-0.22,\"std\":0.12},\"exists_probability\":0.82,\"effect_direction\":\"negative\"},{\"from\":\"fac_legal_clearance\",\"to\":\"risk_legal_block\",\"strength\":{\"mean\":-0.55,\"std\":0.15},\"exists_probability\":0.85,\"effect_direction\":\"negative\"},{\"from\":\"fac_market_window\",\"to\":\"risk_market_miss\",\"strength\":{\"mean\":-0.28,\"std\":0.14},\"exists_probability\":0.75,\"effect_direction\":\"negative\"},{\"from\":\"out_arr_uplift\",\"to\":\"goal_arr_growth\",\"strength\":{\"mean\":0.55,\"std\":0.12},\"exists_probability\":0.90,\"effect_direction\":\"positive\"},{\"from\":\"out_eng_velocity\",\"to\":\"goal_arr_growth\",\"strength\":{\"mean\":0.25,\"std\":0.12},\"exists_probability\":0.80,\"effect_direction\":\"positive\"},{\"from\":\"risk_attrition\",\"to\":\"goal_arr_growth\",\"strength\":{\"mean\":-0.35,\"std\":0.14},\"exists_probability\":0.88,\"effect_direction\":\"negative\"},{\"from\":\"risk_budget_overrun\",\"to\":\"goal_arr_growth\",\"strength\":{\"mean\":-0.28,\"std\":0.12},\"exists_probability\":0.85,\"effect_direction\":\"negative\"},{\"from\":\"risk_legal_block\",\"to\":\"goal_arr_growth\",\"strength\":{\"mean\":-0.40,\"std\":0.15},\"exists_probability\":0.88,\"effect_direction\":\"negative\"},{\"from\":\"risk_market_miss\",\"to\":\"goal_arr_growth\",\"strength\":{\"mean\":-0.22,\"std\":0.12},\"exists_probability\":0.80,\"effect_direction\":\"negative\"}],\"goal_constraints\":[{\"constraint_id\":\"gc_budget\",\"node_id\":\"fac_budget\",\"operator\":\">=\",\"value\":0.0,\"label\":\"Strategic budget capped at £1.2m after security remediation\",\"unit\":\"£\",\"source_quote\":\"Realistically it's £1.2m after the security remediation eats its share\",\"confidence\":0.95,\"provenance\":\"explicit\"},{\"constraint_id\":\"gc_attrition\",\"node_id\":\"risk_attrition\",\"operator\":\"<=\",\"value\":0.5,\"label\":\"Engineering attrition must not worsen\",\"unit\":\"scale\",\"source_quote\":\"15% ARR growth next year without engineering attrition getting worse\",\"confidence\":1.0,\"provenance\":\"explicit\"},{\"constraint_id\":\"gc_demo\",\"node_id\":\"risk_market_miss\",\"operator\":\"<=\",\"value\":0.5,\"label\":\"Copilot must demo at Camunda Days 14 May 2027\",\"unit\":\"scale\",\"source_quote\":\"the CEO said the copilot must demo at Camunda Days on 14 May 2027\",\"confidence\":0.85,\"provenance\":\"explicit\"}]}",
+          "truncated": true,
+          "char_count": 9306,
+          "output_hash": "d261b551daedf7ef79ef14f3f25aeb8fa7900ef68ce296471bb8a7c0a1727c35",
+          "output_preview": "{\"nodes\":[{\"id\":\"dec_strategy\",\"kind\":\"decision\",\"label\":\"AI Copilot vs Platform Rewrite vs Neither\"},{\"id\":\"opt_copilot\",\"kind\":\"option\",\"label\":\"Build AI Copilot Now\",\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"interventions\":[{\"factor_id\":\"fac_copilot_build\",\"value\":1},{\"factor_id\":\"fac_rewrite_build\",\"value\":0},{\"factor_id\":\"fac_eng_capacity\",\"value\":0.5}]},\"is_baseline\":false},{\"id\":\"opt_rewrite\",\"kind\":\"option\",\"label\":\"Platform Rewrite First\",\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"interventions\":[{\"factor_id\":\"fac_copilot_build\",\"value\":0},{\"factor_id\":\"fac_rewrite_build\",\"value\":1},{\"factor_id\":\"fac_eng_capacity\",\"value\":0.75}]},\"is_baseline\":false},{\"id\":\"opt_sequence\",\"kind\":\"option\",\"label\":\"Rewrite Then Copilot (Sequenced)\",\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"interventions\":[{\"factor_id\":\"fac_copilot_build\",\"value\":0.4},{\"factor_id\":\"fac_rewrite_build\",\"value\":1},{\"factor_id\":\"fac_eng_capacity\",\"value\":0.6}]},\"is_baseline\":false},{\"id\":\"opt_status_quo\",\"kind\":\"option\",\"label\":\"Neither — Status Quo\",\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"interventions\":[{\"factor_id\":\"fac_copilot_build\",\"value\":0},{\"factor_id\":\"fac_rewrite_build\",\"value\":0},{\"factor_id\":\"fac_eng_capacity\",\"value\":0.3}]},\"is_baseline\":true},{\"id\":\"fac_copilot_build\",\"kind\":\"factor\",\"label\":\"AI Copilot Investment\",\"category\":\"controllable\",\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"encoding_map\":\"{\\\"0\\\": \\\"Not pursued\\\", \\\"1\\\": \\\"Fully pursued\\\"}\",\"is_baseline\":false},\"prior\":null},{\"id\":\"fac_rewrite_build\",\"kind\":\"factor\",\"label\":\"Platform Rewrite Investment\",\"category\":\"controllable\",\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"encoding_map\":\"{\\\"0\\\": \\\"Not pursued\\\", \\\"1\\\": \\\"Fully pursued\\\"}\",\"is_baseline\":false},\"prior\":null},{\"id\":\"fac_eng_capacity\",\"kind\":\"factor\",\"label\":\"Engineering Capacity Allocated\",\"category\":\"cont",
+          "output_edge_count": 34,
+          "output_node_count": 19,
+          "full_output_available": true
+        },
+        "final_graph": {
+          "edge_count": 34,
+          "node_count": 19,
+          "node_kinds": [
+            "decision",
+            "factor",
+            "goal",
+            "option",
+            "outcome",
+            "risk"
+          ]
+        },
+        "llm_quality": {
+          "risk_coefficient_corrections": 0
+        },
+        "llm_metadata": {
+          "seed": 17,
+          "model": "claude-sonnet-4-6",
+          "streamed": true,
+          "max_tokens": 8483,
+          "duration_ms": 36917,
+          "instance_id": "f67dc9b4",
+          "prompt_hash": "152998b447819c2e9e797b1727f8e05b34480486dca6f672a5d2839facd2353f",
+          "temperature": 0,
+          "token_usage": {
+            "total_tokens": 3870,
+            "prompt_tokens": 826,
+            "completion_tokens": 3044
+          },
+          "cache_age_ms": 274909,
+          "cache_status": "fresh",
+          "finish_reason": "end_turn",
+          "prompt_version": "draft_graph_default@v195 (staging)",
+          "response_chars": 9306,
+          "time_to_edges_ms": 17108,
+          "use_staging_mode": true,
+          "prompt_text_version": "v195",
+          "runaway_abort_count": 0,
+          "runaway_abort_triggers": [],
+          "structured_outputs_used": true,
+          "salvaged_from_truncation": false
+        },
+        "cee_provenance": {
+          "model": "claude-sonnet-4-6",
+          "commit": "4b57b8f",
+          "version": "1.12.0",
+          "model_id": "claude-sonnet-4-6",
+          "capability": "draft_graph",
+          "prompt_hash": "152998b447819c2e9e797b1727f8e05b34480486dca6f672a5d2839facd2353f",
+          "context_hash": "f43fa11baf32",
+          "pipeline_path": "unified",
+          "prompt_source": "supabase",
+          "prompt_version": "draft_graph_default@v195 (staging)",
+          "build_timestamp": "2026-08-08T16:11:58.029Z",
+          "prompt_store_version": 195,
+          "model_override_active": false,
+          "prompt_override_active": false,
+          "engine_base_url_configured": false
+        },
+        "llm_call_count": 1,
+        "repair_summary": {
+          "status_quo": {
+            "fixed": false,
+            "marked_droppable": false
+          },
+          "graph_delta": {
+            "edges_after": 34,
+            "nodes_after": 19,
+            "edges_before": 34,
+            "nodes_before": 19
+          },
+          "bucket_summary": {
+            "a": 0,
+            "b": 3,
+            "c": 0
+          },
+          "llm_repair_needed": false,
+          "status_quo_action": "none",
+          "unreachable_factors": {
+            "reclassified": [
+              "fac_budget",
+              "fac_legal_clearance",
+              "fac_llm_cost",
+              "fac_market_window"
+            ],
+            "marked_droppable": []
+          },
+          "edge_format_detected": "V1_FLAT",
+          "deterministic_repairs": [
+            {
+              "code": "CONTROLLABLE_MISSING_DATA",
+              "path": "nodes[fac_copilot_build].data",
+              "action": "Populated missing required fields with defaults"
+            },
+            {
+              "code": "CONTROLLABLE_MISSING_DATA",
+              "path": "nodes[fac_rewrite_build].data",
+              "action": "Populated missing required fields with defaults"
+            },
+            {
+              "code": "OBSERVABLE_EXTRA_DATA",
+              "path": "nodes[fac_budget].data",
+              "action": "Removed factor_type, uncertainty_drivers, and empty interventions sentinel (extra for observable)"
+            },
+            {
+              "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+              "path": "nodes[fac_budget].category",
+              "action": "Reclassified unreachable factor \"Available Strategic Budget\" to external with synthesised prior [0.3, 0.8999999999999999]",
+              "prior_synthesised": true,
+              "synthesised_range": {
+                "range_max": 0.8999999999999999,
+                "range_min": 0.3
+              }
+            },
+            {
+              "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+              "path": "nodes[fac_legal_clearance].category",
+              "action": "Reclassified unreachable factor \"Data Processing Legal Clearance\" to external"
+            },
+            {
+              "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+              "path": "nodes[fac_llm_cost].category",
+              "action": "Reclassified unreachable factor \"LLM Serving Cost per Seat\" to external"
+            },
+            {
+              "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+              "path": "nodes[fac_market_window].category",
+              "action": "Reclassified unreachable factor \"Competitive Market Window\" to external"
+            },
+            {
+              "code": "INBOUND_BUDGET_RESCALED",
+              "path": "edges[*→risk_budget_overrun]",
+              "action": "Rescaled 3 causal inbound edges from sum=1.100 to 0.95"
+            },
+            {
+              "code": "INBOUND_BUDGET_RESCALED",
+              "path": "edges[*→risk_legal_block]",
+              "action": "Rescaled 2 causal inbound edges from sum=1.200 to 0.95"
+            },
+            {
+              "code": "INBOUND_BUDGET_RESCALED",
+              "path": "edges[*→risk_market_miss]",
+              "action": "Rescaled 3 causal inbound edges from sum=1.130 to 0.95"
+            }
+          ],
+          "deterministic_sweep_ran": true,
+          "remaining_violation_codes": [],
+          "remaining_violations_count": 0,
+          "deterministic_repairs_count": 10,
+          "deterministic_sweep_version": "v3",
+          "risk_coefficient_corrections": []
+        },
+        "field_deletions": {
+          "count": 3,
+          "events": [
+            {
+              "field": "data.factor_type",
+              "stage": "deterministic-sweep",
+              "reason": "OBSERVABLE_EXTRA_DATA",
+              "node_id": "fac_budget"
+            },
+            {
+              "field": "data.value",
+              "stage": "unreachable-factors",
+              "reason": "UNREACHABLE_FACTOR_RECLASSIFIED",
+              "node_id": "fac_budget"
+            },
+            {
+              "field": "data",
+              "stage": "unreachable-factors",
+              "reason": "UNREACHABLE_FACTOR_RECLASSIFIED",
+              "node_id": "fac_budget"
+            }
+          ],
+          "stages": [
+            "deterministic-sweep",
+            "unreachable-factors"
+          ],
+          "reasons": [
+            "OBSERVABLE_EXTRA_DATA",
+            "UNREACHABLE_FACTOR_RECLASSIFIED"
+          ]
+        },
+        "plan_annotation": {
+          "plan_id": "10c97e76-fde0-4750-9f41-3ea69fc28930",
+          "model_id": "claude-sonnet-4-6",
+          "plan_hash": "b8481fe27e6a",
+          "confidence": {
+            "overall": 0.85,
+            "structure": 1,
+            "parameters": 1
+          },
+          "open_questions": [],
+          "prompt_version": "draft_graph_default@v195 (staging)",
+          "context_hash_v0": "361742d4b9a9",
+          "stage3_rationales": []
+        },
+        "stage_snapshots": {
+          "stage_1_parse": {
+            "goal_node_id": "goal_arr_growth",
+            "goal_threshold": "absent",
+            "goal_threshold_cap": "absent",
+            "goal_threshold_raw": "absent",
+            "goal_threshold_unit": "absent",
+            "goal_constraints_count": 0
+          },
+          "stage_3_enrich": {
+            "goal_node_id": "goal_arr_growth",
+            "goal_threshold": "absent",
+            "goal_threshold_cap": "absent",
+            "goal_threshold_raw": "absent",
+            "goal_threshold_unit": "absent",
+            "goal_constraints_count": 0
+          },
+          "stage_4_repair": {
+            "goal_node_id": "goal_arr_growth",
+            "goal_threshold": "absent",
+            "goal_threshold_cap": "absent",
+            "goal_threshold_raw": "absent",
+            "goal_threshold_unit": "absent",
+            "goal_constraints_count": 0
+          },
+          "stage_5_package": {
+            "goal_node_id": "goal_arr_growth",
+            "goal_threshold": "absent",
+            "goal_threshold_cap": "absent",
+            "goal_threshold_raw": "absent",
+            "goal_threshold_unit": "absent",
+            "goal_constraints_count": 0
+          },
+          "stage_4b_threshold_sweep": {
+            "goal_node_id": "goal_arr_growth",
+            "goal_threshold": "absent",
+            "goal_threshold_cap": "absent",
+            "goal_threshold_raw": "absent",
+            "goal_threshold_unit": "absent",
+            "goal_constraints_count": 0
+          }
+        },
+        "threshold_sweep": {
+          "ran": true,
+          "codes": [],
+          "duration_ms": 0,
+          "goals_checked": 1,
+          "strips_applied": 0,
+          "warnings_emitted": 0
+        },
+        "diagnostic_checks": {
+          "cee_trace_present": true,
+          "llm_raw_available": true,
+          "intercept_populated": false,
+          "is_baseline_present": true,
+          "confidence_unique_values": [
+            0.72,
+            0.75,
+            0.78,
+            0.8,
+            0.82,
+            0.85,
+            0.88,
+            0.9
+          ],
+          "confidence_differentiated": true
+        },
+        "total_duration_ms": 84692,
+        "validation_summary": {
+          "model_notes": [
+            "[missing_factor] 'Customer Attach Rate' affects ARR uplift but is not explicitly modeled.",
+            "[brief_ambiguity] The mapping from build investment to ARR uplift and its sensitivity to llm cost is not precisely defined.",
+            "[brief_ambiguity] The impact of platform rewrite timing on competitive window risk is unclear."
+          ],
+          "bias_offsets": {
+            "strength_std": 0.006428571428571402,
+            "strength_mean": 0,
+            "exists_probability": -0.04999999999999993
+          },
+          "contested_count": 11,
+          "lint_corrections": 11,
+          "pass2_latency_ms": 46846,
+          "total_edges_validated": 20,
+          "total_pipeline_latency_ms": 46848
+        },
+        "pipeline_checkpoints": [
+          {
+            "stage": "post_adapter_normalisation",
+            "edge_count": 34,
+            "node_count": 19,
+            "sample_edges": [
+              {
+                "to": "opt_copilot",
+                "from": "dec_strategy",
+                "strength_std": 0.01,
+                "belief_exists": 1,
+                "strength_mean": 1,
+                "effect_direction": "positive"
+              },
+              {
+                "to": "risk_budget_overrun",
+                "from": "fac_budget",
+                "strength_std": 0.12,
+                "belief_exists": 0.88,
+                "strength_mean": -0.3,
+                "effect_direction": "negative"
+              },
+              {
+                "to": "goal_arr_growth",
+                "from": "out_arr_uplift",
+                "strength_std": 0.12,
+                "belief_exists": 0.9,
+                "strength_mean": 0.55,
+                "effect_direction": "positive"
+              }
+            ],
+            "edge_field_presence": {
+              "weight": 0,
+              "strength_std": 34,
+              "belief_exists": 34,
+              "strength_mean": 34,
+              "effect_direction": 34
+            },
+            "node_field_presence": {
+              "option_nodes_total": 4,
+              "options_with_interventions": 4
+            },
+            "nested_strength_detected": true
+          },
+          {
+            "stage": "post_stabilisation",
+            "edge_count": 34,
+            "node_count": 19,
+            "sample_edges": [
+              {
+                "to": "opt_copilot",
+                "from": "dec_strategy",
+                "strength_std": 0.01,
+                "belief_exists": 1,
+                "strength_mean": 1,
+                "effect_direction": "positive"
+              },
+              {
+                "to": "risk_budget_overrun",
+                "from": "fac_budget",
+                "strength_std": 0.10363636363636362,
+                "belief_exists": 0.88,
+                "strength_mean": -0.25909090909090904,
+                "effect_direction": "negative"
+              },
+              {
+                "to": "goal_arr_growth",
+                "from": "out_arr_uplift",
+                "strength_std": 0.12,
+                "belief_exists": 0.9,
+                "strength_mean": 0.55,
+                "effect_direction": "positive"
+              }
+            ],
+            "edge_field_presence": {
+              "weight": 34,
+              "strength_std": 34,
+              "belief_exists": 34,
+              "strength_mean": 34,
+              "effect_direction": 34
+            },
+            "node_field_presence": {
+              "option_nodes_total": 4,
+              "options_with_interventions": 4
+            }
+          },
+          {
+            "stage": "pre_boundary",
+            "edge_count": 34,
+            "node_count": 19,
+            "sample_edges": [
+              {
+                "to": "opt_copilot",
+                "from": "dec_strategy",
+                "strength_std": 0.01,
+                "belief_exists": 1,
+                "strength_mean": 1,
+                "effect_direction": "positive"
+              },
+              {
+                "to": "risk_budget_overrun",
+                "from": "fac_budget",
+                "strength_std": 0.10363636363636362,
+                "belief_exists": 0.88,
+                "strength_mean": -0.25909090909090904,
+                "effect_direction": "negative"
+              },
+              {
+                "to": "goal_arr_growth",
+                "from": "out_arr_uplift",
+                "strength_std": 0.12,
+                "belief_exists": 0.9,
+                "strength_mean": 0.55,
+                "effect_direction": "positive"
+              }
+            ],
+            "edge_field_presence": {
+              "weight": 34,
+              "strength_std": 34,
+              "belief_exists": 34,
+              "strength_mean": 34,
+              "effect_direction": 34
+            },
+            "node_field_presence": {
+              "option_nodes_total": 4,
+              "options_with_interventions": 4
+            }
+          }
+        ],
+        "pipeline_checkpoints_meta": {
+          "enabled": true,
+          "total_count": 3,
+          "adapter_count": 1,
+          "pipeline_count": 2
+        }
+      },
+      "request_id": "7d3cb1c8-d311-454f-9535-deb667341bc5",
+      "correlation_id": "7d3cb1c8-d311-454f-9535-deb667341bc5",
+      "repair_summary": {
+        "status_quo": {
+          "fixed": false,
+          "marked_droppable": false
+        },
+        "graph_delta": {
+          "edges_after": 34,
+          "nodes_after": 19,
+          "edges_before": 34,
+          "nodes_before": 19
+        },
+        "bucket_summary": {
+          "a": 0,
+          "b": 3,
+          "c": 0
+        },
+        "llm_repair_needed": false,
+        "status_quo_action": "none",
+        "unreachable_factors": {
+          "reclassified": [
+            "fac_budget",
+            "fac_legal_clearance",
+            "fac_llm_cost",
+            "fac_market_window"
+          ],
+          "marked_droppable": []
+        },
+        "edge_format_detected": "V1_FLAT",
+        "deterministic_repairs": [
+          {
+            "code": "CONTROLLABLE_MISSING_DATA",
+            "path": "nodes[fac_copilot_build].data",
+            "action": "Populated missing required fields with defaults"
+          },
+          {
+            "code": "CONTROLLABLE_MISSING_DATA",
+            "path": "nodes[fac_rewrite_build].data",
+            "action": "Populated missing required fields with defaults"
+          },
+          {
+            "code": "OBSERVABLE_EXTRA_DATA",
+            "path": "nodes[fac_budget].data",
+            "action": "Removed factor_type, uncertainty_drivers, and empty interventions sentinel (extra for observable)"
+          },
+          {
+            "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+            "path": "nodes[fac_budget].category",
+            "action": "Reclassified unreachable factor \"Available Strategic Budget\" to external with synthesised prior [0.3, 0.8999999999999999]",
+            "prior_synthesised": true,
+            "synthesised_range": {
+              "range_max": 0.8999999999999999,
+              "range_min": 0.3
+            }
+          },
+          {
+            "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+            "path": "nodes[fac_legal_clearance].category",
+            "action": "Reclassified unreachable factor \"Data Processing Legal Clearance\" to external"
+          },
+          {
+            "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+            "path": "nodes[fac_llm_cost].category",
+            "action": "Reclassified unreachable factor \"LLM Serving Cost per Seat\" to external"
+          },
+          {
+            "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+            "path": "nodes[fac_market_window].category",
+            "action": "Reclassified unreachable factor \"Competitive Market Window\" to external"
+          },
+          {
+            "code": "INBOUND_BUDGET_RESCALED",
+            "path": "edges[*→risk_budget_overrun]",
+            "action": "Rescaled 3 causal inbound edges from sum=1.100 to 0.95"
+          },
+          {
+            "code": "INBOUND_BUDGET_RESCALED",
+            "path": "edges[*→risk_legal_block]",
+            "action": "Rescaled 2 causal inbound edges from sum=1.200 to 0.95"
+          },
+          {
+            "code": "INBOUND_BUDGET_RESCALED",
+            "path": "edges[*→risk_market_miss]",
+            "action": "Rescaled 3 causal inbound edges from sum=1.130 to 0.95"
+          }
+        ],
+        "deterministic_sweep_ran": true,
+        "remaining_violation_codes": [],
+        "remaining_violations_count": 0,
+        "deterministic_repairs_count": 10,
+        "deterministic_sweep_version": "v3",
+        "risk_coefficient_corrections": []
+      },
+      "transform_defaults": {
+        "defaults": [],
+        "total_defaults": 0,
+        "defaulted_edge_count": 0
+      }
+    },
+    "options": [
+      {
+        "id": "opt_copilot",
+        "label": "Build AI Copilot Now",
+        "status": "ready",
+        "provenance": {
+          "source": "brief_extraction"
+        },
+        "is_baseline": false,
+        "interventions": {
+          "fac_eng_capacity": {
+            "value": 0.5,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_eng_capacity",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_copilot_build": {
+            "value": 1,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_copilot_build",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_rewrite_build": {
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_rewrite_build",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          }
+        }
+      },
+      {
+        "id": "opt_rewrite",
+        "label": "Platform Rewrite First",
+        "status": "ready",
+        "provenance": {
+          "source": "brief_extraction"
+        },
+        "is_baseline": false,
+        "interventions": {
+          "fac_eng_capacity": {
+            "value": 0.75,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_eng_capacity",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_copilot_build": {
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_copilot_build",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_rewrite_build": {
+            "value": 1,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_rewrite_build",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          }
+        }
+      },
+      {
+        "id": "opt_sequence",
+        "label": "Rewrite Then Copilot (Sequenced)",
+        "status": "ready",
+        "provenance": {
+          "source": "brief_extraction"
+        },
+        "is_baseline": false,
+        "interventions": {
+          "fac_eng_capacity": {
+            "value": 0.6,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_eng_capacity",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_copilot_build": {
+            "value": 0.4,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_copilot_build",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_rewrite_build": {
+            "value": 1,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_rewrite_build",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          }
+        }
+      },
+      {
+        "id": "opt_status_quo",
+        "label": "Neither — Status Quo",
+        "status": "ready",
+        "provenance": {
+          "source": "brief_extraction"
+        },
+        "is_baseline": true,
+        "interventions": {
+          "fac_eng_capacity": {
+            "value": 0.3,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_eng_capacity",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_copilot_build": {
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_copilot_build",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_rewrite_build": {
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_rewrite_build",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          }
+        }
+      }
+    ],
+    "quality": {
+      "safety": 8,
+      "overall": 9,
+      "coverage": 10,
+      "structure": 8,
+      "structural_proxy": 8
+    },
+    "_timings": {
+      "draft_graph": {
+        "parse_ms": 36994,
+        "total_ms": 84702,
+        "enrich_ms": 13,
+        "repair_ms": 90,
+        "package_ms": 10,
+        "boundary_ms": 9,
+        "normalise_ms": 1,
+        "parse_llm_ms": 36917,
+        "repair_fired": false,
+        "repair_reason": null,
+        "repair_attempts": 0,
+        "coaching_pass_ms": 30005,
+        "threshold_sweep_ms": 2,
+        "validation_pipeline_ms": 46849
+      }
+    },
+    "coaching": {
+      "summary": null,
+      "bias_signals": [],
+      "widening_log": {
+        "elements_added": [],
+        "brief_completeness": "thin",
+        "elements_considered_but_excluded": []
+      },
+      "strengthen_items": []
+    },
+    "goal_node_id": "goal_arr_growth",
+    "causal_claims": [],
+    "topology_plan": [],
+    "analysis_ready": {
+      "status": "ready",
+      "options": [
+        {
+          "id": "opt_copilot",
+          "label": "Build AI Copilot Now",
+          "status": "ready",
+          "interventions": {
+            "fac_eng_capacity": {
+              "value": 0.5,
+              "source": "brief_extraction",
+              "display_value": "Moderate (0.3)"
+            },
+            "fac_copilot_build": {
+              "value": 1,
+              "source": "brief_extraction",
+              "display_value": "Low (0)"
+            },
+            "fac_rewrite_build": {
+              "value": 0,
+              "source": "brief_extraction",
+              "display_value": "Low (0)"
+            }
+          },
+          "status_reason": "3 intervention(s) ready for analysis",
+          "extraction_metadata": {
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "confidence": "high"
+          },
+          "intervention_details": {
+            "fac_eng_capacity": {
+              "display_value": "Moderate (0.3)",
+              "normalised_value": 0.5
+            },
+            "fac_copilot_build": {
+              "display_value": "Low (0)",
+              "normalised_value": 1
+            },
+            "fac_rewrite_build": {
+              "display_value": "Low (0)",
+              "normalised_value": 0
+            }
+          }
+        },
+        {
+          "id": "opt_rewrite",
+          "label": "Platform Rewrite First",
+          "status": "ready",
+          "interventions": {
+            "fac_eng_capacity": {
+              "value": 0.75,
+              "source": "brief_extraction",
+              "display_value": "Moderate (0.3)"
+            },
+            "fac_copilot_build": {
+              "value": 0,
+              "source": "brief_extraction",
+              "display_value": "Low (0)"
+            },
+            "fac_rewrite_build": {
+              "value": 1,
+              "source": "brief_extraction",
+              "display_value": "Low (0)"
+            }
+          },
+          "status_reason": "3 intervention(s) ready for analysis",
+          "extraction_metadata": {
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "confidence": "high"
+          },
+          "intervention_details": {
+            "fac_eng_capacity": {
+              "display_value": "Moderate (0.3)",
+              "normalised_value": 0.75
+            },
+            "fac_copilot_build": {
+              "display_value": "Low (0)",
+              "normalised_value": 0
+            },
+            "fac_rewrite_build": {
+              "display_value": "Low (0)",
+              "normalised_value": 1
+            }
+          }
+        },
+        {
+          "id": "opt_sequence",
+          "label": "Rewrite Then Copilot (Sequenced)",
+          "status": "ready",
+          "interventions": {
+            "fac_eng_capacity": {
+              "value": 0.6,
+              "source": "brief_extraction",
+              "display_value": "Moderate (0.3)"
+            },
+            "fac_copilot_build": {
+              "value": 0.4,
+              "source": "brief_extraction",
+              "display_value": "Low (0)"
+            },
+            "fac_rewrite_build": {
+              "value": 1,
+              "source": "brief_extraction",
+              "display_value": "Low (0)"
+            }
+          },
+          "status_reason": "3 intervention(s) ready for analysis",
+          "extraction_metadata": {
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "confidence": "high"
+          },
+          "intervention_details": {
+            "fac_eng_capacity": {
+              "display_value": "Moderate (0.3)",
+              "normalised_value": 0.6
+            },
+            "fac_copilot_build": {
+              "display_value": "Low (0)",
+              "normalised_value": 0.4
+            },
+            "fac_rewrite_build": {
+              "display_value": "Low (0)",
+              "normalised_value": 1
+            }
+          }
+        },
+        {
+          "id": "opt_status_quo",
+          "label": "Neither — Status Quo",
+          "status": "ready",
+          "is_baseline": true,
+          "interventions": {
+            "fac_eng_capacity": {
+              "value": 0.3,
+              "source": "brief_extraction",
+              "display_value": "Moderate (0.3)"
+            },
+            "fac_copilot_build": {
+              "value": 0,
+              "source": "brief_extraction",
+              "display_value": "Low (0)"
+            },
+            "fac_rewrite_build": {
+              "value": 0,
+              "source": "brief_extraction",
+              "display_value": "Low (0)"
+            }
+          },
+          "status_reason": "3 intervention(s) ready for analysis",
+          "extraction_metadata": {
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "confidence": "high"
+          },
+          "intervention_details": {
+            "fac_eng_capacity": {
+              "display_value": "Moderate (0.3)",
+              "normalised_value": 0.3
+            },
+            "fac_copilot_build": {
+              "display_value": "Low (0)",
+              "normalised_value": 0
+            },
+            "fac_rewrite_build": {
+              "display_value": "Low (0)",
+              "normalised_value": 0
+            }
+          }
+        }
+      ],
+      "goal_node_id": "goal_arr_growth",
+      "bias_findings": [],
+      "model_adjustments": [
+        {
+          "code": "category_reclassified",
+          "field": "nodes[fac_budget].category",
+          "reason": "Reclassified unreachable factor \"Available Strategic Budget\" to external with synthesised prior [0.3, 0.8999999999999999]",
+          "source": "deterministic_sweep",
+          "node_id": "fac_budget"
+        },
+        {
+          "code": "category_reclassified",
+          "field": "nodes[fac_legal_clearance].category",
+          "reason": "Reclassified unreachable factor \"Data Processing Legal Clearance\" to external",
+          "source": "deterministic_sweep",
+          "node_id": "fac_legal_clearance"
+        },
+        {
+          "code": "category_reclassified",
+          "field": "nodes[fac_llm_cost].category",
+          "reason": "Reclassified unreachable factor \"LLM Serving Cost per Seat\" to external",
+          "source": "deterministic_sweep",
+          "node_id": "fac_llm_cost"
+        },
+        {
+          "code": "category_reclassified",
+          "field": "nodes[fac_market_window].category",
+          "reason": "Reclassified unreachable factor \"Competitive Market Window\" to external",
+          "source": "deterministic_sweep",
+          "node_id": "fac_market_window"
+        }
+      ]
+    },
+    "draft_warnings": [
+      {
+        "id": "goal_no_baseline_value",
+        "edge_ids": [],
+        "fix_hint": "Set goal node's observed_state.value to establish baseline for comparison",
+        "node_ids": [
+          "goal_arr_growth"
+        ],
+        "severity": "low",
+        "explanation": "Goal node has no observed_state.value set.",
+        "affected_edge_ids": [],
+        "affected_node_ids": [
+          "goal_arr_growth"
+        ]
+      }
+    ],
+    "schema_version": "3.0",
+    "_pipeline_outcome": {
+      "warnings": [],
+      "llm_repair": {
+        "outcome": "skipped",
+        "attempts": 0,
+        "triggered": false,
+        "fallback_reason": null
+      },
+      "rescue_score": 18,
+      "graph_drafted": true,
+      "coaching_status": "failed_degraded",
+      "enrichment_status": "complete",
+      "repair_provenance": [
+        {
+          "code": "CONTROLLABLE_MISSING_DATA",
+          "rule": "CONTROLLABLE_MISSING_DATA",
+          "after": null,
+          "field": "graph",
+          "before": null,
+          "source": "fallback_default",
+          "node_or_edge_id": "nodes[fac_copilot_build].data"
+        },
+        {
+          "code": "CONTROLLABLE_MISSING_DATA",
+          "rule": "CONTROLLABLE_MISSING_DATA",
+          "after": null,
+          "field": "graph",
+          "before": null,
+          "source": "fallback_default",
+          "node_or_edge_id": "nodes[fac_rewrite_build].data"
+        },
+        {
+          "code": "OBSERVABLE_EXTRA_DATA",
+          "rule": "OBSERVABLE_EXTRA_DATA",
+          "after": null,
+          "field": "graph",
+          "before": null,
+          "source": "fallback_default",
+          "node_or_edge_id": "nodes[fac_budget].data"
+        },
+        {
+          "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+          "rule": "UNREACHABLE_FACTOR_RECLASSIFIED",
+          "after": null,
+          "field": "graph",
+          "before": null,
+          "source": "structure",
+          "node_or_edge_id": "nodes[fac_budget].category"
+        },
+        {
+          "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+          "rule": "UNREACHABLE_FACTOR_RECLASSIFIED",
+          "after": null,
+          "field": "graph",
+          "before": null,
+          "source": "structure",
+          "node_or_edge_id": "nodes[fac_legal_clearance].category"
+        },
+        {
+          "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+          "rule": "UNREACHABLE_FACTOR_RECLASSIFIED",
+          "after": null,
+          "field": "graph",
+          "before": null,
+          "source": "structure",
+          "node_or_edge_id": "nodes[fac_llm_cost].category"
+        },
+        {
+          "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+          "rule": "UNREACHABLE_FACTOR_RECLASSIFIED",
+          "after": null,
+          "field": "graph",
+          "before": null,
+          "source": "structure",
+          "node_or_edge_id": "nodes[fac_market_window].category"
+        },
+        {
+          "code": "INBOUND_BUDGET_RESCALED",
+          "rule": "INBOUND_BUDGET_RESCALED",
+          "after": null,
+          "field": "graph",
+          "before": null,
+          "source": "structure",
+          "node_or_edge_id": "edges[*→risk_budget_overrun]"
+        },
+        {
+          "code": "INBOUND_BUDGET_RESCALED",
+          "rule": "INBOUND_BUDGET_RESCALED",
+          "after": null,
+          "field": "graph",
+          "before": null,
+          "source": "structure",
+          "node_or_edge_id": "edges[*→risk_legal_block]"
+        },
+        {
+          "code": "INBOUND_BUDGET_RESCALED",
+          "rule": "INBOUND_BUDGET_RESCALED",
+          "after": null,
+          "field": "graph",
+          "before": null,
+          "source": "structure",
+          "node_or_edge_id": "edges[*→risk_market_miss]"
+        }
+      ],
+      "validation_status": "passed",
+      "verification_status": "passed",
+      "factor_value_coverage": {
+        "total": 7,
+        "explicit": 0,
+        "fallback_default": 4,
+        "inferred_with_evidence": 3
+      },
+      "graph_structurally_valid": true,
+      "edge_strength_unique_count": 17,
+      "deterministic_sweep_violations": 0
+    },
+    "validation_warnings": [
+      {
+        "code": "OPTION_SIMILARITY",
+        "details": {
+          "jaccard": 1,
+          "optionA": "opt_sequence",
+          "optionB": "opt_status_quo"
+        },
+        "message": "Options \"Rewrite Then Copilot (Sequenced)\" and \"Neither — Status Quo\" affect the same factors (Jaccard 1.00). Consider whether they represent genuinely different approaches.",
+        "severity": "info",
+        "suggestion": "Options affect the same factors — consider whether they represent genuinely different approaches"
+      }
+    ]
+  }
+}

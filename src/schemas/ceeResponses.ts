@@ -98,17 +98,21 @@ export const LLMMetadataSchema = z.object({
 
 export type LLMMetadataT = z.infer<typeof LLMMetadataSchema>;
 
-/** LLM raw output preview pattern */
+/** LLM raw output trace (full output + preview) */
 export const LLMRawSchema = z.object({
+  /** Full untruncated LLM text output */
+  text: z.string(),
   /** First 2000 chars of raw LLM text */
   output_preview: z.string(),
-  /** SHA-256 of stored output (may be truncated by adapters) */
+  /** Total character count of the full output */
+  char_count: z.number(),
+  /** SHA-256 of stored output */
   output_hash: z.string(),
   /** Quick check: how many nodes in parsed output */
   output_node_count: z.number(),
   /** Quick check: how many edges in parsed output */
   output_edge_count: z.number(),
-  /** True if preview was truncated */
+  /** True if preview was truncated (output > 2000 chars) */
   truncated: z.boolean(),
   /** True if full output stored for later retrieval */
   full_output_available: z.boolean(),
@@ -238,6 +242,9 @@ export const PipelineStatusSchema = z.enum([
   "failed",
 ]);
 
+// WARNING: The runtime pipelineTrace object contains fields beyond this schema
+// (checkpoints, llm_metadata, cee_provenance, pipeline_checkpoints, etc.).
+// .passthrough() is required — do not add .strict() or remove .passthrough().
 /** Complete pipeline trace */
 export const PipelineTraceSchema = z.object({
   status: PipelineStatusSchema,
@@ -247,7 +254,7 @@ export const PipelineTraceSchema = z.object({
   connectivity: ConnectivityDiagnosticSchema.optional(),
   llm_calls: z.array(LlmCallTraceSchema).optional(),
   final_graph: FinalGraphTraceSchema.optional(),
-});
+}).passthrough();
 
 export type PipelineTraceT = z.infer<typeof PipelineTraceSchema>;
 
@@ -273,7 +280,7 @@ export const CEEQualityMetaSchema = z.object({
   overall: z.number(),
   structure: z.number().optional(),
   coverage: z.number().optional(),
-  causality: z.number().optional(),
+  structural_proxy: z.number().optional(),
   safety: z.number().optional(),
   details: z.record(z.any()).optional(),
 });
@@ -308,11 +315,18 @@ export const CEEDraftGraphResponseV1Schema = DraftGraphOutput.and(
       draft_warnings: z.array(z.record(z.any())).optional(),
       confidence_flags: z.record(z.any()).optional(),
       guidance: z.record(z.any()).optional(),
-      // Multi-turn clarifier integration (Phase 1)
+      // Multi-turn clarifier integration (Phase 1) — never populated since
+      // the Stage-4 clarifier retirement (2026-07-16); kept for wire compat.
       clarifier: CEEClarifierBlockV1Schema.optional(),
       // Graph quality enhancement - Phase 1
       weight_suggestions: z.array(CEEWeightSuggestionV1Schema).optional(),
       comparison_suggested: z.boolean().optional(),
+      // BriefSignals v1 — deterministic bias detection (persisted for downstream correlation)
+      bias_signals: z.array(z.object({
+        type: z.enum(["sunk_cost", "anchoring"]),
+        confidence: z.literal("high"),
+        evidence: z.string(),
+      })).optional(),
     })
     .passthrough(),
 );
@@ -420,49 +434,63 @@ export const CEEGraphReadinessResponseV1Schema = z
     quality_factors: z.array(CEEQualityFactorV1Schema),
     can_run_analysis: z.boolean(),
     blocker_reason: z.string().optional(),
+    // F4 (readiness↔run gate): pre-run projection of what run_analysis would
+    // do with an unconfigured option. `will_scaffold_options` is true iff
+    // run_analysis would PROCEED even though not every option is configured —
+    // so the pre-run panel need not read `can_run_analysis === false` as a hard
+    // block when the run would in fact proceed. Computed by the SAME predicate
+    // the run path uses (analysable-option-gate.computeScaffoldPlan), so the
+    // two gates cannot drift.
+    //
+    // ⚠ THE FIELD NAME NO LONGER DESCRIBES THE MECHANISM, DELIBERATELY. Since
+    // the 2026-08-14 no-rank ruling an unconfigured option is EXCLUDED from the
+    // submission rather than filled with placeholders (only the status quo is
+    // held). This is a PUBLISHED field with live UI readers, and the QUESTION
+    // it answers is unchanged, so the name is retained until the UI half of a
+    // rename ships in the same wave.
+    scaffold_plan: z
+      .object({
+        will_scaffold_options: z.boolean(),
+        option_count: z.number().int().min(0).optional(),
+      })
+      .optional(),
+    /**
+     * Per-option, per-factor blockers from the canonical admission assessor.
+     * ADDITIVE — optional here so a consumer pinned to an older shape keeps
+     * validating.
+     *
+     * This is what makes `can_run_analysis: false` ACTIONABLE. The route
+     * previously offered only a count ("1 option(s) blocked"), which cannot
+     * drive the UI's draft-missing-values affordance: it names no option and no
+     * field. `option_id` + `factor_id` + a human `message` do.
+     */
+    readiness_issues: z
+      .array(
+        z
+          .object({
+            code: z.string(),
+            category: z.string(),
+            message: z.string(),
+            repairability: z.string(),
+            option_id: z.string().optional(),
+            option_label: z.string().optional(),
+            factor_id: z.string().optional(),
+            factor_label: z.string().optional(),
+          })
+          .passthrough(),
+      )
+      .optional(),
     trace: CEETraceMetaSchema,
   })
   .passthrough();
 
 export type CEEGraphReadinessResponseV1T = z.infer<typeof CEEGraphReadinessResponseV1Schema>;
 
-// Headline structured data for flexible UI rendering
-export const CEEHeadlineStructuredV1Schema = z.object({
-  goal_text: z.string().nullable(),
-  action: z.string(),
-  outcome_type: z.enum(["positive", "negative", "neutral"]),
-  likelihood: z.number().min(0).max(1),
-  vs_baseline: z.number().nullable(),
-  vs_baseline_direction: z.enum(["better", "worse", "same"]).nullable(),
-  ranking_confidence: z.enum(["low", "medium", "high"]),
-  is_close_race: z.boolean(),
-});
-
-export type CEEHeadlineStructuredV1T = z.infer<typeof CEEHeadlineStructuredV1Schema>;
-
-// Key Insight Response schema
-export const CEEKeyInsightResponseV1Schema = z
-  .object({
-    headline: z.string(),
-    headline_structured: CEEHeadlineStructuredV1Schema.optional(),
-    primary_driver: z.string(),
-    confidence_statement: z.string(),
-    caveat: z.string().optional(),
-    evidence: z.array(z.string()).optional(),
-    next_steps: z.array(z.string()).optional(),
-    // Recommendation status based on identifiability
-    // actionable = causal effects confirmed, proceed with confidence
-    // exploratory = treat as scenario analysis, gather more data
-    recommendation_status: z.enum(["actionable", "exploratory"]).optional(),
-    // Identifiability acknowledgement for transparency
-    identifiability_note: z.string().optional(),
-    quality: CEEQualityMetaSchema,
-    trace: CEETraceMetaSchema,
-    provenance: z.literal("cee"),
-  })
-  .passthrough();
-
-export type CEEKeyInsightResponseV1T = z.infer<typeof CEEKeyInsightResponseV1Schema>;
+// ROADMAP 2.213: the key-insight response schemas
+// (`CEEHeadlineStructuredV1Schema`, `CEEKeyInsightResponseV1Schema`) were
+// deleted with the `/assist/v1/key-insight` route they typed. The headline
+// schema had exactly one consumer — the key-insight response — so it went
+// with it.
 
 // Belief Elicitation Response schema
 export const CEEElicitBeliefOptionSchema = z.object({
@@ -614,23 +642,8 @@ export type CEEEdgeFunctionSuggestionResponseV1T = z.infer<
   typeof CEEEdgeFunctionSuggestionResponseV1Schema
 >;
 
-// Generate Recommendation Response schema
-export const CEEGenerateRecommendationResponseV1Schema = z
-  .object({
-    headline: z.string(),
-    recommendation_narrative: z.string(),
-    confidence_statement: z.string(),
-    alternatives_summary: z.string().optional(),
-    caveat: z.string().optional(),
-    trace: CEETraceMetaSchema,
-    quality: CEEQualityMetaSchema,
-    provenance: z.literal("cee"),
-  })
-  .passthrough();
-
-export type CEEGenerateRecommendationResponseV1T = z.infer<
-  typeof CEEGenerateRecommendationResponseV1Schema
->;
+// ROADMAP 2.213: `CEEGenerateRecommendationResponseV1Schema` was deleted with
+// the `/assist/v1/generate-recommendation` route it typed.
 
 // Narrate Conditions Response schema
 export const CEEConditionSummaryV1Schema = z.object({

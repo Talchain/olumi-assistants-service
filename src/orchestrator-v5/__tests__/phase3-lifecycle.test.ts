@@ -1,0 +1,1101 @@
+/**
+ * V5 Phase 3A PR 3 — lifecycle composer tests.
+ *
+ * Covers the decision tree in `compose.ts:buildBlocksFromFacts` for the
+ * NO-current-turn-run_analysis-fact branch, plus the
+ * `v5.phase3.block_lifecycle` telemetry emission shape.
+ *
+ * Spec items covered:
+ *   2. fresh reuse from prior run_analysis fact on a later non-analysis turn;
+ *   3. stale graph emits exactly one rerun CoachingBlock with priority_rank:1;
+ *   4. unknown freshness suppresses blocks;
+ *   5. rerun refresh switches to newest run_analysis fact;
+ *   9. no fresh ReviewCardBlock or EvidenceBlock after graph divergence.
+ *
+ * Items 1, 6, 7, 8 live in the dedicated UUID helper tests + the
+ * chip-click integration suite.
+ */
+
+import { readFileSync } from 'node:fs';
+
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
+
+import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
+
+import { composeToolCallResponse } from '../compose.js';
+import type { FreshnessDerivation } from '../context/freshness.js';
+import { log } from '../../utils/telemetry.js';
+
+// ---------------------------------------------------------------------------
+// Fixtures — staging-shaped run_analysis fact with a populated
+// `decision_review` enrichment. Mirrors the canonical PLoT V2 shape so
+// the real Phase 3 builders fire all the way through to non-zero blocks.
+// ---------------------------------------------------------------------------
+
+const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const SOURCE_GRAPH_HASH = 'gh_source_a1b2c3d4';
+const DIVERGED_GRAPH_HASH = 'gh_diverged_e5f6g7h8';
+
+const FACTOR_DELIVERY = { id: 'fac_delivery_risk', label: 'Delivery risk', kind: 'factor' };
+const FACTOR_COST = { id: 'fac_cost_overrun', label: 'Cost overrun', kind: 'factor' };
+
+const CANNED_DECISION_REVIEW: Record<string, unknown> = {
+  narrative_summary: 'Plan A leads with a comfortable margin.',
+  story_headlines: {},
+  robustness_explanation: { summary: 'Stable.', primary_risk: null },
+  readiness_rationale: 'Ready.',
+  evidence_enhancements: {
+    fac_delivery_risk: {
+      specific_action: 'pull on-time delivery rate from the last two releases',
+      rationale: 'delivery rate is the highest-leverage variance driver',
+      evidence_type: 'internal_data',
+      decision_hygiene: 'estimate first',
+    },
+  },
+  scenario_contexts: {},
+  flip_thresholds: [],
+  bias_findings: [],
+  key_assumptions: ['Market conditions persist for the next two quarters.'],
+  decision_quality_prompts: [],
+};
+
+function makeRunAnalysisFact(
+  graphHash: string,
+  decisionReview: Record<string, unknown> = CANNED_DECISION_REVIEW,
+): RunAnalysisHandlerFact {
+  return {
+    fact_type: 'run_analysis',
+    fact_version: 1,
+    noop: false,
+    result: {
+      scenario_id: SCENARIO_ID,
+      leading_option_id: 'opt_a',
+      summary: 'Ran analysis.',
+      win_probabilities: { opt_a: 0.7, opt_b: 0.3 },
+      graph_hash_at_run: graphHash,
+      computed_at: '2026-05-17T00:00:00.000Z',
+      enrichment: {
+        graph: { nodes: [FACTOR_DELIVERY, FACTOR_COST] },
+        factor_sensitivity: [
+          { factor_id: 'fac_delivery_risk', confidence: 0.2 },
+          { factor_id: 'fac_cost_overrun', confidence: 0.5 },
+        ],
+        option_comparison: [
+          { id: 'opt_a', option_id: 'opt_a', label: 'Plan A', option_label: 'Plan A', win_probability: 0.7 },
+          { id: 'opt_b', option_id: 'opt_b', label: 'Plan B', option_label: 'Plan B', win_probability: 0.3 },
+        ],
+        decision_review: decisionReview,
+      },
+    },
+  } as unknown as RunAnalysisHandlerFact;
+}
+
+function freshDerivation(opts: {
+  sourceHash: string;
+  selectedIndex: number;
+}): FreshnessDerivation {
+  return {
+    freshness: 'fresh',
+    reason: 'graph_hash_matches',
+    selected_fact_index: opts.selectedIndex,
+    graph_hash_at_run: opts.sourceHash,
+    current_graph_hash: opts.sourceHash,
+    computed_at: '2026-05-17T00:00:00.000Z',
+  };
+}
+
+function staleDerivation(opts: {
+  sourceHash: string;
+  currentHash: string;
+  selectedIndex: number;
+}): FreshnessDerivation {
+  return {
+    freshness: 'stale',
+    reason: 'graph_hash_mismatch',
+    selected_fact_index: opts.selectedIndex,
+    graph_hash_at_run: opts.sourceHash,
+    current_graph_hash: opts.currentHash,
+    computed_at: '2026-05-17T00:00:00.000Z',
+  };
+}
+
+function unknownDerivation(): FreshnessDerivation {
+  return {
+    freshness: 'unknown',
+    reason: 'legacy_fact_missing_hash',
+    selected_fact_index: 0,
+    graph_hash_at_run: null,
+    current_graph_hash: 'gh_current_unknown',
+    computed_at: null,
+  };
+}
+
+function noneDerivation(): FreshnessDerivation {
+  return {
+    freshness: 'none',
+    reason: 'no_successful_run_analysis_fact',
+    selected_fact_index: null,
+    graph_hash_at_run: null,
+    current_graph_hash: 'gh_current_none',
+    computed_at: null,
+  };
+}
+
+const UUID_VALIDATOR = z.string().uuid();
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+describe('Phase 3 lifecycle composer — branch 2 (no current-turn run_analysis fact)', () => {
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+  let infoSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => log);
+    infoSpy = vi.spyOn(log, 'info').mockImplementation(() => log);
+  });
+  afterEach(() => {
+    warnSpy.mockRestore();
+    infoSpy.mockRestore();
+  });
+
+  // Test 2 — fresh reuse from prior run_analysis fact on a later non-analysis turn.
+  it('FRESH: rebuilds Phase 3 blocks from prior run_analysis fact when current turn has none', () => {
+    const priorFact = makeRunAnalysisFact(SOURCE_GRAPH_HASH);
+    const response = composeToolCallResponse({
+      answerKind: 'functional',
+      orientation: '',
+      confirmation: 'Explained.',
+      coaching: null,
+      stage: 'decide',
+      handlerFacts: [],  // no current-turn fact
+      lifecycle: {
+        priorFacts: [priorFact],
+        freshness: freshDerivation({ sourceHash: SOURCE_GRAPH_HASH, selectedIndex: 0 }),
+        requestId: 'req-fresh',
+        scenarioId: SCENARIO_ID,
+      },
+    });
+    // V5 P0-B: the FRESH prior-fact branch now ALSO emits the result-summary
+    // `analysis_result` block (so the UI has a non-empty, structured answer
+    // even without decision_review). Emitted on FRESH only — the STALE test
+    // below still asserts it is absent on a diverged graph.
+    expect(response.blocks.find((b) => b.type === 'analysis_result')).toBeDefined();
+    // Phase 3 blocks rebuilt from prior fact and tagged fresh.
+    const reviewCards = response.blocks.filter((b) => b.type === 'review_card');
+    const coaching = response.blocks.filter((b) => b.type === 'coaching');
+    const evidence = response.blocks.filter((b) => b.type === 'evidence');
+    const phase3Blocks = [...reviewCards, ...coaching, ...evidence];
+    expect(reviewCards.length).toBeGreaterThan(0);
+    expect(coaching.length).toBeGreaterThan(0);
+    expect(evidence.length).toBeGreaterThan(0);
+    for (const b of phase3Blocks) {
+      expect(b.freshness).toBe('fresh');
+      expect(b.graph_hash_at_generation).toBe(SOURCE_GRAPH_HASH);
+      expect(UUID_VALIDATOR.safeParse(b.block_id).success).toBe(true);
+    }
+    // Lifecycle telemetry: emitted_fresh with reason=prior_fact_fresh.
+    const lifecycleCalls = infoSpy.mock.calls.filter(
+      ([payload]) =>
+        typeof payload === 'object' &&
+        payload !== null &&
+        (payload as Record<string, unknown>).event === 'v5.phase3.block_lifecycle',
+    );
+    expect(lifecycleCalls).toHaveLength(1);
+    const payload = lifecycleCalls[0]![0] as Record<string, unknown>;
+    expect(payload.lifecycle_state).toBe('emitted_fresh');
+    expect(payload.reason).toBe('prior_fact_fresh');
+    // V5 P0-B: block_count now includes the added analysis_result block.
+    expect(payload.block_count).toBe(phase3Blocks.length + 1);
+    expect(payload.stale_coaching_emitted).toBe(false);
+  });
+
+  // V5 P0-B — panel-aware keep-list + leak guards for the analysis_result
+  // block. Enrichment is reduced to the fields DGAI hydrates the Results
+  // panel from; every leak-carrying field is dropped at the build site. The
+  // rich fixture mirrors the live staging bundle (build cef69b0): leak
+  // markers live in DROPPED fields (_meta/meta → [REDACTED]; m1_coaching →
+  // isl_engine; decision_brief/fact_objects → seed lineage).
+  function richRunAnalysisFact(opts?: { withDecisionReview?: boolean; onlyLeak?: boolean }): RunAnalysisHandlerFact {
+    const enrichment: Record<string, unknown> = opts?.onlyLeak
+      ? {}
+      : {
+          option_comparison: [
+            { option_id: 'opt_a', option_label: 'Plan A', win_probability: 0.7 },
+            { option_id: 'opt_b', option_label: 'Plan B', win_probability: 0.3 },
+          ],
+          factor_sensitivity: [{ factor_id: 'fac_x', influence_score: 0.5 }],
+          robustness: { level: 'fragile', fragile_edges: [] },
+          results: [{ option_id: 'opt_a' }],
+          // Recovered top-level science field (kept): carries an honest
+          // `flip_value: null` that must survive verbatim, not be coerced.
+          flip_thresholds: [{ factor_id: 'fac_x', flip_value: null }],
+        };
+    // T1 claim safety — the persisted constraint verdict the run_analysis
+    // handler stamps on EVERY fact it writes. Stamped here (including on the
+    // `onlyLeak` fixture) because since ROADMAP 1.218 the transport projection
+    // is gated on it: an unstamped fact FAILS CLOSED, dropping
+    // `decision_review` whole and the three leader-ranking `decision_brief`
+    // members, so this keep-list fixture would silently measure the WITHHELD
+    // projection instead of the transport keep-list it exists to pin
+    // (TESTING-DISCIPLINE rule 1). `__cee_claim_safety` is not itself
+    // keep-listed, so it never reaches the wire and the `onlyLeak` case still
+    // projects to `undefined`.
+    enrichment.__cee_claim_safety = {
+      may_name_leading_option: true,
+      constraint_verdict_state: 'evaluated_feasible',
+    };
+    if (!opts?.onlyLeak && opts?.withDecisionReview !== false) {
+      enrichment.decision_review = { narrative_summary: 'ok' };
+    }
+    if (!opts?.onlyLeak) {
+      // Wave-2 ask 3 (0.19.0): decision_brief is now a KEPT field whose
+      // internal lineage (`seed` / `graph_hash`) is stripped in transit —
+      // it moved out of the always-dropped leak-carrier set below. The
+      // fixture mirrors the live capture: real content PLUS lineage keys,
+      // so the leak assertions keep their positive control.
+      enrichment.decision_brief = {
+        headline: 'Plan A is the leading option.',
+        options: [{ option_id: 'opt_a', rank: 1 }],
+        seed: 12345,
+        graph_hash: 'ef1aeb36a440854a',
+      };
+    }
+    // Leak carriers — always present, always dropped.
+    enrichment._meta = { feature_flags_snapshot: { TOKEN_RL_ENABLE: '[REDACTED]' } };
+    enrichment.meta = { build: 'cef69b0', feature_flags: { TOKEN_RL_ENABLE: '[REDACTED]' } };
+    enrichment.m1_coaching = { assumptions_ledger: { assumptions: [{ source_service: 'isl_engine' }] } };
+    enrichment.fact_objects = [{ lineage: { seed: 999 } }];
+    enrichment.downstream_calls = { isl: [{ request_payload: { graph: { nodes: [] } } }] };
+    enrichment.graph = { nodes: [] };
+    enrichment.critiques = [{ code: 'MONTE_CARLO_FAILED', message: 'internal' }];
+    return {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      noop: false,
+      result: {
+        scenario_id: SCENARIO_ID,
+        leading_option_id: 'opt_a',
+        summary: 'Ran analysis.',
+        win_probabilities: { opt_a: 0.7, opt_b: 0.3 },
+        graph_hash_at_run: SOURCE_GRAPH_HASH,
+        computed_at: '2026-05-17T00:00:00.000Z',
+        enrichment,
+      },
+    } as unknown as RunAnalysisHandlerFact;
+  }
+
+  function analysisResultBlockFor(fact: RunAnalysisHandlerFact, opts: { currentTurn: boolean }) {
+    const response = composeToolCallResponse({
+      answerKind: 'functional',
+      orientation: '', confirmation: 'x', coaching: null, stage: 'decide',
+      handlerFacts: opts.currentTurn ? [fact] : [],
+      lifecycle: opts.currentTurn
+        ? undefined
+        : {
+            priorFacts: [fact],
+            freshness: freshDerivation({ sourceHash: SOURCE_GRAPH_HASH, selectedIndex: 0 }),
+            requestId: 'req', scenarioId: SCENARIO_ID,
+          },
+    });
+    return response.blocks.find((b) => b.type === 'analysis_result') as
+      | { win_probabilities?: Record<string, number>; enrichment?: Record<string, unknown> }
+      | undefined;
+  }
+
+  it('LEAK GUARD: analysis_result enrichment is reduced to the panel keep-list; every leak carrier ([REDACTED]/isl_engine/seed/_meta/graph/critiques) is dropped', () => {
+    const block = analysisResultBlockFor(richRunAnalysisFact(), { currentTurn: false });
+    expect(block).toBeDefined();
+    const enr = block!.enrichment ?? {};
+    // Only panel-aware keep-list fields survive. `flip_thresholds` is now a
+    // recovered top-level science field (kept), not a dropped leak carrier.
+    // 0.19.0 (wave-2 ask 3): `decision_brief` joined the keep-list — its
+    // CONTENT ships, its lineage keys are deep-stripped (asserted below).
+    expect(Object.keys(enr).sort()).toEqual([
+      'decision_brief', 'decision_review', 'factor_sensitivity', 'flip_thresholds', 'option_comparison', 'results', 'robustness',
+    ]);
+    // Leak carriers dropped (decision_brief moved to the kept set, 0.19.0).
+    for (const k of ['_meta', 'meta', 'm1_coaching', 'fact_objects', 'downstream_calls', 'graph', 'critiques']) {
+      expect(k in enr).toBe(false);
+    }
+    // The kept decision_brief ships its content MINUS the lineage keys.
+    const brief = enr.decision_brief as Record<string, unknown>;
+    expect(brief.headline).toBe('Plan A is the leading option.');
+    expect('seed' in brief).toBe(false);
+    expect('graph_hash' in brief).toBe(false);
+    // No leak markers survive ANYWHERE in the kept enrichment.
+    const enrJson = JSON.stringify(enr);
+    expect(enrJson).not.toContain('[REDACTED]');
+    expect(enrJson.toLowerCase()).not.toContain('isl_engine');
+    expect(enrJson).not.toMatch(/"seed"/);
+    // win_probabilities preserved VERBATIM, keyed by option id (DGAI correlates by id).
+    expect(block!.win_probabilities).toEqual({ opt_a: 0.7, opt_b: 0.3 });
+  });
+
+  it('KEEP-LIST: panel fields survive when decision_review is absent (chip-click autofire-off) — block is NOT starved', () => {
+    const block = analysisResultBlockFor(richRunAnalysisFact({ withDecisionReview: false }), { currentTurn: false });
+    const enr = block!.enrichment ?? {};
+    expect(Object.keys(enr).sort()).toEqual([
+      'decision_brief', 'factor_sensitivity', 'flip_thresholds', 'option_comparison', 'results', 'robustness',
+    ]);
+  });
+
+  it('KEEP-LIST: when enrichment carries ONLY leak fields, the block omits enrichment entirely', () => {
+    const block = analysisResultBlockFor(richRunAnalysisFact({ onlyLeak: true }), { currentTurn: false });
+    expect(block).toBeDefined();
+    expect('enrichment' in block!).toBe(false);
+    expect(block!.win_probabilities).toEqual({ opt_a: 0.7, opt_b: 0.3 });
+  });
+
+  it('KEEP-LIST: DGAI read-side givens with no fallback (option_comparison_status, conditional_probabilities) survive while leak carriers are dropped', () => {
+    // Codex closure review — these top-level fields reach enrichment via PLoT
+    // .passthrough() + CEE's byte-for-byte store and are read with no fallback,
+    // so dropping them would regress the Results panel (e.g. constraint-bearing
+    // analyses). option_comparison_status is fixture-proven (value 'computed').
+    const fact = {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      noop: false,
+      result: {
+        scenario_id: SCENARIO_ID,
+        leading_option_id: 'opt_a',
+        summary: 'Ran analysis.',
+        win_probabilities: { opt_a: 0.7, opt_b: 0.3 },
+        graph_hash_at_run: SOURCE_GRAPH_HASH,
+        computed_at: '2026-05-17T00:00:00.000Z',
+        enrichment: {
+          option_comparison: [{ option_id: 'opt_a', win_probability: 0.7 }],
+          option_comparison_status: 'computed',
+          conditional_probabilities: [{ option_id: 'opt_a', given: 'c1', probability: 0.55 }],
+          // leak carriers that must still be dropped
+          _meta: { feature_flags_snapshot: { TOKEN_RL_ENABLE: '[REDACTED]' } },
+          downstream_calls: { isl: [] },
+        },
+      },
+    } as unknown as RunAnalysisHandlerFact;
+    const block = analysisResultBlockFor(fact, { currentTurn: false });
+    const enr = block!.enrichment ?? {};
+    expect(enr.option_comparison_status).toBe('computed');
+    expect(enr.conditional_probabilities).toEqual([{ option_id: 'opt_a', given: 'c1', probability: 0.55 }]);
+    expect('_meta' in enr).toBe(false);
+    expect('downstream_calls' in enr).toBe(false);
+    expect(JSON.stringify(enr)).not.toContain('[REDACTED]');
+  });
+
+  // V5 — recover four top-level, leak-free PLoT V2 science fields at the
+  // safe-transport keep-list (edge_e_values, inference_warnings, confidence_tier,
+  // flip_thresholds), confirmed top-level against the real captured payload
+  // (tests/fixtures/cross-service/v5-turn.run-analysis.staging.json). Faithful
+  // pass-through only — no semantic reconstruction, no internal rehydration.
+  function factWithEnrichment(enrichment: Record<string, unknown>): RunAnalysisHandlerFact {
+    return {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      noop: false,
+      result: {
+        scenario_id: SCENARIO_ID,
+        leading_option_id: 'opt_a',
+        summary: 'Ran analysis.',
+        win_probabilities: { opt_a: 0.7, opt_b: 0.3 },
+        graph_hash_at_run: SOURCE_GRAPH_HASH,
+        computed_at: '2026-05-17T00:00:00.000Z',
+        enrichment,
+      },
+    } as unknown as RunAnalysisHandlerFact;
+  }
+
+  it('KEEP-LIST (recover): the four top-level science fields survive verbatim when present', () => {
+    const fact = factWithEnrichment({
+      option_comparison: [{ option_id: 'opt_a', win_probability: 0.7 }],
+      edge_e_values: [
+        { edge_id: 'fac_a->out_x', e_value: 1.2, flip_direction: 'decrease', current_mean: 0.65, flip_mean: 0.4 },
+      ],
+      inference_warnings: [{ node_id: 'fac_a', code: 'LOW_SAMPLES', message: 'few samples' }],
+      confidence_tier: 'needs_work',
+      flip_thresholds: [{ factor_id: 'fac_a', flip_value: 0.42, direction: 'decrease' }],
+      // leak carrier must still be dropped
+      _meta: { feature_flags_snapshot: { TOKEN_RL_ENABLE: '[REDACTED]' } },
+    });
+    const enr = analysisResultBlockFor(fact, { currentTurn: false })!.enrichment ?? {};
+    expect(enr.edge_e_values).toEqual([
+      { edge_id: 'fac_a->out_x', e_value: 1.2, flip_direction: 'decrease', current_mean: 0.65, flip_mean: 0.4 },
+    ]);
+    expect(enr.inference_warnings).toEqual([{ node_id: 'fac_a', code: 'LOW_SAMPLES', message: 'few samples' }]);
+    expect(enr.confidence_tier).toBe('needs_work');
+    expect(enr.flip_thresholds).toEqual([{ factor_id: 'fac_a', flip_value: 0.42, direction: 'decrease' }]);
+    expect('_meta' in enr).toBe(false);
+    expect(JSON.stringify(enr)).not.toContain('[REDACTED]');
+  });
+
+  it('KEEP-LIST (recover): absence is preserved — recovered fields omitted, never fabricated', () => {
+    const fact = factWithEnrichment({
+      option_comparison: [{ option_id: 'opt_a', win_probability: 0.7 }],
+    });
+    const enr = analysisResultBlockFor(fact, { currentTurn: false })!.enrichment ?? {};
+    for (const k of ['edge_e_values', 'inference_warnings', 'confidence_tier', 'flip_thresholds']) {
+      expect(k in enr).toBe(false);
+    }
+    // No fabricated 0/null/[]/text snuck in for the absent fields.
+    expect(Object.keys(enr).sort()).toEqual(['option_comparison']);
+  });
+
+  it('KEEP-LIST (recover): empty top-level edge_e_values / inference_warnings are preserved AS empty arrays', () => {
+    const fact = factWithEnrichment({
+      option_comparison: [{ option_id: 'opt_a', win_probability: 0.7 }],
+      edge_e_values: [],
+      inference_warnings: [],
+    });
+    const enr = analysisResultBlockFor(fact, { currentTurn: false })!.enrichment ?? {};
+    // Present-but-empty is an honest source state: preserved as [], NOT dropped
+    // to absent and NOT fabricated into content.
+    expect(enr.edge_e_values).toEqual([]);
+    expect(enr.inference_warnings).toEqual([]);
+  });
+
+  it('NO REHYDRATION: populated edge_e_values inside stripped internal carriers is NOT reintroduced when the top level is empty', () => {
+    // Mirrors the real captured payload: top-level edge_e_values is [] while the
+    // populated copy lives only inside _meta / downstream_calls (both stripped).
+    const populated = [
+      { edge_id: 'fac_eng_capacity->out_delivery_throughput', e_value: 1, flip_direction: 'decrease', current_mean: 0.65, flip_mean: 0.401163 },
+    ];
+    const fact = factWithEnrichment({
+      option_comparison: [{ option_id: 'opt_a', win_probability: 0.7 }],
+      edge_e_values: [],
+      inference_warnings: [],
+      _meta: { payloads: { isl_response: { robustness: { edge_e_values: populated } } } },
+      downstream_calls: { isl: [{ response_payload: { robustness: { edge_e_values: populated } } }] },
+    });
+    const enr = analysisResultBlockFor(fact, { currentTurn: false })!.enrichment ?? {};
+    expect(enr.edge_e_values).toEqual([]);
+    expect('_meta' in enr).toBe(false);
+    expect('downstream_calls' in enr).toBe(false);
+    // The populated internal copy must NOT be surfaced anywhere.
+    expect(JSON.stringify(enr)).not.toContain('fac_eng_capacity->out_delivery_throughput');
+    expect(JSON.stringify(enr)).not.toContain('0.401163');
+  });
+
+  it('CONTRACT GUARD: isl_response / isl_engine carrier keys nested inside a recovered field are deep-stripped (forward guard)', () => {
+    // Review follow-up: today these carriers appear only under already-stripped
+    // _meta.payloads / as a value. This guards the future shape where an upstream
+    // change embeds either carrier KEY directly inside a recovered keep-list
+    // field — they must be stripped while legit science leaves survive.
+    const fact = factWithEnrichment({
+      option_comparison: [{ option_id: 'opt_a', win_probability: 0.7 }],
+      edge_e_values: [
+        {
+          edge_id: 'fac_a->out_x',
+          e_value: 1.2,
+          isl_response: { raw: { secret: 'internal' } },
+          isl_engine: { build: 'isl-v9' },
+        },
+      ],
+      flip_thresholds: [
+        { factor_id: 'fac_a', flip_value: null, isl_engine: 'should-not-ship' },
+      ],
+    });
+    const enr = analysisResultBlockFor(fact, { currentTurn: false })!.enrichment ?? {};
+    const ev = enr.edge_e_values as Array<Record<string, unknown>>;
+    // Legit science leaves survive; carrier keys gone at any depth.
+    expect(ev[0]!.edge_id).toBe('fac_a->out_x');
+    expect(ev[0]!.e_value).toBe(1.2);
+    expect('isl_response' in ev[0]!).toBe(false);
+    expect('isl_engine' in ev[0]!).toBe(false);
+    const ft = enr.flip_thresholds as Array<Record<string, unknown>>;
+    expect(ft[0]!.factor_id).toBe('fac_a');
+    expect(ft[0]!.flip_value).toBeNull();
+    expect('isl_engine' in ft[0]!).toBe(false);
+    const enrJson = JSON.stringify(enr);
+    expect(enrJson).not.toContain('isl_response');
+    expect(enrJson).not.toContain('isl_engine');
+    expect(enrJson).not.toContain('internal');
+  });
+
+  it('CROSS-SERVICE CONTRACT: real captured payload — the 4 recovered fields pass through verbatim while every internal carrier is stripped', () => {
+    // Fixture-backed contract anchor over the real cross-service capture (same
+    // fixture used by tests/contract/*). Drives the actual transport with the
+    // raw upstream enrichment so any future shape drift (a recovered field
+    // changing, or a new internal carrier appearing) is caught here.
+    const captured = JSON.parse(
+      readFileSync(
+        new URL(
+          '../../../tests/fixtures/cross-service/v5-turn.run-analysis.staging.json',
+          import.meta.url,
+        ),
+        'utf8',
+      ),
+    ) as { blocks: Array<{ enrichment?: Record<string, unknown> }> };
+    const sourceEnrichment = captured.blocks[0]!.enrichment!;
+    expect(sourceEnrichment).toBeDefined();
+
+    const enr = analysisResultBlockFor(factWithEnrichment(sourceEnrichment), { currentTurn: false })!.enrichment ?? {};
+
+    // Faithful pass-through: each recovered field equals its source value
+    // verbatim (edge_e_values/inference_warnings empty [] in this capture;
+    // confidence_tier populated; flip_thresholds populated incl. flip_value:null).
+    expect(enr.edge_e_values).toEqual(sourceEnrichment.edge_e_values);
+    expect(enr.inference_warnings).toEqual(sourceEnrichment.inference_warnings);
+    expect(enr.confidence_tier).toEqual(sourceEnrichment.confidence_tier);
+    expect(enr.flip_thresholds).toEqual(sourceEnrichment.flip_thresholds);
+
+    // The populated internal edge_e_values copy (15 entries under
+    // _meta.payloads.isl_response / downstream_calls) is NOT rehydrated — the
+    // top-level value stays exactly [] as upstream sent it (asserted verbatim
+    // above). (Note: the edge_id strings also appear legitimately in the kept
+    // `robustness.fragile_edges`, so a string-absence check would be wrong —
+    // the verbatim [] equality is the precise no-rehydration proof.)
+
+    // Every internal carrier / deferred field is stripped at transport.
+    for (const k of ['_meta', 'meta', 'downstream_calls', 'fact_objects', 'graph', 'm1_coaching', 'dominant_factor']) {
+      expect(k in enr).toBe(false);
+    }
+    const enrJson = JSON.stringify(enr);
+    // isl_engine lives only under the dropped m1_coaching; [REDACTED] only under
+    // stripped _meta/meta (and is value-scrubbed anywhere). Both must be gone.
+    expect(enrJson.toLowerCase()).not.toContain('isl_engine');
+    expect(enrJson).not.toContain('[REDACTED]');
+  });
+
+  it('NULL PRESERVED: flip_thresholds flip_value:null survives as an honest source null', () => {
+    const fact = factWithEnrichment({
+      option_comparison: [{ option_id: 'opt_a', win_probability: 0.7 }],
+      flip_thresholds: [
+        { factor_id: 'fac_eng', factor_label: 'Engineering Capacity', flip_value: null, flip_reason: 'no_effect_within_bounds' },
+      ],
+    });
+    const enr = analysisResultBlockFor(fact, { currentTurn: false })!.enrichment ?? {};
+    expect(enr.flip_thresholds).toEqual([
+      { factor_id: 'fac_eng', factor_label: 'Engineering Capacity', flip_value: null, flip_reason: 'no_effect_within_bounds' },
+    ]);
+    const ft = enr.flip_thresholds as Array<Record<string, unknown>>;
+    expect(ft[0]!.flip_value).toBeNull();
+  });
+
+  it('DEFERRED: m1_coaching (carries isl_engine) and dominant_factor remain unrecovered', () => {
+    const fact = factWithEnrichment({
+      option_comparison: [{ option_id: 'opt_a', win_probability: 0.7 }],
+      confidence_tier: 'needs_work',
+      m1_coaching: { assumptions_ledger: { assumptions: [{ source_service: 'isl_engine' }] } },
+      dominant_factor: 'fac_a',
+    });
+    const enr = analysisResultBlockFor(fact, { currentTurn: false })!.enrichment ?? {};
+    expect(enr.confidence_tier).toBe('needs_work');
+    expect('m1_coaching' in enr).toBe(false);
+    expect('dominant_factor' in enr).toBe(false);
+    expect(JSON.stringify(enr).toLowerCase()).not.toContain('isl_engine');
+  });
+
+  it('DEDUPE CONSISTENCY: the current-turn run_analysis block and the reused follow-up block carry IDENTICAL enrichment for the same fact', () => {
+    const fact = richRunAnalysisFact();
+    const currentTurn = analysisResultBlockFor(fact, { currentTurn: true });
+    const reused = analysisResultBlockFor(fact, { currentTurn: false });
+    expect(currentTurn).toBeDefined();
+    expect(reused).toBeDefined();
+    // Same transform on both → identical block payload → DGAI content-hash
+    // dedupe + panel hydration stay consistent across turns.
+    expect(reused!.enrichment).toEqual(currentTurn!.enrichment);
+    expect(reused!.win_probabilities).toEqual(currentTurn!.win_probabilities);
+  });
+
+  // V5 P0-B — Codex non-blocker: the keep-list is not merely a shallow
+  // top-level pick. Internal/debug carriers NESTED inside a kept field are
+  // deep-stripped at the build site, so they cannot survive even in debug-on
+  // mode (where the response-finaliser's prose scrub is bypassed). Legitimate
+  // science metadata (e.g. confidence_provenance) is preserved.
+  it('LEAK GUARD (debug-independent): internal carriers NESTED inside kept fields are deep-stripped; science metadata is preserved', () => {
+    const fact = {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      noop: false,
+      result: {
+        scenario_id: SCENARIO_ID,
+        leading_option_id: 'opt_a',
+        summary: 'Ran analysis.',
+        win_probabilities: { opt_a: 0.7, opt_b: 0.3 },
+        graph_hash_at_run: SOURCE_GRAPH_HASH,
+        computed_at: '2026-05-17T00:00:00.000Z',
+        enrichment: {
+          factor_sensitivity: [
+            {
+              factor_id: 'fac_x',
+              influence_score: 0.5,
+              confidence_provenance: 'isl-model-v2', // legit science metadata — KEPT
+              _meta: { TOKEN_RL_ENABLE: '[REDACTED]' }, // nested carrier — STRIPPED
+              lineage: { seed: 12345 }, // nested carrier — STRIPPED
+            },
+          ],
+          robustness: { level: 'fragile', graph_hash: 'deadbeef', fragile_edges: [] },
+          option_comparison: [
+            { option_id: 'opt_a', win_probability: 0.7, downstream_calls: { isl: [{}] } },
+          ],
+        },
+      },
+    } as unknown as RunAnalysisHandlerFact;
+
+    const block = analysisResultBlockFor(fact, { currentTurn: false });
+    const enr = block!.enrichment ?? {};
+    const enrJson = JSON.stringify(enr);
+    // Nested internal carriers gone — debug-independent (runs at the build site).
+    expect(enrJson).not.toContain('[REDACTED]');
+    expect(enrJson).not.toMatch(/"seed"/);
+    expect(enrJson).not.toMatch(/"graph_hash"/);
+    expect(enrJson).not.toMatch(/"_meta"/);
+    expect(enrJson).not.toMatch(/"lineage"/);
+    expect(enrJson).not.toMatch(/"downstream_calls"/);
+    // Legit science metadata + structural values preserved (NOT over-stripped).
+    expect(enrJson).toContain('confidence_provenance');
+    expect(enrJson).toContain('isl-model-v2');
+    const fs = enr.factor_sensitivity as Array<Record<string, unknown>>;
+    expect(fs[0]!.influence_score).toBe(0.5);
+  });
+
+  // V5 P0-B — Codex non-blocker #2: VALUE-level guard. The redaction marker
+  // `[REDACTED]` hiding under a harmless (non-denylisted) key is dropped, while
+  // legitimate science values that merely CONTAIN internal-sounding substrings
+  // (e.g. "Engineering Capacity" contains "engin"; confidence_provenance) are
+  // preserved — we deliberately do not broad-scrub those tokens.
+  it('LEAK GUARD (value-level): a [REDACTED] value under a harmless key is dropped; legit science labels with internal-sounding substrings survive', () => {
+    const fact = {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      noop: false,
+      result: {
+        scenario_id: SCENARIO_ID,
+        leading_option_id: 'opt_a',
+        summary: 'Ran analysis.',
+        win_probabilities: { opt_a: 0.7, opt_b: 0.3 },
+        graph_hash_at_run: SOURCE_GRAPH_HASH,
+        computed_at: '2026-05-17T00:00:00.000Z',
+        enrichment: {
+          factor_sensitivity: [
+            {
+              factor_id: 'fac_eng',
+              factor_label: 'Engineering Capacity', // contains "engin" — MUST survive
+              confidence_provenance: 'isl-model-v2', // legit metadata — MUST survive
+              note: '[REDACTED]', // redaction marker under a harmless key — STRIPPED
+            },
+          ],
+          option_comparison: [{ option_id: 'opt_a', win_probability: 0.7 }],
+        },
+      },
+    } as unknown as RunAnalysisHandlerFact;
+
+    const block = analysisResultBlockFor(fact, { currentTurn: false });
+    const enr = block!.enrichment ?? {};
+    const enrJson = JSON.stringify(enr);
+    // The redaction marker is gone (value-level guard), and the carrier key with it.
+    expect(enrJson).not.toContain('[REDACTED]');
+    expect(enrJson).not.toMatch(/"note"/);
+    // No false positives: legit labels / provenance with internal-sounding
+    // substrings are preserved verbatim.
+    expect(enrJson).toContain('Engineering Capacity');
+    expect(enrJson).toContain('confidence_provenance');
+    expect(enrJson).toContain('isl-model-v2');
+  });
+
+  // PR 3 contract — block_id stability across stale rebuilds.
+  it('STALE re-emission: same source fact graph_hash → same stale block_id (UI dedupe)', () => {
+    const priorFact = makeRunAnalysisFact(SOURCE_GRAPH_HASH);
+    const lifecycle = {
+      priorFacts: [priorFact] as readonly HandlerFact[],
+      freshness: staleDerivation({
+        sourceHash: SOURCE_GRAPH_HASH,
+        currentHash: DIVERGED_GRAPH_HASH,
+        selectedIndex: 0,
+      }),
+      requestId: 'req-stale-stable',
+      scenarioId: SCENARIO_ID,
+    } as const;
+    const r1 = composeToolCallResponse({
+      answerKind: 'functional',
+      orientation: '', confirmation: '', coaching: null,
+      stage: 'decide', handlerFacts: [], lifecycle,
+    });
+    const r2 = composeToolCallResponse({
+      answerKind: 'functional',
+      orientation: '', confirmation: '', coaching: null,
+      stage: 'decide', handlerFacts: [], lifecycle,
+    });
+    const stale1 = r1.blocks.find((b) => b.type === 'coaching');
+    const stale2 = r2.blocks.find((b) => b.type === 'coaching');
+    expect(stale1).toBeDefined();
+    expect(stale2).toBeDefined();
+    // PR 3 dedupe contract — identical block_id across re-emissions.
+    expect(stale1!.block_id).toBe(stale2!.block_id);
+    expect(stale1!.signal_id).toBe(stale2!.signal_id);
+  });
+
+  // Test 3 — stale graph emits exactly one rerun CoachingBlock with priority_rank:1.
+  // Test 9 — no fresh ReviewCardBlock or EvidenceBlock after graph divergence.
+  it('STALE: emits EXACTLY one rerun CoachingBlock (priority_rank:1, action_intent:rerun_analysis) and ZERO other Phase 3 blocks', () => {
+    const priorFact = makeRunAnalysisFact(SOURCE_GRAPH_HASH);
+    const response = composeToolCallResponse({
+      answerKind: 'functional',
+      orientation: '',
+      confirmation: 'Explained.',
+      coaching: null,
+      stage: 'decide',
+      handlerFacts: [],
+      lifecycle: {
+        priorFacts: [priorFact],
+        freshness: staleDerivation({
+          sourceHash: SOURCE_GRAPH_HASH,
+          currentHash: DIVERGED_GRAPH_HASH,
+          selectedIndex: 0,
+        }),
+        requestId: 'req-stale',
+        scenarioId: SCENARIO_ID,
+      },
+    });
+    // No analysis_result, no review_card, no evidence.
+    expect(response.blocks.find((b) => b.type === 'analysis_result')).toBeUndefined();
+    expect(response.blocks.filter((b) => b.type === 'review_card')).toHaveLength(0);
+    expect(response.blocks.filter((b) => b.type === 'evidence')).toHaveLength(0);
+    // EXACTLY one coaching block — the stale rerun.
+    const coaching = response.blocks.filter((b) => b.type === 'coaching');
+    expect(coaching).toHaveLength(1);
+    const staleBlock = coaching[0]!;
+    expect(staleBlock.freshness).toBe('stale');
+    expect(staleBlock.priority_rank).toBe(1);
+    expect(staleBlock.action_intent).toBe('rerun_analysis');
+    expect(staleBlock.coaching_kind).toBe('orientation');
+    expect(staleBlock.graph_hash_at_generation).toBe(SOURCE_GRAPH_HASH);
+    expect(UUID_VALIDATOR.safeParse(staleBlock.block_id).success).toBe(true);
+    // Lifecycle telemetry: emitted_stale with stale_coaching_emitted=true.
+    const lifecycleCalls = infoSpy.mock.calls.filter(
+      ([payload]) =>
+        typeof payload === 'object' &&
+        payload !== null &&
+        (payload as Record<string, unknown>).event === 'v5.phase3.block_lifecycle',
+    );
+    expect(lifecycleCalls).toHaveLength(1);
+    const payload = lifecycleCalls[0]![0] as Record<string, unknown>;
+    expect(payload.lifecycle_state).toBe('emitted_stale');
+    expect(payload.stale_coaching_emitted).toBe(true);
+    expect(payload.block_count).toBe(1);
+    expect(payload.graph_hash_at_run).toBe(SOURCE_GRAPH_HASH);
+    expect(payload.current_graph_hash).toBe(DIVERGED_GRAPH_HASH);
+  });
+
+  // Test 4 — unknown freshness suppresses blocks.
+  it('UNKNOWN: suppresses Phase 3 emission and logs lifecycle_state=skipped_unknown (no pending block)', () => {
+    const priorFact = makeRunAnalysisFact(SOURCE_GRAPH_HASH);
+    const response = composeToolCallResponse({
+      answerKind: 'functional',
+      orientation: '',
+      confirmation: 'Explained.',
+      coaching: null,
+      stage: 'decide',
+      handlerFacts: [],
+      lifecycle: {
+        priorFacts: [priorFact],
+        freshness: unknownDerivation(),
+        requestId: 'req-unknown',
+        scenarioId: SCENARIO_ID,
+      },
+    });
+    expect(response.blocks).toHaveLength(0);
+    const lifecycleCalls = infoSpy.mock.calls.filter(
+      ([payload]) =>
+        typeof payload === 'object' &&
+        payload !== null &&
+        (payload as Record<string, unknown>).event === 'v5.phase3.block_lifecycle',
+    );
+    expect(lifecycleCalls).toHaveLength(1);
+    const payload = lifecycleCalls[0]![0] as Record<string, unknown>;
+    expect(payload.lifecycle_state).toBe('skipped_unknown');
+    expect(payload.block_count).toBe(0);
+    expect(payload.stale_coaching_emitted).toBe(false);
+  });
+
+  // NONE freshness — sibling case for completeness.
+  it('NONE: suppresses Phase 3 emission and logs lifecycle_state=skipped_none', () => {
+    const response = composeToolCallResponse({
+      answerKind: 'functional',
+      orientation: '',
+      confirmation: 'Explained.',
+      coaching: null,
+      stage: 'decide',
+      handlerFacts: [],
+      lifecycle: {
+        priorFacts: [],
+        freshness: noneDerivation(),
+        requestId: 'req-none',
+        scenarioId: SCENARIO_ID,
+      },
+    });
+    expect(response.blocks).toHaveLength(0);
+    const lifecycleCalls = infoSpy.mock.calls.filter(
+      ([payload]) =>
+        typeof payload === 'object' &&
+        payload !== null &&
+        (payload as Record<string, unknown>).event === 'v5.phase3.block_lifecycle',
+    );
+    expect(lifecycleCalls).toHaveLength(1);
+    expect((lifecycleCalls[0]![0] as Record<string, unknown>).lifecycle_state).toBe('skipped_none');
+  });
+
+  // Test 5 — rerun refresh switches to newest run_analysis fact.
+  it('RERUN: new current-turn run_analysis fact supersedes prior; fresh blocks come from the new graph hash; stale block disappears', () => {
+    const priorFact = makeRunAnalysisFact(SOURCE_GRAPH_HASH);  // stale
+    const newFact = makeRunAnalysisFact(DIVERGED_GRAPH_HASH);  // current-turn rerun
+    const response = composeToolCallResponse({
+      answerKind: 'functional',
+      orientation: '',
+      confirmation: 'Re-ran.',
+      coaching: null,
+      stage: 'analyse',
+      handlerFacts: [newFact],
+      lifecycle: {
+        priorFacts: [priorFact],
+        // After rerun, freshness sees newFact AS the freshest with
+        // current hash matching itself. The composer's branch-1
+        // (current-turn fact) fires; branch-2 does NOT.
+        freshness: freshDerivation({ sourceHash: DIVERGED_GRAPH_HASH, selectedIndex: -1 }),
+        requestId: 'req-rerun',
+        scenarioId: SCENARIO_ID,
+      },
+    });
+    // analysis_result from NEW fact's hash.
+    const analysisResult = response.blocks.find((b) => b.type === 'analysis_result');
+    expect(analysisResult).toBeDefined();
+    // Phase 3 blocks rebuilt from NEW graph hash, ALL fresh.
+    const reviewCards = response.blocks.filter((b) => b.type === 'review_card');
+    const coaching = response.blocks.filter((b) => b.type === 'coaching');
+    expect(reviewCards.length).toBeGreaterThan(0);
+    for (const b of [...reviewCards, ...coaching]) {
+      expect(b.freshness).toBe('fresh');
+      expect(b.graph_hash_at_generation).toBe(DIVERGED_GRAPH_HASH);
+    }
+    // No stale rerun coaching anywhere.
+    expect(coaching.every((c) => c.coaching_kind !== 'orientation' || c.action_intent !== 'rerun_analysis')).toBe(true);
+    // Lifecycle telemetry: emitted_fresh with reason=current_turn_fact (branch 1).
+    const lifecycleCalls = infoSpy.mock.calls.filter(
+      ([payload]) =>
+        typeof payload === 'object' &&
+        payload !== null &&
+        (payload as Record<string, unknown>).event === 'v5.phase3.block_lifecycle',
+    );
+    expect(lifecycleCalls).toHaveLength(1);
+    const payload = lifecycleCalls[0]![0] as Record<string, unknown>;
+    expect(payload.lifecycle_state).toBe('emitted_fresh');
+    expect(payload.reason).toBe('current_turn_fact');
+  });
+
+  // Telemetry safety audit — required by PR 3 spec.
+  it('telemetry payload contains structural fields only (no prose, no labels, no scenario text, no decision_review content)', () => {
+    const priorFact = makeRunAnalysisFact(SOURCE_GRAPH_HASH);
+    composeToolCallResponse({
+      answerKind: 'functional',
+      orientation: '',
+      confirmation: '',
+      coaching: null,
+      stage: 'decide',
+      handlerFacts: [],
+      lifecycle: {
+        priorFacts: [priorFact],
+        freshness: staleDerivation({
+          sourceHash: SOURCE_GRAPH_HASH,
+          currentHash: DIVERGED_GRAPH_HASH,
+          selectedIndex: 0,
+        }),
+        requestId: 'req-tele',
+        scenarioId: SCENARIO_ID,
+      },
+    });
+    const lifecycleCalls = infoSpy.mock.calls.filter(
+      ([payload]) =>
+        typeof payload === 'object' &&
+        payload !== null &&
+        (payload as Record<string, unknown>).event === 'v5.phase3.block_lifecycle',
+    );
+    const payload = lifecycleCalls[0]![0] as Record<string, unknown>;
+    // Allowed fields only.
+    const expectedKeys = new Set([
+      'event',
+      'request_id',
+      'scenario_id',
+      'lifecycle_state',
+      'selected_fact_index',
+      'graph_hash_at_run',
+      'current_graph_hash',
+      'reason',
+      'block_count',
+      'stale_coaching_emitted',
+    ]);
+    for (const key of Object.keys(payload)) {
+      expect(expectedKeys.has(key)).toBe(true);
+    }
+    // Forbidden content: no prose, no labels, no scenario text, no
+    // decision_review content. Sweep the serialised payload.
+    const serialised = JSON.stringify(payload);
+    expect(serialised).not.toContain('Plan A leads');
+    expect(serialised).not.toContain('Market conditions persist');
+    expect(serialised).not.toContain('pull on-time delivery rate');
+    expect(serialised).not.toContain('Delivery risk');
+    expect(serialised).not.toContain('narrative_summary');
+  });
+
+  // Test 8 — output-safety audit for stale block copy. The
+  // deterministic stale-rerun copy MUST not contain banned terms
+  // (recommendation/winner/winning), raw entity-IDs, raw decimals,
+  // em dashes, or schema/internal terms (validator/Zod/dispatcher/
+  // tool call). Since the in-builder prose guard
+  // (validateProseAndSchemaOrDrop) would DROP the block on any of
+  // these, this test would surface as "expected 1 coaching block,
+  // got 0" rather than as a leak — but we also sweep the emitted
+  // strings to make the contract explicit and protect against future
+  // copy edits.
+  it('output-safety: stale rerun coaching copy passes the wire-side ban list', () => {
+    const priorFact = makeRunAnalysisFact(SOURCE_GRAPH_HASH);
+    const response = composeToolCallResponse({
+      answerKind: 'functional',
+      orientation: '', confirmation: '', coaching: null,
+      stage: 'decide', handlerFacts: [],
+      lifecycle: {
+        priorFacts: [priorFact],
+        freshness: staleDerivation({
+          sourceHash: SOURCE_GRAPH_HASH,
+          currentHash: DIVERGED_GRAPH_HASH,
+          selectedIndex: 0,
+        }),
+        requestId: 'req-safety',
+        scenarioId: SCENARIO_ID,
+      },
+    });
+    const stale = response.blocks.find((b) => b.type === 'coaching');
+    expect(stale).toBeDefined();
+    const prose = [stale!.title, stale!.body, stale!.action_label ?? ''].join(' ');
+    // No banned recommendation/winner vocabulary.
+    expect(prose).not.toMatch(/\brecommendations?\b/i);
+    expect(prose).not.toMatch(/\brecommended\b/i);
+    expect(prose).not.toMatch(/\bwinning\b/i);
+    expect(prose).not.toMatch(/\bthe\s+winners?\b/i);
+    // No em dashes.
+    expect(prose).not.toContain('—');
+    // No raw entity-id-shaped tokens (fac_/opt_/con_/out_/factor_/option_/…).
+    expect(prose).not.toMatch(
+      /\b(?:fac|opt|con|out|factor|option|node|edge|goal|risk|constraint|outcome)_[a-z0-9_]{4,}\b/i,
+    );
+    // No raw probability decimals.
+    expect(prose).not.toMatch(/(?:^|[\s(=,])(?:0\.\d|\.\d)/);
+    // No schema/internal terms.
+    expect(prose).not.toMatch(/\b(?:validator|dispatcher|Zod|tool\s+calls?)\b/i);
+  });
+
+  // Defensive: no lifecycle context supplied → preserve PR #178/180 behaviour.
+  it('no lifecycle context: preserves PR #178/180 behaviour — no Phase 3 emission, no telemetry', () => {
+    const response = composeToolCallResponse({
+      answerKind: 'functional',
+      orientation: '',
+      confirmation: 'Explained.',
+      coaching: null,
+      stage: 'decide',
+      handlerFacts: [],  // no current-turn fact
+      // no lifecycle
+    });
+    expect(response.blocks).toHaveLength(0);
+    const lifecycleCalls = infoSpy.mock.calls.filter(
+      ([payload]) =>
+        typeof payload === 'object' &&
+        payload !== null &&
+        (payload as Record<string, unknown>).event === 'v5.phase3.block_lifecycle',
+    );
+    expect(lifecycleCalls).toHaveLength(0);
+  });
+
+  // ── Fix 1: routed-turn fact selection is index-robust ──────────────────
+  // The freshness verdict's `selected_fact_index` is relative to the array it
+  // was derived from. On a routed follow-up the post-handler derivation runs
+  // against the UNIFIED `[...handlerFacts, ...prior_facts]` array, so the index
+  // can be > the position of the same fact inside `prior_facts`. The composer
+  // must resolve the fact by CONTENT, not by blindly indexing.
+
+  it('FIX1 REGRESSION: resolves the prior fact by content even when selected_fact_index is shifted', () => {
+    const priorFact = makeRunAnalysisFact(SOURCE_GRAPH_HASH);
+    const response = composeToolCallResponse({
+      answerKind: 'functional',
+      orientation: '',
+      confirmation: 'Explained.',
+      coaching: null,
+      stage: 'decide',
+      handlerFacts: [],
+      lifecycle: {
+        // Only the run_analysis fact is in this array (position 0)...
+        priorFacts: [priorFact],
+        // ...but the verdict was derived against a prepended array, so the
+        // index points at position 1 (off by handlerFactsForCommit.length).
+        // Pre-fix: priorFacts[1] === undefined → rebuild_failed. Post-fix:
+        // content selection finds the fact at 0 → emitted_fresh.
+        freshness: freshDerivation({ sourceHash: SOURCE_GRAPH_HASH, selectedIndex: 1 }),
+        requestId: 'req-fix1',
+        scenarioId: SCENARIO_ID,
+      },
+    });
+    // Blocks rebuilt — NOT a rebuild_failed.
+    expect(response.blocks.find((b) => b.type === 'analysis_result')).toBeDefined();
+    const lifecycleCalls = infoSpy.mock.calls.filter(
+      ([p]) =>
+        typeof p === 'object' && p !== null &&
+        (p as Record<string, unknown>).event === 'v5.phase3.block_lifecycle',
+    );
+    expect(lifecycleCalls).toHaveLength(1);
+    expect((lifecycleCalls[0]![0] as Record<string, unknown>).lifecycle_state).toBe('emitted_fresh');
+    // And the index/content mismatch is observable (1 passed vs 0 by content).
+    const mismatch = infoSpy.mock.calls.filter(
+      ([p]) =>
+        typeof p === 'object' && p !== null &&
+        (p as Record<string, unknown>).event === 'v5.phase3.lifecycle_index_mismatch',
+    );
+    expect(mismatch).toHaveLength(1);
+    const mm = mismatch[0]![0] as Record<string, unknown>;
+    expect(mm.passed_index).toBe(1);
+    expect(mm.content_index).toBe(0);
+  });
+
+  it('FIX1: no index-mismatch event when the passed index already matches content position', () => {
+    const priorFact = makeRunAnalysisFact(SOURCE_GRAPH_HASH);
+    composeToolCallResponse({
+      answerKind: 'functional',
+      orientation: '', confirmation: 'Explained.', coaching: null,
+      stage: 'decide', handlerFacts: [],
+      lifecycle: {
+        priorFacts: [priorFact],
+        freshness: freshDerivation({ sourceHash: SOURCE_GRAPH_HASH, selectedIndex: 0 }),
+        requestId: 'req-fix1-ok', scenarioId: SCENARIO_ID,
+      },
+    });
+    const mismatch = infoSpy.mock.calls.filter(
+      ([p]) =>
+        typeof p === 'object' && p !== null &&
+        (p as Record<string, unknown>).event === 'v5.phase3.lifecycle_index_mismatch',
+    );
+    expect(mismatch).toHaveLength(0);
+  });
+
+  it('FIX1: honest degradation — no run_analysis fact present → rebuild_failed (selected_fact_unavailable)', () => {
+    // The verdict claims a selected fact, but prior_facts genuinely has none.
+    // Content selection returns null → the honest rebuild_failed path fires.
+    const response = composeToolCallResponse({
+      answerKind: 'functional',
+      orientation: '', confirmation: 'Explained.', coaching: null,
+      stage: 'decide', handlerFacts: [],
+      lifecycle: {
+        priorFacts: [], // genuinely no run_analysis fact
+        freshness: freshDerivation({ sourceHash: SOURCE_GRAPH_HASH, selectedIndex: 0 }),
+        requestId: 'req-fix1-none', scenarioId: SCENARIO_ID,
+      },
+    });
+    expect(response.blocks.find((b) => b.type === 'analysis_result')).toBeUndefined();
+    const lifecycleCalls = infoSpy.mock.calls.filter(
+      ([p]) =>
+        typeof p === 'object' && p !== null &&
+        (p as Record<string, unknown>).event === 'v5.phase3.block_lifecycle',
+    );
+    expect(lifecycleCalls).toHaveLength(1);
+    const payload = lifecycleCalls[0]![0] as Record<string, unknown>;
+    expect(payload.lifecycle_state).toBe('rebuild_failed');
+    expect(payload.reason).toBe('selected_fact_unavailable');
+  });
+});

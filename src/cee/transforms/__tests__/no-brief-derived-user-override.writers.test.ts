@@ -1,0 +1,264 @@
+/**
+ * ROADMAP 2.714 REVERTED — the DERIVED half of the guard.
+ *
+ * `no-brief-derived-user-override.test.ts` is a CORPUS: it proves the ten
+ * measured briefs no longer fabricate. A corpus can only ever notice the cases
+ * someone thought to write down — which is exactly how #853 shipped a 25/25
+ * mutant kit blind to all six of its own defects (CLAUDE.md trap 12d: deriving
+ * a guard from a list MOVES the risk, it does not remove it; ship BOTH the
+ * derivation and the corpus, because neither supersedes the other).
+ *
+ * This file is the other half. It DERIVES, from the source tree at your tip,
+ * the complete set of files that can stamp `observed_state.source =
+ * "user_override"` — the marking that tells a user "this number is yours" and
+ * earns the "From brief"/"Edited" provenance pill — and pins it to a reviewed
+ * manifest. It answers the question the corpus cannot: *is the list right?*
+ *
+ * WHY THIS EXACT PREDICATE. The review's core finding was not a coding error;
+ * it was that every invariant in #853 was true AS STATED while the PREDICATE
+ * IMPLEMENTING IT had the wrong domain. The user-facing claim here —
+ * "you told us this number" — has exactly one honest truth condition: the value
+ * arrived through an operation the user consented to. So the manifest below
+ * records, per file, HOW the value reaches the stamp. A new entry is not
+ * automatically wrong; it is unreviewed, and it must justify itself against
+ * that truth condition before it is added.
+ *
+ * NUL-SAFETY: `readFileSync(..., "utf8")` reads NUL-bearing sources fine, which
+ * plain `grep` does not (CLAUDE.md trap 17) — this repo has at least one such
+ * file, so the scan must not shell out to grep.
+ */
+
+import { describe, it, expect } from "vitest";
+import { readdirSync, readFileSync } from "node:fs";
+import { resolve, relative, join } from "node:path";
+
+const SRC_ROOT = resolve(process.cwd(), "src");
+
+/** The wire literal that marks a value as the user's own. */
+const USER_OVERRIDE_LITERAL = "user_override";
+
+/**
+ * Every `src/` file permitted to carry the `user_override` literal, with the
+ * path by which a value reaches the stamp. Reviewed 8 Aug 2026 alongside the
+ * 2.714 revert.
+ */
+const REVIEWED: Readonly<Record<string, string>> = {
+  // Declares USER_EDIT_SOURCE and stamps it onto `update_node` ops that carry
+  // an `observed_state.value` — i.e. a value the user wrote through a
+  // structured patch operation they consented to. The stamp is TRUE here.
+  "orchestrator/canonicalise-value-ops.ts":
+    "declares USER_EDIT_SOURCE; stamps only structured update_node value ops (user-consented edit)",
+  // The enum member itself plus the schema comments describing which writers
+  // may emit it. Declaration site, not a writer.
+  "schemas/cee-v3.ts":
+    "ObservedStateV3.source enum member + the comments naming its legitimate writers — declaration, not a write",
+  // ── Comment-only mentions. Both are the 2.714 revert's own prose, on the
+  // ── seam the removed rule sat on, warning the next author off it. Neither
+  // ── file contains a write. This guard cannot tell a mention from a write —
+  // ── that is deliberate: an unreviewed appearance of the literal is exactly
+  // ── the signal worth stopping on, and the cost is one manifest line.
+  "cee/transforms/graph-data-integrity.ts":
+    "comment only — the `_brief` parameter doc recording why no integrity check may read the brief",
+  "cee/unified-pipeline/stages/boundary.ts":
+    "comment only — the stage comment recording that the removed 2.714 check stamped brief text this way",
+  // ── 0.40.0, the panel-apply slice. Reviewed 14 Aug 2026 against this guard's
+  // ── one truth condition: "did the value arrive through an operation the user
+  // ── consented to?"
+  //
+  // THE STAMP SITE. It writes USER_EDIT_SOURCE for an inspector/chat value edit
+  // — a structured operation the user performed, so the stamp is TRUE — and now
+  // carries the literal in prose as well. The 0.40.0 change makes it stamp LESS
+  // often, not more: when the server has verified that the number is a named
+  // colleague's panel answer, it stamps `panel_elicited` + `elicited_from`
+  // instead. That is this guard's own principle applied one case further out —
+  // the old behaviour claimed "you told us this number" about a value the owner
+  // had merely retyped from someone else's answer, which is the same class of
+  // untruth 2.714 was reverted for, one seam downstream.
+  "orchestrator-v5/tools/handlers/set-factor-value.ts":
+    "the stamp site — user_override for a user-consented structured edit; stamps panel_elicited instead when CEE has VERIFIED the value is a named participant's panel answer",
+  // Comment only. Contains no write of any kind: it is a pure verifier that
+  // reads the collab store and either returns a server-owned value or refuses.
+  // The literal appears in its header, explaining the attribution untruth the
+  // module exists to close.
+  "collab/apply-verification.ts":
+    "comment only — the module header naming the user_override untruth it closes; the module performs no write",
+  // ── INV-P6, the obligation authority. Reviewed 17 Aug 2026 against this
+  // ── guard's one truth condition.
+  //
+  // A READER, NOT A WRITER — and the distinction is the whole justification. The
+  // literal appears exactly once, as a KEY in a `Record<KnownObservedStateSource
+  // Literal, StructureProvenance>` that classifies a stamp SOMEONE ELSE already
+  // wrote. The module has no write path of any kind: it takes a graph, reads
+  // producer-written stamps, and returns a classification. It cannot cause
+  // `user_override` to appear on any value.
+  //
+  // The truth condition is satisfied in the only direction that applies to a
+  // reader: the module treats `user_override` as evidence the value is the
+  // user's, which is exactly what the writers above establish when they stamp it.
+  // If any of them ever stamped it untruthfully, this module would inherit that
+  // untruth — which is an argument for keeping THEIR entries honest, not for
+  // giving this one a write path it does not have.
+  //
+  // ⚠ And the direction of harm here is the safe one. A wrong classification can
+  // only ever WITHDRAW an obligation the product would otherwise have demanded;
+  // it cannot invent a claim about the user, and it cannot put a number on screen.
+  "cee/graph-readiness/obligation-provenance.ts":
+    "reader only — classifies the stamp as user_stated for the INV-P6 obligation rule; the literal is a lookup key, the module has no write path",
+  // ── The decision-review sampling-width mapping. Reviewed 24 Aug 2026 against
+  // ── this guard's one truth condition.
+  //
+  // A READER, NOT A WRITER, and for the same structural reason as the entry
+  // above: the literal appears exactly once, as a KEY in a
+  // `Record<KnownObservedStateSourceLiteral, ExtractionType>` that classifies a
+  // stamp someone else already wrote. The module takes a stamp and returns a
+  // multiplier bucket. It has no write path, it never touches
+  // `observed_state.source`, and it cannot cause `user_override` to appear on
+  // any value.
+  //
+  // ⚠ THE DIRECTION OF HARM IS DIFFERENT FROM obligation-provenance's, so it is
+  // stated rather than inherited. A wrong classification here does not withdraw
+  // an obligation and does not put a number on screen — it changes a DERIVED
+  // `value_std` multiplier, i.e. how widely a sampler may draw the value. That
+  // is a claim about PRECISION, never a claim about authorship, so it cannot
+  // produce the "you told us this number" untruth 2.714 was reverted for. What
+  // it CAN do is inherit an untruthful stamp from a writer above and sample a
+  // fabricated value too tightly — which is an argument for keeping THEIR
+  // entries honest, exactly as the previous entry says, not for giving this one
+  // a write path it does not have.
+  //
+  // This file exists because the code it replaced read `source` through a
+  // hand-written TWO-member mirror of the twelve-member contract enum and
+  // bucketed every user-authored literal — `user_override` included — as
+  // `inferred`, sampling a user's own figure 50% WIDER than the model's reading
+  // of the brief. The `Record<…>` is what stops that mirror re-forming.
+  "cee/decision-review/value-source-extraction-type.ts":
+    "reader only — maps the stamp to a sampling-width bucket (ExtractionType); the literal is a lookup key, the module has no write path and makes no authorship claim",
+  // ── The brief-audit provenance ledger. Reviewed 26 Aug 2026 against this
+  // ── guard's one truth condition.
+  //
+  // A READER, NOT A WRITER, for the same structural reason as the two entries
+  // above: the literal appears once, as a KEY in a
+  // `Record<KnownObservedStateSourceLiteral, boolean>` classifying a stamp
+  // someone else already wrote. No write path; it never touches
+  // `observed_state.source` and cannot cause `user_override` to appear anywhere.
+  //
+  // ⚠ THE DIRECTION OF HARM IS THE SAFEST OF THE THREE, and it is stated rather
+  // than inherited. This module decides whether to tell the user "I supplied
+  // this figure myself, you did not state it". Reading the stamp can only ever
+  // make it WITHHOLD that claim — it cannot invent a claim about the user, and
+  // it puts no number on screen. It was added precisely BECAUSE the module was
+  // claiming user-authored values as its own inventions: wire-witnessed
+  // 2026-08-25 saying "Those are my estimates, not yours" about a value the
+  // user had set through the Confirm chip minutes earlier.
+  //
+  // ⚠ AND IT DELIBERATELY DOES NOT TRUST EVERY user_stated STAMP. It requires a
+  // USER-WRITE RECEIPT, excluding the producer-written `brief_extraction` /
+  // `explicit` — which classify as `user_stated` upstream but are the model's
+  // own labels and were measured lying by the 2026-08-08 trace. Trusting those
+  // here would delete TRUE entries from the disclosure, which is this guard's
+  // concern one level up: a false claim of USER authorship, made by believing a
+  // label the system wrote about itself.
+  "cee/context-integrity/not-modelled-manifest.ts":
+    "reader only — treats the stamp as a user-write receipt so the brief-audit ledger REFUSES to claim the user's value as its own invention; the literal is a lookup key, no write path, and a wrong read can only withhold our own claim, never invent one about the user",
+  // ── The authorship-display projection. Reviewed 31 Aug 2026 against this
+  // ── guard's one truth condition.
+  //
+  // A READER, NOT A WRITER, for the same structural reason as the three entries
+  // above: the literal appears once, as a KEY in a
+  // `Record<KnownObservedStateSourceLiteral, ValueAuthorshipDisplay | null>`
+  // classifying a stamp someone else already wrote. No write path; it never
+  // touches `observed_state.source` and cannot cause `user_override` to appear
+  // anywhere.
+  //
+  // ⚠ THE DIRECTION OF HARM IS THE MOST DANGEROUS OF THE FOUR, so it is stated
+  // rather than inherited. The three readers above can only ever WITHDRAW an
+  // obligation, widen a sampling band, or withhold our own claim — none can
+  // make an assertion about the user. This one can: it decides what the MODEL
+  // is told about who authored a number, and the model then says so in prose.
+  // A wrong read in the permissive direction would have the product tell a user
+  // "you gave me this figure" about a value they never supplied — the 2.714
+  // untruth, spoken aloud.
+  //
+  // ⭐ WHICH IS WHY THE TABLE DEFERS RATHER THAN OVERRIDES ON EXACTLY THE TWO
+  // LITERALS THAT COULD BE STALE. `brief_extraction` and `cee_inference` are
+  // SYNTHESISED from `extractionType` by `schema-v3.ts:361-362`, and the 2.972
+  // withdrawal rewrites `extractionType` WITHOUT rewriting them — so a reader
+  // that let them win would resurrect a retracted brief claim through the one
+  // field the withdrawal does not reach. They map to `null` (defer), so the
+  // only stamps this module will act on are those a genuine user-edit writer
+  // wrote — i.e. precisely the ones the entries above establish as truthful.
+  "cee/transforms/provenance-display.ts":
+    "reader only — maps the stamp to the display vocabulary (from_brief/ai_inferred/user_set) that reaches the LLM context; the literal is a lookup key, the module has no write path, and the two synthesised-from-extractionType literals DEFER so it can only act on a genuine user-edit writer's stamp",
+};
+
+/**
+ * ⚠ NOT IN THE MANIFEST, DELIBERATELY: any rule that reads a number out of
+ * FREE-BRIEF TEXT and stamps it `user_override`. That is the 2.714 defect
+ * class. The brief is prose the user wrote about their decision; it is not an
+ * instruction to set a field, and a value inferred from it is the SYSTEM'S
+ * READING, never the user's statement. `stated-value-honour.ts` was removed
+ * for exactly this reason, having been measured writing values that were
+ * 10^6x wrong, explicitly negated, retracted, or never stated — each one
+ * attributed back to the user with an empty skip list.
+ */
+
+function walkTypeScript(dir: string, out: string[] = []): string[] {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name === "node_modules" || entry.name === "generated") continue;
+      walkTypeScript(full, out);
+      continue;
+    }
+    if (!entry.name.endsWith(".ts") || entry.name.endsWith(".d.ts")) continue;
+    // Tests assert ABOUT the stamp; they never emit one onto the wire.
+    if (full.includes("__tests__")) continue;
+    out.push(full);
+  }
+  return out;
+}
+
+describe("2.714 revert — the user_override writer set is DERIVED and pinned", () => {
+  const files = walkTypeScript(SRC_ROOT);
+  const carriers = files
+    .filter((f) => readFileSync(f, "utf8").includes(USER_OVERRIDE_LITERAL))
+    .map((f) => relative(SRC_ROOT, f))
+    .sort();
+
+  it("the scan is actually running (it would pass vacuously on an empty walk)", () => {
+    expect(files.length, "the src/ walk found no TypeScript files").toBeGreaterThan(100);
+    // The literal must exist SOMEWHERE, or the scan is matching nothing and
+    // every assertion below is vacuous.
+    expect(carriers.length).toBeGreaterThan(0);
+  });
+
+  it("no UNREVIEWED file can stamp a value as the user's own", () => {
+    const unreviewed = carriers.filter((rel) => !(rel in REVIEWED));
+    expect(
+      unreviewed,
+      `These src/ files carry the \`${USER_OVERRIDE_LITERAL}\` literal but are not in this ` +
+        `guard's REVIEWED manifest:\n` +
+        unreviewed.map((f) => `  - ${f}`).join("\n") +
+        `\n\nBefore adding one, answer the only question that matters: by what path does the ` +
+        `value reach the stamp? "The user told us this number" is true ONLY when the value ` +
+        `arrived through an operation the user consented to. A value READ OUT OF THE BRIEF ` +
+        `is the system's reading of prose, not the user's statement — that is the ROADMAP ` +
+        `2.714 defect this guard exists to stop coming back.`,
+    ).toEqual([]);
+  });
+
+  it("the REVIEWED manifest has no stale entries", () => {
+    const present = new Set(carriers);
+    for (const rel of Object.keys(REVIEWED)) {
+      expect(
+        present.has(rel),
+        `REVIEWED lists ${rel}, which no longer carries the literal in src/`,
+      ).toBe(true);
+    }
+  });
+
+  it("the removed 2.714 module is gone from src/ entirely", () => {
+    const revertedModule = files.map((f) => relative(SRC_ROOT, f));
+    expect(revertedModule).not.toContain("cee/transforms/stated-value-honour.ts");
+  });
+});

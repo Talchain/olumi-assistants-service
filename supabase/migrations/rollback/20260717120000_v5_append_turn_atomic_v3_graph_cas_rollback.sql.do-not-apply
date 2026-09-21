@@ -1,0 +1,28 @@
+-- ============================================================
+-- ROLLBACK for 20260717120000_v5_append_turn_atomic_v3_graph_cas.sql
+-- ⚠️  DO NOT APPLY as part of normal deploys — this is the reversal
+--     script for the Paul-gated append_turn_atomic_v3 CAS migration.
+--
+-- Reverses, in dependency-safe order:
+--   1. DROP the v3 function (all 18-arg overload). v2 remains the live
+--      callee; the app rolls back to it by setting CEE_V5_GRAPH_CAS_RPC=off
+--      BEFORE this runs, so no caller references v3 at drop time.
+--   2. DROP the graph_identity_hash column. Nullable and app-computed with
+--      zero readers other than v3 itself (Postgres never derives it), so the
+--      drop loses no durable meaning — a NULL column is "no recorded base",
+--      which is exactly the pre-migration state.
+--
+-- Safe to re-run: both statements are guarded (IF EXISTS).
+--
+-- Ordering note: drop the function BEFORE the column. The function is the
+-- only reader/writer of the column; dropping the column first would leave
+-- the function body referencing a missing column until its own drop.
+-- ============================================================
+
+DROP FUNCTION IF EXISTS public.append_turn_atomic_v3(
+  uuid, text, text, text, text, boolean, integer, integer, jsonb,
+  jsonb, text, jsonb, jsonb, text, text, text, text, boolean
+);
+
+ALTER TABLE public.scenarios
+  DROP COLUMN IF EXISTS graph_identity_hash;

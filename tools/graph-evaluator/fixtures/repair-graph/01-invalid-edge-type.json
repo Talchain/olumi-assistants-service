@@ -1,0 +1,37 @@
+{
+  "id": "rg-01-invalid-edge-type",
+  "name": "INVALID_EDGE_TYPE — option to outcome",
+  "description": "Graph has a prohibited option→outcome edge. Repair must insert a mediating factor.",
+  "brief": "Should we expand into the European market? We want to grow revenue by entering new geographies.",
+  "graph": {
+    "nodes": [
+      {"id": "dec_expansion", "kind": "decision", "label": "European Market Expansion"},
+      {"id": "opt_expand", "kind": "option", "label": "Enter European Market", "data": {"interventions": {"fac_market_entry": 1}}},
+      {"id": "opt_hold", "kind": "option", "label": "Stay Domestic", "data": {"interventions": {"fac_market_entry": 0}}},
+      {"id": "fac_market_entry", "kind": "factor", "label": "Market Entry Decision", "category": "controllable", "data": {"value": 0, "extractionType": "inferred", "factor_type": "other", "uncertainty_drivers": ["Market readiness unknown"]}},
+      {"id": "out_revenue", "kind": "outcome", "label": "Revenue Growth"},
+      {"id": "goal_growth", "kind": "goal", "label": "Double Revenue"}
+    ],
+    "edges": [
+      {"from": "dec_expansion", "to": "opt_expand", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "dec_expansion", "to": "opt_hold", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_expand", "to": "fac_market_entry", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_hold", "to": "fac_market_entry", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_expand", "to": "out_revenue", "strength": {"mean": 0.7, "std": 0.15}, "exists_probability": 0.85, "effect_direction": "positive"},
+      {"from": "out_revenue", "to": "goal_growth", "strength": {"mean": 0.7, "std": 0.15}, "exists_probability": 0.90, "effect_direction": "positive"}
+    ]
+  },
+  "violations": [
+    {"code": "INVALID_EDGE_TYPE", "node_or_edge": "opt_expand -> out_revenue", "detail": "Prohibited edge: option → outcome. Must route via factor."}
+  ],
+  "expected": {
+    "violations_addressed": ["INVALID_EDGE_TYPE"],
+    "preserve_node_ids": ["dec_expansion", "opt_expand", "opt_hold", "fac_market_entry", "out_revenue", "goal_growth"],
+    "forbidden_edges": [{"from": "opt_expand", "to": "out_revenue"}],
+    "required_edges": [],
+    "no_bridge_edges": false,
+    "preserve_bidirected": false,
+    "check_external_prior": true,
+    "no_json_comments": true
+  }
+}

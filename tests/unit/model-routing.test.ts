@@ -35,7 +35,7 @@ describe("Model Registry", () => {
       expect(model.provider).toBe("openai");
       expect(model.tier).toBe("premium");
       expect(model.enabled).toBe(true);
-      expect(model.maxTokens).toBe(16384);
+      expect(model.maxTokens).toBe(100000);
     });
 
     it("non-reasoning models do not have reasoning flag or have it set to false", () => {
@@ -50,7 +50,7 @@ describe("Model Registry", () => {
       expect(MODEL_REGISTRY["gpt-5-mini"].tier).toBe("fast");
       expect(MODEL_REGISTRY["gpt-4o"].tier).toBe("quality");
       expect(MODEL_REGISTRY["gpt-5.2"].tier).toBe("premium");
-      expect(MODEL_REGISTRY["claude-sonnet-4-20250514"].tier).toBe("premium");
+      expect(MODEL_REGISTRY["claude-sonnet-4-20250514"].tier).toBe("quality");
     });
 
     it("has correct provider assignments", () => {
@@ -89,7 +89,7 @@ describe("Model Registry", () => {
     });
 
     it("returns false for disabled models", () => {
-      expect(isModelEnabled("claude-sonnet-4-20250514")).toBe(false);
+      expect(isModelEnabled("test-disabled-model")).toBe(false);
     });
 
     it("returns false for unknown models", () => {
@@ -140,7 +140,7 @@ describe("Model Registry", () => {
   describe("getModelProvider", () => {
     it("returns provider for known models", () => {
       expect(getModelProvider("gpt-4o")).toBe("openai");
-      expect(getModelProvider("claude-3-5-sonnet-20241022")).toBe("anthropic");
+      expect(getModelProvider("claude-sonnet-4-20250514")).toBe("anthropic");
     });
 
     it("returns undefined for unknown models", () => {
@@ -161,7 +161,7 @@ describe("Model Registry", () => {
 
     it("returns false for Anthropic models", () => {
       expect(isReasoningModel("claude-sonnet-4-20250514")).toBe(false);
-      expect(isReasoningModel("claude-3-5-sonnet-20241022")).toBe(false);
+      expect(isReasoningModel("claude-opus-4-5-20251101")).toBe(false);
     });
 
     it("returns false for unknown models (registry lookup, not string matching)", () => {
@@ -185,36 +185,57 @@ describe("Task-to-Model Routing", () => {
       expect(TASK_MODEL_DEFAULTS.explainer).toBeDefined();
     });
 
-    it("assigns fast tier (gpt-5-mini) to simple tasks", () => {
-      expect(TASK_MODEL_DEFAULTS.clarification).toBe("gpt-5-mini");
-      expect(TASK_MODEL_DEFAULTS.preflight).toBe("gpt-5-mini");
-      expect(TASK_MODEL_DEFAULTS.explainer).toBe("gpt-5-mini");
-      expect(TASK_MODEL_DEFAULTS.evidence_helper).toBe("gpt-5-mini");
-      expect(TASK_MODEL_DEFAULTS.sensitivity_coach).toBe("gpt-5-mini");
+    it("assigns fast tier (gpt-4.1) to simple tasks", () => {
+      expect(TASK_MODEL_DEFAULTS.clarification).toBe("gpt-4.1-2025-04-14");
+      expect(TASK_MODEL_DEFAULTS.preflight).toBe("gpt-4.1-2025-04-14");
+      expect(TASK_MODEL_DEFAULTS.explainer).toBe("gpt-4.1-2025-04-14");
+      expect(TASK_MODEL_DEFAULTS.evidence_helper).toBe("gpt-4.1-2025-04-14");
+      expect(TASK_MODEL_DEFAULTS.sensitivity_coach).toBe("gpt-4.1-2025-04-14");
     });
 
-    it("assigns premium tier (gpt-5.2) to complex reasoning tasks", () => {
+    it("assigns optimized models to complex reasoning tasks", () => {
+      // Reconciled to live staging CEE_MODEL_* (2026-08-08): draft/edit/
+      // orchestrator all serve claude-sonnet-5 (Paul's ruling: all Claude
+      // tasks on sonnet-5, never 4-6).
+      expect(TASK_MODEL_DEFAULTS.draft_graph).toBe("claude-sonnet-5");
+      expect(TASK_MODEL_DEFAULTS.edit_graph).toBe("claude-sonnet-5");
+      expect(TASK_MODEL_DEFAULTS.orchestrator).toBe("claude-sonnet-5");
+      // bias_check uses Claude Sonnet 4 (excellent reasoning)
+      expect(TASK_MODEL_DEFAULTS.bias_check).toBe("claude-sonnet-4-20250514");
+      // repair_graph / decision_review: registered pin of live gpt-4.1
+      expect(TASK_MODEL_DEFAULTS.repair_graph).toBe("gpt-4.1-2025-04-14");
+      expect(TASK_MODEL_DEFAULTS.decision_review).toBe("gpt-4.1-2025-04-14");
+      // Other complex tasks use premium tier (gpt-5.2)
       expect(TASK_MODEL_DEFAULTS.options).toBe("gpt-5.2");
-      expect(TASK_MODEL_DEFAULTS.draft_graph).toBe("gpt-5.2");
-      expect(TASK_MODEL_DEFAULTS.repair_graph).toBe("gpt-5.2");
-      expect(TASK_MODEL_DEFAULTS.bias_check).toBe("gpt-5.2");
-      expect(TASK_MODEL_DEFAULTS.critique_graph).toBe("gpt-5.2");
+      // critique_graph is NOT premium-tier gpt-5.2 any more: it is
+      // provider-constrained to Anthropic/Fixtures, so an OpenAI model made the
+      // task unserviceable regardless of tier.
+      expect(TASK_MODEL_DEFAULTS.critique_graph).toBe("claude-sonnet-5");
     });
 
-    it("all tasks use GPT-5 family models", () => {
-      for (const [task, model] of Object.entries(TASK_MODEL_DEFAULTS)) {
-        expect(model).toMatch(/^gpt-5/);
+    it("tasks use appropriate provider models", () => {
+      const models = Object.values(TASK_MODEL_DEFAULTS);
+      // All models should be valid model IDs
+      for (const model of models) {
+        expect(model).toBeTruthy();
+        // Should match known patterns: gpt-*, claude-*, o1-*, o3-*, o4-*
+        expect(model).toMatch(/^(gpt-|claude-|o\d)/);
       }
     });
   });
 
   describe("QUALITY_REQUIRED_TASKS", () => {
-    it("includes critical tasks", () => {
-      expect(QUALITY_REQUIRED_TASKS).toContain("draft_graph");
-      expect(QUALITY_REQUIRED_TASKS).toContain("bias_check");
+    // NOTE: Quality gates have been removed (2026-01-28)
+    // Premium models are now protected via clientAllowed: false in MODEL_REGISTRY
+    // and CLIENT_BLOCKED_MODELS env var instead of task-based gates
+
+    it("is empty (quality gates removed)", () => {
+      expect(QUALITY_REQUIRED_TASKS).toHaveLength(0);
     });
 
-    it("does not include simple tasks", () => {
+    it("does not include any tasks (quality gates disabled)", () => {
+      expect(QUALITY_REQUIRED_TASKS).not.toContain("draft_graph");
+      expect(QUALITY_REQUIRED_TASKS).not.toContain("bias_check");
       expect(QUALITY_REQUIRED_TASKS).not.toContain("clarification");
       expect(QUALITY_REQUIRED_TASKS).not.toContain("explainer");
     });
@@ -222,18 +243,18 @@ describe("Task-to-Model Routing", () => {
 
   describe("getDefaultModelForTask", () => {
     it("returns correct default for each task", () => {
-      expect(getDefaultModelForTask("clarification")).toBe("gpt-5-mini");
-      expect(getDefaultModelForTask("draft_graph")).toBe("gpt-5.2");
+      expect(getDefaultModelForTask("clarification")).toBe("gpt-4.1-2025-04-14");
+      expect(getDefaultModelForTask("draft_graph")).toBe("claude-sonnet-5");
+      expect(getDefaultModelForTask("bias_check")).toBe("claude-sonnet-4-20250514");
     });
   });
 
   describe("isQualityRequired", () => {
-    it("returns true for quality-required tasks", () => {
-      expect(isQualityRequired("draft_graph")).toBe(true);
-      expect(isQualityRequired("bias_check")).toBe(true);
-    });
+    // Quality gates removed - isQualityRequired always returns false
 
-    it("returns false for non-critical tasks", () => {
+    it("returns false for all tasks (quality gates disabled)", () => {
+      expect(isQualityRequired("draft_graph")).toBe(false);
+      expect(isQualityRequired("bias_check")).toBe(false);
       expect(isQualityRequired("clarification")).toBe(false);
       expect(isQualityRequired("explainer")).toBe(false);
     });

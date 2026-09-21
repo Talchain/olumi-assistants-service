@@ -1,40 +1,136 @@
 /**
  * Provider router for multi-provider LLM orchestration.
  *
- * Selects LLM adapter (Anthropic, OpenAI, Fixtures) based on:
- * 1. LLM_FAILOVER_PROVIDERS → FailoverAdapter (if configured)
- * 2. providers.json overrides → task-specific provider
- * 3. CEE_MODEL_* env vars → explicit operator override (e.g., CEE_MODEL_DRAFT)
- * 4. TASK_MODEL_DEFAULTS → code defaults (e.g., draft_graph → gpt-5.2)
- * 5. LLM_PROVIDER / LLM_MODEL → global defaults
- * 6. Adapter default → gpt-4o-mini
- *
- * Precedence: failover → providers.json → CEE_MODEL_* → TASK_MODEL_DEFAULTS → env → default
+ * Selects LLM adapter (Anthropic, OpenAI, Fixtures) using the canonical
+ * precedence documented in `src/config/model-routing.ts`. Provider follows
+ * the winning model: a task default is not discarded merely because the
+ * lower-precedence global `LLM_PROVIDER` names the other provider.
  */
 
 import { readFileSync, existsSync } from "node:fs";
+import { readFile, access } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
 import { join } from "node:path";
 import { log } from "../../utils/telemetry.js";
-import { config } from "../../config/index.js";
-import type { LLMAdapter } from "./types.js";
+import { config, getClientBlockedModels } from "../../config/index.js";
+import type {
+  LLMAdapter,
+  DraftGraphArgs,
+  DraftGraphResult,
+  SuggestOptionsArgs,
+  SuggestOptionsResult,
+  ClarifyBriefArgs,
+  ClarifyBriefResult,
+  CritiqueGraphArgs,
+  CritiqueGraphResult,
+  ExplainDiffArgs,
+  ExplainDiffResult,
+  ChatArgs,
+  ChatResult,
+  CallOpts,
+} from "./types.js";
 import { AnthropicAdapter } from "./anthropic.js";
 import { OpenAIAdapter } from "./openai.js";
 import { FailoverAdapter } from "./failover.js";
 import { withCaching } from "./caching.js";
+import { withUsageTracking } from "./usage-tracking.js";
 import { isValidCeeTask, getDefaultModelForTask } from "../../config/model-routing.js";
+import {
+  resolveModelAssignment,
+  type ModelAssignmentAvailability,
+  type ResolvedModelAssignment,
+} from "../../config/model-assignment.js";
+import { FALLBACK_ANTHROPIC_MODEL } from "./model-fallback.js";
+import {
+  resolveRouterResolution,
+  type ProviderConfig,
+  type RouterResolutionOutcome,
+  type RouterResolutionSource,
+} from "./router-resolution.js";
 
 /**
- * Map task names to CEE model config keys.
- * Used to look up per-operation model from config.cee.models.*
+ * Map task names to CEE model config keys — the router's env-override table.
+ * Used to look up per-operation model from config.cee.models.* (CEE_MODEL_*)
+ * and config.cee.maxTokens.*
+ *
+ * Exported so the model-map drift tripwire (tests/unit/model-map-drift.test.ts)
+ * can DERIVE the set of tasks the router routes an override for, rather than
+ * re-listing it — every such task must have a checked-in default in
+ * TASK_MODEL_DEFAULTS (or be declared in ROUTER_ENV_ONLY_TASKS below).
  */
-const TASK_TO_CONFIG_KEY: Record<string, keyof typeof config.cee.models> = {
+export const TASK_TO_CONFIG_KEY: Record<string, keyof typeof config.cee.models> = {
   'draft_graph': 'draft',
   'suggest_options': 'options',
   'repair_graph': 'repair',
   'clarify_brief': 'clarification',
   'critique_graph': 'critique',
   'validate': 'validation',
+  'validate_graph': 'validation',
+  'decision_review': 'decision_review',
+  'orchestrator': 'orchestrator',
+  'edit_graph': 'edit_graph',
+  'm2_graph_review': 'm2_review', // V6 dual-draft M2 review (CEE_MODEL_M2_REVIEW)
+  'draft_quality_review': 'draft_quality', // Draft-quality judge (CEE_MODEL_DRAFT_QUALITY)
 };
+
+const CONFIG_KEY_TO_MODEL_ENV_KEY: Partial<
+  Record<keyof typeof config.cee.models, string>
+> = {
+  draft: 'config.cee.models.draft',
+  options: 'CEE_MODEL_OPTIONS',
+  repair: 'CEE_MODEL_REPAIR',
+  clarification: 'CEE_MODEL_CLARIFICATION',
+  critique: 'CEE_MODEL_CRITIQUE',
+  validation: 'CEE_MODEL_VALIDATION',
+  decision_review: 'CEE_MODEL_DECISION_REVIEW',
+  orchestrator: 'CEE_MODEL_ORCHESTRATOR',
+  edit_graph: 'CEE_MODEL_EDIT_GRAPH',
+  m2_review: 'CEE_MODEL_M2_REVIEW',
+  draft_quality: 'CEE_MODEL_DRAFT_QUALITY',
+};
+
+function getTaskModelSourceKey(
+  configKey: keyof typeof config.cee.models | undefined,
+): string | undefined {
+  if (!configKey) return undefined;
+  return CONFIG_KEY_TO_MODEL_ENV_KEY[configKey] ?? `config.cee.models.${configKey}`;
+}
+
+/**
+ * Router tasks that route a CEE_MODEL_* override (they appear in
+ * TASK_TO_CONFIG_KEY) but intentionally carry NO entry in TASK_MODEL_DEFAULTS.
+ * These are NOT first-class CeeTasks — isValidCeeTask() is false for them — so
+ * the router never applies a code default; with the env var unset they fall
+ * through to canonical handling / the global LLM_MODEL.
+ *
+ *   - 'validate': the ALIAS of 'validate_graph'. ⚠ CORRECTED 2026-07-30 (ROADMAP
+ *     2.146): the sibling 'validate_graph' USED to be listed here on the grounds
+ *     that "the Pass-2 validation pipeline is inert on staging
+ *     (CEE_VALIDATION_PIPELINE_ENABLED=false), so no live call reaches them".
+ *     That premise is being retired — 2.146 flips the pipeline on, at which point
+ *     an unset CEE_MODEL_VALIDATION would have handed the "independent reviewer"
+ *     role to whatever the global LLM_MODEL happens to be. 'validate_graph' now
+ *     has a checked-in default (o4-mini) in TASK_MODEL_DEFAULTS.
+ *     'validate' stays here because it has NO CALLERS — `getAdapter('validate')`
+ *     appears nowhere in src/ (scope: rg "getAdapter\(['\"]validate" over src/,
+ *     one hit, and it is 'validate_graph'). Giving a callerless alias a default
+ *     would be decoration; declaring it env-only is the honest record.
+ *
+ * `clarify_brief` is intentionally represented in AI_TASK_LIFECYCLE as the
+ * executable route while the historical `clarification` default remains a
+ * display/compatibility name. Until that compatibility model row is retired,
+ * clarify_brief remains explicit env-or-global fallback rather than silently
+ * pretending the display row governs it.
+ *
+ * This list is the ONE hand-maintained exception to "every router task has a
+ * default". The drift tripwire asserts it stays EXACT (disjoint from the
+ * defaults map, every entry still present in TASK_TO_CONFIG_KEY) so it fails
+ * loud if it drifts — it never silently absorbs a new task.
+ */
+export const ROUTER_ENV_ONLY_TASKS: readonly string[] = [
+  'validate',
+  'clarify_brief',
+];
 
 /**
  * Get the model for a given task from CEE config.
@@ -80,6 +176,36 @@ export function getMaxTokensFromConfig(task?: string): number | undefined {
 const DEFAULT_PROVIDER: 'anthropic' | 'openai' | 'fixtures' = 'openai';
 const DEFAULT_MODEL = 'auto'; // Let each adapter choose its default
 
+export const PROVIDER_DEFAULT_MODELS = Object.freeze({
+  openai: 'gpt-4o-mini',
+  anthropic: FALLBACK_ANTHROPIC_MODEL,
+  fixtures: 'fixture-v1',
+} as const);
+
+function resolveProviderModel(
+  provider: 'anthropic' | 'openai' | 'fixtures',
+  model?: string,
+) {
+  if (!(provider in PROVIDER_DEFAULT_MODELS)) {
+    throw new Error(`Unknown provider: ${String(provider)}`);
+  }
+  const assignment = resolveModelAssignment(
+    model ?? PROVIDER_DEFAULT_MODELS[provider],
+    { fixtures: provider === 'fixtures' },
+  );
+  if (provider !== 'fixtures' && assignment.provider !== provider) {
+    log.info(
+      {
+        configured_provider: provider,
+        resolved_provider: assignment.provider,
+        model: assignment.model,
+      },
+      'Provider follows validated model assignment',
+    );
+  }
+  return assignment;
+}
+
 // Optional config file path (from centralized config or default)
 // Deferred to function to avoid triggering config validation at module load time
 function getConfigPath(): string {
@@ -87,29 +213,15 @@ function getConfigPath(): string {
 }
 
 /**
- * Provider configuration schema
+ * Load provider configuration from file if it exists (sync - fallback only)
  */
-interface ProviderConfig {
-  defaults?: {
-    provider: 'anthropic' | 'openai' | 'fixtures';
-    model?: string;
-  };
-  overrides?: Record<string, {
-    provider: 'anthropic' | 'openai' | 'fixtures';
-    model?: string;
-  }>;
-}
-
-/**
- * Load provider configuration from file if it exists
- */
-function loadConfig(): ProviderConfig | null {
+function loadConfigSync(): ProviderConfig | null {
   const configPath = getConfigPath();
   try {
     if (existsSync(configPath)) {
       const content = readFileSync(configPath, 'utf-8');
       const providersCfg = JSON.parse(content) as ProviderConfig;
-      log.info({ config_path: configPath }, "Loaded provider configuration");
+      log.info({ config_path: configPath }, "Loaded provider configuration (sync)");
       return providersCfg;
     }
   } catch (error) {
@@ -118,17 +230,107 @@ function loadConfig(): ProviderConfig | null {
   return null;
 }
 
+/**
+ * Load provider configuration from file asynchronously (preferred at startup)
+ */
+async function loadConfigAsync(): Promise<ProviderConfig | null> {
+  const configPath = getConfigPath();
+  try {
+    await access(configPath, fsConstants.R_OK);
+    const content = await readFile(configPath, 'utf-8');
+    const providersCfg = JSON.parse(content) as ProviderConfig;
+    log.info({ config_path: configPath }, "Loaded provider configuration (async)");
+    return providersCfg;
+  } catch (error) {
+    // File doesn't exist or not readable - this is normal
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      log.warn({ error, config_path: configPath }, "Failed to load provider config, using env/defaults");
+    }
+  }
+  return null;
+}
+
 // Lazy-load config on first use
 let configCache: ProviderConfig | null | undefined;
 
+/**
+ * Simple LRU Map with bounded size and eviction.
+ * Uses Map's insertion-order property for LRU tracking.
+ */
+class LRUMap<K, V> {
+  private map = new Map<K, V>();
+  private readonly maxSize: number;
+
+  constructor(maxSize: number) {
+    this.maxSize = maxSize;
+  }
+
+  has(key: K): boolean {
+    return this.map.has(key);
+  }
+
+  get(key: K): V | undefined {
+    const value = this.map.get(key);
+    if (value !== undefined) {
+      // Move to end (most recently used)
+      this.map.delete(key);
+      this.map.set(key, value);
+    }
+    return value;
+  }
+
+  set(key: K, value: V): void {
+    // If key exists, delete it first to update position
+    if (this.map.has(key)) {
+      this.map.delete(key);
+    }
+    // Evict oldest entry if at capacity
+    if (this.map.size >= this.maxSize) {
+      const oldestKey = this.map.keys().next().value;
+      if (oldestKey !== undefined) {
+        this.map.delete(oldestKey);
+        log.debug({ evicted_key: oldestKey, cache_size: this.maxSize }, "LRU eviction: adapter cache at capacity");
+      }
+    }
+    this.map.set(key, value);
+  }
+
+  clear(): void {
+    this.map.clear();
+  }
+
+  get size(): number {
+    return this.map.size;
+  }
+}
+
+// Maximum number of cached adapters (prevents unbounded memory growth)
+const ADAPTER_CACHE_MAX_SIZE = 100;
+
 // Cached wrapper instances (caching, failover) to preserve state across requests
-const wrappedAdapters = new Map<string, LLMAdapter>();
+const wrappedAdapters = new LRUMap<string, LLMAdapter>(ADAPTER_CACHE_MAX_SIZE);
 
 function getConfig(): ProviderConfig | null {
   if (configCache === undefined) {
-    configCache = loadConfig();
+    // Fall back to sync load if cache not warmed at startup
+    configCache = loadConfigSync();
   }
   return configCache;
+}
+
+/**
+ * Warm the provider config cache asynchronously at startup.
+ * Call this during server initialization to avoid sync file I/O on first request.
+ */
+export async function warmProviderConfigCache(): Promise<{ loaded: boolean; path: string }> {
+  const configPath = getConfigPath();
+  if (configCache === undefined) {
+    configCache = await loadConfigAsync();
+  }
+  return {
+    loaded: configCache !== null,
+    path: configPath,
+  };
 }
 
 /**
@@ -139,14 +341,14 @@ class FixturesAdapter implements LLMAdapter {
   readonly name = 'fixtures' as const;
   readonly model = 'fixture-v1';
 
-  async draftGraph(_args: any, _opts: any): Promise<any> {
+  async draftGraph(args: DraftGraphArgs, _opts: CallOpts): Promise<DraftGraphResult> {
     // Import fixture dynamically to avoid circular deps
     const { fixtureGraph } = await import("../../utils/fixtures.js");
 
-    const unsafeCaptureEnabled = Boolean(_args?.includeDebug === true && _args?.flags?.unsafe_capture === true);
-    const rawNodeKinds = Array.isArray((fixtureGraph as any)?.nodes)
-      ? ((fixtureGraph as any).nodes as any[])
-        .map((n: any) => n?.kind ?? n?.type ?? 'unknown')
+    const unsafeCaptureEnabled = Boolean(args.includeDebug === true && args.flags?.unsafe_capture === true);
+    const rawNodeKinds = Array.isArray(fixtureGraph?.nodes)
+      ? fixtureGraph.nodes
+        .map((n) => n?.kind ?? 'unknown')
         .filter(Boolean)
       : [];
 
@@ -182,7 +384,7 @@ class FixturesAdapter implements LLMAdapter {
     };
   }
 
-  async suggestOptions(_args: any, _opts: any): Promise<any> {
+  async suggestOptions(_args: SuggestOptionsArgs, _opts: CallOpts): Promise<SuggestOptionsResult> {
     return {
       options: [
         {
@@ -213,20 +415,7 @@ class FixturesAdapter implements LLMAdapter {
       },
     };
   }
-
-  async repairGraph(args: any, _opts: any): Promise<any> {
-    // For fixtures, just return the input graph unchanged
-    return {
-      graph: args.graph,
-      rationales: [{ target: "graph", why: "Fixture repair - no actual changes" }],
-      usage: {
-        input_tokens: 0,
-        output_tokens: 0,
-      },
-    };
-  }
-
-  async clarifyBrief(args: any, _opts: any): Promise<any> {
+  async clarifyBrief(args: ClarifyBriefArgs, _opts: CallOpts): Promise<ClarifyBriefResult> {
     return {
       questions: [
         {
@@ -246,7 +435,7 @@ class FixturesAdapter implements LLMAdapter {
     };
   }
 
-  async critiqueGraph(_args: any, _opts: any): Promise<any> {
+  async critiqueGraph(_args: CritiqueGraphArgs, _opts: CallOpts): Promise<CritiqueGraphResult> {
     return {
       issues: [
         {
@@ -263,7 +452,7 @@ class FixturesAdapter implements LLMAdapter {
     };
   }
 
-  async explainDiff(args: any, _opts: any): Promise<any> {
+  async explainDiff(args: ExplainDiffArgs, _opts: CallOpts): Promise<ExplainDiffResult> {
     const rationales: Array<{ target: string; why: string; provenance_source?: string }> = [];
 
     // Generate rationales for added nodes
@@ -301,10 +490,90 @@ class FixturesAdapter implements LLMAdapter {
       },
     };
   }
+
+  async chat(_args: ChatArgs, _opts: CallOpts): Promise<ChatResult> {
+    // M2 Decision Review mock response - matches OUTPUT_SCHEMA from decision_review prompt
+    // See src/prompts/defaults.ts lines 1097-1141 for the authoritative schema
+    const mockContent = JSON.stringify({
+      narrative_summary:
+        "Option A leads with a 65% win probability, driven by strong market timing alignment. This is a close call with Option B trailing by 12 points. Evidence gaps in customer adoption rates warrant caution before final commitment.",
+      story_headlines: {
+        opt_a: "First-mover advantage drives projected success",
+        opt_b: "Strong fundamentals but timing uncertainty remains",
+      },
+      robustness_explanation: {
+        summary: "The recommendation shows moderate stability with one key sensitivity",
+        primary_risk: "Market timing factor has high elasticity (0.45)",
+        stability_factors: ["Strong team alignment", "Clear market demand signals"],
+        fragility_factors: ["Timing assumptions", "Competitor response uncertainty"],
+      },
+      readiness_rationale:
+        "This is a close call requiring careful attention to timing assumptions before proceeding.",
+      // M2 spec: evidence_enhancements.<factor_id> = { specific_action, rationale, evidence_type, decision_hygiene, effort? }
+      evidence_enhancements: {
+        node_timing: {
+          specific_action: "Commission market timing analysis from independent research firm",
+          rationale: "Current timing estimates have high uncertainty that affects the recommendation",
+          evidence_type: "market_research",
+          decision_hygiene: "Gather disconfirming evidence before committing",
+        },
+      },
+      // M2 spec: scenario_contexts.<edge_id> = { trigger_description, consequence }
+      scenario_contexts: {
+        edge_timing_revenue: {
+          trigger_description: "If market timing shifts unfavorably",
+          consequence: "Option B becomes viable due to its defensive positioning",
+        },
+      },
+      // M2 spec: bias_findings[] = { type, source, description, affected_elements, suggested_action, linked_critique_code?, brief_evidence? }
+      bias_findings: [
+        {
+          type: "DOMINANT_FACTOR",
+          source: "structural",
+          description: "Heavy weight on supporting evidence for Option A",
+          affected_elements: ["node_timing"],
+          suggested_action: "Seek disconfirming evidence actively",
+          linked_critique_code: "DOMINANT_FACTOR",
+        },
+      ],
+      // M2 spec: key_assumptions is array of STRINGS (max 5, mix model + psychological)
+      key_assumptions: [
+        "Market conditions remain stable through implementation period",
+        "Team capacity assumptions are accurate",
+        "Competitor response will be within expected range",
+      ],
+      // M2 spec: decision_quality_prompts[] = { question, principle, applies_because }
+      decision_quality_prompts: [
+        {
+          question: "Have you considered what would make Option B the better choice?",
+          principle: "Pre-mortem analysis",
+          applies_because: "Close-call decisions benefit from imagining failure scenarios",
+        },
+      ],
+      // M2 spec: pre_mortem = { failure_scenario, warning_signs, mitigation, grounded_in, review_trigger? }
+      pre_mortem: {
+        failure_scenario: "Six months from now, if this decision fails, it will be because market timing assumptions were overly optimistic",
+        warning_signs: ["Declining early adoption metrics", "Competitor announcements"],
+        mitigation: "Establish monthly review cadence with kill criteria",
+        review_trigger: "Two consecutive months of below-target adoption",
+        grounded_in: ["edge_timing_revenue", "node_timing"],
+      },
+    });
+
+    return {
+      content: mockContent,
+      model: this.model,
+      latencyMs: 0,
+      usage: {
+        input_tokens: 0,
+        output_tokens: 0,
+      },
+    };
+  }
 }
 
-// Adapter instances cache
-const adapters: Map<string, LLMAdapter> = new Map();
+// Adapter instances cache (LRU with bounded size)
+const adapters = new LRUMap<string, LLMAdapter>(ADAPTER_CACHE_MAX_SIZE);
 
 /**
  * Get or create an adapter instance for the given provider and model.
@@ -341,58 +610,48 @@ function getAdapterInstance(provider: 'anthropic' | 'openai' | 'fixtures', model
   return adapter;
 }
 
-/**
- * Create a failover-enabled adapter from environment configuration
- *
- * Reads LLM_FAILOVER_PROVIDERS env var (comma-separated list, e.g., "anthropic,openai,fixtures")
- * Returns FailoverAdapter that tries providers in sequence, or null if not configured
- */
-function createFailoverAdapter(task?: string): LLMAdapter | null {
-  const failoverProviders = config.llm.failoverProviders;
+function logFailoverAttempt(outcome: RouterResolutionOutcome): void {
+  const attempt = outcome.failoverAttempt;
+  if (!attempt) return;
 
-  if (!failoverProviders || failoverProviders.length === 0) {
-    return null;
-  }
-
-  // failoverProviders is already parsed as array by config
-  const providerNames = failoverProviders;
-
-  if (providerNames.length < 2) {
+  for (const rejection of attempt.rejectedProviders) {
     log.warn(
-      { LLM_FAILOVER_PROVIDERS: providerNames.join(',') },
-      "LLM_FAILOVER_PROVIDERS must specify at least 2 providers, ignoring"
+      {
+        provider: rejection.provider,
+        task: outcome.task,
+        error: rejection.error,
+      },
+      "Failover provider is invalid or lacks the task capability; skipping",
     );
-    return null;
   }
 
-  // Create adapter for each provider
-  const adapterList: LLMAdapter[] = [];
-  for (const providerName of providerNames) {
-    try {
-      const provider = providerName as 'anthropic' | 'openai' | 'fixtures';
-      const adapter = getAdapterInstance(provider);
-      adapterList.push(adapter);
-    } catch (error) {
-      log.warn(
-        { provider: providerName, error },
-        "Failed to create adapter for failover provider, skipping"
-      );
-    }
-  }
-
-  if (adapterList.length < 2) {
+  if (attempt.requestedProviders.length < 2) {
     log.warn(
-      { valid_adapters: adapterList.length },
-      "Not enough valid adapters for failover, disabling"
+      { LLM_FAILOVER_PROVIDERS: attempt.requestedProviders.join(',') },
+      "LLM_FAILOVER_PROVIDERS must specify at least 2 providers, ignoring",
     );
-    return null;
+  } else if (!attempt.active) {
+    log.warn(
+      {
+        valid_adapters: attempt.acceptedAssignments.length,
+        task: outcome.task,
+      },
+      "Not enough task-capable adapters for failover, disabling",
+    );
   }
+}
 
-  log.info(
-    { providers: adapterList.map(a => a.name), task },
-    "Failover enabled - will try providers in sequence"
+function createFailoverAdapter(
+  task: string | undefined,
+  assignments: readonly ResolvedModelAssignment[],
+): LLMAdapter {
+  const adapterList = assignments.map((assignment) =>
+    getAdapterInstance(assignment.provider, assignment.model),
   );
-
+  log.info(
+    { providers: adapterList.map((adapter) => adapter.name), task },
+    "Failover enabled - will try providers in sequence",
+  );
   return new FailoverAdapter(adapterList, task || "unknown");
 }
 
@@ -400,99 +659,172 @@ function createFailoverAdapter(task?: string): LLMAdapter | null {
  * Get the appropriate LLM adapter for a given task.
  *
  * Selection precedence:
- * 1. Failover configuration (LLM_FAILOVER_PROVIDERS) - wraps multiple providers
- * 2. Task-specific override from config file
- * 3. Environment variables (LLM_PROVIDER, LLM_MODEL)
- * 4. Hard-coded defaults
+ * 1. Failover configuration (LLM_FAILOVER_PROVIDERS) - outer availability policy
+ * 2. Request-time model override (from client API body parameter)
+ * 3. CEE_MODEL_* environment variables
+ * 4. TASK_MODEL_DEFAULTS code defaults
+ * 5. Task-specific/default model from providers config
+ * 6. LLM_PROVIDER / LLM_MODEL global env vars
+ * 7. Adapter default (gpt-4o-mini)
  *
  * @param task - Optional task name for task-specific routing (e.g., "draft_graph", "suggest_options")
+ * @param modelOverride - Optional model override from client request body
  * @returns LLMAdapter instance (may be FailoverAdapter wrapping multiple adapters)
  *
  * @example
  * ```typescript
+ * // Default model selection based on task
  * const adapter = getAdapter('draft_graph');
- * const result = await adapter.draftGraph(args, opts);
+ *
+ * // With client-specified model override
+ * const adapter = getAdapter('draft_graph', 'gpt-4o');
  * ```
  */
-export function getAdapter(task?: string): LLMAdapter {
-  // Check for failover configuration first
-  const failoverAdapter = createFailoverAdapter(task);
-  if (failoverAdapter) {
-    // Reuse cached failover wrapper to preserve cache state
-    const cacheKey = `failover:${task || "default"}`;
-    if (!wrappedAdapters.has(cacheKey)) {
-      wrappedAdapters.set(cacheKey, withCaching(failoverAdapter));
-    }
-    return wrappedAdapters.get(cacheKey)!;
-  }
-  const providersConfig = getConfig();
+export function getAdapter(task?: string, modelOverride?: string): LLMAdapter {
+  return getAdapterWithResolution(task, modelOverride).adapter;
+}
 
-  // Read from centralized config (handles environment variables)
-  const envProvider = config.llm.provider || DEFAULT_PROVIDER;
-  const envModel = config.llm.model || DEFAULT_MODEL;
+/**
+ * Resolution source per the brief's precedence enum. See precedence block
+ * in src/config/model-routing.ts for the canonical chain.
+ *
+ * - per_call / store_model_config: discriminated by `origin` argument.
+ *   The router cannot tell these apart on its own.
+ * - env_var: CEE_MODEL_* via config.cee.models.*
+ * - task_default: TASK_MODEL_DEFAULTS fallback
+ * - providers_json: providers.json overrides or defaults
+ * - llm_model_fallback: LLM_PROVIDER/LLM_MODEL env vars, adapter default,
+ *   or failover (failover controls its own model internally).
+ */
+export type ResolutionSource = RouterResolutionSource;
 
-  let selectedProvider: 'anthropic' | 'openai' | 'fixtures' = envProvider;
-  let selectedModel: string | undefined = envModel === 'auto' ? undefined : envModel;
+export interface ModelResolution {
+  readonly task?: string;
+  readonly resolved_model: string;
+  readonly resolution_source: ResolutionSource;
+  readonly modelOverride?: string;
+  /**
+   * Provider that will actually serve the request (anthropic / openai /
+   * fixtures). Group 3 follow-up — surfaces on model_resolutions telemetry
+   * so operators can confirm the right provider was selected end-to-end,
+   * not just the right model string.
+   */
+  readonly provider?: 'anthropic' | 'openai' | 'fixtures';
+  /** Checked-in configuration availability, never a remote API claim. */
+  readonly availability?: ModelAssignmentAvailability;
+  readonly registry_model_id?: string | null;
+}
 
-  // Check for task-specific override in config file (providers.json)
-  if (providersConfig && task && providersConfig.overrides?.[task]) {
-    const override = providersConfig.overrides[task];
-    selectedProvider = override.provider;
-    if (override.model) {
-      selectedModel = override.model;
-    }
-    log.info(
-      { task, provider: selectedProvider, model: selectedModel, source: 'config_override' },
-      "Using task-specific provider override"
-    );
-  }
-  // Check for config file defaults
-  else if (providersConfig?.defaults) {
-    selectedProvider = providersConfig.defaults.provider;
-    if (providersConfig.defaults.model) {
-      selectedModel = providersConfig.defaults.model;
-    }
-    log.info(
-      { provider: selectedProvider, model: selectedModel, source: 'config_default' },
-      "Using provider from config defaults"
-    );
-  }
-  // Use environment variables (already set above)
-  else {
-    log.info(
-      { provider: selectedProvider, model: selectedModel, source: 'environment' },
-      "Using provider from environment"
-    );
+export interface AdapterWithResolution {
+  readonly adapter: LLMAdapter;
+  readonly resolution: ModelResolution;
+}
+
+/**
+ * Resolve the router's exact configured plan without constructing an adapter.
+ * Runtime execution and `/admin/models/routing` both consume this boundary.
+ */
+export function resolveConfiguredRouterPlan(
+  task?: string,
+  modelOverride?: string,
+  origin?: 'per_call' | 'store_model_config',
+): RouterResolutionOutcome {
+  const taskConfigKey = task ? TASK_TO_CONFIG_KEY[task] : undefined;
+  const configuredTaskModel = getModelFromConfig(task);
+  const taskDefault =
+    task && isValidCeeTask(task) ? getDefaultModelForTask(task) : undefined;
+
+  return resolveRouterResolution({
+    task,
+    modelOverride,
+    origin,
+    failoverProviders: config.llm.failoverProviders,
+    providersConfig: getConfig(),
+    configuredProvider: config.llm.provider || DEFAULT_PROVIDER,
+    globalModel: config.llm.model || DEFAULT_MODEL,
+    configuredTaskModel,
+    configuredTaskModelSourceKey: getTaskModelSourceKey(taskConfigKey),
+    taskDefault,
+    taskDefaultSourceKey: task ? `TASK_MODEL_DEFAULTS.${task}` : undefined,
+    providerDefaultModels: PROVIDER_DEFAULT_MODELS,
+    clientBlockedModels: getClientBlockedModels(),
+  });
+}
+
+/**
+ * Get an adapter along with metadata describing which precedence step
+ * delivered the model. Prefer this over getAdapter at any site where the
+ * caller has request/turn context and can log or record the resolution.
+ *
+ * `origin` lets the caller annotate the semantic source of `modelOverride`.
+ * Pass 'store_model_config' when the override came from prompt-store
+ * model_config.{staging,production}; otherwise leave unset or pass
+ * 'per_call' (the default for client-body overrides).
+ */
+export function getAdapterWithResolution(
+  task?: string,
+  modelOverride?: string,
+  origin?: 'per_call' | 'store_model_config',
+): AdapterWithResolution {
+  const outcome = resolveConfiguredRouterPlan(task, modelOverride, origin);
+  if (outcome.kind === 'configuration_error') {
+    logFailoverAttempt(outcome);
+    throw outcome.error;
   }
 
-  // CEE tiered model selection: override model based on task if configured
-  // Priority: CEE_MODEL_* env var > TASK_MODEL_DEFAULTS > LLM_MODEL
-  const ceeModel = getModelFromConfig(task);
-  if (ceeModel && selectedModel !== ceeModel) {
-    log.info(
-      { task, previous_model: selectedModel, cee_model: ceeModel, source: 'cee_env_override' },
-      "Using CEE task-specific model from environment"
-    );
-    selectedModel = ceeModel;
-  } else if (!ceeModel && task && isValidCeeTask(task)) {
-    // No env override - use TASK_MODEL_DEFAULTS
-    const taskDefault = getDefaultModelForTask(task);
-    if (taskDefault && selectedModel !== taskDefault) {
-      log.info(
-        { task, previous_model: selectedModel, task_default: taskDefault, source: 'task_default' },
-        "Using task default model from TASK_MODEL_DEFAULTS"
+  if (outcome.kind === 'failover') {
+    if (modelOverride) {
+      log.warn(
+        { task, model_override: modelOverride, reason: 'failover_configured' },
+        "Model override ignored: failover configuration takes precedence",
       );
-      selectedModel = taskDefault;
     }
+
+    const failoverCacheKey = `failover:${task || "default"}`;
+    if (!wrappedAdapters.has(failoverCacheKey)) {
+      logFailoverAttempt(outcome);
+      const failoverAdapter = createFailoverAdapter(task, outcome.assignments);
+      wrappedAdapters.set(
+        failoverCacheKey,
+        withUsageTracking(withCaching(failoverAdapter)),
+      );
+    }
+    const adapter = wrappedAdapters.get(failoverCacheKey)!;
+    const primary = outcome.assignments[0]!;
+    return {
+      adapter,
+      resolution: {
+        task,
+        resolved_model: primary.model,
+        resolution_source: outcome.resolutionSource,
+        modelOverride,
+        provider: primary.provider,
+        availability: primary.availability,
+        registry_model_id: primary.registryModelId,
+      },
+    };
   }
 
-  // Reuse cached wrapper to preserve cache state across requests
-  const cacheKey = `single:${selectedProvider}:${selectedModel || "default"}`;
+  logFailoverAttempt(outcome);
+  const assignment = outcome.assignment;
+  const cacheKey = `single:${assignment.provider}:${assignment.model}`;
   if (!wrappedAdapters.has(cacheKey)) {
-    const adapter = getAdapterInstance(selectedProvider, selectedModel);
-    wrappedAdapters.set(cacheKey, withCaching(adapter));
+    const adapter = getAdapterInstance(assignment.provider, assignment.model);
+    wrappedAdapters.set(cacheKey, withUsageTracking(withCaching(adapter)));
   }
-  return wrappedAdapters.get(cacheKey)!;
+  const adapter = wrappedAdapters.get(cacheKey)!;
+  return {
+    adapter,
+    resolution: {
+      task,
+      resolved_model: assignment.model,
+      resolution_source: outcome.resolutionSource,
+      modelOverride,
+      provider: assignment.provider,
+      availability: assignment.availability,
+      registry_model_id: assignment.registryModelId,
+    },
+  };
 }
 
 /**
@@ -502,7 +834,8 @@ export function getAdapterForProvider(
   provider: 'anthropic' | 'openai' | 'fixtures',
   model?: string
 ): LLMAdapter {
-  return getAdapterInstance(provider, model);
+  const assignment = resolveProviderModel(provider, model);
+  return getAdapterInstance(assignment.provider, assignment.model);
 }
 
 /**
@@ -513,4 +846,3 @@ export function resetAdapterCache(): void {
   wrappedAdapters.clear();
   configCache = undefined;
 }
-

@@ -1,0 +1,18 @@
+-- ============================================================
+-- ROLLBACK for 20260731130000_v5_turn_fence_atomic_append.sql
+-- ⚠️  DO NOT APPLY unless the orchestrator has decided to roll back.
+--
+-- Effect: drops append_turn_atomic_v4. The application FEATURE-DETECTS the
+-- function (PGRST202) and falls back to the pre-v4 evaluate-then-append
+-- two-step on the next graph write per instance — i.e. rollback restores the
+-- fence exactly as shipped by 20260731120000, including its documented
+-- ~one-RPC evaluate→append window. No data changes in either direction: v4
+-- writes the same rows v2/v3 write, and the fence table is untouched by this
+-- rollback. A CEE restart is NOT required (the fallback is per-call), but
+-- restarting removes the one WARN-per-instance discovery cost.
+-- ============================================================
+
+DROP FUNCTION IF EXISTS public.append_turn_atomic_v4(
+  uuid, text, text, text, text, boolean, integer, integer, jsonb,
+  jsonb, text, jsonb, jsonb, text, text, text, text, boolean, bigint
+);

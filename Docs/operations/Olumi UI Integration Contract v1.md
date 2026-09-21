@@ -179,7 +179,7 @@ if (response.model\_card?.provenance\_summary) {
 
 **Requirements (ALL must be true):**
 
-* Environment: `CEE_ORCHESTRATOR_ENABLE=1` (or `CEE_ORCHESTRATOR_ENABLED`)  
+* Environment: `CEE_ORCHESTRATOR_ENABLED=1`  
 * Config: `CEE_BASE_URL` and `CEE_API_KEY` set  
 * Header: `Idempotency-Key` present  
 * Request: `detail_level` ≠ `'quick'`  

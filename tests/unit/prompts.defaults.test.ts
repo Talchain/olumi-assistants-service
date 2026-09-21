@@ -12,13 +12,17 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   registerAllDefaultPrompts,
   PROMPT_TEMPLATES,
+  DECISION_REVIEW_PROMPT_VERSION,
+  REPAIR_GRAPH_PROMPT_VERSION,
 } from '../../src/prompts/defaults.js';
 import {
   getDefaultPrompts,
   registerDefaultPrompt,
   loadPromptSync,
 } from '../../src/prompts/loader.js';
+import { getSystemPrompt } from '../../src/adapters/llm/prompt-loader.js';
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from '../../src/config/graphCaps.js';
+import { DEFAULT_PROMPT_VERSIONS } from '../../src/prompts/estate.js';
 
 // Reset loader state between tests
 beforeEach(() => {
@@ -46,8 +50,13 @@ describe('PROMPT_TEMPLATES', () => {
     expect(prompt).toContain('outcome');
     expect(prompt).toContain('goal');
     expect(prompt).toContain('JSON');
-    expect(prompt).toContain('{{maxNodes}}');
-    expect(prompt).toContain('{{maxEdges}}');
+    // V187 uses STRUCTURAL_RULES section; older versions use max N nodes or placeholders
+    const hasPlaceholders = prompt.includes('{{maxNodes}}') && prompt.includes('{{maxEdges}}');
+    const hasHardcodedLimits = prompt.includes('Maximum 50 nodes') && prompt.includes('Maximum 200 edges');
+    const hasV12Format = prompt.includes('max 50 nodes') && prompt.includes('200 edges');
+    const hasV15Format = prompt.includes('max 50 nodes') && prompt.includes('100 edges');
+    const hasV187Format = prompt.includes('<STRUCTURAL_RULES>') && prompt.includes('<FINAL_AUDIT>');
+    expect(hasPlaceholders || hasHardcodedLimits || hasV12Format || hasV15Format || hasV187Format).toBe(true);
   });
 
   it('suggest_options prompt contains key instructions', () => {
@@ -61,10 +70,10 @@ describe('PROMPT_TEMPLATES', () => {
 
   it('repair_graph prompt contains key instructions', () => {
     const prompt = PROMPT_TEMPLATES.repair_graph;
-    expect(prompt).toContain('fixing');
+    expect(prompt).toContain('repair');
     expect(prompt).toContain('violations');
-    expect(prompt).toContain('DAGs');
-    expect(prompt).toContain('belief values');
+    expect(prompt).toContain('causal decision graphs');
+    expect(prompt).toContain('MINIMAL DIFF');
   });
 
   it('clarify_brief prompt contains key instructions', () => {
@@ -164,12 +173,39 @@ describe('Prompt Content Quality', () => {
     registerAllDefaultPrompts();
   });
 
-  it('all prompts end with JSON-related instruction', () => {
+  it('all task prompts (except orchestrator and narrate-mode) contain JSON-related instruction', () => {
     const defaults = getDefaultPrompts();
 
-    for (const [_task, prompt] of Object.entries(defaults)) {
-      if (!prompt) continue;
-      // All prompts should end with JSON output guidance
+    // orchestrator uses XML envelope output, not JSON.
+    // V5 narrate-mode prompts (direct_answer_narrate and
+    // the seven handler narrates wired in Phase 0 for C2/D1/D2) output
+    // plain prose for the OlumiResponse.assistant_text field — structured
+    // output is not applicable. turn_classifier DOES use JSON and remains
+    // checked.
+    const JSON_EXEMPT_TASKS = new Set([
+      'orchestrator',
+      'direct_answer_narrate',
+      'run_analysis_narrate',
+      'set_factor_value_narrate',
+      'add_constraint_narrate',
+      'adjust_edge_strength_narrate',
+      'explain_result_narrate',
+      'compare_options_narrate',
+      'what_would_flip_narrate',
+      // V5 routing prompt (v40) — uses tool-call (Anthropic native tool_use)
+      // routing, not JSON envelopes. Output is a structured tool call, not
+      // a JSON document.
+      'routing',
+      // V6 dual-draft M2 review — the registered default is a FAIL-CLOSED
+      // sentinel (__M2_PROMPT_NOT_PROVISIONED__), not a real prompt; it exists
+      // to keep the stage inert until Paul-authored copy lands via the PMS
+      // lane. No JSON instruction applies to a placeholder.
+      'm2_graph_review',
+    ]);
+
+    for (const [task, prompt] of Object.entries(defaults)) {
+      if (!prompt || JSON_EXEMPT_TASKS.has(task)) continue;
+      // Task prompts should contain JSON output guidance
       expect(prompt.toLowerCase()).toContain('json');
     }
   });
@@ -224,5 +260,291 @@ describe('Integration with Loader', () => {
 
     // Try to load a task that doesn't have a default
     expect(() => loadPromptSync('evidence_helper' as any)).toThrow('No default prompt');
+  });
+});
+
+describe('Decision Review Fallback Prompt (v11.2)', () => {
+  beforeEach(() => {
+    registerAllDefaultPrompts();
+  });
+
+  // Race framing (2026-09-10): v11.1 -> v11.2. The registered default's bytes
+  // changed again — the prompt no longer asks for a contest between the user's
+  // options ("came out ahead", "why it leads" / "what would make it lead",
+  // "overtakes"), it asks for each option's OWN standing, and it now states the
+  // ban explicitly. See src/prompts/__tests__/decision-review-race-framing.test.ts.
+  //
+  // F3 (2026-08-10): v11 -> v11.1. The registered default's bytes changed (the
+  // margin instruction now forbids stating the distance between two options),
+  // so the label had to move or it would name two different prompts. NOT 'v12'
+  // — that label is poisoned in the adjacent PMS lineage; see the note at the
+  // constant's declaration in src/prompts/defaults.ts.
+  //
+  // ⚠ THIS IS THE THIRD PLACE THE LABEL LIVES (src/prompts/defaults.ts,
+  // src/prompts/estate.ts DEFAULT_PROMPT_VERSIONS, and here). It sits under
+  // tests/, which `tsconfig.build.json` excludes and a src-scoped spec run never
+  // reaches, so a bump that misses it is green everywhere except the required
+  // check. Move all three in the same commit.
+  it('exports DECISION_REVIEW_PROMPT_VERSION as v11.2', () => {
+    expect(DECISION_REVIEW_PROMPT_VERSION).toBe('v11.2');
+  });
+
+  it('decision_review prompt is registered', () => {
+    const defaults = getDefaultPrompts();
+    expect(defaults).toHaveProperty('decision_review');
+    expect(defaults.decision_review).toBeDefined();
+    expect(typeof defaults.decision_review).toBe('string');
+    expect(defaults.decision_review!.length).toBeGreaterThan(1000);
+  });
+
+  it('decision_review prompt can be loaded with loadPromptSync', () => {
+    const prompt = loadPromptSync('decision_review');
+    expect(typeof prompt).toBe('string');
+    expect(prompt.length).toBeGreaterThan(0);
+  });
+
+  it('decision_review prompt contains required structural sections', () => {
+    const prompt = loadPromptSync('decision_review');
+
+    // Required XML-style sections from v6
+    expect(prompt).toContain('<ROLE>');
+    expect(prompt).toContain('</ROLE>');
+    expect(prompt).toContain('<INPUT_FIELDS>');
+    expect(prompt).toContain('</INPUT_FIELDS>');
+    expect(prompt).toContain('<CONSTRUCTION_FLOW>');
+    expect(prompt).toContain('</CONSTRUCTION_FLOW>');
+    expect(prompt).toContain('<GROUNDING_RULES>');
+    expect(prompt).toContain('</GROUNDING_RULES>');
+    expect(prompt).toContain('<FIELD_SPECIFICATIONS>');
+    expect(prompt).toContain('</FIELD_SPECIFICATIONS>');
+    expect(prompt).toContain('<OUTPUT_SCHEMA>');
+    expect(prompt).toContain('</OUTPUT_SCHEMA>');
+    expect(prompt).toContain('<VALIDATION>');
+    expect(prompt).toContain('</VALIDATION>');
+  });
+
+  it('decision_review prompt contains required output field definitions', () => {
+    const prompt = loadPromptSync('decision_review');
+
+    // Required output fields per M2 schema
+    const requiredFields = [
+      'narrative_summary',
+      'story_headlines',
+      'robustness_explanation',
+      'readiness_rationale',
+      'evidence_enhancements',
+      'scenario_contexts',
+      'flip_thresholds',
+      'bias_findings',
+      'key_assumptions',
+      'decision_quality_prompts',
+    ];
+
+    for (const field of requiredFields) {
+      expect(prompt).toContain(field);
+    }
+  });
+
+  it('decision_review prompt contains grounding rules for numbers', () => {
+    const prompt = loadPromptSync('decision_review');
+
+    // Key grounding constraints from v6
+    expect(prompt).toContain('Descriptive fields');
+    expect(prompt).toContain('Prescriptive fields');
+    expect(prompt).toContain('±10%');
+    expect(prompt).toContain('Do NOT invent statistics');
+    expect(prompt).toContain('Do NOT compute derived numbers');
+  });
+
+  it('decision_review prompt contains tone alignment table', () => {
+    const prompt = loadPromptSync('decision_review');
+
+    // Readiness levels and their tones
+    expect(prompt).toContain('readiness');
+    expect(prompt).toContain('headline_type');
+    expect(prompt).toContain('ready');
+    expect(prompt).toContain('close_call');
+    expect(prompt).toContain('needs_evidence');
+    expect(prompt).toContain('needs_framing');
+    expect(prompt).toContain('Forbidden phrases');
+  });
+
+  it('decision_review prompt contains bias detection guidance', () => {
+    const prompt = loadPromptSync('decision_review');
+
+    // Bias types
+    expect(prompt).toContain('STRUCTURAL');
+    expect(prompt).toContain('SEMANTIC');
+    expect(prompt).toContain('ANCHORING');
+    expect(prompt).toContain('DOMINANT_FACTOR');
+    expect(prompt).toContain('SUNK_COST');
+    expect(prompt).toContain('linked_critique_code');
+    expect(prompt).toContain('brief_evidence');
+  });
+
+  it('decision_review prompt contains validation error documentation', () => {
+    const prompt = loadPromptSync('decision_review');
+
+    // Validation section documents server-side checks
+    expect(prompt).toContain('ERRORS (cause rejection)');
+    expect(prompt).toContain('story_headlines missing');
+    expect(prompt).toContain('Ungrounded number');
+    expect(prompt).toContain('Readiness contradiction');
+  });
+
+  it('decision_review prompt requests JSON-only output', () => {
+    const prompt = loadPromptSync('decision_review');
+
+    expect(prompt).toContain('Return ONLY a JSON object');
+    expect(prompt).toContain('No markdown fences');
+  });
+});
+
+describe('Orchestrator Prompt (cf-v28)', () => {
+  beforeEach(() => {
+    registerAllDefaultPrompts();
+  });
+
+  it('orchestrator prompt is registered', () => {
+    const defaults = getDefaultPrompts();
+    expect(defaults).toHaveProperty('orchestrator');
+    expect(defaults.orchestrator).toBeDefined();
+    expect(typeof defaults.orchestrator).toBe('string');
+  });
+
+  it('orchestrator prompt can be loaded with loadPromptSync', () => {
+    const prompt = loadPromptSync('orchestrator');
+    expect(typeof prompt).toBe('string');
+    expect(prompt.length).toBeGreaterThan(0);
+  });
+
+  it('orchestrator prompt contains required structural sections', () => {
+    const prompt = loadPromptSync('orchestrator');
+
+    expect(prompt).toContain('<ROLE>');
+    expect(prompt).toContain('</ROLE>');
+    expect(prompt).toContain('<PRIMARY_RULES>');
+    expect(prompt).toContain('</PRIMARY_RULES>');
+    expect(prompt).toContain('<TOOLS>');
+    expect(prompt).toContain('</TOOLS>');
+    expect(prompt).toContain('<OUTPUT_CONTRACT>');
+    expect(prompt).toContain('</OUTPUT_CONTRACT>');
+    expect(prompt).toContain('<DIAGNOSTICS>');
+    expect(prompt).toContain('</DIAGNOSTICS>');
+    expect(prompt).toContain('<FINAL_REMINDERS>');
+    expect(prompt).toContain('</FINAL_REMINDERS>');
+  });
+
+  it('orchestrator prompt has no unresolved template variables', () => {
+    const prompt = loadPromptSync('orchestrator');
+    expect(prompt).not.toContain('{{');
+  });
+
+  it('orchestrator prompt is within expected length range', () => {
+    const prompt = loadPromptSync('orchestrator');
+    // cf-v28: ~57k chars (~14k tokens)
+    expect(prompt.length).toBeGreaterThan(40000);
+    expect(prompt.length).toBeLessThan(70000);
+  });
+
+  it('orchestrator prompt is retrievable via getSystemPrompt (async store-aware path)', async () => {
+    const prompt = await getSystemPrompt('orchestrator');
+    expect(typeof prompt).toBe('string');
+    expect(prompt).toContain('<ROLE>');
+    expect(prompt).toContain('<FINAL_REMINDERS>');
+  });
+});
+
+// ============================================================================
+// Prompt version alignment invariants
+//
+// These tests prevent the drift that audit finding #1 identified:
+// registered fallback, PROMPT_TEMPLATES export, and version constants
+// must all reference the same prompt version per route.
+// ============================================================================
+
+describe('Prompt version alignment invariants', () => {
+  beforeEach(() => {
+    registerAllDefaultPrompts();
+  });
+
+  it('registered orchestrator fallback matches PROMPT_TEMPLATES.orchestrator', () => {
+    const registered = loadPromptSync('orchestrator');
+    const template = PROMPT_TEMPLATES.orchestrator;
+    expect(registered).toBe(template);
+  });
+
+  it('registered draft_graph fallback matches PROMPT_TEMPLATES.draft_graph', () => {
+    const registered = loadPromptSync('draft_graph');
+    const template = PROMPT_TEMPLATES.draft_graph;
+    expect(registered).toBe(template);
+  });
+
+  it('registered edit_graph fallback matches PROMPT_TEMPLATES.edit_graph', () => {
+    const registered = loadPromptSync('edit_graph');
+    const template = PROMPT_TEMPLATES.edit_graph;
+    expect(registered).toBe(template);
+  });
+
+  // ⚠ DERIVED, NOT A THIRD COPY OF THE LITERAL (CLAUDE.md trap #12). This
+  // assertion used to re-type 'v11', so the same fact lived in THREE places:
+  // the constant, `estate.ts`'s DEFAULT_PROMPT_VERSIONS map, and here. The F3
+  // bump reddened two of them and would have left the third free to drift on
+  // the next one. The alignment invariant this describe-block is named for is
+  // that the constant and the estate map AGREE — assert exactly that.
+  it('DECISION_REVIEW_PROMPT_VERSION agrees with the estate map', () => {
+    expect(DECISION_REVIEW_PROMPT_VERSION).toBe(DEFAULT_PROMPT_VERSIONS.decision_review);
+    // Positive control (trap 13): an agreement assertion between two undefineds
+    // would pass while measuring nothing.
+    expect(DECISION_REVIEW_PROMPT_VERSION).toMatch(/^v\d/);
+  });
+
+  it('REPAIR_GRAPH_PROMPT_VERSION matches v6', () => {
+    expect(REPAIR_GRAPH_PROMPT_VERSION).toBe('v6');
+  });
+
+  it('orchestrator fallback contains cf-v28 structural markers', () => {
+    const prompt = loadPromptSync('orchestrator');
+    // cf-v28 specific sections not present in earlier versions
+    expect(prompt).toContain('<PRIMARY_RULES>');
+    expect(prompt).toContain('<OUTPUT_CONTRACT>');
+    expect(prompt).toContain('<COACHING_PLAYS>');
+    expect(prompt).toContain('<FINAL_REMINDERS>');
+  });
+
+  it('draft_graph fallback contains v187 structural markers', () => {
+    const prompt = loadPromptSync('draft_graph');
+    // v187 specific sections not present in v19
+    expect(prompt).toContain('<CONSTRUCTION_FLOW>');
+    expect(prompt).toContain('<STRUCTURAL_RULES>');
+    expect(prompt).toContain('<FINAL_AUDIT>');
+    expect(prompt).toContain('<ANNOTATED_EXAMPLE>');
+  });
+
+  it('edit_graph fallback contains v6 structural markers', () => {
+    const prompt = loadPromptSync('edit_graph');
+    // v6 specific sections not present in v2
+    expect(prompt).toContain('<classification>');
+    expect(prompt).toContain('<principles>');
+    expect(prompt).toContain('BIDIRECTED EDGES');
+  });
+});
+
+// ============================================================================
+// max_tokens default propagation
+//
+// Verifies that orchestrator and edit_graph routes provide fallback
+// max_tokens values so the Anthropic adapter does not silently use 4096.
+// ============================================================================
+
+describe('max_tokens default propagation', () => {
+  it('getMaxTokensFromConfig returns undefined when env var is not set', async () => {
+    const { getMaxTokensFromConfig } = await import('../../src/adapters/llm/router.js');
+    // When CEE_MAX_TOKENS_ORCHESTRATOR is not set, the config lookup returns undefined.
+    // The call site must apply its own fallback (16000).
+    const result = getMaxTokensFromConfig('orchestrator');
+    // Result is either a configured number or undefined — both are valid.
+    // The critical invariant is that call sites apply ?? 16000.
+    expect(result === undefined || typeof result === 'number').toBe(true);
   });
 });

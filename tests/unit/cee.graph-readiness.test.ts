@@ -88,8 +88,10 @@ describe("CEE Graph Readiness Assessment", () => {
 
         expect(result.readiness_level).toBe("ready");
         expect(result.readiness_score).toBeGreaterThanOrEqual(70);
-        expect(result.can_run_analysis).toBe(true);
-        expect(result.blocker_reason).toBeUndefined();
+        // NB: this assessor no longer reports `can_run_analysis` / `blocker_reason`
+        // — see the note on `GraphReadinessAssessment`. Admission is
+        // `assessRouteAdmission`'s question, pinned in
+        // src/cee/graph-readiness/__tests__/canonical-readiness.test.ts.
       });
 
       it("returns high confidence for substantial graphs", () => {
@@ -130,7 +132,6 @@ describe("CEE Graph Readiness Assessment", () => {
         expect(result.readiness_level).toBe("fair");
         expect(result.readiness_score).toBeGreaterThanOrEqual(40);
         expect(result.readiness_score).toBeLessThan(70);
-        expect(result.can_run_analysis).toBe(true);
       });
 
       it("provides actionable recommendations", () => {
@@ -188,8 +189,13 @@ describe("CEE Graph Readiness Assessment", () => {
 
         const result = assessGraphReadiness(graph);
 
-        expect(result.can_run_analysis).toBe(false);
-        expect(result.blocker_reason).toContain("option");
+        // Structural insufficiency now shows up as a COACHING verdict, not as
+        // an admission one: score floored, level needs_work, no quality factors
+        // to offer. Whether analysis may RUN is answered elsewhere.
+        expect(result.readiness_level).toBe("needs_work");
+        expect(result.readiness_score).toBe(0);
+        expect(result.quality_factors).toEqual([]);
+        expect(result.confidence_explanation).toContain("option");
       });
 
       it("blocks analysis for graph without decision", () => {
@@ -200,8 +206,9 @@ describe("CEE Graph Readiness Assessment", () => {
 
         const result = assessGraphReadiness(graph);
 
-        expect(result.can_run_analysis).toBe(false);
-        expect(result.blocker_reason).toContain("decision");
+        expect(result.readiness_level).toBe("needs_work");
+        expect(result.readiness_score).toBe(0);
+        expect(result.confidence_explanation).toContain("decision");
       });
 
       it("blocks analysis for empty graph", () => {
@@ -209,8 +216,9 @@ describe("CEE Graph Readiness Assessment", () => {
 
         const result = assessGraphReadiness(graph);
 
-        expect(result.can_run_analysis).toBe(false);
-        expect(result.blocker_reason).toBeTruthy();
+        expect(result.readiness_level).toBe("needs_work");
+        expect(result.readiness_score).toBe(0);
+        expect(result.confidence_explanation).toBeTruthy();
       });
     });
   });
@@ -495,11 +503,46 @@ describe("CEE Graph Readiness Assessment", () => {
 
       const graph = makeGraph(kinds, edges);
 
-      const start = Date.now();
-      assessGraphReadiness(graph);
-      const duration = Date.now() - start;
+      // ROADMAP 2.753 (2026-08-14) — WHY THIS TAKES THE MINIMUM OF N SAMPLES.
+      //
+      // This assertion used to time ONE call with `Date.now()` and assert
+      // `duration < 50`. It failed a full `pnpm test:required` run on this
+      // machine with `expected 50 to be less than 50` — a single scheduling
+      // hiccup landing on a 1 ms-resolution clock with ZERO margin, on a test
+      // whose subject is pure CPU work. An alarm whose colour depends on who
+      // runs it teaches every lane to stop looking (house trap 7).
+      //
+      // The fix is NOT to raise the bound — 50 ms is a real and useful claim
+      // about a 100-node/200-edge assessment, and raising it would weaken the
+      // guard to buy stability. It is to ESTIMATE THE COST HONESTLY: noise only
+      // ever ADDS time, so across repetitions the MINIMUM is the best available
+      // estimator of the true cost and is load-invariant in a way a single
+      // sample is not. `performance.now()` replaces `Date.now()` so a sub-
+      // millisecond result cannot land exactly on the boundary.
+      //
+      // The cold-sample bound below keeps this from being a warm-JIT free pass:
+      // if the very first call is catastrophically slow, that reds regardless
+      // of how fast the warmed repetitions get.
+      const REPETITIONS = 7;
+      const samples: number[] = [];
+      for (let r = 0; r < REPETITIONS; r++) {
+        const start = performance.now();
+        assessGraphReadiness(graph);
+        samples.push(performance.now() - start);
+      }
 
-      expect(duration).toBeLessThan(50);
+      // Non-vacuity: prove we actually measured what we think we measured
+      // before drawing a conclusion from it (house trap 13).
+      expect(samples).toHaveLength(REPETITIONS);
+      expect(Math.min(...samples)).toBeGreaterThan(0);
+
+      // The original claim, robustly estimated.
+      expect(Math.min(...samples)).toBeLessThan(50);
+
+      // Cold path: generous enough to survive a starved worker, tight enough
+      // that an algorithmic blow-up (the thing this test exists to catch) on a
+      // 100-node graph still reds.
+      expect(samples[0]).toBeLessThan(2_000);
     });
   });
 });

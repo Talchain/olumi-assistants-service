@@ -1,0 +1,28 @@
+[
+  {
+    "type": "turn_start",
+    "seq": 0,
+    "turn_id": "turn-err-llm-001",
+    "routing": "llm",
+    "stage": "frame"
+  },
+  {
+    "type": "text_delta",
+    "seq": 1,
+    "delta": "Let me analyze the "
+  },
+  {
+    "type": "text_delta",
+    "seq": 2,
+    "delta": "trade-offs between\u2026"
+  },
+  {
+    "type": "error",
+    "seq": 3,
+    "error": {
+      "code": "LLM_TIMEOUT",
+      "message": "LLM response timed out after 30000ms"
+    },
+    "recoverable": true
+  }
+]

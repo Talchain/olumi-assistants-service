@@ -19,7 +19,7 @@ export interface VerificationContext {
   requestId?: string;
 }
 
-export type VerificationSeverity = "info" | "warning" | "error";
+export type VerificationSeverity = "info" | "warn" | "error";
 
 export interface VerificationResult<T = unknown> {
   /** Whether this stage considered the data valid. */

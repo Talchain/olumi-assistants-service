@@ -1,0 +1,50 @@
+-- ============================================================
+-- Decision Records v1 — break-glass rollback companion
+-- Matches: 20260710113000_v5_decision_records.sql
+-- Status: DO NOT APPLY automatically.
+--
+-- CHANGELOG: 2026-07-10 P1 amendment (workspace/identity design;
+--   pre-execution, in-place) — the forward file gained workspace_id +
+--   visibility columns and create_decision_record gained two trailing
+--   parameters, so the DROP FUNCTION signature and the export SELECT
+--   below were updated to match.
+-- ============================================================
+--
+-- The `.do-not-apply` suffix ensures Supabase migration tooling skips
+-- this file. Apply manually only when the decision_records substrate
+-- must be removed (misbehaving RPC, security concern, or a decision to
+-- withdraw the feature before any meaningful data has accrued).
+--
+-- ⚠️  DATA LOSS: dropping the table destroys every captured decision
+--     record. Decision records are the long-horizon calibration asset —
+--     if ANY real rows exist, export them first:
+--       SELECT jsonb_build_object(
+--         'record_id', record_id, 'scenario_id', scenario_id,
+--         'created_at', to_jsonb(created_at), 'decision', decision,
+--         'prediction', prediction, 'review_date', to_jsonb(review_date),
+--         'outcome', outcome,
+--         'workspace_id', workspace_id, 'visibility', visibility)
+--       FROM public.decision_records;
+--
+-- The forward migration touched NO existing table (no scenarios column,
+-- no policy on any pre-existing object), so rollback is self-contained:
+-- drop the two RPCs, then the table (policy + indexes + generated column
+-- drop with it). Journey events already appended to scenarios.events are
+-- inert data and are deliberately left in place.
+--
+-- After applying: Supabase auto-reloads the PostgREST schema cache on
+-- DDL; if a stale-cache symptom is seen, force a reload with
+--   NOTIFY pgrst, 'reload schema';
+-- ============================================================
+
+-- 1. Drop the RPCs (exact signatures — no overloads exist by design).
+DROP FUNCTION IF EXISTS public.create_decision_record(
+  uuid, jsonb, jsonb, timestamptz, uuid, text, uuid, text
+);
+DROP FUNCTION IF EXISTS public.record_decision_outcome(
+  uuid, jsonb, text
+);
+
+-- 2. Drop the table (RLS policy, indexes and the generated
+--    outcome_result column go with it).
+DROP TABLE IF EXISTS public.decision_records;

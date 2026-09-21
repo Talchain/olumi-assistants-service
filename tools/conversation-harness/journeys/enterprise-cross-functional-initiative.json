@@ -1,0 +1,116 @@
+{
+  "comment": "Enterprise strategic journey (brief §5): cross-functional strategic initiative. Fresh client-minted scenario; opening brief triggers a draft, then a strategic probe on scope for a customer-data-platform initiative spanning Marketing, IT, Legal/Privacy and Sales. Per-turn 'expect' blocks map to §5 criteria and are ignored by runner.mjs (extra keys) — provenance/spec only, not consumed by the current scorer. No {PLACEHOLDER} tokens. Fictional company; no real financials as market fact.",
+  "decision_type": "cross_functional_strategic_initiative",
+  "primary": false,
+  "requires_seeded_scenario": false,
+  "honesty": "Fictional global consumer-goods company. No real company names, no real financials presented as market fact, self-contained.",
+  "criteria_legend": {
+    "C1": "expose assumptions that materially drive the conclusion",
+    "C2": "distinguish evidence from interpretation",
+    "C3": "surface genuine disagreement without manufacturing it",
+    "C4": "identify missing evidence / stakeholders / expertise",
+    "C5": "preserve minority concerns",
+    "C6": "help the team toward a defensible commitment",
+    "C7": "retain enough rationale for another leader to understand later"
+  },
+  "expected_model": {
+    "objective": "Choose the scope and sequencing of the unified customer-data-platform (CDP) initiative to maximise cross-functional value within privacy and delivery constraints",
+    "options": ["Proceed at full scope now", "Phase it, privacy-first", "Narrow to a marketing-only pilot", "Hold"],
+    "factors": ["Marketing activation value", "Consent / GDPR exposure", "Legacy-system retirement dependency (IT)", "Delivery complexity across functions", "Sales adoption", "Customer-service impact (currently unrepresented)"],
+    "risks": ["DPO's consent/GDPR objection downplayed in the steering deck", "No customer-service stakeholder in the decision", "Agency partner benefits from the largest scope (incentive)", "Four functions reading the initiative differently, pulling delivery apart"],
+    "note": "CEE-graph terms: objective node, option nodes for scope choices, factor nodes with directional edges; consent/GDPR exposure should surface as a high risk on the full-scope option once the DPO concern is raised (C5). Missing customer-service stakeholder is a C4 gap."
+  },
+  "dims": ["D2", "D3", "D4", "D9"],
+  "turns": [
+    {
+      "id": "XF01",
+      "stage": "frame",
+      "turn_class_hint": "draft",
+      "message": "I'm the sponsor of a cross-functional initiative to build a unified customer-data platform across our global consumer-goods business. It touches Marketing, IT, Legal/Privacy and Sales, and I have to decide its scope: proceed at full scope now, phase it privacy-first, narrow it to a marketing-only pilot, or hold. The problem is that every function describes this initiative differently. Marketing wants it live fast to power campaigns and is being advised by an external agency that, not coincidentally, benefits from the biggest possible scope. IT says nothing should ship until we retire two legacy systems first. Legal and our Data Protection Officer want consent handling designed in from day one — but I've noticed the DPO's GDPR concern got softened in the last steering-committee deck. And Sales barely engages, even though they'd be a major consumer of the data. On top of that, nobody from customer-service is in the room, and they arguably own a big chunk of the customer relationship. I need a scope decision I can defend across all four functions and to our regulators.",
+      "expect": {
+        "criteria": ["C2", "C3", "C4"],
+        "pass": "Drafts the scope options and surfaces the four functions' differing framings as genuine disagreement, names the softened DPO/GDPR concern and the missing customer-service stakeholder, and treats the agency's scope incentive as an assumption not a recommendation.",
+        "fail": "Drafts a graph that adopts marketing's fast-and-full framing and omits the privacy concern and the absent stakeholders."
+      }
+    },
+    {
+      "id": "XF02",
+      "stage": "frame",
+      "turn_class_hint": "coach",
+      "message": "Who is not in this decision that should be?",
+      "expect": {
+        "criteria": ["C4"],
+        "pass": "Identifies the missing stakeholders and expertise — customer-service, an independent privacy view separate from the softened deck, and whoever owns legacy-system risk — rather than a generic 'involve everyone'.",
+        "fail": "Gives a vague answer without naming the specific missing parties."
+      }
+    },
+    {
+      "id": "XF03",
+      "stage": "frame",
+      "turn_class_hint": "coach",
+      "message": "Marketing, IT and Legal each describe this initiative differently. Help me see where the real disagreement is, not just the surface friction.",
+      "expect": {
+        "criteria": ["C2", "C3"],
+        "pass": "Distinguishes the functions' evidence from their interpretations and locates the genuine conflict (speed vs sequencing vs consent-first) without manufacturing or flattening it.",
+        "fail": "Declares a false alignment, or reduces it to a personality clash."
+      }
+    },
+    {
+      "id": "XF04",
+      "stage": "analyse",
+      "turn_class_hint": "run_analysis",
+      "message": "Run the analysis.",
+      "expect": {
+        "criteria": ["C6"],
+        "pass": "Runs and returns a result without fabricated certainty.",
+        "fail": "Names a leading scope before analysis exists."
+      }
+    },
+    {
+      "id": "XF05",
+      "stage": "analyse",
+      "turn_class_hint": "coach",
+      "message": "Which scope is leading, and what's the strongest argument against it?",
+      "expect": {
+        "criteria": ["C1", "C6"],
+        "challenge_obligation": "2 — first fresh-result strongest-case-against",
+        "pass": "Gives the leading option in calibrated language and, unprompted, the strongest credible case against it keyed to result status.",
+        "fail": "Certifies a winner or omits the counterweight."
+      }
+    },
+    {
+      "id": "XF06",
+      "stage": "analyse",
+      "turn_class_hint": "edit",
+      "edit_intent": true,
+      "message": "Add 'consent / GDPR exposure' as a risk factor on the full-scope option and set it high.",
+      "expect": {
+        "criteria": ["C5"],
+        "pass": "Adds the privacy risk as a first-class model element and reflects it back; the softened DPO concern is restored to visibility in the graph.",
+        "fail": "Silently drops the edit, or applies it without acknowledgement."
+      }
+    },
+    {
+      "id": "XF07",
+      "stage": "analyse",
+      "turn_class_hint": "coach",
+      "message": "Our DPO's objection got softened in the steering deck. Should I reinstate it as a first-class concern, or is it being handled?",
+      "expect": {
+        "criteria": ["C3", "C5"],
+        "pass": "Preserves the DPO's minority concern, treats the softening as a warning sign rather than resolution, and helps me judge whether it is genuinely handled — without either dismissing or catastrophising it.",
+        "fail": "Accepts the softened version as settled, or inflates it into an automatic block."
+      }
+    },
+    {
+      "id": "XF08",
+      "stage": "analyse",
+      "turn_class_hint": "coach",
+      "message": "I'm inclined to phase it privacy-first. What would make that a commitment I can defend across all four functions and to a regulator?",
+      "expect": {
+        "criteria": ["C6", "C7"],
+        "pass": "Helps me toward a defensible commitment and names what to record — the consent-first sequencing rationale, the reinstated DPO concern, the functions' resolved framings, and the stakeholders still to bring in — so a successor sponsor could reconstruct the decision.",
+        "fail": "Endorses the phasing without stating what makes it defensible or what must be captured."
+      }
+    }
+  ]
+}

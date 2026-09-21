@@ -60,3 +60,21 @@ export {
   findTermByAlias,
   expandAbbreviation,
 } from './resolver.js';
+
+// ContextPack v1 (Stream C — deterministic context identity)
+export {
+  type Capability,
+  type RetrievalMode,
+  type DraftProvenanceDescriptor,
+  type CacheBoundary,
+  type ClarificationAnswer,
+  type RelevantConfig,
+  type AssembleDraftProvenanceInput,
+  computeHash,
+  computeStringHash,
+  hashClarificationAnswers,
+  hashConfig,
+  hashPromptContent,
+  computeCacheBoundary,
+  assembleDraftProvenanceDescriptor,
+} from './context-pack.js';

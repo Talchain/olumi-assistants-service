@@ -16,7 +16,10 @@ import {
   getPromptRepository,
   initializePromptRepository,
 } from './repository.js';
-import { log } from '../utils/telemetry.js';
+import { computeContentHash } from './schema.js';
+import { getDefaultPrompts } from './loader.js';
+import { shouldUseStagingPrompts } from '../config/index.js';
+import { log, emit, TelemetryEvents } from '../utils/telemetry.js';
 import { config } from '../config/index.js';
 
 /**
@@ -79,6 +82,14 @@ export async function initializeAndSeedPrompts(force = false): Promise<SeedResul
     }
 
     const result = await repo.seedDefaults(force);
+
+    // Step 3b: Ensure orchestrator staging version matches registered default
+    // Gated behind CEE_PROMPT_AUTO_MIGRATE (default: false) to prevent phantom
+    // version creation on every startup when admin-uploaded content differs from
+    // the registered default in defaults.ts.
+    if (shouldUseStagingPrompts() && config.prompts?.autoMigrateEnabled) {
+      await ensureOrchestratorStagingVersion(repo);
+    }
 
     // Step 4: Warm cache
     await repo.warmCache();
@@ -163,4 +174,105 @@ export async function checkSeedStatus(): Promise<{
     databaseSeeded,
     missingTasks,
   };
+}
+
+// ============================================================================
+// Orchestrator staging version migration
+// ============================================================================
+
+/**
+ * Ensure the orchestrator prompt in the store has a version whose
+ * content matches the registered default (cf-v28).
+ *
+ * Scans ALL existing versions for a hash match before creating a new one,
+ * preventing duplicate writes when a previous migration was blocked by
+ * the activation guard.
+ *
+ * Only called when CEE_PROMPT_AUTO_MIGRATE=true (see caller gate).
+ * Non-destructive: never modifies the active (production) version.
+ */
+async function ensureOrchestratorStagingVersion(
+  repo: ReturnType<typeof getPromptRepository>,
+): Promise<void> {
+  const PROMPT_ID = 'orchestrator_default';
+
+  try {
+    const defaults = getDefaultPrompts();
+    const defaultContent = defaults.orchestrator;
+    if (!defaultContent) return;
+
+    const defaultHash = computeContentHash(defaultContent);
+
+    // Get the existing prompt from the store
+    const existing = await repo.get(PROMPT_ID);
+    if (!existing) {
+      log.debug({ prompt_id: PROMPT_ID }, 'Orchestrator prompt not in store, skipping staging migration');
+      return;
+    }
+
+    // Check if ANY existing version already matches the default hash.
+    // This prevents duplicate version creation when the activation guard
+    // blocked a previous migration (version exists but was never activated).
+    const matchingVer = existing.versions.find(v => v.contentHash === defaultHash);
+    if (matchingVer) {
+      log.debug(
+        { prompt_id: PROMPT_ID, matching_version: matchingVer.version, hash: defaultHash.slice(0, 16) },
+        'Existing version already matches default hash — no migration needed',
+      );
+      return;
+    }
+
+    // Create a new version with the default content
+    const updated = await repo.createVersion(PROMPT_ID, {
+      content: defaultContent,
+      createdBy: 'system-migration',
+      changeNote: 'Auto-migrated orchestrator prompt from registered default (cf-v28)',
+    });
+
+    // Find the newly created version number (highest)
+    const newVersionNum = Math.max(...updated.versions.map(v => v.version));
+
+    // Guard: check if automated activation is permitted
+    const guardEnabled = config.prompts?.activationGuardEnabled ?? true;
+
+    if (guardEnabled) {
+      // Version was created but NOT activated.
+      // A human must set stagingVersion via the admin API.
+      emit(TelemetryEvents.PromptActivationBlocked, {
+        author: 'system-migration',
+        prompt_id: PROMPT_ID,
+        version: newVersionNum,
+        target_environment: 'staging',
+        reason: 'automated_activation_not_permitted',
+        hash: defaultHash.slice(0, 16),
+      });
+      log.warn(
+        {
+          prompt_id: PROMPT_ID,
+          new_version: newVersionNum,
+          hash: defaultHash.slice(0, 16),
+          event: 'prompt.activation.blocked',
+        },
+        `Prompt activation guard enabled — automated staging activation blocked for ${existing.taskId}. Version ${newVersionNum} created but not activated. Use admin API to set stagingVersion.`,
+      );
+    } else {
+      // Guard disabled: old behavior — activate the version automatically
+      await repo.update(PROMPT_ID, { stagingVersion: newVersionNum });
+      log.info(
+        {
+          prompt_id: PROMPT_ID,
+          new_version: newVersionNum,
+          hash: defaultHash.slice(0, 16),
+          event: 'prompt.staging_migration.complete',
+        },
+        'Orchestrator staging version migrated (guard disabled)',
+      );
+    }
+  } catch (err) {
+    // Non-fatal — staging migration failure should not block startup
+    log.warn(
+      { prompt_id: PROMPT_ID, error: String(err) },
+      'Orchestrator staging version migration failed — will use existing store version',
+    );
+  }
 }

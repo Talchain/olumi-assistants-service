@@ -151,3 +151,24 @@ export function flattenZodErrors(error: z.ZodError): string[] {
     return `${path}${e.message}`;
   });
 }
+
+/**
+ * Extract the first N Zod issues as structured objects for diagnostic logging.
+ * Returns an array of {path, message, code, expected?, received?} objects.
+ */
+export function extractZodIssues(error: z.ZodError, count = 3): Array<{
+  path: string;
+  message: string;
+  code: string;
+  expected?: string;
+  received?: string;
+}> {
+  const issues = error?.issues ?? [];
+  return issues.slice(0, count).map((i) => ({
+    path: Array.isArray(i.path) ? i.path.join(".") : "",
+    message: i.message ?? "",
+    code: i.code ?? "",
+    expected: (i as any).expected != null ? String((i as any).expected) : undefined,
+    received: (i as any).received != null ? String((i as any).received) : undefined,
+  }));
+}

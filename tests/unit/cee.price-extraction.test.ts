@@ -35,9 +35,8 @@ function createEdge(from: string, to: string): EdgeV3T {
   return {
     from,
     to,
-    strength_mean: 0.7,
-    strength_std: 0.1,
-    belief_exists: 0.8,
+    strength: { mean: 0.7, std: 0.1 },
+    exists_probability: 0.8,
     effect_direction: "positive",
   };
 }

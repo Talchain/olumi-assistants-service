@@ -8,6 +8,7 @@ import {
   enforceSingleGoal,
   fixMissingOutcomeEdgeBeliefs,
   validateAndFixGraph,
+  fixNonCanonicalStructuralEdges,
   type GraphFixOptions,
   type StructuralMeta,
 } from "../../src/cee/structure/index.js";
@@ -139,7 +140,10 @@ describe("detectStructuralWarnings", () => {
 });
 
 describe("normaliseDecisionBranchBeliefs", () => {
-  it("renormalises decision-to-option beliefs when their sum differs significantly from 1", () => {
+  it("is a no-op — structural edges must not have belief_exists redistributed", () => {
+    // Prior to the fix, this function divided belief_exists by the number of
+    // sibling options (1.0 → 0.333 for 3 options), corrupting structural edge
+    // existence probability.  It is now intentionally a no-op.
     const graph = makeGraph({
       nodes: [
         { id: "goal_1", kind: "goal" } as any,
@@ -154,40 +158,67 @@ describe("normaliseDecisionBranchBeliefs", () => {
       ],
     });
 
-    const normalised = normaliseDecisionBranchBeliefs(graph);
-    expect(normalised).toBeDefined();
-
-    const edges = (normalised as GraphV1).edges as any[];
-    const decisionEdges = edges.filter(
-      (e) => e.from === "dec_1" && (e.to === "opt_1" || e.to === "opt_2"),
-    );
-    const sum = decisionEdges.reduce((acc, e) => acc + (typeof e.belief === "number" ? e.belief : 0), 0);
-    expect(sum).toBeCloseTo(1, 4);
-    for (const edge of decisionEdges) {
-      expect(edge.belief).toBeGreaterThan(0);
-      expect(edge.belief).toBeLessThan(1);
-    }
+    const result = normaliseDecisionBranchBeliefs(graph);
+    // Returns the exact same reference (no-op)
+    expect(result).toBe(graph);
+    // Beliefs remain at their original values
+    const edges = (result as GraphV1).edges as any[];
+    expect(edges[1].belief).toBe(0.7);
+    expect(edges[2].belief).toBe(0.7);
   });
 
-  it("leaves beliefs unchanged when branches are already normalised", () => {
+  it("preserves structural edge ep=1.0 on 3-option graph (regression)", () => {
     const graph = makeGraph({
       nodes: [
-        { id: "goal_1", kind: "goal" } as any,
         { id: "dec_1", kind: "decision" } as any,
         { id: "opt_1", kind: "option" } as any,
         { id: "opt_2", kind: "option" } as any,
+        { id: "opt_3", kind: "option" } as any,
       ],
       edges: [
-        { from: "goal_1", to: "dec_1" } as any,
-        { from: "dec_1", to: "opt_1", belief: 0.6 } as any,
-        { from: "dec_1", to: "opt_2", belief: 0.4 } as any,
+        { from: "dec_1", to: "opt_1", belief_exists: 1.0, belief: 1.0 } as any,
+        { from: "dec_1", to: "opt_2", belief_exists: 1.0, belief: 1.0 } as any,
+        { from: "dec_1", to: "opt_3", belief_exists: 1.0, belief: 1.0 } as any,
       ],
     });
 
-    const originalBeliefs = (graph.edges as any[]).map((e) => e.belief);
-    const normalised = normaliseDecisionBranchBeliefs(graph) as GraphV1;
-    const newBeliefs = (normalised.edges as any[]).map((e) => e.belief);
-    expect(newBeliefs).toEqual(originalBeliefs);
+    const result = normaliseDecisionBranchBeliefs(graph);
+    expect(result).toBe(graph);
+    const edges = (result as GraphV1).edges as any[];
+    for (const edge of edges) {
+      expect(edge.belief_exists).toBe(1.0);
+      expect(edge.belief).toBe(1.0);
+    }
+  });
+
+  it("preserves structural edge ep=1.0 on 4-option graph (regression)", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "dec_1", kind: "decision" } as any,
+        { id: "opt_1", kind: "option" } as any,
+        { id: "opt_2", kind: "option" } as any,
+        { id: "opt_3", kind: "option" } as any,
+        { id: "opt_4", kind: "option" } as any,
+      ],
+      edges: [
+        { from: "dec_1", to: "opt_1", belief_exists: 1.0, belief: 1.0 } as any,
+        { from: "dec_1", to: "opt_2", belief_exists: 1.0, belief: 1.0 } as any,
+        { from: "dec_1", to: "opt_3", belief_exists: 1.0, belief: 1.0 } as any,
+        { from: "dec_1", to: "opt_4", belief_exists: 1.0, belief: 1.0 } as any,
+      ],
+    });
+
+    const result = normaliseDecisionBranchBeliefs(graph);
+    expect(result).toBe(graph);
+    const edges = (result as GraphV1).edges as any[];
+    for (const edge of edges) {
+      expect(edge.belief_exists).toBe(1.0);
+      expect(edge.belief).toBe(1.0);
+    }
+  });
+
+  it("returns undefined graph unchanged", () => {
+    expect(normaliseDecisionBranchBeliefs(undefined)).toBeUndefined();
   });
 });
 
@@ -288,9 +319,32 @@ describe("enforceSingleGoal", () => {
     const nodes = result!.graph.nodes as any[];
     const goalNodes = nodes.filter((n) => n.kind === "goal");
     expect(goalNodes).toHaveLength(1);
-    expect(goalNodes[0].label).toContain("Compound Goal");
-    expect(goalNodes[0].label).toContain("Increase Revenue");
-    expect(goalNodes[0].label).toContain("Reduce Churn");
+    // ⭐ UPDATED (quantities lane, 2026-08-18) — the founder's node-label ruling.
+    // This previously asserted `toContain("Compound Goal")` plus BOTH original
+    // labels inside the display label, i.e. it pinned the defect: a repair
+    // announcing itself to the user, with every objective string-joined behind
+    // it. The label is now a concise faithful objective and the exact user
+    // language is preserved as PROVENANCE instead.
+    expect(goalNodes[0].label).not.toContain("Compound Goal");
+    expect(goalNodes[0].label).not.toContain(" + ");
+    expect(goalNodes[0].label).toBe("Increase Revenue");
+    // Nothing is lost: the merged-away objective stays recoverable. Asserted
+    // explicitly so this test still fails if the label shortens by DISCARDING
+    // rather than by relocating.
+    //
+    // ⭐ UPDATED AGAIN (A3 outcome-nodes lane, 2026-08-18) — SAME CLAIM, REAL
+    // CARRIER. This read `merged_from` / `merged_goals`, which `GraphV3` strips
+    // and nothing reads, so "stays recoverable" was true of an object no user or
+    // service could reach. Paul's §8 A3 ruling makes the merged-away objective a
+    // separate OUTCOME node that crosses the wire; the recoverability claim is
+    // therefore asserted against that node, bound by id.
+    const relocated = nodes.find((n) => n.id === "g2");
+    expect(relocated).toBeDefined();
+    expect(relocated.kind).toBe("outcome");
+    expect(relocated.label).toBe("Reduce Churn");
+    // …and the superseded carriers are gone rather than left beside it.
+    expect(goalNodes[0].merged_from).toBeUndefined();
+    expect(goalNodes[0].merged_goals).toBeUndefined();
   });
 
   it("redirects edges from removed goals to primary goal", () => {
@@ -469,19 +523,26 @@ describe("validateAndFixGraph", () => {
     expect(result.valid).toBe(true);
     expect(result.fixes.singleGoalApplied).toBe(true);
     expect(result.fixes.outcomeBeliefsFilled).toBe(1);
-    expect(result.fixes.decisionBranchesNormalized).toBe(true);
+    // normaliseDecisionBranchBeliefs is now a no-op — structural edges
+    // (decision→option) must keep belief_exists/belief unchanged at whatever
+    // the LLM emitted. Normalisation to sum=1 was corrupting ep from 1.0 to 1/N.
+    expect(result.fixes.decisionBranchesNormalized).toBe(false);
 
     // Verify single goal
     const goalNodes = (result.graph!.nodes as any[]).filter((n) => n.kind === "goal");
     expect(goalNodes).toHaveLength(1);
-    expect(goalNodes[0].label).toContain("Compound Goal");
+    // ⭐ UPDATED (quantities lane, 2026-08-18) — see the note in the
+    // `enforceSingleGoal` block above. The merge still happens; the label no
+    // longer announces it.
+    expect(goalNodes[0].label).not.toContain("Compound Goal");
 
-    // Verify decision branch normalization
+    // Verify decision→option beliefs are preserved (not normalised)
     const decisionEdges = (result.graph!.edges as any[]).filter(
       (e) => e.from === "dec1" && (e.to === "opt1" || e.to === "opt2")
     );
-    const sum = decisionEdges.reduce((acc, e) => acc + (e.belief || 0), 0);
-    expect(sum).toBeCloseTo(1, 2);
+    for (const edge of decisionEdges) {
+      expect(edge.belief).toBe(0.6);
+    }
 
     // Verify outcome belief filled
     const optToOut = (result.graph!.edges as any[]).find(
@@ -711,5 +772,309 @@ describe("enforceSingleGoal edge deduplication", () => {
     // Should keep provenance AND normalize belief to 1.0
     expect(goalToDecision.provenance?.source).toBe("doc.pdf");
     expect(goalToDecision.belief).toBe(1.0);
+  });
+});
+
+describe("fixNonCanonicalStructuralEdges", () => {
+  it("returns undefined for undefined graph", () => {
+    const result = fixNonCanonicalStructuralEdges(undefined);
+    expect(result).toBeUndefined();
+  });
+
+  it("fixes option->factor edge with non-canonical std", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "opt1", kind: "option" } as any,
+        { id: "fac1", kind: "factor" } as any,
+      ],
+      edges: [
+        { id: "e1", from: "opt1", to: "fac1", strength_mean: 0.8, strength_std: 0.15, belief_exists: 0.9 } as any,
+      ],
+    });
+
+    const result = fixNonCanonicalStructuralEdges(graph);
+    expect(result).toBeDefined();
+    expect(result!.fixedEdgeCount).toBe(1);
+    expect(result!.fixedEdgeIds).toContain("e1");
+
+    const edge = (result!.graph.edges as any[])[0];
+    expect(edge.strength_mean).toBe(1.0);
+    expect(edge.strength_std).toBe(0.01);
+    expect(edge.belief_exists).toBe(1.0);
+  });
+
+  it("fixes option->factor edge with non-canonical mean", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "opt1", kind: "option" } as any,
+        { id: "fac1", kind: "factor" } as any,
+      ],
+      edges: [
+        { id: "e1", from: "opt1", to: "fac1", strength_mean: 0.5 } as any,
+      ],
+    });
+
+    const result = fixNonCanonicalStructuralEdges(graph);
+    expect(result).toBeDefined();
+    expect(result!.fixedEdgeCount).toBe(1);
+
+    const edge = (result!.graph.edges as any[])[0];
+    expect(edge.strength_mean).toBe(1.0);
+  });
+
+  it("fixes option->factor edge with non-canonical belief_exists", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "opt1", kind: "option" } as any,
+        { id: "fac1", kind: "factor" } as any,
+      ],
+      edges: [
+        { id: "e1", from: "opt1", to: "fac1", strength_mean: 1, belief_exists: 0.8 } as any,
+      ],
+    });
+
+    const result = fixNonCanonicalStructuralEdges(graph);
+    expect(result).toBeDefined();
+    expect(result!.fixedEdgeCount).toBe(1);
+
+    const edge = (result!.graph.edges as any[])[0];
+    expect(edge.belief_exists).toBe(1.0);
+  });
+
+  it("does not modify already canonical option->factor edges", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "opt1", kind: "option" } as any,
+        { id: "fac1", kind: "factor" } as any,
+      ],
+      edges: [
+        // All canonical values including effect_direction
+        { id: "e1", from: "opt1", to: "fac1", strength_mean: 1.0, strength_std: 0.01, belief_exists: 1.0, effect_direction: "positive" } as any,
+      ],
+    });
+
+    const result = fixNonCanonicalStructuralEdges(graph);
+    expect(result).toBeDefined();
+    expect(result!.fixedEdgeCount).toBe(0);
+    expect(result!.graph).toBe(graph); // Same reference when no changes
+  });
+
+  it("only fixes option->factor edges, not other edge types", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "dec1", kind: "decision" } as any,
+        { id: "opt1", kind: "option" } as any,
+        { id: "fac1", kind: "factor" } as any,
+        { id: "out1", kind: "outcome" } as any,
+      ],
+      edges: [
+        { id: "e1", from: "dec1", to: "opt1", strength_mean: 0.5 } as any, // decision->option (should NOT fix)
+        { id: "e2", from: "opt1", to: "fac1", strength_mean: 0.5 } as any, // option->factor (SHOULD fix)
+        { id: "e3", from: "fac1", to: "out1", strength_mean: 0.5 } as any, // factor->outcome (should NOT fix)
+      ],
+    });
+
+    const result = fixNonCanonicalStructuralEdges(graph);
+    expect(result).toBeDefined();
+    expect(result!.fixedEdgeCount).toBe(1);
+    expect(result!.fixedEdgeIds).toEqual(["e2"]);
+
+    const edges = result!.graph.edges as any[];
+    const decToOpt = edges.find((e) => e.id === "e1");
+    const optToFac = edges.find((e) => e.id === "e2");
+    const facToOut = edges.find((e) => e.id === "e3");
+
+    // Only option->factor should be fixed
+    expect(decToOpt.strength_mean).toBe(0.5); // Not fixed
+    expect(optToFac.strength_mean).toBe(1.0); // Fixed
+    expect(facToOut.strength_mean).toBe(0.5); // Not fixed
+  });
+
+  it("fixes multiple option->factor edges", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "opt1", kind: "option" } as any,
+        { id: "opt2", kind: "option" } as any,
+        { id: "fac1", kind: "factor" } as any,
+      ],
+      edges: [
+        { id: "e1", from: "opt1", to: "fac1", strength_mean: 0.8 } as any,
+        { id: "e2", from: "opt2", to: "fac1", strength_mean: 0.7 } as any,
+      ],
+    });
+
+    const result = fixNonCanonicalStructuralEdges(graph);
+    expect(result).toBeDefined();
+    expect(result!.fixedEdgeCount).toBe(2);
+    expect(result!.fixedEdgeIds).toEqual(["e1", "e2"]);
+
+    const edges = result!.graph.edges as any[];
+    for (const edge of edges) {
+      expect(edge.strength_mean).toBe(1.0);
+    }
+  });
+
+  it("sets direction to positive for fixed edges", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "opt1", kind: "option" } as any,
+        { id: "fac1", kind: "factor" } as any,
+      ],
+      edges: [
+        { id: "e1", from: "opt1", to: "fac1", strength_mean: 0.5, effect_direction: "negative" } as any,
+      ],
+    });
+
+    const result = fixNonCanonicalStructuralEdges(graph);
+    expect(result).toBeDefined();
+
+    const edge = (result!.graph.edges as any[])[0];
+    expect(edge.effect_direction).toBe("positive");
+  });
+
+  // T3: Repair record tests
+  it("returns empty repairs array when no changes needed", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "opt1", kind: "option" } as any,
+        { id: "fac1", kind: "factor" } as any,
+      ],
+      edges: [
+        // All canonical values including effect_direction
+        { id: "e1", from: "opt1", to: "fac1", strength_mean: 1.0, strength_std: 0.01, belief_exists: 1.0, effect_direction: "positive" } as any,
+      ],
+    });
+
+    const result = fixNonCanonicalStructuralEdges(graph);
+    expect(result).toBeDefined();
+    expect(result!.repairs).toEqual([]);
+  });
+
+  it("returns repair records for each field changed", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "opt1", kind: "option" } as any,
+        { id: "fac1", kind: "factor" } as any,
+      ],
+      edges: [
+        { id: "e1", from: "opt1", to: "fac1", strength_mean: 0.5, strength_std: 0.15, belief_exists: 0.8 } as any,
+      ],
+    });
+
+    const result = fixNonCanonicalStructuralEdges(graph);
+    expect(result).toBeDefined();
+    expect(result!.repairs.length).toBeGreaterThan(0);
+
+    // Should have records for mean, std, and prob
+    const meanRepair = result!.repairs.find((r) => r.field === "strength.mean");
+    const stdRepair = result!.repairs.find((r) => r.field === "strength.std");
+    const probRepair = result!.repairs.find((r) => r.field === "exists_probability");
+
+    expect(meanRepair).toBeDefined();
+    expect(meanRepair!.from_value).toBe(0.5);
+    expect(meanRepair!.to_value).toBe(1.0);
+    expect(meanRepair!.action).toBe("normalised");
+
+    expect(stdRepair).toBeDefined();
+    expect(stdRepair!.from_value).toBe(0.15);
+    expect(stdRepair!.to_value).toBe(0.01);
+
+    expect(probRepair).toBeDefined();
+    expect(probRepair!.from_value).toBe(0.8);
+    expect(probRepair!.to_value).toBe(1.0);
+  });
+
+  it("uses real edge.id in repair records (not from->to concatenation)", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "opt1", kind: "option" } as any,
+        { id: "fac1", kind: "factor" } as any,
+      ],
+      edges: [
+        { id: "my-real-edge-id", from: "opt1", to: "fac1", strength_mean: 0.5 } as any,
+      ],
+    });
+
+    const result = fixNonCanonicalStructuralEdges(graph);
+    expect(result).toBeDefined();
+    expect(result!.repairs.length).toBeGreaterThan(0);
+
+    // All repair records should use the real edge.id
+    for (const repair of result!.repairs) {
+      expect(repair.edge_id).toBe("my-real-edge-id");
+      expect(repair.edge_from).toBe("opt1");
+      expect(repair.edge_to).toBe("fac1");
+    }
+  });
+
+  it("uses 'defaulted' action for undefined values", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "opt1", kind: "option" } as any,
+        { id: "fac1", kind: "factor" } as any,
+      ],
+      edges: [
+        // No strength_std defined (undefined)
+        { id: "e1", from: "opt1", to: "fac1", strength_mean: 1.0, belief_exists: 1.0 } as any,
+      ],
+    });
+
+    const result = fixNonCanonicalStructuralEdges(graph);
+    expect(result).toBeDefined();
+
+    const stdRepair = result!.repairs.find((r) => r.field === "strength.std");
+    expect(stdRepair).toBeDefined();
+    expect(stdRepair!.from_value).toBeNull(); // undefined represented as null
+    expect(stdRepair!.action).toBe("defaulted");
+    expect(stdRepair!.to_value).toBe(0.01);
+  });
+
+  it("tracks effect_direction repair when not positive", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "opt1", kind: "option" } as any,
+        { id: "fac1", kind: "factor" } as any,
+      ],
+      edges: [
+        { id: "e1", from: "opt1", to: "fac1", strength_mean: 1.0, strength_std: 0.01, belief_exists: 1.0, effect_direction: "negative" } as any,
+      ],
+    });
+
+    const result = fixNonCanonicalStructuralEdges(graph);
+    expect(result).toBeDefined();
+
+    const dirRepair = result!.repairs.find((r) => r.field === "effect_direction");
+    expect(dirRepair).toBeDefined();
+    expect(dirRepair!.from_value).toBe("negative");
+    expect(dirRepair!.to_value).toBe("positive");
+    expect(dirRepair!.action).toBe("normalised");
+  });
+
+  it("repair records match PLoT repairs_applied[] schema shape", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "opt1", kind: "option" } as any,
+        { id: "fac1", kind: "factor" } as any,
+      ],
+      edges: [
+        { id: "e1", from: "opt1", to: "fac1", strength_mean: 0.5 } as any,
+      ],
+    });
+
+    const result = fixNonCanonicalStructuralEdges(graph);
+    expect(result).toBeDefined();
+    expect(result!.repairs.length).toBeGreaterThan(0);
+
+    // Verify each repair record has all required PLoT fields
+    for (const repair of result!.repairs) {
+      expect(typeof repair.field).toBe("string");
+      expect(["clamped", "defaulted", "normalised"]).toContain(repair.action);
+      expect(repair.from_value === null || typeof repair.from_value === "number" || typeof repair.from_value === "string").toBe(true);
+      expect(typeof repair.to_value === "number" || typeof repair.to_value === "string").toBe(true);
+      expect(typeof repair.reason).toBe("string");
+      expect(typeof repair.edge_id).toBe("string");
+      expect(typeof repair.edge_from).toBe("string");
+      expect(typeof repair.edge_to).toBe("string");
+    }
   });
 });

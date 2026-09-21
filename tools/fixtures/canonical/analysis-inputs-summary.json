@@ -1,0 +1,39 @@
+{
+  "_contract_version": "1.0.0",
+  "_generated_at": "2026-03-08T00:00:00.000Z",
+  "_source_endpoint": "reference assembler (testing only)",
+  "_brief_name": "pricing-decision",
+  "_governance": "Any change to AnalysisInputsSummary shape requires: 1) Schema version bump 2) UI type update",
+  "payload": {
+    "contract_version": "1.0.0",
+    "recommendation": {
+      "option_id": "opt_raise",
+      "option_label": "Raise to £59",
+      "win_probability": 0.62
+    },
+    "options": [
+      { "id": "opt_raise", "label": "Raise to £59", "win_probability": 0.62 },
+      { "id": "opt_keep", "label": "Keep at £49", "win_probability": 0.38 }
+    ],
+    "top_drivers": [
+      { "factor_id": "fac_churn", "factor_label": "Churn rate", "elasticity": -0.34 },
+      { "factor_id": "fac_ltv", "factor_label": "Customer LTV", "elasticity": 0.28 },
+      { "factor_id": "fac_conversion", "factor_label": "Conversion rate", "elasticity": -0.15 }
+    ],
+    "sensitivity_concentration": 0.82,
+    "confidence_band": "medium",
+    "robustness": {
+      "level": "moderate",
+      "recommendation_stability": 0.71
+    },
+    "constraints_status": [
+      { "label": "Revenue floor £500K", "satisfied": true, "probability": 0.87 },
+      { "label": "Churn < 5%", "satisfied": false, "probability": 0.42 }
+    ],
+    "run_metadata": {
+      "seed": 42,
+      "quality_mode": "standard",
+      "timestamp": "2026-03-08T00:00:00.000Z"
+    }
+  }
+}

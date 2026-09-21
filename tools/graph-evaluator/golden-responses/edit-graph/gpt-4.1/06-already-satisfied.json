@@ -1,0 +1,52 @@
+{
+  "brief_id": "06-already-satisfied",
+  "model": "gpt-4.1",
+  "prompt_hash": "sha256:2d6fcbc9d09869a271bc93df1b5bbb450a4a5ee3053d9395c3143b810c973cc5",
+  "response": {
+    "model_id": "gpt-4.1",
+    "brief_id": "06-already-satisfied",
+    "status": "success",
+    "raw_text": "{\n  \"operations\": [],\n  \"removed_edges\": [],\n  \"warnings\": [\n    \"The relationship fac_churn_rate→risk_financial already exists (mean=0.35, exists_probability=0.85).\"\n  ],\n  \"coaching\": {\n    \"summary\": \"The model already includes fac_churn_rate affecting risk_financial. If you'd like to adjust the strength or uncertainty of this relationship, please specify your desired change.\",\n    \"rerun_recommended\": false\n  }\n}",
+    "parsed_graph": {
+      "operations": [],
+      "removed_edges": [],
+      "warnings": [
+        "The relationship fac_churn_rate→risk_financial already exists (mean=0.35, exists_probability=0.85)."
+      ],
+      "coaching": {
+        "summary": "The model already includes fac_churn_rate affecting risk_financial. If you'd like to adjust the strength or uncertainty of this relationship, please specify your desired change.",
+        "rerun_recommended": false
+      }
+    },
+    "extraction_attempted": false,
+    "latency_ms": 1540,
+    "input_tokens": 5387,
+    "output_tokens": 104,
+    "est_cost_usd": 0.011606,
+    "pricing_source": "api_usage",
+    "parsed_json": {
+      "operations": [],
+      "removed_edges": [],
+      "warnings": [
+        "The relationship fac_churn_rate→risk_financial already exists (mean=0.35, exists_probability=0.85)."
+      ],
+      "coaching": {
+        "summary": "The model already includes fac_churn_rate affecting risk_financial. If you'd like to adjust the strength or uncertainty of this relationship, please specify your desired change.",
+        "rerun_recommended": false
+      }
+    }
+  },
+  "scores": {
+    "valid_json": true,
+    "correct_shape": true,
+    "operation_types_correct": true,
+    "topology_compliant": true,
+    "has_impact_rationale": true,
+    "correct_ordering": true,
+    "empty_ops_handled": true,
+    "coaching_present": true,
+    "path_syntax_valid": true
+  },
+  "overall": 1,
+  "captured_at": "2026-03-14T16:39:41.327Z"
+}

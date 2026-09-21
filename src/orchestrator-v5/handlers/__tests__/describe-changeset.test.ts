@@ -1,0 +1,626 @@
+/**
+ * CHANGESET HONESTY MECHANISM (ROADMAP 1.134 — kills F6+F7).
+ *
+ * Paul's 16-Jul verdict-flip: an applied edit showed as the opaque label
+ * "…and 3 more changes" in the hold message, the chip, AND the receipt —
+ * GM could not audit its own applied changeset. The edits DID apply; the
+ * honesty gap was the DESCRIPTION.
+ *
+ * Mechanism under test: ONE `describeChangeset` source function derives
+ * SPECIFIC, per-operation copy for EVERY operation in the batch, and all
+ * three surfaces (hold ask, chip label/message, applied receipt) consume
+ * it — so they can never diverge again.
+ *
+ * RED-first: on the pre-mechanism base, `describeHeldOperationsSubject`
+ * names ONLY the first operation and collapses the rest into
+ * "and N more changes" — the multi-op pins below fail there by design.
+ */
+
+import { describe, expect, it } from 'vitest';
+
+import {
+  clampLabel,
+  describeChangeset,
+  describeHeldOperationsSubject,
+} from '../describe-changeset.js';
+import {
+  buildGmHeldAssistantText,
+  buildGmHeldPublicCopy,
+  describeHeldOperationsSubject as refereeGateSeam,
+} from '../edit-graph-referee-gate.js';
+import { buildGmHeldAppliedReceipt } from '../gm-held-execute.js';
+import { findForbiddenPhraseHit } from '../../compose/forbidden-user-facing-phrases.js';
+import { isValueUpdatePhrasing } from '../../../orchestrator/routing/value-update-gate.js';
+
+const GRAPH = {
+  nodes: [
+    { id: 'fac-marketing', kind: 'factor', label: 'Marketing' },
+    { id: 'fac-revenue', kind: 'factor', label: 'Revenue' },
+    { id: 'opt-hire', kind: 'option', label: 'Hire a recruiter' },
+    { id: 'goal-g', kind: 'goal', label: 'Goal' },
+  ],
+  edges: [
+    { from: 'fac-marketing', to: 'goal-g' },
+    { from: 'fac-revenue', to: 'goal-g' },
+  ],
+};
+
+/** Paul's F7 shape — one add plus two more changes. The defect under kill:
+ *  every op past the first was an opaque count on all three surfaces. */
+const F7_BATCH = [
+  {
+    op: 'add_node',
+    path: 'fac-wasted-time',
+    value: {
+      id: 'fac-wasted-time',
+      kind: 'factor',
+      label: 'Wasted time searching for a co-founder',
+    },
+  },
+  {
+    op: 'update_node',
+    path: 'fac-marketing',
+    value: { observed_state: { value: 0.8 } },
+  },
+  {
+    op: 'add_edge',
+    path: 'edges/-',
+    value: { from: 'fac-revenue', to: 'goal-g' },
+  },
+];
+
+describe('consented fixed-outcome removal copy', () => {
+  const graph = {
+    nodes: [
+      { id: 'funding', kind: 'factor', label: 'Capital Raised' },
+      { id: 'capacity', kind: 'factor', label: 'Founder Capacity' },
+      { id: 'hybrid', kind: 'option', label: 'Hybrid Syndicate', interventions: {
+        funding: { value: 0.575, source: 'cee_hypothesis' },
+        capacity: { value: 0.4, source: 'user_specified' },
+      } },
+    ],
+    edges: [{ from: 'hybrid', to: 'funding' }],
+  };
+  const change = { op: 'update_node', path: 'hybrid', value: { interventions: {
+    capacity: { value: 0.4, source: 'user_specified' },
+  } } };
+  const removal = { op: 'remove_edge', path: 'hybrid::funding' };
+
+  it('names the change of meaning on the offer and receipt without inventing an outcome', () => {
+    const subject = describeHeldOperationsSubject([change, removal], graph)!;
+    expect(subject).toContain("stop fixing 'Capital Raised' under 'Hybrid Syndicate'");
+    for (const text of [buildGmHeldAssistantText(subject, 2), buildGmHeldAppliedReceipt([subject])]) {
+      expect(text).toContain("stop fixing 'Capital Raised' under 'Hybrid Syndicate'");
+      expect(text).not.toContain('0.575');
+      expect(findForbiddenPhraseHit(text)).toBeNull();
+    }
+    expect(isValueUpdatePhrasing(buildGmHeldPublicCopy(subject).message)).toBe(false);
+  });
+
+  it('does not claim a released outcome from map absence without its paired link removal', () => {
+    expect(describeHeldOperationsSubject([change], graph)).not.toContain('stop fixing');
+  });
+
+  it('does not hide a changed sibling behind removal-only copy', () => {
+    const mixed = { ...change, value: { interventions: { capacity: { value: 0.9, source: 'user_specified' } } } };
+    expect(describeHeldOperationsSubject([mixed, removal], graph)).not.toContain('stop fixing');
+  });
+});
+
+describe('describeChangeset — every operation is named, never a count', () => {
+  it('names EVERY operation in the F7 multi-op batch (the defect pin)', () => {
+    const described = describeChangeset(F7_BATCH, GRAPH);
+    expect(described).not.toBeNull();
+    // One item per operation, order-preserving.
+    expect(described!.items).toHaveLength(3);
+    expect(described!.items[0]).toBe(
+      "add factor 'Wasted time searching for a co-founder'",
+    );
+    expect(described!.items[1]).toBe("make 'Marketing' 0.8");
+    expect(described!.items[2]).toBe("link 'Revenue' to 'Goal'");
+    // The joined subject enumerates all three.
+    expect(described!.subject).toBe(
+      "add factor 'Wasted time searching for a co-founder', " +
+        "make 'Marketing' 0.8 and link 'Revenue' to 'Goal'",
+    );
+    // The opaque-count vocabulary is dead.
+    expect(described!.subject).not.toMatch(/\d+\s+more\s+change/i);
+  });
+
+  it('describeHeldOperationsSubject (the shared surface seam) returns the enumerated subject', () => {
+    const subject = describeHeldOperationsSubject(F7_BATCH, GRAPH);
+    expect(subject).toBe(describeChangeset(F7_BATCH, GRAPH)!.subject);
+    expect(subject).not.toMatch(/\d+\s+more\s+change/i);
+  });
+
+  it('two operations join with a plain "and"', () => {
+    const subject = describeHeldOperationsSubject(
+      [
+        { op: 'remove_node', path: 'opt-hire' },
+        { op: 'update_node', path: 'fac-marketing', value: { description: 'x' } },
+      ],
+      GRAPH,
+    );
+    expect(subject).toBe(
+      "remove option 'Hire a recruiter' and update the description of 'Marketing'",
+    );
+  });
+
+  it('returns null only for an empty batch (callers fall back to generic copy)', () => {
+    expect(describeChangeset([], GRAPH)).toBeNull();
+    expect(describeHeldOperationsSubject([], GRAPH)).toBeNull();
+  });
+});
+
+describe('describeChangeset — per-operation vocabulary coverage', () => {
+  it("add_node names the kind for known kinds → add option 'X'", () => {
+    const d = describeChangeset(
+      [
+        {
+          op: 'add_node',
+          path: 'opt-x',
+          value: { id: 'opt-x', kind: 'option', label: 'Outsource hiring' },
+        },
+      ],
+      GRAPH,
+    );
+    expect(d!.subject).toBe("add option 'Outsource hiring'");
+  });
+
+  it('add_node of kind constraint stays plain (never "add ... constraint", which the value-update gate claims)', () => {
+    const d = describeChangeset(
+      [
+        {
+          op: 'add_node',
+          path: 'con-x',
+          value: { id: 'con-x', kind: 'constraint', label: 'Budget cap' },
+        },
+      ],
+      GRAPH,
+    );
+    expect(d!.subject).toBe("add 'Budget cap'");
+    expect(isValueUpdatePhrasing(d!.subject)).toBe(false);
+  });
+
+  it('add_node without a label is honestly generic, never silent', () => {
+    const d = describeChangeset(
+      [{ op: 'add_node', path: 'n-x', value: { id: 'n-x', kind: 'risk' } }],
+      GRAPH,
+    );
+    expect(d!.subject).toBe('add a new risk');
+  });
+
+  it("remove_node resolves label AND kind from the graph → remove option 'X'", () => {
+    const d = describeChangeset([{ op: 'remove_node', path: 'opt-hire' }], GRAPH);
+    expect(d!.subject).toBe("remove option 'Hire a recruiter'");
+  });
+
+  it('remove_node of an unknown id is honestly generic', () => {
+    const d = describeChangeset([{ op: 'remove_node', path: 'nope' }], GRAPH);
+    expect(d!.subject).toBe('remove a part of the model');
+  });
+
+  it("update_node with observed_state.value names the value → make 'X' 0.8", () => {
+    const d = describeChangeset(
+      [
+        {
+          op: 'update_node',
+          path: 'fac-marketing',
+          value: { observed_state: { value: 0.8 } },
+        },
+      ],
+      GRAPH,
+    );
+    expect(d!.subject).toBe("make 'Marketing' 0.8");
+  });
+
+  it('update_node with observed_state value+unit renders the unit', () => {
+    const d = describeChangeset(
+      [
+        {
+          op: 'update_node',
+          path: 'fac-revenue',
+          value: { observed_state: { value: 50000, unit: 'GBP' } },
+        },
+      ],
+      GRAPH,
+    );
+    expect(d!.subject).toBe("make 'Revenue' £50,000");
+  });
+
+  it("update_node with goal_threshold names the target → make the target for 'Goal' 15%", () => {
+    const d = describeChangeset(
+      [
+        {
+          op: 'update_node',
+          path: 'goal-g',
+          value: { goal_threshold: 15, unit: '%' },
+        },
+      ],
+      GRAPH,
+    );
+    expect(d!.subject).toBe("make the target for 'Goal' 15%");
+  });
+
+  it("update_node with a new label is a rename → rename 'Old' to 'New'", () => {
+    const d = describeChangeset(
+      [{ op: 'update_node', path: 'fac-marketing', value: { label: 'Marketing spend' } }],
+      GRAPH,
+    );
+    expect(d!.subject).toBe("rename 'Marketing' to 'Marketing spend'");
+  });
+
+  it("update_node with only a description → update the description of 'X'", () => {
+    const d = describeChangeset(
+      [{ op: 'update_node', path: 'fac-marketing', value: { description: 'Quarterly ad budget' } }],
+      GRAPH,
+    );
+    expect(d!.subject).toBe("update the description of 'Marketing'");
+  });
+
+  it("update_node with other fields stays a named plain update → update 'X'", () => {
+    const d = describeChangeset(
+      [{ op: 'update_node', path: 'fac-marketing', value: { weighting: 2 } }],
+      GRAPH,
+    );
+    expect(d!.subject).toBe("update 'Marketing'");
+  });
+
+  it('update_node of a node added EARLIER IN THE SAME BATCH resolves its label from the batch', () => {
+    const d = describeChangeset(
+      [
+        {
+          op: 'add_node',
+          path: 'fac-new',
+          value: { id: 'fac-new', kind: 'factor', label: 'Churn' },
+        },
+        { op: 'update_node', path: 'fac-new', value: { observed_state: { value: 0.3 } } },
+      ],
+      GRAPH,
+    );
+    expect(d!.items[1]).toBe("make 'Churn' 0.3");
+  });
+
+  it("add_edge resolves both endpoint labels → link 'A' to 'B'", () => {
+    const d = describeChangeset(
+      [{ op: 'add_edge', path: 'edges/-', value: { from: 'fac-marketing', to: 'goal-g' } }],
+      GRAPH,
+    );
+    expect(d!.subject).toBe("link 'Marketing' to 'Goal'");
+  });
+
+  it('add_edge with an unresolvable endpoint is honestly generic', () => {
+    const d = describeChangeset(
+      [{ op: 'add_edge', path: 'edges/-', value: { from: 'nope', to: 'goal-g' } }],
+      GRAPH,
+    );
+    expect(d!.subject).toBe('add a link');
+  });
+
+  it("remove_edge resolves endpoints from its path → remove the link from 'A' to 'B'", () => {
+    const d = describeChangeset(
+      [{ op: 'remove_edge', path: 'fac-marketing->goal-g' }],
+      GRAPH,
+    );
+    expect(d!.subject).toBe("remove the link from 'Marketing' to 'Goal'");
+  });
+
+  it("remove_edge resolves endpoints from a CEE-canonical '::' path — the live-wire format", () => {
+    // normalisePath (orchestrator/tools/edit-graph.ts) mints `from::to` from
+    // the LLM's `/edges/from->to` paths — this is the format the referee
+    // gate actually receives. RED on the '->'-only parser: it degraded to
+    // the generic 'remove a link'.
+    const d = describeChangeset(
+      [{ op: 'remove_edge', path: 'fac-marketing::goal-g' }],
+      GRAPH,
+    );
+    expect(d!.subject).toBe("remove the link from 'Marketing' to 'Goal'");
+  });
+
+  it("update_edge resolves endpoints from a CEE-canonical '::' path", () => {
+    const d = describeChangeset(
+      [
+        {
+          op: 'update_edge',
+          path: 'fac-marketing::goal-g',
+          value: { strength: { mean: 0.4 } },
+        },
+      ],
+      GRAPH,
+    );
+    expect(d!.subject).toBe(
+      "make the strength of the link from 'Marketing' to 'Goal' 0.4",
+    );
+  });
+
+  it('remove_edge with an unparseable path names the op AND the path — never a silent generic', () => {
+    const d = describeChangeset([{ op: 'remove_edge', path: 'garbage' }], GRAPH);
+    expect(d!.subject).toBe("remove a link with an unrecognised reference 'garbage'");
+  });
+
+  it('update_edge with an unparseable path names the op AND the path', () => {
+    const d = describeChangeset(
+      [{ op: 'update_edge', path: 'e1', value: { strength: { mean: 0.4 } } }],
+      GRAPH,
+    );
+    expect(d!.subject).toBe("adjust a link with an unrecognised reference 'e1'");
+  });
+
+  it("a three-part edge-id path (from::to::index) is unparseable — parity with the applier's parseEdgePath", () => {
+    // patch-applier's parseEdgePath throws INVALID_OPERATION on 3-part
+    // paths; describing one as a real link would claim more than the
+    // apply path can honour.
+    const d = describeChangeset(
+      [{ op: 'remove_edge', path: 'fac-marketing::goal-g::0' }],
+      GRAPH,
+    );
+    expect(d!.subject).toBe(
+      "remove a link with an unrecognised reference 'fac-marketing::goal-g::0'",
+    );
+  });
+
+  it('an unparseable path with unsafe tokens is NOT echoed into user copy', () => {
+    const d = describeChangeset(
+      [{ op: 'remove_edge', path: '{"weird": true}' }],
+      GRAPH,
+    );
+    expect(d!.subject).toBe('remove a link with an unrecognised reference');
+    // 'prop_' is on SAFETY_FORBIDDEN_TOKENS — an unparseable path carrying
+    // it must not be echoed (it would collapse the whole subject to the
+    // generic swept copy at the surface sanitiser).
+    const d2 = describeChangeset(
+      [{ op: 'update_edge', path: 'prop_123', value: {} }],
+      GRAPH,
+    );
+    expect(d2!.subject).toBe('adjust a link with an unrecognised reference');
+  });
+
+  it("a parseable path whose endpoints are not in the graph stays the honest op-shaped generic (ids never leak as labels)", () => {
+    const d = describeChangeset(
+      [{ op: 'remove_edge', path: 'ghost-a::ghost-b' }],
+      GRAPH,
+    );
+    expect(d!.subject).toBe('remove a link');
+  });
+
+  it('update_edge with a numeric strength names the new strength', () => {
+    const d = describeChangeset(
+      [
+        {
+          op: 'update_edge',
+          path: 'fac-marketing->goal-g',
+          value: { strength: { mean: 0.4, std: 0.1 } },
+        },
+      ],
+      GRAPH,
+    );
+    expect(d!.subject).toBe(
+      "make the strength of the link from 'Marketing' to 'Goal' 0.4",
+    );
+  });
+
+  it('update_edge without a numeric strength stays a named adjust', () => {
+    const d = describeChangeset(
+      [{ op: 'update_edge', path: 'fac-marketing->goal-g', value: { note: 'x' } }],
+      GRAPH,
+    );
+    expect(d!.subject).toBe("adjust the link from 'Marketing' to 'Goal'");
+  });
+
+  it('an UNKNOWN op type gets an honest fallback NAMING the op — never a silent count', () => {
+    const d = describeChangeset(
+      [
+        { op: 'remove_node', path: 'opt-hire' },
+        { op: 'replace_subgraph', path: 'x', value: {} },
+      ],
+      GRAPH,
+    );
+    expect(d!.items[1]).toBe("apply an unrecognised change of type 'replace subgraph'");
+    expect(d!.subject).toBe(
+      "remove option 'Hire a recruiter' and apply an unrecognised change of type 'replace subgraph'",
+    );
+    expect(d!.subject).not.toMatch(/\d+\s+more\s+change/i);
+  });
+
+  it('an unknown op with an unprintable op token still names itself generically', () => {
+    const d = describeChangeset(
+      [{ op: '{"weird":true}', path: 'x' }],
+      GRAPH,
+    );
+    expect(d!.subject).toBe('apply an unrecognised change');
+  });
+});
+
+describe('all three surfaces render the SAME specific copy (the never-diverge pin)', () => {
+  const subject = (): string => describeHeldOperationsSubject(F7_BATCH, GRAPH)!;
+
+  it('hold ask carries every named operation', () => {
+    const text = buildGmHeldAssistantText(subject(), F7_BATCH.length);
+    expect(text).toContain("add factor 'Wasted time searching for a co-founder'");
+    expect(text).toContain("make 'Marketing' 0.8");
+    expect(text).toContain("link 'Revenue' to 'Goal'");
+    expect(text).toContain('Nothing in the model moves until you confirm');
+    expect(text).not.toMatch(/\d+\s+more\s+change/i);
+    expect(text).not.toContain('—');
+    expect(findForbiddenPhraseHit(text)).toBeNull();
+  });
+
+  it('hold ask pluralises for a multi-op batch (holding these changes, not "that change")', () => {
+    const text = buildGmHeldAssistantText(subject(), F7_BATCH.length);
+    expect(text).toContain('these changes');
+    // Single-op copy keeps the established singular framing.
+    const single = buildGmHeldAssistantText("update 'Marketing'", 1);
+    expect(single).toContain("the change to update 'Marketing'");
+  });
+
+  it('chip MESSAGE carries every named operation; the LABEL is clamped display copy (wave-2 ask #20)', () => {
+    // 1.134 → #20 doctrine hand-off, stated so this pin's history is
+    // honest: 1.134 required the changeset DESCRIPTION to be complete and
+    // identical on every describing surface (it originally pinned the raw
+    // label too). Ask #20 (R8 live probe: a ~300-char sentence rendered as
+    // one enormous confirm chip) refines WHERE the full description lives:
+    // the hold ask, the chip MESSAGE (routing exact-matches it), the
+    // held_proposal card summary, and the applied receipt. The LABEL alone
+    // becomes clamped display copy — a prefix of the same description,
+    // never a diverging rewrite and never an opaque "N more changes".
+    const copy = buildGmHeldPublicCopy(subject());
+    expect(copy.message).toBe(
+      "Yes, add factor 'Wasted time searching for a co-founder', " +
+        "make 'Marketing' 0.8 and link 'Revenue' to 'Goal'.",
+    );
+    expect(copy.label.length).toBeLessThanOrEqual(60);
+    // The label is a PREFIX of the capitalised subject (+ ellipsis) — same
+    // description, display-clamped; not a second wording that could drift.
+    const capitalised = subject().charAt(0).toUpperCase() + subject().slice(1);
+    expect(capitalised.startsWith(copy.label.replace(/\.\.\.$/, ''))).toBe(true);
+    expect(copy.label).not.toMatch(/\d+\s+more\s+change/i);
+  });
+
+  it('applied receipt carries every named operation', () => {
+    const text = buildGmHeldAppliedReceipt([subject()]);
+    expect(text).toContain(
+      "Confirmed: add factor 'Wasted time searching for a co-founder', " +
+        "make 'Marketing' 0.8 and link 'Revenue' to 'Goal'.",
+    );
+    expect(text).toContain('Run the analysis again');
+    expect(text).not.toMatch(/\d+\s+more\s+change/i);
+  });
+
+  it("a held '::'-path remove_edge renders REAL node names on all three surfaces", () => {
+    const s = describeHeldOperationsSubject(
+      [{ op: 'remove_edge', path: 'fac-marketing::goal-g' }],
+      GRAPH,
+    )!;
+    expect(s).toBe("remove the link from 'Marketing' to 'Goal'");
+    const ask = buildGmHeldAssistantText(s, 1);
+    const chip = buildGmHeldPublicCopy(s);
+    const receipt = buildGmHeldAppliedReceipt([s]);
+    for (const text of [ask, chip.label, chip.message, receipt]) {
+      expect(text).toContain("'Marketing'");
+      expect(text).toContain("'Goal'");
+      expect(findForbiddenPhraseHit(text)).toBeNull();
+    }
+  });
+
+  it('the unrecognised-reference fallback copy stays outside the value-update gate', () => {
+    const s = describeHeldOperationsSubject(
+      [{ op: 'remove_edge', path: 'garbage' }],
+      GRAPH,
+    )!;
+    const copy = buildGmHeldPublicCopy(s);
+    expect(isValueUpdatePhrasing(copy.message)).toBe(false);
+    expect(isValueUpdatePhrasing(copy.label)).toBe(false);
+    expect(findForbiddenPhraseHit(copy.message)).toBeNull();
+  });
+
+  it('the referee gate re-exports the SAME function — no second same-named implementation can drift', () => {
+    // The two-same-named-`generateGraphHash` class: a duplicate
+    // implementation under the same name is how this defect survives a
+    // fix. The gate's seam must BE the describe-changeset function.
+    expect(refereeGateSeam).toBe(describeHeldOperationsSubject);
+  });
+
+  it('the describing surfaces agree byte-for-byte on the changeset description', () => {
+    // Post-#20 the DESCRIBING surfaces are the ask, the chip MESSAGE, and
+    // the receipt (the chip label is clamped display copy — see the pin
+    // above; the held_proposal card summary is pinned in
+    // compose/__tests__/held-proposal.test.ts).
+    const s = subject();
+    const ask = buildGmHeldAssistantText(s, F7_BATCH.length);
+    const chip = buildGmHeldPublicCopy(s);
+    const receipt = buildGmHeldAppliedReceipt([s]);
+    expect(ask).toContain(s);
+    expect(chip.message).toBe(`Yes, ${s}.`);
+    expect(receipt).toContain(`Confirmed: ${s}.`);
+  });
+});
+
+describe('routing safety — the new copy must not trip the value-update gate', () => {
+  it('a value-bearing chip message avoids the set/update-to phrasing the gate claims', () => {
+    const subject = describeHeldOperationsSubject(
+      [
+        {
+          op: 'update_node',
+          path: 'fac-marketing',
+          value: { observed_state: { value: 0.8 } },
+        },
+      ],
+      GRAPH,
+    );
+    const copy = buildGmHeldPublicCopy(subject);
+    expect(copy.message).toBe("Yes, make 'Marketing' 0.8.");
+    expect(isValueUpdatePhrasing(copy.message)).toBe(false);
+    expect(isValueUpdatePhrasing(copy.label)).toBe(false);
+  });
+
+  it('the multi-op F7 chip message also stays outside the gate', () => {
+    const copy = buildGmHeldPublicCopy(describeHeldOperationsSubject(F7_BATCH, GRAPH));
+    expect(isValueUpdatePhrasing(copy.message)).toBe(false);
+  });
+
+  // ⚠ CONTRAST CONTROL (added 2026-09-14 with the `change` admission).
+  // Without it, every assertion above passes if the gate simply goes dead —
+  // an absence probe that cannot see a presence proves nothing. These are
+  // genuine USER value-instructions and MUST stay claimed, in the same run.
+  it('CONTRAST: a genuine user value-instruction IS still claimed by the gate', () => {
+    for (const message of [
+      "change Marketing to 0.8",
+      "set Marketing to 0.8",
+      "update Marketing to 0.8",
+      "Change Annual CRM Spend to £63,000.",
+    ]) {
+      expect(isValueUpdatePhrasing(message)).toBe(true);
+    }
+  });
+
+  // EVERY value-bearing clause shape, not just the tunable one. The copy
+  // constraint applies to all of them, and only the tunable shape was
+  // covered before — so the goal-target and edge-strength clauses were
+  // relying on the same exclusion with nothing pinning them.
+  it('every value-bearing clause shape stays outside the gate', () => {
+    const shapes = [
+      "make 'Marketing' 0.8",
+      'make a part of the model 0.8',
+      "make the target for 'Revenue' 0.8",
+      'make a target 0.8',
+      "make the strength of the link from 'Sales' to 'Revenue' 0.3",
+    ];
+    for (const subject of shapes) {
+      const copy = buildGmHeldPublicCopy(subject);
+      expect(isValueUpdatePhrasing(copy.message)).toBe(false);
+      expect(isValueUpdatePhrasing(copy.label)).toBe(false);
+      // DISCRIMINATION PIN — the PRE-fix wording of this same clause (the
+      // only difference being `make <subject> <v>` vs `change <subject> to
+      // <v>`) IS claimed. So the `false` above is the reword doing work, not
+      // a dead gate. ⚠ Written backwards first (`toBe(false)`) and caught by
+      // the test failing; the reword is load-bearing precisely because this
+      // is true.
+      const preFix = subject.replace(/^make /, 'change ').replace(/ ([^ ]+)$/, ' to $1');
+      expect(isValueUpdatePhrasing(`Yes, ${preFix}.`)).toBe(true);
+    }
+  });
+});
+
+// clampLabel is the shared 60/57-ellipsis truncation reused by the F4 per-part
+// replay-chip label in edit-graph-dispatch.ts (which previously re-implemented
+// it inline). These pins lock its output byte-for-byte against the pre-refactor
+// inline formula for both an under-limit and an over-limit already-normalised
+// clause, so a future edit to clampLabel cannot silently drift the chip label.
+describe('clampLabel — byte-identical to the inline 60/57 chip-label formula', () => {
+  const inlineFormula = (clause: string): string =>
+    clause.length > 60 ? `${clause.slice(0, 57)}...` : clause;
+
+  it('returns a <=60-char clause verbatim (label === clause, no ellipsis)', () => {
+    const clause = 'Set Headcount Cost to 0.5'; // 25 chars, already normalised
+    expect(clampLabel(clause)).toBe(inlineFormula(clause));
+    expect(clampLabel(clause)).toBe(clause);
+  });
+
+  it('truncates a >60-char clause to 57 chars + ellipsis, matching the formula', () => {
+    const clause =
+      'remove the option Hire Two Junior Engineers and also drop the senior candidate entirely';
+    expect(clause.length).toBeGreaterThan(60);
+    expect(clampLabel(clause)).toBe(inlineFormula(clause));
+    expect(clampLabel(clause)).toBe(`${clause.slice(0, 57)}...`);
+  });
+});

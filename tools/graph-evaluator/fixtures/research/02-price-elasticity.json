@@ -1,0 +1,16 @@
+{
+  "id": "rt-02-price-elasticity",
+  "name": "Price elasticity of demand",
+  "description": "Query for price elasticity estimates in enterprise software markets",
+  "query": "What is the price elasticity of demand for enterprise software subscriptions? What does research say about how price increases affect customer retention?",
+  "context_hint": "Decision model for a B2B SaaS price increase decision. Need evidence for the price_sensitivity factor.",
+  "target_factor": "Price Elasticity",
+  "expected": {
+    "min_findings_length": 100,
+    "min_source_count": 1,
+    "must_contain_keywords": ["price", "elasticity"],
+    "expects_numeric_values": true,
+    "expects_confidence_note": true,
+    "forbidden_substrings": []
+  }
+}

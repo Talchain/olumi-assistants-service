@@ -1,0 +1,901 @@
+/**
+ * V5 D1 — `set_factor_value` handler.
+ *
+ * Mutates a factor node's `observed_state.{value, raw_value}` deterministically
+ * from a validated proposal. Sonnet supplies user-unit components via the
+ * structured parameter shape `{ value, unit?, cap? }`; the handler
+ * applies the operator and normalises model units. (`raw_value` was an
+ * optional field on the structured shape pre-A3.1 but was never read by
+ * the handler — removed in A3.1 Task 4. Strict Zod rejects it now.)
+ *
+ * Per F.6: no LLM calls inside the handler. No re-parsing of user text — the
+ * proposal parameters are the source of truth (the validator already passed
+ * them through the registered Zod schema).
+ *
+ * Returns:
+ *   - `mutated_graph` — post-mutation graph (validated). Carries the
+ *     full ingress top-level shape with mutated `nodes`/`edges`/
+ *     `goal_constraints` stamped in (A3.1 Task 2). Replaces the
+ *     ingress graph at commit time so append_turn_atomic persists
+ *     the new state.
+ *   - `handler_facts` — single SetFactorValueHandlerFact carrying
+ *     {target_id, status, before, after}. Compose maps this to the
+ *     boundary `graph_patch` block so the UI sees the change.
+ *   - `assistant_text` — decision-language confirmation (no raw decimals,
+ *     no spaces before %).
+ */
+
+import { z } from 'zod';
+
+import { SetFactorValueHandlerFactSchema } from '@talchain/schemas/orchestrator';
+import type { SetFactorValueHandlerFact } from '@talchain/schemas/orchestrator';
+
+import { GraphV3, type GraphV3T } from '../../../schemas/cee-v3.js';
+import { USER_EDIT_SOURCE } from '../../../orchestrator/canonicalise-value-ops.js';
+import type { HandlerFn, HandlerInvocation, HandlerOutcome } from '../registry.js';
+import { HandlerInvocationFailedError, HandlerResultInvalidError } from '../handler-errors.js';
+import { synthesiseDisplayValue } from '../../../cee/factor-extraction/display-value.js';
+import { applyAndValidateMutation } from './d1-shared/apply-graph-mutation.js';
+import { runD1Handler } from './d1-shared/error-boundary.js';
+import { D1HandlerError } from './d1-shared/errors.js';
+import {
+  applyFactorValueOperator,
+  canonicaliseUnitForDisplay,
+  unitComparisonKey,
+  evaluateFactorValueProposal,
+  resolveExistingRawValue,
+} from './d1-shared/evaluate-factor-value-proposal.js';
+import {
+  formatFactorChange,
+  formatFactorValueSet,
+  formatFactorValueUnchanged,
+  formatValueWithUnit,
+} from './d1-shared/format-confirmation.js';
+import { normaliseFactorValue } from './d1-shared/normalise-factor-value.js';
+// ⭐ THE ANALYSIS SEAM'S OWN GATE, ASKED AT THE EDIT SEAM. Imported rather
+// than restated so the two cannot answer "is this factor's recorded scale
+// usable?" differently — see the derivation beside its call site below.
+import { findScaleIncoherentBaselineFactorIds } from '../plot-intervention-scale.js';
+import { renormaliseOptionInterventionsForCapChange } from './d1-shared/renormalise-interventions-for-cap-change.js';
+import { SET_FACTOR_VALUE_USER_GUIDANCE } from './d1-shared/user-guidance.js';
+import { isSuccessfulRunAnalysisFact, selectRunAnalysisFact } from '../../context/freshness.js';
+import { deriveEditComparisonReach } from '../../coaching/edit-comparison-reach.js';
+import { log } from '../../../utils/telemetry.js';
+
+/**
+ * P0 V5 golden-path repair (Wave 2): staleness narrative appended to a
+ * successful set_factor_value receipt when a prior successful
+ * run_analysis fact existed. Closes the UX loop required by the brief:
+ * (1) what changed, (2) what does it affect, (3) is analysis fresh or
+ * stale, (4) what should the user do next. The chip-generator's
+ * stale-rerun rule emits the matching "Re-run analysis" chip when the
+ * post-dispatch freshness re-derivation flips the verdict.
+ *
+ * British English, no internal terms (no graph hash, no fact_type, no
+ * patch language). Suppressed on noop applies (raw_value unchanged) and
+ * when no prior analysis existed (the model is being built; nothing to
+ * stale yet).
+ *
+ * SCOPE — this "suppressed on noop" note governs THIS constant only.
+ * It never covered the receipt sentence (`changeText`), which ignored
+ * `noop` and narrated "Updated X from 0.8 to 0.8." until the Gate-1 fix
+ * below, nor the Step 5 coaching signal, which is a separate channel in
+ * `signals/coaching-signals.ts` and emitted its own false staleness
+ * claim ("This change affects the model...") on the same no-op turn.
+ * Three channels, three independent noop gates — do not read a
+ * suppression note on one as covering the others.
+ */
+// V5 stale-aware explain recovery — the phrase "previous analysis"
+// is on the brief's hard-fail list. The narrative uses "last analysis"
+// (not on the forbidden list) so the deterministic narrative emits
+// brief-aligned copy at source. The finaliser-level egress guard
+// would otherwise rewrite this to a neutral fallback and emit a
+// telemetry signal — better to use clean wording at source.
+//
+// "results" is used in place of any prescription-shaped noun (the
+// foamy-bee UI handoff brief bans `recommended`, `winner`, `winning`
+// from user-facing copy; the noun form `recommendation` is treated
+// in scope by the same rule).
+export const STALENESS_NARRATIVE =
+  ' This makes the last analysis stale. Re-run analysis to see how this affects the results.';
+
+/**
+ * ⭐⭐ THE STALENESS NARRATIVE IS FALSE FOR A FACTOR EVERY OPTION OVERRIDES,
+ * AND THIS CONSTANT IS WHAT IT IS REPLACED BY.
+ *
+ * MEASURED, 2026-09-03 (`olumi-programme-docs`
+ * `artefacts/manual-test-2026-09-03/`). A user corrected Sales Headcount
+ * Investment from £80 to £100,000. All three options in that decision set
+ * their own value for it (0.9 / 0.4 / 0), so the factor is a BASELINE THEY ALL
+ * REPLACE and its own value is never read. The analysis said so in the same
+ * payload: `sensitivity_score: 0`, `elasticity: 0`,
+ * `zero_reason: "intervention_override"`, `influence_rank: 6 of 6`.
+ *
+ * The product nevertheless replied *"This makes the last analysis stale.
+ * Re-run analysis to see how this affects the results."* — a promise the
+ * re-run structurally could not keep, since the edited number cannot enter the
+ * computation. The user duly re-ran, the win figures moved by sampling noise,
+ * and the next turn narrated a causal story for the movement. **The false
+ * staleness promise is the first link in that chain**, which is why this is a
+ * REPLACEMENT and not a suppression: saying nothing would leave the user with
+ * an accepted edit and no way to learn why it did nothing.
+ *
+ * ⚠ IT IS NOT AN ERROR MESSAGE AND MUST NOT READ AS ONE. The edit is applied,
+ * the value is now correct, and the user has done nothing wrong. The sentence
+ * states what the value IS in this model and names the thing that WOULD move
+ * the comparison — the per-option values.
+ *
+ * Copy contract (this file's, unchanged): British English, sentence case, no
+ * em-dashes, no internal terms, no raw decimals. Asserted clean against
+ * `findForbiddenPhraseHit` by test rather than by review.
+ */
+export const BASELINE_REPLACED_BY_OPTIONS_NARRATIVE =
+  ' Every option here sets its own value for this factor, so this figure is the'
+  + ' baseline they all replace, and changing it will not move the comparison.'
+  + ' To change the comparison, set the value each option uses.';
+
+/**
+ * Parameter Zod schema registered with the validator. Exported so the
+ * validation registry can reference the same schema (single source of
+ * truth — the validator and the handler check the same shape).
+ *
+ * Sonnet's tool schema accepts either a primitive or a structured
+ * object `{ value, unit?, cap? }` for `parameters.value`; we accept
+ * both here. When the value arrives as a primitive number we treat
+ * it as a bare-number proposal (no unit) and the handler defers to
+ * the factor's stored unit/cap; when structured, the proposal carries
+ * explicit unit/cap. The structured object is `.strict()`, so unknown
+ * keys (notably `raw_value`, removed in A3.1 Task 4 because it was
+ * dead documentation that risked silent double-normalisation) fail
+ * validation loudly.
+ */
+/**
+ * Graph node kinds this handler will set a value on. Exported as the SINGLE
+ * source of truth for `set_factor_value`'s target-kind capability: the
+ * execute-time gate below reads it, and
+ * `routing/__tests__/registry-handler-kind-drift.test.ts` projects it through
+ * `toEntityKind` and asserts the routing registry's `accepted_entity_kinds`
+ * matches exactly. Without that derivation the registry is a hand-maintained
+ * mirror of this list, and a mirror drifts silently in the direction that
+ * reads as green — refusing requests this handler would have served.
+ */
+export const SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS: readonly string[] = ['factor'];
+const SET_FACTOR_VALUE_ALLOWED_TARGET_KIND_SET: ReadonlySet<string> = new Set(
+  SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS,
+);
+
+// W2E-2: `.finite()` on every number — factor values are contract-silent on
+// range (no bound invented) but NaN/±Infinity must never enter the graph.
+// A failure here rides the existing proposal-validation rejection mechanism.
+export const SetFactorValueValueSchema = z.union([
+  z.number().finite(),
+  z
+    .object({
+      // V5 D1 golden-path closure (A3.1 Task 4): `raw_value` was
+      // previously declared optional but ignored by `parseProposalValue`
+      // — it never reached the handler logic. Removing it from the
+      // schema closes the silent-strip footgun: a proposal carrying
+      // `{ value: 5, raw_value: 0.05 }` now fails Zod validation with
+      // "Unrecognized key(s)" rather than silently picking `value`.
+      value: z.number().finite(),
+      unit: z.string().optional(),
+      cap: z.number().finite().optional(),
+    })
+    .strict(),
+]);
+
+interface ParsedValue {
+  /** The numeric value the user is supplying (operator's right-hand side). */
+  readonly numeric: number;
+  /** Explicit unit on the proposal, if any. */
+  readonly unit?: string;
+  /** Explicit cap on the proposal, if any. */
+  readonly cap?: number;
+  /** True when the proposal supplied an explicit unit (anywhere). */
+  readonly inputHasUnit: boolean;
+}
+
+function parseProposalValue(raw: unknown): ParsedValue {
+  if (typeof raw === 'number') {
+    return { numeric: raw, inputHasUnit: false };
+  }
+  if (raw && typeof raw === 'object') {
+    const obj = raw as { value: number; unit?: string; cap?: number };
+    // An empty / whitespace-only unit is NOT a unit — canonicalise it away here
+    // so it can never be PERSISTED by `after.unit = parsed.unit ?? before.unit`.
+    // `inputHasUnit` already treated `''` as no-unit; carrying `''` in `unit`
+    // while saying "no unit" in `inputHasUnit` is the disagreement that let a
+    // `unit: ''` write through. See `canonicaliseUnitForDisplay`.
+    const unit = canonicaliseUnitForDisplay(obj.unit);
+    return {
+      numeric: obj.value,
+      ...(unit !== undefined ? { unit } : {}),
+      ...(obj.cap !== undefined ? { cap: obj.cap } : {}),
+      inputHasUnit: unit !== undefined,
+    };
+  }
+  throw new D1HandlerError(
+    'PARAMETER_INVALID',
+    'set_factor_value: value must be a number or { value, unit?, cap? }.',
+    { details: { received: raw }, userGuidance: SET_FACTOR_VALUE_USER_GUIDANCE },
+  );
+}
+
+// (Local `applyOperator` removed — single source of truth lives in
+// `d1-shared/evaluate-factor-value-proposal.ts` as
+// `applyFactorValueOperator`, imported above. This handler and the
+// shared predicate now compute identical effectiveRaw values by
+// construction, closing the review feedback NB #1.)
+
+interface ObservedSnapshot {
+  readonly value?: number;
+  readonly raw_value?: number;
+  readonly unit?: string;
+  readonly cap?: number;
+  /**
+   * 0.40.0 — the provenance stamp, carried on the `after` side ONLY.
+   *
+   * ⚠ WITHOUT THIS THE ATTRIBUTION IS INVISIBLE UNTIL A RELOAD, which would make
+   * "visible consequence" a claim the product could not honour on the turn that
+   * produced it. The `graph_patch` block's `after` is what the UI applicator
+   * spreads into `node.data.observedState`; a snapshot that stops at
+   * value/raw_value/unit/cap leaves the canvas pill reading whatever it read
+   * before, so an owner who just applied Grace's number would still see "AI
+   * estimate" until they refreshed. Both hops were probed at the 0.40.0 bytes
+   * before this was widened: `SetFactorValueHandlerFactSchema` and the boundary
+   * `GraphPatchBlockSchema` both accept these keys inside `after` (each with a
+   * minimal-`after` control, so the pass is not vacuous).
+   *
+   * `before` never carries them — it is a snapshot of what was there, and the
+   * pre-edit provenance is not what this event is reporting.
+   */
+  readonly source?: string;
+  /**
+   * ⚠ 0.41.0 — `evidence_event_id` IS DECLARED HERE DELIBERATELY, EVEN THOUGH
+   * NOTHING WOULD HAVE FAILED WITHOUT IT. The stamp sites below SPREAD
+   * `appliedProvenance.elicited_from` wholesale, so the member already reaches
+   * the wire at runtime whatever this type says; a narrower declaration would
+   * simply have been a lie that typechecked, and the next reader would have
+   * concluded from it that the citation does not travel on this hop.
+   */
+  readonly elicited_from?: {
+    readonly round_id: string;
+    readonly participant_id: string;
+    readonly evidence_event_id?: string;
+  };
+}
+
+function snapshotObservedState(node: GraphV3T['nodes'][number]): ObservedSnapshot {
+  const obs = node.observed_state;
+  if (!obs) return {};
+  return {
+    ...(obs.value !== undefined ? { value: obs.value } : {}),
+    ...(obs.raw_value !== undefined ? { raw_value: obs.raw_value } : {}),
+    ...(obs.unit !== undefined ? { unit: obs.unit } : {}),
+    ...(obs.cap !== undefined ? { cap: obs.cap } : {}),
+  };
+}
+
+export function createSetFactorValueHandler(): HandlerFn {
+  return async function setFactorValueHandler(
+    invocation: HandlerInvocation,
+  ): Promise<HandlerOutcome> {
+    return runD1Handler('set_factor_value', async () => {
+    const proposal = invocation.proposal;
+    if (!proposal) {
+      throw new HandlerInvocationFailedError(
+        'set_factor_value invoked without a proposal',
+        {
+          cause_kind: 'parameter_invalid_at_execute',
+          retryable: false,
+          details: { handler_id: 'set_factor_value' },
+        },
+      );
+    }
+
+    // The verified panel attribution for this write, if any. Read once here so
+    // the stamp site below reads as a single expression; `undefined` on every
+    // path except a verified panel apply.
+    const appliedProvenance = invocation.appliedProvenance;
+
+    const rawGraph = invocation.graphForTurn ?? invocation.context.persistedGraph ?? null;
+    if (!rawGraph) {
+      throw new D1HandlerError(
+        'PRECONDITION_UNMET',
+        'set_factor_value requires a graph — none was supplied for this turn.',
+        {
+          details: { handler_id: 'set_factor_value' },
+          userGuidance: SET_FACTOR_VALUE_USER_GUIDANCE,
+        },
+      );
+    }
+    const graphParse = GraphV3.safeParse(rawGraph);
+    if (!graphParse.success) {
+      throw new D1HandlerError(
+        'GRAPH_INVARIANT_VIOLATED',
+        'set_factor_value: ingress graph failed schema validation.',
+        {
+          details: {
+            handler_id: 'set_factor_value',
+            first_issue: graphParse.error.issues[0]?.message,
+          },
+          userGuidance: SET_FACTOR_VALUE_USER_GUIDANCE,
+        },
+      );
+    }
+    const graph = graphParse.data;
+
+    const targetId = proposal.entity.id;
+    const targetNode = graph.nodes.find((n) => n.id === targetId);
+    if (!targetNode) {
+      throw new D1HandlerError(
+        'ENTITY_NOT_FOUND',
+        `Factor "${targetId}" was not found in the graph.`,
+        {
+          details: { handler_id: 'set_factor_value', target_id: targetId },
+          userGuidance: SET_FACTOR_VALUE_USER_GUIDANCE,
+        },
+      );
+    }
+    if (!SET_FACTOR_VALUE_ALLOWED_TARGET_KIND_SET.has(targetNode.kind)) {
+      throw new D1HandlerError(
+        'ENTITY_KIND_MISMATCH',
+        `Cannot set value on a ${targetNode.kind} — set_factor_value only accepts factors.`,
+        {
+          details: {
+            handler_id: 'set_factor_value',
+            target_id: targetId,
+            actual_kind: targetNode.kind,
+            accepted_kinds: [...SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS],
+          },
+          userGuidance: SET_FACTOR_VALUE_USER_GUIDANCE,
+        },
+      );
+    }
+
+    const valueParam = proposal.parameters.find((p) => p.name === 'value');
+    if (!valueParam) {
+      throw new D1HandlerError(
+        'PARAMETER_INVALID',
+        'set_factor_value requires a "value" parameter.',
+        {
+          details: { handler_id: 'set_factor_value' },
+          userGuidance: SET_FACTOR_VALUE_USER_GUIDANCE,
+        },
+      );
+    }
+
+    const parsed = parseProposalValue(valueParam.value);
+    const operator = valueParam.operator ?? 'set';
+    const before = snapshotObservedState(targetNode);
+
+    // The "current value" against which delta operators apply is the
+    // USER-UNIT raw value. `resolveExistingRawValue` de-normalises it (the
+    // inverse of normaliseFactorValue): `raw_value` when present, else
+    // `value * cap` for a capped factor, else `value` for an uncapped factor;
+    // it returns `ambiguous`/`missing` when the scale cannot be recovered (a
+    // legacy `{ value: 0.4, cap: 100000 }` = £40,000 must apply the operator
+    // against 40,000, not 0.4, or "× 0.3" corrupts to £0.12 instead of
+    // £12,000). Shared with the validator + executor precheck so all three
+    // resolve the LHS identically; only a `resolved` value is a usable LHS.
+    const existing = resolveExistingRawValue(before);
+
+    // ── ⭐⭐ IS THERE A SCALE HERE FOR A DECLARATION TO OVERWRITE? ───────────
+    // (2026-09-11, the journey-witnessed dead end.)
+    //
+    // THE MEASURED LOOP. The analysis withholds and offers *"Review or set an
+    // estimate"*. The user sets a bare magnitude on a capless, unitless factor
+    // through the inline editor that button opens; the write is accepted as
+    // `{value: 250000, raw_value: 250000}`; every re-run then refuses at
+    // `findScaleIncoherentBaselineFactorIds` → `baseline_scale_unresolved`,
+    // whose copy asks for A RANGE. Supplying that range hit
+    // `cap_redeclares_scale`; supplying a unit hit `unit_redeclares_scale`.
+    // Both gates were sealed by `factorHasRecordedValue` — which the user's
+    // OWN accepted edit had just made true. The product asked for a range and
+    // then refused the range, and the loop had no exit the product ever named.
+    //
+    // ⭐ THE ANSWER IS THE ANALYSIS GATE'S, ASKED HERE RATHER THAN GUESSED.
+    // This calls the SAME function `run_analysis` calls
+    // (`plot-intervention-scale.ts`), so the edit seam cannot disagree with
+    // the analysis seam about which factors are unusable — the "one question,
+    // two seams, two answers" defect is removed by construction, not by a
+    // second predicate kept in step by hand (trap 12).
+    //
+    // ⚠ SCOPED TO THE PRE-EDIT GRAPH, DELIBERATELY. The question is "is the
+    // factor in the state the analysis is refusing RIGHT NOW?", which is a
+    // fact about recorded state, not about the number being proposed. Reading
+    // the post-edit graph would make the exemption a function of the
+    // proposal — i.e. an input could authorise itself.
+    //
+    // ⚠ AND WHAT THIS INHERITS FOR FREE, which is the reason to call the gate
+    // rather than restate its condition: every exemption the gate already
+    // makes. A factor with a recoverable pair frame, a capped factor, and the
+    // ratified ROUND-5 ASTRIDE-1 class (a factor whose own user-authored
+    // interventions are themselves outside [0,1] — a user working in their own
+    // raw scale, whose analysis COMPUTES today) are all absent from the gate's
+    // output, so none of them is ever admitted here. Blocking or rescaling
+    // that class was the round-4b defect that broke 102 legitimate tests; this
+    // change cannot reach it.
+    //
+    // Interventions come off the option nodes' own `data.interventions`
+    // (`schemas/graph.ts:OptionData`) — the USER/draft-authored levels. The
+    // gate's optional `synthesisedByOption` marker is deliberately not
+    // supplied: it exists to STOP a CEE-scaffolded value establishing a frame,
+    // and the scaffold's placeholders are minted at analysis time and are not
+    // in this graph. Omitting it therefore treats every intervention present
+    // as user-authored, which makes the factor MORE likely to be exempt and
+    // this admission LESS likely to fire — the conservative direction.
+    //
+    // ⚠⚠ AND THE CARRIER IS NODE-LEVEL, NOT `data.interventions` — measured,
+    // and it is the difference between reading the class and reading nothing.
+    // `schemas/cee-v3.ts:246` puts the bundle on the OPTION NODE
+    // (`z.record(string, z.any()).optional()`, values shaped `InterventionV3`,
+    // which is what the gate's own `extractNumericInterventionValue` is built
+    // for). Reading `data.interventions` returned `{}` for every option, which
+    // makes NOTHING self-framed, which names every capless raw baseline —
+    // i.e. it fails OPEN, admitting a declaration onto the round-5 class whose
+    // analysis computes today. Caught here by the discriminating twin in
+    // `set-factor-value-scale-declaration-clears-dead-end.test.ts`, not by
+    // inspection; an empty read and a genuine absence are indistinguishable
+    // without one (trap 13).
+    const optionNodes = graph.nodes.filter((n) => n.kind === 'option');
+    const optionInterventionObjects = optionNodes.map((n) => {
+      const interventions = (n as { interventions?: unknown }).interventions;
+      return interventions !== null && typeof interventions === 'object'
+        ? (interventions as Record<string, unknown>)
+        : {};
+    });
+    //
+    // ⭐ FAIL CLOSED WHEN THE CARRIER CANNOT BE READ. That node-level bundle is
+    // declared a COPY — cee-v3's own comment says `options[]` remains the
+    // canonical source for analysis — and it is optional, so a graph can carry
+    // options whose interventions simply are not on the nodes. In that state
+    // this handler cannot tell a self-framed factor from an incoherent one,
+    // and the two want opposite answers. So: options present but NO
+    // intervention bundle on any of them ⇒ the question is unanswerable here
+    // ⇒ no admission, today's refusal stands. A wrong refusal costs the user a
+    // turn; a wrong admission rescales a baseline whose analysis was working.
+    const interventionCarrierReadable =
+      optionNodes.length === 0
+      || optionInterventionObjects.some((o) => Object.keys(o).length > 0);
+    const factorRecordedScaleIsUnusable =
+      interventionCarrierReadable
+      && findScaleIncoherentBaselineFactorIds(
+        graph.nodes,
+        optionInterventionObjects,
+      ).includes(targetId);
+
+    // Defense-in-depth parity (review follow-up). The handler pre-applies
+    // the operator below and then calls `normaliseFactorValue` with the
+    // POST-operator value — so guards that read the user's STATED right-hand
+    // side (notably `bare_ratio_on_unit_factor`, which gates on `rawInput`,
+    // and the delta guards) never see the original operator/RHS at the
+    // handler. A direct handler call to "increase £40,000 by 0.3" would
+    // otherwise evaluate 40,000.3 and slip past the guard, mutating despite
+    // the validator/precheck rejecting the same proposal. Run the shared
+    // predicate here against the ORIGINAL operator + RHS so the handler
+    // enforces exactly what the validator and executor precheck do (AC.1).
+    // A non-`resolved` existing value omits `factorExistingRaw`, so any delta
+    // fails closed via `delta_no_existing_value`.
+    const preEvaluation = evaluateFactorValueProposal({
+      rawInput: parsed.numeric,
+      operator,
+      ...(parsed.unit !== undefined ? { unit: parsed.unit } : {}),
+      ...(parsed.cap !== undefined ? { proposalCap: parsed.cap } : {}),
+      ...(before.cap !== undefined ? { factorCap: before.cap } : {}),
+      ...(before.unit !== undefined ? { factorUnit: before.unit } : {}),
+      ...(existing.kind === 'resolved' ? { factorExistingRaw: existing.raw } : {}),
+      // ROADMAP 2.159 — the STORED model value / raw_value, un-inverted, so the
+      // predicate can tell a scale REDECLARATION from a first-time declaration.
+      // Distinct from `factorExistingRaw` (the de-normalised delta LHS).
+      ...(before.value !== undefined ? { factorObservedValue: before.value } : {}),
+      ...(before.raw_value !== undefined
+        ? { factorObservedRawValue: before.raw_value }
+        : {}),
+      // 2026-09-11 — the SECOND question the redeclaration gates need, derived
+      // above from the analysis gate itself. Threaded to BOTH runs of the
+      // predicate (AC.1 parity): a pre-check that admits what the execute-time
+      // re-check refuses is the disagreement this change exists to remove.
+      factorRecordedScaleIsUnusable,
+      inputHasUnit: parsed.inputHasUnit,
+    });
+    if (!preEvaluation.ok) {
+      throw new D1HandlerError('PARAMETER_INVALID', preEvaluation.specific_issue, {
+        details: {
+          handler_id: 'set_factor_value',
+          target_id: targetId,
+          rejection_reason: preEvaluation.reason,
+        },
+        userGuidance: SET_FACTOR_VALUE_USER_GUIDANCE,
+      });
+    }
+
+    // Only reached for `set` when `existing` is non-resolved (deltas already
+    // rejected above); `set` ignores the LHS, so 0 is a safe unused default.
+    const currentRaw = existing.kind === 'resolved' ? existing.raw : 0;
+
+    const newRaw = applyFactorValueOperator(currentRaw, operator, parsed.numeric);
+
+    const normalised = normaliseFactorValue({
+      rawInput: newRaw,
+      ...(parsed.unit !== undefined ? { unit: parsed.unit } : {}),
+      ...(parsed.cap !== undefined ? { proposalCap: parsed.cap } : {}),
+      ...(before.cap !== undefined ? { factorCap: before.cap } : {}),
+      ...(before.unit !== undefined ? { factorUnit: before.unit } : {}),
+      // ROADMAP 2.159 — same two fields as `preEvaluation` above, so the
+      // execute-time re-check enforces the same redeclaration gates rather
+      // than a weaker rule set (the AC.1 parity invariant).
+      ...(before.value !== undefined ? { factorObservedValue: before.value } : {}),
+      ...(before.raw_value !== undefined
+        ? { factorObservedRawValue: before.raw_value }
+        : {}),
+      factorRecordedScaleIsUnusable,
+      // ⭐ THE FRAME COMES OFF THE NODE, NOT OFF `before`. `snapshotObservedState`
+      // reads `observed_state`, and the whole point of the persisted frame is
+      // the factor that HAS no observed_state — the one whose options carry
+      // framed magnitudes while it carries nothing. Reading it from the same
+      // snapshot would reintroduce the blind spot it exists to close.
+      // Deliberately NOT passed to `preEvaluation` above: that predicate judges
+      // scale REDECLARATION (unit/cap), a different question (trap 21), and the
+      // frame is not a declaration the user can make or contradict.
+      ...(typeof (targetNode as { scale_frame?: unknown }).scale_frame === 'number'
+        ? { factorScaleFrame: (targetNode as { scale_frame: number }).scale_frame }
+        : {}),
+      // The ambiguity guard only fires when the PROPOSAL itself omits the
+      // unit. The factor's stored unit is irrelevant to the user's intent —
+      // a bare-number proposal "200" against a cap=100 factor is ambiguous
+      // regardless of whether the factor's existing observed_state.unit is
+      // "%". Refuse rather than guess; the user must clarify.
+      inputHasUnit: parsed.inputHasUnit,
+    });
+
+    const after: ObservedSnapshot = {
+      value: normalised.value,
+      raw_value: normalised.raw_value,
+      // The SAME provenance the merged node is stamped with below, so the wire
+      // patch and the persisted graph cannot disagree about who owns the number.
+      //
+      // CONDITIONAL, so the ORDINARY edit path's `after` stays byte-identical:
+      // the UI already stamps `user_override` locally for its own edits, so
+      // adding it here would change an existing payload for no gain. Only a
+      // verified panel apply — which the UI CANNOT stamp for itself, because it
+      // is a server fact — widens the snapshot.
+      ...(appliedProvenance !== undefined
+        ? {
+            source: appliedProvenance.source,
+            elicited_from: appliedProvenance.elicited_from,
+          }
+        : {}),
+      // ⭐ ON A FOLDED-KEY MATCH, THE FACTOR'S STORED SPELLING WINS — nothing was
+      // redeclared, so a value edit must not silently re-case what the factor
+      // DECLARES. This is not "fold the display path": a genuinely NEW unit (no
+      // stored unit, or a different comparison key) still persists the user's own
+      // case, which is the whole point of keeping a display form.
+      //
+      // ⚠ THE MEASURED HARM. `currencyPrefix` (`cee/factor-extraction/display-value
+      // .ts:65`) matches `unit === "GBP"` EXACTLY, not on a folded key. Persisting a
+      // proposal's 'gbp' over a stored 'GBP' therefore stripped the £ from every
+      // subsequent render. Folding the unit_mismatch gate is what first let a
+      // spelling-only proposal reach this write at all, so this guard ships with it.
+      ...(parsed.unit !== undefined
+        ? {
+            unit:
+              before.unit !== undefined &&
+              unitComparisonKey(parsed.unit) === unitComparisonKey(before.unit)
+                ? before.unit
+                : parsed.unit,
+          }
+        : before.unit !== undefined
+          ? { unit: before.unit }
+          : {}),
+      ...(parsed.cap !== undefined
+        ? { cap: parsed.cap }
+        : before.cap !== undefined
+          ? { cap: before.cap }
+          : {}),
+    };
+
+    // 1.16 item A2 — consented cap change detection. An explicit proposal
+    // cap that differs from the stored cap rescales the factor's SCALE:
+    // option interventions on this factor are stored as normalised
+    // multiples of the cap (value = raw / cap — see
+    // d1-shared/renormalise-interventions-for-cap-change.ts for the
+    // verified convention), so leaving them untouched would silently
+    // change every option's ABSOLUTE configuration. Renormalise them by
+    // old_cap/new_cap inside the same mutation.
+    const capChanged =
+      before.cap !== undefined && after.cap !== undefined && after.cap !== before.cap;
+    let rescaledInterventionCount = 0;
+
+    // Apply the mutation to a clone and Zod-parse the result.
+    const result = applyAndValidateMutation(rawGraph, (clone) => {
+      const node = clone.nodes.find((n) => n.id === targetId);
+      if (!node) {
+        // Should be impossible — we found it on `graph` and clone is a deep
+        // copy. Defensive throw for completeness.
+        throw new D1HandlerError('ENTITY_NOT_FOUND', `Node ${targetId} disappeared during clone.`, {
+          userGuidance: SET_FACTOR_VALUE_USER_GUIDANCE,
+        });
+      }
+      const merged = {
+        ...(node.observed_state ?? {}),
+        value: normalised.value,
+        raw_value: normalised.raw_value,
+        ...(after.unit !== undefined ? { unit: after.unit } : {}),
+        ...(after.cap !== undefined ? { cap: after.cap } : {}),
+        // 2.396(b) — the pill-earning stamp. The provenance stamp below is
+        // CLOBBERED by the V3 response transform (schema-v3.ts recomputes
+        // node.provenance from extractionType), so `observed_state.source` is
+        // the carrier that actually reaches the UI's isReviewedByUser rungs.
+        // Overrides any producer stamp deliberately: this write IS the user's.
+        //
+        // ⭐ 0.40.0 — UNLESS THE SERVER HAS VERIFIED THAT IT IS SOMEBODY ELSE'S.
+        // `appliedProvenance` is present only after `verifyAppliedFrom` has
+        // checked an `applied_from` claim against CEE's own collab store, so
+        // this branch stamps a fact the server established, never one the
+        // client asserted. It exists because the alternative — the owner
+        // retyping a colleague's revealed number — stamps `user_override` and
+        // renders as "User edited", i.e. the product relabels Grace's
+        // expertise as the owner's own work. Absence keeps today's behaviour
+        // byte-for-byte; absence means "an ordinary edit", never "attribution
+        // lost".
+        source: appliedProvenance?.source ?? USER_EDIT_SOURCE,
+        // Ids only. A display name here would sit inside `scenarios.graph`,
+        // beyond the reach of the R-2 redaction routine; the label is resolved
+        // at render from round data instead.
+        ...(appliedProvenance !== undefined
+          ? { elicited_from: appliedProvenance.elicited_from }
+          : {}),
+      };
+
+      // ⭐⭐ AND THE ABSENT BRANCH MUST *CLEAR* IT, NOT MERELY DECLINE TO SET IT.
+      //
+      // `merged` SPREADS the prior `observed_state`, so a node that already
+      // carries `elicited_from` keeps it unless this deletes it. Without this
+      // line the sequence "apply Grace's 0.85, then retype 0.5 by hand" leaves
+      // `{ source: 'user_override', elicited_from: { participant_id: <Grace> } }`
+      // — the owner's own typed number, still carrying Grace's identity. The
+      // contract explicitly sanctions consumers keying identity off
+      // `elicited_from` ("a consumer may key display off either, but only
+      // `elicited_from` carries the identity"), so this is not a cosmetic
+      // leftover: it attributes to a named colleague a number she never gave.
+      //
+      // That is the MIRROR of the untruth this whole slice exists to end, and
+      // shipping it inside the fix would have been worse than the original —
+      // the original mislabelled a colleague's number as the owner's, this
+      // mislabels the owner's number as a colleague's, and only this one
+      // invents a quote.
+      //
+      // `delete` rather than `elicited_from: undefined`: the key must be ABSENT,
+      // because absence is the contract's declared semantics ("absent means this
+      // value was not applied from a panel round"), and a present-but-undefined
+      // key survives structuredClone and object spreads while reading as present
+      // to `in` and `Object.keys`.
+      if (appliedProvenance === undefined) {
+        delete (merged as { elicited_from?: unknown }).elicited_from;
+      }
+
+      node.observed_state = merged;
+
+      // V5 D1 golden-path closure (A3.1 Task 3): recompute display_value
+      // from the post-mutation observed_state via the canonical pure
+      // formatter. Without this the persisted node carries a stale
+      // display string ("£40,000" after we just mutated raw_value to
+      // 50000). `synthesiseDisplayValue` returns undefined when input
+      // is insufficient — callers who relied on absence handle that
+      // path; we normalise back to undefined-meaning-cleared rather
+      // than persisting the prior value.
+      const recomputedDisplay = synthesiseDisplayValue({
+        value: normalised.value,
+        raw_value: normalised.raw_value,
+        ...(after.unit !== undefined ? { unit: after.unit } : {}),
+        ...(node.factor_type !== undefined ? { factor_type: node.factor_type } : {}),
+        ...(after.cap !== undefined ? { cap: after.cap } : {}),
+      });
+      if (recomputedDisplay !== undefined) {
+        node.display_value = recomputedDisplay;
+      } else if (node.display_value !== undefined) {
+        // Clear the stale display string when the formatter declines
+        // to produce a new one.
+        delete (node as { display_value?: string }).display_value;
+      }
+
+      // Stamp provenance so downstream consumers know the value was
+      // user-set (NodeV3.provenance enum supports 'user_set' directly).
+      node.provenance = 'user_set';
+
+      // 1.16 item A2 — preserve option-intervention absolutes across the
+      // cap change. Runs inside the mutation clone so the rewritten
+      // option NODES flow through the same nodes-stamping persistence
+      // merges as the factor mutation itself.
+      if (capChanged) {
+        rescaledInterventionCount = renormaliseOptionInterventionsForCapChange(
+          clone,
+          targetId,
+          before.cap,
+          after.cap,
+        );
+      }
+
+      return { before, after };
+    });
+
+    // ⚠ COMPARED ON THE FOLDED KEY, NOT STRICTLY. `noop` is a THIRD reader of the
+    // "are these the same unit?" question that `unitComparisonKey` owns; leaving it
+    // on strict equality made a spelling-only proposal report as an APPLIED CHANGE:
+    // "Updated Headcount from 12 people to 12 People. This makes the last analysis
+    // stale. Re-run analysis…" — narrating a change that did not happen, contradicting
+    // the freshness authority (the analysis hash is unchanged), and prompting a paid
+    // re-run. The 12 other strict unit-equality gates in this repo are rowed
+    // separately; this one is here because folding the mismatch gate made it reachable.
+    //
+    // ⚠ HONEST STATUS: this is DEFENCE-IN-DEPTH, not independently load-bearing.
+    // Mutation-checked and it SURVIVED — reverting it to strict equality leaves the
+    // suite green, because the write above now keeps `before.unit` on a folded match,
+    // so the two spellings are already identical by the time `noop` sees them, and a
+    // non-matching key is refused earlier at guard 2b. It is kept so the invariant is
+    // EXPLICIT rather than incidental: if the write rule ever changes, `noop` must not
+    // silently start narrating phantom changes again. Do not cite it as mutation-verified.
+    const noop =
+      before.value === after.value &&
+      before.raw_value === after.raw_value &&
+      unitComparisonKey(before.unit) === unitComparisonKey(after.unit) &&
+      before.cap === after.cap;
+
+    const fact: SetFactorValueHandlerFact = {
+      fact_type: 'set_factor_value',
+      fact_version: 1,
+      noop,
+      result: {
+        target_id: targetId,
+        status: noop ? 'noop' : 'applied',
+        before: before as Record<string, unknown>,
+        after: after as Record<string, unknown>,
+      },
+    };
+
+    const factCheck = SetFactorValueHandlerFactSchema.safeParse(fact);
+    if (!factCheck.success) {
+      throw new HandlerResultInvalidError(
+        'SetFactorValueHandlerFact failed schema validation',
+        factCheck.error,
+      );
+    }
+
+    const label = targetNode.label;
+    // Narration uses the DE-NORMALISED user-unit value via the same
+    // `resolveExistingRawValue` the operator LHS uses, rendering the honest
+    // user-unit amount — e.g. a legacy capped `{ value: 0.4, cap: 100000, £ }`
+    // narrates "£40,000", not a fabricated "£0.4" (the normalised ratio).
+    // The AFTER value is always `resolved` (normaliseFactorValue wrote
+    // raw_value). The BEFORE value may be `missing`/`ambiguous`: in that case
+    // we must NOT fabricate a numeric "from" (a "from 0" would be a false
+    // claim) — emit a one-sided "Updated X to Y." receipt instead. Only `set`
+    // reaches narration with a non-resolved before (deltas already rejected).
+    const narrationSide = (
+      snap: ObservedSnapshot,
+    ): { readonly raw_value: number; readonly unit?: string } => {
+      const res = resolveExistingRawValue(snap);
+      const raw = res.kind === 'resolved' ? res.raw : 0;
+      return snap.unit !== undefined ? { raw_value: raw, unit: snap.unit } : { raw_value: raw };
+    };
+    const beforeResolution = resolveExistingRawValue(before);
+    // Gate-1 claim integrity: the fact channel decided this was a no-op
+    // above; the text channel must agree. Narrating `formatFactorChange`
+    // here produced the self-refuting "Updated X from 0.8 to 0.8." plus
+    // an implied commit that never happened. Checked FIRST because both
+    // change-shaped receipts below assert a change.
+    //
+    // `after` is the narration side on the no-op path: on a no-op it is
+    // equal to `before` by construction (the noop predicate compares
+    // value/raw_value/unit/cap), and `after` is always `resolved`
+    // (normaliseFactorValue writes raw_value), so this cannot fabricate
+    // a value the way a non-resolved `before` could.
+    const changeText = noop
+      ? formatFactorValueUnchanged({ label, after: narrationSide(after) })
+      : beforeResolution.kind === 'resolved'
+        ? formatFactorChange({ label, before: narrationSide(before), after: narrationSide(after) })
+        : formatFactorValueSet({ label, after: narrationSide(after) });
+
+    // 1.16 item A2 — honest receipt for a consented scale change: the user
+    // agreed to extend (or otherwise move) the factor's scale, so the
+    // receipt says so explicitly. Redacted telemetry (counts + ids only,
+    // never magnitudes) records how many option interventions were
+    // renormalised to preserve their absolute values.
+    if (capChanged) {
+      log.info(
+        {
+          event: 'v5.d1.set_factor_value.cap_changed',
+          target_id: targetId,
+          rescaled_intervention_count: rescaledInterventionCount,
+        },
+        'set_factor_value applied an explicit cap change; option interventions renormalised to preserve absolutes',
+      );
+    }
+    const scaleNote =
+      capChanged && after.cap !== undefined
+        ? ` The scale for this factor now allows values up to ${formatValueWithUnit(after.cap, after.unit)}.`
+        : '';
+    const baseText = `${changeText}${scaleNote}`;
+
+    // P0 V5 golden-path repair (Wave 2): when a prior successful analysis
+    // exists and this turn actually mutated the factor (non-noop), append
+    // the staleness narrative so the assistant_text answers all four
+    // user-facing questions (what changed, what it affects, is analysis
+    // stale, what to do next). Suppressed on noop and pre-analysis
+    // mutations.
+    const hasPriorSuccessfulAnalysis = invocation.context.prior_facts.some(
+      isSuccessfulRunAnalysisFact,
+    );
+
+    // ⭐ CAN THIS EDIT MOVE THE COMPARISON AT ALL? Derived ONCE, here, from the
+    // POST-mutation graph plus the newest analysis the user has been shown.
+    //
+    // The post-mutation graph is the right authority because it is the state
+    // the next analysis would run on. A value edit does not add or remove an
+    // option intervention, and a consented cap change RENORMALISES the
+    // interventions without changing which factors they key — so pre and post
+    // agree here today. Reading the post state anyway means the answer stays
+    // true of the graph the sentence is about if that ever stops holding.
+    //
+    // ⚠ `hasPriorSuccessfulAnalysis` DELIBERATELY DOES NOT GATE THIS. "Every
+    // option replaces this value" is a fact about the MODEL, true before any
+    // analysis has ever run, and it is exactly the moment a user building the
+    // model needs to hear it. Gating it on a prior analysis would withhold the
+    // coaching from the user who has the most to gain from it.
+    const editComparisonReach = deriveEditComparisonReach({
+      graph: result.mutatedGraph,
+      priorAnalysisEnrichment: newestSuccessfulAnalysisEnrichment(
+        invocation.context.prior_facts,
+      ),
+      factorId: targetId,
+    });
+
+    const assistantText = noop
+      ? baseText
+      : editComparisonReach.kind === 'inert'
+        ? `${baseText}${BASELINE_REPLACED_BY_OPTIONS_NARRATIVE}`
+        : hasPriorSuccessfulAnalysis
+          ? `${baseText}${STALENESS_NARRATIVE}`
+          : baseText;
+
+    return {
+      assistant_text: assistantText,
+      handler_facts: [factCheck.data],
+      llm_calls_used: 0,
+      mutated_graph: result.mutatedGraph,
+    };
+    });
+  };
+}
+
+/**
+ * The PLoT envelope of the newest SUCCESSFUL analysis in the window, or null.
+ *
+ * ⚠ "SUCCESSFUL", NOT "SHOWN TO THE USER" — and the two are different
+ * questions with different answers since the server acquired a way to run an
+ * analysis nobody asked for (`scheduleAutoRunAfterFreshDraft`). The "shown"
+ * predicate is `hasUserSeenRunAnalysisResult`, and it is NOT what this call
+ * wants: the question here is *"what did the last computation measure about
+ * this factor?"*, which an auto-run answers perfectly well. Naming it "shown"
+ * would be this estate's signature defect committed inside a docstring
+ * (CLAUDE.md trap #21).
+ *
+ * ⭐ `selectRunAnalysisFact` — the CANONICAL newest-first selector the turn's
+ * own freshness verdict is derived from — rather than a local
+ * `find(isSuccessfulRunAnalysisFact)`. The predicate would be right and the
+ * ORDERING private: facts arrive in the loader's delivery order while the
+ * selector sorts by `computed_at`, so a local find can read a DIFFERENT run
+ * than the rest of the turn is reasoning about (the drift #738 fixed in
+ * `selectTwoNewestRunAnalysisFacts`, and the same reason
+ * `buildRerunAcknowledgement` calls the selector).
+ */
+function newestSuccessfulAnalysisEnrichment(
+  priorFacts: HandlerInvocation['context']['prior_facts'],
+): unknown {
+  const selected = selectRunAnalysisFact(priorFacts);
+  if (selected === null) return null;
+  const fact = selected.fact;
+  if (fact.fact_type !== 'run_analysis') return null;
+  return fact.result.enrichment ?? null;
+}

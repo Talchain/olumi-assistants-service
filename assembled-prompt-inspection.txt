@@ -1,0 +1,101 @@
+================================================================================
+ASSEMBLED PROMPT INSPECTION
+================================================================================
+
+Total characters: 4052
+Estimated tokens (4 chars/token): 1013
+Total lines: 72
+
+Zone 2 blocks detected:
+  - <decision_state> (decision continuity)
+  - Stage confidence
+  - Compact graph
+  - Compact analysis
+    - Option comparison (within analysis)
+    - Top drivers (within analysis)
+    - Fragile edges (within analysis)
+    - Constraint tensions (within analysis)
+    - Flip thresholds (within analysis)
+  - Referenced entity
+  - Event log summary
+  - User intent
+  - Decision archetype
+  - DSK placeholder
+  - Specialist advice placeholder
+
+================================================================================
+FULL ASSEMBLED PROMPT
+================================================================================
+
+[ZONE1: Orchestrator system prompt — cf-v4.0.5]
+You are a decision coaching engine. Help the user explore, model, and evaluate their decision.
+
+<decision_state>
+Goal: Maximise ROI within 18 months
+Options: 4 options
+Constraints: Budget < £200k, Must ship AI features within 6 months
+Stage: evaluate
+Analysis: current
+Top drivers: Team Velocity, Time to Market, Hiring Cost
+Top uncertainties: Churn Risk
+Assumptions: 2 inferred values
+</decision_state>
+Stage confidence: high (analysis_present)
+Graph (12 nodes, 13 edges):
+  goal_1 [goal] "Maximise ROI within 18 months"
+  opt_lead [option] "Hire Tech Lead", interventions: sets Hiring Cost=120000, Team Velocity=0.8
+  opt_devs [option] "Hire Two Developers", interventions: sets Hiring Cost=160000, Team Velocity=0.65
+  opt_contract [option] "Outsource to Contractor", interventions: sets Hiring Cost=90000, Team Velocity=0.5
+  opt_hybrid [option] "Lead + Junior Dev", interventions: sets Hiring Cost=150000, Team Velocity=0.75
+  f_cost [factor] "Hiring Cost", type=external, category=financial, value=120000, source=user
+  f_velocity [factor] "Team Velocity", type=external, category=operational, value=0.7, source=assumption
+  f_churn [factor] "Churn Risk", type=external, category=risk, value=0.15, source=assumption
+  f_time [factor] "Time to Market", type=external, category=operational, value=6, source=user
+  out_revenue [outcome] "Revenue Growth"
+  risk_delay [risk] "Project Delay Risk"
+  con_budget [constraint] "Budget < £200k"
+  f_cost → out_revenue (strength=-0.45, exists_p=0.9) — Hiring Cost moderately decreases Revenue Growth
+  f_velocity → out_revenue (strength=0.72, exists_p=0.85) — Team Velocity strongly increases Revenue Growth (high confidence)
+  f_churn → out_revenue (strength=-0.35, exists_p=0.7) — Churn Risk weakly decreases Revenue Growth (moderate confidence)
+  f_churn → risk_delay (strength=0.55, exists_p=0.75) — Churn Risk moderately increases Project Delay Risk
+  f_time → out_revenue (strength=-0.6, exists_p=0.8) — Time to Market moderately decreases Revenue Growth
+  f_velocity → f_time (strength=-0.5, exists_p=0.78) — Team Velocity moderately decreases Time to Market
+  f_cost → con_budget (strength=0.9, exists_p=0.95)
+  opt_lead → f_cost (strength=0, exists_p=1)
+  opt_lead → f_velocity (strength=0, exists_p=1)
+  opt_devs → f_cost (strength=0, exists_p=1)
+  opt_devs → f_velocity (strength=0, exists_p=1)
+  opt_contract → f_cost (strength=0, exists_p=1)
+  opt_hybrid → f_cost (strength=0, exists_p=1)
+Analysis:
+  Winner: Hire Tech Lead (opt_lead) at 42% win probability
+  Robustness: moderate
+  Option comparison:
+    Hire Tech Lead: 42% win, mean=185000.00, range [120000.00, 260000.00]
+    Lead + Junior Dev: 28% win, mean=165000.00, range [95000.00, 240000.00]
+    Hire Two Developers: 18% win, mean=145000.00, range [80000.00, 215000.00]
+    Outsource to Contractor: 12% win, mean=110000.00, range [50000.00, 180000.00]
+  Top drivers:
+    Team Velocity (f_velocity): sensitivity=0.850, direction=positive
+    Time to Market (f_time): sensitivity=-0.720, direction=negative
+    Hiring Cost (f_cost): sensitivity=-0.550, direction=negative
+    Churn Risk (f_churn): sensitivity=-0.400, direction=negative
+  Fragile edges: 2
+  Fragile edge paths:
+    Team Velocity → Revenue Growth
+    Time to Market → Revenue Growth
+  Constraint tensions: Budget < £200k tension: Hire Two Developers approaches constraint limit
+  Flip thresholds:
+    Team Velocity: current=0.7, flip_at=0.55
+    Churn Risk: current=0.15, flip_at=0.35
+<referenced_entity>
+Label: Team Velocity
+Kind: factor | Category: operational
+Value: 0.7 | Source: assumption
+Connected: Revenue Growth (mean=0.7), Time to Market (mean=-0.5)
+</referenced_entity>
+Decision history: Turn 1: drafted graph (4 options, 4 factors). Turn 2: ran analysis. Turn 3: explaining results.
+User intent: explain
+Decision archetype: hiring (high confidence, evidence: hire, tech lead, developers)
+<!-- DSK claims will appear here when A.9 is active -->
+<!-- Specialist advice will appear here when Phase 2 is active -->

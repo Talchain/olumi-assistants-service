@@ -1,0 +1,500 @@
+/**
+ * V5 orchestrator route pre-flight helper.
+ *
+ * Runs, in order, the ingress-side checks that EVERY dispatch branch
+ * in route-v2.ts depends on:
+ *
+ *   0. User identity    — `resolveUserIdentity` (flag-gated Supabase-JWT
+ *      verification, CEE_REQUIRE_USER_JWT, default OFF — login 3.4 CEE-half.
+ *      Runs FIRST: authentication precedes body validation, so an
+ *      unauthenticated caller learns nothing about payload validity. When
+ *      the flag is off this is a single config read — dormant.)
+ *   1. Extension parse  — `parseRequestExtensions`
+ *   2. B1 ingress       — `validateIngress` (on the body with extension keys stripped)
+ *   3. Scenario upsert  — `preflightEnsureScenario` (fed by the VERIFIED
+ *      identity when step 0 derived one — the caller-supplied `user_id`
+ *      extension is ignored on verified turns)
+ *
+ * Returns a discriminated union so the caller stays the single owner of
+ * `reply.code(...).send(...)`. On failure, the caller sends the 401/422; on
+ * success, the caller destructures `context` and proceeds to dispatch.
+ *
+ * This helper exists so the "all branches share pre-flight" invariant is
+ * preserved by structure, not convention. See Docs/v5/route-v2-branch-audit.md
+ * for the audit that motivated this split. A file-scoped ESLint rule in
+ * eslint.config.js forbids route-v2.ts from invoking the three primitives
+ * directly — new dispatch branches must read `PreFlightContext` from this
+ * helper's return value.
+ *
+ * Side effects: emits telemetry and structured logs via the primitives'
+ * own instrumentation plus the `log.warn` calls below on failure. Does NOT
+ * mutate the Fastify request or reply. Does NOT call any reply method.
+ *
+ * ── ROADMAP 2.236 — STEPS 0 AND 3 ARE NOW SHARED WITH THE STOP ROUTE ────────
+ * `POST /proxy/v5/turn/stop` had NO identity and NO ownership check at all
+ * (Codex audit C finding C-1): a caller who knew a scenario UUID could forge an
+ * allowed Origin, post an invented `turn_id`, and the fence upsert allocated a
+ * NEW generation — superseding a legitimate in-flight turn, which then lost its
+ * graph write at `OLTF2`. The ruled fix is that Stop goes through the SAME
+ * verified-identity + scenario-ownership pre-flight as turn admission.
+ *
+ * ⚠ THE OBVIOUS IMPLEMENTATION IS THE WRONG ONE. Re-deriving "is this caller
+ *   the owner" inside turn-stop.ts would be a second copy of an authorization
+ *   rule — CLAUDE.md trap 12 with an authorization blast radius, and the drift
+ *   would be silent (a divergent copy still answers 200). So steps 0 and 3 are
+ *   extracted here as `resolveVerifiedIdentityOrRefuse` and
+ *   `authorizeScenarioOwnership`, and BOTH `runPreFlight` and
+ *   `recordExplicitTurnStop` call them. There is one implementation of each
+ *   rule; changing it changes both rungs at once, by construction.
+ *
+ *   The extraction is behaviour-preserving for `runPreFlight`: the ORDER above
+ *   is unchanged (identity strictly before body validation — an unauthenticated
+ *   caller still learns nothing about payload validity), and the 401/422
+ *   envelopes are byte-identical.
+ */
+
+import type { FastifyRequest } from 'fastify';
+import type { BoundaryError, OrchestratorTurnPayload } from '@talchain/schemas/boundary';
+
+import { getOrGenerateRequestId } from '../utils/request-id.js';
+import { emit, log, TelemetryEvents } from '../utils/telemetry.js';
+import { validateIngress } from '../validators/b1.js';
+import {
+  parseRequestExtensions,
+  V5RequestExtensionsSchema,
+  type ParsedRequestExtensions,
+} from '../orchestrator-v5/boundary/request-extensions.js';
+import { preflightEnsureScenario } from '../orchestrator-v5/build-turn-context.js';
+import { resolveOwnershipAuthority } from './ownership-authority.js';
+import {
+  buildSignInRequiredError,
+  resolveUserIdentity,
+  type UserIdentityResolution,
+} from './user-identity.js';
+
+// `@talchain/schemas` `OrchestratorTurnPayload` is `.strict()` and would
+// reject `graph_state` / `analysis_state` / `user_id` as unknown keys. We
+// strip them off the body before B1, then parse them with the dedicated
+// extensions validator. Order is load-bearing: extensions first so that
+// an invalid `graph_state` shape surfaces a field-named 422 rather than a
+// generic "unknown key" one.
+//
+// `user_id` was added 2026-04-21 for upsert-on-append pre-flight (see
+// supabase/migrations/…_v5_ensure_scenario_exists.sql).
+//
+// `selected_elements` was added with Wave 2 of the P0 V5 golden-path
+// repair (deterministic value-update with selection narrowing /
+// selected-deictic). Same strip-then-parse pattern: B1 strict() would
+// otherwise reject the key as unknown.
+//
+// DERIVED, not mirrored (trap-12 discipline): the strip-list is exactly the
+// key set of the V5 extension contract (`V5RequestExtensionsSchema`), which is
+// itself built from the field schemas `parseRequestExtensions` runs. Adding an
+// extension field there adds it here automatically — there is no second hand-
+// maintained list to forget. The drift tripwire in
+// `tests/contract/v5-extension-fields-derived.test.ts` fails loudly if the
+// strip-set and the parser's consumed-set ever diverge.
+export const V5_EXTENSION_FIELDS: readonly string[] = Object.keys(
+  V5RequestExtensionsSchema.shape,
+);
+
+export function stripExtensionFields(body: unknown): unknown {
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) return body;
+  const copy: Record<string, unknown> = { ...(body as Record<string, unknown>) };
+  for (const k of V5_EXTENSION_FIELDS) delete copy[k];
+  return copy;
+}
+
+export interface PreFlightContext {
+  readonly requestId: string;
+  readonly ingress: OrchestratorTurnPayload;
+  readonly extensions: ParsedRequestExtensions;
+}
+
+export type PreFlightOutcome =
+  | { readonly ok: true; readonly context: PreFlightContext }
+  | { readonly ok: false; readonly status: 401 | 422; readonly error: BoundaryError };
+
+/**
+ * STEP 0, EXTRACTED — flag-gated user-identity resolution
+ * (CEE_REQUIRE_USER_JWT).
+ *
+ * 'off' (flag down) and 'service_legacy' (key-authed caller, no JWT — the
+ * browser proxy refuses JWT-less turns at its own front door when the flag is
+ * on, so no browser path reaches the carve-out) leave today's behaviour
+ * untouched; 'refused' (present-but-invalid/expired JWT, or missing
+ * verification material) short-circuits with the typed recoverable
+ * sign_in_required 401 BEFORE any body validation.
+ *
+ * ⚠ The refusal is about the CALLER'S TOKEN, never about the scenario — it
+ *   carries no scenario-existence and no scenario-ownership information, which
+ *   is what lets the Stop route surface it without leaking (see turn-stop.ts on
+ *   the indistinguishable refusal).
+ *
+ * Shared by `runPreFlight` (turn admission) and `recordExplicitTurnStop`
+ * (2.236). ONE implementation — see the file header.
+ */
+export async function resolveVerifiedIdentityOrRefuse(
+  req: FastifyRequest,
+  requestId: string,
+): Promise<
+  | { readonly ok: true; readonly identity: UserIdentityResolution }
+  | { readonly ok: false; readonly status: 401; readonly error: BoundaryError }
+> {
+  const identity = await resolveUserIdentity(req, requestId);
+  if (identity.mode === 'refused') {
+    log.warn(
+      { request_id: requestId, auth_reason: identity.reason },
+      'V5 pre-flight: unauthenticated turn refused (sign_in_required)',
+    );
+    return {
+      ok: false,
+      status: 401,
+      error: buildSignInRequiredError(identity.reason, requestId),
+    };
+  }
+  return { ok: true, identity };
+}
+
+/**
+ * STEP 3, EXTRACTED — effective identity + scenario ownership.
+ *
+ * On a verified turn the JWT-derived user_id is authoritative and the
+ * caller-supplied `user_id` extension is IGNORED (spec: after the flip, client
+ * identity from any public path is dead input). A mismatch is telemetry-only —
+ * the verified value wins.
+ *
+ * The ownership decision itself stays `preflightEnsureScenario`'s, unchanged:
+ * it fails CLOSED when the ownership oracle is unavailable, refuses an
+ * anonymous caller on an OWNED scenario, refuses a cross-tenant caller, and
+ * carves out GUEST (unowned) scenarios by design.
+ *
+ * Returns the refusal REASON rather than a finished envelope, because the two
+ * callers must wrap it differently: turn admission answers a typed 422 that
+ * NAMES the reason (the UI distinguishes the branches), while Stop answers ONE
+ * indistinguishable refusal — naming the reason there would leak whether the
+ * scenario exists and whether it is yours. See turn-stop.ts.
+ *
+ * Shared by `runPreFlight` and `recordExplicitTurnStop` (2.236).
+ */
+/**
+ * What a route passes as `claimedUserId` when its surface derives ownership
+ * from the verified token subject alone.
+ *
+ * ── WHY A NAMED SENTINEL RATHER THAN A BARE `null` ─────────────────────────
+ * A bare `null` at a call site reads as "no identity was available", which is
+ * a statement about the REQUEST. This is a statement about the SURFACE: on
+ * these routes a request-supplied identifier is not an input to the ownership
+ * decision at all. Naming it keeps that intent legible at the call site and
+ * makes a future re-introduction a visible edit rather than a silent one.
+ *
+ * ── WHY THIS IS SCOPED TO THE CALL SITES, NOT TO THE SHARED FUNCTION ───────
+ * `authorizeScenarioOwnership` is shared with `/orchestrate/v2/turn{,/stop}`,
+ * where a key-authed service caller acting on a user's behalf is the
+ * documented and intended behaviour (`user-identity.ts`), and where a positive
+ * control in `turn-stop-authorization.test.ts` pins that seam deliberately.
+ * Changing the shared function would move behaviour on those routes too.
+ *
+ * Scoping the change to the scenario call sites leaves that control green,
+ * because nothing it guards has moved: the two surfaces have different
+ * requirements, and this expresses the difference where the difference lives.
+ *
+ * ── ⚠ CEE_REQUIRE_USER_JWT=false IS NOW AN OUTAGE, NOT A ROLLBACK LEVER ────
+ * Because the verified token subject is the ONLY ownership input on these
+ * surfaces, the flag that decides whether a token is verified at all became
+ * load-bearing the moment this sentinel was introduced. With it off,
+ * `resolveUserIdentity` returns `{mode:"off"}` for everyone, the effective
+ * user is null, and every OWNED scenario is refused to its OWN owner on all
+ * six /assist/v1/scenarios/* endpoints — reads and writes alike. Our own
+ * record has previously described this flag as an incident lever; reaching for
+ * it in an incident would now lock every signed-in user out of their own
+ * scenarios. Guest (unowned) scenarios are unaffected.
+ *
+ * It is disclosed at boot (`config.scenario_ownership_posture`, server.ts) and
+ * pinned in the suite as a KNOWN MISCONFIGURATION rather than as correct
+ * behaviour (scenario-routes-claimed-identity.test.ts). Making the two
+ * failures distinguishable to the caller is deliberately NOT done here and is
+ * rowed separately.
+ */
+export const CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE: string | null = null;
+
+/**
+ * ⚠ `admissibleClaimedUserId` USED TO LIVE HERE AND HAS BEEN DELETED.
+ *
+ * It was a thin `string | null` accessor over `resolveOwnershipAuthority`, and
+ * once both call sites moved to the resolver it had ZERO callers — an exported
+ * second expression of the authorization rule, kept alive only by comments
+ * referring to it. That is the shape this estate keeps paying for: two
+ * functions answering one question, free to drift, with nothing forcing them to
+ * agree (CLAUDE.md trap 21, and the two `generateGraphHash` twins before it).
+ * Deleting it leaves exactly one place where "may this caller name an
+ * identity?" is answered.
+ *
+ * The rule, its carve-outs, the witnessed staging defect and the reason HMAC is
+ * the line all live in `orchestrator/ownership-authority.ts`. Go there.
+ */
+
+
+export async function authorizeScenarioOwnership(
+  scenarioId: string,
+  claimedUserId: string | null,
+  identity: UserIdentityResolution,
+  requestId: string,
+  /**
+   * OBSERVATION ONLY — the body `user_id` AS SENT, before admissibility.
+   * NEVER an ownership input; it exists solely to keep the misrepresentation
+   * alarm alive.
+   *
+   * ── WHY THIS PARAMETER HAD TO BE ADDED (a defect in the first cut) ────────
+   * Gating admissibility at the CALL SITE — passing `admissibleClaimedUserId(…)`
+   * in place of the parsed id — discarded the claim before this function ever
+   * saw it. That closed the hole and, in the same motion, silently deleted the
+   * `UserJwtIdentityMismatch` alarm from the only two routes still able to
+   * reach it: after the change, `claimedUserId !== null` became unsatisfiable
+   * for every non-HMAC caller on all five call sites, so a browser presenting
+   * a valid JWT and a DISAGREEING body `user_id` produced no signal at all.
+   *
+   * The comment below already recorded this loss for the three scenario routes
+   * and deferred the repair on the grounds that fixing it "needs an
+   * observation-only parameter on this shared function, which is a change to
+   * the turn/Stop seam this PR deliberately does not touch". That PR now DOES
+   * touch that seam, so the deferral expired and the parameter is here.
+   *
+   * `undefined` means NOT SUPPLIED and preserves the legacy behaviour exactly
+   * (fall back to `claimedUserId`), which is what keeps the three scenario
+   * routes and the direct unit tests unmoved. An explicit `null` means
+   * "supplied, and there was no claim" — a different statement.
+   */
+  observedClaim?: string | null,
+): Promise<
+  | { readonly ok: true; readonly effectiveUserId: string | null }
+  | { readonly ok: false; readonly reason: string }
+> {
+  const observed = observedClaim === undefined ? claimedUserId : observedClaim;
+
+  // A claim was made and DISCARDED. This is the attack signature the
+  // admissibility rule exists to stop, and it is worth a line even though the
+  // request may go on to succeed harmlessly on a guest scenario. Logged at
+  // WARN because a caller naming an identity it may not name is an
+  // operational event, not a debugging detail.
+  if (observed !== null && observed !== claimedUserId && identity.mode !== 'verified') {
+    log.warn(
+      {
+        request_id: requestId,
+        scenario_id: scenarioId,
+        claimed_user_id_prefix: observed.slice(0, 8),
+        identity_mode: identity.mode,
+      },
+      'V5 pre-flight: caller-asserted user_id discarded — caller is not entitled to name an identity',
+    );
+  }
+
+  let effectiveUserId = claimedUserId;
+  if (identity.mode === 'verified') {
+    // ⚠ THIS ALARM IS NO LONGER REACHABLE FROM THE SCENARIO ROUTES, BY
+    // CONSTRUCTION — and it still looks live, which is why this note exists.
+    //
+    // All three /assist/v1/scenarios/* call sites pass
+    // CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE (a literal null) and supply NO
+    // observation, so `observed !== null` is UNSATISFIABLE for them and the
+    // mismatch can never fire on those six endpoints. Only the turn and Stop
+    // routes, which pass `authority.observedClaim`, can reach it.
+    //
+    // One argument was answering two questions — "who owns this?" and "is this
+    // caller misrepresenting itself?" — and removing it as an ownership input
+    // silently removed the second (CLAUDE.md trap 21).
+    //
+    // ⚠ THE DEFERRAL THAT USED TO SIT HERE IS RETIRED, AND LEAVING IT WOULD BE
+    //   THE DEFECT IT DESCRIBED. It read: "Recorded rather than repaired:
+    //   splitting them needs an observation-only parameter on this shared
+    //   function, which is a change to the turn/Stop seam this PR deliberately
+    //   does not touch." That is now FALSE on both clauses — this PR does touch
+    //   that seam, and the parameter exists (see `observedClaim` above). An
+    //   honest note becomes a false one by being left behind after the thing it
+    //   defers gets done.
+    //
+    // WHAT REMAINS TRUE, AND IS ROWED RATHER THAN DONE HERE: the three scenario
+    // routes could now close this the same way — they already call
+    // `parseRequestExtensions`, so the raw claim is in hand and only needs
+    // passing as the fifth argument. That is deliberately NOT done in this PR:
+    // it is six endpoints' worth of behaviour change on surfaces this lane has
+    // not otherwise touched, and "while we're here" work is prohibited. The
+    // MECHANISM now exists; the application is a separate, rowed change.
+    //
+    // NOT OVERSTATED: only the COMPARISON is lost there. The B1 boundary log
+    // still emits `user_id_present` per request, so the presence of a
+    // body-supplied id on a scenario call remains observable.
+    // ⚠ COMPARES `observed`, NOT `claimedUserId`. On the turn and Stop routes
+    // `claimedUserId` has already been through admissibility and is null for
+    // every non-HMAC caller, so comparing it would make this alarm dead code
+    // on exactly the surfaces that can still be misrepresented. `observed` is
+    // the body id as sent, which is the thing whose disagreement is the signal.
+    if (observed !== null && observed !== identity.userId) {
+      emit(TelemetryEvents.UserJwtIdentityMismatch, {
+        request_id: requestId,
+        claimed_user_id_prefix: observed.slice(0, 8),
+        verified_user_id_prefix: identity.userId.slice(0, 8),
+      });
+      log.warn(
+        {
+          request_id: requestId,
+          claimed_user_id_prefix: observed.slice(0, 8),
+          verified_user_id_prefix: identity.userId.slice(0, 8),
+        },
+        'V5 pre-flight: caller-supplied user_id differs from verified JWT sub — using verified identity',
+      );
+    }
+    effectiveUserId = identity.userId;
+  }
+
+  const preflight = await preflightEnsureScenario(scenarioId, effectiveUserId, requestId);
+  if (!preflight.ok) {
+    return { ok: false, reason: preflight.reason };
+  }
+  return { ok: true, effectiveUserId };
+}
+
+/**
+ * THE ONE TRUE SENTENCE A DELETED-SCENARIO REFUSAL CAN CARRY TODAY.
+ *
+ * ── WHY COPY IS ON THIS ENVELOPE AT ALL ────────────────────────────────────
+ * Refusing a turn must not turn a silent resurrection into a silent failure.
+ * Derived at the client (DecisionGuideAI `staging`), the 422 IS surfaced — a
+ * synthetic assistant bubble in the transcript, plus the composer's hero
+ * failure copy — so the refusal is visible. But the client's guidance table
+ * (`failureTypeRetryability.ts`, `OWNERSHIP_REASON_GUIDANCE`) maps only the
+ * three PRE-EXISTING reasons, and an unmapped reason on the
+ * `scenario_preflight` validator falls through to its server-fault line:
+ * "Something on our side isn't working — your message was fine. Please try
+ * again in a moment." Both halves of that are FALSE for a deleted scenario,
+ * and the wait it prescribes can never succeed.
+ *
+ * `details` is `passthrough` on `BoundaryErrorSchema` at both pins, and the
+ * client already reads `details.recovery.{suggestion,hints}` and the flat
+ * `details.recovery_suggestion` mirror — and renders them ABOVE the guidance
+ * line. So CEE can put a true statement in front of the user unilaterally,
+ * which is why this ships here rather than waiting.
+ *
+ * ⚠ WHAT THIS DOES NOT FIX, AND IT IS NOT CLAIMED AS FIXED: the false
+ *   server-fault sentence still renders BELOW this copy until the client adds
+ *   a `scenario_deleted` row to `OWNERSHIP_REASON_GUIDANCE`. That is a
+ *   one-line change in the other repo, it is NOT in this lane's write slot,
+ *   and until it lands the user reads an accurate sentence followed by a
+ *   contradictory one. That is strictly better than a silently resurrected
+ *   decision and strictly worse than the finished state.
+ *
+ * ⚠ A NEW TOP-LEVEL WIRE CODE WOULD BE WORSE THAN DOING NOTHING.
+ *   `BoundaryErrorSchema` is `.strict()` over a CLOSED nine-member enum, so a
+ *   new `error` value (or any extra top-level key) fails the client's
+ *   `safeParse`, collapses to `INTERNAL_ERROR` and shows "Something went wrong
+ *   on our side. Please retry." with a Try-again chip. The refusal therefore
+ *   rides the existing code and validator, and varies only `details.reason`.
+ */
+const SCENARIO_DELETED_RECOVERY_BODY = Object.freeze({
+  suggestion:
+    'This decision has been deleted, so nothing further can be saved to it. ' +
+    'If you did not delete it yourself, it was deleted in another tab or window.',
+  hints: Object.freeze([
+    'Trying again will not restore it.',
+    'Start a new decision, or open a different one from your list.',
+  ]),
+});
+
+const SCENARIO_DELETED_RECOVERY = Object.freeze({
+  recovery: SCENARIO_DELETED_RECOVERY_BODY,
+  // The PINNED flat mirror (@talchain/schemas 0.19.0, Wave-2 ask 7) — same
+  // sentence under the field name the draft-graph and turn routes already
+  // ship, so a consumer implemented against either contract finds it. READ
+  // from the structured value rather than restated: a second copy of this
+  // sentence is a hand-maintained mirror, and it would drift the first time
+  // the copy is edited (CLAUDE.md trap 12). `route-v2.ts` derives its own flat
+  // mirror the same way.
+  recovery_suggestion: SCENARIO_DELETED_RECOVERY_BODY.suggestion,
+});
+
+export async function runPreFlight(req: FastifyRequest): Promise<PreFlightOutcome> {
+  const requestId = getOrGenerateRequestId(req);
+
+  // Step 0 — see `resolveVerifiedIdentityOrRefuse` above. Runs BEFORE any body
+  // validation; that ordering is load-bearing and is pinned by the suites.
+  const resolved = await resolveVerifiedIdentityOrRefuse(req, requestId);
+  if (!resolved.ok) {
+    return { ok: false, status: resolved.status, error: resolved.error };
+  }
+  const identity = resolved.identity;
+
+  const extensions = parseRequestExtensions(req.body, requestId);
+  if (!extensions.ok) {
+    log.warn(
+      {
+        request_id: requestId,
+        error: extensions.error.error,
+        field: (extensions.error.details as { field?: string }).field,
+        issue_count: (extensions.error.details as { issues?: unknown[] }).issues?.length ?? 0,
+      },
+      'V5 request-extensions validation failed',
+    );
+    return { ok: false, status: 422, error: extensions.error };
+  }
+
+  const strippedBody = stripExtensionFields(req.body);
+  const ingress = validateIngress(strippedBody, requestId);
+  if (!ingress.ok) {
+    log.warn(
+      {
+        request_id: requestId,
+        error: ingress.error.error,
+        issue_count: (ingress.error.details as { issues?: unknown[] }).issues?.length ?? 0,
+      },
+      'V5 B1 ingress validation failed',
+    );
+    return { ok: false, status: 422, error: ingress.error };
+  }
+
+  // Step 3 — effective identity + scenario ownership. See
+  // `authorizeScenarioOwnership` above; the Stop route calls the same function.
+  // Admissibility is decided BEFORE ownership, and by the canonical rule in
+  // `ownership-authority.ts`: a shared-key caller may not name the identity it
+  // acts as. The raw claim travels alongside as an OBSERVATION so discarding
+  // it does not also discard the alarm that it was made.
+  const authority = resolveOwnershipAuthority(req, extensions.value.userId, identity);
+  const owned = await authorizeScenarioOwnership(
+    ingress.value.scenario_id,
+    authority.claimAdmitted ? authority.userId : CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE,
+    identity,
+    requestId,
+    authority.observedClaim,
+  );
+  if (!owned.ok) {
+    const preflightError: BoundaryError = {
+      error: 'INGRESS_CONTRACT_VIOLATION',
+      boundary: 'B1',
+      direction: 'ingress',
+      validator: 'scenario_preflight',
+      details: {
+        reason: owned.reason,
+        scenario_id: ingress.value.scenario_id,
+        // Only the deleted-scenario refusal carries copy. The other three
+        // reasons keep a byte-identical envelope (pinned by the inline
+        // snapshots in tests/unit/orchestrator/route-v2-preflight.test.ts).
+        ...(owned.reason === 'scenario_deleted' ? SCENARIO_DELETED_RECOVERY : {}),
+      },
+      request_id: requestId,
+      retryable: false,
+    };
+    return { ok: false, status: 422, error: preflightError };
+  }
+  const effectiveUserId = owned.effectiveUserId;
+
+  return {
+    ok: true,
+    context: {
+      requestId,
+      ingress: ingress.value,
+      // Thread the effective (verified-when-available) identity to every
+      // downstream consumer — ownership checks and RPC p_user_id all read
+      // extensions.userId.
+      extensions: { ...extensions.value, userId: effectiveUserId },
+    },
+  };
+}

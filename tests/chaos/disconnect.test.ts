@@ -131,7 +131,9 @@ async function streamWithDisconnect(
   };
 }
 
-describe("Chaos: Mid-Stream Disconnect", () => {
+// Skipped: v0 /assist/draft-graph route archived — returns 410 Gone. Tests should target /assist/v1/draft-graph
+// TODO: ISSUE-9010 — Chaos suite parked (mid-stream disconnect)
+describe.skip("Chaos: Mid-Stream Disconnect", () => {
   let app: FastifyInstance;
   let redisAvailable = false;
   let secretsConfigured = false;

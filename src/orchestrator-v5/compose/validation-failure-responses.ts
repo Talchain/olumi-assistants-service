@@ -1,0 +1,1550 @@
+/**
+ * Per-code composer for V5 validation failures.
+ *
+ * One switch branch per reachable `ValidationErrorCode`. Each branch yields
+ * a short user-facing `assistant_text` plus one or more `SuggestedAction`s
+ * — every path returns at least one chip so the user always has a next
+ * step (§7 quality contract).
+ *
+ * All dynamic interpolations pass through `safeLabel` (for entity labels;
+ * capped at 60 chars inside the helper) or `sanitiseForUser` (for
+ * free-text internal fields; capped at 100 chars inside the helper).
+ * Enum-bearing fields (EntityKind) are validated by `pickKind` before use.
+ * Entity IDs never appear in output.
+ */
+
+import type { OlumiResponse, StageType } from '@talchain/schemas/boundary';
+
+import type { ValidationError, ValidationErrorCode } from '../routing/validator.js';
+import type { EntityKind } from '../routing/types.js';
+import { log } from '../../utils/telemetry.js';
+
+import type {
+  ChipType,
+  ComposeContext,
+  FailureComposeResult,
+  SuggestedAction,
+} from './types.js';
+import {
+  curatedHandlerChips,
+  safeLabel,
+  sanitiseForUser,
+  type EntityLike,
+} from './helpers.js';
+import {
+  buildQualitativeValueRefusalText,
+  phrasingForParameter,
+  renderNumberlessPhrasing,
+  renderParameterPhrasing,
+} from './parameter-user-phrasing.js';
+import { readMissingValueAnswer } from '../routing/missing-value-answer.js';
+import { isLabelEcho } from '../../cee/transforms/label-echo.js';
+import { formatValueWithUnit } from '../tools/handlers/d1-shared/format-confirmation.js';
+import { isClaimableByClarificationResume } from '../routing/clarification-resume.js';
+import { unitFamilyOf } from '../routing/value-unit-resolution.js';
+import { findChipRawDecimalLeak } from './chip-safety.js';
+import {
+  UNITLESS_VALUE_SCALE_PHRASE,
+  exampleClause,
+  valueExampleForFamily,
+  valueExampleForUnit,
+} from './value-ask-guidance.js';
+import {
+  buildConfigureOptionAdvisedFormat,
+  buildOptionEffectReference,
+} from '../configure-option-chip-text.js';
+
+/**
+ * ⭐ ROADMAP 2.1261 — did the user's own message state (a token of the same
+ * family as) this unit? DERIVED from the value-unit vocabulary the misroute
+ * containment already maintains (`value-unit-resolution.ts`), never a second
+ * list: "12%" and "12 percent" both evidence a `%` proposal, because both
+ * tokens resolve to the `percent` family. A unit outside that vocabulary
+ * falls back to literal containment. An unreadable unit (absent/empty) is
+ * treated as EVIDENCED — this helper only ever LICENSES the honest replacement
+ * copy, so its unknowns must keep the historical bytes (fail-open).
+ */
+function messageEvidencesUnit(message: string, unit: string | undefined): boolean {
+  if (unit === undefined || unit.trim().length === 0) return true;
+  const family = unitFamilyOf(unit);
+  const lowered = message.toLowerCase();
+  if (family === null) return lowered.includes(unit.trim().toLowerCase());
+  const tokens = lowered.match(/[%£$€]|[a-z][a-z'-]*/g) ?? [];
+  return tokens.some((token) => unitFamilyOf(token) === family);
+}
+
+/**
+ * ⭐ THE SAME QUESTION AS `messageEvidencesUnit` ABOVE, ASKED OF THE NUMBER:
+ * did the user's own message contain a figure at all?
+ *
+ * It is a FACT CHECK, not an intent parse, and that is the whole design. It
+ * does not read "strengthen", does not rank magnitude words, and does not
+ * decide what the user meant. Constraint parsing in this estate has already
+ * oscillated through four consecutive rounds of exactly that kind of
+ * predicate — each round fixing one direction and reopening the other, every
+ * round under a fully green suite — and the ruling out of it is that no further
+ * pattern-only rule settles such a question: where the value cannot be
+ * determined, ASK THE USER. This predicate is what licenses the ask; it never
+ * resolves the value.
+ *
+ * ⚠ IT ONLY EVER LICENSES THE HONEST COPY, so its unknowns fail OPEN to today's
+ * bytes: a digit anywhere in the message (a label like "Q3", a quantity of a
+ * different kind) makes it decline and the historical refusal stands. Those
+ * cases are pinned in `NUMBERLESS_MAGNITUDE_KNOWN_DROPPED` rather than chased,
+ * because declining leaves the user with an unhelpful reply while firing
+ * wrongly would leave them with a FALSE one.
+ */
+function messageStatesNoNumber(message: string): boolean {
+  return !/\d/.test(message);
+}
+
+const ENTITY_SIBLING_CAP = 4;
+const AMBIGUOUS_CANDIDATE_CAP = 5;
+
+/**
+ * ⭐ IS THIS SUBJECT ONE WE CAN ACTUALLY NAME BACK TO THE USER?
+ *
+ * `safeLabel` degrades in two steps: a usable label, else `that {kind}`, else
+ * a bare unnamed fallback. Several refusals here interpolate its output into a
+ * sentence ABOUT THE USER'S MESSAGE, and on the bare fallback that sentence
+ * asserts something the payload cannot support.
+ *
+ * ── THE LIVE COST, MEASURED ────────────────────────────────────────────────
+ * 3 Sep 2026 manual capture (`olumi-programme-docs`
+ * `artefacts/manual-test-2026-09-03/olumi-debug-f2e2df1b-20260903.json`), turn
+ * index 2, 14:01:16Z. The user asked, in full: **"Why are all of the outcome
+ * and risk strengths 50%?"** — a whole-model question, 50 characters, naming
+ * no item. The reply, byte-exact:
+ *
+ *     "I wasn't sure what you meant by that item. Did you mean one of these?"
+ *
+ * That is `kind_mismatch_with_siblings` with `entityLabel` on its bare
+ * fallback. Two false claims in one sentence: that the user referred to an
+ * "item", and that their phrasing was unclear. Neither is in the payload. The
+ * user re-asked twice before getting an answer.
+ *
+ * ── WHY A PREDICATE AND NOT A STRING COMPARISON ────────────────────────────
+ * DERIVED from `safeLabel` itself — `safeLabel(null)` IS the bare fallback, so
+ * this cannot drift from the helper it tests (trap 12). Comparing against a
+ * restated `'that item'` literal would go silently wrong the day that copy is
+ * reworded, and the failure would read green.
+ *
+ * The `that {kind}` rung is deliberately NOT unnamed: "I wasn't sure what you
+ * meant by that option" quotes a real category the payload does carry.
+ */
+function isUnnamedSubject(entityLabel: string): boolean {
+  return entityLabel === safeLabel(null);
+}
+
+/**
+ * What a refusal may honestly say when it cannot name its subject.
+ *
+ * The split is the point, and collapsing it would re-open the defect one level
+ * down (CLAUDE.md trap 21 — one name, two questions):
+ *   RESOLVED    the graph DID resolve the target, we simply have no user-safe
+ *               label for it. "I couldn't match that to anything" would be
+ *               false; the true statement is that we cannot make the change.
+ *   UNRESOLVED  nothing was matched at all. That IS the fact, and it is stated
+ *               as OUR failure to match rather than as the user's failure to
+ *               be clear — the distinction #1315 established for the sibling
+ *               instance of this class in the structure-answer composer.
+ *
+ * Neither sentence attributes anything to the user's wording, and neither
+ * invents an "item" the message did not contain.
+ */
+const UNNAMED_SUBJECT_RESOLVED_TEXT =
+  "I found what that change was aimed at, but I can't make that change to it.";
+const UNNAMED_SUBJECT_UNRESOLVED_TEXT = "I couldn't match that to anything in your model.";
+
+/**
+ * 1.16 item A2 — stable chip id for the user-consented "extend the scale"
+ * chip on `value_exceeds_cap` rejections. Exported so the turn-executor's
+ * recoverable-validator commit site can detect the chip on the composed
+ * response and persist the matching `set_factor_value` pending action
+ * (structured {value, unit, cap}) under the SAME id — the pending-action
+ * resumer correlates chip and pending via `chip_id`.
+ */
+export const RESCALE_EXTEND_CAP_CHIP_ID = 'chip_prompt_rescale_extend_cap';
+
+export interface ComposedValidationFailure {
+  readonly response: OlumiResponse;
+  readonly template_id: string;
+  readonly chip_type: ChipType | null;
+}
+
+/**
+ * Build an OlumiResponse for a validation failure. `template_id` and
+ * `chip_type` flow into the failure_response telemetry so an integration
+ * test can assert "no reachable code hit the fallback" and that every path
+ * attaches a typed chip.
+ *
+ * V5 alpha hardening note: after Phase 2.2, this composer is the
+ * **impossible-state safety net** — every recoverable validator code is
+ * routed through `composeRecoverableValidationResponse` (clean body, no
+ * error block) and committed as a direct_answer turn. This function
+ * continues to ship the error-block wrapper so a future unknown code (or
+ * a compile-time-exhaustiveness bug) still fails loudly with a typed
+ * 500 rather than a silent no-op.
+ */
+export function composeValidationFailure(
+  error: ValidationError,
+  ctx: ComposeContext,
+  stage: StageType,
+): ComposedValidationFailure {
+  const result = composeBody(error, ctx);
+  return {
+    response: wrapResponse(error, result.body, stage),
+    template_id: result.template_id,
+    chip_type: result.chip_type,
+  };
+}
+
+export interface BranchResult {
+  readonly body: FailureComposeResult;
+  readonly template_id: string;
+  readonly chip_type: ChipType | null;
+}
+
+/**
+ * Per-code body composer. Extracted from the prior switch statement so each
+ * branch is independently testable and the dispatch layer is a data map
+ * (`VALIDATION_COMPOSERS`) that the TypeScript compiler verifies is
+ * exhaustive against `ValidationErrorCode`.
+ */
+type BranchComposerFn = (error: ValidationError, ctx: ComposeContext) => BranchResult;
+
+function composeHandlerNotFound(error: ValidationError, ctx: ComposeContext): BranchResult {
+  const chips = curatedHandlerChips(ctx.handlerRegistry).map(
+    (h): SuggestedAction => ({
+      id: chipId('action', h.handler_id),
+      label: h.label,
+      message: `${h.label}.`,
+      action_type: h.handler_id as SuggestedAction['action_type'],
+    }),
+  );
+  if (chips.length > 0) {
+    return {
+      body: {
+        assistant_text:
+          "I don't recognise that action. Here's what I can help with right now.",
+        suggested_actions: chips,
+      },
+      template_id: 'handler_not_found',
+      chip_type: 'action',
+    };
+  }
+  return {
+    body: {
+      assistant_text:
+        "I don't recognise that action. Here's what I can help with right now.",
+      suggested_actions: [fallbackPrompt('Tell me what you would like to do')],
+    },
+    template_id: 'handler_not_found',
+    chip_type: 'text_prompt',
+  };
+}
+
+function composeEntityResolutionAmbiguous(error: ValidationError): BranchResult {
+  const details = error.details ?? {};
+  const kind = pickKind(details.entity_kind);
+  const candidates = readCandidates(details.candidates);
+  if (candidates.length > 0) {
+    const chips = candidates.slice(0, AMBIGUOUS_CANDIDATE_CAP).map(
+      (c, i): SuggestedAction => {
+        const label = safeLabel({ label: c.label, kind: kind ?? undefined });
+        return {
+          id: chipId('entity', `${kind ?? 'item'}-${i}`),
+          label,
+          message: `I meant ${label}.`,
+        };
+      },
+    );
+    return {
+      body: {
+        assistant_text: `Which ${kind ?? 'item'} do you mean?`,
+        suggested_actions: chips,
+      },
+      template_id: 'ambiguous_with_candidates',
+      chip_type: 'entity_suggestion',
+    };
+  }
+  return {
+    body: {
+      assistant_text: `I need more detail. Which ${kind ?? 'item'} do you mean?`,
+      suggested_actions: [fallbackPrompt('Tell me which one')],
+    },
+    template_id: 'ambiguous_no_candidates',
+    chip_type: 'text_prompt',
+  };
+}
+
+function composeEntityKindMismatch(error: ValidationError, ctx: ComposeContext): BranchResult {
+  const details = error.details ?? {};
+  const entityLabel = safeLabel({
+    label: readString(details.resolved_label) ?? readString(details.proposed_label),
+    kind: undefined,
+  });
+
+  // `resolved_kind` is present only when the graph resolved the id and the
+  // entity's REAL kind is one the handler does not accept. That is now the
+  // only way a genuine kind mismatch survives the validator's repair — the
+  // model mislabelling a valid target is corrected, not refused. So when we
+  // do refuse, we know exactly what the thing is and what we can act on, and
+  // the copy must say both.
+  const resolvedKind = pickKind(details.resolved_kind);
+  const acceptedKinds = readEntityKinds(details.accepted_kinds);
+
+  // Chips from the kinds the handler CAN act on — the same affordance the
+  // entity_not_found_with_siblings branch gives. A dead-end refusal that
+  // names no next step is what this branch used to be.
+  const graph = ctx.graph;
+  const chips: SuggestedAction[] = [];
+  if (graph) {
+    for (const kind of acceptedKinds) {
+      for (const entity of graph.listEntitiesByKind(kind)) {
+        if (chips.length >= ENTITY_SIBLING_CAP) break;
+        const label = safeLabel({ label: entity.label, kind });
+        chips.push({
+          id: chipId('entity', `km-${chips.length}`),
+          label,
+          message: `I meant ${label}.`,
+        });
+      }
+      if (chips.length >= ENTITY_SIBLING_CAP) break;
+    }
+  }
+
+  // What the handler CAN act on is conveyed by the chips — real labels from
+  // the graph — not by naming our taxonomy. The product-voice contract
+  // (pinned in validation-failure-responses.test.ts) forbids the words
+  // node / edge / goal / constraint / kind in user text, and rightly so:
+  // they are our words, not the user's. Concrete labels are also simply more
+  // useful than an abstract category, and they are clickable.
+  // ⚠ THE UNNAMED ARM IS NOT A NICER WORDING OF THE NAMED ONE — it answers a
+  // different question. When `entityLabel` is on its bare fallback we know
+  // nothing about what the user referred to, so a sentence that quotes their
+  // supposed reference is a claim the payload cannot carry. See
+  // `isUnnamedSubject`. The NAMED path below is byte-identical to before.
+  const found = isUnnamedSubject(entityLabel)
+    ? (resolvedKind ? UNNAMED_SUBJECT_RESOLVED_TEXT : UNNAMED_SUBJECT_UNRESOLVED_TEXT)
+    : resolvedKind
+      ? `I found ${entityLabel}, but I can't make that change to it.`
+      : `I wasn't sure what you meant by ${entityLabel}.`;
+
+  if (chips.length > 0) {
+    return {
+      body: {
+        assistant_text: `${found} Did you mean one of these?`,
+        suggested_actions: chips,
+      },
+      template_id: resolvedKind ? 'kind_mismatch_resolved_with_siblings' : 'kind_mismatch_with_siblings',
+      chip_type: 'entity_suggestion',
+    };
+  }
+
+  // No graph to draw chips from (graph-absent turn, or the handler accepts
+  // only kinds this graph has none of). Still drop the old tail — "Try asking
+  // about a specific option" was actively misleading when the target was an
+  // outcome node, which live evidence shows is the common case.
+  //
+  // `found` is composed ONCE above so the two exits cannot drift into two
+  // spellings of one sentence.
+  return {
+    body: {
+      assistant_text: `${found} Tell me what you'd like to change.`,
+      suggested_actions: [fallbackPrompt('Tell me what you want to change')],
+    },
+    template_id: resolvedKind ? 'kind_mismatch_resolved' : 'kind_mismatch',
+    chip_type: 'text_prompt',
+  };
+}
+
+/** Validate a `details.accepted_kinds` array into typed EntityKinds. */
+function readEntityKinds(value: unknown): EntityKind[] {
+  if (!Array.isArray(value)) return [];
+  const out: EntityKind[] = [];
+  for (const raw of value) {
+    const kind = pickKind(raw);
+    if (kind && !out.includes(kind)) out.push(kind);
+  }
+  return out;
+}
+
+function composeEntityNotFound(error: ValidationError, ctx: ComposeContext): BranchResult {
+  const details = error.details ?? {};
+  const kind = pickKind(details.entity_kind);
+  const entityLabel = safeLabel({
+    label: readString(details.entity_label),
+    kind: kind ?? undefined,
+  });
+  // Same class as the kind-mismatch branch above: "I can't find that item in
+  // your model" tells the user they named an item when they may have named
+  // nothing at all. This branch never resolves a target by construction, so
+  // the unnamed case is always the UNRESOLVED sentence.
+  //
+  // ⭐ Note this arm degrades ONE RUNG LATER than the kind-mismatch one: it
+  // passes `kind` into `safeLabel`, so an entity whose kind is known still
+  // gets "that option" and keeps today's copy. Only a target with neither a
+  // label nor a kind reaches the honest fallback.
+  const notFound = isUnnamedSubject(entityLabel)
+    ? UNNAMED_SUBJECT_UNRESOLVED_TEXT
+    : `I can't find ${entityLabel} in your model.`;
+  const graph = ctx.graph;
+  if (graph && kind) {
+    const siblings = graph.listEntitiesByKind(kind).slice(0, ENTITY_SIBLING_CAP);
+    if (siblings.length > 0) {
+      const chips = siblings.map(
+        (s, i): SuggestedAction => {
+          const label = safeLabel({ label: s.label, kind });
+          return {
+            id: chipId('entity', `nf-${i}`),
+            label,
+            message: `I meant ${label}.`,
+          };
+        },
+      );
+      return {
+        body: {
+          assistant_text: `${notFound} Did you mean one of these?`,
+          suggested_actions: chips,
+        },
+        template_id: 'entity_not_found_with_siblings',
+        chip_type: 'entity_suggestion',
+      };
+    }
+  }
+  return {
+    body: {
+      assistant_text: notFound,
+      suggested_actions: [fallbackPrompt('Try describing what you want')],
+    },
+    template_id: 'entity_not_found_no_siblings',
+    chip_type: 'text_prompt',
+  };
+}
+
+function composeEntityResolutionSuspicious(error: ValidationError): BranchResult {
+  const details = error.details ?? {};
+  const kind = pickKind(details.entity_kind);
+  const chosen = readLabelBearer(details.chosen, kind);
+  const closer = readLabelBearer(details.closer_candidate, kind);
+  const chosenLabel = safeLabel(chosen);
+  const closerLabel = safeLabel(closer);
+  const chips: SuggestedAction[] = [
+    {
+      id: chipId('entity', 'chosen'),
+      label: chosenLabel,
+      message: `I meant ${chosenLabel}.`,
+    },
+    {
+      id: chipId('entity', 'closer'),
+      label: closerLabel,
+      message: `I meant ${closerLabel}.`,
+    },
+  ];
+  return {
+    body: {
+      assistant_text:
+        `Did you mean ${chosenLabel} or ${closerLabel}? They're both in your model.`,
+      suggested_actions: chips,
+    },
+    template_id: 'resolution_suspicious',
+    chip_type: 'entity_suggestion',
+  };
+}
+
+function composePreconditionUnmet(error: ValidationError): BranchResult {
+  const details = error.details ?? {};
+  const reason = readString(details.reason);
+  const handlerId = readString(details.handler_id);
+  if (handlerId === 'run_analysis' && reason === 'no_options_defined') {
+    return {
+      body: {
+        assistant_text:
+          'The analysis needs at least one option to compare. Add your first option to get started.',
+        suggested_actions: [
+          {
+            id: chipId('prompt', 'add-option'),
+            label: 'Add an option',
+            message: 'I want to add an option to my scenario.',
+          },
+        ],
+      },
+      template_id: 'precondition_no_options',
+      chip_type: 'text_prompt',
+    };
+  }
+  return {
+    body: {
+      assistant_text: "I can't run that yet. A prerequisite isn't met.",
+      suggested_actions: [fallbackPrompt('Tell me what you would like to do')],
+    },
+    template_id: 'precondition_generic',
+    chip_type: 'text_prompt',
+  };
+}
+
+function composeParameterInvalid(error: ValidationError, ctx: ComposeContext): BranchResult {
+  const details = error.details ?? {};
+  // `parameter` is a free-string field from the proposal; sanitise before
+  // interpolating. constraint/actual are already sanitised.
+  const parameter = sanitiseForUser(readString(details.parameter) ?? 'that value');
+
+  // V5 Golden Journey row 7 — Fix B. The `missing_value` rejection
+  // branch is for proposals where the `value` parameter was either
+  // absent from the proposal or shaped wrong (e.g. LLM emitted
+  // operator without a paired value on a "from X to Y" turn). The
+  // previous path rendered `sanitiseForUser(undefined) === 'unknown'`,
+  // producing "You gave unknown." — a useless leak of an internal
+  // sentinel. The new branch renders a help message that guides the
+  // user toward supplying a value, without changing the existing
+  // "You gave X" template for real invalid scalars.
+  if (readString(details.rejection_reason) === 'missing_value') {
+    return {
+      body: {
+        // ⭐ WITNESSED (staging UI `88cb7e37` / CEE `4e88390`): this branch
+        // closed with "for example £100,000" on a UNITLESS 0-1 quality factor.
+        // This path threads NO unit (see `preexecuteSetFactorValueStructural`
+        // — details carry parameter/rejection_reason/issue/handler_id/
+        // actual_value and nothing else), so ANY unit example here is
+        // fabricated. Point at the factor's own scale instead of inventing one.
+        assistant_text:
+          `I couldn't tell what value to use. Tell me the number you want, ` +
+          `${UNITLESS_VALUE_SCALE_PHRASE}, and I'll apply it.`,
+        suggested_actions: [
+          {
+            id: chipId('prompt', 'param-supply-value'),
+            label: 'Tell me the value',
+            message: `Use a specific value for ${parameter}.`,
+          },
+        ],
+      },
+      template_id: 'parameter_invalid_missing_value',
+      chip_type: 'text_prompt',
+    };
+  }
+
+  // Value/unit honesty (set_factor_value): a bare number below 1 on a
+  // factor that has a unit reads as a normalised proportion, not a value
+  // in that unit. The predicate refused it before mutating; clarify
+  // honestly without ever rendering the misleading "£0.3". Unit-aware and
+  // NOT currency-specific — `details.unit` is a short symbol ('£', '%',
+  // 'people') threaded by the validator. Falls back to unit-neutral copy
+  // if the unit is somehow absent.
+  if (readString(details.rejection_reason) === 'bare_ratio_on_unit_factor') {
+    const unit = readString(details.unit);
+    const isPercent = unit === '%';
+    const valuePhrase = !unit
+      ? 'the value to use'
+      : isPercent
+        ? 'a percentage'
+        : `a value in ${sanitiseForUser(unit)}`;
+    const askPhrase = !unit
+      ? 'Tell me the value you want, with its unit (for example £6,000, 5%, or 12 months)'
+      : isPercent
+        ? 'Tell me the percentage you want'
+        : `Tell me the amount in ${sanitiseForUser(unit)} you want`;
+    return {
+      body: {
+        assistant_text:
+          `That looks like a proportion rather than ${valuePhrase}, so I ` +
+          `haven't changed anything. ${askPhrase}, and I'll apply it.`,
+        suggested_actions: [
+          {
+            id: chipId('prompt', 'param-supply-ratio-value'),
+            label: 'Tell me the value',
+            message: `Use a specific value for ${parameter}.`,
+          },
+        ],
+      },
+      template_id: 'parameter_invalid_bare_ratio_on_unit_factor',
+      chip_type: 'text_prompt',
+    };
+  }
+
+  // 1.16 items A1/A2/B — honest copy for the remaining set_factor_value
+  // rejection reasons. The validator threads a sanitised, user-readable
+  // `details.issue` for every predicate rejection (e.g. "Value £250,000
+  // exceeds the factor's cap of £200,000."), but these reasons previously
+  // fell through to the generic "'value' needs to be a valid value." —
+  // useless copy that told the user nothing about WHY the edit was refused.
+  const rejectionReason = readString(details.rejection_reason);
+  const issue = readString(details.issue);
+  const factorLabel = readString(details.factor_label);
+
+  if (rejectionReason === 'value_exceeds_cap') {
+    const chips: SuggestedAction[] = [];
+    const honestIssue = sanitiseForUser(issue ?? error.message);
+    // A2 — user-consented rescale chip (never auto-applied). Attached only
+    // when: the proposal carried an EXPLICIT unit (value_exceeds_cap
+    // implies it, but the details may be minimal on legacy emitters), the
+    // operator is an absolute 'set' (the suggested cap covers the stated
+    // value, not a computed delta), a suggested cap was computed, and the
+    // factor label is known. The label matters because the chip's replay
+    // message must NAME the factor: the clarification-resume pre-route
+    // matches the reply against the pending action's factor label. The
+    // message deliberately carries NO digits and NO edit verb so it is
+    // claimed by the resume path (which holds the structured {value, unit,
+    // cap} on the persisted pending action) rather than by the
+    // deterministic value-update path (which would drop the cap).
+    const proposedValue = typeof details.value === 'number' ? details.value : undefined;
+    const unit = readString(details.unit);
+    const suggestedCap = typeof details.suggested_cap === 'number' ? details.suggested_cap : undefined;
+    const operator = readString(details.operator) ?? 'set';
+    if (
+      proposedValue !== undefined &&
+      unit !== undefined &&
+      suggestedCap !== undefined &&
+      suggestedCap >= proposedValue &&
+      factorLabel !== undefined &&
+      operator === 'set'
+    ) {
+      const label = safeLabel({ label: factorLabel, kind: undefined });
+      const replayMessage = `Extend the scale for ${label} and use the new value.`;
+      // PR #413 review FIXUP 2 — degrade-only label gate. The replay is
+      // only deterministic when tryClarificationResume can claim it; a
+      // label carrying a digit ("Phase 2 Cost") or an edit verb ("Set-up
+      // Cost") trips the resumer's negative gate, the click falls to the
+      // LLM WITHOUT the cap, and the user loops the same honest failure.
+      // Apply the resumer's OWN predicate to the exact rendered message
+      // and suppress the chip when it fails — the honest copy and the
+      // retry prompt below still ship.
+      if (isClaimableByClarificationResume(replayMessage)) {
+        chips.push({
+          id: RESCALE_EXTEND_CAP_CHIP_ID,
+          label: `Set to ${formatValueWithUnit(proposedValue, unit)} and extend the scale`,
+          message: replayMessage,
+        });
+      }
+    }
+    chips.push({
+      id: chipId('prompt', 'param-cap-retry'),
+      label: 'Try a different value',
+      message: `Use a different value for ${parameter}.`,
+    });
+    return {
+      body: {
+        assistant_text:
+          `${honestIssue} I haven't changed anything. ` +
+          `You can extend the scale to allow it, or give a value within the current range.`,
+        suggested_actions: chips,
+      },
+      template_id: 'parameter_invalid_value_exceeds_cap',
+      chip_type: 'text_prompt',
+    };
+  }
+
+  if (rejectionReason === 'bare_number_outside_cap') {
+    // The factor's cap does NOT imply a unit: `effectiveUnit` is
+    // `parsed.unit ?? obs?.unit`, and a capped UNITLESS factor leaves both
+    // undefined. Asking such a user for "the value with its unit" and showing
+    // them £100,000 is the witnessed defect.
+    const capExample = valueExampleForUnit(readString(details.unit));
+    const capAsk =
+      capExample === null
+        ? `Tell me the value ${UNITLESS_VALUE_SCALE_PHRASE} and I'll apply it.`
+        : `Tell me the value with its unit${exampleClause(capExample)} and I'll apply it.`;
+    return {
+      body: {
+        assistant_text:
+          `${sanitiseForUser(issue ?? error.message)} I haven't changed anything. ` +
+          `${capAsk}`,
+        suggested_actions: [
+          {
+            id: chipId('prompt', 'param-supply-unit-value'),
+            label: 'Tell me the value',
+            message: `Use a specific value for ${parameter}.`,
+          },
+        ],
+      },
+      template_id: 'parameter_invalid_bare_number_outside_cap',
+      chip_type: 'text_prompt',
+    };
+  }
+
+  if (rejectionReason === 'cap_non_positive') {
+    return {
+      body: {
+        assistant_text:
+          `${sanitiseForUser(issue ?? error.message)} I haven't changed anything. ` +
+          `Give the value with a sensible scale and I'll apply it.`,
+        suggested_actions: [
+          {
+            id: chipId('prompt', 'param-cap-retry'),
+            label: 'Try a different value',
+            message: `Use a different value for ${parameter}.`,
+          },
+        ],
+      },
+      template_id: 'parameter_invalid_cap_non_positive',
+      chip_type: 'text_prompt',
+    };
+  }
+
+  // Item B — relative-edit honesty. A delta ("increase X by 10%") was
+  // refused because the factor has no recorded current value to adjust
+  // from. Name the entity and steer toward an absolute set.
+  if (rejectionReason === 'delta_no_existing_value') {
+    const subject = factorLabel !== undefined
+      ? safeLabel({ label: factorLabel, kind: undefined })
+      : 'That factor';
+    // Same defect as `bare_number_outside_cap`: a factor with no recorded
+    // value very often has no recorded unit either, and this branch showed
+    // every one of them a currency.
+    const deltaExample = valueExampleForUnit(readString(details.unit));
+    const deltaAsk =
+      deltaExample === null
+        ? `Tell me what the value should be, ${UNITLESS_VALUE_SCALE_PHRASE}, and I'll set it.`
+        : `Tell me what the value should be${exampleClause(deltaExample)} and I'll set it.`;
+    return {
+      body: {
+        assistant_text:
+          `${subject} doesn't have a recorded value yet, so I can't adjust it ` +
+          `relative to a current value. ${deltaAsk}`,
+        suggested_actions: [
+          {
+            id: chipId('prompt', 'param-absolute-set'),
+            label: 'Set its value',
+            message: `Set ${subject} to a specific value.`,
+          },
+        ],
+      },
+      template_id: 'parameter_invalid_delta_no_existing_value',
+      chip_type: 'text_prompt',
+    };
+  }
+
+  // ⭐ ROADMAP 2.1261 — HONEST COPY for a unit the USER NEVER STATED.
+  //
+  // `unit_redeclares_scale`'s specific_issue interpolates the PROPOSAL's unit
+  // ("…applying a value in % would change what it measures"). On the chat
+  // path that unit comes from the routing model, which re-reads conversation
+  // history — wire-witnessed (req b90d62e0, deployed c5e2430): the unit-free
+  // "Set it to 0.12." was re-proposed with the PRIOR turn's `%`, and the copy
+  // attributed that % to the user. Copy may only describe what the input
+  // actually contained, so when the caller supplied the raw message AND no
+  // token of the unit's family appears in it, say what is true of the MODEL
+  // and what is needed — without attributing a unit to the user.
+  //
+  // Fail-open by construction: no `userMessage` (system-event paths, legacy
+  // callers) or a message that DOES evidence the unit keeps the historical
+  // bytes below — including the pinned system-event wire contract.
+  if (
+    rejectionReason === 'unit_redeclares_scale' &&
+    typeof ctx.userMessage === 'string' &&
+    !messageEvidencesUnit(ctx.userMessage, readString(details.unit))
+  ) {
+    // ⭐⭐ THE WITNESSED DEFECT (staging UI `88cb7e37` / CEE `4e88390`), on the
+    // product's OWN recommended next step. The copy below used to read "so I
+    // need the value as a plain number ... Tell me the plain number you want".
+    // The user had ALREADY sent a plain number (0.7), and the same value
+    // succeeded when sent bare moments later. THE STATED REASON WAS NOT THE
+    // ACTUAL BLOCKER, so the user retyped numbers that could only keep failing.
+    //
+    // What this branch PROVABLY knows, and what the copy must therefore say:
+    //   • the factor is unitless — `unit_redeclares_scale` fires only on
+    //     `unit !== undefined && factorUnit === undefined`
+    //     (`evaluate-factor-value-proposal.ts` 2c);
+    //   • the unit did NOT come from the user — this branch's own guard is
+    //     `!messageEvidencesUnit(ctx.userMessage, details.unit)`;
+    //   • the magnitude was NEVER INSPECTED by the predicate.
+    // Therefore: name the UNIT as what cannot be applied, and hand back a
+    // sendable restatement. The refusal itself is untouched.
+    //
+    // ⚠⚠ F1, REVIEW OF #1080 — WHAT THIS COPY MUST *NOT* SAY, and why an
+    // earlier draft of this branch said it anyway. That draft closed with
+    // "the number isn't the problem: the unit is", reasoning that because the
+    // predicate never inspects magnitude, the magnitude cannot be at fault.
+    // THAT IS A NON-SEQUITUR: a predicate having no opinion on the number is
+    // not evidence the number is fine. `details.value` is `parsed.numeric`,
+    // and `normalise-factor-value.ts` declares the proposal's number lives in
+    // the UNIT's frame ("{ value: 5, unit: '%' } — percentage on 0-1 model
+    // scale") — while this branch fires precisely when that unit is one the
+    // user never stated. Reachable counter-example: a unitless uncapped factor
+    // sitting at 0.6, "set it to 12", router proposes `{value: 12, unit: '%'}`,
+    // guard 2c fires. "The number isn't the problem" plus `Say "Set X to 12"`
+    // would be false AND would steer the user into writing 12 onto a 0-1
+    // factor, which nothing downstream caps. The old copy claimed no such
+    // thing. So: assert nothing about the magnitude, and make the restatement
+    // CONDITIONAL ("if you meant N as a plain number") rather than an
+    // endorsement. This is trap 13d — an invariant written against the
+    // witnessed failure mode (0.7, where the two frames happened to coincide)
+    // instead of against the spec.
+    //
+    // ⚠ The unit is still never NAMED (ROADMAP 2.1261): saying "you applied %"
+    // about a % the routing model re-read from history is the defect that
+    // branch exists to close. "The edit I built for it carried one" attributes
+    // it where it belongs.
+    const renderedLabel = factorLabel !== undefined
+      ? safeLabel({ label: factorLabel, kind: undefined })
+      : undefined;
+    const unstatedSubject = renderedLabel ?? 'This factor';
+    // ⚠ F2, REVIEW OF #1080 — GATE ON THE RENDERED LABEL, NOT THE RAW ONE.
+    // The restatement tells the user to send a message VERBATIM, so it is only
+    // safe when the label we print is the label the router will match. An
+    // earlier draft gated on `factorLabel !== undefined` while interpolating
+    // `safeLabel(...)`, which has two reachable failure modes: an id-shaped
+    // label (`rep_adoption`) makes `safeLabel` return the bare deictic
+    // 'that item' — and `repair-value-binding.ts` documents a bare deictic as
+    // exactly what CANNOT anchor, so we would be prescribing a message the
+    // system has proven it cannot route; and a label over MAX_LABEL_LENGTH is
+    // truncated to `first 57 + '...'`, producing an unclosed quote around a
+    // label the user is told to send as-is. Byte equality with the raw label
+    // rules out substitution, truncation AND trimming in one check; the
+    // explicit deictic test covers a factor genuinely labelled "that item".
+    const labelIsFaithful =
+      renderedLabel !== undefined &&
+      renderedLabel === factorLabel &&
+      renderedLabel !== 'that item';
+    // Only a `set` may be restated as a target value: on increase/decrease/
+    // multiply `details.value` is the DELTA, and "Set X to <delta>" would
+    // invent the user's figure. Long floats are computed arithmetic
+    // ("1.2999999999999998") and are never echoed back to a user.
+    const unstatedValue = typeof details.value === 'number' && Number.isFinite(details.value)
+      ? details.value
+      : undefined;
+    const restatable =
+      readString(details.operator) === 'set' &&
+      unstatedValue !== undefined &&
+      String(unstatedValue).length <= 12 &&
+      labelIsFaithful;
+    const unstatedNext = restatable
+      ? `If you meant ${String(unstatedValue)} as a plain number on this ` +
+        `factor's own scale, say "Set ${unstatedSubject} to ` +
+        `${String(unstatedValue)}" and I'll apply it.`
+      : `Tell me the value again as a plain number on this factor's own scale ` +
+        `and I'll apply it.`;
+    return {
+      body: {
+        assistant_text:
+          `${unstatedSubject} is recorded without a unit, so the unit in the ` +
+          `edit I built for it cannot be applied without changing what it ` +
+          `measures. I haven't changed anything. ${unstatedNext}`,
+        suggested_actions: [
+          {
+            id: chipId('prompt', 'param-retry'),
+            label: 'Try a different value',
+            message: `Use a different value for ${parameter}.`,
+          },
+        ],
+      },
+      template_id: 'parameter_invalid_unit_unstated',
+      chip_type: 'text_prompt',
+    };
+  }
+
+  // General fallback (item A1): when there is no constraint description but
+  // the validator supplied a user-readable issue, render the issue rather
+  // than the meaningless "'value' needs to be a valid value.".
+  if (readString(details.constraint_description) === undefined && issue !== undefined) {
+    return {
+      body: {
+        assistant_text:
+          `${sanitiseForUser(issue)} I haven't changed anything. ` +
+          `Tell me what you'd like instead and I'll apply it.`,
+        suggested_actions: [
+          {
+            id: chipId('prompt', 'param-retry'),
+            label: 'Try a different value',
+            // ROADMAP 2.380 — DELIBERATELY LEFT ON THE RAW SPELLING. This chip
+            // has the same "internal parameter name in a user-visible string"
+            // smell as the main branch, and I did change it — until CI showed
+            // the change breaking `route-v2-factor-value-edit-scale-
+            // redeclaration.test.ts`, which pins THE REFUSAL SHAPE ON THE WIRE
+            // for the UI half. This branch is reached only when the error
+            // carries an `issue` but NO `constraint_description`, which the
+            // captured live defect does not (it rendered a constraint), so
+            // changing it buys nothing for ROADMAP 2.380 and spends a
+            // documented v2 wire contract to do it. Rowed separately rather
+            // than smuggled into an XS copy fix.
+            message: `Use a different value for ${parameter}.`,
+          },
+        ],
+      },
+      template_id: 'parameter_invalid_issue',
+      chip_type: 'text_prompt',
+    };
+  }
+
+  // ROADMAP 2.380 (FIX 3) — THE VALIDATOR-JARGON LEAK, FIXED AT ITS SOURCE.
+  //
+  // This template used to render, verbatim to the user:
+  //     'strength' needs to be a number between -1 and 1. You gave 30.
+  // `strength` is a Zod field name; "a number between -1 and 1" is
+  // `describeSchema` reading `_def.checks`; and the retry chip put the field
+  // name in the user's own mouth ("Use a different value for strength."). None
+  // of that is vocabulary the product has ever shown. The repo already quoted
+  // this exact sentence as a known leak in a NEIGHBOURING file's copy contract
+  // (configure-option-clarify-response.ts:50) — the copy there was fixed and
+  // this emission site, the one that actually produces it, was not.
+  //
+  // Copy now comes from `parameter-user-phrasing.ts`, keyed by the parameter
+  // the registry declares, and says what the scale MEANS instead of printing
+  // its bounds. An undeclared parameter falls back to copy that echoes NOTHING
+  // from the error, so no future emission site can leak through this branch.
+  // Coverage is DERIVED over HANDLER_VALIDATION_REGISTRY, not hand-listed:
+  // a handler that adds a parameter without adding phrasing turns
+  // __tests__/parameter-invalid-no-validator-jargon.test.ts RED.
+  //
+  // The "You gave X." echo and its DISCRIMINATING scalar gate are deliberately
+  // KEPT as-is. That gate took several rounds of sentinel leaks ('unknown',
+  // '[complex value]') to get right and has its own positive controls; this
+  // fix replaces the jargon, it does not fold the echo away. What is new is
+  // that a parameter may opt OUT of the echo: on the edge-strength path the
+  // number is the ROUTING MODEL's proposal, not something the user typed, so
+  // "You gave 30." attributes to them a value they never gave, on a scale they
+  // have never been shown. See `echo_actual` in parameter-user-phrasing.ts.
+  // ═════════════════════════════════════════════════════════════════════════
+  // ROADMAP 2.384 — THE BAND-VOCABULARY REFUSAL (System D).
+  //
+  // WITNESSED: "Set the … factor to high." → "I couldn't use that as the
+  // value. Tell me the number you want and I'll set it.", while the product's
+  // own read surface showed "Moderate (0.5)" and its readiness blocker asked
+  // the question IN BANDS. The refusal is correct and fails closed; what was
+  // missing is that it never acknowledged the vocabulary the product taught.
+  //
+  // ⭐⭐ THE READING IS TAKEN FROM THE USER'S MESSAGE, NOT FROM THE PROPOSAL,
+  // AND THAT CHOICE IS LOAD-BEARING — DO NOT "SIMPLIFY" IT.
+  //
+  // The tempting version reads `details.actual_value` and asks "is it a
+  // string?". It would have been WRONG on the witnessed turn, and the witness
+  // is what proves it: `value` declares `echo_actual: true`, and
+  // `isGenuineScalar` admits a non-empty string, so had the proposal carried
+  // the bare word the reply would have read "You gave high." IT DID NOT — so
+  // whatever the router put in that slot was NOT a bare scalar string (the
+  // structured `{ value: … }` shape failing `.strict()` fits the evidence).
+  // ⚠ I could not establish at the wire which shape it was, and this branch
+  // deliberately does not need to know: the user's own sentence is the same on
+  // every reading, and it is the only artefact that records what they MEANT.
+  // A proposal-shaped guard would re-open the defect the first time the router
+  // wrapped the word differently.
+  //
+  // Absent `userMessage` (system-event paths) ⇒ no reading ⇒ today's copy,
+  // unchanged. Fail-open by construction, as `messageEvidencesUnit` above.
+  if (readString(details.parameter) === 'value' && typeof ctx.userMessage === 'string') {
+    const answer = readMissingValueAnswer(ctx.userMessage);
+    if (answer !== null && answer.kind === 'qualitative') {
+      // ⛔ THE ANCHOR IS RESOLVED BY IDENTITY OR NOT AT ALL (trap 19). It is
+      // read for the ONE id this refusal is about — never "the sole factor" or
+      // "the first factor with a value", either of which would quote a
+      // different node's state at the user with full confidence.
+      const targetId = readString(details.target_id);
+      const entity = targetId !== undefined ? (ctx.graph?.findEntityById(targetId) ?? null) : null;
+      const snapshot =
+        targetId !== undefined ? (ctx.graph?.findFactorObservedState?.(targetId) ?? null) : null;
+      // `safeLabel` degrades to "that item"/"that factor" when there is no real
+      // label. That phrasing cannot carry the anchor sentence ("that item is
+      // Moderate (0.5) just now" names nothing the user can check), so a
+      // missing label drops the anchor rather than filling it.
+      const rawLabel = typeof entity?.label === 'string' ? entity.label.trim() : '';
+      const factorLabel = rawLabel.length > 0 ? safeLabel(entity) : null;
+      // ⛔⛔ TWO DECLINING CONJUNCTS, DERIVED FROM THE BLOCKER'S OWN PREDICATE.
+      //
+      // ⚠ THE CLAIM THIS PR WAS APPROVED ON — "the reply quotes the same field
+      // the blocker quotes, so the two cannot diverge" — WAS REFUTED IN REVIEW,
+      // and it was refuted because the field is only the FIRST of three things
+      // the blocker's rung 1 requires. `analysis-ready.ts:485` reads
+      // `factorNode.display_value` only when it is NOT a label echo, and it is
+      // reached at all only when the quoted level genuinely came from
+      // `observed_state` (`:829` passes `typeof observedValue === "number"`).
+      // Reading the same FIELD past both conditions is not the same READ.
+      //
+      // Measured on the first version of this branch:
+      //   · `"CRM Annual Licence Cost" is CRM Annual Licence Cost just now.`
+      //     — the label echoed back as its own value, which is the precise harm
+      //     `isLabelEcho` exists to stop, in a sentence about honesty.
+      //   · a factor with `{raw_value, display_value}` and NO observed value
+      //     quoted "50,000" while the blocker returns the bare level — the two
+      //     surfaces disagreeing, which is what this branch promised not to do.
+      //
+      // ⭐ `isLabelEcho` is IMPORTED, not restated. Its own header records that
+      // it once had four call sites hand-copied at three; a fifth copy here
+      // would be that defect committed inside the fix for it. It now lives in
+      // `cee/transforms/label-echo.ts` so both layers read one definition.
+      const levelCameFromObservedState = typeof snapshot?.value === 'number';
+      const rawDisplay =
+        typeof snapshot?.display_value === 'string' ? snapshot.display_value.trim() : '';
+      const currentDisplay =
+        rawDisplay.length > 0 &&
+        levelCameFromObservedState &&
+        !isLabelEcho(rawLabel.toLowerCase(), rawDisplay)
+          ? sanitiseForUser(rawDisplay)
+          : null;
+      const phrasing = phrasingForParameter('value');
+      return {
+        body: {
+          assistant_text: buildQualitativeValueRefusalText({
+            term: sanitiseForUser(answer.term),
+            factorLabel,
+            currentDisplay,
+          }),
+          // The SAME retry chip the generic branch offers. A chip carrying a
+          // number is banned here for the reason the whole branch exists:
+          // choosing one would be the fabrication (see
+          // `routing/readiness-answer-chips.ts`, THE FABRICATION BOUNDARY).
+          suggested_actions: [
+            {
+              id: chipId('prompt', 'param-retry'),
+              label: 'Try a different value',
+              message: phrasing.chip_message,
+            },
+          ],
+        },
+        template_id: 'parameter_invalid_qualitative_value',
+        chip_type: 'text_prompt',
+      };
+    }
+  }
+
+  const actual = sanitiseForUser(details.actual_value);
+  // V5 edit_graph P0 (task_99f83f0d) — kill the "You gave unknown." leak.
+  // `sanitiseForUser` maps undefined/null/empty inputs to the internal
+  // 'unknown' sentinel; rendering "You gave unknown." leaks a placeholder
+  // that means nothing to the user. This covers PARAMETER_INVALID emission
+  // sites that omit `actual_value` entirely (invalid_operator, graph
+  // predicates) — not just the `missing_value` branch above.
+  //
+  // Compound-value hardening: on a multi-effect edit `actual_value` is an
+  // object, so `sanitiseForUser` returns the '[complex value]' sentinel and
+  // "You gave [complex value]." leaked — the 'unknown'-only check let it
+  // through. Gate the echo on the RAW input type instead: only a genuine
+  // finite scalar (number / boolean / non-empty string) has a meaningful
+  // single-value form. Typing the gate — not string-matching sanitiser
+  // sentinels — means a future sentinel can't leak the same way. The residual
+  // `!== 'unknown'` still catches a non-empty string that sanitises to empty.
+  const showActual = isGenuineScalar(details.actual_value) && actual !== 'unknown';
+  const phrasing = phrasingForParameter(readString(details.parameter));
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // THE NUMBERLESS MAGNITUDE ASK — copy may only describe what the input
+  // actually contained.
+  //
+  // WITNESSED (deployed cee-staging, 2026-08-29, signed-in fresh journey, run
+  // `20260829T163926Z-c2-d2842c`): the user typed
+  //   "Strengthen the link from Current Monthly Churn Rate to Churn Remaining
+  //    Elevated."
+  // — an edge derived from the graph in hand, and NO number anywhere — and the
+  // product answered "I couldn't use THAT as the strength of that link", then
+  // recited a numeric range. There was no "that". `echo_actual` in
+  // parameter-user-phrasing.ts already records why: on this path the number is
+  // the ROUTING MODEL's proposal, never the user's. So the refusal attributes a
+  // proposal property to the user, which is the defect class ROADMAP 2.1261
+  // closed one parameter over.
+  //
+  // ⭐ IT ASKS; IT DOES NOT GUESS. Mapping "stronger" to a number would cross
+  // THE FABRICATION BOUNDARY (`routing/readiness-answer-chips.ts`) and would
+  // pick one of six disagreeing band ladders on the user's behalf.
+  //
+  // ⚠ ORDERING IS LOAD-BEARING: this sits BELOW the `value` qualitative branch
+  // (2.384), which is richer — it quotes the user's word and anchors on the
+  // factor's own display value — and `value` declares no
+  // `problem_when_numberless`, so the two cannot both fire.
+  if (typeof ctx.userMessage === 'string' && messageStatesNoNumber(ctx.userMessage)) {
+    const numberless = renderNumberlessPhrasing(phrasing);
+    if (numberless !== null) {
+      return {
+        body: {
+          assistant_text: numberless,
+          // The SAME retry chip the generic branch offers. It carries no
+          // number, so it cannot put a product-chosen value in the user's
+          // mouth when it becomes their next turn.
+          suggested_actions: [
+            {
+              id: chipId('prompt', 'param-retry'),
+              label: 'Try a different value',
+              message: phrasing.chip_message,
+            },
+          ],
+        },
+        template_id: 'parameter_invalid_numberless_magnitude',
+        chip_type: 'text_prompt',
+      };
+    }
+  }
+
+  return {
+    body: {
+      assistant_text: renderParameterPhrasing(phrasing, showActual ? actual : null),
+      suggested_actions: [
+        {
+          id: chipId('prompt', 'param-retry'),
+          label: 'Try a different value',
+          message: phrasing.chip_message,
+        },
+      ],
+    },
+    template_id: 'parameter_invalid',
+    chip_type: 'text_prompt',
+  };
+}
+
+/**
+ * V5 edit_graph P0 containment (task_99f83f0d). The user implied an edit to
+ * an OPTION's intervention but the proposal resolved to a `set_factor_value`
+ * on the shared factor; the turn-executor refused the mutation and routed
+ * this code so we clarify instead of silently changing the factor's own
+ * value. No auto-routing chip (which could loop back into the same
+ * misroute) — a single text-prompt to disambiguate. Graph is unchanged by
+ * the time this composes.
+ */
+/**
+ * ⭐⭐ THE OUTSTANDING-EFFECT-ASK REFUSAL — the copy that has to be TRUE about
+ * the entity and the field, because the receipt it replaces was not.
+ *
+ * Fresh-guest browser witness, 20 Aug 2026. The product offered *"changing the
+ * strength of "<option>→<factor>" to 0.6"*, applied it, badged it **Applied**,
+ * and readiness did not move; separately it wrote a factor's own value under
+ * the same badge. Both writes were truthful about themselves and false about
+ * what the user was answering. The refusal therefore says three things the old
+ * generic copy could not: WHICH pair is outstanding, WHICH field the request
+ * would have moved instead, and — when the option is unambiguous — the
+ * product's OWN advised sentence for writing the right one.
+ *
+ * ⚠ THE OPTION IS NEVER CHOSEN HERE. Two or more outstanding options on the
+ * named factor is a genuine ambiguity, and the estate's ruling for that state is
+ * to ask (CLAUDE.md trap 22f). The copy lists them and stops.
+ *
+ * ⭐ THE EXEMPLAR IS `buildOptionEffectReference`, the estate's ONLY spelling of
+ * the option × factor noun phrase and the one the router's `effect_vocab`
+ * trigger is calibrated against — so a user who copies the sentence back routes
+ * into the writer that can honour it, not into the loop that could not.
+ */
+function composeOutstandingEffectAskMisroute(
+  details: Readonly<Record<string, unknown>>,
+): BranchResult | null {
+  const refusedField = readString(details.effect_ask_refused_field);
+  const factorLabel = readString(details.effect_ask_factor_label);
+  const rawOptions = details.effect_ask_option_labels;
+  const optionLabels = Array.isArray(rawOptions)
+    ? rawOptions.filter((l): l is string => typeof l === 'string' && l.trim().length > 0)
+    : [];
+  if (!refusedField || !factorLabel || optionLabels.length === 0) return null;
+
+  const factor = safeLabel({ label: factorLabel, kind: undefined });
+  // Name the field the request WOULD have moved, in the user's terms.
+  const wrongField =
+    refusedField === 'edge_strength'
+      ? `the strength of the link into ${factor}`
+      : `${factor}'s own value`;
+
+  if (optionLabels.length === 1) {
+    const option = safeLabel({ label: optionLabels[0]!, kind: undefined });
+    // ⭐⭐ CORRECT THE MUTATION IN ONE CLICK, not one retype. When the user's own
+    // sentence already carried a model-unit effect value, the only thing wrong
+    // with the turn was WHICH FIELD it was going to move — so the chip replays
+    // the value they typed, into the phrasing that reaches the honest writer.
+    //
+    // The value is READ BY THE GUARD, using `readOptionEffectValue` — the
+    // writer's OWN reader (trap 12: not a second spelling) — and arrives here as
+    // a number. That reader is anchored on `to <number>` and therefore declines
+    // a hedge like "…strongly, about 0.6" all by itself. The restraint is
+    // deliberate and is the P5 half of this: replaying an approximation as an
+    // exact figure would launder the user's judgement. No value ⇒ no chip, and
+    // the copy asks for the number instead.
+    const rawValue = details.effect_ask_user_value;
+    const userValue = typeof rawValue === 'number' && Number.isFinite(rawValue) ? rawValue : null;
+    const candidateLabel = userValue === null ? '' : `Set the effect to ${userValue}`;
+    // ⭐⭐ THE CHIP CARRIES THE OPTION'S IDENTITY — it does not re-derive it.
+    //
+    // REVIEW FINDING, demonstrated by execution at `1b4e2c1a`. The first cut
+    // emitted the OPTION-LESS advised form so the sentence would route, and rule
+    // 3b then re-resolved the option AT CLICK TIME from whatever was outstanding
+    // then. Measured on the captured graph with the outstanding option shifted
+    // between offer and click:
+    //
+    //   option-less form → binds 939d4630   ← an option the user never chose
+    //   full-label form  → binds 4abad64d   ← the one the copy named
+    //
+    // So the message names the option IN FULL, from the RAW label rather than
+    // the displayed one: `safeLabel` TRUNCATES (real drafted labels run 84-101
+    // characters) and a truncated label matches nothing, which is what pushed
+    // the first cut into the option-less form in the first place. The rendered
+    // sentence the user READS stays truncated; the replay the chip SENDS is
+    // whole. Different jobs, different strings.
+    //
+    // ⚠ RESIDUAL, MEASURED AND NOT CLOSED HERE: if the named option is DELETED
+    // between offer and click, rule 3b still re-resolves (measured: binds
+    // 939d4630) rather than declining, because once the node is gone nothing in
+    // the sentence is recognisable as an option reference. Closing that needs a
+    // chip that pins `optionId` and a resume that binds by it — new pending-action
+    // machinery, not a predicate tweak. Reported rather than bodged.
+    // ⭐ THE REPLAY ARRIVES VERIFIED. `buildVerifiedCorrectionReplay` already ran
+    // it through the real writer against the real graph and confirmed it binds
+    // this exact pair and value, so this site never mints an affordance that
+    // would dead-end. See that function's header for the label class that broke
+    // the previous, hand-reasoned version.
+    const verifiedReplay = readString(details.effect_ask_replay_message) ?? null;
+    const replay =
+      verifiedReplay !== null
+      && !findChipRawDecimalLeak(candidateLabel, verifiedReplay, { isValidatedProposal: false })
+        ? verifiedReplay
+        : null;
+    return {
+      body: {
+        assistant_text:
+          `I haven't changed anything. I'm still waiting on `
+          + `${buildOptionEffectReference(option, factor)}, and what you asked for `
+          + `would have moved ${wrongField} instead — a different number, which `
+          + `would not have answered that question. Send me the effect value like `
+          + `this and I'll write it in: `
+          // ⭐ THE EXEMPLAR NAMES NO OPTION, DELIBERATELY. `safeLabel` truncates
+          // a real drafted option label, and the truncated sentence does NOT
+          // route (`option_not_named`, measured) — it would be a dead end
+          // dressed as help. With the option left out, rule 3b resolves it from
+          // this very ask. Pinned by the routing spec, so the exemplar can never
+          // drift away from the lane that would honour it.
+          + `"${buildConfigureOptionAdvisedFormat('', factor, String(replay === null ? 0.6 : userValue))}" `
+          + `(any number from 0 to 1).`,
+        suggested_actions: [
+          replay === null
+            ? fallbackPrompt('Give the effect value')
+            : {
+                id: chipId('prompt', `option-effect-${factor}`),
+                label: candidateLabel,
+                message: replay,
+              },
+        ],
+      },
+      template_id: 'option_intervention_misroute',
+      chip_type: 'text_prompt',
+    };
+  }
+
+  const options = optionLabels
+    .map((l) => `"${safeLabel({ label: l, kind: undefined })}"`)
+    .join(' and ');
+  return {
+    body: {
+      assistant_text:
+        `I haven't changed anything, because I'm not sure which option you mean. `
+        + `${options} are both still missing their effect on ${factor}, and what `
+        + `you asked for would have moved ${wrongField} instead. Tell me which `
+        + `option you mean and the number, and I'll write it in `
+        + `(any number from 0 to 1).`,
+      suggested_actions: [fallbackPrompt('Say which option')],
+    },
+    template_id: 'option_intervention_misroute',
+    chip_type: 'text_prompt',
+  };
+}
+
+/**
+ * ⭐⭐ THE OFFER IS GONE, SO SAY SO — never guess at what it was.
+ *
+ * The demotion chips carry copy that is CONTENT-FREE BY DESIGN ("Set that value
+ * in my model."). While the offer is live that is harmless: the pending carries
+ * the actual patch and the resume executes IT, not the sentence. Once the offer
+ * is gone the sentence is all that is left, and it says nothing — so anything
+ * built from it is reconstructed from conversation history. Measured at
+ * `1647d99b` from a real round trip: the factor's own value moved 0.5 → 0.8
+ * under the receipt *"Updated Sales Headcount - Hybrid Maintained from 0.5 to
+ * 0.8."* — a confident sentence about a number the user never asked for.
+ *
+ * ⭐ THE VOCABULARY IS THE ESTATE'S OWN, NOT A NEW ONE. `turn-executor.ts`'s
+ * what_would_flip no-pending recovery already says *"no longer available"* for
+ * exactly this state. Same words, so the product does not describe one
+ * situation two ways.
+ *
+ * ⚠ IT DECLINES; IT NEVER RE-DERIVES. Re-offering would mean rebuilding the
+ * proposal from history — the very act that produced the wrong write. The route
+ * onward is to ask, which costs one turn and cannot be wrong.
+ */
+function composeExpiredOfferReplay(): BranchResult {
+  return {
+    body: {
+      assistant_text:
+        `I haven't changed anything. That suggestion is no longer available — `
+        + `offers expire after a couple of turns, and on its own it doesn't say `
+        + `what to change, so acting on it now would mean guessing. Tell me what `
+        + `you'd like to change and I'll write it in.`,
+      suggested_actions: [fallbackPrompt('Tell me what to change')],
+    },
+    template_id: 'expired_offer_replay',
+    chip_type: 'text_prompt',
+  };
+}
+
+function composeOptionInterventionMisroute(error: ValidationError): BranchResult {
+  const details = error.details ?? {};
+  // ⭐ The identity-bound refusal takes precedence when the guard supplied a
+  // pair: it can name the entity and the field, and the generic copy below
+  // cannot. Falls through byte-identically when the details are absent, so the
+  // pre-existing prose-triggered refusals are untouched.
+  const effectAsk = composeOutstandingEffectAskMisroute(details);
+  if (effectAsk !== null) return effectAsk;
+  // ROADMAP 2.11 / P1-3 — the guard now also refuses adjust_edge_strength
+  // proposals for configure-option intent (the live A5/A7 loop wrote edge
+  // strength while READING as configuration). The clarify names the right
+  // contrast per refused handler. The advised exemplar MUST carry the
+  // deterministic gate's own vocabulary ("configure … option") so the
+  // promised follow-up routes without the LLM router — pinned by
+  // configure-option-copy-detector-contract.test.ts.
+  if (readString(details.handler_id) === 'adjust_edge_strength') {
+    return {
+      body: {
+        assistant_text:
+          `That looks like setting an option's effect rather than adjusting ` +
+          `the strength of a link, so I haven't changed anything. Tell me ` +
+          `which option and what it should change, for example 'configure ` +
+          `the acquisition option: set Setup Cost to £2m', and I'll write it in.`,
+        suggested_actions: [fallbackPrompt('Describe the option\'s effect')],
+      },
+      template_id: 'option_intervention_misroute',
+      chip_type: 'text_prompt',
+    };
+  }
+  const factorLabel = readString(details.factor_label);
+  const subject = factorLabel
+    ? `the ${safeLabel({ label: factorLabel, kind: undefined })} factor's own value`
+    : `the factor's own value`;
+  return {
+    body: {
+      assistant_text:
+        `That looks like a change to an option's intervention rather than ` +
+        `${subject}, so I haven't changed anything. Tell me whether you ` +
+        `meant the factor's value or a specific option's effect, and I'll ` +
+        `take it from there.`,
+      suggested_actions: [fallbackPrompt('Describe what you want to change')],
+    },
+    template_id: 'option_intervention_misroute',
+    chip_type: 'text_prompt',
+  };
+}
+
+/**
+ * P0-A value/unit fail-closed containment. The user expressed a value whose
+ * unit cannot be resolved against the target factor with confidence (e.g.
+ * "Set Hiring Cost to 5 agents" — a headcount value on a £ factor, or
+ * "50 percent" on a currency factor). The turn-executor refused the mutation
+ * and routed this code so we clarify instead of silently coercing the bare
+ * number. No auto-routing chip (a replay would drop the same unit and loop) —
+ * a single text-prompt to restate the value with a clear unit. The graph is
+ * unchanged by the time this composes.
+ */
+function composeValueUnitUnresolved(error: ValidationError): BranchResult {
+  const details = error.details ?? {};
+  const factorLabel = readString(details.factor_label);
+  const subject = factorLabel
+    ? `the ${safeLabel({ label: factorLabel, kind: undefined })} factor`
+    : `that factor`;
+  // The example must come from THIS factor's family, not from a hardcoded
+  // currency. `factor_unit_family` is threaded by the turn-executor on every
+  // unresolved verdict; a `count` or `time` factor was previously shown
+  // £100,000. (This code cannot fire on a UNITLESS factor —
+  // `classifyValueUnitAgainstFactor` returns `resolved: true` when
+  // `factorFamily === null` — so this is the same defect class as the
+  // witnessed one rather than the witnessed one itself.)
+  const familyRaw = readString(details.factor_unit_family);
+  const unresolvedExample = valueExampleForFamily(
+    familyRaw === 'currency' || familyRaw === 'percent' || familyRaw === 'time' ||
+    familyRaw === 'metric' || familyRaw === 'count'
+      ? familyRaw
+      : null,
+  );
+  return {
+    body: {
+      assistant_text:
+        `I wasn't sure what value to use for ${subject}, so I haven't ` +
+        `changed anything. Please tell me the value with its unit` +
+        `${exampleClause(unresolvedExample)} and I'll apply it.`,
+      suggested_actions: [fallbackPrompt('Give the value with its unit')],
+    },
+    template_id: 'value_unit_unresolved',
+    chip_type: 'text_prompt',
+  };
+}
+
+/**
+ * Composer map — `Record<ValidationErrorCode, BranchComposerFn>` with
+ * TypeScript exhaustiveness. Adding a new code to the `ValidationErrorCode`
+ * union without adding an entry here is a compile error (see
+ * `assertComposersExhaustive` below). Correction 8 of the V5 alpha
+ * hardening plan.
+ */
+export const VALIDATION_COMPOSERS: Readonly<Record<ValidationErrorCode, BranchComposerFn>> = {
+  HANDLER_NOT_FOUND: composeHandlerNotFound,
+  ENTITY_RESOLUTION_AMBIGUOUS: (e) => composeEntityResolutionAmbiguous(e),
+  ENTITY_KIND_MISMATCH: (e, ctx) => composeEntityKindMismatch(e, ctx),
+  ENTITY_NOT_FOUND: composeEntityNotFound,
+  ENTITY_RESOLUTION_SUSPICIOUS: (e) => composeEntityResolutionSuspicious(e),
+  PRECONDITION_UNMET: (e) => composePreconditionUnmet(e),
+  PARAMETER_INVALID: (e, ctx) => composeParameterInvalid(e, ctx),
+  OPTION_INTERVENTION_MISROUTE: (e) => composeOptionInterventionMisroute(e),
+  EXPIRED_OFFER_REPLAY: () => composeExpiredOfferReplay(),
+  VALUE_UNIT_UNRESOLVED: (e) => composeValueUnitUnresolved(e),
+};
+
+/**
+ * Public entry point shared by both the 200 recoverable wrapper and the
+ * 500 impossible-state wrapper. Runtime fallback: if an unknown code
+ * somehow arrives (e.g. a future change widens the union without
+ * updating the map), log fatal and emit a generic body so the safety-
+ * net 500 path has something to wrap. Correction 8.
+ */
+export function composeBody(error: ValidationError, ctx: ComposeContext): BranchResult {
+  const composer = VALIDATION_COMPOSERS[error.code];
+  if (composer) return composer(error, ctx);
+
+  // Unknown code — should be impossible under correct compile. Log the
+  // violation with enough context to debug without leaking user text.
+  log.error(
+    {
+      event: 'assert_unknown_validation_code',
+      validation_error_code: String(error.code),
+      known_codes: Object.keys(VALIDATION_COMPOSERS),
+    },
+    'V5 validator outcome: unknown code — compile-time exhaustiveness broken',
+  );
+  return {
+    body: {
+      assistant_text:
+        "Something unexpected happened on our side. Your request wasn't processed.",
+      suggested_actions: [fallbackPrompt('Try again in a moment')],
+    },
+    template_id: 'unknown_validation_code',
+    chip_type: 'text_prompt',
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Response wrapper
+// ---------------------------------------------------------------------------
+
+// Validator error codes that are genuinely transient — retrying the
+// same input could succeed because some server-side state may change
+// between attempts. Everything NOT in this set is a deterministic input
+// fault (the user / routing LLM sent something the server cannot act
+// on); retrying unchanged inputs will always fail and retryable=true
+// would mislead clients into pointless retry loops.
+//
+// Today this set is empty: all 7 validator codes
+// (HANDLER_NOT_FOUND, ENTITY_NOT_FOUND, ENTITY_KIND_MISMATCH,
+//  ENTITY_RESOLUTION_AMBIGUOUS, ENTITY_RESOLUTION_SUSPICIOUS,
+//  PARAMETER_INVALID, PRECONDITION_UNMET)
+// are deterministic input faults. If a future validator code IS
+// transient (e.g. a graph lookup that depends on a race condition),
+// add it here. The empty Set is kept to preserve the shape — adding
+// a transient code later requires exactly one line change, not a
+// design.
+const TRANSIENT_VALIDATOR_CODES: ReadonlySet<ValidationError['code']> = new Set<ValidationError['code']>();
+
+function wrapResponse(
+  error: ValidationError,
+  body: FailureComposeResult,
+  stage: StageType,
+): OlumiResponse {
+  // v5-exclusive-cee P0 follow-up: HANDLER_NOT_FOUND surfaces as the typed
+  // FEATURE_NOT_ENABLED wire code (via UNSUPPORTED_ACTION internal class)
+  // so clients can distinguish a declared-but-unbuilt action from a
+  // generic internal bug. All other validator failures keep the existing
+  // INTERNAL_ERROR wire code — their semantics are client-correctable
+  // (entity ambiguity, missing options, etc.) and don't benefit from a
+  // permanent "feature not enabled" framing.
+  const wireCode = error.code === 'HANDLER_NOT_FOUND'
+    ? ('FEATURE_NOT_ENABLED' as const)
+    : ('INTERNAL_ERROR' as const);
+  // Retryability: default false. All validator codes today are
+  // deterministic input faults; retrying unchanged inputs always fails.
+  // A future transient validator code would opt in via the
+  // TRANSIENT_VALIDATOR_CODES set. (v5-exclusive-cee P1 follow-up —
+  // the prior default was `true unless HANDLER_NOT_FOUND`, which
+  // mislabelled ENTITY_NOT_FOUND / PRECONDITION_UNMET / etc. as
+  // retryable and risked the client into pointless retry loops.)
+  const retryable = TRANSIENT_VALIDATOR_CODES.has(error.code);
+  return {
+    response_version: 2,
+    assistant_text: body.assistant_text,
+    blocks: [
+      {
+        type: 'error',
+        error_code: wireCode,
+        severity: 'error',
+        details: {
+          failure_origin: 'validator',
+          error_code: error.code,
+          retryable,
+          ...(error.code === 'HANDLER_NOT_FOUND' && error.details
+            ? {
+                reason: 'handler_not_registered',
+                handler_id: error.details.handler_id,
+              }
+            : {}),
+        },
+      },
+    ],
+    suggested_actions: [...body.suggested_actions],
+    insights: [],
+    stage_indicator: stage,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Small typed detail readers
+// ---------------------------------------------------------------------------
+
+const ENTITY_KIND_VALUES: readonly EntityKind[] = [
+  'node',
+  'edge',
+  'option',
+  'goal',
+  'constraint',
+];
+
+function pickKind(value: unknown): EntityKind | null {
+  return typeof value === 'string' && (ENTITY_KIND_VALUES as readonly string[]).includes(value)
+    ? (value as EntityKind)
+    : null;
+}
+
+function readString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+/**
+ * True only for a genuine finite scalar — a finite number, a boolean, or a
+ * non-empty string. Objects, arrays, null/undefined, and NaN are not.
+ *
+ * Gates the "You gave …" echo in `composeParameterInvalid`: values that are
+ * not scalars have no meaningful single-value form, so `sanitiseForUser`
+ * collapses them to an internal sentinel ('[complex value]' for objects,
+ * 'unknown' for null/undefined) that must never reach the user.
+ */
+function isGenuineScalar(value: unknown): boolean {
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (typeof value === 'boolean') return true;
+  if (typeof value === 'string') return value.trim().length > 0;
+  return false;
+}
+
+function readCandidates(value: unknown): EntityLike[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((v) => v !== null && typeof v === 'object')
+    .map((raw) => {
+      const record = raw as Record<string, unknown>;
+      return {
+        label: typeof record.label === 'string' ? record.label : null,
+      } satisfies EntityLike;
+    });
+}
+
+function readLabelBearer(value: unknown, kind: EntityKind | null): EntityLike | null {
+  if (value === null || typeof value !== 'object') return null;
+  const record = value as Record<string, unknown>;
+  return {
+    label: typeof record.label === 'string' ? record.label : null,
+    kind: kind ?? undefined,
+  };
+}
+
+function chipId(scope: 'action' | 'entity' | 'prompt', discriminator: string): string {
+  return `chip_${scope}_${discriminator}`.toLowerCase().replace(/[^a-z0-9_]/g, '_');
+}
+
+function fallbackPrompt(label: string): SuggestedAction {
+  return {
+    id: chipId('prompt', label),
+    label,
+    message: `${label}.`,
+  };
+}

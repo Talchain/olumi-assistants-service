@@ -1,0 +1,55 @@
+{
+  "schema_version": "olumi.draft_graph.deployed_evidence.v1",
+  "captured_at": "2026-08-16T07:05:00Z",
+  "serving_sha": "b9389df8796f7e7ddb385e17cac5154b64fd6c58",
+  "observations": [
+    {
+      "id": "exact_sha_automatic_failure",
+      "run_id": 31931611366,
+      "workflow_url": "https://github.com/Talchain/olumi-assistants-service/actions/runs/31931611366",
+      "head_sha": "b9389df8796f7e7ddb385e17cac5154b64fd6c58",
+      "observed_at": "2026-08-16T06:34:24Z",
+      "http_status": 500,
+      "latency_seconds": 39.9,
+      "exit_path": "draft_graph_error",
+      "failure_code": "draft_graph_cee_graph_invalid",
+      "node_count": 0,
+      "option_count": 0,
+      "prompt_identity_count": 0
+    },
+    {
+      "id": "pre_science_equivalent_failure",
+      "run_id": 31876646668,
+      "workflow_url": "https://github.com/Talchain/olumi-assistants-service/actions/runs/31876646668",
+      "head_sha": "97be33d51a6f395ec076982db8943664a7cbade8",
+      "observed_at": "2026-08-15T09:21:32Z",
+      "http_status": 500,
+      "latency_seconds": 41.6,
+      "exit_path": "draft_graph_error",
+      "failure_code": "draft_graph_cee_graph_invalid",
+      "node_count": 0,
+      "option_count": 0,
+      "prompt_identity_count": 0
+    },
+    {
+      "id": "exact_sha_manual_rerun_success",
+      "run_id": 31931789517,
+      "workflow_url": "https://github.com/Talchain/olumi-assistants-service/actions/runs/31931789517",
+      "head_sha": "b9389df8796f7e7ddb385e17cac5154b64fd6c58",
+      "observed_at": "2026-08-16T06:36:43Z",
+      "http_status": 200,
+      "latency_seconds": 51.8,
+      "exit_path": "draft_graph",
+      "failure_code": null,
+      "node_count": 12,
+      "option_count": 2,
+      "prompt_identity_count": 1,
+      "prompt_identity": "draft_graph_default@v195 (production)#152998b4"
+    }
+  ],
+  "interpretation": [
+    "The same serving SHA produced both a graph-contract failure and a successful draft minutes apart; draft_graph reliability is stochastic, not explained by the science merge.",
+    "The equivalent failure predates the science change, so this evidence must not be attributed to the science consumer.",
+    "A single successful rerun cannot erase the user-visible failure; the governed baseline reports both rather than selecting the favourable observation."
+  ]
+}

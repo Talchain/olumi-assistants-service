@@ -1,0 +1,19 @@
+Integration Tests (advisory)	fail	2m24s	https://github.com/Talchain/olumi-assistants-service/actions/runs/28998528116/job/86053451563	
+Security Audit	fail	23s	https://github.com/Talchain/olumi-assistants-service/actions/runs/28998528116/job/86053451541	
+CodeQL	pass	2s	https://github.com/Talchain/olumi-assistants-service/runs/86053879412	
+CodeQL Analysis	pass	3m13s	https://github.com/Talchain/olumi-assistants-service/actions/runs/28998528067/job/86053451332	
+Dependency Review	pass	8s	https://github.com/Talchain/olumi-assistants-service/actions/runs/28998528067/job/86053451336	
+Golden Journey Replay (advisory)	pass	32s	https://github.com/Talchain/olumi-assistants-service/actions/runs/28998528090/job/86053451786	
+Lint, TypeCheck, Unit Tests	pass	4m54s	https://github.com/Talchain/olumi-assistants-service/actions/runs/28998528116/job/86053451561	
+Live LLM Integration Tests	pass	20s	https://github.com/Talchain/olumi-assistants-service/actions/runs/28998528116/job/86054121430	
+Performance Gate (p95 < 8s)	pass	43s	https://github.com/Talchain/olumi-assistants-service/actions/runs/28998528119/job/86053451768	
+SSE Live Resume Performance Gate	pass	41s	https://github.com/Talchain/olumi-assistants-service/actions/runs/28998528119/job/86053451794	
+Security Scan Summary	pass	3s	https://github.com/Talchain/olumi-assistants-service/actions/runs/28998528067/job/86053903375	
+Snyk Security Scan	pass	37s	https://github.com/Talchain/olumi-assistants-service/actions/runs/28998528067/job/86053451318	
+Typecheck Drift (ratchet)	pass	56s	https://github.com/Talchain/olumi-assistants-service/actions/runs/28998528116/job/86053451548	
+validate-event-names	pass	51s	https://github.com/Talchain/olumi-assistants-service/actions/runs/28998528134/job/86053451596	
+Full Test Suite (advisory)	pending	0	https://github.com/Talchain/olumi-assistants-service/actions/runs/28998528116/job/86053451587	
+Validate OpenAPI Spec	pass	39s	https://github.com/Talchain/olumi-assistants-service/actions/runs/28998528066/job/86053451307	
+check-schemas	pass	34s	https://github.com/Talchain/olumi-assistants-service/actions/runs/28998507044/job/86053386202	
+check-schemas	pass	21s	https://github.com/Talchain/olumi-assistants-service/actions/runs/28998528138/job/86053451513	
+check-skipped-tests	pass	7s	https://github.com/Talchain/olumi-assistants-service/actions/runs/28998528068/job/86053451320	

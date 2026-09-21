@@ -52,6 +52,48 @@ describe('normalizeGraphForISL', () => {
       expect(factorNode?.data?.extractionType).toBe('explicit');
     });
 
+    it('preserves V3 metadata fields (raw_value, cap, factor_type, uncertainty_drivers) when converting observed_state to data', () => {
+      const graph: GraphV1 = {
+        version: '1',
+        default_seed: 42,
+        nodes: [
+          {
+            id: 'fac_investment',
+            kind: 'factor',
+            label: 'Investment Factor',
+            // V3 format with all metadata fields
+            observed_state: {
+              value: 0.65,
+              baseline: 0.5,
+              unit: '£',
+              source: 'brief_extraction',
+              raw_value: 65000,
+              cap: 100000,
+              extractionType: 'explicit',
+              factor_type: 'cost',
+              uncertainty_drivers: ['Market volatility', 'Exchange rates'],
+            },
+          } as unknown as GraphV1['nodes'][0],
+        ],
+        edges: [],
+      };
+
+      const normalized = normalizeGraphForISL(graph);
+
+      // Factor node should preserve all V3 metadata fields
+      const factorNode = normalized.nodes.find((n) => n.id === 'fac_investment') as any;
+      expect(factorNode).toBeDefined();
+      expect(factorNode?.data).toBeDefined();
+      expect(factorNode?.data?.value).toBe(0.65);
+      expect(factorNode?.data?.baseline).toBe(0.5);
+      expect(factorNode?.data?.unit).toBe('£');
+      // V3 metadata should be preserved
+      expect(factorNode?.data?.raw_value).toBe(65000);
+      expect(factorNode?.data?.cap).toBe(100000);
+      expect(factorNode?.data?.factor_type).toBe('cost');
+      expect(factorNode?.data?.uncertainty_drivers).toEqual(['Market volatility', 'Exchange rates']);
+    });
+
     it('preserves existing data field when present', () => {
       const graph: GraphV1 = {
         version: '1',
@@ -636,8 +678,8 @@ describe('normalizeGraphForISL - option edge filtering', () => {
           { id: 'fac_2', kind: 'factor', label: 'Factor 2', data: { value: 20 } },
         ],
         edges: [
-          { id: 'e1', from: 'opt_1', to: 'fac_1', weight: 0.5 }, // Should be removed
-          { id: 'e2', from: 'fac_1', to: 'fac_2', weight: 0.8 }, // Should be kept
+          { id: 'e1', from: 'opt_1', to: 'fac_1', weight: 0.5, edge_type: 'directed' as const }, // Should be removed
+          { id: 'e2', from: 'fac_1', to: 'fac_2', weight: 0.8, edge_type: 'directed' as const }, // Should be kept
         ],
       };
 
@@ -659,11 +701,11 @@ describe('normalizeGraphForISL - option edge filtering', () => {
           { id: 'out_1', kind: 'outcome', label: 'Outcome' },
         ],
         edges: [
-          { id: 'e1', from: 'opt_a', to: 'fac_1', weight: 0.5 }, // Should be removed
-          { id: 'e2', from: 'opt_b', to: 'fac_1', weight: 0.3 }, // Should be removed
-          { id: 'e3', from: 'opt_a', to: 'fac_2', weight: 0.7 }, // Should be removed
-          { id: 'e4', from: 'fac_1', to: 'out_1', weight: 0.8 }, // Should be kept
-          { id: 'e5', from: 'fac_2', to: 'out_1', weight: 0.6 }, // Should be kept
+          { id: 'e1', from: 'opt_a', to: 'fac_1', weight: 0.5, edge_type: 'directed' as const }, // Should be removed
+          { id: 'e2', from: 'opt_b', to: 'fac_1', weight: 0.3, edge_type: 'directed' as const }, // Should be removed
+          { id: 'e3', from: 'opt_a', to: 'fac_2', weight: 0.7, edge_type: 'directed' as const }, // Should be removed
+          { id: 'e4', from: 'fac_1', to: 'out_1', weight: 0.8, edge_type: 'directed' as const }, // Should be kept
+          { id: 'e5', from: 'fac_2', to: 'out_1', weight: 0.6, edge_type: 'directed' as const }, // Should be kept
         ],
       };
 
@@ -683,8 +725,8 @@ describe('normalizeGraphForISL - option edge filtering', () => {
           { id: 'out_1', kind: 'outcome', label: 'Outcome' },
         ],
         edges: [
-          { id: 'e1', from: 'fac_1', to: 'fac_2', weight: 0.8 },
-          { id: 'e2', from: 'fac_2', to: 'out_1', weight: 0.6 },
+          { id: 'e1', from: 'fac_1', to: 'fac_2', weight: 0.8, edge_type: 'directed' as const },
+          { id: 'e2', from: 'fac_2', to: 'out_1', weight: 0.6, edge_type: 'directed' as const },
         ],
       };
 
@@ -735,8 +777,8 @@ describe('normalizeGraphForISL - option edge filtering', () => {
           { id: 'fac_1', kind: 'factor', label: 'Factor 1', data: { value: 10 } },
         ],
         edges: [
-          { id: 'e1', from: 'opt_1', to: 'fac_1', weight: 0.5 },
-          { id: 'e2', from: 'opt_2', to: 'fac_1', weight: 0.3 },
+          { id: 'e1', from: 'opt_1', to: 'fac_1', weight: 0.5, edge_type: 'directed' as const },
+          { id: 'e2', from: 'opt_2', to: 'fac_1', weight: 0.3, edge_type: 'directed' as const },
         ],
       };
 
@@ -755,7 +797,7 @@ describe('normalizeGraphForISL - option edge filtering', () => {
           { id: 'fac_1', kind: 'factor', label: 'Factor 1', data: { value: 10 } },
         ],
         edges: [
-          { id: 'e1', from: 'fac_1', to: 'opt_1', weight: 0.5 }, // Factor → Option, should be kept
+          { id: 'e1', from: 'fac_1', to: 'opt_1', weight: 0.5, edge_type: 'directed' as const }, // Factor → Option, should be kept
         ],
       };
 
@@ -776,8 +818,8 @@ describe('normalizeGraphForISL - option edge filtering', () => {
           { id: 'fac_1', kind: 'factor', label: 'Factor 1', data: { value: 10 } },
         ],
         edges: [
-          { id: 'e1', from: 'opt_1', to: 'fac_1', weight: 0.5 },
-          { id: 'e2', from: 'fac_1', to: 'fac_1', weight: 0.8 },
+          { id: 'e1', from: 'opt_1', to: 'fac_1', weight: 0.5, edge_type: 'directed' as const },
+          { id: 'e2', from: 'fac_1', to: 'fac_1', weight: 0.8, edge_type: 'directed' as const },
         ],
       };
 

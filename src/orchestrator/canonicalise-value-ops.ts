@@ -1,0 +1,1744 @@
+/**
+ * SHARED value-op canonicalisation + landed-op postcondition for BOTH graph
+ * apply seams — the held/confirm batch (`executeGmHeldResume`) and the NORMAL
+ * edit path (`handleEditGraph`).
+ *
+ * Introduced by PR #521 for the held path only; generalised here (B5) when the
+ * SAME defect was reproduced on the normal path. There is deliberately ONE
+ * canonicaliser and ONE postcondition: a second copy is exactly the
+ * hand-maintained-twin failure this codebase keeps paying for.
+ *
+ * ── The defect ────────────────────────────────────────────────────────────
+ * `applyUpdateNode` is a shallow `Object.assign`, so whatever key the op
+ * carries is written onto the node VERBATIM. The edit prompt
+ * (`edit-graph-v6.ts` PATH SYNTAX) teaches `/nodes/<id>/data/value`, which
+ * `normalisePath` + the scalar-wrap turn into the LITERAL op key
+ * `{ 'data/value': 0.5 }`. `NodeV3` declares neither `data` nor `data/value`,
+ * so a GraphV3 parse STRIPS the write and `observed_state.value` never moves,
+ * while structural siblings land.
+ *
+ * On the HELD path the strip happened inside `applyAndValidateMutation`.
+ * On the NORMAL path it is worse: `GraphV3.safeParse(candidate)` returns
+ * SUCCESS (Zod strips the unknown key rather than erroring) and the code then
+ * promoted the UNPARSED candidate — so validation passed on a graph that was
+ * not the one persisted, and the edit was reported APPLIED with the value
+ * unchanged. Verified on staging HEAD 1063394: `observed_state.value` stayed
+ * 0.2, `data/value: 0.5` became a junk key, `safeParse` succeeded.
+ *
+ * #509 made the held path HONEST (refuses the whole batch) but left the
+ * capability closed: the user was correctly told it did not work, and still
+ * could not apply their value. This module makes it apply.
+ *
+ * ── Why canonicalise here rather than round-trip PLoT ─────────────────────
+ * The obvious alternative — route the confirm through the same PLoT call the
+ * normal edit flow uses — does not exist to be routed to, and would not work
+ * if it did:
+ *   1. The live V5 edit path calls `handleEditGraph(ctx, msg, adapter, reqId,
+ *      turnId)` with NO opts, so `plotClient` is `null` and PLoT is never
+ *      called on the edit path at all. There is no PLoT round-trip to reuse.
+ *   2. PLoT's `validate-patch` `CANONICAL_NODE_FIELDS` contains
+ *      `observed_state` and NOT `data`, so a `data`/`data/value`-spelled
+ *      `update_node` is REJECTED there (`INVALID_PATCH_FIELD`) — PLoT would
+ *      hard-decline the live spelling, not canonicalise it.
+ *   3. A network call inside a confirm would make a previously-pure,
+ *      always-available user action fail on a PLoT outage, and PLoT's repair
+ *      loop could return ops the user never confirmed — breaking the consent
+ *      contract that the confirm applies EXACTLY the named batch.
+ *
+ * ── Why this is not a second, driftable canonicaliser ─────────────────────
+ * Trap 12 (derive, don't mirror). Every input to the translation is derived
+ * from the module that already OWNS it:
+ *   - which node fields survive the re-parse → `NodeV3.shape` (the schema that
+ *     does the stripping), never a hand-listed copy;
+ *   - which `observed_state` sub-keys are tunable → `ALLOWED_OBSERVED_SUBKEYS`,
+ *     imported from `field-safety.ts` (the referee's own allowlist);
+ *   - merge-not-replace semantics → PLoT's own `update_node` behaviour
+ *     (`deepMerge(node, op.value)` in `validate-patch.ts`), so a value write
+ *     never wipes `unit` / `raw_value` / `cap` siblings;
+ *   - the `data` ⇄ `observed_state` alias → the SAME equivalence
+ *     `normaliseEditOpsForPlot` asserts when it renames `observed_state` →
+ *     `data` for `add_node`, and that `field-safety.ts` asserts when it treats
+ *     `root === 'observed_state' || root === 'data'` as one subtree.
+ * The one irreducible constant is that alias, and it is NOT assume-good: an op
+ * this module fails to translate is left VERBATIM, and `batchFullyLanded`
+ * then refuses the whole batch. Drift fails LOUD (an honest refusal), never
+ * silently-green.
+ *
+ * ── Atomicity ─────────────────────────────────────────────────────────────
+ * This module changes only the SPELLING of ops, never their number, order,
+ * targets, or semantics. It runs AFTER the confirm-time re-referee (so the
+ * verdict and its telemetry stay byte-identical) and BEFORE the local apply.
+ * `batchFullyLanded` remains the backstop: all-or-nothing per turn.
+ *
+ * Pure and total — never throws, never mutates its inputs.
+ */
+import { NodeV3 } from '../schemas/cee-v3.js';
+import { ALLOWED_OBSERVED_SUBKEYS } from '../orchestrator-v5/graph-management/field-safety.js';
+import { parseEdgeTargetPath } from '../orchestrator-v5/graph-management/adapters/edit-graph-producer.js';
+// The ONE de-normalisation the validator, the executor precheck and the
+// `set_factor_value` handler already share (the AC.1 parity invariant). Reused
+// rather than reimplemented — a second copy of a scale convention is the
+// hand-maintained-twin defect this module's header exists to warn about.
+import { resolveExistingRawValue } from '../orchestrator-v5/tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
+import { unitPinnedScaleFrame } from '../cee/draft/records/unit-scale-class.js';
+import {
+  PAIR_COHERENCE_RELATIVE_EPSILON,
+  resolveScaleFrame,
+  checkPairCoherence,
+} from '../orchestrator-v5/tools/handlers/d1-shared/scale-frame.js';
+
+/**
+ * R2-1 — a bare sub-1 value against a FRAME-RECOVERABLE factor is genuinely
+ * ambiguous (a proportion of the frame, or a raw sub-unit amount?), and the
+ * round-2 writers measurably disagreed on it (10^5 divergence, REVIEW-926.md
+ * U1). The ambiguity is the PRODUCT: callers prescreen with
+ * `findAmbiguousScaleValueOps` and surface an ask; `reconcileObservedValuePair`
+ * throws this typed error as the fail-loud backstop, so a future caller that
+ * skips the prescreen cannot silently guess.
+ */
+export class AmbiguousScaleValueError extends Error {
+  constructor(
+    readonly path: string,
+    readonly newValue: number,
+    readonly currentRawValue: number,
+  ) {
+    super(
+      `Value ${newValue} on a frame-scaled factor is ambiguous (a proportion, or an amount of ${currentRawValue}-scale?) — the caller must ask, not guess`,
+    );
+    this.name = 'AmbiguousScaleValueError';
+  }
+}
+
+/** One ambiguous value op, as the callers' prescreen reports it. */
+export interface AmbiguousScaleValueOp {
+  readonly path: string;
+  readonly newValue: number;
+  readonly currentRawValue: number;
+  readonly label?: string;
+}
+import type { PatchOperation } from './types.js';
+import type { GraphV3T } from '../schemas/cee-v3.js';
+
+/**
+ * Node fields that SURVIVE the GraphV3 re-parse, derived from the schema that
+ * performs the strip. A field added to (or removed from) `NodeV3` changes this
+ * set automatically — there is no list to keep in sync.
+ */
+const NODE_DECLARED_FIELDS: ReadonlySet<string> = new Set(Object.keys(NodeV3.shape));
+
+/** The canonical node field a tunable value write must land in. */
+const OBSERVED_ROOT = 'observed_state';
+
+/**
+ * Producer spellings of {@link OBSERVED_ROOT}. `data` is the edit prompt's own
+ * vocabulary ("Data: { value, raw_value, unit, cap, … }") and the rename
+ * target `normaliseEditOpsForPlot` uses for `add_node`; `field-safety.ts`
+ * already treats the two roots as one subtree.
+ */
+export const OBSERVED_ROOT_SPELLINGS: ReadonlySet<string> = new Set([OBSERVED_ROOT, 'data']);
+
+/**
+ * Tunable leaves this module will translate, DERIVED from the referee's
+ * allowlist minus `interventions`.
+ *
+ * `interventions` is deliberately excluded: `extractInterventionUpdates`
+ * (edit-graph.ts) reads the `data.interventions` spelling OFF THE OPERATION,
+ * so rewriting that subtree would break the option-configure chain that
+ * option-configure-apply-chain.test.ts pins. An interventions op is left
+ * verbatim and the atomicity guard refuses it honestly — exactly today's
+ * behaviour.
+ */
+const TRANSLATABLE_LEAVES: ReadonlySet<string> = new Set(
+  [...ALLOWED_OBSERVED_SUBKEYS].filter((k) => k !== 'interventions'),
+);
+
+/**
+ * Path segments that could reach the prototype chain. Op keys are
+ * model-controlled, so a key like `__proto__/value` is never translated (left
+ * verbatim → guard refuses), mirroring `candidate-graph.ts`'s setter guard.
+ */
+const FORBIDDEN_PATH_SEGMENTS: ReadonlySet<string> = new Set([
+  '__proto__',
+  'constructor',
+  'prototype',
+]);
+
+/**
+ * ⭐⭐ THE BARE LEAF — THE SPELLING CEE'S OWN NORMALISER MANUFACTURES, AND THE
+ * ONE THIS TRANSLATOR NEVER RECOGNISED.
+ *
+ * The served edit prompt teaches a FIELD-SUFFIXED PATH carrying a SCALAR
+ * (`/nodes/fac_unit_price/unit`). `normalisePath` (edit-graph.ts:4764) splits
+ * that into `{ path: 'fac_unit_price', field: 'unit' }`, and
+ * `normaliseOperation` (edit-graph.ts:5265) wraps the scalar as `{ unit: '£' }`.
+ * So the op key arrives ROOTLESS — and the arm below,
+ * `!OBSERVED_ROOT_SPELLINGS.has(segments[0])`, copied it out VERBATIM.
+ * `NodeV3` declares no top-level `unit`/`value` (they live under
+ * `observed_state`), `GraphV3.safeParse` SILENTLY STRIPS the key,
+ * `firstOperationThatDidNotLand` correctly sees the write did not survive, and
+ * `edit-graph.ts` refuses the WHOLE edit as `OPERATION_DID_NOT_LAND`.
+ *
+ * ⭐ SO CEE PRODUCED A SPELLING CEE REFUSED. That is the defect. The model is
+ * not wrong (it obeyed the prompt) and the guard is not wrong (a stripped write
+ * must never read as applied) — two parts of this service disagreed about one
+ * vocabulary. Measured on the DEPLOYED serving tip `07da2c0b`, 100 refusal
+ * lines over a 20h window with a negative control of 0:
+ *     reason `update_writes_did_not_survive`  100/100
+ *     op     `update_node`                    100/100
+ *     key_shape   unit 68 · value 16 · interventions/<*>/value 8
+ *                 interventions/<*>/<*> 7 · observed_state/<*> 1
+ * — 84 of 100 user-visible refusals came out of this single arm.
+ *
+ * ⚠ DERIVED, NEVER HAND-LISTED (trap 12 — a hand-kept list is this estate's
+ * dominant defect and would reopen the hole on the next field added).
+ * Membership is {@link TRANSLATABLE_LEAVES} (= the referee's own
+ * `ALLOWED_OBSERVED_SUBKEYS` minus `interventions`) MINUS whatever `NodeV3`
+ * declares at top level. A leaf the schema DOES declare is a real node field:
+ * it takes the declared-field branch above and never reaches here, so adding
+ * such a field to `NodeV3` retires it from this set automatically and nothing
+ * in this file needs editing.
+ *
+ * ⚠ `interventions` STAYS OUT, for the reason it is out of
+ * `TRANSLATABLE_LEAVES`: `extractInterventionUpdates` (edit-graph.ts) reads
+ * that subtree OFF THE OPERATION, so rewriting it would break the
+ * option-configure chain. A bare `interventions/<id>/…` key is left verbatim
+ * and the atomicity guard refuses it honestly — exactly today's behaviour, and
+ * a RECORDED known gap (the 15 of 100 measured refusals whose
+ * `key_is_intervention_subtree` is true), never a silent one.
+ *
+ * Returns the leaf name, or `null` when the key is not a translatable bare
+ * leaf. ONE predicate, consulted by the translator AND by
+ * `operationWritesObservedValue`, so the write and its provenance stamp cannot
+ * disagree about which keys are observed-state leaves.
+ */
+function bareObservedLeaf(key: string): string | null {
+  if (NODE_DECLARED_FIELDS.has(key)) return null;
+  const segments = key.split(/[/.]/).filter((s) => s.length > 0);
+  if (segments.length !== 1) return null;
+  const leaf = segments[0]!;
+  if (FORBIDDEN_PATH_SEGMENTS.has(leaf)) return null;
+  return TRANSLATABLE_LEAVES.has(leaf) ? leaf : null;
+}
+
+function asRecord(v: unknown): Record<string, unknown> | null {
+  return v !== null && typeof v === 'object' && !Array.isArray(v)
+    ? (v as Record<string, unknown>)
+    : null;
+}
+
+/**
+ * Same keys, same values by `Object.is`. Used ONLY to decide whether a merge
+ * actually changed anything, so the module can keep its by-reference identity
+ * contract on a no-op. Deliberately shallow: `observed_state`'s tunable leaves
+ * are scalars, and a deep compare here would be a second, driftable opinion
+ * about a shape this module does not own.
+ */
+function shallowEqualRecords(
+  a: Record<string, unknown>,
+  b: Record<string, unknown>,
+): boolean {
+  const aKeys = Object.keys(a);
+  if (aKeys.length !== Object.keys(b).length) return false;
+  return aKeys.every(
+    (k) => Object.prototype.hasOwnProperty.call(b, k) && Object.is(a[k], b[k]),
+  );
+}
+
+/** Locate a node by id on an arbitrary (possibly hostile) ingress graph. */
+function findNode(graph: unknown, nodeId: string): Record<string, unknown> | null {
+  const g = asRecord(graph);
+  if (g === null || !Array.isArray(g.nodes)) return null;
+  for (const n of g.nodes) {
+    const node = asRecord(n);
+    if (node !== null && node.id === nodeId) return node;
+  }
+  return null;
+}
+
+/**
+ * Canonicalise ONE `update_node` op's value payload. Returns `null` when
+ * nothing needed translating, so the caller can return the ORIGINAL operation
+ * object by reference (identity — byte-identical for canonical spellings).
+ */
+function canonicaliseUpdateNodeValue(
+  value: Record<string, unknown>,
+  currentNode: Record<string, unknown> | null,
+): Record<string, unknown> | null {
+  const out: Record<string, unknown> = {};
+  /** Accumulated tunable leaf writes destined for `observed_state`. */
+  let observedPatch: Record<string, unknown> | null = null;
+
+  for (const [key, to] of Object.entries(value)) {
+    // A key the schema already declares is passed through UNTOUCHED — its
+    // existing semantics are not this lane's to change. `observed_state` is
+    // declared and so lands here too; it is passed through in the SAME sense,
+    // and the merge below then applies PLoT's `deepMerge` to it exactly as it
+    // does to a translated leaf. See the merge comment for why.
+    if (NODE_DECLARED_FIELDS.has(key)) {
+      out[key] = to;
+      continue;
+    }
+
+    // ⭐ THE BARE LEAF (see `bareObservedLeaf`): `{ unit: '£' }`, `{ value: 69 }`.
+    //
+    // ⚠ TRANSLATED HERE, AND THE PLACE IS THE WHOLE MEANING GUARANTEE. Both
+    // live seams run canonicalise → `findAmbiguousScaleValueOps` →
+    // `reconcileObservedValuePair` → apply (edit-graph.ts 3104/3108/3147/3155;
+    // gm-held-execute.ts 495/498/510), and BOTH of those downstream functions
+    // read ONLY `value[OBSERVED_ROOT]`. Translating the bare leaf at this point
+    // therefore routes it through the EXISTING ambiguity ask and the EXISTING
+    // raw_value/scale reconciliation automatically — no new normalisation and
+    // no second scale arithmetic is minted here, which is what a rename-only
+    // fix would have needed and is exactly how it would have corrupted the
+    // model. A bare `69` must not be able to reach the normalised
+    // `observed_state.value` slot without passing `reconcileObservedValuePair`,
+    // and translating BEFORE them is what makes that structurally true rather
+    // than merely intended.
+    const bareLeaf = bareObservedLeaf(key);
+    if (bareLeaf !== null) {
+      observedPatch = { ...(observedPatch ?? {}), [bareLeaf]: to };
+      continue;
+    }
+
+    const segments = key.split(/[/.]/).filter((s) => s.length > 0);
+    if (
+      segments.length === 0 ||
+      segments.some((s) => FORBIDDEN_PATH_SEGMENTS.has(s)) ||
+      !OBSERVED_ROOT_SPELLINGS.has(segments[0]!)
+    ) {
+      out[key] = to;
+      continue;
+    }
+
+    if (segments.length === 1) {
+      // Whole-root write in an alias spelling, e.g. `{ data: { value: 0.5 } }`.
+      // Translate only when EVERY member is a tunable leaf; anything else
+      // (an interventions map, an unknown sub-key) stays verbatim.
+      const members = asRecord(to);
+      if (
+        members === null ||
+        Object.keys(members).length === 0 ||
+        !Object.keys(members).every((k) => TRANSLATABLE_LEAVES.has(k))
+      ) {
+        out[key] = to;
+        continue;
+      }
+      observedPatch = { ...(observedPatch ?? {}), ...members };
+      continue;
+    }
+
+    if (segments.length === 2 && TRANSLATABLE_LEAVES.has(segments[1]!)) {
+      observedPatch = { ...(observedPatch ?? {}), [segments[1]!]: to };
+      continue;
+    }
+
+    // Deeper paths (`data/interventions/<factor_id>`) and non-tunable leaves
+    // are NOT this module's to rewrite — verbatim, guard decides.
+    out[key] = to;
+  }
+
+  // ⭐ THE MERGE COVERS THE LITERAL WHOLE-OBJECT WRITE TOO, AND THAT IS THE
+  // FIX. This gate used to be `if (observedPatch === null) return null;`, so
+  // the merge below ran ONLY when some alias-spelled leaf had been translated.
+  // A literal `{ observed_state: { value } }` took the declared-field branch,
+  // translated nothing, returned null here, and `applyUpdateNode`'s
+  // `Object.assign` (its `NODE_REQUIRED_NESTED_FIELDS` set is EMPTY, because
+  // every object-typed NodeV3 field is `.optional()`) then REPLACED the whole
+  // object — dropping `unit` / `cap` / `raw_value`.
+  //
+  // The op key alone decided the semantics, and the edit LLM has no way to
+  // know which vocabulary is safe:
+  //     { 'data/value': v }            → merged
+  //     { 'observed_state/value': v }  → merged
+  //     { data: { value: v } }         → merged
+  //     { observed_state: { value: v } } → REPLACED  ← the only wiping spelling
+  // The divergence is not a decision anyone took; it falls out of
+  // `NODE_DECLARED_FIELDS` (= `Object.keys(NodeV3.shape)`) happening to
+  // contain `observed_state` and not `data`. One intent must have one outcome.
+  //
+  // `reconcileObservedValuePair` USED TO record this wipe as "a real and
+  // separate defect … Recorded, not absorbed" and declined to repair it there
+  // — correctly, because the repair belongs at the writer, which is here.
+  // ⚠ PAST TENSE DELIBERATELY: that paragraph is now marked SPENT at its own
+  // site, because this change closed the wipe. A literal payload now reaches
+  // `reconcileObservedValuePair` MERGED and carrying `raw_value`, so it lands
+  // inside the breadth of that function's stale-carry-forward guard rather
+  // than short-circuiting before it.
+  const literalObserved = asRecord(value[OBSERVED_ROOT]);
+  if (observedPatch === null && literalObserved === null) return null;
+
+  // PLoT's `update_node` semantics (`deepMerge`): merge onto what the node
+  // already has, so a value write never wipes `unit` / `raw_value` / `cap`.
+  // An explicit `observed_state` in the same op still wins over the node's
+  // existing state; the translated leaves win over both (they are the write
+  // the user confirmed). That precedence is UNCHANGED — only the gate moved.
+  const existing = asRecord(currentNode?.observed_state) ?? {};
+  const explicit = asRecord(out[OBSERVED_ROOT]) ?? {};
+  const merged: Record<string, unknown> = {
+    ...existing,
+    ...explicit,
+    ...(observedPatch ?? {}),
+  };
+
+  // Identity is load-bearing (the module contract: an op that needs no
+  // translation is returned BY REFERENCE, and `translatedCount` is what the
+  // pinned tests assert). A literal write onto a node with NO stored
+  // observed_state — or one the merge leaves byte-equal — changes nothing, so
+  // it must still report zero translations rather than manufacture churn.
+  if (observedPatch === null && shallowEqualRecords(merged, explicit)) return null;
+
+  out[OBSERVED_ROOT] = merged;
+  return out;
+}
+
+/**
+ * Translate every `update_node` value op in a confirmed held batch into the
+ * field spelling GraphV3 preserves. Ops that need no translation are returned
+ * BY REFERENCE; when no op changes, the input array is returned by reference
+ * too, so a flag-on run over a canonical batch is byte-identical to flag-off.
+ *
+ * `currentGraph` is the graph the batch is about to be applied to — it supplies
+ * the existing `observed_state` that translated leaves merge onto.
+ */
+export function canonicaliseValueOps(
+  operations: readonly PatchOperation[],
+  currentGraph: unknown,
+): { readonly operations: PatchOperation[]; readonly translatedCount: number } {
+  let translatedCount = 0;
+  // `operations` is an ordered transaction. Keep the observed-state view for
+  // each target in step with earlier ops so a later unit/std leaf cannot
+  // replay the graph's pre-batch value over an already-canonicalised value
+  // write (and vice versa). This mirrors the applier's sequential semantics
+  // without mutating the graph or inventing a second patch engine.
+  const observedByTarget = new Map<string, Record<string, unknown>>();
+  const observedBefore = (path: string): Record<string, unknown> => {
+    const tracked = observedByTarget.get(path);
+    if (tracked !== undefined) return tracked;
+    const initial = asRecord(findNode(currentGraph, path)?.observed_state) ?? {};
+    const snapshot = { ...initial };
+    observedByTarget.set(path, snapshot);
+    return snapshot;
+  };
+  const out = operations.map((op) => {
+    if (op.op !== 'update_node') return op;
+    const value = asRecord(op.value);
+    if (value === null) return op;
+    const before = observedBefore(op.path);
+    const canonical = canonicaliseUpdateNodeValue(value, { observed_state: before });
+    const effectiveValue = canonical ?? value;
+    const observedWrite = asRecord(effectiveValue[OBSERVED_ROOT]);
+    if (observedWrite !== null) {
+      // The local node applier replaces optional `observed_state` objects.
+      // Canonicalised leaf ops already carry the complete merged object, so
+      // tracking the exact outgoing object mirrors the real sequential write
+      // without duplicating any wider patch semantics here.
+      observedByTarget.set(op.path, { ...observedWrite });
+    }
+    if (canonical === null) return op;
+    translatedCount += 1;
+    return { ...op, value: canonical };
+  });
+  return {
+    operations: translatedCount === 0 ? [...operations] : out,
+    translatedCount,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// User-edit provenance stamp (ROADMAP 2.396(b) — P4 transport, 2026-08-05).
+//
+// Every op that reaches either edit seam is a CHAT-SET, USER-CONFIRMED write
+// (the normal path applies what the user asked for; the held path applies what
+// the user explicitly confirmed). Yet the applied value carried NO user
+// provenance, so the UI's "User edited" pill — earned from
+// `observed_state.source` (its reliable rung; node `provenance` is clobbered
+// by the V3 response transform, `schema-v3.ts` nodeProvenanceDisplay) — could
+// never earn on these lanes, and every chat-set value rendered as "Olumi
+// estimate — check first".
+//
+// The stamp is written INTO THE OP, pre-apply, deliberately:
+//   · the applier then writes it, the GraphV3 re-parse keeps it (the
+//     ObservedStateV3.source enum now carries the user members), and
+//     `batchFullyLanded`'s per-field survival check sees it IDENTICAL on both
+//     the raw and canonical sides. Stamping the canonical graph AFTER the
+//     apply would instead make raw != canonical on the observed_state key and
+//     refuse every stamped batch.
+//   · ONE function, called by BOTH seams — the same no-second-copy rule as
+//     `canonicaliseValueOps` itself (see the module header).
+//
+// Scope: ONLY `update_node` ops whose PRE-canonicalisation payload authors a
+// `value` leaf — the pill is a claim about the VALUE. Canonicalisation merges
+// stored siblings, so the post-canonical payload alone is not proof of a write.
+// Unit-only edits, label edits, structural ops and intervention writes are
+// returned BY REFERENCE, untouched. An explicit LLM-claimed producer source on
+// a value write is OVERRIDDEN: the user consented to this write, and letting a
+// model stamp its own output as `cee_inference` on a user-confirmed value is
+// the exact mislabel this exists to close.
+//
+// This deliberately does NOT ride inside `canonicaliseValueOps`: that module's
+// pinned contract is spelling-only ("byte-identical for canonical batches"),
+// and folding a semantic stamp into it would break that pin. Compose them:
+//   stampUserEditProvenance(canonicaliseValueOps(ops, graph).operations, ops)
+// ---------------------------------------------------------------------------
+
+/** The observed_state.source literal CEE's chat-edit writers stamp. */
+export const USER_EDIT_SOURCE = 'user_override' as const;
+/** The node-level provenance literal (the set_factor_value precedent). */
+export const USER_EDIT_PROVENANCE = 'user_set' as const;
+
+function operationWritesObservedValue(op: PatchOperation | undefined): boolean {
+  if (op?.op !== 'update_node') return false;
+  const value = asRecord(op.value);
+  if (value === null) return false;
+
+  const canonicalObserved = asRecord(value[OBSERVED_ROOT]);
+  if (
+    canonicalObserved !== null &&
+    Object.prototype.hasOwnProperty.call(canonicalObserved, 'value')
+  ) {
+    return true;
+  }
+
+  // ⭐ THE BARE LEAF, recognised from the SAME derived set the translator uses
+  // (`bareObservedLeaf`) rather than from a second opinion about spellings.
+  // Without this the number LANDS and the user-edit provenance is silently
+  // dropped: `{ value: 69 }` would be applied while `observed_state.source`
+  // kept its producer value, so the UI's "User edited" pill could never earn
+  // and a value the user had just set would keep rendering as
+  // "Olumi estimate — check first". The write and its authorship must move
+  // together or the product lies about who chose the number.
+  if (Object.keys(value).some((key) => bareObservedLeaf(key) === 'value')) return true;
+
+  return Object.entries(value).some(([key, to]) => {
+    const segments = key.split(/[/.]/).filter((segment) => segment.length > 0);
+    if (!OBSERVED_ROOT_SPELLINGS.has(segments[0] ?? '')) return false;
+    if (segments.length === 2) return segments[1] === 'value';
+    if (segments.length !== 1) return false;
+    const root = asRecord(to);
+    return root !== null && Object.prototype.hasOwnProperty.call(root, 'value');
+  });
+}
+
+/**
+ * Stamp user provenance onto every value-writing `update_node` op. When the
+ * operations have already been canonicalised, pass the corresponding
+ * pre-canonicalisation operations as `valueWriteOperations`; those retain the
+ * distinction between an authored value write and a unit/std-only leaf write
+ * whose merged payload merely contains the stored value. Pure and total —
+ * never throws, never mutates its inputs; ops needing no stamp are returned by
+ * reference.
+ */
+export function stampUserEditProvenance(
+  operations: readonly PatchOperation[],
+  valueWriteOperations: readonly PatchOperation[] = operations,
+): PatchOperation[] {
+  // A later observed-state leaf on the same target replaces the whole object
+  // in the local applier. Once this batch has explicitly authored a value, its
+  // user authority must therefore be carried into later canonical leaf ops;
+  // otherwise a unit/std write can resurrect the pre-batch panel citation.
+  const userValueTargets = new Set<string>();
+  return operations.map((op, index) => {
+    // Canonicalisation merges stored observed-state siblings into leaf writes.
+    // Bind the authorship stamp to the PRE-merge operation so a unit/std-only
+    // edit cannot inherit `value` and masquerade as a user-authored value.
+    if (op.op !== 'update_node') return op;
+    const value = asRecord(op.value);
+    if (value === null) return op;
+    const observed = asRecord(value[OBSERVED_ROOT]);
+    if (observed === null) return op;
+    const writesValue = operationWritesObservedValue(valueWriteOperations[index]);
+    if (!writesValue && !userValueTargets.has(op.path)) return op;
+    if (!Object.prototype.hasOwnProperty.call(observed, 'value')) return op;
+    const stampedObserved: Record<string, unknown> = {
+      ...observed,
+      source: USER_EDIT_SOURCE,
+    };
+    // A normal chat edit is authored by the current user, not by a prior
+    // collaboration round. `canonicaliseValueOps` deliberately carries
+    // observed-state siblings forward, so without an explicit removal the
+    // old participant/evidence citation survives beside `user_override`.
+    // Absence is the shared contract's meaning for "not panel-elicited".
+    delete stampedObserved.elicited_from;
+    if (writesValue) userValueTargets.add(op.path);
+    return {
+      ...op,
+      value: {
+        ...value,
+        [OBSERVED_ROOT]: stampedObserved,
+        provenance: USER_EDIT_PROVENANCE,
+      },
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Observed value-pair authority (ROADMAP 2.1033 — the SERVER half of
+// "screen = commit", 2026-08-09).
+//
+// ── The defect, reproduced by execution at 1ff2469d ────────────────────────
+// `canonicaliseUpdateNodeValue` merges the node's EXISTING observed_state
+// under the translated leaves so a value write never wipes `unit`/`cap`. That
+// merge also carries `raw_value` forward — and `raw_value` is the field the
+// canonical formatter reads FIRST. So editing a 20% factor to 40% produced:
+//
+//   applied observed_state = { value: 0.4, raw_value: 20, unit: '%' }
+//   synthesiseDisplayValue(...)             → "20%"     ← the OLD number
+//   reconcileDisplayAnchors(...) repaired[] → []        ← agreed with it
+//
+// #884's display-anchor reconciliation cannot see this: it recomputes the
+// anchor from the same stale `raw_value`, gets "20%" back, and concludes
+// nothing needs repair. The 2.1003 fix is not wrong — it is fed a lie.
+//
+// ── The authority ruling ───────────────────────────────────────────────────
+// On the edit path `observed_state.value` is AUTHORITATIVE and `raw_value` is
+// a derived denormalisation artefact. Three independent derivations, none of
+// them a matter of taste:
+//   1. `ALLOWED_OBSERVED_SUBKEYS` (field-safety.ts) = baseline · interventions
+//      · std · unit · value. `raw_value` is NOT AI-editable, so an edit op
+//      structurally CANNOT author a correct one. A field the writer may not
+//      write cannot be the field that wins.
+//   2. `graph-hash.ts` whitelists `observed_state.{value,baseline,cap}` as
+//      analysis-affecting and EXCLUDES `raw_value` as "cosmetic / provenance
+//      / display" — the repo's own declaration.
+//   3. `analysis-ready.ts` ships `observed_state.value` as the intervention
+//      number; `raw_value` reaches only display-oriented detail.
+//
+// So the pair is repaired at the WRITER, once, rather than every reader
+// defending against it (trap 21: two same-named-concept sources of one
+// symptom must not earn a third patch).
+//
+// ── Why re-derive rather than invent ───────────────────────────────────────
+// The inverse is NOT a second copy: `resolveExistingRawValue` is the shared
+// de-normalisation the validator, the executor precheck and the
+// `set_factor_value` handler already agree on (the AC.1 parity invariant).
+// Calling it with `raw_value` OMITTED asks it exactly the right question —
+// "what user-unit magnitude does this NEW value denote?" — and it answers
+// `ambiguous` when the scale genuinely cannot be recovered.
+//
+// On `ambiguous`/`missing` the stale `raw_value` is DROPPED, never kept. That
+// is the same law `set-factor-value.ts` and `reconcileDisplayAnchors` already
+// apply to `display_value`: clear the derived artefact rather than let it
+// lie. The formatter's own `value` fallback then renders the honest number.
+// Dropping is safe because the live edit path applies ops through
+// `applyUpdateNode`, whose `NODE_REQUIRED_NESTED_FIELDS` set is empty, so
+// `observed_state` is a whole-object REPLACE (`plotClient` is null at both V5
+// dispatch call sites — PLoT's deepMerge is not in play here).
+//
+// Scope: ONLY `update_node` ops that MOVE `observed_state.value` — i.e. whose
+// payload carries a `value` member DIFFERING from the node's current one.
+// That second clause is load-bearing and is enforced against the node, not
+// against the payload's shape: the canonicaliser merges the node's existing
+// observed_state under every translatable-leaf write, so a unit-only,
+// std-only or baseline-only edit reaches here carrying an UNCHANGED `value`
+// and the live `raw_value`. Reconciling those would DELETE a correct pair on
+// an edit that never touched the number, and with it the
+// `normalisedConvention` evidence the egress scale net needs — sending PLoT a
+// value off by a factor of `cap`. Label edits, structural ops and the
+// intervention subtree (whose own `raw_value` IS authoritative — see
+// plot-intervention-scale.ts) are likewise returned BY REFERENCE, untouched.
+//
+// Composed, not folded into `canonicaliseValueOps`, for the same reason
+// `stampUserEditProvenance` is: that module's pinned contract is
+// spelling-only.
+// ---------------------------------------------------------------------------
+
+/**
+ * Re-derive (or clear) `observed_state.raw_value` on every op that moves
+ * `observed_state.value`, so the denormalised sibling can never outlive the
+ * value it described.
+ *
+ * Pure and total — never throws, never mutates its inputs; an op that needs
+ * no reconciliation is returned BY REFERENCE, so a batch that already agrees
+ * is byte-identical to today.
+ *
+ * @param currentGraph - the graph these ops are about to be applied to; it
+ *                       supplies the `unit`/`cap` scale context and the
+ *                       existing `raw_value` that may need clearing.
+ */
+/**
+ * ⭐⭐ THE ONE MEMBERSHIP PREDICATE for the ambiguous sub-1 scale class, so the
+ * prescreen that ASKS and the backstop that THROWS cannot disagree about who is
+ * in the set. That rule is this module's own; two copies of it would break on
+ * the next edit, which is how the prescreen and the backstop have already
+ * drifted apart once (see the `storedFrameAdmits` exception in
+ * `reconcileObservedValuePair`).
+ *
+ * Returns the EVIDENCE that made the input ambiguous, or `null`:
+ *
+ *  · `'framed'` — the node's stored `scale_frame`, or its own
+ *    `{value, raw_value}` pair, recovers a divisor. A sub-1 input is then
+ *    genuinely "a proportion of the frame, or a raw sub-unit amount?" — the
+ *    R2-1 class, where two baseline writers were measured guessing answers
+ *    10^5 apart. UNCHANGED: this is exactly the set the prescreen already had.
+ *
+ *  · `'unframed_amount'` — NO divisor is recoverable, but the node's own stored
+ *    magnitude is `>= 1`, so THE RECORD ITSELF says this factor is an AMOUNT.
+ *    ⭐ THIS ARM IS NEW, AND IT CLOSES A LIVE SILENT CORRUPTION. Today a
+ *    `{ value: 0.79 }` write onto an unframed pounds factor standing at 49 is
+ *    ambiguous to nothing: the prescreen requires a recoverable frame so it
+ *    does not ask; reconcile's framed branch requires one too so it does not
+ *    throw; and `resolveExistingRawValue` resolves a `[0,1]` non-% value to
+ *    `raw = value`. The factor goes from 49 to 0.79 — a 62x error with no
+ *    refusal, no ask and no log line anywhere. A MISSING FRAME IS THE ABSENCE
+ *    OF EVIDENCE ABOUT SCALE, and absence of evidence is precisely when the
+ *    product must ask rather than pick (trap 22f: make the ambiguity the
+ *    product). This is a deliberate, user-visible behaviour change.
+ *
+ * ⚠ THE BREADTH IS BOUNDED AT BOTH ENDS, because ONE predicate here guards TWO
+ * OPPOSITE harms (trap 22b — asking too little silently rescales a real amount;
+ * asking too much turns an ordinary level edit into an interrogation):
+ *   · `Math.abs(stored) >= 1` — a factor already standing at a sub-1 LEVEL
+ *     (0.2 → 0.4) is an ordinary level edit and must NEVER ask;
+ *   · a node with NO numeric stored value carries no evidence either way, so it
+ *     is left exactly as it was — neither asked about nor rescaled;
+ *   · capped and `%` factors are excluded exactly as before: each has its own
+ *     convention and its own owner, and closing this gap must not open theirs.
+ */
+type AmbiguousScaleEvidence = 'framed' | 'unframed_amount';
+
+function ambiguousScaleEvidence(
+  newValue: unknown,
+  observed: Record<string, unknown>,
+  currentNode: Record<string, unknown> | null,
+): AmbiguousScaleEvidence | null {
+  if (typeof newValue !== 'number' || !Number.isFinite(newValue)) return null;
+  if (newValue === 0 || Math.abs(newValue) >= 1) return null;
+  const nodeObserved = asRecord(currentNode?.observed_state) ?? {};
+  if (nodeObserved.value === newValue) return null; // no move — not an edit
+  const payloadCap = typeof observed.cap === 'number' ? observed.cap : undefined;
+  const nodeCap = typeof nodeObserved.cap === 'number' ? nodeObserved.cap : undefined;
+  if (payloadCap !== undefined || nodeCap !== undefined) return null; // capped: existing machinery owns it
+  // `%` factors: a sub-1 op value is the model-scale convention, not the
+  // ambiguous class — the percentage path owns them (same exclusion as
+  // reconcile's framed branch; one predicate, kept together).
+  const payloadUnit = typeof observed.unit === 'string' ? observed.unit : undefined;
+  const nodeUnit = typeof nodeObserved.unit === 'string' ? nodeObserved.unit : undefined;
+  if ((payloadUnit ?? nodeUnit) === '%') return null;
+  const frame = resolveScaleFrame({
+    storedFrame: (currentNode as { scale_frame?: unknown } | null)?.scale_frame,
+    value: nodeObserved.value,
+    raw_value: nodeObserved.raw_value,
+  });
+  if (frame !== undefined) return 'framed';
+  const stored = nodeObserved.value;
+  if (typeof stored !== 'number' || !Number.isFinite(stored)) return null;
+  return Math.abs(stored) >= 1 ? 'unframed_amount' : null;
+}
+
+/**
+ * THE CALLERS' PRESCREEN for the ambiguous scale class (R2-1). Same
+ * extraction as `reconcileObservedValuePair` (op → observed root → new value;
+ * node → before pair), same predicate as the D1 stated-value ambiguity gate's
+ * framed arm: capless factor, frame recoverable from the BEFORE pair, bare
+ * value `v ≠ 0 ∧ |v| < 1` that actually MOVES the stored value. Both live
+ * callers (`edit-graph.ts` and `gm-held-execute.ts`) call this before
+ * reconcile and surface an ASK for any hit; reconcile's typed throw is the
+ * backstop, and this function is exported so the ask and the backstop cannot
+ * disagree on membership (one predicate, one module — trap 12).
+ */
+export function findAmbiguousScaleValueOps(
+  operations: readonly PatchOperation[],
+  currentGraph: unknown,
+): AmbiguousScaleValueOp[] {
+  const out: AmbiguousScaleValueOp[] = [];
+  for (const op of operations) {
+    if (op.op !== 'update_node') continue;
+    const value = asRecord(op.value);
+    if (value === null) continue;
+    const observed = asRecord(value[OBSERVED_ROOT]);
+    if (observed === null) continue;
+    if (!Object.prototype.hasOwnProperty.call(observed, 'value')) continue;
+    const newValue = observed.value;
+    if (typeof newValue !== 'number' || !Number.isFinite(newValue)) continue;
+    const node = findNode(currentGraph, op.path);
+    // ⚠ ONE PREDICATE WITH THE BACKSTOP (this module's own rule): the ask and
+    // reconcile's throw must agree on membership. The whole membership test —
+    // move, cap, unit, frame, and the new unframed-amount arm — now lives in
+    // `ambiguousScaleEvidence` and is consulted from BOTH sites, so a factor
+    // cannot land in exactly one of the two sets. That failure mode is either
+    // a user asked a question the backstop then refuses to act on, or a throw
+    // with no ask in front of it.
+    if (ambiguousScaleEvidence(newValue, observed, node) === null) continue;
+    const nodeObserved = asRecord(node?.observed_state) ?? {};
+    const currentRaw =
+      typeof nodeObserved.raw_value === 'number' ? nodeObserved.raw_value : Number.NaN;
+    const label = typeof node?.label === 'string' ? node.label : undefined;
+    out.push({
+      path: op.path,
+      newValue,
+      currentRawValue: currentRaw,
+      ...(label !== undefined ? { label } : {}),
+    });
+  }
+  return out;
+}
+
+/**
+ * The divisor the percentage convention has always used: `value` is the 0–1
+ * level and `raw_value` the percentage, so the frame IS 100.
+ */
+const PERCENT_CONVENTION_FRAME = 100;
+
+/**
+ * ⭐ A RECOVERED FRAME IS A QUOTIENT, AND A QUOTIENT OF TWO EXACTLY-STORED
+ * NUMBERS IS NOT ALWAYS THE EXACT DIVISOR.
+ *
+ * `recoverScaleFrame` derives the frame as `raw_value / value`. For an ordinary
+ * percentage pair that quotient is 100 — usually. Enumerated over the integer
+ * percents 1…100, **10 of them recover 99.99999999999999** rather than 100
+ * (7, 14, 17, 28, 34, 55 among them), because `p/100` is not representable in
+ * binary floating point and the division does not undo the rounding.
+ *
+ * Left alone, those ten factors take a divisor a few ulps below 100 and write a
+ * `raw_value` a few ulps below the truth — 89.99999999999999 instead of 90.
+ *
+ * ⚠ AND #1127 CANNOT CATCH IT. The relative error is ~1.4e-16, seven orders of
+ * magnitude INSIDE `PAIR_COHERENCE_RELATIVE_EPSILON` (1e-9), so the pair reads
+ * `coheres` and the value is simply wrong and silent. A guard whose tolerance
+ * is wider than the error it would need to see cannot be the thing that sees it.
+ *
+ * So the same epsilon that decides two carriers agree also decides a recovered
+ * frame IS the percentage convention: within it, snap to exactly 100. That
+ * deliberately reuses the module's own constant rather than minting a second
+ * tolerance — two tolerances for one question is the defect class this file
+ * keeps paying for. A frame genuinely on the ladder (200, 500) is many orders
+ * outside the window and is returned untouched.
+ */
+function snapToPercentConvention(frame: number | undefined): number | undefined {
+  if (frame === undefined) return undefined;
+  const relativeDifference =
+    Math.abs(frame - PERCENT_CONVENTION_FRAME) / PERCENT_CONVENTION_FRAME;
+  return relativeDifference <= PAIR_COHERENCE_RELATIVE_EPSILON
+    ? PERCENT_CONVENTION_FRAME
+    : frame;
+}
+
+/**
+ * The top of the percentage family, taken from the producer rather than minted
+ * here: `deriveFactorScaleFrame`'s basis-points sibling
+ * (`cee/draft/records/projector.ts:1182`) pins 10,000 as the largest frame the
+ * percentage-family ladder sanctions.
+ */
+const PERCENT_FRAME_CEILING = 10_000;
+
+/**
+ * ⭐⭐ A PERCENT FRAME IS BOUNDED AT BOTH ENDS, AND IT WAS ONLY BOUNDED AT ONE.
+ *
+ * Every guard in the frame chain is a LOWER bound plus a finiteness check:
+ * `recoverScaleFrame` refuses `frame <= 1` (`scale-frame.ts:50`), the stored
+ * domain check requires `stored > 1` (`:209`), and the divisor admission
+ * requires `scaleFrame > 1` (`evaluate-factor-value-proposal.ts:305-306`).
+ * NOTHING bounded the top, and `snapToPercentConvention` above is a 1e-9
+ * tightening toward 100 — not a bound.
+ *
+ * MEASURED through this very function before this guard existed:
+ *
+ *   stored frame 1e9,           level 0.9  ->  raw_value 900000000
+ *   stored frame 1.0000000001,  level 0.9  ->  raw_value 0.90000000009
+ *   recovered {1e-7, 100},      level 0.9  ->  raw_value 900000000
+ *
+ * ⭐ TWO HARMS IN OPPOSITE DIRECTIONS, AND ONE LOWER BOUND SERVES NEITHER — a
+ * huge frame OVER-states `raw_value`, a frame fractionally above 1 UNDER-states
+ * it by 100x. Neither is visible to #1127's coherence check, because
+ * `raw = value x frame` is coherent with that frame BY CONSTRUCTION. A guard
+ * whose tolerance cannot see the error it would need to see is not the guard.
+ *
+ * ── THE BAND IS THE PRODUCER'S, NOT THIS MODULE'S ─────────────────────────
+ * `deriveFactorScaleFrame` (`cee/draft/records/projector.ts:1173-1189`) is the
+ * only producer of a factor frame. For a percent-scaled unit it emits exactly
+ * `100` when `max <= 100`, else the {1,2,5}x10^k ladder — NRR 115% -> 200,
+ * ROI 300% -> 500 — and its basis-points sibling pins 10,000. So a percent
+ * frame below 100 or above 10,000 is not a producer state at all.
+ *
+ * ── REFUSE, NEVER REPAIR ──────────────────────────────────────────────────
+ * `scale-frame.ts:166-168` states the doctrine for the bottom of the range
+ * verbatim: "A `<= 1` frame is not a near-miss to be rounded - it is a value no
+ * producer emits, so it is refused rather than repaired." This is that
+ * sentence's missing symmetric half. Returning `undefined` degrades the divisor
+ * to 100 — the same fail-safe this module already documents for an INCOHERENT
+ * stored frame, so out-of-band and incoherent now behave identically.
+ */
+function percentDivisorFrameWithinLadder(frame: number | undefined): number | undefined {
+  const snapped = snapToPercentConvention(frame);
+  if (snapped === undefined) return undefined;
+  if (snapped < PERCENT_CONVENTION_FRAME || snapped > PERCENT_FRAME_CEILING) return undefined;
+  return snapped;
+}
+
+export function reconcileObservedValuePair(
+  operations: readonly PatchOperation[],
+  currentGraph: unknown,
+): PatchOperation[] {
+  return operations.map((op) => {
+    if (op.op !== 'update_node') return op;
+    const value = asRecord(op.value);
+    if (value === null) return op;
+    const observed = asRecord(value[OBSERVED_ROOT]);
+    if (observed === null) return op;
+    if (!Object.prototype.hasOwnProperty.call(observed, 'value')) return op;
+
+    const newValue = observed.value;
+    if (typeof newValue !== 'number' || !Number.isFinite(newValue)) return op;
+
+    // Scale context, and the authority on whether the value MOVED. Read before
+    // any other guard, because that question decides the whole lane.
+    // The NODE, not just its observed_state: the persisted `scale_frame` lives
+    // at node level precisely because the factor this fix exists for has no
+    // observed_state at all.
+    const currentNode = findNode(currentGraph, op.path);
+    const nodeObserved = asRecord(currentNode?.observed_state) ?? {};
+
+    // ⚠ THE SCOPE THE CHAIN ACTUALLY HANDS US. This function's contract is
+    // "act on ops that MOVE observed_state.value", but it never receives a
+    // bare payload: `canonicaliseUpdateNodeValue` merges the node's existing
+    // observed_state under EVERY translatable-leaf write (value · unit ·
+    // baseline · std), so a unit-only / std-only / baseline-only edit arrives
+    // carrying an UNCHANGED `value` AND the live `raw_value` — and would
+    // resolve `ambiguous` and DELETE the pair on an edit that never touched
+    // the number. Nothing can be stale if the value did not move.
+    //
+    // Deleting it is not cosmetic: `buildFactorScaleMap` grants
+    // `normalisedConvention` only when `raw_value` is present, and that flag
+    // is the sole evidence gate for the egress scale net's `cap_denormalised`
+    // rule. Dropping it changes what PLoT/ISL computes on by a factor of
+    // `cap` (£20,000 → 0.2). Pinned by the "COMPOSED chain" describe in
+    // observed-value-pair-authority.test.ts.
+    if (nodeObserved.value === newValue) return op;
+
+    // ⛔ THE FAIL-LOUD BACKSTOP FOR THE UNFRAMED-AMOUNT CLASS (see
+    // `ambiguousScaleEvidence`, which is where the whole membership test now
+    // lives). Both live callers prescreen with the SAME function and surface an
+    // ask, so this is unreachable through them; it exists so a FUTURE caller
+    // that skips the prescreen cannot silently rescale a real amount instead —
+    // the identical role the framed branch's throw already plays further down,
+    // and thrown from the same predicate so the two sets cannot drift.
+    if (ambiguousScaleEvidence(newValue, observed, currentNode) === 'unframed_amount') {
+      const currentRaw =
+        typeof nodeObserved.raw_value === 'number' ? nodeObserved.raw_value : Number.NaN;
+      throw new AmbiguousScaleValueError(op.path, newValue, currentRaw);
+    }
+
+    // ⚠ NARROW BY DESIGN: act ONLY on a payload that already carries a
+    // `raw_value`. That key is the stale-carry-forward signature — it is
+    // there because `canonicaliseUpdateNodeValue` merged the node's existing
+    // observed_state under the write. A payload WITHOUT it cannot strand a
+    // stale claim, so this lane leaves it exactly as it found it.
+    //
+    // ⚠⚠⚠ THE BOUNDARY RECORDED HERE IS SPENT, AND IT WAS #1342 THAT
+    // SPENT IT. The original text — kept below in full, because a superseded
+    // reason is evidence and deleting it would hide why this guard is drawn
+    // where it is — read:
+    //
+    //   "This is the boundary, and it is deliberate. A literal nested
+    //    `{ observed_state: { value } }` op takes the declared-field branch,
+    //    is never merged, and the applier's whole-object replace then drops
+    //    `unit`/`cap`/`raw_value` outright. That sibling WIPE is a real and
+    //    separate defect; it is NOT this defect (nothing stale survives a
+    //    wipe), and repairing it here would be the 'while we're here' scope
+    //    creep this programme keeps paying for. Recorded, not absorbed."
+    //
+    // #1342 CLOSED THAT WIPE AT THE WRITER (`canonicaliseUpdateNodeValue`,
+    // this file): the literal spelling is now merged onto the node's existing
+    // `observed_state` like every other spelling, so `unit` and `cap` survive
+    // and the payload ARRIVES HERE CARRYING `raw_value`. Pinned by
+    // `gm-held-value-canonicalisation.test.ts` — the case now titled
+    // "canonical observed_state spelling: siblings survive the merge", which
+    // asserts the merge (the old title cited here, "the canonicaliser is the
+    // identity", still exists in that file on a DIFFERENT, purely structural
+    // case, so the stale citation resolved silently to the wrong test) — and
+    // by `literal-observed-state-sibling-merge.test.ts`.
+    //
+    // ⭐ WHY THIS MATTERS TO THE GUARD BELOW, not just to the record: the
+    // superseded paragraph is the stated justification for the BREADTH of the
+    // `!hasOwnProperty(observed, 'raw_value') && !storedFrameAdmits` gate, and
+    // its premise was that the literal path CANNOT REACH that gate. It now
+    // reaches it routinely, which is how a stale `raw_value` on this path gets
+    // re-derived rather than carried forward. Reason about that guard's
+    // breadth from THIS text, never from the superseded paragraph above.
+    //
+    // ⭐ ONE EXCEPTION, AND IT IS THE WHOLE DEFECT: a factor the brief stated no
+    // value for has NO `observed_state`, so the canonicaliser has nothing to
+    // merge and the payload carries no `raw_value` — this guard returned before
+    // the frame branch below was ever reached. Meanwhile the prescreen
+    // (`findAmbiguousScaleValueOps`, no such guard) DID see the factor, so the
+    // user was asked a question this backstop then declined to act on. A
+    // persisted `scale_frame` is independent POSITIVE evidence that the factor
+    // is framed — it does not need the stale-carry-forward heuristic to infer
+    // it — so the guard yields to it and to nothing else. Everything without a
+    // stored frame stays exactly as narrow as it was.
+    //
+    // ⚠⚠ AND THE EXCEPTION EXCLUDES PERCENT FACTORS ON A NON-100 FRAME.
+    //
+    // ⚠⚠⚠ THE JUSTIFICATION RECORDED HERE IS SPENT, AND IT WAS THIS PR THAT
+    // SPENT IT. The original text — kept below in full, because a superseded
+    // reason is evidence and deleting it would hide why the guard exists —
+    // read:
+    //
+    //   "the key would otherwise unlock a path that then IGNORES the frame that
+    //    unlocked it. `deriveFactorScaleFrame` only pins 100 when
+    //    `isPercentScaledUnit(unit) && max <= 100`; above 100 it FALLS THROUGH
+    //    to the {1,2,5}·10^k ladder, so an NRR of 115% frames at 200 and an ROI
+    //    of 300% frames at 500. The frame branch below is gated `unit !== '%'`,
+    //    so those never reach it — they fall to `resolveExistingRawValue`,
+    //    which hard-codes `value * 100`. Measured base vs head: NRR wrote
+    //    `raw_value` 50 where the truth is 100 (2×), ROI wrote 50 where the
+    //    truth is 250 (5×), while a 3–5% churn factor (frame 100) stayed
+    //    correct — the contrast control that proves the probe discriminates."
+    //
+    // The load-bearing clause is "which hard-codes `value * 100`". THAT WAS
+    // TRUE AT THE MERGE-BASE AND IS FALSE AT THIS HEAD: this PR removed the
+    // hard-code. Roughly 100 lines below, the percent divisor is now resolved
+    // from the node's own frame and handed to `resolveExistingRawValue`, which
+    // computes `value * (framedDivisor ?? 100)`. Measured with the exclusion
+    // lifted, on the exact shapes the pinned refusals build: a frame-200 node
+    // asked for 0.575 returns raw 114.99999999999999 (correct, not 57.5), and a
+    // frame-500 node asked for 0.6 returns 300 (correct, not 60). For the very
+    // class this text names, the path no longer ignores the frame.
+    //
+    // ⚠ BUT IT IS NOT WHOLLY FALSE, AND THE REMAINING TRUTH IS NARROW. The new
+    // block gates on the NODE's `observed_state.unit`; this guard's
+    // `unitAtGuard` falls back to the PAYLOAD's unit. On a node carrying no
+    // unit of its own the two disagree, no frame is offered, and the divisor
+    // below IS still the hard-coded 100 — measured: raw 57.49999999999999.
+    //
+    // So the honest claim is: this exclusion no longer restores base behaviour
+    // for the class it names — it now also refuses a class the code below would
+    // answer correctly — and its surviving justification is confined to
+    // unit-less nodes. ⭐ THE TWO GATES ASK THE SAME QUESTION OF DIFFERENT
+    // OBJECTS, which is the exact shape this PR's own comment prescribes a
+    // remedy for one level down ("ask the SAME question of BOTH objects, in the
+    // same spelling the consumer uses"). Aligning `storedFrameAdmits` onto
+    // `nodeObserved.unit` is a BEHAVIOUR change that would move the pinned
+    // refusals, so it is reported rather than smuggled in here.
+    //
+    // ⭐ THE DIRECTION OF THE TRADE IS WHAT DECIDES THIS, not the magnitude.
+    // Base refused these outright (`baseline_scale_unresolved`); head ADMITTED
+    // them and the analysis ran to a rendered chart. A loud refusal became a
+    // silent 2–5× error — "prefer visible failure over confident wrongness"
+    // inverted, on the exact class the founder named (NRR, growth and ROI
+    // legitimately exceed 100%). Excluding them restores base behaviour for
+    // this class EXACTLY and leaves the fix intact everywhere else.
+    //
+    // ⚠ THE BANKED CORPUS DOES NOT ABSOLVE THIS. 50 percent-unit nodes, zero
+    // above 100, observed top of range 98 — that is a corpus that EXCLUDES the
+    // class, not evidence the class is unreachable, and 98 sitting flush
+    // against the boundary says only that models emit the usual 0–100 band.
+    //
+    // The principled fix — making `deriveFactorScaleFrame` return 100 for
+    // percent units ALWAYS, per this module's own doctrine that "a percentage
+    // DECLARES its scale" — is the better long-term answer and is deliberately
+    // NOT taken here: it changes over-frame behaviour and carries its own blast
+    // radius. Rowed, not absorbed.
+    const storedScaleFrame = (currentNode as { scale_frame?: unknown } | null)?.scale_frame;
+    const unitAtGuard =
+      typeof observed.unit === 'string'
+        ? observed.unit
+        : typeof nodeObserved.unit === 'string'
+          ? nodeObserved.unit
+          : undefined;
+    const storedFrameAdmits =
+      typeof storedScaleFrame === 'number' &&
+      !(unitAtGuard === '%' && storedScaleFrame !== 100);
+    // ── ⭐⭐ A PERCENTAGE STATES ITS OWN SCALE, AND THIS WRITER WAS THE ONLY
+    // ONE NOT LISTENING (reproduced live 2026-09-02, CEE `3575b18` / UI
+    // `05ca160b`; the P0 "the analysis never runs").
+    //
+    // THE MEASURED DEFECT. A guest set a percent factor to 40% and every
+    // analysis attempt refused, naming that factor: "recorded as a bare amount
+    // with no range". Its PERSISTED record, read out of the deployed session:
+    //
+    //     83c01b53  { value: 40, unit: '%', source: 'user_override' }
+    //
+    // — no `raw_value`, while its FOUR sibling percent factors in the SAME
+    // graph all carried `{ value: 0.x, unit: '%', raw_value: x0 }`. The raw
+    // magnitude was sitting in the LEVEL slot, so the analysis seam's baseline
+    // gate refused it, correctly and permanently.
+    //
+    // ⚠ THE GATE IS RIGHT AND IS NOT TOUCHED. `resolveExistingRawValue`
+    // independently calls `{value: 40, unit: '%'}` `ambiguous` — "a `%` value
+    // OUTSIDE [0,1] ... is genuinely ambiguous → fail closed". Two readers
+    // agree the RECORD is incoherent. The first failure is HERE, at the
+    // writer that produced it.
+    //
+    // ⭐ THIS IS A TWINS DEFECT, NOT A NEW OPINION (trap 12). Given the same
+    // "40%", the V5 writer `normaliseFactorValue` already writes
+    // `{value: 0.4, raw_value: 40}` — through `unitPinnedScaleFrame`. This
+    // op-path writer returned the op UNTOUCHED. One input, two writers, two
+    // answers. The remedy is to consult the SAME authority the other writer
+    // consults, never to mint a second opinion about frames here.
+    //
+    // ⚠ WHY `unitPinnedScaleFrame` IS THE SAFE AUTHORITY. It returns a CONSTANT
+    // determined by TWO things, and BOTH are load-bearing — an earlier version
+    // of this comment named only the magnitude bound, which understated it:
+    //   · the UNIT FAMILY, via `classifyUnitScaleClass` — percent → 100,
+    //     basis points → 10,000, and EVERY other family (currency, counts,
+    //     unit-less) → nothing. The family is matched on the unit's own
+    //     spelling, so '%', 'percent' and '% NRR' all class percent while '£'
+    //     does not;
+    //   · the MAGNITUDE, admitted only within that family's true bound —
+    //     percent on `(1, 100]`, basis points on `(1, 10000]`.
+    // So it can never hand back a laddered, sibling-dependent number and can
+    // never silently rescale a sibling intervention. It abstains at
+    // `magnitude <= 1` (a value already on the analysis scale is never
+    // re-framed) and ABOVE the family bound — which is how the NRR-115% /
+    // ROI-300% class the `storedFrameAdmits` exclusion protects keeps
+    // REFUSING, preserved BY THE AUTHORITY ITSELF rather than by a second
+    // guard here that could drift from it.
+    //
+    // ⚠⚠ THE PREDICATE IS ABOUT THE INCOMING VALUE, NOT ABOUT PRIOR WRITE
+    // STATE — AND THAT IS A CORRECTION THAT COST A DEFECT IN THE OPPOSITE
+    // DIRECTION (review of #1317, measured through `handleEditGraph`).
+    // This block was first conjoined on `!hasOwnProperty(observed,
+    // 'raw_value')`. Its OWN successful write ADDS `raw_value`, so the next
+    // edit on the same factor was excluded by that very conjunct, fell through
+    // to `resolveExistingRawValue`, resolved `ambiguous`, deleted `raw_value`
+    // — and re-created the exact P0 record this fix exists to close. Measured:
+    // 40 → COMPUTES, 55 → BLOCKED, 60 → COMPUTES. The fix ALTERNATED.
+    //
+    // Asking "does this incoming value need re-framing onto the analysis
+    // scale?" — a function of (unit, newValue) ALONE — is idempotent across
+    // repeated edits BY CONSTRUCTION, not by a second patch to the conjunct.
+    // It also subsumes the stale-carry-forward case correctly: a merged
+    // payload whose `raw_value` belongs to the PREVIOUS value is rewritten to
+    // the new pair rather than deleted, which is what the lane below was
+    // trying and could not do (it refuses `value > 1` on a percent factor).
+    // Pinned by the three-edit sequence in
+    // `percent-value-edit-survives-to-analysis.test.ts` — the case a corpus of
+    // fresh-graph fixtures was structurally unable to contain (trap 13d).
+    //
+    // ⚠ NARROW BY CONSTRUCTION, and each surviving conjunct is load-bearing:
+    //   · factor only    — the consumer skips non-factors (see below);
+    //   · no cap         — a capped factor has its own convention and the
+    //                      clamping writer owns it;
+    //   · no stored frame — a framed factor is owned by `storedFrameAdmits`
+    //                      and the frame branch below; this limb is only for
+    //                      the factor that has NO frame at all.
+    // A currency or a count classes `unknown`, pins nothing, and still falls
+    // through to the honest refusal — closing the percent gap must not open the
+    // currency lie.
+    const capAtGuard =
+      typeof observed.cap === 'number'
+        ? observed.cap
+        : typeof nodeObserved.cap === 'number'
+          ? nodeObserved.cap
+          : undefined;
+    //
+    // ⚠ SCOPED TO `kind === 'factor'`, AND CI IS WHY. The first version of this
+    // block omitted that conjunct and moved an OPTION's own observed value
+    // (`gm-held-option-own-value-withhold.test.ts` S3 twin, 30 → 0.3). The
+    // consumer this fix serves — `findScaleIncoherentBaselineFactorIds` — reads
+    // `node.kind !== 'factor' → continue`, so an option's value can never reach
+    // the gate and re-framing it buys nothing while changing a pinned wire
+    // number. Serve exactly the consumer that needs it, and no more.
+    //
+    // ⚠⚠⚠ ROUND 3 — THE ORDERING AXIS. THIS LANE NO LONGER HAS AN ORDERING OF
+    // ITS OWN; IT ADOPTS THE ESTATE'S.
+    //
+    // The previous version resolved the unit-pinned constant FIRST and consulted
+    // no frame the factor already carried. A legacy percent factor whose
+    // `{value, raw_value}` PAIR encodes a non-100 frame carries NO stored
+    // `scale_frame`, so it fell into this limb and the constant 100 OVERRODE the
+    // pair's 200. Measured on `{value: 0.575, raw_value: 115, unit: '%'}` edited
+    // to 40: this lane wrote `{0.4, 40}` while `normaliseFactorValue` wrote
+    // `{0.2, 40}` — ONE INPUT, TWO WRITERS, TWO ANSWERS, i.e. the twins defect
+    // this whole change exists to close, reappearing inside the fix. It lands on
+    // the founder-named NRR-115% class: a baseline level of 0.4 beside siblings
+    // framed at 200 is a 2x distortion with NO refusal anywhere.
+    //
+    // ⭐ THE PRECEDENCE BELOW IS NOT INVENTED HERE. It is verbatim the order
+    // `normaliseFactorValue` uses for a capless factor:
+    //     resolveScaleFrame (stored -> pair)
+    //       -> else, when the carriers do NOT contradict each other,
+    //          unitPinnedScaleFrame
+    //       -> else raw (and the analysis seam refuses, honestly).
+    // Adopting it is what finally makes the two writers AGREE, which was the
+    // point of the change; `percent-value-edit-survives-to-analysis.test.ts`
+    // asserts that agreement directly rather than restating it here.
+    //
+    // ⚠ THE `incoherent` SUPPRESSION IS PART OF THE PRECEDENCE, NOT AN EXTRA.
+    // `resolveScaleFrame` collapses "no frame recorded" and "a frame was
+    // recorded and it CONTRADICTS the pair" to the same `undefined`. A
+    // contradicted frame is POSITIVE evidence the factor's scale is corrupt, and
+    // pinning a unit constant onto it yields a level incomparable to the
+    // siblings the real frame framed — the same sibling-distortion harm reached
+    // through a different door, and the conflation a sibling PR was closed for.
+    //
+    // ⚠ WHY THIS LIMB STILL GATES ON `pinnedFrame !== undefined` FIRST. Where
+    // the unit family pins nothing — every currency, count and unit-less factor,
+    // and percent above its bound — this limb does not run AT ALL, so the
+    // pre-existing frame branch below keeps those classes, including its
+    // deliberate `AmbiguousScaleValueError` throw on a sub-1 input. This limb
+    // only ever covers what that branch excludes (`unit !== '%'`).
+    if (
+      currentNode?.kind === 'factor' &&
+      capAtGuard === undefined
+    ) {
+      const pinnedFrame = unitPinnedScaleFrame(unitAtGuard, newValue);
+      if (pinnedFrame !== undefined) {
+        const carriedFrame = resolveScaleFrame({
+          storedFrame: storedScaleFrame,
+          value: nodeObserved.value,
+          raw_value: nodeObserved.raw_value,
+        });
+        const recordedScaleContradictsItself =
+          checkPairCoherence({
+            storedFrame: storedScaleFrame,
+            value: nodeObserved.value,
+            raw_value: nodeObserved.raw_value,
+          }) === 'incoherent';
+        const frame =
+          carriedFrame ?? (recordedScaleContradictsItself ? undefined : pinnedFrame);
+        const framedValue = frame === undefined ? Number.NaN : newValue / frame;
+        if (Number.isFinite(framedValue)) {
+          return {
+            ...op,
+            value: {
+              ...value,
+              [OBSERVED_ROOT]: { ...observed, value: framedValue, raw_value: newValue },
+            },
+          };
+        }
+      }
+    }
+
+    // ── ⭐⭐ A CAPPED FACTOR'S NORMALISED VALUE IS ALWAYS IN [0,1], SO A VALUE
+    // OUTSIDE IT IS A USER MAGNITUDE — AND THIS WRITER WAS PUTTING IT IN THE
+    // LEVEL SLOT.
+    //
+    // ⚠ THE PREDICATE IS NOT MINTED HERE (trap 13c — derive the expectation
+    // from the PRODUCER's declared semantics, never from the failure in hand).
+    // `resolveExistingRawValue`'s non-% branch already states it, in its own
+    // words, about this exact class:
+    //
+    //     "a normalised capped value is always in [0,1]; a value outside that
+    //      range is an off-contract graph carrying an already-raw value
+    //      (normalisation never produces >1 or <0)"
+    //
+    // — and acts on it, returning `raw = value` for such an input. What that
+    // function CANNOT do is fix the other half of the pair: it only ever
+    // answers "what raw magnitude does this denote?", and this reconciler only
+    // ever writes `raw_value`. So the predicate was applied to one carrier and
+    // not the other, and a `{ value: 69 }` edit on a cap-100 factor was
+    // committed as `{ value: 69, raw_value: 69, cap: 100 }` — a pair denoting
+    // 6,900 in user units, 345x the factor's true magnitude, and outside PLoT's
+    // own `value < 0 || value > 1` gate. HALF A PREDICATE APPLIED is how that
+    // happened; this completes it with the SAME arithmetic the capped WRITER
+    // uses on the way in (`normaliseFactorValue`: `value = raw / cap`), so the
+    // round-trip closes rather than acquiring a second opinion.
+    //
+    // ⚠ Reachable today through the ROOTED spelling (`observed_state/value`),
+    // so this is a pre-existing corruption, not one the bare-leaf translation
+    // introduces. The translation would merely have exposed the dominant
+    // `value` class to it.
+    //
+    // ⚠ NARROW, and every conjunct is load-bearing:
+    //   · `cap !== undefined` — capless factors are owned by the unit-pinned
+    //     limb above and the frame branch below; this arm must not reach them;
+    //   · `unit !== '%'`      — the percentage convention has its own divisor
+    //     and its own ambiguity rule, and intercepting it here would misread an
+    //     unambiguous 0.4 (= 40%) exactly as a previous round did;
+    //   · OUTSIDE [0,1]       — a value INSIDE it is a LEVEL, which is what the
+    //     capped convention stores. Those are left untouched and fall through
+    //     to the pre-existing `resolveExistingRawValue` path, byte-identical.
+    if (
+      capAtGuard !== undefined &&
+      unitAtGuard !== '%' &&
+      (newValue < 0 || newValue > 1)
+    ) {
+      const levelValue = newValue / capAtGuard;
+      if (Number.isFinite(levelValue)) {
+        return {
+          ...op,
+          value: {
+            ...value,
+            [OBSERVED_ROOT]: { ...observed, value: levelValue, raw_value: newValue },
+          },
+        };
+      }
+    }
+
+    if (!Object.prototype.hasOwnProperty.call(observed, 'raw_value') && !storedFrameAdmits) {
+      return op;
+    }
+
+    // Scale context: the payload's own unit/cap (the canonicaliser already
+    // merged the node's in), falling back to the node for a payload that set
+    // one without the other. `nodeObserved` is read above.
+    const unit =
+      typeof observed.unit === 'string'
+        ? observed.unit
+        : typeof nodeObserved.unit === 'string'
+          ? nodeObserved.unit
+          : undefined;
+    const cap =
+      typeof observed.cap === 'number'
+        ? observed.cap
+        : typeof nodeObserved.cap === 'number'
+          ? nodeObserved.cap
+          : undefined;
+
+    // ── FRAMED CAPLESS FACTORS (records pass 3d) — the frame is preserved,
+    // not destroyed (PR #926 round-1 BLOCKER), and the genuinely ambiguous
+    // input class is REFUSED, not guessed (round-2 blocker R2-1). The
+    // projector writes magnitude-scaled factors as {value: raw/frame,
+    // raw_value: raw} with NO cap (a stored cap would flip
+    // normaliseFactorValue to cap-normalised writes and break the user-scale
+    // round-trip). The frame is recoverable from the node's BEFORE pair —
+    // including the over-frame pair a >frame edit creates (round-2 blocker
+    // R2-2: the earlier `value ≤ 1` precondition refused the very pair the
+    // writer itself wrote, so the SECOND edit resurrected the raw write).
+    //
+    //   · bare sub-1 non-zero input → AMBIGUOUS (proportion of the frame, or
+    //     a raw sub-unit amount?). Round 2 measured the two writers guessing
+    //     OPPOSITE answers (10^5 apart). Callers prescreen via
+    //     `findAmbiguousScaleValueOps` and ASK; this throw is the fail-loud
+    //     backstop so no future caller can silently guess (trap 22f: make
+    //     the ambiguity the product).
+    //   · everything else (raw magnitudes, 0, negatives ≤ -1) → RAW, divided
+    //     onto the factor's own frame — the same semantics as writer 1, and
+    //     the cross-writer parity pin holds both to it.
+    // ⚠ `unit === '%'` DEFERS to the percentage convention below — that path
+    // is `resolveExistingRawValue`'s own special case, and it is ITSELF
+    // frame-preserving for percent factors (model value stays the 0–1 level,
+    // raw_value = value×100 — i.e. frame 100, exactly what the pair encodes).
+    // Intercepting it here misread an unambiguous 0.4 (= 40%) as the
+    // ambiguous class (caught by observed-value-pair-authority.test.ts).
+    if (cap === undefined && unit !== '%') {
+      const frame = resolveScaleFrame({
+        storedFrame: (currentNode as { scale_frame?: unknown } | null)?.scale_frame,
+        value: nodeObserved.value,
+        raw_value: nodeObserved.raw_value,
+      });
+      if (frame !== undefined) {
+        if (newValue !== 0 && Math.abs(newValue) < 1) {
+          const currentRaw =
+            typeof nodeObserved.raw_value === 'number' ? nodeObserved.raw_value : Number.NaN;
+          throw new AmbiguousScaleValueError(op.path, newValue, currentRaw);
+        }
+        const framedValue = newValue / frame;
+        if (Number.isFinite(framedValue)) {
+          const nextObserved: Record<string, unknown> = { ...observed };
+          nextObserved.value = framedValue;
+          nextObserved.raw_value = newValue;
+          return { ...op, value: { ...value, [OBSERVED_ROOT]: nextObserved } };
+        }
+        // Non-finite arithmetic: fall through to the pre-existing path below,
+        // which re-derives or clears raw_value — never a silent no-op.
+      }
+    }
+
+    // ⭐ THE PERCENT DIVISOR IS THE FACTOR'S FRAME, NOT A CONSTANT.
+    // This is the one caller that HOLDS the frame — the node's persisted
+    // `scale_frame` plus its before-pair — and it used to throw that knowledge
+    // away here, leaving `resolveExistingRawValue` to assume 100. For the
+    // percent factors the ladder frames above 100 (NRR at 200, ROI at 500)
+    // that assumption is a silent 2–5× error in `raw_value`, and #1127's
+    // coherence check now REFUSES the pair it produces — the detector firing
+    // on a corruption written right here.
+    //
+    // Resolved through the shared owner, so this seam holds no private opinion
+    // about the frame (trap 12). An INCOHERENT stored frame resolves to
+    // `undefined` (#1127) and the divisor degrades to 100 — fail-safe.
+    //
+    // ⚠⚠ TWO OBJECTS, ONE QUESTION — the first version of this block asked it
+    // of the wrong one, and review measured the cost.
+    //
+    // `resolveExistingRawValue` gates the percent branch on the PAYLOAD's
+    // unit; the frame is a property of the NODE. On a unit-changing edit those
+    // are DIFFERENT OBJECTS, and an op that sets `unit` to a percentage on a
+    // magnitude-framed factor made the payload gate say "percent" while the
+    // frame still said 500,000. Measured through the shipped chain: a £ factor
+    // framed at 500,000 wrote `raw_value` 450000 where base wrote 90, and a
+    // count factor framed at 100,000 wrote 90000. `unit` is an editable
+    // observed subkey and this function produces the carry-forward shape
+    // itself, so the state is reachable by the same route the fix relies on.
+    //
+    // The earlier comment here said "non-percent factors never read it". That
+    // was TRUE OF THE PAYLOAD AND FALSE OF THE FACTOR — which is the same
+    // two-questions-under-one-name shape as the defect this block fixes, one
+    // level up. The remedy is to ask the SAME question of BOTH objects, in the
+    // same spelling the consumer uses: the frame is offered only when the
+    // NODE's own unit is `'%'`. A factor that is not itself a percentage
+    // degrades to the pre-existing divisor, which is exactly base behaviour.
+    const nodeUnitForFrame =
+      typeof nodeObserved.unit === 'string' ? nodeObserved.unit : undefined;
+    const percentDivisorFrame =
+      nodeUnitForFrame === '%'
+        ? percentDivisorFrameWithinLadder(
+            resolveScaleFrame({
+              storedFrame: (currentNode as { scale_frame?: unknown } | null)?.scale_frame,
+              value: nodeObserved.value,
+              raw_value: nodeObserved.raw_value,
+            }),
+          )
+        : undefined;
+
+    // `raw_value` deliberately OMITTED: we are asking what the NEW value
+    // denotes, not echoing the old answer back (which is the defect).
+    const derived = resolveExistingRawValue({
+      value: newValue,
+      ...(unit !== undefined ? { unit } : {}),
+      ...(cap !== undefined ? { cap } : {}),
+      ...(percentDivisorFrame !== undefined ? { scaleFrame: percentDivisorFrame } : {}),
+    });
+
+    const nextObserved: Record<string, unknown> = { ...observed };
+    if (derived.kind === 'resolved') {
+      if (observed.raw_value === derived.raw) return op; // agrees — by reference
+      nextObserved.raw_value = derived.raw;
+    } else {
+      // Scale unrecoverable. Never leave the stale claim standing.
+      delete nextObserved.raw_value;
+    }
+
+    return { ...op, value: { ...value, [OBSERVED_ROOT]: nextObserved } };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Landed-op postcondition (#509's `heldBatchFullyLanded`, generalised to serve
+// the normal edit path too).
+//
+// Every operation must have an OBSERVABLE effect on the CANONICAL
+// (persisted-shape) graph. For update ops that means every field the applier
+// wrote must survive canonicalisation with the same value on the target
+// entity; for add/remove ops it means the entity's presence/absence flipped as
+// asked. If ANY op did not land, the caller refuses the WHOLE batch — nothing
+// persists, never a silent partial. Total + fail-closed: an unresolvable
+// target or any thrown comparison reports NOT-landed (refuse), never a false
+// OK.
+//
+// This runs on the ops AS APPLIED (post-canonicalisation). That ordering is
+// what makes it exact: a translated value op's payload is by then a DECLARED
+// `observed_state` write, so it survives the parse byte-for-byte and is
+// verified literally. The only keys that can still be stripped are the ones
+// `canonicaliseValueOps` deliberately left verbatim.
+// ---------------------------------------------------------------------------
+
+const NODE_IDENTITY_KEYS: readonly string[] = ['id'];
+const EDGE_IDENTITY_KEYS: readonly string[] = ['from', 'to', 'id'];
+
+/** Order-insensitive deep equality over JSON-serialisable values. */
+function deepEqualJson(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') {
+    return a === b;
+  }
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    return a.every((x, i) => deepEqualJson(x, b[i]));
+  }
+  const ao = a as Record<string, unknown>;
+  const bo = b as Record<string, unknown>;
+  const ak = Object.keys(ao);
+  if (ak.length !== Object.keys(bo).length) return false;
+  return ak.every(
+    (k) => Object.prototype.hasOwnProperty.call(bo, k) && deepEqualJson(ao[k], bo[k]),
+  );
+}
+
+/**
+ * True for the intervention-subtree op spellings (`data/interventions/<id>`,
+ * `observed_state.interventions.<id>`, `interventions/<id>`) that
+ * `canonicaliseValueOps` deliberately does NOT translate because
+ * `encodeOptionInterventionsForEdit` owns them: it reads these very keys off
+ * the applied graph and promotes them to canonical top-level `interventions`.
+ *
+ * Derived from the same segment vocabulary the canonicaliser uses
+ * (`OBSERVED_ROOT_SPELLINGS` + the `interventions` leaf of the referee's
+ * `ALLOWED_OBSERVED_SUBKEYS`), not a second hand-kept list.
+ */
+function isInterventionSubtreeKey(key: string): boolean {
+  const segments = key.split(/[/.]/).filter((s) => s.length > 0);
+  if (segments.length === 0) return false;
+  if (segments[0] === 'interventions') return true;
+  return OBSERVED_ROOT_SPELLINGS.has(segments[0]!) && segments[1] === 'interventions';
+}
+
+/**
+ * Every non-identity field an update op's applier wrote (`rawEntity`) must
+ * survive canonicalisation byte-for-byte on the persisted entity
+ * (`canonEntity`). A missing/altered field means the write did not land (it
+ * was stripped, e.g. a `data`/slash-keyed value spelling). Fail-closed: a
+ * missing entity reports NOT-survived.
+ *
+ * `preEntity` is supplied ONLY by callers that run a downstream encoder
+ * between the apply and the persisted parse (the normal edit path runs
+ * `encodeOptionInterventionsForEdit`). When present it admits ONE narrow extra
+ * way for a key to have landed: an intervention-subtree spelling whose
+ * canonical `interventions` field actually MOVED relative to the pre-edit
+ * entity. Anything else that was stripped still refuses. When `preEntity` is
+ * absent (the held path) the check is strictly #509's.
+ */
+function firstWriteThatDidNotSurvive(
+  value: unknown,
+  identityKeys: readonly string[],
+  rawEntity: Record<string, unknown> | undefined,
+  canonEntity: Record<string, unknown> | undefined,
+  preEntity: Record<string, unknown> | undefined,
+): string | null {
+  // Entity missing entirely. There is no per-key culprit to name, and
+  // inventing one would be worse than the empty line this replaces.
+  if (rawEntity === undefined || canonEntity === undefined) return MISSING_ENTITY_KEY;
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
+  for (const key of Object.keys(value as Record<string, unknown>)) {
+    if (identityKeys.includes(key)) continue;
+    if (deepEqualJson(rawEntity[key], canonEntity[key])) continue;
+
+    // The write was stripped by canonicalisation.
+    if (preEntity === undefined) return key;
+    if (!isInterventionSubtreeKey(key)) return key;
+    // The intervention encoder owns this spelling — it landed iff the
+    // canonical intervention state actually changed.
+    if (deepEqualJson(canonEntity.interventions, preEntity.interventions)) return key;
+  }
+  return null;
+}
+
+/**
+ * Sentinel for "the target entity was not in the graph at all", so the
+ * descriptor can distinguish that from "a named field was stripped". Not a
+ * real op key: it is masked like any other and reports as `*`.
+ */
+const MISSING_ENTITY_KEY = '\u0000missing_entity';
+
+/**
+ * WHY THE REFUSAL NAMES THE OPERATION.
+ *
+ * `batchFullyLanded` used to return a bare boolean, so the warn line it drives
+ * could say only THAT an operation did not land, never WHICH. Measured cost,
+ * 2026-09-14: on staging `8e4efce0` an edit refused at request
+ * `20eec8c9-…`, and a discriminator over the deployed logs returned
+ *   "encoded option interventions to the canonical"  -> 0
+ *   option_interventions_encoded                     -> 0
+ *   "did not survive canonicalisation" (contrast)    -> 1
+ * i.e. the intervention encoder never fired — and the log could not say whether
+ * the op spelling was outside the recogniser or the encoder was not on the path
+ * at all. Those have OPPOSITE remedies, and nothing on the line discriminated
+ * them. This descriptor does.
+ *
+ * ⛔ REDACTION — WHY NEITHER THE PATH NOR THE RAW KEY IS LOGGED. The obvious
+ * call is "log the key/path, not the value; a path is structural". In THIS
+ * codebase that is false, twice over:
+ *
+ *   1. A path IS an entity id, and entity ids here are slug-shaped SEMANTIC
+ *      WORDS derived from the user's own labels — `fac_delivery_cost`,
+ *      `factor_team_morale`, `goal_revenue` (see
+ *      `orchestrator/shared/output-safety.ts`, which documents exactly this
+ *      shape). So `op.path` for an `update_node` is the user's factor name,
+ *      slugified. Logging it publishes the user's model.
+ *   2. The failing KEY embeds an id too: the intervention spellings are
+ *      `interventions/<id>`, `data/interventions/<id>`,
+ *      `observed_state.interventions.<id>`. The id is the LAST segment, so a
+ *      raw key leaks the same content one level down.
+ *
+ * And the keys are not even a closed set: this module's own
+ * `FORBIDDEN_PATH_SEGMENTS` comment states that "Op keys are model-controlled"
+ * (a key like `__proto__/value` is reachable). A key allowlist must therefore
+ * FAIL CLOSED rather than assume a vocabulary.
+ *
+ * So the descriptor reports the key's SHAPE: each segment is kept only if it
+ * is in this module's own structural vocabulary, and every other segment —
+ * which is where an id can be — is masked to `*`. `interventions/fac_acme_x`
+ * becomes `interventions/*`. That is exactly the discrimination the incident
+ * needed (which spelling family was used) with none of the content.
+ *
+ * Everything else on the descriptor is a closed enum: the op kind (the
+ * `PatchOperation` union) and the reason (the switch arm that refused).
+ * `op.value` is never read.
+ */
+export type NonLandingReason =
+  /** add_node: the node is absent from the canonical graph. */
+  | 'added_entity_missing_from_canonical'
+  /** remove_node / remove_edge: the entity is still present after canonicalisation. */
+  | 'removed_entity_still_present'
+  /** add_edge: the edge is absent from the canonical graph. */
+  | 'added_edge_missing_from_canonical'
+  /** remove_edge / update_edge: `op.path` did not parse as an edge target. */
+  | 'edge_target_path_unparseable'
+  /** update_node / update_edge: a written field did not survive canonicalisation. */
+  | 'update_writes_did_not_survive'
+  /** An op kind this checker cannot verify. Fails closed, as it always did. */
+  | 'unknown_op_kind'
+  /** The per-op check threw. Fails closed, as it always did. */
+  | 'check_threw';
+
+export interface NonLandingOperation {
+  /** Position in the batch. Structural. */
+  readonly index: number;
+  /** The `PatchOperation` union member. Closed set. */
+  readonly op: string;
+  readonly reason: NonLandingReason;
+  /**
+   * The failing write's key with every non-structural segment masked to `*`
+   * (see the redaction note above). Null when the reason is not key-specific.
+   */
+  readonly key_shape: string | null;
+  /**
+   * Whether the failing key is one the intervention encoder owns — evaluated
+   * with `isInterventionSubtreeKey`, the ENCODER'S OWN predicate, so this
+   * answers "was this spelling inside the recogniser?" without re-deriving it.
+   * Null when the reason is not key-specific.
+   */
+  readonly key_is_intervention_subtree: boolean | null;
+}
+
+/**
+ * Segments that are this module's own structural vocabulary and therefore
+ * carry no user content. DERIVED from the sets the canonicaliser already uses
+ * (CLAUDE.md trap 12 — not a second hand-kept list): if a spelling is added
+ * there, it is recognised here automatically.
+ */
+const STRUCTURAL_KEY_SEGMENTS: ReadonlySet<string> = new Set<string>([
+  ...OBSERVED_ROOT_SPELLINGS,
+  ...ALLOWED_OBSERVED_SUBKEYS,
+  ...NODE_IDENTITY_KEYS,
+  ...EDGE_IDENTITY_KEYS,
+  'interventions',
+]);
+
+/**
+ * Mask a model-controlled op key down to its structural shape. Separators are
+ * normalised to `/` so `data.interventions.x` and `data/interventions/x`
+ * aggregate as one shape in the logs.
+ */
+export function describeKeyShape(key: string): string {
+  const segments = key.split(/[/.]/).filter((s) => s.length > 0);
+  if (segments.length === 0) return '*';
+  return segments.map((s) => (STRUCTURAL_KEY_SEGMENTS.has(s) ? s : '*')).join('/');
+}
+
+/**
+ * The first operation in the batch with no observable effect on the canonical
+ * applied graph, or `null` when every operation landed.
+ *
+ * This is the whole check; {@link batchFullyLanded} is a boolean view of it, so
+ * the two cannot drift apart.
+ */
+export function firstOperationThatDidNotLand(
+  operations: readonly PatchOperation[],
+  rawApplied: GraphV3T,
+  canonical: GraphV3T,
+  preEdit?: GraphV3T | null,
+): NonLandingOperation | null {
+  const rawNodes = rawApplied.nodes as ReadonlyArray<Record<string, unknown>>;
+  const rawEdges = rawApplied.edges as ReadonlyArray<Record<string, unknown>>;
+  const canonNodes = canonical.nodes as ReadonlyArray<Record<string, unknown>>;
+  const canonEdges = canonical.edges as ReadonlyArray<Record<string, unknown>>;
+  const preNodes = (preEdit?.nodes ?? undefined) as
+    | ReadonlyArray<Record<string, unknown>>
+    | undefined;
+  const preEdges = (preEdit?.edges ?? undefined) as
+    | ReadonlyArray<Record<string, unknown>>
+    | undefined;
+  const findNode = (
+    arr: ReadonlyArray<Record<string, unknown>> | undefined,
+    id: unknown,
+  ): Record<string, unknown> | undefined => arr?.find((n) => n.id === id);
+  const findEdge = (
+    arr: ReadonlyArray<Record<string, unknown>> | undefined,
+    from: unknown,
+    to: unknown,
+  ): Record<string, unknown> | undefined => arr?.find((e) => e.from === from && e.to === to);
+
+  const describe = (
+    index: number,
+    op: PatchOperation,
+    reason: NonLandingReason,
+    key?: string,
+  ): NonLandingOperation => ({
+    index,
+    op: String(op.op),
+    reason,
+    key_shape: key === undefined ? null : describeKeyShape(key),
+    key_is_intervention_subtree: key === undefined ? null : isInterventionSubtreeKey(key),
+  });
+
+  for (let index = 0; index < operations.length; index += 1) {
+    const op = operations[index]!;
+    try {
+      switch (op.op) {
+        case 'add_node':
+          if (findNode(canonNodes, op.path) === undefined) {
+            return describe(index, op, 'added_entity_missing_from_canonical');
+          }
+          break;
+        case 'remove_node':
+          if (findNode(canonNodes, op.path) !== undefined) {
+            return describe(index, op, 'removed_entity_still_present');
+          }
+          break;
+        case 'add_edge': {
+          const v = op.value as Record<string, unknown>;
+          if (findEdge(canonEdges, v?.from, v?.to) === undefined) {
+            return describe(index, op, 'added_edge_missing_from_canonical');
+          }
+          break;
+        }
+        case 'remove_edge': {
+          const ep = parseEdgeTargetPath(op.path);
+          if (ep === null) return describe(index, op, 'edge_target_path_unparseable');
+          if (findEdge(canonEdges, ep.from, ep.to) !== undefined) {
+            return describe(index, op, 'removed_entity_still_present');
+          }
+          break;
+        }
+        case 'update_node': {
+          const failedKey = firstWriteThatDidNotSurvive(
+            op.value,
+            NODE_IDENTITY_KEYS,
+            findNode(rawNodes, op.path),
+            findNode(canonNodes, op.path),
+            preNodes === undefined ? undefined : findNode(preNodes, op.path),
+          );
+          if (failedKey !== null) {
+            return describe(index, op, 'update_writes_did_not_survive', failedKey);
+          }
+          break;
+        }
+        case 'update_edge': {
+          const ep = parseEdgeTargetPath(op.path);
+          if (ep === null) return describe(index, op, 'edge_target_path_unparseable');
+          const failedKey = firstWriteThatDidNotSurvive(
+            op.value,
+            EDGE_IDENTITY_KEYS,
+            findEdge(rawEdges, ep.from, ep.to),
+            findEdge(canonEdges, ep.from, ep.to),
+            preEdges === undefined ? undefined : findEdge(preEdges, ep.from, ep.to),
+          );
+          if (failedKey !== null) {
+            return describe(index, op, 'update_writes_did_not_survive', failedKey);
+          }
+          break;
+        }
+        default:
+          // Unknown op kind — cannot verify its effect, so fail closed.
+          return describe(index, op, 'unknown_op_kind');
+      }
+    } catch {
+      return describe(index, op, 'check_threw');
+    }
+  }
+  return null;
+}
+
+/**
+ * True iff EVERY operation in the batch has an observable effect on the
+ * canonical applied graph. `rawApplied` is the pre-canonicalisation candidate
+ * (the applier's raw writes); `canonical` is the GraphV3-parsed
+ * persisted-shape graph the commit will store and the UI/analysis will read.
+ *
+ * `preEdit` is optional — see {@link firstWriteThatDidNotSurvive}. Omitting it gives
+ * the strict #509 held-path semantics unchanged.
+ *
+ * A boolean VIEW of {@link firstOperationThatDidNotLand}, never a second
+ * implementation, so the refusal and the reason it reports cannot disagree.
+ */
+export function batchFullyLanded(
+  operations: readonly PatchOperation[],
+  rawApplied: GraphV3T,
+  canonical: GraphV3T,
+  preEdit?: GraphV3T | null,
+): boolean {
+  return firstOperationThatDidNotLand(operations, rawApplied, canonical, preEdit) === null;
+}

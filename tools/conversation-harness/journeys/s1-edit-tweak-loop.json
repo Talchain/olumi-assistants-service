@@ -1,0 +1,13 @@
+{
+  "comment": "S1 edit-tweak loop — frozen graph -> tunable tweak -> [consent if still required] -> apply -> rerun -> reflected delta. Dims: D5-lite (reflected delta, read from D9 perEdit.applied + S1Q1 text — log only), D9 consent friction, D1 chip-no-repeat, D8 latency. Turn ids are S1-prefixed (aggregation-collision rule — see frozen-journey.json comment). The in-flight tunable-auto-apply lane changes consent counts: S1C1 is CONDITIONAL (only_if consent_requested) so the journey measures whichever behaviour is live, it does not assume one.",
+  "requires_seeded_scenario": true,
+  "placeholders": { "FACTOR": "Remaining Hiring Budget" },
+  "dims": ["D5-lite", "D9", "D1", "D8"],
+  "turns": [
+    { "id": "S1A0", "stage": "analyse", "message": "Run the analysis", "turn_class_hint": "run_analysis" },
+    { "id": "S1E1", "stage": "analyse", "message": "Set {FACTOR} to 8", "turn_class_hint": "edit", "edit_intent": true },
+    { "id": "S1C1", "stage": "analyse", "message": "Yes, apply that change.", "turn_class_hint": "edit", "only_if": "consent_requested" },
+    { "id": "S1R1", "stage": "analyse", "message": "Rerun the analysis", "turn_class_hint": "run_analysis" },
+    { "id": "S1Q1", "stage": "analyse", "message": "What changed compared with the last run?", "turn_class_hint": "coach" }
+  ]
+}

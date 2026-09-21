@@ -9,7 +9,6 @@ import { describe, it, expect } from "vitest";
 import {
   aggregateInsights,
   type InsightsContext,
-  type Insight,
 } from "../../src/services/review/insights.js";
 
 describe("aggregateInsights", () => {

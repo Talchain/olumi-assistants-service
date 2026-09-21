@@ -1,0 +1,1218 @@
+{
+  "before": {
+    "nodes": [
+      {
+        "id": "0d2a1d17",
+        "kind": "factor",
+        "label": "Staffed Coverage",
+        "category": "controllable",
+        "provenance": "ai_inferred",
+        "display_value": "Moderate (0.5)",
+        "observed_state": {
+          "value": 0.5,
+          "source": "cee_inference",
+          "factor_type": "other",
+          "extractionType": "inferred",
+          "uncertainty_drivers": [
+            "Not provided"
+          ]
+        }
+      },
+      {
+        "id": "1aab609c",
+        "kind": "outcome",
+        "label": "Share of Requests Resolved Within One Hour",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "2b0a36f4",
+        "kind": "decision",
+        "label": "Decision",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "4bba0554",
+        "kind": "option",
+        "label": "Current Coverage",
+        "provenance": "from_brief",
+        "is_baseline": true,
+        "source_quote": "Current Coverage",
+        "interventions": {
+          "0d2a1d17": {
+            "value": 0.4,
+            "source": "cee_hypothesis",
+            "raw_value": 0.4,
+            "reasoning": "Direct causal value has unresolved stated-item binding via edge 472e21c2; 0.4 is not itself a stated figure, and the claim composes it from stated_items[2]=40, stated_items[4]=40",
+            "target_match": {
+              "node_id": "0d2a1d17",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        }
+      },
+      {
+        "id": "70180763",
+        "kind": "option",
+        "label": "Coverage Pilot",
+        "provenance": "from_brief",
+        "is_baseline": false,
+        "source_quote": "Coverage Pilot",
+        "interventions": {
+          "0d2a1d17": {
+            "value": 0.7,
+            "source": "cee_hypothesis",
+            "raw_value": 0.7,
+            "reasoning": "Direct causal value has unresolved stated-item binding via edge f4f65445; 0.7 is not itself a stated figure, and the claim composes it from stated_items[3]=70",
+            "target_match": {
+              "node_id": "0d2a1d17",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        }
+      },
+      {
+        "id": "c1fd2643",
+        "kind": "goal",
+        "label": "A Higher Share Resolved Within One Hour",
+        "provenance": "from_brief",
+        "source_quote": "a higher share resolved within one hour",
+        "label_authored": true
+      },
+      {
+        "id": "c7a92646",
+        "kind": "risk",
+        "label": "Pilot Coverage Increase May Not Translate to Resolution Gains",
+        "provenance": "ai_inferred"
+      }
+    ],
+    "edges": [
+      {
+        "to": "1aab609c",
+        "from": "0d2a1d17",
+        "origin": "ai",
+        "strength": {
+          "std": 0.15599999999999997,
+          "mean": 0.65
+        },
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0,
+            "strength_mean": 0.65,
+            "exists_probability": 0
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Increasing staffed coverage typically yields near-proportional improvements in resolution rates under fixed demand.",
+            "strength_std": 0.15,
+            "strength_mean": 0.8,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.9
+          },
+          "status": "agreed",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass1_missing": false,
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.6666666666666666,
+          "pass2_adjusted": {
+            "strength_std": 0.15,
+            "strength_mean": 0.65,
+            "exists_probability": 0.9
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": -0.15000000000000002,
+            "exists_probability_offset": 0
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [],
+          "validation_lint_log": []
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "c7a92646",
+        "from": "0d2a1d17",
+        "origin": "ai",
+        "strength": {
+          "std": 0.05,
+          "mean": 0.2
+        },
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0,
+            "strength_mean": 0.2,
+            "exists_probability": 0
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "At high staffing levels, diminishing returns may increase the risk that additional coverage does not yield further resolution gains.",
+            "strength_std": 0.2,
+            "strength_mean": 0.5,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.8
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass1_missing": false,
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.6666666666666666,
+          "pass2_adjusted": {
+            "strength_std": 0.2,
+            "strength_mean": 0.35,
+            "exists_probability": 0.8
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": -0.15000000000000002,
+            "exists_probability_offset": 0
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [
+            "strength_band_change"
+          ],
+          "validation_lint_log": []
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "c1fd2643",
+        "from": "1aab609c",
+        "origin": "ai",
+        "strength": {
+          "std": 0.11999999999999998,
+          "mean": 0.5
+        },
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0,
+            "strength_mean": 0,
+            "exists_probability": 0
+          },
+          "pass2": {
+            "basis": "structural_inference",
+            "reasoning": "The share of requests resolved within one hour directly determines achievement of the goal of a higher share resolved within one hour.",
+            "strength_std": 0.05,
+            "strength_mean": 0.5,
+            "lint_corrected": true,
+            "needs_user_input": false,
+            "exists_probability": 0.99
+          },
+          "status": "agreed",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass1_missing": true,
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0,
+          "pass2_adjusted": {
+            "strength_std": 0.05,
+            "strength_mean": 0.35,
+            "exists_probability": 0.99
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": -0.15000000000000002,
+            "exists_probability_offset": 0
+          },
+          "distance_to_goal": 0,
+          "contested_reasons": [],
+          "validation_lint_log": [
+            {
+              "code": "LINT_BUDGET_RESCALE",
+              "after": 0.5,
+              "before": 1,
+              "edge_key": "1aab609c->c1fd2643"
+            }
+          ]
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "4bba0554",
+        "from": "2b0a36f4",
+        "origin": "default",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Decision-to-option scaffold minted by the projector"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "70180763",
+        "from": "2b0a36f4",
+        "origin": "default",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Decision-to-option scaffold minted by the projector"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "0d2a1d17",
+        "from": "4bba0554",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "0d2a1d17",
+        "from": "70180763",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "c1fd2643",
+        "from": "c7a92646",
+        "origin": "ai",
+        "strength": {
+          "std": 0.11999999999999998,
+          "mean": -0.5
+        },
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0,
+            "strength_mean": -0.5,
+            "exists_probability": 0
+          },
+          "pass2": {
+            "basis": "structural_inference",
+            "reasoning": "Higher risk that coverage increases fail to translate directly reduces attainment of the goal.",
+            "strength_std": 0.05,
+            "strength_mean": -0.5,
+            "lint_corrected": true,
+            "needs_user_input": false,
+            "exists_probability": 0.99
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass1_missing": false,
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 1,
+          "pass2_adjusted": {
+            "strength_std": 0.05,
+            "strength_mean": -0.65,
+            "exists_probability": 0.99
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": -0.15000000000000002,
+            "exists_probability_offset": 0
+          },
+          "distance_to_goal": 0,
+          "contested_reasons": [
+            "strength_band_change"
+          ],
+          "validation_lint_log": [
+            {
+              "code": "LINT_BUDGET_RESCALE",
+              "after": -0.5,
+              "before": -1,
+              "edge_key": "c7a92646->c1fd2643"
+            }
+          ]
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.8,
+        "provenance_display": "ai_inferred"
+      }
+    ]
+  },
+  "after_natural_sentence": {
+    "nodes": [
+      {
+        "id": "0d2a1d17",
+        "kind": "factor",
+        "label": "Staffed Coverage",
+        "category": "controllable",
+        "provenance": "ai_inferred",
+        "display_value": "Moderate (0.5)",
+        "observed_state": {
+          "value": 0.5,
+          "source": "cee_inference",
+          "factor_type": "other",
+          "extractionType": "inferred",
+          "uncertainty_drivers": [
+            "Not provided"
+          ]
+        }
+      },
+      {
+        "id": "1aab609c",
+        "kind": "outcome",
+        "label": "Share of Requests Resolved Within One Hour",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "2b0a36f4",
+        "kind": "decision",
+        "label": "Decision",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "4bba0554",
+        "kind": "option",
+        "label": "Current Coverage",
+        "provenance": "user_set",
+        "is_baseline": true,
+        "source_quote": "Current Coverage",
+        "interventions": {
+          "0d2a1d17": {
+            "value": 0.4,
+            "source": "cee_hypothesis",
+            "raw_value": 0.4,
+            "reasoning": "Direct causal value has unresolved stated-item binding via edge 472e21c2; 0.4 is not itself a stated figure, and the claim composes it from stated_items[2]=40, stated_items[4]=40",
+            "target_match": {
+              "node_id": "0d2a1d17",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        },
+        "observed_state": {
+          "unit": "%",
+          "value": 40,
+          "source": "user_override"
+        }
+      },
+      {
+        "id": "70180763",
+        "kind": "option",
+        "label": "Coverage Pilot",
+        "provenance": "user_set",
+        "is_baseline": false,
+        "source_quote": "Coverage Pilot",
+        "interventions": {
+          "0d2a1d17": {
+            "value": 0.7,
+            "source": "cee_hypothesis",
+            "raw_value": 0.7,
+            "reasoning": "Direct causal value has unresolved stated-item binding via edge f4f65445; 0.7 is not itself a stated figure, and the claim composes it from stated_items[3]=70",
+            "target_match": {
+              "node_id": "0d2a1d17",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        },
+        "observed_state": {
+          "unit": "%",
+          "value": 30,
+          "source": "user_override",
+          "baseline": 70
+        }
+      },
+      {
+        "id": "c1fd2643",
+        "kind": "goal",
+        "label": "A Higher Share Resolved Within One Hour",
+        "provenance": "from_brief",
+        "source_quote": "a higher share resolved within one hour",
+        "label_authored": true
+      },
+      {
+        "id": "c7a92646",
+        "kind": "risk",
+        "label": "Pilot Coverage Increase May Not Translate to Resolution Gains",
+        "provenance": "ai_inferred"
+      }
+    ],
+    "edges": [
+      {
+        "to": "1aab609c",
+        "from": "0d2a1d17",
+        "origin": "ai",
+        "strength": {
+          "std": 0.15599999999999997,
+          "mean": 0.65
+        },
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0,
+            "strength_mean": 0.65,
+            "exists_probability": 0
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Increasing staffed coverage typically yields near-proportional improvements in resolution rates under fixed demand.",
+            "strength_std": 0.15,
+            "strength_mean": 0.8,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.9
+          },
+          "status": "agreed",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass1_missing": false,
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.6666666666666666,
+          "pass2_adjusted": {
+            "strength_std": 0.15,
+            "strength_mean": 0.65,
+            "exists_probability": 0.9
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": -0.15000000000000002,
+            "exists_probability_offset": 0
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [],
+          "validation_lint_log": []
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "c7a92646",
+        "from": "0d2a1d17",
+        "origin": "ai",
+        "strength": {
+          "std": 0.05,
+          "mean": 0.2
+        },
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0,
+            "strength_mean": 0.2,
+            "exists_probability": 0
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "At high staffing levels, diminishing returns may increase the risk that additional coverage does not yield further resolution gains.",
+            "strength_std": 0.2,
+            "strength_mean": 0.5,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.8
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass1_missing": false,
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.6666666666666666,
+          "pass2_adjusted": {
+            "strength_std": 0.2,
+            "strength_mean": 0.35,
+            "exists_probability": 0.8
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": -0.15000000000000002,
+            "exists_probability_offset": 0
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [
+            "strength_band_change"
+          ],
+          "validation_lint_log": []
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "c1fd2643",
+        "from": "1aab609c",
+        "origin": "ai",
+        "strength": {
+          "std": 0.11999999999999998,
+          "mean": 0.5
+        },
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0,
+            "strength_mean": 0,
+            "exists_probability": 0
+          },
+          "pass2": {
+            "basis": "structural_inference",
+            "reasoning": "The share of requests resolved within one hour directly determines achievement of the goal of a higher share resolved within one hour.",
+            "strength_std": 0.05,
+            "strength_mean": 0.5,
+            "lint_corrected": true,
+            "needs_user_input": false,
+            "exists_probability": 0.99
+          },
+          "status": "agreed",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass1_missing": true,
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0,
+          "pass2_adjusted": {
+            "strength_std": 0.05,
+            "strength_mean": 0.35,
+            "exists_probability": 0.99
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": -0.15000000000000002,
+            "exists_probability_offset": 0
+          },
+          "distance_to_goal": 0,
+          "contested_reasons": [],
+          "validation_lint_log": [
+            {
+              "code": "LINT_BUDGET_RESCALE",
+              "after": 0.5,
+              "before": 1,
+              "edge_key": "1aab609c->c1fd2643"
+            }
+          ]
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "4bba0554",
+        "from": "2b0a36f4",
+        "origin": "default",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Decision-to-option scaffold minted by the projector"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "70180763",
+        "from": "2b0a36f4",
+        "origin": "default",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Decision-to-option scaffold minted by the projector"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "0d2a1d17",
+        "from": "4bba0554",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "0d2a1d17",
+        "from": "70180763",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "c1fd2643",
+        "from": "c7a92646",
+        "origin": "ai",
+        "strength": {
+          "std": 0.11999999999999998,
+          "mean": -0.5
+        },
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0,
+            "strength_mean": -0.5,
+            "exists_probability": 0
+          },
+          "pass2": {
+            "basis": "structural_inference",
+            "reasoning": "Higher risk that coverage increases fail to translate directly reduces attainment of the goal.",
+            "strength_std": 0.05,
+            "strength_mean": -0.5,
+            "lint_corrected": true,
+            "needs_user_input": false,
+            "exists_probability": 0.99
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass1_missing": false,
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 1,
+          "pass2_adjusted": {
+            "strength_std": 0.05,
+            "strength_mean": -0.65,
+            "exists_probability": 0.99
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": -0.15000000000000002,
+            "exists_probability_offset": 0
+          },
+          "distance_to_goal": 0,
+          "contested_reasons": [
+            "strength_band_change"
+          ],
+          "validation_lint_log": [
+            {
+              "code": "LINT_BUDGET_RESCALE",
+              "after": -0.5,
+              "before": -1,
+              "edge_key": "c7a92646->c1fd2643"
+            }
+          ]
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.8,
+        "provenance_display": "ai_inferred"
+      }
+    ]
+  },
+  "after_explicit_control": {
+    "nodes": [
+      {
+        "id": "0d2a1d17",
+        "kind": "factor",
+        "label": "Staffed Coverage",
+        "category": "controllable",
+        "provenance": "ai_inferred",
+        "display_value": "Moderate (0.5)",
+        "observed_state": {
+          "value": 0.5,
+          "source": "cee_inference",
+          "factor_type": "other",
+          "extractionType": "inferred",
+          "uncertainty_drivers": [
+            "Not provided"
+          ]
+        }
+      },
+      {
+        "id": "1aab609c",
+        "kind": "outcome",
+        "label": "Share of Requests Resolved Within One Hour",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "2b0a36f4",
+        "kind": "decision",
+        "label": "Decision",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "4bba0554",
+        "kind": "option",
+        "label": "Current Coverage",
+        "provenance": "user_set",
+        "is_baseline": true,
+        "source_quote": "Current Coverage",
+        "interventions": {
+          "0d2a1d17": {
+            "value": 0.4,
+            "source": "cee_hypothesis",
+            "raw_value": 0.4,
+            "reasoning": "Direct causal value has unresolved stated-item binding via edge 472e21c2; 0.4 is not itself a stated figure, and the claim composes it from stated_items[2]=40, stated_items[4]=40",
+            "target_match": {
+              "node_id": "0d2a1d17",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        },
+        "observed_state": {
+          "unit": "%",
+          "value": 40,
+          "source": "user_override"
+        }
+      },
+      {
+        "id": "70180763",
+        "kind": "option",
+        "label": "Coverage Pilot",
+        "provenance": "user_set",
+        "is_baseline": false,
+        "source_quote": "Coverage Pilot",
+        "interventions": {
+          "0d2a1d17": {
+            "value": 0.3,
+            "source": "user_specified",
+            "target_match": {
+              "node_id": "0d2a1d17",
+              "confidence": "high",
+              "match_type": "exact_id"
+            }
+          }
+        },
+        "observed_state": {
+          "unit": "%",
+          "value": 30,
+          "source": "user_override",
+          "baseline": 70
+        }
+      },
+      {
+        "id": "c1fd2643",
+        "kind": "goal",
+        "label": "A Higher Share Resolved Within One Hour",
+        "provenance": "from_brief",
+        "source_quote": "a higher share resolved within one hour",
+        "label_authored": true
+      },
+      {
+        "id": "c7a92646",
+        "kind": "risk",
+        "label": "Pilot Coverage Increase May Not Translate to Resolution Gains",
+        "provenance": "ai_inferred"
+      }
+    ],
+    "edges": [
+      {
+        "to": "1aab609c",
+        "from": "0d2a1d17",
+        "origin": "ai",
+        "strength": {
+          "std": 0.15599999999999997,
+          "mean": 0.65
+        },
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0,
+            "strength_mean": 0.65,
+            "exists_probability": 0
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Increasing staffed coverage typically yields near-proportional improvements in resolution rates under fixed demand.",
+            "strength_std": 0.15,
+            "strength_mean": 0.8,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.9
+          },
+          "status": "agreed",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass1_missing": false,
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.6666666666666666,
+          "pass2_adjusted": {
+            "strength_std": 0.15,
+            "strength_mean": 0.65,
+            "exists_probability": 0.9
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": -0.15000000000000002,
+            "exists_probability_offset": 0
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [],
+          "validation_lint_log": []
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "c7a92646",
+        "from": "0d2a1d17",
+        "origin": "ai",
+        "strength": {
+          "std": 0.05,
+          "mean": 0.2
+        },
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0,
+            "strength_mean": 0.2,
+            "exists_probability": 0
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "At high staffing levels, diminishing returns may increase the risk that additional coverage does not yield further resolution gains.",
+            "strength_std": 0.2,
+            "strength_mean": 0.5,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.8
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass1_missing": false,
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.6666666666666666,
+          "pass2_adjusted": {
+            "strength_std": 0.2,
+            "strength_mean": 0.35,
+            "exists_probability": 0.8
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": -0.15000000000000002,
+            "exists_probability_offset": 0
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [
+            "strength_band_change"
+          ],
+          "validation_lint_log": []
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "c1fd2643",
+        "from": "1aab609c",
+        "origin": "ai",
+        "strength": {
+          "std": 0.11999999999999998,
+          "mean": 0.5
+        },
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0,
+            "strength_mean": 0,
+            "exists_probability": 0
+          },
+          "pass2": {
+            "basis": "structural_inference",
+            "reasoning": "The share of requests resolved within one hour directly determines achievement of the goal of a higher share resolved within one hour.",
+            "strength_std": 0.05,
+            "strength_mean": 0.5,
+            "lint_corrected": true,
+            "needs_user_input": false,
+            "exists_probability": 0.99
+          },
+          "status": "agreed",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass1_missing": true,
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0,
+          "pass2_adjusted": {
+            "strength_std": 0.05,
+            "strength_mean": 0.35,
+            "exists_probability": 0.99
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": -0.15000000000000002,
+            "exists_probability_offset": 0
+          },
+          "distance_to_goal": 0,
+          "contested_reasons": [],
+          "validation_lint_log": [
+            {
+              "code": "LINT_BUDGET_RESCALE",
+              "after": 0.5,
+              "before": 1,
+              "edge_key": "1aab609c->c1fd2643"
+            }
+          ]
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "4bba0554",
+        "from": "2b0a36f4",
+        "origin": "default",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Decision-to-option scaffold minted by the projector"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "70180763",
+        "from": "2b0a36f4",
+        "origin": "default",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Decision-to-option scaffold minted by the projector"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "0d2a1d17",
+        "from": "4bba0554",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "0d2a1d17",
+        "from": "70180763",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "c1fd2643",
+        "from": "c7a92646",
+        "origin": "ai",
+        "strength": {
+          "std": 0.11999999999999998,
+          "mean": -0.5
+        },
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0,
+            "strength_mean": -0.5,
+            "exists_probability": 0
+          },
+          "pass2": {
+            "basis": "structural_inference",
+            "reasoning": "Higher risk that coverage increases fail to translate directly reduces attainment of the goal.",
+            "strength_std": 0.05,
+            "strength_mean": -0.5,
+            "lint_corrected": true,
+            "needs_user_input": false,
+            "exists_probability": 0.99
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass1_missing": false,
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 1,
+          "pass2_adjusted": {
+            "strength_std": 0.05,
+            "strength_mean": -0.65,
+            "exists_probability": 0.99
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": -0.15000000000000002,
+            "exists_probability_offset": 0
+          },
+          "distance_to_goal": 0,
+          "contested_reasons": [
+            "strength_band_change"
+          ],
+          "validation_lint_log": [
+            {
+              "code": "LINT_BUDGET_RESCALE",
+              "after": -0.5,
+              "before": -1,
+              "edge_key": "c7a92646->c1fd2643"
+            }
+          ]
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.8,
+        "provenance_display": "ai_inferred"
+      }
+    ]
+  }
+}

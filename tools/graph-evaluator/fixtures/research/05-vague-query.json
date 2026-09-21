@@ -1,0 +1,16 @@
+{
+  "id": "rt-05-vague-query",
+  "name": "Vague query — business success",
+  "description": "Deliberately vague query to test model's handling of underspecified research requests",
+  "query": "What makes businesses successful?",
+  "context_hint": null,
+  "target_factor": null,
+  "expected": {
+    "min_findings_length": 50,
+    "min_source_count": 0,
+    "must_contain_keywords": ["business"],
+    "expects_numeric_values": false,
+    "expects_confidence_note": true,
+    "forbidden_substrings": []
+  }
+}

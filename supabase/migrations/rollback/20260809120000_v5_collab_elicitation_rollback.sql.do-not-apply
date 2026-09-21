@@ -1,0 +1,84 @@
+-- ============================================================================
+-- ROLLBACK for 20260809120000_v5_collab_elicitation.sql (COLLAB U-S0).
+--
+-- ⚠ `.do-not-apply` per the repo convention: this is the REHEARSED reversal,
+-- kept beside the forward migration so a rollback is never improvised under
+-- pressure. Applying it is a deliberate operator act, never part of a deploy.
+--
+-- ⚠⚠ THIS IS DESTRUCTIVE AND IRREVERSIBLE. It drops the elicitation tables and
+-- every contribution in them. The event tables are APPEND-ONLY BY GRANT: no
+-- role but the owner can UPDATE or individually DELETE a contribution, so this
+-- file is one of only two ways panel data goes away — the other being an
+-- `ON DELETE CASCADE` when a whole parent `scenario` is deleted. Neither is a
+-- path the application can take against a single row, which is the point of the
+-- posture and exactly why this file must not be run casually.
+--
+-- BEFORE RUNNING, take an export if any real panel data exists:
+--   \copy (SELECT * FROM public.elicitation_events)             TO 'elicitation_events.csv'      CSV HEADER
+--   \copy (SELECT * FROM public.elicitation_participants)       TO 'elicitation_participants.csv' CSV HEADER
+--   \copy (SELECT * FROM public.elicitation_rounds)             TO 'elicitation_rounds.csv'       CSV HEADER
+--   \copy (SELECT * FROM public.round_events)                   TO 'round_events.csv'             CSV HEADER
+--   \copy (SELECT * FROM public.elicitation_participant_events) TO 'participant_events.csv'       CSV HEADER
+--
+-- SAFETY NOTE ON SCOPE: the forward migration created SIX tables and ONE
+-- function (`collab_redact_participant`). It altered NO existing table and
+-- touched NO existing policy or grant — so this rollback is a pure drop with no
+-- restoration step and cannot disturb `scenarios`, `model_versions`, or the
+-- turn/fence path.
+-- ============================================================================
+
+-- Order matters: children before parents (FKs are ON DELETE CASCADE, but an
+-- explicit order keeps the intent readable and survives a partial run).
+DROP FUNCTION IF EXISTS public.collab_redact_participant(UUID, TEXT, TEXT);
+DROP TABLE IF EXISTS public.collab_redaction_audit;
+DROP TABLE IF EXISTS public.elicitation_events;
+DROP TABLE IF EXISTS public.elicitation_participant_events;
+DROP TABLE IF EXISTS public.elicitation_participants;
+DROP TABLE IF EXISTS public.round_events;
+DROP TABLE IF EXISTS public.elicitation_rounds;
+
+-- Verification: all six tables and the function gone, and the relations the
+-- forward migration REFERENCED but did not own are untouched.
+DO $$
+DECLARE remaining text := '';
+        t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY[
+    'elicitation_rounds','round_events','elicitation_participants',
+    'elicitation_participant_events','elicitation_events','collab_redaction_audit'
+  ] LOOP
+    IF EXISTS (
+      SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public' AND c.relname = t
+    ) THEN
+      remaining := remaining || t || ' ';
+    END IF;
+  END LOOP;
+  IF remaining <> '' THEN
+    RAISE EXCEPTION 'ROLLBACK INCOMPLETE: still present: %', remaining;
+  END IF;
+
+  -- Positive control: the referenced parents must STILL EXIST. A rollback that
+  -- took `scenarios` or `model_versions` with it would be a catastrophe that a
+  -- bare "tables are gone" check would report as success.
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public' AND c.relname = 'model_versions'
+  ) THEN
+    RAISE EXCEPTION 'ROLLBACK DAMAGE: model_versions is missing — it must be untouched';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public' AND c.relname = 'scenarios'
+  ) THEN
+    RAISE EXCEPTION 'ROLLBACK DAMAGE: scenarios is missing — it must be untouched';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'public' AND p.proname = 'collab_redact_participant'
+  ) THEN
+    RAISE EXCEPTION 'ROLLBACK INCOMPLETE: collab_redact_participant still present';
+  END IF;
+END $$;
+
+SELECT 'COLLAB U-S0 rollback complete: six tables + one function dropped, parents intact' AS verdict;

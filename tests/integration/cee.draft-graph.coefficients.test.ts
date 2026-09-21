@@ -15,6 +15,30 @@ vi.mock("../../src/services/validateClient.js", () => ({
   validateGraph: vi.fn().mockResolvedValue({ ok: true, violations: [], normalized: undefined }),
 }));
 
+// Skip V1 schema verification — this test validates coefficient preservation, not schema compliance
+vi.mock("../../src/cee/verification/index.js", () => ({
+  verificationPipeline: {
+    verify: vi.fn().mockImplementation((resp: any) => ({ response: { ...resp }, results: [] })),
+  },
+}));
+
+// Mock enrichment to pass through — avoids adding partial data objects that fail schema.
+// ⚠ SPREAD, NOT A HAND-LIST (parent CLAUDE.md trap 12). A `vi.mock` factory
+// REPLACES the module, so every export this file did not think to name became
+// `undefined` — and Stage 3 calls them for real. When `creditUserTypedFigures`
+// was added to the enricher, this factory made the whole draft endpoint answer
+// 400 (`cee.enrich.crashed` → `CEE_GRAPH_INVALID`), in three specs at once.
+// `importOriginal` gives every unnamed export its real implementation, so the
+// mock stays scoped to the ONE function this test means to stub.
+vi.mock("../../src/cee/factor-extraction/enricher.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/cee/factor-extraction/enricher.js")>()),
+  enrichGraphWithFactorsAsync: vi.fn().mockImplementation((graph: any) => ({
+    graph,
+    enriched: false,
+    trace: { factors_added: 0 },
+  })),
+}));
+
 // Avoid structural warnings or automatic fixes interfering with coefficients
 vi.mock("../../src/cee/structure/index.js", () => ({
   detectStructuralWarnings: vi.fn().mockReturnValue({
@@ -27,6 +51,55 @@ vi.mock("../../src/cee/structure/index.js", () => ({
     defaultStrengthCount: 0,
     defaultStrengthPercentage: 0,
   }),
+  detectStrengthClustering: () => ({
+    detected: false,
+    coefficientOfVariation: 0,
+    edgeCount: 0,
+  }),
+  detectGoalLayerStrengthClustering: () => ({
+    detected: false,
+    coefficientOfVariation: 0,
+    edgeCount: 0,
+  }),
+  detectSameLeverOptions: () => ({
+    detected: false,
+    maxOverlapPercentage: 0,
+    overlappingOptionPairs: [],
+  }),
+  detectMissingBaseline: () => ({
+    detected: false,
+    hasBaseline: false,
+  }),
+  detectGoalNoBaselineValue: () => ({
+    detected: false,
+    goalHasValue: false,
+  }),
+  detectZeroExternalFactors: () => ({
+    detected: false,
+    factorCount: 0,
+    externalCount: 0,
+  }),
+  checkGoalConnectivity: () => ({
+    status: "full",
+    disconnectedOptions: [],
+    weakPaths: [],
+  }),
+  computeModelQualityFactors: () => ({
+    estimate_confidence: 0.5,
+    strength_variation: 0,
+    range_confidence_coverage: 0,
+    has_baseline_option: false,
+  }),
+  detectOptionSimilarity: () => ({
+    detected: false,
+    critiques: [],
+    warnings: [],
+    validationIssues: [],
+  }),
+  detectMissingCounterfactual: () => ({
+    detected: false,
+    hasCounterfactual: false,
+  }),
   normaliseDecisionBranchBeliefs: (graph: unknown) => graph,
   validateAndFixGraph: (graph: unknown) => ({
     graph,
@@ -37,6 +110,12 @@ vi.mock("../../src/cee/structure/index.js", () => ({
       decisionBranchesNormalized: false,
     },
     warnings: [],
+  }),
+  fixNonCanonicalStructuralEdges: (graph: unknown) => ({
+    graph,
+    fixedEdgeCount: 0,
+    fixedEdgeIds: [],
+    repairs: [],
   }),
   hasGoalNode: (graph: any) => {
     if (!graph || !Array.isArray(graph.nodes)) return false;
@@ -58,10 +137,21 @@ vi.mock("../../src/utils/fixtures.js", () => ({
     nodes: [
       { id: "goal_mrr", kind: "goal", label: "Increase MRR" },
       { id: "dec_pricing", kind: "decision", label: "Pricing strategy" },
-      { id: "opt_increase", kind: "option", label: "Increase price" },
-      { id: "opt_maintain", kind: "option", label: "Maintain price" },
+      { id: "opt_increase", kind: "option", label: "Increase price", data: { interventions: { fac_price: 120 } } },
+      // "Maintain price" IS the current arrangement: it holds fac_price at the
+      // level fac_price already carries (100), so choosing it changes nothing.
+      // It must therefore DECLARE itself the baseline. Without the flag it is an
+      // option that models no change while presenting itself as an alternative —
+      // exactly what OPTION_NO_OP refuses (`validators/graph-validator.ts`), and
+      // exactly the shape that let the product recommend raising a price while
+      // modelling not raising it. The repo already settles this reading:
+      // `model-readiness-compiler-corpus.records.test.ts:120` marks "keeping the
+      // price at £49" `is_baseline: true`.
+      // ⚠ Do NOT "fix" a future OPTION_NO_OP here by moving the intervention off
+      // 100: that would make the label a lie, which is the worse direction.
+      { id: "opt_maintain", kind: "option", label: "Maintain price", is_baseline: true, data: { interventions: { fac_price: 100 } } },
       { id: "fac_price", kind: "factor", label: "Price", data: { value: 100, extractionType: "explicit" } },
-      { id: "fac_demand", kind: "factor", label: "Demand" },
+      { id: "fac_demand", kind: "factor", label: "Demand", data: { value: 500, extractionType: "inferred" } },
       { id: "out_revenue", kind: "outcome", label: "Revenue" },
       { id: "risk_churn", kind: "risk", label: "Churn" },
     ],
@@ -70,6 +160,9 @@ vi.mock("../../src/utils/fixtures.js", () => ({
       { from: "dec_pricing", to: "opt_maintain" },
       { from: "opt_increase", to: "fac_price" },
       { from: "opt_maintain", to: "fac_price" },
+      // Connect fac_demand to option so it's reachable from decision
+      // (prevents pruning as unreachable node)
+      { from: "opt_increase", to: "fac_demand" },
       {
         from: "fac_price",
         to: "out_revenue",
@@ -115,7 +208,7 @@ vi.mock("../../src/utils/fixtures.js", () => ({
       roots: ["dec_pricing"],
       leaves: ["goal_mrr"],
       suggested_positions: {},
-      source: "fixtures",
+      source: "assistant",
     },
   },
 }));
@@ -170,9 +263,9 @@ describe("POST /assist/v1/draft-graph (CEE v1) - coefficient variation", () => {
 
     expect(causalEdges.length).toBeGreaterThanOrEqual(5);
 
-    const strengthMeans = new Set(causalEdges.map((edge) => edge.strength_mean.toFixed(2)));
-    const strengthStds = new Set(causalEdges.map((edge) => edge.strength_std.toFixed(2)));
-    const beliefExists = new Set(causalEdges.map((edge) => edge.belief_exists.toFixed(2)));
+    const strengthMeans = new Set(causalEdges.map((edge) => edge.strength.mean.toFixed(2)));
+    const strengthStds = new Set(causalEdges.map((edge) => edge.strength.std.toFixed(2)));
+    const beliefExists = new Set(causalEdges.map((edge) => edge.exists_probability.toFixed(2)));
 
     expect(strengthMeans.size).toBeGreaterThanOrEqual(3);
     expect(strengthStds.size).toBeGreaterThanOrEqual(2);
@@ -182,6 +275,6 @@ describe("POST /assist/v1/draft-graph (CEE v1) - coefficient variation", () => {
       (edge) => kindById.get(edge.from) === "risk" && kindById.get(edge.to) === "goal"
     );
     expect(riskToGoal).toBeDefined();
-    expect(riskToGoal.strength_mean).toBeLessThan(0);
+    expect(riskToGoal.strength.mean).toBeLessThan(0);
   });
 });

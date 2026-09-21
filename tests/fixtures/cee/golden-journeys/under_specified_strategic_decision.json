@@ -16,7 +16,7 @@
   },
   "expectations": {
     "expect_any_truncated": false,
-    "expect_has_validation_issues": false,
+    "expect_has_validation_issues": true,
     "expect_has_team_disagreement": false,
     "expect_is_complete": false
   }

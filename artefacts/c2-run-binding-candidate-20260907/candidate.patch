@@ -1,0 +1,680 @@
+diff --git a/src/orchestrator-v5/__tests__/c2-analysis-interpretation-composition.test.ts b/src/orchestrator-v5/__tests__/c2-analysis-interpretation-composition.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..e6f7285afc8e9949d02c3e628542072f22a8c154
+--- /dev/null
++++ b/src/orchestrator-v5/__tests__/c2-analysis-interpretation-composition.test.ts
+@@ -0,0 +1,217 @@
++import { describe, expect, it } from 'vitest';
++import { OlumiResponseSchema } from '@talchain/schemas/boundary';
++import type { OlumiResponse } from '@talchain/schemas/boundary';
++import { RunAnalysisHandlerFactSchema } from '@talchain/schemas/orchestrator';
++import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
++
++import { finaliseV5Response } from '../response-finaliser.js';
++import { buildAnalysisResultBlock } from '../compose.js';
++import { deriveAnalysisFreshness } from '../context/freshness.js';
++import { canonicalStateFromFreshness } from '../context/canonical-analysis-state.js';
++import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
++import type { GraphStateIngress } from '../boundary/request-extensions.js';
++import { runAnalysisFact } from '../context/__tests__/run-delta-fixtures.js';
++import {
++  WITHHELD_RUN_IDENTITY_CONFLICT,
++  WITHHELD_RUN_IDENTITY_UNCONFIRMED,
++  composeAnalysisStateV1,
++} from '../compose/analysis-state-v1.js';
++
++// Synthetic run facts; real producer projection, block builder, composer,
++// finaliser and strict wire schema. No provider calls or injected composer.
++const SCENARIO = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
++const OTHER_SCENARIO = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
++const GRAPH: GraphStateIngress = { nodes: [{ id: 'goal', kind: 'goal', label: 'Synthetic goal', goal_threshold: 0.7 }], edges: [] };
++const HASH = computeAnalysisAffectingGraphHash(GRAPH)!;
++const CHANGED_HASH = computeAnalysisAffectingGraphHash({
++  ...GRAPH, nodes: [{ ...GRAPH.nodes[0], goal_threshold: 0.8 }],
++} as GraphStateIngress)!;
++const FIRST_TIME = '2026-09-06T17:50:03.871Z';
++const NEXT_TIME = '2026-09-06T17:50:11.035Z';
++
++function fact(overrides: Partial<RunAnalysisHandlerFact['result']> = {}): RunAnalysisHandlerFact {
++  return RunAnalysisHandlerFactSchema.parse({
++    fact_type: 'run_analysis', fact_version: 1, noop: false,
++    result: {
++      scenario_id: SCENARIO, graph_hash_at_run: HASH, computed_at: FIRST_TIME,
++      leading_option_id: 'option-a', summary: 'Option A leads on the current model.',
++      win_probabilities: { 'option-a': 0.65, 'option-b': 0.35 },
++      constraint_verdict: { may_name_leading_option: true, constraint_verdict_state: 'evaluated_feasible' },
++      enrichment: {
++        analysis_status: 'completed',
++        robustness: { level: 'strong', near_tie: { is_tie: false } },
++        option_comparison: [
++          { option_id: 'option-a', option_label: 'Option A', win_probability: 0.65 },
++          { option_id: 'option-b', option_label: 'Option B', win_probability: 0.35 },
++        ],
++      },
++      ...overrides,
++    },
++  });
++}
++
++function response(run: RunAnalysisHandlerFact | null): OlumiResponse {
++  return {
++    response_version: 2, assistant_text: 'You can explore the model assumptions next.',
++    stage_indicator: 'analyse', suggested_actions: [], insights: [],
++    blocks: run === null ? [] : [buildAnalysisResultBlock(run)],
++  };
++}
++
++function finalise(
++  runs: RunAnalysisHandlerFact[],
++  options: { scenarioId?: string; currentHash?: string; selectedFreshnessRun?: RunAnalysisHandlerFact; withBlock?: boolean } = {},
++) {
++  const chosen = options.selectedFreshnessRun ?? runs[0];
++  const freshness = deriveAnalysisFreshness(chosen ? [chosen] : [], options.currentHash ?? HASH);
++  const out = finaliseV5Response(response(options.withBlock === false ? null : chosen ?? null), {
++    scenarioId: options.scenarioId ?? SCENARIO,
++    priorFacts: runs, freshness, mayNameLeadingOption: true,
++  });
++  expect(OlumiResponseSchema.safeParse(out).success).toBe(true);
++  return out;
++}
++
++describe('C2 binding at the reached finaliser/composer seam', () => {
++  it('keeps a valid current run and its available figures', () => {
++    const out = finalise([fact()]);
++    expect(out.analysis_state?.run_state).toEqual({ kind: 'complete_current', computed_at: FIRST_TIME });
++    expect(out.analysis_state?.leader_claim.permitted).toBe(true);
++    expect(out.blocks[0]).toMatchObject({ leading_option_id: 'option-a', win_probabilities: { 'option-a': 0.65 } });
++  });
++
++  it('uses the new timestamp for a same-graph rerun', () => {
++    const older = fact();
++    const rerun = fact({ computed_at: NEXT_TIME });
++    expect(finalise([older, rerun], { selectedFreshnessRun: rerun }).analysis_state?.run_state)
++      .toEqual({ kind: 'complete_current', computed_at: NEXT_TIME });
++    expect(older.result.computed_at).toBe(FIRST_TIME);
++  });
++
++  it('rejects a same-graph fact from a different rerun than the freshness selection', () => {
++    const out = finalise([fact({ computed_at: NEXT_TIME })], { selectedFreshnessRun: fact() });
++    expect(out.analysis_state?.leader_claim).toEqual({ permitted: false, withheld_reason: WITHHELD_RUN_IDENTITY_CONFLICT });
++    expect(out.analysis_state?.contradictions).toContain(`${WITHHELD_RUN_IDENTITY_CONFLICT}:computed_at_conflict`);
++    expect(out.blocks).toEqual([]);
++  });
++
++  it('binds to the canonical tuple that actually supplies the emitted run state', () => {
++    const older = fact();
++    const newer = fact({ computed_at: NEXT_TIME });
++    const out = finaliseV5Response(response(newer), {
++      scenarioId: SCENARIO, priorFacts: [newer], mayNameLeadingOption: true,
++      freshness: deriveAnalysisFreshness([newer], HASH),
++      canonicalState: canonicalStateFromFreshness(deriveAnalysisFreshness([older], HASH)),
++    });
++    expect(OlumiResponseSchema.safeParse(out).success).toBe(true);
++    expect(out.analysis_state?.run_state.kind).toBe('unknown_degraded');
++    expect(out.analysis_state?.contradictions).toContain(`${WITHHELD_RUN_IDENTITY_CONFLICT}:computed_at_conflict`);
++    expect(out.blocks).toEqual([]);
++  });
++
++  it('treats an explicitly empty supplied fact list as unconfirmed when canonical state claims a selected fact', () => {
++    const original = fact();
++    const out = finaliseV5Response(response(original), {
++      scenarioId: SCENARIO, priorFacts: [], mayNameLeadingOption: true,
++      canonicalState: canonicalStateFromFreshness(deriveAnalysisFreshness([original], HASH)),
++    });
++    expect(OlumiResponseSchema.safeParse(out).success).toBe(true);
++    expect(out.analysis_state?.run_state.kind).toBe('unknown_degraded');
++    expect(out.analysis_state?.leader_claim.withheld_reason).toBe(WITHHELD_RUN_IDENTITY_UNCONFIRMED);
++    expect(out.blocks[0]).toMatchObject({ leading_option_id: null, win_probabilities: { 'option-a': 0.65 } });
++  });
++
++  it('rejects the same graph/time from another scenario without calling it never-run or current', () => {
++    const out = finalise([fact()], { scenarioId: OTHER_SCENARIO });
++    expect(out.analysis_state?.run_state.kind).toBe('unknown_degraded');
++    expect(out.analysis_state?.contradictions).toContain(`${WITHHELD_RUN_IDENTITY_CONFLICT}:scenario_id_conflict`);
++    expect(out.blocks).toEqual([]);
++    expect(out.assistant_text).toBe('You can explore the model assumptions next.');
++  });
++
++  it('does not append a comparative run delta to a conflicting run binding', () => {
++    const olderEcho = runAnalysisFact(
++      [{ id: 'opt-a', win: 0.62 }, { id: 'opt-b', win: 0.38 }], '111', HASH, FIRST_TIME,
++    );
++    const newerEcho = runAnalysisFact(
++      [{ id: 'opt-a', win: 0.45 }, { id: 'opt-b', win: 0.55 }], '222', CHANGED_HASH, NEXT_TIME,
++    );
++    if (olderEcho.fact_type !== 'run_analysis' || newerEcho.fact_type !== 'run_analysis') {
++      throw new Error('The shared producer fixture must supply run_analysis facts');
++    }
++    const older = fact({ ...olderEcho.result });
++    const newer = fact({ ...newerEcho.result });
++    expect(finalise([newer, older], { currentHash: CHANGED_HASH }).run_delta).toBeDefined();
++    const out = finalise([newer, older], { scenarioId: OTHER_SCENARIO, currentHash: CHANGED_HASH });
++    expect(out.analysis_state?.leader_claim.withheld_reason).toBe(WITHHELD_RUN_IDENTITY_CONFLICT);
++    expect(out.blocks).toEqual([]);
++    expect(out.run_delta).toBeUndefined();
++  });
++
++  it('does not rewrite historical identity when the current graph has changed', () => {
++    const original = fact();
++    const snapshot = JSON.stringify(original);
++    const out = finalise([original], { currentHash: CHANGED_HASH, withBlock: false });
++    expect(out.analysis_state?.run_state).toEqual({ kind: 'complete_stale', computed_at: FIRST_TIME, cause: 'graph_changed' });
++    expect(out.analysis_state?.contradictions).not.toContain(`${WITHHELD_RUN_IDENTITY_CONFLICT}:graph_hash_at_run_conflict`);
++    expect(out.graph_hash).toBe(CHANGED_HASH);
++    expect(JSON.stringify(original)).toBe(snapshot);
++  });
++
++  it.each([undefined, '2026-09-06T17:50:03Z'])('retains figures for unconfirmed legacy time %s but withholds fresh claims', (computed_at) => {
++    const out = finalise([fact({ computed_at })]);
++    expect(out.analysis_state?.run_state.kind).toBe('unknown_degraded');
++    expect(out.analysis_state?.leader_claim).toEqual({ permitted: false, withheld_reason: WITHHELD_RUN_IDENTITY_UNCONFIRMED });
++    expect(out.blocks[0]).toMatchObject({ type: 'analysis_result', leading_option_id: null, win_probabilities: { 'option-a': 0.65, 'option-b': 0.35 } });
++    expect((out.blocks[0] as { summary: string }).summary).not.toContain('Option A leads');
++  });
++
++  it('preserves a supported tie and preserves figures when the existing entitlement withholds a leader', () => {
++    const tied = fact({
++      constraint_verdict: { may_name_leading_option: false, constraint_verdict_state: 'evaluated_infeasible' },
++      enrichment: { analysis_status: 'completed', robustness: { level: 'moderate', near_tie: { is_tie: true } } },
++    });
++    const out = finalise([tied]);
++    expect(out.analysis_state?.leader_claim.permitted).toBe(false);
++    expect(out.analysis_state?.leader_claim.separation).toBe('near_tie');
++    expect(out.blocks[0]).toMatchObject({ leading_option_id: null, win_probabilities: { 'option-a': 0.65 } });
++  });
++
++  it('keeps true no-run and no-fact-context compatibility paths distinct', () => {
++    expect(finalise([]).analysis_state?.run_state.kind).toBe('never_run');
++    const legacyCaller = finaliseV5Response(response(fact()), {
++      freshness: deriveAnalysisFreshness([fact()], HASH), mayNameLeadingOption: true,
++    });
++    // This caller is not adopted into the binding check; no new C2 guarantee.
++    expect(legacyCaller.analysis_state?.run_state.kind).toBe('complete_current');
++    expect(legacyCaller.analysis_state?.leader_claim.permitted).toBe(true);
++  });
++
++  it.each(['refused', 'blocked', 'running'] as const)('does not replace a known %s lifecycle with an identity failure', (kind) => {
++    const run = fact();
++    const freshness = {
++      ...deriveAnalysisFreshness([run], HASH),
++      ...(kind === 'refused' ? { refusal_declared: true as const } : {}),
++    };
++    const readiness = kind === 'blocked' ? { status: 'blocked' as const, blocked_reason: 'fixture_blocker' } : undefined;
++    const state = composeAnalysisStateV1({
++      canonical: canonicalStateFromFreshness(freshness, { readiness }),
++      freshness, readiness, mayNameLeadingOption: true, rawRobustness: null,
++      runFactBinding: { scenarioId: OTHER_SCENARIO, selectedResult: run.result },
++      ...(kind === 'running' ? { autoRunInFlight: { startedAt: NEXT_TIME } } : {}),
++    });
++    expect(state?.run_state.kind).toBe(kind);
++    expect(state?.leader_claim.permitted).toBe(false);
++  });
++
++  it('re-finalises the same supplied fact without changing its interpretation fields', () => {
++    const original = fact();
++    const ctx = { scenarioId: SCENARIO, priorFacts: [original], freshness: deriveAnalysisFreshness([original], HASH), mayNameLeadingOption: true };
++    const first = finaliseV5Response(response(original), ctx);
++    const repeated = finaliseV5Response(first, ctx);
++    expect(repeated.analysis_state).toEqual(first.analysis_state);
++    expect(repeated.blocks).toEqual(first.blocks);
++    expect(original.result.computed_at).toBe(FIRST_TIME);
++    // Equality here does not establish request idempotency or DB durability.
++  });
++});
+diff --git a/src/orchestrator-v5/compose/__tests__/leader-claim-not-evaluated.test.ts b/src/orchestrator-v5/compose/__tests__/leader-claim-not-evaluated.test.ts
+index 4b04e63383c9b4b870fc0f1eeba7d69e72e7a7bd..1120c7a1e5fe8170f56f85ab8adeb22c8a1bd79e 100644
+--- a/src/orchestrator-v5/compose/__tests__/leader-claim-not-evaluated.test.ts
++++ b/src/orchestrator-v5/compose/__tests__/leader-claim-not-evaluated.test.ts
+@@ -59,6 +59,8 @@ import {
+   WITHHELD_CONSTRAINT_VERDICT,
+   WITHHELD_NEAR_TIE,
+   WITHHELD_SEPARATION_UNAVAILABLE,
++  WITHHELD_RUN_IDENTITY_UNCONFIRMED,
++  WITHHELD_RUN_IDENTITY_CONFLICT,
+   composeAnalysisStateV1,
+   leaderClaimReasonKind,
+   readRawRobustnessFromResponseBody,
+@@ -244,9 +246,12 @@ describe('S6 — separation_unavailable is NOT EVALUATED, not WITHHELD', () => {
+       // assertion below vacuous (trap 13).
+       expect(minted.length, 'the namespace sweep found no WITHHELD_* codes').toBeGreaterThan(0);
+       expect(new Set(minted).size, 'duplicate code strings').toBe(minted.length);
+-      // The three known today, so a silent SHRINK is caught as well as a growth.
++      // The known codes, so a silent SHRINK is caught as well as a growth.
+       expect(new Set(minted)).toEqual(
+-        new Set([WITHHELD_CONSTRAINT_VERDICT, WITHHELD_NEAR_TIE, WITHHELD_SEPARATION_UNAVAILABLE]),
++        new Set([
++          WITHHELD_CONSTRAINT_VERDICT, WITHHELD_NEAR_TIE, WITHHELD_SEPARATION_UNAVAILABLE,
++          WITHHELD_RUN_IDENTITY_UNCONFIRMED, WITHHELD_RUN_IDENTITY_CONFLICT,
++        ]),
+       );
+ 
+       for (const code of minted) {
+diff --git a/src/orchestrator-v5/compose/analysis-state-v1.ts b/src/orchestrator-v5/compose/analysis-state-v1.ts
+index 2f8595354df59c895137a37adfcfef5e83ab2548..029817bf7dde13fb93db075fba707da9487b600c 100644
+--- a/src/orchestrator-v5/compose/analysis-state-v1.ts
++++ b/src/orchestrator-v5/compose/analysis-state-v1.ts
+@@ -34,7 +34,8 @@
+  *                        exit and read fail-closed) ∧ the engine's own
+  *                        `near_tie` separation
+  *   robustness           the engine's `enrichment.robustness` as it ships
+- *   the five predicates  CanonicalAnalysisState — copied, never recomputed
++ *   the five predicates  CanonicalAnalysisState; unavailable when an adopted
++ *                        run-fact binding cannot be confirmed
+  *   contradictions       CanonicalAnalysisState.contradictions
+  *
+  * ─── `refused`, and why it is signalled rather than inferred ────────────────
+@@ -148,6 +149,7 @@ import type {
+   AnalysisRobustness,
+   AnalysisRunState,
+   AnalysisStateV1,
++  OlumiResponse,
+ } from '@talchain/schemas/boundary';
+ 
+ import { blockerIssue } from '../../orchestrator/tools/analysis-ready-helper.js';
+@@ -155,6 +157,11 @@ import type { CanonicalAnalysisState } from '../context/canonical-analysis-state
+ import type { FreshnessDerivation } from '../context/freshness.js';
+ import { readRawRobustnessSignals } from '../coaching/pick-raw-robustness.js';
+ import type { RawRobustnessSignals } from '../coaching/pick-raw-robustness.js';
++import { compareAnalysisRunFactIdentity } from '../context/analysis-interpretation-identity.js';
++import {
++  projectAnalysisSummaryForWithheldClaim,
++  projectTransportEnrichmentForWithheldClaim,
++} from './withheld-claim-projection.js';
+ 
+ /**
+  * The readiness status this producer emits when the turn supplied no readiness
+@@ -175,6 +182,8 @@ export const REFUSAL_REASON_UNSPECIFIED = 'analysis_refused_unspecified';
+ export const WITHHELD_CONSTRAINT_VERDICT = 'constraint_verdict_withheld';
+ export const WITHHELD_NEAR_TIE = 'options_do_not_separate';
+ export const WITHHELD_SEPARATION_UNAVAILABLE = 'separation_unavailable';
++export const WITHHELD_RUN_IDENTITY_UNCONFIRMED = 'analysis_run_identity_unconfirmed';
++export const WITHHELD_RUN_IDENTITY_CONFLICT = 'analysis_run_identity_conflict';
+ 
+ /**
+  * ⭐ TWO DIFFERENT FACTS WEAR THE SAME `withheld_reason` FIELD (S6, 2026-08-26).
+@@ -238,6 +247,8 @@ export const LEADER_CLAIM_REASON_KINDS: Readonly<
+   [WITHHELD_CONSTRAINT_VERDICT]: 'withheld',
+   [WITHHELD_NEAR_TIE]: 'withheld',
+   [WITHHELD_SEPARATION_UNAVAILABLE]: 'not_evaluated',
++  [WITHHELD_RUN_IDENTITY_UNCONFIRMED]: 'not_evaluated',
++  [WITHHELD_RUN_IDENTITY_CONFLICT]: 'not_evaluated',
+ };
+ 
+ /**
+@@ -382,6 +393,17 @@ export const NO_ANALYSIS_CONTEXT_DERIVATION: FreshnessDerivation = Object.freeze
+ });
+ 
+ export interface AnalysisStateComposeInput {
++  /**
++   * Optional adoption seam: a caller that has read a scenario's facts supplies
++   * the selected fact's original result fields. Scenario scope comes from the
++   * request, independently of the fact. Never use the current graph hash here.
++   * Absence preserves callers that cannot yet supply a fact; it proves no C2
++   * binding. This is not a persisted or versioned interpretation record.
++   */
++  readonly runFactBinding?: {
++    readonly scenarioId: string | undefined;
++    readonly selectedResult: unknown;
++  };
+   /**
+    * The turn's canonical analysis verdict. `null` ⇒ this producer has no
+    * verdict to supply and emits NOTHING — contract-licensed absence, which
+@@ -629,6 +651,40 @@ export function composeAnalysisStateV1(
+   const readinessStatus =
+     readNonEmptyString(canonical.status) ?? READINESS_STATUS_UNSUPPLIED;
+ 
++  const binding = input.runFactBinding === undefined ? undefined : compareAnalysisRunFactIdentity(
++    input.runFactBinding.selectedResult,
++    {
++      scenario_id: input.runFactBinding.scenarioId,
++      graph_hash_at_run: canonical.graph_hash_at_run,
++      computed_at: canonical.computed_at,
++    },
++  );
++  if (binding !== undefined && binding.status !== 'match') {
++    const reason = binding.status === 'mismatch'
++      ? WITHHELD_RUN_IDENTITY_CONFLICT
++      : WITHHELD_RUN_IDENTITY_UNCONFIRMED;
++    // The existing schema uses store_unreadable for an uninterpretable fact
++    // as well as a failed store read (composeRunState's invariant_failed arm).
++    // Do not emit complete_current or never_run from a failed identity join.
++    // Original facts and freshness inputs are read-only; this is presentation.
++    const lifecycle = composeRunState(input);
++    const runState = lifecycle.kind === 'refused' || lifecycle.kind === 'blocked' || lifecycle.kind === 'running'
++      ? lifecycle
++      : { kind: 'unknown_degraded' as const, cause: 'store_unreadable' as const };
++    return {
++      run_state: runState,
++      readiness: { status: readinessStatus, blockers: mapWireBlockers(input.readiness?.blockers, readinessStatus) },
++      leader_claim: { permitted: false, withheld_reason: reason },
++      robustness: {},
++      usable_for_prose: false,
++      usable_for_chips: false,
++      usable_for_followup: false,
++      requires_rerun: false,
++      blocked_unusable: lifecycle.kind === 'blocked' && canonical.blockedUnusable,
++      contradictions: [...canonical.contradictions, `${reason}:${binding.reason}`],
++    };
++  }
++
+   return {
+     run_state: composeRunState(input),
+     readiness: {
+@@ -653,6 +709,34 @@ export function composeAnalysisStateV1(
+   };
+ }
+ 
++/**
++ * The analysis block follows the composed binding verdict. Conflicting facts
++ * cannot supply a result for this run. Unconfirmed legacy binding retains its
++ * available figures but cannot supply a leader designation. The fact remains
++ * intact in both cases. This does not police other response prose or coaching.
++ */
++export function projectAnalysisBlocksForRunBinding(
++  blocks: OlumiResponse['blocks'],
++  state: AnalysisStateV1,
++): OlumiResponse['blocks'] {
++  const reason = state.leader_claim.withheld_reason;
++  if (reason === WITHHELD_RUN_IDENTITY_CONFLICT) {
++    return blocks.filter((block) => block.type !== 'analysis_result');
++  }
++  if (reason !== WITHHELD_RUN_IDENTITY_UNCONFIRMED) return blocks;
++  return blocks.map((block) => {
++    if (block.type !== 'analysis_result') return block;
++    return {
++      ...block,
++      leading_option_id: null,
++      summary: projectAnalysisSummaryForWithheldClaim(block.summary),
++      ...(block.enrichment === undefined ? {} : {
++        enrichment: projectTransportEnrichmentForWithheldClaim(block.enrichment),
++      }),
++    };
++  });
++}
++
+ /**
+  * Read the engine's robustness signals off the response body as it will ship.
+  *
+diff --git a/src/orchestrator-v5/response-finaliser.ts b/src/orchestrator-v5/response-finaliser.ts
+index 2398f62fe8ef78441bff341a5ea0207c3b8e8b40..3ab60c5cb5aecee5e5e5a750208831f2d1561a95 100644
+--- a/src/orchestrator-v5/response-finaliser.ts
++++ b/src/orchestrator-v5/response-finaliser.ts
+@@ -93,10 +93,14 @@ import {
+   composeAnalysisStateV1,
+   NO_ANALYSIS_CONTEXT_DERIVATION,
+   readRawRobustnessFromResponseBody,
++  projectAnalysisBlocksForRunBinding,
++  WITHHELD_RUN_IDENTITY_UNCONFIRMED,
++  WITHHELD_RUN_IDENTITY_CONFLICT,
+ } from './compose/analysis-state-v1.js';
+ import { sanitiseEnrichment } from './compose/sanitise-enrichment.js';
+ import { canonicalStateFromFreshness } from './context/canonical-analysis-state.js';
+ import { buildRunDelta } from './coaching/build-run-delta.js';
++import { selectRunAnalysisFact } from './context/freshness.js';
+ 
+ // ─── Mechanism A: type brand ──────────────────────────────────────────────
+ 
+@@ -140,6 +144,8 @@ export function isFinalisedV5Response(value: unknown): value is FinalisedV5Respo
+ // ─── Context ──────────────────────────────────────────────────────────────
+ 
+ export interface FinaliserContext {
++  /** Already carried by sendFinalised200; independent of selected fact scope. */
++  readonly scenarioId?: string;
+   /**
+    * Pre-computed readiness from the dispatch path:
+    *   - TurnExecutor      : structural readiness from the per-turn graph
+@@ -353,11 +359,10 @@ export function finaliseV5Response(
+       ? { ...stamped, graph_hash: ctx.freshness.current_graph_hash }
+       : stamped;
+   // ANALYSIS-STATE AUTHORITY, STEP 3 — ONE composed verdict per turn, beside
+-  // `analysis_ready`. ADDITIVE BY CONSTRUCTION: it adds exactly one top-level
+-  // key and rewrites none, so a consumer that ignores it sees byte-identical
+-  // behaviour (asserted against a capture taken on the PR base, not against a
+-  // fixture this lane wrote). Composed from values this turn already computed
+-  // — no engine call, no model call, no store read.
++  // `analysis_ready`. On adopted fact-bearing exits it also confines the
++  // analysis block to the composed identity verdict. Other exits retain the
++  // additive behaviour. Composed from already-loaded inputs — no engine call,
++  // model call or store read.
+   const withAnalysisState = attachAnalysisState(withGraphHash, ctx);
+   // THE RUN-OVER-RUN CONSEQUENCE (schemas 0.39.0 `OlumiResponseSchema.run_delta`).
+   // ADDITIVE BY CONSTRUCTION: adds at most one top-level key and rewrites none,
+@@ -451,6 +456,9 @@ function attachAnalysisState(
+       // blockers were dropped on the floor.
+       ctx.analysisReady ? { readiness: ctx.analysisReady } : {},
+     );
++  const selectedRun = ctx.priorFacts === undefined ? null : selectRunAnalysisFact(ctx.priorFacts);
++  const hasRunToBind = ctx.priorFacts !== undefined
++    && (selectedRun !== null || canonical.selected_fact_index !== null);
+   const analysisState = composeAnalysisStateV1({
+     canonical,
+     freshness: ctx.freshness,
+@@ -460,6 +468,12 @@ function attachAnalysisState(
+     // withheld-claim projection has redacted `near_tie`, the separation half
+     // is genuinely unknown to the consumer and `leader_claim` must say so.
+     rawRobustness: readRawRobustnessFromResponseBody(response),
++    ...(!hasRunToBind ? {} : {
++      runFactBinding: {
++        scenarioId: ctx.scenarioId,
++        selectedResult: selectedRun?.fact.result,
++      },
++    }),
+     // ROADMAP 2.1271 — passed through verbatim; the composer owns the arm's
+     // precedence and its timestamp validation.
+     ...(ctx.autoRunInFlight !== undefined
+@@ -467,7 +481,11 @@ function attachAnalysisState(
+       : {}),
+   });
+   if (analysisState === undefined) return response;
+-  return { ...response, analysis_state: analysisState };
++  return {
++    ...response,
++    blocks: projectAnalysisBlocksForRunBinding(response.blocks, analysisState),
++    analysis_state: analysisState,
++  };
+ }
+ 
+ function sanitiseEnrichmentBlocks(
+@@ -534,6 +552,13 @@ function attachRunDelta(
+   response: OlumiResponse,
+   ctx: FinaliserContext,
+ ): OlumiResponse {
++  // Read the composer's identity verdict. An unbound pair must not add a new
++  // comparative delta after the analysis block has been confined.
++  const bindingReason = response.analysis_state?.leader_claim.withheld_reason;
++  if (bindingReason === WITHHELD_RUN_IDENTITY_UNCONFIRMED || bindingReason === WITHHELD_RUN_IDENTITY_CONFLICT) {
++    const { run_delta: _unboundDelta, ...withoutDelta } = response;
++    return withoutDelta;
++  }
+   if (ctx.priorFacts === undefined) return response;
+   const built = buildRunDelta({
+     priorFacts: ctx.priorFacts,
+diff --git a/src/routes/__tests__/c2-analysis-interpretation-restore.test.ts b/src/routes/__tests__/c2-analysis-interpretation-restore.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..fb3fbd70f9b2b4c78f8ddc02e232f1c068f66f5c
+--- /dev/null
++++ b/src/routes/__tests__/c2-analysis-interpretation-restore.test.ts
+@@ -0,0 +1,122 @@
++import { beforeEach, describe, expect, it, vi } from 'vitest';
++import { AnalysisStateV1Schema, OlumiResponseSchema } from '@talchain/schemas/boundary';
++import { RunAnalysisHandlerFactSchema } from '@talchain/schemas/orchestrator';
++
++const readRecent = vi.fn();
++const readFactsFor = vi.fn();
++const readAnalysisInvalidatedAt = vi.fn();
++vi.mock('../../orchestrator-v5/session/index.js', () => ({
++  getSessionStore: () => ({ readRecent, readFactsFor, readAnalysisInvalidatedAt }),
++}));
++vi.mock('../../utils/telemetry.js', () => ({
++  log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
++}));
++
++import { readScenarioAnalysis } from '../scenario-graph-analysis-read.js';
++import { computeAnalysisAffectingGraphHash } from '../../orchestrator-v5/context/graph-hash.js';
++import { WITHHELD_RUN_IDENTITY_CONFLICT, WITHHELD_RUN_IDENTITY_UNCONFIRMED } from '../../orchestrator-v5/compose/analysis-state-v1.js';
++import type { GraphStateIngress } from '../../orchestrator-v5/boundary/request-extensions.js';
++
++const SCENARIO = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
++const OTHER_SCENARIO = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
++const GRAPH: GraphStateIngress = { nodes: [{ id: 'goal', kind: 'goal', label: 'Synthetic goal', goal_threshold: 0.7 }], edges: [] };
++const CHANGED_GRAPH = { ...GRAPH, nodes: [{ ...GRAPH.nodes[0], goal_threshold: 0.8 }] } as GraphStateIngress;
++const HASH = computeAnalysisAffectingGraphHash(GRAPH)!;
++const FIRST = '2026-09-06T17:50:03.871Z';
++const NEXT = '2026-09-06T17:50:11.035Z';
++
++function fact(computed_at: string | undefined = FIRST, scenario_id = SCENARIO) {
++  return RunAnalysisHandlerFactSchema.parse({
++    fact_type: 'run_analysis', fact_version: 1, noop: false,
++    result: {
++      scenario_id, computed_at, graph_hash_at_run: HASH,
++      leading_option_id: 'option-a', summary: 'Option A leads on the current model.',
++      win_probabilities: { 'option-a': 0.65, 'option-b': 0.35 },
++      constraint_verdict: { may_name_leading_option: true, constraint_verdict_state: 'evaluated_feasible' },
++      enrichment: { analysis_status: 'completed', robustness: { level: 'strong', near_tie: { is_tie: false } } },
++    },
++  });
++}
++
++async function read(graph: unknown = GRAPH) {
++  const result = await readScenarioAnalysis({ scenarioId: SCENARIO, graph, requestId: 'c2-restore-fixture' });
++  expect(result.analysis_state).not.toBeNull();
++  expect(AnalysisStateV1Schema.safeParse(result.analysis_state).success).toBe(true);
++  if (result.analysis_result !== null) {
++    expect(OlumiResponseSchema.safeParse({
++      response_version: 2, assistant_text: '', stage_indicator: 'analyse',
++      blocks: [result.analysis_result], suggested_actions: [], insights: [],
++      analysis_state: result.analysis_state,
++    }).success).toBe(true);
++  }
++  return result;
++}
++
++beforeEach(() => {
++  vi.clearAllMocks();
++  readRecent.mockResolvedValue([{ id: 'turn-row' }]);
++  readAnalysisInvalidatedAt.mockResolvedValue(null);
++});
++
++describe('C2 binding through the actual persisted scenario read', () => {
++  it('reloads an existing run with its original hash/time and same state on repeated reads', async () => {
++    const saved = fact();
++    readFactsFor.mockResolvedValue([saved]);
++    const first = await read();
++    expect(first.analysis_state?.run_state).toEqual({ kind: 'complete_current', computed_at: FIRST });
++    expect(first.analysis_result).toMatchObject({ computed_against_hash: HASH, win_probabilities: { 'option-a': 0.65 } });
++    expect(await read()).toEqual(first);
++    expect(saved.result.computed_at).toBe(FIRST);
++  });
++
++  it('selects the new fact after a same-graph rerun', async () => {
++    readFactsFor.mockResolvedValue([fact(FIRST), fact(NEXT)]);
++    expect((await read()).analysis_state?.run_state).toEqual({ kind: 'complete_current', computed_at: NEXT });
++  });
++
++  it('keeps historical identity when a changed current model makes that run stale', async () => {
++    const saved = fact();
++    const original = JSON.stringify(saved);
++    readFactsFor.mockResolvedValue([saved]);
++    const changed = await read(CHANGED_GRAPH);
++    expect(changed.analysis_state?.run_state).toEqual({ kind: 'complete_stale', computed_at: FIRST, cause: 'graph_changed' });
++    expect(changed.analysis_state?.contradictions).toEqual([]);
++    expect(changed.analysis_result).toBeNull();
++    expect(JSON.stringify(saved)).toBe(original);
++  });
++
++  it('does not turn restore-to-the-old-graph into a new run', async () => {
++    readFactsFor.mockResolvedValue([fact()]);
++    readAnalysisInvalidatedAt.mockResolvedValue('2026-09-06T17:50:05.000Z');
++    const restored = await read();
++    expect(restored.analysis_state?.run_state).toEqual({ kind: 'complete_stale', computed_at: FIRST, cause: 'graph_changed' });
++    expect(restored.analysis_result).toBeNull();
++    readFactsFor.mockResolvedValue([fact(NEXT), fact()]);
++    expect((await read()).analysis_state?.run_state).toEqual({ kind: 'complete_current', computed_at: NEXT });
++  });
++
++  it('does not adopt another scenario even with identical graph and timestamp', async () => {
++    readFactsFor.mockResolvedValue([fact(FIRST, OTHER_SCENARIO)]);
++    const result = await read();
++    expect(result.analysis_state?.run_state.kind).toBe('unknown_degraded');
++    expect(result.analysis_state?.leader_claim).toEqual({ permitted: false, withheld_reason: WITHHELD_RUN_IDENTITY_CONFLICT });
++    expect(result.analysis_result).toBeNull();
++  });
++
++  it('keeps available legacy figures when timestamp identity is unsupported', async () => {
++    const legacy = fact('2026-09-06T17:50:03Z');
++    readFactsFor.mockResolvedValue([legacy]);
++    const result = await read();
++    expect(result.analysis_state?.run_state.kind).toBe('unknown_degraded');
++    expect(result.analysis_state?.leader_claim).toEqual({ permitted: false, withheld_reason: WITHHELD_RUN_IDENTITY_UNCONFIRMED });
++    expect(result.analysis_result).toMatchObject({ leading_option_id: null, win_probabilities: { 'option-a': 0.65 } });
++    expect(legacy.result.leading_option_id).toBe('option-a');
++  });
++
++  it('keeps unreadable history distinct from a successful empty read', async () => {
++    readFactsFor.mockRejectedValueOnce(new Error('fixture read failure'));
++    expect((await read()).analysis_state?.run_state.kind).toBe('unknown_degraded');
++    readFactsFor.mockResolvedValue([]);
++    expect((await read()).analysis_state?.run_state.kind).toBe('never_run');
++  });
++});
+diff --git a/src/routes/scenario-graph-analysis-read.ts b/src/routes/scenario-graph-analysis-read.ts
+index aa6f4b7407c9b9bbb9d849c5835a44a39ed83149..718bd58d7a6d124bdecd465d3f53efa73b058b01 100644
+--- a/src/routes/scenario-graph-analysis-read.ts
++++ b/src/routes/scenario-graph-analysis-read.ts
+@@ -93,6 +93,7 @@ import { buildAnalysisResultBlock } from '../orchestrator-v5/compose.js';
+ import {
+   composeAnalysisStateV1,
+   readRawRobustnessFromResponseBody,
++  projectAnalysisBlocksForRunBinding,
+ } from '../orchestrator-v5/compose/analysis-state-v1.js';
+ import { mayPresentLeaderClaimForFact } from '../orchestrator-v5/compose/unrequested-analysis-confinement.js';
+ import { canonicalStateFromFreshness } from '../orchestrator-v5/context/canonical-analysis-state.js';
+@@ -112,8 +113,9 @@ export interface ScenarioAnalysisRead {
+   readonly analysis_state: AnalysisStateV1 | null;
+   /**
+    * The `analysis_result` block for the fact the verdict selected, present ONLY
+-   * on a `fresh` verdict. `null` means no CURRENT result is being delivered —
+-   * never "the analysis is empty".
++   * on a fresh graph-hash verdict with no conflicting run identity. Legacy
++   * identity may remain unconfirmed; its figures then carry no designation or
++   * currentness claim. `null` never means "the analysis is empty".
+    */
+   readonly analysis_result: OlumiResponse['blocks'][number] | null;
+ }
+@@ -172,7 +174,10 @@ export async function readScenarioAnalysis(
+     // against the robustness signals the consumer ACTUALLY receives — the same
+     // reason `finaliseV5Response` reads them off the body rather than off the
+     // fact.
+-    const selected = derivation.freshness === 'fresh' ? selectRunAnalysisFact(read.facts) : null;
++    // Historical selection is independent of permission to display a CURRENT
++    // result. A changed graph must not replace the original run's hash/time.
++    const historical = selectRunAnalysisFact(read.facts);
++    const selected = derivation.freshness === 'fresh' ? historical : null;
+     const fact =
+       selected !== null && selected.fact.fact_type === 'run_analysis'
+         ? (selected.fact as RunAnalysisHandlerFact)
+@@ -183,6 +188,12 @@ export async function readScenarioAnalysis(
+       composeAnalysisStateV1({
+         canonical: canonicalStateFromFreshness(derivation, {}),
+         freshness: derivation,
++        ...(historical === null ? {} : {
++          runFactBinding: {
++            scenarioId: params.scenarioId,
++            selectedResult: historical.fact.result,
++          },
++        }),
+         // ⚠ NOT hardcoded `false`. The entitlement is read from the SELECTED
+         // FACT by the canonical fail-closed reader — the same one
+         // `buildAnalysisResultBlock` uses internally — so the verdict's
+@@ -208,7 +219,10 @@ export async function readScenarioAnalysis(
+             : null,
+       }) ?? null;
+ 
+-    return { analysis_state: analysisState, analysis_result: analysisResult };
++    const boundResult = analysisResult !== null && analysisState !== null
++      ? projectAnalysisBlocksForRunBinding([analysisResult], analysisState)[0] ?? null
++      : analysisResult;
++    return { analysis_state: analysisState, analysis_result: boundResult };
+   } catch (err) {
+     // ADDITIVE MEANS ADDITIVE: the graph read stands whatever happens here.
+     log.warn(

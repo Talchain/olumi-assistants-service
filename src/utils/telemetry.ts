@@ -20,10 +20,12 @@ export function hashIP(ip: string): string {
 }
 
 /**
- * Pino logger with secret/PII redaction
+ * Pino logger with secret/PII/decision-content redaction
  *
  * Redacts sensitive fields to prevent accidental exposure in logs.
- * Paths use wildcards to match nested objects at any depth.
+ * NOTE: pino redact wildcards match exactly ONE level each — paths are
+ * generated at nesting depths 0–2 (NOT "any depth"; the old claim here
+ * was false, see logger-config.ts).
  *
  * SECURITY: Redaction paths centralized in src/utils/logger-config.ts
  * to ensure both Fastify and standalone Pino loggers stay in sync.
@@ -60,6 +62,26 @@ export const TelemetryEvents = {
   CeeDraftGraphSucceeded: "cee.draft_graph.succeeded",
   CeeDraftGraphFailed: "cee.draft_graph.failed",
 
+  // v0.11.0 schema amendment — observable transition signals.
+  // LegacyCoachingValueNormalised fires once per substituted off-enum
+  // bias_category / bias_signal value at the Anthropic adapter ingress
+  // seam. Removable after v194 prompt deployment + 7 consecutive days of
+  // zero events.
+  // ContractDefaultApplied fires whenever the schema-valid empty coaching
+  // default is inserted at Stage 5 Package — should be zero in production
+  // after v194 ships; non-zero indicates a prompt regression.
+  DraftGraphLegacyCoachingValueNormalised: "cee.draft_graph.legacy_coaching_value_normalised",
+  DraftGraphContractDefaultApplied: "cee.draft_graph.contract_default_applied",
+
+  // Lane 3 (2026-07-07): structured-outputs degradation must NOT be silent.
+  // Fires (alongside the WARN-level pino log at the call site) when the
+  // Anthropic adapter's draft_graph structured-outputs request is rejected
+  // by the API (e.g. "compiled grammar is too large") and the call falls
+  // back to prompt-only JSON mode. Non-zero in production means every
+  // draft is paying the slow un-constrained path — investigate the schema
+  // grammar budget (tests/unit/anthropic-graph-schema-grammar-budget.test.ts).
+  CeeStructuredOutputsFellBack: "cee.draft_graph.structured_outputs_fell_back",
+
   CeeExplainGraphRequested: "cee.explain_graph.requested",
   CeeExplainGraphSucceeded: "cee.explain_graph.succeeded",
   CeeExplainGraphFailed: "cee.explain_graph.failed",
@@ -80,6 +102,183 @@ export const TelemetryEvents = {
   CeeOptionsSucceeded: "cee.options.succeeded",
   CeeOptionsFailed: "cee.options.failed",
 
+  // Stage 4 pre-LLM-repair fail-fast gate for OPTIONS_IDENTICAL. Emitted by
+  // src/cee/unified-pipeline/stages/repair/index.ts when the deterministic
+  // sweep leaves an OPTIONS_IDENTICAL violation — that class has repeatedly
+  // failed `repair_graph` revalidation, so we bypass the LLM call and emit
+  // a fail-fast clarification-shaped CEE_GRAPH_INVALID instead.
+  CeeOptionsIdenticalBypass: "cee.options_identical.pre_repair_bypass",
+
+  // Graceful-dedup variant of the above (ROADMAP 2.53 mitigation rung 1).
+  // Fires when the duplicate group that reached the bypass consisted
+  // entirely of AI-inferred options (no explicit is_baseline, no
+  // baseline-shaped label/id, no from_brief extraction marker) and >=2
+  // usable options remained after dropping the duplicate(s) — the draft
+  // CONTINUES instead of failing fast. The pre_repair_bypass event above
+  // keeps firing for the still-erroring residual, so the combined rate of
+  // the two events tracks the underlying LLM collision rate. See
+  // src/cee/unified-pipeline/stages/repair/options-identical-graceful-dedup.ts.
+  CeeOptionsIdenticalDroppedDuplicate: "cee.options_identical.dropped_duplicate",
+
+  // Stage 4 Substep 0.9 — deterministic auto-baseline dedup. Fires when
+  // the LLM-injected status-quo option (with explicit is_baseline=true)
+  // duplicates an explicit option's intervention signature; drops the
+  // baseline so OPTIONS_IDENTICAL never gets raised for this known
+  // LLM-artefact case. See
+  // src/cee/unified-pipeline/stages/repair/auto-baseline-dedup.ts.
+  CeeAutoBaselineDedupApplied: "cee.auto_baseline_dedup.applied",
+
+  // Diagnostic-only counterpart to the above. Fires when a duplicate
+  // group contains options that LOOK like baselines by label / id-suffix
+  // heuristic but lack the explicit is_baseline flag. The dedup substep
+  // does NOT mutate the graph in this case (it would risk deleting a
+  // user-explicit option with a baseline-shaped label) — the collision
+  // flows through to the PR #202 OPTIONS_IDENTICAL typed-clarification
+  // bypass. The event surfaces LLM prompt drift to operators (the
+  // draft_graph prompt mandates is_baseline=true on status-quo options).
+  CeeAutoBaselineHeuristicOnlyCollision: "cee.auto_baseline_dedup.heuristic_only_collision",
+
+  // V5 route-v2 frame-stage no-brief guard. Fires when a frame-stage
+  // message arrives with no graph yet but does NOT match the
+  // draft_graph trigger regex — typically a retry after a failed
+  // draft_graph, or a user reply that isn't a fresh decision brief.
+  // Replaces the "I couldn't complete that turn cleanly" generic
+  // TurnExecutor max_tokens fallback with a deterministic framing
+  // prompt. See src/orchestrator/route-v2.ts (frame_no_brief_guard).
+  V5FrameStageNoBriefGuard: "v5.frame_stage_no_brief_guard",
+
+  // META-DECISION-DIAGNOSIS-2026-07-20 — round-1 process-meta intake
+  // guard. Fires when a frame-stage empty-canvas message is a question TO
+  // the assistant about the process (the product's own pre-analysis spark
+  // prompts, or a narrowly-matched typed variant) and is answered
+  // deterministically instead of being captured as a decision brief by
+  // the draft/clarify pipeline. See src/orchestrator-v5/routing/
+  // process-meta-intake.ts and route-v2's process_meta_intake branch.
+  V5ProcessMetaIntakeGuard: "v5.process_meta_intake_guard",
+
+  // S2-L1 — typed readiness/coaching intake arm. Fires once per
+  // `source='chip_click'` + `chip.action_type='analysis_readiness'` turn,
+  // consumed on its TYPE (not the string mirror). `outcome` names the branch:
+  // fresh_canvas (unified with the process-meta answer) / goal_missing /
+  // readiness_open / readiness_ready. Zero firings after the UI re-vendor
+  // stamps the intent means the typed intent is still not crossing the wire.
+  // See src/orchestrator-v5/routing/readiness-intake.ts and route-v2's
+  // readiness_intake branch.
+  V5ReadinessIntakeArm: "v5.readiness_intake",
+
+  // S2-L3 — typed-chip mutation route. Fires once per `source='chip_click'`
+  // (or 'chip') mutation chip whose typed `action_type`
+  // (set_factor_value / adjust_edge_strength / add_constraint) carried a
+  // pre-resolved `chip.parameters` spec that the reader turned into a
+  // deterministic proposal, consumed on its TYPE (not re-parsed from the chip
+  // copy). `outcome`: routed (proposal synthesised, 0-LLM) or
+  // fell_through:<reason> (params missing/malformed/target unresolved → the
+  // existing text/LLM path owns the turn). Content-free — never user text.
+  // See src/orchestrator-v5/routing/typed-chip-mutation-proposal.ts.
+  V5TypedChipMutationRoute: "v5.typed_chip_mutation_route",
+
+  // TYPED COACHING-INTENT ARM. Fires once per turn carrying a routed
+  // `chip.intent` (challenge_frame / define_success / elicit_options /
+  // challenge_assumption). `intent` is the wire enum value; `stage` is the
+  // turn stage; `dsk_protocol_id` is the cited protocol or null when the
+  // bundle's own `stage_applicability` did not contain this exact stage token
+  // (the fail-closed no-badge arm). Content-free — never user text.
+  // See src/orchestrator-v5/coaching/typed-intent-directive.ts.
+  V5TypedCoachingIntentRoute: "v5.typed_coaching_intent_route",
+
+  // TYPED COACHING-INTENT ARM — THE DROP. Fires once per turn that CARRIES a
+  // non-empty `chip.intent` which `resolveCoachingIntent` DECLINED (not one of
+  // the four routed intents, or a source the arm does not accept). The routed
+  // sibling directly above records what CEE steered; this records what it
+  // silently did not.
+  //
+  // ⭐ WHY IT EXISTS AT ALL. Before it, a published-but-unrouted intent hit
+  // `resolveCoachingIntent` → `undefined` and the arm simply skipped: no
+  // telemetry, no log, no trace anywhere. That silent drop is the exact
+  // mechanism that let four MOUNTED sparks degrade to anonymous prose for as
+  // long as they did — the product could not tell an intent nobody clicked
+  // from an intent it threw away. `intent` is the declined token; `stage` is
+  // the derived turn stage. Content-free — never user text.
+  //
+  // It deliberately does NOT fire on a turn with no `chip.intent` at all: that
+  // is every ordinary turn in the service, and the signal would drown.
+  // See src/orchestrator-v5/turn-executor.ts (the typed coaching-intent arm).
+  V5TypedCoachingIntentUnrouted: "v5.typed_coaching_intent_unrouted",
+
+  // S3 §5 / Lane C3 — add-option compound transaction. Fires once per typed
+  // `add_option` intent turn (`chip.intent='add_option'`). `outcome`: held
+  // (the atomic option+edges+values batch was refereed to a held proposal) or
+  // fell_through:<reason> (params missing/malformed/target unresolved, GM not
+  // live, or the referee did not hold → the existing free-text edit path owns
+  // the turn). `configured` marks whether the option lands with effect values.
+  // Content-free — never user text. See
+  // src/orchestrator-v5/handlers/add-option-dispatch.ts.
+  //
+  // 2026-09-01 — the TEXT leg rides this SAME event rather than minting a
+  // second one: `origin` is 'text', and the focused proposer's every outcome
+  // is already named here (`fell_through:text_rejected` with `rejection_code`,
+  // `fell_through:text_unavailable` with `unavailable_reason`,
+  // `fell_through:text_clarify`, `fell_through:text_no_grounding`,
+  // `fell_through:text_no_budget`). One event, one place to read the whole
+  // add-option funnel — and no widening of this frozen registry.
+  //
+  // 2026-09-12 — `clarify_label` joins that outcome set (NOT a fall-through:
+  // the turn is ANSWERED with a question about the option's name). It replaces
+  // `fell_through:text_clarify` for the label case only; the parent-decision
+  // clarify still emits the fall-through. The two are distinguishable in
+  // telemetry precisely because they are different outcomes for the user.
+  V5AddOptionTransaction: "v5.add_option_transaction",
+
+  // ROADMAP 2.63 C1 — stage-2 explicit-generate wire. Fires once per
+  // message turn that arrives with generate_model/explicit_generate set,
+  // regardless of outcome (`outcome` field: dispatch_draft /
+  // declined_no_brief / graph_present_fallthrough /
+  // state_read_failed_fallthrough; `brief_source` names which server-side
+  // source won the C2 assembly). This is the end-to-end observability for
+  // the UI-half emit (A2's U1/U2): zero firings after the UI deploy means
+  // the flag is still not crossing the wire.
+  V5ExplicitGenerateReceived: "v5.explicit_generate_received",
+
+  // ROADMAP 2.63 C3/C4 — deterministic draft/redraft offer lifecycle.
+  // `seeded` fires when an offer chip + `draft_graph` pending are emitted
+  // (`site`: frame_no_brief_guard / explicit_generate_graph_present;
+  // `persisted` false = commit failed and the chip was withheld).
+  // `resumed` fires when a consent-shaped turn resolved against a live
+  // offer (`outcome`: dispatch_draft / declined_no_brief /
+  // reoffered_graph_changed / reoffered_graph_present /
+  // state_read_failed_fallthrough; `trigger`: copy_replay / bare_confirm).
+  V5DraftOfferSeeded: "v5.draft_offer.seeded",
+  // ROADMAP goalfence — the draft blocked on a goal CEE itself minted and the
+  // turn asked the user for the outcome instead of returning a dead 500.
+  //
+  // NAMESPACED UNDER `recovery_response`, NOT `clarify_v2`, and not under a new
+  // `v5.draft_graph.*` token. Two reasons, and the second is a rule this file
+  // enforces on itself: (a) clarify is strictly PRE-draft, so a dashboard
+  // measuring "how often do we clarify before drafting" must not silently
+  // absorb post-draft-failure asks; (b) `v5.draft_graph` is not a sanctioned
+  // v5 namespace token — `tests/utils/telemetry-events.test.ts` REDs on it —
+  // and widening a frozen contract to fit one event is the wrong direction.
+  // This IS a recovery response, so it belongs in the namespace that already
+  // means that.
+  V5DraftGoalNeverStatedAsk: "v5.recovery_response.goal_never_stated_ask",
+  V5DraftOfferResumed: "v5.draft_offer.resumed",
+  // Clarify v2 (E0-B, ROADMAP 1.94 Option A replacement) — DARK behind
+  // CEE_CLARIFY_V2_ENABLED. `questions_emitted` fires once per clarify
+  // response (fields: round, phase, question_count, dimensions) —
+  // questions_emitted / drafts is the ask-rate counter the 1.94 promotion
+  // path requires, so the next "it never asks" regression is a dashboard
+  // fact, not a 7-day log dig. `proceeded` fires when preflight/resume
+  // hands the turn to the draft (fields: reason: complete /
+  // all_missing_already_asked / round_budget_exhausted / user_proceed /
+  // explicit_generate; resumed: bool).
+  V5ClarifyV2QuestionsEmitted: "v5.clarify_v2.questions_emitted",
+  V5ClarifyV2Proceeded: "v5.clarify_v2.proceeded",
+  // 1.152 (A1/A4): a resume reply deflected instead of answering — fields:
+  // action: release / reoffer; cue: decline / question_reply / bare_ack /
+  // hedged_proceed (1.152(i) P3);
+  // round (null on release). Emitted AFTER a successful commit only (A8).
+  V5ClarifyV2Deflected: "v5.clarify_v2.deflected",
+
   CeeSensitivityCoachRequested: "cee.sensitivity_coach.requested",
   CeeSensitivityCoachSucceeded: "cee.sensitivity_coach.succeeded",
   CeeSensitivityCoachFailed: "cee.sensitivity_coach.failed",
@@ -88,13 +287,24 @@ export const TelemetryEvents = {
   CeeTeamPerspectivesSucceeded: "cee.team_perspectives.succeeded",
   CeeTeamPerspectivesFailed: "cee.team_perspectives.failed",
 
-  CeeKeyInsightRequested: "cee.key_insight.requested",
-  CeeKeyInsightSucceeded: "cee.key_insight.succeeded",
-  CeeKeyInsightFailed: "cee.key_insight.failed",
-
   CeeElicitBeliefRequested: "cee.elicit_belief.requested",
   CeeElicitBeliefSucceeded: "cee.elicit_belief.succeeded",
   CeeElicitBeliefFailed: "cee.elicit_belief.failed",
+
+  // Wave-1 Lane D (PR1 fidelity closure, ROADMAP 2.967) — context-integrity
+  // observability triad. Content-free; log-only (no Datadog mapping).
+  // Registry minted up front by the wave's step-zero PR; emit sites land in
+  // Lane D's own PR. routed: a state/provenance question classified and
+  // routed ('guard' | 'llm') at state-query-guard. Payload: question_class,
+  // route + contextToTelemetry ids — NO question text.
+  CeeContextIntegrityRouted: "cee.context_integrity.routed",
+  // derived: the scenario-graph route computed the retention ledger. Payload:
+  // status + counts only (total / in_model / prose_only / absent / truncated)
+  // — NEVER atom text or brief content.
+  CeeContextIntegrityDerived: "cee.context_integrity.derived",
+  // unavailable: the ledger could not be derived — an honest unknown, never a
+  // silent skip. Payload: unavailable_reason ('no_brief_text' | 'no_graph').
+  CeeContextIntegrityUnavailable: "cee.context_integrity.unavailable",
 
   CeeUtilityWeightRequested: "cee.utility_weight.requested",
   CeeUtilityWeightSucceeded: "cee.utility_weight.succeeded",
@@ -107,10 +317,6 @@ export const TelemetryEvents = {
   CeeEdgeFunctionRequested: "cee.edge_function.requested",
   CeeEdgeFunctionCompleted: "cee.edge_function.completed",
   CeeEdgeFunctionFailed: "cee.edge_function.failed",
-
-  CeeGenerateRecommendationRequested: "cee.generate_recommendation.requested",
-  CeeGenerateRecommendationCompleted: "cee.generate_recommendation.completed",
-  CeeGenerateRecommendationFailed: "cee.generate_recommendation.failed",
 
   CeeNarrateConditionsRequested: "cee.narrate_conditions.requested",
   CeeNarrateConditionsCompleted: "cee.narrate_conditions.completed",
@@ -143,6 +349,15 @@ export const TelemetryEvents = {
   CeeReviewSucceeded: "cee.review.succeeded",
   CeeReviewFailed: "cee.review.failed",
 
+  // CEE Decision Review endpoint events (M2) - unique events only
+  // Note: Requested/Succeeded/Failed use existing DecisionReviewRequested etc.
+  CeeDecisionReviewPromptLoaded: "cee.decision_review.prompt_loaded",
+  CeeDecisionReviewLlmCallStarted: "cee.decision_review.llm_call_started",
+  CeeDecisionReviewLlmCallCompleted: "cee.decision_review.llm_call_completed",
+  CeeDecisionReviewJsonExtracted: "cee.decision_review.json_extracted",
+  CeeDecisionReviewShapeCheckFailed: "cee.decision_review.shape_check_failed",
+  CeeDecisionReviewShapeCheckWarnings: "cee.decision_review.shape_check_warnings",
+
   // V04: Upstream telemetry events
   DraftUpstreamSuccess: "assist.draft.upstream_success",
   DraftUpstreamError: "assist.draft.upstream_error",
@@ -155,19 +370,25 @@ export const TelemetryEvents = {
   FixtureReplaced: "assist.draft.fixture_replaced",
   LegacySSEPath: "assist.draft.legacy_sse_path",
 
-  // Validation and repair events
+  // Validation events
+  // (The assist.draft.repair_* quintet — repair_attempted / repair_start /
+  // repair_success / repair_partial / repair_fallback — was DELETED with the
+  // draft path's LLM repair call: ROADMAP 2.731/2.732. The efficacy
+  // measurement that killed the call was made THROUGH these events:
+  // repair_success emitted zero times in the full 7-day window. Any dashboard
+  // or log query over draft.repair.* / assist.draft.repair_* now reads a
+  // legitimately-empty series, not a broken emitter.)
   ValidationFailed: "assist.draft.validation_failed",
-  RepairAttempted: "assist.draft.repair_attempted",
-  RepairStart: "assist.draft.repair_start",
-  RepairSuccess: "assist.draft.repair_success",
-  RepairPartial: "assist.draft.repair_partial",
-  RepairFallback: "assist.draft.repair_fallback",
 
   // Preflight validation events (v1.13)
   PreflightValidationPassed: "cee.preflight.passed",
   PreflightValidationFailed: "cee.preflight.failed",
   PreflightReadinessAssessed: "cee.preflight.readiness_assessed",
   PreflightRejected: "cee.preflight.rejected",
+  // Structured preflight outcome event with full calibration fields (v1.17)
+  PreflightCompleted: "cee.preflight.completed",
+  // BriefSignals v1 — deterministic brief quality extraction
+  CeeBriefSignals: "cee.brief_signals",
 
   // CEE verification events (v1.14)
   CeeVerificationSucceeded: "cee.verification.succeeded",
@@ -183,11 +404,38 @@ export const TelemetryEvents = {
   // Goal inference (defence-in-depth for missing goal nodes)
   CeeGoalInferred: "cee.draft_graph.goal_inferred",
 
+  // Deterministic graph enforcement (Stage 4 substep 9b)
+  CeeInboundSumRescaled: "cee.draft_graph.inbound_sum_rescaled",
+  CeeBridgeChainRepaired: "cee.draft_graph.bridge_chain_repaired",
+  CeeEnforcementCompleted: "cee.draft_graph.enforcement_completed",
+  CeeEnforcementEdgeSkipped: "cee.draft_graph.enforcement_edge_skipped",
+  CeeEnforcementPostValidationErrors: "cee.draft_graph.enforcement_post_validation_errors",
+  CeeEnforcementPostValidationWarnings: "cee.draft_graph.enforcement_post_validation_warnings",
+  CeeEnforcementPostValidationFailed: "cee.draft_graph.enforcement_post_validation_failed",
+  CeeEnforcementBlocked: "cee.draft_graph.enforcement_blocked",
+  CeeOptionNoOpNeutralised: "cee.draft_graph.option_no_op_neutralised",
+  CeeOptionNoOpTargetRepaired: "cee.draft_graph.option_no_op_target_repaired",
+
+  // Bounded auto-retry on the post-enforcement fail-closed class (ROADMAP 2.1086)
+  CeeEnforcementAutoRetry: "cee.draft_graph.enforcement_auto_retry",
+  CeeEnforcementAutoRetrySkipped: "cee.draft_graph.enforcement_auto_retry_skipped",
+  CeeEnforcementAutoRetryExhausted: "cee.draft_graph.enforcement_auto_retry_exhausted",
+
   // Connectivity validation (P0 diagnostics)
   CeeConnectivityCheck: "cee.draft_graph.connectivity_check",
 
   NodeKindNormalized: "llm.normalization.node_kind_mapped",
   FactorBaselineDefaulted: "cee.factor.baseline_defaulted",
+  InterventionsMissingDefaulted: "cee.option.interventions_missing_defaulted",
+
+  // JSON extraction events (model output normalization)
+  JsonExtractionRequired: "llm.json_extraction.required",
+
+  // NOTE: `RepairPromptTruncated` was REMOVED by ROADMAP 2.763 with the LLM
+  // graph-repair capability — its only two emitters were the Anthropic and
+  // OpenAI repair-prompt builders. It joins the 2.731 quintet (RepairAttempted,
+  // RepairStart, RepairSuccess, RepairPartial, RepairFallback): an event key
+  // with no live emitter is a broken alarm. Guarded in telemetry-events.test.ts.
 
   // Goal generation tracking (prompt tuning)
   GoalGeneration: "cee.goal_generation",
@@ -201,16 +449,8 @@ export const TelemetryEvents = {
   ClarifierRoundComplete: "assist.clarifier.round_complete",
   ClarifierRoundFailed: "assist.clarifier.round_failed",
 
-  // Multi-turn clarifier integration events (v1.15)
-  CeeClarifierSessionStart: "cee.clarifier.session_start",
-  CeeClarifierQuestionAsked: "cee.clarifier.question_asked",
-  CeeClarifierAnswerReceived: "cee.clarifier.answer_received",
-  CeeClarifierAnswerIncorporated: "cee.clarifier.answer_incorporated",
-  CeeClarifierConverged: "cee.clarifier.converged",
-  CeeClarifierQuestionCached: "cee.clarifier.question_cached",
-  CeeClarifierQuestionRetrieved: "cee.clarifier.question_retrieved",
-  CeeClarifierFailed: "cee.clarifier.failed",
-  CeeClarifierSkipped: "cee.clarifier.skipped",
+  // (Multi-turn Stage-4 clarifier events cee.clarifier.* removed 2026-07-16 —
+  // the stage was retired under ROADMAP 1.94 Option A.)
 
   // Critique events (v04)
   CritiqueStart: "assist.critique.start",
@@ -231,6 +471,13 @@ export const TelemetryEvents = {
   AuthSuccess: "assist.auth.success",
   AuthFailed: "assist.auth.failed",
   RateLimited: "assist.auth.rate_limited",
+
+  // User-JWT identity events (login 3.4 CEE-half — CEE_REQUIRE_USER_JWT).
+  // Emitted ONLY when the flag is on; the flag-off path is dormant.
+  UserJwtVerified: "assist.auth.user_jwt_verified",
+  UserJwtRefused: "assist.auth.user_jwt_refused",
+  UserJwtIdentityMismatch: "assist.auth.user_jwt_identity_mismatch",
+  UserJwtServiceCallerLegacy: "assist.auth.user_jwt_service_caller_legacy",
 
   // Guard violations
   GuardViolation: "assist.draft.guard_violation",
@@ -268,6 +515,35 @@ export const TelemetryEvents = {
   ValidationCacheBypass: "assist.draft.validation_cache_bypass",
 
   AnthropicPromptCacheHint: "assist.llm.anthropic_prompt_cache_hint",
+
+  // V5 routing prompt-cache observability (one event per chatWithTools call
+  // out of route-with-tool-use.ts; covers cached, disabled-by-config, and
+  // cache_control-rejection fallback paths).
+  V5PromptCache: "v5.prompt_cache",
+
+  // V5 routing first-pass coercion (repair-tax fix, 2026-07-22). Emitted once
+  // per coercion applied to a routing tool call BEFORE the strict Zod parse,
+  // so a first-pass-valid shape no longer costs a REPAIR_ONCE second LLM call.
+  // Every coercion carries a `reason` tag (stray_answer_shape |
+  // stray_answer_text | unknown_cited_field | parameter_source_alias) — this
+  // is the DRIFT ALARM: a non-zero rate means the served prompt / descriptive
+  // tool schema / enforcing validator have drifted apart again (the
+  // hand-maintained-mirror defect class). NO user text is ever attached
+  // (R-004 redaction discipline) — only the reason tag and, for the
+  // cited-field filter, a count of dropped entries. See
+  // REPAIR-TAX-ROOT-CAUSE-2026-07-22.md and tool-schema.ts
+  // coerceFirstPassToolCall().
+  V5RoutingFirstPassCoerced: "v5.routing.first_pass_coerced",
+  // Codex F3 — forced-pill dedicated-contract outcome. Emitted once per LLM
+  // attempt on a FORCED analytical pill (`forcedExplanationHandlerId` set) so
+  // the first-pass-valid rate is measurable: `first_pass_execute: true` at
+  // `llm_call: 1` is a forced pill that routed as execute on the first pass
+  // (the latency win); `first_pass_execute: false` is the coach/converse BYPASS
+  // being CAUGHT (`returned_intent` names what the model emitted instead) — the
+  // hole the assert-execute-after-parse closes. No user text ever attached
+  // (R-004): only the forced handler id, the returned intent tag, and the
+  // attempt number. See route-with-tool-use.ts enforceForcedExecute().
+  V5RoutingForcedPillOutcome: "v5.routing.forced_pill_outcome",
   CostCalculationUnknownModel: "assist.cost_calculation.unknown_model",
   // SSE Resume events (v1.8.0)
   SseResumeIssued: "assist.sse.resume_issued",
@@ -300,6 +576,24 @@ export const TelemetryEvents = {
 
   // Prompt Management events (v2.0)
   PromptStoreError: "prompt.store_error",
+  /**
+   * A prompt-store JSONB list column could not be established as a list, so the
+   * store SUBSTITUTED an empty list rather than failing the whole read.
+   *
+   * WHY IT EXISTS. The tolerant decoder that replaced three
+   * `JSON.parse(x || '[]')` sites correctly stopped one poisoned row taking
+   * down every version of a task — but it originally returned `[]` and emitted
+   * NOTHING, which converts a crash into a silent degradation: exactly the
+   * failure mode of the ~2.5h incident it was written to end (`draft_graph`
+   * served the bundled default while `/healthz` reported `prompts_ready: true`).
+   *
+   * FAILURE TO KNOW IS NOT KNOWLEDGE THAT NOTHING EXISTS. The returned `[]` is
+   * indistinguishable from a genuinely empty column, so this event is the ONLY
+   * thing that tells the two apart. It carries `outcome: 'unavailable'` and, by
+   * construction, no survivor/recovery vocabulary — there is no per-item
+   * salvage on this path, and an event that claimed some would be lying.
+   */
+  PromptStoreJsonColumnDegraded: "prompt.store.jsonb_column_degraded",
   PromptLoaderError: "prompt.loader.error",
   PromptLoadedFromStore: "prompt.loader.store",
   PromptLoadedFromDefault: "prompt.loader.default",
@@ -348,6 +642,10 @@ export const TelemetryEvents = {
   PromptApprovalGranted: "prompt.approval.granted",
   PromptApprovalRejected: "prompt.approval.rejected",
 
+  // Prompt Activation Guard events (v2.2)
+  PromptActivationBlocked: "prompt.activation.blocked",
+  PromptStagingActivated: "prompt.staging.activated",
+
   // Graph Validation events (v2.2)
   CeeGraphValidation: "cee.graph.validation",
   CeeGraphGoalsMerged: "cee.graph.goals_merged",
@@ -380,10 +678,2282 @@ export const TelemetryEvents = {
   // Boundary logging events (observability v1)
   BoundaryRequest: "boundary.request",
   BoundaryResponse: "boundary.response",
+  CeeBoundaryBlocked: "cee.boundary.blocked",
+
+  // Config security events (Stream F)
+  CeeConfigRawIoOverridden: "cee.config.raw_io_overridden",
 
   // Performance timing events (observability v2)
   LlmCall: "llm.call",
   DownstreamCall: "downstream.call",
+
+  // Orchestrator events (Track C)
+  OrchestratorTurnStarted: "orchestrator.turn.started",
+  OrchestratorTurnCompleted: "orchestrator.turn.completed",
+  OrchestratorTurnFailed: "orchestrator.turn.failed",
+  OrchestratorIntentResolved: "orchestrator.intent.resolved",
+  OrchestratorToolInvoked: "orchestrator.tool.invoked",
+  OrchestratorToolCompleted: "orchestrator.tool.completed",
+  OrchestratorToolFailed: "orchestrator.tool.failed",
+  OrchestratorPlotRunRequested: "orchestrator.plot.run_requested",
+  OrchestratorPlotRunCompleted: "orchestrator.plot.run_completed",
+  OrchestratorPlotRunFailed: "orchestrator.plot.run_failed",
+  OrchestratorPlotValidateRequested: "orchestrator.plot.validate_requested",
+  OrchestratorPlotValidateCompleted: "orchestrator.plot.validate_completed",
+  OrchestratorIdempotencyHit: "orchestrator.idempotency.hit",
+  OrchestratorIdempotencyCached: "orchestrator.idempotency.cached",
+  OrchestratorNumericFreehandStripped: "orchestrator.commentary.numeric_freehand_stripped",
+  OrchestratorSystemEvent: "orchestrator.system_event",
+  OrchestratorModeDisagreement: "orchestrator.turn.mode_disagreement",
+  OrchestratorToolSuppressed: "orchestrator.turn.tool_suppressed",
+  OrchestratorContractViolation: "orchestrator.turn.contract_violation",
+
+  // V5 boundary validation (Boundary Contract v1.1 §4.4).
+  // Emitted by B1 ingress/egress validators on /orchestrate/v2/turn (slice A0).
+  // Fields per §4.4: boundary, direction, validator, contract_version, pass, error_code?, request_id
+  BoundaryValidation: "boundary.validation",
+
+  // W2E-2 — SIGMA FLOOR at the persisted-load boundary
+  // (loadScenarioSnapshotForRunAnalysis, build-turn-context.ts — round 4;
+  // round 3 placed it in PLoTClient.run, AFTER the GraphV3 parse that rejects
+  // std <= 0, where it was dead code on every live path).
+  // Fires once per floored field when the persisted graph carries a
+  // sigma <= 0 (edge strength.std / node observed_state.std) and CEE floors
+  // the compute-side copy to COMPUTE_SIGMA_FLOOR, BEFORE the GraphV3 parse.
+  // Deliberately NOT at ingress and NEVER touching rawPersistedGraph: ingress
+  // and the hash input preserve graph identity exactly, because strength.std
+  // is in the analysis-affecting hash projection and rewriting it there
+  // desyncs every hash token. Full rationale: src/validators/numeric-bounds.ts
+  // module header.
+  //
+  // This is the meter for how much invalid persisted state exists in the wild:
+  // the UI's own writer floors outbound std at ZERO, so affected scenarios emit
+  // this on EVERY analysis run. Expect a non-zero baseline that decays only as
+  // scenarios are re-saved. A sustained rise means a NEW writer is producing
+  // zero-sigma state — find it. Fields: path, kind, repaired_to, request_id.
+  // Never carries the offending value or any label (PII rule).
+  ComputeSigmaFloor: "cee.compute.sigma_floor",
+
+  // V5 TurnExecutor lifecycle (slice A1, addendum §2.1.9).
+  // Started emits when runTurnExecutor enters. Completed emits in `finally`.
+  // Exactly-one-response invariant: every started MUST have a matching completed
+  // with response_emitted=true. ContaminationNarrate is informational only.
+  TurnExecutorStarted: "turn_executor.started",
+  TurnExecutorCompleted: "turn_executor.completed",
+  // V5 alpha hardening Phase 2.5: primary lifecycle events. Every event
+  // on this list carries the full obs field set (v5_journey_id,
+  // prompt_version, prompt_hash, system_chars, context_pack_chars,
+  // handler_proposed, validator_outcome, response_type). Lower-level
+  // debug/warn logs carry only request_id + v5_journey_id. See
+  // Docs/v5/v5-resilience-contract.md Part E.
+  ContextPackAssembled: "v5.context_pack.assembled",
+  ValidatorOutcome: "v5.validator_outcome",
+  RecoveryResponse: "v5.recovery_response",
+  HandlerInvocation: "v5.handler_invocation",
+  TurnExecutorContaminationNarrate: "turn_executor.contamination_narrate",
+
+  // Context Architecture v2 S0 "measure first" (ROADMAP 1.73; design pack
+  // 03-budgets-and-telemetry §2). Both are LOG-ONLY (no Datadog mapping —
+  // registered in debugOnlyEvents in the freeze test) and telemetry-additive:
+  // no flag, no behaviour change.
+  //   v5.context_budget      — once per LLM call: per-section char accounting
+  //                            + API usage tokens (ground truth) + measured
+  //                            chars_per_token. Emitted at the turn-executor
+  //                            routing seam and the edit/repair/review/draft
+  //                            adapter boundaries.
+  //   v5.context_truncation  — at the cut site the moment ANY content is
+  //                            dropped (truncateGraphJson, capConversationText,
+  //                            window slice, brief slice). A truncation event
+  //                            with disclosed:false is the pre-S1 baseline the
+  //                            disclosure ratchet later flips.
+  V5ContextBudget: "v5.context_budget",
+  V5ContextTruncation: "v5.context_truncation",
+  // Capability layer P0 (ROADMAP 1.183). Fires exactly once when a deterministic
+  // lens SUGGESTION (the "strengthen" coach card from lens-selector.ts) survives
+  // the prose/schema gate and is placed on the response. Payload: lens_id +
+  // rationale_code (both closed enums) + graph_hash_at_generation — NO user
+  // text. Content-free; log-only (no Datadog mapping). Zero events means no
+  // analysis in the window justified a lens (the may-recommend-nothing default).
+  V5LensSuggestionEmitted: "v5.capability.lens_suggestion_emitted",
+  // Capability layer P1 (ROADMAP 1.183). Fires when the STRUCTURED companion
+  // block for the selected lens actually REACHES THE WIRE beside the P0
+  // suggestion. Fired from the compose funnel's PERMITTED branch, never from the
+  // builder: surviving construction is not the same event as reaching the wire,
+  // and a companion built and then dropped on the withheld arm must not be
+  // reported as emitted (the broken-alarm class). Payload: lens_id + block_type +
+  // exercise_kind (all closed enums) + graph_hash_at_generation — NO user text
+  // and no producer prose. Content-free; log-only (no Datadog mapping). It is
+  // strictly rarer than the suggestion event: a companion exists for one lens
+  // today, rides the PERMITTED claim arm only, and fails closed on content-less
+  // producer output — so suggestion-without-companion is the normal case, not a
+  // fault signal.
+  V5LensCompanionEmitted: "v5.capability.lens_companion_emitted",
+  // Capability layer P1 (ROADMAP 1.183). The producer returned MORE
+  // `pre_mortem.warning_signs` than its own prompt contract declares ("up to 3",
+  // decompose-prompts.ts:209) and the composer truncated to the cap. Payload:
+  // lens_id + field name + received/kept counts — NO prose. Content-free;
+  // log-only. Fires at the BUILDER (this is a producer-drift signal about the
+  // input, not a statement about what reached the wire), and a non-zero rate is
+  // a prompt-vs-composer contract drift worth seeing, not noise.
+  V5LensCompanionTruncated: "v5.capability.lens_companion_truncated",
+  // Capability layer, ROADMAP 2.211 — the no-immediate-repeat tie-break moved
+  // the lens slot: the lens that would have won it had already won the
+  // immediately-preceding analysis turn of this scenario, and another lens's
+  // trigger was live. Payload: displaced_lens_id + chosen_lens_id +
+  // rationale_code (all closed enums) + graph_hash_at_generation — NO user text.
+  // Content-free; log-only (no Datadog mapping). This is the amendment's own
+  // observability: a ZERO rate against a non-zero
+  // `lens_suggestion_emitted` means the rule is never firing (either every turn
+  // has a single trigger, or the history input is not reaching the selector) —
+  // which is the broken-alarm question this event exists to make answerable.
+  V5LensNoRepeatDisplaced: "v5.capability.lens_no_repeat_displaced",
+  // Capability layer, ROADMAP 2.692/2.1024 — THE SILENT-TURN ALARM. Fires when
+  // the intervention race produced NO recommendation, i.e. `selectLens` returned
+  // null and the turn ships no coaching card. Recommending nothing is a
+  // first-class outcome of this loop ("the run had nothing honest to say"), and
+  // until this event it was completely unobservable: `buildLensSurface` returned
+  // before `lens_suggestion_emitted` could fire, so a silent turn and a turn
+  // that never ran looked identical from the outside. Payload: outcome (closed),
+  // eligible_count, ineligible_count, ineligible_reasons (a sorted, deduped
+  // array of the CLOSED `InterventionIneligibleReason` tags) +
+  // graph_hash_at_generation — NO user text, NO node/edge labels, NO lens copy.
+  // Content-free; log-only (no Datadog mapping).
+  //
+  // ⚠ SCOPE, so a zero rate is not over-read: this reports the RACE's outcome,
+  // not every route by which a turn can end up card-less. A race that HAD a
+  // winner whose block was then dropped by the prose/schema gate
+  // (`validateProseAndSchemaOrDrop`) is a different question and is still
+  // silent — deliberately not folded in here, because bolting a second meaning
+  // onto one field is how two questions come to share one predicate (CLAUDE.md
+  // trap 21). That residual is rowed, not claimed closed.
+  V5LensRaceOutcome: "v5.capability.lens_race_outcome",
+  // Wave-1 Lane A (PR2 scientific loop, ROADMAP 2.989/3.17) — the fragile-edge
+  // selector's decision. ONE event covers both SELECTED and REFUSED arms (kin:
+  // the may-recommend-nothing default of lens_suggestion_emitted above).
+  // Payload: rationale_code (closed enum), e_value_joined (boolean),
+  // stability_band ('degenerate' | 'usable'), refusal_reason (closed enum |
+  // null) — NO user text, NO edge labels. Content-free; log-only (no Datadog
+  // mapping). Registry minted up front by the wave's step-zero PR; the emit
+  // site lands in Lane A's own PR (select-fragile-edge.ts).
+  V5FragileEdgeSelection: "v5.capability.fragile_edge_selection",
+  // Wave-1 Lane A (PR2) — the fragile-edge OFFER reached the composed
+  // response (phase3-blocks emit seam, PERMITTED branch only — surviving
+  // construction is not reaching the wire, per lens_companion_emitted above).
+  // Payload: action_intent, signal_code (closed enums),
+  // graph_hash_at_generation (16-hex prefix) — the loop witness correlates
+  // acceptance against this hash. Content-free; log-only.
+  V5FragileEdgeOfferEmitted: "v5.capability.fragile_edge_offer_emitted",
+  // Wave-3 σ (ROADMAP 1.203) — the field-level claim-safety cage
+  // (`isClaimUsable`/`composeCagedField`) evaluated whether a surface may claim
+  // about a science-bearing enrichment field. Payload: field (name only),
+  // decision ('allowed' | 'denied'), and on a denial a reason tag (fork-order:
+  // tier3_denied | tier2_not_activated | not_allowlisted | companion_unverified |
+  // not_fresh). Reason-tagged drop observability so the deny rate is visible and
+  // never a silent no-op (broken-alarm class); content-free (no user text, no
+  // field VALUE). Log-only (no Datadog mapping).
+  V5ClaimCageFieldEvaluated: "v5.claim_cage.field_evaluated",
+  // Wave-4 δ2 (ROADMAP 1.202) — "AI points at the graph". Fires once per turn
+  // when the deterministic ui_directive emitter places a focus / open_inspector /
+  // highlight directive on the response. Payload: verb + target_kind (both closed
+  // enums) + fact_type — NO user text, NO node id/label. Content-free; log-only.
+  V5UiDirectiveEmitted: "v5.ui_directive.emitted",
+  // Wave-4 δ2 — the reason-tagged DROP counterpart: fires when a candidate
+  // directive is suppressed fail-closed (noop / unresolved target / non-option /
+  // ambiguous / lens-block dropped by σ / no recommendation), so a suppression is
+  // observable and never a silent no-op (broken-alarm class). Payload: fact_type
+  // + reason tag — NO user text. Log-only.
+  V5UiDirectiveSuppressed: "v5.ui_directive.suppressed",
+  // Context Architecture v2 S6 (ROADMAP 1.73; design pack 02 §Seam 3).
+  // Shadow validation of the PLoT→CEE enrichment passthrough (the
+  // platform's known-open seam): emitted when CEE_ENRICHMENT_VALIDATION
+  // is shadow/enforce and AnalysisEnrichmentSchema.safeParse fails on a
+  // PLoT run response. Log-only; the turn proceeds unchanged (stage 1).
+  V5EnrichmentSchemaMismatch: "v5.enrichment.schema_mismatch",
+  // Context Architecture v2 S4 (ROADMAP 1.73; design pack 01 §2/§4, 03 §2).
+  // Rolling conversation summary. Both LOG-ONLY (debugOnlyEvents; no Datadog
+  // mapping — harness 1.70 v1 is the consumer), content-free (statuses/counts,
+  // never summary text).
+  //   v5.summary.updated — one per commit-seam maintainer pass: status
+  //                        (applied/regressed/rejected_kept_prior/floor/…),
+  //                        generator (regen/incremental/floor), duration_ms,
+  //                        chars, capped_fallback, history_capped (Codex r2
+  //                        fix 4a — the full-history read filled its limit;
+  //                        the stored summary discloses the partiality).
+  //                        `regressed` is the R4 monotonic no-op — an
+  //                        out-of-order/stale write that the DB guard refused
+  //                        (NOT an error). Passes are per-scenario
+  //                        single-flight (fix 4b): commits landing mid-pass
+  //                        coalesce into ONE rerun, so a burst emits one
+  //                        event per EXECUTED pass, not per commit.
+  //   v5.summary.lag     — the staleness-invariant signal (01 §4): emitted when
+  //                        summary_lag_turns exceeds the verbatim-window bound,
+  //                        so a summariser outage is loud + disclosed. Emitted
+  //                        by the injector at assembly time (S4 injection
+  //                        follow-up); registered here with the maintainer.
+  //                        `refused` (Codex r2 blocker 1; tightened 1.73-pre a):
+  //                        STRICTLY "the four-slot block was WITHHELD" — true
+  //                        only for the memory-hole refusal (watermark not
+  //                        provably covered by the window, or the gap exceeded
+  //                        the verbatim slice; a disclosed-absence note
+  //                        injected instead). false = the block WAS injected
+  //                        (disclosed-stale, or a floor placeholder).
+  //                        `generator` (1.73-pre a) carries the stored
+  //                        summary's generator (regen/incremental/floor) so a
+  //                        persistent-floor stream (stuck summariser) is
+  //                        segmentable without overloading `refused`.
+  V5SummaryUpdated: "v5.summary.updated",
+  V5SummaryLag: "v5.summary.lag",
+
+  // V5 latency observability (Fix 4 — per-stage timings).
+  // Always emitted to logs. The matching `_timings` block on the wire
+  // response envelope is gated by TWO conditions (PR #182): the server
+  // permission flag `cee.timingDebugEnabled` (env `V5_TIMING_DEBUG=true`)
+  // AND the per-request header `X-Olumi-Debug: timings`. Normal browser
+  // traffic without the header does not receive `_timings`.
+  V5TurnStageTimings: "v5.turn_executor.stage_timings",
+  V5RunAnalysisTimings: "v5.run_analysis.timings",
+  // Track S 0.13c-1 — run_analysis load-time intercept guard summary.
+  // Redacted: corrected_count + node IDs only, no observed magnitudes.
+  V5RunAnalysisInterceptGuard: "v5.run_analysis.intercept_guard",
+  // COLLAB Track A — run_analysis participation guard summary.
+  // Redacted: excluded/pruned COUNTS + node IDs only. Never a label and never a
+  // value: the excluded node's number is exactly what the user kept out of the
+  // calculation, so it must not leak through telemetry either.
+  V5RunAnalysisParticipationGuard: "v5.run_analysis.participation_guard",
+  // ROADMAP 2.229 fix 4 — deterministic IMPERATIVE RE-RUN pre-route.
+  //
+  // Fires once per turn whose message reads as an instruction to re-run
+  // ("run the analysis again"), BEFORE the guard stack and before routing.
+  // Every `rerun_question` classifier pattern is interrogative, so an
+  // instruction used to match nothing, fall through every guard, and be
+  // classified by the LLM — nondeterministically between `run_analysis` and a
+  // mutation handler. This event is how the pre-route's decision is
+  // observable, including its DECLINES: `fell_through` with a reason is what
+  // distinguishes "the sentence did not read as a re-run" from "it did, but
+  // the graph or the registry could not support one", which are different
+  // operational problems and would otherwise look identical (silence).
+  //
+  // Payload — structural only, no user text, no labels, no graph content:
+  //   - request_id: string
+  //   - scenario_id: string
+  //   - outcome: 'routed' | 'fell_through'
+  //   - reason: 'mutation_signal' | 'no_option_target' | 'handler_unavailable'
+  //     | null
+  V5RunAnalysisImperativePreRoute: "v5.run_analysis.imperative_pre_route",
+  // ⭐ THE TARGET REPAIR on an ADMITTED `run_analysis` election. `entity` is
+  // required on every proposal while run_analysis's target is semantically the
+  // whole scenario, so the routing model invents one — and on the measured
+  // builds it picked the DECISION node about half the time, which resolves to
+  // entity kind 'node' and is rejected by `['option','goal']`. The user asked
+  // for an analysis and was told "I can't make that change to it".
+  //
+  // This event is how the substitution is observable, INCLUDING its declines:
+  // a rising `repaired` rate is a routing-prompt signal, and `declined` with a
+  // reason distinguishes "the graph could not support a target" from silence.
+  // Without it the fix would hide the very behaviour that motivated it — the
+  // same argument the `v5.entity_kind_repaired` log makes one seam down.
+  //
+  // Payload — structural only, no user text, no labels, no graph content:
+  //   - request_id: string
+  //   - scenario_id: string
+  //   - handler_id: 'run_analysis'
+  //   - outcome: 'repaired' | 'declined'
+  //   - proposed_kind: EntityKind (what validation actually rejected)
+  //   - repaired_kind: 'option' | null
+  //   - reason: 'no_option_target' | 'revalidation_failed' | null
+  V5RunAnalysisTargetRepair: "v5.run_analysis.target_repair",
+  // D-ask-1 (ROADMAP 2.11 P0-1) — run_analysis scaffolded DISCLOSED
+  // placeholder interventions for unconfigured options so the analysis
+  // completed instead of 422-blocking. Redacted: option ids + per-option
+  // factor counts only — no labels, no magnitudes.
+  V5RunAnalysisOptionsScaffolded: "v5.run_analysis.options_scaffolded",
+  // T1 — a user-ratified hard constraint was APPLIED and then never evaluated
+  // to decision grade (PLoT CONSTRAINT_OUT_OF_DOMAIN /
+  // CONSTRAINT_TARGET_UNRELIABLE / withheld constraint block). The
+  // leading-option claim is withheld and the unchecked condition is disclosed.
+  // Redacted: constraint ids + producer codes only — no labels, no thresholds,
+  // no units, no user text.
+  V5RunAnalysisConstraintUnevaluated: "v5.run_analysis.constraint_unevaluated",
+  // T1 fail-loud: the producer returned constraint evaluations but NOT ONE of
+  // its ids reconciled with a constraint CEE ratified — an identity/keying
+  // divergence across the untyped enrichment seam. BOTH confident verdicts are
+  // withheld in that state ("your condition was not checked" and "your
+  // condition holds" are equally unsupported by zero id overlap), so the user
+  // loses a recommendation on every occurrence and this event is the only
+  // signal it happened. Deliberately NOT folded into
+  // `constraint_unevaluated` — a seam divergence logged as an engine failure to
+  // evaluate is a false accusation against the producer. Redacted: counts + ids
+  // only — no labels, no thresholds, no units, no user text.
+  V5RunAnalysisConstraintIdentityUnresolved:
+    "v5.run_analysis.constraint_identity_unresolved",
+  // T1 LAYER 3 — a turn that WITHHELD the leading-option claim shipped copy
+  // asserting one anyway, caught at the single V5 egress chokepoint
+  // (`sanitiseOlumiResponseForEgress`). This is the residue meter for the whole
+  // defect class: layers 1 and 2 gate the producers we know about, and this
+  // counts the ones we do not. A non-zero rate names an ungated producer.
+  //
+  // SHIPS OBSERVE-ONLY. The `dropped` boolean separates a safety-ENFORCED drop
+  // from telemetry-only DETECTION — same contract as
+  // `V5DecisionReviewContractViolation` — so the observe-only period and the
+  // enforcing period are distinguishable on the dashboard instead of inferred.
+  //
+  // Privacy contract (R-004): `request_id` / `exit_path` are routing-key
+  // strings; `reason` is the primary matched pattern code from the guard's own
+  // bounded vocabulary; `hit_count` is a finite integer; `dropped` is a
+  // boolean. The matched PROSE and the user's decision content never appear —
+  // field paths travel on the `log.error` payload only.
+  V5LeadingOptionClaimAtEgress: "v5.egress.leading_option_claim_withheld_violated",
+  // A client-visible 200 response could not establish persisted analysis
+  // authority and therefore withheld any leading-option claim. Emitted once at
+  // sendFinalised200, never at a read/selector seam, so the counter measures
+  // delivered fail-closed outcomes rather than retries. Payload: bounded
+  // `exit_path` + closed `outcome` only; no identifiers or decision
+  // content. The mode distinguishes suppressed model prose from preserved
+  // deterministic functional copy.
+  V5ClaimSafetyFailClosedUnavailable: "v5.claim_safety.fail_closed_unavailable",
+
+  // ⭐ A USER-VISIBLE REFUSAL, COUNTED AS A REFUSAL.
+  //
+  // Emitted once per turn at `sendFinalised200`, the SOLE sanctioned 200-OK
+  // exit, when the bytes leaving for the user carry a refusal. Same seam and
+  // same argument as `V5ClaimSafetyFailClosedUnavailable` above: a
+  // derivation-level emit would count refusals that were later recovered and
+  // never shipped, and would not prove the user received one.
+  //
+  // WHY IT EXISTS. Before this event a turn that said *"I couldn't complete
+  // that change, and nothing in your model has changed"* was recorded by every
+  // instrument we own as a SUCCESS. Measured on scenario
+  // 9677de7d-0af8-4bee-b2ac-0e63b45aff8e (2026-09-14): 18 turns, `failed 0`,
+  // `answered 17`, two of them refusals, `status: 200` on both. A refusal was
+  // not a queryable thing, which is why the first search for one returned zero.
+  //
+  // WHY NOT `v5.edit_graph.turn` outcome `rejected`, which already exists: it
+  // answers a different question (CLAUDE.md trap 21). It reports the HANDLER's
+  // verdict, and the same session logged `outcome="rejected" branch="clarify"`
+  // for a turn whose user-visible text was a QUESTION. A clarification is the
+  // product working; counting it as a refusal over-states the harm.
+  //
+  // Payload — correlation ids plus the producers' OWN codes, no new vocabulary:
+  //   request_id: string        (joins to every other line of this request)
+  //   scenario_id: string|null  (joins to the SESSION — the join that did not
+  //                              exist: the one event with a request_id had no
+  //                              scenario_id and vice versa)
+  //   exit_path: V5ExitPath     (closed union)
+  //   error_code: BoundaryErrorCode
+  //   severity: 'warn' | 'error'   ('warn' = recoverable, 'error' = fatal)
+  //   refusal_source: string|null  (producer's `details.source`, e.g. 'edit_graph')
+  //   refusal_code: string|null    (producer's `details.rejection_code`, e.g.
+  //                                 'OPERATION_DID_NOT_LAND'; null means the
+  //                                 producer stated no cause — never guessed)
+  //
+  // ⚠ SCOPE, EXACTLY (CLAUDE.md trap 20). This counts refusals MARKED ON THE
+  // WIRE. `composeRecoverableHandlerResponse`,
+  // `composeRecoverableValidationResponse` and `composeUnsupportedActionResponse`
+  // deliberately ship a clean body (`blocks: []`), so their refusals are
+  // invisible here by construction. Those are ALREADY countable via
+  // `turn_executor.failure_response` — and joinable, because that event's
+  // `session_id` IS the scenario id (this repo writes
+  // `scenario_id: context.session_id` at ~30 sites). ⚠ The differently-named
+  // twin is a live hazard, not a tidy-up: a query joining `scenario_id` across
+  // events silently misses that one. Deliberately NOT renamed here — renaming
+  // a frozen event's field is a dashboard-breaking change, and refusals are
+  // countable without it. Recorded so the next reader does not conclude the
+  // clean-body class is dark.
+  CeeTurnRefused: "cee.turn.refused",
+
+  // G-CEE-1 — the EXPLANATION-ANSWER gate (compose/withheld-explanation-answer.ts).
+  //
+  // Unlike the egress guard above, this one ENFORCES: on a turn whose persisted
+  // constraint verdict withholds the leading-option claim, an explanation
+  // handler's answer that names a leader is REPLACED with deterministic
+  // withheld copy before it reaches the user. Fires once per projected answer.
+  //
+  // This is the meter for the rerun no-op leak the POST-#711/#712 live walk
+  // found (4/4 no-op bodies named the leader in `assistant_text`; 3/4 also
+  // dropped the disclosure). A non-zero `leader_claim_replaced` rate is the
+  // model still trying; a non-zero `disclosure_appended` rate is it dropping
+  // the disclosure. Both are expected to be non-zero — the gate is what makes
+  // them harmless, so silence here would mean the gate is not being reached,
+  // not that the model has reformed.
+  //
+  // Privacy contract (R-004): `reason` is from this module's own bounded
+  // vocabulary; `handler_id` is a registry key; the lengths are finite
+  // integers. The answer PROSE and the user's decision content never appear.
+  V5WithheldExplanationAnswerProjected: "v5.explanation.withheld_answer_projected",
+  // V5WithheldLeaderClaimNeutralisedAtFinalise — THE CHOKEPOINT BACKSTOP.
+  //
+  // Named into `v5.egress.*` deliberately, alongside its two closest relatives:
+  // `v5.egress.forbidden_phrase_detected` (the sibling finaliser guard) and
+  // `v5.egress.leading_option_claim_withheld_violated` (the observe-only Layer-3
+  // ALARM on the SAME subject). Same namespace, opposite posture — the alarm
+  // reports and changes nothing, this one is emitted only when the claim was
+  // actually replaced. Reading the two counters together is how you tell
+  // "enforcement is working" from "enforcement is not reached".
+  //
+  // Counterpart to V5WithheldExplanationAnswerProjected above: that event is
+  // the IN-FLOW explanation gate, which only runs on an explanation-handler
+  // dispatch. This one is the finaliser-level guard that every one of
+  // `runTurnExecutor`'s 39 exits passes through, so it is the only observable
+  // for a leader claim leaking on an exit the in-flow gate cannot see — the
+  // POST-#713 walk's 3/3 non-execute shape. Emitted ONLY on the REPLACE branch
+  // (the text actually asserted a leader on a withheld turn); a permitted turn
+  // and a clean withheld turn emit nothing at all, so a non-zero rate here is
+  // real suppressed leakage, not guard traffic.
+  //
+  // EVERY event from this guard is, BY ITS SCOPE, an exit the in-flow
+  // explanation gate could not have covered — the guard returns early on any
+  // turn that dispatched an execute-intent handler. So that fact needs no
+  // per-event tag; it is a property of the event's existence.
+  //
+  // ⚠ There is deliberately NO `in_flow_gate_eligible` and NO `handler_id`.
+  // Both were tried and both were STRUCTURAL CONSTANTS under this scope, which
+  // is worse than uninformative — a field that cannot vary reads on a dashboard
+  // as a measured population when it is a tautology. An earlier revision shipped
+  // `in_flow_gate_eligible` and adversarial review showed a mutant hardcoding it
+  // to `false` left the whole suite green. Do not re-add either without a test
+  // proving BOTH values occur.
+  //
+  // Privacy contract (R-004): bounded enums and finite integers only.
+  // The matched prose is the user's own decision content and never appears.
+  // Payload: { request_id, scenario_id, constraint_verdict_state,
+  // original_length, projected_length, dispatch_path }.
+  V5WithheldLeaderClaimNeutralisedAtFinalise:
+    "v5.egress.leading_option_claim_neutralised_at_finalise",
+  // V5WithheldLeaderClaimNeutralisedAtWire — THE ROUTE-SEAM GATE (ROADMAP 2.149).
+  //
+  // Third member of the `v5.egress.*` claim-safety family, and the one that
+  // covers the population the other two structurally cannot. Read all three
+  // together:
+  //
+  //   ...leading_option_claim_withheld_violated  the ALARM. Observe-only, and
+  //       since 2.149 it runs DOWNSTREAM of the wire gate, so it measures the
+  //       RESIDUE THAT STILL SHIPS — not everything the producers emitted.
+  //       (An earlier draft of this comment said "what the PRODUCERS emitted",
+  //       which contradicted the re-documentation at the alarm's own call site
+  //       in `route-v2.ts`. Two descriptions of one mechanism is the
+  //       hand-maintained mirror; the call site is the authority and this now
+  //       matches it.) Non-zero is expected: a hit names a surface the wire gate
+  //       does not cover, or a phrasing the wide ALARM reader sees and the
+  //       narrow ENFORCER reader deliberately spares.
+  //   ...leading_option_claim_neutralised_at_finalise  the #755 chokepoint.
+  //       Covers `runTurnExecutor`'s exits only — one of route-v2.ts's 19.
+  //   ...leading_option_claim_neutralised_at_wire  THIS one. Covers the 18
+  //       `sendFinalised200` exits that return BEFORE the executor and
+  //       therefore never reach `finalizeRun` at all.
+  //
+  // Emitted ONLY when bytes actually changed. A permitted turn and a clean
+  // withheld turn emit nothing, so a non-zero rate here is real suppressed
+  // leakage on a route exit, not gate traffic.
+  //
+  // ⚠ READ `mode` BEFORE CELEBRATING A NON-ZERO RATE. Two of the five mean
+  // NOTHING WAS NEUTRALISED, despite the event's name:
+  //
+  //   surgical            the gate working: only the vocabulary-bearing
+  //                       sentence(s) replaced, the rest byte-identical.
+  //   surgical_escalated  the DISTRIBUTED-CLAIM path — the residual still named
+  //                       the option after surgery, so the name-bearing
+  //                       sentences went too. Expected and correct; it is also
+  //                       the mode that costs a receipt when one shares a field
+  //                       with a leader claim.
+  //   whole_field         LAST RESORT — two escalations and the residual still
+  //                       named or asserted. Name-gated, so it can no longer
+  //                       fire on prose that never named an option. A
+  //                       non-trivial rate is a defect in the SPLITTER, not a
+  //                       success.
+  //   roster_unavailable  ⚠ NOTHING WAS EDITED. The exit shipped `graph: null`,
+  //                       so the option roster could not be built and the gate
+  //                       stood down on a body that DID carry leader vocabulary.
+  //                       This is the gate's known hole, reported rather than
+  //                       silent — a rising rate here means an exit stopped
+  //                       threading its graph.
+  //   enforcement_failed  ⚠ NOTHING WAS EDITED. The projector threw; the
+  //                       response shipped unedited (the alarm still reports it).
+  //
+  // The three edit modes and the two stand-down modes must never be summed.
+  //
+  // Privacy contract (R-004): `edited_fields` is a sorted join of a two-member
+  // vocabulary; `mode` is the bounded union above; the lengths are finite
+  // integers. The matched prose is the user's own decision content and never
+  // appears — field names travel, field CONTENT does not.
+  V5WithheldLeaderClaimNeutralisedAtWire:
+    "v5.egress.leading_option_claim_neutralised_at_wire",
+  // Track S 0.13c-4 — persist-site intercept repair summary (non-draft chokepoint).
+  // Redacted: corrected_count + node IDs (+ turn_class/source) only, no magnitudes.
+  V5GraphPersistInterceptRepair: "v5.graph_persist.intercept_repair",
+  CeeUnifiedPipelineStageTimings: "cee.unified_pipeline.stage_timings",
+
+  // V5 pending-action lifecycle. Fired at the appropriate point in the
+  // resume cycle. No raw graph / analysis / target-label values in
+  // payloads; only ids and bounded enums.
+  //
+  //   created     — write succeeded (Wave 1)
+  //   matched     — short-confirm pre-route found a resumable pending action
+  //   consumed    — handler successfully dispatched via the resumer
+  //   skipped     — short-confirm pre-route declined to resume; carries reason
+  //   expired     — pending action TTL exceeded (placeholder; resumer rolls
+  //                 wall+turn TTL into 'all_expired' skip reason today)
+  //   invalidated — preconditions failed (graph hash, target missing, etc.;
+  //                 Wave 3 will start emitting this as set_factor_value /
+  //                 edit_graph_add_risk pending actions land)
+  PendingActionCreated: "v5.pending_action.created",
+  PendingActionMatched: "v5.pending_action.matched",
+  PendingActionConsumed: "v5.pending_action.consumed",
+  PendingActionSkipped: "v5.pending_action.skipped",
+  PendingActionExpired: "v5.pending_action.expired",
+  PendingActionInvalidated: "v5.pending_action.invalidated",
+  PendingActionRecoveryExpired: "v5.pending_action.recovery_expired",
+  PendingActionRecoveryAmbiguous: "v5.pending_action.recovery_ambiguous",
+  PendingActionRerunAnalysisRequired: "v5.pending_action.rerun_analysis_required",
+  PendingActionsReadDegraded: "v5.pending_actions.read_degraded",
+  // V5 P0 proposal-memory continuation (post-analysis coaching → action).
+  // captured: emit-time hook recognised a Sonnet-emitted "add X as a
+  //   factor/risk" proposal in the assistant_text and persisted a
+  //   `proposed_concept` pending action alongside the turn commit.
+  // resumed: next-turn no-op recovery layer matched the pending and
+  //   emitted either a Stage 1 (agreement) or Stage 2 (add-as-factor)
+  //   deterministic clarifier instead of the bland vague-edit fallback.
+  V5ProposalContinuationCaptured: "v5.proposal_continuation.captured",
+  V5ProposalContinuationResumed: "v5.proposal_continuation.resumed",
+  V5ProposalContinuationInvalidated: "v5.proposal_continuation.invalidated",
+  // Preflight skipped the LLM call because the requested edit would
+  // exceed structural limits. Reason names match the post-validator
+  // codes so dashboards can correlate (edge_limit ↔
+  // EDGE_LIMIT_EXCEEDED, node_limit ↔ NODE_LIMIT_EXCEEDED).
+  EditGraphPreflightSkippedLlm: "v5.edit_graph.preflight_skipped_llm",
+
+  // V5 state-trust freshness derivation. Emitted once per projection
+  // build (every turn). Single event is sufficient to reconstruct the
+  // freshness state for any turn. Fields:
+  //   freshness: 'fresh' | 'stale' | 'unknown' | 'none'
+  //   reason: FreshnessReason (graph_hash_match / graph_hash_diverged /
+  //           legacy_fact_missing_hash / current_graph_hash_unavailable /
+  //           no_successful_run_analysis_fact / invariant_failed)
+  //   selected_fact_index: number | null
+  //   graph_hash_at_run: string | null
+  //   current_graph_hash: string | null
+  //   computed_at: ISO string | null
+  //   prior_fact_count: number
+  //   analysis_state_source: 'request' | 'fallback' | 'absent'
+  AnalysisFreshnessDerived: "v5.analysis_freshness.derived",
+  /** Hard invariant violation: hashes were both present but freshness
+   *  derived as 'unknown'. Fall back to 'unknown' (never 'stale'),
+   *  emit so ops can investigate. */
+  AnalysisFreshnessInvariantFailed: "v5.analysis_freshness.invariant_failed",
+  /** Soft signal: current graph hash was null (graph absent on this
+   *  turn) so the comparison was impossible. */
+  AnalysisFreshnessGraphHashMissing: "v5.analysis_freshness.graph_hash_missing",
+  /** Selection signal: which fact won and why. Separate from .derived so
+   *  operators can grep "fact_selected" without parsing the bigger event.
+   *  Fires only when a fact was actually selected (selected_fact_index
+   *  non-null). */
+  AnalysisFreshnessFactSelected: "v5.analysis_freshness.fact_selected",
+  /** Telemetry-only marker for dispatcher paths (currently draft_graph)
+   *  that synthesise the freshness verdict without reading the prior
+   *  fact chain. The wire freshness still reflects the canonical state
+   *  (none / unknown); this event records the assumption so operators
+   *  can investigate replay scenarios where a "first-turn" trigger
+   *  shape lands on a session that already has a prior fact. */
+  AnalysisFreshnessFirstTurnAssumed: "v5.analysis_freshness.first_turn_assumed",
+  /** Option-identity guard (CEE_OPTION_IDENTITY_FRESHNESS_GUARD) fired: the
+   *  analysed option identities on the selected fact diverged from the current
+   *  graph's option IDs, so the verdict was forced to 'stale'. Carries the
+   *  standard correlation + freshness fields (request_id, scenario_id,
+   *  dispatch_path, selected_fact_index, graph_hash_at_run, current_graph_hash)
+   *  — never option IDs/labels or user content. Emitted IN ADDITION to the
+   *  graph_hash_missing event on recovery paths (that signal is keyed on the
+   *  hash fields, not the reason, so it is not lost when the verdict is
+   *  overridden to 'analysed_options_diverged'). The richer per-option detail
+   *  (counts, sub-reason) lives on the gated context-summary diagnostic. */
+  AnalysisFreshnessOptionsDiverged: "v5.analysis_freshness.options_diverged",
+
+  // V5 Coaching State Spine — Stage 1. Emitted once per turn when the
+  // internal DecisionContext projection is derived from canonical state.
+  // Privacy contract: carries the STANDARD correlation IDs (request_id,
+  // scenario_id — same as every other V5 telemetry event, e.g. .derived /
+  // SessionReadDegraded) plus counts / flags / provenance ONLY. It NEVER
+  // carries raw decision content — no monetary values, entity labels, timeline
+  // strings, or brief text. Fields:
+  //   request_id, scenario_id: string  (correlation only; not decision content)
+  //   status: 'not_populated' | 'partial' | 'populated'
+  //   monetary_count: number
+  //   has_timeline: boolean
+  //   entity_count: number
+  //   has_goal_metric: boolean
+  //   has_goal_target: boolean
+  //   derived_from_graph_hash: string | null
+  DecisionContextDerived: "v5.decision_context.derived",
+
+  // V5 Coaching State Spine — Stage 2A. Emitted once per turn when the internal
+  // current-turn CoachingState container is derived from canonical state. Same
+  // privacy contract as DecisionContextDerived / context_readiness: STANDARD
+  // correlation IDs plus counts / flags / closed-enum codes / hashes ONLY — never
+  // raw decision content (no labels, values, node/edge/option/factor/fact ids).
+  // Fields:
+  //   request_id, scenario_id: string  (correlation only)
+  //   status: 'empty' | 'active' | 'degraded'
+  //   signal_count, active_count, stale_count, unavailable_count: number
+  //   kinds_present: string[]    (sorted distinct CoachingStateSignalKind — closed enum)
+  //   reason_codes: string[]     (sorted distinct CoachingStateReasonCode — closed enum)
+  //   graph_hash, analysis_graph_hash: string | null  (SHA-prefix provenance)
+  //   freshness: 'fresh' | 'stale' | 'unknown' | 'none'  (for cross-ref with analysis_freshness.derived)
+  V5CoachingStateDerived: "v5.coaching_state.derived",
+
+  // V5 Coaching Context Pack v1 (CEE_COACHING_CONTEXT_PROMPT_ENABLED). Emitted
+  // when the deterministic coaching-output post-check fires on an LLM-authored
+  // coaching turn and the response is degraded to safe. Privacy: correlation
+  // IDs + the closed-enum `violation` + the pack's closed-enum / boolean state
+  // (freshness / rerun_required / usable_for_chips / blocked) ONLY — never the
+  // model prose or any decision content.
+  V5CoachingOutputPostcheck: "v5.coaching.output_postcheck",
+
+  // CEE_ANSWER_TEXT_REQUIRED (belt-and-braces hardening, default OFF).
+  // Emitted when the compose-layer guard (layer B) catches a coach/converse
+  // turn where BOTH `answer_text` and `orientationText` landed empty or
+  // whitespace-only (even after the schema-pressure REPAIR_ONCE retry —
+  // layer A) and degrades to the bounded-recovery response instead of
+  // shipping an empty assistant_text. Privacy: correlation IDs + the
+  // closed-enum `intent_class` + LENGTHS only — never the model's prose.
+  // Fields:
+  //   request_id, scenario_id: string  (correlation only)
+  //   intent_class: 'coach' | 'converse'
+  //   answer_text_length: number  (0 when absent)
+  //   orientation_length: number
+  V5CoachingEmptyAnswerRecovered: "v5.coaching.empty_answer_recovered",
+
+  // ROADMAP 1.38 — the measurement instrument for the answer_text channel
+  // itself. Emitted at the compose pick site for EVERY coach/converse
+  // (tool_call) turn — NOT flag-gated behind CEE_ANSWER_TEXT_REQUIRED,
+  // because the whole point is to quantify the prompt-only world as it
+  // exists today (v42.2g), i.e. how often `answer_text` ships vs the
+  // `orientationText` fallback, BEFORE any of the belt-and-braces hardening
+  // above ever engages. One event per pick, right after the ternary decides
+  // which channel wins. Privacy: correlation IDs + the closed-enum
+  // `intent_class` + closed-enum `source` + LENGTHS only — never the
+  // model's prose. Fields:
+  //   request_id, scenario_id: string  (correlation only)
+  //   intent_class: 'coach' | 'converse'
+  //   source: 'answer_text' | 'orientation_fallback'
+  //   answer_text_length: number  (0 when absent)
+  //   orientation_length: number
+  V5CoachingAnswerSource: "v5.coaching.answer_source",
+
+  // ROADMAP 1.132 (F2) — answer-shape enforcement (UNCONDITIONAL since the F1
+  // flag deletion). Emitted on coach/converse turns when the validated
+  // `answer_shape` is captured for the `_answer_shape` wire sidecar
+  // (turn-executor compose branches). Lengths/counts ONLY — never the shape's
+  // content (PII discipline).
+  //   intent_class: 'coach' | 'converse'
+  //   headline_length: number
+  //   bullet_count: number   (≤3 by schema)
+  //   detail_length: number  (0 on an answer-only turn — `detail` is optional)
+  //   answer_shape_kind: 'answer_only' | 'coached'
+  //     DERIVED from the shape's own content by `classifyAnswerShape`, never
+  //     model-authored, so it cannot disagree with the lengths beside it.
+  //     This is how we can tell on staging whether concise answers are
+  //     actually being emitted, and — the direction that matters just as
+  //     much — whether coaching is still arriving when it should.
+  V5AnswerShapeEmitted: "v5.answer_shape.emitted",
+
+  // ROADMAP 1.132 (F2) hardening — the captured answer_shape no longer
+  // describes the FINAL assistant_text: a post-capture rewriter fired (STEP
+  // 6.6 structural-claim honesty swap, goal-receipt swap, empty-answer
+  // backstop, the finaliser egress guards, a commit-failure response
+  // replacement, or the route-level egress entity-id scrub). The sidecar is
+  // DROPPED rather than shipped stale (fail closed) — a shape describing
+  // text the user never sees is guarantee-theatre. Lengths + seam only —
+  // never the text content (PII discipline).
+  //   dispatch_path: 'turn_executor_finalise' | 'route_egress'
+  //   final_text_length: number
+  //   derived_text_length: number
+  V5AnswerShapeDroppedStale: "v5.answer_shape.dropped_stale",
+
+  // THE COLLAPSE FLOOR (18 Sep 2026). The egress reached a shapeable answer and
+  // DECLINED to attach the `_answer_shape` wire directive, because the answer is
+  // short enough that the deployed UI renders it whole of its own accord
+  // (DecisionGuideAI `CLAMP_CHAR_THRESHOLD`). See
+  // ANSWER_SHAPE_COLLAPSE_FLOOR_CHARS in `orchestrator-v5/routing/answer-shape.ts`.
+  //
+  // ⭐ WHY THIS EVENT EXISTS RATHER THAN SILENCE. Four prior F1 fixes each
+  // shipped believing the egress synthesiser ran on a dispatch path where it
+  // never did, and each passed its own tests. The guard against that was
+  // `v5.answer_shape.emitted` — which is now absent on every SHORT answer, for
+  // a completely different reason. An absent event that means two different
+  // things is how the next silent miss goes unnoticed, so the decline is
+  // announced rather than inferred: the two outcomes of a REACHED egress are
+  // `emitted` and `declined_below_floor`, and NEITHER means the path was never
+  // reached.
+  //
+  // Lengths + seam only, never content (PII discipline).
+  //   dispatch_path: 'route_egress_model_shape' | 'route_egress_synthesised'
+  //   final_text_length: number   (the text the user receives, in full)
+  //   floor_chars: number         (the threshold in force, so a moved floor is
+  //                                visible in the telemetry without a deploy diff)
+  V5AnswerShapeDeclinedBelowFloor: "v5.answer_shape.declined_below_floor",
+
+  // V5 Coaching State Spine — Stage 2B-1b. Emitted once per turn AFTER the turn's
+  // state is successfully persisted (post-append_turn_atomic). Same privacy
+  // contract as V5CoachingStateDerived: correlation IDs + counts / closed-enum
+  // status / SHA-prefix hashes / version / timing / turn_class ONLY — never raw
+  // decision content. `coaching_state_present` distinguishes turns that derived a
+  // snapshot (turn-executor / chip-click) from those that did not (system events,
+  // route-v2 draft/edit) so missed write-site wiring is visible. Fields:
+  //   scenario_id, turn_id, turn_row_id: string  (correlation only)
+  //   turn_class: 'direct_answer' | 'clarify' | 'handler' | 'unhandled'  (closed enum)
+  //   coaching_state_present: boolean
+  //   status: 'empty' | 'active' | 'degraded' | null
+  //   signal_count, active_count, stale_count, unavailable_count: number
+  //   graph_hash, analysis_graph_hash, version: string | null
+  //   snapshot_timing: 'pre_dispatch' | null
+  V5CoachingStatePersisted: "v5.coaching_state.persisted",
+
+  // A3 graph CAS observe-mode. Emitted once per graph-bearing append() when
+  // CEE_V5_GRAPH_CAS_MODE != 'off', AFTER the pre-RPC evaluation and BEFORE
+  // the append_turn_atomic_v2 call. App-side stale-write OBSERVATION only —
+  // NOT atomic CAS (a SELECT-then-write TOCTOU window remains; see
+  // Docs/v5/proposals/append-turn-atomic-v3-graph-cas.md). Privacy contract:
+  // correlation IDs + closed-enum category/reason + hash PREFIXES + timing
+  // ONLY — never raw graph content, labels, values or prose. Fields:
+  //   scenario_id, turn_id: string           (correlation only)
+  //   mode: 'observe' | 'enforce'            (the active mode)
+  //   category: GraphCasConflictCategory     (closed enum — graph-cas-conflict.ts)
+  //   reason: GraphCasConflictReason         (closed enum)
+  //   expected_identity_hash, current_identity_hash, incoming_identity_hash:
+  //     string | null                        (16-hex prefixes of the 64-hex identity hashes)
+  //   expected_analysis_hash, current_analysis_hash: string | null  (already 16-hex)
+  //   select_ms: number | null               (pre-write scenarios SELECT latency)
+  //   select_failed: boolean
+  V5GraphCasEvaluated: "v5.graph_cas.evaluated",
+
+  // A3 graph CAS — enforce mode ONLY (never observe; enforce is auto-downgraded
+  // to observe in prod). Emitted when a write categorised as
+  // analysis_affecting_conflict is blocked pre-RPC via GraphStaleWriteError
+  // (which extends StateCommitFailedError, so the existing typed failure
+  // envelope handles it — no wire-shape change). Same privacy contract and
+  // field set as V5GraphCasEvaluated.
+  V5GraphCasWriteBlocked: "v5.graph_cas.write_blocked",
+
+  // V5 graph CAS — append_turn_atomic_v3 IN-TRANSACTION conflict
+  // (CEE_V5_GRAPH_CAS_RPC=enforce). Emitted when the v3 RPC rejects a
+  // graph write with SQLSTATE 'OLGC1' because the committed
+  // scenarios.graph_identity_hash diverged from the caller's expected
+  // server-read base — the ATOMIC, race-free counterpart to the
+  // observe-hook's V5GraphCasWriteBlocked (which is app-side, SELECT-then-
+  // write). The app surfaces it as GraphStaleWriteError (409-class
+  // refresh-reconfirm) and the whole turn rolls back — nothing clobbered.
+  // Content-free: scenario/turn ids, 16-hex-prefixed expected/incoming
+  // identity hashes, the closed-enum conflict_category, rpc_code only —
+  // never graph content or labels.
+  V5GraphCasRpcConflict: "v5.graph_cas.rpc_conflict",
+
+  // V5 TURN FENCE (Codex P0, 2026-07-31) — one event per GRAPH-BEARING commit,
+  // emitted immediately before the append RPC. Non-graph commits emit nothing:
+  // they are never fenced. `verdict` is the closed
+  // TurnFenceVerdict ∪ {'unfenced'} (turn-fence.ts), so a new outcome cannot
+  // appear un-named. Content-free: scenario/turn ids, turn_class, the verdict,
+  // the two generation integers and a closed reason string — never graph
+  // content or labels.
+  V5TurnFenceEvaluated: "v5.turn_fence.evaluated",
+
+  // V5 TURN FENCE — the refusal. Emitted IN ADDITION to the evaluated event
+  // whenever a graph write is actually refused (verdict stopped / superseded /
+  // unclaimed / unavailable), so the alarm is countable on its own without
+  // filtering the every-commit event. Same payload and privacy contract.
+  V5TurnFenceGraphWriteRefused: "v5.turn_fence.graph_write_refused",
+
+  // V5 TURN FENCE — ROADMAP 2.709 first-write exemption. A graph write whose
+  // fence verdict was `superseded` PROCEEDED because the scenario held NO
+  // committed graph at commit time (a first draft must not be destroyed by a
+  // non-graph-writing turn's claim — the fresh-journey P0). Payload mirrors
+  // the evaluated event plus `channel` (pre_rpc — 2.736 removed the
+  // atomic_recovery producer along with the unfenced recovery it named); the
+  // in-transaction SQL exemption (migration 20260806120000) emits nothing —
+  // it simply never raises OLTF2 for that case.
+  V5TurnFenceFirstWriteExemption: "v5.turn_fence.first_write_exemption",
+
+  // V5 TURN FENCE — ROADMAP 2.709 invariant 6: a refused/failed graph commit
+  // left its trace on the turn's fence row (graph_write_failed_at), so the
+  // SAME scenario's next turn can surface the loss to a user whose client is
+  // gone. Content-free ids + the closed reason string.
+  //
+  // 2.735 adds `disclosure`: `draft_loss` (a model the user had, or a commit
+  // that was actually attempted — the next turn tells them) vs
+  // `turn_dead_only` (the draft failed before there was a graph — the turn is
+  // marked dead so continuation detection stops counting it, and NOTHING is
+  // disclosed, because nothing was lost). Splitting these is the whole of the
+  // 2.735 fix: the old single state made the notice claim a model had been
+  // displayed to users who never saw one.
+  V5TurnFenceGraphWriteFailureMarked: "v5.turn_fence.graph_write_failure_marked",
+
+  // V5 TURN FENCE — ROADMAP 2.735: a later graph commit RESOLVED the
+  // scenario's outstanding draft loss. Emitted once per resolving commit;
+  // scenario id only. Without an explicit resolution the old mark was merely
+  // masked by graph presence, so a later graph deletion re-fired the notice.
+  V5TurnFenceDraftLossResolved: "v5.turn_fence.draft_loss_resolved",
+
+  // V5 — ROADMAP 2.709 invariant 6: a graph-less 200 on a scenario whose
+  // draft loss stands carried the DRAFT_LOSS_NOTICE to the user. Lives in
+  // the turn_fence namespace with the rest of the 2.709 family.
+  V5DraftLossNoticeSurfaced: "v5.turn_fence.draft_loss_notice_surfaced",
+
+  // V5 TURN FENCE — an explicit user Stop arrived at the server
+  // (POST /proxy/v5/turn/stop). `already_committed` records whether the turn
+  // had already been persisted when the Stop landed, which is the fact the UI's
+  // terminal notice is conditioned on. Ids + booleans only.
+  V5TurnStopRequested: "v5.turn_fence.stop_requested",
+
+  // Graph Management referee (CEE_GRAPH_MANAGEMENT_MODE != 'off'). One event
+  // per refereed CandidateMutationEnvelope, name = the verdict (T4.0 §5
+  // no-silent-outcome contract: every held/stale/rejected/clarify verdict
+  // has exactly one event). REDACTED payload (graph-management/telemetry.ts
+  // mutationTelemetryEvent + the seam's mode/dispatch fields): closed-enum
+  // kind/verdict/mutation_class/blocker_code, base_hash_match boolean,
+  // provenance source, scenario/turn ids, latency — NEVER payload values,
+  // labels, or candidate graph internals. `mode` ('shadow' | 'live') rides
+  // alongside so dashboards can split observation from routing.
+  V5CandidateMutationWouldApply: "v5.candidate_mutation.would_apply",
+  V5CandidateMutationHeld: "v5.candidate_mutation.held",
+  V5CandidateMutationStale: "v5.candidate_mutation.stale",
+  V5CandidateMutationRejected: "v5.candidate_mutation.rejected",
+  V5CandidateMutationClarifyRequired: "v5.candidate_mutation.clarify_required",
+
+  // Model Management (CEE_MODEL_VERSIONS_ENABLED) — commit-seam version hook.
+  // Emitted AFTER a durable graph-bearing commit when the fire-and-forget
+  // saveVersion call resolves. Content-free: scenario/turn ids, outcome
+  // status ('ok' | 'deduped' | 'disabled' | 'conflict' | 'error'),
+  // version_number, 16-hex-prefixed graph_identity_hash, error code — never
+  // graph content or labels. Non-blocking contract: emit/save failures log
+  // and NEVER affect the turn result.
+  V5ModelVersionCreated: "v5.model_versions.version_created",
+
+  // Wave-1 Lane C (PR4 collaboration) — a collab write was REFUSED at the
+  // route/service boundary (invalid participant token, closed round,
+  // reveal-while-open, guest scenario, parse failure). A refusal leaves NO
+  // DB row, so this event is its only trace — the loud-refusal alarm for the
+  // N-suite's blindness/token-boundary invariants. Payload: code (closed
+  // enum), round_id — NEVER participant identity beyond server ids, NEVER
+  // expression content. Content-free; log-only (no Datadog mapping).
+  // Registry minted up front by the wave's step-zero PR; emit sites land in
+  // Lane C's own PRs. NOTE: round/append lifecycle is deliberately NOT
+  // minted here — the collab DB tables (round_events, elicitation_events)
+  // are the durable evidence substrate, and a log twin failed the wave's
+  // materiality test.
+  V5CollabWriteRefused: "v5.collab.write_refused",
+
+  // Decision Records — commit-seam capture hook (ROADMAP 3.1, CEE half;
+  // UNCONDITIONAL since #539 deleted CEE_DECISION_RECORD_CAPTURE, Paul's
+  // 19 Jul no-dark-launch ruling; migration
+  // 20260710113000_v5_decision_records.sql EXECUTED on staging
+  // 2026-07-10/11 — see its header). Emitted AFTER a
+  // durable commit carrying a successful (non-noop) run_analysis fact when
+  // the fire-and-forget create_decision_record call resolves, or when the
+  // builder skips before the RPC. Content-free: scenario/turn/row ids,
+  // outcome status ('ok' | 'deduped' | 'skipped' | 'guest_refused' |
+  // 'error'), deterministic record_id (UUID), closed-enum skip_reason,
+  // error name — never option labels, prediction text, or analysis values.
+  // The known-guest PRE-CHECK skip is deliberately log-only (no event; the
+  // MM WARN-spam lesson) — 'guest_refused' marks only the RPC's
+  // authoritative DR001 on the fail-open path. Non-blocking contract:
+  // capture/emit failures log and NEVER affect the turn result.
+  // Also carries the CLAIM VERDICT of the fact the record was projected from
+  // — `may_name_leading_option` (boolean), `constraint_verdict_state` (closed
+  // enum | null), `claim_verdict_provenance` (closed enum) — read via the
+  // shared per-fact reader, never re-derived. A record asserts a leading
+  // option; the verdict says whether the turn was entitled to. Present on
+  // EVERY status so a withhold RATE is derivable rather than only the
+  // happy-path count. Still content-free: booleans + closed enums.
+  V5DecisionRecordCaptured: "v5.decision_records.record_captured",
+
+  // ROADMAP 2.1229 — brief + analysis-provenance forwarded to `scenarios`
+  // from the commit seam, so the share path has something to share. Emitted
+  // once per successful (non-noop) run_analysis commit, from the
+  // fire-and-forget hook. `status` is a closed enum:
+  //   ok          — a scenario row was updated;
+  //   not_stored  — the RPC returned false: it wrote NOTHING (no matching
+  //                 scenario, or a null reached it). Distinct from `ok`
+  //                 deliberately — a silent no-write must never read as a
+  //                 success, which is the defect class this lane removes;
+  //   skipped     — the fact carried an incomplete envelope (`skip_reason`
+  //                 names the first missing member: no_brief |
+  //                 no_graph_hash | no_seed | no_response_hash). All-or-
+  //                 nothing is a CONSUMER requirement: `create_shared_brief`
+  //                 dereferences three provenance keys into three NOT NULL
+  //                 columns after a single null check, so a partial envelope
+  //                 becomes a 23502 at share time;
+  //   error       — store construction or the RPC threw.
+  // Content-free: correlation ids + closed enums ONLY. Never the brief text,
+  // the seed or either hash. Non-blocking contract: capture/emit failures log
+  // and NEVER affect the turn result.
+  V5BriefProvenanceStored: "v5.brief_provenance.stored",
+
+  // V5 Coaching State Spine — Stage 2B-2. Emitted once per turn after the internal coaching
+  // LIFECYCLE is derived (prior pre-dispatch snapshot vs current pre-dispatch coaching_state
+  // + per-source evaluability). Same privacy contract as the other coaching events: STANDARD
+  // correlation IDs + counts / closed-enum codes / hash-AVAILABILITY flags / version / timing
+  // ONLY — never raw decision content (no labels, values, node/edge/option/factor ids, brief
+  // text, free text). Internal-only; the emit is guarded so a telemetry fault never fails the
+  // turn. Fields:
+  //   request_id, scenario_id: string  (correlation only)
+  //   status: 'empty' | 'active' | 'degraded'
+  //   prior_snapshot_available, version_mismatch: boolean
+  //   active_count, resolved_count, stale_count, unavailable_count: number
+  //   kinds_present: string[]                 (sorted distinct CoachingStateSignalKind — closed enum)
+  //   reason_codes: string[]                  (sorted distinct CoachingStateReasonCode — closed enum)
+  //   lifecycle_statuses_present: string[]    (sorted distinct 'active'|'resolved'|'stale'|'unavailable')
+  //   prior_graph_hash_present, current_graph_hash_present: boolean  (availability flags — NOT values)
+  //   snapshot_timing: 'pre_dispatch'
+  //   version: 'v1'
+  V5CoachingStateLifecycleDerived: "v5.coaching_state.lifecycle_derived",
+
+  // V5 TurnExecutor per-code failure composition.
+  // Emitted once per failure path that runs a per-code composer. Fields:
+  //   request_id, session_id, stage,
+  //   failure_origin: 'validator' | 'handler',       // which layer produced the error
+  //   error_code: ValidationErrorCode | HandlerInvocationFailedCause,
+  //   template_used: string,                         // the composer branch that ran
+  //   chip_attached: boolean,                        // did the response ship a chip?
+  //   chip_type: 'action' | 'text_prompt' | 'entity_suggestion' | null,
+  //   chip_count: number,
+  //   retryable?: boolean                            // handler layer only
+  // Regression guard: `template_used === 'fallback'` should never appear for
+  // reachable codes in integration tests — used to detect new codes missing
+  // templates. `failure_origin` is strictly 'validator' or 'handler'; the
+  // fallback path signals via template_used, NOT via failure_origin.
+  TurnExecutorFailureResponse: "turn_executor.failure_response",
+
+  // V5 Phase 1.5: graph lookup adapter outcome (Imp-2, review P1-3).
+  // Emitted exactly once per turn. Fields:
+  //   outcome: 'no_graph' | 'ok' | 'all_dropped' | 'test_override'
+  //   total_nodes, mapped_nodes, dropped_by_unknown_kind, dropped_by_missing_id
+  // 'all_dropped' is a hard payload-drift signal; ops should alert on it.
+  // 'test_override' indicates the adapter was bypassed (tests only) — stats
+  // are zero in that case.
+  TurnExecutorGraphLookup: "turn_executor.graph_lookup",
+
+  // V5 session persistence (slice B).
+  // SessionReadDegraded emits when buildTurnContext's readRecent fails: the
+  // turn still runs with empty prior-turn history. Emitted with
+  // severity='warning' and a stable event name so ops alerting can match it;
+  // critical for detecting silent session-loss windows. Event payload:
+  // { scenario_id, error_code, severity: 'warning' }.
+  SessionReadDegraded: "session.read_degraded",
+
+  // V5 Conversation Context Reliability: continuity-gap detector. Emits when a
+  // turn that PROVABLY continues a prior conversation (source 'chip'/'chip_click'
+  // — a chip can only exist if a prior assistant turn rendered it) arrives with
+  // ZERO prior turns under its scenario_id. The strongest server-observable
+  // signal of UI scenario-id fragmentation (the conversation was split across
+  // scenario_ids), which CEE cannot repair but must not silently accept. CEE
+  // takes ingress.scenario_id verbatim; the payload carries no conversation
+  // history, so a fragmented scenario looks (correctly) empty here. Content-free
+  // payload: { scenario_id, source, stage, prior_turn_count: 0 } — never message
+  // text. See the V5 Conversation Context Reliability lane + the UI scenario-id
+  // follow-up.
+  V5SessionContinuityGap: "v5.session.continuity_gap",
+
+  // Selection-aware answering (hop 3). Emitted once per turn that CARRIED a
+  // canvas selection, after the ids are resolved against the persisted graph.
+  //
+  // This event exists so the seam can be WITNESSED ON STAGING BEFORE ITS
+  // CONSUMER EXISTS: hop 4 (the grounded answer) lands separately, and without
+  // a signal here the intervening deploys would carry a capability nobody could
+  // tell was working. A dark field with no observability is worse than a dark
+  // field.
+  //
+  // Same privacy contract as DecisionContextDerived: STANDARD correlation ids
+  // plus COUNTS and CLOSED-ENUM codes ONLY — never node ids, labels or values.
+  // Payload: { request_id, scenario_id, requested_count, resolved_count,
+  // unresolved_count, graph_read: 'ok_present'|'ok_absent'|'degraded' }.
+  //
+  // `graph_read` is the one that matters operationally: `unresolved_count > 0`
+  // means something different under `ok_present` (the user pointed at a node the
+  // server model does not have) than under `degraded` (CEE could not read the
+  // model at all), and an alert that cannot tell them apart will chase the wrong
+  // fault.
+  V5TurnSelectionResolved: "v5.selection.resolved",
+
+  // V5 Group 1 Task B: decision_review auto-fire after successful
+  // run_analysis. Invoked emits once the enricher decides to fire. Skipped
+  // emits with a reason when the prerequisite data is absent. Failed emits
+  // when the call times out / aborts / shape-check fails; in all failure
+  // modes the turn still succeeds with thin content (enrichment absent).
+  V5DecisionReviewInvoked: "v5.decision_review.invoked",
+  V5DecisionReviewSkipped: "v5.decision_review.skipped",
+  V5DecisionReviewFailed: "v5.decision_review.failed",
+
+  // R2 (2026-08-16) — post-draft auto-run of a provisional analysis
+  // (auto-run-after-draft.ts). ONE event, discriminated by `outcome`:
+  // 'skipped' (+ reason: not_admissible | already_analysed), 'dispatched'
+  // (+ dispatch_outcome, commit_performed, run_turn_id), or 'failed'.
+  V5AutoRunAfterDraft: "v5.run_analysis.auto_run_after_draft",
+
+  // Phase 3A content-thinness diagnostic (F1, 2026-05-18). Fires once the
+  // decision_review LLM call returned a non-null parsed output AND the
+  // enrichment has been successfully sanitised and attached to the
+  // handler fact. Mutually exclusive with V5DecisionReviewFailed for any
+  // given request_id — a throw between shape extraction and attach lands
+  // in the catch block and emits `failed`, not `completed`.
+  //
+  // Carries counts, lengths, and presence-booleans only — never any
+  // prose, graph labels, raw IDs, brief text, or decision_review content.
+  // Pairs an `input_*` snapshot (read from the raw PLoT V2 envelope) with
+  // an `output_*` snapshot (read from the LLM output verbatim).
+  //
+  // Purpose: discriminate between (a) sparse PLoT envelope → empty Phase 3
+  // blocks (RC-1/RC-2 from the content-thinness investigation) vs (b)
+  // dense PLoT envelope → over-filtered LLM output (RC-3). Without this
+  // event, both look identical at the wire — Phase 3 blocks just don't
+  // appear, and operators can't tell which side owns the fix.
+  //
+  // `duration_ms` measures the full invoked → emit window (LLM round-trip
+  // + shape extraction + sanitise + attach), so dashboards see the true
+  // success-path latency, not just the LLM call.
+  //
+  // Privacy contract: every NON-ROUTING field MUST be a finite number or
+  // boolean. `request_id` and `scenario_id` are strings (routing keys,
+  // also present on `invoked` / `skipped` / `failed`). No other strings,
+  // no arrays, no nested objects. Adding a non-routing string field to
+  // this event is a regression and the contract test should fail.
+  V5DecisionReviewCompleted: "v5.decision_review.completed",
+
+  // ROADMAP 1.77 (B1 neuro-symbolic experiment). Fires once per auto-fired
+  // decision_review when the decomposed path (CEE_DECISION_REVIEW_DECOMPOSE=
+  // true) ran, recording the outcome of the 4-parallel-haiku fan-out +
+  // deterministic composition + composed-consistency check. Mutually
+  // exclusive per request_id with the shape of `completed`/`failed` only in
+  // that this event describes the DECOMPOSITION decision, not the attach:
+  // it says whether the composed review was shipped (`composed`) or the
+  // composer fell back to the gpt-4.1 monolith (`fell_back`), and — on
+  // fallback — the machine reason. The enricher still emits the usual
+  // `completed`/`failed` for the attach lifecycle downstream of this.
+  //
+  // Privacy contract: `request_id` / `scenario_id` are routing-key strings;
+  // `outcome` and `fallback_reason` are bounded enum strings (no prose, no
+  // labels, no IDs, no brief text). Every other field is a finite number or
+  // boolean (fragment success counts, violation count, wall-clock ms).
+  V5DecisionReviewDecomposed: "v5.decision_review.decomposed",
+
+  // decision_review POST-parse CONTRACT GATE (ROADMAP 1.185(c) — the named
+  // "keep gpt-4.1" blocker; enforce-vs-telemetry split per A1 ruling D-11).
+  // Fires once per auto-fired decision_review when the parsed output VIOLATES
+  // the prompt contract the block-parse shape check does not cover. The gate
+  // splits its rules into two classes:
+  //   • SAFETY rules (missing review_card, fabricated conversational callbacks
+  //     R-CONT, ungrounded entity references) DROP the review down the graceful
+  //     no-review path (thin content) — never trimmed into compliance.
+  //   • COUNT-CAP rules (tight bias/dqp/key_assumptions/scenario_contexts
+  //     bounds) are TELEMETRY-ONLY — COUNTED for the per-model A/B signal but
+  //     NOT dropped (dropping a prompt-legal tolerance-band review would
+  //     silently change current gpt-4.1 output). shape-check still enforces the
+  //     loose bounds.
+  // The event fires on ANY violation; the `dropped` field says whether it
+  // enforced a drop. The gate is unconditional (no env gate); its existence is
+  // the gpt-4.1 A/B precondition.
+  //
+  // Privacy contract (R-004): `request_id` / `scenario_id` are routing-key
+  // strings; `reason` is the primary violated rule code and `reasons` is the
+  // comma-joined sorted set of violated rule codes — both drawn from a bounded
+  // vocabulary (see DecisionReviewContractRule). `violation_count` is a finite
+  // integer; `dropped` is a boolean (safety-enforced vs telemetry-only). NO
+  // prose, graph label, raw id, brief text, or review content ever appears on
+  // this event.
+  V5DecisionReviewContractViolation: "v5.decision_review.contract_violation",
+
+  // Stored review prose/fact corrections, emitted by decision-review-enricher.
+  // Routing keys, bounded rule codes and counts only; no user prose or values.
+  V5DecisionReviewProseFactViolation: "v5.decision_review.prose_fact_violation",
+
+  // V5 Phase 2.5 Defect A — edit_graph dispatch state observability. Three
+  // events cover the graphState resolution outcomes for an edit-intent turn,
+  // so the routing-contract invariant (edit intent → mutation OR clarification
+  // OR typed recovery; never silent fallthrough) is observable end-to-end:
+  //
+  //  - V5EditGraphGraphStatePresent: edit intent detected and `graphState`
+  //    arrived on the request. Baseline counter for future audit; useful when
+  //    triaging "edit intent matched but dispatch never fired" — if this
+  //    event fires but no edit_graph dispatch follows, the failure is
+  //    upstream (an earlier branch returned first).
+  //  - V5EditGraphGraphStateReloaded: edit intent detected, `graphState`
+  //    absent on request, persisted graph reload from `scenarios.graph`
+  //    succeeded; dispatch proceeds against the reloaded graph.
+  //  - V5EditGraphGraphStateUnavailable: edit intent detected, `graphState`
+  //    absent and the persisted graph either UNREADABLE or invalid. The route
+  //    returns a typed recovery response (`turn_class: direct_answer`)
+  //    rather than silently falling through to TurnExecutor / Sonnet.
+  //    Carries `reason: 'persisted_graph_invalid' | 'session_store_failed'`
+  //    so operators can distinguish the failure modes in dashboards.
+  //    ⚠ ROADMAP 2.388 — `reason: 'no_persisted_graph'` NO LONGER APPEARS ON
+  //    THIS EVENT. Absence is not a failure: it is a first message on an empty
+  //    canvas, and it now falls through to the frame-no-brief guard's coaching.
+  //    Its counter moved to V5EditGraphNoPersistedGraphFallthrough below, so a
+  //    dashboard split by `reason` loses a series rather than silently
+  //    absorbing the traffic into the two that remain.
+  V5EditGraphGraphStatePresent: "v5.edit_graph.graph_state_present",
+  V5EditGraphGraphStateReloaded: "v5.edit_graph.graph_state_reloaded",
+  V5EditGraphGraphStateUnavailable: "v5.edit_graph.graph_state_unavailable",
+
+  // ROADMAP 2.388 — THE MINUTE-ONE DEAD END, and its replacement counter.
+  //
+  // Edit intent was detected on a turn with no request `graphState` AND no
+  // persisted graph — i.e. an edit verb with nothing to edit, overwhelmingly a
+  // user's FIRST message ("Increase annual revenue from £4m to £6m…"). This
+  // used to return `EDIT_GRAPH_RECOVERY_TEXT` ("…I couldn't access the current
+  // graph. Please try again in a moment."), which was both wrong — nothing had
+  // failed — and unrecoverable, since retrying the same message re-enters the
+  // same branch (measured 3/3 and 10/10 on staging `672b634`).
+  //
+  // The turn now FALLS THROUGH to the frame-no-brief guard's coaching + "Build
+  // the model" chip. This event is what keeps the class observable: it is the
+  // rate at which users open with an edit-shaped sentence on an empty canvas,
+  // which is a routing-quality signal worth watching even though it is no
+  // longer an error. Payload: { request_id, scenario_id, message_length } —
+  // routing keys and a length only; NO message text (privacy contract R-004).
+  V5EditGraphNoPersistedGraphFallthrough:
+    "v5.edit_graph.no_persisted_graph_fallthrough",
+
+  // The edit lane claimed a turn it could not resolve, and handed it back.
+  // `editIntentDetected` fires on a bare edit VERB ~2,700 lines before anything
+  // can consult run facts, so a comparative question ("Did my edit change which
+  // option comes out ahead?") was answered "Which option should I update?" by a
+  // module that never reads run facts. When the target resolution carried NO
+  // alternatives — a bare question with no chips, nothing applied and nothing
+  // proposed — the dispatch now returns PRE-COMMIT and the route falls through
+  // to the turn executor, where the context pack (and therefore `run_delta`)
+  // lives. This event is what keeps the class observable: it is the rate at
+  // which the edit lane claims traffic it cannot serve, which is a
+  // routing-quality signal worth watching even though it is no longer a
+  // dead-end. Payload: { request_id, scenario_id, outcome } — routing keys and
+  // the `fell_through:<reason>` outcome only; NO message text (privacy
+  // contract R-004).
+  V5EditGraphUnresolvedClarificationFallthrough:
+    "v5.edit_graph.unresolved_clarification_fallthrough",
+
+  // V5 A4 corrective path — bare add-risk request clarified without an LLM
+  // call or graph mutation. Payload: { request_id, scenario_id, latency_ms,
+  // label_length }. The label itself is intentionally not emitted.
+  V5EditGraphAddRiskClarified: "v5.edit_graph.add_risk_clarified",
+
+  // V5 H5 defence-in-depth — the dispatcher's false-success invariant
+  // fired: `handleEditGraph` returned `wasRejected: false` AND
+  // `isSuccessfulAppliedMutation()` returned false (i.e. NOT a true
+  // applied mutation: any combination of empty/missing operations,
+  // absent appliedGraph, or the impossible-but-not-enforced shape
+  // appliedGraph + operations=[]), yet `assistantText` contained
+  // success-claim language ("successfully", "I've applied/updated/…",
+  // bare past-tense "Updated Price.", terse "Done.", etc.). The
+  // runtime rewrites `assistant_text` to the neutral
+  // EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT before commit so the user
+  // never sees a success claim that wasn't backed by persisted state.
+  // Payload: { request_id, scenario_id, original_phrase, dispatch_path }.
+  // Counterpart to V5EgressForbiddenPhraseDetected; this event is the
+  // structural-mismatch trigger, that one is the lexical-denial trigger.
+  V5EditGraphFalseSuccessRewritten: "v5.edit_graph.false_success_rewritten",
+
+  // V5 appliedGraph-persistence fix (post-H5 follow-up). The
+  // structural-invariant backstop in the V5 edit_graph dispatcher
+  // fired: V4 returned `wasRejected: false` AND `operations.length > 0`
+  // AND `appliedGraph == null`. This shape proves the LLM-authored
+  // prose cannot be backed by persisted state regardless of phrasing
+  // — `findSuccessClaimHit` can't enumerate every variant Sonnet
+  // produces ("Strengthened the X edge from Y to Z..." is a real
+  // observed miss). The runtime rewrites `assistant_text` to the
+  // neutral EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT unconditionally
+  // when this signature fires. After the V4 source fix (synthesize
+  // appliedGraph from candidateGraph when PLoT didn't supply one),
+  // this event should be at-or-near zero in normal operation; a
+  // non-zero rate signals a regression in the V4 success branch's
+  // appliedGraph plumbing.
+  // Payload: { request_id, scenario_id, operations_count, dispatch_path }.
+  V5EditGraphAppliedGraphMissingWithOperations: "v5.edit_graph.applied_graph_missing_with_operations",
+
+  // V5 appliedGraph-persistence fix (post-H5 follow-up). V4's
+  // `handleEditGraph` success branch synthesized appliedGraph from
+  // the locally-computed `candidateGraph` (via
+  // `applyPatchOperations`) because PLoT did not supply one — either
+  // `plotClient` was null (V5 dispatch path's default) or PLoT
+  // validated but omitted `applied_graph` in its response. This is
+  // the expected steady-state path on the V5 dispatch route until
+  // the V4-residue retirement lands. A healthy `synthesized_locally`
+  // rate with near-zero `missing_with_operations` rate means the
+  // pair is working as designed.
+  // Payload: { request_id, scenario_id, operations_count, plot_configured }.
+  // `plot_configured` distinguishes Rule A (PLoT not wired — V5 dispatch
+  // default) from Rule B (PLoT wired but omitted applied_graph with no
+  // repairs reported). Rule lettering matches the synthesis block
+  // comment in src/orchestrator/tools/edit-graph.ts. The
+  // `applied_graph_hash` value is in the companion structured log line
+  // ("edit_graph appliedGraph synthesized from local candidateGraph")
+  // rather than this event payload.
+  V5EditGraphAppliedGraphSynthesizedLocally: "v5.edit_graph.applied_graph_synthesized_locally",
+
+  // V5 recovery chips — fired when the egress safety layer
+  // (failure-response.ts) attaches one or more recovery chips to a failure
+  // response. Distinct from V5DecisionReviewFailed: this event is about the
+  // chips served, not the original failure cause. Payload: failure_type,
+  // chip_labels, scenario_id, turn_id, is_retry, handler_id.
+  V5RecoveryChipServed: "v5.recovery_chip_served",
+
+  // PMS-tracked prompt resolution. Fires on every prompt load for the five
+  // tracked keys (routing, edit_graph, draft_graph, decision_review,
+  // repair_graph), at runtime, healthz/status probes, reload, and startup
+  // snapshot build. Payload: { key, source: 'pms' | 'default', version,
+  // content_hash, trigger, cache?: 'hit' | 'miss' }.
+  V5PromptResolved: "v5.prompt_resolved",
+
+  // Prompt-resolution policy observability (PR1). Fires once per resolution
+  // decision at the routing-snapshot build and the adapter cold-default path.
+  // Payload: { key, outcome, degraded, source: 'pms' | 'default',
+  // fallback_reason, runtime_env, trigger? }. `outcome` (a payload value, not a
+  // frozen event name) is one of pms_success | default_allowed |
+  // default_on_critical_deployed in PR1; PR2 extends it with
+  // lkg_used | emergency_default | fail_closed without re-registration. Loud
+  // signal is the error-level log; no Datadog mapping (see debugOnlyEvents).
+  V5PromptResolutionPolicy: "v5.prompt_resolution_policy",
+
+  // V5 decision_review call-site safety net. The enricher itself catches
+  // its own failures (see V5DecisionReviewFailed). This event fires only
+  // when an exception escaped the enricher and was caught by the
+  // turn-executor's defensive wrap — i.e. a future regression where the
+  // enricher's never-throws invariant was breached.
+  V5DecisionReviewDegraded: "v5.decision_review_degraded",
+
+  // V5 Group 1 Task C: coaching signal fired during Step 5. Payload carries
+  // the signal_id + turn_id so evaluators can correlate with coaching text.
+  V5CoachingSignalFired: "v5.coaching.signal_fired",
+
+  // ── WHY THE RUN-OVER-RUN CONSEQUENCE DID OR DID NOT SHIP ──────────────────
+  //
+  // Emitted once per `finaliseV5Response` CALL, from `attachRunDelta`
+  // (`orchestrator-v5/response-finaliser.ts`), the sole caller of
+  // `buildRunDelta`.
+  //
+  // ⚠ ONCE PER CALL IS NOT ONCE PER TURN, AND THE DIFFERENCE IS FLAG-DEPENDENT.
+  // `route-v2.ts`'s `sendFinalised200` RE-FINALISES: each debug surface it
+  // re-attaches (`_timings`, `_diagnostic_trace`, `_context_summary`, …) spreads
+  // onto `wireBody` and finalises again, SEQUENTIALLY, each behind its own
+  // config gate. Under the default posture those gates are off and a turn
+  // finalises once; with any of them on, expect N>1 IDENTICAL events for one
+  // turn. So COUNT DISTINCT TURNS, never raw event rows — a rate built on rows
+  // silently tracks debug posture rather than product behaviour. (`request_id`
+  // would be the natural dedupe key and is deliberately absent — see the scope
+  // note below; dedupe on `scenario_id` + timestamp window instead.)
+  //
+  // ⛔ THE DEFECT IT CLOSES. The caller discarded the producer's discriminated
+  // refusal with a bare `if (built.kind !== 'ok') return response;`, and nothing
+  // on the path logged anything at all. All five `RunDeltaRefusal` reasons, plus
+  // `priorFacts` absent, plus the identity-unbound strip, plus "it emitted and
+  // something downstream dropped it" were therefore BYTE-IDENTICAL SILENCE —
+  // seven consecutive probes into the dark outcome clause failed on exactly
+  // this, and an eighth would have too.
+  //
+  // ⭐ IT MINTS NO TAXONOMY FOR THE PRODUCER'S OWN REASONS. `RunDeltaRefusal`'s
+  // docblock already says the reason exists because "the caller emits it as
+  // telemetry (this module stays pure)" — the producer kept its half of that
+  // contract and the caller never kept its. The five arrive as passthrough; only
+  // the three the CALLER owns (and the producer cannot see) are added here.
+  //
+  // Payload:
+  //   - scenario_id: string | null — `?? null`, never a placeholder. The
+  //     system-event exit reaches the finaliser with no scenario, and "we do not
+  //     know which session" must not be spelled like a real id.
+  //   - outcome: 'emitted' | 'refused' | 'skipped'
+  //   - reason: string | null — null IFF outcome is 'emitted'. One of the five
+  //     `RunDeltaRefusal` members, or the caller's own `prior_facts_absent` /
+  //     `run_identity_unconfirmed` / `run_identity_conflict`.
+  //   - prior_facts_count / run_analysis_facts_count: number | null — STRUCTURAL
+  //     counts. They separate "no facts in scope" from "facts, but not enough
+  //     run_analysis ones" without naming a single one of them.
+  //   - wire_reason_carried: boolean | null — did the USER-FACING half ship?
+  //     `null` on every exit that puts no reason on the wire BY DESIGN (the
+  //     `emitted` case, and the caller's own three skips — see
+  //     `attachRunDeltaAbsenceReason` for why those stay operator-only).
+  //     `true`/`false` only on `refused`. ⚠ `false` IS THE ONE TO ALERT ON: the
+  //     reason exists and a user could have been told it, but the exit carried
+  //     no `analysis_ready` carrier to put it in. The carrier is CONDITIONAL
+  //     because the strict boundary leaves no declared top-level home, so a
+  //     conditional channel that reported nothing when it missed would be a
+  //     new silent-loss seam of exactly the shape this event was built to end.
+  //     A non-zero rate here is a finding about the CARRIER, not about the
+  //     producer — the refusal itself was correct.
+  //
+  // ⛔ REDACTION: reason code and counts ONLY. No label, quote or id — entity ids
+  // in this estate are slug renderings of the user's own labels
+  // (`fac_delivery_cost`), so an id IS user content. Pinned by the leak arm of
+  // `__tests__/run-delta-outcome-disclosure.test.ts`, which carries a positive
+  // control proving the token was in the input.
+  //
+  // ⚠ QUERY NOTE FOR OPERATORS: grep `run_delta_outcome`. Measured 15 Sep 2026,
+  // it appears nowhere else in the tree (case-insensitive), so it is not
+  // shadowed by an existing constant the way `did_not_land` is by
+  // `OPERATION_DID_NOT_LAND`. The bare token `run_delta` IS shadowed — it is the
+  // wire field name — so do not grep that.
+  //
+  // ⚠ SCOPE, STATED EXACTLY: this reports what the FINALISER decided. It is not
+  // evidence that the bytes reached the UI. `request_id` is deliberately absent
+  // because `FinaliserContext` does not carry one; join to the same turn's
+  // `cee.turn.refused` / `v5.*` events on `scenario_id`.
+  V5RunDeltaOutcome: "v5.coaching.run_delta_outcome",
+
+  // V5 Phase 1 brief persistence — fires from draft-graph-dispatch when the
+  // user-supplied free-text brief is truncated by normaliseBriefText (input
+  // length exceeded MAX_BRIEF_TEXT_LENGTH). Payload: { request_id,
+  // scenario_id, original_length, truncated_length, reason }. Operators can
+  // alert on a non-zero rate to detect users systematically pasting briefs
+  // exceeding the 8000-char DB cap.
+  V5BriefTextNormalised: "v5.brief_text.normalised",
+
+  // V5 Phase 3A PR 3 — block lifecycle: emitted once per composer call that
+  // considered Phase 3 block emission (either from the current-turn fact, a
+  // prior fact, or skipped). Payload: structural enums + booleans + counts
+  // ONLY — NEVER prose, labels, raw entity IDs, scenario text,
+  // decision_review content, or graph content.
+  //   {
+  //     request_id, scenario_id,
+  //     lifecycle_state: 'emitted_fresh' | 'emitted_stale'
+  //       | 'skipped_unknown' | 'skipped_none' | 'rebuild_failed',
+  //     selected_fact_index: number | null,
+  //     graph_hash_at_run: string | null,
+  //     current_graph_hash: string | null,
+  //     reason: FreshnessReason | 'no_current_run_analysis_fact' | …,
+  //     block_count: number,                // total Phase 3 blocks emitted
+  //                                         // (excludes analysis_result).
+  //     stale_coaching_emitted: boolean,    // true only on emitted_stale.
+  //   }
+  // The two graph_hash fields ARE safe to log (they are SHA-prefixes already
+  // logged via v5.analysis_freshness.derived). Operators can confirm a
+  // stale-vs-fresh outcome and trace which fact in prior_facts was selected
+  // without seeing any user content.
+  V5Phase3BlockLifecycle: "v5.phase3.block_lifecycle",
+
+  // V5Phase3LifecycleIndexMismatch — defence-in-depth cross-check for the
+  // Phase 3 lifecycle fact selection. The freshness derivation reports a
+  // `selected_fact_index` relative to the EXACT array it was derived from;
+  // the compose lifecycle resolves the prior run_analysis fact by CONTENT
+  // (selectRunAnalysisFact) rather than trusting that index. This event fires
+  // when the content-selected position differs from the passed index — a
+  // signal that an upstream call site derived freshness against one fact-array
+  // basis but handed compose a differently-ordered array (the historical
+  // routed-turn prepend bug). Metadata only: { request_id, scenario_id,
+  // passed_index, content_index } — both are array positions, never user
+  // content. Behaviour is unchanged when it fires (content selection wins);
+  // the event exists so the regression cannot silently reappear.
+  V5Phase3LifecycleIndexMismatch: "v5.phase3.lifecycle_index_mismatch",
+
+  // CQE (Custom Quantity Extractor — V5 Layer 0) per CQE Design v1.1 §9 and
+  // cqe-investigation-proposal.md §7.2. Emits once per turn after the
+  // assembler runs extractQuantities(). Carries aggregate signals needed for
+  // SLO tracking and upgrade-trigger alerts (word_range_missed > 5%,
+  // compromise_match_count > 30%). Per-turn context lives in the routing
+  // log; this event is the observability stream.
+  CqeExtraction: "cqe.extraction",
+
+  // V5 answer-carrying explanation handlers. Emitted from the turn-executor
+  // around handler dispatch.
+  //
+  // V5ExplanationAnswerVerdict — once per explanation-handler turn after
+  // the side-band check. Payload: { handler_id, answer_text_valid,
+  // answer_validation_error?, answer_text_length, evidence_used_count,
+  // cited_fields_count, forbidden_term_matched }. `forbidden_term_matched`
+  // is non-null only when answer_validation_error === 'forbidden_internal_term'
+  // — the single matched internal-vocabulary term (e.g. "node", "handler"),
+  // deliberately never a surrounding excerpt (see
+  // validator-explanation.ts's `forbidden_term_matched` docstring: the
+  // matched term is always closed-vocabulary and PII-safe, but an excerpt
+  // could capture adjacent user-authored decision-graph labels).
+  V5ExplanationAnswerVerdict: "v5.explanation.answer_verdict",
+  // V5ExplanationEvidence — observability-only mirror of Sonnet's
+  // evidence_used / cited_fields. Emitted when at least one entry is
+  // present. Never persisted on the handler fact and never surfaced to the
+  // user. Payload: { handler_id, evidence_used, cited_fields }.
+  V5ExplanationEvidence: "v5.explanation.evidence",
+  // V5ExplanationValidationBeat — mechanism record for the "what to
+  // validate" beat on the explain_results execute path
+  // (V5-LANE-B-STRUCTURAL-01). Emitted once per execute-verdict
+  // explain_results turn so live smoke can assert the mechanism, not just
+  // the surface text. Payload: { handler_id, mechanism: 'appended' |
+  // 'dedup_skipped' | 'omitted', variant?: 'link' | 'driver',
+  // from_label?, to_label?, driver_label?, omission_reason? }.
+  // The label fields follow the V5ExplanationEvidence precedent above:
+  // observability-only display labels, never persisted on the handler fact
+  // (the generated fact schema is .strict(); a persisted field is a
+  // @talchain/schemas follow-up blocked behind V5-CI-01) and never
+  // surfaced to the user from here.
+  V5ExplanationValidationBeat: "v5.explanation.validation_beat",
+  // V5UnexpectedExplanationPayload — emitted when a mutation/computation
+  // handler (run_analysis, draft_graph, edit_graph) carries a stray
+  // `explanation` field. The field is silently dropped; the user is not
+  // shown an error. Payload: { handler_id, request_id }.
+  V5UnexpectedExplanationPayload: "v5.unexpected_explanation_payload",
+  // V5MutationLanguageGuard — STEP 6 log-only check. Emitted when the
+  // final composed assistant_text on a non-edit handler turn matches the
+  // mutation-language regex despite the side-band check. Detection only;
+  // the final text is NOT mutated at this stage. Payload:
+  // { handler_id, text_length }.
+  V5MutationLanguageGuard: "v5.mutation_language_guard",
+  // V5StructuralSuccessClaimSwapped — Brief 4 STEP 6.6 ENFORCING gate.
+  // Emitted when a turn that committed NO durable mutation produced a
+  // first-person structural success claim and the gate replaced the text
+  // with the honest decline. Safe metadata only (no raw assistant text).
+  // Payload: { request_id, scenario_id, handler_id, text_length }.
+  V5StructuralSuccessClaimSwapped: "v5.structural_success_claim_swapped",
+  // V5StructuralSuccessClaimCandidateMiss — Brief 4 STEP 6.6 MONITOR.
+  // Non-blocking observability for possible false-negatives: no mutation
+  // committed, broad mutation language is present, but the narrow structural
+  // detector did NOT fire (so no swap). Used to surface novel phrasings the
+  // narrow detector should learn. Safe metadata only.
+  // Payload: { request_id, scenario_id, handler_id, text_length }.
+  V5StructuralSuccessClaimCandidateMiss: "v5.structural_success_claim_candidate_miss",
+  // V5ResponseProseSanitised — STEP 6.4 defence-in-depth post-compose
+  // prose sanitiser. Emitted when at least one rewrite/match occurred
+  // on the final composed assistant_text — covers raw decimal
+  // probabilities, raw sensitivity values, and structural edge-strength
+  // language that survived the LLM despite prompt-level guidance.
+  // Payload:
+  // { handler_id, mode, probability_rewrites, sensitivity_rewrites,
+  //   structural_matches, structural_suppressed,
+  //   structural_missed_grammar, structural_rule_ids }.
+  // `mode`: 'rewrite' (legacy — text was mutated) | 'detect_only'
+  // (current — text passes through unchanged, counters still emitted
+  // as a regression canary). The flip to 'detect_only' landed with
+  // A2.2 Task 2 once upstream display-safe projections (A2 / A2.1 /
+  // A2.2) closed every known source of raw-numeric leakage.
+  V5ResponseProseSanitised: "v5.response.prose_sanitised",
+  // V5DeterministicValueUpdate — emitted when the pre-LLM value-update
+  // pre-route runs. `matched: true` means the turn was dispatched as a
+  // clarify direct_answer without an LLM call; `matched: false` means the
+  // pre-route declined and the turn proceeded to the LLM. Payload:
+  // { matched, dispatch?, candidate_count?, top_score?, skip_reason?,
+  //   cqe_quantity_count }.
+  V5DeterministicValueUpdate: "v5.deterministic_value_update",
+
+  // V5 Context Management v1 — context-readiness snapshot. Emitted once
+  // per turn, immediately after context-pack assembly + analysis-freshness
+  // derivation, so operators can see at a glance what CEE knew when
+  // routing fired (graph/brief presence, prior fact counts,
+  // successful-run-analysis presence, freshness verdict + graph hashes,
+  // pending action count, recent_changes count, Phase 3 block context
+  // availability, context_pack size).
+  //
+  // Privacy contract: every NON-ROUTING field is a number, boolean, the
+  // freshness enum, or a graph hash. `request_id` and `scenario_id` are
+  // the two allowed routing strings; the two graph_hash fields are
+  // SHA-prefix strings already emitted by `v5.analysis_freshness.derived`
+  // (safe). No user prose, no labels, no raw entity / node / edge /
+  // option / fact IDs, no decision_review content.
+  V5ContextReadiness: "v5.context_readiness",
+
+  // V5 Context Management v1 — sibling stale-rerun guard. Fires for the
+  // narrow case where prior analysis is stale (graph hash diverged) AND
+  // the user is asking an analytical question (explain / what_drove /
+  // what_would_flip / rerun_question) AND there is no concrete
+  // mutation signal. Short-circuits to a deterministic direct_answer
+  // that nudges re-run, mirroring the Phase 3 stale-safe coaching block
+  // copy + action shape. Payload: structural enums + booleans only.
+  V5StaleRerunGuard: "v5.stale_rerun_guard",
+
+  // V5 P0.2 — run-comparison gate. Fires on a result-sense "what
+  // changed?" turn. Payload: structural enums + booleans only (gate
+  // mode, matched, unmatched_reason, leading_option_changed,
+  // leader_identity_basis) — no option/factor labels, no copy.
+  // `leader_identity_basis` is the closed enum 'option_id' |
+  // 'indeterminate' | null: it distinguishes a comparison that PROVED the
+  // leader unchanged from one that could not tell (a legacy run carrying no
+  // option ids), which the boolean alone collapses into one value.
+  V5RunComparisonGate: "v5.run_comparison_gate",
+
+  // V5 P0.2 — flip-threshold proposal emitted on a what_would_flip turn.
+  // Content-free: { result: 'emitted'|'no_proposal'|'unsafe_copy'|
+  // 'unknown_intent' } — no factor labels, values, or copy.
+  V5ProposedChangeEmitted: "v5.proposed_change.emitted",
+
+  // V5 Context Management v1 — sibling no-analysis guard. Fires when no
+  // successful run_analysis fact exists AND the user is asking an
+  // analytical question. Short-circuits to a deterministic direct_answer
+  // that nudges the user to run analysis first. Payload: structural
+  // enums + booleans only.
+  V5NoAnalysisGuard: "v5.no_analysis_guard",
+
+  // ⭐ The analysis-election gate (routing/analysis-election-gate.ts). Fires on
+  // every LLM-elected proposal so the ADMITTED and DEMOTED arms are both
+  // countable and the deployed demotion rate is derivable rather than
+  // inferred. `outcome` is the gate's own enum
+  // ('admitted' | 'demoted'); `reason` is its structural reason enum.
+  // NEVER carries the message or any user copy.
+  V5AnalysisElectionGate: "v5.routing.analysis_election_gate",
+
+  // V5 Context Management v1 — edit_graph no-op recovery. Emitted from
+  // the dispatchEditGraph no-op branch when the recovery decision is
+  // computed. Replaces the bland fallback with context-aware copy when
+  // the message is analytical (and analysis exists) or with a concise
+  // clarification when the message looks edit-like but vague. Payload:
+  // structural enums + booleans only. `intent_class` is the
+  // AnalyticalIntentClass enum or null; `branch_taken` is the recovery
+  // branch enum.
+  //
+  // ⚠ THE BRANCH LIST THAT USED TO BE SPELLED OUT HERE IS DELETED, NOT
+  // EXTENDED (CLAUDE.md trap 12 — the hand-maintained mirror). It named seven
+  // branches while the type carried eleven: `proposal_stage_one`,
+  // `proposal_stage_two`, `noop_clarification_preserved` and
+  // `noop_fallback_copy` had all been added without it. THE TYPE IS THE
+  // SOURCE OF TRUTH — read `NoOpRecoveryBranch` in
+  // `orchestrator-v5/handlers/edit-graph-dispatch.ts`, which carries a
+  // per-branch note beside each member.
+  // The `explore_factor` / `explore_factor_stale` pair was added as a
+  // safety net for label-shaped no-op messages that slip past the
+  // upstream `tryPostAnalysisLabelIntercept` (V5PostAnalysisLabelIntercept
+  // event below). The `_stale` variant fires when the prior analysis is
+  // stale; it emits a single re-run chip instead of the three
+  // exploration chips so users never get an analysis-grounded nudge
+  // against an out-of-date result.
+  V5EditGraphNoOpRecovery: "v5.edit_graph.no_op_recovery",
+  // Part-accounting conservation law (rehearsal defect A + B's CEE half,
+  // 2026-07-20). Emitted once per multi-part edit turn (>= 2 accountable
+  // decomposed sub-requests): how many parts intake counted, how many the
+  // returned operations covered, how many were disclosed as uncovered, and
+  // whether a named-target substitution (defect B) forced the batch closed
+  // to clarify. Payload: { request_id, scenario_id, dispatch_path,
+  // parts_detected, parts_covered, parts_uncovered, missing_target_count,
+  // substitution_blocked, disclosure_appended }. A rising
+  // parts_uncovered-with-no-disclosure rate or any silent-substitution
+  // regression is drift this event exists to make observable.
+  V5EditGraphPartAccounting: "v5.edit_graph.part_accounting",
+  // R7 — one structured event per edit_graph turn (content-free; pino /
+  // Datadog-log only, registered debug-only in the freeze-gate).
+  V5EditGraphTurn: "v5.edit_graph.turn",
+
+  // V5 edit lifecycle recovery v1 — pre-LLM intercept for the legacy
+  // V4 "Simplify the change" facilitator chip (edit-graph.ts:2096,
+  // :2198). The chip submits the free-text prompt "Try a simpler
+  // version of this change.", which on its own would match
+  // EDIT_GRAPH_POSITIVE_REGEX (via "change") and re-enter the V4
+  // edit_graph LLM — typically producing another empty-operations
+  // no-op. This event fires when route-v2's chip-simplify-intercept
+  // short-circuits that loop with deterministic clarification copy,
+  // BEFORE the LLM call. Payload:
+  //   - source: 'exact_text' (only leg shipped in this PR; future
+  //     metadata leg will add 'chip_metadata').
+  //   - prior_analysis_is_fresh: boolean — whether the request's
+  //     `analysisState` carries a successful `analysis_status` AND a
+  //     `graph_hash_at_run` matching the current graph hash. Always
+  //     boolean; the previous async DB-backed derivation that could
+  //     also return `null` on session-store failure was replaced
+  //     (PR #194 review-1) with a pure request-local helper that
+  //     returns `false` when it cannot verify.
+  V5InterceptedChipClarify: "v5.edit_graph.intercepted_chip_clarify",
+
+  // V5 edit lifecycle recovery v1 — pre-LLM narrow vague-edit guard.
+  // Fires when route-v2's vague-edit-guard short-circuits a free-text
+  // edit message that cleared the existing route-v2 gates but is too
+  // underspecified to spend an LLM call on (no numeric, no factor /
+  // edge / option anchor, no add/remove construct, no mutation
+  // signal, not a question). Payload:
+  //   - prior_analysis_is_fresh: boolean — same shape as the
+  //     chip-clarify event above (always boolean since PR #194
+  //     review-1; see V5InterceptedChipClarify for the rationale).
+  //   - chips_emitted: number — how many graph-derived chips the
+  //     clarify composer attached (0 means cancel-only).
+  V5InterceptedVagueEdit: "v5.edit_graph.intercepted_vague_edit",
+
+  // V5 edit lifecycle recovery v1 — pre-edit analytical-question
+  // guard. Fires when route-v2 detected an edit verb in the message
+  // (EDIT_GRAPH_POSITIVE_REGEX matched) AND the analytical-question
+  // guard suppressed `editIntentDetected` because the message is a
+  // hypothetical / analytical question about the outcome
+  // (e.g. "What could change the outcome?"). The turn then falls
+  // through to TurnExecutor where the post-analysis advice gate /
+  // `what_would_flip` handler owns the response. Payload is
+  // structural only:
+  //   - intent_class: AnalyticalIntentClass | null — null when the
+  //     match came from this guard's additional patterns rather
+  //     than `classifyAnalyticalIntent`.
+  V5EditGraphAnalyticalQuestionSuppressed:
+    "v5.edit_graph.analytical_question_suppressed",
+
+  // V5 Signature Loop — route-level proposal-confirmation guard. Emitted when
+  // a confirmation-shaped, edit-verb-bearing message ("make that update",
+  // "make that change", "update the model") reaches the edit_graph intent
+  // gate. Resolves the proposal-vs-edit ambiguity BEFORE edit routing so a
+  // confirmation can never no-op into edit_graph and wipe the pending
+  // proposal. Diagnostic-only; the operational outcome is the suppressed edit
+  // dispatch / the no-live-proposal clarification.
+  //
+  // Payload:
+  //   - outcome: 'suppressed_live'        — ≥1 route-visible-live, graph-safe
+  //              proposal → edit routing + Stage-4A intercepts bypassed; falls
+  //              through to TurnExecutor, which makes the AUTHORITATIVE apply /
+  //              supersede / idempotency decision (NOT a guarantee of mutation).
+  //            | 'clarify_none'           — read OK, no pending proposal at all.
+  //            | 'clarify_expired'        — read OK, only wall/turn-expired ones.
+  //            | 'clarify_hash_mismatch'  — read OK, only graph-hash-stale ones.
+  //            | 'suppressed_read_failed' — pending read THREW; degrade safely
+  //              by suppressing edit routing (do NOT silently look like "none").
+  //   - live_candidate_count: number      — live, graph-safe apply_proposed_change.
+  // The three `clarify_*` outcomes drive the deterministic no-live-proposal
+  // response; `suppressed_read_failed` is the distinct read-failure trace.
+  V5EditGraphProposalConfirmResolved: "v5.edit_graph.proposal_confirm_resolved",
+
+  // V5 Signature Loop — route-level state-query guard. Emitted when a question
+  // phrase that contains an edit verb ("what did you just change?", "what did
+  // that update do?") is recognised at the edit_graph intent gate and edit
+  // routing is suppressed, so the turn falls through to TurnExecutor where the
+  // recent-changes-grounded `tryStateQueryGuard` answers it instead of a
+  // mutating edit. Diagnostic-only. Payload: request_id, scenario_id.
+  V5EditGraphStateQuerySuppressed: "v5.edit_graph.state_query_suppressed",
+
+  // ROADMAP 2.11 / P0-2 — deterministic configure-option routing. Emitted
+  // when the configure-option intent gate is the DECIDING factor sending a
+  // turn to the edit lane (no positive edit verb would have dispatched it):
+  // "configure {option}" phrasings and the options_not_configured
+  // recovery-chip message, which previously fell through to the LLM router
+  // and live-routed to adjust_edge_strength (the 2.11 infinite-loop
+  // diagnosis). Payload: request_id, scenario_id, trigger
+  // ('chip_prefix' | 'configure_vocab' | 'intervention_vocab').
+  V5EditGraphConfigureOptionRouted: "v5.edit_graph.configure_option_intent_routed",
+
+  // L16 / walk finding N16 — a BARE configure-option turn ("Configure
+  // {option}", the configure chip's own message) was answered by the
+  // deterministic remedy instead of being sent to the edit LLM with nothing
+  // writable in it. On staging `9a0541b` that turn returned
+  // OPERATION_DID_NOT_LAND behind "I wasn't able to make that change safely."
+  // — the product unable to execute its own chip. This counter is the live
+  // meter for how often the remedy fires and how the option was identified.
+  // Payload: request_id, scenario_id, trigger, option_source
+  // ('named_in_message' | 'sole_unconfigured'), factor_count.
+  V5ConfigureOptionClarifyIntercept: "v5.edit_graph.configure_option_clarify_intercept",
+
+  // ⭐ ROADMAP 2.1261 — repair-leg bare-value binding resolved a claimed turn.
+  // Payload: request_id, scenario_id, outcome ('bind' | 'ask'), pair_count.
+  V5RepairValueBindingResolved: "v5.edit_graph.repair_value_binding_resolved",
+
+  // ⭐⭐ ROADMAP 2.1266 — the deterministic OPTION-EFFECT WRITE bound a turn:
+  // one option, one of its linked factors and one model-unit value, all
+  // resolved by identity against the graph the edit is applied to. The
+  // operation is composed server-side instead of asked of the edit LLM, so
+  // the product's own advised phrasing has an acceptance path (P8).
+  // Payload: request_id, scenario_id, option_id, factor_id.
+  V5OptionEffectWriteResolved: "v5.edit_graph.option_effect_write_resolved",
+
+  // ⭐ ROADMAP 2.1266 — the same sentence, with the ENTITY ambiguous (two
+  // options named, or two of one option's linked factors). The product asks
+  // instead of guessing and writes nothing (trap 22f: the ambiguity is the
+  // product). Payload: request_id, scenario_id, ambiguity ('option' |
+  // 'factor'), candidate_count.
+  // ⭐⭐ Two or more options carry ONE normalised label, so the disambiguation
+  // ask is UNANSWERABLE and was replaced by the rename-coaching exit. Payload:
+  //   - request_id, scenario_id
+  //   - colliding_count: number — how many options share the name (>= 2)
+  // ⚠ THE LABEL ITSELF IS NOT EMITTED. It is user-authored model content.
+  // The count is what an on-call needs to know how often the drafter mints a
+  // colliding name; the string adds nothing operational and is the user's.
+  V5OptionEffectLabelCollision: "v5.edit_graph.option_effect_label_collision",
+
+  V5OptionEffectAskEmitted: "v5.edit_graph.option_effect_ask_emitted",
+
+  // ⭐⭐ ROADMAP 2.427 — the configure-option OUTCOME did not honour the turn's
+  // INTENT: the message named an option, the edit lane ran, and the applied
+  // graph carries NO interventions write for THAT option id. Emitted where the
+  // response is replaced with the deterministic recovery copy.
+  //
+  // This is the meter for the false-success class the V5 H5 invariant cannot
+  // see. H5 asks "did anything land?"; on the motivating capture something did
+  // — an EDGE STRENGTH — so H5 stayed silent while the reply claimed success
+  // about an entity the user had not asked about and the option stayed
+  // `needs_encoding`. A non-zero count here with `applied_something: true` is
+  // precisely the wrong-entity write; with `applied_something: false` it is the
+  // generic-degradation branch that used to ship "I wasn't able to make that
+  // change safely."
+  //
+  // Payload: request_id, scenario_id, option_id, factor_count,
+  // applied_something (whether the edit landed ANY graph at all — the field
+  // that separates the two failure branches).
+  V5ConfigureOptionOutcomeUnhonoured: "v5.edit_graph.configure_option_outcome_unhonoured",
+
+  // Wave-1 Lane B (PR3 mutation correctness, ROADMAP 3.16) — the edit turn
+  // named a target entity that does not exist in the persisted graph; the
+  // resolver must clarify, never guess (the wrong-object defect class this
+  // lane exists to close). Payload: request_id, scenario_id,
+  // resolution_match_type, resolution_confidence, counts only — NEVER the
+  // user's text or entity labels. Content-free; log-only (no Datadog
+  // mapping). Registry minted up front by the wave's step-zero PR; the emit
+  // site lands in Lane B's own PR (edit-graph-dispatch seam).
+  V5EditGraphTargetNotNamedInGraph: "v5.edit_graph.target_not_named_in_graph",
+
+  // ROADMAP 2.308 / S1 — the configure-option gate ATTEMPTED a persisted-graph
+  // read for its option-label anchor. Until 2.308 the labels came only from
+  // `extensions.graphState`, which the UI never sends, so the label anchor
+  // (and with it triggers `effect_vocab` / `option_value_set`) was dead code
+  // in production. Emitted on EVERY read attempt — i.e. whenever the detector
+  // reported a label anchor would decide the verdict — so the event count IS
+  // the added-read frequency, with no silent omissions (review #796: emitting
+  // only on a labels-bearing result made a failed or option-less read
+  // invisible and under-counted the very thing this measures). Payload:
+  // request_id, scenario_id, outcome ('labels' | 'empty' | 'failed'), matched
+  // (whether the labels flipped the verdict; always false unless
+  // outcome === 'labels').
+  //
+  // ⚠ Read `matched: true` as THE S1 counter, not the sibling
+  // `configure_option_intent_routed`. That one is gated on
+  // `!positiveEditRegexHit`, and the turns S1 rescues (remedies #6/#7 in the
+  // diagnosis) DO carry a positive edit verb — their edit-lane door was closed
+  // by the VALUE-UPDATE gate, not by a missing verb — so it stays silent for
+  // exactly the class of turn this fix changes.
+  V5EditGraphConfigureOptionLabelsLoaded:
+    "v5.edit_graph.configure_option_labels_loaded",
+
+  // Structural-restructure routing (LATENCY-RECAPTURE finding 3; probe
+  // 69a2f44f). Emitted when the structural-restructure intent gate is the
+  // DECIDING factor sending a turn to the edit lane (no positive edit verb
+  // would have dispatched it): "split the shared factor into per-option
+  // links"-class requests, which previously fell through to the coach, which
+  // DESCRIBED the change without seeding an apply action — so a following
+  // "Yes, apply it now" had no held proposal to resume (the four-turn-nothing
+  // loop). Routing to the edit lane produces the held proposal + confirm chip;
+  // the bare consent resumes via short-confirm → executeGmHeldResume. Payload:
+  // request_id, scenario_id, trigger (StructuralRestructureTrigger).
+  V5EditGraphStructuralRestructureRouted:
+    "v5.edit_graph.structural_restructure_intent_routed",
+
+  // V5 Signature Loop — refresh-continuation guard. Emitted when a turn arrives
+  // at frame stage with no request graph but the scenario already has committed
+  // turns (refresh / reconnection). The guard suppresses the draft_graph /
+  // frame-no-brief "start over" shortcuts so the turn reaches TurnExecutor,
+  // which reconstructs memory from server-side state (persisted graph + recent
+  // turns) instead of re-asking for the brief. Diagnostic-only.
+  //
+  // Payload:
+  //   - guard: 'draft_graph' | 'frame_no_brief' — which shortcut was skipped.
+  //   - prior_turns_present: true                — the discriminator that fired.
+  V5ContinuationGuardApplied: "v5.continuation.guard_applied",
+
+  // V5 product-state continuity (foamy-bee tranche) — emitted by the
+  // deterministic state-query guard. Closes the named misroute class
+  // where "what update did you make?" routes to legacy edit_graph and
+  // returns "No changes were needed for this request."
+  //
+  // Payload:
+  //   - matched: boolean — did the message match a state-query phrase
+  //   - dispatch?: 'with_recent_change' | 'no_recent_changes' |
+  //       'changes_unavailable' — only set when matched
+  //   - recent_change_count: number — entries projected into ContextPack
+  //   - recent_changes_status: 'complete' | 'capped' | 'degraded'
+  //   - prior_mutation_fact_count: number — successful mutation facts
+  //     in the loaded hot window (durable cold-return receipts are carried
+  //     separately and do not inflate this count)
+  // Content-free by contract: no summaries, labels, target IDs, fact payloads
+  // or receipt bodies may enter this event.
+  //
+  // The `matched: true` branch means the turn was dispatched as a
+  // direct_answer with no LLM call. `matched: false` means the guard
+  // declined and the turn proceeded to the LLM (still grounded by the
+  // recent_changes ContextPack projection if any mutations exist).
+  V5StateQueryGuard: "v5.state_query_guard",
+
+  // V5 P0 stabilisation — post-analysis advice gate / deterministic
+  // post-analysis router.
+  //
+  // Fires once per turn, AFTER the state-query guard and BEFORE the LLM
+  // routing call. Records whether the gate short-circuited the turn
+  // (matched=true → deterministic direct_answer) or fell through to
+  // normal routing.
+  //
+  // Payload:
+  //   - request_id: string
+  //   - scenario_id: string
+  //   - matched: boolean
+  //   - unmatched_reason: 'no_analysis' | 'mutation_signal' |
+  //     'no_advice_signal' | 'empty_message' | 'not_fresh' |
+  //     'data_unavailable_for_class' | null
+  //     ('no_leading_option' was retired post-PR #173: missing
+  //     leading_option now surfaces uniformly as
+  //     'data_unavailable_for_class' with `missing_inputs: ['leading_option']`
+  //     so dashboards see the matched class.)
+  //   - advice_class: 'advice' | 'next_step' | 'update_advice' |
+  //     'improvement' | 'meaning' | 'readiness' | 'evidence_gap' |
+  //     'explain_results_free_text' | 'what_would_flip_free_text' | null
+  //     Surfaced on `matched=true` AND on the
+  //     `data_unavailable_for_class` fall-through so dashboards can
+  //     see which class is producing fall-throughs without re-running
+  //     the matcher.
+  //   - missing_inputs: string[] | null — only set when
+  //     `unmatched_reason === 'data_unavailable_for_class'`. Lists
+  //     which required-input keys were absent (e.g. ['top_driver'],
+  //     ['analysis_ready']).
+  //   - leading_option_present: boolean — analysis projection had a
+  //     leading option at gate-evaluation time
+  //   - top_driver_present: boolean — top driver label was available
+  //     for the composed prose
+  //   - suggested_action_count: number — count of chips threaded into
+  //     the direct_answer response. Zero on unmatched turns; per-class
+  //     on matched turns (1 for explain/meaning/advice/next_step/
+  //     update_advice/improvement; 0 for what_would_flip_free_text /
+  //     readiness / evidence_gap). Structural-only — chip labels and
+  //     message strings are not emitted.
+  V5PostAnalysisAdviceGate: "v5.post_analysis_advice_gate",
+
+  // ⚠ ROADMAP 2.229 — `V5FreshAnalysisFollowupGuard`
+  // ("v5.fresh_analysis_followup_guard") was REMOVED here together with the
+  // guard it observed (founder ruling: retire the fresh-analysis follow-up
+  // guard, whose matched branch answered every recognised post-analysis
+  // question with a zero-input string constant). The name is recorded in this
+  // comment on purpose: it appears in historical logs and in
+  // `acceptance-evidence/`, and a reader finding it there needs to know it is
+  // retired rather than missing.
+
+
+  // V5 P0 stabilisation — bounded routing-failure fallback.
+  //
+  // Fires when the routing call returns a "model output failed" error
+  // class (max_tokens / empty_response / schema_repair_failed) and the
+  // turn executor degrades to a deterministic direct_answer envelope
+  // with recovery chips instead of a 500 BoundaryError. Allows ops to
+  // see how often the bounded fallback fires and which cause is
+  // dominant.
+  //
+  // Payload:
+  //   - request_id: string
+  //   - scenario_id: string
+  //   - routing_error_cause: 'schema_repair_failed' | 'empty_response' |
+  //     'unexpected_stop_reason'
+  //   - llm_calls_used: number — attempts before bounded-fallback
+  //   - analysis_ready: boolean — drove the chip set
+  V5RoutingBoundedFallback: "v5.routing_bounded_fallback",
+
+  // V5 WS1 / E4 — pre-LLM evidence that the curated `recent_changes`
+  // projection reached the routing payload assembly. Emitted exactly
+  // once per turn, immediately before the `routeWithToolUse` call,
+  // and only when the state-query guard did NOT short-circuit the turn
+  // (i.e. the LLM is about to be called). NEVER logs the curated
+  // content itself — only the count, a presence flag, and a short
+  // canonical hash so operators can prove the same projection reached
+  // multiple turns / instances.
+  //
+  // Payload:
+  //   - request_id: string
+  //   - scenario_id: string
+  //   - recent_change_count: number — 0 when the field is missing or
+  //     not an array (regression signal).
+  //   - recent_changes_field_present: boolean — derived at runtime via
+  //     Array.isArray on the actual contextPack field. Today's
+  //     assembler unconditionally populates `recent_changes` as a
+  //     frozen array, so this flag is `true` on every healthy turn;
+  //     however a future assembler regression that drops the field or
+  //     emits it as a non-array would fire this event with `false` and
+  //     count 0, making the regression detectable from logs alone
+  //     without a code-search.
+  //   - recent_changes_hash: string — see
+  //     `deriveRecentChangesEvidence` in recent-changes.ts. Returns the
+  //     literal "empty" sentinel when count is zero (including the
+  //     missing-field regression case).
+  V5RecentChangesPreLlm: "v5.recent_changes.pre_llm",
+
+  // V5 stale-aware explain recovery — finaliser-level egress guard
+  // detected a forbidden user-facing phrase in `response.assistant_text`
+  // (per `FORBIDDEN_USER_FACING_PHRASES` in
+  // `src/orchestrator-v5/compose/forbidden-user-facing-phrases.ts`).
+  // Fires from turn-executor's `finalizeRun()` and the terminal compose
+  // points of `edit-graph-dispatch.ts` / `chip-click-dispatch.ts` so
+  // EVERY emit path (deterministic templates, LLM output, fallback
+  // copy, recoverable-handler recovery) is covered uniformly.
+  //
+  // Payload:
+  //   - request_id: string
+  //   - scenario_id: string
+  //   - phrase: string — the matched substring verbatim (NOT the
+  //     regex source) so dashboards group by user-visible text.
+  //   - dispatch_path: string — one of 'turn_executor_finalise',
+  //     'edit_graph_finalise', 'chip_click_finalise' so the on-call
+  //     can attribute hits to the producing surface without grepping.
+  //
+  // On hit, the runtime ALSO replaces `assistant_text` with a neutral
+  // fallback that does not contain any forbidden phrase, so the user
+  // never sees the contradictory wording even when an upstream emit
+  // path produces it. The chip set + blocks are preserved so the
+  // user retains a recovery affordance.
+  V5EgressForbiddenPhraseDetected: "v5.egress.forbidden_phrase_detected",
+
+  // ⭐ The product narrated its OWN PROCESS instead of answering — witnessed on
+  // a real user session (3 Sep 2026): a routing-call chain of thought and a
+  // routing verdict, both shipped verbatim as `assistant_text`, both 200/OK.
+  // Payload:
+  //   - request_id, scenario_id: string
+  //   - marker: string — the matched substring VERBATIM (not the regex
+  //     source), so a dashboard groups by readable phrase.
+  //   - remedy: 'sentences_removed' | 'block_replaced'.
+  //   - dispatch_path: 'turn_executor_finalise' | 'edit_graph_finalise' |
+  //     'chip_click_finalise' — which surface produced it.
+  //   - sentences_total, sentences_removed: number.
+  //   - narration_length: number — bytes routed to the `_reasoning`
+  //     disclosure channel rather than destroyed.
+  //
+  // ⚠ NOT AN ERROR RATE, AND THE TWO REMEDIES MEAN DIFFERENT THINGS.
+  // `sentences_removed` means the block carried a real answer and some
+  // narration around it. `block_replaced` means the whole reply was
+  // deliberation and the user would have read a monologue — that is the
+  // number that measures the defect this guard exists for, and it should
+  // fall as the prompt and the thinking channel improve. A rising
+  // `block_replaced` rate on one `dispatch_path` localises the producer.
+  V5EgressProcessNarrationDetected: "v5.egress.process_narration_detected",
+
+  // F6 — the defaulted-value egress invariant fired on an analysis-bearing
+  // conversational answer over a run whose engine reported defaulted values.
+  // Payload: { request_id, scenario_id, dispatch_path, defaulted_count,
+  //            disclosure_added, suppressed_count, duplicates_removed }.
+  //
+  // ⭐ WHAT THIS IS FOR, AND WHY IT IS NOT AN ALARM. The deterministic
+  // composers already emit the disclosure themselves, so a healthy turn on a
+  // defaulted run reports `disclosure_added: false` — this layer found the
+  // sentence already there and appended nothing. A rising
+  // `disclosure_added: true` rate is therefore NOT an error rate: it measures
+  // how much traffic is reaching the user through the GENERIC ROUTER, i.e.
+  // through the path the deterministic composers never see. That is the number
+  // worth watching, because it is the one that was silently 100% of the harm
+  // while the whole disclosure machinery sat dark.
+  //
+  // `suppressed_count > 0` is the sharper signal: an answer asserted stability
+  // over defaulted inputs and this layer stood it down. On the deterministic
+  // paths that should be structurally impossible (the axis is collapsed
+  // upstream), so a non-zero count there means a composer regressed.
+  V5DefaultedValueEgressApplied: "v5.egress.defaulted_value_applied",
+
+  // ⭐⭐ ROADMAP 2.1265 — the blocker/claim MUTUAL-EXCLUSION invariant fired: a
+  // reply asserted the model holds a value for an option × factor pair whose own
+  // live blocker says it is missing, and the contradicting sentence(s) were
+  // corrected at egress. Payload: { request_id, scenario_id, dispatch_path,
+  // option_id, factor_id, contradiction_count, ungrounded_value_count }.
+  //
+  // ⚠ ANY non-zero count is a REAL fabrication that reached egress, not a
+  // hygiene signal. The guard is inert without a live missing-value blocker AND
+  // a sentence naming that pair AND an unattributed number, so it cannot fire on
+  // ordinary prose — measured at 0 false positives over 688 live replies. A
+  // rising rate here means the upstream composer's context is not carrying the
+  // blocked slots, which is the root cause this layer backstops rather than
+  // fixes.
+  V5BlockedSlotClaimRefused: "v5.egress.blocked_slot_claim_refused",
+
+  // V5 Phase 2 workstream E — PLoT response carries non-finite numeric
+  // value (NaN / +Infinity / -Infinity) at ingress. Walker is structural
+  // so any new PLoT field is covered automatically. Payload:
+  // { request_id, session_id, field_path, value_repr }.
+  // Handler responds by throwing HandlerInvocationFailedError; UI surfaces
+  // the standard recovery chip via buildFailureResponse.
+  PlotResponseInvalidNumeric: "v5.plot_response.invalid_numeric",
+
+  // V5 Phase 2 workstream C — defence-in-depth signal from the display
+  // formatters. Workstream E rejects non-finite values at ingress; if a
+  // value still reaches `formatProbability` / `formatPercentagePoints`
+  // outside the legal range, this event fires so ops can trace the
+  // upstream root cause. Payload: { field_path, value_kind, detail }.
+  // value_kind: 'non_finite' (NaN/Infinity) | 'out_of_range' (<0 or >1).
+  ProbabilityOutOfRange: "v5.probability_out_of_range",
+
+  // V5 Phase 2 workstream B — Sonnet's draft_graph narration explicitly
+  // states a node/edge count that DISAGREES with the final post-repair
+  // graph. Dispatcher prefers the deterministic fallback in this case
+  // and emits this event so ops can chase the upstream prompt drift.
+  // Payload: { request_id, final_node_count, final_edge_count,
+  //            narration_node_count, narration_edge_count,
+  //            narration_length }.
+  // Strict semantic — only real mismatches fire here. The matched-but-
+  // graph-shaped suppression case is a separate event below
+  // (DraftNarrationCountSuppressed) so ops dashboards / alerts that
+  // page on this event keep their original baseline.
+  DraftNarrationCountMismatch: "v5.draft_narration.count_mismatch",
+  // brief brief-display-safe-analysis A2 — Sonnet's narration carried
+  // node/edge-count wording that AGREED with the final graph, but the
+  // wording itself is graph-shaped framing the brief forbids. The
+  // dispatcher replaces it with the decision-language fallback. Distinct
+  // from DraftNarrationCountMismatch so ops can track Sonnet's residual
+  // count-shaped narration rate without polluting the mismatch alert.
+  // Payload: { request_id, final_node_count, final_edge_count,
+  //            narration_node_count, narration_edge_count,
+  //            narration_length }.
+  DraftNarrationCountSuppressed: "v5.draft_narration.count_suppressed",
+
+  // V5 post-draft coaching gated-hybrid composer — which source filled
+  // the sentence-4 assumption (or replaced the whole response). Emitted
+  // by the draft_graph dispatcher after buildPostDraftNarrative runs on
+  // the success path. Category/count only — never logs raw user or
+  // coaching text. Payload:
+  // { request_id, scenario_id,
+  //   assumption_source: 'coaching_summary' | 'strengthen_item_detail'
+  //                    | 'strengthen_item_label' | 'bias_finding'
+  //                    | 'coaching_bias_signal' | 'uncertainty_driver'
+  //                    | 'deterministic_fallback',
+  //   coaching_summary_present: boolean,
+  //   coaching_summary_passed_gate: boolean,
+  //   coaching_summary_reject_reason: GateRejectReason | null,
+  //   coaching_summary_style_rewritten: boolean,   // RC4: em/en dash
+  //                                                // rewritten in place
+  //   fallback_reason: 'gate_rejected' | 'readiness_gated' | 'no_candidate'
+  //                    | null,
+  //   strengthen_items_count: number,
+  //   bias_findings_count: number,
+  //   coaching_bias_signals_count: number }.
+  //
+  // GateRejectReason values: 'empty' | 'too_short' | 'too_long' |
+  //   'internal_id' | 'schema_term' | 'graph_shape' |
+  //   'premature_recommendation' | 'question_shaped' |
+  //   'trailing_punctuation' | 'awkward_grammar' | 'markdown' |
+  //   'no_decision_framing' | 'no_tradeoff_or_gap' | 'no_next_step'.
+  // ('em_dash' retired by RC4 proportionate remedies — a style offence
+  //  is rewritten in place by the gate, never rejected.)
+  V5PostDraftCoachingSourceSelected: "v5.post_draft_coaching.source_selected",
+
+  // V5 Phase 2 workstream A — post-analysis coaching wrapper fired.
+  // SUCCESS telemetry of the post-analysis chip wrapper: an analyse-stage
+  // direct_answer with a fresh run_analysis fact yielded ≥1
+  // review-card-derived chip. NOT an empty-answer salvage — that is
+  // v5.coaching.empty_answer_recovered (V5CoachingEmptyAnswerRecovered);
+  // conflating the two caused a real misdiagnosis in the 11 Jul manual
+  // test (1.16j). No fact is committed — recovery state travels on this
+  // event only (see post-analysis-wrapper.ts's result doc comment; the
+  // earlier version of this comment predated the P0 fix that dropped the
+  // persisted fact). Name is frozen (deliberate-update-only registry) —
+  // clarity lives in this comment and at the emit site, not in a rename.
+  // Payload: { request_id, session_id, chip_count, selected_card_count,
+  //   answer_text_hash, generated_chip_ids, selected_review_card_ids,
+  //   freshness_at_response }.
+  PostAnalysisDirectAnswerRecovered: "v5.post_analysis.direct_answer_recovered",
+  // Companion to ...Recovered: emitted when the wrapper's trigger
+  // conditions fail (or unsupported card_types are filtered out).
+  // Payload: { request_id, session_id, reason, unsupported_count? }.
+  // reason: 'no_run_fact' | 'stale_analysis' | 'no_review_cards'
+  //       | 'unsupported_chip_actions' | 'non_post_analysis_stage'
+  //       | 'freshness_unknown'.
+  PostAnalysisDirectAnswerRecoverySkipped: "v5.post_analysis.direct_answer_recovery_skipped",
+
+  // CI hygiene baseline (claude-v5/ci-hygiene-baseline) — pre-existing live
+  // emit() call sites that were never registered, causing Telemetry Event
+  // Name Validation to fail on every staging push. Registry-only addition;
+  // no new emissions. Each entry corresponds to one or more currently active
+  // emit() sites in src/ (xml_parse_fallback fires from three sites, the
+  // streaming preflight failure from two, the rest from one each).
+  EditGraphNoOperations: "edit_graph.no_operations",
+  StreamingGeneratorPreflightFailure: "streaming.generator_preflight_failure",
+  DeterministicPmsFallbackUsed: "deterministic.pms_fallback_used",
+  V4PmsFallbackUsed: "v4.pms_fallback_used",
+  DeterministicBannedTermDetected: "deterministic.banned_term_detected",
+  OrchestratorDiagnosticsPreambleStripped: "orchestrator.diagnostics_preamble_stripped",
+  OrchestratorXmlParseFallback: "orchestrator.xml_parse_fallback",
+  CeeStage2EdgeCountInvariantViolated: "cee.stage2.edge_count_invariant_violated",
+  CeePostEnrichInvariantViolation: "cee.post_enrich.invariant_violation",
+
+  // Lane CEE-D (edit-loop reliability) — additive parse-shape recovery
+  // event: parseEditGraphResponse received a BARE SINGLE-OPERATION object
+  // (either emitted directly by the model, or produced by the greedy
+  // object extraction slicing the first op out of a prose-wrapped
+  // single-op legacy array) and wrapped it into `operations: [op]`
+  // instead of failing with 'v2 response missing required "operations"
+  // array'. Payload: { op } — the operation kind only, no user text.
+  EditGraphBareSingleOpWrapped: "edit_graph.bare_single_op_wrapped",
+
+  // Lane CEE-D (edit-loop reliability) — relative-delta resolution at the
+  // set_factor_value dispatch seam (turn-executor STEP 2, before
+  // validateToolCall). A proposal carrying a relative percent expression
+  // (structured { value, unit:'%' } with increase/decrease, or a string
+  // "+5%"/"-10%") was resolved against the factor's CURRENT value into an
+  // absolute `set` proposal. Live trace: request_id baca4f1c ("increase
+  // it slightly by 5%" → PARAMETER_INVALID → recovered template).
+  // Payload (system ids + closed enums only — no user values):
+  //   - request_id / scenario_id
+  //   - handler_id: 'set_factor_value'
+  //   - target_id: node id
+  //   - direction: 'increase' | 'decrease'
+  //   - source_shape: 'structured_percent' | 'string_percent'
+  //   - value_unit_guard_skipped: boolean — the P0-A containment guard is
+  //     bypassed for the resolved proposal because the % token was
+  //     deliberately consumed by the resolution, not silently dropped.
+  V5RelativeDeltaResolved: "v5.turn_executor.relative_delta_resolved",
+
+  // ⭐ V5CalibrationConsentWithheld — the user's message withheld consent to
+  // apply anything this turn ("show me the number before applying it", "do
+  // not change the graph until I confirm") and the action layer refused to
+  // mutate. Emitted at TWO layers, distinguished by `layer`:
+  //   - 'step2_gate'       — a mutating proposal was refused BEFORE validate
+  //                          / execute; the user got a deterministic preview.
+  //   - 'commit_backstop'  — a mutation reached the commit closure anyway and
+  //                          its graph write was stripped. This should be
+  //                          UNREACHABLE; a non-zero rate means a mutating
+  //                          route exists that the STEP 2 gate does not know
+  //                          about, and is a defect, not noise.
+  // Payload also carries `rule` (which consent phrasing matched) and, on the
+  // calibration path, `probability_value` / `threshold_value` /
+  // `matched_phrase` so the event proves WHICH number was offered — the
+  // witnessed defect stored the threshold (0.03) where the probability
+  // (0.70) belonged.
+  V5CalibrationConsentWithheld: "v5.turn_executor.calibration_consent_withheld",
+
+  // ⭐⭐ V5MutationWarrantAbsent (INV-1, ROADMAP 2.652) — a graph-mutating
+  // proposal arrived on a turn carrying NO affirmative mutation warrant: the
+  // user's message asked for no change, they clicked no typed mutation chip,
+  // and the turn resumed no proposal they had confirmed. The action layer
+  // DEMOTED it to the propose-confirm channel instead of applying it.
+  //
+  // The AFFIRMATIVE twin of V5CalibrationConsentWithheld above. That event
+  // fires when the user said "do not apply"; this one fires when the user said
+  // nothing about applying at all — the case the walk witnessed live on
+  // `8687a31` ("Open the analysis panel and show me the option comparison" →
+  // "Added constraint: ... Applied", no chip).
+  //
+  // Emitted at TWO layers, distinguished by `layer`:
+  //   - 'step2_gate'      — demoted BEFORE validate/execute; the user got a
+  //                         chip offering the change. This is the product
+  //                         behaviour and a healthy non-zero rate.
+  //   - 'commit_backstop' — a handler mutation reached the commit closure
+  //                         anyway and its graph write was stripped. This
+  //                         should be UNREACHABLE; a non-zero rate means a
+  //                         mutating route exists that the STEP 2 gate does
+  //                         not cover, and is a defect, not noise.
+  // Payload carries `handler_id` and, on the gate layer, `demotion` — whether
+  // the proposal was successfully offered as a chip (`offered`) or the emit
+  // helper refused the copy (`emit_refused:<reason>`), so a demotion that
+  // silently DROPS a change is visible rather than looking like a clean refusal.
+  V5MutationWarrantAbsent: "v5.turn_executor.mutation_warrant_absent",
+
+  // PR #414 review — F3 fail-open fallback visibility. The STEP 7 commit
+  // chokepoint re-projects the committed D1 graph (wire `analysis_ready` +
+  // the egress label graph) through GraphV3; when that parse FAILS the turn
+  // fails open to the pre-mutation wire projection (the pre-#414 behaviour)
+  // instead of dropping readiness from the wire. Should be unreachable — D1
+  // handlers GraphV3-validate the mutated graph and the persistence merge
+  // only restores top-level fields — so any hit is a merge-seam / schema
+  // drift signal that must be dashboard-visible, not warn-log-only.
+  // Content-free payload:
+  //   request_id, scenario_id: string  (correlation only)
+  //   handler_id: string | null        (closed handler enum)
+  //   first_issue_path: string         (first zod issue path, dot-joined —
+  //                                     schema keys/indices only, never values)
+  V5CommittedGraphReprojectionFailed:
+    "v5.turn_executor.committed_graph_reprojection_failed",
+
+  // V5 post-analysis exploration intercept — fires when route-v2's
+  // `tryPostAnalysisLabelIntercept` short-circuits a chip-click /
+  // free-text submission that would otherwise dispatch into V4
+  // `edit_graph` and no-op. Two predicates share the event so
+  // dashboards can attribute hits to:
+  //   - 'bare_label'       — forward-looking gate (new chips and
+  //                          free-text label submissions).
+  //   - 'legacy_fill_in'   — catches the EXACT in-flight failing
+  //                          shape `Change <known label> [—|–|-]`
+  //                          rendered by the pre-Touch-4
+  //                          `buildLabelChip` in
+  //                          `compose/edit-clarify-response.ts`.
+  //                          Can be retired once that chip's submit
+  //                          message has bled through deployed UIs.
+  //
+  // Payload (structural enums + booleans only — NO label text):
+  //   - request_id: string
+  //   - scenario_id: string
+  //   - predicate: 'bare_label' | 'legacy_fill_in'
+  //   - match_kind: 'exact'
+  //   - node_kind: string — the matched graph node's `kind` field
+  //     ('factor' | 'option' | 'driver' | ...); not enumerated so a
+  //     future kind doesn't require a telemetry-registry edit.
+  //   - chips_emitted: number — always 3 in the current composer;
+  //     dashboards can alert on drift if a future change reduces it.
+  //
+  // No label text crosses the wire. The matched node's `label`
+  // surfaces ONLY in the user-facing `assistant_text` via the
+  // composer in `routing/post-analysis-label-intercept.ts`.
+  V5PostAnalysisLabelIntercept: "v5.post_analysis_label_intercept",
+
+  // V5 link-safe response floor — analysis headline Case-E fallback. Fires
+  // from src/orchestrator-v5/tools/handlers/run-analysis.ts when the
+  // deterministic headline builder chooses the minimal Case-E branch
+  // (`{label} currently leads.`) because stronger cases (A/B/C/D) did not
+  // qualify. Surfaces *why* the stronger cases were skipped so we can tune
+  // the strict gates over time. Metadata-only — no user prose or label
+  // text crosses the wire.
+  V5HeadlineFellBack: "v5.headline.fell_back",
+
+  // V5 link-safe response floor — chip floor. Fires from
+  // src/orchestrator-v5/compose/chip-generator.ts. EmptyIntentional is
+  // emitted when a 200 response legitimately has no chips (clarification,
+  // terminal acknowledgement, error recovery, or no safe floor available).
+  // FloorApplied is emitted when the generator would otherwise return an
+  // empty array but the floor mechanism picks a single safe deterministic
+  // chip based on `analysisReady.status` / handler facts / freshness. Both
+  // events carry only reason classes + booleans/counts — no user text.
+  V5ChipsEmptyIntentional: "v5.chips.empty_intentional",
+  V5ChipsFloorApplied: "v5.chips.floor_applied",
+  // ROADMAP 1.20(b) — chip-sameness guard. Fires when ANY candidate chip
+  // this turn computed (raw rules + floor) exactly matches a chip offered
+  // on the immediately-prior turn (`most_recent_pending_actions` chip_id
+  // set) — the generator drops the repeated chips and ships only the
+  // survivors (an honest empty set when EVERY candidate was a repeat), so
+  // chip selection varies turn to turn instead of looping the same
+  // suggestion regardless of content. Payload: suppressed chip ids +
+  // survivor count only (no user text).
+  V5ChipsRecentlyOfferedSuppressed: "v5.chips.recently_offered_suppressed",
+
+  // V5 Lane 2 — egress chip-quality finalizer aggregate. Fires from
+  // src/orchestrator-v5/compose/output-safety.ts (the egress chokepoint)
+  // when the deterministic finalizer drops (unsafe/generic), dedupes, or
+  // budget-trims the response's chips. Content-free: scalar counts +
+  // request_id + bounded exit_path only — no user copy. Diagnostic-only
+  // (no Datadog metric); per-chip detail is a separate v5.chip.suppressed
+  // structured log.
+  V5ChipsFinalized: "v5.chips.finalized",
+
+  // V6 dual-model draft enrichment (CEE_V6_DUAL_DRAFT_ENABLED, default OFF).
+  // Fires from src/cee/dual-draft/. Content-free: counts, coded reasons,
+  // model ids and latencies only — proposal free text never leaves the stage.
+  // M2Outcome: one per enrichment attempt (outcome kind + latency + model).
+  // MergeReport: exact-one-bucket accounting (applied / artifacts / failure-
+  // code histogram / post_merge_valid). Degraded: the stage returned the M1
+  // graph with the coded reason (fail-open is recorded, never silent).
+  V6DualDraftM2Outcome: "v6.dual_draft.m2_outcome",
+  V6DualDraftMergeReport: "v6.dual_draft.merge_report",
+  V6DualDraftDegraded: "v6.dual_draft.degraded",
+
+  // ROADMAP 2.474 — the coach's `propose_structural_edit` tool composed a
+  // batch, and the GROUNDING VALIDATOR judged it. Emitted once per tool
+  // composition, on BOTH outcomes: an ungrounded batch is a real event, not a
+  // silent retry, and the rejection-code histogram is how we find out whether
+  // the grounding table is doing its job or the model is fighting it.
+  // REDACTED by construction: structural rejection code + counts only. The
+  // rejection REASON is not carried — it quotes node ids and labels.
+  V5StructuralEditToolComposed: "v5.structural_edit_tool.composed",
+  // The entry decision (A9): whether the tool engaged on a turn the rulebook
+  // did not claim, and if not, which gate stopped it. This is the counter that
+  // tells us whether the "four turns and nothing applies" dead-end is actually
+  // being rescued, rather than merely having a rescue path in the code.
+  V5StructuralEditToolEntry: "v5.structural_edit_tool.entry",
+
+  // ⭐ DRAFT-QUALITY PASS (src/cee/draft-quality/). CeeDraftQuality is emitted on
+  // EVERY assessed draw — nominated or not, judged or not, redrawn or not, and
+  // on every fail-open arm. That is deliberate: a repair pass whose fail-open is
+  // silent converts a measurable problem into an unmeasurable one, and this
+  // estate cannot currently answer "is the drafter getting better or worse?"
+  // without a bespoke 16-draw experiment. CeeDraftQualityRedraw is emitted once
+  // per turn on which a redraw was actually spent, and carries `improved` — the
+  // acceptance metric for the whole capability (a redraw rate that rises while
+  // `improved` stays flat is money and latency spent reproducing the same
+  // failure; trap 23's shape, and reporting both is the only way to see it).
+  // Coded reasons, counts and model ids only — no labels, no brief content.
+  CeeDraftQuality: "cee.draft_graph.quality",
+  CeeDraftQualityRedraw: "cee.draft_graph.quality_redraw",
+
+  // ⭐ THE OPTION→FACTOR MAGNITUDE CENSUS (src/cee/draft/records/
+  // option-magnitude-census.ts). Emitted FOUR TIMES per drafted graph — once at
+  // each of `before_completion`, `after_completion`, `after_projection` (all
+  // three in the Anthropic draft adapter) and `at_commit` (the V5 commit seam,
+  // on every turn that writes a graph). ONE event name with a `point`
+  // discriminator rather than four names: the four are the same measurement of
+  // the same population at four places, and four names would let one of them be
+  // renamed, dropped or diverge in meaning without the others noticing.
+  //
+  // WHY IT EXISTS. Deployed drafts persist options with `interventions: {}` —
+  // 28 of 32 options empty across 8 drafts, 0 of 8 fully valued. Nothing
+  // currently says WHERE the magnitude goes missing, so no fix can be chosen
+  // over the three suspected causes. This is the instrument that says where.
+  //
+  // ⚠ BOTH NUMBERS OR NEITHER. `missing_magnitude` alone cannot distinguish "no
+  // magnitudes" from "no option→factor claims"; `option_factor_edges` is the
+  // denominator that separates them and is also how the instrument reports its
+  // own blindness (a shape it cannot read counts 0 edges, not 0 misses).
+  // Counts, a closed-enum point and an idempotency key only — no labels, no
+  // brief content, no magnitudes.
+  CeeDraftOptionMagnitudeCensus: "cee.draft_graph.option_magnitude_census",
 } as const;
 
 /**
@@ -499,10 +3069,47 @@ function sanitizeTelemetryData(data: Event): TelemetryShape {
 }
 
 /**
- * Anthropic pricing (as of 2025-01, Claude 3.5 Sonnet)
+ * Anthropic pricing (updated 2026-03)
  * Update these if pricing changes or using different models
+ * Reference: https://www.anthropic.com/pricing
  */
 const ANTHROPIC_PRICING = {
+  // Claude 4.x family
+  "claude-sonnet-4-20250514": {
+    input_per_1k: 0.003,   // $3 per million input tokens
+    output_per_1k: 0.015,  // $15 per million output tokens
+  },
+  "claude-sonnet-4-6": {
+    input_per_1k: 0.003,   // $3 per million input tokens
+    output_per_1k: 0.015,  // $15 per million output tokens
+  },
+  "claude-sonnet-4-5-20250929": {
+    input_per_1k: 0.003,   // $3 per million input tokens
+    output_per_1k: 0.015,  // $15 per million output tokens
+  },
+  "claude-opus-4-20250514": {
+    input_per_1k: 0.015,   // $15 per million input tokens
+    output_per_1k: 0.075,  // $75 per million output tokens
+  },
+  "claude-opus-4-6": {
+    input_per_1k: 0.015,   // $15 per million input tokens
+    output_per_1k: 0.075,  // $75 per million output tokens
+  },
+  "claude-opus-4-5-20251101": {
+    input_per_1k: 0.015,   // $15 per million input tokens
+    output_per_1k: 0.075,  // $75 per million output tokens
+  },
+  // Claude Haiku 4.5 — current fast tier (replacement for the retired 3.5 Haiku)
+  "claude-haiku-4-5": {
+    input_per_1k: 0.001,   // $1 per million input tokens
+    output_per_1k: 0.005,  // $5 per million output tokens
+  },
+  // Claude 3.5 family (RETIRED by Anthropic 2026-02-19; kept for historical cost tracking)
+  "claude-3-5-haiku-20241022": {
+    input_per_1k: 0.0008,  // $0.80 per million input tokens
+    output_per_1k: 0.004,  // $4 per million output tokens
+  },
+  // Legacy Claude 3 (kept for historical cost tracking)
   "claude-3-5-sonnet-20241022": {
     input_per_1k: 0.003,   // $3 per million input tokens
     output_per_1k: 0.015,  // $15 per million output tokens
@@ -521,7 +3128,12 @@ const ANTHROPIC_PRICING = {
   },
 } as const;
 
+/**
+ * OpenAI pricing (updated 2026-03)
+ * Reference: https://openai.com/pricing
+ */
 const OPENAI_PRICING = {
+  // GPT-5 family
   "gpt-5.2": {
     input_per_1k: 0.015,   // $15 per million input tokens (reasoning model)
     output_per_1k: 0.06,   // $60 per million output tokens (reasoning model)
@@ -530,6 +3142,20 @@ const OPENAI_PRICING = {
     input_per_1k: 0.0003,  // $0.30 per million input tokens (fast tier)
     output_per_1k: 0.0012, // $1.20 per million output tokens (fast tier)
   },
+  // GPT-4.1 family
+  "gpt-4.1-2025-04-14": {
+    input_per_1k: 0.002,   // $2 per million input tokens
+    output_per_1k: 0.008,  // $8 per million output tokens
+  },
+  "gpt-4.1-mini-2025-04-14": {
+    input_per_1k: 0.0004,  // $0.40 per million input tokens
+    output_per_1k: 0.0016, // $1.60 per million output tokens
+  },
+  "gpt-4.1-nano-2025-04-14": {
+    input_per_1k: 0.0001,  // $0.10 per million input tokens
+    output_per_1k: 0.0004, // $0.40 per million output tokens
+  },
+  // GPT-4o family
   "gpt-4o": {
     input_per_1k: 0.0025,  // $2.50 per million input tokens
     output_per_1k: 0.01,   // $10 per million output tokens
@@ -538,6 +3164,32 @@ const OPENAI_PRICING = {
     input_per_1k: 0.00015, // $0.15 per million input tokens
     output_per_1k: 0.0006, // $0.60 per million output tokens
   },
+  // o-series reasoning models
+  "o1": {
+    input_per_1k: 0.015,   // $15 per million input tokens
+    output_per_1k: 0.06,   // $60 per million output tokens
+  },
+  "o1-mini": {
+    input_per_1k: 0.003,   // $3 per million input tokens
+    output_per_1k: 0.012,  // $12 per million output tokens
+  },
+  "o1-preview": {
+    input_per_1k: 0.015,   // $15 per million input tokens
+    output_per_1k: 0.06,   // $60 per million output tokens
+  },
+  "o3": {
+    input_per_1k: 0.01,    // $10 per million input tokens
+    output_per_1k: 0.04,   // $40 per million output tokens
+  },
+  "o3-mini": {
+    input_per_1k: 0.0011,  // $1.10 per million input tokens
+    output_per_1k: 0.0044, // $4.40 per million output tokens
+  },
+  "o4-mini": {
+    input_per_1k: 0.0011,  // $1.10 per million input tokens
+    output_per_1k: 0.0044, // $4.40 per million output tokens
+  },
+  // Legacy models
   "gpt-4-turbo": {
     input_per_1k: 0.01,    // $10 per million input tokens
     output_per_1k: 0.03,   // $30 per million output tokens
@@ -699,23 +3351,8 @@ export function emit(event: string, data: Event) {
           break;
         }
 
-        case TelemetryEvents.RepairAttempted:
-        case TelemetryEvents.RepairStart: {
-          datadogClient.increment("draft.repair.attempted", 1);
-          break;
-        }
-
-        case TelemetryEvents.RepairSuccess: {
-          datadogClient.increment("draft.repair.success", 1);
-          break;
-        }
-
-        case TelemetryEvents.RepairFallback: {
-          datadogClient.increment("draft.repair.fallback", 1, {
-            reason: String((eventData.reason as string) || "unknown"),
-          });
-          break;
-        }
+        // draft.repair.* Datadog counters removed with the assist.draft.repair_*
+        // events (ROADMAP 2.732) — the LLM repair they measured is gone (2.731).
 
         case TelemetryEvents.LegacyProvenance: {
           datadogClient.increment("draft.legacy_provenance.occurrences", 1);
@@ -1023,6 +3660,42 @@ export function emit(event: string, data: Event) {
           break;
         }
 
+        case TelemetryEvents.V5PromptCache: {
+          const cacheMode = String((eventData.cache_mode as string) || "unknown");
+          const cacheHit = eventData.cache_hit;
+          const llmCall = String((eventData.llm_call as number | string) ?? "unknown");
+          // Only emit hit/miss counters for cache_mode === 'enabled' so that
+          // dashboards computing hit / (hit + miss) reflect the true cache
+          // performance. When caching is disabled (config flag off, or
+          // cache_control rejected by the API) the call had no opportunity
+          // to hit; conflating those with misses understates the hit rate.
+          // Disabled paths increment a separate counter tagged by mode.
+          if (cacheMode === "enabled") {
+            if (cacheHit === true) {
+              datadogClient.increment("v5.prompt_cache.hit", 1, {
+                cache_mode: cacheMode,
+                llm_call: llmCall,
+              });
+            } else if (cacheHit === false) {
+              datadogClient.increment("v5.prompt_cache.miss", 1, {
+                cache_mode: cacheMode,
+                llm_call: llmCall,
+              });
+            } else {
+              datadogClient.increment("v5.prompt_cache.unknown", 1, {
+                cache_mode: cacheMode,
+                llm_call: llmCall,
+              });
+            }
+          } else {
+            datadogClient.increment("v5.prompt_cache.disabled", 1, {
+              cache_mode: cacheMode,
+              llm_call: llmCall,
+            });
+          }
+          break;
+        }
+
         case TelemetryEvents.GuardViolation: {
           datadogClient.increment("draft.guard_violation", 1, {
             violation_type: String((eventData.violation_type as string) || "unknown"),
@@ -1049,6 +3722,13 @@ export function emit(event: string, data: Event) {
             datadogClient.histogram(
               "cee.draft_graph.structural_warning_count",
               eventData.draft_warning_count as number,
+            );
+          }
+
+          if (typeof eventData.option_label_collision_count === "number") {
+            datadogClient.histogram(
+              "cee.draft_graph.option_label_collision_count",
+              eventData.option_label_collision_count as number,
             );
           }
 
@@ -1250,26 +3930,6 @@ export function emit(event: string, data: Event) {
           break;
         }
 
-        case TelemetryEvents.CeeKeyInsightRequested: {
-          datadogClient.increment("cee.key_insight.requested", 1);
-          break;
-        }
-
-        case TelemetryEvents.CeeKeyInsightSucceeded: {
-          datadogClient.increment("cee.key_insight.succeeded", 1);
-          break;
-        }
-
-        case TelemetryEvents.CeeKeyInsightFailed: {
-          datadogClient.increment("cee.key_insight.failed", 1, {
-            error_code: String((eventData.error_code as string) || "unknown"),
-            http_status: String(
-              (eventData.http_status as number | string | undefined) || "unknown",
-            ),
-          });
-          break;
-        }
-
         case TelemetryEvents.CeeElicitBeliefRequested: {
           datadogClient.increment("cee.elicit_belief.requested", 1);
           break;
@@ -1359,30 +4019,6 @@ export function emit(event: string, data: Event) {
         }
 
         // Phase 4: Recommendation Narratives metrics
-        case TelemetryEvents.CeeGenerateRecommendationRequested: {
-          datadogClient.increment("cee.generate_recommendation.requested", 1);
-          break;
-        }
-
-        case TelemetryEvents.CeeGenerateRecommendationCompleted: {
-          datadogClient.increment("cee.generate_recommendation.completed", 1);
-          const latencyMs = eventData.latency_ms;
-          if (typeof latencyMs === "number" && Number.isFinite(latencyMs)) {
-            datadogClient.histogram("cee.generate_recommendation.latency_ms", latencyMs);
-          }
-          break;
-        }
-
-        case TelemetryEvents.CeeGenerateRecommendationFailed: {
-          datadogClient.increment("cee.generate_recommendation.failed", 1, {
-            error_code: String((eventData.error_code as string) || "unknown"),
-            http_status: String(
-              (eventData.http_status as number | string | undefined) || "unknown",
-            ),
-          });
-          break;
-        }
-
         case TelemetryEvents.CeeNarrateConditionsRequested: {
           datadogClient.increment("cee.narrate_conditions.requested", 1);
           break;
@@ -1460,6 +4096,28 @@ export function emit(event: string, data: Event) {
           break;
         }
 
+        case TelemetryEvents.PromptStoreJsonColumnDegraded: {
+          // A prompt-store JSONB list column could not be established as a list,
+          // so an empty list was SUBSTITUTED. Nothing downstream can tell that
+          // apart from a genuinely empty column — the substituted `[]` is
+          // byte-identical to a real one at every consumer — so this counter is
+          // the only thing that can ever say it happened. Ops can alert on
+          // `prompt.store.jsonb_column_degraded_total > 0` over a short window.
+          //
+          // Tagged by `column` and `reason` because they are different faults
+          // with the same consequence: "the column is not a list" (data drift
+          // in the row) versus "the string is not JSON" (a bad write), and the
+          // remedies differ. Same reasoning as `session.read_degraded_total`.
+          //
+          // Deliberately NOT tagged with `prompt_id`/`version`: those are
+          // unbounded and belong in the ERROR log line, which carries them.
+          datadogClient.increment("prompt.store.jsonb_column_degraded_total", 1, {
+            column: String((eventData.column as string) || "unknown"),
+            reason: String((eventData.reason as string) || "unknown"),
+          });
+          break;
+        }
+
         case TelemetryEvents.PromptLoaderError: {
           datadogClient.increment("prompt.loader.error", 1, {
             task_id: String((eventData.taskId as string) || "unknown"),
@@ -1480,6 +4138,8 @@ export function emit(event: string, data: Event) {
           datadogClient.increment("prompt.loader.source", 1, {
             source: "default",
             task_id: String((eventData.taskId as string) || "unknown"),
+            reason: String((eventData.reason as string) || "unknown"),
+            cached: String((eventData.cached as boolean | undefined) ?? "unknown"),
           });
           break;
         }
@@ -1575,6 +4235,40 @@ export function emit(event: string, data: Event) {
           break;
         }
 
+        case TelemetryEvents.V5DecisionReviewContractViolation: {
+          // Reason tag is the PRIMARY violated rule code (bounded, low
+          // cardinality); the full set travels on the log payload's `reasons`.
+          // `dropped` (bounded boolean) separates safety-enforced drops from
+          // telemetry-only count-cap breaches on the A/B dashboard (D-11).
+          datadogClient.increment("v5.decision_review.contract_violation", 1, {
+            reason: String((eventData.reason as string) || "unknown"),
+            dropped: String(eventData.dropped === true),
+          });
+          break;
+        }
+
+        case TelemetryEvents.V5LeadingOptionClaimAtEgress: {
+          // T1 layer 3. `reason` is the PRIMARY matched pattern code (bounded
+          // by LEADER_CLAIM_PATTERNS); the full set and the field paths travel
+          // on the log payload. `dropped` separates the observe-only period
+          // (false) from enforcement (true) — the whole point of shipping this
+          // guard dark first is that the two are countable apart.
+          datadogClient.increment("v5.egress.leading_option_claim_withheld_violated", 1, {
+            reason: String((eventData.reason as string) || "unknown"),
+            exit_path: String((eventData.exit_path as string) || "unknown"),
+            dropped: String(eventData.dropped === true),
+          });
+          break;
+        }
+
+        case TelemetryEvents.V5ClaimSafetyFailClosedUnavailable: {
+          datadogClient.increment("v5.claim_safety.fail_closed_unavailable_total", 1, {
+            exit_path: String((eventData.exit_path as string) || "unknown"),
+            outcome: String((eventData.outcome as string) || "unknown"),
+          });
+          break;
+        }
+
         case TelemetryEvents.DecisionReviewIslFallback: {
           datadogClient.increment("cee.decision_review.isl_fallback", 1, {
             reason: String((eventData.reason as string) || "unknown"),
@@ -1660,6 +4354,67 @@ export function emit(event: string, data: Event) {
               target: String((eventData.target as string) || "unknown"),
               status: String(eventData.status),
             });
+          }
+          break;
+        }
+
+        case TelemetryEvents.SessionReadDegraded: {
+          // V5 Slice B — silent-session-loss alerting hook. Count every read
+          // failure so ops can alert on `session.read_degraded_total > 0`
+          // over a short window (e.g. 5 min). Tags carry the error shape so
+          // the dashboard can distinguish "RPC down" from "config drift"
+          // from "row-shape parse failure".
+          datadogClient.increment("session.read_degraded_total", 1, {
+            error_code: String((eventData.error_code as string) || "unknown"),
+            severity: String((eventData.severity as string) || "warning"),
+          });
+          break;
+        }
+
+        case TelemetryEvents.CqeExtraction: {
+          // CQE per-turn aggregate metrics. Fields are a subset of the 10
+          // CqeExtractionSummary fields — patterns_matched is omitted here
+          // (high cardinality goes to the routing log only), as are the
+          // low-signal message_too_long and ambiguous_phrasing_detected.
+          datadogClient.increment("cqe.extraction.completed", 1);
+          if (typeof eventData.timeout === "boolean" && eventData.timeout) {
+            datadogClient.increment("cqe.extraction.timeout", 1);
+          }
+          if (
+            typeof eventData.word_range_missed === "boolean" &&
+            eventData.word_range_missed
+          ) {
+            datadogClient.increment("cqe.extraction.word_range_missed", 1);
+          }
+          if (typeof eventData.message_length === "number") {
+            datadogClient.histogram(
+              "cqe.extraction.message_length",
+              eventData.message_length,
+            );
+          }
+          if (typeof eventData.result_count === "number") {
+            datadogClient.histogram(
+              "cqe.extraction.result_count",
+              eventData.result_count,
+            );
+          }
+          if (typeof eventData.cqe_match_count === "number") {
+            datadogClient.gauge(
+              "cqe.extraction.cqe_match_count",
+              eventData.cqe_match_count,
+            );
+          }
+          if (typeof eventData.compromise_match_count === "number") {
+            datadogClient.gauge(
+              "cqe.extraction.compromise_match_count",
+              eventData.compromise_match_count,
+            );
+          }
+          if (typeof eventData.duration_ms === "number") {
+            datadogClient.histogram(
+              "cqe.extraction.duration_ms",
+              eventData.duration_ms,
+            );
           }
           break;
         }

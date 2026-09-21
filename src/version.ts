@@ -57,3 +57,9 @@ export const GIT_COMMIT_SHA =
  * Short git commit SHA (first 7 characters)
  */
 export const GIT_COMMIT_SHORT = GIT_COMMIT_SHA.slice(0, 7);
+
+/**
+ * Build timestamp (captured at module load time).
+ * Shared by /healthz endpoint and pipeline provenance.
+ */
+export const BUILD_TIMESTAMP = new Date().toISOString();

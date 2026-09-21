@@ -12,7 +12,9 @@ import type {
   GetCompiledOptions,
   ActivePromptResult,
   PostgresStoreConfig,
+  PromptMutationPrecondition,
 } from './interface.js';
+import { PromptMutationConflictError } from './interface.js';
 import type {
   PromptDefinition,
   PromptVersion,
@@ -38,6 +40,8 @@ interface PromptRow {
   status: string;
   active_version: number;
   staging_version: number | null;
+  design_version: string | null;
+  model_config: { staging?: string; production?: string } | null;
   tags: string[];
   created_at: Date | string;
   updated_at: Date | string;
@@ -140,7 +144,7 @@ export class PostgresPromptStore implements IPromptStore {
       // Insert prompt and first version in transaction
       await sql.begin(async (tx) => {
         await tx`
-          INSERT INTO prompts (id, name, description, task_id, status, active_version, tags, created_at, updated_at)
+          INSERT INTO prompts (id, name, description, task_id, status, active_version, design_version, model_config, tags, created_at, updated_at)
           VALUES (
             ${request.id},
             ${request.name},
@@ -148,6 +152,8 @@ export class PostgresPromptStore implements IPromptStore {
             ${request.taskId},
             'draft',
             1,
+            ${request.designVersion ?? null},
+            ${request.modelConfig ? JSON.stringify(request.modelConfig) : null},
             ${request.tags ?? []},
             ${now},
             ${now}
@@ -188,7 +194,7 @@ export class PostgresPromptStore implements IPromptStore {
 
     try {
       const prompts = await sql<PromptRow[]>`
-        SELECT id, name, description, task_id, status, active_version, staging_version, tags, created_at, updated_at
+        SELECT id, name, description, task_id, status, active_version, staging_version, design_version, model_config, tags, created_at, updated_at
         FROM prompts
         WHERE id = ${id}
       `;
@@ -224,28 +230,28 @@ export class PostgresPromptStore implements IPromptStore {
       let prompts: PromptRow[];
       if (filter?.taskId && filter?.status) {
         prompts = await sql<PromptRow[]>`
-          SELECT id, name, description, task_id, status, active_version, staging_version, tags, created_at, updated_at
+          SELECT id, name, description, task_id, status, active_version, staging_version, design_version, model_config, tags, created_at, updated_at
           FROM prompts
           WHERE task_id = ${filter.taskId} AND status = ${filter.status}
           ORDER BY id
         `;
       } else if (filter?.taskId) {
         prompts = await sql<PromptRow[]>`
-          SELECT id, name, description, task_id, status, active_version, staging_version, tags, created_at, updated_at
+          SELECT id, name, description, task_id, status, active_version, staging_version, design_version, model_config, tags, created_at, updated_at
           FROM prompts
           WHERE task_id = ${filter.taskId}
           ORDER BY id
         `;
       } else if (filter?.status) {
         prompts = await sql<PromptRow[]>`
-          SELECT id, name, description, task_id, status, active_version, staging_version, tags, created_at, updated_at
+          SELECT id, name, description, task_id, status, active_version, staging_version, design_version, model_config, tags, created_at, updated_at
           FROM prompts
           WHERE status = ${filter.status}
           ORDER BY id
         `;
       } else {
         prompts = await sql<PromptRow[]>`
-          SELECT id, name, description, task_id, status, active_version, staging_version, tags, created_at, updated_at
+          SELECT id, name, description, task_id, status, active_version, staging_version, design_version, model_config, tags, created_at, updated_at
           FROM prompts
           ORDER BY id
         `;
@@ -297,7 +303,11 @@ export class PostgresPromptStore implements IPromptStore {
     }
   }
 
-  async update(id: string, request: UpdatePromptRequest): Promise<PromptDefinition> {
+  async update(
+    id: string,
+    request: UpdatePromptRequest,
+    precondition?: PromptMutationPrecondition,
+  ): Promise<PromptDefinition> {
     const sql = this.ensureInitialized();
 
     try {
@@ -339,16 +349,29 @@ export class PostgresPromptStore implements IPromptStore {
       }
 
       // Build update
-      await sql`
+      // Note: modelConfig can be explicitly set to null/undefined to clear it
+      const newModelConfig = request.modelConfig !== undefined
+        ? (request.modelConfig ? JSON.stringify(request.modelConfig) : null)
+        : (existing.modelConfig ? JSON.stringify(existing.modelConfig) : null);
+
+      const updatedRows = await sql<{ id: string }[]>`
         UPDATE prompts SET
           name = ${request.name ?? existing.name},
           description = ${request.description ?? existing.description ?? null},
           status = ${request.status ?? existing.status},
           active_version = ${request.activeVersion ?? existing.activeVersion},
           staging_version = ${request.stagingVersion === null ? null : (request.stagingVersion ?? existing.stagingVersion ?? null)},
-          tags = ${request.tags ?? existing.tags}
+          design_version = ${request.designVersion ?? existing.designVersion ?? null},
+          model_config = ${newModelConfig},
+          tags = ${request.tags ?? existing.tags},
+          updated_at = NOW()
         WHERE id = ${id}
+          AND updated_at = ${precondition?.expectedUpdatedAt ?? existing.updatedAt}
+        RETURNING id
       `;
+      if (updatedRows.length === 0) {
+        throw new PromptMutationConflictError(id);
+      }
 
       log.info({ promptId: id }, 'Prompt updated');
 
@@ -404,7 +427,11 @@ export class PostgresPromptStore implements IPromptStore {
     }
   }
 
-  async rollback(id: string, request: RollbackRequest): Promise<PromptDefinition> {
+  async rollback(
+    id: string,
+    request: RollbackRequest,
+    precondition?: PromptMutationPrecondition,
+  ): Promise<PromptDefinition> {
     const sql = this.ensureInitialized();
 
     try {
@@ -420,10 +447,17 @@ export class PostgresPromptStore implements IPromptStore {
 
       const previousActive = existing.activeVersion;
 
-      await sql`
-        UPDATE prompts SET active_version = ${request.targetVersion}
+      const updatedRows = await sql<{ id: string }[]>`
+        UPDATE prompts SET
+          active_version = ${request.targetVersion},
+          updated_at = NOW()
         WHERE id = ${id}
+          AND updated_at = ${precondition?.expectedUpdatedAt ?? existing.updatedAt}
+        RETURNING id
       `;
+      if (updatedRows.length === 0) {
+        throw new PromptMutationConflictError(id);
+      }
 
       log.info(
         {
@@ -548,7 +582,11 @@ export class PostgresPromptStore implements IPromptStore {
     }
   }
 
-  async delete(id: string, hard = false): Promise<void> {
+  async delete(
+    id: string,
+    hard = false,
+    precondition?: PromptMutationPrecondition,
+  ): Promise<void> {
     const sql = this.ensureInitialized();
 
     try {
@@ -557,12 +595,26 @@ export class PostgresPromptStore implements IPromptStore {
         throw new Error(`Prompt '${id}' not found`);
       }
 
+      const expectedUpdatedAt =
+        precondition?.expectedUpdatedAt ?? existing.updatedAt;
+      let affectedRows: Array<{ id: string }>;
       if (hard) {
         // CASCADE will delete versions too
-        await sql`DELETE FROM prompts WHERE id = ${id}`;
+        affectedRows = await sql<{ id: string }[]>`
+          DELETE FROM prompts
+          WHERE id = ${id} AND updated_at = ${expectedUpdatedAt}
+          RETURNING id
+        `;
       } else {
         // Soft delete - archive
-        await sql`UPDATE prompts SET status = 'archived' WHERE id = ${id}`;
+        affectedRows = await sql<{ id: string }[]>`
+          UPDATE prompts SET status = 'archived', updated_at = NOW()
+          WHERE id = ${id} AND updated_at = ${expectedUpdatedAt}
+          RETURNING id
+        `;
+      }
+      if (affectedRows.length === 0) {
+        throw new PromptMutationConflictError(id);
       }
 
       log.info({ promptId: id, hard }, 'Prompt deleted');
@@ -583,11 +635,12 @@ export class PostgresPromptStore implements IPromptStore {
     const sql = this.ensureInitialized();
 
     try {
-      // Find production prompt for this task
+      // Find prompt for this task (exclude archived, allow draft/staging/production)
+      // Version selection is controlled by stagingVersion vs activeVersion, not prompt status
       const prompts = await sql`
-        SELECT id, active_version, staging_version
+        SELECT id, active_version, staging_version, model_config
         FROM prompts
-        WHERE task_id = ${taskId} AND status = 'production'
+        WHERE task_id = ${taskId} AND status != 'archived'
       `;
 
       if (prompts.length === 0) {
@@ -637,6 +690,7 @@ export class PostgresPromptStore implements IPromptStore {
         content,
         compiledAt: new Date().toISOString(),
         variables,
+        modelConfig: prompt.model_config ?? undefined,
       };
     } catch (error) {
       emit(TelemetryEvents.PromptStoreError, {
@@ -651,10 +705,11 @@ export class PostgresPromptStore implements IPromptStore {
     const sql = this.ensureInitialized();
 
     try {
+      // Find prompt for this task (exclude archived, allow draft/staging/production)
       const prompts = await sql<PromptRow[]>`
-        SELECT id, name, description, task_id, status, active_version, staging_version, tags, created_at, updated_at
+        SELECT id, name, description, task_id, status, active_version, staging_version, design_version, model_config, tags, created_at, updated_at
         FROM prompts
-        WHERE task_id = ${taskId} AND status = 'production'
+        WHERE task_id = ${taskId} AND status != 'archived'
       `;
 
       if (prompts.length === 0) {
@@ -711,6 +766,8 @@ export class PostgresPromptStore implements IPromptStore {
       })),
       activeVersion: prompt.active_version,
       stagingVersion: prompt.staging_version ?? undefined,
+      designVersion: prompt.design_version ?? undefined,
+      modelConfig: prompt.model_config ?? undefined,
       tags: prompt.tags ?? [],
       createdAt: typeof prompt.created_at === 'string' ? prompt.created_at : prompt.created_at.toISOString(),
       updatedAt: typeof prompt.updated_at === 'string' ? prompt.updated_at : prompt.updated_at.toISOString(),

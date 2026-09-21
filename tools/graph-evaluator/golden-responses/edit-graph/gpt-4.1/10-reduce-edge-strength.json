@@ -1,0 +1,66 @@
+{
+  "brief_id": "10-reduce-edge-strength",
+  "model": "gpt-4.1",
+  "prompt_hash": "sha256:2d6fcbc9d09869a271bc93df1b5bbb450a4a5ee3053d9395c3143b810c973cc5",
+  "response": {
+    "model_id": "gpt-4.1",
+    "brief_id": "10-reduce-edge-strength",
+    "status": "success",
+    "raw_text": "{\n  \"operations\": [\n    {\n      \"op\": \"update_edge\",\n      \"path\": \"/edges/fac_investment->risk_financial/strength.mean\",\n      \"value\": 0.35,\n      \"old_value\": 0.65,\n      \"impact\": \"high\",\n      \"rationale\": \"Investment has a weaker effect on financial exposure due to improved vendor rates, reducing the risk from spending.\"\n    }\n  ],\n  \"removed_edges\": [],\n  \"warnings\": [],\n  \"coaching\": {\n    \"summary\": \"The risk posed by investment to financial exposure has been reduced, reflecting successful vendor negotiations. This lowers the risk pathway from expansion spending to overall financial exposure.\",\n    \"rerun_recommended\": true\n  }\n}",
+    "parsed_graph": {
+      "operations": [
+        {
+          "op": "update_edge",
+          "path": "/edges/fac_investment->risk_financial/strength.mean",
+          "value": 0.35,
+          "old_value": 0.65,
+          "impact": "high",
+          "rationale": "Investment has a weaker effect on financial exposure due to improved vendor rates, reducing the risk from spending."
+        }
+      ],
+      "removed_edges": [],
+      "warnings": [],
+      "coaching": {
+        "summary": "The risk posed by investment to financial exposure has been reduced, reflecting successful vendor negotiations. This lowers the risk pathway from expansion spending to overall financial exposure.",
+        "rerun_recommended": true
+      }
+    },
+    "extraction_attempted": false,
+    "latency_ms": 2520,
+    "input_tokens": 5281,
+    "output_tokens": 156,
+    "est_cost_usd": 0.011810000000000001,
+    "pricing_source": "api_usage",
+    "parsed_json": {
+      "operations": [
+        {
+          "op": "update_edge",
+          "path": "/edges/fac_investment->risk_financial/strength.mean",
+          "value": 0.35,
+          "old_value": 0.65,
+          "impact": "high",
+          "rationale": "Investment has a weaker effect on financial exposure due to improved vendor rates, reducing the risk from spending."
+        }
+      ],
+      "removed_edges": [],
+      "warnings": [],
+      "coaching": {
+        "summary": "The risk posed by investment to financial exposure has been reduced, reflecting successful vendor negotiations. This lowers the risk pathway from expansion spending to overall financial exposure.",
+        "rerun_recommended": true
+      }
+    }
+  },
+  "scores": {
+    "valid_json": true,
+    "correct_shape": true,
+    "operation_types_correct": false,
+    "topology_compliant": true,
+    "has_impact_rationale": true,
+    "correct_ordering": true,
+    "empty_ops_handled": true,
+    "coaching_present": true,
+    "path_syntax_valid": false
+  },
+  "overall": 0.8,
+  "captured_at": "2026-03-14T16:39:41.327Z"
+}

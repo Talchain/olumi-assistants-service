@@ -1,0 +1,1 @@
+We need to decide whether to build our own billing system in-house or buy an off-the-shelf platform like Stripe Billing or Chargebee. Building would take an estimated 9 months and two engineers; buying costs roughly £60k a year but constrains our pricing models. We must decide by the end of Q3 and keep total first-year cost under £250k.

@@ -1,0 +1,65 @@
+{
+  "name": "validation-blocker",
+  "description": "Validation fails with blocking errors. Tests Tier 3 subset assertions for error detection.",
+  "brief": "Should we pivot the product or continue on current path?",
+  "endpoint": "draft_graph",
+  "recorded_response": {
+    "graph": {
+      "version": "1",
+      "default_seed": 42,
+      "nodes": [
+        { "id": "decision_1", "kind": "decision", "label": "Should we pivot or continue on current path?" },
+        { "id": "opt_pivot", "kind": "option", "label": "Pivot the product" },
+        { "id": "opt_continue", "kind": "option", "label": "Continue current path" },
+        { "id": "fac_market_fit", "kind": "factor", "label": "Product-Market Fit", "category": "controllable" },
+        { "id": "fac_resources", "kind": "factor", "label": "Available Resources", "category": "observable" },
+        { "id": "outcome_success", "kind": "outcome", "label": "Business Success" }
+      ],
+      "edges": [
+        { "from": "decision_1", "to": "opt_pivot", "strength_mean": 1, "strength_std": 0.01, "belief_exists": 1, "effect_direction": "positive" },
+        { "from": "decision_1", "to": "opt_continue", "strength_mean": 1, "strength_std": 0.01, "belief_exists": 1, "effect_direction": "positive" },
+        { "from": "opt_pivot", "to": "fac_market_fit", "strength_mean": 1, "strength_std": 0.01, "belief_exists": 1, "effect_direction": "positive" },
+        { "from": "fac_market_fit", "to": "outcome_success", "strength_mean": 0.8, "strength_std": 0.15, "belief_exists": 0.9, "effect_direction": "positive" },
+        { "from": "fac_resources", "to": "outcome_success", "strength_mean": 0.5, "strength_std": 0.2, "belief_exists": 0.85, "effect_direction": "positive" },
+        { "from": "outcome_success", "to": "goal_missing", "strength_mean": 0.9, "strength_std": 0.1, "belief_exists": 1, "effect_direction": "positive" }
+      ],
+      "meta": { "roots": [], "leaves": [], "suggested_positions": {}, "source": "assistant" }
+    },
+    "validation": {
+      "passed": false,
+      "errors": [
+        {
+          "code": "MISSING_GOAL",
+          "severity": "error",
+          "message": "Graph must contain at least one goal node",
+          "path": "nodes",
+          "context": { "node_kinds_found": ["decision", "option", "factor", "outcome"] }
+        },
+        {
+          "code": "INVALID_EDGE_REF",
+          "severity": "error",
+          "message": "Edge references non-existent node 'goal_missing'",
+          "path": "edges[5]",
+          "context": { "from": "outcome_success", "to": "goal_missing", "missing_node": "goal_missing" }
+        },
+        {
+          "code": "NO_PATH_TO_GOAL",
+          "severity": "error",
+          "message": "No valid path exists from decision to goal",
+          "path": "graph",
+          "context": { "decision_id": "decision_1" }
+        }
+      ],
+      "warnings": []
+    }
+  },
+  "assertions": {
+    "has_decision_node": true,
+    "has_goal_node": false,
+    "option_count_gte": 2,
+    "validation_passes": false,
+    "validation_error_count_gte": 1,
+    "validation_has_error_codes": ["MISSING_GOAL", "INVALID_EDGE_REF"],
+    "validation_warning_count": 0
+  }
+}

@@ -1,0 +1,470 @@
+/**
+ * Stage 6: Boundary — V3/V2/V1 transform + analysis_ready + model_adjustments
+ *
+ * Source: Route handler lines 453-524
+ * This is the final stage — it produces the HTTP response body.
+ * The route handler MUST NOT post-process the response.
+ */
+
+import type { StageContext } from "../types.js";
+import { transformResponseToV3, validateStrictModeV3 } from "../../transforms/schema-v3.js";
+import { transformResponseToV2 } from "../../transforms/schema-v2.js";
+import { mapMutationsToAdjustments, extractConstraintDropBlockers } from "../../transforms/analysis-ready.js";
+import { CEEGraphResponseV3, warnOnUnknownV3Fields } from "../../../schemas/cee-v3.js";
+import { extractZodIssues } from "../../../schemas/llmExtraction.js";
+import { log, emit, TelemetryEvents } from "../../../utils/telemetry.js";
+import { config } from "../../../config/index.js";
+import { getRuntimeEnv } from "../../../config/env-resolver.js";
+import { runGraphDataIntegrityChecks } from "../../transforms/graph-data-integrity.js";
+import { deriveStatedQuantityRoles } from "../../context-integrity/not-modelled-manifest.js";
+
+/**
+ * Deterministic-sweep repair codes that become user-reviewable
+ * `analysis_ready.model_adjustments` rows.
+ *
+ * ⚠ THIS IS AN ALLOWLIST, SO ITS FAILURE MODE IS SILENCE. A repair code that
+ * nobody adds here is simply absent from `model_adjustments` — no error, no log,
+ * and the omission reads exactly like a deliberate exclusion. Exported so
+ * `boundary.test.ts` can assert every code the sweep can emit is classified
+ * either here or in that test's ADJUDICATED-EXCLUDED set, and RED when a new one
+ * appears unclassified.
+ *
+ * ── WHY THE TWO DEDUPLICATION CODES ARE DELIBERATELY *NOT* HERE ─────────────
+ * `DUPLICATE_CAUSAL_EDGE_SUPPRESSED` and `CONFLICTING_CAUSAL_DIRECTION` are
+ * adjudicated OUT, not overlooked. `ModelAdjustment.code` is a CLOSED enum in
+ * the shared contract and its only member that could carry them is
+ * `category_reclassified`, which they are not — neither one reclassifies a
+ * node's category. Filing them under a false code would be worse than the
+ * absence. They do still reach the user: they ride
+ * `trace.repair_summary.deterministic_repairs[]`, which the UI renders. Giving
+ * them a truthful `model_adjustments` code needs a new contract member in
+ * `@talchain/schemas`, which is a boundary change beyond this seam.
+ */
+export const REPAIR_CODE_TO_ADJUSTMENT: Record<string, "category_reclassified"> = {
+  UNREACHABLE_FACTOR_RECLASSIFIED: "category_reclassified",
+};
+// The CONTRACT's own type, not a local restatement. `before` is declared here
+// and has never been populated on the deterministic-sweep path (S2).
+import type { ModelAdjustmentT } from "../../../schemas/analysis-ready.js";
+import { computeDiagnosticChecks } from "../../observability/diagnostic-checks.js";
+import { buildCeeErrorResponse } from "../../validation/pipeline.js";
+
+export async function runStageBoundary(ctx: StageContext): Promise<void> {
+  log.info({ requestId: ctx.requestId, stage: "boundary" }, "Unified pipeline: Stage 6 (Boundary) started");
+
+  if (!ctx.ceeResponse) {
+    // Stage 5 didn't produce a response (early return already handled)
+    return;
+  }
+
+  const schemaVersion = ctx.opts.schemaVersion;
+
+  if (schemaVersion === "v3") {
+    // V3 transform
+    const v3Body = transformResponseToV3(ctx.ceeResponse as any, {
+      brief: ctx.input.brief,
+      requestId: ctx.requestId,
+      strictMode: ctx.opts.strictMode,
+      includeDebug: ctx.opts.includeDebug,
+    });
+
+    // ── Graph data integrity checks (post-V3-transform, pre-validation) ─────
+    // Runs three deterministic corrections:
+    // 1. Factor scale consistency: assert value ≈ raw_value/cap (or raw_value/100 for "%").
+    //    Corrects observed_state.value and matching analysis_ready.options interventions.
+    // 2. Edge field defaults: ensure exists_probability and effect_direction are present.
+    //    Structural edges default to 1.0/"positive"; causal to 0.8/sign-inferred.
+    // 3. Observed-root intercept doctrine: remove duplicate `intercept = observed_state.value`
+    //    from observed root nodes (ISL evaluates non-intervened roots as value + intercept,
+    //    so the duplicate doubles the baseline). Never assigns intercepts.
+    // Mutations are logged in trace.pipeline.repair_summary.graph_data_integrity.
+    //
+    // ⚠ NONE OF THESE READS THE BRIEF, and none may (ROADMAP 2.714 reverted,
+    // 8 Aug 2026). #853 added a fourth check here that read a stated number out
+    // of `ctx.input.brief` and stamped it `source: "user_override"` — the
+    // system's reading of prose, attributed to the user. It was measured
+    // writing values 10^6x wrong, values the user had negated or retracted, and
+    // values bound to the wrong node, all silently. The brief is still passed
+    // so the guard suite can prove it is inert; see the parameter doc on
+    // `runGraphDataIntegrityChecks`.
+    const integrityRepairs = runGraphDataIntegrityChecks(v3Body, ctx.requestId, ctx.input.brief);
+    if (
+      integrityRepairs.scale_consistency_repairs.length > 0 ||
+      integrityRepairs.edge_field_repairs.length > 0 ||
+      integrityRepairs.intercept_population_repairs.length > 0
+    ) {
+      // Attach to pipeline trace so debug bundles capture the corrections.
+      const pipelineTrace = (v3Body as any)?.trace?.pipeline;
+      if (pipelineTrace && typeof pipelineTrace === "object") {
+        const repairSummary = (pipelineTrace as any).repair_summary;
+        if (repairSummary && typeof repairSummary === "object") {
+          (repairSummary as any).graph_data_integrity = integrityRepairs;
+        } else {
+          (pipelineTrace as any).repair_summary = { graph_data_integrity: integrityRepairs };
+        }
+      }
+    }
+
+    // ── A STATED LIMIT STOPS MASQUERADING AS AN OBSERVATION ────────────────
+    //
+    // Measured live 14 Sep 2026, 11 fresh drafts of one brief: in 3 of them the
+    // *"keeping monthly churn under 4%"* limit reached the wire as
+    // `observed_state: { value: 0.04, extractionType: "explicit" }` on the churn
+    // node — the field for what is CURRENTLY TRUE — while `goal_constraints[]`
+    // carried the same magnitude honestly (`<= 0.04`) against the SAME node id.
+    // CEE already knew the role and stored the number in the other field anyway.
+    //
+    // ⛔ THIS IS NOT THE FOURTH INTEGRITY CHECK THE BLOCK ABOVE BANS, and the
+    // distinction is the whole reason it is a separate block rather than a
+    // fifth argument to `runGraphDataIntegrityChecks`. That prohibition is
+    // about WRITING A MAGNITUDE READ OUT OF PROSE and attributing it to the
+    // user (#853: values 10^6x wrong, values the user had retracted, stamped
+    // `source: "user_override"`). This writes NO value, moves NO magnitude and
+    // never touches `source`. It stamps ONE optional role field, derived from
+    // `goal_constraints[]` — a producer already on the graph, whose rows the
+    // drafting model emitted and the schema validated — and the brief is read
+    // only to LOCATE that producer's own `source_quote`. Its effect on a user's
+    // attribution runs the opposite way to #853's: it WITHDRAWS a claim the
+    // product was making, never adds one.
+    //
+    // The derivation is `deriveNotModelledManifest`'s own, called through the
+    // same five functions in the same order, so the node stamp and the manifest
+    // row cannot disagree about one figure. Nodes with no `observed_state.value`
+    // are skipped: there is no stored position for a role to describe, and an
+    // option carrier (`CANDIDATE_COLLECTIONS` walks options too) has none.
+    const roleBindings = deriveStatedQuantityRoles(ctx.input.brief, v3Body as unknown);
+    if (roleBindings.length > 0 && Array.isArray((v3Body as any).nodes)) {
+      const roleByNodeId = new Map(roleBindings.map((b) => [b.node_id, b.stated_role]));
+      const stamped: string[] = [];
+      for (const node of (v3Body as any).nodes as Array<Record<string, unknown>>) {
+        const nodeId = typeof node?.id === "string" ? node.id : null;
+        if (nodeId === null) continue;
+        const role = roleByNodeId.get(nodeId);
+        if (role === undefined) continue;
+        const observed = node.observed_state;
+        if (observed === null || typeof observed !== "object") continue;
+        if (typeof (observed as Record<string, unknown>).value !== "number") continue;
+        node.observed_state = { ...(observed as Record<string, unknown>), stated_role: role };
+        stamped.push(nodeId);
+      }
+      if (stamped.length > 0) {
+        log.info(
+          { requestId: ctx.requestId, stage: "boundary", stated_role_stamped: stamped },
+          "Stated-role stamp: node quantities recorded as a stated limit",
+        );
+      }
+    }
+
+    // Surface STRP/repair mutations as model_adjustments (match route handler lines 500-519)
+    const v1Trace = (ctx.ceeResponse as any).trace;
+    const strpMutations = v1Trace?.strp?.mutations;
+    const graphCorrections = v1Trace?.corrections;
+    if (v3Body.analysis_ready && (strpMutations?.length || graphCorrections?.length)) {
+      // Build nodeLabels from v3Body.nodes (ROOT level, not v3Body.graph)
+      const nodeLabels = new Map<string, string>();
+      const graphNodes = (v3Body as any)?.nodes;
+      if (Array.isArray(graphNodes)) {
+        for (const node of graphNodes) {
+          if (node?.id && node?.label) {
+            nodeLabels.set(node.id, node.label);
+          }
+        }
+      }
+      const adjustments = mapMutationsToAdjustments(strpMutations, graphCorrections, nodeLabels);
+      if (adjustments.length > 0) {
+        v3Body.analysis_ready.model_adjustments = adjustments;
+      }
+    }
+
+    // Append deterministic sweep reclassifications as model_adjustments.
+    // Only UNREACHABLE_FACTOR_RECLASSIFIED repairs become model_adjustments — other
+    // codes (NAN_VALUE, SIGN_MISMATCH, etc.) are mechanical fixes the user doesn't
+    // need to review. See REPAIR_CODE_TO_ADJUSTMENT at module scope: it is an
+    // allowlist, so a new repair code lands OUTSIDE it by default and is invisible
+    // here unless someone remembers. That is trap 12's hand-maintained mirror, and
+    // `boundary.test.ts` now REDs on drift rather than assuming good.
+    if (v3Body.analysis_ready) {
+
+      // ── THE PRESERVATION CONTRACT REACHES THE RECEIPT HERE (S2) ────────
+      // `ModelAdjustment.before` is DECLARED in the shared contract
+      // (`schemas/analysis-ready.ts:200`) and has never been populated on this
+      // path. A field declared in a strict block with no projection line is
+      // this estate's named P0 shape — the value crosses no seam and the user
+      // learns nothing. These four lines are that projection.
+      //
+      // ⚠ ID VALIDATION, mirroring what `graph-validator.ts:1407-1420` already
+      // does for `widening_log.elements_added`: an adjustment naming a node
+      // that is not in `nodes[]` points the user at nothing. `widening_log`
+      // guards against the model INVENTING elements; this guards the same
+      // shape in the loss direction. Same check, opposite harm.
+      const liveNodeIds = new Set<string>(
+        (Array.isArray((v3Body as any)?.nodes) ? (v3Body as any).nodes : [])
+          .map((n: any) => n?.id)
+          .filter((id: unknown): id is string => typeof id === "string"),
+      );
+
+      const repairAdjustments = (ctx.deterministicRepairs ?? [])
+        .filter((r) => r.code in REPAIR_CODE_TO_ADJUSTMENT)
+        .map((r) => {
+          // Extract node_id from path format "nodes[fac_x].category"
+          const nodeIdMatch = r.path.match(/^nodes\[([^\]]+)\]/);
+          const nodeId = nodeIdMatch?.[1];
+          const resolved = nodeId !== undefined && liveNodeIds.has(nodeId);
+          const adjustment: ModelAdjustmentT = {
+            code: REPAIR_CODE_TO_ADJUSTMENT[r.code]!,
+            // An id that resolves to nothing is worse than no id: it invites a
+            // consumer to highlight a node that is not there.
+            node_id: resolved ? nodeId : undefined,
+            field: r.path,
+            reason: r.action,
+            source: "deterministic_sweep" as const,
+          };
+          // The magnitude first — it is what a reader recognises. The
+          // normalised value is the fallback, and only when there is no
+          // magnitude to prefer.
+          if (r.deleted_raw_value !== undefined) {
+            adjustment.before = r.deleted_raw_value;
+          } else if (r.deleted_value !== undefined) {
+            adjustment.before = r.deleted_value;
+          }
+          return adjustment;
+        });
+
+      if (!v3Body.analysis_ready.model_adjustments) {
+        v3Body.analysis_ready.model_adjustments = [];
+      }
+      v3Body.analysis_ready.model_adjustments.push(...repairAdjustments);
+    }
+
+    // Attach bias_findings to analysis_ready (from V1 payload → analysis_ready block)
+    if (v3Body.analysis_ready) {
+      const v1BiasFindings = (ctx.ceeResponse as any)?.bias_findings;
+      (v3Body.analysis_ready as any).bias_findings = Array.isArray(v1BiasFindings)
+        ? v1BiasFindings
+        : [];
+    }
+
+    // Surface STRP constraint drops as blockers
+    if (v3Body.analysis_ready && strpMutations?.length) {
+      const constraintBlockers = extractConstraintDropBlockers(strpMutations);
+      if (constraintBlockers.length > 0) {
+        if (!v3Body.analysis_ready.blockers) v3Body.analysis_ready.blockers = [];
+        v3Body.analysis_ready.blockers.push(...constraintBlockers);
+      }
+    }
+
+    // Strict mode validation (fail-closed per boundary contract v1.1 §4.2).
+    // Previously a soft-gate log-and-continue; now sets ctx.earlyReturn with
+    // HTTP 502 and a CEE_EGRESS_CONTRACT_VIOLATION envelope carrying
+    // reason='egress_contract_violation' plus the validator tag.
+    if (ctx.opts.strictMode) {
+      try {
+        validateStrictModeV3(v3Body);
+      } catch (err) {
+        const errMsg = (err as Error).message;
+        log.warn({
+          event: "pipeline.boundary_fail_closed",
+          stage: "boundary_strict_mode",
+          error: errMsg,
+          request_id: ctx.requestId,
+        }, "V3 strict mode validation failed — fail-closed per boundary contract");
+
+        // Emit telemetry event with the new consolidated error code.
+        emit(TelemetryEvents.CeeBoundaryBlocked, {
+          request_id: ctx.requestId,
+          error_code: "CEE_EGRESS_CONTRACT_VIOLATION",
+          error_message: errMsg,
+          validation_issues: [],
+          graph_hash: (v3Body as any)?.meta?.graph_hash,
+        });
+
+        ctx.pipelineOutcome.warnings.push({
+          stage: 'boundary_strict_mode',
+          error: errMsg,
+          degraded: false,
+          blocked: true,
+        });
+
+        ctx.earlyReturn = {
+          statusCode: 502,
+          body: buildCeeErrorResponse(
+            "CEE_EGRESS_CONTRACT_VIOLATION",
+            `Egress contract violation (strict_mode_v3): ${errMsg}`,
+            {
+              requestId: ctx.requestId,
+              retryable: false,
+              reason: "egress_contract_violation",
+              details: { validator: "strict_mode_v3", boundary: "B1", direction: "response" },
+              stage: "boundary",
+            },
+          ),
+        };
+        return;
+      }
+    }
+
+    // ── Diagnostic checks — debug bundle integrity verification ────────────
+    // Compute after all transforms and integrity checks so the checks reflect
+    // the actual final data state. Attached to trace.pipeline for debug bundles.
+    // Runs BEFORE Zod parse so diagnostics are included in the validated output.
+    const diagnosticTrace = (v3Body as any)?.trace?.pipeline;
+    if (diagnosticTrace && typeof diagnosticTrace === 'object') {
+      (diagnosticTrace as Record<string, unknown>).diagnostic_checks =
+        computeDiagnosticChecks(v3Body as unknown as Record<string, unknown>, diagnosticTrace as Record<string, unknown>);
+    }
+
+    // CIL Phase 1: log unknown fields BEFORE parse so drift is observable.
+    // Aggregates unknown keys across response root, all nodes, and all edges
+    // into a single structured log entry per parse call (not per element) to
+    // keep log volume bounded.
+    {
+      const unknownByLevel: {
+        response: string[]
+        nodes: Array<{ nodeId?: string; keys: string[] }>
+        edges: Array<{ from?: string; to?: string; keys: string[] }>
+      } = { response: [], nodes: [], edges: [] }
+
+      warnOnUnknownV3Fields(
+        v3Body as unknown as Record<string, unknown>,
+        "CEEGraphResponseV3",
+        (payload) => { unknownByLevel.response = payload.unknownKeys },
+      )
+
+      const v3Nodes = (v3Body as any)?.nodes
+      if (Array.isArray(v3Nodes)) {
+        for (const node of v3Nodes) {
+          if (node && typeof node === "object") {
+            warnOnUnknownV3Fields(
+              node as Record<string, unknown>,
+              "NodeV3",
+              (payload) => unknownByLevel.nodes.push({
+                nodeId: payload.nodeId,
+                keys: payload.unknownKeys,
+              }),
+            )
+          }
+        }
+      }
+
+      const v3Edges = (v3Body as any)?.edges
+      if (Array.isArray(v3Edges)) {
+        for (const edge of v3Edges) {
+          if (edge && typeof edge === "object") {
+            warnOnUnknownV3Fields(
+              edge as Record<string, unknown>,
+              "EdgeV3",
+              (payload) => unknownByLevel.edges.push({
+                from: typeof (edge as any).from === "string" ? (edge as any).from : undefined,
+                to: typeof (edge as any).to === "string" ? (edge as any).to : undefined,
+                keys: payload.unknownKeys,
+              }),
+            )
+          }
+        }
+      }
+
+      const totalUnknown =
+        unknownByLevel.response.length +
+        unknownByLevel.nodes.length +
+        unknownByLevel.edges.length
+      if (totalUnknown > 0) {
+        log.warn({
+          event: "cee.v3_schema.unknown_fields_stripped",
+          request_id: ctx.requestId,
+          response_unknown_keys: unknownByLevel.response,
+          node_unknowns: unknownByLevel.nodes,
+          edge_unknowns: unknownByLevel.edges,
+          total_unknown_levels: totalUnknown,
+        }, "V3 egress schema dropped undeclared fields — investigate schema drift")
+      }
+    }
+
+    // Belt-and-suspenders: validate V3 output before returning.
+    // CIL Phase 1: when parse succeeds, use parseResult.data — Zod strips
+    // undeclared fields (e.g. _retry_suggestion) so internal metadata doesn't
+    // leak to API clients. On failure, fail closed per boundary contract v1.1 §4.2
+    // (a dev escape hatch remains via CEE_BOUNDARY_ALLOW_INVALID for local work).
+    const parseResult = CEEGraphResponseV3.safeParse(v3Body);
+    if (parseResult.success) {
+      ctx.finalResponse = parseResult.data;
+      return;
+    }
+
+    // Validation failed: emit telemetry and set a typed earlyReturn (502).
+    // The dev escape hatch (config.cee.boundaryAllowInvalid) still permits
+    // passthrough in local/test; staging and production cannot enable it.
+    const runtimeEnv = getRuntimeEnv();
+    const allowInvalid = config.cee.boundaryAllowInvalid;
+
+    const validationIssues = extractZodIssues(parseResult.error, 5);
+    const errMsg = `V3 schema validation failed: ${parseResult.error.issues.length} issues`;
+
+    // Dev escape hatch: allow invalid graphs in local/test if explicitly enabled
+    // (Config-level enforcement already prevents this flag from being true in staging/prod)
+    if (allowInvalid) {
+      log.warn({
+        event: "cee.boundary.output_validation_failed",
+        error_count: parseResult.error.issues.length,
+        first_issues: extractZodIssues(parseResult.error, 3),
+        request_id: ctx.requestId,
+        dev_override_active: true,
+        runtime_env: runtimeEnv,
+      }, "V3 output failed schema validation (bypassed via CEE_BOUNDARY_ALLOW_INVALID)");
+      ctx.finalResponse = v3Body;
+      return;
+    }
+
+    // Fail-closed per boundary contract v1.1 §4.2 (was: Track 1 soft gate).
+    log.warn({
+      event: "pipeline.boundary_fail_closed",
+      stage: "boundary_v3_validation",
+      error_count: parseResult.error.issues.length,
+      first_issues: extractZodIssues(parseResult.error, 3),
+      request_id: ctx.requestId,
+      runtime_env: runtimeEnv,
+    }, "V3 output failed schema validation — fail-closed per boundary contract");
+
+    // Emit telemetry event with the new consolidated error code.
+    emit(TelemetryEvents.CeeBoundaryBlocked, {
+      request_id: ctx.requestId,
+      error_code: "CEE_EGRESS_CONTRACT_VIOLATION",
+      error_message: errMsg,
+      validation_issues: validationIssues,
+      graph_hash: (v3Body as any)?.meta?.graph_hash,
+    });
+
+    ctx.pipelineOutcome.warnings.push({
+      stage: 'boundary_v3_validation',
+      error: errMsg,
+      degraded: false,
+      blocked: true,
+    });
+
+    ctx.earlyReturn = {
+      statusCode: 502,
+      body: buildCeeErrorResponse(
+        "CEE_EGRESS_CONTRACT_VIOLATION",
+        `Egress contract violation (zod_v3): ${errMsg}`,
+        {
+          requestId: ctx.requestId,
+          retryable: false,
+          reason: "egress_contract_violation",
+          details: {
+            validator: "zod_v3",
+            boundary: "B1",
+            direction: "response",
+            issue_count: parseResult.error.issues.length,
+            validation_issues: validationIssues,
+          },
+          stage: "boundary",
+        },
+      ),
+    };
+    return;
+  } else if (schemaVersion === "v2") {
+    ctx.finalResponse = transformResponseToV2(ctx.ceeResponse as any);
+  } else {
+    // V1 pass through
+    ctx.finalResponse = ctx.ceeResponse;
+  }
+}

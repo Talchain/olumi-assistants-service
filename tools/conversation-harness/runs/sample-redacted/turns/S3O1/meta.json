@@ -1,0 +1,14 @@
+{
+  "turn": "S3O1",
+  "started_at": "2026-07-12T01:00:45.860Z",
+  "wall_clock_ms": 16123,
+  "http_status": 200,
+  "error": null,
+  "skipped": false,
+  "stage": "analyse",
+  "message": "Should I go with Hire One Tech Lead or Hire Two Mid-Level Developers?",
+  "turn_class_hint": "coach",
+  "edit_intent": false,
+  "only_if": null,
+  "concurrent_duplicate": false
+}

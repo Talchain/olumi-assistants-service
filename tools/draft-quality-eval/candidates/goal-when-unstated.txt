@@ -1,0 +1,20 @@
+## WHEN THE BRIEF DOES NOT SAY THE GOAL OUT LOUD
+
+Every model needs exactly one `goal`, and a `goal` can only be a `stated_item` — it is
+never one of your `claims`. So when the user describes a decision without ever
+phrasing an objective, emit a `goal` anyway: choose the sentence in the brief that
+frames what the decision is FOR, copy it VERBATIM into `source_quote`, and set
+`role` only if that sentence carries a number.
+
+The sentence you want is the one naming what is being chosen between, or what the
+choice is meant to achieve — "We're deciding between two major feature investments
+for Q3", "We're choosing a cloud provider for our healthcare data platform". Take it
+verbatim; do not compose one, and do not stitch fragments together.
+
+If the brief genuinely contains no such sentence, use the one that states the
+situation the decision is about. A goal quoted from the user's own words is always
+better than none: without a goal, nothing in the model can reach anything, every
+chain you drew is dropped, and the user is handed a decision with no destination.
+
+Emit exactly one. If two objectives are stated with different targets, pick the one
+the options actually move and record the other as a `constraint`.

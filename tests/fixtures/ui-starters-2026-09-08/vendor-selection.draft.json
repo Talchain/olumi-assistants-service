@@ -1,0 +1,1677 @@
+{
+  "schema_version": "3.0",
+  "nodes": [
+    {
+      "id": "dec_cdp",
+      "kind": "decision",
+      "label": "Customer Data Platform Selection",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "fac_annual_cost",
+      "kind": "factor",
+      "label": "Annual Platform Cost",
+      "observed_state": {
+        "value": 0.5,
+        "unit": "£",
+        "source": "cee_inference",
+        "raw_value": 60000,
+        "cap": 120000,
+        "extractionType": "inferred",
+        "factor_type": "cost",
+        "uncertainty_drivers": [
+          "Not provided"
+        ]
+      },
+      "category": "controllable",
+      "display_value": "£60k",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "fac_data_team_capacity",
+      "kind": "factor",
+      "label": "Data Team Capacity",
+      "category": "external",
+      "prior": {
+        "distribution": "uniform",
+        "range_min": 0.1,
+        "range_max": 0.30000000000000004
+      },
+      "extractionType": "inferred",
+      "display_value": "0.1 to 0.3",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "fac_gdpr_compliance",
+      "kind": "factor",
+      "label": "GDPR EU Data Residency Compliance",
+      "observed_state": {
+        "value": 0.5,
+        "source": "cee_inference",
+        "extractionType": "inferred",
+        "factor_type": "other",
+        "uncertainty_drivers": [
+          "Not provided"
+        ]
+      },
+      "category": "controllable",
+      "encoding_map": {
+        "0": "Non-compliant",
+        "1": "Fully compliant"
+      },
+      "display_value": "Moderate (0.5)",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "fac_migration_effort",
+      "kind": "factor",
+      "label": "Migration and Integration Effort",
+      "category": "external",
+      "prior": {
+        "distribution": "uniform",
+        "range_min": 0.25,
+        "range_max": 0.75
+      },
+      "extractionType": "inferred",
+      "display_value": "0.25 to 0.75",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "fac_ops_overhead",
+      "kind": "factor",
+      "label": "Operational Overhead on Data Team",
+      "observed_state": {
+        "value": 0.5,
+        "unit": "scale",
+        "source": "cee_inference",
+        "extractionType": "inferred",
+        "factor_type": "other",
+        "uncertainty_drivers": [
+          "Not provided"
+        ]
+      },
+      "category": "controllable",
+      "display_value": "0.5 scale",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "fac_rudderstack",
+      "kind": "factor",
+      "label": "RudderStack Platform Adoption",
+      "observed_state": {
+        "value": 0,
+        "source": "cee_inference",
+        "extractionType": "inferred",
+        "factor_type": "other",
+        "uncertainty_drivers": [
+          "Not provided"
+        ]
+      },
+      "category": "controllable",
+      "encoding_map": {
+        "0": "Not adopted",
+        "1": "Adopted"
+      },
+      "display_value": "Low (0)",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "fac_segment",
+      "kind": "factor",
+      "label": "Segment Platform Adoption",
+      "observed_state": {
+        "value": 0,
+        "source": "cee_inference",
+        "extractionType": "inferred",
+        "factor_type": "other",
+        "uncertainty_drivers": [
+          "Not provided"
+        ]
+      },
+      "category": "controllable",
+      "encoding_map": {
+        "0": "Not adopted",
+        "1": "Adopted"
+      },
+      "display_value": "Low (0)",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "fac_snowflake_build",
+      "kind": "factor",
+      "label": "Snowflake-Native Build Adoption",
+      "observed_state": {
+        "value": 0,
+        "source": "cee_inference",
+        "extractionType": "inferred",
+        "factor_type": "other",
+        "uncertainty_drivers": [
+          "Not provided"
+        ]
+      },
+      "category": "controllable",
+      "encoding_map": {
+        "0": "Not adopted",
+        "1": "Adopted"
+      },
+      "display_value": "Low (0)",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "goal_cdp",
+      "kind": "goal",
+      "label": "Replace CDP Within Budget and Compliance Constraints",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "opt_rudderstack",
+      "kind": "option",
+      "label": "Adopt RudderStack",
+      "interventions": {
+        "fac_segment": {
+          "value": 0,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_segment",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_rudderstack": {
+          "value": 1,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_rudderstack",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_snowflake_build": {
+          "value": 0,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_snowflake_build",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        }
+      },
+      "is_baseline": false,
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "opt_segment",
+      "kind": "option",
+      "label": "Adopt Segment",
+      "interventions": {
+        "fac_segment": {
+          "value": 1,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_segment",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_rudderstack": {
+          "value": 0,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_rudderstack",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_snowflake_build": {
+          "value": 0,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_snowflake_build",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        }
+      },
+      "is_baseline": false,
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "opt_snowflake",
+      "kind": "option",
+      "label": "Build on Snowflake with Fivetran",
+      "interventions": {
+        "fac_segment": {
+          "value": 0,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_segment",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_rudderstack": {
+          "value": 0,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_rudderstack",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_snowflake_build": {
+          "value": 1,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_snowflake_build",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        }
+      },
+      "is_baseline": false,
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "opt_status_quo",
+      "kind": "option",
+      "label": "Extend Current Contract (Status Quo)",
+      "interventions": {
+        "fac_segment": {
+          "value": 0,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_segment",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_rudderstack": {
+          "value": 0,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_rudderstack",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_snowflake_build": {
+          "value": 0,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_snowflake_build",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        }
+      },
+      "is_baseline": true,
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "out_budget_headroom",
+      "kind": "outcome",
+      "label": "Budget Headroom Within £120k",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "out_platform_capability",
+      "kind": "outcome",
+      "label": "Platform Capability and Fit",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "risk_gdpr_breach",
+      "kind": "risk",
+      "label": "GDPR Non-Compliance Risk",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "risk_migration_delay",
+      "kind": "risk",
+      "label": "Migration Delay Past March Deadline",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "risk_team_overload",
+      "kind": "risk",
+      "label": "Data Team Overload Risk",
+      "provenance": "ai_inferred"
+    }
+  ],
+  "edges": [
+    {
+      "from": "dec_cdp",
+      "to": "opt_rudderstack",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "dec_cdp",
+      "to": "opt_segment",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "dec_cdp",
+      "to": "opt_snowflake",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "dec_cdp",
+      "to": "opt_status_quo",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "fac_annual_cost",
+      "to": "out_budget_headroom",
+      "strength": {
+        "mean": -0.7,
+        "std": 0.1
+      },
+      "exists_probability": 0.95,
+      "effect_direction": "negative",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "fac_data_team_capacity",
+      "to": "risk_team_overload",
+      "strength": {
+        "mean": -0.18999999999999997,
+        "std": 0.076
+      },
+      "exists_probability": 0.85,
+      "effect_direction": "negative",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "fac_gdpr_compliance",
+      "to": "risk_gdpr_breach",
+      "strength": {
+        "mean": -0.65,
+        "std": 0.12
+      },
+      "exists_probability": 0.92,
+      "effect_direction": "negative",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "fac_migration_effort",
+      "to": "risk_migration_delay",
+      "strength": {
+        "mean": 0.42,
+        "std": 0.15
+      },
+      "exists_probability": 0.82,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "fac_migration_effort",
+      "to": "risk_team_overload",
+      "strength": {
+        "mean": 0.15833333333333333,
+        "std": 0.076
+      },
+      "exists_probability": 0.75,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "fac_ops_overhead",
+      "to": "risk_team_overload",
+      "strength": {
+        "mean": 0.285,
+        "std": 0.08866666666666667
+      },
+      "exists_probability": 0.88,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "fac_rudderstack",
+      "to": "out_platform_capability",
+      "strength": {
+        "mean": 0.32884615384615384,
+        "std": 0.1096153846153846
+      },
+      "exists_probability": 0.82,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "fac_segment",
+      "to": "out_platform_capability",
+      "strength": {
+        "mean": 0.40192307692307694,
+        "std": 0.1096153846153846
+      },
+      "exists_probability": 0.85,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "fac_segment",
+      "to": "risk_gdpr_breach",
+      "strength": {
+        "mean": 0.2,
+        "std": 0.12
+      },
+      "exists_probability": 0.72,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "fac_snowflake_build",
+      "to": "out_platform_capability",
+      "strength": {
+        "mean": 0.2192307692307692,
+        "std": 0.13153846153846152
+      },
+      "exists_probability": 0.75,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "fac_snowflake_build",
+      "to": "risk_migration_delay",
+      "strength": {
+        "mean": 0.4,
+        "std": 0.18
+      },
+      "exists_probability": 0.8,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "fac_snowflake_build",
+      "to": "risk_team_overload",
+      "strength": {
+        "mean": 0.31666666666666665,
+        "std": 0.11399999999999999
+      },
+      "exists_probability": 0.88,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_rudderstack",
+      "to": "fac_annual_cost",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_rudderstack",
+      "to": "fac_gdpr_compliance",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_rudderstack",
+      "to": "fac_ops_overhead",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_rudderstack",
+      "to": "fac_rudderstack",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_segment",
+      "to": "fac_annual_cost",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_segment",
+      "to": "fac_gdpr_compliance",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_segment",
+      "to": "fac_ops_overhead",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_segment",
+      "to": "fac_segment",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_snowflake",
+      "to": "fac_annual_cost",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_snowflake",
+      "to": "fac_gdpr_compliance",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_snowflake",
+      "to": "fac_ops_overhead",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_snowflake",
+      "to": "fac_snowflake_build",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_status_quo",
+      "to": "fac_annual_cost",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_status_quo",
+      "to": "fac_gdpr_compliance",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_status_quo",
+      "to": "fac_ops_overhead",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_status_quo",
+      "to": "fac_rudderstack",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_status_quo",
+      "to": "fac_segment",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_status_quo",
+      "to": "fac_snowflake_build",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "out_budget_headroom",
+      "to": "goal_cdp",
+      "strength": {
+        "mean": 0.4,
+        "std": 0.1
+      },
+      "exists_probability": 0.95,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "out_platform_capability",
+      "to": "goal_cdp",
+      "strength": {
+        "mean": 0.45,
+        "std": 0.12
+      },
+      "exists_probability": 0.9,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "risk_gdpr_breach",
+      "to": "goal_cdp",
+      "strength": {
+        "mean": -0.55,
+        "std": 0.12
+      },
+      "exists_probability": 0.92,
+      "effect_direction": "negative",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "risk_migration_delay",
+      "to": "goal_cdp",
+      "strength": {
+        "mean": -0.4,
+        "std": 0.12
+      },
+      "exists_probability": 0.9,
+      "effect_direction": "negative",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "risk_team_overload",
+      "to": "goal_cdp",
+      "strength": {
+        "mean": -0.35,
+        "std": 0.12
+      },
+      "exists_probability": 0.88,
+      "effect_direction": "negative",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    }
+  ],
+  "options": [
+    {
+      "id": "opt_rudderstack",
+      "label": "Adopt RudderStack",
+      "status": "ready",
+      "interventions": {
+        "fac_segment": {
+          "value": 0,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_segment",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_rudderstack": {
+          "value": 1,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_rudderstack",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_snowflake_build": {
+          "value": 0,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_snowflake_build",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        }
+      },
+      "provenance": {
+        "source": "brief_extraction"
+      },
+      "is_baseline": false
+    },
+    {
+      "id": "opt_segment",
+      "label": "Adopt Segment",
+      "status": "ready",
+      "interventions": {
+        "fac_segment": {
+          "value": 1,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_segment",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_rudderstack": {
+          "value": 0,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_rudderstack",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_snowflake_build": {
+          "value": 0,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_snowflake_build",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        }
+      },
+      "provenance": {
+        "source": "brief_extraction"
+      },
+      "is_baseline": false
+    },
+    {
+      "id": "opt_snowflake",
+      "label": "Build on Snowflake with Fivetran",
+      "status": "ready",
+      "interventions": {
+        "fac_segment": {
+          "value": 0,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_segment",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_rudderstack": {
+          "value": 0,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_rudderstack",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_snowflake_build": {
+          "value": 1,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_snowflake_build",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        }
+      },
+      "provenance": {
+        "source": "brief_extraction"
+      },
+      "is_baseline": false
+    },
+    {
+      "id": "opt_status_quo",
+      "label": "Extend Current Contract (Status Quo)",
+      "status": "ready",
+      "interventions": {
+        "fac_segment": {
+          "value": 0,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_segment",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_rudderstack": {
+          "value": 0,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_rudderstack",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_snowflake_build": {
+          "value": 0,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_snowflake_build",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        }
+      },
+      "provenance": {
+        "source": "brief_extraction"
+      },
+      "is_baseline": true
+    }
+  ],
+  "goal_node_id": "goal_cdp",
+  "validation_warnings": [
+    {
+      "code": "CAUSAL_CLAIM_DROPPED",
+      "message": "Dropped 8 malformed causal claim(s)",
+      "severity": "warn",
+      "details": {
+        "count": 8,
+        "first_3_reasons": [
+          "stated_strength: Required",
+          "stated_strength: Required",
+          "stated_strength: Required"
+        ]
+      }
+    }
+  ],
+  "coaching": {
+    "summary": "The decision is well-structured with a hard deadline, a budget ceiling, and a compliance gate already represented. The main gaps are around what happens if migration slips past March and whether team capacity is treated as a hard constraint or a soft one.",
+    "strengthen_items": [
+      {
+        "id": "add-contract-expiry-risk",
+        "label": "Make the March deadline a distinct risk",
+        "detail": "The brief states the contract renews in March, so a failed or delayed migration could force an unwanted renewal at unknown cost — this consequence is not yet captured as a separate risk beyond migration delay.",
+        "action_type": "add_risk",
+        "bias_category": "narrow_framing"
+      },
+      {
+        "id": "add-vendor-lock-in-risk",
+        "label": "Surface long-term vendor dependency as a risk",
+        "detail": "Choosing a managed SaaS platform creates ongoing dependency on that vendor's pricing and roadmap, which is a material risk for a two-person team with limited renegotiation leverage — this is absent from the current structure.",
+        "action_type": "add_risk",
+        "bias_category": "overconfidence"
+      },
+      {
+        "id": "add-team-skill-constraint",
+        "label": "Distinguish team skill from team capacity",
+        "detail": "The brief notes the team 'can't absorb much operational overhead,' but building on Snowflake with Fivetran also requires specific engineering skills; separating skill availability from headroom would sharpen how the Snowflake build option is evaluated.",
+        "action_type": "add_constraint"
+      },
+      {
+        "id": "reframe-goal-to-include-scalability",
+        "label": "Broaden the goal to include future scalability",
+        "detail": "The current goal focuses on replacing the CDP within budget and compliance constraints, but a platform that meets those constraints today may not scale with data volume or team growth — adding a scalability dimension would prevent a locally optimal but strategically weak choice.",
+        "action_type": "reframe_goal",
+        "bias_category": "narrow_framing"
+      }
+    ],
+    "widening_log": {
+      "elements_added": [],
+      "elements_considered_but_excluded": [
+        "Vendor financial stability risk — relevant but the brief gives no signal about this concern",
+        "Data quality / pipeline reliability outcome — plausible but not mentioned in the brief"
+      ],
+      "brief_completeness": "partial"
+    },
+    "bias_signals": [
+      {
+        "type": "narrow_framing",
+        "detail": "The brief frames the goal purely as replacing the platform 'before the current contract renews in March' and 'within budget and compliance constraints,' with no mention of longer-term strategic fit or scalability.",
+        "target": "goal_cdp"
+      },
+      {
+        "type": "status_quo_bias",
+        "detail": "The status quo option ('extend current contract') is included but the brief does not articulate any downside of staying — the framing 'we need to replace' may be suppressing honest evaluation of that path.",
+        "target": "opt_status_quo"
+      }
+    ]
+  },
+  "causal_claims": [],
+  "topology_plan": [],
+  "draft_warnings": [
+    {
+      "id": "goal_no_baseline_value",
+      "severity": "low",
+      "node_ids": [
+        "goal_cdp"
+      ],
+      "edge_ids": [],
+      "affected_node_ids": [
+        "goal_cdp"
+      ],
+      "affected_edge_ids": [],
+      "explanation": "Goal node has no observed_state.value set.",
+      "fix_hint": "Set goal node's observed_state.value to establish baseline for comparison"
+    }
+  ],
+  "analysis_ready": {
+    "options": [
+      {
+        "id": "opt_rudderstack",
+        "label": "Adopt RudderStack",
+        "status": "ready",
+        "status_reason": "3 intervention(s) ready for analysis",
+        "interventions": {
+          "fac_segment": {
+            "value": 0,
+            "source": "brief_extraction",
+            "display_value": "Low (0)"
+          },
+          "fac_rudderstack": {
+            "value": 1,
+            "source": "brief_extraction",
+            "display_value": "Very high (1)"
+          },
+          "fac_snowflake_build": {
+            "value": 0,
+            "source": "brief_extraction",
+            "display_value": "Low (0)"
+          },
+          "fac_annual_cost": {
+            "value": 0.5,
+            "display_value": "£60k"
+          },
+          "fac_gdpr_compliance": {
+            "value": 0.5,
+            "display_value": "Moderate (0.5)"
+          },
+          "fac_ops_overhead": {
+            "value": 0.5,
+            "display_value": "0.5 scale"
+          }
+        },
+        "extraction_metadata": {
+          "source": "brief_extraction",
+          "confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "intervention_details": {
+          "fac_segment": {
+            "display_value": "Low (0)",
+            "normalised_value": 0
+          },
+          "fac_rudderstack": {
+            "display_value": "Very high (1)",
+            "normalised_value": 1
+          },
+          "fac_snowflake_build": {
+            "display_value": "Low (0)",
+            "normalised_value": 0
+          },
+          "fac_annual_cost": {
+            "display_value": "£60k",
+            "normalised_value": 0.5,
+            "raw_value": 60000,
+            "unit": "£"
+          },
+          "fac_gdpr_compliance": {
+            "display_value": "Moderate (0.5)",
+            "normalised_value": 0.5
+          },
+          "fac_ops_overhead": {
+            "display_value": "0.5 scale",
+            "normalised_value": 0.5,
+            "unit": "scale"
+          }
+        }
+      },
+      {
+        "id": "opt_segment",
+        "label": "Adopt Segment",
+        "status": "ready",
+        "status_reason": "3 intervention(s) ready for analysis",
+        "interventions": {
+          "fac_segment": {
+            "value": 1,
+            "source": "brief_extraction",
+            "display_value": "Very high (1)"
+          },
+          "fac_rudderstack": {
+            "value": 0,
+            "source": "brief_extraction",
+            "display_value": "Low (0)"
+          },
+          "fac_snowflake_build": {
+            "value": 0,
+            "source": "brief_extraction",
+            "display_value": "Low (0)"
+          },
+          "fac_annual_cost": {
+            "value": 0.5,
+            "display_value": "£60k"
+          },
+          "fac_gdpr_compliance": {
+            "value": 0.5,
+            "display_value": "Moderate (0.5)"
+          },
+          "fac_ops_overhead": {
+            "value": 0.5,
+            "display_value": "0.5 scale"
+          }
+        },
+        "extraction_metadata": {
+          "source": "brief_extraction",
+          "confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "intervention_details": {
+          "fac_segment": {
+            "display_value": "Very high (1)",
+            "normalised_value": 1
+          },
+          "fac_rudderstack": {
+            "display_value": "Low (0)",
+            "normalised_value": 0
+          },
+          "fac_snowflake_build": {
+            "display_value": "Low (0)",
+            "normalised_value": 0
+          },
+          "fac_annual_cost": {
+            "display_value": "£60k",
+            "normalised_value": 0.5,
+            "raw_value": 60000,
+            "unit": "£"
+          },
+          "fac_gdpr_compliance": {
+            "display_value": "Moderate (0.5)",
+            "normalised_value": 0.5
+          },
+          "fac_ops_overhead": {
+            "display_value": "0.5 scale",
+            "normalised_value": 0.5,
+            "unit": "scale"
+          }
+        }
+      },
+      {
+        "id": "opt_snowflake",
+        "label": "Build on Snowflake with Fivetran",
+        "status": "ready",
+        "status_reason": "3 intervention(s) ready for analysis",
+        "interventions": {
+          "fac_segment": {
+            "value": 0,
+            "source": "brief_extraction",
+            "display_value": "Low (0)"
+          },
+          "fac_rudderstack": {
+            "value": 0,
+            "source": "brief_extraction",
+            "display_value": "Low (0)"
+          },
+          "fac_snowflake_build": {
+            "value": 1,
+            "source": "brief_extraction",
+            "display_value": "Very high (1)"
+          },
+          "fac_annual_cost": {
+            "value": 0.5,
+            "display_value": "£60k"
+          },
+          "fac_gdpr_compliance": {
+            "value": 0.5,
+            "display_value": "Moderate (0.5)"
+          },
+          "fac_ops_overhead": {
+            "value": 0.5,
+            "display_value": "0.5 scale"
+          }
+        },
+        "extraction_metadata": {
+          "source": "brief_extraction",
+          "confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "intervention_details": {
+          "fac_segment": {
+            "display_value": "Low (0)",
+            "normalised_value": 0
+          },
+          "fac_rudderstack": {
+            "display_value": "Low (0)",
+            "normalised_value": 0
+          },
+          "fac_snowflake_build": {
+            "display_value": "Very high (1)",
+            "normalised_value": 1
+          },
+          "fac_annual_cost": {
+            "display_value": "£60k",
+            "normalised_value": 0.5,
+            "raw_value": 60000,
+            "unit": "£"
+          },
+          "fac_gdpr_compliance": {
+            "display_value": "Moderate (0.5)",
+            "normalised_value": 0.5
+          },
+          "fac_ops_overhead": {
+            "display_value": "0.5 scale",
+            "normalised_value": 0.5,
+            "unit": "scale"
+          }
+        }
+      },
+      {
+        "id": "opt_status_quo",
+        "label": "Extend Current Contract (Status Quo)",
+        "status": "ready",
+        "status_reason": "3 intervention(s) ready for analysis",
+        "interventions": {
+          "fac_segment": {
+            "value": 0,
+            "source": "brief_extraction",
+            "display_value": "Low (0)"
+          },
+          "fac_rudderstack": {
+            "value": 0,
+            "source": "brief_extraction",
+            "display_value": "Low (0)"
+          },
+          "fac_snowflake_build": {
+            "value": 0,
+            "source": "brief_extraction",
+            "display_value": "Low (0)"
+          },
+          "fac_annual_cost": {
+            "value": 0.5,
+            "display_value": "£60k"
+          },
+          "fac_gdpr_compliance": {
+            "value": 0.5,
+            "display_value": "Moderate (0.5)"
+          },
+          "fac_ops_overhead": {
+            "value": 0.5,
+            "display_value": "0.5 scale"
+          }
+        },
+        "extraction_metadata": {
+          "source": "brief_extraction",
+          "confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "is_baseline": true,
+        "intervention_details": {
+          "fac_segment": {
+            "display_value": "Low (0)",
+            "normalised_value": 0
+          },
+          "fac_rudderstack": {
+            "display_value": "Low (0)",
+            "normalised_value": 0
+          },
+          "fac_snowflake_build": {
+            "display_value": "Low (0)",
+            "normalised_value": 0
+          },
+          "fac_annual_cost": {
+            "display_value": "£60k",
+            "normalised_value": 0.5,
+            "raw_value": 60000,
+            "unit": "£"
+          },
+          "fac_gdpr_compliance": {
+            "display_value": "Moderate (0.5)",
+            "normalised_value": 0.5
+          },
+          "fac_ops_overhead": {
+            "display_value": "0.5 scale",
+            "normalised_value": 0.5,
+            "unit": "scale"
+          }
+        }
+      }
+    ],
+    "goal_node_id": "goal_cdp",
+    "status": "ready",
+    "bias_findings": [],
+    "model_adjustments": [
+      {
+        "code": "category_reclassified",
+        "node_id": "fac_data_team_capacity",
+        "field": "nodes[fac_data_team_capacity].category",
+        "reason": "Reclassified unreachable factor \"Data Team Capacity\" to external with synthesised prior [0.1, 0.30000000000000004]",
+        "source": "deterministic_sweep"
+      },
+      {
+        "code": "category_reclassified",
+        "node_id": "fac_migration_effort",
+        "field": "nodes[fac_migration_effort].category",
+        "reason": "Reclassified unreachable factor \"Migration and Integration Effort\" to external with synthesised prior [0.25, 0.75]",
+        "source": "deterministic_sweep"
+      }
+    ]
+  },
+  "meta": {
+    "roots": [
+      "dec_cdp",
+      "fac_data_team_capacity",
+      "fac_migration_effort"
+    ],
+    "leaves": [
+      "goal_cdp"
+    ],
+    "source": "assistant"
+  },
+  "quality": {
+    "overall": 9,
+    "structure": 8,
+    "coverage": 10,
+    "structural_proxy": 8,
+    "safety": 8
+  },
+  "_pipeline_outcome": {
+    "graph_drafted": true,
+    "graph_structurally_valid": true,
+    "deterministic_sweep_violations": 0,
+    "verification_status": "passed",
+    "validation_status": "skipped",
+    "enrichment_status": "complete",
+    "coaching_status": "complete",
+    "warnings": [],
+    "rescue_score": 23,
+    "factor_value_coverage": {
+      "total": 8,
+      "explicit": 0,
+      "inferred_with_evidence": 3,
+      "fallback_default": 5
+    },
+    "edge_strength_unique_count": 16,
+    "llm_repair": {
+      "triggered": false,
+      "outcome": "skipped",
+      "fallback_reason": null,
+      "attempts": 0
+    },
+    "repair_provenance": [
+      {
+        "rule": "CONTROLLABLE_MISSING_DATA",
+        "code": "CONTROLLABLE_MISSING_DATA",
+        "node_or_edge_id": "nodes[fac_annual_cost].data",
+        "field": "graph",
+        "before": null,
+        "after": null,
+        "source": "fallback_default"
+      },
+      {
+        "rule": "CONTROLLABLE_MISSING_DATA",
+        "code": "CONTROLLABLE_MISSING_DATA",
+        "node_or_edge_id": "nodes[fac_gdpr_compliance].data",
+        "field": "graph",
+        "before": null,
+        "after": null,
+        "source": "fallback_default"
+      },
+      {
+        "rule": "CONTROLLABLE_MISSING_DATA",
+        "code": "CONTROLLABLE_MISSING_DATA",
+        "node_or_edge_id": "nodes[fac_ops_overhead].data",
+        "field": "graph",
+        "before": null,
+        "after": null,
+        "source": "fallback_default"
+      },
+      {
+        "rule": "CONTROLLABLE_MISSING_DATA",
+        "code": "CONTROLLABLE_MISSING_DATA",
+        "node_or_edge_id": "nodes[fac_rudderstack].data",
+        "field": "graph",
+        "before": null,
+        "after": null,
+        "source": "fallback_default"
+      },
+      {
+        "rule": "CONTROLLABLE_MISSING_DATA",
+        "code": "CONTROLLABLE_MISSING_DATA",
+        "node_or_edge_id": "nodes[fac_segment].data",
+        "field": "graph",
+        "before": null,
+        "after": null,
+        "source": "fallback_default"
+      },
+      {
+        "rule": "CONTROLLABLE_MISSING_DATA",
+        "code": "CONTROLLABLE_MISSING_DATA",
+        "node_or_edge_id": "nodes[fac_snowflake_build].data",
+        "field": "graph",
+        "before": null,
+        "after": null,
+        "source": "fallback_default"
+      },
+      {
+        "rule": "OBSERVABLE_EXTRA_DATA",
+        "code": "OBSERVABLE_EXTRA_DATA",
+        "node_or_edge_id": "nodes[fac_data_team_capacity].data",
+        "field": "graph",
+        "before": null,
+        "after": null,
+        "source": "fallback_default"
+      },
+      {
+        "rule": "OBSERVABLE_EXTRA_DATA",
+        "code": "OBSERVABLE_EXTRA_DATA",
+        "node_or_edge_id": "nodes[fac_migration_effort].data",
+        "field": "graph",
+        "before": null,
+        "after": null,
+        "source": "fallback_default"
+      },
+      {
+        "rule": "UNREACHABLE_FACTOR_RECLASSIFIED",
+        "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+        "node_or_edge_id": "nodes[fac_data_team_capacity].category",
+        "field": "graph",
+        "before": null,
+        "after": null,
+        "source": "structure"
+      },
+      {
+        "rule": "UNREACHABLE_FACTOR_RECLASSIFIED",
+        "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+        "node_or_edge_id": "nodes[fac_migration_effort].category",
+        "field": "graph",
+        "before": null,
+        "after": null,
+        "source": "structure"
+      },
+      {
+        "rule": "COMPLEXITY_CAP_PRUNE",
+        "code": "COMPLEXITY_CAP_PRUNE",
+        "node_or_edge_id": "edges[fac_rudderstack::risk_gdpr_breach::0]",
+        "field": "graph",
+        "before": null,
+        "after": null,
+        "source": "structure"
+      },
+      {
+        "rule": "INBOUND_BUDGET_RESCALED",
+        "code": "INBOUND_BUDGET_RESCALED",
+        "node_or_edge_id": "edges[*→out_platform_capability]",
+        "field": "graph",
+        "before": null,
+        "after": null,
+        "source": "structure"
+      },
+      {
+        "rule": "INBOUND_BUDGET_RESCALED",
+        "code": "INBOUND_BUDGET_RESCALED",
+        "node_or_edge_id": "edges[*→risk_team_overload]",
+        "field": "graph",
+        "before": null,
+        "after": null,
+        "source": "structure"
+      }
+    ]
+  }
+}

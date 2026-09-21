@@ -1,0 +1,1561 @@
+#!/usr/bin/env node
+/**
+ * Staging live-journey smoke gate.
+ *
+ * WHY THIS EXISTS
+ * ---------------
+ * Drafting — step one of the product — was broken on staging for hours while
+ * seven merges shipped over it. Nothing caught it, because the only smoke
+ * workflow was `continue-on-error`, weekly, gated behind an unset repo variable
+ * (`skipped` on 8 of its last 8 runs), and pointed at PRODUCTION.
+ *
+ * This script replaces that prose-level guarantee with a mechanism. It drives
+ * the REAL user journey over HTTP against the DEPLOYED staging service and
+ * exits non-zero when it breaks.
+ *
+ * It checks two independent failure modes, in order:
+ *
+ *   PHASE 1 — DID THE BUILD EVEN SHIP?
+ *     Polls /healthz until the served `build` matches the commit we expect.
+ *     A service still serving an older build than the tip is itself an outage:
+ *     it means the deploy failed, and every downstream "verified on staging"
+ *     claim is measuring the wrong code. This half is arguably more valuable
+ *     than the journey itself — it is the failure mode that was live when this
+ *     gate was written (staging served e22f8a6 while the tip was 26638e7a).
+ *
+ *   PHASE 2 — CAN A USER ACTUALLY GET A GRAPH?
+ *     Turn 1 (frame) then Turn 2 (draft), reusing the scenario_id.
+ *     Turn 2 asserts a USABLE graph — non-trivial node and option counts —
+ *     NOT merely "no 500". "No 500" is what let the outage through: the
+ *     product can return 200 and still hand the user nothing.
+ *
+ * DESIGN NOTE — why the assertions are exported pure functions
+ * ------------------------------------------------------------
+ * `assertHealthyDraft` / `assertHealthyFrame` take a parsed body and return
+ * findings. They do no I/O. That lets tests feed them a committed REAL staging
+ * capture (must PASS) and a committed REAL failure body (must FAIL) — a
+ * positive control, so an absence assertion can never pass vacuously.
+ * There is deliberately NO fixture mode on the CLI: CI always drives real HTTP.
+ * A smoke test against mocks proves nothing about a deployed service.
+ *
+ * THE ROUTE. This gate drives `POST /proxy/v5/turn` — the route a real user's
+ * BROWSER takes — not the internal `/orchestrate/v2/turn` it used to drive.
+ *
+ * DERIVED AT THE DEPLOYED BUNDLE, 10 Sep 2026 (UI 52b5cc93, 72 chunks crawled
+ * from the entry asset): the shipped client bakes an ABSOLUTE host —
+ * `const e = "https://cee-staging.onrender.com/proxy/v5/turn"` in
+ * `assets/ReactFlowGraph-*.js` — so the browser goes straight to CEE and
+ * NETLIFY IS NOT IN THE DRAFTING PATH AT ALL. `/bff/cee/draft-graph` appears
+ * ZERO times in those 72 chunks (contrast control: `cee-staging.onrender.com`
+ * appears 6 times, so the sweep could see). Any diagnosis that routes a
+ * drafting failure through a Netlify edge timeout is describing a path the
+ * product does not use.
+ *
+ * WHY THE ROUTE MATTERS — three failure modes only a USER can hit
+ * ---------------------------------------------------------------
+ * "Generation succeeded server-side" and "the response reached the user" are
+ * DIFFERENT CLAIMS, and the internal route can only ever answer the first.
+ * `/proxy/v5/turn` (src/routes/proxy-v5-turn.ts) adds three seams that sit
+ * between a finished model and a user's screen, and the old target was blind
+ * to all three:
+ *
+ *   · 403 PROXY_ORIGIN_REJECTED  — the proxy validates `Origin` against
+ *     BROWSER_PROXY_ALLOWED_ORIGINS, a Render dashboard value. If it drifts,
+ *     EVERY browser user is refused while the internal route stays perfectly
+ *     healthy. Measured 10 Sep: no Origin → 403, `https://evil.example` → 403,
+ *     `https://olumi.netlify.app` (production) → 403,
+ *     `https://staging--olumi.netlify.app` → admitted.
+ *   · 504 PROXY_UPSTREAM_TIMEOUT — the proxy races `app.inject()` against
+ *     BROWSER_PROXY_TIMEOUT_MS and, when the timer wins, returns 504 while the
+ *     internal request RUNS ON to completion. That is precisely the shape
+ *     "CEE logged draft_graph.succeeded but the user got nothing" — and the
+ *     internal route reports a healthy 200 for exactly that turn.
+ *   · 502 PROXY_INTERNAL_NON_JSON / PROXY_INTERNAL_ERROR — the proxy parses
+ *     and RE-SERIALISES the body. A response that cannot survive that hop
+ *     never reaches the browser however well it was generated.
+ *
+ * The proxy injects the service key itself (`x-olumi-assist-key` never leaves
+ * the process), so this gate sends NO key — it presents exactly what the
+ * deployed browser presents: `Content-Type`, `Accept` and `Origin`.
+ *
+ * WIRE WITNESS, 10 Sep 2026, build 8449e54: this route returned HTTP 200 in
+ * 66.6s carrying 13 nodes, 4 options and 1,140 characters of reply prose. A
+ * response is NOT being cut on the browser's path, and any budget shorter than
+ * ~70s would red a healthy product.
+ *
+ * USAGE
+ *   node scripts/ci/staging-journey-smoke.mjs
+ * ENV
+ *   SMOKE_BASE_URL   (required) e.g. https://cee-staging.onrender.com
+ *   SMOKE_ORIGIN     (required) the browser origin to present, e.g.
+ *                    https://staging--olumi.netlify.app. Required, not
+ *                    defaulted: a gate that invents its own origin would pass
+ *                    while every real browser was being refused.
+ *   SMOKE_EXPECT_SHA (optional) commit expected to be serving; enables Phase 1
+ *   SMOKE_FRESHNESS_TIMEOUT_MS (default 900000 = 15 min)
+ *   SMOKE_TURN_TIMEOUT_MS      (default 180000 = 3 min)
+ */
+
+/**
+ * THE USER'S ROUTE. Named here, once, so the gate and its guards cannot hold
+ * two different opinions about which path is under test. See the header.
+ */
+export const TURN_PATH = "/proxy/v5/turn";
+
+export const MIN_NODES = 4;
+export const MIN_OPTIONS = 2;
+
+/** Node kinds that represent a comparable alternative. See src/schemas/cee-v3.ts. */
+const OPTION_KIND = "option";
+
+/** The `exit_path` that DECLARES a drafting turn. See v5-diagnostic-trace.ts. */
+const DRAFT_EXIT_PATH = "draft_graph";
+
+/**
+ * Exit paths whose `sendFinalised200` call site supplies an `analysisReady`
+ * payload — i.e. the ONLY paths on which an absent/empty `analysis_ready` means
+ * something was LOST rather than simply never produced.
+ *
+ * WHY THIS SET EXISTS
+ * -------------------
+ * The continuity check used to read an empty `analysis_ready.options` on ANY
+ * later turn as "the model did not survive the turn". Measured: a follow-up
+ * with no `analysis_ready` block at all produced exactly that message — and for
+ * a deterministic non-graph exit it is FALSE, an alarm asserting a loss that did
+ * not happen. `clarify_v2` and `frame_no_brief_guard` call `sendFinalised200`
+ * with no `analysisReady` (route-v2.ts:3848 / :5366 / :5400), and the finaliser
+ * omits the block unless a payload is supplied (response-finaliser.ts:261-269).
+ * A false alarm is how this estate loses real ones.
+ *
+ * DERIVED, NOT REMEMBERED (trap 12). This list is a mirror of the producer, so
+ * the spec re-derives it from `route-v2.ts`'s `sendFinalised200` call sites and
+ * fails loud when the two disagree — with a positive control proving the parse
+ * can see call sites at all. Do not hand-edit it: change the route, re-run the
+ * spec, and let the derivation tell you the new set.
+ *
+ * Derived at fd148826 from 21 call sites: `readiness_intake` and `system_event`
+ * are in this set and were NOT in the four (`turn_executor`, `chip_click`,
+ * `draft_graph`, `edit_graph`) that the finaliser's own prose names — the prose
+ * is a summary of the primary paths, not the complete producer.
+ */
+export const READINESS_PRODUCING_EXIT_PATHS = new Set([
+  "chip_click",
+  "draft_graph",
+  "edit_graph",
+  "readiness_intake",
+  "system_event",
+  "turn_executor",
+]);
+
+/**
+ * THE ONE PREDICATE for "this turn handed the user a model".
+ *
+ * It exists as a named export because the same concept was previously expressed
+ * TWO ways: delivery/usability keyed on `draft_graph` PRESENCE while provenance
+ * keyed on `exit_path === "draft_graph"`. That divergence IS the P0 this gate
+ * was rewritten for — #1002 relabelled the drafting event and the provenance
+ * half silently stopped applying. Two predicates for one concept is a
+ * guarantee waiting to lapse; both callers now share this function.
+ */
+export function carriedDraftGraph(body) {
+  const g = body?.draft_graph;
+  return Boolean(g) && typeof g === "object";
+}
+
+/** The option OBJECTS a response says the model is comparing (shape only). */
+function readyOptions(body) {
+  return Array.isArray(body?.analysis_ready?.options) ? body.analysis_ready.options : [];
+}
+
+/**
+ * How many option OBJECTS a response carries, regardless of whether they are
+ * identifiable. The single counter — `assertHealthyDraft`'s minimum-count check
+ * and the continuity check's precondition both read it, so they cannot disagree
+ * about how many options a turn has.
+ */
+export function readyOptionCount(body) {
+  return readyOptions(body).length;
+}
+
+/**
+ * THE READINESS DIAGNOSIS LINE — why this exists, and what it is for.
+ *
+ * On 18 Aug 2026 this gate fired `analysis_ready.options was empty … the model
+ * did not survive the turn` on 2 of 10 identical runs. Every diagnostic the log
+ * carried was IDENTICAL on the failing and the passing runs — same build_sha,
+ * same exit_path, same prompt_identity, same turn-1 node and option counts. The
+ * only thing the log said about the failure was that it happened.
+ *
+ * A whole diagnosis session then went into a SOURCE TRACE to answer a question
+ * the response body answers directly. Worse, the trace had to GUESS which of
+ * four producers of `{status:'blocked', goal_node_id:'', options:[]}` had
+ * emitted it — `assessCanonicalAnalysisReadiness`'s no-semantic fallback
+ * (analysis-ready-helper.ts:1122), its SCHEMA_INVALID exit (:976, which emits
+ * NO block at all), `buildAnalysisRefusalReadiness` (:1366) and
+ * `synthesiseFreshnessOnlyAnalysisReady` (analysis-ready-emit.ts:59) — and
+ * those four are told apart by exactly the fields below:
+ *
+ *   · `goal_node_id` empty vs real     → "the projection found no goal node"
+ *                                        vs "it found the goal and lost the
+ *                                        OPTIONS". Two different defects; the
+ *                                        old log could not distinguish them,
+ *                                        and the first diagnosis asserted the
+ *                                        first without evidence for it.
+ *   · `readiness_issues[].code`        → the projection's OWN reason, already
+ *                                        on the wire and never printed.
+ *   · `blocked_reason`                 → present on the refusal builder, absent
+ *                                        on the freshness-only carrier.
+ *   · `bias_findings` present with no
+ *     `readiness_issues`               → the freshness-only synthesis carrier.
+ *   · `freshness` / `freshness_reason` → whether the synthesis path was even
+ *                                        reachable (it needs a selected
+ *                                        run_analysis fact; a fresh journey has
+ *                                        none, so `none/no_successful_run_
+ *                                        analysis_fact` RULES IT OUT).
+ *   · `graph_hash`                     → whether this turn read the SAME model
+ *                                        the drafting turn committed. This is
+ *                                        the read-vs-write discriminator and
+ *                                        the gate already compares it — but it
+ *                                        only speaks when the two DISAGREE, so
+ *                                        on a failure the log never showed
+ *                                        whether it had agreed or simply been
+ *                                        absent. Silence from a check that
+ *                                        turns itself off on absence is not
+ *                                        evidence (CLAUDE.md trap 13).
+ *
+ * NOTHING HERE IS AN ASSERTION. This function only reports; it cannot pass or
+ * fail a run. It is deliberately shared by the per-turn log line AND the
+ * failure message, so the alarm and the diagnostic can never describe the same
+ * turn differently — the same one-concept-one-predicate rule the rest of this
+ * file is built on.
+ *
+ * ABSENT IS NEVER PRINTED AS EMPTY. `goal_node_id=""` (the projection ran and
+ * found no goal) and `goal_node_id=absent` (no readiness block at all) are
+ * different facts, and `graphLine`'s own header records what collapsing two
+ * facts into one symbol already cost this estate once.
+ */
+export function readinessDiagnosis(body) {
+  const a = body?.analysis_ready;
+  if (!a || typeof a !== "object") return "analysis_ready=absent(no-block)";
+  const q = (v) => (typeof v === "string" ? JSON.stringify(v) : v === undefined ? "absent" : String(v));
+  const issues = Array.isArray(a.readiness_issues)
+    ? a.readiness_issues.map((i) => i?.code ?? "?").join("|") || "none"
+    : "absent";
+  const bias = Array.isArray(a.bias_findings) ? String(a.bias_findings.length) : "absent";
+  return (
+    `status=${q(a.status)} goal_node_id=${q(a.goal_node_id)} ` +
+    `blocked_reason=${q(a.blocked_reason)} readiness_issues=${issues} bias_findings=${bias} ` +
+    `freshness=${q(a.freshness)}/${q(a.freshness_reason)} graph_hash=${q(body?.graph_hash)}`
+  );
+}
+
+/**
+ * The node-kind census of a turn's `draft_graph`.
+ *
+ * The counterpart to `readinessDiagnosis` on the WRITE side. `nodes=14` says
+ * nothing about whether the drafted model contained the one node the readiness
+ * projection requires — a node with `kind: "goal"`; without it
+ * `projectSemanticAnalysisReadyFromGraph` returns `undefined` and the whole
+ * payload collapses to `{status:'blocked', goal_node_id:'', options:[]}`
+ * (analysis-ready-helper.ts:788 → :1122). So the census makes "the drafted
+ * model had a goal / had N options" an OBSERVATION rather than an inference
+ * from a total.
+ *
+ * Returns `draft_graph=absent(no-block)` — never a zero — when the turn carried
+ * no graph, for the same reason `graphLine` does.
+ */
+export function draftGraphCensus(body) {
+  const g = body?.draft_graph;
+  if (!g || typeof g !== "object") return "draft_graph=absent(no-block)";
+  if (!Array.isArray(g.nodes)) return "draft_graph.nodes=absent(not-an-array)";
+  const counts = new Map();
+  for (const n of g.nodes) {
+    const k = n && typeof n === "object" && typeof n.kind === "string" ? n.kind : "(no-kind)";
+    counts.set(k, (counts.get(k) ?? 0) + 1);
+  }
+  const census = [...counts.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([k, n]) => `${k}:${n}`)
+    .join(",");
+  return `draft_graph.kinds=${census || "(empty)"}`;
+}
+
+/**
+ * Assert turn 1 (frame) produced a coherent response.
+ * @returns {string[]} failure messages; empty means healthy.
+ */
+export function assertHealthyFrame(body) {
+  const f = [];
+  if (!body || typeof body !== "object") return ["turn 1: response body was not a JSON object"];
+  if (typeof body.assistant_text !== "string" || body.assistant_text.trim().length === 0) {
+    // The TRIGGER is unchanged: no assistant_text on the wire is still a
+    // failure. The MESSAGE is now confined to what the wire shows. It used to
+    // read "the user would see a blank reply" — a claim about a UI this gate
+    // never drives, and the specific sentence that got a true red read as a
+    // product outage on 10 Sep 2026, when the same body carried a user-facing
+    // recovery suggestion in `details.recovery`. Naming what DID ride with the
+    // empty reply is the difference between "no model and no way forward" and
+    // "no model, with a stated fix".
+    const suggestion =
+      typeof body?.details?.recovery?.suggestion === "string" && body.details.recovery.suggestion.trim().length > 0
+        ? "present"
+        : "absent";
+    f.push(
+      `turn 1: assistant_text was empty — the response carried no reply prose ` +
+        `(details.recovery.suggestion=${suggestion})`,
+    );
+  }
+  const exit = body?._diagnostic_trace?.exit_path;
+  if (typeof exit !== "string" || exit.length === 0) {
+    f.push("turn 1: _diagnostic_trace.exit_path missing — cannot tell which path served this turn");
+  }
+  if (exit === "draft_graph_error") {
+    // ONE predicate. This branch used to say only that it happened, while
+    // `assertHealthyDraft` — reached on the turn that no longer drafts —
+    // printed the violation code. Both now read the same function.
+    f.push(`turn 1: exit_path was draft_graph_error — ${draftErrorDiagnosis(body)}`);
+  }
+  return f;
+}
+
+/**
+ * Assert the turn that DRAFTED returned a USABLE graph, not merely a 200.
+ *
+ * `label` names the turn in every message. It is a parameter, not the hardcoded
+ * "turn 2" it used to be, because #1002 (draft-first) moved drafting to turn 1:
+ * an alarm that says "turn 2" about a turn-1 failure sends the on-call engineer
+ * to the wrong log line.
+ *
+ * @returns {string[]} failure messages; empty means healthy.
+ */
+export function assertHealthyDraft(body, label = "turn 2") {
+  const f = [];
+  if (!body || typeof body !== "object") return [`${label}: response body was not a JSON object`];
+
+  const exit = body?._diagnostic_trace?.exit_path;
+  if (exit === "draft_graph_error") {
+    // Surface the real reason — this is the message an on-call engineer reads
+    // first. Shared with `assertHealthyFrame` so the two turns can never give
+    // different answers to "why did drafting fail"; the ad-hoc two-field copy
+    // that used to live here was the second predicate for one concept.
+    f.push(`${label}: exit_path=draft_graph_error — ${draftErrorDiagnosis(body)}`);
+  }
+
+  const g = body.draft_graph;
+  if (!g || typeof g !== "object") {
+    f.push(`${label}: no draft_graph on the response — the user got no model back`);
+    return f;
+  }
+
+  const nodes = Array.isArray(g.nodes) ? g.nodes : [];
+  if (nodes.length < MIN_NODES) {
+    f.push(`${label}: draft_graph.nodes=${nodes.length}, expected >= ${MIN_NODES} (graph too trivial to be usable)`);
+  }
+
+  // Options live in two places; require BOTH to be coherent. The graph needs
+  // option NODES for connectivity, and analysis_ready.options carries the
+  // intervention metadata the analysis actually compares.
+  const optionNodes = nodes.filter((n) => n && n.kind === OPTION_KIND);
+  if (optionNodes.length < MIN_OPTIONS) {
+    f.push(
+      `${label}: option nodes=${optionNodes.length}, expected >= ${MIN_OPTIONS} ` +
+        `(nothing to compare — a decision needs alternatives)`,
+    );
+  }
+
+  const optionsForAnalysis = readyOptions(body);
+  if (optionsForAnalysis.length < MIN_OPTIONS) {
+    f.push(`${label}: analysis_ready.options=${optionsForAnalysis.length}, expected >= ${MIN_OPTIONS}`);
+  }
+
+  // OPTIONS_IDENTICAL was the live defect: distinct ids, but nothing to tell
+  // the options apart. Assert the ids are actually distinct.
+  const ids = optionsForAnalysis.map((o) => o?.option_id).filter(Boolean);
+  if (ids.length > 0 && new Set(ids).size !== ids.length) {
+    f.push(`${label}: analysis_ready.options contained duplicate option_id values: ${ids.join(",")}`);
+  }
+
+  return f;
+}
+
+/**
+ * The USABLE `option_id`s a response says the model is comparing.
+ *
+ * Note what this drops, and read the precondition pin in `assertHealthyJourney`
+ * before relying on it: an option object whose `option_id` is `""`, `null` or
+ * absent is NOT identifiable, so it cannot participate in an identity check.
+ * The contract admits all three — `OptionForAnalysis.id` is `z.string()` with no
+ * `.min(1)` (src/schemas/analysis-ready.ts:85), the emit is `option_id: opt.id`
+ * (analysis-ready-helper.ts:1123), and the wire envelope validates
+ * `analysis_ready` as `z.unknown().optional()`
+ * (src/orchestrator/validation/response-envelope-schema.ts:135) — so nothing
+ * enforces a usable `option_id` on egress.
+ */
+function readyOptionIds(body) {
+  return readyOptions(body)
+    .map((o) => o?.option_id)
+    .filter((id) => typeof id === "string" && id.length > 0);
+}
+
+/**
+ * THE JOURNEY INVARIANT (ROADMAP 2.1300).
+ *
+ * WHAT THIS ASSERTS, AND WHY IT IS NOT "assert turn 2"
+ * ---------------------------------------------------
+ * The product's promise is not "turn 2 returns a graph" — it is that a user who
+ * brings a decision LEAVES HOLDING A USABLE MODEL, and that the model the
+ * product then talks about is the model it actually built. Which turn drafts is
+ * a product decision that has now changed twice: pre-#1002 turn 1 asked a
+ * clarifying question and turn 2 drafted; post-#1002 turn 1 drafts immediately
+ * and clarification rides alongside. Binding the alarm to a turn INDEX made a
+ * deliberate, ratified product improvement read as an outage — and, far worse,
+ * left the gate unable to tell that case apart from a real outage, because both
+ * emit `no draft_graph on the response`.
+ *
+ * So the assertion is stated over the JOURNEY:
+ *
+ *   1. DELIVERY — at least one turn carried a `draft_graph`. If none did, the
+ *      user got no model and that is the outage this alarm was built for. The
+ *      message names both exit_paths, because "which path served this" is the
+ *      first thing an on-call engineer needs and the old message omitted it.
+ *
+ *   2. USABILITY — the LAST drafting turn's graph clears MIN_NODES /
+ *      MIN_OPTIONS and has distinct option ids, via `assertHealthyDraft` under
+ *      that turn's own label. This is the assertion that #1002 moved out from
+ *      under: the only graph check lived on turn 2, so a trivial or empty
+ *      turn-1 draft (the ROADMAP 2.1252 shape) had NO gate above it here.
+ *
+ *      WHY THE **LAST** DRAFTING TURN, not the first and not every one. The
+ *      invariant is what the user LEAVES HOLDING, and `findIndex` implemented
+ *      "the FIRST drafting turn must be usable" — a different claim, wrong in
+ *      both directions, both measured at fd148826:
+ *        · turn 1 healthy, turn 2 re-drafts an EMPTY graph → PASSED. A re-draft
+ *          collapse was invisible, and a later-turn redraft is a real product
+ *          path (`explicit_generate_graph_present` commits a draft_graph
+ *          redraft). The last-turn reading catches it.
+ *        · turn 1 a provisional 2-node draft, turn 2 a full healthy draft →
+ *          3 FAILURES, though the user does leave holding a usable model. That
+ *          is the same false-alarm shape as the P0 this gate exists to remove,
+ *          one turn narrower. Asserting EVERY drafting turn would keep it.
+ *      A mid-journey provisional sketch is not an outage; an unusable final
+ *      model is. Note the 2.1252 shape still fails when the trivial draft is
+ *      the LAST word — pinned by a test, because that is what this reading
+ *      must not weaken.
+ *
+ *   3. CONTINUITY, BOUND BY IDENTITY — every turn after the drafting turn must
+ *      still name the same `option_id`s. This is deliberately an identity check
+ *      and not a count: `analysis_ready.options.length >= 2` is satisfied by ANY
+ *      two-item list, so a count cannot see the product describing a different
+ *      set of options than the one it built. That divergence is the P5
+ *      fabrication class — a claim about the user's model not grounded in the
+ *      model — and the old gate was blind to it entirely.
+ *
+ * ASYMMETRY, STATED DELIBERATELY (trap 22b): LOSS of a drafted option_id fails;
+ * ADDITION does not. Losing one means the product is talking about a model it
+ * did not build. Gaining one makes nothing the user was told less true, so
+ * failing on it would be a false alarm — and false alarms are precisely how this
+ * estate has lost real ones. One harm, one direction, one parameter.
+ *
+ * @param {unknown} frameBody   turn 1 body
+ * @param {unknown} followUpBody turn 2 body
+ * @returns {string[]} failure messages; empty means healthy.
+ */
+export function assertHealthyJourney(frameBody, followUpBody) {
+  const f = [];
+  const turns = [
+    { label: "turn 1", body: frameBody },
+    { label: "turn 2", body: followUpBody },
+  ];
+
+  // The LAST turn that handed the user a model — the one they leave holding.
+  // Shares `carriedDraftGraph` with the provenance check: one concept, one
+  // predicate. `findLastIndex` is Node 18+; CI runs Node 20.
+  const draftIdx = turns.findLastIndex((t) => carriedDraftGraph(t.body));
+
+  // 1. DELIVERY.
+  if (draftIdx === -1) {
+    f.push(
+      "journey: neither turn carried a draft_graph — the user got no model back " +
+        `(exit_paths: ${turns
+          .map((t) => `${t.label}=${t.body?._diagnostic_trace?.exit_path ?? "?"}`)
+          .join(", ")})`,
+    );
+    return f;
+  }
+
+  // 2. USABILITY, on the turn that actually drafted.
+  const drafting = turns[draftIdx];
+  f.push(...assertHealthyDraft(drafting.body, drafting.label));
+
+  // 3. CONTINUITY, by identity.
+  //
+  // THE PRECONDITION IS PINNED IN CODE, NOT IN A COMMENT. This loop used to
+  // `continue` on an empty `draftedIds` under the note "nothing to lose; (2)
+  // already judged it". That note was FALSE and is what made the hole
+  // invisible: (2) counts option OBJECTS, and its duplicate check is itself
+  // gated on `ids.length > 0`, so FOUR id-less option objects satisfy it
+  // completely — two predicates for one concept again. Measured at fd148826 on
+  // the real turn-1 capture with `option_id: ""` (also `null`, also absent) and
+  // a follow-up naming four COMPLETELY DIFFERENT ids: `assertHealthyJourney`
+  // returned `[]`. A PASS. The identity guarantee turned ITSELF OFF rather than
+  // turning red, which is the worst behaviour available to an alarm.
+  const draftedIds = readyOptionIds(drafting.body);
+  const bindable = draftedIds.length > 0;
+  if (!bindable && readyOptionCount(drafting.body) > 0) {
+    f.push(
+      `${drafting.label}: analysis_ready.options carry no usable option_id — ` +
+        `the continuity check cannot bind, so it was not performed`,
+    );
+  }
+  // When there are no option objects AT ALL, (2) really has judged it —
+  // `analysis_ready.options=0, expected >= ${MIN_OPTIONS}` is already in `f`.
+  // Adding a second message there would be the duplicate-predicate defect.
+
+  for (const later of turns.slice(draftIdx + 1)) {
+    // GRAPH_HASH — the strongest continuity signal available, and it was unused.
+    // Both committed fixtures carry an identical `graph_hash` and the spec
+    // already asserts that equality as "the premise of the continuity
+    // assertion", while the gate never read it. Only compare when BOTH turns
+    // carry one: absence is not disagreement, and firing on absence would red
+    // the legacy clarify-then-draft journey, which carries no hash at all.
+    const draftedHash = drafting.body?.graph_hash;
+    const laterHash = later.body?.graph_hash;
+    if (
+      typeof draftedHash === "string" &&
+      draftedHash.length > 0 &&
+      typeof laterHash === "string" &&
+      laterHash.length > 0 &&
+      draftedHash !== laterHash
+    ) {
+      f.push(
+        `${later.label}: graph_hash ${laterHash} does not match the model drafted on ` +
+          `${drafting.label} (${draftedHash}) — the product is describing a different model ` +
+          `than the one it built.`,
+      );
+    }
+
+    if (!bindable) continue; // already reported above; do not judge silently
+
+    const laterIds = readyOptionIds(later.body);
+    if (laterIds.length === 0) {
+      // An empty/absent `analysis_ready` is a LOSS only where readiness is
+      // PRODUCED. On a deterministic non-graph exit the block is legitimately
+      // absent, and the old unconditional message asserted a loss that did not
+      // happen. Name the exit_path either way — "which path served this" is the
+      // first thing an on-call engineer needs.
+      const laterExit = later.body?._diagnostic_trace?.exit_path;
+      if (typeof laterExit !== "string" || laterExit.length === 0) {
+        f.push(
+          `${later.label}: analysis_ready.options is empty AND _diagnostic_trace.exit_path is ` +
+            `absent — the gate cannot tell a real loss from a legitimate non-readiness exit. ` +
+            `Fix the trace: an unclassifiable turn is not a pass.`,
+        );
+      } else if (READINESS_PRODUCING_EXIT_PATHS.has(laterExit)) {
+        // ⚠⚠ THIS MESSAGE HAS NOW BEEN WRONG TWICE, IN OPPOSITE DIRECTIONS, AND
+        // THAT IS WHY IT NOW NAMES CANDIDATES INSTEAD OF A CAUSE.
+        //
+        // v1 said "the model did not survive the turn" — pointing at
+        // DRAFTING/PERSISTENCE. A diagnosis lane went there; that seam was
+        // healthy.
+        // v2 said the failure is "in that READ or that PROJECTION". Also wrong,
+        // and wrong while the message's own printed fields disproved it: on the
+        // measured failures the read returned the committed model (identical
+        // `graph_hash`) and the projection SUCCEEDED, finding a goal and four
+        // options. It was overwritten AFTERWARDS, by the analyse-refusal arm —
+        // a THIRD seam neither version named.
+        //
+        // ⭐ THE RULE THIS ENCODES: an alarm may state what it OBSERVED with
+        // confidence and must not state a CAUSE it cannot observe. A confident
+        // wrong seam is worse than no seam, because it is acted on. Enumerate
+        // every seam consistent with the evidence, in the order the payload
+        // itself discriminates them, and let the printed fields decide — the
+        // one thing an alarm must never do is disagree with its own data on its
+        // own line.
+        f.push(
+          `${later.label}: analysis_ready.options was empty on exit_path=${laterExit}, which ` +
+            `DOES produce readiness, after the model was drafted on ${drafting.label} — ` +
+            `this turn PUT NO COMPARABLE OPTIONS ON THE WIRE. That is an OBSERVATION about ` +
+            `the payload, not yet a cause: a follow-up turn re-reads the persisted graph and ` +
+            `re-projects readiness from it, so at least three seams can produce it and the ` +
+            `fields below tell them apart. ` +
+            `(a) OVERWRITTEN AFTER A GOOD PROJECTION — the analyse-refusal arm replaces the ` +
+            `structural payload it just built (turn-executor.ts, the ANALYSE_HANDLER_ID branch ` +
+            `→ buildAnalysisRefusalReadiness). TELL: blocked_reason present with ` +
+            `readiness_issues ABSENT, and freshness "unknown". This was the measured cause on ` +
+            `18 Aug 2026 and the read and the projection were both healthy. ` +
+            `(b) THE PROJECTION FOUND NOTHING — analysis-ready-helper's no-semantic fallback. ` +
+            `TELL: readiness_issues PRESENT (it always sets them). ` +
+            `(c) THE READ RETURNED SOMETHING ELSE — stale, empty or foreign persisted state. ` +
+            `TELL: graph_hash DIFFERS between the two turns; equal hashes RULE THIS OUT. ` +
+            `Read these first: [${drafting.label}] ${readinessDiagnosis(drafting.body)} | ` +
+            `[${later.label}] ${readinessDiagnosis(later.body)}. ` +
+            `Do not conclude past what these fields support.`,
+        );
+      }
+      continue;
+    }
+    const missing = draftedIds.filter((id) => !laterIds.includes(id));
+    if (missing.length > 0) {
+      f.push(
+        `${later.label}: analysis_ready.options no longer identifies the model drafted on ` +
+          `${drafting.label} — missing option_id(s): ${missing.join(",")}. The product is ` +
+          `describing a different set of options than the one it built.`,
+      );
+    }
+  }
+
+  return f;
+}
+
+/**
+ * THE PRODUCT MUST NOT ANSWER A CONVERSATIONAL TURN WITH AN ANALYSIS REFUSAL.
+ *
+ * ⭐⭐ WHY THIS EXISTS, AND WHY IT IS DELIBERATELY NOT KEYED ON `options`.
+ *
+ * The 18 Aug 2026 P0 had TWO defects stacked on one turn, and only one of them
+ * is being fixed:
+ *
+ *   1. the turn ROUTED TO THE ANALYSE HANDLER although the user asked it to
+ *      "draft the model now" — nobody requested an analysis; and
+ *   2. the resulting refusal ERASED the model's identity from `analysis_ready`.
+ *
+ * The fix for (2) makes `options` non-empty again, so the continuity check
+ * above — the only thing that has ever caught this turn — goes GREEN. **The
+ * mis-routing then becomes unobservable**: a real, unfixed defect with no alarm
+ * over it, on a build where CI is entirely green. That is the sharpest form of
+ * the "a fix validated against the symptom's metric kills the symptom and
+ * leaves the defect alive" trap, because here the fix also removes the
+ * instrument that was measuring the residual.
+ *
+ * So this assertion keys on `blocked_reason`, which the fix PRESERVES, rather
+ * than on `options`, which the fix repopulates. It is orthogonal to the fix by
+ * construction and survives it.
+ *
+ * ⭐ THE PREDICATE IS DERIVED FROM THE PRODUCER, not from the observed payloads
+ * (P7). `src/orchestrator/types.ts:595` declares `blocked_reason` is *"written
+ * ONLY by `buildAnalysisRefusalReadiness`"*, and that function is called from
+ * exactly two sites, both of them the analyse-refusal arm. So a non-empty
+ * `blocked_reason` IS the turn declaring "I declined to analyse" — it is not a
+ * proxy for it, and no other producer can set it.
+ *
+ * ⭐ "THE USER DID NOT ASK TO ANALYSE" IS DECLARED BY THE CALLER, NEVER INFERRED
+ * FROM THE RESPONSE. This gate is the user: it composes every message it sends,
+ * so it KNOWS which turns requested an analysis. Deriving that intent back out
+ * of the reply would be circular — the reply is the thing under test. Each turn
+ * therefore carries an explicit `requestedAnalysis` flag, and only turns
+ * declared `false` are judged.
+ *
+ * NOTE WHAT THIS IS SILENT ABOUT, deliberately. A turn that runs an unrequested
+ * analysis and SUCCEEDS emits no `blocked_reason` and is not flagged here.
+ * Measured on the same sampling batch: 2 of 6 passing runs had turn 2 report
+ * `freshness="fresh"/"graph_hash_match"`, which on a two-turn journey with no
+ * prior analysis can only mean a run_analysis fact was produced ON THAT TURN.
+ * So the mis-routing is materially more common than the refusals alone reveal.
+ * That is recorded in the diagnosis line (freshness is printed on every turn)
+ * rather than asserted, because an analysis on a follow-up turn is legitimate
+ * in other journeys and firing on it here would be a false alarm — and false
+ * alarms are how this estate loses real ones.
+ *
+ * @param {Array<{label: string, body: unknown, requestedAnalysis: boolean}>} turns
+ * @returns {string[]} failure messages; empty means healthy.
+ */
+export function assertNoUnrequestedAnalysisRefusal(turns) {
+  const f = [];
+  for (const t of turns) {
+    if (t.requestedAnalysis) continue;
+    const reason = t.body?.analysis_ready?.blocked_reason;
+    if (typeof reason !== "string" || reason.trim().length === 0) continue;
+    f.push(
+      `${t.label}: the product answered a CONVERSATIONAL turn with an ANALYSIS REFUSAL ` +
+        `(analysis_ready.blocked_reason="${reason}") — this turn never asked for an analysis. ` +
+        `Only the analyse-refusal arm writes blocked_reason, so the turn routed to the analyse ` +
+        `handler, ran the readiness gate, and declined. The user asked for something else and ` +
+        `got a refusal to do a thing they did not request. ` +
+        `This is a ROUTING defect and it is NOT fixed by making the refusal payload honest: ` +
+        `that fix restores analysis_ready.options, which turns the continuity check above ` +
+        `green while leaving this turn just as wrong. ` +
+        `Readiness on this turn: ${readinessDiagnosis(t.body)}`,
+    );
+  }
+  return f;
+}
+
+/**
+ * A turn that produced a graph must prove WHICH prompt produced it.
+ *
+ * THE ROOT CAUSE OF THE P0 SURVIVED INSIDE ITS OWN FIX. The original check was
+ * inline in `report()` and keyed on TURN 2's exit_path, so #1002 moved the
+ * drafting turn out from under it. The fix removed the TURN half and kept the
+ * EXIT_PATH half — leaving the gate with TWO predicates for the single concept
+ * "this turn drafted": delivery/usability read `draft_graph` PRESENCE while
+ * provenance read `exit_path === "draft_graph"`. So the identical silent loss
+ * recurs the next time the drafting event is relabelled, which is exactly the
+ * change #1002 made.
+ *
+ * It is reachable today, not hypothetically: `draft_graph` is genuinely emitted
+ * under other exits by `applied-graph-emit.ts`'s `n()`, called from four
+ * turn-executor sites, `edit-graph-dispatch.ts` and `system-events/dispatch.ts`.
+ * Measured at fd148826: a turn carrying a `draft_graph` with
+ * `exit_path: "edit_graph"` and an EMPTY `prompt_identity` produced NO failure.
+ *
+ * So the trigger is now DELIVERY — `carriedDraftGraph`, the same predicate
+ * `assertHealthyJourney` uses — union the declared drafting exit, which stays
+ * because a turn that says it drafted is making the same claim even if the
+ * graph never reached the wire. An empty identity on a turn that neither
+ * delivered nor declared a graph stays legitimate: the trace builder
+ * deliberately does not fabricate one there.
+ *
+ * NO FALSE ALARM IS BOUGHT BY THIS, and the claim is checked rather than
+ * asserted: the comment that justified the narrow scope said `prompt_identity`
+ * is EXPECTED to be `[]` on the minimal-trace exits including `turn_executor` —
+ * and this PR's own turn-2 fixture is `turn_executor` carrying
+ * `prompt_identity_count = 1`. Pinned by a test.
+ *
+ * @param {Array<{exit_path: string|null, prompt_identity_count: number}|null>} diagnostics
+ * @param {unknown[]} [bodies] the same turns' response bodies, index-aligned with
+ *   `diagnostics`. Omitted only by callers that have no bodies (the deploy-
+ *   freshness early exit drove no turns), in which case delivery cannot be
+ *   observed and only the declared-exit arm applies.
+ * @returns {string[]} failure messages; empty means healthy.
+ */
+export function assertPromptProvenance(diagnostics, bodies = []) {
+  const f = [];
+  diagnostics.forEach((d, i) => {
+    if (!d) return;
+    const delivered = carriedDraftGraph(bodies[i]);
+    const declared = d.exit_path === DRAFT_EXIT_PATH;
+    if (!delivered && !declared) return;
+    if (d.prompt_identity_count !== 0) return;
+    const how = delivered
+      ? `carried a draft_graph (exit_path=${d.exit_path ?? "?"})`
+      : `exit_path=${DRAFT_EXIT_PATH}`;
+    f.push(
+      `turn ${i + 1}: this turn produced a graph — it ${how} — but prompt_identity was empty: ` +
+        "the served prompt version/hash did not reach the trace, so we cannot prove WHICH " +
+        "prompt produced this graph.",
+    );
+  });
+  return f;
+}
+
+/** Extract the diagnostics we report on every run, healthy or not. */
+export function extractDiagnostics(body) {
+  const t = body?._diagnostic_trace ?? {};
+  const identity = Array.isArray(t.prompt_identity) ? t.prompt_identity : [];
+  return {
+    build_sha: t?.environment?.build_sha ?? null,
+    exit_path: t?.exit_path ?? null,
+    prompt_identity_count: identity.length,
+    prompt_identity: identity.map((p) => `${p?.task_id}=${p?.version}#${String(p?.hash ?? "").slice(0, 8)}`),
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* SAMPLING — because ONE sample cannot measure a RATE.                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * ⭐⭐ WHY THIS SECTION EXISTS — 11 Sep 2026, and it is the sharpest failure
+ * this alarm has had, because THE ALARM FIRED AND WAS THEN OVERRULED BY ITSELF.
+ *
+ * A fail-closed egress validator reached staging at 03:43. It makes a large
+ * minority of drafts of the demo brief die with HTTP 500
+ * (`reason=draft_graph_cee_graph_invalid`). Paul hit it live hours before
+ * showing the PoC to external collaborators.
+ *
+ * This gate FAILED on that exact commit (ccb7188e, run 34559516620). Two things
+ * then went wrong, and only the second one is this file's fault:
+ *
+ *   1. It is not a required check — CEE `staging` requires only
+ *      `Lint, TypeCheck, Unit Tests`, which was green, so the merge proceeded.
+ *      That is a branch-protection decision and is deliberately NOT changed
+ *      here.
+ *
+ *   2. ⭐ IT THEN PASSED ON THE NEXT TWO COMMITS (d2e2662d, 77d11382) WHILE THE
+ *      DEFECT WAS LIVE AND UNCHANGED. It drove ONE journey against a stochastic
+ *      producer, so it read green roughly as often as the draft happened to
+ *      succeed. Its green was not evidence of health; it was a coin landing.
+ *
+ * A SINGLE-SAMPLE GATE CANNOT MEASURE A FAILURE RATE. It is not a weak alarm —
+ * it is an alarm that actively reports health while the product is broken, and
+ * a green from it is the most expensive kind of wrong this estate produces.
+ *
+ * MEASURED, from this gate's OWN run logs (13 runs, 2026-09-09T21:29Z →
+ * 2026-09-11T08:00Z): turn 1 returned `exit_path=draft_graph_error` / HTTP 500
+ * on 5 of 13 — 38%. Both failures whose logs carry the diagnosis line read
+ * `reason=draft_graph_cee_graph_invalid`, the same reason as the 03:43 outage,
+ * at 2026-09-10T13:35Z and 2026-09-10T17:58Z. ⚠ So the failure was live for at
+ * least 30 HOURS BEFORE the 03:43 commit, and the gate reported PASS on 8 of
+ * those 13 runs. "It started at 03:43" is what a one-sample gate makes an
+ * outage look like.
+ *
+ * WHAT THIS SECTION DOES NOT DO, stated because a guard whose advertised scope
+ * is wider than its real one is this estate's dominant defect:
+ *   · It does not widen COVERAGE. See the header note on what the journey
+ *     asserts — the user leaves holding a usable MODEL, never an ANSWER.
+ *     Sampling a blind spot five times measures the blind spot five times.
+ *   · It does not make this gate required, and does not touch branch
+ *     protection. Multi-sample first; required second, once the real variance
+ *     has been observed.
+ *   · It cannot see a low-rate defect. `detectionProbability` prints exactly
+ *     how blind it is, on every run, so nobody inherits a guarantee it does
+ *     not give.
+ */
+
+/**
+ * REPORTS ONLY — never asserts. Classify ONE journey sample's outcome.
+ *
+ * "3 of 5 drafts failed" tells you to look; "3 of 5 failed, all
+ * VIOLATION:OPTIONS_IDENTICAL" tells you WHERE, and that is the difference
+ * between an alarm and an investigation. The codes are read from the
+ * PRODUCER's own fields rather than invented here (trap 13c: an expectation
+ * derived from the reader's model of a producer is a perfect score on the
+ * wrong exam) — the same fields `draftErrorDiagnosis` prints per turn.
+ *
+ * ORDER IS MOST-SPECIFIC-FIRST, and the order is the point:
+ *   1. `threw`            — no body exists, so nothing below can be read.
+ *   2. `PROXY:<code>`     — the proxy refused DELIVERY. The model may be
+ *                           perfectly fine and the user still got nothing;
+ *                           different fault, different action.
+ *   3. `VIOLATION:<code>` — WHICH rule refused it. `OPTIONS_IDENTICAL` is a
+ *                           stochastic model outcome on a binary brief; an
+ *                           infrastructure fault is not. This is the code that
+ *                           makes a rate actionable.
+ *   4. `REASON:<reason>`  — which producer refused, in its own words.
+ *   5. `ERROR:<error>`    — the orchestrator's STRING error envelope.
+ *   6. `HTTP_<status>`    — a non-200 carrying no envelope at all.
+ *   7. `ASSERTIONS_FAILED`— HTTP 200, no envelope, and the journey invariant
+ *                           still failed. A silent-wrongness class, and it must
+ *                           not be collapsed into the loud ones.
+ *
+ * `ok` is decided by the FAILURE LIST, never by the code: a sample is healthy
+ * exactly when the journey assertions found nothing. The classification only
+ * describes a failure that has already been established, so a new failure class
+ * nobody anticipated reports `ASSERTIONS_FAILED` rather than passing.
+ *
+ * @param {Array<{label?: string, status?: number, body?: unknown, threw?: string}>} turns
+ * @param {string[]} failures the journey assertion messages for this sample.
+ * @returns {{ok: boolean, code: string}}
+ */
+export function classifyJourneySample(turns, failures) {
+  const list = Array.isArray(turns) ? turns : [];
+  const failed = Array.isArray(failures) && failures.length > 0;
+  if (!failed) return { ok: true, code: "OK" };
+
+  const nonEmpty = (v) => typeof v === "string" && v.trim().length > 0;
+
+  for (const t of list) if (nonEmpty(t?.threw)) return { ok: false, code: `THREW:${t.threw.trim()}` };
+  for (const t of list) {
+    const code = proxyFailureCode(t?.body);
+    if (code) return { ok: false, code: `PROXY:${code}` };
+  }
+  for (const t of list) if (nonEmpty(t?.body?.details?.violation_code)) return { ok: false, code: `VIOLATION:${t.body.details.violation_code.trim()}` };
+  for (const t of list) if (nonEmpty(t?.body?.details?.reason)) return { ok: false, code: `REASON:${t.body.details.reason.trim()}` };
+  for (const t of list) if (nonEmpty(t?.body?.error)) return { ok: false, code: `ERROR:${t.body.error.trim()}` };
+  for (const t of list) if (typeof t?.status === "number" && t.status !== 200) return { ok: false, code: `HTTP_${t.status}` };
+  return { ok: false, code: "ASSERTIONS_FAILED" };
+}
+
+/**
+ * Aggregate the samples into the numbers the job prints on EVERY run.
+ *
+ * `failureRate` is `null` when nothing was attempted — absent is never reported
+ * as zero, for the same reason `readinessDiagnosis` refuses to print absent as
+ * empty. "No samples ran" and "no samples failed" are opposite facts and a 0
+ * would print them identically.
+ *
+ * @param {Array<{ok?: boolean, code?: string}>} samples
+ * @returns {{attempted: number, ok: number, failed: number, failureRate: number|null, byCode: Record<string, number>}}
+ */
+export function summariseSamples(samples) {
+  const list = Array.isArray(samples) ? samples : [];
+  const attempted = list.length;
+  const ok = list.filter((s) => s?.ok === true).length;
+  const byCode = {};
+  for (const s of list) {
+    const c = typeof s?.code === "string" && s.code.length > 0 ? s.code : "UNCLASSIFIED";
+    byCode[c] = (byCode[c] ?? 0) + 1;
+  }
+  return { attempted, ok, failed: attempted - ok, failureRate: attempted === 0 ? null : (attempted - ok) / attempted, byCode };
+}
+
+/**
+ * P(this gate reds on a given push) for `k` independent samples that must ALL
+ * deliver, against a true per-sample failure rate `r`: `1 - (1 - r)^k`.
+ *
+ * DERIVED, NOT WRITTEN DOWN (trap 12). The honest statement of what this gate
+ * cannot see is arithmetic, and an arithmetic claim parked in a comment is a
+ * hand-maintained mirror that goes stale the moment `k` changes. It is exported
+ * so the claim in the job output, the claim in the PR body and the claim under
+ * test are the same function rather than three copies of a number.
+ *
+ * Independence is an ASSUMPTION, and it is the load-bearing one: it holds for a
+ * stochastic model outcome on a fresh scenario_id, and fails for a correlated
+ * fault (a bad deploy, an exhausted key, a rejected origin) — where every sample
+ * fails together and k buys nothing beyond the first. That direction is safe:
+ * correlated faults are caught by ONE sample.
+ *
+ * @returns {number|null} null when the inputs are not a usable (k, rate) pair.
+ */
+export function detectionProbability(k, failureRate) {
+  if (!Number.isInteger(k) || k < 1) return null;
+  if (typeof failureRate !== "number" || !Number.isFinite(failureRate)) return null;
+  if (failureRate < 0 || failureRate > 1) return null;
+  return 1 - Math.pow(1 - failureRate, k);
+}
+
+/**
+ * The true per-sample failure rate at which this gate is a COIN FLIP — below
+ * it, a given push is more likely to be missed than caught. `1 - 0.5^(1/k)`.
+ *
+ * This is the number the PR body must state and the job must print: it is the
+ * boundary of what k buys, and stating k without it is how a sampling gate gets
+ * inherited as a guarantee of health.
+ *
+ * @returns {number|null} null when k is not a positive integer.
+ */
+export function halfDetectionRate(k) {
+  if (!Number.isInteger(k) || k < 1) return null;
+  return 1 - Math.pow(0.5, 1 / k);
+}
+
+/**
+ * The FLOOR. Returns failure messages; empty means the run cleared it.
+ *
+ * TWO SEPARATE FAILURES, deliberately not one predicate (trap 21 — two harms
+ * under one name is two questions under one name):
+ *
+ *   · TOO FEW SAMPLES. Truncation reduces detection power, and a gate that
+ *     quietly falls back to one sample is the very defect this section exists
+ *     to remove. Below `minSamples` the run is UNMEASURED, and an unmeasured
+ *     result is a hard error, never a pass.
+ *
+ *   · TOO FEW SUCCESSES. The product promise is that a user who brings a
+ *     decision leaves holding a usable model. There is no acceptable non-zero
+ *     rate for a 500 on that path, so the DEFAULT floor is all-of-k; the knob
+ *     exists so the floor can be relaxed for calibration without a code change,
+ *     never because a failing draft is ever fine.
+ *
+ * TRUNCATION MUST NOT SILENTLY WEAKEN THE FLOOR — nor invert into a false red.
+ * An absolute floor of 5 against 3 taken samples would red a run in which every
+ * sample it managed to take was healthy. The floor is therefore scaled to what
+ * was actually taken and rounded UP (fail-closed), and the effective value is
+ * printed rather than inferred.
+ *
+ * @param {{attempted: number, ok: number, failed: number, byCode: Record<string, number>}} summary
+ * @param {{floor: number, requested: number, minSamples: number}} options
+ * @returns {string[]} failure messages; empty means healthy.
+ */
+export function assertSampleFloor(summary, options) {
+  const f = [];
+  const { floor, requested, minSamples } = options;
+  const { attempted, ok, failed, byCode } = summary;
+
+  if (attempted < minSamples) {
+    f.push(
+      `sampling: only ${attempted} of ${requested} journey samples were taken (minimum ${minSamples}) — ` +
+        `the run is UNMEASURED, not healthy. A gate that falls back to one sample cannot see a rate at all, ` +
+        `which is the 11 Sep defect this sampling exists to remove. Raise SMOKE_JOURNEY_BUDGET_MS or lower ` +
+        `SMOKE_DRAFT_SAMPLES; do not read this as a pass.`,
+    );
+  }
+
+  const effectiveFloor = attempted === 0 ? 0 : Math.min(attempted, Math.ceil((floor / requested) * attempted));
+  if (attempted > 0 && ok < effectiveFloor) {
+    const census = Object.entries(byCode)
+      .filter(([c]) => c !== "OK")
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([c, n]) => `${c}×${n}`)
+      .join(", ");
+    f.push(
+      `draft success floor: ${ok}/${attempted} journey samples delivered a usable model, ` +
+        `below the floor of ${effectiveFloor}. ${failed} failed — ${census || "unclassified"}. ` +
+        `This is a RATE, not a single red: the product fails this often for a real user on the demo brief.`,
+    );
+  }
+  return f;
+}
+
+/**
+ * The lines printed on EVERY run, healthy or not.
+ *
+ * ⭐ A GATE THAT ONLY SPEAKS WHEN IT FAILS TEACHES NOBODY WHAT NORMAL LOOKS
+ * LIKE — and the rate is the single number that would have stopped the 11 Sep
+ * merge. The 18 Aug intermittent had no discriminator for exactly this reason:
+ * the eight passing runs carried the answer and never printed it. So the census,
+ * the rate, the floor and the blindness statement are emitted on a PASS too.
+ *
+ * @param {{attempted: number, ok: number, failed: number, failureRate: number|null, byCode: Record<string, number>}} summary
+ * @param {{floor: number, requested: number, minSamples: number}} options
+ * @returns {string[]} lines to log.
+ */
+export function samplingReport(summary, options) {
+  const { floor, requested, minSamples } = options;
+  const { attempted, ok, failed, failureRate, byCode } = summary;
+  const pct = (v) => (v === null || v === undefined ? "n/a" : `${(v * 100).toFixed(1)}%`);
+  const effectiveFloor = attempted === 0 ? 0 : Math.min(attempted, Math.ceil((floor / requested) * attempted));
+  const lines = [];
+
+  lines.push(`## Draft sampling — ${attempted} of ${requested} samples taken (min ${minSamples})`);
+  lines.push(`  delivered a usable model: ${ok}/${attempted}   failed: ${failed}/${attempted}`);
+  // `failureRate === null` prints "n/a", never "0.0%": no samples and no
+  // failures are opposite facts.
+  lines.push(`  OBSERVED DRAFT FAILURE RATE: ${pct(failureRate)}`);
+  lines.push(`  floor: ${ok >= effectiveFloor ? "MET" : "MISSED"} — ${effectiveFloor} of ${attempted} required (configured ${floor} of ${requested})`);
+  lines.push(`  by outcome:`);
+  for (const [code, n] of Object.entries(byCode).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))) {
+    lines.push(`    ${code.padEnd(38)} ${n}`);
+  }
+
+  // WHAT THIS k CANNOT SEE, derived at the k actually used rather than quoted
+  // from a comment written when k was something else.
+  const power = [0.5, 0.3, 0.2, 0.1, 0.05, 0.01]
+    .map((r) => `${pct(r)}→${pct(detectionProbability(attempted || requested, r))}`)
+    .join("  ");
+  lines.push(`  detection power at k=${attempted || requested}, P(this gate reds | true rate):`);
+  lines.push(`    ${power}`);
+  lines.push(
+    `  ⚠ BLIND BELOW ~${pct(halfDetectionRate(attempted || requested))}: under that true failure rate this gate is ` +
+      `MORE LIKELY TO MISS a defect on a given push than to catch it. It bounds a LARGE-MINORITY ` +
+      `failure rate and is not evidence of a healthy one.`,
+  );
+  return lines;
+}
+
+/* ------------------------------------------------------------------ */
+/* CLI — real HTTP only.                                               */
+/* ------------------------------------------------------------------ */
+
+const isMain = process.argv[1] && import.meta.url === `file://${process.argv[1]}`;
+
+function uuid() {
+  return globalThis.crypto.randomUUID();
+}
+
+function log(msg) {
+  process.stdout.write(`${msg}\n`);
+}
+
+/**
+ * THE DRAFT-FAILURE DIAGNOSIS LINE — why this exists, and what it is for.
+ *
+ * `readinessDiagnosis` (above) exists because a whole diagnosis session went
+ * into a source trace to answer a question the response body answers directly.
+ * THE SAME DEFECT WAS LIVE ONE BLOCK OVER, on the failure this alarm reds for
+ * most often.
+ *
+ * A `draft_graph_error` 500 carries a COMPLETE machine-readable diagnosis:
+ * `error`, `details.reason`, `details.violation_code`, `details.repair_skip_reason`,
+ * `details.recovery.suggestion`, and `_diagnostic_trace.retry.{timed_out,error_type}`
+ * plus `benchmarking.total_duration_ms`. The gate printed NONE of it on the
+ * turn that actually drafts, so its red read as "the server fell over".
+ *
+ * Measured (10 Sep 2026): run 809 on build 8449e54 reported only
+ * `exit_path=draft_graph_error` at 40.5s. A reader took that to mean the
+ * product had returned a blank reply and no model, went to CEE's own logs,
+ * found `cee.draft_graph.succeeded` with a full option/factor census, and
+ * concluded the ALARM was lying. The alarm was not lying — it was MUTE. The
+ * committed capture of this exact failure class
+ * (tests/unit/ci/fixtures/live-turn2-draft-500-e22f8a6.json, 40,768ms,
+ * `timed_out: false`) shows what the log withheld: the model DID produce a
+ * graph and CEE's own egress validator refused it —
+ * `reason=draft_graph_cee_graph_invalid`, `violation_code=OPTIONS_IDENTICAL`,
+ * `repair_skip_reason=options_identical_unrepairable_by_llm` — with a
+ * user-facing recovery suggestion on the wire. "Our validator refused a graph
+ * for a nameable reason" and "the server fell over" are different facts and
+ * they were being printed identically.
+ *
+ * WHY THE FIELDS BELOW, SPECIFICALLY
+ *   · `error` / `details.reason`      → which producer refused, in its own words.
+ *   · `details.violation_code`        → WHICH rule. OPTIONS_IDENTICAL is a
+ *                                       stochastic model outcome on a binary
+ *                                       brief; an infrastructure fault is not.
+ *   · `details.repair_skip_reason`    → whether the repair path was even tried,
+ *                                       or declined this class outright.
+ *   · `details.retryable`             → whether a retry could have helped. The
+ *                                       gate drives one shot; without this, a
+ *                                       reader cannot tell a hard refusal from
+ *                                       a transient.
+ *   · `recovery.suggestion` present   → whether the refusal carried anything a
+ *                                       user could act on. This is the field
+ *                                       that separates "no model, and no way
+ *                                       forward" from "no model, with a stated
+ *                                       fix" — and the gate never printed it.
+ *   · `retry.timed_out` / `error_type`→ SETTLES the timeout hypothesis on every
+ *                                       future run instead of costing another
+ *                                       investigation. It was asked, and
+ *                                       answered wrongly, about this very run.
+ *   · `total_duration_ms`             → the server's OWN clock, next to the
+ *                                       client's. Two clocks disagreeing is
+ *                                       how a proxy cut is told from a refusal.
+ *
+ * NOTHING HERE IS AN ASSERTION. Like `readinessDiagnosis`, this function only
+ * reports; it cannot pass or fail a run. It is deliberately shared by the
+ * per-turn log line AND both failure paths, so the alarm and the diagnostic can
+ * never describe the same turn differently — the one-concept-ONE-predicate rule
+ * the rest of this file is built on. Before this existed the frame turn and the
+ * draft turn had two different answers to "why did drafting fail": turn 2
+ * printed the violation code and turn 1 printed nothing, and #1002 had already
+ * moved drafting onto turn 1 — so every real drafting failure landed on the
+ * mute branch.
+ *
+ * ABSENT IS NEVER PRINTED AS EMPTY, for the same reason `readinessDiagnosis`
+ * refuses to: a body with no error envelope and a body whose envelope has no
+ * reason are different facts.
+ */
+export function draftErrorDiagnosis(body) {
+  const d = body?.details;
+  const retry = body?._diagnostic_trace?.retry;
+  const durationMs = body?._diagnostic_trace?.benchmarking?.total_duration_ms;
+  const hasEnvelope = (body && typeof body === "object" && body.error !== undefined) || (d && typeof d === "object");
+  if (!hasEnvelope) return "absent(no-error-envelope)";
+  const q = (v) => (typeof v === "string" ? JSON.stringify(v) : v === undefined ? "absent" : String(v));
+  const suggestion =
+    typeof d?.recovery?.suggestion === "string" && d.recovery.suggestion.trim().length > 0 ? "present" : "absent";
+  // ONE FIELD NAME, TWO PRODUCERS. The orchestrator's `error` is a STRING
+  // ("INTERNAL_ERROR"); the browser proxy's is an OBJECT ({code, message, …}).
+  // Stringifying blindly printed `error=[object Object]` on every proxy
+  // refusal — caught by RUNNING this against staging with a disallowed origin,
+  // not by reading it. Read the code, never the field's stringification.
+  const errName = typeof body?.error === "string" ? body.error : body?.error?.code;
+  return (
+    `error=${q(errName)} reason=${q(d?.reason)} violation_code=${q(d?.violation_code)} ` +
+    `repair_skip_reason=${q(d?.repair_skip_reason)} retryable=${q(d?.retryable ?? body?.retryable)} ` +
+    `recovery_suggestion=${suggestion} timed_out=${q(retry?.timed_out)} error_type=${q(retry?.error_type)} ` +
+    `server_total_duration_ms=${q(durationMs)}`
+  );
+}
+
+/**
+ * Describe the model on a turn, UNAMBIGUOUSLY.
+ *
+ * The old line printed `nodes=${body?.draft_graph?.nodes?.length ?? 0}` beside
+ * `options=${body?.analysis_ready?.options.length}`. Those read two DIFFERENT
+ * top-level blocks with different lifecycles, and the `?? 0` collapsed "there is
+ * no draft_graph block on this turn" into the same "0" as "the graph is empty".
+ * On the 17 Aug failure that printed `nodes=0 options=4`, which reads as an
+ * incoherent payload — four options with no nodes — and cost real diagnosis time
+ * chasing a graph corruption that never existed. An alarm must never make its
+ * own observation ambiguous.
+ */
+function graphLine(body) {
+  const g = body?.draft_graph;
+  const opts = Array.isArray(body?.analysis_ready?.options) ? body.analysis_ready.options.length : "absent";
+  const graph =
+    g && typeof g === "object"
+      ? `draft_graph=present nodes=${Array.isArray(g.nodes) ? g.nodes.length : "?"}`
+      : "draft_graph=absent(no-block)";
+  return `${graph} analysis_ready.options=${opts}`;
+}
+
+/**
+ * PROXY-LAYER DELIVERY — did the response actually reach the caller?
+ *
+ * The three codes below are emitted by the proxy ITSELF, never by the
+ * orchestrator, and each means "the model may be perfectly fine and the user
+ * still got nothing". They are reported separately from the journey assertions
+ * because the ACTION is different: a 403 is a configuration drift that blocks
+ * every browser, a 504 is a delivery cut on a turn the server may have
+ * completed, and a 502 is a response that could not survive re-serialisation.
+ * Collapsing them into "turn 1: HTTP 504 (expected 200)" is how a delivery
+ * failure gets mistaken for a generation failure — the confusion this gate was
+ * repaired to end.
+ *
+ * NOTE THE SHAPE DIFFERENCE, and why it is handled explicitly: the proxy's
+ * `error` is an OBJECT (`{code, message, source, request_id}`) while the
+ * orchestrator's is a STRING (`"INTERNAL_ERROR"`). Two producers, one field
+ * name — read the code, never the field's stringification.
+ */
+export const PROXY_FAILURE_CODES = new Set([
+  "PROXY_ORIGIN_REJECTED",
+  "PROXY_UPSTREAM_TIMEOUT",
+  "PROXY_INTERNAL_ERROR",
+  "PROXY_INTERNAL_NON_JSON",
+  "PROXY_UNSUPPORTED_MEDIA_TYPE",
+]);
+
+/** The proxy error code on a body, or null when the proxy did not refuse. */
+export function proxyFailureCode(body) {
+  const code = body?.error?.code;
+  return typeof code === "string" && PROXY_FAILURE_CODES.has(code) ? code : null;
+}
+
+/**
+ * Assert the response was DELIVERED, not merely generated.
+ * @returns {string[]} failure messages; empty means the proxy handed it over.
+ */
+export function assertProxyDelivered(body, label = "turn 1") {
+  const code = proxyFailureCode(body);
+  if (!code) return [];
+  const e = body.error ?? {};
+  const detail =
+    `${label}: the BROWSER PROXY refused to deliver this turn — ${code}` +
+    (typeof e.message === "string" ? ` (${e.message})` : "") +
+    (e.upstream_duration_ms !== undefined ? ` upstream_duration_ms=${e.upstream_duration_ms}` : "");
+  if (code === "PROXY_ORIGIN_REJECTED") {
+    return [
+      `${detail} — BROWSER_PROXY_ALLOWED_ORIGINS no longer admits this origin, so EVERY browser user is ` +
+        `blocked while the internal route stays healthy.`,
+    ];
+  }
+  if (code === "PROXY_UPSTREAM_TIMEOUT") {
+    return [
+      `${detail} — the proxy timer beat the internal route. The model may have been generated ` +
+        `successfully and the user still received nothing; CEE's own log will say "succeeded".`,
+    ];
+  }
+  return [`${detail} — the response did not survive the hop to the browser.`];
+}
+
+async function postTurn(base, origin, payload, timeoutMs) {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
+  const started = Date.now();
+  try {
+    // EXACTLY what the deployed browser sends: no service key (the proxy
+    // injects its own and it never leaves the process), and the Origin the
+    // proxy validates against. Sending a key here would be theatre — the proxy
+    // forwards only an allowlist of request headers and would drop it.
+    const res = await fetch(`${base}${TURN_PATH}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        Origin: origin,
+      },
+      body: JSON.stringify(payload),
+      signal: ac.signal,
+    });
+    const text = await res.text();
+    let body;
+    try {
+      body = JSON.parse(text);
+    } catch {
+      body = { __unparseable: text.slice(0, 500) };
+    }
+    return { status: res.status, body, ms: Date.now() - started };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * PHASE 1. Poll /healthz until the served build matches `expectSha`.
+ * Returns {ok, served, waitedMs}. Never throws on a bad build — the caller
+ * decides, so the failure message stays in one place.
+ */
+async function waitForBuild(base, expectSha, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  const want = expectSha.slice(0, 7);
+  let served = null;
+  let attempt = 0;
+  while (Date.now() < deadline) {
+    attempt += 1;
+    try {
+      const res = await fetch(`${base}/healthz`, { signal: AbortSignal.timeout(20000) });
+      const body = await res.json();
+      served = body?.build ?? null;
+      if (served && served.slice(0, 7) === want) {
+        return { ok: true, served, waitedMs: timeoutMs - (deadline - Date.now()), attempt };
+      }
+      log(`  [freshness] attempt ${attempt}: serving ${served ?? "?"}, want ${want} — waiting…`);
+    } catch (e) {
+      log(`  [freshness] attempt ${attempt}: /healthz unreachable (${e.name}) — waiting…`);
+    }
+    // Never sleep PAST the deadline. A fixed 15s wait on the final iteration
+    // burns up to 15s of job time after the poll has already given up. The
+    // 15s interval itself is deliberately kept — ~60 healthz GETs over 15
+    // minutes is negligible load and needs no backoff.
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    await new Promise((r) => setTimeout(r, Math.min(15000, remaining)));
+  }
+  return { ok: false, served, waitedMs: timeoutMs, attempt };
+}
+
+/**
+ * Read an integer knob, FAILING CLOSED on anything unreadable.
+ *
+ * `Number("five")` is NaN and `Number("")` is 0; a knob that silently falls back
+ * to a default on a typo is how a gate ends up sampling once while its output
+ * claims five. An unreadable result is a hard error, never a pass.
+ */
+function intFromEnv(name, fallback, min, max) {
+  const raw = process.env[name];
+  if (raw === undefined || String(raw).trim().length === 0) return fallback;
+  const n = Number(String(raw).trim());
+  if (!Number.isInteger(n) || n < min || n > max) {
+    log(`FATAL: ${name}=${JSON.stringify(raw)} is not an integer in [${min}, ${max}].`);
+    process.exit(2);
+  }
+  return n;
+}
+
+/**
+ * ONE journey sample: frame, then draft, then judge — the exact journey this
+ * gate has always driven, on a FRESH scenario_id.
+ *
+ * A new scenario_id per sample is load-bearing, not hygiene: a seeded session is
+ * not evidence about a fresh user, so reusing one would sample the same session
+ * k times instead of sampling the product k times.
+ *
+ * IT NEVER THROWS. A sample that dies mid-flight is recorded as a FAILED sample
+ * carrying `threw`, not propagated — previously one transient abort ended the
+ * run and produced no rate at all, which is the same "no measurement reads as a
+ * verdict" defect one level up. A thrown sample still counts against the floor.
+ */
+async function runJourneySample({ base, origin, turnTimeout, index, total }) {
+  const scenarioId = uuid();
+  log(`\n### Sample ${index}/${total} (scenario_id ${scenarioId})`);
+  const failures = [];
+  const turns = [];
+
+  try {
+    const t1 = await postTurn(
+      base,
+      origin,
+      {
+        kind: "message",
+        turn_id: uuid(),
+        scenario_id: scenarioId,
+        stage: "frame",
+        turn_class: "frame",
+        source: "composer",
+        message: "Should we open a second bakery location in Leeds next quarter?",
+      },
+      turnTimeout,
+    );
+    const d1 = extractDiagnostics(t1.body);
+    turns.push({ label: "turn 1", body: t1.body, status: t1.status, d: d1 });
+    log(
+      `  turn 1: HTTP ${t1.status} in ${(t1.ms / 1000).toFixed(1)}s | exit_path=${d1.exit_path} | ` +
+        `build_sha=${d1.build_sha} | ${graphLine(t1.body)}`,
+    );
+    // Printed on EVERY sample, healthy or not — a diagnostic only emitted on
+    // failure gives you nothing to compare the failure against, which is
+    // precisely why the 18 Aug intermittent had no discriminator: the passing
+    // runs, of which there were eight, carried the answer and never printed it.
+    log(`    ${draftGraphCensus(t1.body)}`);
+    log(`    readiness: ${readinessDiagnosis(t1.body)}`);
+    log(`    draft_error: ${draftErrorDiagnosis(t1.body)}`);
+    failures.push(...assertProxyDelivered(t1.body, "turn 1"));
+    if (t1.status !== 200) failures.push(`turn 1: HTTP ${t1.status} (expected 200)`);
+    failures.push(...assertHealthyFrame(t1.body));
+
+    const t2 = await postTurn(
+      base,
+      origin,
+      {
+        kind: "message",
+        turn_id: uuid(),
+        scenario_id: scenarioId,
+        stage: "frame",
+        turn_class: "propose",
+        source: "composer",
+        message: "Use your best guess for the rest and draft the model now.",
+      },
+      turnTimeout,
+    );
+    const d2 = extractDiagnostics(t2.body);
+    turns.push({ label: "turn 2", body: t2.body, status: t2.status, d: d2 });
+    // build_sha is stamped PER TURN, not once per run. Render made a rolled-back
+    // parent build live mid-window on 17 Aug 2026 (two merges 14s apart, the
+    // parent's deploy finishing last), so "the run confirmed the build at the
+    // start" is not evidence about which build answered a given turn — and with
+    // k samples the window is wider, not narrower.
+    log(
+      `  turn 2: HTTP ${t2.status} in ${(t2.ms / 1000).toFixed(1)}s | exit_path=${d2.exit_path} | ` +
+        `build_sha=${d2.build_sha} | ${graphLine(t2.body)}`,
+    );
+    log(`    ${draftGraphCensus(t2.body)}`);
+    log(`    readiness: ${readinessDiagnosis(t2.body)}`);
+    log(`    draft_error: ${draftErrorDiagnosis(t2.body)}`);
+    failures.push(...assertProxyDelivered(t2.body, "turn 2"));
+    if (t2.status !== 200) failures.push(`turn 2: HTTP ${t2.status} (expected 200)`);
+
+    // Assert over the JOURNEY, not over turn 2. See assertHealthyJourney.
+    failures.push(...assertHealthyJourney(t1.body, t2.body));
+
+    // NEITHER TURN ASKED FOR AN ANALYSIS, and both messages are literals a few
+    // lines above. The intent is DECLARED here, at the only place that knows
+    // it, rather than inferred from the reply under test.
+    failures.push(
+      ...assertNoUnrequestedAnalysisRefusal([
+        { label: "turn 1", body: t1.body, requestedAnalysis: false },
+        { label: "turn 2", body: t2.body, requestedAnalysis: false },
+      ]),
+    );
+
+    // Provenance is judged PER SAMPLE. It used to run once per run inside
+    // `report()`; leaving it there would judge one sample's turns and call the
+    // whole run proven.
+    const turnDiagnostics = turns.map((t) => t.d);
+    const turnBodies = turns.map((t) => t.body);
+    failures.push(...assertPromptProvenance(turnDiagnostics, turnBodies));
+  } catch (e) {
+    const name = typeof e?.name === "string" && e.name.length > 0 ? e.name : "Error";
+    log(`  turn threw: ${e?.stack ?? e}`);
+    turns.push({ label: "threw", threw: name, body: undefined, status: undefined, d: null });
+    failures.push(
+      `sample ${index}: the journey threw before completing — ${name}: ${e?.message ?? String(e)}. ` +
+        `A sample that could not be driven is a FAILED sample, not an absent one.`,
+    );
+  }
+
+  const outcome = classifyJourneySample(turns, failures);
+  log(`  → sample ${index}: ${outcome.ok ? "OK" : `FAILED — ${outcome.code}`}`);
+  for (const m of failures) log(`      ✗ ${m}`);
+  return { index, scenarioId, turns, failures, ok: outcome.ok, code: outcome.code };
+}
+
+async function main() {
+  const base = (process.env.SMOKE_BASE_URL ?? "").replace(/\/$/, "");
+  const origin = (process.env.SMOKE_ORIGIN ?? "").trim().replace(/\/$/, "");
+  const expectSha = process.env.SMOKE_EXPECT_SHA ?? "";
+  const freshnessTimeout = Number(process.env.SMOKE_FRESHNESS_TIMEOUT_MS ?? 900000);
+  const turnTimeout = Number(process.env.SMOKE_TURN_TIMEOUT_MS ?? 180000);
+
+  // ---- SAMPLING KNOBS ----
+  //
+  // k = 5 IS A BUDGET DECISION, AND THE BUDGET IS MEASURED, NOT GUESSED.
+  // From this gate's own 13 most recent run logs: turn 1 took 40.5–81.4s
+  // (mean ~58.6s) and turn 2 took 6.8–15.3s, so a sample costs ~50–97s. Five
+  // serial samples is ~250–485s against a 12-minute Phase-2 budget, inside it
+  // with room for the slowest sample observed plus headroom.
+  //
+  // WHAT k=5 BUYS, at the 38% rate measured across those same runs: P(red) =
+  // 1-(1-0.38)^5 = 91.5%, against 38% for the single sample this replaced. At
+  // the 30% rate quoted for the 11 Sep defect it is 83.2% against 30%.
+  //
+  // WHAT IT DOES NOT BUY: see `halfDetectionRate` — at k=5 this gate is a coin
+  // flip at a 12.9% true failure rate and effectively blind below it. It is
+  // sized to catch a LARGE-MINORITY failure, which is the class that shipped.
+  //
+  // SERIAL, NOT CONCURRENT, and that is deliberate: five concurrent drafts
+  // would measure the product under a load no real user creates, and the
+  // number being measured IS the deliverable. A rate contaminated by
+  // self-inflicted load is worse than no rate.
+  const requested = intFromEnv("SMOKE_DRAFT_SAMPLES", 5, 1, 25);
+  // Below this the run is UNMEASURED rather than healthy. 3 is the smallest k
+  // that still reds more often than not at the 30% rate (1-0.7^3 = 65.7%).
+  const minSamples = intFromEnv("SMOKE_DRAFT_MIN_SAMPLES", Math.min(3, requested), 1, 25);
+  // DEFAULT = ALL OF THEM. A 500 on the drafting path has no acceptable
+  // non-zero rate; the knob exists so the floor can be relaxed while this gate
+  // is being calibrated, not because a failed draft is ever fine.
+  const floor = intFromEnv("SMOKE_DRAFT_MIN_SUCCESSES", requested, 0, requested);
+  // 12 min. Phase 1 can burn up to 15 min, but only on a deploy that FAILED —
+  // and that path returns before Phase 2 — so the two maxima are effectively
+  // exclusive. The job's timeout-minutes is set above their sum regardless.
+  const budgetMs = intFromEnv("SMOKE_JOURNEY_BUDGET_MS", 720000, 30000, 3600000);
+
+  if (!base || !origin) {
+    log("FATAL: SMOKE_BASE_URL and SMOKE_ORIGIN are required.");
+    // Fail closed. A missing secret must never read as a pass.
+    process.exit(2);
+  }
+  if (/olumi-assistants-service\.onrender\.com/.test(base)) {
+    log(`FATAL: refusing to run against production (${base}). This gate targets staging.`);
+    process.exit(2);
+  }
+
+  log(`# CEE staging live-journey smoke`);
+  log(`target: ${base}${TURN_PATH}  (origin ${origin || "(none)"})`);
+  log(`sampling: k=${requested}, floor=${floor}, min=${minSamples}, budget=${Math.round(budgetMs / 1000)}s`);
+
+  const failures = [];
+  const samplingOptions = { floor, requested, minSamples };
+
+  // ---- PHASE 1: did the build ship? ----
+  if (expectSha) {
+    log(`\n## Phase 1 — deploy freshness (want ${expectSha.slice(0, 7)})`);
+    const fresh = await waitForBuild(base, expectSha, freshnessTimeout);
+    if (!fresh.ok) {
+      failures.push(
+        `DEPLOY DID NOT SHIP: after ${Math.round(fresh.waitedMs / 1000)}s, ${base} is still serving ` +
+          `build "${fresh.served ?? "unreachable"}" but this commit is ${expectSha.slice(0, 7)}. ` +
+          `The deploy failed or never fired — staging is running older code than the branch tip.`,
+      );
+      // Do NOT sample: it would measure the wrong build and a rate computed over
+      // it would be a lie with a decimal point on it. `null` says Phase 2 was
+      // never reached, which is a different fact from "no samples failed".
+      report(failures, null, samplingOptions);
+      return;
+    }
+    log(`  OK — serving ${fresh.served} after ${Math.round(fresh.waitedMs / 1000)}s`);
+  } else {
+    log(`\n## Phase 1 — SKIPPED (no SMOKE_EXPECT_SHA); journey will run against whatever is deployed`);
+  }
+
+  // ---- PHASE 2: the journey, SAMPLED ----
+  log(`\n## Phase 2 — journey × ${requested}`);
+  const samples = [];
+  const deadline = Date.now() + budgetMs;
+  let slowestSampleMs = 0;
+
+  for (let i = 1; i <= requested; i += 1) {
+    // THE BUDGET GUARD. Without it the job hits GitHub's own timeout, which
+    // kills the process — so the rate, the census and the floor verdict are
+    // never printed at all, and a run that measured four healthy samples looks
+    // identical to one that measured nothing. Stopping early and SAYING SO is
+    // strictly better than being killed mid-sentence.
+    //
+    // The estimate is the SLOWEST sample seen so far, not the mean: the cost of
+    // being wrong is losing the whole report, so it rounds against itself.
+    if (i > 1 && Date.now() + slowestSampleMs > deadline) {
+      log(
+        `\n  [budget] stopping after ${samples.length} of ${requested} samples — ` +
+          `${Math.round((deadline - Date.now()) / 1000)}s left, slowest sample took ` +
+          `${Math.round(slowestSampleMs / 1000)}s. Reporting what was measured.`,
+      );
+      break;
+    }
+    const started = Date.now();
+    samples.push(await runJourneySample({ base, origin, turnTimeout, index: i, total: requested }));
+    slowestSampleMs = Math.max(slowestSampleMs, Date.now() - started);
+  }
+
+  report(failures, samples, samplingOptions);
+}
+
+function report(failures, samples, samplingOptions) {
+  // PHASE 2 NEVER RAN. Reported as its own state rather than as an empty
+  // sample set: "the deploy did not ship" and "five samples all passed" must
+  // never share an output shape.
+  if (samples === null) {
+    log(`\n## Draft sampling — NOT ATTEMPTED (the deploy did not ship; sampling the wrong build proves nothing)`);
+  } else {
+    const summary = summariseSamples(samples);
+    log("");
+    for (const line of samplingReport(summary, samplingOptions)) log(line);
+    failures.push(...assertSampleFloor(summary, samplingOptions));
+
+    log(`\n## Diagnostics`);
+    for (const s of samples) {
+      for (const t of s.turns) {
+        if (!t.d) continue;
+        log(
+          `  sample ${s.index} ${t.label}: build_sha=${t.d.build_sha} exit_path=${t.d.exit_path} ` +
+            `prompt_identity=${t.d.prompt_identity_count}`,
+        );
+        if (t.d.prompt_identity.length) log(`    prompt_identity: ${t.d.prompt_identity.join(", ")}`);
+      }
+    }
+  }
+
+  log(`\n## Result`);
+  if (failures.length === 0) {
+    log(`PASS — a user can frame a decision and get a usable graph, on every sample taken.`);
+    process.exit(0);
+  }
+  log(`FAIL — ${failures.length} problem(s):`);
+  for (const m of failures) log(`  ✗ ${m}`);
+  log(`\nThe live user journey is broken on the deployed staging build. Do not merge over this.`);
+  process.exit(1);
+}
+
+if (isMain) {
+  main().catch((e) => {
+    log(`\nFAIL — smoke gate threw: ${e?.stack ?? e}`);
+    process.exit(1);
+  });
+}

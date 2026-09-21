@@ -151,9 +151,7 @@ describe("CEE golden journeys (fixtures provider)", () => {
     const { snapshot } = await runGoldenJourney(app, fixture);
 
     expect(snapshot.any_truncated).toBe(fixture.expectations.expect_any_truncated);
-    expect(snapshot.has_validation_issues).toBe(
-      fixture.expectations.expect_has_validation_issues,
-    );
+    expect(snapshot.has_validation_issues).toBe(fixture.expectations.expect_has_validation_issues);
     if (fixture.expectations.expect_has_team_disagreement !== undefined) {
       expect(snapshot.has_team_disagreement).toBe(
         fixture.expectations.expect_has_team_disagreement,
@@ -198,7 +196,7 @@ describe("CEE golden journeys (fixtures provider)", () => {
     const { snapshot } = await runGoldenJourney(app, fixture);
 
     expect(snapshot.any_truncated).toBe(true);
-    expect(snapshot.has_validation_issues).toBe(false);
+    expect(snapshot.has_validation_issues).toBe(fixture.expectations.expect_has_validation_issues);
     expect(snapshot.is_complete).toBe(false);
   });
 
@@ -215,9 +213,7 @@ describe("CEE golden journeys (fixtures provider)", () => {
     const { snapshot } = await runGoldenJourney(app, fixture);
 
     expect(snapshot.any_truncated).toBe(fixture.expectations.expect_any_truncated);
-    expect(snapshot.has_validation_issues).toBe(
-      fixture.expectations.expect_has_validation_issues,
-    );
+    expect(snapshot.has_validation_issues).toBe(fixture.expectations.expect_has_validation_issues);
 
     if (fixture.expectations.expect_has_team_disagreement !== undefined) {
       expect(snapshot.has_team_disagreement).toBe(
@@ -242,11 +238,7 @@ describe("CEE golden journeys (fixtures provider)", () => {
 
     expect(snapshot.any_truncated).toBe(fixture.expectations.expect_any_truncated);
 
-    if (fixture.expectations.expect_has_validation_issues !== undefined) {
-      expect(snapshot.has_validation_issues).toBe(
-        fixture.expectations.expect_has_validation_issues,
-      );
-    }
+    expect(snapshot.has_validation_issues).toBe(fixture.expectations.expect_has_validation_issues);
 
     if (fixture.expectations.expect_has_team_disagreement !== undefined) {
       expect(snapshot.has_team_disagreement).toBe(
@@ -266,11 +258,7 @@ describe("CEE golden journeys (fixtures provider)", () => {
 
     expect(snapshot.any_truncated).toBe(fixture.expectations.expect_any_truncated);
 
-    if (fixture.expectations.expect_has_validation_issues !== undefined) {
-      expect(snapshot.has_validation_issues).toBe(
-        fixture.expectations.expect_has_validation_issues,
-      );
-    }
+    expect(snapshot.has_validation_issues).toBe(fixture.expectations.expect_has_validation_issues);
 
     if (fixture.expectations.expect_has_team_disagreement !== undefined) {
       expect(snapshot.has_team_disagreement).toBe(
@@ -293,11 +281,7 @@ describe("CEE golden journeys (fixtures provider)", () => {
 
     expect(snapshot.any_truncated).toBe(fixture.expectations.expect_any_truncated);
 
-    if (fixture.expectations.expect_has_validation_issues !== undefined) {
-      expect(snapshot.has_validation_issues).toBe(
-        fixture.expectations.expect_has_validation_issues,
-      );
-    }
+    expect(snapshot.has_validation_issues).toBe(fixture.expectations.expect_has_validation_issues);
 
     if (fixture.expectations.expect_has_team_disagreement !== undefined) {
       expect(snapshot.has_team_disagreement).toBe(

@@ -1,0 +1,41 @@
+{
+  "id": "rg-04-unreachable-from-decision",
+  "name": "UNREACHABLE_FROM_DECISION — isolated outcome",
+  "description": "Graph has an outcome node with no inbound path from the decision. Repair must add an edge to connect it.",
+  "brief": "We are deciding how to invest in engineering capacity. We want to improve delivery speed and quality.",
+  "graph": {
+    "nodes": [
+      {"id": "dec_invest", "kind": "decision", "label": "Engineering Investment"},
+      {"id": "opt_hire", "kind": "option", "label": "Hire Engineers", "data": {"interventions": {"fac_team_size": 1}}},
+      {"id": "opt_automate", "kind": "option", "label": "Invest in Tooling", "data": {"interventions": {"fac_team_size": 0.5}}},
+      {"id": "fac_team_size", "kind": "factor", "label": "Team Size", "category": "controllable", "data": {"value": 0.5, "extractionType": "inferred", "factor_type": "other", "uncertainty_drivers": ["Hiring timeline uncertain"]}},
+      {"id": "fac_tool_quality", "kind": "factor", "label": "Tooling Quality", "category": "controllable", "data": {"value": 0.4, "extractionType": "inferred", "factor_type": "other", "uncertainty_drivers": ["Tool evaluation ongoing"]}},
+      {"id": "out_delivery_speed", "kind": "outcome", "label": "Delivery Speed"},
+      {"id": "out_code_quality", "kind": "outcome", "label": "Code Quality"},
+      {"id": "goal_eng_excellence", "kind": "goal", "label": "Engineering Excellence"}
+    ],
+    "edges": [
+      {"from": "dec_invest", "to": "opt_hire", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "dec_invest", "to": "opt_automate", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_hire", "to": "fac_team_size", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_automate", "to": "fac_team_size", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "fac_team_size", "to": "out_delivery_speed", "strength": {"mean": 0.60, "std": 0.18}, "exists_probability": 0.82, "effect_direction": "positive"},
+      {"from": "out_delivery_speed", "to": "goal_eng_excellence", "strength": {"mean": 0.70, "std": 0.15}, "exists_probability": 0.90, "effect_direction": "positive"},
+      {"from": "out_code_quality", "to": "goal_eng_excellence", "strength": {"mean": 0.65, "std": 0.15}, "exists_probability": 0.88, "effect_direction": "positive"}
+    ]
+  },
+  "violations": [
+    {"code": "UNREACHABLE_FROM_DECISION", "node_or_edge": "out_code_quality", "detail": "out_code_quality has no inbound path from the decision node."},
+    {"code": "UNREACHABLE_FROM_DECISION", "node_or_edge": "fac_tool_quality", "detail": "fac_tool_quality has no inbound path from the decision node."}
+  ],
+  "expected": {
+    "violations_addressed": ["UNREACHABLE_FROM_DECISION"],
+    "preserve_node_ids": ["dec_invest", "opt_hire", "opt_automate", "fac_team_size", "fac_tool_quality", "out_delivery_speed", "out_code_quality", "goal_eng_excellence"],
+    "forbidden_edges": [],
+    "required_edges": [],
+    "no_bridge_edges": true,
+    "preserve_bidirected": false,
+    "check_external_prior": false,
+    "no_json_comments": true
+  }
+}

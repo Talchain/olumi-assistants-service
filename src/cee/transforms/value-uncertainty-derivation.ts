@@ -44,7 +44,7 @@ import { log } from "../../utils/telemetry.js";
 /**
  * Types of factor value extraction
  */
-export type ExtractionType = "explicit" | "inferred" | "range";
+export type ExtractionType = "explicit" | "inferred" | "range" | "observed";
 
 /**
  * Input for value uncertainty derivation
@@ -88,6 +88,7 @@ const TYPE_MULTIPLIERS: Record<ExtractionType, number> = {
   explicit: 1.0,
   inferred: 1.5,
   range: 1.0, // Not used for range - has special handling
+  observed: 1.0, // Directly observed, same confidence as explicit
 };
 
 /**

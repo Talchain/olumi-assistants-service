@@ -1,10 +1,13 @@
 import type { FastifyInstance } from "fastify";
 import { env } from "node:process";
-import { SERVICE_VERSION } from "../version.js";
+import { SERVICE_VERSION, GIT_COMMIT_SHORT, BUILD_TIMESTAMP } from "../version.js";
+import { DETERMINISTIC_SWEEP_VERSION } from "../cee/constants/versions.js";
 import { getAdapter } from "../adapters/llm/router.js";
 import { getAllFeatureFlags } from "../utils/feature-flags.js";
 import { resolveCeeRateLimit } from "../cee/config/limits.js";
 import { getRecentCeeErrors } from "../cee/logging.js";
+import { DRAFT_REQUEST_BUDGET_MS, LLM_POST_PROCESSING_HEADROOM_MS, DRAFT_LLM_TIMEOUT_MS } from "../config/timeouts.js";
+import { arePromptsReady, getCriticalPromptCoverage } from "../prompts/readiness.js";
 
 export default async function route(app: FastifyInstance) {
   app.get("/assist/v1/health", async (_req, reply) => {
@@ -79,14 +82,27 @@ export default async function route(app: FastifyInstance) {
       };
     }
 
+    const prompts_ready = await arePromptsReady();
+    const critical_prompts_pms = (await getCriticalPromptCoverage()).all_pms;
+
     const summary = {
       service: "assistants",
+      prompts_ready,
+      critical_prompts_pms,
       version: SERVICE_VERSION,
+      commit: GIT_COMMIT_SHORT,
+      build_timestamp: BUILD_TIMESTAMP,
+      deterministic_sweep_version: DETERMINISTIC_SWEEP_VERSION,
       provider: adapter.name,
       model: adapter.model,
       limits_source: env.ENGINE_BASE_URL ? "engine" : "config",
       diagnostics_enabled: env.CEE_DIAGNOSTICS_ENABLED === "true",
       feature_flags: getAllFeatureFlags(),
+      timeout_config: {
+        DRAFT_REQUEST_BUDGET_MS,
+        LLM_POST_PROCESSING_HEADROOM_MS,
+        DRAFT_LLM_TIMEOUT_MS,
+      },
       cee_config: ceeConfig,
       recent_error_counts,
     };

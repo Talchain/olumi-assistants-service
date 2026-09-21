@@ -1,0 +1,632 @@
+/**
+ * Stage 6: Boundary — Unit Tests
+ *
+ * Verifies V3/V2/V1 transform paths, model_adjustments attachment,
+ * strict mode validation, and nodeLabels extraction.
+ */
+
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+// Mock V3 transform
+vi.mock("../../src/cee/transforms/schema-v3.js", () => ({
+  transformResponseToV3: vi.fn(),
+  validateStrictModeV3: vi.fn(),
+}));
+
+// Mock V2 transform
+vi.mock("../../src/cee/transforms/schema-v2.js", () => ({
+  transformResponseToV2: vi.fn(),
+}));
+
+// Mock analysis-ready
+vi.mock("../../src/cee/transforms/analysis-ready.js", () => ({
+  mapMutationsToAdjustments: vi.fn(),
+  extractConstraintDropBlockers: vi.fn(),
+}));
+
+// Mock telemetry
+vi.mock("../../src/utils/telemetry.js", () => ({
+  log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+  emit: vi.fn(),
+  TelemetryEvents: {
+    CeeBoundaryBlocked: "cee.boundary.blocked",
+  },
+}));
+
+// Mock CEE V3 schema — CIL Phase 1: safeParse returns { success: true, data: input }
+// to simulate Zod strip behaviour (boundary now uses parseResult.data).
+vi.mock("../../src/schemas/cee-v3.js", () => ({
+  CEEGraphResponseV3: {
+    safeParse: vi.fn((input: unknown) => ({ success: true, data: input })),
+  },
+  warnOnUnknownV3Fields: vi.fn(),
+}));
+
+import { runStageBoundary } from "../../src/cee/unified-pipeline/stages/boundary.js";
+import { transformResponseToV3, validateStrictModeV3 } from "../../src/cee/transforms/schema-v3.js";
+import { transformResponseToV2 } from "../../src/cee/transforms/schema-v2.js";
+import { mapMutationsToAdjustments, extractConstraintDropBlockers } from "../../src/cee/transforms/analysis-ready.js";
+import { emit, TelemetryEvents } from "../../src/utils/telemetry.js";
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+const v3Body = {
+  nodes: [
+    { id: "g1", label: "Goal One" },
+    { id: "o1", label: "Option A" },
+    // `fac_x` / `fac_y` are the nodes the repair fixtures below reclassify.
+    // They were absent from this fixture while the assertions asserted their
+    // ids reached `model_adjustments` — a state the pipeline cannot produce,
+    // because reclassifying a factor leaves it IN the graph. Verified on four
+    // deployed captures (build `32f06dd`): every `model_adjustments.node_id`
+    // resolves in `nodes[]`, 0 exceptions. Added so the fixture describes a
+    // reachable state, not so a guard stops biting — the drop case has its own
+    // test below.
+    { id: "fac_x", label: "Factor X" },
+    { id: "fac_y", label: "Factor Y" },
+  ],
+  edges: [],
+  graph: { nodes: [], edges: [] },
+  analysis_ready: {
+    status: "ready",
+    model_adjustments: undefined as any,
+  },
+};
+
+const v2Body = { schema_version: "v2", data: {} };
+
+function makeCtx(overrides?: Partial<Record<string, any>>): any {
+  return {
+    requestId: "test-req-6",
+    input: { brief: "Test brief" },
+    opts: {
+      schemaVersion: "v3" as const,
+      strictMode: false,
+      includeDebug: false,
+    },
+    ceeResponse: {
+      graph: { nodes: [], edges: [] },
+      trace: {
+        strp: {
+          mutations: [{ rule: "R1", type: "strength_clamp" }],
+        },
+        corrections: [{ type: "edge_restored" }],
+      },
+    },
+    finalResponse: undefined,
+    earlyReturn: undefined,
+    pipelineOutcome: {
+      graph_drafted: false,
+      graph_structurally_valid: false,
+      deterministic_sweep_violations: 0,
+      verification_status: 'skipped',
+      validation_status: 'skipped',
+      enrichment_status: 'skipped',
+      coaching_status: 'partial',
+      warnings: [],
+    },
+    ...overrides,
+  };
+}
+
+function setupDefaultMocks() {
+  (transformResponseToV3 as any).mockReturnValue(structuredClone(v3Body));
+  (transformResponseToV2 as any).mockReturnValue(structuredClone(v2Body));
+  (validateStrictModeV3 as any).mockImplementation(() => {});
+  (mapMutationsToAdjustments as any).mockReturnValue([
+    { type: "strength_clamp", description: "Clamped" },
+  ]);
+  (extractConstraintDropBlockers as any).mockReturnValue([]);
+}
+
+// ─── Tests ───────────────────────────────────────────────────────────────────
+
+describe("runStageBoundary", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setupDefaultMocks();
+  });
+
+  // ── No ceeResponse ────────────────────────────────────────────────────
+
+  it("returns without setting finalResponse when ceeResponse is missing", async () => {
+    const ctx = makeCtx({ ceeResponse: undefined });
+    await runStageBoundary(ctx);
+    expect(ctx.finalResponse).toBeUndefined();
+    expect(transformResponseToV3).not.toHaveBeenCalled();
+  });
+
+  // ── V3 path ────────────────────────────────────────────────────────────
+
+  it("calls transformResponseToV3 and sets ctx.finalResponse for V3", async () => {
+    const ctx = makeCtx();
+    await runStageBoundary(ctx);
+
+    expect(transformResponseToV3).toHaveBeenCalledTimes(1);
+    expect(transformResponseToV3).toHaveBeenCalledWith(
+      ctx.ceeResponse,
+      expect.objectContaining({
+        brief: "Test brief",
+        requestId: "test-req-6",
+        strictMode: false,
+        includeDebug: false,
+      }),
+    );
+    expect(ctx.finalResponse).toBeDefined();
+  });
+
+  it("attaches model_adjustments when STRP mutations present", async () => {
+    const ctx = makeCtx();
+    await runStageBoundary(ctx);
+
+    expect(mapMutationsToAdjustments).toHaveBeenCalledTimes(1);
+    expect(ctx.finalResponse.analysis_ready.model_adjustments).toEqual([
+      expect.objectContaining({ type: "strength_clamp" }),
+    ]);
+  });
+
+  it("builds nodeLabels from v3Body.nodes (root level, NOT v3Body.graph)", async () => {
+    const ctx = makeCtx();
+    await runStageBoundary(ctx);
+
+    // mapMutationsToAdjustments receives a Map with node labels from root nodes
+    const call = (mapMutationsToAdjustments as any).mock.calls[0];
+    const nodeLabels: Map<string, string> = call[2];
+    expect(nodeLabels).toBeInstanceOf(Map);
+    expect(nodeLabels.get("g1")).toBe("Goal One");
+    expect(nodeLabels.get("o1")).toBe("Option A");
+  });
+
+  it("skips model_adjustments when no mutations and no corrections", async () => {
+    const ctx = makeCtx({
+      ceeResponse: {
+        graph: { nodes: [], edges: [] },
+        trace: {},
+      },
+    });
+    await runStageBoundary(ctx);
+
+    expect(mapMutationsToAdjustments).not.toHaveBeenCalled();
+  });
+
+  it("skips model_adjustments when analysis_ready is absent", async () => {
+    (transformResponseToV3 as any).mockReturnValue({
+      nodes: [],
+      edges: [],
+      analysis_ready: undefined,
+    });
+    const ctx = makeCtx();
+    await runStageBoundary(ctx);
+
+    expect(mapMutationsToAdjustments).not.toHaveBeenCalled();
+  });
+
+  // ── V3 + strict mode ──────────────────────────────────────────────────
+
+  it("calls validateStrictModeV3 when strictMode is true", async () => {
+    const ctx = makeCtx({ opts: { schemaVersion: "v3", strictMode: true, includeDebug: false } });
+    await runStageBoundary(ctx);
+
+    expect(validateStrictModeV3).toHaveBeenCalledTimes(1);
+    expect(ctx.finalResponse).toBeDefined();
+    expect(ctx.earlyReturn).toBeUndefined();
+  });
+
+  it("fail-closes on strict-mode validation failure — sets earlyReturn(502) with typed envelope (MC-29)", async () => {
+    (validateStrictModeV3 as any).mockImplementation(() => {
+      throw new Error("Missing required field: edges");
+    });
+    const ctx = makeCtx({ opts: { schemaVersion: "v3", strictMode: true, includeDebug: false } });
+    await runStageBoundary(ctx);
+
+    // MC-29: strict-mode failure is fail-closed (was soft-gate Track 1 pre-fix).
+    expect(ctx.finalResponse).toBeUndefined();
+    expect(ctx.earlyReturn).toBeDefined();
+    expect(ctx.earlyReturn!.statusCode).toBe(502);
+    const body = ctx.earlyReturn!.body as Record<string, unknown>;
+    expect(body.code).toBe("CEE_EGRESS_CONTRACT_VIOLATION");
+    expect(body.reason).toBe("egress_contract_violation");
+    const details = body.details as Record<string, unknown>;
+    expect(details.validator).toBe("strict_mode_v3");
+
+    // Warning recorded with blocked=true, degraded=false.
+    const strictWarning = ctx.pipelineOutcome.warnings.find(
+      (w: any) => w.stage === "boundary_strict_mode",
+    );
+    expect(strictWarning).toBeDefined();
+    expect(strictWarning.error).toContain("Missing required field: edges");
+    expect(strictWarning.degraded).toBe(false);
+    expect(strictWarning.blocked).toBe(true);
+
+    // Telemetry event uses the new consolidated code.
+    expect(emit).toHaveBeenCalledWith(
+      TelemetryEvents.CeeBoundaryBlocked,
+      expect.objectContaining({
+        error_code: "CEE_EGRESS_CONTRACT_VIOLATION",
+        error_message: "Missing required field: edges",
+      })
+    );
+  });
+
+  it("does not call validateStrictModeV3 when strictMode is false", async () => {
+    const ctx = makeCtx({ opts: { schemaVersion: "v3", strictMode: false } });
+    await runStageBoundary(ctx);
+
+    expect(validateStrictModeV3).not.toHaveBeenCalled();
+  });
+
+  // ── V2 path ────────────────────────────────────────────────────────────
+
+  it("calls transformResponseToV2 and sets ctx.finalResponse for V2", async () => {
+    const ctx = makeCtx({ opts: { schemaVersion: "v2" } });
+    await runStageBoundary(ctx);
+
+    expect(transformResponseToV2).toHaveBeenCalledTimes(1);
+    expect(transformResponseToV3).not.toHaveBeenCalled();
+    expect(ctx.finalResponse).toEqual(expect.objectContaining({ schema_version: "v2" }));
+  });
+
+  // ── V1 path ────────────────────────────────────────────────────────────
+
+  it("passes through ceeResponse as finalResponse for V1", async () => {
+    const ctx = makeCtx({ opts: { schemaVersion: "v1" } });
+    await runStageBoundary(ctx);
+
+    expect(transformResponseToV3).not.toHaveBeenCalled();
+    expect(transformResponseToV2).not.toHaveBeenCalled();
+    expect(ctx.finalResponse).toBe(ctx.ceeResponse);
+  });
+
+  // ── Constraint-drop blockers ────────────────────────────────────────
+
+  it("injects constraint-drop blockers into analysis_ready.blockers", async () => {
+    (extractConstraintDropBlockers as any).mockReturnValue([
+      { factor_id: "fac_x", factor_label: "fac_x", blocker_type: "constraint_dropped", message: "Constraint dropped (c1): no match", suggested_action: "review_constraint" },
+      { factor_id: "fac_y", factor_label: "fac_y", blocker_type: "constraint_dropped", message: "Constraint dropped (c2): no match", suggested_action: "review_constraint" },
+    ]);
+
+    const ctx = makeCtx({
+      ceeResponse: {
+        graph: { nodes: [], edges: [] },
+        trace: {
+          strp: {
+            mutations: [
+              { code: "CONSTRAINT_DROPPED", constraint_id: "c1", before: "fac_x", reason: "no match" },
+              { code: "CONSTRAINT_DROPPED", constraint_id: "c2", before: "fac_y", reason: "no match" },
+            ],
+          },
+        },
+      },
+    });
+
+    await runStageBoundary(ctx);
+
+    expect(extractConstraintDropBlockers).toHaveBeenCalledTimes(1);
+    expect(ctx.finalResponse.analysis_ready.blockers).toHaveLength(2);
+    expect(ctx.finalResponse.analysis_ready.blockers[0]).toEqual(
+      expect.objectContaining({ blocker_type: "constraint_dropped", factor_id: "fac_x" }),
+    );
+  });
+
+  it("preserves existing blockers when adding constraint-drop blockers", async () => {
+    const existingBlocker = {
+      option_id: "o1",
+      factor_id: "f1",
+      factor_label: "Factor 1",
+      blocker_type: "missing_value",
+      message: "needs value",
+      suggested_action: "add_value",
+    };
+
+    (transformResponseToV3 as any).mockReturnValue({
+      ...structuredClone(v3Body),
+      analysis_ready: {
+        status: "needs_user_input",
+        blockers: [existingBlocker],
+      },
+    });
+    (extractConstraintDropBlockers as any).mockReturnValue([
+      { factor_id: "fac_x", factor_label: "fac_x", blocker_type: "constraint_dropped", message: "Constraint dropped (c1): dropped", suggested_action: "review_constraint" },
+    ]);
+
+    const ctx = makeCtx();
+    await runStageBoundary(ctx);
+
+    expect(ctx.finalResponse.analysis_ready.blockers).toHaveLength(2);
+    expect(ctx.finalResponse.analysis_ready.blockers[0]).toEqual(existingBlocker);
+    expect(ctx.finalResponse.analysis_ready.blockers[1].blocker_type).toBe("constraint_dropped");
+  });
+
+  it("does not change analysis_ready.status when constraint-drop blockers are added", async () => {
+    (extractConstraintDropBlockers as any).mockReturnValue([
+      { factor_id: "fac_x", factor_label: "fac_x", blocker_type: "constraint_dropped", message: "Constraint dropped (c1): dropped", suggested_action: "review_constraint" },
+    ]);
+
+    const ctx = makeCtx();
+    await runStageBoundary(ctx);
+
+    // Status was "ready" before injection — it must remain "ready"
+    expect(ctx.finalResponse.analysis_ready.status).toBe("ready");
+  });
+
+  it("does not add blockers when extractConstraintDropBlockers returns empty", async () => {
+    (extractConstraintDropBlockers as any).mockReturnValue([]);
+
+    const ctx = makeCtx();
+    await runStageBoundary(ctx);
+
+    // analysis_ready should not have a blockers array
+    expect(ctx.finalResponse.analysis_ready.blockers).toBeUndefined();
+  });
+
+  it("does not inject blockers when analysis_ready is absent", async () => {
+    (transformResponseToV3 as any).mockReturnValue({
+      nodes: [],
+      edges: [],
+      analysis_ready: undefined,
+    });
+
+    const ctx = makeCtx();
+    await runStageBoundary(ctx);
+
+    expect(extractConstraintDropBlockers).not.toHaveBeenCalled();
+  });
+
+  // ── Deterministic repair → model_adjustments ────────────────────────
+
+  it("maps UNREACHABLE_FACTOR_RECLASSIFIED repairs to category_reclassified model_adjustments", async () => {
+    // No STRP mutations so mapMutationsToAdjustments is not called
+    (transformResponseToV3 as any).mockReturnValue(structuredClone(v3Body));
+
+    const ctx = makeCtx({
+      ceeResponse: {
+        graph: { nodes: [], edges: [] },
+        trace: {},
+      },
+      deterministicRepairs: [
+        { code: "UNREACHABLE_FACTOR_RECLASSIFIED", path: "nodes[fac_x].category", action: 'Reclassified unreachable factor "Factor X" to external' },
+      ],
+    });
+    await runStageBoundary(ctx);
+
+    expect(ctx.finalResponse.analysis_ready.model_adjustments).toEqual([
+      {
+        code: "category_reclassified",
+        node_id: "fac_x",
+        field: "nodes[fac_x].category",
+        reason: 'Reclassified unreachable factor "Factor X" to external',
+        source: "deterministic_sweep",
+      },
+    ]);
+  });
+
+  it("filters out non-user-visible repair codes (NAN_VALUE, SIGN_MISMATCH)", async () => {
+    (transformResponseToV3 as any).mockReturnValue(structuredClone(v3Body));
+
+    const ctx = makeCtx({
+      ceeResponse: {
+        graph: { nodes: [], edges: [] },
+        trace: {},
+      },
+      deterministicRepairs: [
+        { code: "NAN_VALUE", path: "edges[a→b].strength_mean", action: "Replaced NaN" },
+        { code: "SIGN_MISMATCH", path: "edges[c→d].strength_mean", action: "Flipped sign" },
+        { code: "UNREACHABLE_FACTOR_RECLASSIFIED", path: "nodes[fac_x].category", action: "Reclassified" },
+      ],
+    });
+    await runStageBoundary(ctx);
+
+    // Only the UNREACHABLE_FACTOR_RECLASSIFIED repair should appear
+    expect(ctx.finalResponse.analysis_ready.model_adjustments).toHaveLength(1);
+    expect(ctx.finalResponse.analysis_ready.model_adjustments[0].code).toBe("category_reclassified");
+    expect(ctx.finalResponse.analysis_ready.model_adjustments[0].source).toBe("deterministic_sweep");
+    expect(ctx.finalResponse.analysis_ready.model_adjustments[0].node_id).toBe("fac_x");
+  });
+
+  it("model_adjustments is [] when no reclassifications occurred", async () => {
+    (transformResponseToV3 as any).mockReturnValue(structuredClone(v3Body));
+
+    const ctx = makeCtx({
+      ceeResponse: {
+        graph: { nodes: [], edges: [] },
+        trace: {},
+      },
+      deterministicRepairs: [
+        { code: "NAN_VALUE", path: "edges[a→b].strength_mean", action: "Replaced NaN" },
+      ],
+    });
+    await runStageBoundary(ctx);
+
+    expect(ctx.finalResponse.analysis_ready.model_adjustments).toEqual([]);
+  });
+
+  it("model_adjustments is [] when deterministicRepairs is undefined", async () => {
+    (transformResponseToV3 as any).mockReturnValue(structuredClone(v3Body));
+
+    const ctx = makeCtx({
+      ceeResponse: {
+        graph: { nodes: [], edges: [] },
+        trace: {},
+      },
+      deterministicRepairs: undefined,
+    });
+    await runStageBoundary(ctx);
+
+    expect(ctx.finalResponse.analysis_ready.model_adjustments).toEqual([]);
+  });
+
+  it("model_adjustments is [] when deterministicRepairs is empty", async () => {
+    (transformResponseToV3 as any).mockReturnValue(structuredClone(v3Body));
+
+    const ctx = makeCtx({
+      ceeResponse: {
+        graph: { nodes: [], edges: [] },
+        trace: {},
+      },
+      deterministicRepairs: [],
+    });
+    await runStageBoundary(ctx);
+
+    expect(ctx.finalResponse.analysis_ready.model_adjustments).toEqual([]);
+  });
+
+  it("appends repair adjustments after STRP adjustments", async () => {
+    (mapMutationsToAdjustments as any).mockReturnValue([
+      { code: "category_reclassified", field: "category", reason: "STRP override" },
+    ]);
+
+    const ctx = makeCtx({
+      deterministicRepairs: [
+        { code: "UNREACHABLE_FACTOR_RECLASSIFIED", path: "nodes[fac_y].category", action: "Reclassified Y" },
+      ],
+    });
+    await runStageBoundary(ctx);
+
+    // Both STRP and repair adjustments should be present
+    expect(ctx.finalResponse.analysis_ready.model_adjustments).toHaveLength(2);
+    expect(ctx.finalResponse.analysis_ready.model_adjustments[0].reason).toBe("STRP override");
+    expect(ctx.finalResponse.analysis_ready.model_adjustments[1].reason).toBe("Reclassified Y");
+    expect(ctx.finalResponse.analysis_ready.model_adjustments[1].source).toBe("deterministic_sweep");
+    expect(ctx.finalResponse.analysis_ready.model_adjustments[1].node_id).toBe("fac_y");
+  });
+
+  // ── S2 · the preservation contract at the user surface ──────────────────
+
+  it("drops a node_id that resolves to nothing, and keeps the adjustment", async () => {
+    // Isolate the deterministic-sweep path: makeCtx always carries STRP
+    // mutations, and a leftover STRP adjustment would shift every index below.
+    (mapMutationsToAdjustments as any).mockReturnValue([]);
+    // The id-validation `graph-validator.ts:1407-1420` already applies to
+    // `widening_log.elements_added`, mirrored into the LOSS direction. An id
+    // pointing at a node that is not in the graph invites a consumer to
+    // highlight nothing; the adjustment itself is still true and still shown.
+    //
+    // DISCRIMINATING PAIR with the test above: same code path, same shape, the
+    // ONLY difference is whether the node exists. One must keep the id and one
+    // must drop it, or the guard is not binding to node identity at all.
+    const ctx = makeCtx({
+      deterministicRepairs: [
+        { code: "UNREACHABLE_FACTOR_RECLASSIFIED", path: "nodes[fac_vanished].category", action: "Reclassified a pruned node" },
+      ],
+    });
+    await runStageBoundary(ctx);
+
+    const adjustments = ctx.finalResponse.analysis_ready.model_adjustments;
+    expect(adjustments).toHaveLength(1);
+    expect(adjustments[0].reason).toBe("Reclassified a pruned node");
+    expect(adjustments[0].node_id).toBeUndefined();
+    // The path still names it, so nothing is lost — it simply is not offered
+    // as a resolvable id.
+    expect(adjustments[0].field).toBe("nodes[fac_vanished].category");
+  });
+
+  it("projects the deleted magnitude into ModelAdjustment.before — the contract field this path never populated", async () => {
+    // Isolate the deterministic-sweep path: makeCtx always carries STRP
+    // mutations, and a leftover STRP adjustment would shift every index below.
+    (mapMutationsToAdjustments as any).mockReturnValue([]);
+    const ctx = makeCtx({
+      deterministicRepairs: [
+        {
+          code: "UNREACHABLE_FACTOR_RECLASSIFIED",
+          path: "nodes[fac_x].category",
+          action: "Reclassified X. The extracted value £1,800,000 is not used in the maths",
+          deleted_value: 0.72,
+          deleted_raw_value: 1_800_000,
+          deleted_unit: "£",
+        },
+      ],
+    });
+    await runStageBoundary(ctx);
+
+    const adjustment = ctx.finalResponse.analysis_ready.model_adjustments[0];
+    // The MAGNITUDE, not the cap-normalised 0.72 — a ratio shown as a business
+    // figure is the display defect this whole slice exists to stop.
+    expect(adjustment.before).toBe(1_800_000);
+    expect(adjustment.node_id).toBe("fac_x");
+  });
+
+  it("falls back to the normalised value only when there is no magnitude, and emits no `before` when there is neither", async () => {
+    // Isolate the deterministic-sweep path: makeCtx always carries STRP
+    // mutations, and a leftover STRP adjustment would shift every index below.
+    (mapMutationsToAdjustments as any).mockReturnValue([]);
+    // OPPOSITE-DIRECTION TWIN. `before: undefined` and `before: 0` must never
+    // collapse — one means "nothing was deleted", the other means "a zero was".
+    const ctx = makeCtx({
+      deterministicRepairs: [
+        { code: "UNREACHABLE_FACTOR_RECLASSIFIED", path: "nodes[fac_x].category", action: "A", deleted_value: 0.5 },
+        { code: "UNREACHABLE_FACTOR_RECLASSIFIED", path: "nodes[fac_y].category", action: "B" },
+      ],
+    });
+    await runStageBoundary(ctx);
+
+    const [withValue, without] = ctx.finalResponse.analysis_ready.model_adjustments;
+    expect(withValue.before).toBe(0.5);
+    expect("before" in without).toBe(false);
+  });
+
+  // ── bias_findings wiring ────────────────────────────────────────────────
+
+  it("maps bias_findings from V1 response into analysis_ready", async () => {
+    const findings = [
+      { id: "selection_low_option_count", category: "selection", severity: "medium", node_ids: ["o1"] },
+    ];
+    const ctx = makeCtx({
+      ceeResponse: {
+        graph: { nodes: [], edges: [] },
+        bias_findings: findings,
+        trace: { strp: { mutations: [] }, corrections: [] },
+      },
+    });
+    await runStageBoundary(ctx);
+
+    expect(ctx.finalResponse.analysis_ready.bias_findings).toEqual(findings);
+  });
+
+  it("defaults bias_findings to [] when no findings on V1 response", async () => {
+    const ctx = makeCtx({
+      ceeResponse: {
+        graph: { nodes: [], edges: [] },
+        trace: { strp: { mutations: [] }, corrections: [] },
+      },
+    });
+    await runStageBoundary(ctx);
+
+    expect(ctx.finalResponse.analysis_ready.bias_findings).toEqual([]);
+  });
+
+  it("strict-mode failure sets earlyReturn(502) with typed envelope (MC-29)", async () => {
+    (validateStrictModeV3 as any).mockImplementation(() => {
+      throw new Error("strict validation failed");
+    });
+    const ctx = makeCtx({ opts: { schemaVersion: "v3", strictMode: true, includeDebug: false } });
+    await runStageBoundary(ctx);
+
+    // MC-29: fail-closed, not soft-gate.
+    expect(ctx.finalResponse).toBeUndefined();
+    expect(ctx.earlyReturn?.statusCode).toBe(502);
+    expect(ctx.pipelineOutcome.warnings.some((w: any) => w.stage === "boundary_strict_mode" && w.blocked === true)).toBe(true);
+  });
+
+  it("V3 schema validation failure sets earlyReturn(502) with typed envelope (MC-29)", async () => {
+    const { CEEGraphResponseV3 } = await import("../../src/schemas/cee-v3.js");
+    (CEEGraphResponseV3.safeParse as any).mockReturnValue({
+      success: false,
+      error: { issues: [{ message: "bad field", path: ["x"] }] },
+    });
+    try {
+      const ctx = makeCtx({ opts: { schemaVersion: "v3", strictMode: false, includeDebug: false } });
+      await runStageBoundary(ctx);
+
+      // MC-29: fail-closed, not soft-gate.
+      expect(ctx.finalResponse).toBeUndefined();
+      expect(ctx.earlyReturn?.statusCode).toBe(502);
+      const body = ctx.earlyReturn!.body as Record<string, unknown>;
+      expect(body.code).toBe("CEE_EGRESS_CONTRACT_VIOLATION");
+      expect(body.reason).toBe("egress_contract_violation");
+      expect(ctx.pipelineOutcome.warnings.some((w: any) => w.stage === "boundary_v3_validation" && w.blocked === true)).toBe(true);
+    } finally {
+      // Restore safeParse so subsequent tests aren't affected
+      (CEEGraphResponseV3.safeParse as any).mockReturnValue({ success: true });
+    }
+  });
+});

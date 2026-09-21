@@ -1,0 +1,2022 @@
+/**
+ * ROADMAP 2.973 — THE NOT-MODELLED MANIFEST.
+ *
+ * Answers, for one scenario: *"what did you keep, and what did you leave out?"*
+ *
+ * ── WHY THIS EXISTS ────────────────────────────────────────────────────────
+ * The context-integrity trace of 2026-08-08 drove the DEPLOYED system with three
+ * real strategic briefs and 76 pre-registered information atoms
+ * (`PHASE0-EVIDENCE-2026-07-28/context-integrity-trace-2026-08-08/loss-map.md`).
+ * It measured that the brief is persisted byte-verbatim and read by nothing,
+ * while draft extraction silently discards most of what a strategist said:
+ * quantities surviving with unit AND magnitude intact were 3/17, 5/14 and 1/14.
+ * The user is told none of this. This module makes the loss VISIBLE.
+ *
+ * ── WHAT IT CLAIMS, AND WHAT IT REFUSES TO CLAIM ───────────────────────────
+ * It makes exactly ONE narrow, checkable claim per item:
+ *
+ *     "this quantity you stated does / does not appear in the model."
+ *
+ * It does NOT claim to enumerate everything that was lost. It cannot: the
+ * pipeline has no record of what the drafting LLM chose not to emit. The
+ * classes it CANNOT see are named explicitly in `not_tracked`, and that field
+ * is the point of the design — an empty `absent` list on a brief we
+ * demonstrably lost content from would be a NEW lie, more damaging than
+ * silence. Absent knowledge renders as absent (`status: "unavailable"`), never
+ * as an empty-and-therefore-reassuring list.
+ *
+ * ── DERIVED, NOT ASSERTED ──────────────────────────────────────────────────
+ * Same discipline as `detectLayout` in the route that serves this: the answer
+ * is MEASURED from the bytes being returned. It is a pure function of
+ * (brief_text, graph), so it re-derives on every read and can never go stale
+ * against a graph that has since been edited — unlike a snapshot taken at draft
+ * time, which would start lying the moment the user changed anything.
+ *
+ * ── THE CORPUS IS NOT MINE ─────────────────────────────────────────────────
+ * Trap 22: a corpus drawn from the author's head cannot see the class the
+ * author did not imagine. Every threshold and rule here was measured against
+ * the three briefs of the 2026-08-08 trace — written by a different lane, in a
+ * stressed-executive voice, deliberately spanning goal / quantitative target /
+ * assumption / evidence-with-source / constraint / half-formed idea /
+ * uncertainty / disagreement — and graded against that trace's per-atom loss
+ * tables, which are an INDEPENDENT oracle produced from the deployed system.
+ */
+
+import {
+  MAGNITUDE_ALTERNATION,
+  magnitudeSuffixPattern,
+  resolveMagnitude,
+} from "../../utils/magnitude-alphabet.js";
+import { CURRENCY_SYMBOL_TO_CODE } from "../extraction/numeric-parser.js";
+import { readUnit, type AmountKind } from "../provenance/stated-amounts.js";
+import { classifyValueSource } from "../graph-readiness/obligation-provenance.js";
+import type { KnownObservedStateSourceLiteral } from "@talchain/schemas";
+import type { ObservedStateStatedRole } from "./stated-role-vocabulary.js";
+
+/** Wire schema discriminator. The UI lane builds against this. */
+export const NOT_MODELLED_SCHEMA = "not_modelled.v1" as const;
+
+/**
+ * Upper bound on reported items. A brief is user-supplied and unbounded; an
+ * unbounded array on a read path is a payload-size hazard. Truncation is
+ * REPORTED (`truncated: true`), never silent — a silently short list is the
+ * same lie as an empty one.
+ */
+export const MAX_ITEMS = 200;
+
+export type QuantityKind = "money" | "percent" | "count" | "date" | "period";
+
+/** in_model = carried as a value, cap, unit or label. prose_only = mentioned in
+ *  commentary/coaching but not parameterising anything. absent = nowhere. */
+export type QuantityVerdict = "in_model" | "prose_only" | "absent";
+
+/**
+ * WHAT KIND OF THING THE USER STATED — the second axis, and the one that makes
+ * the retention invariant sayable at all.
+ *
+ * ── WHY THIS EXISTS ────────────────────────────────────────────────────────
+ * Measured on the deployed cold read for the 4-day-week brief (build
+ * `32f06dd`, 2026-08-10): the board's HARD FLOOR ("Do not let CSAT drop below
+ * 85%"), the ops lead's GUESS ("productivity will fall 10-15%") and the
+ * Manchester PILOT RESULT ("a 4% rise") all report as
+ * `kind=percent, verdict=prose_only`. Three different kinds of claim, one
+ * indistinguishable row each. The invariant — that everything material is
+ * retained and correctly CLASSIFIED — could not be stated, let alone met.
+ *
+ * ── WHAT IT IS NOT ─────────────────────────────────────────────────────────
+ * `QuantityKind` is NOT replaced. It stays exactly as it was, byte for byte,
+ * and remains the axis the deployed UI validates against. This is a SECOND,
+ * ADDITIVE axis. See `stated_kinds` on the manifest for why that is not a
+ * stylistic choice.
+ */
+export const STATED_KINDS = [
+  "goal",
+  "option",
+  "constraint",
+  "figure",
+  "evidence",
+  "assumption",
+  "disagreement",
+  "correction",
+] as const;
+
+export type StatedKind = (typeof STATED_KINDS)[number];
+
+/**
+ * ⛔ THE ADOPTION RULE, AND IT IS NOT OPTIONAL.
+ *
+ * The estate's named historical failure is meaning fields that shipped with no
+ * producer and no consumer, and were therefore dark from birth. A kind may sit
+ * in `sourced` ONLY if a LIVE producer supplies it and this map names that
+ * producer at its bytes. Everything else is `unsourced` — declared, counted,
+ * and visible as a known blind spot rather than an absence a reader mistakes
+ * for "nothing of that kind was said".
+ *
+ * A kind moves out of this map only in the same change train as its producer.
+ */
+export const STATED_KIND_PRODUCERS: Readonly<Partial<Record<StatedKind, string>>> = {
+  // Every quantity the scan finds is at minimum a stated figure — the scan
+  // itself is the producer, and it is the one already shipping.
+  figure: "extractStatedQuantities (this module) — quantities stated in the brief",
+  // The drafting model's typed, provenance-bound constraint rows, carried on
+  // the graph with the exact sentence they came from.
+  constraint:
+    "graph.goal_constraints[] with source_quote (draft/anthropic-graph-schema.ts:447-467)",
+};
+
+/**
+ * Kinds with no live producer, stated explicitly rather than left absent.
+ *
+ * `option`, `disagreement` and `correction` are ALREADY named in
+ * `NOT_TRACKED_CLASSES` below — the manifest has always known it cannot see
+ * them. That honesty is the starting point, not a defect: a kind listed here is
+ * a blind spot on the record, and a reader can tell it apart from a kind that
+ * was looked for and not found.
+ */
+export const UNSOURCED_STATED_KINDS: readonly StatedKind[] = STATED_KINDS.filter(
+  (k) => STATED_KIND_PRODUCERS[k] === undefined,
+);
+
+export const SOURCED_STATED_KINDS: readonly StatedKind[] = STATED_KINDS.filter(
+  (k) => STATED_KIND_PRODUCERS[k] !== undefined,
+);
+
+export interface NotModelledItem {
+  /** The exact bytes as the user wrote them. */
+  readonly literal: string;
+  readonly kind: QuantityKind;
+  /** Character offset into `brief_text`. With `literal`, this is the item's
+   *  IDENTITY — consumers must address items by it, never by value. */
+  readonly char_offset: number;
+  readonly verdict: QuantityVerdict;
+  /** The modelled quantity this figure was matched to, when matched
+   *  numerically. Null for a text match or no match. */
+  readonly matched_node_id: string | null;
+  /**
+   * WHAT KIND OF THING this is — the second axis (see `StatedKind`).
+   *
+   * ⚠ SOURCED FROM PRODUCERS, NEVER RE-DERIVED FROM THE PROSE. `constraint`
+   * means "a live `goal_constraints[]` row quotes the sentence this figure
+   * stands in and corroborates its value"; everything else is `figure`. A
+   * figure that IS a constraint in English but that no producer claimed stays
+   * `figure` — that is the honest answer, and it is the loss made visible.
+   * Guessing it back would be a fifth extractor over free text, which
+   * ROADMAP 2.1051 forbids and which misclassification risk makes worse than
+   * silence.
+   */
+  readonly stated_kind: StatedKind;
+}
+
+export interface NotModelledManifest {
+  readonly schema: typeof NOT_MODELLED_SCHEMA;
+  /** `derived` = we looked. `unavailable` = we could not look, and therefore
+   *  know NOTHING about what was dropped. Never conflate the two. */
+  readonly status: "derived" | "unavailable";
+  readonly unavailable_reason: "no_brief_text" | "no_graph" | null;
+  readonly scope: {
+    readonly searched: string;
+    readonly model_surface: readonly string[];
+    readonly prose_surface: readonly string[];
+    readonly excluded_from_search: readonly string[];
+  };
+  readonly quantities: {
+    readonly total: number;
+    readonly in_model: number;
+    readonly prose_only: number;
+    readonly absent: number;
+    readonly truncated: boolean;
+    readonly items: readonly NotModelledItem[];
+  } | null;
+  /**
+   * What the DRAFTING MODEL ITSELF reported leaving out, in its own words.
+   *
+   * ⚠ `none_reported` DOES NOT MEAN NOTHING WAS EXCLUDED. Measured on the trace
+   * corpus: brief B3 — the densest of the three, 16 of 26 atoms dropped — has an
+   * EMPTY exclusion list, because its coaching pass produced zero output and
+   * nothing distinguishes "found nothing" from "silently failed". The three
+   * states are kept apart for exactly that reason.
+   */
+  readonly declared_exclusions: {
+    readonly status: "reported" | "none_reported" | "not_recorded";
+    /** VERBATIM. The model's own sentence, never re-worded or summarised. */
+    readonly items: readonly string[];
+  };
+  /**
+   * Factors carrying a figure the user never stated — i.e. WE supplied it.
+   *
+   * Derived from evidence, never from the `provenance`/`extractionType`
+   * labels, which the 2026-08-08 trace measured as false precisely where they
+   * matter. Carries the human LABEL, never the encoded value: the pipeline's
+   * own `display_value` reads "0.31 to 0.93" with no unit and means nothing to
+   * a user.
+   */
+  readonly inferred_factors: {
+    readonly status: "derived" | "not_recorded";
+    readonly items: readonly { readonly node_id: string; readonly label: string }[];
+  };
+  /**
+   * THE KIND AXIS AND ITS ADOPTION STATE — shipped together, deliberately.
+   *
+   * A vocabulary without a statement of which of its words have producers is
+   * how five of eight kinds ship dark and nobody notices for a month. This
+   * block is that statement, ON THE WIRE, so a consumer can render "we do not
+   * track disagreements yet" instead of implying none were stated.
+   *
+   * `sourced ∪ unsourced` is always the complete `STATED_KINDS` set and the two
+   * are always disjoint — asserted in the spec, not merely intended.
+   */
+  readonly stated_kinds: {
+    readonly status: "derived";
+    /** Count of REPORTED items per kind. Sums to `quantities.items.length`. */
+    readonly tally: Readonly<Record<StatedKind, number>>;
+    /** Kinds a live producer supplies today. */
+    readonly sourced: readonly StatedKind[];
+    /** Kinds with no producer — declared blind spots, never silent absences. */
+    readonly unsourced: readonly StatedKind[];
+    /** The producer, named at its bytes, for each sourced kind. */
+    readonly producers: Readonly<Partial<Record<StatedKind, string>>>;
+  };
+  /** Loss classes this derivation CANNOT observe. The anti-reassurance field. */
+  readonly not_tracked: readonly string[];
+}
+
+/**
+ * What this derivation is structurally blind to.
+ *
+ * Every entry was MEASURED as a real loss class by the 2026-08-08 trace and is
+ * invisible to a quantity-containment check. This list is what stops a short
+ * `absent` array reading as "nothing else was lost".
+ */
+export const NOT_TRACKED_CLASSES: readonly string[] = [
+  // Trace loss class 3 — 0/2 named colleagues' competing proposals survived.
+  "competing_or_dissenting_proposals",
+  // Trace loss class 6 — 0/4 in-brief corrections survived (worst-served class).
+  "corrections_and_second_thoughts",
+  // Trace loss class 5 — every named source across all three briefs was stripped.
+  "named_evidence_sources_and_their_pedigree",
+  // Trace loss class 4 — rules like "max two changes in parallel" became
+  // unparameterised factors; qualitative constraints carry no number to match on.
+  "qualitative_constraints_and_rules",
+  // Self-flagged weakness ("my gut", "pure guess", "treat accordingly").
+  "stated_confidence_and_self_flagged_weakness",
+  // Anything the drafting model declined to emit and never recorded dropping.
+  "statements_the_drafting_model_did_not_report_discarding",
+];
+
+// ── extraction ──────────────────────────────────────────────────────────────
+
+/**
+ * ⚠ NO MAGNITUDE LIST LIVES HERE, AND THAT IS THE POINT.
+ *
+ * The first cut of this module hand-wrote one — a FIFTH copy in a service whose
+ * `utils/magnitude-alphabet.ts` exists precisely because fifteen independent
+ * copies had accumulated and EIGHT of them were measurably wrong, each by a
+ * factor of 1,000 to 1,000,000,000,000, at full confidence.
+ *
+ * It was caught by that module's own union tripwire (ROADMAP 2.330), in CI, not
+ * by review — and the tripwire was right: a lookup here would have drifted from
+ * the canonical alphabet the moment either moved. The copy is deleted; the
+ * alphabet is imported. `grand`, `mn`, `t` and the spelled-out words come free,
+ * and cannot diverge.
+ */
+
+const MONTHS =
+  "january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec";
+
+/**
+ * Unit words that turn a bare number into a STATED QUANTITY.
+ *
+ * ⚠ HAND-WRITTEN, AND IT KNOWS IT (trap 12d). Deriving this from anything is
+ * impossible — it is a fact about English, not about our data. The asymmetry is
+ * therefore deliberate and runs ONE WAY: a unit word missing from this list
+ * means a quantity is never examined and never reported, i.e. we UNDER-report
+ * loss. A false entry could only ever cause us to examine something harmless.
+ * We never manufacture a "you lost this" claim by omission from this list.
+ */
+const UNIT_WORDS =
+  "months?|years?|weeks?|days?|quarters?|people|persons?|person|heads?|hires?|staff|employees?|engineers?|roles?|seats?|customers?|users?|aes?|fte";
+
+/**
+ * One ordered alternation. Branch order matters: money and percent must win
+ * before the bare-number branches, or "£11.2m" degrades into "11.2".
+ *
+ * ⚠ BARE UNDECORATED INTEGERS ARE DELIBERATELY NOT MATCHED. Measured on the
+ * trace corpus: matching them made "FY28" report the quantity `28`, and short
+ * integers collide with everything. A quantity must carry a unit, a currency, a
+ * percent sign, or a calendar/fiscal form to be examined at all. This is stated
+ * in `scope.excluded_from_search` so the consumer knows the list is partial.
+ */
+const QUANTITY_RE = new RegExp(
+  [
+    // The sign is part of the user's literal. Without it "-£2m" was quoted
+    // back to them as "£2m" — misreporting their own words, and inverting the
+    // meaning of a figure that is very often a loss.
+    `(?<money>(?<msign>-)?(?<mcur>[£€$])\\s?(?<mnum>\\d[\\d,]*(?:\\.\\d+)?)${magnitudeSuffixPattern("mmag")})(?![\\d])`,
+    `(?<percent>(?<pnum>\\d[\\d,]*(?:\\.\\d+)?)\\s?%)`,
+    `(?<date>(?:\\d{1,2}\\s+)?(?:${MONTHS})\\s+\\d{4})`,
+    `(?<period>(?:FY\\s?\\d{2,4}|Q[1-4]\\s?\\d{4}|Q[1-4]\\b))`,
+    `(?<counted>(?<cnum>\\d[\\d,]*(?:\\.\\d+)?)(?:\\s+[a-z]+){0,2}\\s+(?:${UNIT_WORDS})\\b)`,
+    `(?<hyph>(?<hnum>\\d[\\d,]*)-(?:${UNIT_WORDS}))`,
+  ].join("|"),
+  "gi",
+);
+
+interface Quantity {
+  readonly literal: string;
+  readonly at: number;
+  readonly kind: QuantityKind;
+  /** Fully expanded value (£11.2m -> 11_200_000). Null for dates/periods. */
+  readonly value: number | null;
+  /** As written (£11.2m -> 11.2). Models store either form; both count. */
+  readonly mantissa: number | null;
+  /** Currency symbol for money, "%" for percent, null otherwise. Load-bearing:
+   *  it is what stops a count matching a currency-denominated carrier. */
+  readonly unit: string | null;
+}
+
+const toNumber = (raw: string): number => Number(raw.replace(/,/g, ""));
+
+/** The unit word at the tail of a count literal. Hoisted: `UNIT_WORDS` is a
+ *  module constant, so this pattern is invariant and was being recompiled on
+ *  every quantity. */
+const COUNT_UNIT_TAIL_RE = new RegExp(`(${UNIT_WORDS})$`, "i");
+
+/** The unit WORD a count was stated in ("8 people" -> "people"). Load-bearing:
+ *  it is the only thing that can tell a headcount from a Trustpilot score. */
+function countUnitWord(literal: string): string | null {
+  const m = literal.match(COUNT_UNIT_TAIL_RE);
+  return m ? m[1].toLowerCase() : null;
+}
+
+/**
+ * The forms a unit word might be written in, so "month"/"months" and
+ * "people"/"person" compare equal.
+ *
+ * ⚠ RETURNS A SET, NOT A SINGLE STEM. A single crude stem got this wrong in the
+ * obvious direction: "hires" -> "hir" (the `es` branch) while "hire" -> "hire",
+ * so a factor declared in `hires` never matched a brief written in `hire`.
+ * Comparing candidate SETS removes the need for the stemmer to pick correctly.
+ */
+function unitForms(word: string): Set<string> {
+  const w = word.toLowerCase().trim();
+  const forms = new Set<string>([w]);
+  if (w.endsWith("ies")) forms.add(`${w.slice(0, -3)}y`);
+  if (w.endsWith("es")) forms.add(w.slice(0, -2));
+  if (w.endsWith("s")) forms.add(w.slice(0, -1));
+  forms.add(`${w}s`);
+  if (w === "people" || w === "person") {
+    forms.add("people");
+    forms.add("person");
+  }
+  return forms;
+}
+
+/** Do two unit words name the same family? */
+function sameUnitFamily(a: string, b: string): boolean {
+  const fa = unitForms(a);
+  for (const f of unitForms(b)) if (fa.has(f)) return true;
+  return false;
+}
+
+export function extractStatedQuantities(text: string): Quantity[] {
+  const out: Quantity[] = [];
+  for (const m of text.matchAll(QUANTITY_RE)) {
+    const g = m.groups ?? {};
+    const at = m.index ?? 0;
+    const literal = m[0];
+    if (g.money !== undefined && g.mnum !== undefined) {
+      const sign = g.msign === "-" ? -1 : 1;
+      const base = toNumber(g.mnum) * sign;
+      const mag = resolveMagnitude(g.mmag);
+      out.push({ literal, at, kind: "money", value: base * mag, mantissa: base, unit: g.mcur ?? null });
+    } else if (g.percent !== undefined && g.pnum !== undefined) {
+      const v = toNumber(g.pnum);
+      out.push({ literal, at, kind: "percent", value: v, mantissa: v, unit: "%" });
+    } else if (g.date !== undefined) {
+      out.push({ literal, at, kind: "date", value: null, mantissa: null, unit: null });
+    } else if (g.period !== undefined) {
+      out.push({ literal, at, kind: "period", value: null, mantissa: null, unit: null });
+    } else if (g.counted !== undefined && g.cnum !== undefined) {
+      const v = toNumber(g.cnum);
+      out.push({ literal, at, kind: "count", value: v, mantissa: v, unit: countUnitWord(literal) });
+    } else if (g.hyph !== undefined && g.hnum !== undefined) {
+      const v = toNumber(g.hnum);
+      out.push({ literal, at, kind: "count", value: v, mantissa: v, unit: countUnitWord(literal) });
+    }
+  }
+  return out;
+}
+
+// ── the two surfaces ────────────────────────────────────────────────────────
+
+/**
+ * The THREE-WAY top-level classification, in ONE map.
+ *
+ * `prose` = commentary we still search, so a quantity found only there is
+ * reported `prose_only` rather than `absent`. `skip` = diagnostics, timings and
+ * quality scores, searched not at all. ABSENCE FROM THIS MAP MEANS MODEL.
+ *
+ * ⚠ ONE MAP BECAUSE TWO SETS ENCODED ONE CLASSIFICATION AND COULD DISAGREE.
+ * This was `NON_MODEL_TOP_KEYS` + `PROSE_TOP_KEYS`, with all three prose keys
+ * duplicated across both and consumed as `if (!nonModel) … else if (prose) …`.
+ * That shape makes the second branch UNREACHABLE for any key added to the prose
+ * set alone: it would be walked as MODEL content, and a figure quoted only in
+ * commentary would be reported `in_model` — the confident-false-statement the
+ * trace measured as loss class 7, arriving through a one-line edit that looks
+ * obviously correct. A single map cannot express that state (trap 12: derive,
+ * and where you cannot, make the drift impossible rather than merely unlikely).
+ *
+ * Coaching is deliberately `prose`: a figure QUOTED BACK in a coaching card was
+ * noticed, but it parameterises nothing, and saying it is "in the model" is the
+ * failure this module exists to prevent.
+ */
+type TopKeyClass = "prose" | "skip";
+
+const TOP_KEY_CLASS: ReadonlyMap<string, TopKeyClass> = new Map<string, TopKeyClass>([
+  ["trace", "skip"],
+  ["_timings", "skip"],
+  ["_pipeline_outcome", "skip"],
+  ["quality", "skip"],
+  ["analysis_ready", "skip"],
+  ["schema_version", "skip"],
+  ["coaching", "prose"],
+  ["draft_warnings", "prose"],
+  ["validation_warnings", "prose"],
+]);
+
+/**
+ * Keys ANYWHERE whose subtree is internal prose rather than model content.
+ *
+ * ⚠ A DENY-LIST BY DESIGN, and the direction is the whole argument. A prose key
+ * MISSING from this list gets treated as model content, so a quantity mentioned
+ * there is reported as `in_model` — we UNDER-report loss. An ALLOW-list that
+ * missed a value-bearing key would do the opposite and manufacture a false
+ * "we dropped this". Under-reporting is recoverable; a false accusation about
+ * the user's own words is not.
+ *
+ * ⚠⚠ ONE MEMBER IS ADDED AGAINST THAT DIRECTION, DELIBERATELY — `source_quote`.
+ * The argument above is right about every OTHER key, and it is why this stayed
+ * a deny-list. But `source_quote` is defined at its producer
+ * (`NodeV3.source_quote`, `schemas/cee-v3.ts:229`, written onto wire nodes at
+ * `transforms/schema-v3.ts:1145`) as THE USER'S EXACT WORDS carried through
+ * unchanged. Nothing computes with it.
+ *
+ * Counting it as model surface is itself the false statement. It let the
+ * product quote the user's own sentence back at them and score that as having
+ * modelled their number — journey-witnessed on CEE `4e88390`, where a stated
+ * £20,000 that reached no factor, option or intervention was reported
+ * `in_model` purely because the sentence containing it was echoed onto a node.
+ * That is a false "we kept this" on the one surface whose entire job is saying
+ * what was kept.
+ *
+ * The flip lands on `prose_only`, not `absent`, so it still makes no "I could
+ * not find it" accusation and the anti-false-accusation rule above is
+ * preserved intact.
+ *
+ * ⚠ LIMIT: where a stated node's LABEL is itself the verbatim sentence
+ * (`label_authored` absent — "the label IS the user's own text",
+ * `cee-v3.ts:231-236`), the label is genuinely model surface and this does not
+ * reach it. That case is carried, so reporting it `in_model` is correct.
+ */
+const PROSE_KEYS: ReadonlySet<string> = new Set([
+  "validation",
+  "reasoning",
+  "rationale",
+  "explanation",
+  "uncertainty_drivers",
+  "notes",
+  "description",
+  "evidence_note",
+  "fix_hint",
+  "commentary",
+  "source_quote", // the user's own words, carried verbatim; nothing computes with it
+]);
+
+/**
+ * The factors the product ESTIMATED — figures it supplied that the user never
+ * stated. The trust-critical half: a user who cannot tell their own numbers
+ * from ours cannot audit the model at all.
+ *
+ * ── DERIVED FROM EVIDENCE, NOT FROM THE PROVENANCE LABEL ───────────────────
+ * This deliberately does NOT read `provenance` / `extractionType`. The
+ * 2026-08-08 trace measured those labels as WRONG exactly where they matter:
+ * `fac_nrr` carried `extractionType:"explicit", provenance:"from_brief"` while
+ * holding zero brief information, and every option intervention value carried
+ * `source:"brief_extraction", value_confidence:"high"` while being
+ * model-invented. Building a trust surface on a label that is false where it
+ * counts would launder the defect rather than expose it.
+ *
+ * So the test is the one thing that cannot lie: does any figure this factor
+ * carries correspond to something the user actually wrote? If not, we supplied
+ * it, whatever the label says.
+ *
+ * (Independent of the provenance-honesty work in `src/cee/provenance/` — that
+ * corrects the labels at the source; this needs no label to be correct.)
+ */
+/**
+ * ⚠ THE FIELD LIST IS THE WHOLE CORRECTNESS ARGUMENT, and its asymmetry runs
+ * the DANGEROUS way — which is why it is pinned by a discrimination test rather
+ * than trusted. A field MISSING here means a figure the user really stated goes
+ * unseen, and we then tell them we invented their own number. (Measured:
+ * `observed_state.cap` and `raw_value` were absent from the first version, and
+ * B2's offshore-scale factor — carrying the brief's £2.9m cap — was wrongly
+ * claimed as ours.)
+ *
+ * ⚠ AND IT IS DECLARED ONCE. Three functions walked this list independently
+ * (`collectFactorNumbers`, `collectSuppressorNumbers`, `collectCandidates`), so
+ * "the whole correctness argument" existed in triplicate and a field could be
+ * added to one copy alone. The walk is now shared; only the per-function
+ * `prior` policy differs, and each difference is argued at its own site.
+ */
+const VALUE_FIELDS = ["value", "raw", "raw_value", "cap"] as const;
+
+/**
+ * ⭐⭐ THE SECOND WAY A FIGURE CAN BE THE USER'S: THEY WROTE IT ON THE CANVAS.
+ *
+ * ── THE DEFECT THIS CLOSES (wire-witnessed 2026-08-25) ─────────────────────
+ * The evidence test above asks only *"does this number appear in the BRIEF?"*.
+ * A user who sets a value through the Model-tab Confirm chip has authored it
+ * just as surely, and it will never appear in their brief — so the ledger told
+ * a user *"Those are my estimates, not yours"* about a value they had set
+ * themselves minutes earlier (canonical state
+ * `{ value: 0.35, source: "user_override", raw_value: 0.35 }`).
+ *
+ * That is the worst thing this surface can do. Its entire job is to say who
+ * authored what, and Olumi's founding premise is that humans remain the
+ * authors — so erasing the user's authorship here is not a missing feature,
+ * it is the product being confidently wrong about the one thing it exists to
+ * be right about.
+ *
+ * ── WHY THIS DOES NOT RE-OPEN THE DEFECT ABOVE ─────────────────────────────
+ * The header above refuses to read `provenance` / `extractionType`, because the
+ * 2026-08-08 trace measured those labels FALSE exactly where they matter. That
+ * refusal is well-founded — and it simply does not extend to user-write
+ * receipts. That sentence is the whole of this fix.
+ *
+ * The trace's lying labels were all PRODUCER-WRITTEN: CEE's own extraction and
+ * inference writers stamping the model's opinion of itself. A user-write
+ * receipt is written by a different mechanism, and three structural guarantees
+ * constrain it — each WEAKER than the first version of this header claimed.
+ * The corrected statements, all re-derived at the bytes 2026-08-26:
+ *
+ *   1. `observed_state.source` is `field_class: 'provenance_owned'` — DENIED to
+ *      the AI edit lane (`src/orchestrator-v5/graph-management/field-safety.ts`
+ *      — NOT `src/cee/orchestrator-v5/…`, which does not exist; the first
+ *      version of this line cited a path that resolves to nothing). The denial
+ *      is real and well-pinned, but it governs ONLY the `edit_graph`
+ *      candidate-mutation lane. ⚠ `set_factor_value` BYPASSES field-safety
+ *      entirely (measured: zero `field-safety` imports against 18 imports in
+ *      that handler).
+ *   2. ⚠ THE STATED REASON WAS REFUTED. The first version said the drafting
+ *      model "cannot emit `observed_state` AT ALL" because
+ *      `cee/draft/anthropic-graph-schema.ts` is `additionalProperties: false`.
+ *      That file's `additionalProperties: false` is real, but THE SCHEMA IS
+ *      RETIRED AND NO LONGER SENT — measured: exactly one live import of that
+ *      module and it takes only `DRAFT_SOFT_NODE_CAP` / `DRAFT_SOFT_EDGE_CAP`,
+ *      two numeric constants, never the schema (contrast control: 6 for a
+ *      known-live sibling). The conclusion survives via the LIVE records
+ *      grammar, not via the cited artefact. And `data.extractionType` IS
+ *      model-emitted and maps into `observed_state.source`; what makes that
+ *      safe is its CLOSED CODOMAIN — a request-side hint, never a server-side
+ *      guarantee.
+ *   3. The rule that forged `user_override` from the system's own reading of
+ *      prose (#853) was genuinely REVERTED, not narrowed (`f950e4b8`, a
+ *      deletion). ⚠ But the writer manifest guarding it pins ONE literal of
+ *      seven and is a STRING SCAN, not a writer derivation:
+ *      `src/orchestrator-v5/system-events/factor-value-edit.ts:346` stamps
+ *      `panel_elicited` and is INVISIBLE to it.
+ *
+ * ⚠⚠ AND THE INDEPENDENCE CLAIM WAS FALSE — it read "any one of those failing
+ * still leaves two". IT DOES NOT. Guarantees 1 and 2 both constrain WHAT THE
+ * MODEL MAY EMIT; NEITHER constrains WHAT CEE STAMPS ON THE MODEL'S BEHALF,
+ * which is the actual hole (see the KNOWN GAP below). Three guarantees pointed
+ * at one door. A confidently wrong trust argument is worse than none, and this
+ * header is inherited by every later session — which is why the correction sits
+ * here rather than only in a PR body.
+ *
+ * ── ⚠⚠ KNOWN GAP: `user_override` IS NOT A SINGLE-MEANING RECEIPT ──────────
+ * One literal serves TWO different writes, and THIS LEDGER CANNOT TELL THEM
+ * APART:
+ *
+ *   (a) a genuine Confirm-chip / inspector edit — the user authored the number;
+ *   (b) a MODEL-AUTHORED `update_node` op. `stampUserEditProvenance`
+ *       (`orchestrator/canonicalise-value-ops.ts`) deliberately OVERWRITES an
+ *       LLM's own `cee_inference` label with `user_override`, resting on the
+ *       premise that "every op that reaches either edit seam is a CHAT-SET,
+ *       USER-CONFIRMED write". ⚠ THIS REPO CONTRADICTS THAT PREMISE IN WRITING:
+ *       `mutation-consent.ts` records that "`edit_graph` is genuinely UNCOVERED
+ *       by withheld-consent enforcement", with `update_node` ops applying
+ *       "regardless of what the user's message asked for" (gap ROADMAP 2.628a).
+ *
+ * CONSEQUENCE, STATED PLAINLY: for class (b) this suppressor can drop a
+ * MODEL-AUTHORED number from the disclosure — the same harm the anti-downgrade
+ * arms exist to stop, arriving through a different literal. We guarded the door
+ * we were looking at.
+ *
+ * WHY IT IS ACCEPTED HERE RATHER THAN CLOSED: it lands in the LESS-BAD
+ * direction this module already commits to — an OMISSION, covered by the
+ * unconditional "This is not a complete account of what was left out" sentence
+ * — never a false claim about the user. The common case (the user states the
+ * number) is unaffected, and `set_factor_value` is milder than it looks because
+ * CEE does the arithmetic server-side, so the operand is the user's stated
+ * delta. Closing it needs a SEPARABLE stamp for model-authored edit ops, which
+ * is the owning lane's call, not this module's.
+ *
+ * ⭐ RE-SURFACE TRIGGER — concrete, so this gap cannot acquire a lapsed licence
+ * and no detector. Re-open THIS suppressor's trust set when ANY of:
+ *   · ROADMAP 2.628a closes (withheld-consent enforcement reaches `edit_graph`)
+ *     — the premise under (b) becomes true and the gap dissolves;
+ *   · `stampUserEditProvenance` gains a distinct stamp for model-authored ops
+ *     (grep `USER_EDIT_SOURCE` in `orchestrator/canonicalise-value-ops.ts`);
+ *   · the writer manifest becomes a DERIVATION over all seven receipt literals
+ *     rather than a string scan for one.
+ * `not-modelled-manifest.user-authorship.test.ts` carries this trigger list
+ * beside the corpus-limit note, so the gap is visible from the suite too.
+ *
+ * ⚠⚠ THIS GAP NOW HAS A SECOND DEPENDENT, AND IT IS THE MORE DANGEROUS ONE.
+ * Added 31 Aug 2026. `cee/transforms/provenance-display.ts` `SOURCE_AUTHORSHIP`
+ * projects `user_override` to `user_set`, and
+ * `orchestrator-v5/format/format-graph-for-context.ts` carries that literal
+ * into the MODEL'S OWN CONTEXT, where the model then says it out loud.
+ *
+ * The direction of harm is the inverse of this module's, which is why it is
+ * recorded here rather than left to that file alone. THIS suppressor can only
+ * OMIT one of our own inventions from a disclosure — the less-bad direction the
+ * header above commits to. THAT reader can make a FALSE CLAIM ABOUT THE USER:
+ * for class (b) it tells someone *"you gave me this figure"* about a value they
+ * never supplied. Same literal, same forged stamp, opposite failure mode.
+ *
+ * ⭐ SO WHEN ANY TRIGGER ABOVE FIRES, TWO READERS MOVE, NOT ONE. That reader
+ * pins the gap as `FORGEABLE_USER_AUTHORSHIP_LITERALS` with a spec asserting
+ * the set EXACTLY and anchoring its membership to `USER_EDIT_SOURCE` at the
+ * stamper — so trigger 2 ("`stampUserEditProvenance` gains a distinct stamp for
+ * model-authored ops") REDs there automatically. It does NOT fire here: this
+ * module's trust set is still a hand-reviewed list, so this paragraph is the
+ * mechanism, and it is the thing to re-read before closing 2.628a.
+ *
+ * ⚠ AND THE GAP IS WIDER THAN ONE LITERAL, WHICH THAT FIRST PIN DID NOT SAY.
+ * SEVEN literals project to `user_set`; only the forged-stamp one is EVIDENCED
+ * here. Five more (`UNVERIFIED_USER_AUTHORSHIP_LITERALS`, same file) have NO
+ * writer anywhere in this repo — measured 1 Sep 2026 with contrast controls —
+ * so their `user_set` verdict rests on documentation of what other surfaces
+ * mean by them, which CEE cannot check. That is a THIRD state, neither
+ * known-safe nor known-forgeable, and it is pinned as its own set with a
+ * PARTITION spec: every `user_set` literal must be accounted for as forgeable,
+ * unverified, or receipted, so a thirteenth contract literal REDs rather than
+ * defaulting to trusted. The same widening applies to the trust set BELOW —
+ * five of its `true` rows are literals nothing in this repo writes.
+ *
+ * ── ⚠ THE ASYMMETRY, STATED BECAUSE IT DECIDES EVERY OPEN CASE ─────────────
+ * WRONGLY CLAIMING A USER'S VALUE AS OUR INVENTION IS FAR WORSE THAN WRONGLY
+ * OMITTING ONE OF OUR OWN INVENTIONS FROM THE LIST. Where authorship cannot be
+ * determined, LEAVE IT OUT rather than guess — the composed answer already
+ * carries a true sentence covering that ("This is not a complete account of
+ * what was left out"), so an omission is disclosed and a false claim is not.
+ *
+ * ── ⚠ AND THE OPPOSITE HARM, WHICH IS WHY THIS IS NOT MERELY `user_stated` ──
+ * `brief_extraction` and `explicit` ALSO classify as `user_stated` on the
+ * authorship axis. Suppressing on authorship alone would drop them — and the
+ * set that removes is precisely *"the label says from-brief but the number is
+ * not in the brief"*, i.e. THE MEASURED LIE. That deletes TRUE entries from a
+ * disclosure whose entire value is that it is specific: a downgrade wearing a
+ * fix's clothes. Hence two conjuncts, never one.
+ */
+const USER_WRITE_RECEIPT: Readonly<
+  Record<KnownObservedStateSourceLiteral, boolean>
+> = {
+  // ── USER-WRITE RECEIPTS: stamped server-side by a deterministic user-write
+  // ── path. Contract provenance: `schemas/cee-v3.ts` names these the
+  // ── "USER-OWNED members".
+  user_override: true, // typed value — UI edit surfaces AND CEE set_factor_value
+  user_confirmed: true, // "confirm as is"
+  user: true, // Model-tab factor-value edits
+  user_edited: true, // OutputsDock transition bridge
+  user_calibration: true, // inspector calibration
+  // The user marked this as their own assumption. They still AUTHORED it, so
+  // telling them "you did not state this" would be the exact harm.
+  //
+  // ⚠ DELIBERATE DIVERGENCE, NAMED (trap 21). This follows
+  // `graph-readiness/obligation-provenance.ts` (`user_stated`) and DIVERGES
+  // from `decision-review/value-source-extraction-type.ts` (`inferred`) — the
+  // same literal, three questions, and only the authorship one is ours. Pinned
+  // both ways in `not-modelled-manifest.user-authorship.test.ts`.
+  user_assumption: true,
+  // Elicited from a named participant AND verified against CEE's own collab
+  // store before the stamp is written — CEE is its only stamper.
+  panel_elicited: true,
+
+  // ── PRODUCER-WRITTEN: the model's labels about itself. Measured lying by the
+  // ── 2026-08-08 trace. NEVER a receipt — see the two-conjunct note above.
+  brief_extraction: false,
+  explicit: false,
+  cee_inference: false,
+  inferred: false,
+  cee_repair: false,
+};
+
+/**
+ * Did the user WRITE this value, as opposed to the model having labelled it as
+ * theirs?
+ *
+ * ⚠ A DIFFERENT QUESTION FROM `classifyValueSource`, DELIBERATELY (trap 21).
+ * That one answers *"who authored this?"*; this answers *"is this stamp itself
+ * trustworthy evidence of user authorship?"*. Both conjuncts are required:
+ *
+ *   1. the upstream authority agrees the value is the user's — so authorship is
+ *      decided in ONE place and this module never holds a second opinion; and
+ *   2. the stamp is a user-write receipt rather than a producer label.
+ *
+ * Absence is NOT promoted, and that is the shared contract's own instruction:
+ * "a consumer MUST NOT read absence as any particular class; classify
+ * unknown/absent as neutral, never guess". An unstamped or unrecognised value
+ * simply falls through to the brief-evidence test, exactly as before — which
+ * also keeps the list SPECIFIC rather than quietly shrinking it.
+ */
+function isUserWriteReceipt(node: Record<string, unknown>): boolean {
+  const observed = node.observed_state;
+  if (observed === null || typeof observed !== "object") return false;
+  const stamp = (observed as Record<string, unknown>).source;
+  if (typeof stamp !== "string") return false;
+  if (classifyValueSource(stamp) !== "user_stated") return false;
+  return USER_WRITE_RECEIPT[stamp as KnownObservedStateSourceLiteral] === true;
+}
+
+/** The objects that may carry a (value…, unit) pair, in precedence order. */
+const CARRIER_KEYS = ["observed_state", "data"] as const;
+
+interface ValueCarrier {
+  /** The carrier's OWN declared unit, verbatim. Taken from the same object as
+   *  the values, so a value can never borrow a unit from elsewhere. */
+  readonly unit: unknown;
+  readonly values: readonly number[];
+}
+
+/**
+ * Every (values…, unit) carrier on a node: the node itself, then
+ * `observed_state`, then `data`.
+ *
+ * ⚠ THE ORDER IS OBSERVABLE and is preserved exactly as the three original
+ * walks had it. `matchCandidate` returns the FIRST compatible candidate, so
+ * candidate order reaches the user as `matched_node_id`.
+ */
+function valueCarriers(node: Record<string, unknown>): ValueCarrier[] {
+  const out: ValueCarrier[] = [];
+  const carriers: Array<Record<string, unknown>> = [node];
+  for (const nested of CARRIER_KEYS) {
+    const v = node[nested];
+    if (v !== null && typeof v === "object") carriers.push(v as Record<string, unknown>);
+  }
+  for (const carrier of carriers) {
+    const values: number[] = [];
+    for (const field of VALUE_FIELDS) {
+      const v = carrier[field];
+      if (typeof v === "number" && Number.isFinite(v)) values.push(v);
+    }
+    out.push({ unit: carrier.unit, values });
+  }
+  return out;
+}
+
+/**
+ * The real-world figures quoted in an encoding map's CAPTIONS.
+ *
+ * The map's KEYS are encoded levels, but its captions carry the figures the
+ * model is claiming ("45 roles offshored (~40% saving)"), so a factor whose
+ * caption quotes the brief is not ours. Declared once: this block was
+ * byte-identical in two of the three walks.
+ */
+function encodingCaptionNumbers(node: Record<string, unknown>): number[] {
+  const out: number[] = [];
+  const encoding = node.encoding_map;
+  if (encoding === null || typeof encoding !== "object") return out;
+  for (const caption of Object.values(encoding as Record<string, unknown>)) {
+    if (typeof caption !== "string") continue;
+    for (const m of caption.matchAll(/\d[\d,]*(?:\.\d+)?/g)) {
+      out.push(Number(m[0].replace(/,/g, "")));
+    }
+  }
+  return out;
+}
+
+function collectFactorNumbers(node: Record<string, unknown>): number[] {
+  const out: number[] = [];
+  const push = (v: unknown): void => {
+    if (typeof v === "number" && Number.isFinite(v)) out.push(v);
+  };
+  // PRIOR POLICY (1 of 3): the DECLARED bounds and value, unconditionally.
+  // This function answers "is there a figure here to own?", for which a
+  // unitless prior counts — a prior IS a number we put on the world.
+  const prior = node.prior;
+  if (prior !== null && typeof prior === "object") {
+    const p = prior as Record<string, unknown>;
+    push(p.range_min);
+    push(p.range_max);
+    push(p.value);
+  }
+  for (const carrier of valueCarriers(node)) out.push(...carrier.values);
+  out.push(...encodingCaptionNumbers(node));
+  return out;
+}
+
+/**
+ * Does this factor put a NUMBER on the world at all?
+ *
+ * ⚠ DELIBERATELY BROADER THAN THE MATCHING CORPUS, and the difference is the
+ * whole point. `collectCandidates` answers *"could this be the user's
+ * figure?"* and therefore demands a declared unit. This answers *"is there a
+ * figure here to own?"* — for which a unitless prior counts, because a prior
+ * IS a number we put on the world.
+ *
+ * Two different questions, named apart on purpose (trap 21). The previous
+ * version of this module answered them with two different matchers and got
+ * caught asserting and denying the same provenance in one panel.
+ */
+function carriesAFigure(node: Record<string, unknown>): boolean {
+  return collectFactorNumbers(node).length > 0;
+}
+
+/**
+ * The factor's own real-world figures — the ones that could plausibly BE a
+ * number the user wrote.
+ *
+ * ⚠ MIRRORS `collectCandidates`, AND THE MIRRORING IS THE POINT. That function
+ * deliberately excludes unitless `[0,1]` prior bounds, because matching against
+ * them is exactly how a stated quantity gets "found" in a model that never
+ * carried it. The suppressor used to re-admit precisely those numbers,
+ * unit-blind — so an unrelated sentence could delete the trust-critical answer.
+ * MEASURED on b1: appending "We have £1m in the bank." (mantissa 1, which is
+ * every default `range_max`) dropped "what I estimated" from 9 to 6; "£0m"
+ * dropped it to 5, and at zero the surface hides the section entirely.
+ *
+ * Each figure is offered in BOTH forms — as stored, and scaled by its declared
+ * unit — because the brief may write either ("1.5 million pounds" vs
+ * "1,500,000 pounds") and a coincidence in either form is a reason to keep
+ * quiet.
+ */
+function collectSuppressorNumbers(node: Record<string, unknown>): number[] {
+  const out: number[] = [];
+  for (const carrier of valueCarriers(node)) {
+    // The unit is read ONCE per carrier, by the repo's own reader.
+    const { multiplier } = readUnit(typeof carrier.unit === "string" ? carrier.unit : null);
+    for (const v of carrier.values) {
+      out.push(v);
+      if (multiplier !== 1) out.push(v * multiplier);
+    }
+  }
+  // ── PRIOR BOUNDS: real-world magnitudes only ──────────────────────────
+  //
+  // ⚠ NOT A CARVE-OUT — it is the distinction this module already draws
+  // everywhere else, applied here. A prior bound on [0,1] is the pipeline's
+  // NORMALISED default (it emits them constantly; that is why
+  // `collectCandidates` refuses them and why percent-as-fraction was
+  // rejected). Admitting those made an unrelated sentence delete the answer:
+  // "We have £1m in the bank" carries mantissa 1, which is every default
+  // `range_max`, and dropped "what I estimated" from 9 to 6.
+  //
+  // A prior bound OUTSIDE the unit interval is a real-world figure, and a
+  // coincidence with one is a genuine cannot-tell. Excluding those wholesale
+  // would trade a recoverable silence for a false ASSERTION about the user's
+  // own number — the harm this whole surface exists to prevent.
+  //
+  // PRIOR POLICY (2 of 3): ANY prior value outside the unit interval — a
+  // different rule from `collectFactorNumbers`' declared-bounds walk above and
+  // from `collectCandidates`, which admits no prior at all. The three run in
+  // opposite safe directions and were each established by an earlier review
+  // round; they are deliberately NOT unified.
+  const prior = node.prior;
+  if (prior !== null && typeof prior === "object") {
+    for (const v of Object.values(prior as Record<string, unknown>)) {
+      if (typeof v !== "number" || !Number.isFinite(v)) continue;
+      if (v >= 0 && v <= 1) continue;
+      out.push(v);
+    }
+  }
+
+  out.push(...encodingCaptionNumbers(node));
+  return out;
+}
+
+/**
+ * Every numeric literal in the brief, however it is written.
+ *
+ * ⚠ DELIBERATELY EXTRACTION-INDEPENDENT, and that independence is the fix for a
+ * real false claim. The suppressor used to consume only SUCCESSFULLY EXTRACTED
+ * quantities — and `QUANTITY_RE` knows three currency symbols. So when
+ * extraction missed a figure there was no "cannot tell" left to fire, and the
+ * factor fell straight through to being claimed as ours.
+ *
+ * MEASURED on the real b1 graph, changing ONLY the notation of its own
+ * sentence "marketing spend is capped at £1.5m": every one of
+ * "1.5 million pounds", "GBP 1.5m", "USD 1.5m", "1.5 million dollars",
+ * "¥1.5m", "₹1.5m", "CHF 1.5m" produced a figure absent from "what I used",
+ * absent from "not modelled yet", AND present under "the numbers behind these
+ * are mine, not yours" — against a carrier (`cap: 1.5, unit: "£m"`) that this
+ * module's own matcher certifies as the user's figure in the £ notation.
+ *
+ * The graph's producer is an LLM that understands money written in words; its
+ * auditor was a regex that knows three symbols — and the auditor overruled the
+ * producer. Widening the regex would be another instance patch owing a fresh
+ * breadth defence for every currency form. Reading raw numeric tokens needs no
+ * vocabulary at all, and errs toward silence.
+ */
+const BRIEF_NUMBER_RE = new RegExp(
+  `(\\d[\\d,]*(?:\\.\\d+)?)(?:\\s*(${MAGNITUDE_ALTERNATION})\\b)?`,
+  "gi",
+);
+
+function numericTokensIn(text: string): number[] {
+  const out: number[] = [];
+  for (const m of text.matchAll(BRIEF_NUMBER_RE)) {
+    const n = Number(m[1].replace(/,/g, ""));
+    if (!Number.isFinite(n)) continue;
+    // BOTH forms, symmetrically with `collectSuppressorNumbers`: the brief may
+    // write "£4m" where the model stores 4,000,000, or "1,500,000 pounds"
+    // where it stores 1.5 under unit "£m". A coincidence in EITHER form is a
+    // reason to keep quiet. Note the magnitude word is read from the canonical
+    // alphabet, so this needs no currency vocabulary of its own.
+    out.push(n);
+    const scale = resolveMagnitude(m[2]);
+    if (scale !== 1) out.push(n * scale);
+  }
+  return out;
+}
+
+/**
+ * Could one of this factor's figures be the user's, even though we could not
+ * CONFIRM it?
+ *
+ * ── WHY A THIRD STATE EXISTS ───────────────────────────────────────────────
+ * The two sections have OPPOSITE safe directions:
+ *
+ *   · refusing a match in "what I used" sends the user's figure to "not
+ *     modelled yet" — over-inviting, and recoverable;
+ *   · refusing the same match in "what I estimated" CLAIMS THEIR NUMBER AS
+ *     OURS — asserting something false about their own input.
+ *
+ * The temptation is a looser matcher for the second section. That is exactly
+ * the two-authorities defect this module was caught shipping. The consistent
+ * answer is that the question has THREE outcomes: theirs, ours, and CANNOT
+ * TELL — and neither section may claim a "cannot tell".
+ */
+function magnitudeCoincidesWithSomethingWritten(
+  node: Record<string, unknown>,
+  briefNumbers: readonly number[],
+): boolean {
+  for (const n of collectSuppressorNumbers(node)) {
+    for (const t of briefNumbers) if (numbersEqual(n, t)) return true;
+  }
+  return false;
+}
+
+/**
+ * The factors whose figures are OURS.
+ *
+ * ── ONE AUTHORITY, CONSUMED TWICE ──────────────────────────────────────────
+ * ⚠ THIS FUNCTION USED TO RUN ITS OWN MATCHER, and the bug that produced is
+ * the sharpest one this module has had. `classify` was converted to
+ * unit-aware candidates; this was not, and kept comparing raw values and
+ * mantissas out of an unlabelled bag. It therefore fired whenever the user's
+ * magnitude NOTATION disagreed with the carrier's declared unit scale —
+ * measured on the real b1 graph, 5 of 9 ordinary notations:
+ *
+ *     "We can spend £1.5m ..."      -> used: fac_marketing_spend      (no clash)
+ *     "We can spend £1,500,000 ..." -> used: fac_marketing_spend
+ *                                   AND estimated: Marketing Spend    (CLASH)
+ *
+ * The panel asserted and denied the same node's provenance at once, and the
+ * denial was contradicted by our own matcher, which had just certified the
+ * figure as the user's.
+ *
+ * The fix is structural, not an exclusion list: this consumes the SAME
+ * `matchCandidate` result `classify` does. A node that produced a match cannot
+ * appear here, by construction rather than by suppression — so the two
+ * sections can no longer drift apart, whatever notation the user writes in.
+ *
+ * (This block sat above `collectSuppressorNumbers` until 2026-08-09, so every
+ * tool attached it to the wrong function and the rationale was invisible at the
+ * line a tidy-up would delete.)
+ */
+function deriveInferredFactors(
+  graph: Record<string, unknown>,
+  matchedNodeIds: ReadonlySet<string>,
+  briefNumbers: readonly number[],
+): NotModelledManifest["inferred_factors"] {
+  const nodes = graph.nodes;
+  if (!Array.isArray(nodes)) return { status: "not_recorded", items: [] };
+
+  const items: Array<{ node_id: string; label: string }> = [];
+  for (const raw of nodes) {
+    if (raw === null || typeof raw !== "object") continue;
+    const node = raw as Record<string, unknown>;
+    if (node.kind !== "factor") continue;
+    const id = typeof node.id === "string" ? node.id : null;
+    const label = typeof node.label === "string" ? node.label : null;
+    // A factor with no label cannot be described to a user, and describing it
+    // by its internal id would be pipeline vocabulary on screen.
+    if (id === null || label === null) continue;
+
+    // Nothing to own.
+    if (!carriesAFigure(node)) continue;
+    // ⭐ THE USER WROTE THIS ONE. Checked FIRST because it is the only DIRECT
+    // evidence of authorship available here — a receipt for a write the user
+    // actually performed, rather than an inference from what their brief says.
+    // The two tests below reason about the BRIEF; this one does not, which is
+    // exactly why it catches what they cannot (a value set on the canvas after
+    // the brief was written). See {@link isUserWriteReceipt}.
+    if (isUserWriteReceipt(node)) continue;
+    // The single authority over the BRIEF-MATCH relationship: anything the
+    // matcher certified as the user's figure is theirs, full stop. This is what
+    // makes the two sections structurally incapable of contradicting each
+    // other. (It is not the only authority on AUTHORSHIP — the canvas-write
+    // receipt above is the other, and the two cannot disagree because neither
+    // can claim a figure the other has released.)
+    //
+    // ⚠ NO MEASURED NOTATION MAKES THIS BITE — BUT SIGNED MONEY DOES, AND THE
+    // CLAIM THAT IT "CANNOT" WAS CORPUS-BOUNDED, NOT STRUCTURAL.
+    //
+    // What was measured: across 12 unsigned notations a numeric match compares
+    // the same magnitudes the coincidence guard below does, so every matched
+    // node was ALSO coincidence-suppressed and removing this line left 0
+    // clashes. What that measurement could not see is that the two readers
+    // disagree on SIGN:
+    //
+    //   · `extractStatedQuantities` carries one (`(?<msign>-)?`), so "-£2m"
+    //     yields -2,000,000;
+    //   · `BRIEF_NUMBER_RE` has NO sign group, so `numericTokensIn` yields the
+    //     UNSIGNED 2 and 2,000,000.
+    //
+    // For a carrier holding -2 under "£m" the matcher therefore fires while the
+    // coincidence guard does not, and this line is the ONLY thing preventing
+    // the round-3 contradiction — a panel asserting and denying one node's
+    // provenance at once. Pinned by the signed-money arms of
+    // `not-modelled-manifest.unit-authority.test.ts`; before those it was
+    // untested, which is why the old note here could drift unchallenged.
+    if (matchedNodeIds.has(id)) continue;
+    // CANNOT TELL — claimed by neither section. See the note above.
+    if (magnitudeCoincidesWithSomethingWritten(node, briefNumbers)) continue;
+
+    items.push({ node_id: id, label });
+  }
+  return { status: "derived", items };
+}
+
+/**
+ * The drafting model's own record of what it considered and left out, at
+ * `graph.coaching.widening_log.elements_considered_but_excluded`.
+ *
+ * ── THIS REFUTED THE PREMISE THIS MODULE STARTED FROM ──────────────────────
+ * The brief for this work assumed the pipeline "discards without recording".
+ * For the sharpest loss class it does not. The 2026-08-08 trace graded B2 atom
+ * A21 — a named colleague's competing proposal — as SEVERE with the note
+ * `"Dana" 0 hits`, scoped to the TURN RESPONSE. The PERSISTED graph carries:
+ *
+ *   "Dana's across-the-board RIF option — excluded because the brief frames it
+ *    as ruled out by the redundancy constraint and CEO position, so it does not
+ *    add decision value"
+ *
+ * The model said what it dropped, and why, in the user's own terms. Nothing
+ * ever read it. That is a plumbing failure, not a knowledge failure — and it is
+ * the single highest-value thing this manifest can carry, because it is the one
+ * loss class a quantity-containment check is structurally blind to.
+ *
+ * It is NOT part of either search surface: a figure appearing only inside an
+ * exclusion record is definitively NOT in the model, and grading it
+ * `prose_only` ("mentioned in the explanation") would understate that.
+ */
+function readDeclaredExclusions(
+  graph: Record<string, unknown>,
+): NotModelledManifest["declared_exclusions"] {
+  const coaching = graph.coaching;
+  if (coaching === null || typeof coaching !== "object") {
+    return { status: "not_recorded", items: [] };
+  }
+  const wideningLog = (coaching as Record<string, unknown>).widening_log;
+  if (wideningLog === null || typeof wideningLog !== "object") {
+    return { status: "not_recorded", items: [] };
+  }
+  const raw = (wideningLog as Record<string, unknown>)
+    .elements_considered_but_excluded;
+  if (!Array.isArray(raw)) return { status: "not_recorded", items: [] };
+
+  const items = raw.filter(
+    (s): s is string => typeof s === "string" && s.trim().length > 0,
+  );
+  // An empty list is "the drafting step reported none", NOT "none exist".
+  return { status: items.length > 0 ? "reported" : "none_reported", items };
+}
+
+/**
+ * A NAMED, UNITED quantity the model actually carries.
+ *
+ * ⚠ THIS TYPE IS THE FIX FOR A REAL DEFECT. The first version matched a stated
+ * quantity against every number anywhere in the model subtree, unit-blind.
+ * Measured on all three real graphs, that made ordinary input false:
+ *
+ *     "We need to decide within 1 year."   -> reported as USED
+ *     "It has 1 month of runway left."     -> reported as USED
+ *     "We can spend £0.75m on marketing."  -> reported as USED
+ *
+ * The `1` came from 46x `edges[].strength.mean` and 46x
+ * `edges[].exists_probability` — topology metadata that is not a user-facing
+ * quantity at all — and `0.75` from a unitless prior bound. 59/38/32 money
+ * mantissas had a collision target per graph.
+ *
+ * It is the SAME mechanism already rejected for percentages ("every stated
+ * percentage finds a coincidental match against some prior bound"); it was
+ * closed there and left open for money and counts. It is now closed generally:
+ * a match must NAME the modelled quantity it matched, in compatible units.
+ * A bag of numbers cannot do that, so the corpus is a list of named candidates.
+ */
+interface Candidate {
+  readonly nodeId: string;
+  readonly label: string;
+  /** Real-world value, already scaled by its declared unit (1.5 "£m" -> 1.5e6). */
+  readonly value: number;
+  /** `currency` / `percent` / `plain`, as `readUnit` classifies it. */
+  readonly unitKind: AmountKind;
+  /** ISO code for currency candidates, so EUR never matches GBP. */
+  readonly currencyCode: string | null;
+  /** The unit string the model declared, verbatim. A count can only match a
+   *  carrier that declares the same unit family. */
+  readonly declaredUnit: string | null;
+}
+
+/**
+ * ⚠ NO CURRENCY VOCABULARY LIVES HERE EITHER, AND FOR THE SAME REASON THE
+ * MAGNITUDE LIST DOES NOT (see the note above `MONTHS`).
+ *
+ * This module shipped with `CURRENCY_SYMBOLS = ["£","€","$"]` and a private
+ * `parseUnit`, re-deriving two facts the repo already owned canonically:
+ *
+ *   · `cee/extraction/numeric-parser.ts` `CURRENCY_SYMBOL_TO_CODE` — ten
+ *     entries, exported under ROADMAP 2.972 with a header saying in terms that
+ *     "a second hand-written currency vocabulary is exactly the mirror trap 12
+ *     describes";
+ *   · `cee/provenance/stated-amounts.ts` `readUnit()` — which returns
+ *     `{kind, currencyCode, multiplier}`, a strict SUPERSET of `parseUnit`'s
+ *     `{unitClass, symbol, scale}`, and landed in `db985bbe` — the base commit
+ *     of the very diff that added the copy.
+ *
+ * The copy carried two live defects, both now pinned by
+ * `not-modelled-manifest.unit-authority.test.ts`:
+ *
+ *   1. `unit: "GBP"` was UNMATCHABLE. It read as `unitClass: "other"`, so
+ *      `unitCompatible` was false for every money quantity and a figure the
+ *      model genuinely carries was reported to the user as "Not modelled yet".
+ *      GBP is producer vocabulary, not a synthetic edge: `cqe/rules.ts`
+ *      `normaliseCurrencyUnit` returns it and `schemas/cee-v3.ts` documents the
+ *      field as "e.g. 'GBP', 'USD'".
+ *   2. `A$m` MIS-SCALED. `CURRENCY_SYMBOLS.find((c) => u.includes(c))` is
+ *      unordered, so `A$` matched on `$`, left the suffix `Am`, and yielded
+ *      scale 1 under the wrong currency — certifying a bare "$2" statement as
+ *      the source of an A$2,000,000 carrier. `alternationOf`
+ *      (`stated-amounts.ts:111`) sorts longest-first precisely to prevent this.
+ *
+ * What stays here is what is genuinely this module's own and belongs nowhere
+ * else: the `kind` classification, dates and periods, the count-unit family
+ * logic, `char_offset` identity, and the three-state verdict.
+ */
+const briefCurrencyCode = (symbol: string | null): string | null =>
+  symbol === null ? null : CURRENCY_SYMBOL_TO_CODE[symbol] ?? null;
+
+/**
+ * Numeric candidates come ONLY from node/option value carriers that declare a
+ * unit alongside them. Everything else numeric in the graph — prior bounds
+ * (unitless [0,1]), intervention encodings (unitless 0..1), and the entire
+ * `edges` subtree (strength, exists_probability, validation passes) — is
+ * DELIBERATELY EXCLUDED. Those numbers are how the model computes, not what it
+ * is claiming about the world, and matching against them is how a stated
+ * quantity gets "found" in a model that never carried it.
+ *
+ * ⚠ THE `edges` SUBTREE IS EXCLUDED AND `SCOPE.model_surface` IS DERIVED FROM
+ * THIS CONSTANT so the user-facing sentence cannot claim otherwise. It did:
+ * it advertised "node, edge and option values" while this walked only nodes and
+ * options. Edge LABELS are still text-searched (they are strings under a
+ * non-skip top-level key); edge VALUES are not.
+ */
+const CANDIDATE_COLLECTIONS = ["nodes", "options"] as const;
+
+/**
+ * Read the real-world side of a canonical option intervention.
+ *
+ * `value` is deliberately excluded: it is the analysis encoding (for example
+ * 0.4), not necessarily the quantity the user stated (for example £20,000).
+ * The provenance tuple below is the fail-closed source-binding contract emitted
+ * by the draft projector. A hypothesis — even one that happens to repeat the
+ * same number — is not evidence that the amount was carried from the brief.
+ */
+function collectSourceBoundInterventionCandidates(
+  option: Record<string, unknown>,
+  factorLabels: ReadonlyMap<string, string>,
+): Candidate[] {
+  const interventions = option.interventions;
+  if (interventions === null || typeof interventions !== "object" || Array.isArray(interventions)) {
+    return [];
+  }
+
+  const out: Candidate[] = [];
+  for (const [factorId, raw] of Object.entries(interventions as Record<string, unknown>)) {
+    if (raw === null || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const intervention = raw as Record<string, unknown>;
+    const targetMatch = intervention.target_match;
+    if (targetMatch === null || typeof targetMatch !== "object" || Array.isArray(targetMatch)) {
+      continue;
+    }
+    const target = targetMatch as Record<string, unknown>;
+    if (
+      intervention.source !== "brief_extraction" ||
+      intervention.value_confidence !== "high" ||
+      target.node_id !== factorId ||
+      target.confidence !== "high" ||
+      target.match_type !== "exact_id"
+    ) {
+      continue;
+    }
+
+    const rawValue = intervention.raw_value;
+    const declaredUnit = intervention.unit;
+    const label = factorLabels.get(factorId);
+    if (
+      typeof rawValue !== "number" ||
+      !Number.isFinite(rawValue) ||
+      typeof declaredUnit !== "string" ||
+      declaredUnit.trim().length === 0 ||
+      label === undefined
+    ) {
+      continue;
+    }
+
+    const { kind, currencyCode, multiplier } = readUnit(declaredUnit);
+    out.push({
+      nodeId: factorId,
+      label,
+      value: rawValue * multiplier,
+      unitKind: kind,
+      currencyCode: currencyCode ?? null,
+      declaredUnit,
+    });
+  }
+  return out;
+}
+
+function collectCandidates(graph: Record<string, unknown>): Candidate[] {
+  const out: Candidate[] = [];
+  const factorLabels = new Map<string, string>();
+  if (Array.isArray(graph.nodes)) {
+    for (const raw of graph.nodes) {
+      if (raw === null || typeof raw !== "object" || Array.isArray(raw)) continue;
+      const node = raw as Record<string, unknown>;
+      if (node.kind !== "factor" || typeof node.id !== "string" || typeof node.label !== "string") {
+        continue;
+      }
+      factorLabels.set(node.id, node.label);
+    }
+  }
+  for (const key of CANDIDATE_COLLECTIONS) {
+    const entries = graph[key];
+    if (!Array.isArray(entries)) continue;
+    for (const raw of entries) {
+      if (raw === null || typeof raw !== "object") continue;
+      const node = raw as Record<string, unknown>;
+      const nodeId = typeof node.id === "string" ? node.id : null;
+      const label = typeof node.label === "string" ? node.label : null;
+      if (nodeId === null || label === null) continue;
+
+      // PRIOR POLICY (3 of 3): none at all. This asks "could this be the
+      // user's figure?", and a unitless prior bound is exactly how a stated
+      // quantity gets "found" in a model that never carried it.
+      for (const carrier of valueCarriers(node)) {
+        const declaredUnit = typeof carrier.unit === "string" ? carrier.unit : null;
+        const { kind, currencyCode, multiplier } = readUnit(declaredUnit);
+        for (const v of carrier.values) {
+          out.push({
+            nodeId,
+            label,
+            value: v * multiplier,
+            unitKind: kind,
+            currencyCode: currencyCode ?? null,
+            declaredUnit,
+          });
+        }
+      }
+      out.push(...collectSourceBoundInterventionCandidates(node, factorLabels));
+    }
+  }
+  return out;
+}
+
+const MONTH_CANON: Readonly<Record<string, string>> = {
+  january: "jan",
+  february: "feb",
+  march: "mar",
+  april: "apr",
+  june: "jun",
+  july: "jul",
+  august: "aug",
+  september: "sep",
+  sept: "sep",
+  october: "oct",
+  november: "nov",
+  december: "dec",
+};
+
+/**
+ * So a brief's "January 2027" matches a model label reading "(Jan 2027)".
+ *
+ * Idempotent: every value in `MONTH_CANON` is either absent from its key set or
+ * maps to itself, so canonicalising twice equals canonicalising once. That is
+ * what lets the graph surface be canonicalised ONCE at build time (below)
+ * instead of per quantity.
+ */
+const canonicaliseMonths = (s: string): string =>
+  s.replace(/\b([a-z]+)\b/gi, (w) => MONTH_CANON[w.toLowerCase()] ?? w);
+
+interface Surfaces {
+  readonly candidates: readonly Candidate[];
+  /** ⚠ ALREADY MONTH-CANONICAL. See `splitSurfaces`. */
+  readonly modelStrings: readonly string[];
+  /** ⚠ ALREADY MONTH-CANONICAL. See `splitSurfaces`. */
+  readonly proseStrings: readonly string[];
+}
+
+/**
+ * ⚠ THE SURFACES ARE CANONICALISED HERE, ONCE — NOT PER QUANTITY.
+ *
+ * `appearsInStrings` used to call `canonicaliseMonths(s)` inside its own
+ * `strings.some(...)`, i.e. once per (quantity x string): it re-canonicalised
+ * the ENTIRE graph surface Q times, and a profile put 87.1% of all self time in
+ * that one call and its callback. The graph surface does not depend on the
+ * quantity, so the work is hoisted to where it is done once. Measured on the
+ * three real cold-read captures, and on the 8,000-char `brief_text` DB ceiling,
+ * in the PR that made this change.
+ *
+ * The transform is idempotent (see `canonicaliseMonths`), so canonical strings
+ * stored here read identically to the per-call form they replace.
+ */
+function splitSurfaces(graph: Record<string, unknown>): Surfaces {
+  const modelStrings: string[] = [];
+  const proseStrings: string[] = [];
+
+  const walkText = (node: unknown, inProse: boolean): void => {
+    if (node === null || node === undefined) return;
+    if (typeof node === "string") {
+      (inProse ? proseStrings : modelStrings).push(canonicaliseMonths(node));
+      return;
+    }
+    if (Array.isArray(node)) {
+      for (const v of node) walkText(v, inProse);
+      return;
+    }
+    if (typeof node === "object") {
+      for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+        if (k === "widening_log") continue;
+        walkText(v, inProse || PROSE_KEYS.has(k));
+      }
+    }
+  };
+
+  for (const [k, v] of Object.entries(graph)) {
+    // Absence from the map means MODEL. `prose` is searched and reported as
+    // commentary; `skip` is not searched at all.
+    const cls = TOP_KEY_CLASS.get(k);
+    if (cls === undefined) walkText(v, false);
+    else if (cls === "prose") walkText(v, true);
+  }
+
+  return { candidates: collectCandidates(graph), modelStrings, proseStrings };
+}
+
+// ── matching ────────────────────────────────────────────────────────────────
+
+const numbersEqual = (a: number, b: number): boolean =>
+  a === b || Math.abs(a - b) <= Math.max(Math.abs(a), Math.abs(b)) * 1e-9;
+
+const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * Does this quantity appear, as written, in one of these strings?
+ *
+ * ⚠ `strings` MUST ALREADY BE MONTH-CANONICAL — `splitSurfaces` does that once
+ * for the whole graph. Only the quantity's own literal is canonicalised here,
+ * which is O(1) per call rather than O(graph).
+ */
+function appearsInStrings(q: Quantity, strings: readonly string[]): boolean {
+  const literal = canonicaliseMonths(q.literal.trim());
+  // Boundary-guarded so "9%" does not match inside "129%", and the leading
+  // `.` guard stops "3" matching the tail of "1.3".
+  const re = new RegExp(
+    `(?<![\\w.])${escapeRe(literal).replace(/\\?\s+/g, "\\s+")}(?![\\w])`,
+    "i",
+  );
+  return strings.some((s) => re.test(s));
+}
+
+/**
+ * Is this modelled quantity a plausible carrier of what the user stated?
+ *
+ * ⚠ MEASURED AND REJECTED for percentages, 2026-08-08: accepting a FRACTION
+ * form (34% ~ 0.34). This pipeline emits unitless priors on [0,1] constantly,
+ * so every stated percentage found a coincidental match. On brief B3 it
+ * flipped EIGHT quantities from `absent` to `in_model` against an independent
+ * oracle of ONE.
+ *
+ * ⚠ AND THE SAME MECHANISM, GENERALISED, 2026-08-09: magnitude agreement alone
+ * is not evidence for ANY class. `fac_headcount_budget` carries `cap: 8` under
+ * unit `"£m"`, so "8 people" and "£8m" are indistinguishable by magnitude and
+ * mean completely different things.
+ */
+function unitCompatible(q: Quantity, c: Candidate): boolean {
+  switch (q.kind) {
+    case "money": {
+      // Same currency, or it is not the user's figure. The trace measured a
+      // real €900k -> £1.6m swap; a matcher blind to the currency would have
+      // reported that swap as the user's own number.
+      //
+      // Compared as ISO CODES on both sides, via the canonical map: the brief
+      // states a SYMBOL ("£") and the model may declare either form ("£m" or
+      // "GBP"). Comparing symbols made the code form unmatchable; comparing
+      // codes makes the two spellings of one currency agree and still keeps
+      // different currencies apart.
+      if (c.unitKind !== "currency" || c.currencyCode === null) return false;
+      const stated = briefCurrencyCode(q.unit);
+      return stated !== null && stated === c.currencyCode;
+    }
+    case "percent":
+      return c.unitKind === "percent";
+    case "count": {
+      // ⚠ A COUNT MUST NAME ITS UNIT, AND THE CARRIER MUST DECLARE THE SAME
+      // ONE. Measured 2026-08-09 against the real graphs: allowing a count to
+      // match any non-money carrier made "5 people on the team" match
+      // `out_csat`'s cap of 5 — declared unit "Trustpilot score" — and "1
+      // year" / "1 month" / "1 engineer" all match `fac_automation_scale`'s
+      // cap of 1, declared unit "scale". Those are not the user's figures.
+      // Requiring the unit family to agree makes counts match rarely and
+      // honestly; a count that cannot be verified falls to "not modelled yet",
+      // which invites the user to add it rather than claiming we used it.
+      if (q.unit === null || c.declaredUnit === null) return false;
+      return sameUnitFamily(q.unit, c.declaredUnit);
+    }
+    default:
+      // Dates and periods carry no magnitude; they match on text only.
+      return false;
+  }
+}
+
+/** The candidate this quantity matches, or null — NAMED, so a match can always
+ *  say WHICH modelled quantity it is claiming. */
+function matchCandidate(q: Quantity, candidates: readonly Candidate[]): Candidate | null {
+  if (q.value === null) return null;
+  for (const c of candidates) {
+    if (!unitCompatible(q, c)) continue;
+    if (numbersEqual(c.value, q.value)) return c;
+  }
+  return null;
+}
+
+function classify(
+  q: Quantity,
+  s: Surfaces,
+): { verdict: QuantityVerdict; matched: Candidate | null } {
+  const matched = matchCandidate(q, s.candidates);
+  if (matched !== null) return { verdict: "in_model", matched };
+  // Text is the second route: a figure written into a label, a unit string or
+  // an encoding-map caption ("45 roles offshored (~40% saving)", "(Jan 2027)")
+  // is genuinely carried by the model even though it is not a numeric field.
+  if (appearsInStrings(q, s.modelStrings)) return { verdict: "in_model", matched: null };
+  if (appearsInStrings(q, s.proseStrings)) return { verdict: "prose_only", matched: null };
+  return { verdict: "absent", matched: null };
+}
+
+// ── the derivation ──────────────────────────────────────────────────────────
+
+// ── the KIND axis: sourced from producers, never re-derived from prose ──────
+
+/**
+ * A span of the brief that a live `goal_constraints[]` row quotes.
+ *
+ * The row is the ORACLE. It carries `source_quote` — "the exact phrase from the
+ * brief that implies this constraint" — plus `value` and `unit`, all emitted by
+ * the drafting model and validated on the way in. We locate that quote in the
+ * brief and remember WHERE it is. Nothing here parses the brief for constraint
+ * language; the producer already decided, and this only asks *where*.
+ */
+interface ConstraintSpan {
+  readonly start: number;
+  readonly end: number;
+  readonly value: number | null;
+  readonly unit: string | null;
+  /**
+   * The node the producer BOUND this limit to (`goal_constraints[].node_id`),
+   * or null where the row named none.
+   *
+   * ⭐ ADDITIVE, AND `classifyStatedKind` DOES NOT READ IT — that function's
+   * two-part conjunction is byte-unchanged. It is here for
+   * {@link deriveStatedQuantityRoles}, which needs the producer's own IDENTITY
+   * binding rather than a re-derived one: the row already says which node the
+   * limit is about, and re-deriving that from magnitudes would be a value
+   * predicate another node could satisfy (CLAUDE.md trap 19).
+   */
+  readonly nodeId: string | null;
+}
+
+/**
+ * Locate each constraint row's quoted sentence inside the brief.
+ *
+ * ⚠ A QUOTE THAT DOES NOT LOCATE IS DISCARDED, NOT APPROXIMATED. `source_quote`
+ * is model-produced, and a model quote is a claim about the brief, not proof of
+ * one: the estate has measured a hallucinated figure receiving `from_brief`
+ * provenance identically to a quoted one. Substring verification against the
+ * submitted text is the fabrication gate, and an unlocatable quote simply
+ * classifies nothing — it can never invent a `constraint`.
+ */
+function constraintSpans(
+  graph: Record<string, unknown>,
+  briefText: string,
+): ConstraintSpan[] {
+  const rows = graph.goal_constraints;
+  if (!Array.isArray(rows)) return [];
+
+  const spans: ConstraintSpan[] = [];
+  for (const row of rows) {
+    if (row === null || typeof row !== "object") continue;
+    const r = row as Record<string, unknown>;
+    const quote = r.source_quote;
+    if (typeof quote !== "string" || quote.trim().length === 0) continue;
+
+    // Verbatim first — the common case and the only one that needs no
+    // judgement. Whitespace-normalised second, because a brief can carry a
+    // newline where the model wrote a space.
+    let start = briefText.indexOf(quote);
+    let matched = quote;
+    if (start < 0) {
+      const loose = new RegExp(
+        quote.trim().split(/\s+/).map(escapeRe).join("\\s+"),
+      );
+      const m = loose.exec(briefText);
+      if (m === null) continue; // unlocatable ⇒ classifies nothing
+      start = m.index;
+      matched = m[0];
+    }
+
+    spans.push({
+      start,
+      end: start + matched.length,
+      value: typeof r.value === "number" ? r.value : null,
+      unit: typeof r.unit === "string" ? r.unit : null,
+      nodeId: typeof r.node_id === "string" && r.node_id.length > 0 ? r.node_id : null,
+    });
+  }
+  return spans;
+}
+
+/**
+ * The kind of one stated quantity.
+ *
+ * `constraint` requires BOTH halves, and the conjunction is the point:
+ *   1. the figure sits INSIDE a span the producer quoted, and
+ *   2. the producer's own `value` corroborates the figure.
+ *
+ * Position alone would sweep up every number that happens to share a sentence
+ * with a limit ("CSAT is 87%. Do not let it drop below 85%" — one sentence, two
+ * very different claims). Value alone would sweep up every restatement of the
+ * same number elsewhere in the brief. Requiring both binds the classification
+ * to the OCCURRENCE the producer actually claimed, which is identity binding,
+ * not a value predicate another object could satisfy.
+ *
+ * Everything the producers do not claim is `figure`. That is not a fallback —
+ * it is the honest answer, and it is what makes a lost constraint VISIBLE
+ * instead of invented back.
+ */
+function classifyStatedKind(q: Quantity, spans: readonly ConstraintSpan[]): StatedKind {
+  const end = q.at + q.literal.length;
+  for (const span of spans) {
+    if (q.at < span.start || end > span.end) continue;
+    if (span.value === null) continue;
+    // The magnitude as written (85) or fully expanded (0.85 → 85%, £11.2m →
+    // 11_200_000); the producer may hold either form.
+    if (
+      (q.value !== null && numbersEqual(q.value, span.value)) ||
+      (q.mantissa !== null && numbersEqual(q.mantissa, span.value))
+    ) {
+      return "constraint";
+    }
+  }
+  return "figure";
+}
+
+const SCOPE = {
+  searched:
+    "quantities stated in the brief that carry a unit: money, percentages, counts with a unit word, calendar dates and fiscal periods",
+  // ⚠ DERIVED FROM `CANDIDATE_COLLECTIONS`, NOT RESTATED. This sentence is
+  // USER-VISIBLE COPY describing what we searched, and it was WRONG: it read
+  // "node, edge and option values" while `collectCandidates` walks only
+  // `nodes` and `options` — excluding the `edges` subtree deliberately, and
+  // saying so in its own docstring. Telling a user we searched edge values
+  // while reporting their figure "not modelled" is the confident-false
+  // statement this whole module exists to prevent, so the noun list is now
+  // generated from the constant that decides it and cannot drift again.
+  model_surface: [
+    `${CANDIDATE_COLLECTIONS.map((c) => c.replace(/s$/, "")).join(" and ")} values, caps, units, labels and encoding maps`,
+  ],
+  prose_surface: ["coaching cards", "draft warnings", "validation warnings"],
+  excluded_from_search: [
+    "bare numbers carrying no unit, currency or percent sign",
+    "everything in not_tracked",
+  ],
+} as const;
+
+const UNAVAILABLE = (
+  reason: "no_brief_text" | "no_graph",
+): NotModelledManifest => ({
+  schema: NOT_MODELLED_SCHEMA,
+  status: "unavailable",
+  unavailable_reason: reason,
+  scope: SCOPE,
+  // NOT an empty tally. We did not look, so we know nothing — and a zero here
+  // would be read as "nothing was dropped".
+  quantities: null,
+  // The VOCABULARY is a property of this derivation, not of any one scenario,
+  // so it is stated even when we could not look — a consumer must be able to
+  // render "we do not track disagreements" without a successful derivation.
+  // The TALLY is all zeros here for the same reason `quantities` is null: we
+  // counted nothing because we looked at nothing, and the zeros are only
+  // readable alongside `status: "unavailable"`.
+  stated_kinds: {
+    status: "derived",
+    tally: Object.fromEntries(STATED_KINDS.map((k) => [k, 0])) as Record<
+      StatedKind,
+      number
+    >,
+    sourced: SOURCED_STATED_KINDS,
+    unsourced: UNSOURCED_STATED_KINDS,
+    producers: STATED_KIND_PRODUCERS,
+  },
+  declared_exclusions: { status: "not_recorded", items: [] },
+  inferred_factors: { status: "not_recorded", items: [] },
+  not_tracked: NOT_TRACKED_CLASSES,
+});
+
+/**
+ * Derive the manifest for one scenario.
+ *
+ * Pure. No I/O, no clock, no randomness — the same (brief, graph) always yields
+ * the same manifest, which is what lets a consumer cache it against the graph
+ * identity hash.
+ */
+export function deriveNotModelledManifest(
+  briefText: string | null | undefined,
+  graph: unknown,
+): NotModelledManifest {
+  if (typeof briefText !== "string" || briefText.trim().length === 0) {
+    return UNAVAILABLE("no_brief_text");
+  }
+  if (graph === null || graph === undefined || typeof graph !== "object") {
+    return UNAVAILABLE("no_graph");
+  }
+
+  const surfaces = splitSurfaces(graph as Record<string, unknown>);
+  const quantities = extractStatedQuantities(briefText);
+  const spans = constraintSpans(graph as Record<string, unknown>, briefText);
+
+  const items: NotModelledItem[] = [];
+  const matchedNodeIds = new Set<string>();
+  const tally = Object.fromEntries(
+    STATED_KINDS.map((k) => [k, 0]),
+  ) as Record<StatedKind, number>;
+  let inModel = 0;
+  let proseOnly = 0;
+  let absent = 0;
+
+  for (const q of quantities) {
+    const { verdict, matched } = classify(q, surfaces);
+    if (matched !== null) matchedNodeIds.add(matched.nodeId);
+    if (verdict === "in_model") inModel += 1;
+    else if (verdict === "prose_only") proseOnly += 1;
+    else absent += 1;
+    if (items.length < MAX_ITEMS) {
+      const statedKind = classifyStatedKind(q, spans);
+      tally[statedKind] += 1;
+      items.push({
+        literal: q.literal,
+        kind: q.kind,
+        char_offset: q.at,
+        verdict,
+        // Which modelled quantity this figure was matched to. Null for a text
+        // match. A numeric match that cannot name its carrier is not a match.
+        matched_node_id: matched?.nodeId ?? null,
+        stated_kind: statedKind,
+      });
+    }
+  }
+
+  return {
+    schema: NOT_MODELLED_SCHEMA,
+    status: "derived",
+    unavailable_reason: null,
+    scope: SCOPE,
+    quantities: {
+      // Tallies count EVERY quantity found, not just the reported slice.
+      total: quantities.length,
+      in_model: inModel,
+      prose_only: proseOnly,
+      absent,
+      truncated: quantities.length > items.length,
+      items,
+    },
+    stated_kinds: {
+      status: "derived",
+      tally,
+      sourced: SOURCED_STATED_KINDS,
+      unsourced: UNSOURCED_STATED_KINDS,
+      producers: STATED_KIND_PRODUCERS,
+    },
+    declared_exclusions: readDeclaredExclusions(graph as Record<string, unknown>),
+    inferred_factors: deriveInferredFactors(
+      graph as Record<string, unknown>,
+      matchedNodeIds,
+      numericTokensIn(briefText),
+    ),
+    not_tracked: NOT_TRACKED_CLASSES,
+  };
+}
+
+
+// ── the ROLE axis reaching the NODE, not just the manifest ──────────────────
+
+/**
+ * One node, and what the user stated the magnitude it carries **as**.
+ *
+ * `node_id` is the PRODUCER'S OWN binding — `goal_constraints[].node_id`,
+ * written by the drafting model and validated by `GoalConstraintSchema` — never
+ * a magnitude this function matched back to a node. Identity, not a value
+ * predicate another node could satisfy (CLAUDE.md trap 19).
+ */
+export interface StatedQuantityRoleBinding {
+  readonly node_id: string;
+  readonly stated_role: ObservedStateStatedRole;
+}
+
+/** A node's `observed_state.value`, or null if it has none. */
+function observedValueOf(graph: Record<string, unknown>, nodeId: string): number | null {
+  const nodes = graph.nodes;
+  if (!Array.isArray(nodes)) return null;
+  for (const raw of nodes) {
+    if (raw === null || typeof raw !== "object") continue;
+    const n = raw as Record<string, unknown>;
+    if (n.id !== nodeId) continue;
+    const observed = n.observed_state;
+    if (observed === null || typeof observed !== "object") return null;
+    const v = (observed as Record<string, unknown>).value;
+    return typeof v === "number" ? v : null;
+  }
+  return null;
+}
+
+/**
+ * Do two quantities READ OFF THE SAME BRIEF state the same magnitude?
+ *
+ * ⚠ THE FRAME IS THE PRECONDITION, AND IT IS STRUCTURAL. Both operands must
+ * come from one `extractStatedQuantities` pass over one text, so they are
+ * already expressed in that extractor's own frame — percent literals as
+ * percentage points, money fully expanded, counts as written. Nothing here may
+ * ever be handed a producer-side `goal_constraints[].value`: the row holds
+ * `0.04` where the brief says `4%`, and comparing those is the frame error this
+ * module's own manifest test pins as an open, disclosed finding.
+ *
+ * Equivalence is deliberately NOT literal equality — `"4.0%"` and `"4%"` are one
+ * magnitude written two ways, and treating them as different is what let a
+ * genuine observation be withdrawn. It is also not bare numeric equality:
+ * `4%`, `4 people` and `£4` share a number and state nothing in common, so the
+ * kind must match, money must share its currency symbol, and a count must share
+ * its unit family (`sameUnitFamily`, so "month"/"months" agree).
+ *
+ * Dates and periods carry no magnitude at all (`value === null`); for those the
+ * only honest comparison left is what was written.
+ */
+function sameStatedQuantity(a: Quantity, b: Quantity): boolean {
+  if (a.kind !== b.kind) return false;
+  if (a.value === null || b.value === null) {
+    return (
+      a.value === b.value &&
+      a.literal.trim().toLowerCase() === b.literal.trim().toLowerCase()
+    );
+  }
+  if (!numbersEqual(a.value, b.value)) return false;
+  if (a.kind === "money") return a.unit === b.unit;
+  if (a.kind === "count") {
+    if (a.unit === null || b.unit === null) return a.unit === b.unit;
+    return sameUnitFamily(a.unit, b.unit);
+  }
+  return true;
+}
+
+/**
+ * The words that make a magnitude a BOUND rather than a reading.
+ *
+ * ⚠ DELIBERATELY NORMATIVE ONLY. Comparatives that a reader uses to REPORT a
+ * level ("churn is above 4%", "spend exceeded £2m") are absent: they describe
+ * where a number sits, which is an observation, and admitting them would let
+ * the stamp fire on one. Both directions of bound are here — a floor is as much
+ * a limit as a ceiling.
+ */
+const LIMIT_CUES: readonly string[] = [
+  "under",
+  "below",
+  "beneath",
+  "at most",
+  "no more than",
+  "not exceed",
+  "without exceeding",
+  "max",
+  "maximum",
+  "cap",
+  "capped",
+  "ceiling",
+  "keep",
+  "keeps",
+  "keeping",
+  "kept",
+  "stay",
+  "stays",
+  "staying",
+  "remain",
+  "remains",
+  "within",
+  "less than",
+  "fewer than",
+  "up to",
+  "at least",
+  "no less than",
+  "no fewer than",
+  "minimum",
+  "floor",
+];
+
+const LIMIT_CUE_RE = new RegExp(`\\b(?:${LIMIT_CUES.map(escapeRe).join("|")})\\b`, "i");
+
+/**
+ * ⭐⭐ Does the brief state THIS occurrence of a magnitude as a LIMIT?
+ *
+ * ⚠ THIS ASKS FOR POSITIVE EVIDENCE, AND THE DIRECTION IS THE WHOLE POINT. The
+ * first version of the surrounding guard reasoned from an ABSENCE — "no
+ * identical literal appears outside the quoted span, therefore no observation
+ * was stated" — and an independent review refuted it: absence of a restatement
+ * is not proof of anything. The claim this module stamps is that the user wrote
+ * this number AS A BOUND, so the evidence demanded is the words that make it
+ * one, sitting in the same clause as the number.
+ *
+ * The clause is cut at the nearest `[.;:,]` before the magnitude, so cue words
+ * cannot be borrowed from a neighbouring sentence — *"we must stay under
+ * budget. Churn is currently 4%"* offers "stay"/"under" to the wrong clause,
+ * and the cut is what stops it.
+ *
+ * ⚠ ITS FAILURE DIRECTION IS A GAP, NOT A LIE, AND THAT IS WHY IT IS SHAPED
+ * THIS WAY ROUND. A phrasing this list does not carry (*"churn: 4% max by Q3"*
+ * reads, *"keep it beneath a four percent line"*) withholds a stamp that was
+ * warranted — a silence. The inverse shape, a detector for OBSERVATION language
+ * used to withhold, fails toward stamping a genuine observation, which is the
+ * lie this change exists to prevent. A list of cues will always be incomplete;
+ * only one of the two arrangements makes incompleteness safe.
+ */
+function statesALimitAt(briefText: string, at: number): boolean {
+  const clause = briefText.slice(0, at).split(/[.;:,]/).pop() ?? "";
+  return LIMIT_CUE_RE.test(clause);
+}
+
+/**
+ * ⭐⭐ A STATED LIMIT SITTING IN THE FIELD FOR WHAT IS CURRENTLY TRUE.
+ *
+ * MEASURED, 14 Sep 2026, 11 fresh live drafts of one brief containing
+ * *"…while keeping monthly churn under 4%…"*. In 3 of the 11 the 4% reached the
+ * wire as the churn node's `observed_state: { value: 0.04, unit: "%", source:
+ * "brief_extraction", extractionType: "explicit" }` — `observed_state` being,
+ * by its own declaration, *"current or proposed value"*. The model therefore
+ * asserts **churn IS 4%** where the user said **keep it under 4%**. In 2 of
+ * those 3 the SAME node also carried an honest `goal_constraints[]` row
+ * (`{node_id, operator: "<=", value: 0.04}`), so CEE had already decided the
+ * role and stored the number in the other field regardless.
+ *
+ * This returns the nodes for which that is provable, so a stamp can say so.
+ *
+ * ── THE ORACLE IS THE ROW, AND THE ROW IS ALREADY BOUND ────────────────────
+ * Nothing here parses the brief for limit language, and nothing re-matches a
+ * magnitude to a node. `goal_constraints[].node_id` states which node the limit
+ * is about; `constraintSpans` (this module, unchanged) proves the row's
+ * `source_quote` is really in the brief, which is the fabrication gate —
+ * an unlocatable quote classifies nothing and can never produce a stamp.
+ *
+ * ── ⛔ THE LIE-DIRECTION GUARD, AND WHY IT IS A *SUFFICIENCY* TEST ──────────
+ * One predicate guards two OPPOSITE harms (trap 22b). Not stamping leaves a
+ * limit masquerading as an observation (a GAP). Stamping wrongly tells a user
+ * that a rate they actually measured is only a cap (a LIE) — and because the
+ * consumer lets this stamp override provenance to `assumption`/`ai_inferred`,
+ * the lie direction WITHDRAWS A TRUE AUTHORSHIP CLAIM. They cannot share one
+ * window, so the lie direction gets its own, strictly stronger condition, and
+ * anything it cannot resolve resolves toward NOT demoting.
+ *
+ * The case is real: *"churn is currently 4% and we must keep it under 4%"*
+ * states one magnitude twice, in two different roles, and the observed 0.04
+ * then genuinely is an observation.
+ *
+ * ⛔⛔ THE FIRST VERSION OF THIS GUARD ASKED THE WRONG QUESTION, AND AN
+ * INDEPENDENT CORPUS REFUTED IT (Codex, 14 Sep 2026, at `007e4265`, executed).
+ * It asked *"does a quantity written the SAME WAY as one inside the quoted span
+ * appear OUTSIDE it?"* — and reasoned that a literal comparison could not be
+ * defeated by a frame. Two cases it could not see, both of which withdrew a
+ * genuine user observation:
+ *
+ *   1. **Equivalent quantities have different literals.** *"monthly churn is
+ *      currently 4.0%, while keeping monthly churn under 4%"* — `"4.0%"` is not
+ *      the string `"4%"`, so no restatement was detected and the observation
+ *      was demoted. Literal identity is not quantity identity.
+ *   2. **Both roles can sit inside ONE legitimate quote.** When the row quotes
+ *      the whole sentence, there is no "outside" left to look in, so a guard
+ *      that only looks outside the span passes VACUOUSLY.
+ *
+ * Neither absence is proof that the observation was never stated. **The absence
+ * of an identical literal outside a quote is not evidence of anything.**
+ *
+ * ⭐ WHAT IT ASKS NOW — the sufficiency rule. Every magnitude the quoted span
+ * states must be stated EXACTLY ONCE in the whole brief. A second writing of it
+ * — inside the quote or outside it, spelt the same way or not — is an
+ * occurrence whose role this function has no evidence about, so the stamp is
+ * withheld. That subsumes the old test (an identical literal outside the span
+ * is a second occurrence) and closes both holes above, because the count is
+ * taken over the WHOLE brief and compares MAGNITUDES, not spellings.
+ *
+ * ⚠ AND IT STILL NEVER COMPARES 4 TO 0.04. Both operands of `sameStatedQuantity`
+ * are read off the SAME brief by `extractStatedQuantities`, so they share that
+ * one declared frame by construction. The producer's row holds **0.04** (a
+ * `value_frame` of "level" with `unit` "fraction" — measured on all six live
+ * drafts that carried a row) while the brief says `4%`, read as **4**; those two
+ * are never operands of the same comparison here, and `numbersEqual` performs no
+ * frame conversion that could rescue such a comparison.
+ *
+ * ── WHAT THIS DOES NOT CLAIM ───────────────────────────────────────────────
+ * The `observed_state.value === row.value` test only holds where the two are
+ * already on the same scale, which they are for a fraction-framed percent
+ * (both 0.04, measured). A currency row stated *"in user units"* (200000)
+ * against an observed 0-1 position (0.4) will not compare equal and is NOT
+ * stamped. That is a known GAP, disclosed rather than closed by guessing a
+ * frame — it fails toward silence, the safe direction, and closing it needs the
+ * frame authority, not a wider window here.
+ *
+ * Pure: same (brief, graph) ⇒ same bindings, sorted by `node_id`.
+ */
+export function deriveStatedQuantityRoles(
+  briefText: string | null | undefined,
+  graph: unknown,
+): readonly StatedQuantityRoleBinding[] {
+  if (typeof briefText !== "string" || briefText.trim().length === 0) return [];
+  if (graph === null || graph === undefined || typeof graph !== "object") return [];
+
+  const g = graph as Record<string, unknown>;
+  const spans = constraintSpans(g, briefText);
+  if (spans.length === 0) return [];
+
+  const quantities = extractStatedQuantities(briefText);
+  const seen = new Set<string>();
+  const bindings: StatedQuantityRoleBinding[] = [];
+
+  for (const span of spans) {
+    if (span.nodeId === null || span.value === null) continue;
+    if (seen.has(span.nodeId)) continue;
+
+    // The node's stored position must BE this limit's threshold. Where it is
+    // some other number the node holds an independent level and nothing here
+    // has anything to say about it.
+    const observed = observedValueOf(g, span.nodeId);
+    if (observed === null || !numbersEqual(observed, span.value)) continue;
+
+    // The lie-direction guard — see the note above.
+    const inSpan = quantities.filter(
+      (q) => q.at >= span.start && q.at + q.literal.length <= span.end,
+    );
+    if (inSpan.length === 0) continue;
+
+    // SUFFICIENCY. Every magnitude the quoted span states must be stated
+    // exactly once in the WHOLE brief. `sameStatedQuantity` is reflexive, so a
+    // count above one means the same magnitude was written somewhere else too —
+    // inside this quote or outside it — and at least one of those writings may
+    // be the observation the node genuinely carries. Unresolved role evidence
+    // resolves toward NOT demoting.
+    const roleAmbiguous = inSpan.some(
+      (q) => quantities.filter((other) => sameStatedQuantity(q, other)).length > 1,
+    );
+    if (roleAmbiguous) continue;
+
+    // POSITIVE EVIDENCE. Uniqueness alone still reasons from an absence, and
+    // one occurrence can carry both roles at once — *"monthly churn is
+    // currently 4%, and that is also our maximum"* writes the magnitude once
+    // and states it as a reading. So the occurrence must also be WORDED as a
+    // bound in its own clause. Nothing infers a limit from the producer's
+    // `operator`: that is the row's claim, and the user's words are the oracle.
+    if (!inSpan.some((q) => statesALimitAt(briefText, q.at))) continue;
+
+    seen.add(span.nodeId);
+    bindings.push({ node_id: span.nodeId, stated_role: "constraint" });
+  }
+
+  bindings.sort((a, b) => (a.node_id < b.node_id ? -1 : a.node_id > b.node_id ? 1 : 0));
+  return bindings;
+}

@@ -1,0 +1,12 @@
+{
+  "meta": {
+    "seed_used": 1,
+    "n_samples": 100,
+    "response_hash": "sha256:minimal-fixture-0001"
+  },
+  "results": [
+    { "option_id": "opt_only", "option_label": "Only Option", "win_probability": 1.0 }
+  ],
+  "response_hash": "sha256:minimal-fixture-top-level-0001",
+  "analysis_status": "completed"
+}

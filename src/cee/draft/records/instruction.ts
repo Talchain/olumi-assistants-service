@@ -1,0 +1,508 @@
+import { createHash } from "node:crypto";
+
+/**
+ * THE DRAFT RECORDS INSTRUCTION — the model-facing half of the contract.
+ *
+ * ── ONE CONTRACT, THREE ARTEFACTS, ONE OWNER ───────────────────────────────
+ * The INSTRUCTION (this file), the GRAMMAR (`grammar.ts`) and the PROJECTOR
+ * (`projector.ts`) are ONE contract: derive any two from the third and prove it
+ * with a conformance test. That is why the instruction ships in CODE and not in
+ * the prompt store. The store can version an instruction, but it cannot pin one
+ * to the grammar and projector it must move in lockstep with — promoting this
+ * would split one contract across two authorities whose precedence is already
+ * implicit (a store model pin silently outranks the env var), behind a drift
+ * alarm that has never run. The precondition for ever promoting it is a store
+ * that can pin (prompt, grammar hash, projector version) as ONE unit.
+ *
+ * ── HOW IT REACHES THE MODEL ───────────────────────────────────────────────
+ * As a SECOND system block, appended AFTER the block carrying the
+ * `cache_control` breakpoint, so the long cached draft prompt stays
+ * byte-identical and no draft pays a cold cache-write.
+ *
+ * ⚠ NOT via `args.systemDirective`. That channel is owned by the lean-draft
+ * retry and answers a different question — "what should this RETRY do
+ * differently?" versus "what SHAPE does every draft emit?". Two questions under
+ * one name is trap 21, and this estate has paid for it.
+ *
+ * ── ⭐ VERSIONS, AND WHICH ONE THE EVIDENCE BELONGS TO ─────────────────────
+ * v2 — sha256 `e630587523d29ace…`, 2,351 bytes. THE MEASURED ONE. Every result
+ *      recorded up to 2026-08-11 (the 0/27-accepted enumeration, both arm-R1
+ *      measured blocks) was taken against exactly these bytes.
+ * v3 — sha256 `494e52b9fca94866…`, 3,673 bytes. PRE-REGISTERED 2026-08-12 and
+ *      ⚠ UNMEASURED at the time of writing. It was written against the gate's
+ *      grammar DERIVED at the validator's bytes (ALLOWED_EDGES, the structural
+ *      category inference, MAX_OPTIONS) and against the emission anatomy of the
+ *      banked corpus — not against a live result. Do not read the pin as
+ *      evidence; read `v3/PRE-REGISTRATION-V3.md` in the evidence dir.
+ *
+ * Both hashes are pinned by a test, and the v2 literal is a RECORD that may
+ * never be re-pointed: a silently edited instruction makes the whole evidence
+ * base unattributable, and two instructions sharing one pin is the same defect
+ * wearing a tidier face. Changing the instruction is legitimate; changing it
+ * while re-pointing the pin in the same motion is not.
+ *
+ * ⭐ WHAT v3 CHANGED, and why each line exists (all derived, none observed):
+ *   · An `option_refinement` IS an option (`projector.ts` CLAIM_KIND_TO_NODE_KIND
+ *     maps it to `option`), so it needs its own chain. MEASURED on the banked
+ *     corpus: 0 of 26 refinement claims carried an outgoing causal_link — 0.0% —
+ *     so every one was born as an option that could never reach the goal. The
+ *     instruction had never told the model this mapping existed.
+ *   · The edge rule, stated POSITIVELY. `ALLOWED_EDGES` has no
+ *     `factor→factor[controllable]` rule and a factor is `controllable` exactly
+ *     when an option points at it, so nothing may point INTO a factor an option
+ *     acts on. v3 says where such an influence SHOULD go instead.
+ *   · An option budget, because the projector mints one option per stated option
+ *     AND per refinement, and MAX_OPTIONS is 6.
+ *   · `sets_to`, so the analysis can compute a real number instead of comparing
+ *     bare labels — asked for only where the brief supports it.
+ *
+ * ⭐⭐ WHAT v6 CHANGED (2026-08-14), and why each line exists:
+ *   · `outcome` and `risk` became EXPRESSIBLE claim kinds (`grammar.ts`), and an
+ *     instruction that did not name them would leave the widening dark: the
+ *     model cannot use a kind it is never told exists. Both halves move.
+ *   · The shape half now ENUMERATES `claim_kind`, which it never did — it
+ *     described the claims in prose and left the model to infer the vocabulary
+ *     from the schema. With six kinds and two of them new that is not good
+ *     enough.
+ *   · "Name a result an `outcome` and a downside a `risk`. Do not file either as
+ *     a `factor`." This is a RECLASSIFICATION instruction and applies NO
+ *     pressure to invent — it tells the model where to put something it was
+ *     already going to say. MEASURED cause: the banked capture
+ *     `live-emission-round11-set12.json` carries a factor claim labelled
+ *     "Engineering Attrition Risk", and 5/5 live draws on the pinned brief
+ *     produced `riskCount: 0`.
+ *   · Terminality and orientation, stated in records terms. These are NOT new
+ *     rules and NOT this lane's invention: they are the served graph prompt's
+ *     own BRIDGE TERMINALITY and NODE ORIENTATION sections
+ *     (`defaults-v187` — "Outcomes and risks are terminal bridge nodes… Do not
+ *     connect outcome→outcome, outcome→risk, risk→outcome, or risk→risk";
+ *     "Outcomes are higher-is-better; risks are higher-is-worse"), which agree
+ *     exactly with `ALLOWED_EDGES`. This is the RECONCILIATION half: system
+ *     block 1 has asked for "≥1 outcome and ≥1 risk" throughout, and block 2 now
+ *     stops contradicting it by silence.
+ *   · "Point a factor at an `outcome` or a `risk` rather than at the goal
+ *     directly", with the REASON given rather than an imperative: a bare
+ *     `factor → goal` edge is bridged by `fixFactorGoalEdges`, and that bridge
+ *     is the machine's guess at the result. Saying why is what makes it a
+ *     contract rather than a rule the model discards under load.
+ *
+ * ⚠ WHAT v6 DELIBERATELY DID NOT TOUCH: system block 1 itself. Derived at the
+ * bytes — `getSystemPrompt('draft_graph')` resolves from the prompt STORE with
+ * the registered default as fallback, so `Prompts/canonical/draft_graph.txt` is
+ * REFERENCE, not the served bytes, and editing it would change nothing a model
+ * receives. The one contradiction that mattered ran the other way (block 1 asked
+ * for risks and outcomes the grammar could not express), and it is closed from
+ * this side.
+ *
+ * ⭐⭐ WHAT v10 CHANGED (2026-08-30) — ONE SECTION, AND IT IS THE ROOT CAUSE OF
+ * THE 1-OF-23 COMPLETION RATE:
+ *   · `## HOW MUCH EACH OPTION MOVES WHAT IT CHANGES` stopped telling the model
+ *     to WITHHOLD the value. v9 said *"Where the brief does not support a
+ *     number, leave `sets_to` out … a guessed one is read as the user's own and
+ *     cannot be told apart from a figure they gave you."*
+ *
+ *     ⚠ THE SECOND CLAUSE WAS FALSE AT `f18d941b`. `projector.ts`
+ *     `bindDirectStatedMagnitude` already stamps every option→factor magnitude
+ *     `brief_extraction` (the value EQUALS a stated figure that verifies against
+ *     the brief bytes) or `cee_hypothesis` (ours) — and only the first is ever
+ *     presented as the user's. The instruction was a stale mirror of a
+ *     distinction the projector gained later (CLAUDE.md trap 12), and it was
+ *     costing the entire product: a messy strategic brief rarely states a
+ *     per-option-per-factor figure, so the model complied and omitted `sets_to`
+ *     everywhere, options reached readiness with no interventions, and every
+ *     option×factor pair raised `MISSING_OPTION_VALUE` — in 20 of 23 measured
+ *     fresh journeys. THE MODEL WAS NOT FAILING TO COMPLY; IT WAS COMPLYING.
+ *
+ *     The three legitimate states for a quantity are user fact / OUR estimate
+ *     with its provenance / genuinely unknown. v9 collapsed the middle one into
+ *     the third. v10 restores it, and the projector supplies the provenance so
+ *     the model never has to speak about it (see the rule directly below, which
+ *     is unchanged and is why this could be done at all).
+ *
+ *   · ⚠ THE HONESTY HALF SHIPS IN THE SAME CHANGE, NOT AFTER IT. `projector.ts`
+ *     now stamps an UNCITED magnitude `cee_hypothesis` rather than writing no
+ *     provenance at all — measured at `f18d941b` by executing the projector: an
+ *     uncited `sets_to` produced `interventions` and `raw_interventions` and NO
+ *     `intervention_details` whatsoever. Asking for more estimates while leaving
+ *     them unattributable would trade a refusal the user can SEE for a
+ *     fabrication they cannot. Pinned by
+ *     `__tests__/option-effect-value-provenance.test.ts`.
+ *
+ *   · THE SHAPE HALF IS BYTE-IDENTICAL to v9. In particular *"Do not invent a
+ *     number the user did not state"* on `stated_items` is UNTOUCHED: that
+ *     governs the USER's half of the record set, it is the property this whole
+ *     mechanism exists to defend, and it was never what blocked anybody.
+ *
+ * ── WHAT IT DELIBERATELY DOES NOT SAY ──────────────────────────────────────
+ * NOTHING ABOUT PROVENANCE. The projector owns provenance mechanically, and a
+ * model that could speak about provenance could commit false authorship — the
+ * exact property this design exists to protect. An instruction that discussed a
+ * provenance channel would invite the model to use one.
+ *
+ * It also asks for no `category` (category is INFERRED FROM STRUCTURE by the
+ * validator, `graph-validator.ts:83-134`; declaring it invites `CATEGORY_MISMATCH`)
+ * and no `strength` (a number the model was not asked for is invented precision,
+ * and the repair machinery defaults it anyway).
+ *
+ * And it applies no pressure to invent: "do not emit a factor you cannot
+ * connect" REMOVES a claim, it does not add one, and the sentence after it
+ * forbids dropping anything the user stated. "CRITICAL: you MUST" phrasing
+ * over-triggers on current models, so the contract is stated plainly and the one
+ * prohibition that carries a reason is the only one raised.
+ *
+ * ── PROVENANCE OF THE SECOND SECTION ───────────────────────────────────────
+ * `## CONNECT WHAT YOU EMIT` was written against the CONSUMER's predicate, not
+ * against the symptom in hand (trap 13d). The symptom was "no causal link starts
+ * at an option". That is NOT what the gate checks. Derived at the bytes:
+ *   NO_EFFECT_PATH            `graph-validator.ts:822` — each option needs a
+ *                             DIRECT `controllable`-factor target that reaches
+ *                             the goal. Option-origin links alone satisfy none of it.
+ *   NO_PATH_TO_GOAL           `:620` — EVERY node except the decision must reach
+ *                             the goal.
+ *   UNREACHABLE_FROM_DECISION `:576` — every node except decision/goal must be
+ *                             reachable from the decision.
+ * So the section asks for the WHOLE SPINE the gate checks, not for the symptom.
+ * Measured effect on the first attempt, same window, controls firing: causal
+ * links originating at an option moved 0/44 → 28/75, and goal-terminating links
+ * 0 → 20, with no pressure on the model to invent anything.
+ */
+
+/** The shape half: two lists, verbatim quotes, and the honesty split. */
+export const DRAFT_RECORDS_SHAPE_INSTRUCTION = `
+## OUTPUT SHAPE FOR THIS REQUEST
+
+Do not emit a graph. Emit two lists instead.
+
+**stated_items** — one entry for each thing the user actually said that bears on
+the decision. \`source_quote\` is REQUIRED and must be copied VERBATIM from the
+brief: do not paraphrase, tidy, translate or summarise it. Use \`kind\`:
+- \`goal\` — the result the user wants, not the move they are weighing to get
+  there. Quote the span naming what is at stake: the quantity, position or state
+  that will tell them the decision went well. A course of action is an
+  \`option\`, however settled the user sounds about it and however early the brief
+  puts it. Never file one span as both a \`goal\` and an \`option\`: if the words
+  name something the user might DO, they are the option, and the goal is
+  elsewhere.
+  Check your pick against the alternatives. Every option, including carrying on
+  as they are, has to be a candidate route TO the goal. If the goal you chose is
+  one of those alternatives, or takes one of them as given, the others cannot be
+  weighed against it and the whole model is built to justify a move the user has
+  not finished making.
+  Most briefs never state an objective outright — they open with a decision
+  already taken, a symptom, or a question. Do not fall back to the sentence that
+  frames the choice: that sentence is the decision, not its purpose. Quote
+  instead the span naming what the options are trying to move — the measure that
+  is going wrong, the position under threat, the quantity everyone is arguing
+  about. Set \`role\` to \`baseline\` when that span gives where they are now
+  rather than where they want to be.
+  When the user HAS said what they are trying to achieve, that is the goal.
+  Quote it, even if it is unquantified, modest or awkwardly worded, and even if
+  you can see a sharper objective behind it. Theirs is the one that counts.
+  When they distinguish a necessary result from optional improvement, put the
+  necessary result first among the \`goal\` records. Keep the optional upside
+  separate; it must not replace the result they say they need. Keep their
+  explanation of what happens if that result is missed as a \`cause\`, with
+  any inferred \`risk\` or \`outcome\` referring to it through \`basis\`.
+  Preserve the qualification or condition in each verbatim quote. A reported
+  wish, disputed demand or suggestion is not an adopted objective merely
+  because the user mentions it. Do not resolve competing priorities for them.
+- \`option\` — a course of action the user named: something they could DO.
+  An option is something you can CARRY OUT. If the span is instead something
+  that can be TRUE or FALSE, it is not an option however much it is shaped like
+  one: "cut our list price by 15%" is an act, "the product has fallen behind
+  competitors" is a claim about the world.
+  Quote the span that NAMES the action, not the sentence it sits in. A shorter
+  span is still verbatim, and that span is what the reader sees on the node.
+  "the events budget, which everyone loves but I've never seen a deal come out
+  of one" names one option — "the events budget" — and then comments on it:
+  quote the option, and put the comment in a \`claim\` if it bears on the
+  decision.
+  The question the user is deciding is not an option. It is the decision, and
+  the options are its branches. Neither is something they say they do not know,
+  something that already happened, nor a description of how things work today:
+  those belong in a \`figure\` or a \`claim\`, or nowhere. Every option is put on
+  the graph to be scored and ranked against the others, so a span that is not a
+  course of action is compared with the user's real alternatives as though it
+  were one of them.
+  A proposed CAUSE is the case this catches most often. When a brief reports
+  what people believe is behind a problem — "some think the product has fallen
+  behind", "the CFO believes we raised prices too aggressively" — each of those
+  spans answers WHY, and an answer is true or false rather than something the
+  user carries out. Quote it as a stated_item with \`kind\` \`cause\`. It is
+  their words, so it belongs in stated_items; it is an explanation, so it is not
+  an \`option\`. Filing one as an \`option\` puts it on the graph to be scored
+  and ranked, and the product then computes a win probability for something
+  nobody can decide to do.
+  Keep every one of them. A disagreement about causes IS the reasoning the user
+  arrived with, and a hypothesis dropped to tidy the graph removes the thing
+  they are arguing about.
+  A brief can disagree about causes and name no course of action at all. When it
+  does, do not hunt the brief for an option that is not there, and do not promote
+  one of the causes to fill the gap. An action YOU are putting forward is an
+  \`option_refinement\` claim — that is the route by which something becomes an
+  option, whether or not the user named any. \`claims\` is already the half of the record
+  set that is yours rather than theirs, so putting it there is what lets the user
+  tell your proposal from their own words and argue with it. Set its \`basis\` to
+  whatever in the brief you built it on, and leave \`basis\` empty when you built
+  it on nothing: an option that honestly rests on nothing is worth more than one
+  resting on a basis that does not hold.
+  Who said it makes no difference. "Sales says cut the price, product says hold
+  and ship the integrations" names two real acts, and both are options.
+  An option often names more than one thing: "raise the price to £59 with the
+  next feature release" names a price move AND the release it is tied to. Keep
+  the whole sentence as the option's \`source_quote\`, and emit a \`factor\` for the
+  other part too when it is something that varies or bears on what happens.
+  Without it the release exists nowhere in the model, and the user is shown their
+  proposal reduced to its price while the option's name still says otherwise.
+  When the SAME condition runs through more than one alternative — "ship the same
+  release either way" — it is a shared condition, not what separates them. Emit
+  it once. Do not give each option a different effect on it to make it look like
+  a difference, and do not stretch to make every part of a sentence into
+  something an option acts on: an option need not move every clause of its own
+  name.
+- \`constraint\` — a limit the user set. Set \`direction\` to \`floor\` when the
+  value is a minimum the user must stay above, \`ceiling\` when it is a maximum
+  they must stay below.
+  Say what the limit APPLIES TO: set \`applies_to_claim\` to the index of the
+  \`claims\` entry it limits, or \`applies_to_stated\` to the index of the
+  \`stated_items\` entry, whichever names the quantity being bounded — never
+  both. "Keep monthly churn under 4%" applies to whatever you called the churn
+  measure, even when you named it something better than the user did. Leave both
+  out when nothing you emitted measures that quantity: an omission is read as
+  "not stated" and costs nothing, and a wrong index binds the user's limit to the
+  wrong number.
+  A limit must be one the user adopts, not merely a number or someone else's
+  proposal they report. Keep acceptance, rejection and uncertainty in the
+  \`source_quote\`; if the bounded quantity or direction is unresolved, retain
+  that wording without inventing a numeric limit or a target reference.
+- \`cause\` — an explanation the user offered for why something is happening: a
+  hypothesis, whoever holds it. Keep every one the brief carries. See the
+  \`option\` entry above for why a cause is never an option.
+- \`figure\` — a quantity or comparison of quantities the user stated. Preserve
+  an ordering in \`source_quote\` without turning it into measured distances.
+Set \`value\` when the user gave a number, and \`unit\` when they stated its unit.
+Do not invent a number the
+user did not state, and do not round or rescale one they did.
+If the currency or unit is missing, leave \`unit\` out; do not infer it from the
+topic, location, another quantity or a model estimate. Keep the original amount
+and any uncertainty in the quote. Use a contiguous verbatim span long enough to
+retain the referent and qualifications, never a reconstructed quotation.
+Set \`value_scale\` whenever you set a number, to say WHAT THE NUMBER MEANS —
+\`unit_interval\` for a share or a bounded percentage written as a decimal (3%
+churn is \`value: 0.03\`, \`unit: "%"\`, \`value_scale: "unit_interval"\`),
+\`ratio\` for a measure that can meaningfully pass 100% (NRR, growth, ROI —
+110% is \`value: 1.1\`), and \`raw_count\` for a plain count left in its own
+unit (6 engineers is \`value: 6\`, \`unit: "engineers"\`,
+\`value_scale: "raw_count"\`). This does not change any number you were already
+going to write; it records which convention you used. \`unit: "%"\` alone does
+not say whether the number uses a decimal or whole-percent convention. A limit
+and a current reading must not be compared using different conventions. Leave \`value_scale\` out if you genuinely cannot
+tell: an omission means "not declared", not permission to infer a convention
+from the magnitude.
+On a \`goal\` carrying a number, set \`role\` to \`target\` when the number is what
+the user wants to REACH, and \`baseline\` when it is where they are NOW. That one
+word decides whether the number is registered as the success threshold, so an
+unstated \`role\` on a current reading is read as a target and inverts the goal.
+Keep current readings, desired targets and adopted limits in separate records,
+even when they use the same number. Use \`role: "constraint"\` for an adopted
+limit and \`role: "context"\` for a figure that establishes neither a current
+reading nor an adopted target or limit. Reporting a view does not adopt it.
+On an \`option\` that is the status quo — doing nothing, continuing as-is,
+deferring without action, or keeping the current course — set
+\`is_baseline: true\`, whatever its wording. Set \`is_baseline: false\` on the
+others. Users write this option themselves more often than not ("keep what we
+have", "hold price and push volume instead"), and it must be flagged even when
+the brief only lists named alternatives.
+
+**claims** — one entry for each thing YOU are adding that the user did not say.
+Use \`claim_kind\`:
+- \`factor\` — something that varies and that an option can move or that bears on
+  what happens
+- \`outcome\` — a result the decision produces. Higher is better.
+- \`risk\` — something that could go wrong, or a downside the decision carries.
+  Higher is worse.
+- \`causal_link\` — one thing affecting another
+- \`option_refinement\` — an action you propose, either sharpening a named option
+  or introducing a materially different alternative, whether or not the user
+  already named options. Keep proposals in \`claims\`, not in the user's
+  \`stated_items\`.
+- \`prior\` — what you believe about a quantity, and how sure you are
+
+Look beyond the named options. Before settling the draft, consider a materially
+different way to pursue the user's purpose: for example, a reversible trial,
+temporary or external capacity, a hybrid, or a smaller-scope route. Use these as
+prompts to think, not a checklist to populate. Include a plausible alternative
+when it changes the mechanism, exposes an important trade-off, or offers a
+useful way to learn. Do not add a near-duplicate merely to increase the count.
+
+Record what a quantity IS now. On a \`factor\`, \`risk\` or \`outcome\` claim, set
+\`value\` only when the quantity has a current level on a supported scale and
+there is a defensible basis for that level. An estimate is recorded as yours,
+not as something the user said. A risk or outcome may name a measured quantity
+or a possible event; its kind or label alone does not establish a current level.
+Do not invent a current level merely to make a limit checkable.
+\`current\`, \`proposed\` and \`limit\` are three different things and a number
+belonging to one is not the level of another. "Reach £20k MRR" is a target,
+"keep churn under 4%" is a limit, and "we are proposing £59" is a proposal —
+none of them says what the quantity is TODAY. A subscriber count worked out from
+a revenue figure is not that figure, and the same number appearing nearby does
+not make it the same quantity.
+Leave \`value\` out where the current level or its scale is unknown. Preserve
+qualitative risks and outcomes without filling in a number.
+
+A LIKELIHOOD IS NOT A CURRENT LEVEL. A chance that an event occurs must not be
+put in \`value\` for a measured current quantity. Keep the user's original
+probability statement and its qualifications in \`stated_items\`; do not replace
+that statement with an inferred current reading. The optional \`likelihood\`
+field can retain a clearly identified event probability in draft records only,
+as a decimal between 0 and 1. It is not projected into the saved model or used
+by analysis, so it is not a substitute for retaining the original statement.
+Do not invent a probability to populate it.
+Use the declared \`value_scale\` convention above for current measurements:
+"monthly churn is currently 4%" supports \`value: 0.04\`, \`unit: "%"\`,
+\`value_scale: "unit_interval"\`. "There is a 4% chance of losing the contract
+this year" identifies an event probability, not a current measurement.
+"Churn risk: 4%", "Vendor slippage: 30%" and "Contract loss: 4%" do not by
+themselves establish which role the number has. Preserve that ambiguity and the
+original wording; do not resolve it from the label, unit or magnitude alone.
+"We might lose the tech lead" remains a qualitative risk.
+
+Keep the user's stated requirements intact. Do not relax a deadline, budget or
+other limit without their invitation, or claim a proposal meets it when that is
+unknown. Do not invent a price, rate or other figure merely to make an
+alternative different. Existing estimation rules still apply; estimates are not
+user-stated facts or proof of feasibility.
+
+\`label\` NAMES the thing, in a few words. Every claim except a \`causal_link\`
+becomes a node on the canvas, and \`label\` is the name the user reads on it:
+"Tech Lead Hiring Time", "LLM Serving Cost", "Engineering Attrition Risk". A
+name is not a sentence. Do not write what you believe about the thing, what it
+does, how long it takes or how sure you are — the node is a place to hang that,
+not the statement of it. A \`prior\` is named the same way as any other claim:
+name the QUANTITY you hold a belief about, not the belief.
+A \`causal_link\` is the exception, because it becomes an arrow rather than a
+node: describe the relationship there as fully as you need to.
+Two nodes must not end up reading the same. The canvas shows a title over two
+lines and clips the rest, so two long names that begin alike are one name to the
+person looking at them.
+
+Name a result an \`outcome\` and a downside a \`risk\`. Do not file either as a
+\`factor\`: a factor is something that VARIES on the way to a result, and calling
+a result a factor loses the distinction the analysis needs to compare options.
+
+Set \`basis\` to the array positions of the stated_items your claim
+builds on. If a claim rests on nothing the user said, leave \`basis\` empty — that
+is a legitimate and expected answer, and marking it honestly is more useful than
+attaching a basis that does not hold.
+
+Reference other records by ARRAY POSITION, and say WHICH ARRAY you mean by
+choosing the field. A \`causal_link\` needs exactly one \`from_\` and one \`to_\`:
+- \`from_stated\` / \`to_stated\` — a position in \`stated_items\`. \`0\` is the
+  first thing the user said.
+- \`from_claim\` / \`to_claim\` — a position in \`claims\`. \`0\` is your first
+  claim.
+Never set both \`from_stated\` and \`from_claim\` on one link, or both \`to_\`
+fields: they point into different lists and the pair contradicts itself.
+
+Emit only what the brief supports — which means the distinction between what the
+user STATED and what is plausibly PROPOSED from their situation, not a bar on
+proposing anything. An empty \`claims\` list remains a valid response when
+nothing useful can be added.
+`.trim();
+
+/** The connectivity half: the causal spine the structural validator checks. */
+export const DRAFT_RECORDS_CONNECT_INSTRUCTION = `
+## CONNECT WHAT YOU EMIT
+
+A decision only holds together if its parts join up, so state the connections as
+\`causal_link\` claims. They are claims like any other — yours, not the user's —
+and \`basis\` still records whatever the user said that you built them on.
+
+- Every option needs a chain that reaches the \`goal\`: a \`causal_link\` FROM the
+  option TO a factor it changes, then onward from that factor to an \`outcome\`
+  or a \`risk\`, and from there to the goal. An option whose chain stops short
+  cannot be compared with any other option.
+- **An \`outcome\` and a \`risk\` are where a chain ENDS.** A factor may point at
+  one; the only link LEAVING one goes to the goal. Do not link an outcome or a
+  risk to another outcome, risk or factor. If two results feel connected, say so
+  by linking them to the goal separately, or make the upstream one a \`factor\`.
+- Point a factor at an \`outcome\` or a \`risk\` rather than at the goal directly.
+  A factor linked straight to the goal has to be bridged for you, and the bridge
+  is then the machine's guess at what the result was, not yours.
+- The goal is a \`stated_item\`, so a link that reaches it sets \`to_stated\`. The
+  goal is never one of your \`claims\`, so \`to_claim\` cannot reach it: a link that
+  tries lands on a factor instead, and every record behind it is dropped for not
+  reaching the goal.
+- **Chain the option the USER named.** When you add an \`option_refinement\` that
+  spells out one of the user's own options, start the chain at the user's option
+  (\`from_stated\`), not at your refinement — the two are one alternative and the
+  refinement's \`basis\` already records which option it belongs to. Give a
+  refinement its OWN chain only when it is a genuinely different alternative the
+  user did not name.
+- Keep \`basis\` honest; do not alter it to force an alternative to survive
+  projection. Respect an explicit request to compare only specified options.
+- Count your alternatives: the user's stated options plus any \`option_refinement\`
+  that introduces a NEW alternative should come to six or fewer. Prefer a few
+  well-connected options over many bare ones. Within that limit favour useful,
+  materially different proposals over cosmetic variants; the limit is a ceiling,
+  never a quota, and having room left is not a reason to add an option.
+- Nothing points INTO an option. An option is where a chain starts. If something
+  bears on whether an option is viable, connect it to a factor on that option's
+  chain, or to the goal.
+- The factor an option acts on is where a chain STARTS. Draw links onward from
+  it — to another factor, or to the goal. Do not draw a link INTO it: if
+  something else bears on that factor, connect that influence to a factor
+  further along the chain, or to the goal.
+- Every other factor needs at least one \`causal_link\` onward, and the chain
+  must end at the \`goal\`. A factor that leads nowhere is not part of the
+  decision.
+- If a stated figure or constraint bears on the goal, say so with a
+  \`causal_link\` from it to the goal, or into the chain that reaches the goal.
+- Set \`effect\` to \`positive\` or \`negative\` on every \`causal_link\`. On the link
+  from an \`outcome\` to the goal that is normally \`positive\`; from a \`risk\` to
+  the goal it is normally \`negative\`. Never store a good thing as a \`risk\`.
+
+Do not emit a factor you cannot connect. But never drop something the user
+stated: keep it in \`stated_items\`, and connect it if it bears on the goal.
+
+## HOW MUCH EACH OPTION MOVES WHAT IT CHANGES
+
+On a \`causal_link\` FROM an option TO a factor, set \`sets_to\` to the value that
+factor would take if that option were chosen, in the same unit the factor is
+measured in.
+
+Set it on every option→factor link you emit. It is the only number the analysis
+has for what an option actually does, so a link without one leaves that option
+with nothing to compare — and the user is asked to supply a value for every
+option and factor by hand before anything can be analysed at all.
+
+Where the brief gives you the figure — a number the user stated, or a change they
+described — use that, and set \`basis\` to the stated_items it came from. Where
+the brief does not give you a figure, give your best estimate, reasoned from what
+the brief does tell you: the scale of the numbers already in it, and the
+direction and rough size of the change this option describes. Keep the factor's
+own unit, and keep your estimates consistent across the options, so the
+comparison between them means something.
+An ordinal statement alone supplies an ordering, not a scale or numeric gaps.
+Keep that statement and its conditions in the cited \`stated_items\`; do not
+turn the ordering alone into \`sets_to\` values, probabilities or scale endpoints.
+
+Leave \`sets_to\` out only where you genuinely cannot form a defensible estimate
+even from the brief's own scale. That is a truthful answer, and it also stops the
+analysis running on that option — so do not reach for it merely because you are
+unsure of the exact number. An estimate you can defend is worth more to the user
+than a gap they must fill before they can see anything at all.
+`;
+
+/**
+ * The instruction served on every draft. A pure concatenation of the two
+ * sections above, so the delta between them stays legible and each half can be
+ * pinned independently.
+ */
+export const DRAFT_RECORDS_INSTRUCTION =
+  `${DRAFT_RECORDS_SHAPE_INSTRUCTION}\n${DRAFT_RECORDS_CONNECT_INSTRUCTION}`.trimEnd();
+
+/** sha256 of the served instruction bytes. */
+export function draftRecordsInstructionHash(): string {
+  return createHash("sha256").update(DRAFT_RECORDS_INSTRUCTION, "utf8").digest("hex");
+}

@@ -1,0 +1,125 @@
+
+[1m[46m RUN [49m[22m [36mv4.0.13 [39m[90m/private/tmp/claude-502/-Users-paulslee-Documents-GitHub/c2a1bad0-8c87-43c2-8748-4edbe88f4af0/scratchpad/artefact-appendix-casing[39m
+
+{"level":30,"time":1783578360731,"pid":82561,"hostname":"Mac.net","version":"v187","explicit":false,"msg":"Using draft_graph prompt v187 (default)"}
+{"level":30,"time":1783578360731,"pid":82561,"hostname":"Mac.net","orchestrator":"cf-v28","draft_graph":"v187","edit_graph":"v6","decision_review":"v11","repair_graph":"v6","routing":"v40","msg":"Prompt fallback defaults registered"}
+{"level":30,"time":1783578360732,"pid":82561,"hostname":"Mac.net","event":"prompt.store.cache.miss","taskId":"orchestrator","reason":"not_cached"}
+{"level":40,"time":1783578360736,"pid":82561,"hostname":"Mac.net","taskId":"orchestrator","reason":"not_cached","cacheAge":null,"cacheTtlMs":300000,"staleGraceMs":600000,"isTransientFailure":false,"msg":"Prompt cache miss - returning defaults. This indicates cache expiry or cold start."}
+{"level":30,"time":1783578360736,"pid":82561,"hostname":"Mac.net","event":"prompt.loader.default","taskId":"orchestrator","reason":"not_cached","cached":true}
+{"level":30,"time":1783578360737,"pid":82561,"hostname":"Mac.net","event":"prompt.loader.default","taskId":"orchestrator"}
+{"level":40,"time":1783578360737,"pid":82561,"hostname":"Mac.net","taskId":"orchestrator","source":"default","useStaging":true,"msg":"Background refresh returned defaults instead of store prompt - check Supabase connectivity"}
+{"level":30,"time":1783578360737,"pid":82561,"hostname":"Mac.net","event":"artefact_appendix_injected","chars":5122,"msg":"Artefact design appendix injected"}
+{"level":30,"time":1783578360737,"pid":82561,"hostname":"Mac.net","event":"zone2_assembly_complete","pipeline":"v2","total_chars":62976,"zone2_chars":207,"section_count":5,"has_continuity":false,"has_graph":false,"has_analysis":false,"has_entities":false,"has_entity_memory":false,"has_event_log":false,"has_isl_fields":false,"has_artefact_appendix":true,"msg":"Zone 2 assembled (V2): 5 sections, 62976 chars"}
+{"level":30,"time":1783578360738,"pid":82561,"hostname":"Mac.net","event":"prompt.store.cache.hit","taskId":"orchestrator"}
+{"level":30,"time":1783578360738,"pid":82561,"hostname":"Mac.net","event":"zone2_assembly_complete","pipeline":"v2","total_chars":57852,"zone2_chars":207,"section_count":5,"has_continuity":false,"has_graph":false,"has_analysis":false,"has_entities":false,"has_entity_memory":false,"has_event_log":false,"has_isl_fields":false,"has_artefact_appendix":false,"msg":"Zone 2 assembled (V2): 5 sections, 57852 chars"}
+{"level":30,"time":1783578360738,"pid":82561,"hostname":"Mac.net","event":"prompt.store.cache.hit","taskId":"orchestrator"}
+{"level":30,"time":1783578360738,"pid":82561,"hostname":"Mac.net","event":"zone2_assembly_complete","pipeline":"v2","total_chars":57852,"zone2_chars":207,"section_count":5,"has_continuity":false,"has_graph":false,"has_analysis":false,"has_entities":false,"has_entity_memory":false,"has_event_log":false,"has_isl_fields":false,"has_artefact_appendix":false,"msg":"Zone 2 assembled (V2): 5 sections, 57852 chars"}
+{"level":30,"time":1783578360740,"pid":82561,"hostname":"Mac.net","event":"prompt.store.cache.hit","taskId":"orchestrator"}
+{"level":30,"time":1783578360740,"pid":82561,"hostname":"Mac.net","event":"artefact_appendix_injected","chars":5122,"msg":"Artefact design appendix injected"}
+{"level":30,"time":1783578360740,"pid":82561,"hostname":"Mac.net","event":"zone2_assembly_complete","pipeline":"v2","total_chars":62976,"zone2_chars":207,"section_count":5,"has_continuity":false,"has_graph":false,"has_analysis":false,"has_entities":false,"has_entity_memory":false,"has_event_log":false,"has_isl_fields":false,"has_artefact_appendix":true,"msg":"Zone 2 assembled (V2): 5 sections, 62976 chars"}
+{"level":30,"time":1783578360740,"pid":82561,"hostname":"Mac.net","event":"prompt.store.cache.hit","taskId":"orchestrator"}
+{"level":30,"time":1783578360740,"pid":82561,"hostname":"Mac.net","event":"zone2_assembly_complete","pipeline":"v2","total_chars":57852,"zone2_chars":207,"section_count":5,"has_continuity":false,"has_graph":false,"has_analysis":false,"has_entities":false,"has_entity_memory":false,"has_event_log":false,"has_isl_fields":false,"has_artefact_appendix":false,"msg":"Zone 2 assembled (V2): 5 sections, 57852 chars"}
+{"level":30,"time":1783578360741,"pid":82561,"hostname":"Mac.net","event":"prompt.store.cache.hit","taskId":"orchestrator"}
+{"level":30,"time":1783578360741,"pid":82561,"hostname":"Mac.net","event":"artefact_appendix_injected","chars":5122,"msg":"Artefact design appendix injected"}
+{"level":30,"time":1783578360741,"pid":82561,"hostname":"Mac.net","event":"zone2_assembly_complete","pipeline":"v2","total_chars":62976,"zone2_chars":207,"section_count":5,"has_continuity":false,"has_graph":false,"has_analysis":false,"has_entities":false,"has_entity_memory":false,"has_event_log":false,"has_isl_fields":false,"has_artefact_appendix":true,"msg":"Zone 2 assembled (V2): 5 sections, 62976 chars"}
+{"level":30,"time":1783578360741,"pid":82561,"hostname":"Mac.net","event":"prompt.store.cache.hit","taskId":"orchestrator"}
+{"level":30,"time":1783578360741,"pid":82561,"hostname":"Mac.net","event":"zone2_assembly_complete","pipeline":"v2","total_chars":57852,"zone2_chars":207,"section_count":5,"has_continuity":false,"has_graph":false,"has_analysis":false,"has_entities":false,"has_entity_memory":false,"has_event_log":false,"has_isl_fields":false,"has_artefact_appendix":false,"msg":"Zone 2 assembled (V2): 5 sections, 57852 chars"}
+{"level":30,"time":1783578360741,"pid":82561,"hostname":"Mac.net","event":"prompt.store.cache.hit","taskId":"orchestrator"}
+{"level":30,"time":1783578360741,"pid":82561,"hostname":"Mac.net","event":"artefact_appendix_injected","chars":5122,"msg":"Artefact design appendix injected"}
+{"level":30,"time":1783578360741,"pid":82561,"hostname":"Mac.net","event":"zone2_assembly_complete","pipeline":"v2","total_chars":62976,"zone2_chars":207,"section_count":5,"has_continuity":false,"has_graph":false,"has_analysis":false,"has_entities":false,"has_entity_memory":false,"has_event_log":false,"has_isl_fields":false,"has_artefact_appendix":true,"msg":"Zone 2 assembled (V2): 5 sections, 62976 chars"}
+{"level":30,"time":1783578360741,"pid":82561,"hostname":"Mac.net","event":"prompt.store.cache.hit","taskId":"orchestrator"}
+{"level":30,"time":1783578360741,"pid":82561,"hostname":"Mac.net","event":"zone2_assembly_complete","pipeline":"v2","total_chars":57852,"zone2_chars":207,"section_count":5,"has_continuity":false,"has_graph":false,"has_analysis":false,"has_entities":false,"has_entity_memory":false,"has_event_log":false,"has_isl_fields":false,"has_artefact_appendix":false,"msg":"Zone 2 assembled (V2): 5 sections, 57852 chars"}
+{"level":30,"time":1783578360742,"pid":82561,"hostname":"Mac.net","event":"prompt.store.cache.hit","taskId":"orchestrator"}
+{"level":30,"time":1783578360742,"pid":82561,"hostname":"Mac.net","event":"artefact_appendix_injected","chars":5122,"msg":"Artefact design appendix injected"}
+{"level":30,"time":1783578360742,"pid":82561,"hostname":"Mac.net","event":"zone2_assembly_complete","pipeline":"v2","total_chars":62976,"zone2_chars":207,"section_count":5,"has_continuity":false,"has_graph":false,"has_analysis":false,"has_entities":false,"has_entity_memory":false,"has_event_log":false,"has_isl_fields":false,"has_artefact_appendix":true,"msg":"Zone 2 assembled (V2): 5 sections, 62976 chars"}
+ [31m×[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22mloadArtefactAppendix — path casing (filesystem-independent)[2m > [22mresolves the appendix directory using the exact on-disk casing[32m 4[2mms[22m[39m
+[31m   → expected 'prompts' to be 'Prompts' // Object.is equality[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22mloadArtefactAppendix — path casing (filesystem-independent)[2m > [22mthe resolved appendix file actually exists at the literal path used[32m 1[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — chip messages[2m > [22mreturns true for chip message: "Assess these options"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — chip messages[2m > [22mreturns true for chip message: "Show me a decision matrix"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — chip messages[2m > [22mreturns true for chip message: "Visualise sensitivity"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — chip messages[2m > [22mreturns true for chip message: "Visualize sensitivity"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — chip messages[2m > [22mreturns true for chip message: "Show me the sensitivity breakdown"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — chip messages[2m > [22mreturns true for chip message: "Compare options"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — chip messages[2m > [22mreturns true for chip message: "Compare options side by side"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — chip messages[2m > [22mreturns true for chip message: "Run pre-mortem exercise"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — natural language triggers[2m > [22mreturns true for NL trigger: "create a comparison table for all options"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — natural language triggers[2m > [22mreturns true for NL trigger: "build me a SWOT analysis please"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — natural language triggers[2m > [22mreturns true for NL trigger: "I'd like a scoring rubric for these options"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — natural language triggers[2m > [22mreturns true for NL trigger: "can you visualise the results for me"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — natural language triggers[2m > [22mreturns true for NL trigger: "show me a chart of the sensitivity"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — natural language triggers[2m > [22mreturns true for NL trigger: "graph the key factors for me please"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — natural language triggers[2m > [22mreturns true for NL trigger: "let me see a matrix of the trade-offs"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — natural language triggers[2m > [22mreturns true for NL trigger: "I want a pros and cons list for each option"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — verb prefix with visual noun[2m > [22mreturns true for verb prefix + visual noun: "create a table comparing all options"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — verb prefix with visual noun[2m > [22mreturns true for verb prefix + visual noun: "generate a chart showing sensitivity"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — verb prefix with visual noun[2m > [22mreturns true for verb prefix + visual noun: "build a matrix of factors and options"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — verb prefix with visual noun[2m > [22mreturns true for verb prefix + visual noun: "make a diagram of the causal relationships"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — verb prefix with visual noun[2m > [22mreturns true for verb prefix + visual noun: "create a comparison of the three options"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — verb prefix with visual noun[2m > [22mreturns true for verb prefix + visual noun: "generate a visualisation of the results"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — verb prefix with visual noun[2m > [22mreturns true for verb prefix + visual noun: "build a visualization of outcomes"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — verb prefix with visual noun[2m > [22mreturns true for verb prefix + visual noun: "make a rubric for scoring these options"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — verb prefix with visual noun[2m > [22mreturns true for verb prefix + visual noun: "create a pre-mortem exercise for the team"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — verb prefix with non-visual noun[2m > [22mreturns false for verb prefix + non-visual noun: "create a model for this decision"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — verb prefix with non-visual noun[2m > [22mreturns false for verb prefix + non-visual noun: "generate a brief for the team"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — verb prefix with non-visual noun[2m > [22mreturns false for verb prefix + non-visual noun: "build a plan for the next quarter"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — verb prefix with non-visual noun[2m > [22mreturns false for verb prefix + non-visual noun: "make a report on the findings"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — verb prefix with non-visual noun[2m > [22mreturns false for verb prefix + non-visual noun: "create a summary of the analysis"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — questions excluded[2m > [22mreturns false for question: "what is the current recommendation"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — questions excluded[2m > [22mreturns false for question: "what are the key factors driving this"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — questions excluded[2m > [22mreturns false for question: "how does pricing affect the outcome"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — questions excluded[2m > [22mreturns false for question: "how do the options compare overall"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — questions excluded[2m > [22mreturns false for question: "why did the analysis change the result"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — questions excluded[2m > [22mreturns false for question: "why does outsourcing win in this scenario"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — edit instructions excluded[2m > [22mreturns false for edit instruction: "set budget to 150k for the model"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — edit instructions excluded[2m > [22mreturns false for edit instruction: "add a factor for regulatory risk"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — edit instructions excluded[2m > [22mreturns false for edit instruction: "remove the outsourcing option from the model"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — analysis requests excluded[2m > [22mreturns false for analysis request: "run the analysis on the updated model"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — analysis requests excluded[2m > [22mreturns false for analysis request: "analyse the options with the new data"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — analysis requests excluded[2m > [22mreturns false for analysis request: "analyze the trade-offs for this decision"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — analysis requests excluded[2m > [22mreturns false for analysis request: "please run analysis with current values"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — short messages excluded[2m > [22mreturns false for short message: "hello"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — short messages excluded[2m > [22mreturns false for short message: "ok"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — short messages excluded[2m > [22mreturns false for short message: "yes"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — short messages excluded[2m > [22mreturns false for short message: "thanks"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — short messages excluded[2m > [22mreturns false for short message: "what next"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — short messages excluded[2m > [22mreturns false for short message: "show me"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — short messages excluded[2m > [22mreturns false for short message: "help me"[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — case insensitive[2m > [22mhandles mixed case[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — edge cases[2m > [22mreturns false for empty string[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — edge cases[2m > [22mreturns false for whitespace-only string[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — edge cases[2m > [22mhandles punctuation in messages[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22misArtefactLikely — edge cases[2m > [22mchip match overrides short-message exclusion[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22massembleV2SystemPrompt — artefact appendix injection[2m > [22mincludes appendix in text when injectArtefactAppendix is true[32m 7[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22massembleV2SystemPrompt — artefact appendix injection[2m > [22mexcludes appendix from text when injectArtefactAppendix is false[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22massembleV2SystemPrompt — artefact appendix injection[2m > [22mexcludes appendix when no options provided[32m 2[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22massembleV2SystemPrompt — artefact appendix injection[2m > [22mincludes appendix in cache_blocks when injectArtefactAppendix is true[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22massembleV2SystemPrompt — artefact appendix injection[2m > [22mhas only 2 cache_blocks when appendix is not injected[32m 0[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22massembleV2SystemPrompt — artefact appendix injection[2m > [22mZone 1 cache_block has cache_control regardless of appendix[32m 1[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22massembleV2SystemPrompt — artefact appendix injection[2m > [22mnon-artefact turns have smaller system prompt[32m 1[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22massembleV2SystemPrompt — artefact appendix injection[2m > [22mappendix content is well-formed with correct XML tags[32m 0[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 1 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m tests/unit/orchestrator/artefact-detector.test.ts[2m > [22mloadArtefactAppendix — path casing (filesystem-independent)[2m > [22mresolves the appendix directory using the exact on-disk casing
+[31m[1mAssertionError[22m: expected 'prompts' to be 'Prompts' // Object.is equality[39m
+
+Expected: [32m"[7mP[27mrompts"[39m
+Received: [31m"[7mp[27mrompts"[39m
+
+[36m [2m❯[22m tests/unit/orchestrator/artefact-detector.test.ts:[2m49:32[22m[39m
+    [90m 47| [39m    // Case-sensitive comparison: this must match the true on-disk cas…
+    [90m 48| [39m    [90m// exactly, not just case-insensitively.[39m
+    [90m 49| [39m    [34mexpect[39m(resolvedDirLiteral)[33m.[39m[34mtoBe[39m(trueDirName)[33m;[39m
+    [90m   | [39m                               [31m^[39m
+    [90m 50| [39m  })[33m;[39m
+    [90m 51| [39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m64 passed[39m[22m[90m (65)[39m
+[2m   Start at [22m 07:26:00
+[2m   Duration [22m 668ms[2m (transform 377ms, setup 103ms, collect 432ms, tests 22ms, environment 0ms, prepare 4ms)[22m
+

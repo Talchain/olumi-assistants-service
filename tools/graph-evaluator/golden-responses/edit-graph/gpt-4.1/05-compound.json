@@ -1,0 +1,230 @@
+{
+  "brief_id": "05-compound",
+  "model": "gpt-4.1",
+  "prompt_hash": "sha256:2d6fcbc9d09869a271bc93df1b5bbb450a4a5ee3053d9395c3143b810c973cc5",
+  "response": {
+    "model_id": "gpt-4.1",
+    "brief_id": "05-compound",
+    "status": "success",
+    "raw_text": "{\n  \"topology_plan\": [\n    \"1. Remove all edges referencing fac_regulations.\",\n    \"2. Remove node fac_regulations.\",\n    \"3. Add new factor fac_competitor_response (external).\",\n    \"4. Add edge fac_competitor_response→out_market_share.\",\n    \"5. Update edge fac_investment→out_revenue/strength.mean.\"\n  ],\n  \"operations\": [\n    {\n      \"op\": \"remove_edge\",\n      \"path\": \"/edges/fac_regulations->risk_operational\",\n      \"old_value\": {\n        \"from\": \"fac_regulations\",\n        \"to\": \"risk_operational\",\n        \"strength\": { \"mean\": 0.45, \"std\": 0.25 },\n        \"exists_probability\": 0.7,\n        \"effect_direction\": \"positive\"\n      },\n      \"impact\": \"moderate\",\n      \"rationale\": \"Edge must be dropped before removing regulatory complexity factor as user instructed.\"\n    },\n    {\n      \"op\": \"remove_node\",\n      \"path\": \"/nodes/fac_regulations\",\n      \"old_value\": {\n        \"id\": \"fac_regulations\",\n        \"kind\": \"factor\",\n        \"label\": \"Regulatory Complexity\",\n        \"category\": \"external\",\n        \"prior\": { \"distribution\": \"uniform\", \"range_min\": 0.3, \"range_max\": 0.9 }\n      },\n      \"impact\": \"moderate\",\n      \"rationale\": \"User requested full removal of regulatory complexity from the model.\"\n    },\n    {\n      \"op\": \"add_node\",\n      \"path\": \"/nodes/fac_competitor_response\",\n      \"value\": {\n        \"id\": \"fac_competitor_response\",\n        \"kind\": \"factor\",\n        \"label\": \"Competitor Response\",\n        \"category\": \"external\",\n        \"prior\": { \"distribution\": \"uniform\", \"range_min\": 0.0, \"range_max\": 1.0 }\n      },\n      \"impact\": \"moderate\",\n      \"rationale\": \"Introduces a direct competitive threat/risk channel.\"\n    },\n    {\n      \"op\": \"add_edge\",\n      \"path\": \"/edges/fac_competitor_response->out_market_share\",\n      \"value\": {\n        \"from\": \"fac_competitor_response\",\n        \"to\": \"out_market_share\",\n        \"strength\": { \"mean\": -0.25, \"std\": 0.18 },\n        \"exists_probability\": 0.68,\n        \"effect_direction\": \"negative\"\n      },\n      \"impact\": \"moderate\",\n      \"rationale\": \"Creates a causal path: increased competitor response reduces gained market share.\"\n    },\n    {\n      \"op\": \"update_edge\",\n      \"path\": \"/edges/fac_investment->out_revenue/strength.mean\",\n      \"value\": 0.35,\n      \"old_value\": 0.2,\n      \"impact\": \"high\",\n      \"rationale\": \"Strengthens investment effect on revenue as user requested; this makes direct capex more influential for revenue growth.\"\n    }\n  ],\n  \"removed_edges\": [\n    {\n      \"from\": \"fac_regulations\",\n      \"to\": \"risk_operational\",\n      \"reason\": \"Parent node fac_regulations removed\"\n    }\n  ],\n  \"warnings\": [\n    \"Removing fac_regulations leaves risk_operational with a single inbound driver (fac_europe_entry). If you wish to model other operational risks, consider adding more drivers.\",\n    \"out_market_share now has three inbound edges: fac_europe_entry (0.7), fac_competition (-0.3), fac_competitor_response (-0.25), total Σ|mean|=1.25, which exceeds the recommended 1.0. If you prefer to keep all three, consider weakening one or redistributing their weights.\"\n  ],\n  \"coaching\": {\n    \"summary\": \"Three model changes: added a new competitor response factor directly affecting market share, removed regulatory complexity and its operational risk edge, and made investment more central to revenue. This will increase the influence of investment and competitive dynamics in scenario results. Market share now may be somewhat overspecified—review edge strengths if needed.\",\n    \"rerun_recommended\": true\n  }\n}",
+    "parsed_graph": {
+      "topology_plan": [
+        "1. Remove all edges referencing fac_regulations.",
+        "2. Remove node fac_regulations.",
+        "3. Add new factor fac_competitor_response (external).",
+        "4. Add edge fac_competitor_response→out_market_share.",
+        "5. Update edge fac_investment→out_revenue/strength.mean."
+      ],
+      "operations": [
+        {
+          "op": "remove_edge",
+          "path": "/edges/fac_regulations->risk_operational",
+          "old_value": {
+            "from": "fac_regulations",
+            "to": "risk_operational",
+            "strength": {
+              "mean": 0.45,
+              "std": 0.25
+            },
+            "exists_probability": 0.7,
+            "effect_direction": "positive"
+          },
+          "impact": "moderate",
+          "rationale": "Edge must be dropped before removing regulatory complexity factor as user instructed."
+        },
+        {
+          "op": "remove_node",
+          "path": "/nodes/fac_regulations",
+          "old_value": {
+            "id": "fac_regulations",
+            "kind": "factor",
+            "label": "Regulatory Complexity",
+            "category": "external",
+            "prior": {
+              "distribution": "uniform",
+              "range_min": 0.3,
+              "range_max": 0.9
+            }
+          },
+          "impact": "moderate",
+          "rationale": "User requested full removal of regulatory complexity from the model."
+        },
+        {
+          "op": "add_node",
+          "path": "/nodes/fac_competitor_response",
+          "value": {
+            "id": "fac_competitor_response",
+            "kind": "factor",
+            "label": "Competitor Response",
+            "category": "external",
+            "prior": {
+              "distribution": "uniform",
+              "range_min": 0,
+              "range_max": 1
+            }
+          },
+          "impact": "moderate",
+          "rationale": "Introduces a direct competitive threat/risk channel."
+        },
+        {
+          "op": "add_edge",
+          "path": "/edges/fac_competitor_response->out_market_share",
+          "value": {
+            "from": "fac_competitor_response",
+            "to": "out_market_share",
+            "strength": {
+              "mean": -0.25,
+              "std": 0.18
+            },
+            "exists_probability": 0.68,
+            "effect_direction": "negative"
+          },
+          "impact": "moderate",
+          "rationale": "Creates a causal path: increased competitor response reduces gained market share."
+        },
+        {
+          "op": "update_edge",
+          "path": "/edges/fac_investment->out_revenue/strength.mean",
+          "value": 0.35,
+          "old_value": 0.2,
+          "impact": "high",
+          "rationale": "Strengthens investment effect on revenue as user requested; this makes direct capex more influential for revenue growth."
+        }
+      ],
+      "removed_edges": [
+        {
+          "from": "fac_regulations",
+          "to": "risk_operational",
+          "reason": "Parent node fac_regulations removed"
+        }
+      ],
+      "warnings": [
+        "Removing fac_regulations leaves risk_operational with a single inbound driver (fac_europe_entry). If you wish to model other operational risks, consider adding more drivers.",
+        "out_market_share now has three inbound edges: fac_europe_entry (0.7), fac_competition (-0.3), fac_competitor_response (-0.25), total Σ|mean|=1.25, which exceeds the recommended 1.0. If you prefer to keep all three, consider weakening one or redistributing their weights."
+      ],
+      "coaching": {
+        "summary": "Three model changes: added a new competitor response factor directly affecting market share, removed regulatory complexity and its operational risk edge, and made investment more central to revenue. This will increase the influence of investment and competitive dynamics in scenario results. Market share now may be somewhat overspecified—review edge strengths if needed.",
+        "rerun_recommended": true
+      }
+    },
+    "extraction_attempted": false,
+    "latency_ms": 6752,
+    "input_tokens": 5403,
+    "output_tokens": 894,
+    "est_cost_usd": 0.017958000000000002,
+    "pricing_source": "api_usage",
+    "parsed_json": {
+      "topology_plan": [
+        "1. Remove all edges referencing fac_regulations.",
+        "2. Remove node fac_regulations.",
+        "3. Add new factor fac_competitor_response (external).",
+        "4. Add edge fac_competitor_response→out_market_share.",
+        "5. Update edge fac_investment→out_revenue/strength.mean."
+      ],
+      "operations": [
+        {
+          "op": "remove_edge",
+          "path": "/edges/fac_regulations->risk_operational",
+          "old_value": {
+            "from": "fac_regulations",
+            "to": "risk_operational",
+            "strength": {
+              "mean": 0.45,
+              "std": 0.25
+            },
+            "exists_probability": 0.7,
+            "effect_direction": "positive"
+          },
+          "impact": "moderate",
+          "rationale": "Edge must be dropped before removing regulatory complexity factor as user instructed."
+        },
+        {
+          "op": "remove_node",
+          "path": "/nodes/fac_regulations",
+          "old_value": {
+            "id": "fac_regulations",
+            "kind": "factor",
+            "label": "Regulatory Complexity",
+            "category": "external",
+            "prior": {
+              "distribution": "uniform",
+              "range_min": 0.3,
+              "range_max": 0.9
+            }
+          },
+          "impact": "moderate",
+          "rationale": "User requested full removal of regulatory complexity from the model."
+        },
+        {
+          "op": "add_node",
+          "path": "/nodes/fac_competitor_response",
+          "value": {
+            "id": "fac_competitor_response",
+            "kind": "factor",
+            "label": "Competitor Response",
+            "category": "external",
+            "prior": {
+              "distribution": "uniform",
+              "range_min": 0,
+              "range_max": 1
+            }
+          },
+          "impact": "moderate",
+          "rationale": "Introduces a direct competitive threat/risk channel."
+        },
+        {
+          "op": "add_edge",
+          "path": "/edges/fac_competitor_response->out_market_share",
+          "value": {
+            "from": "fac_competitor_response",
+            "to": "out_market_share",
+            "strength": {
+              "mean": -0.25,
+              "std": 0.18
+            },
+            "exists_probability": 0.68,
+            "effect_direction": "negative"
+          },
+          "impact": "moderate",
+          "rationale": "Creates a causal path: increased competitor response reduces gained market share."
+        },
+        {
+          "op": "update_edge",
+          "path": "/edges/fac_investment->out_revenue/strength.mean",
+          "value": 0.35,
+          "old_value": 0.2,
+          "impact": "high",
+          "rationale": "Strengthens investment effect on revenue as user requested; this makes direct capex more influential for revenue growth."
+        }
+      ],
+      "removed_edges": [
+        {
+          "from": "fac_regulations",
+          "to": "risk_operational",
+          "reason": "Parent node fac_regulations removed"
+        }
+      ],
+      "warnings": [
+        "Removing fac_regulations leaves risk_operational with a single inbound driver (fac_europe_entry). If you wish to model other operational risks, consider adding more drivers.",
+        "out_market_share now has three inbound edges: fac_europe_entry (0.7), fac_competition (-0.3), fac_competitor_response (-0.25), total Σ|mean|=1.25, which exceeds the recommended 1.0. If you prefer to keep all three, consider weakening one or redistributing their weights."
+      ],
+      "coaching": {
+        "summary": "Three model changes: added a new competitor response factor directly affecting market share, removed regulatory complexity and its operational risk edge, and made investment more central to revenue. This will increase the influence of investment and competitive dynamics in scenario results. Market share now may be somewhat overspecified—review edge strengths if needed.",
+        "rerun_recommended": true
+      }
+    }
+  },
+  "scores": {
+    "valid_json": true,
+    "correct_shape": true,
+    "operation_types_correct": false,
+    "topology_compliant": true,
+    "has_impact_rationale": true,
+    "correct_ordering": true,
+    "empty_ops_handled": true,
+    "coaching_present": true,
+    "path_syntax_valid": false
+  },
+  "overall": 0.8,
+  "captured_at": "2026-03-14T16:39:41.327Z"
+}

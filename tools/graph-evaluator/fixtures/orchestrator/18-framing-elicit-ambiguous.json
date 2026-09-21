@@ -1,0 +1,86 @@
+{
+  "id": "orch-18-framing-elicit-ambiguous",
+  "name": "Framing — Ambiguous Strategy (No Decision)",
+  "description": "User mentions a topic without stating a decision or naming options. The orchestrator should elicit goal and options, not invoke a tool.",
+  "stage": "frame",
+  "user_message": "I've been thinking about our international strategy.",
+  "turn_context": {
+    "scenario_id": "orch-18-framing-elicit-ambiguous",
+    "turn_id": "t1",
+    "stage": "frame",
+    "entities": {
+      "decisions": [],
+      "options": [],
+      "factors": [],
+      "outcomes": [],
+      "risks": [],
+      "goals": [],
+      "edges": [],
+      "constraints": []
+    },
+    "graph": {
+      "node_count": 0,
+      "edge_count": 0,
+      "option_count": 0,
+      "missing_structural": []
+    },
+    "analysis": {
+      "status": "not_run",
+      "staleness_reason": null,
+      "winner": null,
+      "runner_up": null,
+      "robustness_band": null,
+      "top_drivers": [],
+      "fragile_edges": [],
+      "constraints_met": null
+    },
+    "capabilities": {
+      "can_run_analysis": false,
+      "can_explain_results": false,
+      "can_edit_graph": false,
+      "can_compare_options": false,
+      "can_generate_artefact": false,
+      "disabled_reasons": {}
+    },
+    "blockers": [],
+    "signals": {
+      "high_uncertainty_factors": [],
+      "dominant_factor": null,
+      "close_call": false,
+      "missing_option_families": [],
+      "default_value_count": 0,
+      "weak_edges": []
+    },
+    "conversation": {
+      "turn_count": 1,
+      "last_user_intent": null,
+      "last_tool_used": null,
+      "recent_actions_taken": [],
+      "recent_actions_declined": [],
+      "pending_confirmation": null,
+      "last_failed_action": null
+    },
+    "eligible_actions": ["draft_graph", "set_goal_target", "add_option", "add_factor", "research_topic"]
+  },
+  "expected": {
+    "expects_uncertainty_language": false,
+    "must_contain": ["decid"],
+    "forbidden_phrases": [],
+    "scenario_assertions": [
+      {
+        "description": "Should ask a question to elicit the decision, goal, or options",
+        "check": "asks_question"
+      },
+      {
+        "description": "Should not invoke draft_graph without knowing the decision",
+        "check": "action_type_absent",
+        "value": "draft_graph"
+      },
+      {
+        "description": "Should not produce more than 3 actions",
+        "check": "max_actions",
+        "value": 3
+      }
+    ]
+  }
+}

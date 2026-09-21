@@ -38,6 +38,6 @@ export const fixtureGraph: GraphT = {
       fac_1: { x: 100, y: 450 },
       out_1: { x: 100, y: 150 },
     },
-    source: "fixtures",
+    source: "assistant",
   },
 };

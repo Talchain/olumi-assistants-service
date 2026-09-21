@@ -227,32 +227,52 @@ describe("computeOptionStatus", () => {
 
 describe("computeAnalysisReadyStatus", () => {
   it("returns ready when has interventions and no non-numeric raw", () => {
-    const status = computeAnalysisReadyStatus(2, "ready", false);
+    const status = computeAnalysisReadyStatus(2, "ready", false, 0);
     expect(status).toBe("ready");
   });
 
   it("returns needs_user_mapping when no interventions", () => {
-    const status = computeAnalysisReadyStatus(0, undefined, false);
+    const status = computeAnalysisReadyStatus(0, undefined, false, 0);
     expect(status).toBe("needs_user_mapping");
   });
 
   it("returns needs_encoding when original status was needs_encoding and no interventions", () => {
-    const status = computeAnalysisReadyStatus(0, "needs_encoding", false);
+    const status = computeAnalysisReadyStatus(0, "needs_encoding", false, 0);
     expect(status).toBe("needs_encoding");
   });
 
+  // ⭐ CONNECTED BUT NUMBERLESS. `needs_user_mapping` asks the user to choose
+  // which factor the option changes — work already done once an option→factor
+  // edge exists. The outstanding question is the magnitude, which is
+  // `needs_encoding`. Repair-authored edges are excluded by the CALLER, so a
+  // non-zero count here always means a mapping the product did not invent.
+  it("returns needs_encoding when no interventions but a connected factor exists", () => {
+    const status = computeAnalysisReadyStatus(0, "needs_user_mapping", false, 1);
+    expect(status).toBe("needs_encoding");
+  });
+
+  it("returns needs_user_mapping when no interventions AND no connected factor", () => {
+    const status = computeAnalysisReadyStatus(0, "needs_user_mapping", false, 0);
+    expect(status).toBe("needs_user_mapping");
+  });
+
+  it("connectivity does not reach an option that already has an intervention", () => {
+    const status = computeAnalysisReadyStatus(1, "needs_user_mapping", false, 3);
+    expect(status).toBe("ready");
+  });
+
   it("returns needs_encoding when has non-numeric raw values", () => {
-    const status = computeAnalysisReadyStatus(2, "ready", true);
+    const status = computeAnalysisReadyStatus(2, "ready", true, 0);
     expect(status).toBe("needs_encoding");
   });
 
   it("preserves needs_encoding from original status", () => {
-    const status = computeAnalysisReadyStatus(2, "needs_encoding", false);
+    const status = computeAnalysisReadyStatus(2, "needs_encoding", false, 0);
     expect(status).toBe("needs_encoding");
   });
 
   it("upgrades needs_user_mapping to ready when has interventions", () => {
-    const status = computeAnalysisReadyStatus(2, "needs_user_mapping", false);
+    const status = computeAnalysisReadyStatus(2, "needs_user_mapping", false, 0);
     expect(status).toBe("ready");
   });
 });
@@ -403,7 +423,8 @@ describe("Acceptance Criteria", () => {
       const analysisReadyStatus = computeAnalysisReadyStatus(
         1, // intervention count
         extractionResult.status,
-        false // no non-numeric raw
+        false, // no non-numeric raw
+        0 // no connected factors
       );
 
       expect(extractionResult.status).toBe("ready");

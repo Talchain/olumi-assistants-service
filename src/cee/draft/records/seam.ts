@@ -1,0 +1,518 @@
+/**
+ * THE POST-LLM SEAM — where a record set becomes the graph the pipeline expects.
+ *
+ * ── HONEST FAILURE, NEVER A PHANTOM GRAPH ──────────────────────────────────
+ * The anti-goal is a measured product defect, not a hypothetical: a streamed
+ * `GRAPH_READY` frame the user watched arrive, followed by a 504 with empty text
+ * and nothing committed. The user saw a graph that never existed. That is the
+ * worst class available and this seam must never reproduce it.
+ *
+ * So the rule here is: if the model's output is not a record set, this module
+ * says so and REFUSES, and the caller raises the SAME typed failure a
+ * malformed graph raises today. It never guesses, never part-projects, and never
+ * substitutes an empty graph for a failed parse — an empty graph is a lie that
+ * validates.
+ *
+ * The complementary half is already in place downstream and is deliberately left
+ * there rather than duplicated: the projected graph is validated by
+ * `AnthropicDraftResponse.safeParse` exactly as a model-drafted graph was, and a
+ * rejection raises `anthropic_response_invalid_schema` → the existing typed,
+ * user-visible refusal. One validator, one failure surface, one place to change.
+ *
+ * ── ⚠ THE PROMPT-ONLY DEGRADATION PATH IS RECORDS-SHAPED TOO ───────────────
+ * When structured outputs are rejected by the provider (400), the adapter
+ * rebuilds the request WITHOUT the grammar. The instruction block survives that
+ * rebuild, so the model is still asked for records — and `isGraphShapedResponse`
+ * below exists so that a model which ignores the instruction and returns a GRAPH
+ * is treated as a PARSE FAILURE feeding the existing retry, never silently
+ * accepted. Accepting it would re-admit the old draft path as an undeclared
+ * fallback: the product would sometimes draft by records and sometimes not, with
+ * nothing recording which, and every provenance claim this mechanism makes would
+ * be true only on the paths nobody checked.
+ */
+import { z } from "zod";
+import {
+  buildDraftRecordsSchema,
+  DRAFT_RECORD_CATEGORIES,
+  DRAFT_RECORD_CLAIM_KINDS,
+  DRAFT_RECORD_DIRECTIONS,
+  DRAFT_RECORD_EFFECTS,
+  DRAFT_RECORD_ROLES,
+  DRAFT_RECORD_STATED_KINDS,
+  DRAFT_RECORD_VALUE_SCALES,
+  type DraftRecordSet,
+} from "./grammar.js";
+import { projectRecordsToGraph, type RecordProjection } from "./projector.js";
+import { log } from "../../../utils/telemetry.js";
+
+/**
+ * The CEE-INTERNAL validator for what came back off the wire.
+ *
+ * Deliberately NOT `.strict()` on the items: the grammar already carries
+ * `additionalProperties: false`, and on the prompt-only degradation path there is
+ * no grammar at all — a model that adds a stray key there should still have its
+ * RECORDS honoured rather than the whole draft thrown away over a field nobody
+ * reads. What IS enforced is everything the projector's switch depends on:
+ * the two arrays, the discriminators, and the enums.
+ */
+const StatedItemWire = z.object({
+  kind: z.enum(DRAFT_RECORD_STATED_KINDS),
+  source_quote: z.string(),
+  value: z.number().optional(),
+  unit: z.string().optional(),
+  role: z.enum(DRAFT_RECORD_ROLES).optional(),
+  direction: z.enum(DRAFT_RECORD_DIRECTIONS).optional(),
+  // `option` only — grammar design note 5.
+  is_baseline: z.boolean().optional(),
+  // ⭐ `constraint` only — WHAT THE LIMIT APPLIES TO. Typed by namespace, the
+  // same shape as the `claims[]` endpoints below. `.int()` because these index
+  // an array: a fractional index is not a near-miss of a valid one, and letting
+  // it through would push the refusal down to the projector where it would have
+  // to be named `unparseable_ref` — a reason the grammar otherwise makes
+  // unreachable.
+  // ⛔⛔ `.catch(undefined)` — A MALFORMED VALUE HERE DEGRADES TO ABSENCE, NEVER
+  // TO A DEAD DRAFT. Without it a model that emits `applies_to_claim: "0"` on
+  // the prompt-only degradation path (where no grammar is attached, so nothing
+  // enforces `{"type":"integer"}` provider-side) fails THIS item, which fails
+  // the whole `DraftRecordSetWire.safeParse`, which the seam turns into
+  // `not_a_record_set` — the ENTIRE draft lost over an optional enhancement
+  // field. Measured on this tree, and the measurement CORRECTED THE PREMISE
+  // handed to the repair: this is NOT a falsy check treating `"0"` as absent.
+  // There is no falsy special-case anywhere. `"1"`, `0.5` and `null` all refuse
+  // identically to `"0"` — it is plain type strictness whose blast radius is the
+  // whole record set. Absent, empty and zero are three different facts and none
+  // of them is what was happening.
+  //
+  // ⭐ WHY THESE TWO AND NOT THE REFERENCE FAMILY — they answer DIFFERENT
+  // QUESTIONS (trap 21), so one rule was never right for both. `from_claim` /
+  // `to_claim` / `from_stated` / `to_stated` are LOAD-BEARING STRUCTURE: a
+  // malformed one means an edge the model intended cannot be built, and
+  // refusing loudly is correct. `applies_to_*` is an OPTIONAL ENHANCEMENT whose
+  // ABSENCE is defined as byte-identical to today's behaviour — so absence IS
+  // the honest degradation, and failing the whole draft to reach it is
+  // disproportionate in a way the existing case is not. The asymmetry is
+  // deliberate and it is PINNED: a contrast control in
+  // `__tests__/constraint-applies-to-binding.test.ts` asserts a malformed
+  // `from_claim` STILL refuses, so this tolerance cannot silently widen to the
+  // family.
+  //
+  // ⚠ Nothing is hidden by this. The limit itself is untouched — its value,
+  // unit, direction and quote all still parse, the constraint node is still
+  // minted with them, and the pre-existing unbindable-limit ask still fires.
+  // What degrades is only the model's optional HINT about what the limit
+  // applies to, which is a field that did not exist at all until this change.
+  applies_to_stated: z.number().int().optional().catch(undefined),
+  applies_to_claim: z.number().int().optional().catch(undefined),
+}).passthrough();
+
+const InferenceClaimWire = z.object({
+  claim_kind: z.enum(DRAFT_RECORD_CLAIM_KINDS),
+  label: z.string(),
+  basis: z.array(z.number().int()).optional(),
+  // Typed by namespace — grammar design note 1b.
+  from_stated: z.number().int().optional(),
+  from_claim: z.number().int().optional(),
+  to_stated: z.number().int().optional(),
+  to_claim: z.number().int().optional(),
+  effect: z.enum(DRAFT_RECORD_EFFECTS).optional(),
+  strength: z.number().optional(),
+  category: z.enum(DRAFT_RECORD_CATEGORIES).optional(),
+  value: z.number().optional(),
+  // ⚠ ADDED IN v4 AFTER A MEASURED LIVE DEFECT. `sets_to` shipped in the
+  // grammar, the instruction and the projector — and was absent from BOTH this
+  // schema and the rebuild below, so every live draft parsed the model's
+  // intervention magnitude and discarded it one line before projection.
+  // `OptionData.interventions` was therefore never populated on any real run and
+  // the analysis could only compare bare labels. Every interventions test calls
+  // `projectRecordsToGraph` DIRECTLY and so could not see it (trap 3b/19: the
+  // guard was bound to the projector, the live path runs through the seam).
+  // ⚠⚠ AND THE GUARD THIS COMMENT PROMISED DID NOT EXIST. It said
+  // "`assertSeamCarriesEveryGrammarField` below now makes the next such omission
+  // a red rather than a dark capability" — swept with a contrast control on
+  // 2026-08-14, that symbol occurred ONCE in the entire repo: in this sentence.
+  // `draftClaimSchemaKeys()`, which `grammar.ts` calls "the completeness source
+  // for `seam.ts`'s field-by-field rebuild", had no test consumer at all. So the
+  // estate held a sentence about a derived guard instead of the guard, in the one
+  // place written to stop a silent drop — and a mutant confirmed the cost: with
+  // `is_baseline` deleted from the rebuild below, every projector test stayed
+  // green, exactly as they did for `sets_to`.
+  //
+  // The guard is now REAL and behavioural, in
+  // `__tests__/value-carriage-and-baseline.test.ts`
+  // ("assertSeamCarriesEveryGrammarField — derived, and it did not exist
+  // before"): it builds a record populated from the grammar's OWN JSON Schema,
+  // pushes it through this function, and asserts the carried key set EQUALS
+  // `draftStatedItemSchemaKeys()` / `draftClaimSchemaKeys()`. A field added to the
+  // grammar is therefore covered without anyone updating a mirror — and deleting
+  // any line from the rebuild below is a red.
+  sets_to: z.number().optional(),
+  // ⭐ WHAT THE MODEL'S OWN NUMBER IS MEASURED IN. Added here in the SAME change
+  // as the grammar field, because this seam is exactly where `sets_to` was lost:
+  // it shipped in the grammar, the instruction and the projector, and was
+  // dropped one line before projection on every live draft. The derived guard
+  // that comment promised now exists and it RED-ed on this change before I had
+  // wired it — which is the guard working, not a nuisance.
+  unit: z.string().optional(),
+  // ⭐ WHAT CONVENTION THAT NUMBER IS WRITTEN IN — v10, and it is carried here
+  // in the SAME change as the grammar field for the reason the comment above
+  // gives. `unit` and `value_scale` answer different questions and are the two
+  // halves of one quantity; carrying one without the other would leave the
+  // projector inferring the convention from magnitudes, which is the defect
+  // v10 exists to remove.
+  value_scale: z.enum(DRAFT_RECORD_VALUE_SCALES).optional(),
+  // ⭐⭐ DECLARED HERE TOO, AND THE OMISSION WAS A SECOND LAYER OF THE SAME
+  // DEFECT. `likelihood` was added to the model-facing JSON Schema and to
+  // `DraftInferenceClaim`, and the rebuild below was then taught to name it —
+  // and it still did not compile, because THIS schema is what `parsed.data`
+  // is typed from. Undeclared here, the field arrives as passthrough-unknown
+  // (`{}`) and cannot be assigned to a `number`.
+  //
+  // ⚠ THE TYPE ERROR WAS THE ONLY THING THAT CAUGHT IT, and only because the
+  // rebuild is a CONVERSION rather than an assertion (see this function's own
+  // note above). Had the rebuild used `as`, the field would have validated,
+  // been named, compiled, and still arrived `undefined` at the projector.
+  //
+  // ⚠ `.passthrough()` IS WHY THIS IS SILENT. It admits the field at runtime,
+  // so nothing REDs at validation; the wire carries a value that the typed
+  // surface does not know exists. A `.strict()` schema would have rejected it
+  // loudly — which is worse for tolerance and better for this class, and is a
+  // trade this seam has already made deliberately.
+  likelihood: z.number().optional(),
+  // `option_refinement` only — grammar design note 5.
+  is_baseline: z.boolean().optional(),
+}).passthrough();
+
+export const DraftRecordSetWire = z.object({
+  // `min(1)` mirrors the grammar's `minItems: 1`. A brief always states
+  // something; a record set claiming otherwise did not read the brief.
+  stated_items: z.array(StatedItemWire).min(1),
+  // NO minimum — see grammar.ts design note 2. Zero claims is a legitimate,
+  // expected and honest answer, and requiring one would manufacture invention.
+  claims: z.array(InferenceClaimWire),
+}).passthrough();
+
+/**
+ * Is this parsed JSON a GRAPH rather than a record set?
+ *
+ * Bound to the graph's own discriminators (`nodes`/`edges` arrays), not to the
+ * ABSENCE of record keys — absence is also what a truncated or empty response
+ * looks like, and the two must be told apart so the caller can report the right
+ * reason. A response that is both is still a graph-shaped violation: the
+ * instruction says "Do not emit a graph".
+ */
+export function isGraphShapedResponse(value: unknown): boolean {
+  if (value === null || typeof value !== "object") return false;
+  const rec = value as Record<string, unknown>;
+  return Array.isArray(rec.nodes) || Array.isArray(rec.edges);
+}
+
+export type DraftRecordsSeamFailure =
+  /** The response is a graph — the old draft shape, on a path that must not accept it. */
+  | { ok: false; reason: "graph_shaped_response"; detail: string }
+  /** The response is neither a graph nor a conformant record set. */
+  | { ok: false; reason: "not_a_record_set"; detail: string };
+
+export type DraftRecordsSeamResult =
+  | { ok: true; records: DraftRecordSet; projection: RecordProjection }
+  | DraftRecordsSeamFailure;
+
+/**
+ * Validate the model's output as a record set and project it to GraphV3.
+ *
+ * Returns a RESULT rather than throwing, so the caller owns the failure surface
+ * and every refusal goes through the ONE typed path the pipeline already
+ * understands. A function here that threw its own error type would create a
+ * second failure vocabulary for the same user-visible event.
+ */
+export function projectDraftRecords(
+  rawJson: unknown,
+  /**
+   * ⭐ THE BRIEF, AS READ-ONLY EVIDENCE for the provenance claim — never a source
+   * of values. Threaded to `projectRecordsToGraph`, which binds each stated item
+   * against it. OPTIONAL and FAIL-CLOSED: a caller that omits it gets nodes that
+   * decline the `from_brief` badge rather than nodes that assume it.
+   */
+  brief?: string,
+): DraftRecordsSeamResult {
+  // ⚠ GRAPH-SHAPED IS CHECKED FIRST, AND UNCONDITIONALLY.
+  //
+  // The obvious ordering — validate, and only ask "was it a graph?" when
+  // validation fails — has a hole a test found: `DraftRecordSetWire` is
+  // `.passthrough()`, so a response carrying BOTH a record set and a graph
+  // VALIDATES, and the graph rides straight through as though nothing happened.
+  // A hedged response is not a partial success; it is precisely the shape a
+  // reader could take either way, and taking it as records would let the retired
+  // draft path re-enter as an undeclared fallback with nothing recording it.
+  // Refuse it, and say which reason it was.
+  if (isGraphShapedResponse(rawJson)) {
+    const rec = rawJson as Record<string, unknown>;
+    return {
+      ok: false,
+      reason: "graph_shaped_response",
+      detail:
+        `model returned a graph (nodes=${Array.isArray(rec.nodes) ? rec.nodes.length : "absent"}, ` +
+        `edges=${Array.isArray(rec.edges) ? rec.edges.length : "absent"}) instead of a record set`,
+    };
+  }
+  const parsed = DraftRecordSetWire.safeParse(rawJson);
+  if (!parsed.success) {
+    const flat = parsed.error.flatten();
+    const fieldIssues = Object.entries(flat.fieldErrors || {})
+      .map(([field, msgs]) => `${field}: ${(msgs as string[]).join(", ")}`)
+      .join("; ");
+    const formIssues = (flat.formErrors || []).join("; ");
+    return {
+      ok: false,
+      reason: "not_a_record_set",
+      detail: [fieldIssues, formIssues].filter(Boolean).join(" | ") || "unknown record-set validation error",
+    };
+  }
+  // Rebuilt field-by-field rather than double-cast. The wire schema is
+  // `.passthrough()`, so its inferred type carries an index signature the
+  // declared interface does not; converting explicitly keeps the boundary a
+  // CONVERSION rather than an assertion, and a field the projector reads but the
+  // wire schema stopped validating would fail to compile here instead of
+  // arriving as `undefined` at runtime.
+  const records: DraftRecordSet = {
+    stated_items: parsed.data.stated_items.map((item) => ({
+      kind: item.kind,
+      source_quote: item.source_quote,
+      ...(item.value !== undefined ? { value: item.value } : {}),
+      ...(item.unit !== undefined ? { unit: item.unit } : {}),
+      ...(item.role !== undefined ? { role: item.role } : {}),
+      ...(item.direction !== undefined ? { direction: item.direction } : {}),
+      ...(item.is_baseline !== undefined ? { is_baseline: item.is_baseline } : {}),
+      ...(item.applies_to_stated !== undefined ? { applies_to_stated: item.applies_to_stated } : {}),
+      ...(item.applies_to_claim !== undefined ? { applies_to_claim: item.applies_to_claim } : {}),
+    })),
+    claims: parsed.data.claims.map((claim) => ({
+      claim_kind: claim.claim_kind,
+      label: claim.label,
+      ...(claim.basis !== undefined ? { basis: claim.basis } : {}),
+      ...(claim.from_stated !== undefined ? { from_stated: claim.from_stated } : {}),
+      ...(claim.from_claim !== undefined ? { from_claim: claim.from_claim } : {}),
+      ...(claim.to_stated !== undefined ? { to_stated: claim.to_stated } : {}),
+      ...(claim.to_claim !== undefined ? { to_claim: claim.to_claim } : {}),
+      ...(claim.effect !== undefined ? { effect: claim.effect } : {}),
+      ...(claim.strength !== undefined ? { strength: claim.strength } : {}),
+      ...(claim.category !== undefined ? { category: claim.category } : {}),
+      ...(claim.value !== undefined ? { value: claim.value } : {}),
+      ...(claim.sets_to !== undefined ? { sets_to: claim.sets_to } : {}),
+      ...(claim.unit !== undefined ? { unit: claim.unit } : {}),
+      ...(claim.value_scale !== undefined ? { value_scale: claim.value_scale } : {}),
+      // ⭐⭐ CARRIED, AND ITS ABSENCE WAS THE WHOLE POINT OF THE FIELD BEING LOST.
+      //
+      // This rebuild names every field it keeps, and the wire Zod is
+      // `.passthrough()` — so a field the model emits and this line does not
+      // name VALIDATES and then VANISHES. Nothing REDs. Measured as a
+      // discriminating pair before the fix: base `grammar=15 carried=15
+      // dropped=none`, head `grammar=16 carried=15 dropped=['likelihood']`.
+      //
+      // ⚠ AND IT KILLED THE REASON `likelihood` EXISTS. The field was added
+      // because ROUTING is falsifiable and WITHHOLDING is not — a populated
+      // `likelihood` is countable over banked draws, whereas a correct
+      // suppression is invisible against a 99.5%-empty baseline. The histogram
+      // below loops over THESE REBUILT RECORDS, so without this line the bucket
+      // counts zero for ever and the countable signal cannot be counted.
+      ...(claim.likelihood !== undefined ? { likelihood: claim.likelihood } : {}),
+      ...(claim.is_baseline !== undefined ? { is_baseline: claim.is_baseline } : {}),
+    })),
+  };
+  // ⭐⭐ THE WIRE HISTOGRAM — the first telemetry this directory has ever carried.
+  //
+  // Derived, not asserted: before this line `src/cee/draft/records/` emitted
+  // ZERO events and made ZERO log calls (contrast control in the same sweep:
+  // the sibling `unified-pipeline/stages/` carries 42 `event:` lines, 24 in
+  // `parse.ts` alone). So the model's RAW claim-kind mix — how many `risk` and
+  // `outcome` claims actually crossed the wire — was never recorded anywhere,
+  // and every census downstream is taken at least one transform later.
+  //
+  // ⚠ WHY THAT MATTERS AND WHY A LATER COUNT CANNOT SUBSTITUTE. "The model
+  // emitted one risk" and "the model emitted three and something dropped two"
+  // produce an IDENTICAL post-projection graph. Without a count taken HERE,
+  // at the first point the response is structurally readable, those two are
+  // indistinguishable and any repair aimed at either is aimed by inference.
+  //
+  // ⛔ KINDS AND COUNTS ONLY — NEVER THE USER'S WORDS. This seam holds
+  // `source_quote` and `label`, which are the user's own text and the model's
+  // prose about it. Both stay out of the log by construction: every value below
+  // is a grammar ENUM or an integer. A histogram cannot leak a brief.
+  //
+  // ⚠ NO `request_id`, AND ITS ABSENCE IS MEASURED RATHER THAN OVERLOOKED:
+  // `projectDraftRecords` receives none (its only parameters are `rawJson` and
+  // `brief`), `log` is a bare pino instance with no ambient request context
+  // (`utils/telemetry.ts:33`), and `DraftArgs` at the live call site
+  // (`adapters/llm/anthropic.ts:1977`) carries no request identifier either.
+  // Threading one is a signature change through another lane's file, so it is
+  // deliberately NOT done here — correlate by `time` against the adjacent
+  // pipeline events, which do carry it.
+  const claimKinds: Record<string, number> = {};
+  for (const claim of records.claims) {
+    claimKinds[claim.claim_kind] = (claimKinds[claim.claim_kind] ?? 0) + 1;
+  }
+  const statedKinds: Record<string, number> = {};
+  for (const item of records.stated_items) {
+    statedKinds[item.kind] = (statedKinds[item.kind] ?? 0) + 1;
+  }
+  // ⭐⭐ DOES THE MODEL ACTUALLY ANSWER? — the one question grammar v10 and
+  // instruction v19 (#1562) left unanswerable.
+  //
+  // `value_scale` is the model's declaration of what its number MEANS, and the
+  // whole producer-declares-it-then-delete-the-inference programme rests on the
+  // model emitting it. Before this line NOTHING could see whether it does:
+  // `value_scale` and `declared_scale` appear in ZERO telemetry payloads
+  // repo-wide, `cee.llm_output.field_presence` tracks six other fields, the
+  // banked v202 witnesses are post-projection payloads that never carry
+  // `claims`, and the projector's own stamp is invisible downstream. So the
+  // rate has been unmeasured AND unmeasurable — which is why the repair stage's
+  // competing inference cannot yet be deleted (`repair/unreachable-factors.ts`),
+  // and why `display-value.ts:507`'s own dated deletion condition cannot be
+  // taken either. Both are waiting on a number nothing produced.
+  //
+  // ⚠ PER CLAIM KIND, NOT A TOTAL, AND THAT IS THE POINT. The projector stamps
+  // `declared_scale` only where the claim mints a factor-kind node
+  // (`CLAIM_KIND_TO_NODE_KIND` maps `factor` and `prior` to "factor"), so a
+  // pooled rate would average a kind that can carry the declaration together
+  // with kinds that structurally cannot, and read as a producer failure when it
+  // is a carrier gap. A per-kind split makes the two distinguishable in the
+  // data rather than in an argument about the data.
+  //
+  // ⛔ KINDS AND INTEGERS ONLY — the block above says a histogram cannot leak a
+  // brief, and that invariant holds here verbatim: `claim_kind` is a grammar
+  // enum and every value below is a count. No value, no unit, no label, no
+  // `source_quote`.
+  const valueScaleByKind: Record<string, { declared: number; absent: number }> = {};
+  // Counts retention in rebuilt draft records only. This is not evidence that
+  // likelihood reaches the saved model or that the number is a valid probability.
+  const likelihoodByKind: Record<string, { routed: number; absent: number }> = {};
+  for (const claim of records.claims) {
+    const bucket = (valueScaleByKind[claim.claim_kind] ??= { declared: 0, absent: 0 });
+    if (claim.value_scale === undefined) bucket.absent += 1;
+    else bucket.declared += 1;
+
+    const lb = (likelihoodByKind[claim.claim_kind] ??= { routed: 0, absent: 0 });
+    if (claim.likelihood === undefined) lb.absent += 1;
+    else lb.routed += 1;
+  }
+  log.info(
+    {
+      event: "cee.draft.records.wire_histogram",
+      claim_kinds: claimKinds,
+      stated_kinds: statedKinds,
+      claim_count: records.claims.length,
+      stated_count: records.stated_items.length,
+      value_scale_by_kind: valueScaleByKind,
+      likelihood_by_kind: likelihoodByKind,
+    },
+    "Draft record set accepted at the seam",
+  );
+
+  return { ok: true, records, projection: projectRecordsToGraph(records, brief) };
+}
+
+/**
+ * ⭐ THE DERIVED COMPLETENESS GUARD — the mirror-killer for the rebuild above.
+ *
+ * The rebuild is a HAND-WRITTEN LIST of the fields that survive the seam, and a
+ * hand-written list that must be kept in step with the grammar is precisely the
+ * defect class this estate pays for most often (trap 12). It had already
+ * happened: `sets_to` was on the wire, in the instruction and in the projector,
+ * and absent here — so the capability was dark on every live draft while 28,165
+ * tests stayed green.
+ *
+ * The seam's own stated defence — "a field the projector reads but the wire
+ * schema stopped validating would fail to compile here" — CANNOT do that job,
+ * because the wire schemas are `.passthrough()` and therefore carry an index
+ * signature: a missing key reads as `unknown`, never as a compile error.
+ *
+ * So this returns the DIFFERENCE between what the grammar declares and what the
+ * seam carries, computed from `buildDraftRecordsSchema()` at call time. A test
+ * asserts it is empty. It is a completeness check on the LIST, which derivation
+ * alone can never provide (trap 12d): deriving the rebuild from the schema would
+ * prove the copies agree, and this proves the list is not SHORT.
+ *
+ * ⚠ It is exported and called by a test rather than run in the request path: a
+ * throw here would turn a future grammar addition into a live outage, and the
+ * honest failure mode for "we forgot to carry a field" is a red build.
+ *
+ * ⭐⭐ IT IS BEHAVIOURAL, NOT DECLARATIVE, AND THAT IS THE WHOLE POINT. An
+ * earlier draft of this function compared the grammar's keys against a
+ * HAND-WRITTEN set of "the keys the seam carries" — which is a third copy of the
+ * same list, and a guard that agrees with itself (trap 13b): add a field to the
+ * grammar and to that set but not to the rebuild, and it passes while the field
+ * is dropped. So instead it BUILDS a probe record set carrying every
+ * grammar-declared key, RUNS `projectDraftRecords`, and reports which keys did
+ * not survive. It measures the real code path and cannot be satisfied by a list.
+ */
+function exampleValueForSchema(spec: unknown): unknown {
+  if (spec === null || typeof spec !== "object") return "x";
+  const s = spec as Record<string, unknown>;
+  if (Array.isArray(s.enum) && s.enum.length > 0) return s.enum[0];
+  switch (s.type) {
+    case "integer":
+    case "number":
+      return 1;
+    case "boolean":
+      return true;
+    case "array":
+      return [exampleValueForSchema(s.items)];
+    case "object":
+      return {};
+    default:
+      return "x";
+  }
+}
+
+function propertiesOf(schema: unknown, path: readonly string[]): Record<string, unknown> {
+  let cursor: unknown = schema;
+  for (const step of path) cursor = (cursor as Record<string, unknown>)?.[step];
+  return (cursor ?? {}) as Record<string, unknown>;
+}
+
+export function findGrammarFieldsDroppedBySeam(): { claims: string[]; statedItems: string[] } {
+  const schema = buildDraftRecordsSchema();
+  const statedProps = propertiesOf(schema, ["properties", "stated_items", "items", "properties"]);
+  const claimProps = propertiesOf(schema, ["properties", "claims", "items", "properties"]);
+
+  // A probe record set in which EVERY declared property is present with a
+  // type-valid value, so anything missing downstream was dropped by the seam.
+  const statedProbe: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(statedProps)) statedProbe[k] = exampleValueForSchema(v);
+  const claimProbe: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(claimProps)) claimProbe[k] = exampleValueForSchema(v);
+
+  const result = projectDraftRecords({ stated_items: [statedProbe], claims: [claimProbe] });
+  if (!result.ok) {
+    // The probe itself failed to validate — report every key as unverifiable
+    // rather than returning a clean result the caller would read as a pass. An
+    // absence probe that cannot run is not evidence of absence (trap 13).
+    return { claims: Object.keys(claimProps), statedItems: Object.keys(statedProps) };
+  }
+  const carriedStated = new Set(Object.keys(result.records.stated_items[0] ?? {}));
+  const carriedClaim = new Set(Object.keys(result.records.claims[0] ?? {}));
+  return {
+    claims: Object.keys(claimProps).filter((k) => !carriedClaim.has(k)).sort(),
+    statedItems: Object.keys(statedProps).filter((k) => !carriedStated.has(k)).sort(),
+  };
+}
+
+/**
+ * Does a truncated-then-salvaged JSON object look like a usable record set
+ * PREFIX?
+ *
+ * The salvage path exists because a generation cut at the token budget often has
+ * a complete, usable prefix. Its predicate used to be `Array.isArray(json.nodes)`
+ * — the graph's discriminator. On this path that predicate is now permanently
+ * false, so salvage would silently never fire and every truncated draft would
+ * become a hard failure. This is the records-shaped twin of that check.
+ *
+ * It is deliberately WEAKER than `DraftRecordSetWire`: salvage only decides
+ * whether to hand the object on. The real gate is the projection above, and then
+ * `AnthropicDraftResponse.safeParse` on the projected graph — so salvage can only
+ * ever offer a candidate, never admit an invalid one.
+ */
+export function isSalvageableRecordSet(value: unknown): boolean {
+  if (value === null || typeof value !== "object") return false;
+  const rec = value as Record<string, unknown>;
+  return Array.isArray(rec.stated_items) && rec.stated_items.length > 0;
+}

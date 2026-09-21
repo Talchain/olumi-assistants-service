@@ -1,0 +1,41 @@
+-- ============================================================================
+-- ROLLBACK for 20260814120000_collab_evidence.sql
+--
+-- ⚠⚠ DROPPING THE COLUMN DESTROYS EVERY PIECE OF EVIDENCE ANYONE ATTACHED.
+-- That is participant-authored reasoning, written in their own words and
+-- attributed to them — the exact class of record this feature exists to keep.
+-- There is no way to "roll back" it into safety; it is deleted.
+--
+-- So the ORDER below matters and it is not the mirror image of the migration:
+-- the constraints come off FIRST and the column LAST, which leaves a usable
+-- intermediate state where evidence rows still exist and are still readable but
+-- nothing new can be written. If the reason for rolling back is a defect in the
+-- read path, STOP AFTER STEP 1 and do not run step 3.
+--
+-- Filename carries `.do-not-apply` per the estate convention: this is a
+-- recovery procedure a human runs deliberately, never something a migration
+-- runner picks up.
+-- ============================================================================
+
+-- ── 1. Stop new evidence being written; leave what exists readable. ─────────
+ALTER TABLE public.elicitation_events
+  DROP CONSTRAINT IF EXISTS elicitation_events_evidence_matches_kind;
+
+ALTER TABLE public.elicitation_events
+  DROP CONSTRAINT IF EXISTS elicitation_events_kind_check;
+
+ALTER TABLE public.elicitation_events
+  ADD CONSTRAINT elicitation_events_kind_check
+  CHECK (kind IN ('belief_submitted','belief_revised','declined','clarification_requested'));
+-- ⚠ This ADD FAILS if any `evidence_attached` row already exists — correctly.
+-- A constraint that quietly admitted rows it forbids would be worse than a
+-- failed rollback. Export those rows before proceeding, or stop here.
+
+DROP INDEX IF EXISTS public.elicitation_events_evidence_idx;
+
+-- ── 2. (nothing) ───────────────────────────────────────────────────────────
+
+-- ── 3. DESTRUCTIVE. Only after the rows above are gone or exported. ────────
+-- ALTER TABLE public.elicitation_events DROP COLUMN IF EXISTS evidence;
+-- Left COMMENTED deliberately: uncommenting is a conscious act, and a
+-- copy-paste of this file should not silently delete anybody's reasoning.

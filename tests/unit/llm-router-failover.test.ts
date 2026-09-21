@@ -6,8 +6,12 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { getAdapter, resetAdapterCache } from "../../src/adapters/llm/router.js";
-import { FailoverAdapter } from "../../src/adapters/llm/failover.js";
+import {
+  getAdapter,
+  getAdapterWithResolution,
+  resetAdapterCache,
+} from "../../src/adapters/llm/router.js";
+import { TASK_MODEL_DEFAULTS } from "../../src/config/model-routing.js";
 import { cleanBaseUrl } from "../helpers/env-setup.js";
 
 describe("LLM Router - Failover Configuration", () => {
@@ -28,7 +32,7 @@ describe("LLM Router - Failover Configuration", () => {
 
     expect(adapter).toBeDefined();
     expect(adapter.name).toBe("fixtures");
-    expect(adapter).not.toBeInstanceOf(FailoverAdapter);
+    expect(adapter.name).not.toContain("failover");
   });
 
   it("should create failover adapter when LLM_FAILOVER_PROVIDERS is set", () => {
@@ -37,7 +41,6 @@ describe("LLM Router - Failover Configuration", () => {
 
     expect(adapter).toBeDefined();
     expect(adapter.name).toBe("fixtures-failover");
-    expect(adapter).toBeInstanceOf(FailoverAdapter);
   });
 
   it("should handle multiple failover providers", () => {
@@ -55,7 +58,7 @@ describe("LLM Router - Failover Configuration", () => {
 
     // Should fall back to regular provider selection
     expect(adapter.name).toBe("fixtures");
-    expect(adapter).not.toBeInstanceOf(FailoverAdapter);
+    expect(adapter.name).not.toContain("failover");
   });
 
   it("should handle whitespace in LLM_FAILOVER_PROVIDERS", () => {
@@ -73,7 +76,7 @@ describe("LLM Router - Failover Configuration", () => {
 
     // Should fall back to regular provider selection
     expect(adapter.name).toBe("fixtures");
-    expect(adapter).not.toBeInstanceOf(FailoverAdapter);
+    expect(adapter.name).not.toContain("failover");
   });
 
   it("should handle trailing commas in LLM_FAILOVER_PROVIDERS", () => {
@@ -99,7 +102,24 @@ describe("LLM Router - Failover Configuration", () => {
 
     // Failover should take precedence
     expect(adapter.name).toBe("fixtures-failover");
-    expect(adapter).toBeInstanceOf(FailoverAdapter);
+  });
+
+  it("keeps failover outside even an explicit model override", () => {
+    vi.stubEnv("LLM_FAILOVER_PROVIDERS", "fixtures,fixtures");
+    vi.stubEnv("LLM_PROVIDER", "openai");
+
+    const { adapter, resolution } = getAdapterWithResolution(
+      "draft_graph",
+      "unregistered-model-that-must-be-ignored",
+    );
+
+    expect(adapter.name).toBe("fixtures-failover");
+    expect(resolution).toMatchObject({
+      provider: "fixtures",
+      resolved_model: "fixture-v1",
+      resolution_source: "llm_model_fallback",
+      modelOverride: "unregistered-model-that-must-be-ignored",
+    });
   });
 
   it("should work with different provider combinations", () => {
@@ -108,6 +128,40 @@ describe("LLM Router - Failover Configuration", () => {
     const adapter = getAdapter("draft_graph");
 
     expect(adapter).toBeDefined();
-    expect(adapter).toBeInstanceOf(FailoverAdapter);
+    expect(adapter.name).toBe("fixtures-failover");
+  });
+
+  it("filters unsupported critique providers before constructing the failover chain", () => {
+    vi.stubEnv("LLM_FAILOVER_PROVIDERS", "openai,anthropic,fixtures");
+
+    const { adapter, resolution } = getAdapterWithResolution("critique_graph");
+
+    expect(adapter.name).toBe("anthropic-failover");
+    expect(resolution).toMatchObject({
+      provider: "anthropic",
+      resolution_source: "llm_model_fallback",
+    });
+  });
+
+  it("does not pretend one task-capable member is an active failover chain", () => {
+    vi.stubEnv("LLM_FAILOVER_PROVIDERS", "openai,anthropic");
+    vi.stubEnv("LLM_PROVIDER", "openai");
+
+    // Only ONE listed provider (anthropic) can serve critique_graph, so the
+    // chain must not activate. This used to be asserted indirectly, via the
+    // MODEL_PROVIDER_MISMATCH that the then-OpenAI checked-in default produced
+    // once resolution fell through. That default is now Anthropic, so the
+    // fall-through succeeds — and the non-activation is asserted DIRECTLY:
+    // a plain "anthropic" adapter from the task default, never a
+    // "*-failover" adapter and never resolution_source "llm_model_fallback".
+    const { adapter, resolution } = getAdapterWithResolution("critique_graph");
+
+    expect(adapter.name).toBe("anthropic");
+    expect(adapter.name).not.toContain("failover");
+    expect(resolution).toMatchObject({
+      provider: "anthropic",
+      resolved_model: TASK_MODEL_DEFAULTS.critique_graph,
+      resolution_source: "task_default",
+    });
   });
 });

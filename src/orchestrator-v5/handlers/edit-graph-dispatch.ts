@@ -1,0 +1,5743 @@
+/**
+ * V5 pre-Sonnet dispatch for edit_graph turns.
+ *
+ * Mirrors draft-graph-dispatch.ts for natural-language graph edits.
+ * `edit_graph` is NOT in v0.7.0 V5ActionType, so Sonnet's tool-use validator
+ * cannot propose it. Route-v2 detects the edit shape (message-kind, graph
+ * present, positive edit-intent regex, no non-edit phrasing regex) and
+ * delegates deterministically to handleEditGraph.
+ *
+ * Adapter decision (same reasoning as draft-graph-dispatch): v0.7.0's
+ * OlumiResponse.graph_patch block is narrow (single-target operation on
+ * ['set_factor_value','add_constraint','adjust_edge_strength']), whereas
+ * V4's edit_graph emits richer patch descriptions including multi-op
+ * patches, pending clarifications, and route metadata. The adapter
+ * produces a text-only OlumiResponse; the applied graph persists via
+ * the pipeline's own side channels.
+ */
+
+import type { FastifyRequest } from 'fastify';
+
+import type { MessageTurnPayload, OlumiResponse } from '@talchain/schemas/boundary';
+
+import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
+import {
+  handleEditGraph,
+  parseEditGraphResponse,
+  type EditGraphResult,
+} from '../../orchestrator/tools/edit-graph.js';
+import { extractEditLlmCallTelemetry, type EditGraphLlmCallTelemetry } from '../diagnostics/v5-diagnostic-trace.js';
+import { classifyAddRiskIntent } from './edit-templates/classify-add-risk.js';
+import { buildAddRiskClarification } from './edit-templates/add-risk-template.js';
+import { wouldExceedAddRiskLimits } from '../../orchestrator/graph-structure-validator.js';
+import { commitDirectAnswer, computeRequestHash } from '../commit.js';
+import { projectGraphForPersistence } from '../persisted-graph-projection.js';
+import {
+  buildEditGraphHandlerFact,
+  buildGenericEditGraphHandlerFact,
+  isSuccessfulAppliedMutation,
+} from './edit-graph-fact-builder.js';
+import {
+  applyEgressForbiddenPhraseGuard,
+  EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT,
+  findSuccessClaimHit,
+} from '../compose/forbidden-user-facing-phrases.js';
+import { applyProcessNarrationGuard } from '../compose/process-narration.js';
+// ROADMAP 2.427 — configure-option outcome binding (see the guard below the
+// V5 H5 invariant). The composer is the SAME one route-v2's pre-edit-lane
+// intercept uses, so the recovery copy and the intercept copy cannot drift.
+import { evaluateConfigureOptionOutcome } from '../routing/configure-option-outcome.js';
+// ⭐⭐ ROADMAP 2.1266 — the edit-lane arm of the option-intervention misroute
+// guard. 2.427 above owns the TEXT on this turn; this owns the WRITE, so a
+// factor-baseline mutation cannot persist behind a reply that says the option's
+// effect value is still unset. See the module header for the wire witness.
+import { buildFactorScaleMap } from '../tools/plot-intervention-scale.js';
+import { decideNativeQuantityAnswer } from '../routing/native-quantity-answer.js';
+import {
+  buildNativeQuantityOperation,
+  formatNativeQuantityAck,
+  readCommittedNativeQuantity,
+  readExistingIntervention,
+} from '../routing/native-quantity-operation.js';
+import {
+  decideOptionInterventionWrite,
+  formatWithheldWriteNotice,
+  resolveNodeLabels,
+} from '../routing/option-intervention-write-guard.js';
+// ⭐⭐ THE OPTION-`observed_state` SUBSTITUTION — the SECOND wrong-carrier
+// shape, witnessed on deployed `91d39119` on 30 Aug 2026 and NOT covered by the
+// guard above (that one requires a `not_honoured` outcome verdict, which the
+// witnessed turn does not reach: it is allowed as `outcome_not_unhonoured`).
+// Different question, different evidence, separate module — see its header for
+// why folding it into the guard above would be trap 21.
+import {
+  detectOptionOwnValueSubstitution,
+  formatOptionOwnValueWithheldNotice,
+} from '../routing/option-observed-state-substitution.js';
+// The product's OWN shipped configure affordance — the single source of that
+// chip's copy and the prefix route-v2's configure gate matches. Derived, never
+// a second spelling (trap 12).
+import { buildConfigureOptionChip } from '../configure-option-chip-text.js';
+// ⭐⭐ ORDINARY-TEXT AUTHORITY (the increment this file's `grep -c warrant = 0`
+// named). This lane had NO affirmative authority of any kind: it asked whether
+// the user's words DESCRIBED a change and never whether they AUTHORISED one, so
+// "Should we rename this?" renamed the node and confirmed it. The verdict is
+// resolved ONCE in `routing/ordinary-text-authority.ts` — from the estate's
+// already-ratified deliberation classifier over a message quote-masked by THIS
+// graph's own node labels — and consumed here and in `hasMutationWarrantSignal`.
+// `hasStrongerThanTextWarrant` is the SAME precedence the V5 warrant applies, as
+// a value, so this lane cannot second-guess a typed chip or a confirmed answer.
+import {
+  buildMutationWarrantDemotionText,
+  hasStrongerThanTextWarrant,
+} from '../routing/mutation-warrant.js';
+import {
+  projectModelNodeLabels,
+  resolveOrdinaryTextAuthority,
+} from '../routing/ordinary-text-authority.js';
+import { GRAPH_MUTATING_HANDLER_IDS } from '../routing/mutation-consent.js';
+// ⭐⭐ ROADMAP 2.1266 — the WRITE PATH the guard above exists because we lacked.
+// `option-intervention-write-guard.ts` withholds a wrong-entity write; this
+// composes the RIGHT one deterministically, so the product's own advised
+// sentence has an acceptance path (P8). See its module header.
+import {
+  buildOptionEffectRawOperation,
+  formatOptionEffectWriteAck,
+  readCommittedOptionEffect,
+  resolveOptionEffectWrite,
+} from '../routing/option-effect-write.js';
+import { composeConfigureOptionClarifyResponse } from '../compose/configure-option-clarify-response.js';
+import { finalizeChips } from '../compose/chip-finalizer.js';
+import { resolveRunAdmission } from '../tools/handlers/analysis-ready-core.js';
+import {
+  decideGoalTargetReceipt,
+  formatGoalTargetNotSavedText,
+} from '../compose/goal-target-receipt-guard.js';
+import { getAdapter } from '../../adapters/llm/router.js';
+import { getSystemPromptMeta } from '../../adapters/llm/prompt-loader.js';
+import {
+  classifyThrownFailureCode,
+  deriveEditTurnFieldsFromResult,
+  finaliseEditTurnEvent,
+  type EditTurnEventAccumulator,
+} from './edit-graph-turn-event.js';
+import type {
+  ConversationContext,
+  ConversationMessage,
+  DecisionStage,
+  GraphPatchBlockData,
+  GraphV3T,
+  PatchOperation,
+  PendingClarificationState,
+  SuggestedAction,
+  V2RunResponseEnvelope,
+} from '../../orchestrator/types.js';
+import { GraphV3 } from '../../schemas/cee-v3.js';
+import type {
+  AnalysisStateIngress,
+  GraphStateIngress,
+  SelectedElementsIngress,
+} from '../boundary/request-extensions.js';
+import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
+import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
+import { buildAppliedGraphWireField } from '../compose/applied-graph-emit.js';
+import {
+  buildTurnContext,
+  loadMostRecentPendingActions,
+  loadPersistedGraphStrict,
+  loadRecentConversationTurns,
+  loadScenarioBriefText,
+} from '../build-turn-context.js';
+import { projectBriefForEdit } from '../../orchestrator/context/serialise.js';
+import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
+import {
+  appendLapseNotice,
+  emitHoldLapseTelemetry,
+  threadHoldsThroughMutatingCommit,
+} from './hold-thread-through.js';
+import { projectConversation } from '../context/context-pack-assembler.js';
+import { computeExpectedGraphCasHashes } from '../context/graph-cas-conflict.js';
+import { extractGraphOptionIds } from '../context/option-identity.js';
+import { config } from '../../config/index.js';
+import {
+  deriveAnalysisFreshness,
+  emitFreshnessTelemetry,
+  isSuccessfulRunAnalysisFact,
+  type FreshnessDerivation,
+} from '../context/freshness.js';
+import { projectEditSelectionFocus } from './edit-selection-focus.js';
+import type { HandlerFact } from '@talchain/schemas/orchestrator';
+import {
+  classifyAnalyticalIntent,
+  hasMutationSignal,
+  looksLikeAnaphoricEdit,
+  looksLikeVagueEdit,
+} from '../routing/analytical-intent.js';
+import {
+  buildAnaphoricBindingDisclosure,
+  buildLabelChip,
+  resolveAnaphoricReferent,
+} from '../compose/edit-clarify-response.js';
+import {
+  nodeIdFromRef,
+  projectTurnReferentsFromWindow,
+  type TurnReferents,
+} from '../context/turn-referents.js';
+import {
+  buildProposalPendingAction,
+  decideProposalContinuation,
+  findProposedConceptAction,
+  resolveProposalResume,
+} from '../coaching/proposal-continuation.js';
+import { buildReadinessRecoveryChip, buildReadinessEffectPending } from '../coaching/readiness-recovery.js';
+import { resolveRecordedOptionEffectAnswer, type RecordedEffectAnswer } from '../routing/repair-value-binding.js';
+import {
+  buildHeldSupersessionNotice,
+  evaluateEditGraphMutations,
+  hasLiveHeldProposal,
+  type EditGmDecision,
+} from './edit-graph-referee-gate.js';
+// ROADMAP 2.474 — the coach's structural editing tool: contract, entry
+// decision, transport. Three modules on purpose (see their headers): the
+// rules are provable without an LLM, the transport without a graph.
+import {
+  decideStructuralEditEntry,
+  holdSpineActiveForMode,
+} from '../tools/structural-edit-entry.js';
+import { buildStructuralEditGrounding } from '../tools/propose-structural-edit.js';
+import {
+  composeStructuralEdit,
+  resolveComposerBudget,
+  COMPOSER_POST_CALL_RESERVE_MS,
+} from '../tools/compose-structural-edit.js';
+import {
+  accountEditParts,
+  buildMultiPartRejectionClarify,
+  buildUnmappedPartsNotice,
+  buildPartAccountingDisclosure,
+  buildReplayOverflowNotice,
+  buildSubstitutionClarify,
+  decomposeEditMessage,
+  MAX_REPLAY_CHIPS,
+  type EditPartAccounting,
+  type PatchOperationLike,
+} from '../routing/edit-part-decomposition.js';
+import { clampLabel, describeChangeset, type ChangesetOpLike } from './describe-changeset.js';
+import {
+  buildStructuralEditScopeNotice,
+  buildStructuralEditContinuation,
+} from './structural-edit-split-disclosure.js';
+import {
+  STRUCTURAL_EDIT_DECLINE_COPY,
+  type StructuralEditDeclineClass,
+} from './structural-edit-decline-answers.js';
+import { isPatchBudgetRejection } from '../../orchestrator/tools/patch-budget-limits.js';
+import { staleAnalysisBlocksApply } from '../graph-management/frame-gate.js';
+import type { FrameFreshness } from '../graph-management/types.js';
+import { derivePendingActionsFromFinalizedChips } from '../compose/derive-pending-actions.js';
+import {
+  PENDING_ACTION_DEFAULT_TURN_TTL,
+  PENDING_ACTION_DEFAULT_WALL_TTL_MS,
+  type PendingAction,
+} from '../session/pending-action.js';
+import type { SuggestedAction as BoundarySuggestedAction } from '../compose/types.js';
+import { randomUUID } from 'node:crypto';
+
+// v0.7.0's Stage enum (frame | analyse | decide | review) does not align with
+// V4's DecisionStage (frame | ideate | evaluate | decide | optimise). Map
+// across the boundary so ConversationContext.framing.stage is a valid V4
+// DecisionStage. Unmapped values fall back to 'frame' — edit_graph is a
+// structural operation that doesn't branch on stage, so a broad default is
+// safe here.
+/**
+ * V5 Context Management v1 — no-op recovery decision.
+ *
+ * Pure function. Given the user's message, the prior fact chain, and
+ * the post-edit freshness verdict, decide whether to upgrade a bland
+ * no-op response into context-aware copy. Returns either a non-null
+ * `assistantText` to overwrite + optional suggested-action chips, or
+ * `assistantText: null` to leave the existing response unchanged.
+ *
+ * Branches:
+ *   - `analytical_fresh`        — analytical intent + fresh run_analysis fact.
+ *   - `analytical_stale`        — analytical intent + stale run_analysis fact.
+ *   - `analytical_none`         — analytical intent + no run_analysis fact,
+ *                                  and the freshness authority CONFIRMS there
+ *                                  is none (`freshness: 'none'`).
+ *   - `analytical_indeterminate`— analytical intent + no run_analysis fact,
+ *                                  but `freshness: 'unknown'` — the read
+ *                                  failed, so absence is UNPROVEN. Discloses
+ *                                  that we cannot confirm; never claims the
+ *                                  user has not analysed (ROADMAP 2.1237).
+ *   - `vague_edit`              — no analytical intent, no concrete mutation
+ *                                  signal (message looks edit-like but vague).
+ *   - `explore_factor`          — message contains a known graph node label,
+ *                                  no mutation signal, fresh run_analysis
+ *                                  fact present. Three exploration chips
+ *                                  (explain / what-would-flip / pre-mortem).
+ *   - `explore_factor_stale`    — same as `explore_factor` but the prior
+ *                                  analysis is stale. Single rerun chip;
+ *                                  exploration chips suppressed to avoid
+ *                                  silent stale-context UX.
+ *   - `ambiguous`               — anything else; preserve existing copy.
+ *
+ * Freshness precedence for the explore_factor pair:
+ *   - 'fresh'           → explore_factor
+ *   - 'stale'           → explore_factor_stale
+ *   - 'unknown' / 'none'→ defer to ambiguous (cannot prove freshness;
+ *                          safer to preserve V4 copy than nudge with
+ *                          analysis-grounded chips).
+ *
+ * Copy contract: British English, calm, concise. No emoji, no em dashes,
+ * no raw IDs, no internal terms ("validator", "patch", "schema",
+ * "operation", "dispatcher", "tool call"), no "winner" / "winning" /
+ * "recommendation".
+ */
+type NoOpRecoveryBranch =
+  | 'analytical_fresh'
+  | 'analytical_stale'
+  | 'analytical_none'
+  // ROADMAP 2.1237 — analytical intent, no run_analysis fact, AND the
+  // freshness authority could not determine whether one exists. Distinct from
+  // `analytical_none` on purpose: that branch CLAIMS the absence, this one
+  // discloses that we cannot see.
+  | 'analytical_indeterminate'
+  | 'vague_edit'
+  // Spec §4.2 — the three outcomes for an ANAPHORIC edit ("update it").
+  // Named apart from `vague_edit` because they answer a different question:
+  // vague_edit means "no target", these mean "a target to be resolved".
+  // There is deliberately no fourth, reset-shaped outcome.
+  | 'anaphoric_edit_bound'
+  | 'anaphoric_edit_ask_candidates'
+  | 'anaphoric_edit_ask_unresolved'
+  | 'explore_factor'
+  | 'explore_factor_stale'
+  | 'proposal_stage_one'
+  | 'proposal_stage_two'
+  | 'ambiguous'
+  // R10 — no-op clarification-preservation outcomes. Feed the R7 event's
+  // `branch` field so the preservation-vs-fallback rate is measurable.
+  | 'noop_clarification_preserved'
+  | 'noop_fallback_copy';
+
+interface NoOpRecoveryDecision {
+  readonly branch: NoOpRecoveryBranch;
+  readonly intent_class: ReturnType<typeof classifyAnalyticalIntent>;
+  readonly has_run_analysis_fact: boolean;
+  readonly assistantText: string | null;
+  readonly suggestedActions: readonly BoundaryAction[];
+}
+
+interface DecideNoOpRecoveryInput {
+  readonly message: string;
+  readonly priorFacts: readonly HandlerFact[];
+  readonly freshness: 'fresh' | 'stale' | 'unknown' | 'none';
+  /**
+   * Whether the current graph is ready for analysis (has nodes and
+   * edges). Mirrors the predicate used by `tryNoAnalysisGuard` so the
+   * `analytical_none` branch only offers a `run_analysis` chip when
+   * clicking it would actually work. When false, the chip is
+   * suppressed and the copy nudges getting the model ready first.
+   */
+  readonly graphReady: boolean;
+  /**
+   * V5 P0 — Most-recent-turn proposed concept, if any. Populated by the
+   * caller from `EnrichedTurnContext.most_recent_pending_actions` via
+   * `findProposedConceptAction`. When non-null, this enables the
+   * `proposal_stage_one` / `proposal_stage_two` branches that resume
+   * a Sonnet-emitted proposal as a deterministic clarifier instead of
+   * dead-ending in `vague_edit`.
+   *
+   * Optional on the type so existing callers / tests that did not
+   * receive the field continue to compile; behaviour is identical to
+   * the prior implementation when this is undefined or null.
+   */
+  readonly pendingProposedConcept?: {
+    readonly concept: string;
+    readonly preferred_kind: 'risk' | 'factor' | 'either';
+  } | null;
+  /**
+   * V5 P0 staging-smoke follow-up (PR #212): when the pre-LLM
+   * proposal-continuation intercept in `dispatchEditGraph` has already
+   * emitted Stage 1 / Stage 2 deterministic chips on this turn, the
+   * no-op recovery layer MUST NOT also fire its `proposal_stage_one`
+   * / `_two` branches — that produced 6 chips instead of 3 on staging.
+   *
+   * When `true`, the proposal-resume ladder is skipped here entirely;
+   * existing branches (analytical_*, vague_edit, explore_factor*,
+   * ambiguous) still run as defence-in-depth. When `undefined` or
+   * `false`, behaviour is identical to the prior implementation.
+   *
+   * The flag is set by the dispatch call site, not by the resumer.
+   */
+  readonly proposalAlreadyEmittedInThisTurn?: boolean;
+  /**
+   * R10 — set when the V4 no-op branch already preserved a scrubbed LLM
+   * clarifying question. When true, `decideNoOpRecovery` returns a fully inert
+   * decision so no branch (notably vague-edit) can clobber the preserved text.
+   */
+  readonly noOpClarificationPreserved?: boolean;
+  /**
+   * Current graph nodes — used by:
+   *   1. the `explore_factor` safety-net branch to detect a no-op message
+   *      that references a known graph label without an edit verb / value
+   *      (the symptom of a label-chip click that slipped past the upstream
+   *      `tryPostAnalysisLabelIntercept` in route-v2.ts);
+   *   2. the V5 P0 `proposal_stage_two` clarifier to pick candidate
+   *      affect-target labels from the existing model (goal / outcome
+   *      kinds first, then other factors).
+   *
+   * An empty array is acceptable — the explore branch never fires and the
+   * Stage 2 clarifier falls back to a free-text prompt. Each entry needs
+   * `label`; `kind` is optional and used only by Stage 2's ordering.
+   */
+  readonly nodes?: readonly { readonly label: string; readonly kind?: string }[] | null;
+  /**
+   * Spec §4 — the referent register for this turn (`turn_referents`), used ONLY
+   * by the `anaphoric_edit_*` branches to resolve `it` / `this` / `that`.
+   *
+   * Optional on the type (mirroring `most_recent_pending_actions` and
+   * `pendingProposedConcept`) so existing callers and tests that do not supply
+   * it keep compiling. ⚠ Omitting it is NOT the same as supplying an empty
+   * register: when the field is absent the anaphoric branches treat the
+   * register as UNAVAILABLE and ASK, which is the safe outcome. They never fall
+   * back to the reset.
+   */
+  readonly referents?: TurnReferents | null;
+}
+
+const NO_OP_FRESH_TEXT =
+  "I haven't changed the model. This looks like an analysis question. "
+  + "I can walk you through the latest result.";
+
+const NO_OP_STALE_TEXT =
+  "I haven't changed the model. The analysis is based on an earlier "
+  + "version of the graph. Re-run analysis and I'll walk you through "
+  + 'the latest result.';
+
+const NO_OP_NONE_GRAPH_READY_TEXT =
+  "I haven't changed the model. Run analysis first and I'll walk you "
+  + 'through the result.';
+
+const NO_OP_NONE_GRAPH_NOT_READY_TEXT =
+  "I haven't changed the model. Once the model is ready, run analysis "
+  + "and I'll explain what drove the outcome.";
+
+// ROADMAP 2.1237 — the DEGRADED-READ copy. Says what we know ("I haven't
+// changed the model") and what we do not ("I can't confirm whether an
+// analysis has run"), and asserts nothing about the user's history. No
+// internal vocabulary: the user never hears "degraded" or "freshness".
+const NO_OP_INDETERMINATE_GRAPH_READY_TEXT =
+  "I haven't changed the model. I can't confirm whether an analysis has "
+  + "already run for this decision. Running one now will give us a result "
+  + 'either way.';
+
+const NO_OP_INDETERMINATE_GRAPH_NOT_READY_TEXT =
+  "I haven't changed the model. I can't confirm whether an analysis has "
+  + 'already run for this decision. Once the model is ready we can run one '
+  + 'and find out.';
+
+// PR #218 smoke follow-up (Fix B): the prior copy said "Tell me which
+// factor or edge you want to adjust" — "factor or edge" leaks internal
+// schema vocabulary the copy contract forbids, and the smoke showed it
+// reaching the user whenever a genuine proposal fell through extraction.
+// Reworded to keep the meaning (nothing changed yet; ask what to change)
+// without naming schema concepts (edge/node/graph/schema/patch).
+const NO_OP_VAGUE_EDIT_TEXT =
+  'I have not changed the model yet. Tell me what you want to change, '
+  + 'and I will help apply it.';
+
+/**
+ * Spec §4.2 — copy for the three ANAPHORIC outcomes.
+ *
+ * Copy contract, checked against `FORBIDDEN_USER_FACING_PHRASES` and the
+ * branch rules above: British English; no emoji; no em dashes; no internal
+ * terms (`validator` / `patch` / `schema` / `operation` / `node` / `edge` /
+ * `graph`); no raw ids; a POSITIVE statement of mutation status, never a
+ * denial like "nothing changed". The lead sentence is the one already shipping
+ * at `NO_OP_VAGUE_EDIT_TEXT`, so it is known to clear the egress guard.
+ *
+ * ⚠ EVERY ONE OF THESE ASKS A QUESTION. That is the contract, not a style
+ * choice: the branch these replace asserted nothing and asked nothing, which is
+ * the one state where the product holds more information than the user and
+ * volunteers less.
+ */
+const ANAPHORIC_LEAD_TEXT = 'I have not changed the model yet.';
+
+/**
+ * Chip cap for the ambiguous-candidates ask. Matches the 3 that
+ * `selectEditClarifyTargets` offers, so the two clarify surfaces do not present
+ * visibly different budgets for the same kind of question.
+ */
+const ANAPHORIC_CANDIDATE_CHIP_CAP = 3;
+
+/**
+ * Exactly one candidate: BIND, and disclose the binding in its own sentence,
+ * immediately after the mutation-status lead — sentence index 1, asserted by
+ * position in `edit-graph-anaphoric-recovery.test.ts` so this sentence cannot
+ * drift from the copy. Never silently — the user must be able to see what was
+ * assumed and correct it, which is also what makes the next turn's "no, the
+ * other one" resolvable. The disclosure sentence itself is the composer's
+ * `buildAnaphoricBindingDisclosure`, shared with the value pre-route's receipt.
+ */
+function buildAnaphoricBoundText(label: string): string {
+  return (
+    `${ANAPHORIC_LEAD_TEXT} ${buildAnaphoricBindingDisclosure(label)} `
+    + 'What value would you like it set to?'
+  );
+}
+
+/** More than one candidate: ASK, with the candidates offered as chips. */
+const ANAPHORIC_ASK_CANDIDATES_TEXT =
+  `${ANAPHORIC_LEAD_TEXT} I am not sure which one you mean. `
+  + 'Which of these would you like to change?';
+
+/**
+ * Nothing to bind to, or the register could not be read: ASK, and say what was
+ * looked at.
+ *
+ * ⚠ THE SECOND SENTENCE IS A CLAIM ABOUT THIS BUILD'S WHOLE DOMAIN, so it names
+ * ONLY what is actually consulted today. Spec §4.2's example copy also offers
+ * "I looked at what you have selected", and that would be FALSE here: the
+ * selection rank of the register has no producer yet (§3.5 needs a UI-side
+ * "selection last changed" signal). Saying it would be a notice whose truth
+ * condition the code does not meet. When that producer lands, this sentence is
+ * the thing that must change with it.
+ */
+const ANAPHORIC_ASK_UNRESOLVED_TEXT =
+  `${ANAPHORIC_LEAD_TEXT} I am not sure which part of your model you mean. `
+  + 'I looked back at what I last told you about and could not pin it down. '
+  // ⚠ THIS ENDS IN A QUESTION, and the first draft did not — it read "Tell me
+  // which one to change, and I will apply it.", which TELLS rather than ASKS.
+  // The test asserting every anaphoric reply contains a question mark caught it.
+  // That is a milder form of the exact failure this whole branch removes, and it
+  // reappeared inside the fix for it, so the assertion stays.
+  + 'Which part would you like to change?';
+
+const NO_OP_EXPLORE_FACTOR_TEXT =
+  "I haven't changed the model. It looks like you would like to "
+  + 'explore this. I can walk you through the analysis, look at '
+  + 'what could change the outcome, or run a pre-mortem.';
+
+const NO_OP_EXPLORE_FACTOR_STALE_TEXT =
+  "I haven't changed the model. The analysis is based on an earlier "
+  + 'version of the graph. Re-run analysis to explore this against '
+  + 'the latest result.';
+
+const EXPLAIN_RESULTS_CHIP: BoundaryAction = Object.freeze({
+  id: 'chip_action_explain_results',
+  label: 'Walk me through the analysis',
+  message: 'Walk me through the analysis.',
+  // Plural — matches the registered V5 handler in `tools/registry.ts`
+  // and the deterministic chip-click whitelist. Using the singular
+  // `'explain_result'` would fall through as a deprecated alias and
+  // miss the fast chip-click dispatch.
+  action_type: 'explain_results' as const,
+});
+
+const RERUN_ANALYSIS_CHIP: BoundaryAction = Object.freeze({
+  id: 'chip_action_rerun_analysis',
+  label: 'Re-run analysis',
+  message: 'Re-run the analysis.',
+  action_type: 'run_analysis' as const,
+});
+
+const RUN_ANALYSIS_CHIP: BoundaryAction = Object.freeze({
+  id: 'chip_action_run_analysis',
+  label: 'Run analysis',
+  message: 'Run analysis.',
+  action_type: 'run_analysis' as const,
+});
+
+/**
+ * What-would-flip exploration chip. Carries `action_type:
+ * 'what_would_flip'` so a click hits the deterministic chip-click
+ * fast path in route-v2.ts:819 — zero Sonnet round-trip. Used by the
+ * `explore_factor` safety-net branch as one of three exploration
+ * affordances.
+ */
+const WHAT_WOULD_FLIP_CHIP: BoundaryAction = Object.freeze({
+  id: 'chip_action_what_would_flip',
+  label: 'What could change the outcome?',
+  message: 'What could change the outcome of this analysis?',
+  action_type: 'what_would_flip' as const,
+});
+
+/**
+ * Pre-mortem prompt chip. No `action_type` because there is no
+ * registered handler for the pre-mortem flow; the click routes
+ * through TurnExecutor as a normal user turn. Mirrors the
+ * decide-stage rule pattern in
+ * `compose/chip-generator.ts:541-546`.
+ */
+const RUN_PRE_MORTEM_CHIP: BoundaryAction = Object.freeze({
+  id: 'chip_action_run_pre_mortem',
+  label: 'Run a pre-mortem',
+  message: 'Imagine this decision went wrong. What would have caused it?',
+});
+
+/**
+ * Escape regex metacharacters in a literal label string so it can be
+ * embedded inside a custom-boundary pattern safely. Labels are
+ * user-authored and may contain `.()*+?[]{}^$|\` etc.
+ */
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Case-insensitive ALPHANUMERIC-BOUNDARY check: does `message`
+ * contain any of `nodes`'s labels as a complete token?
+ *
+ * The pre-round-3 implementation used JS `\b` which is defined as a
+ * word/non-word transition where `\w = [A-Za-z0-9_]`. That rejects
+ * labels whose first or last character is non-word — e.g.
+ * `Revenue (%)` (ends with `)`) or `C++` (ends with `+`) — because
+ * the leading / trailing `\b` cannot fire when the label itself ends
+ * with a non-word character (no word→non-word transition is
+ * possible). Round-3 reviewer flagged this as a false-negative class
+ * the corpus could realistically hit.
+ *
+ * The custom boundary `(^|[^A-Za-z0-9])` / `(?=$|[^A-Za-z0-9])`
+ * fires on start-of-string / end-of-string or any non-alphanumeric
+ * character around the literal label. This:
+ *   - still rejects "costs" / "costliness" for label "Cost" (the
+ *     character AFTER "cost" is alphanumeric `s` / `l`),
+ *   - still matches standalone "cost" with surrounding punctuation
+ *     ("Explore the Cost!"),
+ *   - now matches "Revenue (%)" inside "Look at Revenue (%) here"
+ *     (the `)` is the label's own trailing char; the lookahead sees
+ *     the following space as non-alphanumeric).
+ *
+ * Labels shorter than 3 characters are still skipped — single- and
+ * two-letter labels would false-positive on common words even with
+ * alphanumeric boundaries (e.g. a label "AI" matching "wait" — the
+ * `A` after `w` is alphanumeric so the leading boundary fails, but
+ * a label "X" inside a numeric context could leak).
+ *
+ * Underscore (`_`) is intentionally treated as alphanumeric by
+ * `[^A-Za-z0-9]` (i.e. as a boundary character). Labels do not use
+ * underscores in practice; if they did, this would NOT match
+ * "foo_label" against label "label" — same conservative behaviour as
+ * `\b`.
+ */
+function messageContainsKnownLabel(
+  message: string,
+  nodes: readonly { readonly label: string }[] | null | undefined,
+): boolean {
+  if (!nodes || nodes.length === 0) return false;
+  for (const node of nodes) {
+    if (typeof node.label !== 'string') continue;
+    const label = node.label.trim();
+    if (label.length < 3) continue;
+    const pattern = new RegExp(
+      `(^|[^A-Za-z0-9])${escapeRegex(label)}(?=$|[^A-Za-z0-9])`,
+      'i',
+    );
+    if (pattern.test(message)) return true;
+  }
+  return false;
+}
+
+export function decideNoOpRecovery(input: DecideNoOpRecoveryInput): NoOpRecoveryDecision {
+  const hasRunAnalysisFact = input.priorFacts.some(
+    (f) => f.fact_type === 'run_analysis' && isSuccessfulRunAnalysisFact(f),
+  );
+
+  // V5 P0 — early-emit authority guard (PR #216 review BLOCKER fix).
+  //
+  // When the pre-LLM proposal intercept has ALREADY emitted a Stage 1
+  // / Stage 2 response this turn (`proposalAlreadyEmittedInThisTurn ===
+  // true`), that response is authoritative: it carries the clean
+  // concept and exactly the right chips. The no-op recovery layer must
+  // NOT touch it via ANY branch.
+  //
+  // A narrower "suppress only the proposal_stage_* branches" guard was
+  // insufficient: the SAME agreement message can also satisfy
+  // `looksLikeVagueEdit` / `classifyAnalyticalIntent` (e.g. the staging
+  // transcript "...how should we update the decision model?" matches
+  // the vague-edit signal), so after the proposal branch was suppressed
+  // the recovery returned `vague_edit` copy — "I haven't changed the
+  // model yet. Tell me which factor or edge..." — which the dispatch
+  // then applied over the Stage 1 text, reintroducing the exact failure
+  // this feature removes AND leaking the forbidden "factor or edge"
+  // phrasing. Returning a fully INERT decision here makes it
+  // structurally impossible for any current or future recovery branch
+  // to overwrite or append to the authoritative early-emit response.
+  // The dispatch still refreshes the pending-action TTL on the
+  // early-emit path independently of this return value.
+  if (input.proposalAlreadyEmittedInThisTurn === true) {
+    return {
+      branch: 'ambiguous',
+      intent_class: null,
+      has_run_analysis_fact: hasRunAnalysisFact,
+      assistantText: null,
+      suggestedActions: [],
+    };
+  }
+
+  // R10 — no-op clarification-preservation authority guard. When the V4 no-op
+  // branch already preserved a scrubbed LLM clarifying question
+  // (`noOpClarificationPreserved === true`), that question is authoritative for
+  // this turn. Return a fully INERT decision (assistantText: null = keep the
+  // upstream text) so no recovery branch — in particular the vague-edit branch,
+  // which fires precisely on the ambiguous-target messages that PRODUCE a
+  // clarifying question — can overwrite it. Mirrors the early-emit guard above.
+  if (input.noOpClarificationPreserved === true) {
+    return {
+      branch: 'noop_clarification_preserved',
+      intent_class: null,
+      has_run_analysis_fact: hasRunAnalysisFact,
+      assistantText: null,
+      suggestedActions: [],
+    };
+  }
+
+  const intentClass = classifyAnalyticalIntent(input.message);
+  const mutationSignal = hasMutationSignal(input.message);
+
+  // V5 P0 proposal-memory continuation — Stage 2 / Stage 1 ladder.
+  //
+  // Defence-in-depth for the case where the pre-LLM intercept did NOT
+  // fire (e.g. graph parse failure made it unsafe, or this is the
+  // add-risk branch where the intercept is skipped). When the intercept
+  // DID fire, the early-emit authority guard above has already returned;
+  // we never reach here. Pending exists but neither Stage 1 nor Stage 2
+  // matched → null return → fall through to the existing branch ladder.
+  {
+    const proposalDecision = decideProposalContinuation({
+      message: input.message,
+      pendingProposedConcept: input.pendingProposedConcept ?? null,
+      nodes: input.nodes ?? null,
+    });
+    if (proposalDecision !== null) {
+      return {
+        branch:
+          proposalDecision.stage === 'stage_two'
+            ? 'proposal_stage_two'
+            : 'proposal_stage_one',
+        intent_class: intentClass,
+        has_run_analysis_fact: hasRunAnalysisFact,
+        assistantText: proposalDecision.assistantText,
+        suggestedActions: proposalDecision.suggestedActions.map((a) => ({
+          id: a.id,
+          label: a.label,
+          message: a.message,
+        })),
+      };
+    }
+  }
+
+  if (intentClass !== null && !mutationSignal) {
+    if (hasRunAnalysisFact && input.freshness === 'fresh') {
+      return {
+        branch: 'analytical_fresh',
+        intent_class: intentClass,
+        has_run_analysis_fact: true,
+        assistantText: NO_OP_FRESH_TEXT,
+        suggestedActions: [EXPLAIN_RESULTS_CHIP],
+      };
+    }
+    if (hasRunAnalysisFact && input.freshness === 'stale') {
+      return {
+        branch: 'analytical_stale',
+        intent_class: intentClass,
+        has_run_analysis_fact: true,
+        assistantText: NO_OP_STALE_TEXT,
+        suggestedActions: [RERUN_ANALYSIS_CHIP],
+      };
+    }
+    if (!hasRunAnalysisFact) {
+      // ⚠ 2026-08-16 (P1, ROADMAP 2.1237) — AN EMPTY FACT ARRAY IS NOT
+      // EVIDENCE OF ABSENCE WHEN THE READ ITSELF FAILED.
+      //
+      // `hasRunAnalysisFact` is a RAW `priorFacts.some(...)`. When the facts
+      // read came back DEGRADED, `priorFacts` is empty because the lookup
+      // failed — not because nothing is there — and this branch then told the
+      // user "Run analysis first", a claim about their history we had no
+      // evidence for.
+      //
+      // ⭐ THE HONEST VERDICT WAS ALREADY IN THIS INPUT OBJECT. The freshness
+      // authority emits `'unknown'` precisely when it could not determine the
+      // answer, and it is passed in beside the facts. This branch simply did
+      // not read it.
+      //
+      // ⭐ `'none'` AND `'unknown'` MUST NOT COLLAPSE — they are different
+      // facts. `'none'` means we looked and there is no successful run, so
+      // `analytical_none` is TRUE and stays exactly as it was. `'unknown'`
+      // means we could not look. Suppressing on empty facts alone would take
+      // BOTH out and stop telling a genuinely-new user to run their first
+      // analysis — the opposite harm, and the one-directional trade CLAUDE.md
+      // trap 22b exists to prevent. Both directions are pinned by test.
+      if (input.freshness === 'unknown') {
+        return {
+          branch: 'analytical_indeterminate',
+          intent_class: intentClass,
+          has_run_analysis_fact: false,
+          assistantText: input.graphReady
+            ? NO_OP_INDETERMINATE_GRAPH_READY_TEXT
+            : NO_OP_INDETERMINATE_GRAPH_NOT_READY_TEXT,
+          // Same readiness gating as `analytical_none` below: a run_analysis
+          // chip that would fail on click is worse than no chip. Running an
+          // analysis is a safe way forward either way — it asserts nothing
+          // about whether one has already happened.
+          suggestedActions: input.graphReady ? [RUN_ANALYSIS_CHIP] : [],
+        };
+      }
+      // Mirror `tryNoAnalysisGuard`'s graph-readiness gating: suppress
+      // the `run_analysis` chip when the graph is not ready (clicking
+      // it would fail), and use the matching copy variant.
+      return {
+        branch: 'analytical_none',
+        intent_class: intentClass,
+        has_run_analysis_fact: false,
+        assistantText: input.graphReady
+          ? NO_OP_NONE_GRAPH_READY_TEXT
+          : NO_OP_NONE_GRAPH_NOT_READY_TEXT,
+        suggestedActions: input.graphReady ? [RUN_ANALYSIS_CHIP] : [],
+      };
+    }
+    // analytical intent + (unknown freshness or has_run_analysis_fact
+    // with non-fresh/stale verdict): treat as ambiguous and preserve
+    // existing copy. The freshness verdict ladder is exhaustive
+    // (fresh/stale/unknown/none); `unknown` falls here.
+    return {
+      branch: 'ambiguous',
+      intent_class: intentClass,
+      has_run_analysis_fact: hasRunAnalysisFact,
+      assistantText: null,
+      suggestedActions: [],
+    };
+  }
+
+  // ⭐ SPEC §4 — ANAPHORIC EDIT. Placed BEFORE the vague-edit branch because it
+  // is the more specific class: the two predicates are disjoint on their object
+  // (`it`/`this`/`that` vs `something`/`stuff`/`the model`), but a message that
+  // somehow satisfied both should be RESOLVED rather than reset.
+  //
+  // The three outcomes are exhaustive and none of them is a reset:
+  //   exactly 1 candidate  → BIND and disclose it
+  //   more than 1          → ASK, offering the candidates
+  //   0, or no/degraded    → ASK, and say what was looked at
+  //     register
+  if (intentClass === null && !mutationSignal && looksLikeAnaphoricEdit(input.message)) {
+    // ⭐ THE DECISION IS THE COMPOSER'S `resolveAnaphoricReferent`, not a
+    // predicate of this branch: top populated rank, the composer's own
+    // eligibility set (`factor|option` — the first version of this branch left
+    // that filter behind and bound the `outcome` MRR Growth on turn 8 of the
+    // 5 Sep founder capture), and the count. The value pre-route in
+    // `turn-executor.ts` calls the same function for "Set it to 100000.", so
+    // the two surfaces cannot resolve one pronoun two ways.
+    //
+    // ⚠ ABSENCE SEMANTICS. An omitted register and a `degraded` one both mean
+    // "could not look", which is NOT the same as "looked and found nothing" —
+    // but all three ASK, so the distinction changes telemetry, not the user's
+    // outcome. An empty `complete` register is an authoritative zero.
+    //
+    // ⚠ AN INELIGIBLE CANDIDATE IS NOT A RESET. Filtering to zero resolves to
+    // `unresolved`, which still asks. The banned outcome stays unreachable —
+    // measured, not assumed.
+    const resolution = resolveAnaphoricReferent(input.referents ?? null);
+
+    if (resolution.outcome === 'bound') {
+      const bound = resolution.referent;
+      return {
+        branch: 'anaphoric_edit_bound',
+        intent_class: null,
+        has_run_analysis_fact: hasRunAnalysisFact,
+        assistantText: buildAnaphoricBoundText(bound.label),
+        // The chip carries the SAME message convention as every other
+        // label chip, via the composer's own exported builder.
+        suggestedActions: [buildLabelChip(nodeIdFromRef(bound.ref), bound.label)],
+      };
+    }
+
+    if (resolution.outcome === 'ask_candidates') {
+      return {
+        branch: 'anaphoric_edit_ask_candidates',
+        intent_class: null,
+        has_run_analysis_fact: hasRunAnalysisFact,
+        assistantText: ANAPHORIC_ASK_CANDIDATES_TEXT,
+        suggestedActions: resolution.candidates
+          .slice(0, ANAPHORIC_CANDIDATE_CHIP_CAP)
+          .map((c) => buildLabelChip(nodeIdFromRef(c.ref), c.label)),
+      };
+    }
+
+    return {
+      branch: 'anaphoric_edit_ask_unresolved',
+      intent_class: null,
+      has_run_analysis_fact: hasRunAnalysisFact,
+      assistantText: ANAPHORIC_ASK_UNRESOLVED_TEXT,
+      suggestedActions: [],
+    };
+  }
+
+  if (intentClass === null && !mutationSignal && looksLikeVagueEdit(input.message)) {
+    // Message carries a positive vague-edit signal (imperative edit
+    // verb with an abstract target). Ask a calm clarification.
+    return {
+      branch: 'vague_edit',
+      intent_class: null,
+      has_run_analysis_fact: hasRunAnalysisFact,
+      assistantText: NO_OP_VAGUE_EDIT_TEXT,
+      suggestedActions: [],
+    };
+  }
+
+  // Safety-net branches — `explore_factor` / `explore_factor_stale`.
+  //
+  // Fires when:
+  //   - no analytical intent matched (handled above),
+  //   - no mutation signal (the user did not supply a value),
+  //   - no vague-edit phrasing (handled above),
+  //   - BUT the message contains a known graph node label, AND
+  //   - a successful prior `run_analysis` fact exists.
+  //
+  // This is the second line of defence behind
+  // `tryPostAnalysisLabelIntercept` in route-v2.ts: if anything still
+  // dispatches into the V4 LLM and no-ops with a message that mentions
+  // a known label (e.g. a chip with an unusual submit shape, or a
+  // user typing a factor name plus a stray word), we turn the dead
+  // end into a useful affordance rather than surfacing the bland
+  // deterministic fallback with no chips.
+  //
+  // Freshness handling mirrors the analytical branches above:
+  //   - 'fresh' → three exploration chips (explain / what-would-flip /
+  //               pre-mortem). The analysis is current; explore freely.
+  //   - 'stale' → single re-run chip. The current analysis no longer
+  //               reflects the graph; offering exploration chips would
+  //               silently feed the user stale-context UX. Code+chip
+  //               mirror the existing `analytical_stale` branch.
+  //   - 'unknown' / 'none' → defer to ambiguous. With an unverifiable
+  //               freshness verdict the safest thing is to preserve
+  //               the V4 handler's existing copy rather than risk a
+  //               stale exploration nudge.
+  //
+  // Copy + chips are duplicated rather than imported from
+  // `compose/post-analysis-label-intercept.ts` to keep this module's
+  // no-circular-dependency contract intact.
+  if (
+    !mutationSignal
+    && hasRunAnalysisFact
+    && messageContainsKnownLabel(input.message, input.nodes ?? null)
+  ) {
+    if (input.freshness === 'fresh') {
+      return {
+        branch: 'explore_factor',
+        intent_class: intentClass,
+        has_run_analysis_fact: true,
+        assistantText: NO_OP_EXPLORE_FACTOR_TEXT,
+        suggestedActions: [EXPLAIN_RESULTS_CHIP, WHAT_WOULD_FLIP_CHIP, RUN_PRE_MORTEM_CHIP],
+      };
+    }
+    if (input.freshness === 'stale') {
+      return {
+        branch: 'explore_factor_stale',
+        intent_class: intentClass,
+        has_run_analysis_fact: true,
+        assistantText: NO_OP_EXPLORE_FACTOR_STALE_TEXT,
+        suggestedActions: [RERUN_ANALYSIS_CHIP],
+      };
+    }
+    // freshness === 'unknown' | 'none' — fall through to the ambiguous
+    // branch below. We have a fact but cannot prove freshness; offering
+    // analysis-exploration chips would risk a silent stale-context UX.
+  }
+
+  // Everything else (analytical intent + mutation signal, or no
+  // analytical intent + mutation signal): preserve existing copy.
+  // The mutation signal means the user genuinely wanted to edit; if
+  // V4 produced a no-op, the response already explains why or asks for
+  // clarification. Better to leave it than to rewrite from too little
+  // signal.
+  return {
+    branch: 'ambiguous',
+    intent_class: intentClass,
+    has_run_analysis_fact: hasRunAnalysisFact,
+    assistantText: null,
+    suggestedActions: [],
+  };
+}
+
+function mapStageToDecisionStage(stage: MessageTurnPayload['stage']): DecisionStage {
+  switch (stage) {
+    case 'frame':
+      return 'frame';
+    case 'analyse':
+      return 'evaluate';
+    case 'decide':
+      return 'decide';
+    case 'review':
+      return 'optimise';
+    default:
+      return 'frame';
+  }
+}
+
+/**
+ * ROADMAP 2.474 — the coach's structural editing tool, engaged as the SECOND
+ * PATH when the rulebook did not claim the turn (A9).
+ *
+ * Returns a replacement `EditGraphResult` when the tool composed a grounded
+ * batch and the pipeline ran it; returns `null` in every other case, leaving
+ * the rulebook's own honest result (its clarify copy, its recovery chips)
+ * exactly as it was. `null` is the important half: the tool must be able to
+ * decline without degrading the answer the user would otherwise have got.
+ *
+ * A5(a) — GROUNDING COMES FROM THE STRICT PERSISTED READ, NEVER THE INGRESS
+ * ECHO. The dispatcher's `gmFrameBase` fallback (`strictBase ?? graphState`)
+ * is fine for the referee frame but is NOT a grounding source: showing the
+ * model a client-supplied graph and then applying against the server's is how
+ * a batch grounded in one world lands in another. This helper does its own
+ * strict read and then REQUIRES the two to agree on their node-id sets. They
+ * agree on every live turn today (route-v2 reloads `scenarios.graph` because
+ * the UI sends a turn, never a graph), so the check costs nothing in practice
+ * — and on the day they diverge, the tool declines instead of guessing.
+ */
+/**
+ * ROADMAP 2.474 / A3 — what the dispatcher needs to know about a SPLIT, carried
+ * back separately from the `EditGraphResult` (a V4 type this path has no
+ * business widening).
+ *
+ * ⚠ THIS IS NOT DISCLOSED-PARTIAL (A2). `submittedIndices` is the complete list
+ * of operations that reached `handleEditGraph`; every other index in
+ * `wholeBatch` was NEVER SUBMITTED — not applied, not rejected, not judged. The
+ * gate's one verdict governs the submitted part WHOLE, exactly as it does for a
+ * batch that did not split.
+ */
+interface StructuralEditSplitOutcome {
+  readonly wholeBatch: readonly PatchOperation[];
+  readonly submittedIndices: readonly number[];
+  readonly partCount: number;
+  readonly remainderDependsOnThisStep: boolean;
+}
+
+interface StructuralEditToolResult {
+  readonly editResult: EditGraphResult;
+  /** Present only when the batch was too large for one proposal. */
+  readonly split: StructuralEditSplitOutcome | null;
+}
+
+/**
+ * ⭐⭐ ROADMAP 2.655 — EVERY EXIT OF THE TOOL IS NAMED, AT THE TYPE LEVEL.
+ *
+ * ── WHAT WENT WRONG ──────────────────────────────────────────────────────
+ * This function used to return `EditGraphResult | null`, and `null` meant "the
+ * rulebook's answer stands". That is right after a grounding failure on an
+ * ordinary turn. It is CATASTROPHIC after a budget refusal, because the
+ * rulebook's answer is then the leaked-limits dead end this whole feature
+ * exists to abolish — and the walk measured exactly that, on the canonical
+ * compound edit, months after the fix shipped.
+ *
+ * ── WHY A DISCRIMINATED RETURN AND NOT A CONVENTION ──────────────────────
+ * The obvious repair is "remember to build honest copy at each `return null`".
+ * There were nine such returns. A convention across nine sites, in a 3,700-line
+ * dispatcher, is the hand-maintained mirror CLAUDE.md trap 12 is about: green
+ * the day it is written, silently short the day a tenth exit is added.
+ *
+ * So the inner function CANNOT return `null` — the type does not permit it. A
+ * new exit must name a {@link StructuralEditDeclineClass} or the build fails,
+ * and there is exactly ONE place (the wrapper below) where a decline becomes
+ * something a user reads.
+ */
+type StructuralEditToolOutcome =
+  | { readonly kind: 'engaged'; readonly result: StructuralEditToolResult }
+  | { readonly kind: 'declined'; readonly declineClass: StructuralEditDeclineClass };
+
+/**
+ * Build the replacement edit result for a declined tool.
+ *
+ * The rulebook's `latencyMs` and `diagnostics` are CARRIED, not discarded: the
+ * turn really did spend that time and really did refuse for that reason, and
+ * the R7 turn event reads `diagnostics.failure_code`. Only what the user reads
+ * is replaced.
+ */
+function structuralEditDeclineResult(
+  declineClass: StructuralEditDeclineClass,
+  rulebookResult: EditGraphResult,
+): StructuralEditToolResult {
+  const answer = STRUCTURAL_EDIT_DECLINE_COPY[declineClass];
+  return {
+    editResult: {
+      blocks: [],
+      assistantText: answer.text,
+      latencyMs: rulebookResult.latencyMs,
+      appliedGraph: null,
+      wasRejected: true,
+      suggestedActions: answer.actions.map((a) => ({ ...a })),
+      ...(rulebookResult.diagnostics !== undefined
+        ? { diagnostics: rulebookResult.diagnostics }
+        : {}),
+    },
+    split: null,
+  };
+}
+
+async function tryStructuralEditTool(input: {
+  readonly editResult: EditGraphResult;
+  readonly context: ConversationContext;
+  readonly adapter: ReturnType<typeof getAdapter>;
+  readonly payload: MessageTurnPayload;
+  readonly requestId: string;
+  /** ROADMAP 2.684 — the turn's wall-clock baseline, for the composer budget. */
+  readonly requestStartMs: number;
+}): Promise<StructuralEditToolResult | null> {
+  const outcome = await runStructuralEditTool(input);
+  if (outcome.kind === 'engaged') return outcome.result;
+
+  // ── ⭐⭐ THE ONE PLACE A DECLINE BECOMES AN ANSWER ─────────────────────────
+  //
+  // Two conditions license the tool to speak over the rulebook, and only two:
+  //
+  //  1. THE TOOL HAS A FINDING THE RULEBOOK DOES NOT. A cap refusal is the
+  //     tool's own conclusion about the user's request, reached after it
+  //     composed the batch. It is reported whatever the rulebook said, exactly
+  //     as it has been since #829 — behaviour deliberately unchanged here.
+  //
+  //  2. THE RULEBOOK'S ANSWER IS KNOWN TO BE THE DEAD END. Asked of the
+  //     PRODUCER'S stamped failure code, never of the sentence: matching on the
+  //     copy would stop recognising it the moment the copy was rewritten, and
+  //     2.655 rewrites it.
+  //
+  // ⚠ AND THE NEGATIVE HALF MATTERS AS MUCH. When the rulebook produced a
+  // legitimate answer of its own — a clarifying question, a no-op explanation —
+  // a declining tool must leave it alone. "Never the rulebook's answer" is the
+  // wrong rule; "never the rulebook's DEAD END" is the right one. Widening this
+  // would erase good coaching on every turn the tool happens to decline.
+  if (
+    outcome.declineClass !== 'too_large_to_split' &&
+    !isPatchBudgetRejection(input.editResult)
+  ) {
+    return null;
+  }
+  return structuralEditDeclineResult(outcome.declineClass, input.editResult);
+}
+
+async function runStructuralEditTool(input: {
+  readonly editResult: EditGraphResult;
+  readonly context: ConversationContext;
+  readonly adapter: ReturnType<typeof getAdapter>;
+  readonly payload: MessageTurnPayload;
+  readonly requestId: string;
+  /** ROADMAP 2.684 — the turn's wall-clock baseline, for the composer budget. */
+  readonly requestStartMs: number;
+}): Promise<StructuralEditToolOutcome> {
+  const { editResult, context, adapter, payload, requestId, requestStartMs } = input;
+
+  const emitEntry = (decision: string): void => {
+    emit(TelemetryEvents.V5StructuralEditToolEntry, {
+      request_id: requestId,
+      scenario_id: payload.scenario_id,
+      decision,
+    });
+  };
+
+  // Cheap gates first — never pay a Supabase read to discover the rulebook
+  // already claimed the turn, or that the hold spine is down.
+  const preGate = decideStructuralEditEntry({
+    rulebook: { wasRejected: editResult.wasRejected, operations: editResult.operations },
+    // ⚠ THE KILL SWITCH. Every hold this tool's safety story rests on exists
+    // only in 'live' — in 'shadow'/'off' the gate returns blockApply:false by
+    // construction, so engaging here would strip the hold and leave an
+    // LLM-composed structural batch AUTO-APPLYING. Turning the mode down must
+    // disable the capability, never de-fang its guard. (This also keeps the
+    // tool inert in production, where 'live' downgrades to 'shadow'.)
+    holdSpineActive: holdSpineActiveForMode(config.features.graphManagementMode),
+    // INHERITED, never recomputed: this function is reachable only through
+    // route-v2's `editIntentDetected` gate (dispatchEditGraph has exactly one
+    // call site, and that gate is its precondition). A second local judgement
+    // here could only ever subtract from it — and did, under-triggering on
+    // configure-option turns, which carry no edit verb at all.
+    editIntentDetectedByRulebook: true,
+    // Provisionally true; the real answer needs the strict read below, which
+    // is only worth doing once the cheap gates pass.
+    groundingAvailable: true,
+  });
+  if (!preGate.engage) {
+    emitEntry(preGate.reason);
+    // ⭐ 2.655 — ALL FIVE pre-gate reasons share one honest sentence, and that
+    // is a judgement rather than a shortcut. What they have in common is that
+    // THE STEP-BY-STEP PATH NEVER RAN: no model was read, no batch composed,
+    // nothing judged. `capability_unavailable` says exactly that and claims
+    // nothing about the request. The alternatives would all overclaim — "I
+    // could not work it out" implies an attempt that did not happen.
+    //
+    // Reachability, derived rather than assumed: on the budget-refusal turns
+    // this copy can actually ship, `rulebook_claimed` is impossible
+    // (`rulebookClaimedTurn` is false whenever `wasRejected`), and
+    // `not_edit_shaped` / `no_grounding` / `already_engaged` are unreachable
+    // from this call site because the three inputs are passed as constants.
+    // `hold_spine_inactive` is the live one, and it is the systematic candidate
+    // for the walk (production downgrades the mode by standing lockdown).
+    return { kind: 'declined', declineClass: 'capability_unavailable' };
+  }
+
+  let persisted: unknown = null;
+  try {
+    persisted = await loadPersistedGraphStrict(payload.scenario_id);
+  } catch (err) {
+    log.warn(
+      {
+        event: 'v5.structural_edit_tool.grounding_read_failed',
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        err:
+          err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+      },
+      'V5 propose_structural_edit — strict persisted read failed; the tool declines rather than grounding on the ingress echo',
+    );
+    emitEntry('no_grounding');
+    return { kind: 'declined', declineClass: 'model_unreadable' };
+  }
+
+  const grounding = buildStructuralEditGrounding(persisted);
+  if (grounding === null) {
+    emitEntry('no_grounding');
+    return { kind: 'declined', declineClass: 'model_unreadable' };
+  }
+
+  // The base the model is SHOWN must be the base the pipeline will APPLY to.
+  const contextNodeIds = new Set(
+    (context.graph?.nodes ?? [])
+      .map((n) => (n as { id?: unknown }).id)
+      .filter((id): id is string => typeof id === 'string'),
+  );
+  const agrees =
+    contextNodeIds.size === grounding.nodeIds.size &&
+    [...grounding.nodeIds].every((id) => contextNodeIds.has(id));
+  if (!agrees) {
+    log.warn(
+      {
+        event: 'v5.structural_edit_tool.base_divergence',
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        persisted_node_count: grounding.nodeIds.size,
+        context_node_count: contextNodeIds.size,
+      },
+      'V5 propose_structural_edit — persisted graph and edit-context graph disagree; declining rather than grounding on one and applying to the other',
+    );
+    emitEntry('no_grounding');
+    // The persisted model and the one on screen are not the same model. From
+    // the user's chair that is indistinguishable from "I could not read your
+    // model", and it is the honest thing to say: whichever is right, this path
+    // cannot tell, so it must not act.
+    return { kind: 'declined', declineClass: 'model_unreadable' };
+  }
+
+  // ── ROADMAP 2.684 — THE BUDGET IS DERIVED HERE, AT DISPATCH, NOT IN THE
+  //    COMPOSER ────────────────────────────────────────────────────────────
+  //
+  // This is the last point on the path that knows how much of the turn is
+  // GONE, and that is the whole reason the derivation moved here. Everything
+  // above — the rulebook's LLM call, its repair round, the strict persisted
+  // read — has already been paid for by the time control reaches this line.
+  // Witness #3 measured that prelude at ~62s of a 115s turn. A budget computed
+  // anywhere upstream of it, however carefully derived, is a budget computed
+  // before the spending happened.
+  const budget = resolveComposerBudget({ requestStartMs });
+  if (budget.kind === 'exhausted') {
+    log.warn(
+      {
+        event: 'v5.structural_edit_tool.no_budget',
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        remaining_ms: budget.remainingMs,
+        post_call_reserve_ms: COMPOSER_POST_CALL_RESERVE_MS,
+      },
+      'V5 propose_structural_edit — too little of the turn remains to compose; declining without spending a call that cannot finish',
+    );
+    emitEntry('no_budget');
+    // ⚠ THE DECLINE THAT USED TO BE A DOOMED CALL. Before 2.684 the budget
+    // floored at MIN_TIMEOUT_MS and fired anyway; witness #3 caught exactly
+    // that, twice, at 5.008s and 5.006s — an `UpstreamTimeoutError` that was
+    // certain before the request left the box. `compose_unavailable` is the
+    // right class and its copy is already true of this exit: the composition
+    // could not run, a retry meets the same wall, and the honest next step is
+    // a smaller ask. The user pays nothing for the finding.
+    return { kind: 'declined', declineClass: 'compose_unavailable' };
+  }
+
+  const outcome = await composeStructuralEdit({
+    adapter,
+    grounding,
+    message: payload.message,
+    maxPatchOperations: config.cee.maxPatchOperations,
+    requestId,
+    scenarioId: payload.scenario_id,
+    timeoutMs: budget.timeoutMs,
+  });
+  if (outcome.status !== 'composed') {
+    emitEntry(outcome.status === 'rejected' ? `rejected_${outcome.code}` : outcome.reason);
+
+    // ── ⚠ THE CLAIM/SUPPRESS PATH, AND WHY NO DECLINE MAY USE IT BLINDLY ────
+    //
+    // #829 recorded the mechanism here and fixed ONE limb of it. The record was
+    // right and the fix was too narrow, so both halves are kept.
+    //
+    // THE MECHANISM (#829, still exactly true): declining meant "the rulebook's
+    // own answer stands". After a budget refusal, the rulebook's own answer is
+    // copy that names a limit and no next step ("limit: 4 node ops, 8 edge
+    // ops"). The tool engages, reaches the same conclusion, declines — and the
+    // FAILED RULEBOOK OPERATION supplies the final answer. The user sees a
+    // number they cannot act on.
+    //
+    // ⚠ WHAT #829 MISSED, AND WHAT THE 2.634 WALK THEN MEASURED (ROADMAP
+    // 2.655): the fix was attached to ONE decline class, the cap refusal. Every
+    // other class — mode not live, model unreadable, base divergence, call
+    // failed, no tool call, each grounding-rejection code — still returned
+    // `null`, and the dead end came straight back. The canonical compound edit
+    // received it verbatim months after the fix shipped. The suite could not
+    // see it because every fixture in the feature stubs the composer to
+    // SUCCEED, so no test exercised a decline after a budget rejection at all.
+    //
+    // Hence the shape now: a decline NAMES ITS CLASS and the wrapper decides
+    // whether the tool speaks. This branch chooses the class only.
+    if (outcome.status === 'rejected') {
+      return {
+        kind: 'declined',
+        // A cap refusal is the tool's own conclusion about the request, reached
+        // after composing the batch, so it is reported whatever the rulebook
+        // said (unchanged from #829). Every other code means a batch came back
+        // and did not hold together against the persisted graph, which is a
+        // different sentence and must not borrow this one.
+        declineClass:
+          outcome.code === 'BATCH_CAP_EXCEEDED' ? 'too_large_to_split' : 'compose_invalid',
+      };
+    }
+    return {
+      kind: 'declined',
+      // `no_tool_call` is NOT a failure: the model was asked and correctly
+      // declined to compose, which is what it should do when the request
+      // cannot be expressed against this graph. Telling the user "I could not
+      // work that out" would be true but useless; telling them the change does
+      // not fit their model as it stands is actionable.
+      declineClass: outcome.reason === 'no_tool_call' ? 'not_expressible' : 'compose_unavailable',
+    };
+  }
+  emitEntry(outcome.parts.length > 1 ? 'engaged_split' : 'engaged');
+
+  // A3 — SUBMIT THE FIRST PART ONLY, and never a later one on this turn.
+  //
+  // `parts[0]` is the whole batch on the ordinary path. When the request was
+  // too large for one proposal, the later parts are not submitted at all: they
+  // are DISCLOSED by the caller and offered as a next step. Submitting a second
+  // part here would put two batches through one turn's single governing verdict
+  // and is precisely the disclosed-partial shape A2 forbids.
+  const firstPart = outcome.parts[0];
+  if (firstPart === undefined) {
+    // A composed outcome always carries at least one part; treat the
+    // impossible case as "the tool declined" rather than submitting nothing.
+    emitEntry('no_parts');
+    return { kind: 'declined', declineClass: 'compose_unavailable' };
+  }
+
+  // A1 — ONE entry seam. The grounded batch re-enters the SAME handler and
+  // runs the SAME downstream train (normalisation, Zod, PLoT gate, apply,
+  // receipts); the referee gate below in this dispatch then returns its ONE
+  // governing verdict over the whole batch, exactly as it does for the
+  // deterministic path. No second applier exists.
+  const editResultForPart = await handleEditGraph(
+    context,
+    payload.message,
+    adapter,
+    requestId,
+    payload.turn_id,
+    { preComposedOperations: firstPart.operations as readonly PatchOperation[] },
+  );
+
+  return {
+    kind: 'engaged',
+    result: {
+      editResult: editResultForPart,
+      split:
+        outcome.parts.length > 1
+          ? {
+              wholeBatch: outcome.operations as readonly PatchOperation[],
+              submittedIndices: firstPart.indices,
+              partCount: outcome.parts.length,
+              remainderDependsOnThisStep: outcome.parts
+                .slice(1)
+                .some((p) => p.dependsOnEarlierPart),
+            }
+          : null,
+    },
+  };
+}
+
+export interface DispatchEditGraphParams {
+  readonly payload: MessageTurnPayload;
+  readonly requestId: string;
+  readonly request: FastifyRequest;
+  /** Permissive ingress shape. Adapter inside converts to GraphV3T. */
+  readonly graphState: GraphStateIngress;
+  /** Permissive ingress shape. Adapter inside converts to V2RunResponseEnvelope. */
+  readonly analysisState: AnalysisStateIngress | null;
+  /**
+   * Canvas selection at send time, normalised to identities by the boundary.
+   * The dispatcher resolves node IDs against the same strict graph snapshot it
+   * hands to edit_graph; client labels and edge inference never enter context.
+   */
+  readonly selectedElements?: SelectedElementsIngress | null;
+  /**
+   * ROADMAP 2.684 — wall-clock baseline of the HTTP request (`routeStartedAt`),
+   * against which the structural-edit composer's remaining budget is derived.
+   * Same thread and same rationale as `dispatchDraftGraph`'s `requestStartMs`:
+   * pre-flight, ingress parse and scenario upsert all spend the turn's deadline
+   * before this dispatcher is entered, so measuring from the dispatcher's own
+   * start under-charges the turn.
+   *
+   * ⚠ OPTIONAL ONLY BECAUSE 128 TEST CALL SITES PREDATE IT — never because a
+   * caller may reasonably omit it. Omitting it falls back to the dispatcher's
+   * own `startedAt`, which is CONSERVATIVE (it can only over-estimate what is
+   * left, never under-estimate it), so the fallback is a real hazard and not a
+   * neutral default. `structural-edit-deadline-plumbing.test.ts` asserts the
+   * ONE production call site (route-v2.ts) passes it, so the fallback cannot
+   * become the live path without a RED.
+   */
+  readonly requestStartMs?: number;
+  /**
+   * ⭐ ROADMAP 2.1261 — repair-leg bare-value binding. When set, THIS string
+   * (the advised-format instruction binding the user's bare value to the sole
+   * missing option×factor pair — probe P1 verbatim, with the user's value) is
+   * what the edit LLM is asked to perform, INSTEAD of `payload.message`.
+   *
+   * ⚠ SCOPE, deliberately narrow: it substitutes ONLY the instruction handed
+   * to `handleEditGraph`. `payload.message` remains the record everywhere else
+   * — the commit's `userMessage`, part-accounting decomposition, the GM
+   * protection-scope extraction, telemetry — so the persisted conversation
+   * carries the user's own bytes, never a synthesised sentence (trap 14b:
+   * rewriting the record falsifies evidence). The route sets it only after the
+   * whole-message claim anchor matched and the persisted graph derived exactly
+   * one missing pair; no other caller may pass it.
+   */
+  readonly editInstructionOverride?: string;
+  /** Server-resolved recorded question. Revalidated below; never copied from ingress. */
+  readonly recordedEffectAnswer?: RecordedEffectAnswer;
+}
+
+export interface DispatchEditGraphResult {
+  readonly response: OlumiResponse;
+  readonly commitPerformed: boolean;
+  /**
+   * V5 finaliser contract: pre-computed canonical readiness from the
+   * post-edit `appliedGraph`. Surfaced so the response-finaliser in
+   * route-v2.ts can stamp `analysis_ready` after composition. Undefined
+   * when there is no `appliedGraph` — the canvas is unchanged so the UI's
+   * prior `ceeAnalysisReady` remains correct.
+   */
+  readonly analysisReady?: AnalysisReadyPayload;
+  /**
+   * V5 state-trust freshness derivation. Edit_graph mutates the graph
+   * but does not produce a run_analysis fact, so post-edit freshness is
+   * determined by comparing the prior fact chain's recorded
+   * graph_hash_at_run against the post-edit graph hash. Expected to be
+   * `stale` after an accepted substantive edit, `fresh`/`unknown`/`none`
+   * otherwise. Surfaced on `analysis_ready` via response-finaliser.
+   */
+  readonly freshness?: import('../context/freshness.js').FreshnessDerivation;
+  /**
+   * Post-edit graph used for label resolution by the central egress
+   * sanitiser (sanitiseOlumiResponseForEgress). Null when no graph was
+   * applied — sanitiser falls back to prefix-aware generic wording.
+   */
+  readonly graph: GraphV3T | null;
+  /**
+   * S3-L6 / F-5 — edit-lane LLM call attribution for `_diagnostic_trace`.
+   * Present only when this edit turn actually invoked the LLM; route-v2
+   * threads it into the minimal trace's `llm_calls[]` (role `edit_graph`).
+   * Undefined on deterministic (no-LLM) edit exits and on the commit-failure
+   * path (that path returns a 500 before route-v2 builds a trace). See
+   * `extractEditLlmCallTelemetry`.
+   */
+  readonly editLlmCall?: EditGraphLlmCallTelemetry;
+  /**
+   * ⭐ THE EDIT LANE IS NON-TERMINAL WHEN IT RESOLVED NOTHING.
+   *
+   * `true` when this dispatch applied nothing, proposed nothing, and could do
+   * no more than ask "which one?" with NO alternatives to offer — the
+   * `resolutionMode === 'clarify'` branch whose target resolution carried an
+   * empty alternatives list. Route-v2 treats it as a hand-back: it does NOT
+   * return the edit 200, and the turn falls through to `runTurnExecutor`, which
+   * holds the context pack and therefore `run_delta`.
+   *
+   * ⚠ WHY THIS IS RETURNED **PRE-COMMIT**, and it is the whole reason the flag
+   * exists rather than route-v2 inspecting `graph`/`commitPerformed`: this
+   * function commits via `commitDirectAnswer` below, and `runTurnExecutor`
+   * commits too. A fall-through decided AFTER that commit would write TWO turn
+   * rows for ONE turn — fail-open, silent, no exception, green suite. So the
+   * early return happens BEFORE the commit region and this result carries
+   * `commitPerformed: false` with nothing persisted. Route-v2's fall-through
+   * branch therefore sits ABOVE its `!commitPerformed` 500.
+   *
+   * ⛔ DELIBERATELY NARROW, and derived from the PRODUCER rather than
+   * re-asserted: `pendingClarification` is assigned at exactly ONE site
+   * (`orchestrator/tools/edit-graph.ts:2033/2045`) and its `candidate_labels`
+   * IS `targetResolution.alternatives.map(a => a.label)`. Of the thirteen
+   * `appliedGraph: null` returns in that file, exactly one sets it — so this
+   * condition is provably exhaustive AND provably narrow. Ambiguous GENUINE
+   * edits that resolve alternatives keep their current route: they get a useful
+   * "Which option: A or B?" with chips, and that is worth more than a run
+   * delta. Absent (never `false`) on every other exit.
+   */
+  readonly unresolvedClarificationFellThrough?: true;
+}
+
+/**
+ * Map the V4 internal `SuggestedAction` shape (`{ label, prompt, role,
+ * action_type? }`) to the boundary `Action` shape (`{ id, label, message,
+ * action_type? }`). The boundary `action_type` enum is closed to v0.7.0
+ * V5ActionType values, so internal action_types that don't fit are dropped
+ * (the resulting chip still works as a prompt-replay button via `message`).
+ */
+const BOUNDARY_ACTION_TYPES: ReadonlySet<string> = new Set([
+  'run_analysis',
+  'set_factor_value',
+  'add_constraint',
+  'adjust_edge_strength',
+  'explain_result',
+  'compare_options',
+  'what_would_flip',
+]);
+
+type BoundaryAction = OlumiResponse['suggested_actions'][number];
+
+function mapSuggestedActionToBoundary(
+  action: SuggestedAction,
+  index: number,
+): BoundaryAction {
+  const base: BoundaryAction = {
+    id: `edit_graph_action_${index}`,
+    label: action.label,
+    message: action.prompt,
+  };
+  if (action.action_type && BOUNDARY_ACTION_TYPES.has(action.action_type)) {
+    base.action_type = action.action_type as BoundaryAction['action_type'];
+  }
+  return base;
+}
+
+function chipsFromPendingClarification(
+  pending: PendingClarificationState,
+): SuggestedAction[] {
+  return pending.candidate_labels.map((label) => ({
+    label,
+    prompt: `Update ${label}.`,
+    role: 'facilitator' as const,
+  }));
+}
+
+// NOTE — pendingProposal accept/cancel chips intentionally NOT rendered.
+//
+// The V4 `handleEditGraph` reads `invocationInput.pending_proposal`
+// (edit-graph.ts around line 1274) to deterministically apply a stored
+// proposal on the next turn. The V5 pre-Sonnet dispatcher, however, does
+// NOT currently:
+//   (a) persist `pendingProposal` to session storage,
+//   (b) read it back on the next turn,
+//   (c) thread it via `handleEditGraph(..., { invocationInput: { ... } })`.
+//
+// Without (a)+(b)+(c), an "Apply this change" chip would replay as a plain
+// user prompt that the LLM has to re-resolve — not a byte-for-byte replay
+// of the original proposal. Presenting non-deterministic accept/cancel
+// chips is worse UX than no chips at all (the user expects clicking
+// "Apply" to apply exactly the shown proposal).
+//
+// Until the deterministic-replay plumbing is wired (separate brief), the
+// composer simply does not surface pending-proposal chips. The V4
+// `assistant_text` still describes the proposal and the user can confirm
+// in natural language.
+
+/**
+ * Build wire-shaped `suggested_actions` from `EditGraphResult`.
+ *
+ * Sources merged (not exclusive precedence) and deduped by `message`:
+ *   1. `result.suggestedActions` — explicit chips from edit-graph.ts
+ *      (clarification chips from `buildClarificationActions`, "Try a
+ *      simpler change" / "Start fresh" recovery chips, "Re-run analysis"
+ *      rerun_recommended chip).
+ *   2. `result.pendingClarification` candidate-label chips — defensively
+ *      included so a result that carries pendingClarification without
+ *      explicit actions still surfaces chips.
+ *
+ * `pendingProposal` accept/cancel chips are intentionally NOT rendered —
+ * see comment on `chipsFromPendingProposal` removal.
+ *
+ * First occurrence wins on dedupe, so explicit `suggestedActions` take
+ * priority over pending-state-derived chips when prompts collide.
+ */
+function buildBoundarySuggestedActions(
+  result: EditGraphResult,
+): BoundaryAction[] {
+  const collected: SuggestedAction[] = [];
+
+  if (result.suggestedActions && result.suggestedActions.length > 0) {
+    collected.push(...result.suggestedActions);
+  }
+  if (result.pendingClarification) {
+    collected.push(...chipsFromPendingClarification(result.pendingClarification));
+  }
+
+  // Dedupe by message.
+  const seen = new Set<string>();
+  const unique: SuggestedAction[] = [];
+  for (const action of collected) {
+    if (seen.has(action.prompt)) continue;
+    seen.add(action.prompt);
+    unique.push(action);
+  }
+
+  return unique.map((a, i) => mapSuggestedActionToBoundary(a, i));
+}
+
+/**
+ * Surface rejection metadata on the wire as a boundary `error` block.
+ *
+ * The internal V4 `GraphPatchBlock` uses `data.status: 'rejected'` with
+ * rejection.code/reason/attempts. The boundary `graph_patch` block schema
+ * has no rejected status (only `'applied' | 'noop'`) and a narrow
+ * `operation` enum, so V4 rejection blocks cannot pass through unmodified.
+ *
+ * Mapping rejection → `error` block (with `details` carrying the rejection
+ * code AND the specific structural violation codes) preserves the
+ * rejection signal without widening the boundary schema. The UI can read
+ * `details.rejection_code` and `details.violation_codes` to render a
+ * specific recovery affordance.
+ *
+ * Two rejection-emit paths exist in the V4 handler:
+ *   1. `buildRejectionResult` (final-attempt repair exhaustion / max-ops /
+ *      budget) → returns `result.blocks: [GraphPatchBlock with rejection]`.
+ *   2. Structural-violation immediate reject for structural intents
+ *      (edit-graph.ts:1950) → returns `result.blocks: []`. Violation codes
+ *      live on `result.diagnostics.validation_violation_codes` and the
+ *      umbrella code on `result.diagnostics.failure_code`.
+ *
+ * Both paths are handled here so a structural-validation rejection (e.g.
+ * the new OPTION_NO_FACTOR_EDGES code) reaches the wire even when the V4
+ * block is absent.
+ *
+ * Successful (non-rejected) edits return `[]` — the V4 GraphPatchBlock
+ * with `operations: PatchOperation[]` does not fit the narrow boundary
+ * `graph_patch` operation enum. The applied graph instead reaches the UI
+ * via the top-level `draft_graph` wire field (attached AFTER the commit
+ * succeeds, at the dispatch success return — see applied-graph-emit.ts)
+ * plus the recomputed `analysis_ready` readiness the finaliser stamps.
+ * NOTE (F2-CEE, 1.16 run-3 diagnosis): the previous wording claimed the
+ * graph reached the UI via "the persisted scenarios.graph row" — a
+ * phantom contract. The UI never re-reads scenarios.graph on an edit
+ * turn; its only inline-graph ingestion path is `draft_graph`.
+ *
+ * COMPATIBILITY NOTE on `error_code: 'INTERNAL_ERROR'` (P0 fix, 2026-05):
+ * `BoundaryErrorCode` is a closed enum (olumi-schemas/src/boundary/
+ * error-codes.ts; "extend additively, do not rename") with no recoverable-
+ * rejection member, so we ship `INTERNAL_ERROR` + `severity: 'warn'` as a
+ * documented short-term combination. The severity-aware UI router treats
+ * the warn-level block as advisory and renders the friendly assistant_text
+ * + chips. Operators read `details.rejection_code` for the specific cause.
+ *
+ * TODO(schemas): additive bump to introduce `RECOVERABLE_EDIT_REJECTION`
+ * (or equivalent) so the wire signal is self-describing without relying
+ * on severity-aware parsing. Tracked separately; coordinate with UI.
+ */
+function buildBoundaryBlocks(result: EditGraphResult): OlumiResponse['blocks'] {
+  if (!result.wasRejected) return [];
+
+  // Path 1: V4 GraphPatchBlock with rejection metadata (from buildRejectionResult).
+  const rejectionBlock = result.blocks.find(
+    (b) => b.block_type === 'graph_patch'
+      && (b.data as GraphPatchBlockData).status === 'rejected',
+  );
+
+  if (rejectionBlock) {
+    const data = rejectionBlock.data as GraphPatchBlockData;
+    const rej = data.rejection;
+    if (rej) {
+      // Stable codes only on the wire. Raw validator detail (rej.reason
+      // text, failure messages, free-form descriptions) stays in server
+      // logs and never crosses the boundary. The UI renders specific
+      // recovery affordances from the codes, not the text.
+      const details: Record<string, unknown> = { source: 'edit_graph' };
+      if (rej.code) details.rejection_code = rej.code;
+      if (rej.plot_code) details.plot_code = rej.plot_code;
+      if (rej.attempts != null) details.attempts = rej.attempts;
+      // Promote diagnostics violation_codes when present so OPTION_NO_FACTOR_EDGES
+      // and similar specific codes reach the wire alongside the umbrella rejection_code.
+      const violationCodes = result.diagnostics?.validation_violation_codes;
+      if (violationCodes && violationCodes.length > 0) {
+        details.violation_codes = violationCodes;
+      }
+      // ⭐ NOTHING FAILS SILENTLY (Paul's ruling, 2026-09-15). The three fields
+      // a person actually needs when a change of theirs is discarded: a
+      // `request_id` they can copy, whose `fault` it was, and a `readable`
+      // sentence that is English rather than a code. They ride in `details`,
+      // which is `z.object({}).passthrough().optional()` while the block itself
+      // is `.strict()` — so this widens no boundary enum and needs no schema
+      // release. Content-free: `readable` is fixed copy selected by a closed
+      // reason enum, never interpolated from the model, the graph or the op,
+      // so the redaction rule the codes above obey is not weakened here.
+      const disclosure = rej.disclosure;
+      if (disclosure) {
+        details.request_id = disclosure.request_id;
+        details.fault = disclosure.fault;
+        details.readable = disclosure.readable;
+      }
+      return [
+        {
+          type: 'error',
+          error_code: 'INTERNAL_ERROR',
+          severity: 'warn',
+          details,
+        },
+      ];
+    }
+  }
+
+  // Path 2: structural-violation immediate reject — V4 returns blocks: [] but
+  // surfaces the failure on diagnostics. Synthesize an error block so the
+  // wire still carries rejection_code + violation_codes (e.g. for the
+  // OPTION_NO_FACTOR_EDGES rule).
+  //
+  // Stable codes only — `failure_message` may contain raw validator output
+  // ("Option opt_x has no outbound edge to a factor — cannot be analysed")
+  // which we do NOT want on the wire. Logs retain it via diagnostics; the
+  // wire surface is just `rejection_code` + `failure_branch` + optional
+  // `violation_codes`.
+  const diag = result.diagnostics;
+  if (diag?.failure_code || (diag?.validation_violation_codes && diag.validation_violation_codes.length > 0)) {
+    const details: Record<string, unknown> = { source: 'edit_graph' };
+    if (diag.failure_code) details.rejection_code = diag.failure_code;
+    if (diag.failure_branch) details.failure_branch = diag.failure_branch;
+    if (diag.validation_violation_codes && diag.validation_violation_codes.length > 0) {
+      details.violation_codes = diag.validation_violation_codes;
+    }
+    return [
+      {
+        type: 'error',
+        error_code: 'INTERNAL_ERROR',
+        severity: 'warn',
+        details,
+      },
+    ];
+  }
+
+  return [];
+}
+
+/**
+ * ROADMAP 2.1003 — the sentence that lied.
+ *
+ * The prior fallback was
+ *   `Applied edit. Graph now has N nodes and M edges.`
+ * whose truth condition was `appliedGraph != null` — PRESENCE OF A GRAPH, not
+ * occurrence of a change and not identity of the object changed. Measured on
+ * deployed staging: an identical replay produced no new graph identity and
+ * still read "Applied edit. Graph now has 21 nodes and 43 edges."
+ *
+ * Three properties this composer now has, in order of precedence:
+ *  1. An UNCHANGED model is stated as unchanged, explicitly, and never
+ *     described as an application. `modelUnchanged === true` is a positive
+ *     verdict from one local comparator over both graphs; `undefined` means
+ *     "could not tell" and deliberately does NOT reach this branch (a guess is
+ *     not a verdict).
+ *  2. A real change is described by the DETERMINISTIC RECEIPT
+ *     (`appliedChanges.summary`, built by `buildAppliedChanges` from the
+ *     operation list AND both graphs — "<Label>: <old> -> <new>"), not by a
+ *     node/edge count. The count was true of a no-change apply and true of a
+ *     wrong-object apply; the receipt names the entity and the transition.
+ *  3. Only when neither is available does it fall back to the count.
+ *
+ * Wholesale replacement, per the discipline already recorded at the 2.427
+ * site: a success sentence followed by a correction is still a success
+ * sentence.
+ */
+export function composeEditFallbackText(result: EditGraphResult): string {
+  if (result.wasRejected) return 'The proposed edit was rejected.';
+  if (!result.appliedGraph) return 'Edit processed.';
+
+  if (result.modelUnchanged === true) {
+    return 'No change: the model already matched that. Nothing was updated.';
+  }
+
+  const receipt = result.appliedChanges?.summary;
+  if (typeof receipt === 'string' && receipt.trim().length > 0) {
+    return receipt.trim();
+  }
+
+  return `Applied edit. Graph now has ${result.appliedGraph.nodes?.length ?? 0} nodes and ${result.appliedGraph.edges?.length ?? 0} edges.`;
+}
+
+/**
+ * ROADMAP 2.1003 — WHOLESALE REPLACEMENT on a proven no-change turn.
+ *
+ * The discipline is already recorded at the 2.427 site: "REFUSE, rather than
+ * confirm-with-a-caveat. The text is replaced WHOLESALE: a success sentence
+ * followed by a correction is still a success sentence."
+ *
+ * The LLM's prose is authored BEFORE the applied graph comes back, so it
+ * cannot know the model did not move — on the measured replay it happily said
+ * the graph had changed. On `modelUnchanged === true` it is therefore
+ * REPLACED, never appended to. `undefined` (no verdict) leaves today's
+ * behaviour byte-identical.
+ *
+ * Named and exported rather than inlined so the rule is a concept with its own
+ * test, not an expression nobody can point a mutant at.
+ */
+export function selectEditAssistantText(result: EditGraphResult, fallback: string): string {
+  if (result.modelUnchanged === true) return fallback;
+  return result.assistantText ?? fallback;
+}
+
+/**
+ * ⭐⭐ ROADMAP 2.1266 — canonicalise the deterministic option-effect operation
+ * through the SAME parser the edit LLM's output goes through.
+ *
+ * `buildOptionEffectRawOperation` emits the served prompt's EXAMPLE-2
+ * vocabulary (`/nodes/<opt>/data/interventions/<factor_id>`, object leaf,
+ * `old_value: null`). Everything downstream of composition expects the
+ * POST-PARSE shape — `path` reduced to the bare node id, the leaf re-keyed by
+ * its slash field so factor attribution survives (the P0-2 object-leaf fix in
+ * `normaliseOperation`). Spelling that shape by hand here would be a MIRROR of
+ * the parser (trap 12) and would go stale the day the parser gains a rule; so
+ * the raw op is round-tripped through `parseEditGraphResponse` instead, and the
+ * deterministic path's operation is BY CONSTRUCTION identical to the one the
+ * model produces for the same edit.
+ *
+ * Returns `null` — never a short or empty batch — when the round trip does not
+ * yield exactly one operation. An empty `preComposedOperations` would reach the
+ * no-operations branch and answer "No changes were needed", which is a WORSE
+ * outcome than the LLM path this is replacing; a null hands the turn straight
+ * back to that path.
+ */
+function canonicaliseOptionEffectOperation(
+  resolved: {
+    readonly optionId: string;
+    readonly optionLabel: string;
+    readonly factorId: string;
+    readonly factorLabel: string;
+    readonly value: number;
+  },
+  requestId: string,
+): readonly PatchOperation[] | null {
+  const raw = buildOptionEffectRawOperation(resolved);
+  let parsedOperations: unknown[];
+  try {
+    parsedOperations = parseEditGraphResponse(
+      JSON.stringify({ operations: [raw], removed_edges: [], warnings: [], coaching: null }),
+    ).operations;
+  } catch {
+    parsedOperations = [];
+  }
+  if (parsedOperations.length !== 1) {
+    log.error(
+      {
+        event: 'v5.edit_graph.option_effect_operation_canonicalise_failed',
+        request_id: requestId,
+        operations_count: parsedOperations.length,
+      },
+      'V5 edit_graph — the deterministic option-effect operation did not survive canonicalisation; falling back to the edit LLM',
+    );
+    return null;
+  }
+  return parsedOperations as readonly PatchOperation[];
+}
+
+/**
+ * The native-quantity operation, through the SAME canonicalisation gate as its
+ * option-effect sibling — `parseEditGraphResponse`, which is the parser the LLM
+ * path's own operations go through. A deterministic operation gets no easier
+ * ride than a generated one; if it does not survive the parser it is discarded
+ * and the turn takes the LLM path, exactly as the sibling does.
+ */
+function canonicaliseNativeQuantityOperation(
+  raw: Record<string, unknown>,
+  requestId: string,
+): readonly PatchOperation[] | null {
+  let parsedOperations: unknown[];
+  try {
+    parsedOperations = parseEditGraphResponse(
+      JSON.stringify({ operations: [raw], removed_edges: [], warnings: [], coaching: null }),
+    ).operations;
+  } catch {
+    parsedOperations = [];
+  }
+  if (parsedOperations.length !== 1) {
+    log.error(
+      {
+        event: 'v5.edit_graph.native_quantity_operation_canonicalise_failed',
+        request_id: requestId,
+        operations_count: parsedOperations.length,
+      },
+      'V5 edit_graph — the native-quantity operation did not survive canonicalisation; falling back to the edit LLM',
+    );
+    return null;
+  }
+  return parsedOperations as readonly PatchOperation[];
+}
+
+function editResultToOlumiResponse(
+  result: EditGraphResult,
+  payload: MessageTurnPayload,
+): OlumiResponse {
+  const fallback = composeEditFallbackText(result);
+
+  // V5 finaliser contract: this composer must NOT set `analysis_ready`. The
+  // dispatcher computes canonical readiness from `editResult.appliedGraph`
+  // and surfaces it on `DispatchEditGraphResult.analysisReady`; the
+  // response-finaliser stamps it onto the wire envelope after composition.
+  const assistantText = selectEditAssistantText(result, fallback);
+
+  return {
+    response_version: 2,
+    assistant_text: assistantText,
+    blocks: buildBoundaryBlocks(result),
+    suggested_actions: buildBoundarySuggestedActions(result),
+    insights: [],
+    stage_indicator: payload.stage,
+  };
+}
+
+/**
+ * Adapter: permissive `GraphStateIngress` (v0.7.0 wire shape) → strict
+ * `GraphV3T` (V4 internal type) for `ConversationContext.graph`.
+ *
+ * Ingress has already been Zod-validated by `parseRequestExtensions`, but its
+ * schema uses `.passthrough()` and weaker field types than GraphV3. Rather
+ * than `as unknown as` (erasing type safety), this adapter runs `GraphV3`
+ * through `safeParse`. Outcomes:
+ *   - parse success → return the parsed GraphV3T (nodes/edges preserved).
+ *   - parse failure → construct a minimal GraphV3T-compatible value from
+ *     the ingress fields `handleEditGraph` actually reads (nodes[id,kind,
+ *     label], edges[from,to]). Failure is logged at warn so the operator
+ *     sees the drift; the edit still proceeds because handleEditGraph
+ *     internally re-casts to a weaker structural type (see edit-graph.ts
+ *     lines 1662/1712/1766).
+ *
+ * Callers of this module MUST NOT apply `as unknown as GraphV3T` themselves
+ * — see the banner comment in src/orchestrator-v5/boundary/request-extensions.ts.
+ */
+/**
+ * V5 A4 Commit 6 — strict parse signal for the deterministic classifier
+ * gate. Callers that need to know whether the returned graph is the
+ * canonical strict-parsed form vs the structural fallback (with inert
+ * default edge fields) can use `graphStateToGraphV3WithParseResult`.
+ * The deterministic add_risk clarification path runs only against strictly
+ * parsed graphs so non-canonical ingress keeps the pre-existing LLM path.
+ */
+function graphStateToGraphV3WithParseResult(
+  graphState: GraphStateIngress,
+  requestId: string,
+): { graph: GraphV3T; strict: boolean } {
+  const parsed = GraphV3.safeParse(graphState);
+  if (parsed.success) {
+    return { graph: parsed.data, strict: true };
+  }
+  return { graph: buildStructuralFallback(graphState, requestId, parsed.error), strict: false };
+}
+function buildStructuralFallback(
+  graphState: GraphStateIngress,
+  requestId: string,
+  error: import('zod').ZodError,
+): GraphV3T {
+  log.warn(
+    {
+      request_id: requestId,
+      issue_count: error.issues.length,
+      first_issue_path: error.issues[0]?.path.join('.') ?? null,
+    },
+    'V5 edit_graph dispatch — graph ingress did not pass strict GraphV3 parse; using structural fallback',
+  );
+  // Structural fallback: build a GraphV3T-shaped object from the ingress
+  // fields handleEditGraph actually reads. Required GraphV3 fields that
+  // the ingress does NOT carry (edge.effect_direction, edge.strength
+  // object, edge.exists_probability) are stamped with inert defaults so
+  // the returned value satisfies GraphV3T's type without fabricating
+  // semantically meaningful values. handleEditGraph re-casts graph
+  // internally (edit-graph.ts:1662/1712/1766 cast to a weaker
+  // { nodes: Array<{id,kind?}>, edges?: unknown[] } type), so these
+  // defaults never influence the edit logic itself.
+  const fallbackNodes: GraphV3T['nodes'] = graphState.nodes.map((n) => {
+    const node = n as { id: string; kind: string; label?: string };
+    return {
+      id: node.id,
+      kind: node.kind as GraphV3T['nodes'][number]['kind'],
+      label: node.label ?? node.id,
+    };
+  });
+  const fallbackEdges: GraphV3T['edges'] = graphState.edges.map((e) => {
+    const edge = e as { from: string; to: string };
+    return {
+      from: edge.from,
+      to: edge.to,
+      strength: { mean: 0, std: 0 },
+      exists_probability: 1,
+      effect_direction: 'positive',
+    };
+  });
+  return { nodes: fallbackNodes, edges: fallbackEdges };
+}
+
+/**
+ * Adapter: permissive `AnalysisStateIngress` → `V2RunResponseEnvelope`.
+ *
+ * Mirrors `coerceIngressAnalysis` in turn-executor.ts (the existing V5
+ * convention for ingress→V4 envelope conversion). Only `analysis_status` is
+ * structurally required in the ingress schema; everything else is
+ * passthrough. We fill `meta` and normalise `results` so handleEditGraph's
+ * downstream consumers receive the shape they expect without this module
+ * applying a type-erasing `as unknown as` cast.
+ */
+// `loadMostRecentPendingActions` lives in `build-turn-context.ts` so the
+// state-write-invariant pre-push guard (SessionStore imports restricted to
+// session/, commit.ts, build-turn-context.ts) stays satisfied. The
+// pre-LLM intercept below calls it directly.
+
+function analysisIngressToV2Envelope(a: AnalysisStateIngress): V2RunResponseEnvelope {
+  const raw = a as AnalysisStateIngress & {
+    meta?: V2RunResponseEnvelope['meta'];
+    results?: unknown;
+    [k: string]: unknown;
+  };
+  const results: unknown[] = Array.isArray(raw.results)
+    ? raw.results
+    : raw.results && typeof raw.results === 'object'
+      ? Object.values(raw.results as Record<string, unknown>)
+      : [];
+  return {
+    ...raw,
+    meta: raw.meta ?? { seed_used: 0, n_samples: 0, response_hash: '' },
+    results,
+  };
+}
+
+/**
+ * V5-PERSIST-FIX-01 (H1) — merge the applied edit back onto the
+ * server-authoritative persisted graph shape before persistence.
+ *
+ * Why this exists: `GraphV3.safeParse` strips top-level `goal_node_id`
+ * and `options[]` (neither is declared on GraphV3), and `NodeV3` strips
+ * undeclared `node.data`. The edit pipeline parses its ingress through
+ * GraphV3, so `appliedGraph` can NEVER carry those fields — committing
+ * it wholesale replaced the rich draft-persisted `scenarios.graph` with
+ * a stripped `{nodes, edges}` shape. Fleet evidence at investigation
+ * time: 43/43 scenarios with an applied edit_graph fact had lost BOTH
+ * `goal_node_id` and `options[]`.
+ *
+ * Merge base precedence (deliberate, per V5-PERSIST-FIX-01):
+ *   1. The PERSISTED `scenarios.graph` (pre-edit) is the base. NOT the
+ *      ingress echo: the real DGAI echo cannot carry `options[]` /
+ *      `goal_node_id` (the draft wire block omits them), so an
+ *      ingress-base merge would pass synthetic tests while live edits
+ *      still lose both fields. This is the one caveat of the D1
+ *      `apply-graph-mutation.ts` merge-back we must NOT copy.
+ *   2. `appliedGraph` wins for what the edit actually changed: `nodes`
+ *      and `edges` (every edit_graph operation — add/update/remove
+ *      node/edge, incl. the constraint shortcut which writes
+ *      `goal_constraints` onto the goal NODE — lives inside those two
+ *      arrays). Top-level `goal_constraints` is NOT overlaid: no edit
+ *      operation writes it, so the base keeps its own (D1
+ *      `add_constraint` owns that field).
+ *   3. Everything else top-level (`goal_node_id`, `options[]`, `meta`,
+ *      `schema_version`, draft-pipeline fields, …) is preserved from
+ *      the base verbatim. Nothing is invented.
+ *   4. Option deletion is honoured, not resurrected: an `options[]`
+ *      entry is dropped IFF its id was a node id in the base graph and
+ *      that node is absent from `appliedGraph.nodes` (i.e. this edit
+ *      provably removed the option node). Entries whose ids never
+ *      matched a base node are preserved (fail-open to preservation).
+ *
+ * Fallback to the RAW ingress graph (the D1-style merge) covers the two
+ * cases the dispatcher legitimately passes — NOT a degraded read. A
+ * degraded/unavailable persisted read FAILS CLOSED upstream in
+ * `dispatchEditGraph` (the strict loader throws → retryable 500) and
+ * never reaches this helper, so "unavailable" is deliberately absent here:
+ *   - `persistedBase === null` — a GENUINELY-empty `scenarios.graph` (the
+ *     strict read succeeded and returned no graph). There is nothing to
+ *     lose; the ingress-merged graph is the first valid write.
+ *   - non-null but structurally unusable (not an object / missing
+ *     nodes+edges arrays) — a malformed-but-READABLE persisted graph. We
+ *     deliberately HEAL FORWARD via the ingress base (commit a valid
+ *     shape) rather than fail closed: a 500 on permanently-malformed data
+ *     would trap the user with no in-app recovery, and a malformed graph
+ *     holds no parseable rich top-level fields to preserve, so this is not
+ *     the H1 corruption class (that shape keeps both arrays → is "usable"
+ *     → merged onto, not replaced). This sub-case is logged at WARN.
+ *     (A future tightening could fail closed here too for maximum
+ *     fail-closed semantics — deferred; see Codex review note.)
+ * Either way the merge is strictly better than the pre-fix stripped
+ * commit and only loses fields the server never validly had.
+ *
+ * Nested `node.data` (e.g. `data.interventions`) is NOT addressed here:
+ * node content is owned by `appliedGraph`, whose nodes were already
+ * NodeV3-parsed at ingress. That remains a prompt/schema-lane issue.
+ *
+ * ⚠ NOT INTERCHANGEABLE with its near-identical twin
+ * `mergeMutatedGraphForPersistence` (d1-shared/apply-graph-mutation.ts). Each is
+ * WRONG on the other's path, in opposite directions: this one PRUNES deleted
+ * `options[]` entries (rule 4 above) and does NOT overlay top-level
+ * `goal_constraints`; the D1 twin does the exact opposite. Swapping them
+ * reproduces a real defect one field over. The difference is pinned by
+ * `orchestrator-v5/__tests__/persist-merge-twins-are-not-interchangeable.test.ts`
+ * — change either twin and read that file first.
+ *
+ * @internal Exported for testing.
+ */
+export function mergeAppliedGraphForPersistence(args: {
+  readonly appliedGraph: GraphV3T;
+  /**
+   * Raw persisted `scenarios.graph` (pre-edit), or null for a
+   * GENUINELY-empty scenario. A degraded read never reaches here — it
+   * fails closed in `dispatchEditGraph` before this helper is called.
+   */
+  readonly persistedBase: unknown;
+  /** Raw request/reloaded ingress graph — fallback base only. */
+  readonly ingressBase: GraphStateIngress;
+  readonly requestId: string;
+  readonly scenarioId: string;
+}): Record<string, unknown> {
+  const { appliedGraph, persistedBase, ingressBase, requestId, scenarioId } = args;
+  const persistedUsable =
+    persistedBase !== null &&
+    persistedBase !== undefined &&
+    typeof persistedBase === 'object' &&
+    !Array.isArray(persistedBase) &&
+    Array.isArray((persistedBase as Record<string, unknown>).nodes) &&
+    Array.isArray((persistedBase as Record<string, unknown>).edges);
+  // A non-null persisted base that is NOT usable = a malformed-but-readable
+  // scenarios.graph. We heal forward via ingress (see docstring) but flag it
+  // loudly so the anomaly is never silent — it should be vanishingly rare.
+  const persistedMalformed =
+    persistedBase !== null && persistedBase !== undefined && !persistedUsable;
+  const base = (
+    persistedUsable ? persistedBase : ingressBase
+  ) as Record<string, unknown>;
+
+  const merged: Record<string, unknown> = {
+    ...base,
+    nodes: appliedGraph.nodes,
+    edges: appliedGraph.edges,
+  };
+
+  // Precedence rule 4 — drop options[] entries provably deleted by THIS
+  // edit (id was a base node, node gone from the applied graph). All
+  // other entries are preserved byte-for-byte.
+  const baseOptions = base.options;
+  let optionsDropped = 0;
+  if (Array.isArray(baseOptions)) {
+    const baseNodeIds = new Set(
+      (base.nodes as unknown[])
+        .map((n) => (n && typeof n === 'object' ? (n as { id?: unknown }).id : undefined))
+        .filter((id): id is string => typeof id === 'string'),
+    );
+    const appliedNodeIds = new Set(appliedGraph.nodes.map((n) => n.id));
+    const survivors = baseOptions.filter((opt) => {
+      const id =
+        opt && typeof opt === 'object' ? (opt as { id?: unknown }).id : undefined;
+      if (typeof id !== 'string') return true;
+      return !(baseNodeIds.has(id) && !appliedNodeIds.has(id));
+    });
+    optionsDropped = baseOptions.length - survivors.length;
+    if (optionsDropped > 0) {
+      merged.options = survivors;
+    }
+  }
+
+  const logPayload = {
+    event: 'v5.edit_graph.persist_merge_back',
+    request_id: requestId,
+    scenario_id: scenarioId,
+    base: persistedUsable
+      ? 'persisted'
+      : persistedMalformed
+        ? 'ingress_fallback_malformed_base'
+        : 'ingress_fallback_genuine_empty',
+    base_has_goal_node_id: typeof base.goal_node_id === 'string',
+    base_options_count: Array.isArray(baseOptions) ? baseOptions.length : null,
+    options_dropped_as_deleted: optionsDropped,
+    applied_node_count: appliedGraph.nodes.length,
+    applied_edge_count: appliedGraph.edges.length,
+  };
+  if (persistedMalformed) {
+    log.warn(
+      logPayload,
+      'V5 edit_graph — persisted scenarios.graph was non-null but structurally unusable; healing forward via the ingress base (no rich top-level fields recoverable from a malformed graph)',
+    );
+  } else {
+    log.info(
+      logPayload,
+      'V5 edit_graph — applied mutation merged onto persisted graph shape for persistence',
+    );
+  }
+
+  return merged;
+}
+
+/**
+ * ROADMAP 1.33 — edit-lane conversation starvation.
+ *
+ * Convert the same 5-turn conversation-slice projection
+ * `context-pack-assembler.ts`'s `projectConversation` builds for the
+ * coaching/draft LLM path into `ConversationContext.messages` (prior turns
+ * ONLY — the current turn's `payload.message` is sent separately as the
+ * edit LLM's `userMessage`, see `edit-graph.ts`, so it is deliberately not
+ * appended here).
+ *
+ * `recentTurns` arrives most-recent-first (context-pack-assembler
+ * convention); reversed to chronological order so the rendered section
+ * reads as a narrative. Per-turn `user_message`/`assistant_message` are
+ * already length-capped at persist time (`CONVERSATION_TEXT_CAP` in
+ * commit.ts) — this function does no further per-message bounding, only
+ * ordering. Overall-section bounding + disclosed truncation happens at
+ * render time in `serialiseEditContextForLLM`.
+ */
+function conversationSliceToMessages(
+  recentTurns: readonly { user_message: string | null; assistant_message: string | null }[],
+): ConversationMessage[] {
+  const chronological = [...recentTurns].reverse();
+  const messages: ConversationMessage[] = [];
+  for (const turn of chronological) {
+    if (turn.user_message) messages.push({ role: 'user', content: turn.user_message });
+    if (turn.assistant_message) messages.push({ role: 'assistant', content: turn.assistant_message });
+  }
+  return messages;
+}
+
+export async function dispatchEditGraph(
+  params: DispatchEditGraphParams,
+): Promise<DispatchEditGraphResult> {
+  const { payload, requestId, graphState, analysisState } = params;
+  const startedAt = Date.now();
+  // ROADMAP 2.684 — the deadline baseline. `routeStartedAt` when the route
+  // threaded it (the live path); the dispatcher's own start otherwise, which
+  // over-estimates the remaining budget by however long pre-flight took. See
+  // the `requestStartMs` jsdoc on DispatchEditGraphParams.
+  const requestStartMs = params.requestStartMs ?? startedAt;
+
+  const { graph: parsedGraph, strict: graphStrictlyCanonical } =
+    graphStateToGraphV3WithParseResult(graphState, requestId);
+  let recordedAnswer: RecordedEffectAnswer | null = null;
+  if (params.recordedEffectAnswer !== undefined) {
+    const resolved = resolveRecordedOptionEffectAnswer({
+      message: payload.message, pendings: params.recordedEffectAnswer.priorPendingActions,
+      graph: graphState, readiness: buildCanonicalAnalysisReadyFromGraph(graphState),
+      scenarioId: payload.scenario_id, nowMs: Date.now(),
+    });
+    if (!graphStrictlyCanonical || resolved.kind !== 'bind'
+      || resolved.answer.pending.id !== params.recordedEffectAnswer.pending.id) {
+      throw new Error('Recorded option-effect answer no longer matches the canonical question');
+    }
+    recordedAnswer = resolved.answer;
+  }
+  const editInstruction = recordedAnswer?.instruction ?? params.editInstructionOverride ?? payload.message;
+  const editSelectionFocus = projectEditSelectionFocus(
+    params.selectedElements,
+    parsedGraph,
+    graphStrictlyCanonical,
+  );
+  // ROADMAP 1.33: feed the same 5-turn conversation slice the
+  // coaching/draft LLM path already builds into the edit-LLM request, so a
+  // user who clarified details over several turns then asks for an edit
+  // gets an edit that sees what they already established (Brief G).
+  // Read failures degrade to an empty slice (see
+  // `loadRecentConversationTurns`) — never fail the turn over a
+  // conversation-history read.
+  const priorConversationTurns = await loadRecentConversationTurns(payload.scenario_id, requestId);
+  const { recent_turns: recentConversationSlice } = projectConversation(priorConversationTurns, false);
+  // Context v2 S2 (ROADMAP 1.199, was 1.73 02 §Seam 1): thread the persisted
+  // decision brief into the edit context — edit/repair are the two turn-path
+  // LLM sites that received NOTHING of the brief. Now UNCONDITIONAL: the S2
+  // capability ships ON (no-dark-launches — the CEE_CONTEXT_BRIEF_ALL_SITES
+  // flag is deleted; flip = code, rollback = revert). A read failure degrades
+  // to no-brief — never fail an edit turn over a brief read (same posture as
+  // the conversation read above). Note the pack's "same scenario read that
+  // already supplies graph/analysis" phrasing does not hold at this dispatch
+  // (graph/analysis arrive on the REQUEST; only conversation turns are read) —
+  // this is the sibling read. The brief reaches ONLY the edit-context
+  // serialiser (serialiseEditContextForLLMWithMeta, called from edit-graph.ts
+  // for edit + repair), so it cannot leak into any other lane.
+  let editBriefSlice: ConversationContext['brief'] = null;
+  try {
+    const briefText = await loadScenarioBriefText(payload.scenario_id, requestId);
+    editBriefSlice = projectBriefForEdit(briefText);
+  } catch {
+    editBriefSlice = null; // helper already degrades; belt for test doubles
+  }
+  const context: ConversationContext = {
+    graph: parsedGraph,
+    analysis_response: analysisState ? analysisIngressToV2Envelope(analysisState) : null,
+    framing: { stage: mapStageToDecisionStage(payload.stage) },
+    messages: conversationSliceToMessages(recentConversationSlice),
+    scenario_id: payload.scenario_id,
+    ...(editBriefSlice ? { brief: editBriefSlice } : {}),
+    ...(editSelectionFocus.length > 0 ? { selected_elements: editSelectionFocus } : {}),
+  };
+
+  const adapter = getAdapter('edit_graph');
+
+  let editResult: EditGraphResult;
+  // ROADMAP 2.474 / A3 — set only when the structural edit tool split an
+  // over-cap request. Read once, in the response-assembly region below.
+  let structuralEditSplit: StructuralEditSplitOutcome | null = null;
+  // A3 — true when this scenario already carries a successful run_analysis
+  // fact, which is what makes a LATER part require a re-run first (see the
+  // derivation in the gate block below). Defaults true so an unreached
+  // derivation produces the honest, non-promising copy rather than a chip that
+  // cannot deliver.
+  let priorAnalysisExistsForSplit = true;
+  // Track the deterministic clarification path independently so
+  // llm_calls_used records 0 when no adapter call was made.
+  let deterministicAddRiskAttempted = false;
+  // V5 P0 staging-smoke follow-up (PR #212): set true when the
+  // pre-LLM proposal-continuation intercept emits Stage 1 / Stage 2
+  // chips. Read by the downstream no-op recovery layer's
+  // `decideNoOpRecovery` call to suppress its parallel proposal
+  // branches so the wire response carries one chip set, not two.
+  let proposalEarlyEmitted = false;
+  /**
+   * ⭐⭐ THE ADD-RISK CLARIFIER ACTUALLY ANSWERED THIS TURN.
+   *
+   * Measured on request `b0d541a9-1631-4604-9546-f089dbb916cc` (8 Sep 2026,
+   * CEE `0f1cbc6b`): "Please can you add it as a risk?" produced
+   * `add_risk_clarified`, and then `no_op_recovery` fired `proposal_stage_one`
+   * with `rewrote_text: true`, replacing that specific clarification with the
+   * generic "one of these" kind chooser. Zero LLM calls, zero operations,
+   * 12 nodes / 21 edges unchanged. The person asked for a risk, was asked back
+   * which kind of thing they meant, and clicking "Add as risk" repeated it.
+   *
+   * PR #212 already established that the recovery's `proposal_stage_*` ladder
+   * must not fire when this turn has ALREADY given a deterministic answer — but
+   * it keys on `proposalEarlyEmitted`, which only the pre-LLM continuation
+   * intercept sets. The add-risk fast path is the SIBLING deterministic answer
+   * (the intercept lives in its `else`: "Add-risk still wins"), so it answered
+   * the turn and left the flag false. Same contract, one path short.
+   *
+   * ⚠ ANSWERED, NOT MATCHED — and the distinction is the whole point. There is
+   *   already a `deterministicAddRiskAttempted` for "the classifier matched";
+   *   keying on that would suppress the ladder on turns the clarifier began and
+   *   did not finish. This is set only where the clarification is actually
+   *   returned to the user.
+   *
+   * ⚠ SCOPE: it is OR-ed into the existing flag at the recovery call site ONLY.
+   *   `proposalEarlyEmitted` keeps its own meaning everywhere else (chip
+   *   counting, `llm_calls_used`, the V4 no-op branch), and every other recovery
+   *   branch — `analytical_*`, `vague_edit`, `explore_factor*`, `ambiguous` —
+   *   still runs as defence-in-depth, exactly as PR #212 requires. A genuinely
+   *   ambiguous agreement, where the add-risk classifier did NOT answer, still
+   *   reaches Stage 1 unchanged.
+   */
+  let addRiskClarifierAnswered = false;
+  // PR #216 review follow-up: set true when the pre-LLM intercept
+  // already emitted a `V5ProposalContinuationInvalidated` event for an
+  // expired / diverged pending. The recovery block re-runs the same
+  // resume gate against the same most-recent pending and would emit a
+  // SECOND identical invalidation when `handleEditGraph` no-ops after
+  // the intercept rejected — double-counting the metric. The recovery
+  // block reads this to skip its own invalidation emit. It does NOT
+  // suppress a recovery-only invalidation (the case where the
+  // intercept's graph-hash compute failed but the recovery's
+  // succeeded) because that path leaves this flag false.
+  let interceptEmittedInvalidation = false;
+  // PR #216 round-3 review (SHOULD-FIX): refreshed proposed_concept
+  // pending action to persist with the commit. Declared at function
+  // scope so the pre-LLM intercept can build it directly from the
+  // concept it just resolved — making the early-emit refresh
+  // independent of the LATER `buildTurnContext` pending read. If that
+  // second read degrades (returns no pending / throws), the early-emit
+  // response is still authoritative AND its pending is still refreshed,
+  // so the next Stage 1 → Stage 2 click resumes. Stays null on paths
+  // that emit no proposal; the commit then falls back to chip-derived
+  // pending actions.
+  let proposalPendingForCommit:
+    | import('../session/pending-action.js').PendingAction
+    | null = null;
+  // F-HELD fix 4a (A-variant) — the `edit_graph_add_risk` pending emitted by
+  // the deterministic add-risk clarify branch, so the driver answer one turn
+  // later can resume via `tryClarificationResume` (the documented-but-never-
+  // emitted kind from session/pending-action.ts). Null on every other path.
+  let addRiskPendingForCommit: PendingAction | null = null;
+
+  // R7 — single per-turn observability event. Each branch fills the accumulator
+  // as it resolves; `emitEditTurnEventOnce` is invoked from the commit-try
+  // `finally` (covers both returns) and from the handler-threw catch (covers the
+  // rethrow), guarded so it fires exactly once. The emit is isolated in its own
+  // try/catch so a telemetry fault can never mask the handler's return/error.
+  const ev: EditTurnEventAccumulator = {
+    scenario_id: payload.scenario_id,
+    turn_id: payload.turn_id,
+    graph_nodes_before: parsedGraph.nodes.length,
+    graph_edges_before: parsedGraph.edges.length,
+  };
+  try {
+    const meta = getSystemPromptMeta('edit_graph');
+    ev.prompt_source = meta.source;
+    ev.prompt_key = meta.promptId ?? null;
+    ev.prompt_task_id = meta.taskId;
+    ev.prompt_version = meta.version ?? null;
+    ev.prompt_hash = meta.prompt_hash ?? null;
+    ev.prompt_fallback_used = meta.source === 'default';
+  } catch {
+    // Prompt-meta is best-effort; leave the prompt_* fields at their defaults.
+  }
+  let eventEmitted = false;
+  const emitEditTurnEventOnce = (): void => {
+    if (eventEmitted) return;
+    eventEmitted = true;
+    try {
+      ev.latency_ms = Date.now() - startedAt;
+      emit(TelemetryEvents.V5EditGraphTurn, finaliseEditTurnEvent(ev));
+    } catch (telemetryErr) {
+      // R7: a telemetry fault must never replace the handler's original return
+      // or rethrown error — swallow locally and degrade to a log.
+      log.warn(
+        {
+          request_id: requestId,
+          scenario_id: payload.scenario_id,
+          err: telemetryErr instanceof Error ? telemetryErr.message : String(telemetryErr),
+        },
+        'V5 edit_graph turn-event emit failed; continuing',
+      );
+    }
+  };
+
+  try {
+    // V5 A4 — deterministic clarification intercept. Pre-LLM classifier
+    // catches high-confidence bare "add X as a risk" patterns, but the
+    // request does not state what drives the risk. Creating a risk node
+    // would require inventing graph structure, so this path asks for the
+    // missing driver and intentionally leaves the graph unchanged.
+    // The deterministic classifier MUST NOT run against a structural
+    // fallback graph. When the ingress did not pass strict GraphV3 parse,
+    // fall through to the LLM path unconditionally (handleEditGraph re-casts
+    // internally and is the pre-existing behaviour for non-canonical ingress).
+    const classified = graphStrictlyCanonical
+      ? classifyAddRiskIntent(payload.message, parsedGraph)
+      : ({ intent: 'llm_required' } as const);
+
+    if (classified.intent === 'add_risk') {
+      deterministicAddRiskAttempted = true;
+      // Pre-LLM preflight: would adding this risk push the model past
+      // its analysis limits? If so, return a structured rejection now
+      // and skip the LLM. The LLM call would otherwise spend 16–18s
+      // before the post-mutation validator rejected with the same
+      // limit code. Specific recovery copy + executable chips give the
+      // user a real next step instead of generic failure copy.
+      const preflight = wouldExceedAddRiskLimits(parsedGraph);
+      if (preflight.over_node_limit || preflight.over_edge_limit) {
+        const rejectionCode = preflight.over_edge_limit
+          ? 'EDGE_LIMIT_EXCEEDED_PREFLIGHT'
+          : 'NODE_LIMIT_EXCEEDED_PREFLIGHT';
+        emit(TelemetryEvents.EditGraphPreflightSkippedLlm, {
+          request_id: requestId,
+          scenario_id: payload.scenario_id,
+          reason: preflight.over_edge_limit ? 'edge_limit' : 'node_limit',
+          projected_nodes: preflight.projected_nodes,
+          projected_edges: preflight.projected_edges,
+          node_limit: preflight.node_limit,
+          edge_limit: preflight.edge_limit,
+          label_length: classified.label.length,
+        });
+        // Recovery surface: assistant text describes the next steps
+        // inline. We do NOT emit prompt-replay chips here — they
+        // would have been dishonest about what clicking does (no
+        // deterministic rebuild or replace flow exists in this
+        // tranche). The brief contract is "every chip must be
+        // actionable"; rather than rename or fake actionability we
+        // omit chips entirely from this rejection path. The user
+        // types their next intent in their own words.
+        editResult = {
+          blocks: [],
+          assistantText:
+            "I can't add another risk without making the model too complex to analyse reliably. " +
+            "Tell me how to simplify the model so we can fit this in, or which existing risk to replace with " +
+            `'${classified.label}'.`,
+          latencyMs: Date.now() - startedAt,
+          appliedGraph: null,
+          wasRejected: true,
+          diagnostics: {
+            classified_intent: 'structural',
+            instruction_mode_applied: 'structural_default',
+            edit_instruction_preview: classified.label.slice(0, 80),
+            graph_context_node_count: preflight.current_nodes,
+            graph_context_edge_count: preflight.current_edges,
+            operations_proposed_count: 0,
+            operations_proposed_types: [],
+            validation_outcome: 'preflight_rejected',
+            validation_violation_codes: [
+              preflight.over_edge_limit ? 'EDGE_LIMIT_EXCEEDED' : 'NODE_LIMIT_EXCEEDED',
+            ],
+            recovery_path_chosen: 'preflight_rejection',
+            conversational_state_summary: null,
+            target_resolution: null,
+            resolution_mode: null,
+            proposal_returned: false,
+            branch_taken: 'rejection',
+            branch_reason: 'add_risk_preflight_limit_exceeded',
+            failure_branch: 'preflight',
+            failure_code: rejectionCode,
+            failure_message: preflight.over_edge_limit
+              ? `Adding the risk would project ${preflight.projected_edges} edges (limit ${preflight.edge_limit}).`
+              : `Adding the risk would project ${preflight.projected_nodes} nodes (limit ${preflight.node_limit}).`,
+          },
+          // No chips on this rejection path — the suggestions are
+          // surfaced inline in assistant_text. See the assistantText
+          // construction above for the rationale.
+          suggestedActions: [],
+        };
+        log.info(
+          {
+            request_id: requestId,
+            scenario_id: payload.scenario_id,
+            latency_ms: editResult.latencyMs,
+            reason: rejectionCode,
+            projected_nodes: preflight.projected_nodes,
+            projected_edges: preflight.projected_edges,
+          },
+          'V5 edit_graph add_risk preflight blocked LLM call (limit would be exceeded)',
+        );
+      } else {
+        editResult = {
+          blocks: [],
+          assistantText: buildAddRiskClarification(classified.label),
+          latencyMs: Date.now() - startedAt,
+          appliedGraph: null,
+          wasRejected: false,
+        };
+        // F-HELD fix 4a — persist the `edit_graph_add_risk` pending with the
+        // clarify turn so the driver answer on the next turn has something
+        // to resume against (wire 04c→10c: the answer was previously
+        // dropped). The pending carries the ORIGINAL risk label (per the
+        // kind's doc in session/pending-action.ts) and the emit-time
+        // analysis-affecting graph hash — the resume is a mutating kind, so
+        // the clarification resumer's hash gate fails closed without it. If
+        // the hash cannot be computed we emit NO pending (mirrors
+        // buildHeldPending's "no readable frame → no safe pending" posture)
+        // rather than persisting one that can only ever dispatch
+        // recovery_graph_changed.
+        const addRiskEmitGraphHash = ((): string | null => {
+          try {
+            return computeAnalysisAffectingGraphHash(graphState);
+          } catch {
+            return null;
+          }
+        })();
+        if (addRiskEmitGraphHash !== null) {
+          const addRiskEmittedAtIso = new Date().toISOString();
+          addRiskPendingForCommit = {
+            id: randomUUID(),
+            scenario_id: payload.scenario_id,
+            // Server-only pending (no rendered chip — same convention as the
+            // value-update clarify's chip-less pendings): the chip_id is a
+            // stable synthetic handle for telemetry / consumption matching.
+            chip_id: 'chip_add_risk_clarify',
+            action: {
+              kind: 'edit_graph_add_risk',
+              label: classified.label,
+            },
+            preconditions: { graph_hash: addRiskEmitGraphHash },
+            expires_at_turn_count: PENDING_ACTION_DEFAULT_TURN_TTL,
+            expires_at_iso: new Date(
+              Date.parse(addRiskEmittedAtIso) + PENDING_ACTION_DEFAULT_WALL_TTL_MS,
+            ).toISOString(),
+            emitted_at_iso: addRiskEmittedAtIso,
+          };
+        } else {
+          log.warn(
+            {
+              request_id: requestId,
+              scenario_id: payload.scenario_id,
+            },
+            'V5 edit_graph add_risk clarify — graph hash unavailable; no resumable pending emitted (fail-closed)',
+          );
+        }
+        log.info(
+          {
+            request_id: requestId,
+            scenario_id: payload.scenario_id,
+            latency_ms: editResult.latencyMs,
+          },
+          'V5 edit_graph add_risk clarification returned without graph mutation',
+        );
+        // The clarification has been returned to the user: this turn is
+        // answered, so the recovery ladder must not re-open Stage 1 over it.
+        addRiskClarifierAnswered = true;
+        emit(TelemetryEvents.V5EditGraphAddRiskClarified, {
+          request_id: requestId,
+          scenario_id: payload.scenario_id,
+          latency_ms: editResult.latencyMs,
+          label_length: classified.label.length,
+        });
+      }
+    } else {
+      // V5 P0 proposal-memory continuation — pre-LLM intercept.
+      //
+      // Sits between the add-risk fast path and the LLM call so the
+      // Stage 1 (agreement) and Stage 2 (add-as-factor) branches emit
+      // deterministically without paying the ~16s handleEditGraph LLM
+      // round-trip. Add-risk still wins (we only reach here when the
+      // add-risk classifier did not match) so the existing fast path
+      // is unchanged.
+      //
+      // Pending actions are loaded inline via the SessionStore factory
+      // rather than reusing buildTurnContext to avoid pulling in the
+      // full prior_facts + scenario_state load on every edit_graph
+      // dispatch. On factory failure the intercept silently returns
+      // null and the LLM path runs normally.
+      const earlyPending = await loadMostRecentPendingActions(
+        payload.scenario_id,
+        requestId,
+      );
+      // Resolve the proposal-resume gate via the shared helper. It runs
+      // the no-pending → wall-clock-TTL → graph-hash ladder in that
+      // order and either returns a Stage 1 / Stage 2 decision or a
+      // typed rejection reason. The wall-clock TTL mirrors the
+      // `isExpired` semantics used by tryClarificationResume /
+      // tryShortConfirmResume so all three resumers agree.
+      let earlyCurrentGraphHash: string | null = null;
+      try {
+        earlyCurrentGraphHash = computeAnalysisAffectingGraphHash(
+          graphState as GraphStateIngress | null | undefined,
+        );
+      } catch {
+        earlyCurrentGraphHash = null;
+      }
+      const resumeOutcome = resolveProposalResume({
+        message: payload.message,
+        pendingActions: earlyPending,
+        nodes: parsedGraph.nodes,
+        currentGraphHash: earlyCurrentGraphHash,
+        nowMs: Date.now(),
+      });
+      if (resumeOutcome.rejection === 'expired_wall' || resumeOutcome.rejection === 'graph_hash_changed') {
+        emit(TelemetryEvents.V5ProposalContinuationInvalidated, {
+          request_id: requestId,
+          scenario_id: payload.scenario_id,
+          reason: resumeOutcome.rejection,
+        });
+        interceptEmittedInvalidation = true;
+      } else if (
+        resumeOutcome.rejection === null
+        && resumeOutcome.decision === null
+      ) {
+        // Lane 22 — the pre-LLM gate previously declined SILENTLY here: a
+        // live, valid pending proposal existed but the agreement matcher
+        // said no-match, and nothing was emitted (the live 2026-07-07 miss
+        // was invisible until the post-LLM zero-operations sub-case). Emit
+        // the no-match outcome from the gate itself so the matcher's miss
+        // rate is measurable. `no_pending` (the steady state on most
+        // turns) still emits nothing.
+        emit(TelemetryEvents.V5ProposalContinuationResumed, {
+          request_id: requestId,
+          scenario_id: payload.scenario_id,
+          outcome: 'no_agreement',
+          pre_llm: true,
+        });
+      }
+      const earlyDecision = resumeOutcome.decision;
+      if (earlyDecision !== null) {
+        editResult = {
+          blocks: [],
+          assistantText: earlyDecision.assistantText,
+          latencyMs: Date.now() - startedAt,
+          appliedGraph: null,
+          wasRejected: false,
+          suggestedActions: earlyDecision.suggestedActions.map((a) => ({
+            label: a.label,
+            prompt: a.message,
+            role: 'facilitator' as const,
+          })),
+        };
+        proposalEarlyEmitted = true;
+        // PR #216 round-3 review (SHOULD-FIX): refresh the pending
+        // action HERE, from the concept the intercept just resolved
+        // (`earlyPending` + `earlyCurrentGraphHash`), rather than
+        // relying on the later `buildTurnContext` pending read in the
+        // recovery block. The gate already passed (decision !== null →
+        // not expired, not diverged), so the concept is safe to carry
+        // forward. This keeps the Stage 1 → Stage 2 continuation
+        // resumable even if that second read degrades. The graph was
+        // not mutated on the early-emit (no-op) path, so the current
+        // ingress graph hash is the right precondition.
+        const earlyConcept = findProposedConceptAction(earlyPending);
+        if (earlyConcept !== null) {
+          proposalPendingForCommit = buildProposalPendingAction({
+            concept: earlyConcept.concept,
+            preferred_kind: earlyConcept.preferred_kind,
+            scenario_id: payload.scenario_id,
+            emitted_at_iso: new Date().toISOString(),
+            ...(earlyCurrentGraphHash ? { graph_hash: earlyCurrentGraphHash } : {}),
+          });
+        }
+        emit(TelemetryEvents.V5ProposalContinuationResumed, {
+          request_id: requestId,
+          scenario_id: payload.scenario_id,
+          outcome: earlyDecision.stage === 'stage_two' ? 'stage_two' : 'stage_one',
+          pre_llm: true,
+        });
+        log.info(
+          {
+            request_id: requestId,
+            scenario_id: payload.scenario_id,
+            stage: earlyDecision.stage,
+            latency_ms: editResult.latencyMs,
+          },
+          'V5 edit_graph proposal-continuation intercept emitted deterministic response without LLM call',
+        );
+      } else {
+        // ⭐⭐ ROADMAP 2.1266 — THE DETERMINISTIC OPTION-EFFECT WRITE.
+        //
+        // No wire verb on this build could set an option's effect value. The
+        // nine `system_event` types carry none (`factor_value_edit` moves a
+        // FACTOR's `observed_state.value` — a different entity), and the chat
+        // path depends on the edit LLM emitting the sanctioned `update_node`
+        // at `/nodes/<opt>/data/interventions/<factor_id>`. On the witnessed
+        // J4 t5 turn it emitted a factor-baseline `parameter_update` instead,
+        // #1016's guard correctly withheld the write, and the product's OWN
+        // advised sentence therefore terminated in a refusal (P8).
+        //
+        // When the sentence binds — one option, one of ITS linked factors, one
+        // model-unit value, all resolved by IDENTITY against this graph — the
+        // operation is composed here instead of asked for. See
+        // `routing/option-effect-write.ts` for the binding predicate and for
+        // every shape it deliberately declines.
+        //
+        // ⚠ RESOLVED TWICE ON PURPOSE, AND THE TWO CALLS ANSWER DIFFERENT
+        // QUESTIONS (trap 21). route-v2 asks *"is this sentence ambiguous
+        // enough that I should ASK instead of dispatching?"* and returns its
+        // own deterministic reply when it is. THIS call asks *"against the
+        // graph I am about to apply to, does the sentence bind?"* — and it is
+        // this one that governs the write, because `parsedGraph` is the graph
+        // `handleEditGraph` mutates. Nothing is inherited across the seam, so
+        // the two cannot disagree in a way that writes anything.
+        //
+        // ⚠ STRICT-PARSE GATE, same rule as the deterministic add_risk path:
+        // a non-canonical ingress graph reaches `handleEditGraph` as a
+        // STRUCTURAL FALLBACK (id/kind/label + edges only), so resolving a
+        // write against it would bind against a graph missing the very
+        // interventions data the decision depends on. Non-strict ingress keeps
+        // the pre-existing LLM path.
+        //
+        // ⚠⚠ MEASURED: THIS GATE IS CURRENTLY REDUNDANT, AND IT STAYS ANYWAY.
+        // Its mutant SURVIVED, and the equivalence was DEMONSTRATED rather than
+        // assumed (trap 13c): `buildStructuralFallback` stamps
+        // `strength: { mean: 0, std: 0 }`, and GraphV3 requires `std > 0`, so
+        // the fallback NEVER strict-parses and `resolveOptionEffectWrite`'s own
+        // `GraphV3.safeParse` already declines `graph_unparseable` on it.
+        // The redundancy therefore rests entirely on one inert default in an
+        // unrelated function: change that `0` to `0.01` and the fallback starts
+        // parsing, at which point a write would bind against a graph whose
+        // `interventions` were dropped on the way in. A guard held up by a
+        // coincidence in someone else's constant is exactly the kind this
+        // estate loses; keeping it costs one boolean.
+        // ⭐ GO(A) — THE NATIVE ANSWER TAKES PRECEDENCE, and it is a SEPARATE
+        // branch rather than a case of the option-effect resolution below.
+        //
+        // The two answer opposite questions about the same cell (trap 21):
+        // `optionEffect` supplies a MISSING model-unit value; this restates an
+        // EXISTING one in the user's own units. Folding them would hand a
+        // currency amount to a [0,1] writer.
+        //
+        // Resolved HERE rather than in the caller (unlike `recordedAnswer`)
+        // because it does not change ROUTING — the turn is an edit either way;
+        // it changes only which operation is composed. `earlyPending` and
+        // `earlyCurrentGraphHash` are already loaded a few lines above for the
+        // proposal resume, so this adds no read.
+        const nativeAnswer = decideNativeQuantityAnswer({
+          message: payload.message,
+          pendings: earlyPending,
+          graph: graphState,
+          currentGraphHash: earlyCurrentGraphHash,
+          nowMs: Date.now(),
+        });
+        const nativeQuantityRaw = nativeAnswer.kind !== 'bind'
+          ? null
+          : buildNativeQuantityOperation(
+              {
+                optionId: nativeAnswer.optionId,
+                optionLabel: nativeAnswer.optionLabel,
+                factorId: nativeAnswer.factorId,
+                factorLabel: nativeAnswer.factorLabel,
+                nativeValue: nativeAnswer.nativeValue,
+                unit: nativeAnswer.unit,
+              },
+              // The cell as it stands, so every existing field survives and the
+              // ENCODED value rides through untouched.
+              readExistingIntervention(graphState, nativeAnswer.optionId, nativeAnswer.factorId),
+              // The target factor's declared scale, from the estate's own
+              // reader. Absent ⇒ no supported mapping ⇒ the write refuses
+              // rather than storing a figure nothing can consume.
+              buildFactorScaleMap(
+                (graphState as { nodes?: unknown } | null | undefined)?.nodes,
+              ).get(nativeAnswer.factorId),
+            );
+        const nativeQuantityOperation = nativeQuantityRaw === null
+          ? null
+          : canonicaliseNativeQuantityOperation(nativeQuantityRaw, requestId);
+        // Bound to the OPERATIONS, not to the answer — an answer whose operation
+        // did not canonicalise must take the LLM path, and the ack below reads
+        // this one variable so it cannot be left behind.
+        const nativeWrite = nativeQuantityOperation === null || nativeAnswer.kind !== 'bind'
+          ? null
+          : nativeAnswer;
+
+        const optionEffect = recordedAnswer !== null
+          ? { matched: true as const, kind: 'write' as const,
+              ...recordedAnswer.pair, value: Number(recordedAnswer.valueText) }
+          : graphStrictlyCanonical
+          ? resolveOptionEffectWrite({
+              // The instruction this turn is actually executing — the SAME
+              // expression handed to `handleEditGraph` below, so the writer and
+              // the LLM can never be asked to perform different sentences.
+              message: editInstruction,
+              graph: parsedGraph,
+            })
+          : { matched: false as const, reason: 'graph_unparseable' as const };
+        const optionEffectResolved =
+          optionEffect.matched && optionEffect.kind === 'write' ? optionEffect : null;
+        const optionEffectOperations = optionEffectResolved === null
+          ? null
+          : canonicaliseOptionEffectOperation(optionEffectResolved, requestId);
+        // Bound to the OPERATIONS, not to the resolution: a resolution whose
+        // operation did not canonicalise must take the LLM path, and every
+        // downstream branch below reads this one variable so none of them can
+        // be left behind (the same structural-honesty rule the withhold verdict
+        // is threaded by).
+        const optionEffectWrite =
+          optionEffectOperations === null ? null : optionEffectResolved;
+        if (optionEffectWrite !== null) {
+          emit(TelemetryEvents.V5OptionEffectWriteResolved, {
+            request_id: requestId,
+            scenario_id: payload.scenario_id,
+            option_id: optionEffectWrite.optionId,
+            factor_id: optionEffectWrite.factorId,
+          });
+        }
+        editResult = await handleEditGraph(
+          context,
+          // ⭐ ROADMAP 2.1261 — the bind instruction substitutes ONLY here (the
+          // edit LLM's task); `payload.message` stays the record everywhere
+          // else in this dispatcher. See `editInstructionOverride`'s jsdoc.
+          editInstruction,
+          adapter,
+          requestId,
+          payload.turn_id,
+          // ⭐ ONE ENTRY SEAM, ONE APPLIER (ROADMAP 2.474 / A1). The
+          // pre-composed batch replaces the LLM's COMPOSITION and nothing
+          // else: normalisation, the field-safety screen, Zod, the referee
+          // gate, the intervention encoder, apply, commit and receipts are the
+          // same code on both paths.
+          //
+          // ⚠ A1's own comment says a pre-composed batch "cannot reach this
+          // line unless the hold is live", justified by the structural-edit
+          // tool's `holdSpineActive` entry gate. THAT WAS A CLAIM ABOUT A CALL
+          // GRAPH WITH ONE CALLER (trap 20), and this is the second. It does
+          // not hold here and does not need to: this batch carries a single
+          // NON-structural tunable field update, which the referee gate judges
+          // on its merits exactly as it judges the LLM's identical operation
+          // (`option-configure-apply-chain.test.ts` hop 2 pins that verdict).
+          // No structural operation can be composed by this path — the shape
+          // is fixed by `buildOptionEffectRawOperation`.
+          // The native restatement wins when both resolve: it is an answer to a
+          // question the product ASKED, and the option-effect resolution is a
+          // read of the sentence. A recorded answer outranks a fresh guess.
+          nativeQuantityOperation !== null
+            ? { preComposedOperations: nativeQuantityOperation }
+            : optionEffectOperations === null
+            ? undefined
+            : { preComposedOperations: optionEffectOperations },
+        );
+        // ⭐ THE NATIVE PATH'S OWN LANDING CHECK AND ACK.
+        //
+        // ⚠⚠ IT CANNOT REUSE THE BLOCK BELOW. That one reads
+        // `readCommittedOptionEffect`, which returns the ENCODED value, and
+        // compares it to the value it asked to write. A native write leaves the
+        // encoded value DELIBERATELY unchanged, so the comparison never holds,
+        // the success ack never fires, and the turn falls into
+        // `option_effect_write_did_not_land` — telling the user their cost did
+        // not save while it sits correctly in the graph. Pinned by
+        // `native-quantity-operation.test.ts`, which asserts the two readers
+        // return different numbers from the same committed graph.
+        if (nativeWrite !== null) {
+          const committedNative = readCommittedNativeQuantity(
+            editResult.appliedGraph,
+            nativeWrite.optionId,
+            nativeWrite.factorId,
+          );
+          if (
+            committedNative !== undefined
+            && committedNative.rawValue === nativeWrite.nativeValue
+            && committedNative.unit === nativeWrite.unit
+          ) {
+            editResult = {
+              ...editResult,
+              assistantText: formatNativeQuantityAck({
+                optionLabel: nativeWrite.optionLabel,
+                factorLabel: nativeWrite.factorLabel,
+                rawValue: committedNative.rawValue,
+                unit: committedNative.unit,
+                // READ BACK, never assumed: the calibration authority derives
+                // this from the figure, so the only honest source is the
+                // committed graph. Absent ⇒ the sentence omits it rather than
+                // asserting a number we did not observe.
+                ...(typeof readCommittedOptionEffect(
+                  editResult.appliedGraph,
+                  nativeWrite.optionId,
+                  nativeWrite.factorId,
+                ) === 'number'
+                  ? {
+                      derivedModelValue: readCommittedOptionEffect(
+                        editResult.appliedGraph,
+                        nativeWrite.optionId,
+                        nativeWrite.factorId,
+                      ) as number,
+                    }
+                  : {}),
+              }),
+            };
+          } else {
+            // Nothing is claimed. The existing recovery machinery composes the
+            // answer, exactly as it does when an option-effect write does not
+            // land.
+            log.warn(
+              {
+                event: 'v5.edit_graph.native_quantity_write_did_not_land',
+                request_id: requestId,
+                scenario_id: payload.scenario_id,
+                option_id: nativeWrite.optionId,
+                factor_id: nativeWrite.factorId,
+              },
+              'V5 native-quantity write did not survive to the applied graph',
+            );
+          }
+        }
+        if (optionEffectWrite !== null) {
+          // ⭐ P5 — THE ACKNOWLEDGEMENT CITES THE COMMITTED BYTES, NOT THE
+          // REQUEST. The value is read back out of the applied graph through
+          // `mergeInterventionSources` — the same reader the readiness badge
+          // and #1016's guard use. If the write did not survive (referee hold,
+          // canonicalisation, encoder deferral) nothing is claimed and the
+          // pre-existing machinery answers: 2.427 will compose its recovery
+          // copy exactly as it does today.
+          const committed = readCommittedOptionEffect(
+            editResult.appliedGraph,
+            optionEffectWrite.optionId,
+            optionEffectWrite.factorId,
+          );
+          if (committed === optionEffectWrite.value) {
+            editResult = {
+              ...editResult,
+              assistantText: formatOptionEffectWriteAck({
+                optionLabel: optionEffectWrite.optionLabel,
+                factorLabel: optionEffectWrite.factorLabel,
+                committedValue: committed,
+              }),
+            };
+          } else {
+            log.warn(
+              {
+                event: 'v5.edit_graph.option_effect_write_did_not_land',
+                request_id: requestId,
+                scenario_id: payload.scenario_id,
+                option_id: optionEffectWrite.optionId,
+                factor_id: optionEffectWrite.factorId,
+              },
+              'V5 edit_graph — the deterministic option-effect operation did not survive to the applied graph; no acknowledgement claimed',
+            );
+          }
+        }
+        // ── ROADMAP 2.474 — THE SECOND PATH (A9) ─────────────────────────
+        // The rulebook has now had the turn. If it CLAIMED the utterance
+        // (produced operations) we are done: one composer per turn, because
+        // two composers racing for the same commit is the parity defect in a
+        // different costume. If it did NOT — a refusal, or the measured
+        // "zero operations, no rejection" dead-end — the grounded structural
+        // edit tool gets the SAME turn, not the next one. That distinction is
+        // the whole fix: a second path on the following turn is the dead-end
+        // with an extra step, because the user has to notice the failure and
+        // rephrase before anything different can happen.
+        //
+        // ⭐ 2.1266 — NOT after a deterministic option-effect write. That path
+        // IS the composer for this turn: the rulebook was never asked, so "the
+        // rulebook did not claim the utterance" is not the state we are in, and
+        // handing an option-effect request to the STRUCTURAL edit tool would
+        // ask a second composer to invent topology for a value the user
+        // already gave. One composer per turn (A9's own rule) applies here too.
+        const toolOutcome = optionEffectWrite !== null
+          ? null
+          : await tryStructuralEditTool({
+              editResult,
+              context,
+              adapter,
+              payload,
+              requestId,
+              requestStartMs,
+            });
+        if (toolOutcome !== null) {
+          editResult = toolOutcome.editResult;
+          // A3 — carried to the response-assembly region below, where the hold
+          // copy has already been built and can be appended to.
+          structuralEditSplit = toolOutcome.split;
+        }
+      }
+    }
+  } catch (err) {
+    log.error(
+      {
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+      },
+      'V5 edit_graph dispatch — handler threw',
+    );
+    // R7: the handler-threw path is the only exit that does not reach the
+    // commit-try `finally`. Record the structured failure code (no message
+    // parsing — see classifyThrownFailureCode) and emit before rethrowing.
+    ev.outcome = 'error';
+    ev.failure_code = classifyThrownFailureCode(err);
+    emitEditTurnEventOnce();
+    throw err;
+  }
+
+  // R7 (NB-1): outer guard around the whole response-assembly + commit region.
+  // The handler-threw path is covered by the catch above; the success/commit
+  // returns are covered by the commit-try `finally` below. This outer `finally`
+  // closes the remaining gap — an unexpected throw in the assembly region
+  // (editResultToOlumiResponse / no-op recovery / canonical readiness projection)
+  // before the commit-try runs — so a turn still emits exactly one event before
+  // the exception propagates. There is intentionally NO catch here: the
+  // original error is never caught or masked. `eventEmitted` makes the emit
+  // idempotent, so the success path (inner commit-`finally`, then this outer
+  // `finally`) emits once, not twice.
+
+  // S3-L6 / F-5: capture the edit-lane LLM call attribution once, from the
+  // finalised edit result's R7 diagnostics + the resolved adapter provider.
+  // `undefined` on deterministic (no-LLM) edits. Surfaced on the success and
+  // commit-failure returns so route-v2 can thread it into
+  // `_diagnostic_trace.llm_calls[]` — previously always `[]` on edit turns.
+  const editLlmCall = extractEditLlmCallTelemetry(editResult, adapter.name);
+
+  try {
+  let response = editResultToOlumiResponse(editResult, payload);
+
+  // ⭐ CLAIM-THEN-STARVE EXIT — hand the turn back BEFORE committing.
+  //
+  // `orchestrator/tools/edit-graph.ts:2054` already states the rule this
+  // enforces: "a deterministic claim must either fully handle the turn OR fall
+  // through to the more capable path. It must never claim-then-starve." The
+  // clarify branch with NO alternatives is exactly a claim-then-starve: it
+  // applied nothing, proposed nothing, and can only emit
+  // `buildClarificationQuestion` with an empty list — the bare "Which option
+  // should I update?" with zero chips. Route-v2 claimed the turn on a bare edit
+  // VERB ~2,700 lines before anything could consult run facts, so a comparative
+  // question was being answered by a module that never reads them.
+  //
+  // ⚠ THIS RETURN MUST STAY ABOVE THE COMMIT REGION. `commitDirectAnswer` runs
+  // below and `runTurnExecutor` commits as well; deciding this after the commit
+  // would write TWO turn rows for ONE turn — fail-open and silent. Nothing is
+  // persisted on this path, so the result carries `commitPerformed: false`.
+  //
+  // ⛔ NARROWNESS IS LOAD-BEARING and comes from the producer, not from a new
+  // predicate. `pendingClarification` has exactly ONE assignment site and its
+  // `candidate_labels` IS the alternatives list, so this selects the clarify
+  // branch with zero alternatives and nothing else. The `appliedGraph === null`
+  // conjunct is a FAIL-CLOSED belt, not a second concept: the one site that
+  // sets `pendingClarification` also sets `appliedGraph: null`, so it cannot
+  // change behaviour today — but if a future branch ever attaches a
+  // clarification to an APPLIED mutation, this keeps the current route rather
+  // than discarding a real edit.
+  if (
+    editResult.pendingClarification != null
+    && editResult.pendingClarification.candidate_labels.length === 0
+    && editResult.appliedGraph === null
+  ) {
+    // Honest per-turn telemetry: this WAS a clarify, it simply did not end the
+    // turn. Matches the `ev.outcome = 'clarify'` sites below. The outer
+    // `finally` emits the single per-turn edit event on this path too.
+    ev.outcome = 'clarify';
+    return {
+      response,
+      commitPerformed: false,
+      graph: null,
+      unresolvedClarificationFellThrough: true,
+      ...(editLlmCall ? { editLlmCall } : {}),
+    };
+  }
+
+  // V5 H5 (Codex round-2 P1) — unified mutation predicate.
+  // `isSuccessfulAppliedMutation()` is the single source of truth
+  // for "did the mutation truly apply?". It requires
+  // wasRejected=false + operations.length > 0 + appliedGraph present.
+  // Computed ONCE here and threaded through every downstream check
+  // that previously inspected `editResult.appliedGraph` directly
+  // (false-success rewrite, analysisReady, freshness postEditGraph,
+  // graphForCommit, returned graph). Closes the asymmetry where
+  // `appliedGraph + empty operations` (impossible-but-not-enforced
+  // shape) would block fact persistence but still produce wire-side
+  // success effects (analysis_ready stamped, freshness derived
+  // against the unpersisted graph, response.graph returned to
+  // route-v2).
+  const successfulAppliedMutation = isSuccessfulAppliedMutation(editResult);
+
+  // R7: populate the per-turn event from the completed handler result. The
+  // no-op recovery layer below refines `ev.branch`; the commit-try `finally`
+  // emits exactly once.
+  Object.assign(
+    ev,
+    deriveEditTurnFieldsFromResult(editResult, {
+      successfulAppliedMutation,
+      graphNodesBefore: ev.graph_nodes_before,
+      graphEdgesBefore: ev.graph_edges_before,
+      proposalEarlyEmitted,
+      // R7 (NB-2 follow-on): the deterministic add-risk path is either a
+      // preflight rejection (→ 'rejected', wasRejected wins) or a clarification
+      // (→ 'clarify'); both set this flag, distinguished by wasRejected.
+      deterministicClarify: deterministicAddRiskAttempted,
+    }),
+  );
+
+  // V5 Context Management v1 — derive freshness + load prior facts
+  // EARLIER than the original (Codex round-2 P1) position, so the no-op
+  // recovery layer below can read `freshness` and `priorFactsForRecovery`
+  // without re-loading state. The block's I/O surface and telemetry are
+  // unchanged from the original position; only the order moved.
+  //
+  // On error the catch branch synthesises a `derivation_failed` verdict
+  // and leaves `priorFactsForRecovery` empty so the no-op recovery falls
+  // back to the bland fallback rather than re-throwing.
+  // V5-PERSIST-FIX-01 (H1): for an applied mutation `persistedPostEditGraph`
+  // is the MERGED graph — the applied nodes/edges laid onto the
+  // server-authoritative persisted base. It is BOTH what gets persisted
+  // (`graphForCommit` below) AND what every current-graph-hash in this
+  // dispatch derives from (freshness, recovery pending refresh); all three
+  // must agree with what the NEXT turn computes from `scenarios.graph`.
+  //
+  // Codex P0 — the base is resolved via the STRICT persisted loader, NOT
+  // buildTurnContext's `persistedGraph`. buildTurnContext swallows
+  // `scenarios.*` read failures into `graph: null`, so relying on it cannot
+  // distinguish a genuinely-empty scenario from a transient/degraded read —
+  // and committing the ingress fallback on a degraded read would overwrite a
+  // rich persisted graph with the lossy client echo (the exact corruption
+  // this fix removes). `loadPersistedGraphStrict` returns the graph, returns
+  // null ONLY for a genuinely-empty `scenarios.graph`, and THROWS on a
+  // degraded read:
+  //   - graph present  → merge onto it (server-only top-level fields survive).
+  //   - null (genuine) → ingress-base fallback: the no-persisted-graph case
+  //     (e.g. a client that sent graph_state for a never-persisted scenario);
+  //     there is nothing to lose, and the edit must still persist.
+  //   - degraded read  → FAIL CLOSED: refuse to persist (throw → route maps it
+  //     to a retryable 500) rather than risk corrupting canonical state. A
+  //     transient blip fails the edit (retryable) instead of silently
+  //     overwriting `scenarios.graph`; mirrors route-v2's no-graph_state
+  //     reload-failure handling, which also refuses to proceed. Throwing here
+  //     also fails fast — it avoids buildTurnContext's extra read against the
+  //     already-degraded store — while the outer assembly `finally` still
+  //     emits the single edit turn event.
+  let persistedPostEditGraph: unknown = graphState;
+  // A3 graph CAS observe-mode: expected-base hashes for this dispatch's
+  // graph-bearing commit. Derived ONLY from the strict SERVER-SIDE persisted
+  // read below (`loadPersistedGraphStrict`) — the same trusted base the merge
+  // uses — NEVER from the request-supplied `graphState` (which is untrusted
+  // and may be the graph being written; trusted base rule, see
+  // graph-cas-conflict.ts). Stays `undefined` (→ `no_expected`, never a
+  // conflict) when there is no applied mutation to persist or the mode is
+  // 'off'. A degraded strict read throws below (pre-existing fail-closed
+  // behaviour), so no expected hash is ever manufactured from a failed read.
+  let expectedGraphCasHashes:
+    | ReturnType<typeof computeExpectedGraphCasHashes>
+    | undefined;
+  // Graph Management (lane 8): frame-authority PRE-edit base for the referee
+  // gate — the strict persisted read when available, else the ingress echo
+  // (the same fallback rule the persistence merge applies).
+  let gmFrameBase: unknown = graphState;
+  if (successfulAppliedMutation) {
+    let strictBase: unknown;
+    try {
+      strictBase = await loadPersistedGraphStrict(payload.scenario_id);
+    } catch (err) {
+      log.warn(
+        {
+          event: 'v5.edit_graph.persist_base_unavailable',
+          request_id: requestId,
+          scenario_id: payload.scenario_id,
+          err:
+            err instanceof Error
+              ? { name: err.name, message: err.message }
+              : { message: String(err) },
+        },
+        'V5 edit_graph — persisted merge base unavailable (degraded read); failing closed to avoid overwriting canonical scenarios.graph with the lossy ingress echo',
+      );
+      throw new Error(
+        'edit_graph: refusing to persist applied mutation — persisted merge base unavailable (degraded read)',
+      );
+    }
+    // A3 graph CAS: hash the strict server base for the commit's expected
+    // fields — reusing the read this path already performs (no extra I/O).
+    // `strictBase` null = genuinely-empty scenarios.graph → expected hashes
+    // {null, null} ("server base read, no graph") → `first_write` when the
+    // graph is still absent at write time, `no_expected` otherwise.
+    // F3 — derive the expected base whenever the resolved CAS capability needs
+    // it (app hook on OR RPC enforcing), not just when the app hook is on. For
+    // valid configs this equals the old `graphCasMode !== 'off'` gate; it closes
+    // the RPC=enforce+MODE=off hole (that combo is also boot-rejected). The
+    // strict read above already fails closed on a degraded read, so no expected
+    // hash is ever manufactured from a failed read.
+    if (config.features.graphCas.requiresExpectedHash) {
+      expectedGraphCasHashes = computeExpectedGraphCasHashes(strictBase ?? null);
+    }
+    gmFrameBase = strictBase ?? graphState;
+    // Design §3.2 — PROJECT INTO THE PERSISTED FORM HERE, before anything in
+    // this dispatch derives a hash from it. `commitDirectAnswer` applies the
+    // three persist passes (intercept repair, option-intervention
+    // normalisation, options[] reconcile) and all three mutate fields
+    // `computeAnalysisAffectingGraphHash` projects. Hashing the pre-projection
+    // merge — as this dispatch used to — advertised a graph that was never
+    // stored to freshness, to the pending re-pin (`graph_hash`) and to the
+    // hold thread-through (`graphHashAfterCommit`).
+    //
+    // Applying it at the point `persistedPostEditGraph` is FINALISED (rather
+    // than at each of its readers) keeps the property the comment above
+    // claims: this one object is both what gets persisted AND what every
+    // current-graph-hash in this dispatch derives from. The projection is
+    // idempotent, so the commit's own re-projection is a byte-identical no-op.
+    persistedPostEditGraph = projectGraphForPersistence(
+      mergeAppliedGraphForPersistence({
+        appliedGraph: editResult.appliedGraph!,
+        // null here = a GENUINELY empty scenarios.graph (the strict read
+        // succeeded); merge() then uses the ingress fallback base. A degraded
+        // read never reaches this line — it threw above.
+        persistedBase: strictBase ?? null,
+        ingressBase: graphState,
+        requestId,
+        scenarioId: payload.scenario_id,
+      }),
+      {
+        scenarioId: payload.scenario_id,
+        turnId: payload.turn_id,
+        turnClass: payload.turn_class,
+        source: 'edit_graph',
+      },
+    );
+  }
+
+  let freshness: FreshnessDerivation;
+  let priorFactsForRecovery: readonly HandlerFact[] = [];
+  // CONTEXT/MEMORY V5 defect 4 — the read state for `priorFactsForRecovery`,
+  // surfaced out of the try for exactly the reason `currentGraphHashForRecovery`
+  // below is: the recovery derivations at the bottom of this function re-derive
+  // freshness from `priorFactsForRecovery` after `turnContext` has left scope.
+  //
+  // ⚠ THE `derivation_failed` GUARDS ON THOSE SITES DO NOT COVER THIS.
+  // `fetchPriorFacts` CATCHES a store throw and returns `readOk: false` rather
+  // than rethrowing, so `buildTurnContext` SUCCEEDS, the try below completes
+  // normally, and the catch branch never runs. Without this flag every one of
+  // those re-derivations reads the resulting `[]` as a positive
+  // `'none' / no_successful_run_analysis_fact` claim.
+  //
+  // `undefined` when the try never reached the assignment (the catch branch
+  // fired) — which is pre-fix behaviour and correct: that path has no read
+  // state to describe.
+  let priorFactsReadOkForRecovery: boolean | undefined;
+  // V5 P0 — captured proposed concept from the prior turn's pending
+  // actions, used by the no-op recovery layer to drive the deterministic
+  // Stage 1 / Stage 2 clarifier. Null when no prior proposal exists, when
+  // it was invalidated by graph divergence, or when the buildTurnContext
+  // catch branch fired.
+  let pendingProposedConceptForRecovery:
+    | { readonly concept: string; readonly preferred_kind: 'risk' | 'factor' | 'either' }
+    | null = null;
+  // The current graph hash, surfaced out of the try so the resume path
+  // can use it to construct the refreshed pending action.
+  let currentGraphHashForRecovery: string | null = null;
+  // HOLD-WIPE fix (task_2e1b8c87): the prior turn's pendings, surfaced out
+  // of the try below so the commit can thread them (a live consent hold
+  // must survive an edit-classified commit — previously this path threaded
+  // NO priorPendingActions and silently wiped it). The catch branch retries
+  // via the cheap single-row read; both reads degrade to [] (a degraded
+  // read cannot preserve what it cannot see — logged at the store layer).
+  let priorPendingForCarry: readonly PendingAction[] = [];
+  // `proposalPendingForCommit` is declared at the top of the function
+  // (above the intercept) so the early-emit path can populate it
+  // directly. The recovery-path resume below assigns it for the
+  // non-early-emit Stage 1 / Stage 2 case.
+  try {
+    const turnContext = await buildTurnContext(payload, requestId);
+    priorFactsForRecovery = turnContext.prior_facts;
+    priorFactsReadOkForRecovery = turnContext.prior_facts_read_ok;
+    // V5-PERSIST-FIX-01: the merge base was already resolved above via the
+    // strict persisted read (so a degraded read fails closed). buildTurnContext
+    // is used here only for prior_facts / pending actions — NOT for the base.
+    const currentGraphHash = computeAnalysisAffectingGraphHash(
+      persistedPostEditGraph as GraphStateIngress | null | undefined,
+    );
+    currentGraphHashForRecovery = currentGraphHash;
+    // V5 P0 — resolve the proposal-resume gate via the shared helper.
+    // It runs the no-pending → wall-clock-TTL → graph-hash ladder in
+    // that order and either returns a Stage 1 / Stage 2 decision or a
+    // typed rejection. We only need the concept itself here (the
+    // decision will be re-derived inside `decideNoOpRecovery` after
+    // intent classification); a non-null decision means the gate is
+    // satisfied and the concept is safe to pass through. The wall-clock
+    // TTL mirrors the `isExpired` semantics used by
+    // tryClarificationResume / tryShortConfirmResume.
+    const priorPending = turnContext.most_recent_pending_actions ?? [];
+    priorPendingForCarry = priorPending;
+    const recoveryGateOutcome = resolveProposalResume({
+      message: payload.message,
+      pendingActions: priorPending,
+      nodes: null,
+      currentGraphHash,
+      nowMs: Date.now(),
+    });
+    if (
+      (recoveryGateOutcome.rejection === 'expired_wall'
+        || recoveryGateOutcome.rejection === 'graph_hash_changed')
+      // PR #216 review follow-up: suppress the duplicate emit when the
+      // pre-LLM intercept already reported this same invalidation this
+      // turn. The intercept and this block both run the resume gate
+      // against the same most-recent pending; without this guard an
+      // expired / diverged pending that then no-ops through
+      // `handleEditGraph` would emit the metric twice. When the
+      // intercept did NOT emit (e.g. its graph-hash compute failed but
+      // this block's succeeded), the flag is false and we still emit
+      // exactly once.
+      && !interceptEmittedInvalidation
+    ) {
+      emit(TelemetryEvents.V5ProposalContinuationInvalidated, {
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        reason: recoveryGateOutcome.rejection,
+      });
+    }
+    if (recoveryGateOutcome.rejection === null) {
+      // Gate satisfied — surface the concept to the no-op recovery
+      // layer. (decideNoOpRecovery may still return a non-proposal
+      // branch if the message does not match agreement / add-as-factor.)
+      const concept = findProposedConceptAction(priorPending);
+      pendingProposedConceptForRecovery = concept;
+    }
+    freshness = deriveAnalysisFreshness(
+      turnContext.prior_facts,
+      currentGraphHash,
+      // Option-identity guard (CEE_OPTION_IDENTITY_FRESHNESS_GUARD): option IDs
+      // from the post-edit persisted graph (same source as the hash). When an
+      // option is added/removed the hash already diverges; the guard adds the
+      // hash-impossible coverage. undefined when off → byte-identical.
+      config.cee.optionIdentityFreshnessGuard
+        ? extractGraphOptionIds(persistedPostEditGraph)
+        : undefined,
+      // CONTEXT/MEMORY V5 defect 4 — a degraded prior-fact read reaches here as
+      // `[]`. Untreated, this is the derivation that seeds the `'none'` verdict
+      // the recovery re-derivations below then repeat.
+      turnContext.prior_facts_read_ok === undefined
+        ? undefined
+        : { priorFactsReadOk: turnContext.prior_facts_read_ok },
+    );
+    emitFreshnessTelemetry(
+      freshness,
+      {
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        dispatch_path: 'edit_graph',
+      },
+      {
+        prior_fact_count: turnContext.prior_facts.length,
+        current_turn_fact_count: 0,
+        edit_was_rejected: editResult.wasRejected,
+      },
+    );
+  } catch (err) {
+    log.warn(
+      {
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+      },
+      'V5 edit_graph dispatch — freshness derivation failed; emitting derivation_failed verdict',
+    );
+    // HOLD-WIPE fix: the buildTurnContext pending read above may not have
+    // run (it can be the very throw that landed us here). Retry via the
+    // standalone single-row read — contracted never to throw (degrades to
+    // [] with store-layer telemetry) — so a freshness failure alone cannot
+    // reopen the silent hold wipe.
+    priorPendingForCarry = await loadMostRecentPendingActions(
+      payload.scenario_id,
+      requestId,
+    );
+    let currentGraphHash: string | null = null;
+    try {
+      currentGraphHash = computeAnalysisAffectingGraphHash(
+        persistedPostEditGraph as GraphStateIngress | null | undefined,
+      );
+    } catch {
+      // Hash computation failure is rare (input validation upstream)
+      // but if it does happen we still synthesise the verdict.
+    }
+    freshness = {
+      freshness: 'unknown',
+      reason: 'derivation_failed',
+      selected_fact_index: null,
+      graph_hash_at_run: null,
+      current_graph_hash: currentGraphHash,
+      computed_at: null,
+    };
+    emitFreshnessTelemetry(
+      freshness,
+      {
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        dispatch_path: 'edit_graph',
+      },
+      {
+        prior_fact_count: 0,
+        current_turn_fact_count: 0,
+        edit_was_rejected: editResult.wasRejected,
+        derivation_error: err instanceof Error ? err.message : String(err),
+      },
+    );
+  }
+
+  // Lane 22 — missed-resume visibility on the ops-produced paths. When a
+  // live, valid pending proposal existed (the resume gate passed) but the
+  // turn went to the LLM and produced an edit outcome — applied OR
+  // rejected — the missed resume was previously invisible: the
+  // zero-operations recovery sub-case below is the ONLY place that
+  // emitted `no_agreement`. Emit it here for the complementary paths so
+  // dashboards see every turn where a pending proposal coexisted with an
+  // LLM edit outcome. `ops_produced` distinguishes this emit from the
+  // zero-ops one; the pre-LLM gate's own no-match emit is distinguished
+  // by `pre_llm: true`.
+  if (
+    pendingProposedConceptForRecovery !== null
+    && !proposalEarlyEmitted
+    && (editResult.wasRejected || (editResult.operations?.length ?? 0) > 0)
+  ) {
+    emit(TelemetryEvents.V5ProposalContinuationResumed, {
+      request_id: requestId,
+      scenario_id: payload.scenario_id,
+      outcome: 'no_agreement',
+      pre_llm: false,
+      ops_produced: true,
+      edit_was_rejected: editResult.wasRejected,
+    });
+  }
+
+  // ── Part-accounting conservation law (rehearsal defects A + B, 2026-07-20) ──
+  // REHEARSAL-DEFECT-TRIAGE-2026-07-20.md: decompose the user's message into
+  // countable sub-requests at intake and attribute the returned operations
+  // against them. Every part must terminate in exactly one of {applied, held,
+  // refused-with-reason, clarify} and the reply must account for ALL of them:
+  //  1. SUBSTITUTION FAILS CLOSED (defect B): a user-NAMED target absent from
+  //     the graph, with an edge from this batch's new node to a DIFFERENT
+  //     existing node, blocks the WHOLE batch to clarify — nothing persists
+  //     and no held pending is minted (a confirm must never commit the
+  //     stand-in). Deliberately FLAG-FREE: enforced in every GM mode — the
+  //     law is a property of the edit lane, not of the referee rollout.
+  //  2. UNDER-ACCOUNT DISCLOSES (defect A): parts no operation covers are
+  //     disclosed by name in the final reply (appended just before the
+  //     finaliser egress guard below, so applied, held and no-op branches
+  //     are all covered by ONE seam).
+  // Single-part messages never engage (>= 2 accountable parts required) —
+  // the false-compound trap. Detection misses degrade to today's behaviour.
+  const partDecomposition = decomposeEditMessage(payload.message);
+  const partAccounting: EditPartAccounting | null =
+    !editResult.wasRejected && partDecomposition.accountableParts.length >= 2
+      ? accountEditParts({
+          parts: partDecomposition.accountableParts,
+          operations: (editResult.operations ?? []) as readonly PatchOperationLike[],
+          graphNodes: parsedGraph.nodes,
+        })
+      : null;
+  const paSubstitutionBlocked =
+    partAccounting !== null && partAccounting.substitutions.length > 0;
+
+  // ── Mixed-compound whole-batch rejection recovery (F4, 2026-07-22) ──
+  // The value-update suppressor stands DOWN for MIXED value+structural
+  // messages (value-update-gate.ts) so the whole message reaches THIS lane —
+  // the only one that can serve both halves in one batch. But when the LLM
+  // edit lane REJECTS the whole batch (SYNTHESIZED_GRAPH_INVALID / parse /
+  // structural_validation), the conservation-law accounting above never runs
+  // (it is gated on `!wasRejected`), and the response falls to the generic
+  // single-cajole ("...describe what to change") which DISCARDS the known
+  // decomposition. The user must then re-describe the entire compound, which
+  // re-enters the same fragile lane and re-fails — the observed cajole loop
+  // (F4 live probe 2026-07-22: "Set X to 0.5 and remove option Y" →
+  // SYNTHESIZED_GRAPH_INVALID after 2 attempts → bare "describe differently").
+  //
+  // Fix (fail-closed to clarify; DISCLOSED-PARTIAL doctrine): when a MIXED
+  // value+structural message is rejected wholesale, name EVERY accountable
+  // part and offer one replay chip per part. Each chip re-sends a SINGLE
+  // clause, which routes to its own DETERMINISTIC lane (value-update path /
+  // referee gate) — each live-verified to terminate cleanly alone — so no part
+  // is silent-dropped and the loop is broken. Blocks (diagnostic
+  // rejection_code) are preserved; only assistant_text + suggested_actions are
+  // re-sourced.
+  //
+  // SCOPE — `mixedValueStructural` ONLY: this is precisely the class the
+  // value-update suppressor stands down for (value-update-gate.ts), forcing an
+  // otherwise deterministically-serviceable value half into the fragile LLM
+  // lane. STRUCTURAL-only compounds ("add a risk and connect it to churn")
+  // already carry their own specific named-refusal / Cap-2A guidance copy
+  // (edit-graph.ts) which is MORE informative than a generic per-part clarify,
+  // so they are deliberately left untouched. Single-part and pure-value
+  // messages report mixedValueStructural=false and keep today's copy.
+  if (editResult.wasRejected && partDecomposition.mixedValueStructural) {
+    const multiPartClarify = buildMultiPartRejectionClarify(partDecomposition);
+    if (multiPartClarify !== null) {
+      // Codex F8: the UI renders at most MAX_REPLAY_CHIPS (3) chips
+      // (SuggestedChips slice(0,3)); emitting more silently drops the tail on
+      // the wire. Cap the emitted replay actions to match, and disclose any
+      // clauses beyond the cap in prose so no part is hidden.
+      const overflowNotice = buildReplayOverflowNotice(partDecomposition.accountableParts);
+      response = {
+        ...response,
+        assistant_text:
+          overflowNotice !== null ? `${multiPartClarify} ${overflowNotice}` : multiPartClarify,
+        suggested_actions: partDecomposition.accountableParts
+          .slice(0, MAX_REPLAY_CHIPS)
+          .map((part, i) => {
+            const clause = part.text.replace(/\s+/g, ' ').trim();
+            const label = clampLabel(clause);
+            const action: { id: string; label: string; message: string; detail?: string } = {
+              id: `edit_part_retry_${i}`,
+              label,
+              message: clause,
+            };
+            if (label !== clause) action.detail = clause;
+            return action;
+          }),
+      };
+      emit(TelemetryEvents.V5EditGraphPartAccounting, {
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        dispatch_path: 'edit_graph_rejected_multipart',
+        parts_detected: partDecomposition.accountableParts.length,
+        parts_covered: 0,
+        parts_uncovered: partDecomposition.accountableParts.length,
+        missing_target_count: 0,
+        substitution_blocked: false,
+        disclosure_appended: true,
+      });
+    }
+  }
+
+  // ── Graph Management referee gate (lane 8, CEE_GRAPH_MANAGEMENT_MODE) ──
+  // off: zero referee calls, byte-identical path (pinned by
+  // edit-graph-dispatch-graph-management-modes.test.ts). shadow: the referee
+  // evaluates every envelope and emits redacted v5.candidate_mutation.*
+  // telemetry; the existing path proceeds UNCHANGED. live: blocked verdicts
+  // route below — the mutation is NOT persisted, no ack prose, no edit fact,
+  // no analysis_ready stamp (structural honesty). GM never writes graph
+  // state itself; the single durable writer remains commitDirectAnswer.
+  // Part-accounting precedence: a substitution-blocked batch never reaches
+  // the referee — a held pending carrying the substituted edge is exactly
+  // what the fail-closed rule exists to prevent.
+  const gmMode = config.features.graphManagementMode;
+  let gmDecision: EditGmDecision | null = null;
+  let gmCurrentHash: string | null = null;
+  if (
+    gmMode !== 'off' &&
+    successfulAppliedMutation &&
+    (editResult.operations?.length ?? 0) > 0 &&
+    !paSubstitutionBlocked
+  ) {
+    try {
+      gmCurrentHash = computeAnalysisAffectingGraphHash(
+        gmFrameBase as GraphStateIngress | null | undefined,
+      );
+    } catch {
+      gmCurrentHash = null; // frame gate fails closed (unreadable → held)
+    }
+    let gmBaseHash: string | null = null;
+    try {
+      // The hash of the graph the candidate ops were generated against (the
+      // ingress echo handleEditGraph edited). When the frame base IS the
+      // ingress (no persisted graph), the two are identical by construction.
+      gmBaseHash =
+        gmFrameBase === graphState
+          ? gmCurrentHash
+          : computeAnalysisAffectingGraphHash(graphState as GraphStateIngress | null | undefined);
+    } catch {
+      gmBaseHash = null;
+    }
+    // PRE-edit freshness for the frame: was the last analysis current
+    // against the graph the candidates were generated on? Re-uses the SAME
+    // prior facts the post-edit derivation loaded (pure re-projection, no
+    // extra I/O). A degraded prior-fact load fails closed to 'unknown'.
+    const gmFreshness: FrameFreshness =
+      freshness.reason === 'derivation_failed'
+        ? 'unknown'
+        : deriveAnalysisFreshness(
+            priorFactsForRecovery,
+            gmCurrentHash,
+            undefined,
+            // Defect 4 — the `derivation_failed` short-circuit above does NOT
+            // cover a degraded read (that path returns `readOk: false` without
+            // throwing, so `freshness.reason` is `no_successful_run_analysis_fact`).
+            priorFactsReadOkForRecovery === undefined
+              ? undefined
+              : { priorFactsReadOk: priorFactsReadOkForRecovery },
+          ).freshness;
+    // ROADMAP 2.474 / A3 — DOES THIS SCENARIO ALREADY CARRY AN ANALYSIS?
+    //
+    // Read off the SAME freshness verdict the gate is about to use, so the
+    // answer cannot drift from the thing that will actually block. `'none'` is
+    // emitted by exactly one branch of `deriveAnalysisFreshness` — "no
+    // successful run_analysis fact was selected" — so `!== 'none'` IS "an
+    // analysis exists", with no second derivation and no extra I/O. A failed
+    // derivation lands on `'unknown'`, i.e. treated as an analysis existing:
+    // the cost of over-warning is a longer sentence, and the cost of
+    // under-warning is a chip that cannot do what it says.
+    //
+    // ⚠ KNOWN RESIDUAL: `priorFactsForRecovery` is a 20-turn WINDOW, not the
+    // scenario, so an analysis older than the window reads as absent here.
+    // The defect, its live witness and the sanctioned scenario-scoped fix are
+    // recorded ONCE, on the field that owns them —
+    // `build-turn-context.ts` `TurnContext.newest_analysis_fact`, whose
+    // docstring also states the contract that stops this seam reading it
+    // directly ("Consumed ONLY through `readMayNameLeadingOptionVerdict`").
+    // Deliberately not restated here (ROADMAP 2.625): a narrative told in
+    // four files is four places to miss when the fix lands. Bound on the
+    // harm: the disclosure over-warns or over-promises about the NEXT step on
+    // a scenario whose analysis is more than 20 turns old; the gate still
+    // governs part 1 correctly either way, so nothing false is ever said
+    // about what happened.
+    priorAnalysisExistsForSplit = gmFreshness !== 'none';
+    gmDecision = evaluateEditGraphMutations({
+      mode: gmMode,
+      operations: editResult.operations!,
+      rationales: editResult.operation_meta?.map((m) => m?.rationale),
+      currentGraph: gmFrameBase,
+      currentGraphHash: gmCurrentHash,
+      baseGraphHash: gmBaseHash,
+      freshness: gmFreshness,
+      scenarioId: payload.scenario_id,
+      turnId: payload.turn_id,
+      requestId,
+      // F-3 negation guard (probe P8/P9, 2026-07-20): the gate extracts
+      // protection scope ("… but do NOT touch X") from the CURRENT turn's
+      // message and demotes any would_apply op targeting a protected
+      // entity to a held proposal. Deliberately NOT threaded on the
+      // gm_held_resume confirm path — a confirmed hold must execute.
+      userMessage: payload.message,
+    });
+  }
+  const gmBlockedApply = gmDecision !== null && gmDecision.blockApply;
+  // ⭐⭐ ROADMAP 2.1266 — OPTION-INTERVENTION MISROUTE, EDIT-LANE ARM.
+  //
+  // Wire-witnessed on deployed `8be62df` (witness-acceptance-2026-08-17, J4
+  // t5): a message naming an option and asking for its effect value applied a
+  // FACTOR-BASELINE `parameter_update` instead — factor `49a2b80b` moved from
+  // 0.5 (the system's own inference) to 0.12 stamped as the user's value,
+  // persisted and guest-readable at reload, while option `21ea9b80` kept
+  // `interventions: {}` — and the reply was the byte-identical "still has no
+  // effect value … open it on the canvas" refusal.
+  // `option-intervention-guard.ts` exists to refuse exactly this mutation, but
+  // it is wired ONLY in the turn-executor's validate block, which an
+  // `exit_path: edit_graph` turn never reaches (see the module header).
+  //
+  // The verdict is computed HERE — immediately before `effectiveAppliedMutation`
+  // — for one reason: that predicate is this dispatcher's single gate for every
+  // downstream success effect (persist, edit fact, analysis_ready, returned
+  // graph). Withholding THROUGH it means the write, the receipt fact, the wire
+  // graph and the readiness stamp cannot disagree about whether this turn
+  // mutated anything, and no new per-signal wiring can be forgotten.
+  const optionInterventionWriteVerdict = decideOptionInterventionWrite({
+    message: payload.message,
+    before: parsedGraph,
+    after: editResult.appliedGraph ?? null,
+    appliedMutation: successfulAppliedMutation && !gmBlockedApply && !paSubstitutionBlocked,
+  });
+  const optionInterventionWriteWithheld = optionInterventionWriteVerdict.verdict === 'withhold';
+  /**
+   * ⭐ THE SCOPE-UNRESOLVED ARM. A turn that is recognisably ABOUT an option
+   * whose identity never resolved, which moved a model-wide baseline and landed
+   * no intervention. Measured on deployed `a3b0548d`: it MINTED
+   * `observed_state` on "Vendor Licensing Cost" and COMMITTED, while the option
+   * the user named kept its own value.
+   *
+   * ⚠ NAMED APART from `optionInterventionWriteWithheld` rather than folded into
+   * it (trap 21). They answer different questions — "was a RESOLVED option's
+   * write not honoured?" versus "do we know which option this was for at all?"
+   * — and they carry different payloads: this one has no `optionId`, because
+   * none resolved, which is the whole reason it must ASK rather than assert.
+   */
+  const optionScopeUnresolved = optionInterventionWriteVerdict.verdict === 'scope_unresolved';
+  // ⭐⭐ THE OPTION-`observed_state` SUBSTITUTION, witnessed on deployed
+  // `91d39119` (30 Aug 2026, scenario `0fe8c040`, request `1a0ba66d`): a plain
+  // English revision wrote each OPTION node's OWN `observed_state` (Pilot 30 /
+  // unit % / baseline 70) while the canonical interventions stayed at 0.7 and
+  // 0.4 — and the reply CONFIRMED the change. The next rerun then read the
+  // unmoved input as evidence of robustness.
+  //
+  // Computed alongside the verdict above rather than inside it: they answer
+  // different questions (message-bound factor-baseline substitute vs
+  // message-free option-own-value substitute) and the witnessed turn is
+  // ALLOWED by the one above as `outcome_not_unhonoured`. Neither is weakened;
+  // a withhold from EITHER withholds the write.
+  const optionOwnValueVerdict = detectOptionOwnValueSubstitution({
+    before: parsedGraph,
+    after: editResult.appliedGraph ?? null,
+    appliedMutation: successfulAppliedMutation && !gmBlockedApply && !paSubstitutionBlocked,
+  });
+  const optionOwnValueWithheld = optionOwnValueVerdict.verdict === 'withhold';
+  // A recorded answer licenses this exact cell, not a substitute baseline or
+  // another option. Feed the existing all-success-effects gate, not just prose.
+  const recordedAnswerNotLanded = recordedAnswer !== null && successfulAppliedMutation
+    && readCommittedOptionEffect(editResult.appliedGraph, recordedAnswer.pair.optionId,
+      recordedAnswer.pair.factorId) !== Number(recordedAnswer.valueText);
+  /**
+   * ⭐⭐ ORDINARY-TEXT AUTHORITY — "did the user ASK for this, or ask what I
+   * THINK?" — the question this lane never asked.
+   *
+   * MEASURED AT PRISTINE `f19d1a92`, through this dispatcher: the message
+   * **"Should we rename this?"** returned an applied graph, `commitDirectAnswer`
+   * received it, and the reply confirmed the rename. `grep -c warrant` over this
+   * file read **0** (in-file contrast control `scope_unresolved`: 3), and
+   * `route-v2.ts` imports only the two NEGATIVE warrant helpers — so the V5
+   * mutation warrant, which exists precisely to stop this, never reached here.
+   * The same person on the V5 typed-handler path got a chip; on this path the
+   * model changed under them.
+   *
+   * ⚠ RESOLVED, NOT RE-DERIVED. `resolveOrdinaryTextAuthority` is the single
+   * authority; `hasMutationWarrantSignal` consumes the identical verdict. Two
+   * lists standing for one concept is this estate's dominant defect, and it is
+   * literally what produced this seam: `classifyUnappliedEditFrame` has been
+   * imported by `orchestrator/tools/edit-graph.ts` for months and was consulted
+   * ONLY to word a reply in the no-op branch. The capability was misplaced, not
+   * missing.
+   *
+   * ⚠ QUOTE-MASKED BY THIS GRAPH'S OWN LABELS, and that is load-bearing rather
+   * than tidy: of 1,564 mutating turns, three carry a deliberative frame and TWO
+   * are FALSE POSITIVES, because a user's graph holds a node labelled
+   * `"What should we do?"` and the frame pattern matches inside the quoted
+   * label. Quote-masked the true number is ONE, and that one is the harm.
+   *
+   * ⚠ SUBORDINATE TO THE TWO STRONGER SOURCES, by the warrant's OWN precedence
+   * helper rather than by a second ordering written here. A typed mutation chip
+   * IS the instruction, and a recorded answer (or the repair-leg instruction
+   * override, which the route sets only after the whole-message claim anchor
+   * matched) resumes a question the PRODUCT asked. Neither may be second-guessed
+   * by reading the text again.
+   *
+   * ⚠ WHY IT IS COMPUTED HERE, one line above the gate: identical reason to the
+   * option-intervention verdict above it. `effectiveAppliedMutation` is this
+   * dispatcher's SINGLE gate for persist, edit fact, `analysis_ready` and the
+   * returned graph, so withholding THROUGH it means the write, the receipt fact,
+   * the wire graph and the readiness stamp cannot disagree, and no new per-signal
+   * wiring can be forgotten.
+   */
+  const editTurnCarriesStrongerWarrant = hasStrongerThanTextWarrant(
+    {
+      turnSource: payload.source,
+      chipActionType: payload.chip?.action_type,
+      isConfirmResume:
+        recordedAnswer !== null || params.editInstructionOverride !== undefined,
+    },
+    GRAPH_MUTATING_HANDLER_IDS,
+  );
+  const ordinaryTextAuthorityWithheld =
+    !editTurnCarriesStrongerWarrant &&
+    resolveOrdinaryTextAuthority({
+      // The USER's own bytes, never `editInstruction` — that may be the
+      // repair-leg synthesised instruction, and authority is a fact about what
+      // the person typed (trap 14b: the record is not ours to rewrite).
+      message: payload.message,
+      modelNodeLabels: projectModelNodeLabels(parsedGraph),
+    }) === 'withheld_deliberation';
+
+  // Structural honesty: every downstream success effect (persist, edit fact,
+  // analysis_ready, returned graph) gates on the EFFECTIVE predicate so a
+  // live-blocked verdict — or a part-accounting substitution block, or a
+  // withheld wrong-entity write, or a turn that asked for a VIEW rather than an
+  // edit — can never surface an applied-mutation signal.
+  const effectiveAppliedMutation =
+    successfulAppliedMutation &&
+    !gmBlockedApply &&
+    !paSubstitutionBlocked &&
+    !optionInterventionWriteWithheld &&
+    // Same reason as its sibling above: a write whose SCOPE was never
+    // established may not surface an applied-mutation signal either, or it
+    // persists exactly as the measured buy turn did.
+    !optionScopeUnresolved &&
+    !optionOwnValueWithheld &&
+    !recordedAnswerNotLanded &&
+    // A turn that asked what we THINK never authorised a write, so it may not
+    // surface an applied-mutation signal either.
+    !ordinaryTextAuthorityWithheld;
+
+  // ⭐⭐ THE HEADLINE MAY NOT OUTRUN THE GATE. Measured on deployed `a3b0548d`,
+  // wire-level, FRESH. One turn shipped BOTH of these:
+  //
+  //   "2 model parameters updated: Pro Plan Monthly Price, Model is raising the
+  //    Pro plan price from £49 to £69 per month with the next Pro feature release"
+  //   "Note: nothing from this message was saved, so \"Pro Plan Monthly Price\"
+  //    is unchanged."
+  //
+  // The second is true — `graph_hash` did not move across the whole session, and
+  // the option's stored value read 59 at save, rerun AND reopen.
+  //
+  // WHY IT IS AN ORDERING DEFECT, NOT A WORDING ONE. The headline is
+  // `buildAppliedChanges`'s summary, composed from the PARSED OPERATIONS and the
+  // in-memory post-apply graph — its signature has no persistence input at all —
+  // and it is fixed into `response.assistant_text` long before the withhold
+  // verdict exists. It is STRUCTURALLY INCAPABLE of knowing the write was
+  // withheld, so no rewording can fix it; only reading the gate can.
+  //
+  // ⚠ A GUARD ALREADY SAT HERE AND MISSED IT. `findSuccessClaimHit` against
+  // `SUCCESS_CLAIM_PATTERNS` replaces a false success sentence on this lane —
+  // but it is bound by PHRASE. EXECUTED against the real wire string: it returns
+  // null for "2 model parameters updated: …" while returning "Updated V" for
+  // "Updated Vendor Licensing Cost". So the list is a hand-maintained mirror of
+  // `edit-graph.ts`'s summary composer (trap 12) and goes stale the day the
+  // headline is reworded. When it misses, the code falls through to
+  // `appendLapseNotice` and the honest note is appended UNDER the false claim.
+  //
+  // This binds by IDENTITY instead — string equality against the very object
+  // that produced the text (trap 19) — so it cannot go stale, and it covers the
+  // five sibling withholds the phrase arm never reached.
+  if (
+    !effectiveAppliedMutation &&
+    editResult.appliedChanges?.summary &&
+    response.assistant_text === editResult.appliedChanges.summary
+  ) {
+    log.warn(
+      {
+        event: 'v5.edit_graph.proposal_headline_withdrawn',
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        // The GATE's conjuncts, never the model's prose — no free text here.
+        gm_blocked_apply: gmBlockedApply,
+        pa_substitution_blocked: paSubstitutionBlocked,
+        option_intervention_write_withheld: optionInterventionWriteWithheld,
+        option_own_value_withheld: optionOwnValueWithheld,
+        recorded_answer_not_landed: recordedAnswerNotLanded,
+        ordinary_text_authority_withheld: ordinaryTextAuthorityWithheld,
+      },
+      'edit_graph: withdrew an applied-changes headline for a turn that persisted nothing',
+    );
+    response = { ...response, assistant_text: EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT };
+  }
+
+  // ⭐⭐ THE HALF THE USER SEES — and it must say what happened FIRST.
+  //
+  // The write is already withheld by the gate above. This replaces whatever the
+  // edit LLM narrated (a rename receipt, on the measured turn) with the
+  // product's OWN demotion copy. Composed by `buildMutationWarrantDemotionText`,
+  // the single authority for this sentence — NOT re-spelled here (trap 12), and
+  // not composed by the model, because on the witnessed turn the model narrated
+  // an "Applied" receipt for a change nobody asked for and a string built from a
+  // template cannot narrate.
+  //
+  // It opens "Nothing has been changed.", which is TRUE BY CONSTRUCTION at this
+  // point, and it OFFERS rather than refusing — the same shape the V5 lane uses,
+  // so the two paths now answer a user's question the same way. Per INV-3 it
+  // asserts nothing about what the user did or did not ask for: this gate WILL
+  // keep missing a real instruction sometimes (see KNOWN_DROPPED), and a reply
+  // that also asserted the user never spoke would turn every residual miss into
+  // an insult.
+  //
+  // ⚠ NOT a `suggested_actions` change. Emitting a chip here would need a
+  // synthesised instruction naming a change only the edit LLM's prose describes,
+  // and that is the fabricated-write class this whole gate exists to prevent.
+  // "Say the word and I will make it" is an affordance the next turn can honour
+  // through the ordinary path, which is the estate's own ratified idiom
+  // (the calibration confirm chip replays a MESSAGE, not a blanket exemption).
+  //
+  // ⭐⭐ `&& successfulAppliedMutation` IS LOAD-BEARING, AND A GUARD FOUND IT.
+  // Without it this branch fired on turns where the handler applied NOTHING and
+  // there was therefore nothing false to withdraw — and it CLOBBERED an
+  // authoritative reply. MEASURED, not reasoned: `edit-graph-dispatch-early-emit
+  // -authoritative.test.ts` went red on the pre-LLM intercept path, and an
+  // instrumented run printed `successfulAppliedMutation: false,
+  // effectiveAppliedMutation: false` — i.e. that turn was ALREADY a no-op at
+  // pristine, my conjunct changed nothing about its write, and the only thing
+  // this branch did was replace a correct Stage-1 coaching reply with a demotion
+  // notice about a change nobody proposed. The guard was working; the decision it
+  // demanded is recorded here rather than silenced by re-pinning the test.
+  //
+  // So it binds by IDENTITY to the thing it withdraws (CLAUDE.md trap 19): a
+  // write the handler REALLY produced and this gate is REALLY withholding —
+  // exactly the discipline the headline gate above already follows.
+  if (ordinaryTextAuthorityWithheld && successfulAppliedMutation) {
+    log.warn(
+      {
+        event: 'v5.edit_graph.ordinary_text_authority_withheld',
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        // Counts and flags only — never the user's prose in telemetry.
+        graph_node_count: parsedGraph.nodes.length,
+        handler_applied_a_graph: editResult.appliedGraph != null,
+      },
+      'edit_graph: the turn asked for a view rather than an edit — write withheld, offering',
+    );
+    response = {
+      ...response,
+      assistant_text: buildMutationWarrantDemotionText('that change to your model', null),
+    };
+  }
+
+  if (optionInterventionWriteWithheld) {
+    log.warn(
+      {
+        event: 'v5.edit_graph.option_intervention_write_withheld',
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        option_id: optionInterventionWriteVerdict.optionId,
+        baseline_node_count: optionInterventionWriteVerdict.baselineNodeIds.length,
+        // ⭐ NAMED APART because they are two different facts, and because the
+        // message below was FALSE without it: an edge-only withhold moves no
+        // node baseline at all, so a reader of this line was told the wrong
+        // thing about what had been discarded. A log line that misdescribes the
+        // event is how the next session inherits a wrong model of the guard.
+        option_edge_count: optionInterventionWriteVerdict.optionEdgeKeys.length,
+        operations_count: editResult.operations?.length ?? 0,
+      },
+      'V5 edit_graph — the applied mutation moved a node baseline the named option is wired to, or one of that option\'s own edges, while writing no effect value for the option the user named; write withheld so the graph matches the honest reply (mutation NOT persisted)',
+    );
+  }
+  if (optionOwnValueWithheld) {
+    log.warn(
+      {
+        event: 'v5.edit_graph.option_own_value_write_withheld',
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        option_ids: optionOwnValueVerdict.substitutions.map((s) => s.optionId),
+        operations_count: editResult.operations?.length ?? 0,
+      },
+      "V5 edit_graph — the applied mutation wrote an option's OWN observed_state while that option's effect values did not move; write withheld so the reply cannot confirm a change the analysis will never see (mutation NOT persisted)",
+    );
+  }
+  if (
+    optionInterventionWriteWithheld ||
+    // Reviewer finding 3 (REVIEW1512): without this, freshness at :3088/:3137 is
+    // derived from the REJECTED post-edit graph and returned to the user beside
+    // "I have not changed the model" — a worse lie than the one this verdict was
+    // added to prevent, because it is staleness claimed off a write we refused.
+    optionScopeUnresolved ||
+    optionOwnValueWithheld ||
+    recordedAnswerNotLanded
+  ) {
+    // The graph did NOT change this turn — re-derive the wire freshness against
+    // the UNCHANGED frame base, exactly as the GM-blocked and part-accounting
+    // branches below do, so staleness is never claimed off an unpersisted
+    // mutation. A `derivation_failed` verdict is kept as honest degradation.
+    if (freshness.reason !== 'derivation_failed') {
+      let unchangedHash: string | null = null;
+      try {
+        unchangedHash = computeAnalysisAffectingGraphHash(
+          gmFrameBase as GraphStateIngress | null | undefined,
+        );
+      } catch {
+        unchangedHash = null;
+      }
+      freshness = deriveAnalysisFreshness(
+        priorFactsForRecovery,
+        unchangedHash,
+        config.cee.optionIdentityFreshnessGuard
+          ? extractGraphOptionIds(gmFrameBase)
+          : undefined,
+        priorFactsReadOkForRecovery === undefined
+          ? undefined
+          : { priorFactsReadOk: priorFactsReadOkForRecovery },
+      );
+    }
+    ev.branch = optionInterventionWriteWithheld
+      ? 'option_intervention_write_withheld'
+      : 'option_own_value_write_withheld';
+    ev.outcome = 'clarify';
+  }
+  if (paSubstitutionBlocked && partAccounting !== null) {
+    // Defect-B fail-closed branch: replace the V4 narration with the
+    // deterministic clarify that enumerates EVERY part and names the
+    // missing target(s). No chips: the ask is a free-text question ("which
+    // part of the model did you mean") a chip cannot answer.
+    response = {
+      ...response,
+      assistant_text: buildSubstitutionClarify(
+        partDecomposition.accountableParts,
+        partAccounting,
+      ),
+      suggested_actions: [],
+    };
+    // The graph did NOT change this turn — re-derive the wire freshness
+    // against the UNCHANGED frame base (same rule as the GM blocked branch;
+    // a derivation_failed verdict is kept as honest degradation).
+    if (freshness.reason !== 'derivation_failed') {
+      let unchangedHash: string | null = null;
+      try {
+        unchangedHash = computeAnalysisAffectingGraphHash(
+          gmFrameBase as GraphStateIngress | null | undefined,
+        );
+      } catch {
+        unchangedHash = null;
+      }
+      freshness = deriveAnalysisFreshness(
+        priorFactsForRecovery,
+        unchangedHash,
+        config.cee.optionIdentityFreshnessGuard
+          ? extractGraphOptionIds(gmFrameBase)
+          : undefined,
+        // Defect 4 — see `priorFactsReadOkForRecovery`. The guard above screens
+        // `derivation_failed`, which a degraded read does NOT produce.
+        priorFactsReadOkForRecovery === undefined
+          ? undefined
+          : { priorFactsReadOk: priorFactsReadOkForRecovery },
+      );
+    }
+    ev.branch = 'part_accounting_substitution_blocked';
+    ev.outcome = 'clarify';
+    log.info(
+      {
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        substitutions: partAccounting.substitutions.length,
+        missing_targets: partAccounting.missingTargets.length,
+        operations_count: editResult.operations?.length ?? 0,
+      },
+      'V5 edit_graph — part-accounting law blocked a named-target substitution (mutation NOT persisted)',
+    );
+  }
+  if (gmBlockedApply && gmDecision !== null) {
+    // Replace the V4 success narration wholesale: verdict template text
+    // (provisional_doctrine_v0), verdict-appropriate chips, and a redacted
+    // public-reason details block (codes + fixed readables only — never
+    // RefereeVerdict.candidate internals). The finaliser egress guard below
+    // still backstops this copy like every other emit path.
+    response = {
+      ...response,
+      assistant_text: gmDecision.assistantText ?? response.assistant_text,
+      suggested_actions: (gmDecision.suggestedActions ?? []).map((c) => ({
+        id: c.id,
+        label: c.label,
+        message: c.message,
+        ...(c.action_type !== undefined ? { action_type: c.action_type } : {}),
+        // Wave-2 ask #20 (0.19.0 Action.detail): full sentence behind a
+        // clamped held-confirm label.
+        ...(c.detail !== undefined ? { detail: c.detail } : {}),
+      })),
+      ...(gmDecision.publicReason !== null
+        ? {
+            blocks: [
+              {
+                type: 'error',
+                error_code: 'INTERNAL_ERROR',
+                severity: 'warn',
+                details: gmDecision.publicReason,
+              },
+              // R8 (unconditional — flag deleted per Paul's NO-DARK-LAUNCHES
+              // ruling; UI card #382 is live on DGAI staging): the typed
+              // held_proposal block — ADDITIVE next to the public-reason
+              // block. Gate-built, schema-validated, fail-closed null (see
+              // compose/held-proposal.ts): an unmappable/malformed hold emits
+              // no block, so this append never carries a partial shape.
+              ...(gmDecision.heldProposalBlock != null
+                ? [gmDecision.heldProposalBlock]
+                : []),
+            ] as OlumiResponse['blocks'],
+          }
+        : {}),
+    };
+    // P0 held-proposal survival (2026-07-15, DGAI #340) requirement 4 —
+    // honest supersession. A fresh hold minted while an earlier consent hold
+    // is still live must SAY what happens to the earlier one: same target →
+    // the carry-forward's same-key rule retires it ("this replaces..."),
+    // different target → both stay live and the copy names the earlier hold
+    // so two consents are never held silently. Appended BEFORE the commit so
+    // stored copy == wire copy (same seam doctrine as the lapse notice).
+    if (hasLiveHeldProposal(gmDecision)) {
+      const supersessionNotice = buildHeldSupersessionNotice(
+        gmDecision.pendingActions[0]!,
+        priorPendingForCarry,
+        Date.now(),
+      );
+      if (supersessionNotice !== null) {
+        response = {
+          ...response,
+          assistant_text: appendLapseNotice(response.assistant_text, supersessionNotice),
+        };
+      }
+    }
+    // The graph did NOT change this turn — re-derive the wire freshness
+    // against the UNCHANGED frame base so staleness is never claimed off an
+    // unpersisted mutation. A derivation_failed verdict is kept as-is
+    // (honest degradation beats a fabricated re-derivation).
+    if (freshness.reason !== 'derivation_failed') {
+      freshness = deriveAnalysisFreshness(
+        priorFactsForRecovery,
+        gmCurrentHash,
+        config.cee.optionIdentityFreshnessGuard
+          ? extractGraphOptionIds(gmFrameBase)
+          : undefined,
+        // Defect 4 — see `priorFactsReadOkForRecovery`. The guard above screens
+        // `derivation_failed`, which a degraded read does NOT produce.
+        priorFactsReadOkForRecovery === undefined
+          ? undefined
+          : { priorFactsReadOk: priorFactsReadOkForRecovery },
+      );
+    }
+    // R7 per-turn event honesty: the mutation did not apply.
+    ev.branch = `graph_management_${gmDecision.governing}`;
+    ev.outcome =
+      gmDecision.governing === 'rejected'
+        ? 'rejected'
+        : gmDecision.governing === 'held'
+          ? 'proposal'
+          : 'clarify';
+    log.info(
+      {
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        mode: gmMode,
+        governing: gmDecision.governing,
+        verdict_counts: gmDecision.verdictCounts,
+        pending_emitted: (gmDecision.pendingActions?.length ?? 0) > 0,
+      },
+      'V5 edit_graph — Graph Management live gate blocked the apply path (mutation NOT persisted)',
+    );
+  }
+
+  // ══ ROADMAP 2.474 / A3 — A SPLIT REQUEST MAKES TWO STATEMENTS, NOT ONE ════
+  //
+  // ⭐⭐ THE RULE, STATED ONCE, HERE — this is the ONLY place either
+  // precondition is written, and the two builders below take no argument that
+  // could re-couple them (ROADMAP 2.620):
+  //
+  //   SCOPE, on EVERY outcome — "only the first of N parts was put to the
+  //     gate; the rest were never judged". It is a fact about the REQUEST, and
+  //     the gate's verdict on the part it judged does not touch it. Applied,
+  //     held, rejected, stale, clarify: the user is told what was not
+  //     submitted. ⭐ SCOPE SURVIVES REFUSAL.
+  //
+  //   CONTINUATION, only on a live hold — "here is step 2", plus the chip that
+  //     takes it. An offer needs a live path to continue, and the only live
+  //     path here is a held proposal the user can still confirm.
+  //
+  // ⚠ WHY THE RULE IS SPELLED OUT RATHER THAN IMPLIED BY THE CODE. The first
+  // version of this block gated BOTH on the verdict, in one condition, and the
+  // result was measured: on a rejected turn the user read "I couldn't take
+  // that change forward, so the model is unchanged" and WAS NEVER TOLD that
+  // 8 of their 12 operations had never been submitted. Coherent, and silent.
+  // The turn before it was contradictory (it offered step 2 of a sequence with
+  // no step 1). Both wrong — because one gate was being asked to answer two
+  // different questions.
+  //
+  // ⚠ NEITHER STATEMENT IS DISCLOSED-PARTIAL. `submittedIndices` names every
+  // operation that reached the gate; the remainder reached NOTHING — not
+  // applied, not rejected, not judged. The copy says the rest were not looked
+  // at, never that part of a judged batch was dropped.
+  //
+  // Appended AFTER the gate's own copy (and after the supersession notice) so
+  // the user reads what happened first, and BEFORE the commit so stored copy
+  // equals wire copy — the same seam doctrine as the lapse notice.
+  if (structuralEditSplit !== null) {
+    const wholeDescription = describeChangeset(
+      structuralEditSplit.wholeBatch as readonly ChangesetOpLike[],
+      gmFrameBase,
+    );
+    const scopeInput =
+      wholeDescription === null
+        ? null
+        : {
+            wholeBatch: wholeDescription,
+            proposedIndices: structuralEditSplit.submittedIndices,
+            partCount: structuralEditSplit.partCount,
+          };
+    const scopeNotice =
+      scopeInput === null ? null : buildStructuralEditScopeNotice(scopeInput);
+    if (scopeNotice !== null) {
+      response = {
+        ...response,
+        assistant_text: appendLapseNotice(response.assistant_text, scopeNotice),
+      };
+    }
+
+    // The continuation's precondition, read through the PRODUCER's predicate
+    // (ROADMAP 2.623(a)) rather than rebuilt from two nullable fields here.
+    const continuationAvailable = hasLiveHeldProposal(gmDecision);
+    const continuation =
+      scopeInput === null || !continuationAvailable
+        ? null
+        : buildStructuralEditContinuation({
+            ...scopeInput,
+            remainderDependsOnThisStep: structuralEditSplit.remainderDependsOnThisStep,
+            // Both halves derived, neither restated (ROADMAP 2.474/A3):
+            // (i) does an analysis exist to go stale, and (ii) does a stale
+            // frame actually block an apply — asked of the frame gate itself.
+            //
+            // ⭐ AND THE RULING LANDED (2.474/A4, 2026-08-05): the gate now
+            // answers `false`, so this conjunction is false and the re-run
+            // copy RETIRED ITSELF — no sentence left behind, no lane needed to
+            // remember. That is the entire return on deriving it. The
+            // expression stays derived rather than collapsing to a literal:
+            // a hardcoded `false` here would be the mirror #829 removed, and
+            // would silently over-promise if the trust set ever moves back.
+            rerunRequiredBeforeNextStep:
+              priorAnalysisExistsForSplit && staleAnalysisBlocksApply(),
+          });
+    if (continuation !== null) {
+      response = {
+        ...response,
+        ...(continuation.notice !== null
+          ? {
+              assistant_text: appendLapseNotice(
+                response.assistant_text,
+                continuation.notice,
+              ),
+            }
+          : {}),
+        // `action_type` is snake_case on the builder's type precisely so this
+        // is a whole-object spread: the earlier field-by-field remap silently
+        // dropped anything the builder added (ROADMAP 2.623(c)).
+        suggested_actions: [
+          ...(response.suggested_actions ?? []),
+          { ...continuation.action },
+        ],
+      };
+    }
+
+    emit(TelemetryEvents.V5StructuralEditToolEntry, {
+      request_id: requestId,
+      scenario_id: payload.scenario_id,
+      decision: 'split_disclosed',
+      part_count: structuralEditSplit.partCount,
+      submitted_operations: structuralEditSplit.submittedIndices.length,
+      total_operations: structuralEditSplit.wholeBatch.length,
+      // Reported separately because they now FAIL separately: a scope notice
+      // with no continuation is the ordinary refusal shape, and a split with
+      // no scope notice at all means `describeChangeset` returned nothing —
+      // which is the one case where the user IS told nothing, and must be
+      // visible rather than inferred from silence.
+      scope_disclosed: scopeNotice !== null,
+      continuation_offered: continuation !== null,
+      governing: gmDecision?.governing ?? null,
+      was_rejected: editResult.wasRejected,
+    });
+  }
+
+  // V5 H5 — false-success invariant (defence-in-depth).
+  // Runs BEFORE the forbidden-phrase guard. Two distinct sub-cases
+  // both gated on `!wasRejected && !successfulAppliedMutation`:
+  //
+  //   A. Structural mismatch — operations exist but appliedGraph is
+  //      missing. The prose cannot be trusted regardless of phrasing
+  //      because no graph state was persisted to commit. This is the
+  //      shape the staging Layer-B replay surfaced (PR #164 round-3
+  //      follow-up): V4 returns operations + appliedChanges + LLM-
+  //      authored success-style coaching prose, but `appliedGraph`
+  //      stayed null because PLoT wasn't wired into V5 dispatch. The
+  //      regex-based `findSuccessClaimHit` can't enumerate every
+  //      phrasing the LLM produces ("Strengthened the X edge from Y
+  //      to Z..." doesn't match the existing pattern set). Rewrite
+  //      UNCONDITIONALLY whenever the structural signature fires.
+  //      The V4 source fix below (Step 2) makes this case impossible
+  //      in normal operation; this backstop catches future
+  //      regressions in the source.
+  //
+  //   B. No-operations no-op with success-claim language. Mode B
+  //      regression backstop — V4 already drops both warnings and
+  //      coaching on no-op paths (PR #164 round-1 P0), so this only
+  //      fires if a future emit path re-introduces LLM prose on the
+  //      no-op branch. Uses the regex set because operations=[] is
+  //      the legitimate no-op shape and the prose IS the only signal
+  //      that something inappropriate slipped through.
+  if (!editResult.wasRejected && !successfulAppliedMutation) {
+    const operationsCount = editResult.operations?.length ?? 0;
+    const hasAppliedGraph = editResult.appliedGraph !== null
+      && editResult.appliedGraph !== undefined;
+
+    if (operationsCount > 0 && !hasAppliedGraph) {
+      // Sub-case A — structural mismatch. Unconditional rewrite.
+      emit(TelemetryEvents.V5EditGraphAppliedGraphMissingWithOperations, {
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        operations_count: operationsCount,
+        dispatch_path: 'edit_graph_finalise',
+      });
+      response = { ...response, assistant_text: EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT };
+    } else {
+      // Sub-case B — regex-based no-op + success-claim backstop.
+      const successHit = findSuccessClaimHit(response.assistant_text ?? '');
+      if (successHit !== null) {
+        emit(TelemetryEvents.V5EditGraphFalseSuccessRewritten, {
+          request_id: requestId,
+          scenario_id: payload.scenario_id,
+          original_phrase: successHit,
+          dispatch_path: 'edit_graph_finalise',
+        });
+        response = { ...response, assistant_text: EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT };
+      }
+
+      // V5 Context Management v1 — no-op recovery layer.
+      //
+      // Sub-case B is a legitimate no-op (zero operations, no applied
+      // graph, no false-success language). The default response copy
+      // is bland or echoes V4 confirmation framing that drops useful
+      // context. Upgrade it when we can do better:
+      //
+      //   - Message is analytical AND a successful run_analysis fact
+      //     exists → acknowledge no change + redirect to the analysis.
+      //   - Message is analytical AND no run_analysis fact exists →
+      //     nudge the user to run analysis first; chip is gated on
+      //     graph-readiness (matches tryNoAnalysisGuard).
+      //   - Message carries a positive vague-edit signal (imperative
+      //     edit verb with an abstract target) → ask a concise
+      //     clarification instead of leaving bland fallback copy.
+      //   - Anything else (including general conversational messages
+      //     with no edit signal) → leave existing copy. Safer than
+      //     rewriting from too little signal.
+      //
+      // Preserves existing response blocks, suggested actions, and
+      // safe coaching payloads where present. Does not introduce
+      // internal terms or claim a change happened.
+      const graphReadyForRecovery =
+        parsedGraph.nodes.length > 0 && parsedGraph.edges.length > 0;
+      // ⭐ SPEC §4.1 RANK 2 — the referent register for this turn.
+      //
+      // `recentConversationSlice` is NEWEST-FIRST (`conversationSliceToMessages`
+      // reverses it to get chronological order), so the first entry carrying a
+      // non-empty `assistant_message` is the product's own last claim. The
+      // current turn is not in it: the commit happens after dispatch.
+      //
+      // ⚠ THE INDEX IS WINDOW-RELATIVE, not conversation-absolute — see
+      // `TurnReferent.introduced_at_turn`. It orders this turn's own register
+      // and nothing more, which is all rank 2 needs.
+      //
+      // ⚠ THE PROSE NEVER LEAVES THIS FUNCTION. The register carries the
+      // assistant sentence internally, but the only thing the reply shows the
+      // user is the node LABEL, which is already model-facing via
+      // `display_graph`. So this adds no new channel for assistant-authored
+      // text and does not touch the withheld-claim redaction guarantee.
+      //
+      // The window-to-register step is the producer's own
+      // `projectTurnReferentsFromWindow`, shared with the value pre-route in
+      // `turn-executor.ts`, so both consumers build the register from the same
+      // rule over the same newest-first shape.
+      const turnReferents = projectTurnReferentsFromWindow({
+        turnsNewestFirst: recentConversationSlice,
+        nodes: parsedGraph.nodes,
+      });
+      const recoveryOutcome = decideNoOpRecovery({
+        message: payload.message,
+        priorFacts: priorFactsForRecovery,
+        freshness: freshness.freshness,
+        graphReady: graphReadyForRecovery,
+        // Pass the post-parse graph nodes so the `explore_factor`
+        // safety-net branch can detect a no-op message that mentions a
+        // known label (the symptom of any path that slips past the
+        // upstream `tryPostAnalysisLabelIntercept` in route-v2.ts).
+        nodes: parsedGraph.nodes,
+        // Spec §4 — consumed ONLY by the `anaphoric_edit_*` branches.
+        referents: turnReferents,
+        // V5 P0 proposal-memory continuation. Null when no fresh prior
+        // proposal exists or graph hash has diverged since emit. The
+        // proposal_stage_one / _two branches only fire when this is
+        // non-null AND the corresponding agreement / add-as-factor
+        // signal matches the user's message.
+        pendingProposedConcept: pendingProposedConceptForRecovery,
+        // V5 P0 staging-smoke follow-up (PR #212): suppress the
+        // recovery's proposal_stage_* branches when the pre-LLM
+        // intercept already emitted Stage 1 / Stage 2 chips. Without
+        // this guard both layers fire and the wire response carries
+        // 6 chips instead of 3.
+        // ⭐ OR-ed with the add-risk clarifier's ANSWERED marker — see its
+        //   declaration. Both are "this turn already answered deterministically",
+        //   which is the question this flag was introduced to answer; keying on
+        //   only one of the two paths is what let `proposal_stage_one` overwrite
+        //   a specific risk clarification with the generic kind chooser.
+        proposalAlreadyEmittedInThisTurn: proposalEarlyEmitted || addRiskClarifierAnswered,
+        // R10 — when the V4 no-op branch preserved a scrubbed clarifying
+        // question, the recovery layer must stay inert (no vague-edit clobber).
+        noOpClarificationPreserved: editResult.noOpClarificationPreserved === true,
+      });
+      // V5 P0 — surface stage outcome telemetry independently of the
+      // existing V5EditGraphNoOpRecovery event so dashboards can track
+      // proposal-resume rate without joining on branch_taken.
+      if (pendingProposedConceptForRecovery !== null) {
+        // Emit the post-recovery telemetry ONLY when the recovery
+        // layer was authoritative for the outcome on this turn.
+        // PR #212 staging-smoke follow-up: when the pre-LLM intercept
+        // already emitted Stage 1 / Stage 2 the recovery's proposal
+        // branch is suppressed (proposalAlreadyEmittedInThisTurn=true)
+        // so recoveryOutcome.branch would compute as something other
+        // than proposal_stage_*. Reporting `outcome: 'no_agreement'`
+        // here would be misleading — the proposal DID resume via the
+        // early-emit path, which already emitted its own
+        // `V5ProposalContinuationResumed{pre_llm: true}` event with
+        // the correct stage_one / stage_two outcome.
+        if (!proposalEarlyEmitted) {
+          const stageOutcome: 'stage_one' | 'stage_two' | 'no_agreement' =
+            recoveryOutcome.branch === 'proposal_stage_two'
+              ? 'stage_two'
+              : recoveryOutcome.branch === 'proposal_stage_one'
+              ? 'stage_one'
+              : 'no_agreement';
+          emit(TelemetryEvents.V5ProposalContinuationResumed, {
+            request_id: requestId,
+            scenario_id: payload.scenario_id,
+            outcome: stageOutcome,
+            pre_llm: false,
+          });
+        }
+        // V5 P0 — refresh the pending action on the RECOVERY-path Stage 1
+        // / Stage 2 emits so the user has another TTL window to walk
+        // through Stage 1 → Stage 2 → Stage 3 without expiry surprises.
+        // Stage 3 ("affecting X" disambiguated) falls through to existing
+        // edit_graph dispatch with full context, and the pending decays
+        // naturally there.
+        //
+        // The early-emit path is NOT handled here: it refreshes the
+        // pending in the intercept itself (PR #216 round-3), independent
+        // of this block's `buildTurnContext` pending read — so the
+        // refresh survives a degraded second read. On the early-emit
+        // path `recoveryOutcome.branch` is 'ambiguous' (inert), so this
+        // condition is correctly false.
+        if (
+          recoveryOutcome.branch === 'proposal_stage_one'
+          || recoveryOutcome.branch === 'proposal_stage_two'
+        ) {
+          const refreshGraphHash =
+            currentGraphHashForRecovery !== null
+              ? currentGraphHashForRecovery
+              : computeAnalysisAffectingGraphHash(
+                  persistedPostEditGraph as GraphStateIngress | null | undefined,
+                );
+          proposalPendingForCommit = buildProposalPendingAction({
+            concept: pendingProposedConceptForRecovery.concept,
+            preferred_kind: pendingProposedConceptForRecovery.preferred_kind,
+            scenario_id: payload.scenario_id,
+            emitted_at_iso: new Date().toISOString(),
+            ...(refreshGraphHash ? { graph_hash: refreshGraphHash } : {}),
+          });
+        }
+      }
+      if (recoveryOutcome.assistantText !== null) {
+        response = { ...response, assistant_text: recoveryOutcome.assistantText };
+      }
+      // Strip existing chips whose intent is incompatible with the
+      // recovery decision BEFORE the dedupe-and-append step. The only
+      // case in v1 is `analytical_none` with `graphReady=false`: a
+      // pre-existing V4 `run_analysis` chip would fail when clicked,
+      // so it must be removed. Without this strip the recovery would
+      // suppress its own chip (correct) but the V4 chip would survive
+      // (wrong) and the user would still see an actionable
+      // run_analysis affordance that cannot succeed.
+      let strippedActions = 0;
+      if (
+        recoveryOutcome.branch === 'analytical_none'
+        && !graphReadyForRecovery
+        && response.suggested_actions
+        && response.suggested_actions.length > 0
+      ) {
+        const before = response.suggested_actions;
+        const after = before.filter((a) => a.action_type !== 'run_analysis');
+        if (after.length !== before.length) {
+          strippedActions = before.length - after.length;
+          response = { ...response, suggested_actions: after };
+        }
+      }
+      // ⭐ SECOND STRIP CASE — the anaphoric branches that OFFER A TARGET SET.
+      //
+      // ⚠ MEASURED ON THE WIRE, and it refutes what this lane first assumed.
+      // The turn-5 reset was briefed as shipping `suggested_actions: []`. True
+      // of the branch, FALSE of the response: the 5 Sep capture carries THREE
+      // chips (`edit_graph_action_0/1/2`), each naming a different node, none
+      // carrying an `action_type` — so the dedupe above, which keys on
+      // `action_type`, cannot see them and the recovery chip is APPENDED beside
+      // them. A reply reading "Taking that as Sales Headcount Investment" would
+      // have shipped under four chips, three of them naming other entities.
+      // That contradicts the disclosure in the sentence directly above it.
+      //
+      // ⛔ DELIBERATELY NARROW, in three ways:
+      //   · Only the two branches that themselves offer targets. The
+      //     `_ask_unresolved` branch offers none and says so, and there the
+      //     pre-existing target chips are the user's only affordance — a strip
+      //     would take something away and give nothing back.
+      //   · Only chips WITHOUT an `action_type`. That is exactly the class the
+      //     dedupe above documents as "message-replay only". A functional
+      //     affordance (`run_analysis`, `explain_result`) answers a different
+      //     question from "which node did you mean" and survives.
+      //   · Nothing is invented: the recovery's own chips are appended by the
+      //     existing merge below, unchanged.
+      else if (
+        (recoveryOutcome.branch === 'anaphoric_edit_bound'
+          || recoveryOutcome.branch === 'anaphoric_edit_ask_candidates')
+        && response.suggested_actions
+        && response.suggested_actions.length > 0
+      ) {
+        const before = response.suggested_actions;
+        const after = before.filter((a) => Boolean(a.action_type));
+        if (after.length !== before.length) {
+          strippedActions = before.length - after.length;
+          response = { ...response, suggested_actions: after };
+        }
+      }
+      // Dedupe by action_type: if the existing response already has a
+      // chip with the same action_type as a recovery chip, suppress
+      // the recovery one. Two chips with identical intent in the same
+      // response are bad UX. Chips without an `action_type` (no
+      // wire-level handler binding) are never deduped against because
+      // their click semantics are message-replay only.
+      let appendedActions = 0;
+      if (recoveryOutcome.suggestedActions.length > 0) {
+        const existing = response.suggested_actions ?? [];
+        const existingIntents = new Set<string>();
+        for (const a of existing) {
+          if (a.action_type) existingIntents.add(a.action_type);
+        }
+        const recoveryFiltered = recoveryOutcome.suggestedActions.filter(
+          (a) => !a.action_type || !existingIntents.has(a.action_type),
+        );
+        appendedActions = recoveryFiltered.length;
+        if (recoveryFiltered.length > 0) {
+          response = {
+            ...response,
+            suggested_actions: [...existing, ...recoveryFiltered],
+          };
+        }
+      }
+      // Emit AFTER strip + dedupe so `appended_actions` honestly
+      // reports what landed on the response, not what the recovery
+      // would have appended in isolation. `stripped_actions` reports
+      // existing-chip removals so observability covers both edges of
+      // the merge logic.
+      //
+      // PR #216 round-3 review (NICE-TO-HAVE): suppress on the
+      // early-emit path. There the recovery decision is inert by
+      // construction (branch 'ambiguous', no rewrite, no append), so
+      // emitting `V5EditGraphNoOpRecovery{branch:ambiguous,
+      // rewrote_text:false, appended:0}` is pure noise that conflates
+      // "recovery ran and did nothing" with "early-emit was
+      // authoritative". The `V5ProposalContinuationResumed{pre_llm:
+      // true}` event already records the early-emit outcome.
+      // R7: the recovery branch is the user-visible no-op outcome; surface it
+      // on the per-turn event. R10 (task 7) adds the preserve/fallback values.
+      // R10 — `noop_clarification_preserved` when the question was kept,
+      // `noop_fallback_copy` when the V4 no-op fell back and recovery did not
+      // upgrade the copy, otherwise the recovery branch that rewrote the text.
+      ev.branch =
+        recoveryOutcome.assistantText === null && editResult.noOpClarificationPreserved !== true
+          ? 'noop_fallback_copy'
+          : recoveryOutcome.branch;
+      if (!proposalEarlyEmitted) {
+        emit(TelemetryEvents.V5EditGraphNoOpRecovery, {
+          request_id: requestId,
+          scenario_id: payload.scenario_id,
+          intent_class: recoveryOutcome.intent_class,
+          has_run_analysis_fact: recoveryOutcome.has_run_analysis_fact,
+          freshness: freshness.freshness,
+          branch_taken: recoveryOutcome.branch,
+          rewrote_text: recoveryOutcome.assistantText !== null,
+          appended_actions: appendedActions,
+          stripped_actions: strippedActions,
+        });
+      }
+    }
+  }
+
+  // ⭐⭐ ROADMAP 2.427 — CONFIGURE-OPTION OUTCOME BINDING.
+  //
+  // Placement is load-bearing in BOTH directions, so it is stated here rather
+  // than left to be re-derived:
+  //
+  //   AFTER the V5 H5 invariant above — because H5's sub-case A rewrites
+  //   UNCONDITIONALLY on `operations > 0 && !appliedGraph`, which is exactly
+  //   failure branch (a) below. Running before H5 would have this richer copy
+  //   clobbered by the generic fallback on the very shape it exists to fix.
+  //   H5 makes the turn SAFE; this makes it USEFUL, and safety goes first.
+  //
+  //   BEFORE the part-accounting / unmapped-part disclosures below — those
+  //   APPEND honest notices to whatever text is current, and they must append
+  //   to the recovery copy rather than to a claim that has been replaced.
+  //
+  // ⚠ NOT gated on `successfulAppliedMutation`, and that is the whole reason
+  // this guard is separate from H5 rather than another sub-case inside it. H5
+  // asks *"did anything land?"*. On the motivating capture (deployed
+  // `98f2476`, diagnosis capture `P3r7_4_phrasing.json`) something DID land —
+  // the edge `opt_cloud_native → fac_adoption_complexity` moved to
+  // `strength.mean 0.7` — so `successfulAppliedMutation` was TRUE, H5 was
+  // structurally silent, ZERO error blocks shipped, and the user read
+  // "Updated the Cloud-Native CRM to Adoption Complexity edge strength from 1.0
+  // to 0.7. Rerun analysis to see the effect." while the option they had asked
+  // to configure stayed `needs_encoding` with `interventions: {}`.
+  //
+  // The question asked here is different, and identity-bound (trap 19): did an
+  // interventions write land FOR THE OPTION THE USER NAMED? Both failure
+  // branches converge on one answer — the deterministic clarify copy that names
+  // the option, the factors still unset, and the sentence that writes them:
+  //
+  //   (a) nothing landed at all (`OPERATION_DID_NOT_LAND`, capture
+  //       `P3_4_phrasing.json`) — previously the generic "I wasn't able to make
+  //       that change safely.", which names no working phrasing while the same
+  //       product emits the routable form in its own clarify reply;
+  //   (b) something landed for a DIFFERENT entity — previously a confident
+  //       success claim about that other entity, with no error block.
+  //
+  // `parsedGraph` is the pre-edit graph this turn was dispatched against;
+  // `editResult.appliedGraph` is the post-edit graph, null when the edit
+  // produced none. See `routing/configure-option-outcome.ts` for why the check
+  // compares the applied GRAPH rather than the operation list.
+  const configureOutcome = evaluateConfigureOptionOutcome({
+    message: payload.message,
+    before: parsedGraph,
+    // ⭐ 2.1266: when the wrong-entity write is withheld the applied graph never
+    // persists, so the copy must be composed against the state the user keeps.
+    // The verdict is `not_honoured` either way (no interventions write landed
+    // on either graph); this only stops the FACTORS NAMED being read off a
+    // graph nobody will hold.
+    after: optionInterventionWriteWithheld ? null : (editResult.appliedGraph ?? null),
+  });
+  if (configureOutcome.status === 'not_honoured') {
+    emit(TelemetryEvents.V5ConfigureOptionOutcomeUnhonoured, {
+      request_id: requestId,
+      scenario_id: payload.scenario_id,
+      option_id: configureOutcome.optionId,
+      factor_count: configureOutcome.factorLabels.length,
+      // Separates branch (b) — the wrong-entity write H5 cannot see — from
+      // branch (a), the ordinary did-not-land dead end.
+      applied_something: editResult.appliedGraph != null,
+    });
+    // REFUSE, rather than confirm-with-a-caveat. The text is replaced
+    // WHOLESALE: a success sentence followed by a correction is still a success
+    // sentence, and the capture that motivated this row put its false claim in
+    // the FIRST sentence, where it is what the user reads and acts on.
+    // ⭐ THE ADMISSION IS DERIVED HERE, NOT ASSUMED IN THE COPY (review C1).
+    // The terminating reply may only say "the analysis will run" if the run
+    // actually would — so the caller, which HOLDS the graph, answers that
+    // question with the same predicate `build-turn-context.ts` admits on. The
+    // composer's input cannot express the condition, which is precisely why the
+    // first version of that sentence was unconditional and therefore false
+    // whenever a structural blocker co-existed. Assessed against the graph the
+    // user now has: the applied one if the edit landed, else the pre-edit one —
+    // the same authority `evaluateConfigureOptionOutcome` compares.
+    // ⭐ 2.1266: assess the graph the user will ACTUALLY have. When the
+    // wrong-entity write is withheld, `appliedGraph` is a graph that never
+    // persists, so admitting a run against it would promise a run over state
+    // nobody holds — the same class of error as stamping readiness from it.
+    const admissionNow = resolveRunAdmission(
+      optionInterventionWriteWithheld ? parsedGraph : (editResult.appliedGraph ?? parsedGraph),
+    );
+    // ⭐⭐ NO GESTURE HERE — AND THAT IS THE FINDING, NOT AN OMISSION (S7).
+    //
+    // This row shipped `blocks: []` and the witnessed capture (UI `326970a7` ·
+    // CEE `5f2e3fd`) showed why that mattered: a chip labelled "Set effect on
+    // Cash runway consumed" opened nothing and handed back a sentence to retype.
+    // The obvious repair is a `ui_directive`. TWO destinations were built for it
+    // and BOTH were refuted by live drives, so the reasoning is recorded rather
+    // than the attempts quietly deleted (trap 14).
+    //
+    //   1. `open_inspector` @ the OPTION node. The canvas panel renders the
+    //      intervention row and `+ Add a change` — both reporting
+    //      `disabled: false` ON THEMSELVES — inside a `<fieldset disabled>` six
+    //      ancestors up. A forced native write produced ZERO wire calls. Its own
+    //      notice: "This inspector is read-only because these changes cannot yet
+    //      be saved to the shared model." Read-only BY POLICY.
+    //
+    //   2. `open_section` @ {model_section, 'options'} — the surface the SHIPPED
+    //      `option_needs_encoding` remedy already points at. Refuted by a matched
+    //      pair in one session: the option row's `-value` testid resolves to an
+    //      EMPTY `<span>` of height 0, no role, no tabindex, no onclick, and a
+    //      real click is REFUSED; the FACTOR row's control in the same table is a
+    //      37×42 `<button>` whose click SUCCEEDS and yields an input. Not policy
+    //      this time (`anyDisabledFieldsetOnPage: 0`) — the option row simply has
+    //      NO value control. The rows even carry
+    //      `-attention-missing-intervention` markers: the section DISPLAYS the
+    //      blocker it cannot fix.
+    //
+    // ⚠⚠ TWO INSTRUMENT LESSONS, both of which nearly shipped a wrong gesture:
+    // A PER-ELEMENT `disabled` CHECK IS NOT AN ENABLED CHECK (only actionability
+    // sees an ancestor disabled fieldset), and A TESTID THAT RESOLVES IS NOT A
+    // CONTROL THAT EXISTS (an empty zero-height span answers `querySelector`
+    // exactly as a button does).
+    //
+    // ⛔ SO THERE IS NO WORKING DIRECT-MANIPULATION SURFACE FOR THIS ENTITY, and
+    // the rule this lane adopted decides the rest: hand the user to a
+    // direct-manipulation surface WHERE ONE EXISTS AND WORKS; hand them to chat
+    // where one does not. **The user is already in chat when they click this
+    // chip**, so the honest gesture is none — a directive here would point at a
+    // place they are already standing, or at a surface that cannot help.
+    //
+    // ⭐ AND THE LOOP GENUINELY CLOSES WITHOUT ONE, which is why this is a
+    // completed fix and not a shortfall. The reply below asks for the number;
+    // a bare `0.6` binds to this exact slot via `deriveOnScreenEffectAsk` →
+    // `matchBareRepairValue` → `resolveRepairValueBinding`. That binding is
+    // derived from READINESS STATE (`status === 'needs_user_input'`), never from
+    // the assistant's prose, so rewording the ask cannot break it.
+    //
+    // ⚠ ROWED, NOT FIXED HERE: the product's own `option_needs_encoding` remedy
+    // (`REMEDY_SECTION_BY_OPEN_ITEM_KIND` → `turn-executor.ts`) points at that
+    // same options section, so it ships a gesture at a surface that cannot
+    // resolve the blocker class it names. That is a defect in SHIPPED code, not
+    // in this row, and it is reported rather than absorbed.
+    response = {
+      ...response,
+      assistant_text: composeConfigureOptionClarifyResponse({
+        optionLabel: configureOutcome.optionLabel,
+        factorLabels: configureOutcome.factorLabels,
+        stage: payload.stage,
+        // ⭐ TERMINATION (L-25 / NEW-1). The composer now DERIVES this itself
+        // from the message — the boolean this site used to pass was optional and
+        // the sibling call site in `route-v2.ts` never passed it, so at that site
+        // the terminating branch was unreachable. Handing over the message means
+        // no call site can forget. See the `message` field's doc.
+        message: payload.message,
+        analysisWillProceed: admissionNow.willProceed,
+        // Was `admissionNow.willProceed ? null : admissionNow.strict.nextStep`
+        // inlined here — correct, but the only hand-kept copy of a coherence
+        // rule every future consumer would have had to rediscover. Derived once
+        // on the admission now; see `RunAdmission.blockedNextStep`.
+        blockedNextStep: admissionNow.blockedNextStep,
+      }).assistant_text,
+    };
+  }
+
+  // ⭐⭐ 2.1266 — A WITHHELD WRITE MUST NOT BE A SILENT ONE.
+  //
+  // Appended here, AFTER the 2.427 recovery copy, and gated on the withhold
+  // verdict alone rather than on `configureOutcome.status` — the two are
+  // equivalent today (the withhold requires a `not_honoured` verdict), and
+  // binding to the verdict that actually caused the withhold means this cannot
+  // silently stop firing if that coincidence ever changes.
+  //
+  // ⚠ SCOPE, and it is deliberately tiny: this APPENDS a sentence. It does not
+  // touch `configureOutcome`, the option resolution, or which options the 2.427
+  // text guard speaks about — the boundary this change was explicitly not
+  // allowed to cross.
+  //
+  // Why it is required: on the W1 shape (an explicitly-requested baseline edit
+  // to a factor the option IS wired to — see the guard's header) the user's
+  // request was correct and correctly executed, and the write is still
+  // discarded because it is indistinguishable at the graph from the witnessed
+  // wrong-entity write. Without this sentence they get copy about the option's
+  // missing effect value and are never told their edit was dropped.
+  if (recordedAnswerNotLanded && recordedAnswer !== null) {
+    response = { ...response, assistant_text:
+      `I could not record that value for "${recordedAnswer.pair.optionLabel}" on "${recordedAnswer.pair.factorLabel}". Nothing has changed.`,
+      suggested_actions: [] };
+  }
+  if (optionInterventionWriteVerdict.verdict === 'scope_unresolved') {
+    // ⭐ NOTHING FAILS SILENTLY, AND THE FAILURE IS OURS (Paul, 2026-09-15).
+    // The write is already withheld by the gate above; this is the half the
+    // user sees. It ASKS, because the one thing we genuinely do not know is
+    // which option they meant — and guessing is the fabricated write the whole
+    // guard exists to prevent.
+    log.warn(
+      {
+        event: 'v5.edit_graph.option_scope_unresolved',
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        // Counts and ids only — never the user's prose in telemetry.
+        baseline_node_count: optionInterventionWriteVerdict.baselineNodeIds.length,
+        option_count: optionInterventionWriteVerdict.optionLabels.length,
+      },
+      'edit_graph: option-anchored turn with no resolved option — write withheld, asking',
+    );
+    const moved = resolveNodeLabels(parsedGraph, optionInterventionWriteVerdict.baselineNodeIds);
+    const movedNamed = moved.length > 0 ? `"${moved[0]}"` : 'that value';
+    const choices = optionInterventionWriteVerdict.optionLabels
+      .map((l) => `"${l}"`)
+      .join(', ');
+    response = {
+      ...response,
+      assistant_text:
+        `That would have changed ${movedNamed} for every option, and I do not think that is ` +
+        `what you meant — so I have not changed the model. Which option did you mean? ` +
+        `${choices}.`,
+    };
+  }
+
+  if (optionInterventionWriteVerdict.verdict === 'withhold') {
+    // ⛔⛔ A WITHHELD TURN MUST NOT CONFIRM AND THEN DENY — and this is the
+    // hole withholding itself opened.
+    //
+    // V5 H5, the false-success invariant, is gated on
+    // `!successfulAppliedMutation`. That predicate asks *"did the applier
+    // apply?"* — and on a withheld turn it is TRUE, because it did. The
+    // predicate that says *"did anything PERSIST?"* is
+    // `effectiveAppliedMutation`, and H5 does not consult it. So for a
+    // `not_honoured_no_copy` verdict — the REVISION class, which carries no
+    // copy and therefore gets no wholesale replacement — the LLM's own
+    // *"Updated … edge strength from 1.0 to 0.7"* survived to the wire, with
+    // the notice below appended underneath it. Measured through this
+    // dispatcher: both sentences, one reply.
+    //
+    // That is worse than the silent wrong-entity write it replaced: there the
+    // reply at least matched the graph. **Withholding the write obliges us to
+    // withdraw the claim.**
+    //
+    // DERIVED, not a phrase list (trap 12): `findSuccessClaimHit` is the
+    // repo's own detector, already used by H5 sub-case B, and it catches the
+    // captured sentence. Scoped deliberately to the success-claim rewrite and
+    // NOT by widening H5's gate — that `else` branch also runs the no-op
+    // RECOVERY layer, which is written for legitimate no-ops and has no
+    // business composing copy for a withheld wrong-entity turn.
+    //
+    // ⚠ SIBLING WITHHOLDS ARE NOT COVERED HERE AND ARE NOT CLAIMED TO BE.
+    // `optionOwnValueWithheld`, `gmBlockedApply`, `paSubstitutionBlocked` and
+    // `recordedAnswerNotLanded` clear `effectiveAppliedMutation` the same way
+    // and are outside this lane's ownership; each owns its own text path. The
+    // general form — H5 asking the wrong question for every withhold — is
+    // reported rather than fixed here.
+    const withheldSuccessHit = findSuccessClaimHit(response.assistant_text ?? '');
+    if (withheldSuccessHit !== null) {
+      emit(TelemetryEvents.V5EditGraphFalseSuccessRewritten, {
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        original_phrase: withheldSuccessHit,
+        dispatch_path: 'option_intervention_write_withheld',
+      });
+      response = { ...response, assistant_text: EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT };
+    }
+    response = {
+      ...response,
+      assistant_text: appendLapseNotice(
+        response.assistant_text,
+        formatWithheldWriteNotice(
+          resolveNodeLabels(parsedGraph, optionInterventionWriteVerdict.baselineNodeIds),
+        ),
+      ),
+    };
+  }
+
+  // ⭐⭐ THE OPTION-`observed_state` SUBSTITUTION — replace the false
+  // confirmation with the ask.
+  //
+  // The witnessed harm was NOT silence: it was a reply that said *"Confirmed:
+  // change 'Coverage Pilot' to 30%"* over a graph whose staffing intervention
+  // never moved. Withholding alone would swap one false belief for another, so
+  // the notice says plainly that nothing was saved and asks for the MISSING
+  // BINDING — which of the option's links the number belonged to. That is the
+  // documented trap-22f exit: where the target cannot be determined, make the
+  // ambiguity the product rather than commit a substitute.
+  //
+  // The chip is the product's OWN shipped `Help me configure <option>` — the
+  // one `detectConfigureOptionIntent` matches by prefix — so the question has
+  // an acceptance path and is not one the product cannot take an answer to
+  // (P8). Built from `configure-option-chip-text.ts`, the single source of that
+  // copy, never re-spelled here (trap 12). Deduped by chip id so a turn that
+  // already offers it does not offer it twice.
+  if (optionOwnValueVerdict.verdict === 'withhold') {
+    const existingActions = response.suggested_actions ?? [];
+    const configureChips: BoundaryAction[] = [];
+    for (const sub of optionOwnValueVerdict.substitutions) {
+      const chip = buildConfigureOptionChip(sub.optionLabel);
+      const alreadyOffered =
+        existingActions.some((a) => a.message === chip.message)
+        || configureChips.some((a) => a.message === chip.message);
+      if (alreadyOffered) continue;
+      // No `action_type`: the boundary enum is closed to the v0.7.0 V5 values
+      // (`BOUNDARY_ACTION_TYPES`) and none of them names "configure an
+      // option". The chip works as a prompt-replay button via `message`, which
+      // is exactly the route `detectConfigureOptionIntent` matches.
+      configureChips.push({
+        id: chip.id,
+        label: chip.label,
+        message: chip.message,
+      });
+    }
+    // ⭐⭐ THE NOTICE REPLACES THE NARRATION — IT DOES NOT SIT UNDER IT.
+    //
+    // Measured, not reasoned about: appending left the reply reading
+    // *"Confirmed: change 'Coverage Pilot' to 30% and change 'Current Coverage'
+    // to 40%."* immediately above *"Nothing from that message was saved."* —
+    // a reply that both confirms and denies the same write, with the
+    // confirmation FIRST. That is worse than the defect, not better.
+    //
+    // ⚠⚠ A CLAIM ABOUT THE SIBLING BRANCH STOOD HERE AND WAS FALSE. It read:
+    // ~~"The sibling factor-baseline withhold does not need this because
+    // 2.427's recovery copy has already replaced the narration wholesale on its
+    // branch."~~ **Refuted by execution.** That wholesale replacement is gated
+    // on `=== 'not_honoured'`, and the REVISION class reaches
+    // `not_honoured_no_copy` — which carries no copy and therefore gets no
+    // replacement. So the sibling branch appended a denial under a surviving
+    // success sentence: a reply that confirmed and denied the same write, the
+    // exact harm this comment describes. It is now fixed at that branch, with
+    // its own `findSuccessClaimHit` withdrawal.
+    //
+    // The durable lesson is the one this file keeps relearning: **a comment
+    // asserting that a NEIGHBOURING branch is safe is a claim about code
+    // nobody re-derives**, and it stayed true only until that branch grew a
+    // verdict it did not have when the sentence was written.
+    //
+    // This branch has no text guard in front of it, so the edit LLM's own
+    // success sentence survives unless it is replaced here. Nothing is lost:
+    // the turn was withheld WHOLESALE, so every success claim in that text is
+    // false by construction. Where the sibling withhold ALSO fired, its copy is
+    // already honest and this appends rather than clobbering it.
+    const ownValueNotice = formatOptionOwnValueWithheldNotice(
+      optionOwnValueVerdict.substitutions,
+    );
+    response = {
+      ...response,
+      assistant_text: optionInterventionWriteWithheld
+        ? appendLapseNotice(response.assistant_text, ownValueNotice)
+        : ownValueNotice,
+      suggested_actions: [...existingActions, ...configureChips],
+    };
+  }
+
+  // Part-accounting disclosure (defect A) — appended as the LAST content
+  // step before the egress guard, so ONE seam covers every emit branch
+  // (applied narration, GM held ask, no-op recovery copy). The builder is
+  // null unless at least one part WAS covered (a full no-op turn keeps its
+  // own clarify copy) and something is genuinely unaccounted.
+  let paDisclosureAppended = false;
+  if (partAccounting !== null && !paSubstitutionBlocked && !editResult.wasRejected) {
+    const paDisclosure = buildPartAccountingDisclosure(partAccounting);
+    if (paDisclosure !== null) {
+      response = {
+        ...response,
+        assistant_text: appendLapseNotice(response.assistant_text, paDisclosure),
+      };
+      paDisclosureAppended = true;
+    }
+  }
+  // Unmapped-part disclosure (#697 follow-up, 2026-07-25 — journey Finding #5).
+  // A quantified limit/cap clause ("cap the upfront spend at 50k") has NO
+  // operation in this lane's vocabulary, so it can never be "covered" and the
+  // conservation accounting above cannot see it: it decomposes to a
+  // non-accountable part, which is exactly why the observed compound left it
+  // in silence while the other half was held. Disclosed here, at the SAME
+  // seam and before the same egress guard, so applied / held / rejected /
+  // no-op branches are all covered. Deliberately NOT gated on
+  // `!editResult.wasRejected`: two of the three observed failures ended on the
+  // generic cajole, which is precisely where the silence was worst.
+  const unmappedNotice = buildUnmappedPartsNotice(
+    partDecomposition.unmappedParts,
+    partDecomposition.accountableParts.length,
+  );
+  if (unmappedNotice !== null) {
+    response = {
+      ...response,
+      assistant_text: appendLapseNotice(response.assistant_text, unmappedNotice),
+    };
+    emit(TelemetryEvents.V5EditGraphPartAccounting, {
+      request_id: requestId,
+      scenario_id: payload.scenario_id,
+      dispatch_path: 'edit_graph_unmapped_parts',
+      parts_detected: partDecomposition.unmappedParts.length,
+      parts_covered: 0,
+      parts_uncovered: partDecomposition.unmappedParts.length,
+      missing_target_count: 0,
+      substitution_blocked: false,
+      disclosure_appended: true,
+    });
+  }
+
+  if (partAccounting !== null) {
+    emit(TelemetryEvents.V5EditGraphPartAccounting, {
+      request_id: requestId,
+      scenario_id: payload.scenario_id,
+      dispatch_path: 'edit_graph',
+      parts_detected: partDecomposition.accountableParts.length,
+      parts_covered: partAccounting.fates.filter((f) => f.covered).length,
+      parts_uncovered: partAccounting.uncoveredParts.length,
+      missing_target_count: partAccounting.missingTargets.length,
+      substitution_blocked: paSubstitutionBlocked,
+      disclosure_appended: paDisclosureAppended,
+    });
+  }
+
+  // ⭐⭐⭐ PROCESS NARRATION — AND THIS IS THE PATH THAT ACTUALLY LEAKED.
+  //
+  // Turn 15 of the 3 Sep capture carries `prompt_identity`
+  // `edit_graph_default@v11 (staging)` and shipped:
+  //
+  //   "This is a question about existing analysis results, not a model edit
+  //    request. Per the conversation, updating Sales Headcount Investment …
+  //    No model changes are needed to answer this."
+  //
+  // The routing verdict read out loud, wrapped around a real answer. Which is
+  // why the remedy is per-sentence and not a whole-block drop: sentences 2 and
+  // 3 ARE the answer the user asked for, and this guard keeps them. Only when
+  // the narration sentences are a strict majority is the whole block treated
+  // as the monologue it is. See `compose/process-narration.ts` for the measure
+  // that separates the two, and for the false-positive sweep.
+  //
+  // Runs BEFORE the forbidden-phrase guard below, matching the ordering in
+  // turn-executor: the guard that can substitute the whole reply goes first so
+  // its replacement is judged by the guard that follows.
+  {
+    const guarded = applyProcessNarrationGuard(response.assistant_text ?? '');
+    if (guarded.rewritten) {
+      emit(TelemetryEvents.V5EgressProcessNarrationDetected, {
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        marker: guarded.hit,
+        remedy: guarded.remedy,
+        dispatch_path: 'edit_graph_finalise',
+        sentences_total: guarded.sentencesTotal,
+        sentences_removed: guarded.sentencesRemoved,
+        narration_length: guarded.narration.length,
+      });
+      response = { ...response, assistant_text: guarded.text };
+    }
+  }
+
+  // V5 stale-aware explain recovery — finaliser-level egress guard.
+  // Runs as the LAST step before the response is committed and
+  // returned, so it backstops EVERY edit_graph emit path: V4
+  // confirmation text, clarification copy, recovery copy, the
+  // generic "Proposed graph edit." fallback. An upstream hook would
+  // miss new emit paths added later; the finaliser hook cannot.
+  {
+    const guarded = applyEgressForbiddenPhraseGuard(response.assistant_text ?? '');
+    if (guarded.rewritten) {
+      emit(TelemetryEvents.V5EgressForbiddenPhraseDetected, {
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        phrase: guarded.hit,
+        dispatch_path: 'edit_graph_finalise',
+      });
+      response = { ...response, assistant_text: guarded.text };
+    }
+  }
+
+  // V5 finaliser contract: compute canonical readiness from the post-edit
+  // graph here so route-v2.ts can stamp it onto the wire envelope.
+  // The graph adapter preserves the V3 intervention carriers, then delegates
+  // whole-status semantics to buildAnalysisReadyPayload. Undefined when no successful mutation
+  // committed — gated by `successfulAppliedMutation` (Codex round-2
+  // P1) so an impossible appliedGraph+empty-operations shape cannot
+  // stamp analysis_ready from an unpersisted graph.
+  // Lane 8: gated on the EFFECTIVE predicate — a GM-live-blocked mutation
+  // must not stamp analysis_ready from a graph that was never persisted.
+  // `let` — overnight review F6: the goal-target receipt guard below can
+  // withhold this turn's graph write AFTER this initial computation; when
+  // it does, `analysisReady` is re-set to `undefined` alongside it so the
+  // wire never stamps readiness derived from a graph that never persisted.
+  //
+  // ⭐ L16 / GATE-REASON INTEGRITY — the non-apply branch no longer drops the
+  // block. It used to resolve to `undefined`, and the 3 Aug walk measured what
+  // that costs: of seven remedy turns after an add-option closed the run gate,
+  // the ONLY two that shipped no `analysis_ready` were the two that took this
+  // branch (r5-01 OPERATION_DID_NOT_LAND, r5-03 a clarifying question) — and
+  // they are exactly the two on which the tester watched the gate copy degrade
+  // from the SPECIFIC reason ("'Launch Customer Retention Programme' has no
+  // effect values yet") to the GENERIC one ("Olumi is not able to run this yet.
+  // Ask in the chat and it will explain what is missing."). The specific copy
+  // is composed from `analysis_ready.options`; drop the block and generic is
+  // the only copy left. A failed remedy must never make the product LESS
+  // specific about why it is blocked.
+  //
+  // Why the pre-edit graph is the honest source here, not a guess: no mutation
+  // happened ⇒ the graph is UNCHANGED ⇒ `parsedGraph` IS what is persisted, and
+  // it is the same base the edit itself ran against. The guard this branch
+  // inherits exists to stop readiness being stamped from an *unpersisted*
+  // `appliedGraph`; that hazard is absent by construction when nothing was
+  // applied. Gated on `graphStrictlyCanonical` so a structural-fallback graph
+  // (non-canonical ingress) never stamps readiness — same posture as the
+  // deterministic add_risk path.
+  //
+  // ⚠ SCOPE, deliberately narrow — keyed on `successfulAppliedMutation`, NOT on
+  // the `effective` predicate. The two differ exactly on the WITHHELD paths: a
+  // GM-live hold and a part-accounting substitution block are turns where a
+  // mutation DID succeed and was deliberately held back pending confirmation.
+  // Those keep their existing "no analysis_ready" contract (pinned by
+  // `edit-graph-dispatch-graph-management-modes.test.ts` and
+  // `edit-graph-dispatch-part-accounting.test.ts`) — they are a held-proposal
+  // lifecycle with its own receipt copy, not the failed-remedy dead end the
+  // walk measured. This branch covers only the genuine non-apply outcomes the
+  // walk actually witnessed: rejected, no-op, zero-ops.
+  //
+  // ⭐ 2.1266: a WITHHELD wrong-entity write leaves `parsedGraph` persisted, so
+  // it takes the same honest branch as a non-apply rather than the `undefined`
+  // the two held-proposal withholds use. The L16 argument above applies with
+  // full force: this is a failed remedy turn on a blocked model, and dropping
+  // the block is exactly what degrades the gate copy from the specific reason
+  // to the generic one. The hazard the `successfulAppliedMutation` guard
+  // screens (readiness stamped from an UNPERSISTED `appliedGraph`) is absent by
+  // construction — the graph this reads is the one that stays in
+  // `scenarios.graph`.
+  let analysisReady: AnalysisReadyPayload | undefined = effectiveAppliedMutation
+    ? buildCanonicalAnalysisReadyFromGraph(editResult.appliedGraph!)
+    : (!successfulAppliedMutation ||
+        optionInterventionWriteWithheld ||
+        // Same reviewer finding: a turn that refused the write must still hand
+        // back readiness for the UNCHANGED model, or the user is told nothing
+        // changed and given no readiness at all.
+        optionScopeUnresolved ||
+        recordedAnswerNotLanded) && graphStrictlyCanonical
+      ? buildCanonicalAnalysisReadyFromGraph(parsedGraph)
+      : undefined;
+
+  // ⭐⭐ THE REPAIR AFFORDANCE IS RE-ISSUED WHILE THE MODEL IS STILL BLOCKED.
+  //
+  // WITNESSED on deployed `a7ee21e`: the product's own prescribed sentence wrote
+  // correctly (blockers 8 → 7, graph hash moved, the option flipped to `ready`)
+  // and the reply came back with `suggested_actions: []` — no affordance, with
+  // SEVEN blockers outstanding. Driven by hand the loop converges (7 → 6, hash
+  // moves again, strictly decreasing), so the MECHANISM terminates and only the
+  // USER's route to it disappears. **The product rewarded a correct action by
+  // withdrawing the means to repeat it.**
+  //
+  // MECHANISM, derived at the bytes rather than assumed: nothing sets `[]` here.
+  // `buildBoundarySuggestedActions` (:1322) merges exactly two sources —
+  // `result.suggestedActions` (clarification / "Try a simpler change" / "Start
+  // fresh" / rerun chips) and `result.pendingClarification` — and BOTH are
+  // failure-shaped. A SUCCESS populates neither, so the empty array is the
+  // absence of a success-path composer, not a decision to suppress one.
+  //
+  // ⭐ SUCCESS ON ONE SLOT IS NOT SUCCESS ON THE MODEL. The turn genuinely
+  // succeeded, which is precisely why the failure-shaped sources stayed silent;
+  // the question the response failed to answer is "what now?", and canonical
+  // readiness — recomputed above from the POST-EDIT graph — already holds it.
+  //
+  // ⚠ NO NEW CHIP LOGIC, AND DELIBERATELY SO (Paul's convergence rule). This
+  // calls `buildReadinessRecoveryChip`, the estate's declared "sole
+  // conversational recovery chip for a non-ready state", on the POST-WRITE
+  // readiness. Three consequences follow from reusing the owner rather than
+  // composing a sibling:
+  //   · The chip names the NEXT head blocker, because `deriveAskedEffectPair`
+  //     reads `blockers[0]` of the recomputed payload — the same element the
+  //     next turn's on-screen question is composed from, so the affordance and
+  //     the prose cannot name different slots.
+  //   · TERMINATION IS STRUCTURAL, not a condition written here: the owner
+  //     returns `null` on its `'run'` branch, i.e. exactly when readiness stops
+  //     blocking. There is no "stop after N" to drift, and no second predicate
+  //     for "is the model ready" (trap 12).
+  //   · A future change to the repair chip reaches this seam automatically.
+  //
+  // ⚠ APPEND-ONLY AND ID-DEDUPED: an existing chip always wins, so this can only
+  // ever ADD an affordance to a turn that had none for that id — it can never
+  // replace or reorder what another composer decided to show.
+  //
+  // ⚠⚠ GATED ON `effectiveAppliedMutation` — A WRITE THAT ACTUALLY LANDED — AND
+  // THE NON-APPLY BRANCHES ARE DELIBERATELY LEFT ALONE. On a rejected / no-op /
+  // zero-ops turn `analysisReady` is recomputed from the UNCHANGED graph, so the
+  // head blocker is still THE PAIR THE USER JUST TRIED TO ANSWER, and re-issuing
+  // there would re-offer the demand they have already responded to — the exact
+  // loop `messageAnswersMissingValueAsk` exists to make structurally impossible,
+  // and a shape `guardLoopingChipsAtEgress` logs as `v5.invariant_violation`.
+  // Those branches already have their own composers and their own pinned specs.
+  // Widening to them is "while we're here" work and is prohibited.
+  //
+  // ⭐ THE CONVERSE IS WHAT MAKES THE SUCCESS PATH SAFE: because the readiness is
+  // recomputed from the POST-EDIT graph, the pair just repaired NO LONGER CARRIES
+  // A BLOCKER, so the head blocker — and therefore the chip — necessarily names a
+  // DIFFERENT slot. The affordance cannot repeat itself, by construction rather
+  // than by a comparison someone has to remember to write.
+  let readinessEffectAskOffered = false;
+  if (effectiveAppliedMutation && analysisReady !== undefined) {
+    const reissued = buildReadinessRecoveryChip(analysisReady);
+    if (reissued !== null && !response.suggested_actions.some((a) => a.id === reissued.id)) {
+      response = {
+        ...response,
+        suggested_actions: [...response.suggested_actions, reissued],
+      };
+    }
+    readinessEffectAskOffered = reissued !== null && finalizeChips(response.suggested_actions, {
+      logSuppressions: false,
+    }).chips.some(
+      a => a.id === reissued.id && a.message === reissued.message,
+    );
+  }
+
+  // V5 state-trust freshness derivation moved earlier in this function
+  // (just after `successfulAppliedMutation` is computed) so the no-op
+  // recovery layer can read it. The behaviour, telemetry, and
+  // dispatch_path are unchanged from the original position.
+
+  try {
+    // llm_calls_used: handleEditGraph makes at least one LLM call for the
+    // edit classification + repair loop. Using 1 as an honest minimum.
+    //
+    // graph: when a true successful applied mutation occurred
+    // (`successfulAppliedMutation`), EditGraphResult.appliedGraph carries
+    // the post-edit GraphV3T and is passed as p_graph so
+    // append_turn_atomic writes scenarios.graph in the same transaction
+    // as the turn row. When NOT a successful applied mutation (rejected,
+    // noop, zero-ops, no appliedGraph, OR the impossible-but-not-enforced
+    // shape appliedGraph+operations=[]), `graphForCommit` resolves to
+    // undefined, the RPC receives p_graph = null, and scenarios.graph is
+    // left unchanged. The gate matches every other downstream check that
+    // depends on "did a mutation truly apply" (false-success rewrite,
+    // analysisReady, freshness postEditGraph, returned graph).
+    // DL-7 PR B: emit a canonical EditGraphHandlerFact for every
+    // successful applied mutation. Two-tier construction:
+    //
+    //   1. Rich path (buildEditGraphHandlerFact) — uses
+    //      appliedChanges + operations + operation_meta to construct
+    //      a fact with display-safe `safe_summary`, projected
+    //      `affected_entities`, and accurate `impact`.
+    //   2. Generic fallback (buildGenericEditGraphHandlerFact) —
+    //      kicks in when the rich path returns null (e.g. missing
+    //      appliedChanges) OR throws. Emits a minimal-but-valid fact
+    //      with safe_summary='Updated the decision model.' and
+    //      affected_entities=[]. War-room correction: a successful
+    //      applied mutation MUST NOT commit with handler_facts: [].
+    //
+    // No-fact path (rejected, noop, zero-ops, no appliedGraph) is
+    // gated by `isSuccessfulAppliedMutation` — those legitimately
+    // commit with handler_facts: [] and handler_id: null.
+    //
+    // turn_class STAYS 'direct_answer' per War Room correction. The
+    // append_turn_atomic RPC accepts handler_facts non-empty alongside
+    // turn_class='direct_answer' (verified via SQL inspection).
+    //
+    // turn-row handler_id ALSO STAYS null. Setting it to 'edit_graph'
+    // would require expanding `V5ActionType` in @talchain/schemas
+    // (schemas-vendor change like PR A — out of PR B scope). The
+    // fact-level `fact_type === 'edit_graph'` is the canonical
+    // discriminator for downstream consumers (recent_changes
+    // projector, state-query guard, prior_facts readers).
+    const factBuilderInput = {
+      editResult,
+      preEditGraph: parsedGraph,
+      hasExistingAnalysis: context.analysis_response !== null,
+    };
+    let editGraphFact: ReturnType<typeof buildEditGraphHandlerFact> = null;
+    let richBuilderThrew = false;
+    let richBuilderError: Error | undefined;
+    try {
+      // Lane 8: a GM-live-blocked mutation persists NO graph, so it must
+      // also emit NO edit receipt fact (the builders derive "applied" from
+      // editResult alone and cannot see the block). Same rule for a
+      // part-accounting substitution block (defect B fail-closed).
+      //
+      // ⭐ 2.1266 — DERIVED FROM THE EFFECTIVE PREDICATE, not from a list of
+      // withhold reasons. This condition used to spell out
+      // `gmBlockedApply || paSubstitutionBlocked`, i.e. a hand-maintained
+      // mirror of the withhold set (trap 12) — and the third withhold reason
+      // proved it: the fact was still built, so a committed `parameter_update`
+      // receipt narrated an edit no persisted graph carried (the DL-7 hazard
+      // the goal-target withhold names). `effectiveAppliedMutation` IS this
+      // dispatcher's gate for every downstream success effect, so a withhold
+      // added tomorrow is covered the day it is written.
+      //
+      // Behaviour-preserving for the two reasons it replaces, verified at the
+      // producer rather than assumed: `isSuccessfulAppliedMutation`'s gates
+      // (not rejected · appliedGraph present · operations non-empty) are a
+      // strict SUBSET of `buildEditGraphHandlerFact`'s own emission gates, so
+      // `!successfulAppliedMutation` already returned null here.
+      editGraphFact = effectiveAppliedMutation
+        ? buildEditGraphHandlerFact(factBuilderInput)
+        : null;
+    } catch (err) {
+      richBuilderThrew = true;
+      richBuilderError = err instanceof Error ? err : new Error(String(err));
+      editGraphFact = null;
+    }
+
+    // Generic fallback: only kicks in for successful applied mutations
+    // where the rich path didn't produce a fact. Legitimate no-fact
+    // outcomes (rejected, noop, zero-ops) skip this entirely.
+    let genericBuilderThrew = false;
+    let genericBuilderError: Error | undefined;
+    if (!editGraphFact && effectiveAppliedMutation) {
+      try {
+        editGraphFact = buildGenericEditGraphHandlerFact(factBuilderInput);
+      } catch (fallbackErr) {
+        genericBuilderThrew = true;
+        genericBuilderError =
+          fallbackErr instanceof Error ? fallbackErr : new Error(String(fallbackErr));
+        editGraphFact = null;
+      }
+      if (editGraphFact) {
+        // Telemetry: clear, distinct event for the generic-fallback
+        // path so dashboards can attribute "rich rate vs fallback rate"
+        // and operators can see when the rich path is degrading.
+        log.warn(
+          {
+            request_id: requestId,
+            scenario_id: payload.scenario_id,
+            event: 'v5.edit_graph.fact_generic_fallback',
+            rich_builder_threw: richBuilderThrew,
+            rich_err: richBuilderError && {
+              name: richBuilderError.name,
+              message: richBuilderError.message,
+            },
+            applied_changes_present: editResult.appliedChanges !== undefined,
+            operations_count: editResult.operations?.length ?? 0,
+          },
+          richBuilderThrew
+            ? 'V5 edit_graph dispatch — rich fact builder threw; emitting generic fallback fact'
+            : 'V5 edit_graph dispatch — rich fact builder unavailable (no appliedChanges); emitting generic fallback fact',
+        );
+      }
+    }
+
+    // ── DEEPEST FALLBACK GATE (DL-7 invariant) ────────────────────────
+    // For a successful applied mutation, BOTH the rich AND the generic
+    // builder must produce a fact. If both fail, refuse to commit the
+    // graph mutation rather than persisting a receipt-less mutation.
+    //
+    // Rationale: a graph mutation persisted without `handler_facts`
+    // becomes downstream-invisible — `recent_changes`, the state-query
+    // guard, and `prior_facts` would all silently miss it. An applied
+    // mutation that produces no readable receipt violates DL-7 War
+    // Room Decision 1 ("successful mutations must be turn-linked and
+    // surfaced"). Better to surface the failure loudly via the
+    // dispatcher's outer catch (`v5.edit_graph.dispatch_failed` →
+    // FailureKind.HANDLER_INVOCATION_FAILED → safe recovery chip) than
+    // to commit a silently-broken state.
+    //
+    // Invariant: if `successfulAppliedMutation` is true, we either
+    // commit with a non-empty `handler_facts` array or we throw
+    // before reaching `commitDirectAnswer`. We never commit the
+    // pair {graph: appliedGraph, handler_facts: []} for an applied
+    // mutation.
+    if (!editGraphFact && effectiveAppliedMutation) {
+      log.error(
+        {
+          request_id: requestId,
+          scenario_id: payload.scenario_id,
+          event: 'v5.edit_graph.fact_emission_failed',
+          rich_builder_threw: richBuilderThrew,
+          rich_err: richBuilderError && {
+            name: richBuilderError.name,
+            message: richBuilderError.message,
+          },
+          generic_builder_threw: genericBuilderThrew,
+          generic_err: genericBuilderError && {
+            name: genericBuilderError.name,
+            message: genericBuilderError.message,
+          },
+          applied_changes_present: editResult.appliedChanges !== undefined,
+          operations_count: editResult.operations?.length ?? 0,
+        },
+        'V5 edit_graph dispatch — BOTH rich and generic fact builders failed for an applied mutation; refusing to commit receipt-less graph mutation',
+      );
+      throw new Error(
+        'edit_graph: applied mutation cannot be committed — both rich and generic fact builders failed (rich threw=' +
+          String(richBuilderThrew) +
+          ', generic threw=' +
+          String(genericBuilderThrew) +
+          ').',
+      );
+    }
+
+    // V5 H5 — graph persistence backstop. Uses the unified
+    // `successfulAppliedMutation` predicate (Codex round-2 P1) so
+    // the gate is identical across the false-success rewrite, the
+    // analysisReady computation, the freshness postEditGraph
+    // selection, this commit, and the function's returned `graph`.
+    // The rich/generic fact-builders use the same predicate, so a
+    // graph cannot persist without a receipt fact and a receipt
+    // fact cannot exist without persistable graph state.
+    // V5-PERSIST-FIX-01 (H1): persist the MERGED graph — the applied
+    // nodes/edges on the persisted-base shape — not the GraphV3-stripped
+    // `appliedGraph`. `persistedPostEditGraph` is that merge for an
+    // applied mutation (see its construction above); committing the
+    // same object every hash in this dispatch derived from keeps
+    // wire freshness, pending-action hashes and the next turn's
+    // persisted-graph hash in lockstep.
+    let graphForCommit = effectiveAppliedMutation
+      ? persistedPostEditGraph ?? undefined
+      : undefined;
+    // ROADMAP 1.19(b) — swap-vs-commit: set when the goal-target receipt
+    // guard below withholds a graph WRITTEN this turn because it doesn't
+    // back the claim. Also gates the function's RETURNED `graph` (wired
+    // straight to the client by route-v2's `sendFinalised200`, NOT merely
+    // used for internal label-resolution) so the wire never ships the
+    // unbacked mutation alongside the honest "I couldn't register" text.
+    let goalTargetSwapWithheldGraph = false;
+    // Lane 20 — goal-target receipt honesty guard (STEP 6.6-class swap
+    // discipline for success-target claims). The live 313e7b61 leak: the
+    // edit LLM stamped non-contract fields onto the goal node and shipped
+    // "Success target … set …" while the canonical registration contract
+    // (`goal_threshold_raw` — the field `has_goal_target` / the UI goal
+    // chip / PLoT's explicit-threshold path read) was never written. A
+    // registration claim may ship ONLY when the graph committed THIS turn
+    // registers the target; a non-mutating turn may describe an
+    // already-registered target (backed by the frame base — the strict
+    // persisted read when loaded, else the ingress echo). Swap happens
+    // BEFORE commit so the stored assistant_message equals the honest
+    // wire copy. Fallback copy is pre-swept against the forbidden-phrase
+    // and success-claim guards (goal-target-receipt-guard.test.ts).
+    const goalReceiptDecision = decideGoalTargetReceipt({
+      assistantText: response.assistant_text,
+      commitGraph: graphForCommit ?? null,
+      persistedGraph: gmFrameBase,
+    });
+    if (goalReceiptDecision.verdict === 'swap') {
+      const graphWasWrittenThisTurn = graphForCommit !== undefined;
+      log.warn(
+        {
+          event: 'v5.edit_graph.goal_target_receipt_swapped',
+          request_id: requestId,
+          scenario_id: payload.scenario_id,
+          reason: goalReceiptDecision.reason,
+          applied_mutation: effectiveAppliedMutation,
+          graph_committed: graphWasWrittenThisTurn,
+          graph_write_withheld: graphWasWrittenThisTurn,
+        },
+        'V5 edit_graph — success-target receipt claimed a registration the committed graph does not carry (no goal_threshold_raw on a goal node); swapped for the honest fallback before commit',
+      );
+      // Overnight review F10 — the withheld write leaves any PREVIOUSLY
+      // registered target intact, so the fallback must name it when one
+      // survives rather than falsely claiming "no target" (see the
+      // function doc on formatGoalTargetNotSavedText).
+      response = {
+        ...response,
+        assistant_text: formatGoalTargetNotSavedText(gmFrameBase),
+      };
+      // Swapping the TEXT for the honest fallback while still persisting
+      // (and returning to the client) the unbacked mutation would commit
+      // junk — the exact live shape that opened this guard (the LLM's
+      // non-contract fields on the goal node). Withhold the write AND the
+      // wire graph entirely so stored/returned state matches the honest
+      // "I couldn't register that" text, same as any other turn that
+      // writes no graph.
+      if (graphWasWrittenThisTurn) {
+        graphForCommit = undefined;
+        goalTargetSwapWithheldGraph = true;
+        // Overnight review F5+F6 — a withheld write must be coherent
+        // across EVERY downstream signal, not just the graph itself:
+        //
+        //  (F5) The "applied" edit receipt FACT was already built (above,
+        //       from `editResult`/`factBuilderInput`) before this guard
+        //       ran, so it still narrates a registration this graph never
+        //       carries. Committing it unchanged grounds the NEXT turn's
+        //       LLM on a phantom edit (DL-7 violation) — `recent_changes`
+        //       / prior_facts readers have no persisted graph to
+        //       cross-check it against. Null it: a withheld-write turn is
+        //       a non-mutating turn, same as any other turn that writes
+        //       no graph and emits no facts.
+        //
+        //  (F6) `analysisReady` was computed from `editResult.appliedGraph`
+        //       — the same unpersisted graph — before this guard ran.
+        //       Re-set to undefined so the wire never stamps readiness
+        //       derived from a graph that never persisted.
+        //
+        //  (F6) `freshness.current_graph_hash` was derived from
+        //       `persistedPostEditGraph` — again the unpersisted graph —
+        //       so it is a phantom hash the next turn's client can never
+        //       actually observe. Re-derive against `gmFrameBase`, the
+        //       PRE-edit persisted base that is what will actually still
+        //       be in `scenarios.graph` after this turn — mirroring the
+        //       GM-blocked branch above (line ~1958), which re-derives
+        //       freshness the same way when IT withholds a write. A
+        //       `derivation_failed` verdict is left as-is (honest
+        //       degradation beats a fabricated re-derivation).
+        editGraphFact = null;
+        analysisReady = undefined;
+        if (freshness.reason !== 'derivation_failed') {
+          let withheldCurrentHash: string | null = null;
+          try {
+            withheldCurrentHash = computeAnalysisAffectingGraphHash(
+              gmFrameBase as GraphStateIngress | null | undefined,
+            );
+          } catch {
+            withheldCurrentHash = null;
+          }
+          freshness = deriveAnalysisFreshness(
+            priorFactsForRecovery,
+            withheldCurrentHash,
+            config.cee.optionIdentityFreshnessGuard
+              ? extractGraphOptionIds(gmFrameBase)
+              : undefined,
+            // Defect 4 — see `priorFactsReadOkForRecovery`. The guard above
+            // screens `derivation_failed`, which a degraded read does NOT produce.
+            priorFactsReadOkForRecovery === undefined
+              ? undefined
+              : { priorFactsReadOk: priorFactsReadOkForRecovery },
+          );
+        }
+      }
+    }
+    // V5 P0 — when the early-emit intercept or the no-op recovery
+    // produced a refreshed `proposed_concept` pending action, persist
+    // it so the next turn can resume. Combine it with the chip-derived
+    // list and pass the combined list explicitly, capped at
+    // PENDING_ACTIONS_PER_TURN_CAP=3 (also enforced by the DB CHECK).
+    //
+    // Proposal FIRST so the cap never drops it (PR #217 round-4 review):
+    // mirrors `buildPendingActionsWithProposalCapture` in
+    // proposal-continuation.ts. In practice the proposal-path response
+    // carries only text-prompt chips (no `action_type`), so chipDerived
+    // is empty here and ordering is moot — but proposal-first is the
+    // correct policy and removes the latent drop if a chip-derivable
+    // action is ever co-emitted on this path.
+    let pendingActionsForCommit:
+      | readonly import('../session/pending-action.js').PendingAction[]
+      | undefined = undefined;
+    if (proposalPendingForCommit !== null) {
+      const chipDerived = derivePendingActionsFromFinalizedChips(
+        (response.suggested_actions ?? []) as readonly BoundarySuggestedAction[],
+        {
+          scenario_id: payload.scenario_id,
+          emitted_at_iso: new Date().toISOString(),
+          ...(currentGraphHashForRecovery
+            ? { graph_hash: currentGraphHashForRecovery }
+            : {}),
+        },
+      );
+      pendingActionsForCommit = [proposalPendingForCommit, ...chipDerived].slice(0, 3);
+    }
+    // F-HELD fix 4a — the add-risk clarify emits its resumable pending.
+    // Mutually exclusive with the proposal path above (the clarify branch
+    // fires pre-LLM, before the proposal intercept can run) and with the GM
+    // held branch below (GM only engages on applied mutations; the clarify
+    // applies nothing) — but ordered proposal-first / GM-wins for the same
+    // deterministic-precedence policy as the other two.
+    if (addRiskPendingForCommit !== null) {
+      pendingActionsForCommit = [
+        addRiskPendingForCommit,
+        ...(pendingActionsForCommit ?? []),
+      ].slice(0, 3);
+    }
+    // Lane 8: a GM-live HELD verdict persists its REAL pending confirmation
+    // (apply_proposed_change; resume is structurally decline-with-clarify —
+    // see edit-graph-referee-gate.ts). Mutually exclusive with the proposal
+    // path above (that path requires a non-applied editResult; GM only
+    // engages on applied ones), but GM wins deterministically if both ever
+    // co-occur.
+    // ROADMAP 2.623(a) — reads "a live held proposal" through the producer's
+    // own predicate rather than rebuilding it here. Equivalent to the previous
+    // `pendingActions !== null && length > 0`, derived not assumed: the ONLY
+    // branch in `evaluateEditGraphMutations` that mints a non-empty
+    // `pendingActions` is inside `if (governing === 'held')` — every other
+    // return, including the fail-closed catch, sets `null`. So the added
+    // verdict check cannot drop a pending the producer is able to mint.
+    if (gmBlockedApply && hasLiveHeldProposal(gmDecision)) {
+      pendingActionsForCommit = [...gmDecision.pendingActions].slice(0, 3);
+    }
+    // Persist only the recovery question this response actually offers, in the
+    // same graph commit. A refusal/hold must not mint a new asked cell.
+    if (graphForCommit !== undefined && readinessEffectAskOffered && !gmBlockedApply) {
+      const projected = projectGraphForPersistence(graphForCommit, {
+        scenarioId: payload.scenario_id, turnId: payload.turn_id,
+        turnClass: 'direct_answer',
+      });
+      if (projected && typeof projected === 'object' && 'nodes' in projected) {
+        const askedGraphHash = computeAnalysisAffectingGraphHash(projected as GraphStateIngress);
+        const asked = askedGraphHash === null ? null : buildReadinessEffectPending({
+          analysisReady, nodes: (projected as GraphStateIngress).nodes,
+          scenarioId: payload.scenario_id, emittedAtIso: new Date().toISOString(),
+          graphHash: askedGraphHash,
+          // Read the superseded ask BEFORE it is replaced, so a re-ask knows it
+          // is a re-ask. Without this the counter resets every turn and the
+          // second ask is indistinguishable from the first.
+          priorPendings: recordedAnswer?.priorPendingActions ?? priorPendingForCarry,
+        });
+        if (asked !== null) {
+          const chipPending = pendingActionsForCommit ?? derivePendingActionsFromFinalizedChips(
+            (response.suggested_actions ?? []) as readonly BoundarySuggestedAction[],
+            { scenario_id: payload.scenario_id, emitted_at_iso: new Date().toISOString(),
+              graph_hash: currentGraphHashForRecovery ?? undefined },
+          );
+          pendingActionsForCommit = [...chipPending, asked];
+        }
+      }
+    }
+    // ── HOLD-WIPE fix (task_2e1b8c87): thread holds through this commit ──
+    // Closes the F-HELD round-2 KNOWN RESIDUAL: edit-classified commits
+    // previously threaded NO priorPendingActions, silently wiping live
+    // consent holds. On a graph-writing commit each live hold is validated
+    // against the post-edit graph — threaded re-pinned when still coherent,
+    // honestly lapsed (deterministic notice + redacted telemetry) when the
+    // mutation genuinely invalidated it. Non-mutating turns (rejections,
+    // no-ops, GM-blocked verdicts, withheld writes) thread every prior
+    // through UNCHANGED; the carry-forward inside commitDirectAnswer owns
+    // TTL/wall/supersession bookkeeping either way.
+    const graphWrittenThisTurn = graphForCommit !== undefined;
+    const holdThread = threadHoldsThroughMutatingCommit({
+      priorPendingActions: recordedAnswer?.priorPendingActions ?? priorPendingForCarry,
+      graphAfterCommit: graphWrittenThisTurn ? graphForCommit : null,
+      graphHashAfterCommit: graphWrittenThisTurn ? currentGraphHashForRecovery : null,
+      // Fulfilment detection (round-3 concern 1): the APPLIED ops let the
+      // thread-through recognise a hold whose change THIS edit itself
+      // delivered (e.g. the user's edit adds the very concept a
+      // proposed_concept offer held) and retire it WITHOUT the false
+      // "has lapsed" sentence. Only meaningful on a graph-writing commit —
+      // `graphForCommit` is set iff the mutation applied (and was not
+      // withheld), when `editResult.operations` is exactly the applied batch.
+      appliedOperations: graphWrittenThisTurn ? editResult.operations ?? null : null,
+      nowMs: Date.now(),
+      scenarioId: payload.scenario_id,
+      turnId: payload.turn_id,
+      requestId,
+    });
+    if (holdThread.notice !== null) {
+      // Injected BEFORE the commit so the durable assistant_message and the
+      // wire copy carry the same honest sentence (F-HELD 2b seam doctrine).
+      response = {
+        ...response,
+        assistant_text: appendLapseNotice(response.assistant_text, holdThread.notice),
+      };
+    }
+    emitHoldLapseTelemetry(holdThread.lapsed, {
+      requestId,
+      scenarioId: payload.scenario_id,
+      turnId: payload.turn_id,
+      site: 'edit_graph_dispatch',
+    });
+    const commitResult = await commitDirectAnswer(response, {
+      scenario_id: payload.scenario_id,
+      turn_id: payload.turn_id,
+      turn_class: 'direct_answer',
+      // handler_id stays null even on successful fact emission — see
+      // the long comment above for the V5ActionType-expansion rationale.
+      handler_id: null,
+      request_hash: computeRequestHash(payload),
+      // Deterministic paths make zero LLM calls; the LLM path makes at
+      // least one (handleEditGraph drives the classification + repair
+      // loop). Both the add-risk clarification (`deterministicAddRisk
+      // Attempted`) and the proposal-continuation pre-LLM intercept
+      // (`proposalEarlyEmitted`) short-circuit BEFORE handleEditGraph,
+      // so neither spends an LLM call. PR #216 review (SHOULD-FIX):
+      // the early-emit path was previously counted as 1, overcounting
+      // LLM cost for the new deterministic path. Distinguish so
+      // dashboards attribute cost honestly.
+      llm_calls_used: deterministicAddRiskAttempted || proposalEarlyEmitted ? 0 : 1,
+      duration_ms: Date.now() - startedAt,
+      handler_facts: editGraphFact ? [editGraphFact] : [],
+      graph: graphForCommit,
+      // Terminal-invariant DELTA baseline: the pre-edit graph this turn built
+      // on — the strict server read when it loaded, else the ingress echo (the
+      // same frame-authority base the referee gate uses). Threading it lets the
+      // commit refuse a violation THIS edit introduced while absorbing one the
+      // scenario already carried, so a legacy/migration-era graph stays
+      // editable (`edit-graph.ts:2750-2755`). Omitted on a non-writing turn,
+      // where there is nothing to check.
+      ...(graphForCommit !== undefined
+        ? { baseGraphForInvariants: gmFrameBase }
+        : {}),
+      // A3 graph CAS: expected-base hashes from the strict server read above
+      // (undefined when no applied mutation / mode off — the CAS hook only
+      // runs for graph-bearing writes, and `graph` is only set on applied
+      // mutations, so coverage is complete on this path). Lane 8: omitted on
+      // a GM-live-blocked turn — no graph is written, so no CAS observation.
+      ...(expectedGraphCasHashes !== undefined && !gmBlockedApply
+        ? expectedGraphCasHashes
+        : {}),
+      ...(pendingActionsForCommit !== undefined
+        ? { pending_actions: pendingActionsForCommit }
+        : {}),
+      // HOLD-WIPE fix: thread the (validated) prior pendings so the commit
+      // carry-forward runs on this path — same contract as the TurnExecutor
+      // commitTurn wrapper. graph_hash is threaded ONLY on graph-writing
+      // commits (the post-edit persisted hash): it pins this turn's
+      // chip-derived pendings and drives the carry-forward's hash rule; a
+      // non-mutating turn threads none so an ingress-echo divergence can
+      // never falsely invalidate a carried hold.
+      priorPendingActions: holdThread.threaded,
+      ...(recordedAnswer !== null && graphForCommit !== undefined
+        && readCommittedOptionEffect(graphForCommit, recordedAnswer.pair.optionId,
+          recordedAnswer.pair.factorId) === Number(recordedAnswer.valueText)
+        ? { consumedPendingRefs: [recordedAnswer.pending.chip_id] } : {}),
+      ...(graphWrittenThisTurn && currentGraphHashForRecovery !== null
+        ? { graph_hash: currentGraphHashForRecovery }
+        : {}),
+      // V5 Stage 2B-1b: the route-v2 edit path never runs buildTurnContext,
+      // so no coaching_state is derived for this turn — persist NULL explicitly.
+      coaching_state: null,
+      // V5 Conversation Context Reliability: persist the user's turn text; the
+      // assistant answer auto-derives from `response.assistant_text`. This path
+      // covers successful mutations, no-ops, add-risk clarifications AND
+      // preflight rejections — so a rejected "add a risk" and its rejection
+      // reply are both available when the next turn asks "why did that fail?".
+      userMessage: payload.message,
+      // Resolve entity-id labels in the stored assistant answer against the
+      // SAME graph the route egress uses for this exit — `graphForCommit` (the
+      // post-edit appliedGraph on a successful mutation, else undefined → the
+      // egress is graph-free too), keeping stored == wire.
+      contentGraph: graphForCommit,
+    });
+    // HOLD-WIPE fix — stored copy == wire copy: with priors now threaded,
+    // the commit seam itself may rewrite the response (turn-TTL lapse
+    // notice, F-HELD 2b; steer-don't-bind chip suppression, F-HELD 3a).
+    // Adopt the committed response when the seam actually rewrote it. The
+    // untouched fast path returns the SAME object (identity-equal), so this
+    // is a no-op there. A canonical model-version receipt is load-bearing even
+    // when assistant_text is empty; response_version keeps a bare `{}` legacy
+    // test double from being mistaken for a real response.
+    const committedResponse = commitResult?.response;
+    const hasModelVersionReceipt =
+      committedResponse !== undefined &&
+      Object.prototype.hasOwnProperty.call(committedResponse, 'model_version_receipt');
+    if (
+      committedResponse !== undefined &&
+      committedResponse !== response &&
+      (hasModelVersionReceipt || committedResponse.response_version === 2)
+    ) {
+      response = committedResponse;
+    }
+    log.info(
+      {
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        latency_ms: editResult.latencyMs,
+        was_rejected: editResult.wasRejected,
+      },
+      'V5 edit_graph dispatch committed',
+    );
+    // V5 H5 (Codex round-2 P1, amended by V5-PERSIST-FIX-01): the
+    // applied graph surfaced downstream is the typed applied graph whose
+    // nodes/edges are IDENTICAL to what was persisted; the persisted
+    // object is the merged superset that additionally preserves
+    // server-authoritative top-level fields (goal_node_id,
+    // options[], …). Route-v2 consumes `graph` only for egress
+    // label-resolution and the diagnostic-trace hash — both read
+    // nodes/edges — so the typed value is kept rather than casting
+    // the raw merged object. Null when no successful applied
+    // mutation, so route-v2 doesn't stamp a non-persisted graph
+    // onto the wire envelope. Lane 8: EFFECTIVE predicate — a GM-live
+    // blocked mutation never surfaces its unpersisted graph. ROADMAP
+    // 1.19(b): also null when the goal-target receipt guard withheld
+    // this turn's graph write (`goalTargetSwapWithheldGraph`) — the
+    // SAME predicate that gates the actual commit above, so a swapped
+    // turn never surfaces its unpersisted mutation here either.
+    const appliedGraphForWire =
+      effectiveAppliedMutation && !goalTargetSwapWithheldGraph
+        ? editResult.appliedGraph ?? null
+        : null;
+    return {
+      // F2-CEE (1.16 run-3 diagnosis): a successful apply previously
+      // returned `blocks: []` with NO graph payload, assuming the UI reads
+      // `scenarios.graph` — it never does (its only inline-graph ingestion
+      // path is the top-level `draft_graph` field). Attach the applied
+      // post-mutation graph via that EXISTING wire field, same shape as
+      // the draft dispatch emits (see applied-graph-emit.ts), gated by the
+      // SAME predicate as `graph` below so the wire never carries an
+      // unpersisted mutation. Post-commit only — this branch runs after
+      // `commitDirectAnswer` resolved; the commit-failure catch below
+      // returns the response without a graph payload.
+      response: appliedGraphForWire
+        ? { ...response, draft_graph: buildAppliedGraphWireField(appliedGraphForWire) }
+        : response,
+      commitPerformed: true,
+      analysisReady,
+      graph: appliedGraphForWire,
+      freshness,
+      ...(editLlmCall ? { editLlmCall } : {}),
+    };
+  } catch (err) {
+    log.error(
+      {
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+      },
+      'V5 edit_graph dispatch — commit failed',
+    );
+    return {
+      response,
+      commitPerformed: false,
+      analysisReady,
+      // V5 H5 (Codex round-3 cleanup): commit failure means
+      // `commitDirectAnswer` threw — the post-edit graph was NOT
+      // persisted to storage regardless of `successfulAppliedMutation`.
+      // Returning `editResult.appliedGraph` here would imply a
+      // persistence outcome that didn't happen. Route-v2 returns a 500
+      // before consuming this field today, so this is not user-facing,
+      // but the object should be self-consistent with
+      // `commitPerformed=false`.
+      graph: null,
+      freshness,
+      ...(editLlmCall ? { editLlmCall } : {}),
+    };
+  } finally {
+    // R7: emit the single per-turn event exactly once. This finally covers both
+    // the success return and the commit-failure return; the handler-threw
+    // rethrow is covered by the catch above. `emitEditTurnEventOnce` is
+    // idempotent and self-isolating, so it never alters the returned value.
+    emitEditTurnEventOnce();
+  }
+  } finally {
+    // R7 (NB-1): outer guard closing the assembly-region gap. Reached when the
+    // response-assembly code above threw before the commit-try ran. Idempotent
+    // via `eventEmitted`, so the normal success path (inner finally already
+    // emitted) is a no-op here. No catch — the original exception still
+    // propagates out of dispatchEditGraph unchanged.
+    emitEditTurnEventOnce();
+  }
+}

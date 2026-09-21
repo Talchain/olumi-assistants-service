@@ -15,8 +15,15 @@ function makeGraph(overrides: Partial<GraphV1> = {}): GraphV1 {
 
 describe("CEE options helper - generateOptions", () => {
   it("suggests expand_scope and change_channel when there are no options", () => {
+    // ⚠ THE DECISION NODE IS LOAD-BEARING — see cee.bias.test.ts. Without it
+    // this is the deliberate exploratory map, and an "add options" nudge is
+    // exactly the pressure that user declined. The real defect this test owns is
+    // a decision whose options are missing.
     const graph = makeGraph({
-      nodes: [{ id: "g1", kind: "goal" } as any],
+      nodes: [
+        { id: "g1", kind: "goal" } as any,
+        { id: "d1", kind: "decision" } as any,
+      ],
     });
 
     const options = generateOptions(graph, null);
@@ -24,6 +31,14 @@ describe("CEE options helper - generateOptions", () => {
 
     expect(ids).toContain("expand_scope_add_options");
     expect(ids).toContain("change_channel_explore_paths");
+  });
+
+  it("does NOT nudge a deliberate decision-free map toward adding options", () => {
+    const graph = makeGraph({ nodes: [{ id: "g1", kind: "goal" } as any] });
+    const ids = generateOptions(graph, null).map((o) => o.id);
+
+    expect(ids).not.toContain("expand_scope_add_options");
+    expect(ids).not.toContain("change_channel_explore_paths");
   });
 
   it("suggests expand_scope_add_comparators when there is a single option", () => {

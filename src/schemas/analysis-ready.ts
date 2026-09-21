@@ -1,6 +1,15 @@
 /**
  * Analysis-Ready Output Schema
  *
+ * Contract owner: CEE
+ * Canonical fixture: tools/fixtures/canonical/analysis-ready.json
+ * UI boundary validator: DecisionGuideAI/src/canvas/conversation/validateAnalysisReadyContract.ts
+ *
+ * ANY shape change requires simultaneous updates to all three:
+ * 1. This schema (version bump)
+ * 2. Canonical fixture (regenerate via npm run generate:analysis-ready-fixture)
+ * 3. UI adapter tests (update expectations in analysisReadyContract.spec.ts)
+ *
  * P0 Schema for direct pass-through to PLoT analysis engine.
  * Key requirement: interventions must be Record<string, number> (plain numbers).
  *
@@ -12,6 +21,13 @@
  */
 
 import { z } from "zod";
+import { GoalThresholdCapProvenanceSchema } from "../utils/goal-threshold-cap.js";
+
+/**
+ * Contract version for the analysis-ready payload shape.
+ * Bump on any breaking change. See governance rule in header comment.
+ */
+export const ANALYSIS_READY_CONTRACT_VERSION = '1.0.0';
 
 // ============================================================================
 // Option for Analysis
@@ -27,7 +43,7 @@ export const ExtractionMetadata = z.object({
   confidence: z.enum(["high", "medium", "low"]),
   /** Explanation for transparency */
   reasoning: z.string().optional(),
-});
+}).passthrough(); // CIL Phase 0.2: preserve additive fields
 export type ExtractionMetadataT = z.infer<typeof ExtractionMetadata>;
 
 /**
@@ -49,6 +65,12 @@ export type RawInterventionValueT = z.infer<typeof RawInterventionValue>;
 export const OptionForAnalysisStatus = z.enum(["ready", "needs_user_mapping", "needs_encoding"]);
 export type OptionForAnalysisStatusT = z.infer<typeof OptionForAnalysisStatus>;
 
+// Compile-time guard: needs_user_input is payload-level only, never option-level (CIL Step 12)
+type _AssertNeedsUserInputNotOptionStatus =
+  "needs_user_input" extends OptionForAnalysisStatusT ? never : true;
+const _assertOptionStatusExcludesNeedsUserInput: _AssertNeedsUserInputNotOptionStatus = true;
+void _assertOptionStatusExcludesNeedsUserInput;
+
 /**
  * Option ready for analysis - interventions are plain numbers.
  *
@@ -68,15 +90,135 @@ export const OptionForAnalysis = z.object({
   status: OptionForAnalysisStatus,
   /** Reason for status determination (for debugging/transparency) */
   status_reason: z.string().optional(),
-  /** Interventions: factor_id -> numeric value (ALWAYS numeric for PLoT) */
-  interventions: z.record(z.string(), z.number()),
+  /**
+   * Interventions: factor_id -> numeric value (flat shape) OR rich object
+   * { value, source?, display_value? } when a human-readable display string
+   * is available. PLoT always receives the flat numeric form — callers that
+   * forward to PLoT MUST flatten via flattenInterventions() first. The rich
+   * form lets the UI render unit-aware display strings without a separate
+   * intervention_details lookup.
+   */
+  interventions: z.record(
+    z.string(),
+    z.union([
+      z.number(),
+      z
+        .object({
+          value: z.number(),
+          source: z.string().optional(),
+          display_value: z.string().optional(),
+        })
+        .passthrough(),
+    ]),
+  ),
   // --- Raw+Encoded pattern: parallel raw values (additive field) ---
   /** Raw intervention values before encoding (for categorical/boolean) */
   raw_interventions: z.record(z.string(), RawInterventionValue).optional(),
   /** Extraction metadata for transparency */
   extraction_metadata: ExtractionMetadata.optional(),
-});
+  /** Marks the status-quo / baseline option. Propagated from OptionV3.is_baseline
+   * or detected by label keyword in buildAnalysisReadyPayload (CEE-2). */
+  is_baseline: z.boolean().optional(),
+  /** Richer display-oriented intervention entries alongside the numeric-only
+   * `interventions` map. Added by buildAnalysisReadyPayload (CEE-9/CEE-6). */
+  intervention_details: z.record(z.string(), z.object({
+    display_value: z.string(),
+    normalised_value: z.number(),
+    raw_value: z.number().optional(),
+    unit: z.string().optional(),
+  })).optional(),
+}).passthrough(); // CIL Phase 0: preserve additive fields
 export type OptionForAnalysisT = z.infer<typeof OptionForAnalysis>;
+
+// ============================================================================
+// Analysis Blockers (Phase 2B)
+// ============================================================================
+
+/**
+ * Blocker type for analysis-ready payload.
+ * Identifies why an option-factor pair can't produce an intervention magnitude.
+ */
+export const AnalysisBlockerType = z.enum(["missing_value", "ambiguous_value", "missing_connection", "constraint_dropped"]);
+/**
+ * The published blocker vocabulary as a TYPE.
+ *
+ * Exported so consumers can key an EXHAUSTIVE map off it instead of restating
+ * the members. `analysis-ready-helper.ts` — the estate's single named readiness
+ * authority — held a four-case `switch` over these values whose `default`
+ * returned `null`, i.e. a hand-maintained copy of this enum whose drift silently
+ * DROPPED blockers on three live surfaces. A `satisfies Record<AnalysisBlockerTypeT, …>`
+ * turns that drift into a compile error, so adding a member here now REDs the
+ * mapper until it is handled.
+ */
+export type AnalysisBlockerTypeT = z.infer<typeof AnalysisBlockerType>;
+
+/**
+ * Suggested action to resolve a blocker.
+ */
+export const AnalysisBlockerAction = z.enum(["add_value", "confirm_value", "add_edge", "review_constraint"]);
+
+/**
+ * Blocker entry for an option-factor pair that can't produce an intervention magnitude.
+ * Emitted when a controllable factor connected to an option has neither
+ * observed_state.value nor data.value.
+ */
+export const AnalysisBlocker = z.object({
+  /** Which option needs this input (undefined = applies to all) */
+  option_id: z.string().optional(),
+  /** Human-readable option label */
+  option_label: z.string().optional(),
+  /** Factor node ID */
+  factor_id: z.string(),
+  /** Human-readable factor label */
+  factor_label: z.string(),
+  /** Type of blocker */
+  blocker_type: AnalysisBlockerType,
+  /** Actionable message for the user */
+  message: z.string(),
+  /** Suggested action to resolve */
+  suggested_action: AnalysisBlockerAction,
+});
+export type AnalysisBlockerT = z.infer<typeof AnalysisBlocker>;
+
+// ============================================================================
+// Model Adjustments (Phase 2C)
+// ============================================================================
+
+/**
+ * User-facing code describing what the system adjusted.
+ * Maps from internal STRP/repair codes to human-friendly labels.
+ */
+export const ModelAdjustmentCode = z.enum([
+  "category_reclassified",
+  "connectivity_repaired",
+  "risk_coefficient_corrected",
+  "data_filled",
+  "enum_corrected",
+]);
+
+/**
+ * A model adjustment surfaced to the user.
+ * Represents a repair or reconciliation mutation made by the pipeline.
+ */
+export const ModelAdjustment = z.object({
+  /** User-facing adjustment code */
+  code: ModelAdjustmentCode,
+  /** Affected node ID */
+  node_id: z.string().optional(),
+  /** Affected edge ID */
+  edge_id: z.string().optional(),
+  /** Field that was modified */
+  field: z.string(),
+  /** Value before adjustment */
+  before: z.unknown().optional(),
+  /** Value after adjustment */
+  after: z.unknown().optional(),
+  /** Human-readable explanation */
+  reason: z.string(),
+  /** Origin of the adjustment (e.g., "strp", "deterministic_sweep") */
+  source: z.string().optional(),
+});
+export type ModelAdjustmentT = z.infer<typeof ModelAdjustment>;
 
 // ============================================================================
 // Analysis Ready Payload
@@ -87,15 +229,17 @@ export type OptionForAnalysisT = z.infer<typeof OptionForAnalysis>;
  * - ready: All interventions encoded, ready for PLoT analysis
  * - needs_user_mapping: Missing factor matches or values
  * - needs_encoding: Has raw values (categorical/boolean) awaiting numeric encoding
- *
- * Accepts 'needs_user_input' as backwards-compatible input alias,
- * but ALWAYS outputs 'needs_user_mapping'.
+ * - needs_user_input: Blockers exist — user must provide missing factor values
+ * - blocked: Validation failure prevents analysis (invalid graph structure)
  */
-export const AnalysisReadyStatus = z
-  .enum(["ready", "needs_user_mapping", "needs_encoding", "needs_user_input"])
-  .transform((val) => (val === "needs_user_input" ? "needs_user_mapping" : val)) as z.ZodType<
-  "ready" | "needs_user_mapping" | "needs_encoding"
->;
+export const AnalysisReadyStatus = z.enum([
+  "ready",
+  "needs_user_mapping",
+  "needs_encoding",
+  "needs_user_input",
+  "blocked",
+]);
+export type AnalysisReadyStatusT = z.infer<typeof AnalysisReadyStatus>;
 
 /**
  * Complete analysis-ready payload.
@@ -104,18 +248,357 @@ export const AnalysisReadyStatus = z
  * Supports the Raw+Encoded pattern at the payload level:
  * - When status is "ready", all options have encoded numeric interventions
  * - When status is "needs_encoding", some options have raw values awaiting encoding
+ * - When status is "needs_user_input", blockers identify missing factor values
  */
+/**
+ * V5 state-trust freshness verdict (additive on analysis_ready). Tells
+ * the UI whether the analysis it can see is up to date with the current
+ * graph. Populated on every primary CEE dispatch path that ships
+ * analysis_ready (turn_executor, chip_click, draft_graph, edit_graph).
+ * The field is `.optional()` for forward compatibility — additive
+ * contract that future dispatch paths can adopt without breaking
+ * existing UI consumers. Not "frequently absent in practice".
+ *
+ *   fresh   → analysis matches the current graph; render figures normally
+ *   stale   → graph has changed since the analysis ran; UI may render a
+ *             pill / rerun affordance
+ *   unknown → freshness could not be derived (legacy fact missing the
+ *             0.10.0 graph_hash_at_run, or no graph on this turn)
+ *   none    → no successful run_analysis fact exists yet
+ */
+export const AnalysisFreshness = z.enum(['fresh', 'stale', 'unknown', 'none']);
+export type AnalysisFreshnessT = z.infer<typeof AnalysisFreshness>;
+
 export const AnalysisReadyPayload = z.object({
   /** Options with numeric interventions */
   options: z.array(OptionForAnalysis),
   /** Goal node ID - must match a goal node in graph */
   goal_node_id: z.string(),
-  /** Status: ready, needs_user_mapping, or needs_encoding */
+  /** Status: ready, needs_user_mapping, needs_encoding, or needs_user_input */
   status: AnalysisReadyStatus,
+  /**
+   * THE run path's own admission answer for this turn — will the analysis
+   * proceed if asked, right now?
+   *
+   * ⚠ THIS IS A DIFFERENT QUESTION FROM `status`, AND THAT IS THE POINT.
+   * `status` is the STRICTER *"is this model ready as it stands?"*. `may_run` is
+   * `resolveRunAdmission(...).willProceed` — the boolean `build-turn-context.ts`
+   * throws `AnalysisNotReadyError` on — which is ALSO true when the run will
+   * proceed by excluding options the user left open. A turn can be
+   * `needs_user_input` and admissible at the same time; that is the readiness
+   * loop's payoff turn, and a consumer reading only `status` hides the Run
+   * affordance the turn has just offered.
+   *
+   * Consumers gate on `may_run !== false` and fall back to their existing
+   * behaviour when it is ABSENT — absence means an older producer, never "no".
+   * (The `/assist/v1/graph-readiness` route publishes the same predicate under
+   * the same name, three-valued there because a caller can fail to reach it.)
+   *
+   * Optional so every pre-`may_run` dispatch path still validates.
+   */
+  may_run: z.boolean().optional(),
+  /**
+   * ⭐⭐ THE ONE ANALYSIS-ADMISSION RESULT — see
+   * `orchestrator-v5/admission/analysis-admission.ts` for the full contract and
+   * for the question each existing authority answers.
+   *
+   * ⚠ IT DOES NOT REPLACE `may_run`, AND MERGING THEM WOULD BE THE DEFECT.
+   * `structurally_analysable` IS `may_run` (the same `willProceed`, carried in
+   * the same object so the two cannot drift). What is NEW is
+   * `permitted_analysis_mode`: the UPPER BOUND on what the product may CLAIM,
+   * which no field expressed before. A model can be perfectly executable and
+   * still not license a leader claim.
+   *
+   * Consumers:
+   *   · gate the Run affordance on `structurally_analysable` (or `may_run` —
+   *     same value) and NEVER on `status`;
+   *   · gate any leading-option / "stable" / "robust" wording on
+   *     `permitted_analysis_mode === 'comparative_leader'` CONJOINED with the
+   *     post-run evidence they already read (`leader_claim.permitted`). The two
+   *     answer different questions: this one asks whether the MODEL licenses the
+   *     claim, that one whether THIS RESULT separated the arms;
+   *
+   *     ⚠⚠ CEE'S OWN PROSE RAIL DEVIATES FROM THE BULLET ABOVE, DELIBERATELY.
+   *     RECORDED HERE SO A CONSUMER READING THAT INSTRUCTION IS NOT MISLED ABOUT
+   *     WHAT CEE ACTUALLY DOES TO `assistant_text`.
+   *     `orchestrator-v5/compose/leading-option-wire-enforcement.ts` and its
+   *     mirrored egress alarm suppress CEE-authored leader wording only when
+   *     `structurally_analysable === true` AND the mode is below
+   *     `comparative_leader` — which, given the producer, means ONLY on
+   *     `quantified_provisional`. `permitted_analysis_mode` and
+   *     `structurally_analysable` come from one writer off one `willProceed`, so
+   *     `{none, exploratory}` occur only with `structurally_analysable === false`
+   *     and `{quantified_provisional, comparative_leader}` only with `true`.
+   *
+   *     CONSEQUENCE, STATED PLAINLY. On the `{none, exploratory}` population a
+   *     schema-following UI suppresses its STRUCTURED leader display while CEE's
+   *     PROSE may still name a leader — structured says no, prose says yes. That
+   *     is the same shape the prose rail was added to close on
+   *     `quantified_provisional`, on a narrower population.
+   *
+   *     WHICH IS AUTHORITATIVE. This bullet stays authoritative for STRUCTURED
+   *     consumers: keep gating on `comparative_leader`. A structured display you
+   *     decline to render costs nothing false, and nothing here asks a UI to
+   *     loosen. CEE's narrower predicate is authoritative for the PROSE CEE
+   *     AUTHORS, and only there. The reason is that readiness is recomputed every
+   *     turn, so a post-analysis explain turn whose graph has since drifted reads
+   *     `none` while the completed result it is discussing is legitimate — and
+   *     prose, unlike a structured field, is written once and cannot be un-written
+   *     by a consumer. Suppressing there would silence leader text across the
+   *     entire post-analysis population, which CEE records as the WORSE defect.
+   *
+   *     ⚠ OPEN, NOT CLOSED, AND UNWITNESSED. The divergence has not been observed
+   *     on the wire in either direction. Do NOT close it by widening CEE to match
+   *     this bullet — that is exactly the blanket suppression above. Closing it
+   *     properly means deciding whether a STRUCTURED surface should also stand
+   *     down on a refused-run turn that is discussing an already-completed
+   *     result. Until that is decided, both behaviours are as described here;
+   *     (CEE PR #1355, 5 Sep 2026);
+   *   · gate any claim about a PROPORTION OF SCENARIOS MEETING THE GOAL on
+   *     `semantic_signals.goal_target_stated` as a THIRD conjunct — a success
+   *     rate against a bar nobody set is a claim about Olumi's own bar;
+   *   · treat `comparative_leader` as a FLOOR, never a quality certificate. One
+   *     user-stated parameter on the comparison's substrate clears it;
+   *     `semantic_signals` carries the counts for a stricter bar;
+   *   · render `reasons` when refusing, so a refusal names which of the four
+   *     fields refused it and what would change it.
+   *
+   * ABSENCE means a pre-`analysis_admission` producer, never "no" — fall back to
+   * existing behaviour, exactly as with `may_run`.
+   *
+   * Additive + passthrough-safe: this object is `.passthrough()` here and the
+   * boundary's `OlumiResponseSchema` accepts additive keys on `analysis_ready`,
+   * the same route `blocked_reason` and `may_run` already took.
+   */
+  analysis_admission: z
+    .object({
+      structurally_analysable: z.boolean(),
+      missing_important_inputs: z.array(z.object({
+        issue_id: z.string(),
+        code: z.string(),
+        option_id: z.string().optional(),
+        option_label: z.string().optional(),
+        factor_id: z.string().optional(),
+        factor_label: z.string().optional(),
+        why_it_matters: z.string(),
+        obligation: z.enum(['required', 'offered']).optional(),
+        waived_by_exclusion: z.boolean(),
+      }).passthrough()).readonly(),
+      semantic_quality_sufficient: z.boolean(),
+      permitted_analysis_mode: z.enum([
+        'none',
+        'exploratory',
+        'quantified_provisional',
+        'comparative_leader',
+      ]),
+      reasons: z.array(z.object({
+        field: z.enum([
+          'structurally_analysable',
+          'missing_important_inputs',
+          'semantic_quality_sufficient',
+          'permitted_analysis_mode',
+        ]),
+        code: z.string(),
+        message: z.string(),
+      }).passthrough()).readonly(),
+      /**
+       * The 64-hex analysis-affecting hash of the graph this verdict is about.
+       * NOT the 16-hex `freshness.current_graph_hash` token — same projection,
+       * different truncation, so never string-equal the two.
+       */
+      graph_hash: z.string().nullable(),
+      semantic_signals: z.object({
+        // The WHOLE-MODEL census: who authored this model's parameters?
+        confidence_parameters_total: z.number(),
+        confidence_parameters_user_stated: z.number(),
+        confidence_parameters_machine_authored: z.number(),
+        confidence_parameters_unattributed: z.number(),
+        // The COMPARISON'S OWN SUBSTRATE: and does the comparison rest on any of
+        // the user's? This pair is what `semantic_quality_sufficient` reads.
+        material_parameters_total: z.number(),
+        material_parameters_user_stated: z.number(),
+        // The strictest slice, published so a stricter consumer needs no second
+        // census: the baselines of the factors the options actually differ on.
+        intervened_factor_baselines_total: z.number(),
+        intervened_factor_baselines_user_stated: z.number(),
+        /**
+         * WHICH material parameters are not yet the user's — the actionable
+         * companion to the pair above, which say only HOW MANY.
+         *
+         * ⚠ `.optional()` because a payload captured before this field existed
+         * must still validate: this schema is replayed against stored fixtures,
+         * and a required member would retro-invalidate them. A consumer must
+         * therefore treat ABSENT ("this producer does not publish it") and
+         * EMPTY ("it publishes it and the set is empty") as different answers.
+         *
+         * ⚠ NOT a decomposition of the counts above — those include material
+         * EDGES, which have no node id. Read `.length`; never subtract.
+         */
+        material_parameters_awaiting_user_node_ids: z.array(z.string()).readonly().optional(),
+        /**
+         * Has the user said what "good" means (a raw goal target)?
+         *
+         * ⚠ DELIBERATELY NOT A CONJUNCT of `permitted_analysis_mode`. It is a
+         * precondition for a GOAL-ATTAINMENT claim ("100% of simulated
+         * scenarios" — without it the bar being cleared is one Olumi chose), and
+         * NOT for a RANKING claim ("Option A leads"). A consumer gating
+         * attainment wording CONJOINS this itself, the same way it conjoins
+         * `leader_claim.permitted` for the post-run question.
+         */
+        goal_target_stated: z.boolean(),
+      }).passthrough(),
+    })
+    .passthrough()
+    .optional(),
+  /**
+   * ROADMAP 2.1085 (root 2.1041) / golden-journey EXT-2 — stable machine-readable code for
+   * WHY this turn's analysis was refused. Present iff `status === 'blocked'`.
+   * See the contract note on `GraphPatchBlockData.analysis_ready` in
+   * src/orchestrator/types.ts; written only by `buildAnalysisRefusalReadiness`.
+   */
+  blocked_reason: z.string().min(1).optional(),
   /** Questions for user when status is needs_user_mapping */
   user_questions: z.array(z.string()).optional(),
-});
+  /** Blockers identifying missing factor values (Phase 2B) */
+  blockers: z.array(AnalysisBlocker).optional(),
+  /** Model adjustments surfaced from STRP/repair mutations (Phase 2C) */
+  model_adjustments: z.array(ModelAdjustment).optional(),
+  /**
+   * The goal node's threshold, NORMALISED against `goal_threshold_cap`
+   * (`goal_threshold = goal_threshold_raw / goal_threshold_cap`).
+   *
+   * ⛔ NOT A PROBABILITY, and this comment said it was. It is a target
+   * expressed as a fraction of a denominator — the number ISL scores
+   * `P(sample >= x)` AGAINST, never the resulting probability. A consumer that
+   * took the old comment at its word would render "0.8" as "80% likely", which
+   * is a claim the product never computed.
+   *
+   * ⚠ AND ITS MEANING DEPENDS ON `goal_threshold_cap_provenance` BELOW. When
+   * the denominator was derived from the target itself, this value is the
+   * CONSTANT 0.8 for every target and carries no information about the goal.
+   * Render the user's figure from `goal_threshold_raw` + `goal_threshold_unit`,
+   * which are honest whatever the provenance says.
+   */
+  goal_threshold: z.number().optional(),
+  /**
+   * ROADMAP 2.315(a) — the RAW goal target, as the user stated it.
+   *
+   * `goal_threshold` above is NORMALISED (raw / cap), which is the only form
+   * that reached consumers until now. A £800,000 target therefore surfaced on
+   * Inspector v2 as "Success means reaching ≥ 0.8 count" — a correct
+   * normalised number that no consumer could turn back into the user's own
+   * figure, because the raw value, its unit and the normalisation denominator
+   * never left CEE. This trio is that missing information.
+   *
+   * ⚠ CARRIED, NEVER RECOMPUTED. These are the values the enricher ATTESTED
+   * on the goal node at mint time (see `applyGoalTargetRedirect` in
+   * cee/factor-extraction/enricher.ts and the add_constraint handler, both
+   * delegating to `resolveGoalThresholdCap`). A consumer — or a later CEE
+   * stage — must NOT re-derive them: `raw = goal_threshold * cap` and the
+   * 25%-headroom cap doctrine are each defensible but can disagree with the
+   * cap the graph was ACTUALLY scored against (an existing compatible cap
+   * wins over fresh headroom, and '%' normalises against 100). Re-deriving
+   * silently produces a number the analysis never used.
+   *
+   * All three are independently optional: a qualitative goal has no numeric
+   * target at all, and absence means absent — never defaulted, never 0.
+   */
+  /** Raw threshold in the user's own units (e.g. 800000 for "£800,000"). */
+  goal_threshold_raw: z.number().optional(),
+  /** Display unit for the raw threshold (e.g. "£", "%", "customers"). */
+  goal_threshold_unit: z.string().optional(),
+  /** Normalisation denominator: goal_threshold = goal_threshold_raw / cap. */
+  goal_threshold_cap: z.number().optional(),
+  /**
+   * WHICH RULE produced `goal_threshold_cap` — see
+   * `GOAL_THRESHOLD_CAP_PROVENANCE` (utils/goal-threshold-cap.ts).
+   *
+   * ⭐ THE REASON THIS CHANNEL NEEDED IT. `goal_threshold_cap` reached
+   * consumers with no account of where it came from, so `0.8` against a cap of
+   * 25,000 was indistinguishable from `0.8` against a cap the user actually
+   * named. It is not: on `target_derived_headroom` the cap is `raw * 1.25`, so
+   * the ratio is 0.8 by construction for EVERY target — the same number for a
+   * GBP 20,000 goal and a GBP 20,000,000 one — and no user supplied the
+   * denominator. On `metric_scale` / `inherited` the denominator comes from
+   * outside the target and the ratio is meaningful.
+   *
+   * ⚠ RIDES ONLY WITH THE CAP, and is CARRIED, NEVER RECOMPUTED — a fresh
+   * resolution can disagree with the cap the graph was actually scored against
+   * (the doctrine is order-dependent). See `utils/goal-threshold-trio.ts`.
+   *
+   * ABSENCE MEANS UNATTESTED — never defaulted. It does NOT suppress the
+   * honest target display: `goal_threshold_raw` + `goal_threshold_unit` are
+   * unaffected by any of this and remain the figure to show the user.
+   */
+  goal_threshold_cap_provenance: GoalThresholdCapProvenanceSchema.optional(),
+  /** Bias findings from structural heuristic detectors (same shape as CEEBiasFindingV1).
+   *  Empty array when no biases detected. Always present for stable UI consumption. */
+  bias_findings: z.array(z.object({
+    id: z.string(),
+    category: z.string(),
+    severity: z.string(),
+    node_ids: z.array(z.string()).optional(),
+    explanation: z.string().optional(),
+    code: z.string().optional(),
+  }).passthrough()).default([]),
+  // V5 state-trust additive fields (CEE → UI). All optional so
+  // pre-state-trust dispatch paths still validate.
+  /** Freshness verdict (see AnalysisFreshness). */
+  freshness: AnalysisFreshness.optional(),
+  /** Stable string code for the freshness reason. UI does NOT render
+   *  this directly — surface for debugging / telemetry / contract tests. */
+  freshness_reason: z.string().optional(),
+  /** Hash of the analysis-affecting graph fields at the moment
+   *  run_analysis executed. Present when freshness is fresh / stale. */
+  graph_hash_at_run: z.string().optional(),
+  /** Hash of the analysis-affecting graph fields on this turn. Present
+   *  when the turn has graph state. UI compares against
+   *  graph_hash_at_run to confirm freshness independently. */
+  current_graph_hash: z.string().optional(),
+}).passthrough(); // CIL Phase 0: preserve additive fields
 export type AnalysisReadyPayloadT = z.infer<typeof AnalysisReadyPayload>;
+
+/**
+ * THE ONE SPELLING of the degenerate "blocked, and I am not describing a model"
+ * carrier — `status: 'blocked'` with an EMPTY identity.
+ *
+ * ⭐ WHY THIS IS A FUNCTION AND NOT THREE OBJECT LITERALS. Three production
+ * sites used to spell this shape independently, each with a DIFFERENT optional
+ * field set beside it:
+ *   · `orchestrator-v5/compose/analysis-ready-emit.ts`  + `bias_findings: []`
+ *   · `orchestrator/tools/analysis-ready-helper.ts`     + `blocked_reason`,
+ *                                                         `readiness_issues`, …
+ *   · `orchestrator/tools/analysis-ready-helper.ts`     + `blocked_reason`
+ * Three spellings of one shape is how they drift apart silently, and a consumer
+ * cannot tell which producer it is holding. The REQUIRED TRIPLE lives here; each
+ * caller spreads it and adds only the fields its own turn genuinely produced.
+ *
+ * ⚠ `options` AND `goal_node_id` ARE PRESENT-BUT-EMPTY, NEVER DROPPED. Both are
+ * REQUIRED at the boundary (`@talchain/schemas` `OlumiResponseSchema` declares
+ * `options: z.array(z.unknown())` and `goal_node_id: z.string()`), so omitting
+ * either fails egress validation and destroys the whole turn.
+ *
+ * ⚠ THIS IS NOT A "NO MODEL EXISTS" CLAIM. It is "this turn is not describing
+ * one". A producer that HOLDS a real identity must carry it rather than reach
+ * for this — see `buildAnalysisRefusalReadiness`, which returns this shape only
+ * when the refusal is genuinely not about the model.
+ */
+export function blockedIdentityCarrier(): {
+  options: never[];
+  goal_node_id: string;
+  status: "blocked";
+} {
+  // ⚠ KEY ORDER IS LOAD-BEARING HERE, AND ONLY HERE — do not "tidy" it.
+  // `analysis-refusal-carries-repair-route.test.ts:247` pins the refusal
+  // carrier as BYTE-IDENTICAL to its previous behaviour via `JSON.stringify`,
+  // which is key-order sensitive. This order is that carrier's original order,
+  // so adopting the factory changes no bytes at the site that guarantees it.
+  // (Swept before choosing: every OTHER equality on this payload goes through
+  // `stableStringify` — which sorts keys — or `Object.keys(...).sort()`, so no
+  // other site can observe the order. The two remaining callers' key order does
+  // change, and nothing pins or hashes it.)
+  return { options: [], goal_node_id: "", status: "blocked" };
+}
 
 // ============================================================================
 // Extended Response Type
@@ -154,7 +637,7 @@ export interface DraftGraphResponseWithAnalysisReady {
     overall: number;
     structure?: number;
     coverage?: number;
-    causality?: number;
+    structural_proxy?: number;
     safety?: number;
   };
 

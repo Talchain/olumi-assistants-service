@@ -8,6 +8,7 @@ import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { build } from "../../src/server.js";
 import { cleanBaseUrl } from "../helpers/env-setup.js";
+import { resolveTaskRouting } from "../../src/adapters/llm/model-routing-report.js";
 
 describe("GET /v1/status", () => {
   let app: FastifyInstance;
@@ -70,11 +71,67 @@ describe("GET /v1/status", () => {
     expect(body).toHaveProperty("llm");
     expect(body.llm).toHaveProperty("provider", "fixtures");
     expect(body.llm).toHaveProperty("model");
-    expect(body.llm).toHaveProperty("cache_enabled", true);
+    // Fixtures adapter does not support caching — cache_enabled is false regardless of env
+    expect(body.llm).toHaveProperty("cache_enabled", false);
     expect(body.llm).toHaveProperty("failover_enabled", false);
+    // The block is now LABELLED as the untasked default, so a reader cannot
+    // take `llm.model` for the model the product runs on.
+    expect(body.llm).toHaveProperty("scope", "untasked_default_adapter");
   });
 
-  it("should expose cache statistics when caching is enabled", async () => {
+  it("reports PER-TASK routing, not the untasked default", async () => {
+    // A deployed capture of this endpoint reported `gpt-4o-mini` while real
+    // turns routed to `claude-sonnet-5`: the endpoint was answering a
+    // question nobody asked (what the untasked fallback would pick) in a
+    // field everyone reads as "the model this product runs on".
+    //
+    // ⚠ THE FIELD NAME WAS FIXED SEPARATELY. This assertion pins the per-task
+    // projection to the PRODUCER, which is a statement about STARTUP routing
+    // only — `resolveTaskRouting` is the same env/defaults projection the
+    // route uses, so it cannot and does not certify what a turn runs on.
+    // That limit is why the block also ships
+    // `startup_task_models_unverified`; the guard for it is
+    // tests/integration/v1.status.startup-task-models.test.ts.
+    const response = await app.inject({ method: "GET", url: "/v1/status" });
+    const body = JSON.parse(response.body);
+
+    expect(body).toHaveProperty("model_routing");
+    const startup = body.model_routing.startup_task_models;
+    expect(startup).toBeDefined();
+
+    // POSITIVE CONTROL (trap 13): the projection must be non-empty, or every
+    // assertion below would pass by looking at nothing.
+    expect(Object.keys(startup).length).toBeGreaterThan(0);
+
+    // Bound BY TASK ID to the PRODUCER's own resolution — not to a literal
+    // written here, and not to anything derived from the default adapter.
+    // This is what makes the assertion survive a change to the default
+    // adapter and fail on a change to the ROUTING, which is the direction
+    // that matters.
+    for (const task of ["draft_graph", "edit_graph", "orchestrator", "critique_graph"]) {
+      expect(startup[task]).toBe(resolveTaskRouting(task as never).model);
+    }
+
+    expect(body.model_routing).toHaveProperty("default_provider");
+  });
+
+  it("does not leak configuration key names on this unauthenticated endpoint", async () => {
+    // `/v1/status` is public. The full routing rows carry configuration key
+    // NAMES (CEE_MODEL_*, providers.json paths) and configuration-error
+    // messages; those belong on the admin-key-gated /admin/models/routing.
+    const response = await app.inject({ method: "GET", url: "/v1/status" });
+    const raw = response.body;
+
+    expect(raw).not.toContain("CEE_MODEL_");
+    expect(raw).not.toContain("providers.json");
+    expect(raw).not.toContain("source_key");
+    expect(raw).not.toContain("configuration_error");
+    // CONTRAST CONTROL: the block we DO expose is present in the same body,
+    // so these absence assertions are not passing on an empty response.
+    expect(raw).toContain("startup_task_models");
+  });
+
+  it("should not expose cache_stats for fixtures adapter (no caching support)", async () => {
     const response = await app.inject({
       method: "GET",
       url: "/v1/status",
@@ -82,11 +139,8 @@ describe("GET /v1/status", () => {
 
     const body = JSON.parse(response.body);
 
-    expect(body.llm).toHaveProperty("cache_stats");
-    expect(body.llm.cache_stats).toHaveProperty("size");
-    expect(body.llm.cache_stats).toHaveProperty("capacity", 100);
-    expect(body.llm.cache_stats).toHaveProperty("ttlMs", 60000); // Note: camelCase from cache
-    expect(body.llm.cache_stats).toHaveProperty("enabled", true);
+    // Fixtures adapter has no stats() method, so cache_stats is undefined
+    expect(body.llm.cache_stats).toBeUndefined();
   });
 
   it("should expose share storage statistics", async () => {
@@ -116,7 +170,9 @@ describe("GET /v1/status", () => {
     expect(body.feature_flags).toHaveProperty("grounding", true);
     expect(body.feature_flags).toHaveProperty("critique", true);
     expect(body.feature_flags).toHaveProperty("clarifier", true);
-    expect(body.feature_flags).toHaveProperty("pii_guard", false);
+    // pii_guard removed 2026-07-20 (O-7 wave 2, Appendix A4): the flag only
+    // ever fed this report field — no enforcement existed.
+    expect(body.feature_flags).not.toHaveProperty("pii_guard");
     expect(body.feature_flags).toHaveProperty("share_review", true);
     expect(body.feature_flags).toHaveProperty("prompt_cache", true);
   });

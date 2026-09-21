@@ -3,14 +3,22 @@ import { log } from "../../utils/telemetry.js";
 /**
  * ID Normalizer Utility
  *
- * Converts human-readable labels into valid node IDs following the pattern:
- * ^[A-Za-z][A-Za-z0-9_-]*$
+ * Converts human-readable labels into valid node IDs following the canonical
+ * pattern: ^[a-z0-9_:-]+$
+ *
+ * Canonical rules:
+ * - Lowercase only
+ * - Separators: underscore (_), colon (:), and hyphen (-)
+ * - Numeric start allowed (e.g. "0_factor")
+ * - When normalising labels, hyphens are replaced with underscores for consistency
+ * - Pre-existing IDs containing hyphens are accepted as-is (aligns with prompt pattern)
  *
  * Used by V3 schema to generate consistent IDs for option nodes and
  * intervention targets.
  */
 
-const PRESERVED_ID_REGEX = /^[A-Za-z][A-Za-z0-9_-]*$/;
+/** Canonical ID pattern shared across CEE. Import this instead of defining inline. */
+export const CANONICAL_ID_REGEX = /^[a-z0-9_:-]+$/;
 
 /**
  * Normalize a label into a valid node ID.
@@ -18,7 +26,7 @@ const PRESERVED_ID_REGEX = /^[A-Za-z][A-Za-z0-9_-]*$/;
  * Rules:
  * 1. Convert to lowercase
  * 2. Replace spaces and hyphens with underscores
- * 3. Remove characters not matching [a-z0-9_:-]
+ * 3. Remove characters not matching [a-z0-9_:]
  * 4. Collapse multiple underscores
  * 5. Trim leading/trailing underscores
  * 6. Handle duplicates by appending __2, __3, etc. (P1-CEE-4: double underscore)
@@ -36,52 +44,19 @@ export function normalizeToId(
   label: string,
   existingIds: Set<string> = new Set()
 ): string {
-  if (label === null || label === undefined || typeof label !== "string") {
-    return generateUniqueId("unknown", existingIds);
-  }
-
-  if (PRESERVED_ID_REGEX.test(label)) {
-    const uniqueId = generateUniqueId(label, existingIds);
-    if (uniqueId !== label) {
-      log.warn(
-        { original_id: label, normalized_id: uniqueId, reason: "collision" },
-        "Normalized ID to resolve collision"
-      );
-    }
-    return uniqueId;
-  }
-
-  // Step 1: Lowercase
-  let id = label.toLowerCase();
-
-  // Step 2: Replace common separators with underscores
-  id = id.replace(/[\s\-–—:]/g, "_");
-
-  // Step 3: Remove parentheses but keep content
-  id = id.replace(/[()[\]{}]/g, "_");
-
-  // Step 4: Remove characters not in allowed set
-  id = id.replace(/[^a-z0-9_-]/g, "");
-
-  // Step 5: Collapse multiple underscores/colons/hyphens
-  id = id.replace(/_{2,}/g, "_");
-  id = id.replace(/-{2,}/g, "-");
-  id = id.replace(/:{2,}/g, ":");
-
-  // Step 6: Trim leading/trailing underscores and hyphens
-  id = id.replace(/^[_-]+|[_-]+$/g, "");
-
-  // Step 7: Ensure non-empty
-  if (!id) {
-    id = "node";
-  }
+  // Core normalisation (steps 1-7) delegated to normaliseIdBase — single source
+  // of truth shared with the integrity sentinel to prevent matching drift.
+  const id = normaliseIdBase(label);
 
   // Step 8: Handle duplicates
   const uniqueId = generateUniqueId(id, existingIds);
   if (uniqueId !== label) {
+    const reason = CANONICAL_ID_REGEX.test(label) ? "collision" : "normalized";
     log.warn(
-      { original_id: label, normalized_id: uniqueId, reason: "normalized" },
-      "Normalized ID to match policy"
+      { original_id: label, normalized_id: uniqueId, reason },
+      reason === "collision"
+        ? "Normalized ID to resolve collision"
+        : "Normalized ID to match policy"
     );
   }
   return uniqueId;
@@ -141,13 +116,41 @@ export function normalizeLabelsToIds(
 }
 
 /**
- * Validate that an ID matches the required pattern.
+ * Core ID normalisation (steps 1-7) without dedup suffix.
+ *
+ * Exported for use by the integrity sentinel so that raw↔V3 ID matching
+ * uses the exact same algorithm as the production normalizer.
+ *
+ * If the input already matches the canonical pattern, it is returned as-is.
+ */
+export function normaliseIdBase(label: string): string {
+  if (label === null || label === undefined || typeof label !== "string") {
+    return "unknown";
+  }
+  if (CANONICAL_ID_REGEX.test(label)) {
+    return label;
+  }
+  let id = label.toLowerCase();
+  id = id.replace(/[\s\-–—]/g, "_");     // spaces/hyphens/dashes → underscore
+  id = id.replace(/[()[\]{}]/g, "_");     // brackets → underscore
+  id = id.replace(/[^a-z0-9_:]/g, "");   // strip non-canonical chars (colons preserved)
+  id = id.replace(/_{2,}/g, "_");         // collapse underscores
+  id = id.replace(/:{2,}/g, ":");         // collapse colons
+  id = id.replace(/^[_:]+|[_:]+$/g, ""); // trim leading/trailing separators
+  if (!id) {
+    id = "node";
+  }
+  return id;
+}
+
+/**
+ * Validate that an ID matches the canonical pattern.
  *
  * @param id - ID to validate
  * @returns true if valid, false otherwise
  */
 export function isValidId(id: string): boolean {
-  return PRESERVED_ID_REGEX.test(id);
+  return CANONICAL_ID_REGEX.test(id);
 }
 
 /**
@@ -161,6 +164,6 @@ export function isValidId(id: string): boolean {
  * extractIdPrefix("factor:marketing") // "factor"
  */
 export function extractIdPrefix(id: string): string {
-  const match = id.match(/^([A-Za-z]+)[_:\/]/);
+  const match = id.match(/^([a-z0-9]+)[_:-]/);
   return match ? match[1] : id;
 }

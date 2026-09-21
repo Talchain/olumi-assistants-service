@@ -1,0 +1,38 @@
+{
+  "name": "minimal-decision",
+  "description": "Simplest valid decision with two options",
+  "brief": "Should I take the job offer or stay at my current company?",
+  "endpoint": "draft_graph",
+  "recorded_response": {
+    "graph": {
+      "version": "1",
+      "default_seed": 42,
+      "nodes": [
+        { "id": "decision_1", "kind": "decision", "label": "Should I take the job offer or stay at my current company?" },
+        { "id": "opt_take", "kind": "option", "label": "Take the new job offer" },
+        { "id": "opt_stay", "kind": "option", "label": "Stay at current company" },
+        { "id": "fac_salary", "kind": "factor", "label": "Salary", "category": "controllable" },
+        { "id": "fac_growth", "kind": "factor", "label": "Career Growth", "category": "observable" },
+        { "id": "outcome_satisfaction", "kind": "outcome", "label": "Job Satisfaction" },
+        { "id": "goal_1", "kind": "goal", "label": "Maximize career success and happiness" }
+      ],
+      "edges": [
+        { "from": "decision_1", "to": "opt_take", "strength_mean": 1, "strength_std": 0.01, "belief_exists": 1, "effect_direction": "positive" },
+        { "from": "decision_1", "to": "opt_stay", "strength_mean": 1, "strength_std": 0.01, "belief_exists": 1, "effect_direction": "positive" },
+        { "from": "opt_take", "to": "fac_salary", "strength_mean": 1, "strength_std": 0.01, "belief_exists": 1, "effect_direction": "positive" },
+        { "from": "fac_salary", "to": "outcome_satisfaction", "strength_mean": 0.5, "belief_exists": 0.9 },
+        { "from": "fac_growth", "to": "outcome_satisfaction", "strength_mean": 0.7, "belief_exists": 0.85 },
+        { "from": "outcome_satisfaction", "to": "goal_1", "strength_mean": 0.9, "belief_exists": 1 }
+      ],
+      "meta": { "roots": [], "leaves": [], "suggested_positions": {}, "source": "assistant" }
+    },
+    "validation": { "passed": true, "errors": [], "warnings": [] }
+  },
+  "assertions": {
+    "has_decision_node": true,
+    "option_count_gte": 2,
+    "has_goal_node": true,
+    "factor_count_gte": 1,
+    "validation_passes": true
+  }
+}

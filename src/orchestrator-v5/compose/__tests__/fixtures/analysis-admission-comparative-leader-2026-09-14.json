@@ -1,0 +1,49 @@
+{
+  "_provenance": {
+    "captured": "2026-09-14",
+    "source": "founder session debug export olumi-debug-44e349fa-20260914.json, request_id 44e349fa-ec71-42ab-ab08-ee4b69526cd4, scenario 9677de7d-0af8-4bee-b2ac-0e63b45aff8e, staging, client build ab6ae8a6",
+    "note": "The `analysis_ready.analysis_admission` object copied VERBATIM from the payload that ALSO carried an analysis_result block asserting 'Nothing in it is confirmed yet'. This is the arm on which that sentence is FALSE: permitted_analysis_mode is comparative_leader, which `deriveMode` grants only when material_parameters_user_stated > 0. Historic record: append only, never edit (parent CLAUDE.md trap 14b) - it is what the product actually emitted on that date."
+  },
+  "analysis_admission": {
+    "structurally_analysable": true,
+    "missing_important_inputs": [],
+    "semantic_quality_sufficient": true,
+    "permitted_analysis_mode": "comparative_leader",
+    "reasons": [
+      {
+        "field": "structurally_analysable",
+        "code": "READY_TO_COMPARE",
+        "message": "Analysis can run on this model as it stands."
+      },
+      {
+        "field": "semantic_quality_sufficient",
+        "code": "CONFIDENCE_PARAMETERS_PARTLY_USER_STATED",
+        "message": "At least one of the estimates this comparison rests on is yours, so a leading option can be named."
+      },
+      {
+        "field": "permitted_analysis_mode",
+        "code": "CONFIDENCE_PARAMETERS_PARTLY_USER_STATED",
+        "message": "At least one of the estimates this comparison rests on is yours, so a leading option can be named."
+      }
+    ],
+    "graph_hash": "40fe96a90854d0e91daa25e3ce17b31ad96cfa742427654e8057a0b98b5b6fa4",
+    "semantic_signals": {
+      "confidence_parameters_total": 15,
+      "confidence_parameters_user_stated": 1,
+      "confidence_parameters_machine_authored": 8,
+      "confidence_parameters_unattributed": 6,
+      "material_parameters_total": 13,
+      "material_parameters_user_stated": 1,
+      "intervened_factor_baselines_total": 2,
+      "intervened_factor_baselines_user_stated": 0,
+      "material_parameters_awaiting_user_node_ids": [
+        "5f0162f7",
+        "6d9a37f3",
+        "8b73e070",
+        "94fa174b",
+        "b4014d90"
+      ],
+      "goal_target_stated": false
+    }
+  }
+}

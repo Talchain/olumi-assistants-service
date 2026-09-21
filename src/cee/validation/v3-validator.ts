@@ -9,10 +9,34 @@ import type {
   CEEGraphResponseV3T,
   ValidationWarningV3T,
 } from "../../schemas/cee-v3.js";
-import { CEEGraphResponseV3 } from "../../schemas/cee-v3.js";
+import { CEEGraphResponseV3, classifyMagnitudeSign } from "../../schemas/cee-v3.js";
 import { hasPathToGoal } from "../extraction/factor-matcher.js";
 import { detectCycles } from "../../utils/graphGuards.js";
-import { config } from "../../config/index.js";
+import { normaliseOptionInterventions } from "../extraction/intervention-extractor.js";
+import { CANONICAL_ID_REGEX } from "../utils/id-normalizer.js";
+
+/**
+ * Normalise raw response options before schema validation.
+ * This is the ingest boundary for raw LLM responses entering validation.
+ */
+function normaliseRawResponseOptions(response: unknown): unknown {
+  if (!response || typeof response !== "object") {
+    return response;
+  }
+
+  const resp = response as Record<string, unknown>;
+  if (!resp.options || !Array.isArray(resp.options)) {
+    return response;
+  }
+
+  return {
+    ...resp,
+    options: resp.options.map((opt: unknown) => {
+      if (!opt || typeof opt !== "object") return opt;
+      return normaliseOptionInterventions(opt as Record<string, unknown>);
+    }),
+  };
+}
 
 /**
  * Validation result with detailed findings.
@@ -57,8 +81,12 @@ export function validateV3Response(
 ): V3ValidationResult {
   const warnings: ValidationWarningV3T[] = [];
 
+  // Normalise options.interventions before schema validation
+  // This ensures null/undefined interventions become {} before zod parsing
+  const normalisedResponse = normaliseRawResponseOptions(response);
+
   // Schema validation first
-  const schemaResult = CEEGraphResponseV3.safeParse(response);
+  const schemaResult = CEEGraphResponseV3.safeParse(normalisedResponse);
   if (!schemaResult.success) {
     for (const issue of schemaResult.error.issues) {
       warnings.push({
@@ -81,6 +109,7 @@ export function validateV3Response(
   warnings.push(...validateGraphStructure(v3Response)); // Cycle, self-loop, bidirectional detection
   warnings.push(...validateOptions(v3Response, options));
   warnings.push(...validateInterventions(v3Response, options));
+  warnings.push(...validateInterventionEdgeConsistency(v3Response));
 
   return categorizeWarnings(warnings);
 }
@@ -90,7 +119,7 @@ export function validateV3Response(
  */
 function categorizeWarnings(warnings: ValidationWarningV3T[]): V3ValidationResult {
   const errors = warnings.filter((w) => w.severity === "error");
-  const warningsOnly = warnings.filter((w) => w.severity === "warning");
+  const warningsOnly = warnings.filter((w) => w.severity === "warn");
   const info = warnings.filter((w) => w.severity === "info");
 
   return {
@@ -128,7 +157,7 @@ function validateGoalNode(response: CEEGraphResponseV3T): ValidationWarningV3T[]
   if (goalNode && goalNode.kind !== "goal") {
     warnings.push({
       code: "GOAL_NODE_WRONG_KIND",
-      severity: "warning",
+      severity: "warn",
       message: `goal_node_id "${response.goal_node_id}" references a node with kind="${goalNode.kind}", expected "goal"`,
       affected_node_id: response.goal_node_id,
       suggestion: "Set the node kind to 'goal' or use a different goal_node_id",
@@ -160,15 +189,14 @@ function validateNodes(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
     }
     seenIds.add(node.id);
 
-    // Check ID format - must start with letter, contain only alphanumeric, underscores, or hyphens
-    // Aligned with PRESERVED_ID_REGEX from id-normalizer
-    if (!/^[A-Za-z][A-Za-z0-9_-]*$/.test(node.id)) {
+    // Check ID format — canonical pattern from id-normalizer
+    if (!CANONICAL_ID_REGEX.test(node.id)) {
       warnings.push({
         code: "INVALID_NODE_ID",
         severity: "error",
-        message: `Invalid node ID format: "${node.id}" (must start with letter, contain only alphanumeric, underscores, or hyphens)`,
+        message: `Invalid node ID format: "${node.id}" (must contain only lowercase alphanumeric, underscores, colons, or hyphens)`,
         affected_node_id: node.id,
-        suggestion: "Use IDs starting with a letter followed by alphanumeric characters, underscores, or hyphens",
+        suggestion: "Use IDs with lowercase alphanumeric characters, underscores, colons, or hyphens",
         stage,
       });
     }
@@ -215,7 +243,7 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
   // In V3, options are in a separate array (as well as in nodes[] for graph connectivity)
   const controllableFactors = new Set<string>();
   for (const option of response.options) {
-    for (const intervention of Object.values(option.interventions)) {
+    for (const intervention of Object.values(option.interventions ?? {})) {
       controllableFactors.add(intervention.target_match.node_id);
     }
   }
@@ -238,7 +266,7 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
       if (incoming.length > 0) {
         warnings.push({
           code: "DECISION_HAS_INCOMING_EDGES",
-          severity: "warning",
+          severity: "warn",
           message: `Decision node "${node.id}" has ${incoming.length} incoming edge(s) but should have none`,
           affected_node_id: node.id,
           suggestion: "Decision nodes should not have any incoming edges",
@@ -253,7 +281,7 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
       if (outgoing.length === 0) {
         warnings.push({
           code: `${node.kind.toUpperCase()}_NO_OUTGOING_EDGE`,
-          severity: "warning",
+          severity: "warn",
           message: `${node.kind} node "${node.id}" has no outgoing edge to goal`,
           affected_node_id: node.id,
           suggestion: `${node.kind} nodes must connect to the goal node`,
@@ -274,7 +302,7 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
         if (targetKind !== "goal") {
           warnings.push({
             code: `${node.kind.toUpperCase()}_NOT_CONNECTED_TO_GOAL`,
-            severity: "warning",
+            severity: "warn",
             message: `${node.kind} node "${node.id}" connects to "${outgoing[0]}" (${targetKind}) instead of goal`,
             affected_node_id: node.id,
             affected_edge_id: `${node.id}→${outgoing[0]}`,
@@ -297,7 +325,7 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
 
     // Skip structural edges for strength variation analysis
     if (!structuralEdgeTypes.has(edgeType)) {
-      causalStrengths.push(edge.strength_mean);
+      causalStrengths.push(edge.strength.mean);
     }
   }
 
@@ -307,7 +335,7 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
     if (uniqueStrengths.size === 1) {
       warnings.push({
         code: "UNIFORM_STRENGTHS",
-        severity: "warning",
+        severity: "warn",
         message: `All ${causalStrengths.length} causal edges have identical strength (${causalStrengths[0].toFixed(2)}). This will produce undifferentiated results.`,
         suggestion: "Review edge strengths — different relationships should have different effect sizes.",
         stage,
@@ -393,48 +421,58 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
       }
     }
 
-    // Check effect_direction matches strength_mean sign
-    const expectedDirection = edge.strength_mean >= 0 ? "positive" : "negative";
+    // Check effect_direction matches strength.mean sign.
+    //
+    // ⚠ CONSUMES the shared definition rather than re-deriving `>= 0`. This
+    // check previously carried its own copy of the two-valued rule, so a ZERO
+    // magnitude "expected" positive — and any edge honestly stating a direction
+    // the magnitude cannot corroborate was reported as a mismatch against
+    // itself. A magnitude of zero states nothing, so there is nothing for the
+    // label to disagree WITH, and this check has no opinion there
+    // (CLAUDE.md trap 21: every reader of a predicate must move with it).
+    const magnitudeClass = classifyMagnitudeSign(edge.strength.mean);
+    const expectedDirection =
+      magnitudeClass === "no_sign_information" ? edge.effect_direction : magnitudeClass;
     if (edge.effect_direction !== expectedDirection) {
       warnings.push({
         code: "EFFECT_DIRECTION_MISMATCH",
-        severity: "warning",
-        message: `Edge ${edge.from} → ${edge.to}: effect_direction="${edge.effect_direction}" but strength_mean=${edge.strength_mean} suggests "${expectedDirection}"`,
+        severity: "warn",
+        message: `Edge ${edge.from} → ${edge.to}: effect_direction="${edge.effect_direction}" but strength.mean=${edge.strength.mean} suggests "${expectedDirection}"`,
         affected_edge_id: edgeId,
-        suggestion: "Ensure effect_direction matches the sign of strength_mean",
+        suggestion: "Ensure effect_direction matches the sign of strength.mean",
         stage: "coefficient_normalisation",
       });
     }
 
-    // Check strength_std is positive
-    if (edge.strength_std <= 0) {
+    // Check strength.std is positive
+    if (edge.strength.std <= 0) {
       warnings.push({
         code: "INVALID_STRENGTH_STD",
         severity: "error",
-        message: `Edge ${edge.from} → ${edge.to}: strength_std must be positive, got ${edge.strength_std}`,
+        message: `Edge ${edge.from} → ${edge.to}: strength.std must be positive, got ${edge.strength.std}`,
         affected_edge_id: edgeId,
         stage: "coefficient_normalisation",
       });
     }
 
-    // Check belief_exists is in [0, 1]
-    if (edge.belief_exists < 0 || edge.belief_exists > 1) {
+    // Check exists_probability is in [0, 1]
+    if (edge.exists_probability < 0 || edge.exists_probability > 1) {
       warnings.push({
         code: "INVALID_BELIEF_EXISTS",
         severity: "error",
-        message: `Edge ${edge.from} → ${edge.to}: belief_exists must be in [0, 1], got ${edge.belief_exists}`,
+        message: `Edge ${edge.from} → ${edge.to}: exists_probability must be in [0, 1], got ${edge.exists_probability}`,
         affected_edge_id: edgeId,
         stage: "coefficient_normalisation",
       });
     }
 
-    // Check strength_mean is in canonical [-1, +1] range (P1-CEE-2)
-    if (edge.strength_mean < MIN_STRENGTH || edge.strength_mean > MAX_STRENGTH) {
+    // Check strength.mean is in canonical [-1, +1] range (P1-CEE-2)
+    if (edge.strength.mean < MIN_STRENGTH || edge.strength.mean > MAX_STRENGTH) {
       // Always ERROR per spec - out of range values must block execution
       warnings.push({
         code: "STRENGTH_OUT_OF_RANGE",
         severity: "error",
-        message: `Edge ${edge.from} → ${edge.to}: strength_mean ${edge.strength_mean.toFixed(2)} outside canonical range [-1, +1]`,
+        message: `Edge ${edge.from} → ${edge.to}: strength.mean ${edge.strength.mean.toFixed(2)} outside canonical range [-1, +1]`,
         affected_edge_id: edgeId,
         suggestion: "Clamp value to [-1, +1] range",
         stage: "coefficient_normalisation",
@@ -448,11 +486,11 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
       (fromKindCheck === "decision" && toKindCheck === "option") ||
       (fromKindCheck === "option" && toKindCheck === "factor");
 
-    if (!isStructuralEdge && Math.abs(edge.strength_mean) < NEGLIGIBLE_THRESHOLD) {
+    if (!isStructuralEdge && Math.abs(edge.strength.mean) < NEGLIGIBLE_THRESHOLD) {
       warnings.push({
         code: "NEGLIGIBLE_STRENGTH",
         severity: "info",
-        message: `Edge ${edge.from} → ${edge.to}: negligible effect (${edge.strength_mean.toFixed(2)}). Consider removing.`,
+        message: `Edge ${edge.from} → ${edge.to}: negligible effect (${edge.strength.mean.toFixed(2)}). Consider removing.`,
         affected_edge_id: edgeId,
         suggestion: "Edges with |strength| < 0.05 have minimal impact on outcomes.",
         stage: "coefficient_normalisation",
@@ -516,8 +554,9 @@ function validateGraphStructure(response: CEEGraphResponseV3T): ValidationWarnin
 
   // Cycle detection using DFS from graphGuards
   // Adapt V3 response to format expected by detectCycles
+  // Preserve edge_type so detectCycles can skip bidirected edges
   const nodes = response.nodes.map((n) => ({ id: n.id, kind: n.kind as any }));
-  const edges = response.edges.map((e) => ({ from: e.from, to: e.to }));
+  const edges = response.edges.map((e) => ({ from: e.from, to: e.to, edge_type: (e as any).edge_type }));
 
   const cycles = detectCycles(nodes, edges);
   for (const cycle of cycles) {
@@ -557,7 +596,7 @@ function validateOptions(
     if (!optionIdSet.has(optionNodeId)) {
       warnings.push({
         code: "OPTION_ID_MISMATCH",
-        severity: "warning",
+        severity: "warn",
         message: `Option node "${optionNodeId}" has no matching entry in options[]`,
         affected_option_id: optionNodeId,
         suggestion: "Ensure options[] IDs match option node IDs in the graph",
@@ -570,7 +609,7 @@ function validateOptions(
     if (!optionNodeIdSet.has(optionId)) {
       warnings.push({
         code: "OPTION_ID_MISMATCH",
-        severity: "warning",
+        severity: "warn",
         message: `Option "${optionId}" exists in options[] but no option node matches`,
         affected_option_id: optionId,
         suggestion: "Ensure options[] IDs match option node IDs in the graph",
@@ -597,8 +636,8 @@ function validateOptions(
 
     // Check for identical interventions (v6.0.2 rule: options must differ)
     // Normalize by sorting keys to make comparison order-insensitive
-    const interventionEntries = Object.entries(option.interventions)
-      .map(([k, v]) => `${v.target_match.node_id}:${v.value}`)
+    const interventionEntries = Object.entries(option.interventions ?? {})
+      .map(([_k, v]) => `${v.target_match.node_id}:${v.value}`)
       .sort()
       .join("|");
 
@@ -606,7 +645,7 @@ function validateOptions(
       const existingOptionId = interventionSignatures.get(interventionEntries);
       warnings.push({
         code: "IDENTICAL_OPTION_INTERVENTIONS",
-        severity: "warning",
+        severity: "warn",
         message: `Options "${option.id}" and "${existingOptionId}" have identical interventions`,
         affected_option_id: option.id,
         suggestion: "Options must differ in at least one intervention value",
@@ -616,8 +655,8 @@ function validateOptions(
       interventionSignatures.set(interventionEntries, option.id);
     }
 
-    // Check ID format
-    if (!/^[a-z0-9_:-]+$/.test(option.id)) {
+    // Check ID format — canonical pattern from id-normalizer
+    if (!CANONICAL_ID_REGEX.test(option.id)) {
       warnings.push({
         code: "INVALID_OPTION_ID",
         severity: "error",
@@ -629,11 +668,11 @@ function validateOptions(
     }
 
     // Check status consistency
-    const hasInterventions = Object.keys(option.interventions).length > 0;
+    const hasInterventions = Object.keys(option.interventions ?? {}).length > 0;
     if (option.status === "ready" && !hasInterventions) {
       warnings.push({
         code: "EMPTY_INTERVENTIONS_READY",
-        severity: "warning",
+        severity: "warn",
         message: `Option "${option.id}" has status='ready' but no interventions`,
         affected_option_id: option.id,
         suggestion: "Add interventions or change status to 'needs_user_mapping'",
@@ -686,7 +725,7 @@ function validateInterventions(
   const stage = "intervention_validation";
 
   for (const option of response.options) {
-    for (const [factorId, intervention] of Object.entries(option.interventions)) {
+    for (const [factorId, intervention] of Object.entries(option.interventions ?? {})) {
       // Check target node exists
       if (!nodeIds.has(intervention.target_match.node_id)) {
         warnings.push({
@@ -704,7 +743,7 @@ function validateInterventions(
       if (!factorIds.has(intervention.target_match.node_id)) {
         warnings.push({
           code: "INTERVENTION_TARGET_NOT_FACTOR",
-          severity: "warning",
+          severity: "warn",
           message: `Option "${option.id}": intervention target "${intervention.target_match.node_id}" is not a factor node`,
           affected_option_id: option.id,
           affected_node_id: intervention.target_match.node_id,
@@ -723,7 +762,7 @@ function validateInterventions(
         if (!hasPath) {
           warnings.push({
             code: "INTERVENTION_TARGET_DISCONNECTED",
-            severity: "warning",
+            severity: "warn",
             message: `Option "${option.id}": target "${intervention.target_match.node_id}" has no path to goal`,
             affected_option_id: option.id,
             affected_node_id: intervention.target_match.node_id,
@@ -774,6 +813,97 @@ function validateInterventions(
           affected_option_id: option.id,
           affected_node_id: factorId,
           suggestion: "Review the target mapping for accuracy",
+          stage,
+        });
+      }
+    }
+  }
+
+  return warnings;
+}
+
+/**
+ * Validate that option interventions have corresponding option→factor edges.
+ *
+ * Per V4 Rule 11: keys(data.interventions) must EXACTLY match outgoing option→factor edges.
+ * This validates both directions:
+ * 1. Every intervention must have a corresponding edge (INTERVENTION_NO_EDGE)
+ * 2. Every edge must have a corresponding intervention (EDGE_NO_INTERVENTION)
+ * 3. Intervention key must match target_match.node_id (INTERVENTION_KEY_MISMATCH)
+ */
+function validateInterventionEdgeConsistency(
+  response: CEEGraphResponseV3T
+): ValidationWarningV3T[] {
+  const warnings: ValidationWarningV3T[] = [];
+  const stage = "intervention_edge_validation";
+
+  // Build map: optionId -> Set of factor IDs connected by edges
+  const optionToFactorEdges = new Map<string, Set<string>>();
+  const factorNodes = new Set(
+    response.nodes.filter((n) => n.kind === "factor").map((n) => n.id)
+  );
+  const optionNodes = new Set(
+    response.nodes.filter((n) => n.kind === "option").map((n) => n.id)
+  );
+
+  for (const edge of response.edges) {
+    if (optionNodes.has(edge.from) && factorNodes.has(edge.to)) {
+      if (!optionToFactorEdges.has(edge.from)) {
+        optionToFactorEdges.set(edge.from, new Set());
+      }
+      optionToFactorEdges.get(edge.from)!.add(edge.to);
+    }
+  }
+
+  // For each option, validate intervention-edge consistency
+  for (const option of response.options) {
+    const edgeTargets = optionToFactorEdges.get(option.id) ?? new Set<string>();
+    const interventionTargets = new Set<string>();
+
+    for (const [factorKey, intervention] of Object.entries(option.interventions ?? {})) {
+      const interventionTarget = intervention.target_match.node_id;
+      interventionTargets.add(interventionTarget);
+
+      // Check 1: Intervention key must match target_match.node_id
+      if (factorKey !== interventionTarget) {
+        warnings.push({
+          code: "INTERVENTION_KEY_MISMATCH",
+          severity: "warn",
+          message: `Option "${option.id}": intervention key "${factorKey}" does not match target_match.node_id "${interventionTarget}"`,
+          affected_option_id: option.id,
+          affected_node_id: interventionTarget,
+          suggestion:
+            "Ensure intervention key matches target_match.node_id — they must be identical",
+          stage,
+        });
+      }
+
+      // Check 2: Intervention target must have a corresponding edge
+      if (!edgeTargets.has(interventionTarget)) {
+        warnings.push({
+          code: "INTERVENTION_NO_EDGE",
+          severity: "warn",
+          message: `Option "${option.id}" has intervention for "${interventionTarget}" but no option→factor edge`,
+          affected_option_id: option.id,
+          affected_node_id: interventionTarget,
+          suggestion:
+            "Remove intervention or add option→factor edge — interventions must have structural support",
+          stage,
+        });
+      }
+    }
+
+    // Check 3: Every edge target must have a corresponding intervention
+    for (const edgeTarget of edgeTargets) {
+      if (!interventionTargets.has(edgeTarget)) {
+        warnings.push({
+          code: "EDGE_NO_INTERVENTION",
+          severity: "warn",
+          message: `Option "${option.id}" has edge to "${edgeTarget}" but no corresponding intervention`,
+          affected_option_id: option.id,
+          affected_node_id: edgeTarget,
+          suggestion:
+            "Add intervention for this edge target or remove the option→factor edge",
           stage,
         });
       }

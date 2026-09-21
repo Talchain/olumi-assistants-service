@@ -1,90 +1,43 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import rateLimit from '@fastify/rate-limit';
+import { RateLimitedError, retryAfterSecondsFromRateLimitContext } from '../utils/errors.js';
 import { z } from 'zod';
-import { config } from '../config/index.js';
-import { listDraftFailureBundles, getDraftFailureBundleById } from '../cee/draft-failures/store.js';
+import {
+  listDraftFailureBundles,
+  getDraftFailureBundleById,
+  DraftFailureStoreUnavailableError,
+} from '../cee/draft-failures/store.js';
+import { verifyAdminKey } from '../middleware/admin-auth.js';
 
-type AdminPermission = 'read' | 'write';
-
-function getAllowedIPs(): Set<string> | null {
-  const allowedIPsConfig = config.prompts?.adminAllowedIPs;
-  if (!allowedIPsConfig || allowedIPsConfig.trim() === '') {
-    return null;
-  }
-
-  return new Set(
-    allowedIPsConfig
-      .split(',')
-      .map((ip) => ip.trim())
-      .filter((ip) => ip.length > 0)
-  );
-}
-
-function verifyIPAllowed(request: FastifyRequest, reply: FastifyReply): boolean {
-  const allowedIPs = getAllowedIPs();
-  if (!allowedIPs) return true;
-
-  const requestIP = request.ip;
-  const isAllowed =
-    allowedIPs.has(requestIP) ||
-    (requestIP === '::1' && allowedIPs.has('127.0.0.1')) ||
-    (requestIP === '127.0.0.1' && allowedIPs.has('::1'));
-
-  if (!isAllowed) {
-    reply.status(403).send({
-      error: 'ip_not_allowed',
-      message: 'Your IP address is not authorized for admin access',
-    });
-    return false;
-  }
-  return true;
-}
-
-function verifyAdminKey(
-  request: FastifyRequest,
+/**
+ * Render a store unavailability as a 503 that NAMES the reason.
+ *
+ * 503, not 500, and not an empty 200: the store is a dependency this route
+ * could not reach, which is a different fact from "the route is broken" and a
+ * different fact again from "there are no failures". Each of the three used to
+ * arrive as one of the other two.
+ *
+ * ⚠ DISCRIMINATES BY IDENTITY (`instanceof`), never by inspecting a message
+ * string another error could satisfy. An unexpected throw is deliberately NOT
+ * laundered into a 503 — it stays a 500 so a genuine bug is investigated as a
+ * bug instead of being reported to on-call as a dependency outage. The
+ * opposite-direction twin for that is pinned in
+ * `tests/unit/cee.draft-failure-store-honesty.test.ts`.
+ */
+function replyStoreUnavailable(
   reply: FastifyReply,
-  requiredPermission: AdminPermission = 'read'
-): boolean {
-  if (!verifyIPAllowed(request, reply)) return false;
-
-  const adminKey = config.prompts?.adminApiKey;
-  const adminKeyRead = config.prompts?.adminApiKeyRead;
-
-  if (!adminKey && !adminKeyRead) {
-    reply.status(503).send({
-      error: 'admin_not_configured',
-      message: 'Admin API is not configured',
-    });
-    return false;
-  }
-
-  const providedKey = request.headers['x-admin-key'] as string;
-  if (!providedKey) {
-    reply.status(401).send({
-      error: 'unauthorized',
-      message: 'Missing admin API key',
-    });
-    return false;
-  }
-
-  if (adminKey && providedKey === adminKey) return true;
-
-  if (adminKeyRead && providedKey === adminKeyRead) {
-    if (requiredPermission === 'write') {
-      reply.status(403).send({
-        error: 'forbidden',
-        message: 'Read-only key cannot perform write operations',
-      });
-      return false;
-    }
-    return true;
-  }
-
-  reply.status(401).send({
-    error: 'unauthorized',
-    message: 'Invalid admin API key',
+  err: DraftFailureStoreUnavailableError,
+): FastifyReply {
+  return reply.status(503).send({
+    error: 'draft_failure_store_unavailable',
+    reason: err.reason,
+    // The cause, verbatim. This endpoint is admin-key gated and its whole
+    // purpose is diagnosis: a reader who cannot see WHY has to go to the Render
+    // logs, which is the round-trip this field exists to remove. The message is
+    // PostgREST's own (a relation name, a permission, a network fault) and
+    // carries no user brief content — the reader functions never see one.
+    message: err.message,
   });
-  return false;
 }
 
 const ListQuerySchema = z.object({
@@ -106,10 +59,13 @@ export async function adminDraftFailureRoutes(app: FastifyInstance): Promise<voi
       const adminKey = request.headers['x-admin-key'] as string ?? '';
       return `draft_failures:${adminKey.slice(0, 8)}:${request.ip}`;
     },
-    errorResponseBuilder: () => ({
-      error: 'rate_limit_exceeded',
-      message: 'Too many requests. Please try again later.',
-    }),
+    // ROADMAP 2.181 — @fastify/rate-limit THROWS this return value, so it MUST
+    // be an Error; a plain object is answered 500 INTERNAL. See RateLimitedError.
+    errorResponseBuilder: (_req, context) =>
+      new RateLimitedError(
+        retryAfterSecondsFromRateLimitContext(context),
+        'Too many requests. Please try again later.',
+      ),
   });
 
   app.get('/admin/v1/draft-failures', async (request: FastifyRequest, reply: FastifyReply) => {
@@ -123,12 +79,20 @@ export async function adminDraftFailureRoutes(app: FastifyInstance): Promise<voi
       });
     }
 
-    const result = await listDraftFailureBundles({
-      requestId: query.data.request_id,
-      correlationId: query.data.correlation_id,
-      limit: query.data.limit,
-      since: query.data.since,
-    });
+    let result: Awaited<ReturnType<typeof listDraftFailureBundles>>;
+    try {
+      result = await listDraftFailureBundles({
+        requestId: query.data.request_id,
+        correlationId: query.data.correlation_id,
+        limit: query.data.limit,
+        since: query.data.since,
+      });
+    } catch (err) {
+      if (err instanceof DraftFailureStoreUnavailableError) {
+        return replyStoreUnavailable(reply, err);
+      }
+      throw err;
+    }
 
     return reply.status(200).send({
       failures: result.failures.map((f) => ({
@@ -166,7 +130,17 @@ export async function adminDraftFailureRoutes(app: FastifyInstance): Promise<voi
       });
     }
 
-    const failure = await getDraftFailureBundleById(params.data.id);
+    let failure: Awaited<ReturnType<typeof getDraftFailureBundleById>>;
+    try {
+      failure = await getDraftFailureBundleById(params.data.id);
+    } catch (err) {
+      if (err instanceof DraftFailureStoreUnavailableError) {
+        return replyStoreUnavailable(reply, err);
+      }
+      throw err;
+    }
+    // Reached only when the store ANSWERED. `not_found` is now a claim about
+    // the table rather than about our ability to read it.
     if (!failure) {
       return reply.status(404).send({
         error: 'not_found',

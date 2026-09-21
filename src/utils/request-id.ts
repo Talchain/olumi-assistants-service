@@ -41,21 +41,26 @@ export function getOrGenerateRequestId(request: FastifyRequest): string {
     return generateRequestId();
   }
 
-  // Check for incoming X-Request-Id header (case-insensitive)
-  const incomingId = request.headers[REQUEST_ID_HEADER_LOWER]
-    || request.headers[REQUEST_ID_HEADER];
+  // Check headers in priority order: X-Request-Id → X-CEE-Request-ID → x-correlation-id
+  const candidates = [
+    request.headers[REQUEST_ID_HEADER_LOWER] || request.headers[REQUEST_ID_HEADER],
+    request.headers['x-cee-request-id'],
+    request.headers['x-correlation-id'],
+  ];
 
-  if (typeof incomingId === 'string') {
-    const trimmed = incomingId.trim();
-    if (isValidRequestId(trimmed)) {
-      return trimmed;
-    }
-    // Log warning for invalid request ID (header injection attempt or malformed)
-    if (trimmed.length > 0 && request.log) {
-      request.log.warn(
-        { invalidRequestId: trimmed.substring(0, 100) },
-        'Invalid request ID rejected, generating new ID'
-      );
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string') {
+      const trimmed = candidate.trim();
+      if (isValidRequestId(trimmed)) {
+        return trimmed;
+      }
+      // Log warning for invalid request ID (header injection attempt or malformed)
+      if (trimmed.length > 0 && request.log) {
+        request.log.warn(
+          { invalidRequestId: trimmed.substring(0, 100) },
+          'Invalid request ID rejected, trying next header'
+        );
+      }
     }
   }
 

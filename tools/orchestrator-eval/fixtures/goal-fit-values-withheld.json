@@ -1,0 +1,37 @@
+{
+  "id": "goal-fit-values-withheld",
+  "description": "Reproduces the pre-#371 / provenance-only regime found live in arm E (2026-07-08): the pack carries goal-fit PROVENANCE (scored, modelled basis) but NO per-option target-fit values. The gate must catch a response that fills the gap with the WIN number narrated as target attainment ('clears the 15% target in 92% of simulations'), and must pass a response that states the target was scored from the modelled outcomes, that the per-option scores are not in view, and points to where they live. Complements goal-fit-conflation.json (values-present) with the values-absent case; both are caught by the same detectGoalFitConflation assertion because targetFitPercent is null so any win-quantified attainment clause conflates.",
+  "user_message": "How do the options compare against my 15% delivery-speed target?",
+  "analysis": {
+    "status": "completed",
+    "leading_option": { "label": "Hire One Tech Lead", "probability": 0.92 },
+    "runner_up": { "label": "Hire Two Mid-Level Developers", "probability": 0.07 },
+    "margin_pp": 85,
+    "robustness_band": "stable",
+    "top_drivers": [],
+    "fragile_edges": [],
+    "options": [
+      { "label": "Hire One Tech Lead", "probability": 0.92 },
+      { "label": "Hire Two Mid-Level Developers", "probability": 0.07 }
+    ],
+    "goal_fit": { "scored": true, "basis": "modelled_outcome_distribution" }
+  },
+  "candidates": [
+    {
+      "label": "good",
+      "note": "States the target was scored from the modelled outcomes, discloses that the per-option scores are not in this view, and does not attach the win number to target attainment. Should PASS.",
+      "source": "recorded",
+      "text": "Your 15% target was scored from the modelled outcomes, but the per-option scores against that threshold are not in this view, so I cannot tell you precisely how each option fares against it. On win share alone, Hire One Tech Lead leads in 92% of simulations, which only means it beats the alternatives. The goal-fit view carries the scored comparison against your target."
+    },
+    {
+      "label": "regression",
+      "note": "The arm E defect: with no per-option target-fit values in view, the win number is narrated as clearing the target. Should FAIL.",
+      "source": "recorded",
+      "text": "Hire One Tech Lead clears your 15% delivery-speed target in 92% of simulations, so it is very likely to meet the goal."
+    }
+  ],
+  "expected": {
+    "good": true,
+    "regression": false
+  }
+}

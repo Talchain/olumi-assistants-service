@@ -16,7 +16,12 @@ You may notice a CEE incident via:
   - Increased 5xx/4xx rates on `/assist/v1/*` CEE endpoints.
   - Spikes in `cee.call` logs with `status=error|timeout|limited` and
     CEE error codes such as `CEE_TIMEOUT`, `CEE_RATE_LIMIT`,
+    `CEE_COST_CAP`, `CEE_BUDGET_EXCEEDED`,
     `CEE_SERVICE_UNAVAILABLE`, `CEE_INTERNAL_ERROR`.
+  - ⚠ `CEE_RATE_LIMIT` / `CEE_COST_CAP` / `CEE_BUDGET_EXCEEDED` are all 429
+    but mean *throttled* / *out of money* / *out of time* respectively. Only
+    the first is about traffic volume. See
+    `Docs/cee/CEE-incident-runbook.md` §3.1 for the triage table.
 - **Scheduled diagnostics workflow**
   - The `CEE Diagnostics (staging)` GitHub Action fails, or
   - Its JSON artifact shows a jump in `recent_error_counts.total` or
@@ -52,7 +57,8 @@ Interpret the summary as described in `Docs/CEE-runbook.md`:
   - `by_capability`: see which CEE feature is failing
     (`cee_draft_graph`, `cee_options`, `cee_evidence_helper`, etc.).
   - `by_error_code`: look for codes like `CEE_TIMEOUT`,
-    `CEE_SERVICE_UNAVAILABLE`, `CEE_RATE_LIMIT`.
+    `CEE_SERVICE_UNAVAILABLE`, `CEE_RATE_LIMIT`, `CEE_COST_CAP`,
+    `CEE_BUDGET_EXCEEDED`.
 
 This gives you a metadata-only view of where the problem is
 concentrated without exposing prompts or payloads.
@@ -72,6 +78,10 @@ Symptoms:
   - `CEE_TIMEOUT` (often mapped from upstream timeouts).
   - `CEE_SERVICE_UNAVAILABLE` (mapped from 503s).
   - `CEE_RATE_LIMIT` across multiple capabilities.
+  - `CEE_BUDGET_EXCEEDED` rising *together with* `CEE_TIMEOUT` — both are
+    latency symptoms, so upstream slowness usually moves them as a pair.
+    (`CEE_COST_CAP` rising instead points at spend, not the provider — that
+    is a local budget matter, not an upstream incident.)
 - `/healthz` still reports `ok: true` and configuration looks correct.
 - Other non‑CEE endpoints using the same provider/model also show
   elevated errors.

@@ -9,7 +9,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import type { FastifyInstance } from "fastify";
-import { cleanBaseUrl } from "../helpers/env-setup.js";
+import { cleanBaseUrl, SERVER_BOOT_HOOK_TIMEOUT_MS } from "../helpers/env-setup.js";
 
 const originalEnv = { ...process.env };
 
@@ -28,7 +28,8 @@ describe("HMAC + API Key Fallback", () => {
     const { build } = await import("../../src/server.js");
     server = await build();
     await server.ready();
-  });
+    // ROADMAP 2.157: full server boot — explicit timeout, see the constant.
+  }, SERVER_BOOT_HOOK_TIMEOUT_MS);
 
   afterAll(async () => {
     await server.close();
@@ -39,7 +40,7 @@ describe("HMAC + API Key Fallback", () => {
   it("falls back to API key when HMAC verification fails but API key is valid", async () => {
     const response = await server.inject({
       method: "POST",
-      url: "/assist/draft-graph",
+      url: "/assist/v1/draft-graph",
       headers: {
         "Content-Type": "application/json",
         "X-Olumi-Assist-Key": "fallback-key-1",
@@ -60,7 +61,7 @@ describe("HMAC + API Key Fallback", () => {
   it("returns 401 when HMAC fails and API key is missing", async () => {
     const response = await server.inject({
       method: "POST",
-      url: "/assist/draft-graph",
+      url: "/assist/v1/draft-graph",
       headers: {
         "Content-Type": "application/json",
         // Invalid HMAC signature with no API key header
@@ -76,7 +77,7 @@ describe("HMAC + API Key Fallback", () => {
     expect(response.statusCode).toBe(401);
     const body = JSON.parse(response.body);
     expect(body.schema).toBe("error.v1");
-    expect(body.code).toBe("FORBIDDEN");
+    expect(body.code).toBe("UNAUTHENTICATED");
     expect(body.message).toContain("Missing API key");
   });
 });
@@ -97,7 +98,8 @@ describe("HMAC-only auth without API keys", () => {
     const { build } = await import("../../src/server.js");
     server = await build();
     await server.ready();
-  });
+    // ROADMAP 2.157: full server boot — explicit timeout, see the constant.
+  }, SERVER_BOOT_HOOK_TIMEOUT_MS);
 
   afterAll(async () => {
     await server.close();
@@ -108,7 +110,7 @@ describe("HMAC-only auth without API keys", () => {
   it("returns 403 with specific HMAC error code when verification fails and no API keys are configured", async () => {
     const response = await server.inject({
       method: "POST",
-      url: "/assist/draft-graph",
+      url: "/assist/v1/draft-graph",
       headers: {
         "Content-Type": "application/json",
         "X-Olumi-Signature": "invalid-signature",
@@ -123,9 +125,9 @@ describe("HMAC-only auth without API keys", () => {
     expect(response.statusCode).toBe(403);
     const body = JSON.parse(response.body);
     expect(body.schema).toBe("error.v1");
-    // For HMAC-only mode, the implementation uses the specific
-    // HMAC error (e.g. INVALID_SIGNATURE) as the error code.
-    expect(body.code).toBe("INVALID_SIGNATURE");
+    // Standard error code per error.v1 schema; specific HMAC error in details
+    expect(body.code).toBe("FORBIDDEN");
+    expect(body.details?.hmac_error).toBe("INVALID_SIGNATURE");
     expect(body.message).toContain("HMAC signature validation failed");
   });
 });

@@ -1,0 +1,591 @@
+{
+ "__provenance__": "MIXED PROVENANCE — READ THIS BEFORE TRUSTING A NUMBER FROM IT (CLAUDE.md trap 16-inverse: a fixture you wrote yourself is not evidence about the wire).\n\nVERBATIM WIRE / DOM CAPTURES, historic record, append only, never edit (trap 14b). Source: olumi-docs/feedback-2026-08-16/MODEL-COMPILER-JOURNEY-WITNESS-2026-08-18.md, deployed CEE 585f8dce / UI dd089a50, FRESH guest journey 2026-08-18 13:22-13:41Z, brief tools/graph-evaluator/briefs/04-conflicting-constraints.md:\n  - wire.t4/t5/t6_user_message: the three repair phrasings, verbatim from the live DOM transcript (witness section 'LINK 9').\n  - wire.on_screen_ask: the product's own turn-1 ask, verbatim.\n  - wire.t4_refusal / wire.t5_reply: Olumi's replies, verbatim.\n  - ids.*: node ids and labels, verbatim from the captured GRAPH_READY.graph node table and from the witness's explicit statement that the surviving blocker is option_id 4abad64d x factor_id 4d3256b4.\n  - draft_graph.nodes: 21 of the 22 captured nodes, each carrying the captured id, kind and label. The 22nd node's identity was NOT recorded in the evidence file (the table lists 21 while the capture counts 22) and is therefore ABSENT rather than invented.\n\nRECONSTRUCTED, NOT CAPTURED — say so rather than let a later reader assume otherwise:\n  - draft_graph.edges: the raw graph JSON was not preserved in the evidence file. Edges are the MINIMUM set consistent with the five captured blockers (each blocker's option->factor pair) plus the factor->outcome->goal wiring needed for the graph to be structurally valid. Consequence, measured: canonical readiness on this reconstruction yields EIGHT MISSING_OPTION_VALUE blockers where the capture recorded five, because the reconstruction gives all four options factor links. Do NOT quote a blocker COUNT from this fixture as a wire figure. The pair identities the specs bind to ARE captured.\n  - node field detail (observed_state / category / provenance) follows the shape of the real captured graph in ../witness-2026-08-17/j4-wrong-entity-write.json; the captured 0.5 observed values are the ones the blocker copy quotes ('is currently 0.5', 5 of 5).",
+ "ids": {
+  "option_id": "4abad64d",
+  "option_label": "double down on enterprise sales (higher margins but longer cycles and more headcount)",
+  "factor_id": "4d3256b4",
+  "factor_label": "Sales Headcount - Hybrid Maintained",
+  "sibling_factor_id": "919d7f50",
+  "sibling_factor_label": "Sales Headcount Investment",
+  "two_option_factor_id": "9061009e",
+  "two_option_factor_label": "Engineering Spend (Upfront Capex) - Hybrid"
+ },
+ "wire": {
+  "on_screen_ask": "Next, choose the missing effect value for \"double down on enterprise sales (higher…\" on \"Sales Headcount - Hybrid Maintained\" so the comparison can be prepared.",
+  "t4_user_message": "Doubling down on enterprise sales would push sales headcount up a lot - set it to 0.8.",
+  "t4_refusal": "That looks like a change to an option's intervention rather than the Sales Headcount Investment factor's own value, so I haven't changed anything. Tell me whether you meant the factor's value or a specific option's effect, and I'll take it from there.",
+  "t5_user_message": "I meant the option's effect. For the enterprise sales option, set Sales Headcount - Hybrid Maintained to 0.8.",
+  "t5_reply": "Updated Sales Headcount - Hybrid Maintained",
+  "t6_user_message": "No - I want the option's effect, not the factor baseline. Under the enterprise sales option, Sales Headcount - Hybrid Maintained should become 0.8."
+ },
+ "draft_graph": {
+  "nodes": [
+   {
+    "id": "666659b7",
+    "kind": "goal",
+    "label": "Cut Burn Rate by 30%",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "d24307c3",
+    "kind": "decision",
+    "label": "Decision",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "793be10e",
+    "kind": "outcome",
+    "label": "Achieve 3x User Growth This Year",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "f2f131a6",
+    "kind": "outcome",
+    "label": "User Growth Rate",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "ce6b11d2",
+    "kind": "outcome",
+    "label": "Gross Margin Improvement",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "out_52677a8b_impact",
+    "kind": "outcome",
+    "label": "Monthly Burn Rate - Status Quo Impact",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "4abad64d",
+    "kind": "option",
+    "label": "double down on enterprise sales (higher margins but longer cycles and more headcount)",
+    "interventions": {},
+    "is_baseline": false,
+    "provenance": "from_brief"
+   },
+   {
+    "id": "e755ec33",
+    "kind": "option",
+    "label": "invest heavily in a self-serve product (lower CAC but requires significant engineering spend upfront)",
+    "interventions": {},
+    "is_baseline": false,
+    "provenance": "from_brief"
+   },
+   {
+    "id": "939d4630",
+    "kind": "option",
+    "label": "Hybrid Phased Approach (Pilot Self-Serve, Maintain Enterprise)",
+    "interventions": {},
+    "is_baseline": false,
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "e5dc21d6",
+    "kind": "option",
+    "label": "Continue Current Mix (Status Quo)",
+    "interventions": {},
+    "is_baseline": true,
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "24931e51",
+    "kind": "factor",
+    "label": "NHS Data Regulation Outcome",
+    "category": "external",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "52677a8b",
+    "kind": "factor",
+    "label": "Monthly Burn Rate - Status Quo",
+    "observed_state": {
+     "value": 0.5,
+     "source": "cee_inference",
+     "extractionType": "inferred",
+     "factor_type": "other",
+     "uncertainty_drivers": [
+      "Not provided"
+     ]
+    },
+    "category": "controllable",
+    "display_value": "Moderate (0.5)",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "16f4cf02",
+    "kind": "factor",
+    "label": "Customer Acquisition Cost",
+    "observed_state": {
+     "value": 0.5,
+     "source": "cee_inference",
+     "extractionType": "inferred",
+     "factor_type": "other",
+     "uncertainty_drivers": [
+      "Not provided"
+     ]
+    },
+    "category": "controllable",
+    "display_value": "Moderate (0.5)",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "e53e6665",
+    "kind": "factor",
+    "label": "Customer Acquisition Cost - Hybrid",
+    "observed_state": {
+     "value": 0.5,
+     "source": "cee_inference",
+     "extractionType": "inferred",
+     "factor_type": "other",
+     "uncertainty_drivers": [
+      "Not provided"
+     ]
+    },
+    "category": "controllable",
+    "display_value": "Moderate (0.5)",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "5aae7675",
+    "kind": "factor",
+    "label": "Engineering Spend (Upfront Capex)",
+    "observed_state": {
+     "value": 0.5,
+     "source": "cee_inference",
+     "extractionType": "inferred",
+     "factor_type": "other",
+     "uncertainty_drivers": [
+      "Not provided"
+     ]
+    },
+    "category": "controllable",
+    "display_value": "Moderate (0.5)",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "9061009e",
+    "kind": "factor",
+    "label": "Engineering Spend (Upfront Capex) - Hybrid",
+    "observed_state": {
+     "value": 0.5,
+     "source": "cee_inference",
+     "extractionType": "inferred",
+     "factor_type": "other",
+     "uncertainty_drivers": [
+      "Not provided"
+     ]
+    },
+    "category": "controllable",
+    "display_value": "Moderate (0.5)",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "919d7f50",
+    "kind": "factor",
+    "label": "Sales Headcount Investment",
+    "observed_state": {
+     "value": 0.5,
+     "source": "cee_inference",
+     "extractionType": "inferred",
+     "factor_type": "other",
+     "uncertainty_drivers": [
+      "Not provided"
+     ]
+    },
+    "category": "controllable",
+    "display_value": "Moderate (0.5)",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "4d3256b4",
+    "kind": "factor",
+    "label": "Sales Headcount - Hybrid Maintained",
+    "observed_state": {
+     "value": 0.5,
+     "source": "cee_inference",
+     "extractionType": "inferred",
+     "factor_type": "other",
+     "uncertainty_drivers": [
+      "Not provided"
+     ]
+    },
+    "category": "controllable",
+    "display_value": "Moderate (0.5)",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "a7342073",
+    "kind": "risk",
+    "label": "Regulatory Access Restriction",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "c4ff4190",
+    "kind": "risk",
+    "label": "Burn Rate Overshoot",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "ceb29710",
+    "kind": "risk",
+    "label": "Enterprise Sales Cycle Delay",
+    "provenance": "ai_inferred"
+   }
+  ],
+  "edges": [
+   {
+    "from": "4abad64d",
+    "to": "4d3256b4",
+    "strength": {
+     "mean": 1.0,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai"
+   },
+   {
+    "from": "4abad64d",
+    "to": "919d7f50",
+    "strength": {
+     "mean": 1.0,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai"
+   },
+   {
+    "from": "e755ec33",
+    "to": "16f4cf02",
+    "strength": {
+     "mean": 1.0,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai"
+   },
+   {
+    "from": "e755ec33",
+    "to": "5aae7675",
+    "strength": {
+     "mean": 1.0,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai"
+   },
+   {
+    "from": "e755ec33",
+    "to": "9061009e",
+    "strength": {
+     "mean": 1.0,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai"
+   },
+   {
+    "from": "939d4630",
+    "to": "e53e6665",
+    "strength": {
+     "mean": 1.0,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai"
+   },
+   {
+    "from": "939d4630",
+    "to": "9061009e",
+    "strength": {
+     "mean": 1.0,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai"
+   },
+   {
+    "from": "e5dc21d6",
+    "to": "52677a8b",
+    "strength": {
+     "mean": 1.0,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai"
+   },
+   {
+    "from": "4d3256b4",
+    "to": "ce6b11d2",
+    "strength": {
+     "mean": 0.5,
+     "std": 0.12
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai"
+   },
+   {
+    "from": "919d7f50",
+    "to": "ce6b11d2",
+    "strength": {
+     "mean": 0.5,
+     "std": 0.12
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai"
+   },
+   {
+    "from": "16f4cf02",
+    "to": "f2f131a6",
+    "strength": {
+     "mean": 0.5,
+     "std": 0.12
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai"
+   },
+   {
+    "from": "5aae7675",
+    "to": "666659b7",
+    "strength": {
+     "mean": 0.5,
+     "std": 0.12
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai"
+   },
+   {
+    "from": "9061009e",
+    "to": "666659b7",
+    "strength": {
+     "mean": 0.5,
+     "std": 0.12
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai"
+   },
+   {
+    "from": "e53e6665",
+    "to": "f2f131a6",
+    "strength": {
+     "mean": 0.5,
+     "std": 0.12
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai"
+   },
+   {
+    "from": "52677a8b",
+    "to": "out_52677a8b_impact",
+    "strength": {
+     "mean": 0.5,
+     "std": 0.12
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai"
+   },
+   {
+    "from": "24931e51",
+    "to": "f2f131a6",
+    "strength": {
+     "mean": 0.5,
+     "std": 0.12
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai"
+   },
+   {
+    "from": "f2f131a6",
+    "to": "793be10e",
+    "strength": {
+     "mean": 0.5,
+     "std": 0.12
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai"
+   },
+   {
+    "from": "ce6b11d2",
+    "to": "666659b7",
+    "strength": {
+     "mean": 0.5,
+     "std": 0.12
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai"
+   },
+   {
+    "from": "out_52677a8b_impact",
+    "to": "666659b7",
+    "strength": {
+     "mean": 0.5,
+     "std": 0.12
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai"
+   },
+   {
+    "from": "a7342073",
+    "to": "666659b7",
+    "strength": {
+     "mean": -0.5,
+     "std": 0.12
+    },
+    "exists_probability": 1,
+    "effect_direction": "negative",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai"
+   },
+   {
+    "from": "c4ff4190",
+    "to": "666659b7",
+    "strength": {
+     "mean": -0.5,
+     "std": 0.12
+    },
+    "exists_probability": 1,
+    "effect_direction": "negative",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai"
+   },
+   {
+    "from": "ceb29710",
+    "to": "666659b7",
+    "strength": {
+     "mean": -0.5,
+     "std": 0.12
+    },
+    "exists_probability": 1,
+    "effect_direction": "negative",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai"
+   }
+  ]
+ }
+}

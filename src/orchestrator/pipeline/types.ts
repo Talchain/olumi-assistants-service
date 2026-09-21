@@ -1,0 +1,715 @@
+/**
+ * V2 Pipeline Types
+ *
+ * Inter-phase data contracts for the five-phase orchestrator pipeline.
+ * Every phase receives the output of the previous phase and adds its own enrichments.
+ *
+ * Reuses existing types from ../types.ts where they exist — does not duplicate.
+ */
+
+import type { FastifyRequest } from "fastify";
+import type {
+  ConversationContext,
+  TypedConversationBlock,
+  ConversationMessage,
+  SuggestedAction,
+  ConversationalState,
+  PendingClarificationState,
+  PendingProposalState,
+  ProposedChangesPayload,
+  SystemEvent,
+  DecisionStage,
+  V2RunResponseEnvelope,
+  OrchestratorError,
+  TurnPlan,
+  GraphV3T,
+  AnalysisInputs,
+  GraphPatchBlockData,
+  AppliedChanges,
+  ModelReceipt,
+} from "../types.js";
+import type { PLoTClient } from "../plot-client.js";
+import type { GraphV3Compact } from "../context/graph-compact.js";
+import type { AnalysisResponseSummary } from "../context/analysis-compact.js";
+import type { DecisionContinuity } from "../context/decision-continuity.js";
+import type { ToolInvocation, ParsedLLMResponse, ExtractedBlock } from "../response-parser.js";
+import type { PLoTClientRunOpts } from "../plot-client.js";
+import type { ChatWithToolsResult, ChatWithToolsArgs, ChatWithToolsStreamEvent, CallOpts } from "../../adapters/llm/types.js";
+import type { GuidanceItem } from "../types/guidance-item.js";
+import type { EditGraphTraceDiagnostics } from "../tools/edit-graph.js";
+import type { DiagnosticTrace } from "./diagnostic-trace.js";
+
+// ============================================================================
+// Shared Value Types
+// ============================================================================
+
+export type ProgressKind = 'changed_model' | 'ran_analysis' | 'added_evidence' | 'committed' | 'none';
+export type IntentClassification = 'explain' | 'recommend' | 'act' | 'conversational';
+export type RouteOutcome =
+  | 'default_llm'
+  | 'explicit_generate'
+  | 'generation_clarification'
+  | 'clarification_continuation'
+  | 'proposal_created'
+  | 'proposal_confirmation'
+  | 'proposal_dismissal'
+  | 'proposal_stale_dismissal'
+  | 'results_explanation'
+  | 'rationale_explanation'
+  | 'direct_analysis_ack_only'
+  | 'direct_analysis_with_narration'
+  | 'direct_analysis_narration_skipped'
+  | 'gap_coaching';
+
+export interface RouteMetadata {
+  outcome: RouteOutcome;
+  reasoning: string;
+  // Extended observability fields (populated by envelope assembler)
+  tool_selected?: string | null;
+  tool_permitted?: boolean;
+  response_mode?: string | null;
+  turn_type?: string | null;
+  has_graph?: boolean;
+  has_analysis?: boolean;
+  contract_version?: string;
+  // Model observability (populated by phase3-llm after LLM call)
+  resolved_model?: string | null;
+  resolved_provider?: string | null;
+  // Prompt observability (populated by phase3-llm from getSystemPromptMeta)
+  prompt_hash?: string | null;
+  prompt_version?: string | null;
+  // Cache observability (populated from Anthropic usage metrics)
+  cache_creation_input_tokens?: number;
+  cache_read_input_tokens?: number;
+  cache_hit?: boolean;
+  // DSK version hash (populated by envelope assembler for canonical assertion target)
+  dsk_version_hash?: string | null;
+  // Feature health diagnostics (populated by envelope assembler)
+  features?: Record<string, { enabled: boolean; healthy: boolean; reason?: string }>;
+}
+
+export type TriggerSource =
+  | 'user_message'
+  | 'system_event'
+  | 'direct_analysis_run'
+  | 'analysis_complete_followup'
+  | 'chip'
+  | 'dock_action';
+
+export interface IntentGateDebugSummary {
+  routing: 'deterministic' | 'llm';
+  tool: string | null;
+  matched_pattern: string | null;
+  confidence?: string | null;
+}
+
+export interface Phase3RouteDebug {
+  initial_intent_gate: IntentGateDebugSummary;
+  final_intent_gate: IntentGateDebugSummary;
+  deterministic_override: {
+    applied: boolean;
+    reason: string | null;
+  };
+  explicit_generate_override: {
+    considered: boolean;
+    applied: boolean;
+    reason: string | null;
+  };
+  explain_results_selection: {
+    considered: boolean;
+    selected: boolean;
+    reason: string | null;
+    explanation_path: 'rationale_explanation' | 'results_explanation' | null;
+  };
+  clarification_continuation: {
+    present: boolean;
+    grouped: boolean;
+  };
+  pending_proposal_followup: {
+    present: boolean;
+    action: 'confirm' | 'dismiss' | 'stale' | null;
+  };
+  post_analysis_followup: {
+    triggered: boolean;
+    reason: string | null;
+  };
+  draft_graph_selection: {
+    considered: boolean;
+    selected: boolean;
+    reason: string | null;
+  };
+}
+
+export interface TurnDebugBundle {
+  request_id: string;
+  turn_id: string;
+  scenario_id: string;
+  trigger_source: TriggerSource;
+  processed_user_message: string | null;
+  recent_conversation: Array<{
+    role: 'user' | 'assistant';
+    text: string;
+  }>;
+  stage_from_ui: string | null;
+  stage_inferred: string | null;
+  intent_classification: string | null;
+  initial_intent_gate: IntentGateDebugSummary;
+  final_route: {
+    routing: 'deterministic' | 'llm';
+    selected_tool: string | null;
+    route_outcome: RouteOutcome | null;
+    route_reasoning: string | null;
+  };
+  route_decisions: Phase3RouteDebug | null;
+  analysis_state: {
+    present: boolean;
+    explainable: boolean;
+    current: boolean;
+    runnable: boolean;
+  };
+  clarification_state: {
+    present: boolean;
+    candidate_labels: string[];
+  };
+  pending_proposal_state: {
+    present: boolean;
+    summary: string | null;
+  };
+  grouped_continuation_used: boolean;
+  outcome: 'blocked' | 'clarified' | 'proposed' | 'applied' | 'narrated' | 'failed' | 'answered';
+  failure: {
+    branch: string | null;
+    code: string | null;
+    message: string | null;
+  };
+  direct_analysis_run: {
+    source_context: string | null;
+    narration_branch: string | null;
+    stale_state_reused: boolean | null;
+  } | null;
+}
+
+export interface StageIndicator {
+  stage: DecisionStage;
+  substate?: 'needs_run' | 'has_run' | 'ready_to_commit' | 'committed';
+  confidence: 'high' | 'medium' | 'low';
+  source: 'explicit_event' | 'inferred';
+}
+
+export interface DecisionArchetype {
+  type: string | null;
+  confidence: 'high' | 'medium' | 'low';
+  evidence: string;
+}
+
+export interface StuckState {
+  detected: boolean;
+  rescue_routes: SuggestedAction[];
+}
+
+// ============================================================================
+// Science / Specialist Placeholder Types
+// ============================================================================
+
+/** Placeholder — populated by A.9 (DSK loader). */
+export interface ClaimReference {
+  claim_id: string;
+  claim_version: string;
+}
+
+/** Placeholder — populated by A.10 (science annotations). */
+export interface ScienceAnnotation {
+  span_start: number;
+  span_end: number;
+  span_text: string;
+  claim_id: string;
+  claim_version: string;
+  category: 'empirical' | 'technique_efficacy' | 'causal_rule' | 'population';
+}
+
+/** Placeholder — populated by A.12 (claims ledger). */
+export interface TechniqueReference {
+  technique_id: string;
+  technique_version: string;
+}
+
+/** Placeholder — populated post-pilot (specialist routing). */
+export interface SpecialistAdvice {
+  specialist_id: string;
+  recommendation: string;
+  confidence: number;
+}
+
+/** Placeholder — populated post-pilot (specialist routing). */
+export interface SpecialistAdviceCandidate {
+  specialist_id: string;
+  score: number;
+  reason: string;
+}
+
+/** Placeholder — populated by A.9 (DSK loader). */
+export interface DSKTrigger {
+  trigger_id: string;
+  condition: string;
+}
+
+/** Placeholder — populated by A.9 (DSK loader). */
+export interface DSKTechnique {
+  technique_id: string;
+  name: string;
+}
+
+// ============================================================================
+// Entity Detail (for entity-aware context enrichment)
+// ============================================================================
+
+export interface ReferencedEntityEdgeSummary {
+  connected_label: string;
+  strength: number;
+  effect_direction?: string;
+}
+
+export interface ReferencedEntityDetail {
+  id: string;
+  label: string;
+  kind: string;
+  category?: string;
+  value?: number;
+  raw_value?: number;
+  unit?: string;
+  cap?: number;
+  source?: string;
+  edges: ReferencedEntityEdgeSummary[];
+}
+
+// ============================================================================
+// ISL/PLoT Enrichment Types (V2)
+// ============================================================================
+
+export interface GapSummary {
+  missing_baseline_count: number;
+  missing_baseline_factors: string[];
+  missing_goal_target: boolean;
+  unconfirmed_count: number;
+  total_factor_count: number;
+}
+
+export interface VoiRankingEntry {
+  factor_id: string;
+  factor_label: string;
+  voi_score: number;
+  evpi: number;
+  evpi_percentage_points: number;
+}
+
+export interface EdgeEValue {
+  edge_id: string;
+  e_value: number;
+  flip_direction: string;
+  current_mean: number;
+  flip_mean: number;
+}
+
+export interface ConditionalWinner {
+  factor_id: string;
+  factor_label: string;
+  split_value: number;
+  split_unit: string;
+  low_bucket: string;
+  high_bucket: string;
+  winner_flips: boolean;
+}
+
+export interface InferenceWarning {
+  node_id: string;
+  code: string;
+  message: string;
+}
+
+export interface PlotCritique {
+  code: string;
+  message: string;
+}
+
+// ============================================================================
+// Phase 1 Output — EnrichedContext
+// ============================================================================
+
+export interface EnrichedContext {
+  // Scenario state (loaded from request)
+  graph: GraphV3T | null;
+  analysis: V2RunResponseEnvelope | null;
+  framing: ConversationContext['framing'];
+  conversation_history: ConversationMessage[];
+  selected_elements: string[];
+
+  // Context management (populated by Phase 1 context management layer)
+  graph_compact?: GraphV3Compact;              // compact graph for LLM context
+  analysis_response?: AnalysisResponseSummary; // compact analysis summary
+  messages?: ConversationMessage[];            // trimmed to 5 turns (optional for backward compat)
+  event_log_summary?: string;                  // from buildEventLogSummary
+  selected_node_ids?: string[];                // from selected_elements (node IDs)
+  selected_edge_ids?: string[];                // from selected_elements (edge IDs)
+  context_hash?: string;                       // from computeContextHash
+  analysis_inputs?: AnalysisInputs | null;     // passed through from request for run_analysis tool
+  /** Decision continuity summary — populated by Phase 1 after compaction. */
+  decision_continuity?: DecisionContinuity;
+  /** Entity-aware detail blocks — populated by Phase 1 when message references graph entities. */
+  referenced_entities?: ReferencedEntityDetail[];
+  /** Cross-turn entity interaction state — populated by Phase 1 when CEE_ENTITY_MEMORY_ENABLED. */
+  entity_state_map?: import("../context/entity-state-tracker.js").EntityStateMap;
+  /** Zone 2 blocks that activated but rendered empty — populated by Phase 3 prompt assembly. */
+  zone2_empty_blocks?: string[];
+
+  // ISL/PLoT enrichment fields (V2 — optional, serialised at trim priority 7-8)
+  /** Data gap summary from graph inspection. */
+  gap_summary?: GapSummary;
+  /** Top investigation priorities with EVPI. From analysis voi_ranking. */
+  voi_ranking?: VoiRankingEntry[];
+  /** Edge robustness e-values. From analysis. */
+  edge_e_values?: EdgeEValue[];
+  /** Conditional winner splits. From analysis. */
+  conditional_winners?: ConditionalWinner[];
+  /** Inference warnings from ISL. */
+  inference_warnings?: InferenceWarning[];
+  /** PLoT structural critiques. */
+  plot_critiques?: PlotCritique[];
+
+  // Inferred state
+  stage_indicator: StageIndicator;
+  intent_classification: IntentClassification;
+  decision_archetype: DecisionArchetype;
+  progress_markers: ProgressKind[];
+  stuck: StuckState;
+  conversational_state: ConversationalState;
+
+  // DSK (stubbed — populated by A.9)
+  dsk: {
+    claims: ClaimReference[];
+    triggers: DSKTrigger[];
+    techniques: DSKTechnique[];
+    version_hash: string | null;
+  };
+
+  // User profile (stubbed — populated by A.4+)
+  user_profile: {
+    coaching_style: 'socratic';
+    calibration_tendency: 'unknown';
+    challenge_tolerance: 'medium';
+  };
+
+  // System
+  scenario_id: string;
+  turn_id: string;
+  system_event?: SystemEvent;
+  user_message?: string;
+}
+
+// ============================================================================
+// Phase 2 Output — SpecialistResult
+// ============================================================================
+
+export interface SpecialistResult {
+  advice: SpecialistAdvice | null;
+  candidates: SpecialistAdviceCandidate[];
+  triggers_fired: string[];
+  triggers_suppressed: string[];
+}
+
+// ============================================================================
+// Phase 3 Output — LLMResult
+// ============================================================================
+
+export interface LLMResult {
+  assistant_text: string | null;
+  tool_invocations: ToolInvocation[];
+  science_annotations: ScienceAnnotation[];
+  raw_response: string;
+  suggested_actions: SuggestedAction[];
+  /** AI-authored blocks extracted from XML <blocks> (commentary, review_card, artefact). */
+  extracted_blocks: ExtractedBlock[];
+  diagnostics: string | null;
+  parse_warnings: string[];
+  route_metadata?: RouteMetadata;
+  route_debug?: Phase3RouteDebug;
+  /**
+   * LLM call telemetry captured from ChatWithToolsResult.
+   * Additive — absent on deterministic routes that skip the LLM.
+   * Used by _diagnostic_trace to populate accurate token/latency/stop_reason fields.
+   */
+  _llm_telemetry?: {
+    input_tokens: number;
+    output_tokens: number;
+    cache_read_input_tokens?: number;
+    cache_creation_input_tokens?: number;
+    latency_ms: number;
+    stop_reason: string;
+    model: string;
+    provider: string;
+    thinking_enabled: boolean;
+  };
+}
+
+// ============================================================================
+// Phase 4 Output — ToolResult
+// ============================================================================
+
+export interface ToolResult {
+  blocks: TypedConversationBlock[];
+  side_effects: {
+    graph_updated: boolean;
+    analysis_ran: boolean;
+    brief_generated: boolean;
+  };
+  assistant_text: string | null;
+  analysis_response?: V2RunResponseEnvelope;
+  tool_latency_ms?: number;
+  /** GuidanceItems generated by this tool execution. Always present; defaults to []. */
+  guidance_items: GuidanceItem[];
+  /** Suggested follow-up actions from tool handler (e.g. "Re-run analysis" after edit_graph). */
+  suggested_actions?: SuggestedAction[];
+  /** edit_graph-only diagnostics for turn trace. */
+  edit_graph_diagnostics?: EditGraphTraceDiagnostics;
+  pending_clarification?: PendingClarificationState;
+  pending_proposal?: PendingProposalState;
+  proposed_changes?: ProposedChangesPayload;
+  route_metadata?: RouteMetadata;
+  /** Applied change receipt from a successful edit_graph. Absent on failed edits. */
+  applied_changes?: AppliedChanges;
+  /** Which explain_results tier resolved this turn: 1 = cached, 2 = review data, 3 = LLM. */
+  deterministic_answer_tier?: 1 | 2 | 3;
+  /** CEE pipeline outcome metadata from draft_graph. Surfaced in turn_complete envelope. */
+  _pipeline_outcome?: import("../../cee/unified-pipeline/types.js").PipelineOutcome;
+  /**
+   * Tool-level LLM call telemetry (e.g. from draft_graph or edit_graph).
+   * Additive — absent when the tool did not make its own LLM call.
+   * Used by _diagnostic_trace to capture tool-level LLM calls alongside
+   * the orchestrator-level call from Phase 3.
+   */
+  _tool_llm_telemetry?: {
+    tool: string;
+    model: string;
+    provider: string;
+    input_tokens: number;
+    output_tokens: number;
+    cache_read_input_tokens?: number;
+    cache_creation_input_tokens?: number;
+    latency_ms: number;
+    stop_reason: string;
+    thinking_enabled: boolean;
+    structured_outputs_used: boolean;
+    prompt_version?: string;
+    prompt_hash?: string;
+    error?: { status: number; type: string; message: string };
+  };
+}
+
+// ============================================================================
+// Phase 5 Output — OrchestratorResponseEnvelopeV2
+// ============================================================================
+
+export interface ScienceLedger {
+  claims_used: ClaimReference[];
+  techniques_used: TechniqueReference[];
+  scope_violations: string[];
+  phrasing_violations: string[];
+  rewrite_applied: boolean;
+}
+
+export interface OrchestratorResponseEnvelopeV2 {
+  turn_id: string;
+  assistant_text: string | null;
+  assistant_tool_calls?: Array<{ name: string; input: Record<string, unknown> }>;
+  blocks: TypedConversationBlock[];
+  suggested_actions: SuggestedAction[];
+  proposed_changes?: ProposedChangesPayload;
+  analysis_response?: V2RunResponseEnvelope;
+  /**
+   * Applied change receipt from a successful edit_graph operation.
+   * Additive UI supplement — does not replace GraphPatchBlock.
+   * Absent when edit was rejected or no edit occurred this turn.
+   */
+  applied_changes?: AppliedChanges;
+  /**
+   * Which explain_results tier resolved this turn.
+   * 1 = cached deterministic, 2 = review data, 3 = LLM call.
+   * Absent when explain_results was not used.
+   */
+  deterministic_answer_tier?: 1 | 2 | 3;
+
+  lineage: {
+    context_hash: string;
+    plan_hash?: string;
+    response_hash?: string;
+    dsk_version_hash: string | null;
+  };
+
+  stage_indicator: {
+    stage: DecisionStage;
+    substate?: string;
+    confidence: 'high' | 'medium' | 'low';
+    source: 'explicit_event' | 'inferred';
+    transition?: { from: DecisionStage; to: DecisionStage; trigger: string };
+  };
+
+  science_ledger: ScienceLedger;
+
+  progress_marker: {
+    kind: ProgressKind;
+  };
+
+  observability: {
+    triggers_fired: string[];
+    triggers_suppressed: string[];
+    intent_classification: string;
+    specialist_contributions: SpecialistAdvice[];
+    specialist_disagreement: null;
+  };
+
+  turn_plan: TurnPlan;
+
+  /**
+   * Structured coaching items generated from this turn's tool execution.
+   * Always present; defaults to []. Additive — existing consumers that don't
+   * read this field are unaffected.
+   */
+  guidance_items: GuidanceItem[];
+
+  /**
+   * Envelope-level analysis readiness computed from the current graph state.
+   * The UI uses this to enable/disable the Analyse button.
+   * Absent when no graph exists. Computed via the canonical graph readiness adapter.
+   */
+  analysis_ready?: GraphPatchBlockData['analysis_ready'];
+
+  /**
+   * When run_analysis returns blocked/failed — from PLoT V2RunError (422) or CEE prereq check.
+   * V2 contract: analysis failures communicated via analysis_status, not HTTP status.
+   */
+  analysis_status?: string;
+  status_reason?: string;
+  retryable?: boolean;
+  critiques?: unknown[];
+  meta?: Record<string, unknown>;
+
+  error?: {
+    code: string;
+    message: string;
+  };
+
+  /** Server-constructed model receipt after draft_graph. */
+  model_receipt?: ModelReceipt;
+
+  /** Diagnostics content from LLM. Non-production only. */
+  diagnostics?: string;
+  /** Parse warnings from XML envelope extraction. Non-production only. */
+  parse_warnings?: string[];
+  /** CEE pipeline outcome metadata — progressive degradation diagnostics from draft_graph. */
+  _pipeline_outcome?: import("../../cee/unified-pipeline/types.js").PipelineOutcome;
+  _route_metadata?: RouteMetadata;
+  _debug_bundle?: TurnDebugBundle;
+  /**
+   * Diagnostic trace — LLM calls, prompt identity, zone 2 assembly, tool policy,
+   * provider resolution, structured output config, streaming metrics, and fallback
+   * events accumulated during this pipeline turn.
+   * Gated by CEE_DIAGNOSTIC_TRACE_ENABLED (default false in production).
+   * Response-only — never fed back into LLM context or Zone 2 assembly.
+   */
+  _diagnostic_trace?: DiagnosticTrace;
+  /**
+   * Contract violation codes from Phase 5 validation. Populated by phase5Validate
+   * when violations are found; used by emitTurnTrace for structured log diagnostics.
+   * Internal — not serialised to the HTTP response.
+   */
+  _contract_violation_codes?: string[];
+}
+
+// ============================================================================
+// Dependency Injection Interfaces
+// ============================================================================
+
+export interface LLMClient {
+  chatWithTools(
+    args: ChatWithToolsArgs,
+    opts: CallOpts,
+  ): Promise<ChatWithToolsResult>;
+
+  chat(
+    options: { system: string; userMessage: string },
+    config: { requestId: string; timeoutMs: number },
+  ): Promise<{ content: string }>;
+
+  /**
+   * Optional: Stream chat with tools for incremental SSE delivery.
+   * If not implemented, pipeline-stream falls back to chatWithTools().
+   */
+  streamChatWithTools?(
+    args: ChatWithToolsArgs,
+    opts: CallOpts,
+  ): AsyncIterable<ChatWithToolsStreamEvent>;
+
+  /**
+   * Return the resolved model ID and provider name for the last call.
+   * Optional — production client implements this; test mocks may omit it.
+   */
+  getResolvedModel?(): { model: string; provider: string } | null;
+}
+
+export interface ToolDispatcher {
+  dispatch(
+    toolName: string,
+    toolInput: Record<string, unknown>,
+    context: ConversationContext,
+    turnId: string,
+    requestId: string,
+    options?: {
+      plotOpts?: PLoTClientRunOpts;
+      request?: FastifyRequest;
+      intentClassification?: string;
+      /** ISO currency code (e.g. "GBP") detected from the user message. Thread
+       *  through so draft_graph gets consistent instruction behaviour on the
+       *  V2 path, matching the deterministic action path. */
+      userCurrencyHint?: string | null;
+    },
+  ): Promise<ToolResult>;
+}
+
+export interface PipelineDeps {
+  llmClient: LLMClient;
+  toolDispatcher: ToolDispatcher;
+  /** PLoT client for system event routing (validate-patch). Optional — omit in tests that don't exercise PLoT. */
+  plotClient?: PLoTClient | null;
+  /** PLoT call opts (turn budget, signal). Passed to system event router. */
+  plotOpts?: PLoTClientRunOpts;
+}
+
+// ============================================================================
+// Re-exports for convenience
+// ============================================================================
+
+export type {
+  ConversationContext,
+  TypedConversationBlock,
+  ConversationMessage,
+  SuggestedAction,
+  ConversationalState,
+  ProposedChangesPayload,
+  SystemEvent,
+  DecisionStage,
+  V2RunResponseEnvelope,
+  OrchestratorError,
+  TurnPlan,
+  GraphV3T,
+  ToolInvocation,
+  ParsedLLMResponse,
+  PLoTClientRunOpts,
+  FastifyRequest,
+  ChatWithToolsResult,
+  ChatWithToolsArgs,
+  ChatWithToolsStreamEvent,
+  CallOpts,
+  GraphV3Compact,
+  AnalysisResponseSummary,
+  GuidanceItem,
+  DecisionContinuity,
+};

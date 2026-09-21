@@ -1,0 +1,40 @@
+{
+  "id": "11-change-factor-value",
+  "name": "Update churn rate factor value",
+  "description": "Changes the observable churn rate value from 3% to 5%, reflecting worsening retention",
+  "graph": {
+    "nodes": [
+      {"id": "dec_expansion", "kind": "decision", "label": "European Market Expansion"},
+      {"id": "opt_expand", "kind": "option", "label": "Enter European Market", "data": {"interventions": {"fac_europe_entry": 1, "fac_investment": 1.0}}},
+      {"id": "opt_hold", "kind": "option", "label": "Focus on Domestic (Status Quo)", "data": {"interventions": {"fac_europe_entry": 0, "fac_investment": 0.2}}},
+      {"id": "fac_europe_entry", "kind": "factor", "label": "Europe Market Entry (0/1)", "category": "controllable", "data": {"value": 0, "extractionType": "inferred", "factor_type": "other"}},
+      {"id": "fac_investment", "kind": "factor", "label": "Expansion Investment (0-1, share of 500k cap)", "category": "controllable", "data": {"value": 0.2, "raw_value": 100000, "unit": "GBP", "cap": 500000, "extractionType": "inferred", "factor_type": "cost"}},
+      {"id": "fac_churn_rate", "kind": "factor", "label": "Monthly Churn Rate", "category": "observable", "data": {"value": 0.03, "raw_value": 3, "unit": "%", "extractionType": "explicit"}},
+      {"id": "fac_competition", "kind": "factor", "label": "Competitive Intensity", "category": "external", "prior": {"distribution": "uniform", "range_min": 0.0, "range_max": 1.0}},
+      {"id": "out_revenue", "kind": "outcome", "label": "Revenue Growth"},
+      {"id": "risk_financial", "kind": "risk", "label": "Financial Exposure"},
+      {"id": "goal_growth", "kind": "goal", "label": "Reach 800 Pro Customers", "goal_threshold": 0.8, "goal_threshold_raw": 800, "goal_threshold_unit": "customers", "goal_threshold_cap": 1000}
+    ],
+    "edges": [
+      {"from": "dec_expansion", "to": "opt_expand", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "dec_expansion", "to": "opt_hold", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_expand", "to": "fac_europe_entry", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_expand", "to": "fac_investment", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_hold", "to": "fac_europe_entry", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_hold", "to": "fac_investment", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "fac_europe_entry", "to": "out_revenue", "strength": {"mean": 0.35, "std": 0.15}, "exists_probability": 0.90, "effect_direction": "positive"},
+      {"from": "fac_investment", "to": "risk_financial", "strength": {"mean": 0.65, "std": 0.15}, "exists_probability": 0.92, "effect_direction": "positive"},
+      {"from": "fac_churn_rate", "to": "risk_financial", "strength": {"mean": 0.35, "std": 0.15}, "exists_probability": 0.85, "effect_direction": "positive"},
+      {"from": "fac_competition", "to": "out_revenue", "strength": {"mean": -0.30, "std": 0.22}, "exists_probability": 0.75, "effect_direction": "negative"},
+      {"from": "out_revenue", "to": "goal_growth", "strength": {"mean": 0.45, "std": 0.10}, "exists_probability": 0.95, "effect_direction": "positive"},
+      {"from": "risk_financial", "to": "goal_growth", "strength": {"mean": -0.25, "std": 0.15}, "exists_probability": 0.90, "effect_direction": "negative"}
+    ]
+  },
+  "edit_instruction": "Set the churn rate to 5% — retention has worsened since the last review",
+  "expected": {
+    "has_operations": true,
+    "expected_op_types": ["update_node"],
+    "topology_must_hold": true,
+    "expect_rerun": true
+  }
+}

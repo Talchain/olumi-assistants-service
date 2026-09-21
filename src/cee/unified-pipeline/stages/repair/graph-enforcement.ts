@@ -1,0 +1,980 @@
+/**
+ * Stage 4 Substep 9b: Deterministic Graph Enforcement
+ *
+ * Two deterministic repairs applied AFTER the clarifier (which can replace
+ * ctx.graph with a refined graph) and before structural-parse:
+ *
+ *   1. fixBridgeChaining  — removes forbidden outcome↔risk edges, adds goal bridges
+ *                            with sign-correct semantics (outcome→goal +, risk→goal −)
+ *   2. applyBudgetRescale — scales causal inbound edges (factor/action→outcome/risk)
+ *                            so Σ|mean| ≤ BUDGET_TARGET
+ *
+ * After both repairs, runs an authoritative post-enforcement re-validation
+ * via graph-validator. If any severity="error" items are returned, enforcement
+ * sets ctx.earlyReturn (422 CEE_GRAPH_INVALID) before Stage 5 Package.
+ * Validator throws are non-fatal (logged, pipeline continues) — this is
+ * consistent with the codebase convention that system-level validator failures
+ * never block valid graphs.
+ *
+ * Only outcome and risk nodes are budget-enforced. Goal/factor/option/etc
+ * are excluded as targets. Only factor/action → outcome/risk causal edges are
+ * rescaled — option→outcome/risk are INVALID_EDGE_TYPE violations and must not
+ * be rescaled (masking the defect). Structural, bridge, and bidirected edges
+ * are also excluded.
+ *
+ * Edge format support: V1_FLAT (strength_mean/strength_std) and LEGACY (weight)
+ * are detected at Stage 4 entry and stored in ctx.detectedEdgeFormat. Canonical
+ * nested `strength: { mean, std }` is the validation-pipeline shape and is not
+ * observed at this stage; if it ever appears, detectEdgeFormat returns "NONE"
+ * and edges fall through readEdgeMean as undefined (skipped with telemetry).
+ *
+ * Gated by CEE_DETERMINISTIC_ENFORCEMENT_ENABLED (default true).
+ */
+
+import type { StageContext } from "../../types.js";
+import type { GraphT, NodeT, EdgeT } from "../../../../schemas/graph.js";
+import { Edge } from "../../../../schemas/graph.js";
+import type { EdgeFormat } from "../../utils/edge-format.js";
+import { detectEdgeFormat, patchEdgeNumeric } from "../../utils/edge-format.js";
+import { config } from "../../../../config/index.js";
+import { log, TelemetryEvents } from "../../../../utils/telemetry.js";
+import type { ValidationErrorCode, ValidatorPhase } from "../../../../validators/graph-validator.types.js";
+import { CANONICAL_EDGE } from "../../../../validators/graph-validator.types.js";
+import { validateGraph as validateGraphDeterministic } from "../../../../validators/graph-validator.js";
+import { repairNoOpOptionTargets } from "./no-op-target-repair.js";
+import { neutraliseNoOpOptions } from "./no-op-neutralisation.js";
+import { buildCeeErrorResponse } from "../../../validation/pipeline.js";
+// ⭐ THE ONE AUTHORITY for "is this block the pipeline's own doing?" — imported,
+// never restated. Both consumers (this stamp and the auto-retry skip) read the
+// same bytes, so they cannot drift into disagreeing about the same block.
+import { isSelfInflictedGoalGap } from "./self-inflicted-goal-gap.js";
+
+// ---------------------------------------------------------------------------
+// The fail-closed block signature (ROADMAP 2.1086)
+// ---------------------------------------------------------------------------
+// These constants ARE the emission: the earlyReturn built at the bottom of
+// `applyDeterministicEnforcement` uses them directly, and the trigger below
+// reads the same bytes — so the auto-retry trigger cannot drift from the
+// producer (derive, don't mirror; trap 12). Note what is deliberately NOT
+// here: a list of validator codes. The gate fires iff
+// `validateGraphDeterministic(...).errors.length > 0` at phase
+// `post_enforcement`, so the retryable code set is whatever that validator
+// classifies as blocking — present or future — by construction.
+
+export const ENFORCEMENT_BLOCK_STATUS_CODE = 422;
+export const ENFORCEMENT_BLOCK_ERROR_CODE = "CEE_GRAPH_INVALID" as const;
+export const ENFORCEMENT_BLOCK_LAST_PHASE = "deterministic_enforcement" as const;
+
+/**
+ * Recognises the post-enforcement fail-closed result THIS module emits —
+ * and only it. Four conjuncts, each carried by the emission below:
+ * the status code, the error code, the producer's own retryability
+ * declaration (`retryable: true` — the gate's judgement that the failure is
+ * stochastic model topology, not a bad brief), and the phase marker that
+ * separates this gate from the orchestrator-validation emitter (the only
+ * other `last_phase` producer in the tree — both named in ROADMAP 2.718).
+ *
+ * Consumed by the bounded auto-retry seam (`draft-auto-retry.ts`); pinned
+ * against the REAL emission in
+ * tests/unit/cee.enforcement-auto-retry-producer-agreement.test.ts.
+ */
+export function isEnforcementBlockedResult(
+  result: { statusCode: number; body: unknown } | undefined,
+): boolean {
+  if (!result || result.statusCode !== ENFORCEMENT_BLOCK_STATUS_CODE) return false;
+  const body = result.body;
+  if (body === null || typeof body !== "object" || Array.isArray(body)) return false;
+  const b = body as Record<string, unknown>;
+  if (b.code !== ENFORCEMENT_BLOCK_ERROR_CODE) return false;
+  if (b.retryable !== true) return false;
+  const details = b.details;
+  if (details === null || typeof details !== "object" || Array.isArray(details)) return false;
+  return (details as Record<string, unknown>).last_phase === ENFORCEMENT_BLOCK_LAST_PHASE;
+}
+
+// ---------------------------------------------------------------------------
+// WHICH blocking code carried the block (2026-09-11, OPTION_NO_OP honest-copy)
+// ---------------------------------------------------------------------------
+//
+// ⚠ THE BLOCK SIGNATURE ABOVE IS DELIBERATELY CODE-BLIND, AND THAT IS STILL
+// RIGHT. Nothing below narrows it: the gate fires, and funds a retry, for
+// whatever the post-enforcement validator classifies as blocking — present or
+// future — exactly as before. What is added here is a SECOND, SEPARATE
+// question, asked only of an already-blocked result:
+//
+//   the signature answers  "should the server re-draft this?"
+//   this answers           "what do we tell the user went wrong?"
+//
+// Two questions, named apart rather than reconciled (trap 21) — and conflating
+// them is precisely the defect this closes. `OPTION_NO_OP` was folded into the
+// one post-enforcement class, so it inherited that class's CONNECTIVITY
+// sentence. Paul hit it live on 2026-09-11: a brief that stated its outcome
+// explicitly and named how each consideration bears on it was told to state its
+// outcome explicitly, for a failure that had nothing to do with connectivity.
+// The comment on `OPTIONS_IDENTICAL_RETRY_EXHAUSTED_SUGGESTION` in
+// draft-auto-retry.ts already forbids exactly this reuse, in terms; this is the
+// same rule applied to the class that was left carrying the lie.
+//
+// The reading is per-CODE, not per-class, because that is what the estate
+// already does one file over: `retry-directive.ts` distinguishes OPTION_NO_OP
+// from the topology codes INSIDE this same class, off this same codes-only
+// mirror. A parallel class would draw one distinction two different ways in two
+// adjacent files, and would force the class predicate to read a hand-list of
+// validator codes — which the block above exists to refuse.
+
+/** The one blocking code whose honest user-facing story is NOT connectivity.
+ *  `satisfies ValidationErrorCode` is the guard: if the validator renames or
+ *  drops the code, this fails TYPECHECK rather than silently ceasing to match
+ *  (the same device `retry-directive.ts` uses for its gloss table). */
+export const OPTION_NO_OP_VALIDATION_CODE = "OPTION_NO_OP" satisfies ValidationErrorCode;
+
+/**
+ * Read the producer's own codes-only mirror (`details.validation_error_codes`)
+ * off an emitted block body. Empty for an absent or malformed field — a copy
+ * decision is never worth a throw on the recovery path.
+ *
+ * ⚠ `retry-directive.ts` carries a private twin of this reader. It is NOT
+ * collapsed onto this export here on purpose: a concurrent P0 lane owns that
+ * file this session, and colliding with it would cost more than the duplicate.
+ * Collapsing the two is a named follow-up, not an oversight.
+ */
+export function readEnforcementBlockCodes(body: unknown): string[] {
+  if (body === null || typeof body !== "object" || Array.isArray(body)) return [];
+  const details = (body as Record<string, unknown>).details;
+  if (details === null || typeof details !== "object" || Array.isArray(details)) return [];
+  const codes = (details as Record<string, unknown>).validation_error_codes;
+  if (!Array.isArray(codes)) return [];
+  return codes.filter((c): c is string => typeof c === "string" && c.length > 0);
+}
+
+/**
+ * Read the producer's own self-inflicted marker (`details.goal_never_stated`)
+ * off an emitted block body.
+ *
+ * ⚠ ABSENT IS FALSE, AND ABSENT IS THE COMMON CASE. The stamp is emitted only
+ * on the true arm, so every ordinary block — and every block from any other
+ * emitter — reads false here and keeps today's behaviour exactly. This reader
+ * is the ONLY way a consumer learns the fact: the graph is gone by the time the
+ * result is held, so nothing downstream can re-derive it and nothing should
+ * try (a second derivation off a different input is how two authorities for one
+ * fact begin).
+ */
+export function readGoalNeverStated(body: unknown): boolean {
+  if (body === null || typeof body !== "object" || Array.isArray(body)) return false;
+  const details = (body as Record<string, unknown>).details;
+  if (details === null || typeof details !== "object" || Array.isArray(details)) return false;
+  return (details as Record<string, unknown>).goal_never_stated === true;
+}
+
+/**
+ * Was the WHOLE blocking finding `OPTION_NO_OP`?
+ *
+ * ⚠ "EVERY code", not "any code", and the asymmetry is the point. A block that
+ * ALSO carries a topology code genuinely had a topology failure, so the
+ * connectivity sentence is true of it and keeps it. Only a block whose entire
+ * finding is the no-op gets the no-op sentence. That is the conservative
+ * direction for THIS predicate: a false OPTION_NO_OP sentence would deny a
+ * connectivity failure that really happened, which is the worse of the two
+ * harms it stands between (trap 22b) — and it is the same direction the
+ * validator itself takes when it refuses to accuse without a baseline.
+ *
+ * Empty is false: no codes is not evidence of a no-op, and the pre-existing
+ * copy is what such a block already ships.
+ */
+export function isOptionNoOpOnlyBlock(codes: readonly string[]): boolean {
+  return codes.length > 0 && codes.every((c) => c === OPTION_NO_OP_VALIDATION_CODE);
+}
+
+/**
+ * Single-attempt recovery copy for a post-enforcement block.
+ *
+ * ⚠ NO FREQUENCY CLAIM IN THE `OPTION_NO_OP` VARIANT, and that is deliberate.
+ * The connectivity copy's "usually transient" / "usually succeeds" is earned:
+ * BASELINE measured 3/5 same-brief recoveries for that class. For OPTION_NO_OP
+ * — a code that first fired on 2026-09-11 — we have NO measured recovery rate
+ * at all, so asserting one would inherit a statistic from a population this
+ * user is not in. The variant therefore keeps the LEVER ("trying again may…")
+ * and drops the RATE, exactly as `RETRY_UNAFFORDABLE_SUGGESTION` does for its
+ * own unmeasured arm.
+ *
+ * ⚠ AND IT DESCRIBES WHAT WAS OBSERVED, NOT WHAT THE USER THOUGHT. A separate
+ * lane is repairing a data defect that binds a factor's recorded current level
+ * from the wrong slot, which can make a genuine option LOOK like a no-op. Until
+ * that lands, this copy may be describing our own data error. "…values that
+ * match the ones already recorded…" stays true in both worlds; "your option
+ * changes nothing" would not.
+ *
+ * Both ways out are named, for the reason `retry-directive.ts:109-113` gives:
+ * only the model can tell a mis-drafted alternative from a deliberate
+ * do-nothing arm, and naming one route pushes every genuine do-nothing option
+ * into being restated as a change it is not — the fabrication direction.
+ *
+ * Domain-neutral by ruling (2026-07-24, draft-honesty lane): name the KIND of
+ * differentiator, never invent a domain. No em dashes in product content
+ * (Paul, 2026-09-10).
+ */
+const CONNECTIVITY_BLOCK_RECOVERY = {
+  // No "be more specific" / "simplify" blame line: the brief is not
+  // the fault, and a vaguer brief makes the model INFER more, which is
+  // the cruel inversion documented in the 2026-07-23 firefight.
+  suggestion:
+    "Part of the drafted decision model was left unconnected to your goal, so it was rejected instead of being shown to you — this is usually transient. Try again.",
+  hints: [
+    "Retrying the same brief usually succeeds",
+    "If it keeps happening, state the outcome you are optimising for explicitly",
+    "Naming how each consideration affects that outcome helps the model connect them",
+  ],
+} as const;
+
+const OPTION_NO_OP_BLOCK_RECOVERY = {
+  suggestion:
+    "One of your options was drafted with values that match the ones already recorded for the factors it acts on, so it modelled no change and there was nothing to compare it against. Trying again may draft it differently.",
+  hints: [
+    "Say what that option changes: cost, time, scope, capacity or risk, whichever dimension the decision turns on",
+    "Or, if that option is meant to be the current arrangement, say so, and give the others something that differs from it",
+  ],
+} as const;
+
+/** The honest sentence for the codes this block actually carried. */
+export function selectEnforcementBlockRecovery(
+  codes: readonly string[],
+): { suggestion: string; hints: readonly string[] } {
+  return isOptionNoOpOnlyBlock(codes)
+    ? OPTION_NO_OP_BLOCK_RECOVERY
+    : CONNECTIVITY_BLOCK_RECOVERY;
+}
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+/** Target sum for inbound |mean| after rescale. Headroom for floating-point. */
+const BUDGET_TARGET = 0.95;
+
+/** Tolerance for the budget threshold — avoids noisy repairs at sums like 1.00000001
+ *  caused by floating-point arithmetic. Set conservatively at 1e-6 (one part per
+ *  million); real budget violations exceed 1.0 by 0.05–0.5, so this never masks them. */
+const EPSILON = 1e-6;
+
+/** Bridge node kinds that are budget-enforced. */
+const ENFORCEABLE_KINDS = new Set(["outcome", "risk"]);
+
+/**
+ * Source kinds whose edges to outcome/risk are considered causal and rescalable.
+ * - "factor" — standard causal source (only valid causal inbound at final topology).
+ * - "action" — treated as option upstream; included defensively.
+ *
+ * "option" is explicitly EXCLUDED:
+ *   option→outcome and option→risk are INVALID_EDGE_TYPE violations per the
+ *   allowed-edge matrix (validateTopology in graph-validator.ts). The deterministic
+ *   sweep removes them via fixOptionOutcomeShortcut / fixOptionRiskShortcut but can
+ *   defer survivors to LLM repair. If they still survive to enforcement, rescaling
+ *   them would make invalid topology look numerically safe — masking the defect
+ *   instead of surfacing it. Post-enforcement validation will flag them as
+ *   INVALID_EDGE_TYPE errors and block packaging (see applyDeterministicEnforcement).
+ */
+const RESCALABLE_SOURCE_KINDS = new Set(["factor", "action"]);
+
+/** Multiplier applied to strongest inbound |mean| when creating a bridge-to-goal edge. */
+const BRIDGE_FALLBACK_FACTOR = 0.5;
+
+/** Default mean for orphan bridge edges (no inbound to derive from). */
+const ORPHAN_BRIDGE_MEAN = 0.3;
+const ORPHAN_BRIDGE_STD = 0.2;
+const ORPHAN_BRIDGE_EXISTENCE = 0.7;
+
+/** Default std for derived bridge edges. */
+const DERIVED_BRIDGE_STD = 0.15;
+const DERIVED_BRIDGE_EXISTENCE = 0.9;
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+interface Repair {
+  code: string;
+  path: string;
+  action: string;
+}
+
+// ---------------------------------------------------------------------------
+// Edge value readers (format-aware)
+// ---------------------------------------------------------------------------
+
+/**
+ * Read the edge mean strength.
+ * Returns `undefined` for missing/non-finite values — callers must skip
+ * those edges and emit telemetry rather than treating as zero.
+ */
+export function readEdgeMean(edge: EdgeT, format: EdgeFormat): number | undefined {
+  const raw = format === "LEGACY"
+    ? (edge as Record<string, unknown>).weight
+    : edge.strength_mean;
+
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return undefined;
+  return raw;
+}
+
+/**
+ * Read the edge std.
+ * Returns `undefined` for LEGACY (no std equivalent), missing, or non-finite values.
+ * Callers must only write std back when the return is a positive finite number —
+ * writing `0` or `undefined` to `strength_std` violates `z.number().positive()`.
+ */
+export function readEdgeStd(edge: EdgeT, format: EdgeFormat): number | undefined {
+  if (format === "LEGACY") return undefined;
+  const raw = edge.strength_std;
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) return undefined;
+  return raw;
+}
+
+// ---------------------------------------------------------------------------
+// Causal-edge predicate
+// ---------------------------------------------------------------------------
+
+/**
+ * True iff the edge is a causal inbound edge eligible for budget rescaling.
+ * Valid: factor→outcome, factor→risk, action→outcome, action→risk.
+ * Excluded: option→outcome/risk (INVALID_EDGE_TYPE — see RESCALABLE_SOURCE_KINDS),
+ *           bidirected edges, bridge edges (outcome/risk→goal), scaffolding.
+ */
+function isRescalableInbound(
+  edge: EdgeT,
+  fromKind: string | undefined,
+  toKind: string | undefined,
+): boolean {
+  if (!fromKind || !toKind) return false;
+  if (!ENFORCEABLE_KINDS.has(toKind)) return false;
+  if (!RESCALABLE_SOURCE_KINDS.has(fromKind)) return false;
+  if (edge.edge_type === "bidirected") return false;
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Budget rescale
+// ---------------------------------------------------------------------------
+
+export function applyBudgetRescale(
+  graph: GraphT,
+  format: EdgeFormat,
+  requestId?: string,
+): { repairs: Repair[]; nodesRescaled: number; edgesSkipped: number } {
+  const repairs: Repair[] = [];
+  let nodesRescaled = 0;
+  let edgesSkipped = 0;
+
+  const nodes = graph.nodes as NodeT[];
+  const edges = graph.edges as EdgeT[];
+
+  const nodeKindMap = new Map<string, string>();
+  for (const node of nodes) nodeKindMap.set(node.id, node.kind);
+
+  // Group rescalable inbound edges by target node.
+  const byTarget = new Map<string, EdgeT[]>();
+  for (const edge of edges) {
+    const fromKind = nodeKindMap.get(edge.from);
+    const toKind = nodeKindMap.get(edge.to);
+    if (!isRescalableInbound(edge, fromKind, toKind)) continue;
+
+    const group = byTarget.get(edge.to);
+    if (group) group.push(edge);
+    else byTarget.set(edge.to, [edge]);
+  }
+
+  // Iterate target nodes in deterministic (sorted) order.
+  const targetIds = [...byTarget.keys()].sort();
+
+  for (const targetId of targetIds) {
+    const group = byTarget.get(targetId)!;
+    const kind = nodeKindMap.get(targetId)!;
+
+    // Compute sum of finite |mean|; skip non-finite edges with telemetry.
+    let totalAbsMean = 0;
+    const finiteEdges: EdgeT[] = [];
+    for (const edge of group) {
+      const mean = readEdgeMean(edge, format);
+      if (mean === undefined) {
+        edgesSkipped++;
+        log.info({
+          event: TelemetryEvents.CeeEnforcementEdgeSkipped,
+          request_id: requestId,
+          edge_from: edge.from,
+          edge_to: edge.to,
+          reason: "non_finite_strength",
+        }, `Enforcement: skipped edge ${edge.from}→${edge.to} (non-finite strength)`);
+        continue;
+      }
+      totalAbsMean += Math.abs(mean);
+      finiteEdges.push(edge);
+    }
+
+    // Skip if zero sum (would divide by zero) or within budget (with EPSILON tolerance).
+    if (totalAbsMean === 0) continue;
+    if (totalAbsMean <= 1.0 + EPSILON) continue;
+
+    const scale = BUDGET_TARGET / totalAbsMean;
+
+    for (const edge of finiteEdges) {
+      const oldMean = readEdgeMean(edge, format)!;
+      const oldStd = readEdgeStd(edge, format); // undefined when missing or LEGACY
+      const newMean = oldMean * scale;
+
+      if (format === "LEGACY") {
+        (edge as Record<string, unknown>).weight = newMean;
+        // LEGACY has no std field — nothing to update
+      } else {
+        edge.strength_mean = newMean;
+        // Only write std back if the original was positive-finite. Writing 0
+        // or undefined to strength_std would violate z.number().positive().
+        if (oldStd !== undefined) {
+          edge.strength_std = oldStd * scale;
+        }
+      }
+    }
+
+    nodesRescaled++;
+    repairs.push({
+      code: "INBOUND_BUDGET_RESCALED",
+      path: `edges[*→${targetId}]`,
+      action: `Rescaled ${finiteEdges.length} causal inbound edges from sum=${totalAbsMean.toFixed(3)} to ${BUDGET_TARGET}`,
+    });
+
+    log.info({
+      event: TelemetryEvents.CeeInboundSumRescaled,
+      request_id: requestId,
+      node_id: targetId,
+      node_kind: kind,
+      original_sum: totalAbsMean,
+      scaled_sum: BUDGET_TARGET,
+      edge_count: finiteEdges.length,
+      edges_affected: finiteEdges.length,
+    }, `Rescaled inbound budget for ${kind} "${targetId}": ${totalAbsMean.toFixed(3)} → ${BUDGET_TARGET}`);
+  }
+
+  return { repairs, nodesRescaled, edgesSkipped };
+}
+
+// ---------------------------------------------------------------------------
+// Bridge chain repair
+// ---------------------------------------------------------------------------
+
+interface BridgeAddition {
+  nodeId: string;
+  nodeKind: string;
+}
+
+/**
+ * Compute the strength for a new bridge-to-goal edge.
+ * Sign is determined ENTIRELY by the bridge node kind:
+ *   - outcome → goal: positive
+ *   - risk    → goal: negative
+ * The magnitude is half the strongest |inbound| mean of the bridge node,
+ * or `ORPHAN_BRIDGE_MEAN` if no usable inbound exists.
+ */
+function computeBridgeMean(
+  nodeKind: string,
+  inboundEdges: EdgeT[],
+  format: EdgeFormat,
+): { mean: number; std: number; existence: number } {
+  let strongestAbs = 0;
+  for (const e of inboundEdges) {
+    const m = readEdgeMean(e, format);
+    if (m === undefined) continue;
+    const abs = Math.abs(m);
+    if (abs > strongestAbs) strongestAbs = abs;
+  }
+
+  let magnitude: number;
+  let std: number;
+  let existence: number;
+
+  if (strongestAbs > 0) {
+    magnitude = strongestAbs * BRIDGE_FALLBACK_FACTOR;
+    std = DERIVED_BRIDGE_STD;
+    existence = DERIVED_BRIDGE_EXISTENCE;
+  } else {
+    magnitude = ORPHAN_BRIDGE_MEAN;
+    std = ORPHAN_BRIDGE_STD;
+    existence = ORPHAN_BRIDGE_EXISTENCE;
+  }
+
+  // Sign is fixed by bridge semantics.
+  const mean = nodeKind === "risk" ? -magnitude : magnitude;
+  return { mean, std, existence };
+}
+
+export function fixBridgeChaining(
+  graph: GraphT,
+  format: EdgeFormat,
+  requestId?: string,
+): { repairs: Repair[]; removedCount: number; goalEdgesAdded: number } {
+  const repairs: Repair[] = [];
+  const nodes = graph.nodes as NodeT[];
+  const edges = graph.edges as EdgeT[];
+
+  const goalNode = nodes.find((n) => n.kind === "goal");
+  if (!goalNode) return { repairs, removedCount: 0, goalEdgesAdded: 0 };
+
+  const nodeKindMap = new Map<string, string>();
+  for (const node of nodes) nodeKindMap.set(node.id, node.kind);
+
+  const existingGoalEdges = new Set<string>();
+  for (const edge of edges) {
+    if (edge.to === goalNode.id) existingGoalEdges.add(edge.from);
+  }
+
+  // PASS 1: identify forbidden bridge-chain edges first so the inbound map
+  // we build for fallback magnitude excludes them. Otherwise a node whose
+  // only inbound is the forbidden edge being removed would seed its
+  // replacement bridge from the very edge we just judged invalid.
+  const toRemove = new Set<number>();
+  for (let i = 0; i < edges.length; i++) {
+    const edge = edges[i];
+    const fromKind = nodeKindMap.get(edge.from);
+    const toKind = nodeKindMap.get(edge.to);
+
+    const isForbiddenChain =
+      fromKind !== undefined &&
+      toKind !== undefined &&
+      ENFORCEABLE_KINDS.has(fromKind) &&
+      ENFORCEABLE_KINDS.has(toKind) &&
+      edge.to !== goalNode.id;
+
+    if (isForbiddenChain) toRemove.add(i);
+  }
+
+  // PASS 2: build inboundByNode excluding forbidden bridge-chain edges.
+  const inboundByNode = new Map<string, EdgeT[]>();
+  for (let i = 0; i < edges.length; i++) {
+    if (toRemove.has(i)) continue;
+    const edge = edges[i];
+    const group = inboundByNode.get(edge.to);
+    if (group) group.push(edge);
+    else inboundByNode.set(edge.to, [edge]);
+  }
+
+  // PASS 3: emit telemetry and queue goal-bridge additions in stable order.
+  const additions: BridgeAddition[] = [];
+  for (let i = 0; i < edges.length; i++) {
+    if (!toRemove.has(i)) continue;
+    const edge = edges[i];
+    const fromKind = nodeKindMap.get(edge.from)!;
+    const toKind = nodeKindMap.get(edge.to)!;
+
+    repairs.push({
+      code: "BRIDGE_CHAIN_REPAIRED",
+      path: `edges[${edge.from}→${edge.to}]`,
+      action: `Removed forbidden ${fromKind}→${toKind} edge; ensured independent goal bridges`,
+    });
+
+    log.info({
+      event: TelemetryEvents.CeeBridgeChainRepaired,
+      request_id: requestId,
+      edge_from: edge.from,
+      edge_to: edge.to,
+      repair_method: "remove_and_bridge",
+    }, `Bridge chain repair: removed ${fromKind}→${toKind} (${edge.from}→${edge.to})`);
+
+    // Queue goal-bridge additions for both endpoints if missing.
+    for (const nodeId of [edge.from, edge.to]) {
+      if (existingGoalEdges.has(nodeId)) continue;
+      existingGoalEdges.add(nodeId); // dedupe across iterations
+      additions.push({ nodeId, nodeKind: nodeKindMap.get(nodeId)! });
+    }
+  }
+
+  // Build new goal-bridge edges deterministically (sorted by source id).
+  additions.sort((a, b) => a.nodeId.localeCompare(b.nodeId));
+  const newEdges: EdgeT[] = [];
+  for (const { nodeId, nodeKind } of additions) {
+    const inbound = inboundByNode.get(nodeId) ?? [];
+    const { mean, std, existence } = computeBridgeMean(nodeKind, inbound, format);
+
+    // Build a schema-validated base edge first so any future shape drift
+    // surfaces as a parse error rather than silent runtime breakage. Numeric
+    // strength fields are then patched in the active edge format (V1_FLAT
+    // or LEGACY) by patchEdgeNumeric.
+    const baseEdge = Edge.parse({
+      id: `${nodeId}__${goalNode.id}__enforcement`,
+      from: nodeId,
+      to: goalNode.id,
+      effect_direction: mean < 0 ? "negative" : "positive",
+      origin: "repair",
+      provenance: {
+        source: "synthetic",
+        quote: "Bridge chain repair (deterministic enforcement)",
+      },
+      provenance_source: "synthetic",
+    });
+
+    const goalEdge = patchEdgeNumeric(baseEdge, format, { mean, std, existence });
+    newEdges.push(goalEdge);
+  }
+
+  if (toRemove.size > 0 || newEdges.length > 0) {
+    (graph as { edges: EdgeT[] }).edges = [
+      ...edges.filter((_, i) => !toRemove.has(i)),
+      ...newEdges,
+    ];
+  }
+
+  return {
+    repairs,
+    removedCount: toRemove.size,
+    goalEdgesAdded: newEdges.length,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Structural-edge re-canonicalisation (ROADMAP 2.1099, R2)
+// ---------------------------------------------------------------------------
+
+/**
+ * Coerce every `option→factor` edge to the canonical tuple, immediately before
+ * the gate reads it.
+ *
+ * WHY THIS IS NEEDED AT ALL — the mechanism, settled by execution 13 Aug 2026
+ * (not inferred; the ranked candidate in the diagnosis was a different hop and
+ * is refuted). `STRUCTURAL_EDGE_NOT_CANONICAL_ERROR` is Bucket A, "always
+ * auto-fix", and `fixStructuralEdgesNotCanonical` canonicalises at substep 1.
+ * But for `option→factor` it is VIOLATION-GATED: it only repairs edges a
+ * pre-sweep violation cites (only `decision→option` is proactive). The code is
+ * emitted by `validateSemantic`, which **returns early when the graph has no
+ * goal node** (`graph-validator.ts:816`, `if (goals.length === 0) return
+ * issues;`).
+ *
+ * So when the drafter omits the goal — the same omission R1 exists for —
+ * the pre-sweep validation emits ZERO citations, the sweep canonicalises
+ * nothing, `ensureGoalNode` mints the goal at substep 8, and the gate then
+ * validates a graph that finally HAS a goal and reports one error per
+ * option→factor edge. Measured on an S3-shaped fixture through the real
+ * `runStageRepair`: 7 of 7 structural edges survive uncanonicalised when the
+ * goal is absent, 0 of 7 when it is present. The same run reproduces the live
+ * multiset. One root cause — a missing goal node — produces BOTH halves of
+ * every measured failure.
+ *
+ * Sited here because this is the LAST thing that runs before the predicate, so
+ * no later step can defeat it, and because the value written is derived from the
+ * same `CANONICAL_EDGE` constant the validator reads — the two cannot drift.
+ * Idempotent, and it cannot make a valid graph invalid: the target IS the
+ * constant the validator demands.
+ *
+ * ⚠ It writes `strength_std` UNCONDITIONALLY, in every edge format. That is
+ * deliberate and is NOT what `canonicalStructuralEdge` does: under LEGACY,
+ * `patchEdgeNumeric` writes `weight`/`belief` and skips std ("LEGACY has no std
+ * equivalent"), while the validator reads `edge.strength_std` with NO fallback
+ * and requires exactly `0.01`. A format-aware repair therefore CANNOT satisfy
+ * this gate under LEGACY — it would loop forever on an unsatisfiable condition,
+ * and the sweep's own `isCanonical` pre-check omits std and so believes it
+ * succeeded. The rule is to write against the CONSUMER'S predicate, not against
+ * the constructor to hand.
+ */
+export function canonicaliseStructuralEdgesAtGate(
+  graph: GraphT,
+  requestId?: string,
+): { repairs: Repair[]; canonicalisedCount: number } {
+  const repairs: Repair[] = [];
+  const nodes = graph.nodes as NodeT[];
+  const edges = graph.edges as EdgeT[];
+
+  const nodeKindMap = new Map<string, string>();
+  for (const node of nodes) nodeKindMap.set(node.id, node.kind);
+
+  let canonicalisedCount = 0;
+
+  for (const edge of edges) {
+    if (nodeKindMap.get(edge.from) !== "option" || nodeKindMap.get(edge.to) !== "factor") continue;
+
+    // Read exactly as the validator reads (graph-validator.ts, the
+    // STRUCTURAL_EDGE_NOT_CANONICAL_ERROR block) — same fallbacks, same fields.
+    const e = edge as Record<string, unknown>;
+    const mean = edge.strength_mean ?? (e.weight as number | undefined);
+    const std = edge.strength_std;
+    const prob = edge.belief_exists ?? (e.belief as number | undefined);
+    const direction = edge.effect_direction;
+
+    if (
+      mean === CANONICAL_EDGE.mean &&
+      std === CANONICAL_EDGE.std &&
+      prob === CANONICAL_EDGE.prob &&
+      direction === CANONICAL_EDGE.direction
+    ) {
+      continue;
+    }
+
+    edge.strength_mean = CANONICAL_EDGE.mean;
+    edge.strength_std = CANONICAL_EDGE.std;
+    edge.belief_exists = CANONICAL_EDGE.prob;
+    edge.effect_direction = CANONICAL_EDGE.direction;
+    // Keep the LEGACY mirrors in step when the edge carries them, so a LEGACY
+    // consumer downstream does not read a stale pre-canonical number.
+    if (e.weight !== undefined) e.weight = CANONICAL_EDGE.mean;
+    if (e.belief !== undefined) e.belief = CANONICAL_EDGE.prob;
+
+    canonicalisedCount++;
+    repairs.push({
+      code: "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+      path: `edges[${edge.from}→${edge.to}]`,
+      action: `Re-canonicalised structural option→factor edge to mean=${CANONICAL_EDGE.mean}, std=${CANONICAL_EDGE.std}, existence=${CANONICAL_EDGE.prob}, direction="${CANONICAL_EDGE.direction}"`,
+    });
+  }
+
+  if (canonicalisedCount > 0) {
+    log.info({
+      event: "cee.enforcement.structural_edges_recanonicalised",
+      request_id: requestId,
+      count: canonicalisedCount,
+    }, `Enforcement: re-canonicalised ${canonicalisedCount} structural option→factor edge(s) before the gate`);
+  }
+
+  return { repairs, canonicalisedCount };
+}
+
+// ---------------------------------------------------------------------------
+// Orchestrator entry point
+// ---------------------------------------------------------------------------
+
+export function applyDeterministicEnforcement(ctx: StageContext): void {
+  if (!ctx.graph) return;
+  if (!config.cee.deterministicEnforcementEnabled) return;
+
+  const graph = ctx.graph as unknown as GraphT;
+  const requestId = ctx.requestId;
+
+  // Re-detect the edge format from the FINAL graph. The clarifier (substep 9)
+  // can replace ctx.graph with a refinedGraph whose shape differs from the
+  // pre-clarifier graph; using ctx.detectedEdgeFormat (captured at Stage 4
+  // entry) would cause readEdgeMean to read the wrong field and silently
+  // skip every edge as non-finite. Detected value wins; fall back to the
+  // captured format only when detection returns "NONE".
+  const liveFormat = detectEdgeFormat(graph.edges as EdgeT[]);
+  const capturedFormat: EdgeFormat = ctx.detectedEdgeFormat ?? "V1_FLAT";
+  const format: EdgeFormat = liveFormat === "NONE" ? capturedFormat : liveFormat;
+  if (liveFormat !== "NONE" && liveFormat !== capturedFormat) {
+    log.info({
+      request_id: requestId,
+      captured_format: capturedFormat,
+      live_format: liveFormat,
+    }, "Enforcement: edge format changed since Stage 4 entry (likely clarifier refinement); using live format");
+  }
+
+  // Order: bridge chain repair first (may add goal edges that affect topology),
+  // then budget rescale (rescales causal inbound — bridge edges to goal are
+  // excluded by isRescalableInbound, so order is technically independent for
+  // budget sums — but bridge-first is the contractual order from the brief).
+  // R2 (ROADMAP 2.1099) FIRST: make the system's own stated contract true —
+  // "STRUCTURAL EDGES ARE NORMALISED AUTOMATICALLY" (prompts/defaults.ts),
+  // Bucket A "always auto-fix" — rather than relying on a substep-1 repair whose
+  // citation is suppressed whenever the drafted graph has no goal node. See
+  // `canonicaliseStructuralEdgesAtGate` for the measured mechanism.
+  const canonResult = canonicaliseStructuralEdgesAtGate(graph, requestId);
+
+  const bridgeResult = fixBridgeChaining(graph, format, requestId);
+  const budgetResult = applyBudgetRescale(graph, format, requestId);
+
+  // ⭐ OPTION_NO_OP — CONSEQUENCE, NOT PREDICATE. Runs LAST of the repairs and
+  // immediately before the authoritative re-validation below, so it sees the
+  // final interventions: an earlier position could be invalidated by any repair
+  // that touches them. An option that changes nothing is de-configured rather
+  // than refused — it ships in the user's graph and the analysable-option gate
+  // excludes it from comparative ranking, so it can never be named a leader.
+  // See `no-op-neutralisation.ts` for why DROP and `is_baseline` were rejected.
+  // ⭐ REPAIR BEFORE WITHDRAWAL. An option whose own label states the target
+  // its intervention failed to carry gets that target written — so the user's
+  // own question stays in their comparison instead of being de-configured.
+  // Shares `findNoOpOptions` with the neutralisation below rather than asking
+  // the question a second time, and every case it declines falls through to
+  // that neutralisation unchanged. See `no-op-target-repair.ts`.
+  const noOpRepairResult = repairNoOpOptionTargets(graph, requestId);
+  const noOpResult = neutraliseNoOpOptions(graph, requestId);
+
+  // Append repairs deterministically: canonicalise, then bridge, then budget
+  // (matches call order).
+  const allRepairs = [...canonResult.repairs, ...bridgeResult.repairs, ...budgetResult.repairs, ...noOpRepairResult.repairs, ...noOpResult.repairs];
+  if (allRepairs.length > 0) {
+    ctx.deterministicRepairs = [
+      ...(ctx.deterministicRepairs ?? []),
+      ...allRepairs,
+    ];
+  }
+
+  // Authoritative post-enforcement re-validation.
+  // GraphValidationResult.errors contains only severity="error" items ("Blocking errors that
+  // prevent processing" — graph-validator.types.ts). If any survive after enforcement, the
+  // graph has a topology defect that neither the deterministic sweep nor LLM repair resolved
+  // (e.g. option→outcome/risk deferred by the sweep with no controllable factor). Package it
+  // and the user receives an analysis built on an invalid causal graph. We fail closed instead.
+  let postValidationErrorCount = 0;
+  let postValidationWarningCount = 0;
+  let blocked = false;
+  try {
+    const revalidation = validateGraphDeterministic({
+      graph,
+      requestId,
+      phase: "post_enforcement" satisfies ValidatorPhase,
+    });
+    postValidationErrorCount = revalidation.errors.length;
+    postValidationWarningCount = revalidation.warnings.length;
+
+    // Log non-blocking warnings independently so they are observable in dashboards
+    // without being conflated with blocking errors.
+    if (postValidationWarningCount > 0) {
+      log.info({
+        event: TelemetryEvents.CeeEnforcementPostValidationWarnings,
+        request_id: requestId,
+        warning_count: postValidationWarningCount,
+        warning_codes: revalidation.warnings.map((w) => w.code),
+      }, `Post-enforcement validation: ${postValidationWarningCount} non-blocking warning(s)`);
+    }
+
+    if (postValidationErrorCount > 0) {
+      const errorCodes = revalidation.errors.map((e) => e.code);
+      log.warn({
+        event: TelemetryEvents.CeeEnforcementPostValidationErrors,
+        request_id: requestId,
+        error_count: postValidationErrorCount,
+        codes: errorCodes,
+      }, `Post-enforcement validation surfaced ${postValidationErrorCount} blocking errors`);
+
+      // Fail closed: set earlyReturn so the pipeline skips Stage 5 packaging.
+      blocked = true;
+      log.warn({
+        event: TelemetryEvents.CeeEnforcementBlocked,
+        request_id: requestId,
+        error_count: postValidationErrorCount,
+        codes: errorCodes,
+      }, `Enforcement blocked packaging: ${postValidationErrorCount} topology error(s) remain`);
+
+      // The user-facing sentence is chosen from the codes that actually
+      // blocked, not from the class alone. See selectEnforcementBlockRecovery.
+      const blockRecovery = selectEnforcementBlockRecovery(errorCodes);
+
+      // ⭐⭐ DID WE CAUSE THIS? A THIRD QUESTION OF AN ALREADY-BLOCKED RESULT.
+      //
+      // The block signature answers   "should the server re-draft this?"
+      // `selectEnforcementBlockRecovery` answers "what do we tell the user?"
+      // This answers                  "is the goal it failed to reach OURS?"
+      //
+      // Three questions, named apart rather than folded together (trap 21).
+      // Nothing above is narrowed: the gate still fires for whatever the
+      // post-enforcement validator classifies as blocking, and the copy
+      // selection is untouched. This only STAMPS a fact about the block that
+      // two downstream readers need and neither can derive for itself — the
+      // auto-retry seam holds the result but not the graph, and the route holds
+      // neither.
+      //
+      // Derived at the GRAPH rather than inferred from the codes: the codes say
+      // what could not reach the goal, and only the goal node itself says who
+      // authored it.
+      const goalNeverStated = isSelfInflictedGoalGap(graph, errorCodes);
+      if (goalNeverStated) {
+        log.info({
+          event: TelemetryEvents.CeeEnforcementBlocked,
+          request_id: requestId,
+          error_count: postValidationErrorCount,
+          codes: errorCodes,
+          goal_never_stated: true,
+        }, "Enforcement block is self-inflicted: the unreached goal is CEE's own placeholder");
+      }
+
+      const errorBody = buildCeeErrorResponse(
+        ENFORCEMENT_BLOCK_ERROR_CODE,
+        `Graph failed post-enforcement validation (${postValidationErrorCount} topology error(s))`,
+        {
+          requestId,
+          // HONEST RETRY (2026-07-24, draft-honesty lane). Fail-closing here is
+          // correct and unchanged — an invalid model is never shipped. What was
+          // wrong was the CONTRACT the user got: no `retryable` and no
+          // `recovery` meant the envelope defaulted to `retryable: false` /
+          // `recovery: null`, i.e. a hard dead end. The day-3 matrix caught this
+          // on a brief that drafted CLEANLY twice in the same run (46s and 60s)
+          // and hit this gate once — the failure is stochastic model topology,
+          // not a bad brief, so RETRY is the honest primary lever, exactly as it
+          // is for the truncation-400 (see unified-pipeline/index.ts).
+          retryable: true,
+          recovery: {
+            suggestion: blockRecovery.suggestion,
+            hints: [...blockRecovery.hints],
+          },
+          details: {
+            validation_errors: revalidation.errors.map((e) => ({
+              code: e.code,
+              message: e.message,
+              path: e.path,
+            })),
+            // Codes-only mirror for the WIRE (ROADMAP 2.718). The route
+            // boundary's PIPELINE_DETAILS_ALLOWLIST forwards only fixed-enum
+            // fields; `validation_errors` stays off-wire because its
+            // `message` strings embed node labels drafted from user input.
+            // Diagnosing the 2026-08-06 failures (runs de79da/39cf53) cost a
+            // Render-logs round-trip precisely because the wire carried no
+            // codes. Derived from the same array, so the two cannot drift.
+            validation_error_codes: revalidation.errors.map((e) => e.code),
+            enforcement_repairs: allRepairs.length,
+            last_phase: ENFORCEMENT_BLOCK_LAST_PHASE,
+            // ROADMAP goalfence: a fixed boolean, no user content — the same
+            // shape rule every other allowlisted details key here obeys.
+            // Emitted ONLY on the true arm: an absent key means "not
+            // self-inflicted, or not asked", and every reader treats absence as
+            // the ordinary block (fail-closed). A `false` would be a claim this
+            // module has not earned on the paths that never reach the check.
+            ...(goalNeverStated ? { goal_never_stated: true } : {}),
+          },
+        },
+      );
+      ctx.earlyReturn = { statusCode: ENFORCEMENT_BLOCK_STATUS_CODE, body: errorBody };
+    }
+  } catch (err) {
+    // Validator throws are non-fatal by codebase convention — a system-level
+    // failure in the validator itself should never block a valid graph.
+    // The graph has already passed all earlier repair stages; continuing
+    // without this gate is safer than failing valid requests due to a
+    // validator bug. The throw is logged and surfaces in post_validation_error_count=0.
+    log.warn({
+      event: TelemetryEvents.CeeEnforcementPostValidationFailed,
+      request_id: requestId,
+      err: (err as Error)?.message,
+    }, "Post-enforcement validation threw — non-fatal, continuing");
+  }
+
+  ctx.repairTrace = {
+    ...(ctx.repairTrace ?? {}),
+    deterministic_enforcement: {
+      ran: true,
+      structural_edges_recanonicalised: canonResult.canonicalisedCount,
+      no_op_options_neutralised: noOpResult.neutralisedOptionIds.length,
+      bridge_chains_removed: bridgeResult.removedCount,
+      bridge_goal_edges_added: bridgeResult.goalEdgesAdded,
+      nodes_rescaled: budgetResult.nodesRescaled,
+      edges_skipped_non_finite: budgetResult.edgesSkipped,
+      total_repairs: allRepairs.length,
+      post_validation_error_count: postValidationErrorCount,
+      post_validation_warning_count: postValidationWarningCount,
+      blocked,
+    },
+  };
+
+  // Brief specifies "Clean graph (no violations) → no-op, no telemetry".
+  // We honour the spirit by suppressing per-repair events when nothing fires
+  // (those have early `continue`s) and demoting the SUMMARY heartbeat to debug
+  // when there were zero repairs. info-level summary only when work happened.
+  const totalRepairs = allRepairs.length;
+  const summaryPayload = {
+    event: TelemetryEvents.CeeEnforcementCompleted,
+    request_id: requestId,
+    structural_edges_recanonicalised: canonResult.canonicalisedCount,
+    bridge_chains_removed: bridgeResult.removedCount,
+    goal_edges_added: bridgeResult.goalEdgesAdded,
+    nodes_rescaled: budgetResult.nodesRescaled,
+    edges_skipped: budgetResult.edgesSkipped,
+    post_validation_errors: postValidationErrorCount,
+    post_validation_warnings: postValidationWarningCount,
+    edge_format: format,
+    total_repairs: totalRepairs,
+  };
+  if (totalRepairs > 0 || postValidationErrorCount > 0 || postValidationWarningCount > 0) {
+    log.info(summaryPayload, "Deterministic graph enforcement completed");
+  } else {
+    log.debug(summaryPayload, "Deterministic graph enforcement no-op");
+  }
+}

@@ -1,0 +1,444 @@
+/**
+ * V5 alpha hardening Phase 2.3 — PLoT permissive status matrix tests.
+ *
+ * Coverage goals:
+ *
+ *  1. PINNED regression (brief 2.3): `analysis_status: "computed"` with a
+ *     usable `option_comparison[]` → handler returns success with a
+ *     populated `leading_option_id` fact. This is the staging symptom the
+ *     brief calls out, grounded against the real capture at
+ *     tests/staging/artifacts/cross-service-2026-03-15T23-24-53-476Z/step-2-analysis.json
+ *     (SHA-256 2d2aab36...).
+ *
+ *  2. Per-status matrix coverage for Part C of the resilience contract:
+ *     null / completed / computed / partial / blocked / failed / unknown-
+ *     usable / unknown-unusable.
+ *
+ *  3. The partial + unknown paths surface caveats through the existing
+ *     `summary` + `assistant_text` fields only (correction 4 — no schema
+ *     extension to RunAnalysisHandlerFactSchema).
+ *
+ *  4. Unknown-usable status emits an `external_contract_unknown_status`
+ *     warning log; unknown-unusable emits the same warning + raises fatal.
+ */
+
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { RunAnalysisResultSchema } from '@talchain/schemas/orchestrator';
+
+import type { PLoTClient } from '../../../../orchestrator/plot-client.js';
+import type { V2RunResponseEnvelope } from '../../../../orchestrator/types.js';
+import { log } from '../../../../utils/telemetry.js';
+
+import {
+  createRunAnalysisHandler,
+  RUN_ANALYSIS_ASSISTANT_TEMPLATES,
+  type RunAnalysisScenarioSnapshot,
+  type ScenarioReader,
+} from '../run-analysis.js';
+import { HandlerInvocationFailedError } from '../../handler-errors.js';
+import type { HandlerInvocation } from '../../registry.js';
+
+const SCENARIO_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+const REQUEST_ID = 'req-status-test';
+
+function makeInvocation(): HandlerInvocation {
+  return {
+    context: {
+      stage: 'analyse',
+      entity_registry: { option_ids: [], goal_id: null },
+      capabilities: {},
+      messages: [{ role: 'user', content: 'run analysis' }],
+      session_id: SCENARIO_ID,
+      request_id: REQUEST_ID,
+      budgets: { turn_ms: 180_000, llm_narrate_ms: 60_000 },
+      prior_turns: [],
+      prior_facts: [],
+      scenarioBriefText: null,
+      persistedGraph: null,
+    } as unknown as HandlerInvocation['context'],
+    payload: {
+      turn_id: 't1',
+      scenario_id: SCENARIO_ID,
+      message: 'run analysis',
+      turn_class: 'decide',
+      stage: 'analyse',
+    } as unknown as HandlerInvocation['payload'],
+    requestId: REQUEST_ID,
+    signal: new AbortController().signal,
+    orientationText: '',
+  };
+}
+
+const SCENARIO_SNAPSHOT: RunAnalysisScenarioSnapshot = {
+  graph: { nodes: [{ id: 'g', kind: 'goal' }], edges: [] },
+  options: [
+    { id: 'opt_1', option_id: 'opt_1', label: 'Plan A', interventions: { f: 1 } },
+    { id: 'opt_2', option_id: 'opt_2', label: 'Plan B', interventions: { f: 0 } },
+  ],
+  goal_node_id: 'g',
+};
+
+const scenarioReader: ScenarioReader = async () => SCENARIO_SNAPSHOT;
+
+function mkPlot(response: V2RunResponseEnvelope): PLoTClient {
+  return {
+    run: vi.fn(async () => response),
+    validatePatch: vi.fn().mockResolvedValue({}),
+  } as unknown as PLoTClient;
+}
+
+// Usable result body matching the real staging PLoT capture shape.
+function usableOptionComparison() {
+  return [
+    { option_id: 'opt_1', option_label: 'Raise price', win_probability: 0.62 },
+    { option_id: 'opt_2', option_label: 'Keep price', win_probability: 0.38 },
+  ];
+}
+
+function withStatus(
+  status: string | null,
+  body: Record<string, unknown> = { option_comparison: usableOptionComparison() },
+): V2RunResponseEnvelope {
+  return {
+    meta: { seed_used: 42, n_samples: 1000, response_hash: 'h' },
+    response_hash: 'h',
+    ...(status != null ? { analysis_status: status } : {}),
+    ...body,
+  } as V2RunResponseEnvelope;
+}
+
+let warnSpy: ReturnType<typeof vi.spyOn>;
+
+beforeEach(() => {
+  warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
+});
+afterEach(() => {
+  warnSpy.mockRestore();
+  vi.restoreAllMocks();
+});
+
+describe('run_analysis handler — permissive status matrix (Phase 2.3)', () => {
+  it('PINNED: analysis_status="computed" with usable option_comparison succeeds', async () => {
+    // Brief 2.3 pinned regression. Pre-hardening, this case returned
+    // HANDLER_INVOCATION_FAILED(analysis_not_completed); post-hardening
+    // it succeeds with the DEFAULT template and a populated fact.
+    //
+    // V5 deterministic headline (2026-05-28): when winner data is present
+    // (Raise price 0.62, Keep price 0.38, no driver/fragility), the
+    // handler emits the Case D headline. Status template still fires when
+    // winner extraction is null (covered by the PARTIAL_NO_RESULTS test).
+    const handler = createRunAnalysisHandler({
+      plotClient: mkPlot(withStatus('computed')),
+      scenarioReader,
+    });
+
+    const outcome = await handler(makeInvocation());
+    expect(outcome.assistant_text).toMatch(/^Raise price scored highest against your goal in 62% of runs of this model/);
+    expect(outcome.handler_facts).toHaveLength(1);
+    const fact = outcome.handler_facts[0]!;
+    expect(fact.fact_type).toBe('run_analysis');
+    if (fact.fact_type === 'run_analysis') {
+      expect(fact.result.leading_option_id).toBe('opt_1');
+      expect(fact.result.win_probabilities).toBeDefined();
+    }
+  });
+
+  it('analysis_status=null (absent) succeeds with Case D headline', async () => {
+    const handler = createRunAnalysisHandler({
+      plotClient: mkPlot(withStatus(null)),
+      scenarioReader,
+    });
+    const outcome = await handler(makeInvocation());
+    expect(outcome.assistant_text).toMatch(/^Raise price scored highest against your goal in 62% of runs of this model/);
+  });
+
+  it('analysis_status="completed" succeeds with Case D headline', async () => {
+    const handler = createRunAnalysisHandler({
+      plotClient: mkPlot(withStatus('completed')),
+      scenarioReader,
+    });
+    const outcome = await handler(makeInvocation());
+    expect(outcome.assistant_text).toMatch(/^Raise price scored highest against your goal in 62% of runs of this model/);
+  });
+
+  it('analysis_status="partial" succeeds with Case D headline + partial caveat suffix', async () => {
+    // V5 deterministic headline (2026-05-28): partial caveat now appends
+    // to the headline as a status suffix rather than overwriting the
+    // user-visible string entirely. The handler still passes the partial
+    // caveat through `summary` (correction 4 — no schema extension).
+    const handler = createRunAnalysisHandler({
+      plotClient: mkPlot(withStatus('partial')),
+      scenarioReader,
+    });
+    const outcome = await handler(makeInvocation());
+    expect(outcome.assistant_text).toMatch(/^Raise price scored highest against your goal in 62% of runs of this model/);
+    expect(outcome.assistant_text).toContain('provisional');
+    // Card/chat parity: summary equals assistant_text.
+    const fact = outcome.handler_facts[0]!;
+    if (fact.fact_type === 'run_analysis') {
+      expect(fact.result.summary).toBe(outcome.assistant_text);
+    }
+  });
+
+  it('analysis_status="blocked" is fatal with cause_kind analysis_blocked', async () => {
+    const handler = createRunAnalysisHandler({
+      plotClient: mkPlot(withStatus('blocked')),
+      scenarioReader,
+    });
+    await expect(handler(makeInvocation())).rejects.toMatchObject({
+      name: 'HandlerInvocationFailedError',
+      cause_kind: 'analysis_blocked',
+    });
+  });
+
+  it('analysis_status="failed" is fatal with cause_kind analysis_failed', async () => {
+    const handler = createRunAnalysisHandler({
+      plotClient: mkPlot(withStatus('failed')),
+      scenarioReader,
+    });
+    await expect(handler(makeInvocation())).rejects.toMatchObject({
+      name: 'HandlerInvocationFailedError',
+      cause_kind: 'analysis_failed',
+    });
+  });
+
+  it('unknown status WITH usable fields proceeds with Case D headline + caution caveat + warning log', async () => {
+    // V5 deterministic headline (2026-05-28): unknown-status caveat now
+    // appends to the headline as a status suffix. The warning log still
+    // fires (assertion below).
+    const handler = createRunAnalysisHandler({
+      plotClient: mkPlot(withStatus('still_thinking_very_hard')),
+      scenarioReader,
+    });
+    const outcome = await handler(makeInvocation());
+    expect(outcome.assistant_text).toMatch(/^Raise price scored highest against your goal in 62% of runs of this model/);
+    expect(outcome.assistant_text).toContain('treat the result with caution');
+
+    const warnCall = warnSpy.mock.calls.find((c) => {
+      const payload = c[0] as Record<string, unknown>;
+      return payload?.event === 'external_contract_unknown_status';
+    });
+    expect(warnCall).toBeDefined();
+    expect((warnCall![0] as Record<string, unknown>).analysis_status).toBe(
+      'still_thinking_very_hard',
+    );
+  });
+
+  it('unknown status with NO usable fields is fatal with cause_kind analysis_not_completed', async () => {
+    const handler = createRunAnalysisHandler({
+      plotClient: mkPlot(
+        withStatus('still_thinking_very_hard', { option_comparison: [] }),
+      ),
+      scenarioReader,
+    });
+    await expect(handler(makeInvocation())).rejects.toBeInstanceOf(
+      HandlerInvocationFailedError,
+    );
+    // Warning still fires with usable_fields:false so log aggregators can
+    // separate degraded-but-passed from fatal-no-fields.
+    const warnCall = warnSpy.mock.calls.find((c) => {
+      const payload = c[0] as Record<string, unknown>;
+      return payload?.event === 'external_contract_unknown_status';
+    });
+    expect(warnCall).toBeDefined();
+    expect((warnCall![0] as Record<string, unknown>).usable_fields).toBe(false);
+  });
+
+  it('partial status with no result records emits PARTIAL_NO_RESULTS caveat', async () => {
+    // Follow-up review: pre-follow-up this fell through to NO_RESULTS
+    // silently, dropping the partial-run caveat. Contract Part C requires
+    // a caveat for partial regardless of record count — the user needs to
+    // distinguish "analysis ran cleanly, nothing to compare" from
+    // "analysis was cut short and produced nothing".
+    const handler = createRunAnalysisHandler({
+      plotClient: mkPlot(withStatus('partial', { option_comparison: [] })),
+      scenarioReader,
+    });
+    const outcome = await handler(makeInvocation());
+    expect(outcome.assistant_text).toBe(
+      RUN_ANALYSIS_ASSISTANT_TEMPLATES.PARTIAL_NO_RESULTS,
+    );
+    // Caveat copy mentions both "partial" and the zero-comparisons fact
+    // so users can't misread this as a clean empty run.
+    expect(outcome.assistant_text.toLowerCase()).toContain('partial');
+    expect(outcome.assistant_text.toLowerCase()).toMatch(/no option comparisons|incomplete/);
+  });
+
+  it('does NOT extend the handler fact schema for partial/unknown status', async () => {
+    // Correction 4 (alpha hardening): the fact carries partial/unknown
+    // caveats through the existing `summary` string only — NO new top-
+    // level fields are introduced for status.
+    //
+    // V5 state-trust (0.10.0): `graph_hash_at_run` and `computed_at` are
+    // now first-class optional fields on RunAnalysisResultSchema —
+    // independent of analysis_status. They appear on EVERY successful
+    // fact (including partial), so the allowlist below includes them.
+    const handler = createRunAnalysisHandler({
+      plotClient: mkPlot(withStatus('partial')),
+      scenarioReader,
+    });
+    const outcome = await handler(makeInvocation());
+    const fact = outcome.handler_facts[0]!;
+    if (fact.fact_type === 'run_analysis') {
+      // Only the known schema fields should be present on result.
+      //
+      // DERIVED FROM THE SCHEMA, not mirrored from it (CLAUDE.md trap #12).
+      // This used to be a hand-written array, and it went stale the moment
+      // `constraint_verdict` was added in @talchain/schemas 0.25.0 — the
+      // failure mode a mirror always has. Reading `.shape` means a future
+      // contract field is admitted automatically and, more importantly, a field
+      // the handler invents that the CONTRACT does not declare still fails
+      // here, which is the assertion this test actually exists to make.
+      const declared = Object.keys(RunAnalysisResultSchema.shape);
+      const resultKeys = Object.keys(fact.result).sort();
+      for (const k of resultKeys) {
+        expect(declared).toContain(k);
+      }
+    }
+  });
+
+  it('uses staging-shape capture — option_comparison with opt_id + win_probability', async () => {
+    // Minimum usable-fields contract from Part C: matches real staging
+    // response at cross-service-2026-03-15T23-24-53-476Z/step-2-analysis.json.
+    const response = {
+      meta: { seed_used: 42, n_samples: 500, response_hash: 'h' },
+      response_hash: 'h',
+      analysis_status: 'computed',
+      option_comparison: [
+        { option_id: 'opt_1', option_label: 'Raise price to £59', win_probability: 0.347 },
+        { option_id: 'opt_2', option_label: 'Keep current', win_probability: 0.300 },
+        { option_id: 'opt_3', option_label: 'Introduce tiered pricing', win_probability: 0.353 },
+      ],
+    } as unknown as V2RunResponseEnvelope;
+
+    const handler = createRunAnalysisHandler({
+      plotClient: mkPlot(response),
+      scenarioReader,
+    });
+    const outcome = await handler(makeInvocation());
+    // ⚠ POLICY REVERSAL, 31 Aug 2026. This previously asserted
+    //     expect(outcome.assistant_text).toBe('Introduce tiered pricing currently leads.');
+    //   on the reasoning: "Winner opt_3 has 35.3% probability → below
+    //   MIN_LEAD_PROBABILITY (0.4) so strong cases A/B/C/D suppress. The V5
+    //   link-safe response floor (Case E) now produces the minimum
+    //   non-overclaiming label-only headline instead of the locked DEFAULT
+    //   template."
+    //
+    // ⭐ THE CAPTURED RESPONSE ABOVE IS UNCHANGED AND MUST STAY UNCHANGED — it
+    // is a real staging envelope from 2026-03-15, and rewriting a capture to
+    // suit a new expectation would falsify the record. What changed is only
+    // what the product SAYS about it.
+    //
+    // And what it said was not defensible. The captured field is
+    // 0.353 / 0.347 / 0.300 — a THREE-WAY RACE DECIDED BY SIX TENTHS OF ONE
+    // PERCENTAGE POINT — and the product named a winner, with the number and
+    // every hedge stripped off, which is the most confident-reading sentence in
+    // the grammar. `MIN_LEAD_PROBABILITY` correctly suppressed the enriched
+    // cases and then the floor asserted the same claim anyway, unqualified.
+    //
+    // ⚠ NOTE WHAT THIS CAPTURE IS: a pricing brief with three genuine,
+    // decision-shaped options ("Raise price to £59" / "Keep current" /
+    // "Introduce tiered pricing"). So the defect this change closes was NEVER
+    // confined to open-ended diagnostic briefs — a well-formed decision brief
+    // produced a dead heat on real staging in March and got a named winner too.
+    // This is the oldest evidence in the suite for the fix, and it is the
+    // reason the gate keys on the FIELD rather than on the brief class.
+    expect(outcome.assistant_text).toBe(RUN_ANALYSIS_ASSISTANT_TEMPLATES.DEFAULT);
+    const fact = outcome.handler_facts[0]!;
+    if (fact.fact_type === 'run_analysis') {
+      // opt_3 has the highest probability — handler picks it.
+      expect(fact.result.leading_option_id).toBe('opt_3');
+      expect(Object.keys(fact.result.win_probabilities ?? {})).toHaveLength(3);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Absent analysis_status must not be reported as success on an unusable
+// envelope.
+//
+// `evaluateAnalysisStatus` accepted `status === null` unconditionally, without
+// consulting `hasUsableResultFields` — that helper was reached only on the
+// unrecognised-status branch. So a PLoT 200 carrying neither an
+// `analysis_status` nor any usable result record was classified `ok` and became
+// a successful run fact.
+//
+// The asymmetry with `completed` below is deliberate, not an oversight.
+// `analysis_status: "completed"` is PLoT AFFIRMING the run finished, so
+// "no options were compared" (the NO_RESULTS template) is a truthful report and
+// stays reachable — pinned by `run-analysis.test.ts`, "NO_RESULTS template
+// fires when results[] is empty AND status is completed". An ABSENT status is
+// PLoT saying nothing at all: with no status and no records there is no
+// evidence the analysis ran, and reporting success is a claim CEE cannot
+// support.
+//
+// Invariants below are written against the `hasUsableResultFields` contract
+// (Part C: at least one record carries a string `option_id` or `option_label`
+// AND a finite numeric `win_probability`), not against the shape of the defect.
+// ---------------------------------------------------------------------------
+
+describe('run_analysis handler — absent analysis_status requires usable results', () => {
+  it('absent analysis_status WITH usable option_comparison still succeeds', async () => {
+    // Over-blocking guard, and the discriminating twin of the fatal cases
+    // below: the fix must narrow the null branch, never close it. Binds by
+    // IDENTITY to the option the records name, not to "some truthy outcome".
+    const handler = createRunAnalysisHandler({
+      plotClient: mkPlot(withStatus(null)),
+      scenarioReader,
+    });
+    const outcome = await handler(makeInvocation());
+    const fact = outcome.handler_facts[0]!;
+    expect(fact.fact_type).toBe('run_analysis');
+    if (fact.fact_type === 'run_analysis') {
+      expect(fact.result.leading_option_id).toBe('opt_1');
+    }
+  });
+
+  it('absent analysis_status AND zero result records is fatal with cause_kind analysis_not_completed', async () => {
+    const handler = createRunAnalysisHandler({
+      plotClient: mkPlot(withStatus(null, { option_comparison: [] })),
+      scenarioReader,
+    });
+    await expect(handler(makeInvocation())).rejects.toMatchObject({
+      name: 'HandlerInvocationFailedError',
+      cause_kind: 'analysis_not_completed',
+    });
+  });
+
+  it('absent analysis_status AND records with a label but no finite win_probability is fatal', async () => {
+    // The `win_probability` limb of the usable-fields contract. Records are
+    // present and labelled, so a record-COUNT check would pass this envelope;
+    // only the field-level contract rejects it.
+    const handler = createRunAnalysisHandler({
+      plotClient: mkPlot(
+        withStatus(null, {
+          option_comparison: [
+            { option_id: 'opt_1', option_label: 'Raise price' },
+            { option_id: 'opt_2', option_label: 'Keep price' },
+          ],
+        }),
+      ),
+      scenarioReader,
+    });
+    await expect(handler(makeInvocation())).rejects.toMatchObject({
+      name: 'HandlerInvocationFailedError',
+      cause_kind: 'analysis_not_completed',
+    });
+  });
+
+  it('absent analysis_status AND records with a win_probability but no label is fatal', async () => {
+    // The label limb of the same contract.
+    const handler = createRunAnalysisHandler({
+      plotClient: mkPlot(
+        withStatus(null, {
+          option_comparison: [{ win_probability: 0.62 }, { win_probability: 0.38 }],
+        }),
+      ),
+      scenarioReader,
+    });
+    await expect(handler(makeInvocation())).rejects.toMatchObject({
+      name: 'HandlerInvocationFailedError',
+      cause_kind: 'analysis_not_completed',
+    });
+  });
+});

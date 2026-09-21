@@ -382,11 +382,11 @@ interface Graph {
 
 ```typescript
 interface CEEQualityMeta {
-  overall: number;    // 1-10, from engine confidence
+  overall: number;    // 1-10, confidence-derived
   structure: number;  // 1-10, graph complexity
   coverage: number;   // 1-10, options and risks
   safety: number;     // 1-10, minus validation issues
-  causality: number;  // 1-10, cause/effect richness
+  structural_proxy: number;  // 1-10, structural completeness proxy
 }
 ```
 
@@ -556,9 +556,7 @@ if (response.ceeReview) {
 | `CEE_DRAFT_FEATURE_VERSION` | - | Version string in `X-CEE-Feature-Version` |
 | `CEE_DRAFT_ARCHETYPES_ENABLED` | `true` | Enable archetype detection |
 | `CEE_DRAFT_STRUCTURAL_WARNINGS_ENABLED` | `false` | Enable structural warnings |
-| `CEE_BIAS_STRUCTURAL_ENABLED` | `false` | Enable structural bias detectors |
 | `CEE_BIAS_MITIGATION_PATCHES_ENABLED` | `false` | Enable deterministic bias mitigation patches on `/assist/v1/bias-check` (adds `mitigation_patches` field). |
-| `CEE_PRE_DECISION_CHECKS_ENABLED` | `false` | Include pre-decision checklist |
 | `CEE_CAUSAL_VALIDATION_ENABLED` | `false` | Enable ISL bias enrichment |
 | `CEE_PREFLIGHT_ENABLED` | `false` | Enable preflight validation |
 | `CEE_PREFLIGHT_STRICT` | `false` | Reject briefs failing preflight |

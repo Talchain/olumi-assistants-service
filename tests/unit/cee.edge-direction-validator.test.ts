@@ -97,7 +97,7 @@ describe("EdgeDirectionValidator", () => {
       const result = await validator.validate({ graph } as any);
 
       expect(result.valid).toBe(true);
-      expect(result.severity).toBe("warning");
+      expect(result.severity).toBe("warn");
       expect(result.code).toBe("EDGE_DIRECTION_VIOLATION");
       expect(result.message).toMatch(/goal outgoing/);
 
@@ -123,7 +123,7 @@ describe("EdgeDirectionValidator", () => {
       const result = await validator.validate({ graph } as any);
 
       expect(result.valid).toBe(true);
-      expect(result.severity).toBe("warning");
+      expect(result.severity).toBe("warn");
 
       const details = result.details as any;
       expect(details.goal_outgoing_count).toBe(2);
@@ -146,7 +146,7 @@ describe("EdgeDirectionValidator", () => {
       const result = await validator.validate({ graph } as any);
 
       expect(result.valid).toBe(true);
-      expect(result.severity).toBe("warning");
+      expect(result.severity).toBe("warn");
 
       const details = result.details as any;
       expect(details.wrong_direction_count).toBe(1);
@@ -167,7 +167,7 @@ describe("EdgeDirectionValidator", () => {
       const validator = new EdgeDirectionValidator();
       const result = await validator.validate({ graph } as any);
 
-      expect(result.severity).toBe("warning");
+      expect(result.severity).toBe("warn");
       const details = result.details as any;
       expect(details.violations[0].reason).toMatch(/Outcomes don't cause decisions/);
     });
@@ -213,7 +213,7 @@ describe("EdgeDirectionValidator", () => {
       const result = await validator.validate({ graph } as any);
 
       expect(result.valid).toBe(true); // Still valid, but with warning
-      expect(result.severity).toBe("warning");
+      expect(result.severity).toBe("warn");
       const details = result.details as any;
       expect(details.violations[0].reason).toMatch(/Factors don't cause options/);
     });

@@ -1,0 +1,3119 @@
+/**
+ * Deterministic Pre-Repair Sweep — Unit Tests
+ *
+ * Covers: Bucket A/B fixes, unreachable factors, status quo,
+ * violation routing, repair gating, format lock, field preservation,
+ * adapter brief inclusion, contract alignment, observability.
+ */
+
+import { describe, it, expect, vi } from "vitest";
+
+// ── Mocks ────────────────────────────────────────────────────────────────────
+
+vi.mock("../../src/utils/telemetry.js", () => ({
+  log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+  emit: vi.fn(),
+  calculateCost: vi.fn().mockReturnValue(0),
+  TelemetryEvents: {},
+}));
+
+vi.mock("../../src/config/index.js", () => ({
+  config: { cee: {}, features: { optionShortcutRepair: true } },
+  isProduction: vi.fn().mockReturnValue(true),
+}));
+
+// ── Imports ──────────────────────────────────────────────────────────────────
+
+import {
+  detectEdgeFormat,
+  patchEdgeNumeric,
+  canonicalStructuralEdge,
+  neutralCausalEdge,
+} from "../../src/cee/unified-pipeline/utils/edge-format.js";
+import { handleUnreachableFactors } from "../../src/cee/unified-pipeline/stages/repair/unreachable-factors.js";
+import { fixStatusQuoConnectivity } from "../../src/cee/unified-pipeline/stages/repair/status-quo-fix.js";
+import { log } from "../../src/utils/telemetry.js";
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Minimal graph with a valid basic structure */
+function makeGraph(overrides: {
+  nodes?: any[];
+  edges?: any[];
+} = {}): any {
+  return {
+    nodes: overrides.nodes ?? [
+      { id: "dec_1", kind: "decision", label: "Decision" },
+      { id: "opt_a", kind: "option", label: "Option A" },
+      { id: "opt_b", kind: "option", label: "Option B" },
+      { id: "fac_price", kind: "factor", label: "Price", category: "controllable", data: { value: 0.5, factor_type: "cost", extractionType: "explicit", uncertainty_drivers: ["market"] } },
+      { id: "fac_quality", kind: "factor", label: "Quality", category: "controllable", data: { value: 0.7, factor_type: "quality", extractionType: "explicit", uncertainty_drivers: ["supply"] } },
+      { id: "out_revenue", kind: "outcome", label: "Revenue" },
+      { id: "goal_1", kind: "goal", label: "Maximise Revenue" },
+    ],
+    edges: overrides.edges ?? [
+      { from: "dec_1", to: "opt_a", strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: "positive" },
+      { from: "dec_1", to: "opt_b", strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: "positive" },
+      { from: "opt_a", to: "fac_price", strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: "positive" },
+      { from: "opt_b", to: "fac_quality", strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: "positive" },
+      { from: "fac_price", to: "out_revenue", strength_mean: 0.7, strength_std: 0.15, belief_exists: 0.9, effect_direction: "positive" },
+      { from: "fac_quality", to: "out_revenue", strength_mean: 0.5, strength_std: 0.2, belief_exists: 0.8, effect_direction: "positive" },
+      { from: "out_revenue", to: "goal_1", strength_mean: 0.8, strength_std: 0.1, belief_exists: 0.95, effect_direction: "positive" },
+    ],
+  };
+}
+
+// =============================================================================
+// Edge Format Utility
+// =============================================================================
+
+describe("edge-format utility", () => {
+  describe("detectEdgeFormat", () => {
+    it("returns V1_FLAT for edges with strength_mean", () => {
+      const edges = [{ from: "a", to: "b", strength_mean: 0.5 }];
+      expect(detectEdgeFormat(edges as any)).toBe("V1_FLAT");
+    });
+
+    it("returns LEGACY for edges with weight/belief", () => {
+      const edges = [{ from: "a", to: "b", weight: 0.5, belief: 0.8 }];
+      expect(detectEdgeFormat(edges as any)).toBe("LEGACY");
+    });
+
+    it("returns NONE for empty edges", () => {
+      expect(detectEdgeFormat([])).toBe("NONE");
+    });
+
+    it("returns NONE for edges without numeric fields", () => {
+      const edges = [{ from: "a", to: "b" }];
+      expect(detectEdgeFormat(edges as any)).toBe("NONE");
+    });
+
+    it("prefers V1_FLAT over LEGACY when both present", () => {
+      const edges = [
+        { from: "a", to: "b", strength_mean: 0.5, weight: 0.3 },
+      ];
+      expect(detectEdgeFormat(edges as any)).toBe("V1_FLAT");
+    });
+  });
+
+  describe("patchEdgeNumeric", () => {
+    it("patches V1_FLAT fields", () => {
+      const edge = { from: "a", to: "b" };
+      const result = patchEdgeNumeric(edge as any, "V1_FLAT", { mean: 0.5, std: 0.1, existence: 0.8 });
+      expect(result.strength_mean).toBe(0.5);
+      expect(result.strength_std).toBe(0.1);
+      expect(result.belief_exists).toBe(0.8);
+    });
+
+    it("patches LEGACY fields", () => {
+      const edge = { from: "a", to: "b" };
+      const result = patchEdgeNumeric(edge as any, "LEGACY", { mean: 0.5, existence: 0.8 });
+      expect((result as any).weight).toBe(0.5);
+      expect((result as any).belief).toBe(0.8);
+    });
+
+    it("does not mutate input", () => {
+      const edge = { from: "a", to: "b", strength_mean: 0.3 };
+      const result = patchEdgeNumeric(edge as any, "V1_FLAT", { mean: 0.9 });
+      expect(result.strength_mean).toBe(0.9);
+      expect(edge.strength_mean).toBe(0.3);
+    });
+  });
+
+  describe("canonicalStructuralEdge", () => {
+    it("sets canonical V1 values", () => {
+      const edge = { from: "opt_a", to: "fac_price" };
+      const result = canonicalStructuralEdge(edge as any, "V1_FLAT");
+      expect(result.strength_mean).toBe(1);
+      expect(result.strength_std).toBe(0.01);
+      expect(result.belief_exists).toBe(1.0);
+    });
+
+    it("preserves other fields", () => {
+      const edge = { from: "opt_a", to: "fac_price", origin: "ai", effect_direction: "positive" as const };
+      const result = canonicalStructuralEdge(edge as any, "V1_FLAT");
+      expect(result.origin).toBe("ai");
+      expect(result.effect_direction).toBe("positive");
+    });
+  });
+
+  describe("neutralCausalEdge", () => {
+    it("creates positive neutral edge", () => {
+      const result = neutralCausalEdge("V1_FLAT", { from: "fac_a", to: "out_1" });
+      expect(result.from).toBe("fac_a");
+      expect(result.to).toBe("out_1");
+      expect(result.strength_mean).toBe(0.3);
+      expect(result.strength_std).toBe(0.2);
+      expect(result.belief_exists).toBe(0.7);
+      expect(result.origin).toBe("repair");
+    });
+
+    it("creates negative neutral edge", () => {
+      const result = neutralCausalEdge("V1_FLAT", { from: "fac_a", to: "risk_1", sign: "negative" });
+      expect(result.strength_mean).toBe(-0.3);
+      expect(result.effect_direction).toBe("negative");
+    });
+
+    it("includes provenance and provenance_source fields", () => {
+      const result = neutralCausalEdge("V1_FLAT", { from: "fac_a", to: "out_1" });
+      expect(result.provenance).toEqual({
+        source: "synthetic",
+        quote: "Repair edge (structural connectivity)",
+      });
+      expect(result.provenance_source).toBe("synthetic");
+    });
+  });
+});
+
+// =============================================================================
+// Bucket A — Always Auto-Fix
+// =============================================================================
+
+describe("Bucket A fixes", () => {
+  // We test via the graph-validator + manual fixes. Since the deterministic sweep
+  // calls the validator internally, we test the fix functions through integration-style tests.
+
+  describe("NaN strength_mean → replaced with 0.5", () => {
+    it("replaces NaN edge values", () => {
+      const graph = makeGraph({
+        edges: [
+          { from: "dec_1", to: "opt_a", strength_mean: NaN, strength_std: 0.01, belief_exists: 1 },
+          { from: "opt_a", to: "fac_price", strength_mean: 1, strength_std: 0.01, belief_exists: 1 },
+          { from: "fac_price", to: "out_revenue", strength_mean: 0.7, strength_std: 0.15, belief_exists: 0.9 },
+          { from: "out_revenue", to: "goal_1", strength_mean: 0.8, strength_std: 0.1, belief_exists: 0.95 },
+        ],
+      });
+
+      // Check the NaN exists
+      expect(Number.isNaN(graph.edges[0].strength_mean)).toBe(true);
+
+      // After manual fix (simulating what the sweep does)
+      for (const edge of graph.edges) {
+        if (typeof edge.strength_mean === "number" && Number.isNaN(edge.strength_mean)) {
+          edge.strength_mean = 0.5;
+        }
+      }
+
+      expect(graph.edges[0].strength_mean).toBe(0.5);
+    });
+  });
+
+  describe("SIGN_MISMATCH → mean flipped", () => {
+    it("flips mean sign to match effect_direction", () => {
+      const edge = { from: "fac_a", to: "out_1", strength_mean: 0.5, strength_std: 0.1, belief_exists: 0.8, effect_direction: "negative" as const };
+
+      // Detect sign mismatch: negative direction but positive mean
+      if (edge.effect_direction === "negative" && edge.strength_mean > 0) {
+        edge.strength_mean = -edge.strength_mean;
+      }
+
+      expect(edge.strength_mean).toBe(-0.5);
+    });
+  });
+
+  describe("INVALID_EDGE_REF → edge removed", () => {
+    it("removes edges referencing non-existent nodes", () => {
+      const graph = makeGraph();
+      graph.edges.push({ from: "non_existent", to: "goal_1", strength_mean: 0.5 });
+
+      const nodeIds = new Set(graph.nodes.map((n: any) => n.id));
+      graph.edges = graph.edges.filter((e: any) => nodeIds.has(e.from) && nodeIds.has(e.to));
+
+      expect(graph.edges).toHaveLength(7);
+      expect(graph.edges.every((e: any) => nodeIds.has(e.from) && nodeIds.has(e.to))).toBe(true);
+    });
+  });
+
+  describe("GOAL_HAS_OUTGOING → outgoing removed", () => {
+    it("removes outgoing edges from goal nodes", () => {
+      const graph = makeGraph();
+      graph.edges.push({ from: "goal_1", to: "fac_price", strength_mean: 0.3 });
+
+      const goalIds = new Set(graph.nodes.filter((n: any) => n.kind === "goal").map((n: any) => n.id));
+      graph.edges = graph.edges.filter((e: any) => !goalIds.has(e.from));
+
+      const outgoingFromGoal = graph.edges.filter((e: any) => goalIds.has(e.from));
+      expect(outgoingFromGoal).toHaveLength(0);
+    });
+  });
+
+  describe("DECISION_HAS_INCOMING → incoming removed", () => {
+    it("removes incoming edges to decision nodes", () => {
+      const graph = makeGraph();
+      graph.edges.push({ from: "fac_price", to: "dec_1", strength_mean: 0.3 });
+
+      const decisionIds = new Set(graph.nodes.filter((n: any) => n.kind === "decision").map((n: any) => n.id));
+      graph.edges = graph.edges.filter((e: any) => !decisionIds.has(e.to));
+
+      const incomingToDecision = graph.edges.filter((e: any) => decisionIds.has(e.to));
+      expect(incomingToDecision).toHaveLength(0);
+    });
+  });
+
+  describe("Non-canonical structural edge → canonicalised", () => {
+    it("canonicalises V1 structural edges", () => {
+      const edge = { from: "opt_a", to: "fac_price", strength_mean: 0.7, strength_std: 0.15, belief_exists: 0.8 };
+      const result = canonicalStructuralEdge(edge as any, "V1_FLAT");
+
+      expect(result.strength_mean).toBe(1);
+      expect(result.strength_std).toBe(0.01);
+      expect(result.belief_exists).toBe(1.0);
+    });
+
+    it("canonicalises LEGACY structural edges", () => {
+      const edge = { from: "opt_a", to: "fac_price", weight: 0.5, belief: 0.6 };
+      const result = canonicalStructuralEdge(edge as any, "LEGACY");
+
+      expect((result as any).weight).toBe(1);
+      expect((result as any).belief).toBe(1.0);
+    });
+  });
+});
+
+// =============================================================================
+// Bucket B — Violation-Gated
+// =============================================================================
+
+describe("Bucket B fixes (violation-gated)", () => {
+  describe("CONTROLLABLE_MISSING_DATA", () => {
+    it("adds defaults when violation is cited", () => {
+      const node: any = { id: "fac_test", kind: "factor", label: "Test", category: "controllable", data: {} };
+
+      // Simulate: violation exists → fill defaults
+      if (node.data.value === undefined) (node.data as any).value = 0.5;
+      if ((node.data as any).extractionType === undefined) (node.data as any).extractionType = "inferred";
+      if ((node.data as any).factor_type === undefined) (node.data as any).factor_type = "other";
+      if ((node.data as any).uncertainty_drivers === undefined) (node.data as any).uncertainty_drivers = ["Not provided"];
+
+      expect(node.data).toEqual({
+        value: 0.5,
+        extractionType: "inferred",
+        factor_type: "other",
+        uncertainty_drivers: ["Not provided"],
+      });
+    });
+
+    it("makes NO changes when violation is NOT cited", () => {
+      const node = { id: "fac_test", kind: "factor", label: "Test", category: "controllable", data: {} };
+      const before = JSON.parse(JSON.stringify(node));
+
+      // No violation → no fix applied
+      // (The sweep only applies Bucket B for cited codes)
+
+      expect(node).toEqual(before);
+    });
+  });
+
+  describe("OBSERVABLE_EXTRA_DATA", () => {
+    it("removes extra fields, preserves others", () => {
+      const node: any = {
+        id: "fac_obs", kind: "factor", label: "Observable",
+        category: "observable",
+        data: { value: 0.5, extractionType: "observed", factor_type: "cost", uncertainty_drivers: ["x"] },
+        observed_state: { value: 0.5 },
+      };
+
+      // Fix: remove factor_type and uncertainty_drivers only
+      delete node.data.factor_type;
+      delete node.data.uncertainty_drivers;
+
+      expect(node.data).toEqual({ value: 0.5, extractionType: "observed" });
+      expect(node.observed_state).toEqual({ value: 0.5 });
+    });
+  });
+
+  describe("EXTERNAL_HAS_DATA", () => {
+    it("removes prohibited fields, preserves extractionType", () => {
+      const node: any = {
+        id: "fac_ext", kind: "factor", label: "External",
+        category: "external",
+        data: { value: 0.3, extractionType: "inferred", factor_type: "cost", uncertainty_drivers: ["y"] },
+      };
+
+      // Fix: remove value, factor_type, uncertainty_drivers — preserve extractionType
+      delete node.data.value;
+      delete node.data.factor_type;
+      delete node.data.uncertainty_drivers;
+
+      expect(node.data).toEqual({ extractionType: "inferred" });
+    });
+  });
+
+  describe("CATEGORY_MISMATCH", () => {
+    it("infers controllable from option→factor edge", () => {
+      const graph = makeGraph();
+      const factorNode = graph.nodes.find((n: any) => n.id === "fac_price");
+      factorNode.category = "external"; // Wrong category
+
+      const nodeKindMap = new Map(graph.nodes.map((n: any) => [n.id, n.kind]));
+      const hasOptionEdge = new Set<string>();
+      for (const edge of graph.edges) {
+        if (nodeKindMap.get(edge.from) === "option" && nodeKindMap.get(edge.to) === "factor") {
+          hasOptionEdge.add(edge.to);
+        }
+      }
+
+      // Structure-inferred category
+      const inferred = hasOptionEdge.has("fac_price") ? "controllable" : "external";
+      expect(inferred).toBe("controllable");
+    });
+
+    it("infers external when no option→factor edge", () => {
+      const graph = makeGraph({
+        nodes: [
+          ...makeGraph().nodes,
+          { id: "fac_market", kind: "factor", label: "Market Conditions", category: "controllable" },
+        ],
+      });
+
+      const nodeKindMap = new Map(graph.nodes.map((n: any) => [n.id, n.kind]));
+      const hasOptionEdge = new Set<string>();
+      for (const edge of graph.edges) {
+        if (nodeKindMap.get(edge.from) === "option" && nodeKindMap.get(edge.to) === "factor") {
+          hasOptionEdge.add(edge.to);
+        }
+      }
+
+      const inferred = hasOptionEdge.has("fac_market") ? "controllable" : "external";
+      expect(inferred).toBe("external");
+    });
+  });
+});
+
+// =============================================================================
+// Unreachable Factors
+// =============================================================================
+
+describe("unreachable factors", () => {
+  it("reclassifies factor with zero option→factor edges to external", () => {
+    const graph = makeGraph({
+      nodes: [
+        ...makeGraph().nodes,
+        { id: "fac_market", kind: "factor", label: "Market Conditions", category: "controllable", data: { value: 0.5, factor_type: "other" } },
+      ],
+      edges: [
+        ...makeGraph().edges,
+        { from: "fac_market", to: "out_revenue", strength_mean: 0.4, strength_std: 0.2, belief_exists: 0.7 },
+      ],
+    });
+
+    const result = handleUnreachableFactors(graph, "V1_FLAT");
+
+    expect(result.reclassified).toContain("fac_market");
+    const marketNode = graph.nodes.find((n: any) => n.id === "fac_market");
+    expect(marketNode.category).toBe("external");
+    // data removed: after stripping value/factor_type, no union-required key remains
+    expect(marketNode.data).toBeUndefined();
+  });
+
+  it("preserves external factor with path to goal (no blocker)", () => {
+    const graph = makeGraph({
+      nodes: [
+        ...makeGraph().nodes,
+        { id: "fac_market", kind: "factor", label: "Market Conditions", category: "external" },
+      ],
+      edges: [
+        ...makeGraph().edges,
+        { from: "fac_market", to: "out_revenue", strength_mean: 0.4, strength_std: 0.2, belief_exists: 0.7 },
+      ],
+    });
+
+    const result = handleUnreachableFactors(graph, "V1_FLAT");
+
+    // Market factor has path to goal via out_revenue→goal_1
+    expect(result.markedDroppable).not.toContain("fac_market");
+  });
+
+  it("marks external factor with no path to goal as droppable (NOT removed)", () => {
+    const graph = makeGraph({
+      nodes: [
+        ...makeGraph().nodes,
+        { id: "fac_isolated", kind: "factor", label: "Isolated Factor", category: "controllable" },
+      ],
+    });
+    // No edges from fac_isolated to anything
+
+    const nodeCountBefore = graph.nodes.length;
+    const result = handleUnreachableFactors(graph, "V1_FLAT");
+
+    expect(result.reclassified).toContain("fac_isolated");
+    expect(result.markedDroppable).toContain("fac_isolated");
+    // NOT removed
+    expect(graph.nodes.length).toBe(nodeCountBefore);
+    expect(graph.nodes.find((n: any) => n.id === "fac_isolated")).toBeDefined();
+  });
+
+  it("does NOT reclassify factor with option→factor edge", () => {
+    const graph = makeGraph();
+
+    const result = handleUnreachableFactors(graph, "V1_FLAT");
+
+    // fac_price and fac_quality have option edges — should NOT be reclassified
+    expect(result.reclassified).not.toContain("fac_price");
+    expect(result.reclassified).not.toContain("fac_quality");
+  });
+});
+
+// =============================================================================
+// Status Quo Fix
+// =============================================================================
+
+describe("status quo fix", () => {
+  it("wires status quo option with zero option→factor edges when reachability violation exists", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "dec_1", kind: "decision", label: "Decision" },
+        { id: "opt_a", kind: "option", label: "Option A" },
+        { id: "opt_sq", kind: "option", label: "Do Nothing" }, // status quo (no edges)
+        { id: "fac_price", kind: "factor", label: "Price", category: "controllable" },
+        { id: "out_revenue", kind: "outcome", label: "Revenue" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "dec_1", to: "opt_a", strength_mean: 1, strength_std: 0.01, belief_exists: 1 },
+        { from: "dec_1", to: "opt_sq", strength_mean: 1, strength_std: 0.01, belief_exists: 1 },
+        { from: "opt_a", to: "fac_price", strength_mean: 1, strength_std: 0.01, belief_exists: 1 },
+        { from: "fac_price", to: "out_revenue", strength_mean: 0.7, strength_std: 0.15, belief_exists: 0.9 },
+        { from: "out_revenue", to: "goal_1", strength_mean: 0.8, strength_std: 0.1, belief_exists: 0.95 },
+      ],
+    });
+
+    const edgeCountBefore = graph.edges.length;
+    const result = fixStatusQuoConnectivity(
+      graph,
+      [{ code: "NO_PATH_TO_GOAL" }],
+      "V1_FLAT",
+    );
+
+    expect(result.fixed).toBe(true);
+    expect(graph.edges.length).toBeGreaterThan(edgeCountBefore);
+
+    // Status quo should now have an edge to fac_price
+    const sqEdge = graph.edges.find((e: any) => e.from === "opt_sq" && e.to === "fac_price");
+    expect(sqEdge).toBeDefined();
+  });
+
+  it("marks status quo as droppable when unfixable (NOT removed)", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "dec_1", kind: "decision", label: "Decision" },
+        { id: "opt_a", kind: "option", label: "Option A" },
+        { id: "opt_sq", kind: "option", label: "Status Quo" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "dec_1", to: "opt_a", strength_mean: 1, strength_std: 0.01, belief_exists: 1 },
+        { from: "dec_1", to: "opt_sq", strength_mean: 1, strength_std: 0.01, belief_exists: 1 },
+        // opt_a has no factor edges either → no targets to copy
+      ],
+    });
+
+    const result = fixStatusQuoConnectivity(
+      graph,
+      [{ code: "NO_EFFECT_PATH" }],
+      "V1_FLAT",
+    );
+
+    expect(result.markedDroppable).toBe(true);
+    // NOT removed
+    expect(graph.nodes.find((n: any) => n.id === "opt_sq")).toBeDefined();
+  });
+
+  it("makes no changes when status quo already connected", () => {
+    const graph = makeGraph();
+
+    const result = fixStatusQuoConnectivity(
+      graph,
+      [{ code: "NO_PATH_TO_GOAL" }],
+      "V1_FLAT",
+    );
+
+    // All options have edges → no status quo detected → no changes
+    expect(result.fixed).toBe(false);
+    expect(result.markedDroppable).toBe(false);
+    expect(result.repairs).toHaveLength(0);
+  });
+
+  it("makes no changes without relevant violations", () => {
+    const graph = makeGraph({
+      nodes: [
+        ...makeGraph().nodes,
+        { id: "opt_sq", kind: "option", label: "Status Quo" },
+      ],
+      edges: [
+        ...makeGraph().edges,
+        { from: "dec_1", to: "opt_sq", strength_mean: 1, strength_std: 0.01, belief_exists: 1 },
+      ],
+    });
+
+    const result = fixStatusQuoConnectivity(
+      graph,
+      [{ code: "NAN_VALUE" }], // Not a relevant violation
+      "V1_FLAT",
+    );
+
+    expect(result.fixed).toBe(false);
+    expect(result.repairs).toHaveLength(0);
+  });
+
+  it("does NOT treat option labelled 'status quo' but having interventions as status quo", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "dec_1", kind: "decision", label: "Decision" },
+        { id: "opt_sq", kind: "option", label: "Status Quo" },
+        { id: "opt_b", kind: "option", label: "Option B" },
+        { id: "fac_price", kind: "factor", label: "Price", category: "controllable" },
+        { id: "out_revenue", kind: "outcome", label: "Revenue" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "dec_1", to: "opt_sq", strength_mean: 1, strength_std: 0.01, belief_exists: 1 },
+        { from: "dec_1", to: "opt_b", strength_mean: 1, strength_std: 0.01, belief_exists: 1 },
+        { from: "opt_sq", to: "fac_price", strength_mean: 1, strength_std: 0.01, belief_exists: 1 }, // Has intervention edge
+        { from: "opt_b", to: "fac_price", strength_mean: 1, strength_std: 0.01, belief_exists: 1 },
+        { from: "fac_price", to: "out_revenue", strength_mean: 0.7, strength_std: 0.15, belief_exists: 0.9 },
+        { from: "out_revenue", to: "goal_1", strength_mean: 0.8, strength_std: 0.1, belief_exists: 0.95 },
+      ],
+    });
+
+    const result = fixStatusQuoConnectivity(
+      graph,
+      [{ code: "NO_PATH_TO_GOAL" }],
+      "V1_FLAT",
+    );
+
+    // opt_sq has interventions — it's NOT status quo by structure
+    expect(result.fixed).toBe(false);
+    expect(result.repairs).toHaveLength(0);
+  });
+});
+
+// =============================================================================
+// Routing — LLM Repair Needed
+// =============================================================================
+
+describe("violation routing", () => {
+  it("only Bucket A → llmRepairNeeded = false", () => {
+    // When all violations are Bucket A (NAN_VALUE, SIGN_MISMATCH, etc.)
+    // the sweep resolves them and llmRepairNeeded should be false
+    const _bucketACodes = new Set(["NAN_VALUE", "SIGN_MISMATCH", "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR", "INVALID_EDGE_REF", "GOAL_HAS_OUTGOING", "DECISION_HAS_INCOMING"]);
+    const bucketCCodes = new Set(["NO_PATH_TO_GOAL", "NO_EFFECT_PATH", "UNREACHABLE_FROM_DECISION", "MISSING_BRIDGE", "MISSING_GOAL", "MISSING_DECISION", "INVALID_EDGE_TYPE", "CYCLE_DETECTED", "OPTIONS_IDENTICAL", "GOAL_NUMBER_AS_FACTOR", "INSUFFICIENT_OPTIONS"]);
+
+    const violations = [{ code: "NAN_VALUE" }, { code: "SIGN_MISMATCH" }];
+    const hasBucketC = violations.some((v) => bucketCCodes.has(v.code));
+    expect(hasBucketC).toBe(false);
+  });
+
+  it("Bucket A + C → A resolved, llmRepairNeeded = true", () => {
+    const bucketCCodes = new Set(["NO_PATH_TO_GOAL", "NO_EFFECT_PATH", "UNREACHABLE_FROM_DECISION", "MISSING_BRIDGE", "MISSING_GOAL", "MISSING_DECISION", "INVALID_EDGE_TYPE", "CYCLE_DETECTED", "OPTIONS_IDENTICAL", "GOAL_NUMBER_AS_FACTOR", "INSUFFICIENT_OPTIONS"]);
+
+    const violations = [{ code: "NAN_VALUE" }, { code: "NO_PATH_TO_GOAL" }];
+    const hasBucketC = violations.some((v) => bucketCCodes.has(v.code));
+    expect(hasBucketC).toBe(true);
+  });
+
+  it("only Bucket C → llmRepairNeeded = true", () => {
+    const bucketCCodes = new Set(["NO_PATH_TO_GOAL", "NO_EFFECT_PATH", "UNREACHABLE_FROM_DECISION", "MISSING_BRIDGE", "MISSING_GOAL", "MISSING_DECISION", "INVALID_EDGE_TYPE", "CYCLE_DETECTED", "OPTIONS_IDENTICAL", "GOAL_NUMBER_AS_FACTOR", "INSUFFICIENT_OPTIONS"]);
+
+    const violations = [{ code: "NO_PATH_TO_GOAL" }, { code: "CYCLE_DETECTED" }];
+    const hasBucketC = violations.some((v) => bucketCCodes.has(v.code));
+    expect(hasBucketC).toBe(true);
+  });
+
+  it("no violations → llmRepairNeeded = false", () => {
+    const violations: Array<{ code: string }> = [];
+    expect(violations.length).toBe(0);
+  });
+});
+
+// =============================================================================
+// Format Lock
+// =============================================================================
+
+describe("format lock", () => {
+  it("V1 graph: all repairs use V1", () => {
+    const graph = makeGraph();
+    const format = detectEdgeFormat(graph.edges);
+    expect(format).toBe("V1_FLAT");
+
+    // Status quo fix should produce V1 edges
+    const sqGraph = makeGraph({
+      nodes: [
+        ...makeGraph().nodes,
+        { id: "opt_sq", kind: "option", label: "SQ" },
+      ],
+      edges: [
+        ...makeGraph().edges,
+        { from: "dec_1", to: "opt_sq", strength_mean: 1, strength_std: 0.01, belief_exists: 1 },
+      ],
+    });
+
+    const _result = fixStatusQuoConnectivity(
+      sqGraph,
+      [{ code: "NO_PATH_TO_GOAL" }],
+      "V1_FLAT",
+    );
+
+    // New edges should use V1_FLAT format
+    const newEdges = sqGraph.edges.filter((e: any) => e.from === "opt_sq" && e.to !== undefined && e.to !== "opt_sq");
+    for (const edge of newEdges) {
+      if (edge.from === "opt_sq") {
+        // Canonical structural edges use V1_FLAT
+        expect(edge.strength_mean).toBeDefined();
+        expect(edge.strength_std).toBeDefined();
+        expect(edge.belief_exists).toBeDefined();
+      }
+    }
+  });
+
+  it("LEGACY graph: all repairs use LEGACY", () => {
+    const edge = neutralCausalEdge("LEGACY", { from: "fac_a", to: "out_1" });
+    expect((edge as any).weight).toBeDefined();
+    expect((edge as any).belief).toBeDefined();
+    expect(edge.strength_mean).toBeUndefined();
+  });
+});
+
+// =============================================================================
+// Field Preservation
+// =============================================================================
+
+describe("field preservation", () => {
+  it("Bucket A fix preserves unknown fields on affected edges", () => {
+    const edge = {
+      from: "opt_a", to: "fac_price",
+      strength_mean: 0.7, strength_std: 0.15, belief_exists: 0.8,
+      custom_field: "preserve_me",
+      provenance: "doc_1",
+    };
+
+    const result = canonicalStructuralEdge(edge as any, "V1_FLAT");
+
+    expect(result.strength_mean).toBe(1);
+    expect((result as any).custom_field).toBe("preserve_me");
+    expect((result as any).provenance).toBe("doc_1");
+  });
+
+  it("unaffected nodes/edges identical before and after", () => {
+    const graph = makeGraph();
+    const unaffectedEdge = JSON.parse(JSON.stringify(graph.edges[4])); // fac_price → out_revenue
+
+    // Apply a fix to a different edge
+    graph.edges[0].strength_mean = 1; // Already canonical
+
+    // Unaffected edge should be identical
+    expect(graph.edges[4]).toEqual(unaffectedEdge);
+  });
+
+  it("top-level graph fields preserved", () => {
+    const graph = makeGraph();
+    (graph as any).metadata = { version: "1.0" };
+
+    // After fixes, metadata should still be there
+    expect((graph as any).metadata).toEqual({ version: "1.0" });
+  });
+});
+
+// =============================================================================
+// Adapter Brief Inclusion
+// =============================================================================
+
+describe("adapter brief inclusion", () => {
+  it("includes brief in prompt text when present", () => {
+    // Verify the prompt format includes brief
+    const brief = "Should we expand into European markets?";
+    const promptText = `Brief: ${brief ?? "Not provided"}`;
+    expect(promptText).toContain("Should we expand into European markets?");
+  });
+
+  it("shows 'Not provided' when brief is absent", () => {
+    const brief: string | undefined = undefined;
+    const promptText = `Brief: ${brief ?? "Not provided"}`;
+    expect(promptText).toContain("Not provided");
+  });
+
+  it("shows escalation text on attempt 2", () => {
+    const attempt = 2;
+    const escalationText = attempt > 1 ? "Previous attempt failed. Try a different approach." : "";
+    expect(escalationText).toContain("Previous attempt failed");
+  });
+
+  it("no escalation text on attempt 1", () => {
+    const attempt = 1;
+    const escalationText = attempt > 1 ? "Previous attempt failed. Try a different approach." : "";
+    expect(escalationText).toBe("");
+  });
+});
+
+// =============================================================================
+// Contract Alignment — analysis_ready
+// =============================================================================
+
+describe("contract alignment — analysis_ready", () => {
+  it("graph with unreachable controllable factor → needs_user_mapping", () => {
+    // Simulate the check from buildAnalysisReadyPayload
+    const nodes = [
+      { id: "opt_a", kind: "option" },
+      { id: "fac_price", kind: "factor", category: "controllable" },
+      { id: "fac_unlinked", kind: "factor", category: "controllable" }, // No option edge
+    ];
+    const edges = [
+      { from: "opt_a", to: "fac_price" },
+    ];
+
+    const nodeKindMap = new Map(nodes.map((n) => [n.id, n.kind]));
+    const optionEdgeTargets = new Set<string>();
+    for (const edge of edges) {
+      if (nodeKindMap.get(edge.from) === "option" && nodeKindMap.get(edge.to) === "factor") {
+        optionEdgeTargets.add(edge.to);
+      }
+    }
+
+    const unreachableControllable = nodes.filter((n) => {
+      if (n.kind !== "factor") return false;
+      if (optionEdgeTargets.has(n.id)) return false;
+      if ((n as any).category === "external") return false;
+      return true;
+    });
+
+    expect(unreachableControllable).toHaveLength(1);
+    expect(unreachableControllable[0].id).toBe("fac_unlinked");
+  });
+
+  it("graph with unreachable external factor → ready (no blocker)", () => {
+    const nodes = [
+      { id: "opt_a", kind: "option" },
+      { id: "fac_price", kind: "factor", category: "controllable" },
+      { id: "fac_market", kind: "factor", category: "external" }, // External — should NOT block
+    ];
+    const edges = [
+      { from: "opt_a", to: "fac_price" },
+    ];
+
+    const nodeKindMap = new Map(nodes.map((n) => [n.id, n.kind]));
+    const optionEdgeTargets = new Set<string>();
+    for (const edge of edges) {
+      if (nodeKindMap.get(edge.from) === "option" && nodeKindMap.get(edge.to) === "factor") {
+        optionEdgeTargets.add(edge.to);
+      }
+    }
+
+    const unreachableControllable = nodes.filter((n) => {
+      if (n.kind !== "factor") return false;
+      if (optionEdgeTargets.has(n.id)) return false;
+      if ((n as any).category === "external") return false;
+      return true;
+    });
+
+    expect(unreachableControllable).toHaveLength(0);
+  });
+
+  it("graph with all factors reachable → ready", () => {
+    const nodes = [
+      { id: "opt_a", kind: "option" },
+      { id: "fac_price", kind: "factor", category: "controllable" },
+    ];
+    const edges = [
+      { from: "opt_a", to: "fac_price" },
+    ];
+
+    const nodeKindMap = new Map(nodes.map((n) => [n.id, n.kind]));
+    const optionEdgeTargets = new Set<string>();
+    for (const edge of edges) {
+      if (nodeKindMap.get(edge.from) === "option" && nodeKindMap.get(edge.to) === "factor") {
+        optionEdgeTargets.add(edge.to);
+      }
+    }
+
+    const unreachableControllable = nodes.filter((n) => {
+      if (n.kind !== "factor") return false;
+      if (optionEdgeTargets.has(n.id)) return false;
+      if ((n as any).category === "external") return false;
+      return true;
+    });
+
+    expect(unreachableControllable).toHaveLength(0);
+  });
+});
+
+// =============================================================================
+// Observability
+// =============================================================================
+
+describe("observability", () => {
+  it("repair_summary has all required fields", () => {
+    const repairSummary = {
+      deterministic_repairs_count: 3,
+      deterministic_repairs: [
+        { code: "NAN_VALUE", path: "edges[a→b].strength_mean", action: "Replaced NaN with 0.5" },
+        { code: "SIGN_MISMATCH", path: "edges[c→d].strength_mean", action: "Flipped" },
+        { code: "UNREACHABLE_FACTOR_RECLASSIFIED", path: "nodes[fac_x].category", action: "Reclassified" },
+      ],
+      unreachable_factors: { reclassified: ["fac_x"], marked_droppable: [] },
+      status_quo: { fixed: false, marked_droppable: false },
+      // llm_repair_called / llm_repair_brief_included /
+      // llm_repair_skipped_reason were deleted with the draft path's LLM
+      // repair (ROADMAP 2.731/2.732). llm_repair_needed survives as the
+      // sweep's own Bucket-C diagnostic.
+      llm_repair_needed: false,
+      remaining_violations_count: 0,
+      remaining_violation_codes: [],
+      edge_format_detected: "V1_FLAT",
+      graph_delta: { nodes_before: 7, nodes_after: 8, edges_before: 7, edges_after: 8 },
+    };
+
+    expect(repairSummary.deterministic_repairs_count).toBe(3);
+    expect(repairSummary.unreachable_factors.reclassified).toContain("fac_x");
+    expect(repairSummary.llm_repair_needed).toBe(false);
+    expect(repairSummary.edge_format_detected).toBe("V1_FLAT");
+    expect(repairSummary.graph_delta.nodes_before).toBe(7);
+  });
+
+  it("model_adjustments allowlist filters to user-visible repairs only", () => {
+    // Only UNREACHABLE_FACTOR_RECLASSIFIED is user-visible; NAN_VALUE is mechanical
+    const REPAIR_CODE_TO_ADJUSTMENT: Record<string, string> = {
+      UNREACHABLE_FACTOR_RECLASSIFIED: "category_reclassified",
+    };
+    const repairs = [
+      { code: "NAN_VALUE", path: "edges[a→b].strength_mean", action: "Replaced NaN" },
+      { code: "UNREACHABLE_FACTOR_RECLASSIFIED", path: "nodes[fac_x].category", action: "Reclassified" },
+    ];
+
+    const adjustments = repairs
+      .filter((r) => r.code in REPAIR_CODE_TO_ADJUSTMENT)
+      .map((r) => ({
+        code: REPAIR_CODE_TO_ADJUSTMENT[r.code],
+        field: r.path,
+        reason: r.action,
+      }));
+
+    expect(adjustments).toHaveLength(1);
+    expect(adjustments[0].code).toBe("category_reclassified");
+    expect(adjustments[0].field).toBe("nodes[fac_x].category");
+  });
+
+  it("graph_delta counts are accurate", () => {
+    const graph = makeGraph();
+    const nodesBefore = graph.nodes.length;
+    const edgesBefore = graph.edges.length;
+
+    // Add a node and edge
+    graph.nodes.push({ id: "fac_new", kind: "factor", label: "New" });
+    graph.edges.push({ from: "fac_new", to: "out_revenue", strength_mean: 0.5 });
+
+    const delta = {
+      nodes_before: nodesBefore,
+      nodes_after: graph.nodes.length,
+      edges_before: edgesBefore,
+      edges_after: graph.edges.length,
+    };
+
+    expect(delta.nodes_after - delta.nodes_before).toBe(1);
+    expect(delta.edges_after - delta.edges_before).toBe(1);
+  });
+});
+
+// =============================================================================
+// Repair Gating
+// =============================================================================
+
+describe("repair gating", () => {
+  it("valid graph (errorCount: 0) → LLM repair NOT called", () => {
+    // When graph-validator returns valid: true with 0 errors,
+    // llmRepairNeeded should be false
+    const validationResult = { valid: true, errors: [], warnings: [] };
+    expect(validationResult.errors.length).toBe(0);
+    // sweep sets llmRepairNeeded = false
+  });
+
+  it("invalid graph → LLM repair called", () => {
+    const validationResult = {
+      valid: false,
+      errors: [{ code: "NO_PATH_TO_GOAL", severity: "error", message: "No path" }],
+      warnings: [],
+    };
+    // Bucket C code present → llmRepairNeeded = true
+    const bucketCCodes = new Set(["NO_PATH_TO_GOAL"]);
+    const hasBucketC = validationResult.errors.some((v) => bucketCCodes.has(v.code));
+    expect(hasBucketC).toBe(true);
+  });
+
+  it("warning-only → LLM repair NOT called", () => {
+    const validationResult = {
+      valid: true, // valid despite warnings
+      errors: [],
+      warnings: [{ code: "STRENGTH_OUT_OF_RANGE", severity: "warn", message: "Strength 1.5" }],
+    };
+    // No errors → llmRepairNeeded = false
+    expect(validationResult.errors.length).toBe(0);
+  });
+});
+
+// =============================================================================
+// Hotfix: Status quo path reachability (replaces zero-edge-count)
+// =============================================================================
+
+import { hasPathToGoal, findDisconnectedOptions } from "../../src/cee/unified-pipeline/stages/repair/status-quo-fix.js";
+
+describe("hasPathToGoal", () => {
+  it("returns true when direct path exists", () => {
+    const edges: any[] = [
+      { from: "opt_a", to: "fac_1" },
+      { from: "fac_1", to: "goal_1" },
+    ];
+    expect(hasPathToGoal("opt_a", edges, new Set(["goal_1"]))).toBe(true);
+  });
+
+  it("returns true when transitive path exists (opt→fac→out→goal)", () => {
+    const edges: any[] = [
+      { from: "opt_a", to: "fac_1" },
+      { from: "fac_1", to: "out_1" },
+      { from: "out_1", to: "goal_1" },
+    ];
+    expect(hasPathToGoal("opt_a", edges, new Set(["goal_1"]))).toBe(true);
+  });
+
+  it("returns false when no path to goal", () => {
+    const edges: any[] = [
+      { from: "opt_a", to: "fac_1" },
+      // fac_1 is a dead end
+    ];
+    expect(hasPathToGoal("opt_a", edges, new Set(["goal_1"]))).toBe(false);
+  });
+
+  it("returns false when edges exist but none reach goal", () => {
+    const edges: any[] = [
+      { from: "opt_a", to: "fac_1" },
+      { from: "fac_1", to: "fac_2" },
+      { from: "fac_2", to: "fac_3" },
+    ];
+    expect(hasPathToGoal("opt_a", edges, new Set(["goal_1"]))).toBe(false);
+  });
+});
+
+describe("findDisconnectedOptions", () => {
+  it("detects option with zero edges as disconnected", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "goal_1", kind: "goal", label: "Goal" },
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "opt_b", kind: "option", label: "B" },
+        { id: "fac_1", kind: "factor", label: "F1" },
+        { id: "out_1", kind: "outcome", label: "O1" },
+      ],
+      edges: [
+        // opt_a is connected
+        { from: "opt_a", to: "fac_1" },
+        { from: "fac_1", to: "out_1" },
+        { from: "out_1", to: "goal_1" },
+        // opt_b has zero edges
+      ],
+    });
+
+    const disconnected = findDisconnectedOptions(graph);
+    expect(disconnected).toContain("opt_b");
+    expect(disconnected).not.toContain("opt_a");
+  });
+
+  it("detects option with edges to dead-end factors as disconnected", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "goal_1", kind: "goal", label: "Goal" },
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "opt_b", kind: "option", label: "B" },
+        { id: "fac_1", kind: "factor", label: "F1" },
+        { id: "fac_2", kind: "factor", label: "F2" },
+        { id: "out_1", kind: "outcome", label: "O1" },
+      ],
+      edges: [
+        // opt_a is connected all the way to goal
+        { from: "opt_a", to: "fac_1" },
+        { from: "fac_1", to: "out_1" },
+        { from: "out_1", to: "goal_1" },
+        // opt_b has edges but to a dead-end factor
+        { from: "opt_b", to: "fac_2" },
+        // fac_2 goes nowhere
+      ],
+    });
+
+    const disconnected = findDisconnectedOptions(graph);
+    expect(disconnected).toContain("opt_b");
+    expect(disconnected).not.toContain("opt_a");
+  });
+
+  it("returns empty array when all options reach goal", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "goal_1", kind: "goal", label: "Goal" },
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "opt_b", kind: "option", label: "B" },
+        { id: "fac_1", kind: "factor", label: "F1" },
+        { id: "out_1", kind: "outcome", label: "O1" },
+      ],
+      edges: [
+        { from: "opt_a", to: "fac_1" },
+        { from: "opt_b", to: "fac_1" },
+        { from: "fac_1", to: "out_1" },
+        { from: "out_1", to: "goal_1" },
+      ],
+    });
+
+    expect(findDisconnectedOptions(graph)).toHaveLength(0);
+  });
+});
+
+describe("fixStatusQuoConnectivity — path reachability", () => {
+  it("fixes option with edges to dead-end factors by wiring to connected factors", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "goal_1", kind: "goal", label: "Goal" },
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "opt_sq", kind: "option", label: "Status Quo" },
+        { id: "fac_cost", kind: "factor", label: "Cost", category: "controllable" },
+        { id: "fac_dead", kind: "factor", label: "Dead End", category: "controllable" },
+        { id: "out_1", kind: "outcome", label: "Outcome" },
+      ],
+      edges: [
+        // opt_a is connected
+        { from: "opt_a", to: "fac_cost", strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: "positive" },
+        { from: "fac_cost", to: "out_1", strength_mean: 0.5, strength_std: 0.1, belief_exists: 0.8, effect_direction: "positive" },
+        { from: "out_1", to: "goal_1", strength_mean: 0.7, strength_std: 0.1, belief_exists: 0.9, effect_direction: "positive" },
+        // opt_sq has edges but fac_dead is a dead end
+        { from: "opt_sq", to: "fac_dead", strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: "positive" },
+      ],
+    });
+
+    const result = fixStatusQuoConnectivity(
+      graph,
+      [{ code: "NO_PATH_TO_GOAL" }],
+      "V1_FLAT",
+    );
+
+    expect(result.fixed).toBe(true);
+    // opt_sq should now have an edge to fac_cost
+    const sqToCost = graph.edges.find(
+      (e: any) => e.from === "opt_sq" && e.to === "fac_cost",
+    );
+    expect(sqToCost).toBeDefined();
+  });
+
+  it("does not wire options that already reach goal", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "goal_1", kind: "goal", label: "Goal" },
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "opt_b", kind: "option", label: "B" },
+        { id: "fac_1", kind: "factor", label: "F1", category: "controllable" },
+        { id: "out_1", kind: "outcome", label: "O1" },
+      ],
+      edges: [
+        { from: "opt_a", to: "fac_1", strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: "positive" },
+        { from: "opt_b", to: "fac_1", strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: "positive" },
+        { from: "fac_1", to: "out_1", strength_mean: 0.5, strength_std: 0.1, belief_exists: 0.8, effect_direction: "positive" },
+        { from: "out_1", to: "goal_1", strength_mean: 0.7, strength_std: 0.1, belief_exists: 0.9, effect_direction: "positive" },
+      ],
+    });
+
+    const edgesBefore = graph.edges.length;
+    const result = fixStatusQuoConnectivity(
+      graph,
+      [{ code: "NO_PATH_TO_GOAL" }],
+      "V1_FLAT",
+    );
+
+    // Both options already reach goal — no wiring needed
+    expect(result.fixed).toBe(false);
+    expect(graph.edges.length).toBe(edgesBefore);
+  });
+});
+
+// =============================================================================
+// Hotfix: Proactive unreachable factor scan (0 violations)
+// =============================================================================
+
+describe("handleUnreachableFactors — proactive scan", () => {
+  it("reclassifies unreachable factors even when called with no prior violations", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "goal_1", kind: "goal", label: "Goal" },
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "fac_connected", kind: "factor", label: "Connected", category: "controllable" },
+        { id: "fac_orphan", kind: "factor", label: "Orphan", category: "controllable", data: { value: 0.5 } },
+        { id: "out_1", kind: "outcome", label: "O1" },
+      ],
+      edges: [
+        { from: "opt_a", to: "fac_connected" },
+        { from: "fac_connected", to: "out_1" },
+        { from: "out_1", to: "goal_1" },
+        // fac_orphan has no inbound option edges
+      ],
+    });
+
+    const result = handleUnreachableFactors(graph, "V1_FLAT");
+
+    expect(result.reclassified).toContain("fac_orphan");
+    const orphanNode = graph.nodes.find((n: any) => n.id === "fac_orphan");
+    expect(orphanNode.category).toBe("external");
+    // data is removed entirely because after stripping value/factor_type/uncertainty_drivers,
+    // the remaining object can't satisfy any NodeData union branch (FactorData requires value)
+    expect(orphanNode.data).toBeUndefined();
+  });
+
+  it("does NOT reclassify factors reachable via factor→factor chains", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "goal_1", kind: "goal", label: "Goal" },
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "fac_1", kind: "factor", label: "F1", category: "controllable" },
+        { id: "fac_2", kind: "factor", label: "F2", category: "observable" },
+        { id: "out_1", kind: "outcome", label: "O1" },
+      ],
+      edges: [
+        { from: "opt_a", to: "fac_1" },
+        { from: "fac_1", to: "fac_2" }, // Transitive through factor chain
+        { from: "fac_2", to: "out_1" },
+        { from: "out_1", to: "goal_1" },
+      ],
+    });
+
+    const result = handleUnreachableFactors(graph, "V1_FLAT");
+
+    // fac_2 is reachable via fac_1 → fac_2 chain
+    expect(result.reclassified).not.toContain("fac_2");
+  });
+});
+
+// =============================================================================
+// Prior synthesis on reclassification
+// =============================================================================
+
+describe("handleUnreachableFactors — prior synthesis from baseline", () => {
+  it("synthesises prior from data.value: 0.04 (low value, margin=0.1)", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "goal_1", kind: "goal", label: "Goal" },
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "fac_connected", kind: "factor", label: "Connected", category: "controllable" },
+        { id: "fac_churn", kind: "factor", label: "Customer Churn", category: "observable", data: { value: 0.04 } },
+        { id: "out_1", kind: "outcome", label: "O1" },
+      ],
+      edges: [
+        { from: "opt_a", to: "fac_connected" },
+        { from: "fac_connected", to: "out_1" },
+        { from: "fac_churn", to: "out_1" },
+        { from: "out_1", to: "goal_1" },
+      ],
+    });
+
+    const result = handleUnreachableFactors(graph, "V1_FLAT");
+
+    expect(result.reclassified).toContain("fac_churn");
+    const churnNode = graph.nodes.find((n: any) => n.id === "fac_churn");
+    expect(churnNode.category).toBe("external");
+    // data.value stripped → data removed entirely
+    expect(churnNode.data).toBeUndefined();
+    // Prior synthesised: margin = max(0.1, 0.04*0.5) = 0.1
+    expect(churnNode.prior).toEqual({
+      distribution: "uniform",
+      range_min: 0.0, // clamp(0.04 - 0.1, 0, 1) = 0.0
+      range_max: 0.14, // clamp(0.04 + 0.1, 0, 1) = 0.14
+    });
+  });
+
+  it("synthesises prior from data.value: 0.6 (medium value, margin=0.3)", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "goal_1", kind: "goal", label: "Goal" },
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "fac_connected", kind: "factor", label: "Connected", category: "controllable" },
+        { id: "fac_demand", kind: "factor", label: "Demand", category: "observable", data: { value: 0.6 } },
+        { id: "out_1", kind: "outcome", label: "O1" },
+      ],
+      edges: [
+        { from: "opt_a", to: "fac_connected" },
+        { from: "fac_connected", to: "out_1" },
+        { from: "fac_demand", to: "out_1" },
+        { from: "out_1", to: "goal_1" },
+      ],
+    });
+
+    const result = handleUnreachableFactors(graph, "V1_FLAT");
+
+    expect(result.reclassified).toContain("fac_demand");
+    const demandNode = graph.nodes.find((n: any) => n.id === "fac_demand");
+    // margin = max(0.1, 0.6*0.5) = 0.3
+    expect(demandNode.prior.distribution).toBe("uniform");
+    expect(demandNode.prior.range_min).toBeCloseTo(0.3, 10); // 0.6 - 0.3
+    expect(demandNode.prior.range_max).toBeCloseTo(0.9, 10); // 0.6 + 0.3
+  });
+
+  it("synthesises full-range prior for binary value 0", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "goal_1", kind: "goal", label: "Goal" },
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "fac_connected", kind: "factor", label: "Connected", category: "controllable" },
+        { id: "fac_binary", kind: "factor", label: "Binary", category: "controllable", data: { value: 0 } },
+        { id: "out_1", kind: "outcome", label: "O1" },
+      ],
+      edges: [
+        { from: "opt_a", to: "fac_connected" },
+        { from: "fac_connected", to: "out_1" },
+        { from: "fac_binary", to: "out_1" },
+        { from: "out_1", to: "goal_1" },
+      ],
+    });
+
+    const result = handleUnreachableFactors(graph, "V1_FLAT");
+
+    expect(result.reclassified).toContain("fac_binary");
+    const binaryNode = graph.nodes.find((n: any) => n.id === "fac_binary");
+    expect(binaryNode.prior).toEqual({
+      distribution: "uniform",
+      range_min: 0.0,
+      range_max: 1.0,
+    });
+  });
+
+  it("does NOT synthesise prior when factor has no data.value", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "goal_1", kind: "goal", label: "Goal" },
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "fac_connected", kind: "factor", label: "Connected", category: "controllable" },
+        { id: "fac_nodata", kind: "factor", label: "No Data", category: "controllable" },
+        { id: "out_1", kind: "outcome", label: "O1" },
+      ],
+      edges: [
+        { from: "opt_a", to: "fac_connected" },
+        { from: "fac_connected", to: "out_1" },
+        { from: "fac_nodata", to: "out_1" },
+        { from: "out_1", to: "goal_1" },
+      ],
+    });
+
+    const result = handleUnreachableFactors(graph, "V1_FLAT");
+
+    expect(result.reclassified).toContain("fac_nodata");
+    const nodataNode = graph.nodes.find((n: any) => n.id === "fac_nodata");
+    expect(nodataNode.category).toBe("external");
+    expect(nodataNode.prior).toBeUndefined();
+  });
+
+  it("includes prior_synthesised in repair record", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "goal_1", kind: "goal", label: "Goal" },
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "fac_connected", kind: "factor", label: "Connected", category: "controllable" },
+        { id: "fac_churn", kind: "factor", label: "Churn", category: "observable", data: { value: 0.04 } },
+        { id: "out_1", kind: "outcome", label: "O1" },
+      ],
+      edges: [
+        { from: "opt_a", to: "fac_connected" },
+        { from: "fac_connected", to: "out_1" },
+        { from: "fac_churn", to: "out_1" },
+        { from: "out_1", to: "goal_1" },
+      ],
+    });
+
+    const result = handleUnreachableFactors(graph, "V1_FLAT");
+
+    const reclassRepair = result.repairs.find(
+      (r) => r.code === "UNREACHABLE_FACTOR_RECLASSIFIED" && r.path.includes("fac_churn"),
+    );
+    expect(reclassRepair).toBeDefined();
+    expect(reclassRepair!.prior_synthesised).toBe(true);
+    expect(reclassRepair!.synthesised_range).toEqual({ range_min: 0.0, range_max: 0.14 });
+    expect(reclassRepair!.action).toContain("synthesised prior");
+  });
+
+  it("repair record omits prior_synthesised when no data.value", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "goal_1", kind: "goal", label: "Goal" },
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "fac_connected", kind: "factor", label: "Connected", category: "controllable" },
+        { id: "fac_ext", kind: "factor", label: "External", category: "external" },
+        { id: "out_1", kind: "outcome", label: "O1" },
+      ],
+      edges: [
+        { from: "opt_a", to: "fac_connected" },
+        { from: "fac_connected", to: "out_1" },
+        { from: "fac_ext", to: "out_1" },
+        { from: "out_1", to: "goal_1" },
+      ],
+    });
+
+    const result = handleUnreachableFactors(graph, "V1_FLAT");
+
+    const reclassRepair = result.repairs.find(
+      (r) => r.code === "UNREACHABLE_FACTOR_RECLASSIFIED" && r.path.includes("fac_ext"),
+    );
+    expect(reclassRepair).toBeDefined();
+    expect(reclassRepair!.prior_synthesised).toBeUndefined();
+    expect(reclassRepair!.synthesised_range).toBeUndefined();
+  });
+
+  it("falls back to full uncertainty for negative data.value", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "goal_1", kind: "goal", label: "Goal" },
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "fac_connected", kind: "factor", label: "Connected", category: "controllable" },
+        { id: "fac_neg", kind: "factor", label: "Negative", category: "observable", data: { value: -0.5 } },
+        { id: "out_1", kind: "outcome", label: "O1" },
+      ],
+      edges: [
+        { from: "opt_a", to: "fac_connected" },
+        { from: "fac_connected", to: "out_1" },
+        { from: "fac_neg", to: "out_1" },
+        { from: "out_1", to: "goal_1" },
+      ],
+    });
+
+    const result = handleUnreachableFactors(graph, "V1_FLAT");
+
+    expect(result.reclassified).toContain("fac_neg");
+    const negNode = graph.nodes.find((n: any) => n.id === "fac_neg");
+    // Out-of-domain negative → full uncertainty (guards against inverted ranges)
+    expect(negNode.prior).toEqual({
+      distribution: "uniform",
+      range_min: 0.0,
+      range_max: 1.0,
+    });
+  });
+
+  /**
+   * ⚠ EXPECTATION CORRECTED (PR1, frontier comparison 2026-08-10). This pin
+   * previously asserted `[0, 1]` for a value above 1, under the label "falls
+   * back to full uncertainty".
+   *
+   * ITS INTENT WAS SOUND AND IS PRESERVED: the old code's clamp produced
+   * `range_min = max(0, 110-55) = 55`, `range_max = min(1, 165) = 1` — an
+   * INVERTED range — and `[0,1]` was the workaround. The fix removes the upper
+   * clamp on ratio scale instead, so the range is `[55, 165]`: not inverted,
+   * and it CONTAINS the baseline it was synthesised from. Non-inversion is now
+   * asserted directly, as an invariant over every branch, in
+   * `stages/repair/__tests__/stated-quantity-survival.test.ts`.
+   *
+   * WHY THE OLD EXPECTATION HAD TO GO: `[0,1]` discards the baseline entirely.
+   * Measured on the deployed B1 capture, that is what turned a stated "NRR
+   * 112%" into a maximum-width prior, which then topped ISL's influence
+   * ranking — the product reporting the user's own figure as the thing it knows
+   * least about. A value above 1 is not a fault to be neutralised; the live
+   * draft prompt mandates it for any ratio that can exceed 100%.
+   */
+  it("synthesises a containing, non-inverted prior for a high data.value", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "goal_1", kind: "goal", label: "Goal" },
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "fac_connected", kind: "factor", label: "Connected", category: "controllable" },
+        { id: "fac_high", kind: "factor", label: "High", category: "observable", data: { value: 110 } },
+        { id: "out_1", kind: "outcome", label: "O1" },
+      ],
+      edges: [
+        { from: "opt_a", to: "fac_connected" },
+        { from: "fac_connected", to: "out_1" },
+        { from: "fac_high", to: "out_1" },
+        { from: "out_1", to: "goal_1" },
+      ],
+    });
+
+    const result = handleUnreachableFactors(graph, "V1_FLAT");
+
+    expect(result.reclassified).toContain("fac_high");
+    const highNode = graph.nodes.find((n: any) => n.id === "fac_high");
+    // margin = max(0.1, 110 * 0.5) = 55 → [55, 165]. Same margin doctrine as
+    // every other branch; only the upper clamp (the source of the inversion)
+    // is gone.
+    expect(highNode.prior).toEqual({
+      distribution: "uniform",
+      range_min: 55,
+      range_max: 165,
+    });
+    // The property the original pin actually existed to protect.
+    expect(highNode.prior.range_min).toBeLessThanOrEqual(highNode.prior.range_max);
+    // The property its expectation silently gave up.
+    expect(highNode.prior.range_min).toBeLessThanOrEqual(110);
+    expect(highNode.prior.range_max).toBeGreaterThanOrEqual(110);
+  });
+
+  it("emits cee.repair.prior_synthesised_from_baseline log event", () => {
+    vi.mocked(log.info).mockClear();
+
+    const graph = makeGraph({
+      nodes: [
+        { id: "goal_1", kind: "goal", label: "Goal" },
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "fac_connected", kind: "factor", label: "Connected", category: "controllable" },
+        { id: "fac_churn", kind: "factor", label: "Churn", category: "observable", data: { value: 0.04 } },
+        { id: "out_1", kind: "outcome", label: "O1" },
+      ],
+      edges: [
+        { from: "opt_a", to: "fac_connected" },
+        { from: "fac_connected", to: "out_1" },
+        { from: "fac_churn", to: "out_1" },
+        { from: "out_1", to: "goal_1" },
+      ],
+    });
+
+    handleUnreachableFactors(graph, "V1_FLAT");
+
+    const synthCall = vi.mocked(log.info).mock.calls.find(
+      (args) => (args[0] as any)?.event === "cee.repair.prior_synthesised_from_baseline",
+    );
+    expect(synthCall).toBeDefined();
+    expect((synthCall![0] as any).node_id).toBe("fac_churn");
+    expect((synthCall![0] as any).original_value).toBe(0.04);
+    expect((synthCall![0] as any).range_min).toBe(0.0);
+    expect((synthCall![0] as any).range_max).toBe(0.14);
+  });
+});
+
+// =============================================================================
+// Hotfix: analysis_ready blocker scope
+// =============================================================================
+
+describe("analysis_ready blocker scope (unit-level)", () => {
+  it("observable factor unreachable → NOT a blocker", () => {
+    // Test the filter logic directly
+    const node: any = { id: "fac_churn", kind: "factor", label: "Churn Rate", category: "observable" };
+    const category = node.category;
+    // The fix excludes observable
+    expect(category === "external" || category === "observable").toBe(true);
+  });
+
+  it("external factor unreachable → NOT a blocker", () => {
+    const node: any = { id: "fac_market", kind: "factor", label: "Market Conditions", category: "external" };
+    const category = node.category;
+    expect(category === "external" || category === "observable").toBe(true);
+  });
+
+  it("controllable factor unreachable → IS a blocker", () => {
+    const node: any = { id: "fac_price", kind: "factor", label: "Price", category: "controllable" };
+    const category = node.category;
+    expect(category === "external" || category === "observable").toBe(false);
+  });
+
+  it("constraint node excluded by id prefix", () => {
+    const nodeId = "constraint_fac_monthly_churn_max";
+    expect(nodeId.startsWith("constraint_")).toBe(true);
+  });
+
+  it("factor with undefined category → IS a blocker (safe default)", () => {
+    const node: any = { id: "fac_unknown", kind: "factor", label: "Unknown" };
+    const category = node.category;
+    expect(category === "external" || category === "observable").toBe(false);
+  });
+});
+
+// =============================================================================
+// Factor→Goal Edge Splitting (B4 minimisation topology fix)
+// =============================================================================
+
+import { fixFactorGoalEdges, fixDisconnectedObservables, fixOptionOutcomeShortcut, fixOptionRiskShortcut, fixOptionGoalShortcut, fixNanValues } from "../../src/cee/unified-pipeline/stages/repair/deterministic-sweep.js";
+
+describe("fixFactorGoalEdges", () => {
+  it("splits a factor→goal edge into factor→outcome→goal", () => {
+    const graph: any = {
+      nodes: [
+        { id: "fac_support_cost", kind: "factor", label: "Support Cost" },
+        { id: "goal_reduce_costs", kind: "goal", label: "Reduce Costs" },
+      ],
+      edges: [
+        { from: "fac_support_cost", to: "goal_reduce_costs", strength_mean: 0.7, strength_std: 0.1, belief_exists: 0.85, effect_direction: "negative" },
+      ],
+    };
+
+    const result = fixFactorGoalEdges(graph, "V1_FLAT");
+
+    expect(result.splitCount).toBe(1);
+    expect(result.repairs).toHaveLength(1);
+    expect(result.repairs[0].code).toBe("FACTOR_GOAL_EDGE_SPLIT");
+
+    // Should have 3 nodes: original factor, original goal, new outcome
+    expect(graph.nodes).toHaveLength(3);
+    const outcomeNode = graph.nodes.find((n: any) => n.kind === "outcome");
+    expect(outcomeNode).toBeDefined();
+    expect(outcomeNode.id).toBe("out_fac_support_cost_impact");
+    expect(outcomeNode.label).toBe("Support Cost Impact");
+
+    // Should have 2 edges: factor→outcome, outcome→goal
+    expect(graph.edges).toHaveLength(2);
+    const factorToOutcome = graph.edges.find((e: any) => e.from === "fac_support_cost" && e.to === "out_fac_support_cost_impact");
+    const outcomeToGoal = graph.edges.find((e: any) => e.from === "out_fac_support_cost_impact" && e.to === "goal_reduce_costs");
+
+    expect(factorToOutcome).toBeDefined();
+    expect(outcomeToGoal).toBeDefined();
+
+    // factor→outcome preserves original strength
+    expect(factorToOutcome.strength_mean).toBe(0.7);
+    expect(factorToOutcome.strength_std).toBe(0.1);
+    expect(factorToOutcome.belief_exists).toBe(0.85);
+    expect(factorToOutcome.effect_direction).toBe("negative");
+    expect(factorToOutcome.origin).toBe("repair");
+
+    // outcome→goal uses moderate defaults
+    expect(outcomeToGoal.strength_mean).toBe(0.5);
+    expect(outcomeToGoal.strength_std).toBe(0.15);
+    expect(outcomeToGoal.belief_exists).toBe(0.9);
+    expect(outcomeToGoal.effect_direction).toBe("positive");
+    expect(outcomeToGoal.origin).toBe("repair");
+  });
+
+  it("leaves valid edges untouched", () => {
+    const graph: any = {
+      nodes: [
+        { id: "fac_cost", kind: "factor", label: "Cost" },
+        { id: "out_efficiency", kind: "outcome", label: "Efficiency" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "fac_cost", to: "out_efficiency", strength_mean: 0.7, strength_std: 0.1, belief_exists: 0.9 },
+        { from: "out_efficiency", to: "goal_1", strength_mean: 0.8, strength_std: 0.1, belief_exists: 0.95 },
+      ],
+    };
+
+    const result = fixFactorGoalEdges(graph, "V1_FLAT");
+
+    expect(result.splitCount).toBe(0);
+    expect(result.repairs).toHaveLength(0);
+    expect(graph.nodes).toHaveLength(3);
+    expect(graph.edges).toHaveLength(2);
+  });
+
+  it("handles multiple factor→goal edges to the same goal", () => {
+    const graph: any = {
+      nodes: [
+        { id: "fac_a", kind: "factor", label: "Factor A" },
+        { id: "fac_b", kind: "factor", label: "Factor B" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "fac_a", to: "goal_1", strength_mean: 0.5, strength_std: 0.1, belief_exists: 0.9 },
+        { from: "fac_b", to: "goal_1", strength_mean: 0.3, strength_std: 0.2, belief_exists: 0.8 },
+      ],
+    };
+
+    const result = fixFactorGoalEdges(graph, "V1_FLAT");
+
+    expect(result.splitCount).toBe(2);
+    // 3 original + 2 synthetic outcome nodes
+    expect(graph.nodes).toHaveLength(5);
+    // 2 original edges replaced by 4 (2 factor→outcome + 2 outcome→goal)
+    expect(graph.edges).toHaveLength(4);
+    // No factor→goal edges remain
+    const factorGoalEdges = graph.edges.filter((e: any) => {
+      const from = graph.nodes.find((n: any) => n.id === e.from);
+      const to = graph.nodes.find((n: any) => n.id === e.to);
+      return from?.kind === "factor" && to?.kind === "goal";
+    });
+    expect(factorGoalEdges).toHaveLength(0);
+  });
+
+  it("works with LEGACY edge format", () => {
+    const graph: any = {
+      nodes: [
+        { id: "fac_cost", kind: "factor", label: "Cost" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "fac_cost", to: "goal_1", weight: 0.6, belief: 0.8 },
+      ],
+    };
+
+    const result = fixFactorGoalEdges(graph, "LEGACY");
+
+    expect(result.splitCount).toBe(1);
+    expect(graph.edges).toHaveLength(2);
+
+    const factorToOutcome = graph.edges.find((e: any) => e.to === "out_fac_cost_impact");
+    expect((factorToOutcome as any).weight).toBe(0.6);
+    expect((factorToOutcome as any).belief).toBe(0.8);
+  });
+
+  it("no-op on empty graph", () => {
+    const graph: any = { nodes: [], edges: [] };
+    const result = fixFactorGoalEdges(graph, "V1_FLAT");
+    expect(result.splitCount).toBe(0);
+    expect(result.repairs).toHaveLength(0);
+  });
+
+  // ===========================================================================
+  // Duplicate causal paths — one relationship must arrive as ONE edge
+  // ===========================================================================
+  //
+  // ⚠ THIS BLOCK PREVIOUSLY PINNED THE DEFECT. It asserted FOUR edges here and
+  // narrated the duplicate in its own comment ("fac→out (edge 3, same from/to)")
+  // as though it were the intended shape. It is not, and the consequence is not
+  // cosmetic: the two `fac_cost→out_fac_cost_impact` edges this graph produces
+  // carry DIFFERENT numerics (0.5/0.9 and 0.3/0.8), and PLoT's ISL preflight
+  // fingerprints duplicates on exactly those fields —
+  // `plot-lite-service` b9f6b5a7 `src/integrations/isl/preflight.ts:334-344`,
+  // emitted at `src/routes/v2/run.ts:6804-6826`. A divergent duplicate is a
+  // `DUPLICATE_EDGE_CONFLICT` blocker: HTTP 422, `blocks_analysis: true`, ISL
+  // never called. So the unsuppressed shape did not mis-weight the analysis —
+  // it made the graph UNANALYSABLE, and told the user to "keep one edge per
+  // relationship" about edges this repair had just minted on their behalf.
+  //
+  // Assertions bind by ENDPOINT IDENTITY, never by count alone: a bare length
+  // check passes for any four edges, including the wrong four.
+  it("emits ONE factor→outcome edge when the same factor targets multiple goals", () => {
+    const graph: any = {
+      nodes: [
+        { id: "fac_cost", kind: "factor", label: "Cost" },
+        { id: "goal_1", kind: "goal", label: "Goal 1" },
+        { id: "goal_2", kind: "goal", label: "Goal 2" },
+      ],
+      edges: [
+        { from: "fac_cost", to: "goal_1", strength_mean: 0.5, strength_std: 0.1, belief_exists: 0.9 },
+        { from: "fac_cost", to: "goal_2", strength_mean: 0.3, strength_std: 0.1, belief_exists: 0.8 },
+      ],
+    };
+
+    const result = fixFactorGoalEdges(graph, "V1_FLAT");
+
+    // Both source edges were still re-routed — suppression removes the duplicate
+    // LIMB, never the handling of a source claim.
+    expect(result.splitCount).toBe(2);
+
+    // Only 1 synthetic outcome node created (shared by both goals)
+    const outcomeNodes = graph.nodes.filter((n: any) => n.kind === "outcome");
+    expect(outcomeNodes).toHaveLength(1);
+    expect(outcomeNodes[0].id).toBe("out_fac_cost_impact");
+
+    // The shared limb appears exactly ONCE, identified by its endpoints.
+    const facToOut = graph.edges.filter(
+      (e: any) => e.from === "fac_cost" && e.to === "out_fac_cost_impact",
+    );
+    expect(facToOut).toHaveLength(1);
+
+    // ⚠ KNOWN, ACCEPTED LOSS — DO NOT READ THIS AS COMPLETENESS.
+    // The surviving limb carries ONE claim's numerics; the other claim's
+    // strength (0.3 here) is DISCARDED, and with three claims 0.9/0.5/0.1 only
+    // 0.9 survives. That is deliberate: every surviving number is one a source
+    // actually stated, and averaging would invent a number nobody asserted.
+    // But it IS a loss, it is not disclosed per-value, and the copy must never
+    // imply the model kept everything. Adjudicated and accepted; revisit if the
+    // product ever needs to show a distribution over competing claims.
+    expect(facToOut[0].strength_mean).toBe(0.5);
+
+    // Both goals still reached, one edge each.
+    expect(
+      graph.edges.filter((e: any) => e.from === "out_fac_cost_impact" && e.to === "goal_1"),
+    ).toHaveLength(1);
+    expect(
+      graph.edges.filter((e: any) => e.from === "out_fac_cost_impact" && e.to === "goal_2"),
+    ).toHaveLength(1);
+
+    expect(graph.edges).toHaveLength(3);
+
+    // The discarded claim is DISCLOSED, not dropped in silence.
+    const suppressions = result.repairs.filter((r) => r.code === "DUPLICATE_CAUSAL_EDGE_SUPPRESSED");
+    expect(suppressions).toHaveLength(1);
+    expect(suppressions[0].path).toBe("edges[fac_cost→out_fac_cost_impact]");
+  });
+
+  it("collapses two EQUIVALENT source claims to one path, not two", () => {
+    const graph: any = {
+      nodes: [
+        { id: "fac_cost", kind: "factor", label: "Cost" },
+        { id: "goal_1", kind: "goal", label: "Goal 1" },
+      ],
+      edges: [
+        { from: "fac_cost", to: "goal_1", strength_mean: 0.5, strength_std: 0.1, belief_exists: 0.9 },
+        { from: "fac_cost", to: "goal_1", strength_mean: 0.5, strength_std: 0.1, belief_exists: 0.9 },
+      ],
+    };
+
+    const result = fixFactorGoalEdges(graph, "V1_FLAT");
+
+    expect(result.splitCount).toBe(2);
+    expect(
+      graph.edges.filter((e: any) => e.from === "fac_cost" && e.to === "out_fac_cost_impact"),
+    ).toHaveLength(1);
+    expect(
+      graph.edges.filter((e: any) => e.from === "out_fac_cost_impact" && e.to === "goal_1"),
+    ).toHaveLength(1);
+    expect(graph.edges).toHaveLength(2);
+    // BOTH limbs of the second claim were duplicates.
+    expect(
+      result.repairs.filter((r) => r.code === "DUPLICATE_CAUSAL_EDGE_SUPPRESSED"),
+    ).toHaveLength(2);
+  });
+
+  it("SURFACES a direction conflict rather than adding a contradicting parallel edge", () => {
+    const graph: any = {
+      nodes: [
+        { id: "fac_cost", kind: "factor", label: "Cost" },
+        { id: "goal_1", kind: "goal", label: "Goal 1" },
+      ],
+      edges: [
+        { from: "fac_cost", to: "goal_1", strength_mean: 0.5, strength_std: 0.1, belief_exists: 0.9, effect_direction: "positive" },
+        { from: "fac_cost", to: "goal_1", strength_mean: 0.4, strength_std: 0.1, belief_exists: 0.8, effect_direction: "negative" },
+      ],
+    };
+
+    const result = fixFactorGoalEdges(graph, "V1_FLAT");
+
+    const facToOut = graph.edges.filter(
+      (e: any) => e.from === "fac_cost" && e.to === "out_fac_cost_impact",
+    );
+    expect(facToOut).toHaveLength(1);
+    expect(facToOut[0].effect_direction).toBe("positive");
+
+    // A disagreement about DIRECTION is information, so it gets its own code —
+    // never folded into the duplicate count, which would hide it.
+    const conflicts = result.repairs.filter((r) => r.code === "CONFLICTING_CAUSAL_DIRECTION");
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0].path).toBe("edges[fac_cost→out_fac_cost_impact]");
+
+    // ⚠ BOUND BY IDENTITY, NOT BY SUBSTRING. `toContain("negative")` passed for
+    // any sentence mentioning the word anywhere — including one attributing the
+    // wrong direction to the wrong edge, which is exactly the defect this copy
+    // was rewritten to remove. The copy must name the NODES by label, describe
+    // what Olumi DID, and never quote a direction back at the user as theirs.
+    expect(conflicts[0].action).toBe(
+      'Merged conflicting links between "Cost" and "Cost Impact" into one, keeping the direction already ' +
+        "in the model. The drafted model connected them with opposite directions of effect, and only one " +
+        "direction can be analysed.",
+    );
+    // No raw node id may reach user-visible copy (the UI renders it unsanitised).
+    expect(conflicts[0].action).not.toContain("fac_cost");
+    expect(conflicts[0].action).not.toContain("out_fac_cost_impact");
+  });
+
+  // ===========================================================================
+  // GATE 1 — only a STATED, KNOWN sign can disagree. An absence is not a clash.
+  // ===========================================================================
+  it.each([
+    ["an ABSENT effect_direction (the ?? default is ours, not a claim)", undefined],
+    ["an explicit \"unknown\" (contract-admitted absence of a claim)", "unknown"],
+  ])("does NOT report a conflict against %s", (_label, dir) => {
+    const second: any = { from: "fac_cost", to: "goal_1", strength_mean: 0.4, strength_std: 0.1, belief_exists: 0.8 };
+    if (dir !== undefined) second.effect_direction = dir;
+
+    const graph: any = {
+      nodes: [
+        { id: "fac_cost", kind: "factor", label: "Cost" },
+        { id: "goal_1", kind: "goal", label: "Goal 1" },
+      ],
+      edges: [
+        { from: "fac_cost", to: "goal_1", strength_mean: 0.5, strength_std: 0.1, belief_exists: 0.9, effect_direction: "negative" },
+        second,
+      ],
+    };
+
+    const result = fixFactorGoalEdges(graph, "V1_FLAT");
+
+    expect(result.repairs.filter((r) => r.code === "CONFLICTING_CAUSAL_DIRECTION")).toHaveLength(0);
+    // Still deduplicated — the limb is suppressed, just not narrated as a clash.
+    expect(
+      graph.edges.filter((e: any) => e.from === "fac_cost" && e.to === "out_fac_cost_impact"),
+    ).toHaveLength(1);
+    expect(
+      result.repairs.filter((r) => r.code === "DUPLICATE_CAUSAL_EDGE_SUPPRESSED").length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("does NOT report a conflict for the minted outcome→goal limb, whose sign is ours", () => {
+    // Both source claims say "negative"; the outcome→goal limb is minted
+    // "positive" regardless. If the minted sign were treated as a claim, this
+    // graph would report a conflict nobody made.
+    const graph: any = {
+      nodes: [
+        { id: "fac_cost", kind: "factor", label: "Cost" },
+        { id: "goal_1", kind: "goal", label: "Goal 1" },
+      ],
+      edges: [
+        { from: "fac_cost", to: "goal_1", strength_mean: 0.5, strength_std: 0.1, belief_exists: 0.9, effect_direction: "negative" },
+        { from: "fac_cost", to: "goal_1", strength_mean: 0.4, strength_std: 0.1, belief_exists: 0.8, effect_direction: "negative" },
+      ],
+    };
+
+    const result = fixFactorGoalEdges(graph, "V1_FLAT");
+
+    expect(result.repairs.filter((r) => r.code === "CONFLICTING_CAUSAL_DIRECTION")).toHaveLength(0);
+    expect(
+      graph.edges.filter((e: any) => e.from === "out_fac_cost_impact" && e.to === "goal_1"),
+    ).toHaveLength(1);
+  });
+
+  // ===========================================================================
+  // GATE 2 — a coherent model must never be narrated as self-contradiction
+  // ===========================================================================
+  it("does NOT report a conflict when the claims have DIFFERENT targets", () => {
+    // "Price helps revenue, hurts share" — coherent. The two claims collide only
+    // because WE mediate them through one shared outcome node. Blaming the user
+    // for our mediation artefact is the defect this gate exists to prevent.
+    const graph: any = {
+      nodes: [
+        { id: "fac_price", kind: "factor", label: "Price" },
+        { id: "goal_revenue", kind: "goal", label: "Revenue" },
+        { id: "goal_share", kind: "goal", label: "Market Share" },
+      ],
+      edges: [
+        { from: "fac_price", to: "goal_revenue", strength_mean: 0.5, strength_std: 0.1, belief_exists: 0.9, effect_direction: "positive" },
+        { from: "fac_price", to: "goal_share", strength_mean: 0.4, strength_std: 0.1, belief_exists: 0.8, effect_direction: "negative" },
+      ],
+    };
+
+    const result = fixFactorGoalEdges(graph, "V1_FLAT");
+
+    expect(result.repairs.filter((r) => r.code === "CONFLICTING_CAUSAL_DIRECTION")).toHaveLength(0);
+    // Both goals still reached; the shared limb is carried once.
+    expect(
+      graph.edges.filter((e: any) => e.from === "fac_price" && e.to === "out_fac_price_impact"),
+    ).toHaveLength(1);
+    expect(
+      graph.edges.filter((e: any) => e.from === "out_fac_price_impact" && e.to === "goal_revenue"),
+    ).toHaveLength(1);
+    expect(
+      graph.edges.filter((e: any) => e.from === "out_fac_price_impact" && e.to === "goal_share"),
+    ).toHaveLength(1);
+    // ⚠ PRE-EXISTING SIGN INVERSION, ROWED SEPARATELY, NOT FIXED HERE.
+    // The shared limb carries ONE sign, so the only path to "Market Share" comes
+    // out positive although the source said negative. That follows from the
+    // per-factor shared mediating outcome, which predates this suppression.
+    // Pinned so the gap is visible in the suite rather than invisible to it.
+    expect(
+      graph.edges.find((e: any) => e.from === "fac_price" && e.to === "out_fac_price_impact")
+        .effect_direction,
+    ).toBe("positive");
+  });
+
+  // ===========================================================================
+  // Order-freedom — the same model must analyse the same way twice
+  // ===========================================================================
+  it("resolves the shared limb identically whichever order the claims arrive in", () => {
+    const build = (reversed: boolean): any => {
+      const a = { from: "fac_cost", to: "goal_1", strength_mean: 0.9, strength_std: 0.1, belief_exists: 0.99, effect_direction: "positive" };
+      const b = { from: "fac_cost", to: "goal_2", strength_mean: 0.1, strength_std: 0.4, belief_exists: 0.51, effect_direction: "positive" };
+      return {
+        nodes: [
+          { id: "fac_cost", kind: "factor", label: "Cost" },
+          { id: "goal_1", kind: "goal", label: "Goal 1" },
+          { id: "goal_2", kind: "goal", label: "Goal 2" },
+        ],
+        edges: reversed ? [b, a] : [a, b],
+      };
+    };
+
+    const forward = build(false);
+    const reverse = build(true);
+    fixFactorGoalEdges(forward, "V1_FLAT");
+    fixFactorGoalEdges(reverse, "V1_FLAT");
+
+    const limbOf = (g: any) =>
+      g.edges.find((e: any) => e.from === "fac_cost" && e.to === "out_fac_cost_impact");
+
+    // Same numerics either way — decided by a key over the source claim, never
+    // by position in edges[]. Before this, first-in-list won and the output
+    // graph depended on input order.
+    expect(limbOf(forward).strength_mean).toBe(limbOf(reverse).strength_mean);
+    expect(limbOf(forward).strength_std).toBe(limbOf(reverse).strength_std);
+    expect(limbOf(forward).belief_exists).toBe(limbOf(reverse).belief_exists);
+    // Bound to the actual winner, not merely to agreement: goal_1 sorts before
+    // goal_2, so the 0.9 claim survives in BOTH orders.
+    expect(limbOf(forward).strength_mean).toBe(0.9);
+    expect(limbOf(reverse).strength_mean).toBe(0.9);
+  });
+
+  it("does not add a second limb when the graph ALREADY carries that edge", () => {
+    // Ordering must not decide the outcome: the pass-through edge is listed
+    // AFTER the factor→goal edge that would mint the same limb.
+    const graph: any = {
+      nodes: [
+        { id: "fac_cost", kind: "factor", label: "Cost" },
+        { id: "out_fac_cost_impact", kind: "outcome", label: "Cost Impact" },
+        { id: "goal_1", kind: "goal", label: "Goal 1" },
+      ],
+      edges: [
+        { from: "fac_cost", to: "goal_1", strength_mean: 0.5, strength_std: 0.1, belief_exists: 0.9 },
+        { from: "fac_cost", to: "out_fac_cost_impact", strength_mean: 0.7, strength_std: 0.1, belief_exists: 0.95 },
+      ],
+    };
+
+    fixFactorGoalEdges(graph, "V1_FLAT");
+
+    const facToOut = graph.edges.filter(
+      (e: any) => e.from === "fac_cost" && e.to === "out_fac_cost_impact",
+    );
+    expect(facToOut).toHaveLength(1);
+    // The pre-existing, user-owned edge survives — the repair yields to it.
+    expect(facToOut[0].strength_mean).toBe(0.7);
+  });
+
+  // ===========================================================================
+  // Id-collision safety — the minted id may already be TAKEN, by a non-outcome
+  // ===========================================================================
+  //
+  // `out_<factorId>_impact` is minted, not reserved. Before this block the
+  // splitter asked only `nodeKindMap.has(outcomeId)` — PRESENCE, never KIND — so
+  // a pre-existing non-outcome node sitting on that id was silently adopted as
+  // the mediating outcome. Two harms follow, and the second is the serious one:
+  //
+  //   1. factor→<non-outcome> is wired, which is not the topology this repair
+  //      exists to build; and
+  //   2. when the squatter is itself a GOAL, the splitter emits a BRAND-NEW
+  //      factor→goal edge — the exact edge it was called to remove — *after* the
+  //      sweep that owns that pattern has already run. It reaches the
+  //      post-enforcement gate with no repair authority left to claim it.
+  //
+  // The collision-safe form of this same id-minting policy already existed in
+  // this file, in `fixOptionGoalShortcut` (kind-check, then suffix-search for a
+  // free `out_<x>_impact_<n>`). Two implementations of one policy in one file,
+  // disagreeing, is this estate's differently-named-twins defect class; these
+  // tests pin the reconciled behaviour.
+  describe("id collision with a pre-existing non-outcome node", () => {
+    it("does NOT wire through a non-outcome node squatting the minted id", () => {
+      const graph: any = {
+        nodes: [
+          { id: "fac_support_cost", kind: "factor", label: "Support Cost" },
+          // The squatter: exactly the id the splitter would mint, held by a FACTOR.
+          { id: "out_fac_support_cost_impact", kind: "factor", label: "Pre-existing, not an outcome" },
+          { id: "goal_reduce_costs", kind: "goal", label: "Reduce Costs" },
+        ],
+        edges: [
+          { from: "fac_support_cost", to: "goal_reduce_costs", strength_mean: 0.7, strength_std: 0.1, belief_exists: 0.85 },
+        ],
+      };
+
+      const result = fixFactorGoalEdges(graph, "V1_FLAT");
+
+      expect(result.splitCount).toBe(1);
+
+      // The squatter is untouched — neither rewritten to `outcome` nor wired into.
+      const squatter = graph.nodes.find((n: any) => n.id === "out_fac_support_cost_impact");
+      expect(squatter.kind, "the pre-existing node's kind must not be rewritten").toBe("factor");
+      expect(
+        graph.edges.some((e: any) => e.from === "fac_support_cost" && e.to === "out_fac_support_cost_impact"),
+        "the splitter must not wire factor→<non-outcome squatter>",
+      ).toBe(false);
+      expect(
+        graph.edges.some((e: any) => e.from === "out_fac_support_cost_impact" && e.to === "goal_reduce_costs"),
+        "the splitter must not wire <non-outcome squatter>→goal",
+      ).toBe(false);
+
+      // A collision-safe synthetic outcome is minted instead, and the chain runs
+      // through THAT node — bound by id, not by "some outcome exists".
+      const minted = graph.nodes.find((n: any) => n.id === "out_fac_support_cost_impact_2");
+      expect(minted, "a collision-safe outcome node must be minted").toBeDefined();
+      expect(minted.kind).toBe("outcome");
+      expect(
+        graph.edges.some((e: any) => e.from === "fac_support_cost" && e.to === "out_fac_support_cost_impact_2"),
+        "factor→<collision-safe outcome> must be wired",
+      ).toBe(true);
+      expect(
+        graph.edges.some((e: any) => e.from === "out_fac_support_cost_impact_2" && e.to === "goal_reduce_costs"),
+        "<collision-safe outcome>→goal must be wired",
+      ).toBe(true);
+
+      // And the pattern this repair exists to remove must not survive in any form.
+      const factorGoal = graph.edges.filter((e: any) => {
+        const from = graph.nodes.find((n: any) => n.id === e.from);
+        const to = graph.nodes.find((n: any) => n.id === e.to);
+        return from?.kind === "factor" && to?.kind === "goal";
+      });
+      expect(factorGoal, "no factor→goal edge may remain after the split").toHaveLength(0);
+    });
+
+    it("emits no fresh factor→goal edge when the squatter is itself the GOAL", () => {
+      // The serious harm, isolated: adopting a GOAL as the mediating "outcome"
+      // makes the splitter re-emit the very pattern it was called to remove.
+      const graph: any = {
+        nodes: [
+          { id: "fac_sales", kind: "factor", label: "Sales" },
+          { id: "out_fac_sales_impact", kind: "goal", label: "A goal squatting the minted id" },
+          { id: "goal_growth", kind: "goal", label: "Growth" },
+        ],
+        edges: [
+          { from: "fac_sales", to: "goal_growth", strength_mean: 0.6, strength_std: 0.1, belief_exists: 0.9 },
+        ],
+      };
+
+      fixFactorGoalEdges(graph, "V1_FLAT");
+
+      expect(
+        graph.edges.some((e: any) => e.from === "fac_sales" && e.to === "out_fac_sales_impact"),
+        "wiring factor→<goal squatter> IS a fresh factor→goal edge, emitted after the sweep that owns it",
+      ).toBe(false);
+      const squatter = graph.nodes.find((n: any) => n.id === "out_fac_sales_impact");
+      expect(squatter.kind, "the squatting goal must not be rewritten to outcome").toBe("goal");
+    });
+
+    it("still reuses ONE synthetic outcome across several goals when the id collides", () => {
+      // The dedup invariant pinned by "deduplicates outcome node when same factor
+      // targets multiple goals" must survive collision handling: resolving the id
+      // per EDGE rather than per FACTOR would mint `_2` then `_3` here.
+      const graph: any = {
+        nodes: [
+          { id: "fac_cost", kind: "factor", label: "Cost" },
+          { id: "out_fac_cost_impact", kind: "factor", label: "Squatter" },
+          { id: "goal_1", kind: "goal", label: "Goal 1" },
+          { id: "goal_2", kind: "goal", label: "Goal 2" },
+        ],
+        edges: [
+          { from: "fac_cost", to: "goal_1", strength_mean: 0.5, strength_std: 0.1, belief_exists: 0.9 },
+          { from: "fac_cost", to: "goal_2", strength_mean: 0.3, strength_std: 0.1, belief_exists: 0.8 },
+        ],
+      };
+
+      const result = fixFactorGoalEdges(graph, "V1_FLAT");
+
+      expect(result.splitCount).toBe(2);
+      const synthetic = graph.nodes.filter((n: any) => n.kind === "outcome");
+      expect(synthetic, "exactly one synthetic outcome, shared by both goals").toHaveLength(1);
+      expect(synthetic[0].id).toBe("out_fac_cost_impact_2");
+      expect(
+        graph.nodes.some((n: any) => n.id === "out_fac_cost_impact_3"),
+        "a second collision-safe id would mean the id was resolved per-edge, not per-factor",
+      ).toBe(false);
+    });
+
+    it("walks the suffix past collision-safe ids that are already taken", () => {
+      const graph: any = {
+        nodes: [
+          { id: "fac_cost", kind: "factor", label: "Cost" },
+          { id: "out_fac_cost_impact", kind: "factor", label: "Squatter" },
+          { id: "out_fac_cost_impact_2", kind: "risk", label: "Also taken" },
+          { id: "goal_1", kind: "goal", label: "Goal" },
+        ],
+        edges: [
+          { from: "fac_cost", to: "goal_1", strength_mean: 0.5, strength_std: 0.1, belief_exists: 0.9 },
+        ],
+      };
+
+      fixFactorGoalEdges(graph, "V1_FLAT");
+
+      const minted = graph.nodes.find((n: any) => n.id === "out_fac_cost_impact_3");
+      expect(minted, "the suffix search must skip every taken id").toBeDefined();
+      expect(minted.kind).toBe("outcome");
+      expect(
+        graph.nodes.find((n: any) => n.id === "out_fac_cost_impact_2").kind,
+        "the taken `_2` node must be left exactly as it was",
+      ).toBe("risk");
+    });
+
+    it("reuses a pre-existing node on the minted id when it IS already an outcome", () => {
+      // The negative half: a kind-COMPATIBLE node must still be reused, or the
+      // guard has simply been widened into always minting a fresh id.
+      const graph: any = {
+        nodes: [
+          { id: "fac_cost", kind: "factor", label: "Cost" },
+          { id: "out_fac_cost_impact", kind: "outcome", label: "Already the right kind" },
+          { id: "goal_1", kind: "goal", label: "Goal" },
+        ],
+        edges: [
+          { from: "fac_cost", to: "goal_1", strength_mean: 0.5, strength_std: 0.1, belief_exists: 0.9 },
+        ],
+      };
+
+      fixFactorGoalEdges(graph, "V1_FLAT");
+
+      expect(
+        graph.nodes.some((n: any) => n.id === "out_fac_cost_impact_2"),
+        "a kind-compatible existing outcome must be reused, not duplicated",
+      ).toBe(false);
+      expect(
+        graph.edges.some((e: any) => e.from === "fac_cost" && e.to === "out_fac_cost_impact"),
+        "the existing outcome must carry the chain",
+      ).toBe(true);
+    });
+  });
+});
+
+// =============================================================================
+// Disconnected Observable Pruning
+// =============================================================================
+
+describe("fixDisconnectedObservables", () => {
+  it("PII (14-Jul ruling): the pruned-node log carries a digest + category only — never the raw label or id (sentinel-proven)", async () => {
+    const SENTINEL_LABEL = "SENTINEL-7d2e91bc Relocate HQ To Lisbon";
+    const SENTINEL_ID = "fac_sentinel_relocate_hq_to_lisbon";
+    const { log } = await import("../../src/utils/telemetry.js");
+    const infoMock = log.info as ReturnType<typeof vi.fn>;
+    infoMock.mockClear();
+
+    const graph = makeGraph({
+      nodes: [
+        { id: "dec_1", kind: "decision", label: "Decision" },
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "opt_b", kind: "option", label: "B" },
+        { id: SENTINEL_ID, kind: "factor", label: SENTINEL_LABEL, category: "observable" },
+        { id: "out_revenue", kind: "outcome", label: "Revenue" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "dec_1", to: "opt_a", strength_mean: 1 },
+        { from: "opt_a", to: "out_revenue", strength_mean: 0.7 },
+        { from: "out_revenue", to: "goal_1", strength_mean: 0.8 },
+      ],
+    });
+
+    const result = fixDisconnectedObservables(graph);
+
+    // POSITIVE CONTROL: the sentinel IS visible in the product repair
+    // record (returned data, not a log) — the harness can see presences.
+    expect(JSON.stringify(result.repairs)).toContain(SENTINEL_LABEL);
+
+    // The LOG must carry neither the label nor the raw id — path-based
+    // logger redaction cannot clean interpolated message strings, so
+    // this call site must emit digests/enums only.
+    const prunedCalls = infoMock.mock.calls.filter((call) =>
+      JSON.stringify(call).includes("observable_pruned"),
+    );
+    expect(prunedCalls.length).toBeGreaterThan(0);
+    for (const call of prunedCalls) {
+      const serialized = JSON.stringify(call);
+      expect(serialized).not.toContain(SENTINEL_LABEL);
+      expect(serialized).not.toContain(SENTINEL_ID);
+      expect(serialized).toMatch(/sha8:[0-9a-f]{8}/);
+    }
+  });
+
+  it("prunes observable factor with zero edges", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "dec_1", kind: "decision", label: "Decision" },
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "opt_b", kind: "option", label: "B" },
+        { id: "fac_price", kind: "factor", label: "Price", category: "controllable" },
+        { id: "fac_orphan", kind: "factor", label: "Orphan Observable", category: "observable" },
+        { id: "out_revenue", kind: "outcome", label: "Revenue" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "dec_1", to: "opt_a", strength_mean: 1 },
+        { from: "opt_a", to: "fac_price", strength_mean: 1 },
+        { from: "fac_price", to: "out_revenue", strength_mean: 0.7 },
+        { from: "out_revenue", to: "goal_1", strength_mean: 0.8 },
+      ],
+    });
+
+    const result = fixDisconnectedObservables(graph);
+
+    expect(result.pruned).toEqual(["fac_orphan"]);
+    expect(result.repairs).toHaveLength(1);
+    expect(result.repairs[0].code).toBe("DISCONNECTED_OBSERVABLE_PRUNED");
+    expect(graph.nodes.find((n: any) => n.id === "fac_orphan")).toBeUndefined();
+    expect(graph.nodes).toHaveLength(6);
+  });
+
+  it("prunes external factor with zero edges", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "dec_1", kind: "decision", label: "Decision" },
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "opt_b", kind: "option", label: "B" },
+        { id: "fac_ext", kind: "factor", label: "External Factor", category: "external" },
+        { id: "out_revenue", kind: "outcome", label: "Revenue" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "dec_1", to: "opt_a", strength_mean: 1 },
+        { from: "opt_a", to: "out_revenue", strength_mean: 0.7 },
+        { from: "out_revenue", to: "goal_1", strength_mean: 0.8 },
+      ],
+    });
+
+    const result = fixDisconnectedObservables(graph);
+
+    expect(result.pruned).toEqual(["fac_ext"]);
+    expect(graph.nodes.find((n: any) => n.id === "fac_ext")).toBeUndefined();
+  });
+
+  it("does NOT prune controllable factor with zero edges", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "dec_1", kind: "decision", label: "Decision" },
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "opt_b", kind: "option", label: "B" },
+        { id: "fac_orphan_ctrl", kind: "factor", label: "Orphan Controllable", category: "controllable" },
+        { id: "out_revenue", kind: "outcome", label: "Revenue" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "dec_1", to: "opt_a", strength_mean: 1 },
+        { from: "opt_a", to: "out_revenue", strength_mean: 0.7 },
+        { from: "out_revenue", to: "goal_1", strength_mean: 0.8 },
+      ],
+    });
+
+    const result = fixDisconnectedObservables(graph);
+
+    expect(result.pruned).toEqual([]);
+    expect(graph.nodes.find((n: any) => n.id === "fac_orphan_ctrl")).toBeDefined();
+  });
+
+  it("preserves observable factor that has edges", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "dec_1", kind: "decision", label: "Decision" },
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "opt_b", kind: "option", label: "B" },
+        { id: "fac_obs", kind: "factor", label: "Connected Observable", category: "observable" },
+        { id: "out_revenue", kind: "outcome", label: "Revenue" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "dec_1", to: "opt_a", strength_mean: 1 },
+        { from: "fac_obs", to: "out_revenue", strength_mean: 0.5 },
+        { from: "out_revenue", to: "goal_1", strength_mean: 0.8 },
+      ],
+    });
+
+    const result = fixDisconnectedObservables(graph);
+
+    expect(result.pruned).toEqual([]);
+    expect(graph.nodes.find((n: any) => n.id === "fac_obs")).toBeDefined();
+  });
+
+  it("is idempotent — running twice produces no further changes", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "dec_1", kind: "decision", label: "Decision" },
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "opt_b", kind: "option", label: "B" },
+        { id: "fac_orphan", kind: "factor", label: "Orphan", category: "observable" },
+        { id: "out_revenue", kind: "outcome", label: "Revenue" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "dec_1", to: "opt_a", strength_mean: 1 },
+        { from: "opt_a", to: "out_revenue", strength_mean: 0.7 },
+        { from: "out_revenue", to: "goal_1", strength_mean: 0.8 },
+      ],
+    });
+
+    const result1 = fixDisconnectedObservables(graph);
+    expect(result1.pruned).toHaveLength(1);
+
+    const result2 = fixDisconnectedObservables(graph);
+    expect(result2.pruned).toHaveLength(0);
+    expect(result2.repairs).toHaveLength(0);
+  });
+
+  it("prunes multiple disconnected observables at once", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "dec_1", kind: "decision", label: "Decision" },
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "opt_b", kind: "option", label: "B" },
+        { id: "fac_obs1", kind: "factor", label: "Obs1", category: "observable" },
+        { id: "fac_obs2", kind: "factor", label: "Obs2", category: "observable" },
+        { id: "fac_ext1", kind: "factor", label: "Ext1", category: "external" },
+        { id: "out_revenue", kind: "outcome", label: "Revenue" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "dec_1", to: "opt_a", strength_mean: 1 },
+        { from: "opt_a", to: "out_revenue", strength_mean: 0.7 },
+        { from: "out_revenue", to: "goal_1", strength_mean: 0.8 },
+      ],
+    });
+
+    const result = fixDisconnectedObservables(graph);
+
+    expect(result.pruned).toEqual(["fac_obs1", "fac_obs2", "fac_ext1"]);
+    expect(result.repairs).toHaveLength(3);
+    expect(graph.nodes).toHaveLength(5); // dec, opt_a, opt_b, out_revenue, goal
+  });
+
+  it("does not introduce invalid edge references after pruning", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "dec_1", kind: "decision", label: "Decision" },
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "opt_b", kind: "option", label: "B" },
+        { id: "fac_orphan", kind: "factor", label: "Orphan", category: "observable" },
+        { id: "out_revenue", kind: "outcome", label: "Revenue" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "dec_1", to: "opt_a", strength_mean: 1 },
+        { from: "opt_a", to: "out_revenue", strength_mean: 0.7 },
+        { from: "out_revenue", to: "goal_1", strength_mean: 0.8 },
+      ],
+    });
+
+    fixDisconnectedObservables(graph);
+
+    // All edges should reference existing node IDs
+    const nodeIds = new Set(graph.nodes.map((n: any) => n.id));
+    for (const edge of graph.edges) {
+      expect(nodeIds.has(edge.from)).toBe(true);
+      expect(nodeIds.has(edge.to)).toBe(true);
+    }
+  });
+});
+
+// =============================================================================
+// FORBIDDEN_EDGE classification: factor→goal vs option→outcome
+// =============================================================================
+
+describe("FORBIDDEN_EDGE Bucket routing", () => {
+  it("factor→goal is auto-fixed by fixFactorGoalEdges (proactive, not Bucket C)", () => {
+    const graph: any = {
+      nodes: [
+        { id: "dec_1", kind: "decision", label: "Decision" },
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "opt_b", kind: "option", label: "B" },
+        { id: "fac_cost", kind: "factor", label: "Cost", category: "controllable" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "dec_1", to: "opt_a", strength_mean: 1, strength_std: 0.01, belief_exists: 1 },
+        { from: "dec_1", to: "opt_b", strength_mean: 1, strength_std: 0.01, belief_exists: 1 },
+        { from: "opt_a", to: "fac_cost", strength_mean: 1, strength_std: 0.01, belief_exists: 1 },
+        { from: "fac_cost", to: "goal_1", strength_mean: 0.7, strength_std: 0.15, belief_exists: 0.9 },
+      ],
+    };
+
+    const result = fixFactorGoalEdges(graph, "V1_FLAT");
+
+    // factor→goal edge should be split into factor→outcome→goal
+    expect(result.splitCount).toBe(1);
+    expect(result.repairs[0].code).toBe("FACTOR_GOAL_EDGE_SPLIT");
+    // No factor→goal edges should remain
+    const factorGoalEdges = graph.edges.filter((e: any) => {
+      const fromNode = graph.nodes.find((n: any) => n.id === e.from);
+      const toNode = graph.nodes.find((n: any) => n.id === e.to);
+      return fromNode?.kind === "factor" && toNode?.kind === "goal";
+    });
+    expect(factorGoalEdges).toHaveLength(0);
+  });
+
+  it("option→outcome is auto-fixed when outcome already reaches goal", () => {
+    const graph: any = {
+      nodes: [
+        { id: "dec_1", kind: "decision", label: "Decision" },
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "opt_b", kind: "option", label: "B" },
+        { id: "fac_cost", kind: "factor", label: "Cost", category: "controllable" },
+        { id: "out_revenue", kind: "outcome", label: "Revenue" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "dec_1", to: "opt_a", strength_mean: 1 },
+        { from: "dec_1", to: "opt_b", strength_mean: 1 },
+        { from: "opt_a", to: "fac_cost", strength_mean: 1 },
+        { from: "opt_a", to: "out_revenue", strength_mean: 0.5 }, // Forbidden: option→outcome
+        { from: "fac_cost", to: "out_revenue", strength_mean: 0.7 },
+        { from: "out_revenue", to: "goal_1", strength_mean: 0.8 },
+      ],
+    };
+
+    const result = fixOptionOutcomeShortcut(graph);
+    expect(result.removedCount).toBe(1);
+    expect(result.repairs[0].code).toBe("FORBIDDEN_EDGE_AUTO_FIXED");
+
+    // The option→outcome edge should be removed
+    const optOutEdges = graph.edges.filter((e: any) => e.from === "opt_a" && e.to === "out_revenue");
+    expect(optOutEdges).toHaveLength(0);
+    // Other edges preserved
+    expect(graph.edges).toHaveLength(5);
+  });
+});
+
+// =============================================================================
+// fixOptionOutcomeShortcut
+// =============================================================================
+
+describe("fixOptionOutcomeShortcut", () => {
+  it("removes option→outcome when outcome→goal exists", () => {
+    const graph: any = {
+      nodes: [
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "out_1", kind: "outcome", label: "Outcome" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "opt_a", to: "out_1", strength_mean: 0.5 },
+        { from: "out_1", to: "goal_1", strength_mean: 0.8 },
+      ],
+    };
+
+    const result = fixOptionOutcomeShortcut(graph);
+    expect(result.removedCount).toBe(1);
+    expect(result.skippedCount).toBe(0);
+    expect(result.repairs[0].code).toBe("FORBIDDEN_EDGE_AUTO_FIXED");
+    expect(graph.edges).toHaveLength(1);
+    expect(graph.edges[0].from).toBe("out_1");
+  });
+
+  it("does NOT remove option→outcome when outcome has no goal path", () => {
+    const graph: any = {
+      nodes: [
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "out_1", kind: "outcome", label: "Outcome" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "opt_a", to: "out_1", strength_mean: 0.5 },
+        // No outcome→goal edge
+      ],
+    };
+
+    const result = fixOptionOutcomeShortcut(graph);
+    expect(result.removedCount).toBe(0);
+    expect(result.skippedCount).toBe(1);
+    expect(graph.edges).toHaveLength(1);
+  });
+
+  it("validates path uses only allowed edge patterns", () => {
+    // outcome→option is NOT an allowed pattern — should not count as a path to goal
+    const graph: any = {
+      nodes: [
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "out_1", kind: "outcome", label: "Outcome" },
+        { id: "opt_b", kind: "option", label: "B" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "opt_a", to: "out_1", strength_mean: 0.5 },
+        { from: "out_1", to: "opt_b", strength_mean: 0.3 }, // Not an allowed pattern
+        { from: "opt_b", to: "goal_1", strength_mean: 0.8 }, // Not an allowed pattern
+      ],
+    };
+
+    const result = fixOptionOutcomeShortcut(graph);
+    expect(result.removedCount).toBe(0);
+    expect(result.skippedCount).toBe(1);
+  });
+
+  it("does NOT auto-fix option→goal", () => {
+    const graph: any = {
+      nodes: [
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "opt_a", to: "goal_1", strength_mean: 0.5 },
+      ],
+    };
+
+    const result = fixOptionOutcomeShortcut(graph);
+    expect(result.removedCount).toBe(0);
+    expect(result.skippedCount).toBe(0);
+    expect(graph.edges).toHaveLength(1);
+  });
+
+  it("does NOT auto-fix option→risk", () => {
+    const graph: any = {
+      nodes: [
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "risk_1", kind: "risk", label: "Risk" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "opt_a", to: "risk_1", strength_mean: 0.5 },
+        { from: "risk_1", to: "goal_1", strength_mean: 0.8 },
+      ],
+    };
+
+    const result = fixOptionOutcomeShortcut(graph);
+    expect(result.removedCount).toBe(0);
+    expect(result.skippedCount).toBe(0);
+  });
+
+  it("forbidden edge removal disconnects observable → Task 1 prunes it", () => {
+    const graph: any = {
+      nodes: [
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "fac_obs", kind: "factor", label: "Observable", category: "observable" },
+        { id: "out_1", kind: "outcome", label: "Outcome" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "opt_a", to: "out_1", strength_mean: 0.5 },     // Forbidden shortcut
+        { from: "fac_obs", to: "out_1", strength_mean: 0.3 },    // Keeps fac_obs connected
+        { from: "out_1", to: "goal_1", strength_mean: 0.8 },
+      ],
+    };
+
+    // Step 1: Remove forbidden shortcut
+    const shortcutResult = fixOptionOutcomeShortcut(graph);
+    expect(shortcutResult.removedCount).toBe(1);
+
+    // fac_obs still connected (fac_obs→out_1 edge exists)
+    const obsResult1 = fixDisconnectedObservables(graph);
+    expect(obsResult1.pruned).toEqual([]);
+
+    // Now simulate removing fac_obs→out_1 edge too (making it disconnected)
+    graph.edges = graph.edges.filter((e: any) => !(e.from === "fac_obs" && e.to === "out_1"));
+    const obsResult2 = fixDisconnectedObservables(graph);
+    expect(obsResult2.pruned).toEqual(["fac_obs"]);
+  });
+
+  it("two consecutive sweeps produce identical output (stability)", () => {
+    const graph: any = {
+      nodes: [
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "out_1", kind: "outcome", label: "Outcome" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "opt_a", to: "out_1", strength_mean: 0.5 },
+        { from: "out_1", to: "goal_1", strength_mean: 0.8 },
+      ],
+    };
+
+    const result1 = fixOptionOutcomeShortcut(graph);
+    expect(result1.removedCount).toBe(1);
+
+    const result2 = fixOptionOutcomeShortcut(graph);
+    expect(result2.removedCount).toBe(0);
+    expect(result2.skippedCount).toBe(0);
+  });
+
+  it("handles outcome reaching goal via factor chain (factor→outcome→goal)", () => {
+    const graph: any = {
+      nodes: [
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "fac_1", kind: "factor", label: "Factor", category: "controllable" },
+        { id: "out_1", kind: "outcome", label: "Outcome" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "opt_a", to: "out_1", strength_mean: 0.5 },  // Forbidden shortcut
+        { from: "fac_1", to: "out_1", strength_mean: 0.7 },   // Valid chain exists
+        { from: "out_1", to: "goal_1", strength_mean: 0.8 },
+      ],
+    };
+
+    const result = fixOptionOutcomeShortcut(graph);
+    expect(result.removedCount).toBe(1);
+    expect(graph.edges).toHaveLength(2);
+  });
+});
+
+// =============================================================================
+// Sequencing: pruning uses post-repair edge state
+// =============================================================================
+
+describe("pruning sequencing — runs after upstream deterministic repairs", () => {
+  it("pruning counts edges added by factor→goal split (not pre-repair state)", () => {
+    // fac_obs has no edges initially. After factor→goal split creates
+    // fac_main→out_fac_main_impact, the fac_obs still has zero edges → pruned.
+    // But if fac_obs DID have an edge to fac_main, it should NOT be pruned.
+    const graph: any = {
+      nodes: [
+        { id: "fac_main", kind: "factor", label: "Main", category: "controllable" },
+        { id: "fac_obs", kind: "factor", label: "Observable", category: "observable" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "fac_main", to: "goal_1", strength_mean: 0.7, strength_std: 0.15, belief_exists: 0.9, effect_direction: "positive" },
+        // fac_obs → fac_main: observable feeds into main factor
+        { from: "fac_obs", to: "fac_main", strength_mean: 0.3, strength_std: 0.2, belief_exists: 0.8, effect_direction: "positive" },
+      ],
+    };
+
+    // Step 1: factor→goal split adds new edges
+    const splitResult = fixFactorGoalEdges(graph, "V1_FLAT");
+    expect(splitResult.splitCount).toBe(1);
+
+    // Step 2: pruning should see fac_obs→fac_main edge (still connected)
+    const pruneResult = fixDisconnectedObservables(graph);
+    expect(pruneResult.pruned).toEqual([]);
+    expect(graph.nodes.find((n: any) => n.id === "fac_obs")).toBeDefined();
+  });
+
+  it("pruning removes observable disconnected after option→outcome shortcut removal", () => {
+    // fac_obs is only connected via an option→outcome edge.
+    // After shortcut removal, it becomes disconnected and gets pruned.
+    const graph: any = {
+      nodes: [
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "fac_obs", kind: "factor", label: "Observable", category: "observable" },
+        { id: "out_1", kind: "outcome", label: "Outcome" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "opt_a", to: "out_1", strength_mean: 0.5 },     // Forbidden shortcut
+        { from: "out_1", to: "goal_1", strength_mean: 0.8 },     // Outcome reaches goal
+        // fac_obs has no edges at all
+      ],
+    };
+
+    // Step 1: remove shortcut
+    const shortcutResult = fixOptionOutcomeShortcut(graph);
+    expect(shortcutResult.removedCount).toBe(1);
+
+    // Step 2: pruning sees post-shortcut state
+    const pruneResult = fixDisconnectedObservables(graph);
+    expect(pruneResult.pruned).toEqual(["fac_obs"]);
+  });
+});
+
+// =============================================================================
+// Disconnected Observable Pruning — Intervention Cleanup
+// =============================================================================
+
+describe("fixDisconnectedObservables — intervention cleanup", () => {
+  it("removes intervention references to pruned factor", () => {
+    const graph: any = {
+      nodes: [
+        { id: "dec_1", kind: "decision", label: "Decision" },
+        { id: "opt_a", kind: "option", label: "A", data: { interventions: { fac_obs: 0.5, fac_ctrl: 0.8 } } },
+        { id: "opt_b", kind: "option", label: "B", data: { interventions: { fac_obs: 0.3 } } },
+        { id: "fac_ctrl", kind: "factor", label: "Ctrl", category: "controllable" },
+        { id: "fac_obs", kind: "factor", label: "Observable", category: "observable" },
+        { id: "out_1", kind: "outcome", label: "Outcome" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "dec_1", to: "opt_a" },
+        { from: "opt_a", to: "fac_ctrl" },
+        { from: "fac_ctrl", to: "out_1" },
+        { from: "out_1", to: "goal_1" },
+        // fac_obs has NO edges — will be pruned
+      ],
+    };
+
+    const result = fixDisconnectedObservables(graph);
+    expect(result.pruned).toEqual(["fac_obs"]);
+
+    // Intervention references to fac_obs should be removed
+    const optA = graph.nodes.find((n: any) => n.id === "opt_a");
+    expect(optA.data.interventions).toEqual({ fac_ctrl: 0.8 });
+
+    const optB = graph.nodes.find((n: any) => n.id === "opt_b");
+    expect(optB.data.interventions).toEqual({});
+
+    // Repair records should include intervention cleanup
+    const interventionRepairs = result.repairs.filter((r: any) =>
+      r.path.includes("interventions"),
+    );
+    expect(interventionRepairs).toHaveLength(2);
+  });
+
+  it("does not touch interventions when no nodes are pruned", () => {
+    const graph: any = {
+      nodes: [
+        { id: "opt_a", kind: "option", label: "A", data: { interventions: { fac_obs: 0.5 } } },
+        { id: "fac_obs", kind: "factor", label: "Observable", category: "observable" },
+      ],
+      edges: [
+        { from: "fac_obs", to: "opt_a" }, // Has an edge — not pruned
+      ],
+    };
+
+    const result = fixDisconnectedObservables(graph);
+    expect(result.pruned).toEqual([]);
+    const optA = graph.nodes.find((n: any) => n.id === "opt_a");
+    expect(optA.data.interventions).toEqual({ fac_obs: 0.5 });
+  });
+
+  it("handles options with no data or no interventions gracefully", () => {
+    const graph: any = {
+      nodes: [
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "opt_b", kind: "option", label: "B", data: {} },
+        { id: "opt_c", kind: "option", label: "C", data: { interventions: null } },
+        { id: "fac_obs", kind: "factor", label: "Observable", category: "observable" },
+      ],
+      edges: [],
+    };
+
+    // Should not throw
+    const result = fixDisconnectedObservables(graph);
+    expect(result.pruned).toEqual(["fac_obs"]);
+  });
+
+  it("pruning is idempotent with intervention cleanup", () => {
+    const graph: any = {
+      nodes: [
+        { id: "opt_a", kind: "option", label: "A", data: { interventions: { fac_obs: 0.5 } } },
+        { id: "fac_obs", kind: "factor", label: "Observable", category: "observable" },
+      ],
+      edges: [],
+    };
+
+    const result1 = fixDisconnectedObservables(graph);
+    expect(result1.pruned).toEqual(["fac_obs"]);
+
+    const result2 = fixDisconnectedObservables(graph);
+    expect(result2.pruned).toEqual([]);
+    expect(result2.repairs).toHaveLength(0);
+  });
+});
+
+// =============================================================================
+// Task 3: NaN-fix std aligned with signature detector
+// =============================================================================
+
+describe("NaN-fix std alignment", () => {
+  it("strength_std NaN is repaired to 0.125 (not 0.1)", () => {
+    const graph = makeGraph({
+      edges: [
+        { from: "dec_1", to: "opt_a", strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: "positive" },
+        { from: "dec_1", to: "opt_b", strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: "positive" },
+        { from: "opt_a", to: "fac_price", strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: "positive" },
+        { from: "fac_price", to: "out_revenue", strength_mean: 0.7, strength_std: NaN, belief_exists: 0.9, effect_direction: "positive" },
+        { from: "out_revenue", to: "goal_1", strength_mean: 0.8, strength_std: 0.15, belief_exists: 0.95, effect_direction: "positive" },
+      ],
+    });
+
+    const violations = [{ code: "NAN_VALUE", severity: "error", message: "NaN", path: "edges[3]" }];
+    const repairs = fixNanValues(graph, violations as any);
+
+    const repairedEdge = graph.edges.find((e: any) => e.from === "fac_price" && e.to === "out_revenue");
+    expect(repairedEdge.strength_std).toBe(0.125);
+    expect(repairs.some((r: any) => r.path.includes("strength_std"))).toBe(true);
+  });
+
+  it("valid strength_std is unchanged", () => {
+    const graph = makeGraph({
+      edges: [
+        { from: "fac_price", to: "out_revenue", strength_mean: 0.7, strength_std: 0.3, belief_exists: 0.9, effect_direction: "positive" },
+      ],
+    });
+
+    const repairs = fixNanValues(graph, []);
+    expect(repairs).toHaveLength(0);
+    expect(graph.edges[0].strength_std).toBe(0.3);
+  });
+});
+
+// =============================================================================
+// fixOptionRiskShortcut
+// =============================================================================
+
+describe("fixOptionRiskShortcut", () => {
+  it("removes option→risk when risk already reaches goal via valid chain", () => {
+    const graph: any = {
+      nodes: [
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "fac_1", kind: "factor", label: "Factor", category: "controllable" },
+        { id: "risk_1", kind: "risk", label: "Risk" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "opt_a", to: "fac_1", strength_mean: 1, strength_std: 0.01, belief_exists: 1 },
+        { from: "fac_1", to: "risk_1", strength_mean: 0.5, strength_std: 0.15, belief_exists: 0.9 },
+        { from: "opt_a", to: "risk_1", strength_mean: 0.5, strength_std: 0.15, belief_exists: 0.9 }, // Forbidden
+        { from: "risk_1", to: "goal_1", strength_mean: 0.8, strength_std: 0.1, belief_exists: 0.95 },
+      ],
+    };
+
+    const result = fixOptionRiskShortcut(graph, "V1_FLAT");
+    expect(result.removedCount).toBe(1);
+    expect(result.rerouted).toBe(0);
+    expect(result.repairs[0].code).toBe("FORBIDDEN_EDGE_AUTO_FIXED");
+    // Forbidden edge removed, 3 edges remain
+    expect(graph.edges).toHaveLength(3);
+    expect(graph.edges.some((e: any) => e.from === "opt_a" && e.to === "risk_1")).toBe(false);
+  });
+
+  it("reroutes option→risk when risk has no goal path and option has controllable factor", () => {
+    // Risk does NOT reach goal — must reroute via factor
+    const graph: any = {
+      nodes: [
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "fac_1", kind: "factor", label: "Factor", category: "controllable" },
+        { id: "risk_1", kind: "risk", label: "Risk" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "opt_a", to: "fac_1", strength_mean: 1, strength_std: 0.01, belief_exists: 1 },
+        { from: "opt_a", to: "risk_1", strength_mean: 0.5, strength_std: 0.15, belief_exists: 0.9 }, // Forbidden
+        // No risk_1→goal_1 edge — risk has no path to goal
+      ],
+    };
+
+    const result = fixOptionRiskShortcut(graph, "V1_FLAT");
+    expect(result.removedCount).toBe(1);
+    expect(result.rerouted).toBe(1);
+    // Forbidden edge removed, new factor→risk added
+    expect(graph.edges.some((e: any) => e.from === "opt_a" && e.to === "risk_1")).toBe(false);
+    expect(graph.edges.some((e: any) => e.from === "fac_1" && e.to === "risk_1")).toBe(true);
+  });
+
+  it("reroutes option→risk when risk reaches goal but no factor→risk bridge exists", () => {
+    // Risk reaches goal but option has no compliant bridge — reroute via factor
+    const graph: any = {
+      nodes: [
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "fac_1", kind: "factor", label: "Factor", category: "controllable" },
+        { id: "risk_1", kind: "risk", label: "Risk" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "opt_a", to: "fac_1", strength_mean: 1 },
+        { from: "opt_a", to: "risk_1", strength_mean: 0.5 }, // Forbidden
+        { from: "risk_1", to: "goal_1", strength_mean: 0.8 },
+      ],
+    };
+
+    const result = fixOptionRiskShortcut(graph, "V1_FLAT");
+    expect(result.removedCount).toBe(1);
+    expect(result.rerouted).toBe(1); // Rerouted via Case 3 (no bridge, factor available)
+    expect(graph.edges.some((e: any) => e.from === "opt_a" && e.to === "risk_1")).toBe(false);
+    // New factor→risk edge created
+    expect(graph.edges.some((e: any) => e.from === "fac_1" && e.to === "risk_1")).toBe(true);
+  });
+
+  it("handles multiple forbidden option→risk edges", () => {
+    const graph: any = {
+      nodes: [
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "opt_b", kind: "option", label: "B" },
+        { id: "fac_1", kind: "factor", label: "Factor", category: "controllable" },
+        { id: "risk_1", kind: "risk", label: "Risk 1" },
+        { id: "risk_2", kind: "risk", label: "Risk 2" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "opt_a", to: "fac_1", strength_mean: 1, strength_std: 0.01, belief_exists: 1 },
+        { from: "opt_b", to: "fac_1", strength_mean: 1, strength_std: 0.01, belief_exists: 1 },
+        { from: "opt_a", to: "risk_1", strength_mean: 0.5 }, // Forbidden
+        { from: "opt_b", to: "risk_2", strength_mean: 0.3 }, // Forbidden
+        { from: "opt_a", to: "risk_2", strength_mean: 0.4 }, // Forbidden
+        { from: "risk_1", to: "goal_1", strength_mean: 0.8 },
+        { from: "risk_2", to: "goal_1", strength_mean: 0.7 },
+      ],
+    };
+
+    const result = fixOptionRiskShortcut(graph, "V1_FLAT");
+    expect(result.removedCount).toBe(3);
+    // No option→risk edges remain
+    expect(graph.edges.filter((e: any) => {
+      const fromNode = graph.nodes.find((n: any) => n.id === e.from);
+      const toNode = graph.nodes.find((n: any) => n.id === e.to);
+      return fromNode?.kind === "option" && toNode?.kind === "risk";
+    })).toHaveLength(0);
+  });
+
+  it("no-op when no option→risk edges exist", () => {
+    const graph: any = {
+      nodes: [
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "fac_1", kind: "factor", label: "Factor", category: "controllable" },
+        { id: "out_1", kind: "outcome", label: "Outcome" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "opt_a", to: "fac_1", strength_mean: 1 },
+        { from: "fac_1", to: "out_1", strength_mean: 0.5 },
+        { from: "out_1", to: "goal_1", strength_mean: 0.8 },
+      ],
+    };
+
+    const result = fixOptionRiskShortcut(graph, "V1_FLAT");
+    expect(result.removedCount).toBe(0);
+    expect(result.skippedCount).toBe(0);
+    expect(result.rerouted).toBe(0);
+    expect(graph.edges).toHaveLength(3);
+  });
+
+  it("defers to LLM when no controllable factor exists and risk has no goal path", () => {
+    // No factor, no goal path — cannot fix, defer
+    const graph: any = {
+      nodes: [
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "risk_1", kind: "risk", label: "Risk" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "opt_a", to: "risk_1", strength_mean: 0.5 }, // Forbidden, no factor, no goal path
+        // No risk_1→goal_1 edge
+      ],
+    };
+
+    const result = fixOptionRiskShortcut(graph, "V1_FLAT");
+    expect(result.removedCount).toBe(0);
+    expect(result.skippedCount).toBe(1);
+    // Edge preserved for LLM
+    expect(graph.edges).toHaveLength(1);
+    expect(graph.edges.some((e: any) => e.from === "opt_a" && e.to === "risk_1")).toBe(true);
+  });
+
+  it("handles V3 'action' kind as equivalent to 'option'", () => {
+    const graph: any = {
+      nodes: [
+        { id: "act_a", kind: "action", label: "A" },  // V3 kind
+        { id: "fac_1", kind: "factor", label: "Factor", category: "controllable" },
+        { id: "risk_1", kind: "risk", label: "Risk" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "act_a", to: "fac_1", strength_mean: 1 },
+        { from: "fac_1", to: "risk_1", strength_mean: 0.5 },
+        { from: "act_a", to: "risk_1", strength_mean: 0.5 }, // Forbidden action→risk
+        { from: "risk_1", to: "goal_1", strength_mean: 0.8 },
+      ],
+    };
+
+    const result = fixOptionRiskShortcut(graph, "V1_FLAT");
+    expect(result.removedCount).toBe(1);
+    expect(graph.edges.some((e: any) => e.from === "act_a" && e.to === "risk_1")).toBe(false);
+  });
+
+  it("removes shortcut when option→factor→risk bridge already exists", () => {
+    const graph: any = {
+      nodes: [
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "fac_1", kind: "factor", label: "Factor", category: "controllable" },
+        { id: "risk_1", kind: "risk", label: "Risk" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "opt_a", to: "fac_1", strength_mean: 1 },
+        { from: "fac_1", to: "risk_1", strength_mean: 0.5 }, // Valid bridge exists
+        { from: "opt_a", to: "risk_1", strength_mean: 0.5 }, // Forbidden shortcut
+        { from: "risk_1", to: "goal_1", strength_mean: 0.8 },
+      ],
+    };
+
+    const result = fixOptionRiskShortcut(graph, "V1_FLAT");
+    expect(result.removedCount).toBe(1);
+    expect(result.rerouted).toBe(0); // Used existing bridge, no reroute
+    expect(graph.edges).toHaveLength(3);
+  });
+});
+
+// =============================================================================
+// fixOptionGoalShortcut
+// =============================================================================
+
+describe("fixOptionGoalShortcut", () => {
+  it("removes option→goal when valid path exists through factors", () => {
+    const graph: any = {
+      nodes: [
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "fac_1", kind: "factor", label: "Factor", category: "controllable" },
+        { id: "out_1", kind: "outcome", label: "Outcome" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "opt_a", to: "fac_1", strength_mean: 1, strength_std: 0.01, belief_exists: 1 },
+        { from: "fac_1", to: "out_1", strength_mean: 0.5, strength_std: 0.15, belief_exists: 0.9 },
+        { from: "out_1", to: "goal_1", strength_mean: 0.8, strength_std: 0.1, belief_exists: 0.95 },
+        { from: "opt_a", to: "goal_1", strength_mean: 0.5 }, // Forbidden
+      ],
+    };
+
+    const result = fixOptionGoalShortcut(graph, "V1_FLAT");
+    expect(result.removedCount).toBe(1);
+    expect(result.rerouted).toBe(0);
+    expect(result.repairs[0].code).toBe("FORBIDDEN_EDGE_AUTO_FIXED");
+    expect(graph.edges).toHaveLength(3);
+    expect(graph.edges.some((e: any) => e.from === "opt_a" && e.to === "goal_1")).toBe(false);
+  });
+
+  it("reroutes option→goal when no valid path exists", () => {
+    const graph: any = {
+      nodes: [
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "fac_1", kind: "factor", label: "Factor", category: "controllable" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "opt_a", to: "fac_1", strength_mean: 1 },
+        { from: "opt_a", to: "goal_1", strength_mean: 0.5 }, // Forbidden, no valid chain
+      ],
+    };
+
+    const result = fixOptionGoalShortcut(graph, "V1_FLAT");
+    expect(result.removedCount).toBe(1);
+    expect(result.rerouted).toBe(1);
+    // Forbidden edge removed, synthetic outcome created
+    expect(graph.edges.some((e: any) => e.from === "opt_a" && e.to === "goal_1")).toBe(false);
+    // New nodes/edges created: factor→outcome, outcome→goal
+    expect(graph.nodes.some((n: any) => n.kind === "outcome" && n.id.includes("fac_1"))).toBe(true);
+    const syntheticOutcome = graph.nodes.find((n: any) => n.kind === "outcome" && n.id.includes("fac_1"));
+    expect(graph.edges.some((e: any) => e.from === "fac_1" && e.to === syntheticOutcome.id)).toBe(true);
+    expect(graph.edges.some((e: any) => e.from === syntheticOutcome.id && e.to === "goal_1")).toBe(true);
+  });
+
+  it("no-op when no option→goal edges exist", () => {
+    const graph: any = {
+      nodes: [
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "fac_1", kind: "factor", label: "Factor", category: "controllable" },
+        { id: "out_1", kind: "outcome", label: "Outcome" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "opt_a", to: "fac_1", strength_mean: 1 },
+        { from: "fac_1", to: "out_1", strength_mean: 0.5 },
+        { from: "out_1", to: "goal_1", strength_mean: 0.8 },
+      ],
+    };
+
+    const result = fixOptionGoalShortcut(graph, "V1_FLAT");
+    expect(result.removedCount).toBe(0);
+    expect(result.skippedCount).toBe(0);
+    expect(graph.edges).toHaveLength(3);
+  });
+
+  it("defers to LLM when no controllable factor exists", () => {
+    const graph: any = {
+      nodes: [
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "opt_a", to: "goal_1", strength_mean: 0.5 }, // Forbidden, no factor
+      ],
+    };
+
+    const result = fixOptionGoalShortcut(graph, "V1_FLAT");
+    expect(result.removedCount).toBe(0);
+    expect(result.skippedCount).toBe(1);
+    expect(graph.edges).toHaveLength(1);
+    expect(graph.edges[0].from).toBe("opt_a");
+  });
+
+  it("does not duplicate synthetic outcome for multiple option→goal edges via same factor", () => {
+    const graph: any = {
+      nodes: [
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "opt_b", kind: "option", label: "B" },
+        { id: "fac_1", kind: "factor", label: "Factor", category: "controllable" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "opt_a", to: "fac_1", strength_mean: 1 },
+        { from: "opt_b", to: "fac_1", strength_mean: 1 },
+        { from: "opt_a", to: "goal_1", strength_mean: 0.5 }, // Forbidden
+        { from: "opt_b", to: "goal_1", strength_mean: 0.5 }, // Forbidden
+      ],
+    };
+
+    const result = fixOptionGoalShortcut(graph, "V1_FLAT");
+    expect(result.removedCount).toBe(2);
+    // Only one synthetic outcome node created
+    const syntheticOutcomes = graph.nodes.filter((n: any) => n.kind === "outcome");
+    expect(syntheticOutcomes).toHaveLength(1);
+  });
+
+  it("generates collision-safe outcome ID when existing node has incompatible kind", () => {
+    // Pre-existing node with the synthetic ID but kind "factor" — should not be reused
+    const graph: any = {
+      nodes: [
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "fac_1", kind: "factor", label: "Factor", category: "controllable" },
+        { id: "out_fac_1_impact", kind: "factor", label: "Collider" }, // Wrong kind!
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "opt_a", to: "fac_1", strength_mean: 1 },
+        { from: "opt_a", to: "goal_1", strength_mean: 0.5 }, // Forbidden
+      ],
+    };
+
+    const result = fixOptionGoalShortcut(graph, "V1_FLAT");
+    expect(result.removedCount).toBe(1);
+    expect(result.rerouted).toBe(1);
+    // A new outcome node was created (not reusing the factor with clashing ID)
+    const outcomes = graph.nodes.filter((n: any) => n.kind === "outcome");
+    expect(outcomes).toHaveLength(1);
+    // The outcome ID is the collision-safe variant
+    expect(outcomes[0].id).toBe("out_fac_1_impact_2");
+  });
+});

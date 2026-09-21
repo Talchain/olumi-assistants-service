@@ -1,0 +1,478 @@
+{
+  "response_version": 2,
+  "assistant_text": "Hire One Tech Lead comes out ahead by a wide margin, leading in 78% of simulations against 18% for Hire Two Mid-Level Developers, and the result holds under most plausible variations.\n\n- **The gap is  \u2026[REDACTED \u2014 1537 chars total]",
+  "blocks": [
+    {
+      "type": "analysis_result",
+      "summary": "Hire One Tech Lead currently leads by 60 percentage points because Remaining Hiring Budget is the strongest driver.",
+      "leading_option_id": "opt_tech_lead",
+      "win_probabilities": {
+        "Hire One Tech Lead": 0.7815,
+        "Delay Hire (Status Quo)": 0.037125000000000005,
+        "Hire Two Mid-Level Developers": 0.181375
+      },
+      "enrichment": {
+        "option_comparison": [
+          {
+            "id": "opt_status_quo",
+            "label": "Delay Hire (Status Quo)",
+            "status": "computed",
+            "outcome": {
+              "p10": -0.01964336783693027,
+              "p50": 0,
+              "p90": 0.019327811313717563,
+              "std": 0.0197132874847368,
+              "mean": -0.00011233293472970013,
+              "n_samples": 4000,
+              "validity_ratio": 1,
+              "n_valid_samples": 4000
+            },
+            "option_id": "opt_status_quo",
+            "option_label": "Delay Hire (Status Quo)",
+            "win_probability": 0.037125000000000005
+          },
+          {
+            "id": "opt_tech_lead",
+            "label": "Hire One Tech Lead",
+            "status": "computed",
+            "outcome": {
+              "p10": 0.01753127764203214,
+              "p50": 0.28299681530858756,
+              "p90": 0.5369386099654446,
+              "std": 0.19182935803674428,
+              "mean": 0.28311189926111907,
+              "n_samples": 4000,
+              "validity_ratio": 1,
+              "n_valid_samples": 4000
+            },
+            "option_id": "opt_tech_lead",
+            "option_label": "Hire One Tech Lead",
+            "win_probability": 0.7815
+          },
+          {
+            "id": "opt_two_mid",
+            "label": "Hire Two Mid-Level Developers",
+            "status": "computed",
+            "outcome": {
+              "p10": -0.20403857576047935,
+              "p50": 0.06861192892924899,
+              "p90": 0.2943912007330298,
+              "std": 0.19217404955403142,
+              "mean": 0.055923040815825956,
+              "n_samples": 4000,
+              "validity_ratio": 1,
+              "n_valid_samples": 4000
+            },
+            "option_id": "opt_two_mid",
+            "option_label": "Hire Two Mid-Level Developers",
+            "win_probability": 0.181375
+          }
+        ],
+        "factor_sensitivity": [
+          {
+            "source": "graph",
+            "direction": "positive",
+            "factor_id": "fac_tl_indicator",
+            "confidence": 0.3,
+            "elasticity": 0,
+            "zero_reason": "intervention_override",
+            "factor_label": "Tech Lead Hired",
+            "elasticity_std": 0,
+            "influence_rank": 1,
+            "rank_flip_rate": 0,
+            "importance_rank": 1,
+            "influence_score": 1,
+            "stability_method": "bootstrap_20",
+            "confidence_source": "plot_unified_from_isl_bootstrap",
+            "sensitivity_score": 0,
+            "flip_risk_category": "negligible",
+            "value_of_information": 0,
+            "attribution_stability": "negligible",
+            "confidence_components": {
+              "sampling_stability": 0,
+              "structural_certainty": 0.5
+            },
+            "confidence_provenance": {
+              "input_quality": "standard",
+              "is_provisional": true,
+              "formula_version": "plot_unified_v3",
+              "calibration_status": "provisional_pending_pilot_calibration",
+              "computation_source": "plot_unified_from_isl_bootstrap"
+            },
+            "range_derivation_source": "default"
+          },
+          {
+            "source": "graph",
+            "direction": "positive",
+            "factor_id": "fac_budget_remaining",
+            "confidence": 0.4346,
+            "elasticity": 0.17732575530960212,
+            "evpi_status": "below_resolution",
+            "factor_label": "Remaining Hiring Budget",
+            "elasticity_std": 0.03890453,
+            "influence_rank": 2,
+            "rank_flip_rate": 0.45,
+            "importance_rank": 2,
+            "influence_score": 0.17732575530960212,
+            "value_defaulted": true,
+            "stability_method": "bootstrap_20",
+            "confidence_source": "plot_unified_from_isl_bootstrap",
+            "sensitivity_score": 0.06616071428571428,
+            "flip_risk_category": "negligible",
+            "value_of_information": 0,
+            "attribution_stability": "low",
+            "confidence_components": {
+              "sampling_stability": 0.25,
+              "structural_certainty": 0.5
+            },
+            "confidence_provenance": {
+              "input_quality": "standard",
+              "is_provisional": true,
+              "formula_version": "plot_unified_v3",
+              "calibration_status": "provisional_pending_pilot_calibration",
+              "computation_source": "plot_unified_from_isl_bootstrap"
+            }
+          },
+          {
+            "source": "graph",
+            "direction": "positive",
+            "factor_id": "fac_ml_indicator",
+            "confidence": 0.3,
+            "elasticity": 0,
+            "zero_reason": "intervention_override",
+            "factor_label": "Two Mid-Level Developers Hired",
+            "elasticity_std": 0,
+            "influence_rank": 3,
+            "rank_flip_rate": 0,
+            "importance_rank": 3,
+            "influence_score": 0.1493867783428058,
+            "stability_method": "bootstrap_20",
+            "confidence_source": "plot_unified_from_isl_bootstrap",
+            "sensitivity_score": 0,
+            "flip_risk_category": "negligible",
+            "value_of_information": 0,
+            "attribution_stability": "negligible",
+            "confidence_components": {
+              "sampling_stability": 0,
+              "structural_certainty": 0.5
+            },
+            "confidence_provenance": {
+              "input_quality": "standard",
+              "is_provisional": true,
+              "formula_version": "plot_unified_v3",
+              "calibration_status": "provisional_pending_pilot_calibration",
+              "computation_source": "plot_unified_from_isl_bootstrap"
+            },
+            "range_derivation_source": "default"
+          }
+        ],
+        "robustness": {
+          "level": "moderate",
+          "near_tie": {
+            "gap": 0.600125,
+            "is_tie": false,
+            "threshold": 0.1,
+            "top_option_id": "opt_tech_lead",
+            "tied_option_ids": [
+              "opt_tech_lead"
+            ],
+            "second_option_id": "opt_two_mid"
+          },
+          "is_robust": true,
+          "confidence": 0.769143400042892,
+          "robust_edges": [
+            {
+              "to_id": "out_delivery_speed",
+              "edge_id": "fac_budget_remaining->out_delivery_speed",
+              "from_id": "fac_budget_remaining",
+              "to_label": "AI Feature Delivery Speed",
+              "from_label": "Remaining Hiring Budget",
+              "switch_probability": 1,
+              "alternative_winner_id": null,
+              "alternative_winner_label": null
+            },
+            {
+              "to_id": "out_delivery_speed",
+              "edge_id": "fac_ml_indicator->out_delivery_speed",
+              "from_id": "fac_ml_indicator",
+              "to_label": "AI Feature Delivery Speed",
+              "from_label": "Two Mid-Level Developers Hired",
+              "switch_probability": 1,
+              "alternative_winner_id": null,
+              "alternative_winner_label": null
+            },
+            {
+              "to_id": "risk_coordination",
+              "edge_id": "fac_ml_indicator->risk_coordination",
+              "from_id": "fac_ml_indicator",
+              "to_label": "Team Coordination Overhead",
+              "from_label": "Two Mid-Level Developers Hired",
+              "switch_probability": 1,
+              "alternative_winner_id": null,
+              "alternative_winner_label": null
+            },
+            {
+              "to_id": "risk_time_to_productivity",
+              "edge_id": "fac_ml_indicator->risk_time_to_productivity",
+              "from_id": "fac_ml_indicator",
+              "to_label": "Time to Productivity",
+              "from_label": "Two Mid-Level Developers Hired",
+              "switch_probability": 1,
+              "alternative_winner_id": null,
+              "alternative_winner_label": null
+            },
+            {
+              "to_id": "out_delivery_speed",
+              "edge_id": "fac_tl_indicator->out_delivery_speed",
+              "from_id": "fac_tl_indicator",
+              "to_label": "AI Feature Delivery Speed",
+              "from_label": "Tech Lead Hired",
+              "switch_probability": 1,
+              "alternative_winner_id": null,
+              "alternative_winner_label": null
+            },
+            {
+              "to_id": "out_technical_quality",
+              "edge_id": "fac_tl_indicator->out_technical_quality",
+              "from_id": "fac_tl_indicator",
+              "to_label": "Technical Architecture Quality",
+              "from_label": "Tech Lead Hired",
+              "switch_probability": 1,
+              "alternative_winner_id": null,
+              "alternative_winner_label": null
+            },
+            {
+              "to_id": "risk_time_to_productivity",
+              "edge_id": "fac_tl_indicator->risk_time_to_productivity",
+              "from_id": "fac_tl_indicator",
+              "to_label": "Time to Productivity",
+              "from_label": "Tech Lead Hired",
+              "switch_probability": 1,
+              "alternative_winner_id": null,
+              "alternative_winner_label": null
+            },
+            {
+              "to_id": "goal_feature_delivery",
+              "edge_id": "out_delivery_speed->goal_feature_delivery",
+              "from_id": "out_delivery_speed",
+              "to_label": "Ship AI Features Within 6 Months",
+              "from_label": "AI Feature Delivery Speed",
+              "switch_probability": 1,
+              "alternative_winner_id": null,
+              "alternative_winner_label": null
+            },
+            {
+              "to_id": "goal_feature_delivery",
+              "edge_id": "out_technical_quality->goal_feature_delivery",
+              "from_id": "out_technical_quality",
+              "to_label": "Ship AI Features Within 6 Months",
+              "from_label": "Technical Architecture Quality",
+              "switch_probability": 1,
+              "alternative_winner_id": null,
+              "alternative_winner_label": null
+            },
+            {
+              "to_id": "goal_feature_delivery",
+              "edge_id": "risk_coordination->goal_feature_delivery",
+              "from_id": "risk_coordination",
+              "to_label": "Ship AI Features Within 6 Months",
+              "from_label": "Team Coordination Overhead",
+              "switch_probability": 1,
+              "alternative_winner_id": null,
+              "alternative_winner_label": null
+            },
+            {
+              "to_id": "goal_feature_delivery",
+              "edge_id": "risk_time_to_productivity->goal_feature_delivery",
+              "from_id": "risk_time_to_productivity",
+              "to_label": "Ship AI Features Within 6 Months",
+              "from_label": "Time to Productivity",
+              "switch_probability": 1,
+              "alternative_winner_id": null,
+              "alternative_winner_label": null
+            }
+          ],
+          "fragile_edges": [],
+          "display_verdict": "moderate",
+          "recommended_option_id": "opt_tech_lead",
+          "display_verdict_reason": "this result mostly held up, but could shift under some changes",
+          "recommended_option_label": "Hire One Tech Lead"
+        },
+        "option_comparison_status": "computed",
+        "edge_e_values": [
+          {
+            "to_id": "out_delivery_speed",
+            "e_value": 2.0184,
+            "edge_id": "fac_ml_indicator::out_delivery_speed",
+            "from_id": "fac_ml_indicator",
+            "to_label": "AI Feature Delivery Speed",
+            "flip_mean": 0.941629,
+            "from_label": "Two Mid-Level Developers Hired",
+            "current_mean": 0.4665178571428571,
+            "flip_direction": "increase"
+          },
+          {
+            "to_id": "risk_coordination",
+            "e_value": 1.7226,
+            "edge_id": "fac_ml_indicator::risk_coordination",
+            "from_id": "fac_ml_indicator",
+            "to_label": "Team Coordination Overhead",
+            "flip_mean": -0.861316,
+            "from_label": "Two Mid-Level Developers Hired",
+            "current_mean": 0.5,
+            "flip_direction": "decrease"
+          },
+          {
+            "to_id": "risk_time_to_productivity",
+            "e_value": 1.6535,
+            "edge_id": "fac_ml_indicator::risk_time_to_productivity",
+            "from_id": "fac_ml_indicator",
+            "to_label": "Time to Productivity",
+            "flip_mean": -0.578724,
+            "from_label": "Two Mid-Level Developers Hired",
+            "current_mean": 0.35,
+            "flip_direction": "decrease"
+          },
+          {
+            "to_id": "out_delivery_speed",
+            "e_value": 1,
+            "edge_id": "fac_tl_indicator::out_delivery_speed",
+            "from_id": "fac_tl_indicator",
+            "to_label": "AI Feature Delivery Speed",
+            "flip_mean": -0.081537,
+            "from_label": "Tech Lead Hired",
+            "current_mean": 0.38169642857142855,
+            "flip_direction": "decrease"
+          },
+          {
+            "to_id": "out_technical_quality",
+            "e_value": 1,
+            "edge_id": "fac_tl_indicator::out_technical_quality",
+            "from_id": "fac_tl_indicator",
+            "to_label": "Technical Architecture Quality",
+            "flip_mean": -0.405766,
+            "from_label": "Tech Lead Hired",
+            "current_mean": 0.65,
+            "flip_direction": "decrease"
+          },
+          {
+            "to_id": "goal_feature_delivery",
+            "e_value": 1,
+            "edge_id": "out_delivery_speed::goal_feature_delivery",
+            "from_id": "out_delivery_speed",
+            "to_label": "Ship AI Features Within 6 Months",
+            "flip_mean": -0.326408,
+            "from_label": "AI Feature Delivery Speed",
+            "current_mean": 0.65,
+            "flip_direction": "decrease"
+          },
+          {
+            "to_id": "goal_feature_delivery",
+            "e_value": 1,
+            "edge_id": "out_technical_quality::goal_feature_delivery",
+            "from_id": "out_technical_quality",
+            "to_label": "Ship AI Features Within 6 Months",
+            "flip_mean": -0.187277,
+            "from_label": "Technical Architecture Quality",
+            "current_mean": 0.3,
+            "flip_direction": "decrease"
+          },
+          {
+            "to_id": "goal_feature_delivery",
+            "e_value": 1.7226,
+            "edge_id": "risk_coordination::goal_feature_delivery",
+            "from_id": "risk_coordination",
+            "to_label": "Ship AI Features Within 6 Months",
+            "flip_mean": 0.430659,
+            "from_label": "Team Coordination Overhead",
+            "current_mean": -0.25,
+            "flip_direction": "increase"
+          }
+        ],
+        "inference_warnings": [],
+        "confidence_tier": "strong",
+        "flip_thresholds": []
+      }
+    }
+  ],
+  "suggested_actions": [
+    {
+      "id": "chip_action_what_would_flip",
+      "label": "Explore what would change this",
+      "message": "Explore what would change the result.",
+      "action_type": "what_would_flip"
+    }
+  ],
+  "insights": [],
+  "stage_indicator": "analyse",
+  "analysis_ready": {
+    "options": [
+      {
+        "option_id": "opt_status_quo",
+        "label": "Delay Hire (Status Quo)",
+        "status": "ready",
+        "interventions": {
+          "fac_ml_indicator": 0,
+          "fac_tl_indicator": 0
+        },
+        "is_baseline": true
+      },
+      {
+        "option_id": "opt_tech_lead",
+        "label": "Hire One Tech Lead",
+        "status": "ready",
+        "interventions": {
+          "fac_ml_indicator": 0,
+          "fac_tl_indicator": 1
+        },
+        "is_baseline": false
+      },
+      {
+        "option_id": "opt_two_mid",
+        "label": "Hire Two Mid-Level Developers",
+        "status": "ready",
+        "interventions": {
+          "fac_ml_indicator": 1,
+          "fac_tl_indicator": 0
+        },
+        "is_baseline": false
+      }
+    ],
+    "goal_node_id": "goal_feature_delivery",
+    "status": "ready",
+    "computed_at": "2026-07-12T01:00:40.793Z",
+    "freshness": "fresh",
+    "freshness_reason": "graph_hash_match",
+    "graph_hash_at_run": "0610d4fd489f9237",
+    "current_graph_hash": "0610d4fd489f9237"
+  },
+  "_diagnostic_trace": {
+    "llm_calls": [],
+    "prompt_identity": [],
+    "zone2_assembly": null,
+    "tool_policy": null,
+    "provider_resolution": [],
+    "structured_output_config": null,
+    "streaming_metrics": null,
+    "fallback_trace": [],
+    "benchmarking": {
+      "total_duration_ms": 16117,
+      "substage_timings": {
+        "finalisation_ms": 2
+      }
+    },
+    "correlation_ids": {
+      "request_id": "d7d93d29-ec49-4da2-9561-d972885f866c",
+      "scenario_id": "231e6644-d484-410d-8c1a-a1ae770406a7",
+      "turn_id": "dd49f933-364c-4636-b1f8-822e6805ce45",
+      "graph_hash": "dc3c2ef9a877a5f9",
+      "response_hash": "045e674616ba"
+    },
+    "environment": {
+      "build_sha": "7704517",
+      "environment": "staging"
+    },
+    "exit_path": "turn_executor",
+    "trace_version": 1
+  }
+}

@@ -2,17 +2,21 @@ import { randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { DraftGraphInput } from "../schemas/assist.js";
 import { sanitizeDraftGraphInput } from "./assist.draft-graph.js";
-import { finaliseCeeDraftResponse, buildCeeErrorResponse } from "../cee/validation/pipeline.js";
-import { resolveCeeRateLimit } from "../cee/config/limits.js";
+import { buildCeeErrorResponse } from "../cee/validation/pipeline.js";
+import { runUnifiedPipeline } from "../cee/unified-pipeline/index.js";
+import { enforceRateBuckets } from "../cee/config/limits.js";
 import { getRequestId } from "../utils/request-id.js";
 import { getRequestKeyId, getRequestCallerContext } from "../plugins/auth.js";
 import { contextToTelemetry } from "../context/index.js";
 import { emit, log, TelemetryEvents } from "../utils/telemetry.js";
+import { SSE_HEARTBEAT_INTERVAL_MS, SSE_WRITE_TIMEOUT_MS } from "../config/timeouts.js";
 import { logCeeCall } from "../cee/logging.js";
 import { config } from "../config/index.js";
-import { assessBriefReadiness } from "../cee/validation/readiness.js";
+import { evaluatePreflightDecision } from "../cee/validation/preflight-decision.js";
+import type { PreflightRejectPayload, NeedsClarificationPayload, PreflightDecision } from "../cee/validation/preflight-decision.js";
+import { formatBriefHeader } from "../cee/signals/brief-header.js";
+import { detectCurrency, buildCurrencyInstruction } from "../cee/signals/currency-signal.js";
 import { parseSchemaVersion, transformResponseToV2 } from "../cee/transforms/index.js";
-import { createResumeToken } from "../utils/sse-resume-token.js";
 import {
   initStreamState,
   bufferEvent,
@@ -33,75 +37,9 @@ const SSE_HEADERS = {
   "cache-control": "no-cache",
 } as const;
 
-// Simple in-memory rate limiter for CEE SSE streaming
-const WINDOW_MS = 60_000;
-const MAX_BUCKETS = 10_000;
-const MAX_BUCKET_AGE_MS = WINDOW_MS * 10;
-const PRUNE_INTERVAL = 100;
-
-type BucketState = {
-  count: number;
-  windowStart: number;
-};
-
-const ceeStreamBuckets = new Map<string, BucketState>();
-let pruneCounter = 0;
-let oldestKnownTimestamp = Date.now();
-
-function pruneBuckets(map: Map<string, BucketState>, now: number): void {
-  if (map.size <= MAX_BUCKETS && now - oldestKnownTimestamp <= MAX_BUCKET_AGE_MS) {
-    return;
-  }
-
-  pruneCounter++;
-  if (pruneCounter < PRUNE_INTERVAL && map.size <= MAX_BUCKETS) {
-    return;
-  }
-  pruneCounter = 0;
-
-  let newOldest = now;
-  for (const [key, state] of map) {
-    if (now - state.windowStart > MAX_BUCKET_AGE_MS) {
-      map.delete(key);
-    } else if (state.windowStart < newOldest) {
-      newOldest = state.windowStart;
-    }
-  }
-  oldestKnownTimestamp = newOldest;
-
-  if (map.size <= MAX_BUCKETS) return;
-
-  let toRemove = map.size - MAX_BUCKETS;
-  for (const key of map.keys()) {
-    if (toRemove <= 0) break;
-    map.delete(key);
-    toRemove -= 1;
-  }
-}
-
-function checkCeeStreamLimit(key: string, limit: number): { allowed: boolean; retryAfterSeconds: number } {
-  const now = Date.now();
-  pruneBuckets(ceeStreamBuckets, now);
-  let state = ceeStreamBuckets.get(key);
-
-  if (!state) {
-    state = { count: 0, windowStart: now };
-    ceeStreamBuckets.set(key, state);
-  }
-
-  if (now - state.windowStart > WINDOW_MS) {
-    state.count = 0;
-    state.windowStart = now;
-  }
-
-  if (state.count >= limit) {
-    const retryAfter = Math.ceil((state.windowStart + WINDOW_MS - now) / 1000);
-    return { allowed: false, retryAfterSeconds: Math.max(1, retryAfter) };
-  }
-
-  state.count++;
-  return { allowed: true, retryAfterSeconds: 0 };
-}
+// Rate limiting for CEE SSE streaming uses the shared tiered bucket
+// (enforceRateBuckets, draft tier). The former inline bucket twin was removed
+// in favour of the single derived limiter in src/cee/config/limits.ts.
 
 interface StageEvent {
   stage: string;
@@ -117,7 +55,7 @@ async function writeStage(reply: FastifyReply, event: StageEvent): Promise<void>
     } else {
       const timeout = setTimeout(() => {
         reject(new Error("SSE write timeout"));
-      }, 5000);
+      }, SSE_WRITE_TIMEOUT_MS);
 
       reply.raw.once("drain", () => {
         clearTimeout(timeout);
@@ -128,7 +66,6 @@ async function writeStage(reply: FastifyReply, event: StageEvent): Promise<void>
 }
 
 export default async function route(app: FastifyInstance) {
-  const RATE_LIMIT_RPM = resolveCeeRateLimit("CEE_STREAM_RATE_LIMIT_RPM") ?? 20;
   const FEATURE_VERSION = "stream-1.0.0";
 
   app.post("/assist/v1/draft-graph/stream", async (req, reply) => {
@@ -141,9 +78,13 @@ export default async function route(app: FastifyInstance) {
     // Check for v2 schema request via query parameter
     const schemaVersion = parseSchemaVersion((req.query as Record<string, unknown>)?.schema);
 
-    // Rate limiting (per API key or per IP)
-    const rateLimitKey = keyId ?? req.ip ?? "anonymous";
-    const { allowed, retryAfterSeconds } = checkCeeStreamLimit(rateLimitKey, RATE_LIMIT_RPM);
+    // Rate limiting: shared draft-tier bucket (fail-closed, sanctioned-key aware).
+    const { allowed, retryAfterSeconds } = enforceRateBuckets({
+      feature: "draft_graph_stream",
+      envVarName: "CEE_STREAM_RATE_LIMIT_RPM",
+      keyId: keyId ?? undefined,
+      ip: req.ip,
+    });
 
     if (!allowed) {
       const errorBody = buildCeeErrorResponse(
@@ -214,7 +155,7 @@ export default async function route(app: FastifyInstance) {
         ...telemetryCtx,
         latency_ms: Date.now() - start,
         error_code: "CEE_VALIDATION_FAILED",
-        http_status: 400,
+        http_status: 200, // SSE always opens with 200
       });
 
       logCeeCall({
@@ -223,21 +164,33 @@ export default async function route(app: FastifyInstance) {
         latencyMs: Date.now() - start,
         status: "error",
         errorCode: "CEE_VALIDATION_FAILED",
-        httpStatus: 400,
+        httpStatus: 200, // SSE always opens with 200
       });
 
+      // SSE protocol: always 200 — errors communicated via typed events.
       reply.raw.setHeader("X-CEE-Request-ID", requestId);
-      reply.raw.writeHead(400, SSE_HEADERS);
-      await writeStage(reply, { stage: "COMPLETE", payload: errorBody });
+      reply.raw.writeHead(200, SSE_HEADERS);
+      reply.raw.write(
+        `event: error\ndata: ${JSON.stringify({ code: "CEE_VALIDATION_FAILED", reason: "SCHEMA_VALIDATION_FAILED", message: "Invalid input", details: errorBody.details })}\n\n`
+      );
       reply.raw.end();
       return reply;
     }
 
     const input = sanitizeDraftGraphInput(parsed.data, req.body);
 
-    // Preflight validation (if enabled)
+    // Preflight validation — delegates all policy ladder decisions to the
+    // shared evaluatePreflightDecision() function (identical logic as sync route).
+    //
+    // SSE protocol: the HTTP status is always 200 (stream opened) even for
+    // reject/clarify outcomes — errors and guidance are communicated via events.
+    let preflightDecision: PreflightDecision | undefined;
     if (config.cee.preflightEnabled) {
-      const readiness = assessBriefReadiness(input.brief);
+      const decision = preflightDecision = evaluatePreflightDecision(input.brief, {
+        preflightStrict: config.cee.preflightStrict,
+        preflightReadinessThreshold: config.cee.preflightReadinessThreshold,
+      });
+      const { readiness } = decision;
 
       log.info({
         request_id: requestId,
@@ -247,7 +200,92 @@ export default async function route(app: FastifyInstance) {
         event: "cee.preflight.assessed",
       }, `Brief readiness: ${readiness.level} (score: ${readiness.score})`);
 
-      // Clarification enforcement
+      // Emit telemetry (identical fields to sync route — comes from shared decision object).
+      emit(TelemetryEvents.PreflightCompleted, {
+        ...telemetryCtx,
+        ...decision.telemetry,
+      });
+
+      // Emit BriefSignals telemetry (only when signals were computed — skipped on reject)
+      if (decision.briefSignals) {
+        emit(TelemetryEvents.CeeBriefSignals, {
+          ...telemetryCtx,
+          signals_version: "v1",
+          brief_strength: decision.briefSignals.brief_strength,
+          option_count_estimate: decision.briefSignals.option_count_estimate,
+          has_explicit_goal: decision.briefSignals.has_explicit_goal,
+          has_measurable_target: decision.briefSignals.has_measurable_target,
+          baseline_state: decision.briefSignals.baseline_state,
+          has_constraints: decision.briefSignals.has_constraints,
+          has_risks: decision.briefSignals.has_risks,
+          bias_signals: decision.briefSignals.bias_signals.map((b) => b.type),
+          word_count: decision.briefSignals.word_count,
+          numeric_anchor_count: decision.briefSignals.numeric_anchor_count,
+          questions_shown_count: (decision.payload as any)?.clarification_questions?.length ?? 0,
+          readiness_score: decision.telemetry.readiness_score,
+          action: decision.action,
+        });
+      }
+
+      if (decision.action === "reject") {
+        const p = decision.payload as PreflightRejectPayload;
+
+        emit(TelemetryEvents.PreflightRejected, {
+          ...telemetryCtx,
+          latency_ms: Date.now() - start,
+          readiness_score: readiness.score,
+          readiness_level: readiness.level,
+          rejection_reason: p.rejection_reason,
+        });
+
+        logCeeCall({
+          requestId,
+          capability: "cee_draft_graph_stream",
+          latencyMs: Date.now() - start,
+          status: "error",
+          errorCode: "CEE_PREFLIGHT_REJECTED",
+          httpStatus: 200, // SSE always opens with 200
+        });
+
+        reply.raw.setHeader("X-CEE-Request-ID", requestId);
+        reply.raw.writeHead(200, SSE_HEADERS);
+        reply.raw.write(
+          `event: error\ndata: ${JSON.stringify({ code: "CEE_VALIDATION_FAILED", reason: p.rejection_reason, message: p.message })}\n\n`
+        );
+        reply.raw.end();
+        return reply;
+      }
+
+      if (decision.action === "clarify") {
+        const p = decision.payload as NeedsClarificationPayload;
+
+        emit(TelemetryEvents.PreflightRejected, {
+          ...telemetryCtx,
+          latency_ms: Date.now() - start,
+          readiness_score: readiness.score,
+          readiness_level: readiness.level,
+          rejection_reason: "underspecified",
+        });
+
+        logCeeCall({
+          requestId,
+          capability: "cee_draft_graph_stream",
+          latencyMs: Date.now() - start,
+          status: "ok",
+          httpStatus: 200,
+        });
+
+        reply.raw.setHeader("X-CEE-Request-ID", requestId);
+        reply.raw.setHeader("X-CEE-Readiness-Score", readiness.score.toString());
+        reply.raw.writeHead(200, SSE_HEADERS);
+        reply.raw.write(
+          `event: needs_clarification\ndata: ${JSON.stringify(p)}\n\n`
+        );
+        reply.raw.end();
+        return reply;
+      }
+
+      // action === "proceed": apply clarification enforcement (Phase 5) if enabled.
       if (config.cee.clarificationEnforced) {
         const allowDirectThreshold = config.cee.clarificationThresholdAllowDirect;
         const oneRoundThreshold = config.cee.clarificationThresholdOneRound;
@@ -296,18 +334,35 @@ export default async function route(app: FastifyInstance) {
             latencyMs: Date.now() - start,
             status: "error",
             errorCode: "CEE_CLARIFICATION_REQUIRED",
-            httpStatus: 400,
+            httpStatus: 200, // SSE always opens with 200
           });
 
+          // SSE protocol: always 200 — errors communicated via typed events.
           reply.raw.setHeader("X-CEE-Request-ID", requestId);
           reply.raw.setHeader("X-CEE-Readiness-Score", readiness.score.toString());
-          reply.raw.writeHead(400, SSE_HEADERS);
-          await writeStage(reply, { stage: "COMPLETE", payload: errorBody });
+          reply.raw.writeHead(200, SSE_HEADERS);
+          reply.raw.write(
+            `event: error\ndata: ${JSON.stringify({ code: "CEE_CLARIFICATION_REQUIRED", reason: "CLARIFICATION_REQUIRED", message: "Brief requires clarification before drafting", details: errorBody.details })}\n\n`
+          );
           reply.raw.end();
           return reply;
         }
       }
     }
+
+    // ── Thread BriefSignals into pipeline input ────────────────────────
+    if (preflightDecision?.briefSignals) {
+      if (config.cee.briefSignalsHeaderEnabled) {
+        (input as any).briefSignalsHeader = formatBriefHeader(preflightDecision.briefSignals);
+      }
+      if (preflightDecision.briefSignals.bias_signals.length > 0) {
+        (input as any).bias_signals = preflightDecision.briefSignals.bias_signals;
+      }
+    }
+
+    // ── Currency context signal ──────────────────────────────────────
+    const currencySignal = detectCurrency(input.brief);
+    (input as any).currencyInstruction = buildCurrencyInstruction(currencySignal);
 
     // Initialize SSE response
     reply.raw.setHeader("X-CEE-API-Version", schemaVersion === "v2" ? "v2" : "v1");
@@ -321,7 +376,8 @@ export default async function route(app: FastifyInstance) {
 
     let eventSeq = 0;
 
-    // Initialize SSE state for resume (if Redis available)
+    // Initialize SSE state for event buffering (if Redis available)
+    // Note: v1 has no resume endpoint — resume token emission removed.
     if (!degradedMode) {
       try {
         await initStreamState(requestId);
@@ -331,25 +387,6 @@ export default async function route(app: FastifyInstance) {
           data: JSON.stringify({ stage: "DRAFTING" }),
           timestamp: Date.now(),
         });
-
-        // Send resume token
-        try {
-          const resumeToken = createResumeToken(requestId, "DRAFTING", eventSeq);
-          reply.raw.write(`event: resume\ndata: ${JSON.stringify({ token: resumeToken })}\n\n`);
-          emit(TelemetryEvents.SseResumeIssued, {
-            request_id: requestId,
-            seq: eventSeq,
-            step: "DRAFTING",
-          });
-          await bufferEvent(requestId, {
-            seq: eventSeq++,
-            type: "resume",
-            data: JSON.stringify({ token: resumeToken }),
-            timestamp: Date.now(),
-          });
-        } catch (tokenError) {
-          log.debug({ error: tokenError, request_id: requestId }, "Resume token generation skipped");
-        }
       } catch (stateError) {
         log.debug({ error: stateError, request_id: requestId }, "SSE state initialization skipped");
         degradedMode = true;
@@ -364,21 +401,19 @@ export default async function route(app: FastifyInstance) {
         clearInterval(heartbeatInterval);
         log.debug({ error, correlation_id: requestId }, "Heartbeat failed - stopping");
       }
-    }, 10000);
+    }, SSE_HEARTBEAT_INTERVAL_MS);
 
     let sseEndState: "complete" | "timeout" | "aborted" | "error";
 
     try {
-      // Run the CEE draft pipeline (includes all validations: single goal, outcome beliefs, etc.)
-      const { statusCode, body, headers } = await finaliseCeeDraftResponse(input, req.body, req);
-
-      // Add CEE headers to SSE if provided
-      if (headers) {
-        for (const [key, value] of Object.entries(headers)) {
-          // Can't set headers after writeHead, but we can include in payload
-          log.debug({ key, value }, "CEE response header (included in payload)");
-        }
-      }
+      // Run the unified CEE draft pipeline (same as non-streaming route)
+      const { statusCode, body } = await runUnifiedPipeline(input, req.body, req, {
+        schemaVersion,
+        strictMode: false,
+        includeDebug: false,
+        rawOutput: false,
+        requestStartMs: start,
+      });
 
       // Determine if this is an error response
       if (statusCode >= 400) {

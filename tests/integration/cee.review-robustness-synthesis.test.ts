@@ -30,6 +30,45 @@ vi.mock("../../src/cee/structure/index.js", () => ({
     defaultStrengthCount: 0,
     defaultStrengthPercentage: 0,
   }),
+  detectStrengthClustering: () => ({
+    detected: false,
+    coefficientOfVariation: 0,
+    edgeCount: 0,
+  }),
+  detectGoalLayerStrengthClustering: () => ({
+    detected: false,
+    coefficientOfVariation: 0,
+    edgeCount: 0,
+  }),
+  detectSameLeverOptions: () => ({
+    detected: false,
+    maxOverlapPercentage: 0,
+    overlappingOptionPairs: [],
+  }),
+  detectMissingBaseline: () => ({
+    detected: false,
+    hasBaseline: false,
+  }),
+  detectGoalNoBaselineValue: () => ({
+    detected: false,
+    goalHasValue: false,
+  }),
+  detectZeroExternalFactors: () => ({
+    detected: false,
+    factorCount: 0,
+    externalCount: 0,
+  }),
+  checkGoalConnectivity: () => ({
+    status: "full",
+    disconnectedOptions: [],
+    weakPaths: [],
+  }),
+  computeModelQualityFactors: () => ({
+    estimate_confidence: 0.5,
+    strength_variation: 0,
+    range_confidence_coverage: 0,
+    has_baseline_option: false,
+  }),
   normaliseDecisionBranchBeliefs: (graph: unknown) => graph,
   validateAndFixGraph: (graph: unknown) => ({
     graph,
@@ -40,6 +79,12 @@ vi.mock("../../src/cee/structure/index.js", () => ({
       decisionBranchesNormalized: false,
     },
     warnings: [],
+  }),
+  fixNonCanonicalStructuralEdges: (graph: unknown) => ({
+    graph,
+    fixedEdgeCount: 0,
+    fixedEdgeIds: [],
+    repairs: [],
   }),
   // Goal inference utilities
   hasGoalNode: (graph: any) => {
@@ -143,7 +188,7 @@ describe("POST /assist/v1/review robustness synthesis", () => {
 
       expect(body.robustness_synthesis).toBeDefined();
       expect(body.robustness_synthesis.headline).toBe(
-        "87% confident that Premium Pricing remains your best option"
+        "Premium Pricing stays in front in 87% of tested scenarios"
       );
       // With contextualised templates, check for key elements
       expect(body.robustness_synthesis.assumption_explanations).toHaveLength(1);
@@ -185,7 +230,7 @@ describe("POST /assist/v1/review robustness synthesis", () => {
 
       expect(body.robustness_synthesis).toBeDefined();
       expect(body.robustness_synthesis.headline).toBe(
-        "75% confident that Hire Engineers remains your best option"
+        "Hire Engineers stays in front in 75% of tested scenarios"
       );
       // With fallback behavior, these have fallback messages
       expect(body.robustness_synthesis.assumption_explanations[0].explanation).toContain("No critical assumptions");

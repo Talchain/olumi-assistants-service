@@ -11,6 +11,9 @@
  * - Response: Add schema_version: "2.2"
  */
 
+import type { z } from "zod";
+import { GoalThresholdFrame } from "@talchain/schemas";
+import type { GoalThresholdCapProvenance } from "../../utils/goal-threshold-cap.js";
 import { deriveStrengthStd, type ProvenanceObject } from "./strength-derivation.js";
 import {
   ensureEffectDirection,
@@ -34,12 +37,23 @@ export interface V1FactorData {
   value?: number;
   baseline?: number;
   unit?: string;
+  /** Raw value before normalization (preserves original extraction) */
+  raw_value?: number;
+  /** Upper bound/cap for the value (e.g., "up to £500k" → cap is 500000) */
+  cap?: number;
   range?: { min: number; max: number };
   /** Extraction metadata for uncertainty derivation */
   extractionType?: ExtractionType;
   confidence?: number;
   rangeMin?: number;
   rangeMax?: number;
+  /** Factor type classification for downstream enrichment */
+  factor_type?: "cost" | "price" | "time" | "probability" | "revenue" | "demand" | "quality" | "other";
+  /** 1-2 short phrases explaining sources of epistemic uncertainty */
+  uncertainty_drivers?: string[];
+  /** Encoding map for categorical factor labels (v191+). Maps encoded integers to display strings.
+   * e.g. { "0": "Developers", "1": "Tech Lead" } for "Team Structure (0=Developers, 1=Tech Lead)" */
+  encoding_map?: Record<string, string>;
 }
 
 /**
@@ -48,6 +62,17 @@ export interface V1FactorData {
  */
 export interface V1OptionData {
   interventions: Record<string, number>;
+  /** Selected raw record magnitudes, using the existing V3 carrier. */
+  raw_interventions?: Record<string, number>;
+  /** Existing intervention detail fields carried through the V1 passthrough seam. */
+  intervention_details?: Record<string, {
+    raw_value: number;
+    unit?: string;
+    source: "brief_extraction" | "cee_hypothesis";
+    reasoning: string;
+  }>;
+  /** Marks the status-quo / baseline option (v191+). Exactly one option should have true. */
+  is_baseline?: boolean;
 }
 
 /**
@@ -78,6 +103,65 @@ export interface V1Node {
   label?: string;
   body?: string;
   data?: V1NodeData;
+  /** Factor category (V12.4+): controllable, observable, external */
+  category?: "controllable" | "observable" | "external";
+  /**
+   * Goal threshold fields (V14+).
+   * Only applies to goal nodes. Extracted from explicit numeric targets in brief.
+   */
+  /** Normalised threshold in model units (0-1) */
+  goal_threshold?: number;
+  /** Raw threshold value from brief for UI display */
+  goal_threshold_raw?: number;
+  /** Unit of measurement for display */
+  goal_threshold_unit?: string;
+  /** Normalisation denominator */
+  goal_threshold_cap?: number;
+  /**
+   * Which rule produced `goal_threshold_cap` (see
+   * `GOAL_THRESHOLD_CAP_PROVENANCE`, utils/goal-threshold-cap.ts). Declared
+   * here for the same reason the frame below is: `transformNodeToV3` has to
+   * NAME a field to carry it across, because the transform rebuilds the node
+   * field-by-field and drops anything it does not name.
+   *
+   * DERIVED from the resolver's own constant, never restated as a local union.
+   */
+  goal_threshold_cap_provenance?: GoalThresholdCapProvenance;
+  /**
+   * The FRAME `goal_threshold` is stated in (ROADMAP 2.258, schemas 0.31.0).
+   * Always `'level'` from CEE — see `CEE_GOAL_THRESHOLD_FRAME`. Declared here
+   * so `transformNodeToV3` can carry it across; without it the V1→V3 copy does
+   * not typecheck and the frame would have to travel as an untyped rider.
+   *
+   * DERIVED from the contract enum, never restated. A hand-written
+   * `'level' | 'delta'` here would be a second copy of a vocabulary this repo
+   * does not own — it would keep compiling after the package renamed or
+   * extended a member, which is the drift trap 12 exists to forbid.
+   */
+  goal_threshold_frame?: z.infer<typeof GoalThresholdFrame>;
+  /**
+   * The goal metric's user-stated CURRENT LEVEL (ROADMAP 2.273), normalised
+   * against `goal_threshold_cap` — the same denominator as `goal_threshold`.
+   * Declared here for the same reason as the frame above: `transformNodeToV3`
+   * has to name the field to carry it across, because the transform rebuilds
+   * each node field-by-field and drops anything it does not name.
+   */
+  goal_baseline?: number;
+  /** The stated current level in raw user units. */
+  goal_baseline_raw?: number;
+  /**
+   * The per-factor scale frame pass 3d divided this factor's magnitudes by
+   * (`schemas/graph.ts:scale_frame`). Declared here for exactly the reason the
+   * two fields above give: `transformNodeToV3` rebuilds each node
+   * field-by-field and drops anything it does not name, and it cannot name a
+   * field this type does not declare without casting round the type system.
+   *
+   * ⭐ The typecheck is the mechanism here, not the documentation. Adding the
+   * carry in `schema-v3.ts` without this line fails to compile — which is how
+   * this hop was found at all. A field that travelled as an untyped rider would
+   * have compiled green and shipped dark, the way its sibling nearly did.
+   */
+  scale_frame?: number;
 }
 
 export interface V1Edge {
@@ -95,6 +179,10 @@ export interface V1Edge {
   strength_mean?: number;
   strength_std?: number;
   belief_exists?: number;
+  // Edge origin: set by graph-orchestrator (default 'ai'), survives to V3 response
+  origin?: string;
+  // Edge type: directed (default) or bidirected (unmeasured confounder). Phase 3A-trust.
+  edge_type?: "directed" | "bidirected";
 }
 
 export interface V1Graph {
@@ -116,7 +204,7 @@ export interface V1DraftGraphResponse {
     overall: number;
     structure?: number;
     coverage?: number;
-    causality?: number;
+    structural_proxy?: number;
     safety?: number;
   };
   trace?: {
@@ -132,12 +220,18 @@ export interface V1DraftGraphResponse {
     };
     /** Pipeline diagnostics (P0) */
     pipeline?: Record<string, unknown>;
+    [key: string]: unknown;
   };
   validation_issues?: Array<Record<string, unknown>>;
   draft_warnings?: Array<{
-    type: string;
-    message: string;
-    severity?: string;
+    id: string;
+    severity: string;
+    node_ids?: string[];
+    edge_ids?: string[];
+    affected_node_ids: string[];
+    affected_edge_ids: string[];
+    explanation?: string;
+    fix_hint?: string;
   }>;
   [key: string]: unknown;
 }
@@ -224,7 +318,7 @@ export interface V2DraftGraphResponse {
     overall: number;
     structure?: number;
     coverage?: number;
-    causality?: number;
+    structural_proxy?: number;
     safety?: number;
   };
   trace?: {
@@ -234,9 +328,14 @@ export interface V2DraftGraphResponse {
   };
   validation_issues?: Array<Record<string, unknown>>;
   draft_warnings?: Array<{
-    type: string;
-    message: string;
-    severity?: string;
+    id: string;
+    severity: string;
+    node_ids?: string[];
+    edge_ids?: string[];
+    affected_node_ids: string[];
+    affected_edge_ids: string[];
+    explanation?: string;
+    fix_hint?: string;
   }>;
   [key: string]: unknown;
 }
@@ -378,6 +477,9 @@ export function transformEdgeToV2(
     strength_std: strengthStd,
     provenance: extractProvenanceString(edge.provenance),
     // Note: provenance_source intentionally omitted from v2
+    // Preserve validation metadata if present — it does not passthrough
+    // automatically because this function constructs a new object.
+    ...('validation' in edge && edge.validation !== undefined && { validation: edge.validation }),
   };
 }
 

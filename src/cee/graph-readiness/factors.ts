@@ -408,7 +408,7 @@ export function scoreGoalOutcomeLinkage(graph: GraphV1 | undefined): FactorResul
 
   let score = C.baseScore;
   const goalIds = new Set(toIds(goals));
-  const outcomeIds = new Set(toIds(outcomes));
+  const _outcomeIds = new Set(toIds(outcomes));
 
   // Build adjacency list for bidirectional BFS
   const adjacencyList = buildAdjacencyList(edges);

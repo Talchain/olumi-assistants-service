@@ -1,0 +1,1553 @@
+/**
+ * edit_graph v2 prompt integration tests.
+ *
+ * Tests the v2 response parser, operation mapping, path normalisation,
+ * coaching/warnings wiring, empty operations handling, and legacy compat.
+ */
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+// ============================================================================
+// Mocks — must be declared before imports
+// ============================================================================
+
+let patchPreValidationEnabledForTest = false;
+let patchBudgetEnabledForTest = false;
+
+vi.mock("../../../../src/adapters/llm/prompt-loader.js", () => ({
+  getSystemPrompt: vi.fn().mockResolvedValue("You edit causal decision graphs"),
+  getSystemPromptMeta: vi.fn().mockReturnValue({ source: 'default', prompt_version: 'v2' }),
+  // The edit/review lanes resolve prompt bytes AND identity in ONE bound
+  // `getSystemPromptSnapshot` call. A mock factory REPLACES the module, so
+  // omitting this export hands the code under test `undefined` (trap 12).
+  // Content and meta mirror the two mocks above deliberately: production
+  // binds them to one resolution, and the mock must not model them as
+  // independently divergent.
+  getSystemPromptSnapshot: vi.fn().mockResolvedValue({
+    content: "You edit causal decision graphs",
+    meta: { source: 'default', prompt_version: 'v2' },
+  }),
+}));
+
+vi.mock("../../../../src/config/index.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../../../../src/config/index.js")>();
+  return {
+    ...original,
+    config: new Proxy(original.config, {
+      get(target, prop) {
+        if (prop === "cee") {
+          return new Proxy(Reflect.get(target, prop) as object, {
+            get(ceeTarget, ceeProp) {
+              if (ceeProp === "maxRepairRetries") return 1;
+              if (ceeProp === "patchPreValidationEnabled") return patchPreValidationEnabledForTest;
+              if (ceeProp === "patchBudgetEnabled") return patchBudgetEnabledForTest;
+              return Reflect.get(ceeTarget, ceeProp);
+            },
+          });
+        }
+        return Reflect.get(target, prop);
+      },
+    }),
+  };
+});
+
+import {
+  classifyEditIntent,
+  determineEditResolutionMode,
+  parseEditGraphResponse,
+  handleEditGraph,
+  resolveEditTarget,
+} from "../../../../src/orchestrator/tools/edit-graph.js";
+import type { ConversationContext, GraphPatchBlockData } from "../../../../src/orchestrator/types.js";
+import type { LLMAdapter } from "../../../../src/adapters/llm/types.js";
+import type { PLoTClient, ValidatePatchResult } from "../../../../src/orchestrator/plot-client.js";
+
+beforeEach(() => {
+  patchPreValidationEnabledForTest = false;
+  patchBudgetEnabledForTest = false;
+});
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+function makeContext(overrides?: Partial<ConversationContext>): ConversationContext {
+  return {
+    graph: {
+      nodes: [
+        { id: "goal_1", kind: "goal", label: "Revenue" },
+        { id: "factor_1", kind: "factor", label: "Price" },
+        { id: "out_1", kind: "outcome", label: "Sales" },
+      ],
+      edges: [
+        {
+          from: "factor_1",
+          to: "out_1",
+          strength_mean: 0.5,
+          strength_std: 0.1,
+          exists_probability: 0.9,
+          effect_direction: "positive",
+        },
+        {
+          from: "out_1",
+          to: "goal_1",
+          strength_mean: 0.8,
+          strength_std: 0.05,
+          exists_probability: 1.0,
+          effect_direction: "positive",
+        },
+      ],
+    } as unknown as ConversationContext["graph"],
+    analysis_response: null,
+    framing: null,
+    messages: [],
+    conversational_state: { active_entities: [], stated_constraints: [], current_topic: "framing", last_failed_action: null },
+    scenario_id: "test-scenario",
+    ...overrides,
+  };
+}
+
+function makeAdapter(responseContent: string | object): LLMAdapter {
+  const content = typeof responseContent === 'string'
+    ? responseContent
+    : JSON.stringify(responseContent);
+  return {
+    name: "test",
+    model: "test-model",
+    chat: vi.fn().mockResolvedValue({ content }),
+    draftGraph: vi.fn(),
+    repairGraph: vi.fn(),
+    suggestOptions: vi.fn(),
+    clarifyBrief: vi.fn(),
+    critiqueGraph: vi.fn(),
+    explainDiff: vi.fn(),
+  } as unknown as LLMAdapter;
+}
+
+function makePlotClientSuccess(data?: Record<string, unknown>): PLoTClient {
+  const result: ValidatePatchResult = {
+    kind: 'success',
+    data: { verdict: 'accepted', ...data },
+  };
+  return {
+    run: vi.fn().mockResolvedValue({}),
+    validatePatch: vi.fn().mockResolvedValue(result),
+  };
+}
+
+// ============================================================================
+// Golden Fixtures
+// ============================================================================
+
+const V2_GOOD_RESPONSE = {
+  operations: [
+    {
+      op: "add_node",
+      path: "/nodes/fac_competitor",
+      value: {
+        id: "fac_competitor",
+        kind: "factor",
+        label: "Competitor Response",
+        category: "external",
+        prior: { distribution: "uniform", range_min: 0.0, range_max: 1.0 },
+      },
+      impact: "moderate",
+      rationale: "Adds competitive risk path",
+    },
+    {
+      op: "add_edge",
+      path: "/edges/fac_competitor->out_1",
+      value: {
+        from: "fac_competitor",
+        to: "out_1",
+        strength: { mean: -0.3, std: 0.15 },
+        exists_probability: 0.70,
+        effect_direction: "negative",
+      },
+      impact: "moderate",
+      rationale: "Competitor pressure reduces sales",
+    },
+  ],
+  removed_edges: [],
+  warnings: ["fac_competitor added as external — if any option affects it, change to controllable"],
+  coaching: {
+    summary: "Added a competitor response factor connected to sales outcome.",
+    rerun_recommended: true,
+  },
+};
+
+const V2_EMPTY_OPS_RESPONSE = {
+  operations: [],
+  removed_edges: [],
+  warnings: ["The relationship factor_1→out_1 already exists (mean=0.5, exists_probability=0.9)."],
+  coaching: {
+    summary: "This link is already in your model. Want me to adjust its strength?",
+    rerun_recommended: false,
+  },
+};
+
+// ============================================================================
+// Parser Tests
+// ============================================================================
+
+describe("parseEditGraphResponse", () => {
+  // Test 1: Valid JSON object response
+  it("parses a valid v2 JSON object response", () => {
+    const result = parseEditGraphResponse(JSON.stringify(V2_GOOD_RESPONSE));
+
+    expect(result.operations).toHaveLength(2);
+    expect(result.warnings).toHaveLength(1);
+    expect(result.coaching).not.toBeNull();
+    expect(result.coaching!.summary).toContain("competitor response");
+    expect(result.coaching!.rerun_recommended).toBe(true);
+  });
+
+  // Test 2: Legacy array response — detected and logged
+  //
+  // Phase 2A contract change (deliberate, called out in Phase 2A report):
+  // the bare-array branch of parseEditGraphResponse previously set
+  // coaching=null. As of Phase 2A it populates safe defaults
+  // ({ summary: "Proposed graph edit.", rerun_recommended: false }) so
+  // that the success-path text builder produces a non-null assistantText.
+  // The previous `expect(result.coaching).toBeNull()` assertion was
+  // updated to assert the safe-default shape. See
+  // Docs/edit_graph_v9_deferred_items.md (DL-5, DL-5b) for the wider
+  // workstream context and
+  // tests/unit/orchestrator/tools/edit-graph-bare-array-safe-envelope.test.ts
+  // (A5) for the canonical Phase 2A contract.
+  it("detects and parses legacy array response", () => {
+    const legacyOps = [
+      { op: "add_node", path: "nodes/new", value: { id: "new", kind: "factor", label: "X" } },
+    ];
+    const result = parseEditGraphResponse(JSON.stringify(legacyOps));
+
+    expect(result.operations).toHaveLength(1);
+    expect(result.removed_edges).toHaveLength(0);
+    expect(result.warnings).toHaveLength(0);
+    // Phase 2A: safe defaults instead of null.
+    expect(result.coaching).not.toBeNull();
+    expect(result.coaching!.summary).toBe("Proposed graph edit.");
+    expect(result.coaching!.rerun_recommended).toBe(false);
+  });
+
+  // Test 3: Malformed JSON — graceful error
+  it("throws on malformed JSON", () => {
+    expect(() => parseEditGraphResponse("not json at all")).toThrow("No valid JSON found");
+  });
+
+  it("throws on response with no operations field", () => {
+    expect(() => parseEditGraphResponse('{ "warnings": ["bad"] }')).toThrow("missing required");
+  });
+
+  // Test 4: Path syntax normalisation — /nodes/fac_x/label
+  it("normalises /nodes/<id>/<field> path syntax", () => {
+    const response = {
+      operations: [
+        {
+          op: "update_node",
+          path: "/nodes/factor_1/label",
+          value: "New Label",
+          old_value: "Old Label",
+          impact: "low",
+          rationale: "Rename",
+        },
+      ],
+      warnings: [],
+      coaching: null,
+    };
+    const result = parseEditGraphResponse(JSON.stringify(response));
+
+    // Path should be normalised to bare ID
+    expect(result.operations[0].path).toBe("factor_1");
+    // Scalar value should be wrapped into { field: value } for update ops
+    expect(result.operations[0].value).toEqual({ label: "New Label" });
+    expect(result.operations[0].old_value).toEqual({ label: "Old Label" });
+  });
+
+  // Test 5: Path syntax — /edges/fac_a->out_b/strength.mean
+  it("normalises /edges/<from>-><to>/<field> path syntax and nests dotted keys", () => {
+    const response = {
+      operations: [
+        {
+          op: "update_edge",
+          path: "/edges/factor_1->out_1/strength.mean",
+          value: 0.7,
+          old_value: 0.4,
+          impact: "high",
+          rationale: "Strengthen edge",
+        },
+      ],
+      warnings: [],
+      coaching: null,
+    };
+    const result = parseEditGraphResponse(JSON.stringify(response));
+
+    expect(result.operations[0].path).toBe("factor_1::out_1");
+    expect(result.operations[0].value).toEqual({ strength: { mean: 0.7 } });
+    expect(result.operations[0].old_value).toEqual({ strength: { mean: 0.4 } });
+  });
+
+  // Markdown fence handling
+  it("extracts JSON from markdown fenced code block", () => {
+    const wrapped = '```json\n' + JSON.stringify(V2_GOOD_RESPONSE) + '\n```';
+    const result = parseEditGraphResponse(wrapped);
+
+    expect(result.operations).toHaveLength(2);
+    expect(result.coaching).not.toBeNull();
+  });
+
+  // Nested strength passes through unchanged (no longer flattened)
+  it("preserves nested strength: { mean, std } without flattening", () => {
+    const response = {
+      operations: [
+        {
+          op: "add_edge",
+          path: "/edges/factor_1->goal_1",
+          value: {
+            from: "factor_1",
+            to: "goal_1",
+            strength: { mean: 0.6, std: 0.15 },
+            exists_probability: 0.8,
+            effect_direction: "positive",
+          },
+          impact: "moderate",
+          rationale: "Test",
+        },
+      ],
+      warnings: [],
+      coaching: null,
+    };
+    const result = parseEditGraphResponse(JSON.stringify(response));
+
+    const value = result.operations[0].value as Record<string, unknown>;
+    expect(value.strength).toEqual({ mean: 0.6, std: 0.15 });
+    expect(value.strength_mean).toBeUndefined();
+    expect(value.strength_std).toBeUndefined();
+  });
+});
+
+// ============================================================================
+// classifyEditIntent Tests
+// ============================================================================
+
+describe("classifyEditIntent", () => {
+  it("classifies value updates as parameter_update", () => {
+    expect(classifyEditIntent("Set customer willingness to pay high")).toBe("parameter_update");
+  });
+
+  it("classifies option configuration requests as option_configuration", () => {
+    expect(classifyEditIntent("Configure the premium option to increase price")).toBe("option_configuration");
+  });
+
+  it("classifies topology changes as structural", () => {
+    expect(classifyEditIntent("Add a competitor factor")).toBe("structural");
+  });
+});
+
+describe("target resolution and resolution modes", () => {
+  it("resolves exact label matches with high confidence", () => {
+    const resolution = resolveEditTarget("Set Price higher", makeContext());
+    expect(resolution.match_type).toBe("exact_label");
+    expect(resolution.confidence).toBe("high");
+    expect(resolution.resolved_target?.label).toBe("Price");
+  });
+
+  it("resolves alias matches with high confidence", () => {
+    const resolution = resolveEditTarget(
+      "Set onboarding to 2 months",
+      makeContext({
+        graph: {
+          nodes: [
+            { id: "f1", kind: "factor", label: "Onboarding Time" },
+            { id: "f2", kind: "factor", label: "Hiring Delay" },
+          ],
+          edges: [],
+        } as unknown as ConversationContext["graph"],
+      }),
+    );
+
+    expect(resolution.match_type).toBe("alias");
+    expect(resolution.confidence).toBe("high");
+    expect(resolution.resolved_target?.label).toBe("Onboarding Time");
+  });
+
+  it("uses conversational active_entities for pronoun/coreference resolution", () => {
+    const resolution = resolveEditTarget(
+      "Set it to 2 months",
+      makeContext({
+        graph: {
+          nodes: [{ id: "f1", kind: "factor", label: "Onboarding Time" }],
+          edges: [],
+        } as unknown as ConversationContext["graph"],
+        conversational_state: {
+          active_entities: ["Onboarding Time"],
+          stated_constraints: [],
+          current_topic: "editing",
+          last_failed_action: null,
+        },
+      }),
+    );
+
+    expect(resolution.match_type).toBe("active_entity");
+    expect(resolution.confidence).toBe("high");
+    expect(resolution.resolved_target?.label).toBe("Onboarding Time");
+  });
+
+  it("returns clarify mode for ambiguous alias matches", () => {
+    const context = makeContext({
+      graph: {
+        nodes: [
+          { id: "f1", kind: "factor", label: "Onboarding Time" },
+          { id: "f2", kind: "factor", label: "Hiring Delay" },
+        ],
+        edges: [],
+      } as unknown as ConversationContext["graph"],
+    });
+    const resolution = resolveEditTarget("Set ramp-up time to 2 months", context);
+
+    expect(resolution.match_type).toBe("ambiguous");
+    expect(resolution.alternatives.map((candidate) => candidate.label)).toEqual([
+      "Onboarding Time",
+      "Hiring Delay",
+    ]);
+    expect(determineEditResolutionMode("Set ramp-up time to 2 months", context)).toBe("clarify");
+  });
+
+  it("returns propose_and_confirm for compound edits against one resolved target", () => {
+    const context = makeContext();
+    expect(determineEditResolutionMode("Update Price and also rename Price", context)).toBe("propose_and_confirm");
+  });
+
+  it("token overlap matches fuzzy label like 'competitor pressure' → 'Competitive Pressure'", () => {
+    const context = makeContext({
+      graph: {
+        nodes: [
+          { id: "goal_1", kind: "goal", label: "Revenue" },
+          { id: "fac_1", kind: "factor", label: "Competitive Pressure" },
+          { id: "fac_2", kind: "factor", label: "Market Growth" },
+        ],
+        edges: [],
+      } as unknown as ConversationContext["graph"],
+    });
+
+    const resolution = resolveEditTarget("set competitor pressure to high", context);
+    expect(resolution.resolved_target?.label).toBe("Competitive Pressure");
+    expect(resolution.confidence).toBe("high");
+  });
+
+  it("token overlap does not match on stopwords alone", () => {
+    const context = makeContext({
+      graph: {
+        nodes: [
+          { id: "goal_1", kind: "goal", label: "Revenue" },
+          { id: "fac_1", kind: "factor", label: "High Value Segment" },
+          { id: "fac_2", kind: "factor", label: "Brand Awareness" },
+        ],
+        edges: [],
+      } as unknown as ConversationContext["graph"],
+    });
+
+    // "set X to high" — "high" and "value" are stopwords, should not match "High Value Segment".
+    // Multiple factors prevent graph_local single-factor fallback.
+    const resolution = resolveEditTarget("set price to high", context);
+    expect(resolution.resolved_target?.label).not.toBe("High Value Segment");
+    // With no match, confidence should be low
+    expect(resolution.confidence).toBe("low");
+  });
+
+  it("token overlap rejects short substring matches like 'rate' inside 'corporate'", () => {
+    const context = makeContext({
+      graph: {
+        nodes: [
+          { id: "goal_1", kind: "goal", label: "Revenue" },
+          { id: "fac_1", kind: "factor", label: "Corporate Governance" },
+          { id: "fac_2", kind: "factor", label: "Churn Rate" },
+        ],
+        edges: [],
+      } as unknown as ConversationContext["graph"],
+    });
+
+    // "rate" is 4 chars, "corporate" is 9 chars — ratio 0.44, below 0.6 threshold
+    // Should NOT falsely match "Corporate Governance" via "rate" substring
+    const resolution = resolveEditTarget("set rate to 5%", context);
+    // Should match "Churn Rate" (exact substring "rate" in "churn rate"), not "Corporate Governance"
+    expect(resolution.resolved_target?.label).toBe("Churn Rate");
+  });
+
+  it("parameter_update with low confidence returns propose_and_confirm", () => {
+    const context = makeContext({
+      graph: {
+        nodes: [
+          { id: "goal_1", kind: "goal", label: "Revenue" },
+          { id: "fac_1", kind: "factor", label: "Customer Satisfaction Index" },
+          { id: "fac_2", kind: "factor", label: "Brand Perception Score" },
+        ],
+        edges: [],
+      } as unknown as ConversationContext["graph"],
+    });
+
+    // No exact, alias, or token match for "churn rate" — confidence: low
+    const intent = classifyEditIntent("set churn rate to 5%");
+    expect(intent).toBe("parameter_update");
+
+    const mode = determineEditResolutionMode("set churn rate to 5%", context);
+    // Should propose_and_confirm (let user verify) instead of clarify
+    expect(mode).toBe("propose_and_confirm");
+  });
+});
+
+// ============================================================================
+// Operation Mapping Tests
+// ============================================================================
+
+describe("operation mapping", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  // Test 6: Each op type mapped correctly without impact/rationale
+  it("strips impact and rationale from PatchOperation (add_node)", async () => {
+    const response = {
+      operations: [
+        {
+          op: "add_node",
+          path: "/nodes/fac_new",
+          value: { id: "fac_new", kind: "factor", label: "New" },
+          impact: "moderate",
+          rationale: "User requested",
+        },
+      ],
+      warnings: [],
+      coaching: { summary: "Added new factor.", rerun_recommended: false },
+    };
+    const adapter = makeAdapter(response);
+    const result = await handleEditGraph(
+      makeContext(),
+      "Add a new factor",
+      adapter,
+      "req-1",
+      "turn-1",
+    );
+
+    const data = result.blocks[0].data as GraphPatchBlockData;
+    const op = data.operations[0];
+    // impact and rationale must NOT be on PatchOperation
+    expect((op as unknown as Record<string, unknown>).impact).toBeUndefined();
+    expect((op as unknown as Record<string, unknown>).rationale).toBeUndefined();
+    expect(op.op).toBe("add_node");
+    expect(op.path).toBe("fac_new");
+  });
+
+  // Test 7: impact/rationale preserved as block metadata
+  it("stores operation metadata in block provenance _meta", async () => {
+    const response = {
+      operations: [
+        {
+          op: "update_node",
+          path: "/nodes/factor_1",
+          value: { label: "Updated" },
+          impact: "high",
+          rationale: "User requested rename",
+        },
+      ],
+      warnings: [],
+      coaching: { summary: "Renamed factor.", rerun_recommended: false },
+    };
+    const adapter = makeAdapter(response);
+    const result = await handleEditGraph(
+      makeContext(),
+      "Rename factor",
+      adapter,
+      "req-1",
+      "turn-1",
+    );
+
+    const block = result.blocks[0];
+    const meta = (block.provenance as unknown as Record<string, unknown>)._meta as Record<string, unknown>;
+    expect(meta).toBeDefined();
+    const opMeta = meta.operation_meta as Array<{ impact: string; rationale: string }>;
+    expect(opMeta[0].impact).toBe("high");
+    expect(opMeta[0].rationale).toBe("User requested rename");
+  });
+
+  // Test 8: removed_edges stored in debug payload
+  it("stores removed_edges in block provenance _meta", async () => {
+    const response = {
+      operations: [
+        {
+          op: "remove_edge",
+          path: "/edges/factor_1->out_1",
+          old_value: { from: "factor_1", to: "out_1" },
+          impact: "moderate",
+          rationale: "Remove before node removal",
+        },
+        {
+          op: "remove_node",
+          path: "/nodes/factor_1",
+          old_value: { id: "factor_1", kind: "factor", label: "Price" },
+          impact: "high",
+          rationale: "User requested removal",
+        },
+      ],
+      removed_edges: [
+        { from: "factor_1", to: "out_1", reason: "Parent node factor_1 removed" },
+      ],
+      warnings: [],
+      coaching: { summary: "Removed price factor.", rerun_recommended: true },
+    };
+    const adapter = makeAdapter(response);
+    const result = await handleEditGraph(
+      makeContext(),
+      "Remove the price factor",
+      adapter,
+      "req-1",
+      "turn-1",
+    );
+
+    const block = result.blocks[0];
+    const meta = (block.provenance as unknown as Record<string, unknown>)._meta as Record<string, unknown>;
+    expect(meta).toBeDefined();
+    expect(meta.removed_edges).toEqual([
+      { from: "factor_1", to: "out_1", reason: "Parent node factor_1 removed" },
+    ]);
+  });
+});
+
+// ============================================================================
+// Envelope / Coaching Tests
+// ============================================================================
+
+describe("envelope and coaching wiring", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  // Test 9: Non-empty operations → assistant_text is coaching.summary + warnings appended
+  it("sets assistant_text to coaching.summary with warnings appended for non-empty ops", async () => {
+    const adapter = makeAdapter(V2_GOOD_RESPONSE);
+    const result = await handleEditGraph(
+      makeContext(),
+      "Add competitor",
+      adapter,
+      "req-1",
+      "turn-1",
+    );
+
+    expect(result.assistantText).not.toBeNull();
+    // F3 fix (GM go-live acceptance evidence, Brief H deliverable 5): the
+    // edit_graph success branch always has a committed `appliedGraph` (the
+    // function refuses to reach this branch without one) — the change IS
+    // already applied here, regardless of the block's auto_apply: false
+    // shape contract. The proposal-language guard must NOT rewrite
+    // truthful completion language ("Added X…") into "Proposing to add X…"
+    // on this branch; doing so violated the four-state copy rule
+    // (proposed/applied/blocked/stale) by narrating an applied turn as a
+    // pending proposal.
+    expect(result.assistantText).toContain("Added a competitor response factor");
+    expect(result.assistantText).not.toContain("Proposing to add");
+    expect(result.assistantText).toContain("Note:");
+    // V5 H5 follow-up: the warning-scrubber now resolves `fac_competitor`
+    // to its actual label "Competitor Response" because `candidateGraph`
+    // is computed unconditionally (decoupled from
+    // `patchPreValidationEnabled`). Previously the candidate wasn't
+    // available in this test config, so the scrubber fell back to the
+    // generic "the relevant factor". Resolving to the actual label is
+    // more informative for the user — the bare ID still mustn't leak.
+    expect(result.assistantText).toContain("Competitor Response added as external");
+    expect(result.assistantText).not.toContain("fac_competitor");
+  });
+
+  // Test 10: Empty operations → R10 preserves a CLEAN clarifying question.
+  // V5 H5 Mode B (Codex round-1 P0) drops LLM-authored strings on the
+  // no-op path because they can carry terse false-success claims. PR #249
+  // R10 (edit-graph.ts ~1879–1980) carves out one narrow exception: when
+  // `coaching.summary` is a clarifying question that passes ALL THREE trip
+  // tests — no success claim, no forbidden user-facing phrase, no edit-
+  // internals/raw-id leak — it is preserved (the user keeps the specific,
+  // useful question instead of a generic dead-end). Scope is deliberately
+  // narrow: ONLY `coaching.summary` is eligible; `warnings` are STILL
+  // dropped (free prose, same false-success vector, no mandated question).
+  // The `V2_EMPTY_OPS_RESPONSE` summary is exactly such a clean question.
+  // The unsafe-summary fallback path is asserted by the sibling test below.
+  it("preserves a clean clarifying question in coaching.summary on empty ops (R10); warnings still dropped", async () => {
+    const adapter = makeAdapter(V2_EMPTY_OPS_RESPONSE);
+    const result = await handleEditGraph(
+      makeContext(),
+      "Does factor_1 affect out_1?",
+      adapter,
+      "req-1",
+      "turn-1",
+    );
+
+    expect(result.assistantText).not.toBeNull();
+    // The clean clarifying question is PRESERVED verbatim (R10).
+    expect(result.assistantText).toContain(V2_EMPTY_OPS_RESPONSE.coaching.summary);
+    expect(result.noOpClarificationPreserved).toBe(true);
+    // Warnings remain dropped — R10 preserves coaching.summary only, not
+    // the free-prose warning string from the fixture.
+    expect(result.assistantText).not.toContain(V2_EMPTY_OPS_RESPONSE.warnings[0]);
+    expect(result.assistantText).not.toContain("already exists");
+    expect(result.assistantText).not.toContain("exists_probability");
+  });
+
+  // Test 10b (R10 safety sibling): an UNSAFE no-op summary that makes a
+  // terse false-success claim must NOT be preserved — it falls back to the
+  // deterministic clarify copy (Lane 22: composeEditClarifyResponse parts,
+  // formerly NO_OP_FALLBACK_TEXT). This retains the Codex-P0 Mode-B
+  // safety coverage the old Test 10 enforced. Note: a sentence-leading
+  // "Updated X to Y" is INLINE-rewritten into a safe proposal frame by
+  // enforceProposalLanguage *before* the trip test (so that path is safely
+  // transformed, not dropped). To exercise the DROP path we use a terse
+  // "Done — …" acknowledgement, which survives the inline rewrites and
+  // still trips SUCCESS_CLAIM_PATTERNS (`/^\s*Done\b[.!\s—-]/m`), so the
+  // clarification-preservation gate declines and the user never reads a
+  // false claim of a mutation that did not happen (operations is empty).
+  it("does NOT preserve a false-success coaching.summary on empty ops; falls back to NO_OP_FALLBACK_TEXT (R10 safety)", async () => {
+    const unsafeNoOp = {
+      operations: [],
+      removed_edges: [],
+      warnings: [],
+      coaching: {
+        summary: "Done — value set.",
+        rerun_recommended: false,
+      },
+    };
+    const adapter = makeAdapter(unsafeNoOp);
+    const result = await handleEditGraph(
+      makeContext(),
+      "Set price to 100",
+      adapter,
+      "req-1",
+      "turn-1",
+    );
+
+    expect(result.assistantText).not.toBeNull();
+    expect(result.noOpClarificationPreserved).toBe(false);
+    // The false-success claim must not reach the user.
+    expect(result.assistantText).not.toContain("Done — value set");
+    expect(result.assistantText).not.toContain("value set");
+    // ROADMAP 2.1361 — REBOUND FROM THE COPY TO THE VERDICT. See the note in
+    // edit-graph.test.ts: the closing sentence is no longer constant, because
+    // the branch now says what it understood. `noOpClarificationPreserved`
+    // (asserted false above) IS the "deterministic fallback fired" verdict.
+    // The LEAD sentence is still constant — every branch must be able to say
+    // the turn wrote nothing — so that half stays pinned.
+    expect(result.assistantText).toContain("I haven't changed anything from that.");
+  });
+
+  // Test 11: substantive ops (add_node/add_edge) + prior analysis → suggested action chip
+  it("includes 'Re-run analysis' chip when rerun_recommended is true", async () => {
+    const adapter = makeAdapter(V2_GOOD_RESPONSE);
+    // rerun_recommended is now deterministic: requires prior analysis + substantive ops
+    const contextWithAnalysis = makeContext({
+      analysis_response: {
+        meta: { seed_used: 1, n_samples: 100, response_hash: "h" },
+        results: [{ option_label: "A", win_probability: 0.6 }],
+      } as never,
+    });
+    const result = await handleEditGraph(
+      contextWithAnalysis,
+      "Add competitor",
+      adapter,
+      "req-1",
+      "turn-1",
+    );
+
+    expect(result.suggestedActions).toBeDefined();
+    expect(result.suggestedActions).toHaveLength(1);
+    expect(result.suggestedActions![0].label).toBe("Re-run analysis");
+    expect(result.suggestedActions![0].role).toBe("facilitator");
+  });
+
+  // Test 12: coaching.rerun_recommended: false → no rerun chip
+  it("omits rerun chip when rerun_recommended is false", async () => {
+    const response = {
+      operations: [
+        {
+          op: "update_node",
+          path: "/nodes/factor_1",
+          value: { label: "Renamed" },
+          impact: "low",
+          rationale: "Cosmetic rename",
+        },
+      ],
+      warnings: [],
+      coaching: { summary: "Renamed the factor.", rerun_recommended: false },
+    };
+    const adapter = makeAdapter(response);
+    const result = await handleEditGraph(
+      makeContext(),
+      "Rename factor",
+      adapter,
+      "req-1",
+      "turn-1",
+    );
+
+    expect(result.suggestedActions).toBeUndefined();
+  });
+
+  it("returns clarify output with suggestion chips for ambiguous targets", async () => {
+    const adapter = makeAdapter(V2_GOOD_RESPONSE);
+    const result = await handleEditGraph(
+      makeContext({
+        graph: {
+          nodes: [
+            { id: "f1", kind: "factor", label: "Onboarding Time" },
+            { id: "f2", kind: "factor", label: "Hiring Delay" },
+          ],
+          edges: [],
+        } as unknown as ConversationContext["graph"],
+      }),
+      "Set ramp-up time to 2 months",
+      adapter,
+      "req-clarify",
+      "turn-clarify",
+    );
+
+    expect(result.blocks).toEqual([]);
+    expect(result.wasRejected).toBe(true);
+    expect(result.assistantText).toContain("Which one should I update");
+    expect(result.suggestedActions?.map((action) => action.label)).toEqual([
+      "Onboarding Time",
+      "Hiring Delay",
+    ]);
+    expect((adapter.chat as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0);
+    expect(result.diagnostics?.resolution_mode).toBe("clarify");
+    expect(result.diagnostics?.target_resolution?.alternatives_count).toBe(2);
+  });
+
+  it("takes the deterministic propose branch for compound edits without executing the LLM path (V4 proposed_changes payload retired)", async () => {
+    const adapter = makeAdapter(V2_GOOD_RESPONSE);
+    const result = await handleEditGraph(
+      makeContext(),
+      "Update Price and also lower Price",
+      adapter,
+      "req-proposal",
+      "turn-proposal",
+    );
+
+    expect(result.blocks).toEqual([]);
+    expect(result.wasRejected).toBe(false);
+    // S3-L1 — the top-level `proposedChanges` payload is no longer RETURNED.
+    // Its only readers were the 410-tombstoned V4 pipeline (phase4-tools:369,
+    // tools/dispatch:323); the live V5 dispatcher (edit-graph-dispatch.ts)
+    // never reads it. `proposedChanges` is now a within-turn local feeding the
+    // copy builder only. The compound edit still resolves both clauses to
+    // Price, which is asserted where it is live-observable: the copy.
+    expect(result.proposedChanges).toBeUndefined();
+    // POSITIVE controls that the branch was genuinely taken (trap-13 — the
+    // absence above is not vacuous): the LLM lane was NOT reached, the
+    // resolution mode is the propose branch, proposal_returned is flagged, and
+    // the copy names the resolved target it holds a change for.
+    expect((adapter.chat as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0);
+    expect(result.diagnostics?.resolution_mode).toBe("propose_and_confirm");
+    expect(result.diagnostics?.proposal_returned).toBe(true);
+    expect(result.assistantText ?? "").toContain("**Price**");
+  });
+
+  it("constrains auto-apply prompt with the resolved target label context", async () => {
+    const adapter = makeAdapter({
+      operations: [
+        {
+          op: "update_node",
+          path: "/nodes/f1",
+          value: { value: "2 months" },
+          old_value: { value: "1 month" },
+          impact: "low",
+          rationale: "Update onboarding time",
+        },
+      ],
+      removed_edges: [],
+      warnings: [],
+      coaching: { summary: "Updated onboarding time.", rerun_recommended: false },
+    });
+
+    await handleEditGraph(
+      makeContext({
+        graph: {
+          nodes: [{ id: "f1", kind: "factor", label: "Onboarding Time" }],
+          edges: [],
+        } as unknown as ConversationContext["graph"],
+      }),
+      "Set onboarding to 2 months",
+      adapter,
+      "req-auto-apply",
+      "turn-auto-apply",
+    );
+
+    const firstCall = (adapter.chat as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(firstCall.system).toContain("Apply this request to the existing Onboarding Time factor only.");
+  });
+});
+
+// ============================================================================
+// Empty Operations (Integration Tests)
+// ============================================================================
+
+describe("empty operations handling", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  // Test 13: Does NOT create a GraphPatchBlock
+  it("returns no blocks for empty operations", async () => {
+    const adapter = makeAdapter(V2_EMPTY_OPS_RESPONSE);
+    const result = await handleEditGraph(
+      makeContext(),
+      "Does this edge exist?",
+      adapter,
+      "req-1",
+      "turn-1",
+    );
+
+    expect(result.blocks).toHaveLength(0);
+  });
+
+  // Test 14: Does NOT hit patch validation/apply pipeline
+  it("does not call PLoT validatePatch for empty operations", async () => {
+    const adapter = makeAdapter(V2_EMPTY_OPS_RESPONSE);
+    const plotClient = makePlotClientSuccess();
+
+    const result = await handleEditGraph(
+      makeContext(),
+      "Already exists?",
+      adapter,
+      "req-1",
+      "turn-1",
+      { plotClient },
+    );
+
+    expect(plotClient.validatePatch).not.toHaveBeenCalled();
+    expect(result.blocks).toHaveLength(0);
+  });
+
+  // Test 15: Does NOT surface as an error envelope
+  it("does not set wasRejected for empty operations", async () => {
+    const adapter = makeAdapter(V2_EMPTY_OPS_RESPONSE);
+    const result = await handleEditGraph(
+      makeContext(),
+      "Already exists?",
+      adapter,
+      "req-1",
+      "turn-1",
+    );
+
+    expect(result.wasRejected).toBe(false);
+    expect(result.assistantText).not.toBeNull();
+  });
+});
+
+// ============================================================================
+// Full Round-trip Test
+// ============================================================================
+
+describe("full round-trip", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  // Test 16: Valid operations → GraphPatchBlock with correct PatchOperation[] shape
+  it("produces a valid GraphPatchBlock from v2 response", async () => {
+    const adapter = makeAdapter(V2_GOOD_RESPONSE);
+    const result = await handleEditGraph(
+      makeContext(),
+      "Add competitor factor",
+      adapter,
+      "req-1",
+      "turn-1",
+    );
+
+    expect(result.blocks).toHaveLength(1);
+    expect(result.blocks[0].block_type).toBe("graph_patch");
+
+    const data = result.blocks[0].data as GraphPatchBlockData;
+    expect(data.patch_type).toBe("edit");
+    expect(data.status).toBe("proposed");
+    expect(data.operations).toHaveLength(2);
+
+    // add_node
+    expect(data.operations[0].op).toBe("add_node");
+    expect(data.operations[0].path).toBe("fac_competitor");
+
+    // add_edge — strength stays nested (canonical format)
+    expect(data.operations[1].op).toBe("add_edge");
+    expect(data.operations[1].path).toBe("fac_competitor::out_1");
+    const edgeValue = data.operations[1].value as Record<string, unknown>;
+    expect(edgeValue.strength).toEqual({ mean: -0.3, std: 0.15 });
+
+    // No impact/rationale on canonical PatchOperations
+    for (const op of data.operations) {
+      expect((op as unknown as Record<string, unknown>).impact).toBeUndefined();
+      expect((op as unknown as Record<string, unknown>).rationale).toBeUndefined();
+    }
+  });
+});
+
+// ============================================================================
+// Golden Fixture Tests
+// ============================================================================
+
+describe("golden fixtures", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  // Test 17: Good response fixture parses correctly
+  it("parses the golden 'good response' fixture", () => {
+    const result = parseEditGraphResponse(JSON.stringify(V2_GOOD_RESPONSE));
+
+    expect(result.operations).toHaveLength(2);
+    expect(result.operations[0].op).toBe("add_node");
+    expect(result.operations[1].op).toBe("add_edge");
+    expect(result.warnings).toHaveLength(1);
+    expect(result.coaching!.rerun_recommended).toBe(true);
+  });
+
+  // Test 18: Empty operations fixture
+  it("parses the golden 'empty operations' fixture", () => {
+    const result = parseEditGraphResponse(JSON.stringify(V2_EMPTY_OPS_RESPONSE));
+
+    expect(result.operations).toHaveLength(0);
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]).toContain("already exists");
+    expect(result.coaching!.rerun_recommended).toBe(false);
+  });
+});
+
+// ============================================================================
+// Prompt Loading Test
+// ============================================================================
+
+describe("prompt loading", () => {
+  // Test 19a: Handler loads prompt via getSystemPrompt('edit_graph')
+  it("uses prompt-loader for edit_graph system prompt — via the BOUND snapshot call", async () => {
+    // The lane resolves bytes and identity together now. Two independent
+    // reads could disagree on the transient store-failure path (default bytes
+    // served while the stale store entry still answers a separate meta read),
+    // and that identity is recorded as provenance — so the bound call is the
+    // seam worth pinning here.
+    const { getSystemPromptSnapshot, getSystemPrompt } = await import(
+      "../../../../src/adapters/llm/prompt-loader.js"
+    );
+    const adapter = makeAdapter(V2_GOOD_RESPONSE);
+
+    await handleEditGraph(
+      makeContext(),
+      "Add competitor",
+      adapter,
+      "req-1",
+      "turn-1",
+    );
+
+    expect(getSystemPromptSnapshot).toHaveBeenCalledWith("edit_graph");
+    // ...and NOT via the unbound two-read pattern this replaced.
+    expect(getSystemPrompt).not.toHaveBeenCalledWith("edit_graph");
+  });
+
+  it("steers narrow value edits toward field-level updates in the system prompt", async () => {
+    const adapter = makeAdapter({
+      operations: [
+        {
+          op: "update_node",
+          path: "/nodes/factor_1/data.value",
+          value: "high",
+          old_value: "medium",
+          impact: "low",
+          rationale: "Update the existing factor value",
+        },
+      ],
+      removed_edges: [],
+      warnings: [],
+      coaching: { summary: "Updated the factor value.", rerun_recommended: false },
+    });
+
+    const result = await handleEditGraph(
+      makeContext(),
+      "Set customer willingness to pay high",
+      adapter,
+      "req-narrow-prompt",
+      "turn-narrow-prompt",
+    );
+
+    const firstCall = (adapter.chat as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(firstCall.system).toContain("Prefer update_node or update_edge operations only.");
+    expect(firstCall.system).not.toContain("Prefer the narrowest valid update to an existing option");
+    expect(result.diagnostics?.classified_intent).toBe("parameter_update");
+    expect(result.diagnostics?.instruction_mode_applied).toBe("narrow_parameter_update");
+    expect(result.diagnostics?.operations_proposed_count).toBe(1);
+    expect(result.diagnostics?.operations_proposed_types).toEqual(["update_node"]);
+    expect(result.diagnostics?.validation_outcome).toBe("success");
+    expect(result.diagnostics?.edit_instruction_preview).toContain("Prefer update_node or update_edge operations only.");
+  });
+
+  it("uses option_configuration narrow instruction path for option updates", async () => {
+    const adapter = makeAdapter({
+      operations: [
+        {
+          op: "update_node",
+          path: "/nodes/factor_1/label",
+          value: "Premium Option Price",
+          old_value: "Price",
+          impact: "low",
+          rationale: "Adjust option configuration label",
+        },
+      ],
+      removed_edges: [],
+      warnings: [],
+      coaching: { summary: "Updated option configuration.", rerun_recommended: false },
+    });
+
+    const result = await handleEditGraph(
+      makeContext({
+        graph: {
+          nodes: [
+            { id: "goal_1", kind: "goal", label: "Revenue" },
+            { id: "factor_1", kind: "option", label: "Premium Option" },
+          ],
+          edges: [],
+        } as unknown as ConversationContext["graph"],
+      }),
+      "Configure the premium option to change pricing",
+      adapter,
+      "req-option-prompt",
+      "turn-option-prompt",
+    );
+
+    const firstCall = (adapter.chat as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(firstCall.system).toContain("This is an option/intervention configuration update.");
+    expect(firstCall.system).toContain("Prefer the narrowest valid update to an existing option or intervention field.");
+    expect(result.diagnostics?.classified_intent).toBe("option_configuration");
+    expect(result.diagnostics?.instruction_mode_applied).toBe("narrow_option_configuration");
+    expect(result.diagnostics?.validation_outcome).toBe("success");
+  });
+
+  it("keeps structural intent on structural validation path", async () => {
+    const structuralInvalidResponse = {
+      operations: [
+        {
+          op: "add_edge",
+          path: "/edges/missing_factor->out_1",
+          value: {
+            from: "missing_factor",
+            to: "out_1",
+            strength: { mean: 0.4, std: 0.1 },
+            exists_probability: 0.8,
+            effect_direction: "positive",
+          },
+          impact: "high",
+          rationale: "Add missing structural edge",
+        },
+      ],
+      removed_edges: [],
+      warnings: [],
+      coaching: { summary: "Added edge.", rerun_recommended: false },
+    };
+    const adapter = {
+      ...makeAdapter(structuralInvalidResponse),
+      chat: vi.fn()
+        .mockResolvedValueOnce({ content: JSON.stringify(structuralInvalidResponse) })
+        .mockResolvedValueOnce({ content: JSON.stringify(structuralInvalidResponse) }),
+    } as unknown as LLMAdapter;
+
+    const result = await handleEditGraph(
+      makeContext(),
+      "Add a competitor factor and connect it to sales",
+      adapter,
+      "req-structural",
+      "turn-structural",
+    );
+
+    expect(result.wasRejected).toBe(true);
+    expect(result.diagnostics?.classified_intent).toBe("structural");
+    expect(result.diagnostics?.instruction_mode_applied).toBe("structural_default");
+    expect(result.diagnostics?.validation_outcome).toBe("structural_validation_failed");
+    expect(result.diagnostics?.recovery_path_chosen).toBe("rejection_block");
+  });
+
+  it("includes diagnostics on budget_exceeded early exit", async () => {
+    patchBudgetEnabledForTest = true;
+
+    const adapter = makeAdapter({
+      operations: [
+        { op: "update_node", path: "/nodes/factor_1/label", value: "Price A", old_value: "Price", impact: "low", rationale: "A" },
+        { op: "update_node", path: "/nodes/factor_1/label", value: "Price B", old_value: "Price A", impact: "low", rationale: "B" },
+        { op: "update_node", path: "/nodes/factor_1/label", value: "Price C", old_value: "Price B", impact: "low", rationale: "C" },
+        { op: "update_node", path: "/nodes/factor_1/label", value: "Price D", old_value: "Price C", impact: "low", rationale: "D" },
+        { op: "update_node", path: "/nodes/factor_1/label", value: "Price E", old_value: "Price D", impact: "low", rationale: "E" },
+      ],
+      removed_edges: [],
+      warnings: [],
+      coaching: { summary: "Updated labels.", rerun_recommended: false },
+    });
+
+    const result = await handleEditGraph(
+      makeContext(),
+      "Set customer willingness to pay higher",
+      adapter,
+      "req-budget",
+      "turn-budget",
+    );
+
+    expect(result.wasRejected).toBe(true);
+    expect(result.blocks).toEqual([]);
+    expect(result.diagnostics?.validation_outcome).toBe("budget_exceeded");
+    expect(result.diagnostics?.validation_violation_codes).toEqual(["budget_exceeded"]);
+    expect(result.diagnostics?.recovery_path_chosen).toBe("rejection_block");
+    expect(result.diagnostics?.operations_proposed_count).toBe(5);
+  });
+
+  it("includes diagnostics on graph_structure_invalid early exit", async () => {
+    patchPreValidationEnabledForTest = true;
+
+    const adapter = makeAdapter({
+      operations: [
+        {
+          op: "remove_node",
+          path: "/nodes/goal_1",
+          old_value: { id: "goal_1", kind: "goal", label: "Revenue" },
+          impact: "high",
+          rationale: "Remove goal node",
+        },
+      ],
+      removed_edges: [],
+      warnings: [],
+      coaching: { summary: "Removed goal.", rerun_recommended: false },
+    });
+
+    const result = await handleEditGraph(
+      makeContext(),
+      "Remove goal node",
+      adapter,
+      "req-struct-invalid",
+      "turn-struct-invalid",
+    );
+
+    expect(result.wasRejected).toBe(true);
+    expect(result.blocks).toEqual([]);
+    expect(result.diagnostics?.validation_outcome).toBe("graph_structure_invalid");
+    expect(result.diagnostics?.validation_violation_codes.length).toBeGreaterThan(0);
+  });
+
+  // Lane 22 (live 2026-07-07 session-ending failure) — structural-rejection
+  // honesty. The rejection copy must carry the claim-safe actionable reason
+  // from the VIOLATION_MESSAGES catalogue (not the vague generic line), and
+  // the known dead-end "Simplify the change" chip (whose exact prompt text
+  // needed the chip-simplify-intercept to break a no-op loop) must be gone.
+  it("structural rejection surfaces the claim-safe actionable reason and drops the dead-end chip", async () => {
+    patchPreValidationEnabledForTest = true;
+
+    const adapter = makeAdapter({
+      operations: [
+        {
+          op: "remove_node",
+          path: "/nodes/goal_1",
+          old_value: { id: "goal_1", kind: "goal", label: "Revenue" },
+          impact: "high",
+          rationale: "Remove goal node",
+        },
+      ],
+      removed_edges: [],
+      warnings: [],
+      coaching: { summary: "Removed goal.", rerun_recommended: false },
+    });
+
+    const result = await handleEditGraph(
+      makeContext(),
+      "Remove goal node",
+      adapter,
+      "req-struct-honesty",
+      "turn-struct-honesty",
+    );
+
+    expect(result.wasRejected).toBe(true);
+    const text = result.assistantText ?? "";
+    // Actionable catalogue reason surfaced (one of the user-facing
+    // VIOLATION_MESSAGES strings), not the vague generic copy.
+    expect(text).toMatch(
+      /cannot reach the goal|no goal node|circular dependency|no connections|fewer than two options|no decision node/i,
+    );
+    expect(text).not.toContain("inconsistency in the model structure");
+    // Raw internal detail stays suppressed.
+    expect(text).not.toMatch(/\bgoal_1\b/);
+
+    // Dead-end chip replaced: no "Simplify the change" label, and the exact
+    // interceptor-trapped prompt text is gone.
+    const labels = (result.suggestedActions ?? []).map((a) => a.label);
+    const prompts = (result.suggestedActions ?? []).map((a) => a.prompt);
+    expect(labels).not.toContain("Simplify the change");
+    expect(prompts).not.toContain("Try a simpler version of this change.");
+    // The user still has affordances.
+    expect(labels.length).toBeGreaterThan(0);
+    expect(labels).toContain("Rebuild from updated brief");
+  });
+
+  it("returns a concise recovery question after repeated structural outputs for a narrow request", async () => {
+    const structuralResponse = {
+      operations: [
+        {
+          op: "add_node",
+          path: "/nodes/fac_customer_willingness",
+          value: { id: "fac_customer_willingness", kind: "factor", label: "Customer Willingness To Pay" },
+          impact: "moderate",
+          rationale: "Create a new factor for willingness to pay",
+        },
+      ],
+      removed_edges: [],
+      warnings: [],
+      coaching: { summary: "Added a new factor.", rerun_recommended: false },
+    };
+    const adapter = {
+      ...makeAdapter(structuralResponse),
+      chat: vi.fn()
+        .mockResolvedValueOnce({ content: JSON.stringify(structuralResponse) })
+        .mockResolvedValueOnce({ content: JSON.stringify(structuralResponse) }),
+    } as unknown as LLMAdapter;
+
+    const result = await handleEditGraph(
+      makeContext(),
+      "Set customer willingness to pay high",
+      adapter,
+      "req-recovery",
+      "turn-recovery",
+    );
+
+    expect(result.blocks).toEqual([]);
+    expect(result.wasRejected).toBe(true);
+    expect(result.assistantText).toContain("Which existing factor or edge should I update");
+    expect((adapter.chat as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(2);
+  });
+
+  // Test 19b: Default prompt contains v2-specific content (not old inline prompt)
+  it("default EDIT_GRAPH_PROMPT contains v2 unique strings", async () => {
+    const { EDIT_GRAPH_PROMPT } = await import("../../../../src/prompts/defaults.js");
+
+    // Unique v2 strings that don't exist in the old prompt
+    expect(EDIT_GRAPH_PROMPT).toContain("TOPOLOGY_RULES");
+    expect(EDIT_GRAPH_PROMPT).toContain("CONTRASTIVE_EXAMPLES");
+    expect(EDIT_GRAPH_PROMPT).toContain("IMPACT_ASSESSMENT");
+    expect(EDIT_GRAPH_PROMPT).toContain("coaching");
+    // Must NOT contain the old instruction to return a bare array
+    expect(EDIT_GRAPH_PROMPT).not.toContain("Respond ONLY with a JSON array");
+  });
+});
+
+// ============================================================================
+// All 6 op types
+// ============================================================================
+
+describe("all op types through v2 parser", () => {
+  const makeResponse = (ops: Record<string, unknown>[]) => ({
+    operations: ops.map(op => ({ ...op, impact: "low", rationale: "test" })),
+    warnings: [],
+    coaching: null,
+  });
+
+  it("add_node with /nodes/ path", () => {
+    const result = parseEditGraphResponse(JSON.stringify(makeResponse([
+      { op: "add_node", path: "/nodes/fac_x", value: { id: "fac_x", kind: "factor", label: "X" } },
+    ])));
+    expect(result.operations[0].path).toBe("fac_x");
+    expect(result.operations[0].op).toBe("add_node");
+  });
+
+  it("remove_node with /nodes/ path", () => {
+    const result = parseEditGraphResponse(JSON.stringify(makeResponse([
+      { op: "remove_node", path: "/nodes/fac_x", old_value: { id: "fac_x" } },
+    ])));
+    expect(result.operations[0].path).toBe("fac_x");
+  });
+
+  it("update_node with /nodes/<id>/<field> path", () => {
+    const result = parseEditGraphResponse(JSON.stringify(makeResponse([
+      { op: "update_node", path: "/nodes/fac_x/label", value: "New", old_value: "Old" },
+    ])));
+    expect(result.operations[0].path).toBe("fac_x");
+    expect(result.operations[0].value).toEqual({ label: "New" });
+  });
+
+  it("add_edge with /edges/ path and nested strength", () => {
+    const result = parseEditGraphResponse(JSON.stringify(makeResponse([
+      {
+        op: "add_edge",
+        path: "/edges/fac_x->out_y",
+        value: { from: "fac_x", to: "out_y", strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.8, effect_direction: "positive" },
+      },
+    ])));
+    expect(result.operations[0].path).toBe("fac_x::out_y");
+    const val = result.operations[0].value as Record<string, unknown>;
+    expect(val.strength).toEqual({ mean: 0.5, std: 0.1 });
+    expect(val.strength_mean).toBeUndefined();
+  });
+
+  it("remove_edge with /edges/ path", () => {
+    const result = parseEditGraphResponse(JSON.stringify(makeResponse([
+      { op: "remove_edge", path: "/edges/fac_x->out_y", old_value: { from: "fac_x", to: "out_y" } },
+    ])));
+    expect(result.operations[0].path).toBe("fac_x::out_y");
+  });
+
+  it("update_edge with /edges/<from>-><to>/<field> path nests dotted key", () => {
+    const result = parseEditGraphResponse(JSON.stringify(makeResponse([
+      { op: "update_edge", path: "/edges/fac_x->out_y/strength.mean", value: 0.9, old_value: 0.5 },
+    ])));
+    expect(result.operations[0].path).toBe("fac_x::out_y");
+    expect(result.operations[0].value).toEqual({ strength: { mean: 0.9 } });
+  });
+});
+
+// ============================================================================
+// LLM warnings surfaced in validation_warnings on block
+// ============================================================================
+
+// ============================================================================
+// Baseline structural violations — edits on incomplete graphs
+// ============================================================================
+
+describe("baseline structural violations (pre-existing violations ignored)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    patchPreValidationEnabledForTest = true;
+  });
+
+  it("allows factor update on graph with no options (pre-existing FEWER_THAN_TWO_OPTIONS)", async () => {
+    // Graph has goal + factor but no decision or options.
+    // Pre-existing violations: NO_DECISION, FEWER_THAN_TWO_OPTIONS.
+    // A simple label update should NOT be blocked by these.
+    const adapter = makeAdapter({
+      operations: [
+        {
+          op: "update_node",
+          path: "/nodes/factor_1",
+          value: { label: "Updated Price" },
+          impact: "low",
+          rationale: "Rename factor",
+        },
+      ],
+      removed_edges: [],
+      warnings: [],
+      coaching: { summary: "Updated label.", rerun_recommended: false },
+    });
+
+    const result = await handleEditGraph(
+      makeContext(),
+      "Update the price factor label",
+      adapter,
+      "req-baseline-1",
+      "turn-baseline-1",
+    );
+
+    expect(result.wasRejected).toBe(false);
+    expect(result.blocks).toHaveLength(1);
+    expect((result.blocks[0].data as GraphPatchBlockData).status).toBe("proposed");
+  });
+
+  it("still rejects edit that introduces a NEW structural violation", async () => {
+    // Removing the goal introduces NO_GOAL — a new violation not in baseline.
+    const adapter = makeAdapter({
+      operations: [
+        {
+          op: "remove_node",
+          path: "/nodes/goal_1",
+          old_value: { id: "goal_1", kind: "goal", label: "Revenue" },
+          impact: "high",
+          rationale: "Remove goal",
+        },
+      ],
+      removed_edges: [],
+      warnings: [],
+      coaching: { summary: "Removed goal.", rerun_recommended: false },
+    });
+
+    const result = await handleEditGraph(
+      makeContext(),
+      "Remove goal node",
+      adapter,
+      "req-baseline-2",
+      "turn-baseline-2",
+    );
+
+    expect(result.wasRejected).toBe(true);
+  });
+
+  it("rejects edit that adds a second orphan when baseline already has one (same-code count delta)", async () => {
+    // Input graph: goal + factor + outcome (connected) + an ORPHAN node (fac_orphan, no edges).
+    // Baseline has 1× ORPHAN_NODE. Edit adds another disconnected node → 2× ORPHAN_NODE.
+    // Count delta: 2 - 1 = 1 new violation → must reject.
+    const graphWithOrphan = {
+      nodes: [
+        { id: "goal_1", kind: "goal", label: "Revenue" },
+        { id: "factor_1", kind: "factor", label: "Price" },
+        { id: "out_1", kind: "outcome", label: "Sales" },
+        { id: "fac_orphan", kind: "factor", label: "Orphan Factor" }, // pre-existing orphan
+      ],
+      edges: [
+        {
+          from: "factor_1",
+          to: "out_1",
+          strength_mean: 0.5,
+          strength_std: 0.1,
+          exists_probability: 0.9,
+          effect_direction: "positive",
+        },
+        {
+          from: "out_1",
+          to: "goal_1",
+          strength_mean: 0.8,
+          strength_std: 0.05,
+          exists_probability: 1.0,
+          effect_direction: "positive",
+        },
+      ],
+    } as unknown as ConversationContext["graph"];
+
+    const adapter = makeAdapter({
+      operations: [
+        {
+          op: "add_node",
+          path: "/nodes/fac_new_orphan",
+          value: { id: "fac_new_orphan", kind: "factor", label: "New Orphan" },
+          impact: "low",
+          rationale: "Add unconnected factor",
+        },
+      ],
+      removed_edges: [],
+      warnings: [],
+      coaching: { summary: "Added factor.", rerun_recommended: false },
+    });
+
+    const result = await handleEditGraph(
+      makeContext({ graph: graphWithOrphan }),
+      "Add a new factor",
+      adapter,
+      "req-same-code",
+      "turn-same-code",
+    );
+
+    // Must reject: the edit introduced a NEW orphan (same code as baseline, but count increased)
+    expect(result.wasRejected).toBe(true);
+  });
+});
+
+// ============================================================================
+// LLM warnings surfaced in validation_warnings on block
+// ============================================================================
+
+describe("LLM warnings surfaced on block", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("includes LLM warnings in block validation_warnings", async () => {
+    const adapter = makeAdapter(V2_GOOD_RESPONSE);
+    const result = await handleEditGraph(
+      makeContext(),
+      "Add competitor",
+      adapter,
+      "req-1",
+      "turn-1",
+    );
+
+    const data = result.blocks[0].data as GraphPatchBlockData;
+    expect(data.validation_warnings).toBeDefined();
+    expect(data.validation_warnings!.some(w => w.includes("fac_competitor added as external"))).toBe(true);
+  });
+});

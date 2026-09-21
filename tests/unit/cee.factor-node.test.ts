@@ -11,7 +11,6 @@ import { normaliseNodeKind, NODE_KIND_MAP } from "../../src/adapters/llm/normali
 import { detectBiases } from "../../src/cee/bias/index.js";
 import { suggestEdgeFunction } from "../../src/cee/edge-function-suggestions/index.js";
 import { computeGraphStats } from "../../src/cee/graph-readiness/factors.js";
-import { generateKeyInsight } from "../../src/cee/key-insight/index.js";
 import type { GraphV1 } from "../../src/contracts/plot/engine.js";
 
 describe("factor node kind", () => {
@@ -201,75 +200,6 @@ describe("factor node kind", () => {
 
       // "Competitor" matches preventative source pattern → noisy_and_not
       expect(result.suggested_function).toBe("noisy_and_not");
-    });
-  });
-
-  describe("key-insight", () => {
-    it("generates external factor statement for factor driver", () => {
-      const result = generateKeyInsight({
-        graph: {
-          nodes: [
-            { id: "o1", kind: "option", label: "Option A" },
-            { id: "f1", kind: "factor", label: "Market conditions" },
-          ],
-          edges: [],
-        } as unknown as GraphV1,
-        ranked_actions: [
-          { node_id: "o1", label: "Option A", expected_utility: 0.8 },
-        ],
-        top_drivers: [
-          { node_id: "f1", label: "Market conditions", impact_pct: 60, kind: "factor" },
-        ],
-      });
-
-      expect(result.primary_driver).toContain("External");
-      expect(result.primary_driver.toLowerCase()).toContain("market conditions");
-    });
-
-    it("generates controllable action statement for action driver", () => {
-      const result = generateKeyInsight({
-        graph: {
-          nodes: [
-            { id: "o1", kind: "option", label: "Option A" },
-            { id: "a1", kind: "action", label: "Hire team" },
-          ],
-          edges: [],
-        } as unknown as GraphV1,
-        ranked_actions: [
-          { node_id: "o1", label: "Option A", expected_utility: 0.8 },
-        ],
-        top_drivers: [
-          { node_id: "a1", label: "Hire team", impact_pct: 60, kind: "action" },
-        ],
-      });
-
-      expect(result.primary_driver.toLowerCase()).toContain("action");
-      expect(result.primary_driver.toLowerCase()).toContain("hire team");
-    });
-
-    it("handles mixed factor and action drivers", () => {
-      const result = generateKeyInsight({
-        graph: {
-          nodes: [
-            { id: "o1", kind: "option", label: "Option A" },
-            { id: "f1", kind: "factor", label: "Market demand" },
-            { id: "a1", kind: "action", label: "Marketing campaign" },
-          ],
-          edges: [],
-        } as unknown as GraphV1,
-        ranked_actions: [
-          { node_id: "o1", label: "Option A", expected_utility: 0.75 },
-        ],
-        top_drivers: [
-          { node_id: "f1", label: "Market demand", impact_pct: 40, kind: "factor" },
-          { node_id: "a1", label: "Marketing campaign", impact_pct: 30, kind: "action" },
-        ],
-      });
-
-      // Should use top driver (factor) for the statement
-      expect(result.primary_driver.toLowerCase()).toContain("market demand");
-      expect(result.headline).toBeDefined();
-      expect(result.confidence_statement).toBeDefined();
     });
   });
 

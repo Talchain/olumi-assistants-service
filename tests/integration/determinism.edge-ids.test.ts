@@ -12,7 +12,9 @@ import draftRoute from "../../src/routes/assist.draft-graph.js";
 // Use fixtures provider for deterministic, fast tests
 vi.stubEnv("LLM_PROVIDER", "fixtures");
 
-describe("Determinism - Stable Edge IDs (v04)", () => {
+// Skipped: v0 /assist/draft-graph route archived — returns 410 Gone. Tests should target /assist/v1/draft-graph
+// TODO: ISSUE-9009 — v04 grounding/determinism integration parked
+describe.skip("Determinism - Stable Edge IDs (v04)", () => {
   let app: ReturnType<typeof Fastify>;
 
   beforeAll(async () => {

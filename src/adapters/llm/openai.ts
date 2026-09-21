@@ -1,89 +1,40 @@
 import OpenAI from "openai";
-import { z } from "zod";
 import { Agent, setGlobalDispatcher } from "undici";
-import type { DocPreview } from "../../services/docProcessing.js";
-import { HTTP_CLIENT_TIMEOUT_MS, REASONING_MODEL_TIMEOUT_MS } from "../../config/timeouts.js";
+import { HTTP_CLIENT_TIMEOUT_MS, REASONING_MODEL_TIMEOUT_MS, UNDICI_CONNECT_TIMEOUT_MS } from "../../config/timeouts.js";
 import { config } from "../../config/index.js";
 import type { GraphT, NodeT, EdgeT } from "../../schemas/graph.js";
-import { ProvenanceSource, NodeKind, StructuredProvenance, NodeData } from "../../schemas/graph.js";
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../config/graphCaps.js";
 import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
 import { formatEdgeId } from "../../cee/corrections.js";
 import { withRetry } from "../../utils/retry.js";
-import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, SuggestOptionsResult, RepairGraphArgs, RepairGraphResult, CallOpts } from "./types.js";
-import { UpstreamTimeoutError, UpstreamHTTPError } from "./errors.js";
+import {
+  retryConfigForLiveEval,
+  sdkMaxRetriesForLiveEval,
+} from './live-eval-retry-policy.js';
+import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, SuggestOptionsResult, CallOpts, ChatArgs, ChatResult, ChatWithToolsArgs, ChatWithToolsResult, ToolResponseBlock } from "./types.js";
+import { UpstreamTimeoutError, UpstreamHTTPError, UpstreamNonJsonError } from "./errors.js";
 import { makeIdempotencyKey } from "./idempotency.js";
 import { generateDeterministicLayout } from "../../utils/layout.js";
-import { normaliseDraftResponse, ensureControllableFactorBaselines } from "./normalisation.js";
+import { normaliseDraftResponse, ensureControllableFactorBaselines, stripModelAuthoredGoalThreshold } from "./normalisation.js";
+import { contentDigest } from "../../utils/redaction.js";
+import { captureCheckpoint, type PipelineCheckpoint } from "../../cee/pipeline-checkpoints.js";
 import { getMaxTokensFromConfig } from "./router.js";
-import { getSystemPrompt, getSystemPromptMeta } from './prompt-loader.js';
+import { resolveDraftMaxTokens, isDraftTruncated, buildFailedCallLlmMeta } from "./draft-budget.js";
+import { wrapUntrusted } from "./untrusted-envelope.js";
+import {
+  getSystemPrompt,
+  getSystemPromptMeta,
+  getSystemPromptSnapshot,
+  invalidatePromptCache,
+} from './prompt-loader.js';
 import { isReasoningModel } from "../../config/models.js";
+import {
+  LLMDraftResponse as OpenAIDraftResponse,
+  LLMOptionsResponse as OpenAIOptionsResponse,
+  LLMClarifyResponse as OpenAIClarifyResponse,
+} from './shared-schemas.js';
 
-// ============================================================================
-// Zod schemas for OpenAI response validation (same as Anthropic)
-const OpenAINode = z.object({
-  id: z.string().min(1),
-  kind: NodeKind,
-  label: z.string().optional(),
-  body: z.string().max(200).optional(),
-  // Node data depends on kind: FactorData for factors, OptionData (interventions) for options
-  data: NodeData.optional(),
-});
-
-// V4 edge strength schema (nested object from LLM)
-const EdgeStrength = z.object({
-  mean: z.number(),
-  std: z.number().positive(),
-}).optional();
-
-const OpenAIEdge = z.object({
-  from: z.string().min(1),
-  to: z.string().min(1),
-  // V4 format (preferred) - from v4 prompt (nested)
-  strength: EdgeStrength,
-  exists_probability: z.number().min(0).max(1).optional(),
-  // V4 format (flat) - added by normaliseDraftResponse()
-  strength_mean: z.number().optional(),
-  strength_std: z.number().optional(),
-  belief_exists: z.number().optional(),
-  effect_direction: z.enum(["positive", "negative"]).optional(),
-  // Legacy format (deprecated, for backwards compatibility during transition)
-  weight: z.number().optional(),
-  belief: z.number().min(0).max(1).optional(),
-  provenance: StructuredProvenance.optional(),
-  provenance_source: ProvenanceSource.optional(),
-});
-
-const OpenAIDraftResponse = z.object({
-  nodes: z.array(OpenAINode),
-  edges: z.array(OpenAIEdge),
-  rationales: z.array(z.object({ target: z.string(), why: z.string() })).optional(),
-});
-
-const OpenAIOptionsResponse = z.object({
-  options: z.array(
-    z.object({
-      id: z.string().min(1),
-      title: z.string().min(3),
-      pros: z.array(z.string()).min(2).max(3),
-      cons: z.array(z.string()).min(2).max(3),
-      evidence_to_gather: z.array(z.string()).min(2).max(3),
-    })
-  ),
-});
-
-const OpenAIClarifyResponse = z.object({
-  questions: z.array(
-    z.object({
-      question: z.string().min(10),
-      choices: z.array(z.string()).optional(),
-      why_we_ask: z.string().min(20),
-      impacts_draft: z.string().min(20),
-    })
-  ).min(1).max(5),
-  confidence: z.number().min(0).max(1),
-  should_continue: z.boolean(),
-});
+// Schemas imported from shared-schemas.ts (OpenAINode, OpenAIEdge, etc.)
 
 // Use centralized config for API key (lazy access via getter)
 function getApiKey(): string | undefined {
@@ -96,7 +47,7 @@ function getApiKey(): string | undefined {
 // Note: OpenAI SDK v6 uses fetch API, so we set global undici dispatcher
 const undiciAgent = new Agent({
   connect: {
-    timeout: 3000, // 3s
+    timeout: UNDICI_CONNECT_TIMEOUT_MS,
   },
   headersTimeout: HTTP_CLIENT_TIMEOUT_MS,
   bodyTimeout: HTTP_CLIENT_TIMEOUT_MS,
@@ -107,14 +58,20 @@ setGlobalDispatcher(undiciAgent);
 
 // Lazy initialization to allow testing without API key
 let client: OpenAI | null = null;
+let clientSdkMaxRetries: number | undefined;
 
 function getClient(): OpenAI {
   const apiKey = getApiKey();
+  const sdkMaxRetries = sdkMaxRetriesForLiveEval();
   if (!apiKey) {
     throw new Error("OPENAI_API_KEY environment variable is required but not set");
   }
-  if (!client) {
-    client = new OpenAI({ apiKey });
+  if (!client || clientSdkMaxRetries !== sdkMaxRetries) {
+    client = new OpenAI({
+      apiKey,
+      ...(sdkMaxRetries === undefined ? {} : { maxRetries: sdkMaxRetries }),
+    });
+    clientSdkMaxRetries = sdkMaxRetries;
   }
   return client;
 }
@@ -130,33 +87,124 @@ function getTimeoutForModel(model: string): number {
 }
 
 /**
+ * Options for building model-specific parameters.
+ */
+export interface BuildModelParamsOptions {
+  /** Max tokens override (uses model default if not specified) */
+  maxTokens?: number;
+  /** Reasoning effort for reasoning models (defaults to "medium") */
+  reasoningEffort?: "low" | "medium" | "high";
+}
+
+/**
+ * Explicit allowlist of legacy models that use max_tokens.
+ * All other models (including unknown future models) will use max_completion_tokens.
+ *
+ * Using an explicit allowlist is safer than pattern matching because:
+ * - New gpt-4.x variants (4.2, 4.3, etc.) will correctly default to max_completion_tokens
+ * - We only keep legacy behavior for known, specific models
+ */
+const LEGACY_MAX_TOKENS_MODELS = new Set([
+  // GPT-3.5 family
+  'gpt-3.5-turbo',
+  'gpt-3.5-turbo-0125',
+  'gpt-3.5-turbo-1106',
+  'gpt-3.5-turbo-16k',
+  'gpt-3.5-turbo-instruct',
+  // GPT-4 base
+  'gpt-4',
+  'gpt-4-32k',
+  // GPT-4 Turbo
+  'gpt-4-turbo',
+  'gpt-4-turbo-preview',
+  'gpt-4-turbo-2024-04-09',
+  'gpt-4-1106-preview',
+  'gpt-4-0125-preview',
+  // GPT-4o family (last generation before max_completion_tokens requirement)
+  'gpt-4o',
+  'gpt-4o-mini',
+  'gpt-4o-2024-05-13',
+  'gpt-4o-2024-08-06',
+  'gpt-4o-2024-11-20',
+  'gpt-4o-mini-2024-07-18',
+]);
+
+/**
+ * Check if a model requires max_completion_tokens instead of max_tokens.
+ *
+ * OpenAI's newer models (gpt-4.1*, gpt-5*, o1*, o3*, o4*) reject the max_tokens
+ * parameter with 400: "Use 'max_completion_tokens' instead."
+ *
+ * For safety, we default to max_completion_tokens for any unknown model,
+ * as future OpenAI models will likely require it.
+ *
+ * @param model - The model ID to check
+ * @returns true if the model requires max_completion_tokens
+ */
+export function requiresMaxCompletionTokens(model: string): boolean {
+  // Explicit allowlist of legacy models that use max_tokens
+  if (LEGACY_MAX_TOKENS_MODELS.has(model)) {
+    return false;
+  }
+
+  // All other models (gpt-4.1*, gpt-4.2*, gpt-5*, o1*, o3*, o4*, and unknown future models)
+  // use max_completion_tokens
+  return true;
+}
+
+/**
  * Build model-specific parameters for OpenAI API calls.
- * Reasoning models require different parameters than standard models.
+ *
+ * Model parameter compatibility:
+ * - Reasoning models (o1*, o3*, gpt-5.2): use reasoning_effort + max_completion_tokens, no temperature/top_p/seed
+ * - Newer non-reasoning models (gpt-4.1*, gpt-5-mini): use max_completion_tokens only, no temperature/top_p/seed
+ *   (these models reject temperature=0 with 400 errors)
+ * - Legacy models (gpt-3.5*, gpt-4o, gpt-4-turbo): use temperature + max_tokens
  *
  * @param model - The model ID being used
- * @param temperature - The temperature value for non-reasoning models
- * @param maxTokens - The max tokens value
+ * @param temperature - The temperature value (only used for legacy models)
+ * @param options - Optional parameters including maxTokens and reasoningEffort
  * @returns Object with appropriate parameters for the model type
  */
 /** @internal Exported for testing only */
 export function buildModelParams(
   model: string,
   temperature: number,
-  maxTokens?: number
+  options?: BuildModelParamsOptions
 ): {
   temperature?: number;
   max_tokens?: number;
   max_completion_tokens?: number;
   reasoning_effort?: "low" | "medium" | "high";
 } {
+  const maxTokens = options?.maxTokens;
+  const reasoningEffort = options?.reasoningEffort ?? "medium";
+  const usesMaxCompletionTokens = requiresMaxCompletionTokens(model);
+
+  // Log which token parameter will be used for observability
+  const tokenParam = usesMaxCompletionTokens ? 'max_completion_tokens' : 'max_tokens';
+  log.debug({
+    event: 'openai.token_param',
+    model,
+    param: tokenParam,
+    includes_temperature: !usesMaxCompletionTokens,
+  }, `Using ${tokenParam} for model ${model}`);
+
   if (isReasoningModel(model)) {
-    // Reasoning models: use reasoning_effort, omit temperature, use max_completion_tokens
+    // Reasoning models: use reasoning_effort, omit temperature/top_p/seed, use max_completion_tokens
     return {
-      reasoning_effort: "medium",
+      reasoning_effort: reasoningEffort,
+      ...(maxTokens ? { max_completion_tokens: maxTokens } : {}),
+    };
+  } else if (usesMaxCompletionTokens) {
+    // Newer non-reasoning models (gpt-4.1*, gpt-5-mini, etc.):
+    // Omit temperature/top_p/seed - these models reject temperature=0 and other sampling params
+    // Only send max_completion_tokens
+    return {
       ...(maxTokens ? { max_completion_tokens: maxTokens } : {}),
     };
   } else {
-    // Standard models: use temperature and max_tokens
+    // Legacy models (gpt-3.5*, gpt-4o, gpt-4-turbo): use temperature and max_tokens
     return {
       temperature,
       ...(maxTokens ? { max_tokens: maxTokens } : {}),
@@ -164,51 +212,15 @@ export function buildModelParams(
   }
 }
 
-function buildRepairPrompt(graph: GraphT, violations: string[]): string {
-  return `You are fixing validation errors in a decision graph.
-
-## Current Graph (INVALID)
-${JSON.stringify(graph, null, 2)}
-
-## Validation Errors
-${violations.map((v, i) => `${i + 1}. ${v}`).join("\n")}
-
-## Your Task
-Fix ALL violations while preserving as much structure as possible:
-- Remove cycles (make it a DAG)
-- Remove edges referencing non-existent nodes
-- Cap at ${GRAPH_MAX_NODES} nodes and ${GRAPH_MAX_EDGES} edges
-- Maintain structured provenance on all edges
-- Keep stable node IDs (don't change IDs unless necessary)
-
-## CRITICAL: Edge Direction Rules
-Edges represent CAUSAL influence: "from" node CAUSES or INFLUENCES "to" node.
-
-**The goal node MUST be a TERMINAL SINK with ZERO outgoing edges.**
-
-Correct directions:
-- decision → option (frames options)
-- option → outcome (leads to outcome)
-- outcome → goal (contributes to goal)
-- factor → option (affects viability)
-- risk → goal (detracts from goal)
-
-**WRONG directions to FIX:**
-- goal → anything (reverse these edges or remove)
-- outcome → option (reverse or remove)
-
-## Output Format (JSON)
-Return ONLY the repaired graph as valid JSON:
-{
-  "nodes": [...],
-  "edges": [...],
-  "rationales": [{"target": "node_id", "why": "why this fix was needed"}]
-}
-
-IMPORTANT: Return ONLY the JSON object, no markdown formatting`;
-}
-
-function buildSuggestOptionsPrompt(goal: string, constraints?: Record<string, unknown>, existingOptions?: string[]): string {
+/**
+ * User-owned context for suggest_options. The governing instructions are the
+ * exact PMS/default snapshot and are sent separately as the system message.
+ */
+function buildSuggestOptionsUserContent(
+  goal: string,
+  constraints?: Record<string, unknown>,
+  existingOptions?: string[],
+): string {
   const existingContext = existingOptions?.length
     ? `\n\n## Existing Options\nAvoid duplicating these:\n${existingOptions.map((o) => `- ${o}`).join("\n")}`
     : "";
@@ -217,43 +229,14 @@ function buildSuggestOptionsPrompt(goal: string, constraints?: Record<string, un
     ? `\n\n## Constraints\n${JSON.stringify(constraints, null, 2)}`
     : "";
 
-  return `You are an expert at generating strategic options for decisions.
-
-## Goal
-${goal}
-${constraintsContext}${existingContext}
-
-## Your Task
-Generate 3-5 distinct, actionable options. For each option provide:
-- id: short lowercase identifier (e.g., "extend_trial", "in_app_nudges")
-- title: concise name (3-8 words)
-- pros: 2-3 advantages
-- cons: 2-3 disadvantages or risks
-- evidence_to_gather: 2-3 data points or metrics to collect
-
-IMPORTANT: Each option must be distinct. Do not duplicate existing options or create near-duplicates.
-
-## Output Format (JSON)
-Return ONLY valid JSON:
-{
-  "options": [
-    {
-      "id": "opt_1",
-      "title": "Option Title",
-      "pros": ["Pro 1", "Pro 2"],
-      "cons": ["Con 1", "Con 2"],
-      "evidence_to_gather": ["Metric 1", "Metric 2"]
-    }
-  ]
-}
-
-Return ONLY the JSON object, no markdown formatting`;
+  return `## Goal\n${goal}${constraintsContext}${existingContext}`;
 }
 
 function buildClarifyBriefPrompt(
   brief: string,
   round: number,
-  previousAnswers?: Array<{ question: string; answer: string }>
+  previousAnswers?: Array<{ question: string; answer: string }>,
+  currencyInstruction?: string,
 ): string {
   const previousContext = previousAnswers?.length
     ? `\n\n## Previous Q&A (Round ${round - 1})\n${previousAnswers
@@ -265,11 +248,13 @@ function buildClarifyBriefPrompt(
     ? `This is clarification round ${round}. Build on previous answers to deepen understanding.`
     : "This is the first round of clarification.";
 
+  const currencyContext = currencyInstruction ?? "";
+
   return `You are an expert decision coach helping to clarify a decision brief before drafting a decision graph.
 
 ## User's Brief
 ${brief}
-${previousContext}
+${previousContext}${currencyContext}
 
 ## Context
 ${roundContext}
@@ -322,8 +307,19 @@ Return ONLY the JSON object, no markdown formatting`;
  */
 const RAW_LLM_OUTPUT_MAX_CHARS = 50000;
 
-const RAW_LLM_TEXT_MAX_CHARS = 10_000;
 const RAW_LLM_PREVIEW_MAX_CHARS = 500;
+
+// Compliance reminder appended to the user message for initial draft generation only.
+// Reinforces critical structural rules at the point of generation (not in the system prompt).
+// Controlled by CEE_DRAFT_COMPLIANCE_REMINDER_ENABLED (default: true).
+// EXPORTED (content unchanged) so the estate drift check can assert this copy
+// stays byte-identical to the Anthropic adapter's — see
+// tests/unit/prompt-estate-drift.test.ts.
+export const DRAFT_COMPLIANCE_REMINDER = `\n\nCOMPLIANCE REMINDER:
+- Output valid JSON only (no comments, no text outside the JSON object)
+- Every outcome and risk needs an inbound path from a controllable factor
+- Every option needs a complete path to goal: option → controllable → outcome/risk → goal
+- 2–6 options maximum`;
 
 /**
  * Truncate raw LLM output for debug tracing.
@@ -342,13 +338,43 @@ function truncateRawOutput(raw: unknown): { output: unknown; truncated: boolean 
   };
 }
 
+/**
+ * Parse JSON with upstream error wrapping.
+ * Converts SyntaxError from JSON.parse into a typed UpstreamNonJsonError
+ * so the pipeline can classify it as a 502 upstream failure.
+ */
+function safeParseJson(
+  content: string,
+  operation: string,
+  elapsedMs: number,
+  requestId?: string,
+): any {
+  try {
+    return JSON.parse(content);
+  } catch (cause) {
+    throw new UpstreamNonJsonError(
+      `openai ${operation} returned non-JSON response`,
+      "openai",
+      operation,
+      elapsedMs,
+      content.slice(0, 500),
+      undefined,
+      undefined,
+      requestId,
+      cause,
+    );
+  }
+}
+
 function sortGraph(graph: { nodes: NodeT[]; edges: EdgeT[] }): { nodes: NodeT[]; edges: EdgeT[] } {
   const nodesSorted = [...graph.nodes].sort((a, b) => a.id.localeCompare(b.id));
 
-  // Assign stable IDs to edges if missing
+  // Assign stable IDs to edges if missing + legacy fallbacks (aligned with Anthropic adapter)
   const edgesWithIds = graph.edges.map((edge, idx) => ({
     ...edge,
     id: edge.id || `${edge.from}::${edge.to}::${idx}`,
+    weight: edge.weight ?? edge.strength_mean,
+    belief: edge.belief ?? edge.belief_exists,
   }));
 
   const edgesSorted = [...edgesWithIds].sort((a, b) => {
@@ -378,28 +404,61 @@ export class OpenAIAdapter implements LLMAdapter {
   async draftGraph(args: DraftGraphArgs, opts: CallOpts): Promise<DraftGraphResult> {
     const { brief, docs = [], seed } = args;
     const collector = opts.collector;
+    const preloadedDraftPrompt =
+      opts.preloadedSystemPrompt?.operation === 'draft_graph'
+        ? opts.preloadedSystemPrompt
+        : undefined;
+
+    // Cache bypass support: invalidate and force fresh load from Supabase
+    if (opts.bypassCache && !preloadedDraftPrompt) {
+      invalidatePromptCache('draft_graph', 'header_refresh');
+      log.info({ taskId: 'draft_graph' }, 'Prompt cache invalidated via bypass flag (OpenAI)');
+    }
 
     // V4: Use shared prompt management system (same as Anthropic adapter)
-    const systemPrompt = getSystemPrompt('draft_graph');
-    const promptMeta = getSystemPromptMeta('draft_graph');
+    // If forceDefault is true, skip store/cache and use hardcoded default directly
+    const systemPrompt = preloadedDraftPrompt
+      ? preloadedDraftPrompt.content
+      : await getSystemPrompt('draft_graph', { forceDefault: opts.forceDefault });
+    const promptMeta = preloadedDraftPrompt
+      ? preloadedDraftPrompt.meta
+      : getSystemPromptMeta('draft_graph');
 
-    // Build user content with brief and documents
-    const docContext = docs.length
-      ? `\n\n## Attached Documents\n${docs
-          .map((d) => {
-            const locationInfo = d.locationHint ? ` (${d.locationHint})` : "";
-            return `**${d.source}** (${d.type}${locationInfo}):\n${d.preview}`;
-          })
-          .join("\n\n")}`
-      : "";
-    const userContent = `## Brief\n${brief}${docContext}`;
+    // Build user content with brief and documents (defense-in-depth 60k cap)
+    let docContext = "";
+    if (docs.length) {
+      const parts: string[] = [];
+      let totalLen = 0;
+      for (const d of docs) {
+        const locationInfo = d.locationHint ? ` (${d.locationHint})` : "";
+        const part = `**${d.source}** (${d.type}${locationInfo}):\n${d.preview}`;
+        totalLen += part.length;
+        if (totalLen > 60_000) {
+          log.warn({ totalLen, docCount: docs.length }, "Document context exceeded adapter-level cap; truncating");
+          break;
+        }
+        parts.push(part);
+      }
+      if (parts.length) {
+        docContext = "\n\n" + wrapUntrusted("## Attached Documents", parts.join("\n\n"));
+      }
+    }
+    const complianceReminder = config.cee.draftComplianceReminderEnabled ? DRAFT_COMPLIANCE_REMINDER : "";
+    const briefSignalsHeader = args.briefSignalsHeader ?? "";
+    const currencyInstruction = args.currencyInstruction ?? "";
+    // System-side corrective directive (lean-retry / strength-default nudge),
+    // OUTSIDE the untrusted markers — parity with the Anthropic adapter's P2
+    // fix so this path does not silently drop the directive now that it is
+    // threaded via systemDirective rather than concatenated into `brief`.
+    const systemDirective = args.systemDirective ? `\n\n${args.systemDirective}` : "";
+    const userContent = `${wrapUntrusted("## Brief", brief)}${docContext}${complianceReminder}${briefSignalsHeader}${currencyInstruction}${systemDirective}`;
 
     // V04: Generate idempotency key for request traceability
     const idempotencyKey = makeIdempotencyKey();
     const startTime = Date.now();
 
     log.info(
-      { brief_chars: brief.length, doc_count: docs.length, model: this.model, provider: 'openai', idempotency_key: idempotencyKey },
+      { brief_chars: brief.length, doc_count: docs.length, model: this.model, provider: 'openai', idempotency_key: idempotencyKey, prompt_id: promptMeta.taskId, prompt_hash: promptMeta.prompt_hash, prompt_source: promptMeta.source },
       "calling OpenAI for draft"
     );
 
@@ -407,10 +466,30 @@ export class OpenAIAdapter implements LLMAdapter {
     const effectiveTimeout = opts.timeoutMs || getTimeoutForModel(this.model);
     const timeoutId = setTimeout(() => abortController.abort(), effectiveTimeout);
 
+    // Wire external abort signal (e.g. client disconnect) to abort the in-flight request
+    const externalSignal = opts.signal ?? opts.abortSignal;
+    let onExternalAbort: (() => void) | undefined;
+    if (externalSignal && !externalSignal.aborted) {
+      onExternalAbort = () => abortController.abort();
+      externalSignal.addEventListener("abort", onExternalAbort, { once: true });
+    } else if (externalSignal?.aborted) {
+      abortController.abort();
+    }
+
     try {
       const apiClient = getClient();
-      const maxTokens = getMaxTokensFromConfig('draft_graph');
-      const modelParams = buildModelParams(this.model, 0, maxTokens);
+      // Derive the draft token cap from the call-site timeout — the SAME
+      // affordability mechanism the Anthropic path uses (ROADMAP 2.90, Codex #9).
+      // Previously this sent the raw configured value or NO cap at all
+      // (getMaxTokensFromConfig returns undefined when unset → buildModelParams
+      // omits the cap), so a runaway OpenAI draft could hang to the timeout
+      // exactly as the Anthropic one did before #585. The effective value is
+      // always ≥ 1, so a cap is now ALWAYS sent.
+      const {
+        affordable: affordableDraftTokens,
+        effective: maxTokens,
+      } = resolveDraftMaxTokens(effectiveTimeout);
+      const modelParams = buildModelParams(this.model, 0, { maxTokens });
       const temperature = 'temperature' in modelParams
         ? (modelParams as any).temperature as number
         : undefined;
@@ -455,6 +534,9 @@ export class OpenAIAdapter implements LLMAdapter {
       );
 
       clearTimeout(timeoutId);
+      if (onExternalAbort && externalSignal) {
+        externalSignal.removeEventListener("abort", onExternalAbort);
+      }
       const _elapsedMs = Date.now() - startTime;
 
       const content = response.choices[0]?.message?.content;
@@ -465,17 +547,132 @@ export class OpenAIAdapter implements LLMAdapter {
 
       const finishReason = response.choices[0]?.finish_reason;
 
+      // TERMINAL-COMPLETION POLICY (ROADMAP 2.90, Codex #9): finish_reason=length
+      // is OpenAI's truncation signal — the cross-provider analogue of Anthropic's
+      // stop_reason=max_tokens, normalised in the shared seam (isDraftTruncated).
+      // With max_tokens now DERIVED from the timeout, a runaway generation RETURNS
+      // truncated inside the window instead of hanging to it. Policy (same as
+      // Anthropic, per the recorded A1 call): accept the truncated draft if it
+      // still parses+validates; otherwise fail FAST and TYPED (truncated_at_max_tokens)
+      // so the runaway case is diagnosable rather than looking like generic non-JSON.
+      const truncatedAtMaxTokens = isDraftTruncated(finishReason);
+      // Same shape as the Anthropic failure meta, built by the SAME function
+      // (draft-budget.ts is already the cross-provider draft seam). It was a
+      // seventh hand-copy; a key added for one provider silently skipped the
+      // other. Streaming-only keys are absent here because the OpenAI draft path
+      // is not streamed — an honest absence, not a mirrored zero.
+      const failedCallLlmMeta = buildFailedCallLlmMeta({
+        model: this.model,
+        promptVersion: promptMeta.prompt_version,
+        promptHash: promptMeta.prompt_hash,
+        temperature,
+        providerLatencyMs: _elapsedMs,
+        finishReason: typeof finishReason === 'string' ? finishReason : undefined,
+        tokenUsage: {
+          prompt_tokens: response.usage?.prompt_tokens ?? 0,
+          completion_tokens: response.usage?.completion_tokens ?? 0,
+          total_tokens: response.usage?.total_tokens ?? ((response.usage?.prompt_tokens ?? 0) + (response.usage?.completion_tokens ?? 0)),
+        },
+      });
+      if (truncatedAtMaxTokens) {
+        log.error({
+          event: "cee.llm.draft_truncated_max_tokens",
+          model: this.model,
+          max_tokens: maxTokens,
+          affordable_tokens: affordableDraftTokens,
+          output_tokens: response.usage?.completion_tokens ?? 0,
+          timeout_ms: effectiveTimeout,
+          provider_latency_ms: _elapsedMs,
+        }, "[OpenAI] draft_graph generation hit finish_reason=length — runaway generation truncated by the derived token budget instead of hanging to the timeout (2026-07-20 outage class)");
+      }
+
       // Parse, normalise non-standard node kinds, ensure factor baselines, then validate with Zod
-      const rawJson = JSON.parse(content);
+      let rawJson: any;
+      try {
+        rawJson = safeParseJson(content, "draft_graph", _elapsedMs, idempotencyKey);
+      } catch (parseErr) {
+        if (truncatedAtMaxTokens) {
+          throw Object.assign(
+            new UpstreamNonJsonError(
+              `openai draft_graph output truncated at max_tokens=${maxTokens} (finish_reason=length, ` +
+              `output_tokens=${response.usage?.completion_tokens ?? 0}) — runaway generation returned truncated JSON ` +
+              `inside the ${effectiveTimeout}ms timeout instead of hanging to it`,
+              "openai",
+              "draft_graph",
+              _elapsedMs,
+              content.slice(0, 500),
+              undefined,
+              undefined,
+              idempotencyKey,
+              parseErr,
+            ),
+            { _llm_meta: failedCallLlmMeta, truncated_at_max_tokens: true },
+          );
+        }
+        if (parseErr instanceof Error && !(parseErr as { _llm_meta?: unknown })._llm_meta) {
+          Object.assign(parseErr, { _llm_meta: failedCallLlmMeta });
+        }
+        throw parseErr;
+      }
       const rawNodeKinds = Array.isArray((rawJson as any)?.nodes)
         ? ((rawJson as any).nodes as any[])
           .map((n: any) => n?.kind ?? n?.type ?? 'unknown')
           .filter(Boolean)
         : [];
+      // ROADMAP 2.281 — the goal-threshold contract is CEE-minted, and on THIS
+      // path the strip is load-bearing: arm (b) of
+      // `__tests__/projector-goal-target-survives-draft.test.ts` REDs if it goes.
+      //
+      // ⚠ WHAT IS PINNED HERE IS THE WIRING, AND ONLY THE WIRING.
+      // `tests/unit/cee.goal-threshold-enricher-only-mint.test.ts` §D asserts
+      // that this file holds exactly one CALL of
+      // `stripModelAuthoredGoalThreshold` and exactly one CALL of
+      // `normaliseDraftResponse`, and that the strip runs before the
+      // normalisation.
+      //
+      // ⚠ §D COUNTS BY SCANNING THIS FILE'S TEXT — each symbol followed by an
+      // open paren — so COMMENTS IN THIS FILE ARE LOAD-BEARING: naming either
+      // symbol in call form in prose takes its count to 2 and REDs §D. Measured,
+      // not guessed — an earlier draft of this very comment did exactly that and
+      // the required check went red on it. Write them as bare symbols in prose.
+      //
+      // ⚠ WHAT IS NOT PINNED: that nothing above this line can mint a goal
+      // field. No assertion covers that. (§D's "the model IS the only possible
+      // author" is a failure-message string, not a check.) It could stop being
+      // true with nothing going red, so this comment does not claim it.
+      //
+      // ⚠ ADDRESS CORRECTED. This comment used to name "the repair_graph site
+      // (:1215)" as the contrasting seam that deliberately does not strip.
+      // ROADMAP 2.763 retired the LLM repair seam; the one-call assertion above
+      // is the durable form of that count, which is why this comment now carries
+      // no line number of its own. The live contrast is `anthropic.ts`, which
+      // does NOT strip — §D asserts zero calls there, with the presence of the
+      // `projectDraftRecords` seam pinned in-test as its precondition. See the
+      // comment at that seam.
+      const strippedGoal = stripModelAuthoredGoalThreshold(rawJson);
+      if (strippedGoal.nodeIds.length > 0) {
+        log.info({
+          event: "cee.draft.model_authored_goal_threshold_stripped",
+          node_ids: strippedGoal.nodeIds,
+          fields: strippedGoal.fields,
+        }, "Discarded a model-authored goal-threshold contract from the draft — the enricher is the only mint (2.281)");
+      }
       const normalised = normaliseDraftResponse(rawJson);
-      const { response: withBaselines, defaultedFactors } = ensureControllableFactorBaselines(normalised);
-      if (defaultedFactors.length > 0) {
-        log.info({ defaultedFactors }, `Defaulted baseline values for ${defaultedFactors.length} controllable factor(s)`);
+
+      // Pipeline checkpoint: post_adapter_normalisation (after normaliseDraftResponse)
+      const checkpointsEnabled = config.cee.pipelineCheckpointsEnabled;
+      const adapterCheckpoints: PipelineCheckpoint[] = [];
+      if (checkpointsEnabled) {
+        adapterCheckpoints.push(
+          captureCheckpoint('post_adapter_normalisation', normalised, {
+            includeNestedStrengthDetection: true,
+          }),
+        );
+      }
+
+      const { response: withBaselines, unquantifiedFactors } = ensureControllableFactorBaselines(normalised);
+      if (unquantifiedFactors.length > 0) {
+        log.info({ unquantifiedFactors }, `Left ${unquantifiedFactors.length} controllable factor(s) explicitly unquantified rather than defaulting a baseline`);
       }
       const parseResult = OpenAIDraftResponse.safeParse(withBaselines);
 
@@ -497,7 +694,8 @@ export class OpenAIAdapter implements LLMAdapter {
           raw_node_kinds: Array.isArray(rawJson?.nodes)
             ? rawJson.nodes.map((n: any) => n?.kind).filter(Boolean)
             : [],
-          raw_output_sample: rawOutputSample,
+          // Digest raw model output — never place it on the wire verbatim (see contentDigest).
+          raw_output_sample: contentDigest(rawOutputSample),
           event: 'llm.validation.schema_failed'
         }, "OpenAI response failed schema validation after normalisation");
 
@@ -507,6 +705,30 @@ export class OpenAIAdapter implements LLMAdapter {
           .join('; ');
         const formIssues = (flatErrors.formErrors || []).join('; ');
         const details = [fieldIssues, formIssues].filter(Boolean).join(' | ');
+
+        // Truncation typing (ROADMAP 2.90, Codex #9): a generation cut at the
+        // derived token budget can still yield text the parser turns into a
+        // partial object that then fails HERE, at schema validation. Type it as
+        // truncation (matching the Anthropic path) so the pipeline's recovery-copy
+        // selection keys off the FLAG, not a brittle message-prefix match.
+        if (truncatedAtMaxTokens) {
+          throw Object.assign(
+            new UpstreamNonJsonError(
+              `openai draft_graph output truncated at max_tokens=${maxTokens} (finish_reason=length, ` +
+              `output_tokens=${response.usage?.completion_tokens ?? 0}) — runaway generation returned a partial ` +
+              `graph that failed schema validation inside the ${effectiveTimeout}ms timeout instead of hanging to it` +
+              (details ? ` (${details})` : ''),
+              "openai",
+              "draft_graph",
+              _elapsedMs,
+              rawOutputSample,
+              undefined,
+              undefined,
+              idempotencyKey,
+            ),
+            { _llm_meta: failedCallLlmMeta, truncated_at_max_tokens: true },
+          );
+        }
 
         throw new Error(`openai_response_invalid_schema: ${details || 'unknown validation error'}`);
       }
@@ -585,9 +807,8 @@ export class OpenAIAdapter implements LLMAdapter {
       const rawOutput = truncateRawOutput(rawJson);
 
       const unsafeCaptureEnabled = args.includeDebug === true && args.flags?.unsafe_capture === true;
-      const rawTextTruncated = content.length > RAW_LLM_TEXT_MAX_CHARS
-        ? content.slice(0, RAW_LLM_TEXT_MAX_CHARS)
-        : content;
+      // Full text preserved for debug bundle (no truncation — needed for prompt validation)
+      const rawTextFull = content;
       const rawPreview = content.length > RAW_LLM_PREVIEW_MAX_CHARS
         ? content.slice(0, RAW_LLM_PREVIEW_MAX_CHARS)
         : content;
@@ -601,6 +822,11 @@ export class OpenAIAdapter implements LLMAdapter {
       return {
         graph,
         rationales: parsed.rationales || [],
+        // Coaching passthrough: preserved via .passthrough() on LLMDraftResponse
+        ...((parsed as any).coaching ? { coaching: (parsed as any).coaching } : {}),
+        // Goal constraints passthrough: LLM-emitted constraints have richer metadata
+        // (source_quote, confidence, provenance) than the regex extractor.
+        ...((parsed as any).goal_constraints ? { goal_constraints: (parsed as any).goal_constraints } : {}),
         debug: unsafeCaptureEnabled ? {
           raw_llm_output: rawOutput.output,
           raw_llm_output_truncated: rawOutput.truncated,
@@ -608,7 +834,15 @@ export class OpenAIAdapter implements LLMAdapter {
         meta: {
           model: this.model,
           prompt_version: promptMeta.prompt_version,
+          prompt_text_version: promptMeta.source === 'store' && promptMeta.version
+            ? `v${promptMeta.version}`
+            : 'fallback-v19',
           prompt_hash: promptMeta.prompt_hash,
+          // Diagnostic fields for prompt cache debugging
+          instance_id: promptMeta.instance_id,
+          cache_age_ms: promptMeta.cache_age_ms,
+          cache_status: promptMeta.cache_status,
+          use_staging_mode: promptMeta.use_staging_mode,
           temperature,
           max_tokens: maxTokens,
           seed,
@@ -617,9 +851,13 @@ export class OpenAIAdapter implements LLMAdapter {
           finish_reason: typeof finishReason === 'string' ? finishReason : undefined,
           provider_latency_ms: _elapsedMs,
           node_kinds_raw_json: rawNodeKinds,
+          // Pipeline checkpoint / provenance fields
+          prompt_source: promptMeta.source,
+          prompt_store_version: promptMeta.version ?? null,
+          pipeline_checkpoints: checkpointsEnabled ? adapterCheckpoints : undefined,
           // Always include raw output for LLM observability trace (preview + full text for storage)
           raw_output_preview: rawPreview,
-          raw_llm_text: rawTextTruncated,
+          raw_llm_text: rawTextFull,
           // Only include parsed JSON when unsafe capture is enabled (admin-gated)
           ...(unsafeCaptureEnabled ? {
             raw_llm_json: rawOutput.output,
@@ -632,19 +870,28 @@ export class OpenAIAdapter implements LLMAdapter {
       };
     } catch (error) {
       clearTimeout(timeoutId);
+      if (onExternalAbort && externalSignal) {
+        externalSignal.removeEventListener("abort", onExternalAbort);
+      }
       const elapsedMs = Date.now() - startTime;
 
       if (error instanceof Error) {
         // V04: Throw typed UpstreamTimeoutError for timeout classification
         if (error.name === "AbortError" || abortController.signal.aborted) {
-          log.error({ timeout_ms: effectiveTimeout, elapsed_ms: elapsedMs }, "OpenAI draft call timed out");
+          // Distinguish external abort (client disconnect) from internal timeout
+          const isExternalAbort = externalSignal?.aborted === true;
+          const phase = isExternalAbort ? "pre_aborted" as const : "body" as const;
+          const msg = phase === "pre_aborted"
+            ? "OpenAI draft_graph aborted before LLM call started (possible client disconnect)"
+            : "OpenAI draft_graph timed out";
+          log.error({ timeout_ms: effectiveTimeout, elapsed_ms: elapsedMs, phase }, msg);
           throw new UpstreamTimeoutError(
-            "OpenAI draft_graph timed out",
+            msg,
             "openai",
             "draft_graph",
-            "body",
+            phase,
             elapsedMs,
-            error
+            { name: error.name, message: error.message }
           );
         }
 
@@ -664,7 +911,7 @@ export class OpenAIAdapter implements LLMAdapter {
             apiError.code || apiError.type,
             requestId,
             elapsedMs,
-            error
+            { name: error.name, message: error.message }
           );
         }
       }
@@ -676,13 +923,29 @@ export class OpenAIAdapter implements LLMAdapter {
 
   async suggestOptions(args: SuggestOptionsArgs, opts: CallOpts): Promise<SuggestOptionsResult> {
     const { goal, constraints, existingOptions } = args;
-    const prompt = buildSuggestOptionsPrompt(goal, constraints, existingOptions);
+    const preloadedSuggestPrompt =
+      opts.preloadedSystemPrompt?.operation === 'suggest_options'
+        ? opts.preloadedSystemPrompt
+        : await getSystemPromptSnapshot('suggest_options');
+    const userContent = buildSuggestOptionsUserContent(
+      goal,
+      constraints,
+      existingOptions,
+    );
 
     // V04: Generate idempotency key for request traceability
     const idempotencyKey = makeIdempotencyKey();
     const startTime = Date.now();
 
-    log.info({ goal_chars: goal.length, model: this.model, provider: 'openai', idempotency_key: idempotencyKey }, "calling OpenAI for options");
+    log.info({
+      goal_chars: goal.length,
+      model: this.model,
+      provider: 'openai',
+      idempotency_key: idempotencyKey,
+      prompt_id: preloadedSuggestPrompt.meta.taskId,
+      prompt_hash: preloadedSuggestPrompt.meta.prompt_hash,
+      prompt_source: preloadedSuggestPrompt.meta.source,
+    }, "calling OpenAI for options");
 
     const abortController = new AbortController();
     const effectiveTimeout = opts.timeoutMs || getTimeoutForModel(this.model);
@@ -691,7 +954,7 @@ export class OpenAIAdapter implements LLMAdapter {
     try {
       const apiClient = getClient();
       const maxTokens = getMaxTokensFromConfig('suggest_options');
-      const modelParams = buildModelParams(this.model, 0.7, maxTokens); // 0.7 for creativity in options
+      const modelParams = buildModelParams(this.model, 0.7, { maxTokens }); // 0.7 for creativity in options
 
       // Debug: Log model parameters for runtime validation
       log.debug({
@@ -711,7 +974,10 @@ export class OpenAIAdapter implements LLMAdapter {
           apiClient.chat.completions.create(
             {
               model: this.model,
-              messages: [{ role: "user", content: prompt }],
+              messages: [
+                { role: "system", content: preloadedSuggestPrompt.content },
+                { role: "user", content: userContent },
+              ],
               response_format: { type: "json_object" },
               ...modelParams,
             },
@@ -736,7 +1002,7 @@ export class OpenAIAdapter implements LLMAdapter {
         throw new Error("openai_empty_response");
       }
 
-      const rawJson = JSON.parse(content);
+      const rawJson = safeParseJson(content, "suggest_options", _elapsedMs, idempotencyKey);
       const parseResult = OpenAIOptionsResponse.safeParse(rawJson);
 
       if (!parseResult.success) {
@@ -794,209 +1060,14 @@ export class OpenAIAdapter implements LLMAdapter {
     }
   }
 
-  async repairGraph(args: RepairGraphArgs, opts: CallOpts): Promise<RepairGraphResult> {
-    const { graph, violations } = args;
-    const collector = opts.collector;
-    const prompt = buildRepairPrompt(graph, violations);
-
-    // V04: Generate idempotency key for request traceability
-    const idempotencyKey = makeIdempotencyKey();
-    const startTime = Date.now();
-
-    log.info({ violation_count: violations.length, model: this.model, provider: 'openai', idempotency_key: idempotencyKey }, "calling OpenAI for repair");
-
-    const abortController = new AbortController();
-    const effectiveTimeout = opts.timeoutMs || getTimeoutForModel(this.model);
-    const timeoutId = setTimeout(() => abortController.abort(), effectiveTimeout);
-
-    try {
-      const apiClient = getClient();
-      const maxTokens = getMaxTokensFromConfig('repair_graph');
-      const modelParams = buildModelParams(this.model, 0, maxTokens);
-
-      // Debug: Log model parameters for runtime validation
-      log.debug({
-        model: this.model,
-        reasoning: isReasoningModel(this.model),
-        params: {
-          has_temperature: 'temperature' in modelParams,
-          has_reasoning_effort: 'reasoning_effort' in modelParams,
-          has_max_completion_tokens: 'max_completion_tokens' in modelParams,
-          has_max_tokens: 'max_tokens' in modelParams,
-        },
-        timeout_ms: effectiveTimeout,
-      }, "[OpenAI] repair_graph request parameters");
-
-      const response = await withRetry(
-        async () =>
-          apiClient.chat.completions.create(
-            {
-              model: this.model,
-              messages: [{ role: "user", content: prompt }],
-              response_format: { type: "json_object" },
-              ...modelParams,
-            },
-            {
-              signal: abortController.signal as any,
-              headers: { "Idempotency-Key": idempotencyKey }, // V04: Add idempotency key
-            }
-          ),
-        {
-          adapter: "openai",
-          model: this.model,
-          operation: "repair_graph",
-        }
-      );
-
-      clearTimeout(timeoutId);
-      const _elapsedMs = Date.now() - startTime;
-
-      const content = response.choices[0]?.message?.content;
-      if (!content) {
-        log.error({ response }, "OpenAI returned empty content for repair");
-        throw new Error("openai_empty_response");
-      }
-
-      // Parse, normalise non-standard node kinds, ensure factor baselines, then validate with Zod
-      const rawJson = JSON.parse(content);
-      const normalised = normaliseDraftResponse(rawJson);
-      const { response: withBaselines, defaultedFactors: repairDefaultedFactors } = ensureControllableFactorBaselines(normalised);
-      if (repairDefaultedFactors.length > 0) {
-        log.info({ defaultedFactors: repairDefaultedFactors }, `Defaulted baseline values for ${repairDefaultedFactors.length} controllable factor(s) in repair`);
-      }
-      const parseResult = OpenAIDraftResponse.safeParse(withBaselines);
-
-      if (!parseResult.success) {
-        const flatErrors = parseResult.error.flatten();
-        log.error({
-          errors: flatErrors,
-          raw_node_kinds: Array.isArray(rawJson?.nodes)
-            ? rawJson.nodes.map((n: any) => n?.kind).filter(Boolean)
-            : [],
-          event: 'llm.validation.repair_schema_failed'
-        }, "OpenAI repair response failed schema validation after normalisation");
-
-        const fieldIssues = Object.entries(flatErrors.fieldErrors || {})
-          .map(([field, msgs]) => `${field}: ${(msgs as string[]).join(', ')}`)
-          .join('; ');
-        const formIssues = (flatErrors.formErrors || []).join('; ');
-        const details = [fieldIssues, formIssues].filter(Boolean).join(' | ');
-
-        throw new Error(`openai_repair_invalid_schema: ${details || 'unknown validation error'}`);
-      }
-
-      const parsed = parseResult.data;
-
-      // Cap node/edge counts
-      if (parsed.nodes.length > GRAPH_MAX_NODES) {
-        parsed.nodes = parsed.nodes.slice(0, GRAPH_MAX_NODES);
-      }
-
-      if (parsed.edges.length > GRAPH_MAX_EDGES) {
-        parsed.edges = parsed.edges.slice(0, GRAPH_MAX_EDGES);
-      }
-
-      // Filter edges to only valid node IDs (Stage 5: Dangling Edge Filter #1 - repair path)
-      const nodeIds = new Set(parsed.nodes.map((n) => n.id));
-      const danglingEdges = parsed.edges.filter((e) => !nodeIds.has(e.from) || !nodeIds.has(e.to));
-
-      if (danglingEdges.length > 0) {
-        log.warn({
-          event: "llm.repair.dangling_edges_removed",
-          removed_count: danglingEdges.length,
-          dangling_edges: danglingEdges.map((e) => ({
-            from: e.from,
-            to: e.to,
-            missing_from: !nodeIds.has(e.from),
-            missing_to: !nodeIds.has(e.to),
-          })).slice(0, 10),
-        }, `Repair: Removed ${danglingEdges.length} edge(s) with dangling node references`);
-
-        if (collector) {
-          for (const edge of danglingEdges) {
-            const missingNode = !nodeIds.has(edge.from) ? edge.from : edge.to;
-            collector.addByStage(
-              5,
-              "edge_removed",
-              { edge_id: formatEdgeId(edge.from, edge.to) },
-              `Node "${missingNode}" not found`,
-              edge,
-              null
-            );
-          }
-        }
-      }
-
-      const validEdges = parsed.edges.filter((e) => nodeIds.has(e.from) && nodeIds.has(e.to));
-
-      // Sort for determinism
-      const sorted = sortGraph({ nodes: parsed.nodes, edges: validEdges });
-
-      const repairedGraph: GraphT = {
-        ...graph,
-        nodes: sorted.nodes,
-        edges: sorted.edges,
-      };
-
-      return {
-        graph: repairedGraph,
-        rationales: parsed.rationales || [],
-        usage: {
-          input_tokens: response.usage?.prompt_tokens || 0,
-          output_tokens: response.usage?.completion_tokens || 0,
-        },
-      };
-    } catch (error) {
-      clearTimeout(timeoutId);
-      const elapsedMs = Date.now() - startTime;
-
-      if (error instanceof Error) {
-        // V04: Throw typed UpstreamTimeoutError for timeout classification
-        if (error.name === "AbortError" || abortController.signal.aborted) {
-          log.error({ timeout_ms: effectiveTimeout, elapsed_ms: elapsedMs }, "OpenAI repair call timed out");
-          throw new UpstreamTimeoutError(
-            "OpenAI repair_graph timed out",
-            "openai",
-            "repair_graph",
-            "body",
-            elapsedMs,
-            error
-          );
-        }
-
-        // V04: Check for OpenAI API errors (non-2xx responses)
-        if ('status' in error && typeof error.status === 'number') {
-          const apiError = error as any;
-          const requestId = apiError.headers?.['x-request-id'] || apiError.request_id;
-          log.error(
-            { status: apiError.status, request_id: requestId, elapsed_ms: elapsedMs },
-            "OpenAI API returned non-2xx status"
-          );
-          throw new UpstreamHTTPError(
-            `OpenAI repair_graph failed: ${apiError.message || 'unknown error'}`,
-            "openai",
-            apiError.status,
-            apiError.code || apiError.type,
-            requestId,
-            elapsedMs,
-            error
-          );
-        }
-      }
-
-      log.error({ error }, "OpenAI repair call failed");
-      throw error;
-    }
-  }
-
   async clarifyBrief(args: import("./types.js").ClarifyBriefArgs, opts: CallOpts): Promise<import("./types.js").ClarifyBriefResult> {
-    const { brief, round, previous_answers, seed } = args;
+    const { brief, round, previous_answers, seed, currencyInstruction } = args;
     const requestId = opts.requestId || `clarify-${Date.now()}`;
     const start = Date.now();
 
     log.info({ request_id: requestId, round, previous_answers_count: previous_answers?.length ?? 0 }, "Starting OpenAI clarify brief");
 
-    const prompt = buildClarifyBriefPrompt(brief, round, previous_answers);
+    const prompt = buildClarifyBriefPrompt(brief, round, previous_answers, currencyInstruction);
 
     const client = getClient();
     const effectiveTimeout = opts.timeoutMs || getTimeoutForModel(this.model);
@@ -1009,7 +1080,7 @@ export class OpenAIAdapter implements LLMAdapter {
       );
 
       const maxTokens = getMaxTokensFromConfig('clarify_brief') ?? 1500;
-      const modelParams = buildModelParams(this.model, 0.5, maxTokens); // 0.5 for consistent questions
+      const modelParams = buildModelParams(this.model, 0.5, { maxTokens }); // 0.5 for consistent questions
 
       // Debug: Log model parameters for runtime validation
       log.debug({
@@ -1077,7 +1148,17 @@ export class OpenAIAdapter implements LLMAdapter {
         rawJson = JSON.parse(jsonText);
       } catch (parseError) {
         log.error({ error: parseError, content: jsonText.slice(0, 500) }, "Failed to parse OpenAI clarify response as JSON");
-        throw new Error("openai_clarify_invalid_json: Response was not valid JSON");
+        throw new UpstreamNonJsonError(
+          "openai clarify_brief returned non-JSON response",
+          "openai",
+          "clarify_brief",
+          elapsedMs,
+          jsonText.slice(0, 500),
+          undefined,
+          undefined,
+          requestId,
+          parseError,
+        );
       }
 
       const parseResult = OpenAIClarifyResponse.safeParse(rawJson);
@@ -1202,5 +1283,383 @@ export class OpenAIAdapter implements LLMAdapter {
     // OpenAI provider does not yet support explainDiff
     // Switch to LLM_PROVIDER=anthropic to use this feature
     throw new Error("openai_explain_diff_not_supported: ExplainDiff endpoint requires LLM_PROVIDER=anthropic (OpenAI implementation pending)");
+  }
+
+  async chat(args: ChatArgs, opts: CallOpts): Promise<ChatResult> {
+    const maxTokens = args.maxTokens ?? 4096;
+    const temperature = args.temperature ?? 0;
+    const timeoutMs = opts.timeoutMs || getTimeoutForModel(this.model);
+
+    // V04: Generate idempotency key for request traceability
+    const idempotencyKey = opts.requestId || makeIdempotencyKey();
+    const startTime = Date.now();
+
+    log.info(
+      {
+        model: this.model,
+        max_tokens: maxTokens,
+        temperature,
+        system_chars: args.system.length,
+        user_chars: args.userMessage.length,
+        idempotency_key: idempotencyKey,
+      },
+      "calling OpenAI for chat completion"
+    );
+
+    const abortController = new AbortController();
+    const timeoutId = setTimeout(() => abortController.abort(), timeoutMs);
+
+    // M3 (Codex r2 pre-merge review): OpenAIAdapter.chat previously DROPPED
+    // CallOpts.signal, so an abort during a chat call (e.g. the decomposed
+    // decision_review monolith fallback on the default gpt-4.1 route) never
+    // cancelled the in-flight request — decompose.ts's "monolith honours
+    // options.signal" claim was false. Wire the external signal to the request
+    // abort controller exactly like draftGraph/repairGraph do.
+    const externalSignal = opts.signal ?? opts.abortSignal;
+    let onExternalAbort: (() => void) | undefined;
+    if (externalSignal && !externalSignal.aborted) {
+      onExternalAbort = () => abortController.abort();
+      externalSignal.addEventListener("abort", onExternalAbort, { once: true });
+    } else if (externalSignal?.aborted) {
+      abortController.abort();
+    }
+
+    try {
+      const apiClient = getClient();
+      const modelParams = buildModelParams(this.model, temperature, { maxTokens });
+
+      const response = await withRetry(
+        async () =>
+          apiClient.chat.completions.create(
+            {
+              model: this.model,
+              messages: [
+                { role: "system", content: args.system },
+                { role: "user", content: args.userMessage },
+              ],
+              ...modelParams,
+              ...(args.responseFormat === 'json_object' && { response_format: { type: "json_object" as const } }),
+            },
+            {
+              signal: abortController.signal as any,
+              headers: { "Idempotency-Key": idempotencyKey },
+            }
+          ),
+        {
+          adapter: "openai",
+          model: this.model,
+          operation: "chat",
+        }
+      );
+
+      clearTimeout(timeoutId);
+      if (onExternalAbort && externalSignal) {
+        externalSignal.removeEventListener("abort", onExternalAbort);
+      }
+      const latencyMs = Date.now() - startTime;
+
+      const content = response.choices[0]?.message?.content;
+      if (!content) {
+        log.error({ response }, "OpenAI returned empty content");
+        throw new Error("openai_empty_response");
+      }
+
+      log.info(
+        {
+          model: this.model,
+          latency_ms: latencyMs,
+          input_tokens: response.usage?.prompt_tokens ?? 0,
+          output_tokens: response.usage?.completion_tokens ?? 0,
+          content_chars: content.length,
+        },
+        "OpenAI chat completion successful"
+      );
+
+      return {
+        content,
+        model: this.model,
+        latencyMs,
+        // R7: surface the raw provider finish reason for per-turn observability.
+        stopReason: response.choices[0]?.finish_reason ?? null,
+        usage: {
+          input_tokens: response.usage?.prompt_tokens ?? 0,
+          output_tokens: response.usage?.completion_tokens ?? 0,
+        },
+      };
+    } catch (error: unknown) {
+      clearTimeout(timeoutId);
+      if (onExternalAbort && externalSignal) {
+        externalSignal.removeEventListener("abort", onExternalAbort);
+      }
+      const elapsedMs = Date.now() - startTime;
+
+      if (error instanceof Error) {
+        // V04: Throw typed UpstreamTimeoutError for timeout classification
+        if (error.name === "AbortError" || abortController.signal.aborted) {
+          // M3: distinguish an external/client abort from a genuine timeout so
+          // the repo-canonical `pre_aborted` phase reaches the classifiers.
+          const isExternalAbort = externalSignal?.aborted === true;
+          const phase = isExternalAbort ? "pre_aborted" as const : "body" as const;
+          log.error(
+            { timeout_ms: timeoutMs, elapsed_ms: elapsedMs, external_abort: isExternalAbort, phase },
+            isExternalAbort ? "OpenAI chat call aborted by external signal" : "OpenAI chat call timed out"
+          );
+          throw new UpstreamTimeoutError(
+            isExternalAbort ? "OpenAI chat aborted by external signal" : "OpenAI chat timed out",
+            "openai",
+            "chat",
+            phase,
+            elapsedMs,
+            error
+          );
+        }
+
+        // V04: Check for OpenAI API errors (non-2xx responses)
+        if ('status' in error && typeof error.status === 'number') {
+          const apiError = error as any;
+          const requestId = apiError.headers?.get?.('x-request-id') || apiError.request_id;
+          log.error(
+            { status: apiError.status, request_id: requestId, elapsed_ms: elapsedMs },
+            "OpenAI API returned non-2xx status"
+          );
+          throw new UpstreamHTTPError(
+            `OpenAI chat failed: ${apiError.message || 'unknown error'}`,
+            "openai",
+            apiError.status,
+            apiError.code || apiError.type,
+            requestId,
+            elapsedMs,
+            error
+          );
+        }
+      }
+
+      log.error({ error }, "OpenAI chat call failed");
+      throw error;
+    }
+  }
+
+  async chatWithTools(args: ChatWithToolsArgs, opts: CallOpts): Promise<ChatWithToolsResult> {
+    const maxTokens = args.maxTokens ?? 4096;
+    const temperature = args.temperature ?? 0;
+    const timeoutMs = opts.timeoutMs || getTimeoutForModel(this.model);
+
+    const idempotencyKey = opts.requestId || makeIdempotencyKey();
+    const startTime = Date.now();
+
+    log.info(
+      {
+        model: this.model,
+        max_tokens: maxTokens,
+        temperature,
+        system_chars: args.system.length,
+        message_count: args.messages.length,
+        tool_count: args.tools.length,
+        tool_names: args.tools.map(t => t.name),
+        idempotency_key: idempotencyKey,
+      },
+      "calling OpenAI for chat with tools"
+    );
+
+    const abortController = new AbortController();
+    const timeoutId = setTimeout(() => abortController.abort(), timeoutMs);
+
+    try {
+      const apiClient = getClient();
+      const modelParams = buildModelParams(this.model, temperature, { maxTokens });
+
+      // Convert messages: ToolResponseBlock[] content → OpenAI format.
+      // flatMap handles user messages with tool_result blocks that expand
+      // into multiple OpenAI messages (one `tool` per result + optional text).
+      const mappedMessages: OpenAI.ChatCompletionMessageParam[] = args.messages.flatMap(
+        (msg): OpenAI.ChatCompletionMessageParam[] => {
+          if (typeof msg.content === 'string') {
+            return [{ role: msg.role, content: msg.content }];
+          }
+          if (msg.role === 'assistant') {
+            const parts: OpenAI.ChatCompletionContentPartText[] = [];
+            const toolCalls: OpenAI.ChatCompletionMessageToolCall[] = [];
+            for (const block of msg.content) {
+              if (block.type === 'text') {
+                parts.push({ type: 'text', text: block.text });
+              } else if (block.type === 'tool_use') {
+                toolCalls.push({
+                  id: block.id,
+                  type: 'function',
+                  function: { name: block.name, arguments: JSON.stringify(block.input) },
+                });
+              }
+            }
+            return [{
+              role: 'assistant',
+              ...(parts.length > 0 ? { content: parts.map(p => p.text).join('') } : { content: null }),
+              ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
+            }];
+          }
+          // User message with block content — may contain tool_result + text.
+          // OpenAI requires tool results as separate { role: 'tool' } messages.
+          const result: OpenAI.ChatCompletionMessageParam[] = [];
+          const textParts: string[] = [];
+          for (const block of msg.content) {
+            if (block.type === 'tool_result') {
+              result.push({
+                role: 'tool' as const,
+                tool_call_id: block.tool_use_id,
+                content: block.content,
+              });
+            } else if (block.type === 'text') {
+              textParts.push(block.text);
+            }
+          }
+          const joined = textParts.join('');
+          if (result.length === 0) {
+            return [{ role: 'user', content: joined }];
+          }
+          if (joined) {
+            result.push({ role: 'user', content: joined });
+          }
+          return result;
+        },
+      );
+      const openaiMessages: OpenAI.ChatCompletionMessageParam[] = [
+        { role: 'system', content: args.system },
+        ...mappedMessages,
+      ];
+
+      // Convert tool definitions: ToolDefinition → OpenAI function tool format
+      const openaiTools: OpenAI.ChatCompletionTool[] = args.tools.map(tool => ({
+        type: 'function',
+        function: {
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.input_schema,
+        },
+      }));
+
+      // Map tool_choice
+      let toolChoice: OpenAI.ChatCompletionToolChoiceOption | undefined;
+      if (args.tool_choice) {
+        if (args.tool_choice.type === 'tool' && args.tool_choice.name) {
+          toolChoice = { type: 'function', function: { name: args.tool_choice.name } };
+        } else if (args.tool_choice.type === 'any') {
+          toolChoice = 'required';
+        } else {
+          toolChoice = 'auto';
+        }
+      }
+
+      const response = await withRetry(
+        async () =>
+          apiClient.chat.completions.create(
+            {
+              model: this.model,
+              messages: openaiMessages,
+              tools: openaiTools,
+              ...(toolChoice !== undefined ? { tool_choice: toolChoice } : {}),
+              ...modelParams,
+            },
+            {
+              signal: abortController.signal as any,
+              headers: { 'Idempotency-Key': idempotencyKey },
+            }
+          ),
+        { adapter: 'openai', model: this.model, operation: 'chat_with_tools' },
+        retryConfigForLiveEval(),
+      );
+
+      clearTimeout(timeoutId);
+      const latencyMs = Date.now() - startTime;
+
+      const choice = response.choices[0];
+      const msg = choice?.message;
+
+      // Map response to ToolResponseBlock[]
+      const content: ToolResponseBlock[] = [];
+      if (msg?.content) {
+        content.push({ type: 'text', text: msg.content });
+      }
+      for (const tc of msg?.tool_calls ?? []) {
+        if (tc.type !== 'function') continue;
+        let input: Record<string, unknown> = {};
+        try { input = JSON.parse(tc.function.arguments); } catch { /* leave empty */ }
+        content.push({
+          type: 'tool_use',
+          id: tc.id,
+          name: tc.function.name,
+          input,
+        });
+      }
+
+      // Map finish_reason to stop_reason
+      const finishReason = choice?.finish_reason;
+      const stop_reason: ChatWithToolsResult['stop_reason'] =
+        finishReason === 'tool_calls' ? 'tool_use' :
+        finishReason === 'length' ? 'max_tokens' :
+        'end_turn';
+
+      log.info(
+        {
+          model: response.model,
+          requested_model: this.model,
+          latency_ms: latencyMs,
+          input_tokens: response.usage?.prompt_tokens ?? 0,
+          output_tokens: response.usage?.completion_tokens ?? 0,
+          content_blocks: content.length,
+          tool_use_blocks: content.filter(b => b.type === 'tool_use').length,
+          stop_reason,
+        },
+        "OpenAI chat with tools successful"
+      );
+
+      return {
+        content,
+        stop_reason,
+        // Provider-reported identity, not the requested alias. Live evidence
+        // must remain truthful under provider-side model substitution.
+        model: response.model,
+        latencyMs,
+        usage: {
+          input_tokens: response.usage?.prompt_tokens ?? 0,
+          output_tokens: response.usage?.completion_tokens ?? 0,
+        },
+      };
+    } catch (error: unknown) {
+      clearTimeout(timeoutId);
+      const elapsedMs = Date.now() - startTime;
+
+      if (error instanceof Error) {
+        if (error.name === 'AbortError' || abortController.signal.aborted) {
+          log.error({ timeout_ms: timeoutMs, elapsed_ms: elapsedMs }, 'OpenAI chat_with_tools call timed out');
+          throw new UpstreamTimeoutError(
+            'OpenAI chat_with_tools timed out',
+            'openai',
+            'chat_with_tools',
+            'body',
+            elapsedMs,
+            error
+          );
+        }
+        if ('status' in error && typeof error.status === 'number') {
+          const apiError = error as any;
+          const requestId = apiError.headers?.get?.('x-request-id') || apiError.request_id;
+          log.error(
+            { status: apiError.status, request_id: requestId, elapsed_ms: elapsedMs },
+            'OpenAI API returned non-2xx status'
+          );
+          throw new UpstreamHTTPError(
+            `OpenAI chat_with_tools failed: ${apiError.message || 'unknown error'}`,
+            'openai',
+            apiError.status,
+            apiError.code || apiError.type,
+            requestId,
+            elapsedMs,
+            error
+          );
+        }
+      }
+
+      log.error({ error }, 'OpenAI chat_with_tools call failed');
+      throw error;
+    }
   }
 }

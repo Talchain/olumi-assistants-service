@@ -1,0 +1,8 @@
+pnpm test:required (vitest.required.config.ts), on commit 807df9923 (pre-merge, worktree cee-f7-verify)
+
+ Test Files  993 passed | 8 skipped (1001)
+      Tests  19429 passed | 99 skipped | 13 todo (19541)
+   Start at  09:50:53
+   Duration  72.79s (transform 34.54s, setup 44.81s, collect 332.99s, tests 123.99s, environment 117ms, prepare 7.48s)
+
+Exit code: 0

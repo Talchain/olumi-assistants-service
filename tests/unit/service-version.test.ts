@@ -21,8 +21,8 @@ describe("SERVICE_VERSION", () => {
     expect(SERVICE_VERSION).not.toBe("0.0.0"); // Ensure not hitting fallback
   });
 
-  it("matches package.json version 1.11.1", () => {
-    expect(SERVICE_VERSION).toBe("1.11.1");
+  it("matches package.json version 1.12.0", () => {
+    expect(SERVICE_VERSION).toBe("1.12.0");
   });
 
   it("can be overridden by SERVICE_VERSION env var", () => {

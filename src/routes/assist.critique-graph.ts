@@ -1,15 +1,29 @@
 import { Buffer } from "node:buffer";
 import type { FastifyInstance } from "fastify";
 import { CritiqueGraphInput, CritiqueGraphOutput, ErrorV1 } from "../schemas/assist.js";
-import { getAdapter } from "../adapters/llm/router.js";
+import { getAdapterWithResolution } from "../adapters/llm/router.js";
+import { getSystemPromptSnapshot } from "../adapters/llm/prompt-loader.js";
+import { shouldUseStagingPrompts } from "../config/index.js";
+import { ModelAssignmentError } from "../config/model-assignment.js";
+import { recordModelResolution } from "../orchestrator-v5/debug/turn-debug-store.js";
 import { emit, log, calculateCost, TelemetryEvents } from "../utils/telemetry.js";
 import { getRequestId } from "../utils/request-id.js";
+import { CRITIQUE_TIMEOUT_MS } from "../config/timeouts.js";
 import { getRequestCallerContext } from "../plugins/auth.js";
 import { contextToTelemetry } from "../context/index.js";
 import { processAttachments, type AttachmentInput, type GroundingStats } from "../grounding/process-attachments.js";
 import { type DocPreview } from "../services/docProcessing.js";
 import { isFeatureEnabled } from "../utils/feature-flags.js";
 import { verificationPipeline } from "../cee/verification/index.js";
+import {
+  createObservabilityCollector,
+  createNoOpObservabilityCollector,
+  isObservabilityEnabled,
+  isRawIOCaptureEnabled,
+  type ObservabilityCollector,
+} from "../cee/observability/index.js";
+
+const CEE_VERSION = "v12.4";
 
 type AttachmentPayload = string | { data: string; encoding?: string };
 
@@ -37,6 +51,18 @@ export default async function route(app: FastifyInstance) {
     const requestId = getRequestId(req as any);
     const callerCtx = getRequestCallerContext(req as any);
     const telemetryCtx = callerCtx ? contextToTelemetry(callerCtx) : { request_id: requestId };
+
+    // Observability: create collector if enabled via flag or include_debug
+    const includeDebug = (input as any).include_debug === true;
+    const observabilityEnabled = isObservabilityEnabled(includeDebug);
+    const rawIOEnabled = isRawIOCaptureEnabled(includeDebug);
+    const observabilityCollector: ObservabilityCollector = observabilityEnabled
+      ? createObservabilityCollector({
+          requestId,
+          ceeVersion: CEE_VERSION,
+          captureRawIO: rawIOEnabled,
+        })
+      : createNoOpObservabilityCollector(requestId);
 
     try {
       // Process attachments with grounding module (v04: 5k limit, privacy, safe CSV)
@@ -105,7 +131,44 @@ export default async function route(app: FastifyInstance) {
       const critiqueStartTime = Date.now();
 
       // Get adapter via router (env-driven or config)
-      const adapter = getAdapter('critique_graph');
+      // Model selection priority: prompt config > task default
+      const promptSnapshot = await getSystemPromptSnapshot('critique_graph');
+      let modelOverride: string | undefined;
+      const promptMeta = promptSnapshot.meta;
+      const promptEnvironment = shouldUseStagingPrompts() ? 'staging' : 'production';
+      if (promptMeta.modelConfig) {
+        const promptModel = promptMeta.modelConfig[promptEnvironment];
+        if (promptModel) {
+          modelOverride = promptModel;
+          log.info({ task: 'critique_graph', env: promptEnvironment, promptModel, promptId: promptMeta.promptId }, 'Using model from prompt config');
+        }
+      }
+      const { adapter, resolution } = getAdapterWithResolution(
+        'critique_graph',
+        modelOverride,
+        modelOverride ? 'store_model_config' : undefined,
+      );
+      log.debug({
+        event: 'model.resolution',
+        task: resolution.task,
+        resolved_model: resolution.resolved_model,
+        provider: resolution.provider,
+        resolution_source: resolution.resolution_source,
+        request_id: requestId,
+      }, 'Model resolution recorded for LLM call');
+      recordModelResolution(requestId, requestId, {
+        task: resolution.task,
+        resolved_model: resolution.resolved_model,
+        provider: resolution.provider,
+        resolution_source: resolution.resolution_source,
+      });
+      const modelSelectionReason = resolution.resolution_source === 'store_model_config'
+        ? (promptEnvironment === 'staging' ? 'prompt_config_staging' : 'prompt_config_production')
+        : resolution.resolution_source === 'per_call'
+          ? 'explicit_override'
+          : resolution.resolution_source === 'task_default' || resolution.resolution_source === 'env_var'
+            ? 'task_default'
+            : 'provider_default';
 
       emit(TelemetryEvents.CritiqueStart, {
         ...telemetryCtx,
@@ -125,12 +188,39 @@ export default async function route(app: FastifyInstance) {
           focus_areas: input.focus_areas,
         },
         {
-          requestId: `critique_${Date.now()}`,
-          timeoutMs: 10000, // 10s timeout for critique
+          requestId,
+          timeoutMs: CRITIQUE_TIMEOUT_MS,
+          observabilityCollector,
+          preloadedSystemPrompt: {
+            operation: 'critique_graph',
+            content: promptSnapshot.content,
+            meta: promptSnapshot.meta,
+          },
         }
       );
 
       const critiqueDuration = Date.now() - critiqueStartTime;
+
+      // Record LLM call for observability
+      if (observabilityEnabled) {
+        observabilityCollector.recordLLMCall({
+          step: "critique_graph",
+          model: adapter.model,
+          provider: (adapter.name === "anthropic" || adapter.name === "openai") ? adapter.name : "anthropic",
+          model_selection_reason: modelSelectionReason,
+          tokens: {
+            input: result.usage.input_tokens,
+            output: result.usage.output_tokens,
+            total: result.usage.input_tokens + result.usage.output_tokens,
+          },
+          latency_ms: critiqueDuration,
+          attempt: 1,
+          success: true,
+          started_at: new Date(critiqueStartTime).toISOString(),
+          completed_at: new Date().toISOString(),
+          cache_hit: (result.usage.cache_read_input_tokens ?? 0) > 0,
+        });
+      }
 
       // Calculate cost (provider-specific pricing)
       const cost_usd = calculateCost(adapter.model, result.usage.input_tokens, result.usage.output_tokens);
@@ -187,6 +277,11 @@ export default async function route(app: FastifyInstance) {
         },
       );
 
+      // Attach observability data if enabled
+      if (observabilityEnabled) {
+        (response as any)._observability = observabilityCollector.build();
+      }
+
       return reply.send(response);
     } catch (error: unknown) {
       const err = error instanceof Error ? error : new Error("unexpected error");
@@ -196,6 +291,20 @@ export default async function route(app: FastifyInstance) {
         ...telemetryCtx,
         error: err.message,
       });
+
+      if (error instanceof ModelAssignmentError) {
+        reply.code(400);
+        return reply.send(ErrorV1.parse({
+          schema: "error.v1",
+          code: "BAD_INPUT",
+          message: "invalid_model_configuration",
+          details: {
+            reason: error.code,
+            model: error.model,
+            hint: error.message,
+          },
+        }));
+      }
 
       // Capability mapping: provider not supported -> 400 BAD_INPUT with hint
       if (err.message && err.message.includes("_not_supported")) {

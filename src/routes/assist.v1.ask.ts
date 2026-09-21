@@ -20,6 +20,7 @@ import { getRequestKeyId, getRequestCallerContext } from "../plugins/auth.js";
 import { contextToTelemetry } from "../context/index.js";
 import { emit, log, TelemetryEvents } from "../utils/telemetry.js";
 import type { TurnT } from "../schemas/working-set.js";
+import { ASK_TIMEOUT_MS } from "../config/timeouts.js";
 
 // ============================================================================
 // Request ID Resolution
@@ -175,7 +176,6 @@ function buildAskErrorResponse(
 // ============================================================================
 
 const ASK_RATE_LIMIT_RPM = 30; // Requests per minute per key
-const ASK_TIMEOUT_MS = 30_000;
 const FEATURE_VERSION = "ask-v1.0.0";
 
 export default async function route(app: FastifyInstance) {

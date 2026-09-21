@@ -50,6 +50,28 @@ export interface ActivePromptResult {
 }
 
 /**
+ * Optimistic concurrency token captured by the governed store before it
+ * evaluates a served-byte change. Backends must apply this predicate in the
+ * same write/delete statement as the mutation so evidence cannot be checked
+ * against one row and committed over a newer row.
+ */
+export interface PromptMutationPrecondition {
+  readonly expectedUpdatedAt: string;
+}
+
+export class PromptMutationConflictError extends Error {
+  readonly name = 'PromptMutationConflictError';
+  readonly code = 'PROMPT_MUTATION_CONFLICT';
+
+  constructor(readonly promptId: string) {
+    super(
+      `Prompt '${promptId}' changed while the mutation was being validated. ` +
+      'Reload the prompt and retry the complete mutation.',
+    );
+  }
+}
+
+/**
  * Abstract interface for prompt storage backends
  *
  * All methods are async to support both local and remote stores.
@@ -84,7 +106,11 @@ export interface IPromptStore {
    * @throws Error if prompt not found
    * @throws Error if setting to production when another production prompt exists for task
    */
-  update(id: string, request: UpdatePromptRequest): Promise<PromptDefinition>;
+  update(
+    id: string,
+    request: UpdatePromptRequest,
+    precondition?: PromptMutationPrecondition,
+  ): Promise<PromptDefinition>;
 
   /**
    * Create a new version of an existing prompt
@@ -96,7 +122,11 @@ export interface IPromptStore {
    * Rollback to a previous version
    * @throws Error if prompt or version not found
    */
-  rollback(id: string, request: RollbackRequest): Promise<PromptDefinition>;
+  rollback(
+    id: string,
+    request: RollbackRequest,
+    precondition?: PromptMutationPrecondition,
+  ): Promise<PromptDefinition>;
 
   /**
    * Approve a version for production promotion
@@ -117,12 +147,24 @@ export interface IPromptStore {
    * @param hard - If true, permanently delete; if false, archive
    * @throws Error if prompt not found
    */
-  delete(id: string, hard?: boolean): Promise<void>;
+  delete(
+    id: string,
+    hard?: boolean,
+    precondition?: PromptMutationPrecondition,
+  ): Promise<void>;
 
   /**
-   * Get compiled prompt content for a task with variables interpolated
-   * Finds the production prompt for the task, interpolates variables
-   * @returns null if no production prompt exists for task
+   * Get compiled prompt content for a task with variables interpolated.
+   *
+   * Finds the canonical, non-archived prompt for the task. Canonical election
+   * must never depend on mutable metadata such as updatedAt.
+   *
+   * Version selection:
+   * - If options.version is specified, uses that exact version
+   * - If options.useStaging is true and staging_version exists, uses staging_version
+   * - Otherwise uses active_version
+   *
+   * @returns null if no non-archived prompt exists for task, or if the target version doesn't exist
    */
   getCompiled(
     taskId: string,
@@ -131,8 +173,12 @@ export interface IPromptStore {
   ): Promise<CompiledPrompt | null>;
 
   /**
-   * Get the active prompt for a task
-   * @returns null if no production prompt exists for task
+   * Get the active prompt for a task.
+   *
+   * Finds the canonical, non-archived prompt for the task. Canonical election
+   * must never depend on mutable metadata such as updatedAt.
+   *
+   * @returns null if no non-archived prompt exists for task
    */
   getActivePromptForTask(taskId: string): Promise<ActivePromptResult | null>;
 }

@@ -51,9 +51,9 @@ export function parseTimeoutWithSource(envValue: string | undefined, defaultValu
     return { value: defaultValue, source: 'default' };
   }
 
-  // Clamp to reasonable range: 100ms to 30s
+  // Clamp to reasonable range: 100ms to 60s
   const MIN_TIMEOUT = 100;
-  const MAX_TIMEOUT = 30000;
+  const MAX_TIMEOUT = 60000;
   const clamped = Math.max(MIN_TIMEOUT, Math.min(MAX_TIMEOUT, parsed));
 
   if (clamped !== parsed) {

@@ -15,7 +15,7 @@ import {
   toOptionV3,
 } from "../../src/cee/extraction/intervention-extractor.js";
 import { transformOptionToAnalysisReady } from "../../src/cee/transforms/analysis-ready.js";
-import type { NodeV3T, EdgeV3T } from "../../src/schemas/cee-v3.js";
+import type { NodeV3T, EdgeV3T, OptionV3T } from "../../src/schemas/cee-v3.js";
 
 describe("Categorical Extraction", () => {
   describe("extractCategoricalInterventions", () => {
@@ -119,10 +119,9 @@ describe("Categorical Extraction", () => {
       {
         from: "factor_region",
         to: "goal_growth",
-        strength_mean: 2.0,
-        strength_std: 0.5,
+        strength: { mean: 2.0, std: 0.5 },
         effect_direction: "positive",
-        belief_exists: 0.8,
+        exists_probability: 0.8,
       },
     ];
 
@@ -135,14 +134,21 @@ describe("Categorical Extraction", () => {
         "goal_growth"
       );
 
-      // Should have interventions (placeholder values)
-      expect(Object.keys(result.interventions).length).toBeGreaterThan(0);
+      // ⚠ CONTRACT CHANGED DELIBERATELY: an un-encodable categorical value no
+      // longer fabricates a `value: 0` "placeholder" intervention. Nothing
+      // downstream could distinguish a placeholder zero from a deliberate one —
+      // `mergeInterventionSourceObjects` admits any finite number, so it reached
+      // the analysis loader as the lever position the user chose, and zero is
+      // not neutral for a cost, a rate or a headcount.
+      //
+      // The honest shape is: NO numeric intervention, the RAW value preserved,
+      // and `needs_encoding` — we know the factor and what was said, we just
+      // have no number for it yet.
+      expect(Object.keys(result.interventions).length).toBe(0);
 
-      // Should have raw_interventions
       expect(result.raw_interventions).toBeDefined();
-      expect(Object.keys(result.raw_interventions!).length).toBeGreaterThan(0);
+      expect(result.raw_interventions!["factor_region"]).toBe("UK");
 
-      // Status should be needs_encoding (has categorical values)
       expect(result.status).toBe("needs_encoding");
     });
 
@@ -170,15 +176,15 @@ describe("Categorical Extraction", () => {
         "goal_growth"
       );
 
-      // Find an intervention with raw_value
-      const interventionsWithRaw = Object.values(result.interventions).filter(
-        (i) => i.raw_value !== undefined
-      );
+      // The raw categorical value is carried on `raw_interventions`, keyed by
+      // the factor it was matched to — not smuggled onto a numeric intervention
+      // that had to invent a value to exist. Bound by factor IDENTITY.
+      expect(result.raw_interventions).toBeDefined();
+      expect(Object.keys(result.raw_interventions!)).toContain("factor_region");
+      expect(typeof result.raw_interventions!["factor_region"]).toBe("string");
 
-      expect(interventionsWithRaw.length).toBeGreaterThan(0);
-      const intervention = interventionsWithRaw[0];
-      expect(intervention.value_type).toBe("categorical");
-      expect(typeof intervention.raw_value).toBe("string");
+      // And no numeric intervention was fabricated to carry it.
+      expect(Object.keys(result.interventions).length).toBe(0);
     });
   });
 
@@ -305,10 +311,9 @@ describe("Categorical Extraction", () => {
         {
           from: "factor_region",
           to: "goal",
-          strength_mean: 1.0,
-          strength_std: 0.1,
+          strength: { mean: 1.0, std: 0.1 },
           effect_direction: "positive",
-          belief_exists: 0.9,
+          exists_probability: 0.9,
         },
       ];
 
@@ -365,20 +370,92 @@ describe("Analysis-Ready Contract (transformOptionToAnalysisReady)", () => {
     {
       from: "factor_region",
       to: "goal",
-      strength_mean: 1.5,
-      strength_std: 0.3,
+      strength: { mean: 1.5, std: 0.3 },
       effect_direction: "positive",
-      belief_exists: 0.85,
+      exists_probability: 0.85,
     },
     {
       from: "factor_price",
       to: "goal",
-      strength_mean: 2.0,
-      strength_std: 0.4,
+      strength: { mean: 2.0, std: 0.4 },
       effect_direction: "positive",
-      belief_exists: 0.9,
+      exists_probability: 0.9,
     },
   ];
+
+  function encodedWithProof(
+    overrides: Partial<OptionV3T['interventions'][string]> = {},
+  ): OptionV3T {
+    return {
+      id: 'opt_region',
+      label: 'Launch in UK',
+      status: 'ready',
+      interventions: {
+        factor_region: {
+          value: 1,
+          raw_value: 'UK',
+          value_type: 'categorical',
+          encoding_map: { UK: 1 },
+          source: 'user_specified',
+          target_match: {
+            node_id: 'factor_region',
+            match_type: 'exact_id',
+            confidence: 'high',
+          },
+          ...overrides,
+        },
+      },
+    };
+  }
+
+  it('accepts a categorical Raw+Encoded carrier only when its map proves the exact numeric code', () => {
+    const analysisReady = transformOptionToAnalysisReady(encodedWithProof());
+    expect(analysisReady.status).toBe('ready');
+    expect(analysisReady.interventions.factor_region).toBe(1);
+    expect(analysisReady.raw_interventions?.factor_region).toBe('UK');
+  });
+
+  it('accepts a boolean Raw+Encoded carrier only with exact boolean/map/0|1 proof', () => {
+    const analysisReady = transformOptionToAnalysisReady(encodedWithProof({
+      value: 1,
+      raw_value: true,
+      value_type: 'boolean',
+      encoding_map: { true: 1, false: 0 },
+    }));
+    expect(analysisReady.status).toBe('ready');
+    expect(analysisReady.interventions.factor_region).toBe(1);
+    expect(analysisReady.raw_interventions?.factor_region).toBe(true);
+  });
+
+  it('keeps a categorical raw value non-ready when encoding proof is absent', () => {
+    expect(transformOptionToAnalysisReady(encodedWithProof({ encoding_map: undefined })).status)
+      .toBe('needs_encoding');
+  });
+
+  it('keeps a categorical raw value non-ready when its map disagrees with the numeric code', () => {
+    expect(transformOptionToAnalysisReady(encodedWithProof({ encoding_map: { UK: 0 } })).status).toBe(
+      'needs_encoding',
+    );
+  });
+
+  it('requires the raw-to-code proof to be an own encoding-map property', () => {
+    const inheritedMap = Object.create({ UK: 1 }) as Record<string, number>;
+    expect(transformOptionToAnalysisReady(encodedWithProof({ encoding_map: inheritedMap })).status)
+      .toBe('needs_encoding');
+  });
+
+  it.each([
+    ['fractional categorical code', { value: 0.5, encoding_map: { UK: 0.5 } }],
+    ['categorical carrier with boolean raw value', { raw_value: true, encoding_map: { true: 1 } }],
+    ['boolean carrier with string raw value', { value_type: 'boolean', raw_value: 'UK', encoding_map: { UK: 1 } }],
+    ['categorical code above the faithful PLoT domain', { value: 2, encoding_map: { UK: 2 } }],
+  ] satisfies Array<[string, Partial<OptionV3T['interventions'][string]>]>) (
+    'keeps %s non-ready',
+    (_label, overrides) => {
+      expect(transformOptionToAnalysisReady(encodedWithProof(overrides)).status)
+        .toBe('needs_encoding');
+    },
+  );
 
   it("flattens categorical interventions to plain numbers", () => {
     // Extract categorical option
@@ -397,7 +474,7 @@ describe("Analysis-Ready Contract (transformOptionToAnalysisReady)", () => {
     const analysisReady = transformOptionToAnalysisReady(v3Option);
 
     // CRITICAL: interventions must be Record<string, number>
-    for (const [factorId, value] of Object.entries(analysisReady.interventions)) {
+    for (const [_factorId, value] of Object.entries(analysisReady.interventions)) {
       expect(typeof value).toBe("number");
       expect(value).not.toBeNull();
       expect(value).not.toBeNaN();
@@ -423,7 +500,7 @@ describe("Analysis-Ready Contract (transformOptionToAnalysisReady)", () => {
     const analysisReady = transformOptionToAnalysisReady(v3Option);
 
     // CRITICAL: interventions must be Record<string, number>
-    for (const [factorId, value] of Object.entries(analysisReady.interventions)) {
+    for (const [_factorId, value] of Object.entries(analysisReady.interventions)) {
       expect(typeof value).toBe("number");
       // Boolean should be encoded as 0 or 1
       expect([0, 1]).toContain(value);
@@ -505,7 +582,7 @@ describe("Analysis-Ready Contract (transformOptionToAnalysisReady)", () => {
     const analysisReady = transformOptionToAnalysisReady(v3Option);
 
     // All interventions must be plain numbers
-    for (const [factorId, value] of Object.entries(analysisReady.interventions)) {
+    for (const [_factorId, value] of Object.entries(analysisReady.interventions)) {
       expect(typeof value).toBe("number");
       expect(Number.isFinite(value)).toBe(true);
     }
@@ -538,7 +615,7 @@ describe("Analysis-Ready Contract (transformOptionToAnalysisReady)", () => {
       const analysisReady = transformOptionToAnalysisReady(v3Option);
 
       // CRITICAL CONTRACT: interventions values are NEVER objects
-      for (const [factorId, value] of Object.entries(analysisReady.interventions)) {
+      for (const [_factorId, value] of Object.entries(analysisReady.interventions)) {
         expect(typeof value).toBe("number");
         expect(value).not.toEqual(expect.objectContaining({ value: expect.any(Number) }));
       }

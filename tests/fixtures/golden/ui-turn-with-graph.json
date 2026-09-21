@@ -1,0 +1,41 @@
+{
+  "message": "How does this model look?",
+  "scenario_id": "scn-graph-001",
+  "client_turn_id": "ct-graph-001",
+  "conversation_history": [],
+  "graph_state": {
+    "nodes": [
+      { "id": "goal_1", "kind": "goal", "label": "Maximize Profit" },
+      { "id": "opt_1", "kind": "option", "label": "Expand East" },
+      { "id": "opt_2", "kind": "option", "label": "Expand West" },
+      { "id": "opt_3", "kind": "option", "label": "Stay Local" },
+      { "id": "fac_1", "kind": "factor", "label": "Market Size" },
+      { "id": "fac_2", "kind": "factor", "label": "Competition" },
+      { "id": "fac_3", "kind": "factor", "label": "Cost of Entry" },
+      { "id": "fac_4", "kind": "factor", "label": "Regulatory Risk" },
+      { "id": "fac_5", "kind": "factor", "label": "Brand Recognition" },
+      { "id": "fac_6", "kind": "factor", "label": "Supply Chain" },
+      { "id": "fac_7", "kind": "factor", "label": "Talent Pool" },
+      { "id": "fac_8", "kind": "factor", "label": "Customer Demand" },
+      { "id": "fac_9", "kind": "factor", "label": "Technology Readiness" }
+    ],
+    "edges": [
+      { "from": "fac_1", "to": "goal_1", "strength": { "mean": 0.8, "std": 0.1 } },
+      { "from": "fac_2", "to": "goal_1", "strength": { "mean": -0.4, "std": 0.15 } },
+      { "from": "fac_3", "to": "goal_1", "strength": { "mean": -0.6, "std": 0.1 } },
+      { "from": "fac_4", "to": "goal_1", "strength": { "mean": -0.3, "std": 0.2 } },
+      { "from": "fac_5", "to": "goal_1", "strength": { "mean": 0.5, "std": 0.1 } },
+      { "from": "fac_6", "to": "goal_1", "strength": { "mean": 0.4, "std": 0.15 } },
+      { "from": "fac_7", "to": "goal_1", "strength": { "mean": 0.3, "std": 0.1 } },
+      { "from": "fac_8", "to": "goal_1", "strength": { "mean": 0.7, "std": 0.1 } },
+      { "from": "fac_9", "to": "goal_1", "strength": { "mean": 0.35, "std": 0.12 } },
+      { "from": "fac_1", "to": "fac_2", "strength": { "mean": 0.5, "std": 0.1 } },
+      { "from": "fac_3", "to": "fac_6", "strength": { "mean": -0.3, "std": 0.1 } },
+      { "from": "fac_5", "to": "fac_8", "strength": { "mean": 0.4, "std": 0.1 } },
+      { "from": "fac_7", "to": "fac_9", "strength": { "mean": 0.6, "std": 0.1 } },
+      { "from": "fac_2", "to": "fac_3", "strength": { "mean": 0.2, "std": 0.1 } },
+      { "from": "fac_4", "to": "fac_3", "strength": { "mean": 0.35, "std": 0.15 } },
+      { "from": "fac_6", "to": "fac_8", "strength": { "mean": 0.25, "std": 0.1 } }
+    ]
+  }
+}

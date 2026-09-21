@@ -1,0 +1,40 @@
+{
+  "name": "currency-in-brief",
+  "description": "Brief with various currency formats - goal numbers should not become factor nodes",
+  "brief": "Should we invest $50k in marketing or €30k in R&D? Target: $200k revenue.",
+  "endpoint": "draft_graph",
+  "recorded_response": {
+    "graph": {
+      "version": "1",
+      "default_seed": 42,
+      "nodes": [
+        { "id": "decision_1", "kind": "decision", "label": "How should we invest our budget?" },
+        { "id": "opt_marketing", "kind": "option", "label": "Invest $50k in marketing" },
+        { "id": "opt_rnd", "kind": "option", "label": "Invest €30k in R&D" },
+        { "id": "fac_budget", "kind": "factor", "label": "Budget Allocation", "category": "controllable" },
+        { "id": "fac_brand_awareness", "kind": "factor", "label": "Brand Awareness", "category": "controllable" },
+        { "id": "fac_product_quality", "kind": "factor", "label": "Product Quality", "category": "controllable" },
+        { "id": "outcome_revenue", "kind": "outcome", "label": "Revenue Growth" },
+        { "id": "goal_1", "kind": "goal", "label": "Reach $200k revenue target" }
+      ],
+      "edges": [
+        { "from": "decision_1", "to": "opt_marketing", "strength_mean": 1, "strength_std": 0.01, "belief_exists": 1, "effect_direction": "positive" },
+        { "from": "decision_1", "to": "opt_rnd", "strength_mean": 1, "strength_std": 0.01, "belief_exists": 1, "effect_direction": "positive" },
+        { "from": "opt_marketing", "to": "fac_brand_awareness", "strength_mean": 1, "strength_std": 0.01, "belief_exists": 1, "effect_direction": "positive" },
+        { "from": "opt_rnd", "to": "fac_product_quality", "strength_mean": 1, "strength_std": 0.01, "belief_exists": 1, "effect_direction": "positive" },
+        { "from": "fac_brand_awareness", "to": "outcome_revenue", "strength_mean": 0.6, "belief_exists": 0.8 },
+        { "from": "fac_product_quality", "to": "outcome_revenue", "strength_mean": 0.5, "belief_exists": 0.85 },
+        { "from": "outcome_revenue", "to": "goal_1", "strength_mean": 0.9, "belief_exists": 1 }
+      ],
+      "meta": { "roots": [], "leaves": [], "suggested_positions": {}, "source": "assistant" }
+    },
+    "validation": { "passed": true, "errors": [], "warnings": [] }
+  },
+  "assertions": {
+    "no_factor_value_nodes": true,
+    "has_decision_node": true,
+    "has_goal_node": true,
+    "goal_contains_currency": true,
+    "validation_passes": true
+  }
+}

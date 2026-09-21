@@ -1,0 +1,1050 @@
+{
+  "option_comparison": [
+    {
+      "option_id": "opt_outbound",
+      "option_label": "Build Outbound SDR Team",
+      "id": "opt_outbound",
+      "label": "Build Outbound SDR Team",
+      "outcome": {
+        "mean": -0.17177312016904342,
+        "std": 0.1500728327402855,
+        "p10": -0.3623474021069713,
+        "p50": -0.1766092603326864,
+        "p90": 0.024927524885273052,
+        "n_samples": 10000,
+        "n_valid_samples": 10000,
+        "validity_ratio": 1
+      },
+      "status": "computed",
+      "win_probability": 0.04693333333333332
+    },
+    {
+      "option_id": "opt_partner",
+      "option_label": "Double Down on Partner Channel",
+      "id": "opt_partner",
+      "label": "Double Down on Partner Channel",
+      "outcome": {
+        "mean": 0.08629495354224384,
+        "std": 0.05092142267764365,
+        "p10": 0.019682097726488122,
+        "p50": 0.08511195512367195,
+        "p90": 0.15243797794323813,
+        "n_samples": 10000,
+        "n_valid_samples": 10000,
+        "validity_ratio": 1
+      },
+      "status": "computed",
+      "win_probability": 0.8575833333333327
+    },
+    {
+      "option_id": "opt_plg",
+      "option_label": "Product-Led Growth Free Tier",
+      "id": "opt_plg",
+      "label": "Product-Led Growth Free Tier",
+      "outcome": {
+        "mean": -0.013038869419738941,
+        "std": 0.0597182814952709,
+        "p10": -0.08954741649610817,
+        "p50": -0.010671324427183972,
+        "p90": 0.06435370652159116,
+        "n_samples": 10000,
+        "n_valid_samples": 10000,
+        "validity_ratio": 1
+      },
+      "status": "computed",
+      "win_probability": 0.07545000000000003
+    },
+    {
+      "option_id": "opt_status_quo",
+      "option_label": "Continue Current Mix (Status Quo)",
+      "id": "opt_status_quo",
+      "label": "Continue Current Mix (Status Quo)",
+      "outcome": {
+        "mean": -0.000017529537403522254,
+        "std": 0.019296573714131862,
+        "p10": -0.01967075202494741,
+        "p50": 0.00000666090428179128,
+        "p90": 0.02018167546164092,
+        "n_samples": 10000,
+        "n_valid_samples": 10000,
+        "validity_ratio": 1
+      },
+      "status": "computed",
+      "win_probability": 0.020033333333333347
+    }
+  ],
+  "factor_sensitivity": [
+    {
+      "factor_id": "fac_market_conditions",
+      "factor_label": "Market Conditions",
+      "influence_score": 0.009602194787379982,
+      "influence_rank": 4,
+      "sensitivity_score": -0.003500000000000003,
+      "elasticity": 0.009602194787379982,
+      "direction": "negative",
+      "importance_rank": 1,
+      "value_of_information": 0,
+      "confidence": 0.3625,
+      "confidence_source": "plot_unified_from_isl_bootstrap",
+      "confidence_provenance": {
+        "computation_source": "plot_unified_from_isl_bootstrap",
+        "formula_version": "plot_unified_v3",
+        "is_provisional": true,
+        "calibration_status": "provisional_pending_pilot_calibration",
+        "input_quality": "standard"
+      },
+      "confidence_components": {
+        "structural_certainty": 0.5,
+        "sampling_stability": 0.25
+      },
+      "source": "graph",
+      "flip_risk_category": "correlated",
+      "attribution_stability": "low",
+      "elasticity_std": 0.00703217,
+      "rank_flip_rate": 0.05,
+      "stability_method": "bootstrap_20",
+      "value_defaulted": true,
+      "importance_basis": "graph_structural",
+      "driver_label": "biggest",
+      "evpi_percentage_points": 0,
+      "evpi_method": "heuristic",
+      "evidence_hint": false
+    },
+    {
+      "factor_id": "fac_partner_invest",
+      "factor_label": "Partner Channel Investment",
+      "influence_score": 1,
+      "influence_rank": 1,
+      "sensitivity_score": 0,
+      "elasticity": 0,
+      "direction": "positive",
+      "importance_rank": 2,
+      "value_of_information": 0,
+      "confidence": 0.3,
+      "confidence_source": "plot_unified_from_isl_bootstrap",
+      "confidence_provenance": {
+        "computation_source": "plot_unified_from_isl_bootstrap",
+        "formula_version": "plot_unified_v3",
+        "is_provisional": true,
+        "calibration_status": "provisional_pending_pilot_calibration",
+        "input_quality": "standard"
+      },
+      "confidence_components": {
+        "structural_certainty": 0.5,
+        "sampling_stability": 0
+      },
+      "zero_reason": "intervention_override",
+      "source": "graph",
+      "flip_risk_category": "correlated",
+      "attribution_stability": "negligible",
+      "elasticity_std": 0,
+      "rank_flip_rate": 0,
+      "stability_method": "bootstrap_20",
+      "importance_basis": "graph_structural",
+      "driver_label": "strong",
+      "range_derivation_source": "default"
+    },
+    {
+      "factor_id": "fac_outbound_invest",
+      "factor_label": "Outbound SDR Investment",
+      "influence_score": 0.7133058984910837,
+      "influence_rank": 2,
+      "sensitivity_score": 0,
+      "elasticity": 0,
+      "direction": "negative",
+      "importance_rank": 3,
+      "value_of_information": 0,
+      "confidence": 0.3,
+      "confidence_source": "plot_unified_from_isl_bootstrap",
+      "confidence_provenance": {
+        "computation_source": "plot_unified_from_isl_bootstrap",
+        "formula_version": "plot_unified_v3",
+        "is_provisional": true,
+        "calibration_status": "provisional_pending_pilot_calibration",
+        "input_quality": "standard"
+      },
+      "confidence_components": {
+        "structural_certainty": 0.5,
+        "sampling_stability": 0
+      },
+      "zero_reason": "intervention_override",
+      "source": "graph",
+      "flip_risk_category": "correlated",
+      "attribution_stability": "negligible",
+      "elasticity_std": 0,
+      "rank_flip_rate": 0,
+      "stability_method": "bootstrap_20",
+      "importance_basis": "graph_structural",
+      "driver_label": "strong",
+      "range_derivation_source": "default"
+    },
+    {
+      "factor_id": "fac_plg_invest",
+      "factor_label": "PLG Engineering Investment",
+      "influence_score": 0.1111111111111111,
+      "influence_rank": 3,
+      "sensitivity_score": 0,
+      "elasticity": 0,
+      "direction": "negative",
+      "importance_rank": 4,
+      "value_of_information": 0,
+      "confidence": 0.3,
+      "confidence_source": "plot_unified_from_isl_bootstrap",
+      "confidence_provenance": {
+        "computation_source": "plot_unified_from_isl_bootstrap",
+        "formula_version": "plot_unified_v3",
+        "is_provisional": true,
+        "calibration_status": "provisional_pending_pilot_calibration",
+        "input_quality": "standard"
+      },
+      "confidence_components": {
+        "structural_certainty": 0.5,
+        "sampling_stability": 0
+      },
+      "zero_reason": "intervention_override",
+      "source": "graph",
+      "flip_risk_category": "correlated",
+      "attribution_stability": "negligible",
+      "elasticity_std": 0,
+      "rank_flip_rate": 0,
+      "stability_method": "bootstrap_20",
+      "importance_basis": "graph_structural",
+      "driver_label": "minor",
+      "range_derivation_source": "default"
+    }
+  ],
+  "robustness": {
+    "fragile_edges": [
+      {
+        "edge_id": "fac_partner_invest->out_new_arr",
+        "from_id": "fac_partner_invest",
+        "to_id": "out_new_arr",
+        "switch_probability": 0.19,
+        "marginal_switch_probability": 0,
+        "alternative_winner_id": "opt_plg",
+        "from_label": "Partner Channel Investment",
+        "to_label": "Net New ARR Generated",
+        "severity": "warning",
+        "visible": true,
+        "alternative_winner_label": "Product-Led Growth Free Tier"
+      },
+      {
+        "edge_id": "out_partner_leverage->goal_arr",
+        "from_id": "out_partner_leverage",
+        "to_id": "goal_arr",
+        "switch_probability": 0.1368,
+        "marginal_switch_probability": 0,
+        "alternative_winner_id": "opt_plg",
+        "from_label": "Partner Pipeline Leverage",
+        "to_label": "Add £2M Net New ARR Within 12 Months",
+        "severity": "warning",
+        "visible": false,
+        "alternative_winner_label": "Product-Led Growth Free Tier"
+      },
+      {
+        "edge_id": "fac_plg_invest->risk_activation_failure",
+        "from_id": "fac_plg_invest",
+        "to_id": "risk_activation_failure",
+        "switch_probability": 0.1292,
+        "marginal_switch_probability": 0,
+        "alternative_winner_id": "opt_plg",
+        "from_label": "PLG Engineering Investment",
+        "to_label": "Self-Serve Activation Failure",
+        "severity": "warning",
+        "visible": false,
+        "alternative_winner_label": "Product-Led Growth Free Tier"
+      },
+      {
+        "edge_id": "fac_outbound_invest->risk_ramp_drag",
+        "from_id": "fac_outbound_invest",
+        "to_id": "risk_ramp_drag",
+        "switch_probability": 0.1088,
+        "marginal_switch_probability": 0,
+        "alternative_winner_id": "opt_outbound",
+        "from_label": "Outbound SDR Investment",
+        "to_label": "Hiring and Ramp Drag",
+        "severity": "warning",
+        "visible": false,
+        "alternative_winner_label": "Build Outbound SDR Team"
+      },
+      {
+        "edge_id": "fac_outbound_invest->risk_conversion_shortfall",
+        "from_id": "fac_outbound_invest",
+        "to_id": "risk_conversion_shortfall",
+        "switch_probability": 0.0852,
+        "marginal_switch_probability": 0,
+        "alternative_winner_id": "opt_outbound",
+        "from_label": "Outbound SDR Investment",
+        "to_label": "Pipeline Conversion Shortfall",
+        "severity": "warning",
+        "visible": false,
+        "alternative_winner_label": "Build Outbound SDR Team"
+      },
+      {
+        "edge_id": "risk_ramp_drag->goal_arr",
+        "from_id": "risk_ramp_drag",
+        "to_id": "goal_arr",
+        "switch_probability": 0.0844,
+        "marginal_switch_probability": 0,
+        "alternative_winner_id": "opt_plg",
+        "from_label": "Hiring and Ramp Drag",
+        "to_label": "Add £2M Net New ARR Within 12 Months",
+        "severity": "warning",
+        "visible": false,
+        "alternative_winner_label": "Product-Led Growth Free Tier"
+      },
+      {
+        "edge_id": "fac_outbound_invest->out_new_arr",
+        "from_id": "fac_outbound_invest",
+        "to_id": "out_new_arr",
+        "switch_probability": 0.07912772585669782,
+        "marginal_switch_probability": 0,
+        "alternative_winner_id": "opt_plg",
+        "from_label": "Outbound SDR Investment",
+        "to_label": "Net New ARR Generated",
+        "severity": "warning",
+        "visible": false,
+        "alternative_winner_label": "Product-Led Growth Free Tier"
+      },
+      {
+        "edge_id": "fac_market_conditions->risk_activation_failure",
+        "from_id": "fac_market_conditions",
+        "to_id": "risk_activation_failure",
+        "switch_probability": 0.07678697806086342,
+        "marginal_switch_probability": 0,
+        "alternative_winner_id": "opt_plg",
+        "from_label": "Market Conditions",
+        "to_label": "Self-Serve Activation Failure",
+        "severity": "warning",
+        "visible": false,
+        "alternative_winner_label": "Product-Led Growth Free Tier"
+      },
+      {
+        "edge_id": "fac_market_conditions->risk_conversion_shortfall",
+        "from_id": "fac_market_conditions",
+        "to_id": "risk_conversion_shortfall",
+        "switch_probability": 0.0756,
+        "alternative_winner_id": "opt_plg",
+        "from_label": "Market Conditions",
+        "to_label": "Pipeline Conversion Shortfall",
+        "severity": "warning",
+        "visible": false,
+        "alternative_winner_label": "Product-Led Growth Free Tier"
+      },
+      {
+        "edge_id": "risk_conversion_shortfall->goal_arr",
+        "from_id": "risk_conversion_shortfall",
+        "to_id": "goal_arr",
+        "switch_probability": 0.072,
+        "marginal_switch_probability": 0,
+        "alternative_winner_id": "opt_plg",
+        "from_label": "Pipeline Conversion Shortfall",
+        "to_label": "Add £2M Net New ARR Within 12 Months",
+        "severity": "warning",
+        "visible": false,
+        "alternative_winner_label": "Product-Led Growth Free Tier"
+      },
+      {
+        "edge_id": "out_new_arr->goal_arr",
+        "from_id": "out_new_arr",
+        "to_id": "goal_arr",
+        "switch_probability": 0.0516,
+        "marginal_switch_probability": 0,
+        "alternative_winner_id": "opt_plg",
+        "from_label": "Net New ARR Generated",
+        "to_label": "Add £2M Net New ARR Within 12 Months",
+        "severity": "warning",
+        "visible": false,
+        "alternative_winner_label": "Product-Led Growth Free Tier"
+      }
+    ],
+    "robust_edges": [
+      {
+        "edge_id": "fac_market_conditions->out_partner_leverage",
+        "from_id": "fac_market_conditions",
+        "to_id": "out_partner_leverage",
+        "from_label": "Market Conditions",
+        "to_label": "Partner Pipeline Leverage",
+        "alternative_winner_id": null,
+        "alternative_winner_label": null
+      },
+      {
+        "edge_id": "fac_plg_invest->out_new_arr",
+        "from_id": "fac_plg_invest",
+        "to_id": "out_new_arr",
+        "from_label": "PLG Engineering Investment",
+        "to_label": "Net New ARR Generated",
+        "alternative_winner_id": null,
+        "alternative_winner_label": null
+      },
+      {
+        "edge_id": "risk_activation_failure->goal_arr",
+        "from_id": "risk_activation_failure",
+        "to_id": "goal_arr",
+        "from_label": "Self-Serve Activation Failure",
+        "to_label": "Add £2M Net New ARR Within 12 Months",
+        "alternative_winner_id": null,
+        "alternative_winner_label": null
+      }
+    ],
+    "is_robust": true,
+    "level": "high",
+    "confidence": 0.8575833333333327,
+    "confidence_basis": "recommendation_stability_uncalibrated",
+    "recommended_option_id": "opt_partner",
+    "recommended_option_label": "Double Down on Partner Channel",
+    "near_tie": {
+      "is_tie": false,
+      "top_option_id": "opt_partner",
+      "second_option_id": "opt_plg",
+      "tied_option_ids": [
+        "opt_partner"
+      ],
+      "gap": 0.7821333333333327,
+      "threshold": 0.1
+    },
+    "display_verdict": "robust",
+    "display_verdict_reason": "this result held up under the changes we tested"
+  },
+  "decision_review": {
+    "narrative_summary": "Double Down on Partner Channel leads by a margin of about 78 percentage points. This position holds even though market conditions are not yet fully evidenced, so checking these underlying assumptions could matter before acting.",
+    "story_headlines": {
+      "opt_outbound": "Outbound SDR Team struggles due to slow hiring and declining reply rates as captured in your own recent reporting.",
+      "opt_partner": "Partner Channel comes out ahead based on higher pipeline conversion and existing partner contribution, but this relies on current market trends holding.",
+      "opt_plg": "Product-Led Growth Free Tier trails because activation and conversion metrics remain uncertain and have not outperformed the partner-driven motion.",
+      "opt_status_quo": "Status Quo preserves current routes but falls short of the £2M net new ARR target as modelled."
+    },
+    "robustness_explanation": {
+      "summary": "The ordering holds in about 86% of variations on current assumptions, though reliability depends strongly on market conditions.",
+      "primary_risk": "If market conditions shift unfavourably, the link from Market Conditions to Self-Serve Activation Failure may weaken the case for the partner channel.",
+      "stability_factors": [
+        "Partner Channel Investment already sources a significant share of new logos as you note."
+      ],
+      "fragility_factors": [
+        "The link from Market Conditions to Self-Serve Activation Failure could flip the advantage if adverse shifts occur."
+      ]
+    },
+    "readiness_rationale": "The comparison is settled on your model, but much rests on how market conditions evolve, as this affects activation and conversion outcomes across all options.",
+    "evidence_enhancements": {
+      "fac_market_conditions": {
+        "specific_action": "Gather current sector benchmarks and analyst forecasts to validate or update your outlook on market conditions and how they affect conversion rates.",
+        "rationale": "More accurate early reads on market conditions will help you assess whether partner-driven pipeline strength will hold or weaken.",
+        "evidence_type": "market_research",
+        "decision_hygiene": "Estimate the likely outlook before reviewing external data for a sharper update."
+      }
+    },
+    "scenario_contexts": {
+      "fac_market_conditions->risk_activation_failure": {
+        "trigger_description": "If market conditions reduce self-serve activation further than modelled, this link may undermine both the PLG and partner strategies.",
+        "consequence": "Then Product-Led Growth Free Tier could overtake Double Down on Partner Channel if the partner model falters."
+      },
+      "out_partner_leverage->goal_arr": {
+        "trigger_description": "If partner pipeline leverage does not translate into new revenue as predicted, hitting the £2M ARR goal becomes uncertain.",
+        "consequence": "Then Product-Led Growth Free Tier could overtake Double Down on Partner Channel for net new ARR."
+      }
+    },
+    "flip_thresholds": [],
+    "bias_findings": [],
+    "key_assumptions": [
+      "The link from Market Conditions to Self-Serve Activation Failure assumes no major shock alters customer willingness to activate.",
+      "Partner Channel Investment assumes existing partners continue to convert leads at twice the outbound rate.",
+      "The pathway from Net New ARR Generated to Add £2M Net New ARR Within 12 Months assumes conversion rates can be maintained at historical levels."
+    ],
+    "decision_quality_prompts": [
+      {
+        "question": "What would make you switch from Double Down on Partner Channel to Product-Led Growth Free Tier?",
+        "principle": "Consider-the-opposite as a debiasing strategy",
+        "applies_because": "A large margin currently favours the partner channel, so actively challenging this outcome can surface overlooked risks.",
+        "dsk_claim_id": "DSK-T-003",
+        "evidence_strength": "medium",
+        "dsk_protocol_id": "DSK-P-003"
+      },
+      {
+        "question": "What is the base rate for efforts like Double Down on Partner Channel delivering £2M net new ARR in 12 months?",
+        "principle": "Outside view and reference class forecasting",
+        "applies_because": "Confidence depends on whether similar partner expansions have typically delivered these results in SaaS.",
+        "dsk_claim_id": "DSK-T-002",
+        "evidence_strength": "strong",
+        "dsk_protocol_id": "DSK-P-002"
+      }
+    ],
+    "pre_mortem": {
+      "failure_scenario": "The plan fails because partner pipeline dries up or conversion rates decline, while market headwinds dampen activation and new ARR falls short across both partner and PLG routes.",
+      "warning_signs": [
+        "Partner-generated pipeline stagnates or declines early in the year.",
+        "Self-serve activation rates slip below 30% despite product investments."
+      ],
+      "mitigation": "Set early targets for partner pipeline growth and monitor market signals, with a clear fallback to PLG investment if results are missed.",
+      "grounded_in": [
+        "fac_market_conditions->risk_activation_failure",
+        "out_partner_leverage->goal_arr"
+      ],
+      "review_trigger": "Reconvene if partner conversions trend below historical rates by the next quarterly review."
+    },
+    "produced_at": "2026-08-05T10:10:39.150Z"
+  },
+  "option_comparison_status": "computed",
+  "edge_e_values": [
+    {
+      "edge_id": "fac_outbound_invest::risk_ramp_drag",
+      "from_id": "fac_outbound_invest",
+      "to_id": "risk_ramp_drag",
+      "from_label": "Outbound SDR Investment",
+      "to_label": "Hiring and Ramp Drag",
+      "e_value": 1,
+      "flip_direction": "decrease",
+      "current_mean": 0.62,
+      "flip_mean": -0.274941,
+      "stability": {
+        "n_seeds": 10,
+        "n_seeds_flipped": 9,
+        "band_min": -0.696457,
+        "band_median": -0.055149,
+        "band_max": 0.361196,
+        "band_width": 1.057653,
+        "seed_flip_means": [
+          null,
+          -0.587601,
+          -0.459023,
+          0.361196,
+          -0.055149,
+          0.170805,
+          0.319569,
+          0.072639,
+          -0.696457,
+          -0.507118
+        ]
+      }
+    },
+    {
+      "edge_id": "fac_partner_invest::out_new_arr",
+      "from_id": "fac_partner_invest",
+      "to_id": "out_new_arr",
+      "from_label": "Partner Channel Investment",
+      "to_label": "Net New ARR Generated",
+      "e_value": 1,
+      "flip_direction": "decrease",
+      "current_mean": 0.3627272727272727,
+      "flip_mean": -0.284843,
+      "stability": {
+        "n_seeds": 10,
+        "n_seeds_flipped": 10,
+        "band_min": -0.362567,
+        "band_median": 0.001296,
+        "band_max": 0.857888,
+        "band_width": 1.220455,
+        "seed_flip_means": [
+          0.857888,
+          -0.257477,
+          -0.362567,
+          0.125253,
+          -0.000001,
+          0.074509,
+          0.530081,
+          0.002593,
+          -0.16619,
+          -0.25961
+        ]
+      }
+    },
+    {
+      "edge_id": "fac_partner_invest::out_partner_leverage",
+      "from_id": "fac_partner_invest",
+      "to_id": "out_partner_leverage",
+      "from_label": "Partner Channel Investment",
+      "to_label": "Partner Pipeline Leverage",
+      "e_value": 1.2734,
+      "flip_direction": "decrease",
+      "current_mean": 0.55,
+      "flip_mean": -0.700389,
+      "stability": {
+        "n_seeds": 10,
+        "n_seeds_flipped": 3,
+        "band_min": -0.617074,
+        "band_median": -0.256277,
+        "band_max": 0.481891,
+        "band_width": 1.098965,
+        "seed_flip_means": [
+          null,
+          -0.256277,
+          -0.617074,
+          0.481891,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      }
+    },
+    {
+      "edge_id": "fac_plg_invest::out_new_arr",
+      "from_id": "fac_plg_invest",
+      "to_id": "out_new_arr",
+      "from_label": "PLG Engineering Investment",
+      "to_label": "Net New ARR Generated",
+      "e_value": 3.9905,
+      "flip_direction": "increase",
+      "current_mean": 0.18999999999999997,
+      "flip_mean": 0.758197,
+      "stability": {
+        "n_seeds": 10,
+        "n_seeds_flipped": 6,
+        "band_min": 0.124146,
+        "band_median": 0.664519,
+        "band_max": 0.892165,
+        "band_width": 0.768019,
+        "seed_flip_means": [
+          0.892165,
+          0.821342,
+          null,
+          null,
+          null,
+          0.124146,
+          0.426407,
+          0.659598,
+          null,
+          0.669439
+        ]
+      }
+    },
+    {
+      "edge_id": "fac_plg_invest::risk_activation_failure",
+      "from_id": "fac_plg_invest",
+      "to_id": "risk_activation_failure",
+      "from_label": "PLG Engineering Investment",
+      "to_label": "Self-Serve Activation Failure",
+      "e_value": 1.1281,
+      "flip_direction": "decrease",
+      "current_mean": 0.58,
+      "flip_mean": -0.65427,
+      "stability": {
+        "n_seeds": 10,
+        "n_seeds_flipped": 3,
+        "band_min": -0.602563,
+        "band_median": -0.327258,
+        "band_max": -0.295656,
+        "band_width": 0.306907,
+        "seed_flip_means": [
+          null,
+          -0.327258,
+          null,
+          null,
+          -0.602563,
+          null,
+          null,
+          null,
+          -0.295656,
+          null
+        ]
+      }
+    },
+    {
+      "edge_id": "out_new_arr::goal_arr",
+      "from_id": "out_new_arr",
+      "to_id": "goal_arr",
+      "from_label": "Net New ARR Generated",
+      "to_label": "Add £2M Net New ARR Within 12 Months",
+      "e_value": 1,
+      "flip_direction": "decrease",
+      "current_mean": 0.55,
+      "flip_mean": -0.431904,
+      "stability": {
+        "n_seeds": 10,
+        "n_seeds_flipped": 10,
+        "band_min": -0.786226,
+        "band_median": -0.000001,
+        "band_max": 0.798717,
+        "band_width": 1.584943,
+        "seed_flip_means": [
+          0.225217,
+          -0.786226,
+          -0.542735,
+          0.798717,
+          -0.000001,
+          0.353356,
+          -0.000001,
+          0.632685,
+          -0.174693,
+          -0.31695
+        ]
+      }
+    },
+    {
+      "edge_id": "out_partner_leverage::goal_arr",
+      "from_id": "out_partner_leverage",
+      "to_id": "goal_arr",
+      "from_label": "Partner Pipeline Leverage",
+      "to_label": "Add £2M Net New ARR Within 12 Months",
+      "e_value": 1.2734,
+      "flip_direction": "decrease",
+      "current_mean": 0.3,
+      "flip_mean": -0.382031,
+      "stability": {
+        "n_seeds": 10,
+        "n_seeds_flipped": 10,
+        "band_min": -0.585044,
+        "band_median": -0.068037,
+        "band_max": 0.840347,
+        "band_width": 1.425391,
+        "seed_flip_means": [
+          0.840347,
+          -0.097304,
+          -0.396044,
+          0.305395,
+          -0.356061,
+          0.083153,
+          -0.03877,
+          0.57681,
+          -0.372036,
+          -0.585044
+        ]
+      }
+    },
+    {
+      "edge_id": "risk_activation_failure::goal_arr",
+      "from_id": "risk_activation_failure",
+      "to_id": "goal_arr",
+      "from_label": "Self-Serve Activation Failure",
+      "to_label": "Add £2M Net New ARR Within 12 Months",
+      "e_value": 1.1281,
+      "flip_direction": "increase",
+      "current_mean": -0.25,
+      "flip_mean": 0.282013,
+      "stability": {
+        "n_seeds": 10,
+        "n_seeds_flipped": 9,
+        "band_min": -0.120181,
+        "band_median": 0.304173,
+        "band_max": 0.688814,
+        "band_width": 0.808995,
+        "seed_flip_means": [
+          0.688814,
+          0.232863,
+          0.532099,
+          0.573606,
+          0.304173,
+          -0.120181,
+          null,
+          -0.003097,
+          0.157736,
+          0.613585
+        ]
+      }
+    },
+    {
+      "edge_id": "risk_conversion_shortfall::goal_arr",
+      "from_id": "risk_conversion_shortfall",
+      "to_id": "goal_arr",
+      "from_label": "Pipeline Conversion Shortfall",
+      "to_label": "Add £2M Net New ARR Within 12 Months",
+      "e_value": 3.0485,
+      "flip_direction": "increase",
+      "current_mean": -0.3,
+      "flip_mean": 0.914551,
+      "stability": {
+        "n_seeds": 10,
+        "n_seeds_flipped": 4,
+        "band_min": 0.434742,
+        "band_median": 0.706606,
+        "band_max": 0.968653,
+        "band_width": 0.533911,
+        "seed_flip_means": [
+          null,
+          null,
+          0.968653,
+          null,
+          null,
+          0.434742,
+          null,
+          null,
+          0.814455,
+          0.598757
+        ]
+      }
+    },
+    {
+      "edge_id": "risk_ramp_drag::goal_arr",
+      "from_id": "risk_ramp_drag",
+      "to_id": "goal_arr",
+      "from_label": "Hiring and Ramp Drag",
+      "to_label": "Add £2M Net New ARR Within 12 Months",
+      "e_value": 1,
+      "flip_direction": "increase",
+      "current_mean": -0.45,
+      "flip_mean": 0.199554,
+      "stability": {
+        "n_seeds": 10,
+        "n_seeds_flipped": 10,
+        "band_min": -0.33969,
+        "band_median": 0.032849,
+        "band_max": 0.697764,
+        "band_width": 1.037454,
+        "seed_flip_means": [
+          -0.186851,
+          0.340594,
+          0.327733,
+          -0.313097,
+          0.136738,
+          -0.071039,
+          -0.33969,
+          -0.077786,
+          0.594909,
+          0.697764
+        ]
+      }
+    }
+  ],
+  "inference_warnings": [
+    {
+      "code": "EDGE_E_VALUE_NON_FINITE_DROPPED",
+      "message": "6 edge E-value entries were omitted from edge_e_values: 6 carried no finite E-value from the analysis engine (an unflippable edge, whose current and flip means coincide, has no evidence ratio). edge_e_values is shorter because those entries could not be represented, not because they were computed empty. All other analyses are unaffected.",
+      "severity": "info"
+    }
+  ],
+  "confidence_tier": "strong",
+  "flip_thresholds": [
+    {
+      "factor_id": "fac_market_conditions",
+      "factor_label": "Market Conditions",
+      "current_value": 0,
+      "flip_value": null,
+      "alternative_winner_id": null,
+      "alternative_winner_label": null,
+      "flip_reason": "structurally_invariant",
+      "iterations_used": 0,
+      "probes_used": 0,
+      "no_flip_in_range": true
+    },
+    {
+      "factor_id": "fac_outbound_invest",
+      "factor_label": "Outbound SDR Investment",
+      "current_value": 0,
+      "flip_value": null,
+      "unit": "£M",
+      "alternative_winner_id": null,
+      "alternative_winner_label": null,
+      "flip_reason": "structurally_invariant",
+      "iterations_used": 0,
+      "probes_used": 0,
+      "no_flip_in_range": true,
+      "value_scale": "display",
+      "current_display": "0 £M"
+    },
+    {
+      "factor_id": "fac_partner_invest",
+      "factor_label": "Partner Channel Investment",
+      "current_value": 0,
+      "flip_value": null,
+      "unit": "£M",
+      "alternative_winner_id": null,
+      "alternative_winner_label": null,
+      "flip_reason": "structurally_invariant",
+      "iterations_used": 0,
+      "probes_used": 0,
+      "no_flip_in_range": true,
+      "value_scale": "display",
+      "current_display": "0 £M"
+    },
+    {
+      "factor_id": "fac_plg_invest",
+      "factor_label": "PLG Engineering Investment",
+      "current_value": 0,
+      "flip_value": null,
+      "unit": "£M",
+      "alternative_winner_id": null,
+      "alternative_winner_label": null,
+      "flip_reason": "structurally_invariant",
+      "iterations_used": 0,
+      "probes_used": 0,
+      "no_flip_in_range": true,
+      "value_scale": "display",
+      "current_display": "0 £M"
+    }
+  ],
+  "decision_brief": {
+    "brief_id": "103d25f6-e0c3-4e7a-a5ee-48679c0eebb2",
+    "version": "1",
+    "created_at": "2026-08-05T10:10:26.692Z",
+    "headline": "Double Down on Partner Channel currently leads by 78 points on the current model. This option leads on the current model, with important caveats. Before acting, validate the assumptions most likely to change the result.",
+    "options": [
+      {
+        "option_id": "opt_partner",
+        "label": "Double Down on Partner Channel",
+        "win_probability": 0.8575833333333327,
+        "rank": 1
+      },
+      {
+        "option_id": "opt_plg",
+        "label": "Product-Led Growth Free Tier",
+        "win_probability": 0.07545000000000003,
+        "rank": 2
+      },
+      {
+        "option_id": "opt_outbound",
+        "label": "Build Outbound SDR Team",
+        "win_probability": 0.04693333333333332,
+        "rank": 3
+      },
+      {
+        "option_id": "opt_status_quo",
+        "label": "Continue Current Mix (Status Quo)",
+        "win_probability": 0.020033333333333347,
+        "rank": 4
+      }
+    ],
+    "top_drivers": [
+      {
+        "factor_label": "Market Conditions",
+        "sensitivity": 0.009602194787379982,
+        "direction": "negative"
+      }
+    ],
+    "key_assumptions": [
+      "Market Conditions"
+    ],
+    "what_would_change": [
+      "Partner Pipeline Leverage → Add £2M Net New ARR Within 12 Months",
+      "Hiring and Ramp Drag → Add £2M Net New ARR Within 12 Months",
+      "Market Conditions → Self-Serve Activation Failure",
+      "Market Conditions → Pipeline Conversion Shortfall",
+      "Pipeline Conversion Shortfall → Add £2M Net New ARR Within 12 Months",
+      "Net New ARR Generated → Add £2M Net New ARR Within 12 Months"
+    ],
+    "robustness": "robust",
+    "warnings": [
+      {
+        "code": "DOMINANT_FACTOR",
+        "message": "One factor dominates. What would change if Market Conditions had less influence?",
+        "severity": "warning"
+      },
+      {
+        "code": "INFLUENTIAL_EXTERNALS",
+        "message": "External factors Market Conditions significantly affect your outcome but are inherently uncertain. How might you bound these?",
+        "severity": "warning"
+      },
+      {
+        "code": "M2_UNAVAILABLE",
+        "message": "Decision review was unavailable; brief uses deterministic coaching fallback",
+        "severity": "warning"
+      },
+      {
+        "code": "MARGINAL_SWITCH_TRUNCATED",
+        "message": "Marginal switch probability was computed for the 10 most elastic fragile edge(s) of 11; the remaining 1 carry marginal_switch_probability=null. Each edge's sweep costs 100 isolated re-evaluations per option, so the set is bounded to keep the analysis inside its compute-admission budget. Retained values are unaffected — each is computed independently of the others",
+        "severity": "warning"
+      }
+    ],
+    "headline_banded": {
+      "text": "Double Down on Partner Channel is clearly ahead.",
+      "band": "clearly_ahead",
+      "leader_option_id": "opt_partner",
+      "leader_label": "Double Down on Partner Channel",
+      "runner_up_option_id": "opt_plg",
+      "runner_up_label": "Product-Led Growth Free Tier",
+      "win_probability_gap": 0.7821333333333327,
+      "robustness_gated": false,
+      "doctrine": "provisional_doctrine_v0"
+    },
+    "defaulted_assumptions": [
+      {
+        "factor_label": "Market Conditions",
+        "note": "No starting value was provided for \"Market Conditions\" — the analysis used a default. Setting a real value or range would make this result more trustworthy.",
+        "source": "value_defaulted",
+        "doctrine": "provisional_doctrine_v0"
+      }
+    ],
+    "robustness_caveat": {
+      "text": "This ranking held up under the perturbations tested. That is not a guarantee — defaulted or uncertain inputs can still change the result.",
+      "basis": "is_robust",
+      "doctrine": "provisional_doctrine_v0"
+    },
+    "warning_codes": [],
+    "analysis_summary": {
+      "leading_option": "Double Down on Partner Channel",
+      "win_probability": 0.8575833333333327,
+      "robustness_band": "robust"
+    }
+  },
+  "factor_evppi": [
+    {
+      "factor_id": "fac_market_conditions",
+      "evppi": 0,
+      "evppi_raw": 0,
+      "baseline_max_expected_utility": 0.086295,
+      "conditional_max_expected_utility": 0.086295,
+      "units": "outcome",
+      "method": "regression_evppi_v1",
+      "regression_degree": 4,
+      "n_samples": 10000,
+      "clamped_low": false,
+      "clamped_high": false,
+      "noise_floor": 0,
+      "status": "below_resolution",
+      "correlation_active": false
+    }
+  ],
+  "decision_evpi": 0.0049100425770616735,
+  "p_win_sensitivity": [
+    {
+      "factor_id": "fac_outbound_invest",
+      "p_win_delta": 0.008333,
+      "p_win_delta_percentage_points": 0.83,
+      "current_metric": 0.859417,
+      "perfect_metric": 0.86775,
+      "metric_type": "p_win_recommended",
+      "method": "p_win_delta_at_mean_v1",
+      "n_samples": 2000,
+      "status": "below_resolution",
+      "clamped": false,
+      "noise_floor": 0.03099,
+      "noise_floor_method": "z95_worst_case_bernoulli_diff",
+      "labelling_doctrine": "provisional_doctrine_v0"
+    },
+    {
+      "factor_id": "fac_partner_invest",
+      "p_win_delta": 0.005,
+      "p_win_delta_percentage_points": 0.5,
+      "current_metric": 0.859417,
+      "perfect_metric": 0.864417,
+      "metric_type": "p_win_recommended",
+      "method": "p_win_delta_at_mean_v1",
+      "n_samples": 2000,
+      "status": "below_resolution",
+      "clamped": false,
+      "noise_floor": 0.03099,
+      "noise_floor_method": "z95_worst_case_bernoulli_diff",
+      "labelling_doctrine": "provisional_doctrine_v0"
+    },
+    {
+      "factor_id": "fac_market_conditions",
+      "p_win_delta": 0.002583,
+      "p_win_delta_percentage_points": 0.26,
+      "current_metric": 0.859417,
+      "perfect_metric": 0.862,
+      "metric_type": "p_win_recommended",
+      "method": "p_win_delta_at_mean_v1",
+      "n_samples": 2000,
+      "status": "below_resolution",
+      "clamped": false,
+      "noise_floor": 0.03099,
+      "noise_floor_method": "z95_worst_case_bernoulli_diff",
+      "labelling_doctrine": "provisional_doctrine_v0"
+    },
+    {
+      "factor_id": "fac_plg_invest",
+      "p_win_delta": 0,
+      "p_win_delta_percentage_points": 0,
+      "current_metric": 0.859417,
+      "perfect_metric": 0.858833,
+      "metric_type": "p_win_recommended",
+      "method": "p_win_delta_at_mean_v1",
+      "n_samples": 2000,
+      "status": "below_resolution",
+      "clamped": true,
+      "noise_floor": 0.03099,
+      "noise_floor_method": "z95_worst_case_bernoulli_diff",
+      "labelling_doctrine": "provisional_doctrine_v0"
+    }
+  ]
+}

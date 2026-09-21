@@ -1,0 +1,66 @@
+{
+  "brief_id": "09-update-node-label",
+  "model": "gpt-4.1",
+  "prompt_hash": "sha256:2d6fcbc9d09869a271bc93df1b5bbb450a4a5ee3053d9395c3143b810c973cc5",
+  "response": {
+    "model_id": "gpt-4.1",
+    "brief_id": "09-update-node-label",
+    "status": "success",
+    "raw_text": "{\n  \"operations\": [\n    {\n      \"op\": \"update_node\",\n      \"path\": \"/nodes/fac_competition/label\",\n      \"value\": \"Market Competition\",\n      \"old_value\": \"Competitive Intensity\",\n      \"impact\": \"low\",\n      \"rationale\": \"Renames external factor for clarity, no structural/causal changes.\"\n    }\n  ],\n  \"removed_edges\": [],\n  \"warnings\": [],\n  \"coaching\": {\n    \"summary\": \"Renamed 'Competitive Intensity' to 'Market Competition'. This is a cosmetic change and does not alter model structure or relationships.\",\n    \"rerun_recommended\": false\n  }\n}",
+    "parsed_graph": {
+      "operations": [
+        {
+          "op": "update_node",
+          "path": "/nodes/fac_competition/label",
+          "value": "Market Competition",
+          "old_value": "Competitive Intensity",
+          "impact": "low",
+          "rationale": "Renames external factor for clarity, no structural/causal changes."
+        }
+      ],
+      "removed_edges": [],
+      "warnings": [],
+      "coaching": {
+        "summary": "Renamed 'Competitive Intensity' to 'Market Competition'. This is a cosmetic change and does not alter model structure or relationships.",
+        "rerun_recommended": false
+      }
+    },
+    "extraction_attempted": false,
+    "latency_ms": 1555,
+    "input_tokens": 5391,
+    "output_tokens": 140,
+    "est_cost_usd": 0.011902,
+    "pricing_source": "api_usage",
+    "parsed_json": {
+      "operations": [
+        {
+          "op": "update_node",
+          "path": "/nodes/fac_competition/label",
+          "value": "Market Competition",
+          "old_value": "Competitive Intensity",
+          "impact": "low",
+          "rationale": "Renames external factor for clarity, no structural/causal changes."
+        }
+      ],
+      "removed_edges": [],
+      "warnings": [],
+      "coaching": {
+        "summary": "Renamed 'Competitive Intensity' to 'Market Competition'. This is a cosmetic change and does not alter model structure or relationships.",
+        "rerun_recommended": false
+      }
+    }
+  },
+  "scores": {
+    "valid_json": true,
+    "correct_shape": true,
+    "operation_types_correct": false,
+    "topology_compliant": true,
+    "has_impact_rationale": true,
+    "correct_ordering": true,
+    "empty_ops_handled": true,
+    "coaching_present": true,
+    "path_syntax_valid": false
+  },
+  "overall": 0.8,
+  "captured_at": "2026-03-14T16:39:41.327Z"
+}

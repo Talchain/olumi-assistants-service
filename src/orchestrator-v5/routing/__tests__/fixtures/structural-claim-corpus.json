@@ -1,0 +1,1147 @@
+[
+ {
+  "text": "I'd like to add a Pricing option to capture that tradeoff.",
+  "category": "false_success_structural",
+  "lens": "active-verbs"
+ },
+ {
+  "text": "I would like to add a churn factor here, since it drives the outcome.",
+  "category": "false_success_structural",
+  "lens": "active-verbs"
+ },
+ {
+  "text": "I want to add an option for the fallback plan.",
+  "category": "false_success_structural",
+  "lens": "active-verbs"
+ },
+ {
+  "text": "I'm gonna add a Risk factor now.",
+  "category": "false_success_structural",
+  "lens": "active-verbs"
+ },
+ {
+  "text": "I plan to add a constraint on the budget so spend stays capped.",
+  "category": "false_success_structural",
+  "lens": "active-verbs"
+ },
+ {
+  "text": "Let me just add a quick option for that scenario.",
+  "category": "false_success_structural",
+  "lens": "active-verbs"
+ },
+ {
+  "text": "Let me now connect the two nodes so the influence flows through.",
+  "category": "false_success_structural",
+  "lens": "active-verbs"
+ },
+ {
+  "text": "Let me quickly add a factor for seasonality.",
+  "category": "false_success_structural",
+  "lens": "active-verbs"
+ },
+ {
+  "text": "Let me hook up a driver for demand and wire it to revenue.",
+  "category": "false_success_structural",
+  "lens": "active-verbs"
+ },
+ {
+  "text": "Let me wire up a driver for demand.",
+  "category": "false_success_structural",
+  "lens": "active-verbs"
+ },
+ {
+  "text": "I'll now add an option to cover the downside case.",
+  "category": "false_success_structural",
+  "lens": "active-verbs"
+ },
+ {
+  "text": "I'll just update the churn factor's weight.",
+  "category": "false_success_structural",
+  "lens": "active-verbs"
+ },
+ {
+  "text": "I'll be adding a factor for seasonality shortly.",
+  "category": "false_success_structural",
+  "lens": "active-verbs"
+ },
+ {
+  "text": "I'm modifying the Pricing factor as we speak.",
+  "category": "false_success_structural",
+  "lens": "active-verbs"
+ },
+ {
+  "text": "I'm editing the constraint to relax the cap.",
+  "category": "false_success_structural",
+  "lens": "active-verbs"
+ },
+ {
+  "text": "I'm incorporating a new option for the partnership route.",
+  "category": "false_success_structural",
+  "lens": "active-verbs"
+ },
+ {
+  "text": "I'm establishing a driver node for demand pressure.",
+  "category": "false_success_structural",
+  "lens": "active-verbs"
+ },
+ {
+  "text": "I set a new constraint on spend so the budget can't overrun.",
+  "category": "false_success_structural",
+  "lens": "active-verbs"
+ },
+ {
+  "text": "I set the option's weight just now, so it's heavier than before.",
+  "category": "false_success_structural",
+  "lens": "active-verbs"
+ },
+ {
+  "text": "I went ahead and added a churn factor for you.",
+  "category": "false_success_structural",
+  "lens": "active-verbs"
+ },
+ {
+  "text": "I have now added the Coach option to reflect that route.",
+  "category": "false_success_structural",
+  "lens": "active-verbs"
+ },
+ {
+  "text": "Let me now revise the graph to reflect the new structure.",
+  "category": "false_success_graphmodel",
+  "lens": "active-verbs"
+ },
+ {
+  "text": "I'll quickly rewire the constraints to break the cycle.",
+  "category": "false_success_structural",
+  "lens": "active-verbs"
+ },
+ {
+  "text": "I’ll go ahead and revise the factor to be more conservative.",
+  "category": "false_success_structural",
+  "lens": "active-verbs"
+ },
+ {
+  "text": "Let me go ahead and rewire the demand driver now.",
+  "category": "false_success_structural",
+  "lens": "active-verbs"
+ },
+ {
+  "text": "I am about to connect the Demand node to the Revenue node.",
+  "category": "false_success_structural",
+  "lens": "active-verbs"
+ },
+ {
+  "text": "Sounds good — here's the tradeoff first. I've added a Pricing option for you.",
+  "category": "false_success_structural",
+  "lens": "active-verbs"
+ },
+ {
+  "text": "I revised the factor in the report for you, exactly as discussed.",
+  "category": "nongraph",
+  "lens": "active-verbs"
+ },
+ {
+  "text": "I created an option in the slide deck, not the graph itself.",
+  "category": "nongraph",
+  "lens": "active-verbs"
+ },
+ {
+  "text": "I would add a factor for competitive response if the data supported it.",
+  "category": "advisory",
+  "lens": "active-verbs"
+ },
+ {
+  "text": "I reworked the model to reflect those two new cost drivers.",
+  "category": "false_success_graphmodel",
+  "lens": "graph-model"
+ },
+ {
+  "text": "Let me rewire the graph so the regulatory factor feeds into both options.",
+  "category": "false_success_graphmodel",
+  "lens": "graph-model"
+ },
+ {
+  "text": "I've gone ahead and redrawn the decision model around the revised timeline.",
+  "category": "false_success_graphmodel",
+  "lens": "graph-model"
+ },
+ {
+  "text": "I rebuilt the graph from scratch with the cleaner factor hierarchy you described.",
+  "category": "false_success_graphmodel",
+  "lens": "graph-model"
+ },
+ {
+  "text": "Done — I updated the model to remove the redundant branch.",
+  "category": "false_success_graphmodel",
+  "lens": "graph-model"
+ },
+ {
+  "text": "I’ll revise the graph now that we’ve settled on three options.",
+  "category": "false_success_graphmodel",
+  "lens": "graph-model"
+ },
+ {
+  "text": "Let me go ahead and edit the model to weight the financial factor more heavily.",
+  "category": "false_success_graphmodel",
+  "lens": "graph-model"
+ },
+ {
+  "text": "I modified the decision model so the constraint sits upstream of the cost node.",
+  "category": "false_success_graphmodel",
+  "lens": "graph-model"
+ },
+ {
+  "text": "Good question. To answer it cleanly, I redrew the model with the supplier risk isolated.",
+  "category": "false_success_graphmodel",
+  "lens": "graph-model"
+ },
+ {
+  "text": "I’ve rebuilt the decision model and re-ran the analysis on the new structure.",
+  "category": "false_success_graphmodel",
+  "lens": "graph-model"
+ },
+ {
+  "text": "I reworked the model documentation to spell out each factor's definition.",
+  "category": "nongraph",
+  "lens": "graph-model"
+ },
+ {
+  "text": "I updated the model's notes with a caveat about the optimistic revenue assumption.",
+  "category": "nongraph",
+  "lens": "graph-model"
+ },
+ {
+  "text": "I revised the model version label to v3 after our last conversation.",
+  "category": "nongraph",
+  "lens": "graph-model"
+ },
+ {
+  "text": "I reworked the graph spec in the README so contributors know the node format.",
+  "category": "nongraph",
+  "lens": "graph-model"
+ },
+ {
+  "text": "I rewrote the model writeup to make the recommendation clearer for your board.",
+  "category": "nongraph",
+  "lens": "graph-model"
+ },
+ {
+  "text": "I updated the model's changelog to note that we added the compliance factor.",
+  "category": "nongraph",
+  "lens": "graph-model"
+ },
+ {
+  "text": "I edited the model documentation and pushed it into your graph for reference.",
+  "category": "false_success_graphmodel",
+  "lens": "graph-model"
+ },
+ {
+  "text": "I adjusted the model's notes, then wired the new driver into the graph.",
+  "category": "false_success_graphmodel",
+  "lens": "graph-model"
+ },
+ {
+  "text": "Your model now has four options and a cleaner factor layout after my edits.",
+  "category": "benign_readout",
+  "lens": "graph-model"
+ },
+ {
+  "text": "I'd suggest reworking the model so the constraint no longer dominates every path.",
+  "category": "advisory",
+  "lens": "graph-model"
+ },
+ {
+  "text": "Would you like me to rewire the graph so those two factors share a parent?",
+  "category": "advisory",
+  "lens": "graph-model"
+ },
+ {
+  "text": "I think the model needs reworking before we trust the ranking.",
+  "category": "advisory",
+  "lens": "graph-model"
+ },
+ {
+  "text": "Once you confirm, I'll rebuild the graph around the new objective.",
+  "category": "advisory",
+  "lens": "graph-model"
+ },
+ {
+  "text": "I reworked the relationship between the two cost factors in the model.",
+  "category": "ambiguous_edge",
+  "lens": "graph-model"
+ },
+ {
+  "text": "I rewired the dependency so it flows the other way through the graph.",
+  "category": "ambiguous_edge",
+  "lens": "graph-model"
+ },
+ {
+  "text": "After studying it, I rebuilt my mental model of how the supplier risk propagates.",
+  "category": "nongraph",
+  "lens": "graph-model"
+ },
+ {
+  "text": "I reworked the model in my head and the second option clearly wins on EVPI.",
+  "category": "nongraph",
+  "lens": "graph-model"
+ },
+ {
+  "text": "Honestly, I haven't touched the graph yet — let me know which factor to add first.",
+  "category": "nongraph",
+  "lens": "graph-model"
+ },
+ {
+  "text": "I went and reworkd the model to drop the dominated option for you.",
+  "category": "false_success_graphmodel",
+  "lens": "graph-model"
+ },
+ {
+  "text": "I updated, restructured, and ultimately redrew the entire model end to end.",
+  "category": "false_success_graphmodel",
+  "lens": "graph-model"
+ },
+ {
+  "text": "Good catch on the coverage gap. The Coaching option has been added to your decision model, so you should now see it alongside the existing three.",
+  "category": "false_success_passive",
+  "lens": "passive-statenow"
+ },
+ {
+  "text": "All set. The Regulatory Risk node has been reconfigured to feed into the Cost factor.",
+  "category": "false_success_passive",
+  "lens": "passive-statenow"
+ },
+ {
+  "text": "Done. The decision graph has been restructured around the two new options you described.",
+  "category": "false_success_passive",
+  "lens": "passive-statenow"
+ },
+ {
+  "text": "Two new options have been added to the model to capture the partnership and the in-house build.",
+  "category": "false_success_passive",
+  "lens": "passive-statenow"
+ },
+ {
+  "text": "Both factors were rewired to point at the Revenue node instead of Margin.",
+  "category": "false_success_passive",
+  "lens": "passive-statenow"
+ },
+ {
+  "text": "Everything is wired up now: the Pricing factor and the Demand factor have both been connected.",
+  "category": "false_success_passive",
+  "lens": "passive-statenow"
+ },
+ {
+  "text": "The new constraint has now been put in place, capping the budget node at 50k.",
+  "category": "false_success_passive",
+  "lens": "passive-statenow"
+ },
+ {
+  "text": "Your model now reflects the added Competitor Response factor and the link to Market Share.",
+  "category": "false_success_passive",
+  "lens": "passive-statenow"
+ },
+ {
+  "text": "After that change, the graph now contains five options and the rewired dependency between them.",
+  "category": "false_success_passive",
+  "lens": "passive-statenow"
+ },
+ {
+  "text": "The model now has the Coaching option you asked for, sitting right beside Self-Study.",
+  "category": "benign_readout",
+  "lens": "passive-statenow"
+ },
+ {
+  "text": "Just to confirm what you're looking at: the diagram now shows four factors feeding the goal.",
+  "category": "benign_readout",
+  "lens": "passive-statenow"
+ },
+ {
+  "text": "Heads up: the option labelled \"Wait and See\" was never actually added, so nothing changed on your end.",
+  "category": "benign_readout",
+  "lens": "passive-statenow"
+ },
+ {
+  "text": "Once the legal review wraps, a new constraint should be added to the model around data residency.",
+  "category": "advisory",
+  "lens": "passive-statenow"
+ },
+ {
+  "text": "I'd note that the relationship between Marketing spend and Pipeline has been rewired to a stronger weight.",
+  "category": "ambiguous_edge",
+  "lens": "passive-statenow"
+ },
+ {
+  "text": "Good news on the structure: the dependency was reworked so Supply now drives Cost directly.",
+  "category": "ambiguous_edge",
+  "lens": "passive-statenow"
+ },
+ {
+  "text": "The connection has now been established between the Hiring node and the Runway node.",
+  "category": "ambiguous_edge",
+  "lens": "passive-statenow"
+ },
+ {
+  "text": "All the options are now updated to reflect the new cost assumptions you gave me.",
+  "category": "false_success_passive",
+  "lens": "passive-statenow"
+ },
+ {
+  "text": "The factor's weight is now adjusted, and the option it feeds has been updated to match.",
+  "category": "false_success_passive",
+  "lens": "passive-statenow"
+ },
+ {
+  "text": "Per your request, the Churn driver was inserted upstream of the Revenue node.",
+  "category": "false_success_passive",
+  "lens": "passive-statenow"
+ },
+ {
+  "text": "The edges have been redrawn so that every factor now routes through the central goal.",
+  "category": "false_success_passive",
+  "lens": "passive-statenow"
+ },
+ {
+  "text": "I've gone ahead with it; the constraint is now in place limiting headcount to twelve.",
+  "category": "false_success_passive",
+  "lens": "passive-statenow"
+ },
+ {
+  "text": "Your model now includes the three options, but I haven't touched the edges between them yet.",
+  "category": "false_success_passive",
+  "lens": "passive-statenow"
+ },
+ {
+  "text": "That factor has been incorporated into the model and is already influencing the projected outcome.",
+  "category": "false_success_passive",
+  "lens": "passive-statenow"
+ },
+ {
+  "text": "The options were reordered for clarity, but no new ones were created in the graph.",
+  "category": "benign_readout",
+  "lens": "passive-statenow"
+ },
+ {
+  "text": "Following up: the node has been revised and the driver it depends on was changed accordingly.",
+  "category": "false_success_passive",
+  "lens": "passive-statenow"
+ },
+ {
+  "text": "The presentation's option slide has been updated, but I left your actual model untouched.",
+  "category": "nongraph",
+  "lens": "passive-statenow"
+ },
+ {
+  "text": "The model documentation now includes a section on the new option, though the graph itself is unchanged.",
+  "category": "nongraph",
+  "lens": "passive-statenow"
+ },
+ {
+  "text": "The notes were reworked to mention the option, and the report's factor table has been updated too.",
+  "category": "nongraph",
+  "lens": "passive-statenow"
+ },
+ {
+  "text": "Confirmed on my side: a constraint has been set up around the timeline, and another factor was introduced for risk.",
+  "category": "false_success_passive",
+  "lens": "passive-statenow"
+ },
+ {
+  "text": "I revised the connection between the two factors so the model is consistent.",
+  "category": "false_success_structural",
+  "lens": "ambiguous-edge"
+ },
+ {
+  "text": "I established a connection between the two drivers you mentioned.",
+  "category": "false_success_structural",
+  "lens": "ambiguous-edge"
+ },
+ {
+  "text": "I redrew the connection so the option now points at your goal.",
+  "category": "false_success_structural",
+  "lens": "ambiguous-edge"
+ },
+ {
+  "text": "I’ve rewired the relationship between Brand and Loyalty for you.",
+  "category": "ambiguous_edge",
+  "lens": "ambiguous-edge"
+ },
+ {
+  "text": "I rewired the relationship to reflect the new ordering.",
+  "category": "ambiguous_edge",
+  "lens": "ambiguous-edge"
+ },
+ {
+  "text": "I’ve revised the dependency to match what you described.",
+  "category": "ambiguous_edge",
+  "lens": "ambiguous-edge"
+ },
+ {
+  "text": "I connected the relationship back to your primary goal.",
+  "category": "ambiguous_edge",
+  "lens": "ambiguous-edge"
+ },
+ {
+  "text": "I linked the dependency so Pricing now feeds Demand.",
+  "category": "ambiguous_edge",
+  "lens": "ambiguous-edge"
+ },
+ {
+  "text": "The link between Cost and Margin was deleted as you asked.",
+  "category": "false_success_passive",
+  "lens": "ambiguous-edge"
+ },
+ {
+  "text": "I drew a connection from Brand to Loyalty in your model.",
+  "category": "ambiguous_edge",
+  "lens": "ambiguous-edge"
+ },
+ {
+  "text": "I severed the relationship between the two factors.",
+  "category": "ambiguous_edge",
+  "lens": "ambiguous-edge"
+ },
+ {
+  "text": "I mapped the dependency from Brand to Revenue.",
+  "category": "ambiguous_edge",
+  "lens": "ambiguous-edge"
+ },
+ {
+  "text": "I tied the relationship between Sales and Support together.",
+  "category": "ambiguous_edge",
+  "lens": "ambiguous-edge"
+ },
+ {
+  "text": "I hooked up the connection between Sales and Support.",
+  "category": "ambiguous_edge",
+  "lens": "ambiguous-edge"
+ },
+ {
+  "text": "I reconnected the relationship after removing the stray node.",
+  "category": "ambiguous_edge",
+  "lens": "ambiguous-edge"
+ },
+ {
+  "text": "I strengthened the relationship between the two drivers.",
+  "category": "ambiguous_edge",
+  "lens": "ambiguous-edge"
+ },
+ {
+  "text": "I went ahead and rewired the relationship between Marketing and Revenue.",
+  "category": "ambiguous_edge",
+  "lens": "ambiguous-edge"
+ },
+ {
+  "text": "The dependency between Pricing and Demand has been removed.",
+  "category": "false_success_passive",
+  "lens": "ambiguous-edge"
+ },
+ {
+  "text": "A connection between the two nodes has been added.",
+  "category": "false_success_passive",
+  "lens": "ambiguous-edge"
+ },
+ {
+  "text": "Done — the connection between Marketing and Sales is now in place.",
+  "category": "false_success_passive",
+  "lens": "ambiguous-edge"
+ },
+ {
+  "text": "The relationship between Cost and Margin has been rewired.",
+  "category": "false_success_passive",
+  "lens": "ambiguous-edge"
+ },
+ {
+  "text": "The relationship has been rewired.",
+  "category": "false_success_passive",
+  "lens": "ambiguous-edge"
+ },
+ {
+  "text": "I rewired the relationship.",
+  "category": "ambiguous_edge",
+  "lens": "ambiguous-edge"
+ },
+ {
+  "text": "I’d suggest rewiring the dependency between Pricing and Demand if margins slip.",
+  "category": "advisory",
+  "lens": "ambiguous-edge"
+ },
+ {
+  "text": "Would you like me to rewire the relationship between those two factors?",
+  "category": "advisory",
+  "lens": "ambiguous-edge"
+ },
+ {
+  "text": "I connected Alice with Bob over that dependency last week.",
+  "category": "idiom_people",
+  "lens": "ambiguous-edge"
+ },
+ {
+  "text": "Your model now reflects the dependency you described between the two teams.",
+  "category": "benign_readout",
+  "lens": "ambiguous-edge"
+ },
+ {
+  "text": "I introduced a connection in the documentation, not the graph.",
+  "category": "nongraph",
+  "lens": "ambiguous-edge"
+ },
+ {
+  "text": "I’ve linked the relationship note in the report, leaving the graph untouched.",
+  "category": "nongraph",
+  "lens": "ambiguous-edge"
+ },
+ {
+  "text": "I updated the dependency between revenue and the cost driver so it now flows the right way.",
+  "category": "ambiguous_edge",
+  "lens": "ambiguous-edge"
+ },
+ {
+  "text": "I reworked the options section of the deck so the three alternatives read more clearly.",
+  "category": "nongraph",
+  "lens": "nongraph-context"
+ },
+ {
+  "text": "I revised the factors part of the report to match the latest numbers.",
+  "category": "nongraph",
+  "lens": "nongraph-context"
+ },
+ {
+  "text": "I reworked the deck’s options section and tightened the framing on slide 4.",
+  "category": "nongraph",
+  "lens": "nongraph-context"
+ },
+ {
+  "text": "I’ve added an option under the appendix of the presentation for the board to review.",
+  "category": "nongraph",
+  "lens": "nongraph-context"
+ },
+ {
+  "text": "I revised the factor within the report’s methodology section.",
+  "category": "nongraph",
+  "lens": "nongraph-context"
+ },
+ {
+  "text": "I added a constraint to the proposal we’re sending the client.",
+  "category": "nongraph",
+  "lens": "nongraph-context"
+ },
+ {
+  "text": "I revised the factor in the briefing before the standup.",
+  "category": "nongraph",
+  "lens": "nongraph-context"
+ },
+ {
+  "text": "I changed the constraints column of the spreadsheet to reflect the new caps.",
+  "category": "nongraph",
+  "lens": "nongraph-context"
+ },
+ {
+  "text": "I added an option to the dashboard so the team can see all three paths.",
+  "category": "nongraph",
+  "lens": "nongraph-context"
+ },
+ {
+  "text": "I added an option with the report attached for context.",
+  "category": "nongraph",
+  "lens": "nongraph-context"
+ },
+ {
+  "text": "I’ve added an option to the presentation we’re giving Thursday.",
+  "category": "nongraph",
+  "lens": "nongraph-context"
+ },
+ {
+  "text": "Sure — I revised the factor in the report and flagged the assumption I wasn’t certain about.",
+  "category": "nongraph",
+  "lens": "nongraph-context"
+ },
+ {
+  "text": "I added an option for the report’s alternatives table earlier today.",
+  "category": "nongraph",
+  "lens": "nongraph-context"
+ },
+ {
+  "text": "I’ve inserted a factor into the report’s risk section per your note.",
+  "category": "nongraph",
+  "lens": "nongraph-context"
+ },
+ {
+  "text": "Let me add an option to the meeting notes so we don’t forget it.",
+  "category": "nongraph",
+  "lens": "nongraph-context"
+ },
+ {
+  "text": "I added the Risk option to your model for the presentation tomorrow.",
+  "category": "false_success_structural",
+  "lens": "nongraph-context"
+ },
+ {
+  "text": "I’ve added the Pricing option into the graph and exported it for the slides.",
+  "category": "false_success_structural",
+  "lens": "nongraph-context"
+ },
+ {
+  "text": "I added an option for the presentation to the decision model so it’s captured everywhere.",
+  "category": "false_success_structural",
+  "lens": "nongraph-context"
+ },
+ {
+  "text": "I added the Growth driver into the graph, ready for the board deck.",
+  "category": "false_success_structural",
+  "lens": "nongraph-context"
+ },
+ {
+  "text": "I reworked the options section of the deck, then added the Coach option to your model so they stay in sync.",
+  "category": "false_success_structural",
+  "lens": "nongraph-context"
+ },
+ {
+  "text": "I updated the model documentation to describe the new option we discussed.",
+  "category": "nongraph",
+  "lens": "nongraph-context"
+ },
+ {
+  "text": "I added a note about the churn factor to the spec; no change to the actual model.",
+  "category": "nongraph",
+  "lens": "nongraph-context"
+ },
+ {
+  "text": "I’ve reworked the options in the strategy doc to mirror the three scenarios.",
+  "category": "nongraph",
+  "lens": "nongraph-context"
+ },
+ {
+  "text": "I revised the factor naming in the wiki page for clarity.",
+  "category": "nongraph",
+  "lens": "nongraph-context"
+ },
+ {
+  "text": "I added an option called “Defer” to the agenda for next week’s review.",
+  "category": "nongraph",
+  "lens": "nongraph-context"
+ },
+ {
+  "text": "I reworked the options portion of our deck and dropped the weakest one.",
+  "category": "nongraph",
+  "lens": "nongraph-context"
+ },
+ {
+  "text": "I’ve added an option to the email draft summarizing the choices.",
+  "category": "nongraph",
+  "lens": "nongraph-context"
+ },
+ {
+  "text": "I updated the options list within the slides per your edits.",
+  "category": "nongraph",
+  "lens": "nongraph-context"
+ },
+ {
+  "text": "I connected the dots on the churn factor.",
+  "category": "idiom_people",
+  "lens": "idiom-people-readout"
+ },
+ {
+  "text": "I've connected the dots on why the Coach option wins.",
+  "category": "idiom_people",
+  "lens": "idiom-people-readout"
+ },
+ {
+  "text": "Let me connect the dots on the Coach option for you.",
+  "category": "idiom_people",
+  "lens": "idiom-people-readout"
+ },
+ {
+  "text": "I’ll connect the dots between the Pricing option and Revenue.",
+  "category": "idiom_people",
+  "lens": "idiom-people-readout"
+ },
+ {
+  "text": "I drew a distinction between the Cost and Revenue factors.",
+  "category": "idiom_people",
+  "lens": "idiom-people-readout"
+ },
+ {
+  "text": "I connected you with the analyst who owns the Coach option.",
+  "category": "idiom_people",
+  "lens": "idiom-people-readout"
+ },
+ {
+  "text": "I’ll connect you with the team about the new factor.",
+  "category": "idiom_people",
+  "lens": "idiom-people-readout"
+ },
+ {
+  "text": "I connected Priya with the team that owns the Revenue driver.",
+  "category": "idiom_people",
+  "lens": "idiom-people-readout"
+ },
+ {
+  "text": "I'll link you with Dana, who set up the churn factor.",
+  "category": "idiom_people",
+  "lens": "idiom-people-readout"
+ },
+ {
+  "text": "I connected the team to the right option owners.",
+  "category": "idiom_people",
+  "lens": "idiom-people-readout"
+ },
+ {
+  "text": "I connected Alice with Bob on the hiring question.",
+  "category": "idiom_people",
+  "lens": "idiom-people-readout"
+ },
+ {
+  "text": "I joined the dots across your factors.",
+  "category": "idiom_people",
+  "lens": "idiom-people-readout"
+ },
+ {
+  "text": "I connected the findings back to your original question about options.",
+  "category": "idiom_people",
+  "lens": "idiom-people-readout"
+ },
+ {
+  "text": "I added one suggestion: a Coach option could be worth modelling.",
+  "category": "advisory",
+  "lens": "idiom-people-readout"
+ },
+ {
+  "text": "I've added some colour on why the Growth factor matters most.",
+  "category": "advisory",
+  "lens": "idiom-people-readout"
+ },
+ {
+  "text": "If it helps, I added a quick note: consider a Coach option down the line.",
+  "category": "advisory",
+  "lens": "idiom-people-readout"
+ },
+ {
+  "text": "I added the option scores together to rank them.",
+  "category": "benign_readout",
+  "lens": "idiom-people-readout"
+ },
+ {
+  "text": "Personally I’d connect Cost to Revenue, but it's your call.",
+  "category": "advisory",
+  "lens": "idiom-people-readout"
+ },
+ {
+  "text": "I'd suggest adding a Coach option here.",
+  "category": "advisory",
+  "lens": "idiom-people-readout"
+ },
+ {
+  "text": "Your model now has four options and I've reviewed each.",
+  "category": "benign_readout",
+  "lens": "idiom-people-readout"
+ },
+ {
+  "text": "The model now includes everything you set up earlier.",
+  "category": "benign_readout",
+  "lens": "idiom-people-readout"
+ },
+ {
+  "text": "Your model now has 4 options.",
+  "category": "benign_readout",
+  "lens": "idiom-people-readout"
+ },
+ {
+  "text": "I counted the options for you: there are four.",
+  "category": "benign_readout",
+  "lens": "idiom-people-readout"
+ },
+ {
+  "text": "I ran the numbers across all four options.",
+  "category": "benign_readout",
+  "lens": "idiom-people-readout"
+ },
+ {
+  "text": "Shall I add a Coach option to your model?",
+  "category": "advisory",
+  "lens": "idiom-people-readout"
+ },
+ {
+  "text": "Would you like me to connect Cost and Revenue?",
+  "category": "advisory",
+  "lens": "idiom-people-readout"
+ },
+ {
+  "text": "I can add an option if you'd like — just say the word.",
+  "category": "advisory",
+  "lens": "idiom-people-readout"
+ },
+ {
+  "text": "Want me to add a Coach option and wire it to Revenue?",
+  "category": "advisory",
+  "lens": "idiom-people-readout"
+ },
+ {
+  "text": "I’ve connected the dots on the Coach option.",
+  "category": "idiom_people",
+  "lens": "idiom-people-readout"
+ },
+ {
+  "text": "The graph now shows three factors clearly.",
+  "category": "benign_readout",
+  "lens": "idiom-people-readout"
+ },
+ {
+  "text": "I'll loop in the team and connect them with your factors doc.",
+  "category": "idiom_people",
+  "lens": "idiom-people-readout"
+ },
+ {
+  "text": "The Brand Risk factor has been added.",
+  "category": "false_success_structural",
+  "lens": "robustness"
+ },
+ {
+  "text": "A Coach Hire option was created.",
+  "category": "false_success_structural",
+  "lens": "robustness"
+ },
+ {
+  "text": "The new Coach Hire option has been added.",
+  "category": "false_success_structural",
+  "lens": "robustness"
+ },
+ {
+  "text": "Your Pricing option has been updated.",
+  "category": "false_success_structural",
+  "lens": "robustness"
+ },
+ {
+  "text": "The two Coach Hire and Rail options have been added.",
+  "category": "false_success_structural",
+  "lens": "robustness"
+ },
+ {
+  "text": "I have, as requested, added the Coach Hire option.",
+  "category": "false_success_structural",
+  "lens": "robustness"
+ },
+ {
+  "text": "Now your model has the Coach Hire option.",
+  "category": "false_success_passive",
+  "lens": "robustness"
+ },
+ {
+  "text": "I've set  up the Coach Hire option.",
+  "category": "false_success_structural",
+  "lens": "robustness"
+ },
+ {
+  "text": "I set  up a new connection.",
+  "category": "ambiguous_edge",
+  "lens": "robustness"
+ },
+ {
+  "text": "Good question. I added a Brand Risk factor.",
+  "category": "false_success_structural",
+  "lens": "robustness"
+ },
+ {
+  "text": "First, here's the summary. I've added a factor.",
+  "category": "false_success_structural",
+  "lens": "robustness"
+ },
+ {
+  "text": "I’ve added the Coach Hire option to your model.",
+  "category": "false_success_structural",
+  "lens": "robustness"
+ },
+ {
+  "text": "I REWORKED the graph.",
+  "category": "false_success_graphmodel",
+  "lens": "robustness"
+ },
+ {
+  "text": "I Added the Coach Hire Option.",
+  "category": "false_success_structural",
+  "lens": "robustness"
+ },
+ {
+  "text": "I’ve gone ahead and added the option.",
+  "category": "false_success_structural",
+  "lens": "robustness"
+ },
+ {
+  "text": "I've now added a Brand Risk factor.",
+  "category": "false_success_structural",
+  "lens": "robustness"
+ },
+ {
+  "text": "Now your model includes the Coach Hire driver.",
+  "category": "false_success_passive",
+  "lens": "robustness"
+ },
+ {
+  "text": "I updated the model’s documentation.",
+  "category": "nongraph",
+  "lens": "robustness"
+ },
+ {
+  "text": "I added an option to the presentation.",
+  "category": "nongraph",
+  "lens": "robustness"
+ },
+ {
+  "text": "I’ve revised the option in the deck, not the graph.",
+  "category": "nongraph",
+  "lens": "robustness"
+ },
+ {
+  "text": "I rewired the relationship between Pricing and Revenue.",
+  "category": "ambiguous_edge",
+  "lens": "robustness"
+ },
+ {
+  "text": "The relationship was rewired.",
+  "category": "false_success_passive",
+  "lens": "robustness"
+ },
+ {
+  "text": "Your model now has four options.",
+  "category": "benign_readout",
+  "lens": "robustness"
+ },
+ {
+  "text": "Let me  add a factor.",
+  "category": "false_success_structural",
+  "lens": "robustness"
+ },
+ {
+  "text": "I would suggest adding the Coach Hire option to the model.",
+  "category": "advisory",
+  "lens": "robustness"
+ },
+ {
+  "text": "I’ve added a new option, then connected it to Revenue.",
+  "category": "false_success_structural",
+  "lens": "robustness"
+ },
+ {
+  "text": "I went ahead and inserted the Risk Appetite constraint.",
+  "category": "false_success_structural",
+  "lens": "robustness"
+ },
+ {
+  "text": "I have added, per your request, the Coach Hire constraint.",
+  "category": "false_success_structural",
+  "lens": "robustness"
+ },
+ {
+  "text": "I'll add a factor once you confirm.",
+  "category": "advisory",
+  "lens": "conditional-suffix"
+ },
+ {
+  "text": "I will update the model if you approve.",
+  "category": "advisory",
+  "lens": "conditional-suffix"
+ },
+ {
+  "text": "Let me change the factor after you approve.",
+  "category": "advisory",
+  "lens": "conditional-suffix"
+ },
+ {
+  "text": "I'll add the Pricing option once you give the go-ahead.",
+  "category": "advisory",
+  "lens": "conditional-suffix"
+ },
+ {
+  "text": "I'm going to add a node when you're ready.",
+  "category": "advisory",
+  "lens": "conditional-suffix"
+ },
+ {
+  "text": "I will change the factor unless you object.",
+  "category": "advisory",
+  "lens": "conditional-suffix"
+ },
+ {
+  "text": "If the team approves, I'll add a factor.",
+  "category": "advisory",
+  "lens": "conditional-subject"
+ },
+ {
+  "text": "I'll update the model when approval comes through.",
+  "category": "advisory",
+  "lens": "conditional-subject"
+ },
+ {
+  "text": "Once scoping is done, I'll add a driver.",
+  "category": "advisory",
+  "lens": "conditional-subject"
+ },
+ {
+  "text": "I added a factor, and I'll explain more if you want.",
+  "category": "completion_must_swap",
+  "lens": "mixed-clause"
+ },
+ {
+  "text": "I've updated the model, and if you want I can outline the rationale.",
+  "category": "completion_must_swap",
+  "lens": "mixed-clause"
+ },
+ {
+  "text": "I added a factor — I'll add another if you confirm.",
+  "category": "completion_must_swap",
+  "lens": "separator-emdash"
+ },
+ {
+  "text": "I added a factor, I'll explain if you want.",
+  "category": "completion_must_swap",
+  "lens": "separator-comma-splice"
+ },
+ {
+  "text": "I added a factor: I'll explain if you want.",
+  "category": "completion_must_swap",
+  "lens": "separator-colon"
+ },
+ {
+  "text": "I updated the model, I'll explain if you want.",
+  "category": "completion_must_swap",
+  "lens": "p6-comma-splice"
+ },
+ {
+  "text": "I've changed the graph — happy to revisit if you want.",
+  "category": "completion_must_swap",
+  "lens": "p6-emdash"
+ },
+ {
+  "text": "If the team approves — I'll add a factor.",
+  "category": "advisory",
+  "lens": "conditional-emdash"
+ },
+ {
+  "text": "I'll add a factor — if the team approves.",
+  "category": "advisory",
+  "lens": "conditional-emdash"
+ },
+ {
+  "text": "If the team approves: I'll add a factor.",
+  "category": "advisory",
+  "lens": "conditional-colon"
+ },
+ {
+  "text": "I'll add a factor: if the team approves.",
+  "category": "advisory",
+  "lens": "conditional-colon"
+ },
+ {
+  "text": "I'm adding a factor if the team approves.",
+  "category": "advisory",
+  "lens": "progressive-conditional"
+ },
+ {
+  "text": "If the team approves, I'm updating the model.",
+  "category": "advisory",
+  "lens": "progressive-conditional"
+ },
+ {
+  "text": "I'm reworking the model when approval comes through.",
+  "category": "advisory",
+  "lens": "progressive-conditional"
+ }
+]

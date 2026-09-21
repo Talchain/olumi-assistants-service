@@ -1,0 +1,469 @@
+import { isSlugShapedEntityId } from '../../orchestrator/shared/output-safety.js';
+import { rewriteEmDashes } from '../compose/terminology-rewrite.js';
+
+/**
+ * Pure deterministic copy-quality gate for post-draft coaching strings.
+ *
+ * Two surfaces:
+ *   - {@link gateAssumptionFragment} accepts a single short phrase (the
+ *     tail of "One assumption worth checking: …").
+ *   - {@link gateFullResponse} accepts a whole assistant_text body that
+ *     would replace the deterministic five-sentence builder output.
+ *
+ * Both surfaces are pre-emptive filters on LLM-authored coaching strings
+ * coming off `draft_graph` (`coachingSummary`, `strengthenItems[].detail`,
+ * `coachingBiasSignals[].detail`). They are independent from the post-hoc
+ * egress guard in `src/orchestrator-v5/compose/forbidden-user-facing-
+ * phrases.ts`: that module enforces a narrow set of hard bans on every
+ * final assistant_text; this module rejects coaching candidates BEFORE
+ * they reach the builder, with a wider rule set tuned to coaching
+ * context (length caps, decision-framing presence, etc.).
+ *
+ * Pure: no I/O, no logging, no side effects. Always returns a
+ * `GateResult`; never throws.
+ */
+
+const FRAGMENT_MIN_CHARS = 5;
+const FRAGMENT_MAX_CHARS = 150;
+const RESPONSE_MIN_CHARS = 80;
+// Tightened from 1200 → 800 chars to land closer to the deterministic
+// five-sentence budget (~700 chars / 140 words). A coaching summary that
+// blows past the deterministic envelope is almost always rambling or a
+// list dump in disguise, neither of which reads cleanly as a single
+// post-draft paragraph.
+const RESPONSE_MAX_CHARS = 800;
+
+/**
+ * Internal-id prefix tokens that should never reach a user.
+ *
+ * Aligned with the central detector at
+ * {@link ../../orchestrator/shared/entity-id-pattern.ts:25}: same
+ * prefix list, same `[_:-]` separator class.
+ *
+ * Detection is two-stage:
+ *   1. This regex finds *candidate* prefix-shaped tokens (broad
+ *      over-match — also catches English compounds like
+ *      `risk_adjusted`, `out_of_scope`, `option_value`,
+ *      `constraint_based`, `factor_analysis`).
+ *   2. {@link isSlugShapedEntityId} (imported from the central
+ *      output-safety helper) confirms each candidate against the
+ *      slug-shape heuristic: digit anywhere → ID, `fac`/`opt` short
+ *      prefix → ID, multi-segment with first segment ≥ 4 chars → ID;
+ *      single-segment suffix or short-connector first segment →
+ *      English compound, NOT an ID.
+ *
+ * Result: a sentence like "consider the risk_adjusted return" passes
+ * the gate cleanly; a sentence containing `factor_delivery_cost` or
+ * `option_launch_now` is rejected as expected.
+ *
+ * Global flag is required for `matchAll`. `node_*` is intentionally
+ * omitted to match the central detector — `node` has no
+ * unambiguous-leak prose collisions worth a hard ban here, and the
+ * existing `node_id` / `nodeid` schema-term substrings still catch
+ * the canonical leak shape inside FORBIDDEN_SCHEMA_TERMS below.
+ */
+const INTERNAL_ID_CANDIDATE_REGEX =
+  /\b(?:fac|opt|goal|dec|out|risk|con|factor|option|decision|outcome|constraint)[_:-][a-z0-9_:-]+/gi;
+
+/**
+ * Named schema / service / debug terms. These are concrete phrases the
+ * pipeline uses internally that have no user-facing meaning. Match is
+ * substring-based (case-insensitive) so "model_adjustment" inside
+ * a longer sentence still trips.
+ */
+const FORBIDDEN_SCHEMA_TERMS: readonly string[] = [
+  'intervention',
+  'schema',
+  'payload',
+  'analysis_ready',
+  'analysisready',
+  'model_adjustment',
+  'modeladjustment',
+  'bias_finding',
+  'biasfinding',
+  'factor_id',
+  'factorid',
+  'node_id',
+  'nodeid',
+  'graph_node',
+  'graphnode',
+  'graph node',
+  'enrichment',
+  'envelope',
+];
+
+/**
+ * Graph-shape language. The post-draft surface is decision-coaching
+ * copy; users never see "nodes", "edges", or "graph" in a working
+ * draft. A coaching summary that mentions them is showing graph
+ * inventory rather than reasoning about the decision, which is the
+ * exact regression PR #207 set out to prevent. Word-boundary anchored
+ * so "anode", "wedge", "telegraph" are not false positives.
+ */
+const GRAPH_SHAPE_REGEX = /\b(?:nodes?|edges?|graphs?)\b/i;
+
+/**
+ * Premature-recommendation language. Post-draft coaching runs before
+ * any analysis, so the assistant must not declare a winner, name a
+ * preferred option, or instruct the user toward a specific choice. The
+ * regex covers single-word tokens plus the common multi-word phrases
+ * an LLM tends to slip into a "coaching" register.
+ *
+ * Whole-word anchoring with `\b` so legitimate uses ("the chosen
+ * route" inside a summary that is NOT pre-analysis recommendation
+ * still gets flagged — there is no innocuous use of these phrases at
+ * the post-draft stage).
+ */
+const PREMATURE_RECOMMENDATION_REGEX = new RegExp(
+  [
+    '\\brecommend(?:s|ed|ation|ations)?\\b',
+    '\\bwinner\\b',
+    '\\bwinning (?:option|route|path|choice)\\b',
+    '\\bbest (?:option|route|path|choice|approach)\\b',
+    '\\btop (?:choice|option|route|path)\\b',
+    '\\bchosen (?:route|option|path|choice)\\b',
+    '\\bfavou?red (?:option|route|path|choice)\\b',
+    '\\bpreferred (?:option|route|path|choice)\\b',
+    '\\b(?:you|i) (?:should|would) (?:choose|pick|go with|select)\\b',
+    '\\b(?:clear|obvious) (?:choice|winner|favou?rite)\\b',
+    '\\b(?:strongest|most promising|leading) (?:option|route|path|choice)\\b',
+  ].join('|'),
+  'i',
+);
+
+/**
+ * ⭐⭐ THE ANALYSIS-ASSERTION CLASS — the precondition a PHASE GATE was
+ * standing in for.
+ *
+ * Post-draft coaching is composed on turns where `analysis_ready.status` may
+ * be anything. The real harm on a non-ready turn is not "model-authored bytes"
+ * as such: it is copy that PRESUPPOSES a completed analysis. A sentence like
+ * "run the analysis before committing to a route" tells the reader an analysis
+ * is the next gate; "the comparison shows capacity dominates" tells them one
+ * has already run. Neither is true on a turn that is not ready, and the second
+ * is a fabricated result.
+ *
+ * ⚠ WHY THIS IS A CLOSED LIST AND NOT A CLEVER PREDICATE. `CLAUDE.md` traps 22
+ * / 22b / 22d / 22f record four consecutive rounds of oscillation on ONE
+ * natural-language predicate in this repo, each round fixing one direction and
+ * reopening the other. That predicate guarded TWO OPPOSITE HARMS under one
+ * window, which is why no single rule could settle it.
+ *
+ * ⭐ THIS ONE GUARDS EXACTLY ONE HARM, AND ITS FAILURE MODE IS ASYMMETRIC.
+ * A candidate that trips this guard is DROPPED, and the caller falls back to
+ * the fixed-generic assumption — which is precisely what every non-ready turn
+ * serves today. So over-blocking costs nothing beyond the status quo, and
+ * under-blocking is the only real harm. That asymmetry is the whole argument
+ * for a deliberately GENEROUS list: when in doubt, add the term. Do not
+ * "tighten" this list to admit more copy without a measured reason, and never
+ * turn it into a two-sided window.
+ *
+ * PREDICATE ONLY — returns true when the text asserts or presupposes an
+ * analysis outcome. Callers drop; nothing is rewritten in place.
+ */
+const ANALYSIS_ASSERTION_REGEX = new RegExp(
+  [
+    // A completed or pending analysis named as an event.
+    '\\banalys(?:is|es|e|ed|ing|ze|zed|zing)\\b',
+    '\\bre-?run\\b',
+    '\\bsimulat(?:e|es|ed|ion|ions|ing)\\b',
+    '\\bmonte carlo\\b',
+    '\\bevpi\\b',
+    '\\bexpected value of (?:perfect )?information\\b',
+    '\\bsensitivity (?:analysis|run|sweep)\\b',
+    // Results language: a claim that an outcome is already known.
+    '\\bthe results?\\b',
+    '\\bresults? (?:show|shows|showed|indicate|indicates|suggest|suggests)\\b',
+    '\\bthe (?:model|comparison|simulation) (?:show|shows|showed|says|said|indicates|suggests|tells)\\b',
+    '\\bthe (?:outcome|output|verdict|score|scores|ranking|rankings)\\b',
+    '\\bonce (?:the|you) (?:analys|analyz|run|compare)',
+    '\\bafter (?:the|you) (?:analys|analyz|run)',
+    // Comparative outcomes between options.
+    '\\bout-?perform(?:s|ed|ing)?\\b',
+    '\\brank(?:s|ed|ing|ings)? (?:above|below|higher|lower|first|last)\\b',
+    '\\bscores? (?:higher|lower|better|worse)\\b',
+    '\\b(?:beats|dominates|edges out|comes out ahead|comes out on top)\\b',
+    '\\bahead of (?:option|the other)',
+    '\\bmore likely to succeed\\b',
+  ].join('|'),
+  'i',
+);
+
+/**
+ * True when `text` asserts or presupposes an analysis outcome.
+ *
+ * Exported so the post-draft builder can admit a candidate on a turn whose
+ * readiness is NOT `ready`, gated on what the copy actually CLAIMS rather than
+ * on the phase the run happens to be in. Also exported so unit tests can pin
+ * specific pass/fail fixtures directly.
+ */
+export function assertsAnalysisOutcome(text: string): boolean {
+  if (typeof text !== 'string') return true; // fail closed
+  return ANALYSIS_ASSERTION_REGEX.test(text);
+}
+
+/**
+ * Markdown / bullet / numbered-list / header formatting. A coaching
+ * summary should render as a single paragraph of prose; bullet-shaped
+ * input is almost always either an LLM that ignored the format
+ * instruction or a debug dump leaking through. Applied only to the
+ * whole-response surface — sentence-4 fragments are too short to
+ * legitimately contain list formatting.
+ */
+const MARKDOWN_LIST_REGEX = /(?:^|\n)\s*(?:[-*+]\s|\d+\.\s|#+\s)/;
+
+/**
+ * First-word tokens that read as question-shaped, unsuitable as the
+ * tail of "One assumption worth checking: …".
+ */
+const INTERROGATIVE_PREFIXES: ReadonlySet<string> = new Set([
+  'what',
+  'why',
+  'how',
+  'when',
+  'where',
+  'which',
+  'who',
+  'is',
+  'are',
+  'does',
+  'do',
+  'can',
+  'should',
+  'would',
+  'will',
+  'could',
+  'might',
+]);
+
+/**
+ * Tokens that signal the response frames a decision. At least one
+ * must be present for {@link gateFullResponse} to accept.
+ */
+const DECISION_FRAMING_TOKENS_REGEX =
+  /\b(?:decision|model|option|options|route|routes|path|paths|choice|choices|trade-?off)\b/i;
+
+/**
+ * Tokens that signal the response surfaces a trade-off, gap or
+ * assumption. At least one must be present for {@link gateFullResponse}
+ * to accept.
+ */
+const TRADEOFF_OR_GAP_TOKENS_REGEX =
+  /\b(?:trade-?off|balance|risk|risks|assume|assumes|assumption|assumptions|consider|weigh|weighs|weighed|gap|gaps|unknown|unknowns|uncertain(?:ty)?|tension|constraint|constraints)\b/i;
+
+/**
+ * Tokens that signal a next-step nudge. At least one must be present
+ * for {@link gateFullResponse} to accept.
+ */
+const NEXT_STEP_TOKENS_REGEX =
+  /\b(?:run|next|then|try|check|explore|review|inspect|validate|stress-?test)\b/i;
+
+/**
+ * Reasons a candidate string can fail the gate. Stays small and
+ * category-only so it can be emitted as telemetry without risk of
+ * leaking text.
+ */
+export type GateRejectReason =
+  | 'empty'
+  | 'too_short'
+  | 'too_long'
+  | 'internal_id'
+  | 'schema_term'
+  | 'graph_shape'
+  | 'premature_recommendation'
+  | 'question_shaped'
+  | 'trailing_punctuation'
+  | 'awkward_grammar'
+  | 'markdown'
+  | 'no_decision_framing'
+  | 'no_tradeoff_or_gap'
+  | 'no_next_step';
+
+export interface GateResult {
+  readonly accept: boolean;
+  readonly rejectReason?: GateRejectReason;
+  /**
+   * RC4 proportionate remedies: the sanitised candidate to ship on accept.
+   * Equal to the trimmed input when no style rewrite was needed. Callers
+   * MUST render this value, not the original candidate, so a style
+   * offence (em/en dash) is repaired in place instead of costing the
+   * user the generated coaching (the 2026-07-15 session lost its drafted
+   * coaching summary to a single em dash).
+   */
+  readonly text?: string;
+  /** True when the deterministic style rewrite changed the candidate. */
+  readonly styleRewritten?: boolean;
+}
+
+/** Convenience: build a rejecting result with a category. */
+function reject(reason: GateRejectReason): GateResult {
+  return { accept: false, rejectReason: reason };
+}
+
+/**
+ * Shared checks applied to both fragments and full responses.
+ *
+ * RC4 proportionate remedies: em/en dashes are a STYLE offence — the
+ * previous hard `em_dash` rejection destroyed whole LLM coaching
+ * candidates over one character (live-evidenced 2026-07-15). The dash is
+ * now rewritten in place (`rewriteEmDashes`: numeric ranges → "to",
+ * interior dashes → comma join) BEFORE the remaining rules run; every
+ * other rule keeps its rejecting remedy (they are content offences —
+ * premature recommendation pre-analysis, internal leaks — with no safe
+ * deterministic rewrite at this surface).
+ */
+interface SharedCheckOutcome {
+  /** The first failing rule, or null when the shared rules pass. */
+  readonly failure: GateResult | null;
+  /** The trimmed, style-rewritten candidate the caller must continue with. */
+  readonly text: string;
+  /** True when the dash rewrite changed the candidate. */
+  readonly styleRewritten: boolean;
+}
+
+function checkShared(text: string): SharedCheckOutcome {
+  if (typeof text !== 'string') {
+    return { failure: reject('empty'), text: '', styleRewritten: false };
+  }
+  const dash = rewriteEmDashes(text.trim());
+  const trimmed = dash.text.trim();
+  if (trimmed.length === 0) {
+    return { failure: reject('empty'), text: trimmed, styleRewritten: dash.rewritten };
+  }
+  const outcome = (failure: GateResult | null): SharedCheckOutcome => ({
+    failure,
+    text: trimmed,
+    styleRewritten: dash.rewritten,
+  });
+  if (hasConfirmedInternalId(trimmed)) return outcome(reject('internal_id'));
+  if (GRAPH_SHAPE_REGEX.test(trimmed)) return outcome(reject('graph_shape'));
+  const lower = trimmed.toLowerCase();
+  for (const term of FORBIDDEN_SCHEMA_TERMS) {
+    if (lower.includes(term)) return outcome(reject('schema_term'));
+  }
+  if (PREMATURE_RECOMMENDATION_REGEX.test(trimmed)) {
+    return outcome(reject('premature_recommendation'));
+  }
+  return outcome(null);
+}
+
+/**
+ * Two-stage internal-id detection: broad regex finds candidates, then
+ * the central {@link isSlugShapedEntityId} heuristic confirms each
+ * candidate is slug-shaped (real ID) rather than an English compound
+ * (`risk_adjusted`, `out_of_scope`, `option_value`, `constraint_based`,
+ * `factor_analysis`). Returns true on the first confirmed leak.
+ */
+function hasConfirmedInternalId(text: string): boolean {
+  for (const match of text.matchAll(INTERNAL_ID_CANDIDATE_REGEX)) {
+    if (isSlugShapedEntityId(match[0])) return true;
+  }
+  return false;
+}
+
+/**
+ * Gate for sentence-4 fragment candidates (strengthen-item detail /
+ * label, bias-finding explanation, coaching-bias-signal detail).
+ *
+ * Accepts only when the string is a clean declarative fragment that
+ * reads naturally after the deterministic "One assumption worth
+ * checking: " lead-in, with the builder appending a trailing period.
+ */
+export function gateAssumptionFragment(text: string): GateResult {
+  const shared = checkShared(text);
+  if (shared.failure) return shared.failure;
+  const trimmed = shared.text;
+
+  if (trimmed.length < FRAGMENT_MIN_CHARS) return reject('too_short');
+  if (trimmed.length > FRAGMENT_MAX_CHARS) return reject('too_long');
+
+  // Trailing punctuation (the builder appends `.` itself).
+  if (/[.!?,;:]$/.test(trimmed)) return reject('trailing_punctuation');
+
+  // Question-shaped first word. Strip a trailing `'s` contraction
+  // before lookup so "What's the issue" / "Where's the data" /
+  // "How's the rollout" trip the same as their non-contracted forms.
+  const firstToken = (trimmed.split(/\s+/, 1)[0] ?? '')
+    .toLowerCase()
+    .replace(/['’]s$/, '');
+  if (INTERROGATIVE_PREFIXES.has(firstToken)) return reject('question_shaped');
+
+  // Reject obvious filler / awkward fragments — too few alphanumeric
+  // word characters relative to length suggests a glyph-heavy string.
+  const letters = trimmed.replace(/[^A-Za-z]/g, '');
+  if (letters.length < Math.max(FRAGMENT_MIN_CHARS, Math.floor(trimmed.length * 0.4))) {
+    return reject('awkward_grammar');
+  }
+
+  return { accept: true, text: trimmed, styleRewritten: shared.styleRewritten };
+}
+
+/**
+ * CONTENT-ONLY gate for a standalone coaching CARD BODY (P1, 2026-07-27).
+ *
+ * WHY THIS IS NOT {@link gateAssumptionFragment}. `bias_signals[].detail` was
+ * the one LLM-authored string reaching a user-visible surface
+ * (`blocks[].body`, via buildDraftBiasSignalBlocks) with no content gate at
+ * all — only an entity-ID scrub. The obvious fix, "just run
+ * gateAssumptionFragment over it", is wrong, and measurably so: that gate is
+ * shaped for the tail of the sentence "One assumption worth checking: …", so
+ * it rejects trailing punctuation and caps at 150 chars. Measured against the
+ * REAL bias details in this repo's own fixtures (the two wire-shape signals in
+ * draft-bias-signal-blocks.test.ts, the overconfidence signal, and the
+ * recorded frozen-graph.json signal) it rejects 4 of 4 — three
+ * `trailing_punctuation`, one `too_long`. NONE of those is a content offence.
+ * Wiring it here would have silently destroyed the entire bias-card surface —
+ * precisely the "silent coaching loss" failure this module already records
+ * having suffered once (the 2026-07-15 em-dash incident, above).
+ *
+ * A card body is a complete sentence in its own box, not a sentence fragment
+ * spliced into a lead-in. So this gate keeps the SHARED CONTENT rules — the
+ * premature-recommendation lexicon, internal-id leaks, schema terms,
+ * graph-shape language — and drops only the fragment-splicing presentation
+ * rules that do not apply. One lexicon, one source of truth, no second mirror.
+ *
+ * PREDICATE ONLY — the caller ships its own original bytes. A trip DROPS the
+ * card (mirroring the estate's rule that an unnameable bias is dropped, never
+ * re-labelled: a bias claim is a claim about a real person). Nothing is
+ * rewritten in place here.
+ */
+const CARD_BODY_MIN_CHARS = 5;
+/** CoachingBlockSchema's body cap; callers truncate to this before gating. */
+const CARD_BODY_MAX_CHARS = 300;
+
+export function gateCoachingCardBody(text: string): GateResult {
+  const shared = checkShared(text);
+  if (shared.failure) return shared.failure;
+  const trimmed = shared.text;
+  if (trimmed.length < CARD_BODY_MIN_CHARS) return reject('too_short');
+  if (trimmed.length > CARD_BODY_MAX_CHARS) return reject('too_long');
+  return { accept: true, text: trimmed, styleRewritten: shared.styleRewritten };
+}
+
+/**
+ * Strict whole-response gate. Accepts only when the candidate is
+ * a complete coaching paragraph that frames a decision, surfaces
+ * a trade-off / gap / assumption, points at a next step, and is
+ * free of the premature-recommendation and internal-id pitfalls.
+ *
+ * Used to decide whether `coachingSummary` can replace the entire
+ * deterministic five-sentence builder output.
+ */
+export function gateFullResponse(text: string): GateResult {
+  const shared = checkShared(text);
+  if (shared.failure) return shared.failure;
+  const trimmed = shared.text;
+
+  if (trimmed.length < RESPONSE_MIN_CHARS) return reject('too_short');
+  if (trimmed.length > RESPONSE_MAX_CHARS) return reject('too_long');
+
+  // Bullet- / list- / header-shaped input is rejected outright. A coaching
+  // summary must render as a single paragraph of decision-coaching prose.
+  if (MARKDOWN_LIST_REGEX.test(trimmed)) return reject('markdown');
+
+  if (!DECISION_FRAMING_TOKENS_REGEX.test(trimmed)) return reject('no_decision_framing');
+  if (!TRADEOFF_OR_GAP_TOKENS_REGEX.test(trimmed)) return reject('no_tradeoff_or_gap');
+  if (!NEXT_STEP_TOKENS_REGEX.test(trimmed)) return reject('no_next_step');
+
+  return { accept: true, text: trimmed, styleRewritten: shared.styleRewritten };
+}

@@ -1,0 +1,40 @@
+-- ============================================================
+-- ROLLBACK for 20260610120000_v5_db_security_tier1_hardening.sql
+-- DO NOT APPLY as part of normal migration flow (matches repo convention:
+-- rollback files carry the .do-not-apply suffix and are run manually only
+-- if the forward migration must be reverted).
+--
+-- Restores the pre-Tier-1 state exactly: re-grants the revoked privileges
+-- and disables the RLS that Tier 1 enabled on cee_prompt_observations.
+-- No data is affected (grants/RLS only).
+-- ============================================================
+
+BEGIN;
+
+-- Reverse 3: re-grant EXECUTE to anon on the legacy RPCs.
+GRANT EXECUTE ON FUNCTION
+  public.append_turn_atomic(uuid,text,text,text,text,boolean,integer,integer,jsonb,jsonb,text,jsonb,jsonb)
+TO anon;
+GRANT EXECUTE ON FUNCTION
+  public.insert_conversation_turn(uuid,text,text,jsonb,uuid,uuid,text)
+TO anon;
+GRANT EXECUTE ON FUNCTION
+  public.purge_old_observations(integer)
+TO anon;
+GRANT EXECUTE ON FUNCTION
+  public.ensure_scenario_exists(uuid,uuid)
+TO anon;
+
+-- Reverse 2: disable the RLS Tier 1 enabled on cee_prompt_observations.
+ALTER TABLE public.cee_prompt_observations NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.cee_prompt_observations DISABLE ROW LEVEL SECURITY;
+
+-- Reverse 1: re-grant TRUNCATE to anon + authenticated on the 4 tables.
+GRANT TRUNCATE ON TABLE
+  public.v5_conversation_turns,
+  public.v5_handler_facts,
+  public.turn_observations,
+  public.cee_prompt_observations
+TO anon, authenticated;
+
+COMMIT;

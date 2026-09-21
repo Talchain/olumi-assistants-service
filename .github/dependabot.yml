@@ -9,6 +9,9 @@ version: 2
 updates:
   - package-ecosystem: "npm"
     directory: "/"
+    # Target the integration branch: main is frozen (deploys run off staging),
+    # so alerts/PRs must describe staging's dependency tree, not stale main.
+    target-branch: "staging"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -58,6 +61,8 @@ updates:
   # Monitor GitHub Actions workflows for updates
   - package-ecosystem: "github-actions"
     directory: "/"
+    # Target the integration branch (see npm entry above).
+    target-branch: "staging"
     schedule:
       interval: "weekly"
       day: "monday"

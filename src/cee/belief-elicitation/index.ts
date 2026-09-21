@@ -10,6 +10,8 @@
  * elicitBelief("3 in 4") → { suggested_value: 0.75, confidence: 'high' }
  */
 
+import { isReferenceClassCollapseHazard } from "../../orchestrator-v5/belief-elicitation/reference-class-grammar.js";
+
 export interface ElicitBeliefInput {
   node_id: string;
   node_label: string;
@@ -29,7 +31,20 @@ export interface ElicitBeliefOutput {
 
 // Qualitative probability mappings - comprehensive set
 // Values based on research on probability word interpretation
-const CERTAINTY_TERMS: Record<string, number> = {
+//
+// ⭐ EXPORTED 2026-08-05. This map already knew that "pretty likely" is
+// 0.70; the V5 routing path that MUTATES the graph did not use it (the
+// only caller of `elicitBelief` in all of `src/` was the standalone
+// `/assist/v1/elicit-belief` route). The 5 Aug simulated-user review
+// witnessed the consequence live: "pretty likely" was refused on two
+// percentage-scaled factors, and in another session the threshold in
+// "churn stays below 3% is pretty likely" was stored as the value.
+//
+// `routing/calibration-semantics.ts` now consumes THIS map, by import.
+// It is exported rather than copied so there is exactly one place where
+// a phrase's number lives (CLAUDE.md trap 12: the dominant defect is the
+// hand-maintained mirror).
+export const CERTAINTY_TERMS: Record<string, number> = {
   // Absolute certainty
   certain: 0.99,
   definitely: 0.95,
@@ -215,6 +230,53 @@ export function elicitBelief(input: ElicitBeliefInput): ElicitBeliefOutput {
       confidence: "high",
       reasoning: `Parsed "${user_expression}" as ${Math.round(percentageResult * 100)}% probability.`,
       needs_clarification: false,
+      provenance: "cee",
+    };
+  }
+
+  // ⭐⭐ ROADMAP 2.722 — THE POINT-COLLAPSE GUARD, and it runs BEFORE
+  // `parseFraction` because that is the function that performs the defect.
+  //
+  // THE DEFECT, at the bytes. `parseFraction` matches
+  // `/(\d+)\s*(?:in|out of)\s*(\d+)/i`, so
+  //   "3 out of 7 similar projects succeeded"
+  // returned `{ suggested_value: 0.43, confidence: 'high',
+  //             needs_clarification: false }`.
+  // TWO fabrications in one return value:
+  //   1. THE SAMPLE SIZE IS DESTROYED. The 7 — the only thing in the
+  //      sentence from which uncertainty could be DERIVED rather than
+  //      invented — is discarded at the parse and never recoverable.
+  //   2. SURENESS IS INVENTED. A 3-of-7 base rate is not 0.43-with-high-
+  //      confidence; it is a small sample whose middle-half band spans
+  //      roughly 33%-56%. Returning 'high' asserts a certainty the user
+  //      never expressed and the data cannot support.
+  // This is the exact point-collapse the reference-class feature exists to
+  // prevent — already being performed, by us, on any K-out-of-N phrasing
+  // that reached this function.
+  //
+  // THE REMEDY IS TO ASK, NOT TO GUESS. A K-of-N reference-class statement
+  // is not a probability expression, so there is no honest single number to
+  // return here; the caller is given a clarifying question instead. On the
+  // V5 turn path the same utterance is met by the reference-class pre-route,
+  // which does the arithmetic properly and offers to record it.
+  //
+  // ⚠ NARROW BY CONSTRUCTION — and the discrimination is DERIVED, not a
+  // second hand-kept list. `isReferenceClassCollapseHazard` is the SAME
+  // grammar the pre-route uses, so there is exactly one definition of "this
+  // is a reference-class statement" in the estate (CLAUDE.md trap 12). It
+  // requires a class noun phrase AND an outcome verb phrase around the
+  // count pair. A BARE FRACTION HAS NEITHER: "3 in 4", "3/4", "1 in 10",
+  // "3 in 4 chance" are not recognised and keep their documented meaning
+  // (0.75, 0.75, 0.10) for every existing caller of this module and its
+  // `/assist/v1/elicit-belief` route. The module docstring's own example,
+  // `elicitBelief("3 in 4") -> 0.75 high`, is unchanged and pinned.
+  if (isReferenceClassCollapseHazard(user_expression)) {
+    return {
+      suggested_value: 0.5,
+      confidence: "low",
+      reasoning: `"${user_expression}" states a count out of a sample, not a probability. Collapsing it to a single number would throw away the sample size, which is the only thing that makes the uncertainty derivable.`,
+      needs_clarification: true,
+      clarifying_question: `That reads as a base rate over a group of cases rather than a probability for "${node_label}". How many comparable cases were there in total, and how many of them had the outcome? I can work out the rate and how uncertain it is from those two numbers.`,
       provenance: "cee",
     };
   }

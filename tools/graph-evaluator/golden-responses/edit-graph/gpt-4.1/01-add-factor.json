@@ -1,0 +1,130 @@
+{
+  "brief_id": "01-add-factor",
+  "model": "gpt-4.1",
+  "prompt_hash": "sha256:2d6fcbc9d09869a271bc93df1b5bbb450a4a5ee3053d9395c3143b810c973cc5",
+  "response": {
+    "model_id": "gpt-4.1",
+    "brief_id": "01-add-factor",
+    "status": "success",
+    "raw_text": "{\n  \"topology_plan\": [\n    \"Add fac_competitor_response as external\",\n    \"Connect fac_competitor_response to out_revenue with a valid factor→outcome edge\",\n    \"Verify Σ|mean| of inbound edges to out_revenue does not exceed 1.0\"\n  ],\n  \"operations\": [\n    {\n      \"op\": \"add_node\",\n      \"path\": \"/nodes/fac_competitor_response\",\n      \"value\": {\n        \"id\": \"fac_competitor_response\",\n        \"kind\": \"factor\",\n        \"label\": \"Competitor Response\",\n        \"category\": \"external\",\n        \"prior\": {\n          \"distribution\": \"uniform\",\n          \"range_min\": 0.0,\n          \"range_max\": 1.0\n        }\n      },\n      \"impact\": \"moderate\",\n      \"rationale\": \"Adds a new external factor representing the market's response to competition, enabling new causal analysis.\"\n    },\n    {\n      \"op\": \"add_edge\",\n      \"path\": \"/edges/fac_competitor_response->out_revenue\",\n      \"value\": {\n        \"from\": \"fac_competitor_response\",\n        \"to\": \"out_revenue\",\n        \"strength\": {\n          \"mean\": -0.25,\n          \"std\": 0.18\n        },\n        \"exists_probability\": 0.7,\n        \"effect_direction\": \"negative\"\n      },\n      \"impact\": \"moderate\",\n      \"rationale\": \"Competitive response could erode revenue, so a negative moderate-strength edge connects the new factor to revenue growth.\"\n    }\n  ],\n  \"removed_edges\": [],\n  \"warnings\": [\n    \"Inbound edge strengths to out_revenue now sum to |0.35| + |0.2| + |0.25| = 0.8, which is within the allowed total of 1.0.\"\n  ],\n  \"coaching\": {\n    \"summary\": \"Added an explicit competitor response risk as an external factor impacting revenue. This change allows scenario testing for market pushback or counter-offers. The new edge is moderate negative to revenue growth, so consider tuning if competition is expected to be more or less aggressive.\",\n    \"rerun_recommended\": true\n  }\n}",
+    "parsed_graph": {
+      "topology_plan": [
+        "Add fac_competitor_response as external",
+        "Connect fac_competitor_response to out_revenue with a valid factor→outcome edge",
+        "Verify Σ|mean| of inbound edges to out_revenue does not exceed 1.0"
+      ],
+      "operations": [
+        {
+          "op": "add_node",
+          "path": "/nodes/fac_competitor_response",
+          "value": {
+            "id": "fac_competitor_response",
+            "kind": "factor",
+            "label": "Competitor Response",
+            "category": "external",
+            "prior": {
+              "distribution": "uniform",
+              "range_min": 0,
+              "range_max": 1
+            }
+          },
+          "impact": "moderate",
+          "rationale": "Adds a new external factor representing the market's response to competition, enabling new causal analysis."
+        },
+        {
+          "op": "add_edge",
+          "path": "/edges/fac_competitor_response->out_revenue",
+          "value": {
+            "from": "fac_competitor_response",
+            "to": "out_revenue",
+            "strength": {
+              "mean": -0.25,
+              "std": 0.18
+            },
+            "exists_probability": 0.7,
+            "effect_direction": "negative"
+          },
+          "impact": "moderate",
+          "rationale": "Competitive response could erode revenue, so a negative moderate-strength edge connects the new factor to revenue growth."
+        }
+      ],
+      "removed_edges": [],
+      "warnings": [
+        "Inbound edge strengths to out_revenue now sum to |0.35| + |0.2| + |0.25| = 0.8, which is within the allowed total of 1.0."
+      ],
+      "coaching": {
+        "summary": "Added an explicit competitor response risk as an external factor impacting revenue. This change allows scenario testing for market pushback or counter-offers. The new edge is moderate negative to revenue growth, so consider tuning if competition is expected to be more or less aggressive.",
+        "rerun_recommended": true
+      }
+    },
+    "extraction_attempted": false,
+    "latency_ms": 7293,
+    "input_tokens": 5389,
+    "output_tokens": 472,
+    "est_cost_usd": 0.014554,
+    "pricing_source": "api_usage",
+    "parsed_json": {
+      "topology_plan": [
+        "Add fac_competitor_response as external",
+        "Connect fac_competitor_response to out_revenue with a valid factor→outcome edge",
+        "Verify Σ|mean| of inbound edges to out_revenue does not exceed 1.0"
+      ],
+      "operations": [
+        {
+          "op": "add_node",
+          "path": "/nodes/fac_competitor_response",
+          "value": {
+            "id": "fac_competitor_response",
+            "kind": "factor",
+            "label": "Competitor Response",
+            "category": "external",
+            "prior": {
+              "distribution": "uniform",
+              "range_min": 0,
+              "range_max": 1
+            }
+          },
+          "impact": "moderate",
+          "rationale": "Adds a new external factor representing the market's response to competition, enabling new causal analysis."
+        },
+        {
+          "op": "add_edge",
+          "path": "/edges/fac_competitor_response->out_revenue",
+          "value": {
+            "from": "fac_competitor_response",
+            "to": "out_revenue",
+            "strength": {
+              "mean": -0.25,
+              "std": 0.18
+            },
+            "exists_probability": 0.7,
+            "effect_direction": "negative"
+          },
+          "impact": "moderate",
+          "rationale": "Competitive response could erode revenue, so a negative moderate-strength edge connects the new factor to revenue growth."
+        }
+      ],
+      "removed_edges": [],
+      "warnings": [
+        "Inbound edge strengths to out_revenue now sum to |0.35| + |0.2| + |0.25| = 0.8, which is within the allowed total of 1.0."
+      ],
+      "coaching": {
+        "summary": "Added an explicit competitor response risk as an external factor impacting revenue. This change allows scenario testing for market pushback or counter-offers. The new edge is moderate negative to revenue growth, so consider tuning if competition is expected to be more or less aggressive.",
+        "rerun_recommended": true
+      }
+    }
+  },
+  "scores": {
+    "valid_json": true,
+    "correct_shape": true,
+    "operation_types_correct": false,
+    "topology_compliant": true,
+    "has_impact_rationale": true,
+    "correct_ordering": true,
+    "empty_ops_handled": true,
+    "coaching_present": true,
+    "path_syntax_valid": true
+  },
+  "overall": 0.8500000000000001,
+  "captured_at": "2026-03-14T16:39:41.327Z"
+}

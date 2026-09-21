@@ -168,10 +168,10 @@ export function selectModel(
       emitSelectionTelemetry(input, result);
       return result;
     }
-    const result = resolveModel("gpt-4o-mini", "override", warnings, modelSelectionConfig.fallbackEnabled);
+    const result = resolveModel("gpt-4.1-2025-04-14", "override", warnings, modelSelectionConfig.fallbackEnabled);
     emit(ModelTelemetryEvents.ModelOverrideAccepted, {
       task: input.task,
-      model: "gpt-4o-mini",
+      model: "gpt-4.1-2025-04-14",
       shortcut: "_fast",
       correlationId: input.correlationId,
     });

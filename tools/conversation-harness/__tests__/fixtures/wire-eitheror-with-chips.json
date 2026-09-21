@@ -1,0 +1,12 @@
+{
+  "assistant_text": "Both options are viable, but they trade speed against depth. Would you prefer to move faster with the two mid-level developers, or build deeper expertise with the tech lead?",
+  "suggested_actions": [
+    { "id": "chip_compare_options", "label": "Compare the two options" },
+    { "id": "chip_pick_developers", "label": "Lean towards the developers" },
+    { "id": "chip_pick_tech_lead", "label": "Build expertise with the tech lead" }
+  ],
+  "_diagnostic_trace": {
+    "exit_path": "coach",
+    "substage_timings": { "llm_call": 8200, "context_pack": 310, "compose": 45 }
+  }
+}

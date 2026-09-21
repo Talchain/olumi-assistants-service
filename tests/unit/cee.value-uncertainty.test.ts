@@ -475,7 +475,7 @@ describe("Backward Compatibility", () => {
       },
       quality: { overall: 0.9, structure: 0.85 },
       trace: { request_id: "req-123" },
-      draft_warnings: [{ type: "TEST", message: "Test warning" }],
+      draft_warnings: [{ id: "TEST", severity: "medium", affected_node_ids: [], affected_edge_ids: [] }],
     };
 
     const v2Response = transformResponseToV2(v1Response);
@@ -493,34 +493,115 @@ describe("Backward Compatibility", () => {
 
 describe("Factor Extraction with Confidence and Type", () => {
   it("extracts explicit currency from-to with high confidence", () => {
-    const factors = extractFactors("The price will increase from £49 to £59");
-
-    const priceFactor = factors.find((f) => f.value === 59);
-    expect(priceFactor).toBeDefined();
-    expect(priceFactor!.extractionType).toBe("explicit");
-    expect(priceFactor!.confidence).toBeGreaterThanOrEqual(0.90);
-    expect(priceFactor!.baseline).toBe(49);
+    expect(completeShape("The price will increase from £49 to £59")).toEqual([
+      ["Price", 54, "£", "range", 0.8, null],
+      ["Price", 59, "£", "explicit", 0.95, 49],
+      ["Price", 49, "£", "inferred", 0.6, null],
+    ]);
   });
 
   it("extracts approximate values as inferred", () => {
-    const factors = extractFactors("We expect around £60 in revenue");
-
-    const factor = factors.find((f) => f.value === 60);
-    expect(factor).toBeDefined();
-    expect(factor!.extractionType).toBe("inferred");
-    expect(factor!.confidence).toBeLessThanOrEqual(0.75);
+    // M8's own shape. The confidence 0.70 is what distinguishes the
+    // `approximateValue` extractor from the currency fallback's 0.60 — the
+    // collision the previous `.find` + `<= 0.75` assertion could not see.
+    expect(completeShape("We expect around £60 in revenue")).toEqual([
+      ["Value", 60, "£", "inferred", 0.7, null],
+    ]);
   });
 
   it("extracts range with bounds", () => {
-    const factors = extractFactors("The cost is between £50-70");
+    // ⚠ THE BARE LOWER BOUND IS NO LONGER EMITTED **WHERE A MAGNITUDE IS AT
+    // STAKE** (ROADMAP 2.1131). The `currency` pattern used to read "£80" of
+    // "£80-120k" and stop at the hyphen, so a correctly-read range travelled
+    // beside a point 1,000x short of it. That twin is the carrier that reached
+    // a user: it was the **80** the 3 Sep session stored as `raw_value`, scaled
+    // to `cap: 100`, and then refused Paul's £100,000 correction against.
+    //
+    // ⚠⚠ "£50-70" IS NOT THAT CASE AND ITS COMPANION IS BACK, DELIBERATELY
+    // (review N1). Neither bound carries a magnitude, so reading £50 as a point
+    // drops nothing. The first cut of `RANGE_LOWER_BOUND_ABSENT_GUARD` declined
+    // on the SYNTAX alone — any amount before dash-then-digit — and that
+    // breadth destroyed a stated figure on the reachable path: through
+    // `enrichGraphWithFactorsAsync`, "The budget is £50,000 - 3 months of
+    // runway." moved from `raw_value 50000 / "explicit"` at base `f4c8f501` to
+    // `raw_value 25001.5 / "range"` with `rangeMin 50000 > rangeMax 3`.
+    // The guard now declines only where the UPPER bound carries a magnitude.
+    // The enriched factor for this brief is unchanged either way: the 0.8 range
+    // beats the 0.6 companion in `mergeFactors`.
+    expect(completeShape("The cost is between £50-70")).toEqual([
+      ["Cost", 60, "£", "range", 0.8, null], // midpoint
+      ["Cost", 50, "£", "inferred", 0.6, null],
+    ]);
+    const ranged = extractFactors("The cost is between £50-70").find(
+      (f) => f.rangeMin !== undefined,
+    );
+    expect(ranged!.rangeMin).toBe(50);
+    expect(ranged!.rangeMax).toBe(70);
+  });
 
-    // Should extract midpoint with range info
-    const factor = factors.find((f) => f.rangeMin !== undefined);
-    expect(factor).toBeDefined();
-    expect(factor!.extractionType).toBe("range");
-    expect(factor!.rangeMin).toBe(50);
-    expect(factor!.rangeMax).toBe(70);
-    expect(factor!.value).toBe(60); // Midpoint
+  /* -------------------------------------------------------------------------
+   * ⭐⭐ AN UNCERTAINTY WIDENING THIS PR CAUSES, DISCLOSED AND PINNED RATHER
+   * THAN LEFT SILENT (ROADMAP 2.1131, review N3).
+   *
+   * `approximateValue` could not read a magnitude before this change, so
+   * "The budget is around £120k." produced a WRONG `inferred` 120 that lost the
+   * dedup race, and `currencyWithMultiplier`'s `explicit` 120,000 at 0.85 is
+   * what survived. Now `approximateValue` reads the magnitude, so it produces
+   * the RIGHT 120,000 — and because it runs FIRST and `seenFactors` is keyed on
+   * `label:value:unit` with first-writer-wins, it now CLAIMS that key and the
+   * `explicit` twin is dropped as a duplicate.
+   *
+   * Measured through `extractFactors` at base `f4c8f501` and at `6e982fc3`:
+   *
+   *   "The budget is around £120k."
+   *     base   inferred 120 @0.70   +   explicit 120,000 @0.85   → enriched EXPLICIT
+   *     head   inferred 120,000 @0.70                            → enriched INFERRED
+   *
+   * The VALUE is unchanged and correct on both. What moves is the TYPE and the
+   * CONFIDENCE, and `value-uncertainty-derivation.ts` reads both:
+   * `baseCV = 0.2*(1-confidence) + 0.05` and `typeMultiplier.inferred = 1.5`.
+   *
+   * ⚠ THE WIDENING IS **2.06x, NOT 1.5x**, and the review that raised this
+   * named only the type multiplier. Measured: (0.11 * 1.5) / (0.08 * 1.0).
+   * The confidence moves too, so quoting the type multiplier alone understates
+   * it by a third — the reason this is pinned as a NUMBER below rather than
+   * described in prose.
+   *
+   * ⭐ AND IT IS KEPT, NOT REVERSED, because `inferred` is what the derivation
+   * module's own docstring prescribes for this shape: *"'inferred':
+   * Approximate/context-derived (\"around £60\") → multiplier 1.5"*. The writer
+   * hedged with "around"; a wider band on a hedged figure is the honest answer.
+   * Base got `explicit` only as a side effect of a defect — the wrong value
+   * losing a key collision. Correct for the wrong reason is not a behaviour to
+   * preserve; it is one to disclose.
+   * ----------------------------------------------------------------------- */
+  it("an APPROXIMATED amount is inferred, and its uncertainty band is 2.06x the explicit one", () => {
+    for (const [brief, label, value] of [
+      ["The budget is around £120k.", "Budget", 120_000],
+      ["cost roughly £1.2 million", "Cost", 1_200_000],
+      ["The cost is approximately £80k.", "Cost", 80_000],
+    ] as const) {
+      // Direction 1 — the value must NOT regress to the base's magnitude-less
+      // reading. This is the half the PR exists for.
+      expect(completeShape(brief), brief).toEqual([
+        [label, value, "£", "inferred", 0.7, null],
+      ]);
+      // Direction 2 — the widening itself, pinned so it cannot drift in either
+      // direction unremarked. A change to `typeMultiplier` OR to the
+      // approximate extractor's confidence REDs here.
+      const asInferred = deriveValueUncertainty({
+        value,
+        extractionType: "inferred",
+        confidence: 0.7,
+      });
+      const asExplicitBefore = deriveValueUncertainty({
+        value,
+        extractionType: "explicit",
+        confidence: 0.85,
+      });
+      expect(asInferred.valueStd / asExplicitBefore.valueStd, `${brief}: widening ratio`)
+        .toBeCloseTo(2.0625, 4);
+    }
   });
 
   it("extracts contextual numbers as explicit", () => {
@@ -533,12 +614,10 @@ describe("Factor Extraction with Confidence and Type", () => {
   });
 
   it("extracts standalone currency as inferred", () => {
-    const factors = extractFactors("We budgeted £100");
-
-    // Standalone currency without context words is inferred
-    const factor = factors.find((f) => f.value === 100);
-    expect(factor).toBeDefined();
-    expect(factor!.extractionType).toBe("inferred");
+    // Standalone currency without context words is inferred.
+    expect(completeShape("We budgeted £100")).toEqual([
+      ["Budget", 100, "£", "inferred", 0.6, null],
+    ]);
   });
 });
 
@@ -621,6 +700,35 @@ describe("Edge Cases", () => {
 
 import { enrichGraphWithFactors } from "../../src/cee/factor-extraction/enricher.js";
 import type { GraphT, FactorDataT } from "../../src/schemas/graph.js";
+
+/**
+ * ROADMAP 2.324 — the COMPLETE factor array, as `[label, value, unit,
+ * extractionType, confidence, baseline]`.
+ *
+ * WHY THE ASSERTIONS BELOW WERE CONVERTED. Four of them read a single factor
+ * out of the array with a VALUE predicate and then checked a loose bound on it
+ * — `.find(f => f.value === 60)` followed by `confidence <= 0.75`. That is the
+ * exact shape mutant M8 walked through: delete the `approximateValue` extractor
+ * outright and the CURRENCY FALLBACK produces a factor with the same value, the
+ * same `inferred` type and a confidence of 0.60 that satisfies the same bound.
+ * The test passes — on a different factor than the one it was written for —
+ * while a user-visible factor node has vanished from the graph. 23,832 tests
+ * agreed with it.
+ *
+ * A complete-array pin cannot do that: the surviving factor differs in
+ * confidence (0.6 vs 0.7), so the array differs, so it REDs.
+ */
+function completeShape(brief: string): unknown[][] {
+  return extractFactors(brief).map((f) => [
+    f.label,
+    f.value,
+    f.unit ?? null,
+    f.extractionType,
+    f.confidence,
+    f.baseline ?? null,
+  ]);
+}
+
 
 describe("End-to-End Integration: Enrichment → V2 Transform", () => {
   it("enriched factors include value_std in v2 output", () => {

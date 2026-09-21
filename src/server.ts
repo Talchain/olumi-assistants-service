@@ -1,4 +1,5 @@
-// Load environment variables from .env file (local development only)
+// Load environment variables from .env file
+// In production without a .env file, this is a no-op (dotenv silently skips)
 import "dotenv/config";
 
 import { env } from "node:process";
@@ -16,6 +17,7 @@ import evidencePackRoute from "./routes/assist.evidence-pack.js";
 import shareRoute from "./routes/assist.share.js";
 import ceeDraftRouteV1 from "./routes/assist.v1.draft-graph.js";
 import ceeDraftStreamRouteV1 from "./routes/assist.v1.draft-graph-stream.js";
+import ceeDraftStagedRouteV1 from "./routes/assist.v1.draft-graph-staged.js";
 import ceeOptionsRouteV1 from "./routes/assist.v1.options.js";
 import ceeBiasCheckRouteV1 from "./routes/assist.v1.bias-check.js";
 import ceeExplainGraphRouteV1 from "./routes/assist.v1.explain-graph.js";
@@ -24,12 +26,16 @@ import ceeSensitivityCoachRouteV1 from "./routes/assist.v1.sensitivity-coach.js"
 import ceeTeamPerspectivesRouteV1 from "./routes/assist.v1.team-perspectives.js";
 import ceeDecisionReviewExampleRouteV1 from "./routes/assist.v1.decision-review-example.js";
 import ceeGraphReadinessRouteV1 from "./routes/assist.v1.graph-readiness.js";
-import ceeKeyInsightRouteV1 from "./routes/assist.v1.key-insight.js";
+import ceeScenarioGraphRouteV1 from "./routes/assist.v1.scenario-graph.js";
+import ceeScenarioGraphRegisterRouteV1 from "./routes/assist.v1.scenario-graph-register.js";
+import ceeScenarioVersionsRouteV1 from "./routes/assist.v1.scenario-versions.js";
 import ceeElicitBeliefRouteV1 from "./routes/assist.v1.elicit-belief.js";
+import collabRoundsRouteV1 from "./routes/collab.v1.rounds.js";
+import collabPacketRouteV1 from "./routes/collab.v1.packet.js";
+import ceeDecisionRecordsRouteV1 from "./routes/assist.v1.decision-records.js";
 import ceeUtilityWeightRouteV1 from "./routes/assist.v1.suggest-utility-weights.js";
 import ceeRiskToleranceRouteV1 from "./routes/assist.v1.elicit-risk-tolerance.js";
 import ceeEdgeFunctionRouteV1 from "./routes/assist.v1.suggest-edge-function.js";
-import ceeGenerateRecommendationRouteV1 from "./routes/assist.v1.generate-recommendation.js";
 import ceeNarrateConditionsRouteV1 from "./routes/assist.v1.narrate-conditions.js";
 import ceeExplainPolicyRouteV1 from "./routes/assist.v1.explain-policy.js";
 import ceeElicitPreferencesRouteV1 from "./routes/assist.v1.elicit-preferences.js";
@@ -39,33 +45,70 @@ import ceeIslSynthesisRouteV1 from "./routes/assist.v1.isl-synthesis.js";
 import ceeHealthRouteV1 from "./routes/assist.v1.health.js";
 import ceeAskRouteV1 from "./routes/assist.v1.ask.js";
 import ceeReviewRouteV1 from "./routes/assist.v1.review.js";
+import ceeDecisionReviewRouteV1 from "./routes/assist.v1.decision-review.js";
 import { statusRoutes, incrementRequestCount, incrementErrorCount } from "./routes/v1.status.js";
 import { limitsRoute } from "./routes/v1.limits.js";
 import observabilityPlugin from "./plugins/observability.js";
 import { performanceMonitoring } from "./plugins/performance-monitoring.js";
-import { getAdapter } from "./adapters/llm/router.js";
+import { getAdapter, warmProviderConfigCache, getMaxTokensFromConfig } from "./adapters/llm/router.js";
+import { validateDraftThinkingAffordability } from "./adapters/llm/draft-budget.js";
+import { validateModelsAtStartup, getEnabledModelsSummary, validateModelsRegistered } from "./config/models.js";
+import { buildBootModelRegistryBatch } from "./config/boot-model-registry-batch.js";
+import { DEFAULT_SUMMARY_MODEL } from "./orchestrator-v5/rolling-summary/summary-types.js";
+import { DEFAULT_DECOMPOSE_MODEL } from "./cee/decision-review/decompose.js";
 import { SERVICE_VERSION, GIT_COMMIT_SHA, GIT_COMMIT_SHORT } from "./version.js";
+// The contract-health manifest, published on /healthz. Imported from the
+// RUNTIME-RESOLVED module, never from the package.json pin — see the block at
+// the /healthz 200 return for why that distinction is the whole point.
+import {
+  SCHEMA_PACKAGE_VERSION,
+  SCHEMA_SHA,
+  CONTRACT_MANIFEST_SHA,
+} from "@talchain/schemas";
 import { getAllFeatureFlags } from "./utils/feature-flags.js";
 import { attachRequestId, getRequestId, REQUEST_ID_HEADER } from "./utils/request-id.js";
-import { buildErrorV1, toErrorV1, getStatusCodeForErrorCode } from "./utils/errors.js";
+import { buildErrorV1, toErrorV1, getStatusCodeForErrorCode, isClientAbortError, RateLimitedError, retryAfterSecondsFromRateLimitContext } from "./utils/errors.js";
 import { authPlugin, getRequestKeyId } from "./plugins/auth.js";
 import { responseHashPlugin } from "./plugins/response-hash.js";
 import { boundaryLoggingPlugin } from "./plugins/boundary-logging.js";
 import { getRecentCeeErrors } from "./cee/logging.js";
 import { resolveCeeRateLimit } from "./cee/config/limits.js";
-import { HTTP_CLIENT_TIMEOUT_MS, ROUTE_TIMEOUT_MS, UPSTREAM_RETRY_DELAY_MS } from "./config/timeouts.js";
+import { HTTP_CLIENT_TIMEOUT_MS, ROUTE_TIMEOUT_MS, UPSTREAM_RETRY_DELAY_MS, DRAFT_REQUEST_BUDGET_MS, LLM_POST_PROCESSING_HEADROOM_MS, DRAFT_LLM_TIMEOUT_MS, getResolvedTimeouts, validateTimeoutRelationships, getAffordableDraftTokens, validateDraftTokenAffordability } from "./config/timeouts.js";
+import { getTurnExecutorBudgets, getHandlerBudgetMs } from "./orchestrator-v5/budgets.js";
+import { resolveDecisionReviewHardBudgetMs } from "./orchestrator-v5/coaching/decision-review-enricher.js";
 import { getISLConfig } from "./adapters/isl/config.js";
 import { getIslCircuitBreakerStatusForDiagnostics } from "./cee/bias/causal-enrichment.js";
+import { ceeOrchestratorRouteV2 } from "./orchestrator/route-v2.js";
+import ceeStreamedTurnRouteV2 from "./routes/orchestrate.v2.turn-stream.js";
 import { adminPromptRoutes } from "./routes/admin.prompts.js";
+import { adminPromptStatusRoutes } from "./routes/admin.prompts.status.js";
+import { publicPromptRoutes } from "./routes/v1.prompts.js";
 import { adminUIRoutes } from "./routes/admin.ui.js";
 import { adminDraftFailureRoutes } from "./routes/admin.v1.draft-failures.js";
 import { adminLLMOutputRoutes } from "./routes/admin.v1.llm-output.js";
+import { adminTurnDebugRoutes } from "./routes/admin.v1.turn-debug.js";
+import { adminRoutingLogRoutes } from "./routes/admin.v1.routing-log.js";
 import { adminTestRoutes } from "./routes/admin.testing.js";
+import { adminModelRoutes } from "./routes/admin.models.js";
+import { proxyV5TurnRoute } from "./routes/proxy-v5-turn.js";
+import proxyV5TurnStreamRoute from "./routes/proxy-v5-turn-stream.js";
+import { logResolvedTaskModels } from "./config/model-resolution-logger.js";
+import {
+  buildStartupTaskModels,
+  resolveModelRoutingSnapshot,
+} from "./adapters/llm/model-routing-report.js";
 import { initializeAndSeedPrompts, getBraintrustManager, registerAllDefaultPrompts, getPromptStore, getPromptStoreStatus, isPromptStoreHealthy, isStoreBackendConfigured, initializePromptStore } from "./prompts/index.js";
-import { getActiveExperiments, warmPromptCacheFromStore } from "./adapters/llm/prompt-loader.js";
-import { config } from "./config/index.js";
+import { getActiveExperiments, warmPromptCacheFromStore, getPromptLoaderCacheDiagnostics, isCacheWarmingComplete, isCacheWarmingHealthy, getCacheWarmingState, logStartupHealthCheck } from "./adapters/llm/prompt-loader.js";
+import { isPromptManagementEnabled } from "./prompts/loader.js";
+import { config, shouldUseStagingPrompts, resolvePromptEnvironment, validateConfig, checkDeprecatedEnvVars, checkDeadEnvVars, emitConfigOverrideTelemetry } from "./config/index.js";
 import { createLoggerConfig } from "./utils/logger-config.js";
+import { log } from "./utils/telemetry.js";
 import { startDraftFailureRetentionJob } from "./cee/draft-failures/store.js";
+import { loadDskBundle, getDskVersionHash } from "./orchestrator/dsk-loader.js";
+import { logFeatureHealth } from "./diagnostics/feature-health.js";
+import { initSentry, setSentryRequestTag, setupSentryFastify } from "./middleware/sentry.js";
+import { createContextRegistrationHook, createContextCleanupHook } from "./middleware/token-budget.js";
+import { isAllowedBrowserOrigin } from "./security/browser-origin-policy.js";
 
 export const DEFAULT_ORIGINS = [
   "https://olumi.app",
@@ -91,6 +134,11 @@ export const DEFAULT_ALLOWED_HEADERS = [
   "X-Olumi-Client-Build",
   "X-Olumi-Payload-Hash",
   "X-Olumi-Unsafe",
+  // Browser proxy headers — @fastify/cors handles OPTIONS preflight before
+  // route handlers, so these must be declared here for the proxy route.
+  "X-User-Id",
+  "X-Request-Id",
+  "X-Correlation-Id",
 ];
 
 function resolveAllowedOrigins(): string[] {
@@ -106,9 +154,8 @@ function resolveAllowedOrigins(): string[] {
     throw new Error("FATAL: ALLOWED_ORIGINS cannot contain '*' in production");
   }
 
-  // Diagnostic: log parsed origins at startup
-  console.log("[CORS] Raw ALLOWED_ORIGINS env:", raw ? `"${raw}"` : "(not set, using defaults)");
-  console.log("[CORS] Parsed origins:", JSON.stringify(origins));
+  // Diagnostic: log parsed origins at startup (debug level)
+  log.debug({ rawEnv: raw ?? '(not set)', origins }, 'CORS origins parsed');
 
   return origins;
 }
@@ -118,27 +165,143 @@ function resolveAllowedOrigins(): string[] {
  * (Can be imported for testing or run directly)
  */
 export async function build() {
+  // Sentry: initialise early (no-op when SENTRY_DSN is unset)
+  initSentry();
+
+  // Fail-fast: Validate all configuration at startup
+  // This ensures misconfiguration is caught immediately rather than lazily
+  validateConfig();
+
+  // Emit telemetry for any config override events (Stream F)
+  await emitConfigOverrideTelemetry();
+
+  // Check for deprecated environment variables and log warnings
+  const deprecationWarnings = checkDeprecatedEnvVars();
+  for (const w of deprecationWarnings) {
+    log.warn({ event: 'config.deprecated_env_var', key: w.key, replacement: w.replacement }, w.message);
+  }
+
+  // Check for dead environment variables (set but have no effect)
+  const deadVarWarnings = checkDeadEnvVars();
+  for (const w of deadVarWarnings) {
+    log.warn({ event: 'config.dead_env_var', key: w.key }, w.message);
+  }
+
+  // ── SCENARIO OWNERSHIP POSTURE — say it out loud, at boot, unconditionally ──
+  //
+  // Ownership on the /assist/v1/scenarios/* family is derived from the VERIFIED
+  // token subject alone (route-v2-preflight.ts's
+  // CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE). That is correct — and it makes
+  // CEE_REQUIRE_USER_JWT load-bearing rather than optional.
+  //
+  // With the flag OFF, `resolveUserIdentity` returns `{ mode: "off" }` for every
+  // caller, so the effective user is null. A scenario with a non-null stored
+  // owner then has a non-null owner and a null caller, which is refused
+  // (`scenario_requires_authenticated_owner`) on EVERY endpoint below. The
+  // owner cannot read their own scenario and cannot write to it. It reads to
+  // the user as data loss; the cause is a flag.
+  //
+  // ⚠ THIS IS NOT A ROLLBACK LEVER. Turning CEE_REQUIRE_USER_JWT off no longer
+  // restores legacy behaviour — it takes the scenario surfaces DOWN for every
+  // signed-in user. Nothing else in the config layer guards this direction: the
+  // only refine on this flag (config/index.ts) fires when it is TRUE.
+  //
+  // Non-fatal on purpose: guest (unowned) scenarios still work, so this is a
+  // partial outage, and a service that refuses to boot would be worse. But it
+  // must never be silent again.
+  if (config.auth?.requireUserJwt !== true) {
+    log.warn(
+      {
+        event: 'config.scenario_ownership_posture',
+        require_user_jwt: false,
+        owned_scenarios_reachable_by_owner: false,
+        endpoints: [
+          'POST /assist/v1/scenarios/:scenario_id/graph',
+          'POST /assist/v1/scenarios/:scenario_id/graph/register',
+          'POST /assist/v1/scenarios/:scenario_id/versions',
+          'POST /assist/v1/scenarios/:scenario_id/versions/compare',
+          'POST /assist/v1/scenarios/:scenario_id/versions/save',
+          'POST /assist/v1/scenarios/:scenario_id/versions/restore',
+        ],
+      },
+      'MISCONFIGURATION: CEE_REQUIRE_USER_JWT is OFF, so no caller is ever identified — and ownership ' +
+        'on the scenario surfaces is derived from the verified token subject alone. Every OWNED scenario ' +
+        'is therefore unreadable AND unwritable by its own owner across all six /assist/v1/scenarios/* ' +
+        'endpoints, which answer 404. Guest (unowned) scenarios are unaffected. This flag is NOT a ' +
+        'rollback lever for the scenario family: set CEE_REQUIRE_USER_JWT=true to restore owner access.',
+    );
+  }
+
+  // Prompt environment — always logged at startup so every boot records which
+  // PMS pointer this deployment serves and why. A production runtime resolving
+  // the STAGING pointer is logged at error level and (when the prod verdict is
+  // a positive identification) also fails /healthz, so Render will not route
+  // traffic to it.
+  const promptEnvAtBoot = resolvePromptEnvironment();
+  const promptEnvLogFields = {
+    event: 'config.prompt_environment',
+    prompt_environment: promptEnvAtBoot.environment,
+    source: promptEnvAtBoot.source,
+    runtime_env: promptEnvAtBoot.runtimeEnv,
+    runtime_env_source: promptEnvAtBoot.runtimeEnvSource,
+    mismatch: promptEnvAtBoot.mismatch,
+    blocks_readiness: promptEnvAtBoot.blocksReadiness,
+    reasons: promptEnvAtBoot.reasons,
+  };
+  if (promptEnvAtBoot.mismatch) {
+    log.error(
+      promptEnvLogFields,
+      `[AUDIT] Runtime env "${promptEnvAtBoot.runtimeEnv}" is serving the "${promptEnvAtBoot.environment}" prompt pointer. ` +
+        `Set PROMPTS_ENVIRONMENT=production on this service.`,
+    );
+  } else {
+    log.info(
+      promptEnvLogFields,
+      `Prompt environment: ${promptEnvAtBoot.environment} (${promptEnvAtBoot.source})`,
+    );
+  }
+  for (const reason of promptEnvAtBoot.reasons) {
+    if (reason === 'prompt_env_unset_on_deployed_env') {
+      log.warn(
+        { event: 'config.prompt_environment', reason },
+        `Deployed environment "${promptEnvAtBoot.runtimeEnv}" does not declare PROMPTS_ENVIRONMENT — ` +
+          `the prompt pointer is being DERIVED. Set PROMPTS_ENVIRONMENT explicitly.`,
+      );
+    }
+  }
+
   // Fail-fast: Verify LLM provider and API key configuration
-  const llmProvider = env.LLM_PROVIDER || 'openai';
-  if (llmProvider === 'openai' && !env.OPENAI_API_KEY) {
+  const llmProvider = config.llm.provider;
+  if (llmProvider === 'openai' && !config.llm.openaiApiKey) {
     throw new Error('FATAL: LLM_PROVIDER=openai but OPENAI_API_KEY is not set');
   }
-  if (llmProvider === 'anthropic' && !env.ANTHROPIC_API_KEY) {
+  if (llmProvider === 'anthropic' && !config.llm.anthropicApiKey) {
     throw new Error('FATAL: LLM_PROVIDER=anthropic but ANTHROPIC_API_KEY is not set');
   }
 
+  // Validate model registry at startup
+  // This logs enabled models and warns about deprecated/misconfigured models
+  const modelValidation = validateModelsAtStartup();
+  if (modelValidation.warnings.length > 0) {
+    for (const warning of modelValidation.warnings) {
+      log.warn({ event: 'model.validation.warning' }, warning);
+    }
+  }
+  const modelsSummary = getEnabledModelsSummary();
+  log.info({
+    event: 'model.validation.complete',
+    openai: modelsSummary.openai,
+    anthropic: modelsSummary.anthropic,
+    total: modelValidation.enabledModels,
+  }, 'Model registry validated');
+
   // Fail-fast: In production, require at least one API key or HMAC secret so
   // that authentication cannot be accidentally disabled.
-  const nodeEnv = env.NODE_ENV || 'development';
+  const nodeEnv = config.server.nodeEnv;
   const hasApiKeys =
-    Boolean(env.ASSIST_API_KEY && env.ASSIST_API_KEY.trim().length > 0) ||
-    Boolean(
-      env.ASSIST_API_KEYS &&
-        env.ASSIST_API_KEYS
-          .split(',')
-          .some((k) => k.trim().length > 0),
-    );
-  const hasHmacSecret = Boolean(env.HMAC_SECRET && env.HMAC_SECRET.trim().length > 0);
+    Boolean(config.auth.assistApiKey?.trim().length) ||
+    Boolean(config.auth.assistApiKeys?.some((k) => k.trim().length > 0));
+  const hasHmacSecret = Boolean(config.auth.hmacSecret?.trim().length);
 
   if (nodeEnv === 'production' && !hasApiKeys && !hasHmacSecret) {
     throw new Error(
@@ -146,9 +309,162 @@ export async function build() {
     );
   }
 
+  // One adapter-free routing projection feeds startup status and the admin
+  // endpoint. Gated, inert/display and invalid rows remain visible in the full
+  // snapshot but cannot be presented as effective serving assignments.
+  const modelRoutingSnapshot = resolveModelRoutingSnapshot();
+  const startupTaskModels = buildStartupTaskModels(modelRoutingSnapshot);
+  log.info(
+    { event: 'config.task_models', ...startupTaskModels },
+    'Effective task model assignments from shared routing authority',
+  );
+
+  // Boot fail-loud drift guard (Lane F 2026-07-23, EXTENDED to all call sites
+  // 2026-07-24 — ROADMAP 1.185(a) rec-2 / MODEL-ROUTING-POLICY D10;
+  // DRAFTING-COMPONENT-DESIGN Q4 derive-don't-mirror; WIDENED TO EFFECTIVE
+  // 2026-07-31, assessment-models-prompts.md §1.5): EVERY model id that can
+  // actually SERVE must be a registered, ENABLED registry entry. A typo, a
+  // retired id, or an absent-default (the trap-12 class that left
+  // claude-opus-4-8 out of the registry) would otherwise only surface as a
+  // 400/500 at the first request on that path.
+  //
+  // ⚠ THE GAP THIS WIDENING CLOSES: the batch used to be `draft_graph`
+  // EFFECTIVE + every CHECKED-IN default. Env overrides WIN over checked-in
+  // defaults (router precedence step 3 > step 4), so the ids that actually
+  // served were the only ones never checked — and three live tasks were running
+  // on the bare, unregistered, FLOATING alias `gpt-4.1` unnoticed.
+  //
+  // ⚠ AND NOTE WHAT IS *NOT* HERE: no `config` argument. The batch used to be
+  // assembled inline on this line, and a review proved that wiring was pinned by
+  // NOTHING — passing `{}` instead of `config.cee.models` restored the exact
+  // pre-fix blindness with the full test suite still green (CLAUDE.md trap 11).
+  // `buildBootModelRegistryBatch` now reads live config itself, so there is no
+  // argument here left to hollow out, and the equivalent mutation lives inside
+  // the seam where env-driven tests catch it. Do not "simplify" this back into
+  // an inline assembly.
+  //
+  // Reads the registry directly, logs ERROR and continues in the same
+  // fire-but-continue style as the draft-token / thinking affordability asserts
+  // below (a config the runtime clamps has already made safe should not brick
+  // the pod on boot).
+  const modelDefaultChecks = buildBootModelRegistryBatch([
+    // Router-bypass defaults: the two resolvers that don't consult
+    // TASK_MODEL_DEFAULTS (summariser + decision-review decompose). Their env
+    // overrides (`CEE_MODEL_SUMMARY`, `CEE_MODEL_DECISION_REVIEW_HAIKU`) are
+    // covered by the derived `env_model:*` rows, so default + override are
+    // both validated.
+    { label: 'rolling_summary_default', modelId: DEFAULT_SUMMARY_MODEL },
+    { label: 'decision_review_decompose_default', modelId: DEFAULT_DECOMPOSE_MODEL },
+  ]);
+  const modelRegistryErrors = validateModelsRegistered(modelDefaultChecks);
+  for (const modelError of modelRegistryErrors) {
+    log.error({ event: 'config.model_registered' }, modelError);
+  }
+  log.info(
+    { event: 'config.model_registry_guard', checked: modelDefaultChecks.length, errors: modelRegistryErrors.length },
+    modelRegistryErrors.length === 0
+      ? `Model registry drift guard armed: all ${modelDefaultChecks.length} default model ids registered + enabled`
+      : `Model registry drift guard armed: ${modelRegistryErrors.length} of ${modelDefaultChecks.length} default model ids FAILED (see config.model_registered errors)`,
+  );
+
+  // Log all resolved timeout values at startup for diagnostics
+  const resolvedTimeouts = getResolvedTimeouts();
+  log.info({ event: 'config.timeouts', ...resolvedTimeouts }, 'Resolved timeout configuration');
+
+  // Log request budget configuration (single source of truth for draft-graph lifecycle)
+  log.info({
+    event: 'cee.config.request_budget',
+    draft_request_budget_ms: DRAFT_REQUEST_BUDGET_MS,
+    llm_post_processing_headroom_ms: LLM_POST_PROCESSING_HEADROOM_MS,
+    derived_llm_timeout_ms: DRAFT_LLM_TIMEOUT_MS,
+    affordable_draft_tokens: getAffordableDraftTokens(DRAFT_LLM_TIMEOUT_MS),
+  }, `Request budget: ${DRAFT_REQUEST_BUDGET_MS}ms total, ${DRAFT_LLM_TIMEOUT_MS}ms LLM timeout, ${LLM_POST_PROCESSING_HEADROOM_MS}ms headroom, ${getAffordableDraftTokens(DRAFT_LLM_TIMEOUT_MS)} affordable draft tokens`);
+
+  // Boot assertion (2026-07-20 draft outage — "never again"): a configured
+  // draft max_tokens the derived timeout cannot afford is exactly the
+  // arithmetic that hung every long draft generation to the 105s cap. The
+  // runtime clamps independently (resolveDraftMaxTokens), so this logs at
+  // ERROR and continues rather than killing the pod over a config the clamp
+  // has already made safe. Both compared values are DERIVED from live config.
+  for (const affordabilityError of validateDraftTokenAffordability(getMaxTokensFromConfig('draft_graph') ?? null)) {
+    log.error({ event: 'config.draft_token_affordability' }, affordabilityError);
+  }
+
+  // Boot assertion (thinking half, ROADMAP 2.90 / Codex #8): an ENABLED draft
+  // extended-thinking budget the derived timeout cannot afford is the config that
+  // resurrects the outage arithmetic. The runtime clamps independently
+  // (resolveDraftThinking), so this logs at ERROR and continues. Both compared
+  // values are DERIVED from live config.
+  for (const thinkingError of validateDraftThinkingAffordability(
+    config.cee.thinking.draftGraphEnabled,
+    config.cee.thinking.draftGraphBudget,
+  )) {
+    log.error({ event: 'config.draft_thinking_affordability' }, thinkingError);
+  }
+
+  // Validate timeout relationships (warn about misconfigurations).
+  // The V5 budget-layer values are injected: `timeouts.ts` is kept import-light
+  // and cannot reach `orchestrator-v5/budgets.ts` (which depends on it) or
+  // `config.proxy.*` without a cycle. Resolving them HERE means the ladder is
+  // checked against the env actually applied to this instance, not repo
+  // defaults — the whole reason these rungs are at boot and not only in CI.
+  const timeoutWarnings = validateTimeoutRelationships({
+    handlerBudgetMs: getHandlerBudgetMs(),
+    turnBudgetMs: getTurnExecutorBudgets().turn_ms,
+    browserProxyTimeoutMs: config.proxy.browserProxyTimeoutMs,
+    // ROADMAP 2.180-B: the budget ACTUALLY ARMED on this instance, resolved
+    // against the live decompose posture — not the raw constant.
+    decisionReviewHardBudgetMs: resolveDecisionReviewHardBudgetMs(
+      config.cee.decisionReviewDecompose,
+    ),
+  });
+  for (const warning of timeoutWarnings) {
+    log.warn({ event: 'config.timeout_relationship' }, warning);
+  }
+
   // Register default prompts (fallbacks for prompt management system)
   // This must happen before routes are registered so prompts are available
   registerAllDefaultPrompts();
+  // Note: the v5 routing prompt snapshot is built later in the boot sequence,
+  // AFTER initializePromptStore() + warmPromptCacheFromStore(). Building here
+  // would resolve via the unhealthy store and pin the default fallback even
+  // when Supabase has the routing prompt populated. See `buildRoutingPromptSnapshot()`
+  // call below the prompt-store initialisation block.
+
+  // DSK v0 bundle — no-op unless ENABLE_DSK_V0=true or DSK_ENABLED=true
+  loadDskBundle();
+  const dskHash = getDskVersionHash();
+  log.info({ dsk_version_hash: dskHash }, dskHash ? `DSK loaded: ${dskHash}` : 'DSK not loaded: flag OFF or bundle missing');
+
+  // Feature health check — log which enabled features have OBSERVED evidence
+  // that they can do something (a resolvable producer module, a loaded bundle,
+  // a configured dependency), not merely a flag that is on. Awaited because
+  // producer-module evidence is probed by dynamic import; it runs after
+  // loadDskBundle() above so the DSK verdict sees the real bundle state.
+  await logFeatureHealth();
+
+  // Startup health summary — single structured log line for deployment diagnostics
+  //
+  // ⚠ THIS LINE USED TO LIE (ISSUE-9020). It computed the LOGGED value as
+  // `env unset ? nodeEnv !== 'production' : <real flag>`, while the real gate
+  // (`config.features.diagnosticTraceEnabled`) defaults FALSE. So with the
+  // variable unset on any non-production deploy the startup log printed
+  // `diagnostic_trace: true` while the trace was off — a capability reported
+  // as ON when it was OFF, which is the one thing a startup health summary
+  // must never do. It now reports the gate the code actually consults; there
+  // is no second value to keep in step with it.
+  const diagnosticTraceEnabled = config.features.diagnosticTraceEnabled;
+  log.info({
+    event: 'config.startup_health',
+    pipeline: 'unified_v2',
+    orchestrator_version: config.features.orchestratorV2 ? 'V2' : 'V1',
+    diagnostic_trace: diagnosticTraceEnabled,
+    streaming: config.features.orchestratorStreaming,
+    models: startupTaskModels,
+    deprecated_vars_detected: deprecationWarnings.length,
+    dead_vars_detected: deadVarWarnings.length,
+  }, 'Startup health summary');
+  logResolvedTaskModels(modelRoutingSnapshot);
 
   // Security configuration (read from env or use defaults)
   const BODY_LIMIT_BYTES = Number(env.BODY_LIMIT_BYTES) || 1024 * 1024; // 1 MB default
@@ -169,9 +485,16 @@ export async function build() {
 
   // CORS: Strict allowlist (default: olumi.app + localhost dev)
   const allowedOrigins = resolveAllowedOrigins();
+  const allowedOriginSet = new Set(allowedOrigins);
 
   await app.register(cors, {
-    origin: allowedOrigins,
+    origin: (origin, callback) => {
+      callback(
+        null,
+        typeof origin === "string" &&
+          isAllowedBrowserOrigin(origin, allowedOriginSet),
+      );
+    },
     allowedHeaders: DEFAULT_ALLOWED_HEADERS,
     exposedHeaders: [
       "x-olumi-service",
@@ -179,6 +502,10 @@ export async function build() {
       "x-olumi-response-hash",
       "x-olumi-trace-received",
       "x-olumi-downstream-calls",
+      // Browser proxy diagnostic headers
+      "x-request-id",
+      "x-proxy-source",
+      "x-proxy-duration-ms",
     ],
   });
 
@@ -186,7 +513,7 @@ export async function build() {
   app.addHook("onRequest", async (request) => {
     const origin = request.headers.origin;
     if (origin) {
-      const isAllowed = allowedOrigins.includes(origin);
+      const isAllowed = isAllowedBrowserOrigin(origin, allowedOriginSet);
       request.log.info({ origin, isAllowed, allowedOrigins }, "[CORS] Incoming request origin");
     }
   });
@@ -236,29 +563,22 @@ await app.register(rateLimit, {
   },
   errorResponseBuilder: (req, context) => {
     const requestId = getRequestId(req);
-    // Calculate retry_after_seconds with proper guards
-    let retryAfter = 60; // Default fallback
-    if (context.after && typeof context.after === 'number') {
-      const diff = Math.ceil((context.after - Date.now()) / 1000);
-      retryAfter = Math.max(1, diff); // Ensure at least 1 second
-    }
+    // `context.ttl` is ms remaining in the window. `context.after` is a
+    // human-readable STRING ("1 minute"), so the old numeric guard on it never
+    // matched and every refusal reported a hardcoded 60s.
+    const retryAfter = retryAfterSecondsFromRateLimitContext(context);
     app.log.warn({
       event: "rate_limit_hit",
-      max: GLOBAL_RATE_LIMIT_RPM,
+      max: context.max ?? GLOBAL_RATE_LIMIT_RPM,
       request_id: requestId,
+      retry_after_seconds: retryAfter,
     }, "Rate limit exceeded");
 
-    // Use centralized error builder for consistency
-    // Note: Must include statusCode for @fastify/rate-limit
-    return {
-      statusCode: 429,
-      ...buildErrorV1(
-        'RATE_LIMITED',
-        'Too many requests',
-        { retry_after_seconds: retryAfter },
-        requestId
-      ),
-    };
+    // ROADMAP 2.181 — @fastify/rate-limit THROWS this return value
+    // (index.js:333). It MUST be an Error: a plain object (even one carrying
+    // `statusCode: 429`) reaches this app's custom setErrorHandler as an
+    // unknown error type and is answered 500 INTERNAL. See RateLimitedError.
+    return new RateLimitedError(retryAfter);
   },
 });
 
@@ -272,6 +592,21 @@ await app.register(rateLimit, {
   app.addHook("onRequest", async (request, _reply) => {
     attachRequestId(request);
     incrementRequestCount();
+    setSentryRequestTag(getRequestId(request));
+
+    // Warn if request arrives before cache warming completes (race condition diagnostic)
+    // Skip healthz to avoid noise during startup probes
+    if (!isCacheWarmingComplete() && !request.url.startsWith('/healthz')) {
+      const warmingState = getCacheWarmingState();
+      request.log.warn({
+        event: 'request_before_cache_warming',
+        url: request.url,
+        method: request.method,
+        warming_completed: warmingState.completed,
+        warming_completed_at: warmingState.completedAt,
+        instance_uptime_ms: Date.now() - (warmingState.completedAt ?? Date.now()),
+      }, 'Request received before cache warming completed - may use default prompts');
+    }
   });
 
   // Auth: API key authentication with per-key quotas (v1.3.0)
@@ -283,6 +618,21 @@ await app.register(rateLimit, {
 
   // Boundary logging: Service headers + boundary events (observability v1)
   await app.register(boundaryLoggingPlugin);
+
+  // Token budget: register request context for LLM routes, clean up on response.
+  // Budget enforcement itself happens at the adapter boundary (usage-tracking.ts).
+  {
+    const contextReg = createContextRegistrationHook();
+    const contextCleanup = createContextCleanupHook();
+
+    app.addHook("onRequest", async (request) => {
+      await contextReg(request);
+    });
+
+    app.addHook("onResponse", async (request) => {
+      await contextCleanup(request);
+    });
+  }
 
   // Response hook: Add X-Request-Id header to every response
   app.addHook("onSend", async (request, reply, payload) => {
@@ -351,8 +701,49 @@ await app.register(rateLimit, {
 }
 
 // Centralized error handler: structured error.v1 responses with request_id
+// Layer 3 guarantee: every error response has a non-empty JSON body.
 app.setErrorHandler((error, request, reply) => {
-  const errorV1 = toErrorV1(error, request);
+  // ROADMAP 1.16i (CEE half) — client aborts are not server errors. One
+  // aborted browser request used to produce four error-class log lines and
+  // a false 5xx metric increment for a 500 that never reached any client
+  // (the socket was already gone). Short-circuit BEFORE toErrorV1 so its
+  // "Internal server error occurred" copy never fires: ONE warn-class line
+  // with the distinct `client_aborted` class, NO incrementErrorCount, and
+  // the reply finalised as 499 (client closed request) — nothing is
+  // deliverable on a dead socket, and a non-5xx status keeps the
+  // observability onResponse access-log line out of the error class too.
+  // Genuine errors fall through to the existing path byte-unchanged.
+  if (isClientAbortError(error)) {
+    app.log.warn(
+      {
+        event: "client_aborted",
+        request_id: getRequestId(request),
+        method: request.method,
+        url: request.url,
+        error_code: (error as NodeJS.ErrnoException)?.code ?? null,
+      },
+      "Client aborted request mid-flight — reply undeliverable, not a server error",
+    );
+    return reply.status(499).send();
+  }
+
+  let errorV1: ReturnType<typeof toErrorV1>;
+  try {
+    errorV1 = toErrorV1(error, request);
+  } catch {
+    // If toErrorV1 itself fails, produce a minimal fallback body
+    errorV1 = buildErrorV1("INTERNAL", "internal error", undefined, undefined);
+  }
+
+  // Guard: ensure errorV1 is a non-empty object with required code field
+  if (!errorV1 || typeof errorV1 !== "object" || !errorV1.code) {
+    app.log.error(
+      { event: "EMPTY_ERROR_V1", method: request.method, url: request.url },
+      "toErrorV1 returned empty/incomplete body — using fallback",
+    );
+    errorV1 = buildErrorV1("INTERNAL", "internal error", undefined, undefined);
+  }
+
   const statusCode = getStatusCodeForErrorCode(errorV1.code);
 
   // Track error for /v1/status metrics (separates 4xx vs 5xx)
@@ -419,7 +810,231 @@ function buildCeeConfig() {
   };
 }
 
-app.get("/healthz", async () => {
+// ---------------------------------------------------------------------------
+// /healthz — minimal public probe (load balancers, readiness checks, CI)
+// ---------------------------------------------------------------------------
+app.get("/healthz", async (_request, reply) => {
+  // GATE 0 — a production runtime must never serve the PMS staging pointer.
+  // When the prod verdict is a POSITIVE identification (OLUMI_ENV=prod, or
+  // RENDER_SERVICE_NAME set and not containing "staging") and the resolved
+  // prompt environment is nonetheless `staging`, refuse readiness: Render's
+  // health check fails and the misconfigured deploy never takes traffic.
+  // That is strictly safer than silently serving staging prompts to
+  // production users.
+  //
+  // Deliberately NOT fatal when the prod verdict came only from the
+  // ambiguous NODE_ENV fallback — both Render services set
+  // NODE_ENV=production, so blocking there could brick the STAGING deploy.
+  // That case degrades loudly instead (see `degraded_reasons`).
+  const promptEnvironment = resolvePromptEnvironment();
+  if (promptEnvironment.blocksReadiness) {
+    return reply.code(503).send({
+      ok: false,
+      build: GIT_COMMIT_SHORT,
+      service: "assistants",
+      version: SERVICE_VERSION,
+      degraded: true,
+      degraded_reasons: promptEnvironment.reasons,
+      prompts_ready: false,
+      not_ready_reason: "prompt_env_conflicts_with_runtime",
+      message:
+        `Runtime environment is "${promptEnvironment.runtimeEnv}" (from ` +
+        `${promptEnvironment.runtimeEnvSource}) but the resolved prompt environment is ` +
+        `"${promptEnvironment.environment}" (from ${promptEnvironment.source}). ` +
+        `Refusing readiness rather than serving staging prompts in production. ` +
+        `Set PROMPTS_ENVIRONMENT=production (and clear PROMPTS_USE_STAGING) on this service.`,
+    });
+  }
+
+  const { arePromptsReady, getCriticalPromptCoverage, promptStoreDegradationReasons } =
+    await import("./prompts/readiness.js");
+  const prompts_ready = await arePromptsReady();
+  const criticalPromptCoverage = await getCriticalPromptCoverage();
+  // Additive honest signal: true iff every critical (tracked) prompt resolves
+  // from PMS. Unlike `prompts_ready`, a bundled default makes this false.
+  // Deliberately does NOT affect `degraded` (avoids load-balancer side effects).
+  const critical_prompts_pms = criticalPromptCoverage.all_pms;
+  const promptStoreStatus = getPromptStoreStatus();
+  const promptStoreHealthy = isPromptStoreHealthy();
+  const hasAuthKeys = !!(env.ASSIST_API_KEY || env.ASSIST_API_KEYS);
+  const hasHmacSecret = !!(env.CEE_HMAC_SECRET || env.HMAC_SECRET);
+  const adapter = getAdapter();
+  const llmProvider = adapter.name;
+  const hasLlmKey =
+    llmProvider === 'fixtures' ? true :
+    llmProvider === 'anthropic' ? !!env.ANTHROPIC_API_KEY :
+    llmProvider === 'openai' ? !!env.OPENAI_API_KEY :
+    false;
+
+  const warmingState = getCacheWarmingState();
+  const cacheWarmingHealthy = isCacheWarmingHealthy();
+
+  const degradationReasons: string[] = [];
+  if (promptStoreStatus.enabled && !promptStoreHealthy) {
+    degradationReasons.push('prompt_store_unhealthy');
+  }
+  if (promptStoreStatus.enabled && warmingState.completed && !cacheWarmingHealthy) {
+    degradationReasons.push('cache_warming_no_store_prompts');
+  }
+  if (!hasAuthKeys && !hasHmacSecret) {
+    degradationReasons.push('no_auth_configured');
+  }
+  if (!hasLlmKey) {
+    degradationReasons.push('no_llm_key_configured');
+  }
+
+  // A CRITICAL prompt key fell back because the PMS store THREW.
+  //
+  // P0 (~2.5h): a single undecodable version row made the store throw for
+  // every version of `draft_graph`; the loader swallowed it and served a
+  // bundled default, so `/healthz` reported ok/ready/not-degraded throughout.
+  // `critical_prompts_pms` was false but is DELIBERATELY excluded from
+  // `degraded_reasons` — correctly, since it is false in healthy shapes too.
+  // This reason is scoped to an actual store FAILURE instead, which is what
+  // makes it an alarm rather than a permanent amber light. `degraded` does not
+  // change the status code, so this is safe for the load balancer.
+  degradationReasons.push(...promptStoreDegradationReasons(criticalPromptCoverage));
+
+  // Non-fatal prompt-environment misconfiguration (e.g. a deployed service
+  // that never declared PROMPTS_ENVIRONMENT) surfaces here without failing
+  // the health check.
+  degradationReasons.push(...promptEnvironment.reasons);
+
+  const isDegraded = degradationReasons.length > 0;
+
+  return {
+    ok: true,
+    build: GIT_COMMIT_SHORT,
+    degraded: isDegraded,
+    degraded_reasons: isDegraded ? degradationReasons : undefined,
+    service: "assistants",
+    version: SERVICE_VERSION,
+    prompts_ready,
+    critical_prompts_pms,
+    prompt_environment: promptEnvironment.environment,
+    // ⭐ THE RESOLVED GRAPH-CAS CAPABILITY, PUBLISHED BECAUSE A PROTECTION
+    // NOBODY OUTSIDE CAN WITNESS IS ONE NOBODY CAN RELY ON.
+    //
+    // `src/config/index.ts` rowed this and stated the problem exactly: the
+    // deployed posture is set in the Render dashboard, is not derivable from
+    // any file, and was "UNOBSERVABLE FROM ANY CLIENT by construction". Two
+    // prose claims in the tree contradict each other about it — one says
+    // staging runs MODE=observe + RPC=enforce, the header of
+    // `routes/assist.v1.scenario-graph-register.ts` says RPC=shadow — and
+    // NOTHING IN THE REPOSITORY COULD SETTLE WHICH. Both were deliberately
+    // left in place pointing at each other so no reader picked one at random.
+    //
+    // A real cost, paid on 18 Sep 2026: the Canvas lane held a built UI PR
+    // because it could not learn whether `edge_strength_edit` would be
+    // refused with `reader_only_refusal` on the deployed service. Shipping it
+    // blind would have given users a control that silently never reached the
+    // model. That question is now one curl, for every workstream, for good.
+    //
+    // ⚠ PUBLISHED AS THE RESOLVED CAPABILITY, NOT THE RAW ENV VARS. The two
+    // switches are coupled — RPC=enforce with MODE=off is boot-rejected as
+    // enforcement theatre (no caller derives an expected hash, so the RPC
+    // receives a NULL expected and the update falls through to
+    // unconditional). Publishing the resolved object means a reader cannot
+    // reconstruct that invalid combination from what they see here, and
+    // `enforcing` answers the only question a caller actually has.
+    //
+    // Non-secret by construction: an enum posture, never a key, a host or a
+    // magnitude. It sits beside `build`, `version` and `prompt_environment`,
+    // which are published on the same public probe for the same reason.
+    graph_cas: {
+      app_mode: config.features.graphCas.appMode,
+      rpc_mode: config.features.graphCas.rpcMode,
+      // The one field a caller needs: is an atomic compare-and-set actually
+      // enforced on a graph write, or is it observing/shadowing?
+      enforcing: config.features.graphCas.rpcEnforce,
+      requires_expected_hash: config.features.graphCas.requiresExpectedHash,
+    },
+
+    // ⭐ THE CONTRACT THIS BOX IS ACTUALLY RUNNING — published because
+    // SCHEMA-VERSION SKEW IS THIS ESTATE'S DOMINANT CROSS-CUTTING RISK AND
+    // WAS, UNTIL THIS FIELD, UNMEASURABLE FROM OUTSIDE THE BOX.
+    //
+    // `CLAUDE.md` states the risk: each repo pins its own `@talchain/schemas`,
+    // the versions drift, and a consumer on an older version SILENTLY DROPS
+    // fields it does not know — coaching, evidence and enrichment have all
+    // been lost this way. A value that validates at the producer vanishes at
+    // the consumer with no error anywhere.
+    //
+    // A real cost, measured 18 Sep 2026: a live debug capture reported all six
+    // `schema_versions.*` fields null with `consistency_status: "unknown"`,
+    // reason `missing_schema_versions`. The bundle could not see the risk the
+    // doctrine calls dominant. Those six fields read a WIRE field named
+    // `schema_version`, which — where it exists at all — is a per-endpoint
+    // FORMAT LABEL (`"sequential.v1"`, `"optimise.v1"`; olumi-schemas
+    // `src/boundary/group-a.ts:119,236-238`), never a package version. They
+    // could not have answered this question even fully populated. This field
+    // answers it directly.
+    //
+    // ⚠ THE RUNTIME-RESOLVED VERSION, NOT THE PIN. `package.json:97` is a
+    // DECLARATION; the loaded module is the FACT, and they diverge exactly
+    // when it matters — a stale `node_modules`, a hoisted duplicate, a
+    // vendored tarball re-cut under the same version string. The divergence
+    // is live TODAY: the published 0.55.0 tarball carries
+    // `CONTRACT_MANIFEST_SHA = 088fb46a…` while olumi-schemas `main`, also
+    // calling itself 0.55.0, carries `4d3b0995…`. Two byte-sets, one version
+    // string — which is exactly why the two digests are published beside the
+    // version and why a pin-derived value would be worse than useless here.
+    //
+    // ⚠ NOT NESTED, DELIBERATELY. The four keys and their names are fixed by
+    // the contract (`@talchain/schemas` `HEALTH_MANIFEST_FIELDS`, shipped
+    // 2026-07-26): "a nested object is easy to add and easy for a load
+    // balancer / smoke test to never look at. Top-level fields sit next to
+    // `build` and get read." `parseHealthManifest()` parses them `.strict()`,
+    // so a typo fails loudly instead of being ignored. CEE is the FIRST
+    // adopter — measured the same day, all four services scored zero.
+    //
+    // Non-secret by construction: a semver string and two sha256 digests over
+    // PUBLIC contract bytes. Never a key, a host, a path or a magnitude. It
+    // sits beside `build`, `version` and `graph_cas`, published on the same
+    // unauthenticated probe for the same reason.
+    schema_write_version: SCHEMA_PACKAGE_VERSION,
+    // DELIBERATELY CONSERVATIVE: exactly what this service writes. CEE's
+    // boundary schemas are tolerant-additive and would in practice read more
+    // than one release line, but a wider claim here is one I cannot
+    // substantiate, and this field is the input to `compareHealthManifest`'s
+    // reader-first deploy gate — a writer may only be promoted once every
+    // downstream reader lists its release line. An unearned entry would
+    // silently widen that gate. Widen it only with evidence per version.
+    schema_read_versions: [SCHEMA_PACKAGE_VERSION],
+    schema_sha: SCHEMA_SHA,
+    contract_manifest_sha: CONTRACT_MANIFEST_SHA,
+  };
+});
+
+// ---------------------------------------------------------------------------
+// /healthz/detail — full diagnostics (admin auth required)
+// ---------------------------------------------------------------------------
+app.get("/healthz/detail", async (request, reply) => {
+  const providedKey = request.headers["x-admin-key"] as string | undefined;
+  if (!providedKey) {
+    return reply.code(401).send({
+      schema: "error.v1",
+      code: "UNAUTHENTICATED",
+      message: "X-Admin-Key header required for detailed health check.",
+    });
+  }
+
+  const adminKey = config.prompts?.adminApiKey;
+  const adminKeyRead = config.prompts?.adminApiKeyRead;
+  const { safeEqual: safeEq } = await import("./utils/hash.js");
+  const authorized = Boolean(
+    (adminKey && safeEq(providedKey, adminKey)) ||
+    (adminKeyRead && safeEq(providedKey, adminKeyRead))
+  );
+
+  if (!authorized) {
+    return reply.code(403).send({
+      schema: "error.v1",
+      code: "FORBIDDEN",
+      message: "Invalid admin key.",
+    });
+  }
+
   const adapter = getAdapter();
   const ceeConfig = buildCeeConfig();
 
@@ -437,6 +1052,31 @@ app.get("/healthz", async () => {
     | {
         total: number;
         production: number;
+        taskIds: string[];
+        draft_graph_debug?: {
+          exists: boolean;
+          status?: string;
+          activeVersion?: number;
+          stagingVersion?: number | null;
+          compiledOk?: boolean;
+        };
+        runtime_diagnostics?: {
+          instanceId: string;
+          instanceUptimeMs: number;
+          isPromptManagementEnabled: boolean;
+          loaderCacheSize: number;
+          cacheTtlMs: number;
+          staleGracePeriodMs: number;
+          draftGraphCacheEntry: {
+            taskId: string;
+            source: 'store' | 'default';
+            promptId?: string;
+            version?: number;
+            isStaging?: boolean;
+            ageMs: number;
+            status: 'fresh' | 'stale' | 'expired';
+          } | null;
+        };
       }
     | undefined;
 
@@ -444,9 +1084,50 @@ app.get("/healthz", async () => {
     try {
       const store = getPromptStore();
       const allPrompts = await store.list();
+
+      // Find draft_graph prompt for debugging
+      const draftGraphPrompt = allPrompts.find((p) => p.taskId === 'draft_graph');
+      let draftGraphDebug: typeof promptCounts extends undefined ? never : NonNullable<typeof promptCounts>['draft_graph_debug'] = {
+        exists: !!draftGraphPrompt,
+      };
+
+      if (draftGraphPrompt) {
+        draftGraphDebug.status = draftGraphPrompt.status;
+        draftGraphDebug.activeVersion = draftGraphPrompt.activeVersion;
+        draftGraphDebug.stagingVersion = draftGraphPrompt.stagingVersion ?? null;
+
+        // Test if getCompiled works using the same staging logic as runtime
+        const useStaging = shouldUseStagingPrompts();
+        try {
+          const compiled = await store.getCompiled('draft_graph', {}, { useStaging });
+          draftGraphDebug.compiledOk = !!compiled;
+          // Add diagnostic info about which version would be used
+          (draftGraphDebug as Record<string, unknown>).useStagingMode = useStaging;
+          (draftGraphDebug as Record<string, unknown>).targetVersion = compiled?.version;
+        } catch {
+          draftGraphDebug.compiledOk = false;
+        }
+      }
+
+      // Get prompt-loader cache diagnostics (this is what runtime actually uses)
+      const loaderCacheDiagnostics = getPromptLoaderCacheDiagnostics();
+      const draftGraphCacheEntry = loaderCacheDiagnostics.entries.find(e => e.taskId === 'draft_graph');
+
       promptCounts = {
         total: allPrompts.length,
         production: allPrompts.filter((p) => p.status === 'production').length,
+        taskIds: [...new Set(allPrompts.map((p) => p.taskId))].sort(),
+        draft_graph_debug: draftGraphDebug,
+        // Runtime diagnostics - what the actual LLM calls will use
+        runtime_diagnostics: {
+          instanceId: loaderCacheDiagnostics.instanceId,
+          instanceUptimeMs: loaderCacheDiagnostics.instanceUptimeMs,
+          isPromptManagementEnabled: isPromptManagementEnabled(),
+          loaderCacheSize: loaderCacheDiagnostics.cacheSize,
+          cacheTtlMs: loaderCacheDiagnostics.cacheTtlMs,
+          staleGracePeriodMs: loaderCacheDiagnostics.staleGracePeriodMs,
+          draftGraphCacheEntry: draftGraphCacheEntry ?? null,
+        },
       };
     } catch {
       // ignore
@@ -455,7 +1136,7 @@ app.get("/healthz", async () => {
 
   // Check auth configuration
   const hasAuthKeys = !!(env.ASSIST_API_KEY || env.ASSIST_API_KEYS);
-  const hasHmacSecret = !!env.SHARE_SECRET;
+  const hasHmacSecret = !!(env.CEE_HMAC_SECRET || env.HMAC_SECRET);
 
   // Check LLM configuration (provider-specific)
   const llmProvider = adapter.name;
@@ -465,10 +1146,23 @@ app.get("/healthz", async () => {
     llmProvider === 'openai' ? !!env.OPENAI_API_KEY :
     false;
 
+  // Get cache warming state for diagnostics
+  const warmingState = getCacheWarmingState();
+  const cacheWarmingHealthy = isCacheWarmingHealthy();
+
+  // Per-key PMS coverage for the critical (tracked) prompts — the rollout gate
+  // signal. all_pms===true means it's safe to consider arming fail-closed (PR2).
+  const { getCriticalPromptCoverage } = await import("./prompts/readiness.js");
+  const criticalPromptCoverage = await getCriticalPromptCoverage('status');
+
   // Determine degradation reasons
+  const promptEnvironment = resolvePromptEnvironment();
   const degradationReasons: string[] = [];
   if (promptStoreStatus.enabled && !promptStoreHealthy) {
     degradationReasons.push('prompt_store_unhealthy');
+  }
+  if (promptStoreStatus.enabled && warmingState.completed && !cacheWarmingHealthy) {
+    degradationReasons.push('cache_warming_no_store_prompts');
   }
   if (!hasAuthKeys && !hasHmacSecret) {
     degradationReasons.push('no_auth_configured');
@@ -476,6 +1170,7 @@ app.get("/healthz", async () => {
   if (!hasLlmKey) {
     degradationReasons.push('no_llm_key_configured');
   }
+  degradationReasons.push(...promptEnvironment.reasons);
 
   const isDegraded = degradationReasons.length > 0;
 
@@ -501,6 +1196,10 @@ app.get("/healthz", async () => {
     },
     cee: {
       diagnostics_enabled: env.CEE_DIAGNOSTICS_ENABLED === "true",
+      pipeline_checkpoints_enabled: {
+        env_raw: env.CEE_PIPELINE_CHECKPOINTS_ENABLED ?? null,
+        config_parsed: config.cee.pipelineCheckpointsEnabled,
+      },
       config: ceeConfig,
       timeouts: {
         route_ms: ROUTE_TIMEOUT_MS,
@@ -523,8 +1222,29 @@ app.get("/healthz", async () => {
       enabled: promptStoreStatus.enabled,
       healthy: promptStoreHealthy,
       degraded_reason: (promptStoreStatus.enabled && !promptStoreHealthy) ? 'prompt_store_unhealthy' : undefined,
+      // Which PMS pointer this deployment serves, and WHY. A deploy check can
+      // assert `environment === "production"` on the production service.
+      // Contains no secrets — only env NAMES and the resolved verdict.
+      environment: {
+        environment: promptEnvironment.environment,
+        source: promptEnvironment.source,
+        runtime_env: promptEnvironment.runtimeEnv,
+        runtime_env_source: promptEnvironment.runtimeEnvSource,
+        mismatch: promptEnvironment.mismatch,
+        blocks_readiness: promptEnvironment.blocksReadiness,
+        reasons: promptEnvironment.reasons,
+      },
       store: promptStoreStatus,
       counts: promptCounts,
+      cache_warming: {
+        completed: warmingState.completed,
+        completedAt: warmingState.completedAt ? new Date(warmingState.completedAt).toISOString() : null,
+        healthy: cacheWarmingHealthy,
+        warmed_from_store: warmingState.warmedFromStore,
+        failed_count: warmingState.failedCount,
+        skipped_count: warmingState.skippedCount,
+      },
+      critical_prompt_coverage: criticalPromptCoverage,
     },
   };
 });
@@ -602,6 +1322,10 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
 
   await ceeDraftRouteV1(app);
   await ceeDraftStreamRouteV1(app);
+  // ROADMAP 1.204 M1 — staged SSE draft delivery. Registered UNCONDITIONALLY
+  // and unflagged (no dark launches): the buffered and 2-frame routes above are
+  // unchanged, and the UI opts in by calling this one.
+  await ceeDraftStagedRouteV1(app);
   await ceeOptionsRouteV1(app);
   await ceeBiasCheckRouteV1(app);
   await ceeExplainGraphRouteV1(app);
@@ -609,12 +1333,36 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
   await ceeSensitivityCoachRouteV1(app);
   await ceeTeamPerspectivesRouteV1(app);
   await ceeGraphReadinessRouteV1(app);
-  await ceeKeyInsightRouteV1(app);
+  await ceeScenarioGraphRouteV1(app);
+  await ceeScenarioGraphRegisterRouteV1(app);
+  // Model Management v1 wiring slice — versions list/save/restore. Registered
+  // UNCONDITIONALLY (no dark launches); the service itself still honours
+  // CEE_MODEL_VERSIONS_ENABLED, whose default is now ON (config/index.ts).
+  await ceeScenarioVersionsRouteV1(app);
   await ceeElicitBeliefRouteV1(app);
+  // COLLAB U-S0 (ROADMAP 2.686/2.909/2.910) — blind elicitation rounds.
+  // Registered UNCONDITIONALLY (no dark launches, no new env gate).
+  //
+  // Each module mounts its handlers at EXACTLY ONE prefix: the contract-pinned
+  // /collab/v1/*. `collabPaths()` returns a single path. An earlier draft also
+  // aliased these under /assist/v1/collab/* to ride the existing /bff/cee/*
+  // seam; that alias was WITHDRAWN — two entrances to one room is one too many
+  // when the room is a privacy boundary.
+  //
+  // Browser reachability comes from the UI's `/bff/collab/*` edge function,
+  // which rewrites to this prefix and forwards x-collab-participant-token. See
+  // src/collab/route-support.ts for why no pre-existing seam reaches here.
+  // The store is constructed lazily per request, so these routes are inert
+  // until called and require no new tables at boot.
+  await collabRoundsRouteV1(app);
+  await collabPacketRouteV1(app);
+  // Calibration recording seam (R0). Registered UNCONDITIONALLY — no flag,
+  // per Paul's no-dark-launch / no-new-env-gate rulings. Its own always-on
+  // Supabase-JWT verification is independent of CEE_REQUIRE_USER_JWT.
+  await ceeDecisionRecordsRouteV1(app);
   await ceeUtilityWeightRouteV1(app);
   await ceeRiskToleranceRouteV1(app);
   await ceeEdgeFunctionRouteV1(app);
-  await ceeGenerateRecommendationRouteV1(app);
   await ceeNarrateConditionsRouteV1(app);
   await ceeExplainPolicyRouteV1(app);
   await ceeElicitPreferencesRouteV1(app);
@@ -624,8 +1372,127 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
   await ceeHealthRouteV1(app);
   await ceeAskRouteV1(app);
   await ceeReviewRouteV1(app);
+  await ceeDecisionReviewRouteV1(app);
   if (env.CEE_DECISION_REVIEW_EXAMPLE_ENABLED === "true") {
     await ceeDecisionReviewExampleRouteV1(app);
+  }
+
+  // V1 orchestrator belt (POST /orchestrate/v1/turn, POST /assist/v1/edit-graph)
+  // was deleted 2026-07-21: the V1 route was UI-dead (the live product path is
+  // /orchestrate/v2/turn) and already 410'd once CEE_PIPELINE_V4_ENABLED went
+  // inert. Its handlers (turn-handler, parallel-generate, moe-spike,
+  // route-stream) and the V4/V2 pipelines it owned had zero live-V5 importers.
+
+  // V5 orchestrator — the live product path. Registered UNCONDITIONALLY since
+  // 2026-07-20 (O-7 wave 2: ENABLE_V5_ORCHESTRATOR deleted; its OFF branch
+  // 404'd the core route).
+  await ceeOrchestratorRouteV2(app);
+  app.log.info({}, 'V5 orchestrator registered (POST /orchestrate/v2/turn)');
+
+  // ROADMAP 2.122 / 1.204 M1 (CEE lane 2) — the STREAMED sibling of the turn.
+  // Registered UNCONDITIONALLY and unflagged (no dark launches); the UI opts in
+  // by calling it, and rollback is a revert.
+  //
+  // MUST be registered AFTER ceeOrchestratorRouteV2 — the same ordering
+  // constraint /proxy/v5/turn carries below, and for the same reason: this route
+  // forwards to /orchestrate/v2/turn via app.inject(), so that route has to
+  // exist as an internal target.
+  //
+  // Auth: NOT listed in auth.ts isPublicRoute(), so the global onRequest hook
+  // authenticates it exactly as it authenticates /orchestrate/v2/turn. No new
+  // auth surface — deliberately, and unlike /proxy/v5/turn, which is public and
+  // does its own origin validation.
+  await ceeStreamedTurnRouteV2(app);
+  app.log.info({}, 'V5 streamed turn registered (POST /orchestrate/v2/turn/stream)');
+
+  // Browser proxy for V5 turns — bypasses Netlify Edge timeout.
+  // Registered after V5 orchestrator so /orchestrate/v2/turn exists as the internal target.
+  // Route handles its own origin validation; auth bypass is in auth.ts isPublicRoute().
+  if (config.proxy.browserProxyEnabled) {
+    // Log the verified timeout chain so the relationship is visible at startup.
+    // Required invariant: proxyTimeout < ROUTE_TIMEOUT_MS so the proxy can return
+    // structured JSON before Fastify kills the connection.
+    const proxyTimeout = config.proxy.browserProxyTimeoutMs;
+    const proxyChainOk = proxyTimeout < ROUTE_TIMEOUT_MS;
+    const proxyDraftOk = proxyTimeout >= DRAFT_REQUEST_BUDGET_MS;
+    log.info(
+      {
+        event: "proxy.timeout_chain",
+        ui_extended_timeout_ms: 130_000,
+        proxy_timeout_ms: proxyTimeout,
+        route_timeout_ms: ROUTE_TIMEOUT_MS,
+        draft_request_budget_ms: DRAFT_REQUEST_BUDGET_MS,
+        draft_llm_timeout_ms: DRAFT_LLM_TIMEOUT_MS,
+        chain_invariant_proxy_lt_route: proxyChainOk,
+        chain_invariant_proxy_gte_draft_budget: proxyDraftOk,
+      },
+      proxyChainOk && proxyDraftOk
+        ? `[proxy-v5] Timeout chain OK: UI(130s) → proxy(${proxyTimeout}ms) → route(${ROUTE_TIMEOUT_MS}ms)`
+        : `[proxy-v5] Timeout chain WARNING: proxy(${proxyTimeout}ms) vs route(${ROUTE_TIMEOUT_MS}ms) vs draft(${DRAFT_REQUEST_BUDGET_MS}ms)`,
+    );
+    if (!proxyChainOk) {
+      log.warn(
+        {},
+        `[proxy-v5] BROWSER_PROXY_TIMEOUT_MS (${proxyTimeout}ms) >= ROUTE_TIMEOUT_MS (${ROUTE_TIMEOUT_MS}ms) — ` +
+          "proxy cannot return structured JSON before Fastify kills the connection. Reduce BROWSER_PROXY_TIMEOUT_MS.",
+      );
+    }
+    if (!proxyDraftOk) {
+      log.warn(
+        {},
+        `[proxy-v5] BROWSER_PROXY_TIMEOUT_MS (${proxyTimeout}ms) < DRAFT_REQUEST_BUDGET_MS (${DRAFT_REQUEST_BUDGET_MS}ms) — ` +
+          "proxy may time out before a normal draft graph completes. Increase BROWSER_PROXY_TIMEOUT_MS.",
+      );
+    }
+
+    // Origin-drift guard: warn if any proxy origin is absent from the global
+    // CORS allowlist. Such an origin would pass POST validation but fail the
+    // OPTIONS preflight (handled by @fastify/cors with exact-match logic),
+    // causing a confusing CORS error for the browser.
+    const globalCorsOrigins = new Set(
+      (env.ALLOWED_ORIGINS ?? "")
+        .split(",")
+        .map((o) => o.trim())
+        .filter((o) => o.length > 0),
+    );
+    const proxyOrigins = (config.proxy.browserProxyAllowedOrigins ?? "")
+      .split(",")
+      .map((o) => o.trim())
+      .filter((o) => o.length > 0);
+    const driftOrigins = proxyOrigins.filter((o) => !globalCorsOrigins.has(o));
+    if (driftOrigins.length > 0) {
+      log.warn(
+        { driftOrigins },
+        "[proxy-v5] Origin drift detected: these proxy origins are not in ALLOWED_ORIGINS. " +
+          "OPTIONS preflight will fail for these origins. Add them to ALLOWED_ORIGINS.",
+      );
+    }
+  }
+  await proxyV5TurnRoute(app);
+
+    // ROADMAP 2.122 / 1.204 M1 (CEE lane 2) — the STREAMED browser surface.
+    //
+    // Registered inside the same BROWSER_PROXY_ENABLED block as its buffered
+    // sibling and immediately after it: a deployment with no browser proxy has
+    // no browser surface to stream over, and it forwards to /orchestrate/v2/turn
+    // (registered above) via app.inject(), so that target must already exist.
+    //
+    // This is the route the UI can actually reach. The service sibling
+    // (/orchestrate/v2/turn/stream, registered above) requires an assist key or
+    // HMAC, which a browser cannot hold — any VITE_* value is public by
+    // construction. Public in the auth-plugin sense by INHERITANCE, not by a new
+    // exemption: isPublicRoute() matches by prefix, so the existing
+    // "/proxy/v5/turn" entry already covers "/proxy/v5/turn/stream".
+    await proxyV5TurnStreamRoute(app);
+
+  // Public prompt routes (cache warming and status)
+  // Registered unconditionally - routes handle health checks internally
+  await publicPromptRoutes(app);
+
+  // Warm provider config cache asynchronously (avoids sync file I/O on first request)
+  const providerConfigResult = await warmProviderConfigCache();
+  if (providerConfigResult.loaded) {
+    app.log.info({ config_path: providerConfigResult.path }, 'Provider config cache warmed');
   }
 
   // Always initialize prompt store if database credentials are configured
@@ -637,7 +1504,14 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
     await initializePromptStore();
 
     // Initialize store, seed defaults, and warm cache
-    if (config.prompts?.enabled) {
+    // Use isPromptManagementEnabled() for consistency with runtime behavior
+    // This auto-enables if a healthy DB-backed store is configured (Supabase/Postgres)
+    const promptMgmtEnabled = await (async () => {
+      const { isPromptManagementEnabled } = await import('./prompts/loader.js');
+      return isPromptManagementEnabled();
+    })();
+
+    if (promptMgmtEnabled) {
       const seedResult = await initializeAndSeedPrompts();
       app.log.info({ seedResult }, 'Prompt system initialized');
 
@@ -645,14 +1519,28 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
         const warmResult = await warmPromptCacheFromStore();
         app.log.info({ warmResult }, 'Prompt cache warmed from store');
       }
+    } else if (config.prompts?.enabled) {
+      // Explicit PROMPTS_ENABLED=true but store not healthy - warn
+      app.log.warn('PROMPTS_ENABLED=true but prompt store is not healthy - cache warming skipped');
     }
 
-    // Only register admin routes if explicitly enabled or admin key is set
-    if (config.prompts?.enabled || config.prompts?.adminApiKey) {
+    // Startup health check: log prompt fallback alignment and model routing
+    logStartupHealthCheck();
+
+    // Register admin routes if enabled and configured
+    // Set ADMIN_ROUTES_ENABLED=false in production to disable
+    const adminRoutesEnabled = config.prompts?.adminRoutesEnabled !== false;
+    if (!adminRoutesEnabled) {
+      app.log.info('Admin routes disabled via ADMIN_ROUTES_ENABLED=false');
+    } else if (config.prompts?.enabled || config.prompts?.adminApiKey || config.prompts?.adminApiKeyRead) {
       await adminPromptRoutes(app);
+      await adminPromptStatusRoutes(app);
       await adminUIRoutes(app);
+      await adminModelRoutes(app);
       await adminDraftFailureRoutes(app);
       await adminLLMOutputRoutes(app);
+      await adminTurnDebugRoutes(app);
+      await adminRoutingLogRoutes(app);
       await adminTestRoutes(app);
       app.log.info('Admin prompt management routes registered');
 
@@ -666,12 +1554,64 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
     }
   }
 
+  // V5 routing prompt snapshot — built unconditionally at startup so both
+  // PMS-enabled and default-only deployments fail fast on a missing or
+  // out-of-range routing prompt. When PMS is enabled, the snapshot resolves
+  // through the store first; when PMS is disabled or unreachable, it falls
+  // back to the registered default (Prompts/v40.txt). The build runs AFTER
+  // the optional PMS init/warm block above so PMS content takes precedence
+  // on the first resolution.
+  const { buildRoutingPromptSnapshot } = await import(
+    './orchestrator-v5/routing/prompt-loader.js'
+  );
+  await buildRoutingPromptSnapshot();
+
+  // PR1 observability: log critical-prompt PMS coverage at startup. Info when
+  // every critical key resolves from PMS; loud warn (listing offenders) when
+  // any is on the bundled default. This is the gate signal for arming
+  // fail-closed (PR2). Non-fatal — never blocks boot.
+  try {
+    const { getCriticalPromptCoverage } = await import(
+      './prompts/readiness.js'
+    );
+    const coverage = await getCriticalPromptCoverage('startup');
+    if (coverage.all_pms) {
+      app.log.info(
+        { event: 'prompt.critical_coverage', all_pms: true, keys: coverage.keys },
+        'Critical prompt coverage: all critical prompts resolve from PMS',
+      );
+    } else {
+      // `all_pms` is false when a critical key is on a bundled default/error
+      // OR serving a STALE snapshot (a later rebuild was rejected, e.g. an
+      // oversized PMS prompt). Surface both causes so the warn line is never
+      // an empty/misleading list when the offender is a stale snapshot.
+      app.log.warn(
+        {
+          event: 'prompt.critical_coverage',
+          all_pms: false,
+          default_or_error: coverage.default_or_error,
+          snapshot_errors: coverage.snapshot_errors,
+          keys: coverage.keys,
+        },
+        `Critical prompt coverage NOT all-current — default/error: [${coverage.default_or_error.join(', ')}]; stale/rejected snapshot: [${coverage.snapshot_errors.join(', ')}]`,
+      );
+    }
+  } catch (err) {
+    app.log.warn(
+      { event: 'prompt.critical_coverage', error: String(err) },
+      'Critical prompt coverage check failed (non-fatal)',
+    );
+  }
+
+  // Sentry: register Fastify error handler AFTER all routes
+  setupSentryFastify(app);
+
   return app;
 }
 
 // If running directly (not imported), start the server
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const port = Number(env.PORT || 3101);
+  const port = config.server.port;
 
   build()
     .then(async (app) => {
@@ -697,12 +1637,12 @@ if (import.meta.url === `file://${process.argv[1]}`) {
         route_timeout_ms: ROUTE_TIMEOUT_MS,
         http_client_timeout_ms: HTTP_CLIENT_TIMEOUT_MS,
         upstream_retry_delay_ms: UPSTREAM_RETRY_DELAY_MS,
-      }, '🚀 Olumi Assistants Service starting');
+      }, 'Olumi Assistants Service starting');
 
       await app.listen({ port, host: "0.0.0.0" });
     })
     .catch((err: unknown) => {
-      console.error('❌ Failed to start server:', err);
+      log.fatal({ err, event: 'server.startup.failed' }, 'Failed to start server');
       process.exit(1);
     });
 }

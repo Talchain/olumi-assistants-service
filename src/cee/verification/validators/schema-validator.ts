@@ -1,5 +1,7 @@
 import { z } from "zod";
 import type { VerificationResult, VerificationStage } from "../types.js";
+import { extractZodIssues } from "../../../schemas/llmExtraction.js";
+import { log } from "../../../utils/telemetry.js";
 
 /**
  * Zod-based schema validator for CEE responses.
@@ -31,6 +33,21 @@ export class SchemaValidator implements VerificationStage<unknown, unknown> {
     if (!parseResult.success) {
       const errorPaths = parseResult.error.errors.map((e) => e.path.join("."));
 
+      // Diagnostic: log first 5 Zod issues (schema paths and error codes only, no user content)
+      const diagnosticIssues = parseResult.error.errors.slice(0, 5).map((e) => ({
+        path: e.path.join("."),
+        code: e.code,
+        message: e.message,
+      }));
+      log.warn(
+        {
+          event: "cee.verification.schema_invalid_detail",
+          error_count: parseResult.error.errors.length,
+          issues: diagnosticIssues,
+        },
+        "SCHEMA_INVALID diagnostic: Zod validation failed on assembled response",
+      );
+
       return {
         valid: false,
         stage: this.name,
@@ -40,6 +57,7 @@ export class SchemaValidator implements VerificationStage<unknown, unknown> {
         details: {
           error_paths: errorPaths,
           error_count: parseResult.error.errors.length,
+          first_issues: extractZodIssues(parseResult.error, 3),
         },
       } as VerificationResult<T>;
     }

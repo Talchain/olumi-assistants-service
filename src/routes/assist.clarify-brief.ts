@@ -1,8 +1,10 @@
 import type { FastifyInstance } from "fastify";
 import { ClarifyBriefInput, ClarifyBriefOutput, ErrorV1 } from "../schemas/assist.js";
 import { getAdapter } from "../adapters/llm/router.js";
+import { getSystemPromptSnapshot } from "../adapters/llm/prompt-loader.js";
 import { emit, log, calculateCost, TelemetryEvents } from "../utils/telemetry.js";
 import { getRequestId } from "../utils/request-id.js";
+import { CLARIFY_BRIEF_TIMEOUT_MS } from "../config/timeouts.js";
 import { getRequestCallerContext } from "../plugins/auth.js";
 import { contextToTelemetry } from "../context/index.js";
 import { isFeatureEnabled } from "../utils/feature-flags.js";
@@ -12,6 +14,7 @@ import {
   findWeakestFactor,
   compressPreviousAnswers,
 } from "../cee/validation/readiness.js";
+import { detectCurrency, buildCurrencyInstruction } from "../cee/signals/currency-signal.js";
 
 export default async function route(app: FastifyInstance) {
   app.post("/assist/clarify-brief", async (req, reply) => {
@@ -59,6 +62,11 @@ export default async function route(app: FastifyInstance) {
       // Compress previous answers for history context
       const compressedHistory = compressPreviousAnswers(input.previous_answers);
 
+      // Resolve one exact governed prompt authority before the caching/routing
+      // boundary. The adapter must consume these same bytes; promotion cannot
+      // reuse a response created under a previous snapshot.
+      const promptSnapshot = await getSystemPromptSnapshot('clarify_brief');
+
       // Get adapter via router (env-driven or config)
       const adapter = getAdapter('clarify_brief');
 
@@ -73,16 +81,25 @@ export default async function route(app: FastifyInstance) {
         weakest_factor: weakestFactor,
       });
 
+      // Currency context signal — lightweight string scan
+      const currencySignal = detectCurrency(input.brief);
+
       const result = await adapter.clarifyBrief(
         {
           brief: input.brief,
           round: input.round,
           previous_answers: input.previous_answers,
           seed: input.seed,
+          currencyInstruction: buildCurrencyInstruction(currencySignal),
         },
         {
           requestId: `clarify_${Date.now()}`,
-          timeoutMs: 10000, // 10s timeout for clarification
+          timeoutMs: CLARIFY_BRIEF_TIMEOUT_MS,
+          preloadedSystemPrompt: {
+            operation: 'clarify_brief',
+            content: promptSnapshot.content,
+            meta: promptSnapshot.meta,
+          },
         }
       );
 

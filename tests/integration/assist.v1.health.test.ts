@@ -38,6 +38,7 @@ describe("GET /assist/v1/health (CEE service health)", () => {
 
     expect(body.service).toBe("assistants");
     expect(body.version).toBe(SERVICE_VERSION);
+    expect(body.deterministic_sweep_version).toBe("v3");
     expect(["openai", "anthropic", "fixtures"]).toContain(body.provider);
     expect(typeof body.model).toBe("string");
 

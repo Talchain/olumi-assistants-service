@@ -4,15 +4,19 @@
  * Centralizes node/edge limits so that schemas, guards, adapters,
  * share limits, and the /v1/limits endpoint stay in sync.
  *
- * Defaults:
- * - 50 nodes
- * - 200 edges
+ * Platform defaults from @talchain/schemas: MAX_NODES=50, MAX_EDGES=100.
+ * CEE defaults now match PLoT canonical limits (Decision Model Schema v2.8 D.1).
+ * CEE should never produce graphs PLoT will reject.
  *
  * Can be overridden via GRAPH_MAX_NODES / GRAPH_MAX_EDGES env vars.
  */
 
-const DEFAULT_MAX_NODES = 50;
-const DEFAULT_MAX_EDGES = 200;
+import { LIMITS as PLATFORM_LIMITS } from "@talchain/schemas";
+
+// CEE defaults: both match PLoT canonical limits (Decision Model Schema v2.8 D.1).
+// CEE should never produce graphs PLoT will reject.
+const DEFAULT_MAX_NODES = PLATFORM_LIMITS.MAX_NODES; // 50 — matches platform
+const DEFAULT_MAX_EDGES = 100; // Aligned with PLoT canonical limit (Decision Model Schema v2.8 D.1)
 
 function parsePositiveInt(value: string | undefined, fallback: number): number {
   if (!value) return fallback;

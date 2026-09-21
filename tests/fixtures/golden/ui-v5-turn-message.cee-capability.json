@@ -1,0 +1,32 @@
+{
+  "kind": "message",
+  "turn_id": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+  "scenario_id": "550e8400-e29b-41d4-a716-446655440000",
+  "stage": "analyse",
+  "turn_class": "propose",
+  "message": "Which option looks stronger given the margin risk?",
+  "source": "composer",
+  "graph_state": {
+    "nodes": [
+      { "id": "goal_1", "kind": "goal", "label": "Choose vendor" },
+      {
+        "id": "factor_margin",
+        "kind": "factor",
+        "label": "Gross margin",
+        "exists_probability": 0.8,
+        "strength": { "mean": 0.4, "std": 0.1 }
+      },
+      { "id": "opt_a", "kind": "option", "label": "Vendor A" }
+    ],
+    "edges": [
+      { "from": "factor_margin", "to": "goal_1", "strength": { "mean": 0.5, "std": 0.2 } }
+    ]
+  },
+  "analysis_state": {
+    "analysis_status": "complete",
+    "option_comparison": [{ "option_id": "opt_a", "win_probability": 0.62 }],
+    "meta": { "response_hash": "rh-live-001" }
+  },
+  "user_id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+  "selected_elements": { "node_ids": ["factor_margin"], "edge_ids": [] }
+}

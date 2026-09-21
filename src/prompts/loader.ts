@@ -6,10 +6,35 @@
  * or prompts are not found.
  */
 
+import { createHash } from 'node:crypto';
 import { type CeeTaskId, interpolatePrompt } from './schema.js';
 import { getPromptStore, isDbBackedStoreHealthy } from './store.js';
-import { log, emit } from '../utils/telemetry.js';
-import { config } from '../config/index.js';
+import { log, emit, TelemetryEvents } from '../utils/telemetry.js';
+import { config, shouldUseStagingPrompts } from '../config/index.js';
+import {
+  isTrackedKey,
+  mapSource,
+  pmsResolveTaskId,
+  resolvePublicVersion,
+  type TrackedKey,
+} from './tracked.js';
+import type { FallbackReason } from './resolution-policy.js';
+import { getRegisteredDefaultPrompt } from './default-registry.js';
+
+export { getDefaultPrompts, registerDefaultPrompt } from './default-registry.js';
+
+/** Source of a `loadPrompt()` call. Lets dashboards filter probe noise. */
+export type PromptResolveTrigger =
+  | 'runtime'
+  | 'healthz'
+  | 'status'
+  | 'reload'
+  | 'startup'
+  | 'background_refresh';
+
+function shortSha256(content: string): string {
+  return createHash('sha256').update(content).digest('hex').slice(0, 16);
+}
 
 /**
  * Telemetry events for prompt loading
@@ -21,23 +46,6 @@ const LoaderTelemetryEvents = {
 } as const;
 
 /**
- * Default prompts registry (hardcoded fallbacks)
- * These are used when the prompt management system is disabled
- * or no managed prompt is found for a task.
- */
-const DEFAULT_PROMPTS: Partial<Record<CeeTaskId, string>> = {
-  // Defaults will be populated during migration
-};
-
-/**
- * Register a default prompt for a task
- * Called during module initialization to register hardcoded prompts
- */
-export function registerDefaultPrompt(taskId: CeeTaskId, content: string): void {
-  DEFAULT_PROMPTS[taskId] = content;
-}
-
-/**
  * Options for loading a prompt
  */
 export interface LoadPromptOptions {
@@ -45,12 +53,33 @@ export interface LoadPromptOptions {
   variables?: Record<string, string | number>;
   /** Force use of default prompt (bypass store) */
   forceDefault?: boolean;
-  /** Use staging version instead of production */
+  /**
+   * Use the PMS `staging_version` pointer instead of `active_version`.
+   *
+   * DERIVED, NOT DEFAULTED-TO-FALSE. When omitted this resolves from
+   * `shouldUseStagingPrompts()` — i.e. the deployment's own prompt
+   * environment — so a caller that forgets to pass it cannot silently
+   * serve/report the PRODUCTION pointer on a staging deployment. Pass an
+   * explicit boolean only to override that (e.g. A/B experiment variants).
+   */
   useStaging?: boolean;
   /** Specific version to load */
   version?: number;
   /** Correlation ID for telemetry */
   correlationId?: string;
+  /**
+   * Origin of this resolution call. Defaults to 'runtime'. Healthz/status
+   * probes pass 'healthz' / 'status' so dashboards can filter probe noise.
+   * Admin reload passes 'reload'; the routing snapshot build passes 'startup'.
+   */
+  trigger?: PromptResolveTrigger;
+  /**
+   * Marks whether the caller served this resolution from a cache layer.
+   * The adapter-level cache passes 'hit' on cache hit; underlying store
+   * misses pass 'miss'. Used in `v5.prompt_resolved` so dashboards can
+   * separate cold loads from cache-served loads. Optional.
+   */
+  cache?: 'hit' | 'miss';
 }
 
 /**
@@ -65,6 +94,17 @@ export interface LoadedPrompt {
   promptId?: string;
   /** Version number (if from store) */
   version?: number;
+  /** Whether this is a staging version (true if useStaging was requested and staging version was used) */
+  isStaging?: boolean;
+  /** Environment-specific model configuration (if from store and configured) */
+  modelConfig?: { staging?: string; production?: string };
+  /**
+   * When `source === 'default'`, why the fallback happened. Additive diagnostic
+   * (PR1) so a critical-key fallback can be told apart from a genuine missing
+   * PMS row. Undefined / 'none' when resolved from store. Load-bearing for PR2's
+   * last-known-good vs fail-closed decision.
+   */
+  fallbackReason?: FallbackReason;
 }
 
 /**
@@ -75,14 +115,15 @@ export interface LoadedPrompt {
  *
  * File store does NOT auto-enable - requires explicit PROMPTS_ENABLED=true
  */
-function isPromptManagementEnabled(): boolean {
+export function isPromptManagementEnabled(): boolean {
   try {
     // Feature flag in config - explicit enablement
     if (config.prompts?.enabled === true) {
       return true;
     }
     // Auto-enable only for database-backed stores (not file store)
-    return isDbBackedStoreHealthy();
+    const dbHealthy = isDbBackedStoreHealthy();
+    return dbHealthy;
   } catch {
     return false;
   }
@@ -108,35 +149,89 @@ export async function loadPrompt(
   const {
     variables = {},
     forceDefault = false,
-    useStaging = false,
+    // DERIVE, DON'T MIRROR. This used to default to `false`, which silently
+    // meant "serve the PRODUCTION pointer" for every caller that omitted it.
+    // On a staging deployment that produced a per-task divergence: the
+    // routing snapshot (which passes useStaging explicitly, see
+    // src/orchestrator-v5/routing/prompt-loader.ts) honoured its
+    // `staging_version` pin while the readiness probe
+    // (src/prompts/readiness.ts) reported `active_version` for every other
+    // tracked key — so /admin/prompts/status, /admin/prompts/reload and
+    // /healthz all MISREPORTED which prompt version was live.
+    useStaging = shouldUseStagingPrompts(),
     version,
     correlationId,
+    trigger = 'runtime',
+    cache,
   } = options;
 
   // Check if we should use defaults
   if (forceDefault || !isPromptManagementEnabled()) {
-    return loadDefaultPrompt(taskId, variables, correlationId);
+    return loadDefaultPrompt(
+      taskId,
+      variables,
+      correlationId,
+      trigger,
+      cache,
+      forceDefault ? 'none' : 'pms_disabled',
+    );
   }
 
   try {
-    // Try to load from store
+    // Try to load from store. PMS lookup is alias-aware: a logical key
+    // (e.g. `routing`) may resolve a DIFFERENT operator-managed PMS task
+    // (e.g. `orchestrator`) via PMS_TASK_ALIAS. The DEFAULT fallback below
+    // still uses the original `taskId`, so a PMS miss serves the logical
+    // key's own guard-safe default (routing → v40), not the aliased task's.
+    const pmsTaskId = pmsResolveTaskId(taskId);
     const store = getPromptStore();
-    const compiled = await store.getCompiled(taskId, variables, {
+    const compiled = await store.getCompiled(pmsTaskId, variables, {
       version,
       useStaging,
     });
 
     if (compiled) {
+      // Check if staging version was used by comparing against prompt's activeVersion
+      // If useStaging was requested and version differs from activeVersion, it's staging
+      let isStaging = false;
+      if (useStaging) {
+        try {
+          const prompt = await store.get(compiled.promptId);
+          if (prompt && prompt.stagingVersion && compiled.version === prompt.stagingVersion) {
+            isStaging = true;
+          }
+        } catch {
+          // Ignore errors checking staging status
+        }
+      }
+
       emit(LoaderTelemetryEvents.PromptLoadedFromStore, {
         taskId,
         promptId: compiled.promptId,
         version: compiled.version,
+        isStaging,
         correlationId,
       });
 
+      if (isTrackedKey(taskId)) {
+        emit(TelemetryEvents.V5PromptResolved, {
+          key: taskId,
+          source: mapSource('store'),
+          version: resolvePublicVersion(
+            taskId as TrackedKey,
+            'store',
+            compiled.version,
+          ),
+          content_hash: shortSha256(compiled.content),
+          trigger,
+          ...(cache ? { cache } : {}),
+          correlationId,
+        });
+      }
+
       log.debug(
-        { taskId, promptId: compiled.promptId, version: compiled.version },
-        'Prompt loaded from store'
+        { taskId, promptId: compiled.promptId, version: compiled.version, isStaging },
+        isStaging ? 'Staging prompt loaded from store' : 'Prompt loaded from store'
       );
 
       return {
@@ -144,15 +239,23 @@ export async function loadPrompt(
         source: 'store',
         promptId: compiled.promptId,
         version: compiled.version,
+        isStaging,
+        modelConfig: compiled.modelConfig,
       };
     }
 
     // No managed prompt found, fall back to default
     log.debug({ taskId }, 'No managed prompt found, using default');
-    return loadDefaultPrompt(taskId, variables, correlationId);
+    return loadDefaultPrompt(taskId, variables, correlationId, trigger, cache, 'not_found');
   } catch (error) {
-    // Error loading from store, fall back to default
-    log.warn(
+    // Error loading from store, fall back to default.
+    //
+    // LEVEL IS LOAD-BEARING (P0, ~2.5h): `emit()` logs via `log.info`, so the
+    // `prompt.loader.error` event below lands at level 30 and cannot trip
+    // level-based alerting. During the incident five of these fired per probe
+    // and nothing paged. This site logs at ERROR so the store failure is
+    // visible to a level filter even though the throw is swallowed here.
+    log.error(
       { taskId, error, correlationId },
       'Error loading prompt from store, falling back to default'
     );
@@ -163,7 +266,7 @@ export async function loadPrompt(
       correlationId,
     });
 
-    return loadDefaultPrompt(taskId, variables, correlationId);
+    return loadDefaultPrompt(taskId, variables, correlationId, trigger, cache, 'fetch_error');
   }
 }
 
@@ -173,9 +276,12 @@ export async function loadPrompt(
 function loadDefaultPrompt(
   taskId: CeeTaskId,
   variables: Record<string, string | number>,
-  correlationId?: string
+  correlationId?: string,
+  trigger: PromptResolveTrigger = 'runtime',
+  cache?: 'hit' | 'miss',
+  reason: FallbackReason = 'none'
 ): LoadedPrompt {
-  const defaultContent = DEFAULT_PROMPTS[taskId];
+  const defaultContent = getRegisteredDefaultPrompt(taskId);
 
   if (!defaultContent) {
     throw new Error(`No default prompt registered for task: ${taskId}`);
@@ -189,9 +295,22 @@ function loadDefaultPrompt(
     correlationId,
   });
 
+  if (isTrackedKey(taskId)) {
+    emit(TelemetryEvents.V5PromptResolved, {
+      key: taskId,
+      source: mapSource('default'),
+      version: resolvePublicVersion(taskId as TrackedKey, 'default', undefined),
+      content_hash: shortSha256(content),
+      trigger,
+      ...(cache ? { cache } : {}),
+      correlationId,
+    });
+  }
+
   return {
     content,
     source: 'default',
+    fallbackReason: reason,
   };
 }
 
@@ -203,7 +322,7 @@ export function loadPromptSync(
   taskId: CeeTaskId,
   variables: Record<string, string | number> = {}
 ): string {
-  const defaultContent = DEFAULT_PROMPTS[taskId];
+  const defaultContent = getRegisteredDefaultPrompt(taskId);
 
   if (!defaultContent) {
     throw new Error(`No default prompt registered for task: ${taskId}`);
@@ -227,11 +346,4 @@ export async function hasManagedPrompt(taskId: CeeTaskId): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-/**
- * Get all registered default prompts (for migration tooling)
- */
-export function getDefaultPrompts(): Partial<Record<CeeTaskId, string>> {
-  return { ...DEFAULT_PROMPTS };
 }

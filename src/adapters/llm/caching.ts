@@ -14,10 +14,11 @@
  *   - PROMPT_CACHE_MAX_SIZE: Max LRU entries (default: 100, only for memory mode)
  *   - PROMPT_CACHE_TTL_MS: Entry TTL in milliseconds (default: 3600000 = 1 hour)
  *
- * Redis key pattern: pc:{operation}:{hash16}
+ * Redis key pattern: pc:v2:{operation}:{sha256}
  * Note: Streaming responses are NOT cached (bypasses cache)
  */
 
+import { createHash } from "node:crypto";
 import { LruTtlCache } from "../../utils/cache.js";
 import { emit, TelemetryEvents, log } from "../../utils/telemetry.js";
 import { fastHash } from "../../utils/hash.js";
@@ -31,15 +32,56 @@ import type {
   SuggestOptionsResult,
   ExplainDiffArgs,
   ExplainDiffResult,
-  RepairGraphArgs,
-  RepairGraphResult,
   ClarifyBriefArgs,
   ClarifyBriefResult,
   CritiqueGraphArgs,
   CritiqueGraphResult,
+  ChatArgs,
+  ChatResult,
+  ChatWithToolsArgs,
+  ChatWithToolsResult,
+  ChatWithToolsStreamEvent,
   CallOpts,
   DraftStreamEvent,
 } from "./types.js";
+
+const RESPONSE_CACHE_NAMESPACE = "pc:v2";
+
+interface ResponseAuthority {
+  readonly prompt: {
+    readonly operation: string;
+    readonly content: string;
+    readonly taskId: string;
+    readonly source: string;
+    readonly promptId: string | null;
+    readonly version: number | null;
+    readonly promptVersion: string;
+    readonly promptHash: string | null;
+    readonly isStaging: boolean | null;
+    readonly useStagingMode: boolean | null;
+    readonly modelConfig: unknown;
+  };
+  readonly routingTopology: ReadonlyArray<{
+    readonly provider: string;
+    readonly model: string;
+  }>;
+  readonly generationConfig: {
+    readonly timeoutMs: number;
+    readonly configuredMaxTokens: number | null;
+    readonly maxTokensCeiling: number | null;
+    readonly anthropicStructuredOutputs: boolean | null;
+    readonly draftComplianceReminderEnabled: boolean | null;
+  };
+}
+
+interface FailoverMetadataProvider {
+  getFailoverMetadata(): {
+    readonly topology?: ReadonlyArray<{
+      readonly provider: string;
+      readonly model: string;
+    }>;
+  };
+}
 
 // Cache configuration helpers (using centralized config)
 function getCacheEnabled(): boolean {
@@ -72,6 +114,42 @@ function getCacheMaxSize(): number {
 
 function getCacheTtlMs(): number {
   return config.promptCache.ttlMs;
+}
+
+function getConfiguredMaxTokens(operation: string): number | null {
+  const key = {
+    draft_graph: "draft",
+    suggest_options: "options",
+    clarify_brief: "clarification",
+    critique_graph: "critique",
+  }[operation] as "draft" | "options" | "clarification" | "critique" | undefined;
+
+  if (!key) return null;
+  return config.cee.maxTokens[key] ?? null;
+}
+
+function hasFailoverMetadata(adapter: LLMAdapter): adapter is LLMAdapter & FailoverMetadataProvider {
+  return typeof (adapter as Partial<FailoverMetadataProvider>).getFailoverMetadata === "function";
+}
+
+function getRoutingTopology(adapter: LLMAdapter): ResponseAuthority["routingTopology"] {
+  if (hasFailoverMetadata(adapter)) {
+    const topology = adapter.getFailoverMetadata().topology;
+    if (
+      topology?.length &&
+      topology.every(
+        (entry) =>
+          typeof entry.provider === "string" &&
+          entry.provider.length > 0 &&
+          typeof entry.model === "string" &&
+          entry.model.length > 0,
+      )
+    ) {
+      return topology.map(({ provider, model }) => ({ provider, model }));
+    }
+  }
+
+  return [{ provider: adapter.name, model: adapter.model }];
 }
 
 /**
@@ -127,17 +205,84 @@ export class CachingAdapter implements LLMAdapter {
    * Generate cache key from operation and args
    * Uses canonical JSON to ensure stable keys regardless of property order
    *
-   * Key pattern: pc:{operation}:{hash16}
-   * (Redis keyPrefix will prepend namespace, e.g., "olumi:pc:draft_graph:a3f5c7d1...")
+   * Key pattern: pc:v2:{operation}:{sha256}
+   * (Redis keyPrefix will prepend its deployment namespace.)
    */
-  private getCacheKey(operation: string, args: unknown): string {
-    // Create deterministic key from operation + args + model
-    // Uses module-level sortedReplacer for efficiency
-    const keyData = JSON.stringify({ operation, args, model: this.model }, sortedReplacer);
-    const hash = fastHash(keyData, 16);
+  private getCacheKey(operation: string, args: unknown, authority: ResponseAuthority): string {
+    const keyData = JSON.stringify(
+      {
+        namespace: RESPONSE_CACHE_NAMESPACE,
+        operation,
+        args,
+        authority,
+      },
+      sortedReplacer,
+    );
+    const hash = createHash("sha256").update(keyData, "utf8").digest("hex");
 
-    // Redis key pattern: pc:{operation}:{hash16}
-    return `pc:${operation}:${hash}`;
+    return `${RESPONSE_CACHE_NAMESPACE}:${operation}:${hash}`;
+  }
+
+  /**
+   * Build the immutable response authority required for safe cross-request
+   * reuse. Operations without an exact governed prompt/code fingerprint are
+   * deliberately not cached (notably the current inline explain_diff path).
+   */
+  private getResponseAuthority(operation: string, opts: CallOpts): ResponseAuthority | null {
+    const snapshot = opts.preloadedSystemPrompt;
+    if (
+      !snapshot ||
+      snapshot.operation !== operation ||
+      snapshot.meta.taskId !== operation
+    ) {
+      return null;
+    }
+
+    const routingTopology = getRoutingTopology(this.adapter);
+    // Anthropic consumes the exact clarify snapshot carried in CallOpts.
+    // OpenAI and fixtures currently serve provider-owned inline/code prompts,
+    // so a topology that can reach either provider has no single immutable
+    // prompt authority at this boundary and must bypass response caching.
+    if (
+      operation === "clarify_brief" &&
+      routingTopology.some(({ provider }) => provider !== "anthropic")
+    ) {
+      return null;
+    }
+
+    const prompt = {
+      operation: snapshot.operation,
+      content: snapshot.content,
+      taskId: snapshot.meta.taskId,
+      source: snapshot.meta.source,
+      promptId: snapshot.meta.promptId ?? null,
+      version: snapshot.meta.version ?? null,
+      promptVersion: snapshot.meta.prompt_version,
+      promptHash: snapshot.meta.prompt_hash ?? null,
+      isStaging: snapshot.meta.isStaging ?? null,
+      useStagingMode: snapshot.meta.use_staging_mode ?? null,
+      modelConfig: snapshot.meta.modelConfig ?? null,
+    };
+
+    return {
+      prompt,
+      routingTopology,
+      generationConfig: {
+        // timeoutMs is response authority: draft max_tokens is derived from
+        // this live window, and shorter windows can also alter failover.
+        timeoutMs: opts.timeoutMs,
+        configuredMaxTokens: getConfiguredMaxTokens(operation),
+        maxTokensCeiling: opts.maxTokensCeiling ?? null,
+        anthropicStructuredOutputs:
+          operation === "draft_graph" || operation === "critique_graph"
+            ? config.cee.anthropicStructuredOutputs
+            : null,
+        draftComplianceReminderEnabled:
+          operation === "draft_graph"
+            ? config.cee.draftComplianceReminderEnabled
+            : null,
+      },
+    };
   }
 
   /**
@@ -160,7 +305,12 @@ export class CachingAdapter implements LLMAdapter {
       return fn();
     }
 
-    const cacheKey = this.getCacheKey(operation, args);
+    const authority = this.getResponseAuthority(operation, opts);
+    if (!authority) {
+      return fn();
+    }
+
+    const cacheKey = this.getCacheKey(operation, args, authority);
 
     // Try Redis first if enabled
     if (this.redisEnabled) {
@@ -259,10 +409,6 @@ export class CachingAdapter implements LLMAdapter {
     );
   }
 
-  async repairGraph(args: RepairGraphArgs, opts: CallOpts): Promise<RepairGraphResult> {
-    return this.withCache("repair_graph", args, opts, () => this.adapter.repairGraph(args, opts));
-  }
-
   async clarifyBrief(args: ClarifyBriefArgs, opts: CallOpts): Promise<ClarifyBriefResult> {
     return this.withCache("clarify_brief", args, opts, () =>
       this.adapter.clarifyBrief(args, opts)
@@ -330,10 +476,13 @@ export class CachingAdapter implements LLMAdapter {
           let totalDeleted = 0;
 
           do {
+            // V1 `pc:{operation}:*` entries are quarantined: never read them
+            // and do not mutate them from request/runtime code. Operators may
+            // retire that namespace separately after the v2 deployment.
             const [newCursor, keys] = await redis.scan(
               cursor,
               "MATCH",
-              "pc:*",
+              `${RESPONSE_CACHE_NAMESPACE}:*`,
               "COUNT",
               100
             );
@@ -356,6 +505,42 @@ export class CachingAdapter implements LLMAdapter {
     }
 
     log.info({ provider: this.adapter.name }, "Prompt cache cleared");
+  }
+
+  /**
+   * Chat completion - bypasses cache as responses are context-dependent
+   */
+  async chat(args: ChatArgs, opts: CallOpts): Promise<ChatResult> {
+    // Chat responses are typically unique and context-dependent, so we bypass cache
+    return this.adapter.chat(args, opts);
+  }
+
+  /**
+   * Native tool calling - bypasses cache, delegates to underlying adapter
+   */
+  async chatWithTools(args: ChatWithToolsArgs, opts: CallOpts): Promise<ChatWithToolsResult> {
+    if (!this.adapter.chatWithTools) {
+      throw new Error(`Adapter ${this.adapter.name} does not support chatWithTools`);
+    }
+    return this.adapter.chatWithTools(args, opts);
+  }
+
+  /**
+   * Streaming tool calling - bypasses cache, delegates to underlying adapter.
+   * Falls back to non-streaming chatWithTools when inner adapter lacks stream support,
+   * yielding a single message_complete event to maintain streaming contract.
+   */
+  async *streamChatWithTools(args: ChatWithToolsArgs, opts: CallOpts): AsyncIterable<ChatWithToolsStreamEvent> {
+    if (this.adapter.streamChatWithTools) {
+      yield* this.adapter.streamChatWithTools(args, opts);
+      return;
+    }
+    // Fallback: inner adapter doesn't support streaming — use non-streaming path
+    if (!this.adapter.chatWithTools) {
+      throw new Error(`Adapter ${this.adapter.name} does not support chatWithTools or streamChatWithTools`);
+    }
+    const result = await this.adapter.chatWithTools(args, opts);
+    yield { type: 'message_complete' as const, result };
   }
 }
 

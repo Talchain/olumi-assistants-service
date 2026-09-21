@@ -1,0 +1,1 @@
+Should we hire one tech lead or two mid-level developers? Budget is £200k and we need our AI features shipped within 6 months. The goal is faster feature delivery.

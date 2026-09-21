@@ -77,11 +77,24 @@ export interface GraphReadinessAssessment {
   /** Breakdown of quality factors with recommendations */
   quality_factors: QualityFactor[];
 
-  /** Whether the graph meets minimum requirements for analysis */
-  can_run_analysis: boolean;
-
-  /** Reason analysis is blocked (if can_run_analysis is false) */
-  blocker_reason?: string;
+  /**
+   * ⚠ `can_run_analysis` and `blocker_reason` USED TO LIVE HERE AND ARE GONE
+   * ON PURPOSE. Do not add them back.
+   *
+   * This assessor answers "how good is this model?" — a COACHING question. It
+   * never had the information to answer "may analysis run?", and for as long as
+   * it claimed to, its answer was a hardcoded `true` literal gated only on node
+   * counts. That literal was the readiness route's admission verdict for every
+   * request whose client cache happened to be cold.
+   *
+   * The admission question has exactly one authority:
+   * `assessCanonicalAnalysisReadiness`, reached through
+   * `assessRouteAdmission` (src/cee/graph-readiness/canonical-readiness.ts).
+   *
+   * Removing the fields from the TYPE rather than merely leaving them unread is
+   * the point: a field nothing reads gets read again eventually, whereas this
+   * cannot be reintroduced without a compile error at every call site.
+   */
 
   /** Distribution of evidence quality across edges */
   evidence_quality?: EvidenceQualityDistribution;

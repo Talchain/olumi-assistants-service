@@ -17,9 +17,7 @@
  */
 
 import { randomUUID, createHash } from "node:crypto";
-import { log, emit } from "../../utils/telemetry.js";
-import { getAdapter } from "../llm/router.js";
-import type { CallOpts } from "../llm/types.js";
+import { log } from "../../utils/telemetry.js";
 import type {
   WorkingSetRequestT,
   AskResponseT,
@@ -30,7 +28,7 @@ import type {
   AttributionT,
 } from "../../schemas/working-set.js";
 import { validateActionIds, validateHighlightIds } from "../../schemas/working-set.js";
-import { inferIntent, isP0Intent } from "../../services/intent-inference.js";
+import { inferIntent } from "../../services/intent-inference.js";
 import type { GraphT } from "../../schemas/graph.js";
 
 // ============================================================================
@@ -206,7 +204,7 @@ async function handleRepair(
   request: WorkingSetRequestT,
   _opts: AskAdapterOpts
 ): Promise<HandlerResult> {
-  const { message, graph_snapshot } = request;
+  const { graph_snapshot } = request;
 
   // Check for common issues
   const issues: string[] = [];
@@ -312,7 +310,7 @@ async function handleClarify(
   request: WorkingSetRequestT,
   _opts: AskAdapterOpts
 ): Promise<HandlerResult> {
-  const { message, graph_snapshot, selection } = request;
+  const { graph_snapshot, selection } = request;
 
   // If there's a selection, highlight it and ask about it
   if (selection?.node_id) {

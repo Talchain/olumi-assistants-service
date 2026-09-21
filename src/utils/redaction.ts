@@ -9,11 +9,90 @@
  * - PII (emails, phones, API keys, etc.) - via PII Guard
  */
 
+import { createHash } from "node:crypto";
 import { redactObject as piiRedactObject, getDefaultGuardConfig } from "./pii-guard.js";
 import { fastHash } from "./hash.js";
 
 const MAX_QUOTE_LENGTH = 100;
 const REDACTED_MARKER = '[REDACTED]';
+
+/**
+ * Structured, non-reversible digest of free-text model output or user prose.
+ *
+ * WHY THIS EXISTS
+ * ---------------
+ * Central-log redaction (see logger-config.ts REDACT_PATHS) is an alias list:
+ * a field only gets censored if its exact name is enumerated there. Content-bearing
+ * log fields (raw_output_sample, *_preview, *_sample, response_preview, …) are NOT
+ * in that list, so raw model/user text reaches central logs verbatim. Alias lists
+ * are a hand-maintained mirror — they drift, and the drift always reads as green.
+ *
+ * Rather than chase every new field name into REDACT_PATHS, content log sites route
+ * their value through this helper, which emits only non-sensitive derivatives:
+ * a correlation hash and a length. There is nothing left for the alias list to miss.
+ *
+ * HEAD POLICY (decided honestly)
+ * ------------------------------
+ * The DEFAULT is head-less: {sha256_16, length} only. This fully closes the raw-content
+ * leak while preserving what diagnosis actually needs — a stable id to correlate two
+ * log lines about the same output, and the size of the payload.
+ *
+ * A short prefix is available OPT-IN (`headChars > 0`) for staging diagnosis, but it is
+ * NOT a raw slice: the prefix is first passed through the PII guard (redactLogMessage),
+ * so emails / phones / API keys / tokens inside it are scrubbed before it is emitted.
+ * Even opted-in, the head cannot carry PII. Callers that don't ask for a head get none.
+ */
+export interface ContentDigest {
+  /** First 16 hex chars of SHA-256 over the serialized content — a stable correlation id, not reversible. */
+  sha256_16: string;
+  /** Character length of the serialized content (0 for null/undefined). */
+  length: number;
+  /** OPTIONAL, opt-in only: a short prefix already run through the PII guard. Absent by default. */
+  head?: string;
+}
+
+/**
+ * Serialize an arbitrary log value to a string for digesting.
+ * Strings pass through; everything else is JSON-stringified (String() fallback).
+ */
+function serializeForDigest(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value) ?? String(value);
+  } catch {
+    return String(value);
+  }
+}
+
+/**
+ * Digest content-bearing log values into a safe, non-reversible summary.
+ *
+ * Use this at EVERY log call site that would otherwise place raw model output or user
+ * text on the wire under a content field (raw_*, *_preview, *_sample, …). A lint-style
+ * tripwire test (content-digest-log-tripwire.test.ts) enforces this across the repo.
+ *
+ * @param value    The raw content (string or object) that must not reach logs verbatim.
+ * @param opts.headChars  Opt-in prefix length for staging diagnosis. Default 0 (no head).
+ *                        Any prefix emitted is first scrubbed by the PII guard.
+ */
+export function contentDigest(value: unknown, opts?: { headChars?: number }): ContentDigest {
+  const serialized = serializeForDigest(value);
+  const sha256_16 = createHash('sha256').update(serialized).digest('hex').slice(0, 16);
+  const digest: ContentDigest = {
+    sha256_16,
+    length: serialized.length,
+  };
+
+  const headChars = opts?.headChars ?? 0;
+  if (headChars > 0 && serialized.length > 0) {
+    // Scrub PII from the prefix, THEN cap. Never emit a raw slice.
+    const scrubbed = redactLogMessage(serialized.slice(0, headChars));
+    digest.head = scrubbed;
+  }
+
+  return digest;
+}
 
 /**
  * Dangerous prototype keys that should never be set dynamically

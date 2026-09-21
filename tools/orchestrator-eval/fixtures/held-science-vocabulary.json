@@ -1,0 +1,43 @@
+{
+  "id": "held-science-vocabulary",
+  "description": "D5 held-science. RUBRIC-EXPANSION-SPEC.md D5's original plan (import HELD_SCIENCE_VOCABULARY_PATTERN wholesale) does not survive contact with the orchestrator terminology map: verified 2026-07-08 (prompt-workstream co-owner finding, corroborated independently here), that runtime pattern bans 'influence' and 'vulnerable' — the exact words the terminology map MANDATES as the plain-language replacement for driver/sensitivity prose. The runtime pattern was built for a different surface (Cap-1/Cap-2A held-science REJECTION copy, where the words are banned outright with no substitute expected), so it is the wrong source of truth here. D5 is this pack's own eval-assertion (src/held-science.ts): a narrow raw-metric-token ('sensitivity', 'robustness', 'elasticity', 'evpi'/'voi', 'fragile edge') + raw-decimal-score check, scoped to what the terminology map actually forbids — naming the SCORE instead of describing the EFFECT in plain language.",
+  "user_message": "Which factor matters most for this decision?",
+  "analysis": {
+    "status": "completed",
+    "leading_option": { "label": "Hire One Tech Lead", "probability": 0.81 },
+    "runner_up": { "label": "Hire Two Mid-Level Developers", "probability": 0.18 },
+    "margin_pp": 63,
+    "robustness_band": "stable",
+    "top_drivers": [],
+    "fragile_edges": [],
+    "options": [
+      { "label": "Hire One Tech Lead", "probability": 0.81 },
+      { "label": "Hire Two Mid-Level Developers", "probability": 0.18 }
+    ]
+  },
+  "candidates": [
+    {
+      "label": "good",
+      "note": "Plain-language framing of impact, no raw science vocabulary. Should PASS.",
+      "source": "recorded",
+      "text": "Team Seniority made the biggest difference to the outcome, though the call is yours."
+    },
+    {
+      "label": "good_terminology_map_mandated_words",
+      "note": "Uses the terminology map's REQUIRED plain-language vocabulary ('influence', 'vulnerable') — must PASS, proving D5 does not re-import the production HELD_SCIENCE_VOCABULARY_PATTERN (which would ban these words and fail every compliant response).",
+      "source": "recorded",
+      "text": "Team Seniority has the biggest influence on the outcome, and the result holds under most plausible variations of your assumptions. The most vulnerable assumption is the seniority link, so that is worth checking."
+    },
+    {
+      "label": "regression",
+      "note": "The terminology-map defect: the raw metric name and value surfaced in prose on a held-science turn. Should FAIL (no_held_science_vocabulary).",
+      "source": "recorded",
+      "text": "Team Seniority has the highest sensitivity value (0.42)."
+    }
+  ],
+  "expected": {
+    "good": true,
+    "good_terminology_map_mandated_words": true,
+    "regression": false
+  }
+}
