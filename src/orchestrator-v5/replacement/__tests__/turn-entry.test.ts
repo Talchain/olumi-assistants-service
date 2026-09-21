@@ -460,7 +460,7 @@ describe('what the user establishes reaches the record and the next prompt', () 
 /**
  * ⛔ THE SECOND COPY OF THIS LIST WAS ALREADY WRONG WHEN IT WAS FOUND.
  *
- * The live harness hand-listed the tools and was missing FOUR of the eight —
+ * The live harness hand-listed the tools and was missing FOUR of the eight then-current tools —
  * `run_analysis` and all three structure tools — so every live judgement about
  * what the model does with them was a judgement about tools it was never
  * offered. Its own comment records an earlier instance of the same drift with
@@ -479,6 +479,13 @@ describe('the tool list is built in ONE place, and every tool is offered', () =>
     'remember',
     'set_option_effect',
     'run_analysis',
+    // Added 21 Sep with the bounded repair set. `propose_repairs` puts the
+    // whole gap set forward at once; `resolve_blocked_link` carries the only
+    // repairs that can clear an option blocked by a link to a risk (no effect
+    // value can — see `RepairBlockedLink`). This list going red when they
+    // landed is the guard working, not a nuisance.
+    'propose_repairs',
+    'resolve_blocked_link',
     'add_factor',
     'add_option',
     'add_link',
@@ -494,7 +501,7 @@ describe('the tool list is built in ONE place, and every tool is offered', () =>
     });
   }
 
-  it('offers exactly the eight tools, by name and in order', () => {
+  it('offers exactly the ten tools, by name and in order', () => {
     expect(build().map((t) => t.definition.name)).toEqual(NAMES);
   });
 

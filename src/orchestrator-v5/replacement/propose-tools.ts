@@ -71,6 +71,15 @@ export function createSetOptionEffectTool(deps: ProposeToolDeps): AgentTool {
               'Only when the user is changing a number you already offered them. The id of that '
               + 'waiting offer. It is replaced, and the new number goes back to them to agree.',
           },
+          user_words: {
+            type: 'string',
+            description:
+              "The user's own phrasing that this value is your reading of — copy it from their "
+              + 'message, in their words and their units ("increases throughput significantly", '
+              + '"a total of £200,000"). Set this whenever the number is YOUR reading of what they '
+              + 'said rather than a figure they gave in this form. It is shown back to them before '
+              + 'anything is saved, which is what makes reading generously safe.',
+          },
         },
         required: ['option_id', 'factor_id', 'value'],
       },
@@ -102,16 +111,57 @@ export function createSetOptionEffectTool(deps: ProposeToolDeps): AgentTool {
         ? raw.amends_proposal_id
         : undefined;
 
+      // ⭐ WHAT MAKES GENEROUS READING SAFE, AND IT BELONGS IN THE SUMMARY.
+      //
+      // Paul, session `65fdde46` turn 3, wrote three facts in one message —
+      // "Two Developers increases our delivery throughput significantly … a
+      // total of £200,000 … increase technical capability by at least 25%" —
+      // and got back a question about whether he meant the factor or an option,
+      // with all three figures discarded (`material_parameters_user_stated: 0`).
+      // Taking a qualitative claim seriously means turning "significantly" into
+      // a number, and a number the user never said MUST NOT travel as if they
+      // said it: `set-option-effect.ts` records a measured run where the model
+      // turned "churn went from 3% to 4.4%" into 0.47 and offered it as theirs.
+      //
+      // The summary is the string the user is shown AND the string the accept
+      // guard compares their reply against, so putting their own words here is
+      // what makes the reading visible and correctable in the one place that
+      // matters — before anything is written.
+      //
+      // ⚠ UNVERIFIED AT THIS SEAM, STATED RATHER THAN IMPLIED. This tool has no
+      // access to the user's message, so it cannot check the quote the way
+      // `accept_proposal` checks `user_agreement_quote` against `input.message`.
+      // Nothing is committed by a proposal, and the person best placed to catch
+      // a misquote is the person being shown their own words — but this is a
+      // gap, not a guarantee, and a controller-side check would close it.
+      const userWords =
+        typeof raw.user_words === 'string' && raw.user_words.trim().length > 0
+          ? raw.user_words.trim()
+          : undefined;
+
       return {
         type: 'proposed',
-        summary: result.summary,
+        summary:
+          userWords === undefined
+            ? result.summary
+            : `${result.summary} — my reading of "${userWords}"`,
         operations: result.operations,
         ...(amends !== undefined ? { amends } : {}),
-        content: amends !== undefined
-          ? `This replaces the earlier offer. Put the NEW number to them in their own terms and wait `
-            + `for them to agree — it is not saved yet, and the earlier one can no longer be accepted.`
-          : `This affects the comparison between ${result.option_label} and the other options through `
-            + `${result.factor_label}. Say what it means for their decision, not just that you have offered it.`,
+        content: [
+          amends !== undefined
+            ? `This replaces the earlier offer. Put the NEW number to them in their own terms and wait `
+              + `for them to agree — it is not saved yet, and the earlier one can no longer be accepted.`
+            : `This affects the comparison between ${result.option_label} and the other options through `
+              + `${result.factor_label}. Say what it means for their decision, not just that you have offered it.`,
+          userWords === undefined
+            ? ''
+            : `⚠ THIS NUMBER IS YOUR READING OF "${userWords}", NOT A FIGURE THEY GAVE. Say so in those `
+              + `terms — quote their words back and ask whether ${result.value} is what they meant. Do not `
+              + `present it as their number. If they gave you several facts at once, put this alongside `
+              + `the others as one set rather than asking about this one on its own.`,
+        ]
+          .filter((s) => s.length > 0)
+          .join('\n\n'),
       };
     },
   };
