@@ -53,7 +53,7 @@ import {
 } from './conversation-memory.js';
 import { EMPTY_PROPOSAL_STORE, type ProposalStore } from './proposal-store.js';
 import { createRunAnalysisTool } from './run-analysis-tool.js';
-import { createProposeRepairsTool } from './repair-tools.js';
+import { createProposeRepairsTool, createResolveBlockedLinkTool } from './repair-tools.js';
 import { createRememberTool } from './remember-tool.js';
 import { createSetOptionEffectTool } from './propose-tools.js';
 import {
@@ -347,6 +347,10 @@ export function buildReplacementTools(args: {
     // yields a flat bullet list with `obligation` stripped, and nothing at all
     // below two blockers.
     createProposeRepairsTool({ getGraph: args.getGraph }),
+    // The only repairs that can clear an option blocked by a link to a risk.
+    // No effect value can — verified at `cee/transforms/analysis-ready.ts` and
+    // reproduced with a contrast control; see `RepairBlockedLink`.
+    createResolveBlockedLinkTool({ getGraph: args.getGraph }),
     // The structure tools, also unconditional. A model that can read the
     // workspace and set an effect but cannot add the node the user just named
     // has to answer "I can't do that" to the most ordinary request there is —

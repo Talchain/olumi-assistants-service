@@ -94,6 +94,7 @@ import {
   type StructureProvenance,
 } from '../../cee/graph-readiness/obligation-provenance.js';
 import { mergeInterventionSources } from '../../orchestrator/tools/analysis-ready-helper.js';
+import { isDirectedEdge } from '../../schemas/graph.js';
 import { MAX_COMPOUND_OPERATIONS } from './proposal-store.js';
 import { setOptionEffect, type EffectGraph } from './set-option-effect.js';
 
@@ -158,9 +159,86 @@ export interface RepairAsk {
   readonly waived_by_exclusion: boolean;
 }
 
+/**
+ * How a blocked option→risk link can be cleared. Two kinds, and they are not
+ * interchangeable — see {@link RepairBlockedLink}.
+ */
+export type LinkResolutionKind =
+  /** Keep the link, mark it so the engine never sees it. Non-destructive. */
+  | 'keep_out_of_comparison'
+  /** Take the link out of the model entirely. Destructive, and honest. */
+  | 'remove_link';
+
+export interface RepairLinkResolution {
+  readonly kind: LinkResolutionKind;
+  readonly summary: string;
+  readonly operations: readonly Record<string, unknown>[];
+  /** Set when the resolution encodes a claim beyond "leave it out". Must be
+   *  said out loud; see {@link buildLinkResolution}. */
+  readonly caveat?: string;
+}
+
+/**
+ * ⭐⭐⭐ AN OPTION HELD BACK BY A LINK, NOT BY A MISSING NUMBER — and the reason
+ * the product asked Paul the wrong question for a whole session.
+ *
+ * ── THE GATE, VERIFIED AT THE BYTES (`cee/transforms/analysis-ready.ts:680-694`)
+ * ANY option→risk edge that is not `bidirected` stamps the option
+ * `needs_user_mapping`, and `unresolvedTargetCount > 0` short-circuits every
+ * other check (`cee/transforms/option-status.ts:266`). The code says in its own
+ * comment why no value can clear it: *"A causal coefficient is not an
+ * intervention level; other numeric effects cannot resolve this missing
+ * mapping."*
+ *
+ * ⛔ SO EVERY "SET THIS VALUE" REPAIR LEAVES THE MODEL EXACTLY AS UNANALYSABLE.
+ * Reproduced on this branch against the captured graph with a contrast control:
+ * adding one option→risk edge flips `willProceed` true→false with
+ * `OPTION_NEEDS_MAPPING`, and the SAME edge marked `bidirected` leaves it
+ * analysable. The option already carried three effect values; nothing was
+ * missing. The authority's own prompt for it is *"Choose which factor
+ * <option> changes and by how much"* — it names a FACTOR when the blocker is a
+ * RISK, which is the question Paul spent a session trying to satisfy.
+ *
+ * ⛔ AND THE EXCLUSION ROUTE DOES NOT REACH IT, measured with a positive
+ * control. `OPTION_NEEDS_MAPPING` is in `WAIVABLE_BY_EXCLUSION`, but
+ * `gateAnalysableOptions` only ever considers options where
+ * `hasEmptyInterventions` holds — it returns the input by reference otherwise.
+ * A risk-blocked option HAS interventions, so it is never excluded:
+ * `waivedOptionIds` is empty and `will_scaffold_options` is false. The control
+ * is that the same machinery DOES fire on this graph when an option's
+ * interventions are deleted, so the absence is a rule and not blindness.
+ *
+ * ⚠ THE GATE ITSELF IS NOT OURS TO FIX — readiness/admission is Core's, and so
+ * is the contract question underneath (is an option→risk edge a qualitative
+ * hypothesis to exclude with disclosure, or a quantity the user must supply?).
+ * What is built here is the INTERACTION that repairs the graph, and it works
+ * whether or not that ruling lands.
+ */
+export interface RepairBlockedLink {
+  readonly issue_id: string;
+  readonly option_id: string;
+  readonly option_label: string;
+  readonly risk_id: string;
+  readonly risk_label: string;
+  /**
+   * The readiness authority's own prompt for this blocker, kept for the record.
+   * It asks about a FACTOR. It is deliberately NOT put to the user — that is
+   * the whole point of this class — but discarding it silently would leave
+   * nothing to show that the two disagree.
+   */
+  readonly authority_prompt: string;
+  /** Ordered: the non-destructive one first. Never empty. */
+  readonly resolutions: readonly RepairLinkResolution[];
+}
+
 export interface RepairPlan {
   /** The authority's verdict, copied. `true` means nothing here blocks a run. */
   readonly analysable: boolean;
+  /**
+   * Options held back by a link rather than by a missing value. These carry
+   * the ONLY repairs that can clear that blocker — no effect value can.
+   */
+  readonly blocked_links: readonly RepairBlockedLink[];
   /**
    * Estimates put to the user, bounded — see {@link MAX_COMPOUND_OPERATIONS}.
    * Each becomes ONE proposal, so the whole set can be agreed in ONE write.
@@ -178,9 +256,84 @@ export interface RepairPlan {
   readonly deferred: readonly RepairOffer[];
 }
 
+/**
+ * The two ways a blocked option→risk link can be cleared, as real patch
+ * operations. ONE producer, so the tool that offers a resolution and the tool
+ * that amends one cannot drift apart (CLAUDE.md trap 12).
+ *
+ * ⚠ THE EDGE PATH IS `from::to`, which is CEE's internal spelling for an edge
+ * operation — `mapOpsForPlot` converts it to `from->to` on the way out, and
+ * `structure-tools.ts` already stages `add_edge` this way. It is NOT
+ * `compose/edge-address.ts`'s vocabulary, which owns a different seam
+ * (fragile-edge target refs), and whose `parseEdgeId` explicitly REJECTS `::`.
+ * Two spellings, two seams, named apart.
+ *
+ * ⛔ THE CAVEAT ON `keep_out_of_comparison` IS LOAD-BEARING AND MUST BE SAID.
+ * `bidirected` is the only marking the gate exempts, and operationally it does
+ * exactly what is wanted — `schemas/graph.ts:502-504`: *"ISL never sees
+ * bidirected edges"*, kept for *"trust warnings only"*. But the contract also
+ * defines it as *"A↔B — indicates an unmeasured common cause (Pearl's ADMG
+ * notation)"*, which is a SPECIFIC causal claim and not simply "we could not
+ * quantify this". Using it to mean the second is a reinterpretation, and
+ * whether that is right is Core's contract question, not this lane's. So the
+ * caveat travels with the resolution and the user is told what it records.
+ */
+export function buildLinkResolution(input: {
+  readonly optionId: string;
+  readonly optionLabel: string;
+  readonly riskId: string;
+  readonly riskLabel: string;
+  readonly kind: LinkResolutionKind;
+}): RepairLinkResolution {
+  const { optionId, optionLabel, riskId, riskLabel, kind } = input;
+  const path = `${optionId}::${riskId}`;
+  if (kind === 'remove_link') {
+    return {
+      kind,
+      summary: `Take the link from ${optionLabel} to ${riskLabel} out of the model`,
+      operations: [
+        {
+          op: 'remove_edge',
+          path,
+          old_value: null,
+          impact: 'high',
+          rationale:
+            `The user chose to drop this link rather than keep it. It is the only other way to `
+            + `clear the block on ${optionLabel}.`,
+        },
+      ],
+    };
+  }
+  return {
+    kind,
+    summary: `Keep the link from ${optionLabel} to ${riskLabel}, but leave it out of the comparison`,
+    operations: [
+      {
+        op: 'update_edge',
+        path,
+        value: { edge_type: 'bidirected' },
+        old_value: null,
+        impact: 'moderate',
+        rationale:
+          `Marks the link so the engine does not try to put a number on it. The relationship stays `
+          + `on the model as a note.`,
+      },
+    ],
+    caveat:
+      `This records the link as an "unmeasured common cause", which is the only marking the `
+      + `checker accepts and is a slightly stronger statement than "we could not put a number on `
+      + `it". Say that plainly rather than describing it as just a note.`,
+  };
+}
+
 function nodesOf(graph: unknown): readonly Record<string, unknown>[] {
   const g = graph as { nodes?: unknown } | null | undefined;
   return Array.isArray(g?.nodes) ? (g.nodes as Record<string, unknown>[]) : [];
+}
+
+function edgesOf(graph: unknown): readonly Record<string, unknown>[] {
+  const g = graph as { edges?: unknown } | null | undefined;
+  return Array.isArray(g?.edges) ? (g.edges as Record<string, unknown>[]) : [];
 }
 
 function labelOf(node: Record<string, unknown> | undefined, fallback: string): string {
@@ -216,8 +369,57 @@ export function buildRepairPlan(input: {
   // Read off `assessment.blockingIssues` rather than `readinessQuestions`,
   // which returns NOTHING below two blockers because `repairProposal` is null
   // there. A one-blocker model is exactly as stuck as a six-blocker one.
+  // ── LINK BLOCKERS ───────────────────────────────────────────────────────
+  //
+  // ⭐ BOUND TO THE AUTHORITY'S VERDICT, NOT TO A COPY OF ITS RULE. This does
+  // NOT re-derive "does an option→risk edge block?" — that predicate lives in
+  // `cee/transforms/analysis-ready.ts` and mirroring it here would be a second
+  // opinion about readiness (trap 12). The authority decides IF the option is
+  // blocked; this only works out WHAT WOULD CLEAR IT, by finding the links the
+  // gate's own comment names. `isDirectedEdge` is imported rather than
+  // re-spelled — it is the estate's single directed-edge policy point.
+  //
+  // An option the authority blocks with OPTION_NEEDS_MAPPING that has NO such
+  // link falls through to an ordinary ask, unchanged. That is the honest
+  // fallback and it is what makes this narrow rather than a catch-all.
+  const blockedLinks: RepairBlockedLink[] = [];
+  const linkHandledIssueIds = new Set<string>();
+  for (const issue of admission.assessment.blockingIssues) {
+    if (issue.code !== 'OPTION_NEEDS_MAPPING') continue;
+    const optionId = issue.option_id;
+    if (optionId === undefined) continue;
+    const optionLabel = issue.option_label ?? labelOf(byId.get(optionId), optionId);
+    for (const edge of edgesOf(graph)) {
+      if (edge.from !== optionId) continue;
+      if (byId.get(String(edge.to))?.kind !== 'risk') continue;
+      if (!isDirectedEdge(edge as { edge_type?: 'directed' | 'bidirected' })) continue;
+      const riskId = String(edge.to);
+      const riskLabel = labelOf(byId.get(riskId), riskId);
+      linkHandledIssueIds.add(issue.issue_id);
+      blockedLinks.push({
+        issue_id: issue.issue_id,
+        option_id: optionId,
+        option_label: optionLabel,
+        risk_id: riskId,
+        risk_label: riskLabel,
+        authority_prompt: String(issue.message ?? ''),
+        // Non-destructive first. A deleted causal relationship is the user's
+        // modelling thrown away, and they may well want it kept.
+        resolutions: [
+          buildLinkResolution({ optionId, optionLabel, riskId, riskLabel, kind: 'keep_out_of_comparison' }),
+          buildLinkResolution({ optionId, optionLabel, riskId, riskLabel, kind: 'remove_link' }),
+        ],
+      });
+    }
+  }
+
   const asks: RepairAsk[] = [];
   for (const issue of admission.assessment.blockingIssues) {
+    // ⛔ A LINK-BLOCKED OPTION MUST NOT ALSO BE ASKED THE FACTOR QUESTION.
+    // That prompt is the measured defect: it names a factor when the blocker is
+    // a risk, and no answer to it can clear the block. It is carried on the
+    // link repair as `authority_prompt` rather than discarded.
+    if (linkHandledIssueIds.has(issue.issue_id)) continue;
     const prompt = typeof issue.message === 'string' ? issue.message.trim() : '';
     if (prompt.length === 0) continue;
     const decision = classifyIssueObligation(issue, graph, admission.waivedOptionIds);
@@ -322,6 +524,7 @@ export function buildRepairPlan(input: {
 
   return {
     analysable: admission.willProceed,
+    blocked_links: blockedLinks,
     offers,
     asks,
     deferred,
@@ -330,5 +533,10 @@ export function buildRepairPlan(input: {
 
 /** Nothing to do: no estimate to confirm and no gap to settle. */
 export function planIsEmpty(plan: RepairPlan): boolean {
-  return plan.offers.length === 0 && plan.asks.length === 0 && plan.deferred.length === 0;
+  return (
+    plan.offers.length === 0 &&
+    plan.asks.length === 0 &&
+    plan.deferred.length === 0 &&
+    plan.blocked_links.length === 0
+  );
 }
