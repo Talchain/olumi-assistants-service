@@ -141,7 +141,7 @@ import { shapeRunResult } from '../orchestrator-v5/replacement/to-run-result.js'
 // internally, so no store import is needed and rule 3 is untouched.
 import {
   createApplyOperations,
-  currentModelRevision,
+  currentModelSnapshot,
 } from '../orchestrator-v5/apply-operations.js';
 import { projectTurnContext } from '../orchestrator-v5/replacement/turn-context-view.js';
 import {
@@ -3112,9 +3112,22 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       // analysis-affecting model"; a transport failure means "we could not
       // look". Collapsing the second into the first reports "no model" for a
       // model that exists.
-      const mintedModelRevision = hasModel
-        ? await currentModelRevision(ingress.scenario_id)
+      // ⭐ ONE PERSISTED READ, and everything this turn binds to it.
+      //
+      // Codex (#1660, exact-head CHANGES_REQUIRED): the token was correctly
+      // store-derived while freshness and option identity were derived from
+      // `extensions.graphState` — the INGRESS graph — one step later. Two
+      // sources in one turn, and the store's projection provably differs from
+      // ingress on exactly the fields the hash covers. A CURRENT analysis could
+      // therefore reach the model and the wire marked stale.
+      //
+      // Reading the store twice would not fix it either: the controller writes
+      // WITHIN a turn, so a write between two reads yields two canonical-looking
+      // snapshots of different graphs. `currentModelSnapshot` is the single read.
+      const modelSnapshot = hasModel
+        ? await currentModelSnapshot(ingress.scenario_id)
         : null;
+      const mintedModelRevision = modelSnapshot?.revision ?? null;
 
       // ⚠ A NULL MINT DECLINES THE TURN rather than inventing a token. The
       // previous shape ended `?? 'graph-unhashable'`, manufacturing a base for
@@ -3161,14 +3174,25 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         // window reproduces the same lie on any conversation long enough to
         // age the analysis out of it.
         // ═══════════════════════════════════════════════════════════════════
-        const currentGraphHash =
-          computeAnalysisAffectingGraphHash(
-            extensions.graphState as Parameters<typeof computeAnalysisAffectingGraphHash>[0],
-          ) ?? null;
+        // ⛔ BOTH OF THESE COME FROM `modelSnapshot`, NOT FROM THE REQUEST.
+        //
+        // `currentGraphHash` is `modelSnapshot.revision` — not a second
+        // computation that happens to agree, but the SAME VALUE: the token is
+        // `modelRevisionOf(graph)` and `modelRevisionOf` IS
+        // `computeAnalysisAffectingGraphHash`. So "the analysis view and the
+        // proposal revision describe the same object" is now true because
+        // there is one object, rather than true because a comment says so —
+        // which is precisely what the reviewer found was not the case.
+        //
+        // The graph handed to `projectTurnContext` is the stored one for the
+        // same reason: it derives the analysis snapshot AND the option
+        // identities, and identities read off the request would key against a
+        // model the store does not hold.
+        const currentGraphHash = modelSnapshot?.revision ?? null;
         const contextView = projectTurnContext(
           await claimSafety.turnContext(),
           currentGraphHash,
-          extensions.graphState,
+          modelSnapshot?.graph ?? null,
         );
 
         const turn = await handleReplacementTurn(
