@@ -42,6 +42,7 @@ import {
   isRetryExhausted,
   needsReconciliation,
   openProposal,
+  amendProposal,
   type Proposal,
   type ProposalStore,
 } from './proposal-store.js';
@@ -160,14 +161,34 @@ export function composeTurn(input: ComposeTurnInput): ComposeTurnResult {
   loopResult.proposed.forEach((staged, index) => {
     const proposalId = idFor('proposal', index);
 
+    const operations = [
+      { kind: staged.tool, summary: staged.summary, detail: { operations: staged.operations } },
+    ];
+
     // RULE 3 — durable, bound to this revision.
-    proposals = openProposal(proposals, {
-      id: proposalId,
-      operations: [{ kind: staged.tool, summary: staged.summary, detail: { operations: staged.operations } }],
-      model_revision: modelRevision,
-      proposed_at: now,
-      proposed_in_turn: turnId,
-    });
+    //
+    // ⭐ AN AMENDMENT TAKES THE SAME ROUTE, DELIBERATELY. It is a new durable
+    // proposal bound to this revision like any other; the only difference is
+    // that it also supersedes the one it replaces, so the original cannot be
+    // accepted afterwards. Routing it through `openProposal` instead would
+    // leave BOTH waiting, and the user who said "yes, but 0.6" could then have
+    // the 0.55 version accepted by a later turn.
+    proposals =
+      staged.amends !== undefined
+        ? amendProposal(proposals, staged.amends, {
+            amended_id: proposalId,
+            operations,
+            amended_at: now,
+            amended_in_turn: turnId,
+            current_model_revision: modelRevision,
+          })
+        : openProposal(proposals, {
+            id: proposalId,
+            operations,
+            model_revision: modelRevision,
+            proposed_at: now,
+            proposed_in_turn: turnId,
+          });
     openedProposalIds.push(proposalId);
 
     // RULE 2 — recorded as a suggestion, never as a fact.

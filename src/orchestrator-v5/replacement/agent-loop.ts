@@ -66,6 +66,15 @@ export type AgentToolOutcome =
       readonly summary: string;
       readonly operations: readonly Record<string, unknown>[];
       readonly content?: string;
+      /**
+       * ⭐ Set ONLY by an amend tool: the id of the proposal this replaces.
+       *
+       * It stays on the `proposed` outcome rather than getting an outcome type
+       * of its own precisely so the loop's existing invariant covers it — a
+       * `propose` tool may stage operations and MAY NOT record consent. An
+       * amendment must go back to the user, so it must not be an `accept`.
+       */
+      readonly amends?: string;
     }
   /** The user agreed to a proposal that was already put to them. Carries the
    *  id, never a change — a re-derived operation is a different decision. */
@@ -102,6 +111,8 @@ export interface ProposedChange {
   readonly tool: string;
   readonly summary: string;
   readonly operations: readonly Record<string, unknown>[];
+  /** Set only by an amend tool — the proposal this one replaces. */
+  readonly amends?: string;
 }
 
 export interface RememberedBatch {
@@ -317,7 +328,12 @@ export async function runAgentLoop(
             `tool "${use.name}" is declared "${tool.kind}" but returned a proposal — only a "propose" tool may stage operations`,
           );
         }
-        proposed.push({ tool: use.name, summary: outcome.summary, operations: outcome.operations });
+        proposed.push({
+          tool: use.name,
+          summary: outcome.summary,
+          operations: outcome.operations,
+          ...(outcome.amends !== undefined ? { amends: outcome.amends } : {}),
+        });
         results.push({
           type: 'tool_result',
           tool_use_id: use.id,

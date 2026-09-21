@@ -51,7 +51,10 @@ export function createSetOptionEffectTool(deps: ProposeToolDeps): AgentTool {
         "Propose how much one option moves one factor, as a share of that factor's range from 0 to 1. " +
         'Use this when the user has told you what an option does — not to fill in a number they have ' +
         'not given you. If you do not know the value, ask; do not estimate one and offer it as theirs. ' +
-        'This proposes only: nothing is saved until they agree.',
+        'This proposes only: nothing is saved until they agree. ' +
+        'If they are changing a number you already offered — "yes, but make it 0.6" — set ' +
+        'amends_proposal_id to that offer instead of accepting it. Accepting saves the number YOU ' +
+        'offered, not the one they just said.',
       input_schema: {
         type: 'object',
         additionalProperties: false,
@@ -61,6 +64,12 @@ export function createSetOptionEffectTool(deps: ProposeToolDeps): AgentTool {
           value: {
             type: 'number',
             description: "Between 0 and 1 — the share of the factor's range this option moves it by.",
+          },
+          amends_proposal_id: {
+            type: 'string',
+            description:
+              'Only when the user is changing a number you already offered them. The id of that '
+              + 'waiting offer. It is replaced, and the new number goes back to them to agree.',
           },
         },
         required: ['option_id', 'factor_id', 'value'],
@@ -81,13 +90,28 @@ export function createSetOptionEffectTool(deps: ProposeToolDeps): AgentTool {
         return { type: 'refused', content: result.refusal.message };
       }
 
+      // ⭐ THE AMEND ROUTE. Deliberately NOT a second tool: an amendment needs
+      // every refusal this one already makes (unlinked factor, unknown option,
+      // out-of-range value), and a parallel tool would drift from them.
+      //
+      // ⛔ It is still `kind: 'propose'`, so the loop's own invariant applies —
+      // a propose tool MAY NOT record consent. The amended number goes back to
+      // the user. That is the whole point: accepting would save the number WE
+      // offered, which is the harm the third verb exists to prevent.
+      const amends = typeof raw.amends_proposal_id === 'string' && raw.amends_proposal_id.length > 0
+        ? raw.amends_proposal_id
+        : undefined;
+
       return {
         type: 'proposed',
         summary: result.summary,
         operations: result.operations,
-        content:
-          `This affects the comparison between ${result.option_label} and the other options through ` +
-          `${result.factor_label}. Say what it means for their decision, not just that you have offered it.`,
+        ...(amends !== undefined ? { amends } : {}),
+        content: amends !== undefined
+          ? `This replaces the earlier offer. Put the NEW number to them in their own terms and wait `
+            + `for them to agree — it is not saved yet, and the earlier one can no longer be accepted.`
+          : `This affects the comparison between ${result.option_label} and the other options through `
+            + `${result.factor_label}. Say what it means for their decision, not just that you have offered it.`,
       };
     },
   };
