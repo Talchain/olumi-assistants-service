@@ -87,27 +87,32 @@ export function runStructuralParse(ctx: StageContext): void {
   // acts when EVERY issue is an optional `observed_state`. Declines otherwise,
   // leaving the emission below byte-identical to before this existed.
   const salvage = salvageObservedState(input, issues);
-  if (salvage.salvaged) {
-    log.warn({
-      event: "cee.structural_parse.observed_state_salvaged",
-      error_count: issueCount,
-      first_issues: firstIssues,
-      union_branch_detail: unionDetail,
-      stripped: salvage.stripped,
-      stripped_constraint_nodes: salvage.stripped.filter((s) => s.node_kind === "constraint").length,
-      request_id: ctx.requestId,
-    }, "Structural parse failed on optional observed_state only — field shed, model preserved");
-    return;
-  }
-
+  // ⚠ THE EVENT NAME IS DELIBERATELY UNCHANGED ON BOTH PATHS. An earlier draft
+  // emitted a NEW event name when the salvage succeeded, which would have made
+  // any counter keyed on `cee.structural_parse.failed` fall — a metric that
+  // improves because the telemetry moved, not because the product did (trap 23,
+  // and the in-repo consumer search cannot see dashboards or alerts). The parse
+  // DID fail in both cases; what differs is the consequence to the user. So the
+  // event stays, the failure keeps being counted honestly, and `salvaged`
+  // carries the new fact.
   log.warn({
     event: "cee.structural_parse.failed",
+    salvaged: salvage.salvaged,
     error_count: issueCount,
     first_issues: firstIssues,
     union_branch_detail: unionDetail,
-    salvage_declined: salvage.declined_reason,
+    ...(salvage.salvaged
+      ? {
+          stripped: salvage.stripped,
+          stripped_constraint_nodes: salvage.stripped.filter((n) => n.node_kind === "constraint").length,
+        }
+      : { salvage_declined: salvage.declined_reason }),
     request_id: ctx.requestId,
-  }, "Structural parse failed — graph does not conform to DraftGraphOutput schema");
+  }, salvage.salvaged
+    ? "Structural parse failed on optional observed_state only — field shed, model preserved"
+    : "Structural parse failed — graph does not conform to DraftGraphOutput schema");
+
+  if (salvage.salvaged) return;
 
   ctx.earlyReturn = {
     statusCode: 400,
