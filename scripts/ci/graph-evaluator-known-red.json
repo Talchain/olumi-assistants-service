@@ -3,7 +3,7 @@
   "measuredAt": "b6fc704c7424744611f95d5c1d3a7a0473da1837",
   "measuredAtNote": "GITHUB_SHA. On a pull_request event this is the EPHEMERAL MERGE COMMIT, not the PR head - use measuredIn (the run id) for provenance. Seeded from PR #1605, head 6652d6dcbd66a5b73445eff812a6768a9061b1fa.",
   "measuredIn": "Talchain/olumi-assistants-service run 35387588918",
-  "minPassingTests": 218,
+  "minPassingTests": 278,
   "knownRedTestFiles": {
     "tests/adapters.test.ts": 1,
     "tests/governed-draft-graph.test.ts": 1
@@ -11,5 +11,6 @@
   "knownRedTypecheckFiles": {
     "src/e2e-pipeline-test.ts": 2,
     "src/validate-graph-tester.ts": 2
-  }
+  },
+  "minPassingTestsNote": "RAISED BY A DERIVED DELTA, NOT A LOCAL ABSOLUTE. This file's own $comment says the baseline may only be measured in CI, because the tool's governed suite depends on the repo-root install \u2014 so the CI-measured base of 218 is KEPT and only the delta from WP1 is added: tests/trust-gates.test.ts +42 (new file), tests/scorer.test.ts 59 -> 76 (+17), tests/rubric-invariant.test.ts 10 -> 11 passed (+1, the goal_threshold_cap_provenance SAMPLE_VALUES fix). 218 + 60 = 278. Every one of those three files was run in isolation and is green; the broad local suite was NOT run to take this number (the repo load guard blocked it at load average 84, where a pristine baseline manufactures failures). knownRedTestFiles is UNCHANGED: rubric-invariant.test.ts had begun failing after CEE added goal_threshold_cap_provenance to CEE_MINTED_GOAL_FIELDS, which is a drift this file never recorded; the fix returns the failing set to its recorded baseline rather than widening it. Test FILES on disk go 18 -> 19; the guard derives that count itself and needs no entry."
 }
