@@ -10,6 +10,7 @@ import { EMPTY_PROPOSAL_STORE, type Proposal } from '../proposal-store.js';
 import { ACCEPT_TOOL_NAME, type ApplyOperations } from '../run-replacement-turn.js';
 import type { ChatWithToolsLike } from '../agent-loop.js';
 import type { ToolResponseBlock } from '../../../adapters/llm/types.js';
+import type { AgentTool } from '../agent-loop.js';
 import {
   EMPTY_REPLACEMENT_STATE,
   ReplacementStateConflictError,
