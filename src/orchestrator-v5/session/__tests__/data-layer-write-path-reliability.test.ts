@@ -59,7 +59,31 @@ const V4_PATH = fileURLToPath(
     import.meta.url,
   ),
 );
+/**
+ * ⛔ THE EFFECTIVE v5 BODY, NOT THE ORIGINAL ONE.
+ *
+ * `20260824200000` first defined `append_turn_atomic_v5`, and #1638's
+ * `20260920210000` later `CREATE OR REPLACE`s it. **The LATEST migration is the
+ * installed body**, so a guard pointed at the original protects nothing: the
+ * receipt, `MV422` and marker protections could be deleted from the effective
+ * definition with every assertion here still green.
+ *
+ * ⭐ This file made exactly that mistake and its PR body asserted the opposite
+ * ("neither pins the other's subject"). Caught in review. Recorded here because
+ * the hazard is invisible — a stale pointer at a superseded `CREATE OR REPLACE`
+ * body produces a fully green, fully vacuous guard, with no conflict and no red.
+ *
+ * ⇒ Rule for anything added below: **point at the newest migration that
+ * redefines the function**, and keep the original only as a CONTRAST CONTROL.
+ */
 const V5_PATH = fileURLToPath(
+  new URL(
+    '../../../../supabase/migrations/20260920210000_v5_append_v5_replay_precedes_cas.sql',
+    import.meta.url,
+  ),
+);
+/** The superseded original — used ONLY to prove the extractor discriminates. */
+const V5_SUPERSEDED_PATH = fileURLToPath(
   new URL(
     '../../../../supabase/migrations/20260824200000_c8_atomic_model_version_restore.sql',
     import.meta.url,
@@ -79,6 +103,7 @@ function stripComments(text: string): string {
 
 const v4Source = readFileSync(V4_PATH, 'utf8');
 const v5Source = readFileSync(V5_PATH, 'utf8');
+const v5SupersededSource = readFileSync(V5_SUPERSEDED_PATH, 'utf8');
 
 /**
  * The v4 body: from its own CREATE to the terminating `$$;`. Scoping matters —
@@ -102,6 +127,7 @@ function extractV5AppendBody(source: string): string {
 
 const v4 = extractV4Body(v4Source).replace(/\s+/g, ' ');
 const v5 = extractV5AppendBody(v5Source).replace(/\s+/g, ' ');
+const v5Superseded = extractV5AppendBody(v5SupersededSource).replace(/\s+/g, ' ');
 
 /** Offset of an anchor, asserted present by identity before it is compared. */
 function at(body: string, anchor: string, label: string): number {
@@ -242,6 +268,35 @@ describe('CASE 1/3 — a duplicate (scenario_id, turn_id) replays and repeats NO
 });
 
 // ── CASE 2 ───────────────────────────────────────────────────────────────────
+describe('⛔ the v5 guards read the EFFECTIVE body, not a superseded one', () => {
+  it('the effective v5 body is NOT byte-identical to the superseded original — the pointer moved', () => {
+    // If these ever match, either the repoint was reverted or a later migration
+    // restored the old body. Both are the silent-revert class this file exists
+    // to survive, and both make every v5 assertion below vacuous.
+    expect(v5.length).toBeGreaterThan(0);
+    expect(v5Superseded.length).toBeGreaterThan(0);
+    expect(v5).not.toBe(v5Superseded);
+  });
+
+  it('⭐ CONTRAST CONTROL — the two bodies differ on the ORDERING #1638 changed, in opposite directions', () => {
+    const casAt = (body: string) => body.indexOf('IF p_cas_enforce');
+    const lookupAt = (body: string) => body.indexOf('v_turn_preexisting := FOUND;');
+    // effective: the replay lookup precedes CAS
+    expect(lookupAt(v5)).toBeGreaterThanOrEqual(0);
+    expect(casAt(v5)).toBeGreaterThanOrEqual(0);
+    expect(lookupAt(v5)).toBeLessThan(casAt(v5));
+    // superseded: the opposite. This is what proves the extractor discriminates
+    // rather than reading the same text twice.
+    expect(lookupAt(v5Superseded)).toBeGreaterThan(casAt(v5Superseded));
+  });
+
+  it('the protections this file asserts are present in the EFFECTIVE body', () => {
+    for (const anchor of ["USING ERRCODE = 'MV422'", "USING ERRCODE = 'MV409'", 'model_version_receipt']) {
+      expect(v5, `absent from the effective v5 body: ${anchor}`).toContain(anchor);
+    }
+  });
+});
+
 describe('CASE 2 — a stale-revision write is refused with OLGC1 and leaves NOTHING behind', () => {
   it('the CAS raise is ordered AFTER the turn insert, so the abort is load-bearing', () => {
     const insert = at(v4, 'INSERT INTO v5_conversation_turns (', 'turn insert');
