@@ -49,7 +49,10 @@ import {
 } from "../../utils/magnitude-alphabet.js";
 import { CURRENCY_SYMBOL_TO_CODE } from "../extraction/numeric-parser.js";
 import { readUnit, type AmountKind } from "../provenance/stated-amounts.js";
-import { classifyValueSource } from "../graph-readiness/obligation-provenance.js";
+import {
+  classifyValueSource,
+  reflectsAHumanAct,
+} from "../graph-readiness/obligation-provenance.js";
 import type { KnownObservedStateSourceLiteral } from "@talchain/schemas";
 import type { ObservedStateStatedRole } from "./stated-role-vocabulary.js";
 
@@ -712,7 +715,10 @@ const VALUE_FIELDS = ["value", "raw", "raw_value", "cap"] as const;
  * carries a true sentence covering that ("This is not a complete account of
  * what was left out"), so an omission is disclosed and a false claim is not.
  *
- * ── ⚠ AND THE OPPOSITE HARM, WHICH IS WHY THIS IS NOT MERELY `user_stated` ──
+ * ── ⚠ AND THE OPPOSITE HARM, WHICH IS WHY THIS IS NOT MERELY THE AUTHORSHIP ─
+ * ── PREDICATE. (The upstream conjunct is `reflectsAHumanAct`, deliberately
+ * ── WIDER than `earnsAuthorshipCredit`: a value the user merely CONFIRMED
+ * ── earns no leader claim and is still not ours to call an invention.) ──────
  * `brief_extraction` and `explicit` ALSO classify as `user_stated` on the
  * authorship axis. Suppressing on authorship alone would drop them — and the
  * set that removes is precisely *"the label says from-brief but the number is
@@ -734,11 +740,15 @@ const USER_WRITE_RECEIPT: Readonly<
   // The user marked this as their own assumption. They still AUTHORED it, so
   // telling them "you did not state this" would be the exact harm.
   //
-  // ⚠ DELIBERATE DIVERGENCE, NAMED (trap 21). This follows
-  // `graph-readiness/obligation-provenance.ts` (`user_stated`) and DIVERGES
-  // from `decision-review/value-source-extraction-type.ts` (`inferred`) — the
-  // same literal, three questions, and only the authorship one is ours. Pinned
-  // both ways in `not-modelled-manifest.user-authorship.test.ts`.
+  // ⚠ DELIBERATE, NAMED (trap 21), and RE-RULED 20 Sep 2026.
+  // `graph-readiness/obligation-provenance.ts` now calls this `user_ratified`
+  // rather than `user_stated` — an admitted guess is not a value the user KNOWS,
+  // so it earns no authorship credit toward the leader claim. It is still a
+  // human act, so it is still a receipt HERE: the question this table answers is
+  // "would calling this OUR invention be a lie?", and it would. Three questions
+  // over one literal (`user_ratified` here, `inferred` for sampling width in
+  // `decision-review/value-source-extraction-type.ts`), pinned all ways in
+  // `not-modelled-manifest.user-authorship.test.ts`.
   user_assumption: true,
   // Elicited from a named participant AND verified against CEE's own collab
   // store before the stamp is written — CEE is its only stamper.
@@ -776,7 +786,16 @@ function isUserWriteReceipt(node: Record<string, unknown>): boolean {
   if (observed === null || typeof observed !== "object") return false;
   const stamp = (observed as Record<string, unknown>).source;
   if (typeof stamp !== "string") return false;
-  if (classifyValueSource(stamp) !== "user_stated") return false;
+  // ⚠ `reflectsAHumanAct`, NOT `earnsAuthorshipCredit` — and the distinction is
+  // this module's whole asymmetry, stated in the header above: wrongly claiming
+  // a user's value as OUR invention is far worse than wrongly omitting one of
+  // ours. A value the user CONFIRMED (`user_ratified` since 20 Sep 2026) is one
+  // they attended to; telling them "you did not state this" about it is the
+  // named harm. The authorship ruling that split `user_confirmed` and
+  // `user_assumption` out of `user_stated` is about whether a confirmation may
+  // unlock the LEADER CLAIM — a different question (trap 21), and answering it
+  // here would have silently widened this disclosure to cover them.
+  if (!reflectsAHumanAct(classifyValueSource(stamp))) return false;
   return USER_WRITE_RECEIPT[stamp as KnownObservedStateSourceLiteral] === true;
 }
 

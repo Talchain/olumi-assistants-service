@@ -329,7 +329,28 @@ describe('SOURCE_EXTRACTION_TYPE_TABLE — completeness and the ONE deliberate d
    * (trap 22f: a gap recorded in the suite is honest; a gap invisible to it is
    * how a silent re-bucketing ships).
    */
-  const KNOWN_DIVERGENT_FROM_OBLIGATION = new Set<string>(['user_assumption']);
+  /**
+   * ⭐ THE SET MOVED ON 20 Sep 2026, AND BOTH HALVES OF THE MOVE ARE DELIBERATE.
+   *
+   * `obligation-provenance.ts` split `user_confirmed` and `user_assumption` out
+   * of `user_stated` into a fifth class, `user_ratified`. Against the WIDTH
+   * table that swaps one member of this set for the other:
+   *
+   *   · `user_assumption` LEAVES. Width has always called it `inferred` (a
+   *     declared guess is a guess); obligation now agrees that it is not
+   *     authorship. The divergence this set was minted for is RESOLVED, not
+   *     suppressed — the two authorities genuinely agree on it now.
+   *   · `user_confirmed` JOINS. Width keeps it TIGHT and that is correct: the
+   *     user LOOKED at the number and endorsed it, which is real evidence about
+   *     the value and the only thing the sampler is asking. Obligation withholds
+   *     authorship credit, which is a question about who may name a leader.
+   *     Two questions, one literal (trap 21) — the fix is to name the
+   *     divergence, never to align the two tables.
+   *
+   * ⛔ Do NOT "tidy" this to an empty set by re-widening `user_confirmed`. That
+   * would tell the sampler to distrust a number a person checked.
+   */
+  const KNOWN_DIVERGENT_FROM_OBLIGATION = new Set<string>(['user_confirmed']);
 
   it('agrees with obligation-provenance on every literal EXCEPT the pinned divergence set', () => {
     const observedDivergences = new Set<string>();
@@ -345,16 +366,28 @@ describe('SOURCE_EXTRACTION_TYPE_TABLE — completeness and the ONE deliberate d
     );
   });
 
-  it('the pinned divergence is real — user_assumption is user_stated for obligation and WIDE for width', () => {
+  it('the pinned divergence is real — user_confirmed is NOT authorship for obligation and TIGHT for width', () => {
     // Pins the precondition in-test (trap 13b): if this stopped being true the
     // guard above would agree vacuously.
-    expect(classifyValueSource('user_assumption')).toBe('user_stated');
+    expect(classifyValueSource('user_confirmed')).toBe('user_ratified');
+    expect(SOURCE_EXTRACTION_TYPE_TABLE.user_confirmed).toBe('explicit');
+  });
+
+  it('TWIN — the divergence that LEFT is really resolved, not suppressed', () => {
+    // `user_assumption` was the pinned divergence until 20 Sep 2026. It is out
+    // of the set because the two authorities AGREE now, and that agreement is
+    // asserted here rather than inferred from the set having shrunk.
+    expect(classifyValueSource('user_assumption')).toBe('user_ratified');
     expect(SOURCE_EXTRACTION_TYPE_TABLE.user_assumption).toBe('inferred');
   });
 
   it('every literal obligation-provenance calls ai_drafted or system_repaired stays WIDE', () => {
     // The direction that must never invert: nothing the MODEL authored may
     // reach the tight bucket.
+    //
+    // ⚠ `user_ratified` is deliberately NOT in this predicate. It is not a class
+    // the model authored — it is the model's number with a person's endorsement
+    // on it, and the endorsement is exactly what the sampler may tighten on.
     for (const literal of OBSERVED_STATE_SOURCE_LITERALS) {
       const authored = classifyValueSource(literal);
       if (authored === 'ai_drafted' || authored === 'system_repaired') {

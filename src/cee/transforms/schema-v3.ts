@@ -770,11 +770,79 @@ export function transformNodeToV3(
       // Absence is passed through as absence: the contract's failure semantics
       // forbid reading it as `unit_interval`, so the formatter falls back to
       // its existing behaviour rather than to a default.
+      // ⭐⭐ THE DECLARATION SAYS WHAT THE NUMBER MEANS; THE EVIDENCE SAYS WHO
+      // NORMALISED IT — AND THEY ARE DIFFERENT QUESTIONS (trap 21).
+      //
+      // ⚠⚠ THIS SAID "THREE writers" UNTIL THE #1653 REBASE (21 Sep 2026) AND
+      // IT WAS FALSE AT THAT TIP. `declared_scale` has FOUR WRITER CLASSES over
+      // SIX ASSIGNMENT SITES; the DERIVED census in
+      // `factor-extraction/__tests__/range-display-normalised-declaration.test.ts`
+      // is the authority, not this comment, and it REDs on a fifth.
+      //
+      // WORD-ONLY writers — a declaration, with nothing normalised:
+      //   · `draft/records/projector.ts:2918-2919` — the USER's own
+      //     `stated_items[].value_scale`                     ⭐ added by #1653
+      //   · `draft/records/projector.ts:3424` — the MODEL's `claims[].value_scale`,
+      //     and the served ungated instruction
+      //     (`draft/records/instruction.ts:291`) tells the model that
+      //     `unit_interval` means *"a share"* — a genuine sub-unit quantity, on
+      //     the unit's own scale.
+      // NORMALISATION-BACKED writers:
+      //   · `draft/records/projector.ts:4339-4340` — pass 3d's rewrite
+      //   · `repair/unreachable-factors.ts` — `declaredScaleOf`
+      //
+      // Reading the word alone cannot tell the first pair from the second, and
+      // doing so DELETED a correct `"0.2 to 0.6 share"` — measured through this
+      // very chain.
+      //
+      // So the evidence is derived HERE, where the node is, and passed. All
+      // three carriers are producer-side facts about a division that happened:
+      //   · `scale_frame` — `projector.ts:4303` writes it on EVERY framed
+      //     factor precisely so that "absent ⇒ never framed" is true;
+      //   · `cap` — the enricher's normalisation divisor, promoted to node
+      //     level by `unreachable-factors.ts:578`;
+      //   · `raw_value !== value` — `normalise-factor-value.ts:14-18`: "when
+      //     `cap` is absent, value = raw_value", so a DIFFERENCE is the
+      //     normalisation, promoted at `unreachable-factors.ts:575`.
+      //
+      // ⚠ PRESENCE OF `raw_value` IS NOT ENOUGH — it must DIFFER. A model that
+      // emits `{value: 0.4, raw_value: 0.4}` has normalised nothing, and
+      // `declaredScaleOf` agrees (it refuses to declare that shape). Reading
+      // presence alone would re-open the defect this derivation closes.
+      const storedValue =
+        typeof anyNode.observed_state?.value === "number"
+          ? (anyNode.observed_state.value as number)
+          : isFactorData(node.data) && typeof (node.data as any).value === "number"
+            ? ((node.data as any).value as number)
+            : undefined;
+      const nodeRawValue =
+        typeof anyNode.raw_value === "number"
+          ? (anyNode.raw_value as number)
+          : isFactorData(node.data) && typeof (node.data as any).raw_value === "number"
+            ? ((node.data as any).raw_value as number)
+            : undefined;
+      const nodeCap =
+        anyNode.cap ?? (isFactorData(node.data) ? (node.data as any).cap : undefined);
+      // ⭐ THE PRODUCER'S OWN ANSWER OUTRANKS ANY RE-DERIVATION HERE.
+      // `repair/unreachable-factors.ts` stamps `declared_scale_basis` at the
+      // one moment the evidence is still complete — it deletes `data.value`
+      // immediately afterwards, so `raw_value !== value` becomes unreadable
+      // downstream. The three derived carriers below stay because the OTHER
+      // normalising producer (projector pass 3d) writes `scale_frame` and not
+      // this basis, and because a stored graph drafted before the basis
+      // existed still carries them.
+      const boundsAreNormalised =
+        anyNode.declared_scale_basis === "normalisation"
+        || anyNode.scale_frame !== undefined
+        || nodeCap !== undefined
+        || (nodeRawValue !== undefined && storedValue !== undefined && nodeRawValue !== storedValue);
+
       const synthesised = synthesiseRangeDisplayValue(
         v3Node.prior,
         priorUnit,
         v3Node.factor_type,
         anyNode.declared_scale,
+        boundsAreNormalised,
       );
       if (synthesised !== undefined) {
         v3Node.display_value = synthesised;

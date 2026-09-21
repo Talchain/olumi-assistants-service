@@ -1262,6 +1262,15 @@ async function runStructuralEditTool(input: {
     adapter,
     grounding,
     message: payload.message,
+    // ROADMAP 1.33, second leg — the SAME slice the rulebook already gets.
+    // `context.messages` is built at this dispatch's top from the 5-turn
+    // conversation projection and rendered for the rulebook as
+    // `## Recent Conversation`; it was in scope here and simply not forwarded,
+    // so the splitter could not resolve a request whose object ("these
+    // estimates", "that", "the one we discussed") lived in an earlier turn.
+    // Read from `context`, never re-loaded: a second read could disagree with
+    // the one the rulebook was judged on.
+    conversation: context.messages,
     maxPatchOperations: config.cee.maxPatchOperations,
     requestId,
     scenarioId: payload.scenario_id,

@@ -51,6 +51,7 @@ import {
   RunDeltaWinProbabilityDeltaSchema,
 } from '@talchain/schemas/boundary';
 
+import { STRUCTURE_PROVENANCE_ENUM_VALUES } from '../../cee/graph-readiness/obligation-provenance.js';
 import { RECENT_CHANGES_SUMMARY_MAX_CHARS } from './recent-changes.js';
 
 import { QuantityExtractionResultSchema } from './cqe/schema-types.js';
@@ -672,7 +673,15 @@ const ContextPackFactorValueEntrySchema = z
   .object({
     label: z.string().min(1),
     has_value: z.boolean(),
-    provenance: z.enum(['user_stated', 'ai_drafted', 'system_repaired', 'unattributed']),
+    /**
+     * ⛔ DERIVED FROM THE UNION, NEVER RE-INLINED. This was a hand-listed
+     * four-member tuple, and widening `StructureProvenance` breaks NOTHING at
+     * build time (zero exhaustive switches over it repo-wide) — so the next
+     * member would have been REJECTED HERE AT RUNTIME, inside the context pack,
+     * on a real turn, under a green build. Pinned both ways, and round-tripped,
+     * by `__tests__/context-pack-provenance-vocabulary-parity.test.ts`.
+     */
+    provenance: z.enum(STRUCTURE_PROVENANCE_ENUM_VALUES),
   })
   .strict();
 

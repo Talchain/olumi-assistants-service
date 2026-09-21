@@ -196,9 +196,46 @@ describe('⭐ REGISTRATION — the half a green completeness guard cannot see', 
     expect(TEMPLATE_SUFFIX_DISCLOSURE_EXCLUSIONS.map((e) => e.name)).not.toContain(REGISTERED_NAME);
   });
 
-  it('it rides LAST, matching the handler’s append order', () => {
+  /**
+   * ⚠ THIS ARM READ `names[names.length - 1] === REGISTERED_NAME` UNTIL 21 Sep
+   * 2026, AND THAT SPELLING WAS A HAND-MAINTAINED MIRROR (trap 12).
+   *
+   * The property it exists to protect is that the registry mirrors the
+   * `run_analysis` handler's append order — `TEMPLATE_SUFFIX_ONLY_REGEX`
+   * compiles the registry IN ORDER, so a family registered out of position
+   * makes the egress reject the composed summary and the user silently gets the
+   * bare template. `names[last]` is not that property. It is a claim that this
+   * family is the NEWEST one, which can only hold until the next family lands.
+   *
+   * The next family landed (#1650, the withheld-separability disclosure) and
+   * this arm RED — while NOTHING WAS IN THE WRONG POSITION: the handler appends
+   * it after `participationDisclosure` and the registry registers it after this
+   * entry, in agreement. A guard that REDs on a correct change is not catching
+   * the defect it was written for; it is reporting its own spelling.
+   *
+   * ⭐ THE ESTATE HAD ALREADY ANSWERED THIS ONCE, and the contrast is the
+   * evidence: the sibling pin for the unset-option-effect family
+   * (`routing/__tests__/unset-option-effect-salvage-registration.test.ts`)
+   * states the same rule RELATIVELY, and #1602 — the commit that added THIS
+   * family to the end of the registry — did not have to touch it. Same
+   * question, two spellings; one survived the next family and one did not.
+   *
+   * So this arm now states the relative rule, and the property that actually
+   * matters is asserted where it belongs — derived from `run-analysis.ts` ON
+   * DISK in `template-suffix-disclosure-registry-completeness.test.ts`, which
+   * constrains EVERY family's position instead of one, and is the only guard
+   * that binds the registry to the handler rather than to itself.
+   */
+  it('it composes AFTER the unset-option-effect family, matching the handler’s append order', () => {
     const names = TEMPLATE_SUFFIX_DISCLOSURE_GRAMMARS.map((g) => g.name);
-    expect(names[names.length - 1]).toBe(REGISTERED_NAME);
+    // Pin the precondition in-test (trap 13b): `indexOf` returns -1 for a name
+    // that is absent, and a comparison between two absent entries would be a
+    // discriminator that stopped discriminating without going red.
+    expect(names).toContain(REGISTERED_NAME);
+    expect(names).toContain('UNSET_OPTION_EFFECT_DISCLOSURE_RE_SRC');
+    expect(names.indexOf(REGISTERED_NAME)).toBeGreaterThan(
+      names.indexOf('UNSET_OPTION_EFFECT_DISCLOSURE_RE_SRC'),
+    );
   });
 
   it('⭐ the WITHHELD (locked-template) branch admits `template + disclosure`', () => {

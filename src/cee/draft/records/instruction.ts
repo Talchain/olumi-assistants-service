@@ -284,10 +284,17 @@ Set \`value\` when the user gave a number, and \`unit\` when they stated its uni
 Do not invent a number the
 user did not state, and do not round or rescale one they did.
 If the currency or unit is missing, leave \`unit\` out; do not infer it from the
-topic, location, another quantity or a model estimate. Keep the original amount
+topic, location, another quantity or a model estimate.
+\`unit\` is WHAT THE NUMBER IS MEASURED IN and nothing else. Never put a
+scale or convention word there — not "scale", not "unit_interval", not
+"ratio", not "raw_count", not "level", not "fraction". Those belong in
+\`value_scale\`, a separate field on the same record. A quantity with no
+natural unit — a judgement of quality, readiness or capability — has NO
+\`unit\`: leave it out and say what the number means in \`value_scale\`. Keep the original amount
 and any uncertainty in the quote. Use a contiguous verbatim span long enough to
 retain the referent and qualifications, never a reconstructed quotation.
-Set \`value_scale\` whenever you set a number, to say WHAT THE NUMBER MEANS —
+Set \`value_scale\` on a \`figure\` whenever you set a number on it, to say
+WHAT THE NUMBER MEANS —
 \`unit_interval\` for a share or a bounded percentage written as a decimal (3%
 churn is \`value: 0.03\`, \`unit: "%"\`, \`value_scale: "unit_interval"\`),
 \`ratio\` for a measure that can meaningfully pass 100% (NRR, growth, ROI —
@@ -358,9 +365,19 @@ field can retain a clearly identified event probability in draft records only,
 as a decimal between 0 and 1. It is not projected into the saved model or used
 by analysis, so it is not a substitute for retaining the original statement.
 Do not invent a probability to populate it.
-Use the declared \`value_scale\` convention above for current measurements:
-"monthly churn is currently 4%" supports \`value: 0.04\`, \`unit: "%"\`,
-\`value_scale: "unit_interval"\`. "There is a 4% chance of losing the contract
+Whenever YOU set a \`value\` on a claim, set \`value_scale\` on
+that claim too, using the same three-way vocabulary defined for stated items:
+\`unit_interval\` for a share or bounded percentage written as a decimal,
+\`ratio\` for a measure that can meaningfully pass 100%, and \`raw_count\` for a
+plain count in its own unit. It is a field on the claim, exactly as \`unit\` is,
+and the two answer different questions: \`unit\` is what the number is measured
+in, \`value_scale\` is which convention you wrote it in. A factor you score 0 to 1
+for quality or readiness is \`value_scale: "unit_interval"\` with NO \`unit\` —
+never \`unit: "scale"\`. Leave \`value_scale\` out only if you genuinely cannot
+tell; an omission means "not declared", never permission for anyone downstream
+to infer the convention from the magnitude.
+For current measurements: "monthly churn is currently 4%" supports
+\`value: 0.04\`, \`unit: "%"\`, \`value_scale: "unit_interval"\`. "There is a 4% chance of losing the contract
 this year" identifies an event probability, not a current measurement.
 "Churn risk: 4%", "Vendor slippage: 30%" and "Contract loss: 4%" do not by
 themselves establish which role the number has. Preserve that ambiguity and the
