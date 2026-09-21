@@ -100,6 +100,7 @@
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 
 import { buildTurnContext } from '../build-turn-context.js';
+import type { EnrichedTurnContext } from '../build-turn-context.js';
 import { log } from '../../utils/telemetry.js';
 import {
   claimSafetyScopeFromContext,
@@ -204,6 +205,23 @@ export interface TurnClaimSafetyResolver {
    * spreads the result into its `sendFinalised200` ctx.
    */
   forExit(): Promise<TurnExitStamp>;
+  /**
+   * THIS TURN'S CONTEXT, from the same memoised read {@link forExit} uses, or
+   * `null` when it could not be read.
+   *
+   * Exposed for a controller that must REPORT on the scenario rather than
+   * merely be permitted or withheld — the replacement conversation layer has
+   * to tell the user what analysis exists, and reading it from a second
+   * `buildTurnContext` call would be a second answer to one question plus a
+   * second round trip on the turn's critical path.
+   *
+   * ⚠ `null` means WE COULD NOT LOOK. It does NOT mean the scenario is empty,
+   * and a consumer that reports it as "nothing has ever been computed" has
+   * reintroduced the exact defect this exposure exists to fix. See
+   * `replacement/turn-context-view.ts`, which is the one consumer and states
+   * the four states it maps onto.
+   */
+  turnContext(): Promise<EnrichedTurnContext | null>;
 }
 
 /**
@@ -222,25 +240,28 @@ export function createTurnClaimSafetyResolver(
   // today, but not a property this module should depend on) would otherwise
   // each start their own read and the second would discard the first's answer.
   let memo: Promise<ResolvedTurnExit> | null = null;
+  // ⭐ THE CONTEXT READ IS MEMOISED SEPARATELY FROM THE VERDICT, so a caller
+  // that needs the context ITSELF (the replacement controller, which must tell
+  // the user what analysis exists) shares this turn's ONE read instead of
+  // opening a second one. Two reads would be two answers about one scenario —
+  // the mirror defect (CLAUDE.md trap 12) bought with an extra round trip.
+  //
+  // Same promise-not-value reasoning as `memo` below: concurrent callers must
+  // join the first read rather than each starting their own.
+  let contextMemo: Promise<EnrichedTurnContext | null> | null = null;
 
-  async function resolve(): Promise<ResolvedTurnExit> {
-    // No payload ⇒ nothing was looked at. NO freshness is carried, which is
-    // distinct from a read that looked and found nothing.
-    if (payload === null) return { verdict: NO_TURN_CONTEXT_VERDICT };
+  /**
+   * The turn's context, or `null` when there is nothing to read (a system
+   * event, which carries no `message`) or the read THREW.
+   *
+   * Both collapse to `null` here ON PURPOSE — every consumer of this function
+   * must treat "could not look" identically, and the two are told apart where
+   * it matters by the caller checking `payload` (see {@link resolve}).
+   */
+  async function loadContext(): Promise<EnrichedTurnContext | null> {
+    if (payload === null) return null;
     try {
-      const context = await buildTurnContext(payload, requestId);
-      // THE canonical derivation — the same two arguments the execute path
-      // passes at `turn-executor.ts`. Nothing is re-derived or mirrored here.
-      return {
-        verdict: readMayNameLeadingOptionVerdict(
-          context.prior_facts,
-          claimSafetyScopeFromContext(context),
-        ),
-        // NOT a second derivation: the context computed this from the same
-        // facts, the same persisted-graph hash and the same degraded-read flag
-        // it hands `deriveCoachingState`. Read, never recomputed (trap 12).
-        freshness: context.persisted_analysis_freshness,
-      };
+      return await buildTurnContext(payload, requestId);
     } catch (err) {
       // FAIL CLOSED and SAY SO. A swallowed read failure that returned `true`
       // is the shape of every defect in this workstream; a swallowed read
@@ -258,11 +279,35 @@ export function createTurnClaimSafetyResolver(
         },
         'V5 claim safety — turn-context read failed at an early exit; withholding the leading-option permission',
       );
-      // SAY WHICH KIND OF IGNORANCE THIS IS. The verdict fails closed as before;
-      // the freshness reports a FAILED read rather than letting the exit's
-      // `analysis_state` claim no graph was in scope.
-      return { verdict: NO_TURN_CONTEXT_VERDICT, freshness: CONTEXT_READ_FAILED_DERIVATION };
+      return null;
     }
+  }
+
+  async function resolve(): Promise<ResolvedTurnExit> {
+    // No payload ⇒ nothing was looked at. NO freshness is carried, which is
+    // distinct from a read that looked and found nothing.
+    if (payload === null) return { verdict: NO_TURN_CONTEXT_VERDICT };
+    contextMemo ??= loadContext();
+    const context = await contextMemo;
+    if (context !== null) {
+      // THE canonical derivation — the same two arguments the execute path
+      // passes at `turn-executor.ts`. Nothing is re-derived or mirrored here.
+      return {
+        verdict: readMayNameLeadingOptionVerdict(
+          context.prior_facts,
+          claimSafetyScopeFromContext(context),
+        ),
+        // NOT a second derivation: the context computed this from the same
+        // facts, the same persisted-graph hash and the same degraded-read flag
+        // it hands `deriveCoachingState`. Read, never recomputed (trap 12).
+        freshness: context.persisted_analysis_freshness,
+      };
+    }
+    // SAY WHICH KIND OF IGNORANCE THIS IS. The verdict fails closed as before;
+    // the freshness reports a FAILED read rather than letting the exit's
+    // `analysis_state` claim no graph was in scope. (The read failure itself is
+    // logged once, at the read, by `loadContext`.)
+    return { verdict: NO_TURN_CONTEXT_VERDICT, freshness: CONTEXT_READ_FAILED_DERIVATION };
   }
 
   return {
@@ -276,6 +321,10 @@ export function createTurnClaimSafetyResolver(
         // "not read" stays distinguishable from every derived verdict.
         ...(resolved.freshness !== undefined ? { exitFreshness: resolved.freshness } : {}),
       };
+    },
+    async turnContext(): Promise<EnrichedTurnContext | null> {
+      contextMemo ??= loadContext();
+      return await contextMemo;
     },
   };
 }

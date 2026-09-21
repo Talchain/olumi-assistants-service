@@ -446,6 +446,14 @@ export type V5DiagnosticExitPath =
   | 'turn_executor'
   | 'chip_click'
   | 'edit_graph'
+  /**
+   * The replacement conversation controller (CEE_REPLACEMENT_COACH_ENABLED).
+   * One controller per turn: a turn that takes this exit ran none of the
+   * routing branches below it, and a turn that ran any of them did not take
+   * this exit. Distinguishable in the trace precisely so the two can never be
+   * confused when reading a session back.
+   */
+  | 'replacement_controller'
   | 'system_event'
   | 'frame_no_brief_guard'
   // META-DECISION-DIAGNOSIS-2026-07-20 — round-1 process-meta intake
