@@ -112,6 +112,32 @@ describe('declaration vs inference — agree, absent, contradict', () => {
     });
   }
 
+  // ⭐⭐ THE UNIT WITHHOLDING IS A SECOND QUESTION AND IT MUST NOT RIDE ON THE
+  // FIRST. "What scale do we claim this is?" and "is it safe to show the unit?"
+  // are different (trap 21). A contradiction makes us LESS certain, so it must
+  // not start showing a unit the pre-existing code judged unsafe: a ratio-scale
+  // prior of [0.56, 1.68] renders "56% to 1.68%" through `display-value.ts`'s
+  // magnitude sniff. Each case below is a case that existed BEFORE this change,
+  // asserted to behave as it did then.
+  const unitOf = (n: Record<string, unknown>) => n.unit;
+
+  it('WITHHOLD — declared unit_interval contradicted by an inferred ratio still withholds', () => {
+    // The regression case. Keying the withhold on the RESOLVED scale alone
+    // clears the declaration and then shows the unit, which is the render the
+    // withholding exists to prevent.
+    const n = afterRepair(
+      { value: 1.68, unit: '%', raw_value: 168 },
+      { declared_scale: 'unit_interval', observed_state: { value: 1.68, declared_scale: 'unit_interval' } },
+    );
+    expect(n.declared_scale, 'the contradiction still clears the claim').toBeUndefined();
+    expect(unitOf(n), 'but the unit stays withheld — less certain, not more').toBeUndefined();
+  });
+
+  it('SHOW — a plain unit_interval factor keeps its unit', () => {
+    // The contrast that stops the rule above collapsing into "always withhold".
+    expect(unitOf(afterRepair(pctData())), 'nothing here suggests ratio').toBe('%');
+  });
+
   it('A DECLARATION THE INFERENCE CANNOT JUDGE SURVIVES — it is not contradicted', () => {
     // No unit, no cap, raw === value ⇒ `declaredScaleOf` abstains. Abstention is
     // not disagreement, so the user's declaration stands. This is what stops the

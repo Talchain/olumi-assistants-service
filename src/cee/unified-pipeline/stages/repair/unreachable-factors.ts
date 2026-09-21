@@ -702,13 +702,29 @@ export function handleUnreachableFactors(
       // two branches read as independent conditions when they are in fact the
       // two halves of one decision. Nested, the shape says what it does: a
       // stated unit either displays or is withheld-and-recorded.
-      // ⭐ READS THE RESOLVED SCALE, NOT THE RAW INFERENCE. `scale` used to be
-      // whatever `declaredScaleOf` returned; now three outcomes are possible
-      // (agree / declaration stands / contradiction cleared), and the unit
-      // withholding must follow the value that actually ENDED UP on the node —
-      // or it withholds a unit to protect a `ratio` reading the node no longer
-      // claims. One source, so the two cannot drift (trap 12).
-      const withholdUnit = (node as any).declared_scale === "ratio";
+      // ⭐⭐ WITHHOLD ON *ANY* REASON TO THINK RATIO — resolved OR inferred.
+      //
+      // ⚠ THE OBVIOUS VERSION OF THIS LINE IS A REGRESSION, and I wrote it
+      // before catching it. `scale` used to be whatever `declaredScaleOf`
+      // returned; keying the withhold on the RESOLVED value alone looks like
+      // the tidy one-source fix, and it silently changes one pre-existing case:
+      //
+      //     declared `unit_interval` + inferred `ratio`
+      //       before -> inference won, unit WITHHELD
+      //       resolved-only -> contradiction clears it, unit SHOWN
+      //
+      // and showing it is precisely what the withholding exists to prevent —
+      // `display-value.ts` resolves a '%' by MAGNITUDE SNIFF, so a ratio-scale
+      // prior of [0.56, 1.68] renders "56% to 1.68%". Clearing the declaration
+      // is the right answer to "what scale is this?"; it is NOT a licence to
+      // start rendering a unit we previously judged unsafe. Two questions
+      // (trap 21): what do we CLAIM the scale is, and is it safe to show the
+      // unit. The contradiction makes us less certain, not more.
+      //
+      // The disjunction preserves every pre-existing case exactly, and answers
+      // the one new case (a declaration surviving an abstention) in the safe
+      // direction. Pinned in `declaration-beats-inference.test.ts`.
+      const withholdUnit = (node as any).declared_scale === "ratio" || inferred === "ratio";
       if (data.unit !== undefined) {
         if (!withholdUnit) {
           (node as any).unit = data.unit;
