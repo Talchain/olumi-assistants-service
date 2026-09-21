@@ -1,7 +1,24 @@
 name: Performance Gate
 
+# ⛔⛔ NO `pull_request:` TRIGGER. THIS JOB SPENDS REAL MONEY AT PRODUCTION.
+#
+# It runs Artillery against `https://olumi-assistants-service.onrender.com` —
+# PRODUCTION, not staging — hitting `POST /assist/draft-graph` with the real
+# `ASSIST_API_KEY`. An unqualified `pull_request:` meant EVERY pull request from
+# EVERY lane fired paid production draft traffic, including docs-only and
+# CI-only PRs.
+#
+# Production perf coverage is unchanged and complete without it:
+#   · `schedule` — nightly baseline, the actual trend signal
+#   · `push: main` — every release
+#   · `workflow_dispatch` — on demand, before a change you want measured
+# A per-PR run added spend, not signal: p95 against production does not vary
+# with the contents of a branch that has not been deployed.
+#
+# ⚠ Removing the trigger blocks nothing. Measured at the API: the ONLY required
+# status check on `staging` is "Lint, TypeCheck, Unit Tests". This job has never
+# been required.
 on:
-  pull_request:
   workflow_dispatch:
   push:
     branches:
@@ -19,9 +36,23 @@ concurrency:
 
 jobs:
   perf-gate:
-    # Named staging batch only; unset hold restores automatic coverage.
-    if: >-
-      ${{ !(vars.CORE_DRAFTING_PAID_HOLD == '20260920' && (github.event_name == 'pull_request' && github.base_ref == 'staging' && contains(fromJSON('["fix/baseline-ask-collision-precedence","cct/quantities-on-risk-and-outcome","feat/core-1251-validated-20260919","feat/draft-authored-meaning-20260919","feat/core-budget-consent-20260919","feat/core-authored-limit-continuity-20260919","feat/core-capacity-intervention-20260919","feat/core-explicit-paid-release-20260920"]'), github.head_ref))) }}
+    # ⚠⚠ THE PAID HOLD THAT NEVER HELD — REMOVED RATHER THAN REPAIRED.
+    #
+    # This job carried:
+    #     if: !(vars.CORE_DRAFTING_PAID_HOLD == '20260920' && <8 named branches>)
+    #
+    # `vars.CORE_DRAFTING_PAID_HOLD` HAS NEVER EXISTED. Measured at the API:
+    # `actions/variables` total_count = 0, with `actions/secrets` total_count = 3
+    # as the positive control, so the probe could see a presence. An undefined
+    # `vars.X` is the empty string, the comparison is always false, `!(false && …)`
+    # is always true, and the job ALWAYS RAN — including for the eight branches
+    # the hold explicitly named.
+    #
+    # ⛔ A present, plausible, permanently-false cost control is WORSE than none,
+    # because it is exactly what stops anyone looking — the same shape as a
+    # dependency override pinned one patch short of its fix. Deleting it is the
+    # honest state: the trigger above is now the control, and it is one nobody
+    # has to remember to set.
     name: Performance Gate (p95 < 8s)
     runs-on: ubuntu-latest
     timeout-minutes: 12
@@ -124,9 +155,12 @@ jobs:
             See job summary for p95 values (healthz gating, draft-graph observed).
 
   sse-live-resume-gate:
-    # Named staging batch only; unset hold restores automatic coverage.
-    if: >-
-      ${{ !(vars.CORE_DRAFTING_PAID_HOLD == '20260920' && (github.event_name == 'pull_request' && github.base_ref == 'staging' && contains(fromJSON('["fix/baseline-ask-collision-precedence","cct/quantities-on-risk-and-outcome","feat/core-1251-validated-20260919","feat/draft-authored-meaning-20260919","feat/core-budget-consent-20260919","feat/core-authored-limit-continuity-20260919","feat/core-capacity-intervention-20260919","feat/core-explicit-paid-release-20260920"]'), github.head_ref))) }}
+    # ⚠ SAME DEAD HOLD, SAME PRODUCTION TARGET. This job's `PERF_TARGET_URL` is
+    # also `olumi-assistants-service.onrender.com`, and it carried the identical
+    # `vars.CORE_DRAFTING_PAID_HOLD` condition — a variable that has never
+    # existed, so this job always ran too. Removed for the same reason, and
+    # named here because the workflow has TWO jobs and reasoning about one of
+    # them is how the other gets forgotten.
     name: SSE Live Resume Performance Gate
     runs-on: ubuntu-latest
     timeout-minutes: 15
