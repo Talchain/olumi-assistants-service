@@ -445,12 +445,17 @@
               "<=",
               ">",
               ">=",
-              "="
-            ]
+              "=",
+              "qualitative"
+            ],
+            "description": "Keep the user's operator EXACT: 'under 4%' is '<', 'at most 4%' is '<='. Use 'qualitative' for a limit with no numeric threshold, and set value null."
           },
           "value": {
-            "type": "number",
-            "description": "Native magnitude as written (4 for 4%)."
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Native magnitude as written (4 for 4%). null for a QUALITATIVE limit that has no number — 'data residency must be UK-only', 'must keep the existing team'. Never invent a 1/0 or any other stand-in to fill this field."
           },
           "unit": {
             "type": [
