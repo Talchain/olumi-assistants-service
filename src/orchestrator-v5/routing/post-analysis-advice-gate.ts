@@ -2666,7 +2666,18 @@ function composeWhatWouldFlip(
     sentences.push(closeness);
   } else {
     sentences.push(
-      `Based on this model, ${quoteLabel(leadingLabel)} currently leads${probabilityFragment(analysis.leading_option?.probability)}.`,
+      // ⭐ THE SIXTH CALL SITE, and the one this file had missed. The other
+      // five already route through the shared composer; this arm still
+      // asserted a league-table standing in the retired verb, on the live
+      // deterministic free-text advice path. `null` for the goal label is the
+      // same choice the five siblings make: the composer says "your goal"
+      // rather than inventing a referent, which is safer than keeping a
+      // standing claim the ruling retires.
+      composeResultStandingSentence(
+        quoteLabel(leadingLabel),
+        null,
+        probabilityFragment(analysis.leading_option?.probability),
+      ),
     );
     // ROADMAP 2.1067 — ONE OWNER FOR THIS SENTENCE, the `flip` voice of
     // `composeRobustnessVerdict`. These two arms were copy-identical twins of

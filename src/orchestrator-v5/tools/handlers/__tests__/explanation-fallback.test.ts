@@ -12,6 +12,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { RESULT_STANDING_VERB } from '../../../compose/goal-referenced-result-phrasing.js';
 
 // Interpolated, never re-typed — see the note in post-analysis-advice-gate.test.ts.
 import { RESULT_STANDING_SUBJECT } from '../../../compose/goal-referenced-result-phrasing.js';
@@ -1069,7 +1070,10 @@ describe('composeWhatWouldFlipFallback — label-quoting + hedge-consolidation p
     const text = composeWhatWouldFlipFallback(ANALYSIS);
     expect(text).not.toMatch(/performing best/i);
     expect(text).not.toMatch(/\bbest\b/i);
-    expect(text).toMatch(/currently leads/);
+    // The positive control for this absence pin. Bound to the shared constant
+    // rather than a retyped sentence, so it cannot drift into a fourth copy of
+    // the opener while the composer moves.
+    expect(text).toContain(RESULT_STANDING_VERB);
   });
 
   it('near-tie + fragile: the lead drops its trailing "could shift" hedge (one caveat only)', () => {

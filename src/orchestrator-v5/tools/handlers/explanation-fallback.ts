@@ -689,6 +689,15 @@ export function composeWhatWouldFlipFallback(
   rawRobustness?: RawRobustnessSignals | null,
   flipSummary?: FlipSummary | null,
   defaultedAssumptions?: DefaultedAssumptionsSignal | null,
+  /**
+   * ⭐ THE GOAL THE PROBABILITY IS ABOUT — same contract as
+   * `composeExplainResultsFallback` above, because these two composers answer
+   * the same question in two voices and must not diverge on what the number
+   * MEANS. Absent ⇒ the sentence says "your goal" rather than inventing a
+   * referent; never defaulted from another label, since a wrong goal is worse
+   * than a generic one because the reader cannot tell it is wrong.
+   */
+  goalLabel?: string | null,
 ): string {
   if (!projection || !projection.leading_option) {
     return 'The analysis has finished, but the sensitivity picture could not be summarised from the available data. Would you like to run the analysis again?';
@@ -710,7 +719,19 @@ export function composeWhatWouldFlipFallback(
   // is set on the projection.
 
   sentences.push(
-    `${quoteLabel(leading.label)} currently leads, with a probability of ${formatProbability(leading.probability)}.`,
+    // ⭐ ROUTED THROUGH THE SHARED COMPOSER. This opener asserted a
+    // league-table standing in the retired verb — the exact claim the ruling
+    // retires, on a LIVE user-facing path reached by the routed
+    // `what_would_flip` handler. It now reports the same Monte Carlo result as
+    // a measurement against the user's goal, in one voice with its sibling.
+    //
+    // ⚠ The label keeps this file's existing quoting. The ruling is about the
+    // VERB; re-rendering the label would be an unasked-for copy change.
+    composeResultStandingSentence(
+      quoteLabel(leading.label),
+      goalLabel,
+      ` with a probability of ${formatProbability(leading.probability)}`,
+    ),
   );
 
   // Margin sentence (near-tie "effectively tied" / clear "would need to close"

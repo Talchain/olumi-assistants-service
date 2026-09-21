@@ -16,6 +16,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { RESULT_STANDING_VERB } from '../../compose/goal-referenced-result-phrasing.js';
 
 // ⭐ The post-analysis copy pins below INTERPOLATE the owner's phrases rather
 // than re-typing them. Paul's 21 Sep ruling retired the league-table noun "the
@@ -1040,7 +1041,9 @@ describe('tryPostAnalysisAdviceGate — enriched composer output (full data)', (
     if (out.matched) {
       const text = out.assistant_text;
       // Clear-lead opener — quoted label, no "favoured option"/"best".
-      expect(text).toContain("Based on this model, 'Hire two senior engineers locally' currently leads");
+      // ROADMAP: the retired league-table opener. The sixth call site in this
+      // file now routes through the shared composer like its five siblings.
+      expect(text).toContain("'Hire two senior engineers locally' " + RESULT_STANDING_VERB);
       expect(text).toContain('with a probability of 62%');
       // ROADMAP 2.1067 — was "For 'Hire one senior engineer overseas' to
       // overtake it, the lead of 24 percentage points would need to close",
@@ -3305,7 +3308,7 @@ describe('tryPostAnalysisAdviceGate — what_would_flip richer evidence + honest
     expect(out.matched).toBe(true);
     if (out.matched) {
       const t = out.assistant_text;
-      expect(t).toContain("Based on this model, 'Option A' currently leads");
+      expect(t).toContain("'Option A' " + RESULT_STANDING_VERB);
       expect(t).not.toContain('the link from'); // no invented fragile assumption
       expect(t).not.toMatch(/most likely to flip|threshold signal/i); // no implied flip
       expect(t).toContain('What to check next');
