@@ -163,6 +163,10 @@ import {
   enforceAnalysisAuthorityUnavailableAtEgress,
   type AnalysisAuthorityUnavailableEgressMode,
 } from '../orchestrator-v5/compose/analysis-authority-unavailable-notice.js';
+// G3 — the one-way scenario-over-window precedence, applied at the finaliser
+// seam beside the arm above. See that module for why the two derivations are
+// named apart rather than reconciled.
+import { resolveScenarioAnalysisSupersession } from '../orchestrator-v5/context/scenario-analysis-supersession.js';
 import {
   classifyAnswerShape,
   deriveAnswerTextFromShape,
@@ -782,6 +786,19 @@ async function sendFinalised200(
      *  system-event writers). Reader/acknowledgement events omit it. */
     readonly freshness?: import('../orchestrator-v5/context/freshness.js').FreshnessDerivation;
     /**
+     * G3 — the SCENARIO-BOUND freshness verdict, over the durable analysis
+     * history rather than this turn's bounded window. Supplied by the
+     * turn_executor exit from `TurnExecutorRunResult.scenarioFreshness`, and by
+     * no other exit: it is the only dispatch that loads the durable carrier.
+     *
+     * ⚠ NOT A BETTER `freshness` — a DIFFERENT QUESTION (trap 21). Consumed
+     * only through `resolveScenarioAnalysisSupersession` at the finaliser seam
+     * below, which may correct a hot-window `none` and may correct nothing else.
+     * Absent ⇒ no durable reasoning authority licensed it, and the seam changes
+     * nothing.
+     */
+    readonly scenarioFreshness?: import('../orchestrator-v5/context/freshness.js').FreshnessDerivation;
+    /**
      * The COMPLETED RERUN's fact window, threaded into `finaliseV5Response` so
      * it can stamp the run-over-run consequence block (`run_delta`). Supplied
      * by the turn_executor exit via `TurnExecutorRunResult.priorFacts`, which
@@ -1028,6 +1045,30 @@ async function sendFinalised200(
   const canonicalStateSourceForSummary = ctx.canonicalState
     ? 'turn_executor'
     : 'route_fallback';
+  // G3 — THE HEALTHY TWIN OF THE ARM BELOW, at the same seam and by design.
+  //
+  // The `analysisAuthorityUnavailable` arm substitutes a whole derivation when
+  // the durable analysis authority could NOT BE READ, *"so a hot-window `none`
+  // verdict cannot reappear as `never_run` after egress copy has already
+  // disclosed that the scenario-wide read failed"*
+  // (`compose/analysis-authority-unavailable-notice.ts`). G3 is the same harm
+  // from the other direction: the durable authority COULD be read and holds a
+  // `run_analysis` fact the bounded hot window has since lost, so the wire says
+  // `none` — "never run" — about an analysis that exists.
+  //
+  // Evaluated only on the healthy arm, and the two are mutually exclusive by
+  // construction besides: `fail_closed_unavailable` means no durable reasoning
+  // authority, and the producer populates `scenarioFreshness` only when one was
+  // licensed. The `? undefined :` is therefore belt-and-braces, and it is here
+  // so the precedence cannot be reached from a state that has already declared
+  // its read failed.
+  const scenarioSupersession = analysisAuthorityUnavailable
+    ? undefined
+    : resolveScenarioAnalysisSupersession({
+        windowFreshness: ctx.freshness,
+        scenarioFreshness: ctx.scenarioFreshness,
+        ...(ctx.analysisReady ? { readiness: ctx.analysisReady } : {}),
+      });
   const finaliserContext = analysisAuthorityUnavailable
     ? {
         ...ctx,
@@ -1037,7 +1078,19 @@ async function sendFinalised200(
           ctx.analysisReady ? { readiness: ctx.analysisReady } : {},
         ),
       }
-    : ctx;
+    : scenarioSupersession !== undefined
+      ? {
+          ...ctx,
+          // ⚠ ADDITIVE, NEVER AN OVERWRITE. `ctx.freshness` and
+          // `ctx.canonicalState` are left exactly as the dispatch supplied them,
+          // so the authoritative top-level `graph_hash` stamp, the
+          // `_context_summary` diagnostic below, and every other reader are
+          // byte-identical. Only `analysis_ready.freshness` and `analysis_state`
+          // read the two members added here — see `FinaliserContext`.
+          analysisStateFreshness: scenarioSupersession.freshness,
+          analysisStateCanonical: scenarioSupersession.canonicalState,
+        }
+      : ctx;
   let analysisAuthorityUnavailableEgressMode: AnalysisAuthorityUnavailableEgressMode =
     'substantive_replaced';
   // ── ROADMAP 2.709 invariant 6 — surface a STANDING draft loss ─────────
@@ -8179,6 +8232,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         ? { withheldExplanationReason: run.withheldExplanationReason }
         : {}),
       ...(run.freshness ? { freshness: run.freshness } : {}),
+      // G3 — the scenario-bound verdict, beside the wire-bound one. Absent
+      // unless a durable reasoning authority licensed it; the seam then changes
+      // nothing, so every other exit family stays byte-identical.
+      ...(run.scenarioFreshness ? { scenarioFreshness: run.scenarioFreshness } : {}),
       requestStartedAt: routeStartedAt,
       scenarioId: ingress.scenario_id,
       turnId: ingress.turn_id,
