@@ -1,7 +1,19 @@
 name: Performance Gate
 
+# ⛔⛔ NO `pull_request:` TRIGGER. THIS WORKFLOW FIRES PAID LOAD AT PRODUCTION.
+#
+# `BASE_URL` below is `olumi-assistants-service.onrender.com` — PRODUCTION, not
+# staging — and the steps drive artillery at `POST /assist/draft-graph` plus
+# sustained concurrent streams, with the real `ASSIST_API_KEY`. An unqualified
+# `pull_request:` meant EVERY pull request from EVERY lane spent production
+# draft calls, on a workflow that is NOT a required check on `staging` and so
+# gated nothing. Measured 21 Sep 2026: it fired on five branches in under an
+# hour, none of which had asked for a performance measurement.
+#
+# The nightly schedule and `push: main` keep the gate's actual purpose —
+# watching production p95 over time — and `workflow_dispatch` lets anyone run
+# it against a branch deliberately when they want that signal.
 on:
-  pull_request:
   workflow_dispatch:
   push:
     branches:
@@ -19,9 +31,15 @@ concurrency:
 
 jobs:
   perf-gate:
-    # Named staging batch only; unset hold restores automatic coverage.
-    if: >-
-      ${{ !(vars.CORE_DRAFTING_PAID_HOLD == '20260920' && (github.event_name == 'pull_request' && github.base_ref == 'staging' && contains(fromJSON('["fix/baseline-ask-collision-precedence","cct/quantities-on-risk-and-outcome","feat/core-1251-validated-20260919","feat/draft-authored-meaning-20260919","feat/core-budget-consent-20260919","feat/core-authored-limit-continuity-20260919","feat/core-capacity-intervention-20260919","feat/core-explicit-paid-release-20260920"]'), github.head_ref))) }}
+    # ⚠ THE `CORE_DRAFTING_PAID_HOLD` GUARD THAT SAT HERE WAS A NO-OP AND ALWAYS
+    # HAD BEEN. It read `vars.CORE_DRAFTING_PAID_HOLD == '20260920'`; measured
+    # 21 Sep 2026 `gh api repos/.../actions/variables` returns
+    # `total_count: 0` (positive control: `secrets` returns 3), so the
+    # comparison was always false, `!(false)` always true, and both jobs ran —
+    # including for the eight branches the hold named. It is removed rather
+    # than left in place: a dead switch invites a later fix that sets the
+    # variable and still changes nothing. Its every conjunct also required
+    # `github.event_name == 'pull_request'`, which no longer occurs.
     name: Performance Gate (p95 < 8s)
     runs-on: ubuntu-latest
     timeout-minutes: 12
@@ -124,9 +142,15 @@ jobs:
             See job summary for p95 values (healthz gating, draft-graph observed).
 
   sse-live-resume-gate:
-    # Named staging batch only; unset hold restores automatic coverage.
-    if: >-
-      ${{ !(vars.CORE_DRAFTING_PAID_HOLD == '20260920' && (github.event_name == 'pull_request' && github.base_ref == 'staging' && contains(fromJSON('["fix/baseline-ask-collision-precedence","cct/quantities-on-risk-and-outcome","feat/core-1251-validated-20260919","feat/draft-authored-meaning-20260919","feat/core-budget-consent-20260919","feat/core-authored-limit-continuity-20260919","feat/core-capacity-intervention-20260919","feat/core-explicit-paid-release-20260920"]'), github.head_ref))) }}
+    # ⚠ THE `CORE_DRAFTING_PAID_HOLD` GUARD THAT SAT HERE WAS A NO-OP AND ALWAYS
+    # HAD BEEN. It read `vars.CORE_DRAFTING_PAID_HOLD == '20260920'`; measured
+    # 21 Sep 2026 `gh api repos/.../actions/variables` returns
+    # `total_count: 0` (positive control: `secrets` returns 3), so the
+    # comparison was always false, `!(false)` always true, and both jobs ran —
+    # including for the eight branches the hold named. It is removed rather
+    # than left in place: a dead switch invites a later fix that sets the
+    # variable and still changes nothing. Its every conjunct also required
+    # `github.event_name == 'pull_request'`, which no longer occurs.
     name: SSE Live Resume Performance Gate
     runs-on: ubuntu-latest
     timeout-minutes: 15
