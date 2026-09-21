@@ -2862,15 +2862,37 @@ export async function runTurnExecutor(
       // degraded-read flag only into the canonical selector made a single turn
       // emit pack 'unknown' and turn_outcome 'none' simultaneously. Every raw
       // derivation over context.prior_facts now threads the same flag.
-      context.prior_facts_read_ok === undefined
-        ? undefined
-        : { priorFactsReadOk: context.prior_facts_read_ok },
+      // ⭐ ONE AUTHORITY FOR ONE QUESTION, extended to the restore marker. The
+      // note above says every raw derivation over `context.prior_facts` threads
+      // the same degraded-read flag; the restore-chronology marker is the same
+      // shape of fact and is threaded the same way, from the SAME context read,
+      // so no two derivations on this turn can disagree about whether the model
+      // was restored after its analysis ran.
+      //
+      // ⚠ `analysisInvalidatedAt` is the ONLY input that can make a MATCHING
+      // hash read `stale`. Without it a restored model reports `fresh` on every
+      // turn-path derivation — measured: 1 of 20 call sites threaded it.
+      // `null`/absent ⇒ byte-identical to before.
+      {
+        ...(context.prior_facts_read_ok === undefined
+          ? {}
+          : { priorFactsReadOk: context.prior_facts_read_ok }),
+        ...(context.analysis_invalidated_at === undefined
+          ? {}
+          : { analysisInvalidatedAt: context.analysis_invalidated_at }),
+      },
     );
     promptAnalysisFreshness = deriveAnalysisFreshness(
       scenarioAnalysisFacts,
       currentAnalysisGraphHashForTurn,
       currentGraphOptionIdsForTurn,
-      { priorFactsReadOk: scenarioAnalysisFactsReadOk },
+      {
+        priorFactsReadOk: scenarioAnalysisFactsReadOk,
+        // Same marker, same turn, same read — see the routing derivation above.
+        ...(context.analysis_invalidated_at === undefined
+          ? {}
+          : { analysisInvalidatedAt: context.analysis_invalidated_at }),
+      },
     );
     // G3 — surface the SAME derivation on the run result, gated on the SAME
     // authority binding that produced its fact array. No second derivation: the
