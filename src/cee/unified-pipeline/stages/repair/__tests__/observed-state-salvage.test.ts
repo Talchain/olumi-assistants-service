@@ -301,6 +301,52 @@ describe('observed_state salvage — an optional field must not destroy the mode
     expect(declineReasonFor(graph)).toBe('issue_outside_observed_state');
   });
 
+  it('T18 USER AUTHORITY: an observed_state a human authored is never shed', () => {
+    // Gate 0: "explicit user meaning survives brief -> canonical model" and
+    // "unsupported semantics are exposed as unsupported, never silently
+    // approximated". FOUND BY EXECUTION — a witness run showed this exact shape
+    // being shed silently while the salvage reported success.
+    const graph = graphWith({
+      id: 'fac_featq', kind: 'factor', label: 'Feature release quality',
+      observed_state: { unit: 'rating', source: 'user_override' },
+    });
+    expect(issueCodesFor(graph)).toEqual(['invalid_union']); // precondition
+    const ctx = ctxFor(graph);
+    runStructuralParse(ctx);
+    expect(ctx.earlyReturn?.statusCode).toBe(400);
+    expect(graph.nodes[0]).toHaveProperty('observed_state');
+  });
+
+  it('T19 DISCRIMINATING TWIN of T18: a SYSTEM-authored source IS salvaged', () => {
+    // Byte-identical to T18 except `source`. `brief_extraction` is the SYSTEM's
+    // own reading of prose — #853 is the record of exactly that being
+    // attributed to the user with values 10^6x wrong. Treating it as user
+    // authority would re-import that mistake, so the guard must NOT fire here.
+    const graph = graphWith({
+      id: 'fac_featq', kind: 'factor', label: 'Feature release quality',
+      observed_state: { unit: 'rating', source: 'brief_extraction' },
+    });
+    expect(issueCodesFor(graph)).toEqual(['invalid_union']); // same precondition
+    const ctx = ctxFor(graph);
+    runStructuralParse(ctx);
+    expect(ctx.earlyReturn).toBeUndefined();
+    expect(graph.nodes[0]).not.toHaveProperty('observed_state');
+  });
+
+  it('T20 stated_role ALONE is sufficient — it is the user\'s reading', () => {
+    // `stated_role` records WHAT THE USER STATED THE MAGNITUDE AS
+    // (cee-v3.ts:137). value-warrant-guard.ts:227 treats
+    // `stated_role: 'constraint'` as a REFUSAL to assert the value — meaning no
+    // other field carries, so losing it changes what the model claims.
+    const graph = graphWith({
+      id: 'fac_x', kind: 'factor', label: 'Churn',
+      observed_state: { unit: '%', stated_role: 'constraint' },
+    });
+    const ctx = ctxFor(graph);
+    runStructuralParse(ctx);
+    expect(ctx.earlyReturn?.statusCode).toBe(400);
+  });
+
   it('T3 an issue ANYWHERE ELSE still 400s and sheds nothing', () => {
     const graph = graphWith({ id: 'f1', label: 'no kind' });  // `kind` is required
     const ctx = ctxFor(graph);

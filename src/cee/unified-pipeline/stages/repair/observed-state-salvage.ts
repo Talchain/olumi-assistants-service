@@ -66,6 +66,7 @@ export interface ObservedStateSalvageResult {
     | "graph_has_no_node_array"
     | "no_node_carried_the_field"
     | "would_strip_constraint"
+    | "would_strip_user_authority"
     | "reparse_still_failed";
 }
 
@@ -145,6 +146,45 @@ function goalConstraintNodeIds(goalConstraints: unknown): ReadonlySet<string> {
   return ids;
 }
 
+/**
+ * `observed_state.source` literals that mean A HUMAN PUT THIS HERE.
+ *
+ * ⚠ NOT DERIVED FROM THE CONTRACT, DELIBERATELY — and taken verbatim from the
+ * estate's own enumeration in `schemas/__tests__/observed-state-source-derivation.test.ts`,
+ * which lists each literal beside the writer that emits it. The CEE/system
+ * literals are excluded on purpose: `brief_extraction` is the SYSTEM's reading
+ * of prose, and #853 is the record of exactly that being attributed to the user
+ * with values 10^6x wrong (`stages/boundary.ts:82-87`). A guard that treated
+ * the system's own reading as user authority would re-import that mistake.
+ */
+const USER_AUTHORED_SOURCES: ReadonlySet<string> = new Set([
+  "user_override",     // CEE set_factor_value / chat edits
+  "user_confirmed",    // UI "confirm as is"
+  "user",              // UI Model-tab factor-value edit
+  "user_edited",       // UI OutputsDock transition bridge
+  "user_assumption",   // UI "mark as assumption"
+  "user_calibration",  // UI inspector calibration
+  "panel_elicited",    // CEE verified panel apply
+]);
+
+/**
+ * Does this `observed_state` carry USER AUTHORITY that shedding would destroy?
+ *
+ * Two independent markers, either sufficient:
+ *   · `source` names a user-authored writer (above); or
+ *   · `stated_role` is present at all — it records WHAT THE USER STATED THE
+ *     MAGNITUDE AS (`schemas/cee-v3.ts:137`), i.e. the reading itself is the
+ *     user's, and `value-warrant-guard.ts:227` treats `stated_role: 'constraint'`
+ *     as a REFUSAL to assert the value, which is meaning no other field carries.
+ */
+function carriesUserAuthority(obs: unknown): boolean {
+  if (obs === null || typeof obs !== "object") return false;
+  const o = obs as Record<string, unknown>;
+  if (typeof o.source === "string" && USER_AUTHORED_SOURCES.has(o.source)) return true;
+  if (o.stated_role !== undefined && o.stated_role !== null) return true;
+  return false;
+}
+
 export function salvageObservedState(
   input: { graph?: unknown; goal_constraints?: unknown },
   issues: ReadonlyArray<ZodIssue>,
@@ -220,7 +260,19 @@ export function salvageObservedState(
       return { salvaged: false, stripped: [], declined_reason: "would_strip_constraint" };
     }
 
-    // 3. KIND — kept as well, not instead. It is the weakest of the three and
+    // 3. USER AUTHORITY — the observed_state records that a HUMAN put this
+    //    here, via a user-authored `source` or any `stated_role`. Shedding it
+    //    would delete user meaning with nothing shown to the user, which is
+    //    what "explicit user meaning survives brief -> canonical model" and
+    //    "unsupported semantics are exposed as unsupported, never silently
+    //    approximated" forbid. FOUND BY EXECUTION, not by reading: a witness
+    //    run at this head showed `{unit, stated_role, source:'user_override'}`
+    //    being shed silently while the salvage reported success.
+    if (carriesUserAuthority(obs)) {
+      return { salvaged: false, stripped: [], declined_reason: "would_strip_user_authority" };
+    }
+
+    // 4. KIND — kept as well, not instead. It is the weakest of the three and
     //    the only one that was here before; removing it would narrow the guard
     //    on the strength of the other two being complete, which is not proven.
     if (node.kind === "constraint") {

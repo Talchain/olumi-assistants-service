@@ -8,3 +8,8 @@ packages:
 # GHSA-rgw5-rvv9-x895), so the "no 1.x/2.x backport exists" premise is gone and
 # the tree no longer resolves 1.1.16 / 2.1.2. The audit now runs unsuppressed.
 # Do NOT re-add entries here without the D-58 evidence trail.
+allowBuilds:
+  '@playwright/browser-chromium': set this to true or false
+  esbuild: set this to true or false
+  protobufjs: set this to true or false
+  unix-dgram: set this to true or false
