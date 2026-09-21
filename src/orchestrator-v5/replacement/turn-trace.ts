@@ -45,6 +45,16 @@ export type ReplacementRefusalCode =
   | 'quote_not_from_message'
   /** The acceptance names a number the offer does not carry. */
   | 'acceptance_names_other_number'
+  /**
+   * A compound accept could not be gathered into ONE write — a member was not
+   * authorised, members were agreed against different model revisions, or the
+   * set carried more operations than one receipt can honestly account for.
+   *
+   * Distinct from `write_failed`: nothing was dispatched, and every member is
+   * still waiting. Recorded separately so a set that was never sent is never
+   * read back as a set that failed.
+   */
+  | 'compound_batch_refused'
   /** The checkpoint store refused, so nothing was sent. */
   | 'checkpoint_refused'
   /** The write was sent and did not come back. Outcome genuinely unknown. */

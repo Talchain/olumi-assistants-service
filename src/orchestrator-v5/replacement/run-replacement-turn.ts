@@ -68,7 +68,7 @@ import {
   markStaleForRevision,
   needsReconciliation,
   openProposals,
-  operationsToApply,
+  operationsToApplyBatch,
   recordApplied,
   recordApplyAttempt,
   recordApplyFailed,
@@ -332,6 +332,27 @@ export const ACCEPT_TOOL_INPUT_SCHEMA = {
       type: 'string',
       description: "The user's own words agreeing, copied exactly from their latest message.",
     },
+    /**
+     * ⭐ THE SET. When the user agrees to several waiting changes in one breath
+     * — "yes, all of those look right" — name the rest here and they are saved
+     * in ONE write, under one receipt.
+     *
+     * ⛔ WHY IT IS NOT "call accept twice". The applier's idempotency is
+     * `ON CONFLICT (scenario_id, turn_id) DO NOTHING`, so a second append under
+     * one turn id skips the graph write, the facts and the brief entirely while
+     * returning a valid-looking row id — which is why this tool refuses a
+     * second write per turn. Telling the user "one of them went through, ask me
+     * again for the other" was the honest behaviour available before this field
+     * existed, and it is what produced "Tackling them together isn't possible
+     * in one step" on 21 Sep.
+     */
+    also_accept_ids: {
+      type: 'array',
+      items: { type: 'string' },
+      description:
+        'Other waiting changes the SAME agreement covers. Use this when they said yes to a set — '
+        + 'all of them are saved together in one go. Leave it out when they agreed to just one.',
+    },
   },
   required: ['proposal_id', 'user_agreement_quote'],
 } as const;
@@ -502,7 +523,9 @@ export async function runReplacementTurn(
             description:
               'Record that the user has agreed to a change you previously offered, and save it. ' +
               'Only for a change already put to them and still waiting — it saves exactly what was ' +
-              'shown and nothing else. If they want something different, offer that instead.',
+              'shown and nothing else. If they want something different, offer that instead. ' +
+              'When they agreed to SEVERAL waiting changes at once, name the rest in also_accept_ids ' +
+              'and they are all saved together in one go — never call this twice in a turn.',
             input_schema: ACCEPT_TOOL_INPUT_SCHEMA,
           },
           execute: async (raw) => {
@@ -578,20 +601,39 @@ export async function runReplacementTurn(
             const proposalId = typeof raw.proposal_id === 'string' ? raw.proposal_id : '';
             const quote = typeof raw.user_agreement_quote === 'string' ? raw.user_agreement_quote : '';
 
+            // ⭐ THE SET THE USER AGREED TO, primary first. Order is preserved
+            // and duplicates are dropped rather than refused: naming the
+            // primary again in `also_accept_ids` is a model slip, not a second
+            // agreement, and `operationsToApplyBatch` would rightly refuse the
+            // repeat as "applied twice".
+            const alsoRaw = Array.isArray(raw.also_accept_ids) ? raw.also_accept_ids : [];
+            const ids: string[] = [];
+            for (const candidate of [proposalId, ...alsoRaw]) {
+              if (typeof candidate !== 'string' || candidate.length === 0) continue;
+              if (!ids.includes(candidate)) ids.push(candidate);
+            }
+
             const waiting = openProposals(proposals);
-            const target = waiting.find((p) => p.id === proposalId);
-            if (target === undefined) {
+            // ⛔ EVERY MEMBER OR NONE. A partial accept is the harm this whole
+            // field exists to remove: the user says yes to a set, some of it
+            // lands, and the rest is reported as needing another turn.
+            const missing = ids.filter((id) => !waiting.some((p) => p.id === id));
+            if (missing.length > 0) {
               trace.refused('proposal_not_waiting');
               return {
                 type: 'refused',
                 content:
                   waiting.length === 0
                     ? 'There is nothing waiting to be agreed to. If you want to make a change, offer it first.'
-                    : `No change with that id is waiting. Waiting: ${waiting
+                    : `${missing.length === 1 ? 'No change with that id is' : `${missing.length} of those ids are not`} waiting, so NOTHING has been saved — `
+                      + `not even the ones that are waiting, because the user agreed to a set and a part of a set is not what they agreed to. `
+                      + `Waiting: ${waiting
                         .map((p) => `${p.id} (${p.operations.map((o) => o.summary).join('; ')})`)
                         .join(', ')}.`,
               };
             }
+            const targets = ids.map((id) => waiting.find((p) => p.id === id)!);
+            const target = targets[0]!;
 
             if (!quotedFromMessage(quote, input.message)) {
               trace.refused('quote_not_from_message');
@@ -607,18 +649,28 @@ export async function runReplacementTurn(
             // OF THIS OFFER. See `namesANumberTheOfferDoesNot` for the measured
             // case and for why this asks a lexical question rather than a
             // linguistic one.
-            if (namesANumberTheOfferDoesNot(input.message, target.operations)) {
+            // ⚠ OVER THE WHOLE SET, NOT THE PRIMARY. A user replying "yes, but
+            // make the SMB one 0.6" to a set of eight offers is changing one of
+            // them; checking only the first would let the other seven — and the
+            // one they just changed — be written at MY numbers with a receipt
+            // saying it saved what they asked for. The question the guard asks
+            // is "does their message name a number that NO offer in this set
+            // carries?", which is the correct generalisation of the single
+            // case: a number none of the offers hold cannot be an acceptance of
+            // any of them.
+            const allOperations = targets.flatMap((p) => [...p.operations]);
+            if (namesANumberTheOfferDoesNot(input.message, allOperations)) {
               trace.refused('acceptance_names_other_number');
               return {
                 type: 'refused',
                 content:
-                  `The user's message names a number this offer does not carry, so agreeing to the ` +
-                  `offer as it stands would save MY value and discard THEIRS. Nothing has been saved. ` +
+                  `The user's message names a number ${targets.length === 1 ? 'this offer does' : 'none of these offers do'} not carry, so agreeing to ` +
+                  `${targets.length === 1 ? 'the offer' : 'them'} as ${targets.length === 1 ? 'it stands' : 'they stand'} would save MY value and discard THEIRS. Nothing has been saved. ` +
                   `Offer the change again at the number they gave, and let them agree to that.`,
               };
             }
 
-            const summary = target.operations.map((o) => o.summary).join('; ');
+            const summary = allOperations.map((o) => o.summary).join('; ');
 
             // ⛔ THE ROLLBACK POINT. Everything from here to the checkpoint is
             // state this turn has NOT yet earned the right to keep: the
@@ -631,23 +683,48 @@ export async function runReplacementTurn(
             // for a write that was never sent is its own small lie").
             const beforeAuthorise = proposals;
 
-            proposals = authoriseProposal(proposals, proposalId, {
-              authorised_in_turn: input.turnId,
-              authorised_at: input.now,
-              current_model_revision: input.modelRevision,
-            });
+            for (const id of ids) {
+              proposals = authoriseProposal(proposals, id, {
+                authorised_in_turn: input.turnId,
+                authorised_at: input.now,
+                current_model_revision: input.modelRevision,
+              });
+            }
 
-            // Bound to what was OFFERED. Not re-derived from the conversation.
-            const bound = operationsToApply(proposals, proposalId);
+            // ⭐ ONE WRITE FOR THE WHOLE SET. Bound to what was OFFERED, member
+            // by member — never re-derived from the conversation. The batch
+            // refuses on its own terms (a member not authorised, members agreed
+            // against different revisions, more operations than one receipt can
+            // honestly account for), and a refusal here must undo the
+            // authorisations this turn just made rather than leave consent
+            // recorded for a write that never left.
+            let bound: { readonly operations: readonly ProposalOperation[]; readonly model_revision: string };
+            try {
+              bound = operationsToApplyBatch(proposals, ids);
+            } catch (err) {
+              proposals = beforeAuthorise;
+              trace.refused('compound_batch_refused');
+              return {
+                type: 'refused',
+                content:
+                  `I could not save those together (${err instanceof Error ? err.message : String(err)}). `
+                  + `NOTHING has been saved and every one of them is still waiting. Tell the user what happened `
+                  + `and offer them again — do not save part of the set.`,
+              };
+            }
             // Kinds only. The values are the user's and never enter the record.
             trace.accepted(proposalId, bound.operations.map((o) => o.kind));
+            // ONE key for ONE write. Every member goes in flight under it, so a
+            // retry of this turn is the same write rather than N new ones.
             const idempotencyKey = input.idFor('idempotency', applied.length);
-            proposals = recordApplyAttempt(proposals, proposalId);
-            proposals = beginApply(proposals, proposalId, {
-              idempotency_key: idempotencyKey,
-              apply_started_at: input.now,
-              current_model_revision: input.modelRevision,
-            });
+            for (const id of ids) {
+              proposals = recordApplyAttempt(proposals, id);
+              proposals = beginApply(proposals, id, {
+                idempotency_key: idempotencyKey,
+                apply_started_at: input.now,
+                current_model_revision: input.modelRevision,
+              });
+            }
 
             // ⛔ THE TURN'S ONE WRITE ATTEMPT IS RESERVED HERE — BEFORE DISPATCH,
             // NOT AFTER A SUCCESSFUL RETURN.
@@ -726,14 +803,19 @@ export async function runReplacementTurn(
             }
 
             if (!outcome.ok) {
-              proposals = recordApplyFailed(proposals, proposalId, {
-                reason: outcome.reason,
-                failed_at: input.now,
-              });
+              // One write failed, so EVERY member failed — there is no partial
+              // outcome to report, which is the whole reason the set travels
+              // together.
+              for (const id of ids) {
+                proposals = recordApplyFailed(proposals, id, {
+                  reason: outcome.reason,
+                  failed_at: input.now,
+                });
+              }
               trace.refused('write_failed');
               return {
                 type: 'refused',
-                content: `It did not save: ${outcome.reason}. Nothing has changed. Tell the user what happened.`,
+                content: `It did not save: ${outcome.reason}. Nothing has changed${ids.length > 1 ? ' — none of the set went through' : ''}. Tell the user what happened.`,
               };
             }
 
@@ -768,11 +850,17 @@ export async function runReplacementTurn(
               };
             }
 
-            proposals = recordApplied(proposals, proposalId, {
-              receipt_id: outcome.receiptId,
-              applied_at: input.now,
-            });
-            applied.push({ proposalId, receiptId: outcome.receiptId });
+            // ⭐ ONE RECEIPT, CITED BY EVERY MEMBER. They were carried by one
+            // write, so one proof of commit is what actually substantiates all
+            // of them; minting a receipt each would be a claim about writes
+            // that never happened.
+            for (const id of ids) {
+              proposals = recordApplied(proposals, id, {
+                receipt_id: outcome.receiptId,
+                applied_at: input.now,
+              });
+              applied.push({ proposalId: id, receiptId: outcome.receiptId });
+            }
             trace.writeCommitted(outcome.receiptId);
             if (outcome.newModelRevision !== undefined) {
               newModelRevision = outcome.newModelRevision;
@@ -781,22 +869,28 @@ export async function runReplacementTurn(
 
             // The ONLY place an `authorised_change` is ever written, and it
             // carries both ids — the memory module refuses it without them.
-            memory = recordItem(memory, {
-              id: `change-${proposalId}`,
-              kind: 'authorised_change',
-              text: summary,
-              source_turn_id: input.turnId,
-              recorded_at: input.now,
-              proposal_id: proposalId,
-              receipt_id: outcome.receiptId,
-            });
+            // One item PER PROPOSAL, because the record is what a later turn
+            // reads back to say "you agreed to X": collapsing a set into one
+            // line would lose which changes the user actually consented to.
+            for (const p of targets) {
+              memory = recordItem(memory, {
+                id: `change-${p.id}`,
+                kind: 'authorised_change',
+                text: p.operations.map((o) => o.summary).join('; '),
+                source_turn_id: input.turnId,
+                recorded_at: input.now,
+                proposal_id: p.id,
+                receipt_id: outcome.receiptId,
+              });
+            }
 
             return {
               type: 'accepted',
               proposal_id: proposalId,
               summary,
               content:
-                `SAVED. "${summary}" is now part of the model. You may tell the user it is done. ` +
+                `SAVED${ids.length > 1 ? ` — ALL ${ids.length}, in one write` : ''}. "${summary}" ` +
+                `${ids.length > 1 ? 'are' : 'is'} now part of the model. You may tell the user it is done. ` +
                 `This is the only circumstance in which you may say that.`,
             };
           },

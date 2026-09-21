@@ -75,6 +75,31 @@ export type AgentToolOutcome =
        * amendment must go back to the user, so it must not be an `accept`.
        */
       readonly amends?: string;
+      /**
+       * ⭐ SEVERAL SEPARATELY-AMENDABLE CHANGES FROM ONE TOOL CALL.
+       *
+       * ⛔ WHY THIS IS NOT "one proposal carrying many operations", which is
+       * the shape that suggests itself and loses the capability. A proposal is
+       * the unit of CONSENT and the unit of AMENDMENT: `amendProposal` replaces
+       * one proposal's operations wholesale. So a single proposal holding eight
+       * repairs cannot be part-amended — "yes, but make the SMB one 0.6" would
+       * replace the whole set with that one cell and silently discard the other
+       * seven, issuing a receipt that says it saved what was asked for. That is
+       * the exact harm `amendProposal` was minted to prevent, arriving through
+       * the batching route.
+       *
+       * So each part becomes its OWN proposal, and the set is agreed in ONE
+       * write through `operationsToApplyBatch`. Many proposals, one write, one
+       * receipt.
+       *
+       * ⚠ ADDITIVE, AND THE PRECEDENCE IS STATED RATHER THAN INFERRED: when
+       * `parts` is present it is the COMPLETE list of changes to stage, and
+       * `summary` is then only the headline shown back to the model —
+       * `operations` is not staged. An outcome without `parts` behaves exactly
+       * as before. A `parts` array that is present and empty is a programming
+       * error and the loop raises rather than staging nothing quietly.
+       */
+      readonly parts?: readonly ProposedPart[];
     }
   /** The user agreed to a proposal that was already put to them. Carries the
    *  id, never a change — a re-derived operation is a different decision. */
@@ -105,6 +130,20 @@ export interface RememberedItem {
   readonly text: string;
   /** Id of an earlier item this corrects. Same kind only. */
   readonly supersedes?: string;
+}
+
+/**
+ * One separately-consentable change inside a multi-part proposal.
+ *
+ * Deliberately the same two load-bearing fields a single-change `proposed`
+ * outcome carries, so a part and a whole proposal are the same object to
+ * everything downstream and the composer needs no branch for them.
+ */
+export interface ProposedPart {
+  readonly summary: string;
+  readonly operations: readonly Record<string, unknown>[];
+  /** Set when THIS part replaces an earlier offer — see `ProposedChange.amends`. */
+  readonly amends?: string;
 }
 
 export interface ProposedChange {
@@ -328,12 +367,44 @@ export async function runAgentLoop(
             `tool "${use.name}" is declared "${tool.kind}" but returned a proposal — only a "propose" tool may stage operations`,
           );
         }
-        proposed.push({
-          tool: use.name,
-          summary: outcome.summary,
-          operations: outcome.operations,
-          ...(outcome.amends !== undefined ? { amends: outcome.amends } : {}),
-        });
+        // ⛔ A PROPOSAL WITH NOTHING IN IT IS NOT A PROPOSAL. Without this the
+        // multi-part field below has a silent failure mode: a tool that meant
+        // to set `parts` and did not would stage one proposal whose operations
+        // are empty, the user would be asked to agree to it, and the write
+        // would carry nothing while the receipt said it landed.
+        if (outcome.parts === undefined && outcome.operations.length === 0) {
+          throw new AgentLoopError(
+            `tool "${use.name}" returned a proposal with no operations and no parts — there is nothing for the user to agree to`,
+          );
+        }
+        if (outcome.parts !== undefined && outcome.parts.length === 0) {
+          throw new AgentLoopError(
+            `tool "${use.name}" returned an empty "parts" list — a set of changes with no members is not a proposal`,
+          );
+        }
+        // `parts`, when present, IS the complete list; `operations` is not
+        // staged alongside it. Stated in the outcome's docblock so neither
+        // side has to infer the precedence.
+        const staged: readonly ProposedPart[] =
+          outcome.parts ??
+          [{
+            summary: outcome.summary,
+            operations: outcome.operations,
+            ...(outcome.amends !== undefined ? { amends: outcome.amends } : {}),
+          }];
+        for (const part of staged) {
+          if (part.operations.length === 0) {
+            throw new AgentLoopError(
+              `tool "${use.name}" staged a part with no operations ("${part.summary}") — a change that writes nothing cannot be consented to`,
+            );
+          }
+          proposed.push({
+            tool: use.name,
+            summary: part.summary,
+            operations: part.operations,
+            ...(part.amends !== undefined ? { amends: part.amends } : {}),
+          });
+        }
         results.push({
           type: 'tool_result',
           tool_use_id: use.id,

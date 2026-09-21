@@ -53,6 +53,7 @@ import {
 } from './conversation-memory.js';
 import { EMPTY_PROPOSAL_STORE, type ProposalStore } from './proposal-store.js';
 import { createRunAnalysisTool } from './run-analysis-tool.js';
+import { createProposeRepairsTool } from './repair-tools.js';
 import { createRememberTool } from './remember-tool.js';
 import { createSetOptionEffectTool } from './propose-tools.js';
 import {
@@ -338,6 +339,14 @@ export function buildReplacementTools(args: {
     // questions) and when a current result already exists (pointing at
     // read_results instead of spending again).
     createRunAnalysisTool({ getGraph: args.getGraph, getAnalysis: args.getAnalysis }),
+    // ⭐ THE WHOLE REPAIR SET, IN ONE CALL. Unconditional, and deliberately
+    // alongside `run_analysis` rather than inside it: the run tool's refusal
+    // answers "why can't I run?", this answers "what is between us and a
+    // result I can trust?", and they are different questions. Before it, the
+    // only route to the second was to propose a run and be refused — which
+    // yields a flat bullet list with `obligation` stripped, and nothing at all
+    // below two blockers.
+    createProposeRepairsTool({ getGraph: args.getGraph }),
     // The structure tools, also unconditional. A model that can read the
     // workspace and set an effect but cannot add the node the user just named
     // has to answer "I can't do that" to the most ordinary request there is —
