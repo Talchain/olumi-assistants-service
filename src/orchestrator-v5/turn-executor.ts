@@ -14377,20 +14377,34 @@ export async function runTurnExecutor(
           // turn that writes no graph). Only applies when a graph WAS
           // produced this turn — a swap driven by `persistedGraph` not
           // backing a DESCRIBE-only claim has no graph to withhold.
+          // ⭐ THE GUARD STATES ITS OWN CONSEQUENCES; THIS HONOURS THEM.
+          //
+          // These two withholdings used to be written out here, which made the
+          // requirement invisible to anyone holding only the verdict — a new
+          // controller could swap the text, look correct, and silently
+          // reintroduce the phantom receipt. `consequences` now travels with
+          // the decision, so honouring it does not require reading this file.
+          //
+          // Overnight review F5 — the withheld write must ALSO withhold the
+          // "applied" edit receipt FACT built from the same unbacked mutation.
+          // Committing `handlerFactsForCommit` unchanged (status: 'applied',
+          // noop: false) while the graph write is withheld grounds the NEXT
+          // turn's LLM on a phantom edit — `recent_changes` / prior_facts
+          // readers have no persisted graph to cross-check the fact against,
+          // so they take it at face value (DL-7 violation). A withheld-write
+          // turn is a non-mutating turn, same as any other turn that writes no
+          // graph and emits no facts.
+          //
+          // `graphWasWrittenThisTurn` still gates: a swap driven by
+          // `persistedGraph` not backing a DESCRIBE-only claim has no graph to
+          // withhold, and the guard's consequences do not claim otherwise.
           if (graphWasWrittenThisTurn) {
-            graphForCommit = undefined;
-            // Overnight review F5 — the withheld write must also withhold
-            // the "applied" edit receipt FACT built from the same unbacked
-            // mutation. Committing `handlerFactsForCommit` unchanged here
-            // (status: 'applied', noop: false) while the graph write is
-            // withheld grounds the NEXT turn's LLM on a phantom edit —
-            // `recent_changes` / prior_facts readers have no persisted
-            // graph to cross-check the fact against, so they take it at
-            // face value (DL-7 violation: a receipt narrating an applied
-            // mutation with no persistable graph state behind it). A
-            // withheld-write turn is a non-mutating turn, same as any
-            // other turn that writes no graph and emits no facts.
-            handlerFactsForCommit = [];
+            if (goalReceiptDecision.consequences.withholdGraphWrite) {
+              graphForCommit = undefined;
+            }
+            if (goalReceiptDecision.consequences.withholdReceiptFacts) {
+              handlerFactsForCommit = [];
+            }
           }
         }
       }

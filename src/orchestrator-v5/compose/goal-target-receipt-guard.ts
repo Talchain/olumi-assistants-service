@@ -434,7 +434,53 @@ export interface GoalTargetReceiptDecision {
     | 'backed_by_commit_graph'
     | 'backed_by_persisted_graph'
     | 'unbacked_claim';
+  /**
+   * ⭐ WHAT HONOURING THIS VERDICT REQUIRES — stated by the guard, not left for
+   * the caller to know.
+   *
+   * ⛔ THE DEFECT THIS EXISTS TO PREVENT IS A MIGRATION, NOT A BUG. Swapping
+   * the text is the OBVIOUS half. The subtle half is that a `swap` must also
+   * withhold the graph write AND the `applied` receipt fact: committing an
+   * `applied / noop:false` fact while the write is withheld grounds the NEXT
+   * turn's model on a phantom edit, because `recent_changes` / `prior_facts`
+   * readers have no persisted graph to cross-check it against and take it at
+   * face value (DL-7).
+   *
+   * Until now that requirement lived ONLY as two assignments inside
+   * `turn-executor.ts` (`graphForCommit = undefined`,
+   * `handlerFactsForCommit = []`). Any consumer that took the verdict and
+   * swapped the text — a new controller, a different architecture — would have
+   * looked correct and silently reintroduced the phantom receipt.
+   *
+   * Carrying the consequences HERE makes that a contract a consumer can honour
+   * without reading a 17,000-line controller. Additive: the existing caller's
+   * behaviour is unchanged, and these fields describe exactly what it already
+   * does.
+   */
+  readonly consequences: {
+    /** The graph produced this turn must NOT be persisted. */
+    readonly withholdGraphWrite: boolean;
+    /** The `applied` receipt facts for this turn must NOT be committed. */
+    readonly withholdReceiptFacts: boolean;
+  };
 }
+
+/** `pass` costs nothing: the turn proceeds exactly as it would have. */
+const NO_CONSEQUENCES = {
+  withholdGraphWrite: false,
+  withholdReceiptFacts: false,
+} as const;
+
+/**
+ * A `swap` withholds BOTH. They travel together deliberately — withholding the
+ * write while committing the receipt is the phantom-edit defect, and
+ * withholding the receipt while committing the write would leave a real edit
+ * with no record of it.
+ */
+const SWAP_CONSEQUENCES = {
+  withholdGraphWrite: true,
+  withholdReceiptFacts: true,
+} as const;
 
 /**
  * Decide whether a composed assistant text may ship as-is.
@@ -456,16 +502,16 @@ export function decideGoalTargetReceipt(args: {
   readonly persistedGraph: unknown;
 }): GoalTargetReceiptDecision {
   if (!claimsGoalTargetRegistration(args.assistantText)) {
-    return { verdict: 'pass', reason: 'no_claim' };
+    return { verdict: 'pass', reason: 'no_claim', consequences: NO_CONSEQUENCES };
   }
   const wroteGraphThisTurn =
     args.commitGraph !== null && args.commitGraph !== undefined;
   if (wroteGraphThisTurn) {
     return graphRegistersGoalTarget(args.commitGraph)
-      ? { verdict: 'pass', reason: 'backed_by_commit_graph' }
-      : { verdict: 'swap', reason: 'unbacked_claim' };
+      ? { verdict: 'pass', reason: 'backed_by_commit_graph', consequences: NO_CONSEQUENCES }
+      : { verdict: 'swap', reason: 'unbacked_claim', consequences: SWAP_CONSEQUENCES };
   }
   return graphRegistersGoalTarget(args.persistedGraph)
-    ? { verdict: 'pass', reason: 'backed_by_persisted_graph' }
-    : { verdict: 'swap', reason: 'unbacked_claim' };
+    ? { verdict: 'pass', reason: 'backed_by_persisted_graph', consequences: NO_CONSEQUENCES }
+    : { verdict: 'swap', reason: 'unbacked_claim', consequences: SWAP_CONSEQUENCES };
 }
