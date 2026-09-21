@@ -133,6 +133,15 @@ import { validateEgress } from '../validators/b1.js';
 import { runTurnExecutor } from '../orchestrator-v5/turn-executor.js';
 import { handleReplacementTurn } from '../orchestrator-v5/replacement/turn-entry.js';
 import { shapeRunResult } from '../orchestrator-v5/replacement/to-run-result.js';
+// ⚠ The ADAPTER and the MINTER, not the writer beneath them. The
+// consent-coverage guard pins that writer's production consumers at exactly
+// one and its detector is a whole-file source-spelling scan including
+// comments — so this file must not name it. Both default the session store
+// internally, so no store import is needed and rule 3 is untouched.
+import {
+  createApplyOperations,
+  currentModelRevision,
+} from '../orchestrator-v5/apply-operations.js';
 import { projectTurnContext } from '../orchestrator-v5/replacement/turn-context-view.js';
 import {
   ReplacementNotConfiguredError,
@@ -3032,7 +3041,48 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           ? buildCanonicalAnalysisReadyFromGraph(extensions.graphState)
           : undefined;
 
-      if (hasModel && (!isAnalyseStage || analysisReadyForExit !== undefined)) {
+      // ⛔⛔ THE CONSENT TOKEN IS MINTED FROM THE STORE, NEVER FROM THE REQUEST.
+      //
+      // This corrects a design I had already written and banked. I fed
+      // `modelRevision` from `computeAnalysisAffectingGraphHash(
+      // extensions.graphState)` — the INGRESS graph — and argued that if it
+      // disagreed with the store's, the refusal would "arrive as data".
+      //
+      // It would have arrived on EVERY turn. The store holds a PROJECTION of
+      // the ingress graph, and the three persist passes (`commit.ts:1124-1136`)
+      // mutate exactly the fields this hash covers. Measured by the data layer
+      // on verbatim bytes: ingress `c373cbdfb844909d` → persisted
+      // `4dadc7e6510ec272`, DIFFERENT, controls discriminating. The same
+      // two-source mismatch has already shipped once as a false
+      // `GRAPH_DIVERGED` (`response-finaliser.ts:436-445`).
+      //
+      // ⭐ Making a failure observable is a virtue only when the failure is
+      // RARE. A 100% refusal rate wearing "the model has changed since that was
+      // agreed" does not need an instrument; it needs not to ship.
+      //
+      // `currentModelRevision` takes NO graph parameter, and that is the only
+      // enforcement available — the tokens are opaque strings, so nothing
+      // downstream could tell a store-derived hash from an ingress-derived one.
+      //
+      // ⚠ A FAILED READ THROWS AND IS LET THROUGH. `null` means "no
+      // analysis-affecting model"; a transport failure means "we could not
+      // look". Collapsing the second into the first reports "no model" for a
+      // model that exists.
+      const mintedModelRevision = hasModel
+        ? await currentModelRevision(ingress.scenario_id)
+        : null;
+
+      // ⚠ A NULL MINT DECLINES THE TURN rather than inventing a token. The
+      // previous shape ended `?? 'graph-unhashable'`, manufacturing a base for
+      // a model that does not exist. `hasModel` is a fact about the REQUEST;
+      // this is the fact about the STORE, and a proposal can only bind to the
+      // second. Not the banned fallback-after-failure: a precondition never
+      // met, exactly as `hasModel` already is.
+      if (
+        hasModel &&
+        mintedModelRevision !== null &&
+        (!isAnalyseStage || analysisReadyForExit !== undefined)
+      ) {
         // Fail loud, not half-working. Without a durable store a user's
         // agreement can land on an instance that never saw the offer.
         const replacementStore = getReplacementStateStore();
@@ -3103,7 +3153,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             // Read from the SAME `currentGraphHash` the analysis view was
             // derived against, so "is this analysis current?" and "is this
             // proposal still valid?" are questions about one object.
-            modelRevision: currentGraphHash ?? 'graph-unhashable',
+            // The STORE-minted token — see the block at the gate above for
+            // why this may never come from `extensions.graphState`.
+            modelRevision: mintedModelRevision,
             // ⛔ `ingress.turn_id`, NOT `requestId`, AND THIS IS LOAD-BEARING
             // ONCE A WRITE PATH IS INJECTED.
             //
@@ -3130,6 +3182,19 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           {
             chatWithTools: anthropicChatWithTools(),
             state: replacementStore,
+            // ⭐⭐⭐ THE THIRD PIECE. Supplier + consumer + INJECTION, and until
+            // now only two existed: the accept tool is built ONLY when this
+            // port is injected, so the layer could offer a change, hear "yes",
+            // and have nowhere to put the answer. Measured before writing it:
+            // `applyOperations` had ZERO occurrences in this file and zero on
+            // staging. Neither lane was at fault — the seam between them was
+            // never assigned.
+            applyOperations: createApplyOperations({
+              scenarioId: ingress.scenario_id,
+              requestId,
+              // Threaded into the change summary only; grants no authority.
+              hasExistingAnalysis: contextView.snapshot != null,
+            }),
           },
         );
 
