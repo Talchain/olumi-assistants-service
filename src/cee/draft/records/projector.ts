@@ -4951,6 +4951,152 @@ function findUndevelopedDuplicates(projection: OneProjection): DemoteDecision[] 
  * conjunct (#1462). Until this PR was rebased that dependency was enforced by
  * the branch stacking; on `staging` it is enforced by nothing but this note.
  */
+/**
+ * ⭐⭐ THE USER'S OWN OPTION ABSORBS ANY MODEL OPTION THAT RESTATES IT.
+ *
+ * ── THE WITNESSED DEFECT (the user's live pricing draw, bundle `9077a1e3`,
+ * 2026-09-21) ──────────────────────────────────────────────────────────────
+ * Brief: *"should we increase the Pro plan price from £49 to £59 per month with
+ * the next Pro feature release?"*. The drafter emitted his sentence as a STATED
+ * option AND a titled MODEL option of the SAME proposal:
+ *
+ *   "increase the Pro plan price from £49 to £59 …"  STATED  price=59
+ *   "Raise Price to £59 with Feature Release"        MODEL   price=59, churn=0.045
+ *
+ * `findUndevelopedDuplicates` never fired, because it groups on the FULL
+ * intervention signature (the validator's own `OPTIONS_IDENTICAL` predicate) and
+ * the two differ by the churn effect. So both reached the wire.
+ *
+ * ⛔ WHY THE FIX IS HERE AND NOWHERE DOWNSTREAM. Every later gate is correct and
+ * DELIBERATE, and each fails closed BECAUSE two options claim one figure:
+ *   · the brief-authority gate withholds attribution when a stated figure has no
+ *     single owner — its own twin test calls this the case "a naive 'delete the
+ *     gate' fix reopens";
+ *   · `collectSourceBoundInterventionCandidates` will not anchor a figure to a
+ *     hypothesis, because "a hypothesis — even one that happens to repeat the
+ *     same number — is not evidence that the amount was carried from the brief";
+ *   · so that draw reported `in_model_anchored: 0` of 5 and
+ *     `confidence_parameters_user_stated: 0`, and told the user "every estimate
+ *     this comparison rests on is Olumi's, not yours" about the £49 and £59 he
+ *     wrote. Relaxing either gate re-opens #1657 (reverted by #1665).
+ *
+ * ⭐ ABSORB, NEVER WITHDRAW. Withdrawing the restatement is the move
+ * {@link findUndevelopedDuplicates}'s own note records as BUILT, MEASURED AND
+ * REVERTED: it destroyed the only representation of a risk the survivor never
+ * carried. Here the MODEL option's extra effects — including the churn estimate
+ * that is the user's proposal's own downside — are copied ONTO the stated option
+ * first. Each intervention keeps its own `source`/`value_confidence`, so an
+ * Olumi estimate stays an Olumi estimate; what changes is WHICH option carries
+ * it. The signatures then match and the EXISTING duplicate pass withdraws the
+ * rival, with nothing lost.
+ *
+ * ⛔ IT NEVER OVERWRITES. Only factors the stated option does not already set
+ * are copied, so the user's own figure is never replaced by a restatement's.
+ */
+function absorbRestatementsIntoStatedOptions(
+  projection: OneProjection,
+  /**
+   * ⚠ WHY A MEMO AND NOT JUST A MUTATION. `projectOnce` REBUILDS the projection
+   * from the records on every pass of the fixed-point loop, so an in-place merge
+   * is discarded the moment a withdrawal triggers a re-projection — and the
+   * restatement is then withdrawn with its extra effects still only on IT.
+   * Measured: the user's option came back carrying price alone and the churn
+   * estimate vanished, which is precisely the content loss
+   * {@link findUndevelopedDuplicates}'s note records as the reason the obvious
+   * fix was reverted. The memo carries absorbed effects across every rebuild, so
+   * the withdrawal is a dedup and never a loss.
+   */
+  memo: Map<string, Record<string, unknown>>,
+): void {
+  // Same precondition as the sibling repair, read from the gate rather than
+  // restated (trap 13b).
+  if (!projection.graph.nodes.some((n) => n.kind === "goal")) return;
+
+  type IvMap = Record<string, unknown>;
+  /**
+   * ⚠ THE PROJECTOR'S OWN SHAPE, MEASURED, NOT THE WIRE'S. Here
+   * `data.interventions` is `Record<string, number>` — the scale-projected
+   * magnitude. The rich `{ value, raw_value, source, … }` form is a LATER
+   * projection, so keying this on `raw_value` finds nothing and the absorb
+   * silently never fires. Both are read anyway: a number directly, an object by
+   * its `value`, so this cannot go blind if the shapes converge.
+   */
+  const ivOf = (n: Record<string, unknown>): IvMap | null => {
+    const data = n.data as { interventions?: unknown } | undefined;
+    const nested = data?.interventions;
+    if (nested !== null && typeof nested === "object" && !Array.isArray(nested)) return nested as IvMap;
+    const direct = n.interventions;
+    if (direct !== null && typeof direct === "object" && !Array.isArray(direct)) return direct as IvMap;
+    return null;
+  };
+  const magnitudeOf = (entry: unknown): number | null => {
+    if (typeof entry === "number" && Number.isFinite(entry)) return entry;
+    if (entry !== null && typeof entry === "object" && !Array.isArray(entry)) {
+      const v = (entry as { value?: unknown }).value;
+      if (typeof v === "number" && Number.isFinite(v)) return v;
+    }
+    return null;
+  };
+  /** The (factor, magnitude) pairs an option claims. */
+  const claimsOf = (iv: IvMap | null): Set<string> => {
+    const out = new Set<string>();
+    for (const [factorId, entry] of Object.entries(iv ?? {})) {
+      const m = magnitudeOf(entry);
+      if (m !== null) out.add(`${factorId}=${m}`);
+    }
+    return out;
+  };
+
+  const stated: Array<{ node: Record<string, unknown>; iv: IvMap }> = [];
+  const model: Array<{ node: Record<string, unknown>; iv: IvMap }> = [];
+  for (const raw of projection.graph.nodes) {
+    const node = raw as unknown as Record<string, unknown>;
+    if (node.kind !== "option") continue;
+    const iv = ivOf(node);
+    if (iv === null) continue;
+    const id = node.id as string;
+    // The SAME two authorities the sibling repair uses: minted-from-a-claim is a
+    // MODEL option; a `stated` provenance class is the user's own.
+    if (projection.optionClaimIndexById.has(id)) model.push({ node, iv });
+    else if (projection.provenance[id]?.provenance_class === "stated") stated.push({ node, iv });
+  }
+  // ⛔ NO EARLY RETURN ON AN EMPTY `model` SET. Measured: on the pass AFTER a
+  // withdrawal the restatement is gone, so `model` is empty — and returning
+  // there skips the memo replay this function exists to perform, which is
+  // exactly how the absorbed churn estimate was lost on the first attempt. The
+  // replay must run whenever there is a stated option, withdrawal or not.
+  if (stated.length === 0) return;
+
+  for (const mine of stated) {
+    const id = mine.node.id as string;
+    // FIRST re-apply anything absorbed on an earlier pass: this projection was
+    // rebuilt from the records and knows nothing of it.
+    const remembered = memo.get(id);
+    if (remembered !== undefined) {
+      for (const [factorId, entry] of Object.entries(remembered)) {
+        if (Object.prototype.hasOwnProperty.call(mine.iv, factorId)) continue;
+        mine.iv[factorId] = entry;
+      }
+    }
+    const mineClaims = claimsOf(mine.iv);
+    if (mineClaims.size === 0) continue;
+    for (const other of model) {
+      // A RESTATEMENT is an option claiming the SAME FIGURE on the SAME FACTOR.
+      // Merely sharing a factor is a different proposal and is left alone.
+      const restates = [...claimsOf(other.iv)].some((c) => mineClaims.has(c));
+      if (!restates) continue;
+      for (const [factorId, entry] of Object.entries(other.iv)) {
+        if (entry === undefined) continue;
+        if (Object.prototype.hasOwnProperty.call(mine.iv, factorId)) continue;
+        mine.iv[factorId] = entry;
+        const bucket = memo.get(id) ?? {};
+        bucket[factorId] = entry;
+        memo.set(id, bucket);
+      }
+    }
+  }
+}
+
 function repairStatedOptionTargets(projection: OneProjection): void {
   // The gate's OWN precondition, read from the gate rather than restated as a
   // rule of our own (trap 13b — a guard agreeing with itself).
@@ -5017,12 +5163,18 @@ export function projectRecordsToGraph(
   const demoted = new Map<number, DemoteDecision>();
   let projection = projectOnce(records, demoted, brief, completionBoundary);
   repairStatedOptionTargets(projection);
+  // Absorb BEFORE the duplicate pass reads signatures: a restatement whose extra
+  // effects have moved onto the user's option now shares its signature, so the
+  // existing withdrawal is a clean dedup rather than a content loss.
+  const absorbed = new Map<string, Record<string, unknown>>();
+  absorbRestatementsIntoStatedOptions(projection, absorbed);
   for (let pass = 0; pass < claimCount; pass++) {
     const decisions = findUndevelopedDuplicates(projection);
     if (decisions.length === 0) break;
     for (const d of decisions) demoted.set(d.claimIndex, d);
     projection = projectOnce(records, demoted, brief, completionBoundary);
     repairStatedOptionTargets(projection);
+    absorbRestatementsIntoStatedOptions(projection, absorbed);
   }
   // The internal binding is not part of the contract: consumers get the same
   // graph/provenance/disclosures and the explicitly declared constraint carriers.
