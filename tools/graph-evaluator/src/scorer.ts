@@ -841,15 +841,6 @@ function scoreDecisionEnrichment(graph: ParsedGraph): number {
     incident.add(e.to);
   }
 
-  const interventionsByTarget = new Map<string, ReturnType<typeof readInterventions>>();
-  for (const node of graph.nodes) {
-    for (const iv of readInterventions(node)) {
-      const list = interventionsByTarget.get(iv.factorId) ?? [];
-      list.push(iv);
-      interventionsByTarget.set(iv.factorId, list);
-    }
-  }
-
   let qualifying = 0;
   let launderers = 0;
 
