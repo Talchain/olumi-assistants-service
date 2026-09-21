@@ -820,12 +820,46 @@ const PREREGISTERED_V22_CONNECT_BYTES = 5115;
  * bytes. Whether the model now declares is a live-draw RATE, and one draw is
  * not a rate. v22 above remains immutable.
  */
-const PREREGISTERED_V23_INSTRUCTION_SHA256 =
+const SUPERSEDED_V23_INSTRUCTION_SHA256 =
   "f7f58464da94413fedd8bd81ab91695220e2138c26b98ef2f04a316cb93ad786";
-const PREREGISTERED_V23_INSTRUCTION_BYTES = 22312;
-const PREREGISTERED_V23_SHAPE_SHA256 =
-  "2a0915802c27c6051ae80e3ef041812bf370a082a950e697cef84f6d1a1d02a1";
-const PREREGISTERED_V23_SHAPE_BYTES = 17197;
+const SUPERSEDED_V23_INSTRUCTION_BYTES = 22312;
+/**
+ * v24 — A LIMIT NEVER APPLIES TO THE GOAL, 2026-09-21. UNMEASURED on model output.
+ *
+ * SHAPE HALF ONLY. The connect half is byte-identical to v22/v23
+ * (`1e2ba3c6…`, 5,115), which is what makes this version attributable to one
+ * half and keeps every v23 connect measurement its own.
+ *
+ * ── WHY, MEASURED ON A FRESH BRIEF AT THE DEPLOYED BUILD `09a1b3a`
+ * Brief: *"On-time delivery is running at 91% and our contractual floor for it
+ * is 88%. We want to lift it to 95%…"*. The seam accepted a `constraint` stated
+ * item carrying `value: 88, unit: "%"`. **"88" then appears ZERO times in the
+ * whole response.** It bound nothing, so the connectivity prune withdrew it as
+ * `unconnected_to_goal` and it surfaced only inside a redacted
+ * `detail_not_connected: 5` count.
+ *
+ * ── THE LOSS POINT, ISOLATED BY MAPPING EVERY ARM
+ * Direction is IRRELEVANT — `floor`, `ceiling` and absent all behave
+ * identically; the discriminator is whether the limit bound a target. And
+ * pointing it at the GOAL cannot work: `MINTABLE_TARGET_KINDS` is
+ * `{"outcome", "factor"}` (`cee/compound-goal/mintable-target-kinds.ts:31`), so
+ * a goal-targeted limit is refused `constraint_target_not_measurable`.
+ *
+ * The instruction already said to name the quantity being bounded. It did NOT
+ * say the goal is never that quantity — so on a brief whose limit bounds the
+ * very metric the goal targets, the obvious reading points at the goal and the
+ * limit is discarded. This version says it.
+ *
+ * ⛔ THE PIN CLAIMS NOTHING ABOUT WHETHER THIS WORKS. It identifies source
+ * bytes. Whether the model now binds is a live-draw RATE, and one draw is not a
+ * rate. v23 above remains immutable.
+ */
+const PREREGISTERED_V24_INSTRUCTION_SHA256 =
+  "5fce35eb2d0fe70aa3b984ea717fd7067ff9acc584f434a22ad3bb59bc327478";
+const PREREGISTERED_V24_INSTRUCTION_BYTES = 22827;
+const PREREGISTERED_V24_SHAPE_SHA256 =
+  "68c85cb8939ed35b6306915a6622583cdaaea5fb1c59f977308ec946c879b3bb";
+const PREREGISTERED_V24_SHAPE_BYTES = 17712;
 /**
  * SUPERSEDED — v18's bytes, the value ask, AND THE ARTEFACT EVERY 17 Sep
  * MEASUREMENT WAS TAKEN UNDER: both live v202 draws, Paul's manual test, and the
@@ -900,9 +934,9 @@ const SUPERSEDED_V12_INSTRUCTION_BYTES = 12280;
 
 describe("the draft records instruction is the registered artefact", () => {
   it("hashes to the unmeasured v23 source registration at the pinned byte length", () => {
-    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V23_INSTRUCTION_SHA256);
+    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V24_INSTRUCTION_SHA256);
     expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).toBe(
-      PREREGISTERED_V23_INSTRUCTION_BYTES,
+      PREREGISTERED_V24_INSTRUCTION_BYTES,
     );
   });
 
@@ -953,6 +987,16 @@ describe("the draft records instruction is the registered artefact", () => {
     expect(draftRecordsInstructionHash()).not.toBe(SUPERSEDED_V19_INSTRUCTION_SHA256);
     expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).not.toBe(
       SUPERSEDED_V19_INSTRUCTION_BYTES,
+    );
+  });
+
+  it("is DISTINCT from the SUPERSEDED v23 bytes, so every 21 Sep measurement stays its own", () => {
+    // The stated-value-scale witness, the no-quantity ground-truth draw and the
+    // fresh-brief journey were all taken under v23. None of those numbers may be
+    // re-attributed to the version written after them.
+    expect(draftRecordsInstructionHash()).not.toBe(SUPERSEDED_V23_INSTRUCTION_SHA256);
+    expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).not.toBe(
+      SUPERSEDED_V23_INSTRUCTION_BYTES,
     );
   });
 
@@ -1185,16 +1229,16 @@ describe("the draft records instruction is the registered artefact", () => {
     // say which convention its number is in" without reading a diff.
     expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).toBe(
       // v22 changes both halves; model generation remains unmeasured.
-      PREREGISTERED_V23_SHAPE_SHA256,
+      PREREGISTERED_V24_SHAPE_SHA256,
     );
-    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(PREREGISTERED_V23_SHAPE_BYTES);
+    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(PREREGISTERED_V24_SHAPE_BYTES);
     expect(
       Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8") +
         1 +
         Buffer.byteLength(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8") -
         1,
       "the three pins no longer add up — one of them was updated without the others",
-    ).toBe(PREREGISTERED_V23_INSTRUCTION_BYTES);
+    ).toBe(PREREGISTERED_V24_INSTRUCTION_BYTES);
     // WITHDRAWN — v20.0's shape half, the value this pin USED to name, kept
     // beside the live one exactly as every entry below it is. Asserted DISTINCT
     // for a DIFFERENT reason from those, and the difference is worth stating:
