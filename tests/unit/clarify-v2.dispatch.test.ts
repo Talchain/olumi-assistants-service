@@ -118,7 +118,7 @@ describe('clarify v2 dispatch — #497 mechanical-fix behavioural pins', () => {
     // Round-2 ask (quantities) + the lapse notice appended at commit.
     expect(outcome.response.assistant_text).toContain('?');
     expect(outcome.response.assistant_text).toContain(
-      "The held change 'Add churn risk' has lapsed",
+      "The held change has lapsed: Add churn risk.",
     );
   });
 

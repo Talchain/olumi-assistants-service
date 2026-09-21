@@ -391,7 +391,12 @@ export function buildHoldMutationLapseNotice(pa: PendingAction): string {
       ? a.public_label.trim()
       : null;
   return label !== null
-    ? `The held change '${label}' has lapsed because the model changed, say the word if you still want it.`
+    // ⛔ SAME DEFECT, SAME FIX AS `commit.ts` — see
+    // `__tests__/held-lapse-no-nested-quotes.test.ts`. `label` DESCRIBES a
+    // change and carries its own quoted element names, so wrapping it produced
+    // `The held change 'Add 'competitor price reaction'' has lapsed...`.
+    // A colon delimits without a second quote layer.
+    ? `The held change has lapsed because the model changed: ${label}. Say the word if you still want it.`
     : 'A held change has lapsed because the model changed, say the word if you still want it.';
 }
 

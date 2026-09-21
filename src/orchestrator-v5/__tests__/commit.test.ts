@@ -646,10 +646,10 @@ describe('F-HELD — held-consent lifecycle at the commit seam', () => {
         store,
       );
       expect(result.response.assistant_text).toContain(
-        "The held change 'Continue with this change' has lapsed",
+        "The held change has lapsed: Continue with this change.",
       );
       expect(result.response.assistant_text).toContain(
-        'say the word if you still want it',
+        'Say the word if you still want it',
       );
       // F-HELD round 2, FIXUP 2: the notice is injected AFTER every sanitise
       // seam, so it must satisfy house style directly — no em dash.

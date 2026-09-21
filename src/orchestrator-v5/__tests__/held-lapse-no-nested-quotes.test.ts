@@ -15,6 +15,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { buildHeldLapseNotice } from '../commit.js';
+import { buildHoldMutationLapseNotice } from '../handlers/hold-thread-through.js';
 
 function hold(publicLabel: string): Parameters<typeof buildHeldLapseNotice>[0] {
   return {
@@ -55,5 +56,20 @@ describe('buildHeldLapseNotice — never nests quotes', () => {
   it('falls back cleanly when there is no label', () => {
     const out = buildHeldLapseNotice({ action: { kind: 'apply_proposed_change' } } as never);
     expect(out).toContain('A held change has lapsed');
+  });
+});
+
+/**
+ * ⭐ THE SECOND PRODUCER. `hold-thread-through.ts` emits the model-changed
+ * variant of the same sentence and carried the IDENTICAL defect. It was missed
+ * on the first pass because the original grep was truncated with `head -5` —
+ * a manifest built from a truncated list is not a manifest.
+ */
+describe('the model-changed lapse notice never nests quotes either', () => {
+  it('does not double-quote a label that already quotes an element', () => {
+    const out = buildHoldMutationLapseNotice(hold("Add 'competitor price reaction'"));
+    expect(out).not.toContain("''");
+    expect(out).toContain("Add 'competitor price reaction'");
+    expect(out).toContain('lapsed');
   });
 });

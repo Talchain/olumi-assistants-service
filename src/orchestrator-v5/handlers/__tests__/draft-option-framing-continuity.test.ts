@@ -231,8 +231,8 @@ describe('draft option framing continuity through the real commit', () => {
     expect(store.committed).toHaveLength(1);
     const write = store.committed[0]!;
     const notices = [
-      "The held change 'Capacity change' has lapsed because the model changed, say the word if you still want it.",
-      "The held change 'Earlier proposal' has lapsed, say the word if you still want it.",
+      "The held change has lapsed because the model changed: Capacity change. Say the word if you still want it.",
+      "The held change has lapsed: Earlier proposal. Say the word if you still want it.",
     ];
     for (const notice of notices) {
       expect(occurrenceCount(write.assistantMessage, notice)).toBe(1);

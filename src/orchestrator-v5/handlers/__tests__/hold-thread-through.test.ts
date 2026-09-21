@@ -175,7 +175,7 @@ describe('threadHoldsThroughMutatingCommit — kind matrix', () => {
     expect(r.lapsed).toHaveLength(1);
     expect(r.lapsed[0]!.detail).toBe('held_batch_invalid_post_mutation');
     expect(r.lapsed[0]!.governing).toBe('rejected');
-    expect(r.notice).toContain("'Continue with this change'");
+    expect(r.notice).toContain('Continue with this change');
     expect(r.notice).toContain('has lapsed because the model changed');
   });
 
@@ -216,7 +216,7 @@ describe('threadHoldsThroughMutatingCommit — kind matrix', () => {
     const r = threadHoldsThroughMutatingCommit(threadInput([hold]));
     expect(r.threaded).toHaveLength(0);
     expect(r.lapsed[0]!.detail).toBe('proposal_base_moved');
-    expect(r.notice).toContain("'Set Demand to 0.7'");
+    expect(r.notice).toContain('Set Demand to 0.7');
   });
 
   it('hash-pinned concept offer with a stale pin: honest lapse, notice names the concept', () => {
@@ -252,8 +252,8 @@ describe('threadHoldsThroughMutatingCommit — kind matrix', () => {
     });
     const r = threadHoldsThroughMutatingCommit(threadInput([first, second]));
     expect(r.lapsed).toHaveLength(2);
-    expect(r.notice).toContain("'Continue with this change'");
-    expect(r.notice).not.toContain("'Set Demand to 0.7'");
+    expect(r.notice).toContain('Continue with this change');
+    expect(r.notice).not.toContain('Set Demand to 0.7');
   });
 });
 
@@ -393,7 +393,7 @@ describe('fulfilment-aware lapse — no false notice when THIS turn delivered th
     expect(r.lapsed).toHaveLength(2);
     expect(r.lapsed[0]!.detail).toBe('fulfilled_by_this_mutation');
     expect(r.lapsed[1]!.detail).toBe('held_batch_invalid_post_mutation');
-    expect(r.notice).toContain("'Continue with this change'");
+    expect(r.notice).toContain('Continue with this change');
     expect(r.notice).not.toContain("'team morale'");
   });
 });
