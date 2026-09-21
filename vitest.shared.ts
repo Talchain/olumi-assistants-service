@@ -125,6 +125,11 @@ export const REQUIRED_GATE_INTEGRATION_EXCLUSIONS = [
   // required gate and a regex cannot observe a transaction boundary. Self-gated
   // on RUN_C4_CANONICAL_STATE + DATABASE_URL; skips (never errors) without them.
   "tests/integration/c4-canonical-state-restore.contract.test.ts",
+  // C8 replay-vs-CAS ordering — same real-Postgres recipe and the same
+  // RUN_C4_CANONICAL_STATE + DATABASE_URL gate as the C4 file above. The defect
+  // it pins is a statement ORDER inside a plpgsql body, which no static guard
+  // in this gate can observe. Skips (never errors) without those two vars.
+  "tests/integration/c8-append-v5-replay-precedes-cas.contract.test.ts",
   "tests/integration/prompts.repository.test.ts",
   "tests/integration/slice-b-commit-failure.test.ts",
   "tests/integration/slice-b-concurrent-writes.test.ts",
