@@ -839,6 +839,35 @@ function projectField(
  * surfaces that disagreed on the captured turn: the assistant prose and the
  * retained `analysis_result.summary`.
  *
+ * ⚠⚠ AMENDED 2026-09-21 — THE SENTENCE ABOVE WAS TRUE OF ITS CAPTURE AND SHORT
+ *    AS COVERAGE, AND IT IS LEFT STANDING RATHER THAN REWRITTEN because it is a
+ *    record of what that capture showed (CLAUDE.md trap 14 / 14b).
+ *
+ *    "The two surfaces that disagreed on the captured turn" enumerated the
+ *    surfaces the `39557a98` capture happened to expose. **The product has
+ *    THREE.** `enrichment.decision_review` is built by the same turn, rides on
+ *    the same `analysis_result` block, is read by the same user, and conjoins
+ *    only the ENTITLEMENT term (`decision-review-enricher.ts`, keyed on
+ *    `mayNameLeadingOption` alone) — never the admission, and it received none
+ *    of this caveat.
+ *
+ *    Measured on staging build `d536aae`, guest scenario `914266c1`, beat 6
+ *    (banked: `__tests__/fixtures/beat6-decision-review-capture.json`): on a
+ *    payload where the two conjuncts genuinely DISAGREE — entitled `true`,
+ *    `analysisReadyPermitsLeaderNaming` `false` — `assistant_text` and
+ *    `analysis_result.summary` both carried the caveat while
+ *    `decision_review.readiness_rationale` read *"The comparison is settled
+ *    enough to act on: … holds a well evidenced share across runs"*, beside its
+ *    own sibling `robustness_explanation.summary` reading *"directional rather
+ *    than settled"*. **The blob contradicted itself inside one 5 KB object, on
+ *    one screen, on a run with zero user-stated material parameters.**
+ *
+ *    The fix adds the MISSING CONJUNCT'S QUALIFICATION at a surface that already
+ *    had the other conjunct. It removes nothing, suppresses nothing, and mints
+ *    no new copy — {@link PROVISIONAL_FIGURES_CAVEAT} is reused unchanged. See
+ *    {@link DECISION_REVIEW_CAVEATED_MEMBER} for which member it attaches to and
+ *    why that is a recorded copy decision rather than a derivation.
+ *
  * ⚠ THIS IS NOT A CLASSIFIER AND NOT A WORDING RULE. Nothing here reads the
  *   model's language, judges whether prose "sounds qualified", or bans a word.
  *   Idempotence is IDENTITY ON OUR OWN CONSTANT — `includes` of the exact
@@ -883,9 +912,91 @@ function withProvisionalCaveat(text: string): string {
 }
 
 /**
- * Attach the caveat to the retained `analysis_result` summaries.
+ * ⭐⭐ THE DECISION-REVIEW NARRATIVE FIELD THE CAVEAT ATTACHES TO — and it is a
+ * COPY DECISION, recorded here so it is reviewable rather than implied.
  *
- * ⚠ SUMMARIES ONLY, AND NOTHING IS REMOVED. The honest figures stay; the
+ * `enrichment.decision_review` is LLM-authored prose under DYNAMIC keys, which
+ * is exactly why {@link projectBlocksForWithheldClaim}'s sibling drops the blob
+ * WHOLE on a withheld turn rather than editing inside it
+ * (`withheld-claim-projection.ts`, `WITHHELD_DROPPED_ENRICHMENT_BLOBS`). A
+ * permit-with-caveat turn is NOT a withheld turn, so dropping is the wrong
+ * instrument here — the user asked for the review and is entitled to it. The
+ * question is only WHERE the qualification lands.
+ *
+ * ⛔ ONE FIELD, CHOSEN ON MEASURED EVIDENCE, NOT ON TASTE. Live capture, staging
+ *    build `d536aae`, guest scenario `914266c1`, beat 6 — banked verbatim at
+ *    `__tests__/fixtures/beat6-decision-review-capture.json`. On a run whose own
+ *    admission reported `material_parameters_user_stated: 0` of 18 and
+ *    `confidence_parameters_user_stated: 0` of 20, the blob contradicted itself
+ *    inside 5,219 bytes:
+ *
+ *      readiness_rationale            "The comparison is SETTLED ENOUGH TO ACT ON:
+ *                                      … holds a WELL EVIDENCED share across runs"
+ *      robustness_explanation.summary "…worth treating as DIRECTIONAL RATHER THAN
+ *                                      SETTLED."
+ *
+ *    `readiness_rationale` is the member that carries the unqualified claim;
+ *    `robustness_explanation.summary` and `narrative_summary` did not, on this
+ *    capture. Attaching the caveat to the member that measurably carries the
+ *    claim is the narrow move; caveating all three would be a wording rule
+ *    written from taste, which this module bans in as many words above.
+ *
+ * ⚠ THIS IS A ONE-MEMBER MIRROR AND IT IS NAMED AS ONE (CLAUDE.md trap 12).
+ *   It is NOT derived, it cannot be, and it will not notice a future prompt
+ *   field that starts carrying the claim instead. It is deliberately not widened
+ *   to a name-pattern or a language test — see the module's own ruling that a
+ *   natural-language predicate here is the over-suppression trade running
+ *   backwards. Widening is a REVIEW decision with a fresh capture behind it,
+ *   never a tidy-up.
+ */
+const DECISION_REVIEW_CAVEATED_MEMBER = 'readiness_rationale';
+
+/**
+ * Attach the caveat to one `enrichment.decision_review` narrative member.
+ *
+ * Returns `null` when nothing changed, so the caller keeps byte-identity by
+ * construction. Defensive at every hop: the enrichment is `Record<string,
+ * unknown>` on this path and the blob is a provider payload, so a missing,
+ * null, non-object or non-string member is simply left alone.
+ *
+ * ⚠ NOTHING IS REMOVED AND NO KEY IS ADDED. The member is appended to, once,
+ *   by identity on our own constant — the same idempotence
+ *   {@link withProvisionalCaveat} gives the other two surfaces.
+ */
+function qualifyDecisionReviewNarrative(block: Record<string, unknown>): Record<string, unknown> | null {
+  const enrichment = block.enrichment;
+  if (enrichment === null || typeof enrichment !== 'object' || Array.isArray(enrichment)) return null;
+  const review = (enrichment as Record<string, unknown>).decision_review;
+  if (review === null || typeof review !== 'object' || Array.isArray(review)) return null;
+  const current = (review as Record<string, unknown>)[DECISION_REVIEW_CAVEATED_MEMBER];
+  if (typeof current !== 'string') return null;
+  const next = withProvisionalCaveat(current);
+  if (next === current) return null;
+  return {
+    ...block,
+    enrichment: {
+      ...(enrichment as Record<string, unknown>),
+      decision_review: {
+        ...(review as Record<string, unknown>),
+        [DECISION_REVIEW_CAVEATED_MEMBER]: next,
+      },
+    },
+  };
+}
+
+/**
+ * Attach the caveat to the retained `analysis_result` prose.
+ *
+ * ⭐⭐ TWO SURFACES ON ONE BLOCK, BECAUSE THE PRODUCT HAS THREE AND THE ARM HAD
+ *    TWO. Before this, the permit-with-caveat arm qualified `assistant_text` and
+ *    `analysis_result.summary`, and `enrichment.decision_review` — a THIRD
+ *    user-facing surface, on the same block, built by the same turn — received
+ *    the entitlement and none of the qualification. That is CLAUDE.md trap 21 in
+ *    its purest form: a harm closed on the surfaces someone enumerated, left open
+ *    on the one nobody did, with every test green because each surface is
+ *    correct in isolation.
+ *
+ * ⚠ PROSE ONLY, AND NOTHING IS REMOVED. The honest figures stay; the
  *   leading option ID stays exactly as the producer set it. A legitimate null
  *   projection (unrequested / constraint / run-identity) is left null — this
  *   seam never restores an ID over a restriction, which the review explicitly
@@ -893,19 +1004,32 @@ function withProvisionalCaveat(text: string): string {
  *
  * Returns `null` when nothing changed, so the caller keeps byte-identity by
  * construction rather than by hope — the same contract
- * {@link projectBlocksForWithheldClaim} follows.
+ * {@link projectBlocksForWithheldClaim} follows. Note the two members move
+ * INDEPENDENTLY: an already-caveated summary beside an unqualified
+ * `readiness_rationale` is exactly the live capture this fix was derived from,
+ * so a per-member check is required and a block-level one would miss it.
  */
-function qualifyAnalysisResultSummaries(blocks: unknown): unknown[] | null {
+function qualifyAnalysisResultProse(blocks: unknown): unknown[] | null {
   if (!Array.isArray(blocks) || blocks.length === 0) return null;
   let changed = false;
   const projected = blocks.map((block) => {
     if (block === null || typeof block !== 'object') return block;
     const source = block as { readonly type?: unknown; readonly summary?: unknown };
-    if (source.type !== 'analysis_result' || typeof source.summary !== 'string') return block;
-    const next = withProvisionalCaveat(source.summary);
-    if (next === source.summary) return block;
-    changed = true;
-    return { ...(block as Record<string, unknown>), summary: next };
+    if (source.type !== 'analysis_result') return block;
+    let next = block as Record<string, unknown>;
+    if (typeof source.summary === 'string') {
+      const summary = withProvisionalCaveat(source.summary);
+      if (summary !== source.summary) {
+        next = { ...next, summary };
+        changed = true;
+      }
+    }
+    const reviewed = qualifyDecisionReviewNarrative(next);
+    if (reviewed !== null) {
+      next = reviewed;
+      changed = true;
+    }
+    return next === (block as Record<string, unknown>) ? block : next;
   });
   return changed ? projected : null;
 }
@@ -983,11 +1107,17 @@ export function enforceLeadingOptionClaimsAtWire(
     // the review's second finding was that returning the response untouched
     // here admits an unqualified assertion, and it does. Both surfaces that
     // disagreed on the captured turn are qualified from this one decision.
+    //
+    // ⚠ AMENDED 2026-09-21: THREE surfaces, not two — `enrichment.decision_review`
+    // is the third and was missed by the enumeration above. See the amendment on
+    // {@link PROVISIONAL_FIGURES_CAVEAT}. `qualifyAnalysisResultProse` (renamed
+    // from `qualifyAnalysisResultSummaries`, which no longer described what it
+    // does) now reaches both block members from this same one decision.
     const answer =
       typeof response.assistant_text === 'string'
         ? withProvisionalCaveat(response.assistant_text)
         : response.assistant_text;
-    const qualifiedBlocks = qualifyAnalysisResultSummaries(response.blocks);
+    const qualifiedBlocks = qualifyAnalysisResultProse(response.blocks);
     const answerChanged = answer !== response.assistant_text;
     if (!answerChanged && qualifiedBlocks === null) return unchanged(response);
     return {
