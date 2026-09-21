@@ -4951,6 +4951,117 @@ function findUndevelopedDuplicates(projection: OneProjection): DemoteDecision[] 
  * conjunct (#1462). Until this PR was rebased that dependency was enforced by
  * the branch stacking; on `staging` it is enforced by nothing but this note.
  */
+/**
+ * ⭐⭐ YOU DO NOT CHOOSE THE THING YOU ARE CAPPING.
+ *
+ * A factor the user CONSTRAINED must never also be something an option SETS.
+ *
+ * ── THE WITNESSED DEFECT (live staging draw `9077a1e3`, 2026-09-21) ────────
+ * Brief: *"reaching £20k MRR within 12 months WHILE KEEPING MONTHLY CHURN UNDER
+ * 4%, should we increase the Pro plan price from £49 to £59…"*. Two different
+ * speech acts: a CHOICE about price, a LIMIT on churn. The draft collapsed them
+ * — three of four options were given a direct `Monthly Churn Rate` intervention:
+ *
+ *   Hold Price at £49          churn 0.03
+ *   Raise Price to £59 …       churn 0.045   ← BREACHES the user's own 4% ceiling
+ *   Gradual Price Step to £54  churn 0.033
+ *
+ * while `goal_constraints` simultaneously carried `{ node_id: churn, operator:
+ * "<=", value: 0.04, provenance: "explicit" }` quoting his words verbatim.
+ *
+ * ⭐ WHY THIS IS THE ROOT AND NOT A TIDY-UP.
+ *   · It INVENTS A CHOICE THE USER DID NOT MAKE. Those levels are Olumi's, and
+ *     pinning them as interventions asserts he selected a churn rate — one of
+ *     them the very rate he forbade.
+ *   · It is the reason his £59 lost its owner. `findUndevelopedDuplicates`
+ *     already withdraws a MODEL option duplicating a STATED one
+ *     (`undeveloped_duplicate_of_stated`), but it groups on the FULL
+ *     intervention signature, so this extra entry made the restatement look
+ *     structurally distinct and it survived. Two options then claimed £59, the
+ *     brief-authority gate correctly refused to credit a figure with no single
+ *     owner, and the product told him "every estimate this comparison rests on
+ *     is Olumi's, not yours" about the number he wrote.
+ *   · And it is why the fix belongs HERE rather than in the demote:
+ *     `r1-audit-remediation.regression.test.ts` ROOT 2(d) forbids a demote that
+ *     "collapses genuinely distinct meaning". Removing the ILLEGITIMATE
+ *     intervention leaves the restatement genuinely indistinct, so the EXISTING
+ *     rule withdraws it on its own grounds and nothing is weakened.
+ *
+ * ⛔ THE CONSTRAINT IS NOT DELETED, AND NEITHER IS THE CONCEPT. The factor keeps
+ * every causal edge it has, the constraint stays a constraint on it, and a
+ * model's expectation about where churn lands remains a hypothesis on the causal
+ * chain — arguable, and never mistaken for the user's choice.
+ *
+ * ⚠ SCOPED TO CONSTRAINED FACTORS ONLY. An option that sets a factor nobody
+ * capped is untouched, so this cannot narrow a genuine alternative.
+ */
+function dropInterventionsOnConstrainedFactors(projection: OneProjection): void {
+  // Same precondition as the sibling passes, read from the gate (trap 13b).
+  if (!projection.graph.nodes.some((n) => n.kind === "goal")) return;
+
+  const constrained = new Set<string>();
+  // Read the field off its OWN type — `goalConstraints` is a readonly array of a
+  // declared row shape, so casting it to `Record<string, unknown>[]` is both
+  // unnecessary and rejected by the build gate.
+  for (const row of projection.goalConstraints ?? []) {
+    const id = row?.node_id;
+    if (typeof id === "string" && id.length > 0) constrained.add(id);
+  }
+  if (constrained.size === 0) return;
+
+  // ⚠ NO CAST. `graph.nodes` is already `ProjectedNode[]`, whose `data` is
+  // `Record<string, unknown>` — casting the node to a bag added an
+  // `as unknown as` and pushed the forbidden-boundary-pattern gate off baseline.
+  for (const node of projection.graph.nodes) {
+    if (node.kind !== "option") continue;
+    const id = node.id;
+    // ⛔⛔ NEVER A STATED OPTION. MEASURED, AND IT WAS A BLOCKING DEFECT IN THE
+    // FIRST VERSION OF THIS RULE.
+    //
+    // A user can legitimately CHOOSE a level on a factor he also CAPPED — "cut
+    // the Pro plan price to £45" alongside "never price below £40" are both
+    // about price, and both are his. The first version keyed only on the factor
+    // and deleted his own £45, leaving his option with `interventions: {}`:
+    // user-authored content destroyed, which is precisely the harm #1657 was
+    // reverted for. The defect this pass exists to fix is a MACHINE-invented
+    // level pinned as a choice, so only machine-minted options are in scope.
+    if (!projection.optionClaimIndexById.has(id)) continue;
+    const data = node.data;
+    const iv = data?.interventions as Record<string, unknown> | undefined;
+    if (iv === null || iv === undefined || typeof iv !== "object") continue;
+
+    const keys = Object.keys(iv);
+    const capped = keys.filter((k) => constrained.has(k));
+    if (capped.length === 0) continue;
+
+    // ⛔ ALL-OR-NOTHING WHEN EVERY LEVER IS CAPPED, AND THE ALTERNATIVE WAS
+    // MEASURED. Deleting while testing the CURRENT size strips down to one and
+    // keeps whichever key `Object.keys` happens to reach last — an invented
+    // level retained by claim order, which is not a principled outcome and is
+    // untestable as a rule. An option with no UNCAPPED lever is left entirely
+    // alone for the existing gates to judge on their own terms; emptying it
+    // would not make it tidier, it would make it unanalysable
+    // (`run-analysis.ts` only refuses when NO option has interventions, so a
+    // single emptied option goes silently unanalysable rather than erroring).
+    if (capped.length === keys.length) continue;
+
+    for (const factorId of capped) {
+      delete iv[factorId];
+      // ⭐ AND THE SIBLING CARRIERS GO WITH IT. `raw_interventions` and
+      // `intervention_details` are written by the same pass and ride to the
+      // wire independently — `analysis-ready.ts` carries option-level
+      // `raw_interventions` through UNFILTERED, and the live bundle shows it
+      // arriving with the invented churn value on it. Removing only the
+      // encoded entry leaves the invented magnitude reachable under a
+      // different key, which is the same defect wearing a different name.
+      const rawIv = data?.raw_interventions as Record<string, unknown> | undefined;
+      if (rawIv !== undefined) delete rawIv[factorId];
+      const details = data?.intervention_details as Record<string, unknown> | undefined;
+      if (details !== undefined) delete details[factorId];
+    }
+  }
+}
+
 function repairStatedOptionTargets(projection: OneProjection): void {
   // The gate's OWN precondition, read from the gate rather than restated as a
   // rule of our own (trap 13b — a guard agreeing with itself).
@@ -5017,12 +5128,18 @@ export function projectRecordsToGraph(
   const demoted = new Map<number, DemoteDecision>();
   let projection = projectOnce(records, demoted, brief, completionBoundary);
   repairStatedOptionTargets(projection);
+  // Run BEFORE the duplicate pass reads signatures, so a restatement is judged
+  // on the structure it legitimately has.
+  // Drop consequence-interventions BEFORE signatures are read, so a restatement
+  // is judged on the structure it legitimately has.
+  dropInterventionsOnConstrainedFactors(projection);
   for (let pass = 0; pass < claimCount; pass++) {
     const decisions = findUndevelopedDuplicates(projection);
     if (decisions.length === 0) break;
     for (const d of decisions) demoted.set(d.claimIndex, d);
     projection = projectOnce(records, demoted, brief, completionBoundary);
     repairStatedOptionTargets(projection);
+    dropInterventionsOnConstrainedFactors(projection);
   }
   // The internal binding is not part of the contract: consumers get the same
   // graph/provenance/disclosures and the explicitly declared constraint carriers.
