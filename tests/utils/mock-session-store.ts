@@ -91,6 +91,18 @@ export function createMockSessionStore(
     // suite keeps recording Stops unless it seeds an un-admitted turn id
     // deliberately.
     turnFenceRowExists: async () => true,
+    // The drift alarm fired again here, as designed: `committedTurnRowId` was
+    // added to `SessionStore` and this helper was not updated. Benign default =
+    // this turn has NOT committed, which is the state an ordinary in-flight turn
+    // is in while the code under test runs. Note this is NOT inconsistent with
+    // `turnFenceRowExists` defaulting to `true` directly above — a turn can be
+    // ADMITTED and never COMMIT, and the two methods read different tables to
+    // answer different questions (spelled out on the interface for the same
+    // reason). A row-id default would tell every suite "your write already
+    // landed", which is precisely the answer that makes a recovering caller
+    // decline to apply — the wrong default to give a suite that did not ask for
+    // it. A suite exercising the already-committed replay path overrides it.
+    committedTurnRowId: async () => null,
     // ROADMAP 2.171: benign default = NOT post-Stop, so every suite keeps the
     // ordinary coach copy unless it seeds the tombstone deliberately.
     wasLatestScenarioTurnStopped: async () => false,

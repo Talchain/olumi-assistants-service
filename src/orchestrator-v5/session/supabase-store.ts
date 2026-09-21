@@ -1435,19 +1435,40 @@ export class SupabaseSessionStore implements SessionStore {
   private async tryFirstWriteExemptRecovery(
     write: SessionTurnWrite,
   ): Promise<{ id: string } | null> {
+    const id = await this.committedTurnRowId(write.scenario_id, write.turn_id);
+    return id === null ? null : { id };
+  }
+
+  /**
+   * ⭐ THE SAME SELECT, SURFACED. See {@link SessionStore.committedTurnRowId}
+   * for what it answers, why it is NOT `turnFenceRowExists` (different table,
+   * different question), and why it is needed while the replay-before-CAS
+   * migration is unapplied.
+   *
+   * ⚠ IT IS ONE COPY DELIBERATELY. This body WAS the private
+   * `tryFirstWriteExemptRecovery`, which now delegates to it rather than
+   * holding a second, identical select — a duplicated read of one table under
+   * two names is the drift this repo keeps paying for. Behaviour is unchanged
+   * in both directions: same table, same two filters, same `limit(1)`, same
+   * string-typed row guard, and the same swallow of a failed or throwing read.
+   * Only the return shape differs at the seam (`string | null` here,
+   * re-wrapped as `{ id } | null` for the existing caller).
+   */
+  async committedTurnRowId(scenarioId: string, turnId: string): Promise<string | null> {
     try {
       const { data, error } = await this.client
         .from('v5_conversation_turns')
         .select('id')
-        .eq('scenario_id', write.scenario_id)
-        .eq('turn_id', write.turn_id)
+        .eq('scenario_id', scenarioId)
+        .eq('turn_id', turnId)
         .limit(1);
       if (!error) {
         const row = ((data as Array<{ id?: unknown }> | null) ?? [])[0];
-        if (row && typeof row.id === 'string') return { id: row.id };
+        if (row && typeof row.id === 'string') return row.id;
       }
     } catch {
-      // Fall through to the original refusal.
+      // Fall through: a failed read is an unknown, not a fact. The caller is
+      // already recovering from one and must not receive a second.
     }
     return null;
   }

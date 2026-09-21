@@ -380,6 +380,41 @@ export interface SessionStore {
    */
   turnFenceRowExists?(scenarioId: string, turnId: string): Promise<boolean>;
   /**
+   * ⭐⭐ DID THIS EXACT (scenario, turn) ALREADY COMMIT, AND WHAT IS ITS ROW ID?
+   *
+   * ⚠⚠ THIS IS NOT {@link turnFenceRowExists}, WHICH SITS DIRECTLY ABOVE IT AND
+   * READS A DIFFERENT TABLE TO ANSWER A DIFFERENT QUESTION. Named apart on
+   * purpose: `turnFenceRowExists` reads `v5_turn_fence` and asks *was this turn
+   * ADMITTED?*; this reads `v5_conversation_turns` and asks *did this turn
+   * COMMIT?*. A turn can be admitted and never commit. Two similar names over
+   * two tables is how this estate acquires twins that quietly disagree, so the
+   * distinction is spelled out rather than left to the reader.
+   *
+   * ── WHY A KEYED READ AT ALL ───────────────────────────────────────────────
+   * A turn row existing for `(scenario_id, turn_id)` PROVES the whole
+   * transaction committed: every post-insert failure path raises, and a raise
+   * rolls the turn row back with it. So this single select is the honest answer
+   * to "did my write land?" — and it is the only one available when a replay
+   * cannot supply it.
+   *
+   * ⛔ IT IS NEEDED BECAUSE REPLAY CANNOT BE TRUSTED TO ANSWER THAT TODAY. On
+   * the deployed `append_turn_atomic_v5` body the compare-and-swap is evaluated
+   * BEFORE the turn pre-existence lookup, so replaying an already-committed
+   * turn RAISES a stale-write error whenever the graph head has moved on — the
+   * normal state during exactly the interruption a replay exists to recover
+   * from. `supabase/migrations/20260920210000_v5_append_v5_replay_precedes_cas.sql`
+   * fixes the ordering and is NOT YET APPLIED. Until it is, a caller holding a
+   * turn id and no outcome must settle it with this read rather than by
+   * inferring an outcome from a refusal, which fails in the direction that
+   * invites re-applying a change that already landed.
+   *
+   * Returns the committed row id, or `null` on a clean no-row read. Best-effort
+   * by contract: a FAILED read resolves `null` as well, because every consumer
+   * is recovering from an unknown already and must not have a second unknown
+   * thrown at it. Optional for the same reason as {@link claimTurnFence}.
+   */
+  committedTurnRowId?(scenarioId: string, turnId: string): Promise<string | null>;
+  /**
    * V5 TURN FENCE / ROADMAP 2.171 — is the scenario in the POST-EXPLICIT-STOP
    * state? True iff the NEWEST `v5_turn_fence` row for the scenario, excluding
    * `excludeTurnId` (the turn asking), carries a Stop tombstone. Any later
