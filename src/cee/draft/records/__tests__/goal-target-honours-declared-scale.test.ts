@@ -65,7 +65,7 @@ function goalNode(records: DraftRecordSet) {
   const { graph } = projectRecordsToGraph(records);
   const goals = graph.nodes.filter((n) => n.kind === "goal");
   expect(goals.length, "exactly one goal, or every assertion below is vacuous").toBe(1);
-  return goals[0]! as Record<string, unknown>;
+  return goals[0]! as unknown as Record<string, unknown>;
 }
 
 describe("a declared unit-interval target is not divided by its cap again", () => {
