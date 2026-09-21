@@ -715,7 +715,27 @@ function labelIsNamedInFigureSentence(
   const haystack = new Set(labelTokens(sentence));
   const tokens = labelTokens(nodeLabel);
   if (tokens.length === 0) return false;
-  return tokens.every((t) => haystack.has(t));
+  // ⭐ A SHAPE-WORD IS NOT A SUBJECT, SO IT CANNOT WITHHOLD THE USER'S CREDIT.
+  // `UNIDENTIFIED_QUANTITY_LABELS` names the tokens `inferLabel` falls back to
+  // when its lookbehind identified no subject at all — its own docblock: they
+  // "name the SHAPE of the quantity ... and say nothing about WHAT the number
+  // measures". A token that identifies nothing is not evidence the user NAMED
+  // this factor, so requiring it to appear only punishes a model that named the
+  // factor MORE precisely than the user did. Measured on the deployed build
+  // `3032f55`: the brief said "our monthly churn is currently 3.8%", the draft
+  // labelled the node "Monthly Churn Rate", and the user's own figure was
+  // published as `cee_inference` because "rate" is not in their sentence.
+  //
+  // ⚠ THIS IS THE PREDICATE READ NARROWER, NOT A NEW VOCABULARY (trap 12) — the
+  // same move the unit gate above already made. And it is asked of the NODE's
+  // label only; `hasUnboundQuantityLabel` still refuses a shape-word on the
+  // EXTRACTOR's side, which is the direction that could invent a credit.
+  const identifying = tokens.filter((t) => !isUnidentifiedQuantityLabel(t));
+  // ⚠ ALL SHAPE-WORDS MEANS NO SUBJECT WAS NAMED. Refusing here is load-bearing:
+  // an empty list would make `.every()` vacuously true and credit any figure in
+  // the sentence to a node called "Rate".
+  if (identifying.length === 0) return false;
+  return identifying.every((t) => haystack.has(t));
 }
 
 export function creditUserTypedFigures(
