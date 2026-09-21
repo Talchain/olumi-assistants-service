@@ -57,6 +57,10 @@ import { classifyStructuralClaim } from './mutation-language.js';
 // ROADMAP 2.278 — the single owner of "may copy claim this could flip?".
 import type { FlipClaimPosture } from '../context/flip-threshold-rows.js';
 import {
+  composeResultStandingSentence,
+  composeRunnerUpStandingSentence,
+} from '../compose/goal-referenced-result-phrasing.js';
+import {
   formatPercentagePoints,
   formatProbability,
 } from '../format/format-analysis-value.js';
@@ -1932,7 +1936,10 @@ function runnerUpStandingSentence(
   renderedRunnerLabel: string,
   runnerProbability: number | undefined,
 ): string {
-  return `${renderedRunnerLabel} sits in second place${probabilityFragment(runnerProbability)}.`;
+  return composeRunnerUpStandingSentence(
+    renderedRunnerLabel,
+    probabilityFragment(runnerProbability),
+  );
 }
 
 /**
@@ -2035,7 +2042,7 @@ function composeAdvice(
   // a grammatical sentence, because a node label can be a raw span of the
   // user's brief ("The biggest thing to examine next is we believe is partly
   // driven by product quality and…"). `quoteLabel` exists for exactly this.
-  const opener = `Based on this model, the analysis currently favours ${quoteLabel(leadingLabel)}${probability}.`;
+  const opener = composeResultStandingSentence(quoteLabel(leadingLabel), null, probability);
   const margin = marginPpString(analysis.margin_pp);
   const runnerLabel = analysis.runner_up?.label;
   // ROUND 4: `advice` makes no stability claim, but it DOES compose a margin
@@ -2077,7 +2084,7 @@ function composeImprovement(
   // matching.
   const probability = probabilityFragment(analysis.leading_option?.probability);
   // Quoted, matching every sibling composer — see `composeAdvice`.
-  const opener = `Based on this model, the analysis currently favours ${quoteLabel(leadingLabel)}${probability}.`;
+  const opener = composeResultStandingSentence(quoteLabel(leadingLabel), null, probability);
   // ROUND 4: routed through the shared composer. `improvement` is the one
   // surface with NO closeness sentence of its own — its opener states the
   // leader flatly — so on a near-tie this slot is the ONLY place honesty can
@@ -2131,9 +2138,12 @@ function composeMeaning(
   // A3: the posture was never threaded here, so "The order could shift with
   // movement on X" shipped un-gated beside the gated fragility caveat.
   const noFlip = flipClaimPosture === 'attested_no_flip';
-  // Vocabulary aligns with the workstream brief — "currently favours"
-  // opener and "appears to be driven by" attribution avoid the
-  // winner/leader-adjacent framing the previous wording carried.
+  // ⭐ Vocabulary follows PAUL'S 21 Sep RULING via the one owner,
+  // `compose/goal-referenced-result-phrasing.ts`. The opener used to open with
+  // a RECOMMENDATION VERB, which is exactly what the ruling forbids; it now
+  // states the measurement ("came out highest on your goal") and lets the
+  // reader judge it. The "appears to be driven by" attribution is unchanged
+  // and rides as a trailing clause.
   //
   // Near-tie honesty (shared with explain_results): on a sub-1pp margin OR a
   // raw near_tie override, lead with the closeness line and DO NOT assert the
@@ -2177,11 +2187,21 @@ function composeMeaning(
         : '';
     if (topDriverLabel) {
       sentences.push(
-        `Based on this model, the analysis currently favours ${quoteLabel(leadingLabel)}${probability}, and the result appears to be driven by ${quoteLabel(topDriverLabel)}.${marginSentence}`,
+        `${composeResultStandingSentence(
+          quoteLabel(leadingLabel),
+          null,
+          probability,
+          `, and the result appears to be driven by ${quoteLabel(topDriverLabel)}`,
+        )}${marginSentence}`,
       );
     } else {
       sentences.push(
-        `Based on this model, the analysis currently favours ${quoteLabel(leadingLabel)}${probability}, given the model you've built so far.${marginSentence}`,
+        `${composeResultStandingSentence(
+          quoteLabel(leadingLabel),
+          null,
+          probability,
+          ", given the model you've built so far",
+        )}${marginSentence}`,
       );
     }
   }
@@ -2370,7 +2390,11 @@ function composeExplainResults(
     sentences.push(closeness);
   } else {
     sentences.push(
-      `Based on this model, the analysis currently favours ${quoteLabel(leadingLabel)}${probabilityFragment(analysis.leading_option?.probability)}.`,
+      composeResultStandingSentence(
+        quoteLabel(leadingLabel),
+        null,
+        probabilityFragment(analysis.leading_option?.probability),
+      ),
     );
     // ROADMAP 2.1067 — ONE OWNER FOR THIS SENTENCE. These two arms were
     // copy-identical twins of `composeRobustnessVerdict`'s `explain` clear and

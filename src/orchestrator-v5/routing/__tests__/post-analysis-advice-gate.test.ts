@@ -517,9 +517,9 @@ describe('tryPostAnalysisAdviceGate — composer copy contract', () => {
     // Enriched composers (this workstream) no longer match a single
     // hard-coded string — they include optional probability / margin /
     // robustness fragments that degrade gracefully when fields are
-    // absent. The structural contract is: the opener uses the new
-    // "currently favours" vocabulary, the leading option is named,
-    // and the top driver is referenced as the next-examine point.
+    // absent. The structural contract is: the opener states the MEASUREMENT
+    // (Paul's 21 Sep ruling — never a recommendation verb), the leading option
+    // is named, and the top driver is referenced as the next-examine point.
     const input: Parameters<typeof tryPostAnalysisAdviceGate>[0] = {
       message: 'What is the next step?',
       analysis: FIXTURE_ANALYSIS,
@@ -530,7 +530,9 @@ describe('tryPostAnalysisAdviceGate — composer copy contract', () => {
     const out = tryPostAnalysisAdviceGate(input);
     expect(out.matched).toBe(true);
     if (out.matched) {
-      expect(out.assistant_text).toContain("Based on this model, the analysis currently favours 'Hire two senior engineers locally'");
+      expect(out.assistant_text).toContain(
+        "Across the futures we sampled, 'Hire two senior engineers locally' came out highest on your goal",
+      );
       expect(out.assistant_text).toContain("The biggest thing to examine next is 'Delivery risk'");
       expect(out.assistant_text).toContain('it could change the result');
     }
@@ -975,7 +977,9 @@ describe('tryPostAnalysisAdviceGate — enriched composer output (full data)', (
     });
     expect(out.matched).toBe(true);
     if (out.matched) {
-      expect(out.assistant_text).toContain("Based on this model, the analysis currently favours 'Hire two senior engineers locally'");
+      expect(out.assistant_text).toContain(
+        "Across the futures we sampled, 'Hire two senior engineers locally' came out highest on your goal",
+      );
       expect(out.assistant_text).toContain('with a probability of 62%');
       // ROADMAP 2.1067 — this pin previously required
       // "That sits ahead of 'Hire one senior engineer overseas' by 24
@@ -1058,7 +1062,9 @@ describe('tryPostAnalysisAdviceGate — enriched composer output (full data)', (
       expect(out.assistant_text).toContain('with a probability of 62%');
       // ROADMAP 2.1067 — was "It sits ahead of 'Hire one senior engineer
       // overseas' by 24 percentage points".
-      expect(out.assistant_text).toContain("'Hire one senior engineer overseas' sits in second place, with a probability of 38%");
+      expect(out.assistant_text).toContain(
+        "'Hire one senior engineer overseas' came out highest less often, with a probability of 38%",
+      );
       expect(out.assistant_text).not.toMatch(/percentage points?/i);
       // Names the specific fragile assumption (parity with explain_results /
       // what_would_flip) — the sentence is itself the "what to check".
@@ -1081,7 +1087,9 @@ describe('tryPostAnalysisAdviceGate — enriched composer output (full data)', (
     const out = tryPostAnalysisAdviceGate(input);
     expect(out.matched).toBe(true);
     if (out.matched) {
-      expect(out.assistant_text).toContain("Based on this model, the analysis currently favours 'Hire two senior engineers locally'");
+      expect(out.assistant_text).toContain(
+        "Across the futures we sampled, 'Hire two senior engineers locally' came out highest on your goal",
+      );
       expect(out.assistant_text).toContain('with a probability of 62%');
       // ROADMAP 2.1067 — was "It sits ahead of Hire one senior engineer
       // overseas by 24 percentage points".
@@ -1090,7 +1098,9 @@ describe('tryPostAnalysisAdviceGate — enriched composer output (full data)', (
       // `composeAdvice` was the only composer in the file leaving labels bare,
       // which produced an ungrammatical sentence whenever a label was a raw
       // span of the user's brief. It now quotes, like its siblings.
-      expect(out.assistant_text).toContain("'Hire one senior engineer overseas' sits in second place, with a probability of 38%");
+      expect(out.assistant_text).toContain(
+        "'Hire one senior engineer overseas' came out highest less often, with a probability of 38%",
+      );
       expect(out.assistant_text).not.toMatch(/percentage points?/i);
       expect(out.assistant_text).toContain("The biggest thing to examine next is 'Delivery risk'");
       // Readability sectioning: the next-step sentence is a bullet
@@ -1186,7 +1196,9 @@ describe('tryPostAnalysisAdviceGate — validation-priority beat (what to valida
     if (out.matched) {
       const text = out.assistant_text;
       // 1/2 — leader + confidence
-      expect(text).toContain("the analysis currently favours 'Hire a senior engineer'");
+      expect(text).toContain(
+        "Across the futures we sampled, 'Hire a senior engineer' came out highest on your goal",
+      );
       expect(text).toContain('with a probability of 62%');
       // 3 — why it leads (drivers)
       expect(text).toContain('Engineering capacity');
@@ -2581,8 +2593,9 @@ describe('tryPostAnalysisAdviceGate — near-tie + raw robustness', () => {
     if (out.matched) {
       expect(out.advice_class).toBe('next_step');
       const text = out.assistant_text;
-      // Existing opener preserved.
-      expect(text).toContain("currently favours 'Hire One Tech Lead'");
+      // Existing opener preserved (its VERB moved with Paul's 21 Sep ruling;
+      // what this pin is about is that a near-tie does not change the opener).
+      expect(text).toContain("'Hire One Tech Lead' came out highest on your goal");
       // S4 ROUND 4 — this pin previously required "It sits ahead of Hire Two
       // Developers" on a 0.05pp gap. Literally true, but it frames a dead heat
       // as a standing, and the sibling pin directly below already demanded that

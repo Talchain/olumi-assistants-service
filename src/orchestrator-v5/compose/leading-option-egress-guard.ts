@@ -103,6 +103,14 @@ import { log, emit, TelemetryEvents } from '../../utils/telemetry.js';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 import { analysisReadyPermitsLeaderNaming } from '../admission/analysis-admission.js';
 import { splitIntoRedactableUnits } from './redactable-units.js';
+// ⭐ The result sentence's verb arrives from its ONE owner, never as a literal
+// here. `goal-referenced-result-phrasing.ts` is import-free, so consuming it
+// from the guard layer introduces no cycle.
+import {
+  RESULT_STANDING_EXEMPLARS,
+  RESULT_STANDING_PATTERN,
+  RESULT_STANDING_VERB,
+} from './goal-referenced-result-phrasing.js';
 
 /**
  * Copy that NAMES or PRESUMES a leading option.
@@ -290,6 +298,44 @@ const LEADER_CLAIM_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re:
    */
   { code: 'scored_highest', re: /\bscor(?:e|es|ed|ing)\s+highest\b/i },
   { code: 'most_likely_to_serve', re: /\bmost\s+likely\s+to\s+serve\b/i },
+  /**
+   * ⭐ THE REPO'S CURRENT DETERMINISTIC TEMPLATE — and it is here on the SAME
+   * COMMIT that starts emitting it, which is the entire point.
+   *
+   * Paul's 21 Sep ruling retired the recommendation verb: the post-analysis
+   * composers said "Based on this model, the analysis currently favours
+   * ${label}${p}" and now say "Across the futures we sampled, ${label} came
+   * out highest on ${goal}${p}". `sits in second place` became "${runner}
+   * came out highest less often${p}".
+   *
+   * ⛔ THE OLD WORDING WAS READ AS WELL AS WRITTEN. `context/withheld-history-
+   * redaction.ts` carries a `favour` pattern precisely because "the analysis
+   * currently favours …" was a LIVE LEAK on the POST-#713 walk — a stored
+   * sentence that has to be scrubbed from the model's own history when a later
+   * turn withholds the leader claim. Measured on this branch by RUNNING the
+   * exported readers, not by reading the regexes:
+   *
+   *     "…the analysis currently favours X…"     alarm=false  history=TRUE
+   *     "…X came out highest on your goal…"      alarm=false  history=false
+   *
+   * Changing the emitter alone therefore moves the history reader TRUE→false
+   * and re-opens that leak. Note also what the left column says: `favours` was
+   * never in THIS list, so the alarm never saw the superseded sentence either.
+   * The replacement is strictly better covered than the string it replaces.
+   *
+   * ⚠ DERIVED, NOT COPIED (CLAUDE.md trap 12). The pattern is built from the
+   * same constant the composers interpolate
+   * (`compose/goal-referenced-result-phrasing.ts`), so a reword moves the
+   * product's words and the guard's vocabulary together and cannot be
+   * half-done. {@link assertResultStandingVocabularyIsCovered} pins it at
+   * module load.
+   *
+   * No new overlapping pair: `comes_out_ahead` requires `ahead|on top` and
+   * `scored_highest` requires a `scor*` head, so neither subsumes nor is
+   * subsumed by this one. The `every(...)` reasoning at
+   * {@link assertedLeaderNamesItsOwnSubject} is unaffected.
+   */
+  { code: 'came_out_highest', re: RESULT_STANDING_PATTERN },
 ];
 
 /**
@@ -1375,5 +1421,52 @@ export function guardLeadingOptionClaimsAtEgress(
   return response;
 }
 
+/**
+ * BUILD-TIME PROBE — THE ALARM CAN SEE WHAT THE COMPOSERS ACTUALLY EMIT.
+ *
+ * ⭐ ASSERT SURVIVAL, NOT THE CONSTANT. This does NOT re-type the sentence and
+ * check a literal — that would be a fourth hand-maintained copy which keeps
+ * passing while the composers drift away from it (CLAUDE.md trap 13b). It runs
+ * the REAL exemplars, built by calling the REAL composers, through the REAL
+ * exported reader, and requires a hit.
+ *
+ * WHAT IT DEFENDS. `withheld-history-redaction.ts`'s `historyAssertsLeaderClaim`
+ * is a strict superset of this reader BY CALLING IT, so the coverage asserted
+ * here is what stops a withheld leader reaching the user through stored
+ * history. A reword of {@link RESULT_STANDING_VERB} that the derivation failed
+ * to follow would silently blind both readers at once; this fails the process
+ * at startup instead.
+ *
+ * ⚠ THE SECOND ARM IS THE POSITIVE CONTROL (trap #13). A coverage probe passes
+ * vacuously if the reader fires on everything, so an ordinary coaching sentence
+ * carrying no ordering claim must still read FALSE. Without it, `re: /./` would
+ * satisfy the first arm perfectly.
+ */
+function assertResultStandingVocabularyIsCovered(): void {
+  for (const sentence of RESULT_STANDING_EXEMPLARS) {
+    if (!textNamesLeadingOption(sentence)) {
+      throw new Error(
+        'leading-option-egress-guard: the ALARM reader is blind to the result sentence the ' +
+          `post-analysis composers emit — ${JSON.stringify(sentence)}. ` +
+          `RESULT_STANDING_PATTERN no longer follows RESULT_STANDING_VERB (${JSON.stringify(RESULT_STANDING_VERB)}). ` +
+          'Fix the derivation in compose/goal-referenced-result-phrasing.ts. Do NOT hand-copy a ' +
+          'literal into LEADER_CLAIM_PATTERNS: this reader is what withheld-history-redaction.ts ' +
+          "calls, so a blind spot here is a withheld leader reaching the user through the model's " +
+          'own stored history.',
+      );
+    }
+  }
+  // POSITIVE CONTROL: ordinary coaching prose, no ordering claim, must be spared.
+  const SPARED = 'Two of your assumptions have no evidence attached yet, so the model rests on them.';
+  if (textNamesLeadingOption(SPARED)) {
+    throw new Error(
+      'leading-option-egress-guard: the ALARM reader fires on prose that makes no ordering claim ' +
+        `— ${JSON.stringify(SPARED)}. The coverage assertion above is then vacuous (trap #13), and ` +
+        'the history redactor that calls this reader would scrub legitimate coaching.',
+    );
+  }
+}
+
 // Module-load probes last, so every declaration they read is initialised.
 assertEnforcerIsNarrowerThanAlarm();
+assertResultStandingVocabularyIsCovered();

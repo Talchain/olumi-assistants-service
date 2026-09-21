@@ -366,19 +366,26 @@ describe('TurnExecutor → post-analysis coaching wrapper integration', () => {
     expect(result.telemetry.commit_performed).toBe(true);
     expect(result.telemetry.failure_type).toBeNull();
 
-    // Deterministic prose contract: leading option label appears,
-    // gate's enriched "currently favours" framing fires, no forbidden
-    // wording, no raw decimals. The composer's top-driver branch is
-    // covered exhaustively at the unit-test level (FIXTURE_ANALYSIS
-    // there carries explicit top_drivers); this executor fixture
-    // exercises the no-driver fallback prose path because the
-    // run_analysis fact builder doesn't carry factor_sensitivity —
-    // the enriched composer (grounded fresh-analysis workstream)
-    // opens with "Based on this model, the analysis currently favours
-    // <leading>" regardless of which branch fires.
+    // Deterministic prose contract: leading option label appears, the gate's
+    // enriched result-standing framing fires, no forbidden wording, no raw
+    // decimals. The composer's top-driver branch is covered exhaustively at
+    // the unit-test level (FIXTURE_ANALYSIS there carries explicit
+    // top_drivers); this executor fixture exercises the no-driver fallback
+    // prose path because the run_analysis fact builder doesn't carry
+    // factor_sensitivity — the enriched composer opens with the same
+    // result-standing sentence regardless of which branch fires.
+    //
+    // ⭐ PAUL'S 21 Sep RULING. This pin used to require "currently favours",
+    // which is a RECOMMENDATION VERB. The opener now states the measurement
+    // ("came out highest on your goal"); the pin is unchanged in INTENT — the
+    // deterministic opener fires on this branch — and the retired verb is
+    // pinned as FORBIDDEN below so it cannot come back.
     expect(result.response.assistant_text).toContain('A');
-    expect(result.response.assistant_text).toContain('currently favours');
+    expect(result.response.assistant_text).toContain('came out highest');
     expect(result.response.assistant_text.toLowerCase()).not.toContain('recommendation');
+    // PERMANENT REGRESSION GUARD — the retired recommendation verb, in any
+    // inflection or spelling, must never reach a user again.
+    expect(result.response.assistant_text).not.toMatch(/\bfavou?rs?\b/i);
     expect(result.response.assistant_text).not.toMatch(/\d+\.\d+/);
     // No canonical edit_graph no-op denial.
     expect(result.response.assistant_text).not.toContain("I couldn't see a concrete change");

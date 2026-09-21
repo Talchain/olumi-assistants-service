@@ -59,6 +59,10 @@ import type {
 // any more. This module composed the last two deterministic sentences that
 // rendered the runner-up gap as a magnitude; with those retired, the only
 // percentage this file may speak is an option's OWN win share.
+import {
+  composeResultStandingSentence,
+  composeRunnerUpStandingSentence,
+} from '../../compose/goal-referenced-result-phrasing.js';
 import { formatProbability } from '../../format/format-analysis-value.js';
 import { bandFromMagnitude } from '../../format/influence-bands.js';
 import {
@@ -400,13 +404,13 @@ export function composeRobustnessVerdict(
     } else if (marginCat === 'clear' && finiteMargin !== null) {
       margin_clause =
         mode === 'explain'
-          ? `${quoteLabel(runner.label)} came out highest less often${runnerPFragment}.`
+          ? composeRunnerUpStandingSentence(quoteLabel(runner.label), runnerPFragment)
           : `${quoteLabel(runner.label)} is the most likely contender to overtake it${runnerPFragment}.`;
     } else {
       // indeterminate: no finite margin and not a near-tie.
       margin_clause =
         mode === 'explain'
-          ? `${quoteLabel(runner.label)} came out highest less often${runnerPFragment}.`
+          ? composeRunnerUpStandingSentence(quoteLabel(runner.label), runnerPFragment)
           : `${quoteLabel(runner.label)} is the most likely contender to overtake it.`;
     }
   }
@@ -586,10 +590,17 @@ export function composeExplainResultsFallback(
   // the caveat sentence avoids duplication when prefix + composer both
   // ran, and keeps prose ordering decisions in one place.
 
+  // ⭐ ONE OWNER FOR THE PHRASE — `compose/goal-referenced-result-phrasing.ts`.
+  // The composer resolves the referent itself, so the `goalLabel ?? 'your goal'`
+  // branch no longer lives in two places, and the verb it interpolates is the
+  // same constant `LEADER_CLAIM_PATTERNS` derives its matcher from. That is
+  // what keeps the withheld-history redactor able to see this sentence.
   sentences.push(
-    goalLabel
-      ? `Across the futures we sampled, ${leading.label} came out highest on ${goalLabel} with a probability of ${formatProbability(leading.probability)}.`
-      : `Across the futures we sampled, ${leading.label} came out highest on your goal with a probability of ${formatProbability(leading.probability)}.`,
+    composeResultStandingSentence(
+      leading.label,
+      goalLabel,
+      ` with a probability of ${formatProbability(leading.probability)}`,
+    ),
   );
 
   if (verdict.margin_clause !== null) {
