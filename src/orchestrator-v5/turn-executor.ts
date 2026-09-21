@@ -2760,7 +2760,7 @@ export async function runTurnExecutor(
         ? selectedGraphForFreshnessParsed.data
         : null;
     currentAnalysisGraphHashForTurn =
-      contextGraphSelection.status !== 'canonical' || canonicalReadinessGraphForRun === null
+      canonicalReadinessGraphForRun === null
         ? null
         : computeAnalysisAffectingGraphHash(
             canonicalReadinessGraphForRun as GraphStateIngress,
@@ -2784,6 +2784,38 @@ export async function runTurnExecutor(
       config.cee.optionIdentityFreshnessGuard
         ? extractGraphOptionIds(contextGraphForReasoning)
         : undefined;
+    // ⛔ THE LIVE GRAPH HASH IS PASSED WHOLE. A CANONICAL-ONLY NARROWING WAS
+    // TRIED HERE TWICE AND CANNOT WORK — measured, not reasoned.
+    //
+    // The intent was that a non-canonical (provisional) graph selection must
+    // not AUTHORISE a freshness verdict. The first attempt blanked
+    // `currentAnalysisGraphHashForTurn` itself; that was correctly rejected
+    // because thirteen call sites read that variable for four different
+    // questions. The second attempt blanked only this argument, via a
+    // freshness-scoped local — and reproduced the SAME regression, because
+    // `deriveAnalysisFreshness` ECHOES its `currentGraphHash` argument back
+    // out as `FreshnessDerivation.current_graph_hash` (`context/freshness.ts`
+    // `:677,:687,:711,:724,:742,:751`), and FOURTEEN sites in this file read
+    // the live hash back off `freshness?.current_graph_hash` — including
+    // `tryClarificationResume` (`:6117`) and `buildRescaleCapPendingActions`
+    // (`:11223`), both of which fail CLOSED on a missing hash. Measured on a
+    // provisional-selection turn: `currentAnalysisGraphHashForTurn` was
+    // `15e13fe7bc9ddd4d` while `freshness.current_graph_hash` was `null`, the
+    // resumer dispatched `recovery_graph_changed`, and zero pendings were
+    // persisted.
+    //
+    // ⛔ AND IT CANNOT BE SPLIT INSIDE THE DERIVER EITHER. Hard invariant 3
+    // (`context/freshness.ts:591-598`) forbids `unknown` when BOTH hashes are
+    // present, so the only way to obtain the intended `unknown` verdict is to
+    // blank the hash — which is the same field the fourteen consumers read.
+    // One field, two questions (trap 21): "what did the verdict compare
+    // against?" and "what is the live graph hash?". Separating them needs a
+    // distinct field on `FreshnessDerivation` plus a migration of those
+    // fourteen readers — a design change, not a narrowing.
+    //
+    // ⛔ Do NOT "fix" it by relaxing `graphHashConflicts`. Failing closed
+    // there is correct; the defect was feeding it a null it had no business
+    // seeing.
     routingFreshness = deriveAnalysisFreshness(
       scenarioAnalysisFacts,
       currentAnalysisGraphHashForTurn,

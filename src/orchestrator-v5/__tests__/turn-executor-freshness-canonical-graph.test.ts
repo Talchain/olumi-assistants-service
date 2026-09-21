@@ -736,10 +736,28 @@ describe('turn-executor freshness — canonical persisted graph (H3 fix)', () =>
 
     const evt = findPreHandlerFreshnessEvent();
     expect(evt, 'pre-handler freshness telemetry event should fire').toBeDefined();
-    // The request graph stays provisional; a matching hash cannot reactivate
-    // an orphaned result without a valid canonical graph.
-    expect(evt!.data.freshness).toBe('unknown');
-    expect(evt!.data.current_graph_hash).toBeNull();
+    // ⛔ REVERTED TO THE STAGING EXPECTATION, AND THE REVERT IS THE FINDING.
+    //
+    // This increment rewrote these two lines to `'unknown'` / `toBeNull()`, to
+    // pin a new claim: a provisional graph selection must not authorise a
+    // freshness verdict. The ONLY lever the deriver offers for that is blanking
+    // `currentGraphHash` (hard invariant 3, `context/freshness.ts:591-598`,
+    // forbids `unknown` when both hashes are present) — and
+    // `deriveAnalysisFreshness` echoes that argument back out as
+    // `FreshnessDerivation.current_graph_hash`, which FOURTEEN sites in
+    // `turn-executor.ts` read as THE LIVE GRAPH HASH. Two of them fail CLOSED:
+    // `tryClarificationResume` (`:6117`) and `buildRescaleCapPendingActions`
+    // (`:11223`). Measured: asserting null here costs clarification resume and
+    // rescale-pending persistence on EVERY provisional turn — five route-level
+    // tests, all reporting "The model has changed since I asked…".
+    //
+    // So this assertion cannot be satisfied at the same time as those five.
+    // `current_graph_hash` is one field answering two questions (trap 21);
+    // separating them needs a distinct field on `FreshnessDerivation` and a
+    // migration of the fourteen readers. Until then the live hash stays
+    // truthful and the hash comparison decides, as on `origin/staging`.
+    expect(evt!.data.freshness).toBe('fresh');
+    expect(evt!.data.current_graph_hash).toBe(PRE_EDIT_HASH);
     expect(findContextPackEvent()?.data.graph_context_status).toBe('provisional');
     expect(findContextPackEvent()?.data.graph_context_reason).toBe(
       'persisted_absent_request_valid',
