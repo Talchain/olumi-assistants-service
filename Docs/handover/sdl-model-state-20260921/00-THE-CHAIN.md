@@ -21,8 +21,9 @@ measured in deployed logs (ⓂⓁ), or read from code at staging tip `e717e19d`.
 | **receipt** | `ModelVersionMutationReceiptV1Local` (`mutation-receipt.ts:115-163`), wire key `model_version_receipt` | graph carried **verbatim by reference**; re-parsing changes the hash |
 | **persisted state** | `scenarios.graph` updated in the same RPC | ✅ commits |
 | **model version** | `model_versions` + `scenarios.current_model_version_id` | ⛔ **silently skipped for guests** — see below |
-| **reload** | `supabase-store.ts:2234 loadGraph/loadGraphAndBriefText` (CEE is the only live reader) | agent report pending at time of writing |
+| **reload** | `supabase-store.ts:2233-2237` — `select('graph, brief_text')` ONLY | ⛔ **does NOT reproduce exact state** — no load-side projection; `pending_actions`/`coaching_state` written but absent from the read list. See `04-RELOAD-AND-COMPARISON.md` |
 | **analysis identity** | `run_analysis` fact fields `graph_hash_at_run` + `computed_at`, **both OPTIONAL** | ⛔ no `model_version_id`, no `run_id` anywhere on the fact |
+| **comparison** | `POST /versions/compare` → `compareVersionRecords`, deterministic, no LLM | exists and is real; gated 3 ways — see `04-RELOAD-AND-COMPARISON.md` |
 
 ---
 
