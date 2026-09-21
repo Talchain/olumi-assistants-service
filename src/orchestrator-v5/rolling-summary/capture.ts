@@ -45,12 +45,13 @@ import type { SummariserTurn } from './build-input.js';
 import { buildDeterministicFloor } from './deterministic-floor.js';
 import { getRollingSummaryModel, getRollingSummaryStore } from './index.js';
 import { parseSummaryOutput } from './parse-summary.js';
+import { overCapCorrection } from './summariser.js';
 import type { ParsedSummarySlot, SummaryParseReject } from './parse-summary.js';
 import { findErasedSlots, findUnwitnessedAssistantAttributions } from './retention.js';
 import type { SummariserModel } from './summariser.js';
 import type { RollingSummaryStorePort } from './store-adapter.js';
 
-import { SUMMARY_FULL_HISTORY_READ_LIMIT } from './summary-types.js';
+import { SUMMARY_FULL_HISTORY_READ_LIMIT, SUMMARY_HARD_CAP_CHARS } from './summary-types.js';
 import type { SummarySpeaker } from './summary-types.js';
 
 /** Read the full persisted history off the hot-path window. readRecent is
@@ -309,7 +310,46 @@ async function runMaintainPass(args: MaintainRollingSummaryArgs): Promise<void> 
     }
 
     // --- parse + reject-or-write ---------------------------------------
-    const parsed = parseSummaryOutput(modelText);
+    // ⭐⭐ OVER-CAP GETS ONE RETRY, BECAUSE IT IS THE ONE REJECT REASON THE
+    // MODEL CAN ACTUALLY FIX AND THE ONLY ONE IT WAS NEVER TOLD ABOUT.
+    //
+    // MEASURED, staging scenario 95703b18, 21 Sep 2026: six passes applied,
+    // then EIGHT consecutive `over_cap` rejections with zero recoveries — the
+    // scenario's durable memory frozen from 17:04 onwards, ~52s of latency and
+    // eight Haiku calls spent recording nothing. Estate-wide that day, 8 of 9
+    // rejections were this one scenario while 22 others applied 52 of 52, so
+    // it is a function of accumulated content, not flakiness: once a summary
+    // crosses the cap, EVERY later pass fails the same way. A full `regen`
+    // failed too, so the regeneration horizon does not rescue it.
+    //
+    // ⛔ THE CAP IS NOT CHANGED AND IS NOT THE DEFECT. `summary-types.ts`
+    // states reject-on-bloat as design and `parse-summary.test.ts` pins it on
+    // raw output. The gap is FEEDBACK: the prompt states a target and a
+    // ceiling, but never how far this attempt overshot, so the model has no
+    // new information on which to produce anything different next turn.
+    //
+    // ⚠ BOUNDED AND REASON-SCOPED. Exactly one retry, and only for `over_cap`:
+    // a missing slot or a stray preamble is a schema violation, not a length
+    // problem, and retrying those would spend a second call for nothing. The
+    // discriminating case in `maintainer.test.ts` fails if this is ever
+    // widened to retry any rejection.
+    let parsed = parseSummaryOutput(modelText);
+    let overCapRetried = false;
+    if (!parsed.ok && parsed.reason === 'over_cap') {
+      overCapRetried = true;
+      try {
+        const retry = await model.summarise(
+          `${input.userMessage}\n\n${overCapCorrection(modelText.length)}`,
+          { requestId: args.turnId },
+        );
+        modelText = retry.text;
+        usage = retry.usage ?? usage;
+        parsed = parseSummaryOutput(modelText);
+      } catch {
+        // A failed retry is not a new failure mode: fall through holding the
+        // first attempt's rejection, exactly as before this retry existed.
+      }
+    }
 
     // DURABLE-MEMORY WRITE GATES (retention.ts). Two ways an otherwise
     // well-formed summary writes a FALSEHOOD about the user's own history —
@@ -344,15 +384,29 @@ async function runMaintainPass(args: MaintainRollingSummaryArgs): Promise<void> 
     if (!parsed.ok || gateReject !== null) {
       const reason = parsed.ok ? gateReject! : parsed.reason;
       if (prior !== null) {
-        log.debug(
-          { scenario_id: args.scenarioId, turn_id: args.turnId, reject_reason: reason },
-          'RollingSummary — summariser output rejected (off-contract); keeping prior summary',
+        // An over-cap rejection that SURVIVED the retry means this scenario's
+        // memory is now frozen and will stay frozen, so it is warned, not
+        // debugged. The old `log.debug` is why eight consecutive freezes on
+        // staging went unnoticed for a whole conversation.
+        const frozen = overCapRetried && reason === 'over_cap';
+        const logReject = frozen ? log.warn.bind(log) : log.debug.bind(log);
+        logReject(
+          {
+            scenario_id: args.scenarioId,
+            turn_id: args.turnId,
+            reject_reason: reason,
+            ...(overCapRetried ? { over_cap_retried: true } : {}),
+          },
+          frozen
+            ? 'RollingSummary — over cap again after retry; durable memory is NOT updating for this scenario'
+            : 'RollingSummary — summariser output rejected (off-contract); keeping prior summary',
         );
         emitUpdated(args, {
           status: 'rejected_kept_prior',
           mode,
           duration_ms: Date.now() - startedAt,
           reject_reason: reason,
+          ...(overCapRetried ? { over_cap_retried: true } : {}),
           usage,
         });
         return;
@@ -369,6 +423,7 @@ async function runMaintainPass(args: MaintainRollingSummaryArgs): Promise<void> 
         mode,
         duration_ms: Date.now() - startedAt,
         reject_reason: reason,
+        ...(overCapRetried ? { over_cap_retried: true } : {}),
         usage,
       });
       return;
@@ -465,6 +520,10 @@ function emitUpdated(
      *  non-zero stream is a summariser regression, not a user event. */
     readonly carried_forward_slots?: number;
     readonly reject_reason?: string;
+    /** True when this pass produced over-cap output and the bounded retry ran.
+     *  A persistent stream of `over_cap_retried` with `rejected_kept_prior` is
+     *  a FROZEN summary — the scenario's durable memory has stopped updating. */
+    readonly over_cap_retried?: boolean;
     readonly error_name?: string;
     readonly usage?: { input_tokens?: number; output_tokens?: number };
   },
@@ -483,6 +542,7 @@ function emitUpdated(
       history_capped: fields.history_capped ?? null,
       carried_forward_slots: fields.carried_forward_slots ?? null,
       reject_reason: fields.reject_reason ?? null,
+      over_cap_retried: fields.over_cap_retried ?? null,
       error_name: fields.error_name ?? null,
       input_tokens: fields.usage?.input_tokens ?? null,
       output_tokens: fields.usage?.output_tokens ?? null,

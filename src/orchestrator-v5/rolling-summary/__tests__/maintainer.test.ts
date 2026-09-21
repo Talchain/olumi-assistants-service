@@ -29,7 +29,7 @@ import { buildDeterministicFloor } from '../deterministic-floor.js';
 import { MonotonicRollingSummaryStoreFake } from '../../../../tests/utils/rolling-summary-store-fake.js';
 import type { RollingSummaryStorePort, UpsertRollingSummaryOutcome } from '../store-adapter.js';
 import type { SummariserModel } from '../summariser.js';
-import { SUMMARY_SCHEMA_VERSION } from '../summary-types.js';
+import { SUMMARY_HARD_CAP_CHARS, SUMMARY_SCHEMA_VERSION } from '../summary-types.js';
 import type { RollingSummary } from '../summary-types.js';
 
 const SCENARIO = 'scenario-1';
@@ -585,5 +585,113 @@ describe('maintainRollingSummaryForCommit — coalescing preserves briefText (MI
     // The rerun MUST still carry the brief text even though its own commit
     // (turn-2) had none.
     expect(inputs[1]).toContain('KEEP-BERLIN-BRIEF');
+  });
+});
+
+
+/**
+ * ⭐⭐ OVER-CAP IS THE ONE REJECT REASON THE MODEL CAN FIX, AND IT WAS NEVER TOLD.
+ *
+ * MEASURED ON STAGING, scenario 95703b18, 21 Sep 2026 (Render logs):
+ *   16:23 -> 17:04   applied x6
+ *   17:05 -> 17:19   over_cap x8, zero recoveries  <- memory frozen, permanently
+ * Estate-wide in the same 3h25m: 8 of 9 rejections were this ONE scenario;
+ * the other 22 scenarios applied 52 of 52. So it is not flakiness — it is a
+ * function of accumulated content, and once a scenario crosses the cap EVERY
+ * later pass fails. A full `regen` at 17:08:07 failed too, so regeneration
+ * does not rescue it. Cost: ~52s of latency and 8 wasted Haiku calls, while
+ * the assistant's durable memory stayed frozen at its 17:04 state.
+ *
+ * ⛔ THE CAP ITSELF IS NOT THE DEFECT AND IS NOT CHANGED HERE. `summary-types.ts`
+ * states rejection-of-bloat as design and `parse-summary.test.ts` pins it. What
+ * was missing is the FEEDBACK: the summariser is told a target (800-1400) and a
+ * ceiling (1600) but never how far it actually overshot, so it reproduces the
+ * same over-cap output every turn forever.
+ */
+describe('over-cap recovery — the summariser is told its overage and gets one retry', () => {
+  const OVER_CAP = [
+    'DECISION FRAME: Choosing an HQ.',
+    `CONSTRAINTS & PREFERENCES: Keep Berlin. ${'Also hold costs down, retain the team and preserve runway. '.repeat(30)}[t1]`,
+    'RESOLVED: (none)',
+    'OPEN: (none)',
+  ].join('\n');
+
+  /** Bind the fixture to the REAL constant: if the cap ever moves above this
+   *  fixture's size the test would silently stop exercising the path. */
+  it('the fixture genuinely exceeds the live hard cap', () => {
+    expect(OVER_CAP.length).toBeGreaterThan(SUMMARY_HARD_CAP_CHARS);
+  });
+
+  function priorSummary(): RollingSummary {
+    return {
+      text: 'GOOD PRIOR', slots: [], updated_turn_id: 'turn-2',
+      updated_turn_created_at: mkTurn(2).created_at, version: 1, generator: 'regen',
+      schema_version: SUMMARY_SCHEMA_VERSION,
+    };
+  }
+
+  it('retries ONCE, telling the model its measured length and the cap, and applies the compliant retry', async () => {
+    const spy = emitSpy();
+    const store = new RecordingStore(priorSummary());
+    const seen: string[] = [];
+    const model: SummariserModel = {
+      summarise: vi.fn(async (userMessage: string) => {
+        seen.push(userMessage);
+        return { text: seen.length === 1 ? OVER_CAP : VALID };
+      }),
+    };
+    await maintainRollingSummaryForCommit({
+      scenarioId: SCENARIO, turnId: 'turn-3', persistedRowId: 'row-3',
+      historyReader: historyReader([mkTurn(3), mkTurn(2)]),
+      summaryStore: store, model,
+    });
+    expect(seen.length).toBe(2);                              // exactly one retry
+    expect(updatedEvents(spy)[0]!.status).toBe('applied');    // memory UPDATES
+    expect(store.upsertSummary).toHaveBeenCalledOnce();
+    // The retry must carry the two numbers the model lacked. Without the
+    // measured length it has no more information than the first attempt.
+    expect(seen[1]).toContain(String(OVER_CAP.length));
+    expect(seen[1]).toContain(String(SUMMARY_HARD_CAP_CHARS));
+  });
+
+  it('a retry that is ALSO over cap keeps the prior summary, and says it retried', async () => {
+    const spy = emitSpy();
+    const store = new RecordingStore(priorSummary());
+    let calls = 0;
+    const model: SummariserModel = {
+      summarise: vi.fn(async () => { calls += 1; return { text: OVER_CAP }; }),
+    };
+    await maintainRollingSummaryForCommit({
+      scenarioId: SCENARIO, turnId: 'turn-3', persistedRowId: 'row-3',
+      historyReader: historyReader([mkTurn(3), mkTurn(2)]),
+      summaryStore: store, model,
+    });
+    expect(calls).toBe(2);                                    // BOUNDED: never a third
+    expect(store.upsertSummary).not.toHaveBeenCalled();       // prior preserved
+    expect(updatedEvents(spy)[0]!.status).toBe('rejected_kept_prior');
+    expect(updatedEvents(spy)[0]!.reject_reason).toBe('over_cap');
+    expect(updatedEvents(spy)[0]!.over_cap_retried).toBe(true);
+  });
+
+  /** ⭐ THE DISCRIMINATOR. Retrying every reject reason would spend a second
+   *  Haiku call on schema violations the model has no reason to fix (a missing
+   *  slot is not a length problem). The retry must be bound to `over_cap`
+   *  ALONE — this case fails if the implementation retries on any reject. */
+  it('does NOT retry a non-length rejection — exactly one model call', async () => {
+    const spy = emitSpy();
+    const store = new RecordingStore(priorSummary());
+    let calls = 0;
+    const model: SummariserModel = {
+      summarise: vi.fn(async () => { calls += 1; return { text: 'here is a nice summary for you' }; }),
+    };
+    await maintainRollingSummaryForCommit({
+      scenarioId: SCENARIO, turnId: 'turn-3', persistedRowId: 'row-3',
+      historyReader: historyReader([mkTurn(3), mkTurn(2)]),
+      summaryStore: store, model,
+    });
+    expect(calls).toBe(1);
+    expect(updatedEvents(spy)[0]!.status).toBe('rejected_kept_prior');
+    expect(updatedEvents(spy)[0]!.reject_reason).toBe('content_before_label');
+    expect(updatedEvents(spy)[0]!.over_cap_retried).toBeNull();
   });
 });

@@ -85,6 +85,30 @@ export const SUMMARISER_SYSTEM_PROMPT = [
   '- When a constraint is WITHDRAWN or no longer applies, never express that by emptying the slot. Write it as text — "Constraint withdrawn: the 500k budget cap no longer applies [t14]" — and keep the other constraints. An emptied slot cannot be told apart from the failure mode above where durable memory is dropped, so it will be repaired by restoring the old entry and the withdrawal will be lost.',
 ].join('\n');
 
+/**
+ * ⭐ THE ONE FACT THE SUMMARISER NEVER HAD: HOW FAR IT ACTUALLY OVERSHOT.
+ *
+ * SUMMARISER_SYSTEM_PROMPT already states the target and the ceiling, and that
+ * was not enough — staging scenario 95703b18 produced eight consecutive
+ * over-cap passes (21 Sep 2026), each one a fresh attempt with exactly the same
+ * information as the last, so there was nothing to make the next attempt
+ * differ. This appends the MEASURED length of the attempt that was just thrown
+ * away, which is the only new input available without changing the contract.
+ *
+ * Kept next to the prompt deliberately: the ceiling is quoted from
+ * SUMMARY_HARD_CAP_CHARS rather than retyped, so a change to the cap cannot
+ * leave this correction stating a stale number (trap 12 — no hand-maintained
+ * mirror).
+ */
+export function overCapCorrection(producedChars: number): string {
+  const over = producedChars - SUMMARY_HARD_CAP_CHARS;
+  return [
+    `YOUR PREVIOUS ATTEMPT WAS REJECTED AND NOTHING WAS RECORDED. It was ${producedChars} characters; the hard limit is ${SUMMARY_HARD_CAP_CHARS}, so you were ${over} over.`,
+    `Produce the four slots again, complete, within ${SUMMARY_HARD_CAP_CHARS} characters in total including the labels and every [tN] citation.`,
+    'Compress wording in OPEN and RESOLVED first — they are the least durable. Do NOT drop a constraint, and do NOT drop a citation: a shorter CONSTRAINTS slot is a memory loss, whereas shorter phrasing is not.',
+  ].join('\n');
+}
+
 export interface SummariserModelResult {
   readonly text: string;
   readonly usage?: { readonly input_tokens?: number; readonly output_tokens?: number };
