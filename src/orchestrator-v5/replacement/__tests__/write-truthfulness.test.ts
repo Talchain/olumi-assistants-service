@@ -204,3 +204,68 @@ describe('mixed outcomes — a receipt does not short-circuit the judgement', ()
     expect(constrainProseToWriteOutcome(prose, o)).toBe(prose);
   });
 });
+
+
+/**
+ * ⭐⭐ PRE-DISPATCH REFUSALS LEFT THE REPLY COMPLETELY UNCONSTRAINED.
+ *
+ * `trace.writeAttempted()` is called at the point of COMMITMENT in
+ * `run-replacement-turn.ts` — deliberately before dispatch, so the turn's one
+ * write is reserved even if it throws. Every guard that refuses EARLIER than
+ * that line therefore ends the turn with `write_attempted === false`:
+ *
+ *     proposal_not_waiting · quote_not_from_message
+ *     acceptance_names_other_number · second_write_this_turn
+ *
+ * Those returned `no_write`, `proseForWriteOutcome` returns null for
+ * `no_write`, and the model's prose was published VERBATIM. So a user could
+ * say "yes, go ahead", have the acceptance refused before it ever reached the
+ * writer, and be told "Done — I have made that change." with no enforcement
+ * anywhere. The whole point of this module is that such a sentence cannot
+ * survive, and for four of the nine refusal codes it always did.
+ *
+ * ⚠ `no_write` MUST STILL MEAN NO WRITE. An ordinary conversational turn
+ * refuses nothing and writes nothing; constraining its prose would put a
+ * save-failure sentence onto a turn where the user never asked for a change.
+ * The discriminator is whether the turn REFUSED something, not whether it
+ * dispatched.
+ */
+describe('pre-dispatch refusals still constrain the reply', () => {
+  const PRE_DISPATCH = [
+    'proposal_not_waiting',
+    'quote_not_from_message',
+    'acceptance_names_other_number',
+    'second_write_this_turn',
+  ] as const;
+
+  it.each(PRE_DISPATCH)('%s is refused, not no_write, even though nothing dispatched', (code) => {
+    const o = writeTruthfulnessOf(trace({ write_attempted: false, refusals: [code] as never }));
+    expect(o.kind, `${code} left the reply unconstrained`).toBe('refused');
+    expect(constrainProseToWriteOutcome('Done — I have made that change.', o)).toBe(REFUSED);
+  });
+
+  it.each(PRE_DISPATCH)('%s beside a receipt is mixed with a DEFINITE residual', (code) => {
+    const o = writeTruthfulnessOf(
+      trace({
+        write_attempted: true,
+        write_committed: true,
+        receipt_id: 'rcp-9',
+        refusals: [code] as never,
+      }),
+    );
+    // We know this one did not reach the writer, so "I cannot tell" understates
+    // what the turn knows — the residual must be `refused`.
+    expect(o).toMatchObject({ kind: 'mixed', residual: 'refused' });
+  });
+
+  /** ⭐ CONTRAST CONTROL: a turn with no write and NO refusal is still
+   *  `no_write`, and its prose is still untouched. A fix that constrained
+   *  every non-writing turn would pass everything above and break ordinary
+   *  conversation. */
+  it('an ordinary conversational turn is untouched', () => {
+    const o = writeTruthfulnessOf(trace());
+    expect(o.kind).toBe('no_write');
+    const prose = 'Your model weighs delivery speed against hiring risk.';
+    expect(constrainProseToWriteOutcome(prose, o)).toBe(prose);
+  });
+});

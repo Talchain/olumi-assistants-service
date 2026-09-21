@@ -24,7 +24,7 @@
  * Telling a user nothing changed, when a change may well have landed, sends
  * them to re-enter work that is already in the model.
  */
-import type { ReplacementTurnTrace } from './turn-trace.js';
+import type { ReplacementRefusalCode, ReplacementTurnTrace } from './turn-trace.js';
 
 /** The turn's write, as the turn can PROVE it — never as the prose describes it. */
 export type WriteTruthfulness =
@@ -40,17 +40,45 @@ export type WriteTruthfulness =
   | { readonly kind: 'mixed'; readonly receiptId: string; readonly residual: 'refused' | 'unknown' };
 
 /**
- * Refusal codes that mean the write DEFINITELY did not happen — the request
- * never left, or the writer answered with a failure. Nothing changed.
+ * ⭐⭐ EVERY REFUSAL CODE IS CLASSIFIED, AND THE COMPILER ENFORCES THAT.
+ *
+ * This was two `Set`s of string literals and FOUR OF THE NINE codes were in
+ * neither — `proposal_not_waiting`, `quote_not_from_message`,
+ * `acceptance_names_other_number` and `second_write_this_turn` all fell
+ * through to the default. Because `Record<ReplacementRefusalCode, …>` requires
+ * every union member, a new refusal code now fails the BUILD until someone
+ * decides what it means for the user's data — which is the decision that was
+ * silently skipped four times.
+ *
+ * `not_written` — nothing reached the store, so the model is unchanged.
+ * `may_have_written` — it was dispatched and the answer was lost; asserting
+ * either direction would be a fabrication.
  */
-const DEFINITELY_NOT_WRITTEN = new Set(['checkpoint_refused', 'no_checkpoint', 'write_failed']);
+const REFUSAL_CLASS: Record<ReplacementRefusalCode, 'not_written' | 'may_have_written'> = {
+  // ── Pre-dispatch: refused before the turn's write was ever reserved, so
+  //    `write_attempted` is still false when the turn ends. Nothing left.
+  proposal_not_waiting: 'not_written',
+  quote_not_from_message: 'not_written',
+  acceptance_names_other_number: 'not_written',
+  second_write_this_turn: 'not_written',
+  // ── Reserved, then stopped at the durability barrier. Nothing left either.
+  no_checkpoint: 'not_written',
+  checkpoint_refused: 'not_written',
+  // ── Dispatched. Only these can leave the model in a state we cannot name.
+  write_failed: 'not_written',
+  write_outcome_unknown: 'may_have_written',
+  // `no_receipt` belongs here, not above: the writer said done and handed back
+  // nothing citable, so the change may well exist.
+  no_receipt: 'may_have_written',
+};
 
 /**
- * Refusal codes that mean a write MAY have landed and we cannot prove it.
- * `no_receipt` belongs here, not above: the writer said done and handed back
- * nothing citable, so the change may well exist.
+ * An unrecognised code is neither — it is a code from a future version of the
+ * writer, and it lands on the weaker reading. See the default note below.
  */
-const MAY_HAVE_WRITTEN = new Set(['write_outcome_unknown', 'no_receipt']);
+function classOf(code: string): 'not_written' | 'may_have_written' | 'unrecognised' {
+  return (REFUSAL_CLASS as Record<string, 'not_written' | 'may_have_written' | undefined>)[code] ?? 'unrecognised';
+}
 
 /**
  * ⚠ THE DEFAULT IS `unknown`, DELIBERATELY. A write was attempted, no receipt
@@ -69,9 +97,13 @@ export function writeTruthfulnessOf(
   // those changes." was published about BOTH. That is the worst shape in this
   // module — a TRUE receipt used as evidence for a FALSE claim, with a citable
   // id attached to it. The codes are therefore classified BEFORE any verdict.
-  const codes = new Set<string>(trace.refusals);
-  const mayHaveWritten = [...MAY_HAVE_WRITTEN].some((c) => codes.has(c));
-  const definitelyNotWritten = [...DEFINITELY_NOT_WRITTEN].some((c) => codes.has(c));
+  const classes = trace.refusals.map((c) => classOf(c));
+  // An unrecognised code reads as `may_have_written`: it is the weaker claim,
+  // and a code this build has never seen cannot be asserted to have changed
+  // nothing. Same direction as the default below.
+  const mayHaveWritten = classes.some((c) => c === 'may_have_written' || c === 'unrecognised');
+  const definitelyNotWritten = classes.some((c) => c === 'not_written');
+  const refusedSomething = classes.length > 0;
   const receiptId =
     trace.write_committed && trace.receipt_id !== null && trace.receipt_id.trim() !== ''
       ? trace.receipt_id
@@ -88,11 +120,22 @@ export function writeTruthfulnessOf(
     // to `committed` here would re-open the exact hole above for every refusal
     // code added after today, which is the failure mode this module's default
     // exists to prevent.
-    if (codes.size > 0) return { kind: 'mixed', receiptId, residual: 'unknown' };
+    if (refusedSomething) return { kind: 'mixed', receiptId, residual: 'unknown' };
     return { kind: 'committed', receiptId };
   }
 
-  if (!trace.write_attempted) return { kind: 'no_write' };
+  // ⛔⛔ A PRE-DISPATCH REFUSAL IS NOT `no_write`, AND TREATING IT AS ONE LEFT
+  // THE REPLY ENTIRELY UNCONSTRAINED. `writeAttempted()` is reserved at the
+  // point of COMMITMENT, so every guard refusing earlier ends the turn with
+  // `write_attempted === false`. Those turns returned `no_write`, whose prose
+  // is null, so "Done — I have made that change." published verbatim on a turn
+  // where the user's "yes" never reached the writer.
+  //
+  // ⚠ The discriminator is whether the turn REFUSED something, not whether it
+  // dispatched. An ordinary conversational turn refuses nothing and must stay
+  // untouched — constraining it would put a save-failure sentence on a turn
+  // where the user never asked for a change.
+  if (!trace.write_attempted && !refusedSomething) return { kind: 'no_write' };
   if (mayHaveWritten) return { kind: 'unknown' };
   if (definitelyNotWritten) return { kind: 'refused' };
   return { kind: 'unknown' };
