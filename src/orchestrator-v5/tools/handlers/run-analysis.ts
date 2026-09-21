@@ -145,6 +145,7 @@ import {
 // headline ON them, and then discarded both — so this handler could only ever
 // emit the locked template on the one population that most needs the reason.
 import { buildSeparabilityDisclosure } from '../../coaching/separability-disclosure.js';
+import { deriveEmittedGoalDirection } from '../../goal-target/goal-direction.js';
 
 // `PLOT_SLOW_LIKELY_MS` lives in the shared `../../telemetry/turn-timings.js`
 // module so the turn-executor (error-path reconstruction) can apply the
@@ -876,6 +877,21 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     if (snapshot.n_samples !== undefined) plotPayload.n_samples = snapshot.n_samples;
     if (snapshot.goal_constraints !== undefined) {
       plotPayload.goal_constraints = snapshot.goal_constraints;
+    }
+    // ROADMAP 2.920 — the user's ATTESTED objective sense, MINIMISE ONLY.
+    //
+    // Absent ⇒ ISL runs the maximiser unattested, which for a goal that is a
+    // quantity to REDUCE crowns the WORST option (measured on isl-staging: the
+    // ranking flips completely when 'minimise' is stamped). `maximise` is
+    // byte-identical to sending nothing, so emitting it is pure downside and
+    // `deriveEmittedGoalDirection` never returns it — see that module's header
+    // for the one-sided-exposure argument.
+    const emittedGoalDirection = deriveEmittedGoalDirection(
+      graphForAnalysis,
+      snapshot.goal_node_id,
+    );
+    if (emittedGoalDirection !== undefined) {
+      plotPayload.goal_direction = emittedGoalDirection;
     }
     // Lane 28 — brief pipeline seam 3: flag-gated brief leg
     // (CEE_SEND_BRIEF_TO_PLOT, default OFF — doctrine ask D5 is Paul-gated;
