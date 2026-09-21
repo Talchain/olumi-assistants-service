@@ -438,3 +438,85 @@ describe('the offer must refuse EXACTLY where the handler refuses — no more', 
     ).not.toBeNull();
   });
 });
+
+/**
+ * ⭐⭐ THE SOURCE MAPPING, NOT THE PRECEDENCE — and the distinction is the
+ * whole reason this block is four lines rather than four cases.
+ *
+ * A reviewer asked whether this corpus exercises two unit sources that
+ * DISAGREE, on the grounds that a corpus offering one source at a time proves
+ * the predicate reads *a* unit and never that it reads the *right* one. The
+ * question was right and the answer was no. Measured by mutant rather than by
+ * grep: inverting `resolveConstraintUnit`'s precedence outright REDs **five**
+ * tests, and **every one of them is in the handler's own suite** —
+ * `add-constraint-unit-integrity.test.ts` carries an explicit *"ordering pin:
+ * the existing row unit outranks the node observed unit"*. **Nothing in this
+ * file moved.**
+ *
+ * ⛔ SO THE PRECEDENCE IS ALREADY GUARDED, AT ITS OWNER, AND COPYING THOSE
+ * ASSERTIONS HERE WOULD BE THE MIRROR. This side IMPORTS
+ * `resolveConstraintUnit`; it does not reimplement the order, so it inherits
+ * that guarantee. A second copy would prove the two copies agree — never that
+ * the order is right — which is the trap-12d shape.
+ *
+ * ⭐ WHAT IS GENUINELY THIS SIDE'S RISK is narrower and is not covered
+ * anywhere: **whether this call site maps ITS sources onto the RIGHT
+ * PARAMETERS.** If `observedUnit` were passed where `existingUnit` belongs,
+ * every precedence test at the handler would still pass and this corpus would
+ * not notice — because the function would be resolving correctly over
+ * arguments this file assembled wrongly.
+ *
+ * One case settles it: two sources present and disagreeing, asserting WHICH
+ * unit came back by its consequence.
+ */
+describe('this call site maps its own sources onto the right parameters', () => {
+  it('the existing ROW unit wins over the NODE observed unit — proving the mapping, not the order', async () => {
+    const { resolveConstraintUnit } = await import('../../tools/handlers/add-constraint.js');
+
+    // ⚠ THE PRECONDITION, ASSERTED: the two sources must actually disagree, or
+    // the case below cannot discriminate and would pass by coincidence.
+    expect(
+      resolveConstraintUnit({ existingUnit: 'GBP', observedUnit: '%' }),
+      'the shared resolver must prefer the row over the node — if this flips, the case below is meaningless',
+    ).toBe('GBP');
+
+    // A goal target whose NODE says '%' while its persisted ROW says 'GBP'.
+    // 300,000 is ambiguous with no unit, unambiguous with either — so the only
+    // way this can be silent is if SOME unit resolved. What proves the mapping
+    // is the arm below, where only the ROW carries one.
+    const rowOnly = findUnitAmbiguousOffer(
+      action(
+        'add_constraint',
+        [
+          { name: 'constraint_type', value: 'at_most' },
+          { name: 'value', value: 300_000 },
+        ],
+        { id: 'g-arr', kind: 'goal', label: 'ARR' },
+      ),
+      // the NODE carries NO unit — so a resolution can only have come from the row
+      [{ id: 'g-arr', kind: 'goal', observed_state: {} }],
+      [{ node_id: 'g-arr', operator: '<=', value: 250_000, unit: 'GBP' }],
+    );
+    expect(
+      rowOnly,
+      'the existing row was passed as `existingUnit`, so the unit resolves and no refusal is due',
+    ).toBeNull();
+
+    // ⭐ THE DISCRIMINATING TWIN: strip the row, leave the node empty, and the
+    // same shape must refuse. Without it, "null" above could mean this
+    // function stopped refusing for any reason at all.
+    const neither = findUnitAmbiguousOffer(
+      action(
+        'add_constraint',
+        [
+          { name: 'constraint_type', value: 'at_most' },
+          { name: 'value', value: 300_000 },
+        ],
+        { id: 'g-arr', kind: 'goal', label: 'ARR' },
+      ),
+      [{ id: 'g-arr', kind: 'goal', observed_state: {} }],
+      [],
+    );
+    expect(neither, 'with no unit in any source the refusal must stand').not.toBeNull();
+  });
+});
