@@ -29,6 +29,21 @@ const DEFAULT_TIMEOUT_MS = 60_000;
  * `config.params` is passed through as-is (it is the caller's escape hatch, and
  * the Responses API validates its own field names) but it is applied FIRST, so
  * it can never overwrite the three identity fields below.
+ *
+ * STRICT STRUCTURED OUTPUTS NEED NO CODE HERE (measured in WP0, 2026-09-21).
+ * The runner injects the grammar through that same escape hatch:
+ *
+ *   config.params.text = {
+ *     format: { type: "json_schema", name: "rich_decision_model",
+ *               strict: true, schema }
+ *   }
+ *
+ * `output/model-gen-20260921/wp0/builder-smoke-request.json` is the exact body
+ * that returned HTTP 200 on `gpt-4.1` at `temperature: 0` — which also falsifies
+ * the comment at `src/adapters/llm/openai.ts:158-161` claiming gpt-4.1 rejects
+ * temperature 0 with a 400 (false for the Responses API).
+ * The Anthropic side is NOT symmetric: it takes `output_config.format` with no
+ * `name` and no `strict` — see `ModelConfig.output_config`.
  */
 export function buildResponsesParams(
   system: string,

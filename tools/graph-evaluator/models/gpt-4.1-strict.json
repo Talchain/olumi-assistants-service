@@ -1,0 +1,18 @@
+{
+  "id": "gpt-4.1-strict",
+  "display_name": "GPT-4.1 (strict rich schema)",
+  "provider": "openai",
+  "model": "gpt-4.1",
+  "api_key_env": "OPENAI_API_KEY",
+  "params": {
+    "temperature": 0
+  },
+  "target_mode": "normal",
+  "pricing": {
+    "input_per_1m": 2.0,
+    "output_per_1m": 8.0,
+    "source": "openai_api_docs_2026-03 (copied verbatim from models/gpt-4.1.json)"
+  },
+  "pricing_verified": true,
+  "_note": "Arm B builder. The runner injects params.text.format = {type: json_schema, name: rich_decision_model, strict: true, schema} from contracts/rich-decision-model.v0.json. MEASURED 2026-09-21 (WP0): this exact body at temperature 0 returns HTTP 200 / status completed on gpt-4.1 (resolved gpt-4.1-2025-04-14) — see output/model-gen-20260921/wp0/builder-smoke-request.json. That falsifies the comment at src/adapters/llm/openai.ts:158-161 claiming gpt-4.1 rejects temperature 0 with a 400."
+}

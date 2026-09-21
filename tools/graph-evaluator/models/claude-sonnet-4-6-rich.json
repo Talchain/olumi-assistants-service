@@ -1,0 +1,21 @@
+{
+  "id": "claude-sonnet-4-6-rich",
+  "display_name": "Claude Sonnet 4.6 (rich v0 strict schema)",
+  "provider": "anthropic",
+  "model": "claude-sonnet-4-6",
+  "max_tokens": 16384,
+  "timeout_ms": 120000,
+  "params": {
+    "temperature": 0
+  },
+  "thinking": {
+    "type": "disabled"
+  },
+  "pricing": {
+    "input_per_1m": 3.0,
+    "output_per_1m": 15.0,
+    "source": "anthropic-2026-03 (copied verbatim from models/claude-sonnet-4-6.json)"
+  },
+  "pricing_verified": true,
+  "_note": "ARM A′ — the incumbent model with the NEW rich schema and builder prompt, which is what makes 'the contract did the work' separable from 'GPT-4.1 did the work' (PLAN-v2 amendment 1). output_config is NOT set here: the runner injects {format: {type: json_schema, schema}} from contracts/rich-decision-model.v0.json. The Anthropic body takes NO name and NO strict — that is the OpenAI shape and a 400 here. claude-sonnet-4-6 is recorded structuredOutputs:true, thinkingEnabled:true (live probe 2026-08-08, src/adapters/llm/anthropic-model-capabilities.ts); thinking is sent EXPLICITLY disabled rather than omitted, per the product's F-5 note, so an adaptive-thinking model swap cannot silently change the arm."
+}

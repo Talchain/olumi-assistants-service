@@ -17,6 +17,54 @@ function isClaudeModel(modelId: string): boolean {
   return modelId.toLowerCase().includes("claude");
 }
 
+/**
+ * Build the `messages.create()` body from a {@link ModelConfig}.
+ *
+ * ⚠ WHY THIS IS A SEPARATE, EXPORTED, PURE FUNCTION — the same reasoning as
+ * `buildResponsesParams` in the OpenAI provider (E1, 2026-07-31). An assertion
+ * about WHAT WE SEND can only be honest if it does not need a network call. The
+ * `output_config` passthrough below exists so Arm A′ can run the rich v0 schema
+ * on Claude as GA structured outputs; without a pure builder, the only way to
+ * check the body was actually built would be to spend a model call on it.
+ *
+ * CONTRACT: when `config.output_config` is undefined the returned body is
+ * byte-identical to the pre-passthrough one. Both directions are asserted in
+ * `tests/model-gen/anthropic-output-config.test.ts`; deleting either half of the
+ * `if` turns one of them RED.
+ */
+export function buildMessagesParams(
+  system: string,
+  user: string,
+  config: ModelConfig,
+): Anthropic.MessageCreateParamsNonStreaming {
+  const maxTokens = config.max_tokens ?? DEFAULT_MAX_TOKENS;
+  const temperature = config.params?.temperature as number | undefined;
+
+  const params: Anthropic.MessageCreateParamsNonStreaming = {
+    model: config.model,
+    system,
+    messages: [{ role: "user", content: user }],
+    max_tokens: maxTokens,
+    ...(temperature != null ? { temperature } : {}),
+  };
+
+  // Only pass thinking config for Claude models
+  if (isClaudeModel(config.model) && config.thinking !== undefined) {
+    (params as Record<string, unknown>)["thinking"] = config.thinking;
+  }
+
+  // GA structured outputs. Passed through VERBATIM and only when the caller set
+  // it: a model that does not accept `output_config` must keep its old body.
+  // Not gated on model id here — the evaluator's job is to MEASURE which models
+  // accept the v0 schema, and a local allowlist would answer that question from
+  // memory instead of from the API. A rejection is a finding, not a bug to hide.
+  if (config.output_config !== undefined) {
+    (params as Record<string, unknown>)["output_config"] = config.output_config;
+  }
+
+  return params;
+}
+
 export class AnthropicProvider implements LLMProvider {
   async chat(system: string, user: string, config: ModelConfig): Promise<LLMResult> {
     let apiKey: string;
@@ -35,22 +83,8 @@ export class AnthropicProvider implements LLMProvider {
 
     const client = new Anthropic({ apiKey });
     const timeoutMs = config.timeout_ms ?? DEFAULT_TIMEOUT_MS;
-    const maxTokens = config.max_tokens ?? DEFAULT_MAX_TOKENS;
 
-    const temperature = config.params?.temperature as number | undefined;
-    const params: Anthropic.MessageCreateParamsNonStreaming = {
-      model: config.model,
-      system,
-      messages: [{ role: "user", content: user }],
-      max_tokens: maxTokens,
-      ...(temperature != null ? { temperature } : {}),
-    };
-
-    // Only pass thinking config for Claude models
-    if (isClaudeModel(config.model) && config.thinking !== undefined) {
-       
-      (params as any)["thinking"] = config.thinking;
-    }
+    const params = buildMessagesParams(system, user, config);
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);

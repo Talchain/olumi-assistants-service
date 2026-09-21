@@ -1,0 +1,17 @@
+{
+  "id": "gpt-5.6-terra-high",
+  "display_name": "GPT-5.6 Terra (reasoning effort high)",
+  "provider": "openai",
+  "model": "gpt-5.6-terra",
+  "api_key_env": "OPENAI_API_KEY",
+  "params": {},
+  "reasoning_effort": "high",
+  "target_mode": "deep",
+  "pricing": {
+    "input_per_1m": 0,
+    "output_per_1m": 0,
+    "source": "unknown — fill from OpenAI pricing page"
+  },
+  "pricing_verified": false,
+  "_note": "Arm C widener. ⛔ PRICING IS UNVERIFIED AND MUST BE FILLED BEFORE ANY COST CLAIM. The zeroes are placeholders, NOT a measurement and NOT free: the runner emits est_cost_usd null (never 0) for any model with pricing_verified false, because a 0 in a cost column reads as a finding. ASSUMPTION carried from PLAN-v2 escalation 1: 'Terra High' = gpt-5.6-terra with reasoning effort high; no temperature is sent (reasoning models in this estate ship params {} — see models/gpt-5.4.json)."
+}

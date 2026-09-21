@@ -1,0 +1,16 @@
+{
+  "id": "gpt-5.6-sol",
+  "display_name": "GPT-5.6 Sol",
+  "provider": "openai",
+  "model": "gpt-5.6-sol",
+  "api_key_env": "OPENAI_API_KEY",
+  "params": {},
+  "target_mode": "deep",
+  "pricing": {
+    "input_per_1m": 0,
+    "output_per_1m": 0,
+    "source": "unknown — fill from OpenAI pricing page"
+  },
+  "pricing_verified": false,
+  "_note": "Arm D challenger on the hard subset. ⛔ PRICING IS UNVERIFIED AND MUST BE FILLED BEFORE ANY COST CLAIM — the zeroes are placeholders, not a measurement. est_cost_usd is emitted as null while pricing_verified is false. No reasoning_effort is pinned here: Sol's default effort is what the plan compares, and pinning one would silently make it a different candidate."
+}
