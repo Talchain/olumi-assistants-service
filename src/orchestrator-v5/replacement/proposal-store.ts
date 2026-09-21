@@ -513,6 +513,78 @@ export function recordApplyFailed(
  *                    double-apply this store exists to prevent
  *  · `withdrawn`   — retracted
  */
+/**
+ * ⭐ THE BOUND ON A COMPOUND COMMIT.
+ *
+ * WHY A COMPOUND COMMIT EXISTS AT ALL, and it is not convenience. The writer
+ * keys idempotency on `(scenario_id, turn_id)`, so a SECOND write under one
+ * turn id is swallowed — and swallowed looks exactly like saved. That is why
+ * the controller refuses a second write per turn (`second_write_this_turn`),
+ * and why a user who agrees to three changes in one breath is currently told
+ * two of them did not happen. The only honest way to honour all three is ONE
+ * write carrying all three, which is this.
+ *
+ * WHY IT IS BOUNDED. One write earns ONE receipt. If it fails, the user must
+ * be told exactly what did not happen, and that sentence has to be readable —
+ * an unbounded batch produces a failure notice nobody can act on, and a
+ * consent nobody can hold in their head at the moment they give it.
+ *
+ * The bound is on OPERATIONS, not on proposals, because operations are what
+ * the writer receives and what the receipt has to account for. Twelve is
+ * deliberately not one-per-proposal: a single proposal may legitimately carry
+ * several operations, so bounding proposals would bound the wrong thing and
+ * would drift the moment a propose tool changed its arity.
+ */
+export const MAX_COMPOUND_OPERATIONS = 12;
+
+/**
+ * Gather several authorised proposals into ONE write.
+ *
+ * ⛔ EVERY member must be `authorised` and must share ONE model revision.
+ * Consent binds to a specific state of the model, so proposals agreed against
+ * different revisions are not a batch — they are two conversations, and
+ * concatenating them would apply one of them against a state its user never
+ * saw. Refused rather than reconciled here.
+ *
+ * Order is the caller's order, preserved: the operations are opaque to this
+ * module and a later one may depend on an earlier one.
+ */
+export function operationsToApplyBatch(
+  store: ProposalStore,
+  ids: readonly string[],
+): { readonly operations: readonly ProposalOperation[]; readonly model_revision: string } {
+  assertState(ids.length > 0, 'a compound commit needs at least one proposal');
+  assertState(
+    new Set(ids).size === ids.length,
+    'the same proposal appears twice in one compound commit — it would be applied twice',
+  );
+
+  const members = ids.map((id) => {
+    const p = find(store, id);
+    assertState(
+      p.status === 'authorised',
+      `only an authorised proposal can be applied, and "${id}" is "${p.status}"`,
+    );
+    return p;
+  });
+
+  const revision = members[0]!.model_revision;
+  for (const p of members) {
+    assertState(
+      p.model_revision === revision,
+      `"${p.id}" was agreed against a different model revision — proposals agreed against different states of the model cannot share one write`,
+    );
+  }
+
+  const operations = members.flatMap((p) => [...p.operations]);
+  assertState(
+    operations.length <= MAX_COMPOUND_OPERATIONS,
+    `a compound commit carries at most ${MAX_COMPOUND_OPERATIONS} operations and this one has ${operations.length} — offer the rest on the next turn rather than sending a write whose failure could not be explained`,
+  );
+
+  return { operations, model_revision: revision };
+}
+
 export function operationsToApply(
   store: ProposalStore,
   id: string,
