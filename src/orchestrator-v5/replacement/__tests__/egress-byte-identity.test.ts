@@ -33,6 +33,7 @@ import {
   ANALYSIS_AUTHORITY_UNAVAILABLE_NOTICE,
   enforceAnalysisAuthorityUnavailableAtEgress,
 } from '../../compose/analysis-authority-unavailable-notice.js';
+import { createReplacementTraceRecorder } from '../turn-trace.js';
 import type { ReplacementEntryResult } from '../turn-entry.js';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 
@@ -55,6 +56,21 @@ function turn(text: string): ReplacementEntryResult {
     toolsCalled: ['read_results'],
     iterations: 2,
     incomplete: false,
+    // `trace` became required when the turn record was added. This fixture
+    // exercises EGRESS BYTE IDENTITY only, so the trace is a minimal real one
+    // rather than a cast: a cast here would let the field's shape drift
+    // without this file noticing, which is the mirror the record exists to
+    // avoid.
+    trace: createReplacementTraceRecorder({
+      correlationId: 'req-egress-test',
+      modelRevision: 'rev-egress',
+    }).finish({
+      outcome: 'completed',
+      proposalsOpen: 0,
+      proposalsInFlight: 0,
+      toolsCalled: ['read_results'],
+      iterations: 2,
+    }),
   };
 }
 
