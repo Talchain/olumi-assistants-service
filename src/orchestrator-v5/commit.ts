@@ -87,6 +87,7 @@ import { recordDecisionRecordForCommit } from './decision-records/capture.js';
 import { recordBriefProvenanceForCommit } from './brief-provenance/capture.js';
 import { maintainRollingSummaryForCommit } from './rolling-summary/capture.js';
 import { isSuccessfulRunAnalysisFact } from './context/freshness.js';
+import { quoteLabel } from './compose/quote-label.js';
 
 export interface CommitMetadata {
   readonly scenario_id: string;
@@ -789,8 +790,14 @@ export function buildHeldLapseNotice(pa: PendingAction): string {
   // F-HELD round 2 (FIXUP 2): comma, not an em dash — this string is
   // injected AFTER every sanitise seam, so it must satisfy house style
   // (no em dash in user-facing copy) directly.
+  // `quoteLabel` adds the pair only when the label does not already carry a
+  // delimiting quote of its own. `proposal-continuation.ts:1160` mints
+  // `Add '<concept>'`, which wrapped again reads
+  // "The held change 'Add 'competitor price reaction'' has lapsed" — reported
+  // from the panel. Sentence shape deliberately unchanged; only the outer
+  // quote characters differ, so every spec pinning this copy stays green.
   return label !== null
-    ? `The held change '${label}' has lapsed, say the word if you still want it.`
+    ? `The held change ${quoteLabel(label)} has lapsed, say the word if you still want it.`
     : 'A held change has lapsed, say the word if you still want it.';
 }
 
