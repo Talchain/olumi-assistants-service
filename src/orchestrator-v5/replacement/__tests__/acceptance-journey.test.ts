@@ -48,6 +48,7 @@ import { EMPTY_CONVERSATION_MEMORY, liveItemsOfKind } from '../conversation-memo
 import { EMPTY_PROPOSAL_STORE, needsReconciliation, openProposals } from '../proposal-store.js';
 import { ACCEPT_TOOL_NAME, runReplacementTurn } from '../run-replacement-turn.js';
 import { traceAccountsForItsWrite } from '../turn-trace.js';
+import { findSuccessClaimHit } from '../../compose/forbidden-user-facing-phrases.js';
 import type { ConversationMemory } from '../conversation-memory.js';
 import type { ProposalStore } from '../proposal-store.js';
 import type { AgentTool, ChatWithToolsLike } from '../agent-loop.js';
@@ -267,6 +268,13 @@ describe('the acceptance journey the deployed product could not complete', () =>
     expect(changes[0]!.proposal_id).toBe(proposalId);
     expect(changes[0]!.receipt_id).toBe('commit-7a1');
 
+    // ⭐ AND WHAT THE USER ACTUALLY READS — the half an internal assertion
+    // cannot see. Everything above is state; this is the product speaking.
+    // The accept tool licenses the claim explicitly ("You may tell the user it
+    // is done. This is the ONLY circumstance in which you may say that"), so on
+    // a committed turn the reply is allowed to say so.
+    expect(t2.text, 'the user is told something').not.toBe('');
+
     // ── 8. the next turn and a reload agree ───────────────────────────────
     const after = reload(t2);
     expect(needsReconciliation(after.proposals), 'nothing left unresolved').toHaveLength(0);
@@ -332,6 +340,16 @@ describe('the acceptance journey the deployed product could not complete', () =>
     expect(write, 'nothing may be written').not.toHaveBeenCalled();
     expect(t2.applied).toHaveLength(0);
     expect(openProposals(t2.proposals), 'the offer still stands').toHaveLength(1);
+    // ⭐⭐ AND THE USER IS NOT TOLD IT SAVED. This is the layer's whole purpose,
+    // and it was previously unasserted — every other check here is about state,
+    // which a user never sees. The oracle is the repo's OWN success-claim
+    // detector (`findSuccessClaimHit`), not a phrase list written here: a list
+    // of my own would go stale the day the copy is reworded, and would be the
+    // hand-maintained mirror this estate pays for (trap 12).
+    expect(
+      findSuccessClaimHit(t2.text),
+      `the reply must not claim a save that did not happen: ${JSON.stringify(t2.text)}`,
+    ).toBeNull();
     // The record says WHY, by code — the thing the estate could not reconstruct.
     expect(t2.trace.refusals).toContain('acceptance_names_other_number');
     expect(t2.trace.write_attempted).toBe(false);
@@ -373,5 +391,13 @@ describe('the acceptance journey the deployed product could not complete', () =>
     // say what happened.
     expect(traceAccountsForItsWrite(t2.trace)).toBe(true);
     expect(t2.applied, 'nothing may be claimed as applied').toHaveLength(0);
+    // ⭐⭐ THE HARDEST CASE, AND THE ONE THE WHOLE LAYER EXISTS FOR: the write
+    // was SENT and the outcome is unknown. The user must be told neither that
+    // it landed nor that it did not.
+    expect(
+      findSuccessClaimHit(t2.text),
+      `an unknown outcome must not read as a save: ${JSON.stringify(t2.text)}`,
+    ).toBeNull();
+    expect(t2.text, 'and the turn must say something, not go silent').not.toBe('');
   });
 });
