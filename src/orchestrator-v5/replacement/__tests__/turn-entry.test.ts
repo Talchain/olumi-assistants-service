@@ -5,6 +5,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
+import { log } from '../../../utils/telemetry.js';
 import { EMPTY_CONVERSATION_MEMORY, recordItem } from '../conversation-memory.js';
 import { EMPTY_PROPOSAL_STORE, type Proposal } from '../proposal-store.js';
 import { ACCEPT_TOOL_NAME, type ApplyOperations } from '../run-replacement-turn.js';
@@ -504,5 +505,69 @@ describe('the tool list is built in ONE place, and every tool is offered', () =>
       execute: () => ({ type: 'proposed', summary: 's', operations: [] }),
     };
     expect(build([extra]).map((t) => t.definition.name)).toEqual([...NAMES, 'extra_tool']);
+  });
+});
+
+/**
+ * ⭐⭐ THE RECORD MUST ACTUALLY LEAVE THE PROCESS.
+ *
+ * A trace that is computed, returned, and consumed by nobody is this estate's
+ * chronic failure #1 wearing an observability badge — and writing one was how
+ * this block came to exist. The controller deliberately owns no sink, so the
+ * emit lives here, at the integration boundary, and these tests are what stop
+ * it being quietly removed or never wired at all.
+ */
+describe('the turn record reaches the log, and survives the turn that needs it most', () => {
+  function traceEvents(spy: { mock: { calls: unknown[][] } }) {
+    return spy.mock.calls
+      .map((c) => c[0] as Record<string, unknown>)
+      .filter((o) => o !== null && typeof o === 'object' && o.event === 'v5.replacement.turn');
+  }
+
+  it('emits the decision chain, keyed on the correlation id the caller supplied', async () => {
+    const spy = vi.spyOn(log, 'info').mockImplementation(() => undefined as never);
+    try {
+      const store = memoryStore();
+      const r = await handleReplacementTurn(entryInput({ turnId: 'turn-xyz' }), {
+        chatWithTools: scripted([say('A plain answer.')]),
+        state: store,
+      });
+      const events = traceEvents(spy as never);
+      expect(events, 'exactly one record per turn').toHaveLength(1);
+      // ⭐ ONE ID SPANNING UI -> CONTROLLER -> WRITE: the value the caller sent.
+      expect(events[0]!.correlation_id).toBe('turn-xyz');
+      expect(events[0]!.correlation_id).toBe(r.trace.correlation_id);
+      expect(events[0]!.scenario_id).toBe('sc-1');
+      expect(events[0]!.controller).toBe('replacement');
+      expect(events[0]!.outcome).toBe('completed');
+      expect(events[0]!.write_attempted).toBe(false);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  /**
+   * ⛔ THE ORDERING CLAIM, PINNED RATHER THAN ASSERTED IN A COMMENT.
+   *
+   * The emit sits BEFORE the final state save because a save that fails throws
+   * out of the entry — and that is precisely the turn whose record is hardest
+   * to reconstruct afterwards. Emitting after the save would lose it exactly
+   * when it is needed. Nothing in the trace depends on the save landing: it
+   * describes what the turn DID, which is already settled by that point.
+   */
+  it('still emits when the final save throws — the turn hardest to reconstruct', async () => {
+    const spy = vi.spyOn(log, 'info').mockImplementation(() => undefined as never);
+    try {
+      const store: ReplacementStateStore = {
+        load: async () => ({ state: EMPTY_REPLACEMENT_STATE, revision: null }),
+        save: async () => { throw new Error('connection reset'); },
+      };
+      await expect(
+        handleReplacementTurn(entryInput(), { chatWithTools: scripted([say('x')]), state: store }),
+      ).rejects.toThrow();
+      expect(traceEvents(spy as never), 'the record survives the failure').toHaveLength(1);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
