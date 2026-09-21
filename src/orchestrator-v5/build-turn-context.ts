@@ -236,6 +236,16 @@ export interface EnrichedTurnContext extends TurnContext {
    */
   readonly prior_facts_read_ok?: boolean;
   /**
+   * The DB-stamped restore-chronology marker for this scenario, or `null`.
+   *
+   * Threaded to every freshness derivation on the turn path so a model restored
+   * to an earlier version is not reported `fresh` merely because its hash
+   * matches the one the analysis ran against. `null` means no restore
+   * invalidation — the pre-C8 behaviour — and is also what a failed or
+   * unsupported read yields, so absence can only ever degrade to today.
+   */
+  readonly analysis_invalidated_at?: string | null;
+  /**
    * Scenario-wide fact authority for analysis-specific reasoning.
    *
    * This is deliberately distinct from `prior_facts`: that ordinary bounded
@@ -708,11 +718,59 @@ export async function buildTurnContext(
     priorTurnsTotal,
     durableMutationFactRead,
     durableScenarioAnalysisFactRead,
+    analysisInvalidatedAtRead,
   ] = await Promise.all([
     fetchPriorTurns(payload.scenario_id, requestId, store),
     fetchPriorTurnsTotal(payload.scenario_id, requestId, store),
     fetchRecentAppliedMutationFacts(payload.scenario_id, requestId, store),
     fetchScenarioAnalysisFacts(payload.scenario_id, requestId, store),
+    // ⭐ THE RESTORE-CHRONOLOGY MARKER — the fifth read, and it is FREE. This
+    // batch's own comment above: concurrent reads cost the batch's MAX latency,
+    // not their sum. That is the whole reason it belongs here rather than at
+    // one of the twenty derivation sites.
+    //
+    // WHY IT IS NEEDED. `deriveAnalysisFreshness` has accepted
+    // `analysisInvalidatedAt` since C8 and it is the ONLY input that can make a
+    // hash MATCH still read `stale` — a model restored to an earlier version
+    // can be byte-identical to the one the analysis ran against while the
+    // analysis is no longer about the model the user is looking at. Measured at
+    // this SHA: of the twenty production `deriveAnalysisFreshness` call sites,
+    // exactly ONE threads it (`routes/scenario-graph-analysis-read.ts`). So no
+    // TURN-PATH derivation can report a post-restore staleness, and every one of
+    // them answers `fresh` on a restored model.
+    //
+    // ⚠ BEST-EFFORT, AND FAILING OPEN IS CORRECT HERE. The store method is
+    // OPTIONAL and its contract resolves `null` on a failed read. `null` means
+    // "no restore invalidation", which is byte-identical to the behaviour every
+    // consumer had before this line existed — so a store that lacks the method,
+    // or a read that fails, degrades to exactly today, never to a false `stale`.
+    // A false `stale` would tell a user their analysis is out of date when it is
+    // not, which is the worse direction.
+    // ⛔ THE `??` CANNOT CATCH A REJECTION. It substitutes only when the method
+    // is ABSENT (`undefined`). The production Supabase implementation THROWS
+    // `SessionReadError` on a database error or a malformed timestamp, and an
+    // unhandled rejection inside a shared `Promise.all` rejects the WHOLE batch
+    // and aborts the user's turn. The comment above promised "a read that fails
+    // degrades to exactly today"; without this `.catch` the code did not deliver
+    // it, and the interface's "resolves null on a failed read" was contradicted
+    // by the implementation. Caught at the producer boundary, telemetered with
+    // the established `session.read_degraded` event, and resolved to `null` —
+    // which means "no restore invalidation", the pre-existing behaviour.
+    (store?.readAnalysisInvalidatedAt?.(payload.scenario_id) ?? Promise.resolve(null)).catch(
+      (error: unknown) => {
+        log.warn(
+          {
+            event: 'session.read_degraded',
+            read: 'analysis_invalidated_at',
+            request_id: requestId,
+            scenario_id: payload.scenario_id,
+            error_name: error instanceof Error ? error.name : typeof error,
+          },
+          'Restore-invalidation read degraded — treated as no invalidation',
+        );
+        return null;
+      },
+    ),
   ]);
   const priorTurns = priorTurnsRead.turns;
   // V5 Conversation Context Reliability: continuity-gap guard. A 'chip'/'chip_click'
@@ -1147,6 +1205,7 @@ export async function buildTurnContext(
     newest_analysis_fact_read_ok: newestAnalysisFactRead.readOk,
     prior_facts: priorFactsWithRecentMutationHistory,
     prior_facts_read_ok: priorFactsReadOk,
+    analysis_invalidated_at: analysisInvalidatedAtRead,
     scenario_analysis_fact_set: scenarioAnalysisFactSet,
     // ONE derivation, two consumers — `deriveCoachingState` above and the
     // graph-less exits' `analysis_state` via `turn-claim-safety.ts`. Exposed

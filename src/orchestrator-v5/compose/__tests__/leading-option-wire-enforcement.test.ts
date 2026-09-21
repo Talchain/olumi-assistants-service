@@ -816,3 +816,127 @@ describe('the shared unit machinery is SHARED, not copied', () => {
     });
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('the separation the producer ALREADY decided — declined narrows, unevaluated does not', () => {
+  // WHY THIS EXISTS. This gate conjoined ENTITLEMENT and ADMISSION and never
+  // required that the options actually SEPARATE — while `composeLeaderClaim`
+  // did, and the shared contract says `permitted` is "composed once ... so that
+  // no surface has to re-derive it and no two surfaces can disagree". This
+  // surface re-derived it, so an evaluated-and-declined run could ship
+  // `leader_claim.permitted: false` beside prose naming the leader, with
+  // neither egress rail firing.
+  //
+  // ⚠ THE PAIR IS THE POINT, not either case alone. Obeying a bare
+  // `permitted: false` would also suppress every "we did not look" turn, which
+  // trades a LIE for a GAP — the window trap 22b says those two may not share.
+  // The first case proves the lie is closed; the second proves the gap was not
+  // opened. One without the other shows nothing.
+
+  it('⛔ WE LOOKED AND DECLINED — the leader is removed even though entitled', () => {
+    const input = envelope(`${RECEIPT} ${CLAIM}`);
+    const result = enforceLeadingOptionClaimsAtWire(input, {
+      ...OPTS,
+      mayNameLeadingOption: true,
+      leaderClaimWithheldReason: 'options_do_not_separate',
+    });
+    expect(result.response).not.toBe(input);
+    expect(result.changed).toBe(true);
+    expect(String((result.response as { assistant_text?: unknown }).assistant_text)).not.toContain(
+      LEADER,
+    );
+  });
+
+  it('⭐ CONTRAST — WE DID NOT LOOK: byte-identical, by reference', () => {
+    // `separation_unavailable` is an ABSENCE OF EVIDENCE and carries no verdict
+    // about naming. Suppressing here is the over-suppression this module's own
+    // docstring calls the worse defect.
+    const input = envelope(`${RECEIPT} ${CLAIM}`);
+    const result = enforceLeadingOptionClaimsAtWire(input, {
+      ...OPTS,
+      mayNameLeadingOption: true,
+      leaderClaimWithheldReason: 'separation_unavailable',
+    });
+    expect(result.response).toBe(input);
+    expect(result.changed).toBe(false);
+  });
+
+  it('⭐ CONTRAST — a code this producer never minted does NOT narrow', () => {
+    // `leaderClaimReasonKind` returns 'unknown' for an unminted code, and
+    // unknown must not be read as a licence to suppress any more than as a
+    // licence to name. Absent operand, absent narrowing.
+    const input = envelope(`${RECEIPT} ${CLAIM}`);
+    expect(
+      enforceLeadingOptionClaimsAtWire(input, {
+        ...OPTS,
+        mayNameLeadingOption: true,
+        leaderClaimWithheldReason: 'some_code_from_the_future',
+      }).response,
+    ).toBe(input);
+    // And the absent case, which is every caller that does not thread it.
+    expect(
+      enforceLeadingOptionClaimsAtWire(input, { ...OPTS, mayNameLeadingOption: true }).response,
+    ).toBe(input);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('the provisional arm cannot be bypassed by a constraint withhold', () => {
+  // ⭐ THE REVIEWER'S QUESTION, PINNED RATHER THAN ARGUED. `separableProvisional`
+  // is evaluated ABOVE the narrowing conjunct, so if a payload could carry
+  // `separation: 'separated'` AND a WITHHELD-kind reason at once, that arm would
+  // fire first and ship the leader with only a caveat.
+  //
+  // It CAN carry both — `composeLeaderClaim` sets `separation` from
+  // `raw.near_tie_is_tie` INDEPENDENTLY of the withhold, so a non-entitled turn
+  // whose options genuinely separate publishes exactly that pair.
+  //
+  // ⭐ BUT THE MISS IS UNREACHABLE, and the reason is precedence over ONE shared
+  // operand, not luck:
+  //
+  //     claim.withheld_reason = !entitled ? WITHHELD_CONSTRAINT_VERDICT : …
+  //
+  // `constraint_verdict_withheld` is emitted IFF `!entitled` — and BOTH permit
+  // arms here require `opts.mayNameLeadingOption === true`. It is the same value
+  // on both sides: `response-finaliser.ts` feeds `composeLeaderClaim` from
+  // `ctx.mayNameLeadingOption`, and `route-v2.ts` feeds this gate from the same
+  // field. So the pair exists, and neither arm can fire while it does.
+  //
+  // ⚠ That is a property of TWO files agreeing, which is exactly the kind of
+  // reasoning that rots silently. Hence a test rather than a comment: if either
+  // side stops reading that one field, this REDs instead of shipping a leader
+  // past a constraint withhold.
+
+  it('⛔ constraint-withheld AND separated AND provisional — the leader still goes', () => {
+    const input = envelope(`${RECEIPT} ${CLAIM}`);
+    const result = enforceLeadingOptionClaimsAtWire(input, {
+      ...OPTS,
+      // The producer emits `constraint_verdict_withheld` only when NOT entitled.
+      mayNameLeadingOption: false,
+      separationEstablished: true,
+      leaderClaimWithheldReason: 'constraint_verdict_withheld',
+    });
+    expect(result.changed).toBe(true);
+    expect(String((result.response as { assistant_text?: unknown }).assistant_text)).not.toContain(
+      LEADER,
+    );
+  });
+
+  it('⭐ CONTRAST — entitled + separated + provisional is still PERMIT-WITH-CAVEAT', () => {
+    // The arm above must not have been broken by the conjunct: a genuinely
+    // entitled, genuinely separable run still reaches the caveat path rather
+    // than the withhold path. Without this, the case above could pass because
+    // the gate suppresses everything.
+    const input = envelope(`${RECEIPT} ${CLAIM}`);
+    const result = enforceLeadingOptionClaimsAtWire(input, {
+      ...OPTS,
+      mayNameLeadingOption: true,
+      separationEstablished: true,
+    });
+    expect(String((result.response as { assistant_text?: unknown }).assistant_text)).toContain(
+      LEADER,
+    );
+  });
+});

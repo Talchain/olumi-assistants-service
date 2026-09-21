@@ -1855,6 +1855,25 @@ async function sendFinalised200(
           };
         }
       ).analysis_state?.leader_claim?.separation === 'separated',
+    // ⭐ THE NARROWING OPERAND, from the SAME already-composed claim on this
+    // very body — so the enforcer and every structured consumer read ONE
+    // interpretation of the separation question rather than two. Absent field
+    // ⇒ absent operand ⇒ today's behaviour exactly.
+    //
+    // ⚠ The RAW REASON is threaded, not a boolean derived here. Classifying it
+    // is `leaderClaimReasonKind`'s job and it lives with the producer that
+    // mints the codes; deriving a second opinion at this call site is how one
+    // subsystem ends up with two answers to one question.
+    leaderClaimWithheldReason: (() => {
+      const reason = (
+        wireBody as {
+          readonly analysis_state?: {
+            readonly leader_claim?: { readonly withheld_reason?: unknown };
+          };
+        }
+      ).analysis_state?.leader_claim?.withheld_reason;
+      return typeof reason === 'string' ? reason : undefined;
+    })(),
   });
   if (wireEnforcement.changed) {
     let projected: import('@talchain/schemas/boundary').OlumiResponse =

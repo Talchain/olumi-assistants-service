@@ -74,6 +74,14 @@ describe('buildTurnContext', () => {
       // wire-facing subset and is `.strict()`, so this key is deliberately not
       // added to it.
       prior_facts_read_ok: _pfrok,
+      // The DB-stamped restore-chronology marker — CEE-internal, never on the
+      // wire, and the same class as `prior_facts_read_ok` directly above. It
+      // tells every turn-path `deriveAnalysisFreshness` whether the model was
+      // restored AFTER its analysis ran, which is the one staleness a hash
+      // comparison cannot see. Stripped for the same reason its siblings are:
+      // `TurnContextSchema` describes the wire-facing subset and is `.strict()`,
+      // so this key is deliberately NOT added to it.
+      analysis_invalidated_at: _aiat,
       scenario_analysis_fact_set: _safs,
       prior_facts_with_turn: _pfwt,
       scenarioBriefText: _sb,
