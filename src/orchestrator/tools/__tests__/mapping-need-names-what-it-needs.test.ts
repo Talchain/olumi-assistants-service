@@ -69,6 +69,7 @@ import { describe, it, expect } from "vitest";
 
 import type { GraphV3T, OptionV3T } from "../../../schemas/cee-v3.js";
 import { validateV3Response } from "../../../cee/validation/v3-validator.js";
+import { nameMappingNeed } from "../../../cee/transforms/option-status.js";
 import { projectOptionForCanonicalBuilder } from "../analysis-ready-helper.js";
 
 // ---------------------------------------------------------------------------
@@ -219,6 +220,19 @@ describe("an option that needs user mapping names what it needs", () => {
     );
     const subject = byId(project(candidates), SUBJECT_ID);
     expect(subject.user_questions).toEqual([own]);
+  });
+
+  it("an option whose label is empty is still explained, and names nothing false", () => {
+    // `OptionV3.label` permits "" and the analysis projection reads it directly —
+    // so this is reachable, not hypothetical. The obligation must still be met.
+    const questions = nameMappingNeed({ status: "needs_user_mapping", label: "   " });
+    expect(questions).toHaveLength(1);
+    expect(questions[0]).not.toContain('""');
+    expect(questions[0]).toContain("this option");
+    // And a real label is still named, so the degradation is scoped.
+    expect(nameMappingNeed({ status: "needs_user_mapping", label: "Hire two" })[0]).toContain(
+      '"Hire two"',
+    );
   });
 
   it("CONTRAST CONTROL: an option with unresolved_targets is already explained", () => {

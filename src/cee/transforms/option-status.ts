@@ -446,7 +446,19 @@ export function categorizeUserQuestions(questions: string[]): {
  * difference between an answerable ask and a restatement of the blocker.
  */
 export function mappingNeedQuestion(optionLabel: string): string {
-  return `Which factor(s) does "${optionLabel}" change, and what value should each be set to?`;
+  // ⚠ AN EMPTY LABEL IS REACHABLE, AND NAMING NOTHING READS AS BROKEN.
+  // `OptionV3.label` is a bare `z.string()` with no minimum, and
+  // `projectOptionForAnalysis` reads it straight off the parsed option — only
+  // `projectOptionForCanonicalBuilder` guards with `readNonEmptyString`. Found
+  // by enumerating this predicate's input space rather than the case it was
+  // written for (CLAUDE.md trap 22). Returning NOTHING is not the alternative:
+  // that would leave the option unexplained and break the invariant this
+  // function exists to keep. So the sentence degrades instead of naming "".
+  const named = optionLabel.trim();
+  if (named === "") {
+    return "Which factor(s) does this option change, and what value should each be set to?";
+  }
+  return `Which factor(s) does "${named}" change, and what value should each be set to?`;
 }
 
 /** Input to {@link nameMappingNeed}. */
