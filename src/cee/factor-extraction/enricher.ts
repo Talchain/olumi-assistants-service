@@ -18,6 +18,7 @@ import {
   extractFactors,
   extractFactorsOrchestrated,
   generateFactorId,
+  isUnidentifiedQuantityLabel,
   type ExtractedFactor,
 } from "./index.js";
 import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
@@ -26,10 +27,16 @@ import type { CorrectionCollector } from "../corrections.js";
 import { formatEdgeId } from "../corrections.js";
 import { DEFAULT_EXISTS_PROBABILITY } from "@talchain/schemas";
 import { synthesiseDisplayValue } from "./display-value.js";
-import { unitPinnedScaleFrame } from "../draft/records/unit-scale-class.js";
+import {
+  UNIT_SCALE_CLASS_TOKENS,
+  unitPinnedScaleFrame,
+  type UnitScaleClass,
+} from "../draft/records/unit-scale-class.js";
+import { sameUnit } from "../../utils/currency-alphabet.js";
 import {
   CEE_GOAL_THRESHOLD_FRAME,
-  resolveGoalThresholdCap,
+  resolveGoalThresholdCapWithProvenance,
+  type GoalThresholdCapProvenance,
 } from "../../utils/goal-threshold-cap.js";
 import {
   deriveGoalTargetFromLabel,
@@ -38,6 +45,7 @@ import {
   type GoalTargetCandidate,
   type GoalLabelTargetRefusal,
 } from "./goal-label-target.js";
+import { admitGoalBaseline } from "./goal-baseline-admissibility.js";
 
 /**
  * Type guard to check if node data is FactorData (not OptionData)
@@ -461,6 +469,496 @@ function backfillStatedUnit(
 }
 
 /**
+ * ⭐⭐⭐ THE USER TYPED THIS NUMBER, SO WE MUST NOT REPORT IT AS OUR OWN GUESS.
+ *
+ * ── THE DEFECT, MEASURED AT THE BYTES (capture `d9c4066c`, 19 Sep 2026)
+ * The user wrote *"conversion rate from trial to paid is 12%"* and *"Our churn
+ * rate is 4% monthly"*. Both reached the graph as factors carrying **exactly**
+ * those figures — `{value: 0.12, unit: "%"}` and `{value: 0.04, unit: "%"}` —
+ * and both carried `extractionType: "inferred"`. `schema-v3.ts:458` maps that
+ * to `observed_state.source: "cee_inference"`, and the product then tells the
+ * user, on every analysis, that *every estimate behind them is machine-authored
+ * and unconfirmed*. **That sentence is false for the two numbers they typed
+ * themselves**, and `brief_extraction` appeared on 0 of the capture's 6 valued
+ * factors.
+ *
+ * ── ⚠ WHERE THE STAMP COMES FROM, DERIVED RATHER THAN ASSUMED
+ * Not from this module and not from the record projector. `schema-v3.ts:458`'s
+ * default for an ABSENT `extractionType` is `brief_extraction`, so a declined
+ * brief-claim cannot produce `cee_inference`; and `provenance-display.ts:117`
+ * records that a literal search for a written `cee_inference` finds no writer.
+ * The only way to that stamp is `data.extractionType === "inferred"`, which the
+ * MODEL writes because the served prompt teaches it
+ * (`defaults-v187.ts:407`, "Inferred: no value stated → extractionType:
+ * 'inferred'"). The model transcribed the user's figures correctly and then
+ * labelled them as its own inference. The enhance branch above could not
+ * correct that, because it runs only when the node has NO value
+ * (`hasFactorData`), and these nodes had one.
+ *
+ * ── WHY POSITIONAL, AND NOT A MAGNITUDE COMPARISON
+ * The obvious repair — ask whether this value is "stated in the brief" — is a
+ * measured dead end. `isAmountStatedInBrief` scans a whole text for a
+ * magnitude, and teaching it percent↔fraction equivalence re-opens a
+ * deliberately-closed fabrication: B3's *"up to £7.2m a year if attach were
+ * 100%"* would certify a binary lever set to 1 (`stated-amounts.ts:61-63`).
+ * Nor can the model's `unit` discriminate: it is a free string on a
+ * `.passthrough()` object and the false-positive record carries none.
+ *
+ * This takes the route this module already ratified instead
+ * (`enhanceWriteIsSpanContained`): **the figure must be a literal span of the
+ * user's own bytes, and it must lie inside this node's own sentence.** Offsets
+ * are scale-blind, so no scale frame can defeat them. Measured on the real
+ * spans: `soleStatedQuantityInSpan` and this gate both refuse *"up to £7.2m a
+ * year if attach were 100%"* POSITIONALLY — it carries two quantities and the
+ * span test never reaches a value at all.
+ *
+ * ── THE CONJUNCTION, AND WHAT EACH LIMB IS FOR
+ *   1. the node's own level is a finite number      — the thing being described;
+ *   2. it is stamped `inferred`                     — we only ever correct a
+ *      machine-authored claim UPWARD; `explicit`, `range` and `observed` are
+ *      never touched, so this cannot withdraw an existing claim;
+ *   3. `matchedText` is a literal span of the brief — the figure is the user's
+ *      BYTES, not the model's opinion (and `extractFactors` sets it from the
+ *      regex match's own `m[0]`, so the span exists by construction);
+ *   4. `enhanceWriteIsSpanContained`                — the ratified subject gate:
+ *      on a stated node the figure must sit inside that node's own sentence;
+ *   5. the extractor's value EQUALS the node's level exactly — binding by
+ *      IDENTITY, never by a predicate another figure could satisfy (trap 19).
+ *      This is what stops the brief's competitor `£5m` — which `inferLabel`
+ *      really does label "Churn Rate" on this very brief — from crediting the
+ *      churn factor: 5000000 ≠ 0.04. It also means this can only ever fire
+ *      where the two sides ALREADY agree on the scale convention, so it cannot
+ *      import a scale-frame error.
+ * Limb 3's precondition is asserted, not assumed: a `matchedText` the brief
+ * does not contain is not a position, and returns false.
+ *
+ * ── ⚠⚠ IT CROSSES THE ADMISSION FLOOR. MEASURED, NOT ESTIMATED.
+ * `brief_extraction` classifies as user-stated in the analysis-admission
+ * census, `analysis-admission.ts:900/935` turn
+ * `material_parameters_user_stated > 0` into `semanticSufficient`, and
+ * `deriveMode` turns that into `comparative_leader` — **the licence to name a
+ * leading option.** Run against capture `d9c4066c`'s own nodes and its 39
+ * edges, through `censusConfidenceParameters`:
+ *
+ *     material_parameters_total        31  →  31   (unchanged)
+ *     material_parameters_user_stated   0  →   2
+ *     semanticQualitySufficient     false  →  true
+ *     semanticVerdictCause  all_machine_authored → material_user_stated
+ *
+ * So this does not merely relabel a badge: **it moves that run from
+ * `quantified_provisional` to `comparative_leader`.** It stamps 2 of the 6
+ * valued factors — Trial-to-Paid Conversion Rate and Monthly Churn Rate — and
+ * leaves the other 4 alone, their model-normalised levels (0, 0.4, 0.4, 0.5)
+ * matching no figure the user wrote. That is the correct direction *if* the
+ * stamps are true, and it is exactly why the conjunction above is narrow: a
+ * wrong stamp here would let the product name a winner off a number nobody
+ * confirmed. ⚠ Scope of that measurement, stated so it is not read wider: the
+ * debug bundle flattens node KINDS, so goal/decision/risk were re-derived from
+ * ids and labels to rebuild the topology. The direction and the flip are
+ * robust; the exact total of 31 is only as good as that reconstruction.
+ *
+ * ── WHY A STANDALONE PASS, AND NOT A LIMB OF THE ENRICHMENT LOOP
+ * Measured, after trying the loop first — it failed on BOTH captured factors
+ * for two independent reasons, and each is a property of enrichment that this
+ * question does not share:
+ *   · `enrichGraphWithFactorsAsync` returns EARLY when every option's
+ *     interventions are complete ("the FACTOR side is genuinely complete"), and
+ *     the capture is exactly that shape, so the loop never ran at all. Note the
+ *     precedent already inside that early exit: ROADMAP 2.281 had to carve the
+ *     goal-target mint out of it for the same reason — the exit is scoped to
+ *     "does this graph need VALUES?", and it was silently swallowing a
+ *     different question. This is a third.
+ *   · `selectEnhanceTarget` picks ONE candidate per extracted figure and gives
+ *     up, so the brief's `12%` consumed the only seat that `4%` could have used
+ *     and the churn factor was never offered its own figure.
+ * Neither applies to a provenance correction: it writes one key per node, two
+ * nodes cannot contend for it, and a graph whose values are complete is exactly
+ * a graph whose values may still be miscredited.
+ *
+ * ── AMBIGUITY REFUSES (trap 22f)
+ * A node is credited only when EXACTLY ONE extracted figure earns it. Two
+ * candidates is a question, not a fact, and this writes nothing rather than
+ * pick. On the measured brief that rule does real work: `4%` is extracted twice
+ * — once as `Churn Rate` and once under `inferLabel`'s fallback label `Rate` —
+ * and `hasUnboundQuantityLabel` (reused, not re-derived) discards the fallback,
+ * leaving exactly one.
+ *
+ * ── WHAT IT DELIBERATELY DOES NOT DO
+ * It writes ONE key. It never mints, rescales, re-labels or alters a value, a
+ * unit, a cap or a baseline — where correspondence cannot be proven it writes
+ * nothing at all, and the node keeps today's behaviour exactly.
+ */
+/**
+ * The brief sentence a figure was written in, or `undefined`.
+ *
+ * ⚠ THE SPLIT DELIBERATELY DOES NOT CUT ON A BARE `.`, and that is not
+ * fussiness: CLAUDE.md trap 22 records a guard that could never fire because
+ * the window handed to it was cut at the first `[.!?]` — **which is also the
+ * decimal point** — so an amount written `£1.5m` was truncated to `1` before
+ * the guard ever looked. A terminator here must be followed by whitespace or
+ * the end of the text, so `£7.2m` and `0.04` survive intact. Newlines also
+ * terminate, because this estate's briefs are bulleted and a bullet is a
+ * sentence.
+ *
+ * ⚠ AND THE EXAMPLE ABOVE IS WRITTEN `£1.5m` ON PURPOSE. Spelling the
+ * magnitude word out would enrol this file in
+ * `utils/__tests__/magnitude-alphabet.union.test.ts`'s scan — it REDed on
+ * exactly that, from prose, on this change. A derived guard cannot tell a
+ * mention from a use, and this module holds no magnitude lookup, so the fix
+ * is to stop saying the word rather than to widen the manifest.
+ */
+/**
+ * Is the occurrence of `needle` at `at` a WHOLE figure, or a fragment of a
+ * longer one?
+ *
+ * ⚠ THIS IS NOT DEFENSIVENESS — IT IS THE DEFECT A REVIEW MEASURED IN THIS
+ * FILE. `"4%"` is a substring of `"14%"`, `"2%"` of `"12%"`, `"£2m"` of
+ * `"£12m"`. Resolved by plain `.includes`, the figure `4%` in
+ * *"Gross margin sits at 14% today. Churn is 4% per month."* binds to the
+ * MARGIN sentence — so `labelIsNamedInFigureSentence`, which this file's own
+ * docblock calls "the limb that closes this pass's one measured hole", was
+ * being asked its question about a sentence the figure was never written in.
+ * A character adjacent to the needle that could continue a number means the
+ * match is inside a larger one.
+ */
+function isWholeFigureOccurrence(haystack: string, needle: string, at: number): boolean {
+  const isDigit = (c: string | undefined): boolean => c !== undefined && c >= "0" && c <= "9";
+  // A separator CONTINUES a number only when digits sit on both sides of it —
+  // `12,500` and `1.5`. The comma in `"… is 12%, which we believe …"` does not,
+  // and an earlier cut of this rule refused that occurrence and silently
+  // dropped the capture's own 12%. Measured, not reasoned: the headline pin in
+  // this file's spec went 2 credits to 1.
+  const separatorInsideNumber = (sepAt: number, digitAt: number): boolean =>
+    (haystack[sepAt] === "." || haystack[sepAt] === ",") && isDigit(haystack[digitAt]);
+  // Only a needle that BEGINS with a digit can be the tail of a longer number,
+  // and only one that ENDS with a digit can be its head. `12%` cannot be
+  // extended rightwards by anything, so nothing to its right is asked about.
+  if (/^[0-9]/.test(needle)) {
+    if (isDigit(haystack[at - 1])) return false;
+    if (separatorInsideNumber(at - 1, at - 2)) return false;
+  }
+  if (/[0-9]$/.test(needle)) {
+    const end = at + needle.length;
+    if (isDigit(haystack[end])) return false;
+    if (separatorInsideNumber(end, end + 1)) return false;
+  }
+  return true;
+}
+
+function briefSentenceContaining(brief: string, matchedText: string): string | undefined {
+  const needle = canonicaliseSpan(matchedText);
+  if (needle.length === 0) return undefined;
+  // ⚠ AMBIGUITY REFUSES, the same rule this pass already applies to earners.
+  // A figure written in two sentences names no single sentence, so there is no
+  // subject evidence to read and nothing is credited. Under-claiming is the
+  // chosen direction throughout this module: the cost is a badge, never a
+  // value.
+  const hits: string[] = [];
+  for (const sentence of brief.split(/(?<=[.!?])\s+|[\n\r]+/)) {
+    const canonical = canonicaliseSpan(sentence);
+    for (let at = canonical.indexOf(needle); at !== -1; at = canonical.indexOf(needle, at + 1)) {
+      if (isWholeFigureOccurrence(canonical, needle, at)) {
+        hits.push(sentence);
+        break;
+      }
+    }
+  }
+  return hits.length === 1 ? hits[0] : undefined;
+}
+
+/** The content tokens of a label: lowercase, alphanumeric, two characters or more. */
+function labelTokens(label: string): readonly string[] {
+  return label
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((t) => t.length >= 2);
+}
+
+/**
+ * ⭐⭐⭐ DID THE USER NAME THIS FACTOR IN THE SENTENCE WHERE THEY WROTE THIS
+ * FIGURE? — the mirror of `enhanceWriteIsSpanContained`, and the limb that
+ * closes this pass's one measured hole.
+ *
+ * That gate asks whether the FIGURE lies inside the NODE's own sentence. It can
+ * only ask that of a node that HAS a sentence — a stated item with a
+ * `source_quote`. A model-drafted factor has none, so the gate returns `true`
+ * vacuously and the subject binding falls back entirely to `labelsMatch` over
+ * `inferLabel`'s guess. **Measured on this very brief, that is not good
+ * enough:** `inferLabel` labels the competitor's `£5m` — *"A competitor just
+ * raised £5m and is hiring aggressively"* — **"Churn Rate"**, because its
+ * window reaches back into the previous bullet. A first cut of this pass
+ * therefore credited a churn factor carrying 5,000,000 as the user's own
+ * figure: the exact £8.5m-class harm `enhanceWriteIsSpanContained` exists to
+ * stop, arriving through the one door that gate cannot watch.
+ *
+ * So where the node has no span of its own, the FIGURE's span supplies one, and
+ * the question is turned round: every content token of the node's label must
+ * appear in the sentence the user wrote the figure in. It is the same
+ * positional evidence read from the other end, it needs no value and no scale,
+ * and it is asked of EVERY node rather than only the span-less ones — one rule,
+ * no branch on node shape, and no vacuous arm left for the next figure to walk
+ * through.
+ *
+ * ⚠ IT UNDER-CLAIMS, AND THAT IS THE CHOSEN DIRECTION. A user who names a
+ * factor in one sentence and gives its number in the next is refused. Nothing
+ * is lost but a badge; the value, unit and label are untouched, and the failure
+ * is toward telling the user we guessed when in fact they told us — the safe
+ * half of the pair (trap 22b).
+ */
+function labelIsNamedInFigureSentence(
+  nodeLabel: string,
+  factor: ExtractedFactor,
+  brief: string,
+): boolean {
+  const sentence = briefSentenceContaining(brief, factor.matchedText ?? "");
+  if (sentence === undefined) return false;
+  const haystack = new Set(labelTokens(sentence));
+  const tokens = labelTokens(nodeLabel);
+  if (tokens.length === 0) return false;
+  // ⭐ A SHAPE-WORD IS NOT A SUBJECT, SO IT CANNOT WITHHOLD THE USER'S CREDIT.
+  // `UNIDENTIFIED_QUANTITY_LABELS` names the tokens `inferLabel` falls back to
+  // when its lookbehind identified no subject at all — its own docblock: they
+  // "name the SHAPE of the quantity ... and say nothing about WHAT the number
+  // measures". A token that identifies nothing is not evidence the user NAMED
+  // this factor, so requiring it to appear only punishes a model that named the
+  // factor MORE precisely than the user did. Measured on the deployed build
+  // `3032f55`: the brief said "our monthly churn is currently 3.8%", the draft
+  // labelled the node "Monthly Churn Rate", and the user's own figure was
+  // published as `cee_inference` because "rate" is not in their sentence.
+  //
+  // ⚠ THIS IS THE PREDICATE READ NARROWER, NOT A NEW VOCABULARY (trap 12) — the
+  // same move the unit gate above already made. And it is asked of the NODE's
+  // label only; `hasUnboundQuantityLabel` still refuses a shape-word on the
+  // EXTRACTOR's side, which is the direction that could invent a credit.
+  const identifying = tokens.filter((t) => !isUnidentifiedQuantityLabel(t));
+  // ⚠ ALL SHAPE-WORDS MEANS NO SUBJECT WAS NAMED. Refusing here is load-bearing:
+  // an empty list would make `.every()` vacuously true and credit any figure in
+  // the sentence to a node called "Rate".
+  if (identifying.length === 0) return false;
+  return identifying.every((t) => haystack.has(t));
+}
+
+export function creditUserTypedFigures(
+  graph: GraphT,
+  brief: string,
+  collector?: CorrectionCollector,
+): number {
+  if (typeof brief !== "string" || brief.trim().length === 0) return 0;
+
+  const canonicalBrief = canonicaliseSpan(brief);
+  let extracted: readonly ExtractedFactor[];
+  try {
+    // Regex-only by construction — this is `extractFactors`, never the
+    // orchestrated variant, so the pass makes no provider call and cannot make
+    // a graph's provenance depend on a model's availability.
+    extracted = extractFactors(brief);
+  } catch {
+    return 0;
+  }
+  if (extracted.length === 0) return 0;
+
+/**
+ * ⭐⭐⭐ DOES THE NODE HOLD THE SAME QUANTITY THE USER WROTE?
+ *
+ * ── THE DEFECT THIS CLOSES. Every other limb of the crediting pass can be
+ * satisfied by a NAKED NUMBER: the span is real, the label matches, the tokens
+ * sit in the sentence, and the identity test compares `factor.value === level`.
+ * None of them reads a unit. So a node labelled "Churn Rate" holding
+ * `{ value: 0.04, unit: "£" }` earns the same credit from the brief sentence
+ * *"Our monthly churn rate is 4%."* — and the projection then keeps that frame
+ * while stamping the figure as the person's own. They wrote a percentage. The
+ * node says four pence. Identical naked numbers are not identical quantities.
+ *
+ * ── WHY THIS IS NOT COSMETIC. A credited figure counts toward
+ * `material_parameters_user_stated` in the analysis-admission census, so a
+ * false credit can lift a run across the admission floor and license
+ * comparative material on evidence the person never supplied.
+ *
+ * ── WHAT COUNTS AS CORRESPONDENCE, AND WHY IT IS BORROWED, NOT WRITTEN HERE.
+ * Two existing authorities answer this and a third copy of unit vocabulary is
+ * the hand-maintained mirror this estate keeps paying for:
+ *   · {@link sameUnit} normalises currency spellings to their code and compares
+ *     — and is explicitly NOT a conversion, so a genuine currency difference
+ *     still compares unequal;
+ *   · {@link UNIT_SCALE_CLASS_TOKENS} answers the percent-family question, so
+ *     `"%"` and `"percent"` correspond while `"%"` and `"pp"` do not, because
+ *     percentage points are a different frame rather than a spelling of one.
+ *
+ * ── ⚠⚠ WHY THE EXACT-TOKEN TABLE AND NOT `classifyUnitScaleClass`, WHICH IS
+ * THE OBVIOUS CALL AND IS WRONG AT THIS BOUNDARY. The review found it: change
+ * the `"pp"` twin below to the SPELLED-OUT `"percentage points"` and the
+ * classifier shortcut let it through as `percent`, crediting the person with a
+ * quantity they did not write. That is not a bug in the classifier. It is the
+ * rowed one-way door `unit-scale-class.ts` documents by name — `pp`/`ppt`/`pps`
+ * classify as `percentage_points`, while the spelled-out forms reach `percent`
+ * through the PREFIX layer, deliberately, because that is what the predicates it
+ * replaced did and closing the asymmetry moves live frames.
+ *
+ * The category error was mine, and it is trap 21 exactly: `classifyUnitScaleClass`
+ * answers **"which DISPLAY FRAME family is this token in?"** and I asked it
+ * **"are these the same QUANTITY?"**. Those diverge precisely here — percent and
+ * percentage points share a frame family and are different quantities ("churn
+ * rose 4 percentage points" is not "churn is 4 percent").
+ *
+ * So this boundary consults the classifier's EXACT-TOKEN layer instead, which is
+ * exported for exactly this ("EXPORTED SO ITS GUARD CAN BE DERIVED FROM IT").
+ * Still one vocabulary, still no third copy — a NARROWER read of the same
+ * authority. The scale-family policy and the rowed door are untouched; nothing
+ * here changes a frame, a value, or what any other caller sees.
+ *
+ * ⚠ IT IS STRICTLY NARROWER THAN WHAT IT REPLACES, so it can only WITHHOLD
+ * credits, never add one — the safe direction for a pass that feeds the
+ * admission census. The measured cost: a unit like `"% churn"` (a real spelling
+ * in this estate) no longer corresponds with `"%"`, because it is not an exact
+ * token. That is a real credit withheld, and it is the same trade this docblock
+ * already takes below for a missing unit.
+ *
+ * ── FAILS CLOSED. A unit missing on either side is NOT correspondence, so the
+ * node keeps the provenance it already had. That is deliberate: this pass only
+ * ever corrects upward, and declining to upgrade is a gap, while upgrading on
+ * an unestablished frame is a false attribution. The cost is a real credit
+ * withheld when a producer omits a unit; the alternative is crediting the
+ * person with a quantity they did not write.
+ */
+function exactScaleClassOf(unit: string): UnitScaleClass | undefined {
+  const token = unit.trim().toLowerCase();
+  for (const [scaleClass, tokens] of UNIT_SCALE_CLASS_TOKENS) {
+    if (tokens.some((t) => t.toLowerCase() === token)) return scaleClass;
+  }
+  return undefined;
+}
+
+function unitsCorrespond(
+  nodeUnit: string | undefined,
+  figureUnit: string | undefined,
+): boolean {
+  if (typeof nodeUnit !== "string" || nodeUnit.trim().length === 0) return false;
+  if (typeof figureUnit !== "string" || figureUnit.trim().length === 0) return false;
+  if (sameUnit(nodeUnit, figureUnit)) return true;
+  const nodeClass = exactScaleClassOf(nodeUnit);
+  return nodeClass !== undefined && nodeClass === exactScaleClassOf(figureUnit);
+}
+
+  let credited = 0;
+
+  for (let nodeIndex = 0; nodeIndex < graph.nodes.length; nodeIndex++) {
+    const node = graph.nodes[nodeIndex];
+    if (node.kind !== "factor") continue;
+
+    const data = node.data;
+    if (!isFactorData(data)) continue;
+
+    // (1) The node must carry a level for a figure to BE.
+    const level = data.value;
+    if (typeof level !== "number" || !Number.isFinite(level)) continue;
+
+    // (2) Correct upward only. A node that already claims the brief, a range or
+    // an observation is left exactly as it is — this can never WITHDRAW a claim.
+    if (data.extractionType !== "inferred") continue;
+
+    const earners = extracted.filter((factor) => {
+      // (3) The figure must be a literal span of the user's own bytes.
+      const matched = canonicaliseSpan(factor.matchedText ?? "");
+      if (matched.length === 0) return false;
+      if (!canonicalBrief.includes(matched)) return false;
+      // (3a) ⛔ AND IT MUST BE A NUMBER THE USER WROTE, NOT ONE THIS SERVICE
+      // CALCULATED FROM WHAT THEY WROTE. A range extraction carries the user's
+      // genuine span alongside a value that is `rangePointEstimate`'s MIDPOINT
+      // (`utils/amount-range.ts`, `(min + max) / 2`). Measured by executing
+      // `extractFactors` at this head: *"Our monthly churn rate runs 3% to 5%
+      // depending on the cohort."* yields `{ value: 0.04, matchedText: "3% to
+      // 5%", extractionType: "range" }` — and the digit `4` appears NOWHERE in
+      // that brief. Every other limb passes on such a factor (the span is
+      // real, the label matches, the tokens are in the sentence, and a node
+      // sitting at 0.04 satisfies the identity test), so without this line the
+      // pass credits OUR OWN ARITHMETIC to the user. Accepting a value this
+      // service derived does not make its origin a user measurement.
+      //
+      // ⚠ SCOPE, STATED: this reads the factor's OWN shape — its range bounds
+      // and its declared type — rather than a list of the loops that mint
+      // midpoints, because such a list is a hand-maintained mirror. It still
+      // fails OPEN for a future derivation that sets neither marker; that is
+      // the known limit of this limb and not a claim about all derived values.
+      if (
+        factor.extractionType === "range" ||
+        factor.rangeMin !== undefined ||
+        factor.rangeMax !== undefined
+      ) {
+        return false;
+      }
+      // (4) …naming THIS subject, by the module's own two selection rules.
+      if (!node.label || !labelsMatch(node.label, factor.label)) return false;
+      if (hasUnboundQuantityLabel(node, factor)) return false;
+      // Crediting a current estimate requires the same declared-role authority
+      // as installing its value. A literal target or limit remains non-current,
+      // including when another node owns that protected quantity.
+      if (selectEnhanceTarget([node], factor, graph.nodes).node !== node) return false;
+      // (5) …written inside THIS node's own sentence, where the node has one…
+      if (!enhanceWriteIsSpanContained(node, factor, brief)) return false;
+      // (6) …and, whether or not it has one, named by the user in the sentence
+      // the figure itself was written in. This is the limb that stops
+      // `inferLabel`'s cross-bullet guess crediting the competitor's £5m to a
+      // churn factor — see `labelIsNamedInFigureSentence`.
+      if (!labelIsNamedInFigureSentence(node.label, factor, brief)) return false;
+      // (7) Credit a current figure, not a directional row's proposed endpoint.
+      // Its baseline is extracted separately; counting both would duplicate the
+      // same current evidence and trip the ambiguity guard below.
+      const currentValue = statedCurrentRaw(factor);
+      if (factor.value !== currentValue || currentValue !== level) return false;
+      // (7b) …IN THE SAME FRAME. Identity of the number is not identity of the
+      // quantity — see `unitsCorrespond`. Missing or conflicting units retain
+      // the provenance the node already had; nothing here changes a value.
+      return unitsCorrespond(
+        (data as { unit?: unknown }).unit as string | undefined,
+        factor.unit,
+      );
+    });
+
+    if (earners.length !== 1) {
+      if (earners.length > 1) {
+        log.info(
+          {
+            event: "cee.factor_enrichment.figure_credit_ambiguous",
+            nodeId: node.id,
+            candidates: earners.map((f) => f.matchedText),
+          },
+          `Refusing to credit "${node.id}": ${earners.length} figures in the brief could be this level`,
+        );
+      }
+      continue;
+    }
+
+    const earner = earners[0]!;
+    const nextData: FactorDataT = { ...data, extractionType: "explicit" };
+    graph.nodes[nodeIndex] = { ...node, data: nextData };
+    credited++;
+
+    log.info(
+      {
+        event: "cee.factor_enrichment.figure_credited_to_user",
+        nodeId: node.id,
+        matchedText: earner.matchedText,
+        value: level,
+      },
+      `"${earner.matchedText}" is the user's own figure, so "${node.id}" no longer reports it as machine-authored`,
+    );
+
+    if (collector) {
+      collector.addByStage(
+        11, // Stage 11: Factor Enrichment
+        "node_modified",
+        { node_id: node.id, kind: "factor" },
+        `Credited a figure the user typed in the brief`,
+        data,
+        nextData,
+      );
+    }
+  }
+
+  return credited;
+}
+
+/**
  * Check if two labels refer to the same concept
  */
 function labelsMatch(label1: string, label2: string): boolean {
@@ -498,9 +996,11 @@ function labelsMatch(label1: string, label2: string): boolean {
  * selected write (including replacement-node creation) rather than guessing.
  */
 function hasUnboundQuantityLabel(node: NodeT, factor: ExtractedFactor): boolean {
-  const extractedLabel = factor.label.trim().toLowerCase();
-  return /^(?:value|rate|factor)$/.test(extractedLabel)
-    && node.label?.trim().toLowerCase() !== extractedLabel;
+  // ⚠ The `/^(?:value|rate|factor)$/` that used to be spelled here was a second
+  // copy of `inferLabel`'s fallback vocabulary. It now consumes the producer's
+  // own list (`UNIDENTIFIED_QUANTITY_LABELS`, index.ts) so the two cannot drift.
+  return isUnidentifiedQuantityLabel(factor.label)
+    && node.label?.trim().toLowerCase() !== factor.label.trim().toLowerCase();
 }
 
 /**
@@ -641,6 +1141,7 @@ interface DeclaredFigure {
   readonly value: number;
   readonly unit?: string;
   readonly source_quote?: string;
+  readonly role?: string;
 }
 
 /**
@@ -800,20 +1301,48 @@ function figureAlreadyPlacedBy(
 function selectEnhanceTarget(
   existingFactors: readonly NodeT[],
   factor: ExtractedFactor,
+  allNodes: readonly NodeT[],
 ): { readonly node?: NodeT; readonly refusedBy?: NodeT } {
   const candidates = existingFactors.filter((n) => n.label && labelsMatch(n.label, factor.label));
   if (candidates.length === 0) return {};
 
-  const bound = candidates.find((n) => {
+  // A declared target, limit or context can support a causal factor without being its current
+  // value. Preserve that distinction when enrichment supplies missing data;
+  // otherwise it reinstates the observation the records projector withheld.
+  const currentReading = {
+    ...factor, value: statedCurrentRaw(factor),
+    baseline: undefined, rangeMin: undefined, rangeMax: undefined,
+  };
+  const eligible = candidates.filter((n) => {
+    const role = (n.data as { role?: unknown } | undefined)?.role;
+    if (role !== undefined && role !== "baseline") return false;
+    const declared = declaredBasisFigures(n);
+    if (declared === undefined) return true;
+    const targets = declared.filter((d) => d.role !== undefined && d.role !== "baseline");
+    return !figureIsDeclared(targets, currentReading) ||
+      figureIsDeclared(declared.filter((d) => d.role === undefined || d.role === "baseline"), currentReading);
+  });
+  const bound = eligible.find((n) => {
     const declared = declaredBasisFigures(n);
     return declared !== undefined && figureIsDeclared(declared, factor);
   });
   if (bound !== undefined) return { node: bound };
 
-  const undeclared = candidates.find((n) => declaredBasisFigures(n) === undefined);
+  const protectedQuantity = allNodes.find((n) => {
+    const declared = declaredBasisFigures(n);
+    const matchedText = canonicaliseSpan(factor.matchedText ?? "");
+    return declared !== undefined &&
+      figureIsDeclared(declared.filter(d => d.role !== undefined && d.role !== "baseline" &&
+        matchedText.length > 0 && d.source_quote !== undefined &&
+        canonicaliseSpan(d.source_quote).includes(matchedText)), currentReading) &&
+      !figureIsDeclared(declared.filter(d => d.role === undefined || d.role === "baseline"), currentReading);
+  });
+  if (protectedQuantity !== undefined) return { refusedBy: protectedQuantity };
+
+  const undeclared = eligible.find((n) => declaredBasisFigures(n) === undefined);
   if (undeclared !== undefined) return { node: undeclared };
 
-  // Every candidate declared a basis and none of them names this figure.
+  // No candidate admits this figure as a current value in its declared basis.
   return { refusedBy: candidates[0] };
 }
 
@@ -979,7 +1508,7 @@ export function enrichGraphWithFactors(
     // Same selection as the async twin, so the two cannot drift apart on the
     // one question they both answer (see `selectEnhanceTarget`). This path
     // keeps no warnings array, so the refusal is logged and counted only.
-    const selection = selectEnhanceTarget(existingFactors, factor);
+    const selection = selectEnhanceTarget(existingFactors, factor, graph.nodes);
 
     if (selection.refusedBy !== undefined) {
       factorsSkipped++;
@@ -993,7 +1522,7 @@ export function enrichGraphWithFactors(
           refusedUnit: factor.unit,
           refusedMatchedText: factor.matchedText,
         },
-        `Refusing to write "${factor.matchedText}" onto "${selection.refusedBy.id}": the records do not base that node on it`,
+        `Refusing to write "${factor.matchedText}" onto "${selection.refusedBy.id}": the records do not declare it as a current value for that node`,
       );
       continue;
     }
@@ -1228,9 +1757,39 @@ function qualifyExtractedFactors(
       // Check unit compatibility first
       if (!unitsCompatible(existing.unit, factor.unit)) continue;
 
+      // ⭐⭐⭐ NUMERIC PROXIMITY IS ONLY EVIDENCE OF SAMENESS WHEN AT LEAST ONE
+      // SIDE NAMED NO SUBJECT (measured on the wire, Render
+      // srv-d4slpaili9vc73eiq4og, 17 Sep 17:58:34Z and 18:00:34Z).
+      //
+      // A pricing brief put three prices and a churn figure in one paragraph.
+      // `inferLabel`'s 50-character lookbehind bound the prices to "Churn Rate";
+      // the correctly-labelled {Plan Price, 59} then arrived and was DISCARDED
+      // as a duplicate — `cee.factor_extraction.dedupe_within_extraction`,
+      // skippedLabel "Plan Price", skippedValue 59 — because a wrongly-labelled
+      // factor already held 59 and the value limb below carried NO label
+      // condition at all. So the failure did not merely mislabel a number: it
+      // deleted the correct factor to keep the incorrect one, and a
+      // required-fields guard saw a factor carrying a value and called it
+      // healthy. "More fields populated" is the wrong success metric.
+      //
+      // ⛔ THE FIX IS NOT A BETTER SUBJECT-INFERENCE RULE OVER PROSE. This
+      // estate has already spent four rounds oscillating on one such predicate
+      // (CLAUDE.md trap 22f); a fifth rule is the forbidden move. The
+      // discriminator used here is STRUCTURAL and comes from the extractor's own
+      // record: `isUnidentifiedQuantityLabel` is true exactly when `inferLabel`
+      // found NO context word and fell back to naming the quantity's shape
+      // ("Value"/"Rate"/"Factor"). When BOTH sides name a subject and those
+      // names do not match, a shared number is not evidence they are the same
+      // quantity — the labels are, and the label limb below is what decides it.
+      // When either side named nothing, proximity is still the best available
+      // reading and the limb applies unchanged (this is what keeps ROADMAP
+      // 2.299's {Factor, 6M} vs {Target, 6M} collision collapsing).
+      const eitherSideNamedNoSubject =
+        isUnidentifiedQuantityLabel(existing.label) || isUnidentifiedQuantityLabel(factor.label);
+
       // Check value within 10% tolerance
       let isDuplicate = false;
-      if (existing.value !== undefined && factor.value !== undefined) {
+      if (eitherSideNamedNoSubject && existing.value !== undefined && factor.value !== undefined) {
         const tolerance = Math.abs(existing.value * 0.1);
         if (Math.abs(existing.value - factor.value) <= tolerance) {
           isDuplicate = true;
@@ -1266,6 +1825,18 @@ function qualifyExtractedFactors(
       const challengerIsTarget = isTargetGoalLabel(factor.label);
       const incumbentIsTarget = isTargetGoalLabel(incumbent.label);
       if (challengerIsTarget !== incumbentIsTarget) return challengerIsTarget;
+      // ⭐ SECOND RUNG ON THE SAME ROLE AXIS: a factor that NAMES its subject
+      // beats one that admits it could not identify one. Without this, the
+      // surviving collision above is decided by confidence alone — and both
+      // sides of a "Value 59" / "Plan Price 59" collision carry the same 0.6
+      // inferred confidence, so the generic label wins on push order and the
+      // named one is discarded. That is the same harm one rung down from the
+      // measured defect, and the module already rules this way at the write
+      // seam (`hasUnboundQuantityLabel`): a fallback word "does not establish
+      // that the number measures that node".
+      const challengerNamesSubject = !isUnidentifiedQuantityLabel(factor.label);
+      const incumbentNamesSubject = !isUnidentifiedQuantityLabel(incumbent.label);
+      if (challengerNamesSubject !== incumbentNamesSubject) return challengerNamesSubject;
       return factor.confidence > incumbent.confidence;
     });
 
@@ -1470,8 +2041,9 @@ export function applyGoalTargetRedirect(
   let normalizedValue = factor.value;
   let rawValue: number | undefined;
   let cap: number | undefined;
+  let capProvenance: GoalThresholdCapProvenance | undefined;
 
-  const resolvedCap = resolveGoalThresholdCap(
+  const resolvedCapWithProvenance = resolveGoalThresholdCapWithProvenance(
     currentGoalNode.goal_threshold_cap,
     rawForResolver,
     factor.unit,
@@ -1490,18 +2062,72 @@ export function applyGoalTargetRedirect(
 
   let normalizedBaseline: number | undefined;
 
-  if (resolvedCap !== null) {
-    cap = resolvedCap;
+  if (resolvedCapWithProvenance !== null) {
+    cap = resolvedCapWithProvenance.cap;
+    // Captured from the SAME resolution as the cap, never re-derived — a second
+    // resolution can disagree with the cap the graph was actually scored
+    // against (the cap doctrine is order-dependent).
+    capProvenance = resolvedCapWithProvenance.provenance;
     rawValue = rawForResolver;
-    normalizedValue = rawForResolver / resolvedCap;
-    // THE SHARED DENOMINATOR. Divided by the very same `resolvedCap` on
+    normalizedValue = rawForResolver / cap;
+    // THE SHARED DENOMINATOR. Divided by the very same `cap` on
     // the same branch, so threshold and baseline cannot drift onto
     // different scales — ISL's `threshold − baseline + intercept` is
     // only meaningful when both operands were scored against one cap,
     // and a mismatch there yields a confident WRONG probability rather
     // than an error.
-    normalizedBaseline =
-      rawBaseline === undefined ? undefined : rawBaseline / resolvedCap;
+    //
+    // ⭐⭐ AND THE SHARED DENOMINATOR IS NOT THE WHOLE QUESTION (ROADMAP
+    // 2.1160). One cap makes the two numbers COMMENSURABLE; it does not
+    // make the pair EXPRESSIBLE. The chat path's twin writer takes its
+    // baseline from `extractGoalTargetWithBaseline`, which refuses a
+    // DECREASING pair by name (`index.ts:1771-1782`, ROADMAP 2.353 review
+    // A2) because `goal_threshold_frame` is the code constant 'level' and
+    // ISL asks `P(level >= threshold)` — a target below its stated current
+    // level inverts the question and returns a confident wrong answer. This
+    // route consulted no such rule, and stamped one: MEASURED on staging
+    // (`public.scenarios`, 2026-09-10 22:05:08Z) a goal carrying
+    // `goal_threshold_raw 2`, `cap 2.5` and a stated level of 14 shipped
+    // `observed_state.baseline 5.6` — five weeks AFTER the sibling refusal
+    // landed. Trap 22b: one harm closed on one route, left open on its
+    // neighbour, invisible to both routes' tests.
+    //
+    // The rule is IMPORTED, never restated — two derivations of one doctrine
+    // drift and the drift reads as green (trap 12).
+    //
+    // ⚠ ONLY THE BASELINE IS WITHHELD. `goal_threshold`, `_raw`, `_unit` and
+    // `_cap` are stamped below exactly as before, so the user's own figure
+    // still reaches the screen ("Target: £90" stays true). Without a
+    // baseline, `transforms/schema-v3.ts:405` builds no `observed_state`,
+    // ISL refuses with `missing_goal_baseline` and the ranking is withheld —
+    // the same honest refusal the `else` branch below already relies on.
+    if (rawBaseline === undefined) {
+      normalizedBaseline = undefined;
+    } else {
+      const admission = admitGoalBaseline({
+        rawTarget: rawForResolver,
+        rawBaseline,
+        cap,
+      });
+      if (admission.admitted) {
+        normalizedBaseline = admission.normalised;
+      } else {
+        normalizedBaseline = undefined;
+        log.info(
+          {
+            goalNodeId: currentGoalNode.id,
+            factor_label: factor.label,
+            factor_unit: factor.unit,
+            raw_target: rawForResolver,
+            raw_baseline: rawBaseline,
+            cap,
+            refusal: admission.reason,
+            event: "cee.factor_enrichment.goal_baseline_withheld",
+          },
+          `Withheld the stated current level on "${currentGoalNode.id}" (${admission.reason}) — the target is registered, the probability is not`,
+        );
+      }
+    }
   } else {
     rawValue = rawForResolver;
     // No sound denominator exists, so the target itself is registered
@@ -1519,6 +2145,14 @@ export function applyGoalTargetRedirect(
     goal_threshold_raw: rawValue,
     goal_threshold_unit: factor.unit ?? "count",
     goal_threshold_cap: cap,
+    // WHICH RULE produced that denominator. Carried from the same resolution,
+    // and only when a cap exists for it to describe. On
+    // `target_derived_headroom` the cap is `raw * 1.25`, which makes
+    // `goal_threshold` the constant 0.8 for every target — a consumer cannot
+    // fail closed on a denominator it cannot see.
+    ...(capProvenance !== undefined && {
+      goal_threshold_cap_provenance: capProvenance,
+    }),
     // ROADMAP 2.258 — attest the FRAME beside the number. A CODE
     // CONSTANT: the arithmetic three lines up is `raw / cap`, an
     // absolute LEVEL on the metric's own scale, so `'level'` is true
@@ -1641,7 +2275,14 @@ function deriveGoalTargetCandidateFromLabel(
       brief_span: candidate.brief_span,
       unit: candidate.unit,
     },
-    `Goal target candidate derived from the goal label (${candidate.binding}); nothing written`,
+    // ⚠ "from the goal label" was true of every arm until the unlabelled-goal
+    // arm existed, and is false of it — that arm fires precisely BECAUSE the
+    // label named nothing. A log line that misreports which route produced a
+    // record is how the next reader draws the wrong conclusion from a real
+    // event, so the sentence now names the route rather than assuming it.
+    candidate.binding === "unlabelled_goal"
+      ? `Goal target candidate: the label names no figure and the brief states one, so the person will be asked (${candidate.binding}); nothing written`
+      : `Goal target candidate derived from the goal label (${candidate.binding}); nothing written`,
   );
   return candidate;
 }
@@ -1878,7 +2519,7 @@ export async function enrichGraphWithFactorsAsync(
 
     // ⭐⭐⭐ WHICH SUBJECT THIS FIGURE BELONGS TO — answered from the records'
     // own declared basis, not from label overlap. See `selectEnhanceTarget`.
-    const selection = selectEnhanceTarget(existingFactors, factor);
+    const selection = selectEnhanceTarget(existingFactors, factor, graph.nodes);
 
     if (selection.refusedBy !== undefined) {
       // The records name the figures this node is based on, and this is not one
@@ -1888,7 +2529,7 @@ export async function enrichGraphWithFactorsAsync(
       // an unbindable magnitude belongs.
       factorsSkipped++;
       warnings.push(
-        `"${factor.matchedText}" was not written to "${selection.refusedBy.label}": that factor is not based on it.`,
+        `"${factor.matchedText}" was not written to "${selection.refusedBy.label}": the records do not declare it as a current value for that factor.`,
       );
       log.info(
         {
@@ -1901,7 +2542,7 @@ export async function enrichGraphWithFactorsAsync(
           refusedMatchedText: factor.matchedText,
           declaredBasis: declaredBasisFigures(selection.refusedBy),
         },
-        `Refusing to write "${factor.matchedText}" onto "${selection.refusedBy.id}": the records do not base that node on it`,
+        `Refusing to write "${factor.matchedText}" onto "${selection.refusedBy.id}": the records do not declare it as a current value for that node`,
       );
       continue;
     }

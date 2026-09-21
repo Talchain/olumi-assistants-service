@@ -116,6 +116,7 @@ vi.mock('../session/index.js', () => ({
 
 const { runTurnExecutor } = await import('../turn-executor.js');
 const { OLUMI_ACTION_TOOL_NAME } = await import('../routing/tool-schema.js');
+const { parsePendingAction } = await import('../session/pending-action.js');
 
 const SCENARIO_ID = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 
@@ -132,6 +133,52 @@ const WALK_READ_UTTERANCE = 'Open the analysis panel and show me the option comp
  * has nothing to do with warrants (trap 13b).
  */
 const PLAIN_READ_UTTERANCE = 'Show me how the model looks right now.';
+
+it.each(['Add that limit to my model.', 'yes'])('captured budget offer retains its level frame through consent: %s', async (consent) => {
+  const graph: GraphV3T = {
+    nodes: [
+      { id: 'g-output', kind: 'goal', label: 'Improve team output' },
+      { id: 'o-assistant', kind: 'option', label: 'Hire an assistant' },
+      { id: 'f7a3774d', kind: 'factor', label: 'Annual Assistant Cost',
+        observed_state: { value: 0.5, raw_value: 33000, unit: '$', cap: 66000, source: 'cee_inference' } },
+    ], edges: [],
+  };
+  servedGraph = graph;
+  const originalState = structuredClone(graph.nodes[2]!.observed_state);
+  const adapter = {
+    chatWithTools: vi.fn(async () => mkToolUseResult({
+      intent_class: 'execute', action: {
+        handler_id: 'add_constraint',
+        entity: { id: 'f7a3774d', kind: 'node', label: 'Annual Assistant Cost',
+          resolution_status: 'resolved', resolution_method: 'id_match' },
+        parameters: [
+          { name: 'constraint_type', value: 'at_most', source: 'user_explicit' },
+          { name: 'value', value: 40000, source: 'user_explicit' },
+          { name: 'unit', value: '$', source: 'user_explicit' },
+        ], cited_context_fields: [],
+      },
+    })),
+  };
+  await runTurnExecutor(payload('I actually only have a budget of $40,000 for an assistant.'), 'req-budget-offer', {
+    routingAdapter: adapter, graphState: graph,
+  });
+  expect(graphWrites()).toHaveLength(0);
+  const offer = (appendCalls.at(-1)!.pending_actions as PendingAction[]).find((p) => p.action.kind === 'apply_proposed_change')!;
+  expect(offer).toBeDefined();
+  expect(offer.action.kind === 'apply_proposed_change' && offer.action.inline_patch?.constraint_value_frame).toBe('level');
+  const restored = parsePendingAction(JSON.parse(JSON.stringify(offer)));
+  expect(restored).not.toBeNull();
+  pendingActionsForRead = [restored!];
+  appendCalls.length = 0;
+  const resumeAdapter = throwingRoutingAdapter();
+  await runTurnExecutor(payload(consent), 'req-budget-confirm', { routingAdapter: resumeAdapter, graphState: graph });
+  expect(resumeAdapter.chatWithTools).not.toHaveBeenCalled();
+  expect(graphWrites()).toHaveLength(1);
+  const saved = graphWrites()[0]!.graph as GraphV3T;
+  expect(saved.goal_constraints).toHaveLength(1);
+  expect(saved.goal_constraints![0]).toMatchObject({ node_id: 'f7a3774d', operator: '<=', value: 40000, unit: '$', value_frame: 'level' });
+  expect(saved.nodes.find((n) => n.id === 'f7a3774d')!.observed_state).toEqual(originalState);
+});
 
 function payload(message: string, overrides: Partial<MessageTurnPayload> = {}): MessageTurnPayload {
   return makeMessagePayload({

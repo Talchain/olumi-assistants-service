@@ -253,6 +253,37 @@ export interface HandlerInvocation {
    */
   readonly edgeStrengthDirectionAuthority?: 'positive' | 'negative';
   /**
+   * ⭐⭐ THIS TURN IS AN ANSWER TO A BASELINE QUESTION THE PRODUCT ASKED, AND
+   * THE AUTHORITY IT CARRIES IS FOR THE BASELINE FIELD ONLY.
+   *
+   * Threaded in as a SERVER FACT, on the same terms as `appliedProvenance`
+   * above: the executor sets it only when `tryBaselineElicitationResume`
+   * resolved the message as an answer that names its own subject, against a
+   * live server-minted `elicit_target_baseline` pending for `targetId`. A
+   * routing model cannot populate it, and absence means "an ordinary edit"
+   * with byte-unchanged behaviour.
+   *
+   * ⚠ WHY THE TARGET ALONE IS NOT ENOUGH, and why this exists. The warrant that
+   * lets an answer through is scoped to (handler, target) — but a single target
+   * carries TWO semantic quantities: its BASELINE (where it is now) and its
+   * SUCCESS CONSTRAINT (where the user needs it to get to). Granting authority
+   * for one conferred it on the other, so a user answering "Churn rate is 30%"
+   * had their own 10% success limit rewritten to 30% and its `value_frame`
+   * dropped, while no baseline was recorded at all. Same node and same handler
+   * is NOT baseline-only authority.
+   *
+   * An answer alone preserves the existing limit. A compound turn may also
+   * carry a separately warranted, subject-bound limitChange; the handler must
+   * match its proposed tuple before saving the two quantities together.
+   */
+  readonly baselineAnswerAuthority?: {
+    readonly targetId: string;
+    /** User-stated limit, scoped after the independent mutation warrant. */
+    readonly limitChange?: import('../routing/baseline-answer-mutation.js').BaselineLimitChange;
+  };
+  /** Existing server-side proposal frame, relayed only after exact confirmed-tuple matching. */
+  readonly confirmedConstraintValueFrame?: import('@talchain/schemas').GoalThresholdFrameType;
+  /**
    * Exact persisted edge identity for the strict `edge_strength_edit` adapter.
    *
    * The legacy natural-language lane addresses an edge with a composite

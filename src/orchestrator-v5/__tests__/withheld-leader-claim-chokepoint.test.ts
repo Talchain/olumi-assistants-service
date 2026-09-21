@@ -187,8 +187,61 @@ function withheldRunAnalysisFact(): Record<string, unknown> {
   return fact;
 }
 
-/** STAMPED PERMITTED — the PERMIT-WINS control's input. */
+/**
+ * STAMPED PERMITTED — the PERMIT-WINS control's input.
+ *
+ * ⚠⚠ THIS FIXTURE SAID "PERMITTED" AND MEANT "THE CONSTRAINT PERMITS", and
+ * those stopped being the same claim the moment the chokepoint began reading
+ * the SEPARATION permission too. The published claim has always been
+ * `permitted = entitled && separates` (`composeLeaderClaim`); this fixture
+ * stamped only the first half and carried no `robustness` at all, so its run
+ * was in fact `separation_unavailable` — a turn the wire withholds — while the
+ * control asserted the prose may name a leader on it.
+ *
+ * ⭐ IT IS COMPLETED, NOT RELAXED, AND THE DISTINCTION MATTERS. The control's
+ * INTENT is "a genuinely permitted turn is untouched", and that intent is
+ * preserved exactly: it now expresses genuine permission on BOTH axes and
+ * still proves the guard does not over-fire. Narrowing the assertion instead
+ * — or deleting the control because it disagreed with a change — would have
+ * been the guard-agreeing-with-itself defect (trap 13b), which is the whole
+ * reason this comment is here rather than a one-line fixture edit.
+ *
+ * Its discriminating twin is {@link constraintPermittedButUnseparatedFact}: the
+ * SAME fixture minus the robustness. One must be untouched and the other must
+ * be substituted, or the gate is not reading separation at all.
+ */
 function permittedRunAnalysisFact(): Record<string, unknown> {
+  const fact = baseRunAnalysisFact();
+  (fact.result as Record<string, unknown>).constraint_verdict = {
+    may_name_leading_option: true,
+    constraint_verdict_state: 'evaluated_feasible',
+  };
+  // The second half of the published permission. `level` non-empty and
+  // `near_tie.is_tie` falsy is what `readRawRobustnessSignals` requires to
+  // return signals at all, and what `separationEstablishedFromRobustness`
+  // requires to call the arms separated.
+  const result = fact.result as Record<string, unknown>;
+  (result.enrichment as Record<string, unknown>).robustness = {
+    level: 'high',
+    near_tie: { is_tie: false },
+  };
+  return fact;
+}
+
+/**
+ * ⭐⭐⭐ THE DISCRIMINATING TWIN — constraint PERMITS, separation was never
+ * evaluated. Byte-identical to {@link permittedRunAnalysisFact} except that the
+ * robustness block is absent, which is exactly the shape a confined
+ * `auto_post_draft` run arrives in: its robustness keys are stripped before any
+ * reader sees them.
+ *
+ * MEASURED, 19 Sep, request `1a5b1051`: on this population the deterministic
+ * path answered *"the analysis currently favours … with a probability of 64%"*
+ * while the same response published `leader_claim.permitted: false`,
+ * `withheld_reason: "separation_unavailable"`. Two surfaces, one payload,
+ * opposite claims.
+ */
+function constraintPermittedButUnseparatedFact(): Record<string, unknown> {
   const fact = baseRunAnalysisFact();
   (fact.result as Record<string, unknown>).constraint_verdict = {
     may_name_leading_option: true,
@@ -670,6 +723,36 @@ describe('claim safety at the finalizeRun CHOKEPOINT — exits that bypass the i
         ).toContain('leads with a win probability');
         expect(eventsNamed(CHOKEPOINT_EVENT)).toHaveLength(0);
         expect(body._diagnostic_trace?.claim_safety?.withheld_projection_reason).toBeNull();
+        expect(committedAssistantMessages).toEqual([body.assistant_text]);
+      });
+
+      /**
+       * ⭐⭐⭐ THE SEPARATION TWIN OF THE PERMIT-WINS CONTROL, and the pair is
+       * the evidence — neither half proves anything alone.
+       *
+       * Above: constraint permits AND the arms separated ⇒ untouched.
+       * Here:  constraint permits and separation was NEVER EVALUATED ⇒ the
+       *        chokepoint substitutes, because the published claim on this very
+       *        payload is `permitted: false`.
+       *
+       * The two fixtures differ in ONE field, the `robustness` block. If a
+       * future edit makes the gate read entitlement only, this arm REDs while
+       * every other arm in this file stays green — which is precisely how the
+       * defect shipped in the first place.
+       */
+      it('⭐ SEPARATION TWIN: constraint-permitted but UNSEPARATED is substituted, not served', async () => {
+        factsByTurnRowId = {
+          [ANALYSIS_TURN_ROW_ID]: [constraintPermittedButUnseparatedFact()],
+        };
+        routeWithToolUseMock.mockResolvedValue(exit.routingResult(LEAK_TEXT));
+        const { body } = await postTurn(app, NEUTRAL_MESSAGE);
+        expect(
+          String(body.assistant_text ?? ''),
+          'the leader claim must not survive on a run whose arms were never told apart',
+        ).not.toContain('leads with a win probability');
+        expect(body._diagnostic_trace?.claim_safety?.withheld_projection_reason).toBe(
+          'leader_claim_replaced',
+        );
         expect(committedAssistantMessages).toEqual([body.assistant_text]);
       });
 

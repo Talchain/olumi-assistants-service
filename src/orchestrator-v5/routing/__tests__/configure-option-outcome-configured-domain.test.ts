@@ -123,6 +123,39 @@ function asNeedsEncoding(graph: unknown): Graph {
   return clone;
 }
 
+/**
+ * ⚠⚠ THE UNCONFIGURED TWIN NEEDS AN OPTION THAT IS NOT THE STATUS QUO (added
+ * 18 Sep 2026, the held-baseline lane) — and that is a fact about the CAPTURE,
+ * not a weakening of the twin.
+ *
+ * `asNeedsEncoding` removes the named option's effect values to create an
+ * outstanding slot. The captured option carries `is_baseline: true` (fixture
+ * line 69) AND the idiom "(Status Quo)" in its label, so a declared status quo
+ * with no effect values is now `ready` — a baseline is held at its factors'
+ * observed values and has NO outstanding slot by construction. On that graph
+ * the resolver correctly declines and the verdict is `not_honoured_no_copy`,
+ * so the arm would no longer discriminate.
+ *
+ * This variant therefore removes BOTH baseline signals — the declaration and
+ * the label idiom — and nothing else. The message is rewritten to name the same
+ * option by its new label, so `detectConfigureOptionIntent` still resolves it
+ * (asserted in the arm itself). Every other byte is the capture's.
+ */
+const UNCONFIGURED_LABEL = 'Hold Price at £49';
+const UNCONFIGURED_MESSAGE =
+  "Change the Hold Price at £49 option's Pro Plan Monthly Price to 79%";
+
+function asUnconfiguredNonBaseline(graph: unknown): Graph {
+  const clone = asNeedsEncoding(graph);
+  for (const node of clone.nodes) {
+    if (node.id === OPTION_ID) {
+      delete node.is_baseline;
+      node.label = UNCONFIGURED_LABEL;
+    }
+  }
+  return clone;
+}
+
 function optionInterventionValue(graph: unknown, optionId: string, factorId: string): unknown {
   const node = (graph as Graph).nodes.find((n) => n.id === optionId);
   const bundle = node?.interventions as Record<string, { value?: unknown }> | undefined;
@@ -240,17 +273,46 @@ describe('configure-option outcome guard — the configured-option domain', () =
    * user actually named, never merely "some option was reported".
    */
   it('reaches a not_honoured verdict for the SAME write when the option is unconfigured', () => {
+    const before = asUnconfiguredNonBaseline(CAPTURE.before);
+    const after = asUnconfiguredNonBaseline(CAPTURE.after);
+
+    // PRECONDITION, PINNED IN-TEST (trap 13b): the detector must still resolve
+    // the option under its new label, or this arm would be measuring a failed
+    // detection rather than the guard.
+    expect(
+      detectConfigureOptionIntent(UNCONFIGURED_MESSAGE, projectOptionLabels(before.nodes as never))
+        .matched,
+    ).toBe(true);
+
     const verdict = evaluateConfigureOptionOutcome({
-      message: MESSAGE,
-      before: asNeedsEncoding(CAPTURE.before),
-      after: asNeedsEncoding(CAPTURE.after),
+      message: UNCONFIGURED_MESSAGE,
+      before: before as never,
+      after: after as never,
     });
 
     expect(verdict.status).toBe('not_honoured');
     expect(verdict.status === 'not_honoured' && verdict.optionId).toBe(OPTION_ID);
-    expect(verdict.status === 'not_honoured' && verdict.optionLabel).toBe(
-      CAPTURE.provenance.option_label,
-    );
+    expect(verdict.status === 'not_honoured' && verdict.optionLabel).toBe(UNCONFIGURED_LABEL);
+  });
+
+  /**
+   * ⭐ THE ARM THE TWIN ABOVE USED TO BE, KEPT AS ITS OWN STATEMENT. Stripping a
+   * DECLARED baseline's effect values does not create an outstanding slot, so
+   * the resolver declines and the write is protected without a new sentence.
+   * Pinned so the difference between the two arms stays visible: it is the
+   * baseline declaration, nothing else.
+   */
+  it('a DECLARED BASELINE with its effect values stripped has no outstanding slot', () => {
+    const before = asNeedsEncoding(CAPTURE.before);
+    expect(before.nodes.find((n) => n.id === OPTION_ID)?.is_baseline).toBe(true);
+
+    const verdict = evaluateConfigureOptionOutcome({
+      message: MESSAGE,
+      before: before as never,
+      after: asNeedsEncoding(CAPTURE.after) as never,
+    });
+    expect(verdict.status).toBe('not_honoured_no_copy');
+    expect(verdict.status === 'not_honoured_no_copy' && verdict.optionId).toBe(OPTION_ID);
   });
 
   /**

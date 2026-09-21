@@ -47,6 +47,11 @@
  * the cap the graph was actually scored against.
  */
 
+import {
+  GOAL_THRESHOLD_CAP_PROVENANCE,
+  type GoalThresholdCapProvenance,
+} from './goal-threshold-cap.js';
+
 /**
  * What may reach the wire: the raw target, optionally accompanied by its unit
  * and the cap it was normalised against. Never a cap or unit on their own.
@@ -55,6 +60,19 @@ export interface GoalThresholdTrio {
   goal_threshold_raw: number;
   goal_threshold_unit?: string;
   goal_threshold_cap?: number;
+  /**
+   * WHICH RULE produced `goal_threshold_cap` — rides ONLY alongside the cap it
+   * describes, for the same reason the cap rides only alongside the raw value.
+   *
+   * ⚠ WITHOUT THIS THE CAP IS A NUMBER NOBODY CAN JUDGE. On
+   * `target_derived_headroom` the denominator is `raw * 1.25`, so
+   * `goal_threshold` is the constant 0.8 for every target and says nothing
+   * about the user's goal; on `metric_scale` / `inherited` the denominator
+   * comes from outside the target and the threshold is meaningful. Those are
+   * different epistemic states and the payload could not previously tell them
+   * apart. Carried verbatim, never re-derived (see the header).
+   */
+  goal_threshold_cap_provenance?: GoalThresholdCapProvenance;
 }
 
 /** A source of goal-threshold fields: a graph node, or an upstream payload. */
@@ -62,6 +80,7 @@ export interface GoalThresholdTrioSource {
   goal_threshold_raw?: unknown;
   goal_threshold_unit?: unknown;
   goal_threshold_cap?: unknown;
+  goal_threshold_cap_provenance?: unknown;
 }
 
 /**
@@ -95,6 +114,20 @@ export function pickGoalThresholdTrio(
   const cap = source.goal_threshold_cap;
   if (typeof cap === 'number' && Number.isFinite(cap)) {
     out.goal_threshold_cap = cap;
+
+    // THE CAP'S OWN ANCHOR. The provenance is a claim ABOUT the cap, so it
+    // rides only when the cap does — beside it, never instead of it and never
+    // without it. Validated against the resolver's own enum rather than
+    // trusted: an unrecognised value is treated as absent (UNATTESTED), which
+    // is the honest default, rather than forwarded as though it meant
+    // something.
+    const provenance = source.goal_threshold_cap_provenance;
+    if (
+      typeof provenance === 'string' &&
+      (GOAL_THRESHOLD_CAP_PROVENANCE as readonly string[]).includes(provenance)
+    ) {
+      out.goal_threshold_cap_provenance = provenance as GoalThresholdCapProvenance;
+    }
   }
 
   return out;

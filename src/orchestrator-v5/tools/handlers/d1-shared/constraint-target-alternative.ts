@@ -166,6 +166,104 @@ function sampleFrameIsAnchored(
   return true;
 }
 
+/**
+ * ⭐⭐ THE CONSTRAINT IDS WHOSE TARGET IS **PROVED** UNANCHORABLE.
+ *
+ * ── WHY IT LIVES HERE ─────────────────────────────────────────────────────
+ * {@link sampleFrameIsAnchored} is this estate's single mirror of PLoT's
+ * anchor rule, derived at that service's bytes and SHA-pinned in its docblock.
+ * A second copy of that question, minted next to its consumer, is the
+ * differently-named-twin defect this repo pays for most often (CLAUDE.md trap
+ * 12). So the question keeps ONE owner and gains a second reader.
+ *
+ * ── WHAT IT IS FOR, AND WHAT IT IS EMPHATICALLY NOT FOR ───────────────────
+ * Its only consumer chooses a REPAIR SENTENCE. It does **not** feed
+ * `deriveConstraintVerdict`, does not partition any constraint out of the
+ * withholding, and cannot move `may_name_leading_option`. That separation is
+ * deliberate and is the lesson of release blocker r1225-constraint-regression:
+ * a scoreability predicate wired into the VERDICT silently un-fixed
+ * trust-spine board #1 and had to be reverted. The same predicate wired into
+ * the COPY can, at worst, print a less useful true sentence.
+ *
+ * ── DIRECTION OF USE, WHICH IS THE SAFETY ARGUMENT ────────────────────────
+ * {@link sampleFrameIsAnchored} is documented as SUFFICIENT, NEVER COMPLETE:
+ * a node it ACCEPTS may still go unscored, but a node it REFUSES would
+ * certainly not have been scored. This collector reads only the REFUSAL side —
+ * the side that carries a proof — and every unreadable shape yields "not
+ * proved", i.e. today's copy. A constraint naming a node this graph does not
+ * contain is NOT collected: we have established that we could not look, not
+ * that the target is derived.
+ *
+ * ── GAP RECORDED, NOT CHASED ──────────────────────────────────────────────
+ * ⚠ This caller does NOT pre-gate on {@link recordsATestableFigure}, which
+ * {@link findConstraintTargetAlternative} does before it calls the predicate —
+ * so limb 4's comment (*"the candidate gate already proved the figure"*) does
+ * not hold here, and a ROOT node carrying no observed value reads ANCHORED.
+ * That is deliberate and it is the safe direction: such a node is not proved
+ * derived, so it keeps today's sentence. The class is not lost — a target
+ * recording no level is the `unmeasured_target` voice's own subject, and
+ * "set a current value" is the advice that lands there, not "your target is
+ * computed". Widening this to cover it would put the wrong cause on screen.
+ *
+ * @param constraintsSource the same two shapes `readRatifiedConstraints`
+ *   accepts — the `goal_constraints` array, or an object carrying one —
+ *   because `RatifiedConstraint` drops `node_id` and this needs it.
+ * @param graphSource an object carrying `nodes[]`, and optionally `edges[]` /
+ *   `options[]`.
+ *
+ * Pure. Fails closed (empty set) on every malformed shape.
+ */
+export function collectUnanchoredConstraintTargetIds(
+  constraintsSource: unknown,
+  graphSource: unknown,
+): Set<string> {
+  const out = new Set<string>();
+
+  const rawConstraints = Array.isArray(constraintsSource)
+    ? constraintsSource
+    : constraintsSource !== null && typeof constraintsSource === 'object'
+      ? (constraintsSource as Record<string, unknown>).goal_constraints
+      : undefined;
+  if (!Array.isArray(rawConstraints) || rawConstraints.length === 0) return out;
+
+  const graph =
+    graphSource !== null && typeof graphSource === 'object'
+      ? (graphSource as Record<string, unknown>)
+      : undefined;
+  const rawNodes = graph?.nodes;
+  if (!Array.isArray(rawNodes) || rawNodes.length === 0) return out;
+
+  const nodes = rawNodes.filter(
+    (n): n is TargetAlternativeNode => n !== null && typeof n === 'object',
+  );
+  const rawEdges = graph?.edges;
+  const edges = Array.isArray(rawEdges)
+    ? rawEdges.filter((e): e is TargetAlternativeEdge => e !== null && typeof e === 'object')
+    : undefined;
+  const rawOptions = graph?.options;
+  const options = Array.isArray(rawOptions)
+    ? rawOptions.filter((o): o is TargetAlternativeOption => o !== null && typeof o === 'object')
+    : undefined;
+
+  const byId = new Map<string, TargetAlternativeNode>();
+  for (const n of nodes) {
+    if (typeof n.id === 'string' && n.id !== '') byId.set(n.id, n);
+  }
+
+  for (const item of rawConstraints) {
+    if (item === null || typeof item !== 'object') continue;
+    const obj = item as Record<string, unknown>;
+    const constraintId = typeof obj.constraint_id === 'string' ? obj.constraint_id : null;
+    const nodeId = typeof obj.node_id === 'string' ? obj.node_id : null;
+    if (constraintId === null || nodeId === null) continue;
+    const node = byId.get(nodeId);
+    // Absent target ⇒ we could not look ⇒ NOT proved unanchored.
+    if (node === undefined) continue;
+    if (!sampleFrameIsAnchored(nodeId, node, { nodes, edges, options })) out.add(constraintId);
+  }
+  return out;
+}
+
 export interface TargetAlternative {
   readonly nodeId: string;
   readonly label: string;

@@ -215,6 +215,53 @@ export interface FinaliserContext {
    */
   readonly freshness?: import('./context/freshness.js').FreshnessDerivation;
   /**
+   * G3 — the turn's SCENARIO-BOUND freshness verdict, carried verbatim from
+   * `TurnExecutorRunResult.scenarioFreshness`.
+   *
+   * ⚠ DECLARED, BUT NOT READ IN THIS FILE, AND THAT IS DELIBERATE. The
+   * supersession DECISION is made once at the route seam
+   * (`route-v2.ts`, beside the `analysisAuthorityUnavailable` arm) via
+   * `resolveScenarioAnalysisSupersession`, and its OUTPUT arrives here as the
+   * two `analysisState*` members below. Re-deciding it here would be a second
+   * copy of one rule — the hand-maintained-mirror defect (trap 12). It is
+   * declared so the exit's context can carry it through the spread without an
+   * excess-property error, and so the channel is visible to a reader.
+   */
+  readonly scenarioFreshness?: import('./context/freshness.js').FreshnessDerivation;
+  /**
+   * G3 — THE RESOLVED DERIVATION THE TWO ANALYSIS-STATE SURFACES REPORT, when
+   * and only when the scenario-bound verdict superseded a hot-window `none`.
+   *
+   * ⚠ IT IS A SEPARATE MEMBER RATHER THAN AN OVERWRITE OF `freshness`, AND THE
+   * REASON IS MEASURED, NOT STYLISTIC. `ctx.freshness` has a third reader three
+   * statements below the `analysis_ready` stamp: the AUTHORITATIVE TOP-LEVEL
+   * `graph_hash`. The wire-bound derivation is re-derived POST-DISPATCH against
+   * the POST-EDIT graph hash on any turn that committed a mutation
+   * (`turn-executor.ts`'s `hashForPostHandlerFreshness` and its two
+   * `postApplyHash` siblings), while the scenario derivation holds the
+   * PRE-dispatch hash. Substituting `ctx.freshness` wholesale would therefore
+   * have rewritten `graph_hash` back to the pre-edit value on exactly the edit
+   * turns this guarantee is about — reintroducing the FALSE GRAPH_DIVERGED class
+   * the stamp's own docblock records as live-proven. Exactly two readers move;
+   * `graph_hash` and the freshness-only synthesis predicate do not.
+   */
+  readonly analysisStateFreshness?: import('./context/freshness.js').FreshnessDerivation;
+  /**
+   * G3 — the canonical projection of `analysisStateFreshness`, supplied
+   * together with it and never alone.
+   *
+   * ⚠ REQUIRED, BECAUSE `analysis_state` DOES NOT BRANCH ON THE DERIVATION.
+   * `composeAnalysisStateV1` reads its `freshness` input for exactly one thing
+   * (`refusal_declared`); every run-state branch reads `canonical.freshness`
+   * (`compose/analysis-state-v1.ts::composeRunState`). On the `turn_executor`
+   * exit `ctx.canonicalState` is always present, so the
+   * `canonicalStateFromFreshness` fallback below never runs there — a
+   * derivation-only substitution would have been a NO-OP on the one exit that
+   * can carry this. That is chronic failure #1 (a field nothing reads), caught
+   * by tracing the consumer rather than by assuming the derivation drives it.
+   */
+  readonly analysisStateCanonical?: import('./context/canonical-analysis-state.js').CanonicalAnalysisState;
+  /**
    * ANALYSIS-STATE AUTHORITY, STEP 3 — the turn's canonical analysis verdict,
    * threaded by a dispatch path that computed the FULL verdict (turn-executor,
    * with degraded detection). When absent, the finaliser composes the same
@@ -366,8 +413,25 @@ export function finaliseV5Response(
     FRESHNESS_ONLY_SYNTHESIS_REASONS.has(ctx.freshness.reason)
       ? synthesiseFreshnessOnlyAnalysisReady()
       : undefined);
+  // G3 — MIGRATED READER 1 of 2. The freshness fields stamped onto
+  // `analysis_ready` report the scenario-bound verdict when it superseded a
+  // hot-window `none`, so a saved analysis that rolled out of the bounded
+  // window is still identifiable and still marked as belonging to an earlier
+  // revision, instead of reading "never run".
+  //
+  // ⚠ NOT `payloadForStamp`'s own predicate above, which keeps reading
+  // `ctx.freshness`. That predicate asks a different question — *"did this turn
+  // have an unparseable graph, so that a freshness-only carrier must be
+  // synthesised?"* — and it is inert under supersession anyway (it requires
+  // `'unknown'`; supersession requires `'none'`).
   const stamped: OlumiResponse = payloadForStamp
-    ? { ...scrubbed, analysis_ready: attachComputedAt(payloadForStamp, ctx.freshness) }
+    ? {
+        ...scrubbed,
+        analysis_ready: attachComputedAt(
+          payloadForStamp,
+          ctx.analysisStateFreshness ?? ctx.freshness,
+        ),
+      }
     : { ...scrubbed };
   // ROADMAP 1.192 leg κ(a) — AUTHORITATIVE top-level graph_hash. The egress
   // sanitiser sets graph_hash from the GraphV3-parsed per-turn graph as a
@@ -471,14 +535,25 @@ function attachAnalysisState(
   response: OlumiResponse,
   ctx: FinaliserContext,
 ): OlumiResponse {
+  // G3 — MIGRATED READER 2 of 2. The resolved canonical state wins over the
+  // dispatch's own when the scenario-bound verdict superseded a hot-window
+  // `none`. FIRST in the chain, because on the only exit that can supply it
+  // `ctx.canonicalState` is also always present — and that state is the one
+  // carrying the `never_run` claim this guarantee exists to remove.
+  //
+  // It is the healthy twin of the route's `analysisAuthorityUnavailable` arm,
+  // which substitutes exactly this pair for the opposite reason: there the
+  // durable authority could not be READ, here it could be read and holds a fact
+  // the bounded window has lost.
   const canonical =
+    ctx.analysisStateCanonical ??
     ctx.canonicalState ??
     canonicalStateFromFreshness(
       // The no-context derivation is passed POSITIONALLY and never assigned to
       // `ctx.freshness` — see its docstring: its reason is a
       // FRESHNESS_ONLY_SYNTHESIS_REASONS member, so binding it to the context
       // would also synthesise a `blocked` analysis_ready block.
-      ctx.freshness ?? exitDerivationFor(ctx) ?? NO_ANALYSIS_CONTEXT_DERIVATION,
+      ctx.analysisStateFreshness ?? ctx.freshness ?? exitDerivationFor(ctx) ?? NO_ANALYSIS_CONTEXT_DERIVATION,
       // Threaded UNCONDITIONALLY, which it was not before. Three graph-less
       // exits (`readiness_intake` and two `edit_graph` declines) supply a
       // readiness payload with no freshness derivation; under the old
@@ -487,11 +562,39 @@ function attachAnalysisState(
       ctx.analysisReady ? { readiness: ctx.analysisReady } : {},
     );
   const selectedRun = ctx.priorFacts === undefined ? null : selectRunAnalysisFact(ctx.priorFacts);
+  // ⚠⚠ G3 — `selected_fact_index` IS ARRAY-RELATIVE, AND UNDER SUPERSESSION IT
+  // IS RELATIVE TO AN ARRAY THIS FUNCTION DOES NOT HAVE.
+  //
+  // `FreshnessDerivation.selected_fact_index` documents itself as a position in
+  // *"the EXACT array passed to `deriveAnalysisFreshness` — which is
+  // caller-defined, NOT a global ordering … Consumers MUST resolve the fact
+  // against the same array they passed in"*. `ctx.priorFacts` is the HOT
+  // WINDOW; a superseding canonical state's index is a position in the DURABLE
+  // scenario array, which is never threaded here.
+  //
+  // Without this exclusion the fix defeats itself, and silently. Supersession
+  // fires precisely when the hot window holds no successful `run_analysis` fact,
+  // so `selectedRun` is null while the superseding index is NOT — the old
+  // disjunct would flip `hasRunToBind` to true, hand
+  // `compareAnalysisRunFactIdentity` an `undefined` left-hand side, take the
+  // `unconfirmed` arm, and emit `unknown_degraded` / `store_unreadable` with the
+  // leader claim withheld. That is a WORSE answer than the `never_run` being
+  // corrected, produced by a green code path with no error anywhere.
+  //
+  // Omitting the binding is the honest state and not a loss: the binding
+  // cross-checks the DISPLAYED fact against the hot window, and on this turn
+  // there is no hot-window fact to cross-check. `selectedRun !== null` still
+  // binds whenever the window does hold one.
   const hasRunToBind = ctx.priorFacts !== undefined
-    && (selectedRun !== null || canonical.selected_fact_index !== null);
+    && (selectedRun !== null
+      || (ctx.analysisStateCanonical === undefined && canonical.selected_fact_index !== null));
   const analysisState = composeAnalysisStateV1({
     canonical,
-    freshness: ctx.freshness,
+    // Read for `refusal_declared` only (see `composeRunState`). Substituting is
+    // safe because a refusal turn can never reach supersession: its verdict is
+    // rewritten to `unknown` by `clampRefusalFreshness`, and supersession
+    // requires `none`. That premise is pinned in-test, not just asserted here.
+    freshness: ctx.analysisStateFreshness ?? ctx.freshness,
     readiness: ctx.analysisReady,
     mayNameLeadingOption: ctx.mayNameLeadingOption,
     // Read from the body as it will ship, not from the fact: when the
@@ -652,6 +755,10 @@ function attachRunDelta(
     outcome: 'emitted' | 'refused' | 'skipped',
     reason: RunDeltaDisclosureReason | null,
     out: T,
+    // null on every exit that puts no reason on the wire by design — see
+    // `attachRunDeltaAbsenceReason`. Only `false` means "there WAS a user-facing
+    // reason and it did not travel", which is the state worth counting.
+    wireReasonCarried: boolean | null = null,
   ): T => {
     // ⛔ AN OBSERVABILITY PATH MUST NOT BE ABLE TO BREAK THE THING IT OBSERVES.
     // Before this change `attachRunDelta` could not fail a response; it now
@@ -677,6 +784,11 @@ function attachRunDelta(
         // is user content, not structure.
         prior_facts_count: priorFactsCount,
         run_analysis_facts_count: runAnalysisFactsCount,
+        // Did the user-facing half actually ship? The carrier is CONDITIONAL
+        // (see `attachRunDeltaAbsenceReason`), and a conditional carrier that
+        // reports nothing when it misses is a silent-loss channel — the exact
+        // shape this event was built to end.
+        wire_reason_carried: wireReasonCarried,
       });
     } catch {
       // Deliberately swallowed. The response is the product; the log line is not.
@@ -706,8 +818,77 @@ function attachRunDelta(
   // The producer's own union, passed through. This caller mints no taxonomy for
   // the five: re-spelling them here would be a second list free to drift from
   // the one the producer actually returns.
-  if (built.kind !== 'ok') return disclose('refused', built.reason, response);
+  if (built.kind !== 'ok') {
+    const stamped = attachRunDeltaAbsenceReason(response, built.reason);
+    return disclose('refused', built.reason, stamped.body, stamped.carried);
+  }
   return disclose('emitted', null, { ...response, run_delta: built.delta });
+}
+
+/**
+ * Put the producer's refusal reason where a PERSON can be told it.
+ *
+ * ⛔ THE DEFECT THIS CLOSES, and it is the other half of the one above. The
+ * disclosure added on 15 Sep reaches an OPERATOR. The person looking at an
+ * empty comparison panel is told nothing at all — five distinct refusals arrive
+ * at the client as one silence, so the panel is built, mounted, and correctly
+ * renders NOTHING, because no honest sentence exists without the reason.
+ * `insufficient_runs` alone accounts for the overwhelming majority — a wire
+ * measurement taken outside this lane over three days found `run_delta` present
+ * in 0 of 915 `run_analysis` facts (contrast control `decision_brief` 915/915),
+ * and only 11.5% of scenarios ever reaching a second run (1,103 of 9,598). "You
+ * have only run this once, so there is nothing to compare" is a TRUE sentence
+ * we are currently withholding.
+ *
+ * ⚠ THE CARRIER IS FORCED BY THE CONTRACT, NOT CHOSEN FOR TIDINESS, and
+ * anyone editing this should know why before moving it. Measured by EXECUTING
+ * the pinned `@talchain/schemas` 0.55.0, both controls green:
+ *   · `OlumiResponseSchema` is `.strict()`. An undeclared TOP-LEVEL sibling of
+ *     `run_delta` — the natural home — fails `safeParse` with
+ *     `unrecognized_keys`, which takes the whole reply down the egress
+ *     degradation path. That home needs a schemas RELEASE, not a CEE change.
+ *   · `analysis_ready` is `.passthrough()`, at the boundary AND at CEE's own
+ *     `schemas/analysis-ready.ts`, so an undeclared key inside it crosses
+ *     INTACT. `validateEgress` returns the CALLER'S OBJECT rather than
+ *     `parsed.data`, so it is a gate and not a transform, and nothing strips it.
+ * This is the same mechanic `may_run` and `blocked_reason` already ride; the
+ * precedent and its derivation are written up in `routing/readiness-intake.ts`.
+ * The key is named `run_delta_absence_reason` in full so it can never be
+ * mistaken for a readiness field by a reader who arrives at it cold.
+ *
+ * ⚠ THE MIGRATION IS NAMED IN THIS PR'S BODY AND IS NOT YET A REGISTER ROW —
+ * stated plainly so nobody inherits a scheduler that does not exist. When the
+ * contract carries a declared top-level sibling of `run_delta`, this moves
+ * there and the passthrough key retires. Until then a CEE-only change is the
+ * ONLY way the sentence reaches a user, and a user-facing gap does not wait on
+ * a release train.
+ *
+ * ⛔ NEVER FABRICATE THE CARRIER. `analysis_ready`'s `status` / `options` /
+ * `goal_node_id` are REQUIRED at the boundary, so synthesising one to hold a
+ * reason would invent a readiness claim in order to ship an honesty fix. On a
+ * carrier-less exit this returns the body untouched and reports
+ * `carried: false`, so the loss is countable rather than silent.
+ *
+ * ⚠ SCOPE: the FIVE PRODUCER refusals only. The caller's own three are
+ * deliberately excluded — `prior_facts_absent` fires on every turn that ran no
+ * analysis at all (most of them), and the two identity members already reach
+ * the client as `analysis_state.leader_claim.withheld_reason`. Putting either
+ * here would be a second spelling of a fact the wire already carries, which is
+ * how two authorities under one name get born (CLAUDE.md trap 21).
+ */
+function attachRunDeltaAbsenceReason(
+  response: OlumiResponse,
+  reason: RunDeltaRefusal,
+): { readonly body: OlumiResponse; readonly carried: boolean } {
+  const carrier = response.analysis_ready;
+  if (carrier === undefined) return { body: response, carried: false };
+  return {
+    body: {
+      ...response,
+      analysis_ready: { ...carrier, run_delta_absence_reason: reason },
+    },
+    carried: true,
+  };
 }
 
 function stripCeeTrace(response: OlumiResponse): OlumiResponse {

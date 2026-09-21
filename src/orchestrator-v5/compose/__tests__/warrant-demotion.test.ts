@@ -71,6 +71,25 @@ function setFactorValueAction(): ProposalAction {
   } as unknown as ProposalAction;
 }
 
+describe('original constraint frame in a consent offer', () => {
+  it('carries the captured budget level without putting frame authority in model parameters', () => {
+    const action = { ...addConstraintAction(), parameters: [
+      { name: 'constraint_type', value: 'at_most', source: 'user_explicit' },
+      { name: 'value', value: 40000, source: 'user_explicit' },
+      { name: 'unit', value: '$', source: 'user_explicit' },
+    ] } as ProposalAction;
+    const offer = buildWarrantDemotion(action, [], 'I actually only have a budget of $40,000 for an assistant.');
+    expect(offer.ok).toBe(true);
+    if (!offer.ok) throw new Error('expected a complete offer');
+    expect(offer.proposal.constraint_value_frame).toBe('level');
+    expect(offer.proposal.params).not.toHaveProperty('constraint_value_frame');
+    const unrelated = buildWarrantDemotion(action, [], 'I spend $40,000 on an assistant.');
+    expect(unrelated.ok && unrelated.proposal.constraint_value_frame).toBeUndefined();
+    const mismatch = buildWarrantDemotion(action, [], 'I have a budget of $30,000.');
+    expect(mismatch.ok && mismatch.proposal.constraint_value_frame).toBeUndefined();
+  });
+});
+
 function adjustEdgeStrengthAction(): ProposalAction {
   return {
     handler_id: 'adjust_edge_strength',

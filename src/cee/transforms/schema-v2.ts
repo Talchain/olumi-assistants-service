@@ -13,6 +13,7 @@
 
 import type { z } from "zod";
 import { GoalThresholdFrame } from "@talchain/schemas";
+import type { GoalThresholdCapProvenance } from "../../utils/goal-threshold-cap.js";
 import { deriveStrengthStd, type ProvenanceObject } from "./strength-derivation.js";
 import {
   ensureEffectDirection,
@@ -116,6 +117,16 @@ export interface V1Node {
   goal_threshold_unit?: string;
   /** Normalisation denominator */
   goal_threshold_cap?: number;
+  /**
+   * Which rule produced `goal_threshold_cap` (see
+   * `GOAL_THRESHOLD_CAP_PROVENANCE`, utils/goal-threshold-cap.ts). Declared
+   * here for the same reason the frame below is: `transformNodeToV3` has to
+   * NAME a field to carry it across, because the transform rebuilds the node
+   * field-by-field and drops anything it does not name.
+   *
+   * DERIVED from the resolver's own constant, never restated as a local union.
+   */
+  goal_threshold_cap_provenance?: GoalThresholdCapProvenance;
   /**
    * The FRAME `goal_threshold` is stated in (ROADMAP 2.258, schemas 0.31.0).
    * Always `'level'` from CEE — see `CEE_GOAL_THRESHOLD_FRAME`. Declared here

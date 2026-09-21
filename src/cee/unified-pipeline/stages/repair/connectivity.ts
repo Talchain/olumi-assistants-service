@@ -3,7 +3,7 @@
  *
  * Source: Pipeline A lines 1495-1696
  * Ensures minimum structure (goal, decision, option), infers goal if missing,
- * wires outcomes to goal if unreachable, builds validationSummary.
+ * preserves missing causal paths for validation, builds validationSummary.
  */
 
 import type { StageContext } from "../../types.js";
@@ -13,8 +13,6 @@ import {
 } from "../../../transforms/structure-checks.js";
 import {
   ensureGoalNode,
-  hasGoalNode,
-  wireOutcomesToGoal,
 } from "../../../structure/index.js";
 import { fixTerminalBridge } from "./terminal-bridge.js";
 import { detectEdgeFormat } from "../../utils/edge-format.js";
@@ -76,43 +74,16 @@ export function runConnectivity(ctx: StageContext): void {
     }
   }
 
-  // Wire outcomes/risks to goal when connectivity fails
-  const goalExistsButUnreachable =
-    !structure.valid &&
-    structure.connectivity_failed &&
-    (structure as any).connectivity?.reachable_goals?.length === 0 &&
-    hasGoalNode(ctx.graph);
-
-  if (goalExistsButUnreachable) {
-    const goalNode = (ctx.graph as any).nodes.find((n: any) => n.kind === "goal");
-    const goalId = goalNode?.id as string | undefined;
-
-    if (goalId) {
-      const edgeCountBefore = (ctx.graph as any).edges.length;
-      ctx.graph = wireOutcomesToGoal(ctx.graph!, goalId, ctx.collector);
-      const edgesAdded = (ctx.graph as any).edges.length - edgeCountBefore;
-
-      if (edgesAdded > 0) {
-        structure = validateMinimumStructure(ctx.graph!);
-        log.info({
-          request_id: ctx.requestId,
-          edges_added: edgesAdded,
-          goal_node_id: goalId,
-        }, "Edge repair: wired outcomes/risks to goal");
-      }
-    }
-  }
+  // A missing causal path needs clarification, not a fixed-sign goal edge.
+  // Keep the retained graph for the existing structural validation below.
 
   // Terminal-bridge synthesis (ROADMAP 2.1099). MUST run after `ensureGoalNode`
   // above: when the model omits the goal, CEE mints it here and the enforcement
   // gate then rejects the graph because that freshly-minted node is unreachable.
   // Sited in the sweep instead, this repair could not see that goal at all.
   //
-  // `wireOutcomesToGoal` has just run and, on this shape, wired nothing — its
-  // outcome/risk set is empty. That is the whole failure class: six connectivity
-  // repairs, all presupposing a bridge node that does not exist. See
-  // terminal-bridge.ts for the measured evidence and the honesty contract on the
-  // node it mints.
+  // This separate case has no outcome/risk node at all; it cannot replace
+  // the retained risk→outcome mechanism.
   {
     const liveFormat = detectEdgeFormat((ctx.graph as any).edges as EdgeT[]);
     const format: EdgeFormat = liveFormat === "NONE" ? (ctx.detectedEdgeFormat ?? "V1_FLAT") : liveFormat;

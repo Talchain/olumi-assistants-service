@@ -33,6 +33,7 @@ import type {
   ToolDefinition,
 } from '../../adapters/llm/types.js';
 import type { EditPatchOperationLike } from '../graph-management/adapters/edit-graph-producer.js';
+import { renderRecentConversationForEdit } from '../../orchestrator/context/serialise.js';
 
 import {
   buildProposeStructuralEditTool,
@@ -86,6 +87,56 @@ export interface StructuralEditComposeInput {
   readonly grounding: StructuralEditGrounding;
   /** The user's edit request, verbatim. */
   readonly message: string;
+  /**
+   * ⚠ REQUIRED — ROADMAP 1.33's ruling, applied to the SECOND edit-lane LLM.
+   *
+   * The prior turns of this scenario, oldest-first, EXCLUDING the current one
+   * (`message` carries that, and duplicating it would let the model compose
+   * the request twice). Empty array when there is no history.
+   *
+   * WHY IT IS REQUIRED RATHER THAN OPTIONAL, and it is the same argument the
+   * `timeoutMs` jsdoc below makes: this field was ABSENT, and "the dispatcher
+   * never passes the conversation" was therefore not a type error, not a test
+   * failure, and visible nowhere — it was simply the behaviour. The measured
+   * consequence: on a turn whose request was *"Can you update the model with
+   * these estimates?"*, the RULEBOOK — which receives `## Recent Conversation`
+   * via `serialiseEditContextForLLM` — composed a batch large enough to breach
+   * the patch budget, and THIS composer, handed the sentence alone, returned
+   * `no_tool_call` → `not_expressible` → *"I could not see how to make that
+   * change against your model as it stands."* One dispatch, one
+   * `ConversationContext`, two LLMs, and only one of them could resolve
+   * *"these estimates"*.
+   *
+   * ROADMAP 1.33 already ruled this shape a defect and fixed it for the
+   * rulebook — `serialise.ts`'s *"the edit LLM saw only the verbatim current
+   * message, dropping facts the user established over earlier turns"*, shipped
+   * as #391 under the name "edit-lane conversation starvation" (the name lives
+   * in `handlers/edit-graph-dispatch.ts`; deliberately no line number — the
+   * estate's stale-pointer class). The structural composer (#823, Aug 2026) is
+   * a later seam on the same dispatch that reproduced it.
+   *
+   * ⚠ WHAT MAKING IT REQUIRED ACTUALLY GUARANTEES, STATED NARROWLY. It turns
+   * the absence into a COMPILE ERROR **for this composer**: no caller can
+   * reach `composeStructuralEdit` without passing a conversation, and a future
+   * caller cannot reintroduce the starvation here. It does NOT close the class
+   * — the device is a property of THIS input type, and a sibling composer with
+   * its own input type is invisible to it.
+   *
+   * And that is not hypothetical. `tools/propose-add-option.ts` is a THIRD
+   * edit-lane LLM that ALREADY EXISTS AND IS ALREADY STARVED: its
+   * `AddOptionComposeInput` declares `message` and no `conversation`, it sends
+   * a single user message to its own same-named `COMPOSER_SYSTEM_PROMPT`, and
+   * it is live on the add-option text leg through the same
+   * `getAdapter('edit_graph')` (`orchestrator/route-v2.ts`, `composeAddOption`
+   * call site). Deliberately NOT fixed here — a different surface, rowed for
+   * its own change rather than bundled (CLAUDE.md: "while we're here" work is
+   * prohibited). Recorded rather than quietly dropped, because a doc claiming
+   * the class is closed is how the next session stops looking.
+   *
+   * There is deliberately no default. `?? []` would restore exactly the silent
+   * absence this field exists to abolish.
+   */
+  readonly conversation: readonly { role: 'user' | 'assistant'; content: string }[];
   /** Pipeline op cap (`config.cee.maxPatchOperations`) — passed, never guessed. */
   readonly maxPatchOperations: number;
   readonly requestId: string;
@@ -123,7 +174,77 @@ const COMPOSER_SYSTEM_PROMPT =
   'Do not claim the change has been made. Structural changes are held for the ' +
   'user to confirm.';
 
+/**
+ * The history half of the system prompt — appended ONLY when the user message
+ * actually carries the two sections it names. See `buildComposerPayloadText`.
+ *
+ * ⚠ IT IS A SEPARATE CONSTANT BECAUSE FUSING IT INTO `COMPOSER_SYSTEM_PROMPT`
+ * WAS A DEFECT, caught in adversarial review before merge. Fused, it was sent
+ * on 100% of structural-edit turns, so a FIRST-TURN edit — whose user message
+ * is the bare sentence with no markdown headers at all — was told that the
+ * request lives under "## The change to make" and that earlier turns appear
+ * under "## Recent Conversation", with NEITHER header present in the message it
+ * received. At `temperature: 0` with `tool_choice: 'auto'` and a live decline
+ * path, a model told to act on a section it cannot locate can decline the tool
+ * call: `no_tool_call` → `not_expressible` — the exact dead end this change
+ * exists to remove, newly reachable on the one turn class the change promised
+ * would not move. Do not re-fuse it; the spec's payload control pins the
+ * separation by asserting these header strings are ABSENT from the system
+ * prompt when there is no history.
+ */
+const COMPOSER_HISTORY_INSTRUCTION =
+  'Earlier turns may appear under "## Recent Conversation". Use them ONLY to ' +
+  'work out what the request under "## The change to make" is referring to — ' +
+  'that request is the only thing to compose, and every id still comes from ' +
+  'the tool description, never from the conversation.';
+
 const COMPOSER_MAX_TOKENS = 4000;
+
+/**
+ * The composer's system prompt AND user message, from ONE decision.
+ *
+ * Mirrors the RULEBOOK's own layout (`serialiseEditContextForLLM` renders the
+ * same `## Recent Conversation` section from the same `context.messages`), and
+ * DERIVES its bound from the same exported renderer rather than re-spelling the
+ * 4,000-char cap or the "(N earlier turns omitted for length)" disclosure —
+ * CLAUDE.md trap 12: a second copy of a cap is a mirror that drifts silently.
+ *
+ * The request goes LAST, adjacent to the tool call, because that is the
+ * position the model acts on; the history is antecedent material only.
+ *
+ * ⚠ BOTH FIELDS ARE DECIDED BY ONE PREDICATE, ON PURPOSE (CLAUDE.md trap 21:
+ * two predicates answering one question is how a harm closed in one place
+ * reopens in another). The question is "does the user message actually carry a
+ * `## Recent Conversation` section?", so the branch is taken on the RENDERED
+ * text and both fields fall out of it.
+ *
+ * MEASURED, so the reason is not overstated: at this tip `conversation.length
+ * > 0` and `recent.length > 0` are EXTENSIONALLY EQUIVALENT —
+ * `renderRecentConversationForEdit` returns `''` only for an empty array (a
+ * blank-content pair renders `"user: \nassistant: "`, 18 chars). So gating on
+ * the length would be correct TODAY. It is gated on the rendered text anyway,
+ * because that is the fact the system prompt is making a claim about: if the
+ * renderer's empty condition ever widens, one branch cannot drift from the
+ * other, and the system prompt still cannot name a header the message lacks.
+ *
+ * No history ⇒ the WHOLE payload, `system` included, is byte-identical to the
+ * pre-fix payload. That is deliberate: the no-history turns that work today
+ * must not move, and it is what makes the discriminating control in the spec
+ * possible.
+ */
+function buildComposerPayloadText(input: {
+  readonly message: string;
+  readonly conversation: readonly { role: 'user' | 'assistant'; content: string }[];
+}): { readonly system: string; readonly userMessage: string } {
+  const recent = renderRecentConversationForEdit(input.conversation);
+  if (recent.length === 0) {
+    return { system: COMPOSER_SYSTEM_PROMPT, userMessage: input.message };
+  }
+  return {
+    system: `${COMPOSER_SYSTEM_PROMPT}\n\n${COMPOSER_HISTORY_INSTRUCTION}`,
+    userMessage: `## Recent Conversation\n${recent}\n\n## The change to make\n${input.message}`,
+  };
+}
 
 /**
  * What still has to happen on this turn AFTER the composer returns, charged at
@@ -287,13 +408,26 @@ export async function composeStructuralEdit(
 
   const tool: ToolDefinition = buildProposeStructuralEditTool(input.grounding);
 
+  // ONE call, ONE branch: the system prompt and the user message must agree
+  // about whether a `## Recent Conversation` section exists. See
+  // `buildComposerPayloadText`.
+  const payloadText = buildComposerPayloadText({
+    message: input.message,
+    conversation: input.conversation,
+  });
+
   let result: ChatWithToolsResult;
   try {
     result = await chatWithTools.call(
       input.adapter,
       {
-        system: COMPOSER_SYSTEM_PROMPT,
-        messages: [{ role: 'user', content: input.message }],
+        system: payloadText.system,
+        messages: [
+          {
+            role: 'user',
+            content: payloadText.userMessage,
+          },
+        ],
         tools: [tool],
         tool_choice: { type: 'auto' },
         temperature: 0,

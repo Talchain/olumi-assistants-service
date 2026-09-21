@@ -155,4 +155,21 @@ describe("the adapter threads the trust decision into the production keep logic"
     const opts = keepSpy.mock.calls[0]![3] as { preservationViolations?: readonly string[] } | undefined;
     expect(opts?.preservationViolations).toBeInstanceOf(Array);
   });
+
+  it("W4: records lineage survives the real adapter and matches the actual provider request", async () => {
+    streamSpy.mockImplementation(fakeStream(RECORDS_WITH_INVALID_OPTION_EFFECT_SOURCE));
+    const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+    const result = await draftGraphWithAnthropic({ brief: "Should we hold the price at £49 to reach £20k MRR?", docs: [], seed: 3, model: "claude-sonnet-4-6" });
+    const { draftRequestIdentity } = await import("../../src/cee/draft/records/lineage.js");
+    const lineage = result.meta?.raw_draft_lineage;
+    expect(lineage).toBeDefined();
+    expect(lineage!.provider_output.decoded_input).toEqual(JSON.parse(RECORDS_WITH_INVALID_OPTION_EFFECT_SOURCE));
+    expect(lineage!.initial_records.claims).toHaveLength(7);
+    expect(lineage!.draft_request).toEqual(draftRequestIdentity(streamSpy.mock.calls.at(-1)![0]));
+    expect(lineage!.completion.attempted).toBe(true);
+    expect(lineage!.completion.request).toEqual(draftRequestIdentity(createSpy.mock.calls.at(-1)![0]));
+    expect(lineage!.completion.output_text).toContain('Churn from price hold');
+    expect(lineage!.projection.refusals.length).toBeGreaterThan(0);
+    expect(result.graph).not.toHaveProperty('raw_draft_lineage');
+  });
 });

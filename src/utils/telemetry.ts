@@ -915,6 +915,11 @@ export const TelemetryEvents = {
   // Track S 0.13c-1 — run_analysis load-time intercept guard summary.
   // Redacted: corrected_count + node IDs only, no observed magnitudes.
   V5RunAnalysisInterceptGuard: "v5.run_analysis.intercept_guard",
+  // COLLAB Track A — run_analysis participation guard summary.
+  // Redacted: excluded/pruned COUNTS + node IDs only. Never a label and never a
+  // value: the excluded node's number is exactly what the user kept out of the
+  // calculation, so it must not leak through telemetry either.
+  V5RunAnalysisParticipationGuard: "v5.run_analysis.participation_guard",
   // ROADMAP 2.229 fix 4 — deterministic IMPERATIVE RE-RUN pre-route.
   //
   // Fires once per turn whose message reads as an instruction to re-run
@@ -1362,6 +1367,29 @@ export const TelemetryEvents = {
   //   derived_text_length: number
   V5AnswerShapeDroppedStale: "v5.answer_shape.dropped_stale",
 
+  // THE COLLAPSE FLOOR (18 Sep 2026). The egress reached a shapeable answer and
+  // DECLINED to attach the `_answer_shape` wire directive, because the answer is
+  // short enough that the deployed UI renders it whole of its own accord
+  // (DecisionGuideAI `CLAMP_CHAR_THRESHOLD`). See
+  // ANSWER_SHAPE_COLLAPSE_FLOOR_CHARS in `orchestrator-v5/routing/answer-shape.ts`.
+  //
+  // ⭐ WHY THIS EVENT EXISTS RATHER THAN SILENCE. Four prior F1 fixes each
+  // shipped believing the egress synthesiser ran on a dispatch path where it
+  // never did, and each passed its own tests. The guard against that was
+  // `v5.answer_shape.emitted` — which is now absent on every SHORT answer, for
+  // a completely different reason. An absent event that means two different
+  // things is how the next silent miss goes unnoticed, so the decline is
+  // announced rather than inferred: the two outcomes of a REACHED egress are
+  // `emitted` and `declined_below_floor`, and NEITHER means the path was never
+  // reached.
+  //
+  // Lengths + seam only, never content (PII discipline).
+  //   dispatch_path: 'route_egress_model_shape' | 'route_egress_synthesised'
+  //   final_text_length: number   (the text the user receives, in full)
+  //   floor_chars: number         (the threshold in force, so a moved floor is
+  //                                visible in the telemetry without a deploy diff)
+  V5AnswerShapeDeclinedBelowFloor: "v5.answer_shape.declined_below_floor",
+
   // V5 Coaching State Spine — Stage 2B-1b. Emitted once per turn AFTER the turn's
   // state is successfully persisted (post-append_turn_atomic). Same privacy
   // contract as V5CoachingStateDerived: correlation IDs + counts / closed-enum
@@ -1489,13 +1517,53 @@ export const TelemetryEvents = {
   V5CandidateMutationClarifyRequired: "v5.candidate_mutation.clarify_required",
 
   // Model Management (CEE_MODEL_VERSIONS_ENABLED) — commit-seam version hook.
-  // Emitted AFTER a durable graph-bearing commit when the fire-and-forget
-  // saveVersion call resolves. Content-free: scenario/turn ids, outcome
-  // status ('ok' | 'deduped' | 'disabled' | 'conflict' | 'error'),
-  // version_number, 16-hex-prefixed graph_identity_hash, error code — never
-  // graph content or labels. Non-blocking contract: emit/save failures log
-  // and NEVER affect the turn result.
+  // Emitted AFTER a durable graph-bearing commit, from the post-success block
+  // in `commit.ts` — never at decision time (Codex C8-A review defect 5).
+  // Content-free: scenario/turn ids, a status, version_number, 16-hex-prefixed
+  // graph_identity_hash, error code — never graph content or labels.
+  // Non-blocking contract: emit failures log and NEVER affect the turn result.
+  //
+  // ⛔⛔ THIS EVENT IS A SKIP ALARM. ITS NAME SAYS THE OPPOSITE. Its only emit
+  // carries `status: 'skipped'` with a `skip_reason`, and two tests in
+  // `atomic-model-version-commit.test.ts` deliberately assert ZERO of it on the
+  // versionable paths — "emitting a skip here would keep the alarm firing on
+  // the product's most common edge shape". DO NOT add a success arm to it; a
+  // committed version is reported by `V5ModelVersionCommitted` below.
+  //
+  // ⚠ Consequence for anyone reading a dashboard: a ZERO here means "no skip
+  // was recorded", NEVER "no version exists". Measured 20 Sep 2026, staging
+  // read zero over 30 hours while `v5.graph_cas.evaluated` read 100+ in the
+  // same window, and the natural reading of that zero was the opposite of the
+  // truth. The status enum this comment used to advertise
+  // ('ok' | 'deduped' | 'conflict' | 'error') was never emitted by any code.
+  //
+  // ⚠ The sentence this replaced also said "when the fire-and-forget saveVersion
+  // call resolves". That path is no longer how a conversational commit writes a
+  // version — it is `append_turn_atomic_v5`, in the same transaction as the turn.
   V5ModelVersionCreated: "v5.model_versions.version_created",
+
+  // ⭐ Model Management — a model version WAS committed (or was planned and the
+  // append returned no receipt). Emitted from the post-durable block in
+  // `commit.ts`, never at decision time.
+  //
+  // ⛔ WHY THIS IS A SEPARATE EVENT FROM THE ONE ABOVE, which is the whole
+  // point: `version_created` READS like a success signal and is in fact a SKIP
+  // ALARM — `atomic-model-version-commit.test.ts` pins that by asserting ZERO
+  // of it on the versionable paths, because "emitting a skip here would keep
+  // the alarm firing on the product's most common edge shape". Folding a
+  // success arm into it would have broken that alarm for every consumer
+  // counting it. Two questions, two names.
+  //
+  // Before this existed nothing was emitted when a version WAS written, so the
+  // durable receipt could not be observed at all: staging read
+  // `version_created = 0` for 30 hours while `v5.graph_cas.evaluated` read
+  // 100+, and the natural reading of that zero was the opposite of the truth.
+  //
+  // Statuses: 'committed' (a version row exists; version_number and the 16-hex
+  // hash prefix are set) | 'no_receipt' (planned, but v5 was not the selected
+  // RPC). Content-free: ids, status, version number, hash PREFIX. Non-blocking:
+  // an emit failure logs and never affects the turn result.
+  V5ModelVersionCommitted: "v5.model_versions.version_committed",
 
   // Wave-1 Lane C (PR4 collaboration) — a collab write was REFUSED at the
   // route/service boundary (invalid participant token, closed round,
@@ -1534,6 +1602,28 @@ export const TelemetryEvents = {
   // EVERY status so a withhold RATE is derivable rather than only the
   // happy-path count. Still content-free: booleans + closed enums.
   V5DecisionRecordCaptured: "v5.decision_records.record_captured",
+
+  // ROADMAP 2.1229 — brief + analysis-provenance forwarded to `scenarios`
+  // from the commit seam, so the share path has something to share. Emitted
+  // once per successful (non-noop) run_analysis commit, from the
+  // fire-and-forget hook. `status` is a closed enum:
+  //   ok          — a scenario row was updated;
+  //   not_stored  — the RPC returned false: it wrote NOTHING (no matching
+  //                 scenario, or a null reached it). Distinct from `ok`
+  //                 deliberately — a silent no-write must never read as a
+  //                 success, which is the defect class this lane removes;
+  //   skipped     — the fact carried an incomplete envelope (`skip_reason`
+  //                 names the first missing member: no_brief |
+  //                 no_graph_hash | no_seed | no_response_hash). All-or-
+  //                 nothing is a CONSUMER requirement: `create_shared_brief`
+  //                 dereferences three provenance keys into three NOT NULL
+  //                 columns after a single null check, so a partial envelope
+  //                 becomes a 23502 at share time;
+  //   error       — store construction or the RPC threw.
+  // Content-free: correlation ids + closed enums ONLY. Never the brief text,
+  // the seed or either hash. Non-blocking contract: capture/emit failures log
+  // and NEVER affect the turn result.
+  V5BriefProvenanceStored: "v5.brief_provenance.stored",
 
   // V5 Coaching State Spine — Stage 2B-2. Emitted once per turn after the internal coaching
   // LIFECYCLE is derived (prior pre-dispatch snapshot vs current pre-dispatch coaching_state
@@ -1912,6 +2002,18 @@ export const TelemetryEvents = {
   //   - prior_facts_count / run_analysis_facts_count: number | null — STRUCTURAL
   //     counts. They separate "no facts in scope" from "facts, but not enough
   //     run_analysis ones" without naming a single one of them.
+  //   - wire_reason_carried: boolean | null — did the USER-FACING half ship?
+  //     `null` on every exit that puts no reason on the wire BY DESIGN (the
+  //     `emitted` case, and the caller's own three skips — see
+  //     `attachRunDeltaAbsenceReason` for why those stay operator-only).
+  //     `true`/`false` only on `refused`. ⚠ `false` IS THE ONE TO ALERT ON: the
+  //     reason exists and a user could have been told it, but the exit carried
+  //     no `analysis_ready` carrier to put it in. The carrier is CONDITIONAL
+  //     because the strict boundary leaves no declared top-level home, so a
+  //     conditional channel that reported nothing when it missed would be a
+  //     new silent-loss seam of exactly the shape this event was built to end.
+  //     A non-zero rate here is a finding about the CARRIER, not about the
+  //     producer — the refusal itself was correct.
   //
   // ⛔ REDACTION: reason code and counts ONLY. No label, quote or id — entity ids
   // in this estate are slug renderings of the user's own labels

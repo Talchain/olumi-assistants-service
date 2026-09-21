@@ -18,6 +18,8 @@
 import { log } from "../../utils/telemetry.js";
 import type { GoalConstraintT } from "../../schemas/assist.js";
 import { extractDeadline } from "./deadline-extractor.js";
+import { FALL_VERB, RISE_VERB, FALL_PLUS_SRC, RISE_PLUS_SRC } from "./motion-grammar.js";
+export { FALL_VERB, RISE_VERB } from "./motion-grammar.js";
 import { mapQualitativeToProxy } from "./qualitative-proxy.js";
 import { fuzzyMatchNodeId } from "../../validators/structural-reconciliation.js";
 import {
@@ -52,10 +54,34 @@ export interface ExtractedGoalConstraint {
   label: string;
   /** Source quote from brief */
   sourceQuote: string;
+  /** Internal amount-capture offsets [start, end) in the exact extractor input. Not a wire field. */
+  sourceAmountSpan?: { readonly start: number; readonly end: number };
   /** Extraction confidence */
   confidence: number;
   /** Provenance type */
   provenance: "explicit" | "inferred" | "proxy";
+  /**
+   * ⭐ BY-PRESENCE AUDIT OF A UNIT-**LABEL** REWRITE. NOT A VALUE CONVERSION.
+   *
+   * Stamped by `normaliseConstraintUnits` when it relabels a sub-unit `'%'`
+   * row to `'fraction'`. Every key is scoped to THIS RULE'S INPUT, never to
+   * the reader: see that function's docblock for why a stated-figure claim
+   * from that site is unknowable, and why `original_value`/`original_unit`
+   * are left unstamped as a pair.
+   *
+   * ⚠ ABSENT MEANS "NO REWRITE HAPPENED", which is a different fact from "a
+   * rewrite happened and was lost". Never defaulted.
+   */
+  provenance_unit_relabelled?: {
+    rule: "percent_label_to_fraction_label";
+    /**
+     * This rule's INPUT — identical to the sibling `value`, because the rule
+     * changes only the label. Never the reader's stated figure.
+     */
+    pre_normalisation_value: number;
+    /** The label this rule rewrote away from. Never the reader's stated unit. */
+    pre_normalisation_unit: string;
+  };
   /**
    * ROADMAP 2.855 — the FRAME this branch's `value` is minted in.
    *
@@ -94,6 +120,10 @@ export interface ExtractedGoalConstraint {
   };
 }
 
+/** Parsed numeric semantics only: deliberately carries no bindable target. */
+export type UnboundConstraintFrameEvidence = Pick<ExtractedGoalConstraint,
+  "operator" | "value" | "unit" | "valueFrame" | "sourceQuote" | "sourceAmountSpan">;
+
 export interface CompoundGoalExtractionResult {
   /** Primary goal target (from goal verbs) */
   primaryGoal?: {
@@ -104,6 +134,8 @@ export interface CompoundGoalExtractionResult {
   };
   /** Extracted constraints (from subordinate clauses) */
   constraints: ExtractedGoalConstraint[];
+  /** Pronoun-bound syntax may attest a frame, but cannot author a graph binding. */
+  unboundConstraintFrames: UnboundConstraintFrameEvidence[];
   /** Whether compound goals were detected */
   isCompound: boolean;
   /** Warnings about extraction */
@@ -243,8 +275,36 @@ function isDurativeOver(brief: string, matchIndex: number, matchText: string): b
 /** Extended value pattern fragment — captures numeric value with optional composite unit suffix */
 const _VAL = `${AMT}(?:\\s*(?:\\/\\s*(?:month|year|quarter|week|day|hr|hour))|\\s+(?:${WORD_UNIT_ALT}))?`;
 
+// Subject-first edit syntax. Capture the whole candidate, including an absent
+// or malformed subject, so looser patterns cannot turn its operator words into
+// a node name. Quoted labels may contain punctuation; bare labels stay within
+// their clause. This identifies syntax, not the speaker's authority to adopt it.
+const EDIT_BOUND_OPERATOR = String.raw`(?:at\s+or\s+(?:above|below)|at\s+(?:least|most)|above|below|under|over|to)`;
+const QUOTED_EDIT_SUBJECT = String.raw`(?:"[^"\r\n]+"|“[^”\r\n]+”|'[^'\r\n]+')`;
+const EDIT_BOUND_SUBJECT = String.raw`(?:${QUOTED_EDIT_SUBJECT}|(?!\s*${QUOTED_EDIT_SUBJECT})(?:(?!\b(?:keep(?:ing)?|set)\b|\b${EDIT_BOUND_OPERATOR}\s+${_VAL})[^\r\n.!?;,:])*?)`;
+const UNBOUND_EDIT_SUBJECT = /^(?:it|this|that|these|those|them)$/i;
+
+function explicitBoundTarget(raw: string | undefined): string | null {
+  const text = raw?.trim() ?? "";
+  const quoted = /^(?:"[^"\r\n]+"|“[^”\r\n]+”|'[^'\r\n]+')$/.test(text);
+  const name = (quoted ? text.slice(1, -1) : text).trim();
+  if (!name || /^(?:at|above|below|under|over)$/i.test(name)) return null;
+  if (!quoted && (
+    !/^[\p{L}\p{N}_][\p{L}\p{N}_'’-]*(?:[ \t]+[\p{L}\p{N}_][\p{L}\p{N}_'’-]*)*$/u.test(name)
+    || /\b(?:and|or)\b/i.test(name)
+    // A prevention construction is not a metric name. Keep its span claimed
+    // so legacy patterns cannot mint the opposite bound; the existing
+    // construction authority owns its direction and subject. Reuse the
+    // existing verb grammar, without excluding metric names containing "from".
+    || new RegExp(String.raw`\bfrom\s+(?:${FALL_PLUS_SRC}|${RISE_PLUS_SRC}|${RISE_VERB})$`, "i").test(name)
+  )) return null;
+  return name;
+}
+
 /** Upper bound constraint patterns (operator: <=) */
 const UPPER_BOUND_PATTERNS = [
+  new RegExp(String.raw`\bkeep(?:ing)?\s+(?<target>${EDIT_BOUND_SUBJECT})\s*\b(?:at\s+or\s+below|at\s+most|under|below)\s+(?<amount>${_VAL})`, "gid"),
+  new RegExp(String.raw`\bset\s+(?:the\s+)?maximum\s+(?<target>${EDIT_BOUND_SUBJECT})\s*\bto\s+(?<amount>${_VAL})`, "gid"),
   // "while keeping X under/below Y"
   new RegExp(String.raw`while\s+(?:keeping|maintaining)\s+(\w+(?:\s+\w+){0,3})\s+(?:under|below|at most)\s+(${AMT})`, "gi"),
   // "without exceeding Y"
@@ -299,7 +359,6 @@ const UPPER_BOUND_PATTERNS = [
  * the ceiling being re-derived from the floor's own words.
  */
 export const NEGATION_LEAD = String.raw`(?:without|must\s+not|cannot|can't|shouldn't|should\s+not|won't|will\s+not|never)`;
-export const FALL_VERB = String.raw`(?:drop(?:ping|s)?|fall(?:ing|s)?|slip(?:ping|s)?|dip(?:ping|s)?)`;
 const NEGATED_FLOOR_PATTERNS = [
   // "without dropping gross margin below 78%"
   new RegExp(
@@ -324,6 +383,61 @@ const NEGATED_FLOOR_PATTERNS = [
 ];
 
 /**
+ * NEGATED CEILINGS — "must not go above £1.5m" means X <= 1_500_000.
+ *
+ * ⚠ THE EXACT MIRROR OF `NEGATED_FLOOR_PATTERNS`, AND DELIBERATELY NOT A SECOND
+ * MECHANISM. Measured on staging tip `f31b84c8` (2026-09-17): FIVE of seven
+ * ceiling phrasings reached the wire with the operator REVERSED —
+ *
+ *   "Marketing must not go above £1.5m."             -> `>= 1500000`
+ *   "Marketing cannot go above £1.5m."               -> `>= 1500000`
+ *   "Spend must not rise above £1.5m."               -> `>= 1500000`
+ *   "Do not let marketing go above £1.5m."           -> `>= 1500000`
+ *   "Headcount should not climb above 50 engineers." -> `>= 50`
+ *
+ * — each stamped `provenance: "explicit"` at `confidence: 0.85`. Only `exceed`
+ * and `under` worked, because those two have their own upper-bound patterns.
+ *
+ * This is the SAME defect class as the negated floors above, on the LOWER-bound
+ * path instead of the upper one, and it was disclosed as a tripwire in
+ * `negated-bound-polarity.test.ts` describe D rather than fixed, because fixing
+ * it was a second symmetric change on a different code path. This is that
+ * change. The tripwire is deleted with it, which is the protocol its own
+ * docblock prescribed.
+ *
+ * An inverted ceiling is worse than a missing one in exactly the way an
+ * inverted floor is: the operator and value survive all 19 hops to ISL, so
+ * every option that HONOURS the user's limit is scored as violating it and
+ * every option that BREACHES it passes.
+ *
+ * As with the floors, the inner phrase ("marketing go above £1.5m") still
+ * matches the simple `X above Y` lower-bound pattern, so CLAIMING THE SPAN is
+ * the only way to stop the floor being re-derived from the ceiling's own words.
+ */
+const NEGATED_CEILING_PATTERNS = [
+  // "without letting marketing go above £1.5m"
+  new RegExp(
+    String.raw`${NEGATION_LEAD}\s+(?:let(?:ting)?\s+)?${RISE_VERB}\s+(\w+(?:\s+\w+){0,3})\s+(?:above|over|beyond)\s+(${AMT})`,
+    "gi",
+  ),
+  // "must not let marketing go above £1.5m"
+  new RegExp(
+    String.raw`${NEGATION_LEAD}\s+let(?:ting)?\s+(\w+(?:\s+\w+){0,3})\s+${RISE_VERB}\s+(?:above|over|beyond)\s+(${AMT})`,
+    "gi",
+  ),
+  // "marketing must not go above £1.5m" — the founder case, and the commonest.
+  new RegExp(
+    String.raw`(\w+(?:\s+\w+){0,3})\s+${NEGATION_LEAD}\s+${RISE_VERB}\s+(?:above|over|beyond)\s+(${AMT})`,
+    "gi",
+  ),
+  // subject-less: "without going above £1.5m"
+  new RegExp(
+    String.raw`${NEGATION_LEAD}\s+${RISE_VERB}\s+(?:above|over|beyond)\s+(${AMT})`,
+    "gi",
+  ),
+];
+
+/**
  * Lower bound constraint patterns (operator: >=).
  *
  * ⚠ `barePreposition` IS DECLARED AT THE PATTERN, NOT IN A SIDE LIST. It marks
@@ -336,6 +450,8 @@ const NEGATED_FLOOR_PATTERNS = [
  * parallel `Set` of patterns could not (CLAUDE.md trap 12).
  */
 const LOWER_BOUND_PATTERNS: ReadonlyArray<{ re: RegExp; barePreposition?: true }> = [
+  { re: new RegExp(String.raw`\bkeep(?:ing)?\s+(?<target>${EDIT_BOUND_SUBJECT})\s*\b(?:at\s+or\s+above|at\s+least|above)\s+(?<amount>${_VAL})`, "gid") },
+  { re: new RegExp(String.raw`\bset\s+(?:the\s+)?minimum\s+(?<target>${EDIT_BOUND_SUBJECT})\s*\bto\s+(?<amount>${_VAL})`, "gid") },
   // "while ensuring X stays above/at least Y"
   { re: new RegExp(String.raw`while\s+ensuring\s+(\w+(?:\s+\w+){0,3})\s+(?:stays?\s+)?(?:above|at least)\s+(${AMT})`, "gi") },
   // "maintain at least Y"
@@ -447,13 +563,13 @@ const NOUN_FORM_PATTERNS: ReadonlyArray<{
   //     turn on it: "£50,000 capital investment", "£2m capacity", "£40,000
   //     budgeting", "£5m capital", "12 capital projects". Every one is a
   //     PREFIX of a limit noun inside a longer, entirely descriptive word.
-  { re: new RegExp(String.raw`(${AMT_CURRENCY})\s+(${LIMIT_NOUN})\b`, "gi"), amount: 1, noun: 2 },
+  { re: new RegExp(String.raw`(${AMT_CURRENCY})\s+(${LIMIT_NOUN})\b`, "gid"), amount: 1, noun: 2 },
 
   // N2  "a hard limit of £250,000" · "The budget of £120,000"
   {
     re: new RegExp(
       String.raw`\b(?:${LIMIT_ADJECTIVE}\s+)?(${LIMIT_NOUN})\s+of\s+(${AMT_CURRENCY})`,
-      "gi",
+      "gid",
     ),
     amount: 2,
     noun: 1,
@@ -463,7 +579,7 @@ const NOUN_FORM_PATTERNS: ReadonlyArray<{
   {
     re: new RegExp(
       String.raw`(?:\b([A-Za-z][\w-]{2,})\s+)?\b(${LIMIT_NOUN})(?:\s+constraints?)?\s*:\s*(${AMT_CURRENCY})`,
-      "gi",
+      "gid",
     ),
     amount: 3,
     noun: 2,
@@ -474,7 +590,7 @@ const NOUN_FORM_PATTERNS: ReadonlyArray<{
   {
     re: new RegExp(
       String.raw`\b(?:${LIMIT_ADJECTIVE}\s+)?(${LIMIT_NOUN})(?:\s+for\s+(?:this|it|the\s+[\w-]+))?\s+is\s+(${AMT_CURRENCY})`,
-      "gi",
+      "gid",
     ),
     amount: 2,
     noun: 1,
@@ -571,6 +687,16 @@ const SOFT_INTENT_RE =
 const THIRD_PARTY_POSSESSION_RE =
   /\b([\w-]+)\s+(?:has|have|had)\s+(?:a|an|the|its|their|his|her)?\s*$/i;
 const FIRST_PERSON_SUBJECT = new Set(["we", "i", "our", "ours", "us", "my", "mine"]);
+
+function isDirectRestrictedFirstPersonPossession(head: string, sentence: string): boolean {
+  const directHead = head.trim();
+  // Keep the original sentence boundary: a colon or quote must not turn an
+  // embedded first-person statement into the user's own possession.
+  if (!sentence.trimStart().startsWith(directHead)) return false;
+  // "Only" restricts the available amount; "actually" asserts the correction.
+  // Other modifiers may express uncertainty or frequency, so remain unsupported.
+  return /^(?:i|we)\s+(?:actually\s+)?only\s+have(?:\s+(?:a|an|the))?$/i.test(directHead);
+}
 
 /**
  * "…said THEIR budget of £2m…" — the limit is explicitly somebody else's.
@@ -1045,9 +1171,66 @@ function extractNegatedFloorConstraints(brief: string): {
   return { constraints, claimed };
 }
 
+/**
+ * Extract negated CEILINGS, and report the spans they claim.
+ *
+ * The exact mirror of {@link extractNegatedFloorConstraints}, down to the
+ * confidence rule and the quote policy. The claim is the load-bearing half for
+ * the same reason: "must not go above £1.5m" contains "go above £1.5m", which
+ * the simple lower-bound pattern reads as a FLOOR. Without the claim the fix
+ * would emit the correct ceiling and the inverted floor side by side, and the
+ * model would carry both.
+ */
+function extractNegatedCeilingConstraints(brief: string): {
+  constraints: ExtractedGoalConstraint[];
+  claimed: Span[];
+} {
+  const constraints: ExtractedGoalConstraint[] = [];
+  const claimed: Span[] = [];
+
+  for (const pattern of NEGATED_CEILING_PATTERNS) {
+    pattern.lastIndex = 0;
+    let match;
+    while ((match = pattern.exec(brief)) !== null) {
+      const index = match.index ?? 0;
+      // A later, looser pattern must not re-emit a span an earlier one owns.
+      if (overlapsClaimed(index, match[0].length, claimed)) continue;
+
+      // Subject-less form: single capture group (the amount).
+      const hasSubject = match[2] !== undefined;
+      const targetName = hasSubject ? match[1] : "unspecified";
+      const valueStr = hasSubject ? match[2] : match[1];
+      if (!valueStr) continue;
+
+      const { value, unit } = parseValue(valueStr);
+      constraints.push({
+        targetName: targetName.trim(),
+        targetNodeId: generateNodeId(targetName.trim()),
+        operator: "<=",
+        value,
+        unit,
+        label: buildBoundDisplayName(targetName, "<=", valueStr),
+        // ⚠ THE QUOTE KEEPS THE NEGATION, for the reason the floor version
+        // gives: it is shown back to the user as the evidence for this
+        // constraint, and a quote with the word that reverses its meaning
+        // removed cannot support the row it is attached to.
+        sourceQuote: match[0].slice(0, 200),
+        confidence: hasSubject ? 0.85 : 0.6,
+        provenance: "explicit",
+        valueFrame: "level",
+      });
+      claimed.push([index, index + match[0].length]);
+    }
+  }
+
+  return { constraints, claimed };
+}
+
 function extractUpperBoundConstraints(
   brief: string,
-  claimed: readonly Span[] = [],
+  claimed: Span[],
+  pass: "edit" | "legacy",
+  unboundFrames: UnboundConstraintFrameEvidence[] = [],
 ): ExtractedGoalConstraint[] {
   const constraints: ExtractedGoalConstraint[] = [];
 
@@ -1055,8 +1238,12 @@ function extractUpperBoundConstraints(
     pattern.lastIndex = 0;
     let match;
     while ((match = pattern.exec(brief)) !== null) {
+      const editAmount = match.groups?.amount;
+      if ((editAmount !== undefined) !== (pass === "edit")) continue;
       // A negated floor already owns these words — see NEGATED_FLOOR_PATTERNS.
       if (overlapsClaimed(match.index ?? 0, match[0].length, claimed)) continue;
+
+      if (editAmount !== undefined) claimed.push([match.index, match.index + match[0].length]);
 
       // ── SUPPRESS RATHER THAN INVERT ────────────────────────────────────
       // A `below|under` reading whose clause is negated is a FLOOR wearing a
@@ -1073,7 +1260,7 @@ function extractUpperBoundConstraints(
       // Precedent: ROADMAP 2.653 drops rows whose operator is the inverse of
       // the sentence rather than repairing them.
       if (
-        /\b(?:below|under)\b/i.test(match[0]) &&
+        (editAmount !== undefined || /\b(?:below|under)\b/i.test(match[0])) &&
         NEGATION_OR_PREVENTION_LEAD.test(suppressionWindow(brief, match.index ?? 0, claimed) + " " + match[0])
       ) {
         continue;
@@ -1082,7 +1269,12 @@ function extractUpperBoundConstraints(
       let targetName: string;
       let valueStr: string;
 
-      if (!match[2]) {
+      if (editAmount !== undefined) {
+        const explicitTarget = explicitBoundTarget(match.groups?.target);
+        if (explicitTarget === null) continue;
+        targetName = explicitTarget;
+        valueStr = editAmount;
+      } else if (!match[2]) {
         // Subject-optional pattern: only 1 capture group (value only)
         valueStr = match[1];
         targetName = "unspecified";
@@ -1101,7 +1293,7 @@ function extractUpperBoundConstraints(
       const { value, unit } = parseValue(valueStr);
       const targetNodeId = generateNodeId(targetName.trim());
 
-      constraints.push({
+      const constraint: ExtractedGoalConstraint = {
         targetName: targetName.trim(),
         targetNodeId,
         operator: "<=",
@@ -1110,13 +1302,22 @@ function extractUpperBoundConstraints(
         // ROADMAP 2.653 (I-B): plain words + the user's own number text, never
         // the internal direction word. See `constraint-display-name.ts`.
         label: buildBoundDisplayName(targetName, "<=", valueStr),
-        sourceQuote: match[0].slice(0, 200),
+        sourceQuote: editAmount !== undefined ? match[0] : match[0].slice(0, 200),
+        ...(match.indices?.groups?.amount ? { sourceAmountSpan: {
+          start: match.indices.groups.amount[0], end: match.indices.groups.amount[1],
+        } } : {}),
         confidence: targetName === "unspecified" ? 0.6 : 0.85,
         provenance: "explicit",
         // Absolute LEVEL on the metric's own scale (the stated bound is the
         // target quantity itself, not a change to it).
         valueFrame: "level",
-      });
+      };
+      if (editAmount !== undefined && UNBOUND_EDIT_SUBJECT.test(targetName)) {
+        const { operator, value, unit, valueFrame, sourceQuote, sourceAmountSpan } = constraint;
+        unboundFrames.push({ operator, value, unit, valueFrame, sourceQuote, sourceAmountSpan });
+      } else {
+        constraints.push(constraint);
+      }
     }
   }
 
@@ -1128,7 +1329,9 @@ function extractUpperBoundConstraints(
  */
 function extractLowerBoundConstraints(
   brief: string,
-  claimed: readonly Span[] = [],
+  claimed: Span[],
+  pass: "edit" | "legacy",
+  unboundFrames: UnboundConstraintFrameEvidence[] = [],
 ): ExtractedGoalConstraint[] {
   const constraints: ExtractedGoalConstraint[] = [];
 
@@ -1137,8 +1340,12 @@ function extractLowerBoundConstraints(
     pattern.lastIndex = 0;
     let match;
     while ((match = pattern.exec(brief)) !== null) {
+      const editAmount = match.groups?.amount;
+      if ((editAmount !== undefined) !== (pass === "edit")) continue;
       // A negated floor already owns these words — see NEGATED_FLOOR_PATTERNS.
       if (overlapsClaimed(match.index ?? 0, match[0].length, claimed)) continue;
+
+      if (editAmount !== undefined) claimed.push([match.index, match.index + match[0].length]);
 
       // ── A TIME HORIZON IS NOT A FLOOR ──────────────────────────────────
       // "maximise engineering output over 12 months" states a DURATION. Read
@@ -1149,10 +1356,39 @@ function extractLowerBoundConstraints(
       if (spec.barePreposition && isDurativeOver(brief, match.index ?? 0, match[0])) {
         continue;
       }
+
+      // ── SUPPRESS RATHER THAN INVERT (the mirror of the ceiling path) ────
+      // An `above|over` reading whose clause is negated is a CEILING wearing a
+      // floor's words. `NEGATED_CEILING_PATTERNS` mints the correct row for the
+      // phrasings it recognises; for every phrasing it does not, the honest
+      // output is NOTHING.
+      //
+      // Identical reasoning to the `below|under` screen in
+      // `extractUpperBoundConstraints`, and deliberately the SAME two
+      // predicates (`NEGATION_OR_PREVENTION_LEAD` over `suppressionWindow`), so
+      // the two directions cannot drift apart. A missing constraint is a gap;
+      // an inverted one is scored by ISL and penalises precisely the options
+      // that honour the limit.
+      //
+      // ⚠ WE DO NOT ATTEMPT TO INVERT-CORRECTLY HERE. Guessing the operator
+      // from arbitrary English is the 2.714 failure mode, and CLAUDE.md trap
+      // 22f records this predicate family oscillating for four rounds when the
+      // fix in one direction was a new rule rather than a suppression.
+      if (
+        (editAmount !== undefined || /\b(?:above|over)\b/i.test(match[0])) &&
+        NEGATION_OR_PREVENTION_LEAD.test(suppressionWindow(brief, match.index ?? 0, claimed) + " " + match[0])
+      ) {
+        continue;
+      }
       let targetName: string;
       let valueStr: string;
 
-      if (!match[2]) {
+      if (editAmount !== undefined) {
+        const explicitTarget = explicitBoundTarget(match.groups?.target);
+        if (explicitTarget === null) continue;
+        targetName = explicitTarget;
+        valueStr = editAmount;
+      } else if (!match[2]) {
         // Subject-optional pattern: only 1 capture group (value only)
         valueStr = match[1];
         targetName = "unspecified";
@@ -1169,7 +1405,7 @@ function extractLowerBoundConstraints(
       const { value, unit } = parseValue(valueStr);
       const targetNodeId = generateNodeId(targetName.trim());
 
-      constraints.push({
+      const constraint: ExtractedGoalConstraint = {
         targetName: targetName.trim(),
         targetNodeId,
         operator: ">=",
@@ -1178,13 +1414,22 @@ function extractLowerBoundConstraints(
         // ROADMAP 2.653 (I-B): plain words + the user's own number text, never
         // the internal direction word. See `constraint-display-name.ts`.
         label: buildBoundDisplayName(targetName, ">=", valueStr),
-        sourceQuote: match[0].slice(0, 200),
+        sourceQuote: editAmount !== undefined ? match[0] : match[0].slice(0, 200),
+        ...(match.indices?.groups?.amount ? { sourceAmountSpan: {
+          start: match.indices.groups.amount[0], end: match.indices.groups.amount[1],
+        } } : {}),
         confidence: targetName === "unspecified" ? 0.6 : 0.85,
         provenance: "explicit",
         // Absolute LEVEL on the metric's own scale (the stated bound is the
         // target quantity itself, not a change to it).
         valueFrame: "level",
-      });
+      };
+      if (editAmount !== undefined && UNBOUND_EDIT_SUBJECT.test(targetName)) {
+        const { operator, value, unit, valueFrame, sourceQuote, sourceAmountSpan } = constraint;
+        unboundFrames.push({ operator, value, unit, valueFrame, sourceQuote, sourceAmountSpan });
+      } else {
+        constraints.push(constraint);
+      }
     }
   }
 
@@ -1260,12 +1505,14 @@ function extractNounFormConstraints(
       if (SOFT_INTENT_RE.test(sentence)) continue;
       // S5 — somebody else's. "Our main competitor has a budget of £2m."
       const possession = THIRD_PARTY_POSSESSION_RE.exec(head);
-      if (possession && !FIRST_PERSON_SUBJECT.has(possession[1].toLowerCase())) continue;
+      if (possession && !FIRST_PERSON_SUBJECT.has(possession[1].toLowerCase()) &&
+          !isDirectRestrictedFirstPersonPossession(head, sentence)) continue;
       // S6 — explicitly theirs. "…said their budget of £2m was typical."
       if (THIRD_PERSON_POSSESSIVE_RE.test(head)) continue;
 
       const valueStr = match[spec.amount];
       if (!valueStr) continue;
+      const amountSpan = match.indices?.[spec.amount];
       const noun = spec.noun ? match[spec.noun] : "budget";
       const targetName = resolveLimitTarget(noun, spec.qualifier ? match[spec.qualifier] : undefined);
 
@@ -1302,6 +1549,7 @@ function extractNounFormConstraints(
         //
         // `sentence` is already derived above for S2/S3/S4; no new derivation.
         sourceQuote: sentence.trim().slice(0, 200),
+        ...(amountSpan ? { sourceAmountSpan: { start: amountSpan[0], end: amountSpan[1] } } : {}),
         // Below the 0.85 the verb forms carry: the noun states the limit but
         // the commitment is read off the surrounding clause, which is a weaker
         // reading than a verb that states it outright.
@@ -2003,9 +2251,24 @@ export function extractCompoundGoals(
   // pass had nothing left to drop. It was deleted rather than shipped as
   // unreachable code with a test that passed vacuously. The property is guarded
   // by the mutant that removes the claim itself (M7), which REDs.
-  const { constraints: negatedFloors, claimed } = extractNegatedFloorConstraints(brief);
-  const upperBound = extractUpperBoundConstraints(brief, claimed);
-  const lowerBound = extractLowerBoundConstraints(brief, claimed);
+  const { constraints: negatedFloors, claimed: floorClaimed } =
+    extractNegatedFloorConstraints(brief);
+  // ⚠ NEGATED CEILINGS RUN HERE, BEFORE THE LOWER BOUNDS, FOR THE MIRROR-IMAGE
+  // REASON: "must not go above £1.5m" contains "go above £1.5m", which the
+  // simple `X above Y` pattern reads as a FLOOR. Claiming the span first is
+  // what stops the inverted floor being re-derived from the ceiling's own
+  // words. The two claim sets are UNIONED and every later path receives the
+  // union, so a span owned by either direction is owned by both.
+  const { constraints: negatedCeilings, claimed: ceilingClaimed } =
+    extractNegatedCeilingConstraints(brief);
+  const claimed: Span[] = [...floorClaimed, ...ceilingClaimed];
+  // A complete edit owns its quoted subject before either direction's looser
+  // patterns can read an opposite-direction bound inside that subject.
+  const unboundConstraintFrames: UnboundConstraintFrameEvidence[] = [];
+  const upperEdits = extractUpperBoundConstraints(brief, claimed, "edit", unboundConstraintFrames);
+  const lowerEdits = extractLowerBoundConstraints(brief, claimed, "edit", unboundConstraintFrames);
+  const upperBound = [...upperEdits, ...extractUpperBoundConstraints(brief, claimed, "legacy")];
+  const lowerBound = [...lowerEdits, ...extractLowerBoundConstraints(brief, claimed, "legacy")];
   // NOUN forms ("a £50,000 cap"). Runs AFTER the bound patterns and claims
   // nothing: where a verb form already read the same words, `deduplicateConstraints`
   // keeps the stricter row, and the verb form's higher confidence wins a tie.
@@ -2017,6 +2280,7 @@ export function extractCompoundGoals(
   // Combine and deduplicate
   let constraints = deduplicateConstraints([
     ...negatedFloors,
+    ...negatedCeilings,
     ...upperBound,
     ...lowerBound,
     ...nounForm,
@@ -2056,6 +2320,7 @@ export function extractCompoundGoals(
   return {
     primaryGoal,
     constraints,
+    unboundConstraintFrames,
     isCompound,
     warnings,
   };
@@ -2076,6 +2341,58 @@ export function extractCompoundGoals(
  * original `value > 0` guard silently skipped negative fractions, which
  * would have left them mislabelled unit "%" (double-encoding risk in the
  * exact way this fix is closing) instead of "fraction".
+ *
+ * ⭐⭐⭐ THIS FUNCTION CANNOT KNOW THE FIGURE THE READER STATED, AND MUST NOT
+ * CLAIM TO — the P0 that removed `provenance_unit_normalised` from this site.
+ *
+ * A reader wrote *"keep monthly churn under 4%"*; the canvas showed **"≤
+ * 0.04%"**. This site used to stamp
+ * `provenance_unit_normalised: { rule: 'percent_to_fraction', original_value:
+ * c.value, original_unit: '%' }`. But the guard one line below fires ONLY when
+ * `0 < |value| < 1` — i.e. only when the value is ALREADY a fraction — so
+ * `original_value` was, BY CONSTRUCTION OF THE GUARD, always the post-relabel
+ * fraction and never the reader's figure.
+ *
+ * ⛔ TWO QUESTIONS UNDER ONE NAME (trap 21). The field answers *"what was this
+ * value before my relabel ran?"*. Its declared consumers read it as *"what did
+ * the reader actually state?"* — `@talchain/schemas` fixtures exemplify it as
+ * `original_value: 15` beside `original_unit: '%'` (a whole-number percent this
+ * guard can never produce), and the UI's `canvas/utils/goalConstraintText.ts`
+ * says so in terms: *"`original_value` is the number the reader actually
+ * stated — 110, not 1.1"*. That read path OUTRANKS the `source_quote`
+ * fallback, so the false stamp did not merely mislead: it SUPPRESSED the
+ * honest rendering (quoting the reader's own sentence) and printed a number a
+ * hundred times too small in its place.
+ *
+ * ⛔ THE REMEDY IS NOT TO MULTIPLY BY 100. The consumer refuses that in terms
+ * this producer must respect: *"Converting `0.04` to `4%` would be this surface
+ * deciding what scale a number is in — the exact mechanism behind the 100×
+ * defect ... **Never infer scale from magnitude.**"* The same applies here.
+ * By the time this runs the model has emitted `0.04`; the reader's "4" survives
+ * only inside `sourceQuote`, as TEXT, and recovering it would be a
+ * natural-language magnitude predicate — the class this estate has repeatedly
+ * failed to bound (traps 22 / 22b / 22f).
+ *
+ * ⭐ SO THIS SITE STATES ONLY WHAT IT KNOWS. `provenance_unit_relabelled`
+ * records this rule's own INPUT under names scoped to this rule
+ * (`pre_normalisation_value` / `pre_normalisation_unit`). An absent claim a
+ * consumer can detect beats a present claim that lies.
+ *
+ * ⛔⛔ `original_value` AND `original_unit` ARE ONE PAIR AND MOVE TOGETHER.
+ * Unstamping the value and leaving the unit would be a half-fix that the next
+ * consumer to pair them regenerates in full: `original_unit: '%'` has the
+ * IDENTICAL two-questions-one-name defect (true of the reader's phrasing,
+ * false of the value beside it), and the consumer's `formatLimitMagnitude`
+ * switches on `kind === 'percent'` and appends `%`. So `0.04` + a surviving
+ * `'%'` is `≤ 0.04%` again, from a different pair of hands. Both fields are
+ * left unstamped, and the contract fixture is the independent evidence that
+ * they are one pair: it carries BOTH, and is coherent only under the
+ * stated-figure reading.
+ *
+ * ⚠ `provenance_unit_normalised` REMAINS DECLARED in the schema and carried
+ * by-presence through `toGoalConstraints`: it is a published contract field
+ * whose meaning is sound, and a producer that genuinely knows the stated figure
+ * may stamp it. This function is simply not such a producer.
  */
 export function normaliseConstraintUnits(
   constraints: ExtractedGoalConstraint[],
@@ -2085,11 +2402,11 @@ export function normaliseConstraintUnits(
       return {
         ...c,
         unit: "fraction",
-        provenance_unit_normalised: {
-          rule: "percent_to_fraction",
-          original_value: c.value,
-          original_unit: c.unit,
-        } as any,
+        provenance_unit_relabelled: {
+          rule: "percent_label_to_fraction_label",
+          pre_normalisation_value: c.value,
+          pre_normalisation_unit: c.unit,
+        },
       };
     }
     return c;
@@ -2119,6 +2436,12 @@ export function toGoalConstraints(
     deadline_metadata: c.deadlineMetadata,
     ...((c as any).provenance_unit_normalised
       ? { provenance_unit_normalised: (c as any).provenance_unit_normalised }
+      : {}),
+    // Same by-presence projection as the sibling above, and for the same
+    // reason: a field absent from this literal never reaches
+    // `graph.goal_constraints` however faithfully the mint site stamps it.
+    ...(c.provenance_unit_relabelled
+      ? { provenance_unit_relabelled: c.provenance_unit_relabelled }
       : {}),
   }));
 }

@@ -64,6 +64,7 @@ export async function adminLLMOutputRoutes(app: FastifyInstance): Promise<void> 
       stored_at: new Date(entry.storedAt).toISOString(),
       model: entry.model ?? null,
       prompt_version: entry.promptVersion ?? null,
+      ...(entry.draftLineage ? { draft_lineage: entry.draftLineage } : {}),
     });
   });
 

@@ -98,9 +98,29 @@ describe('Phase 1.5 — Phase 1 regression', () => {
   beforeEach(() => setTestSink(() => {}));
   afterEach(() => setTestSink(null));
 
+  // ⚠ THIS CASE ALONE TAKES A NON-RUN MESSAGE, and the reason is the one the
+  // BASE_PAYLOAD docblock above states in terms: that sentence was chosen
+  // because it was "measured inert to every deterministic pre-route". As of
+  // the FIRST-RUN FALLBACK (turn-executor, proposal-convergence seam) it is no
+  // longer inert for a turn whose router returns TEXT — a user who types "Run
+  // the analysis." and gets prose back now gets a run, which is the whole
+  // point of that change. Every OTHER case in this file keeps BASE_PAYLOAD,
+  // because their mocked routers return a tool_call and the fallback's
+  // `type !== 'tool_call'` guard cannot reach them — which is also the
+  // evidence that the guard is narrow.
+  //
+  // The assertions below are UNCHANGED. Only the sentence moves, and it moves
+  // to one carrying no run instruction, no edit verb and no interrogative, so
+  // it is inert to the pre-routes for the same reason the original was.
+  const CONVERSE_PAYLOAD = makeMessagePayload({
+    turn_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    scenario_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    message: 'My board meets on Thursday.',
+  });
+
   it('text_only converse still works with graph threaded', async () => {
     const routingAdapter = mockAdapter(textResult('Here is what I see in your model.'));
-    const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-reg-conv', {
+    const { response, telemetry } = await runTurnExecutor(CONVERSE_PAYLOAD, 'req-reg-conv', {
       routingAdapter,
       graphState: mkConfiguredGraph(),
     });

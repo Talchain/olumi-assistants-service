@@ -69,6 +69,11 @@
  */
 
 import { hasMutationSignal } from './analytical-intent.js';
+import { hasConstraintMutationSignal } from './constraint-mutation-signal.js';
+import {
+  resolveOrdinaryTextAuthority,
+  type OrdinaryTextAuthority,
+} from './ordinary-text-authority.js';
 import { isAnalyticalQuestion } from './analytical-question-guard.js';
 import { isStateQueryQuestionShape } from './state-query-guard.js';
 import {
@@ -77,59 +82,20 @@ import {
 } from '../../orchestrator/routing/edit-graph-intent-regex.js';
 
 /**
- * Constraint-shaped mutation phrasings the canonical
- * `MUTATION_SIGNAL_PATTERNS` does not carry.
+ * ⭐ THE CONSTRAINT-SHAPED SIGNAL NOW LIVES IN A LEAF, AND IS RE-EXPORTED HERE.
  *
- * ⚠ EVERY PATTERN REQUIRES A DEONTIC FRAME **AND** A DIGIT. Dropping either
- * requirement flips this module's fail-safe direction (see the header): a
- * bare `stays below` would grant a warrant on "there's a 70% chance churn
- * stays below 3%", which is the calibration forecast #831 and ROADMAP 2.627
- * exist to keep OUT of the write path.
- *
- * Kept as a separate export rather than appended to
- * `MUTATION_SIGNAL_PATTERNS` deliberately: that list has six read-side
- * consumers (run-comparison, stale-rerun, vague-edit, post-analysis-label,
- * no-analysis, post-analysis-advice) whose short-circuit behaviour inverts on
- * a mutation hit, and widening it would change all six at once for reasons
- * none of them asked for. The union assertion in the spec keeps this list a
- * strict SUPERSET, which is the only relationship the warrant needs.
+ * `CONSTRAINT_MUTATION_SIGNAL_PATTERNS` and `hasConstraintMutationSignal` moved
+ * VERBATIM to `./constraint-mutation-signal.js` so that
+ * `./ordinary-text-authority.js` can subordinate its veto to an unambiguous
+ * instruction without this module and that one importing each other. Re-exported
+ * rather than relocated-and-rewired: every existing importer, including this
+ * module's own specs, keeps its import path, and there is still exactly ONE
+ * definition of the predicate.
  */
-export const CONSTRAINT_MUTATION_SIGNAL_PATTERNS: readonly RegExp[] = [
-  // "Keep churn below 3%." · "Hold spend under 50k." · "Maintain uptime above 99%."
-  /\b(?:keep|hold|maintain)\b[^.?!\n]{0,60}\b(?:below|under|above|over|beneath|beyond|at\s+or\s+(?:below|above)|within)\b[^.?!\n]{0,24}\d/i,
-  // "Churn must be at most 3%." · "It has to be at least 1%." · "must stay under 3%"
-  /\b(?:must|should|needs?\s+to|has\s+to|have\s+to)\b[^.?!\n]{0,40}\b(?:at\s+most|at\s+least|no\s+more\s+than|no\s+less\s+than|no\s+higher\s+than|no\s+lower\s+than|below|under|above|over|beneath)\b[^.?!\n]{0,24}\d/i,
-  // "Churn can't exceed 3%." · "must not go above 3%" · "shouldn't rise above 3%"
-  /\b(?:can(?:'|’)?t|cannot|can\s+not|must\s+not|mustn(?:'|’)?t|should\s+not|shouldn(?:'|’)?t|won(?:'|’)?t|may\s+not)\b[^.?!\n]{0,24}\b(?:exceed|surpass|go\s+(?:above|below|over|under|past)|rise\s+(?:above|over|past)|fall\s+below|drop\s+below|climb\s+(?:above|over))\b[^.?!\n]{0,24}\d/i,
-  // "Limit churn to 3%." · "Cap spend at 50k." · "Constrain churn to 3%."
-  /\b(?:limit|cap|restrict|constrain|bound|ceiling|floor)\b[^.?!\n]{0,60}\b(?:to|at|of)\b[^.?!\n]{0,24}\d/i,
-  // "Make sure churn stays below 3%." · "Ensure uptime remains above 99%."
-  /\b(?:make\s+sure|ensure|guarantee)\b[^.?!\n]{0,60}\b(?:stays?|remains?|sits?|is|are)\b[^.?!\n]{0,40}\b(?:below|under|above|over|beneath|at\s+or\s+(?:below|above))\b[^.?!\n]{0,24}\d/i,
-  // "Don't let churn rise above 3%." · "Never let spend exceed 50k."
-  /\b(?:do\s*n(?:o|')?t|don\s*'?\s*t|do\s+not|never)\s+(?:let|allow)\b[^.?!\n]{0,60}\b(?:exceed|surpass|go\s+(?:above|below|over|under)|rise\s+(?:above|over)|fall\s+below|drop\s+below|get\s+(?:above|below))\b[^.?!\n]{0,24}\d/i,
-  // Bare imperative constraint: "No more than 3% churn." · "At most 3% churn."
-  /^\s*(?:no\s+(?:more|less|higher|lower)\s+than|at\s+most|at\s+least|up\s+to)\b[^.?!\n]{0,40}\d/im,
-  // ⭐ THE CONVERSATIONAL CONSTRAINT — how users actually state a bound in
-  // chat, and the shape the repo's OWN journey fixtures use:
-  //   "We can't spend more than £50,000 on marketing."
-  //   "Yes, we don't want to spend more than £50k on this."
-  // A negated capability/desire plus a comparative bound plus a number. It is
-  // an instruction, not a report, because of the negation — "we spent more than
-  // £50k" carries no negation and does not match.
-  /\b(?:do\s*n(?:o|')?t|don\s*'?\s*t|do\s+not|never|can(?:'|’)?t|cannot|can\s+not|won(?:'|’)?t|will\s+not|must\s+not|mustn(?:'|’)?t)\b[^.?!\n]{0,60}\b(?:more|less|higher|lower|greater|bigger|smaller)\s+than\b[^.?!\n]{0,24}[£$€]?\s?\d/i,
-];
-
-/**
- * Does the message carry a CONSTRAINT-shaped mutation instruction? Narrow by
- * construction — see the fail-safe note above.
- */
-export function hasConstraintMutationSignal(message: string): boolean {
-  if (typeof message !== 'string') return false;
-  for (const re of CONSTRAINT_MUTATION_SIGNAL_PATTERNS) {
-    if (re.test(message)) return true;
-  }
-  return false;
-}
+export {
+  CONSTRAINT_MUTATION_SIGNAL_PATTERNS,
+  hasConstraintMutationSignal,
+} from './constraint-mutation-signal.js';
 
 /**
  * Edit verbs the V5 mutating handlers serve that `EDIT_GRAPH_POSITIVE_REGEX`
@@ -296,8 +262,41 @@ const WARRANT_EXTRA_EDIT_VERB_PATTERNS: readonly RegExp[] = [
  * PR #1107 after five variants across two independent corpora. The standing
  * ruling is that no further punctuation-only or lexical rule will settle it.
  * If you find yourself writing that predicate, STOP and report.
+ *
+ * ⭐⭐ TERM D — ORDINARY-TEXT AUTHORITY. THE SECOND PARAMETER IS A VERDICT THIS
+ * FUNCTION DOES NOT COMPUTE, AND THAT IS THE POINT.
+ *
+ * The product performed the SAME model mutation whether the user gave an
+ * explicit edit instruction or merely asked for advice, because every term above
+ * answers *"do these words describe a change?"* and none answers *"did the user
+ * ASK me to make it?"*. Measured at this tip, Term 3 alone grants a full mutation
+ * warrant to **"Do you think the churn rate should be lower?"** — an advice
+ * question, granted authority to write.
+ *
+ * `routing/ordinary-text-authority.ts` answers that second question ONCE, from
+ * the estate's already-ratified deliberation classifier
+ * (`classifyUnappliedEditFrame`) over a message quote-masked by the GRAPH'S OWN
+ * node labels, and subordinates itself to the canonical and constraint lists so
+ * a MIXED edit (advice + an explicit edit in one message) keeps its authority.
+ * It is passed IN rather than called here for two reasons, both structural:
+ *
+ *   · the mask needs the model's node labels, which this module has no business
+ *     loading; and
+ *   · `detectMutationWarrant` resolves it ONLY AFTER `confirm_resume` and
+ *     `typed_mutation_chip` have returned, so the veto is subordinate to the two
+ *     stronger sources BY CONSTRUCTION rather than by an ordering somebody has
+ *     to remember (see `hasStrongerThanTextWarrant`).
+ *
+ * ⚠ THE DEFAULT IS `'granted'`, DELIBERATELY. A caller that does not resolve the
+ * question gets exactly the behaviour it had before this term existed — including
+ * `hasAffirmativeMutationOutsideCandidates` below, which passes a REMAINDER
+ * string with the prohibitive clause already removed and must keep answering the
+ * old question about it.
  */
-export function hasMutationWarrantSignal(message: string): boolean {
+export function hasMutationWarrantSignal(
+  message: string,
+  ordinaryTextAuthority: OrdinaryTextAuthority = 'granted',
+): boolean {
   if (typeof message !== 'string' || message.trim().length === 0) return false;
   // Term 0 — the user explicitly withheld authority AND no canonical mutation
   // signal survives the prohibition. The two negated conjuncts are not decoration:
@@ -316,9 +315,38 @@ export function hasMutationWarrantSignal(message: string): boolean {
   ) {
     return false;
   }
+  // Term D — the user asked what we THINK and no unambiguous instruction
+  // survives that frame. Read AFTER Term 0 and BEFORE the lexical terms: an
+  // explicit "do not change the model" outranks everything including this, and
+  // this outranks vocabulary, because it is the only term that asks whether the
+  // user AUTHORISED a write rather than whether their words DESCRIBE one.
+  // Both are vetoes, so the relative order of Term 0 and Term D cannot change
+  // any outcome — it is written this way to be READ in that order.
+  if (ordinaryTextAuthority === 'withheld_deliberation') return false;
   if (hasMutationSignal(message)) return true;
   if (hasConstraintMutationSignal(message)) return true;
   return isEditRequestShape(message);
+}
+
+/**
+ * ⭐ THE TWO WARRANT SOURCES THAT OUTRANK ORDINARY TEXT, IN ONE PLACE.
+ *
+ * `detectMutationWarrant` below answers this first and returns before any text
+ * is read; `handlers/edit-graph-dispatch.ts` asks the same question so its own
+ * ordinary-text conjunct cannot second-guess a chip click or a confirmed hold.
+ *
+ * ⚠ ONE LIST, TWO CONSUMERS — not two orderings that have to be kept in sync.
+ * Two lists standing for one concept is this estate's dominant defect, and the
+ * whole reason this seam needed fixing is that a deliberation classifier and a
+ * write decision lived in different places without knowing about each other.
+ */
+export function hasStrongerThanTextWarrant(
+  input: Pick<MutationWarrantInput, 'turnSource' | 'chipActionType' | 'isConfirmResume'>,
+  mutationActionTypes: ReadonlySet<string>,
+): boolean {
+  if (input.isConfirmResume) return true;
+  const isChipTurn = input.turnSource === 'chip_click' || input.turnSource === 'chip';
+  return isChipTurn && isMutationChipActionType(input.chipActionType, mutationActionTypes);
 }
 
 /**
@@ -1104,6 +1132,22 @@ export interface MutationWarrantInput {
    * `consumedPendingAction`, never guessed from text.
    */
   readonly isConfirmResume: boolean;
+  /**
+   * ⭐ The resolved node labels of the model this turn is about, used to
+   * QUOTE-MASK the message before the deliberative frame is read.
+   *
+   * ⚠ LOAD-BEARING, AND MEASURED. Of 1,564 mutating turns, THREE carry a
+   * deliberative frame and TWO of those are FALSE POSITIVES — a user's graph
+   * contains a node labelled `"What should we do?"` and the frame pattern
+   * matches inside the QUOTED LABEL. Quote-masked, the true number is 1 of
+   * 1,564, and that one IS the harm. Without these labels this term would tax
+   * two legitimate mutations to catch one.
+   *
+   * Optional because most callers hold no graph at the point they ask. Omitting
+   * it masks nothing, which withholds MORE rather than less — the fail-safe
+   * direction this module declares in its header.
+   */
+  readonly modelNodeLabels?: readonly string[];
 }
 
 /**
@@ -1137,7 +1181,16 @@ export function detectMutationWarrant(
   if (isChipTurn && isMutationChipActionType(input.chipActionType, mutationActionTypes)) {
     return { granted: true, source: 'typed_mutation_chip' };
   }
-  if (hasMutationWarrantSignal(input.message)) {
+  // ⭐ ORDINARY TEXT ONLY FROM HERE — and the subordination is STRUCTURAL.
+  // Both stronger sources have already returned above, so Term D cannot veto a
+  // typed mutation chip or a confirmed hold. `hasStrongerThanTextWarrant`
+  // states that same precedence as a value, for the edit-lane consumer that
+  // cannot rely on this function's control flow.
+  const ordinaryTextAuthority = resolveOrdinaryTextAuthority({
+    message: input.message,
+    modelNodeLabels: input.modelNodeLabels ?? [],
+  });
+  if (hasMutationWarrantSignal(input.message, ordinaryTextAuthority)) {
     return { granted: true, source: 'message_signal' };
   }
   return { granted: false };
@@ -1194,6 +1247,72 @@ export function detectMutationWarrant(
  * SAY SO rather than let the user believe the old row is gone. The
  * remove/replace capability itself is ROADMAP 2.659, not this fix.
  */
+/**
+ * The closing PROMISE, named once so no reader has to re-spell it (trap 12).
+ *
+ * ⛔ IT IS HONOURABLE ONLY WHERE THE SAME TURN PERSISTS AN
+ * `apply_proposed_change` PENDING. Acceptance is handled by
+ * `tryShortConfirmResume`, which replays a STORED `inline_patch`; with nothing
+ * stored, a "yes" has nothing to resume and the user has been told the product
+ * was ready to act. Use `withdrawUnresumableOfferClose` wherever the emitting
+ * branch has declined to persist one.
+ */
+export const MUTATION_OFFER_CLOSING_PROMISE = 'Say the word and I will make it.';
+
+/**
+ * What the product says instead when it has decided NOT to keep the change.
+ *
+ * It still opens with the no-write disclosure (INV-3 above is untouched), still
+ * asserts nothing about what the user did or did not ask for, and closes on a
+ * move the user can actually make rather than on a promise nothing can honour.
+ * The estate already ratified this shape for the sibling branch that refuses an
+ * under-specified offer — `buildIncompleteOfferRefusalText`, PR #1491.
+ *
+ * ⛔⛔ IT MAKES NO CLAIM ABOUT SESSION STATE, AND THAT IS THE LOAD-BEARING PART.
+ * The first version of this constant closed "…so nothing is waiting on your
+ * reply…". That is a claim about the pendings THE COMMIT PERSISTS, and the only
+ * set the caller can see is `demotionPending` — the pendings THIS BRANCH minted.
+ * They are not the same set:
+ *
+ *   `turn-executor.ts:1695`    every `commitTurn` threads
+ *                              `priorPendingActions: context.most_recent_pending_actions`
+ *   `commit.ts:1289-1310`      `finalPendings = [...chipDerivedPending, ...survivingPrior]`
+ *   `commit.ts:565-571`        the hash-invalidation rule requires a NON-EMPTY
+ *                              `currentGraphHash`; the `no_graph_hash` branch
+ *                              has none, so a prior proposal is never
+ *                              invalidated there
+ *
+ * MEASURED, three-turn journey, one instrument: T1 offers with a graph and mints
+ * an `apply_proposed_change` · T2 has no usable graph, hits
+ * `emit_refused:no_graph_hash`, persists `["apply_proposed_change"]` and SAID
+ * "nothing is waiting on your reply" · T3's bare "yes" returned "Applying: Add
+ * this limit. Added constraint: Customer Churn Rate must be at most 7%." and
+ * wrote the graph. A denial with a write behind it — which moves the user's
+ * model of what the product will do, where the promise it replaced merely did
+ * nothing.
+ *
+ * ⛔ AND FEEDING THE GUARD THE PERSISTED SET IS WORSE, not better. MEASURED on
+ * the same journey with `[...demotionPending, ...context.most_recent_pending_actions]`
+ * passed to `withdrawUnresumableOfferClose`: the length test then passes, so the
+ * promise is KEPT — turn 2 said "a limit keeping "Customer Churn Rate" at or
+ * below 7 … Say the word and I will make it." and the "yes" returned "Added
+ * constraint: Customer Acquisition Cost must be at most 500 GBP." A promise
+ * about one change, honoured by writing another, with a receipt. That is the
+ * `d8a908b3` class exactly. The guard's boolean answers "is anything resumable?"
+ * and the sentence's referent is "THIS change" (trap 21) — do not reconcile them
+ * by widening the set. Widening it would also have to re-derive
+ * `computeSurvivingPriorPendingsDetailed` (five rules, `nowMs` and
+ * `consumedPendingRefs` included) at a site that runs BEFORE the commit, which
+ * is the hand-maintained mirror this module exists to avoid (trap 12).
+ *
+ * A sentence that makes no claim about a set cannot be wrong about one. Pinned
+ * by the discriminating pair and the journey in
+ * `__tests__/offer-without-pending-wiring.test.ts`.
+ */
+export const MUTATION_OFFER_UNRESUMABLE_CLOSE =
+  'I could not put it forward as something you can confirm — tell me what ' +
+  'you would like changed and I will take another look.';
+
 export function buildMutationWarrantDemotionText(
   changeDescription: string,
   residualDisclosure: string | null,
@@ -1201,8 +1320,76 @@ export function buildMutationWarrantDemotionText(
   const opening =
     `Nothing has been changed. I want to confirm this with you before I edit ` +
     `the model, and ${changeDescription} looks like it would help. ` +
-    `Say the word and I will make it.`;
+    `${MUTATION_OFFER_CLOSING_PROMISE}`;
   return residualDisclosure === null ? opening : `${opening} ${residualDisclosure}`;
+}
+
+/**
+ * Withdraw the closing promise from a demotion text whose branch persisted no
+ * resumable pending.
+ *
+ * ⭐ DERIVED, NEVER MIRRORED — and the reason is measured history. PR #1491
+ * ruled this exact class for ONE branch and hand-wrote the remedy into it; the
+ * three siblings beside it kept the promise for another three weeks. A caller
+ * that decides the copy by restating the persistence decision will drift from
+ * it again the next time a branch is added. Callers pass the PENDINGS THEY ARE
+ * ABOUT TO COMMIT, so the copy cannot disagree with what was kept.
+ *
+ * ⛔ NOT A WIDER RECOGNISER. Commit `d8a908b3` withdrew that recommendation: a
+ * held change replays entirely from its stored patch and never re-reads the
+ * message, so widening the confirmation predicate would apply the OFFER's value
+ * and silently discard one the user restated — with a receipt. The defect is
+ * that the offer was made, not that the acceptance was refused.
+ *
+ * ⚠ SCOPED TO THE V5 DEMOTION GATE BY ITS CALLERS, deliberately. Two lanes, two
+ * questions (trap 21) — this must not be applied globally.
+ *
+ * ⛔ `persistedPendings` IS THIS BRANCH'S SET, NOT THE COMMIT'S. Callers pass
+ * `demotionPending`. The commit persists `demotionPending ∪ survivors(prior)`,
+ * so a non-empty result here does NOT mean the session holds nothing. That is
+ * exactly why `MUTATION_OFFER_UNRESUMABLE_CLOSE` states nothing about session
+ * state — see its docblock for the measurement, and for why widening this
+ * parameter makes the product promise one change and write another.
+ *
+ * ── EVERY CALLER OF `buildMutationWarrantDemotionText`, AND ITS STATUS ──────
+ * Derived at this tip with `rg -a` over `src/` (contrast control:
+ * `buildWarrantDemotion`, 4 files — the instrument is not blind).
+ *
+ *   `turn-executor.ts:11476`        `!demotion.ok` — GUARDED by this function
+ *   `turn-executor.ts:11486`        `no_graph_hash` — GUARDED by this function
+ *   `turn-executor.ts:11510`        emit success / refused — GUARDED (a success
+ *                                   keeps the promise: `demotionPending` is
+ *                                   non-empty, so the guard is a no-op)
+ *   `edit-graph-dispatch.ts:3873`   EMITTER, deliberately LEFT ALONE. Ruled
+ *                                   (PR #1583) and pinned by
+ *                                   `edit-graph-dispatch-ordinary-text-authority.test.ts:177`:
+ *                                   there the handler really did produce a
+ *                                   mutation the gate withheld, so a restated
+ *                                   instruction IS honourable through the
+ *                                   ordinary edit path.
+ *   `explicit-constraint-edit.ts:72` NOT AN EMITTER — a RECOGNISER. It rebuilds
+ *                                   the offer text and grants a write on
+ *                                   `message.startsWith(rendered)`
+ *                                   (`:64-79`), needing no stored pending
+ *                                   because it rebuilds the proposal from the
+ *                                   message. It therefore renders the text WITH
+ *                                   the promise, and a user who copies back a
+ *                                   WITHDRAWN offer can no longer match it —
+ *                                   which is correct, since a withdrawn offer
+ *                                   was never put forward. Nothing here changes
+ *                                   what it renders. ⚠ STATUS: coupled,
+ *                                   correct-by-construction, UNWITNESSED — it
+ *                                   needs a granted warrant, a single resolved
+ *                                   target and a matching quantity/unit on the
+ *                                   restating turn. Recorded, not fixed.
+ */
+export function withdrawUnresumableOfferClose(
+  text: string,
+  persistedPendings: readonly unknown[],
+): string {
+  if (persistedPendings.length > 0) return text;
+  if (!text.includes(MUTATION_OFFER_CLOSING_PROMISE)) return text;
+  return text.replace(MUTATION_OFFER_CLOSING_PROMISE, MUTATION_OFFER_UNRESUMABLE_CLOSE);
 }
 
 /**

@@ -50,6 +50,7 @@
  * another eligible relationship, but user copy makes no unsupported superlative.
  */
 
+import { composeEdgeIdentity } from '../compose/edge-address.js';
 import { orderFragilityPriorityRows } from '../../orchestrator/shared/fragile-edge-authority.js';
 
 /** Why no edge was selected. Closed enum — the telemetry payload's `refusal_reason`. */
@@ -258,13 +259,17 @@ function hasUsableFlipTarget(currentMean: number | null, flipMean: number | null
   );
 }
 
-/** The composite separator the graph-edit path accepts (`parseEdgeId`). */
-const EDGE_IDENTITY_SEPARATOR = '→'; // →
-
-/** Compose the `${fromId}→${toId}` identity `parseEdgeId` round-trips. */
-export function composeEdgeIdentity(fromId: string, toId: string): string {
-  return `${fromId}${EDGE_IDENTITY_SEPARATOR}${toId}`;
-}
+/**
+ * Compose the `${fromId}→${toId}` identity `parseEdgeId` round-trips.
+ *
+ * ⭐ RE-EXPORTED, NOT RE-DECLARED. The separator and the composer now have ONE
+ * owner (`compose/edge-address.ts`), because this module and
+ * `grounded-counter-case.ts` each carried their own copy of the constant — a
+ * hand-maintained mirror of an identity vocabulary that had already grown to
+ * three spellings estate-wide (CLAUDE.md trap 12). Existing importers of this
+ * name are unaffected.
+ */
+export { composeEdgeIdentity };
 
 const NO_CANDIDATE: FragileEdgeDecision = Object.freeze({
   selected: null,

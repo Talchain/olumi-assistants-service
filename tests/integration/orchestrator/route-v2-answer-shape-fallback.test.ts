@@ -75,6 +75,26 @@ const { deriveAnswerTextFromShape } = await import(
 
 const SCENARIO_ID = '77777777-7777-4777-8777-777777777777';
 
+/**
+ * THE COLLAPSE FLOOR (18 Sep 2026) — why the shaped fixtures below are long.
+ *
+ * `_answer_shape` is a WIRE DIRECTIVE telling the UI to collapse the answer.
+ * CEE now issues it only above `ANSWER_SHAPE_COLLAPSE_FLOOR_CHARS` (3,000 —
+ * the deployed UI's own `CLAMP_CHAR_THRESHOLD`, below which the free-text body
+ * renders whole anyway). This file's subject is the SYNTHESIS MECHANIC — which
+ * dispatch paths reach the egress synthesiser, and what it extracts — so the
+ * cases that expect a shape are padded past the floor and every assertion
+ * about extraction and byte-equality is unchanged.
+ *
+ * ONE LINE, no blank line inside it: the pad must land wholly in `detail` and
+ * must not perturb headline extraction, bullet extraction, or the
+ * exactly-one-`\n\n` assertion in the byte-equality case.
+ *
+ * The floor itself — both directions, both egress sites, and the boundary
+ * character — is pinned in `route-v2-answer-shape-collapse-floor.test.ts`.
+ */
+const FLOOR_PAD = ` ${'Every figure here is read straight from your own model. '.repeat(60).trim()}`;
+
 // Intent-null / text_only prose: a run result WITHOUT `answerShape` but WITH
 // the `answerProse` scope flag — the model's own converse/text_only ANSWER
 // prose, the F1 target the egress fallback SHOULD shape.
@@ -180,7 +200,7 @@ describe('route-v2 — deterministic `_answer_shape` fallback (ROADMAP 1.132, F1
   // assertion FAILS RED before the fix and PASSES after.
   it('intent-null prose (single paragraph, no blank lines) → `_answer_shape` synthesised at egress', async () => {
     const prose =
-      'Team size is the biggest driver of the outcome. Raise it to twelve before deciding anything else.';
+      `Team size is the biggest driver of the outcome. Raise it to twelve before deciding anything else.${FLOOR_PAD}`;
     runTurnExecutorMock.mockResolvedValue(mkProseRun(prose));
     const { status, body } = await postTurn(app, 'dddddddd-1111-4ddd-8ddd-dddddddddd01');
     expect(status).toBe(200);
@@ -188,7 +208,9 @@ describe('route-v2 — deterministic `_answer_shape` fallback (ROADMAP 1.132, F1
     expect(body._answer_shape).toBeDefined();
     expect(body._answer_shape.headline).toBe('Team size is the biggest driver of the outcome.');
     expect(body._answer_shape.bullets).toEqual([]);
-    expect(body._answer_shape.detail).toBe('Raise it to twelve before deciding anything else.');
+    expect(body._answer_shape.detail).toBe(
+      `Raise it to twelve before deciding anything else.${FLOOR_PAD}`,
+    );
   });
 
   // ── Byte-equality invariant on the HARD case ───────────────────────────
@@ -197,7 +219,7 @@ describe('route-v2 — deterministic `_answer_shape` fallback (ROADMAP 1.132, F1
   // the F1 progressive-disclosure win. Byte-equality holds by identity.
   it('byte-equality invariant: derive(_answer_shape) === assistant_text exactly (hard case)', async () => {
     const prose =
-      'Team size is the biggest driver of the outcome. Raise it to twelve before deciding anything else.';
+      `Team size is the biggest driver of the outcome. Raise it to twelve before deciding anything else.${FLOOR_PAD}`;
     runTurnExecutorMock.mockResolvedValue(mkProseRun(prose));
     const { status, body } = await postTurn(app, 'dddddddd-1111-4ddd-8ddd-dddddddddd02');
     expect(status).toBe(200);
@@ -206,7 +228,7 @@ describe('route-v2 — deterministic `_answer_shape` fallback (ROADMAP 1.132, F1
     expect(deriveAnswerTextFromShape(body._answer_shape)).toBe(body.assistant_text);
     // The reflow: the original single-space join became a blank-line break.
     expect(body.assistant_text).toBe(
-      'Team size is the biggest driver of the outcome.\n\nRaise it to twelve before deciding anything else.',
+      `Team size is the biggest driver of the outcome.\n\nRaise it to twelve before deciding anything else.${FLOOR_PAD}`,
     );
     // A single-paragraph prose has zero `\n\n`; the shaped text has exactly one.
     expect(prose.includes('\n\n')).toBe(false);
@@ -216,14 +238,14 @@ describe('route-v2 — deterministic `_answer_shape` fallback (ROADMAP 1.132, F1
   // ── Bullets extracted in order ─────────────────────────────────────────
   it('prose with already-bulleted lines → bullets extracted in order (cap 3), rest in detail', async () => {
     const prose =
-      'Here are the top factors to weigh.\n- Team size dominates.\n- Budget is second.\nWeigh them before you decide.';
+      `Here are the top factors to weigh.\n- Team size dominates.\n- Budget is second.\nWeigh them before you decide.${FLOOR_PAD}`;
     runTurnExecutorMock.mockResolvedValue(mkProseRun(prose));
     const { status, body } = await postTurn(app, 'dddddddd-1111-4ddd-8ddd-dddddddddd03');
     expect(status).toBe(200);
     expect(body._answer_shape).toBeDefined();
     expect(body._answer_shape.headline).toBe('Here are the top factors to weigh.');
     expect(body._answer_shape.bullets).toEqual(['Team size dominates.', 'Budget is second.']);
-    expect(body._answer_shape.detail).toBe('Weigh them before you decide.');
+    expect(body._answer_shape.detail).toBe(`Weigh them before you decide.${FLOOR_PAD}`);
     // Byte-equality still holds by construction.
     expect(deriveAnswerTextFromShape(body._answer_shape)).toBe(body.assistant_text);
   });
@@ -279,7 +301,7 @@ describe('route-v2 — deterministic `_answer_shape` fallback (ROADMAP 1.132, F1
   // Byte-equality holds by construction; the F1 win (blank-line reflow) lands.
   it('multi-sentence intent-null PROSE (answerProse: true) → `_answer_shape` synthesised, byte-equality holds', async () => {
     const prose =
-      'Retention is the lever with the most leverage here. Fix churn before you touch pricing. The causal path runs straight through it.';
+      `Retention is the lever with the most leverage here. Fix churn before you touch pricing. The causal path runs straight through it.${FLOOR_PAD}`;
     runTurnExecutorMock.mockResolvedValue(mkProseRun(prose));
     const { status, body } = await postTurn(app, 'dddddddd-2222-4ddd-8ddd-dddddddddd03');
     expect(status).toBe(200);
@@ -289,7 +311,7 @@ describe('route-v2 — deterministic `_answer_shape` fallback (ROADMAP 1.132, F1
     );
     expect(body._answer_shape.bullets).toEqual([]);
     expect(body._answer_shape.detail).toBe(
-      'Fix churn before you touch pricing. The causal path runs straight through it.',
+      `Fix churn before you touch pricing. The causal path runs straight through it.${FLOOR_PAD}`,
     );
     // Byte-equality by construction: derive(shape) === the wire assistant_text.
     expect(deriveAnswerTextFromShape(body._answer_shape)).toBe(body.assistant_text);

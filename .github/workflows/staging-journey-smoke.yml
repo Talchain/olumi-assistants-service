@@ -9,21 +9,15 @@ name: Staging Journey Smoke
 # `continue-on-error`, scheduled weekly, and pointed at PRODUCTION — an
 # environment that is out of scope. `cee-diagnostics` is dead the same way.
 #
-# This workflow is deliberately built WITHOUT every mechanism that made those
-# two silent:
-#   - NO `continue-on-error`      → a red step fails the run.
-#   - NO `if: vars.X == 'true'`   → cannot be switched off by leaving a
-#                                    variable unset. There is no off switch.
-#   - NO schedule                 → runs on the push that deploys, every time.
-#   - NOT production              → targets staging; the script itself refuses
-#                                    to run against the production hostname.
-#
-# These properties are ASSERTED BY A TEST that parses THIS FILE
-# (tests/unit/ci/staging-journey-smoke.test.ts). The test derives the facts
-# from the YAML rather than keeping a second hand-maintained copy of them, so
-# re-introducing `continue-on-error` or a `vars.` gate turns the test suite red.
-# Deleting this file also turns it red. Disabling this alarm is possible — but
-# it cannot be done SILENTLY.
+# A reviewed release exception can hold paid calls only for the named Core /
+# Drafting batch: set CORE_DRAFTING_PAID_HOLD=20260920 and mark its staging merge
+# commits [core-drafting-20260920]. Unset or any other value keeps the alarm on.
+# Other pushes and explicit exact-SHA dispatch are unaffected. A held job is
+# SKIPPED, not evidence of a successful journey. Clear the hold after the batch's
+# triggered jobs reach terminal state; changing the variable triggers no run.
+# Required non-model CI, freshness and journey assertions are not bypassed.
+# The tests pin this bounded exception and still reject unrelated variable gates,
+# continue-on-error, loss of the push trigger, or a production target.
 #
 # HOW IT CATCHES THE OUTAGE
 #   Render auto-deploys `staging` on push. This workflow starts on that same
@@ -59,10 +53,23 @@ concurrency:
 
 jobs:
   journey:
+    if: >-
+      ${{ !(vars.CORE_DRAFTING_PAID_HOLD == '20260920' && (github.event_name == 'push' && github.ref == 'refs/heads/staging' && contains(github.event.head_commit.message, '[core-drafting-20260920]'))) }}
     name: Live user journey against deployed staging
     runs-on: ubuntu-latest
-    # Freshness poll (15 min) + two turns (~1 min) + headroom.
-    timeout-minutes: 25
+    # Freshness poll (15 min) + the SAMPLED journey (12 min budget) + headroom.
+    # The two maxima are effectively exclusive — a freshness poll that runs to
+    # its timeout means the deploy did not ship, and that path returns BEFORE
+    # Phase 2 — so this is headroom, not expected runner cost. A measured
+    # sample costs ~50-97s and k defaults to 5.
+    #
+    # This number is NOT hand-maintained against the script: a test derives the
+    # script's own SMOKE_FRESHNESS_TIMEOUT_MS and SMOKE_JOURNEY_BUDGET_MS
+    # defaults and REDS if their sum ever reaches it. Being killed by the job
+    # timeout is the worst failure available here — the process dies before the
+    # rate, the census and the floor verdict are printed, so a run that measured
+    # four healthy samples looks exactly like one that measured nothing.
+    timeout-minutes: 32
     steps:
       # SPARSE on purpose. This gate runs a dependency-free .mjs that reads NO
       # repository files (verified: zero `import` / `readFileSync` / `require(`

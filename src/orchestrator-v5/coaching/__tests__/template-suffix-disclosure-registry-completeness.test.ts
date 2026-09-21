@@ -31,8 +31,11 @@
  *   - SUBDIRECTORIES of `coaching/` (there are none today, so this limit is
  *     currently vacuous — it will not stay that way by itself).
  *   - other naming conventions: a grammar not suffixed `_RE_SRC` is invisible.
- * As measured, the union is EXACTLY complete: 10 exported = 4 registered +
- * 6 reasoned-exclusions.
+ * As measured 21 Sep 2026, the union is EXACTLY complete: 12 exported =
+ * 6 registered + 6 reasoned-exclusions. (This sentence is a MEASUREMENT, not an
+ * authority — it read "10 = 4 + 6" until the participation family landed and
+ * again until the separability family did, and nothing REDs when it drifts. The
+ * assertions below are derived; re-derive this line rather than trusting it.)
  *
  * ⚠ AND WHAT THIS GUARD CANNOT SEE AT ALL: a family accounted for WRONGLY.
  * Moving a registered entry onto the exclusion list with a plausible reason
@@ -40,6 +43,28 @@
  * admitting it and the salvage stops rescuing it. That is behaviour, not
  * bookkeeping, and it is pinned per-family — see
  * `routing/__tests__/unset-option-effect-salvage-registration.test.ts`.
+ *
+ * ⭐⭐ AND THE THIRD THING NEITHER HALF COULD SEE, ADDED 21 Sep 2026: A FAMILY
+ * ACCOUNTED FOR CORRECTLY AND REGISTERED IN THE WRONG POSITION.
+ *
+ * `TEMPLATE_SUFFIX_ONLY_REGEX` compiles this array IN ORDER, so the registry
+ * order is not cosmetic — it must equal the `run_analysis` handler's own append
+ * order or a composed summary is a shape the allowlist does not recognise, and
+ * the user silently receives the bare template. Until now that correspondence
+ * was pinned only by two per-family proxies that never mention the handler at
+ * all: one relative (`unset-option-effect-salvage-registration.test.ts`: "after
+ * the intake family") and one ABSOLUTE (`analysis-participation-disclosure.test.ts`:
+ * "rides LAST"). The absolute one is a hand-maintained mirror by construction —
+ * it can only hold while its family is the newest — and it RED on the very next
+ * family to arrive (the withheld-separability disclosure, #1650) although
+ * NOTHING WAS IN THE WRONG POSITION: the handler appended it last and the
+ * registry registered it last, in agreement.
+ *
+ * So the last describe block below derives the append order from
+ * `tools/handlers/run-analysis.ts` ON DISK and asserts the registry equals it.
+ * That is strictly stronger than either proxy: it constrains EVERY family's
+ * position, and it is the only guard here that binds the registry to the
+ * handler rather than to itself.
  */
 import { describe, it, expect } from 'vitest';
 import { readdirSync, readFileSync } from 'node:fs';
@@ -151,6 +176,131 @@ describe('registered entries are bound to the real export BY IDENTITY, not by la
       >;
       expect(mod[name], `${name} is not exported by ${file as string}`).toBeTypeOf('string');
       expect(mod[name]).toBe(source);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ⭐⭐ ORDER — the registry must MIRROR the handler's append order.
+// ---------------------------------------------------------------------------
+
+const HANDLER_PATH = resolve(COACHING_DIR, '..', 'tools', 'handlers', 'run-analysis.ts');
+const HANDLER_SRC = readFileSync(HANDLER_PATH, 'utf8');
+
+/**
+ * The ordered `${…}` slot names the handler composes the summary from, read
+ * from its source. DERIVED, so a slot added, removed or reordered in
+ * `run-analysis.ts` changes this array without anyone remembering to.
+ *
+ * Scoped deliberately to the suffix run AFTER `${headline ?? template}` — that
+ * head is the verdict, not a disclosure, and `compose-site-verdict-consumption.
+ * drift.test.ts` already pins the whole line verbatim.
+ */
+function extractHandlerAppendOrder(): readonly string[] {
+  const line = /const summary = `\$\{headline \?\? template\}((?:\$\{\w+\})*)`;/.exec(HANDLER_SRC);
+  if (line === null) return [];
+  return [...(line[1] as string).matchAll(/\$\{(\w+)\}/g)].map((m) => m[1] as string);
+}
+
+const HANDLER_APPEND_ORDER = extractHandlerAppendOrder();
+
+/**
+ * slot name in `run-analysis.ts` → the disclosure family it emits, and how that
+ * family is accounted for.
+ *
+ * ⚠ THIS IS A HAND-WRITTEN MAP, AND IT IS ALLOWED TO BE ONE ONLY BECAUSE IT
+ * CANNOT DRIFT SILENTLY (trap 12): the first assertion below asserts its slot
+ * list is EXACTLY what the handler source composes, so a new suffix slot REDs
+ * here by name before it can be mis-registered. What a derivation cannot supply
+ * is the slot→family binding — the handler names a local `const`, not a
+ * grammar — so it is stated, and then bounded on both sides.
+ */
+const SLOT_FAMILY: ReadonlyArray<readonly [string, string, 'registered' | 'excluded']> = [
+  ['scaffoldDisclosure', 'SCAFFOLD_ANY_DISCLOSURE_RE_SRC', 'registered'],
+  ['constraintGapDisclosure', 'CONSTRAINT_GAP_DISCLOSURE_RE_SRC', 'registered'],
+  ['intakeDisclosure', 'INTAKE_OPTION_DISCLOSURE_RE_SRC', 'registered'],
+  // The one slot the handler appends that the template branch must NOT admit:
+  // the tail asserts a LEADER and only ships when `headline !== null`, so
+  // `template + tail` is a composition the handler can never emit. Its reason
+  // is recorded on TEMPLATE_SUFFIX_DISCLOSURE_EXCLUSIONS and asserted below.
+  ['objectiveContradictionDisclosure', 'OBJECTIVE_CONTRADICTION_RE_SRC', 'excluded'],
+  ['unsetOptionEffectDisclosure', 'UNSET_OPTION_EFFECT_DISCLOSURE_RE_SRC', 'registered'],
+  ['participationDisclosure', 'ANALYSIS_PARTICIPATION_DISCLOSURE_RE_SRC', 'registered'],
+  ['separabilityDisclosure', 'SEPARABILITY_DISCLOSURE_RE_SRC', 'registered'],
+];
+
+describe('the handler-source extractor can see (controls first — trap 13)', () => {
+  /**
+   * An order assertion built on an extractor that returned NOTHING agrees with
+   * everything: `[] === []` is the shape of two instruments that both read
+   * zero. These controls make that impossible to ship silently.
+   */
+  it('extracts a NON-EMPTY append order (the assertion below is not vacuous)', () => {
+    expect(
+      HANDLER_APPEND_ORDER.length,
+      `Extracted no summary slots from ${HANDLER_PATH}. Either the composition ` +
+        `line moved or its shape changed — do NOT read the order assertions below ` +
+        `as green until this is non-zero.`,
+    ).toBeGreaterThan(0);
+  });
+
+  it('positive control — a slot known to be composed is found', () => {
+    expect(HANDLER_APPEND_ORDER).toContain('scaffoldDisclosure');
+  });
+
+  it('negative control — it does not invent a slot the handler does not compose', () => {
+    expect(HANDLER_APPEND_ORDER).not.toContain('definitelyNotARealDisclosure');
+  });
+
+  it('contrast control — the extractor is bound to the SUFFIX run, not the whole file', () => {
+    // `headline` and `template` are composed on the same line and are NOT
+    // suffixes. If either appears here the scope has silently widened.
+    expect(HANDLER_APPEND_ORDER).not.toContain('headline');
+    expect(HANDLER_APPEND_ORDER).not.toContain('template');
+  });
+});
+
+describe('⭐⭐ ORDER — the registry mirrors the run_analysis handler append order', () => {
+  it('every suffix slot the handler composes is accounted for, in the handler’s own order', () => {
+    expect(
+      HANDLER_APPEND_ORDER,
+      `The summary composition in ${HANDLER_PATH} does not match SLOT_FAMILY. A new ` +
+        `disclosure suffix must be added to SLOT_FAMILY at the SAME POSITION the handler ` +
+        `appends it, and then registered (or reasoned-excluded) in that position too — ` +
+        `TEMPLATE_SUFFIX_ONLY_REGEX compiles the registry IN ORDER, so a family registered ` +
+        `out of position makes the egress reject the composed summary and the user ` +
+        `silently receives the bare template.`,
+    ).toEqual(SLOT_FAMILY.map(([slot]) => slot));
+  });
+
+  it('⭐ the registry order EQUALS the handler order, with the reasoned exclusions removed', () => {
+    const expected = SLOT_FAMILY.filter(([, , d]) => d === 'registered').map(([, name]) => name);
+    expect(
+      TEMPLATE_SUFFIX_DISCLOSURE_GRAMMARS.map((g) => g.name),
+      `TEMPLATE_SUFFIX_DISCLOSURE_GRAMMARS is not in the handler's append order. This is ` +
+        `the property the per-family pins were proxies for, and the only one that is ` +
+        `actually load-bearing.`,
+    ).toEqual(expected);
+  });
+
+  it('a slot mapped as `excluded` really is on the reasoned-exclusion list', () => {
+    const excludedNames = new Set(TEMPLATE_SUFFIX_DISCLOSURE_EXCLUSIONS.map((e) => e.name));
+    const mappedExcluded = SLOT_FAMILY.filter(([, , d]) => d === 'excluded').map(([, n]) => n);
+    // Pin the precondition: a map with no `excluded` rows would satisfy the
+    // loop below by iterating nothing (trap 13b).
+    expect(mappedExcluded.length).toBeGreaterThan(0);
+    for (const name of mappedExcluded) {
+      expect(
+        excludedNames.has(name),
+        `${name} is composed by the handler and mapped 'excluded' here, but carries no ` +
+          `reasoned exclusion. 'excluded' may not be used to park an unaccounted family.`,
+      ).toBe(true);
+    }
+  });
+
+  it('every family named in the map really is an exported grammar (no invented names)', () => {
+    for (const [slot, name] of SLOT_FAMILY) {
+      expect(SCANNED.has(name), `${slot} → ${name}, which nothing exports`).toBe(true);
     }
   });
 });

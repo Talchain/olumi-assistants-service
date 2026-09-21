@@ -62,11 +62,13 @@ import {
   ANALYSIS_CONTEXT_INSTRUCTION,
   PROVISIONAL_FIGURES_INSTRUCTION,
   MARGIN_MEANING_INSTRUCTION,
+  SIMULATION_SHARE_MEANING_INSTRUCTION,
   CONTEXT_BUDGET_INSTRUCTION,
   FACTOR_VALUES_INSTRUCTION,
   OLDER_RELEVANT_FACTS_INSTRUCTION,
   RECENT_CHANGES_INSTRUCTION,
   RUN_DELTA_INSTRUCTION,
+  STATED_OBJECTIONS_INSTRUCTION,
 } from '../../routing/route-with-tool-use.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 // ONE shared extractor. This gate and the context-policy conformance anchor read
@@ -146,6 +148,11 @@ const CODE_OWNED_INSTRUCTIONS = [
   ['PROVISIONAL_FIGURES_INSTRUCTION', PROVISIONAL_FIGURES_INSTRUCTION],
   // Emitted by the same condition that serialises a non-null `analysis.margin`.
   ['MARGIN_MEANING_INSTRUCTION', MARGIN_MEANING_INSTRUCTION],
+  // What a simulation SHARE is. Emitted by the SAME condition that
+  // serialises the shares — the sibling rule to `margin` above — and stood
+  // down on the provisional arm, where `PROVISIONAL_FIGURES_INSTRUCTION`
+  // already carries the identical ratified sentence.
+  ['SIMULATION_SHARE_MEANING_INSTRUCTION', SIMULATION_SHARE_MEANING_INSTRUCTION],
   // Prompt coverage. Emitted by the SAME condition that serialises
   // `context_budget`, so a reduced graph/analysis projection cannot be read as
   // proof of absence. The maximal fixture reaches this through real graph
@@ -183,6 +190,14 @@ const CODE_OWNED_INSTRUCTIONS = [
   // to catch, live inside the gate. REGISTRATION_COMPLETENESS below now derives
   // the emission set from the source, so this list cannot fall short again.
   ['OLDER_RELEVANT_FACTS_INSTRUCTION', OLDER_RELEVANT_FACTS_INSTRUCTION],
+  // Standing objections. Emitted by the SAME condition that puts
+  // `stated_objections` on the pack. Code-owned for the reason every sibling
+  // above is: the served V5 routing prompt is an operator-managed PMS row, so
+  // this repo cannot sanction a new field there. The field is the user's OWN
+  // words about a finding they reject, and an unsanctioned field of that kind
+  // is the worst of the class — the model would be free to read an objection
+  // as a correction and quietly agree.
+  ['STATED_OBJECTIONS_INSTRUCTION', STATED_OBJECTIONS_INSTRUCTION],
   // Factor value state. Emitted by the SAME condition that puts `factor_values`
   // on the pack — same reasoning as its seven siblings above. PR #1122 shipped
   // the FIELD with no instruction at all; registering here puts the block under
@@ -362,9 +377,38 @@ function runAnalysisFact(
 }
 
 /** Newest-first, exactly how the turn loader delivers `prior_facts`. */
+/**
+ * FIXTURE_COMPLETENESS: `stated_objections` is a schema-declared key, so the
+ * maximal fixture must populate it or this gate narrows its own scope.
+ *
+ * ⚠ THE STATEMENT IS DELIBERATELY PROSE-LENGTH, and that is not cosmetic — it
+ * is what makes THE GATE cover this field at all. `proseLeaves` only collects
+ * strings of >= 4 words; a one-word objection scores ZERO prose leaves and the
+ * gate would pass the field by testing nothing. That is the same fixture-
+ * contingent blindness measured on `factor_values` above, and a real user's
+ * stated reason is prose by construction — the contract bounds it at 2000
+ * characters precisely because people write sentences.
+ *
+ * ⚠ APPENDED OLDEST (last) so the two-newest `run_analysis` selection that
+ * `run_delta` depends on is untouched by this addition.
+ */
+const FINDING_DISSENT_FACT = {
+  fact_type: 'finding_dissent',
+  fact_version: 1,
+  noop: false,
+  result: {
+    finding_id: 'strengthen:robustness',
+    analysis_id: 'hash-b',
+    statement:
+      'The ranking is called fragile because the salary estimate moves it, but our local salary band is fixed by a pay framework we renegotiate only in April, so that input cannot move this year.',
+    provenance: 'user_set',
+  },
+} as unknown;
+
 const RUN_DELTA_PRIOR_FACTS = [
   runAnalysisFact([['opt_local', 0.62], ['opt_offshore', 0.38]], '222', 'hash-b', '2026-07-25T00:00:00Z'),
   runAnalysisFact([['opt_local', 0.41], ['opt_offshore', 0.59]], '111', 'hash-a', '2026-07-24T00:00:00Z'),
+  FINDING_DISSENT_FACT,
 ];
 
 const ANALYSIS = {

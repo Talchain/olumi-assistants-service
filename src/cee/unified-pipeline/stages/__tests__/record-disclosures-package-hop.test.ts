@@ -49,6 +49,7 @@ vi.mock('../../../structure/index.js', () => ({
   detectStructuralWarnings: vi.fn(),
   detectUniformStrengths: vi.fn(),
   detectStrengthClustering: vi.fn(),
+  detectGoalLayerStrengthClustering: vi.fn(),
   detectSameLeverOptions: vi.fn(),
   detectOptionSimilarity: vi.fn().mockReturnValue({ detected: false, critiques: [], warnings: [], validationIssues: [] }),
   detectMissingBaseline: vi.fn(),
@@ -81,6 +82,7 @@ import {
   detectStructuralWarnings,
   detectUniformStrengths,
   detectStrengthClustering,
+  detectGoalLayerStrengthClustering,
   detectSameLeverOptions,
   detectMissingBaseline,
   detectGoalNoBaselineValue,
@@ -162,6 +164,7 @@ function setupMocks(): void {
   (detectStructuralWarnings as any).mockReturnValue({ warnings: [], uncertainNodeIds: [] });
   (detectUniformStrengths as any).mockReturnValue({ detected: false });
   (detectStrengthClustering as any).mockReturnValue({ detected: false });
+  (detectGoalLayerStrengthClustering as any).mockReturnValue({ detected: false });
   (detectSameLeverOptions as any).mockReturnValue({ detected: false });
   (detectMissingBaseline as any).mockReturnValue({ detected: false });
   (detectGoalNoBaselineValue as any).mockReturnValue({ detected: false });
@@ -195,5 +198,20 @@ describe('REV930D — package hop carries record_disclosures onto the V1 payload
     const ctx = makeCtx({ recordDisclosures: undefined });
     await runStagePackage(ctx);
     expect((ctx.ceeResponse as any)?.record_disclosures).toBeUndefined();
+  });
+
+  it('joins lineage to the actual package graph and constraint disposition without exposing it', async () => {
+    const receipt = { version: 1, projection: { constraints: [{ node_id: 'not-authoritative' }] } };
+    const ctx = makeCtx({ goalConstraints: [] });
+    ctx.llmMeta.raw_llm_text = '{"stated_items":[],"claims":[]}';
+    ctx.llmMeta.raw_draft_lineage = receipt;
+    await runStagePackage(ctx);
+    expect(buildLLMRawTrace).toHaveBeenCalledWith(ctx.requestId, ctx.llmMeta.raw_llm_text, ctx.graph, expect.objectContaining({
+      storeOutput: true,
+      draftLineage: { receipt, goalConstraints: [] },
+    }));
+    expect(ctx.goalConstraints).toEqual([]);
+    expect(JSON.stringify(ctx.ceeResponse)).not.toContain('not-authoritative');
+    expect(JSON.stringify(ctx.ceeResponse)).not.toContain('raw_draft_lineage');
   });
 });

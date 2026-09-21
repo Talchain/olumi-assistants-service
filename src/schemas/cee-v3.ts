@@ -16,6 +16,7 @@ import { z } from "zod";
 import type { ValidationMetadata } from "../cee/validation-pipeline/types.js";
 import { GoalConstraintSchema } from "./assist.js";
 import { CausalClaimsArraySchema } from "./causal-claims.js";
+import { GoalThresholdCapProvenanceSchema } from "../utils/goal-threshold-cap.js";
 import { ValidationWarningSchema as SharedValidationWarningSchema, CIL_WARNING_CODES, GoalThresholdFrame, OBSERVED_STATE_SOURCE_LITERALS } from "@talchain/schemas";
 import { CAUSAL_CLAIMS_WARNING_CODES } from "./causal-claims.js";
 import { CANONICAL_ID_REGEX } from "../cee/utils/id-normalizer.js";
@@ -210,6 +211,27 @@ export const NodeV3 = z.object({
   /** Normalisation denominator (e.g., 1000 for "800/1000 = 0.8") */
   goal_threshold_cap: z.number().optional(),
   /**
+   * WHICH RULE PRODUCED `goal_threshold_cap` — see
+   * `GOAL_THRESHOLD_CAP_PROVENANCE` (utils/goal-threshold-cap.ts).
+   *
+   * On `target_derived_headroom` the denominator is `raw * 1.25`, so
+   * `goal_threshold = raw / cap` is the CONSTANT 0.8 for every target and
+   * carries no information about the goal; the other two rules take their
+   * denominator from outside the target and do. A consumer cannot fail closed
+   * on a denominator it cannot see.
+   *
+   * ⚠ THIS DECLARATION IS LOAD-BEARING, NOT DOCUMENTATION — the same warning
+   * `goal_threshold_frame` carries below. `NodeV3` is a plain `z.object`
+   * ("declared fields only — unknown fields stripped"), so an undeclared
+   * provenance is SILENTLY DELETED by `GraphV3.safeParse` on the run path and
+   * the stamp would reach nothing, with no error anywhere. Proven by a positive
+   * control in `__tests__/goal-threshold-cap-provenance-wire-survival.test.ts`.
+   *
+   * ABSENCE MEANS UNATTESTED — never defaulted. CEE mints it; no model authors
+   * it (`CEE_MINTED_GOAL_FIELDS`).
+   */
+  goal_threshold_cap_provenance: GoalThresholdCapProvenanceSchema.optional(),
+  /**
    * The FRAME `goal_threshold` is stated in (ROADMAP 2.258, schemas 0.31.0).
    * Always `'level'` from CEE — see `CEE_GOAL_THRESHOLD_FRAME`.
    *
@@ -258,6 +280,61 @@ export const NodeV3 = z.object({
    * e.g. { "0": "Developers", "1": "Tech Lead" } for "Team Structure (0=Developers, 1=Tech Lead)".
    * Node-level field (not in observed_state) — describes label encoding, not observed state. */
   encoding_map: z.record(z.string(), z.string()).optional(),
+  /**
+   * COLLAB Track A — whether this node participates in the CALCULATION.
+   *
+   * `'retained_excluded'` — the node is kept in the model with its wording,
+   * identity and authorship intact, is still visible to coaching, and is
+   * DELIBERATELY EXCLUDED from the analysis. `'included'` is ordinary
+   * participation.
+   *
+   * ⚠ THIS DECLARATION IS LOAD-BEARING, NOT DOCUMENTATION — the same warning
+   * `scale_frame` carries above, and for the same measured reason: this
+   * `NodeV3` is a plain `z.object` (see the closing comment at the end of the
+   * object), so an undeclared root is SILENTLY DELETED by `GraphV3.safeParse`
+   * with no error anywhere. `@talchain/schemas`' own `NodeV3Schema` is
+   * `.passthrough()` and would have kept it — declaring it THERE alone changes
+   * nothing here. Two same-named `NodeV3`s; this is the one that strips.
+   *
+   * ⛔ ABSENCE IS NOT A CLAIM, AND CONSUMERS MUST NOT INFER ONE.
+   * Absent ⇒ treat as included FOR COMPUTATION ONLY: 182,015 existing nodes
+   * carry no field and must not be dropped from anyone's analysis. But absence
+   * and inclusion are therefore INDISTINGUISHABLE, so a surface MUST render an
+   * exclusion claim ONLY on an explicit `'retained_excluded'` — never from
+   * absence, never from a negation, and never from an unrecognised value.
+   * An unknown value is NOT an exclusion claim: render nothing. A wrong
+   * exclusion claim about a node CEE never stamped is worse than a missing one.
+   * (Agreed with the Canvas lane, 18 Sep, as the binding display contract.)
+   *
+   * WHY AN ENUM AND NOT A BOOLEAN: the state is named, so a third state later
+   * does not need a second flag. `waived_by_exclusion` became unable to answer
+   * the adjacent question for exactly that reason.
+   *
+   * ⚠ NAME THE THREE APART — they share the English phrase and they are NOT
+   * this field. Do not "reconcile" them; that reconciliation is what cost this
+   * estate the leader-claim seam:
+   *   · `GroundedUnresolved = 'none' | 'not_in_model' | 'could_not_check'`
+   *     (UI `canvas/conversation/groundedSelection.ts`) — whether a selection
+   *     the USER REFERENCED exists in the graph. Its own docblock insists
+   *     `not_in_model` ("we read the graph and it isn't there") and
+   *     `could_not_check` ("we couldn't read") must not collapse.
+   *   · `in_model` as a COUNT in a quantities tally `{total, in_model,
+   *     prose_only, absent}` (UI `adapters/cee/notModelled.ts`) — whether a
+   *     number from the brief reached the model.
+   *   · THIS field — whether a node that IS in the model participates in the
+   *     CALCULATION. Neither of the others is about participation.
+   *
+   * PROMOTION IS A SINGLE FIELD FLIP on the existing node — never
+   * create-and-delete. Paul's ruling requires promotion "without duplication or
+   * loss", and any design that mints a second node fails it however clean it
+   * looks.
+   *
+   * NOT AI-EDITABLE, and deny-by-default already enforces it: the root is
+   * absent from `aiEditableFieldRoots('node')`, so `field-safety.ts` refuses any
+   * `update_node` op naming it — the same posture as `scale_frame` and
+   * `goal_threshold_frame`. CEE mints it; no model authors it.
+   */
+  analysis_participation: z.enum(['included', 'retained_excluded']).optional(),
   /** Prior distribution data for external factors (set by LLM or synthesised by unreachable-factors repair).
    *  ISL needs prior ranges to run Monte Carlo sampling on external factors. */
   prior: z.object({ distribution: z.string(), range_min: z.number(), range_max: z.number() }).passthrough().optional(),
@@ -914,12 +991,109 @@ export function isValidInterventionTarget(node: NodeV3T): boolean {
 }
 
 /**
+ * What a magnitude says about causal direction. THREE classes, not two.
+ *
+ * ⚠ ZERO IS ITS OWN CLASS, AND COLLAPSING IT INTO "positive" IS THE DEFECT THIS
+ * EXISTS TO NAME. The previous definition was `mean >= 0 ? "positive" :
+ * "negative"`, which is total over `number` but has only two outputs, so a
+ * magnitude that states NOTHING about direction was resolved to a POSITIVE
+ * CAUSAL CLAIM. `EffectDirection` documents "positive" as "increasing source
+ * increases target" (`schemas/graph.ts:459-462`) — false of a zero coefficient.
+ *
+ * `edgeSign()` (`orchestrator-v5/coaching/post-draft-narrative.ts:1340-1352`)
+ * had already reached this conclusion and states it in its own words: "a mean
+ * of exactly 0 yields `null` rather than a guess — at zero the sign cannot
+ * recover direction, and `-0 >= 0` is `true`, so an unguarded test calls every
+ * zero positive." That is the evidence `>= 0` was the wrong DEFINITION rather
+ * than merely an inconsistency between copies — a guard derived from the old
+ * rule could only ever have proved the copies agreed with it.
+ *
+ * (`orchestrator/context/graph-compact.ts` also never names a direction at
+ * zero, but incidentally: an earlier `absMean < 0.1` sub-threshold skip makes
+ * its `mean > 0 ? 'positive' : 'negative'` ternary unreachable there. It
+ * corroborates; it is not a second independent witness.)
+ *
+ * ⚠ `-0` MUST classify as carrying no sign information. `-0 >= 0` and
+ * `-0 > 0 === false` and `-0 < 0 === false`, so the ordering comparisons below
+ * place it in this class correctly — but only because zero is the FALL-THROUGH
+ * rather than a `>= 0` test. Do not "simplify" this to `mean >= 0`.
+ */
+export type MagnitudeSignClass = "positive" | "negative" | "no_sign_information";
+
+export function classifyMagnitudeSign(strengthMean: number): MagnitudeSignClass {
+  if (strengthMean > 0) return "positive";
+  if (strengthMean < 0) return "negative";
+  return "no_sign_information";
+}
+
+/** The outcome of resolving the two direction carriers against each other. */
+export interface EffectDirectionResolution {
+  /** The direction to put on the wire. */
+  readonly direction: "positive" | "negative";
+  /**
+   * `true` when NEITHER carrier stated a direction and one had to be invented
+   * to satisfy the two-member egress enum. The caller MUST disclose it — see
+   * `transformEdgeToV3`, which records it in `transform_defaults` alongside
+   * every other invented edge value.
+   */
+  readonly invented: boolean;
+}
+
+/**
+ * Resolve causal direction from its two carriers.
+ *
+ * Direction is carried TWICE — as the `effect_direction` enum and as the SIGN
+ * of `strength_mean` (`schemas/graph.ts:488`: "sign indicates direction"). This
+ * is the single place that decides what the pair jointly states, so the two
+ * cannot drift apart at the point of use.
+ *
+ * The two ordering rulings are UNCHANGED and are not reopened here:
+ *   Q_A (`cee.edge-direction-derives-from-mean-sign.test.ts`) — a SIGNED
+ *       magnitude is self-describing, so it wins and a stale label is corrected.
+ *   Q_B (`cee.edge-polarity-direction-authority.test.ts`) — an UNSIGNED
+ *       magnitude carries no polarity, so the label wins and the SIGN is moved
+ *       onto the magnitude upstream (`transformEdgeToV3`), which is why by the
+ *       time this runs the mean is already signed.
+ *
+ * What is NEW is the third class. Both rulings, STRP Rule 4
+ * (`validators/structural-reconciliation.ts:901`, guarded `!== 0`) and
+ * `fixSignMismatch` (via `graph-validator.ts:1405`, guarded `!== 0`) ABSTAIN at
+ * a zero magnitude. Nothing reconciled it, and this function then filled the
+ * silence with "positive". Now: at zero the magnitude states nothing, so a
+ * STATED direction is preserved, and if nothing was stated the invention is
+ * reported to the caller rather than made silently.
+ */
+export function resolveEffectDirection(
+  strengthMean: number,
+  statedDirection?: unknown
+): EffectDirectionResolution {
+  const cls = classifyMagnitudeSign(strengthMean);
+  if (cls !== "no_sign_information") {
+    return { direction: cls, invented: false };
+  }
+  if (statedDirection === "positive" || statedDirection === "negative") {
+    return { direction: statedDirection, invented: false };
+  }
+  // Nothing stated a direction and the magnitude states none either. The egress
+  // enum has no member for "unresolved" (see this file's EdgeV3
+  // `effect_direction`), so a value must be chosen — but it is DISCLOSED.
+  return { direction: "positive", invented: true };
+}
+
+/**
  * Derive effect_direction from strength_mean.
+ *
+ * Thin wrapper over `resolveEffectDirection` so there is ONE definition. Callers
+ * that hold a stated direction should call `resolveEffectDirection` directly and
+ * disclose an invented result; this single-argument form is retained for the
+ * call sites that genuinely have only a magnitude, and is byte-identical to the
+ * previous implementation for every magnitude that carries its own sign.
  */
 export function deriveEffectDirection(
-  strengthMean: number
+  strengthMean: number,
+  statedDirection?: unknown
 ): "positive" | "negative" {
-  return strengthMean >= 0 ? "positive" : "negative";
+  return resolveEffectDirection(strengthMean, statedDirection).direction;
 }
 
 // ============================================================================

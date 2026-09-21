@@ -206,6 +206,51 @@ const BASE_CAPTURE_PATH = join(
  */
 const NEW_KEYS = ["analysis_state", "analysis_result", "graph_hash"] as const;
 
+/**
+ * Additions made INSIDE a pre-existing key since the base capture — declared
+ * the same way `NEW_KEYS` declares top-level ones, and for the same reason.
+ *
+ * ⚠ WHY THIS EXISTS RATHER THAN A REGENERATED FIXTURE. The pin below asks two
+ * questions through one deep comparison: "was anything pre-existing REWRITTEN?"
+ * and "did anything undeclared APPEAR?". A field ADDED inside a pre-existing
+ * subtree rewrites nothing, but `toEqual` cannot tell the two apart, so a
+ * change that is additive by exactly the standard this pin enforces reads as a
+ * violation of it. The fixture is a frozen record of the 2.1271 base and
+ * regenerating it here would make it a post-change capture masquerading as a
+ * control — the vacuity the block at the top of this test already guards
+ * against. So the addition is DECLARED instead, and stays as exact in both
+ * directions as `NEW_KEYS` is: each path below must be ABSENT from the base and
+ * PRESENT in the body, or this fails.
+ *
+ * `not_modelled.quantities.in_model_{anchored,unanchored}` split the `in_model`
+ * verdict by the route that reached it — a named modelled quantity carrying the
+ * figure as a VALUE, versus the literal merely occurring in some model string.
+ * Measured on the committed cold-read captures, 11 of 18 `in_model` verdicts
+ * name no node, so the two were not distinguishable on the wire at all.
+ */
+const NEW_NESTED_KEYS: readonly (readonly string[])[] = [
+  ["not_modelled", "quantities", "in_model_anchored"],
+  ["not_modelled", "quantities", "in_model_unanchored"],
+];
+
+/** Walk a declared path to its parent, asserting every hop exists. */
+function parentOf(
+  root: Record<string, unknown>,
+  path: readonly string[],
+  what: string,
+): Record<string, unknown> | undefined {
+  let cursor: unknown = root;
+  for (const segment of path.slice(0, -1)) {
+    if (cursor === null || typeof cursor !== "object") return undefined;
+    cursor = (cursor as Record<string, unknown>)[segment];
+  }
+  expect(
+    cursor === null || typeof cursor !== "object",
+    `${what}: ${path.join(".")} has no object parent`,
+  ).toBe(false);
+  return cursor as Record<string, unknown>;
+}
+
 describe("2.1271 — additive by construction (pin 1)", () => {
   it("adds EXACTLY the declared keys and rewrites no pre-existing value", async () => {
     const app = await buildApp();
@@ -234,9 +279,31 @@ describe("2.1271 — additive by construction (pin 1)", () => {
     // per-request value by definition, named explicitly rather than skipped
     // silently, and asserted on its own terms below.
     const PER_REQUEST_KEYS = new Set(["request_id"]);
+
+    // Lift the DECLARED nested additions out before comparing — having first
+    // proved each one is absent from the base and present in the body. A stale
+    // declaration therefore REDs rather than silently excusing nothing, and a
+    // rewrite ANYWHERE ELSE in the same subtree still REDs, because only the
+    // declared leaf is removed.
+    const compared = structuredClone(body) as Record<string, unknown>;
+    for (const path of NEW_NESTED_KEYS) {
+      const leaf = path[path.length - 1];
+      const baseParent = parentOf(base, path, "base capture");
+      expect(
+        baseParent,
+        `base capture must predate ${path.join(".")}`,
+      ).not.toHaveProperty(leaf);
+      const bodyParent = parentOf(compared, path, "response");
+      expect(
+        bodyParent,
+        `declared nested addition ${path.join(".")} must actually be emitted`,
+      ).toHaveProperty(leaf);
+      delete (bodyParent as Record<string, unknown>)[leaf];
+    }
+
     for (const [key, value] of Object.entries(base)) {
       if (PER_REQUEST_KEYS.has(key)) continue;
-      expect(body[key], `pre-existing key ${key} must be unchanged`).toEqual(value);
+      expect(compared[key], `pre-existing key ${key} must be unchanged`).toEqual(value);
     }
     expect(typeof body.request_id, "request_id must still be a non-empty string").toBe("string");
     expect((body.request_id as string).length).toBeGreaterThan(0);

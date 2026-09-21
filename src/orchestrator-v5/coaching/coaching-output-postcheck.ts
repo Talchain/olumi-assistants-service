@@ -879,6 +879,12 @@ export interface BuildCoachingDegradeOptions {
   /** Direct, source-bound analytical recovery composed from current facts. */
   readonly sourceBoundRecovery?: string;
   /**
+   * The person's own words for this turn, used ONLY to name back the subject
+   * they asked about when the neutral copy fires. Never parsed for intent,
+   * never quoted. Omit for the unchanged copy.
+   */
+  readonly question?: string;
+  /**
    * F-HELD fix 3b — when a live confirmation-expecting hold exists, the
    * state-unsafe degrade restates the held offer + its confirm chip instead
    * of the #298 trust template + rerun chip. Wire capture 13c is the RED
@@ -888,6 +894,64 @@ export interface BuildCoachingDegradeOptions {
    * the unchanged no-hold behaviour.
    */
   readonly liveHold?: HeldOfferForDegrade;
+  /**
+   * WHICH boundary the output crossed, so the degrade can say what it held
+   * back instead of holding back everything.
+   *
+   * Read for exactly one decision — see {@link CLAIM_PERMISSION_NOTE}. It is
+   * never narrated, never mapped to copy for any other member, and a member
+   * this builder does not recognise leaves the bytes unchanged. Omit for the
+   * unchanged copy.
+   */
+  readonly violation?: CoachingViolation;
+}
+
+/**
+ * ⭐⭐⭐ WHAT WAS HELD BACK, AND WHAT IS STILL ON OFFER.
+ *
+ * ── THE WITNESS. Deployed staging 19 Sep 2026, scenario `7cb3cd1c`, 18:49:58Z,
+ * trace `a01280f1`. The person typed "What would you advise?", waited 12.2
+ * seconds while the model composed a real answer, and received the stale
+ * caveat and the re-run offer as the ENTIRE turn. Render carries the reason:
+ * `v5.coaching.output_postcheck`, violation
+ * `confident_advice_under_unsafe_state`, freshness `stale`, `blocked: false`.
+ *
+ * ── THE RULE THAT FIRED IS CORRECT AND IS NOT TOUCHED. It bars exactly one
+ * thing — confident DIRECTIONAL advice toward an option — while a result
+ * cannot be treated as current, and it exempts recovery guidance by design.
+ * `blocked: false` says the result exists and is usable; it is only out of
+ * date. The model was rightly stopped from saying "go with X".
+ *
+ * ── WHAT WAS WRONG WAS THE DEGRADE. One barred claim class became total
+ * silence, so the reasoning and the assumptions — which rest on nothing
+ * current, and which the very same rule still permits — died alongside the one
+ * sentence that was unsafe. The person was told neither what had been withheld
+ * nor that anything else remained, and did not ask again.
+ *
+ * ── SCOPE, DELIBERATELY NARROW. Emitted only for the violation that earns it,
+ * and only where the sentence is TRUE: a result that exists but whose currency
+ * is in doubt (stale, or unconfirmed). A blocked or absent analysis has no
+ * figures being held back, so claiming otherwise would be a fresh false
+ * statement — the controls pin both directions.
+ *
+ * British English; carries no value, unit, hash, option label or freshness
+ * claim, and states no figure.
+ */
+export const CLAIM_PERMISSION_NOTE =
+  ' I\u2019ve held back from pointing you to one option over another, because ' +
+  'that would rest on a result I can\u2019t treat as current. Ask me about the ' +
+  'reasoning or the assumptions behind it and I\u2019ll answer from what\u2019s ' +
+  'in the model.';
+
+/**
+ * The one violation whose reason the degrade may state.
+ *
+ * A function rather than an inline comparison so the narrowness is visible at
+ * the call site and a widening has to be written down here, next to the
+ * sentence whose truth conditions it would be widening.
+ */
+function statesWhatWasHeldBack(violation: CoachingViolation | undefined): boolean {
+  return violation === 'confident_advice_under_unsafe_state';
 }
 
 /**
@@ -993,6 +1057,126 @@ export const NEUTRAL_DEGRADE_TEXT =
   'Please ask me what you’d like to inspect or change next.';
 
 /**
+ * ⭐⭐⭐ THE SAME WITHHOLD, NAMING WHAT IT WAS ASKED ABOUT.
+ *
+ * ── THE WITNESS. Deployed staging 19 Sep 2026, scenario `26b908ee`, 18:59:05.
+ * The person clicked "How likely is this?" on the risk **Dilution and Control
+ * Risk**, waited 12.7s, and got {@link NEUTRAL_DEGRADE_TEXT} and nothing else.
+ * They never asked about that risk again. From their seat the product had not
+ * declined — it had shown no sign of having read the question.
+ *
+ * ⚠ THE WITHHOLD IS UNCHANGED AND IS NOT THE DEFECT. An always-on post-check
+ * fired on a FRESH analysis, and this arm exists precisely so a healthy
+ * analysis is not misdescribed as stale. What was wrong is that the SUBJECT
+ * was dropped, so a refusal about one risk reads identically to a refusal
+ * about nothing.
+ *
+ * ⛔ THE BAN IS PRESERVED EXACTLY AS WRITTEN. This copy still carries no value,
+ * unit, hash, OPTION LABEL or freshness claim. An option label is banned BY
+ * NAME because naming a leading option injects the residue the egress alarm
+ * measures — so {@link resolveDegradeSubject} refuses every `option` node, and
+ * refuses on ambiguity rather than guessing.
+ */
+const subjectBoundDegradeText = (subject: string): string =>
+  `Something in my answer about “${subject}” was not safe to show as-is. ` +
+  'Please ask me what you’d like to inspect or change next.';
+
+/**
+ * ⭐⭐⭐ THE ANSWER TO A QUESTION THE MODEL CANNOT ANSWER — the one violation
+ * where "ask me something else" is the wrong reply.
+ *
+ * MEASURED, staging 19 Sep, scenario `26b908ee`, 18:59:05, request `90854480`.
+ * The person clicked the product's OWN chip — **"How likely is this?"** — on
+ * the risk *Dilution and Control Risk*:
+ *
+ *     v5.post_analysis_advice_gate  matched=false  unmatched_reason=no_advice_signal
+ *     v5.coaching.output_postcheck  violation=unsupported_evidence_or_confidence_claim
+ *                                   freshness=fresh  usable_for_chips=true  blocked=false
+ *
+ * The advice gate has no class for a likelihood question, so the turn fell to
+ * the model, which invented a confidence claim, which this post-check correctly
+ * barred. Every guard worked. And the person, having pressed a button the
+ * product offered them, was told that something was unsafe and invited to ask
+ * about something else. **They never asked again.**
+ *
+ * ⚠ WHY THIS IS NOT THE SAME AS THE SWEPT COPY ABOVE. For every other
+ * always-on violation, "that response was not safe as-is" is the whole honest
+ * story: the model said something it should not have, and the person's next
+ * move is genuinely open. For THIS violation the person asked a specific,
+ * answerable-sounding question and the product declined it. Handing them a
+ * blank prompt makes the decline read as a malfunction rather than as a limit,
+ * and it wastes the one thing the turn definitely established.
+ *
+ * ⛔ WHAT THIS COPY MAY NOT DO, and each ban is a defect this estate has
+ * already paid for:
+ *
+ *   · IT MAY NOT SAY THE QUANTITY IS ABSENT. Risk nodes in the captures carry
+ *     `data: {}`, so the temptation is "there is no likelihood recorded". But
+ *     {@link ReadinessRecoveryNode} is `{ id, kind, label }` — this function
+ *     CANNOT SEE a node's data, so that sentence would be an absence claim from
+ *     an instrument that cannot observe presence (trap 13). What is genuinely
+ *     known here is the VIOLATION: the answer would have outrun the evidence.
+ *     The copy is warranted by that and by nothing else.
+ *
+ *   · IT MAY NOT PROMISE TO RECORD THE PERSON'S ESTIMATE. "Tell me and I'll
+ *     save it against the risk" is the obvious warm ending and it would be the
+ *     RESEARCH CTA REBUILT (CLAUDE.md: a visible affordance that terminates in
+ *     refusal). Whether a probability can be persisted onto a risk node is
+ *     Core's question and is not settled. So the invitation is to REASON from
+ *     their view, which this turn can genuinely do, not to store it.
+ *
+ *   · IT MAY NOT NAME AN OPTION, carry a value, unit, hash or freshness claim.
+ *     Unchanged from the swept copy — {@link resolveDegradeSubject} refuses
+ *     every `option` node and refuses on ambiguity.
+ *
+ * Both endings offer moves that WORK on the very next turn with no new
+ * capability: state a belief, or ask what the model does hold.
+ */
+const OUTRAN_THE_EVIDENCE_TAIL =
+  'Tell me what you already believe about it and we can reason from that, ' +
+  'or ask me what the model does record about it.';
+
+const evidenceClaimDegradeText = (subject: string | undefined): string =>
+  subject === undefined
+    ? 'My answer would have claimed more than the model supports, so I\u2019ve held it back. ' +
+      OUTRAN_THE_EVIDENCE_TAIL
+    : `My answer about \u201c${subject}\u201d would have claimed more than the model ` +
+      `supports, so I\u2019ve held it back. ${OUTRAN_THE_EVIDENCE_TAIL}`;
+
+/**
+ * The ONE entity the question names, or `undefined`.
+ *
+ * ⚠ IT IS A CONTAINMENT TEST OVER LABELS THE GRAPH ALREADY CARRIES, not a
+ * parser and not an intent classifier — the module docstring bans a
+ * natural-language predicate at this seam and that ban stands. It reads only
+ * `readinessNodes`, which the executor already passes.
+ *
+ * ⛔ OPTIONS ARE EXCLUDED BY KIND, and ambiguity refuses. Two matches is a
+ * question, not a fact; one option match is the one thing this copy may never
+ * say. Both fall back to the unchanged sentence, so the failure direction is
+ * "says less", never "says something it may not".
+ */
+function resolveDegradeSubject(
+  question: string | undefined,
+  nodes: readonly ReadinessRecoveryNode[] | undefined,
+): string | undefined {
+  if (typeof question !== 'string' || question.trim().length === 0) return undefined;
+  if (nodes === undefined || nodes.length === 0) return undefined;
+  const haystack = question.toLowerCase();
+  const named: string[] = [];
+  for (const node of nodes) {
+    const label = typeof node.label === 'string' ? node.label.trim() : '';
+    if (label.length < 3) continue;
+    if (!haystack.includes(label.toLowerCase())) continue;
+    // An option named in the question ends the resolution outright — it must
+    // not be named, and it must not be stepped over to reach a sibling either.
+    if (node.kind === 'option') return undefined;
+    if (!named.includes(label)) named.push(label);
+  }
+  return named.length === 1 ? named[0] : undefined;
+}
+
+/**
  * Deterministic degrade-to-safe response for a fired post-check. State-aware:
  *   - state UNSAFE → a #298 trust template (so the explanation path, this
  *     post-check and the harness speak ONE trust language) + the existing
@@ -1017,7 +1201,22 @@ export function buildCoachingDegradeResponse(
     if (opts.sourceBoundRecovery?.trim()) {
       return { assistant_text: opts.sourceBoundRecovery, suggested_actions: [] };
     }
-    return { assistant_text: NEUTRAL_DEGRADE_TEXT, suggested_actions: [] };
+    // A real answer outranks naming the subject; naming the subject outranks
+    // saying nothing about it. See `subjectBoundDegradeText`.
+    const subject = resolveDegradeSubject(opts.question, opts.readinessNodes);
+    // ONE violation gets its own ending, because for that one the swept copy's
+    // "ask me something else" is the wrong reply to a question the person was
+    // invited to ask. Every other violation is byte-identical.
+    if (opts.violation === 'unsupported_evidence_or_confidence_claim') {
+      return {
+        assistant_text: evidenceClaimDegradeText(subject),
+        suggested_actions: [],
+      };
+    }
+    return {
+      assistant_text: subject === undefined ? NEUTRAL_DEGRADE_TEXT : subjectBoundDegradeText(subject),
+      suggested_actions: [],
+    };
   }
   // F-HELD fix 3b — a live hold outranks every state-unsafe trust template.
   // Rationale: each of those templates ships the rerun chip, which mints the
@@ -1058,9 +1257,15 @@ export function buildCoachingDegradeResponse(
     // freshness so a blocked-and-stale fact does not claim "the model changed".
     assistant_text = buildAnalysisDegradedTemplate();
   } else if (pack.freshness === 'stale') {
-    assistant_text = buildAnalysisStaleTemplate();
+    // APPENDED, never prepended: `explain-results` and the golden-path
+    // contract both anchor on this caveat OPENING the turn.
+    assistant_text =
+      buildAnalysisStaleTemplate()
+      + (statesWhatWasHeldBack(opts.violation) ? CLAIM_PERMISSION_NOTE : '');
   } else if (pack.freshness === 'unknown') {
-    assistant_text = buildAnalysisUnconfirmedTemplate();
+    assistant_text =
+      buildAnalysisUnconfirmedTemplate()
+      + (statesWhatWasHeldBack(opts.violation) ? CLAIM_PERMISSION_NOTE : '');
   } else {
     // Fact present + fresh but trust-downgraded (e.g. ready-with-actionable-
     // blockers) → honest "no usable result".

@@ -100,6 +100,7 @@ import {
   selectFragilityPriorityRow,
 } from '../../orchestrator/shared/fragile-edge-authority.js';
 import { isSlugShapedEntityId } from '../../orchestrator/shared/output-safety.js';
+import { composeEdgeIdentity } from '../compose/edge-address.js';
 import { findForbiddenPhraseHit, RAW_DECIMAL_RE } from '../compose/forbidden-user-facing-phrases.js';
 
 /** Why no grounded counter-case was produced. Closed enum — the telemetry payload. */
@@ -218,9 +219,6 @@ function isComposable(sentence: string): boolean {
 }
 
 
-/** The composite separator the graph-edit path accepts (`parseEdgeId`). */
-const EDGE_IDENTITY_SEPARATOR = '→'; // →
-
 /**
  * Select the relationship this run's disconfirmation exercise should argue
  * against, and compose the exercise prose naming it.
@@ -280,7 +278,7 @@ export function selectGroundedCounterCase(enrichment: unknown): GroundedCounterC
     grounded: {
       fromId,
       toId,
-      edgeIdentity: `${fromId}${EDGE_IDENTITY_SEPARATOR}${toId}`,
+      edgeIdentity: composeEdgeIdentity(fromId, toId),
       fromLabel,
       toLabel,
       counterCase,

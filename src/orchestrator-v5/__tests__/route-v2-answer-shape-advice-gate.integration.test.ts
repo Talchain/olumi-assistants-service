@@ -53,7 +53,38 @@ vi.mock('../session/index.js', () => ({
 }));
 
 const { ceeOrchestratorRouteV2 } = await import('../../orchestrator/route-v2.js');
-const { deriveAnswerTextFromShape } = await import('../routing/answer-shape.js');
+const { deriveAnswerTextFromShape, synthesiseAnswerShapeFromText } = await import(
+  '../routing/answer-shape.js'
+);
+
+/**
+ * THE COLLAPSE FLOOR (18 Sep 2026) — what this file now proves, and why the
+ * assertion moved from the SIDECAR to the TELEMETRY.
+ *
+ * `_answer_shape` is a WIRE DIRECTIVE telling the UI to collapse the answer to
+ * its headline. CEE now issues it only above
+ * `ANSWER_SHAPE_COLLAPSE_FLOOR_CHARS` (3,000 — the deployed UI's own
+ * `CLAMP_CHAR_THRESHOLD`, below which it renders the answer whole anyway).
+ *
+ * ⛔ THAT WOULD HAVE QUIETLY DESTROYED THIS FILE'S GUARD. Its subject is
+ * REACHABILITY: four consecutive F1 fixes each shipped believing the egress
+ * synthesiser ran on a dispatch path where it did not, and each passed its own
+ * tests. This file exists because the advice gate was one of those paths. The
+ * real advice-gate answer is a few hundred characters, so under the floor it
+ * legitimately ships without a sidecar — and "no sidecar" would then have
+ * meant BOTH "correctly below the floor" AND "the egress never ran here",
+ * which is precisely the condition this file was written to detect.
+ *
+ * So the decline is ANNOUNCED. `v5.answer_shape.declined_below_floor` is the
+ * positive witness that the egress reached a shapeable answer on this path and
+ * chose not to collapse it. The reachability assertion below binds to that
+ * event BY DISPATCH PATH — if the advice gate stops reaching the egress
+ * synthesiser, no event is emitted and this file REDs, exactly as before.
+ */
+const emitted: Array<{ event: string; fields: Record<string, unknown> }> = [];
+function declinesBelowFloor() {
+  return emitted.filter((e) => e.event === 'v5.answer_shape.declined_below_floor');
+}
 
 const SCENARIO_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 
@@ -111,6 +142,14 @@ function makeFreshRunAnalysisFact(): Record<string, unknown> {
       graph_hash_at_run: READY_GRAPH_HASH,
       computed_at: new Date(Date.now() - 60_000).toISOString(),
       enrichment: {
+      // ⚠ ADDED. These fixtures expressed robustness only through
+      // `robustness_synthesis`, which the advice gate reads for its own
+      // band — and which appears in **0 of 41** real September captures.
+      // The separation permission reads `enrichment.robustness`, so without
+      // this the fixture describes a run whose arms were never told apart,
+      // and the deterministic answer it asserts is one the wire withholds.
+      // Completing it, not relaxing the assertion.
+      robustness: { level: 'high', near_tie: { is_tie: false } },
         analysis_status: 'completed',
         option_comparison: [
           { option_id: 'opt_hire', option_label: 'Hire', win_probability: 0.72, outcome_mean: 0.5 },
@@ -171,7 +210,10 @@ describe('route-v2 — `_answer_shape` on the REAL post-analysis advice-gate ans
     mockState.priorTurns = [PRIOR_RUN_ANALYSIS_TURN];
     mockState.priorFacts = [makeFreshRunAnalysisFact()];
     mockState.persistedGraph = READY_GRAPH;
-    setTestSink(() => {});
+    emitted.length = 0;
+    setTestSink((event: string, fields: Record<string, unknown>) => {
+      emitted.push({ event, fields });
+    });
   });
   afterEach(() => {
     setTestSink(null);
@@ -198,29 +240,65 @@ describe('route-v2 — `_answer_shape` on the REAL post-analysis advice-gate ans
     expect(body.assistant_text.length).toBeGreaterThan(0);
     expect(body.assistant_text).toContain('Hire');
 
-    // THE FIX: the deterministic post-analysis answer now ships `_answer_shape`.
-    expect(body._answer_shape, 'advice-gate answer must ship _answer_shape').toBeDefined();
-    expect(typeof body._answer_shape.headline).toBe('string');
-    expect(body._answer_shape.headline.length).toBeGreaterThan(0);
-    expect(Array.isArray(body._answer_shape.bullets)).toBe(true);
-    expect(body._answer_shape.bullets.length).toBeLessThanOrEqual(3);
-    expect(typeof body._answer_shape.detail).toBe('string');
-    expect(body._answer_shape.detail.length).toBeGreaterThan(0);
+    // THE FIX (reachability): the deterministic post-analysis answer reaches the
+    // egress synthesiser. Before it, the advice gate never set the scope signal
+    // and the egress skipped this path entirely — the A2 live failure.
+    const declines = declinesBelowFloor();
+    expect(
+      declines.map((d) => d.fields.dispatch_path),
+      'the advice-gate answer must REACH the egress synthesiser — no event means the path is dark again',
+    ).toContain('route_egress_synthesised');
+
+    // And the answer really is shapeable, so the ONLY reason it ships plain is
+    // the floor. Without this the assertion above could be satisfied by an
+    // answer the synthesiser would have refused anyway.
+    const shape = synthesiseAnswerShapeFromText(body.assistant_text);
+    expect(shape, 'the real advice-gate answer must be shapeable').not.toBeNull();
+    expect(shape!.headline.length).toBeGreaterThan(0);
+    expect(shape!.bullets.length).toBeLessThanOrEqual(3);
+
+    // THE USER OUTCOME: below the floor the answer is NOT collapsed, and the
+    // user receives every character the gate composed.
+    expect(body).not.toHaveProperty('_answer_shape');
+    const reached = declines.find((d) => d.fields.dispatch_path === 'route_egress_synthesised')!;
+    expect(reached.fields.final_text_length).toBe(body.assistant_text.length);
+    expect(reached.fields.final_text_length as number).toBeLessThanOrEqual(
+      reached.fields.floor_chars as number,
+    );
   });
 
   // ── BYTE-EQUALITY on the REAL answer ───────────────────────────────────────
   // Approach (b): assistant_text is SET to derive(shape). The tie the sidecar
   // contract requires holds by identity — proven on the REAL projection copy,
   // not a hand-picked fixture string.
-  it('byte-equality: derive(_answer_shape) === assistant_text on the real advice-gate answer', async () => {
+  it('below the floor the real advice-gate answer ships unreflowed and unshaped', async () => {
     const { status, body } = await postAnalyticalTurn(
       app,
       'Why is this option ahead?',
       'eeeeeeee-1111-4eee-8eee-eeeeeeeeee02',
     );
     expect(status).toBe(200);
-    expect(body._answer_shape).toBeDefined();
-    expect(deriveAnswerTextFromShape(body._answer_shape)).toBe(body.assistant_text);
+    // ── THE INVARIANT'S PREMISE IS NOW FALSE, SO THE TEST ASSERTS ITS TWIN ──
+    // `derive(shape) === assistant_text` is the contract for a SHIPPED sidecar.
+    // Below the floor nothing ships, so asserting it here would be asserting a
+    // conditional whose antecedent is false — true for free, and blind.
+    //
+    // What must be true instead is that the treatment was not HALF applied.
+    // Attaching the sidecar also REFLOWS the headline/detail join from a single
+    // space to a blank line; declining must leave the gate's own bytes alone,
+    // or the product ships a reflow nobody asked for and a text/shape pair that
+    // has quietly drifted. Both limbs are DERIVED from the shape, not from
+    // hardcoded projection copy, so this cannot rot when the wording changes.
+    expect(body).not.toHaveProperty('_answer_shape');
+    const shape = synthesiseAnswerShapeFromText(body.assistant_text);
+    expect(shape).not.toBeNull();
+    const wouldHaveShipped = deriveAnswerTextFromShape(shape!);
+    expect(wouldHaveShipped.startsWith(`${shape!.headline}\n\n`)).toBe(true);
+    expect(body.assistant_text.startsWith(`${shape!.headline} `)).toBe(true);
+    expect(body.assistant_text).not.toBe(wouldHaveShipped);
+    expect(declinesBelowFloor().map((d) => d.fields.dispatch_path)).toContain(
+      'route_egress_synthesised',
+    );
   });
 
   // ── FUNCTIONAL STAYS PLAIN through the SAME REAL egress (mandate #4) ────────

@@ -198,6 +198,14 @@ brief: do not paraphrase, tidy, translate or summarise it. Use \`kind\`:
   When the user HAS said what they are trying to achieve, that is the goal.
   Quote it, even if it is unquantified, modest or awkwardly worded, and even if
   you can see a sharper objective behind it. Theirs is the one that counts.
+  When they distinguish a necessary result from optional improvement, put the
+  necessary result first among the \`goal\` records. Keep the optional upside
+  separate; it must not replace the result they say they need. Keep their
+  explanation of what happens if that result is missed as a \`cause\`, with
+  any inferred \`risk\` or \`outcome\` referring to it through \`basis\`.
+  Preserve the qualification or condition in each verbatim quote. A reported
+  wish, disputed demand or suggestion is not an adopted objective merely
+  because the user mentions it. Do not resolve competing priorities for them.
 - \`option\` — a course of action the user named: something they could DO.
   An option is something you can CARRY OUT. If the span is instead something
   that can be TRUE or FALSE, it is not an option however much it is shaped like
@@ -263,16 +271,49 @@ brief: do not paraphrase, tidy, translate or summarise it. Use \`kind\`:
   out when nothing you emitted measures that quantity: an omission is read as
   "not stated" and costs nothing, and a wrong index binds the user's limit to the
   wrong number.
+  A limit must be one the user adopts, not merely a number or someone else's
+  proposal they report. Keep acceptance, rejection and uncertainty in the
+  \`source_quote\`; if the bounded quantity or direction is unresolved, retain
+  that wording without inventing a numeric limit or a target reference.
 - \`cause\` — an explanation the user offered for why something is happening: a
   hypothesis, whoever holds it. Keep every one the brief carries. See the
   \`option\` entry above for why a cause is never an option.
-- \`figure\` — a quantity the user stated
-Set \`value\` and \`unit\` when the user gave a number. Do not invent a number the
+- \`figure\` — a quantity or comparison of quantities the user stated. Preserve
+  an ordering in \`source_quote\` without turning it into measured distances.
+Set \`value\` when the user gave a number, and \`unit\` when they stated its unit.
+Do not invent a number the
 user did not state, and do not round or rescale one they did.
+If the currency or unit is missing, leave \`unit\` out; do not infer it from the
+topic, location, another quantity or a model estimate.
+\`unit\` is WHAT THE NUMBER IS MEASURED IN and nothing else. Never put a
+scale or convention word there — not "scale", not "unit_interval", not
+"ratio", not "raw_count", not "level", not "fraction". Those belong in
+\`value_scale\`, a separate field on the same record. A quantity with no
+natural unit — a judgement of quality, readiness or capability — has NO
+\`unit\`: leave it out and say what the number means in \`value_scale\`. Keep the original amount
+and any uncertainty in the quote. Use a contiguous verbatim span long enough to
+retain the referent and qualifications, never a reconstructed quotation.
+Set \`value_scale\` on a \`figure\` whenever you set a number on it, to say
+WHAT THE NUMBER MEANS —
+\`unit_interval\` for a share or a bounded percentage written as a decimal (3%
+churn is \`value: 0.03\`, \`unit: "%"\`, \`value_scale: "unit_interval"\`),
+\`ratio\` for a measure that can meaningfully pass 100% (NRR, growth, ROI —
+110% is \`value: 1.1\`), and \`raw_count\` for a plain count left in its own
+unit (6 engineers is \`value: 6\`, \`unit: "engineers"\`,
+\`value_scale: "raw_count"\`). This does not change any number you were already
+going to write; it records which convention you used. \`unit: "%"\` alone does
+not say whether the number uses a decimal or whole-percent convention. A limit
+and a current reading must not be compared using different conventions. Leave \`value_scale\` out if you genuinely cannot
+tell: an omission means "not declared", not permission to infer a convention
+from the magnitude.
 On a \`goal\` carrying a number, set \`role\` to \`target\` when the number is what
 the user wants to REACH, and \`baseline\` when it is where they are NOW. That one
 word decides whether the number is registered as the success threshold, so an
 unstated \`role\` on a current reading is read as a target and inverts the goal.
+Keep current readings, desired targets and adopted limits in separate records,
+even when they use the same number. Use \`role: "constraint"\` for an adopted
+limit and \`role: "context"\` for a figure that establishes neither a current
+reading nor an adopted target or limit. Reporting a view does not adopt it.
 On an \`option\` that is the status quo — doing nothing, continuing as-is,
 deferring without action, or keeping the current course — set
 \`is_baseline: true\`, whatever its wording. Set \`is_baseline: false\` on the
@@ -301,20 +342,47 @@ prompts to think, not a checklist to populate. Include a plausible alternative
 when it changes the mechanism, exposes an important trade-off, or offers a
 useful way to learn. Do not add a near-duplicate merely to increase the count.
 
-Record what a quantity IS now. On a \`factor\` claim, set \`value\` to the level
-that quantity sits at today, when you can say what that level is on a scale the
-brief supports. Use the user's own number when they gave one FOR THAT QUANTITY;
-otherwise give your own estimate. A number you estimate is recorded as yours,
-not as something they said.
+Record what a quantity IS now. On a \`factor\`, \`risk\` or \`outcome\` claim, set
+\`value\` only when the quantity has a current level on a supported scale and
+there is a defensible basis for that level. An estimate is recorded as yours,
+not as something the user said. A risk or outcome may name a measured quantity
+or a possible event; its kind or label alone does not establish a current level.
+Do not invent a current level merely to make a limit checkable.
 \`current\`, \`proposed\` and \`limit\` are three different things and a number
 belonging to one is not the level of another. "Reach £20k MRR" is a target,
 "keep churn under 4%" is a limit, and "we are proposing £59" is a proposal —
 none of them says what the quantity is TODAY. A subscriber count worked out from
 a revenue figure is not that figure, and the same number appearing nearby does
 not make it the same quantity.
-Leave \`value\` out where you cannot place the quantity on a scale the brief
-supports. A quantity that is genuinely qualitative, or genuinely unknown, stays
-that way: there is nothing to fill in and no count to satisfy.
+Leave \`value\` out where the current level or its scale is unknown. Preserve
+qualitative risks and outcomes without filling in a number.
+
+A LIKELIHOOD IS NOT A CURRENT LEVEL. A chance that an event occurs must not be
+put in \`value\` for a measured current quantity. Keep the user's original
+probability statement and its qualifications in \`stated_items\`; do not replace
+that statement with an inferred current reading. The optional \`likelihood\`
+field can retain a clearly identified event probability in draft records only,
+as a decimal between 0 and 1. It is not projected into the saved model or used
+by analysis, so it is not a substitute for retaining the original statement.
+Do not invent a probability to populate it.
+Whenever YOU set a \`value\` on a claim, set \`value_scale\` on
+that claim too, using the same three-way vocabulary defined for stated items:
+\`unit_interval\` for a share or bounded percentage written as a decimal,
+\`ratio\` for a measure that can meaningfully pass 100%, and \`raw_count\` for a
+plain count in its own unit. It is a field on the claim, exactly as \`unit\` is,
+and the two answer different questions: \`unit\` is what the number is measured
+in, \`value_scale\` is which convention you wrote it in. A factor you score 0 to 1
+for quality or readiness is \`value_scale: "unit_interval"\` with NO \`unit\` —
+never \`unit: "scale"\`. Leave \`value_scale\` out only if you genuinely cannot
+tell; an omission means "not declared", never permission for anyone downstream
+to infer the convention from the magnitude.
+For current measurements: "monthly churn is currently 4%" supports
+\`value: 0.04\`, \`unit: "%"\`, \`value_scale: "unit_interval"\`. "There is a 4% chance of losing the contract
+this year" identifies an event probability, not a current measurement.
+"Churn risk: 4%", "Vendor slippage: 30%" and "Contract loss: 4%" do not by
+themselves establish which role the number has. Preserve that ambiguity and the
+original wording; do not resolve it from the label, unit or magnitude alone.
+"We might lose the tech lead" remains a qualitative risk.
 
 Keep the user's stated requirements intact. Do not relax a deadline, budget or
 other limit without their invitation, or claim a proposal meets it when that is
@@ -432,6 +500,9 @@ the brief does tell you: the scale of the numbers already in it, and the
 direction and rough size of the change this option describes. Keep the factor's
 own unit, and keep your estimates consistent across the options, so the
 comparison between them means something.
+An ordinal statement alone supplies an ordering, not a scale or numeric gaps.
+Keep that statement and its conditions in the cited \`stated_items\`; do not
+turn the ordering alone into \`sets_to\` values, probabilities or scale endpoints.
 
 Leave \`sets_to\` out only where you genuinely cannot form a defensible estimate
 even from the brief's own scale. That is a truthful answer, and it also stops the

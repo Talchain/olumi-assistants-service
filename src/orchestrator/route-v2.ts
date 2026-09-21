@@ -101,6 +101,7 @@ import type { TurnTimingsBlock, V5TurnTimings } from '../orchestrator-v5/telemet
 import type {
   V5DiagnosticExitPath,
   V5DiagnosticTrace,
+  V5HandlerRefusal,
 } from '../orchestrator-v5/diagnostics/v5-diagnostic-trace.js';
 import { buildMinimalV5DiagnosticTrace } from '../orchestrator-v5/diagnostics/v5-diagnostic-trace.js';
 import {
@@ -163,10 +164,16 @@ import {
   enforceAnalysisAuthorityUnavailableAtEgress,
   type AnalysisAuthorityUnavailableEgressMode,
 } from '../orchestrator-v5/compose/analysis-authority-unavailable-notice.js';
+// G3 — the one-way scenario-over-window precedence, applied at the finaliser
+// seam beside the arm above. See that module for why the two derivations are
+// named apart rather than reconciled.
+import { resolveScenarioAnalysisSupersession } from '../orchestrator-v5/context/scenario-analysis-supersession.js';
 import {
   classifyAnswerShape,
   deriveAnswerTextFromShape,
   synthesiseAnswerShapeFromText,
+  warrantsProgressiveDisclosure,
+  ANSWER_SHAPE_COLLAPSE_FLOOR_CHARS,
 } from '../orchestrator-v5/routing/answer-shape.js';
 import type { GraphV3T } from './types.js';
 import { GraphV3 } from '../schemas/cee-v3.js';
@@ -255,8 +262,10 @@ import {
 import { normaliseBriefText } from '../orchestrator-v5/session/normalise-brief-text.js';
 import { normaliseReplayMessage } from '../orchestrator-v5/compose/looping-chip-guard.js';
 import { isAnalyticalQuestion } from '../orchestrator-v5/routing/analytical-question-guard.js';
+import { mayContainExplicitConstraintEdit, resolveExplicitConstraintEdit } from '../orchestrator-v5/routing/explicit-constraint-edit.js';
 import {
   hasExplicitNoModelChangeIntent,
+  hasConstraintMutationSignal,
   isBoundedNonMutationAnalyticalRequest,
 } from '../orchestrator-v5/routing/mutation-warrant.js';
 import {
@@ -317,7 +326,15 @@ import {
   composeProcessMetaIntakeResponse,
 } from '../orchestrator-v5/routing/process-meta-intake.js';
 import { composeReadinessIntakeResponse } from '../orchestrator-v5/routing/readiness-intake.js';
-import { buildReadinessRepairOffer } from '../orchestrator-v5/handlers/readiness-repair-proposal.js';
+import {
+  buildReadinessRepairOffer,
+  withReadinessApplyControl,
+} from '../orchestrator-v5/handlers/readiness-repair-proposal.js';
+import { prepareValueBatchOffer } from '../orchestrator-v5/handlers/readiness-value-batch-flow.js';
+import {
+  buildValueBatchReviewBlock,
+  composeValueBatchReviewText,
+} from '../orchestrator-v5/handlers/readiness-value-batch.js';
 import { shouldSuppressEditDispatchForValueUpdate } from './routing/value-update-gate.js';
 import {
   EDIT_GRAPH_NEGATIVE_REGEX,
@@ -770,6 +787,19 @@ async function sendFinalised200(
      *  system-event writers). Reader/acknowledgement events omit it. */
     readonly freshness?: import('../orchestrator-v5/context/freshness.js').FreshnessDerivation;
     /**
+     * G3 — the SCENARIO-BOUND freshness verdict, over the durable analysis
+     * history rather than this turn's bounded window. Supplied by the
+     * turn_executor exit from `TurnExecutorRunResult.scenarioFreshness`, and by
+     * no other exit: it is the only dispatch that loads the durable carrier.
+     *
+     * ⚠ NOT A BETTER `freshness` — a DIFFERENT QUESTION (trap 21). Consumed
+     * only through `resolveScenarioAnalysisSupersession` at the finaliser seam
+     * below, which may correct a hot-window `none` and may correct nothing else.
+     * Absent ⇒ no durable reasoning authority licensed it, and the seam changes
+     * nothing.
+     */
+    readonly scenarioFreshness?: import('../orchestrator-v5/context/freshness.js').FreshnessDerivation;
+    /**
      * The COMPLETED RERUN's fact window, threaded into `finaliseV5Response` so
      * it can stamp the run-over-run consequence block (`run_delta`). Supplied
      * by the turn_executor exit via `TurnExecutorRunResult.priorFacts`, which
@@ -993,6 +1023,18 @@ async function sendFinalised200(
      */
     readonly withheldExplanationReason?: WithheldExplanationReason;
     /**
+     * WHICH handler declined this turn, and why, in stable codes. Present only
+     * when the recoverable-handler composer answered; the turn-executor is the
+     * only producer, and an absent value is stamped as nothing at all — there
+     * is deliberately no "unknown" placeholder, because "this turn did not
+     * refuse" and "it refused for a reason nobody can name" are different
+     * claims and the second is the state this field exists to abolish.
+     *
+     * Diagnostic only — it reaches the wire solely inside the flag-gated
+     * `_diagnostic_trace.handler_refusal`, never `response`.
+     */
+    readonly handlerRefusal?: V5HandlerRefusal;
+    /**
      * ROADMAP 2.1271 — THIS turn started a provisional analysis and it is in
      * flight. Threaded by exactly ONE exit (draft_graph) and consumed only by
      * `composeAnalysisStateV1`'s `running` arm. Absent everywhere else, which is
@@ -1016,6 +1058,30 @@ async function sendFinalised200(
   const canonicalStateSourceForSummary = ctx.canonicalState
     ? 'turn_executor'
     : 'route_fallback';
+  // G3 — THE HEALTHY TWIN OF THE ARM BELOW, at the same seam and by design.
+  //
+  // The `analysisAuthorityUnavailable` arm substitutes a whole derivation when
+  // the durable analysis authority could NOT BE READ, *"so a hot-window `none`
+  // verdict cannot reappear as `never_run` after egress copy has already
+  // disclosed that the scenario-wide read failed"*
+  // (`compose/analysis-authority-unavailable-notice.ts`). G3 is the same harm
+  // from the other direction: the durable authority COULD be read and holds a
+  // `run_analysis` fact the bounded hot window has since lost, so the wire says
+  // `none` — "never run" — about an analysis that exists.
+  //
+  // Evaluated only on the healthy arm, and the two are mutually exclusive by
+  // construction besides: `fail_closed_unavailable` means no durable reasoning
+  // authority, and the producer populates `scenarioFreshness` only when one was
+  // licensed. The `? undefined :` is therefore belt-and-braces, and it is here
+  // so the precedence cannot be reached from a state that has already declared
+  // its read failed.
+  const scenarioSupersession = analysisAuthorityUnavailable
+    ? undefined
+    : resolveScenarioAnalysisSupersession({
+        windowFreshness: ctx.freshness,
+        scenarioFreshness: ctx.scenarioFreshness,
+        ...(ctx.analysisReady ? { readiness: ctx.analysisReady } : {}),
+      });
   const finaliserContext = analysisAuthorityUnavailable
     ? {
         ...ctx,
@@ -1025,7 +1091,19 @@ async function sendFinalised200(
           ctx.analysisReady ? { readiness: ctx.analysisReady } : {},
         ),
       }
-    : ctx;
+    : scenarioSupersession !== undefined
+      ? {
+          ...ctx,
+          // ⚠ ADDITIVE, NEVER AN OVERWRITE. `ctx.freshness` and
+          // `ctx.canonicalState` are left exactly as the dispatch supplied them,
+          // so the authoritative top-level `graph_hash` stamp, the
+          // `_context_summary` diagnostic below, and every other reader are
+          // byte-identical. Only `analysis_ready.freshness` and `analysis_state`
+          // read the two members added here — see `FinaliserContext`.
+          analysisStateFreshness: scenarioSupersession.freshness,
+          analysisStateCanonical: scenarioSupersession.canonicalState,
+        }
+      : ctx;
   let analysisAuthorityUnavailableEgressMode: AnalysisAuthorityUnavailableEgressMode =
     'substantive_replaced';
   // ── ROADMAP 2.709 invariant 6 — surface a STANDING draft loss ─────────
@@ -1351,6 +1429,18 @@ async function sendFinalised200(
         verdict_provenance: ctx.mayNameLeadingOptionProvenance ?? null,
         withheld_projection_reason: ctx.withheldExplanationReason ?? null,
       },
+      // ⭐⭐ WHICH THROW DECLINED THIS TURN. Stamped HERE for exactly the reason
+      // `claim_safety` above is: this is the ONE place every dispatch family's
+      // trace passes through on its way to the wire, so wiring it into each
+      // builder instead would be the per-site enumeration that always misses a
+      // sibling.
+      //
+      // OMITTED, not nulled, on a turn that did not refuse — an absent key
+      // honestly means "no handler declined", and a present one is always a
+      // real refusal. Threaded from the turn-executor's own catch and never
+      // re-derived here, so the trace cannot disagree with the error it
+      // reports on.
+      ...(ctx.handlerRefusal ? { handler_refusal: ctx.handlerRefusal } : {}),
     };
     const augmented: OlumiResponseWithDebugFields = {
       ...wireBody,
@@ -1485,7 +1575,44 @@ async function sendFinalised200(
   // its own, which is exactly why the wire gate DROPS `_answer_shape` whenever
   // it edits the answer rather than relying on this comparison to notice.
   // Neither guard is now the last word alone; read them together.
-  if (egress.ok && !analysisAuthorityUnavailable && ctx.answerShape) {
+  //
+  // ⭐ THE COLLAPSE FLOOR (added 18 Sep 2026). The sidecar is a WIRE DIRECTIVE
+  // to collapse: `MessageBubble.tsx` renders `<AnswerBody>` INSTEAD of the
+  // free-text body whenever it arrives. Below the floor the deployed UI would
+  // have shown the answer WHOLE, so attaching it there replaces "the user reads
+  // all of it" with "the user reads one sentence" — the measured founder
+  // defect. `warrantsProgressiveDisclosure` is applied to `derivedText`, the
+  // exact string `assistant_text` carries on the wire, because that is what the
+  // UI's own clamp measures. Rationale, the deployed-bundle derivation and the
+  // drift analysis: `answer-shape.ts` → ANSWER_SHAPE_COLLAPSE_FLOOR_CHARS.
+  //
+  // Note the ORDER: the floor is checked BEFORE the fail-closed tie
+  // verification below, never instead of it. Declining to collapse ships
+  // `wireBody` untouched — the executor already set `assistant_text` to this
+  // same derived text, so nothing is lost and no new text/shape pair is minted.
+  const shapeDerivedText = ctx.answerShape ? deriveAnswerTextFromShape(ctx.answerShape) : '';
+  if (
+    egress.ok &&
+    !analysisAuthorityUnavailable &&
+    ctx.answerShape &&
+    !warrantsProgressiveDisclosure(shapeDerivedText)
+  ) {
+    // Announced, never silent — see V5AnswerShapeDeclinedBelowFloor. This is
+    // the positive witness that the egress DID reach a shapeable answer here.
+    emit(TelemetryEvents.V5AnswerShapeDeclinedBelowFloor, {
+      request_id: requestId,
+      exit_path: exitPath,
+      dispatch_path: 'route_egress_model_shape',
+      final_text_length: shapeDerivedText.length,
+      floor_chars: ANSWER_SHAPE_COLLAPSE_FLOOR_CHARS,
+    });
+  }
+  if (
+    egress.ok &&
+    !analysisAuthorityUnavailable &&
+    ctx.answerShape &&
+    warrantsProgressiveDisclosure(shapeDerivedText)
+  ) {
     const augmented: OlumiResponseWithDebugFields = {
       ...wireBody,
       _answer_shape: ctx.answerShape,
@@ -1494,7 +1621,7 @@ async function sendFinalised200(
       sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
       finaliserContext,
     );
-    const derivedText = deriveAnswerTextFromShape(ctx.answerShape);
+    const derivedText = shapeDerivedText;
     const finalText =
       typeof withShape.assistant_text === 'string' ? withShape.assistant_text : '';
     if (finalText === derivedText) {
@@ -1564,7 +1691,33 @@ async function sendFinalised200(
     wireBody.assistant_text.trim().length > 0
   ) {
     const synth = synthesiseAnswerShapeFromText(wireBody.assistant_text);
-    if (synth !== null) {
+    // ⭐ THE COLLAPSE FLOOR (18 Sep 2026) — see
+    // ANSWER_SHAPE_COLLAPSE_FLOOR_CHARS in `answer-shape.ts` for the measured
+    // defect, the deployed-bundle derivation of 3,000 and why the cross-service
+    // drift is benign in both directions.
+    //
+    // Declining here leaves `wireBody` COMPLETELY untouched — no sidecar AND no
+    // blank-line reflow — so a short answer ships exactly as its author composed
+    // it. The reflow is part of the disclosure treatment, not a free readability
+    // win, and applying half a treatment is how a text/shape pair drifts apart.
+    //
+    // ⚠ The floor is checked on `derived`, NOT on `wireBody.assistant_text`.
+    // They differ: derivation re-joins headline/bullets/detail with `\n\n`. The
+    // UI's clamp measures the RENDERED string, so the derived text is the only
+    // one that answers the same question the UI is asking.
+    if (synth !== null && !warrantsProgressiveDisclosure(deriveAnswerTextFromShape(synth))) {
+      // Announced, never silent — see V5AnswerShapeDeclinedBelowFloor. The
+      // answer WAS shapeable and the egress DID run: this event is what stops
+      // a future silent dispatch-path miss reading as "short answer".
+      emit(TelemetryEvents.V5AnswerShapeDeclinedBelowFloor, {
+        request_id: requestId,
+        exit_path: exitPath,
+        dispatch_path: 'route_egress_synthesised',
+        final_text_length: wireBody.assistant_text.length,
+        floor_chars: ANSWER_SHAPE_COLLAPSE_FLOOR_CHARS,
+      });
+    }
+    if (synth !== null && warrantsProgressiveDisclosure(deriveAnswerTextFromShape(synth))) {
       const derived = deriveAnswerTextFromShape(synth);
       const augmented: OlumiResponseWithDebugFields = {
         ...wireBody,
@@ -2442,7 +2595,7 @@ function isPriorAnalysisFreshFromRequest(
 type ProposalConfirmResolution =
   | {
       readonly kind: 'suppress';
-      readonly outcome: 'suppressed_live' | 'suppressed_read_failed';
+      readonly outcome: 'suppressed_live' | 'suppressed_read_failed' | 'clarify_expired';
       readonly liveCount: number;
     }
   | {
@@ -2497,6 +2650,7 @@ async function resolveProposalConfirmAtRoute(
    * byte-identical.
    */
   replayMessage: string | null = null,
+  renewalChipId?: string | null,
 ): Promise<ProposalConfirmResolution> {
   let pendings: readonly PendingAction[];
   try {
@@ -2550,6 +2704,13 @@ async function resolveProposalConfirmAtRoute(
       expiredProposals.map((pa) => resolveProposalRenderCopy(pa.action)),
     );
     if (expiredMatches.length > 0) {
+      const selected = expiredMatches.length === 1 ? expiredProposals[expiredMatches[0]!] : undefined;
+      if (selected?.action.kind === 'apply_proposed_change' &&
+          selected.action.inline_patch?.handler_id === 'add_constraint' &&
+          renewalChipId !== null && (renewalChipId === undefined || selected.chip_id === renewalChipId)) {
+        // The executor may renew this offer, but cannot apply expired consent.
+        return { kind: 'suppress', outcome: 'clarify_expired', liveCount: 0 };
+      }
       return { kind: 'clarify', outcome: 'clarify_expired' };
     }
     return { kind: 'pass', outcome: 'replay_no_match' };
@@ -2572,6 +2733,11 @@ async function resolveProposalConfirmAtRoute(
   // (→ `clarify_expired`) rather than a misleading `suppressed_live`.
   const notExpired = proposals.filter((pa) => !isPendingActionExpired(pa, nowMs));
   if (notExpired.length === 0) {
+    if (pendings.length === 1 && proposals[0]?.action.kind === 'apply_proposed_change' &&
+        proposals[0].action.inline_patch?.handler_id === 'add_constraint' &&
+        renewalChipId !== null && (renewalChipId === undefined || proposals[0].chip_id === renewalChipId)) {
+      return { kind: 'suppress', outcome: 'clarify_expired', liveCount: 0 };
+    }
     return { kind: 'clarify', outcome: 'clarify_expired' };
   }
   const requestGraphHash =
@@ -2579,7 +2745,10 @@ async function resolveProposalConfirmAtRoute(
   const graphSafe =
     requestGraphHash == null
       ? notExpired
-      : notExpired.filter((pa) => pa.preconditions.graph_hash === requestGraphHash);
+      : notExpired.filter((pa) =>
+          // Typed constraints are validated against the executor's canonical graph.
+          (pa.action.kind === 'apply_proposed_change' && pa.action.inline_patch?.handler_id === 'add_constraint') ||
+          pa.preconditions.graph_hash === requestGraphHash);
   if (graphSafe.length === 0) {
     return { kind: 'clarify', outcome: 'clarify_hash_mismatch' };
   }
@@ -3298,18 +3467,178 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           readinessOffer = null;
         }
       }
-      if (readinessOffer) {
+      /**
+       * ⭐ THE SECOND APPLY CONTROL, AND IT ANSWERS A DIFFERENT QUESTION FROM THE
+       * FIRST (trap 21 — named apart, deliberately, not collapsed).
+       *
+       *   `readiness_multi_repair_v1` — "can these blockers be CANONICALISED
+       *      without guessing?" It is value-preserving by construction and its
+       *      module states it never guesses a missing scalar.
+       *   `readiness_value_batch_v1` — "can the missing VALUES be estimated and
+       *      reviewed in one action?" It proposes numbers the model authored,
+       *      every one marked as an AI estimate and none applied unreviewed.
+       *
+       * So the batch is tried ONLY when the repair path found nothing to
+       * canonicalise: where a value-preserving fix exists it is strictly better
+       * than an estimate, and offering both would ask the user to choose between
+       * two controls that sound alike.
+       *
+       * ⚠ THE MODEL CALL SITS BEHIND THE FLOOR CHECK, NOT IN FRONT OF IT.
+       * `prepareValueBatchOffer` returns `below_floor` without calling anything
+       * when fewer than two cells are open — a single missing value is already
+       * served by the per-cell chip, which asks a precise question the user can
+       * answer in a sentence. The witnessed harm is TEN values and ten
+       * round-trips, and the cost should be proportional to that.
+       *
+       * ⭐ AND THE ROUTER DOES NOT KNOW A MODEL EXISTS. It asks for an offer and
+       * gets one. The shared-Anthropic binding — temperature, token budget, the
+       * output schema — belongs to `readiness-value-estimator.ts`, which owns the
+       * prompt those settings serve. It used to live HERE, which made the router
+       * a dedicated Anthropic chat caller for a prompt it does not own, and
+       * `tests/unit/ai-task-lifecycle-authority.test.ts` derives that set from the
+       * source and requires each member to declare a model/prompt authority row.
+       * It fired, correctly. Moving the binding is the fix; widening the expected
+       * array would have been the hand-maintained mirror the guard exists to stop.
+       */
+      let valueBatchOffer: Awaited<ReturnType<typeof prepareValueBatchOffer>> | null = null;
+      // Hoisted out of the try: the review surface below needs the SAME hash the
+      // offer was built against, so the block's `graph_hash_at_generation` names
+      // the model the user is looking at rather than one re-derived later.
+      let valueBatchGraphHash: string | null = null;
+      if (
+        readinessOffer === null
+        && readiness.assessment
+        && readinessPendingReadOk
+        && persistedGraph !== null
+      ) {
+        try {
+          const graphHash = computeAnalysisAffectingGraphHash(
+            persistedGraph as GraphStateIngress,
+          );
+          if (graphHash !== null) {
+            valueBatchGraphHash = graphHash;
+            valueBatchOffer = await prepareValueBatchOffer({
+              assessment: readiness.assessment,
+              graph: persistedGraph,
+              currentGraphHash: graphHash,
+              scenarioId: ingress.scenario_id,
+              brief: ingress.message,
+              requestId,
+            });
+          }
+        } catch (err) {
+          // Fail CLOSED to the existing route: the per-cell chip and the typed
+          // issue list are still there, so the user is never worse off than
+          // before this control existed.
+          valueBatchOffer = null;
+          log.warn(
+            {
+              request_id: requestId,
+              scenario_id: ingress.scenario_id,
+              err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+            },
+            'S2-L1 readiness arm — value batch unavailable; readiness remains available without it',
+          );
+        }
+      }
+      if (valueBatchOffer && valueBatchOffer.kind !== 'offer') {
+        // Recorded by NAME rather than collapsed to a null: `below_floor` and
+        // `estimator_failed` are different facts and only one of them is a defect.
+        log.info(
+          {
+            request_id: requestId,
+            scenario_id: ingress.scenario_id,
+            outcome: valueBatchOffer.kind,
+          },
+          'S2-L1 readiness arm — no value batch offered',
+        );
+      }
+
+      /**
+       * ⭐⭐⭐ THE NUMBERS REACH THE USER HERE, ON THE TURN THAT OFFERS THE CHIP.
+       *
+       * THE DEFECT THIS CLOSES, measured at the bytes on this branch's own first
+       * head: the chip applied N model-authored values to the user's model in one
+       * click and the user saw NONE of them first. `valueBatchOffer.proposal` was
+       * carried into the pending action's `inline_patch` and read by nothing on
+       * the way out — this file consumed `.kind` and `.offer` only, the readiness
+       * response was composed 63 lines ABOVE the estimator call, the chip had no
+       * `detail` and `params: {}`, and `OlumiResponseSchema` is `.strict()` with
+       * no pending/inline_patch key, so NO CLIENT COULD HAVE RENDERED IT however
+       * it was written. Three separate sites told the user they had reviewed
+       * them. That is the product's own ruling — humans remain the authors and
+       * the decision-makers — inverted.
+       *
+       * ⚠ IT RUNS ON `no_writable` TOO, and that is not tidiness. The module
+       * refuses at compose time to accept a silent decline
+       * (`declined_without_reason`) precisely so the reasons can be shown; a
+       * branch that surfaced only the writable set would delete the one thing a
+       * user can act on in the state where the model estimated nothing. There is
+       * still no chip there, because there is still nothing to approve.
+       *
+       * ⛔ AND IT IS ORDERED BEFORE THE APPLY CONTROL DELIBERATELY. `applyOffer`
+       * below reads `valueBatchReviewShown`, so the chip cannot exist on a turn
+       * whose values were not rendered. The previous version of this feature
+       * asserted that coupling in a comment; this one cannot compile without it.
+       */
+      let valueBatchReviewShown = false;
+      if (
+        valueBatchOffer
+        && (valueBatchOffer.kind === 'offer' || valueBatchOffer.kind === 'no_writable')
+        && valueBatchGraphHash !== null
+      ) {
+        const reviewText = composeValueBatchReviewText(valueBatchOffer.proposal);
+        // Fail closed on an empty compose: a chip whose values did not render is
+        // exactly the state this block exists to make impossible.
+        if (reviewText.trim().length > 0) {
+          const reviewBlock = buildValueBatchReviewBlock({
+            proposal: valueBatchOffer.proposal,
+            currentGraphHash: valueBatchGraphHash,
+            createdAtIso: new Date().toISOString(),
+          });
+          readinessResponse = {
+            ...readinessResponse,
+            assistant_text: `${readinessResponse.assistant_text}\n\n${reviewText}`,
+            // The typed mark is ADDITIVE to the numbers, never a substitute for
+            // them: `CoachingBlockSchema.body` caps at 300 characters, so a
+            // ten-cell batch cannot live there. A null block (its own schema
+            // refused it) loses the mark and keeps every number.
+            ...(reviewBlock !== null
+              ? { blocks: [...readinessResponse.blocks, reviewBlock] as typeof readinessResponse.blocks }
+              : {}),
+          };
+          valueBatchReviewShown = true;
+        }
+      }
+
+      /** Whichever apply control this turn earned. At most one is ever offered. */
+      let applyOffer:
+        | { readonly chip: { readonly id: string; readonly label: string; readonly message: string; readonly detail?: string }; readonly pending: PendingAction }
+        | null =
+        readinessOffer
+        ?? (valueBatchOffer && valueBatchOffer.kind === 'offer' && valueBatchReviewShown
+          ? valueBatchOffer.offer
+          : null);
+
+      if (applyOffer) {
         readinessResponse = {
           ...readinessResponse,
-          suggested_actions: [
-            ...readinessResponse.suggested_actions,
-            {
-              id: readinessOffer.chip.id,
-              label: readinessOffer.chip.label,
-              message: readinessOffer.chip.message,
-              ...(readinessOffer.chip.detail ? { detail: readinessOffer.chip.detail } : {}),
-            },
-          ],
+          // The composer already filled this row to its cap. Appending here put
+          // the apply control at index 3 of 4 and the client rendered the first
+          // three, so the control never reached the user. `withReadinessApplyControl`
+          // makes room instead of overflowing.
+          //
+          // ⚠ MERGE RESOLUTION, 18 Sep: staging (#1596) passed `readinessOffer.chip`
+          // because on staging the repair offer was the ONLY apply control. This
+          // branch adds a second one, so `applyOffer` is `readinessOffer ?? the
+          // value-batch offer` — and inside this block `readinessOffer` can be
+          // null. Passing it would throw on exactly the turns this branch exists
+          // to serve. Both fixes are kept: staging's cap-preserving insert, this
+          // branch's two-control selection, bound to the control actually chosen.
+          suggested_actions: withReadinessApplyControl(
+            readinessResponse.suggested_actions,
+            applyOffer.chip,
+          ) as typeof readinessResponse.suggested_actions,
         };
         try {
           const committed = await commitDirectAnswer(readinessResponse, {
@@ -3321,7 +3650,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             llm_calls_used: 0,
             duration_ms: Date.now() - routeStartedAt,
             handler_facts: [],
-            pending_actions: [readinessOffer.pending],
+            pending_actions: [applyOffer.pending],
             priorPendingActions: readinessPriorPendings,
             coaching_state: null,
             userMessage: ingress.message,
@@ -3331,7 +3660,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           // A review control without a durable pending would be a dead control.
           // Keep the complete issue explanation, but remove the apply action.
           readinessResponse = readiness.response;
-          readinessOffer = null;
+          applyOffer = null;
           log.warn(
             {
               request_id: requestId,
@@ -5489,6 +5818,18 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       isAnalyticalQuestion(ingress.message) || boundedNonMutationAnalytical;
     const positiveEditRegexHit = EDIT_GRAPH_POSITIVE_REGEX.test(ingress.message);
     const negativeEditRegexHit = EDIT_GRAPH_NEGATIVE_REGEX.test(ingress.message);
+    let explicitConstraintEditDetected = false;
+    if (!modelChangeRefused && (positiveEditRegexHit || hasConstraintMutationSignal(ingress.message)) &&
+        mayContainExplicitConstraintEdit(ingress.message)) {
+      try {
+        const graphForConstraint = GraphV3.safeParse(await loadPersistedGraphOnce());
+        if (graphForConstraint.success) {
+          explicitConstraintEditDetected = resolveExplicitConstraintEdit(ingress.message, graphForConstraint.data).status !== 'unmatched';
+        }
+      } catch {
+        // The existing route owns the memoised read failure and its recovery.
+      }
+    }
     // Part-accounting conservation law (2026-07-20): the suppressor stands
     // DOWN for mixed value+structural messages so both halves reach the
     // edit_graph lane together — see shouldSuppressEditDispatchForValueUpdate.
@@ -5745,6 +6086,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         requestId,
         extensions.graphState ?? null,
         isConfirmationShaped ? null : ingress.message,
+        ingress.source === 'chip_click' || ingress.source === 'chip'
+          ? ingress.chip?.action_type === 'add_constraint' ? ingress.chip.id : null
+          : undefined,
       );
       emit(TelemetryEvents.V5EditGraphProposalConfirmResolved, {
         request_id: requestId,
@@ -5793,7 +6137,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // shared bounded classifier owns the turn, every legacy edit intercept
     // stands down; the normal router gets exactly one chance to answer it.
     const bypassEditHandling =
-      proposalConfirmSuppressed || stateQuerySuppressed || boundedNonMutationAnalytical || modelChangeRefused;
+      proposalConfirmSuppressed || explicitConstraintEditDetected || stateQuerySuppressed || boundedNonMutationAnalytical || modelChangeRefused;
 
     // ══════════════════════════════════════════════════════════════════════
     // ⭐⭐ ROADMAP 2.1353 — THE TWO EDIT-CLARIFY INTERCEPTS MUST REMEMBER ASKING.
@@ -6632,6 +6976,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         answeredAskClaim) &&
       !modelChangeRefused &&
       !proposalConfirmSuppressed &&
+      !explicitConstraintEditDetected &&
       // Edge-chip door (ROADMAP 1.187 / #30, HARD GATE before Lane U). A typed
       // mutation chip_click (source==='chip_click' with a defined, non-readiness
       // `action_type` — e.g. `adjust_edge_strength`/`set_factor_value`) whose
@@ -7911,7 +8256,15 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       ...(run.withheldExplanationReason !== undefined
         ? { withheldExplanationReason: run.withheldExplanationReason }
         : {}),
+      // WHICH handler declined, for the diagnostic trace only. Absent ⇒
+      // nothing stamped, which is the honest reading for every turn that did
+      // not take the recoverable-handler path.
+      ...(run.handlerRefusal !== undefined ? { handlerRefusal: run.handlerRefusal } : {}),
       ...(run.freshness ? { freshness: run.freshness } : {}),
+      // G3 — the scenario-bound verdict, beside the wire-bound one. Absent
+      // unless a durable reasoning authority licensed it; the seam then changes
+      // nothing, so every other exit family stays byte-identical.
+      ...(run.scenarioFreshness ? { scenarioFreshness: run.scenarioFreshness } : {}),
       requestStartedAt: routeStartedAt,
       scenarioId: ingress.scenario_id,
       turnId: ingress.turn_id,

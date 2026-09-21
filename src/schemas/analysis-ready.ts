@@ -21,6 +21,7 @@
  */
 
 import { z } from "zod";
+import { GoalThresholdCapProvenanceSchema } from "../utils/goal-threshold-cap.js";
 
 /**
  * Contract version for the analysis-ready payload shape.
@@ -138,6 +139,18 @@ export type OptionForAnalysisT = z.infer<typeof OptionForAnalysis>;
  * Identifies why an option-factor pair can't produce an intervention magnitude.
  */
 export const AnalysisBlockerType = z.enum(["missing_value", "ambiguous_value", "missing_connection", "constraint_dropped"]);
+/**
+ * The published blocker vocabulary as a TYPE.
+ *
+ * Exported so consumers can key an EXHAUSTIVE map off it instead of restating
+ * the members. `analysis-ready-helper.ts` — the estate's single named readiness
+ * authority — held a four-case `switch` over these values whose `default`
+ * returned `null`, i.e. a hand-maintained copy of this enum whose drift silently
+ * DROPPED blockers on three live surfaces. A `satisfies Record<AnalysisBlockerTypeT, …>`
+ * turns that drift into a compile error, so adding a member here now REDs the
+ * mapper until it is handled.
+ */
+export type AnalysisBlockerTypeT = z.infer<typeof AnalysisBlockerType>;
 
 /**
  * Suggested action to resolve a blocker.
@@ -450,7 +463,22 @@ export const AnalysisReadyPayload = z.object({
   blockers: z.array(AnalysisBlocker).optional(),
   /** Model adjustments surfaced from STRP/repair mutations (Phase 2C) */
   model_adjustments: z.array(ModelAdjustment).optional(),
-  /** Goal threshold (normalised 0–1 probability from the goal node) */
+  /**
+   * The goal node's threshold, NORMALISED against `goal_threshold_cap`
+   * (`goal_threshold = goal_threshold_raw / goal_threshold_cap`).
+   *
+   * ⛔ NOT A PROBABILITY, and this comment said it was. It is a target
+   * expressed as a fraction of a denominator — the number ISL scores
+   * `P(sample >= x)` AGAINST, never the resulting probability. A consumer that
+   * took the old comment at its word would render "0.8" as "80% likely", which
+   * is a claim the product never computed.
+   *
+   * ⚠ AND ITS MEANING DEPENDS ON `goal_threshold_cap_provenance` BELOW. When
+   * the denominator was derived from the target itself, this value is the
+   * CONSTANT 0.8 for every target and carries no information about the goal.
+   * Render the user's figure from `goal_threshold_raw` + `goal_threshold_unit`,
+   * which are honest whatever the provenance says.
+   */
   goal_threshold: z.number().optional(),
   /**
    * ROADMAP 2.315(a) — the RAW goal target, as the user stated it.
@@ -481,6 +509,28 @@ export const AnalysisReadyPayload = z.object({
   goal_threshold_unit: z.string().optional(),
   /** Normalisation denominator: goal_threshold = goal_threshold_raw / cap. */
   goal_threshold_cap: z.number().optional(),
+  /**
+   * WHICH RULE produced `goal_threshold_cap` — see
+   * `GOAL_THRESHOLD_CAP_PROVENANCE` (utils/goal-threshold-cap.ts).
+   *
+   * ⭐ THE REASON THIS CHANNEL NEEDED IT. `goal_threshold_cap` reached
+   * consumers with no account of where it came from, so `0.8` against a cap of
+   * 25,000 was indistinguishable from `0.8` against a cap the user actually
+   * named. It is not: on `target_derived_headroom` the cap is `raw * 1.25`, so
+   * the ratio is 0.8 by construction for EVERY target — the same number for a
+   * GBP 20,000 goal and a GBP 20,000,000 one — and no user supplied the
+   * denominator. On `metric_scale` / `inherited` the denominator comes from
+   * outside the target and the ratio is meaningful.
+   *
+   * ⚠ RIDES ONLY WITH THE CAP, and is CARRIED, NEVER RECOMPUTED — a fresh
+   * resolution can disagree with the cap the graph was actually scored against
+   * (the doctrine is order-dependent). See `utils/goal-threshold-trio.ts`.
+   *
+   * ABSENCE MEANS UNATTESTED — never defaulted. It does NOT suppress the
+   * honest target display: `goal_threshold_raw` + `goal_threshold_unit` are
+   * unaffected by any of this and remain the figure to show the user.
+   */
+  goal_threshold_cap_provenance: GoalThresholdCapProvenanceSchema.optional(),
   /** Bias findings from structural heuristic detectors (same shape as CEEBiasFindingV1).
    *  Empty array when no biases detected. Always present for stable UI consumption. */
   bias_findings: z.array(z.object({

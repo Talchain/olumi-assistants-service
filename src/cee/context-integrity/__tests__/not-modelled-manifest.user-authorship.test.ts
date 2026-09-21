@@ -87,7 +87,11 @@ import { dirname, join } from "node:path";
 import { OBSERVED_STATE_SOURCE_LITERALS } from "@talchain/schemas";
 
 import { deriveNotModelledManifest } from "../not-modelled-manifest.js";
-import { classifyValueSource } from "../../graph-readiness/obligation-provenance.js";
+import {
+  classifyValueSource,
+  earnsAuthorshipCredit,
+  reflectsAHumanAct,
+} from "../../graph-readiness/obligation-provenance.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -232,21 +236,49 @@ describe("the ledger never claims a value the user authored", () => {
    * `obligation-provenance.classifyValueSource` answers "WHO AUTHORED this?".
    * This module answers "IS THIS STAMP A USER-WRITE RECEIPT?" — i.e. is the
    * label itself trustworthy evidence of user authorship. They are different
-   * questions and they differ on exactly two literals.
+   * questions and they differ on exactly two literals. (⭐ Since 20 Sep 2026 the
+   * upstream side of the comparison is `reflectsAHumanAct`, which is WIDER than
+   * authorship: `user_confirmed` and `user_assumption` are `user_ratified` — a
+   * human act that earns no leader claim.)
    *
    * Pinned in BOTH directions, so neither silently absorbs the other.
    */
   describe("agreement with the authorship authority, divergence pinned", () => {
-    it("every user-write receipt is also `user_stated` upstream", () => {
+    /**
+     * ⚠ THE UPSTREAM PREDICATE IS `reflectsAHumanAct`, NOT AUTHORSHIP — and the
+     * gap between them is the 20 Sep 2026 ruling, asserted here so it cannot be
+     * closed by accident. `user_confirmed` and `user_assumption` are
+     * `user_ratified` upstream: NOT authorship (they earn no leader claim), but
+     * still a human act, and therefore still receipts here. A guard written
+     * against `=== "user_stated"` would have quietly widened this disclosure to
+     * describe a value the user confirmed as Olumi's own invention.
+     */
+    it("every user-write receipt reflects a human act upstream", () => {
       for (const source of USER_WRITE_RECEIPTS) {
-        expect(classifyValueSource(source), `${source} upstream`).toBe("user_stated");
+        expect(
+          reflectsAHumanAct(classifyValueSource(source)),
+          `${source} upstream`,
+        ).toBe(true);
       }
     });
 
-    it("the divergence is exactly {brief_extraction, explicit}: `user_stated` upstream, NOT a receipt here", () => {
+    it("⭐ the two RATIFIED receipts are NOT authorship — the ruling, pinned in both directions", () => {
+      for (const source of ["user_confirmed", "user_assumption"] as const) {
+        expect(classifyValueSource(source), source).toBe("user_ratified");
+        expect(earnsAuthorshipCredit(classifyValueSource(source)), source).toBe(false);
+        // …and they are STILL receipts, which is the half that must not be lost.
+        expect((USER_WRITE_RECEIPTS as readonly string[]).includes(source), source).toBe(true);
+      }
+      // CONTRAST: a genuinely authored receipt still earns authorship, so the
+      // assertions above are about those two literals and not about the predicate
+      // having collapsed to a constant.
+      expect(earnsAuthorshipCredit(classifyValueSource("user_override"))).toBe(true);
+    });
+
+    it("the divergence is exactly {brief_extraction, explicit}: a human act upstream, NOT a receipt here", () => {
       const divergent = OBSERVED_STATE_SOURCE_LITERALS.filter(
         (lit) =>
-          classifyValueSource(lit) === "user_stated" &&
+          reflectsAHumanAct(classifyValueSource(lit)) &&
           !(USER_WRITE_RECEIPTS as readonly string[]).includes(lit),
       );
       expect([...divergent].sort()).toEqual(["brief_extraction", "explicit"]);

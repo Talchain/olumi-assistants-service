@@ -194,12 +194,17 @@ import { readTopLevelFlipRows } from '../context/flip-threshold-rows.js';
 import { findForbiddenPhraseHit, RAW_DECIMAL_RE } from './forbidden-user-facing-phrases.js';
 import { applyTerminologyRewrite } from './terminology-rewrite.js';
 import {
+  composeStatedDissentBody,
+  isStatedDissentOfferComposable,
+} from '../coaching/stated-dissent-offer-text.js';
+import {
   disagreementResolutionSignals,
   evidenceSignals,
   fragileEdgeOfferSignals,
   guidanceSignalsForCoachingKind,
   overrideStressTestSignals,
   reviewCardSignals,
+  statedDissentReviewSignals,
 } from './guidance-signals.js';
 // ROADMAP 2.989 — the fragile-edge selector (pure) and the leader admission.
 // `mayPresentLeaderClaimForFact` is IMPORTED, not restated: the offer's
@@ -207,6 +212,11 @@ import {
 // ⚠ It was the per-fact withheld LEAF until the unrequested-run confinement;
 // the leaf answers only "does the constraint verdict permit a leader?", and
 // compose now also asks "did anybody request this analysis?".
+import {
+  canonicaliseEdgeReference,
+  canonicalEdgeAddress,
+  composeEdgeIdentity,
+} from './edge-address.js';
 import { selectFragileEdge } from '../coaching/select-fragile-edge.js';
 // Lane C — the grounded counter-case. NOTE it answers a DIFFERENT question
 // from `selectFragileEdge` above ("what should the team argue against?" vs
@@ -522,41 +532,136 @@ function populateGraphNodeLookup(
   // Without this pass, every scenario_context card would drop (the
   // round-3 fail-closed gate is correct; the lookup just needed to be
   // wider).
+  //
+  // ⛔⛔ AND IT WAS STILL NOT WIDE ENOUGH — IT KEYED ON A FIELD THE CONTRACT
+  // DOES NOT DEFINE, AND THAT COST A REAL USER TWELVE CARDS.
+  //
+  // Measured on Render `srv-d4slpaili9vc73eiq4og`, 17 Sep 2026 17:39–18:20Z, one
+  // session, twelve occurrences of `v5.phase3.block_dropped` with
+  // `drop_reason: 'lookup_miss'` — `scenario_context` on `edge_id`, `pre_mortem`
+  // on `grounded_in`. Every pre-mortem and scenario card that referenced a
+  // relationship was deleted before egress.
+  //
+  // This pass read `e.id` and `continue`d when it was absent. `EdgeV3Schema`
+  // DECLARES NO `id` (contrast control: `NodeV3Schema` declares one, with
+  // `NODE_ID_PATTERN`), and `GraphV3Schema.edges` is `z.array(EdgeV3Schema)` —
+  // so for a canonical graph NO EDGE WAS EVER REGISTERED and every edge
+  // reference missed BY CONSTRUCTION. The drop gates downstream are correct
+  // fail-closed guards; the map underneath them was empty.
+  //
+  // ⭐ THE MODEL WAS CITING THE RIGHT THING THE WHOLE TIME. Both committed live
+  // captures (`__tests__/fixtures/dsk-walk/*.enrichment.json`) key
+  // `scenario_contexts` and `pre_mortem.grounded_in` on `from->to` endpoint
+  // addresses, which is exactly what `decision-review-graph-projection.ts`
+  // hands the model as an edge's `id` and what `fragile_edges[].edge_id`
+  // carries. The producer honoured the prompt; the consumer looked for a field
+  // that does not exist. So the repair is NOT to relax a gate — it is to make
+  // the ADDRESS resolvable, by the identity the contract actually defines.
   const edges = graph.edges;
   if (Array.isArray(edges)) {
+    // ⚠ THE PAIR DOES NOT UNIQUELY RESOLVE EVERY CASE, so the address is read
+    // in two passes rather than written straight into the map. PARALLEL EDGES
+    // (two edges over the same ordered pair) share ONE address between them,
+    // and `Map.set` would silently hand the card to whichever came last.
+    // Attaching a card to an arbitrary one of several relationships asserts an
+    // identity nothing gave us — the exact fabrication class the `lookup_miss`
+    // gates exist to prevent. An address claimed more than once therefore
+    // resolves to NEITHER edge and the card drops exactly as it does today,
+    // with its existing telemetry. This is `deriveLabelIndex`'s own
+    // `AMBIGUOUS_LABEL` doctrine one level down, not a new opinion.
+    const pending: Array<{
+      readonly explicitId: string | null;
+      readonly address: string | null;
+      readonly ref: GraphNodeRef;
+    }> = [];
+    const addressClaims = new Map<string, number>();
     for (const raw of edges) {
       const e = readRecord(raw);
       if (e === null) continue;
-      const id = typeof e.id === 'string' ? e.id : null;
-      if (id === null) continue;
+      const explicitId = typeof e.id === 'string' && e.id.length > 0 ? e.id : null;
       const explicitLabel = typeof e.label === 'string' && e.label.length > 0
         ? e.label
         : null;
-      if (explicitLabel !== null) {
-        lookup.set(id, { id, label: explicitLabel, kind: 'edge' });
-        continue;
-      }
-      // Derive `from → to` from canonical endpoint node labels. Skip if
-      // either endpoint isn't in the node lookup (graph drift). Endpoint
-      // ids: `from_node_id`/`to_node_id` (enrichment shape) or `from`/`to`
-      // (persisted GraphStateIngress shape).
+      // Endpoint ids: `from_node_id`/`to_node_id` (enrichment shape) or
+      // `from`/`to` (the canonical `EdgeV3` / persisted shape).
       const fromId = typeof e.from_node_id === 'string' ? e.from_node_id
         : typeof e.from === 'string' ? e.from
         : null;
       const toId = typeof e.to_node_id === 'string' ? e.to_node_id
         : typeof e.to === 'string' ? e.to
         : null;
-      if (fromId === null || toId === null) continue;
-      const fromRef = lookup.get(fromId);
-      const toRef = lookup.get(toId);
-      if (fromRef === undefined || toRef === undefined) continue;
-      lookup.set(id, {
-        id,
-        label: `${fromRef.label} → ${toRef.label}`,
-        kind: 'edge',
-      });
+      // Both endpoints must resolve to canonical nodes before the pair is an
+      // address: an endpoint that is not in the graph is drift, and an address
+      // built over it would point at nothing (the pre-existing skip).
+      const fromRef = fromId === null ? undefined : lookup.get(fromId);
+      const toRef = toId === null ? undefined : lookup.get(toId);
+      const addressed = fromId !== null && toId !== null
+        && fromRef !== undefined && toRef !== undefined;
+      const address = addressed ? canonicalEdgeAddress(fromId, toId) : null;
+      // Derive `from → to` from canonical endpoint node labels when the
+      // producer named none. An explicit label still wins, unchanged.
+      const label = explicitLabel ?? (
+        fromRef !== undefined && toRef !== undefined
+          ? `${fromRef.label} → ${toRef.label}`
+          : null
+      );
+      // Nothing honest to register: no label to show and/or no key to file it
+      // under. Both were already `continue`s; neither is new.
+      if (label === null) continue;
+      if (explicitId === null && address === null) continue;
+      // The ref's OWN id is the ACTIONABLE composite, matching the fragile-edge
+      // card above (`composeEdgeIdentity`) — the string
+      // `adjust-edge-strength.ts::parseEdgeId` round-trips, so the thing the
+      // card points at and the thing the handler resolves are one string. A
+      // producer-supplied id still wins, so nothing that resolved before moves.
+      const id = explicitId ?? (
+        addressed && fromId !== null && toId !== null
+          ? composeEdgeIdentity(fromId, toId)
+          : ''
+      );
+      if (id.length === 0) continue;
+      pending.push({ explicitId, address, ref: { id, label, kind: 'edge' } });
+      if (address !== null) {
+        addressClaims.set(address, (addressClaims.get(address) ?? 0) + 1);
+      }
+    }
+    for (const entry of pending) {
+      // A producer-minted id is unambiguous by construction and keeps its own
+      // key — so a producer that DOES distinguish its parallel edges stays
+      // fully addressable even where the shared endpoint pair cannot.
+      if (entry.explicitId !== null) lookup.set(entry.explicitId, entry.ref);
+      if (entry.address !== null && addressClaims.get(entry.address) === 1) {
+        lookup.set(entry.address, entry.ref);
+      }
     }
   }
+}
+
+/**
+ * Resolve an LLM-supplied graph reference to its canonical ref.
+ *
+ * ⭐ THIS IS THE CONSUMER HALF OF THE EDGE-IDENTITY REPAIR. A direct hit covers
+ * every node id and every producer-minted edge id, exactly as before. The
+ * fallback normalises an EDGE ADDRESS onto the one key the lookup is registered
+ * under, so the `->` spelling the decision_review producer emits and the `→`
+ * spelling the graph-edit path round-trips both resolve to the same edge
+ * instead of one of them missing by spelling alone.
+ *
+ * ⚠ IT WIDENS NO GATE. A reference that names an edge the graph does not
+ * contain, an address whose endpoints are not nodes, an ambiguous parallel-edge
+ * address, or a string with no separator at all still returns `undefined` and
+ * still drops its card with the same telemetry. The only references that newly
+ * resolve are ones naming an edge that GENUINELY EXISTS.
+ */
+export function resolveGraphEntityRef(
+  lookup: GraphNodeLookup,
+  raw: string,
+): GraphNodeRef | undefined {
+  const direct = lookup.get(raw);
+  if (direct !== undefined) return direct;
+  const address = canonicaliseEdgeReference(raw);
+  if (address === null || address === raw) return undefined;
+  return lookup.get(address);
 }
 
 
@@ -1608,6 +1713,43 @@ function buildJudgementLensOffer(selection: LensSelection): JudgementLensOffer |
 }
 
 /**
+ * T3 — the stated-dissent offer, or `null` for every other lens.
+ *
+ * Deliberately NOT folded into {@link buildJudgementLensOffer}: that function's
+ * whole body is an edge — `selection.judgementEdge`, two endpoint labels, an
+ * edge-shaped `target_refs` entry and an edge-shaped action prompt. T3 has no
+ * edge and no graph subject at all, so folding it in would mean four new
+ * `isDissent` branches through a function whose header records that FOUR
+ * readings of one discrimination is how a fifth branch acquires the wrong one.
+ *
+ * ⚠ `targetRefs` IS EMPTY, AND THAT IS DERIVED RATHER THAN LAZY.
+ * `TargetRefKind` is a CLOSED 7-value schema enum — factor, option, edge, goal,
+ * risk, constraint, outcome — with no member for a FINDING, and `target_refs`
+ * is `z.array(TargetRefSchema)` with no minimum, so an empty array is the
+ * contract's own way of saying "this card points at no graph entity". Choosing
+ * the nearest wrong kind would state a false OBJECT on a producer-owned field,
+ * which is the wrong-object class ROADMAP 2.392 exists to kill; inventing an id
+ * would put an id in a user-facing block. Empty is the true answer.
+ */
+function buildStatedDissentOffer(selection: LensSelection): JudgementLensOffer | null {
+  if (selection.lens !== 'stated_dissent_review') return null;
+  const dissent = selection.statedDissent;
+  if (dissent === undefined) return null;
+  // Same backstop stance as the sibling offers: the SAME pure predicate ran at
+  // eligibility inside `selectLens`, so this arm is unreachable through the
+  // live path — it stays because a lens id and its payload travelling as two
+  // fields is exactly the pairing a future refactor can break.
+  if (!isStatedDissentOfferComposable(dissent.openCount)) return null;
+  return {
+    body: composeStatedDissentBody(selection.body, dissent.openCount),
+    // No action pair in v1 — see `coaching/stated-dissent-offer-text.ts`. The
+    // mint emits `action_label`/`action_prompt` together or not at all, so the
+    // card ships with its finding and no inert chip.
+    targetRefs: [],
+  };
+}
+
+/**
  * ⚠ TEST-ONLY as of ROADMAP 2.211. Complete caller manifest at this tip
  * (`rg -a` over the whole repo excluding `node_modules`): this definition, one
  * prose mention in `lens-selector.ts`, and three spec files
@@ -1752,10 +1894,22 @@ export function buildLensSurface(
     return null;
   }
 
+  // T3 — same backstop stance again. The lens exists only to carry this
+  // sentence, so an uncomposable offer drops the SURFACE rather than shipping a
+  // card whose body opens on a tail with no antecedent.
+  const statedDissentOffer = buildStatedDissentOffer(selection);
+  if (selection.lens === 'stated_dissent_review' && statedDissentOffer === null) {
+    return null;
+  }
+
   // The turn's ONE action pair, whichever lens produced it. `judgementOffer`
   // first for the same reason `body`/`target_refs` read it first below: the two
   // offer kinds are mutually exclusive by lens, so the order is a tie-break that
   // can never fire, not a precedence rule.
+  // T3 carries no action pair, so it is deliberately absent from this chain:
+  // adding `statedDissentOffer?.actionLabel` would read as though it might one
+  // day supply one, and a later slice adding a PROBE prompt must revisit the
+  // routing gates rather than inherit a silent hook.
   const actionLabel = judgementOffer?.actionLabel ?? offer?.actionLabel;
   const actionPrompt = judgementOffer?.actionPrompt ?? offer?.actionPrompt;
 
@@ -1785,24 +1939,34 @@ export function buildLensSurface(
     coaching_kind: 'strengthen' as const,
     title: truncate(selection.title, TITLE_MAX),
     body: truncate(
-      judgementOffer?.body ?? offer?.body ?? groundedSensitivity?.grounded?.body ?? selection.body,
+      judgementOffer?.body ??
+        statedDissentOffer?.body ??
+        offer?.body ??
+        groundedSensitivity?.grounded?.body ??
+        selection.body,
       BODY_MAX,
     ),
     source: 'deterministic_signal' as const,
-    target_refs: (judgementOffer?.targetRefs ?? offer?.targetRefs ?? []) as readonly TargetRef[],
+    target_refs: (judgementOffer?.targetRefs ??
+      statedDissentOffer?.targetRefs ??
+      offer?.targetRefs ??
+      []) as readonly TargetRef[],
     priority_rank: 15,
     // Wave-2 ask 1 (0.19.0) + 1.120 residual (0.21.0): producer-owned guidance
     // signals for `strengthen` (category could_fix, signal_code STRENGTHEN_ITEM)
     // — except on the fragile-edge offer (detector class: result fragility) and
-    // the two judgement lenses (detector classes: the user's own override / the
-    // validation pipeline's contested verdict — see `guidance-signals.ts`).
+    // the three judgement lenses (detector classes: the user's own override /
+    // the validation pipeline's contested verdict / the user's own stated
+    // objection — see `guidance-signals.ts`).
     ...(selection.lens === 'override_stress_test'
       ? overrideStressTestSignals()
       : selection.lens === 'disagreement_resolution'
         ? disagreementResolutionSignals()
-        : offer !== null
-          ? fragileEdgeOfferSignals()
-          : guidanceSignalsForCoachingKind('strengthen')),
+        : selection.lens === 'stated_dissent_review'
+          ? statedDissentReviewSignals()
+          : offer !== null
+            ? fragileEdgeOfferSignals()
+            : guidanceSignalsForCoachingKind('strengthen')),
     // ROADMAP 2.989 — the ACTION. ⚠ NO `action_intent`, and that is derived,
     // not forgotten. `ActionIntentLiteral` is a CLOSED 15-value schema enum with
     // no edge-mutation member; its nearest value, `edit_factor`, would state a
@@ -2118,10 +2282,16 @@ export function buildLensCompanionBlocks(
     // 2.690 §B.5 names the P-003 companion reuse as a candidate for a LATER
     // slice — with honest copy — and that is a reviewed addition here, not a
     // default.
+    //
+    // T3 (`stated_dissent_review`) declares no companion either, and for a
+    // sharper reason than its siblings: a structured exercise block would be
+    // the product taking a turn at the objection, and the whole proposition of
+    // that card is that the objection is the user's to answer.
     case 'sensitivity_flip_risk':
     case 'evpi_evidence_priority':
     case 'override_stress_test':
     case 'disagreement_resolution':
+    case 'stated_dissent_review':
     case 'fragile_edge_resolution':
     case 'what_if_counterfactual':
       return [];
@@ -2535,7 +2705,7 @@ function buildPreMortemCard(
   const groundedStrings = grounded.filter((g): g is string => typeof g === 'string' && g.length > 0);
   const targetRefs: TargetRef[] = [];
   for (const raw of groundedStrings) {
-    const ref = lookup.get(raw);
+    const ref = resolveGraphEntityRef(lookup, raw);
     if (ref !== undefined) targetRefs.push(ref);
   }
   if (groundedStrings.length > 0 && targetRefs.length === 0) {
@@ -2858,7 +3028,13 @@ function buildBiasCards(
     const targetRefs: TargetRef[] = [];
     for (const elt of affected) {
       if (typeof elt !== 'string') continue;
-      const ref = lookup.get(elt);
+      // Same LLM-supplied edge-reference class as the two drop sites above:
+      // the served prompt tells the model `affected_elements` may carry
+      // "valid node/edge ids from graph". This one never DROPPED the card — a
+      // missed edge just silently lost its link — so it cost a link rather
+      // than a card, but it is the same unresolvable address and the same
+      // one-line resolution.
+      const ref = resolveGraphEntityRef(lookup, elt);
       if (ref !== undefined) targetRefs.push(ref);
     }
     const candidate = {
@@ -3072,7 +3248,7 @@ function buildScenarioContextCards(
     // the canonical graph lookup. The Record key IS the edge claim;
     // emitting with `target_refs: []` would publish a "scenario about
     // an unknown thing" — fail-closed instead.
-    const ref = lookup.get(edgeId);
+    const ref = resolveGraphEntityRef(lookup, edgeId);
     if (ref === undefined || ref.kind !== 'edge') {
       emitDrop({
         block_type: 'review_card',

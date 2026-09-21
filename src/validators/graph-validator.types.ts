@@ -304,12 +304,15 @@ export const MAX_OPTIONS = 6;
 export const ALLOWED_EDGES: AllowedEdgeRule[] = [
   { fromKind: "decision", toKind: "option" },
   { fromKind: "option", toKind: "factor", toFactorCategory: "controllable" },
+  // Retained hypothesis; analysis readiness requires an intervention mapping.
+  { fromKind: "option", toKind: "risk" },
   { fromKind: "factor", toKind: "factor", toFactorCategory: "observable" },
   { fromKind: "factor", toKind: "factor", toFactorCategory: "external" },
   { fromKind: "factor", toKind: "outcome" },
   { fromKind: "factor", toKind: "risk" },
   { fromKind: "outcome", toKind: "goal" },
   { fromKind: "risk", toKind: "goal" },
+  { fromKind: "risk", toKind: "outcome" },
 ];
 
 /**

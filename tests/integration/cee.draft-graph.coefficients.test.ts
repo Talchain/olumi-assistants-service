@@ -22,8 +22,16 @@ vi.mock("../../src/cee/verification/index.js", () => ({
   },
 }));
 
-// Mock enrichment to pass through — avoids adding partial data objects that fail schema
-vi.mock("../../src/cee/factor-extraction/enricher.js", () => ({
+// Mock enrichment to pass through — avoids adding partial data objects that fail schema.
+// ⚠ SPREAD, NOT A HAND-LIST (parent CLAUDE.md trap 12). A `vi.mock` factory
+// REPLACES the module, so every export this file did not think to name became
+// `undefined` — and Stage 3 calls them for real. When `creditUserTypedFigures`
+// was added to the enricher, this factory made the whole draft endpoint answer
+// 400 (`cee.enrich.crashed` → `CEE_GRAPH_INVALID`), in three specs at once.
+// `importOriginal` gives every unnamed export its real implementation, so the
+// mock stays scoped to the ONE function this test means to stub.
+vi.mock("../../src/cee/factor-extraction/enricher.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/cee/factor-extraction/enricher.js")>()),
   enrichGraphWithFactorsAsync: vi.fn().mockImplementation((graph: any) => ({
     graph,
     enriched: false,
@@ -44,6 +52,11 @@ vi.mock("../../src/cee/structure/index.js", () => ({
     defaultStrengthPercentage: 0,
   }),
   detectStrengthClustering: () => ({
+    detected: false,
+    coefficientOfVariation: 0,
+    edgeCount: 0,
+  }),
+  detectGoalLayerStrengthClustering: () => ({
     detected: false,
     coefficientOfVariation: 0,
     edgeCount: 0,

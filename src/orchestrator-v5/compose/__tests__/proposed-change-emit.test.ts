@@ -63,6 +63,20 @@ function makeCtx(overrides: Partial<ProposedChangeContext> = {}): ProposedChange
   };
 }
 
+it('keeps frame authority in the pending offer and distinguishes otherwise identical frames', () => {
+  const level = emitProposedChange(makeProposal({ constraint_value_frame: 'level' }), makeCtx());
+  const delta = emitProposedChange(makeProposal({ constraint_value_frame: 'delta' }), makeCtx());
+  const unknown = emitProposedChange(makeProposal(), makeCtx());
+  expect(level.status).toBe('success');
+  expect(delta.status).toBe('success');
+  expect(unknown.status).toBe('success');
+  if (level.status !== 'success' || delta.status !== 'success' || unknown.status !== 'success') throw new Error('expected offers');
+  expect(level.chip.id).not.toBe(delta.chip.id);
+  expect(level.chip.id).not.toBe(unknown.chip.id);
+  expect(level.pending.action.kind === 'apply_proposed_change' && level.pending.action.inline_patch?.constraint_value_frame).toBe('level');
+  expect(level.chip).not.toHaveProperty('constraint_value_frame');
+});
+
 describe('emitProposedChange — proposal id stability', () => {
   it('produces a stable id of the form prop_<12-hex> for the same inputs', () => {
     const a = emitProposedChange(makeProposal(), makeCtx());

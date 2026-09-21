@@ -39,6 +39,7 @@ import {
   DRAFT_RECORD_EFFECTS,
   DRAFT_RECORD_ROLES,
   DRAFT_RECORD_STATED_KINDS,
+  DRAFT_RECORD_VALUE_SCALES,
   type DraftRecordSet,
 } from "./grammar.js";
 import { projectRecordsToGraph, type RecordProjection } from "./projector.js";
@@ -60,6 +61,29 @@ const StatedItemWire = z.object({
   value: z.number().optional(),
   unit: z.string().optional(),
   role: z.enum(DRAFT_RECORD_ROLES).optional(),
+  // The convention the user's number is written in. Optional and additive,
+  // exactly as the claims-side twin: absence means UNDECLARED, never
+  // `unit_interval`.
+  // ⛔⛔ `.catch(undefined)` — A MALFORMED VALUE DEGRADES TO ABSENCE, NEVER TO A
+  // DEAD DRAFT. Same ruling `applies_to_*` above carries, for the same reason:
+  // `value_scale` is an OPTIONAL ENHANCEMENT whose ABSENCE is defined as
+  // byte-identical to the behaviour before it existed, so absence IS the honest
+  // degradation and failing the whole record set to reach it is
+  // disproportionate.
+  //
+  // MEASURED on this tree, with a positive control AND a contrast control, on
+  // the shape the prompt-only fallback can produce (no grammar attached, so
+  // nothing enforces the enum provider-side):
+  //
+  //   valid                    -> ok, value_scale carried
+  //   value_scale: "percent"   -> ok=false, "not_a_record_set"      <<<
+  //   applies_to_stated: "0"   -> ok        (its `.catch` absorbs it)
+  //   kind: "nonsense"         -> ok=false  (a DISCRIMINATOR still refuses,
+  //                                          and must — that is the contrast)
+  //
+  // One out-of-enum string on ONE stated item loses the ENTIRE draft — every
+  // quote, figure and limit — over a field that did not exist last week.
+  value_scale: z.enum(DRAFT_RECORD_VALUE_SCALES).optional().catch(undefined),
   direction: z.enum(DRAFT_RECORD_DIRECTIONS).optional(),
   // `option` only — grammar design note 5.
   is_baseline: z.boolean().optional(),
@@ -152,6 +176,36 @@ const InferenceClaimWire = z.object({
   // that comment promised now exists and it RED-ed on this change before I had
   // wired it — which is the guard working, not a nuisance.
   unit: z.string().optional(),
+  // ⭐ WHAT CONVENTION THAT NUMBER IS WRITTEN IN — v10, and it is carried here
+  // in the SAME change as the grammar field for the reason the comment above
+  // gives. `unit` and `value_scale` answer different questions and are the two
+  // halves of one quantity; carrying one without the other would leave the
+  // projector inferring the convention from magnitudes, which is the defect
+  // v10 exists to remove.
+  // ⚠ THE SAME `.catch(undefined)`, applied to the v10 twin. PRE-EXISTING, not
+  // introduced here — but it is the identical field, the identical harm and two
+  // words away, and leaving one of two instances tolerant would read as a
+  // deliberate asymmetry when it is not one. Named rather than done silently:
+  // if a loud failure was wanted here, this is the line to argue with.
+  value_scale: z.enum(DRAFT_RECORD_VALUE_SCALES).optional().catch(undefined),
+  // ⭐⭐ DECLARED HERE TOO, AND THE OMISSION WAS A SECOND LAYER OF THE SAME
+  // DEFECT. `likelihood` was added to the model-facing JSON Schema and to
+  // `DraftInferenceClaim`, and the rebuild below was then taught to name it —
+  // and it still did not compile, because THIS schema is what `parsed.data`
+  // is typed from. Undeclared here, the field arrives as passthrough-unknown
+  // (`{}`) and cannot be assigned to a `number`.
+  //
+  // ⚠ THE TYPE ERROR WAS THE ONLY THING THAT CAUGHT IT, and only because the
+  // rebuild is a CONVERSION rather than an assertion (see this function's own
+  // note above). Had the rebuild used `as`, the field would have validated,
+  // been named, compiled, and still arrived `undefined` at the projector.
+  //
+  // ⚠ `.passthrough()` IS WHY THIS IS SILENT. It admits the field at runtime,
+  // so nothing REDs at validation; the wire carries a value that the typed
+  // surface does not know exists. A `.strict()` schema would have rejected it
+  // loudly — which is worse for tolerance and better for this class, and is a
+  // trade this seam has already made deliberately.
+  likelihood: z.number().optional(),
   // `option_refinement` only — grammar design note 5.
   is_baseline: z.boolean().optional(),
 }).passthrough();
@@ -254,6 +308,7 @@ export function projectDraftRecords(
       ...(item.value !== undefined ? { value: item.value } : {}),
       ...(item.unit !== undefined ? { unit: item.unit } : {}),
       ...(item.role !== undefined ? { role: item.role } : {}),
+      ...(item.value_scale !== undefined ? { value_scale: item.value_scale } : {}),
       ...(item.direction !== undefined ? { direction: item.direction } : {}),
       ...(item.is_baseline !== undefined ? { is_baseline: item.is_baseline } : {}),
       ...(item.applies_to_stated !== undefined ? { applies_to_stated: item.applies_to_stated } : {}),
@@ -273,6 +328,22 @@ export function projectDraftRecords(
       ...(claim.value !== undefined ? { value: claim.value } : {}),
       ...(claim.sets_to !== undefined ? { sets_to: claim.sets_to } : {}),
       ...(claim.unit !== undefined ? { unit: claim.unit } : {}),
+      ...(claim.value_scale !== undefined ? { value_scale: claim.value_scale } : {}),
+      // ⭐⭐ CARRIED, AND ITS ABSENCE WAS THE WHOLE POINT OF THE FIELD BEING LOST.
+      //
+      // This rebuild names every field it keeps, and the wire Zod is
+      // `.passthrough()` — so a field the model emits and this line does not
+      // name VALIDATES and then VANISHES. Nothing REDs. Measured as a
+      // discriminating pair before the fix: base `grammar=15 carried=15
+      // dropped=none`, head `grammar=16 carried=15 dropped=['likelihood']`.
+      //
+      // ⚠ AND IT KILLED THE REASON `likelihood` EXISTS. The field was added
+      // because ROUTING is falsifiable and WITHHOLDING is not — a populated
+      // `likelihood` is countable over banked draws, whereas a correct
+      // suppression is invisible against a 99.5%-empty baseline. The histogram
+      // below loops over THESE REBUILT RECORDS, so without this line the bucket
+      // counts zero for ever and the countable signal cannot be counted.
+      ...(claim.likelihood !== undefined ? { likelihood: claim.likelihood } : {}),
       ...(claim.is_baseline !== undefined ? { is_baseline: claim.is_baseline } : {}),
     })),
   };
@@ -312,6 +383,68 @@ export function projectDraftRecords(
   for (const item of records.stated_items) {
     statedKinds[item.kind] = (statedKinds[item.kind] ?? 0) + 1;
   }
+  // ⭐⭐ DOES THE MODEL ACTUALLY ANSWER? — the one question grammar v10 and
+  // instruction v19 (#1562) left unanswerable.
+  //
+  // `value_scale` is the model's declaration of what its number MEANS, and the
+  // whole producer-declares-it-then-delete-the-inference programme rests on the
+  // model emitting it. Before this line NOTHING could see whether it does:
+  // `value_scale` and `declared_scale` appear in ZERO telemetry payloads
+  // repo-wide, `cee.llm_output.field_presence` tracks six other fields, the
+  // banked v202 witnesses are post-projection payloads that never carry
+  // `claims`, and the projector's own stamp is invisible downstream. So the
+  // rate has been unmeasured AND unmeasurable — which is why the repair stage's
+  // competing inference cannot yet be deleted (`repair/unreachable-factors.ts`),
+  // and why `display-value.ts:507`'s own dated deletion condition cannot be
+  // taken either. Both are waiting on a number nothing produced.
+  //
+  // ⚠ PER CLAIM KIND, NOT A TOTAL, AND THAT IS THE POINT. The projector stamps
+  // `declared_scale` only where the claim mints a factor-kind node
+  // (`CLAIM_KIND_TO_NODE_KIND` maps `factor` and `prior` to "factor"), so a
+  // pooled rate would average a kind that can carry the declaration together
+  // with kinds that structurally cannot, and read as a producer failure when it
+  // is a carrier gap. A per-kind split makes the two distinguishable in the
+  // data rather than in an argument about the data.
+  //
+  // ⛔ KINDS AND INTEGERS ONLY — the block above says a histogram cannot leak a
+  // brief, and that invariant holds here verbatim: `claim_kind` is a grammar
+  // enum and every value below is a count. No value, no unit, no label, no
+  // `source_quote`.
+  const valueScaleByKind: Record<string, { declared: number; absent: number }> = {};
+  // Counts retention in rebuilt draft records only. This is not evidence that
+  // likelihood reaches the saved model or that the number is a valid probability.
+  const likelihoodByKind: Record<string, { routed: number; absent: number }> = {};
+  for (const claim of records.claims) {
+    const bucket = (valueScaleByKind[claim.claim_kind] ??= { declared: 0, absent: 0 });
+    if (claim.value_scale === undefined) bucket.absent += 1;
+    else bucket.declared += 1;
+
+    const lb = (likelihoodByKind[claim.claim_kind] ??= { routed: 0, absent: 0 });
+    if (claim.likelihood === undefined) lb.absent += 1;
+    else lb.routed += 1;
+  }
+  // ⭐⭐ THE STATED SIDE IS COUNTED TOO, AND IT HAD TO BE ADDED IN THE SAME
+  // CHANGE AS THE FIELD.
+  //
+  // The claims twin shipped MEASURED-INERT: `value_scale` declared on 0 of 89
+  // claims across two live draws, and `declared_scale` present on 0 of 92 nodes
+  // across nine real sessions. That is the entire reason the stated field
+  // exists. Shipping it without extending this counter would recreate exactly
+  // the state that docblock above complains about — a carrier nobody can tell
+  // is empty — and the next lane would have to re-derive the rate by hand from
+  // debug exports, which is how the claims side went a whole release unnoticed.
+  //
+  // ⚠ Counted over VALUED stated items only. A record with no number cannot
+  // declare a convention for it, so pooling it with ones that can would read as
+  // a producer failure when it is a structural absence — the same distinction
+  // the per-kind split above exists to preserve.
+  const statedValueScaleByKind: Record<string, { declared: number; absent: number }> = {};
+  for (const item of records.stated_items) {
+    if (typeof item.value !== "number") continue;
+    const bucket = (statedValueScaleByKind[item.kind] ??= { declared: 0, absent: 0 });
+    if (item.value_scale === undefined) bucket.absent += 1;
+    else bucket.declared += 1;
+  }
   log.info(
     {
       event: "cee.draft.records.wire_histogram",
@@ -319,6 +452,9 @@ export function projectDraftRecords(
       stated_kinds: statedKinds,
       claim_count: records.claims.length,
       stated_count: records.stated_items.length,
+      value_scale_by_kind: valueScaleByKind,
+      stated_value_scale_by_kind: statedValueScaleByKind,
+      likelihood_by_kind: likelihoodByKind,
     },
     "Draft record set accepted at the seam",
   );

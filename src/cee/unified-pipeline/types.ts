@@ -5,6 +5,8 @@
  * StageContext is the single mutable context object passed through all stages.
  */
 
+import type { RecordConstraintCandidate } from "../draft/records/projector.js";
+import type { RecordConstraintDisposition } from "../compound-goal/record-constraint-carrier.js";
 import type { GoalTargetCandidate } from "../factor-extraction/goal-label-target.js";
 import type { FastifyRequest } from "fastify";
 import type { GraphV1 } from "../../contracts/plot/engine.js";
@@ -237,6 +239,10 @@ export interface StageContext {
   recordDisclosures?: unknown;
   /** LLM-emitted goal constraints — merged with regex-extracted constraints in Stage 4 */
   llmGoalConstraints?: Array<Record<string, unknown>>;
+  /** Unvalidated records declarations: never enter legacy LLM precedence. */
+  recordConstraintCandidates?: readonly RecordConstraintCandidate[];
+  /** Admin receipt of compilation and final source-agnostic gate decisions. */
+  recordConstraintDispositions?: RecordConstraintDisposition[];
   /** True if parse stage retried the LLM call due to default strength detection. */
   strengthDefaultRetried?: boolean;
   /** Strength default detection result from the initial attempt (for telemetry). */

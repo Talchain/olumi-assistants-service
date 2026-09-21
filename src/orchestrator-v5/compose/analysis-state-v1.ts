@@ -109,10 +109,30 @@
  *
  *      **BOTH CLAUSES ARE NOW FALSE.** Swept at UI `staging` 13b8676d
  *      (2026-08-26), contrast control in the same run:
- *        - `canvas/state/analysisStateSelector.ts:671` reads
- *          `wire.leader_claim.permitted && run_state.kind === 'complete_current'`
- *          — THE STEP-7 CONJUNCT THIS NOTE SAID MUST NOT BE BUILT UNTIL THE
- *          QUESTION WAS SETTLED. It was built. The question was not settled.
+ *        - ⚠⚠ **THE CONSUMER NAMED HERE HAS MOVED — RE-POINTED 2026-09-18, and
+ *          the old text is corrected rather than deleted (trap 14).** It read:
+ *          *"`canvas/state/analysisStateSelector.ts:671` reads
+ *          `wire.leader_claim.permitted && run_state.kind === 'complete_current'`"*.
+ *          Re-swept at UI `staging` **af4370a0**: that file still EXISTS and
+ *          contains **ZERO** occurrences of `permitted` (contrast control in the
+ *          same run: `leader_claim` is read in 15 non-test UI files, so the probe
+ *          is sighted). **The live read is
+ *          `lib/coherence/crossSurfaceCoherence.ts` →
+ *          `producerWithholdsLeaderClaim`**, reached from
+ *          `canvas/hydrate/applyScenarioAnalysisRead.ts` (import, then
+ *          `'leader_claim_withheld'`). Its body is `state?.leader_claim
+ *          ?.permitted === false` — so the substance of the finding STANDS: the
+ *          step-7 conjunct was built, the question was not settled, and the
+ *          consumer still reads `permitted` as a permission.
+ *
+ *          ⭐ THE DURABLE REFERENCE IS THE SYMBOL, NOT THE LINE, for the same
+ *          reason the sibling bullet below already gives about `:863`/`:872`:
+ *          these are UI-repo coordinates this CEE module cannot verify at build
+ *          time, so they rot silently. A stale pointer reads as CONSIDERED and
+ *          sends the next session to the wrong file — which is how CLAUDE.md's
+ *          readiness-authority line sat wrong from 19 Aug to 18 Sep. Cite
+ *          `producerWithholdsLeaderClaim` by name; re-derive the line if you
+ *          need one.
  *        - `lib/coherence/crossSurfaceCoherence.ts` (the EMISSION site; the
  *          nearby `:863` cited in the first draft of this note is the GUARD,
  *          not the emission — a review measured the emission at `:872`. Both
@@ -754,6 +774,39 @@ export function separationEstablishedFromRobustness(
   return raw !== null && !raw.near_tie_is_tie;
 }
 
+/**
+ * The two ways the SEPARATION half can withhold, as the producer's own codes.
+ * `null` means separation did not withhold — it says nothing about the other
+ * permissions, which are separate questions with separate answers.
+ */
+export type SeparationWithhold =
+  | typeof WITHHELD_NEAR_TIE
+  | typeof WITHHELD_SEPARATION_UNAVAILABLE;
+
+/**
+ * ⭐ WHICH separation code this run earns — extracted so a CONSUMER can name the
+ * reason the wire publishes instead of deriving a second opinion about it.
+ *
+ * `composeLeaderClaim` below now calls this for its own `withheld_reason`, so
+ * there is ONE discrimination, not a producer's and a consumer's near-copy that
+ * drift apart (trap 12). If this estate ever changes what counts as a near tie,
+ * the sentence the user reads changes with it, in the same commit, or not at
+ * all.
+ *
+ * ⚠ THE ABSENCE/PRESENCE SPLIT IS THE WHOLE POINT AND IT IS NOT COSMETIC.
+ * `raw === null` means WE DID NOT LOOK; `near_tie_is_tie` means we looked and
+ * they were too close. Those warrant different sentences and different next
+ * steps — one asks for a run, the other asks the person what matters to them —
+ * and collapsing them into "separation failed" is exactly the universal
+ * permission flag this seam must not grow.
+ */
+export function separationWithholdFromRobustness(
+  raw: RawRobustnessSignals | null,
+): SeparationWithhold | null {
+  if (separationEstablishedFromRobustness(raw)) return null;
+  return raw !== null ? WITHHELD_NEAR_TIE : WITHHELD_SEPARATION_UNAVAILABLE;
+}
+
 function composeLeaderClaim(input: AnalysisStateComposeInput): AnalysisLeaderClaim {
   const entitled = input.mayNameLeadingOption === true;
   const raw: RawRobustnessSignals | null = input.rawRobustness;
@@ -770,11 +823,14 @@ function composeLeaderClaim(input: AnalysisStateComposeInput): AnalysisLeaderCla
     // ONE reason, chosen by which half failed first, so a consumer is never
     // told "the options do not separate" about a turn whose CEE verdict
     // withheld the claim for an unrelated reason.
+    // ⚠ `separationWithholdFromRobustness` is the SAME discrimination a consumer
+    // reads, called here so the published code and the explained code cannot
+    // disagree. `!` is sound only because this branch runs when
+    // `permitted === false`, and with `entitled === true` that forces
+    // `separates === false`, which is exactly when the helper returns non-null.
     claim.withheld_reason = !entitled
       ? WITHHELD_CONSTRAINT_VERDICT
-      : separationKnown
-        ? WITHHELD_NEAR_TIE
-        : WITHHELD_SEPARATION_UNAVAILABLE;
+      : separationWithholdFromRobustness(raw)!;
   }
   // ABSENCE IS DISTINCT: omitted means no separation statement was computed,
   // never "the options do not separate".

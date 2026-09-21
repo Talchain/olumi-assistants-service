@@ -129,7 +129,11 @@ const CLASS_B_VERBATIM: readonly Case[] = [
   // ⚠ D2 is the ROADMAP 2.714 mechanism sentence: with a bare `[.!?]`
   // terminator the sentence cut lands INSIDE `£1.5m`. Mutant M11 pins it.
   { id: 'b-v-D2', brief: 'Do not let the £1.5m marketing spend push gross margin below 78%', wire: [], asked: true, klass: 'currency-decimal-2714' },
-  { id: 'b-v-D8', brief: 'Marketing must not go above £1.5m', wire: [], asked: true, klass: 'above-side-inversion' },
+  // ✅ WAS `wire: [], asked: true, klass: 'above-side-inversion'`. The negated
+  //    ceiling is now MINTED correctly, so the row reaches the wire and the gate
+  //    has nothing left to ask. `a-h` above stays an inversion-class gap: its
+  //    negation governs `approve`, not a rise verb, so no pattern recognises it.
+  { id: 'b-v-D8', brief: 'Marketing must not go above £1.5m', wire: ['<='], asked: false, klass: 'negated-ceiling-PROVEN' },
   { id: 'b-v-D9', brief: "Don't spend more than £1m", wire: [], asked: true, klass: 'contraction-ceiling-drop' },
   { id: 'b-v-D11', brief: 'Avoid exceeding 5% churn', wire: [], asked: false, klass: 'prevention-ceiling-drop' },
 ];

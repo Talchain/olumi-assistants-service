@@ -19,7 +19,7 @@ import type {
   GraphV3T,
   ValidationWarningV3T,
 } from "../../schemas/cee-v3.js";
-import { deriveEffectDirection } from "../../schemas/cee-v3.js";
+import { resolveEffectDirection } from "../../schemas/cee-v3.js";
 import { deriveStrengthStd, type ProvenanceObject } from "./strength-derivation.js";
 import type { V1DraftGraphResponse, V1Node, V1Edge, V1Graph } from "./schema-v2.js";
 import { isFactorData, isOptionData } from "./schema-v2.js";
@@ -135,6 +135,88 @@ const LABEL_BOUND_PROVENANCE_KINDS: ReadonlySet<string> = new Set([
   "outcome",
   "decision",
 ]);
+
+/**
+ * ⭐⭐ NODE KINDS WHOSE `observed_state` MAY BE RENDERED AS A HUMAN-READABLE
+ * `display_value` WHEN THE MODEL DID NOT AUTHOR ONE.
+ *
+ * ── WHAT THIS IS NOT ─────────────────────────────────────────────────────────
+ * This set does NOT decide whether a non-factor node may CARRY a value. It
+ * never did, and a brief that reached this lane said it did — the correction is
+ * recorded here because the false version is the more plausible one and will be
+ * re-derived otherwise.
+ *
+ * `observed_state` is built at `:364` from `isFactorData(node.data) &&
+ * node.data.value !== undefined`, and `isFactorData` is `!('interventions' in
+ * data)` (`schema-v2.ts:85`) — it reads the DATA SHAPE, never `kind`. The
+ * LLM-authored `display_value` passthrough (`:633`) is gated the same way. So a
+ * risk or an outcome carrying `data.value` ALREADY reaches the wire with its
+ * number, its `observed_state.source`, its `extractionType` and its
+ * `provenance`. Measured by execution, not read
+ * (`__tests__/ai-value-non-factor-kinds.test.ts`, three kinds, green at the
+ * pristine tip before this change existed).
+ *
+ * The one genuinely kind-gated limb was the SYNTHESIS FALLBACK below, and its
+ * effect was narrower and stranger than "the value is dropped": the number
+ * arrived and the sentence a human reads did not. A risk shipped
+ * `observed_state.value: 0.3` with no `display_value` at all — a quantity the
+ * canvas holds and cannot render as words.
+ *
+ * ── WHY IT WAS SCOPED TO `factor`: NO DOWNSTREAM REASON WAS EVER STATED ──────
+ * The gate entered at `8cc0f15c` ("synthesise display_value for all factor
+ * categories and improve unit fallback", 11 Apr 2026), whose own message frames
+ * the work as widening from `external` factors to *all factor CATEGORIES*
+ * (external / observable / controllable). `kind === "factor"` was the ambient
+ * scope of a change about categories, not a ruling about kinds. No comment, no
+ * commit and no consumer states a reason a non-factor `display_value` would
+ * break anything — and the two node-level consumers are scoped by lookup rather
+ * than by kind (`analysis-ready.ts:467,587` resolve a FACTOR node by id;
+ * `label-value-divergence.ts:371` is a divergence GUARD, which widening feeds
+ * more nodes, not fewer).
+ *
+ * ── WHY `goal` IS EXCLUDED, DELIBERATELY (trap 21: one field, two questions) ──
+ * A goal's `observed_state` is NOT this node's own measured quantity. It is
+ * built by the goal limb at `:315` from `goal_baseline`, and that limb's own
+ * doctrine says `value` and `baseline` carry the same number because they are
+ * "the goal metric's current observed level" serving a change-from-baseline
+ * frame. A goal also already owns a separate target/threshold display surface
+ * (`goal_threshold_raw`/`goal_threshold_unit`). Synthesising a bare
+ * `display_value` there would put a BASELINE string on the one node kind whose
+ * user-facing number is a TARGET, and the two are indistinguishable once
+ * rendered. That is the "a value that reaches the screen misread is worse than
+ * one that never arrives" harm, so the goal limb is left exactly as it was and
+ * is rowed rather than widened here.
+ *
+ * `option` is excluded because OptionData carries `interventions`, so
+ * `isFactorData` is false and no `observed_state` is built from it — the option
+ * value surface is the intervention's own `display_value` (`cee-v3.ts:559`).
+ *
+ * ⚠ THIS SET IS A HAND-WRITTEN LIST, WHICH IS TRAP 12. It is therefore pinned
+ * by a completeness guard that asserts every member of the canonical
+ * `NodeKindV3` enum is EXPLICITLY included or excluded here — so adding a kind
+ * to the contract REDs this file rather than silently defaulting it to "no
+ * display value". The exclusions are named so the guard has something to check.
+ */
+const DISPLAY_VALUE_SYNTHESIS_KINDS: ReadonlySet<string> = new Set([
+  "factor",
+  "risk",
+  "outcome",
+  "decision",
+  "action",
+]);
+
+/**
+ * Kinds deliberately withheld from `DISPLAY_VALUE_SYNTHESIS_KINDS`, each for a
+ * reason stated in that constant's doc. Exported for the completeness guard,
+ * which asserts the two sets partition `NodeKindV3` exactly.
+ */
+export const DISPLAY_VALUE_SYNTHESIS_EXCLUDED_KINDS: ReadonlySet<string> = new Set([
+  "goal",
+  "option",
+]);
+
+/** Exported for the completeness guard only. */
+export const DISPLAY_VALUE_SYNTHESIS_INCLUDED_KINDS = DISPLAY_VALUE_SYNTHESIS_KINDS;
 
 /**
  * Resolve an option's baseline flag from its two accepted V1 carriers.
@@ -257,6 +339,16 @@ export function transformNodeToV3(
     ...(node.goal_threshold_raw != null && { goal_threshold_raw: node.goal_threshold_raw }),
     ...(node.goal_threshold_unit != null && { goal_threshold_unit: node.goal_threshold_unit }),
     ...(node.goal_threshold_cap != null && { goal_threshold_cap: node.goal_threshold_cap }),
+    // The cap's PROVENANCE rides across with the cap, for the same reason the
+    // frame does below: this transform rebuilds the node field-by-field, so an
+    // unnamed key is dropped here silently under a green suite. Carried only
+    // when the cap itself is present — a provenance without the denominator it
+    // describes is a claim about nothing, and would leave a consumer unable to
+    // tell "no cap" from "a cap produced by this rule".
+    ...(node.goal_threshold_cap != null &&
+      node.goal_threshold_cap_provenance != null && {
+        goal_threshold_cap_provenance: node.goal_threshold_cap_provenance,
+      }),
     // ROADMAP 2.258 — the frame rides across the V1→V3 transform with its
     // threshold. This copy is REQUIRED, not decorative: the transform rebuilds
     // the node field-by-field, so a `goal_threshold_frame` minted on the V1
@@ -401,6 +493,11 @@ export function transformNodeToV3(
       baseline: node.data.baseline,
       unit: node.data.unit,
       source,
+      // The records producer declares the stored value's scale. This is not a
+      // user baseline or authority for constraint value_frame / level conversion.
+      ...((node as { declared_scale?: unknown }).declared_scale !== undefined && {
+        declared_scale: (node as { declared_scale?: unknown }).declared_scale,
+      }),
       // Pass through factor metadata fields
       ...(node.data.raw_value !== undefined && { raw_value: node.data.raw_value }),
       ...(derivedRawValue !== undefined && { raw_value: derivedRawValue }),
@@ -635,13 +732,33 @@ export function transformNodeToV3(
     v3Node.display_value = dataDisplayValue;
   }
 
-  // Synthesise display_value for factors that lack an LLM-provided value.
+  // Synthesise display_value for quantified nodes that lack an LLM-provided one.
   //
-  // Path A (external factors): use prior range via synthesiseRangeDisplayValue.
-  // Path B (controllable/observable factors): use observed_state fields via
-  //   synthesiseDisplayValue. E.g. value=6, unit="developers" → "6 developers".
-  if (v3Node.display_value === undefined && v3Node.kind === "factor") {
-    if ((node as any).category === "external" && v3Node.prior) {
+  // Path A (external FACTORS only): use prior range via synthesiseRangeDisplayValue.
+  //   Its `kind === "factor"` test is kept EXPLICIT rather than inferred from
+  //   `category`: `V1Node.category` is declared without a kind restriction, so
+  //   "only factors are external" is a convention of the producer, not a
+  //   guarantee of the type. Widening Path A would push non-factor nodes through
+  //   the external-factor scale machinery (`declared_scale` is stamped only on
+  //   factors by `repair/unreachable-factors.ts`), which nothing here tests and
+  //   this row does not need. Unchanged behaviour, stated rather than assumed.
+  // Path B (any kind in DISPLAY_VALUE_SYNTHESIS_KINDS): use observed_state fields
+  //   via synthesiseDisplayValue. E.g. value=6, unit="developers" → "6 developers".
+  //   Widened from `kind === "factor"` — see DISPLAY_VALUE_SYNTHESIS_KINDS for
+  //   what the old gate did and did NOT do, and why `goal` stays out.
+  //
+  // ⛔ AUTHORSHIP IS NOT TOUCHED HERE, AND THAT IS LOAD-BEARING. This block only
+  // renders a string from numbers `observed_state` already carries. The fields
+  // that say WHOSE value it is — `observed_state.source`
+  // (`cee_inference` | `brief_extraction`), `observed_state.extractionType`, and
+  // the node's `provenance` — are computed below at `:761+` from the SAME
+  // `extractionType` for every kind, and the 2.972 withdrawal that demotes an
+  // unearned `from_brief` runs after this and reads `observed_state`, not
+  // `display_value`. So a widened value arrives carrying the same authorship
+  // stamp a factor's would, and an AI-proposed number on a risk reaches the user
+  // as the AI's (`provenance: "ai_inferred"`), never as their own.
+  if (v3Node.display_value === undefined && DISPLAY_VALUE_SYNTHESIS_KINDS.has(v3Node.kind)) {
+    if (v3Node.kind === "factor" && (node as any).category === "external" && v3Node.prior) {
       // Path A: external factor — synthesise from prior range
       const priorUnit = anyNode.unit ?? (isFactorData(node.data) ? (node.data as any).unit : undefined);
       // ⭐ THE SCALE IS DECLARED BY A PRODUCER, NOT SNIFFED BY THIS CONSUMER.
@@ -653,11 +770,79 @@ export function transformNodeToV3(
       // Absence is passed through as absence: the contract's failure semantics
       // forbid reading it as `unit_interval`, so the formatter falls back to
       // its existing behaviour rather than to a default.
+      // ⭐⭐ THE DECLARATION SAYS WHAT THE NUMBER MEANS; THE EVIDENCE SAYS WHO
+      // NORMALISED IT — AND THEY ARE DIFFERENT QUESTIONS (trap 21).
+      //
+      // ⚠⚠ THIS SAID "THREE writers" UNTIL THE #1653 REBASE (21 Sep 2026) AND
+      // IT WAS FALSE AT THAT TIP. `declared_scale` has FOUR WRITER CLASSES over
+      // SIX ASSIGNMENT SITES; the DERIVED census in
+      // `factor-extraction/__tests__/range-display-normalised-declaration.test.ts`
+      // is the authority, not this comment, and it REDs on a fifth.
+      //
+      // WORD-ONLY writers — a declaration, with nothing normalised:
+      //   · `draft/records/projector.ts:2918-2919` — the USER's own
+      //     `stated_items[].value_scale`                     ⭐ added by #1653
+      //   · `draft/records/projector.ts:3424` — the MODEL's `claims[].value_scale`,
+      //     and the served ungated instruction
+      //     (`draft/records/instruction.ts:291`) tells the model that
+      //     `unit_interval` means *"a share"* — a genuine sub-unit quantity, on
+      //     the unit's own scale.
+      // NORMALISATION-BACKED writers:
+      //   · `draft/records/projector.ts:4339-4340` — pass 3d's rewrite
+      //   · `repair/unreachable-factors.ts` — `declaredScaleOf`
+      //
+      // Reading the word alone cannot tell the first pair from the second, and
+      // doing so DELETED a correct `"0.2 to 0.6 share"` — measured through this
+      // very chain.
+      //
+      // So the evidence is derived HERE, where the node is, and passed. All
+      // three carriers are producer-side facts about a division that happened:
+      //   · `scale_frame` — `projector.ts:4303` writes it on EVERY framed
+      //     factor precisely so that "absent ⇒ never framed" is true;
+      //   · `cap` — the enricher's normalisation divisor, promoted to node
+      //     level by `unreachable-factors.ts:578`;
+      //   · `raw_value !== value` — `normalise-factor-value.ts:14-18`: "when
+      //     `cap` is absent, value = raw_value", so a DIFFERENCE is the
+      //     normalisation, promoted at `unreachable-factors.ts:575`.
+      //
+      // ⚠ PRESENCE OF `raw_value` IS NOT ENOUGH — it must DIFFER. A model that
+      // emits `{value: 0.4, raw_value: 0.4}` has normalised nothing, and
+      // `declaredScaleOf` agrees (it refuses to declare that shape). Reading
+      // presence alone would re-open the defect this derivation closes.
+      const storedValue =
+        typeof anyNode.observed_state?.value === "number"
+          ? (anyNode.observed_state.value as number)
+          : isFactorData(node.data) && typeof (node.data as any).value === "number"
+            ? ((node.data as any).value as number)
+            : undefined;
+      const nodeRawValue =
+        typeof anyNode.raw_value === "number"
+          ? (anyNode.raw_value as number)
+          : isFactorData(node.data) && typeof (node.data as any).raw_value === "number"
+            ? ((node.data as any).raw_value as number)
+            : undefined;
+      const nodeCap =
+        anyNode.cap ?? (isFactorData(node.data) ? (node.data as any).cap : undefined);
+      // ⭐ THE PRODUCER'S OWN ANSWER OUTRANKS ANY RE-DERIVATION HERE.
+      // `repair/unreachable-factors.ts` stamps `declared_scale_basis` at the
+      // one moment the evidence is still complete — it deletes `data.value`
+      // immediately afterwards, so `raw_value !== value` becomes unreadable
+      // downstream. The three derived carriers below stay because the OTHER
+      // normalising producer (projector pass 3d) writes `scale_frame` and not
+      // this basis, and because a stored graph drafted before the basis
+      // existed still carries them.
+      const boundsAreNormalised =
+        anyNode.declared_scale_basis === "normalisation"
+        || anyNode.scale_frame !== undefined
+        || nodeCap !== undefined
+        || (nodeRawValue !== undefined && storedValue !== undefined && nodeRawValue !== storedValue);
+
       const synthesised = synthesiseRangeDisplayValue(
         v3Node.prior,
         priorUnit,
         v3Node.factor_type,
         anyNode.declared_scale,
+        boundsAreNormalised,
       );
       if (synthesised !== undefined) {
         v3Node.display_value = synthesised;
@@ -995,8 +1180,30 @@ export function transformEdgeToV3(
   // P1-CEE-2: Apply std bounds (floor 1e-6, cap max(0.5, 2×|mean|))
   strengthStd = boundStrengthStd(strengthStd, strengthMean, edge.from, edge.to);
 
-  // Derive effect direction from strength_mean
-  const effectDirection = deriveEffectDirection(strengthMean);
+  // Resolve effect direction from BOTH carriers — the magnitude's sign and the
+  // stated label — through the one definition in `schemas/cee-v3.ts`.
+  //
+  // ⚠ `existingDirection` MUST be passed. Without it a zero magnitude resolved
+  // to "positive", so an edge stating `effect_direction: "negative"` with
+  // `strength_mean: 0` left this function as "positive" — an authored negative
+  // silently inverted on the wire, with every reconciliation authority
+  // abstaining at zero (each is guarded `!== 0`). The sign-transfer above is
+  // guarded `rawStrength > 0` and so abstains too, which is why this call is
+  // the only place the zero case can be got right.
+  const directionResolution = resolveEffectDirection(strengthMean, existingDirection);
+  const effectDirection = directionResolution.direction;
+  if (directionResolution.invented) {
+    // Neither carrier stated a direction. The V3 egress enum has no member for
+    // "unresolved", so one is chosen — and recorded in the same channel every
+    // other invented edge value already uses, so it cannot become positive
+    // SILENTLY.
+    defaults.push({
+      edge_id: edgeId,
+      field: "effect_direction",
+      default_value: effectDirection,
+      reason: "zero magnitude carries no sign information and no direction was stated",
+    });
+  }
 
   // Extract provenance — prefer structured edge.provenance, fall back to
   // edge.provenance_source (flat enum from Anthropic structured outputs).

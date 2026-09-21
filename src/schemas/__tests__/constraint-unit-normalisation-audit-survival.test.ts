@@ -96,10 +96,19 @@ describe('the unit-normalisation audit trail survives GoalConstraintSchema', () 
 
     const [wire] = toGoalConstraints([normalised]);
     const parsed = GoalConstraintSchema.parse(wire) as Record<string, unknown>;
-    expect(parsed.provenance_unit_normalised).toEqual({
-      rule: 'percent_to_fraction',
-      original_value: 0.05,
-      original_unit: '%',
+    // ⛔ REPOINTED, AND THE REASON MATTERS. This rule no longer stamps
+    // `provenance_unit_normalised`: its guard fires only when the value is
+    // ALREADY a fraction, so `original_value` could only ever be the
+    // post-relabel machine value — while the contract fixture and the UI both
+    // declare that field to be the figure the READER stated. A reader who
+    // wrote "under 4%" was shown "≤ 0.04%". The declaration this spec exists to
+    // protect is unchanged and still load-bearing; only the producer's claim
+    // narrowed, so the end-to-end assertion follows it to the honest field.
+    expect(parsed.provenance_unit_normalised).toBeUndefined();
+    expect(parsed.provenance_unit_relabelled).toEqual({
+      rule: 'percent_label_to_fraction_label',
+      pre_normalisation_value: 0.05,
+      pre_normalisation_unit: '%',
     });
   });
 
@@ -120,5 +129,6 @@ describe('the unit-normalisation audit trail survives GoalConstraintSchema', () 
     const [wire] = toGoalConstraints([untouched]);
     const parsed = GoalConstraintSchema.parse(wire) as Record<string, unknown>;
     expect(parsed.provenance_unit_normalised).toBeUndefined();
+    expect(parsed.provenance_unit_relabelled).toBeUndefined();
   });
 });

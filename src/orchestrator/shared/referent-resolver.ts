@@ -522,7 +522,25 @@ export function buildReferentIndex(lookup: GraphNodeLookup): ReferentIndex {
     if (key.length === 0) continue;
     const bucket = index.get(key);
     if (bucket === undefined) index.set(key, [{ id: ref.id, label: ref.label }]);
-    else bucket.push({ id: ref.id, label: ref.label });
+    // ⭐ ONE ENTITY ADDRESSABLE BY TWO SPELLINGS IS NOT TWO ENTITIES.
+    //
+    // Ambiguity is a fact about how many CANONICAL IDS own a label, never about
+    // how many KEYS reach them. Until edge addresses landed, every lookup entry
+    // was keyed on its own `ref.id`, so ids were unique across `values()` by
+    // construction and this predicate is a NO-OP for every pre-existing caller
+    // — it cannot turn a genuinely ambiguous label unambiguous, because two
+    // DIFFERENT ids still fill the bucket and still project to
+    // `AMBIGUOUS_LABEL`.
+    //
+    // It is required now because an edge carrying a producer-minted `id` is
+    // reachable BOTH by that id and by its canonical `(from, to)` address
+    // (`phase3-blocks.ts::populateGraphNodeLookup`). Without this, registering
+    // the second spelling would mark that edge's label ambiguous and silently
+    // stop a REAL relationship linking in prose — a repair that delivered the
+    // card and broke the link is not a repair.
+    else if (!bucket.some((candidate) => candidate.id === ref.id)) {
+      bucket.push({ id: ref.id, label: ref.label });
+    }
   }
   return index;
 }

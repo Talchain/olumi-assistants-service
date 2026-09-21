@@ -850,25 +850,33 @@ describe("Substep 8: Connectivity", () => {
     expect(ctx.validationSummary.status).toBe("valid");
   });
 
-  it("wires outcomes to goal when unreachable", () => {
-    (validateMinimumStructure as any)
-      .mockReturnValueOnce({
-        valid: false, missing: [], counts: { goal: 1, decision: 1, option: 1 },
-        connectivity_failed: true, connectivity: { reachable_goals: [] },
-      })
-      .mockReturnValueOnce({
-        valid: true, missing: [], counts: { goal: 1, decision: 1, option: 1 },
-        connectivity_failed: false,
-      });
+  /**
+   * INVERTED. This test used to assert the stage WIRED outcomes to the goal and
+   * thereby turned an invalid graph valid — it queued TWO `validateMinimumStructure`
+   * results, the second of which only made sense if a repair had run in between.
+   *
+   * Connectivity no longer invents that edge. A fabricated outcome → goal link is a
+   * causal claim the user never made, and manufacturing one to clear validation is
+   * the defect this increment removes. An unreachable goal now stays unreachable and
+   * validation reports it.
+   *
+   * ⚠ The second queued `mockReturnValueOnce` was also load-bearing by accident:
+   * with only one call consumed it survived into the NEXT test and made it read
+   * 'valid'. A single `mockReturnValue` removes that cross-test leak.
+   */
+  it("does NOT wire outcomes to goal when unreachable — the graph stays invalid and says so", () => {
+    (validateMinimumStructure as any).mockReturnValue({
+      valid: false, missing: [], counts: { goal: 1, decision: 1, option: 1 },
+      connectivity_failed: true, connectivity: { reachable_goals: [] },
+    });
     (hasGoalNode as any).mockReturnValue(true);
-
-    const wiredGraph = { ...validGraph, edges: [...validGraph.edges, { id: "new", from: "o1", to: "g1" }] };
-    (wireOutcomesToGoal as any).mockReturnValue(wiredGraph);
 
     const ctx = makeCtx();
     runConnectivity(ctx);
 
-    expect(ctx.validationSummary.status).toBe("valid");
+    expect(ctx.validationSummary.status).toBe("invalid");
+    // The discriminating pin: the repair is not merely ineffective, it is not reached.
+    expect(wireOutcomesToGoal).not.toHaveBeenCalled();
   });
 
   it("sets validationSummary when structure invalid", () => {
