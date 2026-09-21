@@ -1247,6 +1247,32 @@ export function detectMutationWarrant(
  * SAY SO rather than let the user believe the old row is gone. The
  * remove/replace capability itself is ROADMAP 2.659, not this fix.
  */
+/**
+ * The closing PROMISE, named once so no reader has to re-spell it (trap 12).
+ *
+ * ⛔ IT IS HONOURABLE ONLY WHERE THE SAME TURN PERSISTS AN
+ * `apply_proposed_change` PENDING. Acceptance is handled by
+ * `tryShortConfirmResume`, which replays a STORED `inline_patch`; with nothing
+ * stored, a "yes" has nothing to resume and the user has been told the product
+ * was ready to act. Use `withdrawUnresumableOfferClose` wherever the emitting
+ * branch has declined to persist one.
+ */
+export const MUTATION_OFFER_CLOSING_PROMISE = 'Say the word and I will make it.';
+
+/**
+ * What the product says instead when it has decided NOT to keep the change.
+ *
+ * It still opens with the no-write disclosure (INV-3 above is untouched), still
+ * asserts nothing about what the user did or did not ask for, and closes on a
+ * move the user can actually make rather than on a promise nothing can honour.
+ * The estate already ratified this shape for the sibling branch that refuses an
+ * under-specified offer — `buildIncompleteOfferRefusalText`, PR #1491.
+ */
+export const MUTATION_OFFER_UNRESUMABLE_CLOSE =
+  'I could not put it forward as something you can confirm, so nothing is ' +
+  'waiting on your reply — tell me what you would like changed and I will ' +
+  'take another look.';
+
 export function buildMutationWarrantDemotionText(
   changeDescription: string,
   residualDisclosure: string | null,
@@ -1254,8 +1280,41 @@ export function buildMutationWarrantDemotionText(
   const opening =
     `Nothing has been changed. I want to confirm this with you before I edit ` +
     `the model, and ${changeDescription} looks like it would help. ` +
-    `Say the word and I will make it.`;
+    `${MUTATION_OFFER_CLOSING_PROMISE}`;
   return residualDisclosure === null ? opening : `${opening} ${residualDisclosure}`;
+}
+
+/**
+ * Withdraw the closing promise from a demotion text whose branch persisted no
+ * resumable pending.
+ *
+ * ⭐ DERIVED, NEVER MIRRORED — and the reason is measured history. PR #1491
+ * ruled this exact class for ONE branch and hand-wrote the remedy into it; the
+ * three siblings beside it kept the promise for another three weeks. A caller
+ * that decides the copy by restating the persistence decision will drift from
+ * it again the next time a branch is added. Callers pass the PENDINGS THEY ARE
+ * ABOUT TO COMMIT, so the copy cannot disagree with what was kept.
+ *
+ * ⛔ NOT A WIDER RECOGNISER. Commit `d8a908b3` withdrew that recommendation: a
+ * held change replays entirely from its stored patch and never re-reads the
+ * message, so widening the confirmation predicate would apply the OFFER's value
+ * and silently discard one the user restated — with a receipt. The defect is
+ * that the offer was made, not that the acceptance was refused.
+ *
+ * ⚠ SCOPED TO THE V5 DEMOTION GATE BY ITS CALLERS, deliberately. The edit lane
+ * emits the same sentence with no pending at `edit-graph-dispatch.ts:3873`, and
+ * that is RULED (PR #1583) and pinned by a test: there the handler really did
+ * produce a mutation the gate withheld, so a restated instruction IS honourable
+ * through the ordinary edit path. Two lanes, two questions (trap 21) — this
+ * must not be applied globally.
+ */
+export function withdrawUnresumableOfferClose(
+  text: string,
+  persistedPendings: readonly unknown[],
+): string {
+  if (persistedPendings.length > 0) return text;
+  if (!text.includes(MUTATION_OFFER_CLOSING_PROMISE)) return text;
+  return text.replace(MUTATION_OFFER_CLOSING_PROMISE, MUTATION_OFFER_UNRESUMABLE_CLOSE);
 }
 
 /**
