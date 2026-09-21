@@ -1,5 +1,20 @@
 import { describe, it, expect, vi } from 'vitest';
 import { writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+/**
+ * ⛔ NOT A HARDCODED PATH — `/private/tmp` is macOS-only and this suite runs in
+ * the REQUIRED check on Linux, where it does not exist. The first version wrote
+ * to it literally and the required check went RED with ENOENT while the three
+ * behaviour assertions below were all passing: a witness that can only be
+ * produced on the author's laptop is not a witness.
+ *
+ * `RUNNER_TEMP` is GitHub Actions' own writable scratch dir; `tmpdir()` is the
+ * local equivalent. The path is REPORTED rather than assumed, so a reader of a
+ * CI log can find the artefact.
+ */
+const WITNESS_PATH = join(process.env.RUNNER_TEMP ?? tmpdir(), 'WITNESS.txt');
 import { runStructuralParse } from '../../src/cee/unified-pipeline/stages/repair/structural-parse.js';
 import type { StageContext } from '../../src/cee/unified-pipeline/types.js';
 
@@ -101,7 +116,15 @@ describe('BEHAVIOUR WITNESS — #1674', () => {
     W(shed
       ? '\n⛔ GATE-0 FINDING: user-authority markers (stated_role, source=user_override) were SHED SILENTLY.'
       : '\n✅ declined — user authority preserved.');
-    writeFileSync('/private/tmp/WITNESS.txt', out.join('\n') + '\n');
+    // The artefact is an OBSERVATION. A filesystem that refuses the write must
+    // not turn a passing behaviour witness into a red required check — the
+    // assertions below are the test; this file is the evidence for a human.
+    try {
+      writeFileSync(WITNESS_PATH, out.join('\n') + '\n');
+    } catch (err) {
+      console.warn(`[witness] could not write ${WITNESS_PATH}:`, err);
+    }
+    console.log(`[witness] wrote ${WITNESS_PATH}`);
 
     // Recorded as an OBSERVATION, not an assertion of desired behaviour — the
     // point of the probe is to find out, and the answer goes to Paul.
