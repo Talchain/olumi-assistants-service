@@ -1600,6 +1600,48 @@ export async function commitDirectAnswer(
         error_code: null,
         provenance: 'commit',
       });
+    } else if (atomicVersionPlan.kind === 'plan') {
+      // ⭐ THE COMMITTED ARM — A SEPARATE EVENT, DELIBERATELY.
+      //
+      // `V5ModelVersionCreated` reads as though it reports a creation. It does
+      // not: it is a SKIP ALARM, and two tests in
+      // `atomic-model-version-commit.test.ts` pin that by asserting ZERO of it
+      // on the versionable paths ("emitting a skip here would keep the alarm
+      // firing on the product's most common edge shape"). Adding a success arm
+      // to that event would have silently broken the alarm for anything
+      // counting it — two questions under one name.
+      //
+      // ⛔ WHAT THE SEPARATE EVENT EXISTS TO FIX. Until 20 Sep 2026 nothing
+      // emitted on the success path at all, so a model version being written
+      // was invisible: the whole staging service read
+      // `v5.model_versions.version_created = 0` over 30 hours while
+      // `v5.graph_cas.evaluated` read 100+ in the same window, and the honest
+      // first reading of that zero — "the versioned write path is never taken"
+      // — was exactly wrong. The durable receipt's existence could not be
+      // established from telemetry at all.
+      //
+      // ⚠ PLACEMENT IS LOAD-BEARING. This sits inside the post-durable guarded
+      // block for the same reason the skip emit was MOVED here (Codex C8-A
+      // review defect 5): emitted at decision time it would publish the outcome
+      // of a transaction that had not run, and stay published when the append
+      // then threw. Do not hoist it.
+      //
+      // `modelVersionReceipt` is undefined when v5 was not the selected RPC —
+      // a real and different outcome from a version being written, so it gets
+      // its own status rather than being folded into either neighbour.
+      const receipt = appendOutcome.modelVersionReceipt;
+      emit(TelemetryEvents.V5ModelVersionCommitted, {
+        scenario_id: metadata.scenario_id,
+        turn_id: metadata.turn_id,
+        status: receipt === undefined ? 'no_receipt' : 'committed',
+        version_number: receipt?.version_number ?? null,
+        // 16-hex prefix only — content-free, like every event beside it.
+        graph_identity_hash_prefix:
+          receipt === undefined
+            ? null
+            : receipt.graph_identity_hash.slice(0, 16),
+        provenance: 'commit',
+      });
     }
 
     // ⭐ CENSUS POINT 4 of 4 — `at_commit`. MEASUREMENT ONLY: nothing reads it,
