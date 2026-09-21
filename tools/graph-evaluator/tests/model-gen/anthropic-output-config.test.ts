@@ -10,7 +10,10 @@
 import { describe, expect, it } from "vitest";
 import { buildMessagesParams } from "../../src/providers/anthropic-provider.js";
 import type { ModelConfig } from "../../src/providers/types.js";
-import { loadRichSchema } from "../../src/rich-model.js";
+import { assertSchemaMirrorsTypes, loadRichSchema } from "../../src/rich-model.js";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const base: ModelConfig = {
   id: "claude-sonnet-4-6-rich",
@@ -79,5 +82,34 @@ describe("loadRichSchema", () => {
     // Positive control: the probe can see something — the contract's own keys survive.
     expect(schema["title"]).toBe("RichDecisionModel");
     expect(Object.keys(schema["properties"] as object)).toContain("user_facts");
+  });
+});
+
+describe("assertSchemaMirrorsTypes", () => {
+  it("passes on the live contract", () => {
+    expect(() => assertSchemaMirrorsTypes()).not.toThrow();
+  });
+
+  it("REDs on a NESTED drift, not only a top-level one", () => {
+    // The 2026-09-22 shape exactly: `decision.goal_measured_by` was added to
+    // `properties` without being added to `decision.required`. Top-level
+    // `required` never moved, so a top-level-only check is blind to it.
+    const schema = loadRichSchema() as Record<string, unknown>;
+    const decision = (schema["properties"] as Record<string, Record<string, unknown>>)["decision"];
+    (decision["properties"] as Record<string, unknown>)["smuggled_field"] = { type: "string" };
+
+    const dir = mkdtempSync(join(tmpdir(), "rich-schema-drift-"));
+    const path = join(dir, "drifted.json");
+    writeFileSync(path, JSON.stringify(schema));
+    expect(() => assertSchemaMirrorsTypes(path)).toThrow(/smuggled_field/);
+  });
+
+  it("REDs on a TOP-LEVEL drift too (contrast control for the check above)", () => {
+    const schema = loadRichSchema() as Record<string, unknown>;
+    schema["required"] = (schema["required"] as string[]).filter((k) => k !== "notes");
+    const dir = mkdtempSync(join(tmpdir(), "rich-schema-drift-"));
+    const path = join(dir, "drifted-top.json");
+    writeFileSync(path, JSON.stringify(schema));
+    expect(() => assertSchemaMirrorsTypes(path)).toThrow(/notes/);
   });
 });
