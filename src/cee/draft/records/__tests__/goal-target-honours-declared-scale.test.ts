@@ -98,9 +98,7 @@ describe("a declared unit-interval target is not divided by its cap again", () =
     expect(n.goal_threshold).toBe(0.95);
   });
 
-  it("refuses a declaration that contradicts its own magnitude — resolves to today's behaviour", () => {
-    // 95 is not on the unit interval whatever the label says. Same precedent as
-    // the factor path: a contradiction resolves to UNDECLARED, never to a side.
+  it("refuses a unit_interval declaration above 1 — it contradicts its own domain", () => {
     const n = goalNode(goalRecords(95, "%", "unit_interval"));
     expect(n.goal_threshold_raw).toBe(95);
     expect(n.goal_threshold).toBe(0.95);
@@ -111,5 +109,65 @@ describe("a declared unit-interval target is not divided by its cap again", () =
     expect(n.goal_threshold_cap).toBe(100);
     expect(n.goal_threshold_unit).toBe("%");
     expect(n.goal_threshold_frame).toBe("level");
+    expect(n.goal_threshold_cap_provenance).toBe("metric_scale");
+  });
+});
+
+/**
+ * ⛔⛔ THE ROWS THE FIRST VERSION OF THIS FIX BROKE.
+ *
+ * An adversarial review measured them; they are kept verbatim as the corpus,
+ * because they came from outside this author's head and the author's own spec
+ * was 7/7 green while every one of them was wrong (trap 22c).
+ *
+ * `resolveGoalThresholdCapWithProvenance` returns `cap = 100` ONLY for
+ * `unit === "%"`. Every other unit falls to `target_derived_headroom`,
+ * `cap = raw * 1.25`, and v1 wrote `raw = value * cap` there — i.e.
+ * `value² × 1.25`. That is not a rounding matter: `goal-threshold-cap.ts`
+ * records that on this rule the threshold is the CONSTANT 0.8 and **the user's
+ * figure survives only in `goal_threshold_raw`**, so corrupting raw destroys
+ * the sole carrier. `formatGoalTargetNotSavedText` rendered "your previous
+ * target of 0.2205share"; `projectGoalTargetRecord` is `model_facing: true`.
+ *
+ * These are not corner cases: `instruction.ts:375` DIRECTS the no-unit shape,
+ * and `display-value.ts:617` records `{value: 0.4, unit: "share"}` as a
+ * live-measured emission.
+ */
+describe("a cap derived FROM the target is not a frame — those rows must not move", () => {
+  const untouched: ReadonlyArray<readonly [string, number, string | undefined, string]> = [
+    ["no unit, unit_interval", 0.95, undefined, "unit_interval"],
+    ["share, unit_interval", 0.42, "share", "unit_interval"],
+    ["GBP, unit_interval", 0.6, "GBP", "unit_interval"],
+    ["no unit, ratio", 0.9, undefined, "ratio"],
+    ["percent (spelled out), unit_interval", 0.95, "percent", "unit_interval"],
+  ];
+
+  for (const [name, value, unit, scale] of untouched) {
+    it(`leaves raw as the emitted value: ${name}`, () => {
+      const n = goalNode(goalRecords(value, unit as string, scale));
+      expect(n.goal_threshold_raw).toBe(value);
+    });
+
+    it(`keeps target_derived_headroom truthful: ${name}`, () => {
+      const n = goalNode(goalRecords(value, unit as string, scale));
+      if (n.goal_threshold_cap_provenance === "target_derived_headroom") {
+        expect(n.goal_threshold_cap).toBeCloseTo((n.goal_threshold_raw as number) * 1.25, 12);
+      }
+    });
+  }
+});
+
+/**
+ * ⛔ AND THE CLASS `ratio` EXISTS FOR, which v1's shared `value <= 1` guard
+ * excluded. The contract: "a ratio that can meaningfully exceed 100% (NRR,
+ * growth, ROI). Admissible [0, +inf); 1.0 is parity." A ratio above 1 is its
+ * NORMAL value, not a contradiction — so the 100-fold understatement this file
+ * exists to close was still live on exactly that case.
+ */
+describe("a ratio may exceed parity", () => {
+  it("frames NRR 120% as 1.2, not 0.012", () => {
+    const n = goalNode(goalRecords(1.2, "%", "ratio"));
+    expect(n.goal_threshold).toBe(1.2);
+    expect(n.goal_threshold_raw).toBe(120);
   });
 });
