@@ -151,7 +151,56 @@ export interface ApplyOperationsInput {
    */
   readonly idempotencyKey: string;
   readonly operations: readonly ProposalOperationInput[];
-  /** The revision the consent was bound to. See {@link modelRevisionOf}. */
+  /**
+   * The revision the consent was bound to.
+   *
+   * ⛔⛔ MINT IT WITH {@link currentModelRevision}. NEVER FROM THE REQUEST'S
+   * `extensions.graphState`. This is not a style preference — the ingress
+   * graph and the stored graph ARE NOT THE SAME OBJECT, and the difference
+   * lands exactly on the fields this token hashes.
+   *
+   * ── MEASURED, AT STAGING `f3ae7266` ───────────────────────────────────────
+   * `commit.ts:1124-1136` resolves `graphForStore` through three persist
+   * passes — `repairGraphForPersistence`, `normaliseOptionInterventionContract`
+   * and `reconcileTopLevelOptionsFromNodes` — which mutate `intercept`, node
+   * `interventions` and top-level `options[]`. All three sit INSIDE
+   * `computeAnalysisAffectingGraphHash`'s projection. Running the real
+   * reconciler against the real hash function on one graph:
+   *
+   *     ingress    c373cbdfb844909d
+   *     persisted  4dadc7e6510ec272      <- different
+   *
+   * with controls that discriminate rather than merely agree: a graph with no
+   * option nodes no-ops and hashes EQUAL, a cosmetic label change reads EQUAL,
+   * and by-reference idempotence holds. So the divergence is caused by the
+   * projection, not by the probe.
+   *
+   * ⚠ AND IT HAS ALREADY SHIPPED ONCE, WITH BOTH HASHES IN THE LOG.
+   * `response-finaliser.ts:436-445` recorded a FALSE `GRAPH_DIVERGED` on a
+   * FRESH analysis — effectiveGraph `7367714928030768` vs persisted
+   * `b3ebb23cfb03df1d`. Same hash function, two sources, a false "the model has
+   * changed". This is a fact about the deployed system, not a hazard someone
+   * imagined.
+   *
+   * ⛔ THE FAILURE IS TOTAL AND IT LOOKS REASONABLE, which is what makes it
+   * worth this much text. Feed this from ingress and EVERY accept refuses with
+   * *"the model has changed since that was agreed"* — a sentence a reader
+   * accepts at face value. A capability outage wearing a correct-sounding
+   * excuse is strictly worse than a crash, because nobody goes looking.
+   *
+   * ⚠ Turn-class scoping, since the estate's own map invites the wrong read:
+   * "the UI sends no graph, CEE reloads its own" is true of RUN turns and
+   * SYSTEM_EVENT turns. It is FALSE of `kind: 'message'` turns, where
+   * `graph_state` is optional and the executor has an explicit backfill for its
+   * absence — and that is the class the accept path is offered on.
+   *
+   * The shape that works is already shipped four times here — `structural_rename`,
+   * `structural_delete`, `option_intervention_edit` and `/graph/register` — and
+   * it is always the same: a SERVER-MINTED base assertion the client echoes,
+   * re-derived server-side from `store.loadGraph`. `/graph/register`'s
+   * `graph_hash` exists *specifically* because a reload left the client
+   * baseless and every first edit refused as `needs_fresh_base`.
+   */
   readonly modelRevision: string;
 }
 
@@ -225,6 +274,37 @@ export function modelRevisionOf(graph: unknown): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * ⭐⭐ THE SERVER-MINTED BASE ASSERTION. The ONLY blessed way to obtain a
+ * `modelRevision`.
+ *
+ * It exists so that the offer side and the accept side read the SAME SOURCE.
+ * {@link createApplyOperations} re-derives the base from `store.loadGraph` at
+ * accept time; if the offer minted its token from anywhere else the two can
+ * disagree for reasons that have nothing to do with the user changing
+ * anything — see {@link ApplyOperationsInput.modelRevision} for the measured
+ * proof and the live incident. Mint from here at OFFER time, carry the token
+ * with the offer, echo it back on accept, and the comparison then means what
+ * it says: the model moved between the offer and the answer.
+ *
+ * ⚠ THIS IS NOT A CONVENIENCE WRAPPER AROUND {@link modelRevisionOf}. The
+ * difference is the ARGUMENT, and the argument is the entire defect: this one
+ * cannot be handed the ingress graph, because it does not take a graph.
+ *
+ * Returns `null` when the scenario has no graph, or one with no
+ * analysis-affecting projection — the same `null` the adapter refuses on, so a
+ * caller that propagates it gets a refusal rather than a token that means
+ * nothing. A FAILED read propagates as a throw: a caller minting a base must
+ * not receive "no model" when the truth is "we could not look".
+ */
+export async function currentModelRevision(
+  scenarioId: string,
+  deps: { readonly store?: ApplyOperationsStore } = {},
+): Promise<string | null> {
+  const store = deps.store ?? getSessionStore();
+  return modelRevisionOf(await store.loadGraph(scenarioId));
 }
 
 /**

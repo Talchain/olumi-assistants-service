@@ -39,6 +39,7 @@ import type { CommitMetadata, CommitResult } from '../commit.js';
 import {
   ApplyOperationsUnverifiedError,
   createApplyOperations,
+  currentModelRevision,
   flattenProposalOperations,
   invariantBaselineFor,
   modelRevisionOf,
@@ -531,5 +532,62 @@ describe('the store is optional, and omitting it costs nothing until the port is
     await run(input());
     expect(getSessionStore).toHaveBeenCalledTimes(1);
     expect(h.loadGraph).toHaveBeenCalledWith(SCENARIO);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('currentModelRevision — the server-minted base assertion', () => {
+  // WHY THIS EXISTS. The offer side and the accept side must read the SAME
+  // source. The adapter re-derives its base from `store.loadGraph`; if an
+  // offer minted its token from the request's `extensions.graphState` the two
+  // could disagree with nothing having changed, and EVERY accept would refuse
+  // with "the model has changed since that was agreed" — a total outage
+  // wearing a reasonable sentence. Measured at staging: ingress
+  // `c373cbdfb844909d` vs persisted `4dadc7e6510ec272`, and already shipped
+  // once as a false GRAPH_DIVERGED. See the field's docblock.
+  //
+  // ⚠ THESE ASSERT THE ROUND TRIP, NOT THAT MEASUREMENT. The ingress-vs-store
+  // divergence is a property of the persist projection and belongs to its own
+  // evidence; restating it here would be a second copy of someone else's
+  // number — the mirror trap. What is pinned here is the only part this module
+  // controls: a token minted by this function is the token the adapter expects.
+
+  it('agrees with the base the adapter itself reads', async () => {
+    const h = harness();
+    const minted = await currentModelRevision(SCENARIO, { store: h.store });
+    expect(minted, 'a real graph mints a real token, never null').not.toBeNull();
+    expect(minted).toBe(modelRevisionOf(baseGraph()));
+  });
+
+  it('⭐ a minted token is ACCEPTED, and a fabricated one is REFUSED', async () => {
+    // Both arms in one test on purpose: the acceptance alone would pass just
+    // as well against an adapter that never compares anything.
+    const accepted = harness();
+    const minted = await currentModelRevision(SCENARIO, { store: accepted.store });
+    const ok = await port(accepted)(input({ modelRevision: minted! }));
+    expect(ok.ok, JSON.stringify(ok)).toBe(true);
+
+    const refused = harness();
+    const no = await port(refused)(input({ modelRevision: 'not-a-revision-this-graph-ever-had' }));
+    expect(no.ok).toBe(false);
+    expect(no.ok === false ? no.reason : '').toContain('has changed');
+  });
+
+  it('cannot be handed a graph — it reads the store, resolving the canonical one when omitted', async () => {
+    const h = harness();
+    getSessionStore.mockReturnValue(h.store);
+    const minted = await currentModelRevision(SCENARIO);
+    expect(getSessionStore).toHaveBeenCalledTimes(1);
+    expect(h.loadGraph).toHaveBeenCalledWith(SCENARIO);
+    expect(minted).toBe(modelRevisionOf(baseGraph()));
+  });
+
+  it('⛔ a FAILED read throws — "we could not look" must not arrive as "no model"', async () => {
+    // The adapter refuses on a null token. If a transport failure returned
+    // null here, a caller minting a base would be told the scenario has no
+    // model — the wrong diagnosis, and one that invites creating a second.
+    const h = harness({ loadThrows: true });
+    await expect(currentModelRevision(SCENARIO, { store: h.store })).rejects.toThrow('transport');
   });
 });
