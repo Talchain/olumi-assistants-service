@@ -53,6 +53,15 @@ vi.mock('../commit.js', async (importOriginal) => ({
   commitDirectAnswer,
 }));
 
+// The canonical store accessor, mocked so the FALLBACK is observable. Spread
+// with `importOriginal` for the usual reason — replacing the module wholesale
+// would silently delete every other export it has.
+const getSessionStore = vi.hoisted(() => vi.fn());
+vi.mock('../session/index.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../session/index.js')>()),
+  getSessionStore,
+}));
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Fixture
 //
@@ -218,6 +227,7 @@ function port(h: Harness) {
 
 beforeEach(() => {
   commitDirectAnswer.mockReset();
+  getSessionStore.mockReset();
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -482,5 +492,44 @@ describe('applyOperations — after dispatch, "it did not save" stops being a cl
       } as unknown as CommitResult;
     });
     await expect(port(h)(input())).rejects.toBeInstanceOf(ApplyOperationsUnverifiedError);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('the store is optional, and omitting it costs nothing until the port is used', () => {
+  // WHY THIS EXISTS. `store` became optional so that a caller offering an
+  // accept needs no `getSessionStore` import of its own — see the field's
+  // docblock for why that is the narrower surface and not a gate dodge. The
+  // property that makes it safe is WHERE the fallback resolves: per call,
+  // inside the returned function, exactly as `commitDirectAnswer` does at
+  // `commit.ts:1121`. Resolve it at construction instead and every suite that
+  // builds a port would reach the real accessor, which builds a Supabase
+  // client from config. These three assertions are what keeps it per call.
+
+  it('does not touch the accessor at construction', () => {
+    createApplyOperations({ scenarioId: SCENARIO, requestId: 'req-lazy' });
+    expect(getSessionStore).not.toHaveBeenCalled();
+  });
+
+  it('uses an INJECTED store verbatim and never resolves the canonical one', async () => {
+    const h = harness();
+    await createApplyOperations({ scenarioId: SCENARIO, store: h.store, requestId: 'req-inj' })(
+      input(),
+    );
+    // Bound by identity to the injected double, not by "some store was read":
+    // a fallback that silently won would satisfy a bare read-count assertion.
+    expect(h.loadGraph).toHaveBeenCalledWith(SCENARIO);
+    expect(getSessionStore).not.toHaveBeenCalled();
+  });
+
+  it('resolves the canonical store ONCE, on first use, when omitted', async () => {
+    const h = harness();
+    getSessionStore.mockReturnValue(h.store);
+    const run = createApplyOperations({ scenarioId: SCENARIO, requestId: 'req-fallback' });
+    expect(getSessionStore).not.toHaveBeenCalled();
+    await run(input());
+    expect(getSessionStore).toHaveBeenCalledTimes(1);
+    expect(h.loadGraph).toHaveBeenCalledWith(SCENARIO);
   });
 });
