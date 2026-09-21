@@ -277,7 +277,8 @@ import {
   deriveContextReadiness,
   type ContextReadiness,
 } from './context/readiness.js';
-import type { V5CoachingDelivery } from './diagnostics/v5-diagnostic-trace.js';
+import type { V5CoachingDelivery, V5HandlerRefusal } from './diagnostics/v5-diagnostic-trace.js';
+import { handlerRefusalFromError } from './diagnostics/v5-diagnostic-trace.js';
 import { tryProposalOrdinalSelect } from './routing/proposal-ordinal-select.js';
 import {
   PROPOSAL_DISMISSAL_RESPONSE,
@@ -684,6 +685,23 @@ export interface TurnExecutorRunResult {
    * the flag-gated diagnostic trace, never through `response`.
    */
   withheldExplanationReason?: WithheldExplanationReason;
+  /**
+   * WHICH handler declined this turn, and why, in stable codes — present only
+   * when the recoverable-handler composer answered the turn, absent on every
+   * success and every other failure family.
+   *
+   * Exists for one reason: to make the refusal's CAUSE resolvable from the
+   * artefact a manual tester holds. `add_constraint` throws at 21 sites behind
+   * one War-Room-locked sentence, and until this field the specific code was
+   * written once (`d1-shared/error-boundary.ts:44`) and read nowhere — a real
+   * banked staging refusal carried none of it on the wire.
+   *
+   * INTERNAL ONLY as a run-result field; it reaches the wire solely through
+   * the flag-gated `_diagnostic_trace.handler_refusal`, never `response`, and
+   * no product behaviour reads it. Same carrier and same rationale as
+   * `withheldExplanationReason` above.
+   */
+  handlerRefusal?: V5HandlerRefusal;
   /**
    * V5 finaliser contract: canonical readiness from the persisted graph
    * authority (request graph only on cold start). Already computed for
@@ -2062,6 +2080,12 @@ export async function runTurnExecutor(
   // result here. `null` means neither applied a projection; the in-flow gate
   // records `unchanged` explicitly when it examines an already-clean answer.
   let withheldExplanationReasonForRun: WithheldExplanationReason | null = null;
+  /**
+   * The recoverable-handler refusal's own codes, for the flag-gated diagnostic
+   * trace only. Null until the recoverable catch fires, which is the honest
+   * reading for every turn that did not refuse.
+   */
+  let handlerRefusalForRun: V5HandlerRefusal | null = null;
   // ROADMAP 2.104 (F2) — may the withheld-reason copy NAME the user's ratified
   // conditions on this turn? Only when the analysis is `fresh`: the verdict is
   // read off the persisted fact while the labels are read off the CURRENT graph,
@@ -12108,6 +12132,35 @@ export async function runTurnExecutor(
             'V5 TurnExecutor handler invocation failed — recoverable',
           );
 
+          // ⭐⭐ WHICH THROW DECLINED, IN CODES, ONTO THE ONE ARTEFACT A MANUAL
+          // TESTER HOLDS. Route-v2 stamps this at the single `sendFinalised200`
+          // chokepoint onto `_diagnostic_trace.handler_refusal`.
+          //
+          // ⛔ WHY IT IS NEEDED DESPITE THE FOUR TELEMETRY LINES AROUND IT.
+          // They carry `cause_kind`, and they are the right place for it — but
+          // they are Datadog/pino, and none of them carries `d1_code`, which
+          // the boundary set at `d1-shared/error-boundary.ts:44` and which had,
+          // at `d575cc60`, exactly ONE production site in the repo: its own
+          // producer. Measured on a real banked staging refusal, the wire body
+          // carried no cause of any kind — so two independent witnesses of the
+          // same opaque `add_constraint` decline could not be told apart, and a
+          // peer lane correctly REFUSED to choose which of ~23 throw sites gets
+          // specific copy, because that choice would have been a guess
+          // validated against a metric nobody could measure.
+          //
+          // Projected from the SAME error object the composer and the telemetry
+          // read, through one shared projector, so the record cannot disagree
+          // with the refusal it reports on. Codes only — no prose, no operation
+          // values, no user content, which is what makes it safe to retain.
+          //
+          // ⚠ SCOPE, EXACTLY. The RECOVERABLE 200 arm only. The fatal arm is
+          // deliberately untouched: it already ships `cause_kind` to the wire
+          // inside `blocks[0].details.error_code`
+          // (`compose/handler-failure-responses.ts:750`), so it is not blind,
+          // and a second call site here would be the duplicated-literal mirror
+          // CLAUDE.md trap 12 is about.
+          handlerRefusalForRun = handlerRefusalFromError(error);
+
           const recoveryComposeCtx: ComposeContext = {
             graph: graphLookupForValidate,
             handlerRegistry: options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY,
@@ -16240,6 +16293,11 @@ export async function runTurnExecutor(
       ...(withheldExplanationReasonForRun !== null
         ? { withheldExplanationReason: withheldExplanationReasonForRun }
         : {}),
+      // WHICH handler declined, in stable codes. Route-v2 stamps it onto
+      // `_diagnostic_trace.handler_refusal`. Absent ⇒ the turn did not take
+      // the recoverable-handler path, which is the honest reading; there is
+      // deliberately no "unknown" placeholder for a turn that did not refuse.
+      ...(handlerRefusalForRun !== null ? { handlerRefusal: handlerRefusalForRun } : {}),
       analysisReady: analysisReadyForTurn,
       ...(turnOutcome ? { turn_outcome: turnOutcome } : {}),
       ...(freshness ? { freshness } : {}),

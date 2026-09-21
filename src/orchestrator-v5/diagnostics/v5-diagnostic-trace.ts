@@ -215,11 +215,140 @@ export interface V5DiagnosticTrace extends DiagnosticTrace {
    */
   claim_safety?: V5ClaimSafety;
   /**
+   * WHICH handler declined, and WHY, in stable codes. Present only on a turn
+   * the recoverable-handler composer answered; absent on every success and on
+   * every other failure family. See {@link V5HandlerRefusal}.
+   */
+  handler_refusal?: V5HandlerRefusal;
+  /**
    * Schema version of the V5 trace envelope itself (NOT a prompt /
    * grammar version). Bumped on any breaking shape change. Exporters
    * read this to choose the right field projection.
    */
   trace_version: 1;
+}
+
+/**
+ * ⭐⭐ WHICH THROW DECLINED THIS TURN — the codes, never the prose.
+ *
+ * ── THE GAP THIS CLOSES, MEASURED ─────────────────────────────────────────
+ * `add_constraint` throws `D1HandlerError` at 21 sites. 20 of them take the
+ * RECOVERABLE 200 path, where `composeRecoverableHandlerResponse` ships
+ * `blocks: []` and a War-Room-locked per-HANDLER phrase — deliberately the
+ * same sentence for every site, so the user is not shown internal taxonomy.
+ * That ruling is correct and this record does not touch it.
+ *
+ * The consequence was that NOTHING downstream could tell the sites apart.
+ * Measured on a real banked staging refusal (`beat5a-answer-limit.json`,
+ * 6,281 bytes, `http 200`, `blocks: []`): the body carried ZERO of
+ * `cause_kind` / `d1_code` / `handler_id` / `specific_issue` / any D1 code,
+ * while eight contrast tokens (`correlation_ids`, `turn_id`, `exit_path`,
+ * `prompt_hash`, `assistant_text`, `build_sha`, `stage_indicator`,
+ * `claim_safety`) all scored 1 — so the zero is discriminating, not a probe
+ * artefact.
+ *
+ * `d1_code` was SET at `d1-shared/error-boundary.ts:44` and had **exactly one
+ * production site in the repo: its own producer.** Zero consumers (contrast:
+ * `cause_kind`, 89 production lines across 19 files). Set is not carried, and
+ * the whole gap lived between those two words.
+ *
+ * ── WHY HERE ──────────────────────────────────────────────────────────────
+ * `_diagnostic_trace` is already PRESENT on the refusal turn (witnessed in
+ * the capture above), is stripped before the strict `OlumiResponseSchema`
+ * validates and re-attached after, and is read by nothing in the product. So
+ * a new key here breaks no contract, renders nowhere, and reaches the one
+ * artefact a manual tester actually holds. Exactly the `claim_safety`
+ * precedent beside it (ROADMAP 1.233), for the same reason: a mechanism that
+ * lives only in logs forces every acceptance walk to infer it from prose.
+ *
+ * ── THE VOCABULARY IS ENTIRELY EXISTING ───────────────────────────────────
+ * Every member is a value the producer already computed. This record mints no
+ * taxonomy. If you find yourself adding an enum here, you have overshot.
+ *
+ * ── BOUNDED BY CONSTRUCTION (the cardinality contract) ────────────────────
+ * Three closed vocabularies and one optional declared code. **No prose, no
+ * operation values, no user content, no ids.** That is not squeamishness: it
+ * is what makes the record safe to retain and safe wherever it travels. The
+ * error's own `message` field is deliberately NOT here — it is honest, but it
+ * interpolates target ids and user-supplied values (`Cannot add constraint:
+ * "${targetId}" …`, `details: { received: typeParam.value }`), so it is log
+ * triage only, as `user-guidance.ts` already rules.
+ *
+ * ── SCOPE, STATED EXACTLY (trap 20 — never generalise an UNKNOWN) ─────────
+ * `d1_code` resolves FOUR of the five D1 codes to a UNIQUE throw line in
+ * `add-constraint.ts` — `PRECONDITION_UNMET` `:431`, `GRAPH_INVARIANT_VIOLATED`
+ * `:442`, `ENTITY_NOT_FOUND` `:459`, `ENTITY_KIND_MISMATCH` `:471` (derived by
+ * counting the file's throws, not inherited). It leaves `PARAMETER_INVALID` a
+ * SEVENTEEN-way bucket. So this closes the two-witness case exactly and
+ * narrows, rather than eliminates, the largest bucket. Per-site resolution for
+ * those seventeen would mean minting seventeen new stable codes — a
+ * vocabulary, and therefore a decision, not a field.
+ *
+ * Stamped by route-v2 at the single `sendFinalised200` chokepoint every
+ * dispatch family passes through, threaded from the turn-executor's own catch
+ * — NOT re-derived here, so the trace cannot disagree with the error it
+ * reports on.
+ */
+export interface V5HandlerRefusal {
+  /**
+   * The handler that declined, by its registry id (`add_constraint`,
+   * `set_factor_value`, `adjust_edge_strength`, `run_analysis`, …). Taken from
+   * the error's own `details.handler_id`, which the invocation boundary
+   * guarantees is a non-empty string.
+   */
+  readonly handler_id: string;
+  /**
+   * The typed invocation cause — a compiler-enforced string-literal union
+   * (`HandlerInvocationFailedCause`). Typed as `string` here so this
+   * diagnostics module stays free of a tools-layer dependency in its public
+   * shape; the real union is enforced at the projector below, where the error
+   * type is in scope.
+   */
+  readonly cause_kind: string;
+  /**
+   * The D1 validator-style code (`PARAMETER_INVALID`, `ENTITY_NOT_FOUND`,
+   * `ENTITY_KIND_MISMATCH`, `PRECONDITION_UNMET`, `GRAPH_INVARIANT_VIOLATED`).
+   *
+   * Null — never omitted, never defaulted — when the throw was NOT a
+   * `D1HandlerError`, e.g. `add-constraint.ts:419`, which throws
+   * `HandlerInvocationFailedError` directly and carries no D1 code. "There was
+   * no D1 code" and "the code was X" are different claims, and a guess in this
+   * field would be worse than the blindness it replaces.
+   */
+  readonly d1_code: string | null;
+  /**
+   * The handler's own finest-grain declared code (`details.reason_code`), when
+   * it set one — `run_analysis` uses it to separate `mixed_scale_unresolved`
+   * from `baseline_scale_unresolved` under a single `cause_kind`. Null when
+   * the handler declared none. Same honesty rule as `d1_code`.
+   */
+  readonly reason_code: string | null;
+}
+
+/**
+ * Project a handler invocation failure onto {@link V5HandlerRefusal}.
+ *
+ * ONE derivation, read by the turn-executor's recoverable catch and nothing
+ * else. Written beside the shape rather than inlined at the catch, because a
+ * four-field object literal copied to a second failure family is exactly the
+ * hand-maintained mirror CLAUDE.md trap 12 is about.
+ *
+ * Reads defensively off `details` (typed `unknown` in the interface's index
+ * signature) so a shape drift degrades to `null` rather than shipping a
+ * non-string into a codes-only record.
+ */
+export function handlerRefusalFromError(error: {
+  readonly cause_kind: string;
+  readonly details: { readonly handler_id: string; readonly [key: string]: unknown };
+}): V5HandlerRefusal {
+  const codeOrNull = (value: unknown): string | null =>
+    typeof value === 'string' && value.length > 0 ? value : null;
+  return {
+    handler_id: error.details.handler_id,
+    cause_kind: error.cause_kind,
+    d1_code: codeOrNull(error.details.d1_code),
+    reason_code: codeOrNull(error.details.reason_code),
+  };
 }
 
 /**
