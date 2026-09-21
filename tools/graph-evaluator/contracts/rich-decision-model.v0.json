@@ -1,0 +1,208 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "olumi/rich-decision-model/v0",
+  "title": "RichDecisionModel",
+  "description": "Olumi rich decision model v0. One schema for the faithful builder and the widener/critic. Every item carries provenance; user-derived items are bound to a verbatim source_quote. Numeric fields are nullable: null means 'not stated / unknown', never 0. Strict-mode compatible (all properties required, additionalProperties false, nullability via type unions).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["decision", "user_facts", "options", "factors", "outcomes", "constraints", "causal_links", "unknowns", "notes"],
+  "properties": {
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["question", "horizon"],
+      "properties": {
+        "question": { "type": "string", "description": "The decision as the user posed it, in their words where possible." },
+        "horizon": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["value", "unit", "source_fact_id"],
+          "properties": {
+            "value": { "type": ["number", "null"] },
+            "unit": { "type": ["string", "null"], "enum": ["days", "weeks", "months", "quarters", "years", null] },
+            "source_fact_id": { "type": ["string", "null"] }
+          }
+        }
+      }
+    },
+    "user_facts": {
+      "type": "array",
+      "description": "Everything the user actually said that the model uses. Builder-only. Each entry MUST quote a contiguous verbatim span of the brief.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "kind", "source_quote", "value", "unit", "role", "transformation"],
+        "properties": {
+          "id": { "type": "string", "description": "Stable id like uf1, uf2." },
+          "kind": { "type": "string", "enum": ["goal", "option", "quantity", "limit", "cause", "horizon", "qualitative", "context"] },
+          "source_quote": { "type": "string", "description": "Verbatim contiguous span from the brief. Never paraphrase." },
+          "value": { "type": ["number", "null"], "description": "The number as the user wrote it, at its native magnitude (59 not 0.59; 4 for 4%; 20000 for £20k with transformation noted)." },
+          "unit": { "type": ["string", "null"], "description": "What the number is measured in, copied from the brief (e.g. '£/month', '%', 'months'). null if none stated." },
+          "role": { "type": "string", "enum": ["target", "baseline", "current", "proposed", "limit", "horizon", "context", "not_numeric"] },
+          "transformation": { "type": ["string", "null"], "description": "If value differs from the literal characters in the quote (e.g. '£20k → 20000', 'two → 2'), say exactly how. null if literal." }
+        }
+      }
+    },
+    "options": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "label", "provenance", "source_fact_id", "is_status_quo", "lever_settings", "rationale"],
+        "properties": {
+          "id": { "type": "string" },
+          "label": { "type": "string" },
+          "provenance": { "type": "string", "enum": ["user", "ai_proposed"] },
+          "source_fact_id": { "type": ["string", "null"], "description": "Required when provenance is user; must reference a user_facts id of kind option." },
+          "is_status_quo": { "type": "boolean" },
+          "lever_settings": {
+            "type": "array",
+            "description": "What this option DOES to controllable factors. Never list an outcome or a constrained quantity here.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["factor_id", "value", "unit", "epistemic_state", "source_fact_id"],
+              "properties": {
+                "factor_id": { "type": "string" },
+                "value": { "type": ["number", "null"], "description": "Native magnitude. null if the option changes the lever without a stated number." },
+                "unit": { "type": ["string", "null"] },
+                "epistemic_state": { "type": "string", "enum": ["known", "observed", "user_estimate", "external_evidence", "ai_hypothesis", "unknown"] },
+                "source_fact_id": { "type": ["string", "null"], "description": "Required when epistemic_state is known/observed/user_estimate." }
+              }
+            }
+          },
+          "rationale": { "type": ["string", "null"], "description": "Required for ai_proposed options: why this alternative is worth considering." }
+        }
+      }
+    },
+    "factors": {
+      "type": "array",
+      "description": "Quantities and qualities that matter to the decision, including levers, observables and external factors.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "label", "control", "measurability", "epistemic_state", "current_value", "unit", "provenance", "source_fact_id", "dsk_refs"],
+        "properties": {
+          "id": { "type": "string" },
+          "label": { "type": "string" },
+          "control": { "type": "string", "enum": ["lever", "observable", "external"], "description": "lever = the decision maker sets it directly; observable = measurable but not directly set; external = outside the organisation's control." },
+          "measurability": { "type": "string", "enum": ["quantitative", "qualitative"] },
+          "epistemic_state": { "type": "string", "enum": ["known", "observed", "user_estimate", "external_evidence", "ai_hypothesis", "unknown"] },
+          "current_value": { "type": ["number", "null"], "description": "Native magnitude. null unless a user fact or external evidence states it. NEVER invent a baseline." },
+          "unit": { "type": ["string", "null"] },
+          "provenance": { "type": "string", "enum": ["user", "ai_proposed"] },
+          "source_fact_id": { "type": ["string", "null"] },
+          "dsk_refs": { "type": "array", "items": { "type": "string" }, "description": "Decision-science knowledge ids from the allowlist supplied in the prompt, if any principle motivated this factor. Empty otherwise." }
+        }
+      }
+    },
+    "outcomes": {
+      "type": "array",
+      "description": "Results and risks the decision produces. Risks are outcomes where higher is worse.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "label", "kind", "better_direction", "measurability", "epistemic_state", "provenance", "source_fact_id", "dsk_refs"],
+        "properties": {
+          "id": { "type": "string" },
+          "label": { "type": "string" },
+          "kind": { "type": "string", "enum": ["outcome", "risk"] },
+          "better_direction": { "type": "string", "enum": ["higher", "lower"] },
+          "measurability": { "type": "string", "enum": ["quantitative", "qualitative"] },
+          "epistemic_state": { "type": "string", "enum": ["known", "observed", "user_estimate", "external_evidence", "ai_hypothesis", "unknown"] },
+          "provenance": { "type": "string", "enum": ["user", "ai_proposed"] },
+          "source_fact_id": { "type": ["string", "null"] },
+          "dsk_refs": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "constraints": {
+      "type": "array",
+      "description": "Limits the user adopted. Keep the operator EXACT: 'under 4%' is '<', 'at most 4%' is '<='.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "subject_id", "operator", "value", "unit", "provenance", "source_fact_id"],
+        "properties": {
+          "id": { "type": "string" },
+          "subject_id": { "type": "string", "description": "id of the factor or outcome being bounded." },
+          "operator": { "type": "string", "enum": ["<", "<=", ">", ">=", "="] },
+          "value": { "type": "number", "description": "Native magnitude as written (4 for 4%)." },
+          "unit": { "type": ["string", "null"] },
+          "provenance": { "type": "string", "enum": ["user", "ai_proposed"] },
+          "source_fact_id": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "causal_links": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "from_id", "to_id", "effect", "magnitude", "mediator_id", "temporal", "provenance", "source_fact_id", "rationale", "dsk_refs"],
+        "properties": {
+          "id": { "type": "string" },
+          "from_id": { "type": "string" },
+          "to_id": { "type": "string" },
+          "effect": { "type": "string", "enum": ["positive", "negative", "unknown"] },
+          "magnitude": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "value", "note"],
+            "properties": {
+              "kind": { "type": "string", "enum": ["unknown", "qualitative", "user_estimate", "ai_estimate"] },
+              "value": { "type": ["number", "null"], "description": "Only when kind is user_estimate or ai_estimate; a unitless effect size in [-1, 1] or a stated elasticity, described in note." },
+              "note": { "type": ["string", "null"] }
+            }
+          },
+          "mediator_id": { "type": ["string", "null"], "description": "Factor through which this effect operates, if the mechanism is indirect." },
+          "temporal": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["delay", "duration", "persistence", "note"],
+            "properties": {
+              "delay": { "type": ["string", "null"], "description": "How long before the effect begins, in the user's words or null." },
+              "duration": { "type": ["string", "null"] },
+              "persistence": { "type": "string", "enum": ["permanent", "decays", "one_off", "unknown"] },
+              "note": { "type": ["string", "null"] }
+            }
+          },
+          "provenance": { "type": "string", "enum": ["user", "ai_hypothesis"] },
+          "source_fact_id": { "type": ["string", "null"] },
+          "rationale": { "type": ["string", "null"] },
+          "dsk_refs": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "unknowns": {
+      "type": "array",
+      "description": "Things the model needs and the user did not say. Ask; never fill.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "question", "about_id", "blocks_quantitative_analysis"],
+        "properties": {
+          "id": { "type": "string" },
+          "question": { "type": "string" },
+          "about_id": { "type": ["string", "null"], "description": "factor/outcome/link id this unknown concerns." },
+          "blocks_quantitative_analysis": { "type": "boolean" }
+        }
+      }
+    },
+    "notes": {
+      "type": "array",
+      "description": "Widener/critic corrections and challenges, each tied to an item.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["about_id", "kind", "text", "dsk_refs"],
+        "properties": {
+          "about_id": { "type": ["string", "null"] },
+          "kind": { "type": "string", "enum": ["correction", "challenge", "assumption", "limitation"] },
+          "text": { "type": "string" },
+          "dsk_refs": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    }
+  }
+}
