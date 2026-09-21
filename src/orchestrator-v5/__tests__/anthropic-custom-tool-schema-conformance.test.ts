@@ -122,6 +122,11 @@ const SERVED_TOOL_SCHEMAS: readonly {
   { label: 'replacement: run_analysis', schema: createRunAnalysisTool(NO_DEPS).definition.input_schema },
   { label: 'replacement: remember', schema: createRememberTool(NO_DEPS).definition.input_schema },
   { label: 'replacement: accept_proposal', schema: ACCEPT_TOOL_INPUT_SCHEMA },
+  { label: 'replacement: propose_repairs', schema: createProposeRepairsTool(NO_DEPS).definition.input_schema },
+  {
+    label: 'replacement: resolve_blocked_link',
+    schema: createResolveBlockedLinkTool(NO_DEPS).definition.input_schema,
+  },
   { label: 'olumi_action (base advert)', schema: OLUMI_ACTION_TOOL.input_schema },
   { label: 'olumi_action (served)', schema: buildOlumiActionTool().input_schema },
   {
@@ -171,6 +176,10 @@ import {
 } from '../replacement/structure-tools.js';
 import { createRunAnalysisTool } from '../replacement/run-analysis-tool.js';
 import { createRememberTool } from '../replacement/remember-tool.js';
+import {
+  createProposeRepairsTool,
+  createResolveBlockedLinkTool,
+} from '../replacement/repair-tools.js';
 import { ACCEPT_TOOL_INPUT_SCHEMA } from '../replacement/run-replacement-turn.js';
 
 const TOOL_SCHEMA_CONSTRUCTION_FILES: readonly string[] = [
@@ -188,6 +197,7 @@ const TOOL_SCHEMA_CONSTRUCTION_FILES: readonly string[] = [
   'orchestrator-v5/replacement/structure-tools.ts',
   'orchestrator-v5/replacement/run-analysis-tool.ts',
   'orchestrator-v5/replacement/remember-tool.ts',
+  'orchestrator-v5/replacement/repair-tools.ts',
   // NOT run-replacement-turn.ts: its accept-tool schema is now the exported
   // `ACCEPT_TOOL_INPUT_SCHEMA` constant, so the file no longer matches this
   // scanner's "constructs a schema inline" pattern — while the schema ITSELF is
@@ -309,6 +319,12 @@ describe('⭐⭐ 2.655 — every custom tool schema Anthropic is sent is API-con
       'replacement: read_workspace $', // reads the workspace as it stands; nothing to parameterise
       'replacement: read_results $', // reads the current analysis; takes no selector
       'replacement: run_analysis $', // runs the analysis as configured; the model chooses nothing
+      // Reports the WHOLE outstanding set for the model on screen, derived from
+      // the readiness authority. There is nothing for the model to select: a
+      // parameter here could only narrow the set, and narrowing it is the
+      // one-at-a-time behaviour the tool exists to end. Its sibling
+      // `resolve_blocked_link` does take parameters and is swept normally.
+      'replacement: propose_repairs $',
     ];
 
     const closedToNothing = SERVED_TOOL_SCHEMAS.flatMap((t) =>
