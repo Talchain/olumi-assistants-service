@@ -757,13 +757,21 @@ export function buildAnalysisReadyPayload(
       // times. It is written to stand alone because `UserMappingForm` renders
       // each entry as its own list item.
       //
+      // ⚠ AND IT SAYS "this option", NOT THE LABEL AGAIN — caught by RENDERING
+      // the composed text rather than by reading it. Option labels here are real
+      // user sentences, not nouns ("invest two engineers for a quarter in the
+      // onboarding flow"), so a second interpolation produced *"model it through
+      // a factor that invest two engineers for a quarter in the onboarding flow
+      // sets"*. The entry sits under the named question and is per-option
+      // already, so the pronoun is unambiguous and the label is not repeated.
+      //
       // ⚠ NO EM DASH. `user_questions` can reach the Reasoning tab through the
       // blocked listing, and that render root carries a no-em-dash copy rule.
       user_questions: [...new Set([...(option.user_questions ?? []),
         ...unresolved.map((edge) =>
           `How does ${option.label} change ${nodeById.get(edge.to)?.label ?? edge.to}? Olumi keeps this link in your model but cannot put a number on it, so the options cannot be compared while it is there.`,
         ),
-        `Removing a link like this is what clears the block; setting a strength on it does not. If the effect is real, model it through a factor that ${option.label} sets, and then remove the link.`,
+        `Removing a link like this is what clears the block; setting a strength on it does not. If the effect is real, model it through a factor this option sets, and then remove the link.`,
       ])],
     };
   });
