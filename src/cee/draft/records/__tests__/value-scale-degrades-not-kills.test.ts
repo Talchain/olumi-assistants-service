@@ -29,7 +29,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { projectDraftRecords } from "../seam.js";
+import { DraftRecordSetWire, projectDraftRecords } from "../seam.js";
 
 const BRIEF = "we have 6 engineers and want to grow revenue next year";
 
@@ -98,7 +98,7 @@ describe("a malformed value_scale degrades, a malformed discriminator refuses", 
     ).toBe("raw_count");
   });
 
-  it("CONTRAST — a malformed DISCRIMINATOR still refuses, so the tolerance has not widened", () => {
+  it("CONTRAST — a malformed REQUIRED discriminator still refuses", () => {
     // `kind` is load-bearing: the projector's switch branches on it. If this
     // ever goes green, the seam has become permissive in general and the three
     // tests above stop being evidence about `value_scale` specifically.
@@ -107,5 +107,102 @@ describe("a malformed value_scale degrades, a malformed discriminator refuses", 
     }));
     expect(out.ok).toBe(false);
     expect(out.reason).toBe("not_a_record_set");
+  });
+
+  it("CONTRAST — a malformed OPTIONAL enum still refuses, which is the case `kind` cannot see", () => {
+    // ⚠⚠ THE TEST ABOVE DOES NOT SUPPORT THE CLAIM IT SOUNDS LIKE, and an
+    // independent reviewer proved it with two mutants: adding `.catch` to
+    // `role` — or to `effect` — left this file **4 of 4 GREEN**. `kind` is
+    // REQUIRED, so it cannot witness a tolerance that spreads to an OPTIONAL
+    // enum, and an optional enum is exactly the shape the next `.catch` would
+    // land on.
+    //
+    // `role` is the nearest neighbour by every axis that matters: optional,
+    // enum-typed, same wire shape, same file, three lines away — and
+    // LOAD-BEARING in a way `value_scale` is not. Dropping it silently changes
+    // what the record MEANS: a stated `target` becomes a figure with no role,
+    // and `goalValueIsATarget` reads an unstated role as a target anyway. So
+    // absence is NOT byte-identical to prior behaviour here, which is precisely
+    // the criterion that admits `value_scale` and refuses `role`.
+    const out = seam(records((r) => {
+      (r.stated_items as Array<Record<string, unknown>>)[1]!.role = "nonsense";
+    }));
+    expect(out.ok, "the tolerance must not have spread to the optional enums").toBe(false);
+    expect(out.reason).toBe("not_a_record_set");
+  });
+
+  it("CONTRAST — and on the CLAIMS shape too, which the stated rows cannot witness", () => {
+    // ⚠ HALF-CLOSING THIS WAS NOT ENOUGH, and the mutants said so. Adding the
+    // `role` row above made the reviewer's `role` mutant bite — and its
+    // `effect` mutant STAYED INVISIBLE, because `effect` lives on the CLAIMS
+    // wire shape and every fixture above carries an empty `claims` array. Two
+    // shapes, two `.catch` sites, so two contrasts: a guard over one shape is
+    // no evidence at all about the other.
+    //
+    // `effect` is load-bearing in the strongest sense available here — it is
+    // the SIGN of a causal relationship. Dropping it silently does not degrade
+    // a display, it reverses what the model said about the world.
+    const out = seam(records((r) => {
+      (r.claims as unknown[]).push({
+        claim_kind: "causal_link",
+        label: "headcount bears on revenue",
+        from_stated: 1,
+        to_stated: 0,
+        effect: "nonsense",
+      });
+    }));
+    expect(out.ok, "a malformed causal SIGN must never degrade to absence").toBe(false);
+    expect(out.reason).toBe("not_a_record_set");
+  });
+});
+
+/**
+ * ⭐⭐ THE DERIVED HALF — WHICH FIELDS ARE TOLERANT, ASKED OF THE SCHEMA ITSELF.
+ *
+ * ⚠ THE BEHAVIOURAL CONTRASTS ABOVE CANNOT ANSWER THIS, and mutants proved it
+ * twice in a row. Adding `.catch` to `role` was invisible until a `role` row
+ * existed; adding it to `effect` was invisible until a CLAIMS row existed; and
+ * `category` and `direction` were STILL invisible after both. Each fix bought
+ * exactly one field, which is the signature of a hand-maintained mirror — the
+ * defect this estate pays for most.
+ *
+ * So this asks the wire schema which fields carry `.catch()`, rather than
+ * guessing a list. A NEW tolerance anywhere on either shape — including on a
+ * field that does not exist yet — turns this red without anyone remembering to
+ * add a row.
+ */
+function tolerantFields(shape: Record<string, unknown>): string[] {
+  // `.catch()` wraps the whole field, so a tolerant field is a `ZodCatch` at the
+  // outermost level. Read from `_def.typeName` because that is what zod 3 sets;
+  // if a zod upgrade changes the spelling, the ALLOWED assertion below fails
+  // loudly rather than silently reporting "nothing is tolerant".
+  return Object.entries(shape)
+    .filter(([, v]) => (v as { _def?: { typeName?: string } })?._def?.typeName === "ZodCatch")
+    .map(([k]) => k)
+    .sort();
+}
+
+describe("the tolerance is exactly where it was decided, and nowhere else", () => {
+  const arr = (DraftRecordSetWire as unknown as { shape: Record<string, { element: { shape: Record<string, unknown> } }> }).shape;
+  const stated = arr.stated_items!.element.shape;
+  const claims = arr.claims!.element.shape;
+
+  it("STATED — only `value_scale` and the two `applies_to_*` degrade", () => {
+    // `applies_to_*` is the pre-existing ruling this one follows; `value_scale`
+    // is this change. Anything else appearing here is a tolerance nobody argued
+    // for.
+    expect(tolerantFields(stated)).toEqual(["applies_to_claim", "applies_to_stated", "value_scale"]);
+  });
+
+  it("CLAIMS — only `value_scale` degrades", () => {
+    expect(tolerantFields(claims)).toEqual(["value_scale"]);
+  });
+
+  it("PRECONDITION — the probe can see a tolerance at all", () => {
+    // Without this, both assertions above are satisfied by a reader that always
+    // returns [] — a guard agreeing with itself. It pins that `ZodCatch` is
+    // still the right thing to look for, which a zod upgrade could change.
+    expect(tolerantFields(stated).length).toBeGreaterThan(0);
+    expect(Object.keys(stated).length).toBeGreaterThan(tolerantFields(stated).length);
   });
 });
