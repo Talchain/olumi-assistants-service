@@ -62,6 +62,7 @@ import type {
 import {
   composeResultStandingSentence,
   composeRunnerUpStandingSentence,
+  RESULT_STANDING_QUESTION,
 } from '../../compose/goal-referenced-result-phrasing.js';
 import { formatProbability } from '../../format/format-analysis-value.js';
 import { bandFromMagnitude } from '../../format/influence-bands.js';
@@ -399,7 +400,7 @@ export function composeRobustnessVerdict(
     if (marginCat === 'near_tie') {
       margin_clause =
         mode === 'explain'
-          ? `${quoteLabel(leading.label)} and ${quoteLabel(runner.label)} are effectively tied, so the lead is too close to call without firming up the key assumptions.`
+          ? `${quoteLabel(leading.label)} and ${quoteLabel(runner.label)} are effectively tied, so ${RESULT_STANDING_QUESTION} is too close to call without firming up the key assumptions.`
           : `${quoteLabel(leading.label)} and ${quoteLabel(runner.label)} are effectively tied.`;
     } else if (marginCat === 'clear' && finiteMargin !== null) {
       margin_clause =
@@ -901,7 +902,9 @@ export const ATTESTED_NO_FLIP_SENTENCE_LEADER_FREE = ((): string => {
  * the pattern list. The opener (`performs_best` / `leads`), the flip-evidence
  * sentences (`which_option_leads`), the attested-no-flip constant
  * (`which_option_leads`) and even {@link formatSensitivityDirection}'s output
- * (`the_lead` — it renders "…strengthens **the lead**") are all caught. That is
+ * (`came_out_highest` — it renders "…strengthens **the option that came out
+ * highest**"; it rendered "…strengthens **the lead**" and tripped `the_lead`
+ * until Paul's 21 Sep ruling retired that noun) are all caught. That is
  * why this is a separate VOICE rather than a filter over the existing one:
  * there is no subset of those sentences that survives.
  * ═══════════════════════════════════════════════════════════════════════════
@@ -959,7 +962,7 @@ export function composeWithheldSensitivityBody(
   // Same ladder as the permitted voice, minus every clause that names or ranks
   // an option. `'none'` and absent both yield nothing: no flip thresholds means
   // no flip verdict to report, and the robustness-band heuristic the permitted
-  // voice falls back to speaks in terms of the lead.
+  // voice falls back to speaks in terms of which option came out highest.
   const flip =
     flipSummary !== null && flipSummary !== undefined && flipSummary.overall_status !== 'none'
       ? flipSummary

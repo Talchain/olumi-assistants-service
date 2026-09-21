@@ -34,6 +34,11 @@
 import { describe, it, expect } from 'vitest';
 import {
   RESULT_STANDING_VERB,
+  RESULT_STANDING_VERB_PRESENT,
+  RESULT_STANDING_PATTERN,
+  RESULT_STANDING_SUBJECT,
+  RESULT_STANDING_QUESTION,
+  RESULT_STANDING_SAME_OPTION,
   RESULT_STANDING_EXEMPLARS,
   composeResultStandingSentence,
   composeRunnerUpStandingSentence,
@@ -153,10 +158,95 @@ describe('the guards can see what the composers emit', () => {
   });
 
   it('the matcher is DERIVED from the verb, not hand-copied beside it', () => {
-    // Bind by identity: the exemplar must contain the constant the guard's
+    // Bind by identity: every exemplar must carry the constant the guard's
     // pattern is built from, so a reword cannot leave one of them behind.
+    //
+    // ⚠ TWO INFLECTIONS, ONE CONSTANT. The re-run line asks whether the same
+    // option `comes out highest`, in the present; the rest report draws already
+    // sampled. RESULT_STANDING_VERB_PRESENT is DERIVED from the same head
+    // family the pattern admits — not written beside it — so accepting it here
+    // is not a second spelling to maintain.
     for (const sentence of RESULT_STANDING_EXEMPLARS) {
-      expect(sentence).toContain(RESULT_STANDING_VERB);
+      const carriesVerb =
+        sentence.includes(RESULT_STANDING_VERB) || sentence.includes(RESULT_STANDING_VERB_PRESENT);
+      expect(carriesVerb, `exemplar carries neither inflection: ${JSON.stringify(sentence)}`).toBe(
+        true,
+      );
     }
+  });
+
+  it('the present-tense inflection is inside the matcher, not beside it', () => {
+    // If this ever fails, RESULT_STANDING_VERB_PRESENT has stopped being
+    // derived from the head family RESULT_STANDING_PATTERN admits, and the
+    // re-run line would be invisible to every reader (CLAUDE.md trap 12).
+    expect(RESULT_STANDING_PATTERN.test(RESULT_STANDING_VERB_PRESENT)).toBe(true);
+    expect(RESULT_STANDING_PATTERN.test(RESULT_STANDING_VERB)).toBe(true);
+    // CONTRAST CONTROL: the pattern is not simply true of everything.
+    expect(RESULT_STANDING_PATTERN.test('came out ahead')).toBe(false);
+  });
+});
+
+/**
+ * ⭐⭐ THE LEAGUE-TABLE NOUN "the lead", RETIRED 21 Sep 2026 — SAME RULING,
+ * SAME OWNER, SECOND FRAGMENT.
+ *
+ * The sensitivity fragment said "…which moderately strengthens **the lead**",
+ * the next-step lines asked whether "**the lead** holds", and the fragility
+ * caveat said "Treat **the lead** as provisional". `the lead` states no
+ * referent, and the product was emitting a phrase its own leader-claim alarm
+ * carries a pattern for (`the_lead`).
+ *
+ * ⛔ THE REPLACEMENTS LIVE HERE, NOT AT THE SIX CALL SITES, FOR THE SAME
+ * LEAK-SAFETY REASON THE VERB DOES. A copy change that no reader can see
+ * switches `withheld-history-redaction.ts` OFF for the new sentences — the
+ * `case1g` corridor arriving through a reword. Deriving all three phrases from
+ * {@link RESULT_STANDING_VERB} makes that impossible by construction: the
+ * emitter and the guard's pattern are the same string.
+ */
+describe('the phrases that replaced the league-table noun', () => {
+  const ALL = [RESULT_STANDING_SUBJECT, RESULT_STANDING_QUESTION, RESULT_STANDING_SAME_OPTION];
+
+  it('none of them is the retired noun, and each states its referent', () => {
+    for (const phrase of ALL) {
+      expect(phrase, 'the league-table noun survived').not.toMatch(/\bthe\s+lead\b/i);
+      expect(phrase).toContain('option');
+    }
+  });
+
+  it('POSITIVE CONTROL: that matcher DOES reject the superseded fragment', () => {
+    // Verbatim from the enriched-fixture reply measured before the change.
+    expect(
+      "The result appears to be driven by 'Delivery risk', which moderately strengthens the lead.",
+    ).toMatch(/\bthe\s+lead\b/i);
+  });
+
+  it('⭐ THE LEAK GUARD: each phrase is visible to the egress alarm and the history redactor', () => {
+    for (const phrase of ALL) {
+      const sentence = `Re-run to see whether ${phrase} still holds.`;
+      expect(textNamesLeadingOption(sentence), `alarm blind to ${JSON.stringify(phrase)}`).toBe(
+        true,
+      );
+      expect(
+        historyAssertsLeaderClaim(sentence),
+        `history redactor blind to ${JSON.stringify(phrase)} — a withheld leader would survive`,
+      ).toBe(true);
+    }
+  });
+
+  it('CONTRAST CONTROL: the same carrier sentence WITHOUT the phrase is spared', () => {
+    // Proves the readers are reacting to the phrase, not to the carrier — a
+    // guard that fired on the scaffolding would satisfy every assertion above
+    // while seeing nothing (CLAUDE.md trap 13b).
+    expect(textNamesLeadingOption('Re-run to see whether that still holds.')).toBe(false);
+    expect(historyAssertsLeaderClaim('Re-run to see whether that still holds.')).toBe(false);
+  });
+
+  it('all three are DERIVED from the one verb, so a reword moves them together', () => {
+    for (const phrase of ALL) {
+      expect(phrase).toMatch(RESULT_STANDING_PATTERN);
+    }
+    expect(RESULT_STANDING_SUBJECT).toContain(RESULT_STANDING_VERB);
+    expect(RESULT_STANDING_QUESTION).toContain(RESULT_STANDING_VERB);
+    expect(RESULT_STANDING_SAME_OPTION).toContain(RESULT_STANDING_VERB_PRESENT);
   });
 });

@@ -35,6 +35,10 @@ import {
   formatProbability,
 } from '../../src/orchestrator-v5/format/format-analysis-value.js';
 import { isNearTieByMargin } from '../../src/orchestrator-v5/coaching/robustness-honesty.js';
+// Interpolated from the owner, never re-typed: Paul's 21 Sep ruling retired
+// the league-table noun "the lead" and the replacement is derived from
+// RESULT_STANDING_VERB (CLAUDE.md trap 12).
+import { RESULT_STANDING_SUBJECT } from '../../src/orchestrator-v5/compose/goal-referenced-result-phrasing.js';
 import type { AnalysisProjectionSummary } from '../../src/orchestrator-v5/context/projection-summaries.js';
 
 interface ProbabilityFixture {
@@ -131,13 +135,13 @@ describe('phase2 numeric format — what_would_flip fallback', () => {
 });
 
 describe('phase2 numeric format — sensitivity rendering', () => {
-  it('sensitivity_value is rendered as bucketed lead-framing prose, never as a raw decimal and never as a percentage', () => {
+  it('sensitivity_value is rendered as bucketed standing-framing prose, never as a raw decimal and never as a percentage', () => {
     // Phase 2's original contract was "sensitivity stays raw — never
     // a percentage". The V5 interaction recovery tranche superseded
     // that with a stronger guarantee: sensitivity values must NEVER
     // appear as raw decimals in user-facing prose either, because
     // numbers like `-0.7346` were the source of the brief's evidence
-    // #4 failure. The fallback composes adverbial lead-framing prose
+    // #4 failure. The fallback composes adverbial standing-framing prose
     // via `formatSensitivityDirection` (delegates to
     // `bandFromMagnitude`).
     //
@@ -161,8 +165,10 @@ describe('phase2 numeric format — sensitivity rendering', () => {
     // V5 interaction recovery: never as a raw decimal in prose.
     expect(prose).not.toContain('0.42');
     expect(prose).not.toMatch(/-?\d+\.\d{2,}/);
-    // Bucketed lead-framing prose appears (0.42 falls in the
+    // Bucketed standing-framing prose appears (0.42 falls in the
     // moderate band [0.3, 0.7), positive sign).
-    expect(prose).toMatch(/moderately strengthens the lead/);
+    expect(prose).toContain(`moderately strengthens ${RESULT_STANDING_SUBJECT}`);
+    // And the retired league-table noun is gone.
+    expect(prose).not.toMatch(/\bthe\s+lead\b/i);
   });
 });

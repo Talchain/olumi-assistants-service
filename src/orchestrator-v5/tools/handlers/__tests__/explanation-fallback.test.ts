@@ -13,6 +13,9 @@
 
 import { describe, expect, it } from 'vitest';
 
+// Interpolated, never re-typed — see the note in post-analysis-advice-gate.test.ts.
+import { RESULT_STANDING_SUBJECT } from '../../../compose/goal-referenced-result-phrasing.js';
+
 import type {
   AnalysisProjectionSummary,
   StructureProjectionSummary,
@@ -93,15 +96,16 @@ describe('composeExplainResultsFallback', () => {
     expect(text).not.toMatch(/percentage points?/i);
     // Driver labels surfaced; sensitivity values rendered as bucketed
     // lead-framing prose (formatSensitivityDirection composes adverb
-    // + verb so the sentence reads "Cost moderately weakens the lead").
+    // + verb so the sentence reads "Cost moderately weakens the option that
+    // came out highest").
     // Thresholds delegate to bandFromMagnitude — the canonical helper
     // — so the fallback bands and the upstream display-safe projection
     // cannot drift. Raw decimals (0.65 / -0.42) must never reach the
     // user-facing wire.
     expect(text).toContain('Engineering Capacity');
     expect(text).toContain('Hiring Cost');
-    expect(text).toMatch(/strengthens the lead/); // 0.65 → strengthens
-    expect(text).toMatch(/weakens the lead/);     // -0.42 → weakens
+    expect(text).toContain(`strengthens ${RESULT_STANDING_SUBJECT}`); // 0.65 → strengthens
+    expect(text).toContain(`weakens ${RESULT_STANDING_SUBJECT}`); // -0.42 → weakens
     // No raw decimals in user-facing prose.
     expect(text).not.toMatch(/-?\d+\.\d/);
     // Humanised stability sentence — plain language, no "robustness" jargon.
@@ -344,8 +348,8 @@ describe('composeWhatWouldFlipFallback', () => {
     // Driver labels surfaced; sensitivities as bucketed lead-framing
     // prose. Thresholds align to bandFromMagnitude. No raw decimals.
     expect(text).toContain('Engineering Capacity');
-    expect(text).toMatch(/strengthens the lead/);
-    expect(text).toMatch(/weakens the lead/);
+    expect(text).toContain(`strengthens ${RESULT_STANDING_SUBJECT}`);
+    expect(text).toContain(`weakens ${RESULT_STANDING_SUBJECT}`);
     expect(text).not.toMatch(/-?\d+\.\d/);
     expect(text).not.toMatch(/\bproposing to\b/i);
     expect(text).not.toMatch(/\bI'll\s+\b/i);

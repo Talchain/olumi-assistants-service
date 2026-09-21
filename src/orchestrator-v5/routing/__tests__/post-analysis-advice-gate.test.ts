@@ -17,6 +17,16 @@
 
 import { describe, expect, it } from 'vitest';
 
+// ⭐ The post-analysis copy pins below INTERPOLATE the owner's phrases rather
+// than re-typing them. Paul's 21 Sep ruling retired the league-table noun "the
+// lead"; a spec that spelled the replacement out would be a fourth
+// hand-maintained copy, green while the composer drifted (CLAUDE.md trap 13b).
+import {
+  RESULT_STANDING_QUESTION,
+  RESULT_STANDING_SAME_OPTION,
+  RESULT_STANDING_SUBJECT,
+} from '../../compose/goal-referenced-result-phrasing.js';
+
 import {
   tryPostAnalysisAdviceGate,
   hasRenderableTopDriverLabel,
@@ -887,8 +897,8 @@ describe('tryPostAnalysisAdviceGate — fragile-edge branch from real staging la
         'One useful confidence check is real-world support for that link rather than the current model estimate, since the robustness check flagged it as fragile',
       );
       // Next action aligns to the SAME named link (not the top driver).
-      expect(out.assistant_text).toMatch(
-        /^• Strengthen the evidence behind that link, then re-run to see whether the lead holds\.$/m,
+      expect(out.assistant_text.split('\n')).toContain(
+        `• Strengthen the evidence behind that link, then re-run to see whether ${RESULT_STANDING_SAME_OPTION}.`,
       );
       // No raw ids / decimals / internal vocabulary / arrows or em dashes leak.
       expect(out.assistant_text).not.toMatch(/\b0\.\d/);
@@ -929,8 +939,8 @@ describe('tryPostAnalysisAdviceGate — fragile-edge branch from real staging la
         "The evidence that would most improve confidence is firmer support for 'Local Senior Hire', since it carries the most weight in this result",
       );
       // Falls back to the top-driver next step.
-      expect(out.assistant_text).toMatch(
-        /^• Re-run after revisiting 'Local Senior Hire', the factor with the most influence here, to see whether the lead holds\.$/m,
+      expect(out.assistant_text.split('\n')).toContain(
+        `• Re-run after revisiting 'Local Senior Hire', the factor with the most influence here, to see whether ${RESULT_STANDING_SAME_OPTION}.`,
       );
     }
   });
@@ -994,8 +1004,8 @@ describe('tryPostAnalysisAdviceGate — enriched composer output (full data)', (
       expect(out.assistant_text).toContain('Delivery risk');
       expect(out.assistant_text).toContain('Cost overrun risk');
       // sensitivity-direction phrases from formatSensitivityDirection
-      expect(out.assistant_text).toMatch(/moderately strengthens the lead/);
-      expect(out.assistant_text).toMatch(/moderately weakens the lead/);
+      expect(out.assistant_text).toContain(`moderately strengthens ${RESULT_STANDING_SUBJECT}`);
+      expect(out.assistant_text).toContain(`moderately weakens ${RESULT_STANDING_SUBJECT}`);
       // Names the specific fragile assumption from fragile_edges[0] (parity
       // with what_would_flip) — no sign/causal claim.
       expect(out.assistant_text).toContain("One useful thing to check is the link from 'Delivery risk' to 'Successful launch': whether it holds as strongly as the model currently assumes");
@@ -1013,7 +1023,9 @@ describe('tryPostAnalysisAdviceGate — enriched composer output (full data)', (
         'One useful confidence check is real-world support for that link rather than the current model estimate, since the robustness check flagged it as fragile',
       );
       expect(out.assistant_text).toContain('What to check next');
-      expect(out.assistant_text).toMatch(/^• Strengthen the evidence behind that link, then re-run to see whether the lead holds\.$/m);
+      expect(out.assistant_text.split('\n')).toContain(
+        `• Strengthen the evidence behind that link, then re-run to see whether ${RESULT_STANDING_SAME_OPTION}.`,
+      );
       expect(out.assistant_text).not.toMatch(/Small changes to the strongest factor can shift the picture/);
     }
   });
@@ -1045,7 +1057,9 @@ describe('tryPostAnalysisAdviceGate — enriched composer output (full data)', (
       expect(text).not.toMatch(/robustness band/i);
       // Reframed next step never implies a single change flips the result.
       expect(text).toContain('What to check next');
-      expect(text).toMatch(/^• Re-run after adjusting the most influential factor to see whether the lead holds\.$/m);
+      expect(text.split('\n')).toContain(
+        `• Re-run after adjusting the most influential factor to see whether ${RESULT_STANDING_SAME_OPTION}.`,
+      );
       expect(text).not.toMatch(/to see where the leading option moves/i);
     }
   });
@@ -1466,8 +1480,8 @@ describe('tryPostAnalysisAdviceGate — degrade-gracefully (partial data)', () =
     if (out.matched) {
       expect(out.assistant_text).toContain('Delivery risk');
       // Sensitivity-direction clause omitted entirely
-      expect(out.assistant_text).not.toContain('strengthens the lead');
-      expect(out.assistant_text).not.toContain('weakens the lead');
+      expect(out.assistant_text).not.toContain(`strengthens ${RESULT_STANDING_SUBJECT}`);
+      expect(out.assistant_text).not.toContain(`weakens ${RESULT_STANDING_SUBJECT}`);
     }
   });
 
@@ -1488,9 +1502,9 @@ describe('tryPostAnalysisAdviceGate — degrade-gracefully (partial data)', () =
     if (out.matched) {
       // fragile_edges[0] is named; we never invent a sensitivity-direction clause.
       expect(out.assistant_text).toContain("the link from 'Delivery risk' to 'Successful launch'");
-      expect(out.assistant_text).not.toContain('has little effect on the lead');
-      expect(out.assistant_text).not.toContain('strengthens the lead');
-      expect(out.assistant_text).not.toContain('weakens the lead');
+      expect(out.assistant_text).not.toContain(`has little effect on ${RESULT_STANDING_SUBJECT}`);
+      expect(out.assistant_text).not.toContain(`strengthens ${RESULT_STANDING_SUBJECT}`);
+      expect(out.assistant_text).not.toContain(`weakens ${RESULT_STANDING_SUBJECT}`);
     }
   });
 
@@ -2517,7 +2531,7 @@ describe('tryPostAnalysisAdviceGate — near-tie + raw robustness', () => {
       const text = out.assistant_text;
       expect(text).toMatch(/'A' and 'B' are effectively tied/);
       // Consolidated single caveat — provisional, not the old stacked "could flip" tail.
-      expect(text).toMatch(/treat the lead as provisional/i);
+      expect(text.toLowerCase()).toContain(`treat ${RESULT_STANDING_QUESTION} as provisional`);
       expect(text).not.toMatch(/outcome could flip with small changes/i);
       expect(text).not.toMatch(/smaller changes are unlikely to flip the outcome/i);
       // Numerically honest: never say a near-zero gap "would need to close".
@@ -2733,7 +2747,7 @@ describe('tryPostAnalysisAdviceGate — near-tie + raw robustness', () => {
       // Raw-fragile branch keeps the clear-lead framing (NOT near-tie reframe)
       // because margin > 1pp, but MUST suppress the stability claim and emit
       // the single fragile-aware caveat instead.
-      expect(text).toMatch(/treat the lead as provisional/i);
+      expect(text.toLowerCase()).toContain(`treat ${RESULT_STANDING_QUESTION} as provisional`);
       expect(text).not.toMatch(/smaller changes are unlikely to (flip|change)/i);
       expect(text).not.toContain('The robustness band is currently moderate');
     }
@@ -3181,7 +3195,7 @@ describe('tryPostAnalysisAdviceGate — what_would_flip richer evidence + honest
     expect(out.matched).toBe(true);
     if (out.matched) {
       const t = out.assistant_text;
-      expect((t.match(/treat the lead as provisional/gi) ?? []).length).toBe(1);
+      expect(t.toLowerCase().split(`treat ${RESULT_STANDING_QUESTION} as provisional`).length - 1).toBe(1);
       expect(t).not.toMatch(/could flip with small changes/i);
       expect(t).not.toMatch(/picture appears fragile/i);
     }
@@ -3213,7 +3227,7 @@ describe('tryPostAnalysisAdviceGate — what_would_flip richer evidence + honest
       const t = out.assistant_text;
       expect(t).not.toMatch(/most likely to flip|single-factor change that flips|threshold signal/i);
       expect(t).not.toMatch(/to see where the leading option moves/i);
-      expect(t).toMatch(/treat the lead as provisional/i);
+      expect(t.toLowerCase()).toContain(`treat ${RESULT_STANDING_QUESTION} as provisional`);
     }
   });
   it('5b. flip_thresholds: [] → no "no-flip" claim and no implied flip (empty is ambiguous)', () => {
@@ -3389,7 +3403,9 @@ describe('interpretation twins — GQPV parity (explain_results + meaning)', () 
         "One useful thing to check is the link from 'Hiring and Salary Cost' to 'Budget Overrun Risk'",
       );
       expect(t).toContain('What to check next');
-      expect(t).toMatch(/^• Strengthen the evidence behind that link, then re-run to see whether the lead holds\.$/m);
+      expect(t.split('\n')).toContain(
+        `• Strengthen the evidence behind that link, then re-run to see whether ${RESULT_STANDING_SAME_OPTION}.`,
+      );
       // Not the driver-named fallback — priorities are coherent.
       expect(t).not.toMatch(/Re-run after revisiting/);
     }
@@ -3402,7 +3418,9 @@ describe('interpretation twins — GQPV parity (explain_results + meaning)', () 
       const t = out.assistant_text;
       expect(t).not.toContain('the link from'); // nothing to strengthen
       expect(t).toContain('What to check next');
-      expect(t).toMatch(/^• Re-run after revisiting 'Delivery risk', the factor with the most influence here, to see whether the lead holds\.$/m);
+      expect(t.split('\n')).toContain(
+        `• Re-run after revisiting 'Delivery risk', the factor with the most influence here, to see whether ${RESULT_STANDING_SAME_OPTION}.`,
+      );
     }
   });
 
@@ -3411,7 +3429,9 @@ describe('interpretation twins — GQPV parity (explain_results + meaning)', () 
     expect(out.matched).toBe(true);
     if (out.matched) {
       const t = out.assistant_text;
-      expect(t).toMatch(/^• Strengthen the evidence behind that link, then re-run to see whether the lead holds\.$/m);
+      expect(t.split('\n')).toContain(
+        `• Strengthen the evidence behind that link, then re-run to see whether ${RESULT_STANDING_SAME_OPTION}.`,
+      );
       expect((t.match(/picture appears fragile/gi) ?? []).length).toBe(1);
     }
   });
@@ -3456,7 +3476,7 @@ describe('interpretation twins — GQPV parity (explain_results + meaning)', () 
       ).toBe(1);
       // Exactly one caveat: meaning adds neither "treat as provisional" nor
       // "picture appears fragile" on top of the named assumption.
-      expect(t).not.toMatch(/treat the lead as provisional/i);
+      expect(t.toLowerCase()).not.toContain(`treat ${RESULT_STANDING_QUESTION} as provisional`);
       expect(t).not.toMatch(/picture appears fragile/i);
       // No contradictory confidence.
       expect(t).not.toMatch(/meaningful rather than marginal/i);

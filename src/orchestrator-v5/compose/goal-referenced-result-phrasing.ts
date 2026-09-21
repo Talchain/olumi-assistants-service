@@ -96,6 +96,93 @@ export const RESULT_STANDING_VERB = 'came out highest';
 export const RESULT_STANDING_FALLBACK_REFERENT = 'your goal';
 
 /**
+ * {@link RESULT_STANDING_VERB} split once, so every phrase and the matcher
+ * below are built from the SAME decomposition rather than re-splitting it.
+ */
+const RESULT_STANDING_PARTS: { readonly head: string; readonly tail: readonly string[] } = (() => {
+  const [head, ...tail] = RESULT_STANDING_VERB.split(/\s+/);
+  if (head === undefined || tail.length === 0) {
+    throw new Error(
+      'goal-referenced-result-phrasing: RESULT_STANDING_VERB must be at least two words, so the ' +
+        'tense head can be widened without widening the whole phrase.',
+    );
+  }
+  return { head, tail };
+})();
+
+/**
+ * The head's tense family — SPELLED ONCE, and read by BOTH the present-tense
+ * phrase below and {@link RESULT_STANDING_PATTERN}.
+ *
+ * ⚠ IT IS SHARED DELIBERATELY. The re-run line asks whether the same option
+ * `comes out highest`, in the present, while the constant is past. If that
+ * present form were written beside the pattern instead of taken from it, the
+ * two would be a hand-maintained pair and the first reword would leave the
+ * re-run line invisible to the guard (CLAUDE.md trap 12). `came` is the emitted
+ * form; `come`/`comes` are admitted so a present-tense register cannot slip
+ * past.
+ */
+const RESULT_STANDING_HEAD_FAMILY: readonly string[] = Object.freeze(
+  Array.from(new Set([RESULT_STANDING_PARTS.head, 'come', 'comes'])),
+);
+
+/**
+ * {@link RESULT_STANDING_VERB} in the present tense — "comes out highest".
+ *
+ * Used where the sentence asks about a FUTURE re-run rather than reporting the
+ * draws already sampled. Built from {@link RESULT_STANDING_HEAD_FAMILY}, which
+ * is the same list {@link RESULT_STANDING_PATTERN} admits, so the phrase cannot
+ * exist outside the matcher's reach.
+ */
+export const RESULT_STANDING_VERB_PRESENT: string = [
+  RESULT_STANDING_HEAD_FAMILY[RESULT_STANDING_HEAD_FAMILY.length - 1],
+  ...RESULT_STANDING_PARTS.tail,
+].join(' ');
+
+/**
+ * ⭐ THE RETIRED LEAGUE-TABLE NOUN'S REPLACEMENT, AS A SUBJECT.
+ *
+ * PAUL'S RULING, 21 Sep 2026 — the same one that retired `favours`: "It's not a
+ * leading option… We are giving them information to improve their critical and
+ * creative thinking, not recommending options."
+ *
+ * WHAT THIS REPLACES. The sensitivity fragment said "…which moderately
+ * strengthens **the lead**." `the lead` is a league-table noun with NO STATED
+ * REFERENT — the lead at what? — and it is the same defect as "sits in second
+ * place", which this module already retired. The product was emitting a phrase
+ * its own leader-claim alarm carries a pattern for
+ * (`leading-option-egress-guard.ts`'s `the_lead`).
+ *
+ * ⚠ WHY A FULL DEFINITE DESCRIPTION AND NOT A PRONOUN. "how often **that
+ * option** came out highest" was measured against the real composed reply and
+ * rejected: in `explain_results` the sentence immediately before the driver
+ * clause names the RUNNER-UP, so "that option" binds to the wrong option by
+ * adjacency and INVERTS the claim. A definite description cannot be mis-bound
+ * by what happens to precede it.
+ */
+export const RESULT_STANDING_SUBJECT = `the option that ${RESULT_STANDING_VERB}`;
+
+/**
+ * The same standing as an INDIRECT QUESTION — "which option came out highest".
+ *
+ * For sentences that ask about the standing rather than assert it: "…is too
+ * close to call", "Treat … as provisional". {@link RESULT_STANDING_SUBJECT}
+ * cannot be used there — "treat the option that came out highest as
+ * provisional" makes the OPTION provisional, when what is provisional is which
+ * option it is.
+ */
+export const RESULT_STANDING_QUESTION = `which option ${RESULT_STANDING_VERB}`;
+
+/**
+ * The re-run clause — "the same option comes out highest".
+ *
+ * The "what to check next" lines asked whether "the lead holds". They now ask
+ * whether a re-run reproduces the standing, which is a question the user can
+ * actually answer by re-running.
+ */
+export const RESULT_STANDING_SAME_OPTION = `the same option ${RESULT_STANDING_VERB_PRESENT}`;
+
+/**
  * {@link RESULT_STANDING_VERB} as a matcher, DERIVED from the constant.
  *
  * The head word is widened to its tense family so a composer that later says
@@ -107,18 +194,11 @@ export const RESULT_STANDING_FALLBACK_REFERENT = 'your goal';
  * repeatedly over one string.
  */
 export const RESULT_STANDING_PATTERN: RegExp = (() => {
-  const [head, ...tail] = RESULT_STANDING_VERB.split(/\s+/);
-  if (head === undefined || tail.length === 0) {
-    throw new Error(
-      'goal-referenced-result-phrasing: RESULT_STANDING_VERB must be at least two words, so the ' +
-        'tense head can be widened without widening the whole phrase.',
-    );
-  }
-  // The head's tense family. `came` is the emitted form; `come`/`comes` are
-  // admitted so a present-tense register cannot slip past the guard.
-  const heads = Array.from(new Set([head, 'come', 'comes']));
-  const tailSource = tail.join(String.raw`\s+`);
-  return new RegExp(String.raw`\b(?:${heads.join('|')})\s+${tailSource}\b`, 'i');
+  const tailSource = RESULT_STANDING_PARTS.tail.join(String.raw`\s+`);
+  return new RegExp(
+    String.raw`\b(?:${RESULT_STANDING_HEAD_FAMILY.join('|')})\s+${tailSource}\b`,
+    'i',
+  );
 })();
 
 /**
@@ -181,4 +261,11 @@ export const RESULT_STANDING_EXEMPLARS: readonly string[] = Object.freeze([
   ),
   composeResultStandingSentence('Double Down on Self-Serve SMB', null, ' with a probability of 62%'),
   composeRunnerUpStandingSentence('Enterprise Land and Expand', ', with a probability of 24%'),
+  // The three phrases that replaced the league-table noun `the lead`. Each
+  // INTERPOLATES the constant its emitter interpolates — never a re-typed
+  // literal — so a reword of RESULT_STANDING_VERB moves the exemplar, the
+  // emitted copy and the guard's pattern in one step.
+  `The result appears to be driven by 'Delivery risk', which moderately strengthens ${RESULT_STANDING_SUBJECT}.`,
+  `'Option A' and 'Option B' are effectively tied, so ${RESULT_STANDING_QUESTION} is too close to call without firming up the key assumptions.`,
+  `Strengthen the evidence behind that link, then re-run to see whether ${RESULT_STANDING_SAME_OPTION}.`,
 ]);

@@ -59,6 +59,8 @@ import type { FlipClaimPosture } from '../context/flip-threshold-rows.js';
 import {
   composeResultStandingSentence,
   composeRunnerUpStandingSentence,
+  RESULT_STANDING_QUESTION,
+  RESULT_STANDING_SAME_OPTION,
 } from '../compose/goal-referenced-result-phrasing.js';
 import {
   formatPercentagePoints,
@@ -1066,8 +1068,8 @@ export function hasRenderableTopDriverLabel(
  * claims ("the strongest sensitivity is on …", "the factor with the most
  * influence …", "driven by …", "the order could shift with movement on …").
  * A driver whose finite `sensitivity_value` sits below the shared near-zero
- * threshold renders as "has little effect on the lead" — pairing that band
- * with a superlative is the live #341 self-contradiction. Such drivers are
+ * threshold renders as "has little effect on the option that came out highest"
+ * — pairing that band with a superlative is the live #341 self-contradiction. Such drivers are
  * omitted from prose; drivers WITHOUT a value stay nameable (no materiality
  * verdict on missing data). Deliberately NOT used by the per-class
  * availability requirements (`missing_inputs`) or the copy-source
@@ -1995,10 +1997,23 @@ function interpretationCloseness(
  * will flip the result. The two constants are also reused verbatim by
  * `composeWhatWouldFlip` so the phrasing has one home.
  */
-const STRENGTHEN_LINK_NEXT_STEP =
-  'Strengthen the evidence behind that link, then re-run to see whether the lead holds.';
-const RERUN_INFLUENTIAL_NEXT_STEP =
-  'Re-run after adjusting the most influential factor to see whether the lead holds.';
+/**
+ * ⭐ THE LEAGUE-TABLE NOUN IS GONE FROM THESE THREE LINES — PAUL'S 21 Sep
+ * RULING, routed through the one owner.
+ *
+ * They asked whether "the lead holds". `the lead` states no referent (held
+ * against what?) and adjudicates a standing the analysis does not produce. They
+ * now ask whether a re-run reproduces the standing — a question the user can
+ * actually answer by doing the thing the line asks for.
+ *
+ * ⛔ {@link RESULT_STANDING_SAME_OPTION} is TAKEN FROM
+ * `compose/goal-referenced-result-phrasing.ts`, never typed here. The alarm's
+ * `came_out_highest` pattern is derived from the same constant, so these lines
+ * cannot reword themselves out from under the guard that has to redact them
+ * when a later turn withholds the leader claim.
+ */
+const STRENGTHEN_LINK_NEXT_STEP = `Strengthen the evidence behind that link, then re-run to see whether ${RESULT_STANDING_SAME_OPTION}.`;
+const RERUN_INFLUENTIAL_NEXT_STEP = `Re-run after adjusting the most influential factor to see whether ${RESULT_STANDING_SAME_OPTION}.`;
 
 function interpretationNextStep(
   hasNamedFragileEdge: boolean,
@@ -2006,7 +2021,7 @@ function interpretationNextStep(
 ): string {
   if (hasNamedFragileEdge) return STRENGTHEN_LINK_NEXT_STEP;
   return topDriverLabel !== null
-    ? `Re-run after revisiting ${quoteLabel(topDriverLabel)}, the factor with the most influence here, to see whether the lead holds.`
+    ? `Re-run after revisiting ${quoteLabel(topDriverLabel)}, the factor with the most influence here, to see whether ${RESULT_STANDING_SAME_OPTION}.`
     : RERUN_INFLUENTIAL_NEXT_STEP;
 }
 
@@ -2714,10 +2729,14 @@ function composeWhatWouldFlip(
   //    "provisional" caveat; an otherwise-stable result gets the stability
   //    reassurance; moderate / unknown bands get nothing.
   if (fragileSignal) {
+    // ⭐ `the lead` retired here too (Paul, 21 Sep). What is provisional is
+    // WHICH OPTION came out highest, not an unnamed standing — and
+    // RESULT_STANDING_SUBJECT would be wrong in this frame: "treat the option
+    // that came out highest as provisional" makes the OPTION provisional.
     sentences.push(
       topEdge
-        ? 'Treat the lead as provisional until that assumption is strengthened.'
-        : 'Treat the lead as provisional until the key assumptions are checked.',
+        ? `Treat ${RESULT_STANDING_QUESTION} as provisional until that assumption is strengthened.`
+        : `Treat ${RESULT_STANDING_QUESTION} as provisional until the key assumptions are checked.`,
     );
   } else {
     const stabilityPhrase = describeRobustnessBand(analysis.robustness_band);

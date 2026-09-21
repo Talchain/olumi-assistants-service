@@ -10,6 +10,9 @@
 
 import { describe, it, expect } from 'vitest';
 
+// Interpolated, never re-typed — see the note in post-analysis-advice-gate.test.ts.
+import { RESULT_STANDING_SUBJECT } from '../../../compose/goal-referenced-result-phrasing.js';
+
 import {
   ExplainResultsHandlerFactSchema,
   type HandlerFact,
@@ -287,8 +290,9 @@ describe('explain_results — answer-carrying contract', () => {
     // Driver sensitivity rendered as bucketed lead-framing prose
     // (formatSensitivityDirection composes adverb + verb against the
     // bandFromMagnitude thresholds). 0.65 magnitude → moderate band
-    // [0.3, 0.7), positive sign → "moderately strengthens the lead".
-    expect(outcome.assistant_text).toMatch(/strengthens the lead/);
+    // [0.3, 0.7), positive sign → "moderately strengthens the option that came
+    // out highest".
+    expect(outcome.assistant_text).toContain(`strengthens ${RESULT_STANDING_SUBJECT}`);
     expect(outcome.assistant_text).not.toMatch(/-?\d+\.\d/);
   });
 
