@@ -56,6 +56,7 @@ import {
 } from '../separability-disclosure.js';
 import {
   isAllowedRunAnalysisAssistantText,
+  buildAnalysisResultHeadline,
   describeAnalysisHeadline,
   TEMPLATE_SUFFIX_DISCLOSURE_GRAMMARS,
   MAX_ASSISTANT_TEXT_CHARS,
@@ -175,12 +176,37 @@ describe('⭐ THE PLUMBING — without all of it the disclosure is inert in prod
     }
   });
 
-  it('⭐ REGISTERED on the template-suffix branch, LAST (the handler append order)', () => {
-    const last = TEMPLATE_SUFFIX_DISCLOSURE_GRAMMARS[TEMPLATE_SUFFIX_DISCLOSURE_GRAMMARS.length - 1];
-    expect(last?.name).toBe('SEPARABILITY_DISCLOSURE_RE_SRC');
+  /**
+   * ⚠ THIS ARM WAS WRITTEN AS `GRAMMARS[GRAMMARS.length - 1]`, AND THAT IS THE
+   * SPELLING THAT COST THIS PR A RED CHECK — one family back.
+   *
+   * `analysis-participation-disclosure.test.ts` pinned ITS family the same
+   * absolute way, and adding this one RED it although nothing was misplaced.
+   * Repeating the spelling here guarantees the same red for whoever adds the
+   * eighth family, on a correct change, for a reason no diff will explain.
+   *
+   * The load-bearing property — registry order EQUALS the handler's append
+   * order — is derived from `run-analysis.ts` on disk in
+   * `template-suffix-disclosure-registry-completeness.test.ts`. This arm keeps
+   * the per-family half that derivation cannot supply: that this family is
+   * REGISTERED rather than reasoned-excluded, bound to its export by identity,
+   * and positioned after the sibling it follows.
+   */
+  it('⭐ REGISTERED on the template-suffix branch, after the participation family', () => {
+    const names = TEMPLATE_SUFFIX_DISCLOSURE_GRAMMARS.map((g) => g.name);
+    const entry = TEMPLATE_SUFFIX_DISCLOSURE_GRAMMARS.find(
+      (g) => g.name === 'SEPARABILITY_DISCLOSURE_RE_SRC',
+    );
+    expect(entry, 'SEPARABILITY_DISCLOSURE_RE_SRC is not registered').toBeDefined();
     // Bound by IDENTITY to the export, not by label — a mislabelled entry
     // would register the wrong grammar under a plausible-looking name.
-    expect(last?.source).toBe(SEPARABILITY_DISCLOSURE_RE_SRC);
+    expect(entry?.source).toBe(SEPARABILITY_DISCLOSURE_RE_SRC);
+    // Precondition pinned in-test: -1 on either side would make the ordering
+    // comparison stop discriminating without going red (trap 13b).
+    expect(names).toContain('ANALYSIS_PARTICIPATION_DISCLOSURE_RE_SRC');
+    expect(names.indexOf('SEPARABILITY_DISCLOSURE_RE_SRC')).toBeGreaterThan(
+      names.indexOf('ANALYSIS_PARTICIPATION_DISCLOSURE_RE_SRC'),
+    );
   });
 
   it('⭐⭐ template + EVERY sibling + this one survives egress — the append order compiles', () => {
@@ -305,6 +331,76 @@ describe('⭐⭐ THE DESCRIPTOR CARRIES THE DISCARDED VALUES — bound to the re
     // Bound to the NAMED count, not merely to "the string got longer".
     expect(text).toContain(
       ` ${isFieldUnseparable(UNSEPARABLE_FIELD, 0.05, 0.01).contenders} options came out too close together`,
+    );
+  });
+
+  /**
+   * ⭐⭐ THE ONE CLAIM THE COPY MAKES ABOUT THE RUN ITSELF, AND NOTHING PINNED IT.
+   *
+   * The sentence says "no option can be put forward yet". On a run that DID
+   * put an option forward that is not a caveat, it is a contradiction inside
+   * one response — the product telling a person their options were too close
+   * to tell apart in the same breath as naming a leader.
+   *
+   * The code is built so it cannot happen: `buildDescriptor`'s
+   * `separabilityWithhold` parameter defaults to `null` and is passed non-null
+   * from EXACTLY ONE of its nineteen call sites — the `separability.unseparable`
+   * branch, which returns `text: null`. That is an argument from reading, and
+   * it is one refactor from being false. This asserts it by EXECUTION over the
+   * headline builder's whole output, on the same pure computation the handler
+   * reads (`buildAnalysisResultHeadline` and `describeAnalysisHeadline` are
+   * both `computeHeadline`, projected differently).
+   */
+  const CO_OCCURRENCE_SWEEP: ReadonlyArray<readonly number[]> = [
+    UNSEPARABLE_FIELD,
+    SEPARABLE_FIELD,
+    [0.353, 0.347, 0.3], // the 2026-03-15 staging capture: a real 0.6pp race
+    [0.9, 0.05, 0.03, 0.02],
+    [0.55, 0.45],
+    [0.5, 0.5],
+    [0.26, 0.25, 0.25, 0.24],
+    [0.4, 0.35, 0.25],
+    [0.34, 0.33, 0.33],
+    [1],
+    [0.6, 0.4],
+    [0.2, 0.2, 0.2, 0.2, 0.2],
+  ];
+
+  it('⭐⭐ a withhold NEVER co-occurs with a headline — swept, not reasoned', () => {
+    let withheld = 0;
+    let headlined = 0;
+    for (const field of CO_OCCURRENCE_SWEEP) {
+      const input = {
+        enrichment: envelope(field),
+        leading_option_id: 'o0',
+        status_kind: 'ok' as const,
+      };
+      const descriptor = describeAnalysisHeadline(input);
+      const headline = buildAnalysisResultHeadline(input);
+      if (descriptor.separability_withhold !== null) {
+        withheld++;
+        expect(
+          headline,
+          `field ${field.join('/')} carries a separability withhold AND a headline: ` +
+            `"${headline as string}". The disclosure would tell the user no option can be ` +
+            `put forward, in the same response that puts one forward.`,
+        ).toBeNull();
+      } else if (headline !== null) {
+        headlined++;
+      }
+    }
+    // ⚠ BOTH ARMS MUST BE EXERCISED, or this passes by sweeping a population
+    // in which the antecedent is never true (trap 13) and a population in
+    // which it is always true (no contrast).
+    expect(withheld, 'no swept field reached the withhold — the implication is vacuous').
+      toBeGreaterThan(0);
+    expect(headlined, 'no swept field produced a headline — the contrast is missing').
+      toBeGreaterThan(0);
+  });
+
+  it('⭐ and the builder emits NOTHING when there is no withhold (the inverse)', () => {
+    expect(buildSeparabilityDisclosure(describeFor(SEPARABLE_FIELD).separability_withhold)).toBe(
+      '',
     );
   });
 });

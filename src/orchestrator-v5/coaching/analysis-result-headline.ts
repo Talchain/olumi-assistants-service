@@ -387,7 +387,10 @@ export const MAX_ASSISTANT_TEXT_CHARS =
   // have been computed on a model the user had excluded parts of. Same rule:
   // budgeted from the builder's own worst case, never hand-estimated.
   ANALYSIS_PARTICIPATION_DISCLOSURE_MAX_CHARS +
-  // The separability disclosure rides FIRST of the suffixes (matching the
+  // ⚠ CORRECTED 21 Sep 2026: this read "rides FIRST of the suffixes", which was
+  // false at the commit that wrote it — a leftover from the build where it DID
+  // ride first, before that was changed back (`run-analysis.ts` records why).
+  // The separability disclosure rides LAST of the suffixes (matching the
   // handler's append order) and CANNOT co-occur with a headline — it ships only
   // where `computeHeadline` returned `text: null` under `options_not_separable`.
   // It can co-occur with every other suffix, though: a run can be unseparable
