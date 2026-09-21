@@ -15,9 +15,21 @@
  * as Olumi's. Gate-0 requires "£49 current / £59 proposed retain user
  * provenance", so this contract item is NOT yet met. Tracked as P5.
  */
-import { writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
+
+/**
+ * ⚠ THE WITNESS ARTEFACT GOES TO A DIRECTORY THIS PROCESS CREATED.
+ * It previously wrote to a hardcoded `/private/tmp/...` — a macOS-only absolute
+ * path that does not exist on a CI runner, so the required check failed ENOENT
+ * on both cases while the assertions themselves were fine. The artefact is the
+ * point of a witness, so the fix creates the directory rather than dropping the
+ * write; the path is reported so a reader can find it in a CI log.
+ */
+const OUT_DIR = mkdtempSync(join(tmpdir(), "capped-factor-witness-"));
 
 import { buildAnalysisReadyPayload } from "../../src/cee/transforms/analysis-ready.js";
 import { projectGraphAndOptionsToV3 } from "../../src/cee/transforms/schema-v3.js";
@@ -86,7 +98,7 @@ function witness(restatementPrice: number) {
 describe("BEHAVIOUR WITNESS — user meaning survives to the analysis payload", () => {
   it("A — the user's brief: one option, his figure, churn stays a constraint", () => {
     const w = witness(59);
-    writeFileSync("/private/tmp/witness-A.json", JSON.stringify(w, null, 1));
+    writeFileSync(join(OUT_DIR, "witness-A.json"), JSON.stringify(w, null, 1));
 
     expect(w.canonical.options.map((o) => o.label), "exactly one option, and it is his").toEqual([MINE]);
     expect(w.canonical.options[0]!.provenance_class, "it reads as the user's own").toBe("stated");
@@ -104,7 +116,7 @@ describe("BEHAVIOUR WITNESS — user meaning survives to the analysis payload", 
     // One property changed — 59 → 54 — and the outcome flips: it is no longer a
     // restatement, so it is a real alternative and is kept.
     const w = witness(54);
-    writeFileSync("/private/tmp/witness-B.json", JSON.stringify(w, null, 1));
+    writeFileSync(join(OUT_DIR, "witness-B.json"), JSON.stringify(w, null, 1));
 
     expect(w.canonical.options.map((o) => o.label), "two genuine alternatives now").toHaveLength(2);
     for (const o of w.canonical.options) {
