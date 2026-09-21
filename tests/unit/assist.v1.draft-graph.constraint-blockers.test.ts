@@ -25,6 +25,7 @@ vi.mock("../../src/cee/structure/index.js", () => ({
   detectStructuralWarnings: vi.fn().mockReturnValue({ warnings: [], uncertainNodeIds: [] }),
   detectUniformStrengths: () => ({ detected: false, totalEdges: 0, defaultStrengthCount: 0, defaultStrengthPercentage: 0 }),
   detectStrengthClustering: () => ({ detected: false, coefficientOfVariation: 0, edgeCount: 0 }),
+  detectGoalLayerStrengthClustering: () => ({ detected: false, coefficientOfVariation: 0, edgeCount: 0 }),
   detectSameLeverOptions: () => ({ detected: false, maxOverlapPercentage: 0, overlappingOptionPairs: [] }),
   detectMissingBaseline: () => ({ detected: false, hasBaseline: false }),
   detectGoalNoBaselineValue: () => ({ detected: false, goalHasValue: false }),

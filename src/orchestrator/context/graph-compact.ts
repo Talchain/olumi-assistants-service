@@ -12,6 +12,7 @@
  */
 
 import type { GraphV3T } from "../../schemas/cee-v3.js";
+import { resolveScaleFrame } from "../../orchestrator-v5/tools/handlers/d1-shared/scale-frame.js";
 import { qualitativeBand } from '../../cee/factor-extraction/display-value.js';
 import { DEFAULT_EXISTS_PROBABILITY } from "./constants.js";
 import { isLegalStructuralEdge } from "../../cee/utils/structural-edge-classifier.js";
@@ -383,6 +384,14 @@ export function projectUncertaintyDriversForContext(
 function buildInterventionSummary(
   interventions: Record<string, unknown>,
   labelMap: Map<string, string>,
+  /**
+   * The target factor's own `observed_state`, by factor id — the `{value,
+   * raw_value}` pair `recoverScaleFrame` needs.
+   *
+   * OPTIONAL so every existing caller and test stays byte-identical: absent,
+   * the function behaves exactly as it did before this change.
+   */
+  framePairs?: ReadonlyMap<string, Record<string, unknown>>,
 ): string | undefined {
   const entries = Object.entries(interventions);
   if (entries.length === 0) return undefined;
@@ -429,6 +438,83 @@ function buildInterventionSummary(
     if (typeof entry === 'number') {
       const label = labelMap.get(factorId)!;
       if (!Number.isFinite(entry)) return `${label}=${entry}`;
+      // ⭐⭐ RECOVER THE MEANING WHEN IT IS RECOVERABLE, AND ONLY THEN.
+      //
+      // The "real-world meaning not established" clause below is correct for
+      // the case the ruling that introduced it considered: a bare scalar whose
+      // target factor carries nothing to interpret it against. It is WRONG for
+      // the common case, where the factor carries a framed `{value, raw_value}`
+      // pair and the meaning is fully derivable ON THE SAME TURN.
+      //
+      // Measured on a live capture (18 Sep): the three options carried
+      // interventions 0.49 / 0.54 / 0.59 against `Pro Plan Price`
+      // {value: 0.49, raw_value: 49, unit: "£"}. The model was told each lever's
+      // meaning was not established, while the response beside it rendered
+      // "£59". Worse, the band is an artefact of the 0.5 boundary — 0.49
+      // Moderate, 0.54 High, 0.59 High — so the two RAISE options shared a band
+      // and the BASELINE differed, on a £5 axis.
+      //
+      // ⚠ `recoverScaleFrame` is IMPORTED, never reimplemented. It is the
+      // estate's single owner of this derivation and already has seven consumer
+      // modules; a second spelling here would be trap 12 in the file that
+      // assembles the model's context. It is total and fail-closed — a pair
+      // that is absent, non-numeric, non-positive, or not `raw > value` yields
+      // `undefined` and the honest clause below survives unchanged.
+      // ⭐ `resolveScaleFrame`, NOT `recoverScaleFrame` — CORRECTED after an
+      // independent seat found the premise wrong at the tip. `scale-frame.ts`
+      // names `resolveScaleFrame` as "THE ONE OWNER of 'what frame is this
+      // factor on?' — stored first, pair second, nothing third", and records
+      // that calling `recoverScaleFrame` DIRECTLY is exactly how two earlier
+      // readers went blind to a persisted `scale_frame`. This was very nearly
+      // the fifth.
+      //
+      // It fixes two measured defects at once:
+      //   · FAIL-OPEN — the owner REFUSES a stored frame the pair contradicts
+      //     (pinned: storedFrame 500_000 beside {0.5, 50_000} yields undefined).
+      //     Reading the pair alone computed 0.59 x 100000 and stated it, so the
+      //     context spoke confidently about the one node class the owner
+      //     deliberately refuses to speak about.
+      //   · MISSED BEST CASE — `projector.ts` writes `scale_frame` on every
+      //     framed factor but writes the PAIR only when a baseline exists. A
+      //     factor with option interventions and NO stated baseline — the exact
+      //     subject of this change — therefore carries a stored frame and no
+      //     pair, and the pair-only read silently did nothing for it.
+      const pair = framePairs?.get(factorId);
+      const frame = pair ? resolveScaleFrame(pair) : undefined;
+      // ⛔⛔ AND `entry` MUST BE IN THE UNIT INTERVAL. Without this the frame is
+      // applied to a number that was never on the factor's normalised scale: a
+      // framed pair beside an intervention of `59` emitted "Pro Plan Price=5900
+      // £" — a £59 lever described as £5,900, WITH THE HONEST HEDGE REMOVED.
+      //
+      // ⭐ The rule is this file's own, stated two lines below about a weaker
+      // claim: "Outside [0,1] no band is claimed at all … a label outside its
+      // domain would be exactly the unwarranted promotion this comment exists
+      // to prevent." A MAGNITUDE outside that domain is a strictly stronger
+      // promotion than the BAND the same function already refuses there.
+      //
+      // ⚠ NOT REDUNDANT WITH THE FRAME CHECK, and the estate's other consumer
+      // of this derivation carries the identical pair with a comment saying so
+      // (`plot-intervention-scale.ts:325-330`). Out-of-unit interventions are a
+      // RATIFIED class — a user working in their own raw scale — not a
+      // curiosity, and `compactGraph` describes the PERSISTED graph, upstream
+      // of every scale reconciliation, so it sees them unreconciled.
+      if (frame !== undefined && Number.isFinite(entry) && entry >= 0 && entry <= 1) {
+        const native = entry * frame;
+        // Rounded to the pair's own precision rather than printed raw: the
+        // multiplication reintroduces float dirt (0.59 * 100 = 58.99999…) and a
+        // context line reading "£58.99999999999999" would be a new defect.
+        // ⚠ `Math.round(native * 1e6) / 1e6` loses precision once
+        // `native x 1e6 > 2^53` (frame >= ~1e10). `toPrecision(12)` is bounded
+        // by the VALUE rather than by a fixed multiplier, so a raw-count frame
+        // cannot overflow it. Non-blocking finding from the review, taken.
+        const rounded = Number(native.toPrecision(12));
+        const unit = typeof (pair as { unit?: unknown }).unit === 'string'
+          ? ((pair as { unit?: string }).unit as string).trim()
+          : '';
+        return unit
+          ? `${label}=${rounded} ${unit} (model value ${entry})`
+          : `${label}=${rounded} (model value ${entry})`;
+      }
       return entry >= 0 && entry <= 1
         ? `${label}=model value ${entry} (display band ${qualitativeBand(entry)}; real-world meaning not established)`
         : `${label}=model value ${entry} (real-world meaning not established)`;
@@ -686,10 +772,24 @@ function buildOptionReachability(
 export function compactGraph(graph: GraphV3T): GraphV3Compact {
   // Build lookup maps for resolving factor IDs to labels and node kinds
   const labelMap = new Map<string, string>();
+  const framePairs = new Map<string, Record<string, unknown>>();
   const kindMap = new Map<string, string>();
   const knownNodeIds = new Set<string>();
   for (const node of graph.nodes) {
     labelMap.set(node.id, node.label ?? node.id);
+    // The frame pair, beside the label, from the SAME loop — so a node can
+    // never appear in one map and not the other.
+    // ⚠ `scale_frame` travels WITH the pair, because the owner reads both and
+    // a factor can carry one without the other — that asymmetry is exactly the
+    // missed-best-case defect above.
+    const os = (node as { observed_state?: Record<string, unknown> }).observed_state;
+    const storedFrame = (node as { scale_frame?: unknown }).scale_frame;
+    if ((os && typeof os === 'object') || storedFrame !== undefined) {
+      framePairs.set(node.id, {
+        ...(os && typeof os === 'object' ? os : {}),
+        ...(storedFrame !== undefined ? { storedFrame } : {}),
+      });
+    }
     kindMap.set(node.id, node.kind);
     knownNodeIds.add(node.id);
   }
@@ -885,6 +985,7 @@ export function compactGraph(graph: GraphV3T): GraphV3Compact {
         const summary = buildInterventionSummary(
           mergeInterventionSourceObjects(anyNode),
           labelMap,
+          framePairs,
         );
         if (summary) {
           n.intervention_summary = summary;

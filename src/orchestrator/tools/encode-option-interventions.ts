@@ -116,6 +116,65 @@ export function parseFlatInterventionKey(key: string): string | undefined {
   return rest.length === 1 ? rest[0] : undefined;
 }
 
+/**
+ * The `InterventionV3.source` members this encoder will PRESERVE from a raw
+ * record instead of defaulting.
+ *
+ * ⭐⭐ WHY THIS EXISTS, AND WHY IT IS SAFE IN ONLY ONE DIRECTION.
+ *
+ * `buildInterventionV3` stamped `source: 'user_specified'` unconditionally, so
+ * a value the PRODUCT chose became permanently indistinguishable from one the
+ * USER stated — measured 2026-09-04 by writing `cee_hypothesis` through the
+ * full apply chain and reading `user_specified` back out. That matters the
+ * moment the product proposes estimates for approval: "whose number is this?"
+ * is the question the whole review rests on, and the graph could not answer it.
+ *
+ * ⚠⚠ THE ALLOWLIST IS EXACTLY ONE MEMBER, AND THE REASON IS A FACT ABOUT THIS
+ * ESTATE RATHER THAN A STYLE CHOICE. `cee_hypothesis` is the ONLY
+ * `InterventionV3.source` the estate's provenance authority classes as the
+ * model speaking:
+ *
+ *   `obligation-provenance.ts` `INTERVENTION_SOURCE` —
+ *     `cee_hypothesis: 'ai_drafted'`
+ *     `user_specified: 'user_stated'`
+ *     `brief_extraction: 'user_stated'`   ← the SAME class as `user_specified`
+ *
+ * and `obligationFor('user_stated') === 'required'`. So `brief_extraction` is a
+ * USER provenance here, not a second non-user one — that file's own header
+ * names it among the producer-written stamps whose gaps "must STILL block".
+ *
+ * ⚠ A `brief_extraction` record therefore defaults to `user_specified` exactly
+ * as it did before this change — same `user_stated` class, same `required`
+ * obligation, no behaviour change for any existing writer. The invariant this
+ * set must keep is the narrow one: NOTHING in it may map to `user_stated`, so
+ * the carry can only ever NARROW a value's claim, never widen it to
+ * user-authored. That is pinned in
+ * `__tests__/encode-option-interventions.provenance.test.ts` by
+ * "every preserved source is a NON-user provenance, checked against the
+ * authority", which reads the mapping out of the authority at test time rather
+ * than restating it here.
+ */
+export const PRESERVED_INTERVENTION_SOURCES: ReadonlySet<string> = new Set([
+  'cee_hypothesis',
+]);
+
+const INTERVENTION_CONFIDENCES: ReadonlySet<string> = new Set(['high', 'medium', 'low']);
+
+// ⚠ A SECOND COPY OF `PRESERVED_INTERVENTION_SOURCES` AND
+// `INTERVENTION_CONFIDENCES` WAS REMOVED HERE DURING A REBASE (18 Sep 2026).
+//
+// This branch was 231 commits behind, and `staging` had independently shipped
+// both constants with byte-identical values (`new Set(['cee_hypothesis'])` and
+// `new Set(['high','medium','low'])`) plus an equivalent docblock, 40 lines
+// above. Git merged the two additions without a conflict because they landed at
+// different offsets, so the only signal was `TS2451: Cannot redeclare
+// block-scoped variable` — 4 errors, against a control showing `staging` alone
+// typechecks clean.
+//
+// The surviving copy is STAGING'S. Nothing was reverted: the values are
+// identical, and both docblocks make the same argument — that the carry may
+// only ever NARROW a value's claim, never widen it to user-authored.
+
 /** Raw intervention recovered from any location, pre-encoding. */
 interface RawIntervention {
   /** Model-unit value when already present (0..1). */
@@ -125,6 +184,10 @@ interface RawIntervention {
   readonly unit?: string;
   /** Cap carried on the intervention object itself (proposal cap). */
   readonly cap?: number;
+  /** A NON-user provenance the writer stated explicitly; absent ⇒ default. */
+  readonly source?: string;
+  readonly value_confidence?: string;
+  readonly reasoning?: string;
 }
 
 export interface EncodeOptionInterventionsResult<T> {
@@ -151,7 +214,15 @@ function toRawIntervention(src: unknown): RawIntervention {
   const bare = finiteNum(src);
   if (bare !== undefined) return { value: bare };
   if (!isPlainObject(src)) return {};
-  const out: { value?: number; raw_value?: number; unit?: string; cap?: number } = {};
+  const out: {
+    value?: number;
+    raw_value?: number;
+    unit?: string;
+    cap?: number;
+    source?: string;
+    value_confidence?: string;
+    reasoning?: string;
+  } = {};
   const v = finiteNum(src.value);
   if (v !== undefined) out.value = v;
   const rv = finiteNum(src.raw_value);
@@ -159,6 +230,17 @@ function toRawIntervention(src: unknown): RawIntervention {
   if (typeof src.unit === 'string') out.unit = src.unit;
   const cap = finiteNum(src.cap);
   if (cap !== undefined) out.cap = cap;
+  // Carried ONLY when explicitly stated and recognised; anything else falls
+  // through to the unchanged default in `buildInterventionV3`.
+  if (typeof src.source === 'string' && PRESERVED_INTERVENTION_SOURCES.has(src.source)) {
+    out.source = src.source;
+    if (typeof src.value_confidence === 'string' && INTERVENTION_CONFIDENCES.has(src.value_confidence)) {
+      out.value_confidence = src.value_confidence;
+    }
+    if (typeof src.reasoning === 'string' && src.reasoning.trim().length > 0) {
+      out.reasoning = src.reasoning;
+    }
+  }
   return out;
 }
 
@@ -332,7 +414,10 @@ function buildInterventionV3(fac: string, value: number, rec: RawIntervention, e
   const iv: Dict = {
     ...carried,
     value,
-    source: 'user_specified',
+    // Default UNCHANGED. `rec.source` is only ever a non-user provenance the
+    // writer stated explicitly (see `PRESERVED_INTERVENTION_SOURCES`), so this
+    // can narrow the claim but never widen it to user-authored.
+    source: rec.source ?? 'user_specified',
     target_match:
       isPlainObject(existing) && isPlainObject(existing.target_match)
         ? existing.target_match
@@ -340,6 +425,12 @@ function buildInterventionV3(fac: string, value: number, rec: RawIntervention, e
   };
   if (rec.unit !== undefined) iv.unit = rec.unit;
   if (rec.raw_value !== undefined) iv.raw_value = rec.raw_value;
+  // Carried only alongside a preserved non-user provenance: an estimate that
+  // cannot say how confident it is, or why, is not reviewable after the turn
+  // that produced it. `VALUE_DERIVED_OR_OWNED_KEYS` above drops the OLD entry's
+  // copies of both, so these are re-supplied from the NEW record or not at all.
+  if (rec.value_confidence !== undefined) iv.value_confidence = rec.value_confidence;
+  if (rec.reasoning !== undefined) iv.reasoning = rec.reasoning;
   return iv;
 }
 

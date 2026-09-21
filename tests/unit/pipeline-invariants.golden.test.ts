@@ -47,7 +47,10 @@ vi.mock("../../src/adapters/llm/router.js", () => ({
 }));
 
 // -- Stub: factor enrichment (Stage 3 LLM call)
-vi.mock("../../src/cee/factor-extraction/enricher.js", () => ({
+// ⚠ SPREAD, NOT A HAND-LIST (parent CLAUDE.md trap 12) — stub the LLM call
+// only; every other enricher export keeps its real implementation.
+vi.mock("../../src/cee/factor-extraction/enricher.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/cee/factor-extraction/enricher.js")>()),
   enrichGraphWithFactorsAsync: vi.fn(async (graph: any) => ({
     graph,
     factorsAdded: 0,
@@ -156,6 +159,7 @@ vi.mock("../../src/cee/structure/index.js", () => ({
   detectStructuralWarnings: vi.fn().mockReturnValue({ warnings: [], uncertainNodeIds: [] }),
   detectUniformStrengths: vi.fn().mockReturnValue({ detected: false }),
   detectStrengthClustering: vi.fn().mockReturnValue({ detected: false }),
+  detectGoalLayerStrengthClustering: vi.fn().mockReturnValue({ detected: false }),
   detectSameLeverOptions: vi.fn().mockReturnValue({ detected: false }),
   detectOptionSimilarity: vi.fn().mockReturnValue({ detected: false, critiques: [], warnings: [], validationIssues: [] }),
   detectMissingBaseline: vi.fn().mockReturnValue({ detected: false }),

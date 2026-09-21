@@ -40,6 +40,12 @@ import {
   READINESS_PRODUCING_EXIT_PATHS,
   MIN_NODES,
   MIN_OPTIONS,
+  classifyJourneySample,
+  summariseSamples,
+  detectionProbability,
+  halfDetectionRate,
+  assertSampleFloor,
+  samplingReport,
 } from "../../../scripts/ci/staging-journey-smoke.mjs";
 
 const REPO_ROOT = resolve(__dirname, "../../..");
@@ -374,18 +380,16 @@ describe("staging journey smoke — the alarm cannot be silenced quietly", () =>
     }
   });
 
-  it("has NO conditional gate on the job or the smoke step", () => {
-    // `if: vars.SMOKE_SCHEDULE_ENABLED == 'true'` is precisely what made
-    // nightly-smoke skip 8 of its last 8 runs while looking healthy.
-    expect(job.if, "job is conditionally gated — it can be disabled by leaving a variable unset").toBeUndefined();
+  it("only the explicit batch hold can defer the job; the smoke step stays unconditional", () => {
+    // The truth table below proves absent configuration runs the alarm.
+    expect(job.if).toContain("!(vars.CORE_DRAFTING_PAID_HOLD == '20260920'");
     expect(requireSmokeStep().if).toBeUndefined();
   });
 
-  it("no `if:` anywhere in the workflow reads a repo variable", () => {
-    // Walk the PARSED tree, not the raw text: the file's own comments explain
-    // the `if: vars.X == 'true'` anti-pattern, and a raw regex would match the
-    // explanation rather than a real gate. Structure is the source of truth.
-    expect(findVarGatedConditions(wf, "workflow")).toEqual([]);
+  it("the named job hold is the only variable condition", () => {
+    expect(findVarGatedConditions(wf, "workflow")).toEqual([
+      `workflow.jobs.journey.if = ${job.if}`,
+    ]);
   });
 
   it("runs on push to staging, not only on a schedule", () => {
@@ -452,12 +456,117 @@ describe("staging journey smoke — the alarm cannot be silenced quietly", () =>
  *                             no `continue-on-error`, base URL defaulted in
  *                             code. It fails loudly or not at all.
  *
- * An empty list is a materially stronger end state than a justified one: any
- * NEWLY-ADDED `vars.*` gate now fails this suite immediately, with no
- * precedent to point at. Re-populating this object should require the same
- * argument the three entries above could not survive.
+ * The only exception is the approved Core/Drafting batch hold. Unlike the old
+ * opt-in enable gates, missing configuration leaves automatic checks running.
+ * Exact condition locations and the event/branch truth table are checked below.
  */
-const VAR_GATE_OPT_OUTS: Record<string, string> = {};
+const VAR_GATE_OPT_OUTS: Record<string, string> = {
+  "ci.yml": "Explicit Core/Drafting paid-test hold; required code gate never held",
+  "perf-gate.yml": "Explicit Core/Drafting staging-PR hold; other runs unchanged",
+  "staging-journey-smoke.yml": "Explicit marked-batch hold; absent variable runs the alarm",
+};
+
+type ReleaseEvent = {
+  event_name: string;
+  base_ref?: string;
+  head_ref?: string;
+  ref?: string;
+  ref_name?: string;
+  event?: { head_commit?: { message: string } };
+};
+
+// These conditions use only string comparisons, Boolean operators, contains and
+// fromJSON. Evaluate that subset from the actual YAML, not a copied predicate.
+function releaseJobRuns(condition: string, event: ReleaseEvent, hold = "", hasKey = "true"): boolean {
+  const expression = condition.trim().slice(3, -2)
+    .replaceAll("needs.live-tests-key", "needs['live-tests-key']");
+  const evaluate = new Function("github", "vars", "needs", "contains", "fromJSON", `return (${expression});`);
+  return evaluate(
+    event,
+    { CORE_DRAFTING_PAID_HOLD: hold },
+    { "live-tests-key": { outputs: { has_key: hasKey } } },
+    (haystack: string | string[], needle: string) => haystack.includes(needle),
+    JSON.parse,
+  );
+}
+
+describe("Core/Drafting release hold is bounded and restores without a push", () => {
+  const workflow = (name: string): any => parse(readFileSync(resolve(REPO_ROOT, ".github/workflows", name), "utf8"));
+  const ci = workflow("ci.yml");
+  const perf = workflow("perf-gate.yml");
+  const smoke = workflow("staging-journey-smoke.yml");
+  const approved = "20260920";
+  const batchBranches = [
+    "fix/baseline-ask-collision-precedence", "cct/quantities-on-risk-and-outcome",
+    "feat/core-1251-validated-20260919", "feat/draft-authored-meaning-20260919",
+    "feat/core-budget-consent-20260919", "feat/core-authored-limit-continuity-20260919",
+    "feat/core-capacity-intervention-20260919", "feat/core-explicit-paid-release-20260920",
+  ];
+  const pr = (head = batchBranches[0], base = "staging"): ReleaseEvent => ({ event_name: "pull_request", base_ref: base, head_ref: head });
+  const push = (message = "[core-drafting-20260920] reviewed release", refName = "staging"): ReleaseEvent => ({
+    event_name: "push", ref_name: refName, ref: `refs/heads/${refName}`, event: { head_commit: { message } },
+  });
+
+  it("only the paid CI job is variable-gated; required code checks retain their gate", () => {
+    expect(findVarGatedConditions(ci, "ci")).toEqual([`ci.jobs.live-tests.if = ${ci.jobs["live-tests"].if}`]);
+    expect(ci.jobs["unit-tests"].if).toBeUndefined();
+    expect(ci.jobs["unit-tests"].steps.some((step: any) => step.run === "pnpm test:required")).toBe(true);
+    expect(ci.on.push.branches).toEqual(["main", "staging", "feat/**"]);
+    expect(ci.on.pull_request.branches).toEqual(["main", "staging"]);
+  });
+
+  it.each(["", "different-batch"])("absent or unrelated hold %j keeps automatic coverage", hold => {
+    for (const job of Object.values(perf.jobs) as Array<{ if: string }>) expect(releaseJobRuns(job.if, pr(), hold)).toBe(true);
+    expect(releaseJobRuns(smoke.jobs.journey.if, push(), hold)).toBe(true);
+    expect(releaseJobRuns(ci.jobs["live-tests"].if, pr(), hold)).toBe(true);
+  });
+
+  it.each(batchBranches)("holds paid PR/feature calls for named branch %s only", branch => {
+    for (const job of Object.values(perf.jobs) as Array<{ if: string }>) {
+      expect(releaseJobRuns(job.if, pr(branch), approved)).toBe(false);
+      expect(releaseJobRuns(job.if, pr(branch, "main"), approved)).toBe(true);
+    }
+    expect(releaseJobRuns(ci.jobs["live-tests"].if, pr(branch), approved)).toBe(false);
+    expect(releaseJobRuns(ci.jobs["live-tests"].if, push("feature", branch), approved)).toBe(false);
+    expect(releaseJobRuns(ci.jobs["live-tests"].if, pr(branch, "main"), approved)).toBe(true);
+  });
+
+  it("unrelated staging PRs and feature branches are not held", () => {
+    for (const job of Object.values(perf.jobs) as Array<{ if: string }>) expect(releaseJobRuns(job.if, pr("feat/unrelated"), approved)).toBe(true);
+    expect(releaseJobRuns(ci.jobs["live-tests"].if, pr("feat/unrelated"), approved)).toBe(true);
+    expect(releaseJobRuns(ci.jobs["live-tests"].if, push("feature", "feat/unrelated"), approved)).toBe(true);
+  });
+
+  it("only explicitly marked staging merges are held; clearing the variable restores them", () => {
+    for (const condition of [smoke.jobs.journey.if, ci.jobs["live-tests"].if]) {
+      expect(releaseJobRuns(condition, push(), approved)).toBe(false);
+      expect(releaseJobRuns(condition, push("ordinary merge"), approved)).toBe(true);
+      expect(releaseJobRuns(condition, push(), "")).toBe(true);
+    }
+  });
+
+  it("preserves explicit smoke/performance dispatch and unrelated production triggers", () => {
+    for (const job of Object.values(perf.jobs) as Array<{ if: string }>) {
+      for (const event of [{ event_name: "workflow_dispatch" }, { event_name: "schedule" }, push("ordinary", "main")]) {
+        expect(releaseJobRuns(job.if, event, approved)).toBe(true);
+      }
+    }
+    expect(releaseJobRuns(smoke.jobs.journey.if, { event_name: "workflow_dispatch" }, approved)).toBe(true);
+    expect(smoke.on.workflow_dispatch.inputs.expect_sha).toBeDefined();
+  });
+
+  it("never turns missing live-LLM credentials into permission", () => {
+    for (const hold of [approved, ""]) expect(releaseJobRuns(ci.jobs["live-tests"].if, pr(), hold, "false")).toBe(false);
+  });
+
+  it("does not exempt additional performance jobs from the scope checks", () => {
+    expect(Object.keys(perf.jobs).sort()).toEqual(["perf-gate", "sse-live-resume-gate"]);
+    expect(findVarGatedConditions(perf, "perf")).toEqual([
+      `perf.jobs.perf-gate.if = ${perf.jobs["perf-gate"].if}`,
+      `perf.jobs.sse-live-resume-gate.if = ${perf.jobs["sse-live-resume-gate"].if}`,
+    ]);
+  });
+});
 
 describe("no NEW workflow may gate itself on an unset repo variable", () => {
   const WORKFLOW_DIR = resolve(REPO_ROOT, ".github/workflows");
@@ -1115,7 +1224,14 @@ describe("C-2 — a conversational turn answered with an ANALYSIS REFUSAL is its
     expect(block).toContain('label: "turn 1", body: t1.body, requestedAnalysis: false');
     expect(block).toContain('label: "turn 2", body: t2.body, requestedAnalysis: false');
     // And the result must actually reach `failures`, or the call is decorative.
-    expect(src).toContain("failures.push(\n    ...assertNoUnrequestedAnalysisRefusal(");
+    //
+    // Matched as a regex rather than an exact string with a baked-in indent:
+    // the call moved into `runJourneySample` when the gate became multi-sample
+    // (11 Sep) and this pin reddened on the INDENTATION ALONE. A guard that
+    // fails on whitespace teaches the next author to loosen it, which is how a
+    // real guarantee gets deleted. The guarantee is unchanged and still exact —
+    // the result of THIS call reaches `failures.push`, on any indent.
+    expect(src).toMatch(/failures\.push\(\s*\.\.\.assertNoUnrequestedAnalysisRefusal\(/);
   });
 });
 
@@ -1363,6 +1479,289 @@ describe("10 Sep — the gate drives the route a REAL USER takes, and proves DEL
   it("an unrecognised error code is not silently swallowed as a proxy failure", () => {
     expect(proxyFailureCode({ error: { code: "SOMETHING_ELSE" } })).toBeNull();
     expect(proxyFailureCode({ error: { code: "PROXY_UPSTREAM_TIMEOUT" } })).toBe("PROXY_UPSTREAM_TIMEOUT");
+  });
+});
+
+/**
+ * ⭐⭐ 11 Sep 2026 — A SINGLE-SAMPLE GATE CANNOT MEASURE A RATE.
+ *
+ * The alarm FAILED on ccb7188e (run 34559516620) and then PASSED on the next
+ * two commits while the defect was live and unchanged, because it drove one
+ * journey against a stochastic producer. These tests pin the two properties
+ * that fixes: the gate takes k samples, and it REDS on a rate rather than on a
+ * coin landing.
+ *
+ * Every fixture below is a REAL COMMITTED CAPTURE. A self-authored body would
+ * encode this author's model of the producer rather than the producer (trap 16)
+ * — and the capture of the exact failure class is already in the tree.
+ */
+describe("11 Sep — the gate samples, and REDS on a RATE", () => {
+  const brokenTurn1 = () => readJson(BROKEN_DRAFT_PATH);
+  const healthyTurn1 = () => readJson(resolve(REPO_ROOT, "tests/unit/ci/fixtures/live-journey-draftfirst-turn1-2ceb65f.json"));
+  const healthyTurn2 = () => readJson(resolve(REPO_ROOT, "tests/unit/ci/fixtures/live-journey-draftfirst-turn2-2ceb65f.json"));
+
+  /** One journey sample, judged by the SAME assertion the gate runs. */
+  const sampleFrom = (t1: any, t2: any, status1 = 200) => {
+    const turns = [
+      { label: "turn 1", body: t1, status: status1 },
+      { label: "turn 2", body: t2, status: 200 },
+    ];
+    const failures = assertHealthyJourney(t1, t2);
+    if (status1 !== 200) failures.push(`turn 1: HTTP ${status1} (expected 200)`);
+    return { ...classifyJourneySample(turns, failures), failures };
+  };
+
+  const OK_SAMPLE = () => sampleFrom(healthyTurn1(), healthyTurn2());
+  const BROKEN_SAMPLE = () => sampleFrom(brokenTurn1(), healthyTurn2(), 500);
+
+  const OPTS = { floor: 5, requested: 5, minSamples: 3 };
+
+  it("POSITIVE CONTROL: the two real captures are the OPPOSITE objects this suite needs", () => {
+    // Without this, every test below could be agreeing about two bodies that
+    // both fail, or both pass, and read perfectly green while measuring
+    // nothing. A discrimination the fixtures must actually be making.
+    const ok = OK_SAMPLE();
+    const broken = BROKEN_SAMPLE();
+    expect(ok.failures, `healthy journey capture produced failures: ${ok.failures.join(" | ")}`).toEqual([]);
+    expect(ok.ok).toBe(true);
+    expect(broken.failures.length).toBeGreaterThan(0);
+    expect(broken.ok).toBe(false);
+    // …and bound by IDENTITY to the 11 Sep failure class, not by a predicate
+    // another body could satisfy.
+    expect(brokenTurn1().details.violation_code).toBe("OPTIONS_IDENTICAL");
+    expect(brokenTurn1().details.reason).toBe("draft_graph_cee_graph_invalid");
+  });
+
+  it("classifies the real outage by the PRODUCER's violation code, not by HTTP status", () => {
+    // "3 of 5 failed" says look; "3 of 5 failed, all VIOLATION:OPTIONS_IDENTICAL"
+    // says where. Exact string, so a widened classifier cannot pass this.
+    expect(BROKEN_SAMPLE().code).toBe("VIOLATION:OPTIONS_IDENTICAL");
+  });
+
+  it("DISCRIMINATING PAIR: a DELIVERY failure outranks a generation failure", () => {
+    // A proxy refusal means the model may be perfectly fine and the user still
+    // got nothing — a different fault with a different action. Neither case
+    // alone proves the ordering; the pair does.
+    const withProxy = {
+      ...brokenTurn1(),
+      error: { code: "PROXY_ORIGIN_REJECTED", message: "origin not allowed" },
+    };
+    expect(classifyJourneySample([{ label: "turn 1", body: withProxy, status: 403 }], ["x"]).code).toBe(
+      "PROXY:PROXY_ORIGIN_REJECTED",
+    );
+    // …the SAME body without the proxy envelope must NOT report PROXY.
+    expect(classifyJourneySample([{ label: "turn 1", body: brokenTurn1(), status: 500 }], ["x"]).code).toBe(
+      "VIOLATION:OPTIONS_IDENTICAL",
+    );
+  });
+
+  it("a sample that THREW is a FAILED sample, never an absent one", () => {
+    expect(classifyJourneySample([{ label: "threw", threw: "AbortError" }], ["boom"])).toEqual({
+      ok: false,
+      code: "THREW:AbortError",
+    });
+  });
+
+  it("`ok` is decided by the FAILURE LIST, never by the error envelope", () => {
+    // The classifier describes a failure already established; it must never
+    // manufacture one. Feed it the outage body with an EMPTY failure list.
+    expect(classifyJourneySample([{ label: "turn 1", body: brokenTurn1(), status: 500 }], [])).toEqual({
+      ok: true,
+      code: "OK",
+    });
+    // …and the inverse: a clean 200 body that still failed the journey is a
+    // silent-wrongness class and must not be collapsed into the loud ones.
+    expect(classifyJourneySample([{ label: "turn 1", body: healthyTurn2(), status: 200 }], ["journey: ..."]).code).toBe(
+      "ASSERTIONS_FAILED",
+    );
+  });
+
+  it("⭐ THE DEFECT, PINNED: one sample PASSES the population five samples RED", () => {
+    // This is the 11 Sep failure in one assertion. The same product, the same
+    // rate: the gate that looks at one journey reports health, and the gate
+    // that looks at five reports the rate. If this ever reads green in both
+    // directions, the sampling has stopped doing anything.
+    const population = [OK_SAMPLE(), BROKEN_SAMPLE(), OK_SAMPLE(), BROKEN_SAMPLE(), OK_SAMPLE()];
+
+    const single = summariseSamples([population[0]]);
+    expect(assertSampleFloor(single, { floor: 1, requested: 1, minSamples: 1 })).toEqual([]);
+
+    const five = summariseSamples(population);
+    const red = assertSampleFloor(five, OPTS);
+    expect(red.length).toBeGreaterThan(0);
+    expect(red.join(" ")).toContain("3/5");
+    // The census must name the class, or the rate is not actionable.
+    expect(red.join(" ")).toContain("VIOLATION:OPTIONS_IDENTICAL×2");
+  });
+
+  it("the floor is MET when every sample delivers, and the run passes", () => {
+    const all = summariseSamples([OK_SAMPLE(), OK_SAMPLE(), OK_SAMPLE(), OK_SAMPLE(), OK_SAMPLE()]);
+    expect(all.failureRate).toBe(0);
+    expect(assertSampleFloor(all, OPTS)).toEqual([]);
+  });
+
+  it("ONE failed sample of five reds the default floor — there is no acceptable 500 rate", () => {
+    const one = summariseSamples([OK_SAMPLE(), OK_SAMPLE(), OK_SAMPLE(), OK_SAMPLE(), BROKEN_SAMPLE()]);
+    expect(assertSampleFloor(one, OPTS).length).toBeGreaterThan(0);
+  });
+
+  describe("truncation can neither weaken the floor silently nor invert into a false red", () => {
+    it("3 healthy samples of a requested 5 is NOT a false red", () => {
+      // An absolute floor of 5 against 3 taken samples would red a run in which
+      // every sample it managed to take was healthy.
+      const s = summariseSamples([OK_SAMPLE(), OK_SAMPLE(), OK_SAMPLE()]);
+      expect(assertSampleFloor(s, OPTS)).toEqual([]);
+    });
+
+    it("but 2 samples is UNMEASURED, and unmeasured is a HARD ERROR", () => {
+      const s = summariseSamples([OK_SAMPLE(), OK_SAMPLE()]);
+      const f = assertSampleFloor(s, OPTS);
+      expect(f.length).toBeGreaterThan(0);
+      expect(f.join(" ")).toContain("UNMEASURED");
+    });
+
+    it("and truncation never turns a RED green", () => {
+      const s = summariseSamples([OK_SAMPLE(), BROKEN_SAMPLE(), OK_SAMPLE()]);
+      expect(assertSampleFloor(s, OPTS).length).toBeGreaterThan(0);
+    });
+
+    it("zero samples reports failureRate null, NEVER 0 — absent is not empty", () => {
+      // "No samples ran" and "no samples failed" are opposite facts, and a 0
+      // would print them identically.
+      expect(summariseSamples([]).failureRate).toBeNull();
+      expect(summariseSamples([]).attempted).toBe(0);
+    });
+  });
+
+  describe("the blindness statement is DERIVED, so it cannot go stale when k changes", () => {
+    it("detectionProbability is 1-(1-r)^k, pinned at the rates the PR body quotes", () => {
+      expect(detectionProbability(1, 0.3)!).toBeCloseTo(0.3, 10);
+      expect(detectionProbability(5, 0.3)!).toBeCloseTo(0.83193, 5);
+      expect(detectionProbability(5, 0.38)!).toBeCloseTo(0.90839, 5);
+      expect(detectionProbability(5, 0.1)!).toBeCloseTo(0.40951, 5);
+      expect(detectionProbability(3, 0.3)!).toBeCloseTo(0.657, 3);
+      // Monotone in k — more samples can never see less.
+      expect(detectionProbability(5, 0.2)!).toBeGreaterThan(detectionProbability(4, 0.2)!);
+    });
+
+    it("returns null rather than a number on inputs that are not a (k, rate) pair", () => {
+      // A gate that reports 0% blindness because its input was rubbish is worse
+      // than one that reports nothing.
+      expect(detectionProbability(0, 0.3)).toBeNull();
+      expect(detectionProbability(2.5, 0.3)).toBeNull();
+      expect(detectionProbability(5, 1.2)).toBeNull();
+      expect(detectionProbability(5, Number.NaN)).toBeNull();
+      expect(halfDetectionRate(0)).toBeNull();
+    });
+
+    it("halfDetectionRate names the rate at which k=5 is a coin flip", () => {
+      expect(halfDetectionRate(5)!).toBeCloseTo(0.12945, 5);
+      // The definition, checked against the other function rather than restated:
+      // at that rate the detection probability really is 50%.
+      expect(detectionProbability(5, halfDetectionRate(5)!)!).toBeCloseTo(0.5, 10);
+      expect(detectionProbability(1, halfDetectionRate(1)!)!).toBeCloseTo(0.5, 10);
+    });
+  });
+
+  describe("the gate reports the rate ON A PASS, not only on a failure", () => {
+    const passLines = () =>
+      samplingReport(summariseSamples([OK_SAMPLE(), OK_SAMPLE(), OK_SAMPLE(), OK_SAMPLE(), OK_SAMPLE()]), OPTS);
+
+    it("a PASSING run prints the observed rate, the census and the floor", () => {
+      // A gate that only speaks when it fails teaches nobody what normal looks
+      // like — and the rate is the single number that would have stopped the
+      // 11 Sep merge. The 18 Aug intermittent had no discriminator for exactly
+      // this reason: eight passing runs carried the answer and never printed it.
+      const out = passLines().join("\n");
+      expect(out).toContain("OBSERVED DRAFT FAILURE RATE: 0.0%");
+      expect(out).toContain("floor: MET");
+      expect(out).toMatch(/OK\s+5/);
+      expect(out).toContain("5 of 5 samples taken");
+    });
+
+    it("a PASSING run also prints what it CANNOT see", () => {
+      // The scope statement travels with the green, or it is inherited as a
+      // guarantee the gate cannot give.
+      const out = passLines().join("\n");
+      expect(out).toContain("BLIND BELOW ~12.9%");
+      expect(out).toContain("detection power at k=5");
+      expect(out).toContain("30.0%→83.2%");
+    });
+
+    it("a FAILING run prints the rate and the classification census", () => {
+      const out = samplingReport(
+        summariseSamples([OK_SAMPLE(), BROKEN_SAMPLE(), OK_SAMPLE(), BROKEN_SAMPLE(), OK_SAMPLE()]),
+        OPTS,
+      ).join("\n");
+      expect(out).toContain("OBSERVED DRAFT FAILURE RATE: 40.0%");
+      expect(out).toContain("floor: MISSED");
+      expect(out).toMatch(/VIOLATION:OPTIONS_IDENTICAL\s+2/);
+    });
+
+    it("prints n/a rather than 0.0% when nothing was sampled", () => {
+      expect(samplingReport(summariseSamples([]), OPTS).join("\n")).toContain("OBSERVED DRAFT FAILURE RATE: n/a");
+    });
+  });
+
+  describe("the job's own budget is DERIVED from the script, and reds when they drift apart", () => {
+    /**
+     * A hand-maintained mirror between a script's default budget and the job's
+     * timeout goes stale the first time k moves, and the failure mode is the
+     * worst available: the runner kills the process, so the rate, the census
+     * and the floor verdict are never printed at all — a run that measured four
+     * healthy samples looks identical to one that measured nothing.
+     */
+    const gateSource = () => readFileSync(resolve(REPO_ROOT, "scripts/ci/staging-journey-smoke.mjs"), "utf8");
+    const defaultOf = (name: string): number => {
+      const m = gateSource().match(new RegExp(`intFromEnv\\("${name}", (\\d+)`));
+      if (!m) throw new Error(`no intFromEnv default found for ${name}`);
+      return Number(m[1]);
+    };
+    const freshnessDefaultMs = (): number => {
+      const m = gateSource().match(/SMOKE_FRESHNESS_TIMEOUT_MS \?\? (\d+)/);
+      if (!m) throw new Error("no SMOKE_FRESHNESS_TIMEOUT_MS default found");
+      return Number(m[1]);
+    };
+
+    it("POSITIVE CONTROL: the parsers read real numbers out of the real script", () => {
+      // Two parsers that both read nothing agree perfectly.
+      expect(defaultOf("SMOKE_JOURNEY_BUDGET_MS")).toBeGreaterThan(0);
+      expect(defaultOf("SMOKE_DRAFT_SAMPLES")).toBeGreaterThan(0);
+      expect(freshnessDefaultMs()).toBeGreaterThan(0);
+      expect(() => defaultOf("SMOKE_NO_SUCH_KNOB")).toThrow();
+    });
+
+    it("timeout-minutes exceeds the freshness poll plus the journey budget", () => {
+      const wf = parse(readFileSync(WORKFLOW_PATH, "utf8"));
+      const timeoutMinutes = wf.jobs.journey["timeout-minutes"];
+      expect(typeof timeoutMinutes).toBe("number");
+      const neededMinutes = (freshnessDefaultMs() + defaultOf("SMOKE_JOURNEY_BUDGET_MS")) / 60000;
+      expect(
+        timeoutMinutes,
+        `the job would be KILLED mid-report: timeout-minutes=${timeoutMinutes} but the script's own ` +
+          `defaults can consume ${neededMinutes} minutes`,
+      ).toBeGreaterThan(neededMinutes);
+    });
+
+    it("k samples at the slowest observed journey still fit the journey budget", () => {
+      // The slowest JOURNEY actually measured, rounded up. Two sources, and the
+      // wider one wins: this gate's own CI run logs 9–11 Sep (turn 1 81.4s +
+      // turn 2 15.3s = 96.7s) and a live k=5 run against staging build 77d1138
+      // on 11 Sep, whose slowest sample was 85.7s + 22.6s = 108.3s.
+      //
+      // ⚠ A constant like this is a hand-maintained mirror of a measurement and
+      // WILL drift. It is deliberately set to the widest sample seen rather than
+      // a mean, so it errs toward reserving too much budget: the cost of being
+      // wrong is truncation, and a truncated run reports UNMEASURED rather than
+      // a false green. Re-measure it if k or the journey changes.
+      const SLOWEST_SAMPLE_MS = 110000;
+      const k = defaultOf("SMOKE_DRAFT_SAMPLES");
+      expect(
+        k * SLOWEST_SAMPLE_MS,
+        `k=${k} at the slowest measured sample exceeds SMOKE_JOURNEY_BUDGET_MS — the run would truncate ` +
+          `on every slow day and report UNMEASURED`,
+      ).toBeLessThanOrEqual(defaultOf("SMOKE_JOURNEY_BUDGET_MS"));
+    });
   });
 });
 

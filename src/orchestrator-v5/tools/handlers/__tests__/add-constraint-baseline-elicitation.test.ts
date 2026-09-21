@@ -681,3 +681,164 @@ describe('2.918 — the elliptical answer binds ONLY through the pending questio
     expect(second.assistant_text).toContain('Noted Churn rate is currently at 12%.');
   });
 });
+
+describe('declared draft percentages retain the baseline question', () => {
+  function draftedGraph(kind: 'risk' | 'outcome' = 'outcome') {
+    const graph = graphWithConstraintTargets();
+    const target = node(graph, 'o-churn-rate');
+    target.kind = kind;
+    target.observed_state = {
+      value: 0.30,
+      raw_value: 30,
+      unit: '%',
+      declared_scale: 'unit_interval',
+      source: 'cee_inference',
+      extractionType: 'inferred',
+      factor_type: 'probability',
+      uncertainty_drivers: ['Limited historical observations'],
+    };
+    return graph;
+  }
+
+  it.each(['risk', 'outcome'] as const)('%s estimate is retained without inventing a baseline, then a user answer is saved', async (kind) => {
+    const graph = draftedGraph(kind);
+    const estimate = { ...node(graph, 'o-churn-rate').observed_state! };
+    const first = await runTurn({
+      graph, message: 'Keep churn rate under 25%.',
+      targetId: 'o-churn-rate', value: 25, unit: '%',
+    });
+    const saved = first.mutated_graph as GraphV3T;
+    expect(node(saved, 'o-churn-rate').observed_state).toEqual(estimate);
+    expect(first.assistant_text).toContain(QUESTION_FOR_CHURN);
+    expect(first.__elicit_baseline).toMatchObject({ target_id: 'o-churn-rate', value: 25, unit: '%' });
+    const row = saved.goal_constraints!.find((c) => c.node_id === 'o-churn-rate')!;
+    expect(row).toMatchObject({ value: 25, operator: '<=', value_frame: 'level' });
+
+    const pending = {
+      ...elicitPending(),
+      action: { ...first.__elicit_baseline!, kind: 'elicit_target_baseline' },
+    } as PendingAction;
+    const second = await runTurn({
+      graph: saved, message: '40%', pendings: [pending],
+      targetId: 'o-churn-rate', value: 25, unit: '%',
+    });
+    const answered = second.mutated_graph as GraphV3T;
+    expect(node(answered, 'o-churn-rate').observed_state).toEqual({
+      ...estimate, value: 0.40, baseline: 0.40, raw_value: 0.40,
+      unit: 'fraction', cap: 1, source: 'brief_extraction', extractionType: 'explicit',
+    });
+    expect(answered.goal_constraints!.find((c) => c.node_id === 'o-churn-rate')).toEqual(row);
+    expect(second.__elicit_baseline).toBeUndefined();
+    expect(second.assistant_text).toContain('Noted Churn rate is currently at 40%.');
+  });
+
+  it.each([
+    ['undeclared scale', { declared_scale: undefined }],
+    ['ratio scale', { declared_scale: 'ratio' }],
+    ['ratio above 100%', { declared_scale: 'ratio', value: 1.25, raw_value: 125 }],
+    ['inconsistent raw magnitude', { raw_value: 3 }],
+    ['missing raw magnitude', { raw_value: undefined }],
+    ['native percentage value', { value: 30 }],
+    ['incompatible unit', { unit: '$' }],
+    ['existing scale cap', { cap: 100 }],
+    ['existing baseline', { baseline: 0.2 }],
+  ])('%s is not treated as the supported draft percentage cell', async (_label, change) => {
+    const graph = draftedGraph();
+    const target = node(graph, 'o-churn-rate');
+    target.observed_state = { ...target.observed_state!, ...change };
+    const before = { ...target.observed_state };
+    const outcome = await runTurn({
+      graph, message: 'Churn rate is 40% today. Keep churn rate under 25%.',
+      targetId: 'o-churn-rate', value: 25, unit: '%',
+    });
+    expect(node(outcome.mutated_graph as GraphV3T, 'o-churn-rate').observed_state).toEqual(before);
+    expect(outcome.__elicit_baseline).toBeUndefined();
+  });
+});
+
+/**
+ * ⭐⭐ THE GOAL CAN NEVER BE MADE MEASURABLE — and the product says so out loud.
+ *
+ * Measured 21 Sep 2026 by EXECUTING Paul's own sentence against this handler,
+ * after the lane's queue recorded the opposite ("all three needed mechanisms
+ * are already built ... it should have elicited the level from him"). The
+ * handler does not throw and does not misbehave:
+ *
+ *   "gain at least 20 new enterprise customers by the end of the year"
+ *     → goal_threshold_raw 20, unit "customers"   — the target IS stamped
+ *     → observed_state.baseline undefined          — correctly not invented
+ *     → __elicit_baseline undefined                — AND NOTHING ASKS FOR ONE
+ *     → "Success target set: Revenue at least 20 customers. I'll flag how your
+ *        options score against it ONCE THE ANALYSIS CAN MEASURE THIS GOAL."
+ *
+ * The reply names the missing precondition and then never requests it. The
+ * baseline is what makes the goal measurable; elicitation is the remedy this
+ * product designed for a missing baseline; and `mintEligible`'s second
+ * conjunct is `(kind === 'outcome' || kind === 'risk')`, so the remedy is
+ * structurally unreachable for a goal. Downstream, ISL withholds the
+ * recommendation with `missing_goal_baseline` — measured on a complex brief on
+ * 19 Sep, and this is where that baseline was silently never obtained.
+ *
+ * ⛔ THIS FILE DOES NOT FIX IT, DELIBERATELY. `mintEligible` is a ten-conjunct
+ * predicate over natural language, and widening one is how this estate has
+ * repeatedly traded one silent failure for its mirror image (traps 22b/22f).
+ * A count baseline ("we have eight today") is also a different PARSING problem
+ * from the percentage one the mint was built for — not the same fix wearing a
+ * wider gate. So the gap is recorded HERE, in the suite, where it REDs the
+ * moment someone changes it in either direction. A gap a suite can see is
+ * honest; a gap invisible to it is how this shipped.
+ */
+describe('2.918 — the elicitation cell EXCLUDES goals, so a goal target can never be baselined', () => {
+  it("Paul's sentence: the target is stamped, no baseline is invented, and NO question is asked", async () => {
+    const outcome = await runTurn({
+      message: 'gain at least 20 new enterprise customers by the end of the year',
+      targetId: 'g-revenue',
+      kind: 'goal',
+      constraintType: 'at_least',
+      value: 20,
+      unit: 'customers',
+    });
+    const goal = node(outcome.mutated_graph as GraphV3T, 'g-revenue') as {
+      goal_threshold_raw?: number;
+      observed_state?: { baseline?: number };
+    };
+
+    // The commit itself is correct and is NOT what is broken here.
+    expect(goal.goal_threshold_raw).toBe(20);
+    expect(goal.observed_state?.baseline).toBeUndefined();
+
+    // ⛔ THE GAP: the one thing that would make the goal measurable is never requested.
+    expect(outcome.__elicit_baseline).toBeUndefined();
+  });
+
+  /**
+   * THE DISCRIMINATING PAIR (trap 19). Absence alone proves nothing — this
+   * probe must be shown capable of SEEING an elicitation, and the two arms must
+   * differ in exactly one field, or the silence could be the unit, the edges,
+   * the frame or the fixture rather than the kind.
+   */
+  it('ISOLATES THE CONJUNCT: one identical cell asks as an outcome and goes silent as a goal', async () => {
+    const asOutcome = await runTurn({
+      message: 'Keep churn rate under 10%.',
+      targetId: 'o-churn-rate',
+      value: 10,
+      unit: '%',
+    });
+    // POSITIVE CONTROL: the elicitation demonstrably fires on this exact cell.
+    expect(asOutcome.__elicit_baseline?.target_id).toBe('o-churn-rate');
+
+    const graph = graphWithConstraintTargets();
+    (node(graph, 'o-churn-rate') as { kind: string }).kind = 'goal'; // the ONLY change
+    const asGoal = await runTurn({
+      message: 'Keep churn rate under 10%.',
+      targetId: 'o-churn-rate',
+      kind: 'goal',
+      value: 10,
+      unit: '%',
+      graph,
+    });
+
+    // Same label, same edges, same unit, same frame, same value, same message.
+    expect(asGoal.__elicit_baseline).toBeUndefined();
+  });
+});

@@ -9,7 +9,7 @@ import type {
   CEEGraphResponseV3T,
   ValidationWarningV3T,
 } from "../../schemas/cee-v3.js";
-import { CEEGraphResponseV3 } from "../../schemas/cee-v3.js";
+import { CEEGraphResponseV3, classifyMagnitudeSign } from "../../schemas/cee-v3.js";
 import { hasPathToGoal } from "../extraction/factor-matcher.js";
 import { detectCycles } from "../../utils/graphGuards.js";
 import { normaliseOptionInterventions } from "../extraction/intervention-extractor.js";
@@ -217,12 +217,14 @@ function validateNodes(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
  */
 const ALLOWED_EDGE_PATTERNS: Array<{ from: string; to: string }> = [
   { from: "decision", to: "option" },  // Decision branches to options
+  { from: "option", to: "risk" },    // Retained hypothesis, not a configured intervention
   { from: "option", to: "factor" },    // Options set controllable factors
   { from: "factor", to: "outcome" },
   { from: "factor", to: "risk" },
   { from: "factor", to: "factor" },    // Target must be exogenous (checked separately)
   { from: "outcome", to: "goal" },
   { from: "risk", to: "goal" },
+  { from: "risk", to: "outcome" },
 ];
 
 // Canonical strength range for CEE edges
@@ -299,7 +301,7 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
       } else {
         // Exactly 1 outgoing - verify it goes to goal
         const targetKind = nodeKindMap.get(outgoing[0]);
-        if (targetKind !== "goal") {
+        if (targetKind !== "goal" && !(node.kind === "risk" && targetKind === "outcome")) {
           warnings.push({
             code: `${node.kind.toUpperCase()}_NOT_CONNECTED_TO_GOAL`,
             severity: "warn",
@@ -421,8 +423,18 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
       }
     }
 
-    // Check effect_direction matches strength.mean sign
-    const expectedDirection = edge.strength.mean >= 0 ? "positive" : "negative";
+    // Check effect_direction matches strength.mean sign.
+    //
+    // ⚠ CONSUMES the shared definition rather than re-deriving `>= 0`. This
+    // check previously carried its own copy of the two-valued rule, so a ZERO
+    // magnitude "expected" positive — and any edge honestly stating a direction
+    // the magnitude cannot corroborate was reported as a mismatch against
+    // itself. A magnitude of zero states nothing, so there is nothing for the
+    // label to disagree WITH, and this check has no opinion there
+    // (CLAUDE.md trap 21: every reader of a predicate must move with it).
+    const magnitudeClass = classifyMagnitudeSign(edge.strength.mean);
+    const expectedDirection =
+      magnitudeClass === "no_sign_information" ? edge.effect_direction : magnitudeClass;
     if (edge.effect_direction !== expectedDirection) {
       warnings.push({
         code: "EFFECT_DIRECTION_MISMATCH",

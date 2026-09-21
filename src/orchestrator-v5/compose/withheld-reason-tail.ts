@@ -170,6 +170,11 @@ import {
   type ConstraintVerdictState,
   type RatifiedConstraint,
 } from '../../orchestrator/context/constraint-feasibility.js';
+import {
+  WITHHELD_NEAR_TIE,
+  WITHHELD_SEPARATION_UNAVAILABLE,
+  type SeparationWithhold,
+} from './analysis-state-v1.js';
 
 /**
  * Which honest account this answer gives. Bounded — this is the telemetry
@@ -180,7 +185,18 @@ export type WithheldReasonKind =
   | 'constraint_infeasible'
   | 'constraint_unevaluated'
   | 'constraint_unresolved'
-  | 'reason_unrecorded';
+  | 'reason_unrecorded'
+  /**
+   * ⭐ THE SEPARATION AXIS — a DIFFERENT PERMISSION, not a second spelling of
+   * the constraint one. `composeLeaderClaim` computes
+   * `permitted = entitled && separates`; the four kinds above are all
+   * `!entitled`, and these two are `entitled && !separates`. A run can fail
+   * either half for reasons that have nothing to do with the other, so they
+   * get their own voices and their own next steps. Collapsing them would be
+   * the universal permission flag this seam must not grow.
+   */
+  | 'separation_not_evaluated'
+  | 'separation_near_tie';
 
 export interface WithheldReasonTail {
   readonly kind: WithheldReasonKind;
@@ -362,6 +378,59 @@ function composeUnlabelledStateText(
  * the user a condition of theirs failed on a scenario that may have ratified
  * none — the exact correctness defect F2 fixed in `withheld-leader-projection.ts`.
  */
+/**
+ * ⭐⭐ THE SEPARATION VOICES — the axis that had none, and the dominant one.
+ *
+ * MEASURED, 19 Sep 2026, twelve debug captures from two manual sessions:
+ * eleven withheld the recommendation. `separation_unavailable` appeared SEVEN
+ * times and `constraint_verdict_withheld` three. So the axis with the fullest
+ * user-facing voice in this file was the MINORITY cause, and the majority cause
+ * reached the person as `WITHHELD_EXPLANATION_NO_DISCLOSURE_TAIL` — *"No single
+ * option can be put forward yet."* A true sentence that names no cause and
+ * offers no next step, on the majority of withheld turns.
+ *
+ * ⚠ TWO VOICES, NOT ONE, AND THE SPLIT IS THE PRODUCT DECISION.
+ * `separationWithholdFromRobustness` distinguishes them and this file must not
+ * re-decide it:
+ *
+ *   not_evaluated — `rawRobustness === null`. WE DID NOT LOOK. The honest next
+ *                   step is a run, because a run is what would measure it.
+ *   near_tie      — we looked and the arms were too close. A run changes
+ *                   nothing; the useful next step is the PERSON, because what
+ *                   separates two near-identical options is a preference and
+ *                   preferences are theirs. That is a coaching move, not a
+ *                   consolation prize for a failed computation.
+ *
+ * ⛔ DO NOT MERGE THEM into "we could not separate the options". It reads
+ * tidier and it is wrong in one direction on each population: it claims a
+ * measurement on the turns where none was taken, and it prescribes a futile
+ * re-run on the turns where one was.
+ *
+ * ── POPULATION, stated per clause, because this module has twice shipped copy
+ * that was true on the population its author had in mind (see
+ * `WITHHELD_EXPLANATION_OPENING_CURRENCY_UNKNOWN`).
+ *
+ * `near_tie` is reachable ONLY when `rawRobustness !== null`, i.e. a run
+ * produced comparable arms, so *"these options"* has a referent by
+ * construction. `not_evaluated` asserts NOTHING about what exists: it says only
+ * that a distance was not established, which is true on every population that
+ * reaches it, including the confined auto-run whose robustness keys were
+ * stripped before the reader ever saw them.
+ *
+ * Neither names or ranks an option, which the load-time probe enforces against
+ * the shared leader vocabulary rather than against my own reading of it.
+ */
+const SEPARATION_NOT_EVALUATED_TEXT =
+  ' How far apart the options are was not established on this run, ' +
+  `${NO_OPTION_YET}. Ask me to run the analysis and I will measure it; ` +
+  'in the meantime I can still talk through the reasoning or the assumptions behind any of them.';
+
+const SEPARATION_NEAR_TIE_TEXT =
+  ' These options came out too close together on this run to tell apart, ' +
+  `${NO_OPTION_YET} without overstating what it shows. ` +
+  'Running it again will not separate them. What matters most to you between them? ' +
+  'Tell me and I will work from that.';
+
 const REASON_UNRECORDED_TEXT =
   ` No single option can be put forward on this result yet, and the reason is not ` +
   'recorded on it, so I will not guess at one. Run the analysis again and it will be ' +
@@ -397,8 +466,41 @@ export function composeWithheldReasonTail(
   state: ConstraintVerdictState | null,
   constraints: readonly RatifiedConstraint[],
   brief?: string | null,
+  separation?: SeparationWithhold | null,
 ): WithheldReasonTail | null {
   const ratified = Array.isArray(constraints) ? constraints : [];
+
+  // ⭐ THE SEPARATION AXIS IS CONSULTED ONLY WHERE THE CONSTRAINT AXIS IS
+  // SILENT, and that ordering is NOT a preference — it is the producer's.
+  // `composeLeaderClaim` chooses `!entitled` FIRST for its own
+  // `withheld_reason`, so a turn whose constraint verdict withholds publishes
+  // `constraint_verdict_withheld` on the wire. If this file spoke the
+  // separation voice there, the sentence and the published code would name
+  // different causes for one withholding — the two-surface disagreement this
+  // neighbourhood exists to remove.
+  //
+  // ⚠ CONSEQUENCE, AND IT IS WHY THIS IS SAFE TO SHIP: wherever a constraint
+  // state withholds, every byte below is what it was. The new voices are
+  // reachable ONLY on the population that previously had no tail at all.
+  const separationVoice = (): WithheldReasonTail | null => {
+    if (separation === WITHHELD_SEPARATION_UNAVAILABLE) {
+      return {
+        kind: 'separation_not_evaluated',
+        text: SEPARATION_NOT_EVALUATED_TEXT,
+        ratified_constraint_count: ratified.length,
+        named_constraint: false,
+      };
+    }
+    if (separation === WITHHELD_NEAR_TIE) {
+      return {
+        kind: 'separation_near_tie',
+        text: SEPARATION_NEAR_TIE_TEXT,
+        ratified_constraint_count: ratified.length,
+        named_constraint: false,
+      };
+    }
+    return null;
+  };
 
   if (state === null) {
     return {
@@ -412,8 +514,11 @@ export function composeWithheldReasonTail(
   switch (state) {
     case 'not_applicable':
     case 'evaluated_feasible':
-      // Permitting states. Not our turn — see the docstring.
-      return null;
+      // The constraint axis PERMITS. That used to end the matter and return
+      // `null`, which is how a separation-withheld turn reached the person as
+      // the cause-free tail. The constraint answer is unchanged — it simply is
+      // not the only permission, and this is where the second one speaks.
+      return separationVoice();
 
     case 'evaluated_infeasible': {
       const label = soleLabel(ratified);
@@ -554,6 +659,13 @@ function assertTailCopyIsLeaderFree(): void {
   // Both unlabelled-state voices are reachable only through a read-back with no
   // constraints, which the loop above covers — but probe them directly too, so
   // deleting that branch's only caller cannot silently un-probe the copy.
+  // The separation voices go through the SAME probes, and they are pushed HERE
+  // rather than below so BOTH checks cover them — the leading-space contract as
+  // well as the leader vocabulary. (The two unlabelled voices below are pushed
+  // after the leading-space loop and therefore skip it; that is pre-existing and
+  // left alone, but it is not a pattern worth copying into new code.)
+  probes.push(['separation:not_evaluated', SEPARATION_NOT_EVALUATED_TEXT]);
+  probes.push(['separation:near_tie', SEPARATION_NEAR_TIE_TEXT]);
   // Every tail must be a LEADING-SPACE fragment — the contract the append seam
   // and the idempotence check both rely on. Checked here rather than in a test
   // so a voice that forgot it fails at import, where it cannot be missed.

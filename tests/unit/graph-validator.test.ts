@@ -1703,7 +1703,11 @@ describe('validateGraphPostNormalisation', () => {
       expect(factor.category).toBe('controllable');
       // Missing fields auto-filled
       expect((factor.data as any).factor_type).toBe('other');
-      expect((factor.data as any).uncertainty_drivers).toEqual(['Estimation uncertainty']);
+      // The fill still FIRES — that is what this test is named for. What it
+      // writes is now NONE: `['Estimation uncertainty']` was a driver the
+      // producer invented, and unlike the sibling `['Not provided']` stamp the
+      // UI does not filter it, so it reached the reader as genuine evidence.
+      expect((factor.data as any).uncertainty_drivers).toEqual([]);
 
       // Override recorded as STRP mutation
       const overrideMutation = strp.mutations.find(m => m.code === 'CATEGORY_OVERRIDE');
@@ -1774,7 +1778,11 @@ describe('validateGraphPostNormalisation', () => {
       const factor = graph.nodes.find(n => n.id === 'fac_new')!;
       expect(factor.category).toBe('controllable');
       expect((factor.data as any).factor_type).toBe('other');
-      expect((factor.data as any).uncertainty_drivers).toEqual(['Estimation uncertainty']);
+      // The fill still FIRES — that is what this test is named for. What it
+      // writes is now NONE: `['Estimation uncertainty']` was a driver the
+      // producer invented, and unlike the sibling `['Not provided']` stamp the
+      // UI does not filter it, so it reached the reader as genuine evidence.
+      expect((factor.data as any).uncertainty_drivers).toEqual([]);
 
       expect(hasError(result, 'CATEGORY_MISMATCH')).toBe(false);
       expect(hasError(result, 'CONTROLLABLE_MISSING_DATA')).toBe(false);

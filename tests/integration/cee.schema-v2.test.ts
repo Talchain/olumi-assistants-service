@@ -35,6 +35,11 @@ vi.mock("../../src/cee/structure/index.js", () => ({
     coefficientOfVariation: 0,
     edgeCount: 0,
   }),
+  detectGoalLayerStrengthClustering: () => ({
+    detected: false,
+    coefficientOfVariation: 0,
+    edgeCount: 0,
+  }),
   detectSameLeverOptions: () => ({
     detected: false,
     maxOverlapPercentage: 0,

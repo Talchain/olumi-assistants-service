@@ -317,3 +317,49 @@ describe("adapter → parse stage", () => {
     );
   });
 });
+
+describe('records constraint → real adapter → parse → compound-goals', () => {
+  it('retains the explicit reference and only compiles the attested quantity at the existing repair boundary', async () => {
+    const brief = 'We need to grow net revenue. Keep monthly churn under 4%. We can invest or hold.';
+    h.payload = JSON.stringify({
+      stated_items: [
+        { kind: 'goal', source_quote: 'grow net revenue', role: 'target' },
+        { kind: 'constraint', source_quote: 'Keep monthly churn under 4%', value: 4, unit: '%', direction: 'ceiling', applies_to_claim: 0 },
+        { kind: 'option', source_quote: 'invest' },
+        { kind: 'option', source_quote: 'hold' },
+      ],
+      claims: [
+        { claim_kind: 'factor', label: 'Subscription Loss Metric' },
+        { claim_kind: 'causal_link', label: 'metric affects revenue', from_claim: 0, to_stated: 0, effect: 'negative' },
+        { claim_kind: 'causal_link', label: 'limit affects revenue', from_stated: 1, to_stated: 0 },
+        { claim_kind: 'causal_link', label: 'invest alters metric', from_stated: 2, to_claim: 0, sets_to: 0.2 },
+        { claim_kind: 'causal_link', label: 'hold alters metric', from_stated: 3, to_claim: 0, sets_to: 0.5 },
+      ],
+    });
+    const { runStageParse } = await import('../../../cee/unified-pipeline/stages/parse.js');
+    const { runCompoundGoals } = await import('../../../cee/unified-pipeline/stages/repair/compound-goals.js');
+    const ctx = {
+      requestId: 'records-constraint-real-hop', input: { brief }, effectiveBrief: brief, rawBody: {},
+      opts: { requestStartMs: Date.now(), forceDefault: true }, transforms: [],
+      pipelineOutcome: { warnings: [] }, pipelineCheckpoints: [], riskCoefficientCorrections: [],
+    } as unknown as StageContext;
+    await runStageParse(ctx);
+    expect(ctx.earlyReturn).toBeUndefined();
+    expect(ctx.llmGoalConstraints).toBeUndefined();
+    expect(ctx.recordConstraintCandidates).toHaveLength(1);
+    const candidate = ctx.recordConstraintCandidates![0]!;
+    expect(candidate).toMatchObject({
+      target_ref: { namespace: 'claims', index: 0 }, constraint: { value: 4, unit: '%' },
+    });
+    expect(ctx.llmMeta.raw_draft_lineage.projection.constraint_carriage)
+      .toBe('forwarded_as_unvalidated_record_candidates');
+    expect(ctx.llmMeta.raw_draft_lineage.projection.constraint_candidates).toEqual(ctx.recordConstraintCandidates);
+    runCompoundGoals(ctx);
+    expect(ctx.goalConstraints).toContainEqual(expect.objectContaining({
+      node_id: candidate.constraint.node_id, value: 0.04, unit: 'fraction', value_frame: 'level',
+    }));
+    expect(ctx.recordConstraintDispositions?.[0]?.reason).toBe('record_constraint_admitted');
+    // Compiler arithmetic did not mutate the raw declarations in the receipt.
+    expect(ctx.llmMeta.raw_draft_lineage.projection.constraints[0].value).toBe(4);
+  });
+});

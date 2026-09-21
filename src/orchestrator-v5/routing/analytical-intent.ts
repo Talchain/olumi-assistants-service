@@ -898,6 +898,186 @@ const IMPERATIVE_RERUN_PATTERNS: readonly RegExp[] = [
 ];
 
 /**
+ * ROADMAP — FIRST-RUN imperative recognition. The same defect as 2.229 fix 4
+ * above, left open for the case that fix did not cover.
+ *
+ * ⭐ THE WITNESS. Deployed staging, capture `5376e928`, 2026-09-19T14:37:55Z,
+ * build `fd65f971`. The user typed **"Run the analysis."** The turn took 10.5s,
+ * `turn_kind` came back `null`, and NO ANALYSIS RAN — the served reply was the
+ * egress guard's neutral fallback. Thirty-one seconds later the same user
+ * clicked the Run chip and it worked in 26.8s. Two turns earlier the product
+ * had itself written *"Say \"run the analysis\" or just say yes, and I will."*
+ * ({@link ANALYSIS_ELECTION_DEMOTION_TEXT}) — so the product named the words
+ * and then did not honour them.
+ *
+ * WHY IT FELL THROUGH, measured: every pattern in
+ * {@link IMPERATIVE_RERUN_PATTERNS} requires a REPETITION MARKER (`again`,
+ * `once more`, …) or the `re-` prefix, because 2.229 was scoped to re-runs.
+ * "Run the analysis." matches every token up to the object and then fails on
+ * the mandatory marker, so it reached the LLM router — which, on that turn,
+ * did not elect `run_analysis`. Wire-witnessed: the turn carries
+ * `prompt_identity routing@121` and no `decision_review`, while every
+ * successful run in the same session carries `decision_review` and no routing.
+ * **A first run had no deterministic path from typed text at all — only a chip
+ * or a coin-flip.**
+ *
+ * ⚠ SEPARATE ARRAY, SAME MACHINERY — and the separation is the point.
+ * {@link looksLikeExplicitAnalysisRequest} already returns TRUE for "Run the
+ * analysis." and it would have been one word to reuse it here. That is the
+ * move this file's own trap-21 note (:968-972) forbids: it answers *"may this
+ * ELECTION be honoured?"*, a permissive admission test applied AFTER the model
+ * has already proposed, whereas this predicate answers *"may I EXECUTE an
+ * analysis with no LLM call?"* — where a false positive REPLACES the user's
+ * computed result. Same sentence, different question, different precision bar.
+ * So the patterns are their own array and every veto is REUSED rather than
+ * restated: {@link RERUN_NEGATION_VETO_PATTERNS},
+ * {@link RERUN_INTERROGATIVE_VETO_PATTERNS} and the
+ * {@link VERB_POSITION_LEFT_CONTEXTS} allowlist all apply unchanged, so there
+ * is no second definition of "a refusal", "a question" or "a verb position"
+ * that could drift from the first.
+ *
+ * ⛔ NO REPETITION MARKER, AND THAT IS THE ONLY DIFFERENCE. These patterns are
+ * {@link IMPERATIVE_RERUN_PATTERNS} minus the marker. Everything the marker was
+ * doing for safety is done instead by the verb-position allowlist, which is
+ * what makes the widening survivable: the corpus case that would have been
+ * catastrophic — the product's OWN chip text *"Which assumptions in this model
+ * matter most to check before I run the analysis?"* — declines because its left
+ * context is `"… before I "`, and `I ` is not a licensed imperative position.
+ * Had the marker simply been made optional without that allowlist, clicking the
+ * assumptions chip would have EXECUTED AN ANALYSIS.
+ *
+ * VERIFIED AGAINST AN OUTSIDE CORPUS, not against this author's head (trap 22):
+ * all 149 unique real user messages harvested from 931 debug captures in
+ * `~/Downloads`. See the commit message for the admit list.
+ *
+ * KNOWN-DROPPED, named so the gap stays visible and a change to it is loud:
+ *   · `"You run the analysis."` — left context `"You "` is not a licensed
+ *     imperative position. A miss, i.e. the safe direction.
+ *   · `"Okay, add this, and then we can rerun the analysis."` — carries a
+ *     mutation and `we can`; the pre-route's own `hasMutationSignal` gate would
+ *     decline it regardless.
+ */
+const IMPERATIVE_FIRST_RUN_PATTERNS: readonly RegExp[] = [
+  // "run the analysis", "run analysis", "run the model", "run the numbers"
+  /\brun\s+(?:the\s+|this\s+|that\s+|my\s+|our\s+)?(?:analysis|analyses|model|numbers|scenario)\b/i,
+  // "analyse the model", "analyse it"
+  /\banaly[sz]e\s+(?:it|this|that|the\s+(?:model|scenario|decision|graph|numbers))\b/i,
+];
+
+/**
+ * ⛔ DEFERRAL / CONDITION VETO — an instruction the user has made CONDITIONAL
+ * is not an instruction to act now.
+ *
+ * Found by independent review (Codex, CHANGES_REQUIRED on this change), from a
+ * source-derived counterexample rather than from a corpus:
+ *
+ *     "Run the analysis only after I confirm."
+ *
+ * The first-run patterns match the prefix "Run the analysis", and the
+ * start-of-message left context licenses it, so without this veto the product
+ * would EXECUTE on a sentence whose whole point is to wait. That is the
+ * consent failure the negation veto already guards one direction of, and it is
+ * strictly worse than a miss: a declined instruction costs a clarification,
+ * an executed deferral runs the analysis the user asked us to hold.
+ *
+ * ⚠ SAME ACCEPTED OVER-REACH AS THE NEGATION VETO, and for the same reason. It
+ * is a bare word-PRESENCE test, not a scoped one, so a genuine unconditional
+ * instruction that merely CONTAINS one of these words is declined too — "Run
+ * the analysis once more" is already handled by the re-run arm, but e.g. "Run
+ * the analysis, if you can" falls through to the LLM router exactly as it did
+ * before this seam existed. That is the SAFE direction. Scoping it properly
+ * needs clause structure, which is the same problem this file's negation veto
+ * already declines to attempt with a wider regex. Do not attempt it here.
+ *
+ * ⚠ KNOWN GAP, NAMED, NOT CLOSED HERE: this veto is applied by
+ * {@link scanImperativeInstruction}, which only {@link looksLikeImperativeRunRequest}
+ * consults. {@link looksLikeImperativeRerun} keeps its own body and its own
+ * behaviour BYTE-UNCHANGED, because the pre-route it feeds is deliberately not
+ * altered by this change — so "Re-run the analysis only after I confirm."
+ * remains claimable by that older path. That is a PRE-EXISTING defect of the
+ * same class, now visible; closing it is its own change with its own evidence.
+ */
+const RUN_DEFERRAL_VETO_PATTERNS: readonly RegExp[] = [
+  // Explicitly conditional on a later act by the user.
+  /\bonly\s+(?:after|when|once|if)\b/i,
+  /\b(?:after|once|when|unless)\s+(?:i|we|you)\b/i,
+  /\bif\s+(?:i|we|you)\s+(?:confirm|say|agree|approve|decide|tell)\b/i,
+  // Deferred by ordering: "first …, then run", "before running".
+  /\bbefore\s+(?:i|we|you)\b/i,
+  /\bwait\s+(?:until|for|till)\b/i,
+  /\bhold\s+off\b/i,
+  /\bnot\s+yet\b/i,
+];
+
+/**
+ * The shared scan. ONE implementation of the veto order and the
+ * every-occurrence + verb-position rule, so the two imperative predicates
+ * cannot drift on what counts as a refusal, a question or a verb position.
+ *
+ * Extracted verbatim from {@link looksLikeImperativeRerun}'s body; the caller
+ * supplies only the pattern array.
+ */
+function scanImperativeInstruction(
+  message: string,
+  patterns: readonly RegExp[],
+): boolean {
+  const trimmed = message.trim();
+  if (trimmed.length === 0) return false;
+  // Negation first: an explicit refusal outranks every other reading.
+  for (const re of RERUN_NEGATION_VETO_PATTERNS) {
+    if (re.test(trimmed)) return false;
+  }
+  for (const re of RERUN_INTERROGATIVE_VETO_PATTERNS) {
+    if (re.test(trimmed)) return false;
+  }
+  // A CONDITIONAL instruction is not an instruction to act now. See the
+  // RUN_DEFERRAL_VETO_PATTERNS header for the counterexample this closes.
+  for (const re of RUN_DEFERRAL_VETO_PATTERNS) {
+    if (re.test(trimmed)) return false;
+  }
+  // Every OCCURRENCE is checked, not merely the first: one message can carry a
+  // nominal use AND a real instruction — "The re-run analysis was odd. Re-run
+  // the model." and "Check the re-run analysis, then re-run the model." both
+  // dispatch (verified), and stopping at the first match would decline them
+  // because the first occurrence is the nominal one.
+  //
+  // ⚠ The connective must itself be on the allowlist. "…was odd, SO re-run the
+  // model." DECLINES, because `so` is not listed. That is a real gap, and it is
+  // in the safe direction (fall through to the LLM). Listed among the declines
+  // documented on the allowlist above rather than papered over here.
+  for (const re of patterns) {
+    const scanner = new RegExp(
+      re.source,
+      re.flags.includes('g') ? re.flags : `${re.flags}g`,
+    );
+    let m: RegExpExecArray | null;
+    while ((m = scanner.exec(trimmed)) !== null) {
+      if (m[0].length === 0) {
+        scanner.lastIndex += 1;
+        continue;
+      }
+      if (isVerbPosition(trimmed, m.index)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * True when the message INSTRUCTS a run of the analysis — first run or re-run.
+ *
+ * This is the predicate the LLM-free dispatch pre-route consults. It is
+ * deliberately the UNION of the two imperative arrays rather than a widened
+ * single array, so {@link looksLikeImperativeRerun}'s pinned behaviour is
+ * untouched and a future narrowing of either half is visible on its own.
+ */
+export function looksLikeImperativeRunRequest(message: string): boolean {
+  return (
+    scanImperativeInstruction(message, IMPERATIVE_RERUN_PATTERNS) ||
+    scanImperativeInstruction(message, IMPERATIVE_FIRST_RUN_PATTERNS)
+  );
+}
+
+/**
  * True when the message INSTRUCTS a re-run of the analysis (as opposed to
  * asking whether one is needed). See the block comment above.
  */

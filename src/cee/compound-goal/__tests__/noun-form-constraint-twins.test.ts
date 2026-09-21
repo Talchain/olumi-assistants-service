@@ -256,3 +256,48 @@ describe("noun-form limits — opposite-direction twins", () => {
     });
   }
 });
+
+describe("direct first-person restricted possession", () => {
+  it.each([
+    "I actually only have a budget of $40,000 for an assistant.",
+    "We actually only have a budget of $40,000 for an assistant.",
+    "I only have a budget of $40,000 for an assistant.",
+    "We only have a budget of $40,000 for an assistant.",
+  ])("preserves the stated budget and level frame: %s", (brief) => {
+    expect(rows(brief)).toEqual([
+      expect.objectContaining({
+        node_id: "fac_budget",
+        operator: "<=",
+        value: 40000,
+        unit: "$",
+        value_frame: "level",
+        provenance: "explicit",
+        source_quote: brief,
+      }),
+    ]);
+  });
+
+  it.each([
+    "They actually only have a budget of $40,000 for an assistant.",
+    "Our main competitor actually only has a budget of $40,000 for an assistant.",
+    "If I actually only have a budget of $40,000, what changes?",
+    "I actually only have a budget of $40,000?",
+    "I actually only had a budget of $40,000 last year.",
+    "I currently spend $40,000 for an assistant.",
+    "I actually only have an expense of $40,000 for an assistant.",
+    'The consultant said "I actually only have a budget of $40,000 for an assistant."',
+    '"I actually only have a budget of $40,000 for an assistant."',
+    "For example, I actually only have a budget of $40,000 for an assistant.",
+    "For example: I actually only have a budget of $40,000 for an assistant.",
+    "I potentially have a budget of $40,000 for an assistant.",
+    "I probably have a budget of $40,000 for an assistant.",
+    "I rarely have a budget of $40,000 for an assistant.",
+    "I sometimes have a budget of $40,000 for an assistant.",
+    "I potentially actually only have a budget of $40,000 for an assistant.",
+    "I actually probably only have a budget of $40,000 for an assistant.",
+    "I actually only rarely have a budget of $40,000 for an assistant.",
+    "I sometimes actually only have a budget of $40,000 for an assistant.",
+  ])("does not expand the rescue to other claims: %s", (brief) => {
+    expect(rows(brief)).toEqual([]);
+  });
+});

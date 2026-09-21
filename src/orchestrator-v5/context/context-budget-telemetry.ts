@@ -80,6 +80,160 @@ export function computeOverBudget(
 }
 
 // ---------------------------------------------------------------------------
+// chars_per_token plausibility — the detector that was already there
+// ---------------------------------------------------------------------------
+
+/**
+ * `chars_per_token` has been a working detector sitting UNREAD on this event
+ * for months. Measured on real staging logs (2026-09-17):
+ *
+ *   draft_graph      0.03   ← total_chars measures ONE component of the user
+ *                             message; the model received ~140x that
+ *   decision_review  0.74   ← honest
+ *   draft_coaching   1.02   ← honest
+ *
+ * Nothing consumed the number, so a call site measuring a fraction of what it
+ * sends looked exactly like a call site measuring all of it. These bounds turn
+ * that into a LOUD, per-call verdict on the event itself.
+ *
+ * The band is deliberately WIDE. English-ish prose runs ~4 chars/token; JSON
+ * and id-dense payloads run lower; heavy prompt CACHING lowers the ratio
+ * further because `input_tokens` excludes cache reads on some adapters, and
+ * a long system prompt the site does not measure lowers it too. 0.5 is far
+ * below any honest assembly; 6.0 is far above any real tokeniser. Anything
+ * outside is an ACCOUNTING fault, not a content property — which is exactly
+ * the class this file failed to surface.
+ */
+export const CHARS_PER_TOKEN_PLAUSIBLE_MIN = 0.5;
+/** Upper plausibility bound — see {@link CHARS_PER_TOKEN_PLAUSIBLE_MIN}. */
+export const CHARS_PER_TOKEN_PLAUSIBLE_MAX = 6;
+
+/**
+ * `unmeasurable` is NOT a pass: it means no ground-truth token count arrived,
+ * so the accounting could not be checked at all. It must never be collapsed
+ * with `plausible` (the "nobody set one" vs "unbounded by design" distinction
+ * this event gets wrong elsewhere, applied here before it can be got wrong).
+ */
+export type CharsPerTokenVerdict =
+  | 'plausible'
+  | 'implausibly_low'
+  | 'implausibly_high'
+  | 'unmeasurable';
+
+/** Pure. Bounds are INCLUSIVE — a value exactly at an edge is not a defect. */
+export function classifyCharsPerToken(charsPerToken: number | null): CharsPerTokenVerdict {
+  if (charsPerToken === null || !Number.isFinite(charsPerToken)) return 'unmeasurable';
+  if (charsPerToken < CHARS_PER_TOKEN_PLAUSIBLE_MIN) return 'implausibly_low';
+  if (charsPerToken > CHARS_PER_TOKEN_PLAUSIBLE_MAX) return 'implausibly_high';
+  return 'plausible';
+}
+
+// ---------------------------------------------------------------------------
+// Content manifests — what a char count cannot tell you
+// ---------------------------------------------------------------------------
+
+/**
+ * Structural counts for a JSON section, for `ContextBudgetArgs.section_shape`.
+ *
+ * ⚠⚠ THE HARM THIS CLOSES, measured on a real user session 16 Sep 2026 and
+ * written up at `coaching/decision-review-enricher.ts:121-134`:
+ * `v5.context_budget` reported `section_chars: { graph_json: 21, ... }` for
+ * `decision_review`. Establishing that 21 characters is
+ * `<GRAPH>\n\n{}\n\n</GRAPH>` — i.e. THE REVIEWING MODEL WAS SENT NO GRAPH
+ * AT ALL — took a human doing arithmetic on three hypothetical renderings
+ * (`{}` is 21, `{nodes:[],edges:[]}` is 51, a one-node graph 103). A count of
+ * `{ nodes: 0, edges: 0 }` says it outright, on the same line, with no
+ * arithmetic and no hypothesis.
+ *
+ * Bound to the SENT BYTES, never to an upstream object: callers pass the exact
+ * substring that went on the wire, so this cannot certify a graph the assembler
+ * dropped on the way (the "a fixture you wrote yourself is not evidence about
+ * the wire" rule, applied to telemetry).
+ *
+ * Pure and total — never throws. Unparseable or absent input yields `{}`
+ * rather than a fabricated zero, because "we could not read it" and "it was
+ * empty" are different findings and this event's whole problem has been
+ * collapsing distinctions like that one.
+ */
+export function jsonStructureManifest(
+  jsonText: string | null | undefined,
+): Readonly<Record<string, number>> {
+  if (typeof jsonText !== 'string' || jsonText.trim() === '') return {};
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(jsonText);
+  } catch {
+    return {};
+  }
+  if (parsed === null || typeof parsed !== 'object') return {};
+  if (Array.isArray(parsed)) return { items: parsed.length };
+  const out: Record<string, number> = {};
+  for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+    if (Array.isArray(value)) out[key] = value.length;
+  }
+  // An object with no array members is still a REAL reading — record its own
+  // key count so `{}` (0) stays distinguishable from a populated object.
+  out.keys = Object.keys(parsed as Record<string, unknown>).length;
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// What `total_chars` actually covers, per call site
+// ---------------------------------------------------------------------------
+
+/**
+ * A number that measures a FRACTION and is named `total_chars` is worse than
+ * no number. The repo-wide convention is `total_chars` = the whole assembled
+ * USER-side context (`decision_review` counts the assembled user message;
+ * `draft_coaching` counts brief + the exact serialised graph string it sends;
+ * `edit_graph` counts the whole serialised context section). `draft_graph` is
+ * the OUTLIER: it reports `effectiveBrief.length` alone, while the real
+ * request also carries the served system prompt, the records instruction, the
+ * records JSON grammar, the untrusted-content envelope, the compliance
+ * reminder, brief signals, the currency instruction and any attached document.
+ * That is the 128-vs-~18,000 gap.
+ *
+ * ⚠ NO CALL SITE COUNTS THE SYSTEM HALF — not even the honest ones. This
+ * declaration states that plainly rather than leaving every reader to assume
+ * `total` means total.
+ *
+ * DERIVE-DON'T-MIRROR, as far as the type system can take it: the record is
+ * keyed on {@link ContextBudgetCallSite}, so a NEW call site does not compile
+ * until it declares what its number measures. It cannot go silently missing;
+ * it can still go stale, which is why the loud half is
+ * {@link classifyCharsPerToken}, measured against ground-truth tokens on every
+ * single call rather than asserted here.
+ */
+export type TotalCharsScope =
+  /** Every model-facing byte of the assembled USER message (system half excluded). */
+  | 'assembled_user_message'
+  /** Only the sections named in `section_chars`; other user-message parts are NOT counted. */
+  | 'declared_sections_only';
+
+export const TOTAL_CHARS_SCOPE: Readonly<Record<ContextBudgetCallSite, TotalCharsScope>> = {
+  routing: 'assembled_user_message',
+  edit_graph: 'assembled_user_message',
+  repair_edit_graph: 'assembled_user_message',
+  decision_review: 'assembled_user_message',
+  // The measured defect. `draft-graph-dispatch.ts` has no assembled-prompt
+  // bytes in scope — `DraftGraphResult.toolLLMTelemetry` carries identities and
+  // token counts only, so an honest total needs char counts plumbed back from
+  // `adapters/llm/anthropic.ts buildDraftPrompt`. Declared honestly here and
+  // flagged loudly by chars_per_token until that plumb lands.
+  draft_graph: 'declared_sections_only',
+  draft_coaching: 'assembled_user_message',
+};
+
+/**
+ * Why `budget_chars` is null, stated rather than implied. "Unbounded by
+ * design" and "nobody set one" must not look identical on the wire — they did,
+ * and `draft_graph` (genuinely unbounded: the brief is passed UNCAPPED, so
+ * declaring a cap would be a false guarantee) was indistinguishable from an
+ * un-migrated site that had simply never been given one.
+ */
+export type BudgetBasis = 'budgeted' | 'unbounded_by_design';
+
+// ---------------------------------------------------------------------------
 // v5.context_budget
 // ---------------------------------------------------------------------------
 
@@ -122,6 +276,24 @@ export interface ContextBudgetArgs {
   readonly scenario_id: string | null;
   /** Char count per context section actually sent on this call. */
   readonly section_chars: Readonly<Record<string, number>>;
+  /**
+   * CONTENT MANIFEST per section — structural counts for sections that are
+   * structured objects, e.g. `{ graph: { nodes: 0, edges: 0 } }`.
+   *
+   * A char count cannot distinguish `<GRAPH>{}</GRAPH>` from a real graph of
+   * the same size, and `draft_graph` is where the product's worst defects are
+   * born (an option minted with no interventions; a limit bound to an
+   * unmeasurable node). A FIELD count would have screamed on day one that the
+   * model was handed an empty structure.
+   *
+   * Optional and ADDITIVE: every existing consumer of `section_chars`,
+   * `over_budget` and the divergence tripwire is untouched, and a site with no
+   * structured section emits `{}`. Values must be flat records of finite
+   * numbers — the logger's measurement-container exemption passes those
+   * through and DIGESTS anything else, so a section named `brief` cannot
+   * smuggle text out under this key.
+   */
+  readonly section_shape?: Readonly<Record<string, Readonly<Record<string, number>>>>;
   readonly total_chars: number;
   /** Truncations that shaped this context (may be empty). */
   readonly truncations: readonly ContextTruncationRecord[];
@@ -153,6 +325,9 @@ export function emitContextBudget(args: ContextBudgetArgs): void {
         ? Math.round((totalChars / inputTokens) * 100) / 100
         : null;
 
+    const budget = CONTEXT_SECTION_BUDGETS[args.call_site].total;
+    const charsPerTokenVerdict = classifyCharsPerToken(charsPerToken);
+
     emit(TelemetryEvents.V5ContextBudget, {
       call_site: args.call_site,
       model: args.model,
@@ -161,8 +336,11 @@ export function emitContextBudget(args: ContextBudgetArgs): void {
       request_id: args.request_id,
       scenario_id: args.scenario_id,
       section_chars: args.section_chars,
+      section_shape: args.section_shape ?? {},
       total_chars: args.total_chars,
-      budget_chars: CONTEXT_SECTION_BUDGETS[args.call_site].total,
+      total_chars_scope: TOTAL_CHARS_SCOPE[args.call_site],
+      budget_chars: budget,
+      budget_basis: (budget === null ? 'unbounded_by_design' : 'budgeted') satisfies BudgetBasis,
       over_budget: computeOverBudget(args.call_site, args.section_chars, args.total_chars),
       truncations: args.truncations,
       summary_lag_turns: args.summary_lag_turns,
@@ -174,7 +352,30 @@ export function emitContextBudget(args: ContextBudgetArgs): void {
         cache_creation_input_tokens: numOrNull(args.usage?.cache_creation_input_tokens),
       },
       chars_per_token: charsPerToken,
+      chars_per_token_verdict: charsPerTokenVerdict,
     });
+
+    // FAIL LOUD. The 0.03 on draft_graph sat on this stream for months because
+    // nothing read it. A warn line names the site, the ratio and both sides of
+    // the arithmetic, so the next instance is a search away rather than a
+    // month away. Observe-only — never throws, never changes a prompt byte.
+    if (charsPerTokenVerdict === 'implausibly_low' || charsPerTokenVerdict === 'implausibly_high') {
+      log.warn(
+        {
+          event: 'v5.context_budget.accounting_implausible',
+          call_site: args.call_site,
+          chars_per_token: charsPerToken,
+          chars_per_token_verdict: charsPerTokenVerdict,
+          plausible_min: CHARS_PER_TOKEN_PLAUSIBLE_MIN,
+          plausible_max: CHARS_PER_TOKEN_PLAUSIBLE_MAX,
+          total_chars: args.total_chars,
+          total_chars_scope: TOTAL_CHARS_SCOPE[args.call_site],
+          input_tokens: inputTokens,
+          request_id: args.request_id,
+        },
+        'v5.context_budget accounting is implausible — total_chars does not explain the tokens the model was billed for (measure the assembled message, or narrow total_chars_scope)',
+      );
+    }
   } catch (err) {
     log.debug(
       { err: err instanceof Error ? err.message : String(err) },

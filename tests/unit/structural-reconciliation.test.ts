@@ -106,7 +106,11 @@ describe('reconcileStructuralTruth', () => {
 
       expect(factor.category).toBe('controllable');
       expect((factor.data as any).factor_type).toBe('other');
-      expect((factor.data as any).uncertainty_drivers).toEqual(['Estimation uncertainty']);
+      // The fill still FIRES — that is what this test is named for. What it
+      // writes is now NONE: `['Estimation uncertainty']` was a driver the
+      // producer invented, and unlike the sibling `['Not provided']` stamp the
+      // UI does not filter it, so it reached the reader as genuine evidence.
+      expect((factor.data as any).uncertainty_drivers).toEqual([]);
     });
 
     it('does not fire when declared category matches inferred', () => {
@@ -163,7 +167,11 @@ describe('reconcileStructuralTruth', () => {
 
       const result = reconcileStructuralTruth(graph, { fillControllableData: true });
 
-      expect((factor.data as any).uncertainty_drivers).toEqual(['Estimation uncertainty']);
+      // The fill still FIRES — that is what this test is named for. What it
+      // writes is now NONE: `['Estimation uncertainty']` was a driver the
+      // producer invented, and unlike the sibling `['Not provided']` stamp the
+      // UI does not filter it, so it reached the reader as genuine evidence.
+      expect((factor.data as any).uncertainty_drivers).toEqual([]);
       const mutation = result.mutations.find(
         m => m.code === 'CONTROLLABLE_DATA_FILLED' && m.field === 'data.uncertainty_drivers'
       );
@@ -190,7 +198,11 @@ describe('reconcileStructuralTruth', () => {
       // Category override fires and fills data inline (lines 171-181)
       expect(result.mutations.some(m => m.code === 'CATEGORY_OVERRIDE')).toBe(true);
       expect((factor.data as any).factor_type).toBe('other');
-      expect((factor.data as any).uncertainty_drivers).toEqual(['Estimation uncertainty']);
+      // The fill still FIRES — that is what this test is named for. What it
+      // writes is now NONE: `['Estimation uncertainty']` was a driver the
+      // producer invented, and unlike the sibling `['Not provided']` stamp the
+      // UI does not filter it, so it reached the reader as genuine evidence.
+      expect((factor.data as any).uncertainty_drivers).toEqual([]);
       // Rule 5 finds fields already present — no CONTROLLABLE_DATA_FILLED mutations
       expect(result.mutations.filter(m => m.code === 'CONTROLLABLE_DATA_FILLED')).toHaveLength(0);
     });
@@ -347,7 +359,11 @@ describe('reconcileStructuralTruth', () => {
 
       expect(factor.category).toBe('controllable');
       expect((factor.data as any).factor_type).toBe('other');
-      expect((factor.data as any).uncertainty_drivers).toEqual(['Estimation uncertainty']);
+      // The fill still FIRES — that is what this test is named for. What it
+      // writes is now NONE: `['Estimation uncertainty']` was a driver the
+      // producer invented, and unlike the sibling `['Not provided']` stamp the
+      // UI does not filter it, so it reached the reader as genuine evidence.
+      expect((factor.data as any).uncertainty_drivers).toEqual([]);
       // Rule 1 sets category, Rule 5 fills data
       expect(result.mutations.some(m => m.code === 'CATEGORY_OVERRIDE')).toBe(true);
       expect(result.mutations.some(m => m.code === 'CONTROLLABLE_DATA_FILLED')).toBe(true);

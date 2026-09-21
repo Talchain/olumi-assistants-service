@@ -174,7 +174,35 @@ const PRIOR_RUN_ANALYSIS_TURN = {
  * nothing else, so any behavioural difference between the two arms is
  * attributable to the verdict and to nothing in the fixture.
  */
+/**
+ * ⚠ `separated` DEFAULTS TO TRUE, AND THE DEFAULT IS THE POINT.
+ *
+ * This builder used to stamp only the CONSTRAINT verdict, so every fact it
+ * produced carried no `robustness` and was therefore `separation_unavailable`
+ * on the published claim (`permitted = entitled && separates`). That was
+ * invisible while the gates read entitlement alone; it is not any more. A
+ * completed analysis normally HAS robustness, so producing one by default is
+ * both the realistic fixture and the one that keeps the permitted controls
+ * meaning what their names say. A test that wants the stripped shape — the
+ * confined `auto_post_draft` shape — asks for it explicitly.
+ */
 function priorRunAnalysisFact(verdict: {
+  may_name_leading_option: boolean;
+  constraint_verdict_state: string;
+  separated?: boolean;
+}): Record<string, unknown> {
+  const fact = priorRunAnalysisFactInner(verdict);
+  if (verdict.separated !== false) {
+    const result = fact.result as Record<string, unknown>;
+    (result.enrichment as Record<string, unknown>).robustness = {
+      level: 'high',
+      near_tie: { is_tie: false },
+    };
+  }
+  return fact;
+}
+
+function priorRunAnalysisFactInner(verdict: {
   may_name_leading_option: boolean;
   constraint_verdict_state: string;
 }): Record<string, unknown> {
@@ -293,6 +321,7 @@ function routedExplainResults(
 }
 
 const { ceeOrchestratorRouteV2 } = await import('../../orchestrator/route-v2.js');
+const { synthesiseAnswerShapeFromText } = await import('../routing/answer-shape.js');
 
 interface WireTurn {
   readonly status: number;
@@ -411,12 +440,28 @@ describe('route-level: the rerun no-op explanation answer on a WITHHELD turn', (
 
     it('the `_answer_shape` SIDECAR is clean too — it is derived from the projected text', async () => {
       const turn = await rerunTurn(app);
-      const shape = (JSON.parse(turn.raw) as Record<string, any>)._answer_shape;
+      const raw = JSON.parse(turn.raw) as Record<string, any>;
 
-      // Non-vacuity first: the sidecar must actually be on this response, or
-      // the absence assertion below is testing nothing. An explanation answer
-      // is classified `substantive`, so the route egress synthesises it.
-      expect(shape, '_answer_shape absent — the assertion below would be vacuous').toBeDefined();
+      // ⛔ NON-VACUITY, AND WHY IT MOVED (18 Sep 2026, the collapse floor).
+      // This assertion used to read the sidecar off the wire. It no longer
+      // ships on this turn: `_answer_shape` is a directive to COLLAPSE the
+      // answer, and CEE now issues it only above
+      // `ANSWER_SHAPE_COLLAPSE_FLOOR_CHARS` (3,000 — the deployed UI's own
+      // clamp). This answer is far shorter, so it correctly ships whole.
+      //
+      // Taking "absent" as the answer would have made the leak scan below
+      // VACUOUS while leaving it green — the exact shape of defect the original
+      // comment guarded against, arriving through a change to a different file.
+      // So the scan is pointed at the shape the egress WOULD have attached,
+      // built by the SAME function the egress uses. The safety claim is
+      // unchanged: this surface is clean because the leading-option gate runs
+      // UPSTREAM of compose, and it would still be clean at any length.
+      expect(raw).not.toHaveProperty('_answer_shape');
+      const shape = synthesiseAnswerShapeFromText(raw.assistant_text as string);
+      expect(
+        shape,
+        'the projected answer must be shapeable — otherwise the scan below is vacuous',
+      ).not.toBeNull();
 
       // It matters that this is checked SEPARATELY from assistant_text. The
       // sidecar is a distinct rendered surface (the walk's §3.3 read the leak
@@ -604,6 +649,34 @@ describe('route-level: the rerun no-op explanation answer on a WITHHELD turn', (
       // And no withheld copy leaked onto a permitted turn.
       expect(turn.assistantText).not.toContain('no option can be put forward yet');
       expect(turn.assistantText).not.toContain('No single option can be put forward');
+    });
+
+    /**
+     * ⭐⭐⭐ THE SEPARATION TWIN of the control directly above. Same fixture,
+     * same Sonnet answer, ONE field different: no `robustness`, which is the
+     * shape a confined `auto_post_draft` run arrives in.
+     *
+     * The constraint PERMITS here. Entitlement alone would serve the leader
+     * sentence — which is exactly what request `1a5b1051` did on 19 Sep while
+     * the same response published `withheld_reason: "separation_unavailable"`.
+     */
+    it('\u2b50 SEPARATION TWIN: constraint-permitted but UNSEPARATED does NOT ship the leader answer', async () => {
+      priorFacts = [
+        priorRunAnalysisFact({
+          may_name_leading_option: true,
+          constraint_verdict_state: 'evaluated_feasible',
+          separated: false,
+        }),
+      ];
+      const turn = await rerunTurn(app);
+      expect(
+        turn.assistantText,
+        'a run whose arms were never told apart cannot put one of them ahead',
+      ).not.toContain('comes out ahead');
+      // ...and the person is told WHY, with something to do about it — not
+      // handed the cause-free tail.
+      expect(turn.assistantText).toMatch(/not established on this run/i);
+      expect(turn.assistantText).toMatch(/run the analysis/i);
     });
 
     it('UNSTAMPED fact FAILS CLOSED — an unreadable verdict withholds', async () => {

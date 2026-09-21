@@ -532,37 +532,18 @@ describe("D — retraction class (DISCLOSED DEFECT, pinned as a tripwire)", () =
 });
 
 /**
- * ── ⚠ DISCLOSED, NOT FIXED: THE MIRROR-IMAGE DEFECT ON THE `above` SIDE ────
+ * ── ✅ THE `above` SIDE IS FIXED — the tripwire that lived here is DELETED ──
  *
- * "Marketing must not go above £1.5m" means `<= 1_500_000`. It is extracted as
- * `>=` — the same confidently-inverted class this PR exists to kill, on the
- * LOWER-bound path instead of the upper one.
+ * A `describe` block used to sit here asserting that "Marketing must not go
+ * above £1.5m" STILL extracted as `>=`. It was a tripwire, not a
+ * specification, and its own docblock set the protocol: *when someone fixes
+ * the `above` side, this REDs and they delete it.* This is that deletion.
  *
- * It is PRE-EXISTING: this PR neither introduced it nor made it worse. It is
- * disclosed rather than fixed because the fix is a second, symmetric change on
- * a different code path — the one the 35-test risk-polarity corpus governs —
- * and bolting it on mid-review is exactly the "while we're here" expansion the
- * scope rule prohibits. The smallest enabling change is to extend the same
- * clause-scoped suppression to `above|over` matches; it is rowed for a
- * follow-up with its own RED-first evidence and its own corpus.
- *
- * ⚠ THIS TEST PINS THE DEFECT, NOT THE DESIRED BEHAVIOUR. It is a tripwire: when
- * someone fixes the `above` side, this REDs and they delete it. It must never be
- * read as a specification.
+ * Measured at staging tip `f31b84c8` before the fix, FIVE of seven ceiling
+ * phrasings inverted — not the single case the tripwire disclosed. The
+ * specification that replaces it is section E below, which asserts the
+ * DESIRED behaviour in BOTH directions.
  */
-describe("D — `above` side inversion (DISCLOSED PRE-EXISTING DEFECT, tripwire)", () => {
-  it("still inverts a negated `above` bound", () => {
-    const rows = constraintsOf("Marketing must not go above £1.5m.").filter(
-      (c) => c.value === 1_500_000,
-    );
-    expect(
-      rows.length,
-      "the `above` side appears to be FIXED — delete this tripwire and its docblock",
-    ).toBeGreaterThan(0);
-    // Today: `>=`, which is the inverse of what the sentence means.
-    expect(rows.some((c) => c.operator === ">=")).toBe(true);
-  });
-});
 
 /**
  * ── ⚠ KNOWN-DROPPED CEILINGS — RECORDED, PINNED, AND NOT SILENT ───────────
@@ -650,5 +631,167 @@ describe("D — known-dropped ceilings are pinned as an EXACT set", () => {
     expect(
       constraintsOf(brief).filter((c) => c.value === 0.78 && c.operator === "<="),
     ).toEqual([]);
+  });
+});
+
+/* ===========================================================================
+ * SECTION E — NEGATED CEILINGS KEEP THE USER'S POLARITY
+ *
+ * The specification that replaces the deleted `above`-side tripwire, and the
+ * exact mirror of section D above.
+ *
+ * ── WHY THIS IS A TRUST DEFECT, NOT A PARSING NICETY ──────────────────────
+ * The operator and value survive every hop to ISL. An inverted ceiling is
+ * therefore SCORED: every option that HONOURS the user's limit is marked as
+ * violating it, and every option that BREACHES it passes. That is the same
+ * mechanism as the inverted floor this file was opened for.
+ *
+ * ── THE MEASURED BASELINE (staging tip `f31b84c8`, 2026-09-17) ────────────
+ * FIVE of seven ceiling phrasings inverted, not the one the tripwire showed:
+ *
+ *   "Marketing must not go above £1.5m."             -> `>=`  INVERTED
+ *   "Marketing cannot go above £1.5m."               -> `>=`  INVERTED
+ *   "Spend must not rise above £1.5m."               -> `>=`  INVERTED
+ *   "Do not let marketing go above £1.5m."           -> `>=`  INVERTED
+ *   "Headcount should not climb above 50 engineers." -> `>=`  INVERTED
+ *   "Marketing must not exceed £1.5m."               -> `<=`  (own pattern)
+ *   "Keep marketing under £1.5m."                    -> `<=`  (own pattern)
+ *
+ * ⚠ EVERY CASE HERE HAS ITS OPPOSITE-DIRECTION TWIN (CLAUDE.md trap 22b), and
+ * the floor twins are NOT decoration: this predicate family oscillated for
+ * four rounds (trap 22f), each round fixing one direction and reopening the
+ * other under a fully green suite. A one-directional corpus here would certify
+ * the next inversion exactly as it certified the last one.
+ * ========================================================================= */
+
+/** Ceilings the fix MINTS, with the value each must carry. */
+const NEGATED_CEILINGS: ReadonlyArray<[string, number]> = [
+  ["Marketing must not go above £1.5m.", 1_500_000],
+  ["Marketing cannot go above £1.5m.", 1_500_000],
+  ["Spend must not rise above £1.5m.", 1_500_000],
+  ["Headcount should not climb above 50 engineers.", 50],
+  ["Churn must not creep above 4%.", 0.04],
+  ["Costs will not go beyond £2m.", 2_000_000],
+  ["Without going above £1.5m.", 1_500_000],
+];
+
+/** The FLOOR twins — every one must keep `>=`, before and after. */
+const FLOOR_TWINS: ReadonlyArray<[string, number]> = [
+  ["Gross margin must not drop below 78%.", 0.78],
+  ["Without dropping gross margin below 78%.", 0.78],
+  ["Keep average tenure above 12 months.", 12],
+  ["Revenue must be at least £2m.", 2_000_000],
+  ["Maintain at least 20 engineers.", 20],
+  ["Tenure must be above 12 months.", 12],
+  ["Retention should stay above 90%.", 0.9],
+  ["No less than 30 customers.", 30],
+];
+
+describe("E — a negated CEILING keeps the user's polarity", () => {
+  it.each(NEGATED_CEILINGS)(
+    "mints `<=`, never the inverse: %s",
+    (brief, value) => {
+      const rows = withValue(constraintsOf(brief), value);
+      expect(rows.length, `no constraint carried the stated ${value} at all`).toBeGreaterThan(0);
+      for (const c of rows) {
+        expect(
+          c.operator,
+          `${JSON.stringify(brief)} states a CEILING, but this row says ` +
+            `${c.operator} ${c.value} (label: ${JSON.stringify(c.label)}). An inverted ` +
+            `ceiling penalises exactly the options that honour the limit.`,
+        ).toBe("<=");
+      }
+    },
+  );
+
+  it.each(NEGATED_CEILINGS)(
+    "the quote KEEPS the negation — it is the evidence shown for the row: %s",
+    (brief, value) => {
+      // A quote with the word that reverses its meaning stripped out cannot
+      // support the row it is attached to. Section D pins the same property
+      // for floors; this is its mirror.
+      for (const c of withValue(constraintsOf(brief), value)) {
+        expect(
+          /\b(?:not|never|cannot|can't|won't|without)\b/i.test(c.sourceQuote),
+          `sourceQuote ${JSON.stringify(c.sourceQuote)} has lost its negation`,
+        ).toBe(true);
+      }
+    },
+  );
+
+  it("the subject is the user's metric, not a fragment of the negation", () => {
+    // Trap 19: bind by IDENTITY. Before the fix the inverted row was targeted
+    // `fac_must_not_go` — the negation itself read as the subject.
+    const rows = withValue(constraintsOf("Marketing must not go above £1.5m."), 1_500_000);
+    expect(rows.length).toBe(1);
+    expect(rows[0].targetName.toLowerCase()).toBe("marketing");
+    expect(rows[0].confidence).toBe(0.85);
+    expect(rows[0].provenance).toBe("explicit");
+  });
+
+  it("the span is CLAIMED, so no inverted floor is re-derived from the ceiling's own words", () => {
+    // The load-bearing half. "must not go above £1.5m" contains "go above
+    // £1.5m", which the simple `X above Y` pattern reads as a FLOOR. Without
+    // the claim the correct ceiling and the inverted floor ship side by side.
+    const rows = constraintsOf("Marketing must not go above £1.5m.");
+    expect(rows.filter((c) => c.operator === ">=")).toEqual([]);
+  });
+
+  it.each(FLOOR_TWINS)(
+    "OPPOSITE-DIRECTION TWIN — still a floor, never a ceiling: %s",
+    (brief, value) => {
+      const rows = withValue(constraintsOf(brief), value);
+      expect(rows.length, `the floor twin lost its constraint entirely`).toBeGreaterThan(0);
+      expect(
+        rows.filter((c) => c.operator === "<="),
+        `a floor twin inverted — this is the oscillation trap 22f records`,
+      ).toEqual([]);
+    },
+  );
+
+  /* ---------------------------------------------------------------------
+   * SUPPRESS RATHER THAN INVERT — the honest output for what we cannot parse.
+   * ------------------------------------------------------------------- */
+
+  it.each([
+    // `do not` is NOT in NEGATION_LEAD, so no pattern recognises this. The
+    // clause-level screen must still stop the INVERTED floor being minted.
+    ["Do not let marketing go above £1.5m.", 1_500_000],
+    // The negation governs `approve`, not a rise verb (corpus case `a-h`).
+    ["The board will not approve annual operating cost above £320,000.", 320_000],
+    // An aside severs the regex adjacency the minting patterns require.
+    ["Churn must not — even during migration — rise above 4%.", 0.04],
+  ])(
+    "an unrecognised negated ceiling emits NOTHING, never an inverted floor: %s",
+    (brief, value) => {
+      expect(
+        withValue(constraintsOf(brief), value).filter((c) => c.operator === ">="),
+        "a gap is honest; an inverted limit is scored against the user",
+      ).toEqual([]);
+    },
+  );
+
+  it("a plain floor with no negation is NOT suppressed — the screen is bounded", () => {
+    // The discriminating half. A screen that deletes everything passes every
+    // suppression assertion above; only this can tell a precise screen from a
+    // destructive one.
+    for (const brief of [
+      "Keep average tenure above 12 months.",
+      "Grow MRR to 250000 while ensuring retention stays above 90%.",
+      "Revenue over £2m.",
+      "We will not cut corners, so keep headcount above 40 engineers.",
+    ]) {
+      expect(
+        constraintsOf(brief).filter((c) => c.operator === ">="),
+        `${brief}: a genuine floor was suppressed`,
+      ).not.toEqual([]);
+    }
+  });
+
+  it("the durative-`over` screen still fires — a time span is not a ceiling either", () => {
+    // `above` is not durative and `over` is (DURATIVE_OVER_RE). The new
+    // ceiling patterns must not have re-opened a bound on a duration.
+    expect(constraintsOf("Maximise engineering output over 12 months.")).toEqual([]);
+    expect(constraintsOf("Minimising total cost of ownership over 3 years.")).toEqual([]);
   });
 });

@@ -104,12 +104,16 @@
  */
 
 import { textAssertsLeadingOption } from './leading-option-egress-guard.js';
+import { type SeparationWithhold } from './analysis-state-v1.js';
 import { composeWithheldReasonTail } from './withheld-reason-tail.js';
 import {
   MAY_NAME_LEADING_OPTION,
   type ConstraintVerdictState,
   type RatifiedConstraint,
 } from '../../orchestrator/context/constraint-feasibility.js';
+import { composeWithheldSensitivityBody } from '../tools/handlers/explanation-fallback.js';
+import type { AnalysisProjectionSummary } from '../context/projection-summaries.js';
+import type { FlipSummary } from './flip-proposal.js';
 
 /**
  * The opening line for a withheld explanation answer **on a turn whose analysis
@@ -250,6 +254,20 @@ export interface WithheldExplanationProjection {
 }
 
 /**
+ * The run's own sensitivity evidence, for the REPLACE branch.
+ *
+ * Passed as DATA rather than as pre-composed text on purpose: this module's
+ * build-time probe can only certify copy it can PRODUCE. A caller-supplied
+ * string would be runtime data, so the probe could not see it and the
+ * "substituted copy never trips its own gate" invariant — the whole reason the
+ * probe exists — would quietly stop covering the largest part of the answer.
+ */
+export interface WithheldSensitivityEvidence {
+  readonly projection: AnalysisProjectionSummary | null | undefined;
+  readonly flipSummary: FlipSummary | null | undefined;
+}
+
+/**
  * Project one explanation-handler answer for a turn whose verdict WITHHOLDS.
  *
  * The caller is responsible for the permission (`mayNameLeadingOption === false`)
@@ -278,6 +296,13 @@ export interface WithheldExplanationProjection {
  *                    `locateEvidence` report `located: false`, so the quote
  *                    stands down and the disclosure degrades to its labelled
  *                    form. The forgotten value here is the SAFE one.
+ * @param sensitivity the run's own sensitivity evidence, used ONLY by the
+ *                    REPLACE branch to answer the question the user asked
+ *                    instead of discarding it. OPTIONAL for the same reason
+ *                    `brief` is: the forgotten value is the SAFE one — no
+ *                    evidence means no body, which is exactly today's copy.
+ *                    See {@link WithheldSensitivityEvidence} for why this is
+ *                    data and not a pre-composed string.
  */
 export function projectExplanationAnswerForWithheldClaim(
   answerText: string,
@@ -286,6 +311,8 @@ export function projectExplanationAnswerForWithheldClaim(
   conditionsAreCurrent: boolean,
   analysisExistenceProven: boolean,
   brief?: string | null,
+  sensitivity?: WithheldSensitivityEvidence | null,
+  separation?: SeparationWithhold | null,
 ): WithheldExplanationProjection {
   const original = typeof answerText === 'string' ? answerText : '';
 
@@ -327,8 +354,14 @@ export function projectExplanationAnswerForWithheldClaim(
   // one is the one a future caller silently forgets, and the forgotten value
   // would be the unsafe one — the same doctrine
   // `EgressSanitiseOpts.mayNameLeadingOption` applies.
+  // ⭐ THE SEPARATION AXIS RIDES THE SAME FRESHNESS GATE, deliberately.
+  // `conditionsAreCurrent` is not a constraint-only guard: a separation answer
+  // read off a run the graph has since moved past names a distance that no
+  // longer describes the model in front of the person. Same reasoning, same
+  // gate, and standing down costs the cause-free tail exactly as it does for
+  // the constraint voices.
   const reason = conditionsAreCurrent
-    ? composeWithheldReasonTail(state, constraints, brief)
+    ? composeWithheldReasonTail(state, constraints, brief, separation)
     : null;
   // `null` for the two PERMITTING states (a correct caller cannot reach them —
   // it owns the permission) and for a stale run. Falling back to the cause-free
@@ -367,10 +400,59 @@ export function projectExplanationAnswerForWithheldClaim(
   // repaired by appending to it: the contradiction the walk photographed
   // (`case1g`) was exactly a leader claim followed by the disclosure.
   if (textAssertsLeadingOption(original)) {
+    // ⭐ WHAT REPLACEMENT USED TO COST THE USER, AND WHY THIS BODY IS HERE.
+    //
+    // Measured on two real sessions (`olumi-debug-73d5c152-20260919`,
+    // `olumi-debug-6edb1cdb-20260917`): the user asks "What could change the
+    // outcome of this analysis?", the turn answers, and the whole served reply
+    // is `opening + tail` — a constraint notice about an unrelated limit, with
+    // NOT ONE WORD about sensitivity. Both carry
+    // `claim_safety.withheld_projection_reason = "leader_claim_replaced"`; the
+    // contrast session that answers the question properly carries none.
+    //
+    // The suppression was right and stays exactly as it was. What was wrong is
+    // that a turn which HAD the answer threw it away along with the leader
+    // claim, because the two rode one string. So the run's own sensitivity
+    // evidence is re-stated here in a voice that names no option — the same
+    // selectors and the same materiality gate the permitted voice uses, minus
+    // every clause that asserts a lead (see `composeWithheldSensitivityBody`).
+    //
+    // It sits BETWEEN the opening and the tail so the user gets the answer to
+    // the question they asked, then the disclosure about the limit that could
+    // not be checked. Absent evidence ⇒ `null` ⇒ byte-identical to today.
+    //
+    // ⚠ GATED ON `analysisExistenceProven`, FOR THE REASON RECORDED IN
+    // {@link WITHHELD_EXPLANATION_NO_DISCLOSURE_TAIL}'S DOCSTRING.
+    //
+    // The body says "would shift **this result** the most" — a DEIXIS, and so
+    // a presupposition that a result exists. That is the identical defect this
+    // module already paid for once: the cause-free tail read "No single option
+    // can be put forward **on this result** yet" and the words were removed on
+    // 2026-07-31 because they presuppose a result on the four provenance
+    // branches that withhold precisely BECAUSE existence could not be
+    // established.
+    //
+    // It is genuinely reachable here rather than theoretical: the evidence
+    // comes from the ContextPack and `prior_facts`, which are a DIFFERENT
+    // source from the claim-safety provenance read, so a `fail_closed_*` read
+    // can leave existence unproven while drivers and flip rows are still in
+    // hand. That is two questions under one subject (trap 21), and the answer
+    // this module has already settled is that `provenanceProvesAnalysisExists`
+    // OWNS the union and is never re-decided — including by a second witness
+    // that happens to look convincing. Unproven ⇒ no opening AND no body; the
+    // tail ships alone, exactly as it does today.
+    const body =
+      sensitivity && analysisExistenceProven
+        ? composeWithheldSensitivityBody(sensitivity.projection, sensitivity.flipSummary)
+        : null;
+    const bodyFragment = body === null ? '' : ` ${body}`;
     return {
       // `tail` is a LEADING-SPACE fragment by contract, so tail-alone is
-      // trimmed rather than shipped with a stray leading space.
-      text: opening ? `${opening}${tail}` : tail.trim(),
+      // trimmed rather than shipped with a stray leading space. `bodyFragment`
+      // follows the same leading-space contract for the same reason.
+      text: opening
+        ? `${opening}${bodyFragment}${tail}`
+        : `${bodyFragment}${tail}`.trim(),
       changed: true,
       reason: 'leader_claim_replaced',
     };
@@ -404,6 +486,56 @@ export function projectExplanationAnswerForWithheldClaim(
  * the seam — loudly, which is the point (CLAUDE.md trap #12: a mirror must fail
  * loud, never assume-good).
  */
+/**
+ * Minimal projection for the build-time probe below. Only `top_drivers` is
+ * read by {@link composeWithheldSensitivityBody}; the rest is the type's
+ * required shape, set to the values that carry no claim.
+ *
+ * ⚠ `leading_option` is deliberately NON-NULL here even though the withheld
+ * voice never speaks about it. A probe that only ever passed `null` would not
+ * notice a future edit that started reading it — and reading it is the one
+ * change that could put an option name back into this copy.
+ */
+function makeProbeProjection(
+  drivers: ReadonlyArray<{ readonly factor_label: string; readonly sensitivity_value: number }>,
+): AnalysisProjectionSummary {
+  return {
+    status: 'ok',
+    leading_option: { label: 'Raise Pro Plan Price to £59', probability: 0.61 },
+    runner_up: { label: 'Bundle New Pro Feature at £49', probability: 0.39 },
+    margin_pp: 22,
+    robustness_band: 'fragile',
+    top_drivers: drivers,
+  } as AnalysisProjectionSummary;
+}
+
+/** Minimal flip summary for the build-time probe below. */
+function makeProbeFlip(
+  status: FlipSummary['overall_status'],
+  entries: ReadonlyArray<{
+    readonly factor_id: string;
+    readonly factor_label: string;
+    readonly flip_value: number | null;
+  }>,
+): FlipSummary {
+  return {
+    overall_status: status,
+    // ⚠ EVERY ENTRY IS GIVEN AN ALTERNATIVE WINNER, and that is load-bearing
+    // rather than incidental fixture detail. The permitted voice's `concrete`
+    // branch reads exactly these two fields to emit "If that happened, X would
+    // lead instead." — the one sentence this voice must never reproduce. With
+    // the fields absent, a future edit that reintroduced that sentence would
+    // produce nothing here and the probe would stay green while the live path
+    // named an option. Supplying them makes the probe able to SEE that edit.
+    entries: entries.map((e) => ({
+      ...e,
+      alternative_winner_id: 'opt_bundle_pro_feature',
+      alternative_winner_label: 'Bundle New Pro Feature at £49 (No Price Rise)',
+    })),
+    margin_supports_flip: true,
+  } as FlipSummary;
+}
+
 function assertSubstitutedCopyIsLeaderFree(): void {
   const probes: ReadonlyArray<readonly [string, string]> = [
     ['WITHHELD_EXPLANATION_OPENING', WITHHELD_EXPLANATION_OPENING],
@@ -437,7 +569,77 @@ function assertSubstitutedCopyIsLeaderFree(): void {
         }),
       ),
   ];
-  for (const [name, copy] of probes) {
+  // ⭐ THE SENSITIVITY BODY IS SUBSTITUTED COPY TOO, SO IT IS PROBED TOO.
+  //
+  // This is the whole reason the REPLACE branch takes EVIDENCE rather than a
+  // pre-composed string: copy that only exists at runtime cannot be certified
+  // here, and a replacement that trips the gate is the defect this module
+  // exists to prevent, one level down. Every rung of the body is driven below.
+  //
+  // ⚠ WITH A POSITIVE CONTROL, because the loop's `for` body is skipped
+  // entirely for a `null` body — so a composer that returned `null` for every
+  // input would make this whole section pass by testing NOTHING (trap 13). The
+  // control asserts the matrix genuinely produced copy, and names the count.
+  const MATERIAL = 0.4; // > NEAR_ZERO_INFLUENCE_THRESHOLD (0.05) — nameable.
+  const NEAR_ZERO = 0.001; // below it — must be filtered out by the composer.
+  const projections: ReadonlyArray<readonly [string, AnalysisProjectionSummary | null]> = [
+    ['no-projection', null],
+    ['no-drivers', makeProbeProjection([])],
+    ['one-driver', makeProbeProjection([{ factor_label: 'Monthly Churn Rate', sensitivity_value: MATERIAL }])],
+    ['two-drivers', makeProbeProjection([
+      { factor_label: 'Monthly Churn Rate', sensitivity_value: MATERIAL },
+      { factor_label: 'Sales Cycle Duration', sensitivity_value: -MATERIAL },
+    ])],
+    ['near-zero-driver', makeProbeProjection([
+      { factor_label: 'Cash Runway', sensitivity_value: NEAR_ZERO },
+    ])],
+  ];
+  const flipSummaries: ReadonlyArray<readonly [string, FlipSummary | null]> = [
+    ['no-flip-summary', null],
+    ['status-none', makeProbeFlip('none', [])],
+    ['no-practical-flip', makeProbeFlip('no_practical_flip', [
+      { factor_id: 'f1', factor_label: 'Monthly Churn Rate', flip_value: null },
+    ])],
+    ['insufficient-data', makeProbeFlip('insufficient_data', [
+      { factor_id: 'f1', factor_label: 'Monthly Churn Rate', flip_value: null },
+    ])],
+    ['concrete-one', makeProbeFlip('concrete', [
+      { factor_id: 'f1', factor_label: 'Monthly Churn Rate', flip_value: 0.041 },
+    ])],
+    ['concrete-two', makeProbeFlip('concrete', [
+      { factor_id: 'f1', factor_label: 'Monthly Churn Rate', flip_value: 0.041 },
+      { factor_id: 'f2', factor_label: 'Sales Cycle Duration', flip_value: 3.5 },
+    ])],
+  ];
+  let bodiesProduced = 0;
+  const bodyProbes: Array<readonly [string, string]> = [];
+  for (const [pName, projection] of projections) {
+    for (const [fName, flip] of flipSummaries) {
+      const body = composeWithheldSensitivityBody(projection, flip);
+      if (body === null) continue;
+      bodiesProduced += 1;
+      bodyProbes.push([`sensitivity-body:${pName}:${fName}`, body] as const);
+      // The body is interpolated into the SAME string as the opening and the
+      // tail, so probe the assembled sentence as well — a fragment can be clean
+      // while the join produces a span the gate sees (defence in depth, same
+      // reasoning as probing the tail fragments individually above).
+      bodyProbes.push([
+        `sensitivity-assembled:${pName}:${fName}`,
+        `${WITHHELD_EXPLANATION_OPENING} ${body}${WITHHELD_EXPLANATION_NO_DISCLOSURE_TAIL}`,
+      ] as const);
+    }
+  }
+  if (bodiesProduced === 0) {
+    throw new Error(
+      'withheld-explanation-answer: the POSITIVE CONTROL failed — the sensitivity-body matrix ' +
+        'produced NO copy at all, so the leader-free assertions over it are vacuous and would ' +
+        'pass on any copy whatsoever. Either `composeWithheldSensitivityBody` now returns null ' +
+        'for every input (then the REPLACE branch silently lost its answer and that is the ' +
+        'defect), or the probe matrix stopped satisfying its rungs (then fix the matrix). Do ' +
+        'not delete this arm.',
+    );
+  }
+  for (const [name, copy] of [...probes, ...bodyProbes]) {
     if (textAssertsLeadingOption(copy)) {
       throw new Error(
         `withheld-explanation-answer: substituted copy ${name} trips the shared ` +

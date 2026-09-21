@@ -87,6 +87,7 @@ import {
 } from "../patch-validation.js";
 import { applyPatchOperations, PatchApplyError } from "../patch-applier.js";
 import { canonicaliseValueOps, firstOperationThatDidNotLand, stampUserEditProvenance, reconcileObservedValuePair, findAmbiguousScaleValueOps } from "../canonicalise-value-ops.js";
+import { stripPipelineOwnedFromAddOperations } from "../../orchestrator-v5/graph-management/field-safety.js";
 import { validateGraphStructure, VIOLATION_MESSAGES, type StructuralViolationCode } from "../graph-structure-validator.js";
 import { buildPatchRejectionEnvelope, type PatchRejectionContext } from "../patch-rejection-helper.js";
 import {
@@ -107,6 +108,13 @@ import {
   buildLabelValueDivergenceActions,
   type LabelValueDivergence,
 } from "../../orchestrator-v5/label-value-divergence.js";
+import {
+  detectStatedLevelDivergences,
+  buildStatedLevelDivergenceDescription,
+  buildStatedLevelDivergenceNote,
+  buildStatedLevelDivergenceActions,
+  type StatedLevelDivergence,
+} from "../../orchestrator-v5/stated-level-divergence.js";
 import {
   findSuccessClaimHit,
   findForbiddenPhraseHit,
@@ -1317,6 +1325,34 @@ const TOP_LEVEL_NODE_FIELDS = ['category', 'kind', 'label', 'id'];
  * Returns a new array — original is not mutated.
  * @internal Exported for testing.
  */
+/**
+ * The user-facing clarification for the `ambiguous_scale_value` rejection class.
+ *
+ * Exported so the rejection path can be tested BY IDENTITY rather than against a
+ * hand-copied string: a test that rebuilds this sentence itself would keep passing
+ * if the product's copy changed underneath it. Used at exactly ONE site, for both
+ * `detail` (the internal log line) and `structural_guidance` (the user copy), so
+ * the two cannot drift apart.
+ *
+ * Deterministic and structural-only by construction: every part comes from the
+ * operation and the user's own graph — the proposed value, the factor's label and
+ * its currently-recorded amount. It asserts nothing about an analysis.
+ */
+export function buildAmbiguousScaleClarification(op: {
+  readonly newValue: number;
+  readonly label?: string | null;
+  readonly currentRawValue?: number | null;
+}): string {
+  const factorName = op.label ?? 'this factor';
+  const currently = Number.isFinite(op.currentRawValue as number)
+    ? ` (currently ${op.currentRawValue})`
+    : '';
+  return (
+    `${op.newValue} reads as a proportion, but \u201c${factorName}\u201d is recorded as an amount` +
+    `${currently}. Tell me the amount you want, or give the value with its unit.`
+  );
+}
+
 export function normaliseEditOpsForPlot(ops: PatchOperation[]): PatchOperation[] {
   if (!config.cee.editNormalisationEnabled) return ops;
 
@@ -1921,12 +1957,33 @@ export function buildAppliedChanges(
   const divergenceByIndex = new Map<number, LabelValueDivergence>();
   for (const d of divergences) divergenceByIndex.set(d.index, d);
 
+  // The same cross-check one shape over: a PROSE-ONLY write onto a node whose
+  // number is still the product's own guess has not given that factor a value,
+  // and "Added a note to X" is true of this apply and of an apply that DID move
+  // the number alike. Witnessed on capture d9c4066c (2026-09-19): the person
+  // said product quality would be very high, the note landed, the receipt said
+  // "Added a note", and the analysis six minutes later ran on 0.5.
+  //
+  // Disjoint from the label-value family by construction — that one requires a
+  // `label` key on the op, this one refuses any key that is not prose — so the
+  // two can never contend for the same index. The prose key list is PASSED IN,
+  // never re-declared, so this file keeps exactly one copy of it.
+  const statedLevelDivergences = detectStatedLevelDivergences(operations, graph, AUTHORED_PROSE_KEYS);
+  const statedLevelByIndex = new Map<number, StatedLevelDivergence>();
+  for (const d of statedLevelDivergences) statedLevelByIndex.set(d.index, d);
+
   const changes: AppliedChangeItem[] = operations.map((op, index) => {
     const label = resolveElementLabel(op.path, graph, preGraph, op.value);
     const divergence = divergenceByIndex.get(index);
-    const description = divergence
-      ? buildLabelValueDivergenceDescription(divergence)
-      : buildOperationDescription(op, graph, preGraph);
+    const statedLevel = statedLevelByIndex.get(index);
+    let description: string;
+    if (divergence) {
+      description = buildLabelValueDivergenceDescription(divergence);
+    } else if (statedLevel) {
+      description = buildStatedLevelDivergenceDescription(statedLevel);
+    } else {
+      description = buildOperationDescription(op, graph, preGraph);
+    }
     return { label, description, element_ref: op.path };
   });
 
@@ -2974,6 +3031,38 @@ export async function handleEditGraph(
     // Sanitise: remove legacy fields
     let operations = sanitiseOperations(validationResult.operations as PatchOperation[]);
 
+    // ⭐ STRIP PIPELINE-OWNED KEYS FROM `add_node` VALUES, RATHER THAN LET THE
+    // REFEREE REFUSE THE WHOLE BATCH. Witnessed on a real user session: an
+    // add_node carrying `observed_state.source` / `provenance` / `raw_value`
+    // was rejected PIPELINE_OWNED_FIELD, and the three structural edges that
+    // referenced the node it would have created then cascaded to
+    // ENTITY_NOT_FOUND — so a change the user had spent three turns agreeing
+    // was reported back as "the model is unchanged". Our own served prompt
+    // asks the model to mirror comparable nodes, which is where those keys
+    // come from. Full rationale + scope on `stripPipelineOwnedFromAddOperations`.
+    //
+    // PLACED HERE, at the ONE choke point, deliberately: `operations` is what
+    // every downstream consumer sees — the referee gate (via
+    // `editResult.operations`), the canonicaliser, the applier and the
+    // receipts. Stripping only the referee's screened copy would leave the
+    // APPLIER writing the forged stamp, re-opening the hole ROADMAP 2.478
+    // closed. Same shape and same seam as the legacy-field strip above.
+    const pipelineOwnedStrip = stripPipelineOwnedFromAddOperations(operations);
+    if (pipelineOwnedStrip.strippedKeyShapes.length > 0) {
+      // DISCLOSED, never silent — and redaction-safe: the shapes name only the
+      // closed CEE-owned vocabulary, every other segment is masked to `*`.
+      log.info(
+        {
+          request_id: requestId,
+          event: 'edit_graph.pipeline_owned_field_stripped',
+          key_shapes: pipelineOwnedStrip.strippedKeyShapes,
+          key_shape_count: pipelineOwnedStrip.strippedKeyShapes.length,
+        },
+        'edit_graph: stripped pipeline-owned keys from add_node values (the add proceeds; the referee would have refused the whole batch)',
+      );
+    }
+    operations = pipelineOwnedStrip.operations;
+
     // Populate old_value for undo data capture (before PLoT submission)
     operations = populateOldValues(
       operations,
@@ -3110,12 +3199,27 @@ export async function handleEditGraph(
     if (ambiguousScaleOps.length > 0) {
       const first = ambiguousScaleOps[0]!;
       const factorName = first.label ?? 'this factor';
+      // R2-1 FOLLOW-UP (coaching lane, 17 Sep 2026) — THE CLARIFICATION NOW
+      // REACHES THE USER. This sentence was composed correctly and then
+      // discarded: `buildAssistantText` reads `structural_guidance`, then
+      // `user_safe_reasons`, and NEVER `detail` on a structural_violation, so
+      // the user received the generic "it would create an inconsistency in the
+      // model structure" — which is not what happened and gives them nothing
+      // to act on. The "State the amount" chip below DID survive, so the
+      // product was showing a precise next step beside a vague, wrong reason.
+      //
+      // `structural_guidance` is the purpose-built channel for exactly this:
+      // deterministic, structural-only next-step copy that replaces the generic
+      // line. This copy qualifies on both counts — it is composed from the
+      // operation's own values (no model output), and it names only the user's
+      // own factor and its current recorded amount, asserting nothing about an
+      // analysis. Composed ONCE and used for both so the log detail and the
+      // user copy cannot drift apart.
+      const ambiguousScaleClarification = buildAmbiguousScaleClarification(first);
       const rejectionCtx: PatchRejectionContext = {
         reason: 'structural_violation',
-        detail:
-          `${first.newValue} reads as a proportion, but “${factorName}” is recorded as an amount` +
-          `${Number.isFinite(first.currentRawValue) ? ` (currently ${first.currentRawValue})` : ''}. ` +
-          `Tell me the amount you want, or give the value with its unit.`,
+        detail: ambiguousScaleClarification,
+        structural_guidance: ambiguousScaleClarification,
         violations: ambiguousScaleOps.map(
           (o) => `ambiguous_scale_value: ${o.newValue} on ${o.label ?? o.path}`,
         ),
@@ -4193,6 +4297,27 @@ export async function handleEditGraph(
       );
     }
 
+    // The prose-only sibling of the same harm: the person contributed an
+    // assessment, it landed as a note, and the factor's number is still ours.
+    // Detected off the receipt graph so the receipt and the chat disclosure
+    // cannot disagree about whether there is anything to disclose.
+    const statedLevelDivergences = detectStatedLevelDivergences(
+      operations,
+      postGraphForReceipt,
+      AUTHORED_PROSE_KEYS,
+    );
+    if (statedLevelDivergences.length > 0) {
+      log.warn(
+        {
+          event: 'edit_graph.stated_level_divergence_disclosed',
+          request_id: requestId,
+          count: statedLevelDivergences.length,
+          paths: statedLevelDivergences.map((d) => d.path),
+        },
+        'edit_graph: a note landed on a node whose modelled value is still machine-authored — disclosing',
+      );
+    }
+
     log.info(
       {
         elapsed_ms: latencyMs,
@@ -4263,6 +4388,26 @@ export async function handleEditGraph(
     const divergenceNote = buildLabelValueDivergenceNote(labelValueDivergences);
     if (divergenceNote) {
       textParts.push(scrubFragment(divergenceNote));
+    }
+    // The prose-only disclosure. It quotes the person's OWN sentence for this
+    // turn rather than the recorded note, because the note is written by the
+    // prose lane and may re-tense them: on capture d9c4066c a forward
+    // expectation ("product quality WILL BE very high") was recorded as a fact
+    // about today ("Current product quality IS assessed as very high"). The
+    // quote costs no model surface and no new field, and it is dropped rather
+    // than paraphrased when there is nothing genuinely theirs to quote.
+    // ⚠ Sanitised and length-bounded HERE, at the caller, exactly as the
+    // module's contract requires — it stays dependency-free on purpose.
+    const lastUserMessage = [...(context.messages ?? [])]
+      .reverse()
+      .find((m) => m.role === 'user' && typeof m.content === 'string' && m.content.trim().length > 0);
+    const rawQuote = lastUserMessage?.content?.trim() ?? '';
+    // Length-bounded here; the whole composed note is scrubbed once below, so
+    // scrubbing the quote separately would only duplicate the leak telemetry.
+    const statedLevelQuote = rawQuote.length > 0 && rawQuote.length <= 240 ? rawQuote : null;
+    const statedLevelNote = buildStatedLevelDivergenceNote(statedLevelDivergences, statedLevelQuote);
+    if (statedLevelNote) {
+      textParts.push(scrubFragment(statedLevelNote));
     }
     // P0 fix (2026-05): NEVER render PLoT repair / A5 enforcement reasons
     // into user-facing assistant_text. Repair `action` strings come from
@@ -4357,6 +4502,13 @@ export async function handleEditGraph(
     // chip's replayed message routes to the intervention-writing lane). This
     // is the affordance the honest disclosure above points at.
     suggestedActions.push(...buildLabelValueDivergenceActions(labelValueDivergences));
+    // ⛔ The prose-only affordance carries NO NUMBER. There is no defensible
+    // mapping from a level word to a value (three ladders in this estate
+    // disagree — see `stated-level-divergence.ts`), so the chip asks, the
+    // person answers, and the existing value path writes. That sequence is
+    // what makes the resulting number genuinely theirs rather than ours with
+    // their name on it.
+    suggestedActions.push(...buildStatedLevelDivergenceActions(statedLevelDivergences));
 
     return {
       blocks: [block],

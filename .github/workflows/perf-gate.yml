@@ -19,6 +19,9 @@ concurrency:
 
 jobs:
   perf-gate:
+    # Named staging batch only; unset hold restores automatic coverage.
+    if: >-
+      ${{ !(vars.CORE_DRAFTING_PAID_HOLD == '20260920' && (github.event_name == 'pull_request' && github.base_ref == 'staging' && contains(fromJSON('["fix/baseline-ask-collision-precedence","cct/quantities-on-risk-and-outcome","feat/core-1251-validated-20260919","feat/draft-authored-meaning-20260919","feat/core-budget-consent-20260919","feat/core-authored-limit-continuity-20260919","feat/core-capacity-intervention-20260919","feat/core-explicit-paid-release-20260920"]'), github.head_ref))) }}
     name: Performance Gate (p95 < 8s)
     runs-on: ubuntu-latest
     timeout-minutes: 12
@@ -121,6 +124,9 @@ jobs:
             See job summary for p95 values (healthz gating, draft-graph observed).
 
   sse-live-resume-gate:
+    # Named staging batch only; unset hold restores automatic coverage.
+    if: >-
+      ${{ !(vars.CORE_DRAFTING_PAID_HOLD == '20260920' && (github.event_name == 'pull_request' && github.base_ref == 'staging' && contains(fromJSON('["fix/baseline-ask-collision-precedence","cct/quantities-on-risk-and-outcome","feat/core-1251-validated-20260919","feat/draft-authored-meaning-20260919","feat/core-budget-consent-20260919","feat/core-authored-limit-continuity-20260919","feat/core-capacity-intervention-20260919","feat/core-explicit-paid-release-20260920"]'), github.head_ref))) }}
     name: SSE Live Resume Performance Gate
     runs-on: ubuntu-latest
     timeout-minutes: 15

@@ -51,6 +51,7 @@ import {
   RunDeltaWinProbabilityDeltaSchema,
 } from '@talchain/schemas/boundary';
 
+import { STRUCTURE_PROVENANCE_ENUM_VALUES } from '../../cee/graph-readiness/obligation-provenance.js';
 import { RECENT_CHANGES_SUMMARY_MAX_CHARS } from './recent-changes.js';
 
 import { QuantityExtractionResultSchema } from './cqe/schema-types.js';
@@ -344,6 +345,23 @@ const ContextPackConversationSchema = z
       })
       .strict()
       .optional(),
+  })
+  .strict();
+
+/**
+ * One standing objection the user has stated against a finding.
+ *
+ * ⚠ THE KEY IS `statement`, AND THE NAME IS LOAD-BEARING: `utils/logger-config.ts`
+ * redacts `statement` at depths 0-2, which is exactly where an element of
+ * `stated_objections` serialises. Renaming it would leave that boundary behind.
+ * Pinned by test rather than left to review.
+ */
+export const StatedObjectionSchema = z
+  .object({
+    finding_id: z.string().min(1),
+    analysis_id: z.string().min(1),
+    /** The user's reason, VERBATIM. Never truncated — the cap is on the COUNT. */
+    statement: z.string().min(1),
   })
   .strict();
 
@@ -655,7 +673,15 @@ const ContextPackFactorValueEntrySchema = z
   .object({
     label: z.string().min(1),
     has_value: z.boolean(),
-    provenance: z.enum(['user_stated', 'ai_drafted', 'system_repaired', 'unattributed']),
+    /**
+     * ⛔ DERIVED FROM THE UNION, NEVER RE-INLINED. This was a hand-listed
+     * four-member tuple, and widening `StructureProvenance` breaks NOTHING at
+     * build time (zero exhaustive switches over it repo-wide) — so the next
+     * member would have been REJECTED HERE AT RUNTIME, inside the context pack,
+     * on a real turn, under a green build. Pinned both ways, and round-tripped,
+     * by `__tests__/context-pack-provenance-vocabulary-parity.test.ts`.
+     */
+    provenance: z.enum(STRUCTURE_PROVENANCE_ENUM_VALUES),
   })
   .strict();
 
@@ -921,6 +947,29 @@ const ContextPackObjectSchema = z
      * authoritative no-changes claim only when this is `complete`.
      */
     recent_changes_status: z.enum(['complete', 'capped', 'degraded']),
+    /**
+     * ⭐ WHAT THE USER HAS SAID THEY DISAGREE WITH, AND WHY — the standing
+     * objections projected from this turn's `finding_dissent` receipts.
+     *
+     * Named APART from `recent_changes` deliberately (trap 21). That field
+     * answers "what changed in the MODEL?"; this one answers "what has the
+     * HUMAN said they do not accept?". `finding_dissent` remains classified
+     * SKIP in `MUTATION_DISPATCH_SKIP` and that is correct — a dissent moves
+     * no graph state. This is not a correction to the skip; it is the second
+     * classification that was missing, so "not a model change" no longer
+     * collapses into "not context at all".
+     *
+     * ⚠ PRESENT ONLY WHEN THE USER HAS ACTUALLY OBJECTED — the key is ABSENT
+     * (never `[]`, never null) otherwise, so a scenario with no objections
+     * serialises byte-identically to pre-change packs and the prompt gains no
+     * section. An EMPTY ARRAY IS NOT EMITTED ON PURPOSE: unlike
+     * `recent_changes`, there is no completeness authority for this field, so
+     * an empty list would be an unearned "the user has objected to nothing"
+     * claim rather than an observation. Absence means UNKNOWN.
+     *
+     * See `context/stated-objections.ts` for the supersession rule and the cap.
+     */
+    stated_objections: z.array(StatedObjectionSchema).readonly().optional(),
     coaching: CoachingCacheSchema,
     compound_detected: z.boolean(),
     /**

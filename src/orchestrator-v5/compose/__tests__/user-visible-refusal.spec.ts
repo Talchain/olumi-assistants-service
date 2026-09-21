@@ -100,7 +100,15 @@ describe('classifyUserVisibleRefusal — the twins that must NOT be counted', ()
     ['a no-op fallback (measured: blocks [])', []],
     [
       'a held proposal — carries a block, is not a refusal',
-      [{ type: 'held_proposal', proposal_id: 'p1', operations: [] }],
+      [
+        // THE REAL WIRE SHAPE. `edit-graph-dispatch.ts:3875-3885` ships the
+        // redacted public reason as a LEADING error block and THEN appends the
+        // held proposal, so an ordinary add-node/add-edge hold is
+        // `[error, held_proposal]`. The previous fixture omitted the error
+        // block and therefore proved nothing about this case.
+        { type: 'error', error_code: 'INTERNAL_ERROR', severity: 'warn', details: { source: 'graph_management' } },
+        { type: 'held_proposal', proposal_id: 'p1', operations: [] },
+      ],
     ],
     [
       'a fresh draft (measured: three coaching blocks)',

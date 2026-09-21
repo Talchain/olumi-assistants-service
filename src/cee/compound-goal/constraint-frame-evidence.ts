@@ -76,7 +76,7 @@ function isPercentScaled(unit: string | undefined): boolean {
  * producers legitimately disagree about whether "5%" is `5` or `0.05` — and
  * neither reading changes the FRAME, which is the only thing being carried.
  */
-function statesSameNumber(candidate: ExtractedGoalConstraint, value: number): boolean {
+function statesSameNumber(candidate: Pick<ExtractedGoalConstraint, "value" | "unit">, value: number): boolean {
   if (valuesMatch(candidate.value, value)) return true;
   return isPercentScaled(candidate.unit) && valuesMatch(candidate.value * 100, value);
 }
@@ -99,18 +99,20 @@ export function deriveStatedConstraintFrame(
   // proxy substitutes a DIFFERENT metric for the user's words ("improve morale"
   // -> a proxy scale), so its number is not this turn's number and its frame
   // must not be borrowed on a value coincidence.
-  const parsed = normaliseConstraintUnits(
-    extractCompoundGoals(message, { includeProxies: false }).constraints,
-  );
+  const extracted = extractCompoundGoals(message, { includeProxies: false });
+  const parsed = normaliseConstraintUnits(extracted.constraints);
 
-  const matching = parsed.filter(
+  // "Keep it under 10%" has source-attested numeric semantics even though
+  // this parser cannot bind "it". The separate evidence carries no target:
+  // the caller still owns binding, and all value/operator ambiguity gates apply.
+  const matching = [...parsed.filter(c => c.deadlineMetadata === undefined),
+    ...extracted.unboundConstraintFrames].filter(
     (c) =>
       c.operator === operator &&
       // ROADMAP 2.349 — a deadline is not a hard constraint, and the merge
       // stage drops these source-agnostically. Excluded here for the same
       // reason: a months-unit pseudo-constraint must not become the frame
       // evidence for a £- or %-measured one on a bare numeric coincidence.
-      c.deadlineMetadata === undefined &&
       statesSameNumber(c, value),
   );
 

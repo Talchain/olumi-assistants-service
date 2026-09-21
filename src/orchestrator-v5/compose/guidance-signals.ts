@@ -131,6 +131,14 @@ export const GUIDANCE_SIGNAL_CODES = {
    *  class the UI's calibration tray / contested cards key on, so a consumer
    *  can group the turn nudge with the Model-tab surface. */
   UNRESOLVED_DISAGREEMENT: 'UNRESOLVED_DISAGREEMENT',
+  /** coaching `strengthen` (T3 stated-dissent lens) — a HUMAN stated an
+   *  objection to a finding and no analysis since has stood against it. NEW,
+   *  and deliberately NOT folded into UNRESOLVED_DISAGREEMENT: that code names
+   *  the two-pass validation pipeline disagreeing with ITSELF, a machine
+   *  signal. One code for both would tell every consumer that a person's
+   *  stated objection and a pipeline divergence are the same class — the
+   *  shared-English-word conflation trap 21 exists for. */
+  STATED_DISSENT_UNANSWERED: 'STATED_DISSENT_UNANSWERED',
 } as const;
 
 export type GuidanceSignalCode = (typeof GUIDANCE_SIGNAL_CODES)[keyof typeof GUIDANCE_SIGNAL_CODES];
@@ -400,4 +408,13 @@ export function overrideStressTestSignals(): GuidanceSignalsWithProvenance {
 
 export function disagreementResolutionSignals(): GuidanceSignalsWithProvenance {
   return strengthenOfferSignals(GUIDANCE_SIGNAL_CODES.UNRESOLVED_DISAGREEMENT);
+}
+
+/**
+ * T3 — the stated-dissent lens. Same shape and same reasoning; the
+ * `signal_code` names the DETECTOR class (a human's persisted `finding_dissent`
+ * receipt), never the block kind.
+ */
+export function statedDissentReviewSignals(): GuidanceSignalsWithProvenance {
+  return strengthenOfferSignals(GUIDANCE_SIGNAL_CODES.STATED_DISSENT_UNANSWERED);
 }

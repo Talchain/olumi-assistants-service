@@ -33,6 +33,7 @@
 import type { z } from 'zod';
 
 import { CURRENCY_SYMBOL_TO_CODE } from '../../cee/extraction/numeric-parser.js';
+import { deriveStatedConstraintFrame } from '../../cee/compound-goal/index.js';
 import type { ProposalAction } from '../routing/types.js';
 import type { ProposedChange, ProposedChangeIntent } from '../types/proposed-change.js';
 import { isProposedChangeActionType } from '../types/proposed-change.js';
@@ -513,6 +514,7 @@ const CONSTRAINT_TYPE_TO_OPERATOR: Readonly<Record<string, '>=' | '<='>> = {
 export function buildWarrantDemotion(
   action: ProposalAction,
   existingConstraints: readonly PersistedConstraintRow[],
+  sourceMessage?: string,
 ): WarrantDemotionBuild {
   if (!isProposedChangeActionType(action.handler_id)) {
     // Not one of the three proposable mutations. The caller must NOT execute
@@ -538,6 +540,7 @@ export function buildWarrantDemotion(
 
   let changeDescription: string;
   let residualDisclosure: string | null = null;
+  let constraintValueFrame: ProposedChange['constraint_value_frame'];
 
   if (intent === 'add_constraint') {
     const constraintType = param(action, 'constraint_type')?.value;
@@ -546,6 +549,10 @@ export function buildWarrantDemotion(
         ? CONSTRAINT_TYPE_TO_OPERATOR[constraintType]!
         : null;
     const bound = formatBound(param(action, 'value')?.value, param(action, 'unit')?.value);
+    const value = param(action, 'value')?.value;
+    if (operator !== null && typeof value === 'number') {
+      constraintValueFrame = deriveStatedConstraintFrame(sourceMessage, operator, value);
+    }
     const direction = operator === '>=' ? 'at or above' : 'at or below';
     changeDescription = `a limit keeping ${entityLabel} ${direction} ${bound}`;
     const surviving = findSurvivingConstraint(targetId, operator, existingConstraints);
@@ -577,6 +584,7 @@ export function buildWarrantDemotion(
       message: copy.message,
       params: proposalParamsToRecord(intent, action),
       target_entity_ids: [targetId],
+      ...(constraintValueFrame !== undefined ? { constraint_value_frame: constraintValueFrame } : {}),
     },
     changeDescription,
     residualDisclosure,

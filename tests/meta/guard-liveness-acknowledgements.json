@@ -24,6 +24,13 @@
       "why": "Reachable only from the manually-installed pre-push hook (scripts/install-hooks.sh). A developer who never ran the installer never runs it, and no CI job does."
     },
     {
+      "path": "scripts/ci/assert-graph-evaluator-observed.mjs",
+      "via": [
+        "NONREQUIRED_WORKFLOW"
+      ],
+      "why": "Reachable only from graph-evaluator.yml::Graph Evaluator (advisory), which is not the required check, so its verdict never blocks a merge. DELIBERATE AND TEMPORARY: tools/graph-evaluator is standing-red (thirteen governed-pack problems - 9 source-hash mismatches, 2 content-hash drifts, 2 governance-artefact drifts - plus a fixture-count drift in tests/adapters.test.ts), and a standing-red required check is a broken alarm (D-58). The guard itself is not advisory - it fails its job on a vacuous run or on any drift from scripts/ci/graph-evaluator-known-red.json. This entry leaves the file when that ratchet reaches empty and the job is promoted to a required check."
+    },
+    {
       "path": "scripts/ci/assert-no-shadow-copies.mjs",
       "via": [
         "NONREQUIRED_WORKFLOW"

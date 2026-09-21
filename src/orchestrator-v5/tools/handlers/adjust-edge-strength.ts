@@ -26,6 +26,7 @@ import { AdjustEdgeStrengthHandlerFactSchema } from '@talchain/schemas/orchestra
 import type { AdjustEdgeStrengthHandlerFact } from '@talchain/schemas/orchestrator';
 
 import { GraphV3, type GraphV3T } from '../../../schemas/cee-v3.js';
+import { parseEdgeAddress } from '../../compose/edge-address.js';
 import { sanitiseUserFacingText } from '../../../orchestrator/shared/output-safety.js';
 import type { HandlerFn, HandlerInvocation, HandlerOutcome } from '../registry.js';
 import { HandlerInvocationFailedError, HandlerResultInvalidError } from '../handler-errors.js';
@@ -98,14 +99,11 @@ function resolveSafeFactEndpointLabel(graph: GraphV3T, nodeId: string): string |
  * around each side. Returns null on malformed input.
  */
 export function parseEdgeId(id: string): { from: string; to: string } | null {
-  const arrow = id.includes('→') ? '→' : id.includes('->') ? '->' : null;
-  if (!arrow) return null;
-  const parts = id.split(arrow);
-  if (parts.length !== 2) return null;
-  const from = parts[0].trim();
-  const to = parts[1].trim();
-  if (!from || !to) return null;
-  return { from, to };
+  // DELEGATED, NOT RE-IMPLEMENTED. The address vocabulary has ONE owner
+  // (`orchestrator-v5/compose/edge-address.ts`); this body moved there verbatim
+  // so the graph-edit path and the Phase 3 lookup can never disagree about what
+  // an edge address IS. Same acceptance, same `::` rejection, unchanged.
+  return parseEdgeAddress(id);
 }
 
 function clamp(n: number): number {

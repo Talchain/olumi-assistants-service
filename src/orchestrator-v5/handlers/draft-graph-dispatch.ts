@@ -757,6 +757,26 @@ export async function dispatchDraftGraph(
         request_id: requestId,
         scenario_id: payload.scenario_id,
         section_chars: { brief: effectiveBrief.length },
+        section_shape: { brief: { chars: effectiveBrief.length } },
+        // ⚠⚠ THIS IS NOT THE WHOLE REQUEST, AND THE NAME `total_chars` SAYS IT
+        // IS. Measured on staging 2026-09-17: `total_chars: 128` against
+        // `input_tokens: 4506` — `chars_per_token: 0.03`, roughly 140x out.
+        //
+        // `effectiveBrief` is ONE component of the user message. The real
+        // request also carries the served `draft_graph` system prompt (the
+        // comment above pegs it near 58,564 chars), DRAFT_RECORDS_INSTRUCTION
+        // as a second system block, the records JSON grammar, the
+        // untrusted-content envelope, the compliance reminder, brief signals,
+        // the currency instruction, any retry directive and any attached
+        // document. NONE of those bytes are in scope here:
+        // `DraftGraphResult.toolLLMTelemetry` carries model identity and token
+        // counts only, so an honest total needs char counts plumbed back from
+        // `adapters/llm/anthropic.ts buildDraftPrompt` — a separate change.
+        //
+        // Until then this site is DECLARED honestly on the wire
+        // (`total_chars_scope: 'declared_sections_only'`, the only site that is)
+        // and the gap is flagged LOUD on every call by
+        // `classifyCharsPerToken`, instead of sitting unread as 0.03.
         total_chars: effectiveBrief.length,
         truncations: [],
         summary_lag_turns: null,

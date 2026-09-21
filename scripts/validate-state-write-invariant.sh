@@ -16,8 +16,8 @@
 #      .from('v5_handler_facts') calls (read or write) — reads go through
 #      the SessionStore interface, not raw Supabase
 #   3. The store interface (`SessionStore` from session/store.ts) is only
-#      imported by files inside session/ plus the two declared integration
-#      points: commit.ts and build-turn-context.ts
+#      imported by files inside session/ plus the three declared integration
+#      points: commit.ts, build-turn-context.ts and apply-operations.ts
 #
 # Test files are exempt from all three — integration tests legitimately
 # exercise the RPC directly and clean up rows they wrote.
@@ -88,12 +88,35 @@ done
 # Allowed importers (outside session/ itself):
 #   - src/orchestrator-v5/commit.ts
 #   - src/orchestrator-v5/build-turn-context.ts
+#   - src/orchestrator-v5/apply-operations.ts  (declared 21 Sep 2026)
+#
+# WHY apply-operations.ts IS A DECLARED POINT AND NOT AN EXEMPTION. This rule
+# exists to keep the session write surface NARROW AND DECLARED. The accept path
+# is a genuine write path and needs a store; the only question is who holds the
+# import. Left undeclared, it lands in a ROUTE file — and then in the next route
+# that offers an accept, and the one after that, because the adapter cannot
+# supply what it is not allowed to resolve. One small single-purpose adapter is
+# strictly narrower than N route files, which is the same argument that made
+# commit.ts a point rather than an exception.
+#
+# ⚠ This does NOT make the gate pass and was not added to. At the time of
+# writing the gate is RED on five pre-existing violations (turn-fence-prehandler,
+# clarify-v2-dispatch, system-events/dispatch, scenario-graph-analysis-read,
+# persist-graph-write) plus one direct .from('v5_handler_facts') in
+# decision-records/store-adapter.ts. Those are the real debt; this line is not
+# cover for them and must not be read as sanctioning them.
+#
+# ⛔ AND THE REASON THEY ACCUMULATED, which matters more than any of them:
+# tests/meta/guard-liveness-acknowledgements.json records this script as
+# reachable ONLY from the manually-installed pre-push hook — "no CI job does".
+# A guard that stopped running looks exactly like a guard that found nothing.
 ILLEGAL_IMPORTS=$(
   node "$STRIPPER" --scan "from '[^']*(orchestrator-v5/)?session/(index|store|supabase-store|cache|invalidation)(\.js)?'" src 2>/dev/null \
   | grep -v '/__tests__/' | grep -v '\.test\.ts:' \
   | grep -v '^src/orchestrator-v5/session/' \
   | grep -v '^src/orchestrator-v5/commit\.ts:' \
   | grep -v '^src/orchestrator-v5/build-turn-context\.ts:' \
+  | grep -v '^src/orchestrator-v5/apply-operations\.ts:' \
   || true
 )
 if [ -n "$ILLEGAL_IMPORTS" ]; then
@@ -104,7 +127,7 @@ if [ "$EXIT" -eq 0 ]; then
   echo "State-write invariant OK:"
   echo "  - append_turn_atomic only in session/supabase-store.ts"
   echo "  - v5_conversation_turns / v5_handler_facts only accessed via session/supabase-store.ts"
-  echo "  - SessionStore imports limited to session/, commit.ts, build-turn-context.ts"
+  echo "  - SessionStore imports limited to session/, commit.ts, build-turn-context.ts, apply-operations.ts"
 fi
 
 exit "$EXIT"

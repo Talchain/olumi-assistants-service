@@ -87,6 +87,7 @@ vi.mock("../../src/cee/structure/index.js", () => ({
   detectStructuralWarnings: vi.fn().mockReturnValue({ warnings: [], uncertainNodeIds: [] }),
   detectUniformStrengths: vi.fn().mockReturnValue({ detected: false }),
   detectStrengthClustering: vi.fn().mockReturnValue({ detected: false }),
+  detectGoalLayerStrengthClustering: vi.fn().mockReturnValue({ detected: false }),
   detectSameLeverOptions: vi.fn().mockReturnValue({ detected: false }),
   detectOptionSimilarity: vi.fn().mockReturnValue({ detected: false, critiques: [], warnings: [], validationIssues: [] }),
   detectMissingBaseline: vi.fn().mockReturnValue({ detected: false }),

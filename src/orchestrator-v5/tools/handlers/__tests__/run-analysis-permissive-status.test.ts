@@ -37,6 +37,14 @@ import {
 } from '../run-analysis.js';
 import { HandlerInvocationFailedError } from '../../handler-errors.js';
 import type { HandlerInvocation } from '../../registry.js';
+// The withheld-separability disclosure (#1650) and the guards its presence is
+// asserted against. Imported by IDENTITY rather than restated as string
+// literals, so a copy change cannot leave this case green about a sentence the
+// product no longer emits.
+import { SEPARABILITY_DISCLOSURE_RE_SRC } from '../../../coaching/separability-disclosure.js';
+import { isFieldUnseparable } from '../../../coaching/option-separability.js';
+import { isAllowedRunAnalysisAssistantText } from '../../../coaching/analysis-result-headline.js';
+import { textNamesLeadingOption } from '../../../compose/leading-option-egress-guard.js';
 
 const SCENARIO_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const REQUEST_ID = 'req-status-test';
@@ -343,7 +351,64 @@ describe('run_analysis handler — permissive status matrix (Phase 2.3)', () => 
     // produced a dead heat on real staging in March and got a named winner too.
     // This is the oldest evidence in the suite for the fix, and it is the
     // reason the gate keys on the FIELD rather than on the brief class.
-    expect(outcome.assistant_text).toBe(RUN_ANALYSIS_ASSISTANT_TEMPLATES.DEFAULT);
+    //
+    // ⚠⚠ SECOND POLICY REVERSAL, 21 Sep 2026, AND THE SAME RULE APPLIES: THE
+    // CAPTURED RESPONSE ABOVE IS STILL UNCHANGED (trap 14b — a dated staging
+    // envelope is a record of what the engine returned, never a fixture to keep
+    // current). What changed is again only what the product SAYS about it.
+    //
+    // This assertion previously read `toBe(DEFAULT)` — the bare locked
+    // template, thirty-eight characters, on the very capture the comment above
+    // spends twenty lines explaining is a genuine three-way dead heat. That was
+    // never the property this case exists to protect: it was protecting "the
+    // product does not name a winner here", and it happened to be spelled as
+    // "the product says nothing else here", which is a different and much
+    // larger claim. #1650 makes the withheld run say WHY, so the text is the
+    // locked template PLUS that reason, and the old spelling would now be
+    // asserting the ABSENCE of the disclosure this very capture motivates.
+    //
+    // ⭐ THE RUN IS STILL WITHHELD — that is asserted first and directly, and
+    // it is the thing a reviewer must be able to see: the text OPENS on the
+    // locked template, i.e. no headline was composed. The disclosure rides a
+    // withheld run or it does not ride at all.
+    const text = outcome.assistant_text as string;
+    expect(
+      text.startsWith(RUN_ANALYSIS_ASSISTANT_TEMPLATES.DEFAULT),
+      `the run was NOT withheld — a headline replaced the locked template: "${text}"`,
+    ).toBe(true);
+
+    // And the ONLY thing riding it is the withheld-separability disclosure,
+    // matched against that module's OWN published grammar and bound to the
+    // export by identity — so a different sentence, an extra suffix, or a
+    // composition in the wrong order all RED here rather than sliding past a
+    // `toContain`.
+    const suffix = text.slice(RUN_ANALYSIS_ASSISTANT_TEMPLATES.DEFAULT.length);
+    expect(suffix).not.toBe('');
+    expect(new RegExp(`^(?:${SEPARABILITY_DISCLOSURE_RE_SRC})$`).test(suffix), suffix).toBe(true);
+
+    // The count it names is derived from THIS capture's own win probabilities
+    // by the gate's own function — not a hand-written "2" that would keep
+    // passing if the capture or the band ever moved. The precondition is
+    // pinned in-test: if this field stops reaching the separability gate, this
+    // REDs here instead of the assertions below passing on a different
+    // population (trap 13b).
+    const verdict = isFieldUnseparable([0.353, 0.347, 0.3], 0.05, 0.01);
+    expect(
+      verdict.unseparable,
+      'this capture no longer reaches the separability gate — re-derive before trusting the rest',
+    ).toBe(true);
+    expect(suffix).toContain(` ${verdict.contenders} options came out too close together`);
+
+    // ⭐ AND THE 31 Aug PROPERTY IS INTACT, asserted directly rather than as a
+    // side effect of the text being short: no option is named or implied.
+    expect(textNamesLeadingOption(text)).toBe(false);
+
+    // ⭐ END TO END on a real capture: the composed summary survives the egress
+    // allowlist. This is what the registry's ORDER protects — registered out of
+    // position, the allowlist rejects this text and the user silently receives
+    // the bare template, with no red anywhere.
+    expect(isAllowedRunAnalysisAssistantText(text)).toBe(true);
+
     const fact = outcome.handler_facts[0]!;
     if (fact.fact_type === 'run_analysis') {
       // opt_3 has the highest probability — handler picks it.

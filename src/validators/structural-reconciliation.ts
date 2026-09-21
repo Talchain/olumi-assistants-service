@@ -185,8 +185,12 @@ function categoryOverrideRule(
         if (!data.factor_type) {
           data.factor_type = FACTOR_TYPE_DEFAULT;
         }
+        // ⛔⛔ AN EMPTY LIST, NEVER A SENTENCE SAYING THE LIST IS EMPTY.
+        // See Rule 5's block below for the full argument; this site is the
+        // same gesture on the reclassification path and must not diverge from
+        // it, or the two rules become two answers to one question (trap 21).
         if (!data.uncertainty_drivers) {
-          data.uncertainty_drivers = ["Estimation uncertainty"];
+          data.uncertainty_drivers = [];
         }
         if (!node.data) {
           node.data = data as unknown as NodeT["data"];
@@ -257,8 +261,34 @@ function controllableDataCompletenessRule(
       });
     }
 
+    // ⛔⛔ AN EMPTY LIST, NEVER A SENTENCE SAYING THE LIST IS EMPTY.
+    //
+    // This wrote `["Estimation uncertainty"]` — a driver the producer invented,
+    // rendered under the person's own factor as though it were evidence. It is
+    // the sibling of the `["Not provided"]` stamp #1572 removed from the
+    // deterministic sweep, and it is WORSE, because it reaches the reader:
+    // the UI's whole-string filter
+    // (`canvas/utils/observedStateHelpers.ts::PLACEHOLDER_EVIDENCE_STRINGS` =
+    // {not provided, n/a, none, not specified, unknown}) does not contain it.
+    // Swept at UI staging `3b7e5d4c`: "estimation uncertainty" 0 occurrences in
+    // `src/`, contrast control "not provided" 93. So it survives
+    // `meaningfulUncertaintyDrivers`, AND — having length one — it silences the
+    // overconfidence coaching that exists for exactly this population.
+    //
+    // ⚠ A DIFFERENT SPELLING WOULD REPRODUCE THIS EXACTLY. Whole-string matching
+    // is load-bearing downstream because genuine drivers contain placeholder
+    // WORDS ("Onboarding complexity unknown" is real evidence), so no wording is
+    // safe. The only honest fill is no fill.
+    //
+    // ⭐ WHY `[]` AND NOT AN ABSENT KEY, settled for the sibling site and
+    // unchanged here: `[]` is TRUTHY, so it passes `graph-validator.ts:848`
+    // (`if (!data?.uncertainty_drivers)`, severity "error") untouched and raises
+    // only `EMPTY_UNCERTAINTY_DRIVERS`, severity "warn" — a state this codebase
+    // had already named legitimate. The schemas declare
+    // `z.array(z.string()).max(2)` with no `.min(1)`, so an empty list
+    // validates. Omitting the key would re-raise the error this rule closes.
     if (!data.uncertainty_drivers) {
-      data.uncertainty_drivers = ["Estimation uncertainty"];
+      data.uncertainty_drivers = [];
       if (!node.data) node.data = data as unknown as NodeT["data"];
       mutations.push({
         rule: "controllable_data_completeness",
@@ -266,8 +296,10 @@ function controllableDataCompletenessRule(
         node_id: node.id,
         field: "data.uncertainty_drivers",
         before: undefined,
-        after: ["Estimation uncertainty"],
-        reason: "Controllable factor missing required uncertainty_drivers — filled with default",
+        // The observability record is read by operators deciding whether the
+        // product fabricated, so it must not claim a sentence was written.
+        after: [],
+        reason: "Controllable factor missing required uncertainty_drivers — recorded as none",
         severity: "info",
       });
     }

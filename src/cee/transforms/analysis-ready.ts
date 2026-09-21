@@ -39,6 +39,7 @@ import { classifyEncodedInterventionAdmissibility } from "../../orchestrator/sha
 // Two readiness paths deciding independently which edges the repair invented is
 // the two-authorities shape this estate keeps paying for (trap 21).
 import { isRepairAuthoredOptionFactorEdge } from "../../graph/repair-authored-edge.js";
+import { resolveScaleFrame } from "../../orchestrator-v5/tools/handlers/d1-shared/scale-frame.js";
 
 // ============================================================================
 // Types
@@ -92,6 +93,15 @@ export function transformOptionToAnalysisReady(
    * the real count.
    */
   connectedFactorCount = 0,
+  /**
+   * Whether this option is the status-quo baseline. Supplied by
+   * `buildAnalysisReadyPayload`, the only producer that sees every option and
+   * can therefore run `detectBaselineOptionIndex`. Defaults to `false` for the
+   * standalone single-option callers, matching
+   * `analysable-option-gate.ts::isBaselineOption`'s strict `=== true`: a
+   * MISSING verdict must exclude rather than hold.
+   */
+  isBaseline = false,
 ): OptionForAnalysisT {
   // Flatten interventions: Record<string, InterventionV3> -> Record<string, number>
   const interventions: Record<string, number> = {};
@@ -171,7 +181,9 @@ export function transformOptionToAnalysisReady(
     Object.keys(interventions).length,
     option.status,
     hasNonNumericRaw,
-    connectedFactorCount
+    connectedFactorCount,
+    isBaseline,
+    option.unresolved_targets?.length ?? 0
   );
 
   const result: OptionForAnalysisT = {
@@ -504,7 +516,8 @@ function buildInterventionDetail(
   factorId: string,
   normalisedValue: number,
   factorNode: NodeV3T | undefined,
-  interventionDisplayValue?: string,
+  intervention: OptionV3T["interventions"][string] | undefined,
+  carriedRawValue: number | string | boolean | undefined,
 ): InterventionDetail {
   // ⚠ F3 (Codex, 2026-08-13) — AN OPTION'S RECEIPT USED TO DESCRIBE THE FACTOR,
   // NOT THE OPTION. Every branch below returned the FACTOR's
@@ -530,7 +543,12 @@ function buildInterventionDetail(
   // was live. The corpus never varied two options on one factor — CLAUDE.md
   // trap 22, and the reason the RED fixtures below do exactly that.
   const os = factorNode?.observed_state;
-  const unit = os?.unit;
+  const unit = intervention?.unit ?? os?.unit;
+  const sameUnit = intervention?.unit === undefined || os?.unit === undefined ||
+    intervention.unit === os.unit;
+  const interventionDisplayValue = typeof intervention?.display_value === "string"
+    ? intervention.display_value : undefined;
+  const usesPercentageDisplay = unit === "%";
   const factorType = factorNode?.factor_type ?? os?.factor_type;
 
   // Is this option sitting AT the factor's observed state? Only then does a
@@ -538,7 +556,7 @@ function buildInterventionDetail(
   // intervention. This is what keeps the baseline/status-quo option rendering
   // exactly as before while a genuinely different lever stops borrowing it.
   const sitsAtObservedState =
-    typeof os?.value === "number" && os.value === normalisedValue;
+    sameUnit && typeof os?.value === "number" && os.value === normalisedValue;
 
   // The magnitude THIS option's level denotes, or null when the record settles
   // no denominator (zero baseline, no `raw_value`, no `observed_state`). Null
@@ -556,10 +574,32 @@ function buildInterventionDetail(
   // recorded `raw_value` is returned DIRECTLY — no arithmetic to be dirty.
   // (The pre-existing `{0.5, 5}` fixtures round-trip exactly, which is why the
   // first version of this suite could not see it — trap 22, again.)
-  const ownRawValue =
-    sitsAtObservedState && typeof os?.raw_value === "number"
-      ? os.raw_value
-      : magnitudeUnderScale(normalisedValue, unit, resolveMagnitudeScale(os));
+  // The native option quantity survives in raw_interventions even when a zero
+  // baseline cannot identify a divisor (19 Sep capture: £10000 beside .05).
+  // Consume that option-owned carrier before trying to invert a calculation.
+  // Percent raw carriers still include both record conventions (.18 and 18);
+  // no per-intervention declaration reaches this boundary. Preserve their
+  // existing scale-based display route instead of treating every raw as 18%.
+  const carriedNativeValue = !usesPercentageDisplay && typeof carriedRawValue === "number" &&
+    Number.isFinite(carriedRawValue) ? carriedRawValue : null;
+  let ownRawValue = carriedNativeValue;
+  if (ownRawValue === null && sameUnit) {
+    if (sitsAtObservedState && typeof os?.raw_value === "number" && Number.isFinite(os.raw_value)) {
+      ownRawValue = os.raw_value;
+    } else {
+      const scale = resolveMagnitudeScale(os);
+      const storedFrame = factorNode?.scale_frame;
+      if (typeof storedFrame === "number" && Number.isFinite(storedFrame) && storedFrame > 1) {
+        const frame = resolveScaleFrame({ storedFrame, value: os?.value, raw_value: os?.raw_value });
+        // Conflicting conversion evidence cannot license a native amount.
+        if (frame !== undefined && (scale.kind !== "cap" || scale.cap === frame)) {
+          ownRawValue = magnitudeUnderScale(normalisedValue, unit, { kind: "frame", frame });
+        }
+      } else {
+        ownRawValue = magnitudeUnderScale(normalisedValue, unit, scale);
+      }
+    }
+  }
 
   const ownFields = {
     normalised_value: normalisedValue,
@@ -567,11 +607,11 @@ function buildInterventionDetail(
     ...(unit !== undefined && { unit }),
   };
 
-  // Highest priority: display_value on the intervention itself (LLM/enricher-
-  // supplied). This lets the draft prompt provide per-intervention display
-  // strings without having to mutate factor node state. It is already
-  // per-intervention, so it is the option's own and is kept verbatim.
-  if (interventionDisplayValue && interventionDisplayValue.trim().length > 0) {
+  // A carried native amount owns its numeric presentation. A display string
+  // can be a stale projection of the same intervention; it must not override
+  // the amount or require us to parse free text to decide which one is true.
+  // With no native carrier, retain the existing per-intervention text route.
+  if (carriedNativeValue === null && interventionDisplayValue && interventionDisplayValue.trim().length > 0) {
     const factorLabel = (factorNode?.label ?? "").toLowerCase().trim();
     if (!isLabelEcho(factorLabel, interventionDisplayValue)) {
       return {
@@ -584,7 +624,8 @@ function buildInterventionDetail(
   // Prefer LLM/enricher-provided display_value on the factor node — but ONLY
   // when this option sits at the factor's observed state (see above). For any
   // other lever it is the status quo wearing the option's name.
-  if (factorNode?.display_value && sitsAtObservedState) {
+  if (factorNode?.display_value && sitsAtObservedState &&
+      (carriedNativeValue === null || carriedNativeValue === os?.raw_value)) {
     const factorLabel = (factorNode.label ?? "").toLowerCase().trim();
     if (!isLabelEcho(factorLabel, factorNode.display_value)) {
       return {
@@ -601,7 +642,10 @@ function buildInterventionDetail(
   const synthesised = synthesiseDisplayValue({
     value: normalisedValue,
     raw_value: ownRawValue ?? undefined,
-    unit,
+    // An unresolved calculation level is not a native amount. The percentage
+    // fallback has its own existing convention; other units require a native
+    // magnitude before a dimensional suffix can truthfully be displayed.
+    unit: ownRawValue !== null || usesPercentageDisplay ? unit : undefined,
     factor_type: factorType,
   });
 
@@ -638,6 +682,27 @@ export function buildAnalysisReadyPayload(
   graph: GraphV3T,
   context: AnalysisReadyContext = {}
 ): AnalysisReadyPayloadT & { _fallback_meta?: AnalysisReadyFallbackMeta } {
+  // Keep qualitative option→risk hypotheses on their existing editable edge.
+  // A causal coefficient is not an intervention level; other numeric effects
+  // cannot resolve this missing mapping. Derive from the graph so no optional
+  // flag or stale options[] mirror can accidentally grant calculation readiness.
+  const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
+  options = options.map((option) => {
+    const unresolved = graph.edges.filter((edge) =>
+      edge.from === option.id && nodeById.get(edge.to)?.kind === "risk"
+      && edge.edge_type !== "bidirected",
+    );
+    if (unresolved.length === 0) return option;
+    return {
+      ...option,
+      status: "needs_user_mapping",
+      unresolved_targets: [...new Set([...(option.unresolved_targets ?? []), ...unresolved.map((edge) => edge.to)])],
+      user_questions: [...new Set([...(option.user_questions ?? []), ...unresolved.map((edge) =>
+        `How does ${option.label} change ${nodeById.get(edge.to)?.label ?? edge.to}? The proposed relationship is retained, but its mechanism and value still need clarification.`,
+      )])],
+    };
+  });
+
   // Build factor node lookup and node kind map
   const factorNodeMap = new Map<string, NodeV3T>();
   const nodeKindLookup = new Map<string, string>();
@@ -708,14 +773,30 @@ export function buildAnalysisReadyPayload(
   //
   // `optionFactorAdj` already excludes repair-authored edges, so a lever the
   // product wired for itself never counts as a mapping the user made.
-  const analysisOptions = options.map((option) =>
-    transformOptionToAnalysisReady(option, (optionFactorAdj.get(option.id) ?? []).length),
-  );
-
   // === is_baseline detection (CEE-2) ===
   // Mark exactly one option as the status-quo baseline, based on LLM flag or
-  // label keyword matching. This is additive — no existing field is modified.
+  // label keyword matching.
+  //
+  // ⭐ THIS RUNS BEFORE THE MAP BELOW, AND THAT ORDERING IS THE FIX — the same
+  // shape as the adjacency hoist above it. `detectBaselineOptionIndex` used to
+  // be called immediately AFTER the map, so every option's status was decided
+  // by the one producer that holds the whole option set while the fact that one
+  // of them IS the status quo was still three lines away. The flag was in hand
+  // and arrived too late to be read: the baseline went out as
+  // `needs_user_mapping` ("choose which factor X changes and by how much") —
+  // a question with no answerable form for a status quo — while
+  // `analysable-option-gate.ts` read the very same flag and HELD the option as
+  // analysable. Two authorities, one object, opposite answers in one turn.
   const baselineIdx = detectBaselineOptionIndex(options);
+
+  const analysisOptions = options.map((option, index) =>
+    transformOptionToAnalysisReady(
+      option,
+      (optionFactorAdj.get(option.id) ?? []).length,
+      index === baselineIdx,
+    ),
+  );
+
   if (baselineIdx !== null) {
     analysisOptions[baselineIdx].is_baseline = true;
   }
@@ -930,10 +1011,9 @@ export function buildAnalysisReadyPayload(
         : (interventionEntry as { value?: unknown })?.value;
       if (typeof numericValue !== 'number') continue;
       const v3Intervention = v3Option?.interventions?.[factorId];
-      const llmDisplayValue = v3Intervention && typeof (v3Intervention as { display_value?: unknown }).display_value === 'string'
-        ? (v3Intervention as { display_value: string }).display_value
-        : undefined;
-      details[factorId] = buildInterventionDetail(factorId, numericValue, factorNode, llmDisplayValue);
+      details[factorId] = buildInterventionDetail(
+        factorId, numericValue, factorNode, v3Intervention, analysisOpt.raw_interventions?.[factorId],
+      );
     }
     analysisOpt.intervention_details = details;
 
@@ -980,8 +1060,27 @@ export function buildAnalysisReadyPayload(
 
   // Determine status based on transformed options (Raw+Encoded pattern)
   // Priority: needs_user_mapping > needs_encoding > ready
+  // ⭐ THE HELD BASELINE IS EXEMPT FROM THE EMPTINESS LIMB — AND THIS IS NOT THE
+  // EDIT THE ⛔ NOTE ON `optionsNeedingMapping` BELOW BANS.
+  //
+  // That note protects the loose limb against being narrowed to a STATUS test,
+  // because the connected-but-numberless class must keep holding `payloadStatus`
+  // still while its `interventions` are provably `{}`. The limb stays loose here
+  // for every one of those options. What is carved out is exactly one option,
+  // by the same strict `is_baseline === true` predicate
+  // `analysable-option-gate.ts::isBaselineOption` uses to HOLD it for the run —
+  // an option whose emptiness is a complete statement rather than a missing one.
+  //
+  // ⚠ WITHOUT THIS, FIXING ONLY THE PER-OPTION STATUS MAKES THINGS WORSE, NOT
+  // BETTER: every option reports `ready`, `appendSemanticIssues` mints nothing,
+  // and the payload still says `needs_user_mapping` — a model blocked with ZERO
+  // blockers, the exact shape recorded at `compose/analysis-state-v1.ts`. The
+  // user would lose the (wrong) explanation and keep the (wrong) block.
+  const isHeldBaseline = (o: OptionForAnalysisT): boolean => o.is_baseline === true;
   const hasIncompleteOptions = analysisOptions.some(
-    (o) => o.status === "needs_user_mapping" || Object.keys(o.interventions).length === 0
+    (o) =>
+      o.status === "needs_user_mapping"
+      || (Object.keys(o.interventions).length === 0 && !isHeldBaseline(o))
   );
   const hasEncodingNeeded = analysisOptions.some(
     (o) => o.status === "needs_encoding"
@@ -1002,7 +1101,11 @@ export function buildAnalysisReadyPayload(
   // This ensures the payload passes validation (needs_user_mapping requires user_questions)
   if (hasIncompleteOptions && uniqueQuestions.length === 0) {
     const incompleteOptionLabels = analysisOptions
-      .filter((o) => o.status === "needs_user_mapping" || Object.keys(o.interventions).length === 0)
+      .filter(
+        (o) =>
+          o.status === "needs_user_mapping"
+          || (Object.keys(o.interventions).length === 0 && !isHeldBaseline(o)),
+      )
       .map((o) => o.label)
       .slice(0, 3); // Limit to first 3 for readability
 

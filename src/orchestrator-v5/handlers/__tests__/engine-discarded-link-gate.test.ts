@@ -215,17 +215,40 @@ describe('the residual is pinned exactly, not left invisible', () => {
     return out.sort();
   };
 
-  it('EXACTLY two option-incident shapes pass the gate, and they are the two ALLOWED_EDGES admits', () => {
+  it('EXACTLY two option-incident shapes pass the gate, and both have a non-edge carrier', () => {
     expect(admittedIncidentPairs()).toEqual(['decision->option', 'option->factor']);
   });
 
-  it('the pass-list is DERIVED from ALLOWED_EDGES, not hand-listed beside it', () => {
-    const fromMatrix = ALLOWED_EDGES.filter(
+  /**
+   * ⭐⭐ THIS TEST REPLACES ONE THAT ASSERTED THE PASS-LIST WAS DERIVED FROM
+   * `ALLOWED_EDGES`, AND IT REPLACES IT BECAUSE THAT PREMISE WAS FALSIFIED.
+   *
+   * CEE legality and engine survival are two questions (CLAUDE.md trap 21). They
+   * agreed until `option → risk` was admitted as a retained hypothesis — correct
+   * for CEE, and no carrier. Deriving the pass-list from `ALLOWED_EDGES` therefore
+   * made this gate stop firing on the exact shape of its own witnessed P0, and the
+   * file collected ZERO tests rather than failing.
+   *
+   * The anti-mirror property the old test protected is kept: the firing set below
+   * is still DERIVED from `ALLOWED_EDGES` and from the gate's own behaviour — only
+   * the direction changed. Pinned as an EXACT set (trap 22f's known-set rule), so
+   * a future option-incident admission REDs here with its shape named, instead of
+   * silently widening the exemption.
+   *
+   * To resolve a RED: decide whether the new shape has a carrier past
+   * `filterOptionNodes`. If it does, add it to `ENGINE_CARRIED_SHAPES` with the
+   * carrier named. If it does not — as `option → risk` does not — add it here.
+   */
+  it('every option-incident shape CEE admits either has a carrier or FIRES the gate', () => {
+    const optionIncident = ALLOWED_EDGES.filter(
       (r) => r.fromKind === 'option' || r.toKind === 'option',
     )
       .map((r) => `${r.fromKind}->${r.toKind}`)
       .sort();
-    expect(admittedIncidentPairs()).toEqual(fromMatrix);
+    const passes = admittedIncidentPairs();
+    const firesInstead = optionIncident.filter((pair) => !passes.includes(pair)).sort();
+    expect(firesInstead).toEqual(['option->risk']);
+    expect([...passes, ...firesInstead].sort()).toEqual(optionIncident);
   });
 
   it('RESIDUAL, stated: a DECISION-incident link with no option does NOT fire, because this gate\'s question would not fit it', () => {

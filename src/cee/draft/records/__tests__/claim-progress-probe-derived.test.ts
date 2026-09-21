@@ -144,16 +144,213 @@ const HISTORIC_V7_GRAMMAR_SHA256 =
  * INCLUDING the draws in which the dropped-limit defect was witnessed, and a
  * reader of those logs must be able to tell which grammar produced them.
  */
-const PINNED_GRAMMAR_SHA256 =
+const HISTORIC_V8_GRAMMAR_SHA256 =
   "3da0c71e7ea918fb652965fd64cf185072ec4a7aad70698386b59262145b868a";
 
+/**
+ * ⭐ v9 — `unit` on `claims[]`. ONE optional string, closing the field a
+ * MODEL-AUTHORED quantity never had: WHAT ITS OWN NUMBER IS MEASURED IN.
+ *
+ * ⚠ WHY IT WAS WORTH A GRAMMAR CHANGE, which this boundary sets a high bar for.
+ * The unit-family safety gate reads `nodeDeclaredUnit(target)`, which reads
+ * `data.unit`. Every unit write site in the projector read `item.unit` — from a
+ * STATED item — so for anything the model authored `targetFamily` was
+ * `undefined` BY CONTRACT, and the gate's conjunction
+ *   `limitFamily !== "unknown" && targetFamily !== "unknown" && …`
+ * could never hold. **The gate was one-sided not by oversight but because the
+ * other side could not exist.** Measured the same night: across the six banked
+ * 15 Sep record sets, 21 of 22 factor claims carry no value field at all, and
+ * across 25 September bundles every one of the six stated limits fails to reach
+ * a measurable target — including one bound to a factor, the RIGHT kind, which
+ * is what refutes "filter the kinds" as the fix.
+ *
+ * ⭐ AND IT IS WHY FOUR MAGNITUDE-BASED SCALE DETECTORS WERE REFUTED in a row
+ * (#1543): each was trying to reconstruct from `0.85` beside `80000` a fact the
+ * producer was never able to state. The model already knows the unit; it had
+ * nowhere to write it down — the same sentence v8 was registered under, one
+ * field along.
+ *
+ * ⛔ DECLARING IS NOT THE THING ALREADY REFUTED. An earlier attempt BORROWED a
+ * unit from a figure cited in `basis` whenever `claim.value` equalled it, and
+ * review killed it with two reproductions — a £49 PRICE read onto a subscriber
+ * COUNT, and a PROPOSED 59 read as a CURRENT 59. Inferring a unit is a
+ * fabrication; the model stating one is a declaration. Nothing is borrowed and
+ * no `extractionType` is earned.
+ *
+ * COST against the budget that actually binds, MEASURED at this tip via
+ * `measureDraftRecordsSchemaBudget`, not estimated: +25 serialised bytes
+ * (1349 → 1374, against 3400) and +1 optional parameter (18 → 19, against 24).
+ * NO new object schema (3, unchanged) and NO union (0, unchanged).
+ *
+ * ⚠⚠ NOTE THE HEADROOM, because it constrains what comes next: 19 of 24
+ * optional parameters are now used. `role` and `representation` — the other two
+ * quantity-semantics fields a claim cannot express — would take it to 21. The
+ * remaining budget is real and small, so the next field is a decision, not a
+ * habit.
+ *
+ * ⚠ THE STATIC BUDGET IS NOT EVIDENCE ABOUT THE COMPILED BOUNDARY, which is
+ * unpublished and was established empirically. Asserted here: the serialised
+ * size and the SHAPE. A live compiled-grammar probe with a 400-producing
+ * negative control needs provider credentials and is OWED, not cleared.
+ *
+ * ⚠ v8's VALUE STAYS AND IS ASSERTED DISTINCT: every draft between the v8
+ * change and this one emitted `grammar_sha256:3da0c71e…`, including every draw
+ * in which the mixed-scale defect was witnessed, and a reader of those logs
+ * must be able to tell which grammar produced them.
+ */
+const HISTORIC_V9_GRAMMAR_SHA256 =
+  "c713248012a8e7a3f547ad83c687b5269004596eb37ec7b8fb1aab5e0f2a014d";
+
+/**
+ * ⭐ v10 — `value_scale` on `claims[]`. ONE optional enum, closing the field a
+ * model-authored quantity never had: WHAT ITS OWN NUMBER MEANS.
+ *
+ * v9 gave the model somewhere to write what a number is MEASURED IN. It still
+ * had nowhere to write what the number IS. Under `unit: "%"`, `4` and `0.04` are
+ * both well-formed and mean the same thing, and v9 could not tell them apart.
+ *
+ * ⚠ WHY IT WAS WORTH A GRAMMAR CHANGE, which this boundary sets a high bar for.
+ * Measured on a live v202 draw (17 Sep, pricing brief, banked at
+ * `output/olumi-evidence-20260917-inert-quantities/prompt-v202/`): factor
+ * `ab78e513` "Monthly Churn Rate", brief *"churn is currently 4% a month"* —
+ *
+ *     scale_frame = 100
+ *       baseline      raw 0.04  -> level 0.0004
+ *       intervention  raw 5.5   -> level 0.055
+ *
+ * Baseline and intervention are levels on ONE axis by construction. A real
+ * x1.375 move is carried as x137.5 and the baseline is understated 100x.
+ * `deriveFactorScaleFrame` must pick ONE frame per factor and pins it from
+ * `Math.max(...)`, so a sub-1 member inherits the frame the >1 member earned.
+ * Pinned in `percent-frame-straddles-one.test.ts` (CEE #1561).
+ *
+ * ⭐ AND IT IS WHY THE FRAME CANNOT BE FIXED WITH A BETTER MAGNITUDE TEST — the
+ * repair lane had already written the reason down, about this exact harm
+ * (`repair/unreachable-factors.ts:337`): *"THE TWO HARMS CANNOT SHARE ONE WINDOW
+ * — a single `value > 1` test tries to serve both and serves the wrong one on
+ * non-compliant input."* `unitPinnedScaleFrame`'s `magnitude > 1` IS that test.
+ * A window cannot be widened into evidence. Same sentence v8 and v9 were
+ * registered under, one field along: the model knows; it had nowhere to say so.
+ *
+ * ⛔ AND THE STAMP IS FROM THE DECLARATION, NEVER FROM THE MAGNITUDES, which was
+ * my first instinct and is worse than absence. `display-value.ts:541` states the
+ * condition from the consumer side: *"if any producer ever stamps
+ * `declared_scale` WITHOUT deriving the prior from the same value, this read
+ * must be re-verified before it is trusted."* A sniff is visibly a guess; a
+ * declaration is trusted. Laundering one into the other is the worst available
+ * move, and the contract says absence is safe: *"A consumer MUST NOT treat
+ * absence as `unit_interval`."*
+ *
+ * ⚠ NOT A DARK FIELD, and that was checked rather than assumed. `projector.ts`
+ * stamps `node.declared_scale` from `claim.value_scale`, and
+ * `transforms/schema-v3.ts:660` already passes `anyNode.declared_scale` into
+ * `synthesiseRangeDisplayValue` — a LIVE reader, on the `prior` display path,
+ * which 2 of 9 drafted factors took across the two banked draws. The
+ * `observed_state` path (7 of 9) has NO reader for it yet; that consumer is a
+ * separate change and is NOT claimed here.
+ *
+ * COST against the budget that actually binds, MEASURED at this tip via
+ * `measureDraftRecordsSchemaBudget`, not estimated: +77 serialised bytes
+ * (1374 -> 1451, against 3400) and +1 optional parameter (19 -> 20, against 24).
+ * NO new object schema (3, unchanged) and NO union (0, unchanged). The 77 bytes
+ * are mostly the three enum tokens; `unit` cost 25 as a bare string.
+ *
+ * ⚠⚠ THE HEADROOM IS NOW 4 OPTIONAL PARAMETERS. `role` and `representation`
+ * would take it to 22 of 24. The next field is a decision, not a habit, and the
+ * one after it is close to the last.
+ *
+ * ⚠ THE STATIC BUDGET IS NOT EVIDENCE ABOUT THE COMPILED BOUNDARY, which is
+ * unpublished and was established empirically. Asserted here: the serialised
+ * size and the SHAPE. The live compiled-grammar probe with a 400-producing
+ * negative control is still OWED, not cleared — unchanged from v9.
+ *
+ * ⚠ v9's VALUE STAYS AND IS ASSERTED DISTINCT: every draft between the v9 change
+ * and this one emitted `grammar_sha256:c7132480…`, INCLUDING both live v202
+ * draws that measured the churn defect above, and a reader of those logs must be
+ * able to tell which grammar produced them.
+ */
+const HISTORIC_V10_GRAMMAR_SHA256 =
+  "d4f4201dd7422ce5c3f41fe1c1046dc9a101eb9b60c0b304451f330a2bb27dbe";
+
+/**
+ * ⭐⭐ v11 — THE `likelihood` DESTINATION (instruction v20.2). ONE optional
+ * `{ type: "number" }` on the claim item, and nothing else.
+ *
+ * ⚠ THE SUPERSEDED VALUE IS KEPT ABOVE, AND ASSERTED DISTINCT BELOW, for the
+ * reason every value above it is kept: every draft emitted between the
+ * `value_scale` widening and this one carries `grammar_sha256:d4f4201d…`,
+ * including every draw behind the measured risk 0/3 and outcome 0/2 this change
+ * exists to move, and a reader of those logs must be able to tell which grammar
+ * produced them. `d4f4201d…` is also the value `staging` serves until this
+ * lands.
+ *
+ * ⛔ THE PIN MOVED BECAUSE THE ARTEFACT MOVED BY DESIGN, and that was DERIVED
+ * rather than read off a diff — re-pinning to "whatever it is now" would launder
+ * an accident into a registration. THE DISCRIMINATING CONTROL, run at this tip:
+ * delete ONLY the `likelihood` property from the built schema and re-hash. It
+ * reproduces `d4f4201dd7422ce5c3f41fe1c1046dc9a101eb9b60c0b304451f330a2bb27dbe`
+ * EXACTLY — the constant above. So the grammar moved for exactly one reason and
+ * carries exactly one new field; a second, unnoticed change would have left that
+ * control disagreeing with the value staging serves.
+ *
+ * ⚠ COST, MEASURED on both arms via `measureDraftRecordsSchemaBudget()`, not
+ * estimated: +31 serialised bytes (1451 -> 1482, against 3400) and +1 optional
+ * parameter (20 -> 21, against Anthropic's 24). NO new object schema (3,
+ * unchanged) and NO union (0, unchanged). The headroom is now THREE optional
+ * parameters — the next field is a decision, not a habit.
+ */
+/**
+ * SUPERSEDED — the grammar in which `value_scale` existed on `claims[]` ONLY.
+ *
+ * Kept, not overwritten. Every draft between v10 and v11 emitted this hash, and
+ * the measurement that motivated v11 — `declared_scale` present on 0 of 92
+ * nodes across 9 real sessions, 19-21 Sep 2026 — is evidence ABOUT THIS
+ * GRAMMAR. Re-pointing the literal would let that finding read as a finding
+ * about v11, which is the artefact intended to fix it.
+ */
+const SUPERSEDED_V10_GRAMMAR_SHA256 =
+  "bfbbe10037f2d52e603c6b3f0389adc61f62febce3f48748fb035a5ede2835a5";
+
+const PINNED_GRAMMAR_SHA256 =
+  // ⚠ RE-PINNED with v11 (`value_scale` on `stated_items`). This hash is over
+  // `JSON.stringify(buildDraftRecordsSchema())` — the BUILT OBJECT the adapter
+  // attaches, not the file — so it moves when a FIELD is added and cannot move
+  // for a comment. That is what makes it the strongest of the three pins, and
+  // it is why adding a grammar field moves it while the instruction pins move
+  // independently: 1482 -> 1559 bytes.
+  //
+  // ⭐ THE BUDGET WAS MEASURED BEFORE THE FIELD WAS ADDED, NOT AFTER: predicted
+  // 1559 bytes / 22 optional params from the schema's own shape, then confirmed
+  // against `measureDraftRecordsSchemaBudget()` — the authority — which agreed
+  // to the byte. 2 optional slots remain against Anthropic's 24, so the next
+  // field is a decision and not a habit.
+  "321681de308163b4b9420cdcf873e668cd16830d022874eac0f2f920ef30ad88";
+
 describe("the claim-progress probe is derived from the grammar", () => {
-  it("hashes to the PRE-REGISTERED v8 grammar the provider receives", () => {
+  it("hashes to the PRE-REGISTERED v11 grammar the provider receives", () => {
     expect(draftRecordsGrammarHash()).toBe(PINNED_GRAMMAR_SHA256);
   });
 
   it("is DISTINCT from the v7 grammar, so the dropped-limit draws stay attributable to it", () => {
     expect(draftRecordsGrammarHash()).not.toBe(HISTORIC_V7_GRAMMAR_SHA256);
+    // v8 kept distinct for the same reason as v3-v7: every draft between the
+    // applies_to widening and the `unit` widening emitted `3da0c71e…`, and a
+    // reader of those logs must be able to tell which grammar produced them.
+    expect(draftRecordsGrammarHash()).not.toBe(HISTORIC_V8_GRAMMAR_SHA256);
+    // v9 kept distinct for the same reason: both live v202 draws that measured
+    // the x137.5 churn carry emitted `c7132480…`, and that evidence must stay
+    // attributable to the grammar that produced it.
+    expect(draftRecordsGrammarHash()).not.toBe(HISTORIC_V9_GRAMMAR_SHA256);
+    // v10 kept distinct for the same reason, and it is the one that matters
+    // most right now: the `declared_scale` 0-of-92 census was measured against
+    // v10, so that evidence must stay attributable to the grammar in which the
+    // user's own numbers had nowhere to declare.
+    expect(draftRecordsGrammarHash()).not.toBe(SUPERSEDED_V10_GRAMMAR_SHA256);
+    // v10 kept distinct for the same reason, and it is the value `staging`
+    // serves: every draft taken before the `likelihood` destination emitted
+    // `d4f4201d…`, including every draw behind the measured risk 0/3 and
+    // outcome 0/2 this change exists to move.
+    expect(draftRecordsGrammarHash()).not.toBe(HISTORIC_V10_GRAMMAR_SHA256);
   });
 
   it("is DISTINCT from the historic v6 grammar, so #1287's capture stays attributable", () => {

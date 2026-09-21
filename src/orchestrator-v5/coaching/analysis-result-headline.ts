@@ -102,6 +102,17 @@ import {
   INTAKE_OPTION_DISCLOSURE_RE_SRC,
   INTAKE_OPTION_DISCLOSURE_MAX_CHARS,
 } from './intake-option-disclosure.js';
+// ⭐ THE SEPARABILITY DISCLOSURE — the SEVENTH suffix, and the first that is
+// about the VERDICT rather than about input quality. It exists because THIS
+// module computed `separation` and `contenders` at the withhold below and threw
+// both away, leaving a run whose ranking we judged unsupportable described to
+// the person as "Ran analysis on your current scenario." and nothing else.
+// Same three pieces of plumbing as its six siblings, for the same reason.
+import {
+  SEPARABILITY_DISCLOSURE_RE_SRC,
+  SEPARABILITY_DISCLOSURE_MAX_CHARS,
+  type SeparabilityWithhold,
+} from './separability-disclosure.js';
 // The objective-contradiction honesty surface (pricing-objective FINDINGS fix
 // 1) — the fourth tail, and the same three pieces of plumbing for the same
 // reason as the three above. Without them the disclosure composes correctly,
@@ -132,6 +143,17 @@ import {
   UNSET_OPTION_EFFECT_DISCLOSURE_RE_SRC,
   UNSET_OPTION_EFFECT_DISCLOSURE_MAX_CHARS,
 } from './unset-option-effect-disclosure.js';
+// The run-level PARTICIPATION disclosure rides LAST. It is registered on the
+// withheld branch for the SAME reason as the tail above and by the SAME test:
+// it names no option, asserts no leader and makes no comparative claim — it
+// states only which parts of the user's own model the calculation did not
+// receive, and how many connections went with them. That is true on a withheld
+// turn, and a user whose model was silently reduced is owed it there most of
+// all.
+import {
+  ANALYSIS_PARTICIPATION_DISCLOSURE_RE_SRC,
+  ANALYSIS_PARTICIPATION_DISCLOSURE_MAX_CHARS,
+} from './analysis-participation-disclosure.js';
 // P1-3 (derive, don't mirror): the defence-in-depth content rules live in
 // their own leaf module so the scaffold-disclosure BUILDER validates its
 // composed suffix against the SAME functions this egress allowlist applies
@@ -357,7 +379,24 @@ export const MAX_ASSISTANT_TEXT_CHARS =
   // incomplete candidate set, contradict the stated objective AND have run past
   // an unset option effect. Same rule: budgeted from the builder's own worst
   // case, never hand-estimated.
-  UNSET_OPTION_EFFECT_DISCLOSURE_MAX_CHARS;
+  UNSET_OPTION_EFFECT_DISCLOSURE_MAX_CHARS +
+  // The participation disclosure rides LAST (matching the handler's append
+  // order) and can co-occur with all five above: a run can hold a status quo,
+  // carry an unevaluated constraint, rank an incomplete candidate set,
+  // contradict the stated objective, have run past an unset option effect AND
+  // have been computed on a model the user had excluded parts of. Same rule:
+  // budgeted from the builder's own worst case, never hand-estimated.
+  ANALYSIS_PARTICIPATION_DISCLOSURE_MAX_CHARS +
+  // ⚠ CORRECTED 21 Sep 2026: this read "rides FIRST of the suffixes", which was
+  // false at the commit that wrote it — a leftover from the build where it DID
+  // ride first, before that was changed back (`run-analysis.ts` records why).
+  // The separability disclosure rides LAST of the suffixes (matching the
+  // handler's append order) and CANNOT co-occur with a headline — it ships only
+  // where `computeHeadline` returned `text: null` under `options_not_separable`.
+  // It can co-occur with every other suffix, though: a run can be unseparable
+  // AND scaffolded AND carrying an unevaluated constraint. Same rule as its six
+  // siblings: budgeted from the builder's own worst case, never hand-estimated.
+  SEPARABILITY_DISCLOSURE_MAX_CHARS;
 
 /**
  * Minimum win_probability for the leading option before the headline may emit a
@@ -654,6 +693,23 @@ export interface HeadlineDescriptor {
   readonly has_driver: boolean;
   readonly has_fragility: boolean;
   readonly margin_bucket: 'tight' | 'moderate' | 'comfortable' | null;
+  /**
+   * ⭐ THE TWO VALUES THIS MODULE USED TO DISCARD, carried so the handler can
+   * tell the person WHY nothing was put forward — without re-running
+   * `isFieldUnseparable`, which would be a second derivation of a meaning with
+   * exactly one owner (CLAUDE.md trap 12) and could describe a different field.
+   *
+   * ⚠ NAMED FOR THE WITHHOLD, NOT FOR THE RUN. `null` means *the separability
+   * gate did not withhold*. It does NOT mean the field was separable, and it
+   * does NOT mean nothing was measured — the gate is consulted on one path
+   * only, after every sibling authority has declined. Reading this as "the
+   * run's separation" is trap 20: an honest scope generalised at the moment it
+   * is recorded.
+   *
+   * Never emitted as telemetry: `V5HeadlineFellBack` spreads named scalars and
+   * fires only on `case === 'E'`, which this path is not.
+   */
+  readonly separability_withhold: SeparabilityWithhold | null;
 }
 
 interface HeadlineResult {
@@ -718,6 +774,9 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
         has_driver: false,
         has_fragility: false,
         margin_bucket: null,
+        // The separability gate is consulted AFTER this withhold and was never
+        // reached, so `null` here means "not consulted" — never "separable".
+        separability_withhold: null,
       },
     };
   }
@@ -750,6 +809,9 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
         has_driver: false,
         has_fragility: false,
         margin_bucket: null,
+        // The separability gate is consulted AFTER this withhold and was never
+        // reached, so `null` here means "not consulted" — never "separable".
+        separability_withhold: null,
       },
     };
   }
@@ -772,6 +834,9 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
         has_driver: false,
         has_fragility: false,
         margin_bucket: null,
+        // The separability gate is consulted AFTER this withhold and was never
+        // reached, so `null` here means "not consulted" — never "separable".
+        separability_withhold: null,
       },
     };
   }
@@ -796,6 +861,9 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
         has_driver: false,
         has_fragility: false,
         margin_bucket: null,
+        // The separability gate is consulted AFTER this withhold and was never
+        // reached, so `null` here means "not consulted" — never "separable".
+        separability_withhold: null,
       },
     };
   }
@@ -819,6 +887,9 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
         has_driver: false,
         has_fragility: false,
         margin_bucket: null,
+        // The separability gate is consulted AFTER this withhold and was never
+        // reached, so `null` here means "not consulted" — never "separable".
+        separability_withhold: null,
       },
     };
   }
@@ -1391,11 +1462,19 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
   if (separability.unseparable) {
     return {
       text: null,
-      descriptor: buildDescriptor(null, 'options_not_separable', {
-        hasDriver,
-        hasFragility,
-        marginBucket,
-      }),
+      descriptor: buildDescriptor(
+        null,
+        'options_not_separable',
+        { hasDriver, hasFragility, marginBucket },
+        // ⭐ THE DISCARD THIS CHANGE CLOSES. `separation` is non-null on this
+        // branch by construction — `isFieldUnseparable` returns
+        // `unseparable: false` when it is null — but the type does not narrow,
+        // so the guard is explicit rather than asserted. A null here degrades
+        // to "no disclosure", never to a disclosure with an invented number.
+        separability.separation === null
+          ? null
+          : { separation: separability.separation, contenders: separability.contenders },
+      ),
     };
   }
 
@@ -1454,6 +1533,11 @@ function buildDescriptor(
   caseKind: HeadlineCase,
   reason: HeadlineFallbackReason,
   args: { hasDriver: boolean; hasFragility: boolean; marginBucket: 'tight' | 'moderate' | 'comfortable' | null },
+  // ⭐ OPTIONAL, AND PASSED FROM EXACTLY ONE CALL SITE — the separability
+  // withhold. Defaulting to `null` keeps all nineteen other descriptor sites
+  // byte-identical, so this change cannot alter a reason code, a telemetry
+  // field or a headline anywhere else.
+  separabilityWithhold: SeparabilityWithhold | null = null,
 ): HeadlineDescriptor {
   return {
     case: caseKind,
@@ -1463,6 +1547,7 @@ function buildDescriptor(
     has_driver: args.hasDriver,
     has_fragility: args.hasFragility,
     margin_bucket: args.marginBucket,
+    separability_withhold: separabilityWithhold,
   };
 }
 
@@ -2198,7 +2283,7 @@ const REDUCED_SAMPLES_RE_SRC = escapeForRegex(REDUCED_SAMPLES_SUFFIX);
 // `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}${
 // intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}`
 // in the run_analysis handler.
-const TAIL_PATTERN = `(?:${NOT_ROBUST_RE_SRC})?(?:${ELIMINATED_RE_SRC})?(?:${REDUCED_SAMPLES_RE_SRC})?${STATUS_SUFFIX_PATTERN}(?:${SCAFFOLD_ANY_DISCLOSURE_RE_SRC})?(?:${CONSTRAINT_GAP_DISCLOSURE_RE_SRC})?(?:${INTAKE_OPTION_DISCLOSURE_RE_SRC})?(?:${OBJECTIVE_CONTRADICTION_RE_SRC})?(?:${UNSET_OPTION_EFFECT_DISCLOSURE_RE_SRC})?`;
+const TAIL_PATTERN = `(?:${NOT_ROBUST_RE_SRC})?(?:${ELIMINATED_RE_SRC})?(?:${REDUCED_SAMPLES_RE_SRC})?${STATUS_SUFFIX_PATTERN}(?:${SCAFFOLD_ANY_DISCLOSURE_RE_SRC})?(?:${CONSTRAINT_GAP_DISCLOSURE_RE_SRC})?(?:${INTAKE_OPTION_DISCLOSURE_RE_SRC})?(?:${OBJECTIVE_CONTRADICTION_RE_SRC})?(?:${UNSET_OPTION_EFFECT_DISCLOSURE_RE_SRC})?(?:${ANALYSIS_PARTICIPATION_DISCLOSURE_RE_SRC})?`;
 
 /** One disclosure family admitted on the locked-template (withheld) branch. */
 export interface TemplateSuffixDisclosureGrammar {
@@ -2286,6 +2371,42 @@ export const TEMPLATE_SUFFIX_DISCLOSURE_GRAMMARS: readonly TemplateSuffixDisclos
     name: 'UNSET_OPTION_EFFECT_DISCLOSURE_RE_SRC',
     source: UNSET_OPTION_EFFECT_DISCLOSURE_RE_SRC,
   },
+  // ⭐ REGISTERED, NOT EXCLUDED, and the test is the one stated above: does the
+  // tail make a claim the withhold just denied? This one states which parts of
+  // the user's own model the calculation did not receive and how many of their
+  // connections went with them. No option is named, no ranking is asserted, no
+  // leader is implied — so `template + tail` is a composition the handler can
+  // and does emit, and a withheld turn computed on a reduced model is exactly
+  // the turn where the fact matters most.
+  //
+  // ⚠ REGISTERING IT HERE IS ALSO WHAT KEEPS IT SALVAGED. Moving this entry to
+  // the exclusion list with a plausible reason leaves the completeness guard's
+  // union assertion GREEN while the withheld branch stops admitting it and the
+  // confirmation salvage stops rescuing it — green, and wrong. That half is
+  // pinned per-family in
+  // `tools/handlers/__tests__/run-analysis-participation-disclosure-wiring.test.ts`.
+  {
+    name: 'ANALYSIS_PARTICIPATION_DISCLOSURE_RE_SRC',
+    source: ANALYSIS_PARTICIPATION_DISCLOSURE_RE_SRC,
+  },
+  // ⭐ REGISTERED, NOT EXCLUDED, and the test is the one the
+  // OBJECTIVE_CONTRADICTION exclusion below states: does the tail make a claim
+  // the withhold just denied? This one says only that N options finished level
+  // and that therefore nothing is being put forward — it ASSERTS the withhold
+  // rather than contradicting it. It names no option, asserts no ranking, and
+  // implies no leader. So `template + tail` is a composition the handler can
+  // and does emit, and a withheld run is the ONLY turn on which it ships.
+  //
+  // ⚠ LAST, mirroring the handler's append order — which is what
+  // `TEMPLATE_SUFFIX_ONLY_REGEX` compiles, so this position is load-bearing and
+  // not cosmetic. `run-analysis.ts` records why the append order is what it is.
+  //
+  // ⚠ AND DELIBERATELY ABSENT FROM `TAIL_PATTERN`. That pattern is the HEADLINE
+  // branch; a shape reached via a headline is a shape where the separability
+  // gate did NOT fire (`separability_withhold` is non-null only where
+  // `computeHeadline` returned `text: null`), so admitting it there would admit
+  // a sentence the handler can never emit.
+  { name: 'SEPARABILITY_DISCLOSURE_RE_SRC', source: SEPARABILITY_DISCLOSURE_RE_SRC },
 ];
 
 /** A `*_RE_SRC` grammar that is deliberately NOT on the template branch. */

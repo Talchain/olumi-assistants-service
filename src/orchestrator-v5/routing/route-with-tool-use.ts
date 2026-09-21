@@ -1186,6 +1186,37 @@ function enforceForcedExecute(
 // Exported for Context-v2 S0 budget measurement (turn-executor): the routing
 // call site measures the EXACT embedded prompt bytes by re-running this pure
 // builder, rather than approximating over a compact pack serialisation.
+/**
+ * Does the model-facing analysis projection actually SERIALISE simulation
+ * shares on this turn?
+ *
+ * ⚠ STRUCTURAL, NEVER LINGUISTIC, and derived from the bytes the coach will
+ *   read rather than from a status token. `llmFacing.analysis` is the
+ *   display-safe projection (`model-facing-context-pack.ts` surfaces
+ *   `display_analysis` under that key). No share in the pack means no number
+ *   to misread, so no definition is owed — the same co-located-conditional
+ *   rule `MARGIN_MEANING_INSTRUCTION` follows.
+ *
+ * ⛔ A SHARE IS A DISPLAY STRING HERE, NOT A DECIMAL, and my first cut tested
+ *    for a number. `DisplaySafeAnalysisOption.win_probability` is typed
+ *    `string` and formatted `"86%"` / `">99%"` / `"<1%"`
+ *    (`format/format-analysis-for-context.ts:39-48`) — the raw decimal never
+ *    reaches this projection. The check therefore matched nothing on a real
+ *    pack, and my own spec agreed with it because the fixture I wrote carried
+ *    `0.55`. A fixture written from my head is not evidence about the wire
+ *    (CLAUDE.md trap 16); the derived `prompt-pack-sanction` gate, which
+ *    assembles a REAL pack, is what caught it.
+ */
+function displayAnalysisCarriesSimulationShares(analysis: unknown): boolean {
+  const options = (analysis as { readonly options?: unknown } | null | undefined)?.options;
+  if (!Array.isArray(options)) return false;
+  return options.some((option) => {
+    if (option === null || typeof option !== 'object') return false;
+    const share = (option as { readonly win_probability?: unknown }).win_probability;
+    return typeof share === 'string' && share.trim().length > 0;
+  });
+}
+
 export function buildUserMessage(contextPack: ContextPack, message: string): string {
   // Design principle: raw model values stay in structured state for
   // handlers, telemetry, freshness hashing, and edit_graph dispatch;
@@ -1272,6 +1303,24 @@ export function buildUserMessage(contextPack: ContextPack, message: string): str
   ) {
     parts.push('', MARGIN_MEANING_INSTRUCTION);
   }
+  // ⭐⭐ WHAT A SIMULATION SHARE IS. The SAME mechanism as the margin block
+  // directly above — emitted by the condition that SERIALISES the shares, so a
+  // number and its definition cannot travel apart — and the reason it is here
+  // rather than on the provisional arm is in
+  // {@link SIMULATION_SHARE_MEANING_INSTRUCTION}: a single figure the person
+  // typed crosses the admission floor and used to take this sentence with it.
+  //
+  // ⚠ ONE SENTENCE, ONE OWNER — and a derived gate is what settled the shape.
+  //   My first cut left the reading in the provisional block and suppressed
+  //   this one on that arm. `prompt-pack-sanction.gate`'s EMISSION check REDs
+  //   on that: a code-owned instruction that no maximal pack can render is
+  //   either dead or mutually exclusive with a sibling, and it refuses both.
+  //   It was right. The reading now lives here alone and is emitted whenever
+  //   the shares are, on EVERY admission arm; the provisional block keeps only
+  //   its qualification lines. No duplication, no exclusion, no drift.
+  if (displayAnalysisCarriesSimulationShares(llmFacing.analysis)) {
+    parts.push('', SIMULATION_SHARE_MEANING_INSTRUCTION);
+  }
   // Coaching Context Pack v1 (CEE_COACHING_CONTEXT_PROMPT_ENABLED): a narrow,
   // additive receive-vs-author instruction, appended ONLY when the deterministic
   // `coaching_context` pack was injected (flag on). Flag-off → the field is
@@ -1355,6 +1404,26 @@ export function buildUserMessage(contextPack: ContextPack, message: string): str
   // instruction says so in the arm where it IS emitted.
   if (contextPack.factor_values !== undefined) {
     parts.push('', FACTOR_VALUES_INSTRUCTION);
+  }
+  // STANDING OBJECTIONS — CODE-OWNED, appended by the SAME condition that puts
+  // `stated_objections` on the pack. Absent key → no section → no instruction →
+  // byte-identity with pre-change prompts for every scenario in which the user
+  // has not objected to anything.
+  //
+  // ⚠ PLACED AFTER the contiguous GRAPH_CONTEXT + DISPLAY_GRAPH +
+  // RECENT_CHANGES span on purpose — `route-with-tool-use.focus.spec.ts`
+  // locates that span as one marker and a block inserted inside it makes its
+  // historical golden unsubtractable. Same reason MARGIN_MEANING_INSTRUCTION
+  // sits where it does.
+  //
+  // ⚠ THIS BLOCK IS HALF THE CHANGE AND THE PACK FIELD IS THE OTHER HALF, the
+  // failure `GOAL_TARGET_INSTRUCTION` and `FACTOR_VALUES_INSTRUCTION` both
+  // name: the served V5 system prompt is an operator-managed PMS row, so a
+  // field added to the pack with no code-owned sanction is a field the model
+  // has never been told how to read — which is exactly how `model_health`
+  // governed nothing for months.
+  if (contextPack.stated_objections !== undefined) {
+    parts.push('', STATED_OBJECTIONS_INSTRUCTION);
   }
   // RUN-OVER-RUN CONSEQUENCE — ALWAYS RENDERED, like GRAPH_CONTEXT_INSTRUCTION
   // and RECENT_CHANGES_INSTRUCTION above and for the identical reason: this
@@ -1556,6 +1625,96 @@ function isWholeModelSingleFactorBuildQuestion(message: string): boolean {
  * Paul's standing rule is why the second clause exists: always leave the user a
  * useful next route, never an honest dead end.
  */
+/**
+ * ⭐⭐ STANDING OBJECTIONS — the user's own stated disagreement, and the only
+ * instruction block in this file whose purpose is to make the model do LESS
+ * answering, not more.
+ *
+ * WHAT IT GOVERNS. `stated_objections` carries a human's reason, verbatim, for
+ * not accepting a finding this product produced. Before schemas 0.55.0 those
+ * words reached `localStorage` and stopped; before this block they reached a
+ * fact row and stopped. The risk now is not that they are lost — it is that
+ * the model does the WRONG thing with them, and there are two wrong things,
+ * pulling in opposite directions:
+ *
+ *   1. CAPITULATION — treat the objection as a correction, quietly drop the
+ *      finding, and agree. That destroys the disagreement instead of using it,
+ *      and it tells the user their own assertion has been accepted as evidence
+ *      when nothing was measured. It is also a false claim about state: a
+ *      dissent writes NO graph state and moves no `graph_hash`
+ *      (`system-events/dispatch.ts` classifies it `'fact_and_commit'`, never
+ *      `'mutating'`), so a model that speaks as though the model changed is
+ *      describing a change that did not happen.
+ *   2. RE-ASSERTION — repeat the finding unchanged, as though the objection
+ *      had not been made. That is the behaviour this whole seam exists to end.
+ *
+ * ⭐ THE PRODUCT'S POSITION, AND WHY IT IS NEITHER: the humans are the authors
+ * and the decision-makers, and a disagreement between a person and a model is
+ * the most useful thing on the table — it is the point at which the reasoning
+ * can actually be improved. So the licensed move is to make the disagreement
+ * EXPLICIT AND TESTABLE: name what the finding rests on, name what would have
+ * to be true for the user's objection to hold, and hand the judgement back.
+ * That is a reasoning-enhancement act, not an answering act.
+ *
+ * ⚠ AND IT IS A STATED POSITION, NEVER EVIDENCE ABOUT THE WORLD. "The user
+ * says the supplier contract is fixed" is a fact about what the user believes.
+ * Promoting it to "the supplier contract is fixed" would fabricate a
+ * measurement out of an assertion — the same class of error as naming a leader
+ * the verdict withheld.
+ */
+export const STATED_OBJECTIONS_INSTRUCTION = [
+  '## Stated objections (the user\u2019s own words \u2014 authoritative about them, not about the world)',
+  'The `stated_objections` block above lists findings this user has told us they do not accept, each with the reason they typed. These are the user\u2019s words, recorded verbatim. Treat them as the current, standing position of the person you are talking to.',
+  '- Do NOT quietly drop, soften or reverse a finding because it has been objected to. An objection is a claim, not a measurement, and nothing has been recomputed. Agreeing on the strength of it would hand the user back their own assertion dressed as a result.',
+  '- Do NOT repeat the objected-to finding as though the objection had not been made. If the objection is relevant to what the user just asked, acknowledge it in their terms before you go on.',
+  '- An objection changes NOTHING in the model. No value moved, no link changed, no analysis re-ran. Never say or imply that the model or the numbers have been updated because of one, and never treat one as an instruction to edit the model \u2014 if a change to the model would settle it, offer that as the next step and let the user decide.',
+  '- The useful move is to make the disagreement testable: say briefly what the finding rests on, and what would have to be true for the user\u2019s objection to hold instead. Where the two can be told apart by something the user knows or could check, say what that is. Where they cannot be told apart from what is on the record, say that plainly \u2014 an honest open disagreement is a better outcome than a resolved one you invented.',
+  '- The judgement is the user\u2019s. Do not rule on who is right.',
+  '- Never restate a stated objection as if it were established fact about the world, and never carry one across to a different finding or a different decision than the one it names.',
+  '- Reason only over the objections in this block. Never infer that a finding is uncontested because it is absent here \u2014 this block records what was said, not everything the user thinks.',
+  // ⛔⛔ THE CURRENCY CLAUSE. Added 18 Sep 2026 on an independent review
+  // finding, and it is the reason the sentence above ("the current, standing
+  // position") is safe to keep.
+  //
+  // Each objection carries `analysis_id` — the run it was written against.
+  // That stamp is projected into the prompt and IS NEVER COMPARED TO ANYTHING,
+  // because the model-facing pack has no referent for it:
+  // `DisplaySafeAnalysis` carries no run id and no finding ids, and
+  // `projectModelFacingContextPack` destructures `analysis_state` OUT — which
+  // is the only place `graph_hash_at_run` / `current_graph_hash` live. So the
+  // id is an opaque token, and without this clause the instruction asserted a
+  // currency the pack cannot support.
+  //
+  // The reachable harm: a user objects to a finding on run A, edits the model,
+  // re-runs to run B where that finding no longer exists — and the objection
+  // is still inside the 20-turn `prior_facts` window, so it is projected
+  // unchanged beside run B's analysis. The model then reasons from, and
+  // acknowledges, an objection to a finding the current analysis does not
+  // make. Presenting a run-A claim as the user's position on run B is a claim
+  // the user never made.
+  //
+  // ⭐ BOTH PRODUCERS ALREADY SAY THIS IN WRITING, which is why the consumer
+  // owes it: the deployed UI's `dissentStore.ts` header — "A dissent written
+  // against one analysis, shown beside a later one with no caveat, is a claim
+  // the user never made... Consumers compare it and caveat" — and schemas
+  // 0.55.0 `FindingDissentEvent.analysis_id`.
+  //
+  // ⛔ IT IS A CAVEAT, NEVER A GATE. The wire contract is explicit: "It is a
+  // RECORD STAMP, never a stale gate: CEE must not refuse a dissent because
+  // the run has since been superseded." So the fact is still projected in
+  // full and the user's words still reach the model — what changes is only
+  // that the model may not ASSERT the objection is about the current run.
+  //
+  // ⚠ THIS IS THE WEAKER OF THE TWO FIXES THE REVIEW OFFERED, DELIBERATELY.
+  // The stronger one — projecting a currency verdict beside each objection
+  // from the canonical analysis state — is the right end state and is rowed.
+  // It needs the assembler to reach analysis state that the model-facing pack
+  // deliberately excludes, which is a real design question and not a clause.
+  // This closes the false assertion now without pretending to close the
+  // comparison.
+  '- Each objection was made against ONE earlier run of the analysis, and you cannot tell from this prompt whether that run is the one shown to you now. The model may have been edited and re-analysed since. So never state or imply that an objection is about the current analysis, and never present it as the user\u2019s view of a finding in front of you unless they have said so on this turn. Their words still stand as their words — what you do not know is which run they were aimed at. Where it matters to the answer, say so plainly and let the user confirm.',
+].join('\n');
+
 export const READINESS_INSTRUCTION = [
   '## Readiness (deterministic — authoritative)',
   'The `readiness` block above is the system’s verified answer to "can this model be analysed yet?". Treat it as the source of truth and express it in plain language; do not restate its field names or contradict it.',
@@ -1630,8 +1789,11 @@ export const GRAPH_CONTEXT_INSTRUCTION = [
  * ⚠ THAT WAS A NAME COLLISION, NOT AN INCONSISTENCY, AND IT IS FIXED BY NAMING
  * APART RATHER THAN BY ALIGNING (CLAUDE.md trap 21). Three fields answer three
  * questions: `factor_values[].provenance` (*is this factor's value attributable
- * to a person at all?*, vocabulary `user_stated | ai_drafted | system_repaired |
- * unattributed`), `graph.edges[].provenance` (*who asserted this LINK?*), and
+ * to a person at all?*, vocabulary `StructureProvenance` — `user_stated`,
+ * `user_ratified`, `ai_drafted`, `system_repaired`, `unattributed`, and
+ * ⚠ `user_ratified` means AN OLUMI ESTIMATE THE USER ENDORSED, which is NOT a
+ * licence to say the user supplied the figure), `graph.edges[].provenance`
+ * (*who asserted this LINK?*), and
  * node `value_authorship` (*whose NUMBER is this?*). The node field was renamed
  * off `provenance` for exactly this reason, and the last clause below states the
  * boundary to the model so it cannot carry one field's rule across to another.
@@ -1755,7 +1917,12 @@ export const PROVISIONAL_FIGURES_INSTRUCTION = [
   '- You MAY discuss the comparison, including the figures, and you SHOULD, when the person is asking about it. Do not refuse to engage.',
   '- Qualify it every time: say plainly that the figures are provisional and rest on estimates nobody has confirmed yet.',
   '- Do not present the comparison as a settled ranking, a recommendation, or a result the person can act on without reviewing the inputs.',
-  '- A simulation share is how often an option scored highest against the goal, not the probability that the goal is achieved. Do not restate it as a chance of success.',
+  // ⚠ THE READING LINE MOVED, and it moved because it was true on a population
+  //   this block never reaches. See {@link SIMULATION_SHARE_MEANING_INSTRUCTION}:
+  //   one figure the person types into their brief crosses the admission floor
+  //   and lifts this whole block, which used to take "a share is not a chance of
+  //   success" with it. It is now emitted by the condition that serialises the
+  //   shares, so this arm still receives it — from its own owner, exactly once.
   '- No winner or contest framing. Discuss goal fit and what is still uncertain.',
   '- Say what would firm it up — which estimates matter most and what evidence would settle them.',
   '- Do not expose status tokens, internal fields or admission modes.',
@@ -1800,6 +1967,54 @@ export const MARGIN_MEANING_INSTRUCTION = [
   '- It is NOT an outcome gap, NOT an effect size, and NOT the probability that the leader does better by that amount. Two options can differ in share while their outcomes barely differ.',
   '- Discuss it as a difference in how often each option came top, and say what it does not settle. Do not restate it as the size of the advantage.',
   '- The figures come from estimates in this model, so the gap moves when those estimates change. Prefer discussing what would narrow or widen it.',
+  '- Do not expose field names, status tokens or internal identifiers.',
+].join('\n');
+
+/**
+ * ⭐⭐⭐ WHAT A SIMULATION SHARE IS — the half of the provisional block that is
+ * true whoever authored the estimates.
+ *
+ * ⛔ THE REGRESSION THIS CLOSES, and it is a consequence of a fix rather than
+ *    of a bug. `PROVISIONAL_FIGURES_INSTRUCTION` carries two kinds of line
+ *    under one condition:
+ *      · qualification — "every estimate is machine-authored", "do not present
+ *        this as a settled ranking". True only while nothing in the model is
+ *        the person's own.
+ *      · reading — "a simulation share is how often an option scored highest
+ *        against the goal, not the probability that the goal is achieved".
+ *        True of every run that produced a share.
+ *    Both are gated on `analysis_context.status === 'provisional_figures'`,
+ *    which is set only when the admission caps at `quantified_provisional`.
+ *    The admission floor is `material_parameters_user_stated > 0`, so ONE
+ *    figure a person types into their brief moves their run off that arm and
+ *    takes the reading with it. Dropping the qualification is the point;
+ *    dropping the reading leaves the coach free to call a 55% share a 55%
+ *    chance of success, on the very run the person is most likely to act on.
+ *
+ * ⚠ IT SAYS WHAT THE NUMBER MEANS AND RESTRICTS NOTHING. The provisional
+ *   block's "no winner or contest framing" and "not a settled ranking" lines
+ *   are deliberately NOT repeated here: on this arm the product is entitled to
+ *   name a leading option, and quietly re-imposing a restriction the admission
+ *   lifted would be the over-suppression trade running backwards.
+ *
+ * ⚠ THE SENTENCE IS LIFTED, NOT REWRITTEN. It is the ratified line from
+ *   `PROVISIONAL_FIGURES_INSTRUCTION`, so the two blocks cannot drift into
+ *   telling the coach two different things about one number.
+ */
+export const SIMULATION_SHARE_MEANING_INSTRUCTION = [
+  '## What a simulation share is (deterministic authority)',
+  // ⚠ SCOPED TO ONE KEY, NOT TO "each option's percentage". A display option can
+  // carry TWO percentages — `win_probability` AND `target_fit` — and
+  // `format-analysis-for-context.ts` is the authority that they are DIFFERENT
+  // quantities ("an option can win most often yet still be unlikely to meet the
+  // target"; live case 89% win vs 29% target-fit). The first cut of this line
+  // said "each option's percentage", which silently redefined `target_fit` as a
+  // simulation share and contradicted that authority inside the same pack — two
+  // definitions of one number is the defect this instruction exists to prevent.
+  "An option's `win_probability` in `analysis` is how often that option scored highest against the goal across the simulated runs.",
+  '- A simulation share is how often an option scored highest against the goal, not the probability that the goal is achieved. Do not restate it as a chance of success.',
+  '- `target_fit`, when it is present, is a DIFFERENT quantity: the modelled probability that the option meets the target. It is not a simulation share, the two can diverge sharply, and neither may be described in the other\u2019s terms.',
+  '- It is not a confidence in the evidence either. The figures come from estimates in this model, so they move when those estimates change.',
   '- Do not expose field names, status tokens or internal identifiers.',
 ].join('\n');
 
@@ -1895,19 +2110,72 @@ export const BRIEF_INSTRUCTION = [
   '- Never repeat internal field names or framing metadata in user-facing text.',
 ].join('\n');
 
+/**
+ * COACHING STATE — what the model may claim about computed results, and what it
+ * must still do for the person regardless.
+ *
+ * ── THE DEFECT THIS CLOSES ─────────────────────────────────────────────────
+ * Witnessed on deployed staging 2026-09-08 16:47Z (UI 8f65f7c5, CEE dcff3c5,
+ * routing prompt v121/bec840a648800928, one real conversational turn). The user
+ * asked a genuinely strategic question — rapidly rising salaries, a £200,000
+ * budget, "what is the most effective way to spend that money on this
+ * additional resource?" — with the coaching context PRESENT and the analysis
+ * stale. The reply opened "Your model doesn't yet price out either option
+ * against that £200,000", explained how to add a budget ceiling, explained the
+ * staleness, withheld an option and asked whether to set a constraint and
+ * re-run. It never touched the hiring problem: no conditional trade-off between
+ * leadership and delivery capacity, no unknown worth naming (spending period,
+ * fully loaded cost), no question about which bottleneck actually binds.
+ * Every safety property PASSED. The useful-coaching check FAILED.
+ *
+ * ── WHY THE OLD WORDING PRODUCED THAT ──────────────────────────────────────
+ * The unsafe-state bullet said, in full: "do not present the results as
+ * current, and do not recommend one option over another. Say the analysis may
+ * be out of date and suggest re-running it BEFORE GIVING CONFIDENT ADVICE."
+ * Read literally that is a prohibition on ALL advice until a run exists, so the
+ * only thing left to say is how to fix the model. The prohibition that is
+ * actually warranted is narrower by a long way: a missing or stale analysis
+ * means there are no CURRENT COMPUTED RESULTS to quote or rank options by. It
+ * says nothing about whether the person can be helped to think.
+ *
+ * ── WHAT CHANGED, AND WHAT DELIBERATELY DID NOT ────────────────────────────
+ * The block now states the positive obligation first and scopes each
+ * prohibition to computed results, rankings and figures. Unchanged and
+ * deliberately so: no invented numbers, provenance, confidence or evidence; no
+ * claim that anything was applied, saved or re-run; honest currentness; honest
+ * uncertainty; no identifiers or field names in user-facing text. The refusal
+ * bullet is untouched.
+ *
+ * ⚠ THIS IS AN INSTRUCTION CHANGE, SO IT IS A HYPOTHESIS UNTIL MEASURED. The
+ * captured-adapter tests below prove what the model is TOLD, never what it
+ * generates. Generated quality is the job of the local candidate comparison
+ * recorded alongside this change; nothing here may be described as a proven
+ * repair of the witnessed turn on the strength of the assembly tests alone.
+ */
 export const COACHING_CONTEXT_INSTRUCTION = [
   '## Coaching state (deterministic — authoritative)',
   'The `coaching_context` block above is the system’s verified state of the analysis. Treat it as the source of truth and express it in plain language; do not restate its field names or contradict it.',
+  // ⭐ THE POSITIVE OBLIGATION, STATED BEFORE THE PROHIBITIONS. Every bullet
+  // below restricts what may be claimed about COMPUTED RESULTS. None of them
+  // restricts thinking with the person, and this line says so explicitly so a
+  // later reader of the prohibitions cannot infer a general silence from them.
+  'This block governs what you may claim about computed results. It never suspends coaching: whatever it says, still help the person think about the problem they actually raised, reasoning from the concerns, goals, options, constraints and evidence already supplied.',
+  '- Answer the question that was actually asked, first. Reason conditionally from the supplied material — "if X matters more here than Y, then …" — and give at least one useful practical implication or trade-off, name the unknown that would most change the answer, and ask one question that would genuinely move the person’s thinking on. Advice about maintaining the model (setting a value, running an analysis) may accompany that; it must never replace it.',
+  '- Keep grounded facts and hypotheses distinguishable in the words themselves. Anything not present in the supplied context is your own reading, and must be voiced as such — a possibility, an assumption, a question — never asserted as a fact about the model, the analysis or the world.',
   // Pre-analysis honesty (review r2): when `freshness` is "none" NO analysis has
   // ever run, so telling the user the results "may be out of date" or to
   // "re-run" is a FALSE claim (there is nothing to re-run). Say plainly that no
-  // analysis has been run yet. The "don't recommend one option over another
-  // before analysis" stance is retained here deliberately (a phase-② design
-  // question, out of scope for this fix).
-  '- If `freshness` is "none": no analysis has been run yet — say so plainly, and do not recommend one option over another as though a result already existed.',
+  // analysis has been run yet.
+  //
+  // ⚠ The former clause "do not recommend one option over another" was DROPPED
+  // here on purpose, and replaced by a ban on stating COMPUTED results. Before
+  // any analysis the honest position is not silence about the options — it is
+  // that no figures exist, which is exactly what the narrower ban says.
+  '- If `freshness` is "none": no analysis has been run yet — say so plainly. You may still reason qualitatively about the options and about what would matter, but state no computed result, ranking, probability or score, and do not settle the choice as though a result already existed.',
   '- If `latest_run_attempt_refused` is true: the latest attempt was refused before computation. Do not say running is safe, that the current model can produce a result, or that a run would show probabilities unless a newer successful run is present. Answer the user’s question directly, preserve the refusal caveat, and give one useful next fact or remedy.',
-  '- Otherwise, if `freshness` is not "fresh", or `rerun_required` is true, or `usable_for_chips` is false, or `blocked` is true: do not present the results as current, and do not recommend one option over another. Say the analysis may be out of date and suggest re-running it before giving confident advice.',
-  '- Never invent freshness, confidence, evidence, provenance, scientific or bias claims, numeric values or units, and never claim a change was applied. State only what the supplied context or analysis already contains.',
+  '- Otherwise, if `freshness` is not "fresh", or `rerun_required` is true, or `usable_for_chips` is false, or `blocked` is true: do not present the results as current, and do not name a leading, winning or recommended option as though the figures settled it. Say the analysis may be out of date and suggest re-running it before any conclusion that depends on the numbers — and still give the qualitative reasoning, the trade-off and the next question the question deserves.',
+  '- Never invent freshness, confidence, evidence, provenance, scientific or bias claims, numeric values or units. Computed results, rankings and figures may come only from the supplied analysis; qualitative reasoning must stay visibly qualitative.',
+  '- Nothing here licences changing anything. Never claim a change was applied, saved, confirmed or re-run — propose it and ask.',
   '- Never quote hashes, identifiers, or internal field names.',
 ].join('\n');
 

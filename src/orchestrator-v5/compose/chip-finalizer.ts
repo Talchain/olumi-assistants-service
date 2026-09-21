@@ -47,6 +47,8 @@ import { log } from '../../utils/telemetry.js';
 import type { SuggestedAction } from './types.js';
 import { findChipLeakToken, findChipRawDecimalLeak } from './chip-safety.js';
 import { CHIP_DERIVABLE_ACTION_TYPES } from '../session/pending-action.js';
+import { validateAndFilterChips } from './chip-generator.js';
+import type { HandlerValidationRegistry } from '../routing/validator.js';
 
 /** The useful 2–3 chip budget cap for the SUGGESTION family (mirrors chip-generator). */
 const MAX_CHIPS = 3;
@@ -368,6 +370,23 @@ export interface FinalizeChipsOptions {
    * is logged once, at egress, not also before commit.
    */
   readonly logSuppressions?: boolean;
+  /**
+   * ⭐ HANDLER PARITY AT EGRESS. When supplied, chips naming a handler that
+   * cannot be dispatched are dropped, using the SAME predicate the generator
+   * already applies (`validateAndFilterChips`) rather than a second copy of it.
+   *
+   * ⚠ WHY THIS IS OPTIONAL AND NOT A DEFAULT. `validateAndFilterChips` has
+   * exactly one caller today — `generateChips` — so ~20 other chip producers
+   * reach this finalizer unchecked. Making the check unconditional here would
+   * silently change what all of them ship, in one step, with no way to attribute
+   * a regression. Absent this option the function is byte-identical to before.
+   *
+   * The registry is a module singleton (`HANDLER_VALIDATION_REGISTRY`); this
+   * parameter exists so a test can pin a narrower one, matching the
+   * `options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY` shape the
+   * turn-executor already uses at five call sites.
+   */
+  readonly validationRegistry?: HandlerValidationRegistry;
 }
 
 /**
@@ -381,6 +400,17 @@ export function finalizeChips(
   opts: FinalizeChipsOptions = {},
 ): ChipFinalizeResult {
   const logSuppressions = opts.logSuppressions !== false;
+  // ⭐ PARITY FIRST, and DELEGATED. A chip naming an undispatchable handler is
+  // not a quality problem to be traded off against a budget — it is an offer the
+  // product cannot honour, so it goes before anything else is weighed. The
+  // predicate is the generator's, imported rather than reimplemented: two copies
+  // of an address-vocabulary question is this estate's dominant defect class, and
+  // `validateAndFilterChips` already emits `v5.chip.suppressed` /
+  // `unregistered_handler` for each drop, so the observability is inherited too.
+  const parityChecked =
+    opts.validationRegistry !== undefined
+      ? validateAndFilterChips(chips, opts.validationRegistry)
+      : chips;
   const report: MutableReport = {
     input: chips.length,
     output: 0,
@@ -394,7 +424,7 @@ export function finalizeChips(
 
   // Phase A — classify, drop unsafe + blank (input order preserved).
   const kept: ClassifiedChip[] = [];
-  for (const chip of chips) {
+  for (const chip of parityChecked) {
     const cat = classify(chip);
     if (cat === 'unsafe') {
       report.dropped_unsafe++;

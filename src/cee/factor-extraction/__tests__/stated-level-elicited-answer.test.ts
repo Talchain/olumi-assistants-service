@@ -150,9 +150,13 @@ describe('2.918 — degenerate inputs fail closed like the parent', () => {
 
 describe('R2918B — the THREE-WAY verdict: bound / unresolved / not answering', () => {
   it('a readable answer is bound', () => {
+    // `authority` records WHICH LIMB bound it. "roughly 30" carries no subject,
+    // so it borrowed the pending question's — the carry that a competing ask
+    // makes ambiguous, and the only one sole-pending permission licenses.
     expect(classifyElicitedBaselineAnswer('roughly 30', LABEL)).toEqual({
       outcome: 'bound',
       percent: 30,
+      authority: 'elliptical',
     });
   });
 
@@ -175,6 +179,7 @@ describe('R2918B — the THREE-WAY verdict: bound / unresolved / not answering',
     expect(classifyElicitedBaselineAnswer('0.3%', LABEL)).toEqual({
       outcome: 'bound',
       percent: 0.3,
+      authority: 'elliptical',
     });
   });
 

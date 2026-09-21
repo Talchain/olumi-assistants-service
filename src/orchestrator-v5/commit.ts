@@ -84,6 +84,7 @@ import {
 } from './model-management/mutation-receipt.js';
 import type { ModelVersionMutationReceiptV1Local } from './model-management/mutation-receipt.js';
 import { recordDecisionRecordForCommit } from './decision-records/capture.js';
+import { recordBriefProvenanceForCommit } from './brief-provenance/capture.js';
 import { maintainRollingSummaryForCommit } from './rolling-summary/capture.js';
 import { isSuccessfulRunAnalysisFact } from './context/freshness.js';
 
@@ -1599,6 +1600,48 @@ export async function commitDirectAnswer(
         error_code: null,
         provenance: 'commit',
       });
+    } else if (atomicVersionPlan.kind === 'plan') {
+      // ⭐ THE COMMITTED ARM — A SEPARATE EVENT, DELIBERATELY.
+      //
+      // `V5ModelVersionCreated` reads as though it reports a creation. It does
+      // not: it is a SKIP ALARM, and two tests in
+      // `atomic-model-version-commit.test.ts` pin that by asserting ZERO of it
+      // on the versionable paths ("emitting a skip here would keep the alarm
+      // firing on the product's most common edge shape"). Adding a success arm
+      // to that event would have silently broken the alarm for anything
+      // counting it — two questions under one name.
+      //
+      // ⛔ WHAT THE SEPARATE EVENT EXISTS TO FIX. Until 20 Sep 2026 nothing
+      // emitted on the success path at all, so a model version being written
+      // was invisible: the whole staging service read
+      // `v5.model_versions.version_created = 0` over 30 hours while
+      // `v5.graph_cas.evaluated` read 100+ in the same window, and the honest
+      // first reading of that zero — "the versioned write path is never taken"
+      // — was exactly wrong. The durable receipt's existence could not be
+      // established from telemetry at all.
+      //
+      // ⚠ PLACEMENT IS LOAD-BEARING. This sits inside the post-durable guarded
+      // block for the same reason the skip emit was MOVED here (Codex C8-A
+      // review defect 5): emitted at decision time it would publish the outcome
+      // of a transaction that had not run, and stay published when the append
+      // then threw. Do not hoist it.
+      //
+      // `modelVersionReceipt` is undefined when v5 was not the selected RPC —
+      // a real and different outcome from a version being written, so it gets
+      // its own status rather than being folded into either neighbour.
+      const receipt = appendOutcome.modelVersionReceipt;
+      emit(TelemetryEvents.V5ModelVersionCommitted, {
+        scenario_id: metadata.scenario_id,
+        turn_id: metadata.turn_id,
+        status: receipt === undefined ? 'no_receipt' : 'committed',
+        version_number: receipt?.version_number ?? null,
+        // 16-hex prefix only — content-free, like every event beside it.
+        graph_identity_hash_prefix:
+          receipt === undefined
+            ? null
+            : receipt.graph_identity_hash.slice(0, 16),
+        provenance: 'commit',
+      });
     }
 
     // ⭐ CENSUS POINT 4 of 4 — `at_commit`. MEASUREMENT ONLY: nothing reads it,
@@ -1734,6 +1777,44 @@ export async function commitDirectAnswer(
       // getScenarioOwner (structural ScenarioOwnerReader slice — keeps
       // the SessionStore import surface at its declared three files).
       sessionStore: store,
+    });
+  }
+
+  // ROADMAP 2.1229 (CEE half) — brief + analysis-provenance capture hook.
+  //
+  // THE USER OUTCOME: a person who has run an analysis can send their model
+  // to a colleague, and the colleague opens the link and sees it. Today
+  // `create_shared_brief` raises 'No brief to share - generate a brief
+  // first' on every real share, because `scenarios.brief` is NULL on 14,157
+  // of 14,158 rows. The DB-side producers were always correct — they lost
+  // their CALLER when the direct browser→PLoT `/v2/run` path was retired
+  // (ROADMAP 2.1229). CEE already mints all four required values on every
+  // run and writes them only to the telemetry table `v5_handler_facts`;
+  // this hook forwards them to the row the share path actually reads.
+  //
+  // SIBLING of the decision-record hook above and deliberately INDEPENDENT
+  // of it: same predicate, same fire-and-forget contract, its own `find` and
+  // its own failure handling, so neither can silently change the other's
+  // firing condition (two hooks answering two questions — they are not one
+  // concept with two writes). Fires ONLY after the durable append succeeded
+  // AND this commit carries a successful (non-noop) run_analysis fact; the
+  // predicate already excludes 'refused' attempts, which carry no brief.
+  // Any failure logs and NEVER affects the turn result. No qualifying fact
+  // ⇒ byte-identical commit path (no store construction, no env reads —
+  // pinned by commit-brief-provenance-hook.test.ts, which asserts the
+  // store-construction COUNT rather than merely that the RPC went uncalled).
+  // The hook needs no session store: `store_brief_and_provenance` runs with
+  // the SERVICE ROLE and updates `scenarios` by id, so there is no guest
+  // pre-check to do and no SessionStore import to add.
+  const briefProvenanceFact = metadata.handler_facts.find(
+    (f): f is RunAnalysisHandlerFact => isSuccessfulRunAnalysisFact(f),
+  );
+  if (briefProvenanceFact !== undefined) {
+    void recordBriefProvenanceForCommit({
+      scenarioId: metadata.scenario_id,
+      turnId: metadata.turn_id,
+      persistedRowId,
+      fact: briefProvenanceFact,
     });
   }
 

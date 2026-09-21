@@ -467,19 +467,37 @@ describe("deriveFactorScaleFrame — the single consumer, behaviour pinned", () 
  * undefined } — its only unit capture group is literally `(?<unit>%)?`. An exact
  * equality is therefore CORRECT AND COMPLETE for that producer, and migrating it
  * would be churn with non-zero risk and no harm removed.
+ * The baseline-answer edit adds one registered site (42 across 22 files): it
+ * consumes parseValue/normaliseConstraintUnits, whose values are already divided
+ * by 100. Its exact unit check must not admit period-bearing percentage units
+ * through the broader display-scale classifier and then discard their period.
+ * The paired drafting release registers two more sites (44 across 23 files).
+ * Its projector derives a percentage display magnitude only from an exact '%'
+ * and an explicit unit_interval/ratio declaration. The constraint consumer
+ * admits only a bounded unit_interval pair whose raw/calculation values agree,
+ * with no existing baseline/cap. These storage checks must not be broadened to
+ * the display classifier's vocabulary or used to infer baseline authority.
+ * The native-intervention receipt adds one site (45 across 24 files): it keeps
+ * the existing exact-'%' display convention separate from native raw quantity
+ * carriage, because percentage raw records still use two input conventions.
  *
  * The set is pinned so it REDs if it GROWS (a new bare equality is added) or
  * SHRINKS (one is migrated without recording it). A gap recorded in the suite is
  * honest; a gap invisible to it is how this class reopens.
  */
+// The combined carrier and native-intervention changes retain 46 sites across 25 files.
 const KNOWN_INLINE_PERCENT_EQUALITY_SITES: Readonly<Record<string, number>> = {
   "cee/compound-goal/direction-gate.ts": 3,
   "cee/compound-goal/extractor.ts": 1,
   "cee/compound-goal/node-generator.ts": 1,
+  // Scalar-percent refusal for the extractor's unresolved 100%+ label/value convention.
+  "cee/compound-goal/record-constraint-carrier.ts": 1,
   "cee/decision-review/shape-check.ts": 1,
+  "cee/draft/records/projector.ts": 1,
   "cee/factor-extraction/display-value.ts": 7,
   "cee/factor-extraction/enricher.ts": 3,
   "cee/factor-extraction/index.ts": 4,
+  "cee/transforms/analysis-ready.ts": 1,
   "cee/transforms/graph-data-integrity.ts": 2,
   "cee/unified-pipeline/stages/repair/deterministic-sweep.ts": 1,
   "cee/unified-pipeline/stages/repair/unreachable-factors.ts": 3,
@@ -489,8 +507,9 @@ const KNOWN_INLINE_PERCENT_EQUALITY_SITES: Readonly<Record<string, number>> = {
   "orchestrator-v5/context/cqe/rules.ts": 1,
   "orchestrator-v5/handlers/describe-changeset.ts": 1,
   "orchestrator-v5/label-value-divergence.ts": 1,
+  "orchestrator-v5/routing/baseline-answer-mutation.ts": 1,
   "orchestrator-v5/routing/resolve-relative-factor-delta.ts": 1,
-  "orchestrator-v5/tools/handlers/add-constraint.ts": 3,
+  "orchestrator-v5/tools/handlers/add-constraint.ts": 4,
   "orchestrator-v5/tools/handlers/d1-shared/evaluate-factor-value-proposal.ts": 1,
   "orchestrator/canonicalise-value-ops.ts": 3,
   "utils/goal-threshold-cap.ts": 1,

@@ -62,6 +62,70 @@ describe('draft-records seam — the wire histogram', () => {
     expect(payload!.stated_count).toBe(4);
   });
 
+  /**
+   * ⭐⭐ THE `value_scale` ADOPTION COUNTER — the number nothing could produce.
+   *
+   * Grammar v10 + instruction v19 (#1562) ask the model to declare what its
+   * number MEANS. Whether it ANSWERS has been unmeasured AND unmeasurable:
+   * `value_scale` appears in zero telemetry payloads repo-wide, and the banked
+   * v202 witnesses are post-projection payloads that never carry `claims`. Two
+   * queued deletions — the repair stage's competing inference and
+   * `display-value.ts:507`'s own dated deletion condition — are both waiting on
+   * this rate.
+   *
+   * The fixture is deliberately MIXED WITHIN ONE KIND and split ACROSS kinds, so
+   * neither a per-kind bug nor a pooled total could produce this shape:
+   * `factor` 2 declared / 1 absent, `risk` 0 declared / 1 absent.
+   */
+  it('⭐ counts value_scale presence PER CLAIM KIND, declared and absent apart', () => {
+    const result = projectDraftRecords({
+      stated_items: [{ kind: 'goal', source_quote: 'cut monthly churn' }],
+      claims: [
+        { claim_kind: 'factor', label: 'Monthly Churn Rate', value: 0.04, unit: '%', value_scale: 'unit_interval' },
+        { claim_kind: 'factor', label: 'Net Revenue Retention', value: 1.1, unit: '%', value_scale: 'ratio' },
+        { claim_kind: 'factor', label: 'Support Headcount' },
+        { claim_kind: 'risk', label: 'the review may slip' },
+      ],
+    });
+    expect(result.ok).toBe(true);
+
+    const payload = emitted();
+    expect(payload, `no ${EVENT} event was emitted`).toBeDefined();
+    expect(payload!.value_scale_by_kind).toEqual({
+      factor: { declared: 2, absent: 1 },
+      risk: { declared: 0, absent: 1 },
+    });
+    // THE PRECONDITION, pinned in-test: the kinds really do differ on this
+    // payload, so the split above is the counter's doing and not a fixture in
+    // which every kind happens to agree.
+    expect((payload!.value_scale_by_kind as Record<string, { declared: number }>).factor.declared)
+      .not.toBe((payload!.value_scale_by_kind as Record<string, { declared: number }>).risk.declared);
+  });
+
+  /**
+   * THE LEAK GUARD, EXTENDED TO THE NEW FIELD. The block's own invariant is that
+   * a histogram cannot leak a brief. A new field is a new chance to break it, so
+   * it is asserted rather than assumed: the counter must carry grammar enums and
+   * integers only — no value, no unit, no label, no source_quote.
+   */
+  it('⭐ the new counter carries enums and integers only — no value, unit or label', () => {
+    projectDraftRecords({
+      stated_items: [{ kind: 'goal', source_quote: 'cut monthly churn to 3%' }],
+      claims: [
+        { claim_kind: 'factor', label: 'Monthly Churn Rate', value: 0.04, unit: '%', value_scale: 'unit_interval' },
+      ],
+    });
+    const serialised = JSON.stringify(emitted()!.value_scale_by_kind);
+    expect(serialised).not.toContain('Monthly Churn Rate');
+    expect(serialised).not.toContain('cut monthly churn');
+    expect(serialised).not.toContain('0.04');
+    expect(serialised).not.toContain('%');
+    expect(serialised).not.toContain('unit_interval');
+    // ...and the contrast: the counter is not empty, so the absences above are
+    // about its CONTENT and not about a field that failed to populate.
+    expect(serialised).toContain('declared');
+  });
+
   it('⭐ does NOT fire when the wire is rejected — a refusal is not a histogram', () => {
     const result = projectDraftRecords({ nodes: [], edges: [] });
     expect(result.ok).toBe(false);

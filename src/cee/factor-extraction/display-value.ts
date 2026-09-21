@@ -18,6 +18,10 @@
  */
 
 import { MAGNITUDE_DISPLAY_LADDER } from "../../utils/magnitude-alphabet.js";
+// ⭐ ONE AUTHORITY for "which SCALE FAMILY is this unit token in?" — the
+// dependency-free leaf extracted from the records projector for exactly this
+// kind of caller. Imported, never re-spelled (trap 12).
+import { isPercentScaledUnit } from "../draft/records/unit-scale-class.js";
 
 // ============================================================================
 // Types
@@ -100,6 +104,31 @@ function currencyPrefix(unit: string): string | undefined {
 function isCurrencyUnit(unit: string | undefined): boolean {
   if (!unit) return false;
   return CURRENCY_SYMBOLS.has(unit) || unit === "GBP" || unit === "USD" || unit === "EUR";
+}
+
+/**
+ * The unit vocabulary this module renders as a DURATION.
+ *
+ * ⚠ ONE DEFINITION, TWO READERS. `formatBound` decides whether to print
+ * `"8 months"` from this; the normalised-domain guard in
+ * `synthesiseRangeDisplayValue` decides whether it may print anything at all.
+ * They were one regex and a copy of it away from being a hand-maintained
+ * mirror — and a guard that recognised a unit the formatter did not (or the
+ * reverse) would suppress the wrong rows silently. Named once, read twice.
+ */
+const TIME_UNIT_PATTERN = /^(?:days?|weeks?|months?|years?|hrs?|hours?)$/i;
+
+/**
+ * ⚠ A TYPE PREDICATE, not a `boolean`, and that is load-bearing rather than
+ * stylistic. `formatBound`'s time branch reads `unit.toLowerCase()`, and the
+ * inline `unit && /…/.test(unit)` it used to carry did that narrowing for it.
+ * Replacing the inline test with a plain-`boolean` helper compiled clean under
+ * `pnpm typecheck` in every other call site and REDDED only here — so the
+ * narrowing is stated in the signature, where the compiler enforces it.
+ */
+function isTimeUnit(unit: string | undefined): unit is string {
+  if (!unit) return false;
+  return TIME_UNIT_PATTERN.test(unit);
 }
 
 // ============================================================================
@@ -327,6 +356,28 @@ export function synthesiseRangeDisplayValue(
   unit?: string,
   _factorType?: string,
   declaredScale?: string,
+  /**
+   * ⭐⭐ NORMALISATION EVIDENCE FROM THE NODE — the discriminator that
+   * `declaredScale` alone CANNOT supply, because `declared_scale` has FOUR
+   * WRITER CLASSES and they do not all mean the same thing by it (trap 21).
+   * ⚠ This said "three writers" until the #1653 rebase, 21 Sep 2026, which
+   * added the USER's own declaration; the derived census in
+   * `__tests__/range-display-normalised-declaration.test.ts` is the authority.
+   *
+   * Derived by the caller from the node's own fields, never from a magnitude:
+   * `scale_frame !== undefined` (pass 3d writes it on EVERY framed factor and
+   * its own comment makes "absent ⇒ never framed" a true statement), a `cap`,
+   * or a `raw_value` that DIFFERS from the stored value
+   * (`normalise-factor-value.ts:14-18`: "when `cap` is absent, value =
+   * raw_value", so `raw_value !== value` MEANS normalised).
+   *
+   * ⚠ ABSENCE FAILS OPEN, DELIBERATELY. `undefined`/`false` keeps the
+   * pre-2.1208 behaviour exactly, so a caller that does not hold the evidence
+   * can only ever UNDER-suppress. Suppressing a display is a degradation; the
+   * defect this limb exists to close is a LIE, and the two do not get to share
+   * a default (trap 22b — a gap and a lie cannot share one window).
+   */
+  boundsAreNormalised?: boolean,
 ): string | undefined {
   const { range_min: rangeMin, range_max: rangeMax, distribution } = prior;
 
@@ -349,6 +400,15 @@ export function synthesiseRangeDisplayValue(
   // 0..100 (both render as "0% to 100%"), including the one-sided
   // "Up to 1" / "At least 0" degenerate forms. Real-world units (currency,
   // time, counts) are untouched — a 0..1 range there is a genuine quantity.
+  //
+  // ⚠⚠ THAT LAST SENTENCE HAS NOW BEEN REFUTED TWICE, AND IS KEPT ONLY AS THE
+  // RECORD OF WHAT WAS BELIEVED. Currency fell to row 2.1207 at a banked
+  // capture; TIME fell to the `Cash Runway` capture of 19 Sep 2026. Both are
+  // handled by their own limbs below, which decline inside the normalised
+  // magnitude domain rather than widen this guard — widening it would also
+  // swallow the genuine `[0, N>1]` spans this one is careful to keep.
+  // COUNTS are the only member still standing, and they are standing on no
+  // evidence either way: nobody has measured one.
   const isDomainScale = !unit || unit === "%";
   if (isDomainScale) {
     const domainMax = unit === "%" && ((hasMax && rangeMax! > 1) || (hasMin && rangeMin! > 1))
@@ -406,6 +466,232 @@ export function synthesiseRangeDisplayValue(
   // through to `£-0.4` — the sign-asymmetry that cost CEE #891 a 100,000x
   // suppression. The test is on |value|.
   if (isCurrencyUnit(unit)) {
+    const withinNormalisedDomain =
+      (!hasMin || Math.abs(rangeMin!) <= 1) && (!hasMax || Math.abs(rangeMax!) <= 1);
+    if (withinNormalisedDomain) return undefined;
+  }
+
+  // ⭐⭐ AND THE SAME IS TRUE OF A TIME UNIT — row 2.1207's defect, one unit
+  // family over, measured in the product owner's own session.
+  //
+  // MEASURED, 19 Sep 2026, scenario `34678f42`, build `c5e1060`, debug export
+  // `olumi-debug-73d5c152-20260919.json`, `full_graph.factors[2]`. Against a
+  // brief stating **"under 18 months of runway"**:
+  //
+  //     { "label": "Cash Runway", "category": "external",
+  //       "observed_state": null,  ->  display_value "0.45 to 1 months" }
+  //
+  // ── WHY THIS IS NOT A NEW JUDGEMENT ABOUT SCALE ──────────────────────────
+  // The guard above declares, as fact, *"Real-world units (currency, time,
+  // counts) are untouched — a 0..1 range there is a genuine quantity."* Row
+  // 2.1207 refuted the CURRENCY half at a banked capture and wrote, of what it
+  // left standing, *"It is true of time and counts, where a prior is authored
+  // on the real scale."* THAT residue is what this capture refutes. Both
+  // producers of a `prior` are on record, at this tip, emitting bounds that are
+  // not on a duration scale:
+  //
+  //   1. THE MODEL. `Prompts/canonical/draft_graph.txt:466-469` gives the
+  //      EXTERNAL node shape as `prior: {distribution, range_min: 0.0,
+  //      range_max: 1.0}` with NO unit, and `:472-479` is the entire anchoring
+  //      table — `"low", "limited" -> 0.0 | 0.4` … `"high", "intense" ->
+  //      0.6 | 1.0`. Every row is a dimensionless 0–1 coordinate.
+  //   2. `synthesisePriorFromBaseline` (`unified-pipeline/stages/repair/
+  //      unreachable-factors.ts:208`) derives the range from the factor's own
+  //      `observed_state.value` — the NORMALISED one. The same session's
+  //      `Sales Cycle Duration` carries `{value: 0.45, raw_value: 4.5, unit:
+  //      "months"}`, so a time factor's `value` is normalised and a prior
+  //      derived from it is too.
+  //
+  // ── WHAT IS CLAIMED, AND WHAT IS NOT ─────────────────────────────────────
+  // Only the region where this function CANNOT TELL a dimensionless anchoring
+  // coordinate from a genuine sub-unit duration. Outside it — `[3, 8]`,
+  // `[0.5, 8]`, `[-18, 0.5]` — the bound is real-scale evidence and renders
+  // exactly as before. Inside it the function declines, which is the behaviour
+  // its two sibling guards already ship (DGAI #342(2) and row 2.1207).
+  //
+  // COUNTS ARE DELIBERATELY NOT INCLUDED. A blanket "every real-world unit"
+  // predicate would need a hand-maintained exclusion list for the units that
+  // GENUINELY live in [0,1] — `scale`, `index`, `probability` — which is the
+  // mirror this estate keeps paying for. No capture has been measured for a
+  // count unit; when one is, it gets its own limb and its own corpus.
+  //
+  // Two opposite harms, and they are not symmetric (trap 22b):
+  //   • rendering it  → a LIE about a number the user never wrote — here ~40x
+  //     out against a figure they had already typed;
+  //   • declining it  → a genuine sub-unit duration loses its display, a
+  //     DEGRADATION, and one bounded the same way row 2.1207 bounded its own:
+  //     a time quantity that HAS an observed value reaches
+  //     `synthesiseDisplayValue` down Path B of `transforms/schema-v3.ts:780`.
+  //     This branch only ever sees the prior-only case.
+  //
+  // ⚠ MAGNITUDE, NOT SIGN — same reasoning as the currency limb. A predicate
+  // written `<= 1` passes `-18` straight through as "normalised" and would
+  // silently suppress a real bound; the test is on |value|.
+  if (isTimeUnit(unit)) {
+    const withinNormalisedDomain =
+      (!hasMin || Math.abs(rangeMin!) <= 1) && (!hasMax || Math.abs(rangeMax!) <= 1);
+    if (withinNormalisedDomain) return undefined;
+  }
+
+  // ⭐⭐ THE PRODUCER'S DECLARATION IS A FACT ABOUT THE NUMBER, NOT ABOUT THE
+  // UNIT TOKEN — AND IT WAS BEING READ ONLY INSIDE `unit === "%"`.
+  //
+  // MEASURED on deployed staging `d536aae`, 21 Sep 2026, guest session,
+  // scenario `914266c1`, beat 1 FRESH (capture
+  // `output/journey-witness-20260921/beat1-brief.json`, node `13d88bbb`).
+  // Against a brief stating **"our net revenue retention is currently 104%"**:
+  //
+  //     scale_frame 2 · prior uniform{0.26, 0.78} · unit "ratio"
+  //       ->  display_value "0.26 to 0.78 ratio"
+  //
+  // — the CAP-NORMALISED bounds wearing the user's own unit word, for a figure
+  // the user had typed. The same response carried
+  // `model_adjustments[…].before = 1.04`, the magnitude they came from, one
+  // field away. (De-normalised by the node's own `scale_frame` the band is
+  // 52%–156%, which does contain 104%; the distribution is not incoherent. It
+  // is the RENDER that is false.)
+  //
+  // ── WHY THIS IS THE SAME DEFECT THIS FUNCTION ALREADY CLOSED TWICE ────────
+  // Row 2.1207 closed it for CURRENCY ("£0.2 to £0.6" against a stated
+  // £120,000) and the 19 Sep capture closed it for TIME ("0.45 to 1 months"
+  // against a stated 18 months). `ratio` is the third member of one class, and
+  // both precedents chose the same disposition, in terms: *rendering it is a
+  // LIE about a number the user never wrote; declining it is a DEGRADATION the
+  // receipt already discloses.*
+  //
+  // ── AND WHY IT IS A DECLARATION READ, NOT A THIRD UNIT LIMB ───────────────
+  // The time limb's own comment refuses a counts limb because *"a blanket
+  // 'every real-world unit' predicate would need a hand-maintained exclusion
+  // list for the units that GENUINELY live in [0,1] — `scale`, `index`,
+  // `probability` — which is the mirror this estate keeps paying for."* That
+  // objection is correct, and keying on the DECLARATION dissolves it rather
+  // than paying it — but ONLY once the declaration is paired with the evidence
+  // below, and the first version of this limb was not.
+  //
+  // ⛔⛔⛔ THE SENTENCE THAT USED TO SIT HERE WAS FALSE, AND IT DELETED A
+  // CORRECT DISPLAY. CORRECTED IN PLACE RATHER THAN QUIETLY DROPPED, because
+  // the next reader will otherwise re-derive it — it is a very plausible
+  // sentence. Withdrawn text, verbatim:
+  //
+  //   ~~`declaredScaleOf` (`repair/unreachable-factors.ts:318-382`) returns
+  //   `unit_interval` ONLY on NORMALISATION EVIDENCE — a cap, or a `raw_value`
+  //   that differs from `value`. A genuine sub-unit quantity has neither and is
+  //   therefore never declared, so this limb cannot reach it.~~
+  //
+  // The claim about `declaredScaleOf` is true. The claim about the LIMB is
+  // false, because ⭐ `declared_scale` HAS FOUR WRITER CLASSES AND THEY DO NOT
+  // MEAN THE SAME THING BY IT (trap 21 — two concepts under one name, with no
+  // duplicated symbol to grep for). ⚠ This list said THREE until the #1653
+  // rebase, 21 Sep 2026, which added writer 0; the DERIVED census in
+  // `__tests__/range-display-normalised-declaration.test.ts` is the authority
+  // for the population, not this comment, and it REDs on a fifth:
+  //
+  //   0. `draft/records/projector.ts:2918-2919` — `node.declared_scale =
+  //      item.value_scale`, THE USER'S OWN WORD, transcribed from their quote
+  //      in the same breath as the number. ⭐ ADDED BY #1653. Same class as
+  //      writer 1 for this limb: a word, with no normalisation anywhere.
+  //      ⚠ SCOPE: the census counts it; the cases below do NOT separately
+  //      drive it (they enter through `claims[]`, not `stated_items[]`), so
+  //      this limb is demonstrated against writers 1-3 and REASONED about for
+  //      writer 0. #1653's own suite drives the carrier.
+  //   1. `draft/records/projector.ts:3424` — `node.declared_scale =
+  //      claim.value_scale`, i.e. THE MODEL'S OWN WORD, stamped with no
+  //      normalisation anywhere. The served, UNGATED instruction
+  //      (`draft/records/instruction.ts:291`, pushed unconditionally at
+  //      `adapters/llm/anthropic.ts:525`) defines the member to the model as
+  //      *"`unit_interval` for **a share** or a bounded percentage written as a
+  //      decimal"* — so "a share" is EXACTLY what this writer emits it for.
+  //   2. `draft/records/projector.ts:4339-4340` — pass 3d's legitimising
+  //      overwrite. It is normalisation-backed, it only RELABELS a declaration
+  //      that already exists, and it runs ONLY inside `if (frame !== undefined)`
+  //      — i.e. only when the magnitudes EXCEEDED 1.
+  //   3. `repair/unreachable-factors.ts` — `declaredScaleOf`, which is
+  //      normalisation-evidence-only exactly as the withdrawn text said, and
+  //      which ABSTAINS on a genuine sub-unit quantity rather than CLEARING
+  //      writer 0's or writer 1's declaration.
+  //
+  // So in the sub-unit case — the very class the withdrawn text called
+  // unreachable — writer 2 never runs and writer 3 abstains, and the model's
+  // raw "a share" declaration arrives here untouched. MEASURED through
+  // `projectRecordsToGraph` → `handleUnreachableFactors` → `transformNodeToV3`
+  // on `{value: 0.4, unit: "share", value_scale: "unit_interval"}`:
+  // `"0.2 to 0.6 share"` before this limb, ABSENT after it — and repair has
+  // already deleted `data.value`, so the factor then carries no value and no
+  // range at all. Reproduced identically for `proportion`, `fraction`, `rate`,
+  // `ratio`, `index`.
+  //
+  // ⭐ THE FIX IS TO STOP ASKING THE WORD AND START ASKING THE EVIDENCE.
+  // `boundsAreNormalised` is derived by the caller from the node's own
+  // `scale_frame` / `cap` / `raw_value !== value` — all three present on the
+  // witnessed NRR node, all three ABSENT on a genuine declared share, measured
+  // through the same chain. It costs the fix nothing: for writer 3, a
+  // non-percent `unit_interval` declaration IMPLIES a cap or a differing
+  // `raw_value` (read `declaredScaleOf`'s two return sites), and both are
+  // promoted to node level at `unreachable-factors.ts:575-579` under the same
+  // conditions — so every pair writer 3 declares still declines.
+  //
+  // That is demonstrated against WRITERS 1, 2 AND 3 — the model, pass 3d and
+  // `declaredScaleOf` — not argued, in
+  // `__tests__/range-display-normalised-declaration.test.ts`. ⚠ NAMED SCOPE
+  // RATHER THAN "all": writer 0 (the USER's declaration, added by #1653) is
+  // COUNTED by the derived census there and is NOT separately driven by these
+  // cases. It is the same class as writer 1 and the limb keys on evidence, so
+  // the reasoning carries — but reasoning is a weaker rung than execution and
+  // the gap is named here rather than absorbed into an "all".
+  //
+  // The contract defines the member being read: `unit_interval` is *"a
+  // proportion or a **cap-normalised magnitude**"* — i.e. a number that is by
+  // definition NOT on the unit's own scale. The '%' branch below compensates
+  // (x100) and keeps its behaviour exactly; no other unit token has a
+  // compensation, so the honest answer there is to decline.
+  //
+  // ⚠ ABSENCE MUST NOT DEFAULT, and `raw_count` must not be swept in. The
+  // contract's failure semantics forbid reading an absent `declared_scale` as
+  // `unit_interval`, and a `raw_count` bound genuinely IS on the unit's scale.
+  // Both keep today's behaviour, and both are pinned as the negative half of
+  // the discriminating pair (trap 19) — a limb loosened to "any ratio unit"
+  // passes the witness and fails them.
+  //
+  // ⛔⛔ EVERY PERCENT-CLASS SPELLING IS EXCLUDED, AND THAT IS A SCOPE RULING,
+  // NOT AN OVERSIGHT. `range-display-declared-scale.test.ts` PINS the current
+  // answer for a divergent percent spelling — *"a declared scale does NOT
+  // rescue a divergent spelling — the gap is in the PREDICATE, not the
+  // scale"* — and the docblock beside it sizes the real repair: the percent
+  // gate is DUPLICATED across three sites here plus two on the point-estimate
+  // path, and closing it must also decide what happens to the qualifier
+  // ("56% to 168% NRR" vs dropping "NRR"). That lane recorded the size and
+  // declined to do it inline. Sweeping those spellings into a DECLINE here
+  // would silently move a pin written to hand the next lane that size — so
+  // this limb stays out of rowed territory entirely. The class question is
+  // asked of the canonical classifier, never re-spelled (trap 12); it imports
+  // nothing, so there is no cycle.
+  //
+  // ⚠ MAGNITUDE, NOT SIGN, AND ONLY INSIDE THE NORMALISED DOMAIN — the same
+  // bound the two sibling limbs above already use, for the same reason (a
+  // predicate written `<= 1` passes `-0.4` straight through; the sign
+  // asymmetry that cost CEE #891 a 100,000x suppression). A real-scale range
+  // is evidence about its own scale and renders as before, whatever a stale
+  // declaration says.
+  //
+  // ⚠ A BARE NUMBER IS NOT THE HARM. `unit !== undefined && unit.length > 0`
+  // is load-bearing, not defensive: the defect is normalised bounds WEARING
+  // THE USER'S OWN UNIT WORD, and with no unit word there is no false claim to
+  // make. Suppressing there would be a pure degradation. Pinned, because the
+  // shape is live — the projector records a real v202 draw with
+  // `Team Churn Rate {uniform, 0.02, 0.22}`, unit absent.
+  //
+  // ⚠ AND `rangeMax` IS A SEPARATE CONJUNCT, NOT DECORATION. A STRADDLING pair
+  // like `[0.5, 8]` has a real-scale upper bound: it is evidence about its own
+  // scale and must render. Dropping this term suppresses it silently, and
+  // straddles are the exact class this estate has already been burned by
+  // ("56% to 1.68%", "100% to 25%"). Both conjuncts are pinned by name.
+  if (
+    boundsAreNormalised === true
+    && declaredScale === "unit_interval"
+    && unit !== undefined
+    && unit.length > 0
+    && !isPercentScaledUnit(unit)
+  ) {
     const withinNormalisedDomain =
       (!hasMin || Math.abs(rangeMin!) <= 1) && (!hasMax || Math.abs(rangeMax!) <= 1);
     if (withinNormalisedDomain) return undefined;
@@ -591,7 +877,7 @@ export function synthesiseRangeDisplayValue(
       const pct = parseFloat((n * percentMultiplier).toFixed(2));
       return `${pct}%`;
     }
-    if (unit && /^(?:days?|weeks?|months?|years?|hrs?|hours?)$/i.test(unit)) {
+    if (isTimeUnit(unit)) {
       const rounded = parseFloat(n.toFixed(1));
       const display = rounded % 1 === 0 ? String(rounded | 0) : String(rounded);
       return `${display} ${unit.toLowerCase()}`;
