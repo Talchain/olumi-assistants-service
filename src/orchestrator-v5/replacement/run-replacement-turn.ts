@@ -235,8 +235,35 @@ function digitRuns(text: string): string[] {
  * refused, and a refusal costs one turn in which the model re-offers at the
  * user's number. A gap, never a lie.
  *
- * The comparison is against the offer's OWN rendered summaries and values, so
- * "yes, 30" against an offer of 30 still accepts.
+ * The comparison is against the offer's OWN RENDERED SUMMARY — the string the
+ * user was actually shown — so "yes, 0.55" against an offer reading 0.55
+ * accepts.
+ *
+ * ⚠ THE `value` LIMB IS DEFENSIVE AND INERT FOR TODAY'S SHAPES, AND AN EARLIER
+ * VERSION OF THIS PARAGRAPH CLAIMED OTHERWISE. `ProposalOperation` is
+ * `{kind, summary, detail}` (`proposal-store.ts:56-60`) — it carries NO `value`
+ * field — so `o.value` is always `undefined` on a real proposal and only the
+ * summary contributes. Kept for a future operation shape that does carry one,
+ * but it is not load-bearing today and must not be cited as if it were.
+ *
+ * ⭐ KNOWN-DROPPED, MEASURED WITH AN OUTSIDE CORPUS AND PINNED BELOW. The
+ * comparison is over digit-run STRINGS, so the same number spelled differently
+ * from the way it was rendered is refused:
+ *
+ *     offer renders "£5,000"   ·   user types "5000"   -> REFUSED
+ *     offer renders "£5,000"   ·   user types "5k"     -> REFUSED
+ *
+ * That is the most likely real-world variance, and it costs the user a turn in
+ * which the model re-offers at their number. It is disclosed here rather than
+ * fixed because every fix is a predicate over how humans write numbers —
+ * thousands separators, `k`/`m` suffixes, currency symbols, spelled words —
+ * and CLAUDE.md trap 22f rules that family unwinnable by rule-adding in this
+ * estate. Failing closed keeps it a gap; normalising would make it a guess, and
+ * a wrong guess here writes a number the user did not agree to.
+ *
+ * The estate's sanctioned form for a known gap applies: the set is pinned in
+ * `__tests__/accept-guard-known-dropped.test.ts` with a test that REDs if it
+ * GROWS or SHRINKS, so the suite stays green for the right reason.
  */
 function namesANumberTheOfferDoesNot(
   message: string,
