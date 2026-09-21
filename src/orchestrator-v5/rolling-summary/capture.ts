@@ -51,7 +51,7 @@ import { findErasedSlots, findUnwitnessedAssistantAttributions } from './retenti
 import type { SummariserModel } from './summariser.js';
 import type { RollingSummaryStorePort } from './store-adapter.js';
 
-import { SUMMARY_FULL_HISTORY_READ_LIMIT, SUMMARY_HARD_CAP_CHARS } from './summary-types.js';
+import { SUMMARY_FULL_HISTORY_READ_LIMIT } from './summary-types.js';
 import type { SummarySpeaker } from './summary-types.js';
 
 /** Read the full persisted history off the hot-path window. readRecent is
