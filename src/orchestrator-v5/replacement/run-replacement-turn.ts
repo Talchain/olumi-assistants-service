@@ -633,7 +633,6 @@ export async function runReplacementTurn(
               };
             }
             const targets = ids.map((id) => waiting.find((p) => p.id === id)!);
-            const target = targets[0]!;
 
             if (!quotedFromMessage(quote, input.message)) {
               trace.refused('quote_not_from_message');
