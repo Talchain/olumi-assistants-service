@@ -254,6 +254,11 @@ import {
   DRAFT_FAILURE_RETRY_CHIP_MESSAGE,
   type DraftFailureFault,
 } from '../orchestrator-v5/draft-failure-recovery-turn.js';
+// The SECOND speaking class's predicate, imported from the file that EMITS it
+// so the trigger cannot drift from the producer (the `isEnforcementBlockedResult`
+// doctrine). Deliberately a separate import and a separate question from
+// `isPostEnforcementBlock` above — see the gate below.
+import { isStructuralParseBlockReason } from '../cee/unified-pipeline/stages/repair/structural-parse.js';
 import {
   commitDirectAnswer,
   computeRequestHash,
@@ -5466,7 +5471,31 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
               (c): c is string => typeof c === 'string',
             )
           : [];
-        if (!previewWasStreamed && isPostEnforcementBlock(recoveryCodes)) {
+        // ── THE SECOND SPEAKING CLASS, NAMED APART (P0, 2026-09-21) ─────
+        // ⚠ TWO PREDICATES, NOT ONE WIDENED ONE (trap 21). They answer
+        // DIFFERENT questions and are keyed on DIFFERENT producers' own
+        // signatures:
+        //   · isPostEnforcementBlock  — "is this the post-enforcement gate's
+        //     block?", keyed on `details.validation_error_codes`.
+        //   · isStructuralParseBlockReason — "is this the Stage 4 structural
+        //     parse block?", keyed on that emitter's exported reason.
+        // Widening the first to cover the second would put one predicate
+        // quietly in charge of two questions, which is how the leader-claim
+        // seam broke. Each stays keyed to the file that emits it.
+        //
+        // WHY THIS CLASS AND NOT THE WHOLE RESIDUAL: it is measurably the
+        // entire draft-500 population. Render `cee-staging`, window
+        // 2026-09-21T00:00Z..23:59Z, both log queries untruncated: 16 draft
+        // 500s, 16 `cee.structural_parse.failed`, overlap 16, others ZERO.
+        // Timeouts, rate limits, upstream errors and plain throws keep today's
+        // 500 exactly — different failures, different honest remedies, and
+        // copy nobody has reviewed. The residual shrinks by one MEASURED
+        // class, not by a guess.
+        const speaksAsStructuralParse = isStructuralParseBlockReason(pipelineReason);
+        if (
+          !previewWasStreamed &&
+          (isPostEnforcementBlock(recoveryCodes) || speaksAsStructuralParse)
+        ) {
           let recoveryPriorPendings: readonly PendingAction[] | null = null;
           try {
             recoveryPriorPendings = await loadMostRecentPendingActionsStrict(
