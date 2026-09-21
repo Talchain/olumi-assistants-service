@@ -24,7 +24,7 @@ import type {
   ExtractionMetadataT,
 } from "../../schemas/analysis-ready.js";
 import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
-import { computeAnalysisReadyStatusWithReason } from "./option-status.js";
+import { computeAnalysisReadyStatusWithReason, nameMappingNeed } from "./option-status.js";
 import { synthesiseDisplayValue } from "../factor-extraction/display-value.js";
 import { isLabelEcho } from "./label-echo.js";
 import {
@@ -186,6 +186,30 @@ export function transformOptionToAnalysisReady(
     option.unresolved_targets?.length ?? 0
   );
 
+  // ⭐⭐ THE COUNT SURVIVED TO THE DECISION; THE LIST MUST SURVIVE TO THE USER.
+  //
+  // `unresolved_targets` is READ three lines above to decide the status — with
+  // interventions present it is the ONLY thing that can return
+  // `needs_user_mapping` — and was then omitted from this literal. So an option
+  // shipped "needs_user_mapping" / "A proposed effect still needs a supported
+  // mapping" with the very list that blocked it absent. Measured on user bundle
+  // `65fdde46` (2026-09-21T12:29Z): three options, ALL carrying two
+  // interventions, two blocked and naming nothing.
+  //
+  // The value already exists; nothing here recomputes it. `nameMappingNeed`
+  // covers only the OTHER limb — no interventions, no targets, no connectivity —
+  // where there is no list to carry and the product must say what it needs
+  // instead. It is the same single authority the extraction and persisted-graph
+  // producers call, and it excludes the held baseline by ruling.
+  const unresolvedTargets = option.unresolved_targets ?? [];
+  const userQuestions = nameMappingNeed({
+    status,
+    label: option.label,
+    unresolvedTargets,
+    userQuestions: option.user_questions,
+    isBaseline,
+  });
+
   const result: OptionForAnalysisT = {
     id: option.id,
     label: option.label,
@@ -193,6 +217,8 @@ export function transformOptionToAnalysisReady(
     status_reason: statusReason,
     interventions,
     extraction_metadata: extractionMetadata,
+    ...(unresolvedTargets.length > 0 ? { unresolved_targets: unresolvedTargets } : {}),
+    ...(userQuestions.length > 0 ? { user_questions: userQuestions } : {}),
   };
 
   // Only include raw_interventions if we have any (additive field)

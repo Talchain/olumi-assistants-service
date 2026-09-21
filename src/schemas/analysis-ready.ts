@@ -116,6 +116,20 @@ export const OptionForAnalysis = z.object({
   raw_interventions: z.record(z.string(), RawInterventionValue).optional(),
   /** Extraction metadata for transparency */
   extraction_metadata: ExtractionMetadata.optional(),
+  /**
+   * ⭐ THE OBLIGATION THAT `needs_user_mapping` CARRIES, declared so it can be
+   * consumed rather than merely tolerated by `.passthrough()`.
+   *
+   * `projectOptionForAnalysis` READS `unresolved_targets` to decide the status
+   * (it is the only thing that can block an option that HAS interventions) and
+   * used to omit it from the result — so the count reached the decision and the
+   * list never reached the user. Measured on user bundle `65fdde46`
+   * (2026-09-21T12:29Z): three options, all with two interventions, two blocked
+   * with `unresolved_targets` absent and no questions.
+   */
+  unresolved_targets: z.array(z.string()).optional(),
+  /** Questions naming what this option still needs, when there is no list to carry. */
+  user_questions: z.array(z.string()).optional(),
   /** Marks the status-quo / baseline option. Propagated from OptionV3.is_baseline
    * or detected by label keyword in buildAnalysisReadyPayload (CEE-2). */
   is_baseline: z.boolean().optional(),

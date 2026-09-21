@@ -15,6 +15,7 @@ import {
   buildAnalysisReadyPayload,
   labelMatchesBaseline,
 } from "../../cee/transforms/analysis-ready.js";
+import { nameMappingNeed } from "../../cee/transforms/option-status.js";
 import { pickGoalThresholdTrio } from "../../utils/goal-threshold-trio.js";
 // The PUBLISHED blocker contract, used to decide which rows the refusal carrier
 // may keep. Imported rather than restated: a hand-copied field list here would
@@ -419,7 +420,16 @@ function readRawInterventions(value: unknown): OptionV3T['raw_interventions'] | 
  * record; it deliberately omits `source`, and the outward projection below
  * drops `extraction_metadata`. No synthetic provenance reaches the wire.
  */
-function projectOptionForCanonicalBuilder(
+/**
+ * EXPORTED FOR OBSERVATION. This is the producer that decides an option's
+ * `status` on the PERSISTED-graph readiness path, and it is the only place a
+ * `needs_user_mapping` V3 option is minted from a raw graph record. The
+ * invariant `v3-validator.ts` declares over that pair (`MISSING_USER_QUESTIONS`)
+ * cannot be guarded through `assessCanonicalAnalysisReadiness`, because the wire
+ * projection below carries neither `unresolved_targets` nor `user_questions`.
+ * Nothing else about this function changes with the export.
+ */
+export function projectOptionForCanonicalBuilder(
   candidate: unknown,
   factorIds: ReadonlySet<string>,
 ): OptionV3T | null {
@@ -473,26 +483,49 @@ function projectOptionForCanonicalBuilder(
         ? 'ready'
         : 'needs_user_mapping');
 
+  const unresolvedTargets = Array.isArray(candidate.unresolved_targets)
+    ? candidate.unresolved_targets.filter((value): value is string => typeof value === 'string')
+    : undefined;
+  const carriedQuestions = Array.isArray(candidate.user_questions)
+    ? candidate.user_questions.filter((value): value is string => typeof value === 'string')
+    : undefined;
+
+  // ⭐ `needs_user_mapping` CLAIMS SOMETHING IS MISSING, SO IT MUST SAY WHAT.
+  //
+  // This function decides `status` from the INTERVENTION COUNT and, until now,
+  // carried the two explanation fields only if the raw candidate happened to
+  // hold them — two different facts, joined by nothing. A candidate with
+  // `interventions: {}` and neither field therefore published
+  // `needs_user_mapping` with nothing to say, which `v3-validator.ts` has always
+  // declared invalid (`MISSING_USER_QUESTIONS`) without anything enforcing it
+  // here. Measured on two real user bundles (2026-09-21T11:47Z, scenarios
+  // `48a1ce84` and `376707e6`): four options each, all in exactly that state.
+  //
+  // ⚠ IT IS REACHABLE FROM THIS FUNCTION'S OWN BODY, not just from a thin
+  // candidate: the factor filter above (`if (!factorIds.has(factorId)) continue`)
+  // DROPS every intervention aimed at a factor this graph does not carry, and
+  // records none of them as an unresolved target. An option can arrive fully
+  // specified and leave with `interventions: {}` and no explanation at all.
+  //
+  // `nameMappingNeed` is the single owner of the sentence and of the held-
+  // baseline exclusion (`cee/transforms/option-status.ts`). The status decision
+  // is deliberately NOT re-opened here — see the divergence note above.
+  const userQuestions = nameMappingNeed({
+    status,
+    label,
+    unresolvedTargets,
+    userQuestions: carriedQuestions,
+    isBaseline: candidate.is_baseline === true,
+  });
+
   return {
     id,
     label,
     status,
     interventions: interventions as OptionV3T['interventions'],
     ...(rawInterventions ? { raw_interventions: rawInterventions } : {}),
-    ...(Array.isArray(candidate.unresolved_targets)
-      ? {
-          unresolved_targets: candidate.unresolved_targets.filter(
-            (value): value is string => typeof value === 'string',
-          ),
-        }
-      : {}),
-    ...(Array.isArray(candidate.user_questions)
-      ? {
-          user_questions: candidate.user_questions.filter(
-            (value): value is string => typeof value === 'string',
-          ),
-        }
-      : {}),
+    ...(unresolvedTargets ? { unresolved_targets: unresolvedTargets } : {}),
+    ...(userQuestions.length > 0 ? { user_questions: userQuestions } : {}),
     ...(candidate.is_baseline === true || candidate.is_baseline === false
       ? { is_baseline: candidate.is_baseline }
       : {}),
@@ -527,6 +560,16 @@ function projectCanonicalPayloadToWire(
           ? { raw_interventions: option.raw_interventions }
           : {}),
         ...(option.status_reason !== undefined ? { status_reason: option.status_reason } : {}),
+        // The obligation travels with the status it justifies. The wire's
+        // `analysis_ready.options` is `z.array(z.unknown())` inside a
+        // `.passthrough()`, so this needs no shared-contract change — the
+        // fields were simply never written.
+        ...(option.unresolved_targets !== undefined
+          ? { unresolved_targets: option.unresolved_targets }
+          : {}),
+        ...(option.user_questions !== undefined
+          ? { user_questions: option.user_questions }
+          : {}),
       };
     }),
     goal_node_id: payload.goal_node_id,
@@ -1110,6 +1153,24 @@ function optionMappingAsk(label: string, repairWiredFactorCount: number): string
   return `${ask} Olumi has already linked it to ${factors} to keep the model connected, but that link is Olumi's own inference rather than a mapping you stated, and it carries no effect value.`;
 }
 
+/**
+ * The producer's own question for an option blocked by an unresolved
+ * RELATIONSHIP, or `undefined` when the block is a plain missing mapping.
+ *
+ * Returns the questions the producer wrote — never a sentence minted here — so
+ * the user reads the risk's own label and nothing is invented.
+ */
+function relationshipAsk(option: unknown): string | undefined {
+  if (!isPlainObject(option)) return undefined;
+  const targets = Array.isArray(option.unresolved_targets) ? option.unresolved_targets : [];
+  if (targets.length === 0) return undefined;
+  const questions = Array.isArray(option.user_questions)
+    ? option.user_questions.filter((q): q is string => typeof q === 'string' && q.length > 0)
+    : [];
+  if (questions.length === 0) return undefined;
+  return questions.join(' ');
+}
+
 function appendSemanticIssues(
   payload: AnalysisReadyPayload | undefined,
   out: CanonicalReadinessIssue[],
@@ -1167,8 +1228,23 @@ function appendSemanticIssues(
       issue_id: `semantic_${out.length + 1}`,
       code: mapping ? 'OPTION_NEEDS_MAPPING' : 'OPTION_NEEDS_ENCODING',
       category: mapping ? 'option_mapping' : 'option_values',
+      // ⭐ ASK ABOUT WHAT ACTUALLY BLOCKED IT.
+      //
+      // `optionMappingAsk` knows only the option label, so it always asks a
+      // FACTOR-mapping question. When the block came from an unresolved
+      // RELATIONSHIP — an option→risk hypothesis is the live case — that ask is
+      // wrong in KIND: it sends the user to fix a factor mapping that is not
+      // what stopped the run. Measured on a real session, the user spent it
+      // trying to repair something that was not broken.
+      //
+      // The producer has already written the right sentence, naming the risk in
+      // the user's OWN label (`buildAnalysisReadyPayload`'s qualitative
+      // option→risk branch). `unresolved_targets` is the evidence that THIS is
+      // why the option is blocked, so it selects the question rather than the
+      // generic ask. With no unresolved targets the option genuinely has no
+      // mapping and the original ask is correct and unchanged.
       message: mapping
-        ? optionMappingAsk(
+        ? relationshipAsk(option) ?? optionMappingAsk(
             option.label,
             repairWiredFactorCount.get(option.option_id) ?? 0,
           )

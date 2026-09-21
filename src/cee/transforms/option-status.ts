@@ -430,3 +430,111 @@ export function categorizeUserQuestions(questions: string[]): {
 
   return { blocking, informational };
 }
+
+// ============================================================================
+// The obligation that comes with `needs_user_mapping`
+// ============================================================================
+
+/**
+ * ⭐⭐ THE ONE SENTENCE THE PRODUCT USES TO SAY "WE DO NOT KNOW WHAT THIS
+ * OPTION DOES", and the only place it is spelled.
+ *
+ * It NAMES THE OPTION on purpose. Two real user debug bundles
+ * (2026-09-21T11:47Z, scenarios `48a1ce84` and `376707e6`) each carried FOUR
+ * options at `needs_user_mapping` simultaneously; a question that does not name
+ * its option cannot tell the user which of the four it is about, which is the
+ * difference between an answerable ask and a restatement of the blocker.
+ */
+export function mappingNeedQuestion(optionLabel: string): string {
+  // ⚠ AN EMPTY LABEL IS REACHABLE, AND NAMING NOTHING READS AS BROKEN.
+  // `OptionV3.label` is a bare `z.string()` with no minimum, and
+  // `projectOptionForAnalysis` reads it straight off the parsed option — only
+  // `projectOptionForCanonicalBuilder` guards with `readNonEmptyString`. Found
+  // by enumerating this predicate's input space rather than the case it was
+  // written for (CLAUDE.md trap 22). Returning NOTHING is not the alternative:
+  // that would leave the option unexplained and break the invariant this
+  // function exists to keep. So the sentence degrades instead of naming "".
+  const named = optionLabel.trim();
+  if (named === "") {
+    return "Which factor(s) does this option change, and what value should each be set to?";
+  }
+  return `Which factor(s) does "${named}" change, and what value should each be set to?`;
+}
+
+/** Input to {@link nameMappingNeed}. */
+export interface MappingNeedInput {
+  /** The status this option is being published with. */
+  status: "ready" | "needs_user_mapping" | "needs_encoding";
+  /** The option's own label — the question names it. */
+  label: string;
+  /** Concepts mentioned but not matched to a factor. */
+  unresolvedTargets?: readonly string[];
+  /** Questions the producer has already written. */
+  userQuestions?: readonly string[];
+  /**
+   * Whether this option is the status-quo baseline, as decided by the same flag
+   * `analysable-option-gate.ts::isBaselineOption` and
+   * `computeAnalysisReadyStatusWithReason` read.
+   */
+  isBaseline?: boolean;
+}
+
+/**
+ * ⭐⭐ `needs_user_mapping` IS A CLAIM THAT SOMETHING IS MISSING, SO IT CARRIES
+ * AN OBLIGATION TO SAY WHAT. This function discharges it.
+ *
+ * `v3-validator.ts` has declared the pair invalid since it was written
+ * (`MISSING_USER_QUESTIONS`: "Option X needs user mapping but has no
+ * user_questions or unresolved_targets") — but only as a post-hoc warning on a
+ * response already built, so nothing held the PRODUCERS to it. Measured on two
+ * real user bundles, every option in both violated it: the user asked what was
+ * missing and the product had nothing to say.
+ *
+ * ── WHY THE PRODUCER SUPPLIES CONTENT RATHER THAN THE STATUS DEGRADING ──────
+ * The invariant can be met from either end. It must be met from this one:
+ *
+ *   · `ready` would be a LIE IN THE DANGEROUS DIRECTION — it asserts the option
+ *     is analysable when nothing is known about what it changes. An unhelpful
+ *     status is bad; an option silently admitted to a run on no mapping is
+ *     worse, and it is the exact harm the NO-SILENT-INVENTION rules exist for.
+ *   · `needs_encoding` would be a DIFFERENT lie. It means "we know WHICH factor
+ *     and lack only the number" (see `computeOptionStatus` Priority 1 and
+ *     `computeAnalysisReadyStatusWithReason`'s connected-factor limb). With no
+ *     interventions and no connectivity the factor is precisely what is NOT
+ *     known, so it would put a question to the user about a mapping that does
+ *     not exist.
+ *
+ * So `needs_user_mapping` is the TRUE status and the producer owes the content.
+ * That is also the direction the repo already took at
+ * `intervention-extractor.ts` — which now calls this function instead of
+ * carrying its own copy of the sentence (CLAUDE.md trap 12: the second copy is
+ * the one that drifts).
+ *
+ * ── THE HELD BASELINE IS EXCLUDED, AND THAT IS NOT A LOOPHOLE ───────────────
+ * For a status quo the question HAS NO ANSWERABLE FORM: supplying the mapping
+ * stops it being the status quo. Asking it is the closed defect recorded in
+ * `computeAnalysisReadyStatusWithReason` (the 2026-09-18 held-baseline ruling,
+ * option `bad0f75e`), where the user was told there was nothing to configure
+ * while the blocker stayed on screen. A blanket backfill would re-open it
+ * (CLAUDE.md trap 21). The baseline's own obligation is discharged by that same
+ * authority returning `ready` for it — this function must not pre-empt that
+ * decision here, because a second producer of the status is what the divergence
+ * note in `analysis-ready-helper.ts` was written to prevent.
+ *
+ * ⚠ SCOPE, STATED PRECISELY: the guarantee is
+ * `status === 'needs_user_mapping' && !isBaseline ⟹ questions ∪ targets ≠ ∅`.
+ * A held baseline may still carry the bare status out of this function.
+ *
+ * @returns The `user_questions` the option should publish — the producer's own
+ *   list untouched whenever it already discharges the obligation.
+ */
+export function nameMappingNeed(input: MappingNeedInput): string[] {
+  const existing = [...(input.userQuestions ?? [])];
+  if (input.status !== "needs_user_mapping") return existing;
+  // The status quo: the ask has no answerable form. See above.
+  if (input.isBaseline === true) return existing;
+  // Already explained, by either carrier the validator accepts.
+  if (existing.length > 0) return existing;
+  if ((input.unresolvedTargets?.length ?? 0) > 0) return existing;
+  return [mappingNeedQuestion(input.label)];
+}
