@@ -723,9 +723,48 @@ export function buildAnalysisReadyPayload(
       ...option,
       status: "needs_user_mapping",
       unresolved_targets: [...new Set([...(option.unresolved_targets ?? []), ...unresolved.map((edge) => edge.to)])],
-      user_questions: [...new Set([...(option.user_questions ?? []), ...unresolved.map((edge) =>
-        `How does ${option.label} change ${nodeById.get(edge.to)?.label ?? edge.to}? The proposed relationship is retained, but its mechanism and value still need clarification.`,
-      )])],
+      // ⭐⭐ NAMING THE OBSTACLE IS HALF AN ASK. THE OTHER HALF IS THE WAY OUT,
+      // AND THE WAY A USER WOULD GUESS PROVABLY DOES NOT WORK.
+      //
+      // The sentence this replaces ended *"its mechanism and value still need
+      // clarification"*, which reads as an instruction to put a number on the
+      // link. Measured through `resolveRunAdmission` on two independent real
+      // captures (`248dc8e5` and `held-baseline-journey-2026-09-18`), that is
+      // the one repair that changes nothing:
+      //
+      //     set a strength on the option→risk edge   willProceed  FALSE
+      //     add an intervention keyed to the risk    willProceed  FALSE
+      //     model it through a factor, link KEPT     willProceed  FALSE
+      //     remove the link                          willProceed  TRUE
+      //     model it through a factor AND remove     willProceed  TRUE
+      //
+      // The predicate above is the reason: it filters on the edge's EXISTENCE
+      // and carries no strength, value or provenance term, so nothing you can
+      // put ON the link is visible to it. `tests/unit/causal-repair-
+      // preservation.test.ts` pins the same fact from the other side
+      // (*"a changed coefficient does not resolve the missing intervention
+      // mapping"*), and that test is the specification here, not a symptom.
+      //
+      // ⛔ THIS CHANGES WHAT THE BLOCK SAYS, NEVER WHEN IT FIRES. No term above
+      // is touched; `risk-block-names-its-route.test.ts` ratchets `willProceed`
+      // across all three arms so a later edit cannot quietly turn copy into a
+      // gate.
+      //
+      // ⚠ THE ROUTE IS A SEPARATE ENTRY, NOT A LONGER SENTENCE. One question per
+      // risk edge names THAT risk; the route is stated once and deduped by the
+      // surrounding `Set`, so an option carrying three risk hypotheses gets
+      // three named asks and one answer, rather than the same paragraph three
+      // times. It is written to stand alone because `UserMappingForm` renders
+      // each entry as its own list item.
+      //
+      // ⚠ NO EM DASH. `user_questions` can reach the Reasoning tab through the
+      // blocked listing, and that render root carries a no-em-dash copy rule.
+      user_questions: [...new Set([...(option.user_questions ?? []),
+        ...unresolved.map((edge) =>
+          `How does ${option.label} change ${nodeById.get(edge.to)?.label ?? edge.to}? Olumi keeps this link in your model but cannot put a number on it, so the options cannot be compared while it is there.`,
+        ),
+        `Removing a link like this is what clears the block; setting a strength on it does not. If the effect is real, model it through a factor that ${option.label} sets, and then remove the link.`,
+      ])],
     };
   });
 
