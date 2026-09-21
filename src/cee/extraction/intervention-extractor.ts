@@ -34,6 +34,7 @@ import { normalizeToId } from "../utils/id-normalizer.js";
 import {
   computeOptionStatus,
   categorizeUserQuestions,
+  nameMappingNeed,
   type StatusComputationInput,
 } from "../transforms/option-status.js";
 import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
@@ -1530,15 +1531,16 @@ export function extractInterventionsForOption(
   // Determine status (now considers categorical/raw values)
   const status = determineOptionStatus(interventions, unresolvedTargets, userQuestions, hasNonNumericRaw);
 
-  if (
-    status === "needs_user_mapping" &&
-    unresolvedTargets.length === 0 &&
-    userQuestions.length === 0
-  ) {
-    userQuestions.push(
-      `Which factor(s) does "${optionLabel}" change, and what value should each be set to?`
-    );
-  }
+  // The obligation that comes with `needs_user_mapping`, discharged through the
+  // shared authority rather than a second copy of the sentence. This site is
+  // where the rule was first written; `analysis-ready-helper.ts` now meets the
+  // same obligation by calling the same function, so the two cannot drift
+  // apart (CLAUDE.md trap 12 — the second copy is the one that goes stale).
+  userQuestions.splice(
+    0,
+    userQuestions.length,
+    ...nameMappingNeed({ status, label: optionLabel, unresolvedTargets, userQuestions }),
+  );
 
   const result: ExtractedOption = {
     id,

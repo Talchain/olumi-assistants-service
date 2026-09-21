@@ -15,6 +15,7 @@ import {
   buildAnalysisReadyPayload,
   labelMatchesBaseline,
 } from "../../cee/transforms/analysis-ready.js";
+import { nameMappingNeed } from "../../cee/transforms/option-status.js";
 import { pickGoalThresholdTrio } from "../../utils/goal-threshold-trio.js";
 // The PUBLISHED blocker contract, used to decide which rows the refusal carrier
 // may keep. Imported rather than restated: a hand-copied field list here would
@@ -482,26 +483,49 @@ export function projectOptionForCanonicalBuilder(
         ? 'ready'
         : 'needs_user_mapping');
 
+  const unresolvedTargets = Array.isArray(candidate.unresolved_targets)
+    ? candidate.unresolved_targets.filter((value): value is string => typeof value === 'string')
+    : undefined;
+  const carriedQuestions = Array.isArray(candidate.user_questions)
+    ? candidate.user_questions.filter((value): value is string => typeof value === 'string')
+    : undefined;
+
+  // ⭐ `needs_user_mapping` CLAIMS SOMETHING IS MISSING, SO IT MUST SAY WHAT.
+  //
+  // This function decides `status` from the INTERVENTION COUNT and, until now,
+  // carried the two explanation fields only if the raw candidate happened to
+  // hold them — two different facts, joined by nothing. A candidate with
+  // `interventions: {}` and neither field therefore published
+  // `needs_user_mapping` with nothing to say, which `v3-validator.ts` has always
+  // declared invalid (`MISSING_USER_QUESTIONS`) without anything enforcing it
+  // here. Measured on two real user bundles (2026-09-21T11:47Z, scenarios
+  // `48a1ce84` and `376707e6`): four options each, all in exactly that state.
+  //
+  // ⚠ IT IS REACHABLE FROM THIS FUNCTION'S OWN BODY, not just from a thin
+  // candidate: the factor filter above (`if (!factorIds.has(factorId)) continue`)
+  // DROPS every intervention aimed at a factor this graph does not carry, and
+  // records none of them as an unresolved target. An option can arrive fully
+  // specified and leave with `interventions: {}` and no explanation at all.
+  //
+  // `nameMappingNeed` is the single owner of the sentence and of the held-
+  // baseline exclusion (`cee/transforms/option-status.ts`). The status decision
+  // is deliberately NOT re-opened here — see the divergence note above.
+  const userQuestions = nameMappingNeed({
+    status,
+    label,
+    unresolvedTargets,
+    userQuestions: carriedQuestions,
+    isBaseline: candidate.is_baseline === true,
+  });
+
   return {
     id,
     label,
     status,
     interventions: interventions as OptionV3T['interventions'],
     ...(rawInterventions ? { raw_interventions: rawInterventions } : {}),
-    ...(Array.isArray(candidate.unresolved_targets)
-      ? {
-          unresolved_targets: candidate.unresolved_targets.filter(
-            (value): value is string => typeof value === 'string',
-          ),
-        }
-      : {}),
-    ...(Array.isArray(candidate.user_questions)
-      ? {
-          user_questions: candidate.user_questions.filter(
-            (value): value is string => typeof value === 'string',
-          ),
-        }
-      : {}),
+    ...(unresolvedTargets ? { unresolved_targets: unresolvedTargets } : {}),
+    ...(userQuestions.length > 0 ? { user_questions: userQuestions } : {}),
     ...(candidate.is_baseline === true || candidate.is_baseline === false
       ? { is_baseline: candidate.is_baseline }
       : {}),
