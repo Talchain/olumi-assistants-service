@@ -39,9 +39,25 @@
  * the MACHINERY, not evidence about model behaviour.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { tmpdir } from 'node:os';
+
+/**
+ * ⛔ THESE PROBE FILES USED HARDCODED `/tmp/<fixed-name>.json`, which CodeQL
+ * flags HIGH as `js/insecure-temporary-file` — a predictable path in a
+ * world-writable directory is a symlink-substitution target, and both alerts
+ * were NEW in this PR. The files are debug aids (vitest suppresses
+ * `console.log`, so outcomes are written out to be read), and the capability is
+ * worth keeping — so this takes a per-run directory with a random suffix
+ * instead of deleting them.
+ *
+ * ⚠ CodeQL is NOT a required check on `staging` (the only required context is
+ * `Lint, TypeCheck, Unit Tests`), so this would have merged unread. That is
+ * exactly why it is fixed here rather than noted.
+ */
+const PROBE_DIR = mkdtempSync(join(tmpdir(), 'cee-replacement-probe-'));
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CAPTURED_GRAPH = JSON.parse(
@@ -135,7 +151,7 @@ describe('CLAUSE: one delayed-confirmation edit reaches the real writer', () => 
     } as never);
 
     // ⭐ THE CLAUSE. A receipt, or a named refusal — reported either way.
-    writeFileSync('/tmp/adapter-outcome.json', JSON.stringify({
+    writeFileSync(join(PROBE_DIR, 'adapter-outcome.json'), JSON.stringify({
       outcome,
       appends: store.append.mock.calls.length,
       rows: store.rows,
@@ -218,7 +234,7 @@ describe('CLAUSE: the offer survives the turn boundary and the answer commits', 
         ]), checkpoint: async () => undefined, applyOperations: apply } as never,
     );
 
-    writeFileSync('/tmp/journey-outcome.json', JSON.stringify({
+    writeFileSync(join(PROBE_DIR, 'journey-outcome.json'), JSON.stringify({
       applied: t2.applied, mustReconcile: t2.mustReconcile,
       refusals: t2.trace?.refusals ?? [], appends: store.append.mock.calls.length, rows: store.rows,
     }, null, 1));
