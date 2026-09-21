@@ -61,7 +61,14 @@ import {
   createAddOptionTool,
 } from './structure-tools.js';
 import { scrubKnownIdentifiers } from './scrub-identifiers.js';
+import { detectUnbackedChangeClaim } from './turn-trace.js';
+// The REAL detectors the rest of the estate uses — never a local
+// re-implementation, which would drift from what actually runs (trap 12).
+import { findSuccessClaimHit } from '../compose/forbidden-user-facing-phrases.js';
+import { containsStructuralSuccessClaim } from '../routing/mutation-language.js';
 import { createReadResultsTool, createReadWorkspaceTool, type AnalysisSnapshot } from './read-tools.js';
+import { log } from '../../utils/telemetry.js';
+
 import {
   runReplacementTurn,
   type ApplyOperations,
@@ -232,6 +239,9 @@ export interface ReplacementEntryInput {
 
 export interface ReplacementEntryResult {
   readonly assistantText: string;
+  /** The turn's decision chain. Exposed as well as logged so a caller — or a
+   *  test — can assert on it without parsing a log line. */
+  readonly trace: ReplacementTurnResult['trace'];
   readonly state: ReplacementState;
   readonly applied: ReplacementTurnResult['applied'];
   readonly mustReconcile: ReplacementTurnResult['mustReconcile'];
@@ -438,6 +448,69 @@ export async function handleReplacementTurn(
     },
   );
 
+  // ⭐⭐ THE RECORD IS EMITTED HERE, AT THE INTEGRATION BOUNDARY, and not by
+  // the controller — which deliberately owns no sink, so its record cannot be
+  // switched off independently of it.
+  //
+  // ⚠ AND IT IS EMITTED BEFORE THE FINAL SAVE, on purpose. A save that fails
+  // throws out of this function; emitting afterwards would lose the record of
+  // exactly the turn hardest to reconstruct. The trace describes what the turn
+  // DID, which is already settled by this point — including the write and its
+  // receipt — so nothing in it depends on the save landing.
+  //
+  // Field-by-field rather than a spread: this object is a wire contract for
+  // whoever reads the logs, and a spread would silently start shipping any
+  // field a later change adds to the trace, including one that should not
+  // leave the process.
+  // Identifiers out, by identity against THIS graph — never by a pattern over
+  // English. The shared egress scrub matches a pattern and was measured
+  // rewriting nine of seventeen ordinary business sentences into
+  // ungrammatical text; see scrub-identifiers.ts.
+  //
+  // ⚠ HOISTED ABOVE THE EMISSION DELIBERATELY. The record below measures what
+  // the reply CLAIMED, and the claim must be read off the text the USER reads
+  // — i.e. after scrubbing — not off the raw model output. `scrubKnownIdentifiers`
+  // is pure, so moving it earlier changes nothing but the order.
+  const assistantText = scrubKnownIdentifiers(result.text, input.getGraph() ?? null);
+
+  // ⭐⭐ WHAT THE REPLY CLAIMED, AGAINST WHAT THE TURN CAN PROVE. A reply may
+  // not assert a change was made unless the turn holds a commit proof, and the
+  // proof is `receipt_id`. This does NOT suppress or rewrite the claim —
+  // choosing what the product says instead is a copy decision. It records it,
+  // so the remedy has a measurement to be judged against rather than a story.
+  // ⚠ A FLOOR, NOT A COUNT: both detectors are pattern-based and the
+  // known-missed set is pinned in `__tests__/unbacked-change-claim.test.ts`.
+  // Null here means "no pattern matched", never "the reply was honest".
+  const unbackedChangeClaim = detectUnbackedChangeClaim(assistantText, result.trace, {
+    findSuccessClaimHit,
+    containsStructuralSuccessClaim,
+  });
+
+  log.info(
+    {
+      event: 'v5.replacement.turn',
+      scenario_id: input.scenarioId,
+      correlation_id: result.trace.correlation_id,
+      controller: result.trace.controller,
+      model_revision: result.trace.model_revision,
+      proposals_open: result.trace.proposals_open,
+      proposals_in_flight: result.trace.proposals_in_flight,
+      accepted_proposal_id: result.trace.accepted_proposal_id,
+      intended_operation_kinds: result.trace.intended_operation_kinds,
+      tools_called: result.trace.tools_called,
+      refusals: result.trace.refusals,
+      write_attempted: result.trace.write_attempted,
+      write_committed: result.trace.write_committed,
+      receipt_id: result.trace.receipt_id,
+      new_model_revision: result.trace.new_model_revision,
+      iterations: result.trace.iterations,
+      outcome: result.trace.outcome,
+      // The measured floor on this layer's own dishonesty. See above.
+      claimed_change_without_receipt: unbackedChangeClaim,
+    },
+    'replacement: turn decision chain',
+  );
+
   const next: ReplacementState = {
     version: 1,
     memory: result.memory,
@@ -470,14 +543,9 @@ export async function handleReplacementTurn(
     );
   }
 
-  // Identifiers out, by identity against THIS graph — never by a pattern over
-  // English. The shared egress scrub matches a pattern and was measured
-  // rewriting nine of seventeen ordinary business sentences into
-  // ungrammatical text; see scrub-identifiers.ts.
-  const assistantText = scrubKnownIdentifiers(result.text, input.getGraph() ?? null);
-
   return {
     assistantText,
+    trace: result.trace,
     state: next,
     applied: result.applied,
     mustReconcile: result.mustReconcile,
