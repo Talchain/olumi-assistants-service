@@ -789,8 +789,19 @@ export function buildHeldLapseNotice(pa: PendingAction): string {
   // F-HELD round 2 (FIXUP 2): comma, not an em dash — this string is
   // injected AFTER every sanitise seam, so it must satisfy house style
   // (no em dash in user-facing copy) directly.
+  // ⛔⛔ THE LABEL IS NEVER WRAPPED IN QUOTES, AND THAT IS THE FIX.
+  // `public_label` DESCRIBES a change ("Add 'competitor price reaction'") and
+  // carries its own quoted element names, because that is how this estate
+  // names graph elements everywhere. Quoting it again shipped this to a user
+  // on staging, 21 Sep 2026:
+  //     The held change 'Add 'competitor price reaction'' has lapsed.
+  // The `''` is unreadable — nothing tells you where the inner name ends.
+  // A colon delimits the description without a second quote layer, so no
+  // label content can ever collide with the delimiter. Pinned by
+  // `__tests__/held-lapse-no-nested-quotes.test.ts` against the shapes the
+  // producer actually emits.
   return label !== null
-    ? `The held change '${label}' has lapsed, say the word if you still want it.`
+    ? `The held change has lapsed: ${label}. Say the word if you still want it.`
     : 'A held change has lapsed, say the word if you still want it.';
 }
 
