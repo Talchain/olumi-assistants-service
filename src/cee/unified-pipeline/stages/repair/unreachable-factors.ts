@@ -319,13 +319,35 @@ export function formatStatedMagnitude(
  * ⭐⭐ THE BASIS RIDES WITH THE SCALE, BECAUSE THE WORD ALONE IS AMBIGUOUS
  * ACROSS PRODUCERS (added 21 Sep 2026, adversarial review of #1648).
  *
- * `declared_scale` has THREE writers. `draft/records/projector.ts:3402` stamps
- * the MODEL'S OWN `value_scale`, and the served ungated instruction defines
- * `unit_interval` to the model as *"a share"* — a genuine sub-unit quantity on
- * the unit's own scale. This function's `unit_interval` is a different thing
- * on two of its three arms: a number that was DIVIDED. A consumer reading only
- * the word cannot tell them apart, and one that tried deleted a correct
- * `"0.2 to 0.6 share"` display.
+ * ⚠⚠ THIS SAID "`declared_scale` has THREE writers" UNTIL THE #1653 REBASE
+ * (21 Sep 2026) AND IT WAS FALSE AT THAT TIP. #1653 added a fourth class — the
+ * USER's own declaration — so the population is now FOUR WRITER CLASSES OVER
+ * SIX ASSIGNMENT SITES. The derived census in
+ * `__tests__/range-display-normalised-declaration.test.ts` is the authority,
+ * not this comment, and it REDs on a fifth class (trap 12: a hand-maintained
+ * count in a docblock drifts silently and reads as settled fact — trap 20):
+ *
+ *   1. the USER  — `draft/records/projector.ts:2918-2919`,
+ *                  `stated_items[].value_scale`        ⭐ added by #1653
+ *   2. the MODEL — `draft/records/projector.ts:3424`, `claims[].value_scale`
+ *   3. pass 3d   — `draft/records/projector.ts:4339-4340`, the
+ *                  normalisation-backed rewrite (it only RELABELS a
+ *                  declaration that already exists)
+ *   4. this function
+ *
+ * Writers 1 and 2 stamp a WORD with no normalisation anywhere: the served
+ * ungated instruction defines `unit_interval` to the model as *"a share"* — a
+ * genuine sub-unit quantity on the unit's own scale. This function's
+ * `unit_interval` is a different thing on two of its three arms: a number that
+ * was DIVIDED. A consumer reading only the word cannot tell them apart, and one
+ * that tried deleted a correct `"0.2 to 0.6 share"` display.
+ *
+ * ⚠ THE NEW WRITER MOVES THE COUNT, NOT THE CODE. For this function's purposes
+ * the user's declaration is the SAME CLASS as the model's — a word that must
+ * never be read as normalisation evidence — and the display limb already
+ * handles it correctly because `boundsAreNormalised` keys on `scale_frame` /
+ * `cap` / `raw_value !== value` and NEVER on the word. The fix was sound; only
+ * the prose was stale.
  *
  * So the basis is returned with the member rather than re-derived downstream
  * (trap 12: a consumer re-spelling this predicate is the mirror), and it is

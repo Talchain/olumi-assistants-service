@@ -773,15 +773,27 @@ export function transformNodeToV3(
       // ⭐⭐ THE DECLARATION SAYS WHAT THE NUMBER MEANS; THE EVIDENCE SAYS WHO
       // NORMALISED IT — AND THEY ARE DIFFERENT QUESTIONS (trap 21).
       //
-      // `declared_scale` has THREE writers. `draft/records/projector.ts:3402`
-      // stamps the MODEL'S OWN `value_scale` verbatim, and the served ungated
-      // instruction (`draft/records/instruction.ts:291`) tells the model that
-      // `unit_interval` means *"a share"* — a genuine sub-unit quantity, on the
-      // unit's own scale, with nothing normalised. `projector.ts:4317` and
-      // `repair/unreachable-factors.ts:582` are the normalisation-backed
-      // writers. Reading the word alone cannot tell the first from the other
-      // two, and doing so DELETED a correct `"0.2 to 0.6 share"` — measured
-      // through this very chain.
+      // ⚠⚠ THIS SAID "THREE writers" UNTIL THE #1653 REBASE (21 Sep 2026) AND
+      // IT WAS FALSE AT THAT TIP. `declared_scale` has FOUR WRITER CLASSES over
+      // SIX ASSIGNMENT SITES; the DERIVED census in
+      // `factor-extraction/__tests__/range-display-normalised-declaration.test.ts`
+      // is the authority, not this comment, and it REDs on a fifth.
+      //
+      // WORD-ONLY writers — a declaration, with nothing normalised:
+      //   · `draft/records/projector.ts:2918-2919` — the USER's own
+      //     `stated_items[].value_scale`                     ⭐ added by #1653
+      //   · `draft/records/projector.ts:3424` — the MODEL's `claims[].value_scale`,
+      //     and the served ungated instruction
+      //     (`draft/records/instruction.ts:291`) tells the model that
+      //     `unit_interval` means *"a share"* — a genuine sub-unit quantity, on
+      //     the unit's own scale.
+      // NORMALISATION-BACKED writers:
+      //   · `draft/records/projector.ts:4339-4340` — pass 3d's rewrite
+      //   · `repair/unreachable-factors.ts` — `declaredScaleOf`
+      //
+      // Reading the word alone cannot tell the first pair from the second, and
+      // doing so DELETED a correct `"0.2 to 0.6 share"` — measured through this
+      // very chain.
       //
       // So the evidence is derived HERE, where the node is, and passed. All
       // three carriers are producer-side facts about a division that happened:

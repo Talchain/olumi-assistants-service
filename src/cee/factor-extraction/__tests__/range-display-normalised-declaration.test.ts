@@ -1,7 +1,7 @@
 /**
  * A PRODUCER'S `unit_interval` DECLARATION IS A FACT ABOUT THE NUMBER, NOT
  * ABOUT THE UNIT TOKEN — BUT THE WORD ALONE DOES NOT SAY *WHICH* PRODUCER SAID
- * IT, AND THE THREE PRODUCERS DO NOT AGREE ON WHAT IT MEANS.
+ * IT, AND THE PRODUCERS DO NOT AGREE ON WHAT IT MEANS.
  *
  * ── THE WITNESS ────────────────────────────────────────────────────────────
  * Deployed CEE staging `d536aae`, 21 Sep 2026, guest session, scenario
@@ -56,7 +56,8 @@
  *   real producer, not argued.~~
  *
  * The statement about `declaredScaleOf` is true. The statement about the LIMB
- * was false, and the demonstration that "proved" it drove ONE OF THREE writers
+ * was false, and the demonstration that "proved" it drove ONE OF THE THREE
+ * WRITERS THAT EXISTED THEN
  * — the one whose semantics agree with the claim — from a hand-built node the
  * refuting writer never touched. A self-authored fixture confirms the author's
  * model of the producer rather than testing it, and a title asserting a
@@ -70,14 +71,35 @@
  * `rate`, `ratio`, `index`. And the harm COMPOUNDS — repair has already
  * deleted `data.value`, so the factor then carries no value and no range.
  *
- * ── THE THREE WRITERS, EACH DRIVEN BY EXECUTION BELOW ───────────────────────
- *   W1 `draft/records/projector.ts:3402` — `node.declared_scale =
+ * ── THE WRITERS ────────────────────────────────────────────────────────────
+ * ⚠⚠ THIS HEADING SAID "THE THREE WRITERS, EACH DRIVEN BY EXECUTION BELOW"
+ * AND, AFTER THE #1653 REBASE (21 Sep 2026), BOTH HALVES OF THAT WERE WRONG:
+ * there are now FOUR WRITER CLASSES over SIX ASSIGNMENT SITES, and the fourth
+ * is NOT driven below. The derived census at the foot of this file is the
+ * authority for the population — it RED-ed on exactly this change, which is
+ * the mechanism working (trap 12), and it REDs again on a fifth class.
+ *
+ *   W0 `draft/records/projector.ts:2918-2919` — `node.declared_scale =
+ *      item.value_scale`, THE USER'S OWN WORD, transcribed from their quote
+ *      alongside the number. ⭐ ADDED BY #1653.
+ *      ⚠ SCOPE, STATED RATHER THAN ABSORBED: the census COUNTS this writer;
+ *      the cases below do NOT drive it. They enter through `claims[]`, and W0
+ *      is reached only through `stated_items[]` with a brief binding, which is
+ *      a different fixture shape and is driven by #1653's own suite
+ *      (`stated-value-scale*`). W0 is the SAME CLASS as W1 for this limb — a
+ *      word, with no normalisation anywhere — so the limb's evidence-keyed
+ *      derivation handles it, and that is reasoning, not execution. Naming the
+ *      gap is the point: an "all writers" claim over a writer the corpus never
+ *      invokes is precisely the defect this suite was rebuilt to stop
+ *      (trap 13d(c)).
+ *   W1 `draft/records/projector.ts:3424` — `node.declared_scale =
  *      claim.value_scale`, THE MODEL'S OWN WORD. The served, UNGATED
  *      instruction (`draft/records/instruction.ts:291`, pushed unconditionally
  *      at `adapters/llm/anthropic.ts:525`) defines the member to the model as
  *      *"`unit_interval` for a **share** or a bounded percentage written as a
  *      decimal"*. Nothing is normalised. The bounds ARE on the unit's scale.
- *   W2 `draft/records/projector.ts:4317` — pass 3d's legitimising overwrite.
+ *   W2 `draft/records/projector.ts:4339-4340` — pass 3d's legitimising
+ *      overwrite, which only RELABELS a declaration that already exists.
  *      Normalisation-backed, and it runs ONLY inside `if (frame !== undefined)`
  *      — i.e. only when the magnitudes EXCEEDED 1, which is precisely NOT the
  *      sub-unit case.
@@ -181,9 +203,14 @@ function factorNode(graph: GraphT, id: string): Record<string, unknown> {
 }
 
 /**
- * ⭐⭐ THE REAL CHAIN, ALL THREE WRITERS IN ORDER — draft projection, repair,
- * V3 transform. This is the instrument the previous version of this suite did
- * not have, and its absence is the entire reason a correct display was deleted.
+ * ⭐⭐ THE REAL CHAIN, W1 -> W2 -> W3 IN ORDER — draft projection, repair, V3
+ * transform. This is the instrument the previous version of this suite did not
+ * have, and its absence is the entire reason a correct display was deleted.
+ *
+ * ⚠ IT DOES NOT REACH W0. Its `stated_items` carry no value and no
+ * `value_scale`, so the user-declaration writer added by #1653 never fires
+ * here. Named rather than implied: "the real chain" is a promise a reader will
+ * read as complete.
  *
  * It also pins the WIRING by identity: `boundsAreNormalised` is derived inside
  * `transforms/schema-v3.ts`, so a caller that stops passing it makes every
@@ -640,14 +667,27 @@ describe("every conjunct of the limb is pinned by its own case", () => {
 
 /**
  * ⭐⭐ THE DEFECT THAT LET THE FIRST VERSION THROUGH WAS NOT A WRONG ASSERTION
- * — IT WAS A COMPLETE-SOUNDING ONE DRIVEN THROUGH ONE OF THREE PRODUCERS. A
- * corpus cannot certify a claim over writers it never invokes (trap 13d(c)),
- * and nothing in the suite noticed the other two existed.
+ * — IT WAS A COMPLETE-SOUNDING ONE DRIVEN THROUGH ONE OF THE THREE PRODUCERS
+ * THAT EXISTED THEN. A corpus cannot certify a claim over writers it never
+ * invokes (trap 13d(c)), and nothing in the suite noticed the other two
+ * existed.
  *
  * So the writer set is DERIVED from the tree rather than remembered, and this
- * REDs if a FOURTH writer appears — at which point the cases above are no
+ * REDs when the population moves — at which point the cases above are no
  * longer a complete demonstration and somebody must decide what the new writer
  * means by `unit_interval`.
+ *
+ * ⭐⭐ IT HAS NOW DONE EXACTLY THAT, ONCE, AND THE ANSWER IS RECORDED (21 Sep
+ * 2026, rebase of #1648 onto #1653). #1653 added the USER's own declaration at
+ * `projector.ts:2918-2919`, this expectation went 3 -> 5 for that file, and the
+ * decision it forced is: W0 is the SAME CLASS as W1 — a word, with no
+ * normalisation anywhere — so the evidence-keyed limb handles it unchanged.
+ * ⚠ That decision is REASONED, not driven: no case below enters through
+ * `stated_items[]`. Saying so is the whole value of the RED.
+ *
+ * ⚠ THIS EXPECTATION IS A HAND-WRITTEN NUMBER BESIDE A DERIVED SCAN, AND THAT
+ * IS DELIBERATE (trap 12d): the scan proves the consumers agree, and only a
+ * written count can notice the POPULATION moved. It must RED on a sixth site.
  *
  * ⚠ ASSIGNMENT SITES ONLY. The object-literal companions
  * (`projector.ts:3405`'s `observed_state` spread and `schema-v3.ts`'s forward
@@ -696,7 +736,9 @@ describe("the writer census is derived, and REDs on a fourth writer", () => {
     expect(byFile.size, "zero files means the probe stopped discriminating").toBeGreaterThan(0);
 
     expect(Object.fromEntries([...byFile].sort())).toEqual({
-      "cee/draft/records/projector.ts": 3,
+      // ⚠ 3 -> 5 at the #1653 rebase: `stated_items[].value_scale` writes both
+      // carriers (`:2918`, `:2919`). Re-derive, never edit to match a run.
+      "cee/draft/records/projector.ts": 5,
       "cee/unified-pipeline/stages/repair/unreachable-factors.ts": 1,
     });
   });

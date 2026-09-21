@@ -358,8 +358,11 @@ export function synthesiseRangeDisplayValue(
   declaredScale?: string,
   /**
    * ⭐⭐ NORMALISATION EVIDENCE FROM THE NODE — the discriminator that
-   * `declaredScale` alone CANNOT supply, because `declared_scale` has three
-   * writers and two of them mean different things by it (trap 21).
+   * `declaredScale` alone CANNOT supply, because `declared_scale` has FOUR
+   * WRITER CLASSES and they do not all mean the same thing by it (trap 21).
+   * ⚠ This said "three writers" until the #1653 rebase, 21 Sep 2026, which
+   * added the USER's own declaration; the derived census in
+   * `__tests__/range-display-normalised-declaration.test.ts` is the authority.
    *
    * Derived by the caller from the node's own fields, never from a magnitude:
    * `scale_frame !== undefined` (pass 3d writes it on EVERY framed factor and
@@ -576,24 +579,36 @@ export function synthesiseRangeDisplayValue(
   //   therefore never declared, so this limb cannot reach it.~~
   //
   // The claim about `declaredScaleOf` is true. The claim about the LIMB is
-  // false, because ⭐ `declared_scale` HAS THREE WRITERS AND THEY DO NOT MEAN
-  // THE SAME THING BY IT (trap 21 — two concepts under one name, with no
-  // duplicated symbol to grep for):
+  // false, because ⭐ `declared_scale` HAS FOUR WRITER CLASSES AND THEY DO NOT
+  // MEAN THE SAME THING BY IT (trap 21 — two concepts under one name, with no
+  // duplicated symbol to grep for). ⚠ This list said THREE until the #1653
+  // rebase, 21 Sep 2026, which added writer 0; the DERIVED census in
+  // `__tests__/range-display-normalised-declaration.test.ts` is the authority
+  // for the population, not this comment, and it REDs on a fifth:
   //
-  //   1. `draft/records/projector.ts:3402` — `node.declared_scale =
+  //   0. `draft/records/projector.ts:2918-2919` — `node.declared_scale =
+  //      item.value_scale`, THE USER'S OWN WORD, transcribed from their quote
+  //      in the same breath as the number. ⭐ ADDED BY #1653. Same class as
+  //      writer 1 for this limb: a word, with no normalisation anywhere.
+  //      ⚠ SCOPE: the census counts it; the cases below do NOT separately
+  //      drive it (they enter through `claims[]`, not `stated_items[]`), so
+  //      this limb is demonstrated against writers 1-3 and REASONED about for
+  //      writer 0. #1653's own suite drives the carrier.
+  //   1. `draft/records/projector.ts:3424` — `node.declared_scale =
   //      claim.value_scale`, i.e. THE MODEL'S OWN WORD, stamped with no
   //      normalisation anywhere. The served, UNGATED instruction
   //      (`draft/records/instruction.ts:291`, pushed unconditionally at
   //      `adapters/llm/anthropic.ts:525`) defines the member to the model as
   //      *"`unit_interval` for **a share** or a bounded percentage written as a
   //      decimal"* — so "a share" is EXACTLY what this writer emits it for.
-  //   2. `draft/records/projector.ts:4317` — pass 3d's legitimising overwrite.
-  //      It is normalisation-backed, and it runs ONLY inside
-  //      `if (frame !== undefined)` — i.e. only when the magnitudes EXCEEDED 1.
-  //   3. `repair/unreachable-factors.ts:582` — `declaredScaleOf`, which is
+  //   2. `draft/records/projector.ts:4339-4340` — pass 3d's legitimising
+  //      overwrite. It is normalisation-backed, it only RELABELS a declaration
+  //      that already exists, and it runs ONLY inside `if (frame !== undefined)`
+  //      — i.e. only when the magnitudes EXCEEDED 1.
+  //   3. `repair/unreachable-factors.ts` — `declaredScaleOf`, which is
   //      normalisation-evidence-only exactly as the withdrawn text said, and
   //      which ABSTAINS on a genuine sub-unit quantity rather than CLEARING
-  //      writer 1's declaration.
+  //      writer 0's or writer 1's declaration.
   //
   // So in the sub-unit case — the very class the withdrawn text called
   // unreachable — writer 2 never runs and writer 3 abstains, and the model's
@@ -615,8 +630,14 @@ export function synthesiseRangeDisplayValue(
   // promoted to node level at `unreachable-factors.ts:575-579` under the same
   // conditions — so every pair writer 3 declares still declines.
   //
-  // That is demonstrated against ALL THREE writers, not argued, in
-  // `__tests__/range-display-normalised-declaration.test.ts`.
+  // That is demonstrated against WRITERS 1, 2 AND 3 — the model, pass 3d and
+  // `declaredScaleOf` — not argued, in
+  // `__tests__/range-display-normalised-declaration.test.ts`. ⚠ NAMED SCOPE
+  // RATHER THAN "all": writer 0 (the USER's declaration, added by #1653) is
+  // COUNTED by the derived census there and is NOT separately driven by these
+  // cases. It is the same class as writer 1 and the limb keys on evidence, so
+  // the reasoning carries — but reasoning is a weaker rung than execution and
+  // the gap is named here rather than absorbed into an "all".
   //
   // The contract defines the member being read: `unit_interval` is *"a
   // proportion or a **cap-normalised magnitude**"* — i.e. a number that is by
