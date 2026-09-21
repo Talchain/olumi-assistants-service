@@ -106,7 +106,11 @@ export function runStructuralParse(ctx: StageContext): void {
           stripped: salvage.stripped,
           stripped_constraint_nodes: salvage.stripped.filter((n) => n.node_kind === "constraint").length,
         }
-      : { salvage_declined: salvage.declined_reason }),
+      : {
+          salvage_declined: salvage.declined_reason,
+          // Rides BESIDE the reason, never replacing it — see `declined_axis`.
+          ...(salvage.declined_axis ? { salvage_declined_axis: salvage.declined_axis } : {}),
+        }),
     request_id: ctx.requestId,
   }, salvage.salvaged
     ? "Structural parse failed on optional observed_state only — field shed, model preserved"

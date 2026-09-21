@@ -67,6 +67,24 @@ export interface ObservedStateSalvageResult {
     | "no_node_carried_the_field"
     | "would_strip_constraint"
     | "reparse_still_failed";
+  /**
+   * WHICH of the three constraint hazards refused, when `declined_reason` is
+   * `would_strip_constraint`. Absent otherwise.
+   *
+   * ⚠ A NEW FIELD, NOT A RENAMED REASON, AND THAT IS DELIBERATE.
+   * `structural-parse`'s own header records why: renaming an emitted value
+   * makes "a metric that improves because the telemetry moved, not because the
+   * product did" (trap 23), and an in-repo search cannot see dashboards or
+   * alerts. Any counter keyed on `would_strip_constraint` keeps counting
+   * exactly what it counted; the axis rides beside it.
+   *
+   * ⭐ WHY IT IS WORTH EMITTING. The three axes are not equally informative.
+   * `kind` was the only one here before and is the weakest; `role` is the case
+   * `kind` MISSED and the reason this guard was re-cut. A decline count that
+   * cannot separate them cannot answer whether the re-cut ever caught anything,
+   * which is the only question the next reader will ask.
+   */
+  declined_axis?: "role" | "shape" | "kind";
 }
 
 /**
@@ -209,7 +227,7 @@ export function salvageObservedState(
     //    threshold regardless of its kind. This is the case `kind` missed.
     const nodeId = typeof node.id === "string" ? node.id : null;
     if (nodeId !== null && constraintTargetIds.has(nodeId)) {
-      return { salvaged: false, stripped: [], declined_reason: "would_strip_constraint" };
+      return { salvaged: false, stripped: [], declined_reason: "would_strip_constraint", declined_axis: "role" };
     }
 
     // 2. SHAPE — the `observed_state` carries a `metadata` key, i.e. it is
@@ -217,14 +235,14 @@ export function salvageObservedState(
     //    broken-operator hazard `schemas/graph.ts:255-259` exists to refuse.
     const obs = node.observed_state;
     if (obs !== null && typeof obs === "object" && "metadata" in (obs as Record<string, unknown>)) {
-      return { salvaged: false, stripped: [], declined_reason: "would_strip_constraint" };
+      return { salvaged: false, stripped: [], declined_reason: "would_strip_constraint", declined_axis: "shape" };
     }
 
     // 3. KIND — kept as well, not instead. It is the weakest of the three and
     //    the only one that was here before; removing it would narrow the guard
     //    on the strength of the other two being complete, which is not proven.
     if (node.kind === "constraint") {
-      return { salvaged: false, stripped: [], declined_reason: "would_strip_constraint" };
+      return { salvaged: false, stripped: [], declined_reason: "would_strip_constraint", declined_axis: "kind" };
     }
   }
 

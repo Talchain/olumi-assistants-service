@@ -46,6 +46,7 @@ import { DraftGraphOutput } from '../../../../../schemas/assist.js';
 import { log } from '../../../../../utils/telemetry.js';
 import { runStructuralParse } from '../structural-parse.js';
 import type { StageContext } from '../../../types.js';
+import { log } from '../../../../../utils/telemetry.js';
 
 vi.mock('../../../../../utils/telemetry.js', () => ({
   log: { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -339,4 +340,82 @@ describe('observed_state salvage — an optional field must not destroy the mode
     expect(graph.nodes[1]).toHaveProperty('observed_state', { value: 0.25 }); // neighbour intact
     expect(graph.nodes[2]).not.toHaveProperty('observed_state');
   });
+
+  /**
+   * ── Mc · THE EVERY-ISSUE RULE, BOUND DIRECTLY ─────────────────────────────
+   *
+   * Paul, 21 Sep: *"bind the EVERY-issue rule directly rather than relying on
+   * restore."*
+   *
+   * `observedStateNodeIndices` returns null — declining the whole salvage — the
+   * moment ANY issue sits outside `graph.nodes.N.observed_state` or carries a
+   * code other than `invalid_union`. That EVERY is the dominance argument for
+   * the entire module: the PR's safety claim is *"only when EVERY issue is an
+   * `invalid_union` at an `observed_state` path"*, and it is what makes
+   * "this cannot make anything worse" true rather than hopeful.
+   *
+   * ⛔ NOTHING BOUND IT. Mutating that `return null` to `continue` — i.e. EVERY
+   * to SOME — left the suite green, because every other test feeds issues that
+   * ALL conform. A rule nothing binds is a rule the next change can delete by
+   * accident, and this is the one carrying the argument.
+   *
+   * ⚠ THE FIXTURE MUST PRODUCE A MIXED ISSUE SET OR THE TEST IS VACUOUS, so the
+   * precondition asserts BOTH that more than one issue exists AND that at least
+   * one of them is NOT at an observed_state path. Without that pin this passes
+   * on a single-issue graph for the wrong reason.
+   */
+  /**
+   * ── THE DECLINE REASON NAMES WHICH AXIS REFUSED ───────────────────────────
+   *
+   * Three independent hazard tests can decline, and until now all three emitted
+   * the byte-identical `salvage_declined: "would_strip_constraint"`. So the
+   * telemetry could say a constraint was protected but never WHICH rule caught
+   * it — and the ROLE axis (the one `kind` missed, and the reason this guard was
+   * re-cut) was indistinguishable from the KIND axis it replaced.
+   *
+   * ⚠ THE EXISTING REASON STRING IS UNCHANGED, DELIBERATELY. `structural-parse`
+   * warns in its own header that renaming an emitted field makes "a metric that
+   * improves because the telemetry moved, not because the product did" (trap
+   * 23). A counter keyed on `would_strip_constraint` keeps counting exactly what
+   * it counted; the axis rides BESIDE it as a new field.
+   */
+  const declinedField = (field: string): unknown => {
+    const call = (log.warn as unknown as { mock: { calls: unknown[][] } }).mock.calls
+      .find(c => (c[0] as Record<string, unknown>)?.event === 'cee.structural_parse.failed');
+    return (call?.[0] as Record<string, unknown>)?.[field];
+  };
+  const declinedAxis = (): unknown => {
+    const call = (log.warn as unknown as { mock: { calls: unknown[][] } }).mock.calls
+      .find(c => (c[0] as Record<string, unknown>)?.event === 'cee.structural_parse.failed');
+    return (call?.[0] as Record<string, unknown>)?.salvage_declined_axis;
+  };
+
+  it('the ROLE axis names itself — a goal_constraints target', () => {
+    const graph = graphWith({ id: 'fac_churn', kind: 'factor', label: 'Churn', observed_state: { unit: '%' } });
+    // ⚠ `constraint_id` IS REQUIRED FOR THE ROW TO COUNT. Omitting it made this
+    // test read `undefined` and look like the axis was never emitted — a
+    // fixture defect wearing the costume of a product one. T13's shape, reused.
+    runStructuralParse(ctxFor(graph, [
+      { constraint_id: 'c1', node_id: 'fac_churn', operator: '<=' as const, value: 0.04 },
+    ]));
+    expect(declinedField('salvage_declined'), 'precondition: the salvage declined on a constraint').toBe('would_strip_constraint');
+    expect(declinedAxis()).toBe('role');
+  });
+
+  it('the SHAPE axis names itself — a metadata key on a factor', () => {
+    const graph = graphWith({ id: 'fac_a', kind: 'factor', label: 'A', observed_state: { unit: '%', metadata: {} } });
+    runStructuralParse(ctxFor(graph));
+    // ⚠ NOT CONDITIONAL. An `if (axis !== undefined)` here passed while the
+    // field did not exist at all — a test that cannot fail is not a test.
+    // The precondition pins that the salvage RAN, then the axis is asserted.
+    expect(declinedField('salvage_declined'), 'precondition: the salvage ran and declined').toBe('would_strip_constraint');
+    expect(declinedAxis()).toBe('shape');
+  });
+
+  it('the KIND axis names itself — a constraint node', () => {
+    const graph = graphWith({ id: 'con_x', kind: 'constraint', label: 'Churn under 4%', observed_state: { unit: '%' } });
+    runStructuralParse(ctxFor(graph));
+    expect(declinedAxis()).toBe('kind');
+  });
+
 });
