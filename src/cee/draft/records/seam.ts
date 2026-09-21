@@ -64,7 +64,26 @@ const StatedItemWire = z.object({
   // The convention the user's number is written in. Optional and additive,
   // exactly as the claims-side twin: absence means UNDECLARED, never
   // `unit_interval`.
-  value_scale: z.enum(DRAFT_RECORD_VALUE_SCALES).optional(),
+  // ⛔⛔ `.catch(undefined)` — A MALFORMED VALUE DEGRADES TO ABSENCE, NEVER TO A
+  // DEAD DRAFT. Same ruling `applies_to_*` above carries, for the same reason:
+  // `value_scale` is an OPTIONAL ENHANCEMENT whose ABSENCE is defined as
+  // byte-identical to the behaviour before it existed, so absence IS the honest
+  // degradation and failing the whole record set to reach it is
+  // disproportionate.
+  //
+  // MEASURED on this tree, with a positive control AND a contrast control, on
+  // the shape the prompt-only fallback can produce (no grammar attached, so
+  // nothing enforces the enum provider-side):
+  //
+  //   valid                    -> ok, value_scale carried
+  //   value_scale: "percent"   -> ok=false, "not_a_record_set"      <<<
+  //   applies_to_stated: "0"   -> ok        (its `.catch` absorbs it)
+  //   kind: "nonsense"         -> ok=false  (a DISCRIMINATOR still refuses,
+  //                                          and must — that is the contrast)
+  //
+  // One out-of-enum string on ONE stated item loses the ENTIRE draft — every
+  // quote, figure and limit — over a field that did not exist last week.
+  value_scale: z.enum(DRAFT_RECORD_VALUE_SCALES).optional().catch(undefined),
   direction: z.enum(DRAFT_RECORD_DIRECTIONS).optional(),
   // `option` only — grammar design note 5.
   is_baseline: z.boolean().optional(),
@@ -163,7 +182,12 @@ const InferenceClaimWire = z.object({
   // halves of one quantity; carrying one without the other would leave the
   // projector inferring the convention from magnitudes, which is the defect
   // v10 exists to remove.
-  value_scale: z.enum(DRAFT_RECORD_VALUE_SCALES).optional(),
+  // ⚠ THE SAME `.catch(undefined)`, applied to the v10 twin. PRE-EXISTING, not
+  // introduced here — but it is the identical field, the identical harm and two
+  // words away, and leaving one of two instances tolerant would read as a
+  // deliberate asymmetry when it is not one. Named rather than done silently:
+  // if a loud failure was wanted here, this is the line to argue with.
+  value_scale: z.enum(DRAFT_RECORD_VALUE_SCALES).optional().catch(undefined),
   // ⭐⭐ DECLARED HERE TOO, AND THE OMISSION WAS A SECOND LAYER OF THE SAME
   // DEFECT. `likelihood` was added to the model-facing JSON Schema and to
   // `DraftInferenceClaim`, and the rebuild below was then taught to name it —
