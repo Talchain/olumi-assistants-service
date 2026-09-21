@@ -62,6 +62,8 @@ import {
 } from './structure-tools.js';
 import { scrubKnownIdentifiers } from './scrub-identifiers.js';
 import { createReadResultsTool, createReadWorkspaceTool, type AnalysisSnapshot } from './read-tools.js';
+import { log } from '../../utils/telemetry.js';
+
 import {
   runReplacementTurn,
   type ApplyOperations,
@@ -232,6 +234,9 @@ export interface ReplacementEntryInput {
 
 export interface ReplacementEntryResult {
   readonly assistantText: string;
+  /** The turn's decision chain. Exposed as well as logged so a caller — or a
+   *  test — can assert on it without parsing a log line. */
+  readonly trace: ReplacementTurnResult['trace'];
   readonly state: ReplacementState;
   readonly applied: ReplacementTurnResult['applied'];
   readonly mustReconcile: ReplacementTurnResult['mustReconcile'];
@@ -438,6 +443,43 @@ export async function handleReplacementTurn(
     },
   );
 
+  // ⭐⭐ THE RECORD IS EMITTED HERE, AT THE INTEGRATION BOUNDARY, and not by
+  // the controller — which deliberately owns no sink, so its record cannot be
+  // switched off independently of it.
+  //
+  // ⚠ AND IT IS EMITTED BEFORE THE FINAL SAVE, on purpose. A save that fails
+  // throws out of this function; emitting afterwards would lose the record of
+  // exactly the turn hardest to reconstruct. The trace describes what the turn
+  // DID, which is already settled by this point — including the write and its
+  // receipt — so nothing in it depends on the save landing.
+  //
+  // Field-by-field rather than a spread: this object is a wire contract for
+  // whoever reads the logs, and a spread would silently start shipping any
+  // field a later change adds to the trace, including one that should not
+  // leave the process.
+  log.info(
+    {
+      event: 'v5.replacement.turn',
+      scenario_id: input.scenarioId,
+      correlation_id: result.trace.correlation_id,
+      controller: result.trace.controller,
+      model_revision: result.trace.model_revision,
+      proposals_open: result.trace.proposals_open,
+      proposals_in_flight: result.trace.proposals_in_flight,
+      accepted_proposal_id: result.trace.accepted_proposal_id,
+      intended_operation_kinds: result.trace.intended_operation_kinds,
+      tools_called: result.trace.tools_called,
+      refusals: result.trace.refusals,
+      write_attempted: result.trace.write_attempted,
+      write_committed: result.trace.write_committed,
+      receipt_id: result.trace.receipt_id,
+      new_model_revision: result.trace.new_model_revision,
+      iterations: result.trace.iterations,
+      outcome: result.trace.outcome,
+    },
+    'replacement: turn decision chain',
+  );
+
   const next: ReplacementState = {
     version: 1,
     memory: result.memory,
@@ -478,6 +520,7 @@ export async function handleReplacementTurn(
 
   return {
     assistantText,
+    trace: result.trace,
     state: next,
     applied: result.applied,
     mustReconcile: result.mustReconcile,
