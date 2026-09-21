@@ -1789,8 +1789,11 @@ export const GRAPH_CONTEXT_INSTRUCTION = [
  * ⚠ THAT WAS A NAME COLLISION, NOT AN INCONSISTENCY, AND IT IS FIXED BY NAMING
  * APART RATHER THAN BY ALIGNING (CLAUDE.md trap 21). Three fields answer three
  * questions: `factor_values[].provenance` (*is this factor's value attributable
- * to a person at all?*, vocabulary `user_stated | ai_drafted | system_repaired |
- * unattributed`), `graph.edges[].provenance` (*who asserted this LINK?*), and
+ * to a person at all?*, vocabulary `StructureProvenance` — `user_stated`,
+ * `user_ratified`, `ai_drafted`, `system_repaired`, `unattributed`, and
+ * ⚠ `user_ratified` means AN OLUMI ESTIMATE THE USER ENDORSED, which is NOT a
+ * licence to say the user supplied the figure), `graph.edges[].provenance`
+ * (*who asserted this LINK?*), and
  * node `value_authorship` (*whose NUMBER is this?*). The node field was renamed
  * off `provenance` for exactly this reason, and the last clause below states the
  * boundary to the model so it cannot carry one field's rule across to another.

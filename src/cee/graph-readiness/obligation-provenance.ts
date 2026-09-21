@@ -66,14 +66,27 @@ import type { CanonicalReadinessIssue } from '../../orchestrator/tools/analysis-
 /**
  * Who authored the structure a readiness issue is raised over.
  *
- * `unattributed` is a FOURTH value on purpose. Collapsing "we know the system
+ * `unattributed` is a DISTINCT value on purpose. Collapsing "we know the system
  * made this" and "nobody stamped it" into one bucket is what makes an obligation
  * rule unauditable: the probe could no longer show which graphs are
  * unclassifiable, and a producer that stops stamping would look like a producer
  * that stamped `ai_drafted`.
+ *
+ * ⭐ `user_ratified` is the FIFTH, added 20 Sep 2026 for the same reason one
+ * level up: *"Olumi estimated it and the user endorsed it"* is neither
+ * authorship nor a machine's own guess, and collapsing it into `user_stated`
+ * (which is what this union did) let a single click satisfy a threshold the
+ * product's own copy promises requires SETTING a value. See
+ * {@link earnsAuthorshipCredit} for the ruling, and {@link reflectsAHumanAct}
+ * for what ratification DOES earn.
+ *
+ * ⛔ THE COUNT IS NOT WRITTEN HERE ANY MORE. `STRUCTURE_PROVENANCE_VALUES` below
+ * is the derivation; a number in a docblock is a hand-maintained mirror, and
+ * this one said "FOURTH" until the fifth member arrived.
  */
 export type StructureProvenance =
   | 'user_stated'
+  | 'user_ratified'
   | 'ai_drafted'
   | 'system_repaired'
   | 'unattributed';
@@ -82,11 +95,169 @@ export type StructureProvenance =
 export type ObligationClass = 'required' | 'offered';
 
 /**
+ * ⭐⭐ THE ONE PLACE THE AUTHORSHIP THRESHOLD IS DECIDED (ruled 20 Sep 2026).
+ *
+ * *"Did a PERSON supply this value?"* — the question every authorship threshold
+ * in the estate is actually asking, and the reason `user_ratified` exists as a
+ * separate class rather than as a shade of `user_stated`.
+ *
+ * ## WHY RATIFICATION IS NOT AUTHORSHIP
+ *
+ * **The decisive ground is the product's own shipped sentence.** When no
+ * parameter is the user's, `analysis-admission.ts` tells them the leader claim
+ * stays withheld *"until you have **SET** at least one of them"*, and again
+ * *"until you have **set a value** on a factor one of the options changes"*.
+ * **Both say SET. Neither says confirm, approve, or accept.** While
+ * `user_confirmed` classified as `user_stated`, one click on one Olumi estimate
+ * satisfied a threshold the product had promised required setting a value —
+ * which made a published sentence false. That is an inconsistency between what
+ * we say and what we do, not a preference.
+ *
+ * Two supporting reasons:
+ *   · **The consequence is wildly asymmetric to the act.** The threshold is
+ *     ONE parameter (`analysis-admission.ts` returns `material_user_stated` the
+ *     moment the count exceeds zero), so a single confirmation converted a
+ *     fully machine-authored model into one licensed to name a winner.
+ *   · **Confirmation cannot distinguish knowledge from acquiescence.** "I know
+ *     this is about right" and "I have no better number and it looks plausible"
+ *     produce the identical event. Humans remaining the AUTHORS requires
+ *     authorship, not assent.
+ *
+ * ## ⚠ WHAT THIS PREDICATE IS NOT — and it is a trap-21 pair, not a duplicate
+ *
+ * Ratification is a **genuine human act** and must not be discarded. Every
+ * threshold about REVIEW rather than AUTHORSHIP reads {@link reflectsAHumanAct}
+ * instead. Two questions, two predicates, named apart — do not "reconcile"
+ * them, which is the move that would recreate the collapse this change undid.
+ */
+export function earnsAuthorshipCredit(provenance: StructureProvenance): boolean {
+  return provenance === 'user_stated';
+}
+
+/**
+ * *"Did a person ATTEND to this value at all?"* — true for authorship AND for
+ * ratification, false for everything the machine did alone.
+ *
+ * The companion to {@link earnsAuthorshipCredit}, and the reason widening the
+ * union does not quietly demote a confirmed value everywhere at once. A user who
+ * confirmed an estimate has done something real: it is honest to say *"you have
+ * reviewed these estimates"*, and it is a LIE to describe that value back to
+ * them as Olumi's own invention. `context-integrity/not-modelled-manifest.ts`
+ * reads this one for exactly that reason — its own header records that wrongly
+ * claiming a user's value as our invention is far worse than the reverse.
+ *
+ * ⛔ It must NOT be used to unlock `comparative_leader`, "stable" or "robust".
+ * That is the authorship question, and it has its own predicate above.
+ */
+export function reflectsAHumanAct(provenance: StructureProvenance): boolean {
+  return provenance === 'user_stated' || provenance === 'user_ratified';
+}
+
+/**
  * THE rule. One line, one place — so no surface can hold a second opinion.
- * `user_stated` and only `user_stated` earns a demand.
+ * Only structure that {@link earnsAuthorshipCredit} earns a demand.
+ *
+ * ⚠ `user_ratified` is DELIBERATELY `offered`, not `required`. INV-P6's
+ * allowlist can only ever WITHDRAW an obligation, and a value the user merely
+ * endorsed is precisely one we may ask about ("is this still right?") and may
+ * not demand. Stated rather than inherited, because the fifth member arrived
+ * after this function was written and a silent `else` is how a class ships
+ * unruled — which is how `user_confirmed` got here in the first place.
  */
 export function obligationFor(provenance: StructureProvenance): ObligationClass {
-  return provenance === 'user_stated' ? 'required' : 'offered';
+  return earnsAuthorshipCredit(provenance) ? 'required' : 'offered';
+}
+
+/**
+ * ⭐⭐ THE ONE ORDER OVER THIS UNION, AS DATA — because two of this file's own
+ * derivations COMBINE the provenance of several elements, and a combining rule
+ * written as an `if` ladder is total only by accident.
+ *
+ * ## WHY THIS EXISTS (measured, 21 Sep 2026)
+ *
+ * `structureProvenanceOfEffect`'s "weakest end wins" was three `if`s and a bare
+ * `return 'user_stated'`. That is total over FOUR members and silently
+ * non-total over five: `user_ratified` matched no guard and fell through to
+ * **`user_stated`** — promoting ratification to authorship on
+ * `readiness_issues[]`, the exact equivalence the 20 Sep ruling forbids, on the
+ * ONE READINESS AUTHORITY's own path. It produced
+ * `{"provenance":"user_stated","obligation":"required"}`, **byte-identical to a
+ * genuinely user-stated control**, while `obligationFor`'s docblock three
+ * screens above said `user_ratified` is deliberately `offered`. The compiler
+ * saw nothing, because a bare `return` at the end of a chain is not a default
+ * the type system can check. It is CLAUDE.md trap 12 — a hand-maintained
+ * mirror — wearing control flow rather than a list.
+ *
+ * ⛔ SO THE ORDER IS A `Record<StructureProvenance, number>` AND NOT A LADDER.
+ * A sixth member fails typecheck AT THIS OBJECT LITERAL, which is the same
+ * device `OBSERVED_STATE_SOURCE` and `STRUCTURE_PROVENANCE_VALUES` already use
+ * in this file. An exhaustive `switch` with a `never` default would also be
+ * total, and was rejected: "weakest wins" is an ORDER over the union, not a
+ * case analysis, so a switch would have to re-derive the comparison at every
+ * call site and could hold a different opinion at each. Stated once, as data.
+ *
+ * ## THE ORDER, AND WHY EACH STEP
+ *
+ * `system_repaired` < `unattributed` < `ai_drafted` < `user_ratified` <
+ * `user_stated`. The first three preserve the ladder's pre-existing precedence
+ * exactly (verified by execution, not by reading). `user_ratified` sits ABOVE
+ * `ai_drafted` because ratification is a genuine human act
+ * ({@link reflectsAHumanAct}) and BELOW `user_stated` because it is not
+ * authorship ({@link earnsAuthorshipCredit}) — which is precisely the gap the
+ * fifth member was minted to hold open.
+ *
+ * ⚠ THIS IS A STRENGTH ORDER, NOT AN OBLIGATION ORDER. Do not read
+ * `required`/`offered` off it; {@link obligationFor} is the only authority on
+ * that, and it deliberately cuts between `user_ratified` and `user_stated`
+ * rather than anywhere else on this scale.
+ */
+const AUTHORSHIP_STRENGTH: Readonly<Record<StructureProvenance, number>> = {
+  system_repaired: 0,
+  unattributed: 1,
+  ai_drafted: 2,
+  user_ratified: 3,
+  user_stated: 4,
+};
+
+/**
+ * The LEAST-authored of several elements' provenance — *"an obligation is only
+ * the user's when every element it names is the user's."*
+ *
+ * Returns `null` for an empty list rather than guessing a member: the caller
+ * knows what "we looked at nothing" means on its own path, and this function
+ * does not.
+ */
+export function weakestProvenance(
+  candidates: readonly StructureProvenance[],
+): StructureProvenance | null {
+  let weakest: StructureProvenance | null = null;
+  for (const candidate of candidates) {
+    if (weakest === null || AUTHORSHIP_STRENGTH[candidate] < AUTHORSHIP_STRENGTH[weakest]) {
+      weakest = candidate;
+    }
+  }
+  return weakest;
+}
+
+/**
+ * The MOST-authored of several elements' provenance — the opposite question,
+ * asked where one human-supplied part is evidence about the whole (an option is
+ * being worked on by the user if ANY of its stated effects is theirs).
+ *
+ * Named apart from {@link weakestProvenance} rather than parameterised, because
+ * the two answer genuinely different questions and a shared `direction` flag is
+ * how a call site ends up asking the wrong one.
+ */
+export function strongestProvenance(
+  candidates: readonly StructureProvenance[],
+): StructureProvenance | null {
+  let strongest: StructureProvenance | null = null;
+  for (const candidate of candidates) {
+    if (strongest === null || AUTHORSHIP_STRENGTH[candidate] > AUTHORSHIP_STRENGTH[strongest]) {
+      strongest = candidate;
+    }
+  }
+  return strongest;
 }
 
 /**
@@ -103,10 +274,38 @@ export function obligationFor(provenance: StructureProvenance): ObligationClass 
  */
 export const STRUCTURE_PROVENANCE_VALUES = Object.keys({
   user_stated: true,
+  user_ratified: true,
   ai_drafted: true,
   system_repaired: true,
   unattributed: true,
 } satisfies Record<StructureProvenance, true>) as readonly StructureProvenance[];
+
+/**
+ * ⛔⛔ THE SAME LIST, TYPED AS THE NON-EMPTY TUPLE `z.enum` DEMANDS.
+ *
+ * WHY THIS EXISTS. `STRUCTURE_PROVENANCE_VALUES` above is derived and therefore
+ * safe; `z.enum` will not accept `readonly StructureProvenance[]`, and the
+ * convenient way past that is to hand-list the members beside the schema. That
+ * is exactly what `context/context-pack-schema.ts` did, and **the compiler
+ * could not see it**: measured at `31d5b81e`, there are ZERO exhaustive
+ * switches over this union repo-wide, so widening it breaks nothing at build
+ * time — while the hand-listed Zod enum would have **REJECTED the new member at
+ * RUNTIME**, inside the context pack, on a real turn. A green build and a
+ * throwing parse.
+ *
+ * So the tuple is published HERE, once, cast only in its TYPE and never in its
+ * CONTENT — the `satisfies Record<StructureProvenance, true>` above is what
+ * keeps it honest, and it is why widening the union still fails typecheck at
+ * the object literal rather than silently shipping a short list.
+ *
+ * Pinned both ways (and round-tripped through the schema, which is the actual
+ * failure mode) by
+ * `orchestrator-v5/context/__tests__/context-pack-provenance-vocabulary-parity.test.ts`.
+ */
+export const STRUCTURE_PROVENANCE_ENUM_VALUES = STRUCTURE_PROVENANCE_VALUES as readonly [
+  StructureProvenance,
+  ...StructureProvenance[],
+];
 
 export const OBLIGATION_CLASS_VALUES = Object.keys({
   required: true,
@@ -146,10 +345,24 @@ const OBSERVED_STATE_SOURCE: Readonly<
   explicit: 'user_stated',
   user: 'user_stated',
   user_override: 'user_stated',
-  user_confirmed: 'user_stated',
   user_edited: 'user_stated',
   user_calibration: 'user_stated',
-  user_assumption: 'user_stated',
+  // ── RATIFICATION, NOT AUTHORSHIP (ruled 20 Sep 2026) ───────────────────
+  // Both of these classified as `user_stated` until that ruling, and neither
+  // carried a written justification — note the asymmetry with `brief_extraction`
+  // at the top of this table, which does. They were swept in with the `user_*` family,
+  // not ruled. See {@link earnsAuthorshipCredit} for the full ground.
+  //
+  // `user_confirmed` is the UI's "confirm as is": an OLUMI estimate the user
+  // endorsed. The number is still ours. The product's own sentence promises the
+  // leader claim stays withheld "until you have SET at least one of them", and a
+  // user who only confirmed has set nothing.
+  user_confirmed: 'user_ratified',
+  // `user_assumption` is "mark as assumption": a value the user INVENTED rather
+  // than one they know. The same reasoning read from the other end — an admitted
+  // guess is not evidence of domain knowledge, and `decision-review/
+  // value-source-extraction-type.ts` has always sampled it WIDE for that reason.
+  user_assumption: 'user_ratified',
   // Elicited FROM the user through a panel, and verified against CEE's own
   // collab store before it is stamped — the user supplied it.
   panel_elicited: 'user_stated',
@@ -261,6 +474,29 @@ function nodeById(graph: unknown, id: string): Record<string, unknown> | null {
 }
 
 /**
+ * Which classes the option-interventions ladder in {@link structureProvenance}
+ * RESOLVES on, and which it defers past to the repair-authored-edge check.
+ *
+ * ⚠ `false` is a DEFERRAL, not a verdict. `unattributed` means no stamp was
+ * read, and `system_repaired` reaching this table would be an off-contract
+ * stamp (`InterventionV3.source` declares three members, none of them repair);
+ * in both cases the incoming-edge check below has better evidence, and both
+ * behave exactly as they did before this map existed.
+ *
+ * ⛔ It is a `Record<StructureProvenance, boolean>` rather than an `if` ladder
+ * for the same reason as {@link AUTHORSHIP_STRENGTH}: a sixth member must be
+ * RULED, and a `Record` makes not ruling it a build failure. Omission is how
+ * `user_ratified` came to be reported as `unattributed` here.
+ */
+const INTERVENTION_CLASS_RESOLVES: Readonly<Record<StructureProvenance, boolean>> = {
+  user_stated: true,
+  user_ratified: true,
+  ai_drafted: true,
+  system_repaired: false,
+  unattributed: false,
+};
+
+/**
  * The provenance of ONE graph element.
  *
  * Reads only fields a PRODUCER writes:
@@ -294,8 +530,20 @@ export function structureProvenance(element: unknown, graph?: unknown): Structur
     const classes = Object.values(interventions).map((entry) =>
       classifyValueSource(asRecord(entry)?.source),
     );
-    if (classes.includes('user_stated')) return 'user_stated';
-    if (classes.includes('ai_drafted')) return 'ai_drafted';
+    // The STRONGEST stated effect wins here — the opposite question to
+    // `structureProvenanceOfEffect`'s, and named apart from it on purpose.
+    //
+    // ⛔ THIS WAS ALSO AN `if` LADDER, total over two members and silent about
+    // the other three: `user_ratified` fell past both guards and this function
+    // returned `unattributed` — a WIRE counter meaning *"nobody stamped it"*,
+    // which is false about a value a human acted on, and the reason this file's
+    // own header insists that bucket stay distinct.
+    //
+    // Which classes RESOLVE here is now stated, not left to omission. The two
+    // that do not are unchanged in behaviour: they defer to the repair-authored
+    // incoming-edge check below, which knows things this map cannot.
+    const strongest = strongestProvenance(classes);
+    if (strongest !== null && INTERVENTION_CLASS_RESOLVES[strongest]) return strongest;
   }
 
   // A repair-authored INCOMING edge makes the element's connection the system's,
@@ -368,14 +616,20 @@ export function structureProvenanceOfEffect(
   const ends: StructureProvenance[] = [];
   if (option) ends.push(structureProvenance(option, graph));
   if (factor) ends.push(structureProvenance(factor, graph));
-  if (ends.length === 0) return 'unattributed';
 
   // The WEAKEST end wins: an obligation is only the user's when every element it
   // names is the user's.
-  if (ends.includes('system_repaired')) return 'system_repaired';
-  if (ends.includes('unattributed')) return 'unattributed';
-  if (ends.includes('ai_drafted')) return 'ai_drafted';
-  return 'user_stated';
+  //
+  // ⛔ DO NOT REWRITE THIS AS AN `if` LADDER. It was one, it was total over four
+  // members, and the fifth (`user_ratified`) fell through its bare final
+  // `return 'user_stated'` — minting a DEMAND over a value the user had only
+  // confirmed, on the readiness authority's own wire field, with no type error.
+  // {@link AUTHORSHIP_STRENGTH} carries the order so a sixth member breaks the
+  // BUILD instead of the ruling.
+  //
+  // `null` here means neither end resolved to a node at all — which is "nobody
+  // stamped it", not "the user said so". Unchanged from the guard this replaces.
+  return weakestProvenance(ends) ?? 'unattributed';
 }
 
 // ============================================================================
