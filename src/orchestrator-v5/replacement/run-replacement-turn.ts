@@ -108,6 +108,11 @@ import type { ToolResponseBlock } from '../../adapters/llm/types.js';
  * and keeps an unknown save honestly unresolved rather than retrying into a
  * duplicate. A degraded product beats a product that silently writes twice.
  */
+import {
+  createReplacementTraceRecorder,
+  type ReplacementTurnTrace,
+} from './turn-trace.js';
+
 export interface ApplyOperations {
   (input: {
     readonly proposalId: string;
@@ -202,6 +207,12 @@ export interface ReplacementTurnResult extends ComposeTurnResult {
   readonly applied: readonly { readonly proposalId: string; readonly receiptId: string }[];
   /** Set when a save landed and the write path reported a new revision. */
   readonly newModelRevision?: string;
+  /** The turn's decision chain — route, proposal context, intended
+   *  operations, tool selection, refusal codes, write and receipt. Returned
+   *  so the caller can persist or emit it; this module keeps no channel of
+   *  its own, because a controller that owns its own telemetry sink is a
+   *  controller whose record can be switched off independently of it. */
+  readonly trace: ReplacementTurnTrace;
 }
 
 /**
@@ -307,6 +318,15 @@ export async function runReplacementTurn(
   // one. `apply_in_flight` is untouched by this — see the store.
   let proposals = markStaleForRevision(input.proposals, input.modelRevision);
   let memory = input.memory;
+
+  // ⭐ ONE RECORD PER TURN, KEYED ON THE TURN ID THE UI SENT. See
+  // `turn-trace.ts` for why this layer does not inherit the estate's
+  // inability to reconstruct its own failures. Recording only — it cannot
+  // throw, await, or change a decision.
+  const trace = createReplacementTraceRecorder({
+    correlationId: input.turnId,
+    modelRevision: input.modelRevision,
+  });
 
   const applied: { proposalId: string; receiptId: string }[] = [];
   let newModelRevision: string | undefined;
@@ -426,7 +446,19 @@ export async function runReplacementTurn(
       now: input.now,
       idFor: input.idFor,
     });
-    return { ...composed, toolsCalled: [], iterations: 0, applied };
+    return {
+      ...composed,
+      toolsCalled: [],
+      iterations: 0,
+      applied,
+      trace: trace.finish({
+        outcome: 'reconciliation_owned',
+        proposalsOpen: openProposals(proposals).length,
+        proposalsInFlight: outstanding.length,
+        toolsCalled: [],
+        iterations: 0,
+      }),
+    };
   }
 
   // Write attempts this turn has COMMITTED TO DISPATCHING, as distinct from
@@ -463,6 +495,7 @@ export async function runReplacementTurn(
             // authorised, put in flight, or sent — leaving a proposal marked
             // in-flight for a write that was never sent is its own small lie.
             if (deps.checkpoint === undefined) {
+              trace.refused('no_checkpoint');
               return {
                 type: 'refused',
                 content:
@@ -516,6 +549,7 @@ export async function runReplacementTurn(
             // review; the guard was over-broad relative to its own stated
             // justification, which is about a second append under ONE turn id.
             if (acceptedThisTurn > 0) {
+              trace.refused('second_write_this_turn');
               return {
                 type: 'refused',
                 content:
@@ -531,6 +565,7 @@ export async function runReplacementTurn(
             const waiting = openProposals(proposals);
             const target = waiting.find((p) => p.id === proposalId);
             if (target === undefined) {
+              trace.refused('proposal_not_waiting');
               return {
                 type: 'refused',
                 content:
@@ -543,6 +578,7 @@ export async function runReplacementTurn(
             }
 
             if (!quotedFromMessage(quote, input.message)) {
+              trace.refused('quote_not_from_message');
               return {
                 type: 'refused',
                 content:
@@ -556,6 +592,7 @@ export async function runReplacementTurn(
             // case and for why this asks a lexical question rather than a
             // linguistic one.
             if (namesANumberTheOfferDoesNot(input.message, target.operations)) {
+              trace.refused('acceptance_names_other_number');
               return {
                 type: 'refused',
                 content:
@@ -586,6 +623,8 @@ export async function runReplacementTurn(
 
             // Bound to what was OFFERED. Not re-derived from the conversation.
             const bound = operationsToApply(proposals, proposalId);
+            // Kinds only. The values are the user's and never enter the record.
+            trace.accepted(proposalId, bound.operations.map((o) => o.kind));
             const idempotencyKey = input.idFor('idempotency', applied.length);
             proposals = recordApplyAttempt(proposals, proposalId);
             proposals = beginApply(proposals, proposalId, {
@@ -614,6 +653,7 @@ export async function runReplacementTurn(
             // question the guard must answer is "has this turn already
             // dispatched a write?", not "has one already succeeded?".
             acceptedThisTurn += 1;
+            trace.writeAttempted();
 
             // Durability barrier. The key is in `proposals` now; it must be
             // on disk BEFORE the write leaves, or a crash loses it.
@@ -639,6 +679,7 @@ export async function runReplacementTurn(
               // has no way to price. Refusing it is a gap; admitting it would be
               // a second uncertain write.
               proposals = beforeAuthorise;
+              trace.refused('checkpoint_refused');
               return {
                 type: 'refused',
                 content:
@@ -658,6 +699,7 @@ export async function runReplacementTurn(
             } catch (err) {
               // UNKNOWN. It stays in flight; the next turn reconciles. The
               // model is told exactly this, so it cannot resolve it either way.
+              trace.refused('write_outcome_unknown');
               return {
                 type: 'refused',
                 content:
@@ -672,6 +714,7 @@ export async function runReplacementTurn(
                 reason: outcome.reason,
                 failed_at: input.now,
               });
+              trace.refused('write_failed');
               return {
                 type: 'refused',
                 content: `It did not save: ${outcome.reason}. Nothing has changed. Tell the user what happened.`,
@@ -699,6 +742,7 @@ export async function runReplacementTurn(
             // still-broken one exhausts the cap and becomes `unresolved`. No
             // new state, and no claim in either direction.
             if (!isNonEmptyReceipt(outcome.receiptId)) {
+              trace.refused('no_receipt');
               return {
                 type: 'refused',
                 content:
@@ -713,7 +757,11 @@ export async function runReplacementTurn(
               applied_at: input.now,
             });
             applied.push({ proposalId, receiptId: outcome.receiptId });
-            if (outcome.newModelRevision !== undefined) newModelRevision = outcome.newModelRevision;
+            trace.writeCommitted(outcome.receiptId);
+            if (outcome.newModelRevision !== undefined) {
+              newModelRevision = outcome.newModelRevision;
+              trace.revisionAdvanced(outcome.newModelRevision);
+            }
 
             // The ONLY place an `authorised_change` is ever written, and it
             // carries both ids — the memory module refuses it without them.
@@ -789,5 +837,12 @@ export async function runReplacementTurn(
     iterations: loopResult.iterations,
     applied,
     ...(newModelRevision === undefined ? {} : { newModelRevision }),
+    trace: trace.finish({
+      outcome: 'completed',
+      proposalsOpen: openProposals(proposals).length,
+      proposalsInFlight: needsReconciliation(proposals).length,
+      toolsCalled: loopResult.toolsCalled,
+      iterations: loopResult.iterations,
+    }),
   };
 }
