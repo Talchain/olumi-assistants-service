@@ -145,7 +145,7 @@
               "string",
               "null"
             ],
-            "description": "If value differs from the literal characters in the quote (e.g. '£20k → 20000', 'two → 2'), say exactly how. null if literal."
+            "description": "If value differs from the literal characters in the quote, say exactly how (e.g. '£20k → 20000', 'two → 2', 'a tech lead → 1', 'next quarter → 1 quarter'). REQUIRED whenever the digits of `value` do not appear in `source_quote`, including an implied count or period. null ONLY when the value is literal in the quote."
           }
         }
       }
