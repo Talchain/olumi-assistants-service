@@ -172,6 +172,7 @@ import { projectModelNodeLabels } from './routing/ordinary-text-authority.js';
 import {
   detectMutationWarrant,
   buildMutationWarrantDemotionText,
+  withdrawUnresumableOfferClose,
   isBoundedNonMutationAnalyticalRequest,
   selectBoundedNonMutationHandler,
   type MutationWarrant,
@@ -11511,6 +11512,30 @@ export async function runTurnExecutor(
             demotion.residualDisclosure,
           );
         }
+
+        // ⭐⭐ THE PROMISE IS DECIDED BY WHAT WAS KEPT, NOT BY WHICH BRANCH RAN.
+        //
+        // Every branch above feeds the SAME `commitTurn(..., pending_actions:
+        // demotionPending)` below, and `demotionPending` is non-empty in exactly
+        // one of them — the successful `emitProposedChange`. The other branches
+        // deliberately persist nothing: there is no proposable intent, no graph
+        // hash to build the drift precondition from, or the emit itself refused.
+        // Each of those refusals is CORRECT and stays. What was wrong is that
+        // three of them still closed with "Say the word and I will make it."
+        // while keeping nothing for a "yes" to find — `tryShortConfirmResume`
+        // replays a STORED `inline_patch`, so an unkept offer is a dead end the
+        // product walked the user into.
+        //
+        // ⛔ THE RECOGNISER IS NOT TOUCHED. Widening it was recommended and
+        // WITHDRAWN (commit `d8a908b3`): replay never re-reads the message, so a
+        // wider predicate would apply the offer's number and discard a value the
+        // user restated, with a receipt. The gate is right; the offer was wrong.
+        //
+        // Derived rather than restated in each branch (trap 12) because the
+        // hand-written remedy is exactly what drifted: PR #1491 fixed one branch
+        // this way and its three siblings kept the promise. Reading
+        // `demotionPending` means a branch added later cannot reopen this.
+        demotionText = withdrawUnresumableOfferClose(demotionText, demotionPending);
 
         emit(TelemetryEvents.V5MutationWarrantAbsent, {
           request_id: requestId,
