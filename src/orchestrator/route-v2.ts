@@ -101,6 +101,7 @@ import type { TurnTimingsBlock, V5TurnTimings } from '../orchestrator-v5/telemet
 import type {
   V5DiagnosticExitPath,
   V5DiagnosticTrace,
+  V5HandlerRefusal,
 } from '../orchestrator-v5/diagnostics/v5-diagnostic-trace.js';
 import { buildMinimalV5DiagnosticTrace } from '../orchestrator-v5/diagnostics/v5-diagnostic-trace.js';
 import {
@@ -1022,6 +1023,18 @@ async function sendFinalised200(
      */
     readonly withheldExplanationReason?: WithheldExplanationReason;
     /**
+     * WHICH handler declined this turn, and why, in stable codes. Present only
+     * when the recoverable-handler composer answered; the turn-executor is the
+     * only producer, and an absent value is stamped as nothing at all — there
+     * is deliberately no "unknown" placeholder, because "this turn did not
+     * refuse" and "it refused for a reason nobody can name" are different
+     * claims and the second is the state this field exists to abolish.
+     *
+     * Diagnostic only — it reaches the wire solely inside the flag-gated
+     * `_diagnostic_trace.handler_refusal`, never `response`.
+     */
+    readonly handlerRefusal?: V5HandlerRefusal;
+    /**
      * ROADMAP 2.1271 — THIS turn started a provisional analysis and it is in
      * flight. Threaded by exactly ONE exit (draft_graph) and consumed only by
      * `composeAnalysisStateV1`'s `running` arm. Absent everywhere else, which is
@@ -1416,6 +1429,18 @@ async function sendFinalised200(
         verdict_provenance: ctx.mayNameLeadingOptionProvenance ?? null,
         withheld_projection_reason: ctx.withheldExplanationReason ?? null,
       },
+      // ⭐⭐ WHICH THROW DECLINED THIS TURN. Stamped HERE for exactly the reason
+      // `claim_safety` above is: this is the ONE place every dispatch family's
+      // trace passes through on its way to the wire, so wiring it into each
+      // builder instead would be the per-site enumeration that always misses a
+      // sibling.
+      //
+      // OMITTED, not nulled, on a turn that did not refuse — an absent key
+      // honestly means "no handler declined", and a present one is always a
+      // real refusal. Threaded from the turn-executor's own catch and never
+      // re-derived here, so the trace cannot disagree with the error it
+      // reports on.
+      ...(ctx.handlerRefusal ? { handler_refusal: ctx.handlerRefusal } : {}),
     };
     const augmented: OlumiResponseWithDebugFields = {
       ...wireBody,
@@ -8231,6 +8256,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       ...(run.withheldExplanationReason !== undefined
         ? { withheldExplanationReason: run.withheldExplanationReason }
         : {}),
+      // WHICH handler declined, for the diagnostic trace only. Absent ⇒
+      // nothing stamped, which is the honest reading for every turn that did
+      // not take the recoverable-handler path.
+      ...(run.handlerRefusal !== undefined ? { handlerRefusal: run.handlerRefusal } : {}),
       ...(run.freshness ? { freshness: run.freshness } : {}),
       // G3 — the scenario-bound verdict, beside the wire-bound one. Absent
       // unless a durable reasoning authority licensed it; the seam then changes
