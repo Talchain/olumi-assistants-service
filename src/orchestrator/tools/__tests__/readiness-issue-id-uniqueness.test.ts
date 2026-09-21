@@ -35,14 +35,36 @@
  * `routing/readiness-summary.ts:174`) pass a plain per-list index, and the former
  * drops `issue_id` outright.
  *
- * ── WHY IT IS NOT COSMETIC: THE READER CHAIN IS COMPLETE ───────────────────
- *   `routing/readiness-answer-chips.ts:178` → `chip_readiness_answer_${issue_id}`
- *        two distinct questions mint two chips carrying ONE id;
- *   `handlers/readiness-value-batch-resume.ts:78,114` → resolves the user's
- *        answer BY `issue_id`, with two different required shapes (`:78` wants
- *        `factor_id`, `:114` wants `prompt`) — precisely the two kinds that
- *        collide here.
- * So an answer to one question can bind to the other, or satisfy neither.
+ * ── WHY IT IS NOT COSMETIC: THE READER CHAIN, CORRECTED TWICE ──────────────
+ *
+ * ⛔ THIS PARAGRAPH ASSERTED THE WRONG CHAIN, THEN I WITHDREW TOO MUCH, AND A
+ * REVIEWER MEASURED THE TRUE ONE. Both errors are kept visible because the
+ * shape is the lesson, not the conclusion.
+ *
+ * ~~`handlers/readiness-value-batch-resume.ts:78,114` resolves the user's
+ * answer BY `issue_id`, so an answer to one question can bind to the other.~~
+ * **FALSE.** Those sites are pure VALIDATORS. Every identity operation in the
+ * value batch is `cellKey(option_id, factor_id)` — measured, and it is why I
+ * withdrew the answer-binding claim.
+ *
+ * ⚠ But I then concluded there was NO consumer at all, and that was also
+ * wrong. My sweep asked *"is `issue_id` a Map/Set key, or inside
+ * `find`/`filter`/`some`?"* — **and a React key is none of those.** The real
+ * chain, measured by the reviewer:
+ *
+ *   CEE `routing/readiness-answer-chips.ts:178,184` → `suggested_actions[].id`
+ *     → UI `ChatThread.tsx:349`   `<SuggestedChips>`      ← production render
+ *     → UI `SuggestedChips.tsx:364`  `key={chip.id ?? …}` ← REACT KEY
+ *
+ * Measured over a K×M grid, staging vs this head: with an option edge-linked
+ * to exactly two unvalued factors plus at least one option awaiting a mapping,
+ * **two chips of DIFFERENT KINDS land in one row under one key.**
+ * **Duplicate `issue_id`: 8 of 12 shapes at staging, 0 of 12 here.**
+ *
+ * ⭐ The durable lesson is about the SWEEP, not the bug: an absence claim is
+ * only as wide as the consumption patterns you thought to ask about. A
+ * framework key, a telemetry join and a render prop are all consumers that no
+ * collection-membership grep can see.
  *
  * ── THE ASSERTION IS DERIVED, NEVER A LITERAL SEQUENCE ─────────────────────
  * Pinning the expected ids would be a hand-maintained mirror of the minting
