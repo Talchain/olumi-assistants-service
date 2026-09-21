@@ -30,6 +30,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { sanitiseForUser } from '../../../compose/helpers.js';
+import { formatUnitAmbiguityClarify } from '../add-constraint.js';
 import {
   ADD_CONSTRAINT_USER_GUIDANCE,
   SET_FACTOR_VALUE_USER_GUIDANCE,
@@ -77,13 +78,53 @@ describe('D1 user guidance reaches the user WHOLE', () => {
   });
 
   /**
+   * ⭐⭐ THE ONE SITE THAT PASSES A *SPECIFIC* GUIDANCE — and it INTERPOLATES,
+   * which is how a length budget is defeated by its own data.
+   *
+   * Measured: the skeleton is 65 characters and the value appears TWICE, so the
+   * budget is ~17.5 characters PER VALUE. Ordinary figures are nowhere near it
+   * (`30` -> 69 chars, `30000` -> 75, `MAX_SAFE_INTEGER` -> 97).
+   *
+   * ⛔ BUT FLOAT NOISE EXCEEDS IT, AND FLOAT NOISE IS WHAT ARITHMETIC PRODUCES.
+   * `0.1 + 0.2` stringifies as `0.30000000000000004` — 19 characters — giving
+   * **103**, and its negative gives **105**. Both truncate, so the product's
+   * clarifying question is cut mid-sentence and the user cannot act on it.
+   * That is `66651370`'s defect exactly, in the one sentence that was sized
+   * against this budget by hand.
+   *
+   * ⚠ REACHABILITY IS **NOT** MEASURED AND IS NOT CLAIMED. `params.value` is the
+   * user's parsed figure; whether a normalisation-derived value with full float
+   * precision reaches this formatter has not been established. **Pinned as a
+   * measured boundary, not reported as a live user harm** — the honest form for
+   * a gap whose reachability is unknown.
+   */
+  it('the specific clarify survives for the values a user actually states', () => {
+    for (const v of [30, 0.3, 30000, 12.5, Number.MAX_SAFE_INTEGER]) {
+      const s = formatUnitAmbiguityClarify(v);
+      expect(sanitiseForUser(s), `value ${v} must reach the user whole`).toBe(s);
+    }
+  });
+
+  it('KNOWN-DROPPED: full-precision float noise TRUNCATES it — pinned, not fixed', () => {
+    // ⛔ Do not "fix" this by shaving the skeleton — it is already 65 chars and
+    // the value appears twice, so every character saved buys only half a
+    // character of value budget. The real remedies are to format the value for
+    // display or to interpolate it once, and BOTH change what the user reads,
+    // which is a decision rather than a tidy-up.
+    const noisy = 0.1 + 0.2; // 0.30000000000000004
+    const s = formatUnitAmbiguityClarify(noisy);
+    expect(s.length, 'the boundary this pins').toBeGreaterThan(100);
+    expect(
+      sanitiseForUser(s),
+      'if this ever survives intact the budget or the formatter changed — re-derive, do not delete',
+    ).not.toBe(s);
+  });
+
+  /**
    * ⚠ SCOPE, STATED RATHER THAN IMPLIED. `formatUnitAmbiguityClarify`
-   * (`add-constraint.ts:190`) is the one site that passes a SPECIFIC
-   * `userGuidance` rather than a canonical phrase, and it is NOT exported, so it
-   * is not covered here. Its own docblock records that it was sized by hand
-   * against this budget. **Anyone wiring a second specific guidance should
-   * export it and add it to `CANONICAL` above** — this file is the place that
-   * makes the budget enforceable instead of a comment.
+   * is now EXPORTED and covered above. **Anyone wiring a second specific
+   * guidance should export it and cover it here too** — this file is the place
+   * that makes the budget enforceable instead of a comment.
    */
   it('documents that exactly three canonical phrases exist, so a fourth must be added here', () => {
     // Not a count of the codebase — a pin on THIS file's coverage, so adding a
