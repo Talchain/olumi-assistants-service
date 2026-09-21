@@ -138,6 +138,14 @@ export const NOTICE_KIND_BY_REASON: Record<
   // declined to assert rather than guessing a direction — the conservative
   // resolution of an ambiguity, which is what this kind names.
   constraint_direction_unstated: "conflict_resolved_conservatively",
+  // ⚠ `other`, NOT `conflict_resolved_conservatively`, and the distinction is
+  // the whole point of this file's doctrine. Nothing was resolved
+  // CONSERVATIVELY here — the approximation is PERMISSIVE. The user wrote
+  // "under 4%" and `ConstraintOperator` can only carry `<=`, so the limit that
+  // ships ADMITS exactly 4%, a value he excluded. Calling that conservative
+  // would tell him his limit was tightened when it was loosened, which is the
+  // specific-but-false bucket this file exists to refuse.
+  constraint_strictness_approximated: "other",
   // A magnitude authored in an earlier pass, against a population that no longer
   // existed by the time the factor's scale was derived. `other`, not a
   // nearest-looking kind: nothing was consolidated and no relationship was

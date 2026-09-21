@@ -625,6 +625,21 @@ export interface DroppedRecordRef {
      */
     | "constraint_direction_unstated"
     /**
+     * ⭐⭐ THE USER STATED A STRICT LIMIT AND THE WIRE CANNOT EXPRESS ONE.
+     *
+     * `ConstraintOperator` is `z.enum([">=", "<="])` (`schemas/graph.ts`), so a
+     * brief saying "keeping monthly churn UNDER 4%" can only be carried as
+     * `<= 0.04` — which ADMITS exactly 4%, a value the user excluded. The
+     * threshold is still bound (a non-strict bound is far closer to his meaning
+     * than none), but the approximation is DISCLOSED rather than silently made.
+     *
+     * WITNESSED on his own draw (`9077a1e3`): quote "keeping monthly churn under
+     * 4%" arrived as `operator: "<=", value: 0.04` under the label "Keep monthly
+     * churn at or below 4%" — his constraint restated with different meaning and
+     * nothing anywhere saying so.
+     */
+    | "constraint_strictness_approximated"
+    /**
      * ⭐⭐ A STATED LIMIT CARRIES NO THRESHOLD WE CAN USE — so it cannot be
      * enforced, and until now nobody said so.
      *
@@ -1049,6 +1064,31 @@ export function canonicalSerialise(value: unknown): string {
  * operator are two vocabularies, the translation happens exactly once, and it
  * is pinned by a test rather than restated in prose.
  */
+/**
+ * ⭐ DOES THE USER'S OWN SENTENCE STATE A *STRICT* BOUND?
+ *
+ * Deterministic and quote-scoped: read ONLY the words the user wrote, never a
+ * model's paraphrase of them. A strict marker counts only when no non-strict
+ * marker is also present, so "no more than 4%" and "at or below 4%" are read as
+ * the non-strict limits they are, and a sentence carrying both is treated as
+ * NOT strict — the fail-closed direction, because over-disclosing an
+ * approximation that did not happen would teach readers to ignore the flag.
+ */
+export function quoteStatesStrictBound(quote: string): boolean {
+  const q = ` ${quote.toLowerCase()} `;
+  const NON_STRICT = [
+    " at most ", " at least ", " no more than ", " no less than ", " no fewer than ",
+    " or below ", " or above ", " or less ", " or more ", " up to ",
+    " maximum of ", " minimum of ", " at or below ", " at or above ",
+  ];
+  if (NON_STRICT.some((m) => q.includes(m))) return false;
+  const STRICT = [
+    " under ", " below ", " less than ", " fewer than ",
+    " over ", " above ", " more than ", " exceed ", " exceeds ", " exceeding ",
+  ];
+  return STRICT.some((m) => q.includes(m));
+}
+
 export function directionToOperator(direction: "floor" | "ceiling"): ">=" | "<=" {
   return direction === "floor" ? ">=" : "<=";
 }
@@ -2793,6 +2833,18 @@ function projectOnce(
       });
     } else if (kind === "constraint" && typeof item.value === "number" && statedDirection !== undefined) {
       const operator = directionToOperator(statedDirection);
+      // ⭐ DISCLOSE A STRICT BOUND THE WIRE CANNOT CARRY. The threshold is still
+      // bound — a non-strict limit is far nearer his meaning than none — but the
+      // gap between "under 4%" and "<= 4%" is stated rather than absorbed.
+      if (quoteStatesStrictBound(quote)) {
+        dropped.push({
+          claim_index: -1,
+          claim_kind: STATED_ITEM_DROP_KIND,
+          label: quote,
+          node_id: id,
+          reason: "constraint_strictness_approximated",
+        });
+      }
       // PLoT reads the operator in BOTH places (graph.ts:176-178, 252-258).
       node.data = { operator };
       node.observed_state = {
