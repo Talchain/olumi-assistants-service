@@ -66,7 +66,7 @@
  */
 
 import type { GraphV3T, DraftCoachingWideningLog } from '../../orchestrator/types.js';
-import { sectionLabel } from '../compose/section-label.js';
+import { sectionLabel, unmarkSectionLabel } from '../compose/section-label.js';
 
 import { findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
 
@@ -1522,7 +1522,7 @@ function buildTradeOffBullet(
   if (opposingPair !== null) {
     const a = elideLabelAtWordBoundary(opposingPair[0], MAX_LABEL_CHARS);
     const b = elideLabelAtWordBoundary(opposingPair[1], MAX_LABEL_CHARS);
-    return `Main trade-off: ${a} balanced against ${b}`;
+    return `${sectionLabel('Main trade-off')} ${a} balanced against ${b}`;
   }
   if (trimmedFactors.length >= 2) {
     // Two factors, no opposition the model can show: name them without
@@ -1531,14 +1531,14 @@ function buildTradeOffBullet(
   }
   if (trimmedFactors.length === 1 && risks.length >= 1) {
     const risk = elideLabelAtWordBoundary(risks[0], MAX_LABEL_CHARS);
-    return `Main trade-off: ${trimmedFactors[0]} against the risk of ${risk}`;
+    return `${sectionLabel('Main trade-off')} ${trimmedFactors[0]} against the risk of ${risk}`;
   }
   if (trimmedFactors.length === 1) {
     return `${sectionLabel('Key consideration')} ${trimmedFactors[0]}`;
   }
   if (risks.length >= 1) {
     const risk = elideLabelAtWordBoundary(risks[0], MAX_LABEL_CHARS);
-    return `Key consideration: the risk of ${risk}`;
+    return `${sectionLabel('Key consideration')} the risk of ${risk}`;
   }
   return null;
 }
@@ -1653,7 +1653,7 @@ function pickDeterministicAssumption(input: {
   if (driver !== null) {
     if (driverIsServable(driver)) {
       return {
-        text: `${sectionLabel('One assumption worth checking')} ${cleanLeadIn(driver)}.`,
+        text: `One assumption worth checking: ${cleanLeadIn(driver)}.`,
         source: 'uncertainty_driver',
         fallbackReason: null,
       };
@@ -1688,7 +1688,7 @@ function pickAssumption(input: {
   const strengthen = pickStrengthenAssumption(strengthenItems);
   if (strengthen) {
     return {
-      text: `${sectionLabel('One assumption worth checking')} ${strengthen.text}.`,
+      text: `One assumption worth checking: ${strengthen.text}.`,
       source: strengthen.source,
       fallbackReason: null,
     };
@@ -1701,7 +1701,7 @@ function pickAssumption(input: {
   const biasFinding = pickBiasFindingAssumption(analysisReady);
   if (biasFinding) {
     return {
-      text: `${sectionLabel('One assumption worth checking')} ${biasFinding}.`,
+      text: `One assumption worth checking: ${biasFinding}.`,
       source: 'bias_finding',
       fallbackReason: anyCandidateRejected ? 'gate_rejected' : null,
     };
@@ -1714,7 +1714,7 @@ function pickAssumption(input: {
   const coachingBias = pickCoachingBiasSignalAssumption(coachingBiasSignals);
   if (coachingBias) {
     return {
-      text: `${sectionLabel('One assumption worth checking')} ${coachingBias}.`,
+      text: `One assumption worth checking: ${coachingBias}.`,
       source: 'coaching_bias_signal',
       fallbackReason: anyCandidateRejected ? 'gate_rejected' : null,
     };
@@ -1731,7 +1731,7 @@ function pickAssumption(input: {
     // this repo has paid for more than once.
     if (driverIsServable(driver)) {
       return {
-        text: `${sectionLabel('One assumption worth checking')} ${cleanLeadIn(driver)}.`,
+        text: `One assumption worth checking: ${cleanLeadIn(driver)}.`,
         source: 'uncertainty_driver',
         fallbackReason: anyCandidateRejected ? 'gate_rejected' : null,
       };
@@ -2062,7 +2062,9 @@ function normaliseForDedup(s: string): string {
  * {@link toCheckBullet}.
  */
 function stripBulletLabel(bullet: string): string {
-  return bullet
+  // Unmark FIRST: the labels below are emitted through `sectionLabel`, so the
+  // bullet arrives marked and this alternation would not match it.
+  return unmarkSectionLabel(bullet)
     .replace(/^(?:Assumption to check|Main trade-off|Key consideration|Worth a look):\s*/i, '')
     .trim();
 }

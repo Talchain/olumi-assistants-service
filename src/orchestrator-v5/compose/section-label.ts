@@ -43,6 +43,24 @@ export function sectionLabel(label: string): string {
 }
 
 /**
+ * ⭐ THE INVERSE, AND IT EXISTS BECAUSE MARKING BROKE THREE READERS.
+ *
+ * Marking a label changes bytes that OTHER code already parses. Measured, not
+ * predicted: `toAssumptionBullet` matches `/^One assumption worth checking:/`
+ * and `stripBulletLabel` matches a four-label alternation — both silently
+ * stopped matching when the markers went in, and the second one let a
+ * duplicate bullet through its dedup (caught by `post-draft-narrative.test.ts
+ * > does not repeat the primary assumption text as the extra check`).
+ *
+ * So any consumer that compares or strips the UNDERLYING text unmarks it first
+ * rather than growing its own `\*\*` literal — which would be a second copy
+ * of the marker, free to drift from `sectionLabel` (trap 12).
+ */
+export function unmarkSectionLabel(text: string): string {
+  return text.split(BOLD).join('');
+}
+
+/**
  * ⛔ THERE IS DELIBERATELY NO `splitsAPhrase()` HELPER HERE, AND THE REASON IS
  * THE FINDING.
  *

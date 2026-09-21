@@ -19,6 +19,7 @@ import {
   quoteLabel,
   type RawRobustnessSignals,
 } from '../robustness-honesty.js';
+import { sectionLabel } from '../../compose/section-label.js';
 
 describe('robustness-honesty SSOT', () => {
   it('NEAR_TIE_PP_THRESHOLD is 1.0pp (inclusive)', () => {
@@ -175,7 +176,7 @@ describe('closenessLead', () => {
       marginPp: 5.15,
     });
     expect(out).toBe(
-      "This is a close call: 'Hire One Tech Lead' is narrowly ahead of 'Hire One Tech Lead and One Developer' by about 5 percentage points.",
+      `${sectionLabel('This is a close call')} 'Hire One Tech Lead' is narrowly ahead of 'Hire One Tech Lead and One Developer' by about 5 percentage points.`,
     );
   });
 
@@ -186,6 +187,6 @@ describe('closenessLead', () => {
       tieReason: 'override',
       marginPp: null,
     });
-    expect(out).toBe("This is a close call: the analysis treats 'A' and 'B' as a near-tie.");
+    expect(out).toBe(`${sectionLabel('This is a close call')} the analysis treats 'A' and 'B' as a near-tie.`);
   });
 });

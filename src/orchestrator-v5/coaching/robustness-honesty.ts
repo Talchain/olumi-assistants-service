@@ -180,5 +180,5 @@ export function closenessLead(args: {
   if (typeof marginPp === 'number' && Number.isFinite(marginPp)) {
     return `${sectionLabel('This is a close call')} ${lead} is narrowly ahead of ${runner} by about ${formatPercentagePoints(Math.abs(marginPp))}.`;
   }
-  return `This is a close call: the analysis treats ${lead} and ${runner} as a near-tie.`;
+  return `${sectionLabel('This is a close call')} the analysis treats ${lead} and ${runner} as a near-tie.`;
 }
