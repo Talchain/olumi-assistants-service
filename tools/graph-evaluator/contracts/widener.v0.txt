@@ -10,4 +10,8 @@ What you may do:
 
 What you must not do: change, rephrase, renumber or drop any user_facts entry, any provenance "user" item, or any constraint operator; add numbers that are not in the brief; add lever_settings on outcomes or constrained quantities; pad the model with generic factors that do not bear on this decision.
 
+If decision.goal_measured_by is null and one of the outcomes plainly measures the stated goal,
+set it — that is a structural correction, not a new user fact. Record it as a note of kind
+"correction".
+
 Return the complete model (all original user items unchanged, plus your additions) as the JSON object.

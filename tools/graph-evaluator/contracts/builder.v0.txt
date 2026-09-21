@@ -10,4 +10,7 @@ Rules — these are the whole job:
 7. Factors, outcomes and causal links: include only those the brief states or clearly implies, with provenance "user" and a source_fact_id, or mark them "ai_hypothesis" / "ai_proposed" with a rationale. Prefer fewer, correct items. Every causal link's magnitude kind is "unknown" unless the person stated one.
 8. Qualitative things they mentioned (morale, sentiment, fit, resistance) are facts of kind "qualitative" and factors with measurability "qualitative". Do not drop them because they lack a number.
 9. Time words (horizon, delays, durations, "for one month", "after the release") go into decision.horizon or the temporal block of the relevant link, in the person's words.
-10. Output only the JSON object.
+10. Set decision.goal_measured_by to the id of the outcome the goal is measured by (for "reach
+£20k MRR", the MRR outcome). Without it nothing connects an option to the goal and the model
+cannot be analysed. Use null only if the brief names no measurable goal.
+11. Output only the JSON object.
