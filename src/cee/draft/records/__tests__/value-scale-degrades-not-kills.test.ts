@@ -171,13 +171,38 @@ describe("a malformed value_scale degrades, a malformed discriminator refuses", 
  * field that does not exist yet — turns this red without anyone remembering to
  * add a row.
  */
-function tolerantFields(shape: Record<string, unknown>): string[] {
-  // `.catch()` wraps the whole field, so a tolerant field is a `ZodCatch` at the
-  // outermost level. Read from `_def.typeName` because that is what zod 3 sets;
-  // if a zod upgrade changes the spelling, the ALLOWED assertion below fails
-  // loudly rather than silently reporting "nothing is tolerant".
+/**
+ * Which fields silently accept something they should refuse — asked of
+ * BEHAVIOUR, not of zod's internals.
+ *
+ * ⚠⚠ THE FIRST VERSION READ `_def.typeName === "ZodCatch"` AND WAS BLIND TO THE
+ * SAME TWO WORDS IN THE OTHER ORDER. An independent reviewer measured it:
+ *
+ *   optional().catch()   outermost ZodCatch     -> seen
+ *   catch().optional()   outermost ZodOptional  -> INVISIBLE, and tolerant at
+ *                                                  runtime all the same
+ *   preprocess+optional  outermost ZodEffects   -> INVISIBLE
+ *
+ * Reproduced end to end: mutating `category` to `.catch().optional()` made
+ * `category: "nonsense"` parse to `undefined` instead of refusing — a real
+ * widening — and this file stayed **9 of 9 green**. The precondition could not
+ * help, because the three genuinely-tolerant fields still read as `ZodCatch`,
+ * so the set was non-empty and not everything.
+ *
+ * ⭐ So it asks each field to parse a value NO schema on this wire accepts. A
+ * field that succeeds is tolerant, however that tolerance is spelled — and a
+ * zod rename cannot blind a reader that never touches `_def`. Same answer as
+ * the internals reader on every pristine shape; strictly more on the mutants.
+ *
+ * ⛔ THE EXPECTED SETS BELOW STAY HAND-WRITTEN, deliberately. Deriving them too
+ * would prove the code agrees with itself and could never say the list is
+ * WRONG (trap 12d). The reader is derived; the decision is written down.
+ */
+const REFUSED_BY_EVERY_FIELD_TYPE = Symbol("no schema on this wire accepts this") as unknown;
+
+function tolerantFields(shape: Record<string, { safeParse: (v: unknown) => { success: boolean } }>): string[] {
   return Object.entries(shape)
-    .filter(([, v]) => (v as { _def?: { typeName?: string } })?._def?.typeName === "ZodCatch")
+    .filter(([, field]) => field.safeParse(REFUSED_BY_EVERY_FIELD_TYPE).success)
     .map(([k]) => k)
     .sort();
 }
@@ -198,10 +223,18 @@ describe("the tolerance is exactly where it was decided, and nowhere else", () =
     expect(tolerantFields(claims)).toEqual(["value_scale"]);
   });
 
+  it("EVERY top-level shape is covered — a third one cannot appear unnoticed", () => {
+    // The two assertions above name their shapes by hand, so a third top-level
+    // shape would be uncovered with nothing to fail. Latent today, and closed
+    // here rather than rowed because it is one line.
+    expect(Object.keys(arr).sort()).toEqual(["claims", "stated_items"]);
+  });
+
   it("PRECONDITION — the probe can see a tolerance at all", () => {
     // Without this, both assertions above are satisfied by a reader that always
-    // returns [] — a guard agreeing with itself. It pins that `ZodCatch` is
-    // still the right thing to look for, which a zod upgrade could change.
+    // returns [] — a guard agreeing with itself. Belt and braces now that the
+    // reader is behavioural, rather than the only defence it was when the
+    // reader depended on a zod-internal spelling.
     expect(tolerantFields(stated).length).toBeGreaterThan(0);
     expect(Object.keys(stated).length).toBeGreaterThan(tolerantFields(stated).length);
   });
