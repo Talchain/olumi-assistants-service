@@ -1153,6 +1153,24 @@ function optionMappingAsk(label: string, repairWiredFactorCount: number): string
   return `${ask} Olumi has already linked it to ${factors} to keep the model connected, but that link is Olumi's own inference rather than a mapping you stated, and it carries no effect value.`;
 }
 
+/**
+ * The producer's own question for an option blocked by an unresolved
+ * RELATIONSHIP, or `undefined` when the block is a plain missing mapping.
+ *
+ * Returns the questions the producer wrote — never a sentence minted here — so
+ * the user reads the risk's own label and nothing is invented.
+ */
+function relationshipAsk(option: unknown): string | undefined {
+  if (!isPlainObject(option)) return undefined;
+  const targets = Array.isArray(option.unresolved_targets) ? option.unresolved_targets : [];
+  if (targets.length === 0) return undefined;
+  const questions = Array.isArray(option.user_questions)
+    ? option.user_questions.filter((q): q is string => typeof q === 'string' && q.length > 0)
+    : [];
+  if (questions.length === 0) return undefined;
+  return questions.join(' ');
+}
+
 function appendSemanticIssues(
   payload: AnalysisReadyPayload | undefined,
   out: CanonicalReadinessIssue[],
@@ -1210,8 +1228,23 @@ function appendSemanticIssues(
       issue_id: `semantic_${out.length + 1}`,
       code: mapping ? 'OPTION_NEEDS_MAPPING' : 'OPTION_NEEDS_ENCODING',
       category: mapping ? 'option_mapping' : 'option_values',
+      // ⭐ ASK ABOUT WHAT ACTUALLY BLOCKED IT.
+      //
+      // `optionMappingAsk` knows only the option label, so it always asks a
+      // FACTOR-mapping question. When the block came from an unresolved
+      // RELATIONSHIP — an option→risk hypothesis is the live case — that ask is
+      // wrong in KIND: it sends the user to fix a factor mapping that is not
+      // what stopped the run. Measured on a real session, the user spent it
+      // trying to repair something that was not broken.
+      //
+      // The producer has already written the right sentence, naming the risk in
+      // the user's OWN label (`buildAnalysisReadyPayload`'s qualitative
+      // option→risk branch). `unresolved_targets` is the evidence that THIS is
+      // why the option is blocked, so it selects the question rather than the
+      // generic ask. With no unresolved targets the option genuinely has no
+      // mapping and the original ask is correct and unchanged.
       message: mapping
-        ? optionMappingAsk(
+        ? relationshipAsk(option) ?? optionMappingAsk(
             option.label,
             repairWiredFactorCount.get(option.option_id) ?? 0,
           )

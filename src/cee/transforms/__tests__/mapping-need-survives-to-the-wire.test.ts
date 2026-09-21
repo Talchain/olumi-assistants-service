@@ -193,3 +193,91 @@ describe("the obligation that blocked the option reaches the user", () => {
     expect(subject.unresolved_targets ?? []).toEqual([]);
   });
 });
+
+/**
+ * ⭐⭐ THE ASK NAMED A FACTOR WHEN THE BLOCKER WAS A RISK — and it cost a whole
+ * session, because the user tried to fix something that was not broken.
+ *
+ * An option→risk edge forces `needs_user_mapping` unconditionally
+ * (`buildAnalysisReadyPayload`, the "keep qualitative option→risk hypotheses"
+ * branch), and `unresolvedTargetCount > 0` short-circuits
+ * `computeAnalysisReadyStatusWithReason` before every other consideration. The
+ * readiness issue then rendered `optionMappingAsk`, which knows only the option
+ * label and asks a FACTOR-MAPPING question:
+ *
+ *     Choose which factor "Two Developers" changes and by how much.
+ *
+ * The producer had already written the correct, risk-naming sentence onto the
+ * option (`How does X change <risk label>? …`). The ask simply did not read it.
+ *
+ * ⚠ SCOPE. This fixes the SENTENCE ONLY. Whether an option→risk edge should
+ * gate admission at all is a separate ruling with a contract gap behind it —
+ * recorded in the PR body, deliberately NOT decided here.
+ */
+describe("a risk-blocked option is asked about the risk, not about a factor", () => {
+  const RISK_ID = "150def25";
+
+  function issuesFor(optionId: string) {
+    const graph = {
+      ...CAPTURE.draft_graph,
+      edges: [
+        ...CAPTURE.draft_graph.edges,
+        {
+          from: optionId,
+          to: RISK_ID,
+          strength: { mean: 0.42, std: 0.13 },
+          exists_probability: 0.79,
+          effect_direction: "positive",
+          provenance: { source: "cee_hypothesis", reasoning: "Retained causal hypothesis" },
+        },
+      ],
+    };
+    return assessCanonicalAnalysisReadiness(graph).blockingIssues;
+  }
+
+  it("PRECONDITION: an option→risk edge really does block the option", () => {
+    const issues = issuesFor(TWO_INTERVENTION_ID);
+    const mapping = issues.filter(
+      (i) => i.option_id === TWO_INTERVENTION_ID && i.code === "OPTION_NEEDS_MAPPING",
+    );
+    expect(mapping.length).toBeGreaterThan(0);
+  });
+
+  it("RED: the message names the risk in the user's own label", () => {
+    const riskLabel = CAPTURE.draft_graph.nodes.find((n) => n.id === RISK_ID)?.label ?? "";
+    expect(riskLabel).not.toBe("");
+    const mapping = issuesFor(TWO_INTERVENTION_ID).filter(
+      (i) => i.option_id === TWO_INTERVENTION_ID && i.code === "OPTION_NEEDS_MAPPING",
+    );
+    expect(mapping.map((i) => i.message).join(" ")).toContain(riskLabel);
+  });
+
+  it("RED: it does not ask a factor-mapping question about a risk blocker", () => {
+    const mapping = issuesFor(TWO_INTERVENTION_ID).filter(
+      (i) => i.option_id === TWO_INTERVENTION_ID && i.code === "OPTION_NEEDS_MAPPING",
+    );
+    expect(mapping.map((i) => i.message).join(" ")).not.toContain("Choose which factor");
+  });
+
+  it("CONTRAST CONTROL: an option with no risk edge keeps the factor ask", () => {
+    // The generic ask is CORRECT when the option genuinely has no mapping —
+    // this proves the change is scoped to the risk case, not a blanket rewrite.
+    const options = wireOptions({
+      clearInterventionsOn: [EMPTIED_ID],
+      disconnect: [EMPTIED_ID],
+    });
+    expect(byId(options, EMPTIED_ID).status).toBe("needs_user_mapping");
+
+    const graph = {
+      ...CAPTURE.draft_graph,
+      nodes: CAPTURE.draft_graph.nodes.map((n) =>
+        n.id === EMPTIED_ID ? { ...n, interventions: {} } : n,
+      ),
+      edges: CAPTURE.draft_graph.edges.filter((e) => e.from !== EMPTIED_ID),
+    };
+    const issues = assessCanonicalAnalysisReadiness(graph).blockingIssues.filter(
+      (i) => i.option_id === EMPTIED_ID && i.code === "OPTION_NEEDS_MAPPING",
+    );
+    expect(issues.map((i) => i.message).join(" ")).toContain("Choose which factor");
+  });
+});
