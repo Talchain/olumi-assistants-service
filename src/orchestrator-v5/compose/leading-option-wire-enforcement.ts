@@ -211,6 +211,9 @@ import {
   permittedAnalysisModeFromAnalysisReady,
 } from '../admission/analysis-admission.js';
 import { WITHHELD_EXPLANATION_NO_DISCLOSURE_TAIL } from './withheld-explanation-answer.js';
+// The producer's own classification of a withheld reason — 'we looked and
+// declined' vs 'we did not look'. Imported, never restated (trap 12).
+import { leaderClaimReasonKind } from './analysis-state-v1.js';
 // The PRODUCER's own withheld projections, reused at the chokepoint rather than
 // re-derived beside it. These already encode the anti-over-suppression policy
 // (a summary naming no leader stays byte-identical; the fragility science
@@ -438,6 +441,47 @@ export interface WireLeaderClaimEnforcementOpts {
    * widens the permit for ONE named population and nothing else.
    */
   readonly separationEstablished?: boolean;
+  /**
+   * ⭐⭐ THE NARROWING OPERAND — `analysis_state.leader_claim.withheld_reason`,
+   * threaded from the SAME already-composed claim on the body being enforced.
+   * Read, never re-derived (the rule {@link separationEstablished} follows).
+   *
+   * ── WHY THIS GATE WAS MISSING A CONJUNCT ──────────────────────────────────
+   * This gate conjoins ENTITLEMENT and ADMISSION. It has never required that
+   * the options ACTUALLY SEPARATE. `composeLeaderClaim` does — `permitted` is
+   * true only when entitlement AND separation hold — and the shared contract
+   * says why in as many words (`AnalysisLeaderClaimSchema.permitted`):
+   *
+   *   "composed once, here, precisely so that no surface has to re-derive it
+   *    and no two surfaces can disagree."
+   *
+   * This surface re-derived it. So a run whose separation was EVALUATED AND
+   * DECLINED could ship `leader_claim.permitted: false` while this gate
+   * returned the prose unchanged — one HTTP 200 carrying the withheld claim
+   * beside prose naming the leader.
+   *
+   * ⛔⛔ AND WHY THIS READS THE REASON RATHER THAN `permitted`. `permitted` is
+   * a BOOLEAN over two very different facts, and collapsing them is the whole
+   * defect (`analysis-state-v1.ts:209-235`):
+   *
+   *   `options_do_not_separate` / `constraint_verdict_withheld`
+   *        → WE LOOKED AND DECLINED. A leader must not be named.
+   *   `separation_unavailable` / `analysis_run_identity_*`
+   *        → WE DID NOT LOOK. An ABSENCE OF EVIDENCE that carries NO verdict.
+   *
+   * Obeying a bare `permitted: false` would suppress the leader on every turn
+   * that displays a prior analysis without re-shipping its `analysis_result`
+   * block — trading a LIE for a widespread GAP, which is exactly the window
+   * trap 22b says these two harms may not share. {@link leaderClaimReasonKind}
+   * is the producer's own classification, is completeness-tested against every
+   * minted `WITHHELD_*` constant, and falls to `'unknown'` — which does NOT
+   * narrow — for any code it did not mint.
+   *
+   * ⚠ ABSENCE IS NOT A VERDICT, in this direction too: `undefined` leaves the
+   * gate exactly as it was. This operand can only ever NARROW the permit, and
+   * only for the one population the producer says it looked at and declined.
+   */
+  readonly leaderClaimWithheldReason?: string;
   /**
    * The graph this exit is shipping (`ctx.graph`), read ONLY for the option
    * ROSTER — see {@link optionRosterFromGraph} for why that is not a second
@@ -1001,7 +1045,21 @@ export function enforceLeadingOptionClaimsAtWire(
       blocksProjected: qualifiedBlocks !== null,
     };
   }
-  if (opts.mayNameLeadingOption && analysisReadyPermitsLeaderNaming(opts.analysisReady)) {
+  // ⭐ THE THIRD CONJUNCT. Entitlement and admission are not enough: a run the
+  // product LOOKED AT and DECLINED to separate must not ship a named leader,
+  // whatever those two say. See {@link WireLeaderClaimEnforcementOpts.leaderClaimWithheldReason}
+  // for why this reads the REASON KIND and not the bare `permitted` boolean.
+  //
+  // ⚠ This does NOT make the enforcer into `composeLeaderClaim` — the objection
+  // this file already raises, and it is right. It CONSUMES that function's
+  // published verdict instead of re-deriving the separation question, which is
+  // what the contract says every surface should do. Authoring stays there.
+  const separationDeclined = leaderClaimReasonKind(opts.leaderClaimWithheldReason) === 'withheld';
+  if (
+    opts.mayNameLeadingOption
+    && analysisReadyPermitsLeaderNaming(opts.analysisReady)
+    && !separationDeclined
+  ) {
     return unchanged(response);
   }
 
