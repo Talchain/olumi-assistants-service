@@ -527,18 +527,21 @@
               "kind": {
                 "type": "string",
                 "enum": [
-                  "unknown",
-                  "qualitative",
+                  "observed",
                   "user_estimate",
-                  "ai_estimate"
-                ]
+                  "elicited",
+                  "model_prior",
+                  "unknown",
+                  "qualitative"
+                ],
+                "description": "How this magnitude came to be known. EXACTLY ONE of: 'observed' — measured or evidenced, cite it in note; 'user_estimate' — the person's own judgement, source_fact_id required; 'elicited' — obtained by ASKING the person, note records the phrasing they used; 'model_prior' — the model's own hypothesis, ALWAYS disclosed as such, never presented as fact; 'qualitative' — a direction is supportable but no number is; 'unknown' — nobody knows yet. ⛔ 'unknown' IS A VALID AND FINAL ANSWER. Never upgrade it to a number to make downstream analysis run: an engine that cannot compute through an unknown is the engine's limitation to disclose, not a licence to invent."
               },
               "value": {
                 "type": [
                   "number",
                   "null"
                 ],
-                "description": "Only when kind is user_estimate or ai_estimate; a unitless effect size in [-1, 1] or a stated elasticity, described in note."
+                "description": "The magnitude, when one is honestly available. null for 'unknown' and 'qualitative' — and null is preferable to a fabricated number in every case."
               },
               "note": {
                 "type": [
