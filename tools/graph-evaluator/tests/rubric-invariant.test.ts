@@ -97,6 +97,7 @@ const SAMPLE_VALUES: Record<string, unknown> = {
   goal_threshold_raw: 20000,
   goal_threshold_unit: "£",
   goal_threshold_cap: 40000,
+  goal_threshold_cap_provenance: "target_derived_headroom",
   goal_threshold_frame: "cee_v1",
   goal_baseline: 0.3,
   goal_baseline_raw: 12000,

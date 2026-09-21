@@ -1,0 +1,129 @@
+[
+ {
+  "id": "14d36e6f",
+  "kind": "option",
+  "label": "increase the Pro plan price from \u00a349 to \u00a359 per month with the next Pro feature release",
+  "interventions": {
+   "6d9a37f3": {
+    "value": 0.59,
+    "raw_value": 59,
+    "unit": "\u00a3/month",
+    "source": "cee_hypothesis",
+    "target_match": {
+     "node_id": "6d9a37f3",
+     "match_type": "exact_id",
+     "confidence": "high"
+    },
+    "value_confidence": "low",
+    "reasoning": "Olumi estimate via edge b27a0be5; no stated figure is cited for this option\u2192factor effect"
+   }
+  },
+  "provenance": "from_brief",
+  "source_quote": "increase the Pro plan price from \u00a349 to \u00a359 per month with the next Pro feature release"
+ },
+ {
+  "id": "32b7e30c",
+  "kind": "option",
+  "label": "Hold Price at \u00a349 (Status Quo)",
+  "interventions": {
+   "6d9a37f3": {
+    "value": 0.49,
+    "raw_value": 49,
+    "unit": "\u00a3/month",
+    "source": "cee_hypothesis",
+    "target_match": {
+     "node_id": "6d9a37f3",
+     "match_type": "exact_id",
+     "confidence": "high"
+    },
+    "value_confidence": "low",
+    "reasoning": "Olumi estimate via edge 2bea43f3; this option\u2192factor effect is not bound to a stated option record"
+   },
+   "ab78e513": {
+    "value": 0.03,
+    "raw_value": 0.03,
+    "unit": "%",
+    "source": "cee_hypothesis",
+    "target_match": {
+     "node_id": "ab78e513",
+     "match_type": "exact_id",
+     "confidence": "high"
+    },
+    "value_confidence": "low",
+    "reasoning": "Olumi estimate via edge 11b4560c; this option\u2192factor effect is not bound to a stated option record"
+   }
+  },
+  "is_baseline": true,
+  "provenance": "ai_inferred"
+ },
+ {
+  "id": "868f8b07",
+  "kind": "option",
+  "label": "Raise Price to \u00a359 with Feature Release",
+  "interventions": {
+   "6d9a37f3": {
+    "value": 0.59,
+    "raw_value": 59,
+    "unit": "\u00a3/month",
+    "source": "cee_hypothesis",
+    "target_match": {
+     "node_id": "6d9a37f3",
+     "match_type": "exact_id",
+     "confidence": "high"
+    },
+    "value_confidence": "low",
+    "reasoning": "Olumi estimate via edge 7a102d6d; this option\u2192factor effect is not bound to a stated option record"
+   },
+   "ab78e513": {
+    "value": 0.045,
+    "raw_value": 0.045,
+    "unit": "%",
+    "source": "cee_hypothesis",
+    "target_match": {
+     "node_id": "ab78e513",
+     "match_type": "exact_id",
+     "confidence": "high"
+    },
+    "value_confidence": "low",
+    "reasoning": "Olumi estimate via edge 2be54453; this option\u2192factor effect is not bound to a stated option record"
+   }
+  },
+  "is_baseline": false,
+  "provenance": "ai_inferred"
+ },
+ {
+  "id": "b079c6bf",
+  "kind": "option",
+  "label": "Gradual Price Step to \u00a354 Now",
+  "interventions": {
+   "6d9a37f3": {
+    "value": 0.54,
+    "raw_value": 54,
+    "unit": "\u00a3/month",
+    "source": "cee_hypothesis",
+    "target_match": {
+     "node_id": "6d9a37f3",
+     "match_type": "exact_id",
+     "confidence": "high"
+    },
+    "value_confidence": "low",
+    "reasoning": "Olumi estimate via edge 0ed1d68e; this option\u2192factor effect is not bound to a stated option record"
+   },
+   "ab78e513": {
+    "value": 0.033,
+    "raw_value": 0.033,
+    "unit": "%",
+    "source": "cee_hypothesis",
+    "target_match": {
+     "node_id": "ab78e513",
+     "match_type": "exact_id",
+     "confidence": "high"
+    },
+    "value_confidence": "low",
+    "reasoning": "Olumi estimate via edge 8d5e501c; this option\u2192factor effect is not bound to a stated option record"
+   }
+  },
+  "is_baseline": false,
+  "provenance": "ai_inferred"
+ }
+]

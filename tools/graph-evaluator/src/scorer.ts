@@ -34,6 +34,12 @@ import {
   buildNodeMap,
   buildInterventionSignature,
 } from "./validator.js";
+import {
+  classifyProvenance,
+  findLaunderedNumbers,
+  locateExpectedUserValues,
+  readInterventions,
+} from "./trust-gates.js";
 
 // =============================================================================
 // Rubric version
@@ -63,7 +69,74 @@ import {
  * this constant carry NO rubric_version column; treat an absent column as
  * rubric 1 and do not compare it with rubric 2.
  */
-export const DRAFT_RUBRIC_VERSION = "draft-graph-rubric-2.0.0";
+/**
+ * `draft-graph-rubric-2.1.0` (2026-09-21, WP1 — freeze the evaluation contract).
+ *
+ * ⚠ RUBRIC 2.1 IS A DIFFERENT MEASURE FROM 2.0, not a bug-fix of it. Five
+ * dimensions were added and `coaching_quality` went to WEIGHT ZERO. Never plot,
+ * average or regression-check 2.0 and 2.1 numbers as one series.
+ *
+ * WEIGHTS (sum asserted == 1.0 by tests/scorer.test.ts):
+ *
+ *   param_quality               0.20   unchanged
+ *   option_diff                 0.20   unchanged
+ *   completeness                0.20   unchanged
+ *   constraint_retention        0.15   unchanged
+ *   external_factor_presence    0.10   unchanged
+ *   ratio_encoding              0.05   unchanged
+ *   coaching_quality            0.00   was 0.10 — the whole 0.10 was reallocated
+ *   numeric_provenance          0.05   NEW
+ *   decision_enrichment         0.02   NEW
+ *   controllability             0.01   NEW
+ *   temporal_preservation       0.01   NEW
+ *   qualitative_preservation    0.01   NEW
+ *
+ * WHY THE SPLIT IS SHAPED THIS WAY, stated so it can be argued with:
+ *   - `numeric_provenance` takes half the reallocated weight because all four
+ *     banked CEE failures are provenance failures — it is the dimension the arms
+ *     exist to discriminate on, and it is the only one that is TWO-SIDED (you
+ *     cannot win by dropping numbers, nor by stamping everything `user`).
+ *   - `decision_enrichment` is the hypothesis Arms C/D test, but its
+ *     deterministic part is a FLOOR check that saturates (see below), so it
+ *     carries little weight; richness ranking is the blind judge's job.
+ *   - `controllability` is near-binary and the structural validator already
+ *     covers most of the topology, so it discriminates rarely.
+ *   - the two preservation dimensions are NA on most briefs and score 1.0 when
+ *     NA; weighting them heavily would move scores for briefs that declare
+ *     nothing.
+ *   - `coaching_quality` keeps being COMPUTED and REPORTED (continuity with 2.0
+ *     and with the governed pack's diagnostics) but no longer moves `overall`:
+ *     draft coaching is a separate surface with its own evaluator, and its 0.10
+ *     was the only weight available without changing a dimension the plan froze.
+ *
+ * `draft-graph-rubric-2.0.0` (2026-08-02, ROADMAP 2.285a) — the rubric scores
+ * ONLY fields the model is PERMITTED to emit. PR #789 cut the goal-threshold
+ * quad from the sent grammar and added an ingress strip, so the model can no
+ * longer author `goal_threshold*`; the enricher mints it after extraction.
+ * Rubric 1 rewarded that quad, which post-#789 made a sub-dimension unearnable
+ * on every numeric-target brief and gave enricher output a score advantage no
+ * model draft could close. Every 2.1 dimension honours the same rule.
+ *
+ * `draft-graph-rubric-1` — everything before that. Results predating the
+ * constant carry NO rubric_version column; treat an absent column as rubric 1.
+ */
+export const DRAFT_RUBRIC_VERSION = "draft-graph-rubric-2.1.0";
+
+/** The weight vector, exported so a test can assert it sums to 1.0. */
+export const RUBRIC_WEIGHTS = {
+  param_quality: 0.20,
+  option_diff: 0.20,
+  completeness: 0.20,
+  constraint_retention: 0.15,
+  external_factor_presence: 0.10,
+  ratio_encoding: 0.05,
+  coaching_quality: 0.00,
+  numeric_provenance: 0.05,
+  decision_enrichment: 0.02,
+  controllability: 0.01,
+  temporal_preservation: 0.01,
+  qualitative_preservation: 0.01,
+} as const;
 
 // =============================================================================
 // Generic factor label blocklist
@@ -684,6 +757,157 @@ function scoreCoachingQuality(graph: ParsedGraph): number {
 }
 
 // =============================================================================
+// Dimensions 9-13 (rubric 2.1) — WP1
+// =============================================================================
+
+/**
+ * Dimension 9: NUMERIC PROVENANCE — TWO-SIDED.
+ *
+ *   side A (retention)   fraction of the brief's declared user values that the
+ *                        candidate still carries at NATIVE magnitude + unit with
+ *                        USER provenance.              (G1, graded)
+ *   side B (no laundering) 1 - fraction of the candidate's user-provenance
+ *                        numbers that the brief does not support.
+ *                                                      (G2, graded)
+ *   score = 0.5*A + 0.5*B
+ *
+ * Two-sidedness is the point: dropping every number makes A collapse, and
+ * stamping every number `user` makes B collapse. Neither half can be gamed by
+ * the move that wins the other.
+ *
+ * ⚠ It NEVER reads `goal_threshold*` — the fields are enricher-minted and
+ * ingress-stripped, so reading them would score CEE's regex extractor instead of
+ * the candidate (see `rubric-invariant.test.ts` and trust-gates.ts).
+ *
+ * Both halves delegate to the TRUST GATES' own helpers, so the gate and the
+ * score can never answer the same question differently.
+ */
+function scoreNumericProvenance(graph: ParsedGraph, brief: Brief): number {
+  const input = { rich: null, graph, brief };
+
+  const located = locateExpectedUserValues(input);
+  const sideA = located.length === 0
+    ? 1.0 // brief declares none — not applicable, full marks for this half
+    : located.filter((l) => l.found != null).length / located.length;
+
+  const { violations, inspected } = findLaunderedNumbers(input);
+  const sideB = inspected === 0 ? 1.0 : Math.max(0, 1 - violations.length / inspected);
+
+  return 0.5 * sideA + 0.5 * sideB;
+}
+
+/**
+ * Dimension 10: CONTROLLABILITY — an intervention may only set a factor the
+ * decision maker actually controls (`category: "controllable"`).
+ *
+ * Score = interventions landing on a controllable factor / all interventions.
+ * 1.0 when the graph has no interventions (not applicable).
+ */
+function scoreControllability(graph: ParsedGraph): number {
+  const categoryOf = new Map<string, string | undefined>();
+  for (const n of graph.nodes) categoryOf.set(n.id, n.kind === "factor" ? n.category : n.kind);
+
+  let total = 0;
+  let ok = 0;
+  for (const node of graph.nodes) {
+    if (node.kind !== "option") continue;
+    for (const iv of readInterventions(node)) {
+      total++;
+      if (categoryOf.get(iv.factorId) === "controllable") ok++;
+    }
+  }
+  return total === 0 ? 1.0 : ok / total;
+}
+
+/**
+ * Dimension 11: DECISION ENRICHMENT (deterministic part).
+ *
+ * Counts AI-proposed options/factors/outcomes/risks that ADD something and
+ * LAUNDER nothing: AI provenance, a non-generic label, at least one incident
+ * edge, and no number on the item stamped with USER provenance.
+ *
+ * ⚠ STATED HONESTLY: this SATURATES. Any candidate contributing CAP (8) clean
+ * AI items scores 1.0, and the Arm A control already contributes nine. It is a
+ * FLOOR CHECK — "did the candidate enrich at all, without laundering?" — not a
+ * richness ranking. Ranking richness is the blind LLM judge's job (plan §WP1.3),
+ * which is why this dimension carries only 0.02.
+ */
+const ENRICHMENT_CAP = 8;
+
+function scoreDecisionEnrichment(graph: ParsedGraph): number {
+  const incident = new Set<string>();
+  for (const e of graph.edges) {
+    incident.add(e.from);
+    incident.add(e.to);
+  }
+
+  const interventionsByTarget = new Map<string, ReturnType<typeof readInterventions>>();
+  for (const node of graph.nodes) {
+    for (const iv of readInterventions(node)) {
+      const list = interventionsByTarget.get(iv.factorId) ?? [];
+      list.push(iv);
+      interventionsByTarget.set(iv.factorId, list);
+    }
+  }
+
+  let qualifying = 0;
+  let launderers = 0;
+
+  for (const node of graph.nodes) {
+    if (!["option", "factor", "outcome", "risk"].includes(node.kind)) continue;
+    if (classifyProvenance(node.provenance) !== "ai") continue;
+
+    const label = (node.label ?? "").toLowerCase().trim();
+    if (label.length < 4 || GENERIC_FACTOR_LABELS.has(label)) continue;
+    if (!incident.has(node.id)) continue;
+
+    // Does this AI item carry a number stamped with USER authority?
+    const ownNumbers = [
+      ...readInterventions(node).map((iv) => iv.source),
+      node.observed_state?.source ?? null,
+      node.data?.extractionType ?? null,
+    ];
+    const launders = ownNumbers.some((src) => src != null && classifyProvenance(src) === "user");
+    if (launders) {
+      launderers++;
+      continue;
+    }
+    qualifying++;
+  }
+
+  const base = Math.min(qualifying, ENRICHMENT_CAP) / ENRICHMENT_CAP;
+  const purity = qualifying + launderers === 0 ? 1.0 : qualifying / (qualifying + launderers);
+  return base * purity;
+}
+
+/**
+ * Dimensions 12 & 13: TEMPORAL / QUALITATIVE PRESERVATION.
+ *
+ * Keyword-based, from the brief's front-matter oracle. Returns `null` when the
+ * brief declares none — NOT APPLICABLE, which the composite scores as 1.0 while
+ * the result carries the null so a reader can tell "not measured" from "measured
+ * and perfect" (an NA and a 1.0 are otherwise byte-identical in a CSV).
+ *
+ * The surface searched is what a GraphV3 body can actually carry: node labels,
+ * the coaching summary and strengthen-item labels/details. A graph has no
+ * temporal block, so a candidate that only ever emits a graph will usually score
+ * low here — that loss is real, and the projection report is where it is
+ * explained (WP6), not hidden.
+ */
+function scoreKeywordPreservation(graph: ParsedGraph, keywords: string[] | undefined): number | null {
+  if (!keywords || keywords.length === 0) return null;
+  const surface = [
+    ...graph.nodes.map((n) => n.label ?? ""),
+    graph.coaching?.summary ?? "",
+    ...(graph.coaching?.strengthen_items ?? []).flatMap((i) => [i.label ?? "", i.detail ?? ""]),
+  ]
+    .join("\n")
+    .toLowerCase();
+  const found = keywords.filter((k) => surface.includes(k.toLowerCase())).length;
+  return found / keywords.length;
+}
+
+// =============================================================================
 // Main scoring entry point
 // =============================================================================
 
@@ -711,6 +935,11 @@ export function score(response: LLMResponse, brief: Brief): ScoreResult {
       ratio_encoding: null,
       external_factor_presence: null,
       coaching_quality: null,
+      numeric_provenance: null,
+      controllability: null,
+      decision_enrichment: null,
+      temporal_preservation: null,
+      qualitative_preservation: null,
       overall_score: null,
       node_count: nodeCount,
       edge_count: edgeCount,
@@ -733,6 +962,12 @@ export function score(response: LLMResponse, brief: Brief): ScoreResult {
   const ratioEncoding = scoreRatioEncoding(graph, brief);
   const externalFactorPresence = scoreExternalFactorPresence(graph, brief);
   const coachingQuality = scoreCoachingQuality(graph);
+  // ── rubric 2.1 ─────────────────────────────────────────────────────────────
+  const numericProvenance = scoreNumericProvenance(graph, brief);
+  const controllability = scoreControllability(graph);
+  const decisionEnrichment = scoreDecisionEnrichment(graph);
+  const temporalPreservation = scoreKeywordPreservation(graph, brief.meta.expected_temporal);
+  const qualitativePreservation = scoreKeywordPreservation(graph, brief.meta.expected_qualitative);
 
   // If structurally invalid, overall_score is null per spec.
   // All per-dimension scores are still returned for diagnostics.
@@ -748,21 +983,32 @@ export function score(response: LLMResponse, brief: Brief): ScoreResult {
       ratio_encoding: ratioEncoding,
       external_factor_presence: externalFactorPresence,
       coaching_quality: coachingQuality,
+      numeric_provenance: numericProvenance,
+      controllability: controllability,
+      decision_enrichment: decisionEnrichment,
+      temporal_preservation: temporalPreservation,
+      qualitative_preservation: qualitativePreservation,
       overall_score: null,
       node_count: nodeCount,
       edge_count: edgeCount,
     };
   }
 
-  // Composite score with new 7-dimension weighting
+  // Composite score, rubric 2.1. NA preservation dimensions score 1.0 and are
+  // still REPORTED as null — see scoreKeywordPreservation.
   const overallScore =
-    paramQuality * 0.20 +
-    optionDiff * 0.20 +
-    completeness * 0.20 +
-    constraintRetention * 0.15 +
-    externalFactorPresence * 0.10 +
-    coachingQuality * 0.10 +
-    ratioEncoding * 0.05;
+    paramQuality * RUBRIC_WEIGHTS.param_quality +
+    optionDiff * RUBRIC_WEIGHTS.option_diff +
+    completeness * RUBRIC_WEIGHTS.completeness +
+    constraintRetention * RUBRIC_WEIGHTS.constraint_retention +
+    externalFactorPresence * RUBRIC_WEIGHTS.external_factor_presence +
+    coachingQuality * RUBRIC_WEIGHTS.coaching_quality +
+    ratioEncoding * RUBRIC_WEIGHTS.ratio_encoding +
+    numericProvenance * RUBRIC_WEIGHTS.numeric_provenance +
+    decisionEnrichment * RUBRIC_WEIGHTS.decision_enrichment +
+    controllability * RUBRIC_WEIGHTS.controllability +
+    (temporalPreservation ?? 1.0) * RUBRIC_WEIGHTS.temporal_preservation +
+    (qualitativePreservation ?? 1.0) * RUBRIC_WEIGHTS.qualitative_preservation;
 
   return {
     rubric_version: DRAFT_RUBRIC_VERSION,
@@ -775,6 +1021,11 @@ export function score(response: LLMResponse, brief: Brief): ScoreResult {
     ratio_encoding: ratioEncoding,
     external_factor_presence: externalFactorPresence,
     coaching_quality: coachingQuality,
+    numeric_provenance: numericProvenance,
+    controllability: controllability,
+    decision_enrichment: decisionEnrichment,
+    temporal_preservation: temporalPreservation,
+    qualitative_preservation: qualitativePreservation,
     overall_score: overallScore,
     node_count: nodeCount,
     edge_count: edgeCount,

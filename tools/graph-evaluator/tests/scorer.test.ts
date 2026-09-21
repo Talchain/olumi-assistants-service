@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { score, DRAFT_RUBRIC_VERSION } from "../src/scorer.js";
+import { score, DRAFT_RUBRIC_VERSION, RUBRIC_WEIGHTS } from "../src/scorer.js";
+import { readFileSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { readBriefs } from "../src/io.js";
+
+/** Tool root, for the banked WP1 fixtures and the real brief oracle. */
+const TOOL_ROOT_21 = join(dirname(fileURLToPath(import.meta.url)), "..");
 import { validateStructural, hasCycle, bfsForward, bfsReverse, buildAdjacencyLists } from "../src/validator.js";
 import type {
   ParsedGraph,
@@ -776,7 +783,29 @@ describe("scorer — failed responses", () => {
 // =============================================================================
 
 describe("scorer — overall_score", () => {
-  it("overall_score = param(0.20) + optDiff(0.20) + completeness(0.20) + constraint(0.15) + external(0.10) + coaching(0.10) + ratio(0.05)", () => {
+  it("THE WEIGHTS SUM TO EXACTLY 1.0 — a stronger invariant than any single term", () => {
+    const total = Object.values(RUBRIC_WEIGHTS).reduce((a, b) => a + b, 0);
+    expect(total).toBeCloseTo(1.0, 10);
+  });
+
+  it("rubric 2.1 weight vector is exactly as documented (frozen with the contract)", () => {
+    expect(RUBRIC_WEIGHTS).toEqual({
+      param_quality: 0.20,
+      option_diff: 0.20,
+      completeness: 0.20,
+      constraint_retention: 0.15,
+      external_factor_presence: 0.10,
+      ratio_encoding: 0.05,
+      coaching_quality: 0.00,
+      numeric_provenance: 0.05,
+      decision_enrichment: 0.02,
+      controllability: 0.01,
+      temporal_preservation: 0.01,
+      qualitative_preservation: 0.01,
+    });
+  });
+
+  it("overall_score is the documented weighted sum, with NA preservation terms scored 1.0", () => {
     const graph = minimalValidGraph();
     const result = score(makeResponse(graph), makeBrief());
 
@@ -786,15 +815,43 @@ describe("scorer — overall_score", () => {
       result.completeness != null
     ) {
       const expected =
-        result.param_quality * 0.20 +
-        result.option_diff * 0.20 +
-        result.completeness * 0.20 +
-        (result.constraint_retention ?? 0) * 0.15 +
-        (result.external_factor_presence ?? 0) * 0.10 +
-        (result.coaching_quality ?? 0) * 0.10 +
-        (result.ratio_encoding ?? 0) * 0.05;
+        result.param_quality * RUBRIC_WEIGHTS.param_quality +
+        result.option_diff * RUBRIC_WEIGHTS.option_diff +
+        result.completeness * RUBRIC_WEIGHTS.completeness +
+        (result.constraint_retention ?? 0) * RUBRIC_WEIGHTS.constraint_retention +
+        (result.external_factor_presence ?? 0) * RUBRIC_WEIGHTS.external_factor_presence +
+        (result.coaching_quality ?? 0) * RUBRIC_WEIGHTS.coaching_quality +
+        (result.ratio_encoding ?? 0) * RUBRIC_WEIGHTS.ratio_encoding +
+        (result.numeric_provenance ?? 0) * RUBRIC_WEIGHTS.numeric_provenance +
+        (result.decision_enrichment ?? 0) * RUBRIC_WEIGHTS.decision_enrichment +
+        (result.controllability ?? 0) * RUBRIC_WEIGHTS.controllability +
+        (result.temporal_preservation ?? 1.0) * RUBRIC_WEIGHTS.temporal_preservation +
+        (result.qualitative_preservation ?? 1.0) * RUBRIC_WEIGHTS.qualitative_preservation;
       expect(result.overall_score).toBeCloseTo(expected, 5);
     }
+  });
+
+  it("coaching_quality is still COMPUTED and REPORTED, it simply no longer moves overall", () => {
+    // Weight 0 must not be implemented by dropping the dimension: the governed
+    // pack and every 2.0 comparison still read the number.
+    const graph = minimalValidGraph();
+    const withCoaching = score(makeResponse(graph), makeBrief());
+    expect(withCoaching.coaching_quality).not.toBeNull();
+
+    // Move ONLY coaching_quality: name two node labels in the summary and give
+    // every strengthen item a legal action_type — both are coaching-only terms.
+    // `completeness`'s coaching sub-dimension is a boolean "is it non-empty",
+    // so it does not move; deleting `coaching` outright WOULD move it and would
+    // prove nothing about the weight.
+    const improved = minimalValidGraph();
+    improved.coaching = {
+      summary: "Strengthen opt_a against fac_ctrl before deciding.",
+      strengthen_items: [{ id: "s1", label: "Add a constraint", action_type: "add_constraint" }],
+    };
+    const betterCoaching = score(makeResponse(improved), makeBrief());
+    // POSITIVE CONTROL for the weight being zero: coaching moved, overall did not.
+    expect(betterCoaching.coaching_quality).not.toBe(withCoaching.coaching_quality);
+    expect(betterCoaching.overall_score).toBeCloseTo(withCoaching.overall_score!, 10);
   });
 
   it("overall_score is null when structural_valid is false", () => {
@@ -980,5 +1037,170 @@ describe("rubric 2 — rubric version is stamped on every result", () => {
 
   it("names a rubric, not the tool version", () => {
     expect(DRAFT_RUBRIC_VERSION).toMatch(/^draft-graph-rubric-\d+\.\d+\.\d+$/);
+  });
+});
+
+// =============================================================================
+// RUBRIC 2.1 (WP1) — the five new dimensions
+//
+// Fixtures: the BANKED Arm A control draw and the BANKED rich builder output,
+// copied byte-identical into fixtures/wp1/ (hashes asserted in
+// tests/trust-gates.test.ts). A self-authored fixture confirms the author's
+// model of the wire; it does not test it.
+// =============================================================================
+
+describe("rubric 2.1 — numeric_provenance is TWO-SIDED", () => {
+  const armA = JSON.parse(
+    readFileSync(join(TOOL_ROOT_21, "fixtures", "wp1", "armA-pricing-staging-run_1.json"), "utf-8")
+  ) as { nodes: GraphNode[]; edges: GraphEdge[]; goal_constraints: GoalConstraint[]; coaching?: ParsedGraph["coaching"] };
+
+  const armAGraph = (): ParsedGraph =>
+    JSON.parse(JSON.stringify({
+      nodes: armA.nodes,
+      edges: armA.edges,
+      goal_constraints: armA.goal_constraints,
+      coaching: armA.coaching,
+    })) as ParsedGraph;
+
+  it("RED on the real Arm A draw: side A collapses because every user value is cee_hypothesis", async () => {
+    const [pricing] = await readBriefs(join(TOOL_ROOT_21, "briefs"), ["pricing-staging"]);
+    const r = score(makeResponse(armAGraph()), pricing!);
+    // side A = 0/5 retained, side B = 1 (nothing laundered) -> 0.5
+    expect(r.numeric_provenance).toBeCloseTo(0.5, 6);
+  });
+
+  it("GREEN when the SAME draw carries the user's £59 at native magnitude with user provenance", async () => {
+    const [pricing] = await readBriefs(join(TOOL_ROOT_21, "briefs"), ["pricing-staging"]);
+    const before = score(makeResponse(armAGraph()), pricing!).numeric_provenance!;
+
+    const fixed = armAGraph();
+    const userOption = fixed.nodes.find((n) => n.id === "14d36e6f")!;
+    const priceIv = userOption.interventions!["ed5b5711"]!;
+    priceIv.source = "brief_extraction";
+    const after = score(makeResponse(fixed), pricing!).numeric_provenance!;
+
+    expect(after).toBeGreaterThan(before);
+  });
+
+  it("side B: stamping an invented number with user provenance COLLAPSES the other half", async () => {
+    const [pricing] = await readBriefs(join(TOOL_ROOT_21, "briefs"), ["pricing-staging"]);
+    const laundered = armAGraph();
+    const opt = laundered.nodes.find((n) => n.id === "5d37cb33")!;
+    // 54 is the model's own invention — it is not in the brief text.
+    opt.interventions!["ed5b5711"]!.source = "brief_extraction";
+    const r = score(makeResponse(laundered), pricing!);
+    // A stays 0/5 (54 is not a declared user value); B falls from 1.0.
+    expect(r.numeric_provenance).toBeLessThan(0.5);
+  });
+
+  it("CONTROL: goal_threshold* cannot move it (the £20k lives only there on this draw)", async () => {
+    const [pricing] = await readBriefs(join(TOOL_ROOT_21, "briefs"), ["pricing-staging"]);
+    const withQuad = armAGraph();
+    expect(withQuad.nodes.find((n) => n.kind === "goal")!.goal_threshold_raw).toBe(20000);
+    const withoutQuad = armAGraph();
+    const goal = withoutQuad.nodes.find((n) => n.kind === "goal")!;
+    delete goal.goal_threshold;
+    delete goal.goal_threshold_raw;
+    delete goal.goal_threshold_unit;
+    delete goal.goal_threshold_cap;
+    expect(score(makeResponse(withoutQuad), pricing!).numeric_provenance).toBe(
+      score(makeResponse(withQuad), pricing!).numeric_provenance
+    );
+  });
+
+  it("NA both sides scores 1.0 — a brief with no oracle and a graph with no user numbers", () => {
+    const g = minimalValidGraph();
+    expect(score(makeResponse(g), makeBrief()).numeric_provenance).toBeCloseTo(1.0, 10);
+  });
+});
+
+describe("rubric 2.1 — controllability", () => {
+  /** minimalValidGraph gives every option a LEGACY intervention map too; clear
+   *  them so this dimension is measured on the interventions under test alone. */
+  function graphWithOnlyWireInterventions(): ParsedGraph {
+    const g = minimalValidGraph();
+    for (const n of g.nodes) {
+      if (n.data?.interventions) delete n.data.interventions;
+    }
+    return g;
+  }
+
+  it("1.0 when every intervention lands on a controllable factor", () => {
+    const g = graphWithOnlyWireInterventions();
+    g.nodes.find((n) => n.kind === "option")!.interventions = {
+      fac_ctrl: { value: 0.8, source: "cee_hypothesis" },
+    };
+    expect(score(makeResponse(g), makeBrief()).controllability).toBe(1);
+  });
+
+  it("falls when an intervention lands on an EXTERNAL factor", () => {
+    const g = graphWithOnlyWireInterventions();
+    g.nodes.find((n) => n.kind === "option")!.interventions = {
+      fac_ctrl: { value: 0.8, source: "cee_hypothesis" },
+      fac_ext: { value: 0.2, source: "cee_hypothesis" },
+    };
+    expect(score(makeResponse(g), makeBrief()).controllability).toBeCloseTo(0.5, 6);
+  });
+});
+
+describe("rubric 2.1 — decision_enrichment is a FLOOR check and says so", () => {
+  const armA = JSON.parse(
+    readFileSync(join(TOOL_ROOT_21, "fixtures", "wp1", "armA-pricing-staging-run_1.json"), "utf-8")
+  ) as { nodes: GraphNode[]; edges: GraphEdge[]; goal_constraints: GoalConstraint[] };
+
+  it("SATURATES on the real Arm A draw — recorded, not hidden", () => {
+    const g = JSON.parse(JSON.stringify({ nodes: armA.nodes, edges: armA.edges, goal_constraints: armA.goal_constraints })) as ParsedGraph;
+    expect(score(makeResponse(g), makeBrief()).decision_enrichment).toBe(1);
+  });
+
+  it("0 when the graph proposes nothing of its own", () => {
+    const g = minimalValidGraph();
+    for (const n of g.nodes) delete n.provenance;
+    expect(score(makeResponse(g), makeBrief()).decision_enrichment).toBe(0);
+  });
+
+  it("laundering an AI item's number into user authority PENALISES it", () => {
+    const clean = minimalValidGraph();
+    for (const n of clean.nodes) n.provenance = "ai_inferred";
+    const cleanScore = score(makeResponse(clean), makeBrief()).decision_enrichment!;
+
+    const launders = minimalValidGraph();
+    for (const n of launders.nodes) n.provenance = "ai_inferred";
+    const opt = launders.nodes.find((n) => n.kind === "option")!;
+    opt.interventions = { fac_ctrl: { value: 0.8, raw_value: 80, source: "brief_extraction" } };
+    const launderedScore = score(makeResponse(launders), makeBrief()).decision_enrichment!;
+
+    expect(launderedScore).toBeLessThan(cleanScore);
+  });
+});
+
+describe("rubric 2.1 — temporal / qualitative preservation report NA as null", () => {
+  it("null when the brief declares none (NOT 1.0 — a reader must tell them apart)", () => {
+    const r = score(makeResponse(minimalValidGraph()), makeBrief());
+    expect(r.temporal_preservation).toBeNull();
+    expect(r.qualitative_preservation).toBeNull();
+  });
+
+  it("but the composite scores a null as 1.0, so a brief that declares nothing is not penalised", () => {
+    const r = score(makeResponse(minimalValidGraph()), makeBrief());
+    const withoutPreservation =
+      r.overall_score! -
+      1.0 * RUBRIC_WEIGHTS.temporal_preservation -
+      1.0 * RUBRIC_WEIGHTS.qualitative_preservation;
+    expect(withoutPreservation).toBeLessThan(r.overall_score!);
+  });
+
+  it("measures the fraction of declared keywords that survive into the graph", () => {
+    const g = minimalValidGraph();
+    g.nodes.find((n) => n.kind === "goal")!.label = "Reach £20k MRR with the next feature release";
+    const brief = makeBrief();
+    brief.meta.expected_temporal = ["feature release", "black friday"];
+    expect(score(makeResponse(g), brief).temporal_preservation).toBeCloseTo(0.5, 6);
+  });
+});
+
+describe("rubric 2.1 — version stamp", () => {
+  it("is 2.1.0 and is a DIFFERENT MEASURE from 2.0.0", () => {
+    expect(DRAFT_RUBRIC_VERSION).toBe("draft-graph-rubric-2.1.0");
   });
 });

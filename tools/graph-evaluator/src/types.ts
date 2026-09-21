@@ -19,6 +19,48 @@ export interface GraphNodeData {
   [key: string]: unknown;
 }
 
+/**
+ * WP1 — the WIRE shape of an intervention (V3 `/assist/v1/draft-graph` body and every
+ * banked capture), as distinct from the evaluator's historical
+ * `GraphNodeData.interventions: Record<string, number>`.
+ *
+ * ⚠ THE TWO SHAPES BOTH EXIST AND BOTH MATTER. The historical map carries the
+ * NORMALISED level only (0.59); the wire object carries the native magnitude
+ * (`raw_value: 59`), its `unit`, and — the whole point for the trust gates —
+ * its `source`. `GraphNodeData.interventions` is deliberately NOT widened to a
+ * union: `buildInterventionSignature()` and four call sites in scorer.ts take
+ * `Record<string, number>`, and widening it there would be a typecheck break
+ * for no gain. The gates read both shapes through one reader
+ * (`readInterventions` in trust-gates.ts).
+ */
+export interface WireIntervention {
+  /** NORMALISED level — what flows downstream (intervention-extractor.ts:1061). */
+  value?: number;
+  /** NATIVE magnitude as the user would recognise it (59, not 0.59). */
+  raw_value?: number;
+  unit?: string;
+  /**
+   * `brief_extraction` | `cee_hypothesis` | `user_specified` on the wire
+   * (`cee-v3.ts:560`). ABSENCE IS NOT A DEFAULT: `schema-v3.ts:457` defaults an
+   * absent `extractionType` to `brief_extraction`, i.e. fails OPEN into user
+   * authority. The gates treat absence as unknown provenance and FAIL it.
+   */
+  source?: string;
+  value_confidence?: string;
+  reasoning?: string;
+  [key: string]: unknown;
+}
+
+/** WP1 — a factor node's own current value on the wire (`node.observed_state`). */
+export interface ObservedState {
+  value?: number;
+  raw_value?: number;
+  unit?: string;
+  source?: string;
+  extractionType?: string;
+  [key: string]: unknown;
+}
+
 export interface GraphNode {
   id: string;
   kind: "goal" | "decision" | "option" | "outcome" | "risk" | "factor";
@@ -33,6 +75,22 @@ export interface GraphNode {
   goal_threshold_raw?: number;
   goal_threshold_unit?: string;
   goal_threshold_cap?: number;
+
+  // ── WP1: wire-shaped fields (present on every V3 capture, absent on the
+  // evaluator's own fixtures). Additive and optional — nothing existing reads
+  // them, and the trust gates read them alongside `data`. ─────────────────────
+  /** Node-level provenance: `from_brief` | `ai_inferred` | `user_set`. */
+  provenance?: string;
+  /** The brief span the producer claims this node came from. */
+  source_quote?: string;
+  /** Wire-shaped interventions (see `WireIntervention`). */
+  interventions?: Record<string, WireIntervention>;
+  /** A factor's own current value on the wire. */
+  observed_state?: ObservedState;
+  /** Node-level extraction label (`explicit` | `inferred` | `range` | `observed`). */
+  extractionType?: string;
+  /** Marks the status-quo option on the wire. */
+  is_baseline?: boolean;
 }
 
 export interface GraphEdge {
@@ -69,6 +127,23 @@ export interface GoalConstraint {
   source_quote?: string;
   confidence?: number;
   provenance?: string;
+  /**
+   * WP1 / amendment 6 — STRICTNESS DISCLOSURE. `@talchain/schemas` restricts the
+   * operator to `z.enum([">=", "<="])` (src/schemas/assist.ts:407), so a strict
+   * `<` cannot be represented on the wire. A projection that relaxes it MUST say
+   * so here; a bare `<=` with no disclosure is what G4 fails.
+   *
+   * ⚠ MEASURED at this HEAD: no producer in `src/` emits either field
+   * (`rg` count 0 outside tools/graph-evaluator/src/rich-model.ts; contrast
+   * control `provenance` as a field: 3,019 hits in the same scope). These are the
+   * channel the rich→GraphV3 projection is REQUIRED to use, not a channel today's
+   * CEE already uses.
+   */
+  strictness?: "strict" | "as_stated";
+  /** The operator actually emitted when `strictness: "strict"` could not be. */
+  relaxed_to?: string;
+  /** Wire field: whether `value` is a level or a delta. */
+  value_frame?: string;
 }
 
 export interface CausalClaim {
@@ -146,7 +221,34 @@ export interface ExpectedConstraint {
   value: number;
   /** If true, value must be >= 1.0 (ratio scale, not incorrectly normalised to 0-1) */
   can_exceed_one?: boolean;
+  /**
+   * WP1 (G4) — the brief states a STRICT bound ("under 4%", "below £2M"), so the
+   * candidate must carry `<`/`>` or disclose the relaxation. Derived from the
+   * brief's words, never from a generated label: `constraint-display-name.ts:145`
+   * GENERATES "at or below" from `<=`, so labels are not evidence.
+   */
+  strict?: boolean;
+  /** The verbatim brief span the oracle was derived from. */
+  quote?: string;
 }
+
+/**
+ * WP1 (G1/G2, `numeric_provenance`) — a quantity the user actually stated, with
+ * the span it came from. MAGNITUDE IS NATIVE: 20000 for "£20k", 4 for "4%",
+ * 59 for "£59" — never the normalised level.
+ */
+export interface ExpectedUserValue {
+  value: number;
+  /** As the brief writes it: "£", "£/month", "%", "months". */
+  unit: string;
+  /** What the number is: target | baseline | current | proposed | limit | horizon. */
+  role: string;
+  /** Verbatim contiguous span of the brief. Asserted to be a substring of `body`. */
+  quote: string;
+}
+
+/** WP1 — where a brief's oracle came from. Both corpora are scored, never pooled. */
+export type CorpusClass = "captured" | "authored";
 
 /** Expected ratio metric entry in brief metadata for ratio_encoding scoring. */
 export interface ExpectedRatioMetric {
@@ -166,6 +268,31 @@ export interface BriefMeta {
   expected_constraints?: ExpectedConstraint[];
   /** Expected ratio metrics for ratio_encoding scoring */
   ratio_metrics?: ExpectedRatioMetric[];
+
+  // ── WP1 oracle (frozen with the evaluation contract) ───────────────────────
+  /** G1 / `numeric_provenance` side A. Every quantity the user stated. */
+  expected_user_values?: ExpectedUserValue[];
+  /** G5 — how many options the user themselves put on the table. */
+  expected_user_options?: number;
+  /** G1 — the decision horizon, when the brief states one. */
+  expected_horizon?: { value: number; unit: string; quote?: string };
+  /** G7 / `qualitative_preservation` — keywords that must survive somewhere. */
+  expected_qualitative?: string[];
+  /** G7 / `temporal_preservation` — timing/sequencing keywords. */
+  expected_temporal?: string[];
+  /** G6 / `controllability` — what the decision maker can actually set. */
+  controllable_levers?: string[];
+  /**
+   * Amendment 4 — capture/real-world-derived vs authored/synthetic. Results are
+   * reported SPLIT by this, never pooled: a self-authored corpus confirms the
+   * author's model of the wire, it does not test it.
+   */
+  corpus_class?: CorpusClass;
+  /**
+   * Where this oracle was read from. `sidecar` means `briefs/oracles/<id>.md`,
+   * used for the briefs whose bytes the governed manifest sha256-pins.
+   */
+  oracle_source?: "front_matter" | "sidecar";
 }
 
 export interface Brief {
@@ -234,6 +361,17 @@ export interface ScoreResult {
   ratio_encoding: number | null;
   external_factor_presence: number | null;
   coaching_quality: number | null;
+  // ── WP1 rubric 2.1 dimensions ──────────────────────────────────────────────
+  /** Two-sided: user values retained AND no number laundered into user authority. */
+  numeric_provenance: number | null;
+  /** Interventions land only on `category: "controllable"` factors. */
+  controllability: number | null;
+  /** AI-proposed items that add something and launder nothing. FLOOR check. */
+  decision_enrichment: number | null;
+  /** null = NOT APPLICABLE (the brief declares none) — scored as 1.0, reported as null. */
+  temporal_preservation: number | null;
+  /** null = NOT APPLICABLE (the brief declares none) — scored as 1.0, reported as null. */
+  qualitative_preservation: number | null;
   overall_score: number | null;
   node_count: number;
   edge_count: number;

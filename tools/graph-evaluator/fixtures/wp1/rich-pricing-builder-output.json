@@ -1,0 +1,230 @@
+{
+  "decision": {
+    "question": "Given our goal of reaching £20k MRR within 12 months while keeping monthly churn under 4%, should we increase the Pro plan price from £49 to £59 per month with the next Pro feature release?",
+    "horizon": {
+      "value": 12,
+      "unit": "months",
+      "source_fact_id": "uf2"
+    }
+  },
+  "user_facts": [
+    {
+      "id": "uf1",
+      "kind": "goal",
+      "source_quote": "goal of reaching £20k MRR",
+      "value": 20000,
+      "unit": "£/month",
+      "role": "target",
+      "transformation": "£20k → 20000"
+    },
+    {
+      "id": "uf2",
+      "kind": "horizon",
+      "source_quote": "within 12 months",
+      "value": 12,
+      "unit": "months",
+      "role": "horizon",
+      "transformation": null
+    },
+    {
+      "id": "uf3",
+      "kind": "limit",
+      "source_quote": "keeping monthly churn under 4%",
+      "value": 4,
+      "unit": "%",
+      "role": "limit",
+      "transformation": null
+    },
+    {
+      "id": "uf4",
+      "kind": "option",
+      "source_quote": "increase the Pro plan price from £49 to £59 per month with the next Pro feature release",
+      "value": null,
+      "unit": null,
+      "role": "proposed",
+      "transformation": null
+    },
+    {
+      "id": "uf5",
+      "kind": "quantity",
+      "source_quote": "from £49 to £59 per month",
+      "value": 49,
+      "unit": "£/month",
+      "role": "current",
+      "transformation": null
+    },
+    {
+      "id": "uf6",
+      "kind": "quantity",
+      "source_quote": "from £49 to £59 per month",
+      "value": 59,
+      "unit": "£/month",
+      "role": "proposed",
+      "transformation": null
+    }
+  ],
+  "options": [
+    {
+      "id": "opt1",
+      "label": "Increase Pro plan price from £49 to £59 per month with the next Pro feature release",
+      "provenance": "user",
+      "source_fact_id": "uf4",
+      "is_status_quo": false,
+      "lever_settings": [
+        {
+          "factor_id": "f1",
+          "value": 59,
+          "unit": "£/month",
+          "epistemic_state": "known",
+          "source_fact_id": "uf6"
+        }
+      ],
+      "rationale": null
+    },
+    {
+      "id": "opt2",
+      "label": "Keep Pro plan price at £49 per month",
+      "provenance": "ai_proposed",
+      "source_fact_id": null,
+      "is_status_quo": true,
+      "lever_settings": [
+        {
+          "factor_id": "f1",
+          "value": 49,
+          "unit": "£/month",
+          "epistemic_state": "known",
+          "source_fact_id": "uf5"
+        }
+      ],
+      "rationale": "This is the current pricing and represents the status quo."
+    }
+  ],
+  "factors": [
+    {
+      "id": "f1",
+      "label": "Pro plan price",
+      "control": "lever",
+      "measurability": "quantitative",
+      "epistemic_state": "known",
+      "current_value": 49,
+      "unit": "£/month",
+      "provenance": "user",
+      "source_fact_id": "uf5",
+      "dsk_refs": []
+    },
+    {
+      "id": "f2",
+      "label": "Next Pro feature release",
+      "control": "external",
+      "measurability": "qualitative",
+      "epistemic_state": "unknown",
+      "current_value": null,
+      "unit": null,
+      "provenance": "user",
+      "source_fact_id": "uf4",
+      "dsk_refs": []
+    }
+  ],
+  "outcomes": [
+    {
+      "id": "o1",
+      "label": "Monthly Recurring Revenue (MRR)",
+      "kind": "outcome",
+      "better_direction": "higher",
+      "measurability": "quantitative",
+      "epistemic_state": "unknown",
+      "provenance": "user",
+      "source_fact_id": "uf1",
+      "dsk_refs": []
+    },
+    {
+      "id": "o2",
+      "label": "Monthly churn rate",
+      "kind": "risk",
+      "better_direction": "lower",
+      "measurability": "quantitative",
+      "epistemic_state": "unknown",
+      "provenance": "user",
+      "source_fact_id": "uf3",
+      "dsk_refs": []
+    }
+  ],
+  "constraints": [
+    {
+      "id": "c1",
+      "subject_id": "o2",
+      "operator": "<",
+      "value": 4,
+      "unit": "%",
+      "provenance": "user",
+      "source_fact_id": "uf3"
+    }
+  ],
+  "causal_links": [
+    {
+      "id": "cl1",
+      "from_id": "f1",
+      "to_id": "o1",
+      "effect": "positive",
+      "magnitude": {
+        "kind": "unknown",
+        "value": null,
+        "note": null
+      },
+      "mediator_id": null,
+      "temporal": {
+        "delay": null,
+        "duration": null,
+        "persistence": "unknown",
+        "note": null
+      },
+      "provenance": "ai_hypothesis",
+      "source_fact_id": null,
+      "rationale": "Increasing the Pro plan price may increase MRR if customer count remains stable.",
+      "dsk_refs": []
+    },
+    {
+      "id": "cl2",
+      "from_id": "f1",
+      "to_id": "o2",
+      "effect": "positive",
+      "magnitude": {
+        "kind": "unknown",
+        "value": null,
+        "note": null
+      },
+      "mediator_id": null,
+      "temporal": {
+        "delay": null,
+        "duration": null,
+        "persistence": "unknown",
+        "note": null
+      },
+      "provenance": "ai_hypothesis",
+      "source_fact_id": null,
+      "rationale": "Increasing the Pro plan price may increase churn rate if customers are price sensitive.",
+      "dsk_refs": []
+    }
+  ],
+  "unknowns": [
+    {
+      "id": "u1",
+      "question": "What is the current number of Pro plan subscribers?",
+      "about_id": null,
+      "blocks_quantitative_analysis": true
+    },
+    {
+      "id": "u2",
+      "question": "What is the current monthly churn rate?",
+      "about_id": "o2",
+      "blocks_quantitative_analysis": true
+    },
+    {
+      "id": "u3",
+      "question": "What is the expected impact of the next Pro feature release on subscriber numbers or churn?",
+      "about_id": "f2",
+      "blocks_quantitative_analysis": false
+    }
+  ],
+  "notes": []
+}
