@@ -66,6 +66,7 @@
  */
 
 import type { GraphV3T, DraftCoachingWideningLog } from '../../orchestrator/types.js';
+import { sectionLabel } from '../compose/section-label.js';
 
 import { findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
 
@@ -1533,7 +1534,7 @@ function buildTradeOffBullet(
     return `Main trade-off: ${trimmedFactors[0]} against the risk of ${risk}`;
   }
   if (trimmedFactors.length === 1) {
-    return `Key consideration: ${trimmedFactors[0]}`;
+    return `${sectionLabel('Key consideration')} ${trimmedFactors[0]}`;
   }
   if (risks.length >= 1) {
     const risk = elideLabelAtWordBoundary(risks[0], MAX_LABEL_CHARS);
@@ -1558,10 +1559,10 @@ function toAssumptionBullet(assumptionSentence: string): string {
   const trimmed = assumptionSentence.trim().replace(/\.$/, '');
   // `One assumption worth checking: <fragment>` (priority-1..4 sources)
   const colonForm = trimmed.match(/^One assumption worth checking:\s*(.+)$/i);
-  if (colonForm) return `Assumption to check: ${colonForm[1].trim()}`;
+  if (colonForm) return `${sectionLabel('Assumption to check')} ${colonForm[1].trim()}`;
   // `One assumption worth checking is whether <fragment>` (fixed-generic)
   const isForm = trimmed.match(/^One assumption worth checking is\s+(.+)$/i);
-  if (isForm) return `Assumption to check: ${isForm[1].trim()}`;
+  if (isForm) return `${sectionLabel('Assumption to check')} ${isForm[1].trim()}`;
   // Defensive: keep the text as-is if neither form matches.
   return trimmed;
 }
@@ -1652,7 +1653,7 @@ function pickDeterministicAssumption(input: {
   if (driver !== null) {
     if (driverIsServable(driver)) {
       return {
-        text: `One assumption worth checking: ${cleanLeadIn(driver)}.`,
+        text: `${sectionLabel('One assumption worth checking')} ${cleanLeadIn(driver)}.`,
         source: 'uncertainty_driver',
         fallbackReason: null,
       };
@@ -1687,7 +1688,7 @@ function pickAssumption(input: {
   const strengthen = pickStrengthenAssumption(strengthenItems);
   if (strengthen) {
     return {
-      text: `One assumption worth checking: ${strengthen.text}.`,
+      text: `${sectionLabel('One assumption worth checking')} ${strengthen.text}.`,
       source: strengthen.source,
       fallbackReason: null,
     };
@@ -1700,7 +1701,7 @@ function pickAssumption(input: {
   const biasFinding = pickBiasFindingAssumption(analysisReady);
   if (biasFinding) {
     return {
-      text: `One assumption worth checking: ${biasFinding}.`,
+      text: `${sectionLabel('One assumption worth checking')} ${biasFinding}.`,
       source: 'bias_finding',
       fallbackReason: anyCandidateRejected ? 'gate_rejected' : null,
     };
@@ -1713,7 +1714,7 @@ function pickAssumption(input: {
   const coachingBias = pickCoachingBiasSignalAssumption(coachingBiasSignals);
   if (coachingBias) {
     return {
-      text: `One assumption worth checking: ${coachingBias}.`,
+      text: `${sectionLabel('One assumption worth checking')} ${coachingBias}.`,
       source: 'coaching_bias_signal',
       fallbackReason: anyCandidateRejected ? 'gate_rejected' : null,
     };
@@ -1730,7 +1731,7 @@ function pickAssumption(input: {
     // this repo has paid for more than once.
     if (driverIsServable(driver)) {
       return {
-        text: `One assumption worth checking: ${cleanLeadIn(driver)}.`,
+        text: `${sectionLabel('One assumption worth checking')} ${cleanLeadIn(driver)}.`,
         source: 'uncertainty_driver',
         fallbackReason: anyCandidateRejected ? 'gate_rejected' : null,
       };
@@ -1990,7 +1991,7 @@ function extractBiasSignalText(signal: unknown): string | null {
  * would trip the egress success-claim guard).
  */
 function toCheckBullet(text: string): string {
-  return `Worth a look: ${text}`;
+  return `${sectionLabel('Worth a look')} ${text}`;
 }
 
 /**
@@ -2003,7 +2004,7 @@ function toCheckBullet(text: string): string {
  * clipping it is the defect this slot exists to end.
  */
 function toDirectionBullet(text: string): string {
-  return `Limit to confirm: ${text}`;
+  return `${sectionLabel('Limit to confirm')} ${text}`;
 }
 
 /**

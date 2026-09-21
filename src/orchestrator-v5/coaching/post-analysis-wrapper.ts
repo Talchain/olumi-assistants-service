@@ -34,6 +34,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import { sectionLabel } from '../compose/section-label.js';
 
 import type { StageType } from '@talchain/schemas/boundary';
 import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
@@ -602,7 +603,7 @@ function pickConversationalMessage(card: ReviewCard): string | null {
   if (typeof card.title === 'string' && card.title.length > 0) {
     const cleaned = sanitiseChipProse(card.title);
     if (!cleaned.suppressed) {
-      return `Tell me more about: ${cleaned.text}`;
+      return `${sectionLabel('Tell me more about')} ${cleaned.text}`;
     }
   }
   if (typeof card.what === 'string' && card.what.length > 0) {
