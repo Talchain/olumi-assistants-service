@@ -61,6 +61,10 @@ const StatedItemWire = z.object({
   value: z.number().optional(),
   unit: z.string().optional(),
   role: z.enum(DRAFT_RECORD_ROLES).optional(),
+  // The convention the user's number is written in. Optional and additive,
+  // exactly as the claims-side twin: absence means UNDECLARED, never
+  // `unit_interval`.
+  value_scale: z.enum(DRAFT_RECORD_VALUE_SCALES).optional(),
   direction: z.enum(DRAFT_RECORD_DIRECTIONS).optional(),
   // `option` only — grammar design note 5.
   is_baseline: z.boolean().optional(),
@@ -280,6 +284,7 @@ export function projectDraftRecords(
       ...(item.value !== undefined ? { value: item.value } : {}),
       ...(item.unit !== undefined ? { unit: item.unit } : {}),
       ...(item.role !== undefined ? { role: item.role } : {}),
+      ...(item.value_scale !== undefined ? { value_scale: item.value_scale } : {}),
       ...(item.direction !== undefined ? { direction: item.direction } : {}),
       ...(item.is_baseline !== undefined ? { is_baseline: item.is_baseline } : {}),
       ...(item.applies_to_stated !== undefined ? { applies_to_stated: item.applies_to_stated } : {}),
@@ -394,6 +399,28 @@ export function projectDraftRecords(
     if (claim.likelihood === undefined) lb.absent += 1;
     else lb.routed += 1;
   }
+  // ⭐⭐ THE STATED SIDE IS COUNTED TOO, AND IT HAD TO BE ADDED IN THE SAME
+  // CHANGE AS THE FIELD.
+  //
+  // The claims twin shipped MEASURED-INERT: `value_scale` declared on 0 of 89
+  // claims across two live draws, and `declared_scale` present on 0 of 92 nodes
+  // across nine real sessions. That is the entire reason the stated field
+  // exists. Shipping it without extending this counter would recreate exactly
+  // the state that docblock above complains about — a carrier nobody can tell
+  // is empty — and the next lane would have to re-derive the rate by hand from
+  // debug exports, which is how the claims side went a whole release unnoticed.
+  //
+  // ⚠ Counted over VALUED stated items only. A record with no number cannot
+  // declare a convention for it, so pooling it with ones that can would read as
+  // a producer failure when it is a structural absence — the same distinction
+  // the per-kind split above exists to preserve.
+  const statedValueScaleByKind: Record<string, { declared: number; absent: number }> = {};
+  for (const item of records.stated_items) {
+    if (typeof item.value !== "number") continue;
+    const bucket = (statedValueScaleByKind[item.kind] ??= { declared: 0, absent: 0 });
+    if (item.value_scale === undefined) bucket.absent += 1;
+    else bucket.declared += 1;
+  }
   log.info(
     {
       event: "cee.draft.records.wire_histogram",
@@ -402,6 +429,7 @@ export function projectDraftRecords(
       claim_count: records.claims.length,
       stated_count: records.stated_items.length,
       value_scale_by_kind: valueScaleByKind,
+      stated_value_scale_by_kind: statedValueScaleByKind,
       likelihood_by_kind: likelihoodByKind,
     },
     "Draft record set accepted at the seam",

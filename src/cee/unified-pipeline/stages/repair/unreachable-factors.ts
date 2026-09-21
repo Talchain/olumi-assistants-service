@@ -577,9 +577,86 @@ export function handleUnreachableFactors(
         (node as any).cap = data.cap;
       }
 
-      const scale = declaredScaleOf(originalValue ?? NaN, data.unit, data.cap, data.raw_value);
-      if (scale !== undefined) {
-        (node as any).declared_scale = scale;
+      // ⭐⭐ PRECEDENCE: A DECLARATION BEATS AN INFERENCE. ALWAYS, AND HERE IS
+      // THE ONLY PLACE THE TWO CAN MEET.
+      //
+      // Three authorities can now answer "what convention is this number written
+      // in", and until this guard existed the LAST writer won — which was this
+      // one, the only one that GUESSES:
+      //
+      //   1. the user, via `stated_items[].value_scale`   — a DECLARATION
+      //   2. the model, via `claims[].value_scale`        — a DECLARATION
+      //   3. `declaredScaleOf` below                      — an INFERENCE from
+      //      (value, unit, cap, raw_value)
+      //
+      // The projector stamps 1 and 2 before this stage runs, and this line then
+      // overwrote them unconditionally. That is precisely the "second
+      // reconstruction" the v10 review named: a stamp that READS as an
+      // attestation while being derived from the magnitude the declaration
+      // exists to stop us reading. A wrong declaration is strictly worse than
+      // none, because absence is honest and a stamp is trusted.
+      //
+      // So the order is fixed and it is one-directional: DECLARED > INFERRED.
+      // This stage still fills every node where nothing is declared — which is
+      // every graph drafted before the fields existed, and every draw where the
+      // model declines to declare — so nothing it used to reach is lost.
+      //
+      // ⚠ PINNED IN BOTH DIRECTIONS, or it is a guard agreeing with itself
+      // (trap 13b): the suite asserts a declared node KEEPS its declaration
+      // even when the inference would choose differently, AND that an
+      // undeclared node STILL receives the inference. One without the other
+      // proves nothing — the first alone is satisfied by an inference that
+      // never fires.
+      // ⭐⭐ WHEN A DECLARATION AND AN INFERENCE DISAGREE, NEITHER WINS.
+      //
+      // ⚠⚠ THE FIRST VERSION OF THIS GUARD SAID "DECLARED BEATS INFERRED" AND
+      // SHIPPED A 100x UNDER-STATEMENT. Caught by independent review, measured
+      // BASE-vs-HEAD through the real repair stage and the real V3 transform:
+      // a stated `figure` with `unit: "%"`, `value: 0.9`, declared
+      // `raw_count`, unconnected to an option (so reclassified `external`, so
+      // no frame fires) rendered
+      //
+      //     BASE  "45% to 100%"        HEAD  "0.45% to 1%"
+      //
+      // because `display-value.ts` maps `raw_count` to a percent multiplier of
+      // 1. The control — the same node UNDECLARED — was byte-identical on both.
+      // Reverting only `&& !alreadyDeclared` restored it on every arm.
+      //
+      // ⛔ AND IT REGRESSED SHIPPED BEHAVIOUR, not just the new field: the same
+      // arm through `claims[].value_scale` (live since v10) broke too. So
+      // `declaredScaleOf` was never merely a fallback — on this population it
+      // was a CORRECTION, and "the declaration is the trusted one" quietly
+      // assumed a model that reliably tells `unit` from `value_scale`. This
+      // lane's own census says otherwise: 18 of 18 valued nodes had a SCALE
+      // WORD sitting in `unit`. Trusting the declaration unconditionally bets
+      // against the measurement that motivated the change.
+      //
+      // ── SO: THREE OUTCOMES, AND THE THIRD IS THE POINT ────────────────────
+      //   agree      -> keep it (they are the same answer)
+      //   no inference -> keep the declaration (nothing contradicts it)
+      //   CONTRADICT -> UNDECLARED. Not the declaration, not the inference.
+      //
+      // Absence is the contract's own safe state — *"A consumer MUST NOT treat
+      // absence as `unit_interval`: that is the unsound guess 2.193 exists to
+      // retire."* A stamp is TRUSTED where a guess is visibly a guess, so the
+      // one thing we must never do is emit a trusted answer that two
+      // independent derivations disagree about. A gap degrades; a wrong stamp
+      // lies. Not symmetric harms, so not a symmetric default (trap 22b).
+      //
+      // ⚠ PINNED OVER THE WHOLE ENUM, not over the member that happened to be
+      // in hand: the first corpus used `ratio`, the ONE member where the
+      // declaration and the inference render identically, so it could not have
+      // seen this. Three members, three disagreement pairs.
+      const declared = (node as any).declared_scale;
+      const inferred = declaredScaleOf(originalValue ?? NaN, data.unit, data.cap, data.raw_value);
+      if (declared === undefined) {
+        if (inferred !== undefined) (node as any).declared_scale = inferred;
+      } else if (inferred !== undefined && inferred !== declared) {
+        // Both carriers, or they drift — `declared-scale-carriage.test.ts`
+        // pins that they may not.
+        delete (node as any).declared_scale;
+        const os = (node as any).observed_state;
+        if (os && typeof os === "object") delete os.declared_scale;
       }
 
       // ⚠ THE UNIT IS WITHHELD ON RATIO SCALE, DELIBERATELY, AND IT IS RECORDED.
@@ -625,7 +702,13 @@ export function handleUnreachableFactors(
       // two branches read as independent conditions when they are in fact the
       // two halves of one decision. Nested, the shape says what it does: a
       // stated unit either displays or is withheld-and-recorded.
-      const withholdUnit = scale === "ratio";
+      // ⭐ READS THE RESOLVED SCALE, NOT THE RAW INFERENCE. `scale` used to be
+      // whatever `declaredScaleOf` returned; now three outcomes are possible
+      // (agree / declaration stands / contradiction cleared), and the unit
+      // withholding must follow the value that actually ENDED UP on the node —
+      // or it withholds a unit to protect a `ratio` reading the node no longer
+      // claims. One source, so the two cannot drift (trap 12).
+      const withholdUnit = (node as any).declared_scale === "ratio";
       if (data.unit !== undefined) {
         if (!withholdUnit) {
           (node as any).unit = data.unit;
