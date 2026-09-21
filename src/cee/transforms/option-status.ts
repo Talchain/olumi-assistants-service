@@ -263,7 +263,29 @@ export function computeAnalysisReadyStatusWithReason(
   isBaseline = false,
   unresolvedTargetCount = 0
 ): AnalysisReadyStatusResult {
-  if (unresolvedTargetCount > 0) {
+  // ⭐⭐ AN UNRESOLVED EDGE DECIDES READINESS ONLY WHEN NOTHING ELSE DOES.
+  //
+  // MEASURED on a real session (`65fdde46`, 21 Sep 2026), brief *"Should I hire
+  // a Tech lead or two developers to increase productivity?"*: both options the
+  // USER named carried two valid factor interventions each AND an edge to
+  // `Coordination Overhead Risk`, and were blocked. Olumi's own suggestion had
+  // no risk edge and was `ready`. `may_run: false` for the whole model.
+  //
+  // The rule that produced it (`analysis-ready.ts:685`) is right as far as it
+  // goes — *"a causal coefficient is not an intervention level; other numeric
+  // effects cannot resolve this missing mapping"* — and is untouched. What is
+  // wrong is the SCOPE: an unresolved edge means this EDGE has no level, not
+  // that the OPTION has none. An option moving two factors is analysable on
+  // those two, and the unresolved edge is a question about a third thing.
+  //
+  // ⚠ THE INCENTIVE WAS BACKWARDS, which is why this is not one brief's bug:
+  // the better the model reasoned about what could go wrong with an option, the
+  // more certainly that option was blocked.
+  //
+  // FAILS CLOSED. With no interventions the option is still refused, by this
+  // same line — a numberless option must not become analysable (trap 22b, the
+  // opposite harm).
+  if (unresolvedTargetCount > 0 && interventionCount === 0) {
     return { status: "needs_user_mapping", reason: "A proposed effect still needs a supported mapping" };
   }
   // ⭐ THE SINGLE ADJUDICATION OF "this option has no effect value yet".

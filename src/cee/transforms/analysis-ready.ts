@@ -693,9 +693,15 @@ export function buildAnalysisReadyPayload(
       && edge.edge_type !== "bidirected",
     );
     if (unresolved.length === 0) return option;
+    // ⭐ THE EDGE IS RECORDED EITHER WAY; ONLY THE OPTION'S FATE CHANGES. An
+    // option that already moves something keeps the status its own
+    // interventions earned — see `computeAnalysisReadyStatusWithReason`, which
+    // makes the same distinction and carries the measurement. An option whose
+    // ONLY effect is this edge has no interventions and is still demoted here.
+    const movesSomething = Object.keys(option.interventions ?? {}).length > 0;
     return {
       ...option,
-      status: "needs_user_mapping",
+      ...(movesSomething ? {} : { status: "needs_user_mapping" as const }),
       unresolved_targets: [...new Set([...(option.unresolved_targets ?? []), ...unresolved.map((edge) => edge.to)])],
       user_questions: [...new Set([...(option.user_questions ?? []), ...unresolved.map((edge) =>
         `How does ${option.label} change ${nodeById.get(edge.to)?.label ?? edge.to}? The proposed relationship is retained, but its mechanism and value still need clarification.`,
