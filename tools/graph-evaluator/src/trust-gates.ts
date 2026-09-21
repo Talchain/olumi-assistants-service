@@ -40,7 +40,7 @@
  * divergence REDs the typecheck instead of drifting.
  */
 
-import type { Brief, GoalConstraint, GraphNode, ParsedGraph, WireIntervention } from "./types.js";
+import type { Brief, GraphNode, ParsedGraph, WireIntervention } from "./types.js";
 
 // =============================================================================
 // Minimal rich-decision-model types (mirror of contracts/rich-decision-model.v0.json)

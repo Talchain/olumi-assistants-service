@@ -50,7 +50,7 @@ import { ANCHOR_REQUIRING_EPISTEMIC_STATES } from "./rich-model.js";
  */
 export function normaliseForMatch(s: string): string {
   return s
-    .replace(/[     ]/g, " ")
+    .replace(/[     ]/g, " ")
     .replace(/[‘’‛]/g, "'")
     .replace(/[“”]/g, '"')
     .replace(/[‐‑‒–—―]/g, "-")

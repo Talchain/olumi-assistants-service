@@ -25,7 +25,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { readBriefs } from "../src/io.js";
-import type { Brief, GraphNode, GoalConstraint, ParsedGraph } from "../src/types.js";
+import type { GraphNode, GoalConstraint, ParsedGraph } from "../src/types.js";
 import type { RichDecisionModel } from "../src/rich-model.js";
 import {
   ANCHOR_REQUIRED_STATES,
@@ -33,7 +33,6 @@ import {
   classifyProvenance,
   contentTokens,
   gateG1,
-  gateG2,
   gateG3,
   gateG4,
   gateG5,

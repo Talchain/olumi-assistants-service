@@ -29,7 +29,7 @@ import { config as loadDotenv } from "dotenv";
 import { readBriefs, readModels } from "../../src/io.js";
 import { getProvider } from "../../src/providers/index.js";
 import type { LLMResult } from "../../src/providers/types.js";
-import type { Brief, ModelConfig } from "../../src/types.js";
+import type { Brief } from "../../src/types.js";
 import {
   loadRichSchema,
   assertSchemaMirrorsTypes,
