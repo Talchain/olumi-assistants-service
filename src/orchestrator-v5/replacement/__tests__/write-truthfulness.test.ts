@@ -194,6 +194,23 @@ describe('mixed outcomes — a receipt does not short-circuit the judgement', ()
     });
   });
 
+  /**
+   * ⭐⭐ THE FAIL-SAFE'S OWN DISCRIMINATING CASE — found by a SURVIVING MUTANT.
+   *
+   * Treating an unrecognised code as `not_written` passes every other case in
+   * this file, because on its own it reaches the same verdict by a different
+   * route. It diverges only HERE: with a known `not_written` code AND an
+   * unrecognised one beside a receipt, the weaker reading must still win. The
+   * turn cannot say the others failed — one of them is a code this build has
+   * never seen and may well have written.
+   */
+  it('a known refusal AND an unrecognised code beside a receipt still yields the WEAKER residual', () => {
+    expect(committedWith(['write_failed', 'code_from_a_future_writer'])).toMatchObject({
+      kind: 'mixed',
+      residual: 'unknown',
+    });
+  });
+
   /** ⭐ CONTRAST CONTROL. A clean commit must STILL pass through untouched —
    *  a "fix" that simply stopped trusting receipts would pass every case above
    *  and destroy the one behaviour this module exists to permit. */
