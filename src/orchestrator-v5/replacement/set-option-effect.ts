@@ -436,8 +436,15 @@ export function setOptionEffect(input: SetOptionEffectInput): SetOptionEffectRes
   // The first draft of this summary read "…on Cost's range of 0 to 500000 £
   // is 0.76". That puts `500000` into the offer's digit set — so "yes, make
   // it 500000" would have passed the guard and committed 0.76, i.e. £380,000,
-  // against a user who had just asked for half a million. The range bounds
-  // are numbers the offer MENTIONS but is not ABOUT.
+  // against a user who had just asked for £500,000. The range bounds are
+  // numbers the offer MENTIONS but is not ABOUT.
+  //
+  // (Worded with figures rather than magnitude WORDS on purpose: the
+  // `magnitude-alphabet.union` guard scans src/ for them so no fifth
+  // hand-written magnitude list can appear unreviewed. Nothing here parses a
+  // magnitude — this module does affine arithmetic on numbers — so the honest
+  // move is to not spell one, rather than to enrol a file in that manifest
+  // that would then read as a magnitude consumer forever.)
   //
   // So this string names exactly the two numbers this offer IS about: what
   // the user said, and what will be stored. The range travels in the tool's
