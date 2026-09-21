@@ -200,7 +200,10 @@ describe("a malformed value_scale degrades, a malformed discriminator refuses", 
  */
 const REFUSED_BY_EVERY_FIELD_TYPE = Symbol("no schema on this wire accepts this") as unknown;
 
-function tolerantFields(shape: Record<string, { safeParse: (v: unknown) => { success: boolean } }>): string[] {
+/** The only surface of a zod field this reader touches — no `_def`, by design. */
+type Parsable = { safeParse: (v: unknown) => { success: boolean } };
+
+function tolerantFields(shape: Record<string, Parsable>): string[] {
   return Object.entries(shape)
     .filter(([, field]) => field.safeParse(REFUSED_BY_EVERY_FIELD_TYPE).success)
     .map(([k]) => k)
@@ -208,7 +211,7 @@ function tolerantFields(shape: Record<string, { safeParse: (v: unknown) => { suc
 }
 
 describe("the tolerance is exactly where it was decided, and nowhere else", () => {
-  const arr = (DraftRecordSetWire as unknown as { shape: Record<string, { element: { shape: Record<string, unknown> } }> }).shape;
+  const arr = (DraftRecordSetWire as unknown as { shape: Record<string, { element: { shape: Record<string, Parsable> } }> }).shape;
   const stated = arr.stated_items!.element.shape;
   const claims = arr.claims!.element.shape;
 
