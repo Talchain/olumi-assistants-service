@@ -103,6 +103,7 @@ import { projectEvidenceAssessment } from './compose/project-evidence-assessment
 import { canonicalStateFromFreshness } from './context/canonical-analysis-state.js';
 import { buildRunDelta, type RunDeltaRefusal } from './coaching/build-run-delta.js';
 import { selectRunAnalysisFact } from './context/freshness.js';
+import { readComparisonScopeFromResponseBody } from './compose/comparison-scope.js';
 
 /**
  * Why the run-over-run consequence did or did not ship.
@@ -601,6 +602,16 @@ function attachAnalysisState(
     // withheld-claim projection has redacted `near_tie`, the separation half
     // is genuinely unknown to the consumer and `leader_claim` must say so.
     rawRobustness: readRawRobustnessFromResponseBody(response),
+    // ⭐ THE SCOPE OF ANY COMPARATIVE CLAIM, from the SAME body and for the same
+    // reason as the line above: this states what the CONSUMER can verify from
+    // what it received. A scope derived from a fact the consumer never saw would
+    // be an assurance about a comparison it cannot check.
+    //
+    // ⚠ The graph is this turn's, and supplies only the ROSTER — what existed to
+    // rank — so the difference between ranked and unranked can be stated rather
+    // than silently narrowed. Absent graph ⇒ no roster ⇒ the difference is
+    // reported ABSENT, never as "nothing was left out".
+    comparisonScope: readComparisonScopeFromResponseBody(response, ctx.graph),
     ...(!hasRunToBind ? {} : {
       runFactBinding: {
         scenarioId: ctx.scenarioId,

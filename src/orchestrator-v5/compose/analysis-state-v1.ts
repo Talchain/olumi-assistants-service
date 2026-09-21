@@ -178,6 +178,7 @@ import type { FreshnessDerivation } from '../context/freshness.js';
 import { readRawRobustnessSignals } from '../coaching/pick-raw-robustness.js';
 import type { RawRobustnessSignals } from '../coaching/pick-raw-robustness.js';
 import { compareAnalysisRunFactIdentity } from '../context/analysis-interpretation-identity.js';
+import type { ComparisonScope } from './comparison-scope.js';
 import {
   projectAnalysisSummaryForWithheldClaim,
   projectTransportEnrichmentForWithheldClaim,
@@ -420,6 +421,12 @@ export interface AnalysisStateComposeInput {
    * Absence preserves callers that cannot yet supply a fact; it proves no C2
    * binding. This is not a persisted or versioned interpretation record.
    */
+  /**
+   * The options this run actually ranked, and what it left out. Derived by the
+   * caller from the body it is about to ship — see
+   * {@link readComparisonScopeFromResponseBody}. Absent ⇒ no scope stated.
+   */
+  readonly comparisonScope?: ComparisonScope;
   readonly runFactBinding?: {
     readonly scenarioId: string | undefined;
     readonly selectedResult: unknown;
@@ -906,6 +913,29 @@ export function composeAnalysisStateV1(
     },
     leader_claim: composeLeaderClaim(input),
     robustness: composeRobustness(input),
+    // ⭐ THE SCOPE OF ANY COMPARATIVE CLAIM — threaded, never derived here. The
+    // caller holds both halves (the shipping body and this turn's graph) and
+    // this composer holds neither, which is also why it cannot silently
+    // disagree with what the consumer received.
+    //
+    // ⚠ OMITTED WHEN ABSENT, and the omission is meaningful: absent means NO
+    // SCOPE WAS COMPUTED, never "every option was ranked". Emitting an empty
+    // object here would assert the opposite of what it means.
+    //
+    // ⚠ COPIED INTO MUTABLE ARRAYS AT THE BOUNDARY, not by weakening the
+    // producer's type. The contract's inferred shape is mutable; the derivation
+    // is `readonly` on purpose so nothing downstream can edit a scope after it
+    // has been stated. The copy is where those two meet.
+    ...(input.comparisonScope === undefined
+      ? {}
+      : {
+          comparison_scope: {
+            ranked_option_ids: [...input.comparisonScope.ranked_option_ids],
+            ...(input.comparisonScope.unranked_option_ids === undefined
+              ? {}
+              : { unranked_option_ids: [...input.comparisonScope.unranked_option_ids] }),
+          },
+        }),
     // The five predicates are COPIED from the canonical verdict, never
     // recomputed: a consumer that re-derives them re-opens the divergence this
     // contract closes, and so would a second derivation here.

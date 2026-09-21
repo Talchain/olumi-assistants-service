@@ -97,3 +97,33 @@ export function deriveComparisonScope(
   const unranked = [...new Set(roster)].filter((id) => !rankedSet.has(id));
   return { ranked_option_ids: ranked, unranked_option_ids: unranked };
 }
+
+/**
+ * Read the comparison scope from the response BODY AS IT WILL SHIP.
+ *
+ * ⚠ THE BODY, NOT THE FACT — and deliberately, for the same reason
+ * `readRawRobustnessFromResponseBody` does it: this field describes what the
+ * CONSUMER can verify from what it received. If the analysis block was not
+ * shipped on this turn, the consumer cannot check any comparative claim against
+ * it, and the honest answer is that no scope was stated — not a scope derived
+ * from a fact the consumer never saw.
+ *
+ * Walks blocks the same way its sibling does. First block carrying an
+ * enrichment from which a scope can be derived wins; `undefined` otherwise.
+ */
+export function readComparisonScopeFromResponseBody(
+  response: unknown,
+  graph: unknown,
+): ComparisonScope | undefined {
+  if (response == null || typeof response !== 'object') return undefined;
+  const blocks = (response as { blocks?: unknown }).blocks;
+  if (!Array.isArray(blocks)) return undefined;
+  for (const block of blocks) {
+    if (block == null || typeof block !== 'object') continue;
+    const enrichment = (block as { enrichment?: unknown }).enrichment;
+    if (enrichment == null || typeof enrichment !== 'object') continue;
+    const scope = deriveComparisonScope(enrichment, graph);
+    if (scope !== undefined) return scope;
+  }
+  return undefined;
+}
