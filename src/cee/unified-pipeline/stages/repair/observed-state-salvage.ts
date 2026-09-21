@@ -58,8 +58,13 @@ export interface ObservedStateSalvageResult {
   stripped: StrippedObservedState[];
   /** Why salvage declined, for telemetry. Absent when it succeeded. */
   declined_reason?:
+    | "issue_path_not_an_array"
     | "issue_outside_observed_state"
+    | "issue_code_not_invalid_union"
+    | "issue_node_index_unusable"
     | "no_observed_state_issues"
+    | "graph_has_no_node_array"
+    | "no_node_carried_the_field"
     | "would_strip_constraint"
     | "reparse_still_failed";
 }
@@ -69,13 +74,19 @@ export interface ObservedStateSalvageResult {
  * Returns the node indices named by the issues, or null if ANY issue sits
  * elsewhere — that node index set is the only thing we are permitted to touch.
  */
-function observedStateNodeIndices(issues: ReadonlyArray<ZodIssue>): number[] | null {
+type IndicesOutcome =
+  | { readonly ok: true; readonly indices: number[] }
+  | { readonly ok: false; readonly reason: ObservedStateSalvageResult["declined_reason"] };
+
+function observedStateNodeIndices(issues: ReadonlyArray<ZodIssue>): IndicesOutcome {
   const indices = new Set<number>();
   for (const issue of issues) {
     const path = Array.isArray(issue?.path) ? issue.path : null;
-    if (path === null) return null;
+    if (path === null) return { ok: false, reason: "issue_path_not_an_array" };
     // Expected exactly: ["graph", "nodes", <number>, "observed_state", ...]
-    if (path[0] !== "graph" || path[1] !== "nodes" || path[3] !== "observed_state") return null;
+    if (path[0] !== "graph" || path[1] !== "nodes" || path[3] !== "observed_state") {
+      return { ok: false, reason: "issue_outside_observed_state" };
+    }
     // ONLY `invalid_union`. A MALFORMED CONSTRAINT observed_state (metadata
     // present, operator missing or invalid) trips FactorObservedState's
     // refinement and is reported as `custom`, NOT `invalid_union` — measured,
@@ -93,12 +104,18 @@ function observedStateNodeIndices(issues: ReadonlyArray<ZodIssue>): number[] | n
     // refusing it — at which point the CONSTRAINT DECLINE below is what still
     // catches it. The two guards overlap by design; do not remove one on the
     // grounds that the other covers the case.
-    if (issue?.code !== "invalid_union") return null;
+    if (issue?.code !== "invalid_union") {
+      return { ok: false, reason: "issue_code_not_invalid_union" };
+    }
     const idx = path[2];
-    if (typeof idx !== "number" || !Number.isInteger(idx) || idx < 0) return null;
+    if (typeof idx !== "number" || !Number.isInteger(idx) || idx < 0) {
+      return { ok: false, reason: "issue_node_index_unusable" };
+    }
     indices.add(idx);
   }
-  return indices.size > 0 ? [...indices] : null;
+  return indices.size > 0
+    ? { ok: true, indices: [...indices] }
+    : { ok: false, reason: "no_observed_state_issues" };
 }
 
 /**
@@ -132,15 +149,16 @@ export function salvageObservedState(
   input: { graph?: unknown; goal_constraints?: unknown },
   issues: ReadonlyArray<ZodIssue>,
 ): ObservedStateSalvageResult {
-  const indices = observedStateNodeIndices(issues);
-  if (indices === null) {
-    return { salvaged: false, stripped: [], declined_reason: "issue_outside_observed_state" };
+  const outcome = observedStateNodeIndices(issues);
+  if (!outcome.ok) {
+    return { salvaged: false, stripped: [], declined_reason: outcome.reason };
   }
+  const indices = outcome.indices;
 
   const graph = input?.graph as { nodes?: unknown } | undefined;
   const nodes = Array.isArray(graph?.nodes) ? (graph!.nodes as Array<Record<string, unknown>>) : null;
   if (nodes === null) {
-    return { salvaged: false, stripped: [], declined_reason: "no_observed_state_issues" };
+    return { salvaged: false, stripped: [], declined_reason: "graph_has_no_node_array" };
   }
 
   // ⛔ A CONSTRAINT NODE IS NEVER STRIPPED — the salvage declines wholesale and
@@ -227,7 +245,7 @@ export function salvageObservedState(
   }
 
   if (stripped.length === 0) {
-    return { salvaged: false, stripped: [], declined_reason: "no_observed_state_issues" };
+    return { salvaged: false, stripped: [], declined_reason: "no_node_carried_the_field" };
   }
 
   // ⚠ `.parse()` in a try/catch for the same reason as the caller: suites that
