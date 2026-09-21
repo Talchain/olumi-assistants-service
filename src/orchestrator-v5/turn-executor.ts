@@ -172,6 +172,7 @@ import { projectModelNodeLabels } from './routing/ordinary-text-authority.js';
 import {
   detectMutationWarrant,
   buildMutationWarrantDemotionText,
+  withdrawUnresumableOfferClose,
   isBoundedNonMutationAnalyticalRequest,
   selectBoundedNonMutationHandler,
   type MutationWarrant,
@@ -707,8 +708,45 @@ export interface TurnExecutorRunResult {
    * V5 state-trust freshness derivation, threaded through so
    * response-finaliser / analysis-ready-emit can use the selected fact's
    * computed_at instead of restamping with Date.now() on every emit.
+   *
+   * ⚠ ITS MEANING IS UNCHANGED AND MUST STAY UNCHANGED: the WIRE-BOUND verdict
+   * over this turn's bounded fact window. Every existing reader — pending-action
+   * hash preconditions, chips, `run_delta` pairing and the authoritative
+   * top-level `graph_hash` stamp — is bound to that question. See
+   * `scenarioFreshness` below for the other question, and
+   * `context/scenario-analysis-supersession.ts` for why the two are named apart
+   * rather than reconciled.
    */
   freshness?: FreshnessDerivation;
+  /**
+   * G3 — THE SCENARIO-BOUND FRESHNESS VERDICT, over the DURABLE analysis
+   * history rather than this turn's bounded window.
+   *
+   * ⭐ A DIFFERENT QUESTION FROM `freshness`, NOT A BETTER ANSWER TO THE SAME
+   * ONE (CLAUDE.md trap 21). `freshness` answers *"what does this turn's hot
+   * window say?"*; this answers *"what does the scenario's durable
+   * `run_analysis` history say?"*. Both are true, they can legitimately
+   * disagree, and neither may be assigned to the other. Assigned here from the
+   * ALREADY-COMPUTED `promptAnalysisFreshness` — this field costs no second
+   * derivation.
+   *
+   * ⚠ PRESENCE IS THE AUTHORITY GATE, AND THAT IS THE WHOLE POINT. Populated
+   * only when `isScenarioAnalysisReasoningAuthority` held for this turn
+   * (`complete | capped`); absent for a `degraded` or unlicensed carrier, which
+   * fails weak. A consumer therefore reads the gate off the field's presence
+   * instead of re-deriving it (trap 12), and a derivation over `[]` with a
+   * degraded read — which returns `unknown` / `derivation_failed` for EVERY
+   * input class — can never reach a consumer as though it were a verdict.
+   *
+   * ⚠ ITS `selected_fact_index` IS RELATIVE TO THE DURABLE ARRAY, NOT to
+   * `prior_facts` and not to the post-handler unified array (see
+   * `FreshnessDerivation.selected_fact_index`: *"Consumers MUST resolve the
+   * fact against the same array they passed in"*). The durable array is not
+   * threaded anywhere, so NOTHING may resolve this index against a fact list.
+   * The single consumer that touches an index at all (`attachAnalysisState`'s
+   * run-fact binding) explicitly excludes it — see the comment there.
+   */
+  scenarioFreshness?: FreshnessDerivation;
   /**
    * Copy-source delivery diagnostics (Scope C, additive). Set when the
    * deterministic post-analysis advice gate produced the response, so
@@ -1865,6 +1903,18 @@ export async function runTurnExecutor(
   let routingFreshness: FreshnessDerivation | null = null;
   let promptAnalysisFreshness: FreshnessDerivation | null = null;
   /**
+   * G3 — the value surfaced on `TurnExecutorRunResult.scenarioFreshness`.
+   *
+   * Outer-`let` for the same reason `routingFreshness` is: `finalizeRun` is
+   * declared outside the try block and has to read it. It is a SEPARATE binding
+   * from `promptAnalysisFreshness` rather than a rename, because the two carry
+   * different preconditions: `promptAnalysisFreshness` exists on every turn that
+   * reaches ORIENT (it is a derivation over `[]` when no authority licensed it),
+   * whereas this is populated ONLY behind the authority gate. Collapsing them
+   * would surface a `derivation_failed` non-verdict as if it were a verdict.
+   */
+  let scenarioFreshnessForRun: FreshnessDerivation | undefined;
+  /**
    * THE RUN FACT THE MODEL-FACING PROSE WAS BUILT FROM, or null when the prose
    * carried no projected analysis.
    *
@@ -2799,6 +2849,19 @@ export async function runTurnExecutor(
       currentGraphOptionIdsForTurn,
       { priorFactsReadOk: scenarioAnalysisFactsReadOk },
     );
+    // G3 — surface the SAME derivation on the run result, gated on the SAME
+    // authority binding that produced its fact array. No second derivation: the
+    // right-hand side is the object assigned one statement above.
+    //
+    // ⚠ THE GATE IS READ OFF `analysisAuthority`, the narrowed binding, NOT
+    // re-tested here. When it is undefined, `scenarioAnalysisFacts` is `[]` and
+    // `scenarioAnalysisFactsReadOk` is `false`, so `promptAnalysisFreshness`
+    // short-circuits at `deriveAnalysisFreshness`'s FIRST branch to
+    // `unknown` / `derivation_failed` for EVERY input class — a non-verdict
+    // that is indistinguishable from a real one downstream. Leaving the field
+    // absent is what keeps that off the wire.
+    scenarioFreshnessForRun =
+      analysisAuthority !== undefined ? promptAnalysisFreshness : undefined;
     // Until the post-dispatch re-derivation runs, the wire-bound
     // `freshness` defaults to the routing view — this covers exit paths
     // that return before handler dispatch (orient errors, routing
@@ -11537,6 +11600,30 @@ export async function runTurnExecutor(
           );
         }
 
+        // ⭐⭐ THE PROMISE IS DECIDED BY WHAT WAS KEPT, NOT BY WHICH BRANCH RAN.
+        //
+        // Every branch above feeds the SAME `commitTurn(..., pending_actions:
+        // demotionPending)` below, and `demotionPending` is non-empty in exactly
+        // one of them — the successful `emitProposedChange`. The other branches
+        // deliberately persist nothing: there is no proposable intent, no graph
+        // hash to build the drift precondition from, or the emit itself refused.
+        // Each of those refusals is CORRECT and stays. What was wrong is that
+        // three of them still closed with "Say the word and I will make it."
+        // while keeping nothing for a "yes" to find — `tryShortConfirmResume`
+        // replays a STORED `inline_patch`, so an unkept offer is a dead end the
+        // product walked the user into.
+        //
+        // ⛔ THE RECOGNISER IS NOT TOUCHED. Widening it was recommended and
+        // WITHDRAWN (commit `d8a908b3`): replay never re-reads the message, so a
+        // wider predicate would apply the offer's number and discard a value the
+        // user restated, with a receipt. The gate is right; the offer was wrong.
+        //
+        // Derived rather than restated in each branch (trap 12) because the
+        // hand-written remedy is exactly what drifted: PR #1491 fixed one branch
+        // this way and its three siblings kept the promise. Reading
+        // `demotionPending` means a branch added later cannot reopen this.
+        demotionText = withdrawUnresumableOfferClose(demotionText, demotionPending);
+
         emit(TelemetryEvents.V5MutationWarrantAbsent, {
           request_id: requestId,
           scenario_id: context.session_id,
@@ -16268,6 +16355,10 @@ export async function runTurnExecutor(
       analysisReady: analysisReadyForTurn,
       ...(turnOutcome ? { turn_outcome: turnOutcome } : {}),
       ...(freshness ? { freshness } : {}),
+      // G3 — the scenario-bound verdict, beside the wire-bound one and never
+      // instead of it. Absent when no durable reasoning authority licensed it
+      // (see the declaration); the route then changes nothing.
+      ...(scenarioFreshnessForRun ? { scenarioFreshness: scenarioFreshnessForRun } : {}),
       ...(coachingDelivery ? { coachingDelivery } : {}),
       // V5 read-only canonical state for the route's flag-gated redacted
       // context-summary diagnostic. Present on execute turns (post-dispatch

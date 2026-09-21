@@ -62,6 +62,11 @@ function baseInput(chatWithTools: unknown) {
     adapter: { name: 'test', chatWithTools } as never,
     grounding: grounding(),
     message: 'restructure the model',
+    // ROADMAP 1.33 second leg — REQUIRED. These cases are about the
+    // transport contract, not about history; the history's own forwarding is
+    // pinned in `compose-structural-edit-conversation.test.ts`. Empty here
+    // keeps the payload byte-identical to the pre-fix one.
+    conversation: [],
     maxPatchOperations: MAX_PATCH_OPERATIONS,
     requestId: 'req-1',
     scenarioId: 'scn-1',

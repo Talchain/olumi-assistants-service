@@ -2896,6 +2896,28 @@ function projectOnce(
       // a factor carrying constraint metadata matches NEITHER union branch and
       // 400s. Unit lives on `data`, never here.
       node.observed_state = { value: item.value, raw_value: item.value };
+      // ⭐⭐ THE USER'S OWN DECLARATION OF WHAT THEIR NUMBER MEANS.
+      //
+      // The exact mirror of the claims-side write below (`:3402` at the time of
+      // writing): both carriers, written together so they cannot drift (trap
+      // 21), and `declared-scale-carriage.test.ts` is the guard that says so.
+      //
+      // ⛔ NOTHING IS INFERRED. `item.value_scale` is the model's transcription
+      // of the convention the USER used, in the same breath as the number
+      // itself. Where it is absent the field is simply not set and the node
+      // behaves exactly as it did before this existed — the contract's own
+      // failure semantics, and what makes this safe for every graph drafted
+      // before the field existed.
+      //
+      // ⚠ THIS DOES NOT CHANGE ANY NUMBER. `deriveFactorScaleFrame` still picks
+      // the frame from the magnitude, so a stated "6 engineers" still stores a
+      // level of 0.6. Making the declaration BEAT the ladder is a rowed one-way
+      // door needing an outside corpus and its own seat (traps 22c/22d). This
+      // write is what makes that decision possible; it is not that decision.
+      if (item.value_scale !== undefined) {
+        node.declared_scale = item.value_scale;
+        node.observed_state.declared_scale = item.value_scale;
+      }
     } else if (kind === "goal" && typeof item.value === "number" && goalValueIsATarget(item.role)) {
       // ⭐⭐ ROOT 3 — THE MISSING GOAL VALUE BRANCH. The comment 40 lines below
       // has named this gap since the R1 cutover: "`projectOnce` has a value

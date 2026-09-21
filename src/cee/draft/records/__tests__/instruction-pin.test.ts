@@ -791,6 +791,42 @@ const PREREGISTERED_V22_CONNECT_SHA256 =
   "1e2ba3c6992c9525f268d8621b2c37f9f9aac687f1edb0e3867360fba4e8274e";
 const PREREGISTERED_V22_CONNECT_BYTES = 5115;
 /**
+ * v23 stated-scale reconciliation, 2026-09-21. UNMEASURED on model output.
+ *
+ * Three changes, all in the SHAPE half — the connect half is byte-identical to
+ * v22 (`1e2ba3c6…`, 5,115), which is what makes this version attributable to
+ * one half:
+ *   1. the `value_scale` ask names the `figure` record it sits on, now that
+ *      `stated_items` can carry the field. ⚠ NARROWED after review: the ask was
+ *      briefly "on the same record", which is broader than the projector
+ *      honours — measured, only `figure` (no role) and `figure role: baseline`
+ *      reach the write. An ask pointed at a shape that discards the answer is
+ *      the defect this very version was written to fix, mirrored. Widening the
+ *      projector to the other seven shapes is rowed, not taken here.
+ *   2. `unit` is stated to be WHAT THE NUMBER IS MEASURED IN and nothing else,
+ *      naming the scale words that must not go there;
+ *   3. the `claims` section gets its OWN `value_scale` ask with a worked
+ *      example, replacing a back-reference to the definition in the
+ *      `stated_items` section.
+ *
+ * ⚠ WHY (3) MATTERS, and it is the measured part: before this, 4 of the 6
+ * `value_scale` mentions — the whole vocabulary and both worked examples — sat
+ * inside the `stated_items` block, the one shape whose schema could not carry
+ * the field. The claims section, which could, had one back-reference. Measured:
+ * `value_scale` declared 0 of 89 claims on two live draws (served `b7c323c`,
+ * 19 Sep) and `declared_scale` present on 0 of 92 nodes across 9 sessions.
+ *
+ * ⛔ THE PIN CLAIMS NOTHING ABOUT WHETHER THIS WORKS. It identifies source
+ * bytes. Whether the model now declares is a live-draw RATE, and one draw is
+ * not a rate. v22 above remains immutable.
+ */
+const PREREGISTERED_V23_INSTRUCTION_SHA256 =
+  "f7f58464da94413fedd8bd81ab91695220e2138c26b98ef2f04a316cb93ad786";
+const PREREGISTERED_V23_INSTRUCTION_BYTES = 22312;
+const PREREGISTERED_V23_SHAPE_SHA256 =
+  "2a0915802c27c6051ae80e3ef041812bf370a082a950e697cef84f6d1a1d02a1";
+const PREREGISTERED_V23_SHAPE_BYTES = 17197;
+/**
  * SUPERSEDED — v18's bytes, the value ask, AND THE ARTEFACT EVERY 17 Sep
  * MEASUREMENT WAS TAKEN UNDER: both live v202 draws, Paul's manual test, and the
  * nine `CONSTRAINT_TARGET_UNRELIABLE` refusals between 18:01 and 18:17Z.
@@ -863,11 +899,33 @@ const SUPERSEDED_V12_INSTRUCTION_SHA256 =
 const SUPERSEDED_V12_INSTRUCTION_BYTES = 12280;
 
 describe("the draft records instruction is the registered artefact", () => {
-  it("hashes to the unmeasured v22 source registration at the pinned byte length", () => {
-    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V22_INSTRUCTION_SHA256);
+  it("hashes to the unmeasured v23 source registration at the pinned byte length", () => {
+    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V23_INSTRUCTION_SHA256);
     expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).toBe(
+      PREREGISTERED_V23_INSTRUCTION_BYTES,
+    );
+  });
+
+  it("keeps v22 identifiable separately from the stated-scale reconciliation", () => {
+    // The 0-of-89 and 0-of-92 declaration measurements were taken against v22.
+    // Asserting distinctness is also what makes an accidental REVERT loud: a
+    // re-pointed pin and a reverted artefact are indistinguishable from a
+    // single equality check.
+    expect(draftRecordsInstructionHash()).not.toBe(PREREGISTERED_V22_INSTRUCTION_SHA256);
+    expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).not.toBe(
       PREREGISTERED_V22_INSTRUCTION_BYTES,
     );
+    expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).not.toBe(
+      PREREGISTERED_V22_SHAPE_SHA256,
+    );
+    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).not.toBe(
+      PREREGISTERED_V22_SHAPE_BYTES,
+    );
+    // ⭐ THE CONNECT HALF IS UNCHANGED, and that is the point of pinning the
+    // halves apart: v23 is attributable to the shape half alone.
+    expect(
+      createHash("sha256").update(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8").digest("hex"),
+    ).toBe(PREREGISTERED_V22_CONNECT_SHA256);
   });
 
   it("keeps v21 identifiable separately from the authored-meaning correction", () => {
@@ -1127,16 +1185,16 @@ describe("the draft records instruction is the registered artefact", () => {
     // say which convention its number is in" without reading a diff.
     expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).toBe(
       // v22 changes both halves; model generation remains unmeasured.
-      PREREGISTERED_V22_SHAPE_SHA256,
+      PREREGISTERED_V23_SHAPE_SHA256,
     );
-    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(PREREGISTERED_V22_SHAPE_BYTES);
+    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(PREREGISTERED_V23_SHAPE_BYTES);
     expect(
       Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8") +
         1 +
         Buffer.byteLength(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8") -
         1,
       "the three pins no longer add up — one of them was updated without the others",
-    ).toBe(PREREGISTERED_V22_INSTRUCTION_BYTES);
+    ).toBe(PREREGISTERED_V23_INSTRUCTION_BYTES);
     // WITHDRAWN — v20.0's shape half, the value this pin USED to name, kept
     // beside the live one exactly as every entry below it is. Asserted DISTINCT
     // for a DIFFERENT reason from those, and the difference is worth stating:

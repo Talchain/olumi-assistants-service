@@ -1247,6 +1247,72 @@ export function detectMutationWarrant(
  * SAY SO rather than let the user believe the old row is gone. The
  * remove/replace capability itself is ROADMAP 2.659, not this fix.
  */
+/**
+ * The closing PROMISE, named once so no reader has to re-spell it (trap 12).
+ *
+ * ⛔ IT IS HONOURABLE ONLY WHERE THE SAME TURN PERSISTS AN
+ * `apply_proposed_change` PENDING. Acceptance is handled by
+ * `tryShortConfirmResume`, which replays a STORED `inline_patch`; with nothing
+ * stored, a "yes" has nothing to resume and the user has been told the product
+ * was ready to act. Use `withdrawUnresumableOfferClose` wherever the emitting
+ * branch has declined to persist one.
+ */
+export const MUTATION_OFFER_CLOSING_PROMISE = 'Say the word and I will make it.';
+
+/**
+ * What the product says instead when it has decided NOT to keep the change.
+ *
+ * It still opens with the no-write disclosure (INV-3 above is untouched), still
+ * asserts nothing about what the user did or did not ask for, and closes on a
+ * move the user can actually make rather than on a promise nothing can honour.
+ * The estate already ratified this shape for the sibling branch that refuses an
+ * under-specified offer — `buildIncompleteOfferRefusalText`, PR #1491.
+ *
+ * ⛔⛔ IT MAKES NO CLAIM ABOUT SESSION STATE, AND THAT IS THE LOAD-BEARING PART.
+ * The first version of this constant closed "…so nothing is waiting on your
+ * reply…". That is a claim about the pendings THE COMMIT PERSISTS, and the only
+ * set the caller can see is `demotionPending` — the pendings THIS BRANCH minted.
+ * They are not the same set:
+ *
+ *   `turn-executor.ts:1695`    every `commitTurn` threads
+ *                              `priorPendingActions: context.most_recent_pending_actions`
+ *   `commit.ts:1289-1310`      `finalPendings = [...chipDerivedPending, ...survivingPrior]`
+ *   `commit.ts:565-571`        the hash-invalidation rule requires a NON-EMPTY
+ *                              `currentGraphHash`; the `no_graph_hash` branch
+ *                              has none, so a prior proposal is never
+ *                              invalidated there
+ *
+ * MEASURED, three-turn journey, one instrument: T1 offers with a graph and mints
+ * an `apply_proposed_change` · T2 has no usable graph, hits
+ * `emit_refused:no_graph_hash`, persists `["apply_proposed_change"]` and SAID
+ * "nothing is waiting on your reply" · T3's bare "yes" returned "Applying: Add
+ * this limit. Added constraint: Customer Churn Rate must be at most 7%." and
+ * wrote the graph. A denial with a write behind it — which moves the user's
+ * model of what the product will do, where the promise it replaced merely did
+ * nothing.
+ *
+ * ⛔ AND FEEDING THE GUARD THE PERSISTED SET IS WORSE, not better. MEASURED on
+ * the same journey with `[...demotionPending, ...context.most_recent_pending_actions]`
+ * passed to `withdrawUnresumableOfferClose`: the length test then passes, so the
+ * promise is KEPT — turn 2 said "a limit keeping "Customer Churn Rate" at or
+ * below 7 … Say the word and I will make it." and the "yes" returned "Added
+ * constraint: Customer Acquisition Cost must be at most 500 GBP." A promise
+ * about one change, honoured by writing another, with a receipt. That is the
+ * `d8a908b3` class exactly. The guard's boolean answers "is anything resumable?"
+ * and the sentence's referent is "THIS change" (trap 21) — do not reconcile them
+ * by widening the set. Widening it would also have to re-derive
+ * `computeSurvivingPriorPendingsDetailed` (five rules, `nowMs` and
+ * `consumedPendingRefs` included) at a site that runs BEFORE the commit, which
+ * is the hand-maintained mirror this module exists to avoid (trap 12).
+ *
+ * A sentence that makes no claim about a set cannot be wrong about one. Pinned
+ * by the discriminating pair and the journey in
+ * `__tests__/offer-without-pending-wiring.test.ts`.
+ */
+export const MUTATION_OFFER_UNRESUMABLE_CLOSE =
+  'I could not put it forward as something you can confirm — tell me what ' +
+  'you would like changed and I will take another look.';
+
 export function buildMutationWarrantDemotionText(
   changeDescription: string,
   residualDisclosure: string | null,
@@ -1254,8 +1320,76 @@ export function buildMutationWarrantDemotionText(
   const opening =
     `Nothing has been changed. I want to confirm this with you before I edit ` +
     `the model, and ${changeDescription} looks like it would help. ` +
-    `Say the word and I will make it.`;
+    `${MUTATION_OFFER_CLOSING_PROMISE}`;
   return residualDisclosure === null ? opening : `${opening} ${residualDisclosure}`;
+}
+
+/**
+ * Withdraw the closing promise from a demotion text whose branch persisted no
+ * resumable pending.
+ *
+ * ⭐ DERIVED, NEVER MIRRORED — and the reason is measured history. PR #1491
+ * ruled this exact class for ONE branch and hand-wrote the remedy into it; the
+ * three siblings beside it kept the promise for another three weeks. A caller
+ * that decides the copy by restating the persistence decision will drift from
+ * it again the next time a branch is added. Callers pass the PENDINGS THEY ARE
+ * ABOUT TO COMMIT, so the copy cannot disagree with what was kept.
+ *
+ * ⛔ NOT A WIDER RECOGNISER. Commit `d8a908b3` withdrew that recommendation: a
+ * held change replays entirely from its stored patch and never re-reads the
+ * message, so widening the confirmation predicate would apply the OFFER's value
+ * and silently discard one the user restated — with a receipt. The defect is
+ * that the offer was made, not that the acceptance was refused.
+ *
+ * ⚠ SCOPED TO THE V5 DEMOTION GATE BY ITS CALLERS, deliberately. Two lanes, two
+ * questions (trap 21) — this must not be applied globally.
+ *
+ * ⛔ `persistedPendings` IS THIS BRANCH'S SET, NOT THE COMMIT'S. Callers pass
+ * `demotionPending`. The commit persists `demotionPending ∪ survivors(prior)`,
+ * so a non-empty result here does NOT mean the session holds nothing. That is
+ * exactly why `MUTATION_OFFER_UNRESUMABLE_CLOSE` states nothing about session
+ * state — see its docblock for the measurement, and for why widening this
+ * parameter makes the product promise one change and write another.
+ *
+ * ── EVERY CALLER OF `buildMutationWarrantDemotionText`, AND ITS STATUS ──────
+ * Derived at this tip with `rg -a` over `src/` (contrast control:
+ * `buildWarrantDemotion`, 4 files — the instrument is not blind).
+ *
+ *   `turn-executor.ts:11476`        `!demotion.ok` — GUARDED by this function
+ *   `turn-executor.ts:11486`        `no_graph_hash` — GUARDED by this function
+ *   `turn-executor.ts:11510`        emit success / refused — GUARDED (a success
+ *                                   keeps the promise: `demotionPending` is
+ *                                   non-empty, so the guard is a no-op)
+ *   `edit-graph-dispatch.ts:3873`   EMITTER, deliberately LEFT ALONE. Ruled
+ *                                   (PR #1583) and pinned by
+ *                                   `edit-graph-dispatch-ordinary-text-authority.test.ts:177`:
+ *                                   there the handler really did produce a
+ *                                   mutation the gate withheld, so a restated
+ *                                   instruction IS honourable through the
+ *                                   ordinary edit path.
+ *   `explicit-constraint-edit.ts:72` NOT AN EMITTER — a RECOGNISER. It rebuilds
+ *                                   the offer text and grants a write on
+ *                                   `message.startsWith(rendered)`
+ *                                   (`:64-79`), needing no stored pending
+ *                                   because it rebuilds the proposal from the
+ *                                   message. It therefore renders the text WITH
+ *                                   the promise, and a user who copies back a
+ *                                   WITHDRAWN offer can no longer match it —
+ *                                   which is correct, since a withdrawn offer
+ *                                   was never put forward. Nothing here changes
+ *                                   what it renders. ⚠ STATUS: coupled,
+ *                                   correct-by-construction, UNWITNESSED — it
+ *                                   needs a granted warrant, a single resolved
+ *                                   target and a matching quantity/unit on the
+ *                                   restating turn. Recorded, not fixed.
+ */
+export function withdrawUnresumableOfferClose(
+  text: string,
+  persistedPendings: readonly unknown[],
+): string {
+  if (persistedPendings.length > 0) return text;
+  if (!text.includes(MUTATION_OFFER_CLOSING_PROMISE)) return text;
+  return text.replace(MUTATION_OFFER_CLOSING_PROMISE, MUTATION_OFFER_UNRESUMABLE_CLOSE);
 }
 
 /**
