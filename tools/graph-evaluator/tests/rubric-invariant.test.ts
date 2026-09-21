@@ -97,6 +97,15 @@ const SAMPLE_VALUES: Record<string, unknown> = {
   goal_threshold_raw: 20000,
   goal_threshold_unit: "£",
   goal_threshold_cap: 40000,
+  // ⭐ A REAL MEMBER OF `GoalThresholdCapProvenance`, not an invented string.
+  // CEE mints exactly three: `metric_scale`, `inherited`,
+  // `target_derived_headroom`. `metric_scale` is used here because the cap
+  // sample above (40000 against a raw of 20000) is a plain x2 — no rule
+  // produces that ratio, and `target_derived_headroom` specifically means
+  // `raw * 1.25`, so pairing it with this cap would make the fixture assert a
+  // relation CEE would never emit. This field was added by CEE and the
+  // invariant failed loud until it was sampled, which is the guard working.
+  goal_threshold_cap_provenance: "metric_scale",
   goal_threshold_frame: "cee_v1",
   goal_baseline: 0.3,
   goal_baseline_raw: 12000,
