@@ -985,7 +985,7 @@ describe('tryPostAnalysisAdviceGate — enriched composer output (full data)', (
       // each option's OWN win share and keeps the qualitative verdict the
       // margin earns. Both halves are pinned so the gap cannot creep back in
       // as "and that is 24 points clear".
-      expect(out.assistant_text).toContain("'Hire one senior engineer overseas' sits in second place, with a probability of 38%, so the lead is meaningful rather than marginal");
+      expect(out.assistant_text).toContain("'Hire one senior engineer overseas' came out highest less often, with a probability of 38%");
       expect(out.assistant_text).not.toMatch(/percentage points?/i);
       expect(out.assistant_text).toContain('Delivery risk');
       expect(out.assistant_text).toContain('Cost overrun risk');
@@ -1417,7 +1417,7 @@ describe('tryPostAnalysisAdviceGate — degrade-gracefully (partial data)', () =
     });
     expect(out.matched).toBe(true);
     if (out.matched) {
-      expect(out.assistant_text).toContain("'Hire one senior engineer overseas' sits in second place");
+      expect(out.assistant_text).toContain("'Hire one senior engineer overseas' came out highest less often");
       // Don't claim a margin we don't have
       expect(out.assistant_text).not.toContain('percentage points');
     }
@@ -2305,7 +2305,7 @@ describe('tryPostAnalysisAdviceGate — near-tie + raw robustness', () => {
     });
     expect(out.matched).toBe(true);
     if (out.matched) {
-      expect(out.assistant_text).toContain('meaningful rather than marginal');
+      expect(out.assistant_text).toContain('came out highest less often');
       expect(out.assistant_text).not.toMatch(/effectively tied/i);
     }
   });
@@ -2326,7 +2326,7 @@ describe('tryPostAnalysisAdviceGate — near-tie + raw robustness', () => {
     });
     expect(out.matched).toBe(true);
     if (out.matched) {
-      expect(out.assistant_text).toContain('meaningful rather than marginal');
+      expect(out.assistant_text).toContain('came out highest less often');
       expect(out.assistant_text).toContain('This result looks fairly stable, but it is worth checking the main assumptions before deciding');
       expect(out.assistant_text).not.toMatch(/robustness band/i);
     }
