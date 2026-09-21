@@ -85,25 +85,40 @@ const ck = async (): Promise<void> => undefined;
  * needing values on three factors), and the shape a single prose offer has to
  * become before anything can accept it.
  *
- * ⛔⛔ THE OPERATION SHAPE IS THE PRODUCER'S, AND MY FIRST VERSION WAS A
- * CORRUPTING ONE. It staged `value: 5000, unit: '£'` — a NATIVE magnitude in
- * the `value` slot — and this test ASSERTED it surviving verbatim, i.e. it
- * pinned the corruption as the desired behaviour. `native-quantity-operation.ts`
- * says why in terms: *"it names the field `value`, which is the ENCODED
- * magnitude the engine computes on. Writing a native `95000` there would move a
- * `[0,1]` intervention to 95,000 and corrupt the causal model."*
+ * ⛔⛔ THE OPERATION SHAPE IS THE PRODUCER'S, AND I GOT IT WRONG TWICE.
  *
- * Derived from the two real emitters instead of my own head:
- *   · ENCODED  — `buildOptionEffectRawOperation` (`option-effect-write.ts:1434`)
- *                emits `value: { value: n }`, a whole-object replacement.
- *   · NATIVE   — `buildNativeQuantityOperation` (`native-quantity-operation.ts`)
- *                emits `value: { ...carried, raw_value: n, unit }` and never
- *                touches the encoded value: **the native rides BESIDE it.**
+ * v1 staged `value: 5000, unit: '£'` — a NATIVE magnitude in the `value` slot —
+ * and this test ASSERTED it surviving verbatim, i.e. it pinned a corruption as
+ * the desired behaviour. `native-quantity-operation.ts`: *"it names the field
+ * `value`, which is the ENCODED magnitude the engine computes on. Writing a
+ * native `95000` there would move a `[0,1]` intervention to 95,000 and corrupt
+ * the causal model."*
  *
- * So `value` is an OBJECT, never a scalar, and there is no top-level `unit`.
- * This is the estate's self-authored-fixture trap: a shape I invented agreed
- * with my model of the writer and would have shipped a receipt for a write that
- * corrupts the model it claims to have updated.
+ * v2 moved the native to `value: { raw_value, unit }` — correct for the NATIVE
+ * emitter, and still not what THIS layer produces. Measured end to end against
+ * the real `applyOperations` adapter, that shape is REFUSED unless the target
+ * factor carries `observed_state.cap`, and I reported it as a cross-lane defect
+ * before checking what the tool emits. It was a shape I typed, not one the
+ * product makes.
+ *
+ * ⭐ WHAT THE REPLACEMENT LAYER ACTUALLY EMITS, read at its own bytes:
+ * `replacement/set-option-effect.ts` takes `value: number` — documented
+ * *"Normalised effect in [0, 1] … this tool does not invent one"* — and emits
+ * `buildOptionEffectRawOperation` (`routing/option-effect-write.ts:1434`),
+ * which is `value: { value: n }`, a whole-object replacement. **Every operation
+ * this controller stages carries an ENCODED value.** So the applier's
+ * `deriveValue` short-circuits on its first line and no cap is ever consulted —
+ * which is why the corrected shape below commits against a factor carrying a
+ * cap, a `scale_frame`, or neither.
+ *
+ * ⚠ AND THE QUESTION THAT SURVIVES, STATED RATHER THAN FIXED: this layer has no
+ * way to express a NATIVE magnitude. A user who says "£5,000" needs the number
+ * converted to `[0,1]` before it reaches the tool, and the tool's own docblock
+ * puts that on the conversation. Whether the model is given the factor's scale
+ * to do that is a real question and is NOT settled here.
+ *
+ * The lesson, three times in one night: a fixture I write agrees with my model
+ * of the producer, and my model of the producer is the thing under test.
  */
 const OFFERED_OPS = [
   {
@@ -112,17 +127,15 @@ const OFFERED_OPS = [
     value: { value: 0.55 },
     old_value: null,
     impact: 'moderate',
-    rationale: 'Sets the effect value for AI Tool + Limited Budget Test on Campaign Strategic Quality.',
+    rationale: 'Sets the effect value the user gave for AI Tool + Limited Budget Test on Campaign Strategic Quality.',
   },
   {
-    // ⭐ THE NATIVE ONE. £5,000 rides as `raw_value` + `unit`, beside an encoded
-    // value this operation deliberately does not touch.
     op: 'update_node',
     path: '/nodes/opt-limited-test/data/interventions/f-budget',
-    value: { raw_value: 5000, unit: '£' },
+    value: { value: 0.05 },
     old_value: null,
     impact: 'moderate',
-    rationale: 'Records the £ figure the user gave, for the model value to be derived from.',
+    rationale: 'Sets the effect value the user gave for AI Tool + Limited Budget Test on Advertising Budget Allocated.',
   },
   {
     op: 'update_node',
@@ -130,13 +143,13 @@ const OFFERED_OPS = [
     value: { value: 0.15 },
     old_value: null,
     impact: 'moderate',
-    rationale: 'Sets the effect value for AI Tool + Limited Budget Test on Founder Time Commitment.',
+    rationale: 'Sets the effect value the user gave for AI Tool + Limited Budget Test on Founder Time Commitment.',
   },
 ];
 
 const OFFER_SUMMARY =
   'Set what AI Tool + Limited Budget Test does to Campaign Strategic Quality (0.55), ' +
-  'Advertising Budget Allocated (£5,000) and Founder Time Commitment (0.15)';
+  'Advertising Budget Allocated (0.05) and Founder Time Commitment (0.15)';
 
 const proposeEstimates: AgentTool = {
   kind: 'propose',
@@ -232,13 +245,15 @@ describe('the acceptance journey the deployed product could not complete', () =>
     // Byte-identical to what was staged.
     expect(seen[0]!.operations).toEqual(offered[0]!.operations);
     expect(seen[0]!.operations[0]!.detail).toEqual({ operations: OFFERED_OPS });
-    // ⭐ AND THE NATIVE FIGURE IS IN THE SLOT THE WRITER READS IT FROM, which is
-    // the part a shape I invented got wrong: £5,000 as `raw_value` beside an
-    // untouched encoded value, never as `value` — which the engine computes on.
+    // ⭐ THE VALUE IS IN THE SLOT THE WRITER READS IT FROM, and it is an OBJECT
+    // carrying an ENCODED model value — what `buildOptionEffectRawOperation`
+    // emits and what this layer can actually produce. The negative half is what
+    // stops a native magnitude being put back into that slot, which is the
+    // shape that corrupts the causal model.
     const budgetOp = (seen[0]!.operations[0]!.detail as { operations: Array<Record<string, unknown>> })
       .operations.find((o) => String(o.path).endsWith('f-budget'))!;
-    expect(budgetOp.value).toEqual({ raw_value: 5000, unit: '£' });
-    expect(budgetOp.value).not.toHaveProperty('value');
+    expect(budgetOp.value).toEqual({ value: 0.05 });
+    expect(budgetOp.value).not.toHaveProperty('raw_value');
     expect(seen[0]!.proposalId).toBe(proposalId);
     expect(seen[0]!.modelRevision).toBe('rev-1');
     expect(seen[0]!.idempotencyKey, 'a key the writer can dedupe on').toBeTruthy();
