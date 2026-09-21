@@ -1565,8 +1565,47 @@ function applyStatedGoalTarget(
   node: ProjectedNode,
   value: number,
   unit: string | undefined,
+  valueScale?: string,
 ): void {
   const resolved = resolveGoalThresholdCapWithProvenance(undefined, value, unit, undefined);
+
+  // ⭐⭐ THE DECLARATION IS READ BEFORE THE FRAME IS APPLIED, OR IT IS APPLIED
+  // TWICE. Measured on a fresh brief at the deployed build (21 Sep 2026):
+  // *"lift it to 95%"* arrived as `{value: 0.95, unit: "%"}` — the model had
+  // ALREADY normalised it — and the seam histogram for that draw records
+  // `stated_value_scale_by_kind.goal {declared: 1, absent: 0}`, so the
+  // convention was stated. This function never received it, resolved a cap of
+  // 100 from the unit, and divided again: `goal_threshold 0.0095`. ISL scores
+  // `delta_threshold = goal_threshold - baseline` against that, so the user's
+  // own success criterion was understated 100-fold.
+  //
+  // Only `unit_interval` and `ratio` assert "already a fraction". `raw_count`
+  // and an ABSENT declaration keep today's arithmetic byte-for-byte, so this
+  // can only correct a value the model TOLD us was normalised.
+  //
+  // ⚠ A DECLARATION THAT CONTRADICTS ITS OWN MAGNITUDE IS NOT HONOURED. A
+  // value above 1 is not on the unit interval whatever the label says, and the
+  // precedent is already set on the factor path: where a declaration and the
+  // magnitude disagree, resolve to UNDECLARED and keep existing behaviour
+  // rather than pick a side (trap 22b — a wrong frame is a LIE, a missing one
+  // is a gap, and they are not symmetric harms).
+  const declaredNormalised =
+    (valueScale === "unit_interval" || valueScale === "ratio") && value <= 1;
+
+  if (resolved !== null && declaredNormalised) {
+    const cap = resolved.cap;
+    // The user's own magnitude is the level times its frame — `raw` is
+    // documented as the raw USER magnitude, kept. Minted in the same block as
+    // the cap and the threshold so all three describe ONE denominator.
+    node.goal_threshold_raw = value * cap;
+    if (unit !== undefined) node.goal_threshold_unit = unit;
+    node.goal_threshold_cap = cap;
+    node.goal_threshold_cap_provenance = resolved.provenance;
+    node.goal_threshold = value;
+    node.goal_threshold_frame = CEE_GOAL_THRESHOLD_FRAME;
+    return;
+  }
+
   node.goal_threshold_raw = value;
   if (unit !== undefined) node.goal_threshold_unit = unit;
   if (resolved !== null) {
@@ -2946,7 +2985,7 @@ function projectOnce(
       // "does not fail — it silently returns a WRONG probability"
       // (`graph.ts:325-330`). So the cap is never derived separately from the
       // value it divides.
-      applyStatedGoalTarget(node, item.value, item.unit);
+      applyStatedGoalTarget(node, item.value, item.unit, item.value_scale);
       // ⚠⚠ `goal_baseline` IS DELIBERATELY NEVER MINTED HERE, and the omission is
       // the honest branch, not a gap. The contract is explicit: it is
       // "EXTRACTION ONLY. Present only when the user STATED a current level in
