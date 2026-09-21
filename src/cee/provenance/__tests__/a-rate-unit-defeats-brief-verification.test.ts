@@ -48,7 +48,7 @@
 import { describe, expect, it } from "vitest";
 
 import { bindStatedItemToBrief } from "../brief-binding.js";
-import { isAmountStatedInBrief } from "../stated-amounts.js";
+import { classifyAmountAgainstBrief, isAmountStatedInBrief } from "../stated-amounts.js";
 
 /** The user's own words, from staging bundle `9077a1e3`. */
 const BRIEF =
@@ -100,5 +100,61 @@ describe("a compound-rate unit defeats brief verification (KNOWN-WRONG, pinned)"
     // the answer moves in both directions depending on how the brief is written.
     expect(isAmountStatedInBrief(59, undefined, BRIEF)).toBe(false);
     expect(isAmountStatedInBrief(59, "", BRIEF)).toBe(false);
+  });
+
+  /**
+   * ⛔⛔ THE SECOND, INDEPENDENT BREAK — and the reason `in_model_anchored` was
+   * 0 of 5 rather than 4 of 5.
+   *
+   * `intervention-extractor.ts:1061` is the LAST route by which a number can
+   * regain the user's authorship. It calls
+   * `classifyAmountAgainstBrief(value, unit, briefText, scale)` where
+   *   · `value` is the NORMALISED intervention level (0.59), not `raw_value`;
+   *   · `unit` is the FACTOR's `observed_state.unit` — `£/month` here.
+   * `magnitudeUnderScale` is supposed to undo the normalisation using `scale`.
+   * Measured below: it does not recover 59 from 0.59 for a currency under ANY
+   * member of the scale enum, so the route fails on the level even when the
+   * unit is made benign. Two independent defects sit on one path and EITHER
+   * alone loses the user's authorship — which is why fixing just one would
+   * still show the user "Olumi's estimate" for a number they typed.
+   *
+   * ⚠ ENUMERATED, NOT SAMPLED. Every `MagnitudeScale` member is exercised, so
+   * this is a statement about the predicate and not about one lucky scale.
+   */
+  it("⛔ THE SECOND BREAK — the normalised level fails under EVERY magnitude scale", () => {
+    const SCALES = ["unit_interval", "ratio", "raw_count", "unknown"] as const;
+
+    for (const scale of SCALES) {
+      // The exact call the extractor makes on the real draw.
+      expect(
+        classifyAmountAgainstBrief(0.59, "£/month", BRIEF, scale as never),
+        `normalised level + rate unit must be recorded as failing under ${scale}`,
+      ).toBe("not_stated");
+
+      // Unit made benign — STILL fails, so the unit is not the only defect.
+      expect(
+        classifyAmountAgainstBrief(0.59, "£", BRIEF, scale as never),
+        `the normalised level alone still fails under ${scale}`,
+      ).toBe("not_stated");
+
+      // DISCRIMINATING CONTROL: same scale, same brief, RAW level + bare symbol
+      // is the one combination that verifies. Without this the loop above would
+      // be satisfied by a predicate that always says "not_stated".
+      expect(
+        classifyAmountAgainstBrief(59, "£", BRIEF, scale as never),
+        `raw level + symbol must verify under ${scale}, or this probe is blind`,
+      ).toBe("stated");
+    }
+  });
+
+  it("⛔ THE USER'S CEILING IS NOT VERIFIABLE AT ITS STORED VALUE EITHER", () => {
+    // "keeping monthly churn under 4%" is stored as 0.04. The same normalisation
+    // gap applies, so the constraint cannot be attributed to him either. Recorded
+    // because it shows the defect is not confined to option interventions.
+    expect(classifyAmountAgainstBrief(0.04, "%", BRIEF, "unit_interval" as never)).toBe(
+      "not_stated",
+    );
+    // Control: the figure as written in the brief does verify.
+    expect(isAmountStatedInBrief(4, "%", BRIEF)).toBe(true);
   });
 });
