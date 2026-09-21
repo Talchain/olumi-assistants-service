@@ -217,6 +217,55 @@ describe('MANDATORY REGRESSION 2 — natural unit equivalence', () => {
     expect(r.ok).toBe(true);
   });
 
+  it('⭐ when both are given, the TOOL’s arithmetic is what gets stored — not the model’s', () => {
+    // FOUND BY A SURVIVING MUTANT, not by review. `effective = rounded` could
+    // be rewritten to `value ?? rounded` and every other case in this file
+    // stayed green, because they all supply a share that is EXACTLY equal to
+    // the derived one — so nothing could tell which of the two was stored.
+    //
+    // The property is the whole point of the change: the layer that can read
+    // the range is the authority on the conversion. A model's number that
+    // merely passes the agreement check is still the model's number.
+    const nudged = 0.118 + 4e-10; // inside the 1e-9 tolerance, so NOT refused
+    expect(nudged).not.toBe(0.118);
+
+    const r = setOptionEffect({
+      graph: graph(), optionId: OPT, factorId: PRICE, nativeValue: 59, value: nudged,
+    });
+    expect(r.ok, 'a share within tolerance must still be accepted').toBe(true);
+    if (!r.ok) return;
+    expect(r.value).toBe(0.118);
+    expect(r.value).not.toBe(nudged);
+    expect(r.operations[0]?.value).toEqual({ value: 0.118 });
+  });
+
+  it('⛔ an ignorance prior is NAMED as not-stated in the workspace, never shown as a range', () => {
+    // `buildUnquantifiedPrior()` writes U(0,1) meaning "nobody has said". The
+    // tool refuses it (pinned in `set-option-effect.test.ts`); this pins the
+    // DISPLAY half, which was unguarded — showing "range 0 to 1" would hand
+    // the model a fabrication to convert against, and showing nothing would
+    // let it read the silence as "no range needed". Both were live failures.
+    const g = graph() as unknown as { nodes: Record<string, unknown>[] };
+    g.nodes.push({
+      id: 'fac_placeholder',
+      kind: 'factor',
+      label: 'Unstated Thing',
+      prior: { distribution: 'uniform', range_min: 0, range_max: 1, prior_is_unquantified: true },
+    });
+    const tool = createReadWorkspaceTool({ getGraph: () => g as never });
+    const out = tool.execute({} as never) as { readonly content: string };
+
+    const line = out.content.split('\n').find((l) => l.includes('[fac_placeholder]'));
+    expect(line).toBeDefined();
+    expect(line).toContain('NOT STATED');
+    expect(line).not.toContain('range 0 to 1');
+
+    // CONTRAST CONTROL, same output: the genuinely-ranged factor still reports
+    // its range, so this is measuring the placeholder and not the renderer.
+    expect(out.content.split('\n').find((l) => l.includes(`[${PRICE}]`)))
+      .toContain('range 0 to 500 £/month');
+  });
+
   it('⛔ a native figure outside the factor’s range is refused as a FRAME question', () => {
     const r = setOptionEffect({ graph: graph(), optionId: OPT, factorId: PRICE, nativeValue: 600 });
     expect(r.ok).toBe(false);
