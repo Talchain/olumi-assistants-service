@@ -560,6 +560,16 @@ function projectCanonicalPayloadToWire(
           ? { raw_interventions: option.raw_interventions }
           : {}),
         ...(option.status_reason !== undefined ? { status_reason: option.status_reason } : {}),
+        // The obligation travels with the status it justifies. The wire's
+        // `analysis_ready.options` is `z.array(z.unknown())` inside a
+        // `.passthrough()`, so this needs no shared-contract change — the
+        // fields were simply never written.
+        ...(option.unresolved_targets !== undefined
+          ? { unresolved_targets: option.unresolved_targets }
+          : {}),
+        ...(option.user_questions !== undefined
+          ? { user_questions: option.user_questions }
+          : {}),
       };
     }),
     goal_node_id: payload.goal_node_id,
