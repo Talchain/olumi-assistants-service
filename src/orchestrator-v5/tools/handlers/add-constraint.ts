@@ -95,7 +95,9 @@ import {
   findConstraintTargetAlternative,
   formatConstraintTargetAlternative,
 } from './d1-shared/constraint-target-alternative.js';
-import { ADD_CONSTRAINT_USER_GUIDANCE } from './d1-shared/user-guidance.js';
+import { ADD_CONSTRAINT_USER_GUIDANCE,
+  SUCCESS_TARGET_POSITIVE_USER_GUIDANCE,
+} from './d1-shared/user-guidance.js';
 
 /**
  * Parameter Zod schema. The brief originally listed
@@ -942,7 +944,29 @@ export function createAddConstraintHandler(): HandlerFn {
         throw new D1HandlerError(
           'PARAMETER_INVALID',
           'A success target must be a positive number — tell me the target value again.',
-          { userGuidance: ADD_CONSTRAINT_USER_GUIDANCE },
+          {
+            // ⭐ THIS SENTENCE IS SHOWN TO THE USER, not replaced by the generic
+            // one — and it is the ONLY one of the file's user-voiced messages
+            // that may be, which is why it is written out here rather than
+            // pointed at a shared constant.
+            //
+            // TWO GATES, BOTH MEASURED. (1) VOCABULARY: every term is one the
+            // product has already shown — "Success target value" is a labelled
+            // field in the interface and "Get help defining the success target"
+            // is its help copy. A sentence can be flawless English and still
+            // name a concept the product invented and never taught; that is the
+            // test, not plain-English readability. (2) BUDGET: 76 characters
+            // against `sanitiseForUser`'s 100, so it survives whole.
+            //
+            // ⛔ THE OTHER USER-VOICED SENTENCES IN THIS FILE DO NOT QUALIFY AND
+            // MUST KEEP THE GENERIC GUIDANCE. Three exceed the budget (101, 138
+            // and 188 characters) and would truncate mid-word — shortening them
+            // is authorship, not routing, and is not this lane's call. Three
+            // more name "the independent instruction in the baseline answer",
+            // a product concept with ZERO occurrences anywhere in the interface
+            // (measured, against a contrast control firing 234 times).
+            userGuidance: SUCCESS_TARGET_POSITIVE_USER_GUIDANCE,
+          },
         );
       }
 
