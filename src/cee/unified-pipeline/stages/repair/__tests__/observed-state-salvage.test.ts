@@ -43,6 +43,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 import { DraftGraphOutput } from '../../../../../schemas/assist.js';
+import { log } from '../../../../../utils/telemetry.js';
 import { runStructuralParse } from '../structural-parse.js';
 import type { StageContext } from '../../../types.js';
 
@@ -154,6 +155,47 @@ describe('observed_state salvage — an optional field must not destroy the mode
 
     expect(ctx.earlyReturn?.statusCode).toBe(400);
     expect(graph.nodes[0]).toHaveProperty('observed_state'); // the factor kept its field too
+  });
+
+  // ── THE DECLINE LABEL MUST NAME THE REAL CONDITION ────────────────────────
+  // Review finding: four distinct conditions all reported as
+  // `issue_outside_observed_state`, including the CONSTRAINT refusal — which is
+  // an issue squarely INSIDE observed_state, refused on its CODE. Anyone
+  // watching whether that narrowing fires would have concluded it never does.
+  //
+  // ⚠ This whole change exists because a telemetry census found the defect.
+  // Telemetry that misnames its own cases is how the NEXT census gets misled,
+  // so the labels are pinned rather than left to drift.
+  const declineReasonFor = (graph: unknown): unknown => {
+    const ctx = ctxFor(graph);
+    runStructuralParse(ctx);
+    const calls = (log.warn as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+    expect(calls.length, 'the emitter logged exactly once').toBe(1);
+    return (calls[0][0] as Record<string, unknown>).salvage_declined;
+  };
+
+  it('T10 the CONSTRAINT refusal names itself, not "outside observed_state"', () => {
+    const graph = graphWith({
+      id: 'con_churn', kind: 'constraint', label: 'Churn under 4%',
+      observed_state: { unit: '%' },
+    });
+    expect(declineReasonFor(graph)).toBe('would_strip_constraint');
+  });
+
+  it('T11 a wrong-CODE issue names the CODE, not the path', () => {
+    // A malformed constraint shape trips the refinement => code `custom`, which
+    // is INSIDE observed_state and refused on its code. Reporting this as
+    // "outside observed_state" was the false label the review caught.
+    const graph = graphWith(FACTOR({ value: 1, metadata: {} }));
+    expect(issueCodesFor(graph)).toEqual(['custom']);
+    expect(declineReasonFor(graph)).toBe('issue_code_not_invalid_union');
+  });
+
+  it('T12 an issue genuinely elsewhere still says so', () => {
+    // The control for T10/T11: this one really IS outside observed_state, so
+    // the original label is correct here and must survive.
+    const graph = graphWith({ id: 'f1', label: 'no kind' });
+    expect(declineReasonFor(graph)).toBe('issue_outside_observed_state');
   });
 
   it('T3 an issue ANYWHERE ELSE still 400s and sheds nothing', () => {
