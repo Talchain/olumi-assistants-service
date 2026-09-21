@@ -33,6 +33,7 @@ import type {
   ToolDefinition,
 } from '../../adapters/llm/types.js';
 import type { EditPatchOperationLike } from '../graph-management/adapters/edit-graph-producer.js';
+import { renderRecentConversationForEdit } from '../../orchestrator/context/serialise.js';
 
 import {
   buildProposeStructuralEditTool,
@@ -86,6 +87,38 @@ export interface StructuralEditComposeInput {
   readonly grounding: StructuralEditGrounding;
   /** The user's edit request, verbatim. */
   readonly message: string;
+  /**
+   * ⚠ REQUIRED — ROADMAP 1.33's ruling, applied to the SECOND edit-lane LLM.
+   *
+   * The prior turns of this scenario, oldest-first, EXCLUDING the current one
+   * (`message` carries that, and duplicating it would let the model compose
+   * the request twice). Empty array when there is no history.
+   *
+   * WHY IT IS REQUIRED RATHER THAN OPTIONAL, and it is the same argument the
+   * `timeoutMs` jsdoc below makes: this field was ABSENT, and "the dispatcher
+   * never passes the conversation" was therefore not a type error, not a test
+   * failure, and visible nowhere — it was simply the behaviour. The measured
+   * consequence: on a turn whose request was *"Can you update the model with
+   * these estimates?"*, the RULEBOOK — which receives `## Recent Conversation`
+   * via `serialiseEditContextForLLM` — composed a batch large enough to breach
+   * the patch budget, and THIS composer, handed the sentence alone, returned
+   * `no_tool_call` → `not_expressible` → *"I could not see how to make that
+   * change against your model as it stands."* One dispatch, one
+   * `ConversationContext`, two LLMs, and only one of them could resolve
+   * *"these estimates"*.
+   *
+   * ROADMAP 1.33 already ruled this shape a defect and fixed it for the
+   * rulebook — `serialise.ts`'s *"the edit LLM saw only the verbatim current
+   * message, dropping facts the user established over earlier turns"*, shipped
+   * as #391 under the name "edit-lane conversation starvation". The structural
+   * composer (#823, Aug 2026) is a later seam on the same dispatch that
+   * reproduced it. Making the parameter required turns the whole class into a
+   * COMPILE ERROR: a third edit-lane LLM cannot be added starved.
+   *
+   * There is deliberately no default. `?? []` would restore exactly the silent
+   * absence this field exists to abolish.
+   */
+  readonly conversation: readonly { role: 'user' | 'assistant'; content: string }[];
   /** Pipeline op cap (`config.cee.maxPatchOperations`) — passed, never guessed. */
   readonly maxPatchOperations: number;
   readonly requestId: string;
@@ -121,9 +154,39 @@ const COMPOSER_SYSTEM_PROMPT =
   'is rejected whole, so guessing costs the user the entire edit.\n' +
   '\n' +
   'Do not claim the change has been made. Structural changes are held for the ' +
-  'user to confirm.';
+  'user to confirm.\n' +
+  '\n' +
+  'Earlier turns may appear under "## Recent Conversation". Use them ONLY to ' +
+  'work out what the request under "## The change to make" is referring to — ' +
+  'that request is the only thing to compose, and every id still comes from ' +
+  'the tool description, never from the conversation.';
 
 const COMPOSER_MAX_TOKENS = 4000;
+
+/**
+ * The composer's user message.
+ *
+ * Mirrors the RULEBOOK's own layout (`serialiseEditContextForLLM` renders the
+ * same `## Recent Conversation` section from the same `context.messages`), and
+ * DERIVES its bound from the same exported renderer rather than re-spelling the
+ * 4,000-char cap or the "(N earlier turns omitted for length)" disclosure —
+ * CLAUDE.md trap 12: a second copy of a cap is a mirror that drifts silently.
+ *
+ * The request goes LAST, adjacent to the tool call, because that is the
+ * position the model acts on; the history is antecedent material only.
+ *
+ * No history ⇒ byte-identical to the pre-fix payload. That is deliberate: the
+ * no-history turns that work today must not move, and it is what makes the
+ * discriminating control in the spec possible.
+ */
+function buildComposerUserMessage(input: {
+  readonly message: string;
+  readonly conversation: readonly { role: 'user' | 'assistant'; content: string }[];
+}): string {
+  const recent = renderRecentConversationForEdit(input.conversation);
+  if (recent.length === 0) return input.message;
+  return `## Recent Conversation\n${recent}\n\n## The change to make\n${input.message}`;
+}
 
 /**
  * What still has to happen on this turn AFTER the composer returns, charged at
@@ -293,7 +356,15 @@ export async function composeStructuralEdit(
       input.adapter,
       {
         system: COMPOSER_SYSTEM_PROMPT,
-        messages: [{ role: 'user', content: input.message }],
+        messages: [
+          {
+            role: 'user',
+            content: buildComposerUserMessage({
+              message: input.message,
+              conversation: input.conversation,
+            }),
+          },
+        ],
         tools: [tool],
         tool_choice: { type: 'auto' },
         temperature: 0,
