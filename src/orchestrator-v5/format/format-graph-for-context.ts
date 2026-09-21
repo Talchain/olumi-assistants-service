@@ -113,8 +113,10 @@ export interface DisplaySafeNode {
    * VOCABULARIES — the count is stated precisely because an earlier draft of
    * this comment said "three vocabularies", which is one more than there are:
    *
-   *   `factor_values[].provenance`  (context-pack-schema.ts:604)
-   *        `user_stated | ai_drafted | system_repaired | unattributed`
+   *   `factor_values[].provenance`  (context-pack-schema.ts, derived from
+   *        `StructureProvenance` — `user_stated | user_ratified | ai_drafted |
+   *        system_repaired | unattributed`; do NOT restate the members here, the
+   *        union is the authority and this line has already gone stale once)
    *        — *is this factor's value attributable to a person at all?*
    *   `graph.edges[].provenance`    (DisplaySafeEdge, this file)
    *        `CompactProvenance` = `from_brief | ai_inferred | user_set`

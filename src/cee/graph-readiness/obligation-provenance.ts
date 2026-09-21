@@ -66,14 +66,27 @@ import type { CanonicalReadinessIssue } from '../../orchestrator/tools/analysis-
 /**
  * Who authored the structure a readiness issue is raised over.
  *
- * `unattributed` is a FOURTH value on purpose. Collapsing "we know the system
+ * `unattributed` is a DISTINCT value on purpose. Collapsing "we know the system
  * made this" and "nobody stamped it" into one bucket is what makes an obligation
  * rule unauditable: the probe could no longer show which graphs are
  * unclassifiable, and a producer that stops stamping would look like a producer
  * that stamped `ai_drafted`.
+ *
+ * ⭐ `user_ratified` is the FIFTH, added 20 Sep 2026 for the same reason one
+ * level up: *"Olumi estimated it and the user endorsed it"* is neither
+ * authorship nor a machine's own guess, and collapsing it into `user_stated`
+ * (which is what this union did) let a single click satisfy a threshold the
+ * product's own copy promises requires SETTING a value. See
+ * {@link earnsAuthorshipCredit} for the ruling, and {@link reflectsAHumanAct}
+ * for what ratification DOES earn.
+ *
+ * ⛔ THE COUNT IS NOT WRITTEN HERE ANY MORE. `STRUCTURE_PROVENANCE_VALUES` below
+ * is the derivation; a number in a docblock is a hand-maintained mirror, and
+ * this one said "FOURTH" until the fifth member arrived.
  */
 export type StructureProvenance =
   | 'user_stated'
+  | 'user_ratified'
   | 'ai_drafted'
   | 'system_repaired'
   | 'unattributed';
@@ -82,11 +95,77 @@ export type StructureProvenance =
 export type ObligationClass = 'required' | 'offered';
 
 /**
+ * ⭐⭐ THE ONE PLACE THE AUTHORSHIP THRESHOLD IS DECIDED (ruled 20 Sep 2026).
+ *
+ * *"Did a PERSON supply this value?"* — the question every authorship threshold
+ * in the estate is actually asking, and the reason `user_ratified` exists as a
+ * separate class rather than as a shade of `user_stated`.
+ *
+ * ## WHY RATIFICATION IS NOT AUTHORSHIP
+ *
+ * **The decisive ground is the product's own shipped sentence.** When no
+ * parameter is the user's, `analysis-admission.ts` tells them the leader claim
+ * stays withheld *"until you have **SET** at least one of them"*, and again
+ * *"until you have **set a value** on a factor one of the options changes"*.
+ * **Both say SET. Neither says confirm, approve, or accept.** While
+ * `user_confirmed` classified as `user_stated`, one click on one Olumi estimate
+ * satisfied a threshold the product had promised required setting a value —
+ * which made a published sentence false. That is an inconsistency between what
+ * we say and what we do, not a preference.
+ *
+ * Two supporting reasons:
+ *   · **The consequence is wildly asymmetric to the act.** The threshold is
+ *     ONE parameter (`analysis-admission.ts` returns `material_user_stated` the
+ *     moment the count exceeds zero), so a single confirmation converted a
+ *     fully machine-authored model into one licensed to name a winner.
+ *   · **Confirmation cannot distinguish knowledge from acquiescence.** "I know
+ *     this is about right" and "I have no better number and it looks plausible"
+ *     produce the identical event. Humans remaining the AUTHORS requires
+ *     authorship, not assent.
+ *
+ * ## ⚠ WHAT THIS PREDICATE IS NOT — and it is a trap-21 pair, not a duplicate
+ *
+ * Ratification is a **genuine human act** and must not be discarded. Every
+ * threshold about REVIEW rather than AUTHORSHIP reads {@link reflectsAHumanAct}
+ * instead. Two questions, two predicates, named apart — do not "reconcile"
+ * them, which is the move that would recreate the collapse this change undid.
+ */
+export function earnsAuthorshipCredit(provenance: StructureProvenance): boolean {
+  return provenance === 'user_stated';
+}
+
+/**
+ * *"Did a person ATTEND to this value at all?"* — true for authorship AND for
+ * ratification, false for everything the machine did alone.
+ *
+ * The companion to {@link earnsAuthorshipCredit}, and the reason widening the
+ * union does not quietly demote a confirmed value everywhere at once. A user who
+ * confirmed an estimate has done something real: it is honest to say *"you have
+ * reviewed these estimates"*, and it is a LIE to describe that value back to
+ * them as Olumi's own invention. `context-integrity/not-modelled-manifest.ts`
+ * reads this one for exactly that reason — its own header records that wrongly
+ * claiming a user's value as our invention is far worse than the reverse.
+ *
+ * ⛔ It must NOT be used to unlock `comparative_leader`, "stable" or "robust".
+ * That is the authorship question, and it has its own predicate above.
+ */
+export function reflectsAHumanAct(provenance: StructureProvenance): boolean {
+  return provenance === 'user_stated' || provenance === 'user_ratified';
+}
+
+/**
  * THE rule. One line, one place — so no surface can hold a second opinion.
- * `user_stated` and only `user_stated` earns a demand.
+ * Only structure that {@link earnsAuthorshipCredit} earns a demand.
+ *
+ * ⚠ `user_ratified` is DELIBERATELY `offered`, not `required`. INV-P6's
+ * allowlist can only ever WITHDRAW an obligation, and a value the user merely
+ * endorsed is precisely one we may ask about ("is this still right?") and may
+ * not demand. Stated rather than inherited, because the fifth member arrived
+ * after this function was written and a silent `else` is how a class ships
+ * unruled — which is how `user_confirmed` got here in the first place.
  */
 export function obligationFor(provenance: StructureProvenance): ObligationClass {
-  return provenance === 'user_stated' ? 'required' : 'offered';
+  return earnsAuthorshipCredit(provenance) ? 'required' : 'offered';
 }
 
 /**
@@ -103,10 +182,38 @@ export function obligationFor(provenance: StructureProvenance): ObligationClass 
  */
 export const STRUCTURE_PROVENANCE_VALUES = Object.keys({
   user_stated: true,
+  user_ratified: true,
   ai_drafted: true,
   system_repaired: true,
   unattributed: true,
 } satisfies Record<StructureProvenance, true>) as readonly StructureProvenance[];
+
+/**
+ * ⛔⛔ THE SAME LIST, TYPED AS THE NON-EMPTY TUPLE `z.enum` DEMANDS.
+ *
+ * WHY THIS EXISTS. `STRUCTURE_PROVENANCE_VALUES` above is derived and therefore
+ * safe; `z.enum` will not accept `readonly StructureProvenance[]`, and the
+ * convenient way past that is to hand-list the members beside the schema. That
+ * is exactly what `context/context-pack-schema.ts` did, and **the compiler
+ * could not see it**: measured at `31d5b81e`, there are ZERO exhaustive
+ * switches over this union repo-wide, so widening it breaks nothing at build
+ * time — while the hand-listed Zod enum would have **REJECTED the new member at
+ * RUNTIME**, inside the context pack, on a real turn. A green build and a
+ * throwing parse.
+ *
+ * So the tuple is published HERE, once, cast only in its TYPE and never in its
+ * CONTENT — the `satisfies Record<StructureProvenance, true>` above is what
+ * keeps it honest, and it is why widening the union still fails typecheck at
+ * the object literal rather than silently shipping a short list.
+ *
+ * Pinned both ways (and round-tripped through the schema, which is the actual
+ * failure mode) by
+ * `orchestrator-v5/context/__tests__/context-pack-provenance-vocabulary-parity.test.ts`.
+ */
+export const STRUCTURE_PROVENANCE_ENUM_VALUES = STRUCTURE_PROVENANCE_VALUES as readonly [
+  StructureProvenance,
+  ...StructureProvenance[],
+];
 
 export const OBLIGATION_CLASS_VALUES = Object.keys({
   required: true,
@@ -146,10 +253,24 @@ const OBSERVED_STATE_SOURCE: Readonly<
   explicit: 'user_stated',
   user: 'user_stated',
   user_override: 'user_stated',
-  user_confirmed: 'user_stated',
   user_edited: 'user_stated',
   user_calibration: 'user_stated',
-  user_assumption: 'user_stated',
+  // ── RATIFICATION, NOT AUTHORSHIP (ruled 20 Sep 2026) ───────────────────
+  // Both of these classified as `user_stated` until that ruling, and neither
+  // carried a written justification — note the asymmetry with `brief_extraction`
+  // at the top of this table, which does. They were swept in with the `user_*` family,
+  // not ruled. See {@link earnsAuthorshipCredit} for the full ground.
+  //
+  // `user_confirmed` is the UI's "confirm as is": an OLUMI estimate the user
+  // endorsed. The number is still ours. The product's own sentence promises the
+  // leader claim stays withheld "until you have SET at least one of them", and a
+  // user who only confirmed has set nothing.
+  user_confirmed: 'user_ratified',
+  // `user_assumption` is "mark as assumption": a value the user INVENTED rather
+  // than one they know. The same reasoning read from the other end — an admitted
+  // guess is not evidence of domain knowledge, and `decision-review/
+  // value-source-extraction-type.ts` has always sampled it WIDE for that reason.
+  user_assumption: 'user_ratified',
   // Elicited FROM the user through a panel, and verified against CEE's own
   // collab store before it is stamped — the user supplied it.
   panel_elicited: 'user_stated',

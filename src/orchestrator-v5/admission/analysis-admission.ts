@@ -167,6 +167,7 @@ import type { CanonicalReadinessIssue } from '../../orchestrator/tools/analysis-
 import { pickGoalThresholdTrio } from '../../utils/goal-threshold-trio.js';
 import {
   classifyValueSource,
+  earnsAuthorshipCredit,
   structureProvenance,
   type ObligationClass,
   type StructureProvenance,
@@ -809,14 +810,34 @@ export function censusConfidenceParameters(graph: unknown): SemanticQualitySigna
   let intervenedUserStated = 0;
   const materialAwaitingUser: string[] = [];
 
+  // ⭐⭐ THE AUTHORSHIP THRESHOLD IS NOT DECIDED HERE. Every predicate in this
+  // census reads `earnsAuthorshipCredit` (`cee/graph-readiness/
+  // obligation-provenance.ts`), which is the one place the question *"did a
+  // PERSON supply this value?"* is answered. This module derives no authorship
+  // rule of its own, and a fifth `StructureProvenance` member must be ruled
+  // THERE rather than absorbed by an `else` HERE — which is exactly how
+  // `user_confirmed` reached `material_parameters_user_stated` unruled, where a
+  // SINGLE parameter lifts the whole model to `comparative_leader`.
+  //
+  // ⚠ `user_ratified` therefore tallies as MACHINE-AUTHORED on this axis, and
+  // that is correct rather than merely convenient: confirmation does not
+  // overwrite the estimate's identity. Olumi authored the number; the user
+  // endorsed it. The census question is *who authored it*.
+  //
+  // ⛔ WHAT IS NOT PUBLISHED, AND DELIBERATELY. `SemanticQualitySignals` is a
+  // WIRE shape (`schemas/analysis-ready.ts`), so no `…_user_ratified` counter is
+  // minted here. Surfacing ratification distinctly is a real obligation of the
+  // ruling and a separate, contract-bearing change; inventing a wire field in
+  // passing is not it. Until then a ratified parameter is visible where it
+  // matters — in `material_parameters_awaiting_user_node_ids` below.
   const tally = (provenance: StructureProvenance): void => {
-    if (provenance === 'user_stated') userStated += 1;
+    if (earnsAuthorshipCredit(provenance)) userStated += 1;
     else if (provenance === 'unattributed') unattributed += 1;
     else machineAuthored += 1;
   };
   const tallyMaterial = (provenance: StructureProvenance): void => {
     materialTotal += 1;
-    if (provenance === 'user_stated') materialUserStated += 1;
+    if (earnsAuthorshipCredit(provenance)) materialUserStated += 1;
   };
 
   const nodes = arrayOf(graph, 'nodes');
@@ -837,17 +858,27 @@ export function censusConfidenceParameters(graph: unknown): SemanticQualitySigna
     const id = typeof node.id === 'string' ? node.id : undefined;
     if (id !== undefined && materialNodeIds.has(id)) {
       tallyMaterial(provenance);
-      // ⚠ `!== 'user_stated'` rather than `=== 'machine_authored'`:
-      // `StructureProvenance` has a third member, `unattributed`, and a
-      // parameter nobody can attribute is exactly one the user should be offered.
-      // Testing for the ONE state that disqualifies keeps a future fourth member
-      // in the offered set by default, which is the safe direction — the harm of
-      // a missing id is a refusal the user cannot act on.
-      if (provenance !== 'user_stated') materialAwaitingUser.push(id);
+      // ⚠ NEGATED rather than `=== 'machine_authored'`: `StructureProvenance`
+      // has members beyond the two obvious ones, and a parameter nobody can
+      // attribute is exactly one the user should be offered. Testing for the ONE
+      // state that disqualifies keeps every further member in the offered set by
+      // default, which is the safe direction — the harm of a missing id is a
+      // refusal the user cannot act on.
+      //
+      // ⭐ That default is now LOAD-BEARING, not incidental: `user_ratified`
+      // lands here, so a confirmed estimate is still OFFERED to the user to set.
+      // Withholding authorship credit AND hiding the parameter would leave a
+      // refusal with nothing to act on — the exact harm this line guards.
+      if (!earnsAuthorshipCredit(provenance)) materialAwaitingUser.push(id);
     }
     if (id !== undefined && intervened.has(id)) {
       intervenedTotal += 1;
-      if (provenance === 'user_stated') intervenedUserStated += 1;
+      // ⭐ DELIBERATE: this counter exists so a STRICTER consumer can require
+      // the user to have set the baseline of a factor the options actually
+      // differ on. A threshold strictly above the authorship floor cannot be
+      // satisfied by something that does not meet the floor, so ratification
+      // must not count here either.
+      if (earnsAuthorshipCredit(provenance)) intervenedUserStated += 1;
     }
   }
 
