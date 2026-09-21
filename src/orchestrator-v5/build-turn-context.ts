@@ -746,7 +746,31 @@ export async function buildTurnContext(
     // or a read that fails, degrades to exactly today, never to a false `stale`.
     // A false `stale` would tell a user their analysis is out of date when it is
     // not, which is the worse direction.
-    store?.readAnalysisInvalidatedAt?.(payload.scenario_id) ?? Promise.resolve(null),
+    // ⛔ THE `??` CANNOT CATCH A REJECTION. It substitutes only when the method
+    // is ABSENT (`undefined`). The production Supabase implementation THROWS
+    // `SessionReadError` on a database error or a malformed timestamp, and an
+    // unhandled rejection inside a shared `Promise.all` rejects the WHOLE batch
+    // and aborts the user's turn. The comment above promised "a read that fails
+    // degrades to exactly today"; without this `.catch` the code did not deliver
+    // it, and the interface's "resolves null on a failed read" was contradicted
+    // by the implementation. Caught at the producer boundary, telemetered with
+    // the established `session.read_degraded` event, and resolved to `null` —
+    // which means "no restore invalidation", the pre-existing behaviour.
+    (store?.readAnalysisInvalidatedAt?.(payload.scenario_id) ?? Promise.resolve(null)).catch(
+      (error: unknown) => {
+        log.warn(
+          {
+            event: 'session.read_degraded',
+            read: 'analysis_invalidated_at',
+            request_id: requestId,
+            scenario_id: payload.scenario_id,
+            error_name: error instanceof Error ? error.name : typeof error,
+          },
+          'Restore-invalidation read degraded — treated as no invalidation',
+        );
+        return null;
+      },
+    ),
   ]);
   const priorTurns = priorTurnsRead.turns;
   // V5 Conversation Context Reliability: continuity-gap guard. A 'chip'/'chip_click'
