@@ -413,6 +413,51 @@ function isWaivableByExclusion(
 }
 
 /**
+ * The options whose ENTIRE mapping gap is a RESOLVED option→risk hypothesis.
+ *
+ * ⭐ "RESOLVED" IS THE LOAD-BEARING WORD, and it is the whole reason this is not
+ * the scope creep {@link isWaivableByComputeDiscard}'s note forbids. Every id in
+ * `unresolved_targets` must name a node that IS IN THE GRAPH and whose `kind` is
+ * `risk`. A target naming nothing — the `missingFactors` sense written by
+ * `cee/extraction/intervention-extractor.ts`, meaning "an intervention names a
+ * factor absent from the graph" — fails the lookup, so the two questions sharing
+ * this one field (trap 21) keep their different answers and only one is waived.
+ *
+ * ⛔ EMPTY IS NOT "RISK-ONLY". An option with no `unresolved_targets` is blocked
+ * for some OTHER reason (no interventions, semantic-only matches) and must keep
+ * its refusal. `targets.length > 0` is required rather than letting `every` pass
+ * vacuously over an empty array — the exact vacuous-pass trap the sibling waiver
+ * rejects by name a few lines below.
+ *
+ * TOTAL: anything that is not a readable `{nodes}` graph yields an EMPTY set, so
+ * an unreadable graph waives nothing and the gate fails toward saying no.
+ */
+function riskOnlyMappingGapOf(
+  graph: unknown,
+  wireOptions: readonly {
+    readonly option_id?: string;
+    readonly unresolved_targets?: readonly string[];
+  }[],
+): ReadonlySet<string> {
+  const record = graph as { readonly nodes?: unknown } | null | undefined;
+  const nodes = Array.isArray(record?.nodes) ? record.nodes : null;
+  if (!nodes) return new Set();
+  const kindById = new Map<string, unknown>();
+  for (const node of nodes) {
+    const n = node as { readonly id?: unknown; readonly kind?: unknown } | null;
+    if (n && typeof n.id === 'string') kindById.set(n.id, n.kind);
+  }
+  const out = new Set<string>();
+  for (const option of wireOptions) {
+    const targets = option.unresolved_targets ?? [];
+    if (targets.length === 0) continue;
+    if (!targets.every((id) => kindById.get(id) === 'risk')) continue;
+    if (typeof option.option_id === 'string') out.add(option.option_id);
+  }
+  return out;
+}
+
+/**
  * ⭐⭐ THE SECOND WAIVER, AND IT ANSWERS A DIFFERENT QUESTION FROM THE FIRST.
  * The two are named apart deliberately: this estate's most expensive defect
  * class is two authorities under one name (CLAUDE.md trap 21), and collapsing
@@ -471,10 +516,51 @@ function isWaivableByExclusion(
 function isWaivableByComputeDiscard(
   issue: CanonicalReadinessIssue,
   valuedOptionIds: ReadonlySet<string>,
+  riskOnlyMappingGapOptionIds: ReadonlySet<string> = new Set(),
 ): boolean {
   // (1) THE PER-(OPTION,FACTOR) AXIS ONLY. The over-demand that has been
   //     measured is confined to this axis; every other blocker code keeps its
   //     refusal until compute's discard is proven for it SEPARATELY.
+  //
+  // ⭐⭐ (1b) ONE SECOND AXIS, ADMITTED ON THIS WAIVER'S OWN ARGUMENT AND NO
+  //     OTHER — `OPTION_NEEDS_MAPPING`, and ONLY where the gap is a RESOLVED
+  //     option→risk hypothesis.
+  //
+  //     THE SCOPE NOTE BELOW EXCLUDES THIS CODE, AND ITS STATED REASON IS WHY
+  //     THIS NARROW CASE BELONGS: *"an unencodable or unmapped value is not a
+  //     value the compute silently handles, it is one CEE could not resolve."*
+  //     True of the general case; FALSE here. The edge names a node that EXISTS
+  //     in the graph and is a `risk` — CEE resolved it perfectly. What is absent
+  //     is a LEVEL, and the edge is stripped before the engine ever sees it
+  //     (`plot-lite-service` `src/normalisation/option-filter.ts:93-97`), so it
+  //     is precisely "a gap the compute discards". {@link riskOnlyMappingGapOf}
+  //     requires EVERY unresolved target to be such a node, so an option
+  //     carrying even one genuinely unmapped target keeps its refusal whole.
+  //
+  //     ⛔ THE OPTION'S STATUS IS NOT TOUCHED, AND THAT IS DELIBERATE. It stays
+  //     `needs_user_mapping`, it keeps its `unresolved_targets`, and #1670's
+  //     risk-naming ask still fires. This answers *"must this gap refuse the
+  //     whole RUN?"* and never *"is this option mapped?"* — the option-level
+  //     verdict is another lane's ruling, pinned as a PRECONDITION in
+  //     `cee/transforms/__tests__/mapping-need-survives-to-the-wire.test.ts`.
+  //     An earlier attempt at this defect overturned that ruling unilaterally by
+  //     deleting the demotion, went RED on #1670's suite, and also degraded the
+  //     ask back to the generic "Choose which factor…" sentence #1670 exists to
+  //     replace. Fixing the ADMISSION instead leaves both intact.
+  //
+  //     WITNESSED, on the deployed build: live draw against staging `5104b244`,
+  //     brief *"Should I hire a Tech lead or two developers to increase
+  //     productivity?"* — two of four options refused while each carried THREE
+  //     resolved interventions, `blockers: 0`, `user_questions: null`,
+  //     `may_run: false`. Both refusals stamped `provenance: "ai_drafted"`,
+  //     `obligation: "offered"` — the product demanding what its own classifier
+  //     says may only ever be offered.
+  if (issue.code === 'OPTION_NEEDS_MAPPING') {
+    if (issue.obligation !== 'offered') return false;
+    return typeof issue.option_id === 'string'
+      && valuedOptionIds.has(issue.option_id)
+      && riskOnlyMappingGapOptionIds.has(issue.option_id);
+  }
   if (issue.code !== 'MISSING_OPTION_VALUE') return false;
 
   // (2) ⭐ THE EXISTING AUTHORITY — CONSULTED, NOT RE-DERIVED.
@@ -876,8 +962,9 @@ function resolveRunAdmissionTerms(
     // remove.
     const answeredByExclusion = (i: CanonicalReadinessIssue): boolean =>
       plan.will_scaffold_options && isWaivableByExclusion(i, touched);
+    const riskOnlyMappingGap = riskOnlyMappingGapOf(canonicalGraph ?? rawGraph, wireOptions);
     const answeredByComputeDiscard = (i: CanonicalReadinessIssue): boolean =>
-      comparisonSurvives && isWaivableByComputeDiscard(i, valued);
+      comparisonSurvives && isWaivableByComputeDiscard(i, valued, riskOnlyMappingGap);
 
     // EVERY blocker must be answered by one of the two. One that is not means
     // the run would fail after admission — the drift in the other direction,
