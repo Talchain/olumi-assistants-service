@@ -571,3 +571,74 @@ describe('the turn record reaches the log, and survives the turn that needs it m
     }
   });
 });
+
+/**
+ * ⭐⭐ THE FINAL BYTES, PER WRITE OUTCOME. The module's own unit suite
+ * (`write-truthfulness.test.ts`) would still pass if the enforcement were
+ * unwired from this entry point — so these three cases exist to bind the
+ * guarantee to what `handleReplacementTurn` actually RETURNS.
+ *
+ * ⭐ The scripted lie is drawn from the KNOWN_MISSED set in
+ * `unbacked-change-claim.test.ts`: a real unbacked claim that BOTH pattern
+ * detectors fail to match. If the enforcement were ever rebuilt on those
+ * detectors, the first two cases go red.
+ */
+describe('the final bytes cannot claim a save the turn cannot prove', () => {
+  /** A VALUE claim. The structural detector anchors on graph nouns, so it
+   *  cannot see this, and neither can the phrase detector. */
+  const LIE = 'The budget is now set to £50k.';
+
+  function lyingModel(): ChatWithToolsLike {
+    return scripted([
+      {
+        content: [
+          {
+            type: 'tool_use',
+            id: 'a1',
+            name: ACCEPT_TOOL_NAME,
+            input: { proposal_id: 'prop-open', user_agreement_quote: 'Yes, go ahead' },
+          },
+        ],
+        stop_reason: 'tool_use',
+      },
+      say(LIE),
+    ]);
+  }
+
+  it('REFUSED: the write definitely failed, and the lie does not reach the user', async () => {
+    const r = await handleReplacementTurn(acceptingInput(), {
+      chatWithTools: lyingModel(),
+      state: memoryStore(withOpenProposal()),
+      applyOperations: async () => ({ ok: false, reason: 'MV409 revision mismatch' }),
+    });
+    expect(r.assistantText, 'the model claim must not survive').not.toContain('£50k');
+    expect(r.assistantText).toMatch(/nothing in your model has changed/i);
+    // The writer's internal reason is not user copy and can carry identifiers.
+    expect(r.assistantText).not.toContain('MV409');
+  });
+
+  it('UNKNOWN: the write may have landed, so the reply refuses to decide', async () => {
+    const r = await handleReplacementTurn(acceptingInput(), {
+      chatWithTools: lyingModel(),
+      state: memoryStore(withOpenProposal()),
+      applyOperations: async () => { throw new Error('socket hang up'); },
+    });
+    expect(r.assistantText).not.toContain('£50k');
+    expect(r.assistantText).toMatch(/cannot tell you whether it saved/i);
+    // ⭐ Telling the user nothing changed here would send them to redo work
+    // that may already be in their model. Unknown is NOT refused.
+    expect(r.assistantText).not.toMatch(/nothing in your model has changed/i);
+  });
+
+  /** ⭐ THE DISCRIMINATING CONTROL. Without this, a constraint that fired on
+   *  EVERY turn would pass both cases above and silently delete every real
+   *  answer the product gives. */
+  it('COMMITTED: a receipt is commit proof, and the reply passes through untouched', async () => {
+    const r = await handleReplacementTurn(acceptingInput(), {
+      chatWithTools: lyingModel(),
+      state: memoryStore(withOpenProposal()),
+      applyOperations: async () => ({ ok: true, receiptId: 'receipt-1' }),
+    });
+    expect(r.assistantText, 'a proven save must not be rewritten').toContain('£50k');
+  });
+});
