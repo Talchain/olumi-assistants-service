@@ -55,10 +55,18 @@
  * in `tests/unit/cee.graph-normalizer.provenance-width.test.ts`, which also
  * pins the ONE deliberate divergence exactly, in both directions:
  *
- *   `user_assumption` is `user_stated` for OBLIGATION (the user said it, so a
- *   gap over it may be demanded) and `inferred` for WIDTH (the user marked it
- *   as an assumption — a declared guess and a model's guess share the wide
- *   bucket). It is also today's behaviour, so nothing is re-tuned by it.
+ *   ⚠ RE-RULED 20 Sep 2026 — THE PINNED DIVERGENCE SWAPPED MEMBERS, and this
+ *   paragraph named the OLD one until then.
+ *
+ *   `user_assumption` NO LONGER DIVERGES: obligation split it (with
+ *   `user_confirmed`) into a fifth class, `user_ratified`, so it now agrees with
+ *   this table that a declared guess is not a known value. The divergence is
+ *   `user_confirmed`: `user_ratified` for OBLIGATION (confirming an Olumi
+ *   estimate is not AUTHORING it, so it may not unlock the leader claim) and
+ *   `explicit` for WIDTH (a person LOOKED at the number and endorsed it, which
+ *   is real evidence about the value and the only thing the sampler asks).
+ *   Neither table's behaviour is re-tuned by the split; only obligation's
+ *   answer moved.
  *
  * ## ⛔ WHAT THIS FILE IS NOT, AND MUST NOT BECOME
  *

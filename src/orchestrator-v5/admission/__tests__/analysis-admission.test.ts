@@ -243,6 +243,64 @@ describe('the predicate discriminates in BOTH directions', () => {
     expect(user.confidence_parameters_total).toBe(machine.confidence_parameters_total);
   });
 
+  /**
+   * ⭐ RATIFICATION IS NOT AUTHORSHIP (ruled 20 Sep 2026).
+   *
+   * The two fixtures differ in EXACTLY ONE BYTE of meaning — the goal-baseline
+   * factor's `observed_state.source` — and must produce OPPOSITE verdicts. This
+   * is the opposite-direction twin for the widening: `user_edited` (authorship)
+   * unlocks, `user_confirmed` (ratification) does not.
+   *
+   * The ground is the product's own shipped sentence, asserted below rather than
+   * paraphrased: it promises the leader claim stays withheld *"until you have
+   * **set** at least one of them"*. A user who only confirmed has set nothing.
+   */
+  it('⭐ a CONFIRMED estimate does NOT unlock the leader claim — the copy promises SET, not confirm', () => {
+    // PRECONDITIONS PINNED IN-TEST (trap 13b): both stamps must really classify
+    // as claimed, or the verdicts below are the fixture's doing and not the
+    // gate's.
+    expect(classifyValueSource('user_edited')).toBe('user_stated');
+    expect(classifyValueSource('user_confirmed')).toBe('user_ratified');
+
+    const stated = censusConfidenceParameters(admissibleGraph({ goalBaselineSource: 'user_edited' }));
+    const ratified = censusConfidenceParameters(
+      admissibleGraph({ goalBaselineSource: 'user_confirmed' }),
+    );
+
+    // Identical topology — bound by identity of what moved, not by the verdict.
+    expect(ratified.confidence_parameters_total).toBe(stated.confidence_parameters_total);
+    expect(ratified.material_parameters_total).toBe(stated.material_parameters_total);
+
+    // THE DISCRIMINATION.
+    expect(semanticQualitySufficient(stated)).toBe(true);
+    expect(semanticQualitySufficient(ratified)).toBe(false);
+    expect(ratified.confidence_parameters_user_stated).toBe(0);
+    expect(ratified.material_parameters_user_stated).toBe(0);
+    expect(semanticVerdictCause(ratified)).toBe('all_machine_authored');
+
+    // And the sentence the user is shown really is the one that says SET, so
+    // this test fails if the copy is reworded away from the ground it rests on.
+    const message = resolveAnalysisAdmission(
+      admissibleGraph({ goalBaselineSource: 'user_confirmed' }),
+    ).reasons.find((r) => r.field === 'semantic_quality_sufficient')?.message;
+    expect(message).toContain('until you have set at least one of them');
+  });
+
+  it('a ratified parameter is still OFFERED to the user — it joins the awaiting-user set', () => {
+    // The ruling withholds authorship credit; it must not ALSO hide the
+    // parameter from the surface that asks the user to set one. The harm of
+    // both would be a refusal the user cannot act on.
+    const ratified = censusConfidenceParameters(
+      admissibleGraph({ goalBaselineSource: 'user_confirmed' }),
+    );
+    const stated = censusConfidenceParameters(
+      admissibleGraph({ goalBaselineSource: 'user_edited' }),
+    );
+    expect(ratified.material_parameters_awaiting_user_node_ids).toContain('fac_price');
+    // CONTRAST: an authored one is NOT awaiting the user.
+    expect(stated.material_parameters_awaiting_user_node_ids).not.toContain('fac_price');
+  });
+
   it('a user-confirmed CAUSAL EDGE is sufficient on its own', () => {
     const signals = censusConfidenceParameters(
       admissibleGraph({ edgeProvenanceSource: 'user_specified' }),
