@@ -31,6 +31,7 @@ import { describe, expect, it } from 'vitest';
 
 import { sanitiseForUser } from '../../../compose/helpers.js';
 import { formatUnitAmbiguityClarify } from '../add-constraint.js';
+import * as guidanceModule from '../d1-shared/user-guidance.js';
 import {
   ADD_CONSTRAINT_USER_GUIDANCE,
   SET_FACTOR_VALUE_USER_GUIDANCE,
@@ -126,10 +127,36 @@ describe('D1 user guidance reaches the user WHOLE', () => {
    * guidance should export it and cover it here too** — this file is the place
    * that makes the budget enforceable instead of a comment.
    */
-  it('documents that exactly three canonical phrases exist, so a fourth must be added here', () => {
-    // Not a count of the codebase — a pin on THIS file's coverage, so adding a
-    // handler without adding it here is a visible omission rather than a silent
-    // gap in the budget guard.
-    expect(CANONICAL).toHaveLength(3);
+  /**
+   * ⭐⭐ THE COMPLETENESS CHECK — because THIS FILE had the same defect it was
+   * written to kill.
+   *
+   * `CANONICAL` above is a HAND-WRITTEN list. My first version pinned it with
+   * `expect(CANONICAL).toHaveLength(3)` — **a hand-maintained number guarding a
+   * hand-maintained list**, which is the mirror this file exists to remove,
+   * reappearing inside it. It would have stayed green forever while a fourth
+   * handler's phrase went unguarded.
+   *
+   * CLAUDE.md trap 12d states the rule: **a derived guard proves AGREEMENT and
+   * can never prove COMPLETENESS** — and the only importable cure is a UNION
+   * ASSERTION. So the covered set is checked against the module's OWN exports,
+   * read at runtime. Add a fourth `*_USER_GUIDANCE` and this REDs by name.
+   */
+  it('covers EVERY exported *_USER_GUIDANCE — derived from the module, not listed here', () => {
+    const exported = Object.entries(guidanceModule)
+      .filter(([k, v]) => k.endsWith('_USER_GUIDANCE') && typeof v === 'string')
+      .map(([k, v]) => [k, v as string] as const);
+
+    // ⛔ POSITIVE CONTROL: if the import ever resolves to an empty or renamed
+    // module, `missing` would be trivially empty and this test would pass by
+    // seeing nothing. An absence claim needs a presence first (trap 13).
+    expect(exported.length, 'the module must expose guidance constants at all').toBeGreaterThan(0);
+
+    const covered = new Set(CANONICAL.map(([, phrase]) => phrase));
+    const missing = exported.filter(([, phrase]) => !covered.has(phrase)).map(([name]) => name);
+    expect(
+      missing,
+      'these guidance phrases are exported but NOT budget-checked — add them to CANONICAL',
+    ).toEqual([]);
   });
 });
