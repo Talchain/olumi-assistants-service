@@ -40,6 +40,8 @@
  * them; it does not choose for the product.
  */
 
+import type { ZodIssue } from "zod";
+
 import { DraftGraphOutput } from "../../../../schemas/assist.js";
 
 /** A node whose optional `observed_state` was shed to save the model. */
@@ -66,9 +68,7 @@ export interface ObservedStateSalvageResult {
  * Returns the node indices named by the issues, or null if ANY issue sits
  * elsewhere — that node index set is the only thing we are permitted to touch.
  */
-function observedStateNodeIndices(
-  issues: ReadonlyArray<{ path?: unknown; code?: unknown }>,
-): number[] | null {
+function observedStateNodeIndices(issues: ReadonlyArray<ZodIssue>): number[] | null {
   const indices = new Set<number>();
   for (const issue of issues) {
     const path = Array.isArray(issue?.path) ? issue.path : null;
@@ -101,7 +101,7 @@ function observedStateNodeIndices(
  */
 export function salvageObservedState(
   input: { graph?: unknown },
-  issues: ReadonlyArray<{ path?: unknown; code?: unknown }>,
+  issues: ReadonlyArray<ZodIssue>,
 ): ObservedStateSalvageResult {
   const indices = observedStateNodeIndices(issues);
   if (indices === null) {

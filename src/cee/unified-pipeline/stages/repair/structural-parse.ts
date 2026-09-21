@@ -13,6 +13,8 @@
  */
 
 import type { StageContext } from "../../types.js";
+import type { ZodIssue } from "zod";
+
 import { DraftGraphOutput } from "../../../../schemas/assist.js";
 import { buildCeeErrorResponse } from "../../../validation/pipeline.js";
 import { extractZodIssues } from "../../../../schemas/llmExtraction.js";
@@ -27,7 +29,7 @@ import { salvageObservedState } from "./observed-state-salvage.js";
  * this emitter alone; the shared extractor is left untouched so the other three
  * call sites' log volume is unchanged.
  */
-function unionBranchDetail(issues: ReadonlyArray<Record<string, unknown>>, cap = 3): Array<{
+function unionBranchDetail(issues: ReadonlyArray<ZodIssue>, cap = 3): Array<{
   path: string;
   branch_messages: string[];
 }> {
@@ -35,7 +37,8 @@ function unionBranchDetail(issues: ReadonlyArray<Record<string, unknown>>, cap =
   for (const issue of issues) {
     if (out.length >= cap) break;
     if (issue?.code !== "invalid_union") continue;
-    const unionErrors = (issue as any).unionErrors;
+    const unionErrors = (issue as { unionErrors?: ReadonlyArray<{ issues?: ReadonlyArray<ZodIssue> }> })
+      .unionErrors;
     if (!Array.isArray(unionErrors)) continue;
     const branchMessages: string[] = [];
     for (const branch of unionErrors) {
@@ -45,7 +48,7 @@ function unionBranchDetail(issues: ReadonlyArray<Record<string, unknown>>, cap =
       }
     }
     out.push({
-      path: Array.isArray(issue.path) ? (issue.path as unknown[]).join(".") : "",
+      path: Array.isArray(issue.path) ? issue.path.join(".") : "",
       branch_messages: branchMessages.slice(0, 6),
     });
   }
@@ -69,12 +72,12 @@ export function runStructuralParse(ctx: StageContext): void {
   const issues = zodError.issues ?? [];
   const issueCount = issues.length;
   const firstIssues = extractZodIssues(zodError, 3);
-  const unionDetail = unionBranchDetail(issues as unknown as Array<Record<string, unknown>>);
+  const unionDetail = unionBranchDetail(issues);
 
   // Only reached on a path whose current outcome is a guaranteed 500, and only
   // acts when EVERY issue is an optional `observed_state`. Declines otherwise,
   // leaving the emission below byte-identical to before this existed.
-  const salvage = salvageObservedState(input, issues as unknown as Array<{ path?: unknown; code?: unknown }>);
+  const salvage = salvageObservedState(input, issues);
   if (salvage.salvaged) {
     log.warn({
       event: "cee.structural_parse.observed_state_salvaged",
