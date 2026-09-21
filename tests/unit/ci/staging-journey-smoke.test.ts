@@ -462,7 +462,6 @@ describe("staging journey smoke — the alarm cannot be silenced quietly", () =>
  */
 const VAR_GATE_OPT_OUTS: Record<string, string> = {
   "ci.yml": "Explicit Core/Drafting paid-test hold; required code gate never held",
-  "perf-gate.yml": "Explicit Core/Drafting staging-PR hold; other runs unchanged",
   "staging-journey-smoke.yml": "Explicit marked-batch hold; absent variable runs the alarm",
 };
 
@@ -516,23 +515,42 @@ describe("Core/Drafting release hold is bounded and restores without a push", ()
   });
 
   it.each(["", "different-batch"])("absent or unrelated hold %j keeps automatic coverage", hold => {
-    for (const job of Object.values(perf.jobs) as Array<{ if: string }>) expect(releaseJobRuns(job.if, pr(), hold)).toBe(true);
+    // ⚠ perf-gate.yml is NO LONGER in this truth table, and its absence is the
+    // point. Both of its jobs target PRODUCTION, and both were gated on
+    // `vars.CORE_DRAFTING_PAID_HOLD` — a variable that has never existed
+    // (measured: actions/variables total_count = 0, secrets = 3 as the positive
+    // control). The condition was therefore always false, the negation always
+    // true, and the jobs ALWAYS RAN — including for the eight branches the hold
+    // named. It is now controlled by its TRIGGER, which nobody has to remember
+    // to set, so there is no condition left to evaluate.
     expect(releaseJobRuns(smoke.jobs.journey.if, push(), hold)).toBe(true);
     expect(releaseJobRuns(ci.jobs["live-tests"].if, pr(), hold)).toBe(true);
   });
 
-  it.each(batchBranches)("holds paid PR/feature calls for named branch %s only", branch => {
-    for (const job of Object.values(perf.jobs) as Array<{ if: string }>) {
-      expect(releaseJobRuns(job.if, pr(branch), approved)).toBe(false);
-      expect(releaseJobRuns(job.if, pr(branch, "main"), approved)).toBe(true);
+  it("⛔ perf-gate does not run on pull requests at all, and neither job is var-gated", () => {
+    // THE REPLACEMENT FOR THE HOLD, and a stronger guarantee than the hold ever
+    // gave: the hold, even had the variable existed, covered eight NAMED
+    // branches. This covers every PR from every lane, for ever, with no list.
+    expect(Object.keys(perf.on)).not.toContain("pull_request");
+    expect(Object.keys(perf.on).sort()).toEqual(["push", "schedule", "workflow_dispatch"]);
+    for (const [name, job] of Object.entries(perf.jobs) as Array<[string, { if?: string }]>) {
+      expect(job.if, `perf job "${name}" still carries a condition`).toBeUndefined();
     }
+    // Production coverage is unchanged — this is what stops the fix being a
+    // silent loss of the signal rather than a removal of the spend.
+    expect(perf.on.schedule).toBeDefined();
+    expect(perf.on.push.branches).toEqual(["main"]);
+  });
+
+  it.each(batchBranches)("holds paid PR/feature calls for named branch %s only", branch => {
+    // perf-gate removed from this table: it no longer runs on pull_request, so
+    // there is no PR call left to hold. See the trigger assertion above.
     expect(releaseJobRuns(ci.jobs["live-tests"].if, pr(branch), approved)).toBe(false);
     expect(releaseJobRuns(ci.jobs["live-tests"].if, push("feature", branch), approved)).toBe(false);
     expect(releaseJobRuns(ci.jobs["live-tests"].if, pr(branch, "main"), approved)).toBe(true);
   });
 
   it("unrelated staging PRs and feature branches are not held", () => {
-    for (const job of Object.values(perf.jobs) as Array<{ if: string }>) expect(releaseJobRuns(job.if, pr("feat/unrelated"), approved)).toBe(true);
     expect(releaseJobRuns(ci.jobs["live-tests"].if, pr("feat/unrelated"), approved)).toBe(true);
     expect(releaseJobRuns(ci.jobs["live-tests"].if, push("feature", "feat/unrelated"), approved)).toBe(true);
   });
@@ -546,11 +564,8 @@ describe("Core/Drafting release hold is bounded and restores without a push", ()
   });
 
   it("preserves explicit smoke/performance dispatch and unrelated production triggers", () => {
-    for (const job of Object.values(perf.jobs) as Array<{ if: string }>) {
-      for (const event of [{ event_name: "workflow_dispatch" }, { event_name: "schedule" }, push("ordinary", "main")]) {
-        expect(releaseJobRuns(job.if, event, approved)).toBe(true);
-      }
-    }
+    // perf-gate's dispatch/schedule/main coverage is asserted on its TRIGGERS
+    // above rather than on a per-job condition, because it no longer has one.
     expect(releaseJobRuns(smoke.jobs.journey.if, { event_name: "workflow_dispatch" }, approved)).toBe(true);
     expect(smoke.on.workflow_dispatch.inputs.expect_sha).toBeDefined();
   });
@@ -560,11 +575,12 @@ describe("Core/Drafting release hold is bounded and restores without a push", ()
   });
 
   it("does not exempt additional performance jobs from the scope checks", () => {
+    // ⚠ THE JOB LIST IS THE LOAD-BEARING HALF. This workflow has TWO jobs and
+    // BOTH target production; reasoning about one is how the other is
+    // forgotten, which is exactly what nearly happened here. If a third
+    // appears, this REDs and someone has to decide whether it spends money.
     expect(Object.keys(perf.jobs).sort()).toEqual(["perf-gate", "sse-live-resume-gate"]);
-    expect(findVarGatedConditions(perf, "perf")).toEqual([
-      `perf.jobs.perf-gate.if = ${perf.jobs["perf-gate"].if}`,
-      `perf.jobs.sse-live-resume-gate.if = ${perf.jobs["sse-live-resume-gate"].if}`,
-    ]);
+    expect(findVarGatedConditions(perf, "perf")).toEqual([]);
   });
 });
 
