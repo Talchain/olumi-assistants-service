@@ -824,6 +824,23 @@ export function censusConfidenceParameters(graph: unknown): SemanticQualitySigna
   // overwrite the estimate's identity. Olumi authored the number; the user
   // endorsed it. The census question is *who authored it*.
   //
+  // ⛔⛔ AND THAT SENTENCE IS A CLAIM ABOUT ANOTHER MODULE, so it is only true
+  // while every derivation in `obligation-provenance.ts` is TOTAL over the
+  // union. It was NOT, and this comment was FALSE when written (measured
+  // 21 Sep 2026): `structureProvenance`'s option-interventions ladder ruled two
+  // members and let `user_ratified` fall through to `unattributed`, so on that
+  // path a ratified value tallied as *"nobody stamped it"* — the one bucket
+  // this census keeps separate precisely so a producer that stopped stamping
+  // could not hide in it. Re-measured after the fix: `machine=1` on all three
+  // census axes (`observed_state`, option `interventions`, edge `provenance`),
+  // byte-identical to the `cee_inference` control and distinct from the
+  // `user_override` one.
+  //
+  // ⚠ SO DO NOT RE-STATE THIS FROM MEMORY. The guarantee lives THERE, is
+  // enforced by `Record<StructureProvenance, …>` totality, and is pinned by
+  // `cee/graph-readiness/__tests__/obligation-provenance.totality.test.ts`.
+  // If that pin goes, this comment is a claim nothing checks again.
+  //
   // ⛔ WHAT IS NOT PUBLISHED, AND DELIBERATELY. `SemanticQualitySignals` is a
   // WIRE shape (`schemas/analysis-ready.ts`), so no `…_user_ratified` counter is
   // minted here. Surfacing ratification distinctly is a real obligation of the

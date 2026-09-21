@@ -169,6 +169,98 @@ export function obligationFor(provenance: StructureProvenance): ObligationClass 
 }
 
 /**
+ * ⭐⭐ THE ONE ORDER OVER THIS UNION, AS DATA — because two of this file's own
+ * derivations COMBINE the provenance of several elements, and a combining rule
+ * written as an `if` ladder is total only by accident.
+ *
+ * ## WHY THIS EXISTS (measured, 21 Sep 2026)
+ *
+ * `structureProvenanceOfEffect`'s "weakest end wins" was three `if`s and a bare
+ * `return 'user_stated'`. That is total over FOUR members and silently
+ * non-total over five: `user_ratified` matched no guard and fell through to
+ * **`user_stated`** — promoting ratification to authorship on
+ * `readiness_issues[]`, the exact equivalence the 20 Sep ruling forbids, on the
+ * ONE READINESS AUTHORITY's own path. It produced
+ * `{"provenance":"user_stated","obligation":"required"}`, **byte-identical to a
+ * genuinely user-stated control**, while `obligationFor`'s docblock three
+ * screens above said `user_ratified` is deliberately `offered`. The compiler
+ * saw nothing, because a bare `return` at the end of a chain is not a default
+ * the type system can check. It is CLAUDE.md trap 12 — a hand-maintained
+ * mirror — wearing control flow rather than a list.
+ *
+ * ⛔ SO THE ORDER IS A `Record<StructureProvenance, number>` AND NOT A LADDER.
+ * A sixth member fails typecheck AT THIS OBJECT LITERAL, which is the same
+ * device `OBSERVED_STATE_SOURCE` and `STRUCTURE_PROVENANCE_VALUES` already use
+ * in this file. An exhaustive `switch` with a `never` default would also be
+ * total, and was rejected: "weakest wins" is an ORDER over the union, not a
+ * case analysis, so a switch would have to re-derive the comparison at every
+ * call site and could hold a different opinion at each. Stated once, as data.
+ *
+ * ## THE ORDER, AND WHY EACH STEP
+ *
+ * `system_repaired` < `unattributed` < `ai_drafted` < `user_ratified` <
+ * `user_stated`. The first three preserve the ladder's pre-existing precedence
+ * exactly (verified by execution, not by reading). `user_ratified` sits ABOVE
+ * `ai_drafted` because ratification is a genuine human act
+ * ({@link reflectsAHumanAct}) and BELOW `user_stated` because it is not
+ * authorship ({@link earnsAuthorshipCredit}) — which is precisely the gap the
+ * fifth member was minted to hold open.
+ *
+ * ⚠ THIS IS A STRENGTH ORDER, NOT AN OBLIGATION ORDER. Do not read
+ * `required`/`offered` off it; {@link obligationFor} is the only authority on
+ * that, and it deliberately cuts between `user_ratified` and `user_stated`
+ * rather than anywhere else on this scale.
+ */
+const AUTHORSHIP_STRENGTH: Readonly<Record<StructureProvenance, number>> = {
+  system_repaired: 0,
+  unattributed: 1,
+  ai_drafted: 2,
+  user_ratified: 3,
+  user_stated: 4,
+};
+
+/**
+ * The LEAST-authored of several elements' provenance — *"an obligation is only
+ * the user's when every element it names is the user's."*
+ *
+ * Returns `null` for an empty list rather than guessing a member: the caller
+ * knows what "we looked at nothing" means on its own path, and this function
+ * does not.
+ */
+export function weakestProvenance(
+  candidates: readonly StructureProvenance[],
+): StructureProvenance | null {
+  let weakest: StructureProvenance | null = null;
+  for (const candidate of candidates) {
+    if (weakest === null || AUTHORSHIP_STRENGTH[candidate] < AUTHORSHIP_STRENGTH[weakest]) {
+      weakest = candidate;
+    }
+  }
+  return weakest;
+}
+
+/**
+ * The MOST-authored of several elements' provenance — the opposite question,
+ * asked where one human-supplied part is evidence about the whole (an option is
+ * being worked on by the user if ANY of its stated effects is theirs).
+ *
+ * Named apart from {@link weakestProvenance} rather than parameterised, because
+ * the two answer genuinely different questions and a shared `direction` flag is
+ * how a call site ends up asking the wrong one.
+ */
+export function strongestProvenance(
+  candidates: readonly StructureProvenance[],
+): StructureProvenance | null {
+  let strongest: StructureProvenance | null = null;
+  for (const candidate of candidates) {
+    if (strongest === null || AUTHORSHIP_STRENGTH[candidate] > AUTHORSHIP_STRENGTH[strongest]) {
+      strongest = candidate;
+    }
+  }
+  return strongest;
+}
+
+/**
  * The vocabularies as VALUES, for the validators that must accept them across a
  * JSON boundary.
  *
@@ -382,6 +474,29 @@ function nodeById(graph: unknown, id: string): Record<string, unknown> | null {
 }
 
 /**
+ * Which classes the option-interventions ladder in {@link structureProvenance}
+ * RESOLVES on, and which it defers past to the repair-authored-edge check.
+ *
+ * ⚠ `false` is a DEFERRAL, not a verdict. `unattributed` means no stamp was
+ * read, and `system_repaired` reaching this table would be an off-contract
+ * stamp (`InterventionV3.source` declares three members, none of them repair);
+ * in both cases the incoming-edge check below has better evidence, and both
+ * behave exactly as they did before this map existed.
+ *
+ * ⛔ It is a `Record<StructureProvenance, boolean>` rather than an `if` ladder
+ * for the same reason as {@link AUTHORSHIP_STRENGTH}: a sixth member must be
+ * RULED, and a `Record` makes not ruling it a build failure. Omission is how
+ * `user_ratified` came to be reported as `unattributed` here.
+ */
+const INTERVENTION_CLASS_RESOLVES: Readonly<Record<StructureProvenance, boolean>> = {
+  user_stated: true,
+  user_ratified: true,
+  ai_drafted: true,
+  system_repaired: false,
+  unattributed: false,
+};
+
+/**
  * The provenance of ONE graph element.
  *
  * Reads only fields a PRODUCER writes:
@@ -415,8 +530,20 @@ export function structureProvenance(element: unknown, graph?: unknown): Structur
     const classes = Object.values(interventions).map((entry) =>
       classifyValueSource(asRecord(entry)?.source),
     );
-    if (classes.includes('user_stated')) return 'user_stated';
-    if (classes.includes('ai_drafted')) return 'ai_drafted';
+    // The STRONGEST stated effect wins here — the opposite question to
+    // `structureProvenanceOfEffect`'s, and named apart from it on purpose.
+    //
+    // ⛔ THIS WAS ALSO AN `if` LADDER, total over two members and silent about
+    // the other three: `user_ratified` fell past both guards and this function
+    // returned `unattributed` — a WIRE counter meaning *"nobody stamped it"*,
+    // which is false about a value a human acted on, and the reason this file's
+    // own header insists that bucket stay distinct.
+    //
+    // Which classes RESOLVE here is now stated, not left to omission. The two
+    // that do not are unchanged in behaviour: they defer to the repair-authored
+    // incoming-edge check below, which knows things this map cannot.
+    const strongest = strongestProvenance(classes);
+    if (strongest !== null && INTERVENTION_CLASS_RESOLVES[strongest]) return strongest;
   }
 
   // A repair-authored INCOMING edge makes the element's connection the system's,
@@ -489,14 +616,20 @@ export function structureProvenanceOfEffect(
   const ends: StructureProvenance[] = [];
   if (option) ends.push(structureProvenance(option, graph));
   if (factor) ends.push(structureProvenance(factor, graph));
-  if (ends.length === 0) return 'unattributed';
 
   // The WEAKEST end wins: an obligation is only the user's when every element it
   // names is the user's.
-  if (ends.includes('system_repaired')) return 'system_repaired';
-  if (ends.includes('unattributed')) return 'unattributed';
-  if (ends.includes('ai_drafted')) return 'ai_drafted';
-  return 'user_stated';
+  //
+  // ⛔ DO NOT REWRITE THIS AS AN `if` LADDER. It was one, it was total over four
+  // members, and the fifth (`user_ratified`) fell through its bare final
+  // `return 'user_stated'` — minting a DEMAND over a value the user had only
+  // confirmed, on the readiness authority's own wire field, with no type error.
+  // {@link AUTHORSHIP_STRENGTH} carries the order so a sixth member breaks the
+  // BUILD instead of the ruling.
+  //
+  // `null` here means neither end resolved to a node at all — which is "nobody
+  // stamped it", not "the user said so". Unchanged from the guard this replaces.
+  return weakestProvenance(ends) ?? 'unattributed';
 }
 
 // ============================================================================
