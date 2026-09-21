@@ -12,6 +12,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DOCTRINE_FATAL_PATTERNS,
   FORBIDDEN_USER_FACING_PHRASES,
+  MUTATION_DENIAL_PHRASES,
   findForbiddenPhraseHit,
   findSuccessClaimHit,
   SUCCESS_CLAIM_PATTERNS,
@@ -882,5 +883,75 @@ describe('2.213 remedy class — a choice directive has no safe rewrite', () => 
     for (const p of DOCTRINE_FATAL_PATTERNS) {
       expect(p.test(EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT)).toBe(false);
     }
+  });
+});
+
+/**
+ * ⛔ A DENIAL IS ONLY A LIE IF SOMETHING WAS CHANGED.
+ *
+ * ── THE WITNESS (deployed staging, 21 Sep 2026, a real 26-minute session) ──
+ * Two of seventeen replies were not answers. They were 71 characters of
+ * `EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT` — the entire assistant text deleted
+ * and replaced. One answered "I think we should limit it to £5k, including any
+ * AI expenses, and no more than a month."
+ *
+ * In that session SEVEN OF EIGHT requests to change something failed. On every
+ * one of those turns "nothing changed" is the TRUTH and the required
+ * disclosure — and saying it destroyed the reply. The guard written to stop the
+ * product lying about changes was deleting its honest statements that nothing
+ * changed.
+ *
+ * ── AND IT WAS ALREADY HALF-FIXED ─────────────────────────────────────────
+ * The finaliser's companion guard catches the MIRROR claim — a first-person
+ * mutation SUCCESS — and is commit-anchored: it fires only when no mutation
+ * committed. Its docblock names itself this guard's companion. One question,
+ * answered for the success claim and not for its opposite.
+ */
+describe('the mutation-denial class is commit-anchored', () => {
+  const DENIAL = 'I could not apply that, so nothing changed in your model.';
+
+  it('WIPES a denial when a mutation DID commit — the lie this guard exists for', () => {
+    const r = applyEgressForbiddenPhraseGuard(DENIAL, { mutationCommitted: true });
+    expect(r.rewritten).toBe(true);
+    expect(r.remedy).toBe('fallback_replacement');
+    expect(r.text).toBe(EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT);
+  });
+
+  it('KEEPS the same sentence when nothing committed — it is simply true', () => {
+    const r = applyEgressForbiddenPhraseGuard(DENIAL, { mutationCommitted: false });
+    expect(r.rewritten).toBe(false);
+    expect(r.text).toBe(DENIAL);
+  });
+
+  it('OMITTING the context changes nothing for existing callers', () => {
+    // Fail-closed: not knowing is not the same as knowing nothing committed.
+    // Every caller that passes no context must behave byte-for-byte as before.
+    const r = applyEgressForbiddenPhraseGuard(DENIAL);
+    expect(r.rewritten).toBe(true);
+    expect(r.text).toBe(EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT);
+  });
+
+  it('⛔ still WIPES when a true denial travels with a genuinely fatal phrase', () => {
+    // The allowance is scoped to the denial class and re-scans without it.
+    // A reply may be honest about the mutation and still leak something that is
+    // fatal whatever the turn did — here internal staleness wording.
+    const mixed = `${DENIAL} This was loaded from a prior run.`;
+    const r = applyEgressForbiddenPhraseGuard(mixed, { mutationCommitted: false });
+    expect(r.rewritten).toBe(true);
+    expect(r.text).toBe(EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT);
+    // And it reports the phrase that actually condemned it, not the denial.
+    expect(r.hit).toMatch(/loaded from a prior run/i);
+  });
+
+  it('the denial class is a SUBSET of the full list, composed not copied', () => {
+    // Pins the composition rather than the contents: a pattern added to the
+    // subset must appear in the whole, so the two can never drift apart.
+    for (const re of MUTATION_DENIAL_PHRASES) {
+      expect(FORBIDDEN_USER_FACING_PHRASES).toContain(re);
+    }
+    expect(MUTATION_DENIAL_PHRASES.length).toBeGreaterThan(0);
+    expect(FORBIDDEN_USER_FACING_PHRASES.length).toBeGreaterThan(
+      MUTATION_DENIAL_PHRASES.length,
+    );
   });
 });

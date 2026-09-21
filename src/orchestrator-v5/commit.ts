@@ -311,7 +311,15 @@ export function capConversationText(
  *
  * We apply both transforms here in WIRE ORDER (forbidden-phrase guard →
  * entity-id scrub) so the stored value equals the wire value on the common
- * egress-ok path and can never contain a forbidden phrase. Both helpers are
+ * egress-ok path.
+ *
+ * ⚠ THE INVARIANT IS NARROWER THAN IT WAS, DELIBERATELY. It used to read "can
+ * never contain a forbidden phrase". A mutation-denial phrase is forbidden
+ * only when it is FALSE — on a turn that wrote no graph, "nothing changed" is
+ * the truth and the required disclosure, and deleting it cost a real user
+ * their whole answer (witnessed 21 Sep). The guard is now commit-anchored on
+ * both sides, so the stored copy can never contain a forbidden phrase THAT IS
+ * FALSE, and still equals the wire. Both helpers are
  * pure and idempotent; telemetry for either rewrite is emitted on the wire
  * path, NOT here (both helpers are deliberately telemetry-free), so we don't
  * double-count or mis-attribute.
@@ -334,9 +342,18 @@ export function capConversationText(
 function durablePublicAssistantText(
   text: string | undefined | null,
   graph: GraphV3T | null,
+  mutationCommitted: boolean,
 ): string | undefined | null {
   if (typeof text !== 'string' || text.trim().length === 0) return text;
-  return sanitiseUserFacingText(applyEgressForbiddenPhraseGuard(text).text, graph).text;
+  return sanitiseUserFacingText(
+    // ⭐ THE SAME QUESTION THE WIRE NOW ASKS. The finaliser's guard is
+    // commit-anchored, so a TRUE "nothing changed" survives to the user on a
+    // turn that wrote no graph. Passing nothing here would leave the stored
+    // copy wiped while the wire kept the sentence — precisely the divergence
+    // this function exists to prevent, arriving from the other side.
+    applyEgressForbiddenPhraseGuard(text, { mutationCommitted }).text,
+    graph,
+  ).text;
 }
 
 /**
@@ -1412,6 +1429,11 @@ export async function commitDirectAnswer(
     durablePublicAssistantText(
       responseForCommit.assistant_text,
       parseContentGraph(metadata.contentGraph),
+      // This module's OWN predicate for the same question, not a mirror of the
+      // finaliser's: `writesGraph` is what `graphPersisted` means here, and the
+      // turn executor's own comment defers to it as "the commit module's own
+      // writesGraph predicate".
+      writesGraph,
     ),
     'assistant_message',
   );

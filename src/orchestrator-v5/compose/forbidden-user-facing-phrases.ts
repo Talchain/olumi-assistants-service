@@ -158,7 +158,38 @@ export const DOCTRINE_VERDICT_PATTERNS: readonly RegExp[] = [
   /\bwinning\s+(?:option|probability|side|choice|outcome)\b/i,
 ];
 
-export const FORBIDDEN_USER_FACING_PHRASES: readonly RegExp[] = [
+/**
+ * ⭐⭐ THE MUTATION-DENIAL CLASS, NAMED APART — because whether it is a LIE
+ * depends on something this list cannot see.
+ *
+ * ── THE WITNESS (deployed staging, 21 Sep 2026, a real 26-minute session) ──
+ * Two of seventeen replies were not answers. They were 71 characters of
+ * `EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT` — the whole assistant text deleted
+ * and replaced. One of them answered "I think we should limit it to £5k,
+ * including any AI expenses, and no more than a month."
+ *
+ * These patterns exist to stop the product DENYING a change it actually made.
+ * That is a lie and must never ship. But on every turn where the product
+ * genuinely could not act — and in that session seven of eight action requests
+ * failed — "nothing changed" is the TRUTH, and the required disclosure. Saying
+ * it destroyed the entire reply.
+ *
+ * ── THE ASYMMETRY THIS FIXES, AND IT IS ALREADY HALF-BUILT ────────────────
+ * The finaliser's companion guard — "ALWAYS-ON false-success neutralisation" —
+ * catches the MIRROR claim (a first-person mutation SUCCESS) and is
+ * COMMIT-ANCHORED: it fires "only when `handlerEmittedMutatedGraph ||
+ * isDraftOrEditGraph` is false". Its own docblock calls itself the companion
+ * to the denial guard. So the success class asks "did a mutation commit?" and
+ * the denial class asked nothing at all — the same question, answered for one
+ * claim and not its opposite.
+ *
+ * ── DERIVED, NOT MIRRORED ─────────────────────────────────────────────────
+ * `FORBIDDEN_USER_FACING_PHRASES` is COMPOSED from this constant below, so
+ * there is one list and nothing to keep in step. A pattern added here is
+ * forbidden by default and merely becomes truth-checkable; a pattern added to
+ * the other half stays unconditionally fatal.
+ */
+export const MUTATION_DENIAL_PHRASES: readonly RegExp[] = [
   // "I haven't applied any changes" — straight apostrophe AND curly
   // apostrophe variants. Anchoring on `\b` after `changes` allows for
   // trailing punctuation ("any changes.", "any changes in this session").
@@ -201,6 +232,10 @@ export const FORBIDDEN_USER_FACING_PHRASES: readonly RegExp[] = [
   // factor.") do NOT match because the line is not solely the
   // standalone phrase.
   /^\s*no\s+changes[.!?]?\s*$/im,
+];
+
+export const FORBIDDEN_USER_FACING_PHRASES: readonly RegExp[] = [
+  ...MUTATION_DENIAL_PHRASES,
   // "unknown freshness" — internal/telemetry term that must never reach
   // user prose; the wire envelope's `analysis_ready.freshness: 'unknown'`
   // is separate, and the UI renders it without verbatim quoting.
@@ -461,9 +496,67 @@ export interface EgressGuardResult {
   readonly rewritten_terms?: readonly string[];
 }
 
-export function applyEgressForbiddenPhraseGuard(text: string): EgressGuardResult {
+/**
+ * What the caller knows about this turn that the phrase list cannot.
+ *
+ * ⛔ OMITTING IT MEANS "I DO NOT KNOW", AND THE GUARD STAYS UNCONDITIONAL.
+ * Every existing caller passes nothing and is byte-for-byte unaffected. Only a
+ * caller that can positively state no mutation committed earns the allowance,
+ * and that is the same signal the finaliser's false-SUCCESS companion already
+ * reads.
+ */
+export interface EgressGuardContext {
+  /**
+   * Did a durable mutation commit on this turn? `false` makes a
+   * mutation-denial phrase TRUE, and a true statement is not a leak.
+   */
+  readonly mutationCommitted?: boolean;
+}
+
+/** Is this hit one whose truth depends on whether a mutation committed? */
+function isMutationDenialHit(text: string): boolean {
+  return MUTATION_DENIAL_PHRASES.some((re) => re.test(text));
+}
+
+/** The first hit that is fatal REGARDLESS of what the turn did. */
+function findNonDenialHit(text: string): string | null {
+  for (const re of FORBIDDEN_USER_FACING_PHRASES) {
+    if (MUTATION_DENIAL_PHRASES.includes(re)) continue;
+    const m = re.exec(text);
+    if (m) return m[0];
+  }
+  return null;
+}
+
+export function applyEgressForbiddenPhraseGuard(
+  text: string,
+  ctx: EgressGuardContext = {},
+): EgressGuardResult {
   const hit = findForbiddenPhraseHit(text);
   if (hit === null) return { rewritten: false, text, hit: null, remedy: 'none' };
+
+  // ⭐ A DENIAL IS ONLY A LIE IF SOMETHING WAS CHANGED. When the caller can say
+  // positively that nothing committed, the sentence is true — and deleting a
+  // true disclosure is the worse failure, because the turn that most needs to
+  // say "nothing changed" is the one where the product could not act.
+  //
+  // ⚠ RE-SCANNED WITHOUT THE DENIAL CLASS, never simply allowed: a reply may
+  // carry a true denial AND a genuinely fatal phrase (a false success claim,
+  // internal jargon, staleness wording). Those stay fatal. This mirrors the
+  // terminology rewrite's own scan-rewrite-rescan shape rather than inventing
+  // a second exemption path.
+  if (ctx.mutationCommitted === false && isMutationDenialHit(text)) {
+    const residual = findNonDenialHit(text);
+    if (residual === null) {
+      return { rewritten: false, text, hit: null, remedy: 'none' };
+    }
+    return {
+      rewritten: true,
+      text: EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT,
+      hit: residual,
+      remedy: 'fallback_replacement',
+    };
+  }
   const substituted = applyTerminologyRewrite(text);
   if (
     substituted.applied.length > 0 &&

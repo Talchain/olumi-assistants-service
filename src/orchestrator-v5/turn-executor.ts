@@ -15249,7 +15249,29 @@ export async function runTurnExecutor(
     if (!response) return;
     const assistantText = response.assistant_text;
     if (typeof assistantText !== 'string' || assistantText.length === 0) return;
-    const guarded = applyEgressForbiddenPhraseGuard(assistantText);
+    // ⭐ COMMIT-ANCHORED, exactly as the false-SUCCESS companion below already
+    // is. That guard fires only when `handlerEmittedMutatedGraph ||
+    // isDraftOrEditGraph` is false, and its own docblock calls itself this
+    // guard's companion — so the two halves of one question were answered for
+    // the SUCCESS claim and not for its mirror.
+    //
+    // The consequence, witnessed on staging 21 Sep in a real session: two of
+    // seventeen replies were deleted in full and replaced with the neutral
+    // fallback, one of them the answer to "I think we should limit it to £5k
+    // … and no more than a month". On a turn where the product genuinely could
+    // not act — seven of eight action requests in that session — "nothing
+    // changed" is the TRUTH and the required disclosure, and saying it cost
+    // the user the whole answer.
+    //
+    // ⚠ The expression is the SAME one, derived here rather than re-spelled,
+    // so the two guards cannot drift into disagreeing about what a mutation is.
+    const mutationCommittedThisTurn =
+      handlerEmittedMutatedGraph ||
+      proposedHandlerIdForOutcome === 'draft_graph' ||
+      proposedHandlerIdForOutcome === 'edit_graph';
+    const guarded = applyEgressForbiddenPhraseGuard(assistantText, {
+      mutationCommitted: mutationCommittedThisTurn,
+    });
     if (!guarded.rewritten) return;
     emit(TelemetryEvents.V5EgressForbiddenPhraseDetected, {
       request_id: requestId,
