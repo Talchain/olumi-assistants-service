@@ -962,3 +962,81 @@ describe("register — the carrier describes the STORED graph, and obeys the pol
     await app.close();
   });
 });
+
+/**
+ * ⛔ THE CANONICAL RECEIPT MUST REACH THE CALLER.
+ *
+ * `append_turn_atomic_v5` builds a `model_version_receipt` and
+ * `SupabaseSessionStore` parses it into `SessionAppendOutcome.modelVersionReceipt`
+ * (`session/store.ts:96`); `appendCheckedGraphWrite` returns that outcome
+ * verbatim. This route DISCARDED it — it did not capture the return value at
+ * all, and its 200 envelope carried only `graph_identity_hash`.
+ *
+ * That is why `build_model_from_brief` could not cite a version: the agent
+ * lane reads `reg.json` and there was no version identity in it, so a freshly
+ * constructed model had no id, no number and no rollback point to name.
+ *
+ * The field is ADDITIVE and optional. The envelope is frozen, so this matters:
+ * the UI consumer (`DecisionGuideAI/src/adapters/cee/registerScenarioGraph.ts:228`)
+ * accepts it by checking `schema` and `registered` rather than parsing
+ * strictly, so an extra key does not break it. Attribution (`authored_by`,
+ * `actor_kind`) is deliberately NOT exposed — citing a version needs its
+ * identity, not its author, and this route is reachable with a service key.
+ */
+describe("register — the canonical receipt reaches the caller", () => {
+  const RECEIPT = {
+    mutation_id: "8f7e6d5c-4b3a-4291-8071-6f5e4d3c2b1a",
+    version_id: "1a2b3c4d-5e6f-4071-8192-a3b4c5d6e7f8",
+    version_number: 1,
+    graph_identity_hash: "a".repeat(64),
+    analysis_affecting_hash: "b".repeat(64),
+    hash_algorithm: "sha256",
+    identity_projection_version: "identity.v1",
+    identity_normaliser_version: "norm.v1",
+    graph_schema_version: "3.0",
+    actor_kind: "unknown" as const,
+    authored_by: null,
+    creation_kind: "initial" as const,
+    source_version_id: null,
+    source_turn_id: "graph_registration:whatever",
+    parent_version_id: null,
+    root_version_id: null,
+  };
+
+  it("surfaces the version identity the RPC returned", async () => {
+    append.mockResolvedValue({ id: "turn-1", modelVersionReceipt: RECEIPT });
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: VERSIONABLE });
+    expect(res.statusCode).toBe(200);
+
+    const body = res.json();
+    expect(body.model_version).toBeDefined();
+    // Identity, not shape — the exact row the store said it wrote.
+    expect(body.model_version.version_id).toBe(RECEIPT.version_id);
+    expect(body.model_version.mutation_id).toBe(RECEIPT.mutation_id);
+    expect(body.model_version.version_number).toBe(1);
+    expect(body.model_version.creation_kind).toBe("initial");
+    await app.close();
+  });
+
+  it("does NOT leak attribution — identity only", async () => {
+    append.mockResolvedValue({ id: "turn-1", modelVersionReceipt: RECEIPT });
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: VERSIONABLE });
+    const mv = res.json().model_version;
+    expect(mv.authored_by).toBeUndefined();
+    expect(mv.actor_kind).toBeUndefined();
+    await app.close();
+  });
+
+  it("CONTROL — a registration that wrote NO version carries no `model_version` key", async () => {
+    // The skip arm. The absence must be an absent key, not a null that a
+    // client would have to distinguish from "version unknown".
+    append.mockResolvedValue({ id: "turn-1" });
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().model_version).toBeUndefined();
+    await app.close();
+  });
+});

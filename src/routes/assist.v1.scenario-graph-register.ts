@@ -444,6 +444,11 @@ export default async function route(app: FastifyInstance) {
       });
 
       const turnId = registrationTurnId();
+      // THE CANONICAL RECEIPT, captured rather than discarded. The RPC builds
+      // it and `SupabaseSessionStore` parses it onto the append outcome; this
+      // route threw that outcome away, which is why a freshly constructed model
+      // had no version identity any caller could cite.
+      let appendOutcome: Awaited<ReturnType<typeof appendCheckedGraphWrite>> | undefined;
 
       /**
        * ⛔ A REGISTRATION THAT WRITES A GRAPH MUST LEAVE A VERSION BEHIND.
@@ -487,7 +492,7 @@ export default async function route(app: FastifyInstance) {
         // questions (a TURN vs a REGISTRATION — no LLM, no composed response,
         // `response_emitted: false`), so they are not merged; what they share
         // is HOW a graph persists, and that now has one owner.
-        await appendCheckedGraphWrite({
+        appendOutcome = await appendCheckedGraphWrite({
           store,
           writesGraph: true,
           // Only what THIS registration introduces can refuse it — a scenario
@@ -622,6 +627,24 @@ export default async function route(app: FastifyInstance) {
         // The ACKNOWLEDGEMENT. This is what lets a client stop saying
         // "cannot confirm": the server has the graph, and this token names it.
         graph_identity_hash: identity,
+        // ADDITIVE and optional: present only when this registration actually
+        // wrote a version. The skip arm omits the KEY rather than sending null,
+        // so a client never has to tell "no version written" apart from
+        // "version unknown". Identity only — attribution is deliberately not
+        // exposed on a service-key-reachable route.
+        ...(appendOutcome?.modelVersionReceipt === undefined
+          ? {}
+          : {
+              model_version: {
+                mutation_id: appendOutcome.modelVersionReceipt.mutation_id,
+                version_id: appendOutcome.modelVersionReceipt.version_id,
+                version_number: appendOutcome.modelVersionReceipt.version_number,
+                creation_kind: appendOutcome.modelVersionReceipt.creation_kind,
+                graph_identity_hash: appendOutcome.modelVersionReceipt.graph_identity_hash,
+                analysis_affecting_hash:
+                  appendOutcome.modelVersionReceipt.analysis_affecting_hash,
+              },
+            }),
         node_count: parsed.data.nodes.length,
         edge_count: parsed.data.edges.length,
         kind_fields_normalised: normalised.changedNodeCount,

@@ -165,9 +165,16 @@ export async function buildModelFromBrief(
     return { ok: false, mutated: false, refusal: 'registration_refused', http: reg.status, detail: String(reg.json.message ?? '').slice(0, 200) };
   }
 
+  // The canonical version this construction produced, so the Agent can cite a
+  // real version number instead of asserting one. Absent when the registration
+  // wrote no version (a graph GraphV3 cannot version) — the Agent must then not
+  // claim one.
+  const modelVersion = (reg.json as { model_version?: unknown }).model_version;
+
   return {
     ok: true,
     mutated: true,
+    ...(modelVersion === undefined ? {} : { model_version: modelVersion }),
     nodes: admitted.nodes.length,
     edges: admitted.edges.length,
     options: admitted.nodes.filter((n) => n.kind === 'option').length,
