@@ -244,6 +244,31 @@ const REVIEWED: Readonly<Record<string, string>> = {
   // wrongly stamped `user_override` upstream classifies as `user_stated` and is
   // counted as the user's. That is an argument for keeping the WRITERS' entries
   // honest, not for giving this one a write path it does not have.
+  // ⭐ READER ONLY, AND IT DELIBERATELY DOES NOT DELEGATE — read the second
+  // paragraph before assuming that is an oversight.
+  //
+  // #1674's salvage sheds a MALFORMED optional `observed_state` so that one bad
+  // field does not destroy an otherwise-valid draft. Before shedding, it asks
+  // whether the object carries a marker of a human act. The literal is a lookup
+  // key in a ReadonlySet; the module has NO write path — it can only PRESERVE or
+  // SHED, never stamp. The 2.714 defect class (read a number out of brief prose,
+  // attribute it to the user) is structurally unreachable from here.
+  //
+  // ⚠⚠ WHY IT DOES NOT CALL `classifyValueSource` + `reflectsAHumanAct`, which
+  // would be the obvious anti-mirror move and WOULD remove this entry:
+  // `graph-readiness/obligation-provenance.ts` classifies `brief_extraction`
+  // and `explicit` as `user_stated`, on the written ground that "a brief is the
+  // user's own words". THIS FILE'S SET DELIBERATELY EXCLUDES BOTH, on the
+  // ground THIS guard states — a value read out of the brief is the system's
+  // reading of prose. The two rulings contradict each other and BOTH are live.
+  // Delegating would adopt the reading this guard exists to forbid, and because
+  // `schema-v3.ts:457-459` defaults every non-`inferred` node to
+  // `brief_extraction`, it would also decline almost every salvage.
+  //
+  // ⛔ DO NOT "fix the mirror" by delegating until that contradiction is ruled.
+  // Banked at output/brief-to-canonical-handover-20260921/02-THE-CAUSAL-CHAIN.md.
+  "cee/unified-pipeline/stages/repair/observed-state-salvage.ts":
+    "reader only, no write path — the literal is a member of USER_AUTHORED_SOURCES, a ReadonlySet consulted before shedding a MALFORMED optional observed_state; the module can only preserve or shed, never stamp, so it cannot attribute a brief-read value to the user. ⚠ It deliberately does NOT delegate to classifyValueSource/reflectsAHumanAct because that table classes brief_extraction and explicit as user_stated, the exact reading this guard forbids; the contradiction is unruled and delegating would adopt the wrong side of it",
   "orchestrator-v5/admission/analysis-admission.ts":
     "comment only, and NOT a writer — the literal appears once in censusConfidenceParameters' docblock naming the control the ratified arm differs from; the module is a pure counter with no write path (proven on a deep-frozen graph across four arms) and derives no authorship rule of its own, delegating every authorship decision to earnsAuthorshipCredit. ⚠ Unlike the reader entries above its failure direction is NOT safe — a permissive mis-read would license comparative_leader — so the delegation, not the direction, is what makes it sound",
 };
