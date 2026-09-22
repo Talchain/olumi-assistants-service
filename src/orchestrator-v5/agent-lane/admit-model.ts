@@ -472,6 +472,36 @@ export function admitCandidateModel(
     }
     if (Object.keys(bundle).length > 0) interventionsByOption.set(optionId, bundle);
   }
+  /**
+   * ⛔ AN OPTION THAT CHANGES NOTHING CANNOT BE COMPARED TO ANYTHING.
+   *
+   * Measured on a real 35-node model: 0 of 7 options carried an intervention.
+   * Every option reached the goal, every count looked healthy, and the analysis
+   * could still never discriminate between "direct sales hiring" and "channel
+   * partnerships" — because nothing said what either one DOES. Supplying the
+   * 17 missing factor values would not have helped: the defect is structural,
+   * not numeric, and no readiness number reveals it.
+   *
+   * This does not invent a level. It records, per option, that the option is
+   * inert, so the Agent can say so and ask — which is the honest move when the
+   * brief genuinely did not say what an option changes.
+   */
+  for (const o of model.options) {
+    const optionId = ids.get(o.label);
+    if (optionId === undefined) continue;
+    const actsOn = actsOnByOption.get(optionId);
+    if (actsOn !== undefined && actsOn.size > 0) continue;
+    unresolved.push({
+      from: o.label,
+      to: '(nothing)',
+      reason: 'option_changes_nothing',
+      detail:
+        `"${o.label}" does not say what it changes — no factor level it sets, and no factor it ` +
+        'acts on. It can appear in the model but can never be compared with another option, ' +
+        'whatever values are filled in later. Ask what this option actually does differently.',
+    });
+  }
+
   for (const n of nodes) {
     const bundle = interventionsByOption.get(n.id);
     if (bundle !== undefined) n.interventions = bundle;
