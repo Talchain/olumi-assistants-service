@@ -149,6 +149,7 @@ import { computeGraphIdentityHash } from "../orchestrator-v5/context/graph-ident
 import { computeExpectedGraphCasHashes } from "../orchestrator-v5/context/graph-cas-conflict.js";
 import { projectGraphForPersistence } from "../orchestrator-v5/persisted-graph-projection.js";
 import { appendCheckedGraphWrite } from "../orchestrator-v5/persist-graph-write.js";
+import { buildAtomicCommittedModelVersion } from "../orchestrator-v5/commit.js";
 import { PersistedGraphInvariantError } from "../orchestrator-v5/persisted-graph-invariants.js";
 import { getSessionStore } from "../orchestrator-v5/session/index.js";
 import { GraphStaleWriteError } from "../orchestrator-v5/session/store.js";
@@ -443,6 +444,40 @@ export default async function route(app: FastifyInstance) {
       });
 
       const turnId = registrationTurnId();
+
+      /**
+       * ⛔ A REGISTRATION THAT WRITES A GRAPH MUST LEAVE A VERSION BEHIND.
+       *
+       * Until this, the write below carried no `modelVersion`, so
+       * `supabase-store.ts` took its NON-VERSIONED branch
+       * (`if (write.modelVersion !== undefined)`) and the RPC was never asked
+       * for a version at all. The version was not lost — it was never
+       * requested. MEASURED on deployed staging: a model built through this
+       * route wrote 28 nodes with `model_versions = 0` and
+       * `current_model_version_id = NULL`, while the conventional route minted
+       * one for the identical brief. A user's first model had no version to
+       * reread, no receipt, and no rollback point.
+       *
+       * ⭐ The SAME builder the turn path uses, not a second one — the brief
+       *    forbids duplicate controllers, and `append_turn_atomic_v5` stays the
+       *    only writer either way.
+       *
+       * ⚠ `creation_kind` is deliberately left as the carrier's
+       *   `committed_mutation`: the RPC REQUIRES exactly that value from any
+       *   caller (it raises `creation/source turn carrier mismatch` otherwise)
+       *   and decides the stored value itself —
+       *   `CASE WHEN NOT v_has_versions THEN 'initial' ELSE 'committed_mutation' END`.
+       *   So a first registration is correctly recorded as `initial` without
+       *   this route asserting anything about lineage. Verified against the
+       *   deployed function body and against the data: all 3,162 scenario-first
+       *   versions are `initial`, and `committed_mutation` never appears first.
+       */
+      const versionPlan = buildAtomicCommittedModelVersion(graphForStore, {
+        scenario_id: scenarioId,
+        turn_id: turnId,
+        baseGraphForInvariants,
+      });
+
       try {
         // C3 — THE SHARED PERSISTENCE FLOOR, not `store.append` directly. This
         // route and `commitDirectAnswer` are the only two `scenarios.graph`
@@ -490,6 +525,9 @@ export default async function route(app: FastifyInstance) {
             duration_ms: Date.now() - startedAt,
             handler_facts: [],
             graph: graphForStore,
+            // Present only when the carrier says this graph is versionable; a
+            // `none`/`skip` outcome leaves the write byte-identical to before.
+            ...(versionPlan.kind === "plan" ? { modelVersion: versionPlan.write } : {}),
             ...(brief.value === undefined ? {} : { briefText: brief.value }),
             expectedGraphIdentityHash,
             expectedGraphAnalysisHash,

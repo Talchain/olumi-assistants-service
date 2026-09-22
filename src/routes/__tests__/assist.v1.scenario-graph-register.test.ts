@@ -774,3 +774,75 @@ describe("register — the terminal persisted-graph invariant (C3 shared floor)"
     await app.close();
   });
 });
+
+/**
+ * ⛔ A REGISTRATION THAT WRITES A VERSIONABLE GRAPH MUST LEAVE A VERSION BEHIND.
+ *
+ * MEASURED on deployed staging (`a76f1a0`, again on `46820d6`): a model built
+ * through this route wrote 28 nodes with `model_versions = 0` and
+ * `current_model_version_id = NULL`, while the CONVENTIONAL route minted a
+ * version for the identical brief in the same run. A user's first model had no
+ * version to reread, no receipt and no rollback point.
+ *
+ * The cause was not a lost version — it was never requested: the write carried
+ * no `modelVersion`, so `supabase-store.ts` took its non-versioned branch.
+ *
+ * ⚠ AND THE FIX IS NOT UNCONDITIONAL, WHICH MATTERS. This route accepts graphs
+ *   that `PersistedGraphV3` rejects — its own ingress schema is looser. The
+ *   carrier then SKIPS (`graph_missing_required_fields`) rather than throwing,
+ *   and the registration still succeeds with no version. That is the correct
+ *   behaviour (a graph with no derivable version must not fail the import), but
+ *   it means "registration" and "versioned" are not synonyms. Both arms are
+ *   pinned below; the skip arm is the one that keeps the import path working.
+ */
+const VERSIONABLE = {
+  nodes: [
+    { id: "n1", kind: "factor", label: "Budget", observed_state: { value: 0.5 } },
+    { id: "n2", kind: "factor", label: "Risk", observed_state: { value: 0.25 } },
+  ],
+  edges: [],
+};
+
+describe("register — the atomic write carries a model-version carrier", () => {
+  it("RED: a versionable graph supplies a modelVersion", async () => {
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: VERSIONABLE });
+    expect(res.statusCode).toBe(200);
+    expect(append).toHaveBeenCalledTimes(1);
+    expect(
+      append.mock.calls[0][0].modelVersion,
+      "without this the store takes its NON-versioned branch and no version row is ever written",
+    ).toBeDefined();
+    await app.close();
+  });
+
+  it("RED: the carrier satisfies both invariants append_turn_atomic_v5 raises on", async () => {
+    const app = await buildApp();
+    await post(app, SCENARIO, { graph: VERSIONABLE });
+    const write = append.mock.calls[0][0];
+    const carrier = write.modelVersion;
+    expect(
+      carrier.source_turn_id,
+      "the RPC raises `creation/source turn carrier mismatch` when these differ",
+    ).toBe(write.turn_id);
+    expect(
+      carrier.creation_kind,
+      "the RPC requires exactly this from any caller and derives `initial` itself when the scenario has no versions yet",
+    ).toBe("committed_mutation");
+    expect(carrier.graph_identity_hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(carrier.analysis_affecting_hash).toMatch(/^[0-9a-f]{64}$/);
+    await app.close();
+  });
+
+  it("CONTROL — a graph PersistedGraphV3 rejects still registers, with NO carrier and no throw", async () => {
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED });
+    expect(res.statusCode, "an unversionable graph must not fail the import").toBe(200);
+    expect(append).toHaveBeenCalledTimes(1);
+    expect(
+      append.mock.calls[0][0].modelVersion,
+      "the carrier SKIPS rather than throwing — registration and versioning are not synonyms",
+    ).toBeUndefined();
+    await app.close();
+  });
+});

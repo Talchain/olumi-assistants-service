@@ -948,7 +948,7 @@ function classifyGraphV3NonConformance(error: ZodError): ModelVersionCarrierSkip
  * and the commit emits it from the post-success block once the append is
  * durable.
  */
-type AtomicCommittedModelVersionOutcome =
+export type AtomicCommittedModelVersionOutcome =
   | { readonly kind: 'plan'; readonly write: AtomicCommittedModelVersionWrite }
   /** A DESIGNED no-version outcome (flag off, no graph, no_op, presentation_only). Silent. */
   | { readonly kind: 'none' }
@@ -959,9 +959,32 @@ type AtomicCommittedModelVersionOutcome =
  * Log the skip immediately (a log line is not a claim about a committed
  * transaction) and carry the reason to the post-success emit.
  */
+/**
+ * The ONLY facts the version carrier needs. Narrower than `CommitMetadata` on
+ * purpose: it lets the carrier serve the REGISTRATION path as well as the turn
+ * path without that path having to fabricate a `CommitMetadata` it does not
+ * have. `CommitMetadata` satisfies this structurally, so the turn call site is
+ * unchanged.
+ *
+ * ⭐ ONE BUILDER, TWO CALL SITES — never a second one. The registration path
+ *    previously supplied no `modelVersion` at all, so `supabase-store.ts`
+ *    took its non-versioned branch and a model created through it had no
+ *    version row and a NULL head. Measured on deployed staging: 28 nodes
+ *    written, `model_versions = 0`, `current_model_version_id = NULL`, while
+ *    the conventional route minted one for the identical brief.
+ */
+export interface AtomicVersionCarrierContext {
+  readonly scenario_id: string;
+  readonly turn_id: string;
+  readonly baseGraphForInvariants?: unknown;
+  readonly versionActor?:
+    | { readonly kind: 'known'; readonly authored_by: VersionAuthoredBy }
+    | { readonly kind: 'system' };
+}
+
 function skipAtomicCommittedModelVersion(
   reason: ModelVersionCarrierSkipReason,
-  metadata: CommitMetadata,
+  metadata: AtomicVersionCarrierContext,
 ): AtomicCommittedModelVersionOutcome {
   log.warn(
     {
@@ -975,9 +998,9 @@ function skipAtomicCommittedModelVersion(
 }
 
 /** Build the carrier and the exact graph bytes it content-addresses. */
-function buildAtomicCommittedModelVersion(
+export function buildAtomicCommittedModelVersion(
   graph: unknown,
-  metadata: CommitMetadata,
+  metadata: AtomicVersionCarrierContext,
 ): AtomicCommittedModelVersionOutcome {
   if (config.cee.modelVersionsEnabled !== true || !graphWasProvided(graph)) {
     return { kind: 'none' };
