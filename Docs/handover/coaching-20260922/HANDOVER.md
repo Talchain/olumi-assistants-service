@@ -36,6 +36,16 @@ is a deliberate choice, not an oversight.
 
 ## A — DURABLE REPLAY IDENTITY · `feat/durable-turn-identity` @ `15d6852e745e0c69bd8d4a0ba3c3b5a18b4b3bc8`
 
+> ⭐ **READ `REPLAY-REACHABILITY-WITNESS.md` IN THIS DIRECTORY FIRST.** SDL's final
+> correction was right that this section originally *inferred* the replay
+> mechanism works. It is now **executed**: the deployed `append_turn_atomic_v5`
+> decides replay before CAS (lookup line 86, CAS raise line 171, ordering
+> control in the same run), and a witness on a throwaway scenario recovers the
+> SAME turn row and the SAME receipt version_id with no duplicate turn or
+> version, while a genuinely new mutation on the same stale expected hash is
+> still refused (`OLGC1`). The mechanism works; the handler path simply never
+> reaches it. **Persistence is not at fault — do not reopen SDL.**
+
 ### First wrong boundary
 `turn-executor.ts` committed every turn under **`context.request_id`**, a
 server-minted per-HTTP-request id, not the client's `turn_id`. That id IS the
