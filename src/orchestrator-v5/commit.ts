@@ -1575,6 +1575,46 @@ export async function commitDirectAnswer(
     );
   }
 
+  // ⭐⭐ A REPLAY MUST NOT NARRATE AN EDIT IT DID NOT MAKE.
+  //
+  // Witnessed on deployed staging (build c12a54d, 22 Sep 2026), scenario
+  // 6f59981e-541a-48ad-a774-cac6de21f810, signed-in, three real turns:
+  //   1. turn T1 sets Sales Cycle Length to 14    -> persisted 14
+  //   2. turn T2 (a DIFFERENT turn) sets it to 17 -> persisted 17
+  //   3. the T1 client never got its response and RETRIES T1:
+  //        SAID : "Updated Sales Cycle Length from 17 months to 14 months."
+  //        STATE: dTurns 0, dVersions 0, persisted value 17, hash UNCHANGED.
+  //
+  // The DURABLE behaviour is correct and is NOT changed here: the retry is
+  // idempotent, writes nothing, and does not clobber the newer value. What was
+  // wrong is the SENTENCE. The handler re-runs against CURRENT state and
+  // composes its confirmation BEFORE the commit resolves as a replay, so the
+  // user is told their edit landed while the model holds someone else's value.
+  //
+  // The honest answer to a replay is the prose the turn ACTUALLY recorded —
+  // which is what idempotent replay means for the response, not only the write.
+  // `replayedAssistantMessage` is present ONLY on a replay (see
+  // `SessionAppendOutcome`), so an ordinary first commit is byte-identical.
+  if (
+    appendOutcome.replayedAssistantMessage !== undefined &&
+    appendOutcome.replayedAssistantMessage !== responseWithModelVersionReceipt.assistant_text
+  ) {
+    log.info(
+      {
+        scenario_id: metadata.scenario_id,
+        turn_id: metadata.turn_id,
+        turn_row_id: persistedRowId,
+      },
+      'V5 commit — this turn REPLAYED an already-committed turn; returning the ' +
+        'prose it durably recorded rather than the freshly composed confirmation, ' +
+        'which would have claimed an edit that did not happen',
+    );
+    responseWithModelVersionReceipt = {
+      ...responseWithModelVersionReceipt,
+      assistant_text: appendOutcome.replayedAssistantMessage,
+    };
+  }
+
   // Post-success observability. The turn's state is now durably committed; the
   // telemetry below is best-effort and MUST NOT convert a successful persist
   // into a turn failure. `emit()`'s pre-Datadog path (sanitize / test sink /

@@ -94,6 +94,21 @@ export interface AtomicCommittedModelVersionReceipt {
 export interface SessionAppendOutcome {
   readonly id: string;
   readonly modelVersionReceipt?: AtomicCommittedModelVersionReceipt;
+  /**
+   * The assistant prose this (scenario_id, turn_id) ALREADY had durably
+   * recorded when the append ran — present ONLY when the append was a replay.
+   *
+   * ⛔ WHY THE CALLER MUST PREFER IT. Witnessed on deployed staging
+   * (build c12a54d, 22 Sep 2026): after a turn committed and a LATER turn moved
+   * the same factor on, the first turn's client retried and was answered
+   * "Updated Sales Cycle Length from 17 months to 14 months" while the persisted
+   * value stayed 17 and nothing was written. The handler re-runs against CURRENT
+   * state and composes its confirmation BEFORE the commit resolves as a replay,
+   * so without this field the caller narrates an edit that did not happen.
+   *
+   * Absent on every ordinary first commit, so a non-replay turn is untouched.
+   */
+  readonly replayedAssistantMessage?: string;
 }
 
 /**
