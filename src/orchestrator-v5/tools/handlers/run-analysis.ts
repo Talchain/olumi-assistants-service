@@ -104,6 +104,7 @@ import {
   readinessQuestions,
   resolveRunAdmission,
 } from './analysis-ready-core.js';
+import { AnalysisSnapshotDivergedError } from '../../run-analysis-snapshot-binding.js';
 // The 2026-08-28 disclosure defect: the run proceeds past unset option effects
 // (the compute-discard waiver) and the analyse turn says nothing about them.
 import {
@@ -424,6 +425,30 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
               ...(readinessQuestions(verdict).length > 0
                 ? { readiness_questions: [...readinessQuestions(verdict)] }
                 : {}),
+            },
+            cause: readError,
+          },
+        );
+      }
+      // The turn's two reads of the persisted graph described DIFFERENT states
+      // (a write landed between read A's freshness verdict and read B). That is
+      // the user's own model moving, NOT infrastructure failure — and the
+      // generic wrap below is FATAL: it reaches the wire as INTERNAL_ERROR on an
+      // HTTP 500 with NEITHER turn persisted, because `commitPerformed` is still
+      // false at that point. Recoverable typed 200 + honest copy + re-run chip,
+      // exactly as `AnalysisNotReadyError` is handled immediately above.
+      if (readError instanceof AnalysisSnapshotDivergedError) {
+        throw new HandlerInvocationFailedError(
+          `Analysis snapshot diverged for ${args.scenario_id}`,
+          {
+            cause_kind: 'analysis_snapshot_diverged',
+            // Retrying re-derives BOTH reads from one state, so a retry
+            // genuinely succeeds — unlike the fatal path, where `retryable:true`
+            // sat on a 500 and invited a loop that could never clear.
+            retryable: true,
+            details: {
+              handler_id: 'run_analysis',
+              scenario_id: args.scenario_id,
             },
             cause: readError,
           },

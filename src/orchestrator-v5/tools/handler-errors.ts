@@ -57,6 +57,16 @@ export type HandlerInvocationFailedCause =
   // safely encoded, or structurally un-analysable). Recoverable typed 200 with
   // an honest next-step — NOT a 500. Carries `reason_code` + `next_step` in details.
   | 'analysis_not_ready'
+  // The turn's two reads of the persisted graph described DIFFERENT states: a
+  // write landed between read A (which produced this turn's freshness verdict)
+  // and read B (which stamps `graph_hash_at_run`). Recoverable typed 200 with
+  // honest copy + a re-run chip — NOT `scenario_read_failed`, which is FATAL and
+  // reaches the wire as INTERNAL_ERROR on an HTTP 500 that loses the turn.
+  //
+  // ⚠ This union is LOCAL TypeScript, not a published contract — `cause_kind`
+  //   appears nowhere in `@talchain/schemas`. Adding a tag here needs no publish
+  //   and no migration, which is exactly what this union's header asks for.
+  | 'analysis_snapshot_diverged'
   // V5 D1 mutation handlers (set_factor_value, add_constraint,
   // adjust_edge_strength). Surface at execute-time when the validator's
   // structural pass missed the failure — e.g. graph-dependent checks

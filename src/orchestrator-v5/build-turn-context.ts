@@ -92,6 +92,12 @@ import { SessionReadError, GraphStaleWriteError, type SessionStore } from './ses
 export { GraphStaleWriteError };
 import { getSessionStore } from './session/index.js';
 import type { PendingAction } from './session/pending-action.js';
+import {
+  AnalysisSnapshotDivergedError,
+  NO_CLAIM,
+  analysisGraphIdentityOf,
+  currentBoundAnalysisSnapshot,
+} from './run-analysis-snapshot-binding.js';
 
 /**
  * F2 (Codex deep-review) — discriminated canonical graph-read state.
@@ -2756,6 +2762,37 @@ export async function loadScenarioSnapshotForRunAnalysis(
     scenarioId,
     sessionStore,
   );
+
+  // ⭐⭐⭐ ONE TURN, ONE PERSISTED SNAPSHOT (single-snapshot race). This is
+  // read B. If the turn bound what read A saw, the two MUST describe the same
+  // persisted state — otherwise this call is about to stamp `graph_hash_at_run`
+  // on a fact against a graph the turn's freshness verdict never described.
+  //
+  // Placed BEFORE the null-graph branch below on purpose: if the graph was
+  // DELETED between the reads, that branch would tell a user who had a model
+  // thirty seconds ago to "draft a model first", which is a lie about their
+  // own data. Divergence is answered as divergence either way.
+  //
+  // `undefined` is NO CLAIM, not agreement: every non-turn caller (test double,
+  // script, future ingress) keeps today's behaviour exactly.
+  const boundSnapshot = currentBoundAnalysisSnapshot();
+  if (
+    boundSnapshot !== undefined &&
+    boundSnapshot.scenarioId === scenarioId &&
+    boundSnapshot.analysisGraphHash !== NO_CLAIM
+  ) {
+    const observedGraphHash = analysisGraphIdentityOf(persistedGraph);
+    if (
+      observedGraphHash !== NO_CLAIM &&
+      observedGraphHash !== boundSnapshot.analysisGraphHash
+    ) {
+      throw new AnalysisSnapshotDivergedError({
+        scenarioId,
+        expectedGraphHash: boundSnapshot.analysisGraphHash,
+        observedGraphHash,
+      });
+    }
+  }
   // `== null` (not a truthy check): scope the recovery to a GENUINELY absent graph
   // (null/undefined). A present-but-corrupt falsy value (e.g. `0` / `""`) is malformed,
   // not missing — it falls through to GraphV3.safeParse below and fails into

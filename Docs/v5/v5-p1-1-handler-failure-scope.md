@@ -196,3 +196,41 @@ Scope for a future P1-1 branch, ordered by user-facing impact:
 - Added at `src/orchestrator-v5/compose/recoverable-handler-causes.ts` (the locked set) + `handler-errors.ts` (cause union + `next_step`/`reason_code` details) + `handler-failure-responses.ts` (the 200 composer case). The lock-size test (`recoverable-handler-response.test.ts`) is updated 7 → 8.
 - Rationale matches §"user-recoverable" above: the failure reflects **graph state / user intent**, not infrastructure — exactly the clean direct_answer 200 + coaching-chip shape.
 - Scope discipline: this is the **only** handler-failure change in EP2. No other cause kinds, dispatch paths, or 500-vs-200 boundaries were touched.
+
+---
+
+## Decision (recorded): `analysis_snapshot_diverged` — 9 → 10
+
+**Decision (recorded):** a `run_analysis` turn reads the persisted graph TWICE with
+nothing joining them — read A (`build-turn-context`, which produces the turn's
+FRESHNESS verdict) and read B (`loadScenarioSnapshotForRunAnalysis`, which stamps
+`graph_hash_at_run`). A write landing between them made the two describe different
+states **silently**. Witnessed at the wire on deployed staging (build `c12a54d`):
+3 of 6 trials diverged, with a deterministic **~0.8–1.5 s** window, every diverged
+run returning **HTTP 200 with no warning**. Exposure ≈ **0.04%** of analysis turns.
+
+The refusal was previously flattened to `scenario_read_failed`, which is FATAL and
+reached the wire as `INTERNAL_ERROR` on an **HTTP 500 with NEITHER the user turn
+nor the assistant turn persisted** — because `commitPerformed` is still `false` at
+dispatch and route-v2 fails closed on `commit_performed === false`. As implemented
+that traded a rare silent-wrong-graph for a **lost turn**.
+
+`analysis_snapshot_diverged` is therefore added to the recoverable typed-200 causes
+so a concurrent edit to the user's own model returns an **honest recovery path**
+(200 + "your model changed while this analysis was being prepared… run it again" +
+a re-run chip) rather than a 500. `retryable: true` is now correct rather than
+merely present: a retry re-derives both reads from one state and genuinely
+succeeds, where before it sat on a 500 and invited a loop that could never clear.
+
+Same principle this register already recorded twice — `analysis_not_ready` (7 → 8)
+and `analysis_engine_busy` (8 → 9): **surfacing a user-recoverable state as a 500
+is a false claim about the system's health.**
+
+**Deliberately narrow.** ONLY the typed divergence recovers. Every other read
+failure — including `scenario_read_failed` itself — stays FATAL, so genuine
+breakage remains loud; pinned by a control in
+`snapshot-divergence-is-recoverable.test.ts` and by the pre-existing fatal list in
+`recoverable-handler-response.test.ts`.
+
+The `RECOVERABLE_HANDLER_CAUSES` lock expands from **9 to 10**.
+
