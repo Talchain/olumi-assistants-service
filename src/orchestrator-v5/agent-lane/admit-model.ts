@@ -16,7 +16,8 @@
  * the same token stay distinct and stay stable.
  */
 
-import type { RepairEntry } from '@talchain/schemas';
+import { REPAIR_CODES, type RepairEntry } from '@talchain/schemas';
+import { CEE_GOAL_THRESHOLD_FRAME } from '../../utils/goal-threshold-cap.js';
 import { admitCandidateLinks, type CandidateLink, type AdmittedEdge } from './admit-candidate.js';
 import {
   admitCandidateConstraints,
@@ -52,9 +53,25 @@ export interface AdmittedNode {
   kind: CandidateNodeKind;
   label: string;
   category?: 'controllable' | 'observable' | 'external';
-  observed_state?: { value: number; unit?: string };
+  observed_state?: { value: number; unit?: string; source?: string };
   goal_threshold?: number;
-  provenance?: { source: string };
+  /** `cee-v3.ts:210`. A threshold with no unit is not a threshold. */
+  goal_threshold_unit?: string;
+  /**
+   * `cee-v3.ts:246`. The contract states a consumer must produce NO goal
+   * probability when this is absent, so omitting it silently disables the goal.
+   */
+  goal_threshold_frame?: 'level' | 'delta';
+  /**
+   * `reasoning` carries the inference CLASS. `source` alone cannot: `inferred`
+   * (the builder's reading of the brief) and `ai_proposed` (the widener's
+   * addition beyond it) both map to `cee_hypothesis`, and W3 has to score
+   * unsupported inference. They are NOT split across `source` values because
+   * `domain_knowledge` is absent from the narrower enums in
+   * `src/schemas/analysis-ready.ts:41` and `cee-v3.ts:560,:590`, so stamping it
+   * would risk a cross-schema validation failure for a cosmetic gain.
+   */
+  provenance?: { source: string; reasoning?: string };
 }
 
 export interface AdmittedModel {
@@ -103,6 +120,15 @@ function assignIds(labels: readonly string[]): Map<string, string> {
 const sourceFor = (provenance: string): string =>
   provenance === 'explicit' ? 'brief_extraction' : 'cee_hypothesis';
 
+/** The inference class, preserved where `source` cannot express it. */
+const reasoningFor = (provenance: string): string => {
+  if (provenance === 'explicit') return 'Stated in the brief by the user.';
+  if (provenance === 'ai_proposed') {
+    return 'Added by the widening pass, beyond the brief. A proposal, not a fact.';
+  }
+  return 'Inferred from the brief by the faithful builder; not stated there.';
+};
+
 export function admitCandidateModel(
   model: CandidateModel,
   widened: WidenerAdditions = {},
@@ -111,7 +137,17 @@ export function admitCandidateModel(
 
   // Fixed traversal order => deterministic ids.
   const entities: { label: string; kind: CandidateNodeKind; provenance: string; node?: Partial<AdmittedNode> }[] = [
-    { label: model.goal.metric, kind: 'goal', provenance: model.goal.provenance, node: { goal_threshold: model.goal.value } },
+    {
+      label: model.goal.metric,
+      kind: 'goal',
+      provenance: model.goal.provenance,
+      node: {
+        goal_threshold: model.goal.value,
+        // A bare number is indistinguishable from a cost cap with no deadline.
+        ...(model.goal.unit ? { goal_threshold_unit: model.goal.unit } : {}),
+        goal_threshold_frame: CEE_GOAL_THRESHOLD_FRAME,
+      },
+    },
     ...model.options.map((o) => ({ label: o.label, kind: 'option' as const, provenance: o.provenance })),
     ...model.factors.map((f) => ({
       label: f.label,
@@ -146,6 +182,42 @@ export function admitCandidateModel(
     ...(widened.proposed_outcomes ?? []).map((o) => ({ label: o.label, kind: 'outcome' as const, provenance: 'ai_proposed' })),
   ];
 
+  // The goal's operator and horizon have NO GraphV3 home. Recording them is the
+  // only way they survive the projection at all.
+  //
+  // ⚠ `REPAIR_CODES` has no member meaning "a representation was dropped" —
+  // the closest is RESOLVE_BELIEF_PRECEDENCE. That is a gap in the shared
+  // vocabulary, named here rather than papered over with a code that misdescribes
+  // what happened.
+  if (typeof model.goal.horizon_months === 'number') {
+    loss.push({
+      code: REPAIR_CODES.RESOLVE_BELIEF_PRECEDENCE,
+      layer: 'cee',
+      field_path: `nodes[${slugId(model.goal.metric)}].horizon_months`,
+      before: model.goal.horizon_months,
+      after: null,
+      reason:
+        `The goal is stated with a ${model.goal.horizon_months}-month horizon, and GraphV3 has ` +
+        'nowhere to put it. The projection therefore expresses a threshold with no deadline: ' +
+        '"reach it" and "reach it within a year" become the same goal. The horizon survives only ' +
+        'in this record and in the rich model.',
+      severity: 'warn',
+    });
+  }
+  if (typeof model.goal.operator === 'string' && model.goal.operator.length > 0) {
+    loss.push({
+      code: REPAIR_CODES.RESOLVE_BELIEF_PRECEDENCE,
+      layer: 'cee',
+      field_path: `nodes[${slugId(model.goal.metric)}].goal_operator`,
+      before: model.goal.operator,
+      after: null,
+      reason:
+        `The goal direction ("${model.goal.operator}") is not carried by \`goal_threshold\`, which ` +
+        'is a bare number. A consumer cannot tell a floor from a ceiling from the projection alone.',
+      severity: 'warn',
+    });
+  }
+
   const ids = assignIds(entities.map((e) => e.label));
   const nodes: AdmittedNode[] = [];
   const seen = new Set<string>();
@@ -159,7 +231,7 @@ export function admitCandidateModel(
       id,
       kind: e.kind,
       label: e.label.slice(0, MAX_LABEL),
-      provenance: { source: sourceFor(e.provenance) },
+      provenance: { source: sourceFor(e.provenance), reasoning: reasoningFor(e.provenance) },
       ...(e.node ?? {}),
     });
   }
