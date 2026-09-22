@@ -1650,9 +1650,22 @@ export async function commitDirectAnswer(
 
     let currentState: Record<string, unknown> | null = null;
     let currentSentence: string | null = null;
-    if (patchTargetId !== null && sessionStore !== undefined) {
+    // ⛔ THIS GUARD TESTED THE OPTIONAL PARAMETER, NOT THE RESOLVED STORE, AND
+    //    THAT MADE THE RECONCILIATION DEAD ON STAGING.
+    //
+    //    `store` is resolved at the top of this function precisely so callers
+    //    need not pass one (`sessionStore ?? getSessionStore()`), and the real
+    //    route relies on that default. Testing `sessionStore` meant the reread
+    //    only ever ran when a caller passed a store EXPLICITLY — which is what
+    //    the unit tests do, so the acceptance seam could not fail.
+    //
+    //    MEASURED on deployed `34ee62f` after #1685 landed: the node carried
+    //    `display_value:"17 months"` and the block carried `target_id`, yet the
+    //    reply was "I couldn't read the current value just now" with
+    //    `after: null`. Nothing was unreadable; the reread never ran.
+    if (patchTargetId !== null) {
       try {
-        const currentGraph = await sessionStore.loadGraph(metadata.scenario_id);
+        const currentGraph = await store.loadGraph(metadata.scenario_id);
         const nodes = (currentGraph as { nodes?: unknown } | null)?.nodes;
         if (Array.isArray(nodes)) {
           for (const n of nodes) {
