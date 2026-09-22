@@ -73,8 +73,59 @@ export type ContextFreshness =
  */
 export interface PromptSnapshot {
   readonly id: string;
-  readonly version: number;
+  /** `null` when the PMS could not name a version (a fallback). Never cacheable. */
+  readonly version: number | null;
   readonly text: string;
+  /** True when this text came from the PMS rather than a hardcoded fallback. */
+  readonly governed?: boolean;
+  /** False whenever there is no immutable (id, version) key to cache it under. */
+  readonly cacheable?: boolean;
+}
+
+/** What `IPromptReader.getActivePrompt` returns. Accepted verbatim. */
+export interface ActivePromptResult {
+  readonly content: string;
+  readonly source: 'database' | 'cache' | 'fallback';
+  readonly promptId?: string;
+  readonly version?: number;
+  readonly contentHash: string;
+}
+
+/**
+ * Build an immutable snapshot from the PMS reader's result.
+ *
+ * ⛔ THE FALLBACK ARM IS WHY THIS IS NOT BOOKKEEPING. `getActivePrompt` falls
+ * back to hardcoded text when the PMS is unreachable, and that text may carry
+ * NO version. Caching it under a governed key would serve ungoverned text and
+ * would look like a cache HIT rather than an outage. It is admitted — refusing
+ * it would take the product down whenever the PMS blinked — but marked
+ * `governed: false, cacheable: false`, and `assembleRequest` reports that.
+ *
+ * `source: 'cache'` is NOT a downgrade: the repository's cache holds text that
+ * came from the PMS, so it is still governed. Cache is a transport.
+ *
+ * The integrity check is the immutability guarantee doing real work: if the
+ * text does not hash to the `contentHash` it travelled with, the pair (id,
+ * version) is no longer naming one text, and every prefix hash keyed on it
+ * would be a lie. That throws rather than degrades.
+ */
+export function promptSnapshotFrom(result: ActivePromptResult): PromptSnapshot {
+  const actual = createHash('sha256').update(result.content, 'utf8').digest('hex');
+  if (result.contentHash !== actual) {
+    throw new Error(
+      `Prompt snapshot integrity failure: ${result.promptId ?? '<unknown>'}` +
+        `@${result.version ?? '<unversioned>'} content does not match its contentHash.`,
+    );
+  }
+  const governed = result.source !== 'fallback';
+  const version = typeof result.version === 'number' ? result.version : null;
+  return Object.freeze({
+    id: result.promptId ?? '<unidentified>',
+    version,
+    text: result.content,
+    governed,
+    cacheable: governed && version !== null,
+  });
 }
 
 /**
@@ -189,7 +240,10 @@ export interface AssembledRequest {
   };
   readonly diagnostics: {
     readonly prompt_id: string;
-    readonly prompt_version: number;
+    readonly prompt_version: number | null;
+    readonly prompt_governed: boolean;
+    /** False => this prefix must not be cached, however stable it looks. */
+    readonly prefix_cacheable: boolean;
     readonly context_freshness: ContextFreshness['kind'];
     readonly context_reason: string | null;
     readonly tool_count: number;
@@ -227,6 +281,12 @@ export function assembleRequest(input: {
     diagnostics: {
       prompt_id: input.promptSnapshot.id,
       prompt_version: input.promptSnapshot.version,
+      prompt_governed: input.promptSnapshot.governed !== false,
+      // Defaults are chosen so an under-specified snapshot cannot silently
+      // become cacheable: a snapshot with no version never is.
+      prefix_cacheable:
+        input.promptSnapshot.cacheable ??
+        (input.promptSnapshot.governed !== false && input.promptSnapshot.version !== null),
       context_freshness: input.freshness.kind,
       context_reason: 'reason' in input.freshness ? input.freshness.reason : null,
       tool_count: tools.length,
