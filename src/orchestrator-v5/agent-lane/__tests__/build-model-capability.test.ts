@@ -11,6 +11,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { config } from '../../../config/index.js';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
 import { budgetFor } from '../model-budgets.js';
@@ -58,20 +59,25 @@ function dispatcher(opts: { before: unknown[]; after: unknown[]; registerStatus?
 const NON_EMPTY = [{ id: 'x', kind: 'goal', label: 'Already here' }];
 
 describe('the flag the route actually reads', () => {
-  it('is declared on the SAME config object the route gates on', () => {
+  it('names a config object that REALLY carries agentLaneEnabled', () => {
+    // \u26d4 AN EARLIER VERSION OF THIS TEST MATCHED THE FILE, NOT THE CONFIG:
+    // a non-greedy `[\\s\\S]*?` anchored at `features: z.object({` ran on past
+    // that object's closing brace and found `agentLaneEnabled` inside `proxy`.
+    // It passed under the very mutant it existed to catch. So this asks the
+    // PARSED config object \u2014 the same object the route dereferences.
     const route = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
     const gate = /config\.([A-Za-z]+)\??\.agentLaneEnabled/.exec(route);
     expect(gate, 'the route must gate on config.<object>.agentLaneEnabled').not.toBeNull();
     const objectTheRouteReads = gate![1];
 
-    // …and the schema must declare it on that same object, not another one.
-    const cfg = readFileSync(new URL('../../../config/index.ts', import.meta.url), 'utf8');
-    const decl = new RegExp(`${objectTheRouteReads}:\\s*z\\.object\\(\\{[\\s\\S]*?agentLaneEnabled`);
+    const section = (config as unknown as Record<string, Record<string, unknown> | undefined>)[objectTheRouteReads];
+    expect(section, `config.${objectTheRouteReads} does not exist`).toBeTypeOf('object');
     expect(
-      decl.test(cfg),
-      `the route gates on config.${objectTheRouteReads}.agentLaneEnabled, but agentLaneEnabled is ` +
-        `not declared on the ${objectTheRouteReads} schema — the route would never mount`,
-    ).toBe(true);
+      typeof section!.agentLaneEnabled,
+      `the route gates on config.${objectTheRouteReads}.agentLaneEnabled, but that key is not on ` +
+        `the parsed config.${objectTheRouteReads} \u2014 the gate can never be true and the route ` +
+        `would never mount, however the environment is set`,
+    ).toBe('boolean');
   });
 });
 
