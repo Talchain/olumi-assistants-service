@@ -484,6 +484,35 @@ machine, that work does not travel. Whoever owns each branch has to decide, and
 `scripts/clone-census.sh` is the tool that enumerates it (exit `2` =
 could-not-measure = failure, never a pass).
 
+### ⛔ CORRECTION TO THIS VERY SECTION — the CEE main clone DOES hold uncommitted source
+
+An earlier draft said the contrast control found no authored source uncommitted.
+**That control was run on the PLoT clone only, and I let its result stand for the
+estate.** Re-run per repo, the CEE main clone (branch `docs/claude-md-restructure`)
+holds **613 insertions / 63 deletions of UNSTAGED authored source**:
+
+```
+ data/prompts.json                                           | 384 ++++++---
+ .../routing/__tests__/post-analysis-advice-gate.test.ts     | 245 +++++
+ .../routing/post-analysis-advice-gate.ts                    |  47 +++
+```
+
+A 47-line change to the post-analysis advice gate **with a 245-line test** — that
+is someone's in-flight work, not scratch. It is not this session's (this session
+worked only in `/private/tmp` clones) and the file's last commit is `f78755ad3`
+from June, so the provenance is an earlier session or a peer.
+
+**It is NOT committed to any branch, deliberately** — publishing an unfinished
+edit as though it were finished is worse than leaving it. Instead the content is
+preserved as a patch so it survives this machine:
+`unbanked/cee-main-clone-uncommitted-20260922.patch` (933 lines). Apply with
+`git apply` in the CEE clone to restore it.
+
+Untracked files in both main clones are indexed by NAME only in the same
+directory. Their contents are deliberately not published: they are unread
+documents on a PUBLIC repository and one is a proposed database security
+hardening script — reading and publishing those is their author's call.
+
 ### Two smaller items in the same class
 - `plot-lite-service` has `CLAUDE.md` **staged but uncommitted** (`M ` in the
   index) on branch `docs/claude-md-restructure`, plus deletions of vendored
