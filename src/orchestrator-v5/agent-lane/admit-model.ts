@@ -102,7 +102,7 @@ export interface CandidateModel {
      */
     changes?: readonly string[];
   }[];
-  readonly factors: readonly { label: string; role: 'controllable' | 'observable' | 'external'; baseline_known: boolean; baseline_value: number | null; unit: string | null; provenance: string }[];
+  readonly factors: readonly { label: string; role: 'controllable' | 'observable' | 'external'; baseline_known: boolean; baseline_value: number | null; unit: string | null; provenance: string; plausible_max?: number | null }[];
   readonly risks: readonly { label: string; provenance: string }[];
   readonly outcomes: readonly { label: string; provenance: string }[];
   readonly links: readonly CandidateLink[];
@@ -261,6 +261,52 @@ const inferenceClassFor = (provenance: string): InferenceClass => {
   return 'builder_inferred';
 };
 
+
+/**
+ * ⭐ A BARE AMOUNT IS UNANALYSABLE, AND THAT IS THE PRODUCT'S OWN RULE.
+ *
+ * ⛔ MEASURED LIVE, 22 Sep, served 877ae800, on a model with every factor
+ * valued and zero structural blockers. Olumi refused:
+ *
+ *   "Pro feature value, Pro subscriber count, New Pro conversions, Revenue per
+ *    Pro subscriber is recorded as a bare amount with no range for me to
+ *    measure it against … I've stopped rather than show you a confident wrong
+ *    answer."   -> `blocked_reason: baseline_scale_unresolved`
+ *
+ * `findScaleIncoherentBaselineFactorIds` accepts a factor on exactly three
+ * grounds: it carries a `cap`; its value is already within [0, 1]; or its
+ * `{value, raw_value}` pair encodes the frame (`raw > value`). Nothing else.
+ *
+ * ⛔ AND NO LATER EDIT CAN SUPPLY ONE. `factor_value_edit` is `.strict()` with
+ * no cap field, and posting the pair directly is accepted with HTTP 200 and
+ * then normalised back to `raw === value` — the one shape `recoverScaleFrame`
+ * explicitly refuses. Measured on the wire, both arms. So the frame must be
+ * established HERE, at construction, or the factor is permanently unanalysable.
+ *
+ * ⚠ THE CAP IS A FRAME, NOT A CLAIM. `raw_value` keeps the user's own number
+ * untouched and `value` is that number read against the range, which is what
+ * the engine compares across factors. The range is the model's proposal and is
+ * recorded in the ledger as such — it is not a forecast, and it never replaces
+ * what the user said.
+ */
+function framedObservedState(f: {
+  baseline_value: number | null; unit: string | null; provenance: string; plausible_max?: number | null;
+}): Record<string, unknown> {
+  const raw = f.baseline_value as number;
+  const base = {
+    ...(f.unit ? { unit: f.unit } : {}),
+    ...(f.provenance === 'explicit' ? { source: 'brief_extraction' } : {}),
+  };
+  const cap = f.plausible_max;
+  // Already a proportion, or no usable range: leave it exactly as it was. A
+  // cap that is not strictly above the value would encode a frame of 1 or less,
+  // which `recoverScaleFrame` refuses and which would misstate the magnitude.
+  if (typeof cap !== 'number' || !Number.isFinite(cap) || cap <= 1 || raw <= 0 || raw > cap) {
+    return { value: raw, ...base };
+  }
+  return { value: raw / cap, raw_value: raw, cap, declared_scale: 'unit_interval', ...base };
+}
+
 export function admitCandidateModel(
   model: CandidateModel,
   widened: WidenerAdditions = {},
@@ -312,13 +358,15 @@ export function admitCandidateModel(
         // to decide whether to audit the figure against the brief. Correcting only
         // the entity stamp left the figure unaudited; measured, not assumed.
         ...(f.baseline_known && typeof f.baseline_value === 'number'
-          ? {
-              observed_state: {
-                value: f.baseline_value,
-                ...(f.unit ? { unit: f.unit } : {}),
-                ...(f.provenance === 'explicit' ? { source: 'brief_extraction' } : {}),
-              },
-            }
+          ? { observed_state: framedObservedState(f) }
+          : {}),
+        // ⭐ THE FRAME TRAVELS WITH THE NODE, not only with the baseline. A
+        // factor with no value today still needs its range, because the value
+        // a user adopts LATER is normalised against it — and no system event
+        // can set a cap afterwards (measured: `factor_value_edit` accepts a
+        // `{value, raw_value}` pair, returns 200, and stores `raw === value`).
+        ...(typeof f.plausible_max === 'number' && f.plausible_max > 1
+          ? { cap: f.plausible_max }
           : {}),
       },
     })),
@@ -600,12 +648,140 @@ export function admitCandidateModel(
     }
   }
 
+  /**
+   * ⭐ A NODE THAT CANNOT REACH THE GOAL BLOCKS THE WHOLE ANALYSIS.
+   *
+   * ⛔ MEASURED LIVE, 22 Sep, served 877ae800, on the canonical pricing model.
+   * Every factor had a value and the analysis was still refused:
+   *
+   *     blocked_reason: "ORPHAN_NODE"   ← 6 nodes with no edge at all
+   *
+   * and with those six removed, in a controlled arm on a registered copy:
+   *
+   *     blocked_reason: "NO_PATH_TO_GOAL"  ← 2 more, connected but dead-ended
+   *
+   * Eight of twenty nodes were structurally inert, ALL FIVE risks among them.
+   * The builder is told to wire everything to the goal and it does not, so an
+   * instruction alone is not the fix — this is the deterministic backstop.
+   *
+   * Two steps, in order, because they are different kinds of claim:
+   *
+   * 1. A RISK with no outgoing edge is connected to the goal, negative and
+   *    `defaulted`. This is NOT a guess about which factor it threatens: in
+   *    this taxonomy a risk is by definition something that threatens the
+   *    goal, so the link is entailed by the node's own kind. Same move the
+   *    terminal-outcome repair above already makes, and disclosed the same way.
+   * 2. Anything that STILL cannot reach the goal is withheld from the admitted
+   *    graph and named in `loss`, because there is no non-guessing repair for
+   *    it — and a model nobody can analyse is worse than a model that says
+   *    plainly which pieces it could not wire in.
+   *
+   * Measured effect of exactly this, on exactly that model: 17 of 20 nodes
+   * retained (every risk kept), structural blockers 5 -> 0.
+   */
+  const withRepairs = [...allEdges, ...repaired];
+  const goalForReach = nodes.find((n) => n.kind === 'goal');
+  const riskRepairs: AdmittedEdge[] = [];
+  let finalEdges = withRepairs;
+
+  if (goalForReach !== undefined) {
+    const hasOutgoingNow = new Set(withRepairs.map((e) => e.from));
+    for (const r of nodes.filter((n) => n.kind === 'risk' && !hasOutgoingNow.has(n.id))) {
+      riskRepairs.push({
+        from: r.id,
+        to: goalForReach.id,
+        effect_direction: 'negative',
+        strength: { mean: STRENGTH_DEFAULT_SIGNATURE.mean, std: STRENGTH_DEFAULT_SIGNATURE.std },
+        exists_probability: DEFAULT_EXISTS_PROBABILITY,
+        // The same structured provenance every other machine-authored edge
+        // carries — a repaired link is a hypothesis, and must read as one.
+        provenance: { source: 'cee_hypothesis' },
+        defaulted: true,
+      } as AdmittedEdge);
+      loss.push({
+        field_path: `edges[${r.id}->${goalForReach.id}]`,
+        before: null,
+        after: 'connected',
+        reason:
+          `The risk "${r.label}" was named but never connected to anything, which stops the whole ` +
+          `model being analysed. It has been connected to "${goalForReach.label}" as a negative ` +
+          'influence, with a placeholder strength — that link follows from it being a risk, not ' +
+          'from anything you said, and neither it nor its strength is a measurement.',
+        severity: 'warn',
+      } as RepairEntry);
+    }
+
+    const edgesNow = [...withRepairs, ...riskRepairs];
+    const adjacency = new Map<string, string[]>();
+    for (const e of edgesNow) adjacency.set(e.from, [...(adjacency.get(e.from) ?? []), e.to]);
+    const reaches = (from: string): boolean => {
+      const seen = new Set<string>([from]);
+      const stack = [from];
+      while (stack.length > 0) {
+        const x = stack.pop()!;
+        if (x === goalForReach.id) return true;
+        for (const y of adjacency.get(x) ?? []) if (!seen.has(y)) { seen.add(y); stack.push(y); }
+      }
+      return false;
+    };
+    /**
+     * ⛔ REPORTED, NOT ENFORCED — and that is a deliberate reversal.
+     *
+     * Withholding every unreachable node DOES clear the blocker: measured on a
+     * registered copy of the live model, `ORPHAN_NODE` then `NO_PATH_TO_GOAL`
+     * both went away and structural blockers fell 5 -> 0. It was implemented,
+     * and then withdrawn, for two reasons that outrank it.
+     *
+     * 1. THE NODES IT DELETES ARE THE STRATEGIC ONES. The widener's additions
+     *    are precisely the ones least likely to be wired by the builder, so
+     *    "drop what cannot reach the goal" thins the model exactly where its
+     *    strategic richness lives — the quality this lane is measured on.
+     * 2. IT DOES NOT DELIVER A RUNNING ANALYSIS ANYWAY. With blockers at 0 the
+     *    same run was still refused, `baseline_scale_unresolved`. Paying in
+     *    lost content for a blocker that is not the last one is a bad trade.
+     *
+     * So an unreachable node stays, and is NAMED. The Agent reads it from
+     * `structural_facts.entities_that_cannot_reach_goal`, raises it when it
+     * describes the model, and the user says what it affects — which the
+     * existing `propose_model_change` capability already turns into a link.
+     * A question to the author beats a deletion behind their back.
+     */
+    const adjacencyNow = new Map<string, string[]>();
+    for (const e of edgesNow) adjacencyNow.set(e.from, [...(adjacencyNow.get(e.from) ?? []), e.to]);
+    const reachesGoal = (from: string): boolean => {
+      const seen = new Set<string>([from]);
+      const stack = [from];
+      while (stack.length > 0) {
+        const x = stack.pop()!;
+        if (x === goalForReach.id) return true;
+        for (const y of adjacencyNow.get(x) ?? []) if (!seen.has(y)) { seen.add(y); stack.push(y); }
+      }
+      return false;
+    };
+    for (const n of nodes) {
+      if (n.id === goalForReach.id || n.kind === 'decision' || reachesGoal(n.id)) continue;
+      loss.push({
+        field_path: `nodes[${n.id}]`,
+        before: n.label,
+        after: n.label,
+        reason:
+          `"${n.label}" is in the model but no chain of causes runs from it to "${goalForReach.label}", ` +
+          'so the analysis cannot be run while it is unconnected. It has been kept rather than ' +
+          'deleted — ask what it affects, and the link can be added.',
+        severity: 'warn',
+      } as RepairEntry);
+    }
+    finalEdges = edgesNow;
+  }
+
   return {
     nodes,
     inference_classes,
-    edges: [...allEdges, ...repaired],
+    edges: finalEdges,
     goal_constraints: constraintResult.constraints,
     loss,
+    // `withheld` is a list of LINKS by contract; a withheld NODE is reported
+    // through `loss`, which is the channel the build result already surfaces.
     withheld: [...unresolved, ...linkResult.withheld],
   };
 }

@@ -108,6 +108,14 @@ const AGENT_INSTRUCTIONS = [
    */
   'When you offer starting estimates, offer them THROUGH propose_assumptions so the user can adopt the exact set you showed them in one step. If the user asks you to put your suggested assumptions into the model, that is a request to propose them \u2014 call propose_assumptions with the figures you just gave, then authorise_change once they confirm.',
   'propose_assumptions changes nothing on its own and leaves any factor that already holds a value alone. After authorise_change, report every value the model stored differently from the one approved.',
+  /*
+   * ⭐ THE BLOCKER THAT SURVIVES EVERY VALUE BEING FILLED IN.
+   * Measured live at served 877ae800: eight assumptions adopted, ZERO factors
+   * left without a value — and the analysis still refused, because one option
+   * of three carried `interventions: null`. An option that sets nothing cannot
+   * be compared with one that does.
+   */
+  'get_canonical_state also reports `options_that_change_nothing`. An option in that list sets no factor, so it cannot be compared and it blocks the whole analysis. Raise it when you describe the model \u2014 do not wait for the analysis to refuse \u2014 ask what that option would actually change,, since only a rebuild can encode it.',
   'British English. Concise but substantive.',
 ].join(' ');
 

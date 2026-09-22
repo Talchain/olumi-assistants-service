@@ -52,7 +52,7 @@ export type InternalDispatch = (path: string, body: unknown) => Promise<{ status
 
 interface GraphRead {
   readonly graph_hash: string;
-  readonly nodes: { id: string; kind: string; label: string; description?: string; observed_state?: Record<string, unknown> }[];
+  readonly nodes: { id: string; kind: string; label: string; description?: string; observed_state?: Record<string, unknown>; interventions?: Record<string, unknown>; changes?: unknown }[];
   readonly edges: { from: string; to: string }[];
   readonly analysis_state: unknown;
 }
