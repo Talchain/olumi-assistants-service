@@ -24,6 +24,8 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 
+import { createNoopSessionStore } from '../session/__tests__/fixtures.js';
+
 const GRAPH_AT_17 = {
   nodes: [
     {
@@ -45,7 +47,7 @@ vi.mock('../session/index.js', async (importOriginal) => {
     ...actual,
     // The DEFAULT the real route relies on.
     getSessionStore: () => ({
-      ...actual.createNoopSessionStore?.(),
+      ...createNoopSessionStore(),
       append: async () => ({ id: 'turn-row', replayedPriorTurn: true as const }),
       loadGraph,
     }),
