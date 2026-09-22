@@ -41,7 +41,38 @@ export function authorisationTurnId(proposalId: string): string {
   const hex = b.toString('hex');
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
-import { createProposal, ProposalStore, type ProposalOperation } from '../proposal.js';
+/**
+ * ⭐ THE RECEIPT A WRITE PRODUCED, read with the estate's own parser.
+ *
+ * ⛔ MEASURED GAP: the agent lane read `model_version_receipt` in 0 non-test
+ * files, against 6 elsewhere in the estate. So even when a signed-in authorise
+ * minted a version, `authorise_change` dropped the receipt — the Agent could not
+ * say "saved as version 7", and a retry could not hand back what the first
+ * authorisation produced.
+ *
+ * Returns the compact summary only. The receipt also carries the entire
+ * committed `graph`, which must never ride into a tool result that is
+ * stringified back into the model's context.
+ *
+ * A receipt that is PRESENT but fails the strict schema is reported, not
+ * swallowed and not thrown: the write happened, the user's turn must not
+ * crash, and nobody should read "no receipt" when one arrived malformed.
+ */
+export function receiptSummaryOf(json: unknown): { summary: ReceiptSummary | null; unreadable: boolean } {
+  try {
+    const r = modelVersionMutationReceiptFromResponse(json);
+    if (r === null) return { summary: null, unreadable: false };
+    return {
+      summary: { version: r.sequence, version_id: r.version_id, mutation_id: r.mutation_id, source_turn_id: r.source_turn_id },
+      unreadable: false,
+    };
+  } catch {
+    return { summary: null, unreadable: true };
+  }
+}
+
+import { createProposal, ProposalStore, type ProposalOperation, type ReceiptSummary } from '../proposal.js';
+import { modelVersionMutationReceiptFromResponse } from '../../model-management/mutation-receipt.js';
 import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
 import { structuralFacts } from '../structural-facts.js';
 import { defaultFrameFor } from '../admit-model.js';
@@ -440,7 +471,18 @@ export function createAgentCapabilities(
         current_graph_identity_hash: before.graph_hash,
       });
       if (decision.status === 'already_applied') {
-        return { ok: true, mutated: false, applied: true, already_applied: true, detail: 'That proposal has already been applied.' };
+        // ⭐ A retry RECOVERS the first result. It carries the proposal id, so
+        // the retry is bound to the same proposal by identity, and the ORIGINAL
+        // receipts, so the Agent can say which version it already became.
+        return {
+          ok: true, mutated: false, applied: true, already_applied: true,
+          proposal_id: decision.proposal.proposal_id,
+          receipts: decision.receipts,
+          detail:
+            decision.receipts.length > 0
+              ? `That proposal was already applied and saved as version ${Math.max(...decision.receipts.map((x) => x.version))}. Nothing was applied twice.`
+              : 'That proposal was already applied. No saved version was recorded for it. Nothing was applied twice.',
+        };
       }
       if (decision.status !== 'execute') {
         return { ok: false, mutated: false, refusal: decision.status, ...(decision.status === 'superseded' ? { expected: decision.expected, actual: decision.actual } : {}) };
@@ -459,6 +501,7 @@ export function createAgentCapabilities(
          */
         const applied: { option: string; factor: string; requested: number; recorded: number | null }[] = [];
         const failures: { path: string; detail: string }[] = [];
+        const receipts: ReceiptSummary[] = [];
         /**
          * ⭐ ATTACH ANY DERIVED FRAME FIRST, in one write, before the levels.
          * The factor must carry its range before a level is recorded against
@@ -516,6 +559,9 @@ export function createAgentCapabilities(
             event: { kind: 'option_intervention_edit', option_id: optionId, factor_id: factorId, value: v, base_graph_hash: baseHash },
           });
           if (r.status !== 200) failures.push({ path: o.path, detail: `http ${r.status}` });
+          const rc = receiptSummaryOf(r.json);
+          if (rc.summary !== null) receipts.push(rc.summary);
+          if (rc.unreadable) failures.push({ path: o.path, detail: 'a receipt arrived but could not be read' });
           const mid = await readGraph(ctx.scenario_id);
           if (mid !== null) baseHash = mid.graph_hash;
         }
@@ -542,10 +588,11 @@ export function createAgentCapabilities(
             detail: 'None of the levels were recorded. The model is unchanged.', failures, interventions: applied,
           };
         }
-        if (landed.length === applied.length) proposals.markApplied(decision.proposal.proposal_id);
+        if (landed.length === applied.length) proposals.markApplied(decision.proposal.proposal_id, receipts);
         return {
           ok: true, mutated: true, applied: true,
           proposal_id: decision.proposal.proposal_id,
+          receipts,
           recorded_count: landed.length,
           requested_count: applied.length,
           interventions: applied,
@@ -585,6 +632,7 @@ export function createAgentCapabilities(
          */
         const applied: { factor: string; requested: number; recorded: number | null }[] = [];
         const failures: { factor: string; detail: string }[] = [];
+        const receipts: ReceiptSummary[] = [];
         for (let i = 0; i < ops.length; i += 1) {
           const o = ops[i];
           const v = (o.value ?? {}) as { value?: number; unit?: string };
@@ -602,6 +650,9 @@ export function createAgentCapabilities(
             },
           });
           if (r.status !== 200) failures.push({ factor: o.path, detail: `http ${r.status}` });
+          const rc = receiptSummaryOf(r.json);
+          if (rc.summary !== null) receipts.push(rc.summary);
+          if (rc.unreadable) failures.push({ factor: o.path, detail: 'a receipt arrived but could not be read' });
         }
 
         // ⛔ CONFIRMED FROM STATE. The handler may rescale what it was sent
@@ -686,11 +737,12 @@ export function createAgentCapabilities(
             }
           }
         }
-        if (landed.length === applied.length) proposals.markApplied(decision.proposal.proposal_id);
+        if (landed.length === applied.length) proposals.markApplied(decision.proposal.proposal_id, receipts);
         const rescaled = landed.filter((a) => a.recorded !== a.requested);
         return {
           ok: true, mutated: true, applied: true,
           proposal_id: decision.proposal.proposal_id,
+          receipts,
           adopted_count: landed.length,
           requested_count: applied.length,
           values: applied,
@@ -771,9 +823,13 @@ export function createAgentCapabilities(
           detail: describeOutcome(confirmation), http: res.status, operation_id: operationId,
         };
       }
-      proposals.markApplied(decision.proposal.proposal_id);
+      const edgeReceipt = receiptSummaryOf(res.json);
+      const edgeReceipts = edgeReceipt.summary !== null ? [edgeReceipt.summary] : [];
+      proposals.markApplied(decision.proposal.proposal_id, edgeReceipts);
       return {
         ok: true, mutated: true, applied: true,
+        receipts: edgeReceipts,
+        ...(edgeReceipt.unreadable ? { receipt_unreadable: true } : {}),
         // Olumi discloses this to the user deterministically; see disclosure.ts.
         placeholder_strength: true,
         proposal_id: decision.proposal.proposal_id,
