@@ -172,7 +172,22 @@ export function unitComparisonKey(unit: string | undefined): string | undefined 
     }
   }
 
-  return foldUnitSide(display);
+  // ── A BARE PERIOD UNIT ───────────────────────────────────────────────────
+  // The same closed table, applied on the side of this function that a rate
+  // never reaches. Witnessed on deployed staging (build 9b98fcd): a factor the
+  // UI renders as "9 months" REFUSED "change ... to 12 months" with "This
+  // factor uses months; the value provided is in month" — because CQE
+  // normalises the period to the singular while the canonical unit is plural.
+  // The user was refused for typing the unit exactly as it was shown to them.
+  //
+  // This is the SAME fold on the SAME closed vocabulary, not a widening. Two
+  // spellings of ONE period become one key; two DIFFERENT periods stay two
+  // keys, which is precisely what a closed table buys over a stemmer — the
+  // `months` vs `weeks` pin in `natural-rate-unit.test.ts` holds it down.
+  const folded = foldUnitSide(display);
+  return Object.prototype.hasOwnProperty.call(RATE_DENOMINATOR_SPELLINGS, folded)
+    ? RATE_DENOMINATOR_SPELLINGS[folded]!
+    : folded;
 }
 
 /**

@@ -133,6 +133,40 @@ describe('the real gate now accepts the edit it used to refuse', () => {
     expect(verdict.ok).toBe(false);
     if (!verdict.ok) expect(verdict.reason).toBe('unit_mismatch');
   });
+
+  /**
+   * ── A BARE PERIOD UNIT — THE SPELLING THE PRODUCT ITSELF DISPLAYS ─────────
+   * Witnessed on DEPLOYED staging (build 9b98fcd, 22 Sep 2026) against a live
+   * factor the UI renders as "9 months":
+   *
+   *   "change Sales Cycle Length to 12 months"
+   *     -> REFUSED: "This factor uses months; the value provided is in month."
+   *   "change Sales Cycle Length to 14"        -> accepted
+   *
+   * So the user is refused for typing the unit EXACTLY as it is shown to them.
+   * CQE normalises the period to the SINGULAR, the canonical unit is the
+   * PLURAL, and the closed period table this branch introduces was consulted
+   * only for a rate DENOMINATOR — a bare unit fell through to the
+   * currency-alphabet-and-case fold, which cannot equate them.
+   *
+   * This is the same fold on the same closed vocabulary, not a widening: a
+   * different period remains a rescale and remains refused, pinned below.
+   */
+  it('accepts the PLURAL the UI displays against the SINGULAR CQE extracts', () => {
+    const verdict = evaluateFor('change sales cycle length to 12 months', 'months');
+    expect(verdict.ok).toBe(true);
+  });
+
+  it('accepts the singular spelling against the same factor', () => {
+    const verdict = evaluateFor('change sales cycle length to 12 month', 'months');
+    expect(verdict.ok).toBe(true);
+  });
+
+  it('CONTRAST — a DIFFERENT period is a rescale, and is still refused', () => {
+    const verdict = evaluateFor('change sales cycle length to 12 weeks', 'months');
+    expect(verdict.ok).toBe(false);
+    if (!verdict.ok) expect(verdict.reason).toBe('unit_mismatch');
+  });
 });
 
 describe('unitComparisonKey folds SPELLINGS of one rate, and nothing else', () => {
@@ -151,6 +185,23 @@ describe('unitComparisonKey folds SPELLINGS of one rate, and nothing else', () =
 
   it('equates singular and plural periods', () => {
     expect(same('£ per month', '£/months')).toBe(true);
+  });
+
+  it('equates singular and plural of a BARE period unit', () => {
+    // The same closed table, on the side of the function a rate never reaches.
+    expect(same('months', 'month')).toBe(true);
+    expect(same('days', 'day')).toBe(true);
+    expect(same('Years', 'year')).toBe(true);
+  });
+
+  it('FALSE-POSITIVE CONTROL — a NON-period plural is not folded', () => {
+    // This is what makes the CLOSED TABLE load-bearing rather than any stemmer.
+    // "strip a trailing s" would satisfy the three assertions above while
+    // equating these too — and inventing `customers ≡ customer` is the same
+    // error class as inventing a denominator on `£ ARR per customer`.
+    expect(same('orders', 'order')).toBe(false);
+    expect(same('customers', 'customer')).toBe(false);
+    expect(same('accounts', 'account')).toBe(false);
   });
 
   it('PINS THE NON-EQUIVALENCES — a rescale is never a spelling', () => {
