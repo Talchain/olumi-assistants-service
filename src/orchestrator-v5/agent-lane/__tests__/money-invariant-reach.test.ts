@@ -10,10 +10,18 @@
  *   :211  `observed.source !== 'brief_extraction'` -> skip
  *   :234  `cap` absent / non-finite / <= 0        -> skip
  *
- * This lane now satisfies the first. It does NOT set `cap`, and it must not
- * invent one — `cap` feeds `isAmountStatedInBrief` and a wrong cap would produce
- * a confidently wrong reconciliation. So the figure remains unaudited, and that
- * is recorded here rather than left to be discovered later.
+ * This lane satisfies the first. It did NOT set `cap`, so the figure went
+ * unaudited, and that was pinned here as a limitation.
+ *
+ * ⭐ THE LIMITATION IS NOW CLOSED, as a side effect of the scale frame the
+ * ANALYSIS needed: a factor above 1 with no `cap` is refused outright by
+ * `run_analysis` (`baseline_scale_unresolved`, measured live), so construction
+ * now publishes one. The old note warned that "a wrong cap would produce a
+ * confidently wrong reconciliation" — which is why the cap is DERIVED from the
+ * largest figure the model itself carries, and why the two assertions below
+ * are a matched pair: it must catch a brief that disagrees AND stay silent on
+ * one that agrees. A cap that merely made the detector fire would be worse
+ * than no cap at all.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -46,11 +54,26 @@ describe('money invariant reach', () => {
     ).toBe('brief_extraction');
   });
 
-  it('LIMITATION, pinned: without `cap` the figure is still unaudited', () => {
+  it('the derived cap turns the audit ON, and it is right in BOTH directions', () => {
     const nodes = valuedNodes();
-    expect(nodes[0].observed_state).not.toHaveProperty('cap');
-    // Even against a brief that plainly disagrees (£79 vs the model's £49).
-    expect(run(nodes, BRIEF_DISAGREES)).toEqual([]);
+    const os = nodes[0].observed_state as Record<string, unknown>;
+    // Derived from the model's own largest figure for this factor (59 -> 100),
+    // with the user's own number kept beside it.
+    expect(os.cap).toBe(100);
+    expect(os.raw_value).toBe(49);
+    expect(os.value).toBeCloseTo(0.49, 10);
+
+    // It CATCHES a brief that plainly disagrees (£79 vs the model's £49) —
+    // this was `[]` before, which is what the pinned limitation recorded.
+    const found = run(nodes, BRIEF_DISAGREES);
+    expect(found).toHaveLength(1);
+    expect(found[0].code).toBe('STATED_MAGNITUDE_UNRECONCILED');
+    expect(found[0].affected_node_id).toBe('pro_plan_price');
+
+    // ⛔ AND THE CONTROL THAT MATTERS MORE: silent when the brief agrees. A cap
+    // that made the detector fire on everything would be a regression wearing
+    // a green test.
+    expect(run(nodes, BRIEF_AGREES)).toEqual([]);
   });
 
   it('PROOF the stamp is now right: add a cap and the invariant CATCHES the mismatch', () => {
