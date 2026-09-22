@@ -69,6 +69,25 @@ export const OUTSIDE_VIEW_ENGAGE_MESSAGE =
  * `reference-class-block.ts` uses for the confirmed exercise.
  */
 export const OUTSIDE_VIEW_OFFER_SIGNAL_PREFIX = 'coaching:outside_view_offer';
+
+/**
+ * ⭐ THE ENGAGE CHIP NAMES THE METHOD; THE DECLINE CHIP MUST NOT.
+ *
+ * `tests/contract/coaching-chip-intent-completeness.guard.test.ts` classifies any
+ * chip id CONTAINING a routed-intent token as a coaching-method chip and REDs if
+ * the registry cannot resolve it. That guard caught a real defect here, not a
+ * registration chore: the decline chip was first named
+ * `chip_prompt_outside_view_decline`, and the only way to satisfy the registry
+ * with that id is to map it to `outside_view` — which would make "Not now"
+ * INVOKE the method it is refusing.
+ *
+ * So the engage chip is registered (`CHIP_ID_INTENT` → `outside_view`) and the
+ * decline chip is renamed to say what it does. The decline never needed a routed
+ * intent: it works by the MESSAGE it mints, which `deriveOutsideViewHistory`
+ * matches. ⛔ Do not put a routed-intent token back in the decline id.
+ */
+export const OUTSIDE_VIEW_ENGAGE_CHIP_ID = 'chip_prompt_outside_view_engage';
+export const OUTSIDE_VIEW_DECLINE_CHIP_ID = 'chip_prompt_skip_reference_class';
 const SOURCE_HANDLER = 'outside_view_offer';
 /** Coaching ranks sit below review cards; this is an offer, not a finding. */
 const PRIORITY_RANK = 150;
@@ -171,7 +190,7 @@ export function buildOutsideViewOffer(
     assistant_text,
     suggested_actions: [
       {
-        id: 'chip_prompt_outside_view_engage',
+        id: OUTSIDE_VIEW_ENGAGE_CHIP_ID,
         label: 'Take the outside view',
         message: OUTSIDE_VIEW_ENGAGE_MESSAGE,
       },
@@ -180,7 +199,7 @@ export function buildOutsideViewOffer(
         // only way not to engage is silence, and silence is indistinguishable
         // from never having been asked — the exact gap that makes the bundle's
         // "already fired / already declined" negative conditions unenforceable.
-        id: 'chip_prompt_outside_view_decline',
+        id: OUTSIDE_VIEW_DECLINE_CHIP_ID,
         label: 'Not now',
         message: OUTSIDE_VIEW_DECLINE_MESSAGE,
       },

@@ -7,11 +7,15 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  OUTSIDE_VIEW_DECLINE_CHIP_ID,
   OUTSIDE_VIEW_DECLINE_MESSAGE,
+  OUTSIDE_VIEW_ENGAGE_CHIP_ID,
   OUTSIDE_VIEW_ENGAGE_MESSAGE,
   buildOutsideViewOffer,
   deriveOutsideViewHistory,
 } from '../outside-view-offer.js';
+import { ROUTED_COACHING_INTENTS } from '../typed-intent-directive.js';
+import { coachingIntentForChipId } from '../coaching-chip-registry.js';
 import {
   OUTSIDE_VIEW_CLAIM_ID,
   OUTSIDE_VIEW_PROTOCOL_ID,
@@ -105,8 +109,8 @@ describe('what the user is shown', () => {
 
   it('offers BOTH engage and decline, so silence is not the only way out', () => {
     expect(offer.suggested_actions.map((a) => a.id)).toEqual([
-      'chip_prompt_outside_view_engage',
-      'chip_prompt_outside_view_decline',
+      OUTSIDE_VIEW_ENGAGE_CHIP_ID,
+      OUTSIDE_VIEW_DECLINE_CHIP_ID,
     ]);
   });
 
@@ -151,7 +155,7 @@ describe('history derivation binds to the product’s own literals', () => {
 describe('⭐ THE ROUND TRIP — declining actually stops the offer', () => {
   it('the decline chip message is recognised by the history derivation', () => {
     const offer = buildOutsideViewOffer(assessOutsideViewEligibility(inputs()), CTX)!;
-    const declineChip = offer.suggested_actions.find((a) => a.id.endsWith('decline'))!;
+    const declineChip = offer.suggested_actions.find((a) => a.id === OUTSIDE_VIEW_DECLINE_CHIP_ID)!;
     // The user clicks it; that message becomes their next turn verbatim.
     const history = deriveOutsideViewHistory([turn(declineChip.message)]);
     expect(history.declineObservedInWindow).toBe(true);
@@ -163,7 +167,7 @@ describe('⭐ THE ROUND TRIP — declining actually stops the offer', () => {
 
   it('engaging then confirming also stops it, via already_completed', () => {
     const offer = buildOutsideViewOffer(assessOutsideViewEligibility(inputs()), CTX)!;
-    const engage = offer.suggested_actions.find((a) => a.id.endsWith('engage'))!;
+    const engage = offer.suggested_actions.find((a) => a.id === OUTSIDE_VIEW_ENGAGE_CHIP_ID)!;
     expect(engage.message).toBe(OUTSIDE_VIEW_ENGAGE_MESSAGE);
     const history = deriveOutsideViewHistory([
       turn(engage.message),
@@ -177,5 +181,22 @@ describe('⭐ THE ROUND TRIP — declining actually stops the offer', () => {
   it('the decline literal is not something a user would type by accident', () => {
     expect(OUTSIDE_VIEW_DECLINE_MESSAGE.length).toBeGreaterThan(30);
     expect(deriveOutsideViewHistory([turn('not now')]).declineObservedInWindow).toBe(false);
+  });
+});
+
+describe('\u26d4 the chip ids must stay honest about what they invoke', () => {
+  it('the ENGAGE chip resolves to the outside_view routed intent', () => {
+    expect(coachingIntentForChipId(OUTSIDE_VIEW_ENGAGE_CHIP_ID)).toBe('outside_view');
+  });
+
+  it('the DECLINE chip spells NO routed intent, so it can never invoke a method', () => {
+    // The completeness guard classifies any id CONTAINING a routed-intent token
+    // as a method chip. A decline that named the method could only satisfy that
+    // guard by mapping "Not now" to running the exercise. Putting a routed token
+    // back in this id REDs here.
+    for (const intent of ROUTED_COACHING_INTENTS) {
+      expect(OUTSIDE_VIEW_DECLINE_CHIP_ID).not.toContain(intent);
+    }
+    expect(coachingIntentForChipId(OUTSIDE_VIEW_DECLINE_CHIP_ID)).toBeUndefined();
   });
 });
