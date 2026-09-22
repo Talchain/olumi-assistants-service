@@ -1040,3 +1040,97 @@ describe("register — the canonical receipt reaches the caller", () => {
     await app.close();
   });
 });
+
+/**
+ * ⛔ A REGISTRATION RETRY MUST NOT MINT A SECOND VERSION — and a reused
+ * operation id carrying a DIFFERENT graph must not be reported as a success.
+ *
+ * The reviewer's blocker on this PR: `registrationTurnId()` minted
+ * `crypto.randomUUID()` per request, and the RPC's idempotency key is
+ * `(scenario_id, turn_id)`. So a lost-response retry was a brand-new write to
+ * every layer beneath it, and the store's replay classifier
+ * (`classifyPriorTurn`) could never match a prior row. Measured signed-in on
+ * staging 9c16e8cd: construction wrote `graph_registration:<random>` with
+ * `model_version_created = NULL`.
+ *
+ * `request_hash` was ALSO set to the turn id, so even with a stable id the
+ * classifier could not tell an identical retry from the same id reused for a
+ * different graph.
+ */
+describe("register — a replay-stable construction identity", () => {
+  const OP = "7b8f0c2e-4d1a-4c3b-9e5f-1a2b3c4d5e6f";
+  const OTHER_OP = "0d9e8f7a-6b5c-4d3e-8f2a-1b0c9d8e7f6a";
+  const SID = "8f14e45f-ceea-4f1a-9e6b-2c8d1b3a7e90";
+  const call = (i: number) => append.mock.calls[i][0] as { turn_id: string; request_hash: string };
+
+  it("RED: the SAME operation_id yields the SAME turn id, so a retry reaches the replay arm", async () => {
+    const app = await buildApp();
+    await post(app, SID, { graph: IMPORTED, operation_id: OP });
+    await post(app, SID, { graph: IMPORTED, operation_id: OP });
+    expect(call(0).turn_id).toBe(call(1).turn_id);
+    // Still says WHY the graph moved, in the turn log.
+    expect(call(0).turn_id.startsWith("graph_registration:")).toBe(true);
+  });
+
+  it("a DIFFERENT operation_id is a different operation", async () => {
+    const app = await buildApp();
+    await post(app, SID, { graph: IMPORTED, operation_id: OP });
+    await post(app, SID, { graph: IMPORTED, operation_id: OTHER_OP });
+    expect(call(0).turn_id).not.toBe(call(1).turn_id);
+  });
+
+  it("CONTRAST CONTROL: with no operation_id every request is still distinct — the UI import does not change", async () => {
+    const app = await buildApp();
+    await post(app, SID, { graph: IMPORTED });
+    await post(app, SID, { graph: IMPORTED });
+    expect(call(0).turn_id).not.toBe(call(1).turn_id);
+  });
+
+  it("RED: request_hash covers the PAYLOAD — identical on an exact retry, different when the graph differs", async () => {
+    const app = await buildApp();
+    await post(app, SID, { graph: IMPORTED, operation_id: OP });
+    await post(app, SID, { graph: IMPORTED, operation_id: OP });
+    await post(app, SID, { graph: SERVER_PRE_IMPORT, operation_id: OP });
+    expect(call(0).request_hash).toBe(call(1).request_hash);
+    expect(call(2).request_hash).not.toBe(call(0).request_hash);
+    // Not the turn id any more: that is what made a reused id undetectable.
+    expect(call(0).request_hash).not.toBe(call(0).turn_id);
+  });
+
+  it("RED: a replay returns the ORIGINAL receipt and says it was a replay", async () => {
+    const receipt = {
+      mutation_id: "cb1dd25d-36c3-5beb-aadf-5a016b2bce25",
+      version_id: "c0813c01-1111-4111-8111-111111111111",
+      version_number: 1,
+      creation_kind: "initial",
+      graph_identity_hash: "a".repeat(64),
+      analysis_affecting_hash: "b".repeat(64),
+    };
+    append.mockResolvedValue({ id: "turn-1", modelVersionReceipt: receipt, replayedPriorTurn: true });
+    const app = await buildApp();
+    const res = await post(app, SID, { graph: IMPORTED, operation_id: OP });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { replayed?: boolean; model_version?: { mutation_id: string; version_id: string } };
+    expect(body.replayed).toBe(true);
+    // Bound by IDENTITY: the receipt the store handed back, not a fresh one.
+    expect(body.model_version?.mutation_id).toBe(receipt.mutation_id);
+    expect(body.model_version?.version_id).toBe(receipt.version_id);
+  });
+
+  it("RED: the same operation_id with a DIFFERENT graph is REFUSED (409), never reported as registered", async () => {
+    append.mockResolvedValue({ id: "turn-1", priorTurnConflict: true });
+    const app = await buildApp();
+    const res = await post(app, SID, { graph: SERVER_PRE_IMPORT, operation_id: OP });
+    expect(res.statusCode).toBe(409);
+    const body = res.json() as { registered?: boolean; details?: { code?: string } };
+    expect(body.registered).not.toBe(true);
+    expect(body.details?.code).toBe("OPERATION_ID_REUSED");
+  });
+
+  it("refuses a malformed operation_id before any database work", async () => {
+    const app = await buildApp();
+    const res = await post(app, SID, { graph: IMPORTED, operation_id: "not-a-uuid" });
+    expect(res.statusCode).toBe(422);
+    expect(append).not.toHaveBeenCalled();
+  });
+});

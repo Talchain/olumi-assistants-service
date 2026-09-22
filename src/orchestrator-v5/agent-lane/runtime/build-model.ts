@@ -33,6 +33,7 @@
  * the hash.
  */
 
+import { createHash } from 'node:crypto';
 import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { budgetFor } from '../model-budgets.js';
@@ -105,6 +106,26 @@ export type CallStructuredModel = (req: {
   reasoning_effort?: 'low' | 'medium' | 'high';
 }) => Promise<{ text: string; usage?: Record<string, unknown> }>;
 
+/**
+ * ⭐ THE CONSTRUCTION'S OPERATION IDENTITY — derived, never minted.
+ *
+ * The same (scenario, brief) always names the same operation, so if a
+ * registration response is lost and the build is retried, the retry reaches the
+ * registration route's replay arm and gets back the ORIGINAL receipt instead of
+ * minting a second version. A different brief is a different operation.
+ *
+ * A v4-shaped UUID because the route validates `operation_id` as a UUID; the
+ * version and variant nibbles are forced, the rest is the digest.
+ */
+export function constructionOperationId(scenarioId: string, brief: string): string {
+  const h = createHash('sha256').update(`agent_construction:${scenarioId}:${brief}`).digest();
+  const b = Buffer.from(h.subarray(0, 16));
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  const x = b.toString('hex');
+  return `${x.slice(0, 8)}-${x.slice(8, 12)}-${x.slice(12, 16)}-${x.slice(16, 20)}-${x.slice(20)}`;
+}
+
 export async function buildModelFromBrief(
   scenarioId: string,
   brief: string,
@@ -165,7 +186,11 @@ export async function buildModelFromBrief(
     };
   }
 
-  const reg = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph/register`, { graph, brief_text: brief });
+  const reg = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph/register`, {
+    graph,
+    brief_text: brief,
+    operation_id: constructionOperationId(scenarioId, brief),
+  });
   if (reg.status !== 200) {
     return { ok: false, mutated: false, refusal: 'registration_refused', http: reg.status, detail: String(reg.json.message ?? '').slice(0, 200) };
   }
@@ -175,11 +200,15 @@ export async function buildModelFromBrief(
   // wrote no version (a graph GraphV3 cannot version) — the Agent must then not
   // claim one.
   const modelVersion = (reg.json as { model_version?: unknown }).model_version;
+  // True only when this construction had ALREADY been committed and the route
+  // handed back the original version rather than writing another.
+  const replayed = (reg.json as { replayed?: unknown }).replayed === true;
 
   return {
     ok: true,
     mutated: true,
     ...(modelVersion === undefined ? {} : { model_version: modelVersion }),
+    ...(replayed ? { replayed: true } : {}),
     nodes: admitted.nodes.length,
     edges: admitted.edges.length,
     options: admitted.nodes.filter((n) => n.kind === 'option').length,

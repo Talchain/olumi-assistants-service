@@ -133,6 +133,7 @@
  *   CEE-to-CEE gated on `projection_version`, and never recompute it locally.
  */
 
+import { createHash } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 
 import { GRAPH_MAX_EDGES, GRAPH_MAX_NODES } from "../config/graphCaps.js";
@@ -171,11 +172,43 @@ const UUID_PATTERN =
  * `turn_id` for the registration commit.
  *
  * Prefixed so the turn log says WHY the graph moved without anyone having to
- * join it against another table, and unique per request so the RPC's
- * idempotency key never collides with a conversational turn.
+ * join it against another table.
+ *
+ * ⛔ REPLAY-STABLE WHEN THE CALLER NAMES THE OPERATION. This was
+ * `randomUUID()` on every request, and the RPC's idempotency key is
+ * `(scenario_id, turn_id)` — so a lost-response retry was a brand-new write to
+ * every layer beneath it, the store's replay classifier (`classifyPriorTurn`)
+ * could never match a prior row, and a retry could mint a SECOND version
+ * instead of recovering the first receipt. Measured signed-in on staging
+ * 9c16e8cd: construction wrote `graph_registration:<random>`.
+ *
+ * With an `operation_id`, the turn id is DERIVED — the same (scenario, operation)
+ * always yields the same key, so an exact retry reaches the replay arm and gets
+ * the original receipt back. Without one, nothing changes: every request is
+ * still distinct, which is the UI import's behaviour today.
  */
-function registrationTurnId(): string {
-  return `graph_registration:${globalThis.crypto.randomUUID()}`;
+export function registrationTurnId(scenarioId: string, operationId?: string): string {
+  if (operationId === undefined) return `graph_registration:${globalThis.crypto.randomUUID()}`;
+  const h = createHash("sha256").update(`graph_registration:${scenarioId}:${operationId}`).digest();
+  const b = Buffer.from(h.subarray(0, 16));
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  const x = b.toString("hex");
+  return `graph_registration:${x.slice(0, 8)}-${x.slice(8, 12)}-${x.slice(12, 16)}-${x.slice(16, 20)}-${x.slice(20)}`;
+}
+
+/**
+ * The request_hash for a registration: a digest of WHAT is being registered.
+ *
+ * ⛔ It used to be the turn id itself. The store's replay classifier answers
+ * "is this the same request replaying?" by comparing `request_hash` against the
+ * row already under `(scenario_id, turn_id)` — so with the turn id as the hash,
+ * an identical retry and the same operation id reused for a DIFFERENT graph were
+ * indistinguishable. Digesting the projected bytes and the brief makes the
+ * first a replay and the second a conflict, which is what they are.
+ */
+export function registrationRequestHash(graphForStore: unknown, brief: string | undefined): string {
+  return `graph_registration:${createHash("sha256").update(JSON.stringify({ graph: graphForStore, brief: brief ?? null })).digest("hex")}`;
 }
 
 export default async function route(app: FastifyInstance) {
@@ -288,6 +321,13 @@ export default async function route(app: FastifyInstance) {
       if (body.brief_text != null && typeof body.brief_text !== "string") {
         return invalid("BRIEF_INVALID", "`brief_text` must be a string when supplied.");
       }
+      // An OPTIONAL caller-named operation. Validated before any database work:
+      // it becomes part of the durable idempotency key, so a malformed one must
+      // never reach the RPC.
+      if (body.operation_id != null && (typeof body.operation_id !== "string" || !UUID_PATTERN.test(body.operation_id))) {
+        return invalid("OPERATION_ID_INVALID", "`operation_id` must be a UUID when supplied.");
+      }
+      const operationId = typeof body.operation_id === "string" ? body.operation_id : undefined;
       const brief = normaliseBriefText(body.brief_text);
       if (brief.truncated) {
         return invalid("BRIEF_INVALID", "`brief_text` exceeds the supported brief length.");
@@ -443,7 +483,8 @@ export default async function route(app: FastifyInstance) {
         source: "graph_registration",
       });
 
-      const turnId = registrationTurnId();
+      const turnId = registrationTurnId(scenarioId, operationId);
+      const requestHash = registrationRequestHash(graphForStore, brief.value);
       // THE CANONICAL RECEIPT, captured rather than discarded. The RPC builds
       // it and `SupabaseSessionStore` parses it onto the append outcome; this
       // route threw that outcome away, which is why a freshly constructed model
@@ -524,7 +565,7 @@ export default async function route(app: FastifyInstance) {
             // `(turn_class = 'handler') = (handler_id IS NOT NULL)`.
             turn_class: "direct_answer",
             handler_id: null,
-            request_hash: turnId,
+            request_hash: requestHash,
             response_emitted: false,
             llm_calls_used: 0,
             duration_ms: Date.now() - startedAt,
@@ -606,6 +647,36 @@ export default async function route(app: FastifyInstance) {
         return unavailable();
       }
 
+      /**
+       * ⛔ A REUSED OPERATION ID WITH A DIFFERENT GRAPH IS A REFUSAL, NOT A SUCCESS.
+       *
+       * The durable key held: the RPC's `(scenario_id, turn_id)` arm returned the
+       * row already there and wrote nothing. Answering 200 `registered: true`
+       * with THIS request's identity hash would tell the caller its graph is
+       * stored when the stored graph is the earlier one — the exact false
+       * "Updated X" the store's classifier docblock measured on the turn path.
+       */
+      if (appendOutcome?.priorTurnConflict === true) {
+        log.warn(
+          {
+            event: "v5.scenario_graph_register.operation_id_reused",
+            request_id: requestId,
+            scenario_id: scenarioId,
+          },
+          "Graph registration — operation_id reused with a different graph; nothing written",
+        );
+        return reply
+          .code(409)
+          .send(
+            buildErrorV1(
+              "BAD_INPUT",
+              "This import was already recorded with a different model. Nothing was changed.",
+              { code: "OPERATION_ID_REUSED" },
+              requestId,
+            ),
+          );
+      }
+
       const identity = computeGraphIdentityHash(graphForStore as GraphStateIngress);
 
       log.info(
@@ -624,6 +695,10 @@ export default async function route(app: FastifyInstance) {
         schema: SCENARIO_GRAPH_REGISTRATION_SCHEMA,
         scenario_id: scenarioId,
         registered: true,
+        // ADDITIVE: present only when this request replayed a registration that
+        // was already committed under the same operation id. The receipt below
+        // is then the ORIGINAL one, not a second version.
+        ...(appendOutcome?.replayedPriorTurn === true ? { replayed: true } : {}),
         // The ACKNOWLEDGEMENT. This is what lets a client stop saying
         // "cannot confirm": the server has the graph, and this token names it.
         graph_identity_hash: identity,
