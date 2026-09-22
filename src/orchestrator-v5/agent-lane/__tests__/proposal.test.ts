@@ -113,3 +113,46 @@ describe('authorisation applies the STORED proposal', () => {
     expect(s.size()).toBeLessThanOrEqual(MAX_PROPOSALS);
   });
 });
+
+describe('outstanding — an approval must have something to bind to', () => {
+  /**
+   * ⛔ MEASURED on the deployed build: the user said "Yes, apply it" and the
+   * turn called NO tools, replying that the change "has been proposed but not
+   * approved or applied". Two proposals were outstanding and the Agent could
+   * name neither. The user believes the model changed; it did not.
+   */
+  const content = (label: string, ops: number) => ({
+    scenario_id: 's1', user_id: 'u1', base_graph_identity_hash: 'h0',
+    operations: Array.from({ length: ops }, (_, i) => ({ op: 'add_edge' as const, path: `a${i}::b${i}` })),
+    provenance: { authored_by: 'model_proposed' as const },
+    validation: { admitted: true, loss_count: 0, refusals: [] },
+    public_label: label,
+  });
+
+  it('returns unapplied proposals NEWEST FIRST, so "yes" binds to what was just shown', () => {
+    const store = new ProposalStore();
+    const first = store.put(createProposal(content('Connect A to B', 1)));
+    const second = store.put(createProposal(content('Set three option levels', 3)));
+    expect(store.outstanding('s1', 'u1').map((p) => p.public_label))
+      .toEqual(['Set three option levels', 'Connect A to B']);
+    expect(store.outstanding('s1', 'u1')[0].proposal_id).toBe(second.proposal_id);
+    expect(first.proposal_id).not.toBe(second.proposal_id);
+  });
+
+  it('drops one once applied', () => {
+    const store = new ProposalStore();
+    const a = store.put(createProposal(content('Connect A to B', 1)));
+    store.put(createProposal(content('Set three option levels', 3)));
+    store.markApplied(a.proposal_id);
+    expect(store.outstanding('s1', 'u1').map((p) => p.public_label)).toEqual(['Set three option levels']);
+  });
+
+  it('never leaks another scenario or another subject — the contrast control', () => {
+    const store = new ProposalStore();
+    store.put(createProposal(content('Mine', 1)));
+    store.put(createProposal({ ...content('Another scenario', 2), scenario_id: 's2' }));
+    store.put(createProposal({ ...content('Another user', 2), user_id: 'u2' }));
+    expect(store.outstanding('s1', 'u1').map((p) => p.public_label)).toEqual(['Mine']);
+  });
+});
+

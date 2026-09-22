@@ -189,6 +189,31 @@ export class ProposalStore {
     return { status: 'execute', proposal: p };
   }
 
+  /**
+   * ⭐ THE PROPOSALS STILL AWAITING A YES, newest first.
+   *
+   * ⛔ MEASURED on the deployed build: the user said "Yes, apply it" and the
+   * Agent called NO tools, answering that the changes "have been proposed but
+   * not approved or applied". Two proposals were outstanding from earlier
+   * turns and it had no way to name either, so the approval simply evaporated
+   * — the single worst thing this loop can do, because the user believes the
+   * model changed and it did not.
+   *
+   * Exposed through `get_canonical_state` so an approval always has an id to
+   * bind to, and so "which one?" is a question the Agent can actually ask.
+   */
+  outstanding(scenarioId: string, userId: string | null): { proposal_id: string; public_label: string }[] {
+    const out: { proposal_id: string; public_label: string }[] = [];
+    for (let i = this.order.length - 1; i >= 0; i -= 1) {
+      const p = this.items.get(this.order[i]);
+      if (p === undefined) continue;
+      if (p.scenario_id !== scenarioId || p.user_id !== userId) continue;
+      if (this.applied.has(p.proposal_id)) continue;
+      out.push({ proposal_id: p.proposal_id, public_label: p.public_label });
+    }
+    return out;
+  }
+
   size(): number {
     return this.items.size;
   }

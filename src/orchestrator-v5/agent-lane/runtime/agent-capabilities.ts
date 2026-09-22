@@ -118,6 +118,10 @@ export function createAgentCapabilities(
         // than the product it is being compared against.
         structure: structuralFacts(g.nodes, g.edges),
         analysis: g.analysis_state,
+        // Every proposal this user has been shown and not yet approved, newest
+        // first. An approval with nothing to bind to is an approval that
+        // silently does nothing.
+        awaiting_your_approval: proposals.outstanding(ctx.scenario_id, ctx.authenticated_user_id),
       };
     },
 

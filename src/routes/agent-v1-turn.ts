@@ -69,6 +69,13 @@ const AGENT_INSTRUCTIONS = [
   'Distinguish user facts and evidence from machine-authored estimates and from unknowns. An absent value is unknown, never zero.',
   MUTATION_INSTRUCTION,
   'Never claim a change happened unless the tool result says it was applied. If a tool reports a refusal, tell the user what it said.',
+  /*
+   * ⛔ THE WORST FAILURE IN THIS LOOP, measured on the deployed build: the user
+   * said "Yes, apply it" and the turn called NO tools, replying that the change
+   * "has been proposed but not approved or applied". The user believes the
+   * model changed; it did not.
+   */
+  'When the user approves, agrees, or says yes, that is an instruction to call authorise_change. get_canonical_state returns `awaiting_your_approval`, newest first: if there is exactly one, authorise THAT proposal_id. If there is more than one, name them and ask which \u2014 in the same turn. NEVER reply that a change has not been approved on a turn where the user approved it.',
   'If get_canonical_state reports the model is empty, call build_model_from_brief with the user\u2019s own words before answering about the model.',
   'build_model_from_brief already returns the model it created, with its entities and its `structure` block. Do NOT call get_canonical_state again afterwards \u2014 answer from what it returned.',
   /*
