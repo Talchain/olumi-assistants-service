@@ -163,7 +163,8 @@
           "is_status_quo",
           "lever_settings",
           "rationale",
-          "grounded_in"
+          "grounded_in",
+          "timing"
         ],
         "properties": {
           "id": {
@@ -253,6 +254,31 @@
               "type": "string"
             },
             "description": "Ids this rests on: a user_facts id, a factor/outcome id in THIS model, or a DSK id from the supplied allowlist. Every id must RESOLVE — an id that points at nothing is flagged. Empty when the item rests on nothing beyond general reasoning, which is itself informative."
+          },
+          "timing": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "when",
+              "source_fact_id"
+            ],
+            "description": "WHEN this option takes effect, when the person tied it to an event or a date. 'with the next Pro feature release', 'once the lease expires', 'after Q3'. This is a property of the OPTION, not of any causal link: it says when the lever moves, not how fast an effect propagates. Leave both null when no timing was stated.",
+            "properties": {
+              "when": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The person's own words for the timing, verbatim where possible."
+              },
+              "source_fact_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The user_facts id those words came from."
+              }
+            }
           }
         }
       }
