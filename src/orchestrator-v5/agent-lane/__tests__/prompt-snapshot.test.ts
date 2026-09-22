@@ -17,7 +17,14 @@
  */
 import { describe, it, expect } from 'vitest';
 import { createHash } from 'node:crypto';
-import { promptSnapshotFrom, assembleRequest } from '../runtime/request-assembly.js';
+import { promptSnapshotFrom, assembleRequest, issueContextPacket } from '../runtime/request-assembly.js';
+
+const SCEN = '11111111-1111-1111-1111-111111111111';
+const UID = 'user-a';
+const GREV = 'a'.repeat(64);
+const BSECRET = 'server-side-secret-value';
+const EXPECT = { scenario_id: SCEN, authenticated_user_id: UID, graph_revision: GREV, current_turn: 7, binding_secret: BSECRET };
+const FRESH = () => issueContextPacket({ scenario_id: SCEN, authenticated_user_id: UID, graph_revision: GREV, captured_at_turn: 7, state: {} }, BSECRET);
 
 const sha = (s: string) => createHash('sha256').update(s).digest('hex');
 const TEXT = 'You are Olumi. Be precise.';
@@ -65,14 +72,14 @@ describe('promptSnapshotFrom — a snapshot must be provably the version it clai
   it('IMMUTABILITY: the same (id, version, text) always yields the same prefix hash', () => {
     const a = promptSnapshotFrom(fromDb());
     const b = promptSnapshotFrom(fromDb({ source: 'cache' }));
-    const base = { mode: 'full' as const, freshness: { kind: 'fresh' } as const, history: [] };
+    const base = { mode: 'full' as const, context: FRESH(), expectation: EXPECT, history: [] };
     expect(assembleRequest({ ...base, promptSnapshot: b }).hashes.prompt)
       .toBe(assembleRequest({ ...base, promptSnapshot: a }).hashes.prompt);
   });
 
   it('a request built on an UNCACHEABLE snapshot says so in its diagnostics', () => {
     const s = promptSnapshotFrom(fromDb({ source: 'fallback' }));
-    const r = assembleRequest({ promptSnapshot: s, mode: 'full', freshness: { kind: 'fresh' }, history: [] });
+    const r = assembleRequest({ promptSnapshot: s, mode: 'full', context: FRESH(), expectation: EXPECT, history: [] });
     expect(r.diagnostics.prefix_cacheable).toBe(false);
     expect(r.diagnostics.prompt_governed).toBe(false);
   });
@@ -80,7 +87,7 @@ describe('promptSnapshotFrom — a snapshot must be provably the version it clai
   it('a governed request reports itself cacheable', () => {
     const r = assembleRequest({
       promptSnapshot: promptSnapshotFrom(fromDb()),
-      mode: 'full', freshness: { kind: 'fresh' }, history: [],
+      mode: 'full', context: FRESH(), expectation: EXPECT, history: [],
     });
     expect(r.diagnostics.prefix_cacheable).toBe(true);
   });

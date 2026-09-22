@@ -313,6 +313,8 @@ export interface AssembledRequest {
     readonly prefix_cacheable: boolean;
     readonly context_freshness: ContextFreshness['kind'];
     readonly context_reason: string | null;
+    /** True only when a verified, current packet was carried to the model. */
+    readonly context_admitted: boolean;
     readonly tool_count: number;
     readonly omitted_tools: readonly string[];
   };
@@ -330,20 +332,42 @@ export interface AssembledRequest {
 export function assembleRequest(input: {
   readonly promptSnapshot: PromptSnapshot;
   readonly mode: AgentLaneMode;
-  readonly freshness: ContextFreshness;
   readonly context?: CanonicalContextPacket | null;
+  /** What the server believes right now. Freshness is DERIVED against this. */
+  readonly expectation: ContextExpectation;
   readonly history: readonly unknown[];
 }): AssembledRequest {
-  const { tools, omitted } = eligibleTools({ mode: input.mode, freshness: input.freshness });
+  // ⛔ FRESHNESS IS DERIVED HERE, NEVER SUPPLIED.
+  //
+  // This function used to accept a `freshness` verdict as a parameter,
+  // independently of the packet. Every piece around it was sound — the binding
+  // verified, the subject checks were right, eligibility could only narrow —
+  // and the bypass sat in the JOIN: a caller could pass `{kind: 'fresh'}` with
+  // no packet, or a forged or stale one, and assembly would suppress the
+  // canonical reread and hand that packet to the model. The verification lived
+  // in a function assembly never called. Found by independent review, not by
+  // this module's own tests.
+  //
+  // A doc comment telling callers to verify first would not close it, for the
+  // same reason a prompt sentence is not a safety boundary.
+  const freshness = assessContextFreshness(input.context, input.expectation);
+  const { tools, omitted } = eligibleTools({ mode: input.mode, freshness });
 
   const promptHash = hash({ id: input.promptSnapshot.id, version: input.promptSnapshot.version, text: input.promptSnapshot.text });
   const toolsHash = hash(tools.map((t) => ({ name: t.name, parameters: t.parameters })));
   const prefixHash = hash({ prompt: promptHash, tools: toolsHash });
-  const contextHash = hash(input.context ?? null);
+  // ⛔ ONLY A VERIFIED, CURRENT PACKET BECOMES AUTHORITATIVE CONTEXT. Anything
+  // else is dropped outright rather than passed along unused: an unverified
+  // packet in the model's context is attacker-controlled text sitting where
+  // canonical state is supposed to be, whether or not a tool was omitted.
+  const admitted = freshness.kind === 'fresh' ? (input.context ?? null) : null;
+  // Hashed on what was ACTUALLY carried, so the diagnostic describes the
+  // request that was sent rather than the one that was offered.
+  const contextHash = hash(admitted);
 
   return {
     stablePrefix: { instructions: input.promptSnapshot.text, tools },
-    dynamic: { context: input.context ?? null, history: input.history },
+    dynamic: { context: admitted, history: input.history },
     hashes: { prompt: promptHash, tools: toolsHash, prefix: prefixHash, context: contextHash },
     diagnostics: {
       prompt_id: input.promptSnapshot.id,
@@ -354,8 +378,9 @@ export function assembleRequest(input: {
       prefix_cacheable:
         input.promptSnapshot.cacheable ??
         (input.promptSnapshot.governed !== false && input.promptSnapshot.version !== null),
-      context_freshness: input.freshness.kind,
-      context_reason: 'reason' in input.freshness ? input.freshness.reason : null,
+      context_freshness: freshness.kind,
+      context_reason: 'reason' in freshness ? freshness.reason : null,
+      context_admitted: admitted !== null,
       tool_count: tools.length,
       omitted_tools: omitted.map((o) => o.name),
     },

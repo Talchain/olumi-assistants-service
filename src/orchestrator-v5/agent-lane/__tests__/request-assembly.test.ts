@@ -155,8 +155,8 @@ describe('stable prefix vs dynamic tail, and the diagnostics', () => {
   const base = {
     promptSnapshot: { id: 'draft_graph_default', version: 202, text: 'You are Olumi.' },
     mode: 'full' as const,
-    freshness: { kind: 'fresh' } as const,
     context: packet(),
+    expectation,
     history: [{ role: 'user', content: 'hello' }],
   };
 
@@ -185,7 +185,7 @@ describe('stable prefix vs dynamic tail, and the diagnostics', () => {
 
   it('the TOOLS hash changes when eligibility changes — so a cache cannot serve the wrong tool set', () => {
     const withState = assembleRequest(base);
-    const withoutState = assembleRequest({ ...base, freshness: { kind: 'absent' } });
+    const withoutState = assembleRequest({ ...base, context: null });
     expect(withoutState.hashes.tools).not.toBe(withState.hashes.tools);
     expect(withoutState.hashes.prefix).not.toBe(withState.hashes.prefix);
   });
