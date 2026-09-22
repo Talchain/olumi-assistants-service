@@ -18,6 +18,7 @@ import { randomUUID } from 'node:crypto';
 import { createProposal, ProposalStore, type ProposalOperation } from '../proposal.js';
 import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
 import type { AgentCapabilities, AgentToolContext, ToolResult } from './agent-tools.js';
+import { buildModelFromBrief, type CallStructuredModel } from './build-model.js';
 
 /** One internal dispatch, so every path is the product's own. */
 export type InternalDispatch = (path: string, body: unknown) => Promise<{ status: number; json: Record<string, unknown> }>;
@@ -34,6 +35,13 @@ const norm = (s: unknown): string => String(s ?? '').toLowerCase().replace(/…$
 export function createAgentCapabilities(
   dispatch: InternalDispatch,
   proposals: ProposalStore,
+  /**
+   * Construction needs a structured model call. It is injected rather than
+   * imported so this module still has no provider of its own — and when it is
+   * absent the tool REFUSES rather than pretending the model could not be built
+   * for some modelling reason.
+   */
+  callStructured?: CallStructuredModel,
 ): AgentCapabilities {
   const readGraph = async (scenarioId: string): Promise<GraphRead | null> => {
     const r = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {});
@@ -167,6 +175,36 @@ export function createAgentCapabilities(
           'The direction was recorded. No strength was stated by the user, so the model carries a ' +
           'placeholder strength that is not a measurement — say so if you describe the change.',
       };
+    },
+
+    async buildModelFromBrief(ctx, args): Promise<ToolResult> {
+      if (callStructured === undefined) {
+        return { ok: false, mutated: false, refusal: 'construction_unavailable' };
+      }
+      const brief = typeof args?.brief === 'string' ? args.brief.trim() : '';
+      if (brief.length === 0) return { ok: false, mutated: false, refusal: 'empty_brief' };
+
+      // ⛔ NEVER BUILD OVER A MODEL THAT ALREADY EXISTS. Registration replaces
+      // the whole graph, so running this on a populated scenario would discard
+      // work the user has already authorised.
+      const before = await readGraph(ctx.scenario_id);
+      if (before === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      if (before.nodes.length > 0) {
+        return {
+          ok: false, mutated: false, refusal: 'model_already_exists',
+          detail: 'The model already has entities. Propose a change instead of rebuilding it.',
+        };
+      }
+
+      const built = await buildModelFromBrief(ctx.scenario_id, brief, dispatch, callStructured);
+      if (built.ok !== true) return built;
+
+      // Confirmed from state, never from the write's own return value.
+      const after = await readGraph(ctx.scenario_id);
+      if (after === null || after.nodes.length === 0) {
+        return { ok: false, mutated: false, refusal: 'model_not_readable_after_write' };
+      }
+      return { ...built, confirmed_entities: after.nodes.length, graph_revision: after.graph_hash };
     },
 
     async runAnalysis(ctx, args): Promise<ToolResult> {

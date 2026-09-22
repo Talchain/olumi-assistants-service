@@ -30,6 +30,7 @@ import { composeDirectAnswerResponse } from '../orchestrator-v5/compose.js';
 import { finaliseV5Response } from '../orchestrator-v5/response-finaliser.js';
 import { runAgentTurn, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
 import { createAgentCapabilities, type InternalDispatch } from '../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
+import type { CallStructuredModel } from '../orchestrator-v5/agent-lane/runtime/build-model.js';
 import { ProposalStore } from '../orchestrator-v5/agent-lane/proposal.js';
 import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-binding.js';
 import { budgetFor } from '../orchestrator-v5/agent-lane/model-budgets.js';
@@ -49,13 +50,14 @@ const AGENT_INSTRUCTIONS = [
   'Distinguish user facts and evidence from machine-authored estimates and from unknowns. An absent value is unknown, never zero.',
   'To change the model you must call propose_model_change, show the user exactly what you propose, and call authorise_change ONLY after they have explicitly approved it.',
   'Never claim a change happened unless the tool result says it was applied. If a tool reports a refusal, tell the user what it said.',
+  'If get_canonical_state reports the model is empty, call build_model_from_brief with the user\u2019s own words before answering about the model.',
   'Discussion, ideation and research are not mutation requests.',
   'When a tool tells you something was not represented, say so.',
   'British English. Concise but substantive.',
 ].join(' ');
 
 export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
-  if (config.features?.agentLaneEnabled !== true) return;
+  if (config.proxy.agentLaneEnabled !== true) return;
 
   const dispatch: InternalDispatch = async (path, body) => {
     const res = await app.inject({
@@ -95,6 +97,52 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     return (await r.json()) as { output: Record<string, unknown>[] };
   };
 
+  /**
+   * Structured construction call. Separate from `callModel` because it is a
+   * different contract: strict `json_schema` output and its own measured budget
+   * (see BANKED_BUDGETS role 'whole'), not the conversation budget.
+   */
+  const callStructured: CallStructuredModel = async (reqBody) => {
+    const r = await fetch(OPENAI_RESPONSES_URL, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${config.llm.openaiApiKey ?? ''}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: reqBody.model,
+        instructions: reqBody.instructions,
+        input: reqBody.input,
+        max_output_tokens: reqBody.max_output_tokens,
+        ...(reqBody.reasoning_effort !== undefined
+          ? { reasoning: { effort: reqBody.reasoning_effort } }
+          : {}),
+        text: {
+          format: {
+            type: 'json_schema',
+            name: 'whole_candidate',
+            strict: true,
+            schema: reqBody.schema,
+          },
+        },
+      }),
+    });
+    if (!r.ok) {
+      const text = await r.text();
+      throw new Error(`openai_${r.status}: ${text.slice(0, 300)}`);
+    }
+    const j = (await r.json()) as {
+      output?: { type?: string; content?: { type?: string; text?: string }[] }[];
+      usage?: Record<string, unknown>;
+    };
+    let text = '';
+    for (const item of j.output ?? []) {
+      if (item.type !== 'message') continue;
+      for (const c of item.content ?? []) if (c.type === 'output_text') text += c.text ?? '';
+    }
+    return { text, usage: j.usage };
+  };
+
   app.post('/agent/v1/turn', async (req: FastifyRequest, reply: FastifyReply) => {
     const body = (req.body ?? {}) as Record<string, unknown>;
     const scenarioId = typeof body.scenario_id === 'string' ? body.scenario_id : '';
@@ -118,7 +166,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       return reply.code(404).send({ error: 'NOT_FOUND', detail: 'No readable conversation for that scenario.' });
     }
 
-    const capabilities = createAgentCapabilities(dispatch, proposals);
+    const capabilities = createAgentCapabilities(dispatch, proposals, callStructured);
     const history = histories.get(sessionId) ?? [];
     const budget = budgetFor('gpt-5.6-terra', 'conversation');
 

@@ -54,6 +54,21 @@ export const BANKED_BUDGETS: readonly CallBudget[] = [
   },
   {
     model: 'gpt-5.6-terra',
+    role: 'whole',
+    max_output_tokens: 6000,
+    reasoning_effort: 'high',
+    evidence:
+      'Measured 22 Sep on the live API against the real buildCandidateSchema(), at a 6000 ceiling: ' +
+      'status "completed", in 838 / out 3404 incl. 2070 reasoning, 54.4 s. It returned 4 options, ' +
+      '11 factors, 6 risks, 6 outcomes, 18 links (5 of them direction "unknown", i.e. withheld ' +
+      'rather than guessed), 1 constraint and 4 interventions. ' +
+      'The measured output EXCEEDS the 2600 widening ceiling, so this role cannot borrow that ' +
+      'budget; 6000 leaves ~1.8x margin over the measurement. ' +
+      'NOTE: a one-pass vs two-pass comparison has NOT been re-derived this session \u2014 this ' +
+      'entry justifies the budget only, not a choice between the two chains.',
+  },
+  {
+    model: 'gpt-5.6-terra',
     role: 'conversation',
     max_output_tokens: 3400,
     evidence:

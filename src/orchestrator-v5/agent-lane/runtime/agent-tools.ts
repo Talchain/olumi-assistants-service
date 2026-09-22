@@ -71,6 +71,18 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       'missing; report that honestly rather than guessing what the result would have been.',
     parameters: obj({ reason: { type: 'string' } }, ['reason']),
   },
+  {
+    type: 'function',
+    name: 'build_model_from_brief',
+    description:
+      'Build the decision model from the user\u2019s brief when get_canonical_state reports the ' +
+      'model is empty. Preserves the user\u2019s own facts, numbers and constraint wording, then ' +
+      'adds the options, factors, risks and causal mechanisms that make the decision reasonable ' +
+      'to analyse. Report honestly what it says was left out.',
+    parameters: obj({
+      brief: { type: 'string', description: 'The user\u2019s decision in their own words, verbatim.' },
+    }, ['brief']),
+  },
 ];
 
 export type ToolName = (typeof AGENT_TOOLS)[number]['name'];
@@ -89,6 +101,7 @@ export interface AgentCapabilities {
   }): Promise<ToolResult>;
   authoriseChange(ctx: AgentToolContext, args: { proposal_id: string }): Promise<ToolResult>;
   runAnalysis(ctx: AgentToolContext, args: { reason: string }): Promise<ToolResult>;
+  buildModelFromBrief(ctx: AgentToolContext, args: { brief: string }): Promise<ToolResult>;
 }
 
 export async function dispatchTool(
@@ -112,6 +125,8 @@ export async function dispatchTool(
       return caps.authoriseChange(ctx, args as never);
     case 'run_analysis':
       return caps.runAnalysis(ctx, args as never);
+    case 'build_model_from_brief':
+      return caps.buildModelFromBrief(ctx, args as never);
     default:
       // An unknown tool is never silently ignored: the Agent is told plainly.
       return { ok: false, mutated: false, refusal: 'unknown_tool', tool: name };
