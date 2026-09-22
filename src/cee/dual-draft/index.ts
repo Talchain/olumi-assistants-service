@@ -33,7 +33,14 @@ import { mergeProposals } from './merge.js';
 import { optionSurfaceUnchanged, checkReadinessNoDowngrade } from './guards.js';
 import { emitM2Outcome, emitMergeReport, emitDegraded } from './telemetry.js';
 
-export type { EnrichmentInput, EnrichmentOutcome, EnrichmentReason } from './types.js';
+export type {
+  EnrichmentInput,
+  EnrichmentOutcome,
+  EnrichmentReason,
+  // Re-exported alongside the outcome it now travels on, so the dispatch can
+  // type `outcome.artifacts` without importing from the merge implementation.
+  DeferArtifact,
+} from './types.js';
 
 /**
  * Whether the M2 review actually made an LLM call for a given outcome reason.
@@ -93,9 +100,14 @@ const M2_DEGRADE_REASON = {
 } as const satisfies Record<string, EnrichmentReason>;
 
 export async function enrichDraftGraph(input: EnrichmentInput): Promise<EnrichmentOutcome> {
+  // SINGLE degrade chokepoint — every one of the 7 degrade sites below routes
+  // through here, so `artifacts: []` covers them all and a future degrade site
+  // cannot forget the field. The contract is an EMPTY ARRAY, never undefined:
+  // a degraded turn ships the M1 graph, and nothing may be attributed to a
+  // merge that was discarded.
   const degrade = (reason: EnrichmentReason, detail?: string): EnrichmentOutcome => {
     emitDegraded(input, reason, detail);
-    return { enriched: false, reason, graph: input.graph };
+    return { enriched: false, reason, graph: input.graph, artifacts: [] };
   };
 
   try {
@@ -152,7 +164,11 @@ export async function enrichDraftGraph(input: EnrichmentInput): Promise<Enrichme
       return degrade('no_proposals_applied');
     }
 
-    return { enriched: true, reason: 'applied', graph: outcome.merged };
+    // Success path — the merge's defer artefacts are carried OUT of the stage.
+    // Before this, mergeProposals computed them, emitMergeReport counted them,
+    // and this return dropped the content on the floor: the artefact channel
+    // had no reader beyond a telemetry count.
+    return { enriched: true, reason: 'applied', graph: outcome.merged, artifacts: outcome.artifacts };
   } catch {
     // Belt-and-braces: the stage is contracted never to throw; if a bug does,
     // the draft turn must survive it untouched.

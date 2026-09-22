@@ -13,11 +13,26 @@
  * MergeFailure, DeferArtifact) and the ProposalEnvelope land alongside this
  * file in later phases behind the same default-OFF flag.
  *
- * Dependency discipline: this module imports only the GraphV3 contract from
- * src/schemas. It must not import from src/orchestrator-v5 — that would invert
- * the cee → orchestrator layering and risk a circular import.
+ * Dependency discipline: this module imports the GraphV3 contract from
+ * src/schemas and — TYPE-ONLY — the DeferArtifact shape from its sibling
+ * ./merge.js (see the re-export below). It must not import from
+ * src/orchestrator-v5 — that would invert the cee → orchestrator layering and
+ * risk a circular import.
  */
 import type { GraphV3T } from '../../schemas/cee-v3.js';
+import type { DeferArtifact } from './merge.js';
+
+/**
+ * The non-mutating epistemic artefact shape, re-exported from the contract
+ * module so a consumer of EnrichmentOutcome gets the artefact type from here
+ * rather than reaching into the merge implementation.
+ *
+ * Declared in ./merge.js (its producer) and left there deliberately: this is an
+ * `import type` / `export type` pair, fully erased at compile time, so it adds
+ * NO runtime edge and cannot form an import cycle — merge.ts does not import
+ * this module.
+ */
+export type { DeferArtifact };
 
 /**
  * Input to the enrichment stage. Built in draft-graph-dispatch from the M1
@@ -63,6 +78,10 @@ export interface EnrichmentInput {
  *      'm2_model_not_resolved' member: model resolution is activation-critical
  *      and must not be hidden under 'm2_llm_error' (which reads as adapter/LLM
  *      instability on the activation dashboards).
+ *   3. 2026-09-22, briefed delta (the first change to touch EnrichmentOutcome
+ *      itself, hence logged explicitly rather than under the reason union) —
+ *      added the `artifacts` field. Purely ADDITIVE: no member removed, no
+ *      existing field or semantic changed. Rationale on the field.
  */
 export type EnrichmentReason =
   // Phase 0/1 members (unchanged)
@@ -95,4 +114,20 @@ export interface EnrichmentOutcome {
   readonly reason: EnrichmentReason;
   /** Final graph: the merged graph when enriched, else the untouched M1 graph. */
   readonly graph: GraphV3T;
+  /**
+   * The non-mutating epistemic artefacts the deterministic merge deferred
+   * (added_evidence_gap / uncertainty_flag / clarification_proposal, plus the
+   * D1 added_option defer). Carried OUT of the stage so the caller can reach
+   * them; before this field they were computed by mergeProposals, counted into
+   * the merge_report telemetry, and then discarded at this boundary.
+   *
+   * ALWAYS AN ARRAY, never undefined — every degrade path returns `[]`, so a
+   * consumer never has to distinguish "no artefacts" from "field absent".
+   *
+   * Carrying them is NOT surfacing them: the standing activation ruling
+   * (amendment #3, see index.ts) keeps defer artefacts out of any user-facing
+   * or persisted surface until the harness/coaching lane authorises it. This
+   * field is the transport precondition for that decision, not the decision.
+   */
+  readonly artifacts: readonly DeferArtifact[];
 }
