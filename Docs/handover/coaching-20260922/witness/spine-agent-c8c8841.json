@@ -1,0 +1,48 @@
+{
+  "build": "c8c8841",
+  "route": "/agent/v1/turn",
+  "rows": [
+    {
+      "c": "1",
+      "n": "a user-authorised mutation commits",
+      "s": "UNSATISFIABLE",
+      "d": "raw_value=9 (was 9) turns=0 versions=0 · \"I can’t apply changes in this read-only preview.\n\n“Sales Cycle Length”\""
+    },
+    {
+      "c": "1",
+      "n": "a durable turn row records the operation",
+      "s": "UNSATISFIABLE",
+      "d": "turn rows=0"
+    },
+    {
+      "c": "1",
+      "n": "a receipt is minted",
+      "s": "UNSATISFIABLE",
+      "d": "model_versions=0"
+    },
+    {
+      "c": "2a",
+      "n": "a retry is distinguishable from a first attempt",
+      "s": "UNSATISFIABLE",
+      "d": "no durable (scenario_id,turn_id) key exists on this route — turns 0→0"
+    },
+    {
+      "c": "4",
+      "n": "it speaks the user-facing unit, not the stored scale",
+      "s": "SATISFIED",
+      "d": "quotes 0.45 = false · \"I can’t make that change in this read-only preview. I would propose setting the **Sales Cy\""
+    },
+    {
+      "c": "5",
+      "n": "analysis reaches the shared spine",
+      "s": "SATISFIED",
+      "d": "run_analysis fact=yes turns=1"
+    },
+    {
+      "c": "5",
+      "n": "an analysis_result block reaches the client",
+      "s": "UNSATISFIABLE",
+      "d": "blocks=(empty) · \"Analysis complete.\n\n**Current result:** **Move Upmarket to Enterprise*\""
+    }
+  ]
+}
