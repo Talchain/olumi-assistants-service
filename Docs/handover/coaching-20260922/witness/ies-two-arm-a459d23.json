@@ -1,0 +1,25 @@
+{
+  "build": "a459d23",
+  "signed": {
+    "label": "SIGNEDIN",
+    "owner": true,
+    "editStatus": 200,
+    "source": "user_override",
+    "value": "0.6",
+    "versions": 1,
+    "before": "/Olumi's/gi=0  /not yours/gi=2  /still Olumi/gi=0  /Still Olumi's:/gi=0",
+    "after": "/Olumi's/gi=0  /not yours/gi=0  /still Olumi/gi=2  /Still Olumi's:/gi=0",
+    "text_after": "The last attempt was refused because the brief mentioned options (\"staying UK-only\", \"going deeper into financial services\") that don't line up with what's in the model. Looking at the model now, the "
+  },
+  "guest": {
+    "label": "GUEST",
+    "owner": false,
+    "editStatus": 200,
+    "source": "user_override",
+    "value": "0.6",
+    "versions": 0,
+    "before": "/Olumi's/gi=0  /not yours/gi=2  /still Olumi/gi=0  /Still Olumi's:/gi=0",
+    "after": "/Olumi's/gi=0  /not yours/gi=0  /still Olumi/gi=2  /Still Olumi's:/gi=0",
+    "text_after": "The last attempt didn't produce a usable result, so let me flag what's needed before running again rather than repeating the same gap."
+  }
+}
