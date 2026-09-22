@@ -30,12 +30,21 @@ const BASE: Node[] = [
 ];
 
 /** Applies `factor_value_edit` the way the product does: the model changes, and the read-back shows it. */
-function fakeProduct(opts: { rescale?: Record<string, number>; failOn?: string[] } = {}) {
+function fakeProduct(opts: { rescale?: Record<string, number>; failOn?: string[]; registerFails?: boolean } = {}) {
   const posted: { turn_id: string; event: Record<string, unknown> }[] = [];
+  const registered: { nodes: Node[] }[] = [];
   let nodes: Node[] = BASE.map((n) => ({ ...n, observed_state: n.observed_state ? { ...n.observed_state } : undefined }));
   let rev = 0;
   const d: InternalDispatch = async (path, body) => {
     const b = (body ?? {}) as Record<string, unknown>;
+    if (path.endsWith('/graph/register')) {
+      if (opts.registerFails === true) return { status: 500, json: {} };
+      const g = (b as { graph: { nodes: Node[] } }).graph;
+      registered.push({ nodes: g.nodes });
+      nodes = g.nodes;
+      rev += 1;
+      return { status: 200, json: {} };
+    }
     if (path === '/orchestrate/v2/turn' && b.kind === 'system_event') {
       const ev = b.event as { kind: string; target_id: string; value: number };
       posted.push({ turn_id: String(b.turn_id), event: ev as unknown as Record<string, unknown> });
@@ -47,7 +56,7 @@ function fakeProduct(opts: { rescale?: Record<string, number>; failOn?: string[]
     }
     return { status: 200, json: { graph: { nodes, edges: [] }, graph_hash: `h${rev}` } };
   };
-  return { d, posted, read: () => nodes };
+  return { d, posted, registered, read: () => nodes };
 }
 
 const ASK = {
@@ -121,7 +130,10 @@ describe('authorise_change applies the STORED assumptions', () => {
       ['monthly_churn_rate', 3.5, '%'],
       ['pro_subscribers', 400, 'subscribers'],
     ]);
-    expect(p.read().find((n) => n.id === 'monthly_churn_rate')?.observed_state?.value).toBe(3.5);
+    // The approved figure is kept as `raw_value`; `value` is it read against
+    // the range that had to be attached (see the frame describe-block below).
+    expect(p.read().find((n) => n.id === 'monthly_churn_rate')?.observed_state?.raw_value).toBe(3.5);
+    expect(p.read().find((n) => n.id === 'monthly_churn_rate')?.observed_state?.value).toBeCloseTo(0.35, 10);
     // The already-valued factor was never touched.
     expect(p.read().find((n) => n.id === 'pro_plan_price')?.observed_state?.value).toBe(49);
     expect(String(applied.not_represented)).toMatch(/assumptions, not measurements/);
@@ -221,5 +233,58 @@ describe('the emitted event satisfies the REAL wire contract', () => {
       event: { ...payload.event, base_graph_hash: 'abc' },
     });
     expect(bad.success).toBe(false);
+  });
+});
+
+describe('a value adopted onto an unframed factor gets a range, or the analysis can never run', () => {
+  /**
+   * ⛔ MEASURED END TO END on the deployed build. A factor whose first value
+   * arrives by adoption has no `observed_state` at construction, so it cannot
+   * carry a `cap` — and `run_analysis` refuses the whole model with
+   * `baseline_scale_unresolved`, permanently, because no system event can add
+   * one afterwards. With the range attached, the same model went
+   * `blocked` -> `ready`, blockers 0, and produced win probabilities.
+   */
+  it('attaches a range derived from the user’s own figure, keeping that figure', async () => {
+    const p = fakeProduct();
+    const caps = createAgentCapabilities(p.d, new ProposalStore());
+    const prop = await caps.proposeAssumptions(ctx, ASK);
+    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+
+    // 400 subscribers is a bare amount; 3.5 is too. Both get a derived range.
+    expect(applied.ranges_added_for_analysis).toEqual([
+      { factor: 'Monthly churn rate', value: 3.5, range: 10 },
+      { factor: 'Pro subscribers', value: 400, range: 1000 },
+    ]);
+    const subs = p.read().find((n) => n.id === 'pro_subscribers')!;
+    expect(subs.observed_state!.cap).toBe(1000);
+    expect(subs.observed_state!.raw_value).toBe(400);
+    expect(subs.observed_state!.value).toBeCloseTo(0.4, 10);
+    // ⛔ And it must be SAID — this is a representational choice, not a fact.
+    expect(String(applied.not_represented)).toMatch(/a unit of measurement rather than a forecast/);
+    expect(String(applied.not_represented)).toMatch(/Pro subscribers 0 to 1000/);
+  });
+
+  it('leaves a value already within the unit interval completely alone', async () => {
+    const p = fakeProduct();
+    const caps = createAgentCapabilities(p.d, new ProposalStore());
+    const prop = await caps.proposeAssumptions(ctx, {
+      assumptions: [{ factor_label: 'Monthly churn rate', value: 0.035, unit: 'proportion', basis: 'already a proportion' }],
+    });
+    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    // The contrast control: no range, no second write, no disclosure noise.
+    expect(applied.ranges_added_for_analysis).toBeUndefined();
+    expect(p.registered).toHaveLength(0);
+    expect(p.read().find((n) => n.id === 'monthly_churn_rate')!.observed_state!.cap).toBeUndefined();
+  });
+
+  it('reports honestly when the range could not be attached', async () => {
+    const p = fakeProduct({ registerFails: true });
+    const caps = createAgentCapabilities(p.d, new ProposalStore());
+    const prop = await caps.proposeAssumptions(ctx, ASK);
+    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    expect(applied.ok).toBe(true);
+    expect(applied.ranges_added_for_analysis).toBeUndefined();
+    expect(applied.failures).toContainEqual({ factor: 'scale_frame', detail: 'could not attach a range: http 500' });
   });
 });

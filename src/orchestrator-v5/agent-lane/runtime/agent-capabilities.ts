@@ -44,6 +44,7 @@ export function authorisationTurnId(proposalId: string): string {
 import { createProposal, ProposalStore, type ProposalOperation } from '../proposal.js';
 import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
 import { structuralFacts } from '../structural-facts.js';
+import { defaultFrameFor } from '../admit-model.js';
 import type { AgentCapabilities, AgentToolContext, ToolResult } from './agent-tools.js';
 import { buildModelFromBrief, type CallStructuredModel } from './build-model.js';
 
@@ -537,6 +538,64 @@ export function createAgentCapabilities(
             failures, values: applied,
           };
         }
+
+        /**
+         * ⭐ ATTACH A SCALE FRAME TO ANYTHING THAT LANDED AS A BARE AMOUNT.
+         *
+         * ⛔ WHY THIS SECOND WRITE EXISTS, measured end to end. A factor above
+         * 1 with no `cap` is refused by `run_analysis`
+         * (`baseline_scale_unresolved`) and the refusal is permanent:
+         * `factor_value_edit` is `.strict()` with no cap field, and posting a
+         * `{value, raw_value}` pair is accepted with HTTP 200 then normalised
+         * back to `raw === value`. Construction publishes the frame inside
+         * `observed_state`, which survives because `ObservedStateSchema` is
+         * `.passthrough()` — but a factor with NO baseline at construction has
+         * no `observed_state` to carry one (`value` is required), and a
+         * node-level `cap` is stripped by `NodeV3Schema`. So a factor that
+         * gets its first value HERE, by adoption, would be unanalysable for
+         * the life of the model.
+         *
+         * Measured on the deployed build: with the frame attached this way,
+         * `analysis_ready` went `blocked` -> `ready`, blockers 0, and the run
+         * produced win probabilities over 10,000 samples per option. Without
+         * it, the same model refused.
+         *
+         * ⚠ The frame is DERIVED from the user's own number, `raw_value` keeps
+         * that number untouched, and it is reported so the Agent says it.
+         */
+        const needsFrame = (afterSet?.nodes ?? []).filter((n) => {
+          if (!ops.some((o) => o.path === n.id)) return false;
+          const os = (n.observed_state ?? {}) as { value?: unknown; cap?: unknown };
+          return typeof os.value === 'number' && Math.abs(os.value) > 1 && typeof os.cap !== 'number';
+        });
+        const framed: { factor: string; value: number; range: number }[] = [];
+        if (needsFrame.length > 0 && afterSet !== null) {
+          const frameById = new Map<string, number>();
+          for (const n of needsFrame) {
+            const os = n.observed_state as { value: number; raw_value?: number };
+            const raw = typeof os.raw_value === 'number' ? os.raw_value : os.value;
+            const range = defaultFrameFor(raw);
+            if (range <= 1) continue;
+            frameById.set(n.id, range);
+            framed.push({ factor: n.label, value: raw, range });
+          }
+          if (frameById.size > 0) {
+            const patched = afterSet.nodes.map((n) => {
+              const range = frameById.get(n.id);
+              if (range === undefined) return n;
+              const os = (n.observed_state ?? {}) as { value: number; raw_value?: number };
+              const raw = typeof os.raw_value === 'number' ? os.raw_value : os.value;
+              return { ...n, observed_state: { ...os, value: raw / range, raw_value: raw, cap: range, declared_scale: 'unit_interval' } };
+            });
+            const reg = await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, {
+              graph: { nodes: patched, edges: afterSet.edges },
+            });
+            if (reg.status !== 200) {
+              failures.push({ factor: 'scale_frame', detail: `could not attach a range: http ${reg.status}` });
+              framed.length = 0;
+            }
+          }
+        }
         if (landed.length === applied.length) proposals.markApplied(decision.proposal.proposal_id);
         const rescaled = landed.filter((a) => a.recorded !== a.requested);
         return {
@@ -551,10 +610,18 @@ export function createAgentCapabilities(
           ...(rescaled.length > 0
             ? { rescaled_by_the_model: rescaled, must_disclose_rescaling: true }
             : {}),
+          ...(framed.length > 0 ? { ranges_added_for_analysis: framed } : {}),
           not_represented:
             'These values are the user\u2019s adopted assumptions, not measurements, and the model records ' +
             'no mark distinguishing the two \u2014 so say so when you describe what changed' +
-            (rescaled.length > 0 ? ', and state every value the model stored differently from the one approved.' : '.'),
+            (rescaled.length > 0 ? ', and state every value the model stored differently from the one approved.' : '.') +
+            (framed.length > 0
+              ? ' Some of them had no range to be read against, which would have stopped the analysis running ' +
+                'at all, so a range was taken from the figure itself: ' +
+                framed.map((f) => `${f.factor} 0 to ${f.range}`).join(', ') +
+                '. That is a unit of measurement rather than a forecast or a limit, the approved figures are ' +
+                'stored unchanged, and the user should be told and invited to correct any range that is wrong.'
+              : ''),
         };
       }
 
