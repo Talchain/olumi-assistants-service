@@ -534,8 +534,9 @@ describe('V5 edit_graph → state-query — Layer A acceptance proof (forced com
       };
       mockState.pendingActions = [existingPending];
 
+      const payload_edit_effect_canonical = mkPayload('What did that update do?');
       const result = await runTurnExecutor(
-        mkPayload('What did that update do?'),
+        payload_edit_effect_canonical,
         'req-edit-effect-canonical',
         { routingAdapter: adapter, graphState: requestGraphCanary as never },
       );
@@ -552,7 +553,7 @@ describe('V5 edit_graph → state-query — Layer A acceptance proof (forced com
       expect(result.response).not.toHaveProperty('model_version_receipt');
 
       const committed = mockState.appendWrites.find(
-        (write) => write.turn_id === 'req-edit-effect-canonical',
+        (write) => write.turn_id === payload_edit_effect_canonical.turn_id,
       );
       expect(committed).toBeDefined();
       expect(committed).toHaveProperty('graph', undefined);
@@ -616,8 +617,9 @@ describe('V5 edit_graph → state-query — Layer A acceptance proof (forced com
       mockState.durableMutationReadFails = true;
       const adapter = throwingRoutingAdapter();
 
+      const payload_degraded_empty_history = mkPayload('What changed?');
       const result = await runTurnExecutor(
-        mkPayload('What changed?'),
+        payload_degraded_empty_history,
         'req-degraded-empty-history',
         { routingAdapter: adapter, graphState: PRE_EDIT_GRAPH as never },
       );
@@ -631,7 +633,7 @@ describe('V5 edit_graph → state-query — Layer A acceptance proof (forced com
       expect(committedPendingActions()).toEqual([]);
       expect(mockState.appendWrites.some((write) => write.graph !== undefined)).toBe(false);
       const committed = mockState.appendWrites.find(
-        (write) => write.turn_id === 'req-degraded-empty-history',
+        (write) => write.turn_id === payload_degraded_empty_history.turn_id,
       );
       expect(committed).toMatchObject({
         handler_id: null,
@@ -792,8 +794,9 @@ describe('V5 edit_graph → state-query — Layer A acceptance proof (forced com
       mockState.persistedGraph = PRE_EDIT_GRAPH;
       const adapter = throwingRoutingAdapter();
 
+      const payload_no_receipt_edit_effect = mkPayload('What did that update do?');
       const result = await runTurnExecutor(
-        mkPayload('What did that update do?'),
+        payload_no_receipt_edit_effect,
         'req-no-receipt-edit-effect',
         { routingAdapter: adapter, graphState: PRE_EDIT_GRAPH as never },
       );
@@ -807,7 +810,7 @@ describe('V5 edit_graph → state-query — Layer A acceptance proof (forced com
       expect(result.response.suggested_actions ?? []).toEqual([]);
       expect(result.response).not.toHaveProperty('model_version_receipt');
       const committed = mockState.appendWrites.find(
-        (write) => write.turn_id === 'req-no-receipt-edit-effect',
+        (write) => write.turn_id === payload_no_receipt_edit_effect.turn_id,
       );
       expect(committed).toHaveProperty('graph', undefined);
     });
@@ -861,14 +864,15 @@ describe('V5 edit_graph → state-query — Layer A acceptance proof (forced com
       mockState.persistedGraph = null;
 
       const adapter = throwingRoutingAdapter();
+      const payload_consequence_no_adopt = mkPayload('What did that update do?');
       await runTurnExecutor(
-        mkPayload('What did that update do?'),
+        payload_consequence_no_adopt,
         'req-consequence-no-adopt',
         { routingAdapter: adapter, graphState: PRE_EDIT_GRAPH as never },
       );
 
       const committed = mockState.appendWrites.find(
-        (write) => write.turn_id === 'req-consequence-no-adopt',
+        (write) => write.turn_id === payload_consequence_no_adopt.turn_id,
       );
       expect(committed).toBeDefined();
       // Precondition pins — without these the assertion below could pass
@@ -891,8 +895,9 @@ describe('V5 edit_graph → state-query — Layer A acceptance proof (forced com
       mockState.persistedGraph = null;
 
       const adapter = consequenceRoutingAdapter('Here is what the model says.');
+      const payload_contrast_adopt = mkPayload('Explain the current results please.');
       await runTurnExecutor(
-        mkPayload('Explain the current results please.'),
+        payload_contrast_adopt,
         'req-contrast-adopt',
         {
           routingAdapter: adapter,
@@ -902,7 +907,7 @@ describe('V5 edit_graph → state-query — Layer A acceptance proof (forced com
       );
 
       const committed = mockState.appendWrites.find(
-        (write) => write.turn_id === 'req-contrast-adopt',
+        (write) => write.turn_id === payload_contrast_adopt.turn_id,
       );
       expect(committed).toBeDefined();
       expect(committed?.handler_id).toBe('explain_results'); // NOT the flagged path
@@ -921,14 +926,15 @@ describe('V5 edit_graph → state-query — Layer A acceptance proof (forced com
       const adapter = consequenceRoutingAdapter(
         'Invented router prose. Would you like me to add supplier concentration as a risk?',
       );
+      const payload_consequence_no_proposal_capture = mkPayload('What did that update do?');
       await runTurnExecutor(
-        mkPayload('What did that update do?'),
+        payload_consequence_no_proposal_capture,
         'req-consequence-no-proposal-capture',
         { routingAdapter: adapter, graphState: PRE_EDIT_GRAPH as never },
       );
 
       const committed = mockState.appendWrites.find(
-        (write) => write.turn_id === 'req-consequence-no-proposal-capture',
+        (write) => write.turn_id === payload_consequence_no_proposal_capture.turn_id,
       );
       expect(committed).toBeDefined();
       expect(adapter.chatWithTools).not.toHaveBeenCalled();
