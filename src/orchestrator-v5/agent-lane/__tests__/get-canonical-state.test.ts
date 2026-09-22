@@ -21,6 +21,20 @@ const graph = {
     { id: 'price', kind: 'factor', label: 'Pro plan price', observed_state: { value: 49, unit: 'GBP' }, provenance: { source: 'user_specified' } },
     { id: 'churn', kind: 'factor', label: 'Monthly churn rate', provenance: { source: 'brief_extraction' } },
     { id: 'nameless', kind: 'factor', label: 'No provenance here' },
+    {
+      id: 'budget',
+      kind: 'factor',
+      label: 'Budget',
+      observed_state: {
+        value: 0.2,
+        raw_value: 200,
+        unit: 'GBP',
+        cap: 1000,
+        declared_scale: 'unit_interval',
+        source: 'brief_extraction',
+      },
+      provenance: 'from_brief',
+    },
   ],
   edges: [],
 };
@@ -106,6 +120,25 @@ describe('getCanonicalState — honest reporting', () => {
     const r = await read();
     expect(r.entities.find((e) => e.label === 'No provenance here')?.authored_by).toBe('unattested');
     expect(r.entities.find((e) => e.label === 'Monthly churn rate')?.authored_by).toBe('brief_extraction');
+  });
+
+  it('preserves canonical id, raw/user value, model value, frame and provenance', async () => {
+    const r = await read();
+    const budget = r.entities.find((e) => e.id === 'budget');
+    expect(budget).toEqual({
+      id: 'budget',
+      label: 'Budget',
+      kind: 'factor',
+      baseline: { kind: 'point', value: 200, unit: 'GBP' },
+      value: 0.2,
+      model_value: 0.2,
+      raw_value: 200,
+      unit: 'GBP',
+      cap: 1000,
+      declared_scale: 'unit_interval',
+      value_source: 'brief_extraction',
+      authored_by: 'from_brief',
+    });
   });
 
   it('distinguishes an EMPTY model from a model with no factors', async () => {
