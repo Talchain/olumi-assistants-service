@@ -94,6 +94,52 @@ const meta = () => ({
   handler_facts: [],
 });
 
+/**
+ * A receipt shaped as `append_turn_atomic_v5` actually returns one.
+ *
+ * ⚠ It is NOT self-validating on its own — an invented shape would simply be
+ *   dropped by `toModelVersionMutationReceiptV1` and every "absent" assertion
+ *   would pass VACUOUSLY. The REPLAY arm below is the control that makes this
+ *   fixture load-bearing: it requires the receipt to be PRESENT, so a bad shape
+ *   turns that test red rather than silently strengthening the others.
+ */
+const RECEIPT = {
+  mutation_id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+  version_id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+  version_number: 2,
+  graph_identity_hash: 'a'.repeat(64),
+  analysis_affecting_hash: 'b'.repeat(64),
+  hash_algorithm: 'sha256',
+  identity_projection_version: 'identity.v1',
+  identity_normaliser_version: '1',
+  graph_schema_version: 'graph_v3',
+  actor_kind: 'unknown' as const,
+  authored_by: null,
+  creation_kind: 'committed_mutation' as const,
+  source_version_id: null,
+  source_turn_id: TURN_ID,
+  parent_version_id: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+  root_version_id: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+  undo_version_id: null,
+  graph: GRAPH_AT_14,
+  event_id: 'model_version_created_mutation_dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+};
+
+function storeWithReceipt(verdict: 'conflict' | 'replay'): SessionStore {
+  const base = createNoopSessionStore();
+  return {
+    ...base,
+    append: async () => ({
+      id: 'turn-row',
+      modelVersionReceipt: RECEIPT,
+      ...(verdict === 'conflict'
+        ? { priorTurnConflict: true as const }
+        : { replayedPriorTurn: true as const }),
+    }),
+    loadGraph: async () => GRAPH_AT_14,
+  } as unknown as SessionStore;
+}
+
 function storeReporting(
   verdict: 'conflict' | 'replay',
   loadGraph: () => Promise<unknown> = async () => GRAPH_AT_14,
@@ -185,5 +231,53 @@ describe('a reused operation id refuses truthfully', () => {
       expect(patch?.after, 'null is the structured current-state-unavailable signal').toBeNull();
       expect(r.response.assistant_text).not.toMatch(/\b25\b/);
     }
+  });
+});
+
+
+/**
+ * ⛔ A CONFLICT MUST NOT HAND BACK THE PRIOR OPERATION'S RECEIPT.
+ *
+ * `append_turn_atomic_v5` returns the ORIGINAL operation's receipt on a reused
+ * id, because the deterministic mutation id is derived from
+ * `scenario_id + turn_id` — exactly what a reused id shares. So the response
+ * said "I did not make that change" while still carrying a
+ * `model_version_receipt`, and `CommitResult.modelVersionReceipt` was non-null.
+ * A consumer reading the receipt rather than the prose concludes the write
+ * happened: the same false success, moved into the structured carrier.
+ *
+ * Nothing is removed from the RPC or from durable version history. The receipt
+ * is TRUE of the earlier operation; it is simply not the receipt of THIS request.
+ */
+describe('a conflict does not hand back the prior operation receipt', () => {
+  it('CONTROL — a genuine replay STILL recovers the receipt, on both carriers', async () => {
+    const r = await commitDirectAnswer(composed(), meta() as never, storeWithReceipt('replay'));
+    expect(
+      (r.response as Record<string, unknown>).model_version_receipt,
+      'if this is absent the RECEIPT fixture is malformed and every absence assertion below is vacuous',
+    ).toBeDefined();
+    expect(r.modelVersionReceipt, 'a replay may truthfully recover the original receipt').not.toBeNull();
+  });
+
+  it('RED: on a conflict the response carries NO model_version_receipt', async () => {
+    const r = await commitDirectAnswer(composed(), meta() as never, storeWithReceipt('conflict'));
+    expect((r.response as Record<string, unknown>).model_version_receipt).toBeUndefined();
+  });
+
+  it('RED: on a conflict CommitResult.modelVersionReceipt is null', async () => {
+    const r = await commitDirectAnswer(composed(), meta() as never, storeWithReceipt('conflict'));
+    expect(
+      r.modelVersionReceipt,
+      'the two carriers must agree — a consumer reading one and rendering the other diverges',
+    ).toBeNull();
+  });
+
+  it('the prose and patch assertions still hold with a receipt in play', async () => {
+    const r = await commitDirectAnswer(composed(), meta() as never, storeWithReceipt('conflict'));
+    expect(r.response.assistant_text).toMatch(/did not make that change/i);
+    expect(r.response.assistant_text).not.toMatch(/\b25\b/);
+    const patch = blocksOf(r.response).find((b) => b.type === 'graph_patch');
+    expect(patch?.status).toBe('noop');
+    expect(patch?.after).toMatchObject({ raw_value: 14 });
   });
 });

@@ -1719,8 +1719,31 @@ export async function commitDirectAnswer(
                 : b,
             );
 
+    // ⛔ A CONFLICT MUST NOT HAND BACK THE PRIOR OPERATION'S RECEIPT.
+    //
+    //    `append_turn_atomic_v5` returns the ORIGINAL operation's receipt here,
+    //    because the deterministic mutation id is derived from
+    //    `scenario_id + turn_id` — which is precisely what a reused id shares.
+    //    So without this, the response said "I did not make that change" while
+    //    still carrying a `model_version_receipt`, and a consumer reading the
+    //    receipt rather than the prose would conclude the write had happened.
+    //    That is the same false-success defect this branch exists to remove,
+    //    moved from the prose into the structured carrier.
+    //
+    //    The durable receipt is TRUE of the earlier operation — it is simply
+    //    not the receipt of THIS request. So nothing is deleted at the RPC or
+    //    in version history; only the disclosure boundary moves. A genuine
+    //    replay is untouched and may still recover the original receipt.
+    const baseForCorrection: typeof responseWithModelVersionReceipt = priorTurnConflict
+      ? (() => {
+          const withoutReceipt = { ...(responseWithModelVersionReceipt as Record<string, unknown>) };
+          delete withoutReceipt.model_version_receipt;
+          return withoutReceipt as typeof responseWithModelVersionReceipt;
+        })()
+      : responseWithModelVersionReceipt;
+
     responseWithModelVersionReceipt = {
-      ...responseWithModelVersionReceipt,
+      ...baseForCorrection,
       assistant_text:
         (priorTurnConflict
           ? // ⛔ NOT "already recorded" — this instruction was never carried out.
@@ -2009,7 +2032,11 @@ export async function commitDirectAnswer(
   return {
     persistedAnalysisGraphHash,
     persistedGraph: writesGraph ? graphForStore : null,
-    modelVersionReceipt: appendOutcome.modelVersionReceipt ?? null,
+    // Same disclosure boundary as the response above: on a CONFLICT the
+    // receipt belongs to the earlier operation, not to this refused request,
+    // and the two carriers must agree or a consumer reading one and rendering
+    // the other diverges. A genuine replay is unchanged.
+    modelVersionReceipt: priorTurnConflict ? null : (appendOutcome.modelVersionReceipt ?? null),
     // F-HELD: the committed response (lapse notice attached / competing
     // suggestion chips suppressed when those seams fired; the SAME object as
     // the input on the untouched fast path). Callers that consume
