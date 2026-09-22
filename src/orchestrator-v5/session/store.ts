@@ -117,6 +117,18 @@ export interface SessionAppendOutcome {
    * Absent on every ordinary first commit, so a non-replay turn is untouched.
    */
   readonly replayedPriorTurn?: true;
+
+  /**
+   * This (scenario_id, turn_id) already has a durable row whose `request_hash`
+   * DIFFERS — a reused operation id carrying a DIFFERENT instruction.
+   *
+   * Distinct from {@link replayedPriorTurn} on purpose: a replay is the SAME
+   * request arriving twice and its honest answer is "already recorded"; this is
+   * a DIFFERENT request that the durable key refused, and its honest answer is
+   * "I did not make that change". Collapsing the two would tell a user their new
+   * instruction had already been carried out, which is false.
+   */
+  readonly priorTurnConflict?: true;
 }
 
 /**
