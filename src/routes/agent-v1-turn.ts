@@ -273,17 +273,65 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      */
     const kind = typeof body.kind === 'string' ? body.kind : 'message';
     if (kind !== 'message') {
-      const composedRefusal = composeDirectAnswerResponse({
-        assistant_text:
-          mode === 'preview'
-            ? 'This is a read-only preview, so I can\u2019t change the model from the board. Tell me what you want to change and I\u2019ll talk it through.'
-            : 'That kind of change does not come through this conversation route. Nothing has been changed.',
-        stage: 'frame',
-        answerKind: 'substantive',
-      });
-      return reply.code(200).send({
-        ...finaliseV5Response(composedRefusal, { scenarioId }),
-        _agent: { session_id: sessionId, mode, tool_calls: [], mutated: false, hops: 0, stopped_reason: 'unsupported_kind' },
+      /**
+       * ⭐ DIRECT MANIPULATION IS FORWARDED, NOT REFUSED.
+       *
+       * ⛔ WHY THIS CHANGED, and it is the most expensive thing I have learned
+       * in this lane. This branch used to refuse every non-message kind, on the
+       * reasoning that "silently dropping a mutation would be worse than saying
+       * no". That was the right choice between those two options and the wrong
+       * set of options: the third one is to forward it to the handlers the
+       * conversational path ALREADY writes through.
+       *
+       * Measured consequence of the refusal, on 22 Sep: setting
+       * `PROXY_V5_TARGET=agent` pointed the browser proxy here, and **the
+       * entire Canvas surface stopped working** — `factor_value_edit`,
+       * `structural_rename` and the rest of the direct-manipulation vocabulary
+       * all came back "That kind of change does not come through this
+       * conversation route", `stopped_reason: unsupported_kind`. Another lane
+       * caught it with a wire witness. So the refusal did not protect the
+       * model; it made the flag unusable, and with it every browser witness of
+       * this lane.
+       *
+       * The Canvas is NOT conversation. A factor edit is the user's own hand on
+       * their own model: there is nothing for an agent to decide, and routing it
+       * through one would add a language model to an action that is already
+       * unambiguous. So it goes straight to `/orchestrate/v2/turn` — the same
+       * boundary every tool in this lane writes through, carrying the caller's
+       * own authorization — and the response is returned verbatim.
+       *
+       * ⛔ PREVIEW STILL REFUSES. That is the hard boundary of this lane: a
+       * read-only preview may not mutate, and a forward is a mutation. The
+       * refusal is kept exactly as it was, in the product's own voice.
+       */
+      if (mode === 'preview') {
+        const composedRefusal = composeDirectAnswerResponse({
+          assistant_text:
+            'This is a read-only preview, so I can\u2019t change the model from the board. Tell me what you want to change and I\u2019ll talk it through.',
+          stage: 'frame',
+          answerKind: 'substantive',
+        });
+        return reply.code(200).send({
+          ...finaliseV5Response(composedRefusal, { scenarioId }),
+          _agent: { session_id: sessionId, mode, tool_calls: [], mutated: false, hops: 0, stopped_reason: 'read_only_preview' },
+        });
+      }
+
+      const forwarded = await dispatchFor(
+        typeof req.headers.authorization === 'string' ? req.headers.authorization : undefined,
+      )('/orchestrate/v2/turn', body);
+      return reply.code(forwarded.status).send({
+        ...forwarded.json,
+        // Underscore sidecar: egress is `.strict()`. Says plainly that this
+        // turn was NOT agent-handled, so a reader cannot mistake a forwarded
+        // canvas edit for something the Agent decided.
+        _diagnostic_trace: {
+          ...(typeof forwarded.json._diagnostic_trace === 'object' && forwarded.json._diagnostic_trace !== null
+            ? forwarded.json._diagnostic_trace as Record<string, unknown>
+            : {}),
+          exit_path: 'agent_lane_forwarded',
+          forwarded_kind: kind,
+        },
       });
     }
 
