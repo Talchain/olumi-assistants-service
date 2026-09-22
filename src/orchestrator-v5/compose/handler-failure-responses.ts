@@ -274,6 +274,25 @@ export function composeHandlerFailureBody(
         chip_type: 'action',
       };
 
+    // The turn's two graph reads described different states — the user's model
+    // moved while this analysis was being prepared. Say exactly that: nothing
+    // broke, nothing was analysed against a mixed view, and re-running is the
+    // remedy. A recoverable cause MUST have a branch here — without one it hits
+    // the exhaustive default, yields `template_id: 'fallback'` and is failed
+    // loud back to a 500, which is the outcome this change exists to remove.
+    case 'analysis_snapshot_diverged':
+      return {
+        body: {
+          assistant_text:
+            'Your model changed while this analysis was being prepared, so I stopped rather '
+            + 'than mix two versions of it. Nothing was lost. Run the analysis again to use '
+            + 'the current version.',
+          suggested_actions: [retryActionChip()],
+        },
+        template_id: 'analysis_snapshot_diverged',
+        chip_type: 'action',
+      };
+
     case 'analysis_not_ready': {
       // EP2 (V5 Edit Safety Core): the read-boundary guard blocked an
       // un-analysable persisted graph. Surface the honest, user-safe next step
