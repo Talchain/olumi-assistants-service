@@ -21,6 +21,7 @@ import {
   CEE_GOAL_THRESHOLD_FRAME,
   resolveGoalThresholdCapWithProvenance,
 } from '../../utils/goal-threshold-cap.js';
+import { STRUCTURAL_EDGE_DEFAULTS } from '../../orchestrator/context/constants.js';
 import { admitCandidateLinks, type CandidateLink, type AdmittedEdge } from './admit-candidate.js';
 import {
   admitCandidateConstraints,
@@ -31,7 +32,22 @@ import {
 const MAX_ID = 100;
 const MAX_LABEL = 200;
 
-export type CandidateNodeKind = 'goal' | 'option' | 'factor' | 'risk' | 'outcome' | 'constraint';
+export type CandidateNodeKind =
+  | 'goal' | 'option' | 'factor' | 'risk' | 'outcome' | 'constraint' | 'decision';
+
+/**
+ * The decision the brief is asking about.
+ *
+ * ⛔ WITHOUT THIS THE MODEL CANNOT BE ANALYSED AT ALL. Run through the real
+ * endpoint, `analysis_ready.status` came back `blocked` and the first readiness
+ * issue was "The model has no decision node." The banked construction contract
+ * emits goal, options, factors, risks, outcomes and links — and no decision — so
+ * every model admitted from it was unanalysable before anything else mattered.
+ *
+ * It is `ai_inferred`: nobody stated it, it is read off the question the brief
+ * asks. The label is the goal metric's decision framing, not invented content.
+ */
+const DECISION_ID = 'decision';
 
 export interface CandidateModel {
   readonly goal: { metric: string; operator: string; value: number; unit: string; horizon_months: number | null; provenance: string };
@@ -253,6 +269,11 @@ export function admitCandidateModel(
     });
   }
 
+  // The decision node is prepended so it takes a stable id before any entity
+  // whose label might slug to the same token.
+  const DECISION_LABEL = `Decision: ${model.goal.metric}`;
+  entities.unshift({ label: DECISION_LABEL, kind: 'decision', provenance: 'inferred' });
+
   const ids = assignIds(entities.map((e) => e.label));
   const nodes: AdmittedNode[] = [];
   const inference_classes: Record<string, InferenceClass> = {};
@@ -292,6 +313,23 @@ export function admitCandidateModel(
   }
 
   const linkResult = admitCandidateLinks(resolvable);
+
+  // decision -> option edges are TOPOLOGY, not causal belief. They use the
+  // canonical structural constant and are deliberately NOT marked `defaulted`
+  // and NOT ledgered: there is no magnitude here that anyone could have
+  // authored, so recording one as a projection would dilute the ledger and hide
+  // the real projections.
+  const decisionId = ids.get(DECISION_LABEL)!;
+  const topologyEdges = nodes
+    .filter((n) => n.kind === 'option')
+    .map((o) => ({
+      from: decisionId,
+      to: o.id,
+      strength: { ...STRUCTURAL_EDGE_DEFAULTS.strength },
+      exists_probability: STRUCTURAL_EDGE_DEFAULTS.exists_probability,
+      effect_direction: STRUCTURAL_EDGE_DEFAULTS.effect_direction,
+      provenance: { source: 'cee_hypothesis' },
+    }));
   const constraintResult = admitCandidateConstraints(model.constraints, (metric) => {
     const exact = ids.get(metric);
     if (exact !== undefined) return exact;
@@ -306,7 +344,7 @@ export function admitCandidateModel(
   return {
     nodes,
     inference_classes,
-    edges: linkResult.edges,
+    edges: [...topologyEdges, ...linkResult.edges],
     goal_constraints: constraintResult.constraints,
     loss,
     withheld: [...unresolved, ...linkResult.withheld],
