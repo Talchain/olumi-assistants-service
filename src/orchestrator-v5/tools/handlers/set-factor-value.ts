@@ -675,6 +675,38 @@ export function createSetFactorValueHandler(): HandlerFn {
         delete (merged as { elicited_from?: unknown }).elicited_from;
       }
 
+      // ⭐⭐ THE SAME RULE, APPLIED TO ITS NEIGHBOUR — and it was missing.
+      //
+      // The block above states the general principle: `merged` SPREADS the prior
+      // `observed_state`, so anything already there survives unless this clears
+      // it. That was applied to `elicited_from` and NOT to `extractionType`,
+      // which rides through from the producer's claim about the value this write
+      // just REPLACED.
+      //
+      // ⚠ IT IS NOT A COSMETIC LEFTOVER. The comment at :627-628 above records
+      // that `schema-v3.ts` RECOMPUTES `node.provenance` from `extractionType`,
+      // so the stale claim is the INPUT to the provenance the wire carries: a
+      // number the user typed is persisted, and re-served, as Olumi's inference.
+      // Measured downstream on 22 Sep 2026 (DecisionGuideAI#1857 reviewed from
+      // this end): `cee-v3.ts:135` puts `extractionType` on the wire, the canvas
+      // hydrate re-keys `observed_state` VERBATIM with no clear
+      // (`applyDraftResult.ts:39,55`), and the card then renders "Estimate not
+      // yet confirmed — this value was filled in for you" about the user's own
+      // number. The canvas can withdraw it in-session; only this line stops a
+      // reload reinstating it. That is Gate-0 item 2, "and reload agrees".
+      //
+      // ⛔ UNCONDITIONAL, unlike the `elicited_from` clear above. That one has a
+      // branch because the server can VERIFY someone else's authorship and must
+      // keep it. There is no equivalent here: an extraction claim describes the
+      // magnitude it was extracted for, and this write has replaced that
+      // magnitude, so the claim cannot survive its subject. A fresh claim is the
+      // producer's to re-author on a later draft, never this handler's to keep.
+      //
+      // `delete` rather than `= undefined`, for the reason given at :673-677: a
+      // present-but-undefined key survives structuredClone and object spreads
+      // while reading as present to `in` and `Object.keys`.
+      delete (merged as { extractionType?: unknown }).extractionType;
+
       node.observed_state = merged;
 
       // V5 D1 golden-path closure (A3.1 Task 3): recompute display_value
