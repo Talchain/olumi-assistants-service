@@ -72,6 +72,15 @@ export interface CandidateLink {
   readonly provenance: string;
   /** Present ONLY when a magnitude was genuinely authored. Normally absent. */
   readonly strength_mean?: number;
+  /**
+   * The canonical `EdgeProvenanceV3.source` to stamp, when the caller knows it
+   * exactly. The projection layer does: it carries a three-way authorship
+   * (`user_stated` / `brief_extraction` / `model_proposed`) that the banked
+   * construction contract's two-way `explicit` / `ai_proposed` cannot express,
+   * and `brief_extraction` is a real distinct value of that enum. When absent
+   * the coarse mapping below applies, which is what the banked contract needs.
+   */
+  readonly provenance_source?: string;
 }
 
 export interface AdmittedEdge {
@@ -147,7 +156,7 @@ export function admitCandidateLinks(links: readonly CandidateLink[]): AdmissionR
       strength: { mean: signedMean, std: PROJECTED_STD },
       exists_probability: DEFAULT_EXISTS_PROBABILITY,
       effect_direction: link.direction,
-      provenance: { source: provenanceSourceFor(link.provenance) },
+      provenance: { source: link.provenance_source ?? provenanceSourceFor(link.provenance) },
     };
 
     if (!authored) {
@@ -186,7 +195,12 @@ export function admitCandidateLinks(links: readonly CandidateLink[]): AdmissionR
   return { edges, loss, withheld };
 }
 
-/** True when every admitted magnitude is either authored or marked `defaulted`. */
+/**
+ * True when every admitted magnitude is either authored or marked `defaulted`.
+ *
+ * An authored magnitude is recognised by its provenance being a stated one
+ * (`user_specified`) rather than by trusting the flag's absence.
+ */
 export function noUnmarkedMagnitudes(result: AdmissionResult): boolean {
   return result.edges.every(
     (e) => e.defaulted === true || e.provenance?.source === 'user_specified',
