@@ -429,7 +429,30 @@ describe('withheld-leader enforcement — the roster must survive a graph-less e
       //    retry offer `draft_failure_retry` ("Try again" / "Yes, try building
       //    the model again from what I have shared."), an instruction to redo
       //    the DRAFT. It names no option and carries no leader claim.
-      expect(calls.length).toBe(28);
+      //  · THE 29th EXIT IS `replacement_controller` (route-v2.ts), added by the
+      //    replacement conversation layer behind CEE_REPLACEMENT_COACH_ENABLED.
+      //    Examined rather than waved through, because a bumped tripwire that
+      //    records no finding is the hand-maintained mirror this census exists
+      //    to replace:
+      //      · it ships `graph: (extensions.graphState ?? null)` — a real
+      //        nullable EXPRESSION, not the `graph: null` LITERAL the 17 above
+      //        pass. So when the request carries a parseable graph the enforcer
+      //        gets a genuine roster, and when it does not this exit degrades
+      //        to the same roster_unavailable stand-down as its siblings — it
+      //        neither adds nor removes enforcement;
+      //      · its permission is `...(await claimSafety.forExit())`, the SAME
+      //        canonical derivation the other exits inherit. It is explicitly
+      //        NOT a hardcoded literal — an earlier revision of this exit did
+      //        pass one, which armed the withhold branch on every replacement
+      //        turn and rewrote 8 of 22 ordinary coaching sentences. That is
+      //        fixed at the source here, so this exit introduces no new claim
+      //        authority;
+      //      · it adds no per-option datum. The replacement layer answers about
+      //        the model the user is building and about pending proposals; it
+      //        ranks nothing and crowns nothing.
+      //    Net: the 29th exit changes the SIZE of the population and not its
+      //    shape, which is why the number below moves and nothing else does.
+      expect(calls.length).toBe(29);
       // #1246's additional exit is a functional recorded-answer refusal, not
       // a new claim authority. It still funnels through the shared finalizer,
       // forwards claim safety, and uses only the canonical repair graph roster.

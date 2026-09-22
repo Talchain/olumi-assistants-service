@@ -137,12 +137,23 @@ const DRAFT_EXIT_PATH = "draft_graph";
  * are in this set and were NOT in the four (`turn_executor`, `chip_click`,
  * `draft_graph`, `edit_graph`) that the finaliser's own prose names — the prose
  * is a summary of the primary paths, not the complete producer.
+ *
+ * 20 Sep 2026 — `replacement_controller` JOINS THE SET, and it is a real change
+ * to the producer rather than an accommodation. That exit previously threaded
+ * NO `analysisReady`, so a whole session behind the replacement-coach flag left
+ * the readiness surface with no server verdict on precisely the turns where a
+ * graph exists and readiness is meaningful. It now supplies
+ * `buildCanonicalAnalysisReadyFromGraph(extensions.graphState)`, like the other
+ * graph-bearing exits — so a missing block on that path IS a loss again, which
+ * is what this set is for. Derived, not remembered: the spec re-ran and told me
+ * the new set.
  */
 export const READINESS_PRODUCING_EXIT_PATHS = new Set([
   "chip_click",
   "draft_graph",
   "edit_graph",
   "readiness_intake",
+  "replacement_controller",
   "system_event",
   "turn_executor",
 ]);

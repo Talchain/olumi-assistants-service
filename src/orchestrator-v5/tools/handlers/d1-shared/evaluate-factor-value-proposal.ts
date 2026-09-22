@@ -33,6 +33,7 @@
 
 import { formatValueWithUnit } from './format-confirmation.js';
 import { recoverScaleFrame } from './scale-frame.js';
+import { currencyAlphabetKey } from '../../../../utils/currency-alphabet.js';
 
 /**
  * Operators the handler's `applyOperator` supports. Mirrors the union
@@ -102,14 +103,91 @@ export function canonicaliseUnitForDisplay(unit: string | undefined): string | u
  * `__tests__/unit-comparison-key.test.ts`. Never widen this to strip punctuation
  * or match prefixes — that would bless a real rescale as a spelling.
  *
+ * ⭐ TWO MORE SPELLINGS FOLD, ON EXACTLY THE SAME TERMS, AND NOTHING ELSE DOES.
+ *   · THE CURRENCY ALPHABET — `£` ≡ `GBP`. Not a new position: `utils/
+ *     currency-alphabet.ts` already owns that vocabulary and already declares
+ *     the two equal, in a function whose own docblock says "NOT A CONVERSION".
+ *     This calls that owner rather than keeping a second table.
+ *   · THE RATE SEPARATOR — `a/b` ≡ `a / b` ≡ `a per b`, with the denominator
+ *     folded to one spelling from a CLOSED period list. Needed because live
+ *     factors are stored both ways (`£/month`, 59 nodes; `contacts per week`).
+ *
+ *   The rescales stay refusals and are pinned as such in
+ *   `routing/__tests__/natural-rate-unit.test.ts`: `£/month` ≠ `£/day`,
+ *   `£/month` ≠ `£/year`, `£` ≠ `£/month`, `£/month` ≠ `$/month`, plus the
+ *   existing `months` ≠ `weeks` and `%` ≠ `pp`.
+ *
  * NOT for percent classification: a unit's IDENTITY ("are these the same unit?")
  * and its SCALE CONVENTION ("what multiplier does this unit imply?") are two more
  * different questions, and this function answers only the first. Do not extend it
  * to classify scales.
  */
+/**
+ * The periods a rate denominator may name, each folded to ONE spelling. Closed
+ * on purpose: an open match would let `£/customer` and `£/customers` fold while
+ * quietly folding things that are not periods at all.
+ */
+const RATE_DENOMINATOR_SPELLINGS: Readonly<Record<string, string>> = {
+  second: 'second', seconds: 'second',
+  minute: 'minute', minutes: 'minute',
+  hour: 'hour', hours: 'hour',
+  day: 'day', days: 'day',
+  week: 'week', weeks: 'week',
+  fortnight: 'fortnight', fortnights: 'fortnight',
+  month: 'month', months: 'month',
+  quarter: 'quarter', quarters: 'quarter',
+  year: 'year', years: 'year',
+  annum: 'year',
+};
+
+/** `a/b`, `a / b`, `a per b` — the three ways this estate spells one rate. */
+const RATE_SEPARATOR_PATTERN = /\s*(?:\/|\bper\b)\s*/;
+
+/** One side of a unit, folded: currency alphabet first, then case. */
+function foldUnitSide(side: string): string {
+  return currencyAlphabetKey(side.trim()).toLowerCase();
+}
+
 export function unitComparisonKey(unit: string | undefined): string | undefined {
   const display = canonicaliseUnitForDisplay(unit);
-  return display === undefined ? undefined : display.toLowerCase();
+  if (display === undefined) return undefined;
+
+  // ── RATES ────────────────────────────────────────────────────────────────
+  // Split on the FIRST separator only, so `£ ARR per customer` folds as
+  // (`£ ARR`, `customer`) and a pathological `a/b/c` is left alone rather than
+  // silently reassociated.
+  const sepMatch = RATE_SEPARATOR_PATTERN.exec(display);
+  if (sepMatch !== null && sepMatch.index > 0) {
+    const numerator = display.slice(0, sepMatch.index);
+    const denominator = display.slice(sepMatch.index + sepMatch[0].length);
+    if (numerator.trim().length > 0 && denominator.trim().length > 0) {
+      const foldedDenominator = denominator.trim().toLowerCase();
+      const period = Object.prototype.hasOwnProperty.call(
+        RATE_DENOMINATOR_SPELLINGS,
+        foldedDenominator,
+      )
+        ? RATE_DENOMINATOR_SPELLINGS[foldedDenominator]!
+        : foldedDenominator;
+      return `${foldUnitSide(numerator)}/${period}`;
+    }
+  }
+
+  // ── A BARE PERIOD UNIT ───────────────────────────────────────────────────
+  // The same closed table, applied on the side of this function that a rate
+  // never reaches. Witnessed on deployed staging (build 9b98fcd): a factor the
+  // UI renders as "9 months" REFUSED "change ... to 12 months" with "This
+  // factor uses months; the value provided is in month" — because CQE
+  // normalises the period to the singular while the canonical unit is plural.
+  // The user was refused for typing the unit exactly as it was shown to them.
+  //
+  // This is the SAME fold on the SAME closed vocabulary, not a widening. Two
+  // spellings of ONE period become one key; two DIFFERENT periods stay two
+  // keys, which is precisely what a closed table buys over a stemmer — the
+  // `months` vs `weeks` pin in `natural-rate-unit.test.ts` holds it down.
+  const folded = foldUnitSide(display);
+  return Object.prototype.hasOwnProperty.call(RATE_DENOMINATOR_SPELLINGS, folded)
+    ? RATE_DENOMINATOR_SPELLINGS[folded]!
+    : folded;
 }
 
 /**
@@ -820,7 +898,79 @@ function evaluateFactorValueProposalImpl(
   //     the existing clarify unchanged (cap !== 1 there, so this exemption
   //     does not apply). The cap-range guard below still runs normally, so
   //     an out-of-[0,1] value on a cap-1 factor is still rejected.
-  const isProportionScaledFactor = cap === 1;
+  /**
+   * ⭐ THE UNIT DECLARES THE SCALE EXACTLY AS A CAP DOES.
+   *
+   * Witnessed on deployed staging (build c12a54d, 22 Sep 2026): the live factor
+   * "Product-Market Fit Investment" carries `unit: 'scale'`, `value: 0.3`, NO
+   * `raw_value` and NO cap. Every way of setting it to 0.8 was refused —
+   * including a bare `0.8` — as "a proportion rather than a value in scale", on
+   * a factor whose OWN PERSISTED VALUE IS 0.3. It could not be set to any sub-1
+   * value, and sub-1 is the only range it has.
+   *
+   * The escape hatch already existed and worked; it was simply keyed on
+   * `factorCap === 1`, which these factors do not carry. Measured directly
+   * against this gate: `unit 'scale', no cap` REFUSED, `unit 'scale',
+   * factorCap 1` ACCEPTED.
+   *
+   * ⚠ CLOSED VOCABULARY, FROM LIVE DATA — NOT A PREDICATE. An open rule ("does
+   *   it look proportional?") would silently reclassify amount units, which is
+   *   the direction that loses user data. These are the proportion-class units
+   *   actually present in the estate (30-day census): `scale` 1,688,
+   *   `unit_interval` 15, `ratio` 6, `proportion` 3.
+   *
+   * ⚠ IT CANNOT WEAKEN THE AMBIGUOUS CASE. An AMOUNT unit is untouched: a bare
+   *   `0.8` on a `months`/`£` factor is still refused and still asks, because
+   *   0.8 months genuinely could mean 0.8 or 80%. On a proportion unit there is
+   *   no second reading to be ambiguous between — pinned by controls.
+   */
+  const PROPORTION_UNIT_TOKENS: ReadonlySet<string> = new Set([
+    'scale',
+    'unit_interval',
+    'ratio',
+    'proportion',
+  ]);
+  const isProportionUnit =
+    typeof factorUnit === 'string' && PROPORTION_UNIT_TOKENS.has(factorUnit.trim().toLowerCase());
+  /**
+   * ⛔ THE UNIT TOKEN IS NOT ENOUGH ON ITS OWN, AND THE ESTATE SAYS SO.
+   *
+   * A first version of this exemption was `cap === 1 || isProportionUnit`.
+   * Independent review REFUTED it, by execution, on a real staging capture:
+   * `fac_crm_capability` carries `unit: 'scale'` with **`cap: 100`** and
+   * `raw_value: 35`. Under the unit-only rule a user typing `0.8` (meaning 80)
+   * was ACCEPTED and persisted as `newRaw = 0.8` — the model value going
+   * 0.35 -> 0.008, a silent ~100x corruption, in exactly the case this gate was
+   * built to ask about.
+   *
+   * The premise was wrong at the root: `unit` is not a range declaration.
+   * `cee/draft/records/instruction.ts:288-291` — "Never put a scale or
+   * convention word there — not 'scale', not 'unit_interval', not 'ratio' ...
+   * Those belong in `value_scale`". So these tokens are documented MALFORMED
+   * occupants of `unit`, and a malformed field cannot carry a safety signal.
+   *
+   * ⭐ SO THE TEST IS "NOTHING CONTRADICTS IT", NOT "THE UNIT SAYS SO".
+   *   A proportion-unit factor is treated as proportion-scaled only when it
+   *   carries NO cap other than 1 and NO recoverable frame. Both a cap and a
+   *   `value`/`raw_value` pair are POSITIVE EVIDENCE of an amount scale, and
+   *   either one outranks the token. That keeps `frameRecoverable` (:944)
+   *   load-bearing — it was added by a previous round-2 review precisely
+   *   because "a FRAME-RECOVERABLE factor declares an amount scale exactly as a
+   *   unit string does", after two writers were measured guessing answers 10^5
+   *   apart on a framed factor.
+   *
+   * What this still fixes is the witnessed live shape: `unit: 'scale'`,
+   * `value: 0.3`, NO cap and NO raw_value — nothing contradicts the token, and
+   * the factor could previously not be set to any sub-1 value at all.
+   */
+  const isProportionScaledFactor =
+    cap === 1 ||
+    (isProportionUnit &&
+      cap === undefined &&
+      recoverScaleFrame({
+        value: factorObservedValue,
+        raw_value: factorObservedRawValue,
+      }) === undefined);
   // R2-1 (PR #926 round-2 re-review): the gate above keyed ONLY on a unit
   // string, and records-drafted factors can never carry one (the records
   // grammar has no unit field on claims) — so the whole records population

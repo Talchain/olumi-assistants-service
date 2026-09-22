@@ -134,7 +134,11 @@ export function buildCompoundPartProposal(
   part: CompoundUpdatePart,
   message: string,
 ): ProposalAction {
-  const { value, unit } = mapCqeQuantityToProposalValue(part.quantity);
+  // `segmentText`, not the whole message: this file's own unit-family guard (c)
+  // is scoped per part for exactly this reason — one part's unit token must
+  // never be attributed to another part's value, and a rate denominator is a
+  // unit token.
+  const { value, unit } = mapCqeQuantityToProposalValue(part.quantity, part.segmentText);
   const operator = deriveOperator(message, part.quantity);
   return {
     handler_id: 'set_factor_value',

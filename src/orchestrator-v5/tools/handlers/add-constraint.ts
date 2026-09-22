@@ -187,7 +187,13 @@ const PROBABILITY_DOMAIN_KIND_SET: ReadonlySet<string> = new Set([
  * composer's 100-char `sanitiseForUser` truncation (MAX_USER_STRING in
  * compose/helpers.ts) so the question is never cut mid-sentence.
  */
-function formatUnitAmbiguityClarify(value: number): string {
+/**
+ * ⚠ EXPORTED FOR THE BUDGET GUARD, not for reuse. It is the ONE site that passes
+ * a SPECIFIC `userGuidance` rather than a canonical phrase, so it is the one
+ * whose length nothing else can check — see
+ * `__tests__/d1-guidance-survives-the-sanitiser.test.ts`.
+ */
+export function formatUnitAmbiguityClarify(value: number): string {
   return `Did you mean ${value}% or an absolute ${value}? Tell me which, and I'll apply it.`;
 }
 

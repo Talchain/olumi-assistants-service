@@ -392,6 +392,25 @@ describe("ROADMAP 2.330 — a new magnitude list in src/ forces a review", () =>
    * magnitude word for a reason that is not a magnitude lookup.
    */
   const REVIEWED: Readonly<Record<string, string>> = {
+    // 21 Sep 2026 — INCIDENTAL, and it is the OPPOSITE of a magnitude list.
+    // `orchestrator-v5/replacement/system-prompt.ts` triggers on two words.
+    // `thousand` sits in a docstring pricing the size of layered prompt
+    // fragments ("a thousand lines across layered fragments"). `million` sits
+    // in a COPY RULE addressed to the model: *'Write amounts in full: "£2.4
+    // million", not "£2.4m"; "50,000", not "50k". A number with a letter
+    // suffix gets split apart when displayed and reads as a typo.'*
+    //
+    // That rule tells the model how to SPELL a magnitude in prose. It declares
+    // no alphabet, holds no word->value map, and performs no parsing — nothing
+    // in this file converts "million" to 1e6 or reads a suffix. So it cannot
+    // become the fifth hand-written magnitude list this guard exists to catch.
+    //
+    // ⚠ BUT IT IS ONE EDIT AWAY FROM BEING ONE. If anyone ever turns that
+    // sentence into an enumerated list of suffixes or a lookup, it MUST move to
+    // SIBLING_VOCABULARIES rather than staying here — the classification is
+    // about what the file DOES, not about which words it contains.
+    'orchestrator-v5/replacement/system-prompt.ts':
+      'Prompt copy rule on spelling amounts in full; no alphabet, no word->value map, no parsing.',
     // 16 Sep 2026 — INCIDENTAL, and the mention is one word of English prose.
     // `orchestrator/context/graph-compact.ts` qualifies an option's model value
     // for the AI-facing context ("model value 1 (display band Very high;

@@ -1469,6 +1469,47 @@ export async function runTurnExecutor(
     GRAPH_MUTATING_HANDLER_IDS,
   );
 
+  /**
+   * ⭐⭐ THE DURABLE TURN IDENTITY — the CLIENT'S, NOT THIS HTTP REQUEST'S.
+   *
+   * Every executor commit site used to pass `turn_id: context.request_id`, a
+   * server-minted per-HTTP-request id (`getOrGenerateRequestId` → the
+   * `x-request-id` header when it validates, otherwise `randomUUID()`). That
+   * id is the durable idempotency key: `append_turn_atomic_v5` enforces
+   * `UNIQUE (scenario_id, turn_id)` and the replay lookup is
+   * `SessionStore.committedTurnRowId(scenario_id, turn_id)`.
+   *
+   * A retry is a NEW HTTP request, so it arrives with a NEW request id — and a
+   * key that changes on retry is not an idempotency key. The replay lookup
+   * found nothing, the write was treated as fresh, and the CAS then refused it
+   * because the original write had already moved the graph head: the 409 that
+   * made Gate 1 replay recovery unreachable. The repaired replay-before-CAS
+   * SQL ordering could not help, because there was no prior row UNDER THE KEY
+   * IT WAS GIVEN.
+   *
+   * ⚠ ROUTE-V2 ALREADY DID THIS CORRECTLY, WHICH IS WHY THE SPLIT WAS INVISIBLE.
+   *   Its own nine `commitDirectAnswer` branches (draft / clarify / offer) pass
+   *   `turn_id: ingress.turn_id`. Only the handler-routed turns — every graph
+   *   mutation — went through here and keyed differently. Measured live on
+   *   22 Sep 2026: handler-routed committed turn ids that appear in
+   *   `v5_turn_fence` — 16 of 341 (4.7%); every other class — 372 of 659
+   *   (56.4%), the contrast control.
+   *
+   * ⚠ THE FENCE IS THE OTHER HALF OF THE AGREEMENT. `turn-fence-prehandler.ts`
+   *   claims `v5_turn_fence (scenario_id, turn_id)` from the SAME body field
+   *   with the same non-empty-string predicate as below. Both keys are now the
+   *   one identity; `durable-turn-identity.test.ts` binds them to each other by
+   *   calling the fence's own parser rather than repeating a literal.
+   *
+   * The fallback exists only for callers that are not the fenced ingress (test
+   * doubles, the local harness). `MessageTurnPayloadSchema` types `turn_id` as
+   * a required UUID string, so production never takes it.
+   */
+  const durableTurnId =
+    typeof payload.turn_id === 'string' && payload.turn_id.length > 0
+      ? payload.turn_id
+      : requestId;
+
   const commitTurn = async (
     resp: Parameters<typeof commitDirectAnswer>[0],
     meta: Parameters<typeof commitDirectAnswer>[1],
@@ -1749,6 +1790,14 @@ export async function runTurnExecutor(
           // can never carry forward and reappear as a zombie.
           priorPendingActions: context.most_recent_pending_actions ?? [],
           ...commitMeta,
+          // ⭐⭐ GATE 1 — deliberately AFTER `...commitMeta`, unlike the two
+          // injections above it. Those are DEFAULTS a call site may override;
+          // this is a GUARANTEE. All ~36 executor commit sites funnel through
+          // this closure, so overriding here is what makes the durable key
+          // uniform by construction rather than by a hand-maintained list —
+          // the same discipline as the consent/warrant backstops at the top of
+          // `commitTurn`. See `durableTurnId` for what the key must be and why.
+          turn_id: durableTurnId,
           coaching_state: context.coaching_state,
           userMessage: userMessageForTurn,
           // Lane 28 — brief pipeline seam 1: a call site's explicit briefText
@@ -7975,6 +8024,7 @@ export async function runTurnExecutor(
         if (isFactor && handlerExecutable) {
           const { value: userUnitValue, unit } = mapCqeQuantityToProposalValue(
             deterministicValueUpdate.quantity,
+            payload.message,
           );
           const operator = deriveOperator(payload.message, deterministicValueUpdate.quantity);
 
@@ -8535,6 +8585,7 @@ export async function runTurnExecutor(
         ).toISOString();
         const { value: userUnitValue, unit } = mapCqeQuantityToProposalValue(
           deterministicValueUpdate.quantity,
+          payload.message,
         );
         const operator = deriveOperator(payload.message, deterministicValueUpdate.quantity);
         const clarifyEmitGraphHash = freshness?.current_graph_hash;

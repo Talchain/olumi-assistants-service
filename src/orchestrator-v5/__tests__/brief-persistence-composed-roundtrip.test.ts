@@ -639,10 +639,16 @@ describe('V5 Phase 1 brief persistence — full liveness chain through runTurnEx
 
     // The follow-up turn's append call MUST carry briefText sourced from
     // canonical state (the seeded draft turn). Pre-Fix-B this field was
-    // omitted on every non-draft commit. Note: the turn-executor commits
-    // with `turn_id: context.request_id`, so the matcher uses requestId.
+    // omitted on every non-draft commit.
+    //
+    // ⚠ THE MATCHER USED TO BE THE REQUEST ID (`'req-fix-b'`), and its comment
+    //   read as a contract: "the turn-executor commits with
+    //   `turn_id: context.request_id`". That WAS the Gate 1 defect, written
+    //   down. The durable idempotency key is the CLIENT's `turn_id` — the one
+    //   thing a retry can reproduce — so the matcher follows the payload this
+    //   very call already supplies.
     const followUpAppendCall = appendSpy.mock.calls.find(
-      ([write]) => write.turn_id === 'req-fix-b',
+      ([write]) => write.turn_id === 'follow-up-fix-b',
     );
     expect(followUpAppendCall).toBeDefined();
     expect(followUpAppendCall?.[0].briefText).toBe(PERSISTED_BRIEF);
