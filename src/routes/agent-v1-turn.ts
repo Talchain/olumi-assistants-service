@@ -176,6 +176,33 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const sessionId = typeof body.agent_session_id === 'string' && body.agent_session_id.length > 0
       ? body.agent_session_id
       : `sess_${scenarioId}`;
+    /**
+     * The UI posts more than conversational messages to /proxy/v5/turn:
+     * `system_event` carries a canvas mutation, `chip_click` a control. Those
+     * have no `message`, so without this they fell through to a raw 422
+     * BAD_INPUT and the user saw an error with no explanation.
+     *
+     * In preview they are refused in the product's own voice, on the normal
+     * response shape, so the surface stays coherent. In full mode a kind this
+     * route does not implement is still refused rather than half-handled —
+     * silently dropping a mutation would be worse than saying no.
+     */
+    const kind = typeof body.kind === 'string' ? body.kind : 'message';
+    if (kind !== 'message') {
+      const composedRefusal = composeDirectAnswerResponse({
+        assistant_text:
+          mode === 'preview'
+            ? 'This is a read-only preview, so I can\u2019t change the model from the board. Tell me what you want to change and I\u2019ll talk it through.'
+            : 'That kind of change does not come through this conversation route. Nothing has been changed.',
+        stage: 'frame',
+        answerKind: 'substantive',
+      });
+      return reply.code(200).send({
+        ...finaliseV5Response(composedRefusal, { scenarioId }),
+        _agent: { session_id: sessionId, mode, tool_calls: [], mutated: false, hops: 0, stopped_reason: 'unsupported_kind' },
+      });
+    }
+
     if (scenarioId.length === 0 || message.length === 0) {
       return reply.code(422).send({ error: 'BAD_INPUT', detail: 'scenario_id and message are required' });
     }
