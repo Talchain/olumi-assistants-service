@@ -274,7 +274,26 @@ export function createAgentCapabilities(
       if (after === null || after.nodes.length === 0) {
         return { ok: false, mutated: false, refusal: 'model_not_readable_after_write' };
       }
-      return { ...built, confirmed_entities: after.nodes.length, graph_revision: after.graph_hash };
+      /**
+       * ⭐ RETURN THE POST-BUILD STATE, so the Agent does not have to go and
+       * fetch it. Measured on the preview path: the first turn called
+       * `get_canonical_state`, then `build_model_from_brief`, then
+       * `get_canonical_state` AGAIN, then `run_analysis` — four tool calls and
+       * four model round trips, 85 s on the slowest sample against a 125 s
+       * browser-proxy budget. The second read asks for something this call
+       * already has in hand.
+       */
+      return {
+        ...built,
+        confirmed_entities: after.nodes.length,
+        graph_revision: after.graph_hash,
+        entities: after.nodes.map((n) => ({
+          label: n.label,
+          kind: n.kind,
+          value: typeof n.observed_state?.value === 'number' ? n.observed_state.value : null,
+        })),
+        structure: structuralFacts(after.nodes, after.edges),
+      };
     },
 
     async runAnalysis(ctx, args): Promise<ToolResult> {
