@@ -39,7 +39,7 @@ describe('money invariant reach', () => {
     const nodes = valuedNodes();
     expect(nodes).toHaveLength(1);
     // Two different claims, and both are needed.
-    expect(nodes[0].provenance?.source, 'who put the ENTITY here').toBe('brief_extraction');
+    expect(nodes[0].provenance, 'node display vocabulary').toBe('from_brief');
     expect(
       (nodes[0].observed_state as Record<string, unknown>).source,
       'where the VALUE came from - the field money-invariant.ts:211 gates on',

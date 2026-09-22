@@ -42,7 +42,9 @@ describe('goal fidelity', () => {
 
   it('stamps the goal unit and the frame the contract calls load-bearing', () => {
     const goal = admitted().nodes.find((n) => n.kind === 'goal');
-    expect(goal?.goal_threshold).toBe(20000);
+    // `goal_threshold` is NORMALISED (raw / cap); the stated number is `_raw`.
+    expect(goal?.goal_threshold).toBeCloseTo(0.8, 10);
+    expect((goal as Record<string, unknown>).goal_threshold_raw).toBe(20000);
     expect((goal as Record<string, unknown>).goal_threshold_unit).toBe('£');
     expect((goal as Record<string, unknown>).goal_threshold_frame).toBe('level');
   });
@@ -64,28 +66,27 @@ describe('goal fidelity', () => {
 
 describe('inference class survives', () => {
   it('a widener addition is distinguishable from a builder inference', () => {
-    const nodes = admitted().nodes;
+    const m = admitted();
     const wideneradded = widened.proposed_factors[0].label as string;
     const builderInferred = faithful.risks.find((r) => r.provenance === 'inferred')?.label
       ?? faithful.options.find((o) => o.provenance === 'inferred')!.label;
+    const idOf = (label: string) => m.nodes.find((n) => n.label === label)!.id;
 
-    const w = nodes.find((n) => n.label === wideneradded);
-    const b = nodes.find((n) => n.label === builderInferred);
-    expect(w, 'widener node present').toBeDefined();
-    expect(b, 'builder-inferred node present').toBeDefined();
+    // The node DISPLAY enum collapses both to 'ai_inferred' — it cannot carry this.
+    expect(m.nodes.find((n) => n.label === wideneradded)!.provenance).toBe('ai_inferred');
+    expect(m.nodes.find((n) => n.label === builderInferred)!.provenance).toBe('ai_inferred');
 
-    // Same canonical `source`, deliberately — see the header note.
-    expect(w!.provenance?.source).toBe('cee_hypothesis');
-    expect(b!.provenance?.source).toBe('cee_hypothesis');
-    // ...but the class is still recoverable.
-    expect(w!.provenance?.reasoning).toMatch(/widen/i);
-    expect(b!.provenance?.reasoning).toMatch(/inferred from the brief/i);
-    expect(w!.provenance?.reasoning).not.toBe(b!.provenance?.reasoning);
+    // The class rides beside the graph instead, where W3 can score it.
+    expect(m.inference_classes[idOf(wideneradded)]).toBe('model_proposed');
+    expect(m.inference_classes[idOf(builderInferred)]).toBe('builder_inferred');
   });
 
   it('a brief-stated entity says so too', () => {
-    const price = admitted().nodes.find((n) => n.label === 'Pro plan price');
-    expect(price!.provenance?.source).toBe('brief_extraction');
-    expect(price!.provenance?.reasoning).toMatch(/stated in the brief/i);
+    const m = admitted();
+    const price = m.nodes.find((n) => n.label === 'Pro plan price')!;
+    expect(price.provenance).toBe('from_brief');
+    expect(m.inference_classes[price.id]).toBe('brief_stated');
+    // The DURABLE value authorship, which the money invariant reads.
+    expect((price.observed_state as Record<string, unknown>).source).toBe('brief_extraction');
   });
 });

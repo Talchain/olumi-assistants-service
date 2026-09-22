@@ -102,7 +102,9 @@ describe('admitCandidateModel — captured candidate', () => {
     expect(proposedLabels.size).toBeGreaterThan(0);
     for (const n of m.nodes) {
       if (proposedLabels.has(n.label)) {
-        expect(n.provenance?.source, `${n.label} must not read as user-authored`).toBe('cee_hypothesis');
+        // Node display vocabulary is a string enum; `user_set` would be the lie.
+        expect(n.provenance, `${n.label} must not read as user-authored`).toBe('ai_inferred');
+        expect(m.inference_classes[n.id]).toBe('model_proposed');
       }
     }
   });

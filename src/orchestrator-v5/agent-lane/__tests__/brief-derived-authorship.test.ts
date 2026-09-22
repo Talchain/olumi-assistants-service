@@ -36,12 +36,14 @@ describe('brief-derived authorship', () => {
     expect(price!.observed_state?.value).toBe(49);
     // The builder marked this factor provenance 'explicit' — meaning the user
     // stated it IN THE BRIEF, which is brief_extraction, not a direct UI edit.
-    expect(price!.provenance?.source).toBe('brief_extraction');
+    // Node display vocabulary; the durable value authorship is on observed_state.
+    expect(price!.provenance).toBe('from_brief');
+    expect((price!.observed_state as Record<string, unknown>).source).toBe('brief_extraction');
   });
 
-  it('no admitted entity claims user_specified from a brief-derived candidate', () => {
+  it('no admitted entity claims a direct user edit from a brief-derived candidate', () => {
     const m = admitCandidateModel(faithful, widened);
-    const overstated = m.nodes.filter((n) => n.provenance?.source === 'user_specified');
+    const overstated = m.nodes.filter((n) => n.provenance === 'user_set');
     expect(
       overstated.map((n) => n.label),
       'nothing in a brief-derived candidate was set directly by the user',

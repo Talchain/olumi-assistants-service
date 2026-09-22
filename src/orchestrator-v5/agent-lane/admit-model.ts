@@ -17,7 +17,10 @@
  */
 
 import { REPAIR_CODES, type RepairEntry } from '@talchain/schemas';
-import { CEE_GOAL_THRESHOLD_FRAME } from '../../utils/goal-threshold-cap.js';
+import {
+  CEE_GOAL_THRESHOLD_FRAME,
+  resolveGoalThresholdCapWithProvenance,
+} from '../../utils/goal-threshold-cap.js';
 import { admitCandidateLinks, type CandidateLink, type AdmittedEdge } from './admit-candidate.js';
 import {
   admitCandidateConstraints,
@@ -63,19 +66,24 @@ export interface AdmittedNode {
    */
   goal_threshold_frame?: 'level' | 'delta';
   /**
-   * `reasoning` carries the inference CLASS. `source` alone cannot: `inferred`
-   * (the builder's reading of the brief) and `ai_proposed` (the widener's
-   * addition beyond it) both map to `cee_hypothesis`, and W3 has to score
-   * unsupported inference. They are NOT split across `source` values because
-   * `domain_knowledge` is absent from the narrower enums in
-   * `src/schemas/analysis-ready.ts:41` and `cee-v3.ts:560,:590`, so stamping it
-   * would risk a cross-schema validation failure for a cosmetic gain.
+   * ⛔ A NODE'S `provenance` IS A DISPLAY ENUM, NOT THE EDGE OBJECT
+   * (`cee-v3.ts:363` — `from_brief | ai_inferred | user_set`). Edges carry the
+   * structured `{source, reasoning}` (`:443`); nodes do not. Stamping the edge
+   * shape here made the whole persisted graph fail `GraphV3.safeParse`, which
+   * `structural-add-edge.ts:233` treats as CORRUPTION — so every write to the
+   * scenario returned 500 until this was fixed.
    */
-  provenance?: { source: string; reasoning?: string };
+  provenance?: 'from_brief' | 'ai_inferred' | 'user_set';
+  /** Normalised 0-1, per the contract. The stated number goes in `_raw`. */
+  goal_threshold_raw?: number;
+  goal_threshold_cap?: number;
+  goal_threshold_cap_provenance?: string;
 }
 
 export interface AdmittedModel {
   readonly nodes: readonly AdmittedNode[];
+  /** node id -> how it got here. Projection metadata; belongs in the ledger. */
+  readonly inference_classes: Readonly<Record<string, InferenceClass>>;
   readonly edges: readonly AdmittedEdge[];
   readonly goal_constraints: readonly AdmittedConstraint[];
   readonly loss: readonly RepairEntry[];
@@ -120,13 +128,24 @@ function assignIds(labels: readonly string[]): Map<string, string> {
 const sourceFor = (provenance: string): string =>
   provenance === 'explicit' ? 'brief_extraction' : 'cee_hypothesis';
 
-/** The inference class, preserved where `source` cannot express it. */
-const reasoningFor = (provenance: string): string => {
-  if (provenance === 'explicit') return 'Stated in the brief by the user.';
-  if (provenance === 'ai_proposed') {
-    return 'Added by the widening pass, beyond the brief. A proposal, not a fact.';
-  }
-  return 'Inferred from the brief by the faithful builder; not stated there.';
+/** The node display vocabulary. `user_set` is reserved for a direct user edit. */
+const displayProvenanceFor = (provenance: string): 'from_brief' | 'ai_inferred' =>
+  provenance === 'explicit' ? 'from_brief' : 'ai_inferred';
+
+/**
+ * The inference CLASS, which the graph cannot carry.
+ *
+ * The node display enum collapses `inferred` and `ai_proposed` into
+ * `ai_inferred`, and W3 has to score unsupported inference. So the class rides
+ * in the admitted model beside the graph — and, being projection metadata rather
+ * than canonical model data, it belongs in the ledger, not in `scenarios.graph`.
+ */
+export type InferenceClass = 'brief_stated' | 'builder_inferred' | 'model_proposed';
+
+const inferenceClassFor = (provenance: string): InferenceClass => {
+  if (provenance === 'explicit') return 'brief_stated';
+  if (provenance === 'ai_proposed') return 'model_proposed';
+  return 'builder_inferred';
 };
 
 export function admitCandidateModel(
@@ -141,12 +160,28 @@ export function admitCandidateModel(
       label: model.goal.metric,
       kind: 'goal',
       provenance: model.goal.provenance,
-      node: {
-        goal_threshold: model.goal.value,
-        // A bare number is indistinguishable from a cost cap with no deadline.
-        ...(model.goal.unit ? { goal_threshold_unit: model.goal.unit } : {}),
-        goal_threshold_frame: CEE_GOAL_THRESHOLD_FRAME,
-      },
+      node: (() => {
+        // ⭐ `goal_threshold` is NORMALISED 0-1 (`raw / cap`), not the stated
+        // number. Writing 20000 into it was out of range by four orders of
+        // magnitude. The cap rule is reused, never re-derived:
+        // `resolveGoalThresholdCapWithProvenance` owns it.
+        const raw = model.goal.value;
+        const resolved = resolveGoalThresholdCapWithProvenance(
+          undefined, raw, model.goal.unit, undefined,
+        );
+        return {
+          ...(model.goal.unit ? { goal_threshold_unit: model.goal.unit } : {}),
+          goal_threshold_frame: CEE_GOAL_THRESHOLD_FRAME,
+          goal_threshold_raw: raw,
+          ...(resolved !== null
+            ? {
+                goal_threshold_cap: resolved.cap,
+                goal_threshold_cap_provenance: resolved.provenance,
+                goal_threshold: raw / resolved.cap,
+              }
+            : {}),
+        };
+      })(),
     },
     ...model.options.map((o) => ({ label: o.label, kind: 'option' as const, provenance: o.provenance })),
     ...model.factors.map((f) => ({
@@ -220,18 +255,20 @@ export function admitCandidateModel(
 
   const ids = assignIds(entities.map((e) => e.label));
   const nodes: AdmittedNode[] = [];
+  const inference_classes: Record<string, InferenceClass> = {};
   const seen = new Set<string>();
   for (const e of entities) {
     const id = ids.get(e.label)!;
     if (seen.has(id)) continue;
     seen.add(id);
+    inference_classes[id] = inferenceClassFor(e.provenance);
     // A factor whose baseline is NOT known gets no observed_state at all —
     // an absent value is the honest record; a zero would be a measurement.
     nodes.push({
       id,
       kind: e.kind,
       label: e.label.slice(0, MAX_LABEL),
-      provenance: { source: sourceFor(e.provenance), reasoning: reasoningFor(e.provenance) },
+      provenance: displayProvenanceFor(e.provenance),
       ...(e.node ?? {}),
     });
   }
@@ -268,6 +305,7 @@ export function admitCandidateModel(
 
   return {
     nodes,
+    inference_classes,
     edges: linkResult.edges,
     goal_constraints: constraintResult.constraints,
     loss,
