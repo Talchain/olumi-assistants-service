@@ -1,0 +1,513 @@
+{
+  "graph": {
+    "nodes": [
+      {
+        "id": "899bdc38",
+        "kind": "goal",
+        "label": "Given our goal of reaching £20k MRR within 12 months while keeping monthly churn under 4%, should we increase the Pro plan price from £49 to £59 per month with the next Pro feature release?",
+        "data": {}
+      },
+      {
+        "id": "1cc8c5a9",
+        "kind": "decision",
+        "label": "Decision",
+        "data": {}
+      },
+      {
+        "id": "3f524cdc",
+        "kind": "factor",
+        "label": "Pro plan price (£/month)",
+        "category": "controllable",
+        "data": {
+          "value": 49,
+          "raw_value": 49,
+          "unit": "£/month",
+          "extractionType": "explicit",
+          "source": "brief_extraction"
+        },
+        "provenance": "from_brief"
+      },
+      {
+        "id": "e4ab4e3b",
+        "kind": "factor",
+        "label": "Active Pro subscribers",
+        "category": "observable",
+        "data": {},
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "625e0f64",
+        "kind": "factor",
+        "label": "Customers' perceived Pro price-value fit",
+        "category": "observable",
+        "data": {},
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "608cdb52",
+        "kind": "factor",
+        "label": "New Pro subscriber acquisition rate",
+        "category": "observable",
+        "data": {},
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "b6e12885",
+        "kind": "factor",
+        "label": "Existing Pro subscriber exposure to the new price",
+        "category": "controllable",
+        "data": {},
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "3efda6ee",
+        "kind": "factor",
+        "label": "Customer adoption and perceived value of the next Pro feature release",
+        "category": "observable",
+        "data": {},
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "67761282",
+        "kind": "outcome",
+        "label": "Monthly Recurring Revenue (MRR)",
+        "data": {},
+        "provenance": "from_brief"
+      },
+      {
+        "id": "bb619172",
+        "kind": "risk",
+        "label": "Monthly churn rate",
+        "data": {},
+        "provenance": "from_brief"
+      },
+      {
+        "id": "d055b5e2",
+        "kind": "risk",
+        "label": "Customer sentiment toward Pro pricing",
+        "data": {},
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "ae6e7b9e",
+        "kind": "option",
+        "label": "Increase Pro plan price from £49 to £59 per month with the next Pro feature release",
+        "interventions": {
+          "3f524cdc": {
+            "value": 59,
+            "raw_value": 59,
+            "unit": "£/month",
+            "source": "brief_extraction",
+            "value_confidence": "high"
+          }
+        },
+        "is_baseline": false,
+        "provenance": "from_brief"
+      },
+      {
+        "id": "d036c9f4",
+        "kind": "option",
+        "label": "Keep Pro plan price at £49 per month",
+        "interventions": {},
+        "is_baseline": true,
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "f4ffb470",
+        "kind": "option",
+        "label": "Run a limited new-customer test of the higher Pro price alongside the feature release while limiting existing-subscriber exposure",
+        "interventions": {},
+        "is_baseline": false,
+        "provenance": "ai_inferred"
+      }
+    ],
+    "edges": [
+      {
+        "from": "1cc8c5a9",
+        "to": "ae6e7b9e",
+        "exists_probability": 1.0,
+        "effect_direction": "positive",
+        "strength": {
+          "mean": 1.0,
+          "std": 0.01
+        },
+        "provenance": {
+          "source": "brief_extraction"
+        },
+        "structural": true
+      },
+      {
+        "from": "ae6e7b9e",
+        "to": "3f524cdc",
+        "exists_probability": 1.0,
+        "effect_direction": "positive",
+        "strength": {
+          "mean": 1.0,
+          "std": 0.01
+        },
+        "provenance": {
+          "source": "brief_extraction"
+        },
+        "structural": true
+      },
+      {
+        "from": "1cc8c5a9",
+        "to": "d036c9f4",
+        "exists_probability": 1.0,
+        "effect_direction": "positive",
+        "strength": {
+          "mean": 1.0,
+          "std": 0.01
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "structural": true
+      },
+      {
+        "from": "1cc8c5a9",
+        "to": "f4ffb470",
+        "exists_probability": 1.0,
+        "effect_direction": "positive",
+        "strength": {
+          "mean": 1.0,
+          "std": 0.01
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "structural": true
+      },
+      {
+        "from": "3f524cdc",
+        "to": "67761282",
+        "exists_probability": 0.5,
+        "effect_direction": null,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "magnitude_placeholder": true
+      },
+      {
+        "from": "3f524cdc",
+        "to": "bb619172",
+        "exists_probability": 0.5,
+        "effect_direction": null,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "magnitude_placeholder": true
+      },
+      {
+        "from": "3f524cdc",
+        "to": "625e0f64",
+        "exists_probability": 0.5,
+        "effect_direction": "negative",
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "magnitude_placeholder": true
+      },
+      {
+        "from": "3efda6ee",
+        "to": "625e0f64",
+        "exists_probability": 0.5,
+        "effect_direction": null,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "magnitude_placeholder": true
+      },
+      {
+        "from": "625e0f64",
+        "to": "bb619172",
+        "exists_probability": 0.5,
+        "effect_direction": "negative",
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "magnitude_placeholder": true
+      },
+      {
+        "from": "3f524cdc",
+        "to": "e4ab4e3b",
+        "exists_probability": 0.5,
+        "effect_direction": null,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "magnitude_placeholder": true
+      },
+      {
+        "from": "608cdb52",
+        "to": "e4ab4e3b",
+        "exists_probability": 0.5,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "magnitude_placeholder": true
+      },
+      {
+        "from": "e4ab4e3b",
+        "to": "67761282",
+        "exists_probability": 0.5,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "magnitude_placeholder": true
+      },
+      {
+        "from": "b6e12885",
+        "to": "bb619172",
+        "exists_probability": 0.5,
+        "effect_direction": null,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "magnitude_placeholder": true
+      },
+      {
+        "from": "625e0f64",
+        "to": "d055b5e2",
+        "exists_probability": 0.5,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "magnitude_placeholder": true
+      },
+      {
+        "from": "67761282",
+        "to": "899bdc38",
+        "exists_probability": 1.0,
+        "effect_direction": "positive",
+        "strength": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "provenance": {
+          "source": "brief_extraction"
+        },
+        "goal_measurement": true
+      }
+    ],
+    "goal_constraints": [
+      {
+        "constraint_id": "con1",
+        "node_id": "bb619172",
+        "operator": "<=",
+        "value": 4,
+        "unit": "%",
+        "strictness": "strict",
+        "relaxed_to": "<=",
+        "provenance": "brief_extraction"
+      }
+    ],
+    "goal_node_id": "899bdc38",
+    "schema_version": "v3-projected"
+  },
+  "projection_report": {
+    "included_nodes": 14,
+    "included_edges": 15,
+    "omitted": [
+      {
+        "id": "decision.horizon",
+        "reason": "no_horizon_field_in_target",
+        "detail": "12 months has nowhere to land in GraphV3"
+      },
+      {
+        "id": "f2",
+        "reason": "no_value",
+        "detail": "'Active Pro subscribers' carries no value; none invented"
+      },
+      {
+        "id": "f3",
+        "reason": "qualitative",
+        "detail": "\"Customers' perceived Pro price-value fit\" has no numeric representation in the target"
+      },
+      {
+        "id": "f3",
+        "reason": "no_value",
+        "detail": "\"Customers' perceived Pro price-value fit\" carries no value; none invented"
+      },
+      {
+        "id": "f4",
+        "reason": "no_value",
+        "detail": "'New Pro subscriber acquisition rate' carries no value; none invented"
+      },
+      {
+        "id": "f5",
+        "reason": "qualitative",
+        "detail": "'Existing Pro subscriber exposure to the new price' has no numeric representation in the target"
+      },
+      {
+        "id": "f5",
+        "reason": "no_value",
+        "detail": "'Existing Pro subscriber exposure to the new price' carries no value; none invented"
+      },
+      {
+        "id": "f6",
+        "reason": "qualitative",
+        "detail": "'Customer adoption and perceived value of the next Pro feature release' has no numeric representation in the target"
+      },
+      {
+        "id": "f6",
+        "reason": "no_value",
+        "detail": "'Customer adoption and perceived value of the next Pro feature release' carries no value; none invented"
+      },
+      {
+        "id": "out3",
+        "reason": "qualitative",
+        "detail": "Customer sentiment toward Pro pricing"
+      },
+      {
+        "id": "opt2->f1",
+        "reason": "no_value",
+        "detail": "lever set without a number; none invented"
+      },
+      {
+        "id": "opt3->f1",
+        "reason": "no_value",
+        "detail": "lever set without a number; none invented"
+      },
+      {
+        "id": "opt3->f5",
+        "reason": "no_value",
+        "detail": "lever set without a number; none invented"
+      },
+      {
+        "id": "cl1",
+        "reason": "unknown_magnitude",
+        "detail": "f1->out1 strength unknown; no placeholder written"
+      },
+      {
+        "id": "cl1",
+        "reason": "temporal",
+        "detail": "delay=with the next Pro feature release duration=None persistence=unknown"
+      },
+      {
+        "id": "cl2",
+        "reason": "unknown_magnitude",
+        "detail": "f1->out2 strength unknown; no placeholder written"
+      },
+      {
+        "id": "cl2",
+        "reason": "temporal",
+        "detail": "delay=at customers' renewal or cancellation decisions duration=None persistence=unknown"
+      },
+      {
+        "id": "cl2",
+        "reason": "mediator",
+        "detail": "mediated by f3"
+      },
+      {
+        "id": "cl3",
+        "reason": "unknown_magnitude",
+        "detail": "f1->f3 strength unknown; no placeholder written"
+      },
+      {
+        "id": "cl3",
+        "reason": "temporal",
+        "detail": "delay=when customers encounter the new price duration=None persistence=unknown"
+      },
+      {
+        "id": "cl4",
+        "reason": "unknown_magnitude",
+        "detail": "f6->f3 strength unknown; no placeholder written"
+      },
+      {
+        "id": "cl4",
+        "reason": "temporal",
+        "detail": "delay=with the next Pro feature release duration=None persistence=unknown"
+      },
+      {
+        "id": "cl5",
+        "reason": "unknown_magnitude",
+        "detail": "f3->out2 strength unknown; no placeholder written"
+      },
+      {
+        "id": "cl5",
+        "reason": "temporal",
+        "detail": "delay=at customers' renewal or cancellation decisions duration=None persistence=unknown"
+      },
+      {
+        "id": "cl6",
+        "reason": "unknown_magnitude",
+        "detail": "f1->f2 strength unknown; no placeholder written"
+      },
+      {
+        "id": "cl6",
+        "reason": "temporal",
+        "detail": "delay=after customers encounter the new price and at renewal decisions duration=None persistence=unknown"
+      },
+      {
+        "id": "cl6",
+        "reason": "mediator",
+        "detail": "mediated by f3"
+      },
+      {
+        "id": "cl7",
+        "reason": "unknown_magnitude",
+        "detail": "f4->f2 strength unknown; no placeholder written"
+      },
+      {
+        "id": "cl8",
+        "reason": "unknown_magnitude",
+        "detail": "f2->out1 strength unknown; no placeholder written"
+      },
+      {
+        "id": "cl9",
+        "reason": "unknown_magnitude",
+        "detail": "f5->out2 strength unknown; no placeholder written"
+      },
+      {
+        "id": "cl9",
+        "reason": "temporal",
+        "detail": "delay=at exposed customers' renewal or cancellation decisions duration=None persistence=unknown"
+      },
+      {
+        "id": "cl9",
+        "reason": "mediator",
+        "detail": "mediated by f3"
+      },
+      {
+        "id": "cl10",
+        "reason": "unknown_magnitude",
+        "detail": "f3->out3 strength unknown; no placeholder written"
+      },
+      {
+        "id": "cl10",
+        "reason": "temporal",
+        "detail": "delay=when customers encounter the new price and feature release duration=None persistence=unknown"
+      },
+      {
+        "id": "con1",
+        "reason": "strict_operator",
+        "detail": "<4 cannot be represented; projected <= WITH disclosure"
+      }
+    ],
+    "omitted_by_reason": {
+      "no_horizon_field_in_target": 1,
+      "no_value": 8,
+      "qualitative": 4,
+      "unknown_magnitude": 10,
+      "temporal": 8,
+      "mediator": 3,
+      "strict_operator": 1
+    },
+    "disclosures": [
+      {
+        "constraint_id": "con1",
+        "original_operator": "<",
+        "projected_operator": "<=",
+        "note": "target contract has no strict inequality; relaxation DISCLOSED"
+      }
+    ]
+  },
+  "post_projection_provenance_gate": {
+    "ok": true,
+    "failures": []
+  }
+}

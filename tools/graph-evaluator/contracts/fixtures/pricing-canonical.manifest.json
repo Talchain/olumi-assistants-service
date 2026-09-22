@@ -1,0 +1,48 @@
+{
+  "fixture": "pricing-canonical",
+  "contract_version": "v0.4",
+  "commit": "1cc5c9e1d17ac05e435ac5297fb454aec2f832cc",
+  "brief_file": "tools/graph-evaluator/briefs/pricing-staging.md",
+  "generated_by": {
+    "builder": "gpt-4.1 (temperature 0, strict json_schema)",
+    "widener": "gpt-5.6-terra (reasoning effort high), shown structure + timing, never magnitudes"
+  },
+  "files": {
+    "pricing-canonical.rich-model.json": "4963c7da20998bf6c0326543bfc0b2bb52df52f0793c66285e7556958e5d3d64",
+    "pricing-canonical.projection.json": "5995e2f37691ca010f6caa46d88e4b369b0de1e9db9247e8b673329b2580afbc"
+  },
+  "schema_sha256": "2d670c8ee6a9edca2671d6f7894edf8c3f3d7acc9648dca5e80554d94f8ca80b",
+  "acceptance": {
+    "assertions": 10,
+    "passed": 10,
+    "runs": 3,
+    "checks": [
+      "A1 £49 baseline typed+user-attributed",
+      "A2 £59 typed intervention on a lever, user-bound",
+      "A3 £20k target + 12-month horizon typed",
+      "A4 'under 4%' is operator '<' exactly",
+      "A5 no unanchored user claim",
+      "A6 temporal meaning survives as structure",
+      "A7 unknowns asked never filled",
+      "P1 projection invents no numeric precision",
+      "P2 authorship unchanged across the boundary",
+      "P3 strict operator disclosed not silently relaxed"
+    ],
+    "runner": "tools/graph-evaluator/scripts/model-gen/canonical_acceptance.py"
+  },
+  "projection_loss": {
+    "no_horizon_field_in_target": 1,
+    "no_value": 8,
+    "qualitative": 4,
+    "unknown_magnitude": 10,
+    "temporal": 8,
+    "mediator": 3,
+    "strict_operator": 1
+  },
+  "known_constraints_for_consumers": [
+    "Anthropic structured outputs cap union-typed params at 16; this schema has 31. Builder must be OpenAI.",
+    "POST /assist/v1/elicit-belief returns provenance 'cee' as a TYPE-LEVEL literal — a user's own words come back as ours. Schema change required before claiming user authorship.",
+    "PLoT /v2/run option contract is {factor_id: <bare number>} — provenance/unit/confidence cannot cross that boundary.",
+    "An option with no numeric lever refuses the WHOLE PLoT run (EMPTY_INTERVENTIONS). Withhold and disclose; where ALL options are qualitative, an empty-options 400 is the correct answer."
+  ]
+}

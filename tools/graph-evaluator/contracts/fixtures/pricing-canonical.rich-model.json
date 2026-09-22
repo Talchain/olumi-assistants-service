@@ -1,0 +1,696 @@
+{
+  "decision": {
+    "question": "Given our goal of reaching £20k MRR within 12 months while keeping monthly churn under 4%, should we increase the Pro plan price from £49 to £59 per month with the next Pro feature release?",
+    "horizon": {
+      "value": 12,
+      "unit": "months",
+      "source_fact_id": "uf2"
+    },
+    "goal_measured_by": "out1"
+  },
+  "user_facts": [
+    {
+      "id": "uf1",
+      "kind": "goal",
+      "source_quote": "reaching £20k MRR",
+      "value": 20000,
+      "unit": "£/month",
+      "role": "target",
+      "transformation": "£20k → 20000"
+    },
+    {
+      "id": "uf2",
+      "kind": "horizon",
+      "source_quote": "within 12 months",
+      "value": 12,
+      "unit": "months",
+      "role": "horizon",
+      "transformation": null
+    },
+    {
+      "id": "uf3",
+      "kind": "limit",
+      "source_quote": "keeping monthly churn under 4%",
+      "value": 4,
+      "unit": "%",
+      "role": "limit",
+      "transformation": null
+    },
+    {
+      "id": "uf4",
+      "kind": "option",
+      "source_quote": "increase the Pro plan price from £49 to £59 per month with the next Pro feature release",
+      "value": null,
+      "unit": null,
+      "role": "proposed",
+      "transformation": null
+    },
+    {
+      "id": "uf5",
+      "kind": "quantity",
+      "source_quote": "from £49 to £59 per month",
+      "value": 49,
+      "unit": "£/month",
+      "role": "current",
+      "transformation": null
+    },
+    {
+      "id": "uf6",
+      "kind": "quantity",
+      "source_quote": "from £49 to £59 per month",
+      "value": 59,
+      "unit": "£/month",
+      "role": "proposed",
+      "transformation": null
+    },
+    {
+      "id": "uf7",
+      "kind": "qualitative",
+      "source_quote": "with the next Pro feature release",
+      "value": null,
+      "unit": null,
+      "role": "not_numeric",
+      "transformation": null
+    }
+  ],
+  "options": [
+    {
+      "id": "opt1",
+      "label": "Increase Pro plan price from £49 to £59 per month with the next Pro feature release",
+      "provenance": "user",
+      "source_fact_id": "uf4",
+      "is_status_quo": false,
+      "lever_settings": [
+        {
+          "factor_id": "f1",
+          "value": 59,
+          "unit": "£/month",
+          "epistemic_state": "known",
+          "source_fact_id": "uf6"
+        }
+      ],
+      "rationale": null,
+      "grounded_in": [
+        "uf4",
+        "uf6",
+        "uf7"
+      ],
+      "timing": {
+        "when": "with the next Pro feature release",
+        "source_fact_id": "uf7"
+      }
+    },
+    {
+      "id": "opt2",
+      "label": "Keep Pro plan price at £49 per month",
+      "provenance": "ai_proposed",
+      "source_fact_id": null,
+      "is_status_quo": true,
+      "lever_settings": [
+        {
+          "factor_id": "f1",
+          "value": null,
+          "unit": null,
+          "epistemic_state": "known",
+          "source_fact_id": "uf5"
+        }
+      ],
+      "rationale": "This is the current pricing and represents the status quo.",
+      "grounded_in": [
+        "uf5"
+      ],
+      "timing": {
+        "when": null,
+        "source_fact_id": null
+      }
+    },
+    {
+      "id": "opt3",
+      "label": "Run a limited new-customer test of the higher Pro price alongside the feature release while limiting existing-subscriber exposure",
+      "provenance": "ai_proposed",
+      "source_fact_id": null,
+      "is_status_quo": false,
+      "lever_settings": [
+        {
+          "factor_id": "f1",
+          "value": null,
+          "unit": null,
+          "epistemic_state": "ai_hypothesis",
+          "source_fact_id": null
+        },
+        {
+          "factor_id": "f5",
+          "value": null,
+          "unit": null,
+          "epistemic_state": "ai_hypothesis",
+          "source_fact_id": null
+        }
+      ],
+      "rationale": "A limited rollout changes the learning mechanism: it can reveal conversion and value-perception responses before exposing the whole existing Pro base to the new price. It rests on general reasoning about reversible experiments and on the proposed price change; no response magnitude is assumed.",
+      "grounded_in": [
+        "uf4",
+        "f1",
+        "f5"
+      ],
+      "timing": {
+        "when": "with the next Pro feature release",
+        "source_fact_id": "uf7"
+      }
+    }
+  ],
+  "factors": [
+    {
+      "id": "f1",
+      "label": "Pro plan price (£/month)",
+      "control": "lever",
+      "measurability": "quantitative",
+      "epistemic_state": "known",
+      "current_value": 49,
+      "unit": "£/month",
+      "provenance": "user",
+      "source_fact_id": "uf5",
+      "dsk_refs": [],
+      "grounded_in": [
+        "uf5"
+      ]
+    },
+    {
+      "id": "f2",
+      "label": "Active Pro subscribers",
+      "control": "observable",
+      "measurability": "quantitative",
+      "epistemic_state": "unknown",
+      "current_value": null,
+      "unit": null,
+      "provenance": "ai_proposed",
+      "source_fact_id": null,
+      "dsk_refs": [],
+      "grounded_in": [
+        "f1",
+        "out1"
+      ]
+    },
+    {
+      "id": "f3",
+      "label": "Customers' perceived Pro price-value fit",
+      "control": "observable",
+      "measurability": "qualitative",
+      "epistemic_state": "unknown",
+      "current_value": null,
+      "unit": null,
+      "provenance": "ai_proposed",
+      "source_fact_id": null,
+      "dsk_refs": [],
+      "grounded_in": [
+        "f1",
+        "uf7"
+      ]
+    },
+    {
+      "id": "f4",
+      "label": "New Pro subscriber acquisition rate",
+      "control": "observable",
+      "measurability": "quantitative",
+      "epistemic_state": "unknown",
+      "current_value": null,
+      "unit": null,
+      "provenance": "ai_proposed",
+      "source_fact_id": null,
+      "dsk_refs": [],
+      "grounded_in": [
+        "f2",
+        "out1"
+      ]
+    },
+    {
+      "id": "f5",
+      "label": "Existing Pro subscriber exposure to the new price",
+      "control": "lever",
+      "measurability": "qualitative",
+      "epistemic_state": "ai_hypothesis",
+      "current_value": null,
+      "unit": null,
+      "provenance": "ai_proposed",
+      "source_fact_id": null,
+      "dsk_refs": [],
+      "grounded_in": [
+        "uf4"
+      ]
+    },
+    {
+      "id": "f6",
+      "label": "Customer adoption and perceived value of the next Pro feature release",
+      "control": "observable",
+      "measurability": "qualitative",
+      "epistemic_state": "unknown",
+      "current_value": null,
+      "unit": null,
+      "provenance": "ai_proposed",
+      "source_fact_id": null,
+      "dsk_refs": [],
+      "grounded_in": [
+        "uf7",
+        "f3"
+      ]
+    }
+  ],
+  "outcomes": [
+    {
+      "id": "out1",
+      "label": "Monthly Recurring Revenue (MRR)",
+      "kind": "outcome",
+      "better_direction": "higher",
+      "measurability": "quantitative",
+      "epistemic_state": "unknown",
+      "provenance": "user",
+      "source_fact_id": "uf1",
+      "dsk_refs": [],
+      "grounded_in": [
+        "uf1"
+      ]
+    },
+    {
+      "id": "out2",
+      "label": "Monthly churn rate",
+      "kind": "risk",
+      "better_direction": "lower",
+      "measurability": "quantitative",
+      "epistemic_state": "unknown",
+      "provenance": "user",
+      "source_fact_id": "uf3",
+      "dsk_refs": [],
+      "grounded_in": [
+        "uf3"
+      ]
+    },
+    {
+      "id": "out3",
+      "label": "Customer sentiment toward Pro pricing",
+      "kind": "risk",
+      "better_direction": "higher",
+      "measurability": "qualitative",
+      "epistemic_state": "unknown",
+      "provenance": "ai_proposed",
+      "source_fact_id": null,
+      "dsk_refs": [],
+      "grounded_in": [
+        "f3",
+        "out2"
+      ]
+    }
+  ],
+  "constraints": [
+    {
+      "id": "con1",
+      "subject_id": "out2",
+      "operator": "<",
+      "value": 4,
+      "unit": "%",
+      "provenance": "user",
+      "source_fact_id": "uf3"
+    }
+  ],
+  "causal_links": [
+    {
+      "id": "cl1",
+      "from_id": "f1",
+      "to_id": "out1",
+      "effect": "unknown",
+      "magnitude": {
+        "kind": "unknown",
+        "value": null,
+        "note": "The arithmetic revenue effect per retained Pro subscriber and the demand response cannot be separated from the information provided."
+      },
+      "mediator_id": null,
+      "temporal": {
+        "delay": "with the next Pro feature release",
+        "duration": null,
+        "persistence": "unknown",
+        "note": "The brief ties the price change to the feature release but does not state how long the price remains in force."
+      },
+      "provenance": "ai_hypothesis",
+      "source_fact_id": null,
+      "rationale": "Changing the Pro plan price affects revenue collected from retained Pro subscribers, but the net MRR effect also depends on the subscriber base and is not specified.",
+      "dsk_refs": [],
+      "grounded_in": [
+        "uf4",
+        "uf5",
+        "uf6",
+        "f2",
+        "out1"
+      ]
+    },
+    {
+      "id": "cl2",
+      "from_id": "f1",
+      "to_id": "out2",
+      "effect": "unknown",
+      "magnitude": {
+        "kind": "unknown",
+        "value": null,
+        "note": "The churn response is unknown and depends on customers' price-value perceptions and renewal behaviour."
+      },
+      "mediator_id": "f3",
+      "temporal": {
+        "delay": "at customers' renewal or cancellation decisions",
+        "duration": null,
+        "persistence": "unknown",
+        "note": null
+      },
+      "provenance": "ai_hypothesis",
+      "source_fact_id": null,
+      "rationale": "A price change does not itself cause churn mechanically; any effect operates through customers' perceived value and resulting retention decisions.",
+      "dsk_refs": [],
+      "grounded_in": [
+        "uf4",
+        "uf5",
+        "uf6",
+        "f3",
+        "out2"
+      ]
+    },
+    {
+      "id": "cl3",
+      "from_id": "f1",
+      "to_id": "f3",
+      "effect": "negative",
+      "magnitude": {
+        "kind": "qualitative",
+        "value": null,
+        "note": "Holding the feature package constant, a higher price can reduce perceived value for money; the paired feature release may offset this for some customers."
+      },
+      "mediator_id": null,
+      "temporal": {
+        "delay": "when customers encounter the new price",
+        "duration": null,
+        "persistence": "unknown",
+        "note": null
+      },
+      "provenance": "ai_hypothesis",
+      "source_fact_id": null,
+      "rationale": "This is a qualitative mechanism proposed from general pricing reasoning, not evidence about these customers.",
+      "dsk_refs": [],
+      "grounded_in": [
+        "f1",
+        "f3",
+        "uf7"
+      ]
+    },
+    {
+      "id": "cl4",
+      "from_id": "f6",
+      "to_id": "f3",
+      "effect": "unknown",
+      "magnitude": {
+        "kind": "unknown",
+        "value": null,
+        "note": "Whether the next feature release is valued enough to change price-value perceptions is not stated."
+      },
+      "mediator_id": null,
+      "temporal": {
+        "delay": "with the next Pro feature release",
+        "duration": null,
+        "persistence": "unknown",
+        "note": null
+      },
+      "provenance": "ai_hypothesis",
+      "source_fact_id": null,
+      "rationale": "The proposed timing implies that feature value may be intended to support the price change, but customer adoption and valuation are unknown.",
+      "dsk_refs": [],
+      "grounded_in": [
+        "uf7",
+        "f6",
+        "f3"
+      ]
+    },
+    {
+      "id": "cl5",
+      "from_id": "f3",
+      "to_id": "out2",
+      "effect": "negative",
+      "magnitude": {
+        "kind": "qualitative",
+        "value": null,
+        "note": "Better perceived price-value fit would generally be expected to reduce cancellation pressure, but the size of that relationship is unknown."
+      },
+      "mediator_id": null,
+      "temporal": {
+        "delay": "at customers' renewal or cancellation decisions",
+        "duration": null,
+        "persistence": "unknown",
+        "note": null
+      },
+      "provenance": "ai_hypothesis",
+      "source_fact_id": null,
+      "rationale": "This is a qualitative retention mechanism based on general reasoning; no customer evidence was provided.",
+      "dsk_refs": [],
+      "grounded_in": [
+        "f3",
+        "out2"
+      ]
+    },
+    {
+      "id": "cl6",
+      "from_id": "f1",
+      "to_id": "f2",
+      "effect": "unknown",
+      "magnitude": {
+        "kind": "unknown",
+        "value": null,
+        "note": "The direction and size of subscriber-base response depend on both acquisition and retention sensitivity to price."
+      },
+      "mediator_id": "f3",
+      "temporal": {
+        "delay": "after customers encounter the new price and at renewal decisions",
+        "duration": null,
+        "persistence": "unknown",
+        "note": null
+      },
+      "provenance": "ai_hypothesis",
+      "source_fact_id": null,
+      "rationale": "Price can affect the active subscriber base through perceived value, but no demand or retention elasticity is available.",
+      "dsk_refs": [],
+      "grounded_in": [
+        "f1",
+        "f2",
+        "f3"
+      ]
+    },
+    {
+      "id": "cl7",
+      "from_id": "f4",
+      "to_id": "f2",
+      "effect": "positive",
+      "magnitude": {
+        "kind": "qualitative",
+        "value": null,
+        "note": "More new Pro subscribers increases the active Pro base, subject to retention."
+      },
+      "mediator_id": null,
+      "temporal": {
+        "delay": null,
+        "duration": null,
+        "persistence": "unknown",
+        "note": null
+      },
+      "provenance": "ai_hypothesis",
+      "source_fact_id": null,
+      "rationale": "This is a definitional growth mechanism needed to distinguish subscriber acquisition from the active subscriber base.",
+      "dsk_refs": [],
+      "grounded_in": [
+        "f4",
+        "f2"
+      ]
+    },
+    {
+      "id": "cl8",
+      "from_id": "f2",
+      "to_id": "out1",
+      "effect": "positive",
+      "magnitude": {
+        "kind": "qualitative",
+        "value": null,
+        "note": "More active Pro subscribers increases Pro-plan MRR when a non-zero plan price is charged; the total contribution is unknown."
+      },
+      "mediator_id": null,
+      "temporal": {
+        "delay": null,
+        "duration": null,
+        "persistence": "unknown",
+        "note": null
+      },
+      "provenance": "ai_hypothesis",
+      "source_fact_id": null,
+      "rationale": "This is the subscriber-base component of MRR and is required to assess whether a price change supports the stated revenue goal.",
+      "dsk_refs": [],
+      "grounded_in": [
+        "f2",
+        "out1",
+        "f1"
+      ]
+    },
+    {
+      "id": "cl9",
+      "from_id": "f5",
+      "to_id": "out2",
+      "effect": "unknown",
+      "magnitude": {
+        "kind": "unknown",
+        "value": null,
+        "note": "Limiting or widening existing-subscriber exposure changes who faces the new price, but the churn response is unknown."
+      },
+      "mediator_id": "f3",
+      "temporal": {
+        "delay": "at exposed customers' renewal or cancellation decisions",
+        "duration": null,
+        "persistence": "unknown",
+        "note": null
+      },
+      "provenance": "ai_hypothesis",
+      "source_fact_id": null,
+      "rationale": "Exposure scope is a controllable rollout design choice that can change the population subject to the price-value and churn risk.",
+      "dsk_refs": [],
+      "grounded_in": [
+        "f5",
+        "f3",
+        "out2"
+      ]
+    },
+    {
+      "id": "cl10",
+      "from_id": "f3",
+      "to_id": "out3",
+      "effect": "positive",
+      "magnitude": {
+        "kind": "qualitative",
+        "value": null,
+        "note": "Perceived value for money may shape sentiment, but no customer feedback is available."
+      },
+      "mediator_id": null,
+      "temporal": {
+        "delay": "when customers encounter the new price and feature release",
+        "duration": null,
+        "persistence": "unknown",
+        "note": null
+      },
+      "provenance": "ai_hypothesis",
+      "source_fact_id": null,
+      "rationale": "Customer sentiment is a plausible qualitative risk of a pricing change; this link is general reasoning rather than evidence about this customer base.",
+      "dsk_refs": [],
+      "grounded_in": [
+        "f3",
+        "out3"
+      ]
+    }
+  ],
+  "unknowns": [
+    {
+      "id": "unk1",
+      "question": "What is the current monthly churn rate?",
+      "about_id": "out2",
+      "blocks_quantitative_analysis": true
+    },
+    {
+      "id": "unk2",
+      "question": "What is the current Monthly Recurring Revenue (MRR)?",
+      "about_id": "out1",
+      "blocks_quantitative_analysis": true
+    },
+    {
+      "id": "unk3",
+      "question": "What is the expected impact of increasing the Pro plan price on churn rate?",
+      "about_id": "cl2",
+      "blocks_quantitative_analysis": true
+    },
+    {
+      "id": "unk4",
+      "question": "What is the expected impact of increasing the Pro plan price on MRR?",
+      "about_id": "cl1",
+      "blocks_quantitative_analysis": true
+    },
+    {
+      "id": "unk5",
+      "question": "How many active Pro subscribers are there currently, and how many are expected over the decision horizon without a price change?",
+      "about_id": "f2",
+      "blocks_quantitative_analysis": true
+    },
+    {
+      "id": "unk6",
+      "question": "What is the current and expected new Pro subscriber acquisition rate, including the likely conversion response to the higher price?",
+      "about_id": "f4",
+      "blocks_quantitative_analysis": true
+    },
+    {
+      "id": "unk7",
+      "question": "How much of current MRR, and of the path to the MRR goal, is attributable to the Pro plan versus other plans or revenue sources?",
+      "about_id": "out1",
+      "blocks_quantitative_analysis": true
+    },
+    {
+      "id": "unk8",
+      "question": "Does the monthly churn limit refer to Pro customers specifically, all customers, customer-logo churn, or revenue churn?",
+      "about_id": "out2",
+      "blocks_quantitative_analysis": true
+    },
+    {
+      "id": "unk9",
+      "question": "When will the next Pro feature release occur, what does it include, and what evidence indicates that customers value it?",
+      "about_id": "f6",
+      "blocks_quantitative_analysis": true
+    },
+    {
+      "id": "unk10",
+      "question": "What customer feedback, historical pricing evidence, or experiment design would establish the effect of price on perceived value, conversion, and retention?",
+      "about_id": "f3",
+      "blocks_quantitative_analysis": true
+    }
+  ],
+  "notes": [
+    {
+      "about_id": "cl2",
+      "kind": "correction",
+      "text": "The original direct price-to-churn hypothesis is structurally incomplete: price affects churn through customers' perceived price-value fit and their subsequent renewal or cancellation decisions. The ai-hypothesis link now names that mediator; this does not assert a direction or size for this business.",
+      "dsk_refs": [],
+      "grounded_in": [
+        "cl2",
+        "f1",
+        "f3",
+        "out2"
+      ]
+    },
+    {
+      "about_id": "cl1",
+      "kind": "limitation",
+      "text": "Price alone cannot determine whether the MRR target is reached. MRR combines the revenue per retained subscriber with the active Pro subscriber base, while total MRR may also include other plans or revenue sources. The current MRR, subscriber base, acquisition path, and revenue mix are not stated.",
+      "dsk_refs": [],
+      "grounded_in": [
+        "cl1",
+        "f1",
+        "f2",
+        "f4",
+        "out1"
+      ]
+    },
+    {
+      "about_id": "con1",
+      "kind": "limitation",
+      "text": "The churn constraint is numerically unusable until the churn population and measurement definition are specified; a price change may affect Pro churn differently from overall customer or revenue churn.",
+      "dsk_refs": [],
+      "grounded_in": [
+        "con1",
+        "out2"
+      ]
+    },
+    {
+      "about_id": "opt3",
+      "kind": "assumption",
+      "text": "The limited-rollout option is a proposed learning design, not an assertion that it is operationally feasible or that it will produce representative results. Its design, exposure population, and success criteria require validation.",
+      "dsk_refs": [],
+      "grounded_in": [
+        "opt3",
+        "f5",
+        "out2"
+      ]
+    }
+  ]
+}
