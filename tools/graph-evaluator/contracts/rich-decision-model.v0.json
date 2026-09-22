@@ -201,7 +201,8 @@
                 "value",
                 "unit",
                 "epistemic_state",
-                "source_fact_id"
+                "source_fact_id",
+                "selects"
               ],
               "properties": {
                 "factor_id": {
@@ -237,6 +238,13 @@
                     "null"
                   ],
                   "description": "Required when epistemic_state is known/observed/user_estimate."
+                },
+                "selects": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "For a CATEGORICAL lever, the branch this option selects — 'Germany', 'Office B', 'hire locally'. Use this INSTEAD of a number: set `selects` and leave `value` null. ⛔ Never write 1 or 0 as an on/off indicator. A 1 you invented is indistinguishable from a 1 the person stated, and claiming a user epistemic state for it attributes your indicator to them. null for a quantitative lever."
                 }
               }
             }
