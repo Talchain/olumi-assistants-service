@@ -48,7 +48,17 @@ export interface AgentTurnResult {
   readonly assistant_text: string;
   /** The full item list, for Olumi to persist as the conversation of record. */
   readonly items: readonly unknown[];
-  readonly tool_calls: readonly { name: string; ok: boolean; mutated: boolean }[];
+  /**
+   * ⭐ THE IDENTITY FIELDS ARE PART OF THE RECORD, NOT DECORATION. Without
+   * `proposal_id` here, a witness cannot tell an authorisation that applied the
+   * offered proposal from one that regenerated a fresh mutation after the user
+   * said yes — which is the exact failure the proposal contract exists to stop.
+   * The prose matching is circumstantial; this is the binding.
+   */
+  readonly tool_calls: readonly {
+    name: string; ok: boolean; mutated: boolean;
+    proposal_id?: string; outcome?: string; refusal?: string;
+  }[];
   /** Full results, so Olumi can decide what it owes the user this turn. */
   readonly tool_results: readonly ToolResult[];
   /** True when any tool actually changed the model. */
@@ -80,7 +90,7 @@ export async function runAgentTurn(
     ...input.history,
     { role: 'user', content: [{ type: 'input_text', text: input.message }] },
   ];
-  const toolCalls: { name: string; ok: boolean; mutated: boolean }[] = [];
+  const toolCalls: { name: string; ok: boolean; mutated: boolean; proposal_id?: string; outcome?: string; refusal?: string }[] = [];
   const toolResults: ToolResult[] = [];
   let mutated = false;
 
@@ -111,7 +121,15 @@ export async function runAgentTurn(
       String(call.name), String(call.arguments ?? '{}'), input.ctx, caps,
     );
     if (result.mutated) mutated = true;
-    toolCalls.push({ name: String(call.name), ok: result.ok, mutated: result.mutated });
+    toolCalls.push({
+      name: String(call.name),
+      ok: result.ok,
+      mutated: result.mutated,
+      // Identity only — never the tool's payload.
+      ...(typeof result.proposal_id === 'string' ? { proposal_id: result.proposal_id } : {}),
+      ...(typeof result.outcome === 'string' ? { outcome: result.outcome } : {}),
+      ...(typeof result.refusal === 'string' ? { refusal: result.refusal } : {}),
+    });
     toolResults.push(result);
 
     // The whole output array first — the reasoning item must accompany the call.
