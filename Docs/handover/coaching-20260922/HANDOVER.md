@@ -599,3 +599,56 @@ Three, all guest, all titled `ZZZ-COACHING-REPLAY-WITNESS-20260922`:
 `2fe77bff-…`, `800ed635-…`, `21ae5630-…` (the last is the one cited in the
 witness). No pre-existing scenario was modified — control: the source board
 `105baa8c-…` still shows `updated_at` 2026-09-19.
+
+---
+
+## G — SESSION CLOSED, AND THE ONE FINDING THAT WOULD OTHERWISE ONLY LIVE IN A PR COMMENT
+
+This session was stood down by Paul after the handover was banked and verified.
+Its last act was an **independent review**, which is recorded here because a PR
+comment is not a durable register.
+
+### Independent verdict given: `Talchain/DecisionGuideAI#1847` — APPROVE
+Bound to `65005cd6e5980845e62178b8e604fb8229c4bcf8` (head verified against
+`pulls/1847 .head.sha` rather than taken from the request), comment
+`5773312303`, body verified at 4,867 bytes with both gate tokens in the opening
+region. Requested by the Canvas lane because the bundle hits two NOT-LOW-RISK
+limbs and they had judged the same PR LOW RISK the night before while it carried
+a reintroduced badge regression.
+
+What the verdict covers: the coaching parity guard was **strengthened, not
+relaxed**; the display-truth gate sits **inside** the shared `ImportanceBar`
+rather than at four call sites; and the new coaching arm has a **real producer**
+(`FactorNode.tsx: leadsInfluence: influenceRank !== null && sensitivityRank === 1`)
+so it is not a guard that can never fire.
+
+What it explicitly does **not** cover: I read the diff and the producers, ran no
+suites, and did not read Staging Gate or Canvas Browser Gate at that head.
+
+### ⚠ THE CARRIED-FORWARD FINDING — not that PR's to fix, and it has no owner
+
+`ImportanceBar.tsx` opens with a pre-existing early return:
+
+```ts
+if (importanceScore == null) return null   // withholds the RANK as well
+```
+
+So a factor with a **licensed rank but no influence score renders nothing at
+all**. #1847 correctly fixed the mirror case — gating the *percentage* on
+provenance while deliberately leaving the rank ungated, after
+`Brief4Panels.spec.tsx` caught an earlier version that dropped the rank at the
+call site. The asymmetry on `importanceScore` was untouched, so that PR's new
+comment ("null withholds the percentage and the bar, never the rank") is true of
+`influenceProvenance` and **not** true of `importanceScore`.
+
+Relevant scale, from the same lane's measurement quoted in that diff: **747 of
+1,850 rendered factors (40.4%) carry no value**, and **15 of 399 boards rank a
+valueless factor most influential**. Whether a rank without a score is
+displayable is a display-truth question for Canvas, not this lane — recorded so
+it is not lost with the PR thread.
+
+### Scope reminder for whoever picks this up
+Reviewing a peer's PR when they cannot self-merge is inside this lane's remit
+(it is fallback-path health and it unblocks finished work). **Building canvas
+display behaviour is not.** The finding above is a row for Canvas, not a task
+for the successor.
