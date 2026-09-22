@@ -52,7 +52,21 @@ const DECISION_ID = 'decision';
 export interface CandidateModel {
   readonly goal: { metric: string; operator: string; value: number; unit: string; horizon_months: number | null; provenance: string };
   readonly constraints: readonly CandidateConstraint[];
-  readonly options: readonly { label: string; provenance: string }[];
+  readonly options: readonly {
+    label: string;
+    provenance: string;
+    /**
+     * What this option DOES — the factor levels it sets. Optional because the
+     * original banked contract has no such field; when it is absent the model
+     * is unanalysable and the product must ask the user for the mapping.
+     */
+    interventions?: readonly {
+      factor_label: string;
+      value: number;
+      unit?: string;
+      provenance: string;
+    }[];
+  }[];
   readonly factors: readonly { label: string; role: 'controllable' | 'observable' | 'external'; baseline_known: boolean; baseline_value: number | null; unit: string | null; provenance: string }[];
   readonly risks: readonly { label: string; provenance: string }[];
   readonly outcomes: readonly { label: string; provenance: string }[];
@@ -68,6 +82,15 @@ export interface WidenerAdditions {
 }
 
 export interface AdmittedNode {
+  /**
+   * factor node id -> encoded level this option sets.
+   *
+   * Written at the node's TOP LEVEL because `interventions` is a DECLARED field
+   * on `NodeV3` and `NodeV3` STRIPS UNDECLARED KEYS — a `data.interventions`
+   * object, which is `edit_graph`'s canonical edit location, would not survive
+   * persistence from here. `extractNumericIntervention` reads both.
+   */
+  interventions?: Record<string, { value: number }>;
   id: string;
   kind: CandidateNodeKind;
   label: string;
@@ -310,6 +333,38 @@ export function admitCandidateModel(
       continue;
     }
     resolvable.push({ ...l, from, to });
+  }
+
+  // ── interventions ────────────────────────────────────────────────────────
+  // An intervention names a factor by LABEL. Resolving it to a node id is an
+  // exact match only: attaching "what this option changes" to a guessed factor
+  // would put the user's own number on the wrong quantity.
+  const interventionsByOption = new Map<string, Record<string, { value: number }>>();
+  for (const o of model.options) {
+    const optionId = ids.get(o.label);
+    if (optionId === undefined) continue;
+    const bundle: Record<string, { value: number }> = {};
+    for (const iv of o.interventions ?? []) {
+      const factorId = ids.get(iv.factor_label);
+      if (factorId === undefined) {
+        unresolved.push({
+          from: o.label,
+          to: iv.factor_label,
+          reason: 'unresolved_intervention_target',
+          detail:
+            `This option states it sets "${iv.factor_label}" to ${iv.value}${iv.unit ?? ''}, but no ` +
+            'factor of that name was admitted. Withheld rather than attached to a guessed factor — ' +
+            "putting the user's own number on the wrong quantity is worse than not carrying it.",
+        });
+        continue;
+      }
+      bundle[factorId] = { value: iv.value };
+    }
+    if (Object.keys(bundle).length > 0) interventionsByOption.set(optionId, bundle);
+  }
+  for (const n of nodes) {
+    const bundle = interventionsByOption.get(n.id);
+    if (bundle !== undefined) n.interventions = bundle;
   }
 
   const linkResult = admitCandidateLinks(resolvable);
