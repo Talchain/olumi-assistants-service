@@ -1,4 +1,45 @@
-# RESUME HERE — AI Coaching / Core Correctness · 22 Sep 2026, ~20:45Z
+# RESUME HERE — AI Coaching / Core Correctness · 22 Sep 2026
+
+## ⛔⛔ READ THIS FIRST — THE STATE BELOW CHANGED AT ~20:50Z
+
+**`PROXY_V5_TARGET` was set back to `agent` after this document was written.**
+Served `ac9838f`, `AGENT_LANE_PREVIEW=false` (full mode).
+
+**So the "conventional route COMPLETE" section below is now HISTORICAL.** It was
+true on build `7a5fe3e` while the target was `orchestrator`. It is not true of
+what users reach now.
+
+Measured on the live user surface at 20:52Z, signed-in:
+
+```
+POST /proxy/v5/turn   "change Sales Cycle Length to 11"
+HTTP 200 · v5_conversation_turns rows: 0 · blocks: (empty) · raw_value: 9 (unchanged)
+
+"Sales Cycle Length currently holds 0.45 in the model, but its unit/range is
+ not recorded. I can't safely replace it with 11 without knowing what 11
+ represents (for example, 11 days, weeks, or months)…"
+```
+
+Three things wrong in one reply to a clear instruction: **`0.45` is the internal
+0–1 scale** (the model holds 9 months); **"unit/range is not recorded" is false**
+— the node carries `unit: "months"`, `raw_value: 9`; and **the edit silently did
+not happen** (0 turn rows, no receipt). The Canvas lane reached the same
+conclusion independently from a different surface at 20:50Z.
+
+**Running `spine.mjs` now will read criterion 7 = FAIL. That is correct, not a
+regression in the harness.**
+
+**The rollback is one variable:** unset `PROXY_V5_TARGET` (schema default
+`orchestrator`). On that route the witness read **31 PASS · 0 FAIL · 0 SKIP**
+at 20:20Z. No deploy of its own is needed.
+
+⚠ **This lane changed no config and is not changing it now** — the target
+disposition is release control's. But note the decision has changed shape:
+**with the route fronted, "accept the bound" is no longer available**, because
+the refusal is not bounded away from users any more. It is the product.
+
+---
+
 
 **Everything in this lane is pushed. Nothing lives only in a temp clone.**
 All five working clones were swept: **0 dirty, 0 unpushed**. All eight branches
