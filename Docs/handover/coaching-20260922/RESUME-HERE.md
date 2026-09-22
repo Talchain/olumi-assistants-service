@@ -1,42 +1,40 @@
 # RESUME HERE — AI Coaching / Core Correctness · 22 Sep 2026
 
-## ⛔⛔ READ THIS FIRST — THE STATE BELOW CHANGED AT ~20:50Z
+## ✅ STATE AT HANDOVER — 21:05Z
 
-**`PROXY_V5_TARGET` was set back to `agent` after this document was written.**
-Served `ac9838f`, `AGENT_LANE_PREVIEW=false` (full mode).
+`PROXY_V5_TARGET = orchestrator`. Served `9c16e8c`.
 
-**So the "conventional route COMPLETE" section below is now HISTORICAL.** It was
-true on build `7a5fe3e` while the target was `orchestrator`. It is not true of
-what users reach now.
-
-Measured on the live user surface at 20:52Z, signed-in:
+**Witnessed on that build: `29 PASS · 2 FAIL · 0 SKIP`.**
 
 ```
-POST /proxy/v5/turn   "change Sales Cycle Length to 11"
-HTTP 200 · v5_conversation_turns rows: 0 · blocks: (empty) · raw_value: 9 (unchanged)
-
-"Sales Cycle Length currently holds 0.45 in the model, but its unit/range is
- not recorded. I can't safely replace it with 11 without knowing what 11
- represents (for example, 11 days, weeks, or months)…"
+1=PASS · 2a=PASS · 2b=PASS · 3=PASS · 4=PASS · 5=PASS · 6=PASS · 7=see below
+PASS [7] /proxy/v5/turn forwards to the orchestrator — turns=1 blocks=2 analysis_ready=present
+PASS [7] a user CAN apply a model edit on their own surface — raw_value 9 → 11
+FAIL [7] CONTROL — creation IS receipted — NOT MEASURED (the control built no graph)
+FAIL [7] a model created on the user surface mints a receipt — NOT MEASURED
 ```
 
-Three things wrong in one reply to a clear instruction: **`0.45` is the internal
-0–1 scale** (the model holds 9 months); **"unit/range is not recorded" is false**
-— the node carries `unit: "months"`, `raw_value: 9`; and **the edit silently did
-not happen** (0 turn rows, no receipt). The Canvas lane reached the same
-conclusion independently from a different surface at 20:50Z.
+⚠ **The 2 FAILs are PROBE-side, not product.** Both creation rows depend on an
+LLM actually drafting a model from the brief; that run drafted none, so the rows
+report **NOT MEASURED** rather than a false product failure. Re-run to clear
+them. Six prior standalone runs of that arm were healthy
+(`nodes=14–15, versions=1, head=set`). **Do not read those two as a regression.**
 
-**Running `spine.mjs` now will read criterion 7 = FAIL. That is correct, not a
-regression in the harness.**
+### What happened around 20:50–21:03, so the record is straight
 
-**The rollback is one variable:** unset `PROXY_V5_TARGET` (schema default
-`orchestrator`). On that route the witness read **31 PASS · 0 FAIL · 0 SKIP**
-at 20:20Z. No deploy of its own is needed.
+`PROXY_V5_TARGET` was set to `agent` at ~20:50 while four agent-route defects
+were open. Measured live: edits silently did not apply (0 turn rows, no receipt)
+and the reply quoted the internal `0.45` while claiming the unit was not
+recorded — when the node holds `unit: "months"`, `raw_value: 9`. Canvas hit the
+same thing independently from a different surface.
 
-⚠ **This lane changed no config and is not changing it now** — the target
-disposition is release control's. But note the decision has changed shape:
-**with the route fronted, "accept the bound" is no longer available**, because
-the refusal is not bounded away from users any more. It is the product.
+**The OpenAI owner then closed the `system_event` gap and the target returned to
+`orchestrator` by 21:03.** No config was changed by this lane at any point.
+
+⭐ **The lesson worth keeping:** criterion 7 tracks a *config disposition*, not
+this lane's code. It went green → red → green three times today on config alone,
+while the underlying code did not change. If it reads FAIL, check
+`PROXY_V5_TARGET` **before** looking for a defect.
 
 ---
 
