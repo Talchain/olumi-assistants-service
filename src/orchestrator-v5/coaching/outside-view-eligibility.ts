@@ -107,6 +107,21 @@ const FRAMES: ReadonlyArray<readonly [string, RegExp]> = [
     /\b(?:we\s+have|we\s+currently|currently|current\w*|today\s+we|at\s+present|existing|from\s+£?[\d,]+\w*)/i,
   ],
   [
+    // ⭐ ASKING FOR A CALCULATION IS NOT PROVIDING AN ESTIMATE. DSK-TR-002 fires
+    // when "user provides point estimates"; a narrow arithmetic request supplies
+    // no estimate at all, and interrupting it with a method offer is the
+    // interruption-cost failure CTL-11 was written to catch — which it did catch
+    // here, on the first run, before this pattern existed.
+    //
+    // NARROW BY CONSTRUCTION: an explicit operator BETWEEN two numeric tokens.
+    // "£59 × 3,200 subscribers" matches; "we'll lose 40 customers if we move to
+    // £59" does not, because no operator sits between the two numbers. A broader
+    // "is this a question?" test would swallow real estimates phrased as
+    // questions, which is the opposite error.
+    'computation_request',
+    /£?[\d,.]+\s*(?:[×x*/÷+]|times|divided\s+by|multiplied\s+by)\s*£?[\d,.]+/i,
+  ],
+  [
     'target_frame',
     /\b(?:increas\w+|reach\w*|achiev\w*|grow\w*\s+to|target\b|goal\b|objective\b|need\s+to\s+\w+|get\s+to|hit\w*|aim\w*)\b/i,
   ],
