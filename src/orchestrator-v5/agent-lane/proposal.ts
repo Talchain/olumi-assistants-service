@@ -34,7 +34,39 @@ import { createHash } from 'node:crypto';
 
 /** One structural change. Deliberately the estate's existing op vocabulary. */
 export interface ProposalOperation {
-  readonly op: 'add_node' | 'remove_node' | 'update_node' | 'add_edge' | 'remove_edge' | 'update_edge';
+  readonly op:
+    | 'add_node' | 'remove_node' | 'update_node'
+    | 'add_edge' | 'remove_edge' | 'update_edge'
+    /**
+     * ⭐ SET A FACTOR TO A STATED ASSUMPTION.
+     *
+     * The gap this exists to close, measured on a real session: the model had
+     * 17 factors with no value, the Agent proposed sensible assumptions in
+     * prose, the user replied "these look like a good set of assumptions, can
+     * you update the model with them?" — and nothing happened. Honest and
+     * inert. Current CEE fills the same blanks by INVENTING values and
+     * attributing them to itself, which is worse; the right answer is a value
+     * the USER adopts, recorded as an assumption rather than a measurement.
+     */
+    | 'set_factor_value'
+    /**
+     * ⭐ SAY WHAT AN OPTION DOES — `path` is `optionId::factorId`.
+     *
+     * Measured live: with every factor valued and the scale frame in place,
+     * the analysis was STILL refused because two options connected to a factor
+     * without saying what level they set it to. An option that sets nothing
+     * cannot be compared with one that does, so it blocks the comparison for
+     * every option, not only itself.
+     *
+     * ⚠ This op was written once and WITHDRAWN before shipping, because
+     * `option_intervention_edit.value` is bounded `[0, 1]` and the contract
+     * states "the client converts nothing" — so a user's "£54" could not be
+     * expressed without inventing a scale. It is buildable now only because
+     * the factor carries a DECLARED `cap`: `raw / cap` reads the user's own
+     * number against a range the model already published and disclosed, which
+     * is a different act from choosing one at the point of writing.
+     */
+    | 'set_option_intervention';
   /** Node id, or `from::to` for an edge. */
   readonly path: string;
   readonly value?: unknown;
@@ -155,6 +187,31 @@ export class ProposalStore {
       };
     }
     return { status: 'execute', proposal: p };
+  }
+
+  /**
+   * ⭐ THE PROPOSALS STILL AWAITING A YES, newest first.
+   *
+   * ⛔ MEASURED on the deployed build: the user said "Yes, apply it" and the
+   * Agent called NO tools, answering that the changes "have been proposed but
+   * not approved or applied". Two proposals were outstanding from earlier
+   * turns and it had no way to name either, so the approval simply evaporated
+   * — the single worst thing this loop can do, because the user believes the
+   * model changed and it did not.
+   *
+   * Exposed through `get_canonical_state` so an approval always has an id to
+   * bind to, and so "which one?" is a question the Agent can actually ask.
+   */
+  outstanding(scenarioId: string, userId: string | null): { proposal_id: string; public_label: string }[] {
+    const out: { proposal_id: string; public_label: string }[] = [];
+    for (let i = this.order.length - 1; i >= 0; i -= 1) {
+      const p = this.items.get(this.order[i]);
+      if (p === undefined) continue;
+      if (p.scenario_id !== scenarioId || p.user_id !== userId) continue;
+      if (this.applied.has(p.proposal_id)) continue;
+      out.push({ proposal_id: p.proposal_id, public_label: p.public_label });
+    }
+    return out;
   }
 
   size(): number {

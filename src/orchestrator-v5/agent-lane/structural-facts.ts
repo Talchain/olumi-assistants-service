@@ -18,6 +18,9 @@ export interface GraphNodeLike {
   readonly kind?: string;
   readonly label?: string;
   readonly observed_state?: { value?: unknown } | undefined;
+  /** What an OPTION sets, keyed by factor id. An option with none does nothing. */
+  readonly interventions?: Record<string, unknown> | undefined;
+  readonly changes?: unknown;
 }
 export interface GraphEdgeLike {
   readonly from: string;
@@ -45,6 +48,21 @@ export interface StructuralFacts {
    * act on.
    */
   readonly factors_without_a_value: number;
+  /**
+   * ⭐ OPTIONS THAT SET NOTHING — the blocker that survives every value being
+   * filled in.
+   *
+   * Measured live on 22 Sep at served 877ae800: after adopting eight
+   * assumptions the model had 0 value-less factors and the analysis was STILL
+   * refused, because one of three options carried `interventions: null`. An
+   * option that changes no factor cannot be compared with one that does, so a
+   * single inert option blocks the whole comparison — and nothing the user
+   * could see said so until they asked for the analysis and waited.
+   *
+   * Reported here so the Agent raises it from `get_canonical_state`, at the
+   * moment the model is described, rather than at the end of the journey.
+   */
+  readonly options_that_change_nothing: readonly string[];
   readonly goal_label: string | null;
 }
 
@@ -95,6 +113,15 @@ export function structuralFacts(
     factors_without_a_value: nodes.filter(
       (n) => n.kind === 'factor' && typeof n.observed_state?.value !== 'number',
     ).length,
+    options_that_change_nothing: nodes
+      .filter((n) => n.kind === 'option')
+      .filter((n) => {
+        const iv = n.interventions;
+        const hasInterventions = iv !== null && iv !== undefined && Object.keys(iv).length > 0;
+        const hasChanges = Array.isArray(n.changes) && n.changes.length > 0;
+        return !hasInterventions && !hasChanges;
+      })
+      .map((n) => labelOf(n.id)),
     goal_label: goal?.label ?? null,
   };
 }

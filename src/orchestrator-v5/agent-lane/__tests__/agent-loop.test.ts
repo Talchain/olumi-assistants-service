@@ -17,6 +17,10 @@ const caps = (over: Partial<AgentCapabilities> = {}): AgentCapabilities => ({
   // unassignable (TS2322) — no test here dispatches it, but the stub must still
   // be the shape the interface declares, or it is not standing in for anything.
   buildModelFromBrief: async () => ({ ok: true, mutated: true }),
+  // Same reason as buildModelFromBrief above: every member the interface
+  // declares must be present, or the stub is not standing in for anything.
+  proposeAssumptions: async () => ({ ok: true, mutated: false, proposal_id: 'prop_a' }),
+  proposeOptionInterventions: async () => ({ ok: true, mutated: false, proposal_id: 'prop_i' }),
   ...over,
 });
 
