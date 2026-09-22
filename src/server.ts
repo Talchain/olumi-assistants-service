@@ -140,6 +140,7 @@ export const DEFAULT_ALLOWED_HEADERS = [
   "X-User-Id",
   "X-Request-Id",
   "X-Correlation-Id",
+  "X-Olumi-AI-Mode",
 ];
 
 function resolveAllowedOrigins(): string[] {
@@ -507,6 +508,7 @@ export async function build() {
       "x-request-id",
       "x-proxy-source",
       "x-proxy-duration-ms",
+      "x-olumi-ai-mode",
     ],
   });
 

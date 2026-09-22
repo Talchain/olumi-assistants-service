@@ -55,8 +55,22 @@ import { recordExplicitTurnStop } from "./turn-stop.js";
  * separate flag on purpose: mounting an inert route and sending the product's
  * traffic at it are different decisions with different blast radii.
  */
-const INTERNAL_TARGET =
-  config.proxy.proxyV5Target === "agent" ? "/agent/v1/turn" : "/orchestrate/v2/turn";
+export const AI_MODE_HEADER = "x-olumi-ai-mode" as const;
+export type BrowserAiMode = "conventional" | "openai";
+export type ProxyInternalTarget = "/orchestrate/v2/turn" | "/agent/v1/turn";
+
+/**
+ * Explicit comparison mode wins over deployment default. The value is a closed
+ * enum and can only select one of the two already-mounted Olumi turn routes.
+ * Missing/invalid headers retain the deployment's configured target.
+ */
+export function resolveProxyInternalTarget(mode: unknown): ProxyInternalTarget {
+  if (mode === "conventional") return "/orchestrate/v2/turn";
+  if (mode === "openai") return "/agent/v1/turn";
+  return config.proxy.proxyV5Target === "agent"
+    ? "/agent/v1/turn"
+    : "/orchestrate/v2/turn";
+}
 
 /** Headers forwarded from the browser request to the internal CEE call. */
 /** EXPORTED for the streamed sibling — one forwarding policy, not two. */
@@ -68,6 +82,7 @@ export const ALLOWED_REQUEST_HEADERS = [
   "x-user-id",
   "x-olumi-client-build",
   "x-olumi-payload-hash",
+  AI_MODE_HEADER,
   // Login 3.4 CEE-half seam: the browser's Supabase access token
   // (`Authorization: Bearer <jwt>`) passes through to the internal turn
   // route, where the flag-gated CEE_REQUIRE_USER_JWT verification consumes
@@ -199,7 +214,7 @@ export function buildCorsHeaders(origin: string): Record<string, string> {
     "Access-Control-Allow-Origin": origin,
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Access-Control-Allow-Headers":
-      "Content-Type, Accept, X-Correlation-Id, X-Request-Id, X-User-Id, X-Olumi-Client-Build, X-Olumi-Payload-Hash",
+      "Content-Type, Accept, X-Correlation-Id, X-Request-Id, X-User-Id, X-Olumi-Client-Build, X-Olumi-Payload-Hash, X-Olumi-AI-Mode",
     Vary: "Origin, Access-Control-Request-Headers",
   };
 }
@@ -305,7 +320,7 @@ export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
     {
       timeoutMs,
       originCount: allowedOrigins.size,
-      target: INTERNAL_TARGET,
+      target: resolveProxyInternalTarget(undefined),
     },
     "[proxy-v5] Browser proxy registered: POST /proxy/v5/turn",
   );
@@ -466,10 +481,11 @@ export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
     // delete it and this route grants any visitor the ability to act as any
     // user they can name by UUID.
     const bodyString = serialiseProxiedBodyWithoutClaimedIdentity(request.body);
+    const internalTarget = resolveProxyInternalTarget(request.headers[AI_MODE_HEADER]);
 
     const injectPromise = app.inject({
       method: "POST",
-      url: INTERNAL_TARGET,
+      url: internalTarget,
       headers: internalHeaders,
       payload: bodyString,
     });
@@ -564,6 +580,10 @@ export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
     // Diagnostic: proxy-specific headers
     reply.header("x-proxy-duration-ms", String(duration));
     reply.header("x-proxy-source", "cee-browser-proxy");
+    reply.header(
+      "x-olumi-ai-mode",
+      internalTarget === "/agent/v1/turn" ? "openai" : "conventional",
+    );
 
     // Security: ensure the service key is NEVER in the response
     reply.removeHeader("x-olumi-assist-key");
