@@ -307,6 +307,85 @@ branch that is not settled by measurement.
 
 ---
 
+## D — FIVE BRANCHES FROM EARLIER THE SAME DAY, FINISHED AND UNREVIEWED
+
+⚠ **These were missing from the first draft of this handover and would have been
+lost.** All five are alive at the remote, verified by `git ls-remote` at
+stand-down. None is merged; none has a review.
+
+| Repo | Branch | Head (40 chars, remote-verified) |
+|---|---|---|
+| PLoT | `feat/goal-direction-passthrough` | `3e3c3bad35fe49c8aebfc95a4cd03ec806d959da` |
+| CEE | `feat/goal-direction-minimise-only` | `88906ce9399006d05fec4af7c9b8a1be5fd43915` |
+| CEE | `feat/coaching-structure-marking` | `a2d7c5bcabe9d2ee092cdb078e0e0b7f51393f71` |
+| CEE | `fix/nested-quotes` | `30ee4f097624f8b53bb5f7552ea5141a671eb24e` |
+| CEE | `fix/receipt-guard-consequences` | `96f6db5bae04d35d85d61e1a6f3af98684af92b4` |
+
+**What they are.** The two `goal-direction` branches are one change across the
+seam: PLoT forwards the user's attested `goal_direction` to ISL (gated, with a
+`target` guard because ISL 422s on `target` without `goal_threshold` AND
+`goal_threshold_frame`), and CEE emits it — **minimise only**, deliberately,
+because the label-intent deriver returns `undetermined` for phrasings like
+"Improve conversion rate" and emitting a guess would be worse than emitting
+nothing. Without them, reduce-goals rank backwards at ISL. The brief written for
+the reviewer is `earlier-today/CODEX-BRIEF-GOAL-DIRECTION.md`.
+`fix/nested-quotes` fixes label quoting that mangled nested quotes;
+`fix/receipt-guard-consequences` turns the goal-target receipt guard's
+enforcement into a returned contract (`withholdGraphWrite` /
+`withholdReceiptFacts`) instead of prose the caller restates;
+`feat/coaching-structure-marking` adds the no-colon `sectionHeader()` the UI
+lane asked for.
+
+⛔ **The PLoT branch's last push was blocked by the husky pre-push hook**
+(`structural-keys.generated.ts` drift) and the failure was initially masked
+because `PUSH_EXIT` had captured `tail`'s status, not git's. It was regenerated
+with `tools/gen-structural-keys.mjs` and the SHA above IS at the remote — but
+**re-verify before building on it**, and never read a push's exit code through a
+pipe.
+
+### Exact next action for D
+Treat them as a review queue, not as new work. The PLoT/CEE pair must land
+together or not at all — CEE emitting a direction PLoT does not forward is
+inert, and PLoT forwarding one CEE never emits is a guard with no producer.
+
+---
+
+## E — EVIDENCE THAT IS **NOT** BANKED, AND WHERE IT IS
+
+`/Users/paulslee/Documents/GitHub/output/` is **6.2 GB across 64,613 files** and
+**is not a git repository**. It holds ~200 directories spanning many lanes and
+several weeks (canvas, panel, producer, core, SDL, recovery bundles), so it was
+NOT committed wholesale: most of it is not this lane's to publish, and a 6.2 GB
+commit would be its own incident.
+
+**What WAS lifted into this repo** (`earlier-today/`): the eight constraint-chain
+derivations and the panel-lane open-question register. Together with the two
+first-wrong-boundary documents beside this file, that is the whole of this
+lane's written output for 21–22 Sep.
+
+**What is therefore local-disk-only, on this machine:** everything else under
+`output/`. If the successor is on a different machine, that material does not
+travel. Named so it is a disclosure rather than a silent gap.
+
+### Open question still on the register
+`earlier-today/PANEL-LANE-BLOCKED-NOW.md` carries one unanswered item for the
+producer lane: **which path minted `goal_threshold_cap = 140` with no
+provenance, and can it still run?** The current resolver cannot have produced it
+— it bounds the percentage rule at `raw <= 100` and would mint `137.5`, not
+`140`, with provenance `target_derived_headroom`. So those rows are residue from
+a retired path or model authorship. Not this lane's to close.
+
+### Canvas ASK 2 — unanswered, and correctly so
+Canvas asked a second question (747 of 1850 rendered factors carry no value;
+`display_value` present on 7 of 8 factors but declared in no schema). It was
+**not** answered: the valueless-factor root cause belongs to the Brief→Canonical
+producer lane and the ranking half to analysis/ISL. ASK 1 **was** answered and
+delivered (`earlier-today/CANVAS-ASK-1-ANSWER.md`), including a correction — my
+first reply claimed the `goal_threshold` mint was broken and that I was taking
+it; the resolver is correct and the claim was withdrawn in the delivered file.
+
+---
+
 ## PROVEN FACTS (measured this session — do not re-derive)
 
 1. Handler-routed committed turn ids agree with the fence **16/341 (4.7%)**;
