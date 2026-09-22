@@ -1,0 +1,278 @@
+/**
+ * POST /agent/v1/turn — the OpenAI Agent mounted in the real PoC.
+ *
+ * The Agent owns conversation, reasoning, context and tool choice. Olumi keeps
+ * canonical truth, admissibility, authorisation, CAS, idempotency, persistence
+ * and analysis: every tool this route exposes delegates to an existing Olumi
+ * path, and writes and analysis go through the SAME `/orchestrate/v2/turn` the
+ * product uses, dispatched internally. The Agent therefore cannot reach a
+ * shortcut the UI does not have.
+ *
+ * ⭐ IDENTITY IS BOUND FROM THE REQUEST, NEVER FROM MODEL OUTPUT. The scenario
+ * comes from the body and the subject from the request's own auth context;
+ * neither is ever taken from what the Agent says. `agent_session_id` is a
+ * correlation token only, verified on every call against that same subject and
+ * scenario — knowing someone else's session id must not expose their model.
+ *
+ * ⚠ Gated by `AGENT_LANE_ENABLED`. The route 404s when unset, so deploying it
+ * changes nothing until it is switched on, and switching it off is the rollback.
+ *
+ * ⚠ Transport is `/v1/responses`, not Agents sessions: every Agents session
+ * created on 22 Sep stalled at `in_progress` with zero turns. The tools and the
+ * in-context execution are unchanged if sessions recover — the transport is a
+ * seam, deliberately.
+ */
+
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { config } from '../config/index.js';
+import { log } from '../utils/telemetry.js';
+import { composeDirectAnswerResponse } from '../orchestrator-v5/compose.js';
+import { finaliseV5Response } from '../orchestrator-v5/response-finaliser.js';
+import { runAgentTurn, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
+import type { AgentLaneMode } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
+import { createAgentCapabilities, type InternalDispatch } from '../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
+import type { CallStructuredModel } from '../orchestrator-v5/agent-lane/runtime/build-model.js';
+import { onceMoreOnTransportFailure } from '../orchestrator-v5/agent-lane/runtime/transport-retry.js';
+import { ProposalStore } from '../orchestrator-v5/agent-lane/proposal.js';
+import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-binding.js';
+import { budgetFor } from '../orchestrator-v5/agent-lane/model-budgets.js';
+import { disclosuresFor, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
+
+const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
+
+/** The conversation of record stays Olumi's; this is a per-process cache. */
+const histories = new Map<string, unknown[]>();
+const proposals = new ProposalStore();
+const sessions = new SessionBindingRegistry();
+
+/**
+ * The one instruction that differs by mode.
+ *
+ * ⚠ This is HONESTY, not the boundary. The boundary is that the tools are not
+ * declared, dispatch refuses the names, and the capabilities refuse. This line
+ * only stops the preview offering to do something it cannot do.
+ */
+const MUTATION_INSTRUCTION =
+  config.proxy.agentLanePreview === true
+    ? 'This is a read-only preview: you CANNOT change the model, and there is no tool that would let you. If the user asks for a change, say plainly that this preview cannot make it and describe what you would propose instead.'
+    : 'To change the model you must call propose_model_change, show the user exactly what you propose, and call authorise_change ONLY after they have explicitly approved it.';
+
+const AGENT_INSTRUCTIONS = [
+  'You are Olumi, a strategic reasoning layer. Improve human strategic judgement rather than deciding for the user.',
+  'Answer the user’s actual question directly and naturally.',
+  'Never invent canonical facts. Before describing what the model contains, call get_canonical_state.',
+  'Distinguish user facts and evidence from machine-authored estimates and from unknowns. An absent value is unknown, never zero.',
+  MUTATION_INSTRUCTION,
+  'Never claim a change happened unless the tool result says it was applied. If a tool reports a refusal, tell the user what it said.',
+  'If get_canonical_state reports the model is empty, call build_model_from_brief with the user\u2019s own words before answering about the model.',
+  'Discussion, ideation and research are not mutation requests.',
+  'get_canonical_state returns a `structure` block computed from the persisted model: which options reach the goal, which cannot, what is unconnected, and how many entities have no value. These are facts, not estimates \u2014 use them, and say them plainly when they explain why an analysis cannot run.',
+  'When a tool tells you something was not represented, say so.',
+  'British English. Concise but substantive.',
+].join(' ');
+
+export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
+  if (config.proxy.agentLaneEnabled !== true) return;
+
+  /**
+   * READ-ONLY preview. Resolved ONCE at registration, not per request, so no
+   * request header or body can select the writable surface.
+   */
+  const mode: AgentLaneMode = config.proxy.agentLanePreview === true ? 'preview' : 'full';
+
+  const dispatch: InternalDispatch = async (path, body) => {
+    const res = await app.inject({
+      method: 'POST',
+      url: path,
+      headers: {
+        'content-type': 'application/json',
+        'x-olumi-assist-key': config.auth.assistApiKey ?? config.auth.assistApiKeys?.[0] ?? '',
+      },
+      payload: body as Record<string, unknown>,
+    });
+    let json: Record<string, unknown> = {};
+    try { json = res.json() as Record<string, unknown>; } catch { json = {}; }
+    return { status: res.statusCode, json };
+  };
+
+
+  const callModel: CallModel = async (req) => onceMoreOnTransportFailure('conversation', async () => {
+    const budget = budgetFor('gpt-5.6-terra', 'conversation');
+    const r = await fetch(OPENAI_RESPONSES_URL, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${config.llm.openaiApiKey ?? ''}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: budget.model,
+        instructions: req.instructions,
+        input: req.input,
+        tools: req.tools,
+        max_output_tokens: req.max_output_tokens,
+      }),
+    });
+    if (!r.ok) {
+      const text = await r.text();
+      throw new Error(`openai_${r.status}: ${text.slice(0, 300)}`);
+    }
+    return (await r.json()) as { output: Record<string, unknown>[] };
+  });
+
+  /**
+   * Structured construction call. Separate from `callModel` because it is a
+   * different contract: strict `json_schema` output and its own measured budget
+   * (see BANKED_BUDGETS role 'whole'), not the conversation budget.
+   */
+  const callStructured: CallStructuredModel = async (reqBody) => onceMoreOnTransportFailure('construction', async () => {
+    const r = await fetch(OPENAI_RESPONSES_URL, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${config.llm.openaiApiKey ?? ''}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: reqBody.model,
+        instructions: reqBody.instructions,
+        input: reqBody.input,
+        max_output_tokens: reqBody.max_output_tokens,
+        ...(reqBody.reasoning_effort !== undefined
+          ? { reasoning: { effort: reqBody.reasoning_effort } }
+          : {}),
+        text: {
+          format: {
+            type: 'json_schema',
+            name: 'whole_candidate',
+            strict: true,
+            schema: reqBody.schema,
+          },
+        },
+      }),
+    });
+    if (!r.ok) {
+      const text = await r.text();
+      throw new Error(`openai_${r.status}: ${text.slice(0, 300)}`);
+    }
+    const j = (await r.json()) as {
+      output?: { type?: string; content?: { type?: string; text?: string }[] }[];
+      usage?: Record<string, unknown>;
+    };
+    let text = '';
+    for (const item of j.output ?? []) {
+      if (item.type !== 'message') continue;
+      for (const c of item.content ?? []) if (c.type === 'output_text') text += c.text ?? '';
+    }
+    return { text, usage: j.usage };
+  }, (call, err) => log.warn({ err, call }, 'agent-lane transport failure, retrying once'));
+
+  app.post('/agent/v1/turn', async (req: FastifyRequest, reply: FastifyReply) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const scenarioId = typeof body.scenario_id === 'string' ? body.scenario_id : '';
+    const message = typeof body.message === 'string' ? body.message : '';
+    const sessionId = typeof body.agent_session_id === 'string' && body.agent_session_id.length > 0
+      ? body.agent_session_id
+      : `sess_${scenarioId}`;
+    if (scenarioId.length === 0 || message.length === 0) {
+      return reply.code(422).send({ error: 'BAD_INPUT', detail: 'scenario_id and message are required' });
+    }
+
+    // Bound from the request, never from the Agent.
+    const userId = typeof (req as { effectiveUserId?: string }).effectiveUserId === 'string'
+      ? (req as { effectiveUserId?: string }).effectiveUserId ?? null
+      : null;
+
+    // A session is a correlation token: bound once, verified every time.
+    const refusal = sessions.check(sessionId, userId, scenarioId);
+    if (refusal === 'unknown_session') sessions.bind(sessionId, userId, scenarioId);
+    else if (refusal !== null) {
+      return reply.code(404).send({ error: 'NOT_FOUND', detail: 'No readable conversation for that scenario.' });
+    }
+
+    const capabilities = createAgentCapabilities(dispatch, proposals, callStructured, mode);
+    const history = histories.get(sessionId) ?? [];
+    const budget = budgetFor('gpt-5.6-terra', 'conversation');
+
+    let result;
+    try {
+      result = await runAgentTurn(
+        {
+          ctx: { scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id },
+          history,
+          message,
+          instructions: AGENT_INSTRUCTIONS,
+          maxOutputTokens: budget.max_output_tokens,
+          mode,
+        },
+        capabilities,
+        callModel,
+      );
+    } catch (err) {
+      log.error({ err: String(err), scenario_id: scenarioId }, 'agent-lane turn failed');
+      return reply.code(502).send({ error: 'UPSTREAM_ERROR', detail: String(err).slice(0, 300) });
+    }
+
+    histories.set(sessionId, [...result.items]);
+
+    // A hop limit is never returned as an empty answer.
+    const text = result.stopped_reason === 'hop_limit' && result.assistant_text.length === 0
+      ? 'I was not able to finish that within this turn. Ask me again and I will continue.'
+      : result.assistant_text;
+
+    // ⭐ `answerKind` is REQUIRED and load-bearing: route egress synthesises
+    // `_answer_shape` only for 'substantive'. An Agent's conversational reply
+    // is substantive by construction — it is the answer, not a confirmation of
+    // a mechanical action.
+    // ⭐ OLUMI OWES THE DISCLOSURE, NOT THE AGENT. When a write had to carry a
+    // placeholder strength the user never gave, the user is told — whether or
+    // not the model chose to mention it.
+    const owed = disclosuresFor(result.tool_results);
+    const composed = composeDirectAnswerResponse({
+      assistant_text: withDisclosures(text, owed),
+      stage: 'frame',
+      answerKind: 'substantive',
+    });
+    const finalised = finaliseV5Response(composed, { scenarioId });
+
+    /**
+     * The minimum the canvas needs to notice the model moved.
+     *
+     * ⛔ WITHOUT `graph_hash` THE CANVAS SILENTLY STOPS UPDATING. Measured:
+     * CEE's own conversational turn returns `graph_hash` and `analysis_ready`
+     * and this route returned neither, so after the Agent built a 34-node model
+     * the UI had nothing telling it the revision had changed. The reply read
+     * fine and the board stayed empty — the worst kind of failure, because
+     * nothing errors.
+     *
+     * Read back from the persisted graph, not from what a tool returned: the
+     * hash the client caches must be the hash the product would serve it.
+     */
+    let graphHash: string | undefined;
+    let analysisReady: unknown;
+    try {
+      const after = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {});
+      if (after.status === 200) {
+        graphHash = typeof after.json.graph_hash === 'string' ? after.json.graph_hash : undefined;
+        analysisReady = after.json.analysis_ready;
+      }
+    } catch {
+      // A readback failure must not lose the user's answer. The turn still
+      // returns; the client simply does not learn the new revision this time.
+    }
+
+    return reply.code(200).send({
+      ...finalised,
+      ...(graphHash !== undefined ? { graph_hash: graphHash } : {}),
+      ...(analysisReady !== undefined ? { analysis_ready: analysisReady } : {}),
+      _agent: {
+        session_id: sessionId,
+        mode,
+        tool_calls: result.tool_calls,
+        mutated: result.mutated,
+        hops: result.hops,
+        stopped_reason: result.stopped_reason,
+      },
+    });
+  });
+
+  log.info({ event: 'agent_lane.route_mounted' }, 'POST /agent/v1/turn mounted');
+}

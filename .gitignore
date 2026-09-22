@@ -52,3 +52,7 @@ logs/
 
 # Lane scratch (never committed)
 LANE-PROGRESS-*.md
+
+# Subagent scratch files must never be committed into the lane.
+src/orchestrator-v5/agent-lane/__probe*.ts
+src/orchestrator-v5/agent-lane/**/zz-*.test.ts
