@@ -45,7 +45,10 @@ describe('typed interventions', () => {
       Object.values(o.interventions ?? {})
         .map((v) => extractNumericIntervention(v)),
     );
-    expect(values).toContain(59);
+    // On the factor's own scale, not raw: a level beside a normalised baseline
+    // is the `mixed_scale_unresolved` defect, measured live and pinned in
+    // goal-reachability-admission.test.ts.
+    expect(values).toContain(0.59);
   });
 
   it('keys interventions by the resolved FACTOR NODE ID, never a label', () => {

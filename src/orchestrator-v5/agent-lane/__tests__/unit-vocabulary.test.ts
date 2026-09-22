@@ -42,8 +42,8 @@ describe('unit vocabulary decides whether the money audit runs', () => {
   it('both configurations state the same price, with different units', () => {
     const a = CONFIG_A().nodes.find((n) => n.observed_state !== undefined);
     const b = CONFIG_B().nodes.find((n) => n.observed_state !== undefined);
-    expect(a!.observed_state!.value).toBe(49);
-    expect(b!.observed_state!.value).toBe(49);
+    expect(a!.observed_state!.raw_value).toBe(49);
+    expect(b!.observed_state!.raw_value).toBe(49);
     expect(a!.observed_state!.unit).toBe('£');
     expect(b!.observed_state!.unit).toBe('GBP per month');
   });

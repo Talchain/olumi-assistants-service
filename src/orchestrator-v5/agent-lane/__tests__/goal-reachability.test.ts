@@ -112,3 +112,83 @@ describe('an option that states no level', () => {
     expect(m.withheld.some((w) => w.reason === 'unresolved_change_target')).toBe(true);
   });
 });
+
+describe('an orphaned goal is repaired AND disclosed', () => {
+  // ⛔ MEASURED ON A REAL BRIEF. Goal metric "Productivity change", while every
+  // causal chain terminated on an invented near-synonym outcome "Productivity
+  // Improvement". 35 nodes, 40 edges, every count healthy — and 0 of 6 options
+  // could reach the goal, so the model could never be analysed.
+  const nearSynonym = {
+    ...CANDIDATE,
+    goal: { metric: 'Productivity change', operator: '>=', value: 10, unit: '%', horizon_months: 3, provenance: 'explicit' },
+    outcomes: [{ label: 'Productivity Improvement', provenance: 'inferred' }],
+    links: [{ from: 'Pro plan price', to: 'Productivity Improvement', direction: 'positive', provenance: 'inferred' }],
+  } as unknown as CandidateModel;
+
+  it('connects the terminal outcome to the goal so the model can be analysed', () => {
+    const m = admitCandidateModel(nearSynonym, {});
+    const goal = m.nodes.find((n) => n.kind === 'goal')!;
+    const opt = m.nodes.find((n) => n.kind === 'option')!;
+    expect(reaches(m.edges, opt.id, goal.id), 'the option must reach the goal').toBe(true);
+  });
+
+  it('RECORDS it as an assumption — a silent connection would be worse', () => {
+    const m = admitCandidateModel(nearSynonym, {});
+    const entry = m.loss.find((l) => String(l.reason).includes('could not be analysed at all'));
+    expect(entry, 'the repair must be disclosed in the loss ledger').toBeDefined();
+    expect(String(entry!.reason)).toMatch(/ASSUMPTION/);
+    expect(String(entry!.reason)).toMatch(/Productivity Improvement/);
+  });
+
+  it('marks the invented edge as defaulted, never as authored', () => {
+    const m = admitCandidateModel(nearSynonym, {});
+    const goal = m.nodes.find((n) => n.kind === 'goal')!;
+    const into = m.edges.filter((e) => e.to === goal.id);
+    expect(into.length).toBeGreaterThan(0);
+    for (const e of into) expect(e.defaulted).toBe(true);
+  });
+
+  it('does NOT fire when the model connected the goal itself — contrast control', () => {
+    // CANDIDATE already terminates on the goal metric's own label. If the
+    // repair fired here it would be adding causality nobody asked for.
+    const m = admitCandidateModel(CANDIDATE, {});
+    const entry = m.loss.find((l) => String(l.reason).includes('could not be analysed at all'));
+    expect(entry, 'repair must not fire on a well-connected goal').toBeUndefined();
+  });
+});
+
+describe('an option that changes nothing is recorded, not silently admitted', () => {
+  // ⛔ MEASURED: 0 of 7 options on a real 35-node model carried an intervention.
+  // Every option reached the goal, every count looked healthy, and the analysis
+  // could still never tell "direct sales hiring" from "channel partnerships" —
+  // because nothing said what either DOES. Filling in the 17 missing factor
+  // values would not have helped: the defect is structural, not numeric.
+  const inert = {
+    ...CANDIDATE,
+    options: [
+      { label: 'Does Something', provenance: 'inferred', changes: ['Pro plan price'], interventions: [] },
+      { label: 'Does Nothing', provenance: 'inferred', changes: [], interventions: [] },
+    ],
+  } as unknown as CandidateModel;
+
+  it('names the inert option so the Agent can ask about it', () => {
+    const m = admitCandidateModel(inert, {});
+    const flagged = m.withheld.filter((w) => w.reason === 'option_changes_nothing').map((w) => w.from);
+    expect(flagged).toEqual(['Does Nothing']);
+  });
+
+  it('does NOT flag an option that acts on something — the contrast control', () => {
+    // Without this, flagging everything would look identical to flagging the
+    // right thing.
+    const m = admitCandidateModel(inert, {});
+    const flagged = m.withheld.filter((w) => w.reason === 'option_changes_nothing').map((w) => w.from);
+    expect(flagged).not.toContain('Does Something');
+  });
+
+  it('still admits the inert option rather than deleting the user’s choice', () => {
+    // Dropping it would be worse: the user named it, and silently losing an
+    // option is a bigger failure than carrying one that cannot be compared.
+    const m = admitCandidateModel(inert, {});
+    expect(m.nodes.filter((n) => n.kind === 'option').map((n) => n.label)).toContain('Does Nothing');
+  });
+});

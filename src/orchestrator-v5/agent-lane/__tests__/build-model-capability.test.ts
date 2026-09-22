@@ -43,9 +43,11 @@ const structured = (payload: unknown = CANDIDATE): CallStructuredModel =>
 /** `nodes` drives both the pre-check and the post-write confirmation. */
 function dispatcher(opts: { before: unknown[]; after: unknown[]; registerStatus?: number }) {
   const calls: string[] = [];
+  const bodies: Record<string, unknown> = {};
   let registered = false;
-  const d: InternalDispatch = async (path) => {
+  const d: InternalDispatch = async (path, body) => {
     calls.push(path);
+    if (path.endsWith('/graph/register')) bodies.register = body;
     if (path.endsWith('/graph/register')) {
       registered = true;
       return { status: opts.registerStatus ?? 200, json: {} };
@@ -53,7 +55,7 @@ function dispatcher(opts: { before: unknown[]; after: unknown[]; registerStatus?
     const nodes = registered ? opts.after : opts.before;
     return { status: 200, json: { graph: { nodes, edges: [] }, graph_hash: registered ? 'after' : 'before' } };
   };
-  return { d, calls };
+  return { d, calls, bodies };
 }
 
 const NON_EMPTY = [{ id: 'x', kind: 'goal', label: 'Already here' }];
@@ -138,20 +140,29 @@ describe('build_model_from_brief', () => {
       ...CANDIDATE,
       constraints: [{ metric: 'Something nobody modelled', operator: '<', value: 4, unit: '%', provenance: 'explicit' }],
     };
-    const { d } = dispatcher({ before: [], after: [{ id: 'a' }] });
+    const { d, bodies } = dispatcher({ before: [], after: [{ id: 'a' }] });
     const caps = createAgentCapabilities(d, new ProposalStore(), structured(unresolvable));
     const r = await caps.buildModelFromBrief(ctx, { brief: 'a brief' });
-    expect(r.goal_constraints_not_carried).toBe(0);
+    expect(r.goal_constraints_carried).toBe(0);
+    const sent = (bodies.register as { graph?: Record<string, unknown> } | undefined)?.graph;
+    expect(sent && 'goal_constraints' in sent, 'no constraints => the key must be absent').toBe(false);
   });
 
-  it('records the constraint the write boundary cannot carry', async () => {
-    const { d } = dispatcher({ before: [], after: [{ id: 'a' }] });
+  it('carries the stated constraint with the graph it registers', async () => {
+    const { d, bodies } = dispatcher({ before: [], after: [{ id: 'a' }] });
     const caps = createAgentCapabilities(d, new ProposalStore(), structured());
     const r = await caps.buildModelFromBrief(ctx, { brief: 'a brief' });
     // The candidate states one constraint; `/graph/register` takes graph +
     // brief_text only, so it is NOT enforced by what was just persisted.
-    expect(r.goal_constraints_not_carried).toBe(1);
-    expect((r.not_represented as string[]).join(' ')).toMatch(/not carried by this write/);
+    expect(r.goal_constraints_carried).toBe(1);
+    // And the graph SENT to registration must actually carry them — the point
+    // of the fix. Asserting only the count would pass while the payload dropped
+    // them, which is exactly the shape of the bug this replaces.
+    // ⛔ ASSERT THE PAYLOAD, NOT THE CALL. A count of admitted constraints
+    // would stay green while the graph sent to registration dropped them —
+    // which is precisely the bug this replaces.
+    const sent = (bodies.register as { graph?: { goal_constraints?: unknown[] } } | undefined)?.graph;
+    expect(sent?.goal_constraints, 'the registered graph must carry the constraint').toHaveLength(1);
   });
 
   it('refuses an empty structured answer instead of writing nothing', async () => {

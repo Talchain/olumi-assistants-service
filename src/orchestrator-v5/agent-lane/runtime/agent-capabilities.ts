@@ -44,6 +44,7 @@ export function authorisationTurnId(proposalId: string): string {
 import { createProposal, ProposalStore, type ProposalOperation } from '../proposal.js';
 import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
 import { structuralFacts } from '../structural-facts.js';
+import { defaultFrameFor } from '../admit-model.js';
 import type { AgentCapabilities, AgentToolContext, ToolResult } from './agent-tools.js';
 import { buildModelFromBrief, type CallStructuredModel } from './build-model.js';
 
@@ -52,7 +53,7 @@ export type InternalDispatch = (path: string, body: unknown) => Promise<{ status
 
 interface GraphRead {
   readonly graph_hash: string;
-  readonly nodes: { id: string; kind: string; label: string; description?: string; observed_state?: Record<string, unknown> }[];
+  readonly nodes: { id: string; kind: string; label: string; description?: string; observed_state?: Record<string, unknown>; interventions?: Record<string, unknown>; changes?: unknown }[];
   readonly edges: { from: string; to: string }[];
   readonly analysis_state: unknown;
 }
@@ -75,6 +76,20 @@ export function createAgentCapabilities(
    * Defence in depth, because a single prompt sentence is not a boundary.
    */
   mode: 'full' | 'preview' = 'full',
+  /**
+   * ⭐ THE UI RENDERS THE ANALYSIS FROM `blocks` AND `analysis_ready`, NOT FROM
+   * THE PROSE. Measured on the real browser transport at `2fd8cbba`: the turn
+   * came back 200 with a correct verdict in `assistant_text` and
+   * `blocks=none`, `analysis_ready.options=0` — so a user reading the page saw
+   * the sentence and an empty results panel.
+   *
+   * The raw payload is handed to the ROUTE through this callback rather than
+   * returned in the ToolResult, because the ToolResult is JSON-stringified
+   * straight back into the model's context: a full analysis payload there
+   * would cost thousands of tokens per hop and tell the model nothing its own
+   * summary does not already say.
+   */
+  onAnalysis?: (payload: { analysis_ready?: unknown; blocks?: unknown[] }) => void,
 ): AgentCapabilities {
   const readOnly = mode === 'preview';
   const refuseReadOnly = (): ToolResult => ({
@@ -117,6 +132,10 @@ export function createAgentCapabilities(
         // than the product it is being compared against.
         structure: structuralFacts(g.nodes, g.edges),
         analysis: g.analysis_state,
+        // Every proposal this user has been shown and not yet approved, newest
+        // first. An approval with nothing to bind to is an approval that
+        // silently does nothing.
+        awaiting_your_approval: proposals.outstanding(ctx.scenario_id, ctx.authenticated_user_id),
       };
     },
 
@@ -158,6 +177,258 @@ export function createAgentCapabilities(
       };
     },
 
+    /**
+     * ⭐ ADOPTING ASSUMPTIONS IS A PROPOSAL, NOT A WRITE.
+     *
+     * The gap, measured on Paul's session of 22 Sep: 17 of 20 factors held no
+     * value, the Agent listed sensible starting assumptions in prose, the user
+     * replied "these look like a good set of assumptions, can you update the
+     * model with them?" — and the turn came back `mutated: false` with
+     * `[get_canonical_state]` as its only tool call. Honest, and inert.
+     *
+     * The dishonest fix is the one the incumbent already ships: invent the
+     * numbers during construction and attribute them to the system. The honest
+     * one is this — the model SUGGESTS, the user ADOPTS, and the adoption goes
+     * through the same stored-proposal/authorise boundary as any other change,
+     * so what gets written is exactly what was shown.
+     *
+     * ⛔ It will not overwrite a value that is already there. A factor that
+     * already carries a number was set by somebody; replacing it with a guess
+     * under cover of "adopting assumptions" is the failure this refuses.
+     */
+    async proposeAssumptions(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      const g = await readGraph(ctx.scenario_id);
+      if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      const input = Array.isArray(args?.assumptions) ? args.assumptions : [];
+      if (input.length === 0) {
+        return { ok: false, mutated: false, refusal: 'empty_proposal', detail: 'No assumptions were given.' };
+      }
+
+      const find = (l: string) => g.nodes.find((n) => norm(n.label) === norm(l) || norm(n.description) === norm(l));
+      const unresolved: string[] = [];
+      const occupied: { label: string; current_value: number }[] = [];
+      const seen = new Set<string>();
+      const adopted: { id: string; label: string; value: number; unit: string; basis: string }[] = [];
+
+      for (const a of input) {
+        const node = find(String(a?.factor_label ?? ''));
+        if (node === undefined) { unresolved.push(String(a?.factor_label ?? '')); continue; }
+        const existing = node.observed_state?.value;
+        if (typeof existing === 'number') { occupied.push({ label: node.label, current_value: existing }); continue; }
+        if (!Number.isFinite(Number(a?.value))) { unresolved.push(node.label); continue; }
+        if (seen.has(node.id)) continue;
+        seen.add(node.id);
+        adopted.push({
+          id: node.id, label: node.label,
+          value: Number(a.value), unit: String(a?.unit ?? ''), basis: String(a?.basis ?? ''),
+        });
+      }
+
+      if (adopted.length === 0) {
+        return {
+          ok: false, mutated: false, refusal: 'nothing_to_adopt',
+          unresolved_labels: unresolved, already_valued: occupied,
+          detail:
+            'None of those could be adopted. Read the state again and use the labels exactly as they appear; ' +
+            'factors that already hold a value are left alone.',
+        };
+      }
+
+      // Sorted by node id so an identical set proposed in a different order is
+      // the SAME proposal, not a second one.
+      const ordered = [...adopted].sort((x, y) => (x.id < y.id ? -1 : x.id > y.id ? 1 : 0));
+      const operations: ProposalOperation[] = ordered.map((a) => ({
+        op: 'set_factor_value',
+        path: a.id,
+        value: { value: a.value, unit: a.unit, basis: a.basis },
+      }));
+      const proposal = createProposal({
+        scenario_id: ctx.scenario_id,
+        user_id: ctx.authenticated_user_id,
+        base_graph_identity_hash: g.graph_hash,
+        operations,
+        provenance: { authored_by: 'model_proposed', basis: 'starting assumptions offered for the user to adopt or correct' },
+        validation: { admitted: true, loss_count: 0, refusals: [] },
+        public_label:
+          `Adopt ${ordered.length} starting assumption${ordered.length === 1 ? '' : 's'}: ` +
+          ordered.map((a) => `${a.label} = ${a.value}${a.unit !== '' ? ' ' + a.unit : ''}`).join('; '),
+      });
+      proposals.put(proposal);
+      return {
+        ok: true, mutated: false,
+        proposal_id: proposal.proposal_id,
+        public_label: proposal.public_label,
+        base_revision: g.graph_hash,
+        assumptions: ordered.map((a) => ({ factor: a.label, value: a.value, unit: a.unit, basis: a.basis })),
+        ...(unresolved.length > 0 ? { unresolved_labels: unresolved } : {}),
+        ...(occupied.length > 0 ? { left_alone_already_valued: occupied } : {}),
+        note:
+          'Nothing has changed. Show the user each value and what it rests on, say plainly that these are ' +
+          'assumptions to adopt or correct and NOT measurements, and call authorise_change with this ' +
+          'proposal_id only once they agree.',
+      };
+    },
+
+    /**
+     * ⭐ WHAT AN OPTION DOES — the last structural blocker on the journey.
+     *
+     * ⛔ THE CONSTRAINT THAT DECIDES THIS DESIGN. `option_intervention_edit` is
+     * `.strict()` and its `value` is `z.number().min(0).max(1)`, described as
+     * "the effect value on the MODEL scale … no unit, no currency and no
+     * percentage: the client converts nothing, and the server licenses no
+     * raw-unit conversion on this path." A first version of this capability
+     * took the user's "£54" and was WITHDRAWN unshipped, because turning it
+     * into a number in [0, 1] meant choosing a scale at the moment of writing,
+     * which is the fabrication this lane exists to prevent.
+     *
+     * ⭐ IT IS HONEST NOW ONLY BECAUSE THE FACTOR CARRIES A DECLARED FRAME.
+     * Construction publishes `observed_state.cap`, so `raw / cap` READS the
+     * user's own number against a range the model already stated and disclosed
+     * — a different act from inventing one here. Both numbers are reported.
+     *
+     * ⛔ AND WITHOUT A FRAME IT REFUSES. A factor with no cap whose value is
+     * outside [0, 1] cannot be expressed on this wire at all; saying so is the
+     * correct outcome, not picking a denominator.
+     */
+    async proposeOptionInterventions(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      const g = await readGraph(ctx.scenario_id);
+      if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      const input = Array.isArray(args?.interventions) ? args.interventions : [];
+      if (input.length === 0) {
+        return { ok: false, mutated: false, refusal: 'empty_proposal', detail: 'No interventions were given.' };
+      }
+      const byLabel = (l: string, kind: string) =>
+        g.nodes.find((n) => n.kind === kind && (norm(n.label) === norm(l) || norm(n.description) === norm(l)));
+
+      const unresolved: string[] = [];
+      const unframed: { factor: string; detail: string }[] = [];
+      const unchanged: string[] = [];
+      const seen = new Set<string>();
+      const set: {
+        option: { id: string; label: string }; factor: { id: string; label: string };
+        raw: number; normalised: number; cap: number | null; unit: string; basis: string;
+        derivedFrame: number | null;
+      }[] = [];
+
+      for (const i of input) {
+        const option = byLabel(String(i?.option_label ?? ''), 'option');
+        const factor = byLabel(String(i?.factor_label ?? ''), 'factor');
+        if (option === undefined) { unresolved.push(`option "${String(i?.option_label ?? '')}"`); continue; }
+        if (factor === undefined) { unresolved.push(`factor "${String(i?.factor_label ?? '')}"`); continue; }
+        const raw = Number(i?.value);
+        if (!Number.isFinite(raw)) { unresolved.push(`${option.label} -> ${factor.label} (no value)`); continue; }
+
+        const os = (factor.observed_state ?? {}) as { cap?: unknown; unit?: unknown };
+        const cap = typeof os.cap === 'number' && Number.isFinite(os.cap) && os.cap > 0 ? os.cap : null;
+        let normalised: number;
+        let derivedFrame: number | null = null;
+        if (cap !== null) {
+          normalised = raw / cap;
+          if (normalised < 0 || normalised > 1) {
+            unframed.push({ factor: factor.label, detail: `${raw} is outside the model's range for this factor (0 to ${cap})` });
+            continue;
+          }
+        } else if (raw >= 0 && raw <= 1) {
+          normalised = raw;
+        } else if (raw > 1) {
+          /**
+           * ⭐ DERIVE THE FRAME RATHER THAN REFUSE, and say so.
+           *
+           * ⛔ MEASURED on the deployed build: this branch USED to refuse, and
+           * the refusal was correct in isolation and a dead end in practice.
+           * A factor with no VALUE cannot carry a range at construction —
+           * `ObservedStateSchema` requires `value`, and a node-level `cap` is
+           * stripped by `NodeV3Schema` — so "Feature release availability" and
+           * "Price rollout exposure" could never be set by any option, and the
+           * comparison could never run. The Agent's advice became "a rebuild is
+           * required", which is not something to ask a user for.
+           *
+           * The frame is taken from the user's own figure and ATTACHED to the
+           * factor on authorisation, exactly as the adopted-assumption path
+           * already does. Reported below as `ranges_added_for_analysis`.
+           */
+          derivedFrame = defaultFrameFor(raw);
+          normalised = raw / derivedFrame;
+        } else {
+          unframed.push({
+            factor: factor.label,
+            detail:
+              `"${factor.label}" has no stated range, and ${raw} cannot be read against one. ` +
+              'Nothing here will pick a range on your behalf for a figure like that.',
+          });
+          continue;
+        }
+
+        const current = (option.interventions ?? {})[factor.id] as { value?: unknown } | number | undefined;
+        const currentValue = typeof current === 'number' ? current : (current as { value?: unknown } | undefined)?.value;
+        if (currentValue === normalised || currentValue === raw) {
+          unchanged.push(`${option.label} already sets ${factor.label} to ${String(currentValue)}`);
+          continue;
+        }
+        const key = `${option.id}::${factor.id}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        set.push({
+          option: { id: option.id, label: option.label },
+          factor: { id: factor.id, label: factor.label },
+          raw, normalised, cap: cap ?? derivedFrame, unit: typeof os.unit === 'string' ? os.unit : '',
+          basis: String(i?.basis ?? ''), derivedFrame,
+        });
+      }
+
+      if (set.length === 0) {
+        return {
+          ok: false, mutated: false, refusal: 'nothing_to_set',
+          ...(unresolved.length > 0 ? { unresolved } : {}),
+          ...(unframed.length > 0 ? { no_stated_range: unframed } : {}),
+          ...(unchanged.length > 0 ? { already_set: unchanged } : {}),
+          detail: 'Nothing could be recorded. Tell the user exactly which of these it was and why.',
+        };
+      }
+
+      const ordered = [...set].sort((x, y) =>
+        `${x.option.id}::${x.factor.id}` < `${y.option.id}::${y.factor.id}` ? -1 : 1);
+      const operations: ProposalOperation[] = ordered.map((i) => ({
+        op: 'set_option_intervention',
+        path: `${i.option.id}::${i.factor.id}`,
+        value: { normalised: i.normalised, raw: i.raw, cap: i.cap, basis: i.basis, derived_frame: i.derivedFrame },
+      }));
+      const proposal = createProposal({
+        scenario_id: ctx.scenario_id,
+        user_id: ctx.authenticated_user_id,
+        base_graph_identity_hash: g.graph_hash,
+        operations,
+        provenance: { authored_by: 'model_proposed', basis: 'what each option does, for the user to confirm or correct' },
+        validation: { admitted: true, loss_count: 0, refusals: [] },
+        public_label:
+          ordered.map((i) => `${i.option.label} sets ${i.factor.label} to ${i.raw}${i.unit !== '' ? ' ' + i.unit : ''}`).join('; '),
+      });
+      proposals.put(proposal);
+      return {
+        ok: true, mutated: false,
+        proposal_id: proposal.proposal_id,
+        public_label: proposal.public_label,
+        base_revision: g.graph_hash,
+        interventions: ordered.map((i) => ({
+          option: i.option.label, factor: i.factor.label,
+          value: i.raw, unit: i.unit,
+          // Both numbers, always. The user approves the one they said.
+          recorded_on_model_scale: i.normalised,
+          model_range: i.cap,
+          ...(i.derivedFrame !== null ? { range_taken_from_your_figure: i.derivedFrame } : {}),
+          basis: i.basis,
+        })),
+        ...(unresolved.length > 0 ? { unresolved } : {}),
+        ...(unframed.length > 0 ? { no_stated_range: unframed } : {}),
+        ...(unchanged.length > 0 ? { already_set: unchanged } : {}),
+        note:
+          'Nothing has changed. Show the user the value in THEIR units and what it rests on, then call ' +
+          'authorise_change with this proposal_id once they agree.',
+      };
+    },
+
     async authoriseChange(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
       const before = await readGraph(ctx.scenario_id);
@@ -175,8 +446,276 @@ export function createAgentCapabilities(
         return { ok: false, mutated: false, refusal: decision.status, ...(decision.status === 'superseded' ? { expected: decision.expected, actual: decision.actual } : {}) };
       }
 
-      // The STORED operation is applied. Nothing is regenerated here.
-      const op = decision.proposal.operations[0];
+      // The STORED operations are applied. Nothing is regenerated here.
+      const ops = decision.proposal.operations;
+
+      if (ops[0]?.op === 'set_option_intervention') {
+        /**
+         * ⚠ THIS EVENT IS CAS-GATED AND `factor_value_edit` IS NOT — it carries
+         * a REQUIRED `base_graph_hash`. Each applied edit moves the hash, so
+         * the current one is re-read between edits; sending the proposal's base
+         * for all of them refuses every edit after the first with a divergence
+         * that is really our own preceding write.
+         */
+        const applied: { option: string; factor: string; requested: number; recorded: number | null }[] = [];
+        const failures: { path: string; detail: string }[] = [];
+        /**
+         * ⭐ ATTACH ANY DERIVED FRAME FIRST, in one write, before the levels.
+         * The factor must carry its range before a level is recorded against
+         * it, or the level is a number the model cannot interpret. Same
+         * mechanism as the adopted-assumption path, and the same disclosure.
+         */
+        const framedHere: { factor: string; range: number }[] = [];
+        const frames = new Map<string, number>();
+        for (const o of ops) {
+          const f = ((o.value ?? {}) as { derived_frame?: number | null }).derived_frame;
+          if (typeof f === 'number' && f > 1) frames.set(o.path.split('::')[1], f);
+        }
+        if (frames.size > 0) {
+          const patched = before.nodes.map((n) => {
+            const range = frames.get(n.id);
+            if (range === undefined) return n;
+            const os = (n.observed_state ?? {}) as { value?: number; raw_value?: number };
+            const raw = typeof os.raw_value === 'number' ? os.raw_value : os.value;
+            /**
+             * ⛔ A FACTOR WITH NO VALUE IS LEFT WITHOUT ONE. `ObservedStateSchema`
+             * requires `value`, so attaching a range here would mean inventing a
+             * baseline — and a zero baseline is the exact fabrication this lane
+             * refuses ("an absent value is unknown, never zero"). It is also
+             * unnecessary: the baseline gate skips a factor with no value
+             * outright (`if (baseline === undefined) continue`), so an unvalued
+             * factor was never what blocked the analysis. Only a factor that
+             * ALREADY carries a bare amount gets the range.
+             */
+            if (typeof raw !== 'number') { frames.delete(n.id); return n; }
+            framedHere.push({ factor: n.label, range });
+            return { ...n, observed_state: { ...os, value: raw / range, raw_value: raw, cap: range, declared_scale: 'unit_interval' } };
+          });
+          if (framedHere.length > 0) {
+            const reg = await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, {
+              graph: { nodes: patched, edges: before.edges },
+            });
+            if (reg.status !== 200) {
+              failures.push({ path: 'scale_frame', detail: `could not attach a range: http ${reg.status}` });
+              framedHere.length = 0;
+            }
+          }
+        }
+        const rebased = framedHere.length > 0 ? await readGraph(ctx.scenario_id) : null;
+        let baseHash = rebased?.graph_hash ?? before.graph_hash;
+        for (let i = 0; i < ops.length; i += 1) {
+          const o = ops[i];
+          const [optionId, factorId] = o.path.split('::');
+          const v = ((o.value ?? {}) as { normalised?: number }).normalised;
+          if (typeof v !== 'number') { failures.push({ path: o.path, detail: 'no value stored on the proposal' }); continue; }
+          const r = await dispatch('/orchestrate/v2/turn', {
+            kind: 'system_event',
+            turn_id: authorisationTurnId(`${decision.proposal.proposal_id}#${i}`),
+            scenario_id: ctx.scenario_id,
+            stage: 'frame',
+            event: { kind: 'option_intervention_edit', option_id: optionId, factor_id: factorId, value: v, base_graph_hash: baseHash },
+          });
+          if (r.status !== 200) failures.push({ path: o.path, detail: `http ${r.status}` });
+          const mid = await readGraph(ctx.scenario_id);
+          if (mid !== null) baseHash = mid.graph_hash;
+        }
+
+        const afterSet = await readGraph(ctx.scenario_id);
+        const byId = new Map((afterSet?.nodes ?? []).map((n) => [n.id, n]));
+        for (const o of ops) {
+          const [optionId, factorId] = o.path.split('::');
+          const option = byId.get(optionId);
+          const iv = (option?.interventions ?? {})[factorId] as { value?: unknown } | number | undefined;
+          const recorded = typeof iv === 'number' ? iv : (iv as { value?: unknown } | undefined)?.value;
+          const stored = ((o.value ?? {}) as { raw?: number }).raw;
+          applied.push({
+            option: option?.label ?? optionId,
+            factor: byId.get(factorId)?.label ?? factorId,
+            requested: typeof stored === 'number' ? stored : Number.NaN,
+            recorded: typeof recorded === 'number' ? recorded : null,
+          });
+        }
+        const landed = applied.filter((a) => a.recorded !== null);
+        if (landed.length === 0) {
+          return {
+            ok: false, mutated: false, applied: false, refusal: 'not_applied',
+            detail: 'None of the levels were recorded. The model is unchanged.', failures, interventions: applied,
+          };
+        }
+        if (landed.length === applied.length) proposals.markApplied(decision.proposal.proposal_id);
+        return {
+          ok: true, mutated: true, applied: true,
+          proposal_id: decision.proposal.proposal_id,
+          recorded_count: landed.length,
+          requested_count: applied.length,
+          interventions: applied,
+          revision_before: before.graph_hash,
+          revision_after: afterSet?.graph_hash ?? before.graph_hash,
+          ...(failures.length > 0 ? { failures } : {}),
+          ...(framedHere.length > 0 ? { ranges_added_for_analysis: framedHere } : {}),
+          not_represented:
+            'What each option does is now recorded from what the user said, not measured. The model ' +
+            'stores each level against the factor\u2019s stated range, so quote the user\u2019s own number back ' +
+            'to them, not the normalised one.' +
+            (framedHere.length > 0
+              ? ' Some factors had no range at all, which would have stopped the analysis running, so one was ' +
+                'taken from the figure itself: ' + framedHere.map((f) => `${f.factor} 0 to ${f.range}`).join(', ') +
+                '. Say so, and invite a correction \u2014 a range is a unit of measurement, not a forecast.'
+              : ''),
+        };
+      }
+
+      if (ops[0]?.op === 'set_factor_value') {
+        /**
+         * ⭐ APPLY EACH ADOPTED ASSUMPTION AS ITS OWN `factor_value_edit`, WITH
+         * ITS OWN DERIVED IDENTITY. The wire has no batch form, and each event
+         * needs a distinct `turn_id` because `(scenario_id, turn_id)` is unique
+         * — so the key is derived from the proposal id AND the operation index,
+         * which keeps a retry of the same authorisation idempotent per value
+         * instead of minting a fresh id every attempt.
+         *
+         * ⚠ REPRESENTATION LOSS, RECORDED. `FactorValueEditEvent` is `.strict()`
+         * and carries `{kind, target_id, value, raw_value?, unit?, field?,
+         * applied_from?}` — there is NO provenance field on it, and the handler
+         * stamps `source: 'user_explicit'` because it was built for the
+         * inspector. That stamp is right about WHO set the value (the user
+         * authorised this exact set) and silent about WHAT IT RESTS ON. The
+         * basis therefore survives only in the proposal and in what the Agent
+         * says, so the result below tells it to say it.
+         */
+        const applied: { factor: string; requested: number; recorded: number | null }[] = [];
+        const failures: { factor: string; detail: string }[] = [];
+        for (let i = 0; i < ops.length; i += 1) {
+          const o = ops[i];
+          const v = (o.value ?? {}) as { value?: number; unit?: string };
+          if (typeof v.value !== 'number') { failures.push({ factor: o.path, detail: 'no value stored on the proposal' }); continue; }
+          const r = await dispatch('/orchestrate/v2/turn', {
+            kind: 'system_event',
+            turn_id: authorisationTurnId(`${decision.proposal.proposal_id}#${i}`),
+            scenario_id: ctx.scenario_id,
+            stage: 'frame',
+            event: {
+              kind: 'factor_value_edit',
+              target_id: o.path,
+              value: v.value,
+              ...(v.unit !== undefined && v.unit !== '' ? { unit: v.unit } : {}),
+            },
+          });
+          if (r.status !== 200) failures.push({ factor: o.path, detail: `http ${r.status}` });
+        }
+
+        // ⛔ CONFIRMED FROM STATE. The handler may rescale what it was sent
+        // (unit caps, percent-vs-fraction), so the recorded number is read back
+        // and reported EVEN WHEN it differs from the one the user approved —
+        // that difference is exactly the thing a user must not discover later.
+        const afterSet = await readGraph(ctx.scenario_id);
+        const byId = new Map((afterSet?.nodes ?? []).map((n) => [n.id, n]));
+        for (const o of ops) {
+          const node = byId.get(o.path);
+          const stored = node?.observed_state?.value;
+          const req = ((o.value ?? {}) as { value?: number }).value;
+          applied.push({
+            factor: node?.label ?? o.path,
+            requested: typeof req === 'number' ? req : Number.NaN,
+            recorded: typeof stored === 'number' ? stored : null,
+          });
+        }
+        const landed = applied.filter((a) => a.recorded !== null);
+        if (landed.length === 0) {
+          return {
+            ok: false, mutated: false, applied: false, refusal: 'not_applied',
+            detail: 'None of the values were recorded. The model is unchanged.',
+            failures, values: applied,
+          };
+        }
+
+        /**
+         * ⭐ ATTACH A SCALE FRAME TO ANYTHING THAT LANDED AS A BARE AMOUNT.
+         *
+         * ⛔ WHY THIS SECOND WRITE EXISTS, measured end to end. A factor above
+         * 1 with no `cap` is refused by `run_analysis`
+         * (`baseline_scale_unresolved`) and the refusal is permanent:
+         * `factor_value_edit` is `.strict()` with no cap field, and posting a
+         * `{value, raw_value}` pair is accepted with HTTP 200 then normalised
+         * back to `raw === value`. Construction publishes the frame inside
+         * `observed_state`, which survives because `ObservedStateSchema` is
+         * `.passthrough()` — but a factor with NO baseline at construction has
+         * no `observed_state` to carry one (`value` is required), and a
+         * node-level `cap` is stripped by `NodeV3Schema`. So a factor that
+         * gets its first value HERE, by adoption, would be unanalysable for
+         * the life of the model.
+         *
+         * Measured on the deployed build: with the frame attached this way,
+         * `analysis_ready` went `blocked` -> `ready`, blockers 0, and the run
+         * produced win probabilities over 10,000 samples per option. Without
+         * it, the same model refused.
+         *
+         * ⚠ The frame is DERIVED from the user's own number, `raw_value` keeps
+         * that number untouched, and it is reported so the Agent says it.
+         */
+        const needsFrame = (afterSet?.nodes ?? []).filter((n) => {
+          if (!ops.some((o) => o.path === n.id)) return false;
+          const os = (n.observed_state ?? {}) as { value?: unknown; cap?: unknown };
+          return typeof os.value === 'number' && Math.abs(os.value) > 1 && typeof os.cap !== 'number';
+        });
+        const framed: { factor: string; value: number; range: number }[] = [];
+        if (needsFrame.length > 0 && afterSet !== null) {
+          const frameById = new Map<string, number>();
+          for (const n of needsFrame) {
+            const os = n.observed_state as { value: number; raw_value?: number };
+            const raw = typeof os.raw_value === 'number' ? os.raw_value : os.value;
+            const range = defaultFrameFor(raw);
+            if (range <= 1) continue;
+            frameById.set(n.id, range);
+            framed.push({ factor: n.label, value: raw, range });
+          }
+          if (frameById.size > 0) {
+            const patched = afterSet.nodes.map((n) => {
+              const range = frameById.get(n.id);
+              if (range === undefined) return n;
+              const os = (n.observed_state ?? {}) as { value: number; raw_value?: number };
+              const raw = typeof os.raw_value === 'number' ? os.raw_value : os.value;
+              return { ...n, observed_state: { ...os, value: raw / range, raw_value: raw, cap: range, declared_scale: 'unit_interval' } };
+            });
+            const reg = await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, {
+              graph: { nodes: patched, edges: afterSet.edges },
+            });
+            if (reg.status !== 200) {
+              failures.push({ factor: 'scale_frame', detail: `could not attach a range: http ${reg.status}` });
+              framed.length = 0;
+            }
+          }
+        }
+        if (landed.length === applied.length) proposals.markApplied(decision.proposal.proposal_id);
+        const rescaled = landed.filter((a) => a.recorded !== a.requested);
+        return {
+          ok: true, mutated: true, applied: true,
+          proposal_id: decision.proposal.proposal_id,
+          adopted_count: landed.length,
+          requested_count: applied.length,
+          values: applied,
+          revision_before: before.graph_hash,
+          revision_after: afterSet?.graph_hash ?? before.graph_hash,
+          ...(failures.length > 0 ? { failures } : {}),
+          ...(rescaled.length > 0
+            ? { rescaled_by_the_model: rescaled, must_disclose_rescaling: true }
+            : {}),
+          ...(framed.length > 0 ? { ranges_added_for_analysis: framed } : {}),
+          not_represented:
+            'These values are the user\u2019s adopted assumptions, not measurements, and the model records ' +
+            'no mark distinguishing the two \u2014 so say so when you describe what changed' +
+            (rescaled.length > 0 ? ', and state every value the model stored differently from the one approved.' : '.') +
+            (framed.length > 0
+              ? ' Some of them had no range to be read against, which would have stopped the analysis running ' +
+                'at all, so a range was taken from the figure itself: ' +
+                framed.map((f) => `${f.factor} 0 to ${f.range}`).join(', ') +
+                '. That is a unit of measurement rather than a forecast or a limit, the approved figures are ' +
+                'stored unchanged, and the user should be told and invited to correct any range that is wrong.'
+              : ''),
+        };
+      }
+
+      const op = ops[0];
       const [fromId, toId] = op.path.split('::');
       const direction = (op.value as { effect_direction: 'positive' | 'negative' }).effect_direction;
       /**
@@ -313,6 +852,7 @@ export function createAgentCapabilities(
       const ready = (r.json.analysis_ready ?? {}) as Record<string, unknown>;
       const blocks = (r.json.blocks as { type: string }[] | undefined) ?? [];
       const result = blocks.find((b) => b.type === 'analysis_result');
+      onAnalysis?.({ analysis_ready: r.json.analysis_ready, blocks });
       return {
         ok: r.status === 200,
         mutated: false,

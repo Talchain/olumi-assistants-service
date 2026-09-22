@@ -1603,7 +1603,14 @@ export async function commitDirectAnswer(
   //
   //    The `ui_directive` block goes too: it exists to "point the UI at the node
   //    the user just changed", and on a replay no node was changed.
-  if (appendOutcome.replayedPriorTurn === true) {
+  // Both verdicts mean THE SAME THING about state — the RPC no-op'd and nothing
+  // was written — so they share one reconciliation: reread authoritative current
+  // state, mark the patch `noop`, drop the stale directive. Only the prose can
+  // differ, because "already recorded" is TRUE for a replay and FALSE for a
+  // reused id carrying a different instruction.
+  const priorTurnReplay = appendOutcome.replayedPriorTurn === true;
+  const priorTurnConflict = appendOutcome.priorTurnConflict === true;
+  if (priorTurnReplay || priorTurnConflict) {
     // ⭐⭐ A RECOVERY MUST RECONCILE AGAINST AUTHORITATIVE CURRENT STATE, NOT
     //    MERELY DECLINE TO LIE.
     //
@@ -1643,9 +1650,22 @@ export async function commitDirectAnswer(
 
     let currentState: Record<string, unknown> | null = null;
     let currentSentence: string | null = null;
-    if (patchTargetId !== null && sessionStore !== undefined) {
+    // ⛔ THIS GUARD TESTED THE OPTIONAL PARAMETER, NOT THE RESOLVED STORE, AND
+    //    THAT MADE THE RECONCILIATION DEAD ON STAGING.
+    //
+    //    `store` is resolved at the top of this function precisely so callers
+    //    need not pass one (`sessionStore ?? getSessionStore()`), and the real
+    //    route relies on that default. Testing `sessionStore` meant the reread
+    //    only ever ran when a caller passed a store EXPLICITLY — which is what
+    //    the unit tests do, so the acceptance seam could not fail.
+    //
+    //    MEASURED on deployed `34ee62f` after #1685 landed: the node carried
+    //    `display_value:"17 months"` and the block carried `target_id`, yet the
+    //    reply was "I couldn't read the current value just now" with
+    //    `after: null`. Nothing was unreadable; the reread never ran.
+    if (patchTargetId !== null) {
       try {
-        const currentGraph = await sessionStore.loadGraph(metadata.scenario_id);
+        const currentGraph = await store.loadGraph(metadata.scenario_id);
         const nodes = (currentGraph as { nodes?: unknown } | null)?.nodes;
         if (Array.isArray(nodes)) {
           for (const n of nodes) {
@@ -1675,8 +1695,11 @@ export async function commitDirectAnswer(
         turn_row_id: persistedRowId,
         current_state_reconciled: currentState !== null,
       },
-      'V5 commit — this turn REPLAYED an already-committed request; nothing was ' +
-        'written, and the response reports authoritative current state',
+      priorTurnConflict
+        ? 'V5 commit — this turn REUSED a committed operation id for a DIFFERENT ' +
+          'request; nothing was written, and the response refuses truthfully'
+        : 'V5 commit — this turn REPLAYED an already-committed request; nothing was ' +
+          'written, and the response reports authoritative current state',
     );
 
     const correctedBlocks =
@@ -1696,10 +1719,39 @@ export async function commitDirectAnswer(
                 : b,
             );
 
+    // ⛔ A CONFLICT MUST NOT HAND BACK THE PRIOR OPERATION'S RECEIPT.
+    //
+    //    `append_turn_atomic_v5` returns the ORIGINAL operation's receipt here,
+    //    because the deterministic mutation id is derived from
+    //    `scenario_id + turn_id` — which is precisely what a reused id shares.
+    //    So without this, the response said "I did not make that change" while
+    //    still carrying a `model_version_receipt`, and a consumer reading the
+    //    receipt rather than the prose would conclude the write had happened.
+    //    That is the same false-success defect this branch exists to remove,
+    //    moved from the prose into the structured carrier.
+    //
+    //    The durable receipt is TRUE of the earlier operation — it is simply
+    //    not the receipt of THIS request. So nothing is deleted at the RPC or
+    //    in version history; only the disclosure boundary moves. A genuine
+    //    replay is untouched and may still recover the original receipt.
+    const baseForCorrection: typeof responseWithModelVersionReceipt = priorTurnConflict
+      ? (() => {
+          const withoutReceipt = { ...(responseWithModelVersionReceipt as Record<string, unknown>) };
+          delete withoutReceipt.model_version_receipt;
+          return withoutReceipt as typeof responseWithModelVersionReceipt;
+        })()
+      : responseWithModelVersionReceipt;
+
     responseWithModelVersionReceipt = {
-      ...responseWithModelVersionReceipt,
+      ...baseForCorrection,
       assistant_text:
-        'That change had already been recorded, so nothing new was written just now. ' +
+        (priorTurnConflict
+          ? // ⛔ NOT "already recorded" — this instruction was never carried out.
+            // Saying it had been would be the same lie in a politer register.
+            'I did not make that change. This request arrived under an identifier ' +
+            'that had already been used for a different instruction, so I stopped ' +
+            'rather than risk applying the wrong edit. Nothing was written. '
+          : 'That change had already been recorded, so nothing new was written just now. ') +
         (currentSentence ?? "I couldn't read the current value just now — open the model to check it."),
       ...(correctedBlocks === null ? {} : { blocks: correctedBlocks }),
     } as typeof responseWithModelVersionReceipt;
@@ -1980,7 +2032,11 @@ export async function commitDirectAnswer(
   return {
     persistedAnalysisGraphHash,
     persistedGraph: writesGraph ? graphForStore : null,
-    modelVersionReceipt: appendOutcome.modelVersionReceipt ?? null,
+    // Same disclosure boundary as the response above: on a CONFLICT the
+    // receipt belongs to the earlier operation, not to this refused request,
+    // and the two carriers must agree or a consumer reading one and rendering
+    // the other diverges. A genuine replay is unchanged.
+    modelVersionReceipt: priorTurnConflict ? null : (appendOutcome.modelVersionReceipt ?? null),
     // F-HELD: the committed response (lapse notice attached / competing
     // suggestion chips suppressed when those seams fired; the SAME object as
     // the input on the untouched fast path). Callers that consume

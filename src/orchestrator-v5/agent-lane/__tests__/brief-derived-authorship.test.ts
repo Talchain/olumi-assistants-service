@@ -33,7 +33,11 @@ describe('brief-derived authorship', () => {
     const m = admitCandidateModel(faithful, widened);
     const price = m.nodes.find((n) => (n.description ?? n.label) === 'Pro plan price');
     expect(price, 'the capture carries a stated price').toBeDefined();
-    expect(price!.observed_state?.value).toBe(49);
+    // ⭐ The user's own number is `raw_value`; `value` is that number read
+    // against the factor's range, which is what the analysis engine compares.
+    // Both are asserted, because losing either is a different defect.
+    expect(price!.observed_state?.raw_value, 'the user\u2019s own figure').toBe(49);
+    expect(price!.observed_state?.value, 'the same figure on the model scale').toBeCloseTo(0.49, 10);
     // The builder marked this factor provenance 'explicit' — meaning the user
     // stated it IN THE BRIEF, which is brief_extraction, not a direct UI edit.
     // Node display vocabulary; the durable value authorship is on observed_state.

@@ -60,7 +60,7 @@ const sessions = new SessionBindingRegistry();
 const MUTATION_INSTRUCTION =
   config.proxy.agentLanePreview === true
     ? 'This is a read-only preview: you CANNOT change the model, and there is no tool that would let you. If the user asks for a change, say plainly that this preview cannot make it and describe what you would propose instead.'
-    : 'To change the model you must call propose_model_change, show the user exactly what you propose, and call authorise_change ONLY after they have explicitly approved it.';
+    : 'To change the model you must first call a proposing tool \u2014 propose_model_change for a link, propose_assumptions to give value-less factors a starting number, propose_option_interventions to record the level an option sets \u2014 show the user exactly what it returned, and call authorise_change with that proposal_id ONLY after they have explicitly approved it.';
 
 const AGENT_INSTRUCTIONS = [
   'You are Olumi, a strategic reasoning layer. Improve human strategic judgement rather than deciding for the user.',
@@ -69,8 +69,24 @@ const AGENT_INSTRUCTIONS = [
   'Distinguish user facts and evidence from machine-authored estimates and from unknowns. An absent value is unknown, never zero.',
   MUTATION_INSTRUCTION,
   'Never claim a change happened unless the tool result says it was applied. If a tool reports a refusal, tell the user what it said.',
+  /*
+   * ⛔ THE WORST FAILURE IN THIS LOOP, measured on the deployed build: the user
+   * said "Yes, apply it" and the turn called NO tools, replying that the change
+   * "has been proposed but not approved or applied". The user believes the
+   * model changed; it did not.
+   */
+  'When the user approves, agrees, or says yes, that is an instruction to call authorise_change. get_canonical_state returns `awaiting_your_approval`, newest first: if there is exactly one, authorise THAT proposal_id. If there is more than one, name them and ask which \u2014 in the same turn. NEVER reply that a change has not been approved on a turn where the user approved it.',
   'If get_canonical_state reports the model is empty, call build_model_from_brief with the user\u2019s own words before answering about the model.',
   'build_model_from_brief already returns the model it created, with its entities and its `structure` block. Do NOT call get_canonical_state again afterwards \u2014 answer from what it returned.',
+  /*
+   * ⛔ DO NOT RUN THE ANALYSIS ON THE TURN THAT BUILDS THE MODEL. Measured on
+   * a real session: 99.9 s for a first turn that built AND analysed, against a
+   * construction cost of 38-110 s on its own. The analysis on a just-built
+   * model is ALWAYS blocked — nothing has values yet — so the user waits
+   * ~20 extra seconds to be told what the build already knows. Report the gaps
+   * from the build's own `structure` block and let them ask.
+   */
+  'After build_model_from_brief, do NOT call run_analysis on the same turn. A newly built model has no values yet, so the analysis can only report what the build already told you \u2014 and it costs the user another twenty seconds. Describe the model and what it still needs, then stop.',
   'Discussion, ideation and research are not mutation requests.',
   'get_canonical_state returns a `structure` block computed from the persisted model: which options reach the goal, which cannot, what is unconnected, and how many FACTORS have no value (only factors can hold one). These are facts, not estimates \u2014 use them, and say them plainly when they explain why an analysis cannot run.',
   'When a tool tells you something was not represented, say so.',
@@ -90,6 +106,30 @@ const AGENT_INSTRUCTIONS = [
    */
   'When the model lacks values, do not send the user away to collect data before they can proceed. Offer a reasoned starting estimate they could adopt, say what it is based on, and invite them to correct it \u2014 a decision model tests assumptions, it does not require certainty up front.',
   'Say plainly that any such figure is an assumption to test, never a measurement. NEVER record one yourself: the user chooses it, or it does not enter the model.',
+  /*
+   * ⭐ THE OFFER HAS TO BE ACTIONABLE, OR IT IS THE SAME DEAD END.
+   * Measured 22 Sep: the Agent offered good starting assumptions in prose, the
+   * user said "these look like a good set of assumptions, can you update the
+   * model with them?", and the turn ended `mutated: false` having called only
+   * get_canonical_state. The offer was honest and the model stayed empty.
+   */
+  'When you offer starting estimates, offer them THROUGH propose_assumptions so the user can adopt the exact set you showed them in one step. If the user asks you to put your suggested assumptions into the model, that is a request to propose them \u2014 call propose_assumptions with the figures you just gave, then authorise_change once they confirm.',
+  'propose_assumptions changes nothing on its own and leaves any factor that already holds a value alone. After authorise_change, report every value the model stored differently from the one approved.',
+  /*
+   * ⭐ THE LAST STRUCTURAL WALL ON THE JOURNEY, measured at served 59c90069:
+   * scale resolved, every factor valued, and the analysis STILL refused —
+   * two options named a factor without saying what level they set it to.
+   */
+  'An option that connects to a factor but states no level for it blocks the comparison for EVERY option, not only itself. run_analysis names each one. Offer a level in the user\u2019s own units with propose_option_interventions, exactly as you would a starting assumption, and say it is an assumption to correct.',
+  'Give propose_option_interventions the number the USER would say (54, not 0.27). If it answers `no_stated_range`, that factor has no range to read the number against \u2014 say so plainly and do not invent one.',
+  /*
+   * ⭐ THE BLOCKER THAT SURVIVES EVERY VALUE BEING FILLED IN.
+   * Measured live at served 877ae800: eight assumptions adopted, ZERO factors
+   * left without a value — and the analysis still refused, because one option
+   * of three carried `interventions: null`. An option that sets nothing cannot
+   * be compared with one that does.
+   */
+  'get_canonical_state also reports `options_that_change_nothing`. An option in that list sets no factor, so it cannot be compared and it blocks the whole analysis. Raise it when you describe the model \u2014 do not wait for the analysis to refuse \u2014 ask what that option would actually change, and record the answer with propose_option_interventions.',
   'British English. Concise but substantive.',
 ].join(' ');
 
@@ -315,7 +355,20 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const dispatch = dispatchFor(
       typeof req.headers.authorization === 'string' ? req.headers.authorization : undefined,
     );
-    const capabilities = createAgentCapabilities(dispatch, proposals, callStructured, mode);
+    /**
+     * ⛔ THE UI RENDERS THE ANALYSIS FROM `blocks` AND `analysis_ready`, NOT
+     * FROM THE PROSE. Measured on the real browser transport at `2fd8cbba`:
+     * the analysis turn returned 200 with a correct verdict in
+     * `assistant_text` and `blocks=none`, `analysis_ready.options=0`. A user
+     * reading the page got the sentence and an EMPTY results panel — the
+     * numbers existed and never reached the surface that shows them. This is
+     * the same defect shape as the `draft_graph` one: the answer was right and
+     * the carrier was missing.
+     */
+    let analysisFromTool: { analysis_ready?: unknown; blocks?: unknown[] } | undefined;
+    const capabilities = createAgentCapabilities(dispatch, proposals, callStructured, mode, (payload) => {
+      analysisFromTool = payload;
+    });
     const history = histories.get(sessionId);
     const budget = budgetFor('gpt-5.6-terra', 'conversation');
 
@@ -400,19 +453,64 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         analysisReady = after.json.analysis_ready;
         // Only when it actually has content: an empty graph must not overwrite
         // whatever the client already has hydrated.
-        const g = after.json.graph as { nodes?: unknown[] } | undefined;
-        if (g !== undefined && Array.isArray(g.nodes) && g.nodes.length > 0) draftGraph = g;
+        /**
+         * ⛔ `draft_graph` IS NOT THE GRAPH — it is a summary that CARRIES the
+         * graph, and `OlumiResponseSchema` requires ALL FOUR of `node_count`,
+         * `edge_count`, `nodes`, `edges`. I first sent `{nodes, edges}` alone.
+         * The envelope then failed validation, the UI discarded the WHOLE
+         * response, and the user was told "the server did not reply in time"
+         * after waiting 93 seconds for an answer that had in fact arrived,
+         * complete, with HTTP 200. A shape error here does not degrade the
+         * turn; it deletes it.
+         */
+        const g = after.json.graph as { nodes?: unknown[]; edges?: unknown[] } | undefined;
+        if (g !== undefined && Array.isArray(g.nodes) && g.nodes.length > 0) {
+          const nodes = g.nodes;
+          const edges = Array.isArray(g.edges) ? g.edges : [];
+          draftGraph = { node_count: nodes.length, edge_count: edges.length, nodes, edges };
+        }
       }
     } catch {
       // A readback failure must not lose the user's answer. The turn still
       // returns; the client simply does not learn the new revision this time.
     }
 
+    // The analysis the tool actually ran wins over the graph readback, which
+    // carries only the persisted state and never the run's own options.
+    const analysisBlocks = Array.isArray(analysisFromTool?.blocks) ? analysisFromTool.blocks : [];
+    const existingBlocks = Array.isArray((finalised as { blocks?: unknown[] }).blocks)
+      ? (finalised as { blocks: unknown[] }).blocks
+      : [];
+
     return reply.code(200).send({
       ...finalised,
+      ...(analysisBlocks.length > 0 ? { blocks: [...existingBlocks, ...analysisBlocks] } : {}),
       ...(graphHash !== undefined ? { graph_hash: graphHash } : {}),
-      ...(analysisReady !== undefined ? { analysis_ready: analysisReady } : {}),
+      ...(analysisFromTool?.analysis_ready !== undefined
+        ? { analysis_ready: analysisFromTool.analysis_ready }
+        : analysisReady !== undefined ? { analysis_ready: analysisReady } : {}),
       ...(draftGraph !== undefined ? { draft_graph: draftGraph } : {}),
+      /**
+       * ⭐ SAY WHICH PATH SERVED THIS TURN.
+       *
+       * ⛔ MEASURED: the estate's `Live user journey against deployed staging`
+       * gate fails with "turn 1: `_diagnostic_trace.exit_path` missing — cannot
+       * tell which path served this turn". With `PROXY_V5_TARGET=agent` every
+       * browser turn comes through here, and the orchestrator's trace never
+       * runs, so nothing downstream could name the producer. An observer that
+       * cannot identify the producer cannot attribute a defect to it.
+       *
+       * Underscore-prefixed because `OlumiResponseSchema` is `.strict()`: a
+       * sidecar is the established way past it, which is why `_agent` already
+       * travels this way.
+       */
+      _diagnostic_trace: {
+        exit_path: 'agent_lane_v1',
+        agent_mode: mode,
+        hops: result.hops,
+        stopped_reason: result.stopped_reason,
+        tools_called: result.tool_calls.map((c) => c.name),
+      },
       _agent: {
         session_id: sessionId,
         mode,

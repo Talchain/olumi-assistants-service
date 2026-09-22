@@ -70,7 +70,9 @@ export function buildCandidateSchema(): Record<string, unknown> {
       label: { type: 'string' }, role: { type: 'string', enum: ['controllable', 'observable', 'external'] },
       baseline_known: { type: 'boolean' }, baseline_value: { anyOf: [{ type: 'number' }, { type: 'null' }] },
       unit: { anyOf: [{ type: 'string' }, { type: 'null' }] }, provenance,
-    }, ['label', 'role', 'baseline_known', 'baseline_value', 'unit', 'provenance']) },
+      plausible_max: { type: 'number',
+        description: 'REQUIRED, and NEVER null. The top of the range this factor could plausibly take, in its own unit \u2014 the SCALE it is read against, not a prediction. A percentage or a score out of 100: 100. A count, an amount or a price: a round number comfortably above anything realistic (a \u00a349 price might use 200; 300 subscribers might use 2000). Something ALREADY between 0 and 1: exactly 1. Every factor gets one, with or without a baseline today \u2014 a value adopted later is read against this same range.' },
+    }, ['label', 'role', 'baseline_known', 'baseline_value', 'unit', 'provenance', 'plausible_max']) },
     risks: { type: 'array', items: obj({ label: { type: 'string' }, provenance }, ['label', 'provenance']) },
     outcomes: { type: 'array', items: obj({ label: { type: 'string' }, provenance }, ['label', 'provenance']) },
     links: { type: 'array', items: obj({
@@ -85,9 +87,13 @@ export const BUILD_INSTRUCTIONS = [
   'Produce a complete causal decision model from the brief in ONE pass.',
   'Preserve exact user facts, numbers, constraint semantics and time horizon. Do not invent numeric baselines or behavioural effects.',
   'For each option fill `interventions` with the factor levels it sets \u2014 record a level the brief states with provenance "explicit", and never guess one it does not give.',
-  'EVERY option must also list, in `changes`, the factors it acts on WITHOUT a stated level. An option that names no interventions and no changes is disconnected from the decision and cannot be analysed at all, so this is not optional bookkeeping.',
+  'EVERY OPTION MUST SAY WHAT IT DOES. An option with no `interventions` AND no `changes` is inert: it can never be compared with another option, whatever values are supplied later, and the whole decision becomes unanswerable. If the brief does not say what an option changes, still name the factors it ACTS ON in `changes` \u2014 that is a structural claim, not a numeric one. '
+  + 'EVERY option must also list, in `changes`, the factors it acts on WITHOUT a stated level. An option that names no interventions and no changes is disconnected from the decision and cannot be analysed at all, so this is not optional bookkeeping.',
   'Then widen: add the options, factors, risks, outcomes and causal mechanisms that materially improve strategic reasoning, including alternatives beyond the user’s initial frame.',
   'Mark provenance honestly on EVERY item: "explicit" only for what the user stated, "inferred" for what you read out of the brief, "ai_proposed" for anything you added beyond it.',
+  'THE GOAL METRIC MUST BE THE TERMINAL NODE. Every option needs a causal path that ends at the goal metric you named in `goal.metric`. Use that EXACT label as the endpoint of the final link \u2014 do not invent a near-synonym outcome like "X Improvement" for a goal called "X change", because a separate synonym leaves the goal disconnected and the model cannot be analysed at all.',
+  'EVERY RISK AND EVERY FACTOR MUST BE WIRED IN. A node with no link, or with links that dead-end before the goal, is not merely decorative \u2014 it stops the ENTIRE model being analysed. Give every risk a link to what it threatens, and every factor a chain of links that ends at the goal metric. Measured on a real model: 8 of 20 nodes were unreachable, all five risks among them, and the analysis refused outright.',
+  'GIVE EVERY FACTOR A `plausible_max`. IT IS REQUIRED AND NEVER NULL, for every factor, whether or not it has a baseline today. A number above 1 with no range beside it CANNOT BE ANALYSED \u2014 the engine has nothing to read it against, Olumi refuses the WHOLE analysis rather than guess, and NO LATER EDIT CAN SUPPLY THE RANGE: the only remedy is rebuilding the model. The range is a SCALE, not a forecast: 100 for a percentage or a score out of 100, exactly 1 for something already between 0 and 1, and a round number comfortably above anything realistic for a count, an amount or a price. Measured twice on real models.',
   'Where a causal direction is genuinely unknown, say "unknown" rather than guessing a sign.',
   'Labels are NAMES, not sentences.',
   'Output only the schema.',
@@ -127,7 +133,28 @@ export async function buildModelFromBrief(
   }
 
   const admitted = admitCandidateModel(candidate, {});
-  const graph = { nodes: admitted.nodes, edges: admitted.edges };
+  /**
+   * ⭐ THE USER'S STATED LIMITS TRAVEL WITH THE GRAPH.
+   *
+   * ⛔ I PREVIOUSLY RECORDED — AND PUBLISHED — THAT THEY HAD NO CARRIER, on the
+   * grounds that `/graph/register` accepts only `graph` and `brief_text`. That
+   * was wrong, and wrong in the expensive direction: it wrote off a capability
+   * the product already had. `GraphV3` declares `goal_constraints`, and a live
+   * probe against deployed staging confirmed they survive registration and read
+   * back intact. The reasoning error was inferring a limit from the ROUTE's
+   * body fields without checking what the GRAPH itself may carry.
+   *
+   * So a brief that says "no more than £100,000" or "under 4% churn" now
+   * produces an enforceable constraint rather than a sentence the model merely
+   * mentioned.
+   */
+  const graph = {
+    nodes: admitted.nodes,
+    edges: admitted.edges,
+    ...(admitted.goal_constraints.length > 0
+      ? { goal_constraints: admitted.goal_constraints }
+      : {}),
+  };
 
   // Never persist a graph the product cannot then read.
   const parsed = GraphV3.safeParse(graph);
@@ -152,18 +179,19 @@ export async function buildModelFromBrief(
     // What the projection could not carry — the Agent is expected to say this.
     withheld: admitted.withheld.map((w) => ({ from: w.from, to: w.to, reason: w.reason })),
     projected_field_count: admitted.loss.length,
-    // ⚠ REPRESENTATION LOSS AT THIS BOUNDARY, recorded rather than hidden.
-    // `/graph/register` accepts `graph` and `brief_text` only. The admitted
-    // goal constraints have no carrier on this route, so a constraint the user
-    // stated is NOT enforced by the model this call persists.
-    goal_constraints_not_carried: admitted.goal_constraints.length,
+    // Options that say what they DO, versus options that are inert. An inert
+    // option can never be compared, whatever values arrive later.
+    options_that_change_nothing: admitted.withheld
+      .filter((w) => w.reason === 'option_changes_nothing')
+      .map((w) => w.from),
+    // Carried WITH the graph (GraphV3 declares `goal_constraints`), verified
+    // surviving registration on deployed staging.
+    goal_constraints_carried: admitted.goal_constraints.length,
     not_represented: [
       admitted.withheld.length > 0
         ? `${admitted.withheld.length} relationship(s) were left out because nobody has stated which way they run.`
         : undefined,
-      admitted.goal_constraints.length > 0
-        ? `${admitted.goal_constraints.length} stated constraint(s) are not carried by this write and are not being enforced yet.`
-        : undefined,
+      undefined,
     ].filter((s): s is string => s !== undefined),
   };
 }
