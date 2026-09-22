@@ -87,6 +87,18 @@ describe('what the user is shown', () => {
     expect(b).not.toHaveProperty('dsk_provenance');
   });
 
+  it('is an assumption_check, NOT a calibration_prompt owned by another flow', () => {
+    const b = offer.blocks[0] as Record<string, unknown>;
+    // `calibration_prompt` belongs to handlers/draft-calibration-blocks.ts (the
+    // "set X to pretty likely" flow). Borrowing it would make this offer
+    // indistinguishable from that one in dedupe and telemetry.
+    expect(b['coaching_kind']).toBe('assumption_check');
+    expect(b['coaching_kind']).not.toBe('calibration_prompt');
+    // And it is a deterministic gate's output, not a draft's or a review's.
+    expect(b['source']).toBe('deterministic_signal');
+    expect(b['source_handler']).toBe('outside_view_offer');
+  });
+
   it('binds no target_ref — the offer is about the decision, not one element', () => {
     expect((offer.blocks[0] as Record<string, unknown>)['target_refs']).toEqual([]);
   });
