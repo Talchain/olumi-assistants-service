@@ -303,8 +303,74 @@ export async function currentModelRevision(
   scenarioId: string,
   deps: { readonly store?: ApplyOperationsStore } = {},
 ): Promise<string | null> {
+  return (await currentModelSnapshot(scenarioId, deps)).revision;
+}
+
+/** One persisted read, and everything a turn derives from the stored model. */
+export interface ModelSnapshot {
+  /**
+   * The stored graph as `store.loadGraph` returned it.
+   *
+   * Typed at the shape its two consumers require rather than left `unknown`,
+   * so the cast the store boundary needs happens ONCE, here, instead of at
+   * every call site. {@link modelRevisionOf} already casts identically before
+   * hashing, so this widens no assumption that was not already being made.
+   */
+  readonly graph: GraphStateIngress | null;
+  /**
+   * `modelRevisionOf(graph)`. Identical BY CONSTRUCTION to the
+   * analysis-affecting hash a caller would compute from `graph`, because
+   * {@link modelRevisionOf} *is* `computeAnalysisAffectingGraphHash`.
+   */
+  readonly revision: string | null;
+}
+
+/**
+ * ⭐⭐ ONE PERSISTED READ PER TURN — the snapshot a turn binds EVERYTHING to.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * WHY THIS EXISTS (Codex, CEE #1660, exact-head CHANGES_REQUIRED)
+ *
+ * {@link currentModelRevision} correctly refuses to take a graph, so the
+ * proposal token is store-derived. But a turn ALSO needs analysis freshness and
+ * option identity, and the route derived those from `extensions.graphState` —
+ * the INGRESS graph. Two sources, one turn:
+ *
+ *   proposal revision   <- store.loadGraph      (canonical)
+ *   analysis freshness  <- extensions.graphState (the request)
+ *   option identity     <- extensions.graphState (the request)
+ *
+ * The store holds a PROJECTION of the ingress graph and the persist passes
+ * mutate exactly the fields the hash covers — measured on verbatim bytes,
+ * ingress `c373cbdfb844909d` -> persisted `4dadc7e6510ec272`. So a CURRENT
+ * stored analysis could be presented to the model and to the wire as stale or
+ * indeterminate while the proposal token was correctly bound to the store.
+ * That is the false-currency class the wiring claims to close, recreated one
+ * step later, and it can make `read_results` give the user the wrong account
+ * of a perfectly valid analysis.
+ *
+ * ⚠ AND EVEN TWO *STORE* READS ARE NOT ENOUGH. Reading the store twice in one
+ * turn is still two snapshots: the controller writes WITHIN a turn
+ * (`second_write_this_turn` exists precisely because it can), so a write
+ * landing between them makes freshness and the minted revision describe
+ * different graph versions while both look canonical. One read, one object.
+ *
+ * ⭐ The invariant is then STRUCTURAL rather than documented: `revision` and
+ * any analysis-affecting hash a caller computes from `graph` are the same
+ * function applied to the same bytes, so they cannot disagree.
+ *
+ * A FAILED read propagates as a throw, for the reason given on
+ * {@link currentModelRevision}: "we could not look" must not arrive as
+ * "there is no model".
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
+export async function currentModelSnapshot(
+  scenarioId: string,
+  deps: { readonly store?: ApplyOperationsStore } = {},
+): Promise<ModelSnapshot> {
   const store = deps.store ?? getSessionStore();
-  return modelRevisionOf(await store.loadGraph(scenarioId));
+  const graph = (await store.loadGraph(scenarioId)) as GraphStateIngress | null;
+  return { graph, revision: modelRevisionOf(graph) };
 }
 
 /**

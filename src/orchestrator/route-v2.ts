@@ -132,6 +132,23 @@ import type { CanonicalContextFrame } from '../orchestrator-v5/context/frame/ind
 import { computeResponseHash } from '../utils/response-hash.js';
 import { validateEgress } from '../validators/b1.js';
 import { runTurnExecutor } from '../orchestrator-v5/turn-executor.js';
+import { handleReplacementTurn } from '../orchestrator-v5/replacement/turn-entry.js';
+import { shapeRunResult } from '../orchestrator-v5/replacement/to-run-result.js';
+// ⚠ The ADAPTER and the MINTER, not the writer beneath them. The
+// consent-coverage guard pins that writer's production consumers at exactly
+// one and its detector is a whole-file source-spelling scan including
+// comments — so this file must not name it. Both default the session store
+// internally, so no store import is needed and rule 3 is untouched.
+import {
+  createApplyOperations,
+  currentModelSnapshot,
+} from '../orchestrator-v5/apply-operations.js';
+import { projectTurnContext } from '../orchestrator-v5/replacement/turn-context-view.js';
+import {
+  ReplacementNotConfiguredError,
+  anthropicChatWithTools,
+  getReplacementStateStore,
+} from '../orchestrator-v5/replacement/wiring.js';
 import {
   dispatchSystemEvent,
   type DispatchSystemEventResult,
@@ -994,6 +1011,17 @@ async function sendFinalised200(
      *     `readMayNameLeadingOptionVerdict`.
      * Never re-derived here (CLAUDE.md trap #12).
      */
+    /**
+     * The caller has already removed identifiers from `assistant_text` by
+     * IDENTITY against this turn's graph, so the pattern scrub must not run
+     * over it again.
+     *
+     * Set by the replacement controller only. Absent everywhere else, so the
+     * retired path is byte-identical. See `EgressSanitiseOpts` for the
+     * measurement that made it necessary: the pattern arm rewrites ordinary
+     * English, and it is unconditional.
+     */
+    readonly assistantTextAlreadyIdentifierSafe?: boolean;
     readonly mayNameLeadingOption: boolean;
     /**
      * WHERE the permission above came from (2026-07-27).
@@ -1283,15 +1311,18 @@ async function sendFinalised200(
     exitPath,
     userMessage: ctx.userMessage,
     mayNameLeadingOption: ctx.mayNameLeadingOption,
+    ...(ctx.assistantTextAlreadyIdentifierSafe === true ? { assistantTextAlreadyIdentifierSafe: true } : {}),
   });
   const egress = validateEgress(candidateSanitised, requestId);
   let wireBody = egress.ok
     ? finaliseV5Response(
-        sanitiseOlumiResponseForEgress(egress.value, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
+        sanitiseOlumiResponseForEgress(egress.value, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption,
+    ...(ctx.assistantTextAlreadyIdentifierSafe === true ? { assistantTextAlreadyIdentifierSafe: true } : {}) }),
         finaliserContext,
       )
     : finaliseV5Response(
-        sanitiseOlumiResponseForEgress(egress.fallback, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
+        sanitiseOlumiResponseForEgress(egress.fallback, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption,
+    ...(ctx.assistantTextAlreadyIdentifierSafe === true ? { assistantTextAlreadyIdentifierSafe: true } : {}) }),
         finaliserContext,
       );
   if (!egress.ok) {
@@ -1364,7 +1395,8 @@ async function sendFinalised200(
       _timings: timingsBlock,
     };
     wireBody = finaliseV5Response(
-      sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
+      sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption,
+    ...(ctx.assistantTextAlreadyIdentifierSafe === true ? { assistantTextAlreadyIdentifierSafe: true } : {}) }),
       finaliserContext,
     );
   }
@@ -1447,7 +1479,8 @@ async function sendFinalised200(
       _diagnostic_trace: stampedTrace,
     };
     wireBody = finaliseV5Response(
-      sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
+      sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption,
+    ...(ctx.assistantTextAlreadyIdentifierSafe === true ? { assistantTextAlreadyIdentifierSafe: true } : {}) }),
       finaliserContext,
     );
   }
@@ -1517,7 +1550,8 @@ async function sendFinalised200(
         _context_summary: contextSummary,
       };
       wireBody = finaliseV5Response(
-        sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
+        sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption,
+    ...(ctx.assistantTextAlreadyIdentifierSafe === true ? { assistantTextAlreadyIdentifierSafe: true } : {}) }),
         finaliserContext,
       );
     }
@@ -1543,7 +1577,8 @@ async function sendFinalised200(
       _reasoning: ctx.reasoning,
     };
     wireBody = finaliseV5Response(
-      sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
+      sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption,
+    ...(ctx.assistantTextAlreadyIdentifierSafe === true ? { assistantTextAlreadyIdentifierSafe: true } : {}) }),
       finaliserContext,
     );
   }
@@ -1618,7 +1653,8 @@ async function sendFinalised200(
       _answer_shape: ctx.answerShape,
     };
     const withShape = finaliseV5Response(
-      sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
+      sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption,
+    ...(ctx.assistantTextAlreadyIdentifierSafe === true ? { assistantTextAlreadyIdentifierSafe: true } : {}) }),
       finaliserContext,
     );
     const derivedText = shapeDerivedText;
@@ -1725,7 +1761,8 @@ async function sendFinalised200(
         _answer_shape: synth,
       };
       const withSynth = finaliseV5Response(
-        sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
+        sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption,
+    ...(ctx.assistantTextAlreadyIdentifierSafe === true ? { assistantTextAlreadyIdentifierSafe: true } : {}) }),
         finaliserContext,
       );
       const synthFinalText =
@@ -1817,6 +1854,7 @@ async function sendFinalised200(
     requestId,
     exitPath,
     mayNameLeadingOption: ctx.mayNameLeadingOption,
+    ...(ctx.assistantTextAlreadyIdentifierSafe === true ? { assistantTextAlreadyIdentifierSafe: true } : {}),
     // Read ONLY for the option ROSTER — "which options exist", never "which one
     // leads". The gate enters only when the prose NAMES one of this scenario's
     // own options, which is what spares "sales leads improved" and every other
@@ -2071,6 +2109,7 @@ async function sendFinalised200(
     requestId,
     exitPath,
     mayNameLeadingOption: ctx.mayNameLeadingOption,
+    ...(ctx.assistantTextAlreadyIdentifierSafe === true ? { assistantTextAlreadyIdentifierSafe: true } : {}),
     // Threaded so the ALARM's scope matches the ENFORCER's exactly. The enforcer
     // above conjoins `analysis_admission.permitted_analysis_mode`; an alarm that
     // did not would short-circuit on the entitlement alone and report nothing on
@@ -2935,8 +2974,11 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
 
     // ═══════════════════════════════════════════════════════════════════════
     // ⭐ T1 CLAIM SAFETY — THE TURN-ENTRY READ (ROADMAP 1.233 finish-line
-    // criterion 2 / 1.349 P1-2). Constructed HERE, before the first dispatch
-    // branch, so EVERY exit below can inherit ONE answer.
+    // criterion 2 / 1.349 P1-2). Constructed at the top of the handler, before
+    // the FIRST dispatch branch — which since the replacement controller
+    // landed means above it, not here — so EVERY exit below can inherit ONE
+    // answer, and so the replacement branch can share the same memoised
+    // context read instead of opening a second one.
     //
     // Until this landed, seventeen exits handed the finaliser a hardcoded
     // permission of `true` on the premise that "this path runs no
@@ -2962,6 +3004,388 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       ingress.kind === 'message' ? ingress : null,
       requestId,
     );
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // ⭐ REPLACEMENT CONVERSATION CONTROLLER — ONE CONTROLLER PER TURN
+    //
+    // Placed HERE, immediately after the turn fence is claimed and before the
+    // first dispatch branch, because this is the earliest point at which the
+    // payload is validated, `extensions` is available, and no LLM call and no
+    // mutation has happened. Branching above the fence would mean running
+    // without an admitted handle, so a concurrent turn could supersede this
+    // one silently.
+    //
+    // WHAT IT DELIBERATELY DOES NOT TAKE. Turns with no graph yet fall
+    // through to the retired path, which owns drafting. Swallowing those
+    // would take the whole draft-graph pipeline offline behind a coaching
+    // flag — a different team's capability, retired by accident.
+    //
+    // NO FALLBACK. If this controller throws, the turn fails AS this
+    // controller. It does not fall through to the retired routing. A fallback
+    // that runs after a save may already have been sent is how you build
+    // "updated, then denied" out of the migration itself.
+    // ═══════════════════════════════════════════════════════════════════════
+    // ⛔ COMPOSER TURNS ONLY. `kind: 'message'` INCLUDES CHIP CLICKS — `source`
+    // is a property of that variant and its members are 'composer' and 'chip'
+    // (plus the legacy 'chip_click' the retired path still matches at :3479,
+    // BELOW this branch). Without this narrowing the layer swallowed every
+    // typed chip, including the only affordance that actually runs an
+    // analysis — and it can neither run one nor save anything. A manual test
+    // on 20 Sep drove chips constantly ("Set effect on…", "Link X to Y",
+    // "Run a pre-mortem"), so this was not a corner case.
+    // Caught by the adversarial review, not by any test here.
+    const isComposerTurn =
+      ingress.kind === 'message' &&
+      (ingress.source === undefined || ingress.source === 'composer');
+    if (config.features.replacementCoachEnabled && isComposerTurn) {
+      const graphNow = extensions.graphState;
+      const hasModel =
+        graphNow != null && Array.isArray(graphNow.nodes) && graphNow.nodes.length > 0;
+
+      // ⛔ ANALYSE-STAGE TURNS ARE DECLINED, and the reason is a measured
+      // user-visible defect rather than caution.
+      //
+      // Derived from the DEPLOYED UI build fd992149 (confirmed against its
+      // own version.json): a response carrying `stage_indicator: "analyse"`
+      // with no `analysis_ready` payload CLEARS `ceeAnalysisReady`
+      // (applyV5State.ts:2020-2029, responseIsAnalyseShaped at :2474). The
+      // message bubble is unaffected, but the user's readiness and results
+      // surface blanks. Answering a question well and wiping their results
+      // while doing it is not a trade worth making.
+      //
+      // ⭐⭐ RESOLVED — THE DECLINE IS NOW CONDITIONAL ON THE ONLY THING IT WAS
+      // EVER ABOUT: whether this exit can carry the readiness payload.
+      //
+      // The paragraph above said carrying it through "would be the better fix
+      // and is the THIRD increment's work", because `extensions.analysisState`
+      // is an `AnalysisStateIngress`, NOT an `AnalysisReadyPayload`, and the
+      // two objects called "readiness" in this estate type-check for each
+      // other while one is empty at runtime. That hazard is real and is NOT
+      // taken on here: the payload comes from
+      // `buildCanonicalAnalysisReadyFromGraph`, the estate's single spelling
+      // of the FULL payload, derived from the graph — `analysisState` is never
+      // consulted, so there is nothing to guess between.
+      //
+      // Re-derived at the DEPLOYED UI `fd992149`, not inherited: the clearing
+      // branch is `} else if (responseIsAnalyseShaped(response)) {`
+      // (applyV5State.ts:2020), and an `else if` is reached ONLY when the
+      // response carried no `analysis_ready` key at all. Carry the key and the
+      // slice is never cleared. So the decline's premise was correct and is
+      // now answerable rather than permanent.
+      //
+      // ⚠ CONDITIONAL, NOT REMOVED, AND THAT IS THE WHOLE CARE. The builder
+      // returns `undefined` for a graph it cannot assess. Shipping an
+      // analyse-stage turn WITHOUT the payload is exactly the measured defect
+      // — the user's readiness and results surface blanks — so that case still
+      // declines and still gets the retired path. The condition admits
+      // precisely the turns this exit can serve without wiping anything.
+      const isAnalyseStage = ingress.stage === 'analyse';
+      const analysisReadyForExit =
+        extensions.graphState != null
+          ? buildCanonicalAnalysisReadyFromGraph(extensions.graphState)
+          : undefined;
+
+      // ⛔⛔ THE CONSENT TOKEN IS MINTED FROM THE STORE, NEVER FROM THE REQUEST.
+      //
+      // This corrects a design I had already written and banked. I fed
+      // `modelRevision` from `computeAnalysisAffectingGraphHash(
+      // extensions.graphState)` — the INGRESS graph — and argued that if it
+      // disagreed with the store's, the refusal would "arrive as data".
+      //
+      // It would have arrived on EVERY turn. The store holds a PROJECTION of
+      // the ingress graph, and the three persist passes (`commit.ts:1124-1136`)
+      // mutate exactly the fields this hash covers. Measured by the data layer
+      // on verbatim bytes: ingress `c373cbdfb844909d` → persisted
+      // `4dadc7e6510ec272`, DIFFERENT, controls discriminating. The same
+      // two-source mismatch has already shipped once as a false
+      // `GRAPH_DIVERGED` (`response-finaliser.ts:436-445`).
+      //
+      // ⭐ Making a failure observable is a virtue only when the failure is
+      // RARE. A 100% refusal rate wearing "the model has changed since that was
+      // agreed" does not need an instrument; it needs not to ship.
+      //
+      // `currentModelRevision` takes NO graph parameter, and that is the only
+      // enforcement available — the tokens are opaque strings, so nothing
+      // downstream could tell a store-derived hash from an ingress-derived one.
+      //
+      // ⚠ A FAILED READ THROWS AND IS LET THROUGH. `null` means "no
+      // analysis-affecting model"; a transport failure means "we could not
+      // look". Collapsing the second into the first reports "no model" for a
+      // model that exists.
+      // ⭐ ONE PERSISTED READ, and everything this turn binds to it.
+      //
+      // Codex (#1660, exact-head CHANGES_REQUIRED): the token was correctly
+      // store-derived while freshness and option identity were derived from
+      // `extensions.graphState` — the INGRESS graph — one step later. Two
+      // sources in one turn, and the store's projection provably differs from
+      // ingress on exactly the fields the hash covers. A CURRENT analysis could
+      // therefore reach the model and the wire marked stale.
+      //
+      // Reading the store twice would not fix it either: the controller writes
+      // WITHIN a turn, so a write between two reads yields two canonical-looking
+      // snapshots of different graphs. `currentModelSnapshot` is the single read.
+      const modelSnapshot = hasModel
+        ? await currentModelSnapshot(ingress.scenario_id)
+        : null;
+      const mintedModelRevision = modelSnapshot?.revision ?? null;
+
+      // ⚠ A NULL MINT DECLINES THE TURN rather than inventing a token. The
+      // previous shape ended `?? 'graph-unhashable'`, manufacturing a base for
+      // a model that does not exist. `hasModel` is a fact about the REQUEST;
+      // this is the fact about the STORE, and a proposal can only bind to the
+      // second. Not the banned fallback-after-failure: a precondition never
+      // met, exactly as `hasModel` already is.
+      if (
+        hasModel &&
+        mintedModelRevision !== null &&
+        (!isAnalyseStage || analysisReadyForExit !== undefined)
+      ) {
+        // Fail loud, not half-working. Without a durable store a user's
+        // agreement can land on an instance that never saw the offer.
+        const replacementStore = getReplacementStateStore();
+        if (replacementStore === null) throw new ReplacementNotConfiguredError();
+
+        const startedAt = Date.now();
+
+        // ═══════════════════════════════════════════════════════════════════
+        // ⭐⭐ ONE CONTEXT READ, FOUR CONSUMERS — and it replaces two literals
+        // that were telling users a measurable falsehood.
+        //
+        // `getAnalysis: () => null` and `history: []` were hardcoded here. The
+        // first is the worse of the two and it was not merely a gap: a null
+        // snapshot makes `read_results` return "NO ANALYSIS HAS BEEN RUN on
+        // this model … not withheld, simply never computed. Say so plainly" —
+        // an INSTRUCTION TO ASSERT IT — on a scenario whose analysis finished
+        // minutes earlier, while `run_analysis` offered to spend real compute
+        // re-running the answer the product already held. Reachable with
+        // nothing but the flag on, and reachable EXACTLY when an analysis is
+        // fresh (CEE promotes the wire stage to 'decide' only on a fresh run,
+        // and this branch declines the 'analyse' stage).
+        //
+        // `claimSafety.turnContext()` is the SAME memoised read that
+        // `forExit()` below uses for the claim permission, so this costs the
+        // turn one context read, not two, and there is exactly one answer in
+        // play about what this scenario holds.
+        //
+        // `projectTurnContext` maps it to four states and keeps "we could not
+        // look" apart from "nothing is there" — see its header for why that
+        // distinction is the whole point. It reads the SCENARIO-scoped fact
+        // carrier rather than the ~20-turn `prior_facts` window, because the
+        // window reproduces the same lie on any conversation long enough to
+        // age the analysis out of it.
+        // ═══════════════════════════════════════════════════════════════════
+        // ⛔ BOTH OF THESE COME FROM `modelSnapshot`, NOT FROM THE REQUEST.
+        //
+        // `currentGraphHash` is `modelSnapshot.revision` — not a second
+        // computation that happens to agree, but the SAME VALUE: the token is
+        // `modelRevisionOf(graph)` and `modelRevisionOf` IS
+        // `computeAnalysisAffectingGraphHash`. So "the analysis view and the
+        // proposal revision describe the same object" is now true because
+        // there is one object, rather than true because a comment says so —
+        // which is precisely what the reviewer found was not the case.
+        //
+        // The graph handed to `projectTurnContext` is the stored one for the
+        // same reason: it derives the analysis snapshot AND the option
+        // identities, and identities read off the request would key against a
+        // model the store does not hold.
+        const currentGraphHash = modelSnapshot?.revision ?? null;
+        const contextView = projectTurnContext(
+          await claimSafety.turnContext(),
+          currentGraphHash,
+          modelSnapshot?.graph ?? null,
+        );
+
+        const turn = await handleReplacementTurn(
+          {
+            scenarioId: ingress.scenario_id,
+            message: ingress.message,
+            // Reference, not memory. Anything load-bearing lives in the
+            // durable `ConversationMemory` via the `remember` tool, which no
+            // window cap can truncate — see `turn-context-view.ts`.
+            history: contextView.history,
+            getGraph: () => extensions.graphState,
+            getAnalysis: () => contextView.snapshot,
+            // ⛔ WAS `computeRequestHash(ingress)`, WHICH WAS A REAL BUG.
+            // That hash is MESSAGE-DEPENDENT, so every turn produced a
+            // different "model revision" and `markStaleForRevision` staled
+            // every open proposal on the very next turn. The core journey is
+            // "offer a change, the user agrees ON A LATER TURN" — this made
+            // that impossible by construction, and no offline test caught it
+            // because they all pass a fixed revision.
+            //
+            // Caught in review (Codex, 20 Sep). The revision must describe
+            // the GRAPH, which is the thing a proposal is actually bound to.
+            // Same canonical hash the egress stamps as `graph_hash` and the
+            // freshness envelope uses, so the two cannot disagree.
+            //
+            // Read from the SAME `currentGraphHash` the analysis view was
+            // derived against, so "is this analysis current?" and "is this
+            // proposal still valid?" are questions about one object.
+            // The STORE-minted token — see the block at the gate above for
+            // why this may never come from `extensions.graphState`.
+            modelRevision: mintedModelRevision,
+            // ⛔ `ingress.turn_id`, NOT `requestId`, AND THIS IS LOAD-BEARING
+            // ONCE A WRITE PATH IS INJECTED.
+            //
+            // `turnId` feeds `idFor`, which mints this layer's proposal ids and
+            // its idempotency keys. `requestId` comes from a request HEADER or
+            // a fresh uuid, so it changes on every HTTP attempt at the same
+            // logical turn — which would mint a NEW proposal id and a NEW
+            // idempotency key for a client retry of one turn.
+            //
+            // Core has since confirmed the conversational applier's contract
+            // (`append_turn_atomic_v3`/v4): idempotency is
+            // `ON CONFLICT (scenario_id, turn_id) DO NOTHING`, and on a replay
+            // it SKIPS CAS and returns the existing row id — the "returns the
+            // original receipt" half of this layer's precondition, satisfied
+            // directly, by the payload's turn id. Keying our own retry off
+            // anything else would sit beside that guarantee instead of on it.
+            //
+            // The commit metadata below already uses `ingress.turn_id`; this is
+            // the same identity, and the two must not disagree.
+            turnId: ingress.turn_id,
+            requestId,
+            now: new Date().toISOString(),
+          },
+          {
+            chatWithTools: anthropicChatWithTools(),
+            state: replacementStore,
+            // ⭐⭐⭐ THE THIRD PIECE. Supplier + consumer + INJECTION, and until
+            // now only two existed: the accept tool is built ONLY when this
+            // port is injected, so the layer could offer a change, hear "yes",
+            // and have nowhere to put the answer. Measured before writing it:
+            // `applyOperations` had ZERO occurrences in this file and zero on
+            // staging. Neither lane was at fault — the seam between them was
+            // never assigned.
+            applyOperations: createApplyOperations({
+              scenarioId: ingress.scenario_id,
+              requestId,
+              // Threaded into the change summary only; grants no authority.
+              hasExistingAnalysis: contextView.snapshot != null,
+            }),
+          },
+        );
+
+        // The turn is written to `v5_conversation_turns` like any other, so
+        // history, debug exports and every existing observability path keep
+        // working. Graph mutation is NOT done here — a save only ever happens
+        // through the injected write path, under the user's consent.
+        const shaped = shapeRunResult({
+          turn,
+          stage: ingress.stage,
+          commitPerformed: true,
+          wallClockMs: Date.now() - startedAt,
+        });
+
+        await commitDirectAnswer(shaped.response, {
+          scenario_id: ingress.scenario_id,
+          // ⛔ `ingress.turn_id`, NOT `requestId`. The idempotency key is
+          // (scenario_id, turn_id); requestId comes from a request HEADER or
+          // a fresh uuid and bears no relation to the payload, so using it
+          // broke the key and desynchronised the turn row from the fence row.
+          // Every one of the nine peer call sites uses `ingress.turn_id`.
+          turn_id: ingress.turn_id,
+          turn_class: 'direct_answer',
+          handler_id: null,
+          request_hash: computeRequestHash(ingress),
+          // Without this the row persists an assistant_message beside a NULL
+          // user_message, so the conversation reads back half-missing.
+          userMessage: ingress.message,
+          llm_calls_used: turn.iterations,
+          duration_ms: Date.now() - startedAt,
+          handler_facts: [],
+          // ⛔ `graph` DELIBERATELY OMITTED. Passing it makes
+          // `graphWasProvided(metadata.graph)` true (commit.ts:1086, 1160),
+          // which sets `writesGraph` and OVERWRITES `scenarios.graph` with
+          // the client's bytes — on a turn whose own comment says it performs
+          // no mutation. This controller never mutates the graph, so it has
+          // nothing to persist. It was the only exit in this file writing the
+          // canonical graph without the invariant baseline.
+        });
+
+        return await sendFinalised200(reply, requestId, 'replacement_controller', shaped.response, {
+          graph: (extensions.graphState ?? null) as GraphV3T | null,
+          userMessage: ingress.message,
+          // ⛔ WAS A HARDCODED PERMISSION — a literal `analysisExists` of false
+          // upstream, which made the claim permission a permanent negative. It
+          // armed `enforceLeadingOptionClaimsAtWire`'s withhold branch on EVERY
+          // replacement turn and published `withheld_reason:
+          // 'constraint_verdict_withheld'` — "we looked and declined" — for a
+          // turn that evaluated no constraint. Measured: 8 of 22 ordinary
+          // coaching sentences rewritten, one into a dangling anaphora.
+          //
+          // ⚠ AND NOTE HOW THIS COMMENT IS WORDED. Naming the permission field
+          // beside a literal — even in prose — enrols this call site in the
+          // guard's scanner and REDs it, because the scanner reads the whole
+          // argument span as text. Third instance of that class in this change
+          // alone (the magnitude alphabet and the consent manifest were the
+          // others). Describe the old value; do not spell it.
+          //
+          // This is the same canonical derivation twenty other exits inherit,
+          // memoised with the context read above, and it is what
+          // `route-egress-claim-safety-marking.drift.test.ts` asks for by name.
+          //
+          // ⚠ IT MAKES THIS EXIT WIPEABLE, AND THAT WAS CHOSEN RATHER THAN
+          // OVERLOOKED. The canonical read can return `fail_closed_unavailable`
+          // (scenario-scoped analysis read failed, window not truncated), which
+          // with `answerKind: 'substantive'` below replaces the whole reply
+          // with the analysis-authority notice. Previously unreachable here,
+          // because the permission was a constant. An exemption was considered
+          // and refused: see the pinned reasoning in
+          // `replacement/__tests__/egress-byte-identity.test.ts`.
+          ...(await claimSafety.forExit()),
+          // ⭐ THE FRESHNESS FOR THE GRAPH THIS EXIT IS SHIPPING.
+          //
+          // Not `exitFreshness` — that one arrives in the spread above and
+          // describes the PERSISTED graph, which the finaliser correctly
+          // ignores while a graph is in scope. Without this key
+          // `analysis_state.run_state` fell back to `unknown_degraded` /
+          // `no_graph_this_turn`, a cause whose contract text says "no graph
+          // was in scope", on a branch whose entry condition is that a graph
+          // EXISTS — beside a `graph_hash` computed from that same graph.
+          //
+          // Same derivation object the model's own `read_results` answered
+          // from, so the sentence the user reads and the envelope the UI reads
+          // cannot disagree about whether the analysis is current.
+          freshness: contextView.freshness,
+          // The readiness verdict the UI gates its Run affordance on. Every
+          // other graph-bearing exit carries one; without it this layer left
+          // the readiness surface with no server verdict for a whole session,
+          // and left `enforceLeadingOptionClaimsAtWire`'s option-roster
+          // FALLBACK with nothing to fall back to — the stand-down the roster
+          // fix exists to prevent.
+          // Computed ONCE, above, because the decline condition reads it too:
+          // building it twice would be two answers to "can this turn carry
+          // readiness?", and the branch would then admit a turn the exit
+          // cannot actually serve.
+          ...(analysisReadyForExit !== undefined ? { analysisReady: analysisReadyForExit } : {}),
+          // ⭐ A REAL ANSWER, DECLARED AS ONE.
+          //
+          // Omitted, it defaulted to substantive-by-absence and tripped the
+          // functional-marking drift guard. The choice is not free-form: the
+          // guard asks for `'functional'` for functional copy and
+          // `'substantive'` for a real answer, and this is a coaching answer
+          // written by a model holding a `read_results` tool. CEE's own
+          // classifier for free-form coach prose (`turn-executor.ts`) reaches
+          // the same verdict for the same shape.
+          //
+          // ⚠ CONSEQUENCE, STATED RATHER THAN DISCOVERED LATER: below
+          // ANSWER_SHAPE_COLLAPSE_FLOOR_CHARS (3,150) the two choices are
+          // byte-identical on the wire, so for the measured 900–2,200 char
+          // range this is behaviourally free. Above it, progressive disclosure
+          // reflows the text into headline + body. That is a real rewrite of
+          // this layer's own prose and it is accepted deliberately: the
+          // alternative is not "untouched", it is the UI's own blunt 3,000
+          // char truncation.
+          answerKind: 'substantive',
+          // Identifiers were already removed BY IDENTITY against this turn's
+          // graph. The shared pattern scrub rewrites ordinary English, so it
+          // must not run over this text a second time.
+          assistantTextAlreadyIdentifierSafe: true,
+        });
+      }
+    }
+
 
     // v0.7.0 schema: ingress is a discriminated union on `kind`. System events
     // (patch_accepted / patch_dismissed / direct_graph_edit / chip_click /
