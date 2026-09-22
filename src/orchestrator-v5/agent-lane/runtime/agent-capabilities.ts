@@ -15,6 +15,16 @@
  */
 
 import { randomUUID } from 'node:crypto';
+
+/**
+ * The durable operation identity for authorising a proposal.
+ *
+ * Prefixed so the turn log says WHY the graph moved without a join, and derived
+ * from the proposal so the SAME authorisation always produces the SAME key.
+ */
+export function authorisationTurnId(proposalId: string): string {
+  return `agent_authorise:${proposalId}`;
+}
 import { createProposal, ProposalStore, type ProposalOperation } from '../proposal.js';
 import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
 import type { AgentCapabilities, AgentToolContext, ToolResult } from './agent-tools.js';
@@ -134,9 +144,30 @@ export function createAgentCapabilities(
       const op = decision.proposal.operations[0];
       const [fromId, toId] = op.path.split('::');
       const direction = (op.value as { effect_direction: 'positive' | 'negative' }).effect_direction;
+      /**
+       * ⭐ THE OPERATION IDENTITY IS DERIVED, NOT MINTED.
+       *
+       * This was `randomUUID()`. A fresh id per authorisation means a retry of
+       * the SAME authorisation is a different operation to every layer beneath
+       * it, so `(scenario_id, turn_id)` can never match and the deployed
+       * `append_turn_atomic_v5` replay arm is unreachable by construction.
+       *
+       * The proposal id is already the stable client/operation identity: it is
+       * hashed over the scenario, the user, the base revision and the exact
+       * operations, so the same authorisation of the same proposal yields the
+       * same key, and a different mutation yields a different one.
+       *
+       * ⚠ This does NOT by itself deliver durable replay. At the served SHA,
+       * `structural-add-edge.ts` computes the current hash and refuses
+       * `BASE_HASH_DIVERGED` BEFORE `payload.turn_id` is read, so the app-level
+       * gate answers first and the DB's replay-before-CAS arm is still not
+       * reached. What this change does is make that boundary MEASURABLE rather
+       * than masked by an identity that never repeats.
+       */
+      const operationId = authorisationTurnId(decision.proposal.proposal_id);
       const res = await dispatch('/orchestrate/v2/turn', {
         kind: 'system_event',
-        turn_id: randomUUID(),
+        turn_id: operationId,
         scenario_id: ctx.scenario_id,
         stage: 'frame',
         event: {
@@ -161,7 +192,10 @@ export function createAgentCapabilities(
         system_message: String(res.json.assistant_text ?? ''),
       });
       if (!confirmation.applied) {
-        return { ok: false, mutated: false, applied: false, refusal: 'not_applied', detail: describeOutcome(confirmation), http: res.status };
+        return {
+          ok: false, mutated: false, applied: false, refusal: 'not_applied',
+          detail: describeOutcome(confirmation), http: res.status, operation_id: operationId,
+        };
       }
       proposals.markApplied(decision.proposal.proposal_id);
       return {
@@ -169,6 +203,7 @@ export function createAgentCapabilities(
         // Olumi discloses this to the user deterministically; see disclosure.ts.
         placeholder_strength: true,
         proposal_id: decision.proposal.proposal_id,
+        operation_id: operationId,
         revision_before: confirmation.revision_before,
         revision_after: confirmation.revision_after,
         not_represented:
@@ -210,6 +245,9 @@ export function createAgentCapabilities(
     async runAnalysis(ctx, args): Promise<ToolResult> {
       const r = await dispatch('/orchestrate/v2/turn', {
         kind: 'message',
+        // Deliberately NOT derived, unlike the authorised write above: asking
+        // for the analysis twice is two operations the user actually made, and
+        // collapsing them onto one identity would suppress the second.
         turn_id: randomUUID(),
         scenario_id: ctx.scenario_id,
         stage: 'analyse',
