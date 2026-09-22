@@ -1,0 +1,32 @@
+## SPINE WITNESS — build c8c8841  degraded=false  owner=signed-in
+
+  PASS [1] mutation commits exactly once  — turns=1
+  PASS [1] committed turn_id EQUALS the client identity
+  PASS [1] a receipt was minted  — versions=1
+  PASS [2a] retry creates NO duplicate turn  — Δ0
+  PASS [2a] retry creates NO duplicate version
+  PASS [2a] retry RECOVERS the same receipt
+  PASS [2b] retry does NOT claim an edit (and actually answered)  — HTTP 200 "That change had already been recorded, so nothing new was wr"
+  PASS [2b] graph_patch does NOT say applied  — status=noop
+  FAIL [2b] reply RECONCILES current state (and makes no edit claim)  — current=17 names=false claims_edit=false
+  PASS [3] exactly one concurrent write wins  — turns=1 claims=1
+  PASS [3] the loser refuses TRUTHFULLY (409)  — GRAPH_DIVERGED
+  PASS [3] a reused turn_id writes nothing  — value=14 turns=1
+  FAIL [3] a reused turn_id does NOT claim the new value was applied  — "Updated Sales Cycle Length from 14 months to 25 months. Ever"
+  FAIL [3] a reused turn_id does NOT emit an APPLIED patch  — status=applied after={"value":1.25,"raw_value":25,"unit":"mon
+  PASS [4] the unit the UI displays is accepted
+  PASS [4] a REAL rescale is still refused (and actually answered)  — HTTP 200 "This factor uses months; the value provided is in week."
+  PASS [4] a proportion factor accepts a proportion  — "Updated Product-Market Fit Investment from 0.3 scale to"
+  PASS [4] the accepted proportion actually PERSISTS as 0.8  — persisted value=0.8
+  PASS [4] a CAPPED scale factor does NOT swallow a bare 0.8  — persisted value=0.2 (was 0.2, cap=100) "That looks like a proportion rather than a va"
+  PASS [5] the two reads never silently disagree  — refused truthfully, no mixing
+  PASS [5] a refusal is not a 500 that loses the turn  — HTTP 200
+  PASS [5] CONTROL — an UNDISTURBED analysis still completes  — refused=false analysis_result=true fact=yes
+  PASS [5] CONTROL — and reports itself FRESH  — freshness=fresh reason=graph_hash_match
+  PASS [6] scenario head == latest version
+  PASS [6] version hash == scenario hash
+  PASS [6] turn mutation_id == version mutation_id
+  PASS [6] the product rereads state truthfully  — "Sales Cycle Length is currently set to 33 months."
+
+### 24 PASS · 3 FAIL · 0 SKIP   on build c8c8841
+criterion roll-up: 1=PASS · 3=FAIL · 4=PASS · 5=PASS · 6=PASS · 2a=PASS · 2b=FAIL

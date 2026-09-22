@@ -1,0 +1,168 @@
+{
+  "build": "c8c8841",
+  "owner": true,
+  "rows": [
+    {
+      "crit": "1",
+      "name": "mutation commits exactly once",
+      "state": "PASS",
+      "detail": "turns=1"
+    },
+    {
+      "crit": "1",
+      "name": "committed turn_id EQUALS the client identity",
+      "state": "PASS",
+      "detail": ""
+    },
+    {
+      "crit": "1",
+      "name": "a receipt was minted",
+      "state": "PASS",
+      "detail": "versions=1"
+    },
+    {
+      "crit": "2a",
+      "name": "retry creates NO duplicate turn",
+      "state": "PASS",
+      "detail": "Δ0"
+    },
+    {
+      "crit": "2a",
+      "name": "retry creates NO duplicate version",
+      "state": "PASS",
+      "detail": ""
+    },
+    {
+      "crit": "2a",
+      "name": "retry RECOVERS the same receipt",
+      "state": "PASS",
+      "detail": ""
+    },
+    {
+      "crit": "2b",
+      "name": "retry does NOT claim an edit (and actually answered)",
+      "state": "PASS",
+      "detail": "HTTP 200 \"That change had already been recorded, so nothing new was wr\""
+    },
+    {
+      "crit": "2b",
+      "name": "graph_patch does NOT say applied",
+      "state": "PASS",
+      "detail": "status=noop"
+    },
+    {
+      "crit": "2b",
+      "name": "reply RECONCILES current state (and makes no edit claim)",
+      "state": "FAIL",
+      "detail": "current=17 names=false claims_edit=false"
+    },
+    {
+      "crit": "3",
+      "name": "exactly one concurrent write wins",
+      "state": "PASS",
+      "detail": "turns=1 claims=1"
+    },
+    {
+      "crit": "3",
+      "name": "the loser refuses TRUTHFULLY (409)",
+      "state": "PASS",
+      "detail": "GRAPH_DIVERGED"
+    },
+    {
+      "crit": "3",
+      "name": "a reused turn_id writes nothing",
+      "state": "PASS",
+      "detail": "value=14 turns=1"
+    },
+    {
+      "crit": "3",
+      "name": "a reused turn_id does NOT claim the new value was applied",
+      "state": "FAIL",
+      "detail": "\"Updated Sales Cycle Length from 14 months to 25 months. Ever\""
+    },
+    {
+      "crit": "3",
+      "name": "a reused turn_id does NOT emit an APPLIED patch",
+      "state": "FAIL",
+      "detail": "status=applied after={\"value\":1.25,\"raw_value\":25,\"unit\":\"mon"
+    },
+    {
+      "crit": "4",
+      "name": "the unit the UI displays is accepted",
+      "state": "PASS",
+      "detail": ""
+    },
+    {
+      "crit": "4",
+      "name": "a REAL rescale is still refused (and actually answered)",
+      "state": "PASS",
+      "detail": "HTTP 200 \"This factor uses months; the value provided is in week.\""
+    },
+    {
+      "crit": "4",
+      "name": "a proportion factor accepts a proportion",
+      "state": "PASS",
+      "detail": "\"Updated Product-Market Fit Investment from 0.3 scale to\""
+    },
+    {
+      "crit": "4",
+      "name": "the accepted proportion actually PERSISTS as 0.8",
+      "state": "PASS",
+      "detail": "persisted value=0.8"
+    },
+    {
+      "crit": "4",
+      "name": "a CAPPED scale factor does NOT swallow a bare 0.8",
+      "state": "PASS",
+      "detail": "persisted value=0.2 (was 0.2, cap=100) \"That looks like a proportion rather than a va\""
+    },
+    {
+      "crit": "5",
+      "name": "the two reads never silently disagree",
+      "state": "PASS",
+      "detail": "refused truthfully, no mixing"
+    },
+    {
+      "crit": "5",
+      "name": "a refusal is not a 500 that loses the turn",
+      "state": "PASS",
+      "detail": "HTTP 200"
+    },
+    {
+      "crit": "5",
+      "name": "CONTROL — an UNDISTURBED analysis still completes",
+      "state": "PASS",
+      "detail": "refused=false analysis_result=true fact=yes"
+    },
+    {
+      "crit": "5",
+      "name": "CONTROL — and reports itself FRESH",
+      "state": "PASS",
+      "detail": "freshness=fresh reason=graph_hash_match"
+    },
+    {
+      "crit": "6",
+      "name": "scenario head == latest version",
+      "state": "PASS",
+      "detail": ""
+    },
+    {
+      "crit": "6",
+      "name": "version hash == scenario hash",
+      "state": "PASS",
+      "detail": ""
+    },
+    {
+      "crit": "6",
+      "name": "turn mutation_id == version mutation_id",
+      "state": "PASS",
+      "detail": ""
+    },
+    {
+      "crit": "6",
+      "name": "the product rereads state truthfully",
+      "state": "PASS",
+      "detail": "\"Sales Cycle Length is currently set to 33 months.\""
+    }
+  ]
+}
