@@ -618,7 +618,6 @@ import {
 import { config } from '../config/index.js';
 import { canonicaliseForAnalysis } from './tools/handlers/analysis-ready-core.js';
 import {
-  analysisGraphIdentityOf,
   analysisGraphIdentityForRead,
   bindAnalysisSnapshotForTurn,
 } from './run-analysis-snapshot-binding.js';
