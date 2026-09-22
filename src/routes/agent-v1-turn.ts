@@ -29,6 +29,7 @@ import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import { scenarioAccessDecision } from '../orchestrator-v5/agent-lane/scenario-access.js';
 import { HistoryStore } from '../orchestrator-v5/agent-lane/history-store.js';
 import { internalHeaders } from '../orchestrator-v5/agent-lane/internal-headers.js';
+import { resolveUserIdentity } from '../orchestrator/user-identity.js';
 import { log } from '../utils/telemetry.js';
 import { composeDirectAnswerResponse } from '../orchestrator-v5/compose.js';
 import { finaliseV5Response } from '../orchestrator-v5/response-finaliser.js';
@@ -249,10 +250,28 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       return reply.code(422).send({ error: 'BAD_INPUT', detail: 'scenario_id and message are required' });
     }
 
-    // Bound from the request, never from the Agent.
-    const userId = typeof (req as { effectiveUserId?: string }).effectiveUserId === 'string'
-      ? (req as { effectiveUserId?: string }).effectiveUserId ?? null
-      : null;
+    /**
+     * Bound from the request, never from the Agent.
+     *
+     * ⛔ `req.effectiveUserId` DOES NOT EXIST. It is not a Fastify decorator:
+     * it is a local computed inside `route-v2-preflight.ts` by calling
+     * `resolveUserIdentity`. Reading it off the request always yielded
+     * `undefined`, so every caller looked anonymous — and on a signed-in user's
+     * OWN scenario the ownership comparison then refused with 404 before a
+     * single tool ran. Measured: 404 in 423 ms with no tool calls, WITH a valid
+     * bearer token presented.
+     *
+     * Every local witness used guest scenarios, where anonymous is the right
+     * answer, so nothing failed until an owned scenario was tried.
+     */
+    const identity = await resolveUserIdentity(req, String(req.id));
+    if (identity.mode === 'refused') {
+      // A presented-but-unusable token is refused, never downgraded to guest:
+      // silently treating a signed-in user as anonymous is how someone else's
+      // scenario becomes readable.
+      return reply.code(401).send({ error: 'SIGN_IN_REQUIRED', detail: identity.reason });
+    }
+    const userId = identity.mode === 'verified' ? identity.userId : null;
 
     // A session is a correlation token: bound once, verified every time.
     const refusal = sessions.check(sessionId, userId, scenarioId);
