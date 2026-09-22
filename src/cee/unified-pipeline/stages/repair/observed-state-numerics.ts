@@ -59,9 +59,19 @@
  * constraint-shaped object is identified exactly as `NodeObservedState` does
  * it — by the presence of a `metadata` key — and skipped untouched.
  *
- * Dropping is recoverable, not lossy-by-design: `schema-v3.ts` rebuilds factor
- * `observed_state` FROM `data`, so a factor whose `data.value` is sound is
- * restored downstream. What is removed is only the copy that cannot parse.
+ * ⚠ THE RECOVERY CLAIM IS REAL BUT DOES NOT COVER THE SHAPE THIS ACTUALLY
+ * MEETS, and the earlier wording here over-read it. `schema-v3.ts:456` does
+ * rebuild `observed_state` from `data.value` — read directly, and it never
+ * reads the V1 `observed_state` at all (`rg -an 'node\.observed_state'` on that
+ * file: zero code hits; contrast control `isFactorData`: 7). So where
+ * `data.value` is sound, nothing is lost downstream.
+ *
+ * But for the target shape — `{declared_scale}` and nothing else —
+ * `projector.ts:3379-3381` sets `data` to `{unit}` or leaves it absent
+ * PRECISELY WHEN `claim.value` is not a number, so there is no `data.value` to
+ * rebuild from. What is lost there is the `declared_scale` TWIN, not a
+ * magnitude: the node-level `declared_scale` survives the drop, and there was
+ * never a usable value to begin with. The audit records the twin explicitly.
  */
 
 import type { StageContext } from "../../types.js";
