@@ -1499,6 +1499,10 @@ const ConfigSchema = z.object({
     // registers nothing unless this is true, so deploying it is inert and the
     // rollback is unsetting one variable.
     agentLaneEnabled: booleanString.default(false),
+    // AGENT_LANE_PREVIEW — READ-ONLY preview. The mutation tools are not
+    // declared to the model, dispatch refuses their names, and the capabilities
+    // refuse too. Default false so nothing changes for the full lane.
+    agentLanePreview: booleanString.default(false),
     browserProxyAllowedOrigins: z.string().optional(), // BROWSER_PROXY_ALLOWED_ORIGINS — comma-separated origin allowlist
     browserProxyTimeoutMs: z.coerce.number().int().min(5_000).max(300_000).default(125_000), // BROWSER_PROXY_TIMEOUT_MS — proxy-to-CEE timeout (5s headroom above DRAFT_REQUEST_BUDGET_MS=120s, must be < ROUTE_TIMEOUT_MS)
   }).default({}),
@@ -1904,6 +1908,7 @@ function parseConfig(): Config {
     proxy: {
       browserProxyEnabled: env.BROWSER_PROXY_ENABLED,
       agentLaneEnabled: env.AGENT_LANE_ENABLED,
+      agentLanePreview: env.AGENT_LANE_PREVIEW,
       browserProxyAllowedOrigins: env.BROWSER_PROXY_ALLOWED_ORIGINS,
       browserProxyTimeoutMs: env.BROWSER_PROXY_TIMEOUT_MS,
     },

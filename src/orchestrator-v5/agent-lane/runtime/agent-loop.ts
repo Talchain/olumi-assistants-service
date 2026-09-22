@@ -17,7 +17,7 @@
  *     sessions unchanged if they recover.
  */
 
-import { AGENT_TOOLS, dispatchTool, type AgentCapabilities, type AgentToolContext, type ToolResult } from './agent-tools.js';
+import { toolsFor, dispatchTool, type AgentCapabilities, type AgentToolContext, type AgentLaneMode, type ToolResult } from './agent-tools.js';
 
 export interface ModelCallRequest {
   readonly instructions: string;
@@ -42,6 +42,11 @@ export interface AgentTurnInput {
   readonly maxOutputTokens: number;
   /** Hard ceiling on tool round trips within one user turn. */
   readonly maxHops?: number;
+  /**
+   * 'preview' hands the model a READ-ONLY tool surface. Defaulting to 'full'
+   * keeps existing callers unchanged; the preview deployment opts in.
+   */
+  readonly mode?: AgentLaneMode;
 }
 
 export interface AgentTurnResult {
@@ -85,6 +90,7 @@ export async function runAgentTurn(
   caps: AgentCapabilities,
   callModel: CallModel,
 ): Promise<AgentTurnResult> {
+  const mode: AgentLaneMode = input.mode ?? 'full';
   const maxHops = input.maxHops ?? DEFAULT_MAX_HOPS;
   const items: unknown[] = [
     ...input.history,
@@ -98,7 +104,7 @@ export async function runAgentTurn(
     const resp = await callModel({
       instructions: input.instructions,
       input: items,
-      tools: AGENT_TOOLS as readonly unknown[],
+      tools: toolsFor(input.mode ?? 'full') as readonly unknown[],
       max_output_tokens: input.maxOutputTokens,
     });
     const out = resp.output ?? [];
@@ -118,7 +124,7 @@ export async function runAgentTurn(
     }
 
     const result: ToolResult = await dispatchTool(
-      String(call.name), String(call.arguments ?? '{}'), input.ctx, caps,
+      String(call.name), String(call.arguments ?? '{}'), input.ctx, caps, mode,
     );
     if (result.mutated) mutated = true;
     toolCalls.push({

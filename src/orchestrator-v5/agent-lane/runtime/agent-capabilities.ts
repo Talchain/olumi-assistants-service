@@ -69,7 +69,18 @@ export function createAgentCapabilities(
    * for some modelling reason.
    */
   callStructured?: CallStructuredModel,
+  /**
+   * 'preview' is READ-ONLY. This is the innermost of three layers: the tools
+   * are not declared, `dispatchTool` refuses the names, and these refuse too.
+   * Defence in depth, because a single prompt sentence is not a boundary.
+   */
+  mode: 'full' | 'preview' = 'full',
 ): AgentCapabilities {
+  const readOnly = mode === 'preview';
+  const refuseReadOnly = (): ToolResult => ({
+    ok: false, mutated: false, refusal: 'read_only_preview',
+    detail: 'This preview cannot change the model. Nothing has been altered.',
+  });
   const readGraph = async (scenarioId: string): Promise<GraphRead | null> => {
     const r = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {});
     if (r.status !== 200) return null;
@@ -110,6 +121,7 @@ export function createAgentCapabilities(
     },
 
     async proposeModelChange(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
       const find = (l: string) => g.nodes.find((n) => norm(n.label) === norm(l) || norm(n.description) === norm(l));
@@ -147,6 +159,7 @@ export function createAgentCapabilities(
     },
 
     async authoriseChange(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
       const before = await readGraph(ctx.scenario_id);
       if (before === null) return { ok: false, mutated: false, refusal: 'not_found' };
       const decision = proposals.authorise({

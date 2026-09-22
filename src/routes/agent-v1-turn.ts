@@ -29,6 +29,7 @@ import { log } from '../utils/telemetry.js';
 import { composeDirectAnswerResponse } from '../orchestrator-v5/compose.js';
 import { finaliseV5Response } from '../orchestrator-v5/response-finaliser.js';
 import { runAgentTurn, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
+import type { AgentLaneMode } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { createAgentCapabilities, type InternalDispatch } from '../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
 import type { CallStructuredModel } from '../orchestrator-v5/agent-lane/runtime/build-model.js';
 import { onceMoreOnTransportFailure } from '../orchestrator-v5/agent-lane/runtime/transport-retry.js';
@@ -44,12 +45,24 @@ const histories = new Map<string, unknown[]>();
 const proposals = new ProposalStore();
 const sessions = new SessionBindingRegistry();
 
+/**
+ * The one instruction that differs by mode.
+ *
+ * ⚠ This is HONESTY, not the boundary. The boundary is that the tools are not
+ * declared, dispatch refuses the names, and the capabilities refuse. This line
+ * only stops the preview offering to do something it cannot do.
+ */
+const MUTATION_INSTRUCTION =
+  config.proxy.agentLanePreview === true
+    ? 'This is a read-only preview: you CANNOT change the model, and there is no tool that would let you. If the user asks for a change, say plainly that this preview cannot make it and describe what you would propose instead.'
+    : 'To change the model you must call propose_model_change, show the user exactly what you propose, and call authorise_change ONLY after they have explicitly approved it.';
+
 const AGENT_INSTRUCTIONS = [
   'You are Olumi, a strategic reasoning layer. Improve human strategic judgement rather than deciding for the user.',
   'Answer the user’s actual question directly and naturally.',
   'Never invent canonical facts. Before describing what the model contains, call get_canonical_state.',
   'Distinguish user facts and evidence from machine-authored estimates and from unknowns. An absent value is unknown, never zero.',
-  'To change the model you must call propose_model_change, show the user exactly what you propose, and call authorise_change ONLY after they have explicitly approved it.',
+  MUTATION_INSTRUCTION,
   'Never claim a change happened unless the tool result says it was applied. If a tool reports a refusal, tell the user what it said.',
   'If get_canonical_state reports the model is empty, call build_model_from_brief with the user\u2019s own words before answering about the model.',
   'Discussion, ideation and research are not mutation requests.',
@@ -60,6 +73,12 @@ const AGENT_INSTRUCTIONS = [
 
 export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
   if (config.proxy.agentLaneEnabled !== true) return;
+
+  /**
+   * READ-ONLY preview. Resolved ONCE at registration, not per request, so no
+   * request header or body can select the writable surface.
+   */
+  const mode: AgentLaneMode = config.proxy.agentLanePreview === true ? 'preview' : 'full';
 
   const dispatch: InternalDispatch = async (path, body) => {
     const res = await app.inject({
@@ -169,7 +188,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       return reply.code(404).send({ error: 'NOT_FOUND', detail: 'No readable conversation for that scenario.' });
     }
 
-    const capabilities = createAgentCapabilities(dispatch, proposals, callStructured);
+    const capabilities = createAgentCapabilities(dispatch, proposals, callStructured, mode);
     const history = histories.get(sessionId) ?? [];
     const budget = budgetFor('gpt-5.6-terra', 'conversation');
 
@@ -182,6 +201,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           message,
           instructions: AGENT_INSTRUCTIONS,
           maxOutputTokens: budget.max_output_tokens,
+          mode,
         },
         capabilities,
         callModel,
@@ -216,6 +236,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ...finalised,
       _agent: {
         session_id: sessionId,
+        mode,
         tool_calls: result.tool_calls,
         mutated: result.mutated,
         hops: result.hops,

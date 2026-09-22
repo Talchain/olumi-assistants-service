@@ -87,6 +87,29 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
 
 export type ToolName = (typeof AGENT_TOOLS)[number]['name'];
 
+/**
+ * Preview mode: a READ-ONLY tool surface.
+ *
+ * ⛔ THE BOUNDARY IS STRUCTURAL, NEVER PROMPTED. A model told not to change
+ * things is a model that usually does not change things. These tools are not
+ * declared to it, `dispatchTool` refuses the names even if it invents them, and
+ * the capabilities themselves refuse in preview. Three layers, none of which is
+ * a sentence in an instruction block.
+ *
+ * Construction is NOT a mutation tool in this sense and stays available: it
+ * creates the model for an empty preview scenario through the product's own
+ * registration route, and without it a preview has nothing to talk about. It is
+ * additionally refused over a scenario that already has entities.
+ */
+export const MUTATION_TOOLS: readonly string[] = ['propose_model_change', 'authorise_change'];
+
+export type AgentLaneMode = 'full' | 'preview';
+
+export function toolsFor(mode: AgentLaneMode): readonly ToolDefinition[] {
+  if (mode !== 'preview') return AGENT_TOOLS;
+  return AGENT_TOOLS.filter((t) => !MUTATION_TOOLS.includes(t.name));
+}
+
 /** Every tool result carries whether it changed anything, so nothing is implied. */
 export interface ToolResult {
   readonly ok: boolean;
@@ -109,7 +132,16 @@ export async function dispatchTool(
   rawArgs: string,
   ctx: AgentToolContext,
   caps: AgentCapabilities,
+  mode: AgentLaneMode = 'full',
 ): Promise<ToolResult> {
+  // Second layer. A model can name a tool it was never given; this refuses it
+  // before any capability is reached, and says so rather than failing quietly.
+  if (mode === 'preview' && MUTATION_TOOLS.includes(name)) {
+    return {
+      ok: false, mutated: false, refusal: 'read_only_preview',
+      detail: 'This preview cannot change the model. Nothing has been altered.',
+    };
+  }
   let args: Record<string, unknown>;
   try {
     args = JSON.parse(rawArgs) as Record<string, unknown>;
