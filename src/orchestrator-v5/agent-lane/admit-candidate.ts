@@ -107,13 +107,30 @@ export interface AdmissionResult {
   readonly loss: readonly RepairEntry[];
   /** Links that could not be admitted honestly. */
   readonly withheld: readonly WithheldLink[];
+  /**
+   * `from::to` for each edge whose magnitude was genuinely authored.
+   *
+   * Tracked explicitly rather than inferred from the provenance value: authored-ness
+   * and authorship are different questions, and reading one off the other is what
+   * made the `user_specified` mistake above invisible.
+   */
+  readonly authored_magnitudes: readonly string[];
 }
 
 function provenanceSourceFor(candidateProvenance: string): string {
   // 'ai_proposed' (widener) and 'inferred' (builder) are both the system's
-  // reading, never the user's. Only an explicitly user-stated link may claim
-  // user authorship, and the construction chain never produces one.
-  return candidateProvenance === 'explicit' ? 'user_specified' : 'cee_hypothesis';
+  // reading, never the user's.
+  //
+  // ⭐ 'explicit' MEANS "THE USER STATED IT IN THE BRIEF", WHICH IS
+  // `brief_extraction` — NOT `user_specified`. This was wrong here and the error
+  // had teeth: `src/cee/provenance/money-invariant.ts:211` gates its entire
+  // audit on `observed.source === 'brief_extraction'`, so stamping
+  // `user_specified` both asserted a direct user edit that never happened AND
+  // exempted every brief-derived figure from the check that asks whether the
+  // figure actually appears in the brief. `user_specified` is reserved for a
+  // value the user set directly, which this construction chain never produces —
+  // a caller that genuinely has one passes `provenance_source` explicitly.
+  return candidateProvenance === 'explicit' ? 'brief_extraction' : 'cee_hypothesis';
 }
 
 /**
@@ -126,6 +143,7 @@ export function admitCandidateLinks(links: readonly CandidateLink[]): AdmissionR
   const edges: AdmittedEdge[] = [];
   const loss: RepairEntry[] = [];
   const withheld: WithheldLink[] = [];
+  const authored_magnitudes: string[] = [];
 
   for (const link of links) {
     const fieldPath = `edges[${link.from}::${link.to}]`;
@@ -158,6 +176,8 @@ export function admitCandidateLinks(links: readonly CandidateLink[]): AdmissionR
       effect_direction: link.direction,
       provenance: { source: link.provenance_source ?? provenanceSourceFor(link.provenance) },
     };
+
+    if (authored) authored_magnitudes.push(`${link.from}::${link.to}`);
 
     if (!authored) {
       // The magnitude is ours, not theirs. Say so, in the edge and in the ledger.
@@ -192,7 +212,7 @@ export function admitCandidateLinks(links: readonly CandidateLink[]): AdmissionR
     edges.push(edge);
   }
 
-  return { edges, loss, withheld };
+  return { edges, loss, withheld, authored_magnitudes };
 }
 
 /**
@@ -202,7 +222,6 @@ export function admitCandidateLinks(links: readonly CandidateLink[]): AdmissionR
  * (`user_specified`) rather than by trusting the flag's absence.
  */
 export function noUnmarkedMagnitudes(result: AdmissionResult): boolean {
-  return result.edges.every(
-    (e) => e.defaulted === true || e.provenance?.source === 'user_specified',
-  );
+  const authored = new Set(result.authored_magnitudes);
+  return result.edges.every((e) => e.defaulted === true || authored.has(`${e.from}::${e.to}`));
 }

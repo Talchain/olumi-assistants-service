@@ -93,8 +93,15 @@ function assignIds(labels: readonly string[]): Map<string, string> {
   return out;
 }
 
+/**
+ * 'explicit' means the user stated it IN THE BRIEF — `brief_extraction`, not
+ * `user_specified`. See the note in `admit-candidate.ts`: the money invariant
+ * (`src/cee/provenance/money-invariant.ts:211`) only audits figures stamped
+ * `brief_extraction`, so the wrong stamp here silently exempted every
+ * brief-derived figure from that audit.
+ */
 const sourceFor = (provenance: string): string =>
-  provenance === 'explicit' ? 'user_specified' : 'cee_hypothesis';
+  provenance === 'explicit' ? 'brief_extraction' : 'cee_hypothesis';
 
 export function admitCandidateModel(
   model: CandidateModel,
@@ -113,8 +120,21 @@ export function admitCandidateModel(
       node: {
         category: f.role,
         // A baseline is written ONLY when the candidate says one is known.
+        //
+        // ⭐ `observed_state.source` IS A DIFFERENT CLAIM FROM `provenance.source`,
+        // and both are required. `provenance.source` says who put this ENTITY in
+        // the model; `observed_state.source` says where this VALUE came from — and
+        // it is the latter that `src/cee/provenance/money-invariant.ts:211` reads
+        // to decide whether to audit the figure against the brief. Correcting only
+        // the entity stamp left the figure unaudited; measured, not assumed.
         ...(f.baseline_known && typeof f.baseline_value === 'number'
-          ? { observed_state: { value: f.baseline_value, ...(f.unit ? { unit: f.unit } : {}) } }
+          ? {
+              observed_state: {
+                value: f.baseline_value,
+                ...(f.unit ? { unit: f.unit } : {}),
+                ...(f.provenance === 'explicit' ? { source: 'brief_extraction' } : {}),
+              },
+            }
           : {}),
       },
     })),
