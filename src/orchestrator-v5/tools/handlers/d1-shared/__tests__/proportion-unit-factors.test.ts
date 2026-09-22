@@ -64,6 +64,36 @@ describe('a proportion-unit factor accepts a proportion', () => {
     expect(evaluateFactorValueProposal(live('proportion') as never).ok).toBe(true);
   });
 
+  /**
+   * ⛔ THE TWO CONTROLS MY FIRST VERSION DID NOT HAVE, AND THE DEFECT THEY CATCH.
+   *
+   * Independent review refuted the first attempt (`cap === 1 || isProportionUnit`)
+   * by executing it on a REAL staging capture: `fac_crm_capability`, `unit:
+   * 'scale'`, **`cap: 100`**, `raw_value: 35`. A user typing `0.8` meaning 80 was
+   * ACCEPTED and would have persisted `newRaw = 0.8` — 0.35 -> 0.008, a silent
+   * ~100x corruption of the user's model.
+   *
+   * Every control in the first version used an AMOUNT unit or `cap: 1`, so the
+   * "too wide" mutant was killed only by `months`/`£` — blind in the one
+   * direction that mattered. These two pin the SCALE-DECLARATION boundary, not
+   * just the unit-class one.
+   */
+  it('CONTROL — a `scale` factor WITH a cap is an amount scale and still refuses', () => {
+    const v = evaluateFactorValueProposal({
+      ...live('scale'), factorCap: 100, factorExistingRaw: 35, factorObservedValue: 0.35,
+      factorObservedRawValue: 35,
+    } as never);
+    expect(v.ok, 'cap 100 says 0.8 probably means 80 — persisting 0.8 would be a ~100x error').toBe(false);
+    if (!v.ok) expect(v.reason).toBe('bare_ratio_on_unit_factor');
+  });
+
+  it('CONTROL — a `scale` factor with a RECOVERABLE FRAME still refuses', () => {
+    const v = evaluateFactorValueProposal({
+      ...live('scale'), factorExistingRaw: 35, factorObservedValue: 0.35, factorObservedRawValue: 35,
+    } as never);
+    expect(v.ok, 'a value/raw_value pair proves an amount scale and outranks the unit token').toBe(false);
+  });
+
   it('CONTROL — an AMOUNT unit with a frame still refuses a bare sub-1 input', () => {
     const v = evaluateFactorValueProposal({
       ...live('months'), factorExistingRaw: 9, factorObservedValue: 0.45, factorObservedRawValue: 9,

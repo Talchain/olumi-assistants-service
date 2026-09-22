@@ -932,7 +932,45 @@ function evaluateFactorValueProposalImpl(
   ]);
   const isProportionUnit =
     typeof factorUnit === 'string' && PROPORTION_UNIT_TOKENS.has(factorUnit.trim().toLowerCase());
-  const isProportionScaledFactor = cap === 1 || isProportionUnit;
+  /**
+   * ⛔ THE UNIT TOKEN IS NOT ENOUGH ON ITS OWN, AND THE ESTATE SAYS SO.
+   *
+   * A first version of this exemption was `cap === 1 || isProportionUnit`.
+   * Independent review REFUTED it, by execution, on a real staging capture:
+   * `fac_crm_capability` carries `unit: 'scale'` with **`cap: 100`** and
+   * `raw_value: 35`. Under the unit-only rule a user typing `0.8` (meaning 80)
+   * was ACCEPTED and persisted as `newRaw = 0.8` — the model value going
+   * 0.35 -> 0.008, a silent ~100x corruption, in exactly the case this gate was
+   * built to ask about.
+   *
+   * The premise was wrong at the root: `unit` is not a range declaration.
+   * `cee/draft/records/instruction.ts:288-291` — "Never put a scale or
+   * convention word there — not 'scale', not 'unit_interval', not 'ratio' ...
+   * Those belong in `value_scale`". So these tokens are documented MALFORMED
+   * occupants of `unit`, and a malformed field cannot carry a safety signal.
+   *
+   * ⭐ SO THE TEST IS "NOTHING CONTRADICTS IT", NOT "THE UNIT SAYS SO".
+   *   A proportion-unit factor is treated as proportion-scaled only when it
+   *   carries NO cap other than 1 and NO recoverable frame. Both a cap and a
+   *   `value`/`raw_value` pair are POSITIVE EVIDENCE of an amount scale, and
+   *   either one outranks the token. That keeps `frameRecoverable` (:944)
+   *   load-bearing — it was added by a previous round-2 review precisely
+   *   because "a FRAME-RECOVERABLE factor declares an amount scale exactly as a
+   *   unit string does", after two writers were measured guessing answers 10^5
+   *   apart on a framed factor.
+   *
+   * What this still fixes is the witnessed live shape: `unit: 'scale'`,
+   * `value: 0.3`, NO cap and NO raw_value — nothing contradicts the token, and
+   * the factor could previously not be set to any sub-1 value at all.
+   */
+  const isProportionScaledFactor =
+    cap === 1 ||
+    (isProportionUnit &&
+      cap === undefined &&
+      recoverScaleFrame({
+        value: factorObservedValue,
+        raw_value: factorObservedRawValue,
+      }) === undefined);
   // R2-1 (PR #926 round-2 re-review): the gate above keyed ONLY on a unit
   // string, and records-drafted factors can never carry one (the records
   // grammar has no unit field on claims) — so the whole records population
