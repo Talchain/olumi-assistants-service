@@ -34,16 +34,27 @@ const BASE: Node[] = [
   { id: 'feature_value', kind: 'factor', label: 'Pro feature value', observed_state: { value: 0.7, unit: 'index 0-1' } },
   // ⛔ THE CONTRAST CONTROL: no frame at all.
   { id: 'subscribers', kind: 'factor', label: 'Pro subscribers', observed_state: { value: 250, unit: 'subscribers' } },
+  // No value at all, and no range: an option must still be able to set it.
+  { id: 'release_availability', kind: 'factor', label: 'Release availability' },
   { id: 'phase_increase', kind: 'option', label: 'Phase Pro price increase', interventions: null },
   { id: 'raise_now', kind: 'option', label: 'Raise at next release', interventions: { pro_plan_price: { value: 0.295 } } },
 ];
 
-function fakeProduct(opts: { failOn?: string[] } = {}) {
+function fakeProduct(opts: { failOn?: string[]; registerFails?: boolean } = {}) {
   const posted: { turn_id: string; event: Record<string, unknown> }[] = [];
+  const registered: { nodes: Node[] }[] = [];
   let nodes: Node[] = BASE.map((n) => ({ ...n, interventions: n.interventions == null ? n.interventions : { ...n.interventions } }));
   let rev = 0;
   const d: InternalDispatch = async (path, body) => {
     const b = (body ?? {}) as Record<string, unknown>;
+    if (path.endsWith('/graph/register')) {
+      if (opts.registerFails === true) return { status: 500, json: {} };
+      const g = (b as { graph: { nodes: Node[] } }).graph;
+      registered.push({ nodes: g.nodes });
+      nodes = g.nodes;
+      rev += 1;
+      return { status: 200, json: {} };
+    }
     if (path === '/orchestrate/v2/turn' && b.kind === 'system_event') {
       const ev = b.event as { option_id: string; factor_id: string; value: number; base_graph_hash: string };
       posted.push({ turn_id: String(b.turn_id), event: ev as unknown as Record<string, unknown> });
@@ -57,7 +68,7 @@ function fakeProduct(opts: { failOn?: string[] } = {}) {
     }
     return { status: 200, json: { graph: { nodes, edges: [] }, graph_hash: `h${rev}` } };
   };
-  return { d, posted, read: () => nodes };
+  return { d, posted, registered, read: () => nodes };
 }
 
 const ASK = {
@@ -85,20 +96,51 @@ describe('the value is read against the factor’s declared range', () => {
     expect(String(r.public_label)).toMatch(/sets Pro plan price to 54 GBP\/month/);
   });
 
-  it('REFUSES a factor with no range rather than picking a denominator', async () => {
+  it('DERIVES a range for a valued factor that has none, and discloses it', async () => {
+    /**
+     * ⛔ THIS TEST ASSERTED THE OPPOSITE, and the reversal is measured. Refusing
+     * was correct in isolation and a dead end in practice: a factor with no
+     * range could never be set by any option, so the comparison could never
+     * run and the Agent's only advice was "a rebuild is required" — not a
+     * thing to ask a user for. The range now comes from the user's own figure,
+     * is attached on authorisation, and is reported.
+     */
     const p = fakeProduct();
     const caps = createAgentCapabilities(p.d, new ProposalStore());
     const r = await caps.proposeOptionInterventions(ctx, {
       interventions: [{ option_label: 'Phase Pro price increase', factor_label: 'Pro subscribers', value: 300, basis: 'growth' }],
     });
-    expect(r.ok).toBe(false);
-    expect(r.refusal).toBe('nothing_to_set');
-    expect(r.no_stated_range).toEqual([
-      { factor: 'Pro subscribers', detail: expect.stringMatching(/has no stated range, so 300 cannot be recorded/) },
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(r.interventions).toEqual([
+      { option: 'Phase Pro price increase', factor: 'Pro subscribers', value: 300, unit: 'subscribers',
+        recorded_on_model_scale: 0.3, model_range: 1000, range_taken_from_your_figure: 1000, basis: 'growth' },
     ]);
-    expect(String((r.no_stated_range as { detail: string }[])[0].detail)).toMatch(/nothing here will pick a range on your behalf/);
     expect(p.posted).toHaveLength(0);
+
+    const applied = await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) });
+    expect(applied.ok, JSON.stringify(applied)).toBe(true);
+    expect(applied.ranges_added_for_analysis).toEqual([{ factor: 'Pro subscribers', range: 1000 }]);
+    const subs = p.read().find((n) => n.id === 'subscribers')!;
+    expect(subs.observed_state!.cap).toBe(1000);
+    expect(subs.observed_state!.raw_value).toBe(250);
+    expect(String(applied.not_represented)).toMatch(/a unit of measurement, not a forecast/);
   });
+
+  it('leaves a factor with NO value alone — a zero baseline would be a fabrication', async () => {
+    const p = fakeProduct();
+    const caps = createAgentCapabilities(p.d, new ProposalStore());
+    const r = await caps.proposeOptionInterventions(ctx, {
+      interventions: [{ option_label: 'Phase Pro price increase', factor_label: 'Release availability', value: 100, basis: 'released' }],
+    });
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    const applied = await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) });
+    // ⛔ The contrast control: no range written, no invented baseline, and the
+    // level still lands. The baseline gate skips a valueless factor anyway.
+    expect(applied.ranges_added_for_analysis).toBeUndefined();
+    expect(p.read().find((n) => n.id === 'release_availability')!.observed_state).toBeUndefined();
+    expect(p.read().find((n) => n.id === 'phase_increase')!.interventions).toEqual({ release_availability: { value: 1 } });
+  });
+
 
   it('refuses a number outside the model’s own range', async () => {
     const p = fakeProduct();
@@ -209,3 +251,23 @@ describe('the emitted event satisfies the REAL wire contract', () => {
     expect(SystemEventTurnPayloadSchema.safeParse({ ...payload, event: noBase }).success).toBe(false);
   });
 });
+
+describe('a range that could not be attached is reported, not assumed', () => {
+  /**
+   * ⛔ WRITTEN BECAUSE THE FAKE HID IT. The first version of this file had no
+   * register handler, so the call fell through to the graph-read stub, came
+   * back 200, and `ranges_added_for_analysis` reported a success that had not
+   * happened. A permissive mock reads exactly like a working system.
+   */
+  it('says so when the range write fails', async () => {
+    const p = fakeProduct({ registerFails: true });
+    const caps = createAgentCapabilities(p.d, new ProposalStore());
+    const r = await caps.proposeOptionInterventions(ctx, {
+      interventions: [{ option_label: 'Phase Pro price increase', factor_label: 'Pro subscribers', value: 300, basis: 'growth' }],
+    });
+    const applied = await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) });
+    expect(applied.ranges_added_for_analysis).toBeUndefined();
+    expect(applied.failures).toContainEqual({ path: 'scale_frame', detail: 'could not attach a range: http 500' });
+  });
+});
+

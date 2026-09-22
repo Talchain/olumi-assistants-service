@@ -291,6 +291,7 @@ export function createAgentCapabilities(
       const set: {
         option: { id: string; label: string }; factor: { id: string; label: string };
         raw: number; normalised: number; cap: number | null; unit: string; basis: string;
+        derivedFrame: number | null;
       }[] = [];
 
       for (const i of input) {
@@ -304,6 +305,7 @@ export function createAgentCapabilities(
         const os = (factor.observed_state ?? {}) as { cap?: unknown; unit?: unknown };
         const cap = typeof os.cap === 'number' && Number.isFinite(os.cap) && os.cap > 0 ? os.cap : null;
         let normalised: number;
+        let derivedFrame: number | null = null;
         if (cap !== null) {
           normalised = raw / cap;
           if (normalised < 0 || normalised > 1) {
@@ -312,12 +314,31 @@ export function createAgentCapabilities(
           }
         } else if (raw >= 0 && raw <= 1) {
           normalised = raw;
+        } else if (raw > 1) {
+          /**
+           * ⭐ DERIVE THE FRAME RATHER THAN REFUSE, and say so.
+           *
+           * ⛔ MEASURED on the deployed build: this branch USED to refuse, and
+           * the refusal was correct in isolation and a dead end in practice.
+           * A factor with no VALUE cannot carry a range at construction —
+           * `ObservedStateSchema` requires `value`, and a node-level `cap` is
+           * stripped by `NodeV3Schema` — so "Feature release availability" and
+           * "Price rollout exposure" could never be set by any option, and the
+           * comparison could never run. The Agent's advice became "a rebuild is
+           * required", which is not something to ask a user for.
+           *
+           * The frame is taken from the user's own figure and ATTACHED to the
+           * factor on authorisation, exactly as the adopted-assumption path
+           * already does. Reported below as `ranges_added_for_analysis`.
+           */
+          derivedFrame = defaultFrameFor(raw);
+          normalised = raw / derivedFrame;
         } else {
           unframed.push({
             factor: factor.label,
             detail:
-              `"${factor.label}" has no stated range, so ${raw} cannot be recorded against it. ` +
-              'Rebuilding the model would give it one; nothing here will pick a range on your behalf.',
+              `"${factor.label}" has no stated range, and ${raw} cannot be read against one. ` +
+              'Nothing here will pick a range on your behalf for a figure like that.',
           });
           continue;
         }
@@ -334,7 +355,8 @@ export function createAgentCapabilities(
         set.push({
           option: { id: option.id, label: option.label },
           factor: { id: factor.id, label: factor.label },
-          raw, normalised, cap, unit: typeof os.unit === 'string' ? os.unit : '', basis: String(i?.basis ?? ''),
+          raw, normalised, cap: cap ?? derivedFrame, unit: typeof os.unit === 'string' ? os.unit : '',
+          basis: String(i?.basis ?? ''), derivedFrame,
         });
       }
 
@@ -353,7 +375,7 @@ export function createAgentCapabilities(
       const operations: ProposalOperation[] = ordered.map((i) => ({
         op: 'set_option_intervention',
         path: `${i.option.id}::${i.factor.id}`,
-        value: { normalised: i.normalised, raw: i.raw, cap: i.cap, basis: i.basis },
+        value: { normalised: i.normalised, raw: i.raw, cap: i.cap, basis: i.basis, derived_frame: i.derivedFrame },
       }));
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
@@ -377,6 +399,7 @@ export function createAgentCapabilities(
           // Both numbers, always. The user approves the one they said.
           recorded_on_model_scale: i.normalised,
           model_range: i.cap,
+          ...(i.derivedFrame !== null ? { range_taken_from_your_figure: i.derivedFrame } : {}),
           basis: i.basis,
         })),
         ...(unresolved.length > 0 ? { unresolved } : {}),
@@ -418,7 +441,50 @@ export function createAgentCapabilities(
          */
         const applied: { option: string; factor: string; requested: number; recorded: number | null }[] = [];
         const failures: { path: string; detail: string }[] = [];
-        let baseHash = before.graph_hash;
+        /**
+         * ⭐ ATTACH ANY DERIVED FRAME FIRST, in one write, before the levels.
+         * The factor must carry its range before a level is recorded against
+         * it, or the level is a number the model cannot interpret. Same
+         * mechanism as the adopted-assumption path, and the same disclosure.
+         */
+        const framedHere: { factor: string; range: number }[] = [];
+        const frames = new Map<string, number>();
+        for (const o of ops) {
+          const f = ((o.value ?? {}) as { derived_frame?: number | null }).derived_frame;
+          if (typeof f === 'number' && f > 1) frames.set(o.path.split('::')[1], f);
+        }
+        if (frames.size > 0) {
+          const patched = before.nodes.map((n) => {
+            const range = frames.get(n.id);
+            if (range === undefined) return n;
+            const os = (n.observed_state ?? {}) as { value?: number; raw_value?: number };
+            const raw = typeof os.raw_value === 'number' ? os.raw_value : os.value;
+            /**
+             * ⛔ A FACTOR WITH NO VALUE IS LEFT WITHOUT ONE. `ObservedStateSchema`
+             * requires `value`, so attaching a range here would mean inventing a
+             * baseline — and a zero baseline is the exact fabrication this lane
+             * refuses ("an absent value is unknown, never zero"). It is also
+             * unnecessary: the baseline gate skips a factor with no value
+             * outright (`if (baseline === undefined) continue`), so an unvalued
+             * factor was never what blocked the analysis. Only a factor that
+             * ALREADY carries a bare amount gets the range.
+             */
+            if (typeof raw !== 'number') { frames.delete(n.id); return n; }
+            framedHere.push({ factor: n.label, range });
+            return { ...n, observed_state: { ...os, value: raw / range, raw_value: raw, cap: range, declared_scale: 'unit_interval' } };
+          });
+          if (framedHere.length > 0) {
+            const reg = await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, {
+              graph: { nodes: patched, edges: before.edges },
+            });
+            if (reg.status !== 200) {
+              failures.push({ path: 'scale_frame', detail: `could not attach a range: http ${reg.status}` });
+              framedHere.length = 0;
+            }
+          }
+        }
+        const rebased = framedHere.length > 0 ? await readGraph(ctx.scenario_id) : null;
+        let baseHash = rebased?.graph_hash ?? before.graph_hash;
         for (let i = 0; i < ops.length; i += 1) {
           const o = ops[i];
           const [optionId, factorId] = o.path.split('::');
@@ -468,10 +534,16 @@ export function createAgentCapabilities(
           revision_before: before.graph_hash,
           revision_after: afterSet?.graph_hash ?? before.graph_hash,
           ...(failures.length > 0 ? { failures } : {}),
+          ...(framedHere.length > 0 ? { ranges_added_for_analysis: framedHere } : {}),
           not_represented:
             'What each option does is now recorded from what the user said, not measured. The model ' +
             'stores each level against the factor\u2019s stated range, so quote the user\u2019s own number back ' +
-            'to them, not the normalised one.',
+            'to them, not the normalised one.' +
+            (framedHere.length > 0
+              ? ' Some factors had no range at all, which would have stopped the analysis running, so one was ' +
+                'taken from the figure itself: ' + framedHere.map((f) => `${f.factor} 0 to ${f.range}`).join(', ') +
+                '. Say so, and invite a correction \u2014 a range is a unit of measurement, not a forecast.'
+              : ''),
         };
       }
 
