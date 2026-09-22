@@ -31,6 +31,7 @@ import { finaliseV5Response } from '../orchestrator-v5/response-finaliser.js';
 import { runAgentTurn, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
 import { createAgentCapabilities, type InternalDispatch } from '../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
 import type { CallStructuredModel } from '../orchestrator-v5/agent-lane/runtime/build-model.js';
+import { onceMoreOnTransportFailure } from '../orchestrator-v5/agent-lane/runtime/transport-retry.js';
 import { ProposalStore } from '../orchestrator-v5/agent-lane/proposal.js';
 import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-binding.js';
 import { budgetFor } from '../orchestrator-v5/agent-lane/model-budgets.js';
@@ -74,7 +75,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     return { status: res.statusCode, json };
   };
 
-  const callModel: CallModel = async (req) => {
+
+  const callModel: CallModel = async (req) => onceMoreOnTransportFailure('conversation', async () => {
     const budget = budgetFor('gpt-5.6-terra', 'conversation');
     const r = await fetch(OPENAI_RESPONSES_URL, {
       method: 'POST',
@@ -95,14 +97,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       throw new Error(`openai_${r.status}: ${text.slice(0, 300)}`);
     }
     return (await r.json()) as { output: Record<string, unknown>[] };
-  };
+  });
 
   /**
    * Structured construction call. Separate from `callModel` because it is a
    * different contract: strict `json_schema` output and its own measured budget
    * (see BANKED_BUDGETS role 'whole'), not the conversation budget.
    */
-  const callStructured: CallStructuredModel = async (reqBody) => {
+  const callStructured: CallStructuredModel = async (reqBody) => onceMoreOnTransportFailure('construction', async () => {
     const r = await fetch(OPENAI_RESPONSES_URL, {
       method: 'POST',
       headers: {
@@ -141,7 +143,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       for (const c of item.content ?? []) if (c.type === 'output_text') text += c.text ?? '';
     }
     return { text, usage: j.usage };
-  };
+  }, (call, err) => log.warn({ err, call }, 'agent-lane transport failure, retrying once'));
 
   app.post('/agent/v1/turn', async (req: FastifyRequest, reply: FastifyReply) => {
     const body = (req.body ?? {}) as Record<string, unknown>;
