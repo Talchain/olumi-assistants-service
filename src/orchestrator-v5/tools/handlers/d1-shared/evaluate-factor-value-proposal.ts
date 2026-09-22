@@ -898,7 +898,41 @@ function evaluateFactorValueProposalImpl(
   //     the existing clarify unchanged (cap !== 1 there, so this exemption
   //     does not apply). The cap-range guard below still runs normally, so
   //     an out-of-[0,1] value on a cap-1 factor is still rejected.
-  const isProportionScaledFactor = cap === 1;
+  /**
+   * ⭐ THE UNIT DECLARES THE SCALE EXACTLY AS A CAP DOES.
+   *
+   * Witnessed on deployed staging (build c12a54d, 22 Sep 2026): the live factor
+   * "Product-Market Fit Investment" carries `unit: 'scale'`, `value: 0.3`, NO
+   * `raw_value` and NO cap. Every way of setting it to 0.8 was refused —
+   * including a bare `0.8` — as "a proportion rather than a value in scale", on
+   * a factor whose OWN PERSISTED VALUE IS 0.3. It could not be set to any sub-1
+   * value, and sub-1 is the only range it has.
+   *
+   * The escape hatch already existed and worked; it was simply keyed on
+   * `factorCap === 1`, which these factors do not carry. Measured directly
+   * against this gate: `unit 'scale', no cap` REFUSED, `unit 'scale',
+   * factorCap 1` ACCEPTED.
+   *
+   * ⚠ CLOSED VOCABULARY, FROM LIVE DATA — NOT A PREDICATE. An open rule ("does
+   *   it look proportional?") would silently reclassify amount units, which is
+   *   the direction that loses user data. These are the proportion-class units
+   *   actually present in the estate (30-day census): `scale` 1,688,
+   *   `unit_interval` 15, `ratio` 6, `proportion` 3.
+   *
+   * ⚠ IT CANNOT WEAKEN THE AMBIGUOUS CASE. An AMOUNT unit is untouched: a bare
+   *   `0.8` on a `months`/`£` factor is still refused and still asks, because
+   *   0.8 months genuinely could mean 0.8 or 80%. On a proportion unit there is
+   *   no second reading to be ambiguous between — pinned by controls.
+   */
+  const PROPORTION_UNIT_TOKENS: ReadonlySet<string> = new Set([
+    'scale',
+    'unit_interval',
+    'ratio',
+    'proportion',
+  ]);
+  const isProportionUnit =
+    typeof factorUnit === 'string' && PROPORTION_UNIT_TOKENS.has(factorUnit.trim().toLowerCase());
+  const isProportionScaledFactor = cap === 1 || isProportionUnit;
   // R2-1 (PR #926 round-2 re-review): the gate above keyed ONLY on a unit
   // string, and records-drafted factors can never carry one (the records
   // grammar has no unit field on claims) — so the whole records population
