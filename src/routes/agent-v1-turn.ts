@@ -30,6 +30,7 @@ import { scenarioAccessDecision } from '../orchestrator-v5/agent-lane/scenario-a
 import { HistoryStore } from '../orchestrator-v5/agent-lane/history-store.js';
 import { internalHeaders } from '../orchestrator-v5/agent-lane/internal-headers.js';
 import { resolveUserIdentity } from '../orchestrator/user-identity.js';
+import { callerIdentityFrom } from '../orchestrator-v5/agent-lane/caller-identity.js';
 import { log } from '../utils/telemetry.js';
 import { composeDirectAnswerResponse } from '../orchestrator-v5/compose.js';
 import { finaliseV5Response } from '../orchestrator-v5/response-finaliser.js';
@@ -264,14 +265,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * Every local witness used guest scenarios, where anonymous is the right
      * answer, so nothing failed until an owned scenario was tried.
      */
-    const identity = await resolveUserIdentity(req, String(req.id));
-    if (identity.mode === 'refused') {
+    const caller = callerIdentityFrom(await resolveUserIdentity(req, String(req.id)));
+    if (caller.kind === 'refuse') {
       // A presented-but-unusable token is refused, never downgraded to guest:
       // silently treating a signed-in user as anonymous is how someone else's
       // scenario becomes readable.
-      return reply.code(401).send({ error: 'SIGN_IN_REQUIRED', detail: identity.reason });
+      return reply.code(401).send({ error: 'SIGN_IN_REQUIRED', detail: caller.reason });
     }
-    const userId = identity.mode === 'verified' ? identity.userId : null;
+    const userId = caller.userId;
 
     // A session is a correlation token: bound once, verified every time.
     const refusal = sessions.check(sessionId, userId, scenarioId);
