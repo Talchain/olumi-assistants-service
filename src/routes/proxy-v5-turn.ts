@@ -40,7 +40,23 @@ import { recordExplicitTurnStop } from "./turn-stop.js";
 // Constants
 // ---------------------------------------------------------------------------
 
-const INTERNAL_TARGET = "/orchestrate/v2/turn";
+/**
+ * Where the browser proxy forwards a v5 turn.
+ *
+ * ⭐ THIS IS THE WHOLE UI SWITCH. The staging UI already posts to
+ * /proxy/v5/turn and its only host source is VITE_V5_ENDPOINT, so moving the
+ * product onto the Agent lane is this one variable — no UI deploy and no CSP
+ * edit, and the rollback is unsetting it.
+ *
+ * ⛔ Resolved from an ENUM, never a path. A free-form env target would let a
+ * config change aim unauthenticated browser traffic at any internal route.
+ *
+ * ⚠ The agent route must ALSO be mounted (AGENT_LANE_ENABLED=true) — a
+ * separate flag on purpose: mounting an inert route and sending the product's
+ * traffic at it are different decisions with different blast radii.
+ */
+const INTERNAL_TARGET =
+  config.proxy.proxyV5Target === "agent" ? "/agent/v1/turn" : "/orchestrate/v2/turn";
 
 /** Headers forwarded from the browser request to the internal CEE call. */
 /** EXPORTED for the streamed sibling — one forwarding policy, not two. */

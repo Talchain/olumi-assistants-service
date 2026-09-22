@@ -219,6 +219,29 @@ const UNSCANNED_COMPOSE_FILES: Readonly<
   // may still be added here later, but only WITH its cost written down; it may
   // never sit here by having been forgotten, because a forgotten file is in
   // neither list and fails.
+  //
+  // ⚠ NO LONGER EMPTY AS OF 2026-09-22, AND THE COST IS WRITTEN DOWN.
+  'routes/agent-v1-turn.ts': {
+    siteCount: 2,
+    keyable: true,
+    why:
+      'The agent lane composes an answer the OpenAI Agent produced, not one the ' +
+      'v5 validator produced. This ledger asks a single question of each site — ' +
+      'does it consume the validator verdict before speaking — and that question ' +
+      'has no answer here, because no validator verdict exists on this path: the ' +
+      'route calls composeDirectAnswerResponse directly with the Agent text and ' +
+      'Olumi-authored disclosures. Registering it in SCANNED_FILES would force a ' +
+      'stance on a question the code never asks, which is worse than declaring ' +
+      'the gap. ' +
+      'THE COST, stated plainly: `ungated: []` below no longer speaks for every ' +
+      'compose site in src/ — it speaks for every site MINUS these two. The two ' +
+      'sites are the substantive turn reply and the refusal for a non-message ' +
+      'turn kind. Both are gated by their own lane tests (the disclosure is ' +
+      'deterministic and Olumi-authored; the read-only refusal is asserted in ' +
+      'three independent layers). ' +
+      'This entry should be DELETED, not grown, when the agent lane either ' +
+      'adopts the validator path or is removed.',
+  },
 };
 
 /**
