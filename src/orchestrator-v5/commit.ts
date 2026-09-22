@@ -1603,7 +1603,14 @@ export async function commitDirectAnswer(
   //
   //    The `ui_directive` block goes too: it exists to "point the UI at the node
   //    the user just changed", and on a replay no node was changed.
-  if (appendOutcome.replayedPriorTurn === true) {
+  // Both verdicts mean THE SAME THING about state — the RPC no-op'd and nothing
+  // was written — so they share one reconciliation: reread authoritative current
+  // state, mark the patch `noop`, drop the stale directive. Only the prose can
+  // differ, because "already recorded" is TRUE for a replay and FALSE for a
+  // reused id carrying a different instruction.
+  const priorTurnReplay = appendOutcome.replayedPriorTurn === true;
+  const priorTurnConflict = appendOutcome.priorTurnConflict === true;
+  if (priorTurnReplay || priorTurnConflict) {
     // ⭐⭐ A RECOVERY MUST RECONCILE AGAINST AUTHORITATIVE CURRENT STATE, NOT
     //    MERELY DECLINE TO LIE.
     //
@@ -1675,8 +1682,11 @@ export async function commitDirectAnswer(
         turn_row_id: persistedRowId,
         current_state_reconciled: currentState !== null,
       },
-      'V5 commit — this turn REPLAYED an already-committed request; nothing was ' +
-        'written, and the response reports authoritative current state',
+      priorTurnConflict
+        ? 'V5 commit — this turn REUSED a committed operation id for a DIFFERENT ' +
+          'request; nothing was written, and the response refuses truthfully'
+        : 'V5 commit — this turn REPLAYED an already-committed request; nothing was ' +
+          'written, and the response reports authoritative current state',
     );
 
     const correctedBlocks =
@@ -1699,7 +1709,13 @@ export async function commitDirectAnswer(
     responseWithModelVersionReceipt = {
       ...responseWithModelVersionReceipt,
       assistant_text:
-        'That change had already been recorded, so nothing new was written just now. ' +
+        (priorTurnConflict
+          ? // ⛔ NOT "already recorded" — this instruction was never carried out.
+            // Saying it had been would be the same lie in a politer register.
+            'I did not make that change. This request arrived under an identifier ' +
+            'that had already been used for a different instruction, so I stopped ' +
+            'rather than risk applying the wrong edit. Nothing was written. '
+          : 'That change had already been recorded, so nothing new was written just now. ') +
         (currentSentence ?? "I couldn't read the current value just now — open the model to check it."),
       ...(correctedBlocks === null ? {} : { blocks: correctedBlocks }),
     } as typeof responseWithModelVersionReceipt;

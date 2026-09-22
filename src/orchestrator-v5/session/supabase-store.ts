@@ -276,9 +276,11 @@ export class SupabaseSessionStore implements SessionStore {
    * harms. A non-graph turn pays no extra read.
    */
   async append(write: SessionTurnWrite): Promise<SessionAppendOutcome> {
-    const replayed = write.graph == null ? false : await this.isReplayOfSameRequest(write);
+    const prior = write.graph == null ? 'new' : await this.classifyPriorTurn(write);
     const outcome = await this.appendThroughRpc(write);
-    return replayed ? { ...outcome, replayedPriorTurn: true } : outcome;
+    if (prior === 'replay') return { ...outcome, replayedPriorTurn: true };
+    if (prior === 'conflict') return { ...outcome, priorTurnConflict: true };
+    return outcome;
   }
 
   /**
@@ -289,7 +291,7 @@ export class SupabaseSessionStore implements SessionStore {
    * handed a second failure because a best-effort read did not answer. The same
    * discipline as {@link committedTurnRowId}, whose swallow this mirrors.
    */
-  private async isReplayOfSameRequest(write: SessionTurnWrite): Promise<boolean> {
+  private async classifyPriorTurn(write: SessionTurnWrite): Promise<'replay' | 'conflict' | 'new'> {
     try {
       const { data, error } = await this.client
         .from('v5_conversation_turns')
@@ -299,7 +301,7 @@ export class SupabaseSessionStore implements SessionStore {
         .limit(1);
       if (!error) {
         const row = ((data as Array<{ request_hash?: unknown }> | null) ?? [])[0];
-        if (!row) return false;
+        if (!row) return 'new';
 
         // ⛔ `(scenario_id, turn_id)` ANSWERS "WILL THE RPC NO-OP?", NOT "IS THIS
         //    THE SAME REQUEST REPLAYING?". `turn_id` is CLIENT-SUPPLIED
@@ -316,14 +318,32 @@ export class SupabaseSessionStore implements SessionStore {
         //    `row.request_hash !== requestDigestFor(input)` mismatch falls to
         //    `committed_turn_unverified` rather than claiming recovery.
         //
-        //    Mismatch ⇒ null ⇒ the caller composes fresh text, i.e. exactly
-        //    today's behaviour. Never a wrong answer, only no answer.
-        return typeof row.request_hash === 'string' && row.request_hash === write.request_hash;
+        //    ⛔ THE MISMATCH ARM USED TO FALL BACK TO "the caller composes fresh
+        //    text … never a wrong answer, only no answer". MEASURED on deployed
+        //    staging `a459d23`, two trials, 3s settle — that is false. Reusing a
+        //    turn id with a DIFFERENT instruction commits nothing (the durable
+        //    key holds) and then tells the user:
+        //
+        //        "Updated Sales Cycle Length from 14 months to 25 months."
+        //        blocks[0] graph_patch status:'applied' after.raw_value: 25
+        //
+        //    while the model still holds 14. Fresh text is composed from the
+        //    PROPOSED patch, so the fallback narrates an edit that never
+        //    happened AND marks the wire contract `applied`. That is a wrong
+        //    answer, in the direction of the number the user just asked for.
+        //
+        //    So a mismatch is now its own verdict. The caller reconciles against
+        //    authoritative current state exactly as it does for a replay — the
+        //    same reread, the same `noop` patch, the same dropped directive —
+        //    and only the prose differs, because "already recorded" would itself
+        //    be false here.
+        if (typeof row.request_hash !== 'string') return 'new';
+        return row.request_hash === write.request_hash ? 'replay' : 'conflict';
       }
     } catch {
       // Fall through: an unreadable row is an unknown, not a fact.
     }
-    return false;
+    return 'new';
   }
 
   private async appendThroughRpc(write: SessionTurnWrite): Promise<SessionAppendOutcome> {
