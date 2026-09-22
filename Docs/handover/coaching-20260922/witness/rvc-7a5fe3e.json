@@ -1,0 +1,72 @@
+{
+  "build": "7a5fe3e",
+  "owner": true,
+  "rows": [
+    {
+      "arm": "REPLAY",
+      "name": "no duplicate turn or version",
+      "state": "PASS",
+      "detail": "Δturns=0 Δversions=0"
+    },
+    {
+      "arm": "REPLAY",
+      "name": "says already recorded, claims no edit",
+      "state": "PASS",
+      "detail": "\"That change had already been recorded, so nothing new was writ\""
+    },
+    {
+      "arm": "REPLAY",
+      "name": "reconciles to authoritative current state (17)",
+      "state": "PASS",
+      "detail": "\"That change had already been recorded, so nothing new was written just now. Sales Cycle Le\""
+    },
+    {
+      "arm": "REPLAY",
+      "name": "graph_patch is noop",
+      "state": "PASS",
+      "detail": "status=noop"
+    },
+    {
+      "arm": "REPLAY",
+      "name": "⭐ the original receipt is PRESERVED",
+      "state": "PASS",
+      "detail": "model_version_receipt=present"
+    },
+    {
+      "arm": "CONFLICT",
+      "name": "nothing was written",
+      "state": "PASS",
+      "detail": "raw_value=14 Δturns=0"
+    },
+    {
+      "arm": "CONFLICT",
+      "name": "does NOT claim the new value was applied",
+      "state": "PASS",
+      "detail": "\"I did not make that change. This request arrived under an iden\""
+    },
+    {
+      "arm": "CONFLICT",
+      "name": "states plainly it did not make the change",
+      "state": "PASS",
+      "detail": "\"I did not make that change. This request arrived under an iden\""
+    },
+    {
+      "arm": "CONFLICT",
+      "name": "is NOT told \"already recorded\"",
+      "state": "PASS",
+      "detail": ""
+    },
+    {
+      "arm": "CONFLICT",
+      "name": "graph_patch does NOT say applied",
+      "state": "PASS",
+      "detail": "status=noop after={\"unit\":\"months\",\"value\":0.7,\"sour"
+    },
+    {
+      "arm": "CONFLICT",
+      "name": "⭐ the prior receipt is ABSENT",
+      "state": "PASS",
+      "detail": "model_version_receipt=absent"
+    }
+  ]
+}
