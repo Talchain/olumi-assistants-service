@@ -27,6 +27,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { config } from '../config/index.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import { scenarioAccessDecision } from '../orchestrator-v5/agent-lane/scenario-access.js';
+import { HistoryStore } from '../orchestrator-v5/agent-lane/history-store.js';
 import { log } from '../utils/telemetry.js';
 import { composeDirectAnswerResponse } from '../orchestrator-v5/compose.js';
 import { finaliseV5Response } from '../orchestrator-v5/response-finaliser.js';
@@ -43,7 +44,7 @@ import { disclosuresFor, withDisclosures } from '../orchestrator-v5/agent-lane/d
 const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
 
 /** The conversation of record stays Olumi's; this is a per-process cache. */
-const histories = new Map<string, unknown[]>();
+const histories = new HistoryStore();
 const proposals = new ProposalStore();
 const sessions = new SessionBindingRegistry();
 
@@ -224,7 +225,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     }
 
     const capabilities = createAgentCapabilities(dispatch, proposals, callStructured, mode);
-    const history = histories.get(sessionId) ?? [];
+    const history = histories.get(sessionId);
     const budget = budgetFor('gpt-5.6-terra', 'conversation');
 
     let result;
