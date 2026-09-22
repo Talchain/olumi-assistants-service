@@ -93,8 +93,25 @@ import { emit, log, TelemetryEvents } from "../utils/telemetry.js";
 import { SSE_HEARTBEAT_INTERVAL_MS } from "../config/timeouts.js";
 import { config } from "../config/index.js";
 
-/** The buffered turn both streamed routes forward to. Single source of truth. */
-export const STREAMED_TURN_INTERNAL_TARGET = "/orchestrate/v2/turn";
+/**
+ * The buffered turn both streamed routes forward to. Single source of truth.
+ *
+ * ⛔ THIS WAS HARDCODED, AND IT SILENTLY DEFEATED `PROXY_V5_TARGET`.
+ * Measured on deployed staging: the buffered `/proxy/v5/turn` honoured the flag
+ * and reached `/agent/v1/turn`, while the UI's CONVERSATIONAL traffic goes
+ * through `/proxy/v5/turn/stream`, which landed here and went to the
+ * orchestrator regardless. The result was the worst kind of failure — the
+ * product answered perfectly well, so nothing looked broken, and the answers
+ * were simply coming from the other engine. A live probe of the stream endpoint
+ * returned CEE's reply with no `_agent` sidecar; the Render log showed
+ * `/orchestrate/v2/turn` at 64-73 s behind every streamed turn.
+ *
+ * The two proxies are peers over ONE buffered turn, so they must resolve the
+ * same target from the same enum. A second copy of that decision is exactly the
+ * drift this file's own header warns about.
+ */
+export const STREAMED_TURN_INTERNAL_TARGET =
+  config.proxy.proxyV5Target === "agent" ? "/agent/v1/turn" : "/orchestrate/v2/turn";
 
 const EVENT_STREAM = "text/event-stream";
 const SSE_TRANSPORT_HEADERS = {

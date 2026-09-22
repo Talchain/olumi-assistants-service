@@ -1,0 +1,315 @@
+{
+  "goal": {
+    "metric": "Monthly recurring revenue",
+    "operator": ">=",
+    "value": 20000,
+    "unit": "GBP/month",
+    "horizon_months": 12,
+    "provenance": "explicit"
+  },
+  "constraints": [
+    {
+      "metric": "Monthly churn rate",
+      "operator": "<",
+      "value": 4,
+      "unit": "%",
+      "provenance": "explicit"
+    }
+  ],
+  "options": [
+    {
+      "label": "Increase the Pro plan price to £59/month with the next Pro feature release",
+      "provenance": "explicit",
+      "interventions": [
+        {
+          "factor_label": "Pro plan monthly price",
+          "value": 59,
+          "unit": "GBP/month",
+          "provenance": "explicit"
+        }
+      ]
+    },
+    {
+      "label": "Keep the Pro plan price at £49/month through the next Pro feature release",
+      "provenance": "ai_proposed",
+      "interventions": [
+        {
+          "factor_label": "Pro plan monthly price",
+          "value": 49,
+          "unit": "GBP/month",
+          "provenance": "explicit"
+        }
+      ]
+    },
+    {
+      "label": "Defer the price-change decision until price sensitivity, churn, and feature-value evidence is available",
+      "provenance": "ai_proposed",
+      "interventions": []
+    }
+  ],
+  "factors": [
+    {
+      "label": "Pro plan monthly price",
+      "role": "controllable",
+      "baseline_known": true,
+      "baseline_value": 49,
+      "unit": "GBP/month",
+      "provenance": "explicit"
+    },
+    {
+      "label": "Next Pro feature release timing",
+      "role": "controllable",
+      "baseline_known": false,
+      "baseline_value": null,
+      "unit": null,
+      "provenance": "explicit"
+    },
+    {
+      "label": "Next Pro feature release scope and customer value",
+      "role": "controllable",
+      "baseline_known": false,
+      "baseline_value": null,
+      "unit": null,
+      "provenance": "inferred"
+    },
+    {
+      "label": "Monthly recurring revenue",
+      "role": "observable",
+      "baseline_known": false,
+      "baseline_value": null,
+      "unit": "GBP/month",
+      "provenance": "explicit"
+    },
+    {
+      "label": "Monthly churn rate",
+      "role": "observable",
+      "baseline_known": false,
+      "baseline_value": null,
+      "unit": "%",
+      "provenance": "explicit"
+    },
+    {
+      "label": "Pro customer count",
+      "role": "observable",
+      "baseline_known": false,
+      "baseline_value": null,
+      "unit": "customers",
+      "provenance": "ai_proposed"
+    },
+    {
+      "label": "Average revenue per Pro customer",
+      "role": "observable",
+      "baseline_known": false,
+      "baseline_value": null,
+      "unit": "GBP/month",
+      "provenance": "ai_proposed"
+    },
+    {
+      "label": "Pro trial-to-paid conversion rate",
+      "role": "observable",
+      "baseline_known": false,
+      "baseline_value": null,
+      "unit": "%",
+      "provenance": "ai_proposed"
+    },
+    {
+      "label": "New Pro subscriptions",
+      "role": "observable",
+      "baseline_known": false,
+      "baseline_value": null,
+      "unit": "subscriptions/month",
+      "provenance": "ai_proposed"
+    },
+    {
+      "label": "Customer perceived Pro plan value",
+      "role": "observable",
+      "baseline_known": false,
+      "baseline_value": null,
+      "unit": null,
+      "provenance": "ai_proposed"
+    },
+    {
+      "label": "Customer price sensitivity",
+      "role": "external",
+      "baseline_known": false,
+      "baseline_value": null,
+      "unit": null,
+      "provenance": "ai_proposed"
+    },
+    {
+      "label": "Competitor pricing and feature positioning",
+      "role": "external",
+      "baseline_known": false,
+      "baseline_value": null,
+      "unit": null,
+      "provenance": "ai_proposed"
+    },
+    {
+      "label": "Existing-customer migration and grandfathering policy",
+      "role": "controllable",
+      "baseline_known": false,
+      "baseline_value": null,
+      "unit": null,
+      "provenance": "ai_proposed"
+    }
+  ],
+  "risks": [
+    {
+      "label": "The higher price increases monthly churn above the 4% constraint",
+      "provenance": "ai_proposed"
+    },
+    {
+      "label": "The higher price reduces Pro conversion or new Pro subscriptions",
+      "provenance": "ai_proposed"
+    },
+    {
+      "label": "The feature release does not create enough perceived value to justify the price increase",
+      "provenance": "ai_proposed"
+    },
+    {
+      "label": "Existing Pro customers react negatively if the increase applies to them without a migration or grandfathering policy",
+      "provenance": "ai_proposed"
+    },
+    {
+      "label": "Competitor alternatives make a £59/month Pro plan less attractive",
+      "provenance": "ai_proposed"
+    },
+    {
+      "label": "A price increase may not produce sufficient customer-count growth or retention to reach £20k MRR within 12 months",
+      "provenance": "ai_proposed"
+    }
+  ],
+  "outcomes": [
+    {
+      "label": "Monthly recurring revenue",
+      "provenance": "explicit"
+    },
+    {
+      "label": "Monthly churn rate",
+      "provenance": "explicit"
+    },
+    {
+      "label": "Average revenue per Pro customer",
+      "provenance": "ai_proposed"
+    },
+    {
+      "label": "Pro customer count",
+      "provenance": "ai_proposed"
+    },
+    {
+      "label": "New Pro subscriptions",
+      "provenance": "ai_proposed"
+    },
+    {
+      "label": "Pro trial-to-paid conversion rate",
+      "provenance": "ai_proposed"
+    },
+    {
+      "label": "Customer perceived Pro plan value",
+      "provenance": "ai_proposed"
+    }
+  ],
+  "links": [
+    {
+      "from": "Pro plan monthly price",
+      "to": "Average revenue per Pro customer",
+      "direction": "positive",
+      "provenance": "ai_proposed"
+    },
+    {
+      "from": "Average revenue per Pro customer",
+      "to": "Monthly recurring revenue",
+      "direction": "positive",
+      "provenance": "ai_proposed"
+    },
+    {
+      "from": "Pro customer count",
+      "to": "Monthly recurring revenue",
+      "direction": "positive",
+      "provenance": "ai_proposed"
+    },
+    {
+      "from": "Monthly churn rate",
+      "to": "Pro customer count",
+      "direction": "negative",
+      "provenance": "ai_proposed"
+    },
+    {
+      "from": "New Pro subscriptions",
+      "to": "Pro customer count",
+      "direction": "positive",
+      "provenance": "ai_proposed"
+    },
+    {
+      "from": "Pro trial-to-paid conversion rate",
+      "to": "New Pro subscriptions",
+      "direction": "positive",
+      "provenance": "ai_proposed"
+    },
+    {
+      "from": "Pro plan monthly price",
+      "to": "Pro trial-to-paid conversion rate",
+      "direction": "negative",
+      "provenance": "ai_proposed"
+    },
+    {
+      "from": "Pro plan monthly price",
+      "to": "Monthly churn rate",
+      "direction": "positive",
+      "provenance": "ai_proposed"
+    },
+    {
+      "from": "Next Pro feature release scope and customer value",
+      "to": "Customer perceived Pro plan value",
+      "direction": "positive",
+      "provenance": "ai_proposed"
+    },
+    {
+      "from": "Customer perceived Pro plan value",
+      "to": "Pro trial-to-paid conversion rate",
+      "direction": "positive",
+      "provenance": "ai_proposed"
+    },
+    {
+      "from": "Customer perceived Pro plan value",
+      "to": "Monthly churn rate",
+      "direction": "negative",
+      "provenance": "ai_proposed"
+    },
+    {
+      "from": "Customer price sensitivity",
+      "to": "Pro trial-to-paid conversion rate",
+      "direction": "negative",
+      "provenance": "ai_proposed"
+    },
+    {
+      "from": "Customer price sensitivity",
+      "to": "Monthly churn rate",
+      "direction": "positive",
+      "provenance": "ai_proposed"
+    },
+    {
+      "from": "Competitor pricing and feature positioning",
+      "to": "Customer perceived Pro plan value",
+      "direction": "negative",
+      "provenance": "ai_proposed"
+    },
+    {
+      "from": "Existing-customer migration and grandfathering policy",
+      "to": "Monthly churn rate",
+      "direction": "unknown",
+      "provenance": "ai_proposed"
+    }
+  ],
+  "unknowns": [
+    "Current monthly recurring revenue and the MRR gap to £20k",
+    "Current monthly churn rate and its measurement definition",
+    "Current Pro customer count, acquisition rate, and retention by cohort",
+    "Whether £59 would apply to new customers, existing customers, or both",
+    "Whether and how long existing Pro customers would be grandfathered",
+    "Expected scope, delivery date, and customer-perceived value of the next Pro feature release",
+    "Pro conversion rate and demand elasticity at £49 versus £59",
+    "Competitor prices, features, and customer switching alternatives",
+    "Whether the £20k MRR target is gross MRR, net MRR, or another MRR definition"
+  ]
+}
