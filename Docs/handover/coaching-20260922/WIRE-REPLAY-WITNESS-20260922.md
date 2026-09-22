@@ -184,3 +184,60 @@ catch it.
 
 Until the §5 blocker is resolved, a GREEN run proves turn identity and no-duplicate, but
 **not** receipt recovery. Do not report it as the full acceptance contract.
+
+---
+
+## 8. ⚠ THE WITNESS ABOVE COVERS ONE OF TWO RECOVERY ROUTES
+
+"Replay recovery" is **two** mechanisms and they do **not** return the same thing.
+
+### Route 1 — a clean retry, nothing in between (what §2 and §7 exercise)
+
+`append_turn_atomic_v5`'s own replay arm, lines 82-86:
+`SELECT id, model_version_mutation_id, model_version_created` — the turn id **and
+the full receipt**. This is the route the acceptance contract is written against.
+
+### Route 2 — the `superseded` path (NOT exercised by the harness)
+
+`supabase-store.ts:1178`, reached only when `classifyAtomicFenceError` yields
+`verdict === 'superseded'` — i.e. a **different, later turn started on the same
+scenario**:
+
+```ts
+private async tryFirstWriteExemptRecovery(write): Promise<{ id: string } | null> {
+  const id = await this.committedTurnRowId(write.scenario_id, write.turn_id);
+  return id === null ? null : { id };
+}
+```
+
+`committedTurnRowId` is `.select('id')` — **one column.**
+
+**VERIFIED: Route 2 cannot return a receipt.** Its docblock is honest about its
+scope — *"a read-only idempotency answer… the honest answer to a retry is the
+existing row id"*. It was built to stop a 500, not to satisfy a receipt contract.
+
+**UNVERIFIED, deliberately:** whether Route 2 is actually *reachable* for a retry
+after PR #1677. That depends on `IF`/`END IF` nesting across a nested function
+call (v5 → v4). ⛔ **Do not settle it by reading.** Ordering claims read off a
+function body are exactly what the 21 Sep note got wrong — it ordered statements
+by character offset, which cannot see block nesting. **Execute it.**
+
+### REQUIRED FOURTH PHASE for the GREEN re-run
+
+The harness in `witness/` has three phases and covers **Route 1 only**. Before
+this PR may be reported as satisfying *"recover the original authoritative
+receipt"*, add:
+
+> **Phase 4** — original mutation commits → **a second, DIFFERENT turn commits on
+> the same scenario** (this is what makes the fence read `superseded`) → *then*
+> retry the ORIGINAL `turn_id` → assert the recovered `mutation_id` equals the
+> original's.
+
+If phase 4 lands on Route 2, the retry recovers a row id with **no
+`mutation_id` and no `model_version_created`**, and the caller cannot quote the
+original receipt. Whether that is acceptable is a product question — but it must
+be **observed**, not assumed.
+
+⛔ **This phase is invisible on a guest scenario**, because a guest mints no
+receipt at all (§5), so the two routes look identical. Phase 4 is therefore
+blocked on the same staging test account as the rest of the receipt half.
