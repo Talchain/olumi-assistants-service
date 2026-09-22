@@ -129,7 +129,7 @@ const AGENT_INSTRUCTIONS = [
    * of three carried `interventions: null`. An option that sets nothing cannot
    * be compared with one that does.
    */
-  'get_canonical_state also reports `options_that_change_nothing`. An option in that list sets no factor, so it cannot be compared and it blocks the whole analysis. Raise it when you describe the model \u2014 do not wait for the analysis to refuse \u2014 ask what that option would actually change,, since only a rebuild can encode it.',
+  'get_canonical_state also reports `options_that_change_nothing`. An option in that list sets no factor, so it cannot be compared and it blocks the whole analysis. Raise it when you describe the model \u2014 do not wait for the analysis to refuse \u2014 ask what that option would actually change, and record the answer with propose_option_interventions.',
   'British English. Concise but substantive.',
 ].join(' ');
 
@@ -467,6 +467,27 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ...(graphHash !== undefined ? { graph_hash: graphHash } : {}),
       ...(analysisReady !== undefined ? { analysis_ready: analysisReady } : {}),
       ...(draftGraph !== undefined ? { draft_graph: draftGraph } : {}),
+      /**
+       * ⭐ SAY WHICH PATH SERVED THIS TURN.
+       *
+       * ⛔ MEASURED: the estate's `Live user journey against deployed staging`
+       * gate fails with "turn 1: `_diagnostic_trace.exit_path` missing — cannot
+       * tell which path served this turn". With `PROXY_V5_TARGET=agent` every
+       * browser turn comes through here, and the orchestrator's trace never
+       * runs, so nothing downstream could name the producer. An observer that
+       * cannot identify the producer cannot attribute a defect to it.
+       *
+       * Underscore-prefixed because `OlumiResponseSchema` is `.strict()`: a
+       * sidecar is the established way past it, which is why `_agent` already
+       * travels this way.
+       */
+      _diagnostic_trace: {
+        exit_path: 'agent_lane_v1',
+        agent_mode: mode,
+        hops: result.hops,
+        stopped_reason: result.stopped_reason,
+        tools_called: result.tool_calls.map((c) => c.name),
+      },
       _agent: {
         session_id: sessionId,
         mode,
