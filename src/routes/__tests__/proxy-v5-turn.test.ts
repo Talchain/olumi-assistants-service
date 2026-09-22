@@ -15,6 +15,7 @@ const mockConfig = {
     browserProxyEnabled: true,
     browserProxyAllowedOrigins: `${STAGING_ORIGIN},http://localhost:5173`,
     browserProxyTimeoutMs: 5_000, // Short for tests
+    proxyV5Target: "agent",
   },
   auth: {
     assistApiKey: TEST_ASSIST_KEY,
@@ -33,7 +34,7 @@ vi.mock("../../utils/telemetry.js", () => ({
 }));
 
 // Import after mocks
-const { proxyV5TurnRoute } = await import("../proxy-v5-turn.js");
+const { proxyV5TurnRoute, resolveProxyInternalTarget } = await import("../proxy-v5-turn.js");
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -88,6 +89,21 @@ function buildApp(opts?: {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+describe("explicit AI comparison target", () => {
+  it("forces conventional independently of deployment default", () => {
+    expect(resolveProxyInternalTarget("conventional")).toBe("/orchestrate/v2/turn");
+  });
+
+  it("forces OpenAI independently of deployment default", () => {
+    expect(resolveProxyInternalTarget("openai")).toBe("/agent/v1/turn");
+  });
+
+  it("keeps the deployment default for an absent or invalid mode", () => {
+    expect(resolveProxyInternalTarget(undefined)).toBe("/agent/v1/turn");
+    expect(resolveProxyInternalTarget("anything-else")).toBe("/agent/v1/turn");
+  });
+});
 
 describe("POST /proxy/v5/turn", () => {
   let app: FastifyInstance;
