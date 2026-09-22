@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { HistoryStore, trimToRecentTurns } from '../history-store.js';
+import { dropDanglingCalls, HistoryStore, trimToRecentTurns } from '../history-store.js';
 
 /** One well-formed turn: user message, reasoning, call, output, answer. */
 const turn = (n: number) => [
@@ -88,3 +88,37 @@ describe('HistoryStore', () => {
     expect(users).toHaveLength(2);
   });
 });
+
+describe('a stored history is VALID INPUT by construction', () => {
+  /**
+   * ⛔ Measured in the deployed service's logs: one `function_call` with no
+   * output made every subsequent turn 502 — permanently, because the bad item
+   * stayed in the stored history. The cause is fixed in the loop; this is the
+   * guard that stops the class recurring through any other writer.
+   */
+  const call = (id: string) => ({ type: 'function_call', name: 'get_canonical_state', arguments: '{}', call_id: id });
+  const output = (id: string) => ({ type: 'function_call_output', call_id: id, output: '{}' });
+
+  it('drops a call nothing answered, and keeps the answered one', () => {
+    const kept = dropDanglingCalls([{ role: 'user' }, call('a'), call('b'), output('a')]);
+    expect(kept).toEqual([{ role: 'user' }, call('a'), output('a')]);
+  });
+
+  it('never drops an OUTPUT — that is the API’s other rejection', () => {
+    const items = [output('ghost'), { role: 'user' }];
+    expect(dropDanglingCalls(items)).toEqual(items);
+  });
+
+  it('leaves a well-formed history untouched — the contrast control', () => {
+    const items = [{ role: 'user' }, call('a'), output('a'), { type: 'message' }];
+    expect(dropDanglingCalls(items)).toEqual(items);
+  });
+
+  it('the store applies it on read', () => {
+    const store = new HistoryStore();
+    store.set('s', [{ role: 'user' }, call('a'), call('orphan'), output('a')]);
+    const got = store.get('s');
+    expect(got.filter((i) => (i as { type?: string }).type === 'function_call')).toEqual([call('a')]);
+  });
+});
+

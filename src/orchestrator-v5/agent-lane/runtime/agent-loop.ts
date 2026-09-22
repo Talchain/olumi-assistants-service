@@ -108,9 +108,30 @@ export async function runAgentTurn(
       max_output_tokens: input.maxOutputTokens,
     });
     const out = resp.output ?? [];
-    const call = out.find((i) => i.type === 'function_call');
+    /**
+     * ⛔ EVERY CALL IN THE OUTPUT, NOT THE FIRST ONE.
+     *
+     * This was `out.find(...)` while the line below pushed the WHOLE output
+     * array into the conversation. When the model emitted two calls in one
+     * turn — which it does, unprompted — the second entered history with no
+     * `function_call_output` beside it, and the Responses API refused the NEXT
+     * request outright:
+     *
+     *   Error: openai_400: "No tool output found for function call call_NFIf…"
+     *   POST /agent/v1/turn status=502 duration_ms=27505
+     *
+     * So the session was poisoned PERMANENTLY: turn 1 answered, every turn
+     * after it 502'd. Read from the deployed service's own logs, and it is
+     * exactly what the estate's live-journey gate had been measuring — turn 1
+     * HTTP 200 in 92.7 s, turn 2 HTTP 502 in 27.7 s, on 4 of 5 samples.
+     *
+     * The invariant this now keeps is the API's, not the bug's: the items this
+     * turn hands on must be valid INPUT for the next request, which means one
+     * output per call, always — including at the hop limit.
+     */
+    const calls = out.filter((i) => i.type === 'function_call');
 
-    if (call === undefined) {
+    if (calls.length === 0) {
       items.push(...out);
       return {
         assistant_text: textOf(out),
@@ -123,27 +144,30 @@ export async function runAgentTurn(
       };
     }
 
-    const result: ToolResult = await dispatchTool(
-      String(call.name), String(call.arguments ?? '{}'), input.ctx, caps, mode,
-    );
-    if (result.mutated) mutated = true;
-    toolCalls.push({
-      name: String(call.name),
-      ok: result.ok,
-      mutated: result.mutated,
-      // Identity only — never the tool's payload.
-      ...(typeof result.proposal_id === 'string' ? { proposal_id: result.proposal_id } : {}),
-      ...(typeof result.outcome === 'string' ? { outcome: result.outcome } : {}),
-      ...(typeof result.refusal === 'string' ? { refusal: result.refusal } : {}),
-    });
-    toolResults.push(result);
-
-    // The whole output array first — the reasoning item must accompany the call.
-    items.push(...out, {
-      type: 'function_call_output',
-      call_id: call.call_id,
-      output: JSON.stringify(result),
-    });
+    // The whole output array first — the reasoning item must accompany the
+    // calls — then one output per call, in the order they were made.
+    items.push(...out);
+    for (const call of calls) {
+      const result: ToolResult = await dispatchTool(
+        String(call.name), String(call.arguments ?? '{}'), input.ctx, caps, mode,
+      );
+      if (result.mutated) mutated = true;
+      toolCalls.push({
+        name: String(call.name),
+        ok: result.ok,
+        mutated: result.mutated,
+        // Identity only — never the tool's payload.
+        ...(typeof result.proposal_id === 'string' ? { proposal_id: result.proposal_id } : {}),
+        ...(typeof result.outcome === 'string' ? { outcome: result.outcome } : {}),
+        ...(typeof result.refusal === 'string' ? { refusal: result.refusal } : {}),
+      });
+      toolResults.push(result);
+      items.push({
+        type: 'function_call_output',
+        call_id: call.call_id,
+        output: JSON.stringify(result),
+      });
+    }
   }
 
   // ⛔ A hop limit is reported, never disguised as an answer. Silently returning
