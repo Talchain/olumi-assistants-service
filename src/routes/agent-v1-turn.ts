@@ -232,8 +232,37 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       answerKind: 'substantive',
     });
     const finalised = finaliseV5Response(composed, { scenarioId });
+
+    /**
+     * The minimum the canvas needs to notice the model moved.
+     *
+     * ⛔ WITHOUT `graph_hash` THE CANVAS SILENTLY STOPS UPDATING. Measured:
+     * CEE's own conversational turn returns `graph_hash` and `analysis_ready`
+     * and this route returned neither, so after the Agent built a 34-node model
+     * the UI had nothing telling it the revision had changed. The reply read
+     * fine and the board stayed empty — the worst kind of failure, because
+     * nothing errors.
+     *
+     * Read back from the persisted graph, not from what a tool returned: the
+     * hash the client caches must be the hash the product would serve it.
+     */
+    let graphHash: string | undefined;
+    let analysisReady: unknown;
+    try {
+      const after = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {});
+      if (after.status === 200) {
+        graphHash = typeof after.json.graph_hash === 'string' ? after.json.graph_hash : undefined;
+        analysisReady = after.json.analysis_ready;
+      }
+    } catch {
+      // A readback failure must not lose the user's answer. The turn still
+      // returns; the client simply does not learn the new revision this time.
+    }
+
     return reply.code(200).send({
       ...finalised,
+      ...(graphHash !== undefined ? { graph_hash: graphHash } : {}),
+      ...(analysisReady !== undefined ? { analysis_ready: analysisReady } : {}),
       _agent: {
         session_id: sessionId,
         mode,
