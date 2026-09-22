@@ -453,3 +453,80 @@ broad prompt/controller architecture · cosmetic copy.
 The current CEE route is the fallback/hedge. The OpenAI connected witness is the
 programme's primary architecture test; this lane's job is to keep the
 deterministic foundations and the fallback path trustworthy while that runs.
+
+---
+
+# ⭐ SUCCESSOR ADDENDUM — 22 September 2026, later the same day
+
+**Read this before acting on "NEXT THREE ACTIONS" above — those three are DONE.**
+
+## What changed
+
+**All three required checks were green.** A, B and C all passed `Lint, TypeCheck,
+Unit Tests` at the exact heads recorded above. **PRs are now open for everything
+in this handover**, and the D branches are in the queue too:
+
+| PR | Branch | Note |
+|---|---|---|
+| CEE #1677 | `feat/durable-turn-identity` | A |
+| CEE #1678 | `feat/natural-unit-rate-equivalence` | B — **head moved to `99b2826642c78e0e7e3a94bd8cb8b374a1caac9e`**, second fix added |
+| CEE #1679 | `feat/single-snapshot-turn-binding` | C — carries the refuse-vs-reuse question + a measured blast radius |
+| PLoT #365 + CEE #1680 | goal-direction | **atomic pair — PLoT FIRST** |
+| CEE #1681 | `fix/receipt-guard-consequences` | |
+| CEE #1682 | `fix/nested-quotes` | lower priority |
+| CEE #1683 | `feat/coaching-structure-marking` | lowest priority; a `wip` commit sits in its history |
+
+**Nothing has been merged. There are still no reviews anywhere in the CEE repo.**
+
+## Three corrections to the body of this handover
+
+1. ⛔ **"Opening a PR spends a production draft call" is NO LONGER TRUE.**
+   `perf-gate.yml` on `staging` has no `pull_request:` trigger (only `main`
+   does). Control: **13 workflow runs across three fresh PR heads, 0 Performance
+   Gate.** The "push to `feat/**`, never open a PR" workaround is retired — which
+   is why the whole queue above could finally be opened.
+
+2. ⛔ **The replay failure mode is NOT a 409.** Witnessed at the wire: the retry
+   returns **HTTP 200 — "Sales Cycle Length is already set to 14 months."** with a
+   different `mutation_id` and a phantom duplicate turn in the user's history. No
+   error anywhere. See `WIRE-REPLAY-WITNESS-20260922.md`.
+
+3. ⚠ **`fix/**` branches get NO required check at all.** `ci.yml` runs it on
+   `push: feat/**`. `fix/nested-quotes` and `fix/receipt-guard-consequences` both
+   showed `total_count` 1 with the required context **absent** — silence, not
+   success. Opening their PRs put them under CI for the first time.
+
+## What is now proven that was not
+
+- **The wire path is executed.** `WIRE-REPLAY-WITNESS-20260922.md` + the runnable
+  harness in `witness/`. Re-running it after #1677 deploys is one command.
+- **The deployed `append_turn_atomic_v5` decides replay BEFORE CAS** (lookup 82-86;
+  `IF NOT v_turn_preexisting` 92→176; `OLGC1` at 168, nested inside), and
+  `v5_claim_turn_fence` is idempotent. **Persistence and the fence are both
+  correct.** This supersedes the 21 Sep note saying the migration was unshipped.
+- ⭐ **The UI already sends a stable `turn_id` across a retry**
+  (`retryLast:6283 → :3895 → buildPayload:201`). **#1677 needs NO UI change**, and
+  it *restores* the retry affordance the UI removed from the wait-expiry and
+  proxy-timeout paths. ⛔ But `deliveryUnknown.ts retrySafety()` concludes safety
+  from reusing **`X-Request-Id`** — **false after #1677**; do not wire it as written.
+- **C's blast radius:** of 5,534 `run_analysis` turns in 14 days, 20.7% overlap
+  another turn, **1.6% overlap a graph-mutating handler, 0 overlap a proven write**
+  (positive control: 1,193 turns did set `model_version_created`). `run_analysis`
+  p50 is 42 s. Refusing is cheap; the recommendation is on #1679.
+
+## The one blocker that needs a human
+
+**The receipt half of the replay acceptance contract cannot be witnessed by any
+key-authed harness.** Guest scenarios mint no `model_versions` (deployed v5 line
+66), and a shared-key caller is refused `scenario_requires_authenticated_owner` on
+an owned one. It needs a **staging test account**. Asked on programme issue #63;
+unanswered at the time of writing. Until it is resolved, a GREEN witness proves
+turn identity and no-duplicate, **not** receipt recovery — do not report it as the
+full contract.
+
+## Scenarios left on the shared database
+
+Three, all guest, all titled `ZZZ-COACHING-REPLAY-WITNESS-20260922`:
+`2fe77bff-…`, `800ed635-…`, `21ae5630-…` (the last is the one cited in the
+witness). No pre-existing scenario was modified — control: the source board
+`105baa8c-…` still shows `updated_at` 2026-09-19.
