@@ -195,6 +195,27 @@ await step('5', async () => {
   rec('5', 'a refusal is not a 500 that loses the turn', res.status !== 500 ? 'PASS' : 'FAIL', `HTTP ${res.status}`);
 });
 
+// ── 5b: THE CONTRAST CONTROL for criterion 5.
+//   Everything above exercises the DIVERGED case only. A build whose refusal
+//   fired on EVERY analysis would satisfy all of it and still be catastrophic —
+//   the witness would read green while no user could ever get a result. A
+//   target-passes assertion needs a control that proves the probe can tell the
+//   two apart.
+await step('5', async () => {
+  const sid = await mk('ZZZ-SPINE-5B');
+  const a = await turn(sid, randomUUID(), 'run the analysis', 'analyse');   // NO concurrent edit
+  const txtA = txt(a);
+  const overRefused = /stopped rather than mix|changed while this analysis/i.test(txtA);
+  const [f] = await sql`select f.payload->'result'->>'graph_hash_at_run' as har from public.v5_handler_facts f
+    join public.v5_conversation_turns c on c.id=f.v5_conversation_turn_id where c.scenario_id=${sid} and f.handler_id='run_analysis' limit 1`;
+  const hasResult = (a.j?.blocks ?? []).some((b) => b?.type === 'analysis_result');
+  rec('5', 'CONTROL — an UNDISTURBED analysis still completes', 
+      answered(a) && !overRefused && hasResult && Boolean(f?.har) ? 'PASS' : 'FAIL',
+      `refused=${overRefused} analysis_result=${hasResult} fact=${f?.har ? 'yes' : 'MISSING'}`);
+  rec('5', 'CONTROL — and reports itself FRESH', a.j?.analysis_ready?.freshness === 'fresh' ? 'PASS' : 'FAIL',
+      `freshness=${a.j?.analysis_ready?.freshness} reason=${a.j?.analysis_ready?.freshness_reason}`);
+});
+
 // ── 6: authoritative reread / receipt / state agree ───────────────────────
 await step('6', async () => {
   const sid = await mk('ZZZ-SPINE-6');

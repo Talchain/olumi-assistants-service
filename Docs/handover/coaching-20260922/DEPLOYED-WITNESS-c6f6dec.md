@@ -54,3 +54,38 @@ must not weaken while fixing the narration.
 
 **Status rung: JOURNEY-WITNESSED on deployed staging, 22 Sep 2026** — criteria
 1, 2a, 3(concurrent), 4, 5, 6.
+
+
+---
+
+## ⛔ A hole in this very witness, found straight after the deploy
+
+Criterion 5 exercises the **diverged** case only. **A build whose refusal fired
+on EVERY analysis would satisfy every row above and still be catastrophic** — the
+witness would read 20/5 while no user could obtain a result at all. A
+target-passes assertion is worth nothing without a control that proves the probe
+can tell the two apart.
+
+Measured on `c6f6dec`, plain analysis, no concurrent edit:
+
+```
+HTTP 200
+blocks: analysis_result, coaching, ui_directive
+handler fact row written : YES (56eacec6adfe)
+analysis_ready.freshness : fresh  reason=graph_hash_match
+spuriously REFUSED       : false
+"Move Upmarket to Enterprise scored highest against your goal in 68% of runs…"
+
+HAPPY PATH INTACT: true
+```
+
+**#1679 did not over-refuse.** Two permanent rows now pin it (`5b`), taking the
+harness to **27 assertions**:
+
+- `CONTROL — an UNDISTURBED analysis still completes` (answered · not refused ·
+  carries an `analysis_result` block · wrote a handler fact)
+- `CONTROL — and reports itself FRESH`
+
+⭐ This is the fourth time auditing the witness has found it weaker than it
+looked, and the fourth time the correction made the number honest rather than
+flattering.
