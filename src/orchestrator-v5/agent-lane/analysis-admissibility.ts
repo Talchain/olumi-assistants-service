@@ -48,7 +48,8 @@ export interface AdmissibilityReason {
     | 'goal_reachable_only_by_projection'
     | 'user_constraint_not_enforced'
     | 'decisive_link_withheld'
-    | 'majority_magnitudes_projected';
+    | 'majority_magnitudes_projected'
+    | 'existence_priors_projected';
   /** Stated in the user's terms, not the schema's. */
   readonly message: string;
 }
@@ -114,8 +115,32 @@ export function assessAnalysisAdmissibility(model: AdmittedModel): Admissibility
     });
   }
 
-  // Any reason other than the bare majority caveat withholds the run.
-  const withholding = reasons.filter((r) => r.code !== 'majority_magnitudes_projected');
+  // 5. The probability that each link EXISTS AT ALL is ours, not theirs.
+  //
+  // ⛔ This was missed entirely at first: the policy read only `e.defaulted`,
+  // which was set only when the MEAN was projected. An edge with an authored mean
+  // carried an unauthored `exists_probability` and the verdict came back `ready`
+  // with zero reasons — PLoT computing over machine-chosen link-existence priors
+  // with nothing said to the user. Found by adversarially auditing this lane.
+  const existenceProjected = model.loss.filter((l) =>
+    l.field_path.endsWith('.exists_probability'),
+  ).length;
+  if (existenceProjected > 0) {
+    reasons.push({
+      code: 'existence_priors_projected',
+      message:
+        `For ${existenceProjected} link${existenceProjected === 1 ? '' : 's'}, how likely the link ` +
+        `exists at all is a value this system chose, not one you or your evidence supplied. ` +
+        `Results would carry that assumption invisibly.`,
+    });
+  }
+
+  // Any reason other than the bare caveats withholds the run.
+  const CAVEAT_ONLY: readonly AdmissibilityReason['code'][] = [
+    'majority_magnitudes_projected',
+    'existence_priors_projected',
+  ];
+  const withholding = reasons.filter((r) => !CAVEAT_ONLY.includes(r.code));
   const verdict: AnalysisVerdict =
     withholding.length > 0 ? 'withheld' : reasons.length > 0 ? 'limited' : 'ready';
 

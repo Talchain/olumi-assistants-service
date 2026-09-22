@@ -72,6 +72,10 @@ export interface CandidateLink {
   readonly provenance: string;
   /** Present ONLY when a magnitude was genuinely authored. Normally absent. */
   readonly strength_mean?: number;
+  /** Present ONLY when a spread was genuinely authored. Normally absent. */
+  readonly strength_std?: number;
+  /** Present ONLY when a link-existence probability was genuinely authored. Normally absent. */
+  readonly existence_probability?: number;
   /**
    * The canonical `EdgeProvenanceV3.source` to stamp, when the caller knows it
    * exactly. The projection layer does: it carries a three-way authorship
@@ -107,6 +111,14 @@ export interface AdmissionResult {
   readonly loss: readonly RepairEntry[];
   /** Links that could not be admitted honestly. */
   readonly withheld: readonly WithheldLink[];
+  /**
+   * `from::to` -> the numeric fields on that edge THIS MODULE chose, not the
+   * author. Per field, because an edge can have an authored mean and an
+   * unauthored existence probability at the same time — and reading one boolean
+   * for the whole edge is exactly how a projected `exists_probability` passed as
+   * clean and drove a `ready` verdict.
+   */
+  readonly projected_fields: Readonly<Record<string, readonly string[]>>;
   /**
    * `from::to` for each edge whose magnitude was genuinely authored.
    *
@@ -144,6 +156,7 @@ export function admitCandidateLinks(links: readonly CandidateLink[]): AdmissionR
   const loss: RepairEntry[] = [];
   const withheld: WithheldLink[] = [];
   const authored_magnitudes: string[] = [];
+  const projected_fields: Record<string, readonly string[]> = {};
 
   for (const link of links) {
     const fieldPath = `edges[${link.from}::${link.to}]`;
@@ -168,20 +181,52 @@ export function admitCandidateLinks(links: readonly CandidateLink[]): AdmissionR
         ? -PROJECTED_MEAN
         : PROJECTED_MEAN;
 
+    // Every numeric is either the author's or ours, decided field by field.
+    const projected: string[] = [];
+    if (!authored) projected.push('strength.mean');
+    const stdAuthored = typeof link.strength_std === 'number';
+    if (!stdAuthored) projected.push('strength.std');
+    const existenceAuthored = typeof link.existence_probability === 'number';
+    if (!existenceAuthored) projected.push('exists_probability');
+
     const edge: AdmittedEdge = {
       from: link.from,
       to: link.to,
-      strength: { mean: signedMean, std: PROJECTED_STD },
-      exists_probability: DEFAULT_EXISTS_PROBABILITY,
+      strength: { mean: signedMean, std: stdAuthored ? (link.strength_std as number) : PROJECTED_STD },
+      exists_probability: existenceAuthored
+        ? (link.existence_probability as number)
+        : DEFAULT_EXISTS_PROBABILITY,
       effect_direction: link.direction,
       provenance: { source: link.provenance_source ?? provenanceSourceFor(link.provenance) },
     };
 
-    if (authored) authored_magnitudes.push(`${link.from}::${link.to}`);
+    const key = `${link.from}::${link.to}`;
+    projected_fields[key] = projected;
+    // ⭐ MARKED WHENEVER **ANY** NUMBER IS OURS, not only when the mean is.
+    // The previous condition was `!authored`, so an edge with an authored mean
+    // carried an unauthored std and existence probability while reporting itself
+    // clean.
+    if (projected.length > 0) edge.defaulted = true;
+
+    if (authored) authored_magnitudes.push(key);
+
+    if (!stdAuthored) {
+      loss.push({
+        code: REPAIR_CODES.CLAMP_STD_MINIMUM,
+        layer: 'cee',
+        field_path: `${fieldPath}.strength.std`,
+        before: null,
+        after: PROJECTED_STD,
+        reason:
+          'Nobody stated how uncertain this strength is. Applied the recognised default spread. ' +
+          'It is not a measurement of anyone\'s confidence.',
+        severity: 'info',
+      });
+    }
 
     if (!authored) {
-      // The magnitude is ours, not theirs. Say so, in the edge and in the ledger.
-      edge.defaulted = true;
+      // The magnitude is ours, not theirs. Say so in the ledger (the edge is
+      // already marked above).
       loss.push({
         code: REPAIR_CODES.APPLY_SIGN_FROM_DIRECTION,
         layer: 'cee',
@@ -196,7 +241,7 @@ export function admitCandidateLinks(links: readonly CandidateLink[]): AdmissionR
       });
     }
 
-    loss.push({
+    if (!existenceAuthored) loss.push({
       code: REPAIR_CODES.DEFAULT_EXISTS_PROBABILITY,
       layer: 'cee',
       field_path: `${fieldPath}.exists_probability`,
@@ -212,7 +257,7 @@ export function admitCandidateLinks(links: readonly CandidateLink[]): AdmissionR
     edges.push(edge);
   }
 
-  return { edges, loss, withheld, authored_magnitudes };
+  return { edges, loss, withheld, authored_magnitudes, projected_fields };
 }
 
 /**
@@ -222,6 +267,17 @@ export function admitCandidateLinks(links: readonly CandidateLink[]): AdmissionR
  * (`user_specified`) rather than by trusting the flag's absence.
  */
 export function noUnmarkedMagnitudes(result: AdmissionResult): boolean {
-  const authored = new Set(result.authored_magnitudes);
-  return result.edges.every((e) => e.defaulted === true || authored.has(`${e.from}::${e.to}`));
+  const ledgered = new Set(result.loss.map((l) => l.field_path));
+  return result.edges.every((e) => {
+    const key = `${e.from}::${e.to}`;
+    const projected = result.projected_fields[key] ?? [];
+    if (projected.length === 0) return true;
+    if (e.defaulted !== true) return false;
+    return projected.every((f) => ledgered.has(`edges[${key}].${f}`));
+  });
+}
+
+/** True only when NO number on any edge was chosen by this module. */
+export function isFullyAuthored(result: AdmissionResult): boolean {
+  return Object.values(result.projected_fields).every((f) => f.length === 0);
 }

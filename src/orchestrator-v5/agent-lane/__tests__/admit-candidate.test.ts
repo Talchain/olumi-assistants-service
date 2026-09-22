@@ -10,7 +10,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { admitCandidateLinks, noUnmarkedMagnitudes, type CandidateLink } from '../admit-candidate.js';
+import { admitCandidateLinks, noUnmarkedMagnitudes, isFullyAuthored, type CandidateLink } from '../admit-candidate.js';
 
 const here = new URL('./fixtures/', import.meta.url);
 const faithful = JSON.parse(readFileSync(new URL('faithful.json', here), 'utf8'));
@@ -76,17 +76,33 @@ describe('admitCandidateLinks — the captured candidate', () => {
     }
   });
 
-  it('CONTRAST CONTROL: an authored magnitude is kept verbatim and NOT marked defaulted', () => {
+  it('CONTRAST CONTROL: an authored magnitude is kept verbatim, and no mean-loss is recorded', () => {
     const authored: CandidateLink[] = [
       { from: 'a', to: 'b', direction: 'positive', provenance: 'explicit', strength_mean: 0.83 },
     ];
     const r = admitCandidateLinks(authored);
     expect(r.edges).toHaveLength(1);
     expect(r.edges[0].strength.mean).toBe(0.83);
-    expect(r.edges[0].defaulted).toBeUndefined();
     expect(r.loss.filter((l) => l.field_path.endsWith('.strength.mean'))).toHaveLength(0);
-    // Control proves the defaulted-marking above is discriminating, not constant-true.
-    expect(noUnmarkedMagnitudes(r)).toBe(true);
+    // ⚠ This assertion previously read `defaulted` toBeUndefined, which ENCODED
+    // the defect: std and exists_probability are still ours on this edge, so the
+    // edge genuinely does carry numbers nobody authored and must say so.
+    expect(r.edges[0].defaulted).toBe(true);
+    expect(noUnmarkedMagnitudes(r), 'every projection is marked and ledgered').toBe(true);
+  });
+
+  it('CONTROL: an edge whose EVERY numeric is authored is not marked at all', () => {
+    const r = admitCandidateLinks([
+      {
+        from: 'a', to: 'b', direction: 'positive', provenance: 'explicit',
+        strength_mean: 0.83, strength_std: 0.04, existence_probability: 0.97,
+      },
+    ]);
+    expect(r.edges[0].strength).toEqual({ mean: 0.83, std: 0.04 });
+    expect(r.edges[0].exists_probability).toBe(0.97);
+    expect(r.edges[0].defaulted, 'nothing here was chosen by us').toBeUndefined();
+    expect(r.loss, 'and nothing is ledgered, because nothing was projected').toHaveLength(0);
+    expect(isFullyAuthored(r)).toBe(true);
   });
 
   it('a negative direction projects a NEGATIVE magnitude, not a positive one', () => {

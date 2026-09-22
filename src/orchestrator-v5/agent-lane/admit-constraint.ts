@@ -48,6 +48,18 @@ export interface AdmittedConstraint {
   value: number;
   label?: string;
   unit?: string;
+  /**
+   * Canonical authorship marker — `GoalConstraintSchema.provenance`
+   * (`src/schemas/assist.ts:418`), values `explicit | inferred | proxy`.
+   *
+   * ⛔ THIS WAS MISSING, AND THE OMISSION HAD TEETH. `CandidateConstraint`
+   * declared `provenance` and this module never read it, so the widening receipt
+   * asserted "the user stated a STRICT bound" for a constraint the MODEL
+   * invented, and the analysis policy then told the user "a limit you set could
+   * not be attached". A model could manufacture a limit, have Olumi certify it
+   * as the user's, and have Olumi restrict the user's own analysis on it.
+   */
+  provenance?: 'explicit' | 'inferred' | 'proxy';
 }
 
 export interface ConstraintAdmissionResult {
@@ -67,6 +79,15 @@ export function isStrictnessLost(op: CandidateOperator): boolean {
   return op === '<' || op === '>';
 }
 
+/** Only a bound the user actually stated may be reported as theirs. */
+function isUserAuthored(candidateProvenance: string): boolean {
+  return candidateProvenance === 'explicit';
+}
+
+function canonicalProvenance(candidateProvenance: string): 'explicit' | 'inferred' {
+  return isUserAuthored(candidateProvenance) ? 'explicit' : 'inferred';
+}
+
 export function admitCandidateConstraints(
   candidates: readonly CandidateConstraint[],
   nodeIdFor: (metric: string) => string | undefined,
@@ -84,8 +105,9 @@ export function admitCandidateConstraints(
         before: c.metric,
         after: null,
         reason:
-          'The constraint names a metric with no node in the admitted model, so it cannot be ' +
-          'attached. Withheld rather than attached to a guessed target.',
+          `${isUserAuthored(c.provenance) ? 'A limit you stated' : 'A limit this system proposed'} ` +
+          'names a metric with no node in the admitted model, so it cannot be attached. Withheld ' +
+          'rather than attached to a guessed target.',
         severity: 'warn',
       });
       continue;
@@ -100,6 +122,7 @@ export function admitCandidateConstraints(
       value: c.value,
       label: `${c.metric} ${c.operator} ${c.value}${c.unit ?? ''}`,
       ...(c.unit !== undefined ? { unit: c.unit } : {}),
+      provenance: canonicalProvenance(c.provenance),
     };
 
     if (isStrictnessLost(c.operator)) {
@@ -110,7 +133,8 @@ export function admitCandidateConstraints(
         before: c.operator,
         after: operator,
         reason:
-          `The user stated a STRICT bound ("${c.metric} ${c.operator} ${c.value}${c.unit ?? ''}") ` +
+          `${isUserAuthored(c.provenance) ? 'You stated' : 'This system proposed'} a STRICT bound ` +
+          `("${c.metric} ${c.operator} ${c.value}${c.unit ?? ''}") ` +
           `but the canonical vocabulary has only ">=" and "<=". The admitted constraint therefore ` +
           `treats exactly ${c.value}${c.unit ?? ''} as satisfying a bound the user excluded. ` +
           `The value is preserved verbatim — no epsilon was invented — so this widening is the ` +
