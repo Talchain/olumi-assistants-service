@@ -617,6 +617,10 @@ import {
 } from './telemetry/turn-timings.js';
 import { config } from '../config/index.js';
 import { canonicaliseForAnalysis } from './tools/handlers/analysis-ready-core.js';
+import {
+  analysisGraphIdentityOf,
+  bindAnalysisSnapshotForTurn,
+} from './run-analysis-snapshot-binding.js';
 
 export interface TurnExecutorRunResult {
   response: OlumiResponse;
@@ -1196,6 +1200,21 @@ export async function runTurnExecutor(
     turnTimings.build_turn_context_ms = Date.now() - buildContextStartedAt;
   }
   stagesCompleted.push('build_turn_context');
+
+  // ⭐⭐⭐ ONE TURN, ONE PERSISTED SNAPSHOT — the PRODUCER for the single-snapshot
+  // guard. `context.persistedGraph` IS read A, the state this turn's freshness
+  // verdict is derived from. Binding its analysis-affecting identity here means
+  // the run_analysis reader's independent second read (`DEFAULT_SCENARIO_READER`
+  // → `loadScenarioSnapshotForRunAnalysis`) can no longer stamp
+  // `graph_hash_at_run` against a graph this turn never saw: it refuses instead.
+  //
+  // Bound for EVERY turn, not only run_analysis ones, because the reader is
+  // reached from more than one branch and a hand-listed set of binding sites is
+  // the maintained-mirror defect. A turn that never reads it pays one hash.
+  bindAnalysisSnapshotForTurn({
+    scenarioId: context.session_id,
+    analysisGraphHash: analysisGraphIdentityOf(context.persistedGraph),
+  });
 
   // Track 2 — pending-confirmation truth, derived ONCE at ORIENT time from the
   // single persisted authority (`most_recent_pending_actions`, the last prior
