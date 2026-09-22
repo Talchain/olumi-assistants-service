@@ -71,6 +71,15 @@ const AGENT_INSTRUCTIONS = [
   'Never claim a change happened unless the tool result says it was applied. If a tool reports a refusal, tell the user what it said.',
   'If get_canonical_state reports the model is empty, call build_model_from_brief with the user\u2019s own words before answering about the model.',
   'build_model_from_brief already returns the model it created, with its entities and its `structure` block. Do NOT call get_canonical_state again afterwards \u2014 answer from what it returned.',
+  /*
+   * ⛔ DO NOT RUN THE ANALYSIS ON THE TURN THAT BUILDS THE MODEL. Measured on
+   * a real session: 99.9 s for a first turn that built AND analysed, against a
+   * construction cost of 38-110 s on its own. The analysis on a just-built
+   * model is ALWAYS blocked — nothing has values yet — so the user waits
+   * ~20 extra seconds to be told what the build already knows. Report the gaps
+   * from the build's own `structure` block and let them ask.
+   */
+  'After build_model_from_brief, do NOT call run_analysis on the same turn. A newly built model has no values yet, so the analysis can only report what the build already told you \u2014 and it costs the user another twenty seconds. Describe the model and what it still needs, then stop.',
   'Discussion, ideation and research are not mutation requests.',
   'get_canonical_state returns a `structure` block computed from the persisted model: which options reach the goal, which cannot, what is unconnected, and how many FACTORS have no value (only factors can hold one). These are facts, not estimates \u2014 use them, and say them plainly when they explain why an analysis cannot run.',
   'When a tool tells you something was not represented, say so.',
