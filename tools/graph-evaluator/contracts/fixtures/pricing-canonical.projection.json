@@ -23,7 +23,12 @@
           "raw_value": 49,
           "unit": "£/month",
           "extractionType": "explicit",
-          "source": "brief_extraction"
+          "source": "brief_extraction",
+          "observed_state": {
+            "value": 49,
+            "unit": "£/month",
+            "source": "brief_extraction"
+          }
         },
         "provenance": "from_brief"
       },

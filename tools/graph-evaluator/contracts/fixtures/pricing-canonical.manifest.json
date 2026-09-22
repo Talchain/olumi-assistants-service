@@ -9,7 +9,7 @@
   },
   "files": {
     "pricing-canonical.rich-model.json": "4963c7da20998bf6c0326543bfc0b2bb52df52f0793c66285e7556958e5d3d64",
-    "pricing-canonical.projection.json": "5995e2f37691ca010f6caa46d88e4b369b0de1e9db9247e8b673329b2580afbc"
+    "pricing-canonical.projection.json": "2675c4711cff896e7d74151aad10ec57d67a57b50dcc38d1f3ac369644cdbfd9"
   },
   "schema_sha256": "2d670c8ee6a9edca2671d6f7894edf8c3f3d7acc9648dca5e80554d94f8ca80b",
   "acceptance": {
@@ -43,6 +43,7 @@
     "Anthropic structured outputs cap union-typed params at 16; this schema has 31. Builder must be OpenAI.",
     "POST /assist/v1/elicit-belief returns provenance 'cee' as a TYPE-LEVEL literal — a user's own words come back as ours. Schema change required before claiming user authorship.",
     "PLoT /v2/run option contract is {factor_id: <bare number>} — provenance/unit/confidence cannot cross that boundary.",
-    "An option with no numeric lever refuses the WHOLE PLoT run (EMPTY_INTERVENTIONS). Withhold and disclose; where ALL options are qualitative, an empty-options 400 is the correct answer."
+    "An option with no numeric lever refuses the WHOLE PLoT run (EMPTY_INTERVENTIONS). Withhold and disclose; where ALL options are qualitative, an empty-options 400 is the correct answer.",
+    "observed_state.source IS SET on every projected value (raised by Connected PoC): CEE's money invariant gates on observed_state.source === 'brief_extraction', so a value carrying only data.source is silently exempt from the audit. cap is deliberately NOT set — it feeds isAmountStatedInBrief and a wrong cap is a confidently wrong reconciliation."
   ]
 }
