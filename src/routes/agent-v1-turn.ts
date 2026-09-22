@@ -32,6 +32,7 @@ import { internalHeaders } from '../orchestrator-v5/agent-lane/internal-headers.
 import { resolveUserIdentity } from '../orchestrator/user-identity.js';
 import { log } from '../utils/telemetry.js';
 import { composeDirectAnswerResponse } from '../orchestrator-v5/compose.js';
+import { assessCanonicalAnalysisReadiness } from '../orchestrator/tools/analysis-ready-helper.js';
 import { finaliseV5Response } from '../orchestrator-v5/response-finaliser.js';
 import { runAgentTurn, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
 import type { AgentLaneMode } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
@@ -441,6 +442,51 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           const nodes = g.nodes;
           const edges = Array.isArray(g.edges) ? g.edges : [];
           draftGraph = { node_count: nodes.length, edge_count: edges.length, nodes, edges };
+
+          /**
+           * ⛔ WITHOUT `analysis_ready` THE USER IS NEVER TOLD THEIR RESULTS
+           *    ARE STALE.
+           *
+           * MEASURED on deployed staging (`dfb31ed`, again on `a76f1a0`), with
+           * the conventional route as a same-run control: this route returned
+           * `analysis_ready: ABSENT` and `blocks: []` where
+           * `/orchestrate/v2/turn` returned the payload and three blocks for the
+           * identical request. The deployed UI renders staleness on FOUR
+           * flag-free surfaces — the freshness notice, the re-analyse bar, the
+           * staleness pill and the coaching-card currency notice — and every one
+           * binds to `analysis_ready.freshness` or `blocks[].freshness`. With
+           * both absent there is nothing for them to render from, so a user on
+           * this route can edit the model and never learn the results predate
+           * the edit. That is silence, not a refusal.
+           *
+           * The readback is asked FIRST and its answer always wins (the
+           * `undefined` guard): if that endpoint ever carries the field, this
+           * becomes a no-op rather than a second producer of the same verdict.
+           *
+           * ⭐ USES THE ONE READINESS AUTHORITY. `assessCanonicalAnalysisReadiness`
+           *    is a PURE function of the graph — no I/O, no clock — so this costs
+           *    one pass over bytes already in memory and adds no read to any
+           *    shared endpoint. Deriving a verdict locally instead would put a
+           *    second producer of `analysis_ready` on a different path, which is
+           *    the failure mode this estate keeps hitting.
+           *
+           * ⚠ FRESHNESS IS DELIBERATELY NOT SYNTHESISED HERE. It needs
+           *   `priorFacts` (`deriveAnalysisFreshness`), i.e. a `v5_handler_facts`
+           *   read this route does not do. A readiness payload that is silent on
+           *   freshness is read by the UI as `VERDICT_ABSENT_FROM_PAYLOAD` ⇒
+           *   `changed` (`analysisFreshness.ts:75`) — the STALE-LEANING side,
+           *   which is the safe direction to be wrong in. Inventing a `fresh`
+           *   verdict from no evidence would not be.
+           */
+          if (analysisReady === undefined) {
+            try {
+              analysisReady = assessCanonicalAnalysisReadiness(after.json.graph).analysisReady;
+            } catch {
+              // Readiness is a disclosure, never part of the write. If it cannot
+              // be assessed the turn still returns; the client simply learns
+              // nothing new about readiness this time.
+            }
+          }
         }
       }
     } catch {
