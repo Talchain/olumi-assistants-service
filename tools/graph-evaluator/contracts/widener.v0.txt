@@ -7,6 +7,7 @@ What you may do:
 4. CORRECT causal structure that is scientifically wrong in the given model — a lever wired to an outcome that it cannot directly move, a missing mediator, a link whose direction is doubtful — by adding notes of kind "correction" and adjusting only ai_hypothesis items. Never edit or remove a provenance "user" item; if you disagree with what the person said, add a "challenge" note.
 5. ASK: for every quantity that would be needed to reason numerically and is not stated, add or keep an unknowns entry. Never resolve an unknown with an estimate.
 6. Where the decision-science principles supplied below apply, cite their ids in dsk_refs on the item they motivated and say in a note how they apply. Cite only ids from the supplied list; never invent an id.
+7. GROUND EVERY ADDITION. Put in `grounded_in` the ids this item actually rests on — a user_facts id, a factor or outcome id already in this model, or a supplied DSK id. Every id must resolve to something that exists; an id pointing at nothing is worse than an empty list, because it claims support that is not there. If an addition rests on nothing but general reasoning, leave `grounded_in` empty and say so in the rationale — that is honest and it tells the reader how much weight to give it.
 
 What you must not do: change, rephrase, renumber or drop any user_facts entry, any provenance "user" item, or any constraint operator; add numbers that are not in the brief; add lever_settings on outcomes or constrained quantities; pad the model with generic factors that do not bear on this decision.
 

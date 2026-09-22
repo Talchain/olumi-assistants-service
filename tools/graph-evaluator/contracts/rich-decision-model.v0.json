@@ -162,7 +162,8 @@
           "source_fact_id",
           "is_status_quo",
           "lever_settings",
-          "rationale"
+          "rationale",
+          "grounded_in"
         ],
         "properties": {
           "id": {
@@ -245,6 +246,13 @@
               "null"
             ],
             "description": "Required for ai_proposed options: why this alternative is worth considering."
+          },
+          "grounded_in": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Ids this rests on: a user_facts id, a factor/outcome id in THIS model, or a DSK id from the supplied allowlist. Every id must RESOLVE — an id that points at nothing is flagged. Empty when the item rests on nothing beyond general reasoning, which is itself informative."
           }
         }
       }
@@ -265,7 +273,8 @@
           "unit",
           "provenance",
           "source_fact_id",
-          "dsk_refs"
+          "dsk_refs",
+          "grounded_in"
         ],
         "properties": {
           "id": {
@@ -333,6 +342,13 @@
               "type": "string"
             },
             "description": "Decision-science knowledge ids from the allowlist supplied in the prompt, if any principle motivated this factor. Empty otherwise."
+          },
+          "grounded_in": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Ids this rests on: a user_facts id, a factor/outcome id in THIS model, or a DSK id from the supplied allowlist. Every id must RESOLVE — an id that points at nothing is flagged. Empty when the item rests on nothing beyond general reasoning, which is itself informative."
           }
         }
       }
@@ -352,7 +368,8 @@
           "epistemic_state",
           "provenance",
           "source_fact_id",
-          "dsk_refs"
+          "dsk_refs",
+          "grounded_in"
         ],
         "properties": {
           "id": {
@@ -411,6 +428,13 @@
             "items": {
               "type": "string"
             }
+          },
+          "grounded_in": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Ids this rests on: a user_facts id, a factor/outcome id in THIS model, or a DSK id from the supplied allowlist. Every id must RESOLVE — an id that points at nothing is flagged. Empty when the item rests on nothing beyond general reasoning, which is itself informative."
           }
         }
       }
@@ -495,7 +519,8 @@
           "provenance",
           "source_fact_id",
           "rationale",
-          "dsk_refs"
+          "dsk_refs",
+          "grounded_in"
         ],
         "properties": {
           "id": {
@@ -622,6 +647,13 @@
             "items": {
               "type": "string"
             }
+          },
+          "grounded_in": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Ids this rests on: a user_facts id, a factor/outcome id in THIS model, or a DSK id from the supplied allowlist. Every id must RESOLVE — an id that points at nothing is flagged. Empty when the item rests on nothing beyond general reasoning, which is itself informative."
           }
         }
       }
@@ -668,7 +700,8 @@
           "about_id",
           "kind",
           "text",
-          "dsk_refs"
+          "dsk_refs",
+          "grounded_in"
         ],
         "properties": {
           "about_id": {
@@ -694,6 +727,13 @@
             "items": {
               "type": "string"
             }
+          },
+          "grounded_in": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Ids this rests on: a user_facts id, a factor/outcome id in THIS model, or a DSK id from the supplied allowlist. Every id must RESOLVE — an id that points at nothing is flagged. Empty when the item rests on nothing beyond general reasoning, which is itself informative."
           }
         }
       }

@@ -14,4 +14,5 @@ Rules — these are the whole job:
 10. Set decision.goal_measured_by to the id of the outcome the goal is measured by (for "reach
 £20k MRR", the MRR outcome). Without it nothing connects an option to the goal and the model
 cannot be analysed. Use null only if the brief names no measurable goal.
-11. Output only the JSON object.
+11. Put in `grounded_in` the ids each item rests on — normally the user_facts entry it came from. An id must resolve to something in this model; leave the list empty rather than inventing one.
+12. Output only the JSON object.
