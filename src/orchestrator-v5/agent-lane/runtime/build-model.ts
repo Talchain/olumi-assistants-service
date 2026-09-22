@@ -128,7 +128,28 @@ export async function buildModelFromBrief(
   }
 
   const admitted = admitCandidateModel(candidate, {});
-  const graph = { nodes: admitted.nodes, edges: admitted.edges };
+  /**
+   * ⭐ THE USER'S STATED LIMITS TRAVEL WITH THE GRAPH.
+   *
+   * ⛔ I PREVIOUSLY RECORDED — AND PUBLISHED — THAT THEY HAD NO CARRIER, on the
+   * grounds that `/graph/register` accepts only `graph` and `brief_text`. That
+   * was wrong, and wrong in the expensive direction: it wrote off a capability
+   * the product already had. `GraphV3` declares `goal_constraints`, and a live
+   * probe against deployed staging confirmed they survive registration and read
+   * back intact. The reasoning error was inferring a limit from the ROUTE's
+   * body fields without checking what the GRAPH itself may carry.
+   *
+   * So a brief that says "no more than £100,000" or "under 4% churn" now
+   * produces an enforceable constraint rather than a sentence the model merely
+   * mentioned.
+   */
+  const graph = {
+    nodes: admitted.nodes,
+    edges: admitted.edges,
+    ...(admitted.goal_constraints.length > 0
+      ? { goal_constraints: admitted.goal_constraints }
+      : {}),
+  };
 
   // Never persist a graph the product cannot then read.
   const parsed = GraphV3.safeParse(graph);
@@ -153,18 +174,14 @@ export async function buildModelFromBrief(
     // What the projection could not carry — the Agent is expected to say this.
     withheld: admitted.withheld.map((w) => ({ from: w.from, to: w.to, reason: w.reason })),
     projected_field_count: admitted.loss.length,
-    // ⚠ REPRESENTATION LOSS AT THIS BOUNDARY, recorded rather than hidden.
-    // `/graph/register` accepts `graph` and `brief_text` only. The admitted
-    // goal constraints have no carrier on this route, so a constraint the user
-    // stated is NOT enforced by the model this call persists.
-    goal_constraints_not_carried: admitted.goal_constraints.length,
+    // Carried WITH the graph (GraphV3 declares `goal_constraints`), verified
+    // surviving registration on deployed staging.
+    goal_constraints_carried: admitted.goal_constraints.length,
     not_represented: [
       admitted.withheld.length > 0
         ? `${admitted.withheld.length} relationship(s) were left out because nobody has stated which way they run.`
         : undefined,
-      admitted.goal_constraints.length > 0
-        ? `${admitted.goal_constraints.length} stated constraint(s) are not carried by this write and are not being enforced yet.`
-        : undefined,
+      undefined,
     ].filter((s): s is string => s !== undefined),
   };
 }
