@@ -275,7 +275,7 @@ describe('decideGoalTargetReceipt on the live turn shape (direct_answer, no hand
         commitGraph: null, // handler = null, no mutation, no graph written
         persistedGraph: PRICING_PERSISTED_GRAPH,
       }),
-    ).toEqual({ verdict: 'swap', reason: 'unbacked_claim' });
+    ).toEqual({ verdict: 'swap', reason: 'unbacked_claim', consequences: { withholdGraphWrite: true, withholdReceiptFacts: true } });
   });
 
   it('RED-first: the live PEOPLE claim on a mutating turn whose commit graph registers no target → swap', () => {
@@ -285,7 +285,7 @@ describe('decideGoalTargetReceipt on the live turn shape (direct_answer, no hand
         commitGraph: PRICING_PERSISTED_GRAPH, // stands in for a write that did not register
         persistedGraph: PRICING_PERSISTED_GRAPH,
       }),
-    ).toEqual({ verdict: 'swap', reason: 'unbacked_claim' });
+    ).toEqual({ verdict: 'swap', reason: 'unbacked_claim', consequences: { withholdGraphWrite: true, withholdReceiptFacts: true } });
   });
 
   it('POSITIVE CONTROL — the SAME prose passes untouched when the target IS registered (a truthful confirmation must survive)', () => {
@@ -295,14 +295,14 @@ describe('decideGoalTargetReceipt on the live turn shape (direct_answer, no hand
         commitGraph: null,
         persistedGraph: registeringGraph,
       }),
-    ).toEqual({ verdict: 'pass', reason: 'backed_by_persisted_graph' });
+    ).toEqual({ verdict: 'pass', reason: 'backed_by_persisted_graph', consequences: { withholdGraphWrite: false, withholdReceiptFacts: false } });
     expect(
       decideGoalTargetReceipt({
         assistantText: LIVE_PEOPLE_FALSE_CLAIM,
         commitGraph: registeringGraph,
         persistedGraph: null,
       }),
-    ).toEqual({ verdict: 'pass', reason: 'backed_by_commit_graph' });
+    ).toEqual({ verdict: 'pass', reason: 'backed_by_commit_graph', consequences: { withholdGraphWrite: false, withholdReceiptFacts: false } });
   });
 
   it('CONTROL — a factor-value receipt on the same bare graph is untouched (reason no_claim), so ordinary edits cannot be collateral', () => {
@@ -312,7 +312,7 @@ describe('decideGoalTargetReceipt on the live turn shape (direct_answer, no hand
         commitGraph: PRICING_PERSISTED_GRAPH,
         persistedGraph: PRICING_PERSISTED_GRAPH,
       }),
-    ).toEqual({ verdict: 'pass', reason: 'no_claim' });
+    ).toEqual({ verdict: 'pass', reason: 'no_claim', consequences: { withholdGraphWrite: false, withholdReceiptFacts: false } });
   });
 });
 
