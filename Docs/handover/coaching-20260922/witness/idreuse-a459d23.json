@@ -1,0 +1,37 @@
+{
+  "build": "a459d23",
+  "out": [
+    {
+      "trial": 1,
+      "value": "14",
+      "turn_rows": 1,
+      "blocks": [
+        {
+          "type": "graph_patch",
+          "status": "applied",
+          "after": "{\"value\":1.25,\"raw_value\":25,\"unit\":\"months\"}"
+        },
+        {
+          "type": "ui_directive"
+        }
+      ],
+      "text": "Updated Sales Cycle Length from 14 months to 25 months. Every option here sets its own value for this factor, so this figure is the baseline they all replace, and changing it will not move the comparison. To change the comparison, set the value each option uses."
+    },
+    {
+      "trial": 2,
+      "value": "14",
+      "turn_rows": 1,
+      "blocks": [
+        {
+          "type": "graph_patch",
+          "status": "applied",
+          "after": "{\"value\":1.25,\"raw_value\":25,\"unit\":\"months\"}"
+        },
+        {
+          "type": "ui_directive"
+        }
+      ],
+      "text": "Updated Sales Cycle Length from 14 months to 25 months. Every option here sets its own value for this factor, so this figure is the baseline they all replace, and changing it will not move the comparison. To change the comparison, set the value each option uses."
+    }
+  ]
+}

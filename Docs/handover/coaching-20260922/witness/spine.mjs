@@ -112,6 +112,29 @@ await step('3', async () => {
   rec('3', 'the loser refuses TRUTHFULLY (409)', refused ? 'PASS' : 'FAIL', refused ? 'GRAPH_DIVERGED' : 'no 409 seen');
 });
 
+// ── 3b: the OTHER stale-different-operation — a REUSED turn_id carrying a
+//   DIFFERENT instruction. The concurrent case above is not the whole of
+//   "a genuinely stale different operation refuses truthfully": the durable
+//   key must bind the REQUEST, not just the id. Measured on a459d23 this
+//   commits nothing (correct) and then tells the user the new value WAS
+//   applied (wrong), with graph_patch status 'applied' and after.raw_value
+//   set to a number the model never took.
+await step('3', async () => {
+  const sid = await mk('ZZZ-SPINE-3B'); const T1 = randomUUID();
+  await turn(sid, T1, 'change Sales Cycle Length to 14');
+  const reuse = await turn(sid, T1, 'change Sales Cycle Length to 25');   // SAME id, DIFFERENT ask
+  await new Promise(r => setTimeout(r, 3000));                            // exclude a late write
+  const v = await raw(sid), t = (await st(sid)).turns;
+  rec('3', 'a reused turn_id writes nothing', v !== '25' && t === 1 ? 'PASS' : 'FAIL', `value=${v} turns=${t}`);
+  const txt3 = txt(reuse);
+  rec('3', 'a reused turn_id does NOT claim the new value was applied',
+      answered(reuse) && !(/\b25\b/.test(txt3) && /\bUpdated\b/i.test(txt3)) ? 'PASS' : 'FAIL',
+      `"${txt3.slice(0, 60)}"`);
+  const p3 = (reuse.j?.blocks ?? []).find(b => b?.type === 'graph_patch');
+  rec('3', 'a reused turn_id does NOT emit an APPLIED patch', p3 === undefined || p3.status !== 'applied' ? 'PASS' : 'FAIL',
+      `status=${p3?.status ?? '(none)'} after=${p3?.after ? JSON.stringify(p3.after).slice(0, 40) : '-'}`);
+});
+
 // ── 4: natural units preserve real unit safety ─────────────────────────────
 await step('4', async () => {
   const sid = await mk('ZZZ-SPINE-4');
