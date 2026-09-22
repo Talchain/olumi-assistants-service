@@ -69,7 +69,23 @@ const CURRENCY_CODES: ReadonlySet<string> = new Set(Object.values(CURRENCY_MAP))
  * no rate is ever applied.
  */
 export function sameUnit(a: string, b: string): boolean {
-  return normaliseUnitForComparison(a) === normaliseUnitForComparison(b);
+  return currencyAlphabetKey(a) === currencyAlphabetKey(b);
+}
+
+/**
+ * ⭐ THE SAME NORMALISATION {@link sameUnit} COMPARES ON, SURFACED.
+ *
+ * `unitComparisonKey` (the factor-value gate) needs to apply this to ONE SIDE
+ * of a rate — the numerator of `£/month` — which a two-argument predicate
+ * cannot express. It is exported rather than copied because a second private
+ * copy of a currency table is precisely the drift this file exists to prevent,
+ * and it is the same body `sameUnit` now delegates to, so the two cannot
+ * disagree.
+ *
+ * ⛔ STILL NOT A CONVERSION, and still recognised currencies only.
+ */
+export function currencyAlphabetKey(unit: string): string {
+  return normaliseUnitForComparison(unit);
 }
 
 /** True when the string names a currency this estate recognises. */
