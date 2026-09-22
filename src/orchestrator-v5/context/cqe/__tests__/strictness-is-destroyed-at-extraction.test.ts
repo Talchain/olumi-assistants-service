@@ -23,9 +23,25 @@
  *    proves the marker is derivable from data this layer already carries.
  *    Pinning that is what makes the eventual fix provable instead of arguable.
  *
- * ⚠ WHEN THE MARKER LANDS, THE FIRST TEST MUST BE INVERTED, DELIBERATELY.
- *    It asserts today's loss. It is a characterisation of a defect, not a
- *    guarantee to protect — a green run here is not good news.
+ * ⚠ WHAT TO DO WHEN THE FIX LANDS — AND THE ANSWER DEPENDS ON WHICH FIX.
+ *
+ *    An earlier version of this header said flatly "THE FIRST TEST MUST BE
+ *    INVERTED". That was imprecise for the very fix this file proposes, and an
+ *    independent review caught it by mutating rather than reading:
+ *
+ *    - A fix that adds a strictness MARKER and leaves `comparator` alone — the
+ *      shape recommended above — leaves all three tests GREEN. Inverting the
+ *      first one under that fix would turn it red on CORRECT code. Instead, add
+ *      an assertion that the marker distinguishes the two rows; the equality
+ *      below stays true and stays worth pinning, because the shared wire
+ *      vocabulary remains inclusive-only.
+ *    - A fix that changes `comparator` itself (a strict member in the enum)
+ *      turns tests 1 and 3 red. THAT is the case where they must be inverted,
+ *      and it is a contract change across three repos, not a local one.
+ *
+ *    So: a green run here is not evidence the defect is fixed. It is evidence
+ *    the loss is still faithfully characterised. Read which fix landed before
+ *    touching these assertions.
  */
 import { describe, it, expect } from 'vitest';
 
