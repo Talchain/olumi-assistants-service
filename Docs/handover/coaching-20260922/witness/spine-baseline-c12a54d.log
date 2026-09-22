@@ -1,0 +1,29 @@
+## SPINE WITNESS — build c12a54d  degraded=false  owner=signed-in
+
+  PASS [1] mutation commits exactly once  — turns=1
+  PASS [1] committed turn_id EQUALS the client identity
+  PASS [1] a receipt was minted  — versions=1
+  PASS [2a] retry creates NO duplicate turn  — Δ0
+  PASS [2a] retry creates NO duplicate version
+  PASS [2a] retry RECOVERS the same receipt
+  FAIL [2b] retry does NOT claim an edit (and actually answered)  — HTTP 200 "Updated Sales Cycle Length from 17 months to 14 months. Ever"
+  FAIL [2b] graph_patch does NOT say applied  — status=applied
+  FAIL [2b] reply RECONCILES current state (and makes no edit claim)  — current=17 names=true claims_edit=true
+  PASS [3] exactly one concurrent write wins  — turns=1 claims=1
+  PASS [3] the loser refuses TRUTHFULLY (409)  — GRAPH_DIVERGED
+  PASS [4] the unit the UI displays is accepted
+  PASS [4] a REAL rescale is still refused (and actually answered)  — HTTP 200 "This factor uses months; the value provided is in week."
+  FAIL [4] a proportion factor accepts a proportion  — "That looks like a proportion rather than a value in sca"
+  FAIL [4] the accepted proportion actually PERSISTS as 0.8  — persisted value=0.3
+  PASS [4] a CAPPED scale factor does NOT swallow a bare 0.8  — persisted value=0.2 (was 0.2, cap=100) "That looks like a proportion rather than a va"
+  FAIL [5] the two reads never silently disagree  — resp=56eacec6adfe fact=96cae050527f
+  PASS [5] a refusal is not a 500 that loses the turn  — HTTP 200
+  PASS [6] scenario head == latest version
+  PASS [6] version hash == scenario hash
+  PASS [6] turn mutation_id == version mutation_id
+  PASS [6] the product rereads state truthfully  — "**Sales Cycle Length is currently set to 33 months.**
+
+That'"
+
+### 16 PASS · 6 FAIL · 0 SKIP   on build c12a54d
+criterion roll-up: 1=PASS · 3=PASS · 4=FAIL · 5=FAIL · 6=PASS · 2a=PASS · 2b=FAIL

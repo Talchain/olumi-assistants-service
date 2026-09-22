@@ -25,18 +25,33 @@ const SRC = '105baa8c-f206-4880-9017-59803af99193';
 const rows = [];
 const rec = (crit, name, state, detail = '') => { rows.push({ crit, name, state, detail }); console.log(`  ${state.padEnd(4)} [${crit}] ${name}${detail ? '  — ' + detail : ''}`); };
 
+const step = async (crit, fn) => { try { await fn(); } catch (e) { rec(crit, 'BLOCK CRASHED — criterion NOT measured', 'FAIL', String(e?.message ?? e).slice(0, 120)); } };
 const hz = await (await fetch(`${BASE}/healthz`)).json();
 console.log(`## SPINE WITNESS — build ${hz.build}  degraded=${hz.degraded}  owner=${OWNER ? 'signed-in' : 'guest'}\n`);
 
 const [src] = await sql`select graph from public.scenarios where id=${SRC}`;
-const mk = async (t) => (await sql`insert into public.scenarios (user_id,title,stage,graph,scenario_schema_version)
-  values (${OWNER}, ${t}, 'evaluate', ${sql.json(src.graph)}, 1) returning id`)[0].id;
-const turn = (sid, tid, msg, stage = 'frame') => {
+const mk = async (t, graph = src.graph) => (await sql`insert into public.scenarios (user_id,title,stage,graph,scenario_schema_version)
+  values (${OWNER}, ${t}, 'evaluate', ${sql.json(graph)}, 1) returning id`)[0].id;
+// A reply only counts as a truthful answer if the service actually answered.
+const answered = (r) => r.status === 200 && String(r.j?.assistant_text ?? '').trim().length > 0;
+// observed_state.value for any node, by id.
+const val = async (sid, node) => (await sql`select n->'observed_state'->>'value' v from public.scenarios s,
+  lateral jsonb_array_elements(s.graph->'nodes') n where s.id=${sid} and n->>'id'=${node}`)[0]?.v;
+const turn = async (sid, tid, msg, stage = 'frame', attempt = 0) => {
   const h = { 'content-type': 'application/json', 'x-olumi-assist-key': KEY, 'x-request-id': randomUUID() };
   if (JWT) h.authorization = `Bearer ${JWT}`;
-  return fetch(`${BASE}/orchestrate/v2/turn`, { method: 'POST', headers: h,
-    body: JSON.stringify({ kind: 'message', turn_id: tid, scenario_id: sid, stage, message: msg, turn_class: 'decide', source: 'composer' }),
-    signal: AbortSignal.timeout(240000) }).then(async r => { const b = await r.text(); let j = null; try { j = JSON.parse(b); } catch {} return { status: r.status, j, b }; });
+  try {
+    const r = await fetch(`${BASE}/orchestrate/v2/turn`, { method: 'POST', headers: h,
+      body: JSON.stringify({ kind: 'message', turn_id: tid, scenario_id: sid, stage, message: msg, turn_class: 'decide', source: 'composer' }),
+      signal: AbortSignal.timeout(240000) });
+    const b = await r.text(); let j = null; try { j = JSON.parse(b); } catch {}
+    return { status: r.status, j, b };
+  } catch (e) {
+    // No response was received, so nothing was observed about the product.
+    // Same turn_id ⇒ the retry rides the service's own idempotent-replay path.
+    if (attempt < 2) { await new Promise(r => setTimeout(r, 1500 * (attempt + 1))); return turn(sid, tid, msg, stage, attempt + 1); }
+    return { status: 0, j: null, b: `TRANSPORT_FAILED after 3 attempts: ${e?.cause?.code ?? e?.message ?? e}` };
+  }
 };
 const txt = r => String(r.j?.assistant_text ?? r.b);
 const st = async (sid) => ({
@@ -48,7 +63,7 @@ const raw = async (sid, node = 'bc936d4c') => (await sql`select n->'observed_sta
   lateral jsonb_array_elements(s.graph->'nodes') n where s.id=${sid} and n->>'id'=${node}`)[0]?.r;
 
 // ── 1: exactly once under stable operation identity ─────────────────────────
-{
+await step('1', async () => {
   const sid = await mk('ZZZ-SPINE-1'); const T1 = randomUUID();
   await turn(sid, T1, 'change Sales Cycle Length to 14');
   const s = await st(sid);
@@ -56,10 +71,10 @@ const raw = async (sid, node = 'bc936d4c') => (await sql`select n->'observed_sta
   const match = (await sql`select 1 from public.v5_conversation_turns where scenario_id=${sid} and turn_id=${T1}`).length === 1;
   rec('1', 'committed turn_id EQUALS the client identity', match ? 'PASS' : 'FAIL');
   rec('1', 'a receipt was minted', OWNER ? (s.versions.length >= 1 ? 'PASS' : 'FAIL') : 'SKIP', OWNER ? `versions=${s.versions.length}` : 'guest mints none — vacuous, not passed');
-}
+});
 
 // ── 2a/2b: retry recovers truthfully, no duplicate, no false narration ──────
-{
+await step('2', async () => {
   const sid = await mk('ZZZ-SPINE-2'); const T1 = randomUUID();
   await turn(sid, T1, 'change Sales Cycle Length to 14');
   await turn(sid, randomUUID(), 'change Sales Cycle Length to 17');   // the intervening write
@@ -69,7 +84,11 @@ const raw = async (sid, node = 'bc936d4c') => (await sql`select n->'observed_sta
   rec('2a', 'retry creates NO duplicate turn', after.turns === before.turns ? 'PASS' : 'FAIL', `Δ${after.turns - before.turns}`);
   rec('2a', 'retry creates NO duplicate version', after.versions.length === before.versions.length ? 'PASS' : 'FAIL');
   rec('2a', 'retry RECOVERS the same receipt', OWNER ? (after.versions.at(-1) === before.versions.at(-1) ? 'PASS' : 'FAIL') : 'SKIP', OWNER ? '' : 'needs signed-in');
-  rec('2b', 'retry does NOT claim an edit', /\bUpdated\b/i.test(txt(retry)) ? 'FAIL' : 'PASS', `"${txt(retry).slice(0, 70)}"`);
+  // ⚠ A bare !/Updated/ passes VACUOUSLY on a 500, a 409 or an empty body —
+  //   none of which is a truthful reconciliation. Conjoined with answered().
+  rec('2b', 'retry does NOT claim an edit (and actually answered)',
+      answered(retry) && !/\bUpdated\b/i.test(txt(retry)) ? 'PASS' : 'FAIL',
+      `HTTP ${retry.status} "${txt(retry).slice(0, 60)}"`);
   const patch = (retry.j?.blocks ?? []).find(b => b?.type === 'graph_patch');
   rec('2b', 'graph_patch does NOT say applied', patch === undefined || patch.status !== 'applied' ? 'PASS' : 'FAIL', `status=${patch?.status ?? '(none)'}`);
   // ⚠ ONLY MEANINGFUL ALONGSIDE THE "does NOT claim an edit" ROW. On a build
@@ -80,10 +99,10 @@ const raw = async (sid, node = 'bc936d4c') => (await sql`select n->'observed_sta
   rec('2b', 'reply RECONCILES current state (and makes no edit claim)',
       namesCurrent && !claimsEdit ? 'PASS' : 'FAIL',
       `current=${vBefore} names=${namesCurrent} claims_edit=${claimsEdit}`);
-}
+});
 
 // ── 3: a genuinely stale DIFFERENT operation refuses truthfully ─────────────
-{
+await step('3', async () => {
   const sid = await mk('ZZZ-SPINE-3');
   const [A, B] = await Promise.all([turn(sid, randomUUID(), 'change Sales Cycle Length to 30'), turn(sid, randomUUID(), 'change Sales Cycle Length to 40')]);
   const s = await st(sid);
@@ -91,21 +110,45 @@ const raw = async (sid, node = 'bc936d4c') => (await sql`select n->'observed_sta
   rec('3', 'exactly one concurrent write wins', s.turns === 1 && claims === 1 ? 'PASS' : 'FAIL', `turns=${s.turns} claims=${claims}`);
   const refused = [A, B].find(r => r.status === 409);
   rec('3', 'the loser refuses TRUTHFULLY (409)', refused ? 'PASS' : 'FAIL', refused ? 'GRAPH_DIVERGED' : 'no 409 seen');
-}
+});
 
 // ── 4: natural units preserve real unit safety ─────────────────────────────
-{
+await step('4', async () => {
   const sid = await mk('ZZZ-SPINE-4');
   const a = await turn(sid, randomUUID(), 'change Sales Cycle Length to 12 months');
   rec('4', 'the unit the UI displays is accepted', /\bUpdated\b/i.test(txt(a)) ? 'PASS' : 'FAIL');
   const b = await turn(sid, randomUUID(), 'change Sales Cycle Length to 20 weeks');
-  rec('4', 'a REAL rescale is still refused', /\bUpdated\b/i.test(txt(b)) ? 'FAIL' : 'PASS', `"${txt(b).slice(0, 60)}"`);
+  rec('4', 'a REAL rescale is still refused (and actually answered)',
+      answered(b) && !/\bUpdated\b/i.test(txt(b)) ? 'PASS' : 'FAIL', `HTTP ${b.status} "${txt(b).slice(0, 55)}"`);
   const c = await turn(sid, randomUUID(), 'set Product-Market Fit Investment to 0.8');
-  rec('4', 'a proportion factor accepts a proportion', /\bUpdated\b/i.test(txt(c)) ? 'PASS' : 'FAIL', `"${txt(c).slice(0, 60)}"`);
-}
+  rec('4', 'a proportion factor accepts a proportion', /\bUpdated\b/i.test(txt(c)) ? 'PASS' : 'FAIL', `"${txt(c).slice(0, 55)}"`);
+  // Saying "Updated" is not the claim — the claim is that 0.8 REACHED the model.
+  const pv = await val(sid, 'f9223d57');
+  rec('4', 'the accepted proportion actually PERSISTS as 0.8', Number(pv) === 0.8 ? 'PASS' : 'FAIL', `persisted value=${pv}`);
+});
+
+// ── 4c: THE CORRUPTION CONTROL — a capped scale factor must NOT take a bare 0.8
+//   Shape copied verbatim from live staging (`fac_internal_pipeline`, one of 128
+//   real cap=100 proportion-unit factors). value = raw_value/cap, so 0.8 here
+//   means 80, not 4/5. The REJECTED first version of #1686 persisted it as 0.8.
+//   Without this row criterion 4 only ever tests the ACCEPT direction and a
+//   regressed build goes green.
+await step('4', async () => {
+  const capped = {
+    id: 'fac_internal_pipeline', kind: 'factor', label: 'Internal Talent Pipeline Investment',
+    category: 'controllable', provenance: 'ai_inferred', display_value: 'Low pipeline investment',
+    observed_state: { cap: 100, unit: 'scale', value: 0.2, source: 'cee_inference', raw_value: 20, factor_type: 'quality' },
+  };
+  const g = { ...src.graph, nodes: [...src.graph.nodes, capped] };
+  const sid = await mk('ZZZ-SPINE-4C', g);
+  const d = await turn(sid, randomUUID(), 'set Internal Talent Pipeline Investment to 0.8');
+  const cv = await val(sid, 'fac_internal_pipeline');
+  rec('4', 'a CAPPED scale factor does NOT swallow a bare 0.8', Number(cv) === 0.8 ? 'FAIL' : 'PASS',
+      `persisted value=${cv} (was 0.2, cap=100) "${txt(d).slice(0, 45)}"`);
+});
 
 // ── 5: one analysis turn cannot silently mix model revisions ───────────────
-{
+await step('5', async () => {
   const sid = await mk('ZZZ-SPINE-5');
   const a = turn(sid, randomUUID(), 'run the analysis', 'analyse');
   await new Promise(r => setTimeout(r, 400));
@@ -113,13 +156,24 @@ const raw = async (sid, node = 'bc936d4c') => (await sql`select n->'observed_sta
   const res = await a;
   const [f] = await sql`select f.payload->'result'->>'graph_hash_at_run' as har from public.v5_handler_facts f
     join public.v5_conversation_turns c on c.id=f.v5_conversation_turn_id where c.scenario_id=${sid} and f.handler_id='run_analysis' limit 1`;
-  const diverged = f?.har && res.j?.graph_hash && res.j.graph_hash !== f.har;
-  rec('5', 'the two reads never silently disagree', diverged ? 'FAIL' : 'PASS', `resp=${String(res.j?.graph_hash).slice(0, 12)} fact=${String(f?.har).slice(0, 12)}`);
+  // ⚠ The old form was `diverged ? FAIL : PASS`, which passed whenever the probe
+  //   found NO data — exactly what a refusal (no handler fact row) produces. A
+  //   fix would then have "passed" for the wrong reason. Classified explicitly;
+  //   indeterminate is a FAILURE to measure, never a pass.
+  const refusedCleanly = res.status === 200 && /stopped rather than mix|changed while this analysis/i.test(txt(res));
+  const both = Boolean(f?.har) && Boolean(res.j?.graph_hash);
+  const verdict = refusedCleanly ? 'PASS'
+    : both ? (res.j.graph_hash === f.har ? 'PASS' : 'FAIL')
+    : 'FAIL';
+  rec('5', 'the two reads never silently disagree', verdict,
+      refusedCleanly ? 'refused truthfully, no mixing'
+      : both ? `resp=${String(res.j.graph_hash).slice(0, 12)} fact=${String(f.har).slice(0, 12)}`
+      : `INDETERMINATE — fact=${f?.har ? 'yes' : 'MISSING'} resp=${res.j?.graph_hash ? 'yes' : 'MISSING'} (not a pass)`);
   rec('5', 'a refusal is not a 500 that loses the turn', res.status !== 500 ? 'PASS' : 'FAIL', `HTTP ${res.status}`);
-}
+});
 
 // ── 6: authoritative reread / receipt / state agree ───────────────────────
-{
+await step('6', async () => {
   const sid = await mk('ZZZ-SPINE-6');
   await turn(sid, randomUUID(), 'change Sales Cycle Length to 33');
   const [s] = await sql`select graph_identity_hash gh, current_model_version_id cur from public.scenarios where id=${sid}`;
@@ -130,7 +184,7 @@ const raw = async (sid, node = 'bc936d4c') => (await sql`select n->'observed_sta
   rec('6', 'turn mutation_id == version mutation_id', OWNER ? (t?.mvm === v?.mutation_id ? 'PASS' : 'FAIL') : 'SKIP');
   const rr = await turn(sid, randomUUID(), 'what value does Sales Cycle Length have?');
   rec('6', 'the product rereads state truthfully', /\b33\b/.test(txt(rr)) ? 'PASS' : 'FAIL', `"${txt(rr).slice(0, 60)}"`);
-}
+});
 
 const p = rows.filter(r => r.state === 'PASS').length, f = rows.filter(r => r.state === 'FAIL').length, s = rows.filter(r => r.state === 'SKIP').length;
 console.log(`\n### ${p} PASS · ${f} FAIL · ${s} SKIP   on build ${hz.build}`);
