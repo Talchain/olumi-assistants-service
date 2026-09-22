@@ -145,6 +145,36 @@ describe("observed_state numeric normalisation", () => {
     expect(ctx.earlyReturn?.statusCode).toBe(400);
   });
 
+  it("GUARD: a CONSTRAINT with no usable threshold still 400s — it is never dropped", () => {
+    // Discriminates the `kind === "factor"` guard ALONE. This observed_state is
+    // factor-SHAPED (no `metadata`) but sits on a constraint node, so only the
+    // kind guard can save it. Dropping it would delete the user's threshold to
+    // buy a 200 — the failure must stay loud.
+    const ctx = makeCtx([
+      factor({ value: 0.6 }),
+      { id: "con_budget", kind: "constraint", label: "Budget cap", observed_state: { raw_value: 50000 } },
+    ]);
+    runBoth(ctx);
+
+    expect(ctx.earlyReturn).toBeDefined();
+    expect(ctx.earlyReturn?.statusCode).toBe(400);
+    const con = (ctx.graph as any).nodes.find((n: any) => n.id === "con_budget");
+    expect(con.observed_state).toEqual({ raw_value: 50000 });
+  });
+
+  it("GUARD: a FACTOR carrying constraint metadata AND no value still 400s", () => {
+    // Discriminates the `"metadata" in o` skip ALONE: the value is invalid, so
+    // only the metadata skip prevents the drop. Laundering a malformed
+    // constraint object by shedding it is exactly what must not happen.
+    const ctx = makeCtx([factor({ metadata: { operator: ">=" } })]);
+    runBoth(ctx);
+
+    expect(ctx.earlyReturn).toBeDefined();
+    expect(ctx.earlyReturn?.statusCode).toBe(400);
+    const node = (ctx.graph as any).nodes.find((n: any) => n.id === "fac_cost");
+    expect(node.observed_state).toEqual({ metadata: { operator: ">=" } });
+  });
+
   it("CONTRAST CONTROL: a FACTOR cannot shed the constraint shape to slip through", () => {
     // FactorObservedState refuses any `metadata` key. A factor carrying broken
     // constraint metadata is skipped by the normaliser and still 400s.
