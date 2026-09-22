@@ -230,10 +230,49 @@ await step('6', async () => {
   rec('6', 'the product rereads state truthfully', /\b33\b/.test(txt(rr)) ? 'PASS' : 'FAIL', `"${txt(rr).slice(0, 60)}"`);
 });
 
+// ── 7: THE ROUTE THE USER ACTUALLY REACHES ─────────────────────────────────
+//   Everything above drives /orchestrate/v2/turn. Since PROXY_V5_TARGET can
+//   forward /proxy/v5/turn to /agent/v1/turn, a green run above may describe a
+//   surface no user touches. These rows are reported SEPARATELY so they never
+//   flatter the conventional roll-up — and the forwarding target is established
+//   BEHAVIOURALLY, because config and a running process can disagree (they did,
+//   for 8 minutes, on 22 Sep).
+const userRoute = [];
+await step('7', async () => {
+  const ORIGIN = process.env.WITNESS_ORIGIN ?? 'https://staging--olumi.netlify.app';
+  const sid = await mk('ZZZ-SPINE-7'); const T = randomUUID();
+  const h = { 'content-type': 'application/json', 'x-olumi-assist-key': KEY, 'x-request-id': randomUUID(), origin: ORIGIN };
+  if (JWT) h.authorization = `Bearer ${JWT}`;
+  let res = null;
+  try {
+    const r = await fetch(`${BASE}/proxy/v5/turn`, { method: 'POST', headers: h,
+      body: JSON.stringify({ kind: 'message', turn_id: T, scenario_id: sid, stage: 'frame',
+        message: 'change Sales Cycle Length to 11', turn_class: 'decide', source: 'composer' }),
+      signal: AbortSignal.timeout(240000) });
+    const b = await r.text(); let j = null; try { j = JSON.parse(b); } catch {}
+    res = { status: r.status, j, b };
+  } catch (e) { res = { status: 0, j: null, b: String(e?.message ?? e) }; }
+
+  if (res.status === 403) {
+    // Origin rejected ⇒ the probe never reached the forwarder. NOT a product fact.
+    rec('7', 'the user-facing route was measurable', 'FAIL', `PROXY_ORIGIN_REJECTED — probe blocked, NOT a product failure (set WITNESS_ORIGIN)`);
+    return;
+  }
+  const s7 = await st(sid), v7 = await raw(sid);
+  const servedByAgent = s7.turns === 0 && (res.j?.blocks ?? []).length === 0;
+  rec('7', `/proxy/v5/turn forwards to ${servedByAgent ? 'THE AGENT ROUTE' : 'the orchestrator'}`,
+      servedByAgent ? 'FAIL' : 'PASS',
+      `turns=${s7.turns} blocks=${(res.j?.blocks ?? []).length} analysis_ready=${res.j?.analysis_ready ? 'present' : 'ABSENT'}`);
+  rec('7', 'a user CAN apply a model edit on their own surface', v7 === '11' ? 'PASS' : 'FAIL',
+      `raw_value=${v7} (9 = refused, 11 = applied) · "${txt(res).slice(0, 60)}"`);
+  userRoute.push(servedByAgent);
+});
+
 const p = rows.filter(r => r.state === 'PASS').length, f = rows.filter(r => r.state === 'FAIL').length, s = rows.filter(r => r.state === 'SKIP').length;
 console.log(`\n### ${p} PASS · ${f} FAIL · ${s} SKIP   on build ${hz.build}`);
 const byCrit = {};
 for (const r of rows) { byCrit[r.crit] ??= { p: 0, f: 0 }; r.state === 'PASS' ? byCrit[r.crit].p++ : r.state === 'FAIL' ? byCrit[r.crit].f++ : 0; }
+console.log(`\n⚠ criteria 1-6 were measured on /orchestrate/v2/turn. Criterion 7 says whether a user reaches it.`);
 console.log('criterion roll-up: ' + Object.entries(byCrit).map(([k, v]) => `${k}=${v.f === 0 ? 'PASS' : 'FAIL'}`).join(' · '));
 fs.writeFileSync(process.env.OUT ?? '/tmp/spine.json', JSON.stringify({ build: hz.build, owner: !!OWNER, rows }, null, 2));
 await sql.end();
