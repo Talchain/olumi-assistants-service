@@ -823,18 +823,6 @@ export function admitCandidateModel(
     }
 
     const edgesNow = [...withRepairs, ...riskRepairs];
-    const adjacency = new Map<string, string[]>();
-    for (const e of edgesNow) adjacency.set(e.from, [...(adjacency.get(e.from) ?? []), e.to]);
-    const reaches = (from: string): boolean => {
-      const seen = new Set<string>([from]);
-      const stack = [from];
-      while (stack.length > 0) {
-        const x = stack.pop()!;
-        if (x === goalForReach.id) return true;
-        for (const y of adjacency.get(x) ?? []) if (!seen.has(y)) { seen.add(y); stack.push(y); }
-      }
-      return false;
-    };
     /**
      * ⛔ REPORTED, NOT ENFORCED — and that is a deliberate reversal.
      *
