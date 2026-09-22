@@ -1910,8 +1910,99 @@ function capitalise(s: string): string {
  * `value: 5, unit: '%'` and computes `5 / 100 = 0.05` correctly.
  * Otherwise the handler would compute `0.05 / 100 = 0.0005` — silent
  * double-normalisation.
+ *
+ * ⭐ RATES. When `message` is supplied and the user attached a period to THIS
+ * amount ("£62 per month"), the denominator is carried into the unit in its
+ * canonical `/` spelling — `'£/month'` — so it matches the stored factor unit
+ * exactly. 21% of the 300 most recently-updated live boards (22 Sep 2026) hold
+ * a rate-shaped unit, 59 of them `£/month`, and before this every natural-unit
+ * edit of one was refused `unit_mismatch` against the factor's own unit. A
+ * bare amount still yields the bare unit: see {@link readRateDenominator} for
+ * why nothing is invented.
+ *
+ * `message` is optional so the existing callers and fixtures keep compiling;
+ * the two production call sites both pass it.
  */
+/**
+ * THE PERIODS A RATE MAY BE STATED IN — a CLOSED list, and that is the guard.
+ *
+ * The reader below accepts `a`/`an`/`each` as separators, so an open-ended
+ * noun match would turn "change cost to £62 a lot" into a rate. Only these
+ * words can ever become a denominator, and each maps to ONE canonical
+ * singular spelling so `/months` and `/month` are the same rate.
+ */
+const RATE_PERIODS: Readonly<Record<string, string>> = {
+  second: 'second', seconds: 'second',
+  minute: 'minute', minutes: 'minute',
+  hour: 'hour', hours: 'hour',
+  day: 'day', days: 'day',
+  week: 'week', weeks: 'week',
+  fortnight: 'fortnight', fortnights: 'fortnight',
+  month: 'month', months: 'month',
+  quarter: 'quarter', quarters: 'quarter',
+  year: 'year', years: 'year',
+  annum: 'year',
+};
+
+/** `/month`, ` per month`, ` a month`, ` an hour`, ` each week`. */
+const RATE_TAIL_PATTERN = /^\s*(?:\/|per\s+|a\s+|an\s+|each\s+)([A-Za-z]+)\b/;
+
+/**
+ * ⭐⭐ THE RATE DENOMINATOR THE USER ACTUALLY WROTE.
+ *
+ * ── WHY THIS READS THE MESSAGE AND NOT THE QUANTITY ───────────────────────
+ * CQE does not extract it. Executed at `bd35cc9e` over the whole chain,
+ * "£62 per month", "£62/month", "£62 a month" and a bare "£62" all produce a
+ * `QuantityExtractionResult` that is BYTE-IDENTICAL in unit (`'GBP'`) and
+ * value — the denominator is not in the extractor's unit vocabulary. Nor does
+ * `raw_text` keep it: that field is truncated at the amount. The original
+ * message is the only thing that still holds the fact, which is why this takes
+ * one, exactly as its neighbour `deriveOperator(message, quantity)` does.
+ *
+ * ⛔ IT MUST IMMEDIATELY FOLLOW THE AMOUNT, AND THAT IS NOT FUSSINESS. Seven
+ *   live nodes are stored as `£ ARR per customer`. In "change ARR per customer
+ *   to £480" the `per` belongs to the FACTOR LABEL; a reader that scanned the
+ *   sentence for `per <noun>` would attach `/customer` to a plain £480 and
+ *   invent a rate the user never stated. Anchoring on the text CQE consumed
+ *   makes that case return nothing by construction, and it is pinned as a
+ *   named control in `natural-rate-unit.test.ts`.
+ *
+ * Fails closed: an anchor that cannot be located in the message yields no
+ * denominator, so the worst outcome is the pre-existing behaviour.
+ */
+export function readRateDenominator(
+  message: string,
+  quantity: QuantityExtractionResult,
+): string | undefined {
+  const anchor = (quantity.raw_text ?? '').trimEnd();
+  if (anchor.length === 0) return undefined;
+  const idx = message.lastIndexOf(anchor);
+  if (idx < 0) return undefined;
+  const tail = message.slice(idx + anchor.length);
+  const match = RATE_TAIL_PATTERN.exec(tail);
+  if (match === null) return undefined;
+  const word = match[1];
+  if (word === undefined) return undefined;
+  return Object.prototype.hasOwnProperty.call(RATE_PERIODS, word.toLowerCase())
+    ? RATE_PERIODS[word.toLowerCase()]
+    : undefined;
+}
+
 export function mapCqeQuantityToProposalValue(
+  quantity: QuantityExtractionResult,
+  message?: string,
+): { value: number; unit: string | undefined } {
+  const base = mapCqeQuantityToBaseUnit(quantity);
+  if (message === undefined || base.unit === undefined) return base;
+  const period = readRateDenominator(message, quantity);
+  // Already a rate (CQE cannot emit one today, but a future vocabulary could):
+  // never compose `£/month/month`.
+  if (period === undefined || base.unit.includes('/')) return base;
+  return { value: base.value, unit: `${base.unit}/${period}` };
+}
+
+/** The unit-vocabulary mapping alone — the switch this function has always been. */
+function mapCqeQuantityToBaseUnit(
   quantity: QuantityExtractionResult,
 ): { value: number; unit: string | undefined } {
   if (quantity.value === null) {

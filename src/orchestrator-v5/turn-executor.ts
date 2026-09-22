@@ -7975,6 +7975,7 @@ export async function runTurnExecutor(
         if (isFactor && handlerExecutable) {
           const { value: userUnitValue, unit } = mapCqeQuantityToProposalValue(
             deterministicValueUpdate.quantity,
+            payload.message,
           );
           const operator = deriveOperator(payload.message, deterministicValueUpdate.quantity);
 
@@ -8535,6 +8536,7 @@ export async function runTurnExecutor(
         ).toISOString();
         const { value: userUnitValue, unit } = mapCqeQuantityToProposalValue(
           deterministicValueUpdate.quantity,
+          payload.message,
         );
         const operator = deriveOperator(payload.message, deterministicValueUpdate.quantity);
         const clarifyEmitGraphHash = freshness?.current_graph_hash;

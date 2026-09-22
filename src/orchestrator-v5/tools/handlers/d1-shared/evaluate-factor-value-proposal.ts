@@ -33,6 +33,7 @@
 
 import { formatValueWithUnit } from './format-confirmation.js';
 import { recoverScaleFrame } from './scale-frame.js';
+import { currencyAlphabetKey } from '../../../../utils/currency-alphabet.js';
 
 /**
  * Operators the handler's `applyOperator` supports. Mirrors the union
@@ -102,14 +103,76 @@ export function canonicaliseUnitForDisplay(unit: string | undefined): string | u
  * `__tests__/unit-comparison-key.test.ts`. Never widen this to strip punctuation
  * or match prefixes — that would bless a real rescale as a spelling.
  *
+ * ⭐ TWO MORE SPELLINGS FOLD, ON EXACTLY THE SAME TERMS, AND NOTHING ELSE DOES.
+ *   · THE CURRENCY ALPHABET — `£` ≡ `GBP`. Not a new position: `utils/
+ *     currency-alphabet.ts` already owns that vocabulary and already declares
+ *     the two equal, in a function whose own docblock says "NOT A CONVERSION".
+ *     This calls that owner rather than keeping a second table.
+ *   · THE RATE SEPARATOR — `a/b` ≡ `a / b` ≡ `a per b`, with the denominator
+ *     folded to one spelling from a CLOSED period list. Needed because live
+ *     factors are stored both ways (`£/month`, 59 nodes; `contacts per week`).
+ *
+ *   The rescales stay refusals and are pinned as such in
+ *   `routing/__tests__/natural-rate-unit.test.ts`: `£/month` ≠ `£/day`,
+ *   `£/month` ≠ `£/year`, `£` ≠ `£/month`, `£/month` ≠ `$/month`, plus the
+ *   existing `months` ≠ `weeks` and `%` ≠ `pp`.
+ *
  * NOT for percent classification: a unit's IDENTITY ("are these the same unit?")
  * and its SCALE CONVENTION ("what multiplier does this unit imply?") are two more
  * different questions, and this function answers only the first. Do not extend it
  * to classify scales.
  */
+/**
+ * The periods a rate denominator may name, each folded to ONE spelling. Closed
+ * on purpose: an open match would let `£/customer` and `£/customers` fold while
+ * quietly folding things that are not periods at all.
+ */
+const RATE_DENOMINATOR_SPELLINGS: Readonly<Record<string, string>> = {
+  second: 'second', seconds: 'second',
+  minute: 'minute', minutes: 'minute',
+  hour: 'hour', hours: 'hour',
+  day: 'day', days: 'day',
+  week: 'week', weeks: 'week',
+  fortnight: 'fortnight', fortnights: 'fortnight',
+  month: 'month', months: 'month',
+  quarter: 'quarter', quarters: 'quarter',
+  year: 'year', years: 'year',
+  annum: 'year',
+};
+
+/** `a/b`, `a / b`, `a per b` — the three ways this estate spells one rate. */
+const RATE_SEPARATOR_PATTERN = /\s*(?:\/|\bper\b)\s*/;
+
+/** One side of a unit, folded: currency alphabet first, then case. */
+function foldUnitSide(side: string): string {
+  return currencyAlphabetKey(side.trim()).toLowerCase();
+}
+
 export function unitComparisonKey(unit: string | undefined): string | undefined {
   const display = canonicaliseUnitForDisplay(unit);
-  return display === undefined ? undefined : display.toLowerCase();
+  if (display === undefined) return undefined;
+
+  // ── RATES ────────────────────────────────────────────────────────────────
+  // Split on the FIRST separator only, so `£ ARR per customer` folds as
+  // (`£ ARR`, `customer`) and a pathological `a/b/c` is left alone rather than
+  // silently reassociated.
+  const sepMatch = RATE_SEPARATOR_PATTERN.exec(display);
+  if (sepMatch !== null && sepMatch.index > 0) {
+    const numerator = display.slice(0, sepMatch.index);
+    const denominator = display.slice(sepMatch.index + sepMatch[0].length);
+    if (numerator.trim().length > 0 && denominator.trim().length > 0) {
+      const foldedDenominator = denominator.trim().toLowerCase();
+      const period = Object.prototype.hasOwnProperty.call(
+        RATE_DENOMINATOR_SPELLINGS,
+        foldedDenominator,
+      )
+        ? RATE_DENOMINATOR_SPELLINGS[foldedDenominator]!
+        : foldedDenominator;
+      return `${foldUnitSide(numerator)}/${period}`;
+    }
+  }
+
+  return foldUnitSide(display);
 }
 
 /**
