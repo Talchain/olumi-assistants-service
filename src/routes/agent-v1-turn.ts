@@ -25,6 +25,8 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { config } from '../config/index.js';
+import { getSessionStore } from '../orchestrator-v5/session/index.js';
+import { scenarioAccessDecision } from '../orchestrator-v5/agent-lane/scenario-access.js';
 import { log } from '../utils/telemetry.js';
 import { composeDirectAnswerResponse } from '../orchestrator-v5/compose.js';
 import { finaliseV5Response } from '../orchestrator-v5/response-finaliser.js';
@@ -187,6 +189,38 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (refusal === 'unknown_session') sessions.bind(sessionId, userId, scenarioId);
     else if (refusal !== null) {
       return reply.code(404).send({ error: 'NOT_FOUND', detail: 'No readable conversation for that scenario.' });
+    }
+
+    /**
+     * Provision the scenario exactly as the product does.
+     *
+     * ⛔ WITHOUT THIS, PAUL'S FIRST TURN ON A NEW DECISION FAILS. Measured:
+     * posting a turn for a scenario id with no row returns `not_found` from the
+     * read AND from the build, and the Agent — correctly — reports that it
+     * could not initialise a model. The control settles whose gap it is:
+     * CEE's own `/orchestrate/v2/turn` given the same unknown id answers 200
+     * and CREATES the row (guest, `user_id: null`). So the product
+     * auto-provisions and this route did not.
+     *
+     * `ensureScenarioExists` is the product's own upsert — `INSERT … ON
+     * CONFLICT (id) DO NOTHING`, returning the AUTHORITATIVE owner of the
+     * stored row. It is NOT a permission grant: the returned owner is compared
+     * below, so an existing row belonging to someone else is refused rather
+     * than adopted.
+     *
+     * ⚠ Fails CLOSED, like the product's pre-flight: if the ownership oracle
+     * cannot answer, the turn is refused rather than run against an
+     * unverifiable scenario.
+     */
+    try {
+      const store = getSessionStore();
+      const owner = await store.ensureScenarioExists(scenarioId, userId);
+      if (scenarioAccessDecision(owner.user_id, userId) !== 'allow') {
+        return reply.code(404).send({ error: 'NOT_FOUND', detail: 'No readable conversation for that scenario.' });
+      }
+    } catch (err) {
+      log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: ownership oracle unavailable — refusing turn');
+      return reply.code(409).send({ error: 'SCENARIO_OWNERSHIP_UNVERIFIABLE', detail: 'Could not verify the scenario. Nothing was changed.' });
     }
 
     const capabilities = createAgentCapabilities(dispatch, proposals, callStructured, mode);
