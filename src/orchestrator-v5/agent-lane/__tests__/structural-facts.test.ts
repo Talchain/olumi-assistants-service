@@ -51,9 +51,20 @@ describe('structuralFacts', () => {
     expect(f.entities_that_cannot_reach_goal).toContain('Brand sentiment');
   });
 
-  it('counts absent values as absent, never as zero', () => {
-    // 6 non-goal-or-otherwise nodes lack a stored value; only `price` has one.
-    expect(f.entities_without_a_value).toBe(nodes.length - 1);
+  it('counts only FACTORS that lack a value, not every node', () => {
+    // \u26d4 Counting every node reported "28 entities have no value" on a
+    // 29-node model, and the Agent said exactly that to a user. A goal, an
+    // option, a risk and an outcome never carry an observed value, so almost
+    // all of that count was never a gap. Fixture: 3 factors, one of which
+    // (`price`) has a value.
+    expect(f.factors_without_a_value).toBe(2);
+  });
+
+  it('does not count an option or a risk as a missing value \u2014 contrast control', () => {
+    const optionsAndOutcomes = nodes.filter((n) => n.kind === 'option' || n.kind === 'outcome');
+    expect(optionsAndOutcomes.length).toBeGreaterThan(0);
+    // If these were counted, the number above could not be 2.
+    expect(f.factors_without_a_value).toBeLessThan(nodes.length - 1);
   });
 
   it('reports no goal rather than guessing one', () => {

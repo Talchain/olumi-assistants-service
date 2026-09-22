@@ -33,8 +33,18 @@ export interface StructuralFacts {
   readonly entities_with_no_connections: readonly string[];
   /** Entities that are connected but from which the goal is unreachable. */
   readonly entities_that_cannot_reach_goal: readonly string[];
-  /** How many entities carry no stored value. Unknown is not zero. */
-  readonly entities_without_a_value: number;
+  /**
+   * How many VALUE-BEARING entities carry no stored value. Unknown is not zero.
+   *
+   * ⛔ COUNT ONLY WHAT COULD HOLD A VALUE. This counted every node, so on a
+   * 29-node model it reported "28 entities have no value" — and the Agent said
+   * exactly that to the user. Technically true and materially misleading: a
+   * goal, an option, a risk and an outcome do not carry an observed value, so
+   * 26 of those 28 were never gaps at all. Current CEE says "twelve factors
+   * still lack values" on the same model, and that is the number a user can
+   * act on.
+   */
+  readonly factors_without_a_value: number;
   readonly goal_label: string | null;
 }
 
@@ -82,7 +92,9 @@ export function structuralFacts(
     options_not_reaching_goal: notReaching,
     entities_with_no_connections: nodes.filter((n) => !touched.has(n.id)).map((n) => labelOf(n.id)),
     entities_that_cannot_reach_goal: strandedNonOptions,
-    entities_without_a_value: nodes.filter((n) => typeof n.observed_state?.value !== 'number').length,
+    factors_without_a_value: nodes.filter(
+      (n) => n.kind === 'factor' && typeof n.observed_state?.value !== 'number',
+    ).length,
     goal_label: goal?.label ?? null,
   };
 }
