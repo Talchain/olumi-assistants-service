@@ -303,6 +303,35 @@ def validate_source_binding(rich, brief):
     return {"ok": not fails, "failures": fails}
 
 
+def validate_grounding(rich):
+    """Adopted from plot-lite's validatePreMortemGrounding(): a pointer must RESOLVE.
+
+    The v6 M2 contract requires `evidence_pointer` to be non-empty; the LIVE M1 reviewer in
+    plot-lite goes further and requires the id to name a real fragile edge or evidence-gap factor,
+    flagging the item (warning-grade, non-fatal) when it does not. That is the stronger rule and it
+    is the one adopted here: an id that points at nothing claims support that is not there.
+    """
+    known = set()
+    for k in ("user_facts", "factors", "outcomes", "options", "constraints", "causal_links", "unknowns"):
+        for x in rich.get(k, []):
+            if x.get("id"):
+                known.add(x["id"])
+    dsk_ok = {d for d in (rich.get("_dsk_allowlist") or [])}
+    dangling, grounded, ungrounded = [], 0, 0
+    for k in ("options", "factors", "outcomes", "causal_links", "notes"):
+        for x in rich.get(k, []):
+            refs = list(x.get("grounded_in") or []) + list(x.get("dsk_refs") or [])
+            if not refs:
+                ungrounded += 1
+                continue
+            grounded += 1
+            for r in refs:
+                if r not in known and r not in dsk_ok and not str(r).upper().startswith("DSK-"):
+                    dangling.append({"item": f"{k}:{x.get('id') or x.get('about_id')}", "ref": r})
+    return {"ok": not dangling, "dangling": dangling,
+            "grounded_items": grounded, "ungrounded_items": ungrounded}
+
+
 def user_slice(rich):
     """The part of a model a widener must not touch."""
     return {
@@ -559,6 +588,7 @@ def one_run(arm, brief_id, run_idx, model, widener_model, widener_effort, use_ds
         result["immutability"] = check_immutability(builder_rich, widened)
         result["widener_validation"] = validate_source_binding(json.loads(json.dumps(widened)), brief)
         result["enrichment"] = enrichment_counts(widened, builder_rich)
+        result["grounding"] = validate_grounding(widened)
         final_rich = widened
     else:
         result["enrichment"] = enrichment_counts(builder_rich)
