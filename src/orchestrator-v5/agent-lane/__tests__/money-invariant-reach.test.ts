@@ -35,10 +35,15 @@ const run = (nodes: unknown[], briefText: string) =>
   detectUnreconciledStatedMagnitudes({ nodes: nodes as never, options: [], briefText });
 
 describe('money invariant reach', () => {
-  it('the lane now satisfies the invariant’s authorship gate', () => {
+  it('the lane satisfies the gate the invariant ACTUALLY reads', () => {
     const nodes = valuedNodes();
     expect(nodes).toHaveLength(1);
-    expect(nodes[0].provenance?.source).toBe('brief_extraction');
+    // Two different claims, and both are needed.
+    expect(nodes[0].provenance?.source, 'who put the ENTITY here').toBe('brief_extraction');
+    expect(
+      (nodes[0].observed_state as Record<string, unknown>).source,
+      'where the VALUE came from - the field money-invariant.ts:211 gates on',
+    ).toBe('brief_extraction');
   });
 
   it('LIMITATION, pinned: without `cap` the figure is still unaudited', () => {
