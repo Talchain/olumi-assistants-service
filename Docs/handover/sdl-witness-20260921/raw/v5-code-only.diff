@@ -1,0 +1,44 @@
+--- ../evidence/c8-v5-code.sql	2026-09-21 23:45:50
++++ ../evidence/fix-v5-code.sql	2026-09-21 23:45:50
+@@ -91,25 +91,27 @@
+   END IF;
+   v_should_create := v_user_id IS NOT NULL
+     AND v_current_hash IS DISTINCT FROM p_incoming_graph_identity_hash;
+-  IF p_cas_enforce
+-     AND p_expected_base_known
+-     AND v_current_hash IS DISTINCT FROM p_expected_graph_identity_hash
+-     AND p_incoming_graph_identity_hash IS DISTINCT FROM v_current_hash
+-     AND NOT (v_current_hash IS NULL AND p_expected_graph_identity_hash IS NOT NULL)
+-  THEN
+-    RAISE EXCEPTION USING
+-      ERRCODE = 'OLGC1',
+-      MESSAGE = format(
+-        'append_turn_atomic_v5: stale graph write for scenario %s (expected %s, current %s)',
+-        p_scenario_id,
+-        COALESCE(p_expected_graph_identity_hash, '<absent>'),
+-        COALESCE(v_current_hash, '<absent>'));
+-  END IF;
+   SELECT id, model_version_mutation_id, model_version_created
+     INTO v_existing_turn_id, v_turn_version_mutation_id, v_turn_version_created
+     FROM public.v5_conversation_turns
+     WHERE scenario_id = p_scenario_id AND turn_id = p_turn_id;
+   v_turn_preexisting := FOUND;
++  IF NOT v_turn_preexisting THEN
++    IF p_cas_enforce
++       AND p_expected_base_known
++       AND v_current_hash IS DISTINCT FROM p_expected_graph_identity_hash
++       AND p_incoming_graph_identity_hash IS DISTINCT FROM v_current_hash
++       AND NOT (v_current_hash IS NULL AND p_expected_graph_identity_hash IS NOT NULL)
++    THEN
++      RAISE EXCEPTION USING
++        ERRCODE = 'OLGC1',
++        MESSAGE = format(
++          'append_turn_atomic_v5: stale graph write for scenario %s (expected %s, current %s)',
++          p_scenario_id,
++          COALESCE(p_expected_graph_identity_hash, '<absent>'),
++          COALESCE(v_current_hash, '<absent>'));
++    END IF;
++  END IF;
+   v_turn_id := public.append_turn_atomic_v4(
+     p_scenario_id,
+     p_turn_id,

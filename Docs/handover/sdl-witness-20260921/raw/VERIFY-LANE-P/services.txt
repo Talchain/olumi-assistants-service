@@ -1,0 +1,8 @@
+srv-d9hlamuq1p3s73a4g0i0     cee-demo                                 web_service ownerId=tea-d3eqr815pdvs73c6dn5g branch=staging
+srv-d4sm7nggjchc738p65o0     isl-production                           web_service ownerId=tea-d3eqr815pdvs73c6dn5g branch=main
+srv-d4slpaili9vc73eiq4og     cee-staging                              web_service ownerId=tea-d3eqr815pdvs73c6dn5g branch=staging
+srv-d4sl44s9c44c73ep4ak0     plot-lite-service-staging                web_service ownerId=tea-d3eqr815pdvs73c6dn5g branch=staging
+srv-d4fmjpkhg0os73948t30     isl-staging                              web_service ownerId=tea-d3eqr815pdvs73c6dn5g branch=staging
+srv-d46fp8q4d50c73b1dqqg     cee-production                           web_service ownerId=tea-d3eqr815pdvs73c6dn5g branch=main
+srv-d3er5sali9vc73dlnek0     plot-lite-service                        web_service ownerId=tea-d3eqr815pdvs73c6dn5g branch=main
+TOTAL_SERVICES=7

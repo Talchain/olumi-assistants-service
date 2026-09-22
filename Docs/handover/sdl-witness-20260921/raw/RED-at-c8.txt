@@ -1,0 +1,22 @@
+PHASE RED-at-c8   at 2026-09-21T22:50:23.238Z   prosrc_md5=829c3deb90594099397d64d747f4854e  len=16299
+OK    OWNED T0 first write (expected NULL, incoming H0)   receipt_is_null=false
+OK    OWNED T1 (expected H0, incoming H1) — the turn we will replay   receipt_is_null=false
+OK    OWNED T2 (expected H1, incoming H2) — head moves on   receipt_is_null=false
+RAISE REPLAY of T1 — byte-identical args to T1 (expected H0, incoming H1, current H2)   SQLSTATE=OLGC1  append_turn_atomic_v5: stale graph write for scenario 456d0620-da8e-4480-9b0c-6d7be49a5f73 (expected df829492c5a91985f8a2a2ebba572e398d6e055a206f835f6dd6e4b5847d92b7, current 351b39cf67ea10366f88107783296e15d67bfa41901dc79ee37509d61fa056b8)
+RAISE C1 STALE NEW turn T3 (fresh turn_id, expected H0, current H2)   SQLSTATE=OLGC1  append_turn_atomic_v5: stale graph write for scenario 456d0620-da8e-4480-9b0c-6d7be49a5f73 (expected df829492c5a91985f8a2a2ebba572e398d6e055a206f835f6dd6e4b5847d92b7, current 351b39cf67ea10366f88107783296e15d67bfa41901dc79ee37509d61fa056b8)
+RAISE C2 REPLAY of T1 with a DIFFERENT mutation id   SQLSTATE=OLGC1  append_turn_atomic_v5: stale graph write for scenario 456d0620-da8e-4480-9b0c-6d7be49a5f73 (expected df829492c5a91985f8a2a2ebba572e398d6e055a206f835f6dd6e4b5847d92b7, current 351b39cf67ea10366f88107783296e15d67bfa41901dc79ee37509d61fa056b8)
+OK    C3 GUEST GT0 first write   receipt_is_null=true
+OK    C3 GUEST GT1 (the turn we replay)   receipt_is_null=true
+OK    C3 GUEST GT2 — head moves on   receipt_is_null=true
+RAISE C3 GUEST REPLAY of GT1   SQLSTATE=OLGC1  append_turn_atomic_v5: stale graph write for scenario de62d299-aac0-42de-a581-aa504c564560 (expected b5af4b28251d5905ad5aeaf2fff5be05dbcede5ec0c870af85a5ab855a202edc, current 3742a2598e669a88d05a4648074673cb4cc7bb5d52a3debea59ab8a971e40a7b)
+OK    C5 FIRST-WRITE exemption: current hash NULL, expected NON-NULL, base_known   receipt_is_null=false
+--- controls ---
+state_before_replay      {"mv":3,"ct":3,"hash":"351b39cf67ea10366f88107783296e15d67bfa41901dc79ee37509d61fa056b8"}
+durability_after_replay  {"turn_t1":1,"version_m1":1,"mv_total":3,"ct_total":3}
+counts_unchanged         true
+receipt_deep_equal_to_T1 undefined
+turn_row_id_equal_to_T1  undefined
+C1 raised_OLGC1          true   (OLGC1)
+C2 raised_MV422          false   (OLGC1)
+C3 guest                 write_committed=true write_receipt_null=true replay_ok=false replay_receipt_null=null guest_model_versions=0
+C5 first-write not_refused true   (accepted)

@@ -1,0 +1,33 @@
+
+> olumi-assistants-service@1.12.0 config:validate /private/tmp/claude-502/-Users-paulslee-Documents-GitHub/b9b90b64-25c1-4a6a-b2e8-866693c995f7/scratchpad/lane-a
+> tsx scripts/validate-config.ts
+
+
+=== Pre-deployment Configuration Validation ===
+
+--- ISL Configuration ---
+✅ CEE_CAUSAL_VALIDATION_ENABLED = undefined: ISL causal validation is disabled (no ISL config required)
+⚠️ ISL_TIMEOUT_MS = 5000 [source: default]: Using default value (consider setting explicitly for production)
+⚠️ ISL_MAX_RETRIES = 1 [source: default]: Using default value (consider setting explicitly for production)
+
+--- LLM Configuration ---
+✅ LLM_PROVIDER = fixtures: Provider configured
+✅ ANTHROPIC_API_KEY: Not required for fixtures provider
+
+--- Authentication Configuration ---
+⚠️ ASSIST_API_KEYS: No ASSIST_API_KEY(S) or HMAC_SECRET configured (auth may be disabled in non-production)
+
+=== Validation Summary ===
+
+✅ Passed: 3
+⚠️  Warnings: 3
+❌ Failed: 0
+
+⚠️  VALIDATION PASSED WITH WARNINGS
+
+Recommended fixes:
+  - ISL_TIMEOUT_MS: Using default value (consider setting explicitly for production)
+  - ISL_MAX_RETRIES: Using default value (consider setting explicitly for production)
+  - ASSIST_API_KEYS: No ASSIST_API_KEY(S) or HMAC_SECRET configured (auth may be disabled in non-production)
+
+Run with --strict flag to treat warnings as failures.

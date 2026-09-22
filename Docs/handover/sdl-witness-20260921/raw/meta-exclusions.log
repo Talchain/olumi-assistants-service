@@ -1,0 +1,9 @@
+
+ RUN  v4.1.10 /private/tmp/claude-502/-Users-paulslee-Documents-GitHub/b9b90b64-25c1-4a6a-b2e8-866693c995f7/scratchpad/lane-a
+
+
+ Test Files  1 passed (1)
+      Tests  7 passed (7)
+   Start at  00:19:49
+   Duration  1.43s (transform 483ms, setup 634ms, import 217ms, tests 8ms, environment 0ms)
+

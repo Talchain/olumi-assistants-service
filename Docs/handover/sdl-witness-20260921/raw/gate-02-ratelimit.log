@@ -1,0 +1,1 @@
+OK: 9 errorResponseBuilder site(s) across 16 file(s) importing @fastify/rate-limit (11 registration site(s), 2580 .ts files scanned) — every one returns an Error.

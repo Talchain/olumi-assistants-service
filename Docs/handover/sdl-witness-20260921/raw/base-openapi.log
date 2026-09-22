@@ -1,0 +1,6 @@
+
+> olumi-assistants-service@1.12.0 openapi:generate /private/tmp/claude-502/-Users-paulslee-Documents-GitHub/b9b90b64-25c1-4a6a-b2e8-866693c995f7/scratchpad/base-control-wt
+> openapi-typescript openapi.yaml -o src/generated/openapi.d.ts
+
+✨ openapi-typescript 7.10.1
+🚀 openapi.yaml → src/generated/openapi.d.ts [146.6ms]

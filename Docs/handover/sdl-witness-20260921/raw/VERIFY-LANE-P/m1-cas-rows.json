@@ -1,0 +1,18 @@
+[
+ {
+  "ts": "2026-09-18T00:21:38.569590019Z",
+  "msg": "{\"level\":30,\"time\":1789690898568,\"pid\":73,\"hostname\":\"srv-d4slpaili9vc73eiq4og-58585b76c9-dzrkc\",\"event\":\"v5.graph_cas.rpc_conflict\",\"scenario_id\":\"39a9a9c8-bc4a-4ef7-b7b2-b854c0d6c1aa\",\"turn_id\":\"33fc9329-92d6-4556-b9e6-752d2a17cdf2\",\"mode\":\"enforce\",\"conflict_category\":\"rpc_cas_conflict\",\"expected_identity_hash\":\"7ed2f7cda8cf3625\",\"incoming_identity_hash\":\"dfabac8aa5fdb0a1\",\"rpc_code\":\"OLGC1\"}"
+ },
+ {
+  "ts": "2026-09-18T12:56:58.496482677Z",
+  "msg": "{\"level\":30,\"time\":1789736218495,\"pid\":70,\"hostname\":\"srv-d4slpaili9vc73eiq4og-555c7bf55d-9wl6s\",\"event\":\"v5.graph_cas.rpc_conflict\",\"scenario_id\":\"3f14e465-6faf-49ae-b032-0450ab47ab5a\",\"turn_id\":\"01c5bbab-d621-40a7-96b0-a3feaabbe13f\",\"mode\":\"enforce\",\"conflict_category\":\"rpc_cas_conflict\",\"expected_identity_hash\":\"7ed2f7cda8cf3625\",\"incoming_identity_hash\":\"5075bc55ec2673c7\",\"rpc_code\":\"OLGC1\"}"
+ },
+ {
+  "ts": "2026-09-21T10:16:13.517916616Z",
+  "msg": "{\"level\":30,\"time\":1789985773516,\"pid\":72,\"hostname\":\"srv-d4slpaili9vc73eiq4og-7dd5587576-d5xqp\",\"event\":\"v5.graph_cas.rpc_conflict\",\"scenario_id\":\"171396f2-04f8-4906-85ad-06fd6032ce39\",\"turn_id\":\"9f4a2a25-54e7-4183-bff4-ebcde78fbe78\",\"mode\":\"enforce\",\"conflict_category\":\"rpc_cas_conflict\",\"expected_identity_hash\":\"3a60aa02af81ea7c\",\"incoming_identity_hash\":\"be7dba2fed1ac188\",\"rpc_code\":\"OLGC1\"}"
+ },
+ {
+  "ts": "2026-09-21T19:56:43.366813198Z",
+  "msg": "{\"level\":30,\"time\":1790020603360,\"pid\":70,\"hostname\":\"srv-d4slpaili9vc73eiq4og-549cd959cb-vrmxw\",\"event\":\"v5.graph_cas.rpc_conflict\",\"scenario_id\":\"28719228-52d4-4cb9-8045-2af654a2a3ca\",\"turn_id\":\"graph_registration:c0f45867-dc41-491c-8bc5-65ccda4cf6c5\",\"mode\":\"enforce\",\"conflict_category\":\"rpc_cas_conflict\",\"expected_identity_hash\":\"7ed2f7cda8cf3625\",\"incoming_identity_hash\":\"3ba2274482229edc\",\"rpc_code\":\"OLGC1\"}"
+ }
+]

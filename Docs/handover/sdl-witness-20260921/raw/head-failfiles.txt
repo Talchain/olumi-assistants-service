@@ -1,0 +1,14 @@
+ FAIL  src/orchestrator-v5/__tests__/q1-outgoing-influence-misclassification.integration.test.ts
+ FAIL  src/orchestrator-v5/__tests__/turn-executor-defaulted-value-disclosure.test.ts
+ FAIL  src/orchestrator-v5/coaching/__tests__/constraint-gap-disclosure-egress.test.ts
+ FAIL  src/orchestrator-v5/coaching/__tests__/scaffold-disclosure.test.ts
+ FAIL  src/orchestrator-v5/tools/handlers/__tests__/add-constraint-refusal-cause-is-resolvable.test.ts
+ FAIL  tests/integration/auth.comprehensive.test.ts
+ FAIL  tests/integration/orchestrate-v2-a1.test.ts
+ FAIL  tests/unit/cee.request-budget.test.ts
+ FAIL  tests/unit/clarify-v2.dispatch.test.ts
+ FAIL  tests/unit/clarify-v2.draft-first.test.ts
+ FAIL  tests/unit/clarify-v2.post-stop.test.ts
+ FAIL  tests/unit/draft-token-affordability.test.ts
+ FAIL  tests/unit/prompt-estate-drift.test.ts
+ FAIL  tests/unit/prompts.defaults.test.ts

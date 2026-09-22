@@ -1,0 +1,6 @@
+PROD AUDIT 2026-09-19T23:44:39.250585266Z [AUDIT] CEE_MODEL_VERSIONS_ENABLED enabled in staging environment
+PROD FLAG  2026-09-19T23:44:39.250585266Z [AUDIT] CEE_MODEL_VERSIONS_ENABLED enabled in staging environment
+PROD FLAG  2026-09-19T23:44:40.958981222Z {"level":30,"time":1789861480490,"pid":52,"hostname":"srv-d46fp8q4d50c73b1dqqg-69f9fb6d9b-7r9pz","event":"cee.config.raw_io_overridden","setting_name":"CEE_MODEL_VERSIONS_ENABLED","requested_value":true,"actual_value":true,"env":"staging","reason":"staging_override_allowed"}
+PROD control 'orchestrator'   -> 22 capped=False
+PROD control 'registered'     -> 9 capped=False
+PROD control 'orchestrate'    -> 3 capped=False

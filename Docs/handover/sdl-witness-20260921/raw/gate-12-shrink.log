@@ -1,0 +1,11 @@
+
+> olumi-assistants-service@1.12.0 eval:promotion-gate:shrink-guard /private/tmp/claude-502/-Users-paulslee-Documents-GitHub/b9b90b64-25c1-4a6a-b2e8-866693c995f7/scratchpad/lane-a
+> tsx tools/orchestrator-eval/src/promotion-gate/shrink-guard-cli.ts
+
+# Promotion-gate SHRINK GUARD
+
+Reference (merge-base): 3d90c3b81dd61e253dfe76f1d2ffb6e69873ed8e
+**PASS** — the gated set did not shrink and the grandfather baseline did not widen.
+
+base gated set: [decision_review] · head gated set: [decision_review]
+base grandfather entries: [] · head: []

@@ -1,0 +1,10 @@
+direction         : FORWARD
+project ref       : <redacted-ref>
+file              : /private/tmp/claude-502/-Users-paulslee-Documents-GitHub/b9b90b64-25c1-4a6a-b2e8-866693c995f7/scratchpad/lane-a/supabase/migrations/20260920210000_v5_append_v5_replay_precedes_cas.sql
+file sha256       : 1b9ba2fa9167b227907216ac0aa06faa577f93c9423cd46dc706c4733ebdb483
+expect md5 before : 829c3deb90594099397d64d747f4854e
+expect md5 after  : 7b78d8e12550628570e15b2b739c2d4d
+mode              : DRY RUN (no write)
+---
+ledger row present: true
+TRANSACTION ROLLED BACK: ABORT: ledger already carries 20260920210000.

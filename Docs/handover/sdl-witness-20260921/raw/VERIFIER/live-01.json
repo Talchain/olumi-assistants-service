@@ -1,0 +1,39 @@
+{
+  "ts": "2026-09-21T23:42:27.943Z",
+  "version": "PostgreSQL 15.8 on aarch64-unknown-linux-gnu, compiled by gcc (GCC) 13.2.0, 64-bit",
+  "fns": [
+    {
+      "name": "append_turn_atomic_v4",
+      "pronargs": 19,
+      "prosecdef": true,
+      "proacl": "{postgres=X/postgres,service_role=X/postgres}",
+      "md5": "db7bdbe3e2052237c623d8c5477a96e5",
+      "len": 4856
+    },
+    {
+      "name": "append_turn_atomic_v5",
+      "pronargs": 30,
+      "prosecdef": true,
+      "proacl": "{postgres=X/postgres,service_role=X/postgres}",
+      "md5": "7b78d8e12550628570e15b2b739c2d4d",
+      "len": 17372
+    },
+    {
+      "name": "create_model_version",
+      "pronargs": 11,
+      "prosecdef": true,
+      "proacl": "{postgres=X/postgres,service_role=X/postgres}",
+      "md5": "a282a1b86186e814a3add01b3ede2662",
+      "len": 5485
+    },
+    {
+      "name": "restore_model_version",
+      "pronargs": 5,
+      "prosecdef": true,
+      "proacl": "{postgres=X/postgres,service_role=X/postgres}",
+      "md5": "35614e797d2f712fa797b7ac9dc51218",
+      "len": 5190
+    }
+  ],
+  "ledger_err": "function length(text[]) does not exist"
+}

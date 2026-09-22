@@ -1,0 +1,103 @@
+
+ RUN  v4.1.10 /private/tmp/claude-502/-Users-paulslee-Documents-GitHub/b9b90b64-25c1-4a6a-b2e8-866693c995f7/scratchpad/lane-a
+
+ ❯ tests/integration/c8-append-v5-replay-precedes-cas.contract.test.ts (8 tests | 5 failed) 140ms
+     × the installed body looks up the turn BEFORE it evaluates the CAS 5ms
+     × THE DEFECT: replaying a committed turn after the head moved returns its receipt, and does not raise 29ms
+     × and the write it was previously told was stale is still durably there 15ms
+     × C2 replay identity is still guarded: the same turn_id with another mutation id is refused 9ms
+     × C3 a GUEST scenario commits with a NULL receipt, and its replay returns NULL rather than raising 7ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/integration/c8-append-v5-replay-precedes-cas.contract.test.ts > append_turn_atomic_v5 — replay is decided before CAS > the installed body looks up the turn BEFORE it evaluates the CAS
+AssertionError: the CAS is not guarded by IF NOT v_turn_preexisting: expected -1 to be greater than -1
+ ❯ tests/integration/c8-append-v5-replay-precedes-cas.contract.test.ts:324:78
+    322|       expect(lookupAt, 'replay lookup not found in the sliced body').t…
+    323|       expect(casAt, 'CAS block not found in the sliced body').toBeGrea…
+    324|       expect(guardAt, 'the CAS is not guarded by IF NOT v_turn_preexis…
+       |                                                                              ^
+    325|       expect(lookupAt, 'the CAS is evaluated BEFORE the replay lookup'…
+    326|       expect(guardAt, 'the replay guard opens before the CAS it guards…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  tests/integration/c8-append-v5-replay-precedes-cas.contract.test.ts > append_turn_atomic_v5 — replay is decided before CAS > THE DEFECT: replaying a committed turn after the head moved returns its receipt, and does not raise
+AssertionError: the replay of a COMMITTED turn was refused as a stale write: expected 'OLGC1' to be null // Object.is equality
+
+- Expected:
+null
+
++ Received:
+"OLGC1"
+
+ ❯ tests/integration/c8-append-v5-replay-precedes-cas.contract.test.ts:339:9
+    337|         replay.sqlstate,
+    338|         'the replay of a COMMITTED turn was refused as a stale write',
+    339|       ).toBe(null);
+       |         ^
+    340|       expect(replay.ok).toBe(true);
+    341|       expect(replay.turnRowId, 'the replay returned a different turn r…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  tests/integration/c8-append-v5-replay-precedes-cas.contract.test.ts > append_turn_atomic_v5 — replay is decided before CAS > and the write it was previously told was stale is still durably there
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ tests/integration/c8-append-v5-replay-precedes-cas.contract.test.ts:358:25
+    356|       const { m1, replayArgs } = await walkToMovedHead(scenarioId, 'du…
+    357|       const replay = await appendTurn(replayArgs);
+    358|       expect(replay.ok).toBe(true);
+       |                         ^
+    359|
+    360|       const [row] = await sql<{ turns: number; versions: number }[]>`
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+ FAIL  tests/integration/c8-append-v5-replay-precedes-cas.contract.test.ts > append_turn_atomic_v5 — replay is decided before CAS > C2 replay identity is still guarded: the same turn_id with another mutation id is refused
+AssertionError: expected 'OLGC1' to be 'MV422' // Object.is equality
+
+Expected: "MV422"
+Received: "OLGC1"
+
+ ❯ tests/integration/c8-append-v5-replay-precedes-cas.contract.test.ts:393:33
+    391|       const impostor = await appendTurn({ ...replayArgs, mutationId: r…
+    392|       expect(impostor.ok, 'a replay carrying another mutation id was a…
+    393|       expect(impostor.sqlstate).toBe('MV422');
+       |                                 ^
+    394|     });
+    395|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/5]⎯
+
+ FAIL  tests/integration/c8-append-v5-replay-precedes-cas.contract.test.ts > append_turn_atomic_v5 — replay is decided before CAS > C3 a GUEST scenario commits with a NULL receipt, and its replay returns NULL rather than raising
+AssertionError: the guest replay was refused as a stale write: expected 'OLGC1' to be null // Object.is equality
+
+- Expected:
+null
+
++ Received:
+"OLGC1"
+
+ ❯ tests/integration/c8-append-v5-replay-precedes-cas.contract.test.ts:402:80
+    400|
+    401|       const replay = await appendTurn(replayArgs);
+    402|       expect(replay.sqlstate, 'the guest replay was refused as a stale…
+       |                                                                                ^
+    403|       expect(replay.ok).toBe(true);
+    404|       expect(replay.receipt, 'a guest replay must return a NULL receip…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/5]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  5 failed | 3 passed (8)
+   Start at  23:55:34
+   Duration  414ms (transform 116ms, setup 132ms, import 22ms, tests 140ms, environment 0ms)
+

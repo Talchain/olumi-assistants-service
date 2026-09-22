@@ -1,0 +1,7 @@
+M4 v5.model_versions.version_committed -> 146 capped=False pages=2
+  status: {'no_receipt': 125, 'committed': 21}
+  ts range: 2026-09-21T00:51:32.145237674Z -> 2026-09-21T23:04:59.153804227Z
+  dotted control 'v5.graph_cas.evaluated'                 -> 600 capped=True
+  dotted control 'cee.config.raw_io_overridden'           -> 133 capped=False
+  dotted control 'v5.model_versions.version_created'      -> 0 capped=False
+  dotted control 'session.read_degraded'                  -> 0 capped=False

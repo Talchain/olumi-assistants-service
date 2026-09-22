@@ -1,0 +1,28 @@
+{
+  "stamp": "2026-09-21T23:13:31.791Z",
+  "mode": "apply",
+  "function": "append_turn_atomic_v5",
+  "version": "20260920210000",
+  "ledgerRowPresent": false,
+  "orderingBefore": {
+    "casGuard": 1743,
+    "olgc1Raise": 2059,
+    "replayLookup": 2417,
+    "preexistingGuard": null,
+    "bodyLength": 10010,
+    "ordering": "CAS_BEFORE_REPLAY (defective)"
+  }
+}
+{
+  "stamp": "2026-09-21T23:13:34.429Z",
+  "mode": "apply",
+  "result": "COMMITTED",
+  "orderingAfter": {
+    "casGuard": 2242,
+    "olgc1Raise": 2572,
+    "replayLookup": 1639,
+    "preexistingGuard": 1862,
+    "bodyLength": 10259,
+    "ordering": "REPLAY_BEFORE_CAS (fixed)"
+  }
+}

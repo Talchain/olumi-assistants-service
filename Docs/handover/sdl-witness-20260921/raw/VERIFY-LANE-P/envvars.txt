@@ -1,0 +1,26 @@
+  page 1: 100 rows
+  page 2: 18 rows
+  page 1: 100 rows
+  page 2: 21 rows
+=== cee-production (srv-d46fp8q4d50c73b1dqqg)  total_rows=118 distinct_keys=118 ===
+  OLUMI_ENV                      = 'staging'
+  NODE_ENV                       = 'staging'
+  CEE_MODEL_VERSIONS_ENABLED     = 'true'
+  CEE_REQUIRE_USER_JWT           = 'true'
+  RENDER_SERVICE_NAME            = <ABSENT>
+  PROMPTS_ENVIRONMENT            = 'staging'
+  SUPABASE_URL                   = https://etmmuzwxtcjipwphdola.supabase.co
+  CEE_V5_GRAPH_CAS_RPC           = 'enforce'
+  DD_ENV                         = 'manual-test'
+  ZZ_FABRICATED_KEY_CONTROL      = <ABSENT> (control OK)
+=== cee-staging (srv-d4slpaili9vc73eiq4og)  total_rows=121 distinct_keys=121 ===
+  OLUMI_ENV                      = <ABSENT>
+  NODE_ENV                       = 'staging'
+  CEE_MODEL_VERSIONS_ENABLED     = 'true'
+  CEE_REQUIRE_USER_JWT           = 'true'
+  RENDER_SERVICE_NAME            = <ABSENT>
+  PROMPTS_ENVIRONMENT            = <ABSENT>
+  SUPABASE_URL                   = https://etmmuzwxtcjipwphdola.supabase.co
+  CEE_V5_GRAPH_CAS_RPC           = 'enforce'
+  DD_ENV                         = 'staging'
+  ZZ_FABRICATED_KEY_CONTROL      = <ABSENT> (control OK)

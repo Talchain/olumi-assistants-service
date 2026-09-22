@@ -1,0 +1,41 @@
+[
+  {
+    "label": "OLD(829c3deb) pre-apply live",
+    "body_len": 9993,
+    "cas_guard": 1737,
+    "olgc1": 2053,
+    "replay_lookup": 2411,
+    "preexisting_guard": -1,
+    "mv422_control": 3499,
+    "v4_control": 2654,
+    "create_model_version": -1,
+    "restore_model_version": -1,
+    "insert_mv_control": 6828
+  },
+  {
+    "label": "NEW(7b78d8e1) live now",
+    "body_len": 10242,
+    "cas_guard": 2236,
+    "olgc1": 2566,
+    "replay_lookup": 1633,
+    "preexisting_guard": 1856,
+    "mv422_control": 3748,
+    "v4_control": 2903,
+    "create_model_version": -1,
+    "restore_model_version": -1,
+    "insert_mv_control": 7077
+  },
+  {
+    "label": "ROLLBACK file body",
+    "body_len": 9993,
+    "cas_guard": 1737,
+    "olgc1": 2053,
+    "replay_lookup": 2411,
+    "preexisting_guard": -1,
+    "mv422_control": 3499,
+    "v4_control": 2654,
+    "create_model_version": -1,
+    "restore_model_version": -1,
+    "insert_mv_control": 6828
+  }
+]

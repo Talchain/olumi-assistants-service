@@ -1,0 +1,26 @@
+{
+  "cee-demo": {
+    "n_vars": 114,
+    "CEE_V5_GRAPH_CAS_RPC": "enforce",
+    "CEE_MODEL_VERSIONS_ENABLED": "true",
+    "supabase_ref_sha8": "9b975f90",
+    "has_SUPABASE_URL": true,
+    "CONTROL_absent_key": "<ABSENT>"
+  },
+  "cee-staging": {
+    "n_vars": 121,
+    "CEE_V5_GRAPH_CAS_RPC": "enforce",
+    "CEE_MODEL_VERSIONS_ENABLED": "true",
+    "supabase_ref_sha8": "9b975f90",
+    "has_SUPABASE_URL": true,
+    "CONTROL_absent_key": "<ABSENT>"
+  },
+  "cee-production": {
+    "n_vars": 118,
+    "CEE_V5_GRAPH_CAS_RPC": "enforce",
+    "CEE_MODEL_VERSIONS_ENABLED": "true",
+    "supabase_ref_sha8": "9b975f90",
+    "has_SUPABASE_URL": true,
+    "CONTROL_absent_key": "<ABSENT>"
+  }
+}

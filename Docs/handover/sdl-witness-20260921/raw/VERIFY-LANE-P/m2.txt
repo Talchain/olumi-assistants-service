@@ -1,0 +1,26 @@
+  [429 retry 0 sleep 2.0]
+  [429 retry 1 sleep 3.6]
+  [429 retry 2 sleep 6.5]
+  [429 retry 0 sleep 2.0]
+  [429 retry 1 sleep 3.6]
+  [429 retry 2 sleep 6.5]
+  [429 retry 0 sleep 2.0]
+  [429 retry 1 sleep 3.6]
+  [429 retry 2 sleep 6.5]
+  [429 retry 3 sleep 11.7]
+=== M2 TARGETS (expect 0) ===
+  'readFactsWithTurnFor'           -> 0 capped=False pages=1
+  'HandlerFactSchema'              -> 0 capped=False pages=1
+  'session.read_degraded'          -> 0 capped=False pages=1
+  'read_degraded'                  -> 0 capped=False pages=1
+  'SessionReadError'               -> 0 capped=False pages=1
+  'prior_facts loaded'             -> 4000 capped=True pages=41
+  'canonical_readback_failed'      -> 0 capped=False pages=1
+=== M2 CONTRAST CONTROLS (expect >0) ===
+  'v5_turn_context_facts'          -> 4000 capped=True pages=41
+  'v5.graph_cas.rpc_conflict'      -> 4 capped=False pages=1
+  'buildTurnContext'               -> 4000 capped=True pages=41
+  'option_intervention_edit'       -> 5 capped=False pages=1
+=== NEGATIVE CONTROLS (expect 0) ===
+  'ZzQxFabricatedNeverLogged'      -> 0
+  'readFactsWithTurnForZZZ'        -> 0

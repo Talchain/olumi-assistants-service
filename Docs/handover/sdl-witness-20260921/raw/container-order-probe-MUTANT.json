@@ -1,0 +1,16 @@
+{
+  "at": "2026-09-21T22:51:04.718Z",
+  "version": "PostgreSQL 15.19 (Debian 15.19-1.pgdg13+2) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "prosrc_md5": "5346f5e7f92b2202ade713035f53e65c",
+  "prosrc_len": 17329,
+  "body_len": 10216,
+  "offsets": {
+    "IF p_cas_enforce": 2209,
+    "ERRCODE = 'OLGC1'": 2539,
+    "INTO v_existing_turn_id": 1639,
+    "IF NOT v_turn_preexisting THEN": -1,
+    "ERRCODE = 'MV422'": 3711,
+    "append_turn_atomic_v4(": 2866
+  },
+  "ordering": "REPLAY_LOOKUP_BEFORE_CAS"
+}

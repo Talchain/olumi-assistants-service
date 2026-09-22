@@ -1,0 +1,35 @@
+# VERIFIER DB READ 2026-09-21T23:01:51.132Z ref=etmmuz…
+## FNDEF v5 exists
+[{"proname":"append_turn_atomic_v2","deflen":3805},{"proname":"append_turn_atomic_v3","deflen":5824},{"proname":"append_turn_atomic_v4","deflen":5668},{"proname":"append_turn_atomic_v5","deflen":17289}]
+## REG turns ever
+[{"n":442}]
+## REG turns model_version_created distribution
+[{"model_version_created":null,"n":442}]
+## REG distinct scenarios
+[{"n":331}]
+## REG earliest latest
+[{"first":"2026-08-06T03:15:29.807Z","last":"2026-09-21T20:43:17.485Z"}]
+## CONTROL all turns mvc distribution
+[{"model_version_created":null,"n":26344},{"model_version_created":false,"n":8379},{"model_version_created":true,"n":3354}]
+## REG-touched scenarios hash stamped
+[{"hash_stamped":true,"n":331}]
+## OWNED graph no version
+[{"n":89}]
+## CONTROL OWNED graph has version
+[{"n":3470}]
+## SPLIT owned+graph+noversion by reg-touched
+[{"reg_touched":true,"hash_stamped":true,"n":72},{"reg_touched":false,"hash_stamped":false,"n":17}]
+## SPLIT owned+graph+HASversion by reg-touched
+[{"reg_touched":false,"n":3454},{"reg_touched":true,"n":16}]
+## SUPPRESSED turns by scenario ownership
+[{"owned":false,"n":8379}]
+## CREATED turns by scenario ownership
+[{"owned":true,"n":3354}]
+## SUPPRESSED turns by TURN user_id (not scenario)
+[{"turn_owned":false,"n":8379}]
+## migrations 20260920210000 present?
+[]
+## CONTROL newest migrations
+[{"version":"20260918014756"},{"version":"20260918002353"},{"version":"20260918002117"},{"version":"20260918000833"},{"version":"20260918000431"}]
+## model_versions total + by kind
+[{"k":"initial","n":3058},{"k":"(null)","n":562},{"k":"committed_mutation","n":296},{"k":"restore","n":18}]

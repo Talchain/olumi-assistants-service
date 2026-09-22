@@ -1,0 +1,106 @@
+{
+  "at": "2026-09-21T23:20:34.636Z",
+  "ledger_since_20260918": [
+    {
+      "version": "20260918000431",
+      "name": "fix_create_shared_snapshot_pgcrypto_search_path",
+      "created_by": "paulsleepm@gmail.com",
+      "has_statements": true,
+      "n_statements": 1,
+      "statements_len": 1570
+    },
+    {
+      "version": "20260918000833",
+      "name": "fix_create_shared_snapshot_search_path",
+      "created_by": "paulsleepm@gmail.com",
+      "has_statements": true,
+      "n_statements": 1,
+      "statements_len": 1067
+    },
+    {
+      "version": "20260918002117",
+      "name": "store_brief_and_provenance_service_role",
+      "created_by": "paulsleepm@gmail.com",
+      "has_statements": true,
+      "n_statements": 1,
+      "statements_len": 3406
+    },
+    {
+      "version": "20260918002353",
+      "name": "widen_shared_briefs_seed_used_to_bigint",
+      "created_by": "paulsleepm@gmail.com",
+      "has_statements": true,
+      "n_statements": 1,
+      "statements_len": 2124
+    },
+    {
+      "version": "20260918014756",
+      "name": "fix_create_shared_brief_seed_cast_to_bigint",
+      "created_by": "paulsleepm@gmail.com",
+      "has_statements": true,
+      "n_statements": 1,
+      "statements_len": 1955
+    },
+    {
+      "version": "20260920210000",
+      "name": "v5_append_v5_replay_precedes_cas",
+      "created_by": null,
+      "has_statements": true,
+      "n_statements": 1,
+      "statements_len": 23270
+    }
+  ],
+  "procs": [
+    {
+      "proname": "append_turn_atomic_v5",
+      "md5": "7b78d8e12550628570e15b2b739c2d4d",
+      "len": 17372,
+      "acl": "{postgres=X/postgres,service_role=X/postgres}",
+      "secdef": true,
+      "nargs": 30,
+      "off": {
+        "cas": 2242,
+        "olgc1": 2572,
+        "lookup": 1639,
+        "guard": 1862,
+        "mv422": 3754,
+        "mv409": 3540,
+        "dedupe": -1
+      }
+    },
+    {
+      "proname": "create_model_version",
+      "md5": "a282a1b86186e814a3add01b3ede2662",
+      "len": 5485,
+      "acl": "{postgres=X/postgres,service_role=X/postgres}",
+      "secdef": true,
+      "nargs": 11,
+      "off": {
+        "cas": -1,
+        "olgc1": -1,
+        "lookup": -1,
+        "guard": -1,
+        "mv422": -1,
+        "mv409": 1522,
+        "dedupe": 2054
+      }
+    },
+    {
+      "proname": "restore_model_version",
+      "md5": "35614e797d2f712fa797b7ac9dc51218",
+      "len": 5190,
+      "acl": "{postgres=X/postgres,service_role=X/postgres}",
+      "secdef": true,
+      "nargs": 5,
+      "off": {
+        "cas": -1,
+        "olgc1": -1,
+        "lookup": -1,
+        "guard": -1,
+        "mv422": -1,
+        "mv409": 1177,
+        "dedupe": 1803
+      }
+    }
+  ]
+}

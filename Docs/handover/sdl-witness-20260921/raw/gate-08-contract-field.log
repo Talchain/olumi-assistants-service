@@ -1,0 +1,33 @@
+CONTRACT FIELD GUARD — node/graph wire contract
+  surfaces:   6
+                contract.NodeV3Schema — 11 fields, unknown keys: passthrough
+                contract.EdgeV3Schema — 7 fields, unknown keys: passthrough
+                cee.NodeV3 — 27 fields, unknown keys: strip
+                cee.EdgeV3 — 11 fields, unknown keys: strip
+                cee.ObservedStateV3 — 10 fields, unknown keys: passthrough
+                cee.CEEGraphResponseV3 — 18 fields, unknown keys: strip
+  source:     1053 files counted of 1056 walked (comments stripped)
+  excluded:   src/schemas/cee-v3.ts, src/schemas/contract-field-guard.ts, src/schemas/value-warrant-guard.ts
+  control:    token 'kind' in 401 files
+  findings:   10 — accepted 4, OPEN 6
+
+⚠ OPEN QUESTIONS (6) — recorded, NOT settled. Nobody has answered these:
+  · stripped:cee.NodeV3:type
+      OPEN — and this is the one the derivation adds that no hand-written list had. contract.NodeV3Schema declares `type` (numeric/ordinal/nominal/boolean); cee.NodeV3 does not, so CEE deletes it. Measured 0 of 45,876 nodes, and THIS IS THE MECHANISM FOR THAT ZERO. The question a human owes an answer to: does CEE want the measurement type on the wire (declare it) or has `kind` absorbed the job (retire it from the shared contract)? Do not answer it by declaring the field to make this go green — see synonym:kind-vs-type, which is the same question from the other side.
+
+  · stripped:cee.NodeV3:body
+      OPEN. contract.NodeV3Schema declares `body`; cee.NodeV3 declares `description` instead and strips `body`. Same concept, two names, and the strip means a `body` written anywhere upstream reaches nothing. The decision owed is which name the node contract keeps — not a second field. See synonym:body-vs-description.
+
+  · stripped:cee.NodeV3:categories
+      OPEN. contract.NodeV3Schema declares `categories` (the label list for a nominal factor); cee.NodeV3 strips it, while cee.NodeV3 carries `encoding_map` which answers a neighbouring question (encoded integer → display string). Whether those are one concept or two has not been settled by anyone, and guessing is how trap 21 happens.
+
+  · convention-outlier:extractionType
+      OPEN. `extractionType` is the ONLY camelCase field in 65 node/graph fields. It is already producing the twin this detector exists to predict: adapters/llm/normalisation.ts:1074 emits a structured-log key spelled `extraction_type`. Nothing is broken today — the log key and the wire field are different things — but one spelling of one concept is now in the tree twice, which is precisely the state `observedState`/`observed_state` started from. Renaming the wire field is a cross-service change and is not in this check's gift; recording it is.
+
+  · synonym:kind-vs-type
+      OPEN, and paired with stripped:cee.NodeV3:type — settle them together. Both are declared on contract.NodeV3Schema and they are genuinely two questions (role vs measurement type), which is exactly why the fix is to NAME THEM APART rather than reconcile them.
+
+  · synonym:body-vs-description
+      OPEN, and paired with stripped:cee.NodeV3:body — settle them together. Two names for optional node prose, one on each half of the same wire.
+
+✅ every finding has a recorded decision, and every decision still reproduces.

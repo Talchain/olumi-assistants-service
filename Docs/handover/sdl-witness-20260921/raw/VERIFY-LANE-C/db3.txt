@@ -1,0 +1,17 @@
+# VERIFIER DB READ 2026-09-21T23:04:17.256Z ref=etmmuz…
+## DISCRIMINATOR: scenarios whose ONLY turns are registrations, split by hash stamped
+[{"hash_stamped":true,"n":168}]
+## CONTROL: scenarios with NO turns at all, hash stamped?
+[{"hash_stamped":false,"n":17}]
+## reg-only scenarios: do they have a graph?
+[{"has_graph":true,"hash_stamped":true,"owned":false,"n":165},{"has_graph":true,"hash_stamped":true,"owned":true,"n":3}]
+## the 72 stranded: do they have turns other than registrations?
+[{"has_other_turns":false,"n":3},{"has_other_turns":true,"n":69}]
+## the 72: any turn with model_version_created = false (suppression evidence)?
+[{"mvc":"(null)","n":208}]
+## ALL suppressed turns: do any belong to an OWNED scenario at TURN TIME? check scenario user_id now
+[{"n":0}]
+## model_versions with creation_kind initial: are any on reg-touched scenarios?
+[{"n":16}]
+## scenarios table: does it have a created_at for the 72 (age)
+[{"oldest":"2026-08-25T20:59:28.873Z","newest":"2026-08-30T13:22:23.681Z","n":72}]

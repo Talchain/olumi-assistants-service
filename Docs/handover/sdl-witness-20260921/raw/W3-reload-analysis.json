@@ -1,0 +1,3050 @@
+{
+  "head": {
+    "id": "d506cb35-6aab-4e08-999d-6b248d1369f8",
+    "version_number": 5,
+    "idh": "6cdc982c34bcd60fa5135cee37af5bde145465c13a158a5943373664c278df7a",
+    "aah": "eaffb2fd4cfd2946e4d715d48489dbde1c7520f45954644ca9b4a8f241b9bd34"
+  },
+  "reload": {
+    "schema": "scenario_graph.v1",
+    "scenario_id": "b6bf8e80-960f-48f8-818e-e7b02d890332",
+    "graph": {
+      "meta": {
+        "roots": [
+          "491176c4",
+          "a3550778",
+          "ab78e513"
+        ],
+        "leaves": [
+          "7f40d56e"
+        ],
+        "source": "assistant"
+      },
+      "edges": [
+        {
+          "to": "94fa174b",
+          "from": "098c77cd",
+          "origin": "ai",
+          "strength": {
+            "std": 0.08399999999999998,
+            "mean": -0.35
+          },
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Model-inferred causal link (records projector)"
+          },
+          "validation": {
+            "pass1": {
+              "strength_std": 0,
+              "strength_mean": -0.35,
+              "exists_probability": 0
+            },
+            "pass2": {
+              "basis": "domain_prior",
+              "reasoning": "Conversion drag from higher prices moderately reduces MRR by lowering new customer flow.",
+              "strength_std": 0.07,
+              "strength_mean": -0.14,
+              "lint_corrected": false,
+              "needs_user_input": true,
+              "exists_probability": 0.9
+            },
+            "status": "contested",
+            "evoi_rank": null,
+            "was_shown": false,
+            "evoi_impact": null,
+            "resolved_by": "default",
+            "user_action": "pending",
+            "pass1_missing": false,
+            "pass2_missing": false,
+            "sign_unstable": false,
+            "max_divergence": 0.6666666666666666,
+            "pass2_adjusted": {
+              "strength_std": 0.07,
+              "strength_mean": -0.1650000000000001,
+              "exists_probability": 0.9
+            },
+            "resolved_value": null,
+            "bias_correction": {
+              "strength_std_offset": 0,
+              "strength_mean_offset": -0.025000000000000078,
+              "exists_probability_offset": 0
+            },
+            "distance_to_goal": 1,
+            "contested_reasons": [
+              "strength_band_change"
+            ],
+            "validation_lint_log": [
+              {
+                "code": "WARN_CLUSTERED_EP",
+                "after": 0.9,
+                "before": 0.9,
+                "edge_key": "098c77cd->94fa174b"
+              }
+            ]
+          },
+          "effect_direction": "negative",
+          "exists_probability": 0.8,
+          "provenance_display": "ai_inferred"
+        },
+        {
+          "to": "098c77cd",
+          "from": "3c8203cf",
+          "origin": "ai",
+          "strength": {
+            "std": 0.10799999999999998,
+            "mean": 0.45
+          },
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Model-inferred causal link (records projector)"
+          },
+          "validation": {
+            "pass1": {
+              "strength_std": 0,
+              "strength_mean": 0.45,
+              "exists_probability": 0
+            },
+            "pass2": {
+              "basis": "domain_prior",
+              "reasoning": "Raising price from £59 to £79 likely increases conversion drag substantially based on typical price elasticities.",
+              "strength_std": 0.15,
+              "strength_mean": 0.6,
+              "lint_corrected": false,
+              "needs_user_input": true,
+              "exists_probability": 0.9
+            },
+            "status": "agreed",
+            "evoi_rank": null,
+            "was_shown": false,
+            "evoi_impact": null,
+            "resolved_by": "default",
+            "user_action": "pending",
+            "pass1_missing": false,
+            "pass2_missing": false,
+            "sign_unstable": false,
+            "max_divergence": 0.6666666666666666,
+            "pass2_adjusted": {
+              "strength_std": 0.15,
+              "strength_mean": 0.575,
+              "exists_probability": 0.9
+            },
+            "resolved_value": null,
+            "bias_correction": {
+              "strength_std_offset": 0,
+              "strength_mean_offset": -0.025000000000000078,
+              "exists_probability_offset": 0
+            },
+            "distance_to_goal": 2,
+            "contested_reasons": [],
+            "validation_lint_log": [
+              {
+                "code": "WARN_CLUSTERED_EP",
+                "after": 0.9,
+                "before": 0.9,
+                "edge_key": "3c8203cf->098c77cd"
+              }
+            ]
+          },
+          "effect_direction": "positive",
+          "exists_probability": 0.8,
+          "provenance_display": "ai_inferred"
+        },
+        {
+          "to": "94fa174b",
+          "from": "3c8203cf",
+          "origin": "ai",
+          "strength": {
+            "std": 0.10687499999999994,
+            "mean": 0.4453124999999999
+          },
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Model-inferred causal link (records projector)"
+          },
+          "validation": {
+            "pass1": {
+              "strength_std": 0,
+              "strength_mean": 0.4453124999999999,
+              "exists_probability": 0
+            },
+            "pass2": {
+              "basis": "domain_prior",
+              "reasoning": "A 34% price increase directly boosts revenue per user by roughly the same proportion.",
+              "strength_std": 0.07,
+              "strength_mean": 0.29,
+              "lint_corrected": false,
+              "needs_user_input": true,
+              "exists_probability": 0.95
+            },
+            "status": "agreed",
+            "evoi_rank": null,
+            "was_shown": false,
+            "evoi_impact": null,
+            "resolved_by": "default",
+            "user_action": "pending",
+            "pass1_missing": false,
+            "pass2_missing": false,
+            "sign_unstable": false,
+            "max_divergence": 1,
+            "pass2_adjusted": {
+              "strength_std": 0.07,
+              "strength_mean": 0.2649999999999999,
+              "exists_probability": 0.95
+            },
+            "resolved_value": null,
+            "bias_correction": {
+              "strength_std_offset": 0,
+              "strength_mean_offset": -0.025000000000000078,
+              "exists_probability_offset": 0
+            },
+            "distance_to_goal": 1,
+            "contested_reasons": [],
+            "validation_lint_log": [
+              {
+                "code": "WARN_CLUSTERED_EP",
+                "after": 0.95,
+                "before": 0.95,
+                "edge_key": "3c8203cf->94fa174b"
+              }
+            ]
+          },
+          "effect_direction": "positive",
+          "exists_probability": 0.8,
+          "provenance_display": "ai_inferred"
+        },
+        {
+          "to": "3c8203cf",
+          "from": "3ec889db",
+          "origin": "ai",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Model-inferred causal link (records projector)"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1,
+          "provenance_display": "ai_inferred"
+        },
+        {
+          "to": "7b9a04f8",
+          "from": "3ec889db",
+          "origin": "ai",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Model-inferred causal link (records projector)"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1,
+          "provenance_display": "ai_inferred"
+        },
+        {
+          "to": "94fa174b",
+          "from": "48d65738",
+          "origin": "ai",
+          "strength": {
+            "std": 0.144,
+            "mean": -0.6
+          },
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Model-inferred causal link (records projector)"
+          },
+          "validation": {
+            "pass1": {
+              "strength_std": 0,
+              "strength_mean": -0.6,
+              "exists_probability": 0
+            },
+            "pass2": {
+              "basis": "domain_prior",
+              "reasoning": "Customer attrition from price rises modestly reduces MRR by shrinking the paying base.",
+              "strength_std": 0.07,
+              "strength_mean": -0.14,
+              "lint_corrected": false,
+              "needs_user_input": true,
+              "exists_probability": 0.9
+            },
+            "status": "contested",
+            "evoi_rank": null,
+            "was_shown": false,
+            "evoi_impact": null,
+            "resolved_by": "default",
+            "user_action": "pending",
+            "pass1_missing": false,
+            "pass2_missing": false,
+            "sign_unstable": false,
+            "max_divergence": 0.8699999999999998,
+            "pass2_adjusted": {
+              "strength_std": 0.07,
+              "strength_mean": -0.1650000000000001,
+              "exists_probability": 0.9
+            },
+            "resolved_value": null,
+            "bias_correction": {
+              "strength_std_offset": 0,
+              "strength_mean_offset": -0.025000000000000078,
+              "exists_probability_offset": 0
+            },
+            "distance_to_goal": 1,
+            "contested_reasons": [
+              "raw_magnitude"
+            ],
+            "validation_lint_log": [
+              {
+                "code": "WARN_CLUSTERED_EP",
+                "after": 0.9,
+                "before": 0.9,
+                "edge_key": "48d65738->94fa174b"
+              }
+            ]
+          },
+          "effect_direction": "negative",
+          "exists_probability": 0.8,
+          "provenance_display": "ai_inferred"
+        },
+        {
+          "to": "3ec889db",
+          "from": "491176c4",
+          "origin": "default",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Decision-to-option scaffold minted by the projector"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1,
+          "provenance_display": "ai_inferred"
+        },
+        {
+          "to": "88855f3f",
+          "from": "491176c4",
+          "origin": "default",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Decision-to-option scaffold minted by the projector"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1,
+          "provenance_display": "ai_inferred"
+        },
+        {
+          "to": "c7658aba",
+          "from": "491176c4",
+          "origin": "default",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Decision-to-option scaffold minted by the projector"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1,
+          "provenance_display": "ai_inferred"
+        },
+        {
+          "to": "d1140d2c",
+          "from": "491176c4",
+          "origin": "default",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Decision-to-option scaffold minted by the projector"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1,
+          "provenance_display": "ai_inferred"
+        },
+        {
+          "to": "e4857b83",
+          "from": "491176c4",
+          "origin": "default",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Decision-to-option scaffold minted by the projector"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1,
+          "provenance_display": "ai_inferred"
+        },
+        {
+          "to": "48d65738",
+          "from": "7b9a04f8",
+          "origin": "ai",
+          "strength": {
+            "std": 0.13511111111111107,
+            "mean": 0.5629629629629629
+          },
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Model-inferred causal link (records projector)"
+          },
+          "validation": {
+            "pass1": {
+              "strength_std": 0,
+              "strength_mean": 0.5629629629629629,
+              "exists_probability": 0
+            },
+            "pass2": {
+              "basis": "domain_prior",
+              "reasoning": "Price-driven churn uplift is a major driver of attrition risk in subscription models.",
+              "strength_std": 0.15,
+              "strength_mean": 0.54,
+              "lint_corrected": false,
+              "needs_user_input": true,
+              "exists_probability": 0.9
+            },
+            "status": "agreed",
+            "evoi_rank": null,
+            "was_shown": false,
+            "evoi_impact": null,
+            "resolved_by": "default",
+            "user_action": "pending",
+            "pass1_missing": false,
+            "pass2_missing": false,
+            "sign_unstable": false,
+            "max_divergence": 0.6666666666666666,
+            "pass2_adjusted": {
+              "strength_std": 0.15,
+              "strength_mean": 0.5149999999999999,
+              "exists_probability": 0.9
+            },
+            "resolved_value": null,
+            "bias_correction": {
+              "strength_std_offset": 0,
+              "strength_mean_offset": -0.025000000000000078,
+              "exists_probability_offset": 0
+            },
+            "distance_to_goal": 2,
+            "contested_reasons": [],
+            "validation_lint_log": [
+              {
+                "code": "WARN_CLUSTERED_EP",
+                "after": 0.9,
+                "before": 0.9,
+                "edge_key": "7b9a04f8->48d65738"
+              }
+            ]
+          },
+          "effect_direction": "positive",
+          "exists_probability": 0.8,
+          "provenance_display": "ai_inferred"
+        },
+        {
+          "to": "3c8203cf",
+          "from": "88855f3f",
+          "origin": "ai",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Model-inferred causal link (records projector)"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1,
+          "provenance_display": "ai_inferred"
+        },
+        {
+          "to": "7b9a04f8",
+          "from": "88855f3f",
+          "origin": "ai",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Model-inferred causal link (records projector)"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1,
+          "provenance_display": "ai_inferred"
+        },
+        {
+          "to": "7f40d56e",
+          "from": "94fa174b",
+          "origin": "ai",
+          "strength": {
+            "std": 0.21599999999999997,
+            "mean": 0.9
+          },
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Model-inferred causal link (records projector)"
+          },
+          "validation": {
+            "pass1": {
+              "strength_std": 0,
+              "strength_mean": 0.9,
+              "exists_probability": 0
+            },
+            "pass2": {
+              "basis": "structural_inference",
+              "reasoning": "Higher MRR directly increases satisfaction of modeling the decision goal.",
+              "strength_std": 0.1,
+              "strength_mean": 0.8,
+              "lint_corrected": false,
+              "needs_user_input": true,
+              "exists_probability": 0.95
+            },
+            "status": "agreed",
+            "evoi_rank": null,
+            "was_shown": false,
+            "evoi_impact": null,
+            "resolved_by": "default",
+            "user_action": "pending",
+            "pass1_missing": false,
+            "pass2_missing": false,
+            "sign_unstable": false,
+            "max_divergence": 1,
+            "pass2_adjusted": {
+              "strength_std": 0.1,
+              "strength_mean": 0.7749999999999999,
+              "exists_probability": 0.95
+            },
+            "resolved_value": null,
+            "bias_correction": {
+              "strength_std_offset": 0,
+              "strength_mean_offset": -0.025000000000000078,
+              "exists_probability_offset": 0
+            },
+            "distance_to_goal": 0,
+            "contested_reasons": [],
+            "validation_lint_log": [
+              {
+                "code": "WARN_CLUSTERED_EP",
+                "after": 0.95,
+                "before": 0.95,
+                "edge_key": "94fa174b->7f40d56e"
+              }
+            ]
+          },
+          "effect_direction": "positive",
+          "exists_probability": 0.8,
+          "provenance_display": "ai_inferred"
+        },
+        {
+          "to": "94fa174b",
+          "from": "a3550778",
+          "origin": "ai",
+          "strength": {
+            "std": 0.12112499999999994,
+            "mean": 0.5046874999999998
+          },
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Model-inferred causal link (records projector)"
+          },
+          "validation": {
+            "pass1": {
+              "strength_std": 0,
+              "strength_mean": 0.5046874999999998,
+              "exists_probability": 0
+            },
+            "pass2": {
+              "basis": "domain_prior",
+              "reasoning": "Active customer count has a strong one-to-one impact on total MRR.",
+              "strength_std": 0.07,
+              "strength_mean": 0.43,
+              "lint_corrected": false,
+              "needs_user_input": true,
+              "exists_probability": 0.95
+            },
+            "status": "agreed",
+            "evoi_rank": null,
+            "was_shown": false,
+            "evoi_impact": null,
+            "resolved_by": "default",
+            "user_action": "pending",
+            "pass1_missing": false,
+            "pass2_missing": false,
+            "sign_unstable": false,
+            "max_divergence": 1,
+            "pass2_adjusted": {
+              "strength_std": 0.07,
+              "strength_mean": 0.4049999999999999,
+              "exists_probability": 0.95
+            },
+            "resolved_value": null,
+            "bias_correction": {
+              "strength_std_offset": 0,
+              "strength_mean_offset": -0.025000000000000078,
+              "exists_probability_offset": 0
+            },
+            "distance_to_goal": 1,
+            "contested_reasons": [],
+            "validation_lint_log": [
+              {
+                "code": "WARN_CLUSTERED_EP",
+                "after": 0.95,
+                "before": 0.95,
+                "edge_key": "a3550778->94fa174b"
+              }
+            ]
+          },
+          "effect_direction": "positive",
+          "exists_probability": 0.8,
+          "provenance_display": "ai_inferred"
+        },
+        {
+          "to": "48d65738",
+          "from": "ab78e513",
+          "origin": "ai",
+          "strength": {
+            "std": 0.09288888888888887,
+            "mean": 0.387037037037037
+          },
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Model-inferred causal link (records projector)"
+          },
+          "validation": {
+            "pass1": {
+              "strength_std": 0,
+              "strength_mean": 0.387037037037037,
+              "exists_probability": 0
+            },
+            "pass2": {
+              "basis": "domain_prior",
+              "reasoning": "Baseline churn rate contributes significantly to overall attrition in subscription services.",
+              "strength_std": 0.15,
+              "strength_mean": 0.46,
+              "lint_corrected": false,
+              "needs_user_input": true,
+              "exists_probability": 0.9
+            },
+            "status": "agreed",
+            "evoi_rank": null,
+            "was_shown": false,
+            "evoi_impact": null,
+            "resolved_by": "default",
+            "user_action": "pending",
+            "pass1_missing": false,
+            "pass2_missing": false,
+            "sign_unstable": false,
+            "max_divergence": 0.6666666666666666,
+            "pass2_adjusted": {
+              "strength_std": 0.15,
+              "strength_mean": 0.43499999999999994,
+              "exists_probability": 0.9
+            },
+            "resolved_value": null,
+            "bias_correction": {
+              "strength_std_offset": 0,
+              "strength_mean_offset": -0.025000000000000078,
+              "exists_probability_offset": 0
+            },
+            "distance_to_goal": 2,
+            "contested_reasons": [],
+            "validation_lint_log": [
+              {
+                "code": "WARN_CLUSTERED_EP",
+                "after": 0.9,
+                "before": 0.9,
+                "edge_key": "ab78e513->48d65738"
+              }
+            ]
+          },
+          "effect_direction": "positive",
+          "exists_probability": 0.8,
+          "provenance_display": "ai_inferred"
+        },
+        {
+          "to": "3c8203cf",
+          "from": "c7658aba",
+          "origin": "ai",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Model-inferred causal link (records projector)"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1,
+          "provenance_display": "ai_inferred"
+        },
+        {
+          "to": "7b9a04f8",
+          "from": "c7658aba",
+          "origin": "ai",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Model-inferred causal link (records projector)"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1,
+          "provenance_display": "ai_inferred"
+        },
+        {
+          "to": "3c8203cf",
+          "from": "d1140d2c",
+          "origin": "ai",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Model-inferred causal link (records projector)"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1,
+          "provenance_display": "ai_inferred"
+        },
+        {
+          "to": "7b9a04f8",
+          "from": "d1140d2c",
+          "origin": "ai",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Model-inferred causal link (records projector)"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1,
+          "provenance_display": "ai_inferred"
+        },
+        {
+          "to": "3c8203cf",
+          "from": "e4857b83",
+          "origin": "ai",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Model-inferred causal link (records projector)"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1,
+          "provenance_display": "ai_inferred"
+        }
+      ],
+      "nodes": [
+        {
+          "id": "098c77cd",
+          "kind": "risk",
+          "label": "New Customer Conversion Drag",
+          "provenance": "ai_inferred"
+        },
+        {
+          "id": "3c8203cf",
+          "kind": "factor",
+          "label": "Entry Plan Monthly Price",
+          "category": "controllable",
+          "provenance": "ai_inferred",
+          "scale_frame": 100,
+          "display_value": "59 £/month",
+          "observed_state": {
+            "unit": "£/month",
+            "value": 0.59,
+            "source": "cee_inference",
+            "raw_value": 59,
+            "factor_type": "other",
+            "declared_scale": "unit_interval",
+            "extractionType": "inferred",
+            "uncertainty_drivers": []
+          }
+        },
+        {
+          "id": "3ec889db",
+          "kind": "option",
+          "label": "Raise to £79 with Grandfathering",
+          "provenance": "ai_inferred",
+          "is_baseline": false,
+          "interventions": {
+            "3c8203cf": {
+              "unit": "£/month",
+              "value": 0.79,
+              "source": "cee_hypothesis",
+              "raw_value": 79,
+              "reasoning": "Olumi estimate via edge 651a933a; this option→factor effect is not bound to a stated option record",
+              "target_match": {
+                "node_id": "3c8203cf",
+                "confidence": "high",
+                "match_type": "exact_id"
+              },
+              "value_confidence": "low"
+            },
+            "7b9a04f8": {
+              "unit": "percentage points",
+              "value": 0.005,
+              "source": "cee_hypothesis",
+              "raw_value": 0.005,
+              "reasoning": "Olumi estimate via edge 20339a09; this option→factor effect is not bound to a stated option record",
+              "target_match": {
+                "node_id": "7b9a04f8",
+                "confidence": "high",
+                "match_type": "exact_id"
+              },
+              "value_confidence": "low"
+            }
+          }
+        },
+        {
+          "id": "48d65738",
+          "kind": "risk",
+          "label": "Customer Attrition from Price Rise",
+          "provenance": "ai_inferred"
+        },
+        {
+          "id": "491176c4",
+          "kind": "decision",
+          "label": "Raise Entry Plan from £59 to £79 per Month",
+          "provenance": "ai_inferred",
+          "label_authored": true
+        },
+        {
+          "id": "7b9a04f8",
+          "kind": "factor",
+          "label": "Price-Driven Churn Uplift",
+          "category": "controllable",
+          "provenance": "ai_inferred",
+          "display_value": "0 percentage points",
+          "observed_state": {
+            "unit": "percentage points",
+            "value": 0,
+            "source": "cee_inference",
+            "factor_type": "other",
+            "declared_scale": "unit_interval",
+            "extractionType": "inferred",
+            "uncertainty_drivers": []
+          }
+        },
+        {
+          "id": "7f40d56e",
+          "kind": "goal",
+          "label": "Help Me Model This Decision",
+          "provenance": "from_brief",
+          "source_quote": "Help me model this decision",
+          "label_authored": true
+        },
+        {
+          "id": "88855f3f",
+          "kind": "option",
+          "label": "Hold Price at £59 (Status Quo)",
+          "provenance": "ai_inferred",
+          "is_baseline": true,
+          "interventions": {
+            "3c8203cf": {
+              "unit": "£/month",
+              "value": 0.59,
+              "source": "cee_hypothesis",
+              "raw_value": 59,
+              "reasoning": "Olumi estimate via edge 789de609; this option→factor effect is not bound to a stated option record",
+              "target_match": {
+                "node_id": "3c8203cf",
+                "confidence": "high",
+                "match_type": "exact_id"
+              },
+              "value_confidence": "low"
+            },
+            "7b9a04f8": {
+              "unit": "percentage points",
+              "value": 0,
+              "source": "cee_hypothesis",
+              "raw_value": 0,
+              "reasoning": "Olumi estimate via edge c26deb26; this option→factor effect is not bound to a stated option record",
+              "target_match": {
+                "node_id": "7b9a04f8",
+                "confidence": "high",
+                "match_type": "exact_id"
+              },
+              "value_confidence": "low"
+            }
+          }
+        },
+        {
+          "id": "94fa174b",
+          "kind": "outcome",
+          "label": "Monthly Recurring Revenue",
+          "provenance": "ai_inferred"
+        },
+        {
+          "id": "a3550778",
+          "kind": "factor",
+          "label": "Active Customer Base",
+          "prior": {
+            "range_max": 0.8999999999999999,
+            "range_min": 0.3,
+            "distribution": "uniform"
+          },
+          "category": "external",
+          "provenance": "user_set",
+          "scale_frame": 2000,
+          "display_value": "1,500",
+          "extractionType": "inferred",
+          "observed_state": {
+            "value": 0.75,
+            "source": "user_override",
+            "raw_value": 1500
+          }
+        },
+        {
+          "id": "ab78e513",
+          "kind": "factor",
+          "label": "Monthly Churn Rate",
+          "prior": {
+            "range_max": 0.13,
+            "range_min": 0,
+            "distribution": "uniform"
+          },
+          "category": "external",
+          "provenance": "user_set",
+          "display_value": "5%",
+          "extractionType": "inferred",
+          "observed_state": {
+            "unit": "%",
+            "value": 0.05,
+            "source": "user_override",
+            "raw_value": 5
+          }
+        },
+        {
+          "id": "c7658aba",
+          "kind": "option",
+          "label": "Raise Price to £79",
+          "provenance": "ai_inferred",
+          "is_baseline": false,
+          "interventions": {
+            "3c8203cf": {
+              "unit": "£/month",
+              "value": 0.79,
+              "source": "cee_hypothesis",
+              "raw_value": 79,
+              "reasoning": "Olumi estimate via edge 2492ecca; this option→factor effect is not bound to a stated option record",
+              "target_match": {
+                "node_id": "3c8203cf",
+                "confidence": "high",
+                "match_type": "exact_id"
+              },
+              "value_confidence": "low"
+            },
+            "7b9a04f8": {
+              "unit": "percentage points",
+              "value": 0.018,
+              "source": "cee_hypothesis",
+              "raw_value": 0.018,
+              "reasoning": "Olumi estimate via edge ecc01915; this option→factor effect is not bound to a stated option record",
+              "target_match": {
+                "node_id": "7b9a04f8",
+                "confidence": "high",
+                "match_type": "exact_id"
+              },
+              "value_confidence": "low"
+            }
+          }
+        },
+        {
+          "id": "d1140d2c",
+          "kind": "option",
+          "label": "Raise Price to £69 (Mid Step)",
+          "provenance": "ai_inferred",
+          "is_baseline": false,
+          "interventions": {
+            "3c8203cf": {
+              "unit": "£/month",
+              "value": 0.69,
+              "source": "cee_hypothesis",
+              "raw_value": 69,
+              "reasoning": "Olumi estimate via edge f3ff122f; this option→factor effect is not bound to a stated option record",
+              "target_match": {
+                "node_id": "3c8203cf",
+                "confidence": "high",
+                "match_type": "exact_id"
+              },
+              "value_confidence": "low"
+            },
+            "7b9a04f8": {
+              "unit": "percentage points",
+              "value": 0.008,
+              "source": "cee_hypothesis",
+              "raw_value": 0.008,
+              "reasoning": "Olumi estimate via edge 124dd1b2; this option→factor effect is not bound to a stated option record",
+              "target_match": {
+                "node_id": "7b9a04f8",
+                "confidence": "high",
+                "match_type": "exact_id"
+              },
+              "value_confidence": "low"
+            }
+          }
+        },
+        {
+          "id": "e4857b83",
+          "kind": "option",
+          "label": "raise our entry plan from £59 to £79 per month",
+          "provenance": "from_brief",
+          "source_quote": "raise our entry plan from £59 to £79 per month",
+          "interventions": {
+            "3c8203cf": {
+              "unit": "£/month",
+              "value": 0.79,
+              "source": "cee_hypothesis",
+              "raw_value": 79,
+              "reasoning": "Olumi estimate via edge 64a89bf5; no stated figure is cited for this option→factor effect",
+              "target_match": {
+                "node_id": "3c8203cf",
+                "confidence": "high",
+                "match_type": "exact_id"
+              },
+              "value_confidence": "low"
+            }
+          }
+        }
+      ],
+      "trace": {
+        "strp": {
+          "mutations": [
+            {
+              "code": "CATEGORY_OVERRIDE",
+              "rule": "category_override",
+              "after": "controllable",
+              "field": "category",
+              "reason": "Structural inference: has option edge → controllable",
+              "node_id": "3c8203cf",
+              "severity": "info"
+            },
+            {
+              "code": "CATEGORY_OVERRIDE",
+              "rule": "category_override",
+              "after": "controllable",
+              "field": "category",
+              "reason": "Structural inference: has option edge → controllable",
+              "node_id": "7b9a04f8",
+              "severity": "info"
+            },
+            {
+              "code": "CATEGORY_OVERRIDE",
+              "rule": "category_override",
+              "after": "observable",
+              "field": "category",
+              "reason": "Structural inference: has value → observable",
+              "node_id": "a3550778",
+              "severity": "info"
+            },
+            {
+              "code": "CATEGORY_OVERRIDE",
+              "rule": "category_override",
+              "after": "observable",
+              "field": "category",
+              "reason": "Structural inference: has value → observable",
+              "node_id": "ab78e513",
+              "severity": "info"
+            },
+            {
+              "code": "SIGN_CORRECTED",
+              "rule": "sign_reconciliation",
+              "after": -0.35,
+              "field": "strength_mean",
+              "before": 0.35,
+              "reason": "strength_mean sign (0.35) contradicts the stated effect_direction \"negative\"; an unsigned magnitude carries no polarity of its own, so the direction is authoritative and the magnitude takes its sign",
+              "edge_id": "098c77cd::94fa174b",
+              "severity": "warn"
+            },
+            {
+              "code": "SIGN_CORRECTED",
+              "rule": "sign_reconciliation",
+              "after": -0.6,
+              "field": "strength_mean",
+              "before": 0.6,
+              "reason": "strength_mean sign (0.6) contradicts the stated effect_direction \"negative\"; an unsigned magnitude carries no polarity of its own, so the direction is authoritative and the magnitude takes its sign",
+              "edge_id": "48d65738::94fa174b",
+              "severity": "warn"
+            }
+          ],
+          "mutation_count": 6,
+          "rules_triggered": [
+            "category_override",
+            "sign_reconciliation"
+          ]
+        },
+        "engine": {
+          "model": "claude-sonnet-4-6",
+          "version": "1.12.0",
+          "provider": "anthropic"
+        },
+        "pipeline": {
+          "strp": {
+            "mutations": [
+              {
+                "code": "CATEGORY_OVERRIDE",
+                "rule": "category_override",
+                "after": "controllable",
+                "field": "category",
+                "reason": "Structural inference: has option edge → controllable",
+                "node_id": "3c8203cf",
+                "severity": "info"
+              },
+              {
+                "code": "CATEGORY_OVERRIDE",
+                "rule": "category_override",
+                "after": "controllable",
+                "field": "category",
+                "reason": "Structural inference: has option edge → controllable",
+                "node_id": "7b9a04f8",
+                "severity": "info"
+              },
+              {
+                "code": "CATEGORY_OVERRIDE",
+                "rule": "category_override",
+                "after": "observable",
+                "field": "category",
+                "reason": "Structural inference: has value → observable",
+                "node_id": "a3550778",
+                "severity": "info"
+              },
+              {
+                "code": "CATEGORY_OVERRIDE",
+                "rule": "category_override",
+                "after": "observable",
+                "field": "category",
+                "reason": "Structural inference: has value → observable",
+                "node_id": "ab78e513",
+                "severity": "info"
+              },
+              {
+                "code": "SIGN_CORRECTED",
+                "rule": "sign_reconciliation",
+                "after": -0.35,
+                "field": "strength_mean",
+                "before": 0.35,
+                "reason": "strength_mean sign (0.35) contradicts the stated effect_direction \"negative\"; an unsigned magnitude carries no polarity of its own, so the direction is authoritative and the magnitude takes its sign",
+                "edge_id": "098c77cd::94fa174b",
+                "severity": "warn"
+              },
+              {
+                "code": "SIGN_CORRECTED",
+                "rule": "sign_reconciliation",
+                "after": -0.6,
+                "field": "strength_mean",
+                "before": 0.6,
+                "reason": "strength_mean sign (0.6) contradicts the stated effect_direction \"negative\"; an unsigned magnitude carries no polarity of its own, so the direction is authoritative and the magnitude takes its sign",
+                "edge_id": "48d65738::94fa174b",
+                "severity": "warn"
+              }
+            ],
+            "mutation_count": 6,
+            "rules_triggered": [
+              "category_override",
+              "sign_reconciliation"
+            ]
+          },
+          "enrich": {
+            "source": "unified_pipeline",
+            "called_count": 1,
+            "factors_added": 0,
+            "extraction_mode": "v4_complete_skip",
+            "factors_skipped": 0,
+            "factors_enhanced": 0
+          },
+          "repair": {
+            "edge_restore": {
+              "restoredCount": 0
+            },
+            "deterministic_sweep": {
+              "sweep_ran": true,
+              "status_quo": {
+                "fixed": false,
+                "marked_droppable": false
+              },
+              "edge_format": "V1_FLAT",
+              "graph_delta": {
+                "edges_after": 22,
+                "nodes_after": 14,
+                "edges_before": 22,
+                "nodes_before": 14
+              },
+              "rescue_score": 24,
+              "repairs_count": 18,
+              "sweep_version": "v3",
+              "bucket_summary": {
+                "a": 9,
+                "b": 2,
+                "c": 0
+              },
+              "violations_after": 0,
+              "llm_repair_needed": false,
+              "violations_before": 11,
+              "factor_goal_splits": 0,
+              "unreachable_factors": {
+                "reclassified": [
+                  "a3550778",
+                  "ab78e513"
+                ],
+                "marked_droppable": []
+              },
+              "complexity_cap_pruned": 0,
+              "goal_threshold_stripped": 0,
+              "disconnected_options_after": [],
+              "disconnected_options_before": [],
+              "option_goal_shortcuts_removed": 0,
+              "option_goal_shortcuts_skipped": 0,
+              "option_risk_shortcuts_removed": 0,
+              "option_risk_shortcuts_skipped": 0,
+              "option_goal_shortcuts_rerouted": 0,
+              "option_risk_shortcuts_rerouted": 0,
+              "disconnected_observables_pruned": [],
+              "goal_threshold_possibly_inferred": 0,
+              "option_outcome_shortcuts_removed": 0,
+              "option_outcome_shortcuts_skipped": 0,
+              "remaining_forbidden_edges_removed": 0
+            },
+            "deterministic_enforcement": {
+              "ran": true,
+              "blocked": false,
+              "total_repairs": 2,
+              "nodes_rescaled": 2,
+              "bridge_chains_removed": 0,
+              "bridge_goal_edges_added": 0,
+              "edges_skipped_non_finite": 0,
+              "no_op_options_neutralised": 0,
+              "post_validation_error_count": 0,
+              "post_validation_warning_count": 2,
+              "structural_edges_recanonicalised": 0
+            }
+          },
+          "status": "success",
+          "llm_raw": {
+            "text": "{\"stated_items\":[{\"kind\":\"figure\",\"source_quote\":\"raise our entry plan from £59 to £79 per month\",\"value\":59,\"unit\":\"£/month\",\"role\":\"baseline\",\"value_scale\":\"raw_count\"},{\"kind\":\"option\",\"source_quote\":\"raise our entry plan from £59 to £79 per month\"},{\"kind\":\"figure\",\"source_quote\":\"Churn is currently 3% monthly\",\"value\":0.03,\"unit\":\"%\",\"value_scale\":\"unit_interval\"},{\"kind\":\"figure\",\"source_quote\":\"We have 1,200 customers\",\"value\":1200,\"unit\":\"customers\",\"value_scale\":\"raw_count\"},{\"kind\":\"goal\",\"source_quote\":\"Help me model this decision\",\"role\":\"context\"}],\"claims\":[{\"claim_kind\":\"option_refinement\",\"label\":\"Hold Price at £59 (Status Quo)\",\"is_baseline\":true},{\"claim_kind\":\"option_refinement\",\"label\":\"Raise Price to £79\",\"is_baseline\":false},{\"claim_kind\":\"option_refinement\",\"label\":\"Raise Price to £69 (Mid Step)\",\"is_baseline\":false},{\"claim_kind\":\"option_refinement\",\"label\":\"Raise to £79 with Grandfathering\",\"is_baseline\":false},{\"claim_kind\":\"factor\",\"label\":\"Entry Plan Monthly Price\",\"value\":59,\"unit\":\"£/month\",\"value_scale\":\"raw_count\"},{\"claim_kind\":\"factor\",\"label\":\"Monthly Churn Rate\",\"value\":0.03,\"unit\":\"%\",\"value_scale\":\"unit_interval\"},{\"claim_kind\":\"factor\",\"label\":\"Price-Driven Churn Uplift\",\"value\":0,\"unit\":\"percentage points\",\"value_scale\":\"unit_interval\"},{\"claim_kind\":\"factor\",\"label\":\"Active Customer Base\",\"value\":1200,\"unit\":\"customers\",\"value_scale\":\"raw_count\"},{\"claim_kind\":\"outcome\",\"label\":\"Monthly Recurring Revenue\"},{\"claim_kind\":\"risk\",\"label\":\"Customer Attrition from Price Rise\"},{\"claim_kind\":\"risk\",\"label\":\"New Customer Conversion Drag\"},{\"claim_kind\":\"causal_link\",\"label\":\"Status Quo holds price at £59\",\"from_claim\":0,\"to_claim\":4,\"effect\":\"positive\",\"sets_to\":59},{\"claim_kind\":\"causal_link\",\"label\":\"Raise to £79 sets price\",\"from_claim\":1,\"to_claim\":4,\"effect\":\"positive\",\"sets_to\":79},{\"claim_kind\":\"causal_link\",\"label\":\"Mid step sets price to £69\",\"from_claim\":2,\"to_claim\":4,\"effect\":\"positive\",\"sets_to\":69},{\"claim_kind\":\"causal_link\",\"label\":\"Grandfathering sets new-customer price to £79\",\"from_claim\":3,\"to_claim\":4,\"effect\":\"positive\",\"sets_to\":79},{\"claim_kind\":\"causal_link\",\"label\":\"Status Quo keeps churn uplift at zero\",\"from_claim\":0,\"to_claim\":6,\"effect\":\"positive\",\"sets_to\":0},{\"claim_kind\":\"causal_link\",\"label\":\"Full £79 rise causes largest churn uplift\",\"from_claim\":1,\"to_claim\":6,\"effect\":\"positive\",\"sets_to\":0.018},{\"claim_kind\":\"causal_link\",\"label\":\"Mid step causes moderate churn uplift\",\"from_claim\":2,\"to_claim\":6,\"effect\":\"positive\",\"sets_to\":0.008},{\"claim_kind\":\"causal_link\",\"label\":\"Grandfathering limits churn uplift for existing customers\",\"from_claim\":3,\"to_claim\":6,\"effect\":\"positive\",\"sets_to\":0.005},{\"claim_kind\":\"causal_link\",\"label\":\"Higher price lifts MRR per customer\",\"from_claim\":4,\"to_claim\":8,\"effect\":\"positive\",\"strength\":0.75},{\"claim_kind\":\"causal_link\",\"label\":\"Larger active base lifts MRR\",\"from_claim\":7,\"to_claim\":8,\"effect\":\"positive\",\"strength\":0.85},{\"claim_kind\":\"causal_link\",\"label\":\"Price-driven churn uplift erodes customer base\",\"from_claim\":6,\"to_claim\":9,\"effect\":\"positive\",\"strength\":0.80},{\"claim_kind\":\"causal_link\",\"label\":\"Baseline churn erodes customer base\",\"from_claim\":5,\"to_claim\":9,\"effect\":\"positive\",\"strength\":0.55},{\"claim_kind\":\"causal_link\",\"label\":\"Higher price reduces new customer conversion\",\"from_claim\":4,\"to_claim\":10,\"effect\":\"positive\",\"strength\":0.45},{\"claim_kind\":\"causal_link\",\"label\":\"Customer attrition reduces MRR\",\"from_claim\":9,\"to_claim\":8,\"effect\":\"negative\",\"strength\":0.60},{\"claim_kind\":\"causal_link\",\"label\":\"Conversion drag slows MRR growth\",\"from_claim\":10,\"to_claim\":8,\"effect\":\"negative\",\"strength\":0.35},{\"claim_kind\":\"causal_link\",\"label\":\"MRR is the primary goal outcome\",\"from_claim\":8,\"to_stated\":4,\"effect\":\"positive\",\"strength\":0.90}]}",
+            "truncated": true,
+            "char_count": 3827,
+            "output_hash": "b937da1832dde6d76a1d4b9e41239ff881457cd4c925333652818699e3f73404",
+            "output_preview": "{\"stated_items\":[{\"kind\":\"figure\",\"source_quote\":\"raise our entry plan from £59 to £79 per month\",\"value\":59,\"unit\":\"£/month\",\"role\":\"baseline\",\"value_scale\":\"raw_count\"},{\"kind\":\"option\",\"source_quote\":\"raise our entry plan from £59 to £79 per month\"},{\"kind\":\"figure\",\"source_quote\":\"Churn is currently 3% monthly\",\"value\":0.03,\"unit\":\"%\",\"value_scale\":\"unit_interval\"},{\"kind\":\"figure\",\"source_quote\":\"We have 1,200 customers\",\"value\":1200,\"unit\":\"customers\",\"value_scale\":\"raw_count\"},{\"kind\":\"goal\",\"source_quote\":\"Help me model this decision\",\"role\":\"context\"}],\"claims\":[{\"claim_kind\":\"option_refinement\",\"label\":\"Hold Price at £59 (Status Quo)\",\"is_baseline\":true},{\"claim_kind\":\"option_refinement\",\"label\":\"Raise Price to £79\",\"is_baseline\":false},{\"claim_kind\":\"option_refinement\",\"label\":\"Raise Price to £69 (Mid Step)\",\"is_baseline\":false},{\"claim_kind\":\"option_refinement\",\"label\":\"Raise to £79 with Grandfathering\",\"is_baseline\":false},{\"claim_kind\":\"factor\",\"label\":\"Entry Plan Monthly Price\",\"value\":59,\"unit\":\"£/month\",\"value_scale\":\"raw_count\"},{\"claim_kind\":\"factor\",\"label\":\"Monthly Churn Rate\",\"value\":0.03,\"unit\":\"%\",\"value_scale\":\"unit_interval\"},{\"claim_kind\":\"factor\",\"label\":\"Price-Driven Churn Uplift\",\"value\":0,\"unit\":\"percentage points\",\"value_scale\":\"unit_interval\"},{\"claim_kind\":\"factor\",\"label\":\"Active Customer Base\",\"value\":1200,\"unit\":\"customers\",\"value_scale\":\"raw_count\"},{\"claim_kind\":\"outcome\",\"label\":\"Monthly Recurring Revenue\"},{\"claim_kind\":\"risk\",\"label\":\"Customer Attrition from Price Rise\"},{\"claim_kind\":\"risk\",\"label\":\"New Customer Conversion Drag\"},{\"claim_kind\":\"causal_link\",\"label\":\"Status Quo holds price at £59\",\"from_claim\":0,\"to_claim\":4,\"effect\":\"positive\",\"sets_to\":59},{\"claim_kind\":\"causal_link\",\"label\":\"Raise to £79 sets price\",\"from_claim\":1,\"to_claim\":4,\"effect\":\"positive\",\"sets_to\":79},{\"claim_kind\":\"causal_link\",\"label\":\"Mid step sets price to £69\",\"from_claim\":2,\"to_claim\":4,\"effect\":\"positive\",\"sets_to\":69},{\"claim_kind\":\"causa",
+            "output_edge_count": 22,
+            "output_node_count": 14,
+            "full_output_available": true
+          },
+          "final_graph": {
+            "edge_count": 22,
+            "node_count": 14,
+            "node_kinds": [
+              "risk",
+              "factor",
+              "option",
+              "decision",
+              "goal",
+              "outcome"
+            ]
+          },
+          "llm_quality": {
+            "risk_coefficient_corrections": 0
+          },
+          "llm_metadata": {
+            "seed": 17,
+            "model": "claude-sonnet-4-6",
+            "streamed": true,
+            "max_tokens": 8472,
+            "duration_ms": 17290,
+            "instance_id": "9cfa77f0",
+            "prompt_hash": "7aa241f467fe2199f4c8376c6a1cc2e6094ea30fef791757472aa1a7a1a1758d",
+            "temperature": 0,
+            "token_usage": {
+              "total_tokens": 6995,
+              "prompt_tokens": 5811,
+              "completion_tokens": 1184
+            },
+            "cache_age_ms": 142895,
+            "cache_status": "fresh",
+            "finish_reason": "end_turn",
+            "prompt_version": "draft_graph_default@v202 (production)",
+            "response_chars": 3827,
+            "time_to_edges_ms": null,
+            "use_staging_mode": true,
+            "prompt_text_version": "v202",
+            "runaway_abort_count": 0,
+            "runaway_abort_triggers": [],
+            "structured_outputs_used": true,
+            "salvaged_from_truncation": false
+          },
+          "cee_provenance": {
+            "model": "claude-sonnet-4-6",
+            "commit": "bd35cc9",
+            "version": "1.12.0",
+            "model_id": "claude-sonnet-4-6",
+            "capability": "draft_graph",
+            "prompt_hash": "7aa241f467fe2199f4c8376c6a1cc2e6094ea30fef791757472aa1a7a1a1758d",
+            "context_hash": "fff088008167",
+            "pipeline_path": "unified",
+            "prompt_source": "supabase",
+            "prompt_version": "draft_graph_default@v202 (production)",
+            "build_timestamp": "2026-09-21T22:52:20.903Z",
+            "prompt_store_version": 202,
+            "model_override_active": false,
+            "prompt_override_active": false,
+            "engine_base_url_configured": false
+          },
+          "llm_call_count": 1,
+          "repair_summary": {
+            "status_quo": {
+              "fixed": false,
+              "marked_droppable": false
+            },
+            "graph_delta": {
+              "edges_after": 22,
+              "nodes_after": 14,
+              "edges_before": 22,
+              "nodes_before": 14
+            },
+            "bucket_summary": {
+              "a": 9,
+              "b": 2,
+              "c": 0
+            },
+            "llm_repair_needed": false,
+            "status_quo_action": "none",
+            "unreachable_factors": {
+              "reclassified": [
+                "a3550778",
+                "ab78e513"
+              ],
+              "marked_droppable": []
+            },
+            "edge_format_detected": "V1_FLAT",
+            "deterministic_repairs": [
+              {
+                "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+                "path": "edges[3ec889db→3c8203cf]",
+                "action": "Canonicalised structural option→factor edge to mean=1, std=0.01, existence=1.0"
+              },
+              {
+                "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+                "path": "edges[3ec889db→7b9a04f8]",
+                "action": "Canonicalised structural option→factor edge to mean=1, std=0.01, existence=1.0"
+              },
+              {
+                "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+                "path": "edges[491176c4→3ec889db]",
+                "action": "Canonicalised structural decision→option edge to mean=1, std=0.01, existence=1.0"
+              },
+              {
+                "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+                "path": "edges[491176c4→88855f3f]",
+                "action": "Canonicalised structural decision→option edge to mean=1, std=0.01, existence=1.0"
+              },
+              {
+                "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+                "path": "edges[491176c4→c7658aba]",
+                "action": "Canonicalised structural decision→option edge to mean=1, std=0.01, existence=1.0"
+              },
+              {
+                "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+                "path": "edges[491176c4→d1140d2c]",
+                "action": "Canonicalised structural decision→option edge to mean=1, std=0.01, existence=1.0"
+              },
+              {
+                "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+                "path": "edges[491176c4→e4857b83]",
+                "action": "Canonicalised structural decision→option edge to mean=1, std=0.01, existence=1.0"
+              },
+              {
+                "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+                "path": "edges[88855f3f→3c8203cf]",
+                "action": "Canonicalised structural option→factor edge to mean=1, std=0.01, existence=1.0"
+              },
+              {
+                "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+                "path": "edges[88855f3f→7b9a04f8]",
+                "action": "Canonicalised structural option→factor edge to mean=1, std=0.01, existence=1.0"
+              },
+              {
+                "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+                "path": "edges[c7658aba→3c8203cf]",
+                "action": "Canonicalised structural option→factor edge to mean=1, std=0.01, existence=1.0"
+              },
+              {
+                "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+                "path": "edges[c7658aba→7b9a04f8]",
+                "action": "Canonicalised structural option→factor edge to mean=1, std=0.01, existence=1.0"
+              },
+              {
+                "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+                "path": "edges[d1140d2c→3c8203cf]",
+                "action": "Canonicalised structural option→factor edge to mean=1, std=0.01, existence=1.0"
+              },
+              {
+                "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+                "path": "edges[d1140d2c→7b9a04f8]",
+                "action": "Canonicalised structural option→factor edge to mean=1, std=0.01, existence=1.0"
+              },
+              {
+                "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+                "path": "edges[e4857b83→3c8203cf]",
+                "action": "Canonicalised structural option→factor edge to mean=1, std=0.01, existence=1.0"
+              },
+              {
+                "code": "CONTROLLABLE_MISSING_DATA",
+                "path": "nodes[3c8203cf].data",
+                "action": "Populated missing required fields with defaults"
+              },
+              {
+                "code": "CONTROLLABLE_MISSING_DATA",
+                "path": "nodes[7b9a04f8].data",
+                "action": "Populated missing required fields with defaults"
+              },
+              {
+                "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+                "path": "nodes[a3550778].category",
+                "action": "Reclassified unreachable factor \"Active Customer Base\" to external with synthesised prior [0.3, 0.8999999999999999]",
+                "deleted_unit": "customers",
+                "deleted_value": 0.6,
+                "deleted_raw_value": 1200,
+                "prior_synthesised": true,
+                "synthesised_range": {
+                  "range_max": 0.8999999999999999,
+                  "range_min": 0.3
+                },
+                "prior_is_unquantified": false
+              },
+              {
+                "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+                "path": "nodes[ab78e513].category",
+                "action": "Reclassified unreachable factor \"Monthly Churn Rate\" to external with synthesised prior [0, 0.13]. The extracted value 3% is not used in the maths — the range shown is a placeholder",
+                "deleted_unit": "%",
+                "deleted_value": 0.03,
+                "deleted_raw_value": 3,
+                "prior_synthesised": true,
+                "synthesised_range": {
+                  "range_max": 0.13,
+                  "range_min": 0
+                },
+                "prior_is_unquantified": false
+              },
+              {
+                "code": "INBOUND_BUDGET_RESCALED",
+                "path": "edges[*→48d65738]",
+                "action": "Rescaled 2 causal inbound edges from sum=1.350 to 0.95"
+              },
+              {
+                "code": "INBOUND_BUDGET_RESCALED",
+                "path": "edges[*→94fa174b]",
+                "action": "Rescaled 2 causal inbound edges from sum=1.600 to 0.95"
+              }
+            ],
+            "deterministic_sweep_ran": true,
+            "remaining_violation_codes": [],
+            "remaining_violations_count": 0,
+            "deterministic_repairs_count": 20,
+            "deterministic_sweep_version": "v3",
+            "risk_coefficient_corrections": []
+          },
+          "field_deletions": {
+            "count": 4,
+            "events": [
+              {
+                "field": "data.value",
+                "stage": "unreachable-factors",
+                "reason": "UNREACHABLE_FACTOR_RECLASSIFIED",
+                "node_id": "a3550778",
+                "previous_unit": "customers",
+                "previous_value": 0.6,
+                "stated_item_id": null,
+                "previous_raw_value": 1200
+              },
+              {
+                "field": "data",
+                "stage": "unreachable-factors",
+                "reason": "UNREACHABLE_FACTOR_RECLASSIFIED",
+                "node_id": "a3550778",
+                "previous_unit": "customers",
+                "previous_value": 0.6,
+                "stated_item_id": null,
+                "previous_raw_value": 1200
+              },
+              {
+                "field": "data.value",
+                "stage": "unreachable-factors",
+                "reason": "UNREACHABLE_FACTOR_RECLASSIFIED",
+                "node_id": "ab78e513",
+                "previous_unit": "%",
+                "previous_value": 0.03,
+                "stated_item_id": null,
+                "previous_raw_value": 3
+              },
+              {
+                "field": "data",
+                "stage": "unreachable-factors",
+                "reason": "UNREACHABLE_FACTOR_RECLASSIFIED",
+                "node_id": "ab78e513",
+                "previous_unit": "%",
+                "previous_value": 0.03,
+                "stated_item_id": null,
+                "previous_raw_value": 3
+              }
+            ],
+            "stages": [
+              "unreachable-factors"
+            ],
+            "reasons": [
+              "UNREACHABLE_FACTOR_RECLASSIFIED"
+            ]
+          },
+          "plan_annotation": {
+            "plan_id": "e08a4421-350c-4d8d-b502-bce749a2f4e3",
+            "model_id": "claude-sonnet-4-6",
+            "plan_hash": "5f7e17432bde",
+            "confidence": {
+              "overall": 0.85,
+              "structure": 1,
+              "parameters": 0.364
+            },
+            "open_questions": [],
+            "prompt_version": "draft_graph_default@v202 (production)",
+            "context_hash_v0": "7218b3353063",
+            "stage3_rationales": []
+          },
+          "stage_snapshots": {
+            "stage_1_parse": {
+              "goal_node_id": "7f40d56e",
+              "goal_threshold": "absent",
+              "goal_threshold_cap": "absent",
+              "goal_threshold_raw": "absent",
+              "goal_threshold_unit": "absent",
+              "goal_constraints_count": 0
+            },
+            "stage_3_enrich": {
+              "goal_node_id": "7f40d56e",
+              "goal_threshold": "absent",
+              "goal_threshold_cap": "absent",
+              "goal_threshold_raw": "absent",
+              "goal_threshold_unit": "absent",
+              "goal_constraints_count": 0
+            },
+            "stage_4_repair": {
+              "goal_node_id": "7f40d56e",
+              "goal_threshold": "absent",
+              "goal_threshold_cap": "absent",
+              "goal_threshold_raw": "absent",
+              "goal_threshold_unit": "absent",
+              "goal_constraints_count": 0
+            },
+            "stage_5_package": {
+              "goal_node_id": "7f40d56e",
+              "goal_threshold": "absent",
+              "goal_threshold_cap": "absent",
+              "goal_threshold_raw": "absent",
+              "goal_threshold_unit": "absent",
+              "goal_constraints_count": 0
+            },
+            "stage_4b_threshold_sweep": {
+              "goal_node_id": "7f40d56e",
+              "goal_threshold": "absent",
+              "goal_threshold_cap": "absent",
+              "goal_threshold_raw": "absent",
+              "goal_threshold_unit": "absent",
+              "goal_constraints_count": 0
+            }
+          },
+          "threshold_sweep": {
+            "ran": true,
+            "codes": [],
+            "duration_ms": 0,
+            "goals_checked": 1,
+            "strips_applied": 0,
+            "warnings_emitted": 0
+          },
+          "diagnostic_checks": {
+            "cee_trace_present": true,
+            "llm_raw_available": true,
+            "intercept_populated": false,
+            "is_baseline_present": true,
+            "confidence_unique_values": [
+              0.8
+            ],
+            "confidence_differentiated": false
+          },
+          "total_duration_ms": 50441,
+          "validation_summary": {
+            "model_notes": [
+              "[brief_ambiguity] Magnitudes for conversion drag and attrition uplift are based on typical elasticities rather than brief specifics",
+              "[topology_concern] MRR is influenced by both price and customer base multiplicatively, but model uses additive normalized effects",
+              "[questionable_edge] The independence of baseline churn and price-driven churn uplift in generating total attrition risk may double-count effects"
+            ],
+            "bias_offsets": {
+              "strength_std": 0,
+              "strength_mean": -0.025000000000000078,
+              "exists_probability": 0
+            },
+            "contested_count": 2,
+            "lint_corrections": 8,
+            "pass2_latency_ms": 28779,
+            "total_edges_validated": 8,
+            "total_pipeline_latency_ms": 28833
+          },
+          "pipeline_checkpoints": [
+            {
+              "stage": "post_adapter_normalisation",
+              "edge_count": 22,
+              "node_count": 14,
+              "sample_edges": [
+                {
+                  "to": "94fa174b",
+                  "from": "098c77cd",
+                  "strength_std": "MISSING",
+                  "belief_exists": "MISSING",
+                  "strength_mean": 0.35,
+                  "effect_direction": "negative"
+                },
+                {
+                  "to": "098c77cd",
+                  "from": "3c8203cf",
+                  "strength_std": "MISSING",
+                  "belief_exists": "MISSING",
+                  "strength_mean": 0.45,
+                  "effect_direction": "positive"
+                },
+                {
+                  "to": "94fa174b",
+                  "from": "3c8203cf",
+                  "strength_std": "MISSING",
+                  "belief_exists": "MISSING",
+                  "strength_mean": 0.75,
+                  "effect_direction": "positive"
+                }
+              ],
+              "edge_field_presence": {
+                "weight": 0,
+                "strength_std": 0,
+                "belief_exists": 0,
+                "strength_mean": 8,
+                "effect_direction": 17
+              },
+              "node_field_presence": {
+                "option_nodes_total": 5,
+                "options_with_interventions": 5
+              },
+              "nested_strength_detected": false
+            },
+            {
+              "stage": "post_stabilisation",
+              "edge_count": 22,
+              "node_count": 14,
+              "sample_edges": [
+                {
+                  "to": "94fa174b",
+                  "from": "098c77cd",
+                  "strength_std": "MISSING",
+                  "belief_exists": "MISSING",
+                  "strength_mean": -0.35,
+                  "effect_direction": "negative"
+                },
+                {
+                  "to": "098c77cd",
+                  "from": "3c8203cf",
+                  "strength_std": "MISSING",
+                  "belief_exists": "MISSING",
+                  "strength_mean": 0.45,
+                  "effect_direction": "positive"
+                },
+                {
+                  "to": "94fa174b",
+                  "from": "3c8203cf",
+                  "strength_std": "MISSING",
+                  "belief_exists": "MISSING",
+                  "strength_mean": 0.4453124999999999,
+                  "effect_direction": "positive"
+                }
+              ],
+              "edge_field_presence": {
+                "weight": 8,
+                "strength_std": 14,
+                "belief_exists": 14,
+                "strength_mean": 22,
+                "effect_direction": 22
+              },
+              "node_field_presence": {
+                "option_nodes_total": 5,
+                "options_with_interventions": 5
+              }
+            },
+            {
+              "stage": "pre_boundary",
+              "edge_count": 22,
+              "node_count": 14,
+              "sample_edges": [
+                {
+                  "to": "94fa174b",
+                  "from": "098c77cd",
+                  "strength_std": "MISSING",
+                  "belief_exists": "MISSING",
+                  "strength_mean": -0.35,
+                  "effect_direction": "negative"
+                },
+                {
+                  "to": "098c77cd",
+                  "from": "3c8203cf",
+                  "strength_std": "MISSING",
+                  "belief_exists": "MISSING",
+                  "strength_mean": 0.45,
+                  "effect_direction": "positive"
+                },
+                {
+                  "to": "94fa174b",
+                  "from": "3c8203cf",
+                  "strength_std": "MISSING",
+                  "belief_exists": "MISSING",
+                  "strength_mean": 0.4453124999999999,
+                  "effect_direction": "positive"
+                }
+              ],
+              "edge_field_presence": {
+                "weight": 8,
+                "strength_std": 14,
+                "belief_exists": 14,
+                "strength_mean": 22,
+                "effect_direction": 22
+              },
+              "node_field_presence": {
+                "option_nodes_total": 5,
+                "options_with_interventions": 5
+              }
+            }
+          ],
+          "pipeline_checkpoints_meta": {
+            "enabled": true,
+            "total_count": 3,
+            "adapter_count": 1,
+            "pipeline_count": 2
+          }
+        },
+        "request_id": "cdc2db1a-2c00-4a0a-a552-52b990995cb0",
+        "correlation_id": "cdc2db1a-2c00-4a0a-a552-52b990995cb0",
+        "repair_summary": {
+          "status_quo": {
+            "fixed": false,
+            "marked_droppable": false
+          },
+          "graph_delta": {
+            "edges_after": 22,
+            "nodes_after": 14,
+            "edges_before": 22,
+            "nodes_before": 14
+          },
+          "bucket_summary": {
+            "a": 9,
+            "b": 2,
+            "c": 0
+          },
+          "llm_repair_needed": false,
+          "status_quo_action": "none",
+          "unreachable_factors": {
+            "reclassified": [
+              "a3550778",
+              "ab78e513"
+            ],
+            "marked_droppable": []
+          },
+          "edge_format_detected": "V1_FLAT",
+          "deterministic_repairs": [
+            {
+              "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+              "path": "edges[3ec889db→3c8203cf]",
+              "action": "Canonicalised structural option→factor edge to mean=1, std=0.01, existence=1.0"
+            },
+            {
+              "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+              "path": "edges[3ec889db→7b9a04f8]",
+              "action": "Canonicalised structural option→factor edge to mean=1, std=0.01, existence=1.0"
+            },
+            {
+              "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+              "path": "edges[491176c4→3ec889db]",
+              "action": "Canonicalised structural decision→option edge to mean=1, std=0.01, existence=1.0"
+            },
+            {
+              "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+              "path": "edges[491176c4→88855f3f]",
+              "action": "Canonicalised structural decision→option edge to mean=1, std=0.01, existence=1.0"
+            },
+            {
+              "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+              "path": "edges[491176c4→c7658aba]",
+              "action": "Canonicalised structural decision→option edge to mean=1, std=0.01, existence=1.0"
+            },
+            {
+              "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+              "path": "edges[491176c4→d1140d2c]",
+              "action": "Canonicalised structural decision→option edge to mean=1, std=0.01, existence=1.0"
+            },
+            {
+              "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+              "path": "edges[491176c4→e4857b83]",
+              "action": "Canonicalised structural decision→option edge to mean=1, std=0.01, existence=1.0"
+            },
+            {
+              "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+              "path": "edges[88855f3f→3c8203cf]",
+              "action": "Canonicalised structural option→factor edge to mean=1, std=0.01, existence=1.0"
+            },
+            {
+              "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+              "path": "edges[88855f3f→7b9a04f8]",
+              "action": "Canonicalised structural option→factor edge to mean=1, std=0.01, existence=1.0"
+            },
+            {
+              "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+              "path": "edges[c7658aba→3c8203cf]",
+              "action": "Canonicalised structural option→factor edge to mean=1, std=0.01, existence=1.0"
+            },
+            {
+              "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+              "path": "edges[c7658aba→7b9a04f8]",
+              "action": "Canonicalised structural option→factor edge to mean=1, std=0.01, existence=1.0"
+            },
+            {
+              "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+              "path": "edges[d1140d2c→3c8203cf]",
+              "action": "Canonicalised structural option→factor edge to mean=1, std=0.01, existence=1.0"
+            },
+            {
+              "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+              "path": "edges[d1140d2c→7b9a04f8]",
+              "action": "Canonicalised structural option→factor edge to mean=1, std=0.01, existence=1.0"
+            },
+            {
+              "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+              "path": "edges[e4857b83→3c8203cf]",
+              "action": "Canonicalised structural option→factor edge to mean=1, std=0.01, existence=1.0"
+            },
+            {
+              "code": "CONTROLLABLE_MISSING_DATA",
+              "path": "nodes[3c8203cf].data",
+              "action": "Populated missing required fields with defaults"
+            },
+            {
+              "code": "CONTROLLABLE_MISSING_DATA",
+              "path": "nodes[7b9a04f8].data",
+              "action": "Populated missing required fields with defaults"
+            },
+            {
+              "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+              "path": "nodes[a3550778].category",
+              "action": "Reclassified unreachable factor \"Active Customer Base\" to external with synthesised prior [0.3, 0.8999999999999999]",
+              "deleted_unit": "customers",
+              "deleted_value": 0.6,
+              "deleted_raw_value": 1200,
+              "prior_synthesised": true,
+              "synthesised_range": {
+                "range_max": 0.8999999999999999,
+                "range_min": 0.3
+              },
+              "prior_is_unquantified": false
+            },
+            {
+              "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+              "path": "nodes[ab78e513].category",
+              "action": "Reclassified unreachable factor \"Monthly Churn Rate\" to external with synthesised prior [0, 0.13]. The extracted value 3% is not used in the maths — the range shown is a placeholder",
+              "deleted_unit": "%",
+              "deleted_value": 0.03,
+              "deleted_raw_value": 3,
+              "prior_synthesised": true,
+              "synthesised_range": {
+                "range_max": 0.13,
+                "range_min": 0
+              },
+              "prior_is_unquantified": false
+            },
+            {
+              "code": "INBOUND_BUDGET_RESCALED",
+              "path": "edges[*→48d65738]",
+              "action": "Rescaled 2 causal inbound edges from sum=1.350 to 0.95"
+            },
+            {
+              "code": "INBOUND_BUDGET_RESCALED",
+              "path": "edges[*→94fa174b]",
+              "action": "Rescaled 2 causal inbound edges from sum=1.600 to 0.95"
+            }
+          ],
+          "deterministic_sweep_ran": true,
+          "remaining_violation_codes": [],
+          "remaining_violations_count": 0,
+          "deterministic_repairs_count": 20,
+          "deterministic_sweep_version": "v3",
+          "risk_coefficient_corrections": []
+        },
+        "transform_defaults": {
+          "defaults": [
+            {
+              "field": "exists_probability",
+              "reason": "causal edge default",
+              "edge_id": "098c77cd->94fa174b",
+              "default_value": 0.8
+            },
+            {
+              "field": "strength_std",
+              "reason": "derived from mean/belief",
+              "edge_id": "098c77cd->94fa174b",
+              "default_value": 0.08399999999999998
+            },
+            {
+              "field": "exists_probability",
+              "reason": "causal edge default",
+              "edge_id": "3c8203cf->098c77cd",
+              "default_value": 0.8
+            },
+            {
+              "field": "strength_std",
+              "reason": "derived from mean/belief",
+              "edge_id": "3c8203cf->098c77cd",
+              "default_value": 0.10799999999999998
+            },
+            {
+              "field": "exists_probability",
+              "reason": "causal edge default",
+              "edge_id": "3c8203cf->94fa174b",
+              "default_value": 0.8
+            },
+            {
+              "field": "strength_std",
+              "reason": "derived from mean/belief",
+              "edge_id": "3c8203cf->94fa174b",
+              "default_value": 0.10687499999999994
+            },
+            {
+              "field": "exists_probability",
+              "reason": "causal edge default",
+              "edge_id": "48d65738->94fa174b",
+              "default_value": 0.8
+            },
+            {
+              "field": "strength_std",
+              "reason": "derived from mean/belief",
+              "edge_id": "48d65738->94fa174b",
+              "default_value": 0.144
+            },
+            {
+              "field": "exists_probability",
+              "reason": "causal edge default",
+              "edge_id": "7b9a04f8->48d65738",
+              "default_value": 0.8
+            },
+            {
+              "field": "strength_std",
+              "reason": "derived from mean/belief",
+              "edge_id": "7b9a04f8->48d65738",
+              "default_value": 0.13511111111111107
+            },
+            {
+              "field": "exists_probability",
+              "reason": "causal edge default",
+              "edge_id": "94fa174b->7f40d56e",
+              "default_value": 0.8
+            },
+            {
+              "field": "strength_std",
+              "reason": "derived from mean/belief",
+              "edge_id": "94fa174b->7f40d56e",
+              "default_value": 0.21599999999999997
+            },
+            {
+              "field": "exists_probability",
+              "reason": "causal edge default",
+              "edge_id": "a3550778->94fa174b",
+              "default_value": 0.8
+            },
+            {
+              "field": "strength_std",
+              "reason": "derived from mean/belief",
+              "edge_id": "a3550778->94fa174b",
+              "default_value": 0.12112499999999994
+            },
+            {
+              "field": "exists_probability",
+              "reason": "causal edge default",
+              "edge_id": "ab78e513->48d65738",
+              "default_value": 0.8
+            },
+            {
+              "field": "strength_std",
+              "reason": "derived from mean/belief",
+              "edge_id": "ab78e513->48d65738",
+              "default_value": 0.09288888888888887
+            }
+          ],
+          "total_defaults": 16,
+          "defaulted_edge_count": 8
+        }
+      },
+      "options": [
+        {
+          "id": "3ec889db",
+          "label": "Raise to £79 with Grandfathering",
+          "status": "ready",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "is_baseline": false,
+          "interventions": {
+            "3c8203cf": {
+              "unit": "£/month",
+              "value": 0.79,
+              "source": "cee_hypothesis",
+              "raw_value": 79,
+              "reasoning": "Olumi estimate via edge 651a933a; this option→factor effect is not bound to a stated option record",
+              "target_match": {
+                "node_id": "3c8203cf",
+                "confidence": "high",
+                "match_type": "exact_id"
+              },
+              "value_confidence": "low"
+            },
+            "7b9a04f8": {
+              "unit": "percentage points",
+              "value": 0.005,
+              "source": "cee_hypothesis",
+              "raw_value": 0.005,
+              "reasoning": "Olumi estimate via edge 20339a09; this option→factor effect is not bound to a stated option record",
+              "target_match": {
+                "node_id": "7b9a04f8",
+                "confidence": "high",
+                "match_type": "exact_id"
+              },
+              "value_confidence": "low"
+            }
+          }
+        },
+        {
+          "id": "88855f3f",
+          "label": "Hold Price at £59 (Status Quo)",
+          "status": "ready",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "is_baseline": true,
+          "interventions": {
+            "3c8203cf": {
+              "unit": "£/month",
+              "value": 0.59,
+              "source": "cee_hypothesis",
+              "raw_value": 59,
+              "reasoning": "Olumi estimate via edge 789de609; this option→factor effect is not bound to a stated option record",
+              "target_match": {
+                "node_id": "3c8203cf",
+                "confidence": "high",
+                "match_type": "exact_id"
+              },
+              "value_confidence": "low"
+            },
+            "7b9a04f8": {
+              "unit": "percentage points",
+              "value": 0,
+              "source": "cee_hypothesis",
+              "raw_value": 0,
+              "reasoning": "Olumi estimate via edge c26deb26; this option→factor effect is not bound to a stated option record",
+              "target_match": {
+                "node_id": "7b9a04f8",
+                "confidence": "high",
+                "match_type": "exact_id"
+              },
+              "value_confidence": "low"
+            }
+          }
+        },
+        {
+          "id": "c7658aba",
+          "label": "Raise Price to £79",
+          "status": "ready",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "is_baseline": false,
+          "interventions": {
+            "3c8203cf": {
+              "unit": "£/month",
+              "value": 0.79,
+              "source": "cee_hypothesis",
+              "raw_value": 79,
+              "reasoning": "Olumi estimate via edge 2492ecca; this option→factor effect is not bound to a stated option record",
+              "target_match": {
+                "node_id": "3c8203cf",
+                "confidence": "high",
+                "match_type": "exact_id"
+              },
+              "value_confidence": "low"
+            },
+            "7b9a04f8": {
+              "unit": "percentage points",
+              "value": 0.018,
+              "source": "cee_hypothesis",
+              "raw_value": 0.018,
+              "reasoning": "Olumi estimate via edge ecc01915; this option→factor effect is not bound to a stated option record",
+              "target_match": {
+                "node_id": "7b9a04f8",
+                "confidence": "high",
+                "match_type": "exact_id"
+              },
+              "value_confidence": "low"
+            }
+          }
+        },
+        {
+          "id": "d1140d2c",
+          "label": "Raise Price to £69 (Mid Step)",
+          "status": "ready",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "is_baseline": false,
+          "interventions": {
+            "3c8203cf": {
+              "unit": "£/month",
+              "value": 0.69,
+              "source": "cee_hypothesis",
+              "raw_value": 69,
+              "reasoning": "Olumi estimate via edge f3ff122f; this option→factor effect is not bound to a stated option record",
+              "target_match": {
+                "node_id": "3c8203cf",
+                "confidence": "high",
+                "match_type": "exact_id"
+              },
+              "value_confidence": "low"
+            },
+            "7b9a04f8": {
+              "unit": "percentage points",
+              "value": 0.008,
+              "source": "cee_hypothesis",
+              "raw_value": 0.008,
+              "reasoning": "Olumi estimate via edge 124dd1b2; this option→factor effect is not bound to a stated option record",
+              "target_match": {
+                "node_id": "7b9a04f8",
+                "confidence": "high",
+                "match_type": "exact_id"
+              },
+              "value_confidence": "low"
+            }
+          }
+        },
+        {
+          "id": "e4857b83",
+          "label": "raise our entry plan from £59 to £79 per month",
+          "status": "ready",
+          "provenance": {
+            "source": "brief_extraction",
+            "brief_quote": "raise our entry plan from £59 to £79 per month"
+          },
+          "interventions": {
+            "3c8203cf": {
+              "unit": "£/month",
+              "value": 0.79,
+              "source": "cee_hypothesis",
+              "raw_value": 79,
+              "reasoning": "Olumi estimate via edge 64a89bf5; no stated figure is cited for this option→factor effect",
+              "target_match": {
+                "node_id": "3c8203cf",
+                "confidence": "high",
+                "match_type": "exact_id"
+              },
+              "value_confidence": "low"
+            }
+          }
+        }
+      ],
+      "quality": {
+        "safety": 8,
+        "overall": 9,
+        "coverage": 10,
+        "structure": 8,
+        "structural_proxy": 8
+      },
+      "_timings": {
+        "draft_graph": {
+          "parse_ms": 20528,
+          "total_ms": 50455,
+          "enrich_ms": 80,
+          "repair_ms": 135,
+          "package_ms": 13,
+          "boundary_ms": 12,
+          "normalise_ms": 2,
+          "parse_llm_ms": 17290,
+          "repair_fired": false,
+          "repair_reason": null,
+          "repair_attempts": 0,
+          "coaching_pass_ms": 22537,
+          "threshold_sweep_ms": 2,
+          "validation_pipeline_ms": 28833
+        }
+      },
+      "coaching": {
+        "summary": "The decision captures the core revenue mechanics well, but the model currently treats Monthly Recurring Revenue as the sole success measure and does not account for how a price change ripples into customer lifetime value or competitive positioning over time.",
+        "bias_signals": [
+          {
+            "type": "narrow_framing",
+            "detail": "The brief frames the entire decision as 'whether to raise our entry plan from £59 to £79' with no mention of downstream effects on customer lifetime, competitive dynamics, or product tier mix — the model inherits that narrow scope.",
+            "target": "491176c4"
+          },
+          {
+            "type": "anchoring",
+            "detail": "The brief states the current price as £59 and the target as £79, and the mid-step option lands at £69 — all options are anchored symmetrically around the existing price point rather than derived from value or willingness-to-pay analysis.",
+            "target": "d1140d2c"
+          },
+          {
+            "type": "overconfidence",
+            "detail": "The brief states 'Churn is currently 3% monthly' as a fixed fact with no range or uncertainty expressed, which may lead the model to treat baseline churn as more stable than it is when a price shock is applied.",
+            "target": "ab78e513"
+          }
+        ],
+        "widening_log": {
+          "elements_added": [],
+          "brief_completeness": "partial",
+          "elements_considered_but_excluded": [
+            "Support cost change — no support-load factor exists in the current structure so adding it would require new elements beyond the brief",
+            "Brand perception — no brand or NPS factor is present; adding one would go beyond the stated scope"
+          ]
+        },
+        "strengthen_items": [
+          {
+            "id": "add-price-elasticity-constraint",
+            "label": "Anchor the churn uplift to a price-elasticity assumption",
+            "detail": "The current baseline churn of 3% monthly is stated, but the model needs an explicit assumption about how much that rate rises per unit of price increase so that the Price-Driven Churn Uplift factor is bounded rather than open-ended.",
+            "action_type": "add_constraint",
+            "bias_category": "overconfidence"
+          },
+          {
+            "id": "add-customer-lifetime-value-goal",
+            "label": "Add customer lifetime value as a second goal dimension",
+            "detail": "Focusing solely on Monthly Recurring Revenue can mask a scenario where higher price raises short-term revenue but accelerates attrition enough to destroy long-run value; a lifetime-value lens would surface that tension.",
+            "action_type": "reframe_goal",
+            "bias_category": "narrow_framing"
+          },
+          {
+            "id": "add-competitive-response-risk",
+            "label": "Introduce a competitive response risk",
+            "detail": "A price rise may prompt prospects to evaluate alternatives more seriously, yet no risk capturing competitor attractiveness or switching behaviour currently feeds into the New Customer Conversion Drag or Active Customer Base factors.",
+            "action_type": "add_risk",
+            "bias_category": "narrow_framing"
+          },
+          {
+            "id": "add-grandfathering-cost-constraint",
+            "label": "Constrain the grandfathering option with its revenue-delay cost",
+            "detail": "The Raise to £79 with Grandfathering option reduces churn risk but also delays full revenue uplift for existing customers; that trade-off should be made explicit as a constraint so it is weighed against the straight raise.",
+            "action_type": "add_constraint"
+          }
+        ]
+      },
+      "goal_node_id": "7f40d56e",
+      "causal_claims": [
+        {
+          "to": "098c77cd",
+          "from": "3c8203cf",
+          "type": "direct_effect",
+          "stated_strength": "moderate"
+        },
+        {
+          "to": "94fa174b",
+          "from": "3c8203cf",
+          "type": "direct_effect",
+          "stated_strength": "moderate"
+        },
+        {
+          "to": "48d65738",
+          "from": "7b9a04f8",
+          "type": "direct_effect",
+          "stated_strength": "moderate"
+        },
+        {
+          "to": "94fa174b",
+          "from": "48d65738",
+          "type": "direct_effect",
+          "stated_strength": "moderate"
+        },
+        {
+          "to": "94fa174b",
+          "from": "098c77cd",
+          "type": "direct_effect",
+          "stated_strength": "moderate"
+        },
+        {
+          "to": "94fa174b",
+          "from": "a3550778",
+          "type": "direct_effect",
+          "stated_strength": "moderate"
+        },
+        {
+          "to": "48d65738",
+          "from": "ab78e513",
+          "type": "direct_effect",
+          "stated_strength": "moderate"
+        },
+        {
+          "to": "7f40d56e",
+          "from": "94fa174b",
+          "type": "direct_effect",
+          "stated_strength": "moderate"
+        }
+      ],
+      "topology_plan": [],
+      "analysis_ready": {
+        "status": "ready",
+        "options": [
+          {
+            "id": "3ec889db",
+            "label": "Raise to £79 with Grandfathering",
+            "status": "ready",
+            "interventions": {
+              "3c8203cf": {
+                "value": 0.79,
+                "source": "cee_hypothesis",
+                "display_value": "79 £/month"
+              },
+              "7b9a04f8": {
+                "value": 0.005,
+                "source": "cee_hypothesis",
+                "display_value": "0.01 percentage points"
+              }
+            },
+            "status_reason": "2 intervention(s) ready for analysis",
+            "raw_interventions": {
+              "3c8203cf": 79,
+              "7b9a04f8": 0.005
+            },
+            "extraction_metadata": {
+              "source": "cee_hypothesis",
+              "reasoning": "Olumi estimate via edge 651a933a; this option→factor effect is not bound to a stated option record",
+              "confidence": "low"
+            },
+            "intervention_details": {
+              "3c8203cf": {
+                "unit": "£/month",
+                "raw_value": 79,
+                "display_value": "79 £/month",
+                "normalised_value": 0.79
+              },
+              "7b9a04f8": {
+                "unit": "percentage points",
+                "raw_value": 0.005,
+                "display_value": "0.01 percentage points",
+                "normalised_value": 0.005
+              }
+            }
+          },
+          {
+            "id": "88855f3f",
+            "label": "Hold Price at £59 (Status Quo)",
+            "status": "ready",
+            "is_baseline": true,
+            "interventions": {
+              "3c8203cf": {
+                "value": 0.59,
+                "source": "cee_hypothesis",
+                "display_value": "59 £/month"
+              },
+              "7b9a04f8": {
+                "value": 0,
+                "source": "cee_hypothesis",
+                "display_value": "0 percentage points"
+              }
+            },
+            "status_reason": "2 intervention(s) ready for analysis",
+            "raw_interventions": {
+              "3c8203cf": 59,
+              "7b9a04f8": 0
+            },
+            "extraction_metadata": {
+              "source": "cee_hypothesis",
+              "reasoning": "Olumi estimate via edge 789de609; this option→factor effect is not bound to a stated option record",
+              "confidence": "low"
+            },
+            "intervention_details": {
+              "3c8203cf": {
+                "unit": "£/month",
+                "raw_value": 59,
+                "display_value": "59 £/month",
+                "normalised_value": 0.59
+              },
+              "7b9a04f8": {
+                "unit": "percentage points",
+                "raw_value": 0,
+                "display_value": "0 percentage points",
+                "normalised_value": 0
+              }
+            }
+          },
+          {
+            "id": "c7658aba",
+            "label": "Raise Price to £79",
+            "status": "ready",
+            "interventions": {
+              "3c8203cf": {
+                "value": 0.79,
+                "source": "cee_hypothesis",
+                "display_value": "79 £/month"
+              },
+              "7b9a04f8": {
+                "value": 0.018,
+                "source": "cee_hypothesis",
+                "display_value": "0.02 percentage points"
+              }
+            },
+            "status_reason": "2 intervention(s) ready for analysis",
+            "raw_interventions": {
+              "3c8203cf": 79,
+              "7b9a04f8": 0.018
+            },
+            "extraction_metadata": {
+              "source": "cee_hypothesis",
+              "reasoning": "Olumi estimate via edge 2492ecca; this option→factor effect is not bound to a stated option record",
+              "confidence": "low"
+            },
+            "intervention_details": {
+              "3c8203cf": {
+                "unit": "£/month",
+                "raw_value": 79,
+                "display_value": "79 £/month",
+                "normalised_value": 0.79
+              },
+              "7b9a04f8": {
+                "unit": "percentage points",
+                "raw_value": 0.018,
+                "display_value": "0.02 percentage points",
+                "normalised_value": 0.018
+              }
+            }
+          },
+          {
+            "id": "d1140d2c",
+            "label": "Raise Price to £69 (Mid Step)",
+            "status": "ready",
+            "interventions": {
+              "3c8203cf": {
+                "value": 0.69,
+                "source": "cee_hypothesis",
+                "display_value": "69 £/month"
+              },
+              "7b9a04f8": {
+                "value": 0.008,
+                "source": "cee_hypothesis",
+                "display_value": "0.01 percentage points"
+              }
+            },
+            "status_reason": "2 intervention(s) ready for analysis",
+            "raw_interventions": {
+              "3c8203cf": 69,
+              "7b9a04f8": 0.008
+            },
+            "extraction_metadata": {
+              "source": "cee_hypothesis",
+              "reasoning": "Olumi estimate via edge f3ff122f; this option→factor effect is not bound to a stated option record",
+              "confidence": "low"
+            },
+            "intervention_details": {
+              "3c8203cf": {
+                "unit": "£/month",
+                "raw_value": 69,
+                "display_value": "69 £/month",
+                "normalised_value": 0.69
+              },
+              "7b9a04f8": {
+                "unit": "percentage points",
+                "raw_value": 0.008,
+                "display_value": "0.01 percentage points",
+                "normalised_value": 0.008
+              }
+            }
+          },
+          {
+            "id": "e4857b83",
+            "label": "raise our entry plan from £59 to £79 per month",
+            "status": "ready",
+            "interventions": {
+              "3c8203cf": {
+                "value": 0.79,
+                "source": "cee_hypothesis",
+                "display_value": "79 £/month"
+              }
+            },
+            "status_reason": "1 intervention(s) ready for analysis",
+            "raw_interventions": {
+              "3c8203cf": 79
+            },
+            "extraction_metadata": {
+              "source": "cee_hypothesis",
+              "reasoning": "Olumi estimate via edge 64a89bf5; no stated figure is cited for this option→factor effect",
+              "confidence": "low"
+            },
+            "intervention_details": {
+              "3c8203cf": {
+                "unit": "£/month",
+                "raw_value": 79,
+                "display_value": "79 £/month",
+                "normalised_value": 0.79
+              }
+            }
+          }
+        ],
+        "goal_node_id": "7f40d56e",
+        "bias_findings": [
+          {
+            "id": "overconfidence_narrow_belief_band",
+            "code": "OVERCONFIDENCE",
+            "targets": {
+              "node_ids": [
+                "3ec889db",
+                "3c8203cf",
+                "7b9a04f8",
+                "491176c4",
+                "88855f3f",
+                "c7658aba",
+                "d1140d2c",
+                "e4857b83"
+              ]
+            },
+            "category": "other",
+            "citation": "Lichtenstein et al. (1982) - Judgment Under Uncertainty",
+            "node_ids": [
+              "3ec889db",
+              "3c8203cf",
+              "7b9a04f8",
+              "491176c4",
+              "88855f3f",
+              "c7658aba",
+              "d1140d2c",
+              "e4857b83"
+            ],
+            "severity": "high",
+            "mechanism": "Excessive certainty in own judgments, leading to overly narrow confidence intervals and underestimation of uncertainty.",
+            "explanation": "Edge beliefs are all high and tightly clustered; probability estimates may be over-confident.",
+            "confidence_band": "medium",
+            "micro_intervention": {
+              "steps": [
+                "Widen your confidence interval: what would make you 90% confident vs 50%?",
+                "List three things you might be wrong about in this analysis"
+              ],
+              "estimated_minutes": 3
+            },
+            "structural_pattern": "Belief values in high, narrow band [1.00, 1.00] across 14 edges"
+          }
+        ],
+        "model_adjustments": [
+          {
+            "code": "category_reclassified",
+            "after": "controllable",
+            "field": "category",
+            "reason": "Structural inference: has option edge → controllable (Entry Plan Monthly Price)",
+            "node_id": "3c8203cf"
+          },
+          {
+            "code": "category_reclassified",
+            "after": "controllable",
+            "field": "category",
+            "reason": "Structural inference: has option edge → controllable (Price-Driven Churn Uplift)",
+            "node_id": "7b9a04f8"
+          },
+          {
+            "code": "category_reclassified",
+            "after": "observable",
+            "field": "category",
+            "reason": "Structural inference: has value → observable (Active Customer Base)",
+            "node_id": "a3550778"
+          },
+          {
+            "code": "category_reclassified",
+            "after": "observable",
+            "field": "category",
+            "reason": "Structural inference: has value → observable (Monthly Churn Rate)",
+            "node_id": "ab78e513"
+          },
+          {
+            "code": "risk_coefficient_corrected",
+            "after": -0.35,
+            "field": "strength_mean",
+            "before": 0.35,
+            "reason": "strength_mean sign (0.35) contradicts the stated effect_direction \"negative\"; an unsigned magnitude carries no polarity of its own, so the direction is authoritative and the magnitude takes its sign",
+            "edge_id": "098c77cd::94fa174b"
+          },
+          {
+            "code": "risk_coefficient_corrected",
+            "after": -0.6,
+            "field": "strength_mean",
+            "before": 0.6,
+            "reason": "strength_mean sign (0.6) contradicts the stated effect_direction \"negative\"; an unsigned magnitude carries no polarity of its own, so the direction is authoritative and the magnitude takes its sign",
+            "edge_id": "48d65738::94fa174b"
+          },
+          {
+            "code": "category_reclassified",
+            "field": "nodes[a3550778].category",
+            "before": 1200,
+            "reason": "Reclassified unreachable factor \"Active Customer Base\" to external with synthesised prior [0.3, 0.8999999999999999]",
+            "source": "deterministic_sweep",
+            "node_id": "a3550778"
+          },
+          {
+            "code": "category_reclassified",
+            "field": "nodes[ab78e513].category",
+            "before": 3,
+            "reason": "Reclassified unreachable factor \"Monthly Churn Rate\" to external with synthesised prior [0, 0.13]. The extracted value 3% is not used in the maths — the range shown is a placeholder",
+            "source": "deterministic_sweep",
+            "node_id": "ab78e513"
+          }
+        ]
+      },
+      "draft_warnings": [
+        {
+          "id": "goal_no_baseline_value",
+          "edge_ids": [],
+          "fix_hint": "Set goal node's observed_state.value to establish baseline for comparison",
+          "node_ids": [
+            "7f40d56e"
+          ],
+          "severity": "low",
+          "explanation": "Goal node has no observed_state.value set.",
+          "affected_edge_ids": [],
+          "affected_node_ids": [
+            "7f40d56e"
+          ]
+        }
+      ],
+      "schema_version": "3.0",
+      "_pipeline_outcome": {
+        "warnings": [],
+        "llm_repair": {
+          "outcome": "skipped",
+          "attempts": 0,
+          "triggered": false,
+          "fallback_reason": null
+        },
+        "rescue_score": 24,
+        "graph_drafted": true,
+        "coaching_status": "complete",
+        "enrichment_status": "complete",
+        "repair_provenance": [
+          {
+            "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+            "rule": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+            "after": null,
+            "field": "graph",
+            "before": null,
+            "source": "structure",
+            "node_or_edge_id": "edges[3ec889db→3c8203cf]"
+          },
+          {
+            "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+            "rule": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+            "after": null,
+            "field": "graph",
+            "before": null,
+            "source": "structure",
+            "node_or_edge_id": "edges[3ec889db→7b9a04f8]"
+          },
+          {
+            "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+            "rule": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+            "after": null,
+            "field": "graph",
+            "before": null,
+            "source": "structure",
+            "node_or_edge_id": "edges[491176c4→3ec889db]"
+          },
+          {
+            "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+            "rule": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+            "after": null,
+            "field": "graph",
+            "before": null,
+            "source": "structure",
+            "node_or_edge_id": "edges[491176c4→88855f3f]"
+          },
+          {
+            "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+            "rule": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+            "after": null,
+            "field": "graph",
+            "before": null,
+            "source": "structure",
+            "node_or_edge_id": "edges[491176c4→c7658aba]"
+          },
+          {
+            "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+            "rule": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+            "after": null,
+            "field": "graph",
+            "before": null,
+            "source": "structure",
+            "node_or_edge_id": "edges[491176c4→d1140d2c]"
+          },
+          {
+            "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+            "rule": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+            "after": null,
+            "field": "graph",
+            "before": null,
+            "source": "structure",
+            "node_or_edge_id": "edges[491176c4→e4857b83]"
+          },
+          {
+            "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+            "rule": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+            "after": null,
+            "field": "graph",
+            "before": null,
+            "source": "structure",
+            "node_or_edge_id": "edges[88855f3f→3c8203cf]"
+          },
+          {
+            "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+            "rule": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+            "after": null,
+            "field": "graph",
+            "before": null,
+            "source": "structure",
+            "node_or_edge_id": "edges[88855f3f→7b9a04f8]"
+          },
+          {
+            "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+            "rule": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+            "after": null,
+            "field": "graph",
+            "before": null,
+            "source": "structure",
+            "node_or_edge_id": "edges[c7658aba→3c8203cf]"
+          },
+          {
+            "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+            "rule": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+            "after": null,
+            "field": "graph",
+            "before": null,
+            "source": "structure",
+            "node_or_edge_id": "edges[c7658aba→7b9a04f8]"
+          },
+          {
+            "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+            "rule": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+            "after": null,
+            "field": "graph",
+            "before": null,
+            "source": "structure",
+            "node_or_edge_id": "edges[d1140d2c→3c8203cf]"
+          },
+          {
+            "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+            "rule": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+            "after": null,
+            "field": "graph",
+            "before": null,
+            "source": "structure",
+            "node_or_edge_id": "edges[d1140d2c→7b9a04f8]"
+          },
+          {
+            "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+            "rule": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+            "after": null,
+            "field": "graph",
+            "before": null,
+            "source": "structure",
+            "node_or_edge_id": "edges[e4857b83→3c8203cf]"
+          },
+          {
+            "code": "CONTROLLABLE_MISSING_DATA",
+            "rule": "CONTROLLABLE_MISSING_DATA",
+            "after": null,
+            "field": "graph",
+            "before": null,
+            "source": "fallback_default",
+            "node_or_edge_id": "nodes[3c8203cf].data"
+          },
+          {
+            "code": "CONTROLLABLE_MISSING_DATA",
+            "rule": "CONTROLLABLE_MISSING_DATA",
+            "after": null,
+            "field": "graph",
+            "before": null,
+            "source": "fallback_default",
+            "node_or_edge_id": "nodes[7b9a04f8].data"
+          },
+          {
+            "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+            "rule": "UNREACHABLE_FACTOR_RECLASSIFIED",
+            "after": null,
+            "field": "graph",
+            "before": null,
+            "source": "structure",
+            "node_or_edge_id": "nodes[a3550778].category"
+          },
+          {
+            "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+            "rule": "UNREACHABLE_FACTOR_RECLASSIFIED",
+            "after": null,
+            "field": "graph",
+            "before": null,
+            "source": "structure",
+            "node_or_edge_id": "nodes[ab78e513].category"
+          },
+          {
+            "code": "INBOUND_BUDGET_RESCALED",
+            "rule": "INBOUND_BUDGET_RESCALED",
+            "after": null,
+            "field": "graph",
+            "before": null,
+            "source": "structure",
+            "node_or_edge_id": "edges[*→48d65738]"
+          },
+          {
+            "code": "INBOUND_BUDGET_RESCALED",
+            "rule": "INBOUND_BUDGET_RESCALED",
+            "after": null,
+            "field": "graph",
+            "before": null,
+            "source": "structure",
+            "node_or_edge_id": "edges[*→94fa174b]"
+          }
+        ],
+        "validation_status": "passed",
+        "verification_status": "passed",
+        "factor_value_coverage": {
+          "total": 4,
+          "explicit": 0,
+          "fallback_default": 0,
+          "inferred_with_evidence": 4
+        },
+        "graph_structurally_valid": true,
+        "edge_strength_unique_count": 8,
+        "deterministic_sweep_violations": 0
+      },
+      "record_disclosures": [
+        {
+          "unit": "£/month",
+          "label": "raise our entry plan from £59 to £79 per month",
+          "value": 59,
+          "reason": "unconnected_to_goal",
+          "withdrawn": true
+        },
+        {
+          "unit": "%",
+          "label": "Churn is currently 3% monthly",
+          "value": 0.03,
+          "reason": "unconnected_to_goal",
+          "withdrawn": true
+        },
+        {
+          "unit": "customers",
+          "label": "We have 1,200 customers",
+          "value": 1200,
+          "reason": "unconnected_to_goal",
+          "withdrawn": true
+        },
+        {
+          "label": "MRR reaches the modelling goal",
+          "reason": "parallel_causal_link_conflict",
+          "withdrawn": true
+        }
+      ],
+      "validation_warnings": [
+        {
+          "code": "OPTION_SIMILARITY",
+          "details": {
+            "jaccard": 1,
+            "optionA": "3ec889db",
+            "optionB": "88855f3f"
+          },
+          "message": "Options \"Raise to £79 with Grandfathering\" and \"Hold Price at £59 (Status Quo)\" affect the same factors (Jaccard 1.00). Consider whether they represent genuinely different approaches.",
+          "severity": "info",
+          "suggestion": "Options affect the same factors — consider whether they represent genuinely different approaches"
+        },
+        {
+          "code": "OPTION_SIMILARITY",
+          "details": {
+            "jaccard": 1,
+            "optionA": "3ec889db",
+            "optionB": "c7658aba"
+          },
+          "message": "Options \"Raise to £79 with Grandfathering\" and \"Raise Price to £79\" affect the same factors (Jaccard 1.00). Consider whether they represent genuinely different approaches.",
+          "severity": "info",
+          "suggestion": "Options affect the same factors — consider whether they represent genuinely different approaches"
+        }
+      ]
+    },
+    "graph_present": true,
+    "brief_text": "We are a B2B SaaS company deciding whether to raise our entry plan from £59 to £79 per month. Churn is currently 3% monthly. We have 1,200 customers. Help me model this decision.",
+    "graph_identity_hash": {
+      "kind": "graph_identity_hash",
+      "value": "6cdc982c34bcd60fa5135cee37af5bde145465c13a158a5943373664c278df7a",
+      "algorithm": "sha256",
+      "projection_version": "identity.v1",
+      "graph_schema_version": "graph_v3",
+      "normaliser_version": "1"
+    },
+    "graph_hash": "eaffb2fd4cfd2946",
+    "layout_present": false,
+    "not_modelled": {
+      "schema": "not_modelled.v1",
+      "status": "derived",
+      "unavailable_reason": null,
+      "scope": {
+        "searched": "quantities stated in the brief that carry a unit: money, percentages, counts with a unit word, calendar dates and fiscal periods",
+        "model_surface": [
+          "node and option values, caps, units, labels and encoding maps"
+        ],
+        "prose_surface": [
+          "coaching cards",
+          "draft warnings",
+          "validation warnings"
+        ],
+        "excluded_from_search": [
+          "bare numbers carrying no unit, currency or percent sign",
+          "everything in not_tracked"
+        ]
+      },
+      "quantities": {
+        "total": 4,
+        "in_model": 4,
+        "in_model_anchored": 0,
+        "in_model_unanchored": 4,
+        "prose_only": 0,
+        "absent": 0,
+        "truncated": false,
+        "items": [
+          {
+            "literal": "£59",
+            "kind": "money",
+            "char_offset": 72,
+            "verdict": "in_model",
+            "matched_node_id": null,
+            "stated_kind": "figure"
+          },
+          {
+            "literal": "£79",
+            "kind": "money",
+            "char_offset": 79,
+            "verdict": "in_model",
+            "matched_node_id": null,
+            "stated_kind": "figure"
+          },
+          {
+            "literal": "3%",
+            "kind": "percent",
+            "char_offset": 113,
+            "verdict": "in_model",
+            "matched_node_id": null,
+            "stated_kind": "figure"
+          },
+          {
+            "literal": "1,200 customers",
+            "kind": "count",
+            "char_offset": 133,
+            "verdict": "in_model",
+            "matched_node_id": null,
+            "stated_kind": "figure"
+          }
+        ]
+      },
+      "stated_kinds": {
+        "status": "derived",
+        "tally": {
+          "goal": 0,
+          "option": 0,
+          "constraint": 0,
+          "figure": 4,
+          "evidence": 0,
+          "assumption": 0,
+          "disagreement": 0,
+          "correction": 0
+        },
+        "sourced": [
+          "constraint",
+          "figure"
+        ],
+        "unsourced": [
+          "goal",
+          "option",
+          "evidence",
+          "assumption",
+          "disagreement",
+          "correction"
+        ],
+        "producers": {
+          "figure": "extractStatedQuantities (this module) — quantities stated in the brief",
+          "constraint": "graph.goal_constraints[] with source_quote (draft/anthropic-graph-schema.ts:447-467)"
+        }
+      },
+      "declared_exclusions": {
+        "status": "reported",
+        "items": [
+          "Support cost change — no support-load factor exists in the current structure so adding it would require new elements beyond the brief",
+          "Brand perception — no brand or NPS factor is present; adding one would go beyond the stated scope"
+        ]
+      },
+      "inferred_factors": {
+        "status": "derived",
+        "items": [
+          {
+            "node_id": "7b9a04f8",
+            "label": "Price-Driven Churn Uplift"
+          }
+        ]
+      },
+      "not_tracked": [
+        "competing_or_dissenting_proposals",
+        "corrections_and_second_thoughts",
+        "named_evidence_sources_and_their_pedigree",
+        "qualitative_constraints_and_rules",
+        "stated_confidence_and_self_flagged_weakness",
+        "statements_the_drafting_model_did_not_report_discarding"
+      ]
+    },
+    "analysis_state": {
+      "run_state": {
+        "kind": "complete_stale",
+        "computed_at": "2026-09-21T23:00:10.505Z",
+        "cause": "graph_changed"
+      },
+      "readiness": {
+        "status": "unknown",
+        "blockers": []
+      },
+      "leader_claim": {
+        "permitted": false,
+        "withheld_reason": "constraint_verdict_withheld"
+      },
+      "robustness": {},
+      "usable_for_prose": true,
+      "usable_for_chips": false,
+      "usable_for_followup": true,
+      "requires_rerun": true,
+      "blocked_unusable": false,
+      "contradictions": []
+    },
+    "analysis_result": null,
+    "request_id": "3fcaa388-4e4c-4f88-96ee-ecacd96b62fe"
+  },
+  "facts": [
+    {
+      "ghar": "a3d229c42b5b7026",
+      "ca": "2026-09-21T23:00:10.505Z",
+      "created_at": "2026-09-21T23:01:16.765Z"
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+import fs from 'node:fs';
+const o = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+console.log('PHASE ' + o.phase + '   at ' + o.at + '   prosrc_md5=' + o.function_under_test.prosrc_md5 + '  len=' + o.function_under_test.prosrc_len);
+for (const s of o.steps) console.log((s.ok ? 'OK    ' : 'RAISE ') + s.name + (s.ok ? ('   receipt_is_null=' + s.receipt_is_null) : ('   SQLSTATE=' + s.sqlstate + '  ' + s.message)));
+const c = o.controls;
+console.log('--- controls ---');
+console.log('state_before_replay      ' + JSON.stringify(c.state_before_replay));
+console.log('durability_after_replay  ' + JSON.stringify(c.durability_after_replay));
+console.log('counts_unchanged         ' + c.counts_unchanged);
+console.log('receipt_deep_equal_to_T1 ' + c.receipt_deep_equal_to_T1);
+console.log('turn_row_id_equal_to_T1  ' + c.turn_row_id_equal_to_T1);
+console.log('C1 raised_OLGC1          ' + c.C1.raised_OLGC1 + '   (' + (c.C1.detail.code || 'no raise') + ')');
+console.log('C2 raised_MV422          ' + c.C2.raised_MV422 + '   (' + (c.C2.detail.code || 'no raise') + ')');
+console.log('C3 guest                 write_committed=' + c.C3.write_committed + ' write_receipt_null=' + c.C3.write_receipt_null + ' replay_ok=' + c.C3.replay_ok + ' replay_receipt_null=' + c.C3.replay_receipt_null + ' guest_model_versions=' + c.C3.guest_model_versions_count);
+console.log('C5 first-write not_refused ' + c.C5.not_refused + '   (' + (c.C5.detail.code || 'accepted') + ')');

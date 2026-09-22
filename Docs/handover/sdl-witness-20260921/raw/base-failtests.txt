@@ -1,0 +1,17 @@
+src/orchestrator-v5/__tests__/short-confirm-route-level.test.ts > Short-confirm pre-route — route-level zero-LLM assertion > "yes" passes validation and dispatches the run_analysis handler (validator_outcome=valid)
+src/orchestrator-v5/__tests__/short-confirm-route-level.test.ts > Short-confirm pre-route — route-level zero-LLM assertion > Wave 5F-2 route-level lifecycle proof: "yes" → validate → execute → commit; PendingActionConsumed telemetry fires
+src/orchestrator-v5/__tests__/turn-executor-phase1.5.test.ts > TurnExecutor — Phase 1.5 graph threading > does NOT emit validate_skipped_no_graph when graphState is threaded
+src/orchestrator-v5/__tests__/turn-executor-run-delta-prior-facts.test.ts > finalizeRun → TurnExecutorRunResult.priorFacts (the run_delta basis) > RERUN → the basis CONTAINS the run this turn just completed, and that run is `pair.current`
+src/orchestrator-v5/__tests__/turn-executor-state-trust.test.ts > TurnExecutor — V5 state-trust freshness threading > routed run_analysis on a fresh turn → result.freshness reflects the JUST-PRODUCED fact, not context.prior_facts
+src/orchestrator-v5/coaching/__tests__/constraint-gap-disclosure-egress.test.ts > the forwarder honesty floor — a REJECTED summary still discloses > a rejected headline still ships the identity_unresolved disclosure
+src/orchestrator-v5/coaching/__tests__/scaffold-disclosure.test.ts > egress allowlist × scaffold disclosure > the extension opens NO hole: improvised prose with the suffix, the bare suffix, and doctored suffixes stay REJECTED
+src/orchestrator-v5/context/__tests__/decision-constraints-wire.route-level.test.ts > route-level — decision constraints reach the routing prompt > THE WIRE: a persisted goal_constraint arrives in the serialised pack, bound by id and exact source_quote
+src/orchestrator-v5/routing/__tests__/validation-registry-disclosure-salvage.test.ts > salvage fixtures are the real thing (precondition pins) > every fixture head is genuinely REJECTED, so the salvage path is the one under test
+src/orchestrator-v5/tools/handlers/__tests__/add-constraint-risk-forwarding.test.ts > A3.1 Task 5 — risk-node constraint reaches PLoT payload via run-analysis > snapshot.goal_constraints carries the risk-node constraint and plotClient.run receives it
+tests/unit/ai-task-lifecycle-authority.test.ts > AI task lifecycle authority > pins dedicated checked-in models to the actual source constants
+tests/unit/anthropic.draft-graph-params.test.ts > draftGraphWithAnthropic — request payload construction > sends output_config.format (GA) when flag is on and model is supported
+tests/unit/anthropic.draft-graph-params.test.ts > draftGraphWithAnthropic — request payload construction > sends temperature=0, an affordable max_tokens, and no output_config when flag is off
+tests/unit/anthropic.option-effect-trust-wiring.test.ts > the adapter threads the trust decision into the production keep logic > W1: passes optionEffectsUnreliable=TRUE when an option-effect source is provably invalid
+tests/unit/anthropic.thinking-first-blocks.test.ts > Anthropic adapter — thinking-first response handling (ROADMAP 1.55a) > draftGraphWithAnthropic parses a [thinking, text] response
+tests/unit/openai.clarify-timeout.test.ts > OpenAIAdapter clarifyBrief timeout handling > throws UpstreamTimeoutError when the clarify call is aborted
+tests/unit/prompts.defaults.test.ts > max_tokens default propagation > getMaxTokensFromConfig returns undefined when env var is not set

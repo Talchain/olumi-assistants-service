@@ -1,0 +1,14 @@
+[
+ {
+  "ts": "2026-09-18T00:21:38.577233992Z",
+  "msg": "{\"level\":50,\"time\":1789690898569,\"pid\":73,\"hostname\":\"srv-d4slpaili9vc73eiq4og-58585b76c9-dzrkc\",\"request_id\":\"30d55cea-c07c-4b74-a131-eb88fb49a409\",\"event_kind\":\"factor_value_edit\",\"scenario_id\":\"39a9a9c8-bc4a-4ef7-b7b2-b854c0d6c1aa\",\"target_id\":\"fac_data_team_capacity\",\"err\":{\"type\":\"Object\",\"message\":\"append_turn_atomic_v5 rejected a stale graph write for scenario 39a9a9c8-bc4a-4ef7-b7b2-b854c0d6c1aa; the turn and version both rolled back.\",\"stack\":\"\",\"name\":\"GraphStaleWriteError\"},\"msg\":\"V5 factor_value_edit \u2014 mutation commit failed\"}"
+ },
+ {
+  "ts": "2026-09-18T12:56:58.506269942Z",
+  "msg": "{\"level\":50,\"time\":1789736218496,\"pid\":70,\"hostname\":\"srv-d4slpaili9vc73eiq4og-555c7bf55d-9wl6s\",\"request_id\":\"809c203f-1dc3-465c-9c74-00cf42dc23c2\",\"event_kind\":\"factor_value_edit\",\"scenario_id\":\"3f14e465-6faf-49ae-b032-0450ab47ab5a\",\"target_id\":\"fac_gdpr_compliance\",\"err\":{\"type\":\"Object\",\"message\":\"append_turn_atomic_v5 rejected a stale graph write for scenario 3f14e465-6faf-49ae-b032-0450ab47ab5a; the turn and version both rolled back.\",\"stack\":\"\",\"name\":\"GraphStaleWriteError\"},\"msg\":\"V5 factor_value_edit \u2014 mutation commit failed\"}"
+ },
+ {
+  "ts": "2026-09-21T10:16:13.527689879Z",
+  "msg": "{\"level\":50,\"time\":1789985773518,\"pid\":72,\"hostname\":\"srv-d4slpaili9vc73eiq4og-7dd5587576-d5xqp\",\"request_id\":\"8e063184-5e4c-46bb-9be1-74dfdb5f596e\",\"event_kind\":\"factor_value_edit\",\"scenario_id\":\"171396f2-04f8-4906-85ad-06fd6032ce39\",\"target_id\":\"fac_eng_capacity\",\"err\":{\"type\":\"Object\",\"message\":\"append_turn_atomic_v5 rejected a stale graph write for scenario 171396f2-04f8-4906-85ad-06fd6032ce39; the turn and version both rolled back.\",\"stack\":\"\",\"name\":\"GraphStaleWriteError\"},\"msg\":\"V5 factor_value_edit \u2014 mutation commit failed\"}"
+ }
+]

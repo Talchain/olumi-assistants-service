@@ -1,0 +1,20 @@
+
+> olumi-assistants-service@1.12.0 eval:promotion-gate /private/tmp/claude-502/-Users-paulslee-Documents-GitHub/b9b90b64-25c1-4a6a-b2e8-866693c995f7/scratchpad/lane-a
+> tsx tools/orchestrator-eval/src/promotion-gate/cli.ts
+
+# Eval-pass promotion gate
+
+**PASS** — no un-grandfathered block, no baseline drift.
+
+| task | v | promoted hash | decision | why |
+|---|---|---|---|---|
+| routing | 121 | `bec840a648800928` | ◻️  UNGATED | no eval pack for "routing" — promotes as today, UNGATED (add a promotion-pack.ts marker to bring it under the gate) |
+| draft_graph | 195 | `152998b447819c2e` | ◻️  UNGATED | no eval pack for "draft_graph" — promotes as today, UNGATED (add a promotion-pack.ts marker to bring it under the gate) |
+| edit_graph | 11 | `40b79180ad739011` | ◻️  UNGATED | no eval pack for "edit_graph" — promotes as today, UNGATED (add a promotion-pack.ts marker to bring it under the gate) |
+| decision_review | 16 | `817014c134b96cd3` | ✅ GATED-PASS | hash-matched (817014c134b96cd3), 12d old, clears the floor: 15 required dimension(s) measured and clear, n=21 |
+| repair_graph | 6 | `ed4ead640907dc9c` | ◻️  UNGATED | no eval pack for "repair_graph" — promotes as today, UNGATED (add a promotion-pack.ts marker to bring it under the gate) |
+| repair_edit_graph | 2 | `d641bd276c5f80a8` | ◻️  UNGATED | no eval pack for "repair_edit_graph" — promotes as today, UNGATED (add a promotion-pack.ts marker to bring it under the gate) |
+
+_1 gated-pass · 0 grandfathered (pre-gate, locked to hash) · 5 ungated (no pack, visible) · 0 BLOCKED._
+
+_Grandfathered rows are pre-gate promotions with no passing eval, tolerated ONLY at the exact hash shown; any bump requires a passing eval. Ungated rows have no pack yet — they fall under the gate automatically when a pack marker lands. This gate reads the GIT source-of-truth; a live-only admin promotion that never updates the committed manifest is not visible here (runtime seam, sequenced separately)._

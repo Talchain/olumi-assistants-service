@@ -1,0 +1,14 @@
+
+> olumi-assistants-service@1.12.0 lint /private/tmp/claude-502/-Users-paulslee-Documents-GitHub/b9b90b64-25c1-4a6a-b2e8-866693c995f7/scratchpad/lane-a
+> eslint .
+
+
+/private/tmp/claude-502/-Users-paulslee-Documents-GitHub/b9b90b64-25c1-4a6a-b2e8-866693c995f7/scratchpad/lane-a/src/cee/provenance/__tests__/fixtures/trace-captures.ts
+  25:1  warning  Unused eslint-disable directive (no problems were reported)
+
+/private/tmp/claude-502/-Users-paulslee-Documents-GitHub/b9b90b64-25c1-4a6a-b2e8-866693c995f7/scratchpad/lane-a/src/orchestrator-v5/tools/handlers/analysable-option-gate.ts
+  520:5  warning  Unused eslint-disable directive (no problems were reported from 'no-console')
+
+✖ 2 problems (0 errors, 2 warnings)
+  0 errors and 2 warnings potentially fixable with the `--fix` option.
+

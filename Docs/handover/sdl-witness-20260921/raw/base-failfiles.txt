@@ -1,0 +1,15 @@
+ FAIL  src/orchestrator-v5/__tests__/short-confirm-route-level.test.ts
+ FAIL  src/orchestrator-v5/__tests__/turn-executor-phase1.5.test.ts
+ FAIL  src/orchestrator-v5/__tests__/turn-executor-run-delta-prior-facts.test.ts
+ FAIL  src/orchestrator-v5/__tests__/turn-executor-state-trust.test.ts
+ FAIL  src/orchestrator-v5/coaching/__tests__/constraint-gap-disclosure-egress.test.ts
+ FAIL  src/orchestrator-v5/coaching/__tests__/scaffold-disclosure.test.ts
+ FAIL  src/orchestrator-v5/context/__tests__/decision-constraints-wire.route-level.test.ts
+ FAIL  src/orchestrator-v5/routing/__tests__/validation-registry-disclosure-salvage.test.ts
+ FAIL  src/orchestrator-v5/tools/handlers/__tests__/add-constraint-risk-forwarding.test.ts
+ FAIL  tests/unit/ai-task-lifecycle-authority.test.ts
+ FAIL  tests/unit/anthropic.draft-graph-params.test.ts
+ FAIL  tests/unit/anthropic.option-effect-trust-wiring.test.ts
+ FAIL  tests/unit/anthropic.thinking-first-blocks.test.ts
+ FAIL  tests/unit/openai.clarify-timeout.test.ts
+ FAIL  tests/unit/prompts.defaults.test.ts

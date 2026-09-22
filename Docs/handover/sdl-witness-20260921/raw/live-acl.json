@@ -1,0 +1,64 @@
+{
+  "at": "2026-09-21T23:11:19.355Z",
+  "procs": [
+    {
+      "proname": "append_turn_atomic_v4",
+      "pronargs": 19,
+      "acl": "{postgres=X/postgres,service_role=X/postgres}",
+      "prosecdef": true,
+      "md5": "db7bdbe3e2052237c623d8c5477a96e5"
+    },
+    {
+      "proname": "append_turn_atomic_v5",
+      "pronargs": 30,
+      "acl": "{postgres=X/postgres,service_role=X/postgres}",
+      "prosecdef": true,
+      "md5": "829c3deb90594099397d64d747f4854e"
+    },
+    {
+      "proname": "create_model_version",
+      "pronargs": 11,
+      "acl": "{postgres=X/postgres,service_role=X/postgres}",
+      "prosecdef": true,
+      "md5": "a282a1b86186e814a3add01b3ede2662"
+    },
+    {
+      "proname": "restore_model_version",
+      "pronargs": 5,
+      "acl": "{postgres=X/postgres,service_role=X/postgres}",
+      "prosecdef": true,
+      "md5": "35614e797d2f712fa797b7ac9dc51218"
+    }
+  ],
+  "ledger": {
+    "new_ones": 0,
+    "c8_present": 1,
+    "max_version": "20260918014756"
+  },
+  "ledger_columns": [
+    {
+      "column_name": "version",
+      "data_type": "text"
+    },
+    {
+      "column_name": "statements",
+      "data_type": "ARRAY"
+    },
+    {
+      "column_name": "name",
+      "data_type": "text"
+    },
+    {
+      "column_name": "created_by",
+      "data_type": "text"
+    },
+    {
+      "column_name": "idempotency_key",
+      "data_type": "text"
+    },
+    {
+      "column_name": "rollback",
+      "data_type": "ARRAY"
+    }
+  ]
+}

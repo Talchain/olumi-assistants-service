@@ -1,0 +1,287 @@
+{
+  "phase": "C4-MUTANT-guard-removed",
+  "at": "2026-09-21T22:51:04.887Z",
+  "steps": [
+    {
+      "name": "OWNED T0 first write (expected NULL, incoming H0)",
+      "ok": true,
+      "turn_row_id": "d0dc18b4-fb66-453e-be9e-4fa1b1105d24",
+      "receipt_is_null": false,
+      "receipt": {
+        "graph": {
+          "edges": [],
+          "nodes": [
+            {
+              "id": "n0"
+            }
+          ]
+        },
+        "event_id": "model_version_created_mutation_de3ca9e3-dbee-46a9-84ca-a1b0bd38be22",
+        "actor_kind": "system",
+        "version_id": "63e20d58-37c8-4664-95e1-da1ba3136d5f",
+        "authored_by": null,
+        "mutation_id": "de3ca9e3-dbee-46a9-84ca-a1b0bd38be22",
+        "creation_kind": "initial",
+        "hash_algorithm": "sha256",
+        "source_turn_id": "T0",
+        "version_number": 1,
+        "root_version_id": "63e20d58-37c8-4664-95e1-da1ba3136d5f",
+        "undo_version_id": null,
+        "parent_version_id": null,
+        "source_version_id": null,
+        "graph_identity_hash": "df829492c5a91985f8a2a2ebba572e398d6e055a206f835f6dd6e4b5847d92b7",
+        "graph_schema_version": "g1",
+        "analysis_affecting_hash": "46a3a25527f3c4a14177a5ff17544fce36ff8c96233f55d0f7f6d587eba58183",
+        "identity_normaliser_version": "n1",
+        "identity_projection_version": "p1"
+      }
+    },
+    {
+      "name": "OWNED T1 (expected H0, incoming H1) — the turn we will replay",
+      "ok": true,
+      "turn_row_id": "877082b3-18f1-4741-82e4-5891dca4b3c0",
+      "receipt_is_null": false,
+      "receipt": {
+        "graph": {
+          "edges": [],
+          "nodes": [
+            {
+              "id": "n1"
+            }
+          ]
+        },
+        "event_id": "model_version_created_mutation_93204568-8b44-4c94-9d4d-5a312d4e019d",
+        "actor_kind": "system",
+        "version_id": "6892bcad-8bbf-4954-8963-4df3be9838e6",
+        "authored_by": null,
+        "mutation_id": "93204568-8b44-4c94-9d4d-5a312d4e019d",
+        "creation_kind": "committed_mutation",
+        "hash_algorithm": "sha256",
+        "source_turn_id": "T1",
+        "version_number": 2,
+        "root_version_id": "63e20d58-37c8-4664-95e1-da1ba3136d5f",
+        "undo_version_id": "63e20d58-37c8-4664-95e1-da1ba3136d5f",
+        "parent_version_id": "63e20d58-37c8-4664-95e1-da1ba3136d5f",
+        "source_version_id": null,
+        "graph_identity_hash": "93928551981d5d20f6ff0bc439b40d69c59913d79f0ef4e9b1e1d84d94d37fb6",
+        "graph_schema_version": "g1",
+        "analysis_affecting_hash": "178d4a665e9936bbc03c7f6e3fb57dccf4ada577cff0afd8b5005c4d8dad175a",
+        "identity_normaliser_version": "n1",
+        "identity_projection_version": "p1"
+      }
+    },
+    {
+      "name": "OWNED T2 (expected H1, incoming H2) — head moves on",
+      "ok": true,
+      "turn_row_id": "510dad16-fdde-48b2-ad3a-c5582a03a456",
+      "receipt_is_null": false,
+      "receipt": {
+        "graph": {
+          "edges": [],
+          "nodes": [
+            {
+              "id": "n2"
+            }
+          ]
+        },
+        "event_id": "model_version_created_mutation_e6c0fdfc-6c4d-48d1-8494-c42ed01c414a",
+        "actor_kind": "system",
+        "version_id": "75e16012-3c0b-452a-9455-5c86bf75d1ed",
+        "authored_by": null,
+        "mutation_id": "e6c0fdfc-6c4d-48d1-8494-c42ed01c414a",
+        "creation_kind": "committed_mutation",
+        "hash_algorithm": "sha256",
+        "source_turn_id": "T2",
+        "version_number": 3,
+        "root_version_id": "63e20d58-37c8-4664-95e1-da1ba3136d5f",
+        "undo_version_id": "6892bcad-8bbf-4954-8963-4df3be9838e6",
+        "parent_version_id": "6892bcad-8bbf-4954-8963-4df3be9838e6",
+        "source_version_id": null,
+        "graph_identity_hash": "351b39cf67ea10366f88107783296e15d67bfa41901dc79ee37509d61fa056b8",
+        "graph_schema_version": "g1",
+        "analysis_affecting_hash": "dbe1c223a65ea16aa6cf16eb089d97b2ac8f75e905c99a054d4023193a29cc27",
+        "identity_normaliser_version": "n1",
+        "identity_projection_version": "p1"
+      }
+    },
+    {
+      "name": "REPLAY of T1 — byte-identical args to T1 (expected H0, incoming H1, current H2)",
+      "ok": false,
+      "sqlstate": "OLGC1",
+      "message": "append_turn_atomic_v5: stale graph write for scenario 9e7818b6-987d-4853-a5b5-a36f7ba466bf (expected df829492c5a91985f8a2a2ebba572e398d6e055a206f835f6dd6e4b5847d92b7, current 351b39cf67ea10366f88107783296e15d67bfa41901dc79ee37509d61fa056b8)"
+    },
+    {
+      "name": "C1 STALE NEW turn T3 (fresh turn_id, expected H0, current H2)",
+      "ok": false,
+      "sqlstate": "OLGC1",
+      "message": "append_turn_atomic_v5: stale graph write for scenario 9e7818b6-987d-4853-a5b5-a36f7ba466bf (expected df829492c5a91985f8a2a2ebba572e398d6e055a206f835f6dd6e4b5847d92b7, current 351b39cf67ea10366f88107783296e15d67bfa41901dc79ee37509d61fa056b8)"
+    },
+    {
+      "name": "C2 REPLAY of T1 with a DIFFERENT mutation id",
+      "ok": false,
+      "sqlstate": "OLGC1",
+      "message": "append_turn_atomic_v5: stale graph write for scenario 9e7818b6-987d-4853-a5b5-a36f7ba466bf (expected df829492c5a91985f8a2a2ebba572e398d6e055a206f835f6dd6e4b5847d92b7, current 351b39cf67ea10366f88107783296e15d67bfa41901dc79ee37509d61fa056b8)"
+    },
+    {
+      "name": "C3 GUEST GT0 first write",
+      "ok": true,
+      "turn_row_id": "29f495f2-5288-4af4-be72-064ca0a048cb",
+      "receipt_is_null": true,
+      "receipt": null
+    },
+    {
+      "name": "C3 GUEST GT1 (the turn we replay)",
+      "ok": true,
+      "turn_row_id": "117d0843-8fdc-4ae0-b7db-fceb5f0e79cb",
+      "receipt_is_null": true,
+      "receipt": null
+    },
+    {
+      "name": "C3 GUEST GT2 — head moves on",
+      "ok": true,
+      "turn_row_id": "5a8b9939-2ad8-4f84-bdac-4aca37ab8bb0",
+      "receipt_is_null": true,
+      "receipt": null
+    },
+    {
+      "name": "C3 GUEST REPLAY of GT1",
+      "ok": false,
+      "sqlstate": "OLGC1",
+      "message": "append_turn_atomic_v5: stale graph write for scenario 9f76a70c-9117-4030-85f6-3cf5203c29f8 (expected b5af4b28251d5905ad5aeaf2fff5be05dbcede5ec0c870af85a5ab855a202edc, current 3742a2598e669a88d05a4648074673cb4cc7bb5d52a3debea59ab8a971e40a7b)"
+    },
+    {
+      "name": "C5 FIRST-WRITE exemption: current hash NULL, expected NON-NULL, base_known",
+      "ok": true,
+      "turn_row_id": "dcbdb899-70ae-4f85-8e57-c143a06c851b",
+      "receipt_is_null": false,
+      "receipt": {
+        "graph": {
+          "edges": [],
+          "nodes": []
+        },
+        "event_id": "model_version_created_mutation_98490ea5-d443-429f-9277-d4ae1734c1da",
+        "actor_kind": "system",
+        "version_id": "5ef15d00-3b40-4bfc-8859-2e187bfd0826",
+        "authored_by": null,
+        "mutation_id": "98490ea5-d443-429f-9277-d4ae1734c1da",
+        "creation_kind": "initial",
+        "hash_algorithm": "sha256",
+        "source_turn_id": "FT1",
+        "version_number": 1,
+        "root_version_id": "5ef15d00-3b40-4bfc-8859-2e187bfd0826",
+        "undo_version_id": null,
+        "parent_version_id": null,
+        "source_version_id": null,
+        "graph_identity_hash": "cd409f4f9b9ab1f9c40e655ccf0704a1f9da5c32cdf4f9acf605bce55510389e",
+        "graph_schema_version": "g1",
+        "analysis_affecting_hash": "bb85088c00ffe897685581b0f4c7d773ac63764cdf0e6302e46c850784cf9c48",
+        "identity_normaliser_version": "n1",
+        "identity_projection_version": "p1"
+      }
+    }
+  ],
+  "controls": {
+    "state_before_replay": {
+      "mv": 3,
+      "ct": 3,
+      "hash": "351b39cf67ea10366f88107783296e15d67bfa41901dc79ee37509d61fa056b8"
+    },
+    "hashes": {
+      "H0": "df829492c5a91985f8a2a2ebba572e398d6e055a206f835f6dd6e4b5847d92b7",
+      "H1": "93928551981d5d20f6ff0bc439b40d69c59913d79f0ef4e9b1e1d84d94d37fb6",
+      "H2": "351b39cf67ea10366f88107783296e15d67bfa41901dc79ee37509d61fa056b8"
+    },
+    "durability_after_replay": {
+      "turn_t1": 1,
+      "version_m1": 1,
+      "mv_total": 3,
+      "ct_total": 3
+    },
+    "counts_unchanged": true,
+    "C1": {
+      "raised_OLGC1": true,
+      "detail": {
+        "ok": false,
+        "code": "OLGC1",
+        "message": "append_turn_atomic_v5: stale graph write for scenario 9e7818b6-987d-4853-a5b5-a36f7ba466bf (expected df829492c5a91985f8a2a2ebba572e398d6e055a206f835f6dd6e4b5847d92b7, current 351b39cf67ea10366f88107783296e15d67bfa41901dc79ee37509d61fa056b8)"
+      }
+    },
+    "C2": {
+      "raised_MV422": false,
+      "detail": {
+        "ok": false,
+        "code": "OLGC1",
+        "message": "append_turn_atomic_v5: stale graph write for scenario 9e7818b6-987d-4853-a5b5-a36f7ba466bf (expected df829492c5a91985f8a2a2ebba572e398d6e055a206f835f6dd6e4b5847d92b7, current 351b39cf67ea10366f88107783296e15d67bfa41901dc79ee37509d61fa056b8)"
+      }
+    },
+    "C3": {
+      "write_committed": true,
+      "write_receipt_null": true,
+      "replay_ok": false,
+      "replay_receipt_null": null,
+      "guest_model_versions_count": 0,
+      "detail": {
+        "g1": {
+          "ok": true,
+          "value": {
+            "turn_row_id": "117d0843-8fdc-4ae0-b7db-fceb5f0e79cb",
+            "model_version_receipt": null
+          }
+        },
+        "greplay": {
+          "ok": false,
+          "code": "OLGC1",
+          "message": "append_turn_atomic_v5: stale graph write for scenario 9f76a70c-9117-4030-85f6-3cf5203c29f8 (expected b5af4b28251d5905ad5aeaf2fff5be05dbcede5ec0c870af85a5ab855a202edc, current 3742a2598e669a88d05a4648074673cb4cc7bb5d52a3debea59ab8a971e40a7b)"
+        }
+      }
+    },
+    "C5": {
+      "not_refused": true,
+      "detail": {
+        "ok": true,
+        "value": {
+          "turn_row_id": "dcbdb899-70ae-4f85-8e57-c143a06c851b",
+          "model_version_receipt": {
+            "graph": {
+              "edges": [],
+              "nodes": []
+            },
+            "event_id": "model_version_created_mutation_98490ea5-d443-429f-9277-d4ae1734c1da",
+            "actor_kind": "system",
+            "version_id": "5ef15d00-3b40-4bfc-8859-2e187bfd0826",
+            "authored_by": null,
+            "mutation_id": "98490ea5-d443-429f-9277-d4ae1734c1da",
+            "creation_kind": "initial",
+            "hash_algorithm": "sha256",
+            "source_turn_id": "FT1",
+            "version_number": 1,
+            "root_version_id": "5ef15d00-3b40-4bfc-8859-2e187bfd0826",
+            "undo_version_id": null,
+            "parent_version_id": null,
+            "source_version_id": null,
+            "graph_identity_hash": "cd409f4f9b9ab1f9c40e655ccf0704a1f9da5c32cdf4f9acf605bce55510389e",
+            "graph_schema_version": "g1",
+            "analysis_affecting_hash": "bb85088c00ffe897685581b0f4c7d773ac63764cdf0e6302e46c850784cf9c48",
+            "identity_normaliser_version": "n1",
+            "identity_projection_version": "p1"
+          }
+        }
+      }
+    }
+  },
+  "function_under_test": {
+    "prosrc_md5": "5346f5e7f92b2202ade713035f53e65c",
+    "prosrc_len": 17329
+  },
+  "fixture": {
+    "owned_scenario": "9e7818b6-987d-4853-a5b5-a36f7ba466bf",
+    "guest_scenario": "9f76a70c-9117-4030-85f6-3cf5203c29f8",
+    "firstwrite_scenario": "d548b823-e90f-459b-b641-17a2726930c8",
+    "owner_user_id": "728154eb-9844-43b3-af54-4b38554425e0"
+  },
+  "replay": {
+    "ok": false,
+    "code": "OLGC1",
+    "message": "append_turn_atomic_v5: stale graph write for scenario 9e7818b6-987d-4853-a5b5-a36f7ba466bf (expected df829492c5a91985f8a2a2ebba572e398d6e055a206f835f6dd6e4b5847d92b7, current 351b39cf67ea10366f88107783296e15d67bfa41901dc79ee37509d61fa056b8)"
+  }
+}

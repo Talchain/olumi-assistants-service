@@ -1,0 +1,17 @@
+src/orchestrator-v5/__tests__/q1-outgoing-influence-misclassification.integration.test.ts > the witnessed Q1 is a misclassified predicate, not an unbound subject > refuses the witnessed shorthand because the CURRENT-MESSAGE PROSE identity is the one that disagrees
+src/orchestrator-v5/__tests__/turn-executor-defaulted-value-disclosure.test.ts > turn-executor finaliser — defaulted-value disclosure guard (WIRING) > appends the disclosure exactly once to the text the wire carries
+src/orchestrator-v5/coaching/__tests__/constraint-gap-disclosure-egress.test.ts > the forwarder honesty floor — a REJECTED summary still discloses > a rejected headline still ships the identity_unresolved disclosure
+src/orchestrator-v5/coaching/__tests__/constraint-gap-disclosure-egress.test.ts > the forwarder honesty floor — a REJECTED summary still discloses > a rejected headline still ships the unevaluated disclosure, not the bare fallback
+src/orchestrator-v5/coaching/__tests__/scaffold-disclosure.test.ts > egress allowlist × scaffold disclosure > the extension opens NO hole: improvised prose with the suffix, the bare suffix, and doctored suffixes stay REJECTED
+src/orchestrator-v5/tools/handlers/__tests__/add-constraint-refusal-cause-is-resolvable.test.ts > add_constraint refusal — the code reaches the run result > a handler-path refusal populates handlerRefusal; a SUCCESS leaves it absent
+tests/integration/auth.comprehensive.test.ts > Key Rotation Scenarios > accepts both old and new keys during rotation window
+tests/integration/orchestrate-v2-a1.test.ts > POST /orchestrate/v2/turn — slice A1 fixtures > budget-exceeded fixture: BUDGET_EXCEEDED wins over any inner timeout
+tests/integration/orchestrate-v2-a1.test.ts > POST /orchestrate/v2/turn — slice A1 fixtures > happy path: fixture emits a valid OlumiResponse + exactly-one completed event
+tests/unit/cee.request-budget.test.ts > Request budget configuration > validateTimeoutRelationships checks budget vs route timeout
+tests/unit/clarify-v2.dispatch.test.ts > clarify v2 dispatch — #497 mechanical-fix behavioural pins > A6: pendings-read failure → not claimed (null), NOTHING committed, live holds untouched
+tests/unit/clarify-v2.draft-first.test.ts > tryClarifyV2Turn — round 1 returns a draft outcome with the deferred ask, at EVERY gap count > single-gap brief → {kind:"draft"} with briefOverride and a disclosed deferredAsk; NOTHING committed
+tests/unit/clarify-v2.draft-first.test.ts > tryClarifyV2Turn — round 1 returns a draft outcome with the deferred ask, at EVERY gap count > two-gap brief → {kind:"draft"} with BOTH dimensions deferred; NOTHING committed (the old blocking ask is gone)
+tests/unit/clarify-v2.post-stop.test.ts > 2.171 — post-Stop fold disclosure (RED-first pin + control) > post-Stop + new brief + same scenario: the fold reply DISCLOSES the original topic and offers "start over"
+tests/unit/draft-token-affordability.test.ts > resolveDraftMaxTokens — effective max_tokens can NEVER exceed the affordable budget > unconfigured → effective equals the affordable budget derived from the timeout
+tests/unit/prompt-estate-drift.test.ts > prompt estate — the code-constant half is visible and real > every declared code constant loads to a non-empty string
+tests/unit/prompts.defaults.test.ts > max_tokens default propagation > getMaxTokensFromConfig returns undefined when env var is not set

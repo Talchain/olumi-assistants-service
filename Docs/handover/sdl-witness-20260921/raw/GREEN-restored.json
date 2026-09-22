@@ -1,0 +1,349 @@
+{
+  "phase": "GREEN-restored",
+  "at": "2026-09-21T22:51:14.354Z",
+  "steps": [
+    {
+      "name": "OWNED T0 first write (expected NULL, incoming H0)",
+      "ok": true,
+      "turn_row_id": "1b8ca864-4b4b-4802-b740-3f26f2f5a197",
+      "receipt_is_null": false,
+      "receipt": {
+        "graph": {
+          "edges": [],
+          "nodes": [
+            {
+              "id": "n0"
+            }
+          ]
+        },
+        "event_id": "model_version_created_mutation_e5c7fb36-db6f-49ff-8813-5704f64ec5f5",
+        "actor_kind": "system",
+        "version_id": "7b4d59eb-c57e-4641-b901-c0b6fb163c14",
+        "authored_by": null,
+        "mutation_id": "e5c7fb36-db6f-49ff-8813-5704f64ec5f5",
+        "creation_kind": "initial",
+        "hash_algorithm": "sha256",
+        "source_turn_id": "T0",
+        "version_number": 1,
+        "root_version_id": "7b4d59eb-c57e-4641-b901-c0b6fb163c14",
+        "undo_version_id": null,
+        "parent_version_id": null,
+        "source_version_id": null,
+        "graph_identity_hash": "df829492c5a91985f8a2a2ebba572e398d6e055a206f835f6dd6e4b5847d92b7",
+        "graph_schema_version": "g1",
+        "analysis_affecting_hash": "46a3a25527f3c4a14177a5ff17544fce36ff8c96233f55d0f7f6d587eba58183",
+        "identity_normaliser_version": "n1",
+        "identity_projection_version": "p1"
+      }
+    },
+    {
+      "name": "OWNED T1 (expected H0, incoming H1) — the turn we will replay",
+      "ok": true,
+      "turn_row_id": "a1615c58-b433-4c61-8481-df733aafa00e",
+      "receipt_is_null": false,
+      "receipt": {
+        "graph": {
+          "edges": [],
+          "nodes": [
+            {
+              "id": "n1"
+            }
+          ]
+        },
+        "event_id": "model_version_created_mutation_22a45fbc-68ad-41ec-9727-0fab90a94a04",
+        "actor_kind": "system",
+        "version_id": "79258fd1-7895-4652-be11-7d8f5a4977cf",
+        "authored_by": null,
+        "mutation_id": "22a45fbc-68ad-41ec-9727-0fab90a94a04",
+        "creation_kind": "committed_mutation",
+        "hash_algorithm": "sha256",
+        "source_turn_id": "T1",
+        "version_number": 2,
+        "root_version_id": "7b4d59eb-c57e-4641-b901-c0b6fb163c14",
+        "undo_version_id": "7b4d59eb-c57e-4641-b901-c0b6fb163c14",
+        "parent_version_id": "7b4d59eb-c57e-4641-b901-c0b6fb163c14",
+        "source_version_id": null,
+        "graph_identity_hash": "93928551981d5d20f6ff0bc439b40d69c59913d79f0ef4e9b1e1d84d94d37fb6",
+        "graph_schema_version": "g1",
+        "analysis_affecting_hash": "178d4a665e9936bbc03c7f6e3fb57dccf4ada577cff0afd8b5005c4d8dad175a",
+        "identity_normaliser_version": "n1",
+        "identity_projection_version": "p1"
+      }
+    },
+    {
+      "name": "OWNED T2 (expected H1, incoming H2) — head moves on",
+      "ok": true,
+      "turn_row_id": "83cd353a-2305-4e71-ae49-65533d7adb73",
+      "receipt_is_null": false,
+      "receipt": {
+        "graph": {
+          "edges": [],
+          "nodes": [
+            {
+              "id": "n2"
+            }
+          ]
+        },
+        "event_id": "model_version_created_mutation_e8c833ec-d162-4654-b9d1-f6625f8bf711",
+        "actor_kind": "system",
+        "version_id": "8a1e0f82-45fe-443e-8f44-d7354e04050e",
+        "authored_by": null,
+        "mutation_id": "e8c833ec-d162-4654-b9d1-f6625f8bf711",
+        "creation_kind": "committed_mutation",
+        "hash_algorithm": "sha256",
+        "source_turn_id": "T2",
+        "version_number": 3,
+        "root_version_id": "7b4d59eb-c57e-4641-b901-c0b6fb163c14",
+        "undo_version_id": "79258fd1-7895-4652-be11-7d8f5a4977cf",
+        "parent_version_id": "79258fd1-7895-4652-be11-7d8f5a4977cf",
+        "source_version_id": null,
+        "graph_identity_hash": "351b39cf67ea10366f88107783296e15d67bfa41901dc79ee37509d61fa056b8",
+        "graph_schema_version": "g1",
+        "analysis_affecting_hash": "dbe1c223a65ea16aa6cf16eb089d97b2ac8f75e905c99a054d4023193a29cc27",
+        "identity_normaliser_version": "n1",
+        "identity_projection_version": "p1"
+      }
+    },
+    {
+      "name": "REPLAY of T1 — byte-identical args to T1 (expected H0, incoming H1, current H2)",
+      "ok": true,
+      "turn_row_id": "a1615c58-b433-4c61-8481-df733aafa00e",
+      "receipt_is_null": false,
+      "receipt": {
+        "graph": {
+          "edges": [],
+          "nodes": [
+            {
+              "id": "n1"
+            }
+          ]
+        },
+        "event_id": "model_version_created_mutation_22a45fbc-68ad-41ec-9727-0fab90a94a04",
+        "actor_kind": "system",
+        "version_id": "79258fd1-7895-4652-be11-7d8f5a4977cf",
+        "authored_by": null,
+        "mutation_id": "22a45fbc-68ad-41ec-9727-0fab90a94a04",
+        "creation_kind": "committed_mutation",
+        "hash_algorithm": "sha256",
+        "source_turn_id": "T1",
+        "version_number": 2,
+        "root_version_id": "7b4d59eb-c57e-4641-b901-c0b6fb163c14",
+        "undo_version_id": "7b4d59eb-c57e-4641-b901-c0b6fb163c14",
+        "parent_version_id": "7b4d59eb-c57e-4641-b901-c0b6fb163c14",
+        "source_version_id": null,
+        "graph_identity_hash": "93928551981d5d20f6ff0bc439b40d69c59913d79f0ef4e9b1e1d84d94d37fb6",
+        "graph_schema_version": "g1",
+        "analysis_affecting_hash": "178d4a665e9936bbc03c7f6e3fb57dccf4ada577cff0afd8b5005c4d8dad175a",
+        "identity_normaliser_version": "n1",
+        "identity_projection_version": "p1"
+      }
+    },
+    {
+      "name": "C1 STALE NEW turn T3 (fresh turn_id, expected H0, current H2)",
+      "ok": false,
+      "sqlstate": "OLGC1",
+      "message": "append_turn_atomic_v5: stale graph write for scenario a500342c-bc8e-4f6e-91d7-1c94649d1d15 (expected df829492c5a91985f8a2a2ebba572e398d6e055a206f835f6dd6e4b5847d92b7, current 351b39cf67ea10366f88107783296e15d67bfa41901dc79ee37509d61fa056b8)"
+    },
+    {
+      "name": "C2 REPLAY of T1 with a DIFFERENT mutation id",
+      "ok": false,
+      "sqlstate": "MV422",
+      "message": "append_turn_atomic_v5: turn replay reused with another mutation id"
+    },
+    {
+      "name": "C3 GUEST GT0 first write",
+      "ok": true,
+      "turn_row_id": "a2d09925-372c-4feb-b533-7082c89f3c56",
+      "receipt_is_null": true,
+      "receipt": null
+    },
+    {
+      "name": "C3 GUEST GT1 (the turn we replay)",
+      "ok": true,
+      "turn_row_id": "87a140cf-9dbd-49ae-ac9d-872851639c5b",
+      "receipt_is_null": true,
+      "receipt": null
+    },
+    {
+      "name": "C3 GUEST GT2 — head moves on",
+      "ok": true,
+      "turn_row_id": "1e59978d-1e32-40d9-8047-122424631fc5",
+      "receipt_is_null": true,
+      "receipt": null
+    },
+    {
+      "name": "C3 GUEST REPLAY of GT1",
+      "ok": true,
+      "turn_row_id": "87a140cf-9dbd-49ae-ac9d-872851639c5b",
+      "receipt_is_null": true,
+      "receipt": null
+    },
+    {
+      "name": "C5 FIRST-WRITE exemption: current hash NULL, expected NON-NULL, base_known",
+      "ok": true,
+      "turn_row_id": "9c476c60-73fa-4c80-886d-857f22942909",
+      "receipt_is_null": false,
+      "receipt": {
+        "graph": {
+          "edges": [],
+          "nodes": []
+        },
+        "event_id": "model_version_created_mutation_dccaaa22-0e05-4e17-8cd0-f1d15d7f55a3",
+        "actor_kind": "system",
+        "version_id": "bc64164f-03c2-4ee3-861f-8c34788bbda3",
+        "authored_by": null,
+        "mutation_id": "dccaaa22-0e05-4e17-8cd0-f1d15d7f55a3",
+        "creation_kind": "initial",
+        "hash_algorithm": "sha256",
+        "source_turn_id": "FT1",
+        "version_number": 1,
+        "root_version_id": "bc64164f-03c2-4ee3-861f-8c34788bbda3",
+        "undo_version_id": null,
+        "parent_version_id": null,
+        "source_version_id": null,
+        "graph_identity_hash": "cd409f4f9b9ab1f9c40e655ccf0704a1f9da5c32cdf4f9acf605bce55510389e",
+        "graph_schema_version": "g1",
+        "analysis_affecting_hash": "bb85088c00ffe897685581b0f4c7d773ac63764cdf0e6302e46c850784cf9c48",
+        "identity_normaliser_version": "n1",
+        "identity_projection_version": "p1"
+      }
+    }
+  ],
+  "controls": {
+    "state_before_replay": {
+      "mv": 3,
+      "ct": 3,
+      "hash": "351b39cf67ea10366f88107783296e15d67bfa41901dc79ee37509d61fa056b8"
+    },
+    "hashes": {
+      "H0": "df829492c5a91985f8a2a2ebba572e398d6e055a206f835f6dd6e4b5847d92b7",
+      "H1": "93928551981d5d20f6ff0bc439b40d69c59913d79f0ef4e9b1e1d84d94d37fb6",
+      "H2": "351b39cf67ea10366f88107783296e15d67bfa41901dc79ee37509d61fa056b8"
+    },
+    "durability_after_replay": {
+      "turn_t1": 1,
+      "version_m1": 1,
+      "mv_total": 3,
+      "ct_total": 3
+    },
+    "counts_unchanged": true,
+    "receipt_deep_equal_to_T1": true,
+    "turn_row_id_equal_to_T1": true,
+    "C1": {
+      "raised_OLGC1": true,
+      "detail": {
+        "ok": false,
+        "code": "OLGC1",
+        "message": "append_turn_atomic_v5: stale graph write for scenario a500342c-bc8e-4f6e-91d7-1c94649d1d15 (expected df829492c5a91985f8a2a2ebba572e398d6e055a206f835f6dd6e4b5847d92b7, current 351b39cf67ea10366f88107783296e15d67bfa41901dc79ee37509d61fa056b8)"
+      }
+    },
+    "C2": {
+      "raised_MV422": true,
+      "detail": {
+        "ok": false,
+        "code": "MV422",
+        "message": "append_turn_atomic_v5: turn replay reused with another mutation id"
+      }
+    },
+    "C3": {
+      "write_committed": true,
+      "write_receipt_null": true,
+      "replay_ok": true,
+      "replay_receipt_null": true,
+      "guest_model_versions_count": 0,
+      "detail": {
+        "g1": {
+          "ok": true,
+          "value": {
+            "turn_row_id": "87a140cf-9dbd-49ae-ac9d-872851639c5b",
+            "model_version_receipt": null
+          }
+        },
+        "greplay": {
+          "ok": true,
+          "value": {
+            "turn_row_id": "87a140cf-9dbd-49ae-ac9d-872851639c5b",
+            "model_version_receipt": null
+          }
+        }
+      }
+    },
+    "C5": {
+      "not_refused": true,
+      "detail": {
+        "ok": true,
+        "value": {
+          "turn_row_id": "9c476c60-73fa-4c80-886d-857f22942909",
+          "model_version_receipt": {
+            "graph": {
+              "edges": [],
+              "nodes": []
+            },
+            "event_id": "model_version_created_mutation_dccaaa22-0e05-4e17-8cd0-f1d15d7f55a3",
+            "actor_kind": "system",
+            "version_id": "bc64164f-03c2-4ee3-861f-8c34788bbda3",
+            "authored_by": null,
+            "mutation_id": "dccaaa22-0e05-4e17-8cd0-f1d15d7f55a3",
+            "creation_kind": "initial",
+            "hash_algorithm": "sha256",
+            "source_turn_id": "FT1",
+            "version_number": 1,
+            "root_version_id": "bc64164f-03c2-4ee3-861f-8c34788bbda3",
+            "undo_version_id": null,
+            "parent_version_id": null,
+            "source_version_id": null,
+            "graph_identity_hash": "cd409f4f9b9ab1f9c40e655ccf0704a1f9da5c32cdf4f9acf605bce55510389e",
+            "graph_schema_version": "g1",
+            "analysis_affecting_hash": "bb85088c00ffe897685581b0f4c7d773ac63764cdf0e6302e46c850784cf9c48",
+            "identity_normaliser_version": "n1",
+            "identity_projection_version": "p1"
+          }
+        }
+      }
+    }
+  },
+  "function_under_test": {
+    "prosrc_md5": "7b78d8e12550628570e15b2b739c2d4d",
+    "prosrc_len": 17372
+  },
+  "fixture": {
+    "owned_scenario": "a500342c-bc8e-4f6e-91d7-1c94649d1d15",
+    "guest_scenario": "b182d7cd-0086-4619-9136-7e1886cbe63b",
+    "firstwrite_scenario": "3964c431-368d-4550-bc78-21736ecaa6df",
+    "owner_user_id": "a995cbd7-f6c9-41c4-be87-875d756b2212"
+  },
+  "replay": {
+    "ok": true,
+    "value": {
+      "turn_row_id": "a1615c58-b433-4c61-8481-df733aafa00e",
+      "model_version_receipt": {
+        "graph": {
+          "edges": [],
+          "nodes": [
+            {
+              "id": "n1"
+            }
+          ]
+        },
+        "event_id": "model_version_created_mutation_22a45fbc-68ad-41ec-9727-0fab90a94a04",
+        "actor_kind": "system",
+        "version_id": "79258fd1-7895-4652-be11-7d8f5a4977cf",
+        "authored_by": null,
+        "mutation_id": "22a45fbc-68ad-41ec-9727-0fab90a94a04",
+        "creation_kind": "committed_mutation",
+        "hash_algorithm": "sha256",
+        "source_turn_id": "T1",
+        "version_number": 2,
+        "root_version_id": "7b4d59eb-c57e-4641-b901-c0b6fb163c14",
+        "undo_version_id": "7b4d59eb-c57e-4641-b901-c0b6fb163c14",
+        "parent_version_id": "7b4d59eb-c57e-4641-b901-c0b6fb163c14",
+        "source_version_id": null,
+        "graph_identity_hash": "93928551981d5d20f6ff0bc439b40d69c59913d79f0ef4e9b1e1d84d94d37fb6",
+        "graph_schema_version": "g1",
+        "analysis_affecting_hash": "178d4a665e9936bbc03c7f6e3fb57dccf4ada577cff0afd8b5005c4d8dad175a",
+        "identity_normaliser_version": "n1",
+        "identity_projection_version": "p1"
+      }
+    }
+  }
+}

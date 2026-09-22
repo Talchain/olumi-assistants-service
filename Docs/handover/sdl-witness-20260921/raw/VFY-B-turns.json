@@ -1,0 +1,210 @@
+{
+ "ts_utc": "2026-09-21T23:11:52.509Z",
+ "scenario": [
+  {
+   "id": "ee26ba7c-0006-47e6-8bc1-9c8cc269c681",
+   "user_id": null,
+   "graph_identity_hash": "ff3956153b57febc62e0de4140cd4af659188ba9f353189a59f712e811c51454",
+   "created_at": "2026-09-21T22:54:10.866Z",
+   "updated_at": "2026-09-21T23:05:01.076Z"
+  }
+ ],
+ "turns": [
+  {
+   "id": "60beee4e-f259-4552-ad9c-781fc125e274",
+   "turn_id": "b5d96e17-8384-42f9-90cd-d4bb8cceacd1",
+   "turn_class": "direct_answer",
+   "handler_id": null,
+   "model_version_mutation_id": "64fb167b-d230-52a7-a637-9022cc24989f",
+   "model_version_created": false,
+   "created_at": "2026-09-21T22:55:00.236Z"
+  },
+  {
+   "id": "393fec03-7f5c-481e-ab81-1f93b618c3d0",
+   "turn_id": "36a12764-484b-48d7-a0d1-eeb0dfcd4c79",
+   "turn_class": "clarify",
+   "handler_id": null,
+   "model_version_mutation_id": null,
+   "model_version_created": null,
+   "created_at": "2026-09-21T22:55:10.161Z"
+  },
+  {
+   "id": "19c71b99-4be8-48b5-aa7f-f2084d964edc",
+   "turn_id": "2bd4aaea-7bc8-4f71-85a5-1a150f10f694",
+   "turn_class": "handler",
+   "handler_id": "run_analysis",
+   "model_version_mutation_id": null,
+   "model_version_created": null,
+   "created_at": "2026-09-21T22:55:36.545Z"
+  },
+  {
+   "id": "3459398d-693e-4a8a-bed2-db5347d8d6a5",
+   "turn_id": "fc74bb6f-1e92-42ac-a8bd-b850f412d7cd",
+   "turn_class": "direct_answer",
+   "handler_id": null,
+   "model_version_mutation_id": null,
+   "model_version_created": null,
+   "created_at": "2026-09-21T22:57:20.964Z"
+  },
+  {
+   "id": "754d8e97-9239-4b5e-bf39-9701e9d5a607",
+   "turn_id": "234220ee-b072-4b11-b5f9-42625f0b58dd",
+   "turn_class": "direct_answer",
+   "handler_id": null,
+   "model_version_mutation_id": "5fd1dc62-4572-54de-ab8a-35fbca409478",
+   "model_version_created": false,
+   "created_at": "2026-09-21T22:57:51.391Z"
+  },
+  {
+   "id": "ea2d9f2c-c5d8-4d07-9661-e256c6fa187e",
+   "turn_id": "714dd8ae-0ebe-42c8-8085-f35aa4137655",
+   "turn_class": "clarify",
+   "handler_id": null,
+   "model_version_mutation_id": null,
+   "model_version_created": null,
+   "created_at": "2026-09-21T22:58:21.628Z"
+  },
+  {
+   "id": "3ae0d73f-2c07-4c3a-9b37-7a6ca89f4964",
+   "turn_id": "638b1ece-a2ab-41c9-9569-60fb68e7d452",
+   "turn_class": "direct_answer",
+   "handler_id": null,
+   "model_version_mutation_id": "1d549076-fef3-512c-a4f7-36ea60d51ea5",
+   "model_version_created": false,
+   "created_at": "2026-09-21T23:02:24.835Z"
+  },
+  {
+   "id": "6e66ac83-1ad4-478d-98aa-d6f332b59d57",
+   "turn_id": "3941a9f0-9cb3-49de-9cba-68a727f13f8f",
+   "turn_class": "direct_answer",
+   "handler_id": null,
+   "model_version_mutation_id": "5c0f6799-5ee5-5456-a293-1e2ec17e0ea1",
+   "model_version_created": false,
+   "created_at": "2026-09-21T23:02:27.086Z"
+  },
+  {
+   "id": "afb90bab-105f-4eee-aa27-faf795df6486",
+   "turn_id": "e104225d-46c9-4b59-a848-2bad7742d316",
+   "turn_class": "handler",
+   "handler_id": "adjust_edge_strength",
+   "model_version_mutation_id": "998d872a-012d-587b-a041-7a5d444b5bd8",
+   "model_version_created": false,
+   "created_at": "2026-09-21T23:04:58.950Z"
+  }
+ ],
+ "turn_count": 9,
+ "model_versions": {
+  "n": 0
+ },
+ "mv_global": {
+  "n": 3939
+ },
+ "fence": [
+  {
+   "turn_id": "b5d96e17-8384-42f9-90cd-d4bb8cceacd1",
+   "generation": "24367",
+   "created_at": "2026-09-21T22:54:10.980Z"
+  },
+  {
+   "turn_id": "69c003bb-6664-4458-8156-afffc6b33361",
+   "generation": "24368",
+   "created_at": "2026-09-21T22:55:02.117Z"
+  },
+  {
+   "turn_id": "fc74bb6f-1e92-42ac-a8bd-b850f412d7cd",
+   "generation": "24373",
+   "created_at": "2026-09-21T22:56:51.755Z"
+  },
+  {
+   "turn_id": "dfcac2eb-a91d-4a92-ba8a-f254ed189973",
+   "generation": "24377",
+   "created_at": "2026-09-21T22:57:50.073Z"
+  },
+  {
+   "turn_id": "234220ee-b072-4b11-b5f9-42625f0b58dd",
+   "generation": "24378",
+   "created_at": "2026-09-21T22:57:50.736Z"
+  },
+  {
+   "turn_id": "f2497bce-0a5f-4b25-91c6-42876cd473a3",
+   "generation": "24385",
+   "created_at": "2026-09-21T23:02:23.381Z"
+  },
+  {
+   "turn_id": "638b1ece-a2ab-41c9-9569-60fb68e7d452",
+   "generation": "24386",
+   "created_at": "2026-09-21T23:02:24.145Z"
+  },
+  {
+   "turn_id": "5e397b37-cafa-4bc1-b72a-a2f598fe9ccc",
+   "generation": "24387",
+   "created_at": "2026-09-21T23:02:25.736Z"
+  },
+  {
+   "turn_id": "3941a9f0-9cb3-49de-9cba-68a727f13f8f",
+   "generation": "24388",
+   "created_at": "2026-09-21T23:02:26.494Z"
+  },
+  {
+   "turn_id": "e104225d-46c9-4b59-a848-2bad7742d316",
+   "generation": "24396",
+   "created_at": "2026-09-21T23:04:58.144Z"
+  }
+ ],
+ "det_check": [
+  {
+   "turn_id": "b5d96e17-8384-42f9-90cd-d4bb8cceacd1",
+   "observed": "64fb167b-d230-52a7-a637-9022cc24989f",
+   "computed": "64fb167b-d230-52a7-9637-9022cc24989f",
+   "match": false
+  },
+  {
+   "turn_id": "36a12764-484b-48d7-a0d1-eeb0dfcd4c79",
+   "observed": null,
+   "computed": "64ba2ca6-99c3-53c0-8443-b319601b914c",
+   "match": false
+  },
+  {
+   "turn_id": "2bd4aaea-7bc8-4f71-85a5-1a150f10f694",
+   "observed": null,
+   "computed": "eebf3048-cc58-57f1-870e-5b257a9b5845",
+   "match": false
+  },
+  {
+   "turn_id": "fc74bb6f-1e92-42ac-a8bd-b850f412d7cd",
+   "observed": null,
+   "computed": "95791f1a-edda-5bc5-b886-4163733eca66",
+   "match": false
+  },
+  {
+   "turn_id": "234220ee-b072-4b11-b5f9-42625f0b58dd",
+   "observed": "5fd1dc62-4572-54de-ab8a-35fbca409478",
+   "computed": "5fd1dc62-4572-54de-ab8a-35fbca409478",
+   "match": true
+  },
+  {
+   "turn_id": "714dd8ae-0ebe-42c8-8085-f35aa4137655",
+   "observed": null,
+   "computed": "c72bb390-721f-5583-af6a-cf59c09f9089",
+   "match": false
+  },
+  {
+   "turn_id": "638b1ece-a2ab-41c9-9569-60fb68e7d452",
+   "observed": "1d549076-fef3-512c-a4f7-36ea60d51ea5",
+   "computed": "1d549076-fef3-512c-a4f7-36ea60d51ea5",
+   "match": true
+  },
+  {
+   "turn_id": "3941a9f0-9cb3-49de-9cba-68a727f13f8f",
+   "observed": "5c0f6799-5ee5-5456-a293-1e2ec17e0ea1",
+   "computed": "5c0f6799-5ee5-5456-b293-1e2ec17e0ea1",
+   "match": false
+  },
+  {
+   "turn_id": "e104225d-46c9-4b59-a848-2bad7742d316",
+   "observed": "998d872a-012d-587b-a041-7a5d444b5bd8",
+   "computed": "998d872a-012d-587b-b041-7a5d444b5bd8",
+   "match": false
+  }
+ ]
+}

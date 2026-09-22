@@ -1,0 +1,22 @@
+PHASE GREEN-after-20260920210000   at 2026-09-21T22:50:38.445Z   prosrc_md5=7b78d8e12550628570e15b2b739c2d4d  len=17372
+OK    OWNED T0 first write (expected NULL, incoming H0)   receipt_is_null=false
+OK    OWNED T1 (expected H0, incoming H1) — the turn we will replay   receipt_is_null=false
+OK    OWNED T2 (expected H1, incoming H2) — head moves on   receipt_is_null=false
+OK    REPLAY of T1 — byte-identical args to T1 (expected H0, incoming H1, current H2)   receipt_is_null=false
+RAISE C1 STALE NEW turn T3 (fresh turn_id, expected H0, current H2)   SQLSTATE=OLGC1  append_turn_atomic_v5: stale graph write for scenario 2e62ca7f-ba63-4d2d-838e-8f2a8e207613 (expected df829492c5a91985f8a2a2ebba572e398d6e055a206f835f6dd6e4b5847d92b7, current 351b39cf67ea10366f88107783296e15d67bfa41901dc79ee37509d61fa056b8)
+RAISE C2 REPLAY of T1 with a DIFFERENT mutation id   SQLSTATE=MV422  append_turn_atomic_v5: turn replay reused with another mutation id
+OK    C3 GUEST GT0 first write   receipt_is_null=true
+OK    C3 GUEST GT1 (the turn we replay)   receipt_is_null=true
+OK    C3 GUEST GT2 — head moves on   receipt_is_null=true
+OK    C3 GUEST REPLAY of GT1   receipt_is_null=true
+OK    C5 FIRST-WRITE exemption: current hash NULL, expected NON-NULL, base_known   receipt_is_null=false
+--- controls ---
+state_before_replay      {"mv":3,"ct":3,"hash":"351b39cf67ea10366f88107783296e15d67bfa41901dc79ee37509d61fa056b8"}
+durability_after_replay  {"turn_t1":1,"version_m1":1,"mv_total":3,"ct_total":3}
+counts_unchanged         true
+receipt_deep_equal_to_T1 true
+turn_row_id_equal_to_T1  true
+C1 raised_OLGC1          true   (OLGC1)
+C2 raised_MV422          true   (MV422)
+C3 guest                 write_committed=true write_receipt_null=true replay_ok=true replay_receipt_null=true guest_model_versions=0
+C5 first-write not_refused true   (accepted)

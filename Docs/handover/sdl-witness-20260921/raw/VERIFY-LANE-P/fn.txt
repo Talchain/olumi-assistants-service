@@ -1,0 +1,3 @@
+matches= 1
+sig= append_turn_atomic_v5(uuid,text,text,text,text,boolean,integer,integer,jsonb,jsonb,text,jsonb,jsonb,text,text,text,text,boolean,bigint,uuid,text,text,text,text,text,text,text,text,text,boolean) bytes= 17289
+FABRICATED COLUMN CONTROL: ERRORED code=42703 msg=column "model_version_zzz_fabricated" does not exist

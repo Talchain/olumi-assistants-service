@@ -1,0 +1,12 @@
+OK    C3 GUEST REPLAY of GT1   receipt_is_null=true
+OK    C5 FIRST-WRITE exemption: current hash NULL, expected NON-NULL, base_known   receipt_is_null=false
+--- controls ---
+state_before_replay      {"mv":3,"ct":3,"hash":"351b39cf67ea10366f88107783296e15d67bfa41901dc79ee37509d61fa056b8"}
+durability_after_replay  {"turn_t1":1,"version_m1":1,"mv_total":3,"ct_total":3}
+counts_unchanged         true
+receipt_deep_equal_to_T1 true
+turn_row_id_equal_to_T1  true
+C1 raised_OLGC1          true   (OLGC1)
+C2 raised_MV422          true   (MV422)
+C3 guest                 write_committed=true write_receipt_null=true replay_ok=true replay_receipt_null=true guest_model_versions=0
+C5 first-write not_refused true   (accepted)

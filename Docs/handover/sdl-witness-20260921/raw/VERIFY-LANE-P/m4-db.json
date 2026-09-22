@@ -1,0 +1,70 @@
+{
+ "clock": [
+  {
+   "db_clock_utc": "2026-09-21T22:09:41.367Z"
+  }
+ ],
+ "window_coverage": [
+  {
+   "min_ts": "2026-09-14T23:26:32.859Z",
+   "max_ts": "2026-09-21T23:09:38.081Z",
+   "n": "5305"
+  }
+ ],
+ "M4_2x2": [
+  {
+   "model_version_created": false,
+   "guest_scenario": true,
+   "turns": 1668,
+   "scenarios": 1472
+  },
+  {
+   "model_version_created": true,
+   "guest_scenario": false,
+   "turns": 380,
+   "scenarios": 376
+  }
+ ],
+ "M4_no_mutation_id": [
+  {
+   "guest_scenario": false,
+   "turns": 361
+  },
+  {
+   "guest_scenario": true,
+   "turns": 2896
+  }
+ ],
+ "M4_logwindow": [
+  {
+   "model_version_created": false,
+   "guest_scenario": true,
+   "turns": 116
+  },
+  {
+   "model_version_created": true,
+   "guest_scenario": false,
+   "turns": 16
+  }
+ ],
+ "cols": [
+  {
+   "column_name": "created_at"
+  },
+  {
+   "column_name": "model_version_created"
+  },
+  {
+   "column_name": "model_version_mutation_id"
+  },
+  {
+   "column_name": "scenario_id"
+  }
+ ],
+ "LEFTJOIN_control": [
+  {
+   "turns_with_mutation_id": 2048,
+   "turns_that_joined": 2048
+  }
+ ]
+}

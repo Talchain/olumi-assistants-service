@@ -1,0 +1,14 @@
+const fs=require('fs');const {Client}=require('pg');
+const E='/Users/paulslee/Documents/GitHub/olumi-assistants-service/.env.staging.local';
+const t=fs.readFileSync(E,'latin1');
+const k=n=>{const m=t.match(new RegExp('^'+n+'=(.*)$','m'));return m?m[1].replace(/["'\r\n ]/g,''):null;};
+const ref=k('SUPABASE_URL').replace('https://','').split('.')[0];
+(async()=>{const c=new Client({host:'aws-0-us-east-1.pooler.supabase.com',port:5432,user:'postgres.'+ref,password:k('SUPABASE_DB_PASSWORD'),database:'postgres',ssl:{rejectUnauthorized:false}});
+await c.connect();await c.query('set transaction read only');
+const q=await c.query(`select table_name,column_name,data_type from information_schema.columns where table_schema='public' and table_name in ('model_versions','v5_turn_fence') and column_name in ('mutation_id','generation','turn_id','scenario_id') order by table_name,column_name`);
+const led=await c.query(`select count(*)::int n from supabase_migrations.schema_migrations`);
+const abs=await c.query(`select count(*)::int n from supabase_migrations.schema_migrations where version='20260918120000'`);
+const pres=await c.query(`select count(*)::int n from supabase_migrations.schema_migrations where version='20260918014756'`);
+const idx=await c.query(`select indexdef from pg_indexes where schemaname='public' and tablename='v5_turn_fence'`);
+console.log(JSON.stringify({ts:new Date().toISOString(),cols:q.rows,ledger_total:led.rows[0].n,target_20260918120000:abs.rows[0].n,contrast_20260918014756:pres.rows[0].n,fence_indexes:idx.rows.map(r=>r.indexdef)},null,2));
+await c.end();})().catch(e=>{console.error('ERR',e.message);process.exit(1);});

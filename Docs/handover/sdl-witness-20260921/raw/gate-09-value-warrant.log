@@ -1,0 +1,99 @@
+VALUE WARRANT GUARD — does each boundary number carry the metadata that makes it refusable?
+  roots:      6 — contract.NodeV3Schema, contract.EdgeV3Schema, cee.NodeV3, cee.EdgeV3, cee.ObservedStateV3, cee.CEEGraphResponseV3
+  vocabulary: 8 tokens — frame, provenance, unit, source, scale, elicited_from, stated_role, extractionType
+  sites:      34 value-bearing fields
+  verdicts:   FIELD 4 · LEVEL_SOLE 4 · LEVEL_SHARED 11 · NONE 15
+  findings:   26 — accepted 8, OPEN 18
+
+  VERDICT      FIELD                                                              REQ BOUNDS         WARRANTS
+  LEVEL_SHARED cee.CEEGraphResponseV3::goal_constraints[].confidence              opt min=0 max=1    provenance (level), provenance_unit_normalised (level), provenance_unit_relabelled (level), source_quote (level), unit (level), value_frame (level)
+  LEVEL_SOLE   cee.CEEGraphResponseV3::goal_constraints[].provenance_unit_normalised.original_value REQ -              original_unit (level)
+  LEVEL_SOLE   cee.CEEGraphResponseV3::goal_constraints[].provenance_unit_relabelled.pre_normalisation_value REQ -              pre_normalisation_unit (level)
+  FIELD        cee.CEEGraphResponseV3::goal_constraints[].value                   REQ -              value_frame (field), provenance (level), provenance_unit_normalised (level), provenance_unit_relabelled (level), source_quote (level), unit (level)
+  NONE         cee.CEEGraphResponseV3::quality.coverage                           opt min=1 max=10   —
+  NONE         cee.CEEGraphResponseV3::quality.overall                            REQ min=1 max=10   —
+  NONE         cee.CEEGraphResponseV3::quality.safety                             opt min=1 max=10   —
+  NONE         cee.CEEGraphResponseV3::quality.structural_proxy                   opt min=1 max=10   —
+  NONE         cee.CEEGraphResponseV3::quality.structure                          opt min=1 max=10   —
+  NONE         cee.CEEGraphResponseV3::record_disclosures_omitted                 opt -              —
+  LEVEL_SOLE   cee.CEEGraphResponseV3::record_disclosures[].value                 opt -              unit (level)
+  LEVEL_SOLE   cee.EdgeV3::exists_probability                                     REQ min=0 max=1    provenance (level), provenance_display (level)
+  NONE         cee.EdgeV3::strength.mean                                          REQ -              —
+  NONE         cee.EdgeV3::strength.std                                           REQ min=0          —
+  FIELD        cee.NodeV3::goal_threshold                                         opt -              goal_threshold_cap_provenance (field), goal_threshold_frame (field), goal_threshold_unit (field), extractionType (level), provenance (level), scale_frame (level), source_quote (level)
+  FIELD        cee.NodeV3::goal_threshold_cap                                     opt -              goal_threshold_cap_provenance (field), extractionType (level), goal_threshold_frame (level), goal_threshold_unit (level), provenance (level), scale_frame (level), source_quote (level)
+  LEVEL_SHARED cee.NodeV3::goal_threshold_raw                                     opt -              extractionType (level), goal_threshold_cap_provenance (level), goal_threshold_frame (level), goal_threshold_unit (level), provenance (level), scale_frame (level), source_quote (level)
+  LEVEL_SHARED cee.NodeV3::intercept                                              opt -              extractionType (level), goal_threshold_cap_provenance (level), goal_threshold_frame (level), goal_threshold_unit (level), provenance (level), scale_frame (level), source_quote (level)
+  LEVEL_SHARED cee.NodeV3::observed_state.baseline                                opt -              extractionType (level), source (level), stated_role (level), unit (level)
+  LEVEL_SHARED cee.NodeV3::observed_state.cap                                     opt -              extractionType (level), source (level), stated_role (level), unit (level)
+  LEVEL_SHARED cee.NodeV3::observed_state.raw_value                               opt -              extractionType (level), source (level), stated_role (level), unit (level)
+  LEVEL_SHARED cee.NodeV3::observed_state.value                                   REQ -              extractionType (level), source (level), stated_role (level), unit (level)
+  NONE         cee.NodeV3::prior.range_max                                        REQ -              —
+  NONE         cee.NodeV3::prior.range_min                                        REQ -              —
+  LEVEL_SHARED cee.NodeV3::scale_frame                                            opt min=0          extractionType (level), goal_threshold_cap_provenance (level), goal_threshold_frame (level), goal_threshold_unit (level), provenance (level), source_quote (level)
+  NONE         contract.EdgeV3Schema::exists_probability                          REQ min=0 max=1    —
+  NONE         contract.EdgeV3Schema::strength.mean                               REQ min=-1 max=1   —
+  NONE         contract.EdgeV3Schema::strength.std                                REQ min=0          —
+  FIELD        contract.NodeV3Schema::goal_threshold                              opt -              goal_threshold_frame (field)
+  LEVEL_SHARED contract.NodeV3Schema::observed_state.baseline                     opt -              declared_scale (level), elicited_from (level), source (level), unit (level)
+  LEVEL_SHARED contract.NodeV3Schema::observed_state.std                          opt min=0          declared_scale (level), elicited_from (level), source (level), unit (level)
+  LEVEL_SHARED contract.NodeV3Schema::observed_state.value                        REQ -              declared_scale (level), elicited_from (level), source (level), unit (level)
+  NONE         contract.NodeV3Schema::state_space.range.max                       REQ -              —
+  NONE         contract.NodeV3Schema::state_space.range.min                       REQ -              —
+
+⚠ OPEN QUESTIONS (18) — recorded, NOT settled. Nobody has answered these:
+  · unwarranted:contract.EdgeV3Schema::strength.std
+      OPEN, and this is the instance that motivated the check. `std` is REQUIRED and `min=0` at the contract, and a consumer substituted a constant 0.15 where it was absent — a real 0.15 and a fabricated 0.15 are indistinguishable BY VALUE, which is the whole defect class. StrengthSchema carries exactly two fields, both numbers, so there is nowhere on the object for an attestation to live. The question owed: does an edge coefficient need a provenance (model / repair / default / user) on the wire, or is `EdgeV3.defaulted` + `EdgeV3.origin` at the level above sufficient? Note those live on cee.EdgeV3 and NOT on contract.EdgeV3Schema, so they cannot answer for this surface.
+
+  · unwarranted:contract.EdgeV3Schema::strength.mean
+      OPEN, same object and same question as its `std` sibling — settle them together. `mean` is bounded `min=-1 max=1` here, which says what range it lives in and nothing about who put it there.
+
+  · unwarranted:cee.EdgeV3::strength.std
+      OPEN, CEE's half of the same pair. Settle with unwarranted:contract.EdgeV3Schema::strength.std — two schemas named `strength`, one on each side of the wire, and a warrant added to one alone changes nothing (the twin the sibling guard records as surface-twin:edgev3).
+
+  · unwarranted:cee.EdgeV3::strength.mean
+      OPEN, and the row carries a SECOND finding this check surfaced without looking for it: the contract declares `mean` as `min=-1 max=1` and CEE's own copy declares NO bounds at all. That divergence is out of this check's scope to fix and is recorded here because the enumeration is where it became visible.
+
+  · unwarranted:cee.NodeV3::prior.range_min
+      OPEN. A prior's range is a pair of magnitudes in the factor's own units with no unit, frame or source beside it — its only sibling is `distribution`, which names the SHAPE and not the SCALE. Whether the unit is inherited from the node's `observed_state.unit` is exactly the kind of thing a consumer currently has to assume, and assuming is the defect. Settle with range_max.
+
+  · unwarranted:cee.NodeV3::prior.range_max
+      OPEN, the other half of the prior range. Settle with range_min.
+
+  · unwarranted:contract.NodeV3Schema::state_space.range.min
+      OPEN. `state_space.range` is `{ min, max }` and nothing else — no unit and no scale, on the surface CEE STRIPS ENTIRELY (stripped:cee.NodeV3:state_space, already recorded in the sibling guard's ledger). So the decision owed here is downstream of that one: settle whether `state_space` crosses the CEE boundary at all before deciding what must accompany it.
+
+  · unwarranted:contract.NodeV3Schema::state_space.range.max
+      OPEN, the other half. Settle with state_space.range.min.
+
+  · unwarranted:contract.EdgeV3Schema::exists_probability
+      OPEN, and deliberately not waved through on its bounds. `min=0 max=1` fixes the RANGE and says nothing about whose belief it is or how it was arrived at — a defaulted 0.9 and an elicited 0.9 are the same number. CEE's own EdgeV3 carries `provenance`, `provenance_display`, `origin` and `defaulted` at this level and the shared contract carries NONE of them, so the contract surface cannot answer the question at all. The decision owed is whether edge existence needs an attestation on the shared wire, not whether CEE happens to have one internally.
+
+  · scope-ambiguous:cee.NodeV3::observed_state.value
+      OPEN, and the sharpest instance this detector found. `observed_state` carries FOUR numbers — `value`, `baseline`, `cap`, `raw_value` — and ONE `unit`. The object's own comments say `raw_value` is 'Raw value before normalization' while `value` is after (cee-v3.ts:130), so a single unit demonstrably does not frame both the same way, and nothing on the wire says which one it frames. `source`, `stated_role` and `extractionType` have the same ambiguity. The decision owed: does `unit` attach to `value` by definition (and the other three inherit or not), or does this object need per-field scoping the way `goal_threshold_unit` has it? Settle the whole family together.
+
+  · scope-ambiguous:cee.NodeV3::observed_state.baseline
+      OPEN — the same four-numbers-one-unit ambiguity. Settle with scope-ambiguous:cee.NodeV3::observed_state.value.
+
+  · scope-ambiguous:cee.NodeV3::observed_state.cap
+      OPEN — same family, and the one where the ambiguity is most likely to bite: a cap is a DENOMINATOR, and the whole `goal_threshold` defect was a denominator nobody could see. Settle with scope-ambiguous:cee.NodeV3::observed_state.value.
+
+  · scope-ambiguous:cee.NodeV3::observed_state.raw_value
+      OPEN — same family, and the field whose docblock is the EVIDENCE that one shared `unit` cannot serve all four. Settle with scope-ambiguous:cee.NodeV3::observed_state.value.
+
+  · scope-ambiguous:contract.NodeV3Schema::observed_state.value
+      OPEN — the contract's own `observed_state`, which is a DIFFERENT object from CEE's: it carries `declared_scale` and `elicited_from` (which CEE's does not declare) and lacks `cap`, `raw_value`, `stated_role` and `extractionType` (which CEE's has). Three numbers, one unit, same ambiguity. Settle alongside the CEE half, not separately — a warrant added to one side of a twin changes nothing.
+
+  · scope-ambiguous:contract.NodeV3Schema::observed_state.baseline
+      OPEN — same object. Settle with scope-ambiguous:contract.NodeV3Schema::observed_state.value.
+
+  · scope-ambiguous:contract.NodeV3Schema::observed_state.std
+      OPEN — same object, and the contract-side twin of the `strength.std` substitution problem: an uncertainty with no attestation is exactly where a constant gets quietly supplied. Settle with scope-ambiguous:contract.NodeV3Schema::observed_state.value.
+
+  · scope-ambiguous:cee.NodeV3::intercept
+      OPEN. A regression intercept sitting among four unrelated node numbers, credited only by node-level `provenance` / `source_quote` / `extractionType` — none of which is about the intercept. This is the clearest case where LEVEL_SHARED is telling the truth: the qualifiers are real, and not one of them attests THIS value.
+
+  · scope-ambiguous:cee.NodeV3::scale_frame
+      OPEN, and it is the interesting one: `scale_frame` IS a warrant — the divisor every option magnitude for this factor was projected onto — and it is itself an unattested number. Its docblock says 'ABSENCE MEANS NEVER FRAMED. Consumers MUST NOT default it' (cee-v3.ts:274), which is the right posture for its absence and says nothing about the units of the divisor when present. A warrant that needs a warrant is not a regress to dismiss: it is the same question one level down.
+
+✅ every finding has a recorded decision, and every decision still reproduces.

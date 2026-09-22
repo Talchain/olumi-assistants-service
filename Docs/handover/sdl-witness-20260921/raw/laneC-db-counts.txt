@@ -1,0 +1,71 @@
+# Lane C live DB read  2026-09-21T22:49:57.954Z
+total_scenarios
+   -> [{"n":14850}]
+owned_scenarios (user_id not null)
+   -> [{"n":3705}]
+OWNED + graph present + current_model_version_id IS NULL  <-- TARGET
+   -> [{"n":89}]
+CONTROL owned + graph + current_model_version_id NOT NULL
+   -> [{"n":3469}]
+GUEST + graph + no version (known guest-conditional)
+   -> [{"n":10321}]
+owned + graph + graph_identity_hash NOT NULL + no version
+   -> [{"n":72}]
+model_versions total
+   -> [{"n":3933}]
+model_versions by creation_kind
+   -> [{"creation_kind":"initial","n":3057},{"creation_kind":null,"n":562},{"creation_kind":"committed_mutation","n":296},{"creation_kind":"restore","n":18}]
+turns written by graph_registration source (turn_class direct_answer, handler_id null, response_emitted false)
+   -> [{"n":442}]
+CONTROL all v5_conversation_turns
+   -> [{"n":38055}]
+registration turn_id prefix probe (turn_id like reg%)
+   -> [{"n":0}]
+distinct turn_id prefixes sample
+   -> [{"p":"clarop","n":30},{"p":"clarskip","n":9},{"p":"11111111","n":3},{"p":"00000000","n":2},{"p":"e11047dd","n":1},{"p":"678fdf90","n":1},{"p":"6aa3283e","n":1},{"p":"b86e68bb","n":1},{"p":"5eafeb55","n":1},{"p":"48c32cec","n":1},{"p":"2f0a72ae","n":1},{"p":"b9136e65","n":1},{"p":"c02b5fb6","n":1},{"p":"a8f9891a","n":1},{"p":"4acb16f0","n":1}]
+# Lane C live DB read 2  2026-09-21T22:50:28.242Z
+TARGET registrations ever (turn_id LIKE graph_registration:%)
+   -> [{"n":442}]
+TARGET registrations last 7 days
+   -> [{"n":139}]
+CONTROL total turns last 7 days
+   -> [{"n":5271}]
+CONTROL turns with model_version_created=true last 7 days
+   -> [{"n":374}]
+registration turns: earliest/latest
+   -> [{"first":"2026-08-06T03:15:29.807Z","last":"2026-09-21T20:43:17.485Z"}]
+registration turns: did any create a version?
+   -> [{"model_version_created":null,"n":442}]
+CONTROL model_version_created distribution ALL turns
+   -> [{"model_version_created":null,"n":26328},{"model_version_created":false,"n":8374},{"model_version_created":true,"n":3353}]
+scenarios touched by a registration, owned, still no version
+   -> [{"n":72}]
+scenarios touched by a registration (all)
+   -> [{"n":331}]
+SCHEMA: v5_conversation_turns columns
+   -> [{"column_name":"id"},{"column_name":"scenario_id"},{"column_name":"user_id"},{"column_name":"turn_id"},{"column_name":"turn_class"},{"column_name":"handler_id"},{"column_name":"request_hash"},{"column_name":"response_emitted"},{"column_name":"llm_calls_used"},{"column_name":"duration_ms"},{"column_name":"created_at"},{"column_name":"pending_actions"},{"column_name":"coaching_state"},{"column_name":"user_message"},{"column_name":"assistant_message"},{"column_name":"model_version_mutation_id"},{"column_name":"model_version_created"}]
+# Lane C live DB read 3  2026-09-21T22:51:07.564Z
+owned + graph + NO version, SPLIT by whether a registration touched it
+   -> [{"reg_touched":true,"hash_stamped":true,"n":72},{"reg_touched":false,"hash_stamped":false,"n":17}]
+CONTROL owned + graph + HAS version, split by registration-touched
+   -> [{"reg_touched":false,"n":3453},{"reg_touched":true,"n":16}]
+registration-touched scenarios: graph_identity_hash stamped?
+   -> [{"hash_stamped":true,"n":331}]
+is 20260920210000 recorded in supabase_migrations?
+   -> [{"version":"20260824200000"}]
+CONTROL latest 5 applied migrations
+   -> [{"version":"20260918014756"},{"version":"20260918002353"},{"version":"20260918002117"},{"version":"20260918000833"},{"version":"20260918000431"}]
+# Lane C live DB read 4  2026-09-21T22:51:41.970Z
+the 72: did a v5 versioned append RUN and get SUPPRESSED (model_version_created=false)?
+   -> [{"v5_ran_and_suppressed":false,"n":72}]
+CONTROL same probe on the 16 registration-touched scenarios that DID get a version
+   -> [{"v5_created":true,"n":16}]
+the 72: how many have ANY turn AFTER their last registration?
+   -> [{"had_later_turn":true,"n":67},{"had_later_turn":false,"n":5}]
+# Lane C live DB read 5  2026-09-21T22:52:08.672Z
+SUPPRESSED turns (model_version_created=false) split by scenario ownership  <-- isolates the hash-equality conjunct
+   -> [{"owned":false,"n":8374}]
+CONTROL created turns (model_version_created=true) split by ownership (must be 100% owned)
+   -> [{"owned":true,"n":3353}]
+OWNED + suppressed: distinct scenarios affected, and how many of those have NO version at all
+   -> []

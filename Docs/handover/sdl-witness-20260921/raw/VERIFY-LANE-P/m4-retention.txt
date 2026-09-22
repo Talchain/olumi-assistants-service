@@ -1,0 +1,6 @@
+15 Sep AM      window 2026-09-15T00:00:00Z..2026-09-15T12:00:00Z -> 5 rows, oldest-in-page 2026-09-15T11:59:03.199964536Z
+    v5.model_versions.version_committed in that window -> 0
+    v5_turn_context_facts (contrast, expect >0)        -> 300 capped=True
+18 Sep early   window 2026-09-18T00:00:00Z..2026-09-18T06:00:00Z -> 5 rows, oldest-in-page 2026-09-18T05:45:12.578350792Z
+    v5.model_versions.version_committed in that window -> 0
+    v5_turn_context_facts (contrast, expect >0)        -> 95 capped=False

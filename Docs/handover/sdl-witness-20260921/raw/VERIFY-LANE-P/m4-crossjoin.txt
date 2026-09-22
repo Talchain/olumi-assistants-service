@@ -1,0 +1,4 @@
+log events: 133 matched DB rows: 133 agree: 133
+MISSING FROM DB: 0 []
+DISAGREE: 0 []
+tally status/guest: {"no_receipt/guest=true":117,"committed/guest=false":16}

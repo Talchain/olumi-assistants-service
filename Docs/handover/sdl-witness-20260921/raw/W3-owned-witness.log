@@ -1,0 +1,60 @@
+
+===== 2026-09-21T22:59:03.622Z phase=draft scenario=b6bf8e80-960f-48f8-818e-e7b02d890332 =====
+owner sub=0a43a097-2917-4860-b0bb-89fdaeac5b01 base=https://cee-staging.onrender.com
+
+-- STEP 1: draft turn (owned)
+  http=422 ms=397 turn_id=t-bcb07058-d751-4351-b69f-1e212ec535f8
+  body: {"error":"INGRESS_CONTRACT_VIOLATION","boundary":"B1","direction":"ingress","validator":"OrchestratorTurnPayload","details":{"issues":[{"path":"turn_id","message":"Invalid","code":"invalid_string"}]},"request_id":"01a0600e-a62e-439d-951d-a4e06ebb9102","retryable":false}
+  DB scenario row: ABSENT
+  versions=0 []
+  turns=0 mutationIds=0
+
+===== 2026-09-21T22:59:14.233Z phase=draft scenario=b6bf8e80-960f-48f8-818e-e7b02d890332 =====
+owner sub=0a43a097-2917-4860-b0bb-89fdaeac5b01 base=https://cee-staging.onrender.com
+
+-- STEP 1: draft turn (owned)
+  http=200 ms=54107 turn_id=0ee1cf2f-d0d6-44bf-8205-7cf4b066a5e3
+  DB scenario row: present
+  user_id=0a43a097-2917-4860-b0bb-89fdaeac5b01  OWNED=true
+  graph_identity_hash(A)=3a8de13d0899e783944d7c12dc3093cd2f4853428a777a6c1a7ee1df59ed9b6f
+  current_model_version_id=a6f542b6-c2d2-46da-af89-d6d34be831c7
+  versions=1 [{"n":1,"kind":"initial","idh":"3a8de13d0899"}]
+  turns=1 mutationIds=1
+
+===== 2026-09-21T23:00:58.434Z phase=mutate scenario=b6bf8e80-960f-48f8-818e-e7b02d890332 =====
+owner sub=0a43a097-2917-4860-b0bb-89fdaeac5b01 base=https://cee-staging.onrender.com
+
+-- STEP 2: mutation (propose then confirm). hash A=3a8de13d0899e783...
+  turn 2a: propose
+    http=200 ms=3193 turn_id=2c5971be-e03d-4815-8689-2e2e1662e3e5
+  turn 2b: confirm
+    http=200 ms=7784 turn_id=03cf7cdf-35b4-4b92-9275-3124d51b3477
+    wire model_version_receipt: ABSENT
+
+  RESULT
+    hash A -> B changed: false  B=3a8de13d0899e783...
+    versions now: [{"n":1,"kind":"initial","idh":"3a8de13d0899","parent":"","mut":"13960910","src_turn":"0ee1cf2f"}]
+    pointer -> head: true
+    head identity == scenario identity: true
+    head is committed_mutation: false
+    head parent == version 1: false
+    confirm turn recorded: []
+
+===== 2026-09-21T23:01:48.675Z phase=mutate scenario=b6bf8e80-960f-48f8-818e-e7b02d890332 =====
+owner sub=0a43a097-2917-4860-b0bb-89fdaeac5b01 base=https://cee-staging.onrender.com
+
+-- STEP 2: mutation (propose then confirm). hash A=3a8de13d0899e783...
+  turn 2a: propose
+    http=200 ms=3051 turn_id=b9a4d243-7141-4a3c-af2b-2a8a8d18d4af
+  turn 2b: confirm
+    http=200 ms=2302 turn_id=d9eb524e-a6cb-4264-b628-382759822a41
+    wire model_version_receipt: ABSENT
+
+  RESULT
+    hash A -> B changed: false  B=3a8de13d0899e783...
+    versions now: [{"n":1,"kind":"initial","idh":"3a8de13d0899","parent":"","mut":"13960910","src_turn":"0ee1cf2f"}]
+    pointer -> head: true
+    head identity == scenario identity: true
+    head is committed_mutation: false
+    head parent == version 1: false
+    confirm turn recorded: []
