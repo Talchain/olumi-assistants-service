@@ -375,16 +375,27 @@ export function admitCandidateModel(
   // authored, so recording one as a projection would dilute the ledger and hide
   // the real projections.
   const decisionId = ids.get(DECISION_LABEL)!;
-  const topologyEdges = nodes
-    .filter((n) => n.kind === 'option')
-    .map((o) => ({
-      from: decisionId,
-      to: o.id,
-      strength: { ...STRUCTURAL_EDGE_DEFAULTS.strength },
-      exists_probability: STRUCTURAL_EDGE_DEFAULTS.exists_probability,
-      effect_direction: STRUCTURAL_EDGE_DEFAULTS.effect_direction,
-      provenance: { source: 'cee_hypothesis' },
-    }));
+  const topo = (from: string, to: string) => ({
+    from,
+    to,
+    strength: { ...STRUCTURAL_EDGE_DEFAULTS.strength },
+    exists_probability: STRUCTURAL_EDGE_DEFAULTS.exists_probability,
+    effect_direction: STRUCTURAL_EDGE_DEFAULTS.effect_direction,
+    provenance: { source: 'cee_hypothesis' },
+  });
+  const optionNodes = nodes.filter((n) => n.kind === 'option');
+  const topologyEdges = [
+    ...optionNodes.map((o) => topo(decisionId, o.id)),
+    // ⭐ option -> factor, one per intervention. NOT invented: an option that
+    // states it sets a factor's level is connected to that factor by
+    // construction, and the readiness check says so in the user's terms —
+    // "An option has no factor connections and cannot be analysed." Derived
+    // strictly from an intervention that already resolved, so an option with no
+    // stated intervention gets no edge and stays honestly unmapped.
+    ...optionNodes.flatMap((o) =>
+      Object.keys(o.interventions ?? {}).map((factorId) => topo(o.id, factorId)),
+    ),
+  ];
   const constraintResult = admitCandidateConstraints(model.constraints, (metric) => {
     const exact = ids.get(metric);
     if (exact !== undefined) return exact;

@@ -69,6 +69,30 @@ describe('typed interventions', () => {
     expect(Object.keys((opt as Record<string, Record<string, unknown>>).interventions ?? {})).toHaveLength(0);
   });
 
+  it('connects an option to every factor it states it changes', () => {
+    const m = admitted();
+    const withIv = m.nodes.filter((n) => n.kind === 'option' && n.interventions !== undefined);
+    expect(withIv.length).toBeGreaterThan(0);
+    for (const o of withIv) {
+      for (const factorId of Object.keys(o.interventions!)) {
+        expect(
+          m.edges.some((e) => e.from === o.id && e.to === factorId),
+          `option ${o.id} states it sets ${factorId} but is not connected to it`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it('an option with NO stated intervention gets no factor edge — it stays honestly unmapped', () => {
+    const m = admitted();
+    const unmapped = m.nodes.filter((n) => n.kind === 'option' && n.interventions === undefined);
+    expect(unmapped.length, 'the capture has a defer option that changes nothing').toBeGreaterThan(0);
+    const factorIds = new Set(m.nodes.filter((n) => n.kind === 'factor').map((n) => n.id));
+    for (const o of unmapped) {
+      expect(m.edges.some((e) => e.from === o.id && factorIds.has(e.to))).toBe(false);
+    }
+  });
+
   it('the graph still passes the validator the write path runs', () => {
     const m = admitted();
     const parsed = GraphV3.safeParse({ nodes: m.nodes, edges: m.edges });
