@@ -892,6 +892,25 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     );
     if (emittedGoalDirection !== undefined) {
       plotPayload.goal_direction = emittedGoalDirection;
+      // ⚠ DISCLOSED AS DERIVED, NOT AS ATTESTED. PLoT's contract documents this
+      // field as "the user's attested objective sense" and states that PLoT
+      // never infers it from a node label — but CEE does exactly that, from the
+      // goal label, because no user-settable direction exists anywhere in this
+      // repo (`rg 'objective_sense|goalDirection|goal_sense' src` non-test: 0).
+      // Until a user-settable sense exists, the honest record is that CEE
+      // derived it, so a deploy can be wire-witnessed and the claim audited
+      // rather than taken on trust. The contract-wording mismatch is raised
+      // separately; it is NOT resolved by this log line.
+      log.info(
+        {
+          event: 'cee.goal_direction.derived',
+          goal_direction: emittedGoalDirection,
+          goal_node_id: snapshot.goal_node_id,
+          provenance: 'derived_from_goal_label',
+          request_id: invocation.requestId,
+        },
+        'goal_direction derived from the goal label and forwarded to PLoT',
+      );
     }
     // Lane 28 — brief pipeline seam 3: flag-gated brief leg
     // (CEE_SEND_BRIEF_TO_PLOT, default OFF — doctrine ask D5 is Paul-gated;

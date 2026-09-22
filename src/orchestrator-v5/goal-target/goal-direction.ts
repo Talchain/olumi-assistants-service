@@ -97,5 +97,16 @@ export function deriveEmittedGoalDirection(
 ): EmittedGoalDirection | undefined {
   const label = readGoalLabel(graph, goalNodeId);
   if (label === null) return undefined;
-  return deriveGoalIntent(label).direction === 'decrease' ? 'minimise' : undefined;
+
+  // ⚠ CONSUMED IN ITS VALIDATED CONJUNCTION, NOT BY `.direction` ALONE.
+  // The incumbent surface this classifier was built for
+  // (`objective-contradiction.ts`) requires `subject !== null` before it acts
+  // on a direction. Reading `.direction` alone consumed the classifier OUTSIDE
+  // the conjunction its corpus suites validate: measured, a bare `"Reduce"` and
+  // `"Cost reduced"` both yield `subject: null` and would have emitted
+  // `minimise` on a label that names no quantity at all. Two surfaces must not
+  // disagree about which way a goal points, and that includes the gate.
+  const intent = deriveGoalIntent(label);
+  if (intent.subject === null) return undefined;
+  return intent.direction === 'decrease' ? 'minimise' : undefined;
 }
