@@ -1,58 +1,73 @@
 # AI Coaching / Core Correctness — lane state
 
-**Updated 22 Sep 2026 15:5xZ · served `0b2b472` · STATE: active, blocked on three DECISIONS**
+**Updated 22 Sep 2026 ~19:05Z · STATE: active, blocked on ONE published verdict**
 
-## The number
+## Scope, as assigned by release control 18:12Z and accepted
+
+> **AI COACHING — No new OpenAI implementation ownership. Continue staging-health /
+> shared deterministic work only unless explicitly handed a shared-boundary repair.**
+
+## ⛔ THE ONE THING BLOCKING EVERYTHING
+
+**#1692 @ `bf0ef4888c06a85e317f8e4b40b58803c7cebefd`** — required CI **green**,
+`behind=0`, MERGEABLE, all checks settled. Removes the dead `adjacency`+`reaches`
+duplicate in `admit-model.ts`.
+
+**Blocked solely on a published exact-head verdict.** The premerge guard refuses
+any merge without one — *"no PUBLISHED approving verdict bound to bf0ef488"* —
+regardless of risk class. **Do not route around the guard.**
+
+### What it unblocks
 
 ```
-### 24 PASS · 5 FAIL · 0 SKIP   on build 0b2b472   (29 assertions, criteria 1-7)
-1=PASS · 2a=PASS · 2b=FAIL · 3=FAIL · 4=PASS · 5=PASS · 6=PASS · 7=FAIL
+e0db97c2  failure   ← staging head
+4df4af95  failure   ← SERVED BUILD
+a1e35b40  failure
+59c90069  failure   ← breakage introduced
+877ae800  success   ← last green
 ```
 
-⚠ **Criteria 1–6 are measured on `/orchestrate/v2/turn`. Criterion 7 says whether
-a user reaches it — and it FAILS.** A green conventional roll-up no longer
-describes a user's experience.
+Four consecutive merges into a red required check; the served build is red; and
+**#1691 is red purely by inheritance** (its failing run annotates
+`admit-model.ts:828 'reaches' is assigned a value but never used`).
 
-## What is done — merged, deployed, witnessed
+⚠ **CI compiles the MERGE of a branch with its base, not the branch tip.** I
+checked a branch file, found the defect absent and wrongly concluded #1691's red
+was its own. The run's **annotations** are the authority.
 
-**#1686, #1679, #1685.** Criteria 1, 2a, 4, 5, 6 are JOURNEY-WITNESSED on
-deployed staging via `/orchestrate/v2/turn`.
+## What is DONE — merged, deployed, witnessed
 
-## The 5 failures, and who owns each
+**#1686, #1679, #1685, #1688.** Conventional spine: **all six behavioural
+criteria PASS**, re-witnessed on served `9fe6d0b` at 27 PASS / 4 FAIL — so the
+four agent-lane merges did **not** break the conventional route.
 
-| rows | criterion | owner | blocked on |
-|---|---|---|---|
-| 3 | 2b reconcile · 3 reused id | **#1688** `344cf12cf02233035e816a16eb05066e9db40eb8`, green ×2 | **release-control exact-head verdict** |
-| 2 | 7 the user's surface | `PROXY_V5_TARGET=agent` | **release-control / Paul decision** |
+`witness/spine.mjs` (33 assertions) · `witness/replay-vs-conflict.mjs`
+(11 PASS / 0 FAIL, validated against a 6/5 baseline on the unfixed build).
 
-Also green and awaiting a verdict: **#1680** `02627c475de45041f434c3902c62f3ceb0ab6165`.
+## Handed over — complete, NOT this lane's to land
 
-## Three decisions this lane cannot make for itself
+- **#1691** receipt-on-creation. Head moved to `d9b4ffe6…` (OpenAI Architecture).
+  ⚠ Property the next owner must not lose: it is **deliberately not
+  unconditional** — this route accepts graphs `PersistedGraphV3` rejects, where
+  the carrier skips and registration succeeds with **no** version. Own control.
+- **`analysis_ready` disclosure** — implemented, gated, two mutants killed,
+  199 files / 4541 passed. Branch held locally, **not opened**. Offered.
 
-1. **#1688's verdict.** It is a wire change (`assistant_text`, `graph_patch.status`),
-   so NOT LOW RISK by the rubric and self-merge is unavailable. It clears all 3
-   conventional rows.
-2. **`PROXY_V5_TARGET`.** Set to `agent` at ~14:55Z; deploy live 14:58Z. The
-   deployed UI posts **every** turn to `/proxy/v5/turn` (89 chunks swept, no flag,
-   no alternative path). So a user can start a model and **cannot edit one**, and
-   no `analysis_ready`/`analysis_result` reaches their client. Rollback is
-   unsetting one variable (schema default `orchestrator`).
-3. **The strictness marker.** "under 4%" becomes `<=` at extraction with **no loss
-   record**; at exactly 4% the product says *"met every limit you set"*. CEE
-   **cannot** withhold on its own — the copy is PLoT's and CEE has no free-form
-   slot (`v5_handler_facts.payload` is a strict 14-member union). The smallest
-   enabling change is a **strictness marker**, which is a schema/wire change.
+## Not this lane's call
+
+`PROXY_V5_TARGET=agent` is live: a user cannot edit their model, and no
+`analysis_ready`/`analysis_result` reaches their client. The refusal **is**
+truthful, so criterion 7 turns on whether that is an **accepted** safe refusal
+for this phase, or one variable is unset. No config has been changed by me.
 
 ## Settled — do NOT re-derive
-- Priority 4 holds end to end on the conventional route; UI renders staleness on
-  **four flag-free surfaces**, all binding to `analysis_ready.freshness` /
-  `blocks[].freshness` — **both ABSENT on the agent route**.
-- `factor_value_edit` HAS a receipt-bearing carrier; the guest 0 is the known
-  guest-conditional skip. Authorship marks are written identically for guests.
+- The RPC decides `creation_kind` (`CASE WHEN NOT v_has_versions THEN 'initial'`)
+  and **requires** `committed_mutation` from callers. All 3,162 scenario-first
+  versions are `initial`.
+- `assessCanonicalAnalysisReadiness(graph)` is **pure** — no I/O.
+  `deriveAnalysisFreshness` needs `priorFacts`, i.e. a DB read.
+- `factor_value_edit` HAS a receipt-bearing carrier; guest 0 is the known skip.
 - CEE reads **no `category`** on the value write path.
-- The agent lane's "READ-ONLY" gates **edits, not creation** — it writes a
-  32-node graph from a brief, and drops goal constraints with a disclosure.
-- `/proxy/v5/turn/stream` is re-targeted too, so the **whole** journey is agent-served.
-- ⛔ **A turn row is NOT an orchestrator/agent discriminator** — use `_agent`.
-- **The witness has been wrong five times, always optimistically.** See
-  `BASELINE-CURRENT.md` and `READ-ONLY-IS-NOT-READ-ONLY-20260922.md`.
+- ⛔ A turn row is **not** an orchestrator/agent discriminator — use `_agent`.
+- **The witness has been wrong six times, always optimistically.** Latest: a
+  creation arm that built no graph reported FAIL; it now reports NOT MEASURED.
