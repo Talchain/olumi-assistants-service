@@ -15,7 +15,7 @@ const mockConfig = {
     browserProxyEnabled: true,
     browserProxyAllowedOrigins: `${STAGING_ORIGIN},http://localhost:5173`,
     browserProxyTimeoutMs: 5_000, // Short for tests
-    proxyV5Target: "agent",
+    proxyV5Target: "orchestrator",
   },
   auth: {
     assistApiKey: TEST_ASSIST_KEY,
@@ -92,7 +92,12 @@ function buildApp(opts?: {
 
 describe("explicit AI comparison target", () => {
   it("forces conventional independently of deployment default", () => {
-    expect(resolveProxyInternalTarget("conventional")).toBe("/orchestrate/v2/turn");
+    mockConfig.proxy.proxyV5Target = "agent";
+    try {
+      expect(resolveProxyInternalTarget("conventional")).toBe("/orchestrate/v2/turn");
+    } finally {
+      mockConfig.proxy.proxyV5Target = "orchestrator";
+    }
   });
 
   it("forces OpenAI independently of deployment default", () => {
@@ -100,8 +105,8 @@ describe("explicit AI comparison target", () => {
   });
 
   it("keeps the deployment default for an absent or invalid mode", () => {
-    expect(resolveProxyInternalTarget(undefined)).toBe("/agent/v1/turn");
-    expect(resolveProxyInternalTarget("anything-else")).toBe("/agent/v1/turn");
+    expect(resolveProxyInternalTarget(undefined)).toBe("/orchestrate/v2/turn");
+    expect(resolveProxyInternalTarget("anything-else")).toBe("/orchestrate/v2/turn");
   });
 });
 
