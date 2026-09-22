@@ -14,16 +14,32 @@
  * re-reads the model afterwards and reports what the model actually shows.
  */
 
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 /**
  * The durable operation identity for authorising a proposal.
  *
- * Prefixed so the turn log says WHY the graph moved without a join, and derived
- * from the proposal so the SAME authorisation always produces the SAME key.
+ * ⛔ IT MUST BE A v4-SHAPED UUID. Measured against the real
+ * `SystemEventTurnPayloadSchema`: `turn_id` is regex-constrained, and a
+ * readable key like `agent_authorise:<proposal_id>` is refused at ingress with
+ * `INGRESS_CONTRACT_VIOLATION` before any handler runs. My first version used
+ * exactly that readable form; the unit tests passed because the mock dispatch
+ * does not validate the payload, and only posting it at the real boundary
+ * showed all four calls refused.
+ *
+ * So this is a NAME-BASED uuid wearing a v4 costume: SHA-256 of the proposal
+ * id with the version and variant nibbles forced. It is deterministic — the
+ * same proposal always yields the same key, which is the whole point — and it
+ * satisfies the wire. The trade is legibility in the turn log for a stable
+ * idempotency key, and the stable key is what the replay arm needs.
  */
 export function authorisationTurnId(proposalId: string): string {
-  return `agent_authorise:${proposalId}`;
+  const h = createHash('sha256').update(`agent_authorise:${proposalId}`).digest();
+  const b = Buffer.from(h.subarray(0, 16));
+  b[6] = (b[6] & 0x0f) | 0x40; // version 4
+  b[8] = (b[8] & 0x3f) | 0x80; // RFC 4122 variant
+  const hex = b.toString('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 import { createProposal, ProposalStore, type ProposalOperation } from '../proposal.js';
 import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';

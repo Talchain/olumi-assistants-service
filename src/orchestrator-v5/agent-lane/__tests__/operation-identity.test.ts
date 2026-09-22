@@ -85,3 +85,29 @@ describe('the operation identity carried into the write', () => {
     expect(a.applied.operation_id).toBe(a.write?.turn_id);
   });
 });
+
+describe('the identity satisfies the REAL wire contract', () => {
+  it('is accepted by SystemEventTurnPayloadSchema — the mock does not validate, the boundary does', async () => {
+    // ⛔ THIS TEST EXISTS BECAUSE THE UNIT TESTS ABOVE PASSED ON A BROKEN KEY.
+    // The recording dispatch accepts any payload, so `agent_authorise:<id>`
+    // looked fine here and was refused INGRESS_CONTRACT_VIOLATION by all four
+    // calls at the real boundary. Bind to the schema the wire actually applies.
+    const { SystemEventTurnPayloadSchema } = await import('@talchain/schemas/boundary');
+    const payload = {
+      kind: 'system_event' as const,
+      turn_id: authorisationTurnId('prop_ff26e7596c7a8bafc3e1695e4b362aa5'),
+      scenario_id: '550e8400-e29b-41d4-a716-446655440000',
+      stage: 'frame' as const,
+      event: {
+        kind: 'structural_add_edge', from: 'a', to: 'b',
+        magnitude: 0.5, effect_direction: 'negative', base_graph_hash: 'abc',
+      },
+    };
+    const ok = SystemEventTurnPayloadSchema.safeParse(payload);
+    expect(ok.success, JSON.stringify(ok.success ? {} : ok.error.issues.slice(0, 3))).toBe(true);
+
+    // Contrast control: the readable form the boundary actually refused.
+    const bad = SystemEventTurnPayloadSchema.safeParse({ ...payload, turn_id: 'agent_authorise:prop_x' });
+    expect(bad.success).toBe(false);
+  });
+});
