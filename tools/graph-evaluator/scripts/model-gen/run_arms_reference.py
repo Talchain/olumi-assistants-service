@@ -407,6 +407,11 @@ def strip_values_for_review(rich):
     for l in m.get("causal_links", []):
         mg = l.get("magnitude") or {}
         mg["value"] = None
+        # ⚠ TEMPORAL BLOCKS ARE DELIBERATELY KEPT. Measured 22 Sep: blinding the widener cost 27%
+        # of temporal richness (9.8 -> 7.2 per model) while costing nothing else. Delay, duration
+        # and persistence are not magnitudes — they are structure, and they are exactly the material
+        # GraphV3 cannot carry and the rich model exists for. Withholding them bought no safety and
+        # lost the thing we are trying to preserve.
     return m
 
 
