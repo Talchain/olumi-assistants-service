@@ -39,6 +39,7 @@ import { createAgentCapabilities, type InternalDispatch } from '../orchestrator-
 import type { CallStructuredModel } from '../orchestrator-v5/agent-lane/runtime/build-model.js';
 import { onceMoreOnTransportFailure } from '../orchestrator-v5/agent-lane/runtime/transport-retry.js';
 import { ProposalStore } from '../orchestrator-v5/agent-lane/proposal.js';
+import { assessCanonicalAnalysisReadiness } from '../orchestrator/tools/analysis-ready-helper.js';
 import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-binding.js';
 import { budgetFor } from '../orchestrator-v5/agent-lane/model-budgets.js';
 import { disclosuresFor, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
@@ -451,6 +452,32 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       if (after.status === 200) {
         graphHash = typeof after.json.graph_hash === 'string' ? after.json.graph_hash : undefined;
         analysisReady = after.json.analysis_ready;
+        /**
+         * ⭐ READINESS FROM THE MOMENT THE MODEL EXISTS, not from the moment
+         * someone runs an analysis.
+         *
+         * ⛔ MEASURED on the real browser transport: after a 60-90 s
+         * construction turn the response carried `draft_graph` and NO
+         * `analysis_ready`, so the readiness panel was empty at exactly the
+         * point a user has just built a model and wants to know what it still
+         * needs. The estate's own live-journey gate asserts the same thing
+         * (`turn 1: analysis_ready.options=0, expected >= 2`), which is how
+         * the gap surfaced.
+         *
+         * `assessCanonicalAnalysisReadiness` is the ONE readiness authority
+         * named in CLAUDE.md and it is a pure function of the graph — no LLM,
+         * no network, no second orchestrator turn — so this costs a function
+         * call, not twenty seconds. The graph read's own `analysis_ready`
+         * still wins when it has one, because that reflects a real run.
+         */
+        if (analysisReady === undefined && after.json.graph !== undefined) {
+          try {
+            const assessed = assessCanonicalAnalysisReadiness(after.json.graph);
+            if (assessed.analysisReady !== undefined) analysisReady = assessed.analysisReady;
+          } catch {
+            // Readiness is a disclosure, never a gate on the user's answer.
+          }
+        }
         // Only when it actually has content: an empty graph must not overwrite
         // whatever the client already has hydrated.
         /**
