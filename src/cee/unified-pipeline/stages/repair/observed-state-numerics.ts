@@ -52,8 +52,12 @@
  * beside a £400,000 option at 0.8, "9 of 25 framings distorted, worst 100x".
  * A wrong number that parses is worse than an absent one that does not.
  *
- * ⛔ IT IS SCOPED TO `kind === "factor"`, which is what the evidence covers
- * (11 of 11 issue paths). A constraint `observed_state` carries the threshold
+ * ⛔ IT IS SCOPED TO THE LEVEL-BEARING KINDS — `factor`, `risk` AND `outcome`,
+ * imported from `LEVEL_BEARING_CLAIM_NODE_KINDS` so there is ONE authority.
+ * The captured evidence was 11 of 11 `factor`, but the producer
+ * (`projector.ts:3425`) writes the same shape for all three, and a factor-only
+ * scope was measured rescuing one of the three. A constraint `observed_state`
+ * carries the threshold
  * PLoT reads from `metadata.operator`; silently dropping one would delete a
  * user's threshold to buy a 200. Those must keep failing loudly. A
  * constraint-shaped object is identified exactly as `NodeObservedState` does
@@ -61,9 +65,13 @@
  *
  * ⚠ THE RECOVERY CLAIM IS REAL BUT DOES NOT COVER THE SHAPE THIS ACTUALLY
  * MEETS, and the earlier wording here over-read it. `schema-v3.ts:456` does
- * rebuild `observed_state` from `data.value` — read directly, and it never
- * reads the V1 `observed_state` at all (`rg -an 'node\.observed_state'` on that
- * file: zero code hits; contrast control `isFactorData`: 7). So where
+ * rebuild `observed_state` from `data.value` — read directly. Its two reads of
+ * an input node's `observed_state` (`schema-v3.ts:1555` as a provenance
+ * discriminator, and `:813` via `anyNode`) were both checked and neither
+ * reaches a risk or outcome node. (An earlier revision of this comment quoted
+ * grep counts taken from a DIFFERENT tree; they were wrong at this head and are
+ * removed rather than restated — the claim below rests on reading the two
+ * sites, not on a count.) So where
  * `data.value` is sound, nothing is lost downstream.
  *
  * But for the target shape — `{declared_scale}` and nothing else —
@@ -96,6 +104,18 @@ function isFiniteNumber(v: unknown): v is number {
  */
 function previousState(o: Record<string, unknown>): Record<string, unknown> {
   const prev: Record<string, unknown> = { previous_value: o.value };
+  // ⚠ JSON COLLAPSES WHAT THIS ROW EXISTS TO RECORD. `NaN` and `±Infinity`
+  // serialise as `null`, and `undefined` drops the key entirely — so for the
+  // exact inputs this repair fires on, `previous_value` alone cannot say what
+  // was there. A faithful, JSON-safe descriptor rides alongside it.
+  prev.previous_value_repr =
+    o.value === undefined
+      ? "undefined"
+      : o.value === null
+        ? "null"
+        : typeof o.value === "number" && !Number.isFinite(o.value)
+          ? String(o.value)
+          : typeof o.value;
   if (isFiniteNumber(o.raw_value)) prev.previous_raw_value = o.raw_value;
   if (typeof o.unit === "string") prev.previous_unit = o.unit;
   if (isFiniteNumber(o.cap)) prev.previous_cap = o.cap;
@@ -137,11 +157,12 @@ export function runObservedStateNumerics(ctx: StageContext): void {
     if (observed === null || typeof observed !== "object" || Array.isArray(observed)) {
       if (observed === undefined) continue;
       delete raw.observed_state;
-      events.push(
-        fieldDeletion(STAGE, nodeId, "observed_state", "OBSERVED_STATE_NOT_NUMERIC", {
+      events.push({
+        ...fieldDeletion(STAGE, nodeId, "observed_state", "OBSERVED_STATE_NOT_NUMERIC", {
           previous_value: observed,
         }),
-      );
+        node_kind: raw.kind,
+      });
       continue;
     }
 
@@ -154,9 +175,10 @@ export function runObservedStateNumerics(ctx: StageContext): void {
     if (!isFiniteNumber(o.value)) {
       const prev = previousState(o);
       delete raw.observed_state;
-      events.push(
-        fieldDeletion(STAGE, nodeId, "observed_state", "OBSERVED_STATE_NOT_NUMERIC", prev),
-      );
+      events.push({
+        ...fieldDeletion(STAGE, nodeId, "observed_state", "OBSERVED_STATE_NOT_NUMERIC", prev),
+        node_kind: raw.kind,
+      });
       continue;
     }
 
@@ -169,11 +191,12 @@ export function runObservedStateNumerics(ctx: StageContext): void {
     if (o.raw_value !== undefined && !isFiniteNumber(o.raw_value)) {
       const previous = o.raw_value;
       delete o.raw_value;
-      events.push(
-        fieldDeletion(STAGE, nodeId, "observed_state.raw_value", "OBSERVED_STATE_NOT_NUMERIC", {
+      events.push({
+        ...fieldDeletion(STAGE, nodeId, "observed_state.raw_value", "OBSERVED_STATE_NOT_NUMERIC", {
           previous_value: previous,
         }),
-      );
+        node_kind: raw.kind,
+      });
     }
   }
 
@@ -185,8 +208,11 @@ export function runObservedStateNumerics(ctx: StageContext): void {
       event: "cee.observed_state.normalised",
       dropped_count: events.length,
       node_ids: events.map((e) => e.node_id).slice(0, 10),
+      // The kind is on the event because the message used to say "factor"
+      // while dropping a risk node — a log that misnames what it did.
+      node_kinds: [...new Set(events.map((e) => e.node_kind))],
       request_id: ctx.requestId,
     },
-    "Dropped unparseable factor observed_state before structural parse",
+    "Dropped unparseable level-bearing observed_state before structural parse",
   );
 }

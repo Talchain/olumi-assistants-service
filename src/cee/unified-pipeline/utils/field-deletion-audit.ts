@@ -53,6 +53,8 @@ export interface PreviousFieldState {
   previous_cap?: number;
   /** The user's own declaration of what their number meant, when present. */
   previous_declared_scale?: unknown;
+  /** JSON-safe descriptor of `previous_value` — NaN/Infinity/undefined survive here. */
+  previous_value_repr?: string;
   /**
    * The provenance the node carried BEFORE the mutation relabelled it.
    * ⚠ Read as a record of what the pipeline claimed, never as proof the user
@@ -68,6 +70,8 @@ export interface PreviousFieldState {
 }
 
 export interface FieldDeletionEvent extends PreviousFieldState {
+  /** Node kind, so a log line cannot misname what it dropped. */
+  node_kind?: unknown;
   /** Pipeline stage that performed the deletion */
   stage: string;
   /** Node ID on which the field was deleted */
@@ -137,6 +141,7 @@ export function fieldDeletion(
   if (previous.previous_unit !== undefined) event.previous_unit = previous.previous_unit;
   if (previous.previous_cap !== undefined) event.previous_cap = previous.previous_cap;
   if (previous.previous_declared_scale !== undefined) event.previous_declared_scale = previous.previous_declared_scale;
+  if (previous.previous_value_repr !== undefined) event.previous_value_repr = previous.previous_value_repr;
   if (previous.previous_provenance !== undefined) event.previous_provenance = previous.previous_provenance;
   if ("stated_item_id" in previous) event.stated_item_id = previous.stated_item_id ?? null;
   return event;

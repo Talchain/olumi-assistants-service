@@ -170,6 +170,33 @@ describe("observed_state numeric normalisation", () => {
     expect((ctx as any).fieldDeletions).toBeUndefined();
   });
 
+
+  it("the audit says WHAT KIND it dropped, and survives JSON for a non-finite value", () => {
+    const ctx = makeCtx([
+      { id: "n_risk", kind: "risk", label: "A risk", data: { value: 0.4 },
+        observed_state: { value: Number.NaN } },
+    ]);
+    runBoth(ctx);
+
+    const ev = ((ctx as any).fieldDeletions ?? []).find((e: any) => e.node_id === "n_risk");
+    expect(ev.node_kind).toBe("risk");
+    // JSON.stringify collapses NaN to null; the descriptor must survive it.
+    const roundTripped = JSON.parse(JSON.stringify(ev));
+    expect(roundTripped.previous_value).toBeNull();
+    expect(roundTripped.previous_value_repr).toBe("NaN");
+  });
+
+  it("an absent value survives JSON too — the key would otherwise vanish", () => {
+    const ctx = makeCtx([factor({ raw_value: 30000, unit: "£" })]);
+    runBoth(ctx);
+
+    const ev = ((ctx as any).fieldDeletions ?? []).find((e: any) => e.node_id === "fac_cost");
+    const roundTripped = JSON.parse(JSON.stringify(ev));
+    expect("previous_value" in roundTripped).toBe(false);
+    expect(roundTripped.previous_value_repr).toBe("undefined");
+    expect(roundTripped.node_kind).toBe("factor");
+  });
+
   it("CONTRAST CONTROL: constraint validation is NOT loosened to buy a 200", () => {
     // A constraint node whose observed_state has a value but no valid operator
     // matches neither union branch. It must STILL fail — dropping a user's
