@@ -46,6 +46,7 @@ describe('isRecoverableHandlerCause', () => {
       'analysis_not_ready', // EP2 (V5 Edit Safety Core) — read-boundary guard blocked outcome
       'analysis_blocked',
       'analysis_engine_busy', // ROADMAP 2.202 fix ③ — downstream 429 is capacity, not breakage
+      'analysis_snapshot_diverged', // the turn's two graph reads disagreed — the user's model moved mid-turn
       'parameter_invalid_at_execute',
       'entity_not_found_in_graph',
       'entity_kind_mismatch_at_execute',
@@ -110,6 +111,7 @@ describe('composeRecoverableHandlerResponse', () => {
     ['analysis_not_ready', { reason_code: 'NO_CAP_UNRECOVERABLE', next_step: 'Review the option values — this option needs a bound (cap) before it can be analysed.' }],
     ['analysis_blocked', {}],
     ['analysis_engine_busy', { downstream_http_status: 429 }],
+    ['analysis_snapshot_diverged', {}],
     ['parameter_invalid_at_execute', { specific_issue: 'value out of range' }],
     ['entity_not_found_in_graph', {}],
     ['entity_kind_mismatch_at_execute', {}],
