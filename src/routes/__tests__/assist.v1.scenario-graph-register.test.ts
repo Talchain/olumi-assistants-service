@@ -846,3 +846,119 @@ describe("register — the atomic write carries a model-version carrier", () => 
     await app.close();
   });
 });
+
+/**
+ * ⛔ THE CARRIER MUST DESCRIBE THE BYTES WE STORED — and three mutants the
+ * block above does not kill.
+ *
+ * `VERSIONABLE` above is hand-authored and has ZERO edges, which is what makes
+ * it versionable (`GraphV3` requires `strength.std` on every edge, so an
+ * edge-bearing graph without it is refused). Two consequences, both measured:
+ *
+ *  1. `projectGraphForPersistence` is a byte-identical NO-OP on it, so passing
+ *     the SUBMITTED graph to the carrier instead of the projected one SURVIVES
+ *     the block above. A receipt that content-addresses bytes we did not store
+ *     is the split semantic history the carrier's own header forbids.
+ *  2. Nothing above pins the carrier's POLICY, so threading the plan in
+ *     unconditionally — ignoring the server-read CAS base — also survives.
+ *
+ * The edge-bearing fixture here is `rich-persisted-graph.json` (the
+ * draft-persisted shape, already the fixture of record in
+ * `merge-mutated-graph-persistence.test.ts` and
+ * `turn-executor-d1-mutation-commit-graph.test.ts`), not a hand-written one.
+ * It matters that the real shape is covered: measured on the live estate
+ * 22 Sep 2026, registration-written scenarios carry `strength.std` on
+ * **16,000 of 16,092 edges**, 517 of 535 graphs fully populated (contrast,
+ * `strength.mean`: 338,179/338,333). So the edge-bearing versionable graph is
+ * the NORMAL case for this route and the skip arm is an 18-graph minority —
+ * the reverse of what a 0-edge fixture and `IMPORTED` together suggest.
+ */
+describe("register — the carrier describes the STORED graph, and obeys the policy", () => {
+  const EDGED = JSON.parse(
+    readFileSync(
+      new URL(
+        "../../orchestrator-v5/__tests__/fixtures/exp01/rich-persisted-graph.json",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  );
+
+  it("POSITIVE CONTROL: the edge-bearing fixture is versionable, and `VERSIONABLE` really has no edges", () => {
+    expect(EDGED.edges.length).toBeGreaterThan(0);
+    expect(
+      EDGED.edges.filter((e: { strength?: { std?: number } }) => typeof e.strength?.std === "number"),
+    ).toHaveLength(EDGED.edges.length);
+    expect(VERSIONABLE.edges).toHaveLength(0);
+  });
+
+  it("an EDGE-BEARING versionable graph — the route's normal shape — still supplies a carrier", async () => {
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: EDGED });
+    expect(res.statusCode).toBe(200);
+    const write = append.mock.calls[0][0];
+    expect(write.modelVersion).toBeDefined();
+    expect(write.modelVersion.source_turn_id).toBe(write.turn_id);
+    await app.close();
+  });
+
+  it("MUTANT KILLER — content-addresses the PROJECTED bytes, never the submitted ones", async () => {
+    // `reconcileTopLevelOptionsFromNodes` moves a graph whose top-level
+    // `options[]` is PRESENT but incomplete (an absent `options` is never
+    // invented), so seeding it with one option makes the pass fire and the
+    // submitted and stored bytes genuinely differ.
+    const partial = { ...EDGED, options: [{ id: EDGED.options[0].id, label: "Partial" }] };
+
+    // POSITIVE CONTROL: the projection must actually MOVE this graph, or every
+    // assertion below passes by comparing a no-op to itself.
+    const projected = projectGraphForPersistence(partial, {});
+    expect(projected).not.toBe(partial);
+    expect(computeGraphIdentityHash(projected as never)?.value).not.toBe(
+      computeGraphIdentityHash(partial as never)?.value,
+    );
+
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: partial });
+    expect(res.statusCode).toBe(200);
+
+    const write = append.mock.calls[0][0];
+    expect(write.modelVersion).toBeDefined();
+    // The receipt describes the STORED bytes …
+    expect(write.modelVersion.graph_identity_hash).toBe(
+      computeGraphIdentityHash(write.graph as never)?.value,
+    );
+    // … and demonstrably NOT the submitted ones.
+    expect(write.modelVersion.graph_identity_hash).not.toBe(
+      computeGraphIdentityHash(partial as never)?.value,
+    );
+    // Receipt and the column this route stamps agree by construction.
+    expect(write.modelVersion.graph_identity_hash).toBe(res.json().graph_identity_hash.value);
+    await app.close();
+  });
+
+  it("MUTANT KILLER — re-registering the SAME graph writes NO carrier (the policy is the carrier's)", async () => {
+    // `decideModelVersionCreation` returns `no_op` when the comparable shapes
+    // match. A fix that threads the plan in unconditionally, or that drops the
+    // server-read CAS base, passes every other case here and fails this one.
+    loadGraph.mockResolvedValue(EDGED);
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: EDGED });
+    expect(res.statusCode).toBe(200);
+    expect(append.mock.calls[0][0].modelVersion).toBeUndefined();
+    await app.close();
+  });
+
+  it("FRESH SCENARIO — the agent-construction case: a null base takes the `initial` arm", async () => {
+    // `build_model_from_brief` (agent lane) persists THROUGH this route into an
+    // empty scenario, so `loadGraph` returns null. This is the shape the
+    // deployed-staging measurement in the block above was taken on.
+    loadGraph.mockResolvedValue(null);
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: EDGED });
+    expect(res.statusCode).toBe(200);
+    const write = append.mock.calls[0][0];
+    expect(write.modelVersion).toBeDefined();
+    expect(write.modelVersion.source_turn_id).toBe(write.turn_id);
+    await app.close();
+  });
+});
