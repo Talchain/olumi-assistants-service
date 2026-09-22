@@ -409,8 +409,22 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         analysisReady = after.json.analysis_ready;
         // Only when it actually has content: an empty graph must not overwrite
         // whatever the client already has hydrated.
-        const g = after.json.graph as { nodes?: unknown[] } | undefined;
-        if (g !== undefined && Array.isArray(g.nodes) && g.nodes.length > 0) draftGraph = g;
+        /**
+         * ⛔ `draft_graph` IS NOT THE GRAPH — it is a summary that CARRIES the
+         * graph, and `OlumiResponseSchema` requires ALL FOUR of `node_count`,
+         * `edge_count`, `nodes`, `edges`. I first sent `{nodes, edges}` alone.
+         * The envelope then failed validation, the UI discarded the WHOLE
+         * response, and the user was told "the server did not reply in time"
+         * after waiting 93 seconds for an answer that had in fact arrived,
+         * complete, with HTTP 200. A shape error here does not degrade the
+         * turn; it deletes it.
+         */
+        const g = after.json.graph as { nodes?: unknown[]; edges?: unknown[] } | undefined;
+        if (g !== undefined && Array.isArray(g.nodes) && g.nodes.length > 0) {
+          const nodes = g.nodes;
+          const edges = Array.isArray(g.edges) ? g.edges : [];
+          draftGraph = { node_count: nodes.length, edge_count: edges.length, nodes, edges };
+        }
       }
     } catch {
       // A readback failure must not lose the user's answer. The turn still

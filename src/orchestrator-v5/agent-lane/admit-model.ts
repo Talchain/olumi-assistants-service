@@ -22,6 +22,7 @@ import {
   resolveGoalThresholdCapWithProvenance,
 } from '../../utils/goal-threshold-cap.js';
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../orchestrator/context/constants.js';
+import { DEFAULT_EXISTS_PROBABILITY, STRENGTH_DEFAULT_SIGNATURE } from '@talchain/schemas';
 import { admitCandidateLinks, type CandidateLink, type AdmittedEdge } from './admit-candidate.js';
 import {
   admitCandidateConstraints,
@@ -516,10 +517,63 @@ export function admitCandidateModel(
 
   loss.push(...linkResult.loss, ...constraintResult.loss);
 
+  /**
+   * ⛔ AN ORPHANED GOAL MAKES THE WHOLE MODEL UNANALYSABLE, and it is invisible
+   * in every count. Measured twice on real briefs: a goal metric "Productivity
+   * change" while every causal chain terminated on an invented near-synonym
+   * outcome "Productivity Improvement" — 35 nodes, 40 edges, all healthy
+   * looking, and 0 of 6 options able to reach the goal.
+   *
+   * The id-level dedupe above only merges IDENTICAL labels, deliberately:
+   * merging "Productivity change" with "Productivity Improvement" by
+   * similarity would be guessing, and guessing is the defect this lane exists
+   * to avoid. So this does NOT rename or merge anything. It connects the
+   * dangling terminal outcomes INTO the goal and RECORDS that it did, as a
+   * projection the user is told about — an explicit, disclosed inference beats
+   * a model that silently cannot be analysed.
+   *
+   * It fires only when the goal has no incoming edge at all. If the model
+   * connected the goal properly, nothing here runs.
+   */
+  const allEdges = [...topologyEdges, ...linkResult.edges];
+  const goalNode = nodes.find((n) => n.kind === 'goal');
+  const repaired: AdmittedEdge[] = [];
+  if (goalNode !== undefined && !allEdges.some((e) => e.to === goalNode.id)) {
+    const hasOutgoing = new Set(allEdges.map((e) => e.from));
+    const hasIncoming = new Set(allEdges.map((e) => e.to));
+    // Terminal outcomes: something feeds them, nothing leaves them. Those are
+    // where the model's own causal chains actually end.
+    const terminals = nodes.filter(
+      (n) => n.kind === 'outcome' && hasIncoming.has(n.id) && !hasOutgoing.has(n.id),
+    );
+    for (const t of terminals) {
+      repaired.push({
+        from: t.id,
+        to: goalNode.id,
+        effect_direction: 'positive',
+        strength: { mean: STRENGTH_DEFAULT_SIGNATURE.mean, std: STRENGTH_DEFAULT_SIGNATURE.std },
+        exists_probability: DEFAULT_EXISTS_PROBABILITY,
+        defaulted: true,
+      } as AdmittedEdge);
+      loss.push({
+        field_path: `edges[${t.id}->${goalNode.id}]`,
+        before: null,
+        after: 'connected',
+        reason:
+          `Nothing the model produced reached the goal "${goalNode.label}", so it could not be ` +
+          `analysed at all. "${t.label}" is where its causal chains actually end, so it has been ` +
+          'connected to the goal as an ASSUMPTION, with a placeholder strength. Neither the link ' +
+          'nor its strength came from you or from the brief — say so, and correct it if the two ' +
+          'are not the same thing.',
+        severity: 'warn',
+      } as RepairEntry);
+    }
+  }
+
   return {
     nodes,
     inference_classes,
-    edges: [...topologyEdges, ...linkResult.edges],
+    edges: [...allEdges, ...repaired],
     goal_constraints: constraintResult.constraints,
     loss,
     withheld: [...unresolved, ...linkResult.withheld],

@@ -112,3 +112,47 @@ describe('an option that states no level', () => {
     expect(m.withheld.some((w) => w.reason === 'unresolved_change_target')).toBe(true);
   });
 });
+
+describe('an orphaned goal is repaired AND disclosed', () => {
+  // ⛔ MEASURED ON A REAL BRIEF. Goal metric "Productivity change", while every
+  // causal chain terminated on an invented near-synonym outcome "Productivity
+  // Improvement". 35 nodes, 40 edges, every count healthy — and 0 of 6 options
+  // could reach the goal, so the model could never be analysed.
+  const nearSynonym = {
+    ...CANDIDATE,
+    goal: { metric: 'Productivity change', operator: '>=', value: 10, unit: '%', horizon_months: 3, provenance: 'explicit' },
+    outcomes: [{ label: 'Productivity Improvement', provenance: 'inferred' }],
+    links: [{ from: 'Pro plan price', to: 'Productivity Improvement', direction: 'positive', provenance: 'inferred' }],
+  } as unknown as CandidateModel;
+
+  it('connects the terminal outcome to the goal so the model can be analysed', () => {
+    const m = admitCandidateModel(nearSynonym, {});
+    const goal = m.nodes.find((n) => n.kind === 'goal')!;
+    const opt = m.nodes.find((n) => n.kind === 'option')!;
+    expect(reaches(m.edges, opt.id, goal.id), 'the option must reach the goal').toBe(true);
+  });
+
+  it('RECORDS it as an assumption — a silent connection would be worse', () => {
+    const m = admitCandidateModel(nearSynonym, {});
+    const entry = m.loss.find((l) => String(l.reason).includes('could not be analysed at all'));
+    expect(entry, 'the repair must be disclosed in the loss ledger').toBeDefined();
+    expect(String(entry!.reason)).toMatch(/ASSUMPTION/);
+    expect(String(entry!.reason)).toMatch(/Productivity Improvement/);
+  });
+
+  it('marks the invented edge as defaulted, never as authored', () => {
+    const m = admitCandidateModel(nearSynonym, {});
+    const goal = m.nodes.find((n) => n.kind === 'goal')!;
+    const into = m.edges.filter((e) => e.to === goal.id);
+    expect(into.length).toBeGreaterThan(0);
+    for (const e of into) expect(e.defaulted).toBe(true);
+  });
+
+  it('does NOT fire when the model connected the goal itself — contrast control', () => {
+    // CANDIDATE already terminates on the goal metric's own label. If the
+    // repair fired here it would be adding causality nobody asked for.
+    const m = admitCandidateModel(CANDIDATE, {});
+    const entry = m.loss.find((l) => String(l.reason).includes('could not be analysed at all'));
+    expect(entry, 'repair must not fire on a well-connected goal').toBeUndefined();
+  });
+});
