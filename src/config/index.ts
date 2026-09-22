@@ -1495,6 +1495,10 @@ const ConfigSchema = z.object({
   // The proxy injects X-Olumi-Assist-Key server-side and validates request origins.
   proxy: z.object({
     browserProxyEnabled: booleanString.default(false), // BROWSER_PROXY_ENABLED — master switch
+    // AGENT_LANE_ENABLED — mounts POST /agent/v1/turn. Default false: the route
+    // registers nothing unless this is true, so deploying it is inert and the
+    // rollback is unsetting one variable.
+    agentLaneEnabled: booleanString.default(false),
     browserProxyAllowedOrigins: z.string().optional(), // BROWSER_PROXY_ALLOWED_ORIGINS — comma-separated origin allowlist
     browserProxyTimeoutMs: z.coerce.number().int().min(5_000).max(300_000).default(125_000), // BROWSER_PROXY_TIMEOUT_MS — proxy-to-CEE timeout (5s headroom above DRAFT_REQUEST_BUDGET_MS=120s, must be < ROUTE_TIMEOUT_MS)
   }).default({}),
@@ -1899,6 +1903,7 @@ function parseConfig(): Config {
     },
     proxy: {
       browserProxyEnabled: env.BROWSER_PROXY_ENABLED,
+      agentLaneEnabled: env.AGENT_LANE_ENABLED,
       browserProxyAllowedOrigins: env.BROWSER_PROXY_ALLOWED_ORIGINS,
       browserProxyTimeoutMs: env.BROWSER_PROXY_TIMEOUT_MS,
     },

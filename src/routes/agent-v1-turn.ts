@@ -55,7 +55,7 @@ const AGENT_INSTRUCTIONS = [
 ].join(' ');
 
 export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
-  if (process.env.AGENT_LANE_ENABLED !== 'true') return;
+  if (config.features?.agentLaneEnabled !== true) return;
 
   const dispatch: InternalDispatch = async (path, body) => {
     const res = await app.inject({
@@ -63,7 +63,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       url: path,
       headers: {
         'content-type': 'application/json',
-        'x-olumi-assist-key': config.auth?.assistApiKey ?? process.env.ASSIST_API_KEY ?? '',
+        'x-olumi-assist-key': config.auth.assistApiKey ?? config.auth.assistApiKeys?.[0] ?? '',
       },
       payload: body as Record<string, unknown>,
     });

@@ -67,7 +67,6 @@ export type CandidateNodeKind =
  * It is `ai_inferred`: nobody stated it, it is read off the question the brief
  * asks. The label is the goal metric's decision framing, not invented content.
  */
-const DECISION_ID = 'decision';
 
 export interface CandidateModel {
   readonly goal: { metric: string; operator: string; value: number; unit: string; horizon_months: number | null; provenance: string };
@@ -195,8 +194,6 @@ function assignIds(labels: readonly string[]): Map<string, string> {
  * `brief_extraction`, so the wrong stamp here silently exempted every
  * brief-derived figure from that audit.
  */
-const sourceFor = (provenance: string): string =>
-  provenance === 'explicit' ? 'brief_extraction' : 'cee_hypothesis';
 
 /** The node display vocabulary. `user_set` is reserved for a direct user edit. */
 const displayProvenanceFor = (provenance: string): 'from_brief' | 'ai_inferred' =>

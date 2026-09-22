@@ -6,7 +6,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   ProposalStore, createProposal, computeProposalId, MAX_PROPOSALS,
-  type ProposalContent, type StructuredProposal,
+  type ProposalContent,
 } from '../proposal.js';
 
 const BASE = 'a'.repeat(64);
