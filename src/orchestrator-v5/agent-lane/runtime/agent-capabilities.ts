@@ -46,6 +46,7 @@ import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
 import { structuralFacts } from '../structural-facts.js';
 import type { AgentCapabilities, AgentToolContext, ToolResult } from './agent-tools.js';
 import { buildModelFromBrief, type CallStructuredModel } from './build-model.js';
+import { canonicalEntityViewOf } from '../tools/get-canonical-state.js';
 
 /** One internal dispatch, so every path is the product's own. */
 export type InternalDispatch = (path: string, body: unknown) => Promise<{ status: number; json: Record<string, unknown> }>;
@@ -103,12 +104,8 @@ export function createAgentCapabilities(
         graph_revision: g.graph_hash,
         empty: g.nodes.length === 0,
         entities: g.nodes.map((n) => ({
-          label: n.label,
+          ...canonicalEntityViewOf(n as unknown as Record<string, unknown>),
           ...(n.description !== undefined ? { full_label: n.description } : {}),
-          kind: n.kind,
-          // A value only when one is actually stored. Absence is reported as
-          // unknown rather than as a zero.
-          value: typeof n.observed_state?.value === 'number' ? n.observed_state.value : null,
         })),
         existing_links: g.edges.map((e) => `${e.from} -> ${e.to}`),
         // Derived by traversal of the persisted graph — facts, not estimates,
@@ -670,9 +667,8 @@ export function createAgentCapabilities(
         confirmed_entities: after.nodes.length,
         graph_revision: after.graph_hash,
         entities: after.nodes.map((n) => ({
-          label: n.label,
-          kind: n.kind,
-          value: typeof n.observed_state?.value === 'number' ? n.observed_state.value : null,
+          ...canonicalEntityViewOf(n as unknown as Record<string, unknown>),
+          ...(n.description !== undefined ? { full_label: n.description } : {}),
         })),
         structure: structuralFacts(after.nodes, after.edges),
       };
