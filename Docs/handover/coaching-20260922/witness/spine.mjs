@@ -291,13 +291,32 @@ await step('7', async () => {
   };
   const onUser = await creationReceipt('/proxy/v5/turn', true);
   const onConv = await creationReceipt('/orchestrate/v2/turn', false);
-  rec('7', 'CONTROL — creation IS receipted on the conventional route',
-      onConv.versions > 0 && onConv.head ? 'PASS' : 'FAIL',
-      `nodes=${onConv.nodes} versions=${onConv.versions} head=${onConv.head ? 'set' : 'NULL'}`);
+
+  // ⚠ BOTH ARMS DEPEND ON AN LLM ACTUALLY DRAFTING A MODEL FROM THE BRIEF.
+  //   Observed once on build 9fe6d0b: the conventional arm returned nodes=0 —
+  //   no graph was built at all — and the row reported FAIL, i.e. a PROBE
+  //   failure presented as a PRODUCT failure. Two immediate re-runs were
+  //   healthy (nodes=15, versions=1, head set), so it was transient.
+  //   An arm that built no graph cannot be asked whether the graph was
+  //   receipted, so it is NOT MEASURED rather than failed.
+  const measurable = (r) => Number(r.nodes) > 0;
+  if (!measurable(onConv)) {
+    rec('7', 'CONTROL — creation IS receipted on the conventional route', 'FAIL',
+        `NOT MEASURED — the control built no graph (nodes=${onConv.nodes}); re-run before reading the pair`);
+  } else {
+    rec('7', 'CONTROL — creation IS receipted on the conventional route',
+        onConv.versions > 0 && onConv.head ? 'PASS' : 'FAIL',
+        `nodes=${onConv.nodes} versions=${onConv.versions} head=${onConv.head ? 'set' : 'NULL'}`);
+  }
   rec('7', 'a model created on the user surface mints a receipt',
-      OWNER ? (onUser.versions > 0 && onUser.head ? 'PASS' : 'FAIL') : 'SKIP',
-      OWNER ? `nodes=${onUser.nodes} versions=${onUser.versions} head=${onUser.head ? 'set' : 'NULL'}`
-            : 'guest mints none — vacuous, not passed');
+      !OWNER ? 'SKIP'
+        : !measurable(onUser) ? 'FAIL'
+        : !measurable(onConv) ? 'FAIL'
+        : onUser.versions > 0 && onUser.head ? 'PASS' : 'FAIL',
+      !OWNER ? 'guest mints none — vacuous, not passed'
+        : !measurable(onUser) ? `NOT MEASURED — this arm built no graph (nodes=${onUser.nodes})`
+        : !measurable(onConv) ? 'NOT MEASURED — the control built no graph, so the comparison is unsupported'
+        : `nodes=${onUser.nodes} versions=${onUser.versions} head=${onUser.head ? 'set' : 'NULL'}`);
 });
 
 const p = rows.filter(r => r.state === 'PASS').length, f = rows.filter(r => r.state === 'FAIL').length, s = rows.filter(r => r.state === 'SKIP').length;
