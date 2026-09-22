@@ -839,6 +839,52 @@ describe("register — the canonical model-version receipt", () => {
     await app.close();
   });
 
+  it("content-addresses the PROJECTED bytes — a receipt may never describe a graph that was never stored", async () => {
+    // MEASURED, and the measurement is why this case is separate. On
+    // `rich-persisted-graph.json` the projection is a byte-identical NO-OP, so
+    // the assertion in the case above compares a no-op to itself: a mutant that
+    // passes the SUBMITTED bytes to the carrier SURVIVES it. That is a hole in
+    // the oracle, not an equivalence — the same hole the "stores the PROJECTED
+    // bytes" case above documents for the ACK. Hashing bytes we do not store is
+    // exactly the split semantic history the carrier's own header forbids.
+    //
+    // `reconcileTopLevelOptionsFromNodes` moves a graph whose top-level
+    // `options[]` is PRESENT but incomplete (an absent `options` is never
+    // invented), so seeding it with a single option makes the pass fire.
+    const partial = {
+      ...VERSIONABLE,
+      options: [{ id: VERSIONABLE.options[0].id, label: "Partial" }],
+    };
+
+    // POSITIVE CONTROL: the projection must actually MOVE this graph, or every
+    // assertion below passes by comparing a no-op to itself.
+    const projected = projectGraphForPersistence(partial, {});
+    expect(projected).not.toBe(partial);
+    expect(
+      computeGraphIdentityHash(projected as never)?.value,
+    ).not.toBe(computeGraphIdentityHash(partial as never)?.value);
+
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: partial });
+    expect(res.statusCode).toBe(200);
+
+    const write = append.mock.calls[0][0];
+    expect(write.modelVersion).toBeDefined();
+    // The receipt describes the STORED bytes …
+    expect(write.modelVersion.graph_identity_hash).toBe(
+      computeGraphIdentityHash(write.graph as never)?.value,
+    );
+    // … and demonstrably NOT the submitted ones.
+    expect(write.modelVersion.graph_identity_hash).not.toBe(
+      computeGraphIdentityHash(partial as never)?.value,
+    );
+    // The receipt and the column the route stamps agree by construction.
+    expect(write.modelVersion.graph_identity_hash).toBe(
+      res.json().graph_identity_hash.value,
+    );
+    await app.close();
+  });
+
   it("FRESH SCENARIO — the agent-construction case: a null base still gets a receipt", async () => {
     // `build_model_from_brief` builds into an empty scenario, so `loadGraph`
     // returns null and the creation policy's `initial` arm is the one that
