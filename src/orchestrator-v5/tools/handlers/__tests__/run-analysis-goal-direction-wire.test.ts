@@ -142,6 +142,22 @@ describe('goal_direction reaches the PLoT payload', () => {
     });
   }
 
+
+  // ── THE FEATURE'S ONLY REAL HITS, PINNED AT THE WIRE ────────────────────
+  // These are the two labels the repo's externally-harvested 73-label corpus
+  // classifies as `decrease` (harvested 2026-08-14 at CEE 73ea84e6). Reach is
+  // 2 of 73 (2.7%), measured — this is deliberately NOT a broad capability.
+  // They are pinned here because the gates above (hyphen boundary, subject
+  // conjunction) each narrow the classifier, and a future tightening that
+  // suppressed these would leave the feature emitting nothing at all while
+  // every other test still passed. Measured: neither is suppressed today.
+  for (const label of ['Minimise TCO over 3 years', 'Minimize long-term energy costs']) {
+    it(`corpus decrease label still reaches the wire: "${label}"`, async () => {
+      const payload = await payloadForGoalLabel(label);
+      expect(payload.goal_direction).toBe('minimise');
+    });
+  }
+
   // ── consumed inside its validated conjunction ───────────────────────────
   for (const label of ['Reduce', 'Cost reduced']) {
     it(`a direction with no subject names no quantity: "${label}"`, async () => {
