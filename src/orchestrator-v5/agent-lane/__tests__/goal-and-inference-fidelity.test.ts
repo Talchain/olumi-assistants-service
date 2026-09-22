@@ -44,9 +44,10 @@ describe('goal fidelity', () => {
     const goal = admitted().nodes.find((n) => n.kind === 'goal');
     // `goal_threshold` is NORMALISED (raw / cap); the stated number is `_raw`.
     expect(goal?.goal_threshold).toBeCloseTo(0.8, 10);
-    expect((goal as Record<string, unknown>).goal_threshold_raw).toBe(20000);
-    expect((goal as Record<string, unknown>).goal_threshold_unit).toBe('£');
-    expect((goal as Record<string, unknown>).goal_threshold_frame).toBe('level');
+    // Declared fields, read directly — the cast disabled property-name checking.
+    expect(goal?.goal_threshold_raw).toBe(20000);
+    expect(goal?.goal_threshold_unit).toBe('£');
+    expect(goal?.goal_threshold_frame).toBe('level');
   });
 
   it('records the horizon it cannot represent, rather than dropping it silently', () => {
@@ -90,6 +91,9 @@ describe('inference class survives', () => {
     expect(price.provenance).toBe('from_brief');
     expect(m.inference_classes[price.id]).toBe('brief_stated');
     // The DURABLE value authorship, which the money invariant reads.
-    expect((price.observed_state as Record<string, unknown>).source).toBe('brief_extraction');
+    // `observed_state` declares `source`, so read it — the cast hid whether the
+    // property name was even real, on the one assertion that distinguishes a
+    // user-stated value from a machine-authored one.
+    expect(price.observed_state?.source).toBe('brief_extraction');
   });
 });

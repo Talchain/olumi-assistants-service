@@ -55,7 +55,8 @@ describe('assessAnalysisAdmissibility', () => {
       edges: [
         { from: 'price', to: 'mrr', strength: { mean: 0.7, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' },
       ],
-      goal_constraints: [],
+      inference_classes: {},
+  goal_constraints: [],
       loss: [],
       withheld: [],
     };
@@ -76,7 +77,8 @@ describe('assessAnalysisAdmissibility', () => {
         { from: 'price', to: 'mrr', strength: { mean: 0.7, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' },
         { from: 'churn', to: 'price', strength: { mean: 0.5, std: 0.125 }, exists_probability: 0.8, effect_direction: 'positive', defaulted: true },
       ],
-      goal_constraints: [],
+      inference_classes: {},
+  goal_constraints: [],
       loss: [],
       withheld: [],
     };

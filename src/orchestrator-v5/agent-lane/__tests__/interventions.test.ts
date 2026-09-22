@@ -37,12 +37,12 @@ describe('typed interventions', () => {
   it('writes them onto the option node where the readiness helper reads them', () => {
     const m = admitted();
     const options = m.nodes.filter((n) => n.kind === 'option');
-    const withIv = options.filter((o) => (o as Record<string, unknown>).interventions !== undefined);
+    const withIv = options.filter((o) => o.interventions !== undefined);
     expect(withIv.length).toBeGreaterThan(0);
 
     // Read them back with CEE's OWN extractor, not my own accessor.
     const values = withIv.flatMap((o) =>
-      Object.values((o as Record<string, Record<string, unknown>>).interventions)
+      Object.values(o.interventions ?? {})
         .map((v) => extractNumericIntervention(v)),
     );
     expect(values).toContain(59);
@@ -52,7 +52,7 @@ describe('typed interventions', () => {
     const m = admitted();
     const ids = new Set(m.nodes.map((n) => n.id));
     for (const o of m.nodes.filter((n) => n.kind === 'option')) {
-      for (const key of Object.keys((o as Record<string, Record<string, unknown>>).interventions ?? {})) {
+      for (const key of Object.keys(o.interventions ?? {})) {
         expect(ids.has(key), `intervention key ${key} must be a node id`).toBe(true);
       }
     }
@@ -66,7 +66,7 @@ describe('typed interventions', () => {
     const m = admitCandidateModel(c, {});
     expect(m.withheld.some((w) => w.reason === 'unresolved_intervention_target')).toBe(true);
     const opt = m.nodes.find((n) => n.kind === 'option')!;
-    expect(Object.keys((opt as Record<string, Record<string, unknown>>).interventions ?? {})).toHaveLength(0);
+    expect(Object.keys(opt.interventions ?? {})).toHaveLength(0);
   });
 
   it('connects an option to every factor it states it changes', () => {
