@@ -241,3 +241,76 @@ be **observed**, not assumed.
 ⛔ **This phase is invisible on a guest scenario**, because a guest mints no
 receipt at all (§5), so the two routes look identical. Phase 4 is therefore
 blocked on the same staging test account as the rest of the receipt half.
+
+---
+
+## 9. ✅ §8 RESOLVED BY EXECUTION — Route 2 is UNREACHABLE for a replay
+
+§8 left the reachability of Route 2 **UNVERIFIED** and said to execute it rather than
+read it. Executed, against the **live deployed** functions, on a throwaway guest
+scenario (`7fceca09-50d5-4cc7-89db-ccc7a6fc42ff`), calling
+`append_turn_atomic_v5` directly.
+
+### The experiment
+
+1. claim the fence for `T1` → generation **24461**; append `T1` → **committed**,
+   `turn_row_id 40b68458-93e7-4f97-b2be-aa4121ad0247`;
+2. claim the fence for a **different** turn `T2` → generation **24462**, so
+   `v5_evaluate_turn_fence(T1)` now reads
+   `{claimed:true, stopped:false, generation:24461, max_generation:24462}`
+   — **T1 is genuinely superseded**, which is the precondition for Route 2;
+3. **replay `T1`** under its own original generation 24461.
+
+### Result
+
+```
+replay T1: {"ok":true,"out":{"turn_row_id":"40b68458-93e7-4f97-b2be-aa4121ad0247",
+                             "model_version_receipt":null}}
+turns after replay: 1   (delta 0)
+```
+
+**The SAME `turn_row_id`, `ok:true`, no second row — while superseded.**
+
+**CONTRAST CONTROL, same run:** a genuinely NEW turn `T3` under that same stale
+generation was **refused**:
+
+```
+OLTF2  append_turn_atomic_v4: the turn admitted at generation 24461 is superseded
+       (max generation 24462)
+```
+
+So the probe can see a fence refusal — it simply does not produce one for a replay.
+
+### What this proves
+
+A replay **does not error**, therefore `classifyAtomicFenceError` never runs,
+therefore **`tryFirstWriteExemptRecovery` (Route 2) is never reached for a replay.**
+v5's replay arm returns before v4's fence check. **Route 1 handles every replay,
+and Route 1 is the one that carries `model_version_receipt`.**
+
+⇒ **The acceptance contract IS satisfiable**, including when another turn has
+intervened. The "required fourth phase" in §8 has been executed here and passes.
+
+⚠ **What is still NOT proven:** the receipt's *content*. `model_version_receipt`
+is `null` above **because this is a guest scenario** (§5) — a third independent
+confirmation of that rule. The **route** is settled; that the route carries a real
+`version_id` on a signed-in scenario still needs the staging test account.
+
+### ⭐ NEW GUARD FOUND — `MV422`, and the PoC lane must know about it
+
+The first attempt at the replay was **refused**:
+
+```
+MV422  append_turn_atomic_v5: turn replay reused with another mutation id
+```
+
+because the harness minted a fresh `p_version_mutation_id` on each call. **A replay
+must carry the SAME mutation id as the original**, or it is refused rather than
+recovered. That is a genuine anti-forgery property: you cannot replay a `turn_id`
+with a *different* mutation and have it silently recover the original.
+
+**Consequence for any retry implementation, including the OpenAI Connected PoC:**
+reusing the durable `turn_id` is **necessary but not sufficient**. The retry must
+also carry the original mutation id. A client that reuses `turn_id` but regenerates
+the mutation id gets `MV422`, not recovery — which would look like a new and
+confusing failure mode rather than the exactly-once behaviour intended.
