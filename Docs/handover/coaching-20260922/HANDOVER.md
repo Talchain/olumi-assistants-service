@@ -56,7 +56,7 @@ production caller: `tryFirstWriteExemptRecovery`, `supabase-store.ts:1438`).
 `request_id` comes from `getOrGenerateRequestId` — the `x-request-id` header if
 it validates, else `randomUUID()` — so **the key moved on every retry**. The
 replay lookup found nothing, the write was treated as fresh, and the CAS then
-refused it because the original write had moved the graph head. That is the 409.
+refused it because the original write had moved the graph head. That is the 409. ⛔ **WRONG SYMPTOM — the wire returns HTTP 200 with a phantom duplicate turn; see the ADDENDUM.**
 
 **The repaired replay-before-CAS SQL could not help: there was no prior row
 under the key it was handed. This is upstream of persistence — do not send it
@@ -453,6 +453,46 @@ broad prompt/controller architecture · cosmetic copy.
 The current CEE route is the fallback/hedge. The OpenAI connected witness is the
 programme's primary architecture test; this lane's job is to keep the
 deterministic foundations and the fallback path trustworthy while that runs.
+
+---
+
+## F — THE LOCAL CLONES HOLD UNBANKED COMMITS THAT ARE **NOT** THIS LANE'S
+
+Measured at stand-down, per repo, as `rev-list --count <branch> --not --remotes`
+over every local branch:
+
+| Local clone | Branches holding commits on NO remote | Commits |
+|---|---|---|
+| `DecisionGuideAI` | 116 | **312** |
+| `olumi-assistants-service` | 68 | **123** |
+| `plot-lite-service` | 27 | **141** |
+
+**576 commits across 211 local branches exist on this machine and nowhere else.**
+Largest single branches: PLoT `feat/engine-m1-guardrails` (27),
+`feat/i-modes-inference-distinction` (14), `feat/templates-v1.2-clean` (12),
+`feat/d1-determinism-single-source` (12); CEE `claude-cee/review-deliverable` (10).
+
+⛔ **NONE of it was pushed, and that is deliberate.** It is other lanes' and
+earlier sessions' work, on two PUBLIC repositories, which I have not read.
+Pushing 576 unread commits to publish them would be a worse outcome than leaving
+them where they are, and it is outside this lane's scope boundary either way.
+This is a **pre-existing estate condition** — the clone census has recorded it
+before — not something this session created.
+
+**What the successor needs to know:** if the fresh account runs on a different
+machine, that work does not travel. Whoever owns each branch has to decide, and
+`scripts/clone-census.sh` is the tool that enumerates it (exit `2` =
+could-not-measure = failure, never a pass).
+
+### Two smaller items in the same class
+- `plot-lite-service` has `CLAUDE.md` **staged but uncommitted** (`M ` in the
+  index) on branch `docs/claude-md-restructure`, plus deletions of vendored
+  ephemera (`.tooling/` 68 entries, `evidence/`, `tmp_release/`, `handoff/`).
+  **Contrast control run: ZERO dirty files under `src/`, `tests/`, `contracts/`
+  or `scripts/`** — so no authored source is uncommitted there, and no branch in
+  that clone has unpushed commits relative to its own upstream.
+- This lane's three code branches and this docs branch are the only things this
+  session authored, and all four are at the remote, verified twice each.
 
 ---
 
