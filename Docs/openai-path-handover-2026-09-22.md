@@ -15,11 +15,23 @@ where a PR exists.
 
 | branch | head (40-char) | state | needs |
 |---|---|---|---|
-| `fix/registration-leaves-a-version` (**PR #1691**) | `b3643ccb028c8522661102b88d4bc36cd1f8ce9a` | MERGEABLE / BLOCKED, **0 reviews**, required check green | independent review |
-| `fix/agent-canonical-state-carries-magnitude` | `ee6027718f82df4c512513adaf55f29c07dd836a` | pushed, no PR opened | review + PR |
-| `fix/agent-lane-dead-reachability-duplicate` | `42e16ad8c93b89557a3cb9bcbd718baf082ff8ef` | pushed, no PR opened | **land first** — unblocks the only required check |
+| `fix/registration-leaves-a-version` (**PR #1691**) | `b3643ccb028c8522661102b88d4bc36cd1f8ce9a` | MERGEABLE, **0 reviews**, required check **SUCCESS** | independent review |
+| `fix/agent-canonical-state-carries-magnitude` (**PR #1698**) | `ee6027718f82df4c512513adaf55f29c07dd836a` | open, CI running | independent review |
+| `fix/agent-lane-dead-reachability-duplicate` (**PR #1699**) | `42e16ad8c93b89557a3cb9bcbd718baf082ff8ef` | open, CI running | **land first** — unblocks the only required check |
 | `backup/claude-session-20260922-build-on-1691` | `9834e3bf655b3aa157a57c08dd7c0941fcda8e3c` | backup only | nothing; delete once #1691 and the projection branch land |
 | `feat/registration-writes-canonical-model-version` | `2a7b513ed8afbc7d2828424c573aeaeb8bc47701` | **SUPERSEDED — do not review** | delete on Paul's word |
+
+### CI state at handover, read from the remote
+
+**#1691 @ `b3643ccb` — required check `Lint, TypeCheck, Unit Tests` is SUCCESS**, and
+so is `Typecheck Drift (ratchet)`. GitHub reports the PR as `UNSTABLE`, but the
+**only** failure is `Graph Evaluator (advisory)`, which is **not required**. Do not
+read `UNSTABLE` as "the gate is red".
+
+⚠ **A bare branch push gets almost no CI.** Before PR #1698 was opened, the
+projection branch had exactly one check-run (`check-schemas`) and no required check
+at all. **A branch without a PR has no required-check signal** — silence is not
+green. PRs #1698 and #1699 were opened so both branches get a real verdict.
 
 **Risk classification, decided before any merge:** #1691 and the projection
 branch are **NOT low risk** — one writes durable version rows, the other changes
