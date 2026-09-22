@@ -1,0 +1,112 @@
+{
+  "goal": {
+    "metric": "MRR",
+    "operator": ">=",
+    "value": 20000,
+    "unit": "£",
+    "horizon_months": 12,
+    "provenance": "explicit"
+  },
+  "constraints": [
+    {
+      "metric": "monthly churn",
+      "operator": "<",
+      "value": 4,
+      "unit": "%",
+      "provenance": "explicit"
+    }
+  ],
+  "options": [
+    {
+      "label": "Increase Pro plan price from £49 to £59 per month with next Pro feature release",
+      "provenance": "explicit"
+    },
+    {
+      "label": "Status quo: Keep Pro plan price at £49 per month",
+      "provenance": "inferred"
+    }
+  ],
+  "factors": [
+    {
+      "label": "Pro plan price",
+      "role": "controllable",
+      "baseline_known": true,
+      "baseline_value": 49,
+      "unit": "£",
+      "provenance": "explicit"
+    },
+    {
+      "label": "Pro feature release",
+      "role": "controllable",
+      "baseline_known": false,
+      "baseline_value": null,
+      "unit": null,
+      "provenance": "explicit"
+    },
+    {
+      "label": "Number of Pro subscribers",
+      "role": "observable",
+      "baseline_known": false,
+      "baseline_value": null,
+      "unit": null,
+      "provenance": "inferred"
+    },
+    {
+      "label": "Monthly churn rate",
+      "role": "observable",
+      "baseline_known": false,
+      "baseline_value": null,
+      "unit": "%",
+      "provenance": "explicit"
+    }
+  ],
+  "risks": [
+    {
+      "label": "Price increase may raise churn above 4%",
+      "provenance": "inferred"
+    }
+  ],
+  "outcomes": [
+    {
+      "label": "Achieve £20k MRR within 12 months",
+      "provenance": "explicit"
+    }
+  ],
+  "links": [
+    {
+      "from": "Pro plan price",
+      "to": "MRR",
+      "direction": "positive",
+      "provenance": "inferred"
+    },
+    {
+      "from": "Pro plan price",
+      "to": "Monthly churn rate",
+      "direction": "unknown",
+      "provenance": "inferred"
+    },
+    {
+      "from": "Pro feature release",
+      "to": "Number of Pro subscribers",
+      "direction": "positive",
+      "provenance": "inferred"
+    },
+    {
+      "from": "Number of Pro subscribers",
+      "to": "MRR",
+      "direction": "positive",
+      "provenance": "inferred"
+    },
+    {
+      "from": "Monthly churn rate",
+      "to": "MRR",
+      "direction": "negative",
+      "provenance": "inferred"
+    }
+  ],
+  "unknowns": [
+    "Effect of price increase on churn",
+    "Effect of price increase on number of Pro subscribers",
+    "Effect of Pro feature release on subscriber growth"
+  ]
+}
