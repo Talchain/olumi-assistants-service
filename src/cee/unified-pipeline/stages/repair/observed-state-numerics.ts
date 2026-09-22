@@ -37,6 +37,13 @@
  * recording the drop in the existing field-deletion audit. It NEVER invents or
  * repairs a number.
  *
+ * ⚠ `isFiniteNumber` IS DELIBERATELY STRICTER THAN THE SCHEMA, AND THE EARLIER
+ * WORDING HERE WAS WRONG. Measured on zod 3.25.76: `z.number()` rejects `NaN`
+ * but ACCEPTS `±Infinity`, so `{ value: Infinity }` parses. This module drops
+ * it anyway — an infinite magnitude is not a position on a 0–1 scale and
+ * nothing downstream can use it — but it is dropped as UNUSABLE, not as
+ * unparseable. Do not read the audit row as "this would have 400ed".
+ *
  * ⛔ IT DOES NOT COERCE. A numeric STRING is not promoted, even though
  * `"0.6"` → `0.6` would be value-preserving, because `value` is the factor's
  * position on the model 0–1 scale and a string like `"30000"` would coerce
@@ -64,6 +71,7 @@ import {
   type FieldDeletionEvent,
 } from "../../utils/field-deletion-audit.js";
 import { log } from "../../../../utils/telemetry.js";
+import { LEVEL_BEARING_CLAIM_NODE_KINDS } from "../../../draft/records/projector.js";
 
 /** Stage label for the field-deletion audit. */
 const STAGE = "observed-state-numerics";
@@ -81,6 +89,13 @@ function previousState(o: Record<string, unknown>): Record<string, unknown> {
   if (isFiniteNumber(o.raw_value)) prev.previous_raw_value = o.raw_value;
   if (typeof o.unit === "string") prev.previous_unit = o.unit;
   if (isFiniteNumber(o.cap)) prev.previous_cap = o.cap;
+  // ⚠ THE TARGET SHAPE CARRIES NONE OF THE ABOVE. `projector.ts:3425` emits
+  // `{declared_scale}` and nothing else, so an audit recording only
+  // value/raw_value/unit/cap says a deletion happened without saying what was
+  // deleted. `declared_scale` also has a node-level twin that SURVIVES this
+  // drop, and `declared-scale-carriage.test.ts` pins the two carriers as
+  // agreeing — so the loss must at minimum be visible here.
+  if (o.declared_scale !== undefined) prev.previous_declared_scale = o.declared_scale;
   return prev;
 }
 
@@ -92,7 +107,16 @@ export function runObservedStateNumerics(ctx: StageContext): void {
 
   for (const raw of nodes as Array<Record<string, unknown>>) {
     if (raw === null || typeof raw !== "object") continue;
-    if (raw.kind !== "factor") continue;
+    // ⭐ SCOPE IS BOUND TO THE PRODUCER'S OWN SET, NOT A SECOND COPY OF IT.
+    // `projector.ts:3425` writes `observed_state = {...prev, declared_scale}`
+    // OUTSIDE its `typeof claim.value === "number"` guard, for every kind in
+    // `LEVEL_BEARING_CLAIM_NODE_KINDS` — factor, risk AND outcome. Scoping this
+    // to `factor` alone rescued one of the three: risk and outcome still 400ed
+    // on the identical shape. The 11-of-11 factor sample was the shape the
+    // capture happened to contain, never proof the other two cannot fire.
+    // Importing the set means the two cannot drift (trap 21).
+    if (typeof raw.kind !== "string") continue;
+    if (!LEVEL_BEARING_CLAIM_NODE_KINDS.has(raw.kind as never)) continue;
     if (!("observed_state" in raw)) continue;
 
     const observed = raw.observed_state;
@@ -128,7 +152,11 @@ export function runObservedStateNumerics(ctx: StageContext): void {
 
     // `value` is sound; a non-numeric `raw_value` alone still fails
     // `z.number().optional()` on both branches. Drop only that key.
-    if ("raw_value" in o && !isFiniteNumber(o.raw_value)) {
+    // `"raw_value" in o` is the WRONG test: `z.number().optional()` accepts
+    // `undefined`, so a present-but-undefined key parses. Deleting it recorded
+    // a false row in an audit whose own header demands it support honest
+    // statements.
+    if (o.raw_value !== undefined && !isFiniteNumber(o.raw_value)) {
       const previous = o.raw_value;
       delete o.raw_value;
       events.push(

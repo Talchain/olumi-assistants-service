@@ -23,7 +23,8 @@
  * UI renders, nor about the incidence rate on staging.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { log } from "../../../../../utils/telemetry.js";
 import type { StageContext } from "../../../types.js";
 import { runObservedStateNumerics } from "../observed-state-numerics.js";
 import { runStructuralParse } from "../structural-parse.js";
@@ -126,6 +127,49 @@ describe("observed_state numeric normalisation", () => {
     expect(ev.previous_unit).toBe("£");
   });
 
+  // ── F1: the producer writes this shape on THREE kinds, not one ──────────
+  // `projector.ts:3425` emits `observed_state = {...prev, declared_scale}`
+  // outside its value guard for every kind in LEVEL_BEARING_CLAIM_NODE_KINDS.
+  // Scoping the repair to `factor` rescued one of three.
+  for (const kind of ["factor", "risk", "outcome"] as const) {
+    it(`a ${kind} carrying only {declared_scale} is rescued, not 400ed`, () => {
+      const ctx = makeCtx([
+        { id: `n_${kind}`, kind, label: `A ${kind}`, data: { value: 0.4 },
+          declared_scale: "unit_interval",
+          observed_state: { declared_scale: "unit_interval" } },
+      ]);
+      runBoth(ctx);
+
+      expect(ctx.earlyReturn).toBeUndefined();
+      const node = (ctx.graph as any).nodes.find((n: any) => n.id === `n_${kind}`);
+      expect(node.observed_state).toBeUndefined();
+      // The node-level twin SURVIVES — only the unparseable copy goes.
+      expect(node.declared_scale).toBe("unit_interval");
+    });
+  }
+
+  it("the audit names declared_scale — the only thing the target shape carried", () => {
+    const ctx = makeCtx([
+      { id: "n_risk", kind: "risk", label: "A risk", data: { value: 0.4 },
+        declared_scale: "unit_interval",
+        observed_state: { declared_scale: "unit_interval" } },
+    ]);
+    runBoth(ctx);
+
+    const ev = ((ctx as any).fieldDeletions ?? []).find((e: any) => e.node_id === "n_risk");
+    expect(ev).toBeDefined();
+    expect(ev.previous_declared_scale).toBe("unit_interval");
+  });
+
+  it("a present-but-undefined raw_value parses, so it is left alone and NOT audited", () => {
+    // z.number().optional() accepts undefined — deleting it recorded a false row.
+    const ctx = makeCtx([factor({ value: 0.6, raw_value: undefined })]);
+    runBoth(ctx);
+
+    expect(ctx.earlyReturn).toBeUndefined();
+    expect((ctx as any).fieldDeletions).toBeUndefined();
+  });
+
   it("CONTRAST CONTROL: constraint validation is NOT loosened to buy a 200", () => {
     // A constraint node whose observed_state has a value but no valid operator
     // matches neither union branch. It must STILL fail — dropping a user's
@@ -203,5 +247,42 @@ describe("the normaliser is wired into the repair stage, not merely exported", (
     const node = (ctx.graph as any).nodes.find((n: any) => n.id === "fac_cost");
     expect(node?.observed_state).toBeUndefined();
     expect(ctx.earlyReturn).toBeUndefined();
+  });
+});
+
+/**
+ * F6 — `describeIssueNode` had ZERO test references, and a mutant returning
+ * `undefined` unconditionally survived 11/11 and 261/261. This is the only
+ * instrument that will name the writer of the next unparseable shape, so an
+ * untested one is a diagnostic that can silently stop working.
+ */
+describe("structural parse failure telemetry names the node", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("emits issue_nodes with identity, key set and member types — never values", () => {
+    const warn = vi.spyOn(log, "warn").mockImplementation((() => {}) as never);
+    // A constraint is skipped by the normaliser, so this reaches the parse and fails.
+    const ctx = makeCtx([
+      factor({ value: 0.6 }),
+      { id: "con_budget", kind: "constraint", label: "Budget cap",
+        observed_state: { value: 50000, metadata: {} } },
+    ]);
+    runBoth(ctx);
+
+    expect(ctx.earlyReturn?.statusCode).toBe(400);
+    const call = warn.mock.calls.find(
+      (c: any) => c[0]?.event === "cee.structural_parse.failed",
+    );
+    expect(call).toBeDefined();
+    const nodes = (call as any)[0].issue_nodes;
+    expect(Array.isArray(nodes)).toBe(true);
+    const entry = nodes.find((n: any) => n.node_id === "con_budget");
+    expect(entry).toBeDefined();
+    expect(entry.node_kind).toBe("constraint");
+    expect(entry.field).toBe("observed_state");
+    expect(entry.field_keys).toEqual(["value", "metadata"]);
+    expect(entry.member_types).toEqual({ value: "number", metadata: "object" });
+    // ⛔ The user's magnitude must NOT be in the log line.
+    expect(JSON.stringify(nodes)).not.toContain("50000");
   });
 });
