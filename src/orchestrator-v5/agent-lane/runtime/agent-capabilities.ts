@@ -43,6 +43,7 @@ export function authorisationTurnId(proposalId: string): string {
 }
 import { createProposal, ProposalStore, type ProposalOperation } from '../proposal.js';
 import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
+import { structuralFacts } from '../structural-facts.js';
 import type { AgentCapabilities, AgentToolContext, ToolResult } from './agent-tools.js';
 import { buildModelFromBrief, type CallStructuredModel } from './build-model.js';
 
@@ -99,6 +100,11 @@ export function createAgentCapabilities(
           value: typeof n.observed_state?.value === 'number' ? n.observed_state.value : null,
         })),
         existing_links: g.edges.map((e) => `${e.from} -> ${e.to}`),
+        // Derived by traversal of the persisted graph — facts, not estimates,
+        // and the Agent may state them to the user as facts. Without these it
+        // has to infer topology from an edge list, and measurably does it worse
+        // than the product it is being compared against.
+        structure: structuralFacts(g.nodes, g.edges),
         analysis: g.analysis_state,
       };
     },
