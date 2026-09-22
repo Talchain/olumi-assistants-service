@@ -31,7 +31,7 @@ const widened = JSON.parse(readFileSync(new URL('widened.json', d), 'utf8'));
 describe('brief-derived authorship', () => {
   it('a node whose figure came from the brief is stamped brief_extraction', () => {
     const m = admitCandidateModel(faithful, widened);
-    const price = m.nodes.find((n) => n.label === 'Pro plan price');
+    const price = m.nodes.find((n) => (n.description ?? n.label) === 'Pro plan price');
     expect(price, 'the capture carries a stated price').toBeDefined();
     expect(price!.observed_state?.value).toBe(49);
     // The builder marked this factor provenance 'explicit' — meaning the user

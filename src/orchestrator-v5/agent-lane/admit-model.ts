@@ -30,7 +30,27 @@ import {
 } from './admit-constraint.js';
 
 const MAX_ID = 100;
-const MAX_LABEL = 200;
+
+/**
+ * ⛔ 33, AND THE NUMBER IS DERIVED, NOT CHOSEN.
+ *
+ * `structural_add_edge` builds its handler fact's `safe_summary` as
+ * `Connected ${fromLabel} to ${toLabel}` (`structural-add-edge.ts:494`) and the
+ * fact schema caps that string at **80**. "Connected " + " to " is 14, so the two
+ * labels together must fit 66 — and a per-label cap of 33 guarantees ANY pair
+ * composes.
+ *
+ * Measured the hard way: an admitted model whose labels were 53 and 18 produced
+ * `safe_summary` at 85 and CEE refused the write with
+ * `refusal_reason: "fact_invalid"`, telling the user "I couldn't record that
+ * properly, so I haven't changed the model." It committed the turn honestly and
+ * wrote no graph. A long label does not degrade the model — it makes the model
+ * UNEDITABLE.
+ *
+ * The full text is never discarded: it goes to `description`, which `NodeV3`
+ * declares, and the shortening is recorded in the ledger.
+ */
+const MAX_LABEL = 33;
 
 export type CandidateNodeKind =
   | 'goal' | 'option' | 'factor' | 'risk' | 'outcome' | 'constraint' | 'decision';
@@ -82,6 +102,8 @@ export interface WidenerAdditions {
 }
 
 export interface AdmittedNode {
+  /** The full text, when the label had to be shortened to stay editable. */
+  description?: string;
   /**
    * factor node id -> encoded level this option sets.
    *
@@ -127,6 +149,15 @@ export interface AdmittedModel {
   readonly goal_constraints: readonly AdmittedConstraint[];
   readonly loss: readonly RepairEntry[];
   readonly withheld: readonly { from: string; to: string; reason: string; detail: string }[];
+}
+
+/** Shorten to the label budget at a word boundary, never mid-word. */
+export function shortLabel(full: string): string {
+  if (full.length <= MAX_LABEL) return full;
+  const cut = full.slice(0, MAX_LABEL - 1);
+  const lastSpace = cut.lastIndexOf(' ');
+  const base = lastSpace > MAX_LABEL / 2 ? cut.slice(0, lastSpace) : cut;
+  return base.replace(/[\s,;:.-]+$/, '') + '\u2026';
 }
 
 export function slugId(label: string): string {
@@ -308,10 +339,26 @@ export function admitCandidateModel(
     inference_classes[id] = inferenceClassFor(e.provenance);
     // A factor whose baseline is NOT known gets no observed_state at all —
     // an absent value is the honest record; a zero would be a measurement.
+    const label = shortLabel(e.label);
+    if (label !== e.label) {
+      loss.push({
+        code: REPAIR_CODES.RESOLVE_BELIEF_PRECEDENCE,
+        layer: 'cee',
+        field_path: `nodes[${id}].label`,
+        before: e.label,
+        after: label,
+        reason:
+          `The label was ${e.label.length} characters. Any structural edit composes two labels into ` +
+          `a summary capped at 80, so a label over ${MAX_LABEL} makes the model uneditable. The full ` +
+          'text is preserved on the node description and here.',
+        severity: 'info',
+      });
+    }
     nodes.push({
       id,
       kind: e.kind,
-      label: e.label.slice(0, MAX_LABEL),
+      label,
+      ...(label !== e.label ? { description: e.label } : {}),
       provenance: displayProvenanceFor(e.provenance),
       ...(e.node ?? {}),
     });

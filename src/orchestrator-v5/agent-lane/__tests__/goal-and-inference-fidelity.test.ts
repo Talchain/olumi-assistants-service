@@ -70,11 +70,14 @@ describe('inference class survives', () => {
     const wideneradded = widened.proposed_factors[0].label as string;
     const builderInferred = faithful.risks.find((r) => r.provenance === 'inferred')?.label
       ?? faithful.options.find((o) => o.provenance === 'inferred')!.label;
-    const idOf = (label: string) => m.nodes.find((n) => n.label === label)!.id;
+    // Labels may have been shortened to stay editable, so resolve on the full
+    // text where one was kept.
+    const nodeFor = (label: string) => m.nodes.find((n) => (n.description ?? n.label) === label)!;
+    const idOf = (label: string) => nodeFor(label).id;
 
     // The node DISPLAY enum collapses both to 'ai_inferred' — it cannot carry this.
-    expect(m.nodes.find((n) => n.label === wideneradded)!.provenance).toBe('ai_inferred');
-    expect(m.nodes.find((n) => n.label === builderInferred)!.provenance).toBe('ai_inferred');
+    expect(nodeFor(wideneradded).provenance).toBe('ai_inferred');
+    expect(nodeFor(builderInferred).provenance).toBe('ai_inferred');
 
     // The class rides beside the graph instead, where W3 can score it.
     expect(m.inference_classes[idOf(wideneradded)]).toBe('model_proposed');
