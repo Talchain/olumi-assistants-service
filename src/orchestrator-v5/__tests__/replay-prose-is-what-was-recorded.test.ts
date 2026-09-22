@@ -76,11 +76,32 @@ const meta = () => ({
   handler_facts: [],
 });
 
-function storeReporting(replayed: boolean): SessionStore {
+/**
+ * The authoritative graph AFTER the intervening write: T2 moved the factor to 17.
+ * A replay of T1 must reconcile against THIS, not against what T1 asked for.
+ */
+const GRAPH_AT_17 = {
+  nodes: [
+    {
+      id: 'bc936d4c',
+      kind: 'factor',
+      label: 'Sales Cycle Length',
+      display_value: '17 months',
+      observed_state: { unit: 'months', value: 0.85, raw_value: 17 },
+    },
+  ],
+  edges: [],
+};
+
+function storeReporting(
+  replayed: boolean,
+  loadGraph: () => Promise<unknown> = async () => GRAPH_AT_17,
+): SessionStore {
   const base = createNoopSessionStore();
   return {
     ...base,
     append: async () => ({ id: 'turn-row', ...(replayed ? { replayedPriorTurn: true as const } : {}) }),
+    loadGraph,
   } as SessionStore;
 }
 
@@ -110,6 +131,42 @@ describe('a replay states that nothing was written, in prose and in the payload'
   it('RED: the open_inspector directive is dropped — no node was changed', async () => {
     const r = await commitDirectAnswer(composed(), meta() as never, storeReporting(true));
     expect(blocksOf(r.response).some((b) => b.type === 'ui_directive')).toBe(false);
+  });
+
+  /**
+   * ⛔ THE SEQUENCE RELEASE CONTROL REQUIRED PINNED, AND WHY.
+   *
+   * T1 = 14 -> a DIFFERENT turn moves it to 17 -> retry T1. An earlier version of
+   * this branch answered only "nothing new was written just now. Open the model
+   * to see its current values." Release control blocked it: truthful about the
+   * RETRY, but it never established what the state IS — and the seam could not
+   * FAIL when the current model was never reread.
+   *
+   * The response must now prove the current authoritative value is 17.
+   */
+  it('RED: the reply RECONCILES against authoritative current state (17), not what T1 asked for', async () => {
+    const r = await commitDirectAnswer(composed(), meta() as never, storeReporting(true));
+    expect(r.response.assistant_text, 'a recovery that names no state is not a reconciliation').toMatch(/17 months/);
+    expect(r.response.assistant_text, 'and it must not resurrect what the retry asked for').not.toMatch(/\b14\b/);
+  });
+
+  it('RED: the graph_patch `after` carries the AUTHORITATIVE current state', async () => {
+    const r = await commitDirectAnswer(composed(), meta() as never, storeReporting(true));
+    const patch = blocksOf(r.response).find((b) => b.type === 'graph_patch');
+    expect(patch?.status).toBe('noop');
+    expect((patch?.after as Record<string, unknown> | null)?.raw_value).toBe(17);
+  });
+
+  it('TRUTHFULLY UNAVAILABLE — an unreadable graph says so and asserts NO state', async () => {
+    const r = await commitDirectAnswer(
+      composed(),
+      meta() as never,
+      storeReporting(true, async () => { throw new Error('store unavailable'); }),
+    );
+    expect(r.response.assistant_text).toMatch(/couldn't read the current value/i);
+    expect(r.response.assistant_text, 'never guess a value onto a recovery receipt').not.toMatch(/\b1[47]\b/);
+    const patch = blocksOf(r.response).find((b) => b.type === 'graph_patch');
+    expect(patch?.after, '`after: null` is the structured current-state-unavailable signal').toBeNull();
   });
 
   it('CONTROL — an ordinary FIRST commit is byte-identical', async () => {

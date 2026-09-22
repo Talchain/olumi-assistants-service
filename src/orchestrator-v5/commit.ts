@@ -1604,37 +1604,103 @@ export async function commitDirectAnswer(
   //    The `ui_directive` block goes too: it exists to "point the UI at the node
   //    the user just changed", and on a replay no node was changed.
   if (appendOutcome.replayedPriorTurn === true) {
+    // ⭐⭐ A RECOVERY MUST RECONCILE AGAINST AUTHORITATIVE CURRENT STATE, NOT
+    //    MERELY DECLINE TO LIE.
+    //
+    // The previous version said only "nothing new was written just now. Open the
+    // model to see its current values." Release control's exact-head verdict
+    // blocked that: truthful about the RETRY, but it never establishes what the
+    // state actually IS — and the acceptance seam could not FAIL when the
+    // current model was never reread.
+    //
+    // On the witnessed sequence (T1 = 14, a DIFFERENT turn moves it to 17, retry
+    // T1) the honest answer names 17. So the replay path rereads through the
+    // EXISTING read boundary (`SessionStore.loadGraph`, the same one
+    // `build-turn-context` uses) and reconciles the targeted field.
+    //
+    // ⚠ TRUTHFULLY UNAVAILABLE BEATS GUESSED. If the reread fails or the target
+    //   cannot be resolved, the prose says so and the patch's `after` is set to
+    //   `null` — an existing nullable field meaning "no current state is being
+    //   asserted". Nothing is invented onto a recovery receipt.
+    //
+    // Costs one read on the REPLAY path only; an ordinary first commit never
+    // reaches this branch.
+    const blocksBefore = Array.isArray(
+      (responseWithModelVersionReceipt as { blocks?: unknown }).blocks,
+    )
+      ? (responseWithModelVersionReceipt as { blocks: unknown[] }).blocks
+      : null;
+    let patchTargetId: string | null = null;
+    for (const b of blocksBefore ?? []) {
+      if (typeof b === 'object' && b !== null && (b as { type?: unknown }).type === 'graph_patch') {
+        const t = (b as { target_id?: unknown }).target_id;
+        if (typeof t === 'string' && t.length > 0) {
+          patchTargetId = t;
+          break;
+        }
+      }
+    }
+
+    let currentState: Record<string, unknown> | null = null;
+    let currentSentence: string | null = null;
+    if (patchTargetId !== null && sessionStore !== undefined) {
+      try {
+        const currentGraph = await sessionStore.loadGraph(metadata.scenario_id);
+        const nodes = (currentGraph as { nodes?: unknown } | null)?.nodes;
+        if (Array.isArray(nodes)) {
+          for (const n of nodes) {
+            if (typeof n !== 'object' || n === null) continue;
+            if ((n as { id?: unknown }).id !== patchTargetId) continue;
+            const obs = (n as { observed_state?: unknown }).observed_state;
+            if (typeof obs === 'object' && obs !== null) {
+              currentState = obs as Record<string, unknown>;
+            }
+            const dv = (n as { display_value?: unknown }).display_value;
+            const lbl = (n as { label?: unknown }).label;
+            if (typeof dv === 'string' && dv.length > 0 && typeof lbl === 'string' && lbl.length > 0) {
+              currentSentence = `${lbl} is currently ${dv}.`;
+            }
+            break;
+          }
+        }
+      } catch {
+        // An unreadable graph is an UNKNOWN, not a fact — fall to the neutral arm.
+      }
+    }
+
     log.info(
       {
         scenario_id: metadata.scenario_id,
         turn_id: metadata.turn_id,
         turn_row_id: persistedRowId,
+        current_state_reconciled: currentState !== null,
       },
       'V5 commit — this turn REPLAYED an already-committed request; nothing was ' +
-        'written, so the response states that rather than narrating an edit',
+        'written, and the response reports authoritative current state',
     );
-    const existingBlocks = Array.isArray(
-      (responseWithModelVersionReceipt as { blocks?: unknown }).blocks,
-    )
-      ? ((responseWithModelVersionReceipt as { blocks: unknown[] }).blocks)
-      : null;
+
     const correctedBlocks =
-      existingBlocks === null
+      blocksBefore === null
         ? null
-        : existingBlocks
+        : blocksBefore
             .filter(
-              (b) => !(typeof b === 'object' && b !== null && (b as { type?: unknown }).type === 'ui_directive'),
+              (b) =>
+                !(typeof b === 'object' && b !== null && (b as { type?: unknown }).type === 'ui_directive'),
             )
             .map((b) =>
               typeof b === 'object' && b !== null && (b as { type?: unknown }).type === 'graph_patch'
-                ? { ...(b as Record<string, unknown>), status: 'noop' }
+                ? // `noop` — nothing was written. `after` carries the AUTHORITATIVE
+                  // current state, or `null` when it could not be established:
+                  // the structured current-state-unavailable signal.
+                  { ...(b as Record<string, unknown>), status: 'noop', after: currentState }
                 : b,
             );
+
     responseWithModelVersionReceipt = {
       ...responseWithModelVersionReceipt,
       assistant_text:
-        'That change had already been recorded, so nothing new was written just now. '
-        + 'Open the model to see its current values.',
+        'That change had already been recorded, so nothing new was written just now. ' +
+        (currentSentence ?? "I couldn't read the current value just now — open the model to check it."),
       ...(correctedBlocks === null ? {} : { blocks: correctedBlocks }),
     } as typeof responseWithModelVersionReceipt;
   }
