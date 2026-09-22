@@ -41,22 +41,42 @@ import {
 /** A graph the analysis hash can actually derive from. */
 const GRAPH = { nodes: [{ id: 'n1', kind: 'factor', label: 'F' }], edges: [] };
 
+/**
+ * The read states as `buildTurnContext` actually produces them, declared as
+ * consts rather than inline literals.
+ *
+ * ⚠ NOT COSMETIC. Inline object literals trigger TypeScript's excess-property
+ *   check against the narrow `{ readonly status: string }` parameter, which
+ *   turned `Typecheck Drift (ratchet)` RED — that job runs the FULL
+ *   `tsc -p tsconfig.json` (src + tests), unlike `tsconfig.build.json`.
+ *   Declaring them also makes the fixtures the SHAPES PRODUCTION PASSES
+ *   (`CanonicalGraphReadState`, build-turn-context.ts:118-147) rather than a
+ *   status-only stand-in, so the test exercises the real object.
+ *
+ *   The parameter stays structural on purpose: importing
+ *   `CanonicalGraphReadState` into the binding module would create a cycle,
+ *   because `build-turn-context.ts` imports the binding module.
+ */
+const DEGRADED = { status: 'degraded', errorCode: 'store_unavailable' };
+const OK_ABSENT = { status: 'ok_absent' };
+const OK_PRESENT = { status: 'ok_present', graph: GRAPH };
+
 describe('a degraded read A stands the guard down rather than arming it', () => {
   it('RED: a DEGRADED read yields NO_CLAIM, not null', () => {
     expect(
-      analysisGraphIdentityForRead(null, { status: 'degraded', errorCode: 'store_unavailable' }),
+      analysisGraphIdentityForRead(null, DEGRADED),
       'a degraded read is not the fact "this scenario has no graph" — arming the guard ' +
         'with null refuses a turn where read B simply succeeded',
     ).toBe(NO_CLAIM);
   });
 
   it('CONTROL — a GENUINE absence still yields null, so two reads can agree on it', () => {
-    expect(analysisGraphIdentityForRead(null, { status: 'ok_absent' })).toBeNull();
+    expect(analysisGraphIdentityForRead(null, OK_ABSENT)).toBeNull();
   });
 
   it('CONTROL — a successful read still yields the real hash, so divergence is still caught', () => {
     const direct = analysisGraphIdentityOf(GRAPH);
-    expect(analysisGraphIdentityForRead(GRAPH, { status: 'ok_present', graph: GRAPH })).toBe(direct);
+    expect(analysisGraphIdentityForRead(GRAPH, OK_PRESENT)).toBe(direct);
     expect(typeof direct).toBe('string');
   });
 
