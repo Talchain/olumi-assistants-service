@@ -52,7 +52,23 @@ export type InternalDispatch = (path: string, body: unknown) => Promise<{ status
 
 interface GraphRead {
   readonly graph_hash: string;
-  readonly nodes: { id: string; kind: string; label: string; description?: string; observed_state?: Record<string, unknown> }[];
+  /**
+   * Declared, not cast. `readGraph` passes the persisted node through verbatim,
+   * so these are the carriers the stored graph really holds — counted across
+   * every stored graph on 22 Sep 2026: `provenance` 209,115, `display_value`
+   * 34,107, `scale_frame` 5,803. Naming them here is what lets the projection
+   * read them without an `as` that would hide a later rename.
+   */
+  readonly nodes: {
+    id: string;
+    kind: string;
+    label: string;
+    description?: string;
+    display_value?: unknown;
+    scale_frame?: unknown;
+    provenance?: unknown;
+    observed_state?: Record<string, unknown>;
+  }[];
   readonly edges: { from: string; to: string }[];
   readonly analysis_state: unknown;
 }
@@ -102,14 +118,50 @@ export function createAgentCapabilities(
         mutated: false,
         graph_revision: g.graph_hash,
         empty: g.nodes.length === 0,
-        entities: g.nodes.map((n) => ({
-          label: n.label,
-          ...(n.description !== undefined ? { full_label: n.description } : {}),
-          kind: n.kind,
-          // A value only when one is actually stored. Absence is reported as
-          // unknown rather than as a zero.
-          value: typeof n.observed_state?.value === 'number' ? n.observed_state.value : null,
-        })),
+        entities: g.nodes.map((n) => {
+          // The carriers the persisted graph already holds. Reading them is not
+          // enrichment — every one of these is a field the estate stores, and
+          // withholding them made the Agent reconstruct from the prompt what
+          // canonical state already knew.
+          const os = (n.observed_state ?? {}) as Record<string, unknown>;
+          const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+          const str = (v: unknown): v is string => typeof v === 'string' && v.length > 0;
+          // Value provenance is a DIFFERENT fact from entity provenance: who
+          // put this NUMBER here, versus where the entity came from. Collapsing
+          // them is how a system-read figure inherits a user's authority.
+          const valueProvenance = {
+            ...(str(os.source) ? { source: os.source } : {}),
+            ...(str(os.extractionType) ? { extraction_type: os.extractionType } : {}),
+          };
+          return {
+            // ⭐ THE ID. Without it the only way to act on an entity was a fuzzy
+            // label match, which collides and cannot address two entities that
+            // read alike.
+            id: n.id,
+            label: n.label,
+            ...(n.description !== undefined ? { full_label: n.description } : {}),
+            kind: n.kind,
+            // A value only when one is actually stored. Absence is reported as
+            // unknown rather than as a zero.
+            value: num(os.value) ? os.value : null,
+            // ⚠ EVERY FIELD BELOW IS OMITTED WHEN ABSENT, never nulled. A null
+            // here would read to a model as a stated fact ("there is no unit")
+            // rather than as silence, and the Agent would repeat it.
+            ...(num(os.raw_value) ? { raw_value: os.raw_value } : {}),
+            ...(str(n.display_value) ? { display_value: n.display_value } : {}),
+            ...(str(os.unit) ? { unit: os.unit } : {}),
+            // The scale carriers. A bare amount with none of these is not just
+            // under-described, it is unanalysable downstream — the Agent needs
+            // to see that to explain it.
+            ...(num(os.cap) ? { cap: os.cap } : {}),
+            ...(str(os.declared_scale) ? { declared_scale: os.declared_scale } : {}),
+            ...(n.scale_frame === undefined ? {} : { scale_frame: n.scale_frame }),
+            ...(Object.keys(valueProvenance).length === 0
+              ? {}
+              : { value_provenance: valueProvenance }),
+            ...(n.provenance === undefined ? {} : { provenance: n.provenance }),
+          };
+        }),
         existing_links: g.edges.map((e) => `${e.from} -> ${e.to}`),
         // Derived by traversal of the persisted graph — facts, not estimates,
         // and the Agent may state them to the user as facts. Without these it
