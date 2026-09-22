@@ -16,27 +16,51 @@
  * own model: there is nothing for an agent to decide.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 
 const ENV = ['AGENT_LANE_ENABLED', 'AGENT_LANE_PREVIEW'] as const;
-const saved: Record<string, string | undefined> = {};
+
+/**
+ * ⛔ ONE APP PER MODE, BUILT ONCE — and the reason is measured, not stylistic.
+ *
+ * Each test used to build its own app: `vi.resetModules()` plus a COLD import of
+ * the whole route module and its dependency tree, five times over. Alone that
+ * passes; under the full agent-lane suite it failed 3/3 locally, always on a
+ * 5 s timeout in the first test, and an independent review saw the same on
+ * pure staging 9c16e8cd. A test that only passes on a quiet machine is a red
+ * waiting to land on everyone's required check.
+ *
+ * The route resolves `mode` from config at REGISTRATION, so full and preview
+ * genuinely need separate module instances — two imports, not five — and the
+ * cold import gets a hook timeout sized for a cold import instead of the 5 s
+ * test default. Assertions are unchanged.
+ */
+const COLD_IMPORT_MS = 60_000;
 
 /** A real app: the route under test, plus a recorder standing in for the orchestrator. */
 async function appWith(preview: boolean): Promise<{ app: FastifyInstance; seen: unknown[] }> {
+  const saved: Record<string, string | undefined> = {};
+  for (const k of ENV) saved[k] = process.env[k];
   vi.resetModules();
   process.env.AGENT_LANE_ENABLED = 'true';
   process.env.AGENT_LANE_PREVIEW = preview ? 'true' : 'false';
-  const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
-  const app = Fastify({ logger: false });
-  const seen: unknown[] = [];
-  app.post('/orchestrate/v2/turn', async (req) => {
-    seen.push(req.body);
-    return { response_version: 2, assistant_text: 'Updated.', blocks: [], suggested_actions: [], insights: [], graph_hash: 'h1' };
-  });
-  await app.register(agentV1TurnRoute);
-  await app.ready();
-  return { app, seen };
+  try {
+    const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
+    const app = Fastify({ logger: false });
+    const seen: unknown[] = [];
+    app.post('/orchestrate/v2/turn', async (req) => {
+      seen.push(req.body);
+      return { response_version: 2, assistant_text: 'Updated.', blocks: [], suggested_actions: [], insights: [], graph_hash: 'h1' };
+    });
+    // Registration is where the route reads its mode, so it must happen while
+    // the env still says what this app is for.
+    await app.register(agentV1TurnRoute);
+    await app.ready();
+    return { app, seen };
+  } finally {
+    for (const k of ENV) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
+  }
 }
 
 const CANVAS_EDIT = {
@@ -47,14 +71,16 @@ const CANVAS_EDIT = {
   event: { kind: 'factor_value_edit', target_id: 'pro_plan_price', value: 0.59, raw_value: 59, unit: 'GBP' },
 };
 
-beforeEach(() => { for (const k of ENV) saved[k] = process.env[k]; });
-afterEach(() => {
-  for (const k of ENV) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
-});
 
 describe('direct manipulation is forwarded, not refused', () => {
+  let app: FastifyInstance;
+  let seen: unknown[];
+  beforeAll(async () => { ({ app, seen } = await appWith(false)); }, COLD_IMPORT_MS);
+  afterAll(async () => { await app.close(); });
+  // Same array the stub pushes into, emptied in place so each test sees only its own posts.
+  beforeEach(() => { seen.length = 0; });
+
   it('delivers the payload to the handlers BYTE-IDENTICALLY', async () => {
-    const { app, seen } = await appWith(false);
     const res = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: CANVAS_EDIT });
     expect(res.statusCode).toBe(200);
     // ⭐ Bound by IDENTITY, not by "a call happened": the handler must receive
@@ -66,31 +92,25 @@ describe('direct manipulation is forwarded, not refused', () => {
     // ⛔ The exact refusal that broke Canvas must be gone.
     expect(JSON.stringify(body)).not.toMatch(/does not come through this conversation route/);
     expect((body._agent as { stopped_reason?: string } | undefined)?.stopped_reason).not.toBe('unsupported_kind');
-    await app.close();
   });
 
   it('says plainly that the turn was NOT agent-handled', async () => {
-    const { app } = await appWith(false);
     const res = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: CANVAS_EDIT });
     const trace = (res.json() as { _diagnostic_trace?: Record<string, unknown> })._diagnostic_trace;
     expect(trace?.exit_path).toBe('agent_lane_forwarded');
     expect(trace?.forwarded_kind).toBe('system_event');
-    await app.close();
   });
 
   it('forwards every kind in the vocabulary, not just the one that was reported', async () => {
-    const { app, seen } = await appWith(false);
     for (const k of ['structural_rename', 'structural_add_edge', 'chip_click', 'undo', 'patch_accepted']) {
       await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { ...CANVAS_EDIT, kind: k } });
     }
     expect(seen.map((b) => (b as { kind: string }).kind)).toEqual([
       'structural_rename', 'structural_add_edge', 'chip_click', 'undo', 'patch_accepted',
     ]);
-    await app.close();
   });
 
   it('CONTRAST CONTROL: a conversational turn is NOT forwarded — it is the Agent’s', async () => {
-    const { app, seen } = await appWith(false);
     await app.inject({
       method: 'POST', url: '/agent/v1/turn',
       payload: { kind: 'message', scenario_id: CANVAS_EDIT.scenario_id, message: 'what is in the model?' },
@@ -98,13 +118,18 @@ describe('direct manipulation is forwarded, not refused', () => {
     // It will fail for want of an OpenAI key, and that is fine: what matters is
     // that it did NOT take the forwarding path.
     expect(seen.filter((b) => (b as { kind?: string }).kind === 'message')).toHaveLength(0);
-    await app.close();
   });
 });
 
 describe('preview still refuses — the hard boundary does not move', () => {
+  let app: FastifyInstance;
+  let seen: unknown[];
+  beforeAll(async () => { ({ app, seen } = await appWith(true)); }, COLD_IMPORT_MS);
+  afterAll(async () => { await app.close(); });
+  // Same array the stub pushes into, emptied in place so each test sees only its own posts.
+  beforeEach(() => { seen.length = 0; });
+
   it('refuses a canvas edit and writes NOTHING', async () => {
-    const { app, seen } = await appWith(true);
     const res = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: CANVAS_EDIT });
     expect(res.statusCode).toBe(200);
     // ⛔ The whole point of preview: nothing reached the handlers.
@@ -112,6 +137,5 @@ describe('preview still refuses — the hard boundary does not move', () => {
     const body = res.json() as Record<string, unknown>;
     expect((body._agent as { stopped_reason?: string }).stopped_reason).toBe('read_only_preview');
     expect(String(body.assistant_text)).toMatch(/read-only preview/);
-    await app.close();
   });
 });
