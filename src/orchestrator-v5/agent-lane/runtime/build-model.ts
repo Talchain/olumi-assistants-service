@@ -35,6 +35,7 @@
 
 import { createHash } from 'node:crypto';
 import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
+import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { budgetFor } from '../model-budgets.js';
 import type { ToolResult } from './agent-tools.js';
@@ -126,6 +127,64 @@ export function constructionOperationId(scenarioId: string, brief: string): stri
   return `${x.slice(0, 8)}-${x.slice(8, 12)}-${x.slice(12, 16)}-${x.slice(16, 20)}-${x.slice(20)}`;
 }
 
+/** The version a construction became, as the Agent may cite it. */
+export interface ConstructionVersion {
+  readonly version_id: string;
+  readonly version_number: number;
+  readonly mutation_id: string | null;
+  readonly creation_kind: string;
+  readonly source_turn_id: string;
+}
+
+/**
+ * ⭐ FIND A CONSTRUCTION THAT ALREADY COMMITTED — by its operation, not by guessing.
+ *
+ * ⛔ THE DEFECT THIS CLOSES, from the independent review of #1691 at 84dadabb:
+ * after a build commits and its response is lost, a retry reached the
+ * "model already has entities" guard BEFORE it ever sent the derived
+ * operation id, so the registration replay arm was unreachable from the Agent
+ * — the model was saved and the Agent reported a refusal.
+ *
+ * The lookup is a READ through the product's own versions route: the
+ * construction's version carries `creation.source_turn_id`, and the turn id is
+ * derived from the SAME function the registration route uses. Anything the read
+ * cannot answer (a guest has no versions; the flag is off; a non-200) is "not
+ * found", never a receipt — so the caller falls back to today's behaviour
+ * rather than inventing one.
+ */
+export async function findConstructionVersion(
+  dispatch: InternalDispatch,
+  scenarioId: string,
+  brief: string,
+): Promise<ConstructionVersion | null> {
+  const turnId = registrationTurnId(scenarioId, constructionOperationId(scenarioId, brief));
+  let cursor: string | undefined;
+  // Bounded: a construction is the FIRST version, so it is on the last page of
+  // a newest-first history; five pages of 200 is far past any retry window.
+  for (let page = 0; page < 5; page += 1) {
+    const r = await dispatch(`/assist/v1/scenarios/${scenarioId}/versions`, {
+      limit: 200,
+      ...(cursor === undefined ? {} : { cursor }),
+    });
+    if (r.status !== 200) return null;
+    const versions = Array.isArray(r.json.versions) ? (r.json.versions as Array<Record<string, unknown>>) : [];
+    const hit = versions.find((v) => (v.creation as { source_turn_id?: unknown } | undefined)?.source_turn_id === turnId);
+    if (hit !== undefined) {
+      const creation = hit.creation as { kind?: unknown; mutation_id?: unknown };
+      return {
+        version_id: String(hit.version_id),
+        version_number: Number(hit.sequence),
+        mutation_id: typeof creation.mutation_id === 'string' ? creation.mutation_id : null,
+        creation_kind: String(creation.kind),
+        source_turn_id: turnId,
+      };
+    }
+    cursor = typeof r.json.next_cursor === 'string' ? r.json.next_cursor : undefined;
+    if (cursor === undefined) return null;
+  }
+  return null;
+}
+
 export async function buildModelFromBrief(
   scenarioId: string,
   brief: string,
@@ -191,6 +250,18 @@ export async function buildModelFromBrief(
     brief_text: brief,
     operation_id: constructionOperationId(scenarioId, brief),
   });
+  if (reg.status === 409 && (reg.json.details as { code?: unknown } | undefined)?.code === 'OPERATION_ID_REUSED') {
+    /**
+     * ⭐ A CONCURRENT BUILD OF THE SAME CONSTRUCTION ALREADY WON. Both calls passed
+     * the empty-graph guard and generated a model — generation is not
+     * deterministic, so the bytes differ — and the route refused this one
+     * because the operation was already committed. That is the SAME
+     * construction, saved once: recover its receipt instead of reporting a
+     * refusal for a model the user now has.
+     */
+    const prior = await findConstructionVersion(dispatch, scenarioId, brief);
+    if (prior !== null) return { ok: true, mutated: false, replayed: true, model_version: prior };
+  }
   if (reg.status !== 200) {
     return { ok: false, mutated: false, refusal: 'registration_refused', http: reg.status, detail: String(reg.json.message ?? '').slice(0, 200) };
   }

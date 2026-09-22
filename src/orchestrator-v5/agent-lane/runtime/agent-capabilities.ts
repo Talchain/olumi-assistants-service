@@ -46,7 +46,7 @@ import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
 import { structuralFacts } from '../structural-facts.js';
 import { defaultFrameFor } from '../admit-model.js';
 import type { AgentCapabilities, AgentToolContext, ToolResult } from './agent-tools.js';
-import { buildModelFromBrief, type CallStructuredModel } from './build-model.js';
+import { buildModelFromBrief, findConstructionVersion, type CallStructuredModel } from './build-model.js';
 
 /** One internal dispatch, so every path is the product's own. */
 export type InternalDispatch = (path: string, body: unknown) => Promise<{ status: number; json: Record<string, unknown> }>;
@@ -793,20 +793,43 @@ export function createAgentCapabilities(
       const brief = typeof args?.brief === 'string' ? args.brief.trim() : '';
       if (brief.length === 0) return { ok: false, mutated: false, refusal: 'empty_brief' };
 
-      // ⛔ NEVER BUILD OVER A MODEL THAT ALREADY EXISTS. Registration replaces
-      // the whole graph, so running this on a populated scenario would discard
-      // work the user has already authorised.
-      const before = await readGraph(ctx.scenario_id);
-      if (before === null) return { ok: false, mutated: false, refusal: 'not_found' };
-      if (before.nodes.length > 0) {
-        return {
-          ok: false, mutated: false, refusal: 'model_already_exists',
-          detail: 'The model already has entities. Propose a change instead of rebuilding it.',
+      /**
+       * ⭐ FIRST ASK WHETHER THIS CONSTRUCTION ALREADY COMMITTED — before the
+       * populated-graph guard, and before any model call.
+       *
+       * ⛔ Independent review of #1691 at 84dadabb: after a build commits and its
+       * response is lost, a retry hit the guard below first and answered
+       * `model_already_exists`, so the derived operation id never reached the
+       * registration replay arm. The model was saved; the Agent said it was not.
+       *
+       * If the version this brief's construction produced exists, recover its
+       * receipt — no second model generation, no second version — and let the
+       * SAME confirm-from-state block below report the model as it now stands.
+       * A populated graph with no matching operation is a genuinely different
+       * model, and keeps the refusal.
+       */
+      const prior = await findConstructionVersion(dispatch, ctx.scenario_id, brief);
+      let built: ToolResult;
+      if (prior !== null) {
+        built = {
+          ok: true, mutated: false, replayed: true, model_version: prior,
+          detail: `This model was already built from this brief and saved as version ${prior.version_number}. Nothing was built twice.`,
         };
+      } else {
+        // ⛔ NEVER BUILD OVER A MODEL THAT ALREADY EXISTS. Registration replaces
+        // the whole graph, so running this on a populated scenario would discard
+        // work the user has already authorised.
+        const before = await readGraph(ctx.scenario_id);
+        if (before === null) return { ok: false, mutated: false, refusal: 'not_found' };
+        if (before.nodes.length > 0) {
+          return {
+            ok: false, mutated: false, refusal: 'model_already_exists',
+            detail: 'The model already has entities. Propose a change instead of rebuilding it.',
+          };
+        }
+        built = await buildModelFromBrief(ctx.scenario_id, brief, dispatch, callStructured);
+        if (built.ok !== true) return built;
       }
-
-      const built = await buildModelFromBrief(ctx.scenario_id, brief, dispatch, callStructured);
-      if (built.ok !== true) return built;
 
       // Confirmed from state, never from the write's own return value.
       const after = await readGraph(ctx.scenario_id);
