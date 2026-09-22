@@ -28,6 +28,7 @@ import { config } from '../config/index.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import { scenarioAccessDecision } from '../orchestrator-v5/agent-lane/scenario-access.js';
 import { HistoryStore } from '../orchestrator-v5/agent-lane/history-store.js';
+import { internalHeaders } from '../orchestrator-v5/agent-lane/internal-headers.js';
 import { log } from '../utils/telemetry.js';
 import { composeDirectAnswerResponse } from '../orchestrator-v5/compose.js';
 import { finaliseV5Response } from '../orchestrator-v5/response-finaliser.js';
@@ -100,20 +101,45 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
    */
   const mode: AgentLaneMode = config.proxy.agentLanePreview === true ? 'preview' : 'full';
 
-  const dispatch: InternalDispatch = async (path, body) => {
-    const res = await app.inject({
-      method: 'POST',
-      url: path,
-      headers: {
-        'content-type': 'application/json',
-        'x-olumi-assist-key': config.auth.assistApiKey ?? config.auth.assistApiKeys?.[0] ?? '',
-      },
-      payload: body as Record<string, unknown>,
-    });
-    let json: Record<string, unknown> = {};
-    try { json = res.json() as Record<string, unknown>; } catch { json = {}; }
-    return { status: res.statusCode, json };
-  };
+  /**
+   * The internal dispatch, built PER REQUEST so it carries the caller's own
+   * identity.
+   *
+   * ⛔ THE ASSIST KEY ALONE CANNOT READ A SIGNED-IN USER'S SCENARIO, and this
+   * is not a theory — measured against deployed staging with a contrast control
+   * in the same run:
+   *
+   *     OWNED scenario, assist key only  -> HTTP 404
+   *     GUEST scenario, assist key only  -> HTTP 200
+   *
+   * A caller presenting only the key resolves to `service_legacy`, so
+   * `effectiveUserId` is null and every `/assist/v1/scenarios/*` route answers
+   * an indistinguishable 404 on an owned scenario. This dispatch was built once
+   * at registration with the key and nothing else, so every tool call on a
+   * signed-in user's own model would have come back `not_found` — the read, the
+   * build, all of it. All my local testing used guest scenarios, which is
+   * exactly why it passed.
+   *
+   * Forwarding the caller's `authorization` means the internal call resolves as
+   * the SAME user the outer request authenticated. It cannot widen authority:
+   * it is the caller's own token, and the ownership pre-flight above has
+   * already refused anyone who is not entitled to this scenario.
+   */
+  const dispatchFor = (authorization: string | undefined): InternalDispatch =>
+    async (path, body) => {
+      const res = await app.inject({
+        method: 'POST',
+        url: path,
+        headers: internalHeaders(
+          config.auth.assistApiKey ?? config.auth.assistApiKeys?.[0] ?? '',
+          authorization,
+        ),
+        payload: body as Record<string, unknown>,
+      });
+      let json: Record<string, unknown> = {};
+      try { json = res.json() as Record<string, unknown>; } catch { json = {}; }
+      return { status: res.statusCode, json };
+    };
 
 
   const callModel: CallModel = async (req) => onceMoreOnTransportFailure('conversation', async () => {
@@ -267,6 +293,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       return reply.code(409).send({ error: 'SCENARIO_OWNERSHIP_UNVERIFIABLE', detail: 'Could not verify the scenario. Nothing was changed.' });
     }
 
+    const dispatch = dispatchFor(
+      typeof req.headers.authorization === 'string' ? req.headers.authorization : undefined,
+    );
     const capabilities = createAgentCapabilities(dispatch, proposals, callStructured, mode);
     const history = histories.get(sessionId);
     const budget = budgetFor('gpt-5.6-terra', 'conversation');
