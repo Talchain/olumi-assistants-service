@@ -41,12 +41,12 @@ describe('goal fidelity', () => {
   });
 
   it('stamps the goal unit and the frame the contract calls load-bearing', () => {
-    const goal = admitted().nodes.find((n) => n.kind === 'goal');
+    const goal = admitted().nodes.find((n) => n.kind === 'goal')!;
     // `goal_threshold` is NORMALISED (raw / cap); the stated number is `_raw`.
-    expect(goal?.goal_threshold).toBeCloseTo(0.8, 10);
-    expect((goal as Record<string, unknown>).goal_threshold_raw).toBe(20000);
-    expect((goal as Record<string, unknown>).goal_threshold_unit).toBe('£');
-    expect((goal as Record<string, unknown>).goal_threshold_frame).toBe('level');
+    expect(goal.goal_threshold).toBeCloseTo(0.8, 10);
+    expect(goal.goal_threshold_raw).toBe(20000);
+    expect(goal.goal_threshold_unit).toBe('£');
+    expect(goal.goal_threshold_frame).toBe('level');
   });
 
   it('records the horizon it cannot represent, rather than dropping it silently', () => {

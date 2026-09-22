@@ -13,6 +13,7 @@ const caps = (over: Partial<AgentCapabilities> = {}): AgentCapabilities => ({
   proposeModelChange: async () => ({ ok: true, mutated: false, proposal_id: 'prop_1' }),
   authoriseChange: async () => ({ ok: true, mutated: true, applied: true }),
   runAnalysis: async () => ({ ok: true, mutated: false, verdict: 'blocked' }),
+  buildModelFromBrief: async () => ({ ok: true, mutated: true }),
   ...over,
 });
 

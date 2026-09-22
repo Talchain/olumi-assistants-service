@@ -55,6 +55,8 @@ describe('assessAnalysisAdmissibility', () => {
       edges: [
         { from: 'price', to: 'mrr', strength: { mean: 0.7, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' },
       ],
+      // Projection metadata only; `assessAnalysisAdmissibility` never reads it.
+      inference_classes: {},
       goal_constraints: [],
       loss: [],
       withheld: [],
@@ -76,6 +78,7 @@ describe('assessAnalysisAdmissibility', () => {
         { from: 'price', to: 'mrr', strength: { mean: 0.7, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' },
         { from: 'churn', to: 'price', strength: { mean: 0.5, std: 0.125 }, exists_probability: 0.8, effect_direction: 'positive', defaulted: true },
       ],
+      inference_classes: {},
       goal_constraints: [],
       loss: [],
       withheld: [],
