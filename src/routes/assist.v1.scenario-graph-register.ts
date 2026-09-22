@@ -149,6 +149,7 @@ import { computeGraphIdentityHash } from "../orchestrator-v5/context/graph-ident
 import { computeExpectedGraphCasHashes } from "../orchestrator-v5/context/graph-cas-conflict.js";
 import { projectGraphForPersistence } from "../orchestrator-v5/persisted-graph-projection.js";
 import { appendCheckedGraphWrite } from "../orchestrator-v5/persist-graph-write.js";
+import { buildAtomicCommittedModelVersion } from "../orchestrator-v5/commit.js";
 import { PersistedGraphInvariantError } from "../orchestrator-v5/persisted-graph-invariants.js";
 import { getSessionStore } from "../orchestrator-v5/session/index.js";
 import { GraphStaleWriteError } from "../orchestrator-v5/session/store.js";
@@ -443,6 +444,42 @@ export default async function route(app: FastifyInstance) {
       });
 
       const turnId = registrationTurnId();
+
+      // THE CANONICAL MODEL-VERSION RECEIPT — the same carrier
+      // `commitDirectAnswer` uses, called with the same inputs. This route is
+      // the other `scenarios.graph` writer (C3 below) and it wrote no receipt
+      // at all: measured on staging 22 Sep 2026, all 725 turns whose `turn_id`
+      // matches `graph_registration:%` carry `model_version_created` NULL —
+      // never `false`. NULL is the tell: `false` means the carrier ran and its
+      // policy declined; NULL means it was never reached. Contrast, same query:
+      // the 38,208 other turns carry 3,491 true / 8,518 false and 12,009
+      // mutation ids, so the writer works — this route never called it.
+      // `build_model_from_brief` (the agent lane's construction capability)
+      // persists THROUGH this route, which is how an agent-built model ended up
+      // with no durable history.
+      //
+      // ⚠ COMPUTED ON `graphForStore`, THE PROJECTED BYTES — never on
+      // `parsed.data`. The receipt content-addresses the graph, so hashing the
+      // submitted bytes would mint a version describing a graph that was never
+      // stored: the split-history defect the carrier's own header forbids. The
+      // route stamps `scenarios.graph_identity_hash` from these same bytes, so
+      // receipt and column agree by construction rather than by coincidence.
+      //
+      // ⚠ NOT EVERY REGISTERED GRAPH IS VERSIONABLE, and that is why this
+      // reuses the carrier's policy instead of writing a row unconditionally.
+      // The carrier gates on `GraphV3`, which requires `strength.std` on every
+      // edge; a graph missing it degrades to the carrier's logged skip and the
+      // registration still succeeds. Measured on the live estate 22 Sep 2026:
+      // 16,000 of 16,092 edges on registration-written scenarios carry
+      // `strength.std` (517 of 535 graphs fully populated), so the skip is the
+      // 18-graph minority, not the normal case — but it is a real population
+      // and it must not fail a user's import.
+      const versionPlan = buildAtomicCommittedModelVersion(graphForStore, {
+        scenario_id: scenarioId,
+        turn_id: turnId,
+        baseGraphForInvariants,
+      });
+
       try {
         // C3 — THE SHARED PERSISTENCE FLOOR, not `store.append` directly. This
         // route and `commitDirectAnswer` are the only two `scenarios.graph`
@@ -493,6 +530,9 @@ export default async function route(app: FastifyInstance) {
             ...(brief.value === undefined ? {} : { briefText: brief.value }),
             expectedGraphIdentityHash,
             expectedGraphAnalysisHash,
+            ...(versionPlan.kind === "plan"
+              ? { modelVersion: versionPlan.write }
+              : {}),
           },
         });
       } catch (err) {

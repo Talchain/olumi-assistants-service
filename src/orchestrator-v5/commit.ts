@@ -948,7 +948,7 @@ function classifyGraphV3NonConformance(error: ZodError): ModelVersionCarrierSkip
  * and the commit emits it from the post-success block once the append is
  * durable.
  */
-type AtomicCommittedModelVersionOutcome =
+export type AtomicCommittedModelVersionOutcome =
   | { readonly kind: 'plan'; readonly write: AtomicCommittedModelVersionWrite }
   /** A DESIGNED no-version outcome (flag off, no graph, no_op, presentation_only). Silent. */
   | { readonly kind: 'none' }
@@ -959,9 +959,35 @@ type AtomicCommittedModelVersionOutcome =
  * Log the skip immediately (a log line is not a claim about a committed
  * transaction) and carry the reason to the post-success emit.
  */
+/**
+ * Exactly the facts the model-version carrier reads. Declared as a `Pick` of
+ * `CommitMetadata` rather than a fresh interface so it cannot drift from it:
+ * `CommitMetadata` is assignable to this, so `commitDirectAnswer`'s own call
+ * site below is unchanged.
+ *
+ * WHY THIS IS NARROWED AND EXPORTED. `POST /assist/v1/scenarios/:id/graph/register`
+ * is the OTHER `scenarios.graph` writer (see `appendCheckedGraphWrite`'s C3
+ * header) and it wrote no version receipt at all: measured on staging
+ * 22 Sep 2026, all 725 `graph_registration:%` turns carry
+ * `model_version_created` NULL — never `false` — against 3,491 true / 8,518
+ * false on the 38,208 other turns. NULL means this carrier was never reached.
+ * The agent lane's `build_model_from_brief` persists through that route, so an
+ * agent-built model had no canonical history. The fix is for the route to call
+ * THIS carrier, not to gain a second one: there is one version writer.
+ *
+ * A registration does not hold an attested author, so it supplies no
+ * `versionActor` and the receipt records `actor_kind: 'unknown'` like every
+ * ordinary carrier. Attributing a registration to its verified caller is a
+ * separate question and deliberately not answered here.
+ */
+export type AtomicModelVersionCommitFacts = Pick<
+  CommitMetadata,
+  'scenario_id' | 'turn_id' | 'baseGraphForInvariants' | 'versionActor'
+>;
+
 function skipAtomicCommittedModelVersion(
   reason: ModelVersionCarrierSkipReason,
-  metadata: CommitMetadata,
+  metadata: AtomicModelVersionCommitFacts,
 ): AtomicCommittedModelVersionOutcome {
   log.warn(
     {
@@ -975,9 +1001,9 @@ function skipAtomicCommittedModelVersion(
 }
 
 /** Build the carrier and the exact graph bytes it content-addresses. */
-function buildAtomicCommittedModelVersion(
+export function buildAtomicCommittedModelVersion(
   graph: unknown,
-  metadata: CommitMetadata,
+  metadata: AtomicModelVersionCommitFacts,
 ): AtomicCommittedModelVersionOutcome {
   if (config.cee.modelVersionsEnabled !== true || !graphWasProvided(graph)) {
     return { kind: 'none' };

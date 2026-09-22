@@ -774,3 +774,112 @@ describe("register — the terminal persisted-graph invariant (C3 shared floor)"
     await app.close();
   });
 });
+
+// ── The canonical model-version receipt ─────────────────────────────────────
+// WHY THIS SUITE EXISTS. Measured on staging 22 Sep 2026: all 725 turns whose
+// `turn_id` matches `graph_registration:%` carry `model_version_created` NULL
+// and `model_version_mutation_id` NULL — not `false`. NULL is the tell. `false`
+// means the carrier ran and its policy declined; NULL means the carrier was
+// never reached. Contrast, same query: the 38,208 non-registration turns carry
+// 3,491 true / 8,518 false and 12,009 mutation ids, so the writer works — this
+// route simply never called it. `build_model_from_brief` (the agent lane's
+// construction capability) persists THROUGH this route, so an agent-built model
+// had no canonical version history.
+//
+// FIXTURE PROVENANCE, AND WHY IT IS NOT THIS FILE'S `IMPORTED`. The carrier
+// gates on `GraphV3`, which requires `strength.std` on every edge.
+// `walk-import-modified.wire.json` — this suite's `IMPORTED`, a 5 Aug capture —
+// carries it on 0 of 32 edges, so it is NOT VERSIONABLE and exercises only the
+// skip arm. It is stale relative to the current producer: measured on the live
+// estate 22 Sep 2026, registration-written scenarios carry `strength.std` on
+// 16,000 of 16,092 edges, 517 of 535 graphs fully populated. So the versionable
+// cases use `rich-persisted-graph.json` (the draft-persisted shape, already the
+// fixture of record in `merge-mutated-graph-persistence.test.ts` and
+// `turn-executor-d1-mutation-commit-graph.test.ts`), and `IMPORTED` is kept for
+// the skip case it genuinely represents — the 18-graph minority.
+//
+// The receipt cases bind BY IDENTITY, never by a value another object could
+// satisfy: the receipt must name THIS turn (`source_turn_id === write.turn_id`)
+// and content-address THESE bytes (`graph_identity_hash` recomputed on the
+// exact object handed to `store.append`). A receipt describing a different
+// graph is the split-history defect the carrier's own header forbids.
+describe("register — the canonical model-version receipt", () => {
+  const VERSIONABLE = JSON.parse(
+    readFileSync(
+      new URL(
+        "../../orchestrator-v5/__tests__/fixtures/exp01/rich-persisted-graph.json",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  );
+
+  it("POSITIVE CONTROL: the versionable fixture really does carry strength.std, and IMPORTED really does not", () => {
+    const std = (g: { edges: Array<{ strength?: { std?: number } }> }) =>
+      g.edges.filter((e) => typeof e.strength?.std === "number").length;
+    expect(std(VERSIONABLE)).toBe(VERSIONABLE.edges.length);
+    expect(std(IMPORTED as never)).toBe(0);
+  });
+
+  it("writes a committed_mutation receipt bound to THIS turn and THESE persisted bytes", async () => {
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: VERSIONABLE });
+    expect(res.statusCode).toBe(200);
+
+    const write = append.mock.calls[0][0];
+    expect(write.modelVersion).toBeDefined();
+    // Identity, not shape: the receipt names the turn that produced it.
+    expect(write.modelVersion.source_turn_id).toBe(write.turn_id);
+    expect(write.modelVersion.creation_kind).toBe("committed_mutation");
+    // Identity, not shape: the receipt content-addresses the STORED graph, so
+    // receipt and `scenarios.graph_identity_hash` describe the same bytes.
+    expect(write.modelVersion.graph_identity_hash).toBe(
+      computeGraphIdentityHash(write.graph as never)?.value,
+    );
+    await app.close();
+  });
+
+  it("FRESH SCENARIO — the agent-construction case: a null base still gets a receipt", async () => {
+    // `build_model_from_brief` builds into an empty scenario, so `loadGraph`
+    // returns null and the creation policy's `initial` arm is the one that
+    // matters. This is the exact shape the P0 was raised about.
+    loadGraph.mockResolvedValue(null);
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: VERSIONABLE });
+    expect(res.statusCode).toBe(200);
+
+    const write = append.mock.calls[0][0];
+    expect(write.modelVersion).toBeDefined();
+    expect(write.modelVersion.source_turn_id).toBe(write.turn_id);
+    await app.close();
+  });
+
+  it("DISCRIMINATING PAIR — re-registering the SAME graph writes NO receipt", async () => {
+    // The mutant this exists to kill: threading the plan in unconditionally.
+    // `decideModelVersionCreation` returns `no_op` when the comparable shapes
+    // match, and a no-op re-registration must not mint a version row. A fix
+    // that ignores the carrier's policy passes both cases above and fails here.
+    loadGraph.mockResolvedValue(VERSIONABLE);
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: VERSIONABLE });
+    expect(res.statusCode).toBe(200);
+
+    expect(append.mock.calls[0][0].modelVersion).toBeUndefined();
+    await app.close();
+  });
+
+  it("A NON-VERSIONABLE GRAPH STILL REGISTERS — the skip must not fail a user's import", async () => {
+    // The 18-graph minority measured above: no edge carries `strength.std`, so
+    // `GraphV3` refuses and the carrier degrades to a logged skip. The
+    // registration itself MUST still succeed and still store the graph —
+    // failing an import to protect a version row would be the worse defect.
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED });
+    expect(res.statusCode).toBe(200);
+
+    const write = append.mock.calls[0][0];
+    expect(write.modelVersion).toBeUndefined();
+    expect(write.graph).toBeDefined();
+    await app.close();
+  });
+});
