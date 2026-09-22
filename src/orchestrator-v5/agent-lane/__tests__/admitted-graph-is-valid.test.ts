@@ -55,7 +55,12 @@ describe('the admitted graph satisfies the write path’s own validator', () => 
   });
 
   it('goal_threshold is normalised, with the raw value and cap beside it', () => {
-    const goal = admitted().nodes.find((n) => n.kind === 'goal') as Record<string, unknown>;
+    // ⛔ NOT `as Record<string, unknown>`. AdmittedNode DECLARES these fields,
+    // so the cast was both illegal (TS2352) and actively harmful: it disabled
+    // the check that `goal_threshold_raw` is a real property name. A typo would
+    // have read `undefined` and the assertion would have failed for the wrong
+    // reason.
+    const goal = admitted().nodes.find((n) => n.kind === 'goal')!;
     expect(goal.goal_threshold_raw, 'the number the user actually stated').toBe(20000);
     expect(goal.goal_threshold_unit).toBe('£');
     // resolveGoalThresholdCapWithProvenance rule 3: cap = raw * 1.25.

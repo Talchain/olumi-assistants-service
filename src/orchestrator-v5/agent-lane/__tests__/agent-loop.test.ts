@@ -13,6 +13,10 @@ const caps = (over: Partial<AgentCapabilities> = {}): AgentCapabilities => ({
   proposeModelChange: async () => ({ ok: true, mutated: false, proposal_id: 'prop_1' }),
   authoriseChange: async () => ({ ok: true, mutated: true, applied: true }),
   runAnalysis: async () => ({ ok: true, mutated: false, verdict: 'blocked' }),
+  // A REQUIRED member of AgentCapabilities. Omitting it made the whole object
+  // unassignable (TS2322) — no test here dispatches it, but the stub must still
+  // be the shape the interface declares, or it is not standing in for anything.
+  buildModelFromBrief: async () => ({ ok: true, mutated: true }),
   ...over,
 });
 
