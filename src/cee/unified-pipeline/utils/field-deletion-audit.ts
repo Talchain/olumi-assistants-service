@@ -89,6 +89,7 @@ export type FieldDeletionReason =
   | 'EXTERNAL_HAS_DATA'
   | 'OBSERVABLE_EXTRA_DATA'
   | 'CATEGORY_OVERRIDE_STRIP'
+  | 'OBSERVED_STATE_NOT_NUMERIC'
   | 'TELEMETRY_CAP_REACHED';
 
 /**
@@ -102,6 +103,7 @@ export const FIELD_DELETION_REASON_DESCRIPTIONS: Record<FieldDeletionReason, str
   EXTERNAL_HAS_DATA: 'Prohibited field removed from external factor',
   OBSERVABLE_EXTRA_DATA: 'Extra controllable-only field removed from observable factor',
   CATEGORY_OVERRIDE_STRIP: 'Controllable-only field stripped during STRP category override',
+  OBSERVED_STATE_NOT_NUMERIC: 'Factor observed_state removed: value absent or not a finite number (would fail DraftGraphOutput)',
   TELEMETRY_CAP_REACHED: 'Per-stage field deletion telemetry cap reached; remaining events truncated',
 };
 
