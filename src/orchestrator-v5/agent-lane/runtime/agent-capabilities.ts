@@ -158,6 +158,99 @@ export function createAgentCapabilities(
       };
     },
 
+    /**
+     * ⭐ ADOPTING ASSUMPTIONS IS A PROPOSAL, NOT A WRITE.
+     *
+     * The gap, measured on Paul's session of 22 Sep: 17 of 20 factors held no
+     * value, the Agent listed sensible starting assumptions in prose, the user
+     * replied "these look like a good set of assumptions, can you update the
+     * model with them?" — and the turn came back `mutated: false` with
+     * `[get_canonical_state]` as its only tool call. Honest, and inert.
+     *
+     * The dishonest fix is the one the incumbent already ships: invent the
+     * numbers during construction and attribute them to the system. The honest
+     * one is this — the model SUGGESTS, the user ADOPTS, and the adoption goes
+     * through the same stored-proposal/authorise boundary as any other change,
+     * so what gets written is exactly what was shown.
+     *
+     * ⛔ It will not overwrite a value that is already there. A factor that
+     * already carries a number was set by somebody; replacing it with a guess
+     * under cover of "adopting assumptions" is the failure this refuses.
+     */
+    async proposeAssumptions(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      const g = await readGraph(ctx.scenario_id);
+      if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      const input = Array.isArray(args?.assumptions) ? args.assumptions : [];
+      if (input.length === 0) {
+        return { ok: false, mutated: false, refusal: 'empty_proposal', detail: 'No assumptions were given.' };
+      }
+
+      const find = (l: string) => g.nodes.find((n) => norm(n.label) === norm(l) || norm(n.description) === norm(l));
+      const unresolved: string[] = [];
+      const occupied: { label: string; current_value: number }[] = [];
+      const seen = new Set<string>();
+      const adopted: { id: string; label: string; value: number; unit: string; basis: string }[] = [];
+
+      for (const a of input) {
+        const node = find(String(a?.factor_label ?? ''));
+        if (node === undefined) { unresolved.push(String(a?.factor_label ?? '')); continue; }
+        const existing = node.observed_state?.value;
+        if (typeof existing === 'number') { occupied.push({ label: node.label, current_value: existing }); continue; }
+        if (!Number.isFinite(Number(a?.value))) { unresolved.push(node.label); continue; }
+        if (seen.has(node.id)) continue;
+        seen.add(node.id);
+        adopted.push({
+          id: node.id, label: node.label,
+          value: Number(a.value), unit: String(a?.unit ?? ''), basis: String(a?.basis ?? ''),
+        });
+      }
+
+      if (adopted.length === 0) {
+        return {
+          ok: false, mutated: false, refusal: 'nothing_to_adopt',
+          unresolved_labels: unresolved, already_valued: occupied,
+          detail:
+            'None of those could be adopted. Read the state again and use the labels exactly as they appear; ' +
+            'factors that already hold a value are left alone.',
+        };
+      }
+
+      // Sorted by node id so an identical set proposed in a different order is
+      // the SAME proposal, not a second one.
+      const ordered = [...adopted].sort((x, y) => (x.id < y.id ? -1 : x.id > y.id ? 1 : 0));
+      const operations: ProposalOperation[] = ordered.map((a) => ({
+        op: 'set_factor_value',
+        path: a.id,
+        value: { value: a.value, unit: a.unit, basis: a.basis },
+      }));
+      const proposal = createProposal({
+        scenario_id: ctx.scenario_id,
+        user_id: ctx.authenticated_user_id,
+        base_graph_identity_hash: g.graph_hash,
+        operations,
+        provenance: { authored_by: 'model_proposed', basis: 'starting assumptions offered for the user to adopt or correct' },
+        validation: { admitted: true, loss_count: 0, refusals: [] },
+        public_label:
+          `Adopt ${ordered.length} starting assumption${ordered.length === 1 ? '' : 's'}: ` +
+          ordered.map((a) => `${a.label} = ${a.value}${a.unit !== '' ? ' ' + a.unit : ''}`).join('; '),
+      });
+      proposals.put(proposal);
+      return {
+        ok: true, mutated: false,
+        proposal_id: proposal.proposal_id,
+        public_label: proposal.public_label,
+        base_revision: g.graph_hash,
+        assumptions: ordered.map((a) => ({ factor: a.label, value: a.value, unit: a.unit, basis: a.basis })),
+        ...(unresolved.length > 0 ? { unresolved_labels: unresolved } : {}),
+        ...(occupied.length > 0 ? { left_alone_already_valued: occupied } : {}),
+        note:
+          'Nothing has changed. Show the user each value and what it rests on, say plainly that these are ' +
+          'assumptions to adopt or correct and NOT measurements, and call authorise_change with this ' +
+          'proposal_id only once they agree.',
+      };
+    },
+
     async authoriseChange(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
       const before = await readGraph(ctx.scenario_id);
@@ -175,8 +268,94 @@ export function createAgentCapabilities(
         return { ok: false, mutated: false, refusal: decision.status, ...(decision.status === 'superseded' ? { expected: decision.expected, actual: decision.actual } : {}) };
       }
 
-      // The STORED operation is applied. Nothing is regenerated here.
-      const op = decision.proposal.operations[0];
+      // The STORED operations are applied. Nothing is regenerated here.
+      const ops = decision.proposal.operations;
+
+      if (ops[0]?.op === 'set_factor_value') {
+        /**
+         * ⭐ APPLY EACH ADOPTED ASSUMPTION AS ITS OWN `factor_value_edit`, WITH
+         * ITS OWN DERIVED IDENTITY. The wire has no batch form, and each event
+         * needs a distinct `turn_id` because `(scenario_id, turn_id)` is unique
+         * — so the key is derived from the proposal id AND the operation index,
+         * which keeps a retry of the same authorisation idempotent per value
+         * instead of minting a fresh id every attempt.
+         *
+         * ⚠ REPRESENTATION LOSS, RECORDED. `FactorValueEditEvent` is `.strict()`
+         * and carries `{kind, target_id, value, raw_value?, unit?, field?,
+         * applied_from?}` — there is NO provenance field on it, and the handler
+         * stamps `source: 'user_explicit'` because it was built for the
+         * inspector. That stamp is right about WHO set the value (the user
+         * authorised this exact set) and silent about WHAT IT RESTS ON. The
+         * basis therefore survives only in the proposal and in what the Agent
+         * says, so the result below tells it to say it.
+         */
+        const applied: { factor: string; requested: number; recorded: number | null }[] = [];
+        const failures: { factor: string; detail: string }[] = [];
+        for (let i = 0; i < ops.length; i += 1) {
+          const o = ops[i];
+          const v = (o.value ?? {}) as { value?: number; unit?: string };
+          if (typeof v.value !== 'number') { failures.push({ factor: o.path, detail: 'no value stored on the proposal' }); continue; }
+          const r = await dispatch('/orchestrate/v2/turn', {
+            kind: 'system_event',
+            turn_id: authorisationTurnId(`${decision.proposal.proposal_id}#${i}`),
+            scenario_id: ctx.scenario_id,
+            stage: 'frame',
+            event: {
+              kind: 'factor_value_edit',
+              target_id: o.path,
+              value: v.value,
+              ...(v.unit !== undefined && v.unit !== '' ? { unit: v.unit } : {}),
+            },
+          });
+          if (r.status !== 200) failures.push({ factor: o.path, detail: `http ${r.status}` });
+        }
+
+        // ⛔ CONFIRMED FROM STATE. The handler may rescale what it was sent
+        // (unit caps, percent-vs-fraction), so the recorded number is read back
+        // and reported EVEN WHEN it differs from the one the user approved —
+        // that difference is exactly the thing a user must not discover later.
+        const afterSet = await readGraph(ctx.scenario_id);
+        const byId = new Map((afterSet?.nodes ?? []).map((n) => [n.id, n]));
+        for (const o of ops) {
+          const node = byId.get(o.path);
+          const stored = node?.observed_state?.value;
+          const req = ((o.value ?? {}) as { value?: number }).value;
+          applied.push({
+            factor: node?.label ?? o.path,
+            requested: typeof req === 'number' ? req : Number.NaN,
+            recorded: typeof stored === 'number' ? stored : null,
+          });
+        }
+        const landed = applied.filter((a) => a.recorded !== null);
+        if (landed.length === 0) {
+          return {
+            ok: false, mutated: false, applied: false, refusal: 'not_applied',
+            detail: 'None of the values were recorded. The model is unchanged.',
+            failures, values: applied,
+          };
+        }
+        if (landed.length === applied.length) proposals.markApplied(decision.proposal.proposal_id);
+        const rescaled = landed.filter((a) => a.recorded !== a.requested);
+        return {
+          ok: true, mutated: true, applied: true,
+          proposal_id: decision.proposal.proposal_id,
+          adopted_count: landed.length,
+          requested_count: applied.length,
+          values: applied,
+          revision_before: before.graph_hash,
+          revision_after: afterSet?.graph_hash ?? before.graph_hash,
+          ...(failures.length > 0 ? { failures } : {}),
+          ...(rescaled.length > 0
+            ? { rescaled_by_the_model: rescaled, must_disclose_rescaling: true }
+            : {}),
+          not_represented:
+            'These values are the user\u2019s adopted assumptions, not measurements, and the model records ' +
+            'no mark distinguishing the two \u2014 so say so when you describe what changed' +
+            (rescaled.length > 0 ? ', and state every value the model stored differently from the one approved.' : '.'),
+        };
+      }
+
+      const op = ops[0];
       const [fromId, toId] = op.path.split('::');
       const direction = (op.value as { effect_direction: 'positive' | 'negative' }).effect_direction;
       /**

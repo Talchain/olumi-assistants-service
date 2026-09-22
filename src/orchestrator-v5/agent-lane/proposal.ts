@@ -34,7 +34,21 @@ import { createHash } from 'node:crypto';
 
 /** One structural change. Deliberately the estate's existing op vocabulary. */
 export interface ProposalOperation {
-  readonly op: 'add_node' | 'remove_node' | 'update_node' | 'add_edge' | 'remove_edge' | 'update_edge';
+  readonly op:
+    | 'add_node' | 'remove_node' | 'update_node'
+    | 'add_edge' | 'remove_edge' | 'update_edge'
+    /**
+     * ⭐ SET A FACTOR TO A STATED ASSUMPTION.
+     *
+     * The gap this exists to close, measured on a real session: the model had
+     * 17 factors with no value, the Agent proposed sensible assumptions in
+     * prose, the user replied "these look like a good set of assumptions, can
+     * you update the model with them?" — and nothing happened. Honest and
+     * inert. Current CEE fills the same blanks by INVENTING values and
+     * attributing them to itself, which is worse; the right answer is a value
+     * the USER adopts, recorded as an assumption rather than a measurement.
+     */
+    | 'set_factor_value';
   /** Node id, or `from::to` for an edge. */
   readonly path: string;
   readonly value?: unknown;
