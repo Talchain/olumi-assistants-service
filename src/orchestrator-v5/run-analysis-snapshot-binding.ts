@@ -91,6 +91,38 @@ export function runWithBoundAnalysisSnapshot<T>(
  */
 export const NO_CLAIM = Symbol('analysis-graph-hash-underivable');
 
+/**
+ * ⭐ THE BIND-SITE DERIVATION — graph PLUS the state of the read that produced it.
+ *
+ * ⛔ WHY THE GRAPH ALONE IS NOT ENOUGH. `context.persistedGraph` is `null` in
+ *    THREE situations, and only one of them is "this scenario has no graph":
+ *      · the store was unavailable   (`build-turn-context.ts:1840-1846`, degraded)
+ *      · the read threw and was caught (`:1873-1879`, degraded)
+ *      · a genuine absence            (ok_absent)
+ *
+ *    Read B does NOT swallow — `loadPersistedScenarioStateStrict` either throws
+ *    or returns the real graph. So arming this guard with `null` after a
+ *    DEGRADED read A makes a transient blip look exactly like a concurrent
+ *    write: `observed = <real hash>` against `expected = null`, and the turn is
+ *    refused although nothing raced.
+ *
+ *    That is the conflation this module's own header forbids, and the estate
+ *    already paid to remove it once — `build-turn-context.ts:104-117` records
+ *    the removal and the discriminator it introduced (`persistedGraphRead`).
+ *
+ * ⚠ THE ERROR DIRECTION IS ONE-WAY, DELIBERATELY. A degraded read stands the
+ *   guard DOWN, so this can only ever refuse FEWER turns. It cannot mask a real
+ *   divergence: a real divergence requires read A to have SUCCEEDED and produced
+ *   a hash for read B to disagree with.
+ */
+export function analysisGraphIdentityForRead(
+  graph: unknown,
+  read: { readonly status: string } | undefined,
+): string | null | typeof NO_CLAIM {
+  if (read !== undefined && read.status === 'degraded') return NO_CLAIM;
+  return analysisGraphIdentityOf(graph);
+}
+
 export function analysisGraphIdentityOf(graph: unknown): string | null | typeof NO_CLAIM {
   if (graph == null) return null;
   try {

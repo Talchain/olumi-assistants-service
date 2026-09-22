@@ -619,6 +619,7 @@ import { config } from '../config/index.js';
 import { canonicaliseForAnalysis } from './tools/handlers/analysis-ready-core.js';
 import {
   analysisGraphIdentityOf,
+  analysisGraphIdentityForRead,
   bindAnalysisSnapshotForTurn,
 } from './run-analysis-snapshot-binding.js';
 
@@ -1213,7 +1214,14 @@ export async function runTurnExecutor(
   // the maintained-mirror defect. A turn that never reads it pays one hash.
   bindAnalysisSnapshotForTurn({
     scenarioId: context.session_id,
-    analysisGraphHash: analysisGraphIdentityOf(context.persistedGraph),
+    // ⛔ DERIVED FROM THE READ, NOT JUST THE GRAPH. A DEGRADED read A also
+    //    yields `persistedGraph: null`, and arming the guard with `null` there
+    //    refuses turns on which nothing raced — see
+    //    `analysisGraphIdentityForRead`.
+    analysisGraphHash: analysisGraphIdentityForRead(
+      context.persistedGraph,
+      context.persistedGraphRead,
+    ),
   });
 
   // Track 2 — pending-confirmation truth, derived ONCE at ORIENT time from the
