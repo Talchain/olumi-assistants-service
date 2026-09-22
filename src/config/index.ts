@@ -1499,10 +1499,6 @@ const ConfigSchema = z.object({
     // registers nothing unless this is true, so deploying it is inert and the
     // rollback is unsetting one variable.
     agentLaneEnabled: booleanString.default(false),
-    // PROXY_V5_TARGET — which internal route /proxy/v5/turn forwards to.
-    // ⛔ AN ENUM, NEVER A PATH FROM THE ENVIRONMENT. A free-form target would
-    // let a config change point the browser proxy at any internal route.
-    proxyV5Target: z.enum(['orchestrator', 'agent']).default('orchestrator'),
     browserProxyAllowedOrigins: z.string().optional(), // BROWSER_PROXY_ALLOWED_ORIGINS — comma-separated origin allowlist
     browserProxyTimeoutMs: z.coerce.number().int().min(5_000).max(300_000).default(125_000), // BROWSER_PROXY_TIMEOUT_MS — proxy-to-CEE timeout (5s headroom above DRAFT_REQUEST_BUDGET_MS=120s, must be < ROUTE_TIMEOUT_MS)
   }).default({}),
@@ -1908,7 +1904,6 @@ function parseConfig(): Config {
     proxy: {
       browserProxyEnabled: env.BROWSER_PROXY_ENABLED,
       agentLaneEnabled: env.AGENT_LANE_ENABLED,
-      proxyV5Target: env.PROXY_V5_TARGET,
       browserProxyAllowedOrigins: env.BROWSER_PROXY_ALLOWED_ORIGINS,
       browserProxyTimeoutMs: env.BROWSER_PROXY_TIMEOUT_MS,
     },
