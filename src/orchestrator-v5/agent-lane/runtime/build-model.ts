@@ -58,11 +58,14 @@ export function buildCandidateSchema(): Record<string, unknown> {
     options: { type: 'array', items: obj({
       label: { type: 'string', description: 'A NAME, not a sentence. Keep it under 33 characters where you can.' },
       provenance,
+      changes: { type: 'array', description:
+        'Factor labels this option changes when it states no level \u2014 e.g. an option that phases, grandfathers or tests something. Use the factor labels exactly. An option that names nothing here and has no interventions is unreachable from the decision and cannot be analysed.',
+        items: { type: 'string' } },
       interventions: { type: 'array', description:
         'The factor levels this option sets. Record a level the brief states, with provenance "explicit". Empty when the option changes nothing. Never guess a level.',
         items: obj({ factor_label: { type: 'string' }, value: { type: 'number' }, unit: { type: 'string' }, provenance },
           ['factor_label', 'value', 'unit', 'provenance']) },
-    }, ['label', 'provenance', 'interventions']) },
+    }, ['label', 'provenance', 'changes', 'interventions']) },
     factors: { type: 'array', items: obj({
       label: { type: 'string' }, role: { type: 'string', enum: ['controllable', 'observable', 'external'] },
       baseline_known: { type: 'boolean' }, baseline_value: { anyOf: [{ type: 'number' }, { type: 'null' }] },
@@ -81,7 +84,8 @@ export function buildCandidateSchema(): Record<string, unknown> {
 export const BUILD_INSTRUCTIONS = [
   'Produce a complete causal decision model from the brief in ONE pass.',
   'Preserve exact user facts, numbers, constraint semantics and time horizon. Do not invent numeric baselines or behavioural effects.',
-  'For each option fill `interventions` with the factor levels it sets. Record a level the brief states with provenance "explicit"; use an empty array when the option changes nothing; never guess a level the brief does not give.',
+  'For each option fill `interventions` with the factor levels it sets \u2014 record a level the brief states with provenance "explicit", and never guess one it does not give.',
+  'EVERY option must also list, in `changes`, the factors it acts on WITHOUT a stated level. An option that names no interventions and no changes is disconnected from the decision and cannot be analysed at all, so this is not optional bookkeeping.',
   'Then widen: add the options, factors, risks, outcomes and causal mechanisms that materially improve strategic reasoning, including alternatives beyond the user’s initial frame.',
   'Mark provenance honestly on EVERY item: "explicit" only for what the user stated, "inferred" for what you read out of the brief, "ai_proposed" for anything you added beyond it.',
   'Where a causal direction is genuinely unknown, say "unknown" rather than guessing a sign.',

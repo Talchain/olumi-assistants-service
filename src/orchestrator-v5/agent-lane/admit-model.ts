@@ -85,6 +85,21 @@ export interface CandidateModel {
       unit?: string;
       provenance: string;
     }[];
+    /**
+     * Factors this option changes WITHOUT a stated level.
+     *
+     * ⛔ WITHOUT THIS, A QUALITATIVE OPTION IS A DEAD END. Measured on a real
+     * build: 3 of 6 options declared no numeric intervention — "Grandfather
+     * Existing Customers", "Phased Price Increase", "Test Price Before
+     * Rollout" — and so had no edge into the model at all, even though the
+     * factors they act on were admitted. They were structurally unreachable
+     * from the decision and could never appear in an analysis.
+     *
+     * The alternative was to make the model invent a level for them, which is
+     * the defect this whole lane exists to avoid. So the option says WHAT it
+     * changes and stays silent on BY HOW MUCH.
+     */
+    changes?: readonly string[];
   }[];
   readonly factors: readonly { label: string; role: 'controllable' | 'observable' | 'external'; baseline_known: boolean; baseline_value: number | null; unit: string | null; provenance: string }[];
   readonly risks: readonly { label: string; provenance: string }[];
@@ -168,12 +183,41 @@ export function slugId(label: string): string {
   return base.length > 0 ? base : 'node';
 }
 
-/** Deterministic, collision-safe id assignment in a fixed traversal order. */
+/** Same words, ignoring case and spacing — the test for "the same thing". */
+const canonicalLabel = (label: string): string => label.trim().toLowerCase().replace(/\s+/g, ' ');
+
+/**
+ * Deterministic, collision-safe id assignment in a fixed traversal order.
+ *
+ * ⛔ A SUFFIXED DUPLICATE ORPHANS THE GOAL. This keyed the map by the EXACT
+ * label string, so the goal metric `"monthly recurring revenue"` and the
+ * outcome `"Monthly Recurring Revenue"` became two nodes, the second suffixed
+ * `_2`. The model's links all named the outcome spelling, so the whole causal
+ * chain terminated on the duplicate and the GOAL NODE WAS ISOLATED. Measured on
+ * the built model: 6 of 6 options could not reach the goal and 16 of 38 nodes
+ * had no edge at all — a model that is honest about its numbers and cannot be
+ * analysed. It happened twice in one build (churn too).
+ *
+ * Entities that spell the same name resolve to ONE id, and because the goal
+ * comes first in the traversal order it is the goal that survives. The map
+ * still answers to BOTH spellings, so a link written either way resolves.
+ *
+ * The merge condition is deliberately narrow: identical words, ignoring case
+ * and spacing. It never merges two different names.
+ */
 function assignIds(labels: readonly string[]): Map<string, string> {
   const out = new Map<string, string>();
+  const byCanonical = new Map<string, string>();
   const used = new Set<string>();
   for (const label of labels) {
     if (out.has(label)) continue;
+    const canonical = canonicalLabel(label);
+    const existing = byCanonical.get(canonical);
+    if (existing !== undefined) {
+      // The same thing, spelled differently. One node, reachable by both names.
+      out.set(label, existing);
+      continue;
+    }
     const base = slugId(label);
     let id = base;
     let n = 2;
@@ -182,6 +226,7 @@ function assignIds(labels: readonly string[]): Map<string, string> {
       id = base.slice(0, MAX_ID - suffix.length) + suffix;
     }
     used.add(id);
+    byCanonical.set(canonical, id);
     out.set(label, id);
   }
   return out;
@@ -384,9 +429,28 @@ export function admitCandidateModel(
   // exact match only: attaching "what this option changes" to a guessed factor
   // would put the user's own number on the wrong quantity.
   const interventionsByOption = new Map<string, Record<string, { value: number }>>();
+  /** option id -> factor ids it acts on, with or without a stated level. */
+  const actsOnByOption = new Map<string, Set<string>>();
   for (const o of model.options) {
     const optionId = ids.get(o.label);
     if (optionId === undefined) continue;
+    const actsOn = new Set<string>();
+    actsOnByOption.set(optionId, actsOn);
+    for (const factorLabel of o.changes ?? []) {
+      const factorId = ids.get(factorLabel);
+      if (factorId === undefined) {
+        unresolved.push({
+          from: o.label,
+          to: factorLabel,
+          reason: 'unresolved_change_target',
+          detail:
+            `This option says it changes "${factorLabel}", but no entity of that name was ` +
+            'admitted. Withheld rather than attached to a guessed factor.',
+        });
+        continue;
+      }
+      actsOn.add(factorId);
+    }
     const bundle: Record<string, { value: number }> = {};
     for (const iv of o.interventions ?? []) {
       const factorId = ids.get(iv.factor_label);
@@ -403,6 +467,7 @@ export function admitCandidateModel(
         continue;
       }
       bundle[factorId] = { value: iv.value };
+      actsOn.add(factorId);
     }
     if (Object.keys(bundle).length > 0) interventionsByOption.set(optionId, bundle);
   }
@@ -437,7 +502,7 @@ export function admitCandidateModel(
     // strictly from an intervention that already resolved, so an option with no
     // stated intervention gets no edge and stays honestly unmapped.
     ...optionNodes.flatMap((o) =>
-      Object.keys(o.interventions ?? {}).map((factorId) => topo(o.id, factorId)),
+      [...(actsOnByOption.get(o.id) ?? [])].map((factorId) => topo(o.id, factorId)),
     ),
   ];
   const constraintResult = admitCandidateConstraints(model.constraints, (metric) => {
