@@ -173,6 +173,64 @@ describe('build_model_from_brief', () => {
   });
 });
 
+describe('mounted Agent semantic context', () => {
+  const framed = {
+    id: 'budget',
+    kind: 'factor',
+    label: 'Budget',
+    observed_state: {
+      value: 0.2,
+      raw_value: 200,
+      unit: 'GBP',
+      cap: 1000,
+      declared_scale: 'unit_interval',
+      source: 'brief_extraction',
+    },
+    provenance: 'from_brief',
+  };
+
+  it('get_canonical_state exposes raw/user meaning as well as the model value', async () => {
+    const d: InternalDispatch = async () => ({
+      status: 200,
+      json: { graph: { nodes: [framed], edges: [] }, graph_hash: 'h1', analysis_state: null },
+    });
+    const r = await createAgentCapabilities(d, new ProposalStore()).getCanonicalState(ctx);
+    expect((r.entities as Record<string, unknown>[])[0]).toMatchObject({
+      id: 'budget',
+      baseline: { kind: 'point', value: 200, unit: 'GBP' },
+      value: 0.2,
+      model_value: 0.2,
+      raw_value: 200,
+      unit: 'GBP',
+      cap: 1000,
+      declared_scale: 'unit_interval',
+      value_source: 'brief_extraction',
+      authored_by: 'from_brief',
+    });
+  });
+
+  it('post-build context uses the same canonical projection instead of a thinner copy', async () => {
+    const after = [{ id: 'goal', kind: 'goal', label: 'MRR' }, framed];
+    const { d } = dispatcher({ before: [], after });
+    const r = await createAgentCapabilities(d, new ProposalStore(), structured()).buildModelFromBrief(
+      ctx,
+      { brief: 'a brief' },
+    );
+    const budget = (r.entities as Record<string, unknown>[]).find((e) => e.id === 'budget');
+    expect(budget).toMatchObject({
+      baseline: { kind: 'point', value: 200, unit: 'GBP' },
+      value: 0.2,
+      model_value: 0.2,
+      raw_value: 200,
+      unit: 'GBP',
+      cap: 1000,
+      declared_scale: 'unit_interval',
+      value_source: 'brief_extraction',
+      authored_by: 'from_brief',
+    });
+  });
+});
+
 describe('the construction budget is the measured one', () => {
   it('sends the WHOLE-candidate ceiling on the real call, not the widening one', async () => {
     // \u2b50 ASSERT WHAT THE CALL SITE SENDS, not what the constant says. A test
