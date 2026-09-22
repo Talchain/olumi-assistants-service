@@ -1575,44 +1575,68 @@ export async function commitDirectAnswer(
     );
   }
 
-  // ⭐⭐ A REPLAY MUST NOT NARRATE AN EDIT IT DID NOT MAKE.
+  // ⭐⭐ A REPLAY MUST NOT CLAIM AN EDIT HAPPENED ON THIS TURN — IN PROSE OR IN
+  //    THE STRUCTURED PAYLOAD.
   //
-  // Witnessed on deployed staging (build c12a54d, 22 Sep 2026), scenario
-  // 6f59981e-541a-48ad-a774-cac6de21f810, signed-in, three real turns:
-  //   1. turn T1 sets Sales Cycle Length to 14    -> persisted 14
-  //   2. turn T2 (a DIFFERENT turn) sets it to 17 -> persisted 17
-  //   3. the T1 client never got its response and RETRIES T1:
-  //        SAID : "Updated Sales Cycle Length from 17 months to 14 months."
-  //        STATE: dTurns 0, dVersions 0, persisted value 17, hash UNCHANGED.
+  // Witnessed on deployed staging (build c12a54d, 22 Sep 2026): turn T1 set a
+  // factor to 14; a DIFFERENT turn T2 moved it to 17; the T1 client lost its
+  // response and retried T1. The reply said "Updated Sales Cycle Length from 17
+  // months to 14 months" while dTurns=0, dVersions=0 and the persisted value
+  // stayed 17. The handler re-runs against CURRENT state and composes its
+  // confirmation BEFORE the commit resolves as a replay.
   //
-  // The DURABLE behaviour is correct and is NOT changed here: the retry is
-  // idempotent, writes nothing, and does not clobber the newer value. What was
-  // wrong is the SENTENCE. The handler re-runs against CURRENT state and
-  // composes its confirmation BEFORE the commit resolves as a replay, so the
-  // user is told their edit landed while the model holds someone else's value.
+  // ⛔ THE FIRST ATTEMPT AT THIS SUBSTITUTED THE TURN'S ORIGINAL PROSE. An
+  //    independent review showed that does NOT fix it: "Updated ... from 9
+  //    months to 14 months" still tells the user the value is now 14, which is
+  //    just as false. Replaying a historical confirmation bare is a category
+  //    error — it answers a question asked NOW with prose composed for a
+  //    question asked EARLIER. So this composes something true of THIS turn.
   //
-  // The honest answer to a replay is the prose the turn ACTUALLY recorded —
-  // which is what idempotent replay means for the response, not only the write.
-  // `replayedAssistantMessage` is present ONLY on a replay (see
-  // `SessionAppendOutcome`), so an ordinary first commit is byte-identical.
-  if (
-    appendOutcome.replayedAssistantMessage !== undefined &&
-    appendOutcome.replayedAssistantMessage !== responseWithModelVersionReceipt.assistant_text
-  ) {
+  // ⛔ AND PROSE ALONE IS NOT ENOUGH. `compose.ts` ships the same claim as
+  //    MACHINE-READABLE data — a `graph_patch` block whose `status` the handler
+  //    sets to 'applied' — and its own comment says the renderer treats
+  //    `assistant_text` as the FALLBACK display source. Correcting only the text
+  //    would fix the fallback and leave the contract asserting the edit. The
+  //    block's `status` therefore moves to 'noop', which is an EXISTING value in
+  //    that union (`set-factor-value.ts:751`) meaning exactly "nothing was
+  //    written" — no new enum, no schemas publish.
+  //
+  //    The `ui_directive` block goes too: it exists to "point the UI at the node
+  //    the user just changed", and on a replay no node was changed.
+  if (appendOutcome.replayedPriorTurn === true) {
     log.info(
       {
         scenario_id: metadata.scenario_id,
         turn_id: metadata.turn_id,
         turn_row_id: persistedRowId,
       },
-      'V5 commit — this turn REPLAYED an already-committed turn; returning the ' +
-        'prose it durably recorded rather than the freshly composed confirmation, ' +
-        'which would have claimed an edit that did not happen',
+      'V5 commit — this turn REPLAYED an already-committed request; nothing was ' +
+        'written, so the response states that rather than narrating an edit',
     );
+    const existingBlocks = Array.isArray(
+      (responseWithModelVersionReceipt as { blocks?: unknown }).blocks,
+    )
+      ? ((responseWithModelVersionReceipt as { blocks: unknown[] }).blocks)
+      : null;
+    const correctedBlocks =
+      existingBlocks === null
+        ? null
+        : existingBlocks
+            .filter(
+              (b) => !(typeof b === 'object' && b !== null && (b as { type?: unknown }).type === 'ui_directive'),
+            )
+            .map((b) =>
+              typeof b === 'object' && b !== null && (b as { type?: unknown }).type === 'graph_patch'
+                ? { ...(b as Record<string, unknown>), status: 'noop' }
+                : b,
+            );
     responseWithModelVersionReceipt = {
       ...responseWithModelVersionReceipt,
-      assistant_text: appendOutcome.replayedAssistantMessage,
-    };
+      assistant_text:
+        'That change had already been recorded, so nothing new was written just now. '
+        + 'Open the model to see its current values.',
+      ...(correctedBlocks === null ? {} : { blocks: correctedBlocks }),
+    } as typeof responseWithModelVersionReceipt;
   }
 
   // Post-success observability. The turn's state is now durably committed; the

@@ -276,10 +276,9 @@ export class SupabaseSessionStore implements SessionStore {
    * harms. A non-graph turn pays no extra read.
    */
   async append(write: SessionTurnWrite): Promise<SessionAppendOutcome> {
-    const replayed =
-      write.graph == null ? null : await this.priorCommittedAssistantMessage(write);
+    const replayed = write.graph == null ? false : await this.isReplayOfSameRequest(write);
     const outcome = await this.appendThroughRpc(write);
-    return replayed === null ? outcome : { ...outcome, replayedAssistantMessage: replayed };
+    return replayed ? { ...outcome, replayedPriorTurn: true } : outcome;
   }
 
   /**
@@ -290,26 +289,41 @@ export class SupabaseSessionStore implements SessionStore {
    * handed a second failure because a best-effort read did not answer. The same
    * discipline as {@link committedTurnRowId}, whose swallow this mirrors.
    */
-  private async priorCommittedAssistantMessage(
-    write: SessionTurnWrite,
-  ): Promise<string | null> {
+  private async isReplayOfSameRequest(write: SessionTurnWrite): Promise<boolean> {
     try {
       const { data, error } = await this.client
         .from('v5_conversation_turns')
-        .select('assistant_message')
+        .select('request_hash')
         .eq('scenario_id', write.scenario_id)
         .eq('turn_id', write.turn_id)
         .limit(1);
       if (!error) {
-        const row = ((data as Array<{ assistant_message?: unknown }> | null) ?? [])[0];
-        if (row && typeof row.assistant_message === 'string' && row.assistant_message.length > 0) {
-          return row.assistant_message;
-        }
+        const row = ((data as Array<{ request_hash?: unknown }> | null) ?? [])[0];
+        if (!row) return false;
+
+        // ⛔ `(scenario_id, turn_id)` ANSWERS "WILL THE RPC NO-OP?", NOT "IS THIS
+        //    THE SAME REQUEST REPLAYING?". `turn_id` is CLIENT-SUPPLIED
+        //    (`turn-executor.ts` passes `payload.turn_id`), so a client that
+        //    reuses a turn id for a DIFFERENT message would otherwise be handed
+        //    ANOTHER TURN'S ANSWER TO A DIFFERENT QUESTION — strictly worse than
+        //    the stale-but-on-topic text it gets today.
+        //
+        //    `request_hash` closes that: `computeRequestHash` covers the
+        //    user-visible payload (`scenario_id`, `stage`, and the variant's
+        //    `message`/`event`), so it is IDENTICAL on a genuine retry and
+        //    DIFFERENT on a reused key. This is the same discipline
+        //    `apply-operations.ts` already applies one file over, where a
+        //    `row.request_hash !== requestDigestFor(input)` mismatch falls to
+        //    `committed_turn_unverified` rather than claiming recovery.
+        //
+        //    Mismatch ⇒ null ⇒ the caller composes fresh text, i.e. exactly
+        //    today's behaviour. Never a wrong answer, only no answer.
+        return typeof row.request_hash === 'string' && row.request_hash === write.request_hash;
       }
     } catch {
       // Fall through: an unreadable row is an unknown, not a fact.
     }
-    return null;
+    return false;
   }
 
   private async appendThroughRpc(write: SessionTurnWrite): Promise<SessionAppendOutcome> {

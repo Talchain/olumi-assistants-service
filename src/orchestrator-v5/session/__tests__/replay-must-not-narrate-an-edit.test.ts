@@ -1,40 +1,17 @@
 /**
- * A REPLAYED COMMIT MUST NOT LET THE CALLER NARRATE AN EDIT IT DID NOT MAKE.
+ * THE STORE REPORTS A REPLAY AS A FACT, VERIFIED BY `request_hash`.
  *
- * ── THE DEFECT, WITNESSED ON DEPLOYED STAGING (build c12a54d, 22 Sep 2026) ──
- * Scenario 6f59981e-541a-48ad-a774-cac6de21f810, signed-in, three real turns:
+ * ⛔ `(scenario_id, turn_id)` ANSWERS "WILL THE RPC NO-OP?", NOT "IS THIS THE
+ *    SAME REQUEST REPLAYING?". `turn_id` is CLIENT-SUPPLIED, so without
+ *    `request_hash` a client reusing a turn id for a DIFFERENT message would be
+ *    reported as a replay — and the caller would tell them nothing was written
+ *    when their new request genuinely was refused. That is strictly worse than
+ *    today. `apply-operations.ts:694-700` already guards this exact class.
  *
- *   1. turn T1 sets Sales Cycle Length to 14   -> persisted raw_value 14
- *   2. turn T2 (a DIFFERENT turn) sets it to 17 -> persisted raw_value 17
- *   3. the T1 client never received its response and RETRIES T1:
- *
- *        SAID : "Updated Sales Cycle Length from 17 months to 14 months."
- *        STATE: dTurns=0  dVersions=0  persisted raw_value = 17  hash UNCHANGED
- *
- * The DURABLE behaviour is correct and must not change: the retry is idempotent,
- * writes nothing, and does NOT clobber the newer value. What is wrong is the
- * SENTENCE. The handler re-runs against CURRENT state and composes its
- * confirmation BEFORE the commit resolves as a replay, and nothing reconciles
- * the narration with the fact that no write occurred.
- *
- * A user who loses a response and retries is told their edit landed when the
- * model actually holds someone else's newer value.
- *
- * ── WHY THE STORE IS THE FIRST BOUNDARY THAT CAN KNOW ──────────────────────
- * `append_turn_atomic_v5` returns `{turn_row_id, model_version_receipt}` and
- * carries NO replay flag (read from the deployed function body, 22 Sep), so the
- * caller cannot tell a replay from a fresh commit by the return value. Adding
- * one is a migration on a database shared with production.
- *
- * The store CAN know without any migration: `v5_conversation_turns` is UNIQUE
- * on `(scenario_id, turn_id)` and rows are never deleted, so a row that already
- * exists under this write's key means this append CANNOT create a new one — it
- * will replay. The pre-read can only be wrong in the direction of a FALSE
- * NEGATIVE (a concurrent insert between the read and the RPC), which degrades
- * to exactly today's behaviour and is never worse.
- *
- * So the store surfaces the ORIGINAL stored prose and the caller prefers it.
- * That is what "idempotent replay" means for the response, not only the write.
+ * ⚠ THE PREVIOUS VERSION OF THIS SUITE COULD NOT DETECT A WRONG FILTER. Its
+ *   fake `eq` ignored its arguments, so a mutant dropping `.eq('scenario_id')`
+ *   survived every test. The fake below RECORDS the filters and the suite
+ *   asserts them, so the read is bound to the columns it claims to use.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -49,31 +26,28 @@ const TURN = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const MUTATION = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const HASH = 'a'.repeat(64);
 const ANALYSIS_HASH = 'b'.repeat(64);
-
-/** What the FIRST attempt durably recorded. */
-const ORIGINAL_PROSE = 'Updated Sales Cycle Length from 9 months to 14 months.';
-/** What the handler freshly composes on the retry, against state that moved. */
-const FRESHLY_COMPOSED = 'Updated Sales Cycle Length from 17 months to 14 months.';
+const REQUEST_HASH = 'sha256:the-same-request';
 
 const rpc = vi.fn();
 const cache = { invalidateAll: vi.fn() };
 
-/** Rows `v5_conversation_turns` holds for (scenario_id, turn_id) in this test. */
-let priorTurnRows: Array<Record<string, unknown>> = [];
-const turnSelectColumns: string[] = [];
+let priorRows: Array<Record<string, unknown>> = [];
+/** Every `.eq(column, value)` the store issued against the turns table. */
+let filters: Array<[string, unknown]> = [];
+let selectedColumns: string[] = [];
 
 const client = {
   rpc,
   from: vi.fn((table: string) => ({
     select: vi.fn((columns: string) => {
-      if (table === 'v5_conversation_turns') turnSelectColumns.push(columns);
+      if (table === 'v5_conversation_turns') selectedColumns.push(columns);
       const result =
-        table === 'v5_conversation_turns'
-          ? { data: priorTurnRows, error: null }
-          : { data: [], error: null };
-      // Support .eq().eq().limit() AND .eq().maybeSingle(), awaited either way.
+        table === 'v5_conversation_turns' ? { data: priorRows, error: null } : { data: [], error: null };
       const builder: Record<string, unknown> = {
-        eq: vi.fn(() => builder),
+        eq: vi.fn((col: string, val: unknown) => {
+          if (table === 'v5_conversation_turns') filters.push([col, val]);
+          return builder;
+        }),
         limit: vi.fn(() => Promise.resolve(result)),
         maybeSingle: vi.fn(() => Promise.resolve({ data: { graph_identity_hash: null }, error: null })),
         then: (res: (v: unknown) => unknown) => Promise.resolve(result).then(res),
@@ -89,13 +63,13 @@ function write(overrides: Partial<SessionTurnWrite> = {}): SessionTurnWrite {
     turn_id: TURN,
     turn_class: 'handler',
     handler_id: 'set_factor_value',
-    request_hash: 'request-hash',
+    request_hash: REQUEST_HASH,
     response_emitted: true,
     llm_calls_used: 0,
     duration_ms: 1,
     handler_facts: [],
     graph: { nodes: [], edges: [] },
-    assistantMessage: FRESHLY_COMPOSED,
+    assistantMessage: 'Updated Sales Cycle Length from 17 months to 14 months.',
     modelVersion: {
       mutation_id: MUTATION,
       graph_identity_hash: HASH,
@@ -118,46 +92,68 @@ const store = () =>
 
 beforeEach(() => {
   vi.clearAllMocks();
-  priorTurnRows = [];
-  turnSelectColumns.length = 0;
-  rpc.mockResolvedValue({ data: { turn_row_id: 'turn-row', model_version_receipt: null }, error: null });
+  priorRows = [];
+  filters = [];
+  selectedColumns = [];
+  // The non-graph append path uses `append_turn_atomic_v2`, which returns a bare
+  // string id; the graph-bearing v5 path returns the receipt object.
+  rpc.mockImplementation((name: string) =>
+    Promise.resolve(
+      name === 'append_turn_atomic_v5'
+        ? { data: { turn_row_id: 'turn-row', model_version_receipt: null }, error: null }
+        : { data: 'turn-row', error: null },
+    ),
+  );
 });
 
-describe('a replayed commit surfaces the prose it ACTUALLY recorded', () => {
-  it('RED: when this (scenario, turn_id) already committed, append returns the ORIGINAL prose', async () => {
-    priorTurnRows = [{ id: 'turn-row', assistant_message: ORIGINAL_PROSE }];
+describe('the store reports a replay, verified by request_hash', () => {
+  it('a committed row for the SAME request is reported as a replay', async () => {
+    priorRows = [{ request_hash: REQUEST_HASH }];
+    expect((await store().append(write())).replayedPriorTurn).toBe(true);
+  });
 
-    const outcome = await store().append(write());
-
+  it('⛔ a DIFFERENT request under the same turn_id is NOT a replay', async () => {
+    priorRows = [{ request_hash: 'sha256:a-completely-different-question' }];
     expect(
-      outcome.replayedAssistantMessage,
-      'the store must hand back what was durably recorded, so the caller cannot ' +
-        'narrate an edit that did not happen',
-    ).toBe(ORIGINAL_PROSE);
+      (await store().append(write())).replayedPriorTurn,
+      'reporting this as a replay would tell the user nothing was written when their ' +
+        'genuinely new request was refused — worse than composing fresh text',
+    ).toBeUndefined();
   });
 
-  it('CONTROL — a FIRST commit carries no replayed prose, so ordinary turns are untouched', async () => {
-    priorTurnRows = []; // nothing committed under this key yet
-
-    const outcome = await store().append(write());
-
-    expect(outcome.replayedAssistantMessage).toBeUndefined();
+  it('CONTROL — a FIRST commit is not a replay, so ordinary turns are untouched', async () => {
+    priorRows = [];
+    expect((await store().append(write())).replayedPriorTurn).toBeUndefined();
   });
 
-  it('CONTROL — a prior row with an EMPTY message is not treated as recoverable prose', async () => {
-    priorTurnRows = [{ id: 'turn-row', assistant_message: '' }];
-
-    const outcome = await store().append(write());
-
-    expect(outcome.replayedAssistantMessage).toBeUndefined();
+  it('CONTROL — a non-graph write pays no read at all', async () => {
+    priorRows = [{ request_hash: REQUEST_HASH }];
+    // graph and modelVersion travel together — the store rejects one without
+    // the other (`appendAtomicVersioned`), so a non-graph write drops both.
+    const outcome = await store().append(write({ graph: undefined, modelVersion: undefined }));
+    expect(outcome.replayedPriorTurn).toBeUndefined();
+    // Other paths also read this table, so the precise claim is that MY read —
+    // the one that selects `request_hash` — did not run.
+    expect(
+      selectedColumns.filter((c) => c.includes('request_hash')),
+      'a turn that writes no graph must not pay the replay lookup',
+    ).toHaveLength(0);
   });
 
-  it('the durable write is UNCHANGED — the replay still calls the append RPC', async () => {
-    priorTurnRows = [{ id: 'turn-row', assistant_message: ORIGINAL_PROSE }];
+  it('the read is BOUND to (scenario_id, turn_id) and to request_hash', async () => {
+    priorRows = [{ request_hash: REQUEST_HASH }];
+    await store().append(write());
+    expect(filters).toEqual([
+      ['scenario_id', SCENARIO],
+      ['turn_id', TURN],
+    ]);
+    expect(selectedColumns.join(',')).toContain('request_hash');
+  });
 
+  it('the durable write is UNCHANGED — the RPC remains the idempotency authority', async () => {
+    priorRows = [{ request_hash: REQUEST_HASH }];
     const outcome = await store().append(write());
-
-    expect(rpc, 'the RPC is the idempotency authority and must still run').toHaveBeenCalled();
+    expect(rpc).toHaveBeenCalled();
     expect(outcome.id).toBe('turn-row');
   });
 });

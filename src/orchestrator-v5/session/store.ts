@@ -95,20 +95,28 @@ export interface SessionAppendOutcome {
   readonly id: string;
   readonly modelVersionReceipt?: AtomicCommittedModelVersionReceipt;
   /**
-   * The assistant prose this (scenario_id, turn_id) ALREADY had durably
-   * recorded when the append ran — present ONLY when the append was a replay.
+   * TRUE when this append REPLAYED an already-committed turn — i.e. the RPC
+   * returned a pre-existing row and wrote nothing.
    *
-   * ⛔ WHY THE CALLER MUST PREFER IT. Witnessed on deployed staging
-   * (build c12a54d, 22 Sep 2026): after a turn committed and a LATER turn moved
-   * the same factor on, the first turn's client retried and was answered
-   * "Updated Sales Cycle Length from 17 months to 14 months" while the persisted
-   * value stayed 17 and nothing was written. The handler re-runs against CURRENT
-   * state and composes its confirmation BEFORE the commit resolves as a replay,
-   * so without this field the caller narrates an edit that did not happen.
+   * ⛔ WHY THIS IS A FLAG AND NOT THE PRIOR PROSE. The first attempt at this
+   *    returned the turn's ORIGINAL `assistant_message` for the caller to send
+   *    back. An independent review showed that is a CATEGORY ERROR: it reuses an
+   *    answer composed for a question asked EARLIER as the answer to a question
+   *    asked NOW. On the witnessed sequence it also stayed false — the original
+   *    "Updated ... from 9 months to 14 months" still implies the value is now
+   *    14, when a later turn had moved it to 17.
    *
+   *    Returning a flag instead lets the caller compose something that is true
+   *    of THIS turn, and it drops three residuals with it: the durable copy is
+   *    capped at 2000 chars (so replaying it could truncate mid-sentence), it
+   *    may carry a stale "re-run your analysis" instruction, and an empty
+   *    durable message made the signal invisible.
+   *
+   * Verified by `request_hash`, not by `(scenario_id, turn_id)` alone — see
+   * `priorCommittedAssistantMessage`'s successor in the Supabase store.
    * Absent on every ordinary first commit, so a non-replay turn is untouched.
    */
-  readonly replayedAssistantMessage?: string;
+  readonly replayedPriorTurn?: true;
 }
 
 /**
