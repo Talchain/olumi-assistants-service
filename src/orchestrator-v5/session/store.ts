@@ -94,6 +94,29 @@ export interface AtomicCommittedModelVersionReceipt {
 export interface SessionAppendOutcome {
   readonly id: string;
   readonly modelVersionReceipt?: AtomicCommittedModelVersionReceipt;
+  /**
+   * TRUE when this append REPLAYED an already-committed turn — i.e. the RPC
+   * returned a pre-existing row and wrote nothing.
+   *
+   * ⛔ WHY THIS IS A FLAG AND NOT THE PRIOR PROSE. The first attempt at this
+   *    returned the turn's ORIGINAL `assistant_message` for the caller to send
+   *    back. An independent review showed that is a CATEGORY ERROR: it reuses an
+   *    answer composed for a question asked EARLIER as the answer to a question
+   *    asked NOW. On the witnessed sequence it also stayed false — the original
+   *    "Updated ... from 9 months to 14 months" still implies the value is now
+   *    14, when a later turn had moved it to 17.
+   *
+   *    Returning a flag instead lets the caller compose something that is true
+   *    of THIS turn, and it drops three residuals with it: the durable copy is
+   *    capped at 2000 chars (so replaying it could truncate mid-sentence), it
+   *    may carry a stale "re-run your analysis" instruction, and an empty
+   *    durable message made the signal invisible.
+   *
+   * Verified by `request_hash`, not by `(scenario_id, turn_id)` alone — see
+   * `priorCommittedAssistantMessage`'s successor in the Supabase store.
+   * Absent on every ordinary first commit, so a non-replay turn is untouched.
+   */
+  readonly replayedPriorTurn?: true;
 }
 
 /**

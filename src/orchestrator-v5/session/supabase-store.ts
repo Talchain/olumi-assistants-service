@@ -250,7 +250,83 @@ export class SupabaseSessionStore implements SessionStore {
     private readonly options: SupabaseSessionStoreOptions,
   ) {}
 
+  /**
+   * ⭐ ONE SEAM FOR THE REPLAY QUESTION, WRAPPING ALL THREE APPEND PATHS.
+   *
+   * `append_turn_atomic_v5` returns `{turn_row_id, model_version_receipt}` and
+   * carries NO replay flag (read from the deployed function body, 22 Sep 2026),
+   * so the outcome alone cannot distinguish a replay from a fresh commit.
+   * Adding one is a migration on a database shared with production.
+   *
+   * It does not need one. `v5_conversation_turns` is UNIQUE on
+   * `(scenario_id, turn_id)` and rows are never deleted, so a row that already
+   * exists under this write's key means this append CANNOT create a new one —
+   * it will replay. The read is therefore sufficient, and it is a READ: it adds
+   * no write and no check-to-write window, because the RPC remains the sole
+   * idempotency authority and is still called unchanged below.
+   *
+   * ⚠ IT CAN ONLY BE WRONG IN ONE DIRECTION. A row inserted between this read
+   * and the RPC yields a FALSE NEGATIVE — no replayed prose, so the caller
+   * composes fresh text, which is exactly today's behaviour. It can never
+   * produce a false POSITIVE, because a row that exists cannot stop existing.
+   * So this is never worse than the status quo on any interleaving.
+   *
+   * Scoped to graph-bearing writes: those are the commits whose prose claims a
+   * mutation ("Updated X from A to B"), and they are the ones a false claim
+   * harms. A non-graph turn pays no extra read.
+   */
   async append(write: SessionTurnWrite): Promise<SessionAppendOutcome> {
+    const replayed = write.graph == null ? false : await this.isReplayOfSameRequest(write);
+    const outcome = await this.appendThroughRpc(write);
+    return replayed ? { ...outcome, replayedPriorTurn: true } : outcome;
+  }
+
+  /**
+   * The prose this (scenario_id, turn_id) already has durably recorded, or null.
+   *
+   * Never throws and never widens a failure: an unreadable row is an UNKNOWN,
+   * not a fact, and the caller is already committing a turn — it must not be
+   * handed a second failure because a best-effort read did not answer. The same
+   * discipline as {@link committedTurnRowId}, whose swallow this mirrors.
+   */
+  private async isReplayOfSameRequest(write: SessionTurnWrite): Promise<boolean> {
+    try {
+      const { data, error } = await this.client
+        .from('v5_conversation_turns')
+        .select('request_hash')
+        .eq('scenario_id', write.scenario_id)
+        .eq('turn_id', write.turn_id)
+        .limit(1);
+      if (!error) {
+        const row = ((data as Array<{ request_hash?: unknown }> | null) ?? [])[0];
+        if (!row) return false;
+
+        // ⛔ `(scenario_id, turn_id)` ANSWERS "WILL THE RPC NO-OP?", NOT "IS THIS
+        //    THE SAME REQUEST REPLAYING?". `turn_id` is CLIENT-SUPPLIED
+        //    (`turn-executor.ts` passes `payload.turn_id`), so a client that
+        //    reuses a turn id for a DIFFERENT message would otherwise be handed
+        //    ANOTHER TURN'S ANSWER TO A DIFFERENT QUESTION — strictly worse than
+        //    the stale-but-on-topic text it gets today.
+        //
+        //    `request_hash` closes that: `computeRequestHash` covers the
+        //    user-visible payload (`scenario_id`, `stage`, and the variant's
+        //    `message`/`event`), so it is IDENTICAL on a genuine retry and
+        //    DIFFERENT on a reused key. This is the same discipline
+        //    `apply-operations.ts` already applies one file over, where a
+        //    `row.request_hash !== requestDigestFor(input)` mismatch falls to
+        //    `committed_turn_unverified` rather than claiming recovery.
+        //
+        //    Mismatch ⇒ null ⇒ the caller composes fresh text, i.e. exactly
+        //    today's behaviour. Never a wrong answer, only no answer.
+        return typeof row.request_hash === 'string' && row.request_hash === write.request_hash;
+      }
+    } catch {
+      // Fall through: an unreadable row is an unknown, not a fact.
+    }
+    return false;
+  }
+
+  private async appendThroughRpc(write: SessionTurnWrite): Promise<SessionAppendOutcome> {
     // A3 graph CAS observe-mode — pre-RPC stale-write evaluation. Runs ONLY
     // for graph-bearing writes when the mode is not 'off'; flag-off pays zero
     // SELECTs and the RPC call below is byte-identical to today. In observe

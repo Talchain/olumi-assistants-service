@@ -1575,6 +1575,136 @@ export async function commitDirectAnswer(
     );
   }
 
+  // ⭐⭐ A REPLAY MUST NOT CLAIM AN EDIT HAPPENED ON THIS TURN — IN PROSE OR IN
+  //    THE STRUCTURED PAYLOAD.
+  //
+  // Witnessed on deployed staging (build c12a54d, 22 Sep 2026): turn T1 set a
+  // factor to 14; a DIFFERENT turn T2 moved it to 17; the T1 client lost its
+  // response and retried T1. The reply said "Updated Sales Cycle Length from 17
+  // months to 14 months" while dTurns=0, dVersions=0 and the persisted value
+  // stayed 17. The handler re-runs against CURRENT state and composes its
+  // confirmation BEFORE the commit resolves as a replay.
+  //
+  // ⛔ THE FIRST ATTEMPT AT THIS SUBSTITUTED THE TURN'S ORIGINAL PROSE. An
+  //    independent review showed that does NOT fix it: "Updated ... from 9
+  //    months to 14 months" still tells the user the value is now 14, which is
+  //    just as false. Replaying a historical confirmation bare is a category
+  //    error — it answers a question asked NOW with prose composed for a
+  //    question asked EARLIER. So this composes something true of THIS turn.
+  //
+  // ⛔ AND PROSE ALONE IS NOT ENOUGH. `compose.ts` ships the same claim as
+  //    MACHINE-READABLE data — a `graph_patch` block whose `status` the handler
+  //    sets to 'applied' — and its own comment says the renderer treats
+  //    `assistant_text` as the FALLBACK display source. Correcting only the text
+  //    would fix the fallback and leave the contract asserting the edit. The
+  //    block's `status` therefore moves to 'noop', which is an EXISTING value in
+  //    that union (`set-factor-value.ts:751`) meaning exactly "nothing was
+  //    written" — no new enum, no schemas publish.
+  //
+  //    The `ui_directive` block goes too: it exists to "point the UI at the node
+  //    the user just changed", and on a replay no node was changed.
+  if (appendOutcome.replayedPriorTurn === true) {
+    // ⭐⭐ A RECOVERY MUST RECONCILE AGAINST AUTHORITATIVE CURRENT STATE, NOT
+    //    MERELY DECLINE TO LIE.
+    //
+    // The previous version said only "nothing new was written just now. Open the
+    // model to see its current values." Release control's exact-head verdict
+    // blocked that: truthful about the RETRY, but it never establishes what the
+    // state actually IS — and the acceptance seam could not FAIL when the
+    // current model was never reread.
+    //
+    // On the witnessed sequence (T1 = 14, a DIFFERENT turn moves it to 17, retry
+    // T1) the honest answer names 17. So the replay path rereads through the
+    // EXISTING read boundary (`SessionStore.loadGraph`, the same one
+    // `build-turn-context` uses) and reconciles the targeted field.
+    //
+    // ⚠ TRUTHFULLY UNAVAILABLE BEATS GUESSED. If the reread fails or the target
+    //   cannot be resolved, the prose says so and the patch's `after` is set to
+    //   `null` — an existing nullable field meaning "no current state is being
+    //   asserted". Nothing is invented onto a recovery receipt.
+    //
+    // Costs one read on the REPLAY path only; an ordinary first commit never
+    // reaches this branch.
+    const blocksBefore = Array.isArray(
+      (responseWithModelVersionReceipt as { blocks?: unknown }).blocks,
+    )
+      ? (responseWithModelVersionReceipt as { blocks: unknown[] }).blocks
+      : null;
+    let patchTargetId: string | null = null;
+    for (const b of blocksBefore ?? []) {
+      if (typeof b === 'object' && b !== null && (b as { type?: unknown }).type === 'graph_patch') {
+        const t = (b as { target_id?: unknown }).target_id;
+        if (typeof t === 'string' && t.length > 0) {
+          patchTargetId = t;
+          break;
+        }
+      }
+    }
+
+    let currentState: Record<string, unknown> | null = null;
+    let currentSentence: string | null = null;
+    if (patchTargetId !== null && sessionStore !== undefined) {
+      try {
+        const currentGraph = await sessionStore.loadGraph(metadata.scenario_id);
+        const nodes = (currentGraph as { nodes?: unknown } | null)?.nodes;
+        if (Array.isArray(nodes)) {
+          for (const n of nodes) {
+            if (typeof n !== 'object' || n === null) continue;
+            if ((n as { id?: unknown }).id !== patchTargetId) continue;
+            const obs = (n as { observed_state?: unknown }).observed_state;
+            if (typeof obs === 'object' && obs !== null) {
+              currentState = obs as Record<string, unknown>;
+            }
+            const dv = (n as { display_value?: unknown }).display_value;
+            const lbl = (n as { label?: unknown }).label;
+            if (typeof dv === 'string' && dv.length > 0 && typeof lbl === 'string' && lbl.length > 0) {
+              currentSentence = `${lbl} is currently ${dv}.`;
+            }
+            break;
+          }
+        }
+      } catch {
+        // An unreadable graph is an UNKNOWN, not a fact — fall to the neutral arm.
+      }
+    }
+
+    log.info(
+      {
+        scenario_id: metadata.scenario_id,
+        turn_id: metadata.turn_id,
+        turn_row_id: persistedRowId,
+        current_state_reconciled: currentState !== null,
+      },
+      'V5 commit — this turn REPLAYED an already-committed request; nothing was ' +
+        'written, and the response reports authoritative current state',
+    );
+
+    const correctedBlocks =
+      blocksBefore === null
+        ? null
+        : blocksBefore
+            .filter(
+              (b) =>
+                !(typeof b === 'object' && b !== null && (b as { type?: unknown }).type === 'ui_directive'),
+            )
+            .map((b) =>
+              typeof b === 'object' && b !== null && (b as { type?: unknown }).type === 'graph_patch'
+                ? // `noop` — nothing was written. `after` carries the AUTHORITATIVE
+                  // current state, or `null` when it could not be established:
+                  // the structured current-state-unavailable signal.
+                  { ...(b as Record<string, unknown>), status: 'noop', after: currentState }
+                : b,
+            );
+
+    responseWithModelVersionReceipt = {
+      ...responseWithModelVersionReceipt,
+      assistant_text:
+        'That change had already been recorded, so nothing new was written just now. ' +
+        (currentSentence ?? "I couldn't read the current value just now — open the model to check it."),
+      ...(correctedBlocks === null ? {} : { blocks: correctedBlocks }),
+    } as typeof responseWithModelVersionReceipt;
+  }
+
   // Post-success observability. The turn's state is now durably committed; the
   // telemetry below is best-effort and MUST NOT convert a successful persist
   // into a turn failure. `emit()`'s pre-Datadog path (sanitize / test sink /
