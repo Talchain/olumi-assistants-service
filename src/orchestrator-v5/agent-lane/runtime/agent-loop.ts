@@ -49,6 +49,8 @@ export interface AgentTurnResult {
   /** The full item list, for Olumi to persist as the conversation of record. */
   readonly items: readonly unknown[];
   readonly tool_calls: readonly { name: string; ok: boolean; mutated: boolean }[];
+  /** Full results, so Olumi can decide what it owes the user this turn. */
+  readonly tool_results: readonly ToolResult[];
   /** True when any tool actually changed the model. */
   readonly mutated: boolean;
   readonly hops: number;
@@ -79,6 +81,7 @@ export async function runAgentTurn(
     { role: 'user', content: [{ type: 'input_text', text: input.message }] },
   ];
   const toolCalls: { name: string; ok: boolean; mutated: boolean }[] = [];
+  const toolResults: ToolResult[] = [];
   let mutated = false;
 
   for (let hop = 0; hop < maxHops; hop++) {
@@ -97,6 +100,7 @@ export async function runAgentTurn(
         assistant_text: textOf(out),
         items,
         tool_calls: toolCalls,
+        tool_results: toolResults,
         mutated,
         hops: hop,
         stopped_reason: 'answered',
@@ -108,6 +112,7 @@ export async function runAgentTurn(
     );
     if (result.mutated) mutated = true;
     toolCalls.push({ name: String(call.name), ok: result.ok, mutated: result.mutated });
+    toolResults.push(result);
 
     // The whole output array first — the reasoning item must accompany the call.
     items.push(...out, {
@@ -123,6 +128,7 @@ export async function runAgentTurn(
     assistant_text: '',
     items,
     tool_calls: toolCalls,
+    tool_results: toolResults,
     mutated,
     hops: maxHops,
     stopped_reason: 'hop_limit',

@@ -33,6 +33,7 @@ import { createAgentCapabilities, type InternalDispatch } from '../orchestrator-
 import { ProposalStore } from '../orchestrator-v5/agent-lane/proposal.js';
 import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-binding.js';
 import { budgetFor } from '../orchestrator-v5/agent-lane/model-budgets.js';
+import { disclosuresFor, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
 
 const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
 
@@ -150,8 +151,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // `_answer_shape` only for 'substantive'. An Agent's conversational reply
     // is substantive by construction — it is the answer, not a confirmation of
     // a mechanical action.
+    // ⭐ OLUMI OWES THE DISCLOSURE, NOT THE AGENT. When a write had to carry a
+    // placeholder strength the user never gave, the user is told — whether or
+    // not the model chose to mention it.
+    const owed = disclosuresFor(result.tool_results);
     const composed = composeDirectAnswerResponse({
-      assistant_text: text,
+      assistant_text: withDisclosures(text, owed),
       stage: 'frame',
       answerKind: 'substantive',
     });

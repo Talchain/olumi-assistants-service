@@ -158,6 +158,8 @@ export function createAgentCapabilities(
       proposals.markApplied(decision.proposal.proposal_id);
       return {
         ok: true, mutated: true, applied: true,
+        // Olumi discloses this to the user deterministically; see disclosure.ts.
+        placeholder_strength: true,
         proposal_id: decision.proposal.proposal_id,
         revision_before: confirmation.revision_before,
         revision_after: confirmation.revision_after,
