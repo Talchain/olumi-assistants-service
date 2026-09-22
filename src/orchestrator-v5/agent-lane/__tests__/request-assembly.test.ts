@@ -18,6 +18,7 @@ import {
   assessContextFreshness,
   eligibleTools,
   assembleRequest,
+  issueContextPacket,
   type CanonicalContextPacket,
 } from '../runtime/request-assembly.js';
 import { AGENT_TOOLS, MUTATION_TOOLS, toolsFor } from '../runtime/agent-tools.js';
@@ -26,16 +27,33 @@ const SCENARIO = '11111111-1111-1111-1111-111111111111';
 const USER = 'user-a';
 const REV = 'a'.repeat(64);
 
-const packet = (over: Partial<CanonicalContextPacket> = {}): CanonicalContextPacket => ({
+const SECRET = 'server-side-secret-value';
+
+/**
+ * Packets are ISSUED, never hand-built. A hand-built packet carries no binding
+ * and is now correctly refused, so constructing one here would test the refusal
+ * rather than the freshness rule each case is about.
+ */
+const packet = (over: Partial<Omit<CanonicalContextPacket, 'binding'>> = {}): CanonicalContextPacket =>
+  issueContextPacket(
+    {
+      scenario_id: SCENARIO,
+      authenticated_user_id: USER,
+      graph_revision: REV,
+      captured_at_turn: 7,
+      state: { entities: [], structure: {} },
+      ...over,
+    },
+    SECRET,
+  );
+
+const expectation = {
   scenario_id: SCENARIO,
   authenticated_user_id: USER,
   graph_revision: REV,
-  captured_at_turn: 7,
-  state: { entities: [], structure: {} },
-  ...over,
-});
-
-const expectation = { scenario_id: SCENARIO, authenticated_user_id: USER, graph_revision: REV, current_turn: 7 };
+  current_turn: 7,
+  binding_secret: SECRET,
+};
 
 describe('context freshness — the packet must describe THIS scenario, THIS user, THIS revision', () => {
   it('fresh when scenario, user and revision all match', () => {
@@ -182,7 +200,10 @@ describe('stable prefix vs dynamic tail, and the diagnostics', () => {
     const a = assembleRequest(base);
     const reordered = assembleRequest({
       ...base,
-      context: { captured_at_turn: 7, state: { structure: {}, entities: [] }, graph_revision: REV, authenticated_user_id: USER, scenario_id: SCENARIO },
+      context: issueContextPacket(
+        { captured_at_turn: 7, state: { structure: {}, entities: [] }, graph_revision: REV, authenticated_user_id: USER, scenario_id: SCENARIO },
+        SECRET,
+      ),
     });
     expect(reordered.hashes.context).toBe(a.hashes.context);
     expect(assembleRequest(base).hashes.prefix).toBe(a.hashes.prefix);

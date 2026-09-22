@@ -26,7 +26,7 @@
  * change nothing. Approval authority lives in the durable proposal machinery,
  * not in a blob that travelled with a request.
  */
-import { createHash } from 'node:crypto';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 
 import { AGENT_TOOLS, toolsFor, type AgentLaneMode, type ToolDefinition } from './agent-tools.js';
 
@@ -47,6 +47,16 @@ export interface CanonicalContextPacket {
   readonly captured_at_turn: number;
   /** The projected canonical state itself. Opaque here, hashed for diagnostics. */
   readonly state: unknown;
+  /**
+   * HMAC over the subject AND the state, keyed on a server secret.
+   *
+   * ⛔ THIS IS WHAT "AUTHENTICATED" MEANS. Without it a packet merely ASSERTS
+   * its scenario, user and revision, and comparing those assertions to what the
+   * server expects catches an honest mistake but never a fabrication — a
+   * fabricator simply writes the values the server expects. The binding is how
+   * the server recognises its OWN packet.
+   */
+  readonly binding: string;
 }
 
 /** What the server believes is true right now, to judge the packet against. */
@@ -55,13 +65,18 @@ export interface ContextExpectation {
   readonly authenticated_user_id: string;
   readonly graph_revision: string;
   readonly current_turn: number;
+  /** Required. A packet that cannot be verified is not evidence of anything. */
+  readonly binding_secret: string;
 }
 
 export type ContextFreshness =
   | { readonly kind: 'fresh' }
   | { readonly kind: 'absent' }
   | { readonly kind: 'stale'; readonly reason: 'revision_moved' | 'captured_earlier' }
-  | { readonly kind: 'invalidated'; readonly reason: 'scenario_mismatch' | 'user_mismatch' | 'malformed' };
+  | {
+      readonly kind: 'invalidated';
+      readonly reason: 'binding_invalid' | 'scenario_mismatch' | 'user_mismatch' | 'malformed';
+    };
 
 /**
  * An immutable, versioned prompt snapshot.
@@ -149,6 +164,52 @@ function hash(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(canonicalise(value))).digest('hex');
 }
 
+/** The exact fields the binding covers. Order is fixed by `canonicalise`. */
+function bindingPayload(p: Omit<CanonicalContextPacket, 'binding'>): unknown {
+  return {
+    scenario_id: p.scenario_id,
+    authenticated_user_id: p.authenticated_user_id,
+    graph_revision: p.graph_revision,
+    captured_at_turn: p.captured_at_turn,
+    state: p.state,
+  };
+}
+
+function computeBinding(p: Omit<CanonicalContextPacket, 'binding'>, secret: string): string {
+  return createHmac('sha256', secret)
+    .update(JSON.stringify(canonicalise(bindingPayload(p))))
+    .digest('hex');
+}
+
+/**
+ * Mint a packet. Only a holder of the server secret can produce one that will
+ * verify, which is the whole point: a packet is evidence the SERVER assembled
+ * this state, not a claim anyone can make.
+ */
+export function issueContextPacket(
+  fields: Omit<CanonicalContextPacket, 'binding'>,
+  secret: string,
+): CanonicalContextPacket {
+  return Object.freeze({
+    scenario_id: fields.scenario_id,
+    authenticated_user_id: fields.authenticated_user_id,
+    graph_revision: fields.graph_revision,
+    captured_at_turn: fields.captured_at_turn,
+    state: fields.state,
+    binding: computeBinding(fields, secret),
+  });
+}
+
+/** Constant-time compare, so a binding cannot be probed a byte at a time. */
+function bindingVerifies(packet: CanonicalContextPacket, secret: string): boolean {
+  if (typeof packet.binding !== 'string' || packet.binding.length !== 64) return false;
+  const expected = computeBinding(packet, secret);
+  const a = Buffer.from(packet.binding, 'hex');
+  const b = Buffer.from(expected, 'hex');
+  if (a.length !== b.length || a.length === 0) return false;
+  return timingSafeEqual(a, b);
+}
+
 /**
  * Is this packet a usable description of the CURRENT subject and state?
  *
@@ -169,6 +230,12 @@ export function assessContextFreshness(
     typeof packet.captured_at_turn !== 'number'
   ) {
     return { kind: 'invalidated', reason: 'malformed' };
+  }
+  // ⛔ BINDING FIRST. If it does not verify, nothing the packet says is
+  // trustworthy — including its scenario and user — so reporting "stale" or
+  // "scenario mismatch" would dress an untrusted claim up as a diagnosis.
+  if (!bindingVerifies(packet, expect.binding_secret)) {
+    return { kind: 'invalidated', reason: 'binding_invalid' };
   }
   if (packet.scenario_id !== expect.scenario_id) return { kind: 'invalidated', reason: 'scenario_mismatch' };
   if (packet.authenticated_user_id !== expect.authenticated_user_id) {
