@@ -116,14 +116,50 @@ describe('the store reports a replay, verified by request_hash', () => {
     priorRows = [{ request_hash: 'sha256:a-completely-different-question' }];
     expect(
       (await store().append(write())).replayedPriorTurn,
-      'reporting this as a replay would tell the user nothing was written when their ' +
-        'genuinely new request was refused — worse than composing fresh text',
+      'reporting this as a replay would tell the user their new instruction had ' +
+        'already been recorded, when it was refused and never ran',
     ).toBeUndefined();
   });
 
-  it('CONTROL — a FIRST commit is not a replay, so ordinary turns are untouched', async () => {
+  /**
+   * ⭐ THE DETECTION HALF, AND WHY IT IS ASSERTED HERE RATHER THAN AT THE CALLER.
+   *
+   * The caller's suite injects a store outcome directly, so it proves what
+   * commit.ts DOES with a verdict — never that this method PRODUCES one. A
+   * mutant collapsing the mismatch arm back to 'replay' survived that suite
+   * completely. These rows execute the classification itself.
+   */
+  it('⛔ a DIFFERENT request under the same turn_id IS reported as a conflict', async () => {
+    priorRows = [{ request_hash: 'sha256:a-completely-different-question' }];
+    expect(
+      (await store().append(write())).priorTurnConflict,
+      'measured on deployed a459d23: without this verdict the caller composes fresh ' +
+        'text from the PROPOSED patch and tells the user an edit happened that did not',
+    ).toBe(true);
+  });
+
+  it('CONTROL — the SAME request is a replay and NOT a conflict', async () => {
+    priorRows = [{ request_hash: REQUEST_HASH }];
+    const outcome = await store().append(write());
+    expect(outcome.replayedPriorTurn).toBe(true);
+    expect(
+      outcome.priorTurnConflict,
+      'collapsing the arms the other way would tell a genuine retry its change was refused',
+    ).toBeUndefined();
+  });
+
+  it('CONTROL — an unreadable prior row is an UNKNOWN, never a conflict', async () => {
+    priorRows = [{ request_hash: 12345 as unknown as string }];
+    const outcome = await store().append(write());
+    expect(outcome.priorTurnConflict, 'a non-string hash is no evidence of a different request').toBeUndefined();
+    expect(outcome.replayedPriorTurn).toBeUndefined();
+  });
+
+  it('CONTROL — a FIRST commit is neither, so ordinary turns are untouched', async () => {
     priorRows = [];
-    expect((await store().append(write())).replayedPriorTurn).toBeUndefined();
+    const outcome = await store().append(write());
+    expect(outcome.replayedPriorTurn).toBeUndefined();
+    expect(outcome.priorTurnConflict).toBeUndefined();
   });
 
   it('CONTROL — a non-graph write pays no read at all', async () => {
@@ -132,6 +168,7 @@ describe('the store reports a replay, verified by request_hash', () => {
     // the other (`appendAtomicVersioned`), so a non-graph write drops both.
     const outcome = await store().append(write({ graph: undefined, modelVersion: undefined }));
     expect(outcome.replayedPriorTurn).toBeUndefined();
+    expect(outcome.priorTurnConflict).toBeUndefined();
     // Other paths also read this table, so the precise claim is that MY read —
     // the one that selects `request_hash` — did not run.
     expect(
