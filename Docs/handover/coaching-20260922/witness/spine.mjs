@@ -266,6 +266,38 @@ await step('7', async () => {
   rec('7', 'a user CAN apply a model edit on their own surface', v7 === '11' ? 'PASS' : 'FAIL',
       `raw_value=${v7} (9 = refused, 11 = applied) · "${txt(res).slice(0, 60)}"`);
   userRoute.push(servedByAgent);
+
+  // ── A model created on the user's surface must be receipted.
+  //   Measured 22 Sep on the agent route: 25 nodes written, model_versions = 0,
+  //   current_model_version_id NULL — a model with no version to reread, no
+  //   receipt and no rollback point. The CONVENTIONAL control mints one for the
+  //   identical brief, which is what makes it a defect rather than a property
+  //   of creation. Both arms are run here so the claim can never rest on one.
+  const brief = 'We are deciding whether to expand into Germany or the Nordics next year.';
+  const mkEmpty = async (t) => (await sql`insert into public.scenarios (user_id,title,stage,graph,scenario_schema_version)
+    values (${OWNER}, ${t}, 'frame', ${sql.json({ nodes: [], edges: [] })}, 1) returning id`)[0].id;
+  const creationReceipt = async (path, useOrigin) => {
+    const sid2 = await mkEmpty('ZZZ-SPINE-7-CREATE');
+    const hh = { 'content-type': 'application/json', 'x-olumi-assist-key': KEY, 'x-request-id': randomUUID() };
+    if (useOrigin) hh.origin = ORIGIN;
+    if (JWT) hh.authorization = `Bearer ${JWT}`;
+    const r = await fetch(`${BASE}${path}`, { method: 'POST', headers: hh,
+      body: JSON.stringify({ kind: 'message', turn_id: randomUUID(), scenario_id: sid2, stage: 'frame',
+        message: brief, turn_class: 'frame', source: 'composer' }), signal: AbortSignal.timeout(240000) });
+    await r.text();
+    const [row] = await sql`select jsonb_array_length(graph->'nodes') n, current_model_version_id c from public.scenarios where id=${sid2}`;
+    const vers = (await sql`select 1 from public.model_versions where scenario_id=${sid2}`).length;
+    return { nodes: row?.n, versions: vers, head: row?.c };
+  };
+  const onUser = await creationReceipt('/proxy/v5/turn', true);
+  const onConv = await creationReceipt('/orchestrate/v2/turn', false);
+  rec('7', 'CONTROL — creation IS receipted on the conventional route',
+      onConv.versions > 0 && onConv.head ? 'PASS' : 'FAIL',
+      `nodes=${onConv.nodes} versions=${onConv.versions} head=${onConv.head ? 'set' : 'NULL'}`);
+  rec('7', 'a model created on the user surface mints a receipt',
+      OWNER ? (onUser.versions > 0 && onUser.head ? 'PASS' : 'FAIL') : 'SKIP',
+      OWNER ? `nodes=${onUser.nodes} versions=${onUser.versions} head=${onUser.head ? 'set' : 'NULL'}`
+            : 'guest mints none — vacuous, not passed');
 });
 
 const p = rows.filter(r => r.state === 'PASS').length, f = rows.filter(r => r.state === 'FAIL').length, s = rows.filter(r => r.state === 'SKIP').length;
