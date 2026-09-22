@@ -307,10 +307,66 @@ function framedObservedState(f: {
   return { value: raw / cap, raw_value: raw, cap, declared_scale: 'unit_interval', ...base };
 }
 
+/**
+ * ⭐ A DEFAULT FRAME, DERIVED FROM THE DATA AND DISCLOSED — the backstop.
+ *
+ * The builder is required to state a `plausible_max` for every factor, and a
+ * widener-proposed factor has no such field at all. A factor that reaches the
+ * graph without a range is PERMANENTLY unanalysable: no system event can add a
+ * cap afterwards (measured — `factor_value_edit` is `.strict()` with no cap
+ * field, and posting a `{value, raw_value}` pair is accepted with HTTP 200 and
+ * normalised back to `raw === value`). The only remedy would be rebuilding the
+ * whole model, which is not a thing a user should be asked to do.
+ *
+ * ⚠ SO A FRAME IS SUPPLIED, AND THIS IS A REAL CONCESSION. Current CEE does
+ * the same thing silently — it is why a user's £49 came back as 0.49. The
+ * difference here is the whole point: the frame is the smallest power of ten
+ * strictly above the largest number the model itself carries for that factor,
+ * so it is DERIVED from the data rather than picked; `raw_value` keeps the
+ * user's own number untouched; and it is recorded in the ledger as defaulted,
+ * so the Agent says it out loud. It is a unit of measurement, not a claim.
+ */
+export function defaultFrameFor(largestMagnitude: number): number {
+  const magnitude = Math.abs(largestMagnitude);
+  if (!Number.isFinite(magnitude) || magnitude <= 1) return 1;
+  return 10 ** Math.ceil(Math.log10(magnitude) + Number.EPSILON);
+}
+
 export function admitCandidateModel(
   model: CandidateModel,
   widened: WidenerAdditions = {},
 ): AdmittedModel {
+
+  /**
+   * The scale frame for each factor, keyed by LABEL because it must be known
+   * before the nodes are built — the baseline is normalised as the node is
+   * created. The builder's stated range wins; anything left without one gets a
+   * frame DERIVED from the largest figure the model already carries for it,
+   * recorded below as defaulted.
+   */
+  const capByLabel = new Map<string, number>();
+  const largestByLabel = new Map<string, number>();
+  const noteMagnitude = (label: string, v: unknown): void => {
+    if (typeof v !== 'number' || !Number.isFinite(v)) return;
+    largestByLabel.set(label, Math.max(largestByLabel.get(label) ?? 0, Math.abs(v)));
+  };
+  for (const f of model.factors) {
+    if (typeof f.plausible_max === 'number' && Number.isFinite(f.plausible_max) && f.plausible_max > 1) {
+      capByLabel.set(f.label, f.plausible_max);
+    }
+    if (f.baseline_known) noteMagnitude(f.label, f.baseline_value);
+  }
+  for (const o of model.options) {
+    for (const iv of o.interventions ?? []) noteMagnitude(iv.factor_label, iv.value);
+  }
+  const defaultedFrames: { label: string; frame: number }[] = [];
+  for (const [label, largest] of largestByLabel) {
+    if (capByLabel.has(label) || largest <= 1) continue;
+    const frame = defaultFrameFor(largest);
+    capByLabel.set(label, frame);
+    defaultedFrames.push({ label, frame });
+  }
+  const capFor = (label: string): number | undefined => capByLabel.get(label);
   const loss: RepairEntry[] = [];
 
   // Fixed traversal order => deterministic ids.
@@ -358,16 +414,17 @@ export function admitCandidateModel(
         // to decide whether to audit the figure against the brief. Correcting only
         // the entity stamp left the figure unaudited; measured, not assumed.
         ...(f.baseline_known && typeof f.baseline_value === 'number'
-          ? { observed_state: framedObservedState(f) }
+          ? { observed_state: framedObservedState({ ...f, plausible_max: capFor(f.label) ?? f.plausible_max }) }
           : {}),
         // ⭐ THE FRAME TRAVELS WITH THE NODE, not only with the baseline. A
         // factor with no value today still needs its range, because the value
         // a user adopts LATER is normalised against it — and no system event
         // can set a cap afterwards (measured: `factor_value_edit` accepts a
         // `{value, raw_value}` pair, returns 200, and stores `raw === value`).
-        ...(typeof f.plausible_max === 'number' && f.plausible_max > 1
-          ? { cap: f.plausible_max }
-          : {}),
+        ...((): Record<string, number> => {
+          const c = capFor(f.label) ?? f.plausible_max;
+          return typeof c === 'number' && c > 1 ? { cap: c } : {};
+        })(),
       },
     })),
     ...model.risks.map((r) => ({ label: r.label, kind: 'risk' as const, provenance: r.provenance })),
@@ -478,6 +535,40 @@ export function admitCandidateModel(
   // exact match only: attaching "what this option changes" to a guessed factor
   // would put the user's own number on the wrong quantity.
   const interventionsByOption = new Map<string, Record<string, { value: number }>>();
+  /**
+   * ⛔ AN OPTION'S LEVEL MUST BE ON THE SAME SCALE AS THE FACTOR'S BASELINE.
+   *
+   * MEASURED LIVE at served a1e35b40, and this defect was introduced by the
+   * scale frame itself: the baseline started being written as `raw / cap`
+   * while the option levels were still written raw, so one factor carried a
+   * baseline of `0.245` and an intervention of `59`. `run_analysis` refused
+   * the whole comparison with `mixed_scale_unresolved` and named four factors
+   * — "values … that the analysis engine would silently rescale".
+   *
+   * A frame that is applied to only one of the two numbers is worse than no
+   * frame at all, because each is individually coherent and the pair is not.
+   * So the SAME cap normalises both, here, from one lookup.
+   */
+  const capByFactorId = new Map<string, number>();
+  for (const f of model.factors) {
+    const fid = ids.get(f.label);
+    const c = capByLabel.get(f.label);
+    if (fid !== undefined && c !== undefined) capByFactorId.set(fid, c);
+  }
+  for (const d of defaultedFrames) {
+    loss.push({
+      field_path: `nodes[${ids.get(d.label) ?? d.label}].observed_state.cap`,
+      before: null,
+      after: d.frame,
+      reason:
+        `No range was stated for "${d.label}", and a number above 1 with no range cannot be analysed ` +
+        `at all \u2014 nor can a range be added afterwards. A range of 0 to ${d.frame} has been used, taken ` +
+        'from the largest figure the model already holds for it. That is a unit of measurement, not a ' +
+        'forecast or a limit, and your own figures are stored unchanged beside it.',
+      severity: 'warn',
+    } as RepairEntry);
+  }
+
   /** option id -> factor ids it acts on, with or without a stated level. */
   const actsOnByOption = new Map<string, Set<string>>();
   for (const o of model.options) {
@@ -515,7 +606,27 @@ export function admitCandidateModel(
         });
         continue;
       }
-      bundle[factorId] = { value: iv.value };
+      const cap = capByFactorId.get(factorId);
+      // Only when the level genuinely sits inside the declared range. A level
+      // outside it is left exactly as stated and the mismatch is recorded —
+      // silently clamping a user's number would be the worse failure.
+      if (cap !== undefined && iv.value >= 0 && iv.value <= cap) {
+        bundle[factorId] = { value: iv.value / cap };
+      } else {
+        if (cap !== undefined) {
+          loss.push({
+            field_path: `nodes[${optionId}].interventions.${factorId}`,
+            before: iv.value,
+            after: iv.value,
+            reason:
+              `"${o.label}" sets "${iv.factor_label}" to ${iv.value}, which is outside the range ` +
+              `0 to ${cap} the model states for that factor. It has been kept exactly as stated ` +
+              'rather than squeezed into the range — say so, and correct either the level or the range.',
+            severity: 'warn',
+          } as RepairEntry);
+        }
+        bundle[factorId] = { value: iv.value };
+      }
       actsOn.add(factorId);
     }
     if (Object.keys(bundle).length > 0) interventionsByOption.set(optionId, bundle);

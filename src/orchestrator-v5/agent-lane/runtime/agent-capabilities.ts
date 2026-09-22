@@ -251,6 +251,142 @@ export function createAgentCapabilities(
       };
     },
 
+    /**
+     * ⭐ WHAT AN OPTION DOES — the last structural blocker on the journey.
+     *
+     * ⛔ THE CONSTRAINT THAT DECIDES THIS DESIGN. `option_intervention_edit` is
+     * `.strict()` and its `value` is `z.number().min(0).max(1)`, described as
+     * "the effect value on the MODEL scale … no unit, no currency and no
+     * percentage: the client converts nothing, and the server licenses no
+     * raw-unit conversion on this path." A first version of this capability
+     * took the user's "£54" and was WITHDRAWN unshipped, because turning it
+     * into a number in [0, 1] meant choosing a scale at the moment of writing,
+     * which is the fabrication this lane exists to prevent.
+     *
+     * ⭐ IT IS HONEST NOW ONLY BECAUSE THE FACTOR CARRIES A DECLARED FRAME.
+     * Construction publishes `observed_state.cap`, so `raw / cap` READS the
+     * user's own number against a range the model already stated and disclosed
+     * — a different act from inventing one here. Both numbers are reported.
+     *
+     * ⛔ AND WITHOUT A FRAME IT REFUSES. A factor with no cap whose value is
+     * outside [0, 1] cannot be expressed on this wire at all; saying so is the
+     * correct outcome, not picking a denominator.
+     */
+    async proposeOptionInterventions(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      const g = await readGraph(ctx.scenario_id);
+      if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      const input = Array.isArray(args?.interventions) ? args.interventions : [];
+      if (input.length === 0) {
+        return { ok: false, mutated: false, refusal: 'empty_proposal', detail: 'No interventions were given.' };
+      }
+      const byLabel = (l: string, kind: string) =>
+        g.nodes.find((n) => n.kind === kind && (norm(n.label) === norm(l) || norm(n.description) === norm(l)));
+
+      const unresolved: string[] = [];
+      const unframed: { factor: string; detail: string }[] = [];
+      const unchanged: string[] = [];
+      const seen = new Set<string>();
+      const set: {
+        option: { id: string; label: string }; factor: { id: string; label: string };
+        raw: number; normalised: number; cap: number | null; unit: string; basis: string;
+      }[] = [];
+
+      for (const i of input) {
+        const option = byLabel(String(i?.option_label ?? ''), 'option');
+        const factor = byLabel(String(i?.factor_label ?? ''), 'factor');
+        if (option === undefined) { unresolved.push(`option "${String(i?.option_label ?? '')}"`); continue; }
+        if (factor === undefined) { unresolved.push(`factor "${String(i?.factor_label ?? '')}"`); continue; }
+        const raw = Number(i?.value);
+        if (!Number.isFinite(raw)) { unresolved.push(`${option.label} -> ${factor.label} (no value)`); continue; }
+
+        const os = (factor.observed_state ?? {}) as { cap?: unknown; unit?: unknown };
+        const cap = typeof os.cap === 'number' && Number.isFinite(os.cap) && os.cap > 0 ? os.cap : null;
+        let normalised: number;
+        if (cap !== null) {
+          normalised = raw / cap;
+          if (normalised < 0 || normalised > 1) {
+            unframed.push({ factor: factor.label, detail: `${raw} is outside the model's range for this factor (0 to ${cap})` });
+            continue;
+          }
+        } else if (raw >= 0 && raw <= 1) {
+          normalised = raw;
+        } else {
+          unframed.push({
+            factor: factor.label,
+            detail:
+              `"${factor.label}" has no stated range, so ${raw} cannot be recorded against it. ` +
+              'Rebuilding the model would give it one; nothing here will pick a range on your behalf.',
+          });
+          continue;
+        }
+
+        const current = (option.interventions ?? {})[factor.id] as { value?: unknown } | number | undefined;
+        const currentValue = typeof current === 'number' ? current : (current as { value?: unknown } | undefined)?.value;
+        if (currentValue === normalised || currentValue === raw) {
+          unchanged.push(`${option.label} already sets ${factor.label} to ${String(currentValue)}`);
+          continue;
+        }
+        const key = `${option.id}::${factor.id}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        set.push({
+          option: { id: option.id, label: option.label },
+          factor: { id: factor.id, label: factor.label },
+          raw, normalised, cap, unit: typeof os.unit === 'string' ? os.unit : '', basis: String(i?.basis ?? ''),
+        });
+      }
+
+      if (set.length === 0) {
+        return {
+          ok: false, mutated: false, refusal: 'nothing_to_set',
+          ...(unresolved.length > 0 ? { unresolved } : {}),
+          ...(unframed.length > 0 ? { no_stated_range: unframed } : {}),
+          ...(unchanged.length > 0 ? { already_set: unchanged } : {}),
+          detail: 'Nothing could be recorded. Tell the user exactly which of these it was and why.',
+        };
+      }
+
+      const ordered = [...set].sort((x, y) =>
+        `${x.option.id}::${x.factor.id}` < `${y.option.id}::${y.factor.id}` ? -1 : 1);
+      const operations: ProposalOperation[] = ordered.map((i) => ({
+        op: 'set_option_intervention',
+        path: `${i.option.id}::${i.factor.id}`,
+        value: { normalised: i.normalised, raw: i.raw, cap: i.cap, basis: i.basis },
+      }));
+      const proposal = createProposal({
+        scenario_id: ctx.scenario_id,
+        user_id: ctx.authenticated_user_id,
+        base_graph_identity_hash: g.graph_hash,
+        operations,
+        provenance: { authored_by: 'model_proposed', basis: 'what each option does, for the user to confirm or correct' },
+        validation: { admitted: true, loss_count: 0, refusals: [] },
+        public_label:
+          ordered.map((i) => `${i.option.label} sets ${i.factor.label} to ${i.raw}${i.unit !== '' ? ' ' + i.unit : ''}`).join('; '),
+      });
+      proposals.put(proposal);
+      return {
+        ok: true, mutated: false,
+        proposal_id: proposal.proposal_id,
+        public_label: proposal.public_label,
+        base_revision: g.graph_hash,
+        interventions: ordered.map((i) => ({
+          option: i.option.label, factor: i.factor.label,
+          value: i.raw, unit: i.unit,
+          // Both numbers, always. The user approves the one they said.
+          recorded_on_model_scale: i.normalised,
+          model_range: i.cap,
+          basis: i.basis,
+        })),
+        ...(unresolved.length > 0 ? { unresolved } : {}),
+        ...(unframed.length > 0 ? { no_stated_range: unframed } : {}),
+        ...(unchanged.length > 0 ? { already_set: unchanged } : {}),
+        note:
+          'Nothing has changed. Show the user the value in THEIR units and what it rests on, then call ' +
+          'authorise_change with this proposal_id once they agree.',
+      };
+    },
+
     async authoriseChange(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
       const before = await readGraph(ctx.scenario_id);
@@ -270,6 +406,73 @@ export function createAgentCapabilities(
 
       // The STORED operations are applied. Nothing is regenerated here.
       const ops = decision.proposal.operations;
+
+      if (ops[0]?.op === 'set_option_intervention') {
+        /**
+         * ⚠ THIS EVENT IS CAS-GATED AND `factor_value_edit` IS NOT — it carries
+         * a REQUIRED `base_graph_hash`. Each applied edit moves the hash, so
+         * the current one is re-read between edits; sending the proposal's base
+         * for all of them refuses every edit after the first with a divergence
+         * that is really our own preceding write.
+         */
+        const applied: { option: string; factor: string; requested: number; recorded: number | null }[] = [];
+        const failures: { path: string; detail: string }[] = [];
+        let baseHash = before.graph_hash;
+        for (let i = 0; i < ops.length; i += 1) {
+          const o = ops[i];
+          const [optionId, factorId] = o.path.split('::');
+          const v = ((o.value ?? {}) as { normalised?: number }).normalised;
+          if (typeof v !== 'number') { failures.push({ path: o.path, detail: 'no value stored on the proposal' }); continue; }
+          const r = await dispatch('/orchestrate/v2/turn', {
+            kind: 'system_event',
+            turn_id: authorisationTurnId(`${decision.proposal.proposal_id}#${i}`),
+            scenario_id: ctx.scenario_id,
+            stage: 'frame',
+            event: { kind: 'option_intervention_edit', option_id: optionId, factor_id: factorId, value: v, base_graph_hash: baseHash },
+          });
+          if (r.status !== 200) failures.push({ path: o.path, detail: `http ${r.status}` });
+          const mid = await readGraph(ctx.scenario_id);
+          if (mid !== null) baseHash = mid.graph_hash;
+        }
+
+        const afterSet = await readGraph(ctx.scenario_id);
+        const byId = new Map((afterSet?.nodes ?? []).map((n) => [n.id, n]));
+        for (const o of ops) {
+          const [optionId, factorId] = o.path.split('::');
+          const option = byId.get(optionId);
+          const iv = (option?.interventions ?? {})[factorId] as { value?: unknown } | number | undefined;
+          const recorded = typeof iv === 'number' ? iv : (iv as { value?: unknown } | undefined)?.value;
+          const stored = ((o.value ?? {}) as { raw?: number }).raw;
+          applied.push({
+            option: option?.label ?? optionId,
+            factor: byId.get(factorId)?.label ?? factorId,
+            requested: typeof stored === 'number' ? stored : Number.NaN,
+            recorded: typeof recorded === 'number' ? recorded : null,
+          });
+        }
+        const landed = applied.filter((a) => a.recorded !== null);
+        if (landed.length === 0) {
+          return {
+            ok: false, mutated: false, applied: false, refusal: 'not_applied',
+            detail: 'None of the levels were recorded. The model is unchanged.', failures, interventions: applied,
+          };
+        }
+        if (landed.length === applied.length) proposals.markApplied(decision.proposal.proposal_id);
+        return {
+          ok: true, mutated: true, applied: true,
+          proposal_id: decision.proposal.proposal_id,
+          recorded_count: landed.length,
+          requested_count: applied.length,
+          interventions: applied,
+          revision_before: before.graph_hash,
+          revision_after: afterSet?.graph_hash ?? before.graph_hash,
+          ...(failures.length > 0 ? { failures } : {}),
+          not_represented:
+            'What each option does is now recorded from what the user said, not measured. The model ' +
+            'stores each level against the factor\u2019s stated range, so quote the user\u2019s own number back ' +
+            'to them, not the normalised one.',
+        };
+      }
 
       if (ops[0]?.op === 'set_factor_value') {
         /**

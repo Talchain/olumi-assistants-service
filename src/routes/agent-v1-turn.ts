@@ -60,7 +60,7 @@ const sessions = new SessionBindingRegistry();
 const MUTATION_INSTRUCTION =
   config.proxy.agentLanePreview === true
     ? 'This is a read-only preview: you CANNOT change the model, and there is no tool that would let you. If the user asks for a change, say plainly that this preview cannot make it and describe what you would propose instead.'
-    : 'To change the model you must first call a proposing tool \u2014 propose_model_change for a link, propose_assumptions to give value-less factors a starting number \u2014 show the user exactly what it returned, and call authorise_change with that proposal_id ONLY after they have explicitly approved it.';
+    : 'To change the model you must first call a proposing tool \u2014 propose_model_change for a link, propose_assumptions to give value-less factors a starting number, propose_option_interventions to record the level an option sets \u2014 show the user exactly what it returned, and call authorise_change with that proposal_id ONLY after they have explicitly approved it.';
 
 const AGENT_INSTRUCTIONS = [
   'You are Olumi, a strategic reasoning layer. Improve human strategic judgement rather than deciding for the user.',
@@ -108,6 +108,13 @@ const AGENT_INSTRUCTIONS = [
    */
   'When you offer starting estimates, offer them THROUGH propose_assumptions so the user can adopt the exact set you showed them in one step. If the user asks you to put your suggested assumptions into the model, that is a request to propose them \u2014 call propose_assumptions with the figures you just gave, then authorise_change once they confirm.',
   'propose_assumptions changes nothing on its own and leaves any factor that already holds a value alone. After authorise_change, report every value the model stored differently from the one approved.',
+  /*
+   * ⭐ THE LAST STRUCTURAL WALL ON THE JOURNEY, measured at served 59c90069:
+   * scale resolved, every factor valued, and the analysis STILL refused —
+   * two options named a factor without saying what level they set it to.
+   */
+  'An option that connects to a factor but states no level for it blocks the comparison for EVERY option, not only itself. run_analysis names each one. Offer a level in the user\u2019s own units with propose_option_interventions, exactly as you would a starting assumption, and say it is an assumption to correct.',
+  'Give propose_option_interventions the number the USER would say (54, not 0.27). If it answers `no_stated_range`, that factor has no range to read the number against \u2014 say so plainly and do not invent one.',
   /*
    * ⭐ THE BLOCKER THAT SURVIVES EVERY VALUE BEING FILLED IN.
    * Measured live at served 877ae800: eight assumptions adopted, ZERO factors

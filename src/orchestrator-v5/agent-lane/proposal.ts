@@ -48,7 +48,25 @@ export interface ProposalOperation {
      * attributing them to itself, which is worse; the right answer is a value
      * the USER adopts, recorded as an assumption rather than a measurement.
      */
-    | 'set_factor_value';
+    | 'set_factor_value'
+    /**
+     * ⭐ SAY WHAT AN OPTION DOES — `path` is `optionId::factorId`.
+     *
+     * Measured live: with every factor valued and the scale frame in place,
+     * the analysis was STILL refused because two options connected to a factor
+     * without saying what level they set it to. An option that sets nothing
+     * cannot be compared with one that does, so it blocks the comparison for
+     * every option, not only itself.
+     *
+     * ⚠ This op was written once and WITHDRAWN before shipping, because
+     * `option_intervention_edit.value` is bounded `[0, 1]` and the contract
+     * states "the client converts nothing" — so a user's "£54" could not be
+     * expressed without inventing a scale. It is buildable now only because
+     * the factor carries a DECLARED `cap`: `raw / cap` reads the user's own
+     * number against a range the model already published and disclosed, which
+     * is a different act from choosing one at the point of writing.
+     */
+    | 'set_option_intervention';
   /** Node id, or `from::to` for an edge. */
   readonly path: string;
   readonly value?: unknown;

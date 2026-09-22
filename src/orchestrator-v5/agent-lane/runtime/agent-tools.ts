@@ -105,6 +105,28 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       },
     }, ['assumptions']),
   },
+  {
+    type: 'function',
+    name: 'propose_option_interventions',
+    description:
+      'Propose the level an option sets a factor to \u2014 what the option actually DOES. An option ' +
+      'that names a factor without saying what it sets it to blocks the comparison for EVERY option, ' +
+      'not just itself. Give the value in the factor\u2019s own units, as the user would say it ' +
+      '(\u00a354, not 0.27). This changes nothing: it records an exact proposal and returns its id to ' +
+      'show the user first. Propose only what the user\u2019s words support; if an option\u2019s level is ' +
+      'not stated, offer one as an assumption and say so, exactly as with propose_assumptions.',
+    parameters: obj({
+      interventions: {
+        type: 'array',
+        items: obj({
+          option_label: { type: 'string' },
+          factor_label: { type: 'string' },
+          value: { type: 'number', description: 'In the factor\u2019s own units \u2014 the number a user would say.' },
+          basis: { type: 'string' },
+        }, ['option_label', 'factor_label', 'value', 'basis']),
+      },
+    }, ['interventions']),
+  },
 ];
 
 export type ToolName = (typeof AGENT_TOOLS)[number]['name'];
@@ -123,7 +145,7 @@ export type ToolName = (typeof AGENT_TOOLS)[number]['name'];
  * registration route, and without it a preview has nothing to talk about. It is
  * additionally refused over a scenario that already has entities.
  */
-export const MUTATION_TOOLS: readonly string[] = ['propose_model_change', 'propose_assumptions', 'authorise_change'];
+export const MUTATION_TOOLS: readonly string[] = ['propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'authorise_change'];
 
 export type AgentLaneMode = 'full' | 'preview';
 
@@ -149,6 +171,9 @@ export interface AgentCapabilities {
   buildModelFromBrief(ctx: AgentToolContext, args: { brief: string }): Promise<ToolResult>;
   proposeAssumptions(ctx: AgentToolContext, args: {
     assumptions: readonly { factor_label: string; value: number; unit: string; basis: string }[];
+  }): Promise<ToolResult>;
+  proposeOptionInterventions(ctx: AgentToolContext, args: {
+    interventions: readonly { option_label: string; factor_label: string; value: number; basis: string }[];
   }): Promise<ToolResult>;
 }
 
@@ -186,6 +211,8 @@ export async function dispatchTool(
       return caps.buildModelFromBrief(ctx, args as never);
     case 'propose_assumptions':
       return caps.proposeAssumptions(ctx, args as never);
+    case 'propose_option_interventions':
+      return caps.proposeOptionInterventions(ctx, args as never);
     default:
       // An unknown tool is never silently ignored: the Agent is told plainly.
       return { ok: false, mutated: false, refusal: 'unknown_tool', tool: name };

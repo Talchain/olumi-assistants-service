@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
+import { admitCandidateModel, defaultFrameFor, type CandidateModel } from '../admit-model.js';
 
 /** The live model's shape: a wired spine, five unlinked risks, a dead-end factor. */
 const CANDIDATE = {
@@ -104,6 +104,66 @@ describe('what still cannot reach the goal is KEPT and named', () => {
   });
 });
 
+describe('the SAME frame normalises the baseline and every option level', () => {
+  it('puts an option level on the factor\u2019s scale, not raw beside a framed baseline', () => {
+    const a = admit();
+    const raise = a.nodes.find((n) => n.label === 'Raise at next release')!;
+    const hold = a.nodes.find((n) => n.label === 'Hold \u00a349 through release')!;
+    const iv = (n: typeof raise) => (n as unknown as { interventions?: Record<string, { value: number }> }).interventions
+      ?? (n as { node?: { interventions?: Record<string, { value: number }> } }).node?.interventions;
+    // ⛔ THE DEFECT THIS PINS, introduced by the frame itself and measured live
+    // as `mixed_scale_unresolved`: baseline 49/200 beside an intervention of 59.
+    const price = a.nodes.find((n) => n.label === 'Pro plan price')!;
+    expect(iv(raise)![price.id].value).toBeCloseTo(59 / 200, 10);
+    expect(iv(hold)![price.id].value).toBeCloseTo(49 / 200, 10);
+    // Contrast control: the baseline is on that very same scale.
+    const os = (price as { node?: { observed_state?: Record<string, unknown> } }).node?.observed_state
+      ?? (price as unknown as { observed_state?: Record<string, unknown> }).observed_state;
+    expect(os!.value).toBeCloseTo(49 / 200, 10);
+  });
+});
+
+describe('a factor with no stated range still gets one, derived and disclosed', () => {
+  it('frames it by the smallest power of ten above the largest figure the model holds', () => {
+    const a = admit();
+    // 'Price-change timing' is declared with no plausible_max and no baseline,
+    // so nothing frames it — and nothing needs to.
+    const timing = a.nodes.find((n) => n.label === 'Price-change timing')!;
+    const os = (n: typeof timing) => (n as { node?: { observed_state?: Record<string, unknown> } }).node?.observed_state
+      ?? (n as unknown as { observed_state?: Record<string, unknown> }).observed_state;
+    expect(os(timing)).toBeUndefined();
+
+    // 'Next Pro feature release' likewise. The contrast that matters is a
+    // factor that DOES carry a magnitude with no stated range.
+    const framed = admitCandidateModel({
+      ...CANDIDATE,
+      factors: [{ label: 'Pro subscribers', role: 'observable', baseline_known: true, baseline_value: 250, unit: 'subscribers', provenance: 'inferred' }],
+      options: [{ label: 'Grow the base', provenance: 'explicit', interventions: [{ factor_label: 'Pro subscribers', value: 300, unit: 'subscribers', provenance: 'explicit' }] }],
+      links: [{ from: 'Pro subscribers', to: 'Monthly recurring revenue', direction: 'positive', provenance: 'inferred' }],
+    } as unknown as CandidateModel);
+    const subs = framed.nodes.find((n) => n.label === 'Pro subscribers')!;
+    // Largest figure the model holds is 300 -> the next power of ten is 1000.
+    expect(os(subs)!.cap).toBe(1000);
+    expect(os(subs)!.raw_value).toBe(250);
+    expect(os(subs)!.value).toBeCloseTo(0.25, 10);
+    // ⛔ It must be SAID, not applied quietly — this is the concession.
+    const told = framed.loss.find((l) => /No range was stated for "Pro subscribers"/.test(l.reason))!;
+    expect(told, JSON.stringify(framed.loss.map((l) => l.reason))).toBeDefined();
+    expect(told.reason).toMatch(/a unit of measurement, not a forecast/);
+    expect(told.after).toBe(1000);
+  });
+
+  it('prefers the range the builder stated over the derived one', () => {
+    const a = admit();
+    const price = a.nodes.find((n) => n.label === 'Pro plan price')!;
+    const os = (price as { node?: { observed_state?: Record<string, unknown> } }).node?.observed_state
+      ?? (price as unknown as { observed_state?: Record<string, unknown> }).observed_state;
+    // Stated 200; the derived one would have been 100 (largest figure is 59).
+    expect(os!.cap).toBe(200);
+    expect(a.loss.find((l) => /No range was stated for "Pro plan price"/.test(l.reason))).toBeUndefined();
+  });
+});
+
 describe('a factor keeps its own scale frame', () => {
   it('normalises a baseline above 1 against its plausible range, keeping the raw number', () => {
     const a = admit();
@@ -116,5 +176,17 @@ describe('a factor keeps its own scale frame', () => {
     expect(os!.value).toBeCloseTo(49 / 200, 10);
     // The user's own number is never replaced by the frame.
     expect(os!.unit).toBe('GBP');
+  });
+});
+
+describe('defaultFrameFor — derived, not chosen', () => {
+  it('is the smallest power of ten strictly above the magnitude', () => {
+    expect(defaultFrameFor(59)).toBe(100);
+    expect(defaultFrameFor(250)).toBe(1000);
+    expect(defaultFrameFor(1000)).toBe(1000);
+    expect(defaultFrameFor(1001)).toBe(10000);
+    // Anything already within the unit interval needs no frame at all.
+    expect(defaultFrameFor(0.7)).toBe(1);
+    expect(defaultFrameFor(1)).toBe(1);
   });
 });
