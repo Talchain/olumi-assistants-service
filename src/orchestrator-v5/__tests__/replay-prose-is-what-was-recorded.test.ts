@@ -37,9 +37,30 @@ function composed() {
   });
   return {
     ...base,
+    // ⛔ THESE ARE THE REAL WIRE SHAPES, TAKEN FROM THE VENDORED SCHEMA, NOT
+    //    INVENTED. An earlier version of this fixture used `before: 17` and
+    //    `{ directive, target_id }`, neither of which exists on the contract —
+    //    `GraphPatchBlockSchema.before/after` is `Record<string, unknown> | null`
+    //    (blocks.js:72-73) and `UiDirectiveBlockObjectSchema` requires `verb`
+    //    plus `targets: TargetRef[]` (blocks.js:1066+, TargetRef = {id,label,kind}).
+    //
+    //    That mattered twice over: it turned the `Typecheck Drift (ratchet)` job
+    //    RED, and it under-bound the test — a fixture that is not the wire shape
+    //    can pass while the production block it stands for would not.
     blocks: [
-      { type: 'graph_patch', status: 'applied', operation: 'set_factor_value', target_id: 'bc936d4c', before: 17, after: 14 },
-      { type: 'ui_directive', directive: 'open_inspector', target_id: 'bc936d4c' },
+      {
+        type: 'graph_patch',
+        status: 'applied',
+        operation: 'set_factor_value',
+        target_id: 'bc936d4c',
+        before: { value: 17, unit: 'months' },
+        after: { value: 14, unit: 'months' },
+      },
+      {
+        type: 'ui_directive',
+        verb: 'open_inspector',
+        targets: [{ id: 'bc936d4c', label: 'Sales Cycle Length', kind: 'factor' }],
+      },
     ],
   } as typeof base;
 }
