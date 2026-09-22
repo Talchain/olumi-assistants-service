@@ -1885,10 +1885,23 @@ async function dispatchFactorValueEdit(
   //
   // Caught by `route-v2-factor-value-edit.test.ts` — the wire hash and the hash
   // of the graph the store received disagreed until this was threaded.
-  const response: OlumiResponse =
-    persistedAnalysisGraphHash !== null
-      ? { ...committedResponse, graph_hash: persistedAnalysisGraphHash }
-      : committedResponse;
+  // Readiness and the UI receipt must both describe the bytes that LANDED.
+  // A successful factor edit is a mutation on a non-empty canvas; the client
+  // reconciles that authoritative postimage from the top-level `draft_graph`.
+  // Without it the edit persists server-side but appears reverted until reload.
+  const committedParse = GraphV3.safeParse(persistedGraphBytes);
+  const graphForReadiness = committedParse.success ? committedParse.data : result.graph;
+
+  const response: OlumiResponse = {
+    ...committedResponse,
+    ...(persistedAnalysisGraphHash !== null
+      ? { graph_hash: persistedAnalysisGraphHash }
+      : {}),
+    // Only attest a committed postimage when the persisted bytes parse.
+    ...(committedParse.success
+      ? { draft_graph: buildAppliedGraphWireField(committedParse.data) }
+      : {}),
+  };
 
   // Readiness from the bytes that LANDED, not from our pre-projection copy.
   //
@@ -1900,9 +1913,6 @@ async function dispatchFactorValueEdit(
   // "advertised state != persisted state" class as the hash defect above.
   // Falls back to the merged graph only if the projected bytes fail to re-parse,
   // which would itself mean the store holds something we cannot model.
-  const committedParse = GraphV3.safeParse(persistedGraphBytes);
-  const graphForReadiness = committedParse.success ? committedParse.data : result.graph;
-
   return {
     response,
     commitPerformed: true,
