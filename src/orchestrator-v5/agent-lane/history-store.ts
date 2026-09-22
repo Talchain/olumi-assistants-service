@@ -36,6 +36,36 @@ export function trimToRecentTurns(items: readonly unknown[], maxTurns = DEFAULT_
   return items.slice(starts[starts.length - maxTurns]);
 }
 
+/**
+ * ⛔ A `function_call` WITH NO OUTPUT MAKES THE NEXT REQUEST FAIL OUTRIGHT, and
+ * it fails forever, because the bad item stays in the stored history:
+ *
+ *   Error: openai_400: "No tool output found for function call call_NFIf…"
+ *   POST /agent/v1/turn status=502 duration_ms=27505
+ *
+ * The cause was in the loop (it answered only the first of several parallel
+ * calls) and is fixed there. This is the structural guard, so the invariant
+ * does not depend on every future writer getting it right: a stored history is
+ * VALID INPUT by construction, and one bad turn costs that turn instead of the
+ * whole session.
+ *
+ * ⚠ It drops the CALL, never the output. An orphaned output is the API's other
+ * rejection and dropping a call cannot create one, because the output is
+ * removed with it.
+ */
+export function dropDanglingCalls(items: readonly unknown[]): unknown[] {
+  const answered = new Set<string>();
+  for (const i of items) {
+    const it = i as { type?: string; call_id?: unknown };
+    if (it?.type === 'function_call_output' && typeof it.call_id === 'string') answered.add(it.call_id);
+  }
+  return items.filter((i) => {
+    const it = i as { type?: string; call_id?: unknown };
+    if (it?.type !== 'function_call') return true;
+    return typeof it.call_id === 'string' && answered.has(it.call_id);
+  });
+}
+
 export class HistoryStore {
   private readonly items = new Map<string, unknown[]>();
 
@@ -45,7 +75,7 @@ export class HistoryStore {
   ) {}
 
   get(sessionId: string): unknown[] {
-    return this.items.get(sessionId) ?? [];
+    return dropDanglingCalls(this.items.get(sessionId) ?? []);
   }
 
   set(sessionId: string, next: readonly unknown[]): void {
