@@ -355,7 +355,20 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const dispatch = dispatchFor(
       typeof req.headers.authorization === 'string' ? req.headers.authorization : undefined,
     );
-    const capabilities = createAgentCapabilities(dispatch, proposals, callStructured, mode);
+    /**
+     * ⛔ THE UI RENDERS THE ANALYSIS FROM `blocks` AND `analysis_ready`, NOT
+     * FROM THE PROSE. Measured on the real browser transport at `2fd8cbba`:
+     * the analysis turn returned 200 with a correct verdict in
+     * `assistant_text` and `blocks=none`, `analysis_ready.options=0`. A user
+     * reading the page got the sentence and an EMPTY results panel — the
+     * numbers existed and never reached the surface that shows them. This is
+     * the same defect shape as the `draft_graph` one: the answer was right and
+     * the carrier was missing.
+     */
+    let analysisFromTool: { analysis_ready?: unknown; blocks?: unknown[] } | undefined;
+    const capabilities = createAgentCapabilities(dispatch, proposals, callStructured, mode, (payload) => {
+      analysisFromTool = payload;
+    });
     const history = histories.get(sessionId);
     const budget = budgetFor('gpt-5.6-terra', 'conversation');
 
@@ -462,10 +475,20 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // returns; the client simply does not learn the new revision this time.
     }
 
+    // The analysis the tool actually ran wins over the graph readback, which
+    // carries only the persisted state and never the run's own options.
+    const analysisBlocks = Array.isArray(analysisFromTool?.blocks) ? analysisFromTool.blocks : [];
+    const existingBlocks = Array.isArray((finalised as { blocks?: unknown[] }).blocks)
+      ? (finalised as { blocks: unknown[] }).blocks
+      : [];
+
     return reply.code(200).send({
       ...finalised,
+      ...(analysisBlocks.length > 0 ? { blocks: [...existingBlocks, ...analysisBlocks] } : {}),
       ...(graphHash !== undefined ? { graph_hash: graphHash } : {}),
-      ...(analysisReady !== undefined ? { analysis_ready: analysisReady } : {}),
+      ...(analysisFromTool?.analysis_ready !== undefined
+        ? { analysis_ready: analysisFromTool.analysis_ready }
+        : analysisReady !== undefined ? { analysis_ready: analysisReady } : {}),
       ...(draftGraph !== undefined ? { draft_graph: draftGraph } : {}),
       /**
        * ⭐ SAY WHICH PATH SERVED THIS TURN.

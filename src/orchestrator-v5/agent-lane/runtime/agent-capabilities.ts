@@ -76,6 +76,20 @@ export function createAgentCapabilities(
    * Defence in depth, because a single prompt sentence is not a boundary.
    */
   mode: 'full' | 'preview' = 'full',
+  /**
+   * ⭐ THE UI RENDERS THE ANALYSIS FROM `blocks` AND `analysis_ready`, NOT FROM
+   * THE PROSE. Measured on the real browser transport at `2fd8cbba`: the turn
+   * came back 200 with a correct verdict in `assistant_text` and
+   * `blocks=none`, `analysis_ready.options=0` — so a user reading the page saw
+   * the sentence and an empty results panel.
+   *
+   * The raw payload is handed to the ROUTE through this callback rather than
+   * returned in the ToolResult, because the ToolResult is JSON-stringified
+   * straight back into the model's context: a full analysis payload there
+   * would cost thousands of tokens per hop and tell the model nothing its own
+   * summary does not already say.
+   */
+  onAnalysis?: (payload: { analysis_ready?: unknown; blocks?: unknown[] }) => void,
 ): AgentCapabilities {
   const readOnly = mode === 'preview';
   const refuseReadOnly = (): ToolResult => ({
@@ -838,6 +852,7 @@ export function createAgentCapabilities(
       const ready = (r.json.analysis_ready ?? {}) as Record<string, unknown>;
       const blocks = (r.json.blocks as { type: string }[] | undefined) ?? [];
       const result = blocks.find((b) => b.type === 'analysis_result');
+      onAnalysis?.({ analysis_ready: r.json.analysis_ready, blocks });
       return {
         ok: r.status === 200,
         mutated: false,

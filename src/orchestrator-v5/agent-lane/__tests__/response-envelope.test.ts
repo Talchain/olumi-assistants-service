@@ -76,3 +76,40 @@ describe('the response says WHICH PATH served the turn', () => {
   });
 });
 
+describe('the analysis reaches the surface that RENDERS it', () => {
+  /**
+   * ⛔ MEASURED on the real browser transport at `2fd8cbba`: the analysis turn
+   * returned 200 with a correct verdict in `assistant_text`, and
+   * `blocks = none`, `analysis_ready.options = 0`. A user reading the page got
+   * the sentence and an EMPTY results panel. Same defect shape as the
+   * `draft_graph` one before it: the answer was right and the carrier missing.
+   */
+  it('an analysis_result block survives the strict egress schema', () => {
+    const block = {
+      type: 'analysis_result',
+      summary: 'Ran analysis on your current scenario.',
+      leading_option_id: null,
+      win_probabilities: { 'Raise to £59': 0.845, 'Hold £49': 0.155 },
+    };
+    const r = OlumiResponseSchema.safeParse({ ...base, blocks: [block] });
+    expect(r.success, r.success ? '' : JSON.stringify(r.error.issues.slice(0, 4))).toBe(true);
+  });
+
+  it('carries analysis_ready with its options — the field the readiness panel reads', () => {
+    const ready = {
+      status: 'ready',
+      goal_node_id: 'mrr',
+      options: [
+        { option_id: 'raise', label: 'Raise to £59', status: 'ready', interventions: { pro_plan_price: 0.295 }, is_baseline: false },
+        { option_id: 'hold', label: 'Hold £49', status: 'ready', interventions: { pro_plan_price: 0.245 }, is_baseline: false },
+      ],
+      blockers: [],
+    };
+    const r = OlumiResponseSchema.safeParse({ ...base, analysis_ready: ready });
+    expect(r.success, r.success ? '' : JSON.stringify(r.error.issues.slice(0, 4))).toBe(true);
+    // The contrast control: an empty options list is ALSO schema-legal, which
+    // is exactly why egress could not catch the defect and a wire witness had to.
+    expect(OlumiResponseSchema.safeParse({ ...base, analysis_ready: { ...ready, options: [] } }).success).toBe(true);
+  });
+});
+
