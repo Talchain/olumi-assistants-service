@@ -132,7 +132,14 @@ export interface AdmittedNode {
   kind: CandidateNodeKind;
   label: string;
   category?: 'controllable' | 'observable' | 'external';
-  observed_state?: { value: number; unit?: string; source?: string };
+  /**
+   * `raw_value`, `cap` and `declared_scale` are the SCALE FRAME. They are
+   * written by `framedObservedState` so a number above 1 is analysable at all
+   * (`baseline_scale_unresolved` otherwise), and declared here because the
+   * type was the reason three test files failed the typecheck ratchet while
+   * `tsconfig.build.json` — which excludes tests — reported clean.
+   */
+  observed_state?: { value: number; unit?: string; source?: string; raw_value?: number; cap?: number; declared_scale?: string };
   goal_threshold?: number;
   /** `cee-v3.ts:210`. A threshold with no unit is not a threshold. */
   goal_threshold_unit?: string;
