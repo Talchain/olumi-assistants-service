@@ -274,9 +274,22 @@ guard stands down rather than inventing agreement OR divergence.
 `run-analysis-single-snapshot.test.ts` 6/6 green (SDL's control + SDL's
 reproduction, now satisfied via the refusal branch + 4 added controls). The
 three suites the unguarded version broke are green again.
-`npm run typecheck` exit 0. **A wider 306-file regression was still running when
-the session was stood down — the successor must re-run it and must not assume
-it passed.**
+`npm run typecheck` exit 0.
+
+**The 306-file regression completed: 301 passed, 5 failed — and the 5 are load
+flakes, measured rather than assumed.** All five pass when re-run alone
+(5 files / 40 tests, exit 0). Four failed as bare `Test timed out in 5000ms`
+and the fifth as a latency assertion (`expected 1633 to be less than 1030`);
+none asserts on a symbol this branch touches, and the set differed between two
+runs of the same tree. Load average at the time was **26.45**, above the
+threshold of 25 at which this repo's own `guard-load.sh` declares local numbers
+void ("at load 43-67 a PRISTINE baseline produced 26 failures across 23 files").
+
+⚠ An EARLIER 306-file run failed differently and that one was REAL: five tests
+red with `TypeError: nodes.map is not a function` from the unguarded producer.
+That is the trap described below, and it is fixed. Do not confuse the two runs.
+
+**CI is the authority. Read the required check at the head, not this table.**
 
 ### Known gap the successor must decide
 `AnalysisSnapshotDivergedError` is caught by the run_analysis handler's generic
