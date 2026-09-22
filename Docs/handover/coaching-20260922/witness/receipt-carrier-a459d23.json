@@ -1,0 +1,21 @@
+{
+  "build": "a459d23",
+  "signed": {
+    "label": "SIGNEDIN",
+    "status": 200,
+    "versions": 1,
+    "turns": 1,
+    "source": "user_override",
+    "raw": "14",
+    "sid": "68eee508-3c32-4e09-9441-07ae83279a1e"
+  },
+  "guest": {
+    "label": "GUEST",
+    "status": 200,
+    "versions": 0,
+    "turns": 1,
+    "source": "user_override",
+    "raw": "14",
+    "sid": "a5ca5368-25fc-4461-abb6-2839a8ddb796"
+  }
+}
