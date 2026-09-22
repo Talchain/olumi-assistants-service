@@ -46,9 +46,24 @@ export interface CanonicalStateRequest {
 }
 
 export interface CanonicalEntityView {
+  /** Stable canonical identity. The Agent must not have to infer ids from labels. */
+  readonly id: string;
   readonly label: string;
   readonly kind: string;
+  /** User-facing magnitude: raw value when one is stored, otherwise the model value. */
   readonly baseline: Magnitude;
+  /** Backwards-compatible alias for the analytical model value. */
+  readonly value: number | null;
+  /** The value used by the analytical model, which may be normalised. */
+  readonly model_value: number | null;
+  /** The original user-facing magnitude when the persisted graph carries one. */
+  readonly raw_value: number | null;
+  readonly unit: string | null;
+  /** Declared frame used to interpret a normalised model value. */
+  readonly cap: number | null;
+  readonly declared_scale: string | null;
+  /** Provenance of the value itself, distinct from who introduced the entity. */
+  readonly value_source: string;
   readonly authored_by: string;
 }
 
@@ -74,22 +89,32 @@ const NOT_FOUND = {
 };
 
 /** An observed value is only a number when the stored graph actually carries one. */
-function baselineOf(node: Record<string, unknown>): Magnitude {
+function observedStateOf(node: Record<string, unknown>): Record<string, unknown> {
   const observed = node.observed_state;
-  if (observed !== null && typeof observed === 'object') {
-    const value = (observed as Record<string, unknown>).value;
-    if (typeof value === 'number' && Number.isFinite(value)) {
-      const unit = (observed as Record<string, unknown>).unit;
-      return typeof unit === 'string'
-        ? { kind: 'point', value, unit }
-        : { kind: 'point', value };
-    }
+  return observed !== null && typeof observed === 'object'
+    ? observed as Record<string, unknown>
+    : {};
+}
+
+function finiteNumber(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null;
+}
+
+function baselineOf(node: Record<string, unknown>): Magnitude {
+  const observed = observedStateOf(node);
+  const value = finiteNumber(observed.raw_value) ?? finiteNumber(observed.value);
+  if (value !== null) {
+    const unit = observed.unit;
+    return typeof unit === 'string'
+      ? { kind: 'point', value, unit }
+      : { kind: 'point', value };
   }
   return { kind: 'unknown' };
 }
 
 function authorshipOf(node: Record<string, unknown>): string {
   const p = node.provenance;
+  if (typeof p === 'string') return p;
   if (p !== null && typeof p === 'object') {
     const source = (p as Record<string, unknown>).source;
     if (typeof source === 'string') return source;
@@ -98,6 +123,27 @@ function authorshipOf(node: Record<string, unknown>): string {
   // shared contract is explicit that a consumer must not read absence as any
   // value, so it is reported as unattested.
   return 'unattested';
+}
+
+export function canonicalEntityViewOf(node: Record<string, unknown>): CanonicalEntityView {
+  const observed = observedStateOf(node);
+  return {
+    id: typeof node.id === 'string' ? node.id : '',
+    label: typeof node.label === 'string' ? node.label : String(node.id ?? ''),
+    kind: typeof node.kind === 'string' ? node.kind : 'unknown',
+    baseline: baselineOf(node),
+    value: finiteNumber(observed.value),
+    model_value: finiteNumber(observed.value),
+    raw_value: finiteNumber(observed.raw_value),
+    unit: typeof observed.unit === 'string' ? observed.unit : null,
+    cap: finiteNumber(observed.cap) ?? finiteNumber(node.cap),
+    declared_scale:
+      typeof observed.declared_scale === 'string'
+        ? observed.declared_scale
+        : (typeof node.declared_scale === 'string' ? node.declared_scale : null),
+    value_source: typeof observed.source === 'string' ? observed.source : 'unattested',
+    authored_by: authorshipOf(node),
+  };
 }
 
 export async function getCanonicalState(
@@ -125,12 +171,7 @@ export async function getCanonicalState(
       ? ((graph as Record<string, unknown>).nodes as Record<string, unknown>[])
       : [];
 
-  const entities: CanonicalEntityView[] = nodes.map((n) => ({
-    label: typeof n.label === 'string' ? n.label : String(n.id ?? ''),
-    kind: typeof n.kind === 'string' ? n.kind : 'unknown',
-    baseline: baselineOf(n),
-    authored_by: authorshipOf(n),
-  }));
+  const entities: CanonicalEntityView[] = nodes.map(canonicalEntityViewOf);
 
   const analysis = deps.readAnalysis === undefined ? null : await deps.readAnalysis(req.scenario_id);
 
