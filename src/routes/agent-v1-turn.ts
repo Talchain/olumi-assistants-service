@@ -375,11 +375,33 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      */
     let graphHash: string | undefined;
     let analysisReady: unknown;
+    /**
+     * ⛔ THE CANVAS RENDERS FROM `draft_graph`, NOT FROM `graph_hash`.
+     *
+     * Measured from a real session's debug bundle: the Agent built the model
+     * (`build_model_from_brief ok=true mutated=true`, `graph_hash`
+     * d22f3fb712f84550), the turn returned 200 with 2,313 characters of good
+     * prose — and the board stayed EMPTY. `canvas_node_count: 0`,
+     * `full_graph` options/factors/edges all 0, and the envelope's own
+     * `analysis_state.run_state.cause` was literally `no_graph_this_turn`.
+     *
+     * I had added `graph_hash` and `analysis_ready` and stopped there, assuming
+     * a revision token was enough to make the client refetch. It is not: on a
+     * turn that DRAFTS, CEE returns the graph itself, and the UI draws that.
+     * A brand-new scenario has nothing hydrated to fall back on, so the user
+     * gets a perfect answer about a model they cannot see — the failure mode
+     * where nothing errors and everything looks broken.
+     */
+    let draftGraph: unknown;
     try {
       const after = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {});
       if (after.status === 200) {
         graphHash = typeof after.json.graph_hash === 'string' ? after.json.graph_hash : undefined;
         analysisReady = after.json.analysis_ready;
+        // Only when it actually has content: an empty graph must not overwrite
+        // whatever the client already has hydrated.
+        const g = after.json.graph as { nodes?: unknown[] } | undefined;
+        if (g !== undefined && Array.isArray(g.nodes) && g.nodes.length > 0) draftGraph = g;
       }
     } catch {
       // A readback failure must not lose the user's answer. The turn still
@@ -390,6 +412,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ...finalised,
       ...(graphHash !== undefined ? { graph_hash: graphHash } : {}),
       ...(analysisReady !== undefined ? { analysis_ready: analysisReady } : {}),
+      ...(draftGraph !== undefined ? { draft_graph: draftGraph } : {}),
       _agent: {
         session_id: sessionId,
         mode,
