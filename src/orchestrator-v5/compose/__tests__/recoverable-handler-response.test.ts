@@ -46,6 +46,7 @@ describe('isRecoverableHandlerCause', () => {
       'analysis_not_ready', // EP2 (V5 Edit Safety Core) — read-boundary guard blocked outcome
       'analysis_blocked',
       'analysis_engine_busy', // ROADMAP 2.202 fix ③ — downstream 429 is capacity, not breakage
+      'analysis_snapshot_diverged', // the turn's two graph reads disagreed — the user's model moved mid-turn
       'parameter_invalid_at_execute',
       'entity_not_found_in_graph',
       'entity_kind_mismatch_at_execute',
@@ -72,7 +73,7 @@ describe('isRecoverableHandlerCause', () => {
     }
   });
 
-  it('locked-set size matches the documented War-Room list (9: +analysis_engine_busy, ROADMAP 2.202 fix 3)', () => {
+  it('locked-set size matches the documented War-Room list (10: +analysis_snapshot_diverged)', () => {
     // This assertion is the fail-loud guard on the locked set, and it did its
     // job: adding `analysis_engine_busy` REDDED it, forcing the addition to be
     // declared here rather than absorbed silently. Bump the number ONLY
@@ -81,7 +82,25 @@ describe('isRecoverableHandlerCause', () => {
     //   engine is at its concurrency limit). diagnosis-run-analysis-500s.md §7
     //   FIX 3; same principle CEE accepted for its own ingress limiter in
     //   41d5ecf0. Deliberately narrow — only a 429 recovers.
-    expect(RECOVERABLE_HANDLER_CAUSES.size).toBe(9);
+    //
+    //   9 → 10: `analysis_snapshot_diverged` — the turn's two reads of the
+    //   persisted graph described DIFFERENT states, i.e. the user's own model
+    //   moved mid-turn. It was previously flattened to `scenario_read_failed`,
+    //   which is FATAL and reached the wire as INTERNAL_ERROR on an HTTP 500
+    //   with NEITHER the user turn nor the assistant turn persisted — traced
+    //   end to end: not in this set → INTERNAL_TO_WIRE.HANDLER_INVOCATION_FAILED
+    //   → `commitPerformed` still false at dispatch → route-v2's
+    //   `commit_performed === false` → 500 BoundaryError.
+    //
+    //   Same principle this list already accepted twice: surfacing a
+    //   user-recoverable state as a 500 is a false claim about the system's
+    //   health. A concurrent edit is not infrastructure failure, and a retry
+    //   re-derives both reads from one state so it genuinely succeeds.
+    //
+    //   Deliberately narrow — ONLY the typed divergence recovers. Every other
+    //   read failure stays FATAL, pinned by the `scenario_read_failed` control
+    //   in the fatal list above, so genuine breakage remains loud.
+    expect(RECOVERABLE_HANDLER_CAUSES.size).toBe(10);
   });
 });
 
@@ -92,6 +111,7 @@ describe('composeRecoverableHandlerResponse', () => {
     ['analysis_not_ready', { reason_code: 'NO_CAP_UNRECOVERABLE', next_step: 'Review the option values — this option needs a bound (cap) before it can be analysed.' }],
     ['analysis_blocked', {}],
     ['analysis_engine_busy', { downstream_http_status: 429 }],
+    ['analysis_snapshot_diverged', {}],
     ['parameter_invalid_at_execute', { specific_issue: 'value out of range' }],
     ['entity_not_found_in_graph', {}],
     ['entity_kind_mismatch_at_execute', {}],

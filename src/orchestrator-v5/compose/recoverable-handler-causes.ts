@@ -38,6 +38,14 @@ export const RECOVERABLE_HANDLER_CAUSES: ReadonlySet<HandlerInvocationFailedCaus
     // a clean direct_answer 200 with an honest next-step + recovery chip. (War-Room
     // convention: control to record against the handler-failure-scope doc.)
     'analysis_not_ready',
+    // A concurrent edit to the user's OWN model is not infrastructure failure.
+    // Before this, an analysis-snapshot divergence flattened to
+    // `scenario_read_failed` -> INTERNAL_ERROR -> HTTP 500 with NEITHER turn
+    // persisted. Same principle this list already accepted for
+    // `analysis_engine_busy`: a false claim about the system's health is itself
+    // a trust defect. Narrow by construction — only the typed divergence
+    // recovers; every other read failure stays FATAL so real breakage is loud.
+    'analysis_snapshot_diverged',
     'analysis_blocked',
     // ROADMAP 2.202 fix ③ (diagnosis-run-analysis-500s.md §7 FIX 3). A
     // downstream 429 is CAPACITY, not infrastructure failure: the engine is
