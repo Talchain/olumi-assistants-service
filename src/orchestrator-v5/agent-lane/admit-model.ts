@@ -478,6 +478,28 @@ export function admitCandidateModel(
   // exact match only: attaching "what this option changes" to a guessed factor
   // would put the user's own number on the wrong quantity.
   const interventionsByOption = new Map<string, Record<string, { value: number }>>();
+  /**
+   * ⛔ AN OPTION'S LEVEL MUST BE ON THE SAME SCALE AS THE FACTOR'S BASELINE.
+   *
+   * MEASURED LIVE at served a1e35b40, and this defect was introduced by the
+   * scale frame itself: the baseline started being written as `raw / cap`
+   * while the option levels were still written raw, so one factor carried a
+   * baseline of `0.245` and an intervention of `59`. `run_analysis` refused
+   * the whole comparison with `mixed_scale_unresolved` and named four factors
+   * — "values … that the analysis engine would silently rescale".
+   *
+   * A frame that is applied to only one of the two numbers is worse than no
+   * frame at all, because each is individually coherent and the pair is not.
+   * So the SAME cap normalises both, here, from one lookup.
+   */
+  const capByFactorId = new Map<string, number>();
+  for (const f of model.factors) {
+    const fid = ids.get(f.label);
+    const max = f.plausible_max;
+    if (fid !== undefined && typeof max === 'number' && Number.isFinite(max) && max > 1) {
+      capByFactorId.set(fid, max);
+    }
+  }
   /** option id -> factor ids it acts on, with or without a stated level. */
   const actsOnByOption = new Map<string, Set<string>>();
   for (const o of model.options) {
@@ -515,7 +537,27 @@ export function admitCandidateModel(
         });
         continue;
       }
-      bundle[factorId] = { value: iv.value };
+      const cap = capByFactorId.get(factorId);
+      // Only when the level genuinely sits inside the declared range. A level
+      // outside it is left exactly as stated and the mismatch is recorded —
+      // silently clamping a user's number would be the worse failure.
+      if (cap !== undefined && iv.value >= 0 && iv.value <= cap) {
+        bundle[factorId] = { value: iv.value / cap };
+      } else {
+        if (cap !== undefined) {
+          loss.push({
+            field_path: `nodes[${optionId}].interventions.${factorId}`,
+            before: iv.value,
+            after: iv.value,
+            reason:
+              `"${o.label}" sets "${iv.factor_label}" to ${iv.value}, which is outside the range ` +
+              `0 to ${cap} the model states for that factor. It has been kept exactly as stated ` +
+              'rather than squeezed into the range — say so, and correct either the level or the range.',
+            severity: 'warn',
+          } as RepairEntry);
+        }
+        bundle[factorId] = { value: iv.value };
+      }
       actsOn.add(factorId);
     }
     if (Object.keys(bundle).length > 0) interventionsByOption.set(optionId, bundle);

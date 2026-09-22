@@ -104,6 +104,25 @@ describe('what still cannot reach the goal is KEPT and named', () => {
   });
 });
 
+describe('the SAME frame normalises the baseline and every option level', () => {
+  it('puts an option level on the factor\u2019s scale, not raw beside a framed baseline', () => {
+    const a = admit();
+    const raise = a.nodes.find((n) => n.label === 'Raise at next release')!;
+    const hold = a.nodes.find((n) => n.label === 'Hold \u00a349 through release')!;
+    const iv = (n: typeof raise) => (n as unknown as { interventions?: Record<string, { value: number }> }).interventions
+      ?? (n as { node?: { interventions?: Record<string, { value: number }> } }).node?.interventions;
+    // ⛔ THE DEFECT THIS PINS, introduced by the frame itself and measured live
+    // as `mixed_scale_unresolved`: baseline 49/200 beside an intervention of 59.
+    const price = a.nodes.find((n) => n.label === 'Pro plan price')!;
+    expect(iv(raise)![price.id].value).toBeCloseTo(59 / 200, 10);
+    expect(iv(hold)![price.id].value).toBeCloseTo(49 / 200, 10);
+    // Contrast control: the baseline is on that very same scale.
+    const os = (price as { node?: { observed_state?: Record<string, unknown> } }).node?.observed_state
+      ?? (price as unknown as { observed_state?: Record<string, unknown> }).observed_state;
+    expect(os!.value).toBeCloseTo(49 / 200, 10);
+  });
+});
+
 describe('a factor keeps its own scale frame', () => {
   it('normalises a baseline above 1 against its plausible range, keeping the raw number', () => {
     const a = admit();
