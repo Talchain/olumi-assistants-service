@@ -1123,10 +1123,29 @@ export function createAgentCapabilities(
             stage: 'frame',
             event: { kind: 'option_intervention_edit', option_id: optionId, factor_id: factorId, value: v, base_graph_hash: baseHash },
           });
-          if (r.status !== 200) failures.push({ path: o.path, detail: `http ${r.status}` });
           const rc = receiptSummaryOf(r.json);
           if (rc.summary !== null) receipts.push(rc.summary);
           if (rc.unreadable) failures.push({ path: o.path, detail: 'a receipt arrived but could not be read' });
+          if (r.status !== 200) {
+            failures.push({ path: o.path, detail: `http ${r.status}` });
+            // ⛔⛔ DO NOT ADVANCE THE BASE AFTER A REFUSED EDIT.
+            //
+            // This used to re-read the graph and reassign `baseHash`
+            // UNCONDITIONALLY, which made the claim at the head of this block —
+            // "a moved graph refuses the WHOLE authorisation, not half of it" —
+            // false for every multi-op proposal. A stale base survived exactly
+            // ONE iteration: op 0 was refused at the row, then `baseHash` became
+            // the CONCURRENT writer's hash and ops 1..N passed the
+            // `base_graph_hash` gate, landing on a model the user never approved
+            // while the result still reported the approval as applied.
+            //
+            // A refusal means the graph moved because someone ELSE wrote. Keeping
+            // the approved base means every remaining op is refused too, which is
+            // the whole-or-nothing property this authorisation is supposed to
+            // have. Advancing after a SUCCESS is different and still correct: the
+            // graph moved because WE moved it, within this same authorisation.
+            continue;
+          }
           const mid = await readGraph(ctx.scenario_id);
           if (mid !== null) baseHash = mid.graph_hash;
         }
