@@ -106,6 +106,9 @@ export function createMockSessionStore(
     // Same drift alarm, same benign default: `readCommittedTurn` (the Agent
     // route's replay read) — no committed row, so the turn runs as today.
     readCommittedTurn: async () => null,
+    // Benign default for the Agent route's pre-execution claim release: a no-op,
+    // since no suite on this helper seeds a claim row to remove.
+    releaseTurnClaim: async () => undefined,
     // ROADMAP 2.171: benign default = NOT post-Stop, so every suite keeps the
     // ordinary coach copy unless it seeds the tombstone deliberately.
     wasLatestScenarioTurnStopped: async () => false,

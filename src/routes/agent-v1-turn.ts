@@ -23,7 +23,7 @@
  * seam, deliberately.
  */
 
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { config } from '../config/index.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
@@ -57,13 +57,26 @@ const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
  * call the provider and the tools; and a turn whose final row failed to persist
  * was re-run by its retry. So the identity is now CLAIMED in the durable turn
  * table (unique on (scenario_id, turn_id)) before any provider or tool call:
- *   · the CLAIM row carries the client's `turn_id` and no messages;
- *   · the ANSWER row carries `<turn_id>:answer` with the user and final text.
+ *   · the CLAIM row carries `<turn_id>:claim` and no messages (history readers
+ *     exclude it before their LIMIT — see `SupabaseSessionStore.readRecent`);
+ *   · the ANSWER row carries the client's `turn_id` with the user and final text.
  * Only the request that CREATED the claim runs. Any other sees the claim, never
  * runs, and waits for the answer (replaying it) or says the outcome is unknown.
  * A claim without an answer is never read as permission to run again.
  */
-export const answerTurnIdOf = (turnId: string): string => `${turnId}:answer`;
+export const claimTurnIdOf = (turnId: string): string => `${turnId}:claim`;
+/**
+ * ⛔ THE CLAIM MUST DECIDE OWNERSHIP ON THE PRODUCTION STORE — independent review
+ * of #1720 at cb4e9d35: a non-graph write goes to `append_turn_atomic_v2`, which
+ * does `ON CONFLICT DO NOTHING` and returns the EXISTING id with no error, so the
+ * store never reports "someone else created this" for a claim. The claim row
+ * therefore carries a per-request NONCE in its hash; the row is written once by
+ * whichever insert wins and never updated, so reading it back says, exactly,
+ * whether THIS request created it.
+ */
+const CLAIM_NONCE = '#claim:';
+const claimHashFor = (requestHash: string, nonce: string): string => `${requestHash}${CLAIM_NONCE}${nonce}`;
+const requestHashOfClaim = (claimHash: string): string => claimHash.split(CLAIM_NONCE)[0] ?? '';
 /** How long a request that did not win the claim waits for the winner's answer. */
 export const AGENT_TURN_CLAIM_WAIT = { totalMs: 150_000, everyMs: 1_000 };
 
@@ -586,8 +599,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         _agent: { session_id: sessionId, mode, tool_calls: [], mutated: false, hops: 0, stopped_reason: 'replayed', replayed: true, turn_id: turnId },
       };
     };
+    // Set only when THIS request owns the turn — used to release it if nothing ran.
+    let claimHash: string | undefined;
     if (turnId !== undefined && typeof store.readCommittedTurn === 'function') {
-      const readAnswer = (): Promise<CommittedTurnRecord | null> => store.readCommittedTurn!(scenarioId, answerTurnIdOf(turnId));
+      const readAnswer = (): Promise<CommittedTurnRecord | null> => store.readCommittedTurn!(scenarioId, turnId);
       let prior: CommittedTurnRecord | null;
       try {
         prior = await readAnswer();
@@ -605,33 +620,43 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       }
       // CLAIM the identity before any provider or tool call. No graph rides on
       // it, so it takes no fence and no CAS; it goes through the shared floor
-      // like every turn row (C8).
-      let claim: Awaited<ReturnType<typeof appendCheckedGraphWrite>>;
+      // like every turn row (C8). Ownership is decided by READING IT BACK.
+      const claimTurnId = claimTurnIdOf(turnId);
+      claimHash = claimHashFor(requestHash, randomUUID());
+      let owner: CommittedTurnRecord | null;
       try {
-        claim = await appendCheckedGraphWrite({
+        await appendCheckedGraphWrite({
           store,
           writesGraph: false,
           source: 'agent_turn_claim',
           write: {
             scenario_id: scenarioId,
-            turn_id: turnId,
+            turn_id: claimTurnId,
             turn_class: 'direct_answer',
             handler_id: null,
-            request_hash: requestHash,
+            request_hash: claimHash,
             response_emitted: false,
             llm_calls_used: 0,
             duration_ms: 0,
             handler_facts: [],
           },
         });
+        owner = await store.readCommittedTurn(scenarioId, claimTurnId);
       } catch (err) {
         log.warn({ err: String(err), scenario_id: scenarioId, turn_id: turnId }, 'agent-lane: turn claim failed — refusing rather than running unclaimed');
         return reply.code(503).send({ error: 'TURN_STATE_UNVERIFIABLE', detail: 'Could not reserve this turn. Nothing was run — please try again.' });
       }
-      if (claim.priorTurnConflict === true) {
+      if (owner === null) {
+        return reply.code(503).send({ error: 'TURN_STATE_UNVERIFIABLE', detail: 'Could not confirm this turn was reserved. Nothing was run — please try again.' });
+      }
+      const claim = {
+        won: owner.request_hash === claimHash,
+        sameRequest: requestHashOfClaim(owner.request_hash) === requestHash,
+      };
+      if (!claim.won && !claim.sameRequest) {
         return reply.code(409).send({ error: 'TURN_ID_REUSED', detail: 'That turn id was already used for a different message. Nothing was run or changed.' });
       }
-      if (claim.replayedPriorTurn === true) {
+      if (!claim.won) {
         // Another request owns this turn: in flight now, or it ran and its answer
         // was never recorded. It is NEVER run again here. Wait for its answer.
         const deadline = Date.now() + AGENT_TURN_CLAIM_WAIT.totalMs;
@@ -666,7 +691,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * the carrier was missing.
      */
     let analysisFromTool: { analysis_ready?: unknown; blocks?: unknown[] } | undefined;
-    const capabilities = createAgentCapabilities(dispatch, proposals, callStructured, mode, (payload) => {
+    // Counts every call that could WRITE, so a failed turn knows whether it is
+    // safe to release its claim (nothing sent) or must leave it (outcome unknown).
+    let writesDispatched = 0;
+    const countingDispatch: typeof dispatch = async (path, body) => {
+      if (path.endsWith('/graph/register') || path === '/orchestrate/v2/turn') writesDispatched += 1;
+      return dispatch(path, body);
+    };
+    const capabilities = createAgentCapabilities(countingDispatch, proposals, callStructured, mode, (payload) => {
       analysisFromTool = payload;
     });
     const history = histories.get(sessionId);
@@ -688,7 +720,18 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       );
     } catch (err) {
       log.error({ err: String(err), scenario_id: scenarioId }, 'agent-lane turn failed');
-      return reply.code(502).send({ error: 'UPSTREAM_ERROR', detail: String(err).slice(0, 300) });
+      // Nothing was sent that could write: release the claim, so a retry of the
+      // SAME turn_id can run. If anything was sent, the claim stands — the
+      // outcome is unknown and the turn is never run twice.
+      let released = false;
+      if (turnId !== undefined && claimHash !== undefined && writesDispatched === 0 && typeof store.releaseTurnClaim === 'function') {
+        try { await store.releaseTurnClaim(scenarioId, claimTurnIdOf(turnId), claimHash); released = true; }
+        catch (e) { log.warn({ err: String(e), scenario_id: scenarioId, turn_id: turnId }, 'agent-lane: claim release failed'); }
+      }
+      return reply.code(502).send({
+        error: 'UPSTREAM_ERROR', detail: String(err).slice(0, 300),
+        ...(turnId !== undefined ? { retry_safe: released } : {}),
+      });
     }
 
     histories.set(sessionId, [...result.items]);
@@ -760,8 +803,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           source: 'agent_turn',
           write: {
           scenario_id: scenarioId,
-          // The ANSWER row: the claim (the bare turn_id) was taken before the run.
-          turn_id: answerTurnIdOf(turnId),
+          // The ANSWER row, under the client's own turn_id; the claim
+          // (`<turn_id>:claim`) was taken before the run.
+          turn_id: turnId,
           // DB CHECK: (turn_class = 'handler') = (handler_id IS NOT NULL) —
           // the graph-register precedent for a turn with no handler.
           turn_class: 'direct_answer',
@@ -784,7 +828,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         if (outcome.replayedPriorTurn === true && typeof store.readCommittedTurn === 'function') {
           // An identical concurrent request committed first: ITS answer is the
           // record, so it is the one returned.
-          const first = await store.readCommittedTurn(scenarioId, answerTurnIdOf(turnId));
+          const first = await store.readCommittedTurn(scenarioId, turnId);
           if (first !== null) return reply.code(200).send(await replayed(first));
         }
         durability = 'recorded';

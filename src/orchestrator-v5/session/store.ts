@@ -472,6 +472,13 @@ export interface SessionStore {
    */
   readCommittedTurn?(scenarioId: string, turnId: string): Promise<CommittedTurnRecord | null>;
   /**
+   * Remove THIS request's own turn claim (`<turn_id>:claim`, matched by the
+   * claim's nonce-bearing hash) after a turn failed before anything was sent
+   * that could write — so a retry of the same turn_id may run. Never removes a
+   * claim another request owns (the hash differs), and never an answer row.
+   */
+  releaseTurnClaim?(scenarioId: string, claimTurnId: string, claimHash: string): Promise<void>;
+  /**
    * V5 TURN FENCE / ROADMAP 2.171 — is the scenario in the POST-EXPLICIT-STOP
    * state? True iff the NEWEST `v5_turn_fence` row for the scenario, excluding
    * `excludeTurnId` (the turn asking), carries a Stop tombstone. Any later

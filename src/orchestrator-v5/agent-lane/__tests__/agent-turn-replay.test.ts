@@ -29,7 +29,7 @@ const store = {
     return rows.get(turnId) ?? null;
   }),
   append: vi.fn(async (w: { turn_id: string; request_hash: string; assistantMessage?: string; userMessage?: string; llm_calls_used: number }) => {
-    if (answerAppendFails && w.turn_id.endsWith(':answer')) throw new Error('answer append failed');
+    if (answerAppendFails && !w.turn_id.endsWith(':claim')) throw new Error('answer append failed');
     const prior = rows.get(w.turn_id);
     if (prior !== undefined) return prior.request_hash === w.request_hash ? { id: prior.id, replayedPriorTurn: true as const } : { id: prior.id, priorTurnConflict: true as const };
     const row: Row = { id: `row-${rows.size + 1}`, turn_id: w.turn_id, request_hash: w.request_hash, assistant_message: w.assistantMessage ?? null, user_message: w.userMessage ?? null, llm_calls_used: w.llm_calls_used };
@@ -94,8 +94,8 @@ describe('an Agent turn replays by its turn_id', () => {
     expect(first.statusCode).toBe(200);
     const firstText = String((first.json() as { assistant_text?: string }).assistant_text);
     expect(provider.calls).toBe(1);
-    // One CLAIM row (the bare turn_id, taken before the run) + one ANSWER row.
-    expect([...rows.keys()].sort()).toEqual([T1, `${T1}:answer`]);
+    // One CLAIM row (`<turn_id>:claim`, taken before the run) + one ANSWER row (the turn_id).
+    expect([...rows.keys()].sort()).toEqual([T1, `${T1}:claim`]);
     // (1) the response is "lost": nothing from it is carried forward.
     const retry = await say(app, 'What should I consider?', T1);
     expect(retry.statusCode).toBe(200);
@@ -114,7 +114,7 @@ describe('an Agent turn replays by its turn_id', () => {
     expect((reused.json() as { error?: string }).error).toBe('TURN_ID_REUSED');
     expect(provider.calls).toBe(1);
     expect(rows.size).toBe(2);
-    expect(rows.get(`${T1}:answer`)?.user_message).toBe('What should I consider?');
+    expect(rows.get(T1)?.user_message).toBe('What should I consider?');
   });
 
   it('(4): a RESTART between the attempt and the retry still replays — the answer comes from the durable row', async () => {
@@ -151,7 +151,7 @@ describe('an Agent turn replays by its turn_id', () => {
     expect(b.statusCode).toBe(200);
     expect(provider.calls, 'only the request that won the claim may call the model').toBe(1);
     expect(textOf(a)).toBe(textOf(b));
-    expect([...rows.keys()].sort()).toEqual([T3, `${T3}:answer`]);
+    expect([...rows.keys()].sort()).toEqual([T3, `${T3}:claim`]);
     // One history advance: the next turn's model call sees ONE earlier user turn.
     await say(app, 'And what about cost?', T2);
     expect(provider.userTurnsSeen).toEqual([1, 2]);
@@ -169,7 +169,7 @@ describe('an Agent turn replays by its turn_id', () => {
     expect(retry.statusCode).toBe(409);
     expect((retry.json() as { error?: string }).error).toBe('TURN_OUTCOME_UNKNOWN');
     expect(provider.calls, 'the claim stands: the turn is never run twice').toBe(1);
-    expect(rows.has(`${T3}:answer`)).toBe(false);
+    expect(rows.has(T3)).toBe(false);
   });
 
   it('an unreadable prior-turn record refuses — it never re-runs a turn that may already have written', async () => {
