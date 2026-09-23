@@ -80,6 +80,7 @@ import type { AgentCapabilities, AgentToolContext, ToolResult } from './agent-to
 import { buildModelFromBrief, findConstructionVersion, type CallStructuredModel } from './build-model.js';
 import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
+import { linkedFactorsOf } from '../../routing/option-effect-write.js';
 
 /** One internal dispatch, so every path is the product's own. */
 export type InternalDispatch = (path: string, body: unknown) => Promise<{ status: number; json: Record<string, unknown> }>;
@@ -617,6 +618,9 @@ export function createAgentCapabilities(
         base_revision: compound.base_graph_identity_hash,
         assumptions: a?.assumptions ?? [],
         option_levels: b?.interventions ?? [],
+        // Levels the proposer LEFT OUT because the option is not wired to that
+        // factor — the Agent must say so and offer a level it CAN record.
+        ...(b !== null && Array.isArray(b.not_linked) ? { not_linked: b.not_linked, not_linked_note: b.not_linked_note } : {}),
         ...refused,
         note:
           'Nothing has changed. Show the user every value and level and what each rests on, say plainly they are ' +
@@ -639,6 +643,7 @@ export function createAgentCapabilities(
       const unresolved: string[] = [];
       const unframed: { factor: string; detail: string }[] = [];
       const unchanged: string[] = [];
+      const notLinked: { option: string; factor: string; acts_on: string[] }[] = [];
       const seen = new Set<string>();
       const set: {
         option: { id: string; label: string }; factor: { id: string; label: string };
@@ -651,6 +656,27 @@ export function createAgentCapabilities(
         const factor = byLabel(String(i?.factor_label ?? ''), 'factor');
         if (option === undefined) { unresolved.push(`option "${String(i?.option_label ?? '')}"`); continue; }
         if (factor === undefined) { unresolved.push(`factor "${String(i?.factor_label ?? '')}"`); continue; }
+        /**
+         * ⛔ A LEVEL CAN ONLY BE SET ON A FACTOR THE OPTION IS WIRED TO — the
+         * write's own rule, applied at PROPOSAL time. MEASURED on served
+         * 0f2f3b87 (journey witness, scenario 1e7649c2): the Agent proposed
+         * "Internal Lead Trial -> Tech lead headcount", an option with no link
+         * to that factor. This proposer accepted it, `option_intervention_edit`
+         * then refused it (`unresolved_effect_relationship`, same reader:
+         * `linkedFactorsOf`), and because a compound's level chain stops at its
+         * first refusal, NONE of that approval's levels landed — the user
+         * approved a set that could never be written. Excluded here, with the
+         * factors the option DOES act on, so the Agent corrects it before the
+         * user is asked to approve anything.
+         */
+        const linked = linkedFactorsOf(g as never, option.id);
+        if (!linked.some((f) => f.id === factor.id)) {
+          notLinked.push({
+            option: option.label, factor: factor.label,
+            acts_on: linked.map((f) => String(f.label ?? f.id)),
+          });
+          continue;
+        }
         const raw = Number(i?.value);
         if (!Number.isFinite(raw)) { unresolved.push(`${option.label} -> ${factor.label} (no value)`); continue; }
 
@@ -727,6 +753,7 @@ export function createAgentCapabilities(
         return {
           ok: false, mutated: false, refusal: 'nothing_to_set',
           ...(unresolved.length > 0 ? { unresolved } : {}),
+          ...(notLinked.length > 0 ? { not_linked: notLinked } : {}),
           ...(unframed.length > 0 ? { no_stated_range: unframed } : {}),
           ...(unchanged.length > 0 ? { already_set: unchanged } : {}),
           detail: 'Nothing could be recorded. Tell the user exactly which of these it was and why.',
@@ -766,6 +793,10 @@ export function createAgentCapabilities(
           basis: i.basis,
         })),
         ...(unresolved.length > 0 ? { unresolved } : {}),
+        ...(notLinked.length > 0 ? {
+          not_linked: notLinked,
+          not_linked_note: 'These levels were LEFT OUT: the option is not connected to that factor, so no level can be recorded there. Propose a level on one of the factors each option acts on (listed in acts_on), or say the option needs a link first.',
+        } : {}),
         ...(unframed.length > 0 ? { no_stated_range: unframed } : {}),
         ...(unchanged.length > 0 ? { already_set: unchanged } : {}),
         note:
