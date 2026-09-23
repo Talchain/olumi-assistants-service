@@ -18,12 +18,43 @@
  */
 import type { SuggestedAction } from '../compose/types.js';
 
-const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
+/**
+ * ⭐ EXPORTED so the approval fast path DERIVES the confirmable message set from
+ * this map instead of keeping a second copy of the strings. Two lists of the
+ * same copy always drift; one cannot. `APPROVE_CHIP_MESSAGES` below is the
+ * derived set, and `approval-fast-path.ts` asserts it is non-empty so a rename
+ * here cannot silently empty the fast path's allowlist.
+ */
+export const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   propose_starting_point: { label: 'Use as starting assumptions', message: 'Yes, use those.' },
   propose_assumptions: { label: 'Use as starting assumptions', message: 'Yes, use those.' },
   propose_option_interventions: { label: 'Use as starting option levels', message: 'Yes, use those.' },
   propose_model_change: { label: 'Make this change', message: 'Yes, make that change.' },
 };
+
+/**
+ * ⛔ THE EXACT STRINGS THIS PRODUCT EMITS AS AN APPROVAL, and why an exact-match
+ * set is the safe half of the fast path.
+ *
+ * MEASURED against the shared free-text recognisers in
+ * `routing/deterministic-short-confirm.ts` (both patterns executed verbatim
+ * against these strings):
+ *   'Yes, use those.'          SHORT_CONFIRM=false  PROPOSAL_CONFIRM=false
+ *   'Yes, make that change.'   SHORT_CONFIRM=false  PROPOSAL_CONFIRM=TRUE
+ * So the battle-hardened patterns cover ONE of the four chips — and the three
+ * they miss include `propose_starting_point`, which is the chip on the measured
+ * approve journey. A fast path built on those patterns alone would miss exactly
+ * the case it exists for.
+ *
+ * ⚠ AND THE FIX IS NOT TO LOOSEN THEM. Those patterns are anchored, witnessed
+ * live, and shared with the v5 consent path; widening them to hear "use those"
+ * would change behaviour on a path this lane does not own. An exact-match set of
+ * strings THE PRODUCT ITSELF AUTHORED cannot over-fire: the user did not compose
+ * these words, the chip did.
+ */
+export const APPROVE_CHIP_MESSAGES: ReadonlySet<string> = Object.freeze(
+  new Set(Object.values(APPROVE).map((c) => c.message)),
+) as ReadonlySet<string>;
 
 export const AMEND_CHIP: SuggestedAction = {
   id: 'agent-amend-proposal',

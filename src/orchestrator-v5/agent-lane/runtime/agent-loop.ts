@@ -102,6 +102,40 @@ export interface TurnTiming {
    * those lead a reader somewhere different.
    */
   readonly tool_provider_ms: number;
+  /**
+   * ⛔⛔ LOOP CALLS ONLY. THIS FIELD UNDERCOUNTS, AND A FAST-PATH BEFORE/AFTER
+   * READ FROM IT WILL BE WRONG.
+   *
+   * It is incremented once per loop iteration (`providerCalls += 1`, below), plus
+   * whatever a tool CLAIMS on its result. MEASURED 24 Sep, scope
+   * `src/orchestrator-v5/agent-lane/**` excluding `__tests__`: **ZERO tool
+   * results emit `provider_calls`**, against a contrast control of 7 + 2 + 3
+   * references across `turn-timing.test.ts`, `turn-timing-emitted.test.ts` and
+   * `agent-turn-is-openai-only.test.ts` — so the claim mechanism is real and
+   * exercised, and simply has no production emitter.
+   *
+   * The concrete consequence: `buildModelFromBrief` calls the model itself
+   * (`runtime/build-model.ts:291`, and again at `:339` when the oversize retry
+   * fires) and reports neither. **So a fresh-brief turn is undercounted by 1,
+   * or by 2 on a retry.**
+   *
+   * ⭐ THE AUTHORITY ON WHAT A TURN ACTUALLY SPENT IS THE REQUEST-SCOPED PROVIDER
+   * LEDGER, not this field: `recordedProviderCalls()` from
+   * `adapters/llm/provider-policy.ts`, surfaced as `_provider_calls` on the
+   * route's response. It records every guarded attempt — allowed AND
+   * `refused_before_network` — at the choke point, so it cannot miss a call a
+   * tool forgot to declare. It also carries `truncated` (#1779) for the 50-row
+   * cap, so a reader can tell "no Anthropic calls" from "none that fit".
+   *
+   * ⚠ WHY THIS MATTERS RIGHT NOW. The RC fast-path work is judged on removed
+   * provider calls. Reading the "before" from this field understates it by 1-2
+   * and makes a real saving look smaller than it is. Use the ledger for any
+   * published number; use this field for the loop's own share of the turn.
+   *
+   * The honest fix is for a model-calling tool to report its own calls — the
+   * mechanism already exists and is invited below. That is one line in
+   * `build-model.ts`, which this lane does not hold a lease on.
+   */
   readonly provider_calls: number;
   readonly tool_calls: number;
   readonly hops: number;
