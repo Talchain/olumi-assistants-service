@@ -53,7 +53,7 @@ import { disclosuresFor, withDisclosures } from '../orchestrator-v5/agent-lane/d
 import { narrateWriteOutcome, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
 import { approvalChipsFor, typedApprovalOf } from '../orchestrator-v5/agent-lane/approval-chips.js';
-import { dispatchTool } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
+import { dispatchTool, toolsFor } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-graph-emit.js';
 import type { GraphV3T } from '../schemas/cee-v3.js';
 
@@ -257,6 +257,12 @@ const STARTING_POINT_CHIP = {
   label: 'Suggest starting assumptions',
   message: 'Suggest starting values for everything this model still needs, so I can approve them.',
 } as const;
+
+/** The UI's Run control: a typed `run_analysis` chip. Words alone never take fast path 3. */
+export function typedRunOf(body: Record<string, unknown>): boolean {
+  const chip = body['chip'] as { action_type?: unknown } | null | undefined;
+  return (body['kind'] === undefined || body['kind'] === 'message') && chip?.action_type === 'run_analysis';
+}
 
 export function isFirstBriefCandidate(body: Record<string, unknown>, message: string): boolean {
   if (body['kind'] !== undefined && body['kind'] !== 'message') return false;
@@ -515,6 +521,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         instructions: req.instructions,
         input: req.input,
         tools: req.tools,
+        // Fast path 3 answers over a run Olumi already made: it may interpret, never act.
+        ...((req as { tool_choice?: unknown }).tool_choice === 'none' ? { tool_choice: 'none' } : {}),
         max_output_tokens: req.max_output_tokens,
       }),
     });
@@ -920,7 +928,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * calls, no implicit analysis. Words alone never take this path.
      */
     const approvedProposal = typedApprovalOf(body);
-    let fastPath: 'approve' | 'first_brief' | undefined;
+    let fastPath: 'approve' | 'first_brief' | 'run' | undefined;
     let result: AgentTurnResult | undefined;
     if (approvedProposal !== undefined) {
       const fastStartedAt = Date.now();
@@ -1007,6 +1015,60 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             timing: { total_ms: ms, provider_ms: providerMs, tool_ms: ms - providerMs, overhead_ms: 0, tool_provider_ms: providerMs, provider_calls: 1, tool_calls: 1, hops: 0 },
           };
         }
+      }
+    }
+    /**
+     * ⭐ FAST PATH 3 — AN EXPLICIT RUN IS RUN, THEN INTERPRETED ONCE (RC #63 5803960423 /
+     * 5803995225). Measured in Paul's staging test: an explicit analysis took ~18 s, 3
+     * provider calls and 2 tool hops — the Agent decided to call the analysis the user had
+     * just asked for. The Run control is a TYPED chip (`action_type: 'run_analysis'`), so
+     * the SAME `run_analysis` capability runs (deterministic PLoT/ISL, no model), and ONE
+     * model call interprets its result with `tool_choice: 'none'` — it can explain, never
+     * act. A refused run is explained by that same one call. The pair is kept in history
+     * so the Agent's next turn knows the run happened.
+     */
+    if (result === undefined && approvedProposal === undefined && typedRunOf(body)) {
+      const fastStartedAt = Date.now();
+      const ran = await dispatchTool('run_analysis', JSON.stringify({ reason: 'the user pressed Run' }),
+        { scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id }, capabilities, mode);
+      const callId = `fast_run_${req.id}`.replace(/[^A-Za-z0-9_-]/g, '_');
+      const priorAndRun = [
+        ...(history ?? []),
+        { role: 'user', content: [{ type: 'input_text', text: message }] },
+        { type: 'function_call', name: 'run_analysis', call_id: callId, arguments: JSON.stringify({ reason: 'the user pressed Run' }) },
+        { type: 'function_call_output', call_id: callId, output: JSON.stringify(ran) },
+      ];
+      try {
+        const providerStartedAt = Date.now();
+        const resp = await callModel({
+          instructions: AGENT_INSTRUCTIONS,
+          input: priorAndRun,
+          tools: toolsFor(mode),
+          max_output_tokens: budget.max_output_tokens,
+          tool_choice: 'none',
+        } as never);
+        const providerMs = Date.now() - providerStartedAt;
+        const out = (resp.output ?? []) as { type?: string; content?: { type?: string; text?: string }[] }[];
+        const answer = out.filter((o) => o.type === 'message').flatMap((o) => o.content ?? [])
+          .filter((c) => c.type === 'output_text').map((c) => c.text ?? '').join('');
+        if (answer.trim().length > 0) {
+          fastPath = 'run';
+          const ms = Date.now() - fastStartedAt;
+          result = {
+            assistant_text: answer,
+            items: [...priorAndRun, ...out.filter((o) => o.type === 'message')],
+            tool_calls: [{ name: 'run_analysis', ok: ran.ok === true, mutated: false, ...(typeof ran.refusal === 'string' ? { refusal: ran.refusal } : {}) }],
+            tool_results: [ran],
+            mutated: false,
+            hops: 1,
+            stopped_reason: 'answered',
+            timing: { total_ms: ms, provider_ms: providerMs, tool_ms: Math.max(0, ms - providerMs), overhead_ms: 0, tool_provider_ms: 0, provider_calls: 1, tool_calls: 1, hops: 1 },
+          };
+        }
+      } catch (err) {
+        // The run already happened; only its interpretation failed. The Agent takes the
+        // turn (it will read the fresh result), rather than the user losing the answer.
+        log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: fast-path interpretation failed — handing the turn to the Agent');
       }
     }
     if (result === undefined) try {
@@ -1118,7 +1180,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           handler_id: null,
           request_hash: requestHash,
           response_emitted: true,
-          llm_calls_used: fastPath === 'approve' ? 0 : fastPath === 'first_brief' ? 1 : result.hops + 1,
+          llm_calls_used: fastPath === 'approve' ? 0 : fastPath === 'first_brief' || fastPath === 'run' ? 1 : result.hops + 1,
           duration_ms: Date.now() - startedAt,
           handler_facts: [],
           userMessage: message,
