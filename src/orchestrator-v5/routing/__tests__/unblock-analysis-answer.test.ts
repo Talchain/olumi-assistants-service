@@ -102,7 +102,12 @@ describe('buildUnblockAnalysisAnswer — the other states', () => {
     // and readiness is still not claimed.
     expect(r.assistant_text).not.toContain('optional extra');
     expect(r.assistant_text).not.toMatch(/Nothing is blocking/i);
-    expect(r.assistant_text).toContain('needs_user_mapping');
+    // ⚠ CORRECTED: this used to assert the raw status enum APPEARED in the
+    // sentence — pinning the very leak a reviewer then found user-visible
+    // ("the model is needs_user_input"). The real property is that the turn
+    // refuses without printing an internal enum at the user.
+    expect(r.assistant_text).toMatch(/cannot run yet/i);
+    expect(r.assistant_text).not.toMatch(/needs_user_mapping/);
   });
 
   it('several blockers are listed, not summarised away', () => {
@@ -169,7 +174,9 @@ describe('a payload that says it is blocked is never called ready', () => {
 
   it('an unknown status with no issues is stated, not guessed', () => {
     const r = buildUnblockAnalysisAnswer({ status: 'needs_user_mapping' }, { authorises_repair: false });
-    expect(r.assistant_text).toContain('needs_user_mapping');
+    // Same correction: state the refusal, never the enum.
+    expect(r.assistant_text).toMatch(/cannot run yet/i);
+    expect(r.assistant_text).not.toMatch(/needs_user_mapping/);
     expect(r.assistant_text).not.toMatch(/Nothing is blocking/i);
   });
 
@@ -253,5 +260,83 @@ describe('the repair tail on a real multi-issue capture', () => {
       { authorises_repair: true },
     );
     expect(assistant_text).toMatch(/That one needs your input/i);
+  });
+});
+
+/**
+ * ⛔ ADMISSION IS `may_run`, NOT `status` — and this test must RED without the fix.
+ *
+ * A reviewer swept 61 canonical payloads and found **13 answered wrongly**: 12
+ * `needs_user_input` and 1 `needs_user_mapping`, every one with `may_run: true`
+ * and ZERO blocking issues. The user was told *"The analysis cannot run yet —
+ * the model is needs_user_input. I do not have an itemised list…"* — both
+ * clauses false, the raw enum leaked into prose, and no run offered, on a model
+ * the product was perfectly willing to run.
+ *
+ * The contract is written down at `schemas/analysis-ready.ts:298-313`:
+ * *"`status` is the STRICTER 'is this model ready as it stands?'. `may_run` is
+ * [the run verdict]. Consumers gate on `may_run !== false` and fall back to
+ * their existing [check]."*
+ *
+ * ⚠ THE REVIEWER'S MUTANT SURVIVED at the previous head because nothing pinned
+ * this. These assertions exist so it cannot survive again.
+ */
+describe('admission is the run verdict, not the readiness status', () => {
+  const shapes = [
+    { status: 'needs_user_input', may_run: true, readiness_issues: [] },
+    { status: 'needs_user_mapping', may_run: true, readiness_issues: [] },
+    { status: 'needs_encoding', may_run: true, readiness_issues: [] },
+  ];
+
+  for (const r of shapes) {
+    it(`may_run:true with status "${r.status}" is NOT refused`, () => {
+      const { assistant_text, offer_run_analysis } = buildUnblockAnalysisAnswer(r, {
+        authorises_repair: false,
+      });
+      expect(assistant_text).not.toMatch(/cannot run yet/i);
+      expect(assistant_text).toContain('Nothing is blocking the analysis');
+      expect(offer_run_analysis).toBe(true);
+    });
+  }
+
+  it('⛔ the raw status enum never appears in prose', () => {
+    for (const r of [...shapes, { status: 'needs_user_input', may_run: false, readiness_issues: [] }]) {
+      const { assistant_text } = buildUnblockAnalysisAnswer(r, { authorises_repair: false });
+      expect(assistant_text).not.toMatch(/needs_user_input|needs_user_mapping|needs_encoding/);
+    }
+  });
+
+  it('CONTROL: may_run:false is still refused', () => {
+    const { assistant_text, offer_run_analysis } = buildUnblockAnalysisAnswer(
+      { status: 'blocked', may_run: false, blocked_reason: 'NO_PATH_TO_GOAL', readiness_issues: [] },
+      { authorises_repair: false },
+    );
+    expect(assistant_text).toMatch(/cannot run yet/i);
+    expect(assistant_text).toContain('NO_PATH_TO_GOAL');
+    expect(offer_run_analysis).toBe(false);
+  });
+
+  it('CONTROL: may_run ABSENT falls back to status, as the contract says', () => {
+    expect(
+      buildUnblockAnalysisAnswer({ status: 'ready', readiness_issues: [] }, { authorises_repair: false })
+        .offer_run_analysis,
+    ).toBe(true);
+    expect(
+      buildUnblockAnalysisAnswer({ status: 'needs_user_input', readiness_issues: [] }, { authorises_repair: false })
+        .offer_run_analysis,
+    ).toBe(false);
+  });
+
+  it('may_run:true WITH outstanding items says they do not stop the run', () => {
+    const { assistant_text, offer_run_analysis } = buildUnblockAnalysisAnswer(
+      {
+        status: 'needs_user_input',
+        may_run: true,
+        readiness_issues: [{ code: 'A', message: 'a tightenable thing', repairability: 'auto' }],
+      },
+      { authorises_repair: false },
+    );
+    expect(offer_run_analysis).toBe(true);
+    expect(assistant_text).toMatch(/do(es)? not stop the run/i);
   });
 });

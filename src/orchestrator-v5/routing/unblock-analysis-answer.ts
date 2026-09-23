@@ -34,6 +34,15 @@ export interface UnblockReadinessView {
   readonly readiness_issues?: readonly UnblockReadinessIssue[];
   /** Named by the refusal producers (e.g. `NO_PATH_TO_GOAL`) with no issue list. */
   readonly blocked_reason?: string;
+  /**
+   * ⭐ THE ADMISSION VERDICT, and the field this module must gate on.
+   *
+   * `analysis-ready.ts:298-313` states the contract: *"`status` is the STRICTER
+   * 'is this model ready as it stands?'. `may_run` is [the run verdict].
+   * Consumers gate on `may_run !== false` and fall back to their existing
+   * [check]."* Optional, so pre-`may_run` dispatch paths still validate.
+   */
+  readonly may_run?: boolean;
 }
 
 export interface UnblockAnalysisAnswer {
@@ -83,11 +92,29 @@ export function buildUnblockAnalysisAnswer(
   // `readiness_issues` — a payload that says it is blocked AND names its
   // blocker, answered with "the model is ready to run". The absence of a
   // detailed list is not evidence of readiness; only `ready` is.
-  const explicitlyReady = readiness.status === 'ready';
-  if (explicitlyReady) {
+  // ⛔ GATE ON THE ADMISSION VERDICT, NOT ON `status`.
+  //
+  // This read `status === 'ready'` alone. Measured over 61 canonical payloads,
+  // **13 were answered wrongly** — 12 `needs_user_input` and 1
+  // `needs_user_mapping`, every one with `may_run: true` and ZERO blocking
+  // issues. The user was told *"The analysis cannot run yet — the model is
+  // needs_user_input. I do not have an itemised list…"*: both clauses false,
+  // on a model the product was willing to run. `status` is the stricter
+  // "ready as it stands?"; `may_run` is the run verdict, and the contract says
+  // to gate on it and fall back to `status` only when it is absent.
+  const admitted =
+    readiness.may_run === true
+    || (readiness.may_run === undefined && readiness.status === 'ready');
+
+  if (admitted) {
+    // Outstanding non-blocking items may still exist; say so rather than
+    // implying the model is pristine.
+    const alsoOutstanding =
+      blocking.length > 0
+        ? ` ${blocking.length} thing${blocking.length === 1 ? '' : 's'} could still be tightened, but ${blocking.length === 1 ? 'it does' : 'they do'} not stop the run.`
+        : '';
     return {
-      assistant_text:
-        'Nothing is blocking the analysis — the model is ready to run.',
+      assistant_text: `Nothing is blocking the analysis — it can run now.${alsoOutstanding}`,
       offer_run_analysis: true,
     };
   }
@@ -100,12 +127,10 @@ export function buildUnblockAnalysisAnswer(
       typeof readiness.blocked_reason === 'string' && readiness.blocked_reason.trim().length > 0
         ? ` The model reports: ${readiness.blocked_reason.trim()}.`
         : '';
-    const state =
-      typeof readiness.status === 'string' && readiness.status.trim().length > 0
-        ? readiness.status.trim()
-        : 'not ready';
+    // ⚠ THE RAW STATUS ENUM IS NOT PROSE. It used to be interpolated directly,
+    // producing "the model is needs_user_input" in a user-facing sentence.
     return {
-      assistant_text: `The analysis cannot run yet — the model is ${state}.${reason} I do not have an itemised list of what to change for this one.`,
+      assistant_text: `The analysis cannot run yet.${reason} I do not have an itemised list of what to change for this one.`,
       offer_run_analysis: false,
     };
   }
