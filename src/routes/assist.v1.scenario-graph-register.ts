@@ -148,12 +148,14 @@ import {
 import { computeGraphIdentityHash } from "../orchestrator-v5/context/graph-identity.js";
 import { computeExpectedGraphCasHashes } from "../orchestrator-v5/context/graph-cas-conflict.js";
 import { projectGraphForPersistence } from "../orchestrator-v5/persisted-graph-projection.js";
-import { appendCheckedGraphWrite } from "../orchestrator-v5/persist-graph-write.js";
+import { appendCheckedGraphWrite, assertNoIntroducedGraphViolations } from "../orchestrator-v5/persist-graph-write.js";
 import { buildAtomicCommittedModelVersion } from "../orchestrator-v5/commit.js";
 import { PersistedGraphInvariantError } from "../orchestrator-v5/persisted-graph-invariants.js";
 import { getSessionStore } from "../orchestrator-v5/session/index.js";
 import { registrationRequestHash, registrationTurnId } from "../orchestrator-v5/graph-registration/registration-identity.js";
 import { GraphStaleWriteError } from "../orchestrator-v5/session/store.js";
+import { runWithPendingTurnFence, TurnFenceRejectedError } from "../orchestrator-v5/session/turn-fence.js";
+import { admitCurrentTurnFence } from "../orchestrator/turn-fence-prehandler.js";
 import { normaliseBriefText } from "../orchestrator-v5/session/normalise-brief-text.js";
 import { resolveCeeRateLimit } from "../cee/config/limits.js";
 import { buildErrorV1 } from "../utils/errors.js";
@@ -490,7 +492,56 @@ export default async function route(app: FastifyInstance) {
         // questions (a TURN vs a REGISTRATION — no LLM, no composed response,
         // `response_emitted: false`), so they are not merged; what they share
         // is HOW a graph persists, and that now has one owner.
-        appendOutcome = await appendCheckedGraphWrite({
+        /**
+         * ⛔ A REGISTRATION IS A GRAPH WRITE, SO IT TAKES A PLACE IN THE FENCE.
+         *
+         * MEASURED on deployed staging (Paul's OpenAI test, 22 Sep 23:22:42Z and
+         * 23:42:15Z, scenario 450acd25): both registrations logged level-50
+         * `v5.turn_fence.no_ingress_fence` — "a GRAPH WRITE reached the store
+         * with no ingress fence handle; it is proceeding UNFENCED". The fence is
+         * bound by `turnFencePreHandler` on `/orchestrate/v2/turn` only, so this
+         * route — the other `scenarios.graph` writer — never had a slot, and the
+         * store's one non-refusing gap let it through.
+         *
+         * Same two steps as the turn ingress, in the same order: bind the slot
+         * for THIS write's identity, then claim AFTER admission (auth, body
+         * validation and ownership all passed above), so a request this route
+         * refuses never advances the scenario's generation. The store then
+         * enforces it exactly as it does for a turn: superseded/stopped refuse,
+         * a failed claim refuses fail-closed.
+         *
+         * ⭐ RETRY STAYS SAFE. The claim is idempotent on (scenario_id, turn_id)
+         * and `registrationTurnId` is derived from the operation id, so a replay
+         * re-reads its ORIGINAL generation; the atomic RPC decides replay of an
+         * already-committed turn before its fence gate (20260806120000 + the
+         * 2.738(a) move to the top of the function), so the replay returns the
+         * original row and receipt rather than a superseded refusal. And a first
+         * graph onto an empty scenario is exempt from OLTF2 by design.
+         */
+        /**
+         * ⛔ REFUSE A STRUCTURALLY INVALID GRAPH BEFORE IT CLAIMS A GENERATION.
+         *
+         * Independent review of #1706 (CHANGES_REQUIRED at 19a0d8b5 and
+         * 614296be): the claim below ran BEFORE the persistence floor's
+         * invariant check, so an ingress-valid but structurally refused
+         * registration (a duplicate node id) still advanced the scenario's
+         * generation — superseding an earlier VALID in-flight turn while writing
+         * nothing itself. The same terminal check now runs first, on the exact
+         * bytes and the same trusted baseline the floor uses, and throws the
+         * same `PersistedGraphInvariantError` the catch below maps to 422. The
+         * floor inside `appendCheckedGraphWrite` is kept: nothing may mutate the
+         * graph between the two, and a second check is the cheap half of that.
+         */
+        assertNoIntroducedGraphViolations({
+          graph: graphForStore,
+          identity: { scenario_id: scenarioId, turn_id: turnId, turn_class: "direct_answer" },
+          writesGraph: true,
+          baseGraphForInvariants,
+          source: "graph_registration",
+        });
+        appendOutcome = await runWithPendingTurnFence(scenarioId, turnId, async () => {
+          await admitCurrentTurnFence();
+          return appendCheckedGraphWrite({
           store,
           writesGraph: true,
           // Only what THIS registration introduces can refuse it — a scenario
@@ -535,8 +586,40 @@ export default async function route(app: FastifyInstance) {
             expectedGraphIdentityHash,
             expectedGraphAnalysisHash,
           },
+          });
         });
       } catch (err) {
+        if (err instanceof TurnFenceRejectedError) {
+          // A later-started write on this scenario owns the graph now, or the
+          // user stopped it: nothing was written, and saying so is a 409 the
+          // caller can act on (re-read, then import again). A fence we could
+          // not claim or read is OUR outage, not a conflict — a retryable 503.
+          const conflict = err.verdict === "superseded" || err.verdict === "stopped";
+          log.warn(
+            {
+              event: "v5.scenario_graph_register.fence_refused",
+              request_id: requestId,
+              scenario_id: scenarioId,
+              verdict: err.verdict,
+              generation: err.generation,
+              max_generation: err.maxGeneration,
+            },
+            "Graph registration — refused by the turn fence; nothing written",
+          );
+          if (!conflict) return unavailable();
+          return reply
+            .code(409)
+            .send(
+              buildErrorV1(
+                "BAD_INPUT",
+                err.verdict === "stopped"
+                  ? "This change was stopped, so nothing was imported."
+                  : "A newer change to this model started while you were importing. Nothing was written — reload and import again.",
+                { code: err.verdict === "stopped" ? "TURN_STOPPED" : "TURN_SUPERSEDED" },
+                requestId,
+              ),
+            );
+        }
         if (err instanceof PersistedGraphInvariantError) {
           // The caller supplied these bytes, so name what is wrong with them —
           // the `invalid()` doctrine. A 503 would be actively misleading: it

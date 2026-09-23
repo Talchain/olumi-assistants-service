@@ -156,7 +156,22 @@ describe('C8 — the `scenarios.graph` writer population is EXACTLY these call s
     // ⭐ THE C8 CLOSURE ITSELF. If `assist.v1.scenario-versions.ts` drops out of
     // this list, the restore tier is silently writing unchecked graphs again —
     // which is exactly the state this pin was written to make impossible.
-    expect(callers).toEqual(['routes/assist.v1.scenario-versions.ts']);
+    // The registration route ALSO calls the check on its own, as a PREFLIGHT
+    // before it claims a turn-fence generation (#1706 review): a structurally
+    // refused import must not advance the scenario's order. It still writes
+    // through `appendCheckedGraphWrite` (pinned above), so the floor stays.
+    expect(callers).toEqual([
+      'routes/assist.v1.scenario-graph-register.ts',
+      'routes/assist.v1.scenario-versions.ts',
+    ]);
+  });
+
+  it('the registration preflight checks the SAME projected object it then writes', () => {
+    // Same defect class as the restore pin below: a check wired to bytes
+    // nobody stores would stay green. `graphForStore` is what the floor writes.
+    const route = PRODUCTION_TS.find((f) => f.path === 'routes/assist.v1.scenario-graph-register.ts');
+    expect(route).toBeDefined();
+    expect(route!.code).toMatch(/assertNoIntroducedGraphViolations\(\{\s*graph:\s*graphForStore\b/);
   });
 
   it('the restore route hands the CHECK the SAME projected object it hands the RPC', () => {
