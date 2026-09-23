@@ -240,7 +240,7 @@ const anthropicDispatcher = new Agent({
 // Scoped fetch that uses our Anthropic-tuned dispatcher without polluting the global
 const anthropicFetch: typeof globalThis.fetch = (input, init) => {
   // ⛔ The network choke point: refused BEFORE I/O under an OpenAI-only request policy.
-  assertProviderAllowed('anthropic', 'transport');
+  assertProviderAllowed('anthropic', 'anthropic.transport');
   return undiciFetch(input as Parameters<typeof undiciFetch>[0], {
     ...init as Parameters<typeof undiciFetch>[1],
     dispatcher: anthropicDispatcher,
@@ -254,7 +254,7 @@ let clientApiKey: string | null = null;
 let clientSdkMaxRetries: number | undefined;
 
 function getClient(): Anthropic {
-  assertProviderAllowed('anthropic', 'client');
+  assertProviderAllowed('anthropic', 'anthropic.client');
   const apiKey = getApiKey();
   const sdkMaxRetries = sdkMaxRetriesForLiveEval();
   if (!apiKey) {

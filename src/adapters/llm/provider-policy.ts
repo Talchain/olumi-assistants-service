@@ -16,7 +16,12 @@
  * `ForbiddenProviderError` before a byte leaves the process, and is logged with its
  * task, so the refusal is also the measurement.
  *
- * Outside a policy (every Conventional request) nothing changes.
+ * Every guarded attempt under a policy — allowed or refused — is appended to the
+ * policy's `calls` ledger, so the route can put `CALL SITE | PROVIDER | MODEL |
+ * PURPOSE | OUTCOME` for the whole turn on the wire (`_agent.provider_calls`). The
+ * purity proof is then read off the response, not reconstructed from logs.
+ *
+ * Outside a policy (every Conventional request) nothing changes and nothing is recorded.
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
 
@@ -27,7 +32,22 @@ export interface ProviderPolicy {
   readonly allowed: ReadonlySet<LlmProvider>;
   /** Who set the policy — for the refusal log. */
   readonly route: string;
+  /** Every guarded generative attempt made under this policy, in order. */
+  readonly calls: GenerativeCall[];
 }
+
+export interface GenerativeCall {
+  /** The guarded choke point, e.g. `agent-v1-turn.callModel`, `anthropic.client`. */
+  readonly site: string;
+  readonly provider: LlmProvider;
+  /** The model requested, or `unknown` where the choke point cannot see it. */
+  readonly model: string;
+  readonly purpose: string;
+  readonly outcome: 'allowed' | 'refused_before_network';
+}
+
+/** Bounds the ledger; a turn makes a handful of calls, so hitting this is itself a finding. */
+export const MAX_RECORDED_CALLS = 50;
 
 export class ForbiddenProviderError extends Error {
   readonly code = 'FORBIDDEN_PROVIDER';
@@ -39,7 +59,7 @@ export class ForbiddenProviderError extends Error {
 
 const store = new AsyncLocalStorage<ProviderPolicy>();
 
-export const OPENAI_ONLY = (route: string): ProviderPolicy => ({ allowed: new Set<LlmProvider>(['openai']), route });
+export const OPENAI_ONLY = (route: string): ProviderPolicy => ({ allowed: new Set<LlmProvider>(['openai']), route, calls: [] });
 
 export function runWithProviderPolicy<T>(policy: ProviderPolicy, fn: () => T): T {
   return store.run(policy, fn);
@@ -49,11 +69,35 @@ export function currentProviderPolicy(): ProviderPolicy | undefined {
   return store.getStore();
 }
 
-/** Throws before any network I/O when the current request's policy forbids `provider`. */
-export function assertProviderAllowed(provider: LlmProvider, task?: string): void {
+/**
+ * Throws before any network I/O when the current request's policy forbids `provider`,
+ * and records the attempt either way. Call it at the last point before the request
+ * leaves the process.
+ */
+export function assertProviderAllowed(
+  provider: LlmProvider,
+  site?: string,
+  detail?: { readonly model?: string; readonly purpose?: string },
+): void {
   const policy = store.getStore();
-  if (policy === undefined || policy.allowed.has(provider)) return;
+  if (policy === undefined) return;
+  const allowed = policy.allowed.has(provider);
+  if (policy.calls.length < MAX_RECORDED_CALLS) {
+    policy.calls.push({
+      site: site ?? 'unspecified',
+      provider,
+      model: detail?.model ?? 'unknown',
+      purpose: detail?.purpose ?? site ?? 'unspecified',
+      outcome: allowed ? 'allowed' : 'refused_before_network',
+    });
+  }
+  if (allowed) return;
   // Logged by the caller's own error path (no logger import here: this module sits
   // beneath the adapters, and importing telemetry from it closed an import cycle).
-  throw new ForbiddenProviderError(provider, policy.route, task);
+  throw new ForbiddenProviderError(provider, policy.route, site);
+}
+
+/** The current request's ledger, or `[]` outside a policy. A copy — the wire must not alias it. */
+export function recordedProviderCalls(): GenerativeCall[] {
+  return [...(store.getStore()?.calls ?? [])];
 }

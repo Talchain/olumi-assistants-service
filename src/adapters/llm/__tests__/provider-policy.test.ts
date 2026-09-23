@@ -22,7 +22,7 @@ vi.mock('undici', async (orig) => {
   };
 });
 
-import { assertProviderAllowed, runWithProviderPolicy, OPENAI_ONLY, ForbiddenProviderError, currentProviderPolicy } from '../provider-policy.js';
+import { assertProviderAllowed, runWithProviderPolicy, OPENAI_ONLY, ForbiddenProviderError, currentProviderPolicy, recordedProviderCalls } from '../provider-policy.js';
 
 describe('the request-scoped provider policy', () => {
   it('outside any policy every provider is allowed (Conventional is unchanged)', () => {
@@ -37,6 +37,20 @@ describe('the request-scoped provider policy', () => {
       expect(() => assertProviderAllowed('anthropic', 'chat')).toThrow(ForbiddenProviderError);
     });
   });
+
+  it('records every guarded attempt, allowed or refused, and nothing outside a policy', () => {
+    assertProviderAllowed('anthropic', 'outside');
+    expect(recordedProviderCalls()).toEqual([]);
+    const calls = runWithProviderPolicy(OPENAI_ONLY('test'), () => {
+      assertProviderAllowed('openai', 'agent-v1-turn.callModel', { model: 'gpt-5.6-terra', purpose: 'conversation' });
+      try { assertProviderAllowed('anthropic', 'anthropic.client'); } catch { /* refused */ }
+      return recordedProviderCalls();
+    });
+    expect(calls).toEqual([
+      { site: 'agent-v1-turn.callModel', provider: 'openai', model: 'gpt-5.6-terra', purpose: 'conversation', outcome: 'allowed' },
+      { site: 'anthropic.client', provider: 'anthropic', model: 'unknown', purpose: 'anthropic.client', outcome: 'refused_before_network' },
+    ]);
+  });
 });
 
 describe('the Anthropic adapter is refused BEFORE network under an OpenAI-only policy', () => {
@@ -47,11 +61,14 @@ describe('the Anthropic adapter is refused BEFORE network under an OpenAI-only p
 
   it('RED: chatWithAnthropic under OPENAI_ONLY throws ForbiddenProviderError with ZERO network calls', async () => {
     const { chatWithAnthropic } = await import('../anthropic.js');
-    const err = await runWithProviderPolicy(OPENAI_ONLY('agent_v1_turn'), () =>
+    const policy = OPENAI_ONLY('agent_v1_turn');
+    const err = await runWithProviderPolicy(policy, () =>
       chatWithAnthropic({ system: 's', userMessage: 'u', model: 'claude-sonnet-5' } as never).then(() => null, (e: unknown) => e),
     );
     expect(err).toBeInstanceOf(ForbiddenProviderError);
     expect(networkCalls).toEqual([]);
+    // …and the refusal is itself the measurement.
+    expect(policy.calls.map((c) => [c.provider, c.outcome])).toEqual([['anthropic', 'refused_before_network']]);
   }, 60_000);
 
   it('CONTRAST: the same call outside the policy DOES reach the network (so the guard is what stopped it)', async () => {

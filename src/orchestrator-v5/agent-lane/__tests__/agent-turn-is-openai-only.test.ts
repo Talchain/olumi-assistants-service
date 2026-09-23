@@ -28,6 +28,9 @@ describe('the Agent route is OpenAI-only, all the way down', () => {
   let app: FastifyInstance;
   const seenInsideOrchestrate: (string | null)[] = [];
   let call = 0;
+  // When set, the internal handler attempts an Anthropic call, as the legacy
+  // decision_review did on served c4a6cce.
+  let internalTriesAnthropic = false;
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async () => {
       call += 1;
@@ -45,6 +48,9 @@ describe('the Agent route is OpenAI-only, all the way down', () => {
     app.post('/orchestrate/v2/turn', async () => {
       // What a conventional handler (e.g. decision_review) would see.
       seenInsideOrchestrate.push(policyMod.currentProviderPolicy()?.route ?? null);
+      if (internalTriesAnthropic) {
+        try { policyMod.assertProviderAllowed('anthropic', 'decision_review', { model: 'claude-sonnet-5', purpose: 'decision_review' }); } catch { /* degraded, as the enricher does */ }
+      }
       return { response_version: 2, assistant_text: 'ok', blocks: [], suggested_actions: [], insights: [], graph_hash: 'h1' };
     });
     app.post('/assist/v1/scenarios/:id/graph', async () => ({ graph: { nodes: [{ id: 'g', kind: 'goal', label: 'Goal' }], edges: [] }, graph_hash: 'h1' }));
@@ -64,6 +70,37 @@ describe('the Agent route is OpenAI-only, all the way down', () => {
     seenInsideOrchestrate.length = 0;
     await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'system_event', scenario_id: SCENARIO, turn_id: '11111111-1111-4111-8111-111111111111', stage: 'analyse', event: { kind: 'factor_value_edit', target_id: 'f', value: 0.5, field: 'value' } } });
     expect(seenInsideOrchestrate).toEqual(['agent_v1_turn']);
+  });
+
+  it('RED: the response carries the turn\u2019s provider ledger — the Agent\u2019s own OpenAI calls, attributed', async () => {
+    call = 0;
+    internalTriesAnthropic = false;
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: 'Run the analysis.' } });
+    const calls = r.json()._provider_calls as { site: string; provider: string; model: string; purpose: string; outcome: string }[];
+    // Two model hops: the run_analysis function call, then the answer.
+    expect(calls).toEqual([
+      { site: 'agent-v1-turn.callModel', provider: 'openai', model: expect.stringMatching(/^gpt-/), purpose: 'conversation', outcome: 'allowed' },
+      { site: 'agent-v1-turn.callModel', provider: 'openai', model: expect.stringMatching(/^gpt-/), purpose: 'conversation', outcome: 'allowed' },
+    ]);
+  });
+
+  it('RED: an Anthropic attempt BENEATH internal dispatch is on the ledger as refused_before_network', async () => {
+    call = 0;
+    internalTriesAnthropic = true;
+    try {
+      const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: 'Run the analysis.' } });
+      const calls = r.json()._provider_calls as { site: string; provider: string; outcome: string }[];
+      expect(calls.filter((c) => c.provider === 'anthropic')).toEqual([
+        { site: 'decision_review', provider: 'anthropic', model: 'claude-sonnet-5', purpose: 'decision_review', outcome: 'refused_before_network' },
+      ]);
+    } finally {
+      internalTriesAnthropic = false;
+    }
+  });
+
+  it('a forwarded canvas edit makes no generative call, and says so', async () => {
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'system_event', scenario_id: SCENARIO, turn_id: '22222222-2222-4222-8222-222222222222', stage: 'analyse', event: { kind: 'factor_value_edit', target_id: 'f', value: 0.5, field: 'value' } } });
+    expect(r.json()._provider_calls).toEqual([]);
   });
 
   it('CONTRAST: a request that does not come through the Agent route has no policy', () => {
