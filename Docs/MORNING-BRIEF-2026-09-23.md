@@ -4,6 +4,11 @@ Written for a manual test first thing. **Served build: `c94208cbf000c199fee34922
 
 ---
 
+> **Served build when I wrote this: `e8cf4c68f150` (deployed 03:23:35Z).** The staging tip has
+> since moved to `e38feb4c23e3` — *"fix(cee): stop the first brief 500ing on an unparseable factor
+> observe"*, another lane's merge, **not yet deployed**. That one is directly relevant to your test:
+> if your first brief 500s, check whether the deploy has landed before reporting it.
+
 ## 1. Test this first — the P0 your manual test failed on is fixed
 
 Brief: `Should I hire a Tech lead or two developers to increase velocity?`
@@ -38,38 +43,54 @@ Split by authentication, n = 14 since the deploy. The pattern is total:
 
 ---
 
-## 2. Expect it to still be slow — and it is FOUR PROVIDER CALLS, not compute
+## 2. Expect it to still be slow — it is FOUR PROVIDER CALLS plus one real PLoT call
 
-**Measured overnight, n=1,200, instrument `cee.unified_pipeline.stage_timings` which was already
-deployed on staging.** Window 2026-09-18 → 2026-09-23.
+**Fully attributed overnight, no residual.** The journey is **ONE HTTP request containing TWO
+turns** — the tell is `v5.run_analysis.auto_run_after_draft` at the end of the trace: a draft
+streams, then the analysis runs in the same request.
 
-A slow turn decomposes, p50:
+| leg | n | median | min–max | what it is |
+|---|---|---|---|---|
+| `parse_ms` | 14 | **~23s** | 19.9–28.5 | one **o4-mini** provider call |
+| `coaching_pass_ms` | 10 | **~20.8s** | 17.3–23.6 | one **claude-sonnet-4-6** call, NESTED in validation |
+| **draft turn total** | 14 | **~48s** | 24.0–80.8 | 24–34s when coaching is skipped |
+| **PLoT `/v2/run`** | 9 | **22.3s** | **19.3–42.1** | the only genuine non-LLM work |
+| `decision_review` | 9 | **16.3s** | 13.2–20.4 | one **claude-sonnet-5** call |
+| **analysis half** | 9 | **38.6s** | | |
 
-```
-total 53.6s = parse              23.2s   <- ONE provider call (parse_llm_ms 21.2s = 91% of it)
-            + validation_pipeline 28.8s
-                  \__ coaching_pass 20.9s   <- ONE OpenAI chat completion, NESTED inside validation
-            + ~1.9s   EVERYTHING non-LLM, combined
-```
-
-The nesting is derived, not assumed: `total - (parse + validation)` has p50 **1,882ms**, whereas
-`total - (parse + coaching + validation)` overshoots by p50 **-18,626ms**, and
-`validation >= coaching` holds in **894/992 = 90.1%**.
-
-**The journey is roughly four sequential provider calls of ~21-23s each. Everything that is not a
-provider call totals about two seconds per turn.**
+**Journey ≈ 48s + 39s ≈ 87s** = four sequential provider calls (~23 + ~21 + ~16 = 60s) + one real
+PLoT call (~22s) + **~2s of everything else combined**.
 
 ⛔ **There is no significant compute anywhere.** `threshold_sweep_ms` p50 = **1 millisecond**
-(max 69ms). `normalise_ms` 2ms · `package_ms` 13ms · `boundary_ms` 13ms · `repair_ms` 109ms.
+(max 69ms) · `normalise_ms` 2ms · `package_ms` 13ms · `boundary_ms` 13ms · `repair_ms` 109ms.
+Any "it is the analytical sweep / a Monte Carlo sample budget" explanation is dead. I had one; see §4.
 
-The construction half is still **61% reasoning tokens** — banked evidence for the `whole` role reads
-`in 838 / out 3404 incl. 2070 reasoning, 54.4 s`. **Graph size barely matters**
-(`r(nodes,duration) = 0.293`, under 9% of variance); on your own brief a **26-node** graph took
-**48.9s** while a **15-node** one took **77.9s**.
+### ⭐⭐ The single best lever, and the code says it is safe
 
-⛔ **Two of my own claims died here.** I told Release Control compaction was the dominant lever
-(it is not — it touches output, not the 61% that is reasoning), and I then said the analysis half
-was a fixed Monte Carlo sample budget (see §4).
+**`coaching_pass` is ~21s — about 24% of the journey — and its own design contract makes it optional.**
+From `src/cee/unified-pipeline/stages/coaching-pass.ts`:
+
+> "STRICTLY NON-FATAL … **The structural graph is IDENTICAL with or without this pass**; the draft
+> NEVER fails because of it." · "The UI (their only consumer) therefore sees the same response shape."
+
+The degradation path **already ships**: on a budget skip it emits canonical-empty coaching plus a
+`coaching_status='skipped_budget'` marker that the UI already renders. My n=1,021 measurement
+reproduces that file's own n=40 capture almost exactly (it says median 20.8s / max 26.0s; I get
+p50 20.9s / p90 23.6s / max 30.0s, the max being its own 30s timeout ceiling).
+
+**So the response currently WAITS for a strictly-non-fatal, UI-only enrichment before you see your
+model.** Deliver the graph when ready and let coaching follow, and **time-to-first-model drops ~21s
+with no loss of content.** That is a pipeline-owner change, not mine — I have changed nothing.
+
+### ⛔ A load-bearing comment is refuted
+
+`plot-client.ts:561` justifies its retry policy on "*staging p95 for a real `/v2/run` is ~5s*".
+**Measured median 22.3s, min 19.3s, max 42.1s, n=9 — not one sample under 19s.** Off by ~4×, and
+it is the stated basis of a retry decision.
+
+The construction half is still **61% reasoning tokens** (`in 838 / out 3404 incl. 2070 reasoning`),
+and **graph size barely matters** (`r(nodes,duration)=0.293`, under 9% of variance): on your own
+brief a **26-node** graph took **48.9s** while a **15-node** one took **77.9s**.
 
 ## 3. Merge order I would recommend
 
@@ -108,7 +129,9 @@ Coaching present ⇔ provider calls present, **10/10**; absent ⇔ zero, **4/4**
 ⚠ **Practical consequence for anyone reading dashboards: `llm_calls_used` is not a provider-call
 count.** It under-reports, and I built a whole argument on it.
 
-**The gap is real but it is an OWNED provider-latency gap, not an unowned compute gap:**
+**The gap is real but it is an OWNED provider-latency gap, not an unowned compute gap.**
+**The full end-to-end attribution — including the PLoT and `decision_review` legs that the
+unified-pipeline event does NOT cover — is in §2; the table below is the dispatch:**
 
 | target | p50 | owner |
 |---|---|---|
