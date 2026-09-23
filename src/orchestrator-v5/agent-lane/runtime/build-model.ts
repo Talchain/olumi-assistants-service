@@ -36,6 +36,11 @@
 import { createHash } from 'node:crypto';
 import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
+import {
+  assessConstructionSize,
+  retryInstruction,
+  type ConstructionSizeVerdict,
+} from '../construction-size-gate.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { budgetFor } from '../model-budgets.js';
 import type { ToolResult } from './agent-tools.js';
@@ -57,7 +62,11 @@ export function buildCandidateSchema(): Record<string, unknown> {
       metric: { type: 'string' }, operator: { type: 'string', enum: ['>=', '<=', '>', '<'] },
       value: { type: 'number' }, unit: { type: 'string' }, provenance,
     }, ['metric', 'operator', 'value', 'unit', 'provenance']) },
-    options: { type: 'array', items: obj({
+    // Bounded AT GENERATION as well as at admission. The array caps are
+    // deliberately looser than the total-model limit: admission merges and drops
+    // items, so a per-array cap tight enough to guarantee the total would refuse
+    // models that admit perfectly well. The total check is the authority.
+    options: { type: 'array', maxItems: 6, items: obj({
       label: { type: 'string', description: 'A NAME, not a sentence. Keep it under 33 characters where you can.' },
       provenance,
       changes: { type: 'array', description:
@@ -68,16 +77,16 @@ export function buildCandidateSchema(): Record<string, unknown> {
         items: obj({ factor_label: { type: 'string' }, value: { type: 'number' }, unit: { type: 'string' }, provenance },
           ['factor_label', 'value', 'unit', 'provenance']) },
     }, ['label', 'provenance', 'changes', 'interventions']) },
-    factors: { type: 'array', items: obj({
+    factors: { type: 'array', maxItems: 8, items: obj({
       label: { type: 'string' }, role: { type: 'string', enum: ['controllable', 'observable', 'external'] },
       baseline_known: { type: 'boolean' }, baseline_value: { anyOf: [{ type: 'number' }, { type: 'null' }] },
       unit: { anyOf: [{ type: 'string' }, { type: 'null' }] }, provenance,
       plausible_max: { type: 'number',
         description: 'REQUIRED, and NEVER null. The top of the range this factor could plausibly take, in its own unit \u2014 the SCALE it is read against, not a prediction. A percentage or a score out of 100: 100. A count, an amount or a price: a round number comfortably above anything realistic (a \u00a349 price might use 200; 300 subscribers might use 2000). Something ALREADY between 0 and 1: exactly 1. Every factor gets one, with or without a baseline today \u2014 a value adopted later is read against this same range.' },
     }, ['label', 'role', 'baseline_known', 'baseline_value', 'unit', 'provenance', 'plausible_max']) },
-    risks: { type: 'array', items: obj({ label: { type: 'string' }, provenance }, ['label', 'provenance']) },
-    outcomes: { type: 'array', items: obj({ label: { type: 'string' }, provenance }, ['label', 'provenance']) },
-    links: { type: 'array', items: obj({
+    risks: { type: 'array', maxItems: 4, items: obj({ label: { type: 'string' }, provenance }, ['label', 'provenance']) },
+    outcomes: { type: 'array', maxItems: 4, items: obj({ label: { type: 'string' }, provenance }, ['label', 'provenance']) },
+    links: { type: 'array', maxItems: 20, items: obj({
       from: { type: 'string' }, to: { type: 'string' },
       direction: { type: 'string', enum: ['positive', 'negative', 'unknown'] }, provenance,
     }, ['from', 'to', 'direction', 'provenance']) },
@@ -91,7 +100,20 @@ export const BUILD_INSTRUCTIONS = [
   'For each option fill `interventions` with the factor levels it sets \u2014 record a level the brief states with provenance "explicit", and never guess one it does not give.',
   'EVERY OPTION MUST SAY WHAT IT DOES. An option with no `interventions` AND no `changes` is inert: it can never be compared with another option, whatever values are supplied later, and the whole decision becomes unanswerable. If the brief does not say what an option changes, still name the factors it ACTS ON in `changes` \u2014 that is a structural claim, not a numeric one. '
   + 'EVERY option must also list, in `changes`, the factors it acts on WITHOUT a stated level. An option that names no interventions and no changes is disconnected from the decision and cannot be analysed at all, so this is not optional bookkeeping.',
-  'Then widen: add the options, factors, risks, outcomes and causal mechanisms that materially improve strategic reasoning, including alternatives beyond the user’s initial frame.',
+  // ⛔ THE EXPLOSION CLAUSE, REPLACED. This previously read: "Then widen: add the
+  // options, factors, risks, outcomes and causal mechanisms that materially improve
+  // strategic reasoning, including alternatives beyond the user's initial frame."
+  // Turn one was INSTRUCTED to widen, and because two further rules below require
+  // every risk and factor to be wired through to the goal, each widened node also
+  // acquired a chain — which is how Paul's first turn reached 26 nodes / 57 edges
+  // from one sentence. The node count and the edge count had one root cause.
+  //
+  // Strategic additions are not abandoned; they move to `unknowns` and to later
+  // proposals, where the user can accept them one at a time.
+  'KEEP THE FIRST MODEL DECISION-CRITICAL, NOT COMPREHENSIVE. Include only what this decision cannot be reasoned about without: the goal, the options, the few factors that actually move the goal, and the risks that would change the answer. '
+  + 'Do NOT widen on this turn. Do not add speculative options, secondary factors, or risks and outcomes that are not decision-critical for this question. '
+  + 'Anything you judge material but that does not meet that bar belongs in `unknowns` as a question, NOT as a node — it can become a proposal later. '
+  + 'Aim for at most 12 nodes and 20 links in total. Fewer, correct, connected items beat a comprehensive map: an oversized first model is refused before it reaches the canvas.',
   'Mark provenance honestly on EVERY item: "explicit" only for what the user stated, "inferred" for what you read out of the brief, "ai_proposed" for anything you added beyond it.',
   'THE GOAL METRIC MUST BE THE TERMINAL NODE. Every option needs a causal path that ends at the goal metric you named in `goal.metric`. Use that EXACT label as the endpoint of the final link \u2014 do not invent a near-synonym outcome like "X Improvement" for a goal called "X change", because a separate synonym leaves the goal disconnected and the model cannot be analysed at all.',
   'EVERY RISK AND EVERY FACTOR MUST BE WIRED IN. A node with no link, or with links that dead-end before the goal, is not merely decorative \u2014 it stops the ENTIRE model being analysed. Give every risk a link to what it threatens, and every factor a chain of links that ends at the goal metric. Measured on a real model: 8 of 20 nodes were unreachable, all five risks among them, and the analysis refused outright.',
@@ -214,7 +236,79 @@ export async function buildModelFromBrief(
     return { ok: false, mutated: false, refusal: 'construction_failed', detail: String(err).slice(0, 200) };
   }
 
-  const admitted = admitCandidateModel(candidate, {});
+  let admitted = admitCandidateModel(candidate, {});
+
+  /**
+   * ⭐ THE COMPACT FIRST-MODEL GATE — one bounded retry, then an honest refusal.
+   *
+   * Measured on Paul's exact first turn: 26 nodes / 57 edges from one sentence.
+   * The size is judged on the ADMITTED graph, never the candidate, because
+   * admission is what decides which items become nodes at all — a cap read off
+   * the raw candidate would measure a different object from the one registered
+   * and would disagree with the canvas the user sees.
+   *
+   * ⛔ NOTHING HERE TRUNCATES. The gate returns counts, not a model (its verdict
+   * carries no array at all, pinned by its own spec), so "use the gate's output"
+   * cannot quietly become "persist the smaller graph". Oversize is answered by
+   * asking the model again under a tighter instruction, or by refusing out loud.
+   *
+   * ⭐⭐ AND THE CAP NEVER OVERRIDES THE USER. When the brief's OWN stated
+   * material alone exceeds the limit, the model is ADMITTED and the fact is
+   * reported: a user with thirteen options has thirteen options, and a size
+   * target that deleted one would be the wrong way round.
+   */
+  let size: ConstructionSizeVerdict = assessConstructionSize(admitted);
+  let sizeRetried = false;
+  if (!size.within && !size.user_material_exceeds_limit) {
+    sizeRetried = true;
+    try {
+      const retry = await callStructured({
+        model: budget.model,
+        // The delta is APPENDED, so every rule the first pass obeyed still holds —
+        // provenance, wiring, plausible_max, no invented numbers.
+        instructions: `${BUILD_INSTRUCTIONS} ${retryInstruction(size)}`,
+        input: brief,
+        max_output_tokens: budget.max_output_tokens,
+        reasoning_effort: budget.reasoning_effort,
+        schema: buildCandidateSchema(),
+      });
+      if (retry.text.length > 0) {
+        const retryCandidate = JSON.parse(retry.text) as CandidateModel;
+        const retryAdmitted = admitCandidateModel(retryCandidate, {});
+        const retrySize = assessConstructionSize(retryAdmitted);
+        // ⚠ ADOPT ONLY WHAT IS ACTUALLY SMALLER, on BOTH dimensions. A retry that
+        // trades 4 nodes for 11 links is not a compaction, and taking it on faith
+        // would let a second model call make the problem worse.
+        if (retrySize.nodes <= size.nodes && retrySize.edges <= size.edges) {
+          candidate = retryCandidate;
+          admitted = retryAdmitted;
+          size = retrySize;
+        }
+      }
+    } catch {
+      // A failed retry costs the retry, never the turn: the refusal below reports
+      // the FIRST model's real counts rather than inventing a reason.
+    }
+  }
+
+  if (!size.within && !size.user_material_exceeds_limit) {
+    return {
+      ok: false,
+      mutated: false,
+      refusal: 'model_too_large',
+      detail: size.detail,
+      nodes: size.nodes,
+      edges: size.edges,
+      limits: size.limits,
+      by_kind: size.by_kind,
+      // What was added beyond the brief — the honest shed target, reported so the
+      // refusal cannot read as "your decision was too complicated".
+      added_beyond_brief: size.sheddable_nodes,
+      from_your_brief: size.brief_stated_nodes,
+      retried: sizeRetried,
+    };
+  }
+
   /**
    * ⭐ THE USER'S STATED LIMITS TRAVEL WITH THE GRAPH.
    *
@@ -284,6 +378,14 @@ export async function buildModelFromBrief(
     ...(replayed ? { replayed: true } : {}),
     nodes: admitted.nodes.length,
     edges: admitted.edges.length,
+    // The compact verdict travels with the success, so a caller never has to
+    // re-derive it — and `size_retried` makes the second model call visible
+    // rather than hidden inside a latency number.
+    within_compact_limits: size.within,
+    size_retried: sizeRetried,
+    ...(size.user_material_exceeds_limit
+      ? { admitted_over_limit_because: 'your own stated options and facts exceed the compact limit' }
+      : {}),
     options: admitted.nodes.filter((n) => n.kind === 'option').length,
     // What the projection could not carry — the Agent is expected to say this.
     withheld: admitted.withheld.map((w) => ({ from: w.from, to: w.to, reason: w.reason })),
