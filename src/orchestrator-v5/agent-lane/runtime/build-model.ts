@@ -249,6 +249,36 @@ export async function findConstructionVersion(
   return null;
 }
 
+/**
+ * The retry's contract, with the user's OWN goal fixed as structured input
+ * (independent review of #1775, 5802902264 then 5803023774).
+ *
+ * MEASURED on served `785185b7` (2 of 12 hiring draws): the compact retry fixed the
+ * size and kept the user's options but reworded the goal ("delivery velocity" →
+ * "velocity"); the label-keyed identity check then discarded a valid model and the
+ * user got none. The repair is NOT to decide afterwards that two goals are
+ * equivalent — cardinality and shared words both proved unsafe (a different
+ * objective, or "defect rate" vs "defect escape rate", would pass). The retry is a
+ * COMPACTION: it may not choose a goal at all. Every goal field is pinned to the
+ * first model's value, so strict structured output must return that exact goal and
+ * the model links to it by its exact label; the unchanged identity check still
+ * refuses anything else.
+ */
+export function retrySchemaPinningGoal(goal: CandidateModel['goal']): Record<string, unknown> {
+  const schema = buildCandidateSchema();
+  const goalSchema = (schema['properties'] as Record<string, Record<string, unknown>>)['goal'];
+  if (goalSchema === undefined) return schema;
+  goalSchema['properties'] = {
+    metric: { type: 'string', enum: [goal.metric] },
+    operator: { type: 'string', enum: [goal.operator] },
+    value: { type: 'number', enum: [goal.value] },
+    unit: { type: 'string', enum: [goal.unit] },
+    horizon_months: goal.horizon_months === null ? { type: 'null' } : { type: 'integer', enum: [goal.horizon_months] },
+    provenance: { type: 'string', enum: [goal.provenance] },
+  };
+  return schema;
+}
+
 export async function buildModelFromBrief(
   scenarioId: string,
   brief: string,
@@ -314,7 +344,7 @@ export async function buildModelFromBrief(
         input: brief,
         max_output_tokens: budget.max_output_tokens,
         reasoning_effort: budget.reasoning_effort,
-        schema: buildCandidateSchema(),
+        schema: retrySchemaPinningGoal(candidate.goal),
       });
       if (retry.text.length > 0) {
         const retryCandidate = JSON.parse(retry.text) as CandidateModel;
