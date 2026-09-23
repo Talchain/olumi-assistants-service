@@ -157,7 +157,7 @@ describe('a compact build names what it left out', () => {
 
   it('RED: the questions the build parked are stated as what the model does not answer yet', () => {
     const n = built({ open_questions: ['Is the bottleneck coordination or capacity?', 'What does onboarding cost the team?'] });
-    expect(n.status).toBe('The model was saved as version 1. Questions this model does not answer yet: Is the bottleneck coordination or capacity; What does onboarding cost the team.');
+    expect(n.status).toBe('The model was saved as version 1. Questions this model does not answer yet: Is the bottleneck coordination or capacity? What does onboarding cost the team?');
   });
 
   it('CONTRAST: nothing left out → the save line alone', () => {
