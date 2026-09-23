@@ -176,6 +176,8 @@ export interface AdmittedModel {
   readonly goal_constraints: readonly AdmittedConstraint[];
   readonly loss: readonly RepairEntry[];
   readonly withheld: readonly { from: string; to: string; reason: string; detail: string }[];
+  /** Factors the model called controllable that no option changes — held as context (demoteUnreachedLevers). */
+  readonly treated_as_context?: readonly string[];
 }
 
 /** Shorten to the label budget at a word boundary, never mid-word. */
@@ -342,6 +344,51 @@ export function defaultFrameFor(largestMagnitude: number): number {
   const magnitude = Math.abs(largestMagnitude);
   if (!Number.isFinite(magnitude) || magnitude <= 1) return 1;
   return 10 ** Math.ceil(Math.log10(magnitude) + Number.EPSILON);
+}
+
+/**
+ * ⛔ A LEVER NO OPTION PULLS IS CONTEXT, NOT A LEVER (served 23 Sep, `c4a6cce`,
+ * canonical pricing brief). The builder marked "Pro feature release readiness"
+ * `controllable`, but no option changes it — so readiness refused the whole
+ * comparison (`Factor … is not connected to any option`, the sole blocker) even
+ * after the user adopted every starting value. For THIS decision a factor that
+ * no option reaches is held at its value while the options are compared: it is
+ * context. It is reclassified `external` — never given an invented option or a
+ * number — and the user is told, so they can say which option should change it.
+ *
+ * Pure over the admitted graph: an option reaches a factor through an edge
+ * (transitively) or through its `interventions`.
+ */
+export function demoteUnreachedLevers<N extends { id: string; kind?: string; label?: string; category?: string; interventions?: Record<string, unknown> }>(
+  nodes: readonly N[],
+  edges: readonly { from: string; to: string }[],
+): { nodes: N[]; demoted: string[] } {
+  const next = new Map<string, string[]>();
+  for (const e of edges) next.set(e.from, [...(next.get(e.from) ?? []), e.to]);
+  // ⛔ REACHED AND EXPANDED ARE SEPARATE (independent review of c222fc67): a
+  // target named by an option's `interventions` is a ROOT to expand, not merely a
+  // node to mark — pre-marking it skipped its downstream factors, so for
+  // option → A → B an intervention on A relabelled a reachable B as context.
+  const reached = new Set<string>();
+  const queue: string[] = [];
+  for (const n of nodes) {
+    if (n.kind !== 'option') continue;
+    queue.push(...Object.keys(n.interventions ?? {}), ...(next.get(n.id) ?? []));
+  }
+  while (queue.length > 0) {
+    const x = queue.pop()!;
+    if (reached.has(x)) continue;
+    reached.add(x);
+    queue.push(...(next.get(x) ?? []));
+  }
+  const demoted: string[] = [];
+  const out = nodes.map((n) => {
+    if (n.kind !== 'factor' || reached.has(n.id)) return n;
+    if (n.category === 'external' || n.category === 'observable') return n;
+    demoted.push(n.label ?? n.id);
+    return { ...n, category: 'external' };
+  });
+  return { nodes: out, demoted };
 }
 
 export function admitCandidateModel(
@@ -732,60 +779,95 @@ export function admitCandidateModel(
     return undefined;
   });
 
-  loss.push(...linkResult.loss, ...constraintResult.loss);
+  /**
+   * ⛔ ONE CONNECTION, ONE EDGE — an option's link to a factor it already acts on
+   * is the SAME connection, not a second one.
+   *
+   * MEASURED LIVE (23 Sep, Paul's hiring brief, gpt-5.6-terra): the drafter named
+   * each option's factors in `changes`/`interventions` AND restated them as
+   * `links`, so admission emitted the canonical structural edge AND a causal
+   * duplicate for the same option -> factor pair — 4 duplicates, 28 real links
+   * reported as 32, and the first model was refused as oversized. The duplicate
+   * is also wrong in kind: an option -> factor edge must carry the canonical
+   * structural values (`graph-validator.ts`, STRUCTURAL_EDGE_NOT_CANONICAL_ERROR),
+   * which the causal projection (0.5 / 0.125 / 0.8) does not.
+   *
+   * So the structural edge is kept and the duplicate is dropped, with the
+   * projection entries it generated, and the drop is recorded — nothing silent.
+   * A candidate option -> factor link with NO structural twin is untouched.
+   */
+  const topologyPairs = new Set(topologyEdges.map((e) => `${e.from}\u0000${e.to}`));
+  const optionIdSet = new Set(optionNodes.map((o) => o.id));
+  const duplicatePairs = new Set(
+    linkResult.edges
+      .filter((e) => optionIdSet.has(e.from) && topologyPairs.has(`${e.from}\u0000${e.to}`))
+      .map((e) => `${e.from}::${e.to}`),
+  );
+  /**
+   * ⛔ …AND THE DROP MUST NOT TAKE THE USER'S AUTHORSHIP WITH IT (Panel review
+   * 5793954535, B2). The live drafter restates 4 of 4 options this way, and an
+   * `explicit` restatement is the only carrier of `brief_extraction` on that
+   * connection. Dropping it emptied `brief_stated_keys.edges`, so #1710's identity
+   * check (`keepsEveryUserStatedIdentity`) had nothing to compare and a retry that
+   * moved the user's option onto a different factor was adopted silently. So the
+   * kept structural edge inherits the user's stamp — only a user stamp: an
+   * `ai_proposed` / `inferred` restatement confers nothing, and the edge keeps the
+   * canonical structural values, which is all the validator checks.
+   */
+  const USER_AUTHORED_EDGE_SOURCES = new Set(['brief_extraction', 'user_specified']);
+  for (const t of topologyEdges) {
+    if (!duplicatePairs.has(`${t.from}::${t.to}`)) continue;
+    const userStated = linkResult.edges.find(
+      (e) => e.from === t.from && e.to === t.to && USER_AUTHORED_EDGE_SOURCES.has(String(e.provenance?.source ?? '')),
+    );
+    if (userStated?.provenance !== undefined) t.provenance = { source: userStated.provenance.source };
+  }
+  const causalEdges = linkResult.edges.filter((e) => !duplicatePairs.has(`${e.from}::${e.to}`));
+  const causalLoss = linkResult.loss.filter((l) => {
+    const m = /^edges\[(.+?)\]\./.exec(String(l.field_path ?? ''));
+    return m === null || !duplicatePairs.has(m[1]!);
+  });
+  for (const pair of duplicatePairs) {
+    const [from, to] = pair.split('::');
+    const stated = linkResult.edges.find((e) => e.from === from && e.to === to);
+    loss.push({
+      field_path: `edges[${pair}]`,
+      before: stated?.effect_direction ?? null,
+      after: 'structural',
+      reason:
+        'This option already acts on this factor, so the link was the same connection stated twice. ' +
+        'It is kept once, as the structural option-to-factor edge; what the option sets the factor to ' +
+        'is carried by the option itself, not by the sign of this edge.',
+      severity: 'info',
+    } as RepairEntry);
+  }
+
+  loss.push(...causalLoss, ...constraintResult.loss);
 
   /**
-   * ⛔ AN ORPHANED GOAL MAKES THE WHOLE MODEL UNANALYSABLE, and it is invisible
-   * in every count. Measured twice on real briefs: a goal metric "Productivity
-   * change" while every causal chain terminated on an invented near-synonym
-   * outcome "Productivity Improvement" — 35 nodes, 40 edges, all healthy
-   * looking, and 0 of 6 options able to reach the goal.
+   * ⛔ AN ORPHANED GOAL IS NAMED, NEVER REPAIRED WITH A SIGN NOBODY STATED.
    *
-   * The id-level dedupe above only merges IDENTICAL labels, deliberately:
-   * merging "Productivity change" with "Productivity Improvement" by
-   * similarity would be guessing, and guessing is the defect this lane exists
-   * to avoid. So this does NOT rename or merge anything. It connects the
-   * dangling terminal outcomes INTO the goal and RECORDS that it did, as a
-   * projection the user is told about — an explicit, disclosed inference beats
-   * a model that silently cannot be analysed.
+   * Measured twice on real briefs: a goal metric "Productivity change" while every
+   * causal chain terminated on an invented near-synonym outcome "Productivity
+   * Improvement" — 35 nodes, 40 edges, all healthy looking, and 0 of 6 options
+   * able to reach the goal.
    *
-   * It fires only when the goal has no incoming edge at all. If the model
-   * connected the goal properly, nothing here runs.
+   * ⛔ A REPAIR USED TO LIVE HERE AND WAS REMOVED BY RULING. When nothing reached
+   * the goal it connected every terminal outcome to the goal as `positive`,
+   * `defaulted`, with NO provenance — and, because it never consulted
+   * `linkResult.withheld`, it did so even over an outcome -> goal link the drafter
+   * had explicitly stated as `unknown` (Panel review 5793954535, B1, probe P1:
+   * readiness `ready` while the server told the user the same question was still
+   * open). Release Control #63 5793252993: no default sign on a link to the goal;
+   * disclosure does not make an arbitrary sign sound; where direction is unknown,
+   * ASK. It is the same ruling that already forbids a factor -> goal repair.
+   *
+   * So an orphaned goal stays orphaned: the reachability pass below names every
+   * node that cannot reach it, readiness reports `NO_PATH_TO_GOAL`, the withheld
+   * link travels in `withheld`, and the construction contract (`build-model.ts`)
+   * is what makes the drafter state the link in the first place.
    */
-  const allEdges = [...topologyEdges, ...linkResult.edges];
-  const goalNode = nodes.find((n) => n.kind === 'goal');
-  const repaired: AdmittedEdge[] = [];
-  if (goalNode !== undefined && !allEdges.some((e) => e.to === goalNode.id)) {
-    const hasOutgoing = new Set(allEdges.map((e) => e.from));
-    const hasIncoming = new Set(allEdges.map((e) => e.to));
-    // Terminal outcomes: something feeds them, nothing leaves them. Those are
-    // where the model's own causal chains actually end.
-    const terminals = nodes.filter(
-      (n) => n.kind === 'outcome' && hasIncoming.has(n.id) && !hasOutgoing.has(n.id),
-    );
-    for (const t of terminals) {
-      repaired.push({
-        from: t.id,
-        to: goalNode.id,
-        effect_direction: 'positive',
-        strength: { mean: STRENGTH_DEFAULT_SIGNATURE.mean, std: STRENGTH_DEFAULT_SIGNATURE.std },
-        exists_probability: DEFAULT_EXISTS_PROBABILITY,
-        defaulted: true,
-      } as AdmittedEdge);
-      loss.push({
-        field_path: `edges[${t.id}->${goalNode.id}]`,
-        before: null,
-        after: 'connected',
-        reason:
-          `Nothing the model produced reached the goal "${goalNode.label}", so it could not be ` +
-          `analysed at all. "${t.label}" is where its causal chains actually end, so it has been ` +
-          'connected to the goal as an ASSUMPTION, with a placeholder strength. Neither the link ' +
-          'nor its strength came from you or from the brief — say so, and correct it if the two ' +
-          'are not the same thing.',
-        severity: 'warn',
-      } as RepairEntry);
-    }
-  }
+  const allEdges = [...topologyEdges, ...causalEdges];
 
   /**
    * ⭐ A NODE THAT CANNOT REACH THE GOAL BLOCKS THE WHOLE ANALYSIS.
@@ -808,8 +890,13 @@ export function admitCandidateModel(
    * 1. A RISK with no outgoing edge is connected to the goal, negative and
    *    `defaulted`. This is NOT a guess about which factor it threatens: in
    *    this taxonomy a risk is by definition something that threatens the
-   *    goal, so the link is entailed by the node's own kind. Same move the
-   *    terminal-outcome repair above already makes, and disclosed the same way.
+   *    goal, so the link is entailed by the node's own kind (whether that
+   *    entailment stands is Release Control's call — Panel N7, 5793954535).
+   *    ⛔ EXCEPT a risk whose link the drafter STATED with direction `unknown`:
+   *    that risk was not "never connected" — its direction was declined, and a
+   *    default `negative` would override the stated uncertainty (Panel review
+   *    5793954535, B1, probe P3; #63 5793252993: ASK instead of defaulting). It
+   *    stays unconnected, named below, and its withheld link is the question.
    * 2. Anything that STILL cannot reach the goal is withheld from the admitted
    *    graph and named in `loss`, because there is no non-guessing repair for
    *    it — and a model nobody can analyse is worse than a model that says
@@ -818,14 +905,16 @@ export function admitCandidateModel(
    * Measured effect of exactly this, on exactly that model: 17 of 20 nodes
    * retained (every risk kept), structural blockers 5 -> 0.
    */
-  const withRepairs = [...allEdges, ...repaired];
   const goalForReach = nodes.find((n) => n.kind === 'goal');
   const riskRepairs: AdmittedEdge[] = [];
-  let finalEdges = withRepairs;
+  let finalEdges = allEdges;
 
   if (goalForReach !== undefined) {
-    const hasOutgoingNow = new Set(withRepairs.map((e) => e.from));
-    for (const r of nodes.filter((n) => n.kind === 'risk' && !hasOutgoingNow.has(n.id))) {
+    const hasOutgoingNow = new Set(allEdges.map((e) => e.from));
+    // A risk whose own link was withheld as direction-unknown was answered
+    // "I cannot say which way" — not left unconnected.
+    const directionDeclined = new Set(linkResult.withheld.map((w) => w.from));
+    for (const r of nodes.filter((n) => n.kind === 'risk' && !hasOutgoingNow.has(n.id) && !directionDeclined.has(n.id))) {
       riskRepairs.push({
         from: r.id,
         to: goalForReach.id,
@@ -850,7 +939,7 @@ export function admitCandidateModel(
       } as RepairEntry);
     }
 
-    const edgesNow = [...withRepairs, ...riskRepairs];
+    const edgesNow = [...allEdges, ...riskRepairs];
     /**
      * ⛔ REPORTED, NOT ENFORCED — and that is a deliberate reversal.
      *
@@ -901,10 +990,22 @@ export function admitCandidateModel(
     finalEdges = edgesNow;
   }
 
+  const levers = demoteUnreachedLevers(nodes, finalEdges);
+  for (const label of levers.demoted) {
+    loss.push({
+      field_path: `nodes[${label}].category`,
+      before: 'controllable',
+      after: 'external',
+      reason: `No option in this decision changes "${label}", so it is held at its value as context while the options are compared, not treated as a lever. If one of the options should change it, say which and it can be connected.`,
+      severity: 'info',
+    } as RepairEntry);
+  }
+
   return {
-    nodes,
+    nodes: levers.nodes,
     inference_classes,
     edges: finalEdges,
+    ...(levers.demoted.length > 0 ? { treated_as_context: levers.demoted } : {}),
     goal_constraints: constraintResult.constraints,
     loss,
     // `withheld` is a list of LINKS by contract; a withheld NODE is reported

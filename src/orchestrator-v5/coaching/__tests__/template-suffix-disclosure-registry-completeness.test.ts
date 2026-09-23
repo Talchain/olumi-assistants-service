@@ -226,6 +226,11 @@ const SLOT_FAMILY: ReadonlyArray<readonly [string, string, 'registered' | 'exclu
   ['objectiveContradictionDisclosure', 'OBJECTIVE_CONTRADICTION_RE_SRC', 'excluded'],
   ['unsetOptionEffectDisclosure', 'UNSET_OPTION_EFFECT_DISCLOSURE_RE_SRC', 'registered'],
   ['participationDisclosure', 'ANALYSIS_PARTICIPATION_DISCLOSURE_RE_SRC', 'registered'],
+  // D-ask-1 (2.11) applied to CEE-INFERRED FACTOR values: the analysis says
+  // whose numbers it ran on. Registered, not excluded — it names no option and
+  // asserts no leader, so `template + tail` is a composition the handler both
+  // can and does emit (a run on inferred values may equally be withheld).
+  ['inferredValueDisclosure', 'INFERRED_VALUE_DISCLOSURE_RE_SRC', 'registered'],
   ['separabilityDisclosure', 'SEPARABILITY_DISCLOSURE_RE_SRC', 'registered'],
 ];
 

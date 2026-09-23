@@ -110,6 +110,69 @@ export function collectInterventionControlledFactorIds(
 }
 
 /**
+ * The `factor_id`s that EVERY option intervenes on — the INTERSECTION across
+ * options, where {@link collectInterventionControlledFactorIds} is the union.
+ *
+ * ⚠ A DIFFERENT QUESTION FROM THE UNION, DELIBERATELY (trap 21). "Does SOME
+ * option pull this lever?" decides whether a factor may be named a tunable
+ * driver. "Does EVERY option set it?" decides whether sweeping that factor's
+ * value can move the winner AT ALL: when every option overrides it, no option
+ * reads the swept value, so a flip row's "no flip" attests the model's shape,
+ * not how settled the result is. One option leaving it free makes the sweep a
+ * real test, so the union would over-fire here.
+ *
+ * Each option's own set is the union of its locations (the same three node
+ * shapes, plus `graph.options[]`), keyed by option id so the same option in
+ * `nodes[]` and `options[]` counts ONCE. No options ⇒ the empty set (nothing is
+ * withheld — the fail-safe direction here is today's behaviour).
+ */
+export function collectFactorIdsSetByEveryOption(graph: unknown): ReadonlySet<string> {
+  if (!isPlainObject(graph)) return new Set();
+
+  const perOption = new Map<string, Set<string>>();
+  // An option with no id cannot be matched to its twin, so it counts as its own.
+  const anonymous: Set<string>[] = [];
+  const setFor = (id: unknown): Set<string> => {
+    if (typeof id !== 'string' || id.trim().length === 0) {
+      const set = new Set<string>();
+      anonymous.push(set);
+      return set;
+    }
+    let set = perOption.get(id.trim());
+    if (set === undefined) {
+      set = new Set<string>();
+      perOption.set(id.trim(), set);
+    }
+    return set;
+  };
+  const adder = (set: Set<string>) => (factorId: string): void => {
+    const id = factorId.trim();
+    if (id.length > 0) set.add(id);
+  };
+
+  if (Array.isArray(graph.nodes)) {
+    for (const node of graph.nodes) {
+      if (!isPlainObject(node) || node.kind !== 'option') continue;
+      addNodeInterventionFactorIds(node, adder(setFor(node.id)));
+    }
+  }
+  if (Array.isArray(graph.options)) {
+    for (const option of graph.options) {
+      if (!isPlainObject(option)) continue;
+      const add = adder(setFor(option.id ?? option.option_id));
+      if (isPlainObject(option.interventions)) {
+        for (const fac of Object.keys(option.interventions)) add(fac);
+      }
+    }
+  }
+
+  const options = [...perOption.values(), ...anonymous];
+  if (options.length === 0) return new Set();
+  const [first, ...rest] = options;
+  return new Set([...first!].filter((factorId) => rest.every((set) => set.has(factorId))));
+}
+
+/**
  * Structural membership test: is this driver's factor controlled by an option
  * intervention? Authority is `factor_id` ONLY — never the label.
  */

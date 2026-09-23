@@ -211,6 +211,51 @@ describe('stampUserEditProvenance — the op-level stamp', () => {
     expect('elicited_from' in observed).toBe(false);
   });
 
+  // ⭐ The chat-edit twin of set_factor_value's fix (served witness 23 Sep:
+  // CEE stored `{ source: 'user_override', extractionType: 'inferred' }` and the
+  // UI card read the user's number as "est."). `canonicaliseValueOps` carries
+  // stored observed-state siblings forward, so without an explicit removal the
+  // producer's extraction marker rides the user's value into the store.
+  it("withdraws the producer's extractionType when the user writes the value", () => {
+    const currentGraph = {
+      nodes: [
+        {
+          id: 'fac_target',
+          observed_state: { value: 0.5, source: 'cee_inference', extractionType: 'inferred' },
+        },
+      ],
+    };
+    const original = valueOp({ value: { 'data/value': 0.3 } });
+    const canonical = canonicaliseValueOps([original], currentGraph).operations;
+    const [stamped] = stampUserEditProvenance(canonical, [original]);
+    const observed = (stamped!.value as Record<string, unknown>).observed_state as Record<
+      string,
+      unknown
+    >;
+    expect(observed.value).toBe(0.3);
+    expect(observed.source).toBe('user_override');
+    expect('extractionType' in observed).toBe(false);
+  });
+
+  it('CONTROL: a unit-only edit is not the user authoring the value — the extraction marker stays', () => {
+    const currentGraph = {
+      nodes: [
+        {
+          id: 'fac_target',
+          observed_state: { value: 0.5, unit: 'GBP', source: 'cee_inference', extractionType: 'inferred' },
+        },
+      ],
+    };
+    const original = valueOp({ value: { 'data/unit': 'USD' } });
+    const canonical = canonicaliseValueOps([original], currentGraph).operations;
+    const [stamped] = stampUserEditProvenance(canonical, [original]);
+    const observed = (stamped!.value as Record<string, unknown>).observed_state as Record<
+      string,
+      unknown
+    > | undefined;
+    if (observed !== undefined) expect(observed.extractionType).toBe('inferred');
+  });
+
   it('does NOT stamp a value-less observed_state write (unit-only edits are not the pill claim)', () => {
     const op = valueOp({ value: { observed_state: { unit: '%' } } });
     const [out] = stampUserEditProvenance([op]);

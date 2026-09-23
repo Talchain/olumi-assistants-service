@@ -559,6 +559,14 @@ export function stampUserEditProvenance(
     // old participant/evidence citation survives beside `user_override`.
     // Absence is the shared contract's meaning for "not panel-elicited".
     delete stampedObserved.elicited_from;
+    // The same carry-forward brings the PRODUCER's `extractionType` (how the
+    // pipeline read the brief) along beside `user_override`, and the UI's est.
+    // predicate reads it: a value the user just set rendered as "filled in for
+    // you" after reload (served witness, 23 Sep). Withdrawn, not re-authored —
+    // see set-factor-value.ts, which clears it for the same reason.
+    // `update_node` replaces `observed_state` wholesale (patch-applier.ts), so
+    // the removal reaches the store.
+    delete stampedObserved.extractionType;
     if (writesValue) userValueTargets.add(op.path);
     return {
       ...op,
