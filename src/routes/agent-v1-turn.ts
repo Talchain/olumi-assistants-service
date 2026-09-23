@@ -444,9 +444,17 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
  * and the message itself (trimmed). Stored as the turn row's `request_hash`, so
  * an exact retry replays and a reused id carrying a different message refuses.
  */
-export function agentTurnRequestHash(scenarioId: string, userId: string | null, message: string): string {
+export function agentTurnRequestHash(scenarioId: string, userId: string | null, message: string, operation?: string): string {
+  /**
+   * ⛔ A TYPED OPERATION IS PART OF WHAT WAS ASKED (independent review of #1782,
+   * 5804375960). Two approval chips carry the SAME words ("Yes, use those.") for
+   * DIFFERENT proposals, so a hash of the words alone let a reused turn_id replay
+   * approval A's answer for a request to approve B. The operation is bound only when
+   * present, so an ordinary message hashes exactly as before and its retries still
+   * replay.
+   */
   const digest = createHash('sha256')
-    .update(JSON.stringify({ v: 1, scenario_id: scenarioId, subject: userId, message: message.trim() }))
+    .update(JSON.stringify({ v: 1, scenario_id: scenarioId, subject: userId, message: message.trim(), ...(operation !== undefined ? { operation } : {}) }))
     .digest('hex');
   return `agent_turn:${digest}`;
 }
@@ -768,7 +776,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       typeof req.headers.authorization === 'string' ? req.headers.authorization : undefined,
     );
 
-    const requestHash = agentTurnRequestHash(scenarioId, userId, message);
+    const approvedProposal = typedApprovalOf(body);
+    const requestHash = agentTurnRequestHash(scenarioId, userId, message, approvedProposal !== undefined ? `approve:${approvedProposal}` : undefined);
     /** The response a replay returns: the ORIGINAL words, on today's state, with no model call. */
     const replayed = async (prior: CommittedTurnRecord) => {
       const composedReplay = composeDirectAnswerResponse({
@@ -919,7 +928,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * status the user reads is composed from the result (`write-outcome`). Zero model
      * calls, no implicit analysis. Words alone never take this path.
      */
-    const approvedProposal = typedApprovalOf(body);
     let fastPath: 'approve' | 'first_brief' | undefined;
     let result: AgentTurnResult | undefined;
     if (approvedProposal !== undefined) {
@@ -928,9 +936,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         'authorise_change', JSON.stringify({ proposal_id: approvedProposal }),
         { scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id }, capabilities, mode,
       );
-      // A proposal this process no longer holds (a deploy, an eviction) is not the
-      // user's doing: the Agent, which can offer it again, takes the turn instead.
-      if (applied.refusal !== 'unknown_proposal') {
+      /**
+       * ⛔ THE TYPED IDENTITY STAYS AUTHORITATIVE, EVEN WHEN THE PROPOSAL IS GONE
+       * (independent review of #1782, 5804375960). Handing a click that consented to A
+       * to the Agent as its generic words let the Agent authorise whichever proposal was
+       * still outstanding (B), and run an analysis. A missing proposal (a deploy, an
+       * eviction) is answered honestly here: nothing written, no model call, no
+       * analysis; the user can ask for a fresh proposal and approve THAT.
+       */
+      {
         fastPath = 'approve';
         const call = {
           name: 'authorise_change', ok: applied.ok === true, mutated: applied.mutated === true, proposal_id: approvedProposal,

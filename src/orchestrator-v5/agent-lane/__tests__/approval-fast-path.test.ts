@@ -15,10 +15,15 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 
 const SCENARIO = '6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b';
+/** Records committed rows by turn_id, so the claim/replay path is the REAL one. */
+const rows = new Map<string, { id: string; request_hash: string; assistant_message: string | null; user_message: string | null; llm_calls_used: number }>();
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
-  readCommittedTurn: vi.fn(async () => null),
-  append: vi.fn(async () => ({ id: 'row-1' })),
+  readCommittedTurn: vi.fn(async (_sid: string, turnId: string) => rows.get(turnId) ?? null),
+  append: vi.fn(async (w: { turn_id: string; request_hash: string; assistantMessage?: string; userMessage?: string; llm_calls_used?: number }) => {
+    if (!rows.has(w.turn_id)) rows.set(w.turn_id, { id: `row-${rows.size + 1}`, request_hash: w.request_hash, assistant_message: w.assistantMessage ?? null, user_message: w.userMessage ?? null, llm_calls_used: w.llm_calls_used ?? 0 });
+    return { id: rows.get(w.turn_id)!.id };
+  }),
 };
 vi.mock('../../session/index.js', () => ({ getSessionStore: () => store }));
 vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {
@@ -29,15 +34,22 @@ vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {
 describe('fast path 2: a typed approval chip applies its exact proposal with zero model calls', () => {
   let app: FastifyInstance;
   let modelCalls = 0;
+  let proposeNext = true;
+  let proposals = 0;
+  const modelCallsReset = () => { proposeNext = true; };
   let edges: { from: string; to: string }[] = [];
   const commits: unknown[] = [];
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async () => {
       modelCalls += 1;
-      if (modelCalls === 1) {
+      if (proposeNext) {
+        proposeNext = false;
+        proposals += 1;
+        // Each proposal is a DIFFERENT link, so the second is a genuinely distinct B.
+        const from = proposals === 1 ? 'Team size' : 'Morale';
         return new Response(JSON.stringify({ output: [{
-          type: 'function_call', name: 'propose_model_change', call_id: 'c1',
-          arguments: JSON.stringify({ from_label: 'Team size', to_label: 'Velocity', direction: 'positive', rationale: 'More people ship more.' }),
+          type: 'function_call', name: 'propose_model_change', call_id: `c${proposals}`,
+          arguments: JSON.stringify({ from_label: from, to_label: 'Velocity', direction: 'positive', rationale: 'It moves velocity.' }),
         }] }), { status: 200 });
       }
       return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'This would connect Team size to Velocity. Approve it if that is right.' }] }] }), { status: 200 });
@@ -48,7 +60,7 @@ describe('fast path 2: a typed approval chip applies its exact proposal with zer
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     app = Fastify({ logger: false });
     app.post('/assist/v1/scenarios/:id/graph', async () => ({
-      graph: { nodes: [{ id: 'f1', kind: 'factor', label: 'Team size' }, { id: 'o1', kind: 'outcome', label: 'Velocity' }], edges },
+      graph: { nodes: [{ id: 'f1', kind: 'factor', label: 'Team size' }, { id: 'f2', kind: 'factor', label: 'Morale' }, { id: 'o1', kind: 'outcome', label: 'Velocity' }], edges },
       graph_hash: `h${edges.length}`,
     }));
     app.post('/orchestrate/v2/turn', async (req) => {
@@ -92,14 +104,38 @@ describe('fast path 2: a typed approval chip applies its exact proposal with zer
     expect((r.json() as { _diagnostic_trace: { fast_path?: string } })._diagnostic_trace.fast_path).toBeUndefined();
   });
 
-  it('a typed chip for a proposal this process no longer holds (a deploy) hands the turn to the Agent, never fails it', async () => {
+  it('CONTROL (Codex 1): the chip names A, A is gone, B is outstanding: no write to B, no model call, no analysis', async () => {
+    // Make B outstanding: a fresh proposal the model offers now.
+    modelCallsReset();
+    const tb = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: 'Should team size drive velocity?' } });
+    const bId = (tb.json() as { _agent: { tool_calls: { name: string; proposal_id?: string }[] } })._agent.tool_calls.find((c) => c.name === 'propose_model_change')?.proposal_id;
+    expect(bId, 'the control: B really is outstanding').toMatch(/^prop_/);
     const before = modelCalls; const commitsBefore = commits.length;
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
       kind: 'message', scenario_id: SCENARIO, message: 'Yes, use those.', source: 'chip', chip: { id: 'agent-approve-proposal:prop_0123456789abcdef0123456789abcdef' },
     } });
     expect(r.statusCode).toBe(200);
-    expect(modelCalls - before, 'the Agent took the turn').toBeGreaterThan(0);
-    expect((r.json() as { _diagnostic_trace: { fast_path?: string } })._diagnostic_trace.fast_path).toBeUndefined();
-    expect(commits.length, 'nothing was applied').toBe(commitsBefore);
+    const b = r.json() as { assistant_text: string; _agent: { tool_calls: { name: string; ok: boolean; refusal?: string }[] }; _provider_calls: unknown[]; _diagnostic_trace: { fast_path?: string } };
+    expect(modelCalls - before, 'no model call').toBe(0);
+    expect(b._provider_calls).toEqual([]);
+    expect(commits.length, 'B was NOT applied').toBe(commitsBefore);
+    expect(b._agent.tool_calls).toEqual([expect.objectContaining({ name: 'authorise_change', ok: false, refusal: 'unknown_proposal' })]);
+    expect(b._diagnostic_trace.fast_path).toBe('approve');
+    expect(b.assistant_text).toMatch(/no longer available, so nothing was changed/);
+  });
+
+  it('CONTROL (Codex 2): one turn_id + the same words for A then B is refused as a different request; the exact A retry replays', async () => {
+    const turnId = '11111111-2222-4333-8444-555555555555';
+    const send = (chipId: string) => app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'message', scenario_id: SCENARIO, turn_id: turnId, message: 'Yes, use those.', source: 'chip', chip: { id: chipId },
+    } });
+    const a = await send('agent-approve-proposal:prop_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+    expect(a.statusCode).toBe(200);
+    const retry = await send('agent-approve-proposal:prop_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+    expect(retry.statusCode, 'the exact A retry replays').toBe(200);
+    expect(retry.json().assistant_text).toBe(a.json().assistant_text);
+    const b = await send('agent-approve-proposal:prop_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
+    expect(b.statusCode, 'B under A\u2019s turn_id is a DIFFERENT request').toBe(409);
+    expect(b.json().error).toBe('TURN_ID_REUSED');
   });
 });
