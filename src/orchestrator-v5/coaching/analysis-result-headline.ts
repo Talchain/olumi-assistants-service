@@ -2419,12 +2419,24 @@ export const TEMPLATE_SUFFIX_DISCLOSURE_GRAMMARS: readonly TemplateSuffixDisclos
   // `computeHeadline` returned `text: null`), so admitting it there would admit
   // a sentence the handler can never emit.
   { name: 'SEPARABILITY_DISCLOSURE_RE_SRC', source: SEPARABILITY_DISCLOSURE_RE_SRC },
-  // ⭐ REGISTERED, NOT EXCLUDED, by the same test the entries above state: does
-  // the tail make a claim the withhold just denied? This one says only how the
-  // product READ THE GOAL'S WORDING. It names no option, asserts no ranking and
-  // implies no leader, so `template + tail` is a composition the handler can
-  // emit — and a withheld run is a turn on which the person most needs to know
-  // that an inference about their objective was in play.
+  // ⭐ REGISTERED, NOT EXCLUDED. The question is: does the tail make a claim the
+  // withhold just denied? This one says only how the product READ THE GOAL'S
+  // WORDING. It names no option, asserts no ranking and implies no leader, so
+  // `template + tail` is a composition the handler can emit — and a withheld run
+  // is a turn on which the person most needs to know that an inference about
+  // their objective was in play.
+  //
+  // ⛔ THAT SENTENCE USED TO CITE "the same test the entries above state", AND
+  // THAT WAS WRONG. `template-suffix-disclosure-registry-completeness.test.ts`
+  // checks registration BOOKKEEPING — identity binding, append order, no orphans
+  // — and nothing semantic. Measured: mutating the copy to "…so the leading
+  // option is the one with the lowest result" left that suite GREEN 18/18 while
+  // naming exactly what a withhold denies.
+  //
+  // The property is now enforced in `__tests__/goal-direction-disclosure.test.ts`
+  // against the estate's own authority, `textAssertsLeadingOption`
+  // (`compose/leading-option-egress-guard.ts`), with a contrast control proving
+  // the probe can see a leader claim. That mutant is now RED.
   { name: 'GOAL_DIRECTION_DISCLOSURE_RE_SRC', source: GOAL_DIRECTION_DISCLOSURE_RE_SRC },
 ];
 

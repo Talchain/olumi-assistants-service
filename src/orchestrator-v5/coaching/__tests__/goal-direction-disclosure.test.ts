@@ -120,3 +120,41 @@ describe('registration — the three pieces of plumbing that must all be present
     expect(re.test(composed)).toBe(true);
   });
 });
+
+/**
+ * ⛔⛔ THE GUARD THE REGISTRATION COMMENT CITED DOES NOT CHECK THIS.
+ *
+ * `analysis-result-headline.ts` registers this grammar in
+ * `TEMPLATE_SUFFIX_DISCLOSURE_GRAMMARS` with the reasoning "does the tail make a
+ * claim the withhold just denied? … It names no option, asserts no ranking and
+ * implies no leader". Registration is what lets the suffix ride a **withheld**
+ * run, so that sentence is load-bearing.
+ *
+ * It was not enforced. I mutated the copy to read "…so the leading option is the
+ * one with the lowest result" — naming a leader, exactly what a withhold denies —
+ * and `template-suffix-disclosure-registry-completeness.test.ts` stayed GREEN
+ * 18/18. That suite checks registration BOOKKEEPING (identity binding, append
+ * order, no orphans), never the semantic property.
+ *
+ * So the property is bound here, against the estate's OWN leader-claim authority
+ * (`compose/leading-option-egress-guard.ts`) rather than a word list of my own —
+ * a hand-written predicate over prose is the hazard this lane has measured twice.
+ */
+describe('the disclosure may ride a WITHHELD run, so it must assert no leader', () => {
+  it('the shipped copy does not assert a leading option', async () => {
+    const { textAssertsLeadingOption } = await import('../../compose/leading-option-egress-guard.js');
+    const shipped = buildGoalDirectionDisclosure('minimise');
+    expect(shipped, 'precondition: there is copy to judge').not.toBe('');
+    expect(textAssertsLeadingOption(shipped)).toBe(false);
+  });
+
+  it('CONTRAST: the guard DOES catch a leader-claiming tail (so the assertion is not vacuous)', async () => {
+    const { textAssertsLeadingOption } = await import('../../compose/leading-option-egress-guard.js');
+    expect(
+      textAssertsLeadingOption(
+        ' Your goal reads as a quantity to reduce, so the leading option is the one with the lowest result.',
+      ),
+      'if this is false the probe cannot see a leader claim and the test above proves nothing',
+    ).toBe(true);
+  });
+});
