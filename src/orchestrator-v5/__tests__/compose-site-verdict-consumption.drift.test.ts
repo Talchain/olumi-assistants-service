@@ -384,6 +384,11 @@ interface RegisteredSite {
 }
 
 const TURN_EXECUTOR_SITES: Readonly<Record<string, RegisteredSite>> = {
+  // ── UNBLOCK-ANALYSIS PRE-ROUTE ──────────────────────────────────────────
+  'unblockAnswer.assistant_text': {
+    stance: 'structural',
+    why: 'Answers "what is stopping my analysis". Built by buildUnblockAnalysisAnswer from analysisReadyForTurn -- the ADMISSION payload, not an analysis RESULT -- and it quotes each readiness issue\'s own `message` verbatim rather than forming a second opinion. It names no option, makes no ranking or comparative claim, and reads no leader: the only option identity it can surface is one the readiness issue itself already named as blocking. It also states plainly that nothing has been changed, so it cannot imply a mutation either. Verified by its own suite, which asserts the text never matches /I (updated|adjusted|applied|set)/ and never claims readiness on a payload whose status is not `ready`.',
+  },
   // ── THE GATED SITE — this PR ────────────────────────────────────────────
   confirmationForCompose: {
     stance: 'gated',
@@ -1207,7 +1212,7 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // regex and in scope here.
     // Expired-constraint renewal adds the explicit assistant_text: expiryText
     // site; the old regex keys it too, so the comparison includes that site.
-    expect(compared, 'the re-key comparison compared nothing').toBe(45);
+    expect(compared, 'the re-key comparison compared nothing').toBe(46);
   });
 
   it('THE DOMAIN IS DERIVED: scanned ∪ unscanned == every compose file in src/', () => {
@@ -1438,8 +1443,8 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // deriving the domain rather than listing it, once more.
     // Expired-constraint renewal adds one structural site and one distinct key
     // in the already-scanned turn-executor.ts; no existing site is reclassified.
-    expect(sites.length, 'total compose SITES across every scanned file').toBe(51);
-    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(47);
+    expect(sites.length, 'total compose SITES across every scanned file').toBe(52);
+    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(48);
     expect(Object.keys(COMPOSE_SITE_REGISTER).sort()).toEqual([
       'compose/configure-option-clarify-response.ts',
       'compose/duplicate-option-label-response.ts',
