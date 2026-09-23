@@ -1,6 +1,6 @@
 # Morning brief — 23 Sep 2026, overnight session
 
-Written for a manual test first thing. **Served build: `c94208cbf000c199fee34922a483ad277d7d63be`, live 03:02:43Z.** Five deploys overnight: `bdad785a` (#1713) → `bf86ce4a` (#1691) → `66b810dd` (#1705) → `da14f03b` (#1707) → `c94208cb` (#1708).
+Written for a manual test first thing. **Do not trust any build SHA in this file — derive it with the commands in the box below.** Nine deploys landed overnight and the last of them is later than this sentence.
 
 ---
 
