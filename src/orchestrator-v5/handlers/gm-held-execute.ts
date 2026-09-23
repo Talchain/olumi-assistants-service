@@ -208,6 +208,26 @@ export interface GmReadinessOption {
   readonly option_id?: string;
   readonly label?: string;
   readonly status?: string;
+  /**
+   * The option's effect values, as the canonical readiness projection carries
+   * them. Optional because the narrow view above predates it; absence is read
+   * as "we cannot prove this option has any", which preserves the prior
+   * behaviour exactly.
+   */
+  readonly interventions?: Readonly<Record<string, unknown>>;
+}
+
+/**
+ * Can we PROVE this option already carries effect values?
+ *
+ * Absence of the field is NOT proof of absence of values — it means the
+ * projection did not carry them — so this answers false there and the caller
+ * behaves exactly as it did before.
+ */
+function provablyHasEffectValues(option: GmReadinessOption): boolean {
+  const iv = option.interventions;
+  if (iv === null || typeof iv !== 'object') return false;
+  return Object.keys(iv).length > 0;
 }
 
 /**
@@ -230,6 +250,27 @@ export function deriveUnconfiguredOptionLabels(
   if (!readiness) return [];
   return readiness.options
     .filter((o) => o.status !== 'ready')
+    // ⛔ THE SENTENCE THIS FEEDS CLAIMS A SPECIFIC FACT, SO THE PREDICATE MUST
+    // ESTABLISH THAT FACT. `buildUnconfiguredOptionsNotice` says the option
+    // "does not have effect values yet" — but `status !== 'ready'` has several
+    // causes and only one of them is that. `option-intervention-write-guard.ts`
+    // already names this exact sentence as a lie when the option carries a
+    // value, and carries a whole verdict (`not_honoured_no_copy`) to avoid it.
+    //
+    // ⛔ MEASURED IN A USER SESSION (deployed staging, 23 Sep, scenario
+    // `399c2814`, 23:38:00). "Two Developers" was `needs_user_mapping` because
+    // ONE EDGE lacked a mechanism — readiness named it exactly:
+    // `OPTION_NEEDS_MAPPING`, "How does Two Developers change Coordination
+    // Overhead Risk?". It already carried effect values on two factors, and the
+    // product had said so itself twenty minutes earlier. The notice told the
+    // user it had none and to "configure the Two Developers option"; he did,
+    // twice, and analysis stayed blocked on the edge nobody named. That is the
+    // trap-19 shape: a claim bound to a predicate another cause satisfies.
+    //
+    // Absence of `interventions` is NOT proof of absence — the notice still
+    // fires there, byte-identical to before. This only withholds a claim that
+    // can be PROVEN false.
+    .filter((o) => !provablyHasEffectValues(o))
     .map((o) => (typeof o.label === 'string' ? o.label.trim() : ''))
     .filter((l) => l.length > 0 && !/^(?:opt|fac|out|risk|goal|dec)_[a-z0-9_]+$/i.test(l));
 }
