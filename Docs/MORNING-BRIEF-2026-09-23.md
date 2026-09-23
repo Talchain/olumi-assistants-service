@@ -99,6 +99,36 @@ The estate's own staged-frame measurements (`cee2-live-latency.md`, 3 runs, per 
 critical path.** Which relocates the lever: **the thing to attack is `parse` (~23s, one o4-mini
 call), because that is what `GRAPH_READY` actually waits for.** Coaching is not on it.
 
+### ⭐ And the 35.8s above is STALE — derived from current data, first graph is ~23s
+
+Those staged-frame figures are the estate's, but they are **July-era**: the same comment dates the
+probe ("the 28 Jul live probe measured at ~33 s of a ~53 s draft") and `cee2-live-latency.md` is
+3 runs. I can derive the current number from my own n=1,200, because the stages before the
+`GRAPH_READY` emit are enumerated in `index.ts`:
+
+| stage (in order, all BEFORE the emit at :1371) | p50 |
+|---|---|
+| Stage 1 Parse (:968) | **23,178ms** |
+| Stage 2 Normalise (:984) | 2ms |
+| Stage 3 Enrich (:1028) | 87ms |
+| Stage 4 Repair | 109ms |
+| **sum → time-to-first-graph** | **≈ 23.4s** |
+
+**So first graph is ~23s today, not ~36s** — and `GRAPH_READY ≈ parse` almost exactly, because
+everything else on the path totals **~200ms**.
+
+⭐ **That makes the lever a single number: the draft model call.** `parse_llm_ms` is p50 **21,224ms**
+and it is **the provider's own reported latency** (`index.ts:942` — `timings.parse_llm_ms =
+ctx.llmMeta.provider_latency_ms`), not a wall-clock measurement that might be hiding our own work.
+**91% of time-to-first-graph is one o4-mini call, and ~200ms of it is ours.** Nothing in CEE's
+pipeline, tool layer or request assembly can move it — only the call itself: model choice, output
+size, or streaming the graph as it generates.
+
+⚠ I have NOT re-measured the frames directly — `GRAPH_READY` is an SSE frame, not a log event, so it
+does not appear in the log timeline I used. The ~23.4s is a **sum of measured stages on the
+enumerated path**, which is why I am giving both it and the estate's older 35.8s rather than
+replacing one with the other.
+
 ⚠ Note `GRAPH_READY` is explicitly **provisional** — `assist.v1.draft-graph-staged.ts:51` says the
 pipeline can still fail or degrade after it, and the client is required to discard it and render the
 terminal payload in named cases. So "you see a graph at 36s" is not "the turn succeeded at 36s".
