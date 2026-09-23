@@ -246,6 +246,8 @@ const anthropicFetch: typeof globalThis.fetch = (input, init) => {
     dispatcher: anthropicDispatcher,
   }) as unknown as Promise<Response>;
 };
+/** Test seam: the transport ALONE, so its own guard is pinned (review of #1749, finding 1). */
+export const anthropicFetchForTests = anthropicFetch;
 
 // Lazy initialization to allow testing without API key.
 // Tracks the key the client was created with so we can detect rotation.
