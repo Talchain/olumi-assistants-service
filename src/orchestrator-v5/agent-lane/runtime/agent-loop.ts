@@ -93,6 +93,13 @@ export interface TurnTiming {
   readonly tool_ms: number;
   /** total - provider - tool, floored at 0. Never negative. */
   readonly overhead_ms: number;
+  /**
+   * Provider time spent INSIDE a tool, already counted in `provider_ms` and
+   * already removed from `tool_ms`. Surfaced separately because it is the
+   * difference between "the model is slow" and "our own tool is slow", and
+   * those lead a reader somewhere different.
+   */
+  readonly tool_provider_ms: number;
   readonly provider_calls: number;
   readonly tool_calls: number;
   readonly hops: number;
@@ -154,6 +161,7 @@ export async function runAgentTurn(
   const startedAt = now();
   let providerMs = 0;
   let toolMs = 0;
+  let toolProviderMs = 0;
   let providerCalls = 0;
   let toolCallCount = 0;
   const timingAt = (hopsTaken: number): TurnTiming => {
@@ -162,6 +170,7 @@ export async function runAgentTurn(
       total_ms: total,
       provider_ms: providerMs,
       tool_ms: toolMs,
+      tool_provider_ms: toolProviderMs,
       overhead_ms: Math.max(0, total - providerMs - toolMs),
       provider_calls: providerCalls,
       tool_calls: toolCallCount,
@@ -235,7 +244,36 @@ export async function runAgentTurn(
       const result: ToolResult = await dispatchTool(
         String(call.name), String(call.arguments ?? '{}'), input.ctx, caps, mode,
       );
-      toolMs += Math.max(0, now() - toolStartedAt);
+      // ⛔ A TOOL'S OWN PROVIDER CALL IS NOT OVERHEAD.
+      //
+      // `build_model_from_brief` is dispatched as a tool and makes its own
+      // `callStructured` call inside — the most expensive call in the product
+      // (banked evidence: "in 838 / out 3404 incl. 2070 reasoning, 54.4 s").
+      // Counted naively, that ~54s landed in `tool_ms` and was reported as
+      // in-process overhead, which is exactly the misattribution this split
+      // exists to prevent: it would send a reader after our own code when the
+      // time is the model's.
+      //
+      // A tool may report `provider_ms` (and optionally `provider_calls`) on
+      // its result. Absent the field nothing changes, so no other lane has to
+      // move for this to become correct once they opt in.
+      const toolWallMs = Math.max(0, now() - toolStartedAt);
+      const claimed = (result as { provider_ms?: unknown }).provider_ms;
+      // ⚠ CLAMPED TO THE TOOL'S ACTUAL WALL TIME. A buggy or hostile tool
+      // reporting more than it took must not drive `tool_ms` negative nor
+      // inflate `provider_ms` past the clock. Non-numeric is ignored, never
+      // coerced — a string would otherwise become NaN and poison every figure.
+      const attributed =
+        typeof claimed === 'number' && Number.isFinite(claimed) && claimed > 0
+          ? Math.min(claimed, toolWallMs)
+          : 0;
+      toolProviderMs += attributed;
+      providerMs += attributed;
+      toolMs += toolWallMs - attributed;
+      const claimedCalls = (result as { provider_calls?: unknown }).provider_calls;
+      if (typeof claimedCalls === 'number' && Number.isFinite(claimedCalls) && claimedCalls > 0) {
+        providerCalls += Math.floor(claimedCalls);
+      }
       if (result.mutated) mutated = true;
       toolCalls.push({
         name: String(call.name),

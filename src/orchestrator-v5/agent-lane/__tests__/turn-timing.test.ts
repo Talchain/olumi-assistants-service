@@ -105,3 +105,82 @@ describe('turn timing — provider time separated from in-process overhead', () 
     expect(r.timing.total_ms).toBeGreaterThanOrEqual(0);
   });
 });
+
+/**
+ * ⛔ A TOOL THAT MAKES ITS OWN PROVIDER CALL WAS BEING COUNTED AS OVERHEAD.
+ *
+ * `build_model_from_brief` is dispatched as a TOOL, and inside it
+ * `build-model.ts:117` makes its own `callStructured` provider call — the
+ * single most expensive call in the product. Its banked budget evidence reads
+ * "in 838 / out 3404 incl. 2070 reasoning, 54.4 s".
+ *
+ * So the ~54s construction call landed in `tool_ms`, i.e. was reported as
+ * in-process overhead. That is precisely the misattribution this split exists
+ * to prevent: a latency diagnostic that files the biggest provider call in the
+ * system under "overhead" would send whoever reads it after the wrong thing.
+ *
+ * A tool may now report `provider_ms` (and optionally `provider_calls`) on its
+ * result, and the loop RECLASSIFIES that time out of `tool_ms` into
+ * `provider_ms`. Absent the field nothing changes, so no other lane has to move
+ * for this to be correct once they opt in.
+ */
+describe('turn timing — provider time INSIDE a tool is not overhead', () => {
+  const ctx2 = { scenario_id: '11111111-1111-1111-1111-111111111111', authenticated_user_id: 'u', request_id: 'r' };
+  const base2 = { ctx: ctx2, history: [], message: 'hi', instructions: 'go', maxOutputTokens: 256 };
+
+  /** Model asks for the tool once, then answers. */
+  function toolThenAnswer(toolResult: Record<string, unknown>) {
+    let n = 0;
+    const model = async () => {
+      n += 1;
+      if (n === 1) {
+        return { output: [{ type: 'function_call', name: 'build_model_from_brief', arguments: '{"brief":"b"}', call_id: 'c1' }] } as never;
+      }
+      return { output: [{ type: 'message', content: [{ type: 'output_text', text: 'ok' }] }] } as never;
+    };
+    const caps = { buildModelFromBrief: async () => toolResult } as never;
+    return { model: model as never, caps };
+  }
+
+  it('reclassifies a tool-reported provider_ms out of tool_ms', async () => {
+    const { model, caps } = toolThenAnswer({ ok: true, mutated: true, provider_ms: 54_400 });
+    // reads: start, pStart, pEnd, tStart, tEnd, pStart2, pEnd2, timingAt
+    // gaps:        0,  1_000,    0, 56_000,    0,   1_000,      0
+    const r = await runAgentTurn({ ...base2, now: scriptedClock([0, 1_000, 0, 56_000, 0, 1_000, 0]) }, caps, model);
+    expect(r.timing.provider_ms).toBeGreaterThanOrEqual(54_400);
+    // the tool wall time minus its provider time is what remains as tool time
+    expect(r.timing.tool_ms).toBe(56_000 - 54_400);
+    expect(r.timing.tool_provider_ms).toBe(54_400);
+  });
+
+  it('counts the tool-internal provider call', async () => {
+    const { model, caps } = toolThenAnswer({ ok: true, mutated: true, provider_ms: 5_000, provider_calls: 1 });
+    const r = await runAgentTurn({ ...base2, now: scriptedClock([0, 1_000, 0, 6_000, 0, 1_000, 0]) }, caps, model);
+    // 2 loop calls + 1 reported by the tool
+    expect(r.timing.provider_calls).toBe(3);
+  });
+
+  it('CONTRAST CONTROL — a tool that reports nothing behaves exactly as before', async () => {
+    const { model, caps } = toolThenAnswer({ ok: true, mutated: true });
+    const r = await runAgentTurn({ ...base2, now: scriptedClock([0, 1_000, 0, 56_000, 0, 1_000, 0]) }, caps, model);
+    expect(r.timing.tool_ms).toBe(56_000);
+    expect(r.timing.tool_provider_ms).toBe(0);
+    expect(r.timing.provider_calls).toBe(2);
+  });
+
+  it('⛔ a tool cannot claim MORE provider time than it actually took', async () => {
+    // A hostile or buggy tool reporting 10 minutes inside a 2s call must not
+    // drive tool_ms negative or inflate provider_ms beyond the wall clock.
+    const { model, caps } = toolThenAnswer({ ok: true, mutated: true, provider_ms: 600_000 });
+    const r = await runAgentTurn({ ...base2, now: scriptedClock([0, 1_000, 0, 2_000, 0, 1_000, 0]) }, caps, model);
+    expect(r.timing.tool_ms).toBeGreaterThanOrEqual(0);
+    expect(r.timing.tool_provider_ms).toBeLessThanOrEqual(2_000);
+  });
+
+  it('a non-numeric provider_ms is ignored, not coerced', async () => {
+    const { model, caps } = toolThenAnswer({ ok: true, mutated: true, provider_ms: 'lots' });
+    const r = await runAgentTurn({ ...base2, now: scriptedClock([0, 1_000, 0, 3_000, 0, 1_000, 0]) }, caps, model);
+    expect(r.timing.tool_provider_ms).toBe(0);
+    expect(r.timing.tool_ms).toBe(3_000);
+  });
+});
