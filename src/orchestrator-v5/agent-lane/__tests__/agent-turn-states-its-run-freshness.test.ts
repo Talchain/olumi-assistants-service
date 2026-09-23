@@ -132,6 +132,16 @@ describe('the Agent turn states its run’s freshness where the UI reads it', ()
     expect(ready.freshness_reason).toBe('agent_readback_run_state_current');
   });
 
+  it('RED: the fresh verdict carries its ATTESTATION — graph_hash_at_run === current_graph_hash === the turn graph_hash, so a RELOAD can confirm it', async () => {
+    const r = await runThenAnswer();
+    const ready = r.json().analysis_ready as Ready & { graph_hash_at_run?: string; current_graph_hash?: string; computed_at?: string };
+    const turnHash = r.json().graph_hash as string;
+    expect(typeof turnHash === 'string' && turnHash.length > 0, 'precondition: the turn carries graph_hash').toBe(true);
+    expect(ready.graph_hash_at_run).toBe(turnHash);
+    expect(ready.current_graph_hash).toBe(turnHash);
+    expect(ready.computed_at).toBe((r.json().analysis_state as { run_state?: { computed_at?: string } }).run_state?.computed_at);
+  });
+
   it('CONTRAST: the graph CHANGES before readback — never "fresh"', async () => {
     afterRun = () => { currentGraph = SERVED_PRICING_GRAPH_CHANGED; };
     const r = await runThenAnswer();
@@ -162,6 +172,21 @@ describe('withRunStateFreshness — restates CEE’s own verdict, never invents 
       expect(withRunStateFreshness(ready, { run_state: { kind } })).toBe(ready);
     }
     expect(withRunStateFreshness(ready, undefined)).toBe(ready);
+  });
+
+  it('attests ONLY when the run’s own hash equals the current one — a mismatch or an absent hash stamps no hashes', async () => {
+    const { withRunStateFreshness } = await import('../analysis-ready-freshness.js');
+    const state = { run_state: { kind: 'complete_current', computed_at: '2026-09-23T20:13:05.494Z' } };
+    const same = withRunStateFreshness({ status: 'ready' }, state, { graphHash: 'h1', analysisResult: { computed_against_hash: 'h1' } }) as Record<string, unknown>;
+    expect(same).toMatchObject({ freshness: 'fresh', graph_hash_at_run: 'h1', current_graph_hash: 'h1', computed_at: '2026-09-23T20:13:05.494Z' });
+    const differ = withRunStateFreshness({ status: 'ready' }, state, { graphHash: 'h2', analysisResult: { computed_against_hash: 'h1' } }) as Record<string, unknown>;
+    expect(differ.freshness).toBe('fresh');
+    expect(differ).not.toHaveProperty('graph_hash_at_run');
+    expect(differ).not.toHaveProperty('current_graph_hash');
+    const absent = withRunStateFreshness({ status: 'ready' }, state, { graphHash: 'h1', analysisResult: null }) as Record<string, unknown>;
+    expect(absent).not.toHaveProperty('graph_hash_at_run');
+    const stale = withRunStateFreshness({ status: 'ready' }, { run_state: { kind: 'complete_stale', computed_at: 'x' } }, { graphHash: 'h1', analysisResult: { computed_against_hash: 'h1' } }) as Record<string, unknown>;
+    expect(stale).not.toHaveProperty('graph_hash_at_run');
   });
 
   it('never overwrites a verdict the producer already set', async () => {
