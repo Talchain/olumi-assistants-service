@@ -203,7 +203,7 @@ import {
   buildOutsideViewOffer,
   deriveOutsideViewHistory,
   type OutsideViewOffer,
-  outsideViewOfferFitsChipBudget,
+  attachOutsideViewOffer,
 } from './coaching/outside-view-offer.js';
 import { deriveConversationTextSignals } from './compose/conversation-text-signals.js';
 import {
@@ -10410,7 +10410,6 @@ export async function runTurnExecutor(
     /** Append the offer's card and chips to a SUBSTANTIVE answer; identity if absent. */
     const withOutsideViewOffer = (resp: OlumiResponse): OlumiResponse => {
       const offer = outsideViewOffer();
-      if (offer === null || offer.blocks.length === 0) return resp;
       // ⛔⛔ NEVER SHOW A CARD THE USER CANNOT DECLINE.
       //
       // `chip-finalizer.ts` caps the `chip_prompt_`/`chip_action_` suggestion
@@ -10424,12 +10423,10 @@ export async function runTurnExecutor(
       // is no slot at all, the whole offer stands down: silence is honest, an
       // un-refusable prompt is not. The budget is asserted against the real
       // finaliser in `__tests__`, not trusted from this comment.
-      if (!outsideViewOfferFitsChipBudget(resp.suggested_actions)) return resp;
-      return {
-        ...resp,
-        blocks: [...resp.blocks, ...offer.blocks],
-        suggested_actions: [...resp.suggested_actions, ...offer.suggested_actions],
-      };
+      // ⭐ ONE IMPLEMENTATION, shared with the spec that pins it. The inline
+      // version could not be mutated to RED because no fixture here saturates the
+      // chip family; `attachOutsideViewOffer` is imported by both.
+      return attachOutsideViewOffer(resp, offer);
     };
     // V5 P0.2 — a flip-threshold proposal's pending action, emitted on a
     // what_would_flip turn and merged into the committed pending_actions.

@@ -15,6 +15,7 @@ import {
   deriveOutsideViewHistory,
   outsideViewOfferFitsChipBudget,
   SUGGESTION_BUDGET,
+  attachOutsideViewOffer,
 } from '../outside-view-offer.js';
 import { ROUTED_COACHING_INTENTS } from '../typed-intent-directive.js';
 import { coachingIntentForChipId } from '../coaching-chip-registry.js';
@@ -42,6 +43,9 @@ function inputs(over: Partial<OutsideViewInputs> = {}): OutsideViewInputs {
     userMessage: "we'll land 40 new customers",
     stage: 'frame',
     hasDecisionDescription: true,
+    // Required since the current turn began settling the offer; defaulted false
+    // so existing cases keep their meaning and each new case opts in explicitly.
+    engageObservedInWindow: false,
     confirmedReferenceClassPresent: false,
     declineObservedInWindow: false,
     userStatesNoComparableCases: false,
@@ -296,5 +300,56 @@ describe('the offer stands down rather than become un-refusable', () => {
       String((c as { id?: unknown }).id ?? '').startsWith('chip_prompt_'),
     ).length;
     expect(kept, 'the finaliser keeps exactly the budget this module assumes').toBe(SUGGESTION_BUDGET);
+  });
+});
+
+/**
+ * ⛔⛔ THE GAP I REPORTED RATHER THAN HID — now closed.
+ *
+ * On my first pass the budget guard lived inline in `turn-executor.ts`, and
+ * DELETING it survived every test: no integration fixture saturates the
+ * suggestion chip family, so the mutant was caught only by inverting the guard
+ * (which suppresses the offer everywhere and is a coarse kill, not a binding).
+ *
+ * `attachOutsideViewOffer` is now exported and the call site delegates to it, so
+ * these drive the REAL path rather than a copy — the failure mode the Panel lane
+ * found in a sibling PR of mine, where the mount spec re-implemented what it
+ * claimed to pin.
+ */
+describe('attachOutsideViewOffer — a card is never attached without room to decline', () => {
+  const sugg = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({ id: `chip_prompt_base_${i}` }));
+  const resp = (n: number) => ({ blocks: [{ type: 'existing' }], suggested_actions: sugg(n) });
+  // The file's own real builder — NOT a fabricated verdict. My first version
+  // hand-rolled `{eligibility:'eligible', …}` and produced no offer at all, so the
+  // assertions were measuring an empty object.
+  const anOffer = () => buildOutsideViewOffer(assessOutsideViewEligibility(inputs()), CTX);
+
+  it('CONTROL: with room, the card AND both chips are attached', () => {
+    const o = anOffer();
+    expect(o, 'precondition: there is an offer to attach').not.toBeNull();
+    const out = attachOutsideViewOffer(resp(1), o);
+    expect(out.blocks.length).toBe(1 + o!.blocks.length);
+    expect(out.suggested_actions.length).toBe(1 + o!.suggested_actions.length);
+  });
+
+  it('⛔ with the suggestion family FULL, nothing is attached — card included', () => {
+    const o = anOffer();
+    const before = resp(SUGGESTION_BUDGET);
+    const out = attachOutsideViewOffer(before, o);
+    expect(out, 'returned by identity — the response is untouched').toBe(before);
+    expect(out.blocks.length, 'the CARD must not ride a budget it cannot be declined under').toBe(1);
+  });
+
+  it('a null offer is returned by identity (fail-open unchanged)', () => {
+    const before = resp(0);
+    expect(attachOutsideViewOffer(before, null)).toBe(before);
+  });
+
+  it('CONTRAST: non-suggestion chips do not consume the budget, so the offer still attaches', () => {
+    const o = anOffer();
+    const before = { blocks: [], suggested_actions: Array.from({ length: 6 }, (_, i) => ({ id: `prop_${i}` })) };
+    const out = attachOutsideViewOffer(before, o);
+    expect(out.blocks.length).toBe(o!.blocks.length);
   });
 });

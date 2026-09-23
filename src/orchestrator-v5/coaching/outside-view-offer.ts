@@ -187,6 +187,36 @@ export interface OutsideViewOffer {
 }
 
 /**
+ * ⛔⛔ ATTACH THE OFFER, OR STAND DOWN — one implementation, imported by the call
+ * site AND its spec.
+ *
+ * Extracted because the inline closure in `turn-executor.ts` could not be
+ * mutated to RED: no integration fixture saturates the suggestion chip family, so
+ * DELETING the budget guard survived every test. I reported that gap rather than
+ * hide it, and this closes it — the same lesson the Panel lane taught me on a
+ * sibling PR, where a mount spec RE-IMPLEMENTED the chaining it claimed to pin
+ * and therefore could never catch a regression in the real path.
+ *
+ * Returns `resp` BY IDENTITY when there is nothing to attach or no room to
+ * decline, so the caller's fail-open behaviour is unchanged.
+ */
+export function attachOutsideViewOffer<
+  T extends {
+    readonly blocks: ReadonlyArray<unknown>;
+    readonly suggested_actions: ReadonlyArray<{ readonly id?: unknown }>;
+  },
+>(resp: T, offer: OutsideViewOffer | null): T {
+  if (offer === null || offer.blocks.length === 0) return resp;
+  if (!outsideViewOfferFitsChipBudget(resp.suggested_actions)) return resp;
+  return {
+    ...resp,
+    blocks: [...resp.blocks, ...offer.blocks],
+    suggested_actions: [...resp.suggested_actions, ...offer.suggested_actions],
+  } as T;
+}
+
+
+/**
  * Build the offer for an `eligible` verdict. Returns `null` for every other
  * verdict — a caller cannot accidentally offer on `declined`.
  *
