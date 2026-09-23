@@ -760,9 +760,20 @@ export function admitCandidateModel(
     const hasIncoming = new Set(allEdges.map((e) => e.to));
     // Terminal outcomes: something feeds them, nothing leaves them. Those are
     // where the model's own causal chains actually end.
-    const terminals = nodes.filter(
-      (n) => n.kind === 'outcome' && hasIncoming.has(n.id) && !hasOutgoing.has(n.id),
-    );
+    const terminalOf = (kind: string) =>
+      nodes.filter((n) => n.kind === kind && hasIncoming.has(n.id) && !hasOutgoing.has(n.id));
+    /**
+     * ⛔ A COMPACT MODEL HAS NO OUTCOMES, SO ITS CHAINS END ON FACTORS (#1710).
+     * Measured on served `553254d`, Paul's brief: 6 nodes, `option → factor` for
+     * both options, no outcome and no `factor → goal` edge. This repair looked
+     * only for terminal OUTCOMES, found none, and never fired — the goal was
+     * orphaned and one approval could no longer run the comparison
+     * (`ORPHAN_NODE` + `NO_PATH_TO_GOAL`, readiness `blocked`). When no outcome
+     * ends a chain, the terminal FACTORS are where it ends: the same disclosed,
+     * defaulted link applies to them, and to nothing else.
+     */
+    const terminalOutcomes = terminalOf('outcome');
+    const terminals = terminalOutcomes.length > 0 ? terminalOutcomes : terminalOf('factor');
     for (const t of terminals) {
       repaired.push({
         from: t.id,
