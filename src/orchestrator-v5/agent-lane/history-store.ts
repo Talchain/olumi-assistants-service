@@ -99,6 +99,11 @@ export function historyFromDurableTurns(
   return items;
 }
 
+/** True when the held history carries no user message — nothing of the conversation itself. */
+export function needsDurableSeed(held: readonly unknown[]): boolean {
+  return !held.some((i) => (i as { role?: unknown })?.role === 'user');
+}
+
 export class HistoryStore {
   private readonly items = new Map<string, unknown[]>();
 

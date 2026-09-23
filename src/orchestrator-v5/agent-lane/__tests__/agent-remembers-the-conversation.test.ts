@@ -76,6 +76,15 @@ describe('after a restart, the Agent still knows the conversation the user can s
     expect(t.at(-1)).toBe('user: And the options?');
   });
 
+  it('a history holding only a board-edit note (no user message) still needs the seed; a real conversation does not', async () => {
+    // Contract with #1733: a forwarded canvas edit appends a note to a session the
+    // process may not have held before. That note must not stop the seeding.
+    const { needsDurableSeed } = await import('../history-store.js');
+    expect(needsDurableSeed([])).toBe(true);
+    expect(needsDurableSeed([{ role: 'developer', content: 'Board edit: Tech lead hires set to 2.' }])).toBe(true);
+    expect(needsDurableSeed([{ role: 'user', content: [{ type: 'input_text', text: 'hi' }] }])).toBe(false);
+  });
+
   it('a durable-read failure degrades to no history — the turn still answers', async () => {
     store.readRecent.mockRejectedValueOnce(new Error('db down'));
     sent.length = 0;
