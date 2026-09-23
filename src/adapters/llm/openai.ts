@@ -19,6 +19,7 @@ import { normaliseDraftResponse, ensureControllableFactorBaselines, stripModelAu
 import { contentDigest } from "../../utils/redaction.js";
 import { captureCheckpoint, type PipelineCheckpoint } from "../../cee/pipeline-checkpoints.js";
 import { getMaxTokensFromConfig } from "./router.js";
+import { buildCritiqueUserContent } from "./critique-prompt.js";
 import { resolveDraftMaxTokens, isDraftTruncated, buildFailedCallLlmMeta } from "./draft-budget.js";
 import { wrapUntrusted } from "./untrusted-envelope.js";
 import {
@@ -1273,10 +1274,99 @@ export class OpenAIAdapter implements LLMAdapter {
     }
   }
 
-  async critiqueGraph(_args: import("./types.js").CritiqueGraphArgs, _opts: CallOpts): Promise<import("./types.js").CritiqueGraphResult> {
-    // OpenAI provider does not yet support critiqueGraph
-    // Switch to LLM_PROVIDER=anthropic to use this feature
-    throw new Error("openai_critique_not_supported: Critique endpoint requires LLM_PROVIDER=anthropic (OpenAI implementation pending)");
+  /**
+   * ⭐ THE CHALLENGER, ON OPENAI. Previously this threw
+   * `openai_critique_not_supported` and told the caller to "switch to
+   * LLM_PROVIDER=anthropic" — which for a dedicated OpenAI PoC is not a
+   * fallback, it is a wall: the one read-only reviewing capability in the
+   * product could not run on OpenAI at all.
+   *
+   * ⛔ SAME PROMPT, SAME CONTRACT, DIFFERENT PROVIDER. The system prompt comes
+   * from `getSystemPrompt('critique_graph')` — the SAME PMS-governed source the
+   * Anthropic path reads — and the user half from the shared
+   * `buildCritiqueUserContent`, whose byte-equivalence with the Anthropic
+   * renderer is pinned by a test. Nothing about the critique's instructions is
+   * re-authored here. A provider swap must not become a silent prompt rewrite.
+   *
+   * ⭐ reasoningEffort: 'high', AND THIS IS THE POINT OF THE KNOB.
+   * A challenger is the one call where more deliberation is worth paying for:
+   * its whole job is to find a defect a faster pass missed, and it does not sit
+   * on the user's critical path (it is read-only and cannot mutate the model).
+   * That is the opposite trade from validation Pass 2, which is output-bound and
+   * now asks for 'low'. One adapter, two deliberate settings — which is only
+   * expressible because `reasoningEffort` was threaded through `chat()`; before
+   * that, every reasoning call in this file shipped the same unchosen "medium".
+   *
+   * ⚠ DEGRADES HONESTLY. A malformed or non-conforming response throws with the
+   * provider's own detail rather than returning an empty critique: a challenger
+   * that silently reports "no issues" because its JSON failed to parse is worse
+   * than one that fails loudly, because the caller cannot tell a clean graph from
+   * a broken reviewer. `assist.critique-graph.ts:229` counts issues by level, so
+   * an empty-on-error result would read to it as "nothing wrong".
+   */
+  async critiqueGraph(args: import("./types.js").CritiqueGraphArgs, opts: CallOpts): Promise<import("./types.js").CritiqueGraphResult> {
+    const system =
+      opts.preloadedSystemPrompt?.operation === 'critique_graph'
+        ? opts.preloadedSystemPrompt.content
+        : await getSystemPrompt('critique_graph');
+
+    const result = await this.chat(
+      {
+        system,
+        userMessage: buildCritiqueUserContent(args),
+        maxTokens: getMaxTokensFromConfig('critique_graph') ?? 2048,
+        responseFormat: 'json_object',
+        reasoningEffort: 'high',
+      },
+      opts,
+    );
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(result.content);
+    } catch {
+      throw new Error(
+        `openai_critique_unparseable: critique_graph returned non-JSON (${result.content.length} chars)`,
+      );
+    }
+
+    const obj = parsed as { issues?: unknown; suggested_fixes?: unknown; overall_quality?: unknown };
+    if (!Array.isArray(obj.issues)) {
+      // Fails closed on SHAPE, not just on syntax. `issues` is the field the
+      // caller counts; a response that parsed but carries no array would
+      // otherwise become a confident "no issues found".
+      throw new Error('openai_critique_malformed: critique_graph response has no `issues` array');
+    }
+
+    const LEVELS = ['BLOCKER', 'IMPROVEMENT', 'OBSERVATION'] as const;
+    type Level = (typeof LEVELS)[number];
+    const isLevel = (v: unknown): v is Level => LEVELS.includes(v as Level);
+
+    const issues = obj.issues
+      .filter(
+        (i): i is { level: Level; note: string; target?: string } =>
+          typeof i === 'object' &&
+          i !== null &&
+          isLevel((i as { level?: unknown }).level) &&
+          typeof (i as { note?: unknown }).note === 'string',
+      )
+      // Same severity ordering the Anthropic path applies, so a caller cannot
+      // tell the providers apart by issue order.
+      .sort((a, b) => LEVELS.indexOf(a.level) - LEVELS.indexOf(b.level));
+
+    const QUALITY = ['poor', 'fair', 'good', 'excellent'] as const;
+    const quality = QUALITY.includes(obj.overall_quality as (typeof QUALITY)[number])
+      ? (obj.overall_quality as (typeof QUALITY)[number])
+      : undefined;
+
+    return {
+      issues,
+      suggested_fixes: Array.isArray(obj.suggested_fixes)
+        ? obj.suggested_fixes.filter((s): s is string => typeof s === 'string')
+        : [],
+      ...(quality ? { overall_quality: quality } : {}),
+      usage: result.usage,
+    };
   }
 
   async explainDiff(_args: import("./types.js").ExplainDiffArgs, _opts: CallOpts): Promise<import("./types.js").ExplainDiffResult> {
