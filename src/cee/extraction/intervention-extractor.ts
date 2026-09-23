@@ -144,6 +144,13 @@ export interface ExtractedOption {
   raw_interventions?: Record<string, RawInterventionValueT>;
   /** Targets that couldn't be matched */
   unresolved_targets?: string[];
+  /**
+   * Intervention targets that exist in the model but are NOT factors — an
+   * option→risk or option→outcome claim. Reported for observability and
+   * DELIBERATELY not merged into `unresolved_targets`: one unresolved target
+   * blocks the entire option, and a risk is not something a user can map.
+   */
+  non_factor_targets?: string[];
   /** Questions for the user */
   user_questions?: string[];
   /** Provenance */
@@ -966,18 +973,64 @@ function buildInterventionsFromV4Data(
   briefText?: string,
   v4RawInterventions?: Record<string, number>,
   v4InterventionBindings?: Record<string, V4InterventionBinding>,
+  /**
+   * ⭐ EVERY node id in the graph, not just the factors.
+   *
+   * Without it this function cannot tell "this id is not in the model" from
+   * "this id IS in the model but is not a factor" — and it treated both as a
+   * missing factor. See the loop below. Optional so existing callers keep their
+   * behaviour exactly; when it is absent the old conservative path is used.
+   */
+  allNodeIds?: ReadonlySet<string>,
 ): ExtractedOption {
   const interventions: Record<string, InterventionV3T> = {};
   const rawInterventions: Record<string, RawInterventionValueT> = {};
   const factorIds = new Set(factors.map((f) => f.id));
   const missingFactors: string[] = [];
+  /** Targets that exist in the model but are not factors. Reported, never blocking. */
+  const nonFactorTargets: string[] = [];
 
   for (const [factorId, value] of Object.entries(v4Interventions)) {
     // Validate factor exists in graph
     if (!factorIds.has(factorId)) {
+      /**
+       * ⭐⭐ AN OPTION→RISK EDGE IS A CAUSAL CLAIM, NOT AN INTERVENTION TARGET.
+       *
+       * MEASURED on deployed staging, 3 draft runs / 2 briefs / 11 options, the
+       * predicate agreeing 11/11: every `unresolved_targets` entry was a
+       * `kind: "risk"` node reached by an option→risk edge, and one such entry
+       * blocks the whole option — `computeAnalysisReadyStatusWithReason`'s FIRST
+       * line returns `needs_user_mapping` on `unresolvedTargetCount > 0`. On one
+       * run that blocked ALL FOUR options: nothing was analysable at all.
+       *
+       * The question it produced cannot be answered — *"How does Two Developers
+       * change Coordination Overhead Risk?"* — for the same reason the
+       * held-baseline ask could not be (`transforms/option-status.ts`, the
+       * 2026-09-18 ruling): a risk is a CONSEQUENCE, not a lever anyone sets.
+       * Supplying a mapping would not make it one.
+       *
+       * ⚠ AND THE OLD LOG LINE IS WHY THIS SURVIVED. It said the intervention
+       * "targets non-existent factor" — but the node EXISTS; it is simply a risk
+       * or an outcome. A warning that misdescribes the condition it fires on is
+       * a warning nobody can act on.
+       *
+       * So the two cases are now separated. A target absent from the model is
+       * still genuinely unresolvable and still blocks (unchanged). A target that
+       * IS in the model but is not a factor is dropped from the intervention set
+       * and recorded — the causal edge the drafter already wrote carries the
+       * claim, so nothing is lost.
+       */
+      if (allNodeIds !== undefined && allNodeIds.has(factorId)) {
+        nonFactorTargets.push(factorId);
+        log.info(
+          { factorId, optionId, optionLabel },
+          "V4 intervention targets a non-factor node (causal claim, not an intervention) — dropped without blocking"
+        );
+        continue;
+      }
       log.warn(
         { factorId, optionId, optionLabel },
-        "V4 intervention targets non-existent factor"
+        "V4 intervention targets an id that is not in the graph at all"
       );
       missingFactors.push(factorId);
       continue;
@@ -1195,6 +1248,9 @@ function buildInterventionsFromV4Data(
     ...(Object.keys(rawInterventions).length > 0 ? { raw_interventions: rawInterventions } : {}),
     status,
     unresolved_targets: missingFactors.length > 0 ? missingFactors : undefined,
+    // Observability only. NOT `unresolved_targets`: these are causal claims the
+    // drafter already carries as edges, so naming them here must not block.
+    ...(nonFactorTargets.length > 0 ? { non_factor_targets: nonFactorTargets } : {}),
     provenance: {
       source: "brief_extraction",
     },
@@ -1250,6 +1306,9 @@ export function extractInterventionsForOption(
       briefText,
       v4RawInterventions,
       v4InterventionBindings,
+      // Every node, so a target that IS in the model but is not a factor can be
+      // told apart from one that is absent entirely.
+      new Set(nodes.map((n) => n.id)),
     );
   }
 
