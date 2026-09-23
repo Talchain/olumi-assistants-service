@@ -6,10 +6,18 @@ import {
   violatesEdgeGrammar,
 } from '../edge-grammar.js';
 
-import blocked8 from './fixtures/draft.graph.json' with { type: 'json' };
-import blockedPricing from './fixtures/draft-pricing.graph.json' with { type: 'json' };
-import blockedHiring from './fixtures/draft-hiring2.graph.json' with { type: 'json' };
-import readyControl from './fixtures/draft-pricing-no-churn-READY.graph.json' with { type: 'json' };
+import { readFileSync } from 'node:fs';
+
+/** Read a banked capture exactly as the repo's other wire fixtures are read
+ *  (`plot-request-scale-captures.test.ts`) — the bytes on disk, unparsed by
+ *  any build step, so what is asserted is what was captured. */
+const capture = (name: string): unknown =>
+  JSON.parse(readFileSync(new URL(`./fixtures/${name}.graph.json`, import.meta.url), 'utf8'));
+
+const blocked8 = capture('draft');
+const blockedPricing = capture('draft-pricing');
+const blockedHiring = capture('draft-hiring2');
+const readyControl = capture('draft-pricing-no-churn-READY');
 
 /**
  * ⭐ THE CORPUS IS NOT MINE. All four fixtures are the structural skeleton of
