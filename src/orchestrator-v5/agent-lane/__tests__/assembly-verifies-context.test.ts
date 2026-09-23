@@ -36,9 +36,19 @@ const expectation = {
   scenario_id: SCENARIO, authenticated_user_id: USER, graph_revision: REV,
   current_turn: 7, binding_secret: SECRET,
 };
+// ⚠ FIXTURE IS DELIBERATELY PROJECTION-SHAPED, and that is load-bearing now.
+// This file's subject is VERIFICATION — whether a packet's binding and subject
+// let it suppress the canonical reread. Suppression gained a SECOND, independent
+// precondition (the state must carry addressable entities; see
+// `context-projection-shaped.test.ts`), so the old `{ id: 'price' }` stub would
+// now fail here for a reason that has nothing to do with verification, and would
+// quietly stop testing what this file exists to test. The entity below carries
+// the four keys `projectEntity` emits unconditionally.
 const issue = (over = {}) => issueContextPacket({
   scenario_id: SCENARIO, authenticated_user_id: USER, graph_revision: REV,
-  captured_at_turn: 7, state: { entities: [{ id: 'price' }] }, ...over,
+  captured_at_turn: 7,
+  state: { entities: [{ id: 'price', label: 'Unit price', kind: 'factor', value: 0.45 }] },
+  ...over,
 }, SECRET);
 
 const build = (context?: CanonicalContextPacket | null) =>

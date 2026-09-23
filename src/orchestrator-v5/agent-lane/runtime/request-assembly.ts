@@ -266,6 +266,67 @@ export interface ToolEligibility {
  */
 const CONTEXT_EQUIVALENT_TOOL = 'get_canonical_state';
 
+/**
+ * Does this state carry entities the Agent can actually ACT on?
+ *
+ * ⛔ WHY AN OMISSION NEEDS EVIDENCE, NOT JUST A VERIFIED BINDING. Verification
+ * proves the packet is the server's own and current. It says nothing about
+ * whether the state inside it is rich enough to stand in for the tool. Those are
+ * two different questions, and one predicate answering both is how this estate
+ * has been bitten before.
+ *
+ * Staging #1698 established ONE projection of a stored node into what the Agent
+ * is shown, `projectEntity`, used by every tool that hands the Agent entities —
+ * because, in its own words, "two field lists will always drift; one cannot".
+ * `CanonicalContextPacket.state` is `unknown` and supplied by the caller, so it
+ * is a second list by construction. This predicate is the join that keeps the
+ * drift from mattering.
+ *
+ * ⚠ WHAT MAKES A THIN PACKET WORSE THAN A SLOW ONE: dropping
+ * `get_canonical_state` removes the Agent's RECOVERY. With the tool present a
+ * thin context is merely inefficient — the model fetches the carriers itself.
+ * With it absent, a thin packet is terminal for the turn. So this fails SAFE:
+ * anything it cannot positively recognise keeps the tool. The cost of a false
+ * negative is one round trip; the cost of a false positive is an Agent reasoning
+ * without the carriers #1698 restored, unable to ask for them.
+ *
+ * ⚠ DELIBERATELY NOT IMPORTING `projectEntity`. It lives in
+ * `agent-capabilities.ts`, which this lane may not edit without a lease, and it
+ * does not exist at this branch's base — #1698 merged after it. So the check is
+ * STRUCTURAL: the four keys that projection emits UNCONDITIONALLY. It cannot
+ * drift into asserting more than the projection guarantees, because the
+ * conditional carriers (`unit`, `cap`, `scale_frame`, `provenance`, …) are
+ * omitted-when-absent by design and requiring any of them would reject a
+ * perfectly good sparse graph.
+ *
+ * `id` is the load-bearing one. Its own docblock in that projection: "⭐ THE ID.
+ * Without it the only way to act on an entity was a fuzzy label match, which
+ * collides and cannot address two entities that read alike."
+ *
+ * An EMPTY entity list satisfies this — `every` over nothing is true, and that is
+ * the intended reading, not an accident. A packet with no entities is equivalent
+ * to what the tool would return for a graph with no nodes, so there are no
+ * carriers to lose.
+ */
+function carriesAddressableEntities(state: unknown): boolean {
+  if (typeof state !== 'object' || state === null) return false;
+  const entities = (state as { entities?: unknown }).entities;
+  if (!Array.isArray(entities)) return false;
+  return entities.every((e) => {
+    if (typeof e !== 'object' || e === null) return false;
+    const n = e as Record<string, unknown>;
+    return (
+      typeof n.id === 'string' &&
+      n.id.length > 0 &&
+      typeof n.label === 'string' &&
+      typeof n.kind === 'string' &&
+      // Present, not truthy: `projectEntity` emits `value: null` deliberately,
+      // because absence reported as a zero would read to a model as a stated fact.
+      'value' in n
+    );
+  });
+}
+
 export function eligibleTools(input: {
   readonly mode: AgentLaneMode;
   readonly context?: CanonicalContextPacket | null;
@@ -292,6 +353,15 @@ export function eligibleTools(input: {
   // property structural rather than something this function has to remember.
   const allowed = toolsFor(input.mode);
   if (freshness.kind !== 'fresh') return { tools: allowed, omitted: [], freshness };
+
+  // ⛔ A VERIFIED PACKET IS NOT AUTOMATICALLY A SUFFICIENT ONE. The packet still
+  // becomes authoritative context in `assembleRequest` — a thin packet is real
+  // canonical state, just sparse. What is withheld here is only the OMISSION:
+  // the tool stays on the list so the Agent can fetch the carriers itself.
+  // Fails safe by construction; see `carriesAddressableEntities`.
+  if (!carriesAddressableEntities(input.context?.state)) {
+    return { tools: allowed, omitted: [], freshness };
+  }
 
   const tools = allowed.filter((t) => t.name !== CONTEXT_EQUIVALENT_TOOL);
   const omitted: OmittedTool[] =
