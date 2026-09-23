@@ -724,7 +724,31 @@ export function buildAnalysisReadyPayload(
       status: "needs_user_mapping",
       unresolved_targets: [...new Set([...(option.unresolved_targets ?? []), ...unresolved.map((edge) => edge.to)])],
       user_questions: [...new Set([...(option.user_questions ?? []), ...unresolved.map((edge) =>
-        `How does ${option.label} change ${nodeById.get(edge.to)?.label ?? edge.to}? The proposed relationship is retained, but its mechanism and value still need clarification.`,
+        // ⛔⛔ THE ASK USED TO BE UNANSWERABLE, and the refusal around it is
+        // deliberate and stays exactly as it was.
+        //
+        // It read: `How does ${option.label} change ${riskLabel}? The proposed
+        // relationship is retained, but its mechanism and value still need
+        // clarification.` The person cannot answer that, because there is no
+        // form in which they could: a RISK IS A CONSEQUENCE, not something an
+        // option sets. The grammar the drafter is given says so too — an option
+        // reaches a risk through a controllable factor (option → factor → risk)
+        // and `option→risk` is not in its ALLOWED EDGE PATTERNS at all.
+        //
+        // So the product was naming a true limitation in a shape that left the
+        // user stuck: honest, and a dead end. The charter asks for the other
+        // half — a limitation surfaced must be one they can act on.
+        //
+        // The ask now carries three things and invents nothing:
+        //   · WHY the link cannot be used as it stands;
+        //   · the question they CAN answer — which factor this option changes;
+        //   · that their claim is kept either way, which is TRUE: the edge is
+        //     retained and only the readiness verdict is withheld.
+        //
+        // ⚠ NOTHING ABOUT THE REFUSAL MOVES. The option is still
+        // `needs_user_mapping`, `unresolved_targets` still carries the risk id,
+        // and no factor is guessed. Only the sentence changed.
+        `${option.label} is linked straight to ${nodeById.get(edge.to)?.label ?? edge.to}. A risk is a consequence, not something an option sets, so the analysis needs the step in between: which factor does ${option.label} change that leads to it? Your link is kept either way.`,
       )])],
     };
   });

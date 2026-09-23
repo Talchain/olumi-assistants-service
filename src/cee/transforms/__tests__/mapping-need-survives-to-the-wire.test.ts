@@ -209,7 +209,7 @@ describe("the obligation that blocked the option reaches the user", () => {
  *     Choose which factor "Two Developers" changes and by how much.
  *
  * The producer had already written the correct, risk-naming sentence onto the
- * option (`How does X change <risk label>? …`). The ask simply did not read it.
+ * option (since 23 Sep: `X is linked straight to <risk label>. …`). The ask simply did not read it.
  *
  * ⚠ SCOPE. This fixes the SENTENCE ONLY. Whether an option→risk edge should
  * gate admission at all is a separate ruling with a contract gap behind it —
