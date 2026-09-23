@@ -224,3 +224,66 @@ describe('formatGoalTargetUnchanged', () => {
     expect(text).not.toMatch(/is already 15%/);
   });
 });
+
+/**
+ * A REAL CHANGE MUST NOT BE NARRATED AS NO CHANGE.
+ *
+ * ⛔ MEASURED IN A USER SESSION on deployed staging, 23 Sep, scenario
+ * `399c2814` at 23:46:18. After thirty-seven minutes unable to run an analysis,
+ * the user wrote "just help me fix what's stopping me from running the
+ * analysis" and the product replied:
+ *
+ *     "Adjusted the link between Two Developers and Coordination Overhead Risk
+ *      from moderate to moderate."
+ *
+ * ── THE MECHANISM ──────────────────────────────────────────────────────────
+ * `adjust-edge-strength.ts:393` computes `noop` as strict equality of `mean`
+ * AND `std` AND `direction`. This formatter reports BANDS. A mean that moves
+ * WITHIN a band is therefore `noop === false` — a genuine write, fact status
+ * `applied` — yet renders a sentence describing no movement. The guard is FINER
+ * than the sentence it guards, which is why `formatEdgeStrengthUnchanged` (the
+ * honest no-op receipt, already present) never fires for this case.
+ *
+ * Band thresholds are `moderate: 0.3`, `strong: 0.7` (`influence-bands.ts:26`),
+ * so 0.35 and 0.55 are the same band by the code's own definition, not by
+ * this author's choice.
+ */
+describe('formatEdgeAdjustment — no false band transition', () => {
+  it('a change WITHIN a band does not claim a transition', () => {
+    const text = formatEdgeAdjustment({
+      fromLabel: 'Two Developers',
+      toLabel: 'Coordination Overhead Risk',
+      beforeMean: 0.35,
+      afterMean: 0.55,
+    });
+    expect(text).not.toMatch(/from moderate to moderate/);
+    expect(text).toContain('still moderate');
+    // It must still report that something WAS adjusted — this is not a no-op.
+    expect(text).toContain('Adjusted the link');
+  });
+
+  it('CONTROL: a genuine band transition is still reported as one', () => {
+    const text = formatEdgeAdjustment({
+      fromLabel: 'churn',
+      toLabel: 'revenue',
+      beforeMean: 0.4,
+      afterMean: 0.7,
+    });
+    expect(text).toContain('from moderate to strong');
+    expect(text).not.toContain('still');
+  });
+
+  it('CONTROL: a direction flip inside one band is still reported', () => {
+    const text = formatEdgeAdjustment({
+      fromLabel: 'a',
+      toLabel: 'b',
+      beforeMean: 0.4,
+      afterMean: -0.5,
+      beforeDirection: 'positive',
+      afterDirection: 'negative',
+    });
+    // Same band magnitude, but the direction changed — that must not be swallowed.
+    expect(text).toMatch(/negative/i);
+    expect(text).not.toContain('still moderate');
+  });
+});

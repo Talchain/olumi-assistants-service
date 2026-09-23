@@ -631,6 +631,33 @@ export function formatEdgeAdjustment(input: EdgeAdjustmentInput): string {
         : ` Direction reversed: now ${afterDirection}.`
     : '';
 
+  // ⭐ A SENTENCE MUST NOT REPORT A TRANSITION THAT DID NOT HAPPEN.
+  //
+  // The `noop` guard in `adjust-edge-strength.ts` is strict equality of `mean`
+  // AND `std` AND `direction`. This sentence reports BANDS. Those are different
+  // resolutions, so a mean that moves WITHIN a band is `noop === false`, reaches
+  // this line, and renders "Adjusted the link between A and B from moderate to
+  // moderate." — a real change narrated as no change. The guard is FINER than
+  // the sentence it guards.
+  //
+  // ⛔ MEASURED IN A REAL USER SESSION (deployed staging, 23 Sep, scenario
+  // `399c2814`, 23:46:18). After thirty-seven minutes blocked, the user wrote
+  // "just help me fix what's stopping me from running the analysis" and the
+  // product answered "Adjusted the link between Two Developers and Coordination
+  // Overhead Risk from moderate to moderate."
+  //
+  // The band is still the right vocabulary — a strength is not a number the
+  // product quotes back (qualitative magnitude is recognised, never
+  // interpreted). So say what is true: the link was adjusted, and the band it
+  // sits in is unchanged. `formatEdgeStrengthUnchanged` remains the receipt for
+  // an ACTUAL no-op, which this is not.
+  if (beforeBand === afterBand && !directionFlipped) {
+    return (
+      `Adjusted the link between ${input.fromLabel} and ${input.toLabel}. ` +
+      `Its strength is still ${afterBand}.`
+    );
+  }
+
   return `Adjusted the link between ${input.fromLabel} and ${input.toLabel} from ${beforeBand} to ${afterBand}.${tail}`;
 }
 
