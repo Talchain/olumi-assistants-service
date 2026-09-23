@@ -99,9 +99,26 @@ export function historyFromDurableTurns(
   return items;
 }
 
-/** True when the held history carries no user message — nothing of the conversation itself. */
+/** Marks a board edit in the Agent's history: the user's own change, already applied — never a request to the Agent. */
+export const BOARD_EDIT_PREFIX = '(Board edit \u2014 the user changed this directly on the canvas and Olumi has already applied it; it is not a request to you.)';
+
+function isBoardEditNote(item: unknown): boolean {
+  const content = (item as { content?: unknown })?.content;
+  const first = Array.isArray(content) ? (content[0] as { text?: unknown } | undefined)?.text : content;
+  return typeof first === 'string' && first.startsWith(BOARD_EDIT_PREFIX);
+}
+
+/**
+ * True when the held history carries no user message of the conversation itself.
+ *
+ * ⛔ A BOARD-EDIT NOTE IS NOT CONVERSATION (preflight integration, #1733 × #1757). The
+ * route records a forwarded canvas edit as a `role: 'user'` item starting with
+ * BOARD_EDIT_PREFIX, so counting every user item meant a board edit made FIRST after
+ * a restart suppressed the seeding, and the Agent forgot the conversation before the
+ * deploy. Notes are ignored here; the seed goes ahead of them.
+ */
 export function needsDurableSeed(held: readonly unknown[]): boolean {
-  return !held.some((i) => (i as { role?: unknown })?.role === 'user');
+  return !held.some((i) => (i as { role?: unknown })?.role === 'user' && !isBoardEditNote(i));
 }
 
 export class HistoryStore {

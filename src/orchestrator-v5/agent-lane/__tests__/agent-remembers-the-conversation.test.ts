@@ -79,9 +79,12 @@ describe('after a restart, the Agent still knows the conversation the user can s
   it('a history holding only a board-edit note (no user message) still needs the seed; a real conversation does not', async () => {
     // Contract with #1733: a forwarded canvas edit appends a note to a session the
     // process may not have held before. That note must not stop the seeding.
-    const { needsDurableSeed } = await import('../history-store.js');
+    const { needsDurableSeed, BOARD_EDIT_PREFIX } = await import('../history-store.js');
     expect(needsDurableSeed([])).toBe(true);
-    expect(needsDurableSeed([{ role: 'developer', content: 'Board edit: Tech lead hires set to 2.' }])).toBe(true);
+    // The REAL writer's shape (agent-v1-turn.ts forwarded-edit append): a USER item
+    // whose text starts with BOARD_EDIT_PREFIX. The earlier fixture here was a
+    // self-authored 'developer' note, which is why the clash went unseen.
+    expect(needsDurableSeed([{ role: 'user', content: [{ type: 'input_text', text: `${BOARD_EDIT_PREFIX} Updated Tech lead hires from 0 to 1.` }] }])).toBe(true);
     expect(needsDurableSeed([{ role: 'user', content: [{ type: 'input_text', text: 'hi' }] }])).toBe(false);
   });
 
