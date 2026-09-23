@@ -631,6 +631,49 @@ export function formatEdgeAdjustment(input: EdgeAdjustmentInput): string {
         : ` Direction reversed: now ${afterDirection}.`
     : '';
 
+  // ⭐ A SENTENCE MUST NOT REPORT A TRANSITION THAT DID NOT HAPPEN.
+  //
+  // The `noop` guard in `adjust-edge-strength.ts` is strict equality of `mean`
+  // AND `std` AND `direction`. This sentence reports BANDS. Those are different
+  // resolutions, so a mean that moves WITHIN a band is `noop === false`, reaches
+  // this line, and renders "Adjusted the link between A and B from moderate to
+  // moderate." — a real change narrated as no change. The guard is FINER than
+  // the sentence it guards.
+  //
+  // ⛔ MEASURED IN A REAL USER SESSION (deployed staging, 23 Sep, scenario
+  // `399c2814`, 23:46:18). After thirty-seven minutes blocked, the user wrote
+  // "just help me fix what's stopping me from running the analysis" and the
+  // product answered "Adjusted the link between Two Developers and Coordination
+  // Overhead Risk from moderate to moderate."
+  //
+  // The band is still the right vocabulary — a strength is not a number the
+  // product quotes back (qualitative magnitude is recognised, never
+  // interpreted). So say what is true: the link was adjusted, and the band it
+  // sits in is unchanged. `formatEdgeStrengthUnchanged` remains the receipt for
+  // an ACTUAL no-op, which this is not.
+  if (beforeBand === afterBand) {
+    const link = `Adjusted the link between ${input.fromLabel} and ${input.toLabel}.`;
+    // ⚠ THE BAND NOUN DOES NOT READ AS A PREDICATE COMPLEMENT AT NEAR-ZERO.
+    // `describeBandWithDirection` returns the literal 'no material influence'
+    // below NEAR_ZERO_INFLUENCE_THRESHOLD, so "its strength is still no
+    // material influence" is not English — the same trap
+    // `formatEdgeStrengthUnchanged` already special-cases forty lines below,
+    // and its docblock says so verbatim. Reachable: z.number().min(-1).max(1)
+    // admits 0.01 → 0.04 with directions agreeing and `noop` false.
+    const stillClause =
+      Math.abs(input.afterMean) < NEAR_ZERO_INFLUENCE_THRESHOLD
+        ? 'It still has no material influence.'
+        : `Its strength is still ${afterBand}.`;
+    // A reversal inside one band must still be reported. Without this the
+    // sentence says only that nothing moved, on a turn where the direction
+    // flipped — which is the same class of false receipt this branch exists
+    // to remove, pointed the other way.
+    if (directionFlipped) {
+      return `${link} ${stillClause.replace(/\.$/, '')}, but the direction is now ${afterDirection}.`;
+    }
+    return `${link} ${stillClause}`;
+  }
+
   return `Adjusted the link between ${input.fromLabel} and ${input.toLabel} from ${beforeBand} to ${afterBand}.${tail}`;
 }
 
