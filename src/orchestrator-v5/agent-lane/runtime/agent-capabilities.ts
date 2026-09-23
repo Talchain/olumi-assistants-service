@@ -1094,7 +1094,14 @@ export function createAgentCapabilities(
              * behaviour rather than turning a degraded read into a hard failure.
              */
             const reg = await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, {
-              graph: { nodes: patched, edges: before.edges },
+              // ⛔⛔ SPREAD THE WHOLE GRAPH. This sent only `{ nodes, edges }`, so
+              // every other top-level key was DELETED by a write whose purpose is
+              // to stop the model being overwritten. They are not cosmetic:
+              // `computeAnalysisAffectingGraphHashSha256` (`context/graph-hash.ts:149-162`)
+              // hashes `options`, `goal_node_id` and `goal_constraints` too, so the
+              // frame write destroyed analysis-affecting content. The value-batch
+              // write at `:367` had it right all along — same spread, same reason.
+              graph: { ...before.raw, nodes: patched, edges: before.edges },
               ...(before.graph_hash !== '' ? { expected_graph_hash: before.graph_hash } : {}),
             });
             if (reg.status !== 200) {
@@ -1332,7 +1339,14 @@ export function createAgentCapabilities(
              * changed. Fixed now, and the guard below counts BOTH.
              */
             const reg = await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, {
-              graph: { nodes: patched, edges: afterSet.edges },
+              // ⛔⛔ SPREAD THE WHOLE GRAPH. This sent only `{ nodes, edges }`, so
+              // every other top-level key was DELETED by a write whose purpose is
+              // to stop the model being overwritten. They are not cosmetic:
+              // `computeAnalysisAffectingGraphHashSha256` (`context/graph-hash.ts:149-162`)
+              // hashes `options`, `goal_node_id` and `goal_constraints` too, so the
+              // frame write destroyed analysis-affecting content. The value-batch
+              // write at `:367` had it right all along — same spread, same reason.
+              graph: { ...afterSet.raw, nodes: patched, edges: afterSet.edges },
               ...(afterSet.graph_hash !== '' ? { expected_graph_hash: afterSet.graph_hash } : {}),
             });
             if (reg.status !== 200) {
