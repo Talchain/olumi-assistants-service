@@ -273,3 +273,109 @@ describe('every register call in this module asserts a base', () => {
     expect(SRC.split('graph/register`, {').length - 1).toBe(3);
   });
 });
+
+/**
+ * ⛔⛔⛔ "A MOVED GRAPH REFUSES THE WHOLE AUTHORISATION, NOT HALF OF IT" WAS FALSE
+ * FOR ANY MULTI-OP PROPOSAL — and the fixture above has exactly ONE op, so no
+ * assertion in this file could see it.
+ *
+ * The level loop ends each iteration with:
+ *
+ *     const mid = await readGraph(ctx.scenario_id);
+ *     if (mid !== null) baseHash = mid.graph_hash;
+ *
+ * That re-reads a FRESH base regardless of whether the edit it just dispatched was
+ * refused. So a stale base survives exactly ONE iteration: op 0 is refused at the
+ * row, then `baseHash` becomes the CONCURRENT writer's hash and ops 1..N pass the
+ * `base_graph_hash` gate — landing on a model the user never approved, while the
+ * result still reports the approval as applied.
+ *
+ * The harness below gates the turn the way the row does: a write carrying the
+ * stale base is refused, anything else is accepted. That is the only way to tell
+ * "refused the whole authorisation" from "refused the first op".
+ */
+function twoOpHarness() {
+  const registerBodies: Record<string, unknown>[] = [];
+  const turnBodies: Record<string, unknown>[] = [];
+  const accepted: Record<string, unknown>[] = [];
+  const d: InternalDispatch = async (path, body) => {
+    const b = (body ?? {}) as Record<string, unknown>;
+    if (path === '/orchestrate/v2/turn') {
+      turnBodies.push(b);
+      const ev = (b.event ?? {}) as { base_graph_hash?: unknown };
+      // The row-level gate: a write against a base that is no longer current is
+      // refused. MOVED_HASH is the concurrent writer's state.
+      if (ev.base_graph_hash !== MOVED_HASH) {
+        return { status: 409, json: { code: 'stale_base_graph_hash' } };
+      }
+      accepted.push(b);
+      return { status: 200, json: {} };
+    }
+    if (path.endsWith('/graph/register')) {
+      registerBodies.push(b);
+      // The frame write is refused: the graph already moved under us.
+      return { status: 409, json: { details: { code: 'GRAPH_STALE' } } };
+    }
+    if (path.endsWith('/graph')) {
+      // ⚠ THE ENTRY READ MUST GIVE THE APPROVED BASE. My first version answered
+      // MOVED_HASH to every read, so `before.graph_hash` was already the moved
+      // value and op 0 was ACCEPTED — the test passed for the wrong reason and
+      // could not see the defect. The graph moves only once someone has written.
+      const moved = registerBodies.length > 0;
+      return {
+        status: 200,
+        json: { graph: { nodes: NODES, edges: EDGES }, graph_hash: moved ? MOVED_HASH : BASE_HASH },
+      };
+    }
+    return { status: 200, json: {} };
+  };
+  return { d, registerBodies, turnBodies, accepted };
+}
+
+function seedTwoOpProposal(store: ProposalStore): string {
+  const p = createProposal({
+    scenario_id: SCENARIO,
+    user_id: USER,
+    base_graph_identity_hash: BASE_HASH,
+    operations: [
+      { op: 'set_option_intervention', path: `${OPTION}::${FACTOR}`, value: { raw: 360, normalised: 0.72, derived_frame: 500 } },
+      { op: 'set_option_intervention', path: `${OPTION}::fac_second`, value: { raw: 120, normalised: 0.24 } },
+    ] as never,
+    provenance: { authored_by: 'model_proposed' },
+    validation: { admitted: true, loss_count: 0, refusals: [] },
+    public_label: 'Two levels at once',
+  });
+  store.put(p);
+  return p.proposal_id;
+}
+
+describe('a moved graph refuses the WHOLE authorisation, not just its first op', () => {
+  it('⛔ no level edit is ACCEPTED once the base is stale', async () => {
+    const store = new ProposalStore();
+    const id = seedTwoOpProposal(store);
+    const h = twoOpHarness();
+    const caps = createAgentCapabilities(h.d, store, structured, 'full', () => undefined);
+    await caps.authoriseChange(ctx as never, { proposal_id: id, approved: true } as never);
+
+    expect(h.turnBodies.length, 'precondition: the loop really dispatched level edits').toBeGreaterThan(0);
+    expect(
+      h.accepted.length,
+      'a write accepted here carries the CONCURRENT writer’s hash — it lands on a model the user never approved',
+    ).toBe(0);
+  });
+
+  it('⛔ every dispatched edit carries the base the USER approved, never a re-read one', async () => {
+    const store = new ProposalStore();
+    const id = seedTwoOpProposal(store);
+    const h = twoOpHarness();
+    const caps = createAgentCapabilities(h.d, store, structured, 'full', () => undefined);
+    await caps.authoriseChange(ctx as never, { proposal_id: id, approved: true } as never);
+
+    const bases = h.turnBodies.map((b) => ((b.event ?? {}) as { base_graph_hash?: unknown }).base_graph_hash);
+    expect(bases.length).toBeGreaterThan(0);
+    expect(
+      bases.filter((x) => x === MOVED_HASH),
+      'a re-read base silently re-licenses the approval against a model the user never saw',
+    ).toEqual([]);
+  });
+});
