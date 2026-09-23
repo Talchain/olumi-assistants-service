@@ -75,7 +75,10 @@ import { PLoTError, PLoTTimeoutError } from '../../../orchestrator/plot-client.j
 
 import { getHandlerBudgetMs } from '../../budgets.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
-import { collectInterventionControlledFactorIds } from '../../context/intervention-controlled-drivers.js';
+import {
+  collectFactorIdsSetByEveryOption,
+  collectInterventionControlledFactorIds,
+} from '../../context/intervention-controlled-drivers.js';
 import { GraphStateIngressSchema } from '../../boundary/request-extensions.js';
 import type {
   HandlerFn,
@@ -1887,6 +1890,12 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       // Source the controlled-id set from the RAW persisted graph (covers all
       // intervention locations), falling back to the canonical options array.
       interventionControlledFactorIds: collectInterventionControlledFactorIds(
+        snapshot.rawPersistedGraph ?? { options: snapshot.options },
+      ),
+      // P2: the INTERSECTION (factors EVERY option sets), from the same graph.
+      // Lets the headline tell a vacuous "no single factor would change the
+      // order" (nothing could, by construction) from a real finding.
+      factorIdsSetByEveryOption: collectFactorIdsSetByEveryOption(
         snapshot.rawPersistedGraph ?? { options: snapshot.options },
       ),
       // The named-driver half. Derived from the SAME records the disclosure

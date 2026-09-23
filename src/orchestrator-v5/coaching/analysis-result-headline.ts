@@ -72,7 +72,7 @@ import { nearTieReasonByMargin } from './robustness-honesty.js';
 import { sanitiseLabel } from '../context/enrichment-graph-labels.js';
 // ROADMAP 2.278: the run's own answer to "may this copy claim the result could
 // flip?" — the single owner of that rule (see `readFlipClaimPosture`).
-import { readFlipClaimPosture } from '../context/flip-threshold-rows.js';
+import { readFlipClaimPosture, readTopLevelFlipRows } from '../context/flip-threshold-rows.js';
 // D-ask-1 (2.11 P0-1): scaffold-disclosure grammar + budget. The suffix copy
 // and this allowlist must accept each other or the disclosure is silently
 // replaced by the locked-template fallback — the drift pin lives in
@@ -539,6 +539,19 @@ export interface AnalysisResultHeadlineInput {
    */
   readonly unsetOptionEffectFactorIds?: ReadonlySet<string>;
   /**
+   * P2 (Paul's manual test, 23 Sep 2026): factor ids that EVERY option sets —
+   * `intervention-controlled-drivers.ts::collectFactorIdsSetByEveryOption`, the
+   * INTERSECTION, not the union in {@link interventionControlledFactorIds}.
+   *
+   * When every flip row's factor is in this set, no option reads the swept
+   * value, so "no single factor we tested would change the order" is true of
+   * the model's SHAPE and says nothing about the result. The narration tail then
+   * treats the flip evidence as inconclusive, which is what it is.
+   *
+   * Omitted / empty ⇒ no change (byte-identical).
+   */
+  readonly factorIdsSetByEveryOption?: ReadonlySet<string>;
+  /**
    * Trust-spine board #1 (CEE half). True when the leading option violates a
    * hard constraint (CEE_CONSTRAINT_INFEASIBLE_GATE ON — computed by the
    * run_analysis handler via constraint-feasibility.ts). When true the headline
@@ -912,7 +925,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
   // case shape, before the status suffix. The base headline stays within
   // MAX_HEADLINE_CHARS; the tail rides on its own budget (lengthCap) so an
   // honest tail never forces a stronger case to shed information.
-  const narrationTail = buildNarrationTail(enrichment, winner);
+  const narrationTail = buildNarrationTail(enrichment, winner, input.factorIdsSetByEveryOption);
   // Seam item 3: reduced-samples disclosure rides between the narration
   // tail and the status suffix (mirrored by TAIL_PATTERN in the grammar).
   const reducedSamplesSuffix =
@@ -2104,6 +2117,21 @@ function resolveCautionCandidate(
 // Mission B — narration-completeness tail (provisional_doctrine_v0)
 // ============================================================================
 
+/**
+ * P2 — is every flip row about a factor that EVERY option sets? Then each row's
+ * "no flip" is guaranteed by the model's shape (no option reads the swept
+ * value) and is not evidence about the result. Structural `factor_id`
+ * membership only; an empty or absent set is never vacuous (today's behaviour).
+ */
+function isNoFlipAttestationVacuous(
+  enrichment: Record<string, unknown>,
+  factorIdsSetByEveryOption: ReadonlySet<string> | undefined,
+): boolean {
+  if (factorIdsSetByEveryOption === undefined || factorIdsSetByEveryOption.size === 0) return false;
+  const rows = readTopLevelFlipRows(enrichment);
+  return rows.length > 0 && rows.every((row) => factorIdsSetByEveryOption.has(row.factor_id));
+}
+
 /** True when the envelope plainly reports a non-robust result. */
 function isNotRobust(enrichment: Record<string, unknown>): boolean {
   const rob = readRecord(enrichment.robustness);
@@ -2120,14 +2148,21 @@ function isNotRobust(enrichment: Record<string, unknown>): boolean {
 function buildNarrationTail(
   enrichment: Record<string, unknown>,
   winner: ResolvedWinner,
+  factorIdsSetByEveryOption: ReadonlySet<string> | undefined,
 ): string {
   let tail = '';
   if (isNotRobust(enrichment)) {
     // 2.278: the run's OWN flip evidence picks the REASON. `permitted` — which
     // includes every run carrying no flip evidence at all — keeps the original
     // sentence byte-identical.
+    //
+    // P2: an attestation over factors EVERY option sets is vacuous — the sweep
+    // could not have moved the winner — so it is treated exactly like no flip
+    // evidence (`permitted`) rather than stated as a finding. The VERDICT stays:
+    // dropping the sentence would hide a true caveat (see 2.278 above).
     tail +=
-      readFlipClaimPosture(enrichment) === 'attested_no_flip'
+      readFlipClaimPosture(enrichment) === 'attested_no_flip' &&
+      !isNoFlipAttestationVacuous(enrichment, factorIdsSetByEveryOption)
         ? NOT_ROBUST_NO_FLIP_SENTENCE
         : NOT_ROBUST_SENTENCE;
   }

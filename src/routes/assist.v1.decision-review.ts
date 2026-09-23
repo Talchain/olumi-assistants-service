@@ -38,6 +38,7 @@ import { HTTP_CLIENT_TIMEOUT_MS } from "../config/timeouts.js";
 import { buildLLMRawTrace } from "../cee/llm-output-store.js";
 import { buildScienceClaimsSection, injectScienceClaimsSection } from "../cee/decision-review/science-claims.js";
 import { performShapeCheck, type ReviewInputForGrounding } from "../cee/decision-review/shape-check.js";
+import { redactUngroundedPolarityFigures } from "../cee/decision-review/figure-polarity.js";
 import { buildDecisionReviewUserMessage } from "../cee/decision-review/invoke.js";
 
 // ============================================================================
@@ -907,7 +908,31 @@ export default async function route(app: FastifyInstance) {
         { request_id: requestId, brief_hash: input.brief_hash },
         gapRedaction,
       );
-      const reviewOutput = gapRedaction.value;
+      // NARRATED FIGURES KEEP THEIR MEANING — the same polarity rule the V5
+      // enricher applies, at this carrier's egress (PLoT merges this review
+      // into `/v2/run` as `m1_review`). The shape check above already refuses a
+      // polarity-ungrounded figure and triggers the one retry; when the retry
+      // still carries it, the route ships the degraded result, so the sentence
+      // is replaced here rather than reaching the user.
+      const polarityRedaction = redactUngroundedPolarityFigures(
+        gapRedaction.value,
+        reviewInputForGrounding,
+      );
+      if (polarityRedaction.paths.length > 0) {
+        log.warn(
+          {
+            request_id: requestId,
+            brief_hash: input.brief_hash,
+            paths: polarityRedaction.paths,
+            ungrounded_holds: polarityRedaction.holds,
+            ungrounded_flips: polarityRedaction.flips,
+            stability_supplied: polarityRedaction.holdsSourcePresent,
+            switch_probability_supplied: polarityRedaction.flipsSourcePresent,
+          },
+          'cee.decision_review.ungrounded_polarity_figure_redacted',
+        );
+      }
+      const reviewOutput = polarityRedaction.value;
       const latencyMs = Date.now() - start;
 
       const response: Record<string, unknown> = {

@@ -90,6 +90,7 @@ import {
 
 import type { DecisionReviewOutput } from './types.js';
 import { applyDskGroundingPolicy } from '../../cee/decision-review/dsk-grounding-policy.js';
+import { redactUngroundedPolarityFigures } from '../../cee/decision-review/figure-polarity.js';
 
 export interface EnrichDecisionReviewInput {
   readonly handlerFacts: readonly HandlerFact[];
@@ -659,6 +660,36 @@ export async function enrichRunAnalysisWithDecisionReview(
     );
     const gapRedacted = gapRedaction.value as Record<string, unknown>;
 
+    // NARRATED FIGURES KEEP THEIR MEANING (Paul's manual test, 23 Sep 2026).
+    // A "holds in about N%" figure may be grounded ONLY by
+    // `recommendation_stability`, and a "flips in about N%" figure ONLY by the
+    // switch probabilities. The run in question carried no stability at all and
+    // the review narrated the FLIP probability (0.6968) as "holds in about 70%".
+    //
+    // Installed HERE because `performShapeCheck` — which now applies the same
+    // rule — is never called on this path. Same seam, same per-sentence surgery
+    // and the same reason as the runner-up gap policy directly above: the served
+    // decision_review prompt is a PMS row whose bytes this repo does not
+    // control, and it still asks for a stability figure PLoT no longer sends.
+    // Nothing derives a stability from `1 − switch_probability`.
+    const polarityRedaction = redactUngroundedPolarityFigures(gapRedacted, invokeInput);
+    if (polarityRedaction.paths.length > 0) {
+      // Field PATHS and counts only — never the prose (R-004).
+      log.warn(
+        {
+          request_id: input.requestId,
+          scenario_id: input.scenarioId,
+          paths: polarityRedaction.paths,
+          ungrounded_holds: polarityRedaction.holds,
+          ungrounded_flips: polarityRedaction.flips,
+          stability_supplied: polarityRedaction.holdsSourcePresent,
+          switch_probability_supplied: polarityRedaction.flipsSourcePresent,
+        },
+        'v5.decision_review.ungrounded_polarity_figure_redacted',
+      );
+    }
+    const polarityRedacted = polarityRedaction.value;
+
     // Validate the stored review against this selected run's enrichment and
     // its review input. Categorical movement is also forwarded before generation;
     // raw edge_e_values magnitudes never enter the prompt. The current producer
@@ -666,7 +697,7 @@ export async function enrichRunAnalysisWithDecisionReview(
     // condition and consequence are corrected together without dropping the card.
     // This is independent of shape/claim-permission gates and does not grant
     // a leader designation or certify conversational assistant_text.
-    const proseFact = checkProseFactAgreement(gapRedacted, enrichment, invokeInput);
+    const proseFact = checkProseFactAgreement(polarityRedacted, enrichment, invokeInput);
     if (proseFact.violations.length > 0) {
       emit(TelemetryEvents.V5DecisionReviewProseFactViolation, {
         request_id: input.requestId,

@@ -15,12 +15,25 @@
  *
  * Grounding rules:
  * - Numbers in descriptive fields must appear in the input data (±10%)
+ * - A percentage bound to a "holds" / "flips" phrase is POLARITY-BOUND: it is
+ *   grounded ONLY by its own field (`recommendation_stability` for holds,
+ *   switch probabilities for flips), and an absent field is UNGROUNDED, never
+ *   vacuous. See `figure-polarity.ts`.
  * - Violations emit UNGROUNDED_NUMBER warnings (one per fabricated number)
  * - Caller decides whether to retry on UNGROUNDED_NUMBER
  */
 
 import { config } from '../../config/index.js';
 import { getClaimById, getProtocolById } from '../../orchestrator/dsk-loader.js';
+import {
+  derivePolarityCorpus,
+  findPolarityBoundFigures,
+  isFigureGroundedForPolarity,
+  isWithinGroundingTolerance,
+  type FigurePolarity,
+  type PolarityBoundFigure,
+  type PolarityCorpus,
+} from './figure-polarity.js';
 
 // ============================================================================
 // Types
@@ -41,7 +54,9 @@ import { getClaimById, getProtocolById } from '../../orchestrator/dsk-loader.js'
  *                           was compared against it. Absence of
  *                           UNGROUNDED_NUMBER warnings is meaningful.
  * - `corpus_absent`         the input yielded NO groundable numbers, so every
- *                           number in the prose passed VACUOUSLY. Absence of
+ *                           number in the prose passed VACUOUSLY — except a
+ *                           polarity-bound "holds" / "flips" figure, which is
+ *                           refused when its field is absent. Absence of
  *                           warnings means "did not look", not "looked and
  *                           found nothing". `scannedNumbers` says how many were
  *                           waved through.
@@ -264,18 +279,9 @@ function isGrounded(n: number, groundedNums: number[]): boolean {
   // reports `coverage: 'corpus_absent'` alongside the count of numbers waved
   // through. Do not read a clean result without reading that report.
   if (groundedNums.length === 0) return true;
-  // Check the original number, percentage equivalents (n/100, n*100),
-  // and common magnitude multipliers (k=1000, m=1000000) so that
-  // "200" is grounded when the corpus contains 200000 (from "£200k").
-  const candidates = [n, n / 100, n * 100, n * 1000, n * 1_000_000];
-  for (const candidate of candidates) {
-    for (const g of groundedNums) {
-      if (g === 0 && candidate === 0) return true;
-      if (g === 0) continue;
-      if (Math.abs((candidate - g) / g) <= 0.10) return true;
-    }
-  }
-  return false;
+  // The ±10% proximity rule itself lives in `figure-polarity.ts`, so the general
+  // rule and the polarity rule share one tolerance (trap 12).
+  return isWithinGroundingTolerance(n, groundedNums);
 }
 
 // Regex that matches standalone numbers (integers and decimals, including negatives).
@@ -287,6 +293,13 @@ const NUMBER_PATTERN = /(?<![a-zA-Z_\-\d])(-?\d+(?:\.\d+)?)(?![a-zA-Z\d])/g;
 // Regex that captures the numeric part of percentage values (e.g. "99%" → "99").
 // Applied to a separate scan so percentages are validated against the corpus.
 const PERCENTAGE_PATTERN = /(?<![a-zA-Z_\-\d])(-?\d+(?:\.\d+)?)%/g;
+
+interface FabricatedNumber {
+  /** The token as written ("70%", "59"), quoted in the warning the retry prompt parses. */
+  readonly token: string;
+  /** Set when the number was refused by the POLARITY rule rather than the general one. */
+  readonly polarity: FigurePolarity | null;
+}
 
 /**
  * Collect all ungrounded numbers from a string field.
@@ -301,23 +314,42 @@ const PERCENTAGE_PATTERN = /(?<![a-zA-Z_\-\d])(-?\d+(?:\.\d+)?)%/g;
  * nothing" from "did not look": an empty `fabricated` alone cannot tell them
  * apart. Deduplication of `fabricated` is handled by callers; `scanned` counts
  * every token inspected and is deliberately NOT deduplicated.
+ *
+ * A token bound to a holds / flips phrase (`figure-polarity.ts`) is judged
+ * against its polarity's one source INSTEAD of the general corpus, and an
+ * absent source refuses it — the vacuous pass below never applies to it.
  */
 function findUngroundedNumbers(
   text: string,
   groundedNums: number[],
-): { fabricated: string[]; scanned: number } {
-  const fabricated: string[] = [];
+  polarityCorpus: PolarityCorpus,
+): { fabricated: FabricatedNumber[]; scanned: number } {
+  const fabricated: FabricatedNumber[] = [];
   let scanned = 0;
+
+  // A percentage bound to a holds / flips phrase is judged ONLY against its own
+  // field. Keyed by the index of its first digit, which is where both passes
+  // below start their match (the lookbehinds are zero-width).
+  const bound = new Map<number, PolarityBoundFigure>();
+  for (const figure of findPolarityBoundFigures(text)) bound.set(figure.index, figure);
+
+  const judge = (index: number, n: number, token: string): void => {
+    const figure = bound.get(index);
+    if (figure !== undefined) {
+      if (!isFigureGroundedForPolarity(figure, polarityCorpus)) {
+        fabricated.push({ token, polarity: figure.polarity });
+      }
+      return;
+    }
+    if (!isGrounded(n, groundedNums)) fabricated.push({ token, polarity: null });
+  };
 
   // Pass 1: percentages — extract numeric part of "N%"
   PERCENTAGE_PATTERN.lastIndex = 0;
   let match: RegExpExecArray | null;
   while ((match = PERCENTAGE_PATTERN.exec(text)) !== null) {
-    const n = parseFloat(match[1]);
     scanned++;
-    if (!isGrounded(n, groundedNums)) {
-      fabricated.push(`${match[1]}%`);
-    }
+    judge(match.index, parseFloat(match[1]), `${match[1]}%`);
   }
 
   // Pass 2: standalone numbers (not followed by %)
@@ -325,14 +357,28 @@ function findUngroundedNumbers(
   while ((match = NUMBER_PATTERN.exec(text)) !== null) {
     // Skip if immediately followed by % (already handled in pass 1)
     if (text[match.index + match[0].length] === '%') continue;
-    const n = parseFloat(match[1]);
     scanned++;
-    if (!isGrounded(n, groundedNums)) {
-      fabricated.push(match[1]);
-    }
+    judge(match.index, parseFloat(match[1]), match[1]);
   }
 
   return { fabricated, scanned };
+}
+
+/**
+ * The warning for one refused number. The `UNGROUNDED_NUMBER: "<token>"` prefix
+ * is load-bearing: the route's retry filter matches the prefix, its correction
+ * prompt extracts the quoted token, and `decompose.ts` promotes the prefix to
+ * FATAL. A polarity refusal says WHICH field could have grounded it, so the
+ * retry is told the meaning, not just the number.
+ */
+function ungroundedWarning(bad: FabricatedNumber, field: string): string {
+  if (bad.polarity === 'holds') {
+    return `UNGROUNDED_NUMBER: "${bad.token}" in ${field} is a "holds" figure; only isl_results.robustness.recommendation_stability can ground it, and it does not`;
+  }
+  if (bad.polarity === 'flips') {
+    return `UNGROUNDED_NUMBER: "${bad.token}" in ${field} is a "flips" figure; only isl_results.fragile_edges[] switch probabilities can ground it, and they do not`;
+  }
+  return `UNGROUNDED_NUMBER: "${bad.token}" in ${field} is not within ±10% of any input value`;
 }
 
 /**
@@ -375,8 +421,18 @@ function groundNumbers(
   input: ReviewInputForGrounding,
 ): { warnings: string[]; report: GroundingReport } {
   const groundedNums = extractGroundedNumbers(input);
+  const polarityCorpus = derivePolarityCorpus(input);
   const warnings: string[] = [];
   let scanned = 0;
+
+  // Deduplicated per field on token AND rule, so a token refused under both
+  // the general and the polarity rule in one field reports both reasons.
+  const report = (bad: FabricatedNumber, field: string, seen: Set<string>): void => {
+    const key = `${bad.polarity ?? 'general'}:${bad.token}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    warnings.push(ungroundedWarning(bad, field));
+  };
 
   for (const key of DESCRIPTIVE_FIELD_KEYS) {
     if (!(key in data)) continue;
@@ -384,14 +440,9 @@ function groundNumbers(
     // Collect all fabricated numbers across all strings, deduplicated per field
     const seen = new Set<string>();
     for (const str of strings) {
-      const scan = findUngroundedNumbers(str, groundedNums);
+      const scan = findUngroundedNumbers(str, groundedNums, polarityCorpus);
       scanned += scan.scanned;
-      for (const bad of scan.fabricated) {
-        if (!seen.has(bad)) {
-          seen.add(bad);
-          warnings.push(`UNGROUNDED_NUMBER: "${bad}" in ${key} is not within ±10% of any input value`);
-        }
-      }
+      for (const bad of scan.fabricated) report(bad, key, seen);
     }
   }
 
@@ -400,14 +451,9 @@ function groundNumbers(
     const seen = new Set<string>();
     for (const bf of data.bias_findings as Record<string, unknown>[]) {
       if (typeof bf.description === 'string') {
-        const scan = findUngroundedNumbers(bf.description, groundedNums);
+        const scan = findUngroundedNumbers(bf.description, groundedNums, polarityCorpus);
         scanned += scan.scanned;
-        for (const bad of scan.fabricated) {
-          if (!seen.has(bad)) {
-            seen.add(bad);
-            warnings.push(`UNGROUNDED_NUMBER: "${bad}" in bias_findings[].description is not within ±10% of any input value`);
-          }
-        }
+        for (const bad of scan.fabricated) report(bad, 'bias_findings[].description', seen);
       }
     }
   }
