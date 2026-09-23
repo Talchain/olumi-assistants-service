@@ -57,6 +57,7 @@ let afterRun: (() => void) | null = null;
 describe('the Agent turn carries the scenario’s state, bound to the graph it returns', () => {
   let app: FastifyInstance;
   let hashOf: (g: unknown) => string | null;
+  let canonicalRead: (graph: unknown) => Promise<{ analysis_state: unknown; analysis_result: unknown }>;
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async () => {
       const output = callModelOutputs.shift() ?? [{ type: 'message', content: [{ type: 'output_text', text: 'Done.' }] }];
@@ -68,6 +69,7 @@ describe('the Agent turn carries the scenario’s state, bound to the graph it r
     const { computeAnalysisAffectingGraphHash } = await import('../../context/graph-hash.js');
     hashOf = (g) => computeAnalysisAffectingGraphHash(g as never) ?? null;
     const { readScenarioAnalysis } = await import('../../../routes/scenario-graph-analysis-read.js');
+    canonicalRead = (graph) => readScenarioAnalysis({ scenarioId: SCENARIO, graph, requestId: 'test' }) as never;
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     app = Fastify({ logger: false });
     app.post('/orchestrate/v2/turn', async () => {
@@ -77,7 +79,7 @@ describe('the Agent turn carries the scenario’s state, bound to the graph it r
       runFact = { ...SERVED_FACT, noop: false, result: { ...SERVED_FACT.result, scenario_id: SCENARIO, graph_hash_at_run: hashOf(currentGraph) } };
       const response = {
         response_version: 2, assistant_text: 'ok', suggested_actions: [], insights: [], graph_hash: 'h-run',
-        blocks: [{ type: 'analysis_result', data: {} }],
+        blocks: [{ type: 'analysis_result', data: { marker: 'the-agent-run-A-block' } }],
         analysis_ready: { status: 'ready', options: [], blockers: [] },
         analysis_state: { marker: 'the-run-s-own-verdict' },
       };
@@ -122,6 +124,23 @@ describe('the Agent turn carries the scenario’s state, bound to the graph it r
     expect(s.leader_claim?.permitted).toBe(false);
     expect(((r.json().blocks ?? []) as { type: string }[]).some((b) => b.type === 'analysis_result')).toBe(false);
     expect((r.json().draft_graph as { node_count?: number }).node_count, 'the NEW graph is returned').toBe(3);
+  });
+
+  it('RED: run A → graph changes to B → ANOTHER analysis of B commits before readback — B\u2019s bound result and verdict, never A\u2019s', async () => {
+    afterRun = () => {
+      currentGraph = GRAPH_B;
+      // Another writer's successful run of B, with a distinguishable leader.
+      runFact = { ...SERVED_FACT, noop: false, result: { ...SERVED_FACT.result, scenario_id: SCENARIO, leading_option_id: 'the_b_run_leader', graph_hash_at_run: hashOf(GRAPH_B) } };
+    };
+    const r = await runThenAnswer();
+    const blocks = (r.json().blocks ?? []) as { type: string }[];
+    const results = blocks.filter((b) => b.type === 'analysis_result');
+    expect(JSON.stringify(results), 'never the Agent\u2019s run-A block').not.toContain('the-agent-run-A-block');
+    // Bound by IDENTITY to what the canonical reader selects for the FINAL graph.
+    const canonical = await canonicalRead(GRAPH_B);
+    expect(canonical.analysis_result, 'the control: B is current in the canonical reader').not.toBeNull();
+    expect(results).toEqual([canonical.analysis_result]);
+    expect(r.json().analysis_state).toEqual(canonical.analysis_state);
   });
 
   it('CONTRAST: an unavailable readback cannot manufacture currentness — the finaliser’s honest unknown, and no result', async () => {
