@@ -907,8 +907,25 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ...finalised,
       ...(analysisBlocks.length > 0 ? { blocks: [...existingBlocks, ...analysisBlocks] } : {}),
       ...(graphHash !== undefined ? { graph_hash: graphHash } : {}),
+      /**
+       * ⛔⛔ BOTH BRANCHES ARE STAMPED, AND THE FIRST ONE IS THE ONE THAT MATTERS.
+       *
+       * There are TWO sources of `analysis_ready` here and `analysisFromTool`
+       * WINS. Stamping only inside `readBackState` would have landed the
+       * freshness field on the LOSING branch — so on exactly the turns where
+       * the Agent actually ran an analysis, and where staleness is most
+       * consequential, the UI would still have had one side of the comparison.
+       * An inner branch under an outer gate: the unit was right and the
+       * composition was not.
+       *
+       * ⚠ THE CURRENT HASH IS CORRECT FOR A TOOL RESULT TOO, and that is the
+       * point rather than a compromise. `current_graph_hash` means "the model as
+       * it stands on this turn"; the tool's own `graph_hash_at_run` says what it
+       * was computed against. If a later write moved the graph, the two now
+       * DIFFER — which is precisely how the UI is meant to notice.
+       */
       ...(analysisFromTool?.analysis_ready !== undefined
-        ? { analysis_ready: analysisFromTool.analysis_ready }
+        ? { analysis_ready: withCurrentGraphHash(analysisFromTool.analysis_ready, graphHash) }
         : analysisReady !== undefined ? { analysis_ready: analysisReady } : {}),
       ...(draftGraph !== undefined ? { draft_graph: draftGraph } : {}),
       /**
