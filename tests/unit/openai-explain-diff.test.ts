@@ -40,7 +40,7 @@ const ARGS = {
   brief: 'We must decide whether to raise prices by 8 percent before Christmas.',
   graph_summary: { node_count: 12, edge_count: 17 },
 };
-const OPTS: CallOpts = { requestId: 'explain-test-1' };
+const OPTS: CallOpts = { requestId: 'explain-test-1', timeoutMs: 30_000 };
 
 /** Runs the REAL method body with a scripted `chat`, capturing its args. */
 async function runExplainDiff(content: string) {
