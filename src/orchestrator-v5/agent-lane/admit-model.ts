@@ -176,6 +176,8 @@ export interface AdmittedModel {
   readonly goal_constraints: readonly AdmittedConstraint[];
   readonly loss: readonly RepairEntry[];
   readonly withheld: readonly { from: string; to: string; reason: string; detail: string }[];
+  /** Factors the model called controllable that no option changes — held as context (demoteUnreachedLevers). */
+  readonly treated_as_context?: readonly string[];
 }
 
 /** Shorten to the label budget at a word boundary, never mid-word. */
@@ -342,6 +344,48 @@ export function defaultFrameFor(largestMagnitude: number): number {
   const magnitude = Math.abs(largestMagnitude);
   if (!Number.isFinite(magnitude) || magnitude <= 1) return 1;
   return 10 ** Math.ceil(Math.log10(magnitude) + Number.EPSILON);
+}
+
+/**
+ * ⛔ A LEVER NO OPTION PULLS IS CONTEXT, NOT A LEVER (served 23 Sep, `c4a6cce`,
+ * canonical pricing brief). The builder marked "Pro feature release readiness"
+ * `controllable`, but no option changes it — so readiness refused the whole
+ * comparison (`Factor … is not connected to any option`, the sole blocker) even
+ * after the user adopted every starting value. For THIS decision a factor that
+ * no option reaches is held at its value while the options are compared: it is
+ * context. It is reclassified `external` — never given an invented option or a
+ * number — and the user is told, so they can say which option should change it.
+ *
+ * Pure over the admitted graph: an option reaches a factor through an edge
+ * (transitively) or through its `interventions`.
+ */
+export function demoteUnreachedLevers<N extends { id: string; kind?: string; label?: string; category?: string; interventions?: Record<string, unknown> }>(
+  nodes: readonly N[],
+  edges: readonly { from: string; to: string }[],
+): { nodes: N[]; demoted: string[] } {
+  const next = new Map<string, string[]>();
+  for (const e of edges) next.set(e.from, [...(next.get(e.from) ?? []), e.to]);
+  const reached = new Set<string>();
+  const stack: string[] = [];
+  for (const n of nodes) {
+    if (n.kind !== 'option') continue;
+    for (const f of Object.keys(n.interventions ?? {})) reached.add(f);
+    stack.push(...(next.get(n.id) ?? []));
+  }
+  while (stack.length > 0) {
+    const x = stack.pop()!;
+    if (reached.has(x)) continue;
+    reached.add(x);
+    stack.push(...(next.get(x) ?? []));
+  }
+  const demoted: string[] = [];
+  const out = nodes.map((n) => {
+    if (n.kind !== 'factor' || reached.has(n.id)) return n;
+    if (n.category === 'external' || n.category === 'observable') return n;
+    demoted.push(n.label ?? n.id);
+    return { ...n, category: 'external' };
+  });
+  return { nodes: out, demoted };
 }
 
 export function admitCandidateModel(
@@ -901,10 +945,22 @@ export function admitCandidateModel(
     finalEdges = edgesNow;
   }
 
+  const levers = demoteUnreachedLevers(nodes, finalEdges);
+  for (const label of levers.demoted) {
+    loss.push({
+      field_path: `nodes[${label}].category`,
+      before: 'controllable',
+      after: 'external',
+      reason: `No option in this decision changes "${label}", so it is held at its value as context while the options are compared, not treated as a lever. If one of the options should change it, say which and it can be connected.`,
+      severity: 'info',
+    } as RepairEntry);
+  }
+
   return {
-    nodes,
+    nodes: levers.nodes,
     inference_classes,
     edges: finalEdges,
+    ...(levers.demoted.length > 0 ? { treated_as_context: levers.demoted } : {}),
     goal_constraints: constraintResult.constraints,
     loss,
     // `withheld` is a list of LINKS by contract; a withheld NODE is reported
