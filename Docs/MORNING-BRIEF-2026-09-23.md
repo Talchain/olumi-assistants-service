@@ -205,3 +205,27 @@ so registrations were bypassing the fence that stops a superseded turn clobberin
 - **If it does not** — work section 9's order: signed in? fenced? only then the carrier. The fence is the *new* variable here and the first thing I would suspect after authentication.
 
 ⭐ **Stated plainly because the temptation ran the other way:** it would have been easy to write "P0 still holds on the new build" on the strength of an empty result set. Every absence claim tonight needed a non-vacuity control, and this one fails it. **Verified on the previous build, unverified on this one.**
+
+---
+
+## 11. ⚠ After #1717 lands, a stacked PR will have NO required check — and no signal that it is missing
+
+#1717 (`25bf0e91…`) has an independent exact-head APPROVE and merges as soon as its required check goes green. It narrows `push` to `[main, staging]` and keeps `pull_request` on `[main, staging]`.
+
+**The reviewer surfaced a consequence I had not stated**, and it is the sharper half of the trade:
+
+> stacked PRs whose base is not `main`/`staging` get **none** of these five workflows, because `pull_request` filters on the **base** branch.
+
+So after this lands:
+
+| what you do | checks you get |
+|---|---|
+| PR into `staging`/`main` | full set, including the required `Lint, TypeCheck, Unit Tests` |
+| push to `feat/**` with no PR | none (accepted trade) |
+| **PR stacked onto another feature branch** | **none of these five — silently** |
+
+**Why this is worse than the `feat/**` loss:** it is invisible. A stacked PR shows **no checks at all** rather than a red one, and on this estate silence has repeatedly been misread as green. `ci.yml` carries the **sole required context**, so someone stacking onto a feature branch gets nothing to satisfy and no indication anything is absent.
+
+It matches the estate's pre-existing rule that stacked PRs get zero checks, which is why the reviewer approved and why landing it tonight is still right — the queue relief is real and measured. But it extends that hole to the required check.
+
+**Practical rule after this lands: base PRs on `staging`, not on another feature branch.** If a stack is unavoidable, re-target the tip PR at `staging` before asking for a verdict, or it cannot be merge-cleared and nothing will tell you why.
