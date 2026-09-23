@@ -196,6 +196,33 @@ The construction half is still **61% reasoning tokens** (`in 838 / out 3404 incl
 and **graph size barely matters** (`r(nodes,duration)=0.293`, under 9% of variance): on your own
 brief a **26-node** graph took **48.9s** while a **15-node** one took **77.9s**.
 
+## 2b. ⭐ DEPLOYMENT IS NOT THE BOTTLENECK — REVIEW IS. Measured.
+
+You said deployment feels like it needs streamlining. **It does not.** Render API, last five deploys:
+
+| stage | measured |
+|---|---|
+| merge commit → Render deploy STARTS | **2.4–3.1 seconds** |
+| build → `live` | **113–182 seconds** |
+| **merge → live, end to end** | **under 3.5 minutes, fully automatic** |
+
+`cee-staging` has `autoDeploy=yes`, so **merging IS deploying** — there is no separate deploy step to
+streamline, and effort spent there is wasted.
+
+**The constraint is review latency.** #1701 held ~5 hours on a correctly-bound REVIEW_REQUEST with no
+verdict of any kind (not a stale one — `pulls/1701/reviews` empty, 0 of 27 comments carrying a
+line-start verdict). Earlier tonight 14 PRs sat green on the required check with zero merges.
+
+⭐ **The single highest-leverage change is yours, not mine:** the current rubric puts *any* shared CI
+file and *any* view-model or wire change above LOW RISK, which covers nearly everything this lane
+builds — so almost every PR needs an independent exact-head verdict. **Widening self-merge to
+agent-lane-only diffs that carry a RED-first test plus a discriminating mutant that was actually
+killed** would have landed #1701 hours ago. #1717 would still have needed review under that rule, and
+correctly so.
+
+⚠ And the sequencing that blocks me specifically: Release Control item 6 (07:16:04Z) holds #1701
+behind **#1720**, which is open with its required check green. Nothing I can do accelerates that.
+
 ## 3. Merge order I would recommend
 
 | # | PR | why |
