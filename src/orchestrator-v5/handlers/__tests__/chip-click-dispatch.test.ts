@@ -372,6 +372,47 @@ describe('dispatchDeterministicChipClick — run_analysis regression', () => {
     expect(enrichRunAnalysisMock, 'the generative review is never invoked').not.toHaveBeenCalled();
   });
 
+  /**
+   * Independent review of #1744 (5796462881) and the preflight pre-review: the only
+   * operator-visible attribution of the skip is its telemetry reason, and nothing
+   * pinned it — a mutant emitting 'autofire_disabled' for the Agent run survived.
+   */
+  it('RED: the Agent run\u2019s skip is ATTRIBUTED — v5 decision_review skipped with reason agent_lane_openai', async () => {
+    const { AGENT_RUN_ANALYSIS_CHIP_ID } = await import('../chip-click-dispatch.js');
+    const { setTestSink, TelemetryEvents } = await import('../../../utils/telemetry.js');
+    const seen: { name: string; data: Record<string, unknown> }[] = [];
+    setTestSink((name, data) => { seen.push({ name, data }); });
+    try {
+      const payload = makeMessagePayload({
+        scenario_id: SCENARIO_ID, turn_id: TURN_ID, stage: 'analyse', message: 'Run it.',
+        turn_class: 'decide', source: 'chip_click',
+        chip: { id: AGENT_RUN_ANALYSIS_CHIP_ID, action_type: 'run_analysis' },
+      });
+      await dispatchDeterministicChipClick('run_analysis', { payload, requestId: 'req-agent-run-attr' });
+    } finally {
+      setTestSink(null);
+    }
+    const skipped = seen.filter((e) => e.name === TelemetryEvents.V5DecisionReviewSkipped);
+    expect(skipped.map((e) => e.data.reason)).toEqual(['agent_lane_openai']);
+  });
+
+  /**
+   * The preflight pre-review of #1744: the existing contrast sends NO chip id, so a
+   * skip keyed on "any id" would pass both tests while stripping decision_review from
+   * Conventional. Real Conventional chip clicks DO carry an id (UI buildPayload.ts;
+   * CEE mints 'chip_action_rerun_analysis').
+   */
+  it('CONTRAST: a Conventional run_analysis chip WITH its own id still awaits the review enricher', async () => {
+    const payload = makeMessagePayload({
+      scenario_id: SCENARIO_ID, turn_id: TURN_ID, stage: 'analyse', message: 'Re-run the analysis.',
+      turn_class: 'decide', source: 'chip_click',
+      chip: { id: 'chip_action_rerun_analysis', action_type: 'run_analysis' },
+    });
+    const out = await dispatchDeterministicChipClick('run_analysis', { payload, requestId: 'req-conv-rerun' });
+    expect(out.outcome).toBe('ok');
+    expect(enrichRunAnalysisMock).toHaveBeenCalledTimes(1);
+  });
+
   it('run_analysis chip-click continues to dispatch with no behavioural change for the existing path', async () => {
     const out = await dispatchDeterministicChipClick('run_analysis', {
       payload: payloadFor('run_analysis'),
