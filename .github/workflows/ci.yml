@@ -19,7 +19,20 @@ on:
 # would destroy evidence of what was verified at that SHA. Only branch and PR
 # runs — where a newer push has already made the older run irrelevant — cancel.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # ⛔ NORMALISED REF, so a same-repo PR and its branch push share ONE group.
+  #
+  # Measured on PR #1711, one head SHA: `Lint, TypeCheck, Unit Tests` ran TWICE.
+  # These workflows trigger on both `push` and `pull_request`, and for a branch
+  # in this repo those produce different `github.ref` — `refs/heads/<branch>`
+  # versus `refs/pull/<n>/merge`. Different ref, different group, both survive.
+  # With 25 open PRs that doubling is plausibly the larger half of the queue.
+  #
+  # ⚠ The obvious remedy, `github.head_ref || github.ref`, does NOT work: on a
+  # PR `head_ref` is "fix/foo" while on a push `github.ref` is
+  # "refs/heads/fix/foo" — still two groups. `github.ref_name` strips the
+  # refs/heads/ prefix, so pairing it with `pull_request.head.ref` yields the
+  # same string from both events.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/staging' && github.ref != 'refs/heads/main' }}
 
 permissions:
