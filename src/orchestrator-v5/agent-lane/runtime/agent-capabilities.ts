@@ -72,6 +72,7 @@ export function receiptSummaryOf(json: unknown): { summary: ReceiptSummary | nul
   }
 }
 
+import { planNewOption, newOptionFollowUp } from '../propose-new-option.js';
 import { createProposal, ProposalStore, type ProposalOperation, type ReceiptSummary, type StructuredProposal } from '../proposal.js';
 import { modelVersionMutationReceiptFromResponse } from '../../model-management/mutation-receipt.js';
 import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
@@ -1023,6 +1024,80 @@ export function createAgentCapabilities(
       // The STORED operations are applied. Nothing is regenerated here.
       const ops = decision.proposal.operations;
 
+      /**
+       * ⭐ ADD AN OPTION — its own route, BEFORE the compound gate.
+       *
+       * `applyCompound` accepts only `set_factor_value` and
+       * `set_option_intervention` and refuses everything else as
+       * `unsupported_compound`. Creating an entity is a different write family, so
+       * widening that gate would dissolve the property that makes it safe. This
+       * route handles exactly `add_node` + `add_edge` and nothing else.
+       *
+       * ⛔ THE HASH IS RE-READ BETWEEN EVERY WRITE. `structural_add_edge` refuses
+       * `BASE_HASH_DIVERGED` against a stale base, and the node write moves the
+       * hash — so reusing the proposal's base hash for the edges would refuse
+       * every one of them AFTER the user approved. That is the exact shape of the
+       * failure this lane has already met twice.
+       */
+      if (ops[0]?.op === 'add_node' && ops.slice(1).every((o) => o.op === 'add_edge')) {
+        const optionId = String(ops[0].path);
+        const nodeValue = (ops[0].value ?? {}) as { label?: unknown };
+        const operationId = authorisationTurnId(decision.proposal.proposal_id);
+        let baseHash = decision.proposal.base_graph_identity_hash;
+
+        const addRes = await dispatch('/orchestrate/v2/turn', {
+          kind: 'system_event', turn_id: operationId, scenario_id: ctx.scenario_id, stage: 'frame',
+          event: { kind: 'structural_add', node_id: optionId, node_kind: 'option',
+            label: String(nodeValue.label ?? ''), base_graph_hash: baseHash },
+        });
+        let afterAdd = await readGraph(ctx.scenario_id);
+        const optionExists = (afterAdd?.nodes ?? []).some((n) => n.id === optionId);
+        if (!optionExists) {
+          return { ok: false, mutated: false, applied: false, refusal: 'not_applied',
+            detail: String(addRes.json.assistant_text ?? 'The option was not added, so nothing else was attempted.'),
+            http: addRes.status, operation_id: operationId };
+        }
+        baseHash = afterAdd?.graph_hash ?? baseHash;
+
+        const linked: string[] = [];
+        const notLinked: { factor: string; detail: string }[] = [];
+        for (const edgeOp of ops.slice(1)) {
+          const [, factorId] = String(edgeOp.path).split('::');
+          const factorNode = (afterAdd?.nodes ?? []).find((n) => n.id === factorId);
+          const factorLabel = String(factorNode?.label ?? factorId);
+          const direction = (edgeOp.value as { direction?: unknown } | undefined)?.direction === 'negative' ? 'negative' : 'positive';
+          const edgeRes = await dispatch('/orchestrate/v2/turn', {
+            kind: 'system_event', turn_id: authorisationTurnId(`${decision.proposal.proposal_id}:${factorId}`),
+            scenario_id: ctx.scenario_id, stage: 'frame',
+            event: { kind: 'structural_add_edge', from: optionId, to: factorId,
+              // ⚠ The projection default, exactly as the edge route above records:
+              // the wire requires a magnitude and this is not the user's claim.
+              magnitude: 0.5, effect_direction: direction, base_graph_hash: baseHash },
+          });
+          afterAdd = await readGraph(ctx.scenario_id);
+          const present = (afterAdd?.edges ?? []).some((e) => e.from === optionId && e.to === factorId);
+          if (present) { linked.push(factorLabel); baseHash = afterAdd?.graph_hash ?? baseHash; }
+          else notLinked.push({ factor: factorLabel, detail: String(edgeRes.json.assistant_text ?? 'not linked') });
+        }
+
+        /**
+         * ⚠ REPORTED HONESTLY, INCLUDING A PARTIAL. The option exists once the node
+         * write lands, so claiming failure would be false — but an option missing a
+         * link it was approved with is NOT what the user agreed to, and saying so is
+         * the difference between a receipt and a reassurance.
+         */
+        return {
+          ok: true, mutated: true, applied: true,
+          operation_id: operationId,
+          option: { label: String(nodeValue.label ?? ''), linked_to: linked },
+          ...(notLinked.length > 0 ? { not_linked: notLinked } : {}),
+          receipts: receiptSummaryOf(addRes.json),
+          follow_up: newOptionFollowUp({ ok: true, optionId, label: String(nodeValue.label ?? ''),
+            actsOn: linked.map((l) => ({ id: '', label: l, direction: 'positive' as const })),
+            publicLabel: decision.proposal.public_label }),
+        };
+      }
+
       // A starting point mixes kinds; each single-kind path below handles one.
       if (new Set(ops.map((o) => o.op)).size > 1) return applyCompound(ctx, decision.proposal, before);
 
@@ -1451,6 +1526,62 @@ export function createAgentCapabilities(
         // The SAME projection get_canonical_state uses — see projectEntity.
         entities: after.nodes.map(projectEntity),
         structure: structuralFacts(after.nodes, after.edges),
+      };
+    },
+
+    /**
+     * ⭐ ADD AN OPTION THE USER PICKED — the act RC named as missing.
+     *
+     * Proposal only, exactly like every other write on this lane: nothing changes
+     * until `authorise_change`. The plan is computed by `planNewOption`, a pure
+     * function, so the refusals are testable without a graph round trip.
+     */
+    async proposeNewOption(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      const g = await readGraph(ctx.scenario_id);
+      if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      const plan = planNewOption(g.nodes as never, {
+        label: String(args?.label ?? ''),
+        acts_on: Array.isArray(args?.acts_on)
+          ? args.acts_on.map((x) => {
+              const a = (x ?? {}) as { factor_label?: unknown; direction?: unknown };
+              return { factor_label: String(a.factor_label ?? ''), direction: a.direction === 'negative' ? 'negative' as const : 'positive' as const };
+            })
+          : [],
+        rationale: String(args?.rationale ?? ''),
+      });
+      if (!plan.ok) {
+        return { ok: false, mutated: false, refusal: plan.refusal, detail: plan.detail,
+          ...(plan.unresolved_labels ? { unresolved_labels: plan.unresolved_labels } : {}) };
+      }
+      /**
+       * ⚠ `add_node` FIRST, THEN ONE `add_edge` PER FACTOR — the order is the
+       * write's, not a preference: `structural_add_edge` cannot reference a node
+       * that does not exist yet. The applier below walks them in this order.
+       */
+      const operations: ProposalOperation[] = [
+        { op: 'add_node', path: plan.optionId, value: { kind: 'option', label: plan.label } },
+        ...plan.actsOn.map((f) => ({ op: 'add_edge' as const, path: `${plan.optionId}::${f.id}`, value: { direction: f.direction } })),
+      ];
+      const proposal = createProposal({
+        scenario_id: ctx.scenario_id,
+        user_id: ctx.authenticated_user_id,
+        base_graph_identity_hash: g.graph_hash,
+        operations,
+        provenance: { authored_by: 'user_stated', basis: 'an option the user asked to add' },
+        validation: { admitted: true, loss_count: 0, refusals: [] },
+        public_label: plan.publicLabel,
+      });
+      proposals.put(proposal);
+      return {
+        ok: true, mutated: false,
+        proposal_id: proposal.proposal_id,
+        public_label: proposal.public_label,
+        base_revision: g.graph_hash,
+        option: { label: plan.label, acts_on: plan.actsOn.map((a) => a.label) },
+        note:
+          'Nothing has changed yet. Show the user the option and what it will be linked to, never the id, '
+          + 'and call authorise_change with this proposal_id once they agree.',
       };
     },
 
