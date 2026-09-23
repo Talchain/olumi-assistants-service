@@ -61,10 +61,7 @@ setGlobalDispatcher(undiciAgent);
 let client: OpenAI | null = null;
 let clientSdkMaxRetries: number | undefined;
 
-function getClient(purpose: string, model: string): OpenAI {
-  // Records the attempt in the request's provider ledger (and refuses it under a
-  // policy that forbids OpenAI) immediately before the adapter's request is built.
-  assertProviderAllowed('openai', `openai-adapter.${purpose}`, { model, purpose });
+function getClient(): OpenAI {
   const apiKey = getApiKey();
   const sdkMaxRetries = sdkMaxRetriesForLiveEval();
   if (!apiKey) {
@@ -78,6 +75,16 @@ function getClient(purpose: string, model: string): OpenAI {
     clientSdkMaxRetries = sdkMaxRetries;
   }
   return client;
+}
+
+/**
+ * The client, for one generative call: records the attempt in the request's
+ * provider ledger (and refuses it under a policy that forbids OpenAI) immediately
+ * before the adapter's request is built. See `provider-policy.ts`.
+ */
+function guardedClient(purpose: string, model: string): OpenAI {
+  assertProviderAllowed('openai', `openai-adapter.${purpose}`, { model, purpose });
+  return getClient();
 }
 
 const TIMEOUT_MS = HTTP_CLIENT_TIMEOUT_MS;
@@ -481,7 +488,7 @@ export class OpenAIAdapter implements LLMAdapter {
     }
 
     try {
-      const apiClient = getClient('draft_graph', this.model);
+      const apiClient = guardedClient('draft_graph', this.model);
       // Derive the draft token cap from the call-site timeout — the SAME
       // affordability mechanism the Anthropic path uses (ROADMAP 2.90, Codex #9).
       // Previously this sent the raw configured value or NO cap at all
@@ -956,7 +963,7 @@ export class OpenAIAdapter implements LLMAdapter {
     const timeoutId = setTimeout(() => abortController.abort(), effectiveTimeout);
 
     try {
-      const apiClient = getClient('suggest_options', this.model);
+      const apiClient = guardedClient('suggest_options', this.model);
       const maxTokens = getMaxTokensFromConfig('suggest_options');
       const modelParams = buildModelParams(this.model, 0.7, { maxTokens }); // 0.7 for creativity in options
 
@@ -1073,7 +1080,7 @@ export class OpenAIAdapter implements LLMAdapter {
 
     const prompt = buildClarifyBriefPrompt(brief, round, previous_answers, currencyInstruction);
 
-    const client = getClient('clarify_brief', this.model);
+    const client = guardedClient('clarify_brief', this.model);
     const effectiveTimeout = opts.timeoutMs || getTimeoutForModel(this.model);
 
     try {
@@ -1329,7 +1336,7 @@ export class OpenAIAdapter implements LLMAdapter {
     }
 
     try {
-      const apiClient = getClient('chat', this.model);
+      const apiClient = guardedClient('chat', this.model);
       const modelParams = buildModelParams(this.model, temperature, { maxTokens });
 
       const response = await withRetry(
@@ -1469,7 +1476,7 @@ export class OpenAIAdapter implements LLMAdapter {
     const timeoutId = setTimeout(() => abortController.abort(), timeoutMs);
 
     try {
-      const apiClient = getClient('chat_with_tools', this.model);
+      const apiClient = guardedClient('chat_with_tools', this.model);
       const modelParams = buildModelParams(this.model, temperature, { maxTokens });
 
       // Convert messages: ToolResponseBlock[] content → OpenAI format.
