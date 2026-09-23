@@ -69,7 +69,7 @@ describe('a caller can choose the reasoning effort, and it reaches the request',
     const { OpenAIAdapter } = await import('../../src/adapters/llm/openai.js');
     await new OpenAIAdapter(REASONING_MODEL).chat(
       { system: 'sys', userMessage: 'msg', maxTokens: 512, reasoningEffort: 'high' },
-      { requestId: 'effort-high' },
+      { requestId: 'effort-high', timeoutMs: 30_000 },
     );
     expect(sentBody().reasoning_effort).toBe('high');
   });
@@ -81,7 +81,7 @@ describe('a caller can choose the reasoning effort, and it reaches the request',
     const { OpenAIAdapter } = await import('../../src/adapters/llm/openai.js');
     await new OpenAIAdapter(REASONING_MODEL).chat(
       { system: 'sys', userMessage: 'msg', maxTokens: 512 },
-      { requestId: 'effort-default' },
+      { requestId: 'effort-default', timeoutMs: 30_000 },
     );
     expect(sentBody().reasoning_effort).toBe('medium');
   });
@@ -93,7 +93,7 @@ describe('a caller can choose the reasoning effort, and it reaches the request',
     const { OpenAIAdapter } = await import('../../src/adapters/llm/openai.js');
     await new OpenAIAdapter('gpt-4o').chat(
       { system: 'sys', userMessage: 'msg', maxTokens: 512, reasoningEffort: 'low' },
-      { requestId: 'effort-nonreasoning' },
+      { requestId: 'effort-nonreasoning', timeoutMs: 30_000 },
     );
     expect('reasoning_effort' in sentBody()).toBe(false);
   });
