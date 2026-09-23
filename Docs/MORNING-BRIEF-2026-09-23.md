@@ -74,7 +74,16 @@ The correlation is **negative** — bigger graphs analyse marginally *faster*. B
 
 **What I established:** the time is **not** CEE waiting. I read `plot-client.ts` and `run-analysis.ts` at the served SHA and found **no poll loop, no sleep, no fixed delay** — CEE's `/v2/run` cap is 75s and sits above PLoT's own budget. So the ~42s is genuinely spent downstream in PLoT/ISL.
 
-**Hypothesis, explicitly NOT verified:** a high floor with no size dependence is the signature of a **fixed simulation budget** — a sample count or iteration count that does not scale with the model. If that is what it is, it is a config change worth more than compaction and `reasoning_effort` combined. I did not verify it: PLoT and ISL are different repos and not my lane.
+**MECHANISM NOW IDENTIFIED** (I read `plot-lite-service` read-only; I did not touch it):
+
+- PLoT defaults to **1000 Monte Carlo samples** — `engine-v3.ts:436` *"Number of Monte Carlo samples (default: 1000)"*, `assembly/decision-brief.ts:47` `n_samples_default: 1000`. Bounded 100–10000 by `input-validation.ts`.
+- **CEE only sends `n_samples` when the snapshot already carries one** — `run-analysis.ts:901` `if (snapshot.n_samples !== undefined)`. So for a normal first analysis CEE sends nothing and **the 1000 default applies by omission.** (Contrast control: `goal_constraints` appears 8× in the same payload, so the probe is not blind.)
+- A fixed sample budget is exactly what produces a high floor that does not scale with node count — which is what the data shows.
+- PLoT already has a **`samples_reduced`** path that CEE surfaces to the user (`run-analysis.ts:1607, 1849`), so reducing samples is **supported, disclosed behaviour** rather than a hack.
+
+**⚠ THE TRADE, WHICH IS REAL — samples buy statistical confidence.** `trust/confidence-calibrated.ts:46` gates on `k_samples >= 1000`. Going below that plausibly downgrades what the product may honestly claim about its own confidence. This is the same shape as the `reasoning_effort` trade: not a free knob, a decision about what the product is allowed to say.
+
+**Still unverified:** that wall time scales roughly linearly with sample count. I did not measure it. If it does, 1000 → 300 would take ~42s toward ~15s — larger than compaction and `reasoning_effort` combined. **Owner: whoever owns PLoT / Scientific Compute, not me.**
 
 **Why this matters for sequencing:** compaction (#1710) targets 39% of the construction half; `reasoning_effort` targets 61% of it. **Neither touches this 42s at all.** If the journey needs to feel fast, this is the largest single lever and it currently has no owner.
 
