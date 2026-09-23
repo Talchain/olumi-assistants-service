@@ -127,6 +127,39 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       },
     }, ['interventions']),
   },
+  {
+    type: 'function',
+    name: 'propose_starting_point',
+    description:
+      'Propose, as ONE exact proposal the user approves ONCE, both the starting values for factors that ' +
+      'have none AND the level each option sets — everything a first comparison needs. Use this instead ' +
+      'of propose_assumptions + propose_option_interventions whenever both are needed: two separate ' +
+      'proposals cannot both be applied from one approval, because applying the first changes the model ' +
+      'the second was made against. This changes nothing on its own. Every figure is the user’s ' +
+      'assumption to adopt or correct, NEVER a measurement — say so. Values in the factor’s own units.',
+    parameters: obj({
+      assumptions: {
+        type: 'array',
+        description: 'Starting values for factors that have none. May be empty.',
+        items: obj({
+          factor_label: { type: 'string' },
+          value: { type: 'number' },
+          unit: { type: 'string' },
+          basis: { type: 'string' },
+        }, ['factor_label', 'value', 'unit', 'basis']),
+      },
+      option_levels: {
+        type: 'array',
+        description: 'The level each option sets a factor to, in the factor’s own units. May be empty.',
+        items: obj({
+          option_label: { type: 'string' },
+          factor_label: { type: 'string' },
+          value: { type: 'number' },
+          basis: { type: 'string' },
+        }, ['option_label', 'factor_label', 'value', 'basis']),
+      },
+    }, ['assumptions', 'option_levels']),
+  },
 ];
 
 export type ToolName = (typeof AGENT_TOOLS)[number]['name'];
@@ -145,7 +178,7 @@ export type ToolName = (typeof AGENT_TOOLS)[number]['name'];
  * registration route, and without it a preview has nothing to talk about. It is
  * additionally refused over a scenario that already has entities.
  */
-export const MUTATION_TOOLS: readonly string[] = ['propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'authorise_change'];
+export const MUTATION_TOOLS: readonly string[] = ['propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'authorise_change'];
 
 export type AgentLaneMode = 'full' | 'preview';
 
@@ -174,6 +207,9 @@ export interface AgentCapabilities {
   }): Promise<ToolResult>;
   proposeOptionInterventions(ctx: AgentToolContext, args: {
     interventions: readonly { option_label: string; factor_label: string; value: number; basis: string }[];
+  }): Promise<ToolResult>;  proposeStartingPoint(ctx: AgentToolContext, args: {
+    assumptions: readonly { factor_label: string; value: number; unit: string; basis: string }[];
+    option_levels: readonly { option_label: string; factor_label: string; value: number; basis: string }[];
   }): Promise<ToolResult>;
 }
 
@@ -213,6 +249,8 @@ export async function dispatchTool(
       return caps.proposeAssumptions(ctx, args as never);
     case 'propose_option_interventions':
       return caps.proposeOptionInterventions(ctx, args as never);
+    case 'propose_starting_point':
+      return caps.proposeStartingPoint(ctx, args as never);
     default:
       // An unknown tool is never silently ignored: the Agent is told plainly.
       return { ok: false, mutated: false, refusal: 'unknown_tool', tool: name };

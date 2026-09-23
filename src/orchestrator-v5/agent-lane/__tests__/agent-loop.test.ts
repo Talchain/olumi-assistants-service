@@ -21,6 +21,7 @@ const caps = (over: Partial<AgentCapabilities> = {}): AgentCapabilities => ({
   // declares must be present, or the stub is not standing in for anything.
   proposeAssumptions: async () => ({ ok: true, mutated: false, proposal_id: 'prop_a' }),
   proposeOptionInterventions: async () => ({ ok: true, mutated: false, proposal_id: 'prop_i' }),
+  proposeStartingPoint: async () => ({ ok: true, mutated: false, proposal_id: 'prop_s' }),
   ...over,
 });
 

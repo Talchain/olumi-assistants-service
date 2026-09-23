@@ -287,6 +287,13 @@ export default async function route(app: FastifyInstance) {
         return invalid("OPERATION_ID_INVALID", "`operation_id` must be a UUID when supplied.");
       }
       const operationId = typeof body.operation_id === "string" ? body.operation_id : undefined;
+      // An OPTIONAL caller assertion: "write this ONLY if the model is still the
+      // one I read". Validated before any database work, like `operation_id`.
+      if (body.expected_graph_hash != null && (typeof body.expected_graph_hash !== "string" || body.expected_graph_hash.length === 0)) {
+        return invalid("EXPECTED_GRAPH_HASH_INVALID", "`expected_graph_hash` must be a non-empty string when supplied.");
+      }
+      const callerExpectedGraphHash =
+        typeof body.expected_graph_hash === "string" ? body.expected_graph_hash : undefined;
       const brief = normaliseBriefText(body.brief_text);
       if (brief.truncated) {
         return invalid("BRIEF_INVALID", "`brief_text` exceeds the supported brief length.");
@@ -429,6 +436,58 @@ export default async function route(app: FastifyInstance) {
         );
         expectedGraphIdentityHash = undefined;
         expectedGraphAnalysisHash = undefined;
+      }
+
+      /**
+       * ⛔ A CALLER'S EXPECTATION IS CHECKED BEFORE ANY WRITE, AGAINST THE
+       * SERVER'S OWN READ.
+       *
+       * Without this, this route's CAS base is only ever the server's own read
+       * a moment ago: it closes the route's read→write window and says nothing
+       * about the model the CALLER approved. Independent review of #1712
+       * (CHANGES_REQUIRED at 3674539 and ecb45282) measured the consequence on
+       * the Agent's one-approval path: an unrelated edit after the user approved
+       * a starting point was absorbed, and the approval landed on a model the
+       * user never saw, reported as applied. `factor_value_edit` carries no base
+       * at all (0.55, `.strict()`), so no existing primitive made a value write
+       * conditional on the approved model.
+       *
+       * The comparison is in ANALYSIS space — the same `graph_hash` the read
+       * route returns and a proposal is bound to (`computeAnalysisAffectingGraphHash`
+       * over the same ingress parse). Equality here, plus the atomic RPC's
+       * identity CAS on this very base at write time, means the bytes written
+       * sit on the model the caller named. A caller that sends nothing is
+       * unaffected, byte for byte.
+       *
+       * ⚠ A failed base read cannot adjudicate an expectation, so it refuses as
+       * our outage (503) rather than writing unconditionally.
+       */
+      if (callerExpectedGraphHash !== undefined) {
+        if (expectedGraphIdentityHash === undefined) {
+          return unavailable();
+        }
+        if (expectedGraphAnalysisHash !== callerExpectedGraphHash) {
+          log.warn(
+            {
+              event: "v5.scenario_graph_register.expected_graph_hash_stale",
+              request_id: requestId,
+              scenario_id: scenarioId,
+              expected: callerExpectedGraphHash,
+              current: expectedGraphAnalysisHash ?? null,
+            },
+            "Graph registration — the model changed since the caller read it; nothing written",
+          );
+          return reply
+            .code(409)
+            .send(
+              buildErrorV1(
+                "BAD_INPUT",
+                "This model changed since it was read. Nothing was written — read it again first.",
+                { code: "GRAPH_STALE", expected_graph_hash: callerExpectedGraphHash, current_graph_hash: expectedGraphAnalysisHash ?? null },
+                requestId,
+              ),
+            );
+        }
       }
 
       // ── 5. Project, then hash, then write — in that order ────────────────
@@ -742,6 +801,12 @@ export default async function route(app: FastifyInstance) {
         // The ACKNOWLEDGEMENT. This is what lets a client stop saying
         // "cannot confirm": the server has the graph, and this token names it.
         graph_identity_hash: identity,
+        // ADDITIVE: the ANALYSIS-space hash of the bytes this registration
+        // stored — the same value the read route will report as `graph_hash`.
+        // A caller chaining a further CAS-gated edit on its OWN write needs
+        // exactly this, and re-reading to obtain it would absorb any foreign
+        // change made in between.
+        graph_hash: computeExpectedGraphCasHashes(graphForStore).expectedGraphAnalysisHash,
         // ADDITIVE and optional: present only when this registration actually
         // wrote a version. The skip arm omits the KEY rather than sending null,
         // so a client never has to tell "no version written" apart from
