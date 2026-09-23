@@ -261,7 +261,18 @@ describe('value batch chip click — one approval, one commit', () => {
     expect(appendCalls).toHaveLength(1);
     const write = appendCalls[0]!;
     expect(write.graph).toBeDefined();
-    expect(write.pending_actions).toEqual([]);
+    // ⚠ WAS `toEqual([])`, AND THAT PINNED THE DEAD END. The applied turn used
+    // to offer nothing, so it minted nothing. It now offers the run, and an
+    // EXECUTABLE chip is pre-authorised by a pending action — that is the
+    // estate's existing mechanism for chip clicks, not new machinery.
+    //
+    // ⭐ BOUND BY IDENTITY, not by "non-empty": exactly one pending, and it is
+    // the run offer for the chip this turn emitted. A value predicate would be
+    // satisfied by any stray pending and would not notice the wrong one.
+    expect(write.pending_actions).toHaveLength(1);
+    const pending = (write.pending_actions as Array<{ chip_id?: string; action?: { kind?: string } }>)[0];
+    expect(pending?.chip_id).toBe('chip_action_run_analysis_post_apply');
+    expect(pending?.action?.kind).toBe('run_analysis');
     expect((write.handler_facts as Array<{ fact_type?: string }>)[0]?.fact_type).toBe('edit_graph');
 
     // ⭐ BOUND BY IDENTITY: each cell's own option_id/factor_id, never "a node

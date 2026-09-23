@@ -4077,8 +4077,20 @@ export async function runTurnExecutor(
           // empty list was FINAL: the user supplied exactly what Olumi asked
           // for, was told the model now passes, and was offered nothing —
           // including when the model was fully ready. See `post-apply-chips.ts`.
+          // ⛔⛔ THE CANONICAL BUILDER, NOT `assessmentAfter.analysisReady`.
+          // The bare assessment does NOT compute `may_run` — measured, it
+          // carries it on 0 of 15,282 real models — so gating the run chip on
+          // that payload made the admission term DEAD CODE: the chip could
+          // only ever appear for `status === 'ready'`, and an
+          // admissible-but-not-ready model was offered nothing while the
+          // client would happily have rendered the run. Only
+          // `canonicalAnalysisReadyFrom(resolveRunAdmission(g), g)` — i.e.
+          // this builder — carries the verdict.
+          //
+          // ⚠ It is computed HERE rather than read from `analysisReadyForTurn`
+          // because that assignment happens AFTER this response is composed.
           suggested_actions: buildPostApplyChips(
-            outcome.assessmentAfter.analysisReady as never,
+            buildCanonicalAnalysisReadyFromGraph(outcome.appliedGraph) as never,
             ((outcome.appliedGraph as { nodes?: unknown[] } | null)?.nodes ?? []) as never,
           ),
         });
@@ -4402,8 +4414,20 @@ export async function runTurnExecutor(
           stage: context.stage,
           // ⭐ Same dead end, same close — see the repair sibling above. Fixing
           // one and not the other is the shape that has bitten this PR twice.
+          // ⛔⛔ THE CANONICAL BUILDER, NOT `assessmentAfter.analysisReady`.
+          // The bare assessment does NOT compute `may_run` — measured, it
+          // carries it on 0 of 15,282 real models — so gating the run chip on
+          // that payload made the admission term DEAD CODE: the chip could
+          // only ever appear for `status === 'ready'`, and an
+          // admissible-but-not-ready model was offered nothing while the
+          // client would happily have rendered the run. Only
+          // `canonicalAnalysisReadyFrom(resolveRunAdmission(g), g)` — i.e.
+          // this builder — carries the verdict.
+          //
+          // ⚠ It is computed HERE rather than read from `analysisReadyForTurn`
+          // because that assignment happens AFTER this response is composed.
           suggested_actions: buildPostApplyChips(
-            outcome.assessmentAfter.analysisReady as never,
+            buildCanonicalAnalysisReadyFromGraph(outcome.appliedGraph) as never,
             ((outcome.appliedGraph as { nodes?: unknown[] } | null)?.nodes ?? []) as never,
           ),
         });

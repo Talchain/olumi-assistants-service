@@ -60,11 +60,20 @@ describe('buildPostApplyChips', () => {
  * CI and invisible to the user. If CEE were STRICTER it would withhold a chip
  * the client would happily have shown.
  *
- * ⚠ THIS ALSO PINS HOW THIS PR COMPOSES WITH THE `may_run` PRODUCER FIX.
- * Without it the post-apply payload carries no `may_run`, so BOTH sides fall
- * back to `status` and agree; with it, both admit on `may_run` and agree. The
- * two changes are independent and correct in either order — which is a
- * property worth pinning rather than a coincidence worth trusting.
+ * ⛔ AN EARLIER VERSION OF THIS DOCBLOCK WAS FALSE, AND THE FALSEHOOD HID A
+ * DEAD BRANCH. It claimed the admission term came alive once the `may_run`
+ * PRODUCER fix landed. It did not: the call site passed
+ * `outcome.assessmentAfter.analysisReady`, which comes from the BARE
+ * assessment and carries `may_run` on **0 of 15,282 real models** — so the
+ * `may_run` half of the gate was unreachable at that site no matter what else
+ * merged, and the chip could only ever appear for `status === 'ready'`.
+ * Independent review caught it by composing both changes and driving the real
+ * fixture. The call site now computes the canonical readiness itself, which is
+ * what actually carries the verdict.
+ *
+ * The cases below exercise this helper directly with explicit readiness, so
+ * they were always testing the helper honestly; what was wrong was my claim
+ * about what the PRODUCTION call site would hand it.
  */
 describe('cross-repo parity: what CEE emits is what the client renders', () => {
   /** The deployed UI predicate, transcribed from DGAI staging. */
