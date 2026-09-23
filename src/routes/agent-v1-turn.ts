@@ -32,7 +32,7 @@ import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
 import { appendCheckedGraphWrite } from '../orchestrator-v5/persist-graph-write.js';
 import { scenarioAccessDecision } from '../orchestrator-v5/agent-lane/scenario-access.js';
-import { HistoryStore } from '../orchestrator-v5/agent-lane/history-store.js';
+import { HistoryStore, historyFromDurableTurns, needsDurableSeed } from '../orchestrator-v5/agent-lane/history-store.js';
 import { internalHeaders } from '../orchestrator-v5/agent-lane/internal-headers.js';
 import { resolveUserIdentity } from '../orchestrator/user-identity.js';
 import { log } from '../utils/telemetry.js';
@@ -111,6 +111,9 @@ const MUTATION_INSTRUCTION =
   config.proxy.agentLanePreview === true
     ? 'This is a read-only preview: you CANNOT change the model, and there is no tool that would let you. If the user asks for a change, say plainly that this preview cannot make it and describe what you would propose instead.'
     : 'To change the model you must first call a proposing tool \u2014 propose_model_change for a link, propose_assumptions to give value-less factors a starting number, propose_option_interventions to record the level an option sets, propose_starting_point for both at once \u2014 show the user exactly what it returned (in words: never print a proposal_id or any other internal id \u2014 the user approves by simply saying yes), and call authorise_change with that proposal_id ONLY after they have explicitly approved it.';
+
+/** Marks a board edit in the Agent's history: the user's own change, already applied — never a request to the Agent. */
+export const BOARD_EDIT_PREFIX = '(Board edit \u2014 the user changed this directly on the canvas and Olumi has already applied it; it is not a request to you.)';
 
 const AGENT_INSTRUCTIONS = [
   'You are Olumi, a strategic reasoning layer. Improve human strategic judgement rather than deciding for the user.',
@@ -224,6 +227,7 @@ const AGENT_INSTRUCTIONS = [
    * ordering is sensitive to, and let the user change it and see how much it matters.
    */
   'When you report an analysis, describe what the CURRENT model implies given its assumptions \u2014 a finding to reason with, never a recommendation. Never call an option the winner, the best option or the recommended one; say which option leads in this model and how firmly. Then name the one or two assumptions the ordering is most sensitive to, say whether each came from the user or from you, and invite the user to change one and see how much it matters. When the result is fragile or a near tie, say that this uncertainty is itself the finding.',
+  'History entries that begin \u201c(Board edit\u201d are changes the user made directly on the canvas. When the user asks about \u201cmy change\u201d, start from the most recent board edit, and read the current state before explaining what it did.',
   'British English. Concise but substantive.',
 ].join(' ');
 
@@ -303,9 +307,44 @@ async function readBackState(dispatch: InternalDispatch, scenarioId: string): Pr
         draftGraph = { node_count: nodes.length, edge_count: edges.length, nodes, edges };
       }
     }
-  } catch {
-    // A readback failure must not lose the user's answer. The turn still
-    // returns; the client simply does not learn the new revision this time.
+  } catch (err) {
+    /**
+     * ⭐⭐ THE FAIL-OPEN IS RIGHT AND IT WAS SILENT — which converted a
+     * measurable problem into an unmeasurable one.
+     *
+     * A readback failure must not lose the user's answer, so returning the turn
+     * is correct and unchanged. But when it happens the client does not learn
+     * the new revision, and **that has a user-visible consequence nobody could
+     * count**: `lastServerGraphHash` in the canvas store is fed by exactly two
+     * wire emitters — the top-level `graph_hash` and
+     * `analysis_ready.current_graph_hash` — and BOTH are omitted on this path.
+     * Null means *"CEE has not stamped one this session"*, and the store's own
+     * comment says a delete then **stands down from the wire** rather than
+     * asserting a base it does not hold.
+     *
+     * So the user's delete gesture silently stops applying, and until now there
+     * was no log line, no event, and no way to know how often. The estate's own
+     * draft-quality doctrine names this exact shape: *"a repair pass whose
+     * fail-open is silent converts a measurable problem into an unmeasurable
+     * one."*
+     *
+     * ⛔ NOTHING ABOUT THE BEHAVIOUR CHANGES. This adds one warn on a path that
+     * already swallowed. It does not refuse the turn, does not retry, and does
+     * not synthesise a revision — a hash this code could not read is one it must
+     * not assert.
+     */
+    log.warn(
+      {
+        event: 'agent_lane.state_readback_failed',
+        scenario_id: scenarioId,
+        err: String(err),
+        // Which emitters the client will be missing, stated rather than implied,
+        // so the consequence is legible without reading the canvas store.
+        graph_hash_emitted: graphHash !== undefined,
+        analysis_ready_emitted: analysisReady !== undefined,
+      },
+      'agent-lane: could not read the current model back — the client will not learn this turn\u2019s revision, so a delete gesture stands down',
+    );
   }
   return { graphHash, analysisReady, draftGraph };
 }
@@ -520,6 +559,23 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const forwarded = await dispatchFor(
         typeof req.headers.authorization === 'string' ? req.headers.authorization : undefined,
       )('/orchestrate/v2/turn', body);
+      /**
+       * ⛔ THE AGENT MUST KNOW WHAT THE USER CHANGED ON THE BOARD. Measured on served
+       * cc7b26c: after a canvas edit (Tech lead hires 0 → 1), "Re-run the analysis.
+       * How much did my change matter?" was answered about the EARLIER approved
+       * baseline — the forwarded edit never entered the Agent's history, and it did
+       * not re-read state. The product's own narration of the edit (the handler's
+       * truthful text, e.g. "Updated Tech lead hires from 0 hires to 1 hire.") is
+       * appended to this session's history, marked as a board edit — not as
+       * something the user asked the Agent to do.
+       */
+      const narration = typeof forwarded.json.assistant_text === 'string' ? forwarded.json.assistant_text.trim() : '';
+      if (forwarded.status === 200 && kind === 'system_event' && narration.length > 0) {
+        histories.set(sessionId, [
+          ...histories.get(sessionId),
+          { role: 'user', content: [{ type: 'input_text', text: `${BOARD_EDIT_PREFIX} ${narration}` }] },
+        ]);
+      }
       return reply.code(forwarded.status).send({
         ...forwarded.json,
         // Underscore sidecar: egress is `.strict()`. Says plainly that this
@@ -743,6 +799,20 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const capabilities = createAgentCapabilities(countingDispatch, proposals, callStructured, mode, (payload) => {
       analysisFromTool = payload;
     });
+    // A session whose in-process history holds no user message (a restart, a
+    // deploy, an eviction — or only a board-edit note appended since) is seeded
+    // from the durable conversation, ahead of whatever is already held — see
+    // `historyFromDurableTurns`. A failed read degrades to no history; it never
+    // fails the turn.
+    const held = histories.get(sessionId);
+    if (needsDurableSeed(held) && typeof store.readRecent === 'function') {
+      try {
+        const durable = historyFromDurableTurns(await store.readRecent(scenarioId));
+        if (durable.length > 0) histories.set(sessionId, [...durable, ...held]);
+      } catch (err) {
+        log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: durable conversation could not be read — continuing without it');
+      }
+    }
     const history = histories.get(sessionId);
     const budget = budgetFor('gpt-5.6-terra', 'conversation');
 

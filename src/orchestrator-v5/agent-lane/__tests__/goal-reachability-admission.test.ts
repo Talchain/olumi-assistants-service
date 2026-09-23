@@ -72,6 +72,43 @@ describe('risks are wired in, not deleted', () => {
     expect(said).toHaveLength(2);
     expect(said[0].reason).toMatch(/not from anything you said/);
   });
+
+  /**
+   * ⛔ A RISK WHOSE LINK THE DRAFTER STATED AS `unknown` IS NOT "NEVER CONNECTED".
+   *
+   * Panel review 5793954535 (B1, probe P3): "Attrition" -> goal stated `unknown`
+   * was withheld, then re-added by the repair above as `negative`, defaulted —
+   * a sign the drafter explicitly declined to give. Release Control #63
+   * 5793252993: where direction is unknown, ASK instead of defaulting. The risk
+   * stays in the model, unconnected and named, and the withheld link is the
+   * question. The contrast is in the same run: the two risks with NO stated link
+   * at all are still wired exactly as before.
+   */
+  const withUnknownRisk = (to: string) => admitCandidateModel({
+    ...CANDIDATE,
+    risks: [...CANDIDATE.risks, { label: 'Attrition', provenance: 'inferred' }],
+    links: [...CANDIDATE.links, { from: 'Attrition', to, direction: 'unknown', provenance: 'inferred' }],
+  } as unknown as CandidateModel);
+
+  for (const [what, to] of [['the goal', 'Monthly recurring revenue'], ['a factor', 'Pro plan price']] as const) {
+    it(`does NOT invent a sign for a risk whose link to ${what} was stated UNKNOWN`, () => {
+      const a = withUnknownRisk(to);
+      const goal = a.nodes.find((n) => n.kind === 'goal')!;
+      const attrition = a.nodes.find((n) => n.label === 'Attrition')!;
+      // Vacuity guard: the drafter really stated the link, and it was withheld.
+      expect(a.withheld).toContainEqual(expect.objectContaining({ from: attrition.id, reason: 'no_authored_direction' }));
+      expect(a.edges.filter((e) => e.from === attrition.id), 'no signed edge may leave a risk whose link is unknown').toEqual([]);
+      expect(a.loss.some((l) => /The risk "Attrition" was named but never connected/.test(l.reason))).toBe(false);
+      // Kept, and named, so the Agent asks rather than the analysis guessing.
+      expect(a.nodes.map((n) => n.label)).toContain('Attrition');
+      expect(a.loss.filter((l) => /no chain of causes runs from it/.test(l.reason)).map((l) => l.before)).toContain('Attrition');
+      // CONTRAST, same run: the risks with no stated link are still wired.
+      for (const label of ['Churn constraint breach', 'MRR target miss']) {
+        const id = a.nodes.find((n) => n.label === label)!.id;
+        expect(a.edges.find((e) => e.from === id && e.to === goal.id)?.effect_direction, label).toBe('negative');
+      }
+    });
+  }
 });
 
 describe('what still cannot reach the goal is KEPT and named', () => {
