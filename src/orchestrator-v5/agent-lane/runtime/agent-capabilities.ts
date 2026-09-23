@@ -53,7 +53,7 @@ export type InternalDispatch = (path: string, body: unknown) => Promise<{ status
 
 interface GraphRead {
   readonly graph_hash: string;
-  readonly nodes: { id: string; kind: string; label: string; description?: string; observed_state?: Record<string, unknown>; interventions?: Record<string, unknown>; changes?: unknown }[];
+  readonly nodes: { id: string; kind: string; label: string; description?: string; observed_state?: Record<string, unknown>; interventions?: Record<string, unknown>; changes?: unknown; scale_frame?: unknown }[];
   readonly edges: { from: string; to: string }[];
   readonly analysis_state: unknown;
 }
@@ -321,7 +321,18 @@ export function createAgentCapabilities(
         if (!Number.isFinite(raw)) { unresolved.push(`${option.label} -> ${factor.label} (no value)`); continue; }
 
         const os = (factor.observed_state ?? {}) as { cap?: unknown; unit?: unknown };
-        const cap = typeof os.cap === 'number' && Number.isFinite(os.cap) && os.cap > 0 ? os.cap : null;
+        /**
+         * ⭐ THE STORED RANGE WINS OVER ONE DERIVED FROM THIS FIGURE. A factor
+         * built with no baseline carries its range as `scale_frame` (the
+         * declared carrier; see `admit-model.ts`), and the option levels
+         * already on it were divided by that range. Reading `observed_state`
+         * alone missed it, so this derived a second range from the user's
+         * number and the two levels on one factor sat on two scales. Measured
+         * in the replay of Paul's session (repro/FINDINGS.md, turns 3-4).
+         */
+        const storedFrame = typeof factor.scale_frame === 'number' && Number.isFinite(factor.scale_frame) && factor.scale_frame > 1
+          ? factor.scale_frame : null;
+        const cap = typeof os.cap === 'number' && Number.isFinite(os.cap) && os.cap > 0 ? os.cap : storedFrame;
         let normalised: number;
         let derivedFrame: number | null = null;
         if (cap !== null) {
@@ -656,6 +667,11 @@ export function createAgentCapabilities(
         const needsFrame = (afterSet?.nodes ?? []).filter((n) => {
           if (!ops.some((o) => o.path === n.id)) return false;
           const os = (n.observed_state ?? {}) as { value?: unknown; cap?: unknown };
+          // ⛔ A factor that already carries a stored range was written ON it
+          // by the value handler. A level above 1 there is the honest truth
+          // about an over-range figure; deriving a new range for it would
+          // rescale the baseline away from every option level on that factor.
+          if (typeof n.scale_frame === 'number' && n.scale_frame > 1) return false;
           return typeof os.value === 'number' && Math.abs(os.value) > 1 && typeof os.cap !== 'number';
         });
         const framed: { factor: string; value: number; range: number }[] = [];
