@@ -280,7 +280,6 @@ export async function buildModelFromBrief(
   // questions it parked in `unknowns`, travel with the result so the Agent can say
   // them — otherwise an option the model mislabelled as its own vanishes unseen.
   let leftOut: { kind: string; label: string }[] = [];
-  let openQuestions: string[] = [];
   if (!size.within && !size.user_material_exceeds_limit) {
     sizeRetried = true;
     try {
@@ -319,8 +318,6 @@ export async function buildModelFromBrief(
           leftOut = admitted.nodes
             .filter((n) => !kept.has(nodeIdentity(n)))
             .map((n) => ({ kind: String(n.kind), label: String((n as { description?: unknown }).description ?? n.label) }));
-          const parked = (retryCandidate as { unknowns?: unknown }).unknowns;
-          openQuestions = Array.isArray(parked) ? parked.filter((q): q is string => typeof q === 'string' && q.trim() !== '') : [];
           candidate = retryCandidate;
           admitted = retryAdmitted;
           size = retrySize;
@@ -365,6 +362,9 @@ export async function buildModelFromBrief(
    * produces an enforceable constraint rather than a sentence the model merely
    * mentioned.
    */
+  const parked = (candidate as { unknowns?: unknown }).unknowns;
+  const openQuestions = Array.isArray(parked) ? parked.filter((q): q is string => typeof q === 'string' && q.trim() !== '') : [];
+
   const graph = {
     nodes: admitted.nodes,
     edges: admitted.edges,
@@ -440,6 +440,9 @@ export async function buildModelFromBrief(
     // surviving registration on deployed staging.
     goal_constraints_carried: admitted.goal_constraints.length,
     ...(leftOut.length > 0 ? { left_out_to_stay_compact: leftOut } : {}),
+    // ⭐ EVERY build, not only a retry: the compact instruction parks Olumi's own
+    // strategic additions in `unknowns`, and on the common path (a first pass already
+    // within budget — 3 of 3 live benchmark runs) nothing else ever showed them.
     ...(openQuestions.length > 0 ? { open_questions: openQuestions } : {}),
     not_represented: [
       admitted.withheld.length > 0

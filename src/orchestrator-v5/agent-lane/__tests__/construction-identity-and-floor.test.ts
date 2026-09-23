@@ -181,6 +181,17 @@ describe('⛔ identity is the FULL stated text and the stated direction (Panel p
     expect((out.not_represented as string[]).join(' ')).toMatch(/13 item\(s\) from the first draft were left out/);
   });
 
+  it('RED: a first pass already within budget still returns the questions it parked in `unknowns`', async () => {
+    const c = candidate({ extraFactors: 2 });
+    (c as { unknowns: string[] }).unknowns = ['Is the bottleneck coordination or capacity?', 'What does onboarding cost the current team?'];
+    const s = structuredSequence(c);
+    const dp = dispatcher();
+    const out = await buildModelFromBrief(SCENARIO, BRIEF, dp.d, s.fn) as Record<string, unknown>;
+    expect(s.calls, 'vacuity: no retry — this is the common path').toHaveLength(1);
+    expect(out.ok, JSON.stringify(out)).toBe(true);
+    expect(out.open_questions).toEqual(['Is the bottleneck coordination or capacity?', 'What does onboarding cost the current team?']);
+  });
+
   it('CONTRAST: a first model within the limit reports nothing left out', async () => {
     const s = structuredSequence(candidate({ extraFactors: 2 }));
     const dp = dispatcher();

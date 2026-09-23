@@ -110,13 +110,22 @@ function leftOutLine(r: ToolResult): string {
   return ` To keep it readable, I left out: ${shown}${more}. Ask me to add any of them back.`;
 }
 
+/** The questions the build parked instead of modelling — what to examine next, not answers. */
+function openQuestionsLine(r: ToolResult): string {
+  const qs = Array.isArray(r.open_questions) ? (r.open_questions as unknown[]).map((q) => String(q).trim()).filter((q) => q !== '') : [];
+  if (qs.length === 0) return '';
+  const shown = qs.slice(0, LEFT_OUT_SHOWN).map((q) => q.replace(/[.?!]+$/, '')).join('; ');
+  const more = qs.length > LEFT_OUT_SHOWN ? `; and ${qs.length - LEFT_OUT_SHOWN} more` : '';
+  return ` Questions this model does not answer yet: ${shown}${more}.`;
+}
+
 /** One authoritative line per write the turn attempted. */
 function statusLine(name: string, r: ToolResult): string {
   if (name === 'build_model_from_brief') {
     const v = (r.model_version as { version_number?: unknown } | undefined)?.version_number;
     const vs = typeof v === 'number' ? ` (version ${v})` : '';
     if (r.ok === true && r.replayed === true) return `This model had already been built${vs}; nothing was built twice.`;
-    if (r.ok === true && r.mutated === true) return `The model was saved${typeof v === 'number' ? ` as version ${v}` : ''}.${leftOutLine(r)}`;
+    if (r.ok === true && r.mutated === true) return `The model was saved${typeof v === 'number' ? ` as version ${v}` : ''}.${leftOutLine(r)}${openQuestionsLine(r)}`;
     return `The model was not built: ${REFUSAL_WORDS[String(r.refusal)] ?? `it was refused (${String(r.refusal ?? 'unknown')})`}.`;
   }
   const perPart = partsLine(r);
