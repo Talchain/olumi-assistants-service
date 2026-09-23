@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { createProposal, ProposalStore } from '../proposal.js';
 import type { CallStructuredModel } from '../runtime/build-model.js';
@@ -229,5 +230,46 @@ describe('a moved graph refuses the WHOLE authorisation, not half of it', () => 
     // that is observable. This is the control that makes the refusal-path
     // assertion mean something: the two paths must differ.
     expect(levels[0].base_graph_hash).toBe(MOVED_HASH);
+  });
+});
+
+
+/**
+ * ⛔⛔ A COUNTING GUARD, BECAUSE I CLAIMED BOTH SITES WERE FIXED AND ONLY ONE
+ * WAS.
+ *
+ * The claim "both frame writes are CAS-gated" went into a commit message and a
+ * PR body while the twin at the adopted-assumption path still wrote
+ * `edges: afterSet.edges` with no expected hash. A prose claim about a file is
+ * not a test of the file.
+ *
+ * This counts BOTH sides so the claim cannot go stale again in either direction:
+ * a register call added without a CAS REDs, and so does one removed.
+ */
+describe('every register call in this module asserts a base', () => {
+  const SRC = readFileSync(new URL('../runtime/agent-capabilities.ts', import.meta.url), 'utf8');
+
+  it('the probe can see the module (not vacuous)', () => {
+    expect(SRC).toContain('graph/register');
+  });
+
+  it('⛔ EVERY graph/register call carries an expected_graph_hash', () => {
+    const calls = SRC.split('graph/register`, {').slice(1);
+    expect(calls.length, 'no register calls found — vacuous').toBeGreaterThan(1);
+    calls.forEach((tail, i) => {
+      // The call's own object literal, up to its closing `});`.
+      const body = tail.slice(0, tail.indexOf('});'));
+      expect(
+        body,
+        `register call #${i + 1} in agent-capabilities.ts writes a graph without asserting ` +
+          'a base — a concurrent write is silently overwritten, and the edges it carries are ' +
+          'restored to whatever they were at the read',
+      ).toContain('expected_graph_hash');
+    });
+  });
+
+  it('⭐ and there are exactly THREE of them — a fourth must be judged, not inherited', () => {
+    // Bounds the claim above: it cannot pass by finding fewer calls than exist.
+    expect(SRC.split('graph/register`, {').length - 1).toBe(3);
   });
 });
