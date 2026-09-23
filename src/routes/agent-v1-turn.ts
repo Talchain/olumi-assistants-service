@@ -26,6 +26,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { config } from '../config/index.js';
+import { OPENAI_ONLY, assertProviderAllowed, recordedProviderCalls, runWithProviderPolicy } from '../adapters/llm/provider-policy.js';
 import { TURN_RESPONSE_HEADROOM_MS } from '../config/timeouts.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
@@ -445,6 +446,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
 
   const callModel: CallModel = async (req) => onceMoreOnTransportFailure('conversation', async () => {
     const budget = budgetFor('gpt-5.6-terra', 'conversation');
+    assertProviderAllowed('openai', 'agent-v1-turn.callModel', { model: budget.model, purpose: 'conversation' });
     const r = await fetch(OPENAI_RESPONSES_URL, {
       method: 'POST',
       headers: {
@@ -472,6 +474,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
    * (see BANKED_BUDGETS role 'whole'), not the conversation budget.
    */
   const callStructured: CallStructuredModel = async (reqBody) => onceMoreOnTransportFailure('construction', async () => {
+    assertProviderAllowed('openai', 'agent-v1-turn.callStructured', { model: reqBody.model, purpose: 'construction' });
     const r = await fetch(OPENAI_RESPONSES_URL, {
       method: 'POST',
       headers: {
@@ -512,7 +515,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     return { text, usage: j.usage };
   }, (call, err) => log.warn({ err, call }, 'agent-lane transport failure, retrying once'));
 
-  app.post('/agent/v1/turn', async (req: FastifyRequest, reply: FastifyReply) => {
+  /*
+   * ⛔ EVERY AGENT TURN IS OPENAI-ONLY (Paul, 23 Sep: zero Anthropic calls on the
+   * OpenAI journey). Any Anthropic attempt beneath this turn — including internal
+   * dispatch to the conventional handlers — is refused before network I/O and logged
+   * (`adapters/llm/provider-policy.ts`).
+   */
+  const agentTurnHandler = async (req: FastifyRequest, reply: FastifyReply) => {
     const startedAt = Date.now();
     const body = (req.body ?? {}) as Record<string, unknown>;
     const scenarioId = typeof body.scenario_id === 'string' ? body.scenario_id : '';
@@ -574,6 +583,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         return reply.code(200).send({
           ...finaliseV5Response(composedRefusal, { scenarioId }),
           _agent: { session_id: sessionId, mode, tool_calls: [], mutated: false, hops: 0, stopped_reason: 'read_only_preview' },
+          _provider_calls: recordedProviderCalls(),
         });
       }
 
@@ -609,6 +619,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           exit_path: 'agent_lane_forwarded',
           forwarded_kind: kind,
         },
+        _provider_calls: recordedProviderCalls(),
       });
     }
 
@@ -715,6 +726,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...(state.draftGraph !== undefined ? { draft_graph: state.draftGraph } : {}),
         _diagnostic_trace: { exit_path: 'agent_lane_v1', agent_mode: mode, hops: 0, stopped_reason: 'replayed', tools_called: [], replayed: true },
         _agent: { session_id: sessionId, mode, tool_calls: [], mutated: false, hops: 0, stopped_reason: 'replayed', replayed: true, turn_id: turnId },
+        _provider_calls: recordedProviderCalls(),
       };
     };
     // Set only when THIS request owns the turn — used to release it if nothing ran.
@@ -1019,8 +1031,17 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         stopped_reason: result.stopped_reason,
         ...(turnId !== undefined ? { turn_id: turnId, durability } : {}),
       },
+      /**
+       * ⭐ EVERY GENERATIVE ATTEMPT THIS TURN MADE, off the provider policy's ledger
+       * (`adapters/llm/provider-policy.ts`) — including those beneath internal
+       * dispatch. The OpenAI-only proof is read from here: any `anthropic` row is a
+       * failure even though it was `refused_before_network`.
+       */
+      _provider_calls: recordedProviderCalls(),
     });
-  });
+  };
+  app.post('/agent/v1/turn', (req: FastifyRequest, reply: FastifyReply) =>
+    runWithProviderPolicy(OPENAI_ONLY('agent_v1_turn'), () => agentTurnHandler(req, reply)));
 
   log.info({ event: 'agent_lane.route_mounted' }, 'POST /agent/v1/turn mounted');
 }

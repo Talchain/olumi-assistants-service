@@ -28,6 +28,7 @@ vi.mock('../rolling-summary/capture.js', () => ({
 import { commitDirectAnswer } from '../commit.js';
 import { composeDirectAnswerResponse } from '../compose.js';
 import { createNoopSessionStore } from '../session/__tests__/fixtures.js';
+import { runWithProviderPolicy, OPENAI_ONLY } from '../../adapters/llm/provider-policy.js';
 
 const SCENARIO_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const TURN_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
@@ -85,5 +86,28 @@ describe('rolling-summary commit hook — unconditional (O-2 activation)', () =>
     await drainMicrotasks();
     expect(maintainSpy).toHaveBeenCalledTimes(2);
     expect(JSON.stringify(withHungMaintainer)).toBe(JSON.stringify(ok));
+  });
+
+  /**
+   * ⛔ The summariser is Anthropic (`AnthropicSummariserModel`). Static audit at
+   * staging 140917d0: every commit the OpenAI Agent causes — its run_analysis,
+   * a forwarded factor_value_edit, an option_intervention_edit — fired it
+   * fire-and-forget, i.e. an Anthropic call on the OpenAI-only journey. The call
+   * must never START under a policy that forbids Anthropic (refusing it inside the
+   * adapter would still be an attempt, and a fire-and-forget one can land after
+   * the reply's ledger is taken).
+   */
+  it('RED: under an OpenAI-only request policy the Anthropic summariser is never started — the commit still lands', async () => {
+    const result = await runWithProviderPolicy(OPENAI_ONLY('agent_v1_turn'), () =>
+      commitDirectAnswer(composed(), meta(), createNoopSessionStore({ appendId: 'row-openai' })));
+    await drainMicrotasks();
+    expect(result.performed).toBe(true);
+    expect(maintainSpy).not.toHaveBeenCalled();
+  });
+
+  it('CONTRAST: the same commit outside any policy (Conventional) still maintains the summary', async () => {
+    await commitDirectAnswer(composed(), meta(), createNoopSessionStore({ appendId: 'row-conv' }));
+    await drainMicrotasks();
+    expect(maintainSpy).toHaveBeenCalledOnce();
   });
 });
