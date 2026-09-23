@@ -202,7 +202,7 @@ export function createAgentCapabilities(
    * would cost thousands of tokens per hop and tell the model nothing its own
    * summary does not already say.
    */
-  onAnalysis?: (payload: { analysis_ready?: unknown; blocks?: unknown[]; analysis_state?: unknown }) => void,
+  onAnalysis?: (payload: { analysis_ready?: unknown; blocks?: unknown[] }) => void,
 ): AgentCapabilities {
   const readOnly = mode === 'preview';
   const refuseReadOnly = (): ToolResult => ({
@@ -1467,7 +1467,7 @@ export function createAgentCapabilities(
       const ready = (r.json.analysis_ready ?? {}) as Record<string, unknown>;
       const blocks = (r.json.blocks as { type: string }[] | undefined) ?? [];
       const result = blocks.find((b) => b.type === 'analysis_result');
-      onAnalysis?.({ analysis_ready: r.json.analysis_ready, blocks, analysis_state: r.json.analysis_state });
+      onAnalysis?.({ analysis_ready: r.json.analysis_ready, blocks });
       return {
         ok: r.status === 200,
         mutated: false,

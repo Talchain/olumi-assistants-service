@@ -237,7 +237,7 @@ const AGENT_INSTRUCTIONS = [
  * the `draft_graph` the canvas draws. Shared by a live turn and a replay, so a
  * replayed answer is shown against the SAME current state a fresh one would be.
  */
-async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown }> {
+async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; resultIsCurrent: boolean }> {
   let graphHash: string | undefined;
   let analysisReady: unknown;
   /**
@@ -250,6 +250,16 @@ async function readBackState(dispatch: InternalDispatch, scenarioId: string): Pr
    * Agent turn. The graph read carries the scenario-bound verdict; it wins when present.
    */
   let analysisState: unknown;
+  /**
+   * ⛔ WHETHER A RESULT IS CURRENT FOR THE GRAPH THIS RESPONSE RETURNS (independent
+   * review of #1760, 5797642232). A turn can run the analysis and THEN change the
+   * graph (an authorised write, or another writer), so the run's own verdict and
+   * blocks may describe a model the user no longer has. The graph read binds its
+   * `analysis_result` to the current graph (`readScenarioAnalysis`: present ONLY on a
+   * fresh graph-hash verdict), so its presence is the one authority for showing a
+   * result as current. Unavailable readback → false: never manufacture currentness.
+   */
+  let resultIsCurrent = false;
   /**
    * ⛔ THE CANVAS RENDERS FROM `draft_graph`, NOT FROM `graph_hash`.
    *
@@ -274,6 +284,7 @@ async function readBackState(dispatch: InternalDispatch, scenarioId: string): Pr
       graphHash = typeof after.json.graph_hash === 'string' ? after.json.graph_hash : undefined;
       analysisReady = after.json.analysis_ready;
       if (typeof after.json.analysis_state === 'object' && after.json.analysis_state !== null) analysisState = after.json.analysis_state;
+      resultIsCurrent = typeof after.json.analysis_result === 'object' && after.json.analysis_result !== null;
       /**
        * ⭐ READINESS FROM THE MOMENT THE MODEL EXISTS, not from the moment
        * someone runs an analysis.
@@ -328,7 +339,7 @@ async function readBackState(dispatch: InternalDispatch, scenarioId: string): Pr
     // A readback failure must not lose the user's answer. The turn still
     // returns; the client simply does not learn the new revision this time.
   }
-  return { graphHash, analysisReady, draftGraph, analysisState };
+  return { graphHash, analysisReady, draftGraph, analysisState, resultIsCurrent };
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -760,7 +771,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * the same defect shape as the `draft_graph` one: the answer was right and
      * the carrier was missing.
      */
-    let analysisFromTool: { analysis_ready?: unknown; blocks?: unknown[]; analysis_state?: unknown } | undefined;
+    let analysisFromTool: { analysis_ready?: unknown; blocks?: unknown[] } | undefined;
     // Counts every call that could WRITE, so a failed turn knows whether it is
     // safe to release its claim (nothing sent) or must leave it (outcome unknown).
     let writesDispatched = 0;
@@ -852,7 +863,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * Read back from the persisted graph, not from what a tool returned: the
      * hash the client caches must be the hash the product would serve it.
      */
-    const { graphHash, analysisReady, draftGraph, analysisState } = await readBackState(dispatch, scenarioId);
+    const { graphHash, analysisReady, draftGraph, analysisState, resultIsCurrent } = await readBackState(dispatch, scenarioId);
 
     // The analysis the tool actually ran wins over the graph readback, which
     // carries only the persisted state and never the run's own options.
@@ -917,16 +928,19 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
 
     return reply.code(200).send({
       ...finalised,
-      ...(analysisBlocks.length > 0 ? { blocks: [...existingBlocks, ...analysisBlocks] } : {}),
+      // The run's blocks only while the final readback holds a result CURRENT for the
+      // returned graph — see `resultIsCurrent`. The Agent's own text still reports
+      // what the run found and that the model has since changed.
+      ...(analysisBlocks.length > 0 && resultIsCurrent ? { blocks: [...existingBlocks, ...analysisBlocks] } : {}),
       ...(graphHash !== undefined ? { graph_hash: graphHash } : {}),
-      ...(analysisFromTool?.analysis_ready !== undefined
-        ? { analysis_ready: analysisFromTool.analysis_ready }
-        : analysisReady !== undefined ? { analysis_ready: analysisReady } : {}),
-      // The run this turn made wins; otherwise the scenario-bound verdict; otherwise
-      // the finaliser's own stays (present, never deleted). See `readBackState`.
-      ...(typeof analysisFromTool?.analysis_state === 'object' && analysisFromTool.analysis_state !== null
-        ? { analysis_state: analysisFromTool.analysis_state }
-        : analysisState !== undefined ? { analysis_state: analysisState } : {}),
+      // Readiness of the graph this response returns: the final readback's, and the
+      // run's only while its result is current for that graph.
+      ...(analysisReady !== undefined
+        ? { analysis_ready: analysisReady }
+        : resultIsCurrent && analysisFromTool?.analysis_ready !== undefined ? { analysis_ready: analysisFromTool.analysis_ready } : {}),
+      // The scenario-bound verdict from the FINAL readback governs; otherwise the
+      // finaliser's own honest no-context verdict stays (present, never deleted).
+      ...(analysisState !== undefined ? { analysis_state: analysisState } : {}),
       ...(draftGraph !== undefined ? { draft_graph: draftGraph } : {}),
       /**
        * ⭐ SAY WHICH PATH SERVED THIS TURN.
