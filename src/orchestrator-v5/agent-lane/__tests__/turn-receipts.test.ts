@@ -170,3 +170,55 @@ describe('the non-array path fails closed — bound behaviourally, not by a type
     expect(out).toHaveLength(1);
   });
 });
+
+/**
+ * ⛔⛔⛔ THE TURN THAT CREATES THE MODEL REPORTED NO RECEIPT AT ALL.
+ *
+ * `build_model_from_brief` — the lane's primary write, the one that mints version
+ * 1 — reports its version under a DIFFERENT key:
+ *
+ *     build-model.ts:441   ...(modelVersion === undefined ? {} : { model_version: modelVersion })
+ *     build-model.ts:423   { ok: true, mutated: false, replayed: true, model_version: prior }
+ *
+ * while this collector reads `result.receipts` (`turn-receipts.ts:64`). So
+ * `_agent.receipts` was `[]` on exactly the turn where "the turn said
+ * `mutated: true` without saying which version it became" bites hardest — the
+ * PR's own headline gap, surviving on the primary path.
+ *
+ * ⚠ AND THE SHAPE DIFFERS TOO. `model_version` comes from the register route as
+ * `{ version_number, version_id, mutation_id }` (see agent-capabilities.ts:381),
+ * NOT `{ version, ... }`. A collector that merely looked at the other key would
+ * still have dropped it for want of `version`.
+ */
+describe('the model-creating turn reports its version', () => {
+  const MV = { version_number: 1, version_id: 'ver-1', mutation_id: 'mut-1', source_turn_id: 't-1' };
+
+  it('⛔ collects a singular model_version as a receipt', () => {
+    const out = collectTurnReceipts([{ ok: true, mutated: true, model_version: MV }]);
+    expect(out, 'the turn that mints version 1 must say so').toHaveLength(1);
+    expect(out[0]!.version).toBe(1);
+    expect(out[0]!.version_id).toBe('ver-1');
+    expect(out[0]!.mutation_id).toBe('mut-1');
+  });
+
+  it('collects it on the REPLAY shape too (build-model.ts:423)', () => {
+    const out = collectTurnReceipts([{ ok: true, mutated: false, replayed: true, model_version: MV }]);
+    expect(out).toHaveLength(1);
+    expect(out[0]!.version_id).toBe('ver-1');
+  });
+
+  it('CONTRAST: the plural `receipts` key still works, and the two de-dupe together', () => {
+    const out = collectTurnReceipts([
+      { model_version: MV },
+      { receipts: [{ version: 1, version_id: 'ver-1', mutation_id: 'mut-1', source_turn_id: null }] },
+      { receipts: [{ version: 2, version_id: 'ver-2', mutation_id: 'mut-2', source_turn_id: null }] },
+    ]);
+    expect(out.map((r) => r.version_id), 'one entry per distinct version_id, in version order').toEqual(['ver-1', 'ver-2']);
+  });
+
+  it('a model_version missing its identity is NOT a receipt', () => {
+    expect(collectTurnReceipts([{ model_version: { version_number: 1 } }])).toHaveLength(0);
+    expect(collectTurnReceipts([{ model_version: { version_id: 'v' } }])).toHaveLength(0);
+    expect(collectTurnReceipts([{ model_version: null }])).toHaveLength(0);
+  });
+})
