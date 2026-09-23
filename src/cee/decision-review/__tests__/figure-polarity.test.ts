@@ -15,8 +15,10 @@ import {
   derivePolarityCorpus,
   findPolarityBoundFigures,
   isFigureGroundedForPolarity,
+  isWithinGroundingTolerance,
   redactUngroundedPolarityFigures,
   ungroundedFigureReplacement,
+  UNRESOLVED_POLARITY_FIGURE_REPLACEMENT,
 } from '../figure-polarity.js';
 import { findForbiddenPhraseHit } from '../../../orchestrator-v5/compose/forbidden-user-facing-phrases.js';
 
@@ -69,7 +71,7 @@ describe('findPolarityBoundFigures — MUST bind', () => {
   });
 });
 
-describe('findPolarityBoundFigures — must NOT bind', () => {
+describe('findPolarityBoundFigures — NO relevant claim → [] (the general rule applies)', () => {
   it.each([
     // Win probability beside a figure-free flip phrase.
     'Reduce scope scored highest in 52% of runs, but the ordering could flip if the Scope link is weaker.',
@@ -77,15 +79,55 @@ describe('findPolarityBoundFigures — must NOT bind', () => {
     'The lead holds under most plausible variations.',
     // Figure attached to a different subject.
     'Option A holds a 62% share of wins.',
-    // Negated frames are DECLINED, not inverted.
-    'The ordering does not hold in 30% of variations.',
-    "The ordering won't flip in 70% of runs.",
     // A percentage-change, not an ordering change.
     'If the price changes by 20%, the ordering could flip.',
     // No figure at all (the existing grounding test's own sentence).
     'Recommendation holds in about 99 of 100 scenarios tested.',
   ])('%s', (text) => {
     expect(findPolarityBoundFigures(text)).toEqual([]);
+  });
+});
+
+/**
+ * Codex CHANGES_REQUIRED on #1754 @ 152c5893: "Declining to infer the polarity
+ * must not mean permitting the claim." These sentences USED to return `[]` —
+ * the same answer as a sentence with no polarity claim at all — so the figure
+ * fell back to the general ±10% rule and `recommendation_stability: 0.70`
+ * grounded "does not hold in about 70%", its own opposite. A recognised claim
+ * the reader cannot give ONE polarity is now an explicit `unresolved` result,
+ * which no field grounds.
+ */
+describe('findPolarityBoundFigures — a RECOGNISED but unsupported claim → explicit unresolved, never []', () => {
+  it.each([
+    // Codex's counterexample, verbatim.
+    ['The ordering does not hold in about 70% of variations.', 'negated', 70],
+    // The inverse negated-flips case.
+    ['The ordering does not flip in about 30% of variations.', 'negated', 30],
+    // The two sentences the previous revision pinned as `[]`.
+    ['The ordering does not hold in 30% of variations.', 'negated', 30],
+    ["The ordering won't flip in 70% of runs.", 'negated', 70],
+    // The same negated claim in the reader's other two attachment forms.
+    ['There is a 70% chance the ordering does not hold.', 'negated', 70],
+    ['In about 70% of variations, the ordering does not hold.', 'negated', 70],
+    // Immediately adjacent bindings of BOTH polarities to one figure.
+    ['It holds in about 70% of variations, the ordering flips in the rest.', 'ambiguous', 70],
+  ] as const)('%s → unresolved (%s) %d', (text, reason, value) => {
+    const figures = findPolarityBoundFigures(text);
+    expect(figures).toHaveLength(1);
+    expect(figures[0]).toMatchObject({ polarity: 'unresolved', reason, value });
+    expect(text.slice(figures[0]!.index).startsWith(String(value))).toBe(true);
+  });
+
+  it('an unresolved figure is grounded by NOTHING — not even a field that numerically matches it', () => {
+    const corpus = derivePolarityCorpus({
+      isl_results: { robustness: { recommendation_stability: 0.7 }, fragile_edges: [{ switch_probability: 0.7 }] },
+    });
+    // Precondition: both fields ARE within tolerance, so only the polarity rule can refuse it.
+    expect(isWithinGroundingTolerance(70, corpus.holds)).toBe(true);
+    expect(isWithinGroundingTolerance(70, corpus.flips)).toBe(true);
+    const [figure] = findPolarityBoundFigures('The ordering does not hold in about 70% of variations.');
+    expect(figure).toBeDefined();
+    expect(isFigureGroundedForPolarity(figure!, corpus)).toBe(false);
   });
 });
 
@@ -163,16 +205,47 @@ describe('redactUngroundedPolarityFigures', () => {
   });
 
   it('replacement copy carries no digits, no dashes, no field names, and passes the egress phrase guard', () => {
+    const copies = [UNRESOLVED_POLARITY_FIGURE_REPLACEMENT];
     for (const polarity of ['holds', 'flips'] as const) {
-      for (const present of [true, false]) {
-        const copy = ungroundedFigureReplacement(polarity, present);
-        expect(copy).not.toMatch(/\d/);
-        expect(copy).not.toMatch(/[—–]/);
-        expect(copy).not.toMatch(/stability|switch|probability|_/i);
-        expect(findForbiddenPhraseHit(copy)).toBeNull();
-        // And the copy itself is not a bound figure (it cannot re-trigger).
-        expect(findPolarityBoundFigures(copy)).toEqual([]);
-      }
+      for (const present of [true, false]) copies.push(ungroundedFigureReplacement(polarity, present));
     }
+    expect(copies.every((c) => typeof c === 'string' && c.length > 0)).toBe(true);
+    for (const copy of copies) {
+      expect(copy).not.toMatch(/\d/);
+      expect(copy).not.toMatch(/[—–]/);
+      expect(copy).not.toMatch(/stability|switch|probability|_/i);
+      expect(findForbiddenPhraseHit(copy)).toBeNull();
+      // And the copy itself is not a bound figure (it cannot re-trigger).
+      expect(findPolarityBoundFigures(copy)).toEqual([]);
+    }
+  });
+
+  describe('Codex #1754 counterexample — stability 0.70, no switch source', () => {
+    const stability70 = { isl_results: { robustness: { recommendation_stability: 0.7 }, fragile_edges: [] } };
+
+    it('"does not hold in about 70%" is REPLACED, counted as unresolved, not as holds or flips', () => {
+      const review = {
+        narrative_summary:
+          'Reduce scope scored highest in 52% of runs. The ordering does not hold in about 70% of variations.',
+      };
+      const out = redactUngroundedPolarityFigures(review, stability70);
+      expect(out.value.narrative_summary).toBe(
+        'Reduce scope scored highest in 52% of runs. ' + UNRESOLVED_POLARITY_FIGURE_REPLACEMENT,
+      );
+      expect(out.paths).toEqual(['narrative_summary']);
+      expect(out.unresolved).toBe(1);
+      expect(out.holds).toBe(0);
+      expect(out.flips).toBe(0);
+    });
+
+    it('CONTRAST, same input: the directly stated "holds in about 70%" comes back as the SAME reference', () => {
+      const review = {
+        narrative_summary:
+          'Reduce scope scored highest in 52% of runs. The ordering holds in about 70% of variations.',
+      };
+      const out = redactUngroundedPolarityFigures(review, stability70);
+      expect(out.value).toBe(review);
+      expect(out.paths).toEqual([]);
+    });
   });
 });

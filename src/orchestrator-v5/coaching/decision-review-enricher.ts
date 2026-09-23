@@ -682,6 +682,7 @@ export async function enrichRunAnalysisWithDecisionReview(
           paths: polarityRedaction.paths,
           ungrounded_holds: polarityRedaction.holds,
           ungrounded_flips: polarityRedaction.flips,
+          unresolved_polarity: polarityRedaction.unresolved,
           stability_supplied: polarityRedaction.holdsSourcePresent,
           switch_probability_supplied: polarityRedaction.flipsSourcePresent,
         },

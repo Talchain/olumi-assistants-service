@@ -55,10 +55,18 @@
  * of runs, but could flip if…") is NOT bound and stays under the general rule.
  *
  * This reader ENFORCES (the enricher and the route replace the sentence), so it
- * is biased to FALSE-NEGATIVE, exactly like `runner-up-gap-statistic.ts`: a
- * negated frame ("does not hold in 30%") is declined rather than inverted, and a
- * figure claimed by BOTH polarities is declined as ambiguous. A declined figure
- * is not waved through — it falls back to the general ±10% rule.
+ * is biased to FALSE-NEGATIVE on phrasing it does not recognise, exactly like
+ * `runner-up-gap-statistic.ts`: an unrecognised sentence stays under the
+ * general ±10% rule.
+ *
+ * ⚠ A RECOGNISED CLAIM IT CANNOT RESOLVE IS REFUSED, NEVER WAVED THROUGH.
+ * A negated frame ("does not hold in 70%") is never inverted, and a figure
+ * claimed by BOTH polarities is never guessed at; either is returned as an
+ * explicit `unresolved` figure, which NO field grounds. (Codex CHANGES_REQUIRED
+ * on #1754 @ 152c5893: the previous revision dropped such a figure, it fell back
+ * to the general rule, and `recommendation_stability: 0.70` grounded "does not
+ * hold in about 70%", its own opposite. Declining to infer the polarity must
+ * not mean permitting the claim.) Nothing here derives a complement either.
  *
  * PURE. No I/O, no config, never throws.
  */
@@ -100,6 +108,14 @@ export function isWithinGroundingTolerance(n: number, values: readonly number[])
 // ============================================================================
 
 export type FigurePolarity = 'holds' | 'flips';
+
+/**
+ * Why a figure ATTACHED to a holds / flips phrase has no one polarity:
+ *  - `negated`   the phrase is negated ("does not hold in 70%", "70% chance
+ *                this won't flip"). Never inverted; no field states it.
+ *  - `ambiguous` the same figure is attached to a holds AND a flips phrase.
+ */
+export type UnresolvedPolarityReason = 'negated' | 'ambiguous';
 
 export interface PolarityCorpus {
   /** `isl_results.robustness.recommendation_stability`, when finite. Nothing else. */
@@ -148,13 +164,28 @@ export function derivePolarityCorpus(input: unknown): PolarityCorpus {
 // The reader — which percentages are bound to a polarity phrase
 // ============================================================================
 
-export interface PolarityBoundFigure {
-  readonly polarity: FigurePolarity;
-  /** The figure as written, e.g. 70 for "70%". */
-  readonly value: number;
-  /** Index of the figure's first digit in the scanned text. */
-  readonly index: number;
-}
+/**
+ * A percentage attached to a holds / flips phrase. `polarity: 'unresolved'` is
+ * a RECOGNISED claim the reader could not give one polarity — distinct from no
+ * relevant claim at all (which is simply absent from the result), and grounded
+ * by nothing.
+ */
+export type PolarityBoundFigure =
+  | {
+      readonly polarity: FigurePolarity;
+      /** The figure as written, e.g. 70 for "70%". */
+      readonly value: number;
+      /** Index of the figure's first digit in the scanned text. */
+      readonly index: number;
+    }
+  | {
+      readonly polarity: 'unresolved';
+      readonly reason: UnresolvedPolarityReason;
+      readonly value: number;
+      readonly index: number;
+    };
+
+export type PolarityBinding = PolarityBoundFigure['polarity'];
 
 const PCT = String.raw`(?<pct>\d+(?:\.\d+)?)\s*(?:%|per\s?cent\b)`;
 const APPROX = String.raw`(?:(?:about|around|roughly|approximately|nearly|almost|some|just\s+(?:over|under)|over|under|more\s+than|less\s+than|at\s+least)\s+)?`;
@@ -162,6 +193,13 @@ const PREP = String.raw`(?:(?:in|across|under|over|for|at)\s+)?`;
 const ORDER_NOUN = String.raw`(?:ordering|order|ranking|result|recommendation|outcome|lead|leader|winner|choice|conclusion)`;
 const RUN_NOUN = String.raw`(?:variations?|runs?|simulations?|scenarios?|samples?|draws?|cases|trials?|the\s+time)`;
 const MODAL = String.raw`(?:could|would|may|might|can|will)`;
+/**
+ * A negator between the subject and the verb in the two figure-first forms
+ * ("70% chance the ordering does not hold", "in 70% of runs, the ordering
+ * won't flip"). The inline twin of `NEGATION_BEFORE_VERB`, same vocabulary.
+ * Captured so the figure is returned UNRESOLVED rather than left unrecognised.
+ */
+const NEG_INLINE = String.raw`(?<neg>(?:(?:\w+\s+)?(?:not|never|no\s+longer|fails?\s+to|failed\s+to)|\w+n['’]t)\s+(?:\w+\s+)?)?`;
 
 const HOLDS_VERB = String.raw`(?:holds?|held|holding|(?:stays?|stayed|remains?|remained)\s+(?:the\s+same|unchanged|in\s+place))`;
 const FLIPS_VERB = String.raw`(?:flips?|flipped|flipping|${MODAL}\s+flip|${ORDER_NOUN}\s+(?:${MODAL}\s+)?(?:changes?|changed))`;
@@ -187,7 +225,7 @@ function forms(polarity: FigurePolarity, verb: string): PolarityForm[] {
       polarity,
       verbFirst: false,
       re: new RegExp(
-        String.raw`(?<![\w.])${PCT}\s+(?:chance|probability|likelihood|risk|odds)\s+(?:that\s+|of\s+)?(?:(?:this|it|the\s+${ORDER_NOUN})\s+)?${verb}\b`,
+        String.raw`(?<![\w.])${PCT}\s+(?:chance|probability|likelihood|risk|odds)\s+(?:that\s+|of\s+)?(?:(?:this|it|the\s+${ORDER_NOUN})\s+)?${NEG_INLINE}${verb}\b`,
         'gid',
       ),
     },
@@ -196,7 +234,7 @@ function forms(polarity: FigurePolarity, verb: string): PolarityForm[] {
       polarity,
       verbFirst: false,
       re: new RegExp(
-        String.raw`\bin\s+${APPROX}${PCT}\s+of\s+(?:the\s+)?${RUN_NOUN},?\s+(?:the\s+)?${ORDER_NOUN}\s+${verb}\b`,
+        String.raw`\bin\s+${APPROX}${PCT}\s+of\s+(?:the\s+)?${RUN_NOUN},?\s+(?:the\s+)?${ORDER_NOUN}\s+${NEG_INLINE}${verb}\b`,
         'gid',
       ),
     },
@@ -210,19 +248,21 @@ const POLARITY_FORMS: readonly PolarityForm[] = [
 
 /**
  * A negator shortly before the verb ("does not hold", "won't flip", "never
- * changes"). Present ⇒ decline, rather than invert — the same convention as
- * `prose-fact-agreement.ts`'s NEGATION_PATTERN.
+ * changes"). Present ⇒ the figure is UNRESOLVED (refused), never inverted — the
+ * same no-inversion convention as `prose-fact-agreement.ts`'s NEGATION_PATTERN.
  */
 const NEGATION_BEFORE_VERB = /(?:\b(?:not|never|no\s+longer|fails?\s+to|failed\s+to)\s+(?:\w+\s+)?|\w+n['’]t\s+(?:\w+\s+)?)$/i;
 
 /**
- * Every percentage in `text` that is bound to a holds or flips phrase. A figure
- * claimed by both polarities is dropped as ambiguous; a negated frame is
- * declined. Order follows position in `text`.
+ * Every percentage in `text` that is bound to a holds or flips phrase. A
+ * negated frame, or a figure claimed by both polarities, is returned as an
+ * explicit `unresolved` figure — never dropped, because a dropped figure falls
+ * back to the general ±10% rule and is grounded by whatever number it is near.
+ * Order follows position in `text`.
  */
 export function findPolarityBoundFigures(text: string): PolarityBoundFigure[] {
   if (typeof text !== 'string' || text.length === 0) return [];
-  const byIndex = new Map<number, PolarityBoundFigure | 'ambiguous'>();
+  const byIndex = new Map<number, PolarityBoundFigure>();
   for (const form of POLARITY_FORMS) {
     form.re.lastIndex = 0;
     let m: RegExpExecArray | null;
@@ -230,35 +270,40 @@ export function findPolarityBoundFigures(text: string): PolarityBoundFigure[] {
       const span = m.indices?.groups?.pct;
       const raw = m.groups?.pct;
       if (span === undefined || raw === undefined) continue;
-      if (form.verbFirst && NEGATION_BEFORE_VERB.test(text.slice(Math.max(0, m.index - 24), m.index))) {
-        continue;
-      }
       const value = parseFloat(raw);
       if (!Number.isFinite(value)) continue;
       const index = span[0];
+      const negated = form.verbFirst
+        ? NEGATION_BEFORE_VERB.test(text.slice(Math.max(0, m.index - 24), m.index))
+        : m.groups?.neg !== undefined;
+      const next: PolarityBoundFigure = negated
+        ? { polarity: 'unresolved', reason: 'negated', value, index }
+        : { polarity: form.polarity, value, index };
       const previous = byIndex.get(index);
       if (previous === undefined) {
-        byIndex.set(index, { polarity: form.polarity, value, index });
-      } else if (previous !== 'ambiguous' && previous.polarity !== form.polarity) {
-        byIndex.set(index, 'ambiguous');
+        byIndex.set(index, next);
+      } else if (previous.polarity === 'unresolved') {
+        // Unresolved is final: no second binding can resolve it.
+      } else if (next.polarity === 'unresolved') {
+        byIndex.set(index, next);
+      } else if (previous.polarity !== next.polarity) {
+        byIndex.set(index, { polarity: 'unresolved', reason: 'ambiguous', value, index });
       }
     }
   }
-  const out: PolarityBoundFigure[] = [];
-  for (const entry of byIndex.values()) {
-    if (entry !== 'ambiguous') out.push(entry);
-  }
-  return out.sort((a, b) => a.index - b.index);
+  return [...byIndex.values()].sort((a, b) => a.index - b.index);
 }
 
 /**
  * Is this bound figure grounded by the ONE source its polarity allows? An
- * absent source is ungrounded — never vacuous.
+ * absent source is ungrounded — never vacuous. An `unresolved` figure has no
+ * source at all: it is never grounded, whatever number it is near.
  */
 export function isFigureGroundedForPolarity(
   figure: Pick<PolarityBoundFigure, 'polarity' | 'value'>,
   corpus: PolarityCorpus,
 ): boolean {
+  if (figure.polarity === 'unresolved') return false;
   const source = figure.polarity === 'holds' ? corpus.holds : corpus.flips;
   if (source.length === 0) return false;
   return isWithinGroundingTolerance(figure.value, source);
@@ -286,6 +331,15 @@ export function ungroundedFigureReplacement(polarity: FigurePolarity, sourcePres
     : `This run does not report how often the ordering ${verb}, so no figure is given for it.`;
 }
 
+/**
+ * The replacement for a sentence whose figure is attached to a negated or
+ * two-way holds / flips claim. No field states that meaning, so the figure is
+ * left out rather than inverted or matched by proximity. Same constraints as
+ * `ungroundedFigureReplacement`.
+ */
+export const UNRESOLVED_POLARITY_FIGURE_REPLACEMENT =
+  'A figure for how often the ordering holds or flips is left out here, because this run cannot confirm what it means.';
+
 export interface PolarityFigureRedaction<T> {
   /** The value with every offending sentence replaced. Same reference when clean. */
   readonly value: T;
@@ -295,6 +349,8 @@ export interface PolarityFigureRedaction<T> {
   readonly holds: number;
   /** Ungrounded FLIPS figures found in edited fields. */
   readonly flips: number;
+  /** UNRESOLVED (negated / two-way) figures found in edited fields. */
+  readonly unresolved: number;
   /** Whether each polarity's source was present in the input (telemetry, never prose). */
   readonly holdsSourcePresent: boolean;
   readonly flipsSourcePresent: boolean;
@@ -326,8 +382,9 @@ export function redactUngroundedPolarityFigures<T>(
   const paths = new Set<string>();
   let holds = 0;
   let flips = 0;
+  let unresolved = 0;
 
-  const ungroundedIn = (text: string, polarity: FigurePolarity): number =>
+  const ungroundedIn = (text: string, polarity: PolarityBinding): number =>
     findPolarityBoundFigures(text).filter(
       (f) => f.polarity === polarity && !isFigureGroundedForPolarity(f, corpus),
     ).length;
@@ -336,7 +393,8 @@ export function redactUngroundedPolarityFigures<T>(
     if (typeof node === 'string') {
       const badHolds = ungroundedIn(node, 'holds');
       const badFlips = ungroundedIn(node, 'flips');
-      if (badHolds === 0 && badFlips === 0) return node;
+      const badUnresolved = ungroundedIn(node, 'unresolved');
+      if (badHolds === 0 && badFlips === 0 && badUnresolved === 0) return node;
       let next = node;
       if (badHolds > 0) {
         next = replaceAssertingUnits(next, (unit) => ungroundedIn(unit, 'holds') > 0, holdsReplacement);
@@ -344,12 +402,20 @@ export function redactUngroundedPolarityFigures<T>(
       if (badFlips > 0) {
         next = replaceAssertingUnits(next, (unit) => ungroundedIn(unit, 'flips') > 0, flipsReplacement);
       }
+      if (badUnresolved > 0) {
+        next = replaceAssertingUnits(
+          next,
+          (unit) => ungroundedIn(unit, 'unresolved') > 0,
+          UNRESOLVED_POLARITY_FIGURE_REPLACEMENT,
+        );
+      }
       // A figure whose binding spans a sentence boundary is not in any one
       // unit, so nothing is replaced — the honest outcome, and the reason this
       // reads the RESULT rather than the whole-string count.
       if (next === node) return node;
       holds += badHolds;
       flips += badFlips;
+      unresolved += badUnresolved;
       paths.add(path === '' ? '<root>' : path);
       return next;
     }
@@ -380,6 +446,7 @@ export function redactUngroundedPolarityFigures<T>(
     paths: [...paths].sort(),
     holds,
     flips,
+    unresolved,
     holdsSourcePresent,
     flipsSourcePresent,
   };

@@ -184,4 +184,78 @@ describe('enricher egress — narrated figures keep their meaning', () => {
     );
     expect(dr.narrative_summary).toBe(narrative);
   });
+
+  // ── Codex CHANGES_REQUIRED on #1754 @ 152c5893 ────────────────────────────
+  // A percentage attached to a NEGATED holds / flips claim escaped: the reader
+  // dropped it, so this seam saw no offending figure and shipped the sentence.
+  // RED at 87625ef8: both RED-FIRST cases below reach the user verbatim.
+
+  /** Codex's counterexample: stability 0.70, NO fragile-edge switch source. */
+  const stability70 = (): Record<string, unknown> =>
+    paulsRunEnrichment({ recommendation_stability: 0.7, fragile_edges: [] });
+  /** The inverse: a single switch probability of 0.30. */
+  const switch30 = (): Record<string, unknown> =>
+    paulsRunEnrichment({
+      fragile_edges: [
+        {
+          edge_id: 'fac_scope->out_delivery',
+          from_id: 'fac_scope',
+          to_id: 'out_delivery',
+          from_label: 'Scope',
+          to_label: 'Delivery date',
+          switch_probability: 0.3,
+        },
+      ],
+    });
+  const UNRESOLVED_COPY =
+    'A figure for how often the ordering holds or flips is left out here, because this run cannot confirm what it means.';
+  const WIN_SENTENCE = 'Reduce scope scored highest against your goal in 52% of runs.';
+
+  it('RED-FIRST (Codex #1754): "does not hold in about 70%" with stability 0.70 never reaches the user', async () => {
+    const enrichment = stability70();
+    // Precondition: the stability that numerically matches the figure IS present, and no switch source is.
+    const robustness = enrichment.robustness as Record<string, unknown>;
+    expect(robustness.recommendation_stability).toBe(0.7);
+    expect(robustness.fragile_edges).toEqual([]);
+
+    const dr = await enrichAndReadReview(
+      enrichment,
+      reviewWith(`The ordering does not hold in about 70% of variations. ${PRIMARY_RISK_SENTENCE}`, 'The result is sensitive to the Scope link.'),
+    );
+    const narrative = dr.narrative_summary as string;
+    expect(narrative).not.toContain('does not hold');
+    expect(narrative).not.toMatch(/\b70%/);
+    expect(narrative).toContain(UNRESOLVED_COPY);
+    expect(narrative).toContain(PRIMARY_RISK_SENTENCE);
+  });
+
+  it('RED-FIRST (Codex #1754, inverse): "does not flip in about 30%" with switch probability 0.30 never reaches the user', async () => {
+    const dr = await enrichAndReadReview(
+      switch30(),
+      reviewWith(`The ordering does not flip in about 30% of variations. ${PRIMARY_RISK_SENTENCE}`, 'The result is sensitive to the Scope link.'),
+    );
+    const narrative = dr.narrative_summary as string;
+    expect(narrative).not.toContain('does not flip');
+    expect(narrative).not.toMatch(/\b30%/);
+    expect(narrative).toContain(UNRESOLVED_COPY);
+    expect(narrative).toContain(PRIMARY_RISK_SENTENCE);
+  });
+
+  it('CONTRAST, same input: "holds in about 70%" backed by stability 0.70 passes byte-identical', async () => {
+    const narrative = `Across the model, the ordering holds in about 70% of variations. ${PRIMARY_RISK_SENTENCE}`;
+    const dr = await enrichAndReadReview(stability70(), reviewWith(narrative, 'The result is sensitive to the Scope link.'));
+    expect(dr.narrative_summary).toBe(narrative);
+  });
+
+  it('CONTRAST, same input: "could flip in about 30%" backed by switch probability 0.30 passes byte-identical', async () => {
+    const narrative = `The ordering could flip in about 30% of variations of the Scope link. ${PRIMARY_RISK_SENTENCE}`;
+    const dr = await enrichAndReadReview(switch30(), reviewWith(narrative, 'The result is sensitive to the Scope link.'));
+    expect(dr.narrative_summary).toBe(narrative);
+  });
+
+  it('CONTRAST, same input: an unrelated win-probability sentence passes byte-identical', async () => {
+    const narrative = `${WIN_SENTENCE} ${PRIMARY_RISK_SENTENCE}`;
+    const dr = await enrichAndReadReview(stability70(), reviewWith(narrative, 'The result is sensitive to the Scope link.'));
+    expect(dr.narrative_summary).toBe(narrative);
+  });
 });

@@ -18,7 +18,8 @@
  * - A percentage bound to a "holds" / "flips" phrase is POLARITY-BOUND: it is
  *   grounded ONLY by its own field (`recommendation_stability` for holds,
  *   switch probabilities for flips), and an absent field is UNGROUNDED, never
- *   vacuous. See `figure-polarity.ts`.
+ *   vacuous. A figure attached to a NEGATED or two-way holds / flips claim is
+ *   UNRESOLVED and grounded by nothing (Codex #1754). See `figure-polarity.ts`.
  * - Violations emit UNGROUNDED_NUMBER warnings (one per fabricated number)
  * - Caller decides whether to retry on UNGROUNDED_NUMBER
  */
@@ -30,9 +31,10 @@ import {
   findPolarityBoundFigures,
   isFigureGroundedForPolarity,
   isWithinGroundingTolerance,
-  type FigurePolarity,
+  type PolarityBinding,
   type PolarityBoundFigure,
   type PolarityCorpus,
+  type UnresolvedPolarityReason,
 } from './figure-polarity.js';
 
 // ============================================================================
@@ -298,7 +300,9 @@ interface FabricatedNumber {
   /** The token as written ("70%", "59"), quoted in the warning the retry prompt parses. */
   readonly token: string;
   /** Set when the number was refused by the POLARITY rule rather than the general one. */
-  readonly polarity: FigurePolarity | null;
+  readonly polarity: PolarityBinding | null;
+  /** Set when `polarity === 'unresolved'`. */
+  readonly reason?: UnresolvedPolarityReason;
 }
 
 /**
@@ -336,8 +340,14 @@ function findUngroundedNumbers(
   const judge = (index: number, n: number, token: string): void => {
     const figure = bound.get(index);
     if (figure !== undefined) {
+      // An UNRESOLVED figure (negated / two-way claim) is refused here too: it
+      // never falls through to the general rule below (Codex #1754).
       if (!isFigureGroundedForPolarity(figure, polarityCorpus)) {
-        fabricated.push({ token, polarity: figure.polarity });
+        fabricated.push(
+          figure.polarity === 'unresolved'
+            ? { token, polarity: 'unresolved', reason: figure.reason }
+            : { token, polarity: figure.polarity },
+        );
       }
       return;
     }
@@ -377,6 +387,11 @@ function ungroundedWarning(bad: FabricatedNumber, field: string): string {
   }
   if (bad.polarity === 'flips') {
     return `UNGROUNDED_NUMBER: "${bad.token}" in ${field} is a "flips" figure; only isl_results.fragile_edges[] switch probabilities can ground it, and they do not`;
+  }
+  if (bad.polarity === 'unresolved') {
+    return bad.reason === 'ambiguous'
+      ? `UNGROUNDED_NUMBER: "${bad.token}" in ${field} is attached to both a "holds" and a "flips" claim; no single input field can ground it`
+      : `UNGROUNDED_NUMBER: "${bad.token}" in ${field} is attached to a negated "holds" / "flips" claim; no input field grounds a negated figure, and it is never inverted`;
   }
   return `UNGROUNDED_NUMBER: "${bad.token}" in ${field} is not within ±10% of any input value`;
 }

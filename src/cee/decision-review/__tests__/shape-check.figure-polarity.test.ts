@@ -23,6 +23,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { performShapeCheck, type ReviewInputForGrounding } from '../shape-check.js';
+import { isWithinGroundingTolerance } from '../figure-polarity.js';
 
 /** Production-shaped: the fields of Paul's run that matter, and no stability. */
 function paulsRunInput(robustness: Record<string, unknown> = {}): ReviewInputForGrounding {
@@ -132,5 +133,81 @@ describe('shape-check — narrated figures keep their meaning', () => {
     const bad = ungrounded(result.warnings);
     expect(bad).toHaveLength(1);
     expect(bad[0]).toMatch(/^UNGROUNDED_NUMBER: "80%" in robustness_explanation /);
+  });
+
+  // ── Codex CHANGES_REQUIRED on #1754 @ 152c5893 ────────────────────────────
+  // "Declining to infer the polarity must not mean permitting the claim." The
+  // previous revision recognised the negator, DROPPED the figure from the
+  // polarity result, and the general ±10% rule then grounded it — so
+  // `recommendation_stability: 0.70` licensed "does not hold in about 70%",
+  // its own opposite. RED at 87625ef8: each case below returned no warning.
+
+  /** Codex's counterexample input: stability 0.70, NO fragile-edge switch source. */
+  function stability70Input(): ReviewInputForGrounding {
+    const input = paulsRunInput({ recommendation_stability: 0.7 });
+    input.isl_results!.fragile_edges = [];
+    return input;
+  }
+
+  it('RED-FIRST (Codex #1754): "does not hold in about 70%" is NOT grounded by the 0.70 stability it contradicts', () => {
+    // Precondition: the general rule WOULD ground it, so only the polarity rule can refuse it.
+    expect(isWithinGroundingTolerance(70, [0.7])).toBe(true);
+    const result = performShapeCheck(
+      review('The ordering does not hold in about 70% of variations.'),
+      stability70Input(),
+    );
+    const bad = ungrounded(result.warnings);
+    expect(bad).toHaveLength(1);
+    expect(bad[0]).toMatch(/^UNGROUNDED_NUMBER: "70%" in robustness_explanation /);
+    expect(bad[0]).toContain('negated');
+  });
+
+  it('RED-FIRST (Codex #1754, inverse): "does not flip in about 30%" is NOT grounded by the 0.30 switch probability it contradicts', () => {
+    const input = paulsRunInput();
+    input.isl_results!.fragile_edges = [{ from_label: 'Scope', to_label: 'Delivery date', switch_probability: 0.3 }];
+    expect(isWithinGroundingTolerance(30, [0.3])).toBe(true);
+    const result = performShapeCheck(review('The ordering does not flip in about 30% of variations.'), input);
+    const bad = ungrounded(result.warnings);
+    expect(bad).toHaveLength(1);
+    expect(bad[0]).toMatch(/^UNGROUNDED_NUMBER: "30%" in robustness_explanation /);
+    expect(bad[0]).toContain('negated');
+  });
+
+  it('RED-FIRST (Codex #1754): the negated claim in the figure-first form is refused too', () => {
+    const result = performShapeCheck(review('There is a 70% chance the ordering does not hold.'), stability70Input());
+    const bad = ungrounded(result.warnings);
+    expect(bad).toHaveLength(1);
+    expect(bad[0]).toMatch(/^UNGROUNDED_NUMBER: "70%" in robustness_explanation /);
+  });
+
+  it('RED-FIRST (Codex #1754): a figure bound to BOTH polarities is refused, not returned to the general corpus', () => {
+    const result = performShapeCheck(
+      review('It holds in about 70% of variations, the ordering flips in the rest.'),
+      stability70Input(),
+    );
+    const bad = ungrounded(result.warnings);
+    expect(bad).toHaveLength(1);
+    expect(bad[0]).toMatch(/^UNGROUNDED_NUMBER: "70%" in robustness_explanation /);
+    expect(bad[0]).toContain('both');
+  });
+
+  it('CONTRAST, same input: the directly stated "holds in about 70%" backed by stability 0.70 passes', () => {
+    const result = performShapeCheck(review('The ordering holds in about 70% of variations.'), stability70Input());
+    expect(ungrounded(result.warnings)).toEqual([]);
+  });
+
+  it('CONTRAST, same input: "could flip in about 30%" backed by switch probability 0.30 passes', () => {
+    const input = paulsRunInput();
+    input.isl_results!.fragile_edges = [{ from_label: 'Scope', to_label: 'Delivery date', switch_probability: 0.3 }];
+    const result = performShapeCheck(review('The ordering could flip in about 30% of variations.'), input);
+    expect(ungrounded(result.warnings)).toEqual([]);
+  });
+
+  it('CONTRAST, same input: an unrelated win-probability sentence passes', () => {
+    const result = performShapeCheck(
+      review('Reduce scope scored highest against your goal in 52% of runs.'),
+      stability70Input(),
+    );
+    expect(ungrounded(result.warnings)).toEqual([]);
   });
 });

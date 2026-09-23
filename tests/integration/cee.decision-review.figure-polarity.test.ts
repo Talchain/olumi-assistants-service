@@ -135,4 +135,51 @@ describe('POST /assist/v1/decision-review — narrated figures keep their meanin
     const review = await postReview(bodyWithoutStability(), reviewWith(narrative));
     expect(review.narrative_summary).toBe(narrative);
   });
+
+  // ── Codex CHANGES_REQUIRED on #1754 @ 152c5893 ────────────────────────────
+  // A percentage attached to a NEGATED holds / flips claim escaped this
+  // carrier: the reader dropped it, the shape check grounded it by proximity
+  // (no retry), and the egress redaction saw no offending figure. PLoT's REAL
+  // body, UNEDITED: `recommendation_stability` 0.59025 grounds "does not hold
+  // in about 59%" (its own opposite) and `fragile_edges[0].switch_probability`
+  // 0.61 grounds "does not flip in about 61%". RED at 87625ef8: both RED-FIRST
+  // cases leave the route verbatim.
+  const UNRESOLVED_COPY =
+    'A figure for how often the ordering holds or flips is left out here, because this run cannot confirm what it means.';
+
+  it('RED-FIRST (Codex #1754): "does not hold in about 59%" with stability 0.59025 is replaced', async () => {
+    const isl = plotEgressBody.isl_results as Record<string, unknown>;
+    expect((isl.robustness as Record<string, unknown>).recommendation_stability).toBe(0.59025);
+
+    const review = await postReview(
+      plotEgressBody,
+      reviewWith(`The ordering does not hold in about 59% of variations. ${RISK}`),
+    );
+    const narrative = review.narrative_summary as string;
+    expect(narrative).not.toContain('does not hold');
+    expect(narrative).not.toContain('59%');
+    expect(narrative).toContain(UNRESOLVED_COPY);
+    expect(narrative).toContain(RISK);
+  });
+
+  it('RED-FIRST (Codex #1754, inverse): "does not flip in about 61%" with switch probability 0.61 is replaced', async () => {
+    const isl = plotEgressBody.isl_results as Record<string, unknown>;
+    expect((isl.fragile_edges as Array<Record<string, unknown>>)[0].switch_probability).toBe(0.61);
+
+    const review = await postReview(
+      plotEgressBody,
+      reviewWith(`The ordering does not flip in about 61% of variations. ${RISK}`),
+    );
+    const narrative = review.narrative_summary as string;
+    expect(narrative).not.toContain('does not flip');
+    expect(narrative).not.toContain('61%');
+    expect(narrative).toContain(UNRESOLVED_COPY);
+    expect(narrative).toContain(RISK);
+  });
+
+  it('CONTRAST, same body: an unrelated win-probability sentence carrying the SAME 59% passes byte-identical', async () => {
+    const narrative = `Hire One Tech Lead came out ahead in about 59% of runs. ${RISK}`;
+    const review = await postReview(plotEgressBody, reviewWith(narrative));
+    expect(review.narrative_summary).toBe(narrative);
+  });
 });
