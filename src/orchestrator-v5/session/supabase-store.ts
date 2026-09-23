@@ -40,6 +40,7 @@ import {
   SessionReadError,
   StateCommitFailedError,
   type AtomicCommittedModelVersionReceipt,
+  type CommittedTurnRecord,
   type GraphWriteFailureDisclosure,
   type PendingActionReadOptions,
   type SessionAppendOutcome,
@@ -1550,6 +1551,27 @@ export class SupabaseSessionStore implements SessionStore {
    * Only the return shape differs at the seam (`string | null` here,
    * re-wrapped as `{ id } | null` for the existing caller).
    */
+  async readCommittedTurn(scenarioId: string, turnId: string): Promise<CommittedTurnRecord | null> {
+    const { data, error } = await this.client
+      .from('v5_conversation_turns')
+      .select('id, request_hash, assistant_message, user_message, llm_calls_used')
+      .eq('scenario_id', scenarioId)
+      .eq('turn_id', turnId)
+      .limit(1);
+    // A failed read is an UNKNOWN and is thrown, never folded into "no row":
+    // the caller would otherwise re-execute a turn that may already have run.
+    if (error) throw new Error(`readCommittedTurn failed: ${error.message ?? String(error)}`);
+    const row = ((data as Array<Record<string, unknown>> | null) ?? [])[0];
+    if (!row || typeof row.id !== 'string') return null;
+    return {
+      id: row.id,
+      request_hash: String(row.request_hash ?? ''),
+      assistant_message: typeof row.assistant_message === 'string' ? row.assistant_message : null,
+      user_message: typeof row.user_message === 'string' ? row.user_message : null,
+      llm_calls_used: typeof row.llm_calls_used === 'number' ? row.llm_calls_used : 0,
+    };
+  }
+
   async committedTurnRowId(scenarioId: string, turnId: string): Promise<string | null> {
     try {
       const { data, error } = await this.client
