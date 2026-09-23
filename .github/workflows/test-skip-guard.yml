@@ -17,6 +17,22 @@ on:
   pull_request:
     branches: [main, staging]
 
+# ⛔ SUPERSEDED RUNS MUST NOT HOLD RUNNERS.
+#
+# Measured 23 Sep 2026, 00:26 UTC: 63 workflow runs queued against 1 in
+# progress, with 25 open PRs. Nothing could go green, so nothing could merge,
+# so nothing could deploy — the queue, not any individual change, was the
+# binding constraint on shipping. Without a concurrency group every push
+# enqueues a fresh full set and the runs it superseded keep their place.
+#
+# ⚠ `cancel-in-progress` is FALSE on staging and main, deliberately. A run on a
+# protected branch is the deploy gate and part of the record; cancelling one
+# would destroy evidence of what was verified at that SHA. Only branch and PR
+# runs — where a newer push has already made the older run irrelevant — cancel.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/staging' && github.ref != 'refs/heads/main' }}
+
 jobs:
   skip-inventory:
     name: Test-skip inventory (AST, ratcheted)
