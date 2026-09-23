@@ -89,7 +89,8 @@ export const BUILD_INSTRUCTIONS = [
   'For each option fill `interventions` with the factor levels it sets \u2014 record a level the brief states with provenance "explicit", and never guess one it does not give.',
   'EVERY OPTION MUST SAY WHAT IT DOES. An option with no `interventions` AND no `changes` is inert: it can never be compared with another option, whatever values are supplied later, and the whole decision becomes unanswerable. If the brief does not say what an option changes, still name the factors it ACTS ON in `changes` \u2014 that is a structural claim, not a numeric one. '
   + 'EVERY option must also list, in `changes`, the factors it acts on WITHOUT a stated level. An option that names no interventions and no changes is disconnected from the decision and cannot be analysed at all, so this is not optional bookkeeping.',
-  'Then widen: add the options, factors, risks, outcomes and causal mechanisms that materially improve strategic reasoning, including alternatives beyond the user’s initial frame.',
+  'KEEP THE MODEL SMALL ENOUGH TO READ AT A GLANCE. Include every option the user named. You may add AT MOST ONE further option, with provenance "ai_proposed", and only when it is a genuinely different path the user should weigh — put any other alternatives you would raise in `unknowns` as a sentence, not in the model. Use at most 8 factors, at most 3 risks and at most 2 outcomes besides the goal, merging near-duplicates. A node that could not change which option wins does not belong in the model.',
+  'AN INTERVENTION IS THE LEVEL A FACTOR REACHES UNDER THAT OPTION, NOT THE AMOUNT IT CHANGES BY. When an option ADDS something — people hired, money spent, a channel opened — model what it adds as its own factor whose level when doing nothing is 0: "hire two developers" is "Developers hired" = 2 and "hire a tech lead" is "Tech leads hired" = 1. That factor’s baseline is 0 by definition, not by guess, so record baseline_known true, baseline_value 0. NEVER record the amount added as the level of a stock it adds to: "Developer headcount" = 2 for a team that already has developers would tell the analysis that hiring two people shrinks the team.',
   'Mark provenance honestly on EVERY item: "explicit" only for what the user stated, "inferred" for what you read out of the brief, "ai_proposed" for anything you added beyond it.',
   'THE GOAL METRIC MUST BE THE TERMINAL NODE. Every option needs a causal path that ends at the goal metric you named in `goal.metric`. Use that EXACT label as the endpoint of the final link \u2014 do not invent a near-synonym outcome like "X Improvement" for a goal called "X change", because a separate synonym leaves the goal disconnected and the model cannot be analysed at all.',
   'EVERY RISK AND EVERY FACTOR MUST BE WIRED IN. A node with no link, or with links that dead-end before the goal, is not merely decorative \u2014 it stops the ENTIRE model being analysed. Give every risk a link to what it threatens, and every factor a chain of links that ends at the goal metric. Measured on a real model: 8 of 20 nodes were unreachable, all five risks among them, and the analysis refused outright.',
@@ -104,6 +105,49 @@ export type CallStructuredModel = (req: {
   max_output_tokens: number; schema: Record<string, unknown>;
   reasoning_effort?: 'low' | 'medium' | 'high';
 }) => Promise<{ text: string; usage?: Record<string, unknown> }>;
+
+/**
+ * ⛔ AT MOST ONE OPTION THE USER DID NOT NAME ENTERS THE MODEL.
+ *
+ * MEASURED on deployed staging (Paul's own test, 22 Sep 23:22Z, scenario
+ * 450acd25): the one-line brief "Should I hire a Tech lead or two developers to
+ * increase velocity?" built 26 nodes and 57 edges — FIVE options, three of
+ * them the builder's own ("Stage Lead Then Developers", "Improve Delivery
+ * Process", "Use External Delivery Capacity"). None of the three carried a
+ * level, so the analysis dropped all three ("3 of your options were left out"),
+ * and the user was left with a canvas they called "massive and unwieldy" and a
+ * comparison of two. The same brief drafted by current CEE produced 13 nodes.
+ *
+ * The prompt now asks for at most one; this makes it true whatever the model
+ * returns. Only `ai_proposed` options are ever dropped — everything the user
+ * named or the brief implies is kept — and every dropped label is returned so
+ * the Agent can offer it as an idea, which is ideation without mutation.
+ */
+export const MAX_AI_PROPOSED_OPTIONS = 1;
+
+export function boundAiProposedOptions(candidate: CandidateModel): {
+  candidate: CandidateModel; suggestedNotAdded: string[];
+} {
+  let kept = 0;
+  const dropped: string[] = [];
+  const options = candidate.options.filter((o) => {
+    if (o.provenance !== 'ai_proposed') return true;
+    kept += 1;
+    if (kept <= MAX_AI_PROPOSED_OPTIONS) return true;
+    dropped.push(o.label);
+    return false;
+  });
+  if (dropped.length === 0) return { candidate, suggestedNotAdded: [] };
+  const gone = new Set(dropped);
+  return {
+    candidate: {
+      ...candidate,
+      options,
+      links: candidate.links.filter((l) => !gone.has(l.from) && !gone.has(l.to)),
+    },
+    suggestedNotAdded: dropped,
+  };
+}
 
 export async function buildModelFromBrief(
   scenarioId: string,
@@ -132,7 +176,8 @@ export async function buildModelFromBrief(
     return { ok: false, mutated: false, refusal: 'construction_failed', detail: String(err).slice(0, 200) };
   }
 
-  const admitted = admitCandidateModel(candidate, {});
+  const { candidate: bounded, suggestedNotAdded } = boundAiProposedOptions(candidate);
+  const admitted = admitCandidateModel(bounded, {});
   /**
    * ⭐ THE USER'S STATED LIMITS TRAVEL WITH THE GRAPH.
    *
@@ -187,7 +232,13 @@ export async function buildModelFromBrief(
     // Carried WITH the graph (GraphV3 declares `goal_constraints`), verified
     // surviving registration on deployed staging.
     goal_constraints_carried: admitted.goal_constraints.length,
+    // Alternatives the builder proposed beyond the one it may add. Kept OUT of
+    // the model so it stays readable; offered to the user as ideas instead.
+    suggested_not_added: suggestedNotAdded,
     not_represented: [
+      suggestedNotAdded.length > 0
+        ? `${suggestedNotAdded.length} further option(s) were suggested but not added, to keep the model readable: ${suggestedNotAdded.join('; ')}. Offer them as ideas; add one only if the user asks.`
+        : undefined,
       admitted.withheld.length > 0
         ? `${admitted.withheld.length} relationship(s) were left out because nobody has stated which way they run.`
         : undefined,

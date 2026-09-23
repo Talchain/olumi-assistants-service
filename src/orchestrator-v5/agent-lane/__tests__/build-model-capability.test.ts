@@ -195,3 +195,59 @@ describe('the construction budget is the measured one', () => {
     expect(budgetFor(seen[0].model!, 'widening').max_output_tokens).toBeLessThan(3404);
   });
 });
+
+/**
+ * ⛔ THE BUILDER MAY ADD AT MOST ONE OPTION THE USER DID NOT NAME.
+ *
+ * Measured on deployed staging (22 Sep 23:22Z, scenario 450acd25): a one-line
+ * hiring brief built FIVE options, three of them the builder's own, none of the
+ * three with a level — the analysis dropped all three and the user called the
+ * canvas "massive and unwieldy". Asserted on the graph SENT to registration and
+ * on edge endpoints, not on a count the capability reports about itself.
+ */
+describe('construction adds at most one option of its own', () => {
+  const opt = (label: string, provenance: string) => ({ label, provenance, changes: ['Delivery capacity'], interventions: [] });
+  const withOptions = (options: unknown[]) => ({
+    ...CANDIDATE,
+    options,
+    factors: [...CANDIDATE.factors, { label: 'Delivery capacity', role: 'observable', baseline_known: false, baseline_value: null, unit: null, provenance: 'inferred', plausible_max: 100 }],
+    links: [
+      ...CANDIDATE.links,
+      ...options.map((o) => ({ from: (o as { label: string }).label, to: 'Delivery capacity', direction: 'positive', provenance: 'inferred' })),
+      { from: 'Delivery capacity', to: 'Monthly recurring revenue', direction: 'positive', provenance: 'inferred' },
+    ],
+  });
+  const registeredOptions = (bodies: Record<string, unknown>) => {
+    const g = (bodies.register as { graph: { nodes: { id: string; kind: string; label: string }[]; edges: { from: string; to: string }[] } }).graph;
+    return { g, labels: g.nodes.filter((n) => n.kind === 'option').map((n) => n.label).sort() };
+  };
+
+  it('keeps every option the user named and the FIRST one it proposed; offers the rest as ideas', async () => {
+    const candidate = withOptions([
+      opt('Hire a Tech Lead', 'explicit'), opt('Hire Two Developers', 'explicit'),
+      opt('Stage Lead Then Developers', 'ai_proposed'), opt('Improve Delivery Process', 'ai_proposed'),
+      opt('Use External Delivery Capacity', 'ai_proposed'),
+    ]);
+    const { d, bodies } = dispatcher({ before: [], after: [{ id: 'a' }] });
+    const r = await createAgentCapabilities(d, new ProposalStore(), structured(candidate)).buildModelFromBrief(ctx, { brief: 'a brief' });
+    expect(r.ok).toBe(true);
+    const { g, labels } = registeredOptions(bodies);
+    expect(labels).toEqual(['Hire Two Developers', 'Hire a Tech Lead', 'Stage Lead Then Developers']);
+    expect(r.suggested_not_added).toEqual(['Improve Delivery Process', 'Use External Delivery Capacity']);
+    // No edge may point at an option that is not in the graph.
+    const ids = new Set(g.nodes.map((n) => n.id));
+    expect(g.edges.every((e) => ids.has(e.from) && ids.has(e.to))).toBe(true);
+    // The Agent is told, in words, what was left out.
+    expect((r.not_represented as string[]).join(' ')).toContain('Improve Delivery Process');
+  });
+
+  it('CONTRAST: never drops an option the user named, however many there are', async () => {
+    const candidate = withOptions([
+      opt('A', 'explicit'), opt('B', 'explicit'), opt('C', 'inferred'), opt('D', 'explicit'), opt('E', 'ai_proposed'),
+    ]);
+    const { d, bodies } = dispatcher({ before: [], after: [{ id: 'a' }] });
+    const r = await createAgentCapabilities(d, new ProposalStore(), structured(candidate)).buildModelFromBrief(ctx, { brief: 'a brief' });
+    expect(registeredOptions(bodies).labels).toEqual(['A', 'B', 'C', 'D', 'E']);
+    expect(r.suggested_not_added).toEqual([]);
+  });
+});
