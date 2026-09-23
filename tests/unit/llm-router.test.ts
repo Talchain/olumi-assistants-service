@@ -208,14 +208,26 @@ describe("LLM Router", () => {
   });
 
   describe("Task/provider capability authority", () => {
-    // ⚠ The task is now a PARAMETER. It used to be hard-coded to
-    // critique_graph, which stopped being an unsupported-provider example the
-    // moment OpenAIAdapter.critiqueGraph was implemented. explain_diff is the
-    // default because its adapter still throws, so it is the live example.
-    function expectProviderMismatch(
-      run: () => unknown,
-      task = "explain_diff",
-    ): void {
+    /**
+     * ⛔⛔ THE CAPABILITY MAP CAN NO LONGER REJECT ANYTHING, AND THAT IS WHY
+     * THIS HELPER CHANGED MECHANISM RATHER THAN VEHICLE.
+     *
+     * `ROUTER_TASK_PROVIDER_CAPABILITIES` has two entries and, once both
+     * `critique_graph` (#1771) and `explain_diff` (#1764) are open, BOTH list
+     * all three providers. The provider union IS
+     * ['anthropic','openai','fixtures'], so `supportedProviders.includes(...)`
+     * is always true and `MODEL_PROVIDER_MISMATCH` is UNREACHABLE through the
+     * real map. Every previous version of this helper worked by finding a task
+     * that was still closed; there is no longer one.
+     *
+     * ⚠ So repointing the VEHICLE again would have been dishonest — it would
+     * assert a rejection the system can no longer perform. Instead this asserts
+     * the guard that IS live: a registry entry with `enabled: false` is refused
+     * before adapter construction. Same property (a bad model fails closed
+     * before any network call), same identity binding (code + the exact model
+     * bytes), different and still-reachable mechanism.
+     */
+    function expectModelDisabled(run: () => unknown, model: string): void {
       let caught: unknown;
       try {
         run();
@@ -224,8 +236,10 @@ describe("LLM Router", () => {
       }
       expect(caught).toBeInstanceOf(ModelAssignmentError);
       if (!(caught instanceof ModelAssignmentError)) return;
-      expect(caught.code).toBe("MODEL_PROVIDER_MISMATCH");
-      expect(caught.message).toContain(`does not implement task '${task}'`);
+      expect(caught.code).toBe("MODEL_DISABLED");
+      // Identity binding: the exact model bytes come back, so this cannot pass
+      // on some other model's rejection.
+      expect(caught.message).toContain(model);
     }
 
     beforeEach(() => {
@@ -279,25 +293,41 @@ describe("LLM Router", () => {
       });
     });
 
-    it("⛔ CONTRAST CONTROL — explain_diff still rejects an OpenAI model", () => {
-      // Without this the suite would pass on a map simply opened to everything.
-      // explain_diff's adapter still throws openai_explain_diff_not_supported,
-      // so the guard must still fire for it — that asymmetry is the only
-      // evidence the map tracks the adapters.
-      expectProviderMismatch(
-        () => getAdapterWithResolution("explain_diff", "gpt-4o"),
-        "explain_diff",
+    it("⛔ a DISABLED model is refused on the override path — the live fail-closed guard", () => {
+      // Replaces "explain_diff still rejects an OpenAI model". That assertion
+      // died with #1764: explain_diff's adapter is implemented and its map
+      // entry now lists openai, so the rejection it asserted cannot happen.
+      // Without SOME fail-closed assertion here the suite would pass on a
+      // resolver that accepted anything at all, which is the real risk.
+      expectModelDisabled(
+        () => getAdapterWithResolution("explain_diff", "test-disabled-model"),
+        "test-disabled-model",
       );
     });
 
+    it("POSITIVE CONTROL — an ENABLED OpenAI model resolves through the identical call", () => {
+      // Proves the test above fails for the DISABLED flag specifically and not
+      // because this task, this override path, or the registry lookup is broken
+      // for every OpenAI model. Without it, a registry that failed to load
+      // would make the rejection above pass vacuously.
+      const { adapter, resolution } = getAdapterWithResolution("explain_diff", "gpt-4o");
+      expect(adapter.name).toBe("openai");
+      expect(resolution).toMatchObject({
+        provider: "openai",
+        resolved_model: "gpt-4o",
+      });
+    });
+
     it("applies the same guard to store pins while preserving valid Anthropic pins", () => {
-      // Exercised against explain_diff: critique_graph now implements OpenAI,
-      // so an OpenAI pin there is legitimately accepted. The GUARD is unchanged
-      // and still has to fire for a task whose adapter throws.
-      expectProviderMismatch(
+      // ⚠ MECHANISM CHANGED, COVERAGE KEPT. The point of this test is that the
+      // STORE-PIN origin is guarded exactly like the env-override origin — a
+      // cold path must not be a way round the checks. The capability map can no
+      // longer reject anything (see the helper's docblock), so the disabled-model
+      // guard is the vehicle; the origin under test is unchanged.
+      expectModelDisabled(
         () =>
-          getAdapterWithResolution("explain_diff", "gpt-4o", "store_model_config"),
-        "explain_diff",
+          getAdapterWithResolution("explain_diff", "test-disabled-model", "store_model_config"),
+        "test-disabled-model",
       );
 
       const valid = getAdapterWithResolution(
