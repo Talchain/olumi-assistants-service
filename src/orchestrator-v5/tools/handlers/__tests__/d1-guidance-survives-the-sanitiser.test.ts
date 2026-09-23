@@ -36,6 +36,7 @@ import {
   ADD_CONSTRAINT_USER_GUIDANCE,
   SET_FACTOR_VALUE_USER_GUIDANCE,
   ADJUST_EDGE_STRENGTH_USER_GUIDANCE,
+  SUCCESS_TARGET_POSITIVE_USER_GUIDANCE,
 } from '../d1-shared/user-guidance.js';
 
 /** The War-Room-locked canonical phrases, imported — never restated here. */
@@ -43,6 +44,27 @@ const CANONICAL: ReadonlyArray<readonly [string, string]> = [
   ['add_constraint', ADD_CONSTRAINT_USER_GUIDANCE],
   ['set_factor_value', SET_FACTOR_VALUE_USER_GUIDANCE],
   ['adjust_edge_strength', ADJUST_EDGE_STRENGTH_USER_GUIDANCE],
+  // ⭐ ADDED BY THE UNION ASSERTION DOING ITS JOB, which is worth recording
+  // because the phrase's author expected the opposite.
+  //
+  // `SUCCESS_TARGET_POSITIVE_USER_GUIDANCE` (add-constraint.ts:974) was exported
+  // deliberately, and its docblock in `d1-shared/user-guidance.ts` says it was
+  // exported "precisely so the budget guard's union assertion sees it: a
+  // `*_USER_GUIDANCE` constant is covered AUTOMATICALLY, an inline string is
+  // not."
+  //
+  // ⛔ It is NOT automatic, and that is the whole point of the completeness
+  // check above. Exporting makes the phrase VISIBLE to the assertion; it does
+  // not make it COVERED. `CANONICAL` is hand-written — the docblock two
+  // paragraphs down says so — so a new export turns this suite RED by name
+  // until someone registers it here. That is the designed behaviour ("Add a
+  // fourth `*_USER_GUIDANCE` and this REDs by name"), and it fired correctly on
+  // the required check for every PR based on this staging head, mine included.
+  //
+  // Registering it, rather than relaxing the assertion, is the fix: 76
+  // characters against `sanitiseForUser`'s 100, so it clears the budget the
+  // other three are held to and needs no exemption.
+  ['add_constraint:success_target_positive', SUCCESS_TARGET_POSITIVE_USER_GUIDANCE],
 ];
 
 describe('D1 user guidance reaches the user WHOLE', () => {
