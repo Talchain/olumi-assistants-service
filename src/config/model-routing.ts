@@ -841,14 +841,43 @@ export const EXECUTABLE_RUNTIME_TASKS = Object.freeze(
 /**
  * Explicit adapter-capability exceptions for routed tasks.
  *
- * Most LLMAdapter operations are implemented by every real provider. These
- * two are deliberately different: OpenAI exposes compatibility stubs that
- * throw before making a call, while Anthropic and the deterministic Fixtures
- * adapter implement the operation. Keeping the exception beside runtime task
- * authority lets both router execution and admin reporting consume one fact.
+ * Most LLMAdapter operations are implemented by every real provider. The
+ * exceptions below are the ones where a provider exposes a compatibility stub
+ * that throws before making a call, rather than an implementation. Keeping the
+ * exception beside runtime task authority lets both router execution and admin
+ * reporting consume one fact.
+ *
+ * ⭐ `critique_graph` GAINED 'openai' BECAUSE THE STUB IS GONE — this entry's own
+ * justification, not a preference. The paragraph above used to read "These two
+ * are deliberately different: OpenAI exposes compatibility stubs that throw
+ * before making a call", and for `critique_graph` that is no longer true:
+ * `OpenAIAdapter.critiqueGraph` is now implemented, reads the SAME
+ * PMS-governed `critique_graph` prompt, renders the user half through the shared
+ * `buildCritiqueUserContent` (byte-equivalence with the Anthropic renderer pinned
+ * by `tests/unit/critique-prompt.equivalence.test.ts`), and returns the same
+ * `CritiqueGraphResult` shape with the same BLOCKER→IMPROVEMENT→OBSERVATION
+ * ordering. An exception whose stated cause has been removed is no longer an
+ * exception; leaving it would fail a capable provider closed.
+ *
+ * ⚠ THIS CHANGES NO DEFAULT AND NO CONVENTIONAL BEHAVIOUR. `TASK_MODEL_DEFAULTS.
+ * critique_graph` remains `claude-sonnet-5`, so nothing re-routes on its own —
+ * this entry widens what MAY be assigned, not what IS. The authority row for
+ * this task states the same thing from the other side: "the checked-in task
+ * model is Anthropic so the capability constraint is satisfied without an env
+ * override". An OpenAI-only deployment selects it explicitly through
+ * `CEE_MODEL_CRITIQUE` (config/index.ts:1743), which is the "separate
+ * deployment/config" shape rather than a global provider change. Before this,
+ * setting that env var to an OpenAI model failed closed with a provider
+ * mismatch — the knob existed and could not be used.
+ *
+ * ⛔ `explain_diff` KEEPS ITS EXCLUSION, deliberately, and that asymmetry is the
+ * point: `OpenAIAdapter.explainDiff` still throws
+ * `openai_explain_diff_not_supported`. Widening it too would make this map a
+ * formality instead of a fact. Implement that adapter first, then remove its
+ * exception for the same reason this one was removed.
  */
 export const ROUTER_TASK_PROVIDER_CAPABILITIES = Object.freeze({
-  critique_graph: Object.freeze(['anthropic', 'fixtures'] as const),
+  critique_graph: Object.freeze(['anthropic', 'openai', 'fixtures'] as const),
   explain_diff: Object.freeze(['anthropic', 'fixtures'] as const),
 } as const satisfies Partial<
   Record<
