@@ -12,8 +12,11 @@
  * healthy. Only reachability does.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
+import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
+import type { InternalDispatch } from '../runtime/agent-capabilities.js';
+import { assessCanonicalAnalysisReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
 
 const CANDIDATE = {
   goal: { metric: 'monthly recurring revenue', operator: '>=', value: 20000, unit: 'GBP', horizon_months: 12, provenance: 'explicit' },
@@ -113,39 +116,110 @@ describe('an option that states no level', () => {
   });
 });
 
-describe('an orphaned goal is repaired AND disclosed', () => {
+describe('⛔ an orphaned goal is NOT repaired with a sign nobody stated (#63 5793252993)', () => {
   // ⛔ MEASURED ON A REAL BRIEF. Goal metric "Productivity change", while every
   // causal chain terminated on an invented near-synonym outcome "Productivity
   // Improvement". 35 nodes, 40 edges, every count healthy — and 0 of 6 options
   // could reach the goal, so the model could never be analysed.
+  //
+  // ⛔ THESE TESTS USED TO PIN A REPAIR THE RULING FORBIDS. Admission connected
+  // each dangling terminal outcome to the goal as `positive`, `defaulted`, with
+  // NO provenance — and it did so even over an outcome -> goal link the drafter
+  // had explicitly stated as `unknown` (Panel review 5793954535, B1, probe P1:
+  // readiness `ready` while the server told the user the same question was still
+  // open). Release Control #63 5793252993: no default sign on a link to the goal;
+  // disclosure does not make an arbitrary sign sound; where direction is unknown,
+  // ASK. So the goal is left unreached, the analysis is honestly blocked by the
+  // readiness authority, and the gap is named for the Agent to ask about.
   const nearSynonym = {
     ...CANDIDATE,
     goal: { metric: 'Productivity change', operator: '>=', value: 10, unit: '%', horizon_months: 3, provenance: 'explicit' },
+    // Two options, so FEWER_THAN_TWO_OPTIONS cannot be what blocks the analysis.
+    options: [
+      ...(CANDIDATE as unknown as { options: unknown[] }).options,
+      { label: 'Hold Pro Price', provenance: 'explicit', interventions: [{ factor_label: 'Pro plan price', value: 49, unit: 'GBP', provenance: 'explicit' }] },
+    ],
     outcomes: [{ label: 'Productivity Improvement', provenance: 'inferred' }],
     links: [{ from: 'Pro plan price', to: 'Productivity Improvement', direction: 'positive', provenance: 'inferred' }],
   } as unknown as CandidateModel;
+  const STRUCTURAL = ['ORPHAN_NODE', 'NO_PATH_TO_GOAL'];
+  const QUESTION = 'Does a productivity improvement raise or lower the productivity change you are aiming for?';
+  const unknownToGoal = {
+    ...nearSynonym,
+    links: [
+      ...(nearSynonym as unknown as { links: unknown[] }).links,
+      { from: 'Productivity Improvement', to: 'Productivity change', direction: 'unknown', provenance: 'inferred' },
+    ],
+    unknowns: [QUESTION],
+  } as unknown as CandidateModel;
+  const directedToGoal = {
+    ...nearSynonym,
+    links: [
+      ...(nearSynonym as unknown as { links: unknown[] }).links,
+      { from: 'Productivity Improvement', to: 'Productivity change', direction: 'positive', provenance: 'inferred' },
+    ],
+  } as unknown as CandidateModel;
+  const blockers = (m: ReturnType<typeof admitCandidateModel>) => {
+    const r = assessCanonicalAnalysisReadiness({ nodes: m.nodes, edges: m.edges });
+    return { codes: r.blockingIssues.map((i) => i.code), safe: r.safeToAnalyse, status: r.analysisReady?.status };
+  };
 
-  it('connects the terminal outcome to the goal so the model can be analysed', () => {
+  it('invents NO link into the goal — the option is honestly left unable to reach it', () => {
     const m = admitCandidateModel(nearSynonym, {});
     const goal = m.nodes.find((n) => n.kind === 'goal')!;
-    const opt = m.nodes.find((n) => n.kind === 'option')!;
-    expect(reaches(m.edges, opt.id, goal.id), 'the option must reach the goal').toBe(true);
+    const options = m.nodes.filter((n) => n.kind === 'option');
+    expect(options).toHaveLength(2);
+    expect(m.edges.filter((e) => e.to === goal.id), 'no edge into the goal may be supplied by admission').toEqual([]);
+    for (const o of options) expect(reaches(m.edges, o.id, goal.id), o.label).toBe(false);
+    expect(m.loss.find((l) => String(l.reason).includes('could not be analysed at all'))).toBeUndefined();
   });
 
-  it('RECORDS it as an assumption — a silent connection would be worse', () => {
+  it('the readiness authority blocks the analysis, and every unreached node is NAMED so the Agent asks', () => {
     const m = admitCandidateModel(nearSynonym, {});
-    const entry = m.loss.find((l) => String(l.reason).includes('could not be analysed at all'));
-    expect(entry, 'the repair must be disclosed in the loss ledger').toBeDefined();
-    expect(String(entry!.reason)).toMatch(/ASSUMPTION/);
-    expect(String(entry!.reason)).toMatch(/Productivity Improvement/);
+    const b = blockers(m);
+    expect(b.safe).toBe(false);
+    expect(b.status).toBe('blocked');
+    expect(b.codes).toContain('NO_PATH_TO_GOAL');
+    expect(b.codes.filter((c) => !STRUCTURAL.includes(c)), 'vacuity: only the structural gap blocks it').toEqual([]);
+    const named = m.loss.filter((l) => /no chain of causes runs from it/.test(String(l.reason))).map((l) => l.before);
+    expect(named).toEqual(expect.arrayContaining(['Productivity Improvement', 'Raise Pro Price', 'Hold Pro Price', 'Pro plan price']));
   });
 
-  it('marks the invented edge as defaulted, never as authored', () => {
-    const m = admitCandidateModel(nearSynonym, {});
+  it('an outcome -> goal link stated UNKNOWN is withheld and ASKED — never signed', async () => {
+    const m = admitCandidateModel(unknownToGoal, {});
     const goal = m.nodes.find((n) => n.kind === 'goal')!;
+    const outcome = m.nodes.find((n) => n.label === 'Productivity Improvement')!;
+    // Vacuity guard: the drafter really did state the link, as `unknown`.
+    expect(m.withheld).toContainEqual(expect.objectContaining({ from: outcome.id, to: goal.id, reason: 'no_authored_direction' }));
+    expect(m.edges.filter((e) => e.to === goal.id), 'the unknown link must not come back with a default sign').toEqual([]);
+    expect(blockers(m).safe).toBe(false);
+    expect(blockers(m).codes).toContain('NO_PATH_TO_GOAL');
+
+    // And the build result — what the Agent reads — carries the withheld pair
+    // AND the question, with nothing registered into the goal.
+    const bodies: unknown[] = [];
+    const d: InternalDispatch = async (path, body) => {
+      if (path.endsWith('/graph/register')) bodies.push(body);
+      return { status: 200, json: { registered: true } };
+    };
+    const fn = vi.fn(async () => ({ text: JSON.stringify(unknownToGoal) })) as unknown as CallStructuredModel;
+    const out = await buildModelFromBrief('55555555-5555-4555-8555-555555555555', 'Raise the Pro price?', d, fn) as Record<string, unknown>;
+    expect(out.ok, JSON.stringify(out).slice(0, 300)).toBe(true);
+    expect(bodies).toHaveLength(1);
+    const reg = (bodies[0] as { graph: { edges: { to: string }[] } }).graph;
+    expect(reg.edges.filter((e) => e.to === goal.id)).toEqual([]);
+    expect(out.withheld).toContainEqual({ from: outcome.id, to: goal.id, reason: 'no_authored_direction' });
+    expect(out.open_questions).toEqual([QUESTION]);
+  });
+
+  it('CONTRAST: an outcome -> goal link with a STATED direction still reaches the goal, with that sign', () => {
+    const m = admitCandidateModel(directedToGoal, {});
+    const goal = m.nodes.find((n) => n.kind === 'goal')!;
+    const outcome = m.nodes.find((n) => n.label === 'Productivity Improvement')!;
+    for (const o of m.nodes.filter((n) => n.kind === 'option')) expect(reaches(m.edges, o.id, goal.id), o.label).toBe(true);
     const into = m.edges.filter((e) => e.to === goal.id);
-    expect(into.length).toBeGreaterThan(0);
-    for (const e of into) expect(e.defaulted).toBe(true);
+    expect(into.map((e) => [e.from, e.effect_direction, e.provenance?.source])).toEqual([[outcome.id, 'positive', 'cee_hypothesis']]);
+    expect(blockers(m).codes.filter((c) => STRUCTURAL.includes(c))).toEqual([]);
   });
 
   it('does NOT fire when the model connected the goal itself — contrast control', () => {

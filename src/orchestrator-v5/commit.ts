@@ -86,6 +86,7 @@ import type { ModelVersionMutationReceiptV1Local } from './model-management/muta
 import { recordDecisionRecordForCommit } from './decision-records/capture.js';
 import { recordBriefProvenanceForCommit } from './brief-provenance/capture.js';
 import { maintainRollingSummaryForCommit } from './rolling-summary/capture.js';
+import { isProviderAllowed } from '../adapters/llm/provider-policy.js';
 import { isSuccessfulRunAnalysisFact } from './context/freshness.js';
 
 export interface CommitMetadata {
@@ -2037,7 +2038,14 @@ export async function commitDirectAnswer(
   // Concurrent commits for one scenario do NOT stampede: the maintainer is
   // per-scenario single-flight with latest-wins coalescing (Codex r2 fix 4b),
   // so a burst of commits runs one pass plus at most one rerun.
-  void maintainRollingSummaryForCommit({
+  //
+  // ⛔ …EXCEPT UNDER AN OPENAI-ONLY REQUEST. The summariser is Anthropic
+  // (`AnthropicSummariserModel`), and every commit the OpenAI Agent causes (its
+  // run_analysis, a forwarded canvas edit, an option level) reached it — an
+  // Anthropic call on the OpenAI journey. It is not started at all, rather than
+  // started and refused: the Agent keeps its own history and never reads the
+  // rolling summary. See `adapters/llm/provider-policy.ts`.
+  if (isProviderAllowed('anthropic')) void maintainRollingSummaryForCommit({
     scenarioId: metadata.scenario_id,
     turnId: metadata.turn_id,
     persistedRowId,

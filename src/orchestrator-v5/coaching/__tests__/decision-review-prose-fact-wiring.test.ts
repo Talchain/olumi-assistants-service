@@ -170,7 +170,22 @@ describe('prose/fact agreement is wired into the live decision_review path', () 
     expect(attached.narrative_summary).toBe(review.narrative_summary);
     expect(attached.story_headlines).toEqual(review.story_headlines);
     expect(attached.evidence_enhancements).toEqual(review.evidence_enhancements);
-    expect(attached.robustness_explanation).toEqual(review.robustness_explanation);
+    // ⚠ ONE FIELD CHANGES, AND IT IS THE CAPTURE'S OWN DEFECT (23 Sep 2026).
+    // This verbatim 2026-09-03 review says "The ordering holds in about 63% of
+    // variations" while the captured `robustness` carries ONLY `fragile_edges`
+    // — no `recommendation_stability` at all. 63% is a stability the run never
+    // supplied: the same defect as Paul's 23 Sep run (`58af9704`), captured
+    // three weeks earlier. The polarity rule now replaces that one sentence;
+    // every other part of `robustness_explanation` is kept, which is the
+    // redaction-not-a-drop property this case exists to pin.
+    const capturedRobustness = CAPTURE.enrichment.robustness as Record<string, unknown>;
+    expect(capturedRobustness.recommendation_stability).toBeUndefined();
+    const reviewRobustness = review.robustness_explanation as Record<string, unknown>;
+    expect(reviewRobustness.summary).toContain('holds in about 63%');
+    expect(attached.robustness_explanation).toEqual({
+      ...reviewRobustness,
+      summary: 'This run does not report how often the ordering holds, so no figure is given for it.',
+    });
     expect(attached.decision_quality_prompts).toEqual(review.decision_quality_prompts);
   });
 

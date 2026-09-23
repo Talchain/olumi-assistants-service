@@ -7,6 +7,7 @@ import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../config/graphCaps.js";
 import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
 import { formatEdgeId } from "../../cee/corrections.js";
 import { withRetry } from "../../utils/retry.js";
+import { assertProviderAllowed } from "./provider-policy.js";
 import {
   retryConfigForLiveEval,
   sdkMaxRetriesForLiveEval,
@@ -75,6 +76,16 @@ function getClient(): OpenAI {
     clientSdkMaxRetries = sdkMaxRetries;
   }
   return client;
+}
+
+/**
+ * The client, for one generative call: records the attempt in the request's
+ * provider ledger (and refuses it under a policy that forbids OpenAI) immediately
+ * before the adapter's request is built. See `provider-policy.ts`.
+ */
+function guardedClient(purpose: string, model: string): OpenAI {
+  assertProviderAllowed('openai', `openai-adapter.${purpose}`, { model, purpose });
+  return getClient();
 }
 
 const TIMEOUT_MS = HTTP_CLIENT_TIMEOUT_MS;
@@ -522,7 +533,7 @@ export class OpenAIAdapter implements LLMAdapter {
     }
 
     try {
-      const apiClient = getClient();
+      const apiClient = guardedClient('draft_graph', this.model);
       // Derive the draft token cap from the call-site timeout — the SAME
       // affordability mechanism the Anthropic path uses (ROADMAP 2.90, Codex #9).
       // Previously this sent the raw configured value or NO cap at all
@@ -891,7 +902,15 @@ export class OpenAIAdapter implements LLMAdapter {
           temperature,
           max_tokens: maxTokens,
           seed,
-          reasoning_effort: isReasoningModel(this.model) ? "medium" : undefined,
+          // ⭐ REPORTED FROM WHAT WAS ACTUALLY SENT, NEVER RE-DERIVED.
+          // This hard-coded "medium" was only ACCIDENTALLY correct: it was
+          // right for as long as no call site could choose an effort. This PR
+          // makes that choice possible, so a re-derived value would report
+          // "medium" while the request carried "low" — and every bake-off row
+          // keyed on reasoning effort would then be unattributable to the
+          // effort it actually used. `modelParams` is the request that went to
+          // the wire, so it is the only honest source for this field.
+          reasoning_effort: modelParams.reasoning_effort,
           token_usage: tokenUsage,
           finish_reason: typeof finishReason === 'string' ? finishReason : undefined,
           provider_latency_ms: _elapsedMs,
@@ -994,7 +1013,7 @@ export class OpenAIAdapter implements LLMAdapter {
     const timeoutId = setTimeout(() => abortController.abort(), effectiveTimeout);
 
     try {
-      const apiClient = getClient();
+      const apiClient = guardedClient('suggest_options', this.model);
       const maxTokens = getMaxTokensFromConfig('suggest_options');
       const modelParams = buildModelParams(this.model, 0.7, { maxTokens }); // 0.7 for creativity in options
 
@@ -1108,7 +1127,7 @@ export class OpenAIAdapter implements LLMAdapter {
 
     const prompt = buildClarifyBriefPrompt(brief, round, previous_answers, currencyInstruction);
 
-    const client = getClient();
+    const client = guardedClient('clarify_brief', this.model);
     const effectiveTimeout = opts.timeoutMs || getTimeoutForModel(this.model);
 
     try {
@@ -1453,13 +1472,26 @@ export class OpenAIAdapter implements LLMAdapter {
     }
 
     try {
-      const apiClient = getClient();
+      // ⭐ BOTH SIDES KEPT. `guardedClient` is #1749's OpenAI-only provider
+      // guard and is the more important of the two — it must not be lost to a
+      // merge that only wanted a parameter.
+      const apiClient = guardedClient('chat', this.model);
       // `reasoningEffort` is threaded from the caller so a call site can choose
-      // it. Omitting it keeps `buildModelParams`' existing `?? "medium"` default
-      // (:181), so every existing caller stays byte-identical — the only change
-      // is that a caller CAN now say otherwise, which none of the six sites
-      // could before. Ignored for non-reasoning models by the
-      // `isReasoningModel` branch, exactly as `thinking` is Anthropic-only.
+      // it. Omitting it keeps `buildModelParams`' existing `?? "medium"`
+      // default, so every existing caller stays byte-identical — the only
+      // change is that a caller CAN now say otherwise. Ignored for
+      // non-reasoning models by the `isReasoningModel` branch, exactly as
+      // `thinking` is Anthropic-only.
+      //
+      // ⚠ A CLAIM OF MINE I CHECKED ON THIS MERGE AND AM KEEPING, NARROWED.
+      // I briefly thought #1761 had already threaded an effort through and that
+      // my premise was stale. It had not: the only other `reasoning_effort` in
+      // this file is a TELEMETRY field (see draftGraph's `meta`), not a call.
+      // Re-derived on the merged tree: all five `buildModelParams` call sites
+      // pass `{ maxTokens }` and nothing else, against a contrast control of
+      // `maxTokens` being threaded five times — so the probe does detect
+      // threading where it exists. The knob was reachable-by-signature and
+      // unreachable-in-fact.
       const modelParams = buildModelParams(this.model, temperature, {
         maxTokens,
         reasoningEffort: args.reasoningEffort,
@@ -1602,7 +1634,7 @@ export class OpenAIAdapter implements LLMAdapter {
     const timeoutId = setTimeout(() => abortController.abort(), timeoutMs);
 
     try {
-      const apiClient = getClient();
+      const apiClient = guardedClient('chat_with_tools', this.model);
       const modelParams = buildModelParams(this.model, temperature, { maxTokens });
 
       // Convert messages: ToolResponseBlock[] content → OpenAI format.
