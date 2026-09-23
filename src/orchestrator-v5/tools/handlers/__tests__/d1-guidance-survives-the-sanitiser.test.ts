@@ -36,6 +36,7 @@ import {
   ADD_CONSTRAINT_USER_GUIDANCE,
   SET_FACTOR_VALUE_USER_GUIDANCE,
   ADJUST_EDGE_STRENGTH_USER_GUIDANCE,
+  SUCCESS_TARGET_POSITIVE_USER_GUIDANCE,
 } from '../d1-shared/user-guidance.js';
 
 /** The War-Room-locked canonical phrases, imported — never restated here. */
@@ -43,6 +44,12 @@ const CANONICAL: ReadonlyArray<readonly [string, string]> = [
   ['add_constraint', ADD_CONSTRAINT_USER_GUIDANCE],
   ['set_factor_value', SET_FACTOR_VALUE_USER_GUIDANCE],
   ['adjust_edge_strength', ADJUST_EDGE_STRENGTH_USER_GUIDANCE],
+  // Added by #1661. The completeness check below RED'd by name the moment this
+  // was exported without being covered here — exactly what its docblock
+  // promises: "Add a fourth `*_USER_GUIDANCE` and this REDs by name."
+  // Registering it is the whole fix, and it buys real coverage rather than
+  // silence: the phrase now runs both `it.each` budget checks like its siblings.
+  ['add_constraint (success target must be positive)', SUCCESS_TARGET_POSITIVE_USER_GUIDANCE],
 ];
 
 describe('D1 user guidance reaches the user WHOLE', () => {
