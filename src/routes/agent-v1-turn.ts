@@ -242,6 +242,28 @@ const AGENT_INSTRUCTIONS = [
  * replayed answer is shown against the SAME current state a fresh one would be.
  */
 /** @internal Exported for testing. */
+/**
+ * A message that can be a brief: typed into the composer (no product chip), and long
+ * enough to describe a decision. The EMPTY-MODEL test that makes it the brief is done
+ * against the persisted graph, never guessed from the words.
+ */
+/**
+ * The next step after a fast-path build: the Agent proposes the starting values (the
+ * model authors them, so a model call is right here), and its approve chip is then
+ * applied with no model call (fast path 2).
+ */
+const STARTING_POINT_CHIP = {
+  id: 'agent-suggest-starting-point',
+  label: 'Suggest starting assumptions',
+  message: 'Suggest starting values for everything this model still needs, so I can approve them.',
+} as const;
+
+export function isFirstBriefCandidate(body: Record<string, unknown>, message: string): boolean {
+  if (body['kind'] !== undefined && body['kind'] !== 'message') return false;
+  if (body['chip'] !== undefined && body['chip'] !== null) return false;
+  return message.trim().split(/\s+/).filter((w) => w.length > 0).length >= 5;
+}
+
 export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown }> {
   let graphHash: string | undefined;
   let analysisReady: unknown;
@@ -898,7 +920,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * calls, no implicit analysis. Words alone never take this path.
      */
     const approvedProposal = typedApprovalOf(body);
-    let fastPath: 'approve' | undefined;
+    let fastPath: 'approve' | 'first_brief' | undefined;
     let result: AgentTurnResult | undefined;
     if (approvedProposal !== undefined) {
       const fastStartedAt = Date.now();
@@ -932,6 +954,59 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           stopped_reason: 'answered',
           timing: { total_ms: ms, provider_ms: 0, tool_ms: ms, overhead_ms: 0, tool_provider_ms: 0, provider_calls: 0, tool_calls: 1, hops: 0 },
         };
+      }
+    }
+    /**
+     * ⭐ FAST PATH 1 — A FRESH BRIEF GOES STRAIGHT TO THE CONSTRUCTOR (RC #63 5803960423 /
+     * 5803995225). Measured in Paul's staging test: the first turn took ~59 s, 5 provider
+     * calls and 3 tool hops — the Agent read the empty state, decided to build, built, then
+     * narrated. The product's own rule already says an empty model plus a message IS the
+     * brief (DecisionGuideAI `streamedDraftEligible`: 0 nodes and a first message is the
+     * draft turn), so the model has nothing to decide. The SAME `build_model_from_brief`
+     * capability runs (its replay recovery, its populated-graph refusal and admission all
+     * unchanged), and the user reads Olumi's status composed from the result — ONE provider
+     * call. Anything else (a populated model, a very short message, a capability refusal
+     * that the Agent can resolve) keeps the Agent.
+     */
+    if (result === undefined && approvedProposal === undefined && isFirstBriefCandidate(body, message)) {
+      const fastStartedAt = Date.now();
+      let empty = false;
+      try {
+        const now = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {});
+        const g = now.json?.graph as { nodes?: unknown[] } | null | undefined;
+        empty = now.status === 200 && (g == null || !Array.isArray(g.nodes) || g.nodes.length === 0);
+      } catch { empty = false; }
+      if (empty) {
+        const built = await dispatchTool(
+          'build_model_from_brief', JSON.stringify({ brief: message }),
+          { scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id }, capabilities, mode,
+        );
+        // The Agent can talk the user through these; Olumi's status could not.
+        const agentResolves = ['model_already_exists', 'empty_brief', 'construction_unavailable', 'not_found', 'read_only_preview'];
+        if (!agentResolves.includes(String(built.refusal ?? ''))) {
+          fastPath = 'first_brief';
+          const call = {
+            name: 'build_model_from_brief', ok: built.ok === true, mutated: built.mutated === true,
+            ...(typeof built.refusal === 'string' ? { refusal: built.refusal } : {}),
+          };
+          const said = narrateWriteOutcome('', [call], [built]).status ?? '';
+          const ms = Date.now() - fastStartedAt;
+          const providerMs = typeof built.provider_ms === 'number' ? Math.min(built.provider_ms, ms) : 0;
+          result = {
+            assistant_text: '',
+            items: [
+              ...(history ?? []),
+              { role: 'user', content: [{ type: 'input_text', text: message }] },
+              { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: said }] },
+            ],
+            tool_calls: [call],
+            tool_results: [built],
+            mutated: built.mutated === true,
+            hops: 0,
+            stopped_reason: 'answered',
+            timing: { total_ms: ms, provider_ms: providerMs, tool_ms: ms - providerMs, overhead_ms: 0, tool_provider_ms: providerMs, provider_calls: 1, tool_calls: 1, hops: 0 },
+          };
+        }
       }
     }
     if (result === undefined) try {
@@ -994,7 +1069,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       stage: 'frame',
       answerKind: 'substantive',
       // One click approves the ONE proposal just offered — the same words as typing "yes".
-      suggested_actions: approvalChipsFor(result.tool_calls),
+      suggested_actions: fastPath === 'first_brief' && result.mutated ? [STARTING_POINT_CHIP] : approvalChipsFor(result.tool_calls),
     });
     const finalised = finaliseV5Response(composed, { scenarioId });
 
@@ -1043,7 +1118,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           handler_id: null,
           request_hash: requestHash,
           response_emitted: true,
-          llm_calls_used: fastPath !== undefined ? 0 : result.hops + 1,
+          llm_calls_used: fastPath === 'approve' ? 0 : fastPath === 'first_brief' ? 1 : result.hops + 1,
           duration_ms: Date.now() - startedAt,
           handler_facts: [],
           userMessage: message,
