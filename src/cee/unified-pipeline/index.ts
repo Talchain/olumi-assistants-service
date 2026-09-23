@@ -810,7 +810,8 @@ export async function runUnifiedPipeline(
     // "Did this draft break the ALLOWED EDGE PATTERNS rule its own prompt
     // states?" is answered by COUNTING EDGES — no judge call, no model spend —
     // so a clean draw reaches the quality pass having paid nothing at all, on
-    // the same object, and roughly half of live traffic drafts clean.
+    // the same object. ⚠ MEASURED: 2 of 8 draws of one brief were clean, not
+    // "roughly half" as an earlier version of this comment said.
     //
     // WHY IT IS NOT A CLAUSE IN THE PASS BELOW: that pass selects on COVERAGE,
     // which rewards MORE nodes. A draw that fixes this defect is the same size
@@ -818,9 +819,12 @@ export async function runUnifiedPipeline(
     // keeps. Opposite directions under one predicate is trap 21.
     //
     // ⚠ MEASURED, 23 Sep 2026, deployed `bdad785a`: the same brief drafted four
-    // times reached `status: ready` twice and `needs_user_mapping` twice, and
-    // across 7+ captured drafts an `option→risk` edge agreed with the refusal
-    // 100% of the time. This is the defect, not a tidy-up.
+    // times reached `status: ready` twice and `needs_user_mapping` twice.
+    //
+    // ⛔ AN EARLIER VERSION OF THIS COMMENT CLAIMED THE `option→risk` EDGE
+    // AGREED WITH THE REFUSAL "100% OF THE TIME". It does not: at n=8 it is 7/8.
+    // Run 7 carried zero edge violations and still refused an option, on the
+    // second mechanism. This is the defect, not a tidy-up.
     const grammar = await applyGrammarRedraw({
       first,
       requestId: getRequestId(request),

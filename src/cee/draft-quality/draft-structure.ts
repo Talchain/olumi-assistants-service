@@ -15,14 +15,27 @@
  *
  * ⛔ AND THE RUN THAT REFUTED THE EARLIER CLAIM. Run 7 carried ZERO edge
  * violations and still blocked. Its option `Raise Pro Plan from £49 to £59`
- * came back with `interventions: {}` and `unresolved_targets: ["49"]` — the
- * literal `49`, which is not a node id in that graph. The product then asked
- * the user:
+ * came back with `interventions: {}` and `unresolved_targets: ["49"]`, and the
+ * product asked the user:
  *
  *     "Which factor does "49" correspond to in the decision model?"
  *
- * …while a factor called **Pro Plan Price** sat in the same graph. The number
- * was read out of "from £49 to £59" and recorded as a TARGET.
+ * …while a factor called **Pro Plan Price** sat in the same graph.
+ *
+ * ⛔⛔ THE DRAFTER DID NOT MINT THAT TARGET, AND AN EARLIER VERSION OF THIS FILE
+ * SAID IT DID. Found by independent review, not by these tests.
+ *
+ * `"49"` is CEE'S OWN token. `intervention-extractor.ts:1243` returns early
+ * whenever the drafter supplied a V4 intervention; only when it supplied NONE
+ * does the legacy path reach `extractRawInterventions(optionLabel, …)` (`:1261`),
+ * which tokenises the OPTION'S LABEL and emits the unmatched token as an
+ * `unresolved_target` (`:1425`). In run 7 the drafter had wired
+ * option → Pro Plan Price correctly.
+ *
+ * So the drafter's real error is the one UPSTREAM of that fallback: **an option
+ * states a value and carries no intervention for it.** Telling it anything else
+ * would break this module's own rule — never correct an error the model did not
+ * make.
  *
  * ⚠ The earlier "option→risk agrees with the refusal 100% of the time" was
  * true of the captures it was measured on and is FALSE at n=8: 7/8. It is
@@ -57,7 +70,20 @@ export interface DraftStructureFacts {
   readonly unresolvableTargets: readonly string[];
   /** Options carrying at least one unresolvable target. */
   readonly optionsWithUnresolvableTarget: number;
-  /** Edge violations + unresolvable targets. The number the redraw selects on. */
+  /**
+   * ⭐⭐ THE NUMBER THE REDRAW SELECTS ON: how many DISTINCT OPTIONS this draw
+   * would have refused, counting an option once however many defects it carries.
+   *
+   * ⛔ IT REPLACED `totalViolations`, AND THE DIFFERENCE IS NOT COSMETIC. Edge
+   * violations counted per EDGE while unresolvable targets counted per distinct
+   * STRING, so the score mixed two units and a draw that refused MORE options
+   * could win: measured on a banked draw, one refused option scored 3. Found by
+   * independent review. Selecting on the refused-option count makes the score
+   * the outcome the user actually meets.
+   */
+  readonly refusedOptions: number;
+  /** Edge violations + unresolvable target strings. TELEMETRY ONLY — it mixes
+   *  two units and must never decide which draw ships. */
   readonly totalViolations: number;
   /** False when the graph's shape could not be read — never "clean". */
   readonly readable: boolean;
@@ -89,6 +115,7 @@ export function readDraftStructureFacts(body: unknown): DraftStructureFacts {
       edgeGrammar,
       unresolvableTargets: [],
       optionsWithUnresolvableTarget: 0,
+      refusedOptions: 0,
       totalViolations: 0,
       readable: false,
     };
@@ -110,6 +137,7 @@ export function readDraftStructureFacts(body: unknown): DraftStructureFacts {
   const options = Array.isArray(analysisReady?.options) ? analysisReady.options : [];
 
   const unresolvable = new Set<string>();
+  const optionsWithBadTarget = new Set<string>();
   let optionsHit = 0;
   for (const option of options) {
     const o = asRecord(option);
@@ -128,14 +156,28 @@ export function readDraftStructureFacts(body: unknown): DraftStructureFacts {
       unresolvable.add(target);
       hit = true;
     }
-    if (hit) optionsHit += 1;
+    if (hit) {
+      optionsHit += 1;
+      // The option's own id, so the refused-option union below counts an option
+      // carrying BOTH defects exactly once.
+      if (typeof o.id === 'string') optionsWithBadTarget.add(o.id);
+    }
   }
 
   const unresolvableTargets = [...unresolvable].sort();
+
+  // ⭐ ONE OPTION, COUNTED ONCE. `violations[].from` is the offending option's
+  // own id, so the union is over option identity rather than over defect
+  // instances — an option that both wires to a risk AND states an unbacked
+  // value costs the user one refused option, not two.
+  const refused = new Set<string>(optionsWithBadTarget);
+  for (const v of edgeGrammar.violations) refused.add(v.from);
+
   return {
     edgeGrammar,
     unresolvableTargets,
     optionsWithUnresolvableTarget: optionsHit,
+    refusedOptions: refused.size,
     totalViolations: edgeGrammar.violations.length + unresolvableTargets.length,
     readable: true,
   };
@@ -144,7 +186,7 @@ export function readDraftStructureFacts(body: unknown): DraftStructureFacts {
 /** Should this draw be redrawn on structural grounds? Unreadable is never a
  *  trigger — see `violatesEdgeGrammar` for the same reasoning. */
 export function violatesDraftStructure(facts: DraftStructureFacts): boolean {
-  return facts.readable && facts.totalViolations > 0;
+  return facts.readable && facts.refusedOptions > 0;
 }
 
 /**
@@ -161,7 +203,7 @@ export function secondDrawIsStructurallyCleaner(
   second: DraftStructureFacts,
 ): boolean {
   if (!first.readable || !second.readable) return false;
-  return second.totalViolations < first.totalViolations;
+  return second.refusedOptions < first.refusedOptions;
 }
 
 /**
@@ -184,12 +226,16 @@ export function buildDraftStructureDirective(facts: DraftStructureFacts): string
       'Keep every risk you identified and keep its bridge to the goal — do NOT delete a risk to satisfy this rule, and do not weaken it.',
     );
   }
-  const targets = facts.unresolvableTargets.length;
+  // ⚠ OPTIONS, NOT STRINGS. `unresolvableTargets` is a set of distinct tokens;
+  // the sentence below is about how many OPTIONS are affected, and using the
+  // token count would state a number the drafter cannot reconcile with its own
+  // output.
+  const targets = facts.optionsWithUnresolvableTarget;
   if (targets > 0) {
     parts.push(
-      `Your previous draft left ${targets} intervention ${targets === 1 ? 'target' : 'targets'} that ${targets === 1 ? 'does' : 'do'} not name any node in the graph you built.`,
-      'Every intervention must target a controllable FACTOR that exists in your own node list, by its id — never a bare number, a price, or a word lifted from the brief.',
-      'If an option states a value, put the value in the intervention and point the target at the factor that value belongs to.',
+      `Your previous draft left ${targets} ${targets === 1 ? 'option that states a value' : 'options that state a value'} in ${targets === 1 ? 'its' : 'their'} label and ${targets === 1 ? 'carries' : 'carry'} no intervention for it.`,
+      'EVERY option that names a value must carry an intervention for that value, targeting a controllable FACTOR by the id it holds in your own node list.',
+      'Without an intervention the value cannot be tied back to any factor, and the option cannot be analysed at all.',
     );
   }
   return parts.join(' ');

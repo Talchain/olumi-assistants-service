@@ -1,6 +1,12 @@
 /**
- * ⭐⭐ THE GRAMMAR REDRAW — one extra draw when the drafter broke its own
- * ALLOWED EDGE PATTERNS rule, and never for any other reason.
+ * ⭐⭐ THE STRUCTURE REDRAW — one extra draw when the drafter produced a model
+ * that refuses its own options, and never for any other reason.
+ *
+ * ⚠ THE NAME SAYS "grammar" FOR ONE REASON ONLY: it was written when the single
+ * known defect was an `option→risk` link the ALLOWED EDGE PATTERNS rule forbids.
+ * There are now TWO, and the second is not an edge at all — an option that states
+ * a value and carries no intervention for it. `draft-structure.ts` holds both and
+ * the selection is over REFUSED OPTIONS, not over edges.
  *
  * ═══════════════════════════════════════════════════════════════════════════
  * WHY THIS IS A THIRD AUTHORITY AND NOT A CLAUSE IN EITHER EXISTING ONE.
@@ -166,15 +172,21 @@ async function runGrammarRedraw(input: GrammarRedrawInput): Promise<GrammarRedra
       event: 'cee.draft.edge_grammar',
       request_id: input.requestId,
       readable: decision.facts?.readable ?? false,
+      // ⭐ THE OUTCOME METRIC IS REFUSED OPTIONS. `violation_count` mixes two
+      // units (edges per edge, targets per distinct string) and is kept for
+      // continuity only — filter dashboards on `refused_options`.
+      refused_options: decision.facts?.refusedOptions ?? null,
       violation_count: decision.facts?.totalViolations ?? null,
       // Broken out, because "the drafter wired an option to a risk" and "the
       // drafter targeted something that is not a node" are different diagnoses
       // about the same producer, and one number cannot tell them apart.
       edge_violations: decision.facts?.edgeGrammar.violations.length ?? null,
       unresolvable_targets: decision.facts?.unresolvableTargets.length ?? null,
-      options_affected: decision.facts
-        ? decision.facts.edgeGrammar.optionsAffected + decision.facts.optionsWithUnresolvableTarget
-        : null,
+      // ⛔ WAS A SUM, WHICH DOUBLE-COUNTED AN OPTION CARRYING BOTH DEFECTS.
+      // `refusedOptions` is the union over option identity; these two stay as
+      // per-mechanism breakdowns and must not be added together.
+      edge_options_affected: decision.facts?.edgeGrammar.optionsAffected ?? null,
+      target_options_affected: decision.facts?.optionsWithUnresolvableTarget ?? null,
       attempt_source: input.attemptSource ?? 'first',
       redraw: decision.redraw,
       skip_reason: decision.redraw ? null : decision.reason,
@@ -207,8 +219,8 @@ async function runGrammarRedraw(input: GrammarRedrawInput): Promise<GrammarRedra
     {
       event: 'cee.draft.edge_grammar_redraw',
       request_id: input.requestId,
-      first_violations: decision.facts.totalViolations,
-      second_violations: secondFacts.readable ? secondFacts.totalViolations : null,
+      first_refused_options: decision.facts.refusedOptions,
+      second_refused_options: secondFacts.readable ? secondFacts.refusedOptions : null,
       second_readable: secondFacts.readable,
       shipped: shipSecond ? 'second' : 'first',
       // `second_outcome` separates "the drafter could not do better" from "the

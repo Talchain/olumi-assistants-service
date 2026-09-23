@@ -39,12 +39,18 @@ describe('the run that refuted the earlier claim', () => {
   });
 
   it('the edge-only detector would have called it clean — the gap, pinned', () => {
-    // The contrast that justifies this module existing at all. If someone
-    // deletes `draft-structure.ts` and routes the redraw back through
-    // `edge-grammar.ts` alone, this is the assertion that REDs.
+    // ⛔ THE CLAIM THAT USED TO SIT HERE WAS FALSE, and independent review proved
+    // it: this file said reverting the redraw to edge-only would turn a test RED.
+    // It did not — all three grammar-redraw changes could be reverted together
+    // and the 49-file reader set stayed 588/588 green, because every body in the
+    // pass-level suite was shaped `{ graph }` while production is top-level V3.
+    //
+    // The assertion below is only about THIS FUNCTION's reading. The claim about
+    // the PASS is made where it can actually be tested, on the raw wire shape:
+    // `grammar-redraw-wire-shape.test.ts`.
     const f = readDraftStructureFacts(ONLY_TARGET);
     expect(f.edgeGrammar.violations).toHaveLength(0);   // the old predicate: clean
-    expect(f.totalViolations).toBeGreaterThan(0);       // the truth: blocked
+    expect(f.refusedOptions).toBeGreaterThan(0);        // the truth: an option is refused
   });
 
   it('the payload really did refuse it', () => {
@@ -197,16 +203,21 @@ describe('the directive names only the defects this draw actually has', () => {
 
   it('a targets-only draw is told about targets and NOT about edges', () => {
     const d = buildDraftStructureDirective(readDraftStructureFacts(ONLY_TARGET));
-    expect(d).toContain('does not name any node');
+    // ⛔ CORRECTED ATTRIBUTION. This asserted 'does not name any node', i.e. that
+    // the DRAFTER minted the bad target. It did not — the token is CEE's own,
+    // from the extractor's label fallback, reached only when the drafter supplied
+    // NO intervention. The drafter's real error is the omission upstream.
+    expect(d).toContain('states a value');
+    expect(d).toContain('carry an intervention');
     expect(d).toContain('controllable FACTOR');
     expect(d).not.toContain('ALLOWED EDGE PATTERNS');
+    expect(d).not.toContain('does not name any node');
   });
 
   it('a draw with both is told about both', () => {
     const d = buildDraftStructureDirective(readDraftStructureFacts(BOTH));
     expect(d).toContain('ALLOWED EDGE PATTERNS');
-    // Number-agnostic: one target reads "does not name", several "do not".
-    expect(d).toMatch(/does not name any node|do not name any node/);
+    expect(d).toMatch(/option that states a value|options that state a value/);
   });
 
   it('a clean draw produces no directive at all', () => {

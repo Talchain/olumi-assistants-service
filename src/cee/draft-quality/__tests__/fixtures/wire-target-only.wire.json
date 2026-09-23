@@ -1,0 +1,171 @@
+{
+ "analysis_ready": {
+  "options": [
+   {
+    "id": "42ea1202",
+    "status": "ready",
+    "unresolved_targets": []
+   },
+   {
+    "id": "77509bb0",
+    "status": "ready",
+    "unresolved_targets": []
+   },
+   {
+    "id": "8419d6e5",
+    "status": "ready",
+    "unresolved_targets": []
+   },
+   {
+    "id": "b3393563",
+    "status": "needs_user_mapping",
+    "unresolved_targets": [
+     "49"
+    ]
+   },
+   {
+    "id": "d04f080e",
+    "status": "ready",
+    "unresolved_targets": []
+   }
+  ],
+  "status": "needs_user_input"
+ },
+ "edges": [
+  {
+   "from": "01af2a64",
+   "to": "42ea1202"
+  },
+  {
+   "from": "01af2a64",
+   "to": "77509bb0"
+  },
+  {
+   "from": "01af2a64",
+   "to": "8419d6e5"
+  },
+  {
+   "from": "01af2a64",
+   "to": "b3393563"
+  },
+  {
+   "from": "01af2a64",
+   "to": "d04f080e"
+  },
+  {
+   "from": "1311b8e7",
+   "to": "8f5e99d8"
+  },
+  {
+   "from": "42ea1202",
+   "to": "45376300"
+  },
+  {
+   "from": "42ea1202",
+   "to": "ed5b5711"
+  },
+  {
+   "from": "45376300",
+   "to": "94fa174b"
+  },
+  {
+   "from": "77509bb0",
+   "to": "45376300"
+  },
+  {
+   "from": "77509bb0",
+   "to": "ed5b5711"
+  },
+  {
+   "from": "8419d6e5",
+   "to": "45376300"
+  },
+  {
+   "from": "8419d6e5",
+   "to": "ed5b5711"
+  },
+  {
+   "from": "8f5e99d8",
+   "to": "94fa174b"
+  },
+  {
+   "from": "94fa174b",
+   "to": "8a5386ff"
+  },
+  {
+   "from": "b3393563",
+   "to": "45376300"
+  },
+  {
+   "from": "b3393563",
+   "to": "ed5b5711"
+  },
+  {
+   "from": "d04f080e",
+   "to": "45376300"
+  },
+  {
+   "from": "d04f080e",
+   "to": "ed5b5711"
+  },
+  {
+   "from": "ed5b5711",
+   "to": "8f5e99d8"
+  },
+  {
+   "from": "ed5b5711",
+   "to": "94fa174b"
+  }
+ ],
+ "nodes": [
+  {
+   "id": "01af2a64",
+   "kind": "decision"
+  },
+  {
+   "id": "1311b8e7",
+   "kind": "factor"
+  },
+  {
+   "id": "42ea1202",
+   "kind": "option"
+  },
+  {
+   "id": "45376300",
+   "kind": "factor"
+  },
+  {
+   "id": "77509bb0",
+   "kind": "option"
+  },
+  {
+   "id": "8419d6e5",
+   "kind": "option"
+  },
+  {
+   "id": "8a5386ff",
+   "kind": "goal"
+  },
+  {
+   "id": "8f5e99d8",
+   "kind": "risk"
+  },
+  {
+   "id": "94fa174b",
+   "kind": "outcome"
+  },
+  {
+   "id": "b3393563",
+   "kind": "option"
+  },
+  {
+   "id": "d04f080e",
+   "kind": "option"
+  },
+  {
+   "id": "ed5b5711",
+   "kind": "factor"
+  }
+ ],
+ "schema_version": "3.0"
+}
