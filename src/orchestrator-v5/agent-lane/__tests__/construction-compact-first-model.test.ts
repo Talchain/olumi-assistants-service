@@ -24,7 +24,7 @@ const factor = (label: string, provenance = 'ai_proposed') => ({
 const link = (from: string, to: string) => ({ from, to, direction: 'positive', provenance: 'inferred' });
 
 /** A candidate whose ADMITTED size is driven by `extraFactors`. */
-function candidate(extraFactors: number, provenance = 'ai_proposed') {
+function candidate(extraFactors: number) {
   const names = Array.from({ length: extraFactors }, (_, i) => `Secondary factor ${i}`);
   return {
     goal: { metric: 'Velocity', operator: '>=', value: 20, unit: 'points', horizon_months: 6, provenance: 'explicit' },
