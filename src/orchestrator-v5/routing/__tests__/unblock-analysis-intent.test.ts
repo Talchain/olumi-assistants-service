@@ -182,3 +182,55 @@ describe('detectUnblockAnalysisIntent', () => {
     expect(detectUnblockAnalysisIntent('   ')).toEqual({ matched: false, reason: 'empty_message' });
   });
 });
+
+/**
+ * ADVERSARIAL ROUND 2 — supplied by a second independent reviewer after the
+ * first round of fixes. Both classes below were measured wrong at that head:
+ * generic trouble-words claimed 15 of 15 fresh strings, and 6 of 8 fresh
+ * refusals still authorised repair.
+ */
+describe('generic trouble-words are bound to the analysis clause', () => {
+  it('trouble in a DIFFERENT sentence is not an admission request', () => {
+    for (const m of [
+      'Explain the analysis. The export button is disabled.',
+      'Walk me through the analysis; our CI is failing.',
+      "Summarise the analysis. I'm stuck on the pricing question.",
+      'What does the analysis say about capacity? The vendor portal is unavailable.',
+    ]) {
+      expect(detectUnblockAnalysisIntent(m).matched).toBe(false);
+    }
+  });
+
+  it('CONTROL: trouble in the SAME clause as the analysis IS claimed', () => {
+    for (const m of [
+      'Run analysis is disabled. What do I need to do?',
+      'The run analysis button is greyed out. Why?',
+    ]) {
+      expect(detectUnblockAnalysisIntent(m).matched).toBe(true);
+    }
+  });
+});
+
+describe('the prohibition guard fails closed on deferral, not just negation', () => {
+  it('⛔ a message deferring to the user never authorises repair', () => {
+    for (const m of [
+      'Check with me first, then put good assumptions in.',
+      'Confirm with me before you use any estimates.',
+      'Run it past me before making assumptions about what is blocking analysis.',
+      "What's blocking the analysis? No guessing.",
+      'Let me know first before you choose any estimates for the blocked analysis.',
+      "What is stopping analysis? Don't make any assumptions.",
+    ]) {
+      const r = detectUnblockAnalysisIntent(m);
+      if (!r.matched) continue; // some are refused earlier; that is also safe
+      expect((r as { authorises_repair: boolean }).authorises_repair).toBe(false);
+    }
+  });
+
+  it('CONTROL: an unconditional authorisation still authorises', () => {
+    const r = detectUnblockAnalysisIntent(
+      'What is blocking the analysis? Put good assumptions in and make those updates.',
+    );
+    expect(r).toEqual({ matched: true, authorises_repair: true });
+  });
+});

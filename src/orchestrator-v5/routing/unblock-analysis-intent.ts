@@ -80,17 +80,29 @@ const ANALYSIS_REFERENCE =
  * silently never matched. The suite caught it; reading the regex did not.
  */
 const IMPEDIMENT_SIGNAL =
-  /\b(stopping|blocking|blocked|unblock|preventing|holding\s+up|stuck|not\s+ready|needs?\s+configuration|no\s+effect\s+values|missing\s+effect|greyed\s+out|disabled|unavailable|failing)\b|\bready\s+to\s+analys\w*|\bbefore\s+(?:you|we|i)\s+can\s+run\b|\bwhat(?:'|\u2019)?s?\s+(?:is\s+)?(?:missing|wrong|blocking|stopping)\b|\b(?:can(?:'|\u2019)?t|cannot|can\s+not|won(?:'|\u2019)?t|unable\s+to|not\s+able\s+to)\b[^.!?]{0,24}\brun\b/i;
+  /\b(stopping|blocking|blocked|unblock|preventing|holding\s+up|not\s+ready|needs?\s+configuration|no\s+effect\s+values|missing\s+effect)\b|\bready\s+to\s+analys\w*|\bbefore\s+(?:you|we|i)\s+can\s+run\b|\bwhat(?:'|\u2019)?s?\s+(?:is\s+)?(?:missing|wrong|blocking|stopping)\b|\b(?:can(?:'|\u2019)?t|cannot|can\s+not|won(?:'|\u2019)?t|unable\s+to|not\s+able\s+to)\b[^.!?]{0,24}\brun\b/i;
 
 /**
- * `fix`/`resolve` only count when they are ABOUT the analysis. Proximity in
- * either direction, because both orders occur in the corpus ("fix this so the
- * analysis can run", "the analysis says it can't run … to fix it").
+ * Words that name trouble without naming ADMISSION. They count only when they
+ * sit in the SAME SENTENCE as the analysis, in either order.
+ *
+ * ⛔ CLAUSE-BOUNDED ON PURPOSE (`[^.!?;\\n]`). The semicolon is in that class
+ * because it was measured missing: "Walk me through the analysis; our CI is
+ * failing" crossed the boundary and was claimed. A review measured `disabled`,
+ * `unavailable`, `failing` and `stuck` claiming 15 of 15 fresh adversarial
+ * strings when they were standalone — "Walk me through the analysis; our CI is
+ * failing" is not a request to unblock anything. That is the same defect the
+ * bare nouns `issue|problem|error` had, which is why they were removed; these
+ * are kept because "Run analysis is disabled" is a real way to ask, but they
+ * are now bound to the clause the analysis is in.
+ *
+ * ⚠ ONE CONSTRUCT, NOT TWO. It was previously a pair of named constants, one
+ * per direction, and a reviewer killed neither: deleting either left every
+ * test green because the corpus always satisfied the other. A conjunct no test
+ * can kill is either redundant or untested, and here it was redundant.
  */
-const REPAIR_VERB_NEAR_ANALYSIS =
-  /\b(?:fix|resolve|unblock)\b[^.!?]{0,60}\b(?:analys|analyz|run)/i;
-const ANALYSIS_NEAR_REPAIR_VERB =
-  /\b(?:analys|analyz|run)\w*\b[^.!?]{0,60}\b(?:fix|resolve|unblock)\b/i;
+const GENERIC_TROUBLE_NEAR_ANALYSIS =
+  /\b(?:fix|resolve|unblock|disabled|unavailable|failing|stuck|greyed\s+out)\b[^.!?;\n]{0,60}\b(?:analys|analyz|run)|\b(?:analys|analyz|run)\w*\b[^.!?;\n]{0,60}\b(?:fix|resolve|unblock|disabled|unavailable|failing|stuck|greyed\s+out)\b/i;
 
 /**
  * The user has authorised the product to supply values it chose.
@@ -105,7 +117,7 @@ const ANALYSIS_NEAR_REPAIR_VERB =
  * direction for this particular flag.
  */
 const REPAIR_PROHIBITION =
-  /\b(?:don(?:'|\u2019)?t|do\s+not|never|without|no)\b[^.!?]{0,30}\b(?:assum\w*|estimat\w*|guess\w*|invent\w*|made?\s+up)\b|\bask\s+me\s+(?:first|before)\b|\bbefore\s+you\s+(?:add|make|use)\b/i;
+  /\b(?:don(?:'|\u2019)?t|do\s+not|never|without|no)\b[^.!?]{0,30}\b(?:assum\w*|estimat\w*|guess\w*|invent\w*|made?\s+up)\b|\bno\s+guess\w*|\b(?:ask|check|confirm|clear|run\s+it\s+past)\b[^.!?]{0,20}\b(?:me|us|with\s+me)\b[^.!?]{0,20}\b(?:first|before)\b|\bbefore\s+you\s+(?:add|make|use|put|set|fill|choose|write)\b|\blet\s+me\s+(?:know|decide|confirm)\s+(?:first|before)\b/i;
 
 /**
  * Explicit permission to choose values. Harvested phrasings: "put good
@@ -131,9 +143,7 @@ export function detectUnblockAnalysisIntent(
     return { matched: false, reason: 'no_analysis_reference' };
   }
   const impeded =
-    IMPEDIMENT_SIGNAL.test(text)
-    || REPAIR_VERB_NEAR_ANALYSIS.test(text)
-    || ANALYSIS_NEAR_REPAIR_VERB.test(text);
+    IMPEDIMENT_SIGNAL.test(text) || GENERIC_TROUBLE_NEAR_ANALYSIS.test(text);
   if (!impeded) {
     return { matched: false, reason: 'no_impediment_signal' };
   }
