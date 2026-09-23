@@ -21,6 +21,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 type Row = { id: string; turn_id: string; request_hash: string; assistant_message: string | null; user_message: string | null; llm_calls_used: number };
 const rows = new Map<string, Row>();
 let readFails = false;
+let answerAppendFails = false;
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readCommittedTurn: vi.fn(async (_sid: string, turnId: string) => {
@@ -28,6 +29,7 @@ const store = {
     return rows.get(turnId) ?? null;
   }),
   append: vi.fn(async (w: { turn_id: string; request_hash: string; assistantMessage?: string; userMessage?: string; llm_calls_used: number }) => {
+    if (answerAppendFails && w.turn_id.endsWith(':answer')) throw new Error('answer append failed');
     const prior = rows.get(w.turn_id);
     if (prior !== undefined) return prior.request_hash === w.request_hash ? { id: prior.id, replayedPriorTurn: true as const } : { id: prior.id, priorTurnConflict: true as const };
     const row: Row = { id: `row-${rows.size + 1}`, turn_id: w.turn_id, request_hash: w.request_hash, assistant_message: w.assistantMessage ?? null, user_message: w.userMessage ?? null, llm_calls_used: w.llm_calls_used };
@@ -54,13 +56,19 @@ const fakeFetch = vi.fn(async (_url: unknown, init?: { body?: string }) => {
 const SID = '6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b';
 const T1 = '0b8c1d2e-3f40-4a5b-8c6d-7e8f9a0b1c2d';
 const T2 = '1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f';
+const T3 = '2d3e4f5a-6b7c-4d8e-9f0a-1b2c3d4e5f6a';
+const textOf = (r: { json: () => unknown }) => String((r.json() as { assistant_text?: string }).assistant_text);
 
 /** A FRESH route module each call — its HistoryStore/ProposalStore are new, as after a restart. */
 async function freshApp(): Promise<FastifyInstance> {
   vi.resetModules();
   process.env.AGENT_LANE_ENABLED = 'true';
   process.env.AGENT_LANE_PREVIEW = 'false';
-  const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
+  const mod = await import('../../../routes/agent-v1-turn.js');
+  const { agentV1TurnRoute } = mod;
+  // A request that loses the claim waits for the winner's answer — short here.
+  mod.AGENT_TURN_CLAIM_WAIT.totalMs = 2_000;
+  mod.AGENT_TURN_CLAIM_WAIT.everyMs = 20;
   const app = Fastify({ logger: false });
   app.post('/assist/v1/scenarios/:id/graph', async () => ({ graph: { nodes: [], edges: [] }, graph_hash: 'h1' }));
   await app.register(agentV1TurnRoute);
@@ -74,7 +82,7 @@ const agentOf = (r: { json: () => unknown }) => (r.json() as { _agent?: Record<s
 describe('an Agent turn replays by its turn_id', () => {
   let app: FastifyInstance;
   beforeEach(async () => {
-    rows.clear(); readFails = false; provider.calls = 0; provider.userTurnsSeen = [];
+    rows.clear(); readFails = false; answerAppendFails = false; provider.calls = 0; provider.userTurnsSeen = [];
     store.append.mockClear(); store.readCommittedTurn.mockClear();
     vi.stubGlobal('fetch', fakeFetch);
     app = await freshApp();
@@ -86,7 +94,8 @@ describe('an Agent turn replays by its turn_id', () => {
     expect(first.statusCode).toBe(200);
     const firstText = String((first.json() as { assistant_text?: string }).assistant_text);
     expect(provider.calls).toBe(1);
-    expect(rows.size).toBe(1);
+    // One CLAIM row (the bare turn_id, taken before the run) + one ANSWER row.
+    expect([...rows.keys()].sort()).toEqual([T1, `${T1}:answer`]);
     // (1) the response is "lost": nothing from it is carried forward.
     const retry = await say(app, 'What should I consider?', T1);
     expect(retry.statusCode).toBe(200);
@@ -94,8 +103,8 @@ describe('an Agent turn replays by its turn_id', () => {
     expect(provider.calls, 'the retry must not call the model again').toBe(1);
     expect(agentOf(retry).tool_calls).toEqual([]);
     expect(agentOf(retry).replayed).toBe(true);
-    expect(rows.size, 'no second turn row').toBe(1);
-    expect(store.append).toHaveBeenCalledTimes(1);
+    expect(rows.size, 'no further turn row').toBe(2);
+    expect(store.append, 'the retry claims nothing and writes nothing').toHaveBeenCalledTimes(2);
   });
 
   it('(3): the same turn_id with a CHANGED message refuses deterministically and runs nothing', async () => {
@@ -104,8 +113,8 @@ describe('an Agent turn replays by its turn_id', () => {
     expect(reused.statusCode).toBe(409);
     expect((reused.json() as { error?: string }).error).toBe('TURN_ID_REUSED');
     expect(provider.calls).toBe(1);
-    expect(rows.size).toBe(1);
-    expect(rows.get(T1)?.user_message).toBe('What should I consider?');
+    expect(rows.size).toBe(2);
+    expect(rows.get(`${T1}:answer`)?.user_message).toBe('What should I consider?');
   });
 
   it('(4): a RESTART between the attempt and the retry still replays — the answer comes from the durable row', async () => {
@@ -125,10 +134,42 @@ describe('an Agent turn replays by its turn_id', () => {
     const next = await say(app, 'And what about cost?', T2);
     expect(next.statusCode).toBe(200);
     expect(provider.calls).toBe(2);
-    expect(rows.size).toBe(2);
+    expect(rows.size).toBe(4);
     // The second model call saw ONE earlier user turn plus this one: the replay
     // added nothing to the conversation the model is given.
     expect(provider.userTurnsSeen).toEqual([1, 2]);
+  });
+
+  /**
+   * ⛔ The reviewer's witnesses for #1720 at f616bc2a: a preflight READ let two
+   * concurrent identical requests both run, and a turn whose answer row failed
+   * to persist was re-run by its retry. The identity is now CLAIMED first.
+   */
+  it('RED (W1): two IDENTICAL requests released together → exactly ONE provider call, one history advance, and the SAME durable answer for both', async () => {
+    const [a, b] = await Promise.all([say(app, 'What should I consider?', T3), say(app, 'What should I consider?', T3)]);
+    expect(a.statusCode).toBe(200);
+    expect(b.statusCode).toBe(200);
+    expect(provider.calls, 'only the request that won the claim may call the model').toBe(1);
+    expect(textOf(a)).toBe(textOf(b));
+    expect([...rows.keys()].sort()).toEqual([T3, `${T3}:answer`]);
+    // One history advance: the next turn's model call sees ONE earlier user turn.
+    await say(app, 'And what about cost?', T2);
+    expect(provider.userTurnsSeen).toEqual([1, 2]);
+  });
+
+  it('RED (W2): the ANSWER could not be recorded → a retry on a FRESH instance runs NOTHING and says the outcome is unknown', async () => {
+    answerAppendFails = true;
+    const first = await say(app, 'What should I consider?', T3);
+    expect(first.statusCode).toBe(200);
+    expect(provider.calls).toBe(1);
+    answerAppendFails = false;
+    await app.close();
+    app = await freshApp();
+    const retry = await say(app, 'What should I consider?', T3);
+    expect(retry.statusCode).toBe(409);
+    expect((retry.json() as { error?: string }).error).toBe('TURN_OUTCOME_UNKNOWN');
+    expect(provider.calls, 'the claim stands: the turn is never run twice').toBe(1);
+    expect(rows.has(`${T3}:answer`)).toBe(false);
   });
 
   it('an unreadable prior-turn record refuses — it never re-runs a turn that may already have written', async () => {

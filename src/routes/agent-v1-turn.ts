@@ -50,6 +50,23 @@ import { narrateWriteOutcome, withWriteOutcome } from '../orchestrator-v5/agent-
 
 const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
 
+/**
+ * ⛔ A TURN'S IDENTITY IS CLAIMED BEFORE IT RUNS — independent review of #1720
+ * at f616bc2a (CHANGES_REQUIRED): a preflight READ of "has this turn
+ * committed?" let two concurrent identical requests both see "no row" and both
+ * call the provider and the tools; and a turn whose final row failed to persist
+ * was re-run by its retry. So the identity is now CLAIMED in the durable turn
+ * table (unique on (scenario_id, turn_id)) before any provider or tool call:
+ *   · the CLAIM row carries the client's `turn_id` and no messages;
+ *   · the ANSWER row carries `<turn_id>:answer` with the user and final text.
+ * Only the request that CREATED the claim runs. Any other sees the claim, never
+ * runs, and waits for the answer (replaying it) or says the outcome is unknown.
+ * A claim without an answer is never read as permission to run again.
+ */
+export const answerTurnIdOf = (turnId: string): string => `${turnId}:answer`;
+/** How long a request that did not win the claim waits for the winner's answer. */
+export const AGENT_TURN_CLAIM_WAIT = { totalMs: 150_000, everyMs: 1_000 };
+
 /** The conversation of record stays Olumi's; this is a per-process cache. */
 const histories = new HistoryStore();
 const proposals = new ProposalStore();
@@ -570,9 +587,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       };
     };
     if (turnId !== undefined && typeof store.readCommittedTurn === 'function') {
+      const readAnswer = (): Promise<CommittedTurnRecord | null> => store.readCommittedTurn!(scenarioId, answerTurnIdOf(turnId));
       let prior: CommittedTurnRecord | null;
       try {
-        prior = await store.readCommittedTurn(scenarioId, turnId);
+        prior = await readAnswer();
       } catch (err) {
         // Unknown is not absent: running the model now could repeat a turn that
         // already wrote. Nothing is run.
@@ -585,6 +603,57 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         }
         return reply.code(200).send(await replayed(prior));
       }
+      // CLAIM the identity before any provider or tool call. No graph rides on
+      // it, so it takes no fence and no CAS; it goes through the shared floor
+      // like every turn row (C8).
+      let claim: Awaited<ReturnType<typeof appendCheckedGraphWrite>>;
+      try {
+        claim = await appendCheckedGraphWrite({
+          store,
+          writesGraph: false,
+          source: 'agent_turn_claim',
+          write: {
+            scenario_id: scenarioId,
+            turn_id: turnId,
+            turn_class: 'direct_answer',
+            handler_id: null,
+            request_hash: requestHash,
+            response_emitted: false,
+            llm_calls_used: 0,
+            duration_ms: 0,
+            handler_facts: [],
+          },
+        });
+      } catch (err) {
+        log.warn({ err: String(err), scenario_id: scenarioId, turn_id: turnId }, 'agent-lane: turn claim failed — refusing rather than running unclaimed');
+        return reply.code(503).send({ error: 'TURN_STATE_UNVERIFIABLE', detail: 'Could not reserve this turn. Nothing was run — please try again.' });
+      }
+      if (claim.priorTurnConflict === true) {
+        return reply.code(409).send({ error: 'TURN_ID_REUSED', detail: 'That turn id was already used for a different message. Nothing was run or changed.' });
+      }
+      if (claim.replayedPriorTurn === true) {
+        // Another request owns this turn: in flight now, or it ran and its answer
+        // was never recorded. It is NEVER run again here. Wait for its answer.
+        const deadline = Date.now() + AGENT_TURN_CLAIM_WAIT.totalMs;
+        for (;;) {
+          let answer: CommittedTurnRecord | null = null;
+          try { answer = await readAnswer(); } catch { answer = null; }
+          if (answer !== null) {
+            if (answer.request_hash !== requestHash) {
+              return reply.code(409).send({ error: 'TURN_ID_REUSED', detail: 'That turn id was already used for a different message. Nothing was run or changed.' });
+            }
+            return reply.code(200).send(await replayed(answer));
+          }
+          if (Date.now() >= deadline) break;
+          await new Promise((r) => setTimeout(r, AGENT_TURN_CLAIM_WAIT.everyMs));
+        }
+        log.warn({ scenario_id: scenarioId, turn_id: turnId }, 'agent-lane: turn claimed but no answer recorded — outcome unknown, not re-run');
+        return reply.code(409).send({
+          error: 'TURN_OUTCOME_UNKNOWN',
+          detail: 'This message is already being handled, or an earlier attempt ran and its reply was not recorded. Nothing was run again — reload to see the current model.',
+        });
+      }
+      // This request created the claim: it alone runs the turn.
     }
     /**
      * ⛔ THE UI RENDERS THE ANALYSIS FROM `blocks` AND `analysis_ready`, NOT
@@ -691,7 +760,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           source: 'agent_turn',
           write: {
           scenario_id: scenarioId,
-          turn_id: turnId,
+          // The ANSWER row: the claim (the bare turn_id) was taken before the run.
+          turn_id: answerTurnIdOf(turnId),
           // DB CHECK: (turn_class = 'handler') = (handler_id IS NOT NULL) —
           // the graph-register precedent for a turn with no handler.
           turn_class: 'direct_answer',
@@ -714,14 +784,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         if (outcome.replayedPriorTurn === true && typeof store.readCommittedTurn === 'function') {
           // An identical concurrent request committed first: ITS answer is the
           // record, so it is the one returned.
-          const first = await store.readCommittedTurn(scenarioId, turnId);
+          const first = await store.readCommittedTurn(scenarioId, answerTurnIdOf(turnId));
           if (first !== null) return reply.code(200).send(await replayed(first));
         }
         durability = 'recorded';
       } catch (err) {
         // The answer is real and the writes already happened; hiding it would be
         // worse. It is returned, flagged as not durable, and logged loudly.
-        log.error({ err: String(err), scenario_id: scenarioId, turn_id: turnId }, 'agent-lane: turn could not be recorded — a retry would re-run it');
+        log.error({ err: String(err), scenario_id: scenarioId, turn_id: turnId }, 'agent-lane: answer could not be recorded — the claim stands, so a retry reports an unknown outcome and never re-runs');
         durability = 'not_recorded';
       }
     }
