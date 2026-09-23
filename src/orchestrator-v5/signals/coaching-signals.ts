@@ -57,6 +57,10 @@ import { formatPercentagePoints } from '../format/format-analysis-value.js';
 import { isNoopFact } from '../tools/fact-noop.js';
 import type { SuccessfulHandlerOutcome } from '../tools/handler-outcome.js';
 import { isAnalysisRefusalFact } from '../context/analysis-refusal-continuity.js';
+import {
+  SAME_INPUTS_LEAD_TEXT,
+  SAME_INPUTS_OFFER_TEXT,
+} from '../routing/run-comparison-gate.js';
 
 export type { CoachingSignalId };
 
@@ -165,6 +169,13 @@ export const COACHING_TEXT: Record<CoachingSignalId, (ctx: {
    * user change?", this answers "could that change have moved anything?".
    */
   readonly interveningChangeIsInert?: boolean;
+  /**
+   * ⭐ BOTH RUNS WERE COMPUTED ON THE SAME ANALYSIS INPUTS — two NON-NULL equal
+   * `graph_hash_at_run` on the compared pair. Nothing that happened between the
+   * runs entered either of them, so no change may be attributed. See
+   * {@link composeRerunText}.
+   */
+  readonly sameAnalysisInputs?: boolean;
 }) => string> = {
   STALE_ANALYSIS_AFTER_EDIT: () =>
     'This change affects the model. The current analysis may not reflect it. Run the analysis to see updated results.',
@@ -181,12 +192,19 @@ export const COACHING_TEXT: Record<CoachingSignalId, (ctx: {
   // It deliberately does NOT get its own `signal_id`: the telemetry series must
   // stay continuous across the cap, which is the same reasoning the withheld
   // rerun arm uses for reusing RERUN_ANALYSIS_COMPLETE.
-  RERUN_ANALYSIS_COMPLETE: ({ runDelta, interveningChange, movementLicence, interveningChangeIsInert }) =>
+  RERUN_ANALYSIS_COMPLETE: ({
+    runDelta,
+    interveningChange,
+    movementLicence,
+    interveningChangeIsInert,
+    sameAnalysisInputs,
+  }) =>
     composeRerunText(
       runDelta ?? null,
       interveningChange ?? null,
       movementLicence ?? { kind: 'indeterminate', reason: 'no_identity_bound_pair' },
       interveningChangeIsInert === true,
+      sameAnalysisInputs === true,
     ),
 };
 
@@ -298,7 +316,29 @@ function composeRerunText(
     reason: 'no_identity_bound_pair',
   },
   interveningChangeIsInert = false,
+  sameAnalysisInputs = false,
 ): string {
+  // ⭐⭐ "HELD BOTH BEFORE AND AFTER" NEEDS AN AFTER (Paul's manual test,
+  // 23 Sep 2026, scenario 58af9704; #63 5794675550). His option edits never
+  // wrote the option's `interventions`, both runs were computed on the SAME
+  // analysis inputs, and this sentence still said "the conclusion held both
+  // before and after those changes" — attributing a result to a change neither
+  // run saw. `interveningChangeIsInert` cannot catch it: it covers one factor
+  // value edit on a factor every option overrides, not a change that never
+  // landed, nor any other change kind.
+  //
+  // The run-comparison ROUTING gate already answers this question for the
+  // user-asked comparison (mode `same_inputs`: two NON-NULL equal
+  // `graph_hash_at_run`). This is the same predicate, and the SAME framing
+  // sentences by import, so the two re-run surfaces cannot drift. Placed like
+  // the gate's: an abstention exit (no comparison made) stays as it is, and a
+  // run with no attributed change keeps its plain sentence — there is nothing
+  // to withdraw.
+  if (sameAnalysisInputs && interveningChange !== null) {
+    const unattributed = composeRerunBody(delta, null, movementLicence, false);
+    if (RERUN_ABSTENTION_EXITS.has(unattributed.kind)) return unattributed.text;
+    return `${SAME_INPUTS_LEAD_TEXT} ${unattributed.text} ${SAME_INPUTS_OFFER_TEXT}`;
+  }
   const body = composeRerunBody(
     delta,
     interveningChange,
@@ -751,6 +791,7 @@ export function detectCoachingSignal(
           interveningChange: null,
           movementLicence: null,
           interveningChangeIsInert: false,
+          sameAnalysisInputs: false,
         }
       : buildRerunAcknowledgement(input);
     return {
@@ -760,6 +801,7 @@ export function detectCoachingSignal(
         interveningChange: rerun.interveningChange,
         movementLicence: rerun.movementLicence,
         interveningChangeIsInert: rerun.interveningChangeIsInert,
+        sameAnalysisInputs: rerun.sameAnalysisInputs,
       }),
     };
   }
@@ -843,12 +885,14 @@ function buildRerunAcknowledgement(input: CoachingSignalInput): {
   readonly interveningChange: InterveningChange | null;
   readonly movementLicence: MovementDirectionLicence | null;
   readonly interveningChangeIsInert: boolean;
+  readonly sameAnalysisInputs: boolean;
 } {
   const none = {
     delta: null,
     interveningChange: null,
     movementLicence: null,
     interveningChangeIsInert: false,
+    sameAnalysisInputs: false,
   } as const;
 
   const currentFact = input.outcome.handler_facts.find(
@@ -896,7 +940,27 @@ function buildRerunAcknowledgement(input: CoachingSignalInput): {
       interveningChange,
       currentEnrichment,
     ),
+    // ⭐ THE SAME SELECTION AGAIN, NOW FIVE CONSUMERS: the prior hash is the
+    // freshness selector's own `graph_hash_at_run` for the run compared against,
+    // never a second read. A null or empty hash on EITHER side proves nothing
+    // (a legacy fact), exactly as in `run-comparison-gate.ts`'s `same_inputs`.
+    sameAnalysisInputs: sameAnalysisInputHashes(selected.graph_hash_at_run, currentFact),
   };
+}
+
+/** An empty string is no hash — the rule `compare-runs.ts`'s `nonEmptyHash` applies. */
+function sameAnalysisInputHashes(priorHash: string | null, currentFact: HandlerFact): boolean {
+  const result = (currentFact as { result?: unknown }).result;
+  const currentHash =
+    result !== null && typeof result === 'object' && !Array.isArray(result)
+      ? (result as Record<string, unknown>).graph_hash_at_run
+      : undefined;
+  return (
+    typeof priorHash === 'string'
+    && priorHash.length > 0
+    && typeof currentHash === 'string'
+    && currentHash === priorHash
+  );
 }
 
 /**
