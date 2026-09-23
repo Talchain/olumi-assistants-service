@@ -162,3 +162,36 @@ describe('an option blocked for another reason is still named', () => {
     expect(deriveBlockedConfiguredOptions(nulled)).toEqual([]);
   });
 });
+
+/**
+ * ⛔ A COUNT IS NOT A DISCLOSURE. The plural branch said "Note: 2 options still
+ * block the analysis." — no names, no reasons, nothing to act on — while the
+ * receipt still directed the user at a DIFFERENT, unconfigured option whose
+ * repair would not unblock anything. A reviewer identified that as reinstating
+ * the exact condition this notice exists to remove.
+ */
+describe('every blocked option is named, not counted', () => {
+  const two = [
+    { label: 'Two Developers', reason: 'A proposed effect still needs a supported mapping' },
+    { label: 'Hire Contractors', reason: 'An effect target is unresolved' },
+  ];
+
+  it('names both options AND both reasons', () => {
+    const notice = buildBlockedOptionsNotice(two) as string;
+    expect(notice).toContain('Two Developers');
+    expect(notice).toContain('Hire Contractors');
+    expect(notice).toContain('A proposed effect still needs a supported mapping');
+    expect(notice).toContain('An effect target is unresolved');
+  });
+
+  it('a bare count with no names is never emitted', () => {
+    const notice = buildBlockedOptionsNotice(two) as string;
+    expect(notice).not.toMatch(/^Note: 2 options still block the analysis\.$/);
+  });
+
+  it('names an option even when its reason is absent', () => {
+    const notice = buildBlockedOptionsNotice([{ label: 'A' }, { label: 'B' }]) as string;
+    expect(notice).toContain("'A'");
+    expect(notice).toContain("'B'");
+  });
+});

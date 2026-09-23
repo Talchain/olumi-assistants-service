@@ -325,13 +325,27 @@ export function buildBlockedOptionsNotice(
 ): string | null {
   const entries = blocked.filter((b) => b.label.length > 0);
   if (entries.length === 0) return null;
-  const one = entries[0] as BlockedConfiguredOption;
-  const named = entries.length === 1 ? `'${one.label}'` : `${entries.length} options`;
-  const because =
-    entries.length === 1 && typeof one.reason === 'string' && one.reason.length > 0
-      ? ` ${one.reason.replace(/\.$/, '')}.`
-      : '';
-  return `Note: ${named} still ${entries.length === 1 ? 'blocks' : 'block'} the analysis.${because}`;
+
+  // ⛔ A COUNT IS NOT A DISCLOSURE. This said "Note: 2 options still block the
+  // analysis." at n >= 2 — no names, no reasons, nothing to act on — while the
+  // receipt still pointed the user at a DIFFERENT, unconfigured option whose
+  // repair would not unblock anything. That reinstates exactly the condition
+  // this notice exists to remove: the user is told something is wrong and sent
+  // to the wrong place. Every blocked option is named, with its own reason.
+  const sentence = (b: BlockedConfiguredOption): string =>
+    typeof b.reason === 'string' && b.reason.length > 0
+      ? `'${b.label}' (${b.reason.replace(/\.$/, '')})`
+      : `'${b.label}'`;
+
+  if (entries.length === 1) {
+    const one = entries[0] as BlockedConfiguredOption;
+    const because =
+      typeof one.reason === 'string' && one.reason.length > 0
+        ? ` ${one.reason.replace(/\.$/, '')}.`
+        : '';
+    return `Note: '${one.label}' still blocks the analysis.${because}`;
+  }
+  return `Note: ${entries.length} options still block the analysis: ${entries.map(sentence).join('; ')}.`;
 }
 
 /** Rerun affordance offered when the post-apply graph is analysis-ready. */
