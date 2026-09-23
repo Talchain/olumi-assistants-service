@@ -324,7 +324,7 @@ describe('record-vs-transcript boundary: the success target', () => {
       // Characterisation of the CURRENT domain — this documents the gap the
       // pack-side fix closes. It is deliberately NOT a wish that the guard
       // widen: widening a natural-language predicate is the oscillation trap.
-      expect(decision).toEqual({ verdict: 'pass', reason: 'no_claim' });
+      expect(decision).toEqual({ verdict: 'pass', reason: 'no_claim', consequences: { withholdGraphWrite: false, withholdReceiptFacts: false } });
     });
 
     it('the guard DOES fire on a registration claim it was built for (positive control)', () => {
@@ -337,7 +337,7 @@ describe('record-vs-transcript boundary: the success target', () => {
       // Without this control the test above would pass just as happily if
       // `decideGoalTargetReceipt` were broken and returned 'pass' for
       // everything — an absence proof needs a presence proof beside it.
-      expect(decision).toEqual({ verdict: 'swap', reason: 'unbacked_claim' });
+      expect(decision).toEqual({ verdict: 'swap', reason: 'unbacked_claim', consequences: { withholdGraphWrite: true, withholdReceiptFacts: true } });
     });
   });
 });

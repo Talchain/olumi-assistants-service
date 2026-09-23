@@ -31,7 +31,7 @@ import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
 import { appendCheckedGraphWrite } from '../orchestrator-v5/persist-graph-write.js';
 import { scenarioAccessDecision } from '../orchestrator-v5/agent-lane/scenario-access.js';
-import { HistoryStore } from '../orchestrator-v5/agent-lane/history-store.js';
+import { HistoryStore, historyFromDurableTurns, needsDurableSeed } from '../orchestrator-v5/agent-lane/history-store.js';
 import { internalHeaders } from '../orchestrator-v5/agent-lane/internal-headers.js';
 import { resolveUserIdentity } from '../orchestrator/user-identity.js';
 import { log } from '../utils/telemetry.js';
@@ -111,6 +111,9 @@ const MUTATION_INSTRUCTION =
     ? 'This is a read-only preview: you CANNOT change the model, and there is no tool that would let you. If the user asks for a change, say plainly that this preview cannot make it and describe what you would propose instead.'
     : 'To change the model you must first call a proposing tool \u2014 propose_model_change for a link, propose_assumptions to give value-less factors a starting number, propose_option_interventions to record the level an option sets, propose_starting_point for both at once \u2014 show the user exactly what it returned (in words: never print a proposal_id or any other internal id \u2014 the user approves by simply saying yes), and call authorise_change with that proposal_id ONLY after they have explicitly approved it.';
 
+/** Marks a board edit in the Agent's history: the user's own change, already applied — never a request to the Agent. */
+export const BOARD_EDIT_PREFIX = '(Board edit \u2014 the user changed this directly on the canvas and Olumi has already applied it; it is not a request to you.)';
+
 const AGENT_INSTRUCTIONS = [
   'You are Olumi, a strategic reasoning layer. Improve human strategic judgement rather than deciding for the user.',
   'Answer the user’s actual question directly and naturally.',
@@ -160,6 +163,13 @@ const AGENT_INSTRUCTIONS = [
   'In that same reply, if any factor has no value or any option sets nothing, call propose_starting_point ONCE with a reasoned starting value for each such factor and the level each option sets, in the user\u2019s own units. Show every figure and what it rests on, say they are your assumptions to adopt or correct, and ask for one approval.',
   'If propose_starting_point refuses with incomplete_starting_point, NOTHING is awaiting approval: call it again with a level for every pair in options_missing_levels before you reply. Never ask the user to approve an incomplete starting point.',
   'Discussion, ideation and research are not mutation requests.',
+  /*
+   * ⭐ IDEATION PUSHES BEYOND THE MODEL, AND SAYS WHAT IT DID NOT DO (Paul, 23 Sep:
+   * "generates non-obvious alternatives … surfaces missing factors and perspectives").
+   * Measured on 10 served "just ideas" replies: 10–19 listed items each — more than a
+   * team can weigh — and only 1 of 10 said nothing had been added to the model.
+   */
+  'When the user asks for ideas or other options, offer three to five the model does not already hold, preferring non-obvious ones, and give each one line on what it would change or which assumption it would test. Say plainly that none has been added to the model, and offer to add any the user picks.',
   /*
    * ⛔ MEASURED on Paul's 22 Sep session: fourteen values were applied and the
    * analysis was never run again, so nothing the user could see had moved.
@@ -216,6 +226,7 @@ const AGENT_INSTRUCTIONS = [
    * ordering is sensitive to, and let the user change it and see how much it matters.
    */
   'When you report an analysis, describe what the CURRENT model implies given its assumptions \u2014 a finding to reason with, never a recommendation. Never call an option the winner, the best option or the recommended one; say which option leads in this model and how firmly. Then name the one or two assumptions the ordering is most sensitive to, say whether each came from the user or from you, and invite the user to change one and see how much it matters. When the result is fragile or a near tie, say that this uncertainty is itself the finding.',
+  'History entries that begin \u201c(Board edit\u201d are changes the user made directly on the canvas. When the user asks about \u201cmy change\u201d, start from the most recent board edit, and read the current state before explaining what it did.',
   'British English. Concise but substantive.',
 ].join(' ');
 
@@ -503,6 +514,23 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const forwarded = await dispatchFor(
         typeof req.headers.authorization === 'string' ? req.headers.authorization : undefined,
       )('/orchestrate/v2/turn', body);
+      /**
+       * ⛔ THE AGENT MUST KNOW WHAT THE USER CHANGED ON THE BOARD. Measured on served
+       * cc7b26c: after a canvas edit (Tech lead hires 0 → 1), "Re-run the analysis.
+       * How much did my change matter?" was answered about the EARLIER approved
+       * baseline — the forwarded edit never entered the Agent's history, and it did
+       * not re-read state. The product's own narration of the edit (the handler's
+       * truthful text, e.g. "Updated Tech lead hires from 0 hires to 1 hire.") is
+       * appended to this session's history, marked as a board edit — not as
+       * something the user asked the Agent to do.
+       */
+      const narration = typeof forwarded.json.assistant_text === 'string' ? forwarded.json.assistant_text.trim() : '';
+      if (forwarded.status === 200 && kind === 'system_event' && narration.length > 0) {
+        histories.set(sessionId, [
+          ...histories.get(sessionId),
+          { role: 'user', content: [{ type: 'input_text', text: `${BOARD_EDIT_PREFIX} ${narration}` }] },
+        ]);
+      }
       return reply.code(forwarded.status).send({
         ...forwarded.json,
         // Underscore sidecar: egress is `.strict()`. Says plainly that this
@@ -724,6 +752,20 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const capabilities = createAgentCapabilities(countingDispatch, proposals, callStructured, mode, (payload) => {
       analysisFromTool = payload;
     });
+    // A session whose in-process history holds no user message (a restart, a
+    // deploy, an eviction — or only a board-edit note appended since) is seeded
+    // from the durable conversation, ahead of whatever is already held — see
+    // `historyFromDurableTurns`. A failed read degrades to no history; it never
+    // fails the turn.
+    const held = histories.get(sessionId);
+    if (needsDurableSeed(held) && typeof store.readRecent === 'function') {
+      try {
+        const durable = historyFromDurableTurns(await store.readRecent(scenarioId));
+        if (durable.length > 0) histories.set(sessionId, [...durable, ...held]);
+      } catch (err) {
+        log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: durable conversation could not be read — continuing without it');
+      }
+    }
     const history = histories.get(sessionId);
     const budget = budgetFor('gpt-5.6-terra', 'conversation');
 

@@ -130,6 +130,64 @@ describe('an incomplete starting point leaves NOTHING approvable', () => {
     expect(store.outstanding(SCENARIO, USER).map((o) => o.proposal_id)).toEqual([complete.proposal_id]);
   });
 
+  /**
+   * ⛔ MEASURED on served d1829c5 (journey J1, proxy): propose_starting_point was
+   * refused `incomplete_starting_point` THREE times in one turn, naming the same
+   * observable, range-framed factor under two options each time, and the user
+   * was never shown a proposal. A level the Agent DID supply was dropped by the
+   * level proposer (outside the stored range, or a label that resolves to
+   * nothing), but the refusal carried only the missing pairs, not why the
+   * supplied level was not accepted, so the Agent re-sent the same value.
+   */
+  it('RED: a supplied level that was NOT accepted is named, with its option and why, beside the missing pair', async () => {
+    const p = fakeProduct();
+    const store = new ProposalStore();
+    const caps = createAgentCapabilities(p.d, store);
+    const r = await caps.proposeStartingPoint(ctx, {
+      assumptions: VALUES,
+      option_levels: [...PARTIAL_LEVELS,
+        // Coordination load's stored range is 0-100: 150 cannot be recorded on it.
+        { option_label: 'Stage Hiring After Review', factor_label: 'Coordination load', value: 150, basis: 'review lowers load' }],
+    });
+    expect(r.refusal).toBe('incomplete_starting_point');
+    expect(r.options_missing_levels).toEqual([{ option: 'Stage Hiring After Review', factor: 'Coordination load' }]);
+    expect(r.levels_not_accepted).toEqual([
+      expect.objectContaining({ option: 'Stage Hiring After Review', factor: 'Coordination load', value: 150, reason: expect.stringContaining('0 to 100') }),
+    ]);
+    expect(String(r.detail)).toMatch(/levels_not_accepted/);
+    expect(store.size()).toBe(0);
+    expect(p.posted).toEqual([]);
+  });
+
+  it('RED: a level whose factor label resolves to nothing is named too', async () => {
+    const p = fakeProduct();
+    const store = new ProposalStore();
+    const caps = createAgentCapabilities(p.d, store);
+    const r = await caps.proposeStartingPoint(ctx, {
+      assumptions: VALUES,
+      option_levels: [...PARTIAL_LEVELS,
+        { option_label: 'Stage Hiring After Review', factor_label: 'Co-ordination burden', value: 35, basis: 'review lowers load' }],
+    });
+    expect(r.refusal).toBe('incomplete_starting_point');
+    expect(r.levels_not_accepted).toEqual([
+      expect.objectContaining({ option: 'Stage Hiring After Review', factor: 'Co-ordination burden', reason: expect.stringMatching(/no factor/i) }),
+    ]);
+  });
+
+  it('CONTRAST: correcting the rejected level into the range admits ONE approvable proposal', async () => {
+    const p = fakeProduct();
+    const store = new ProposalStore();
+    const caps = createAgentCapabilities(p.d, store);
+    const r = await caps.proposeStartingPoint(ctx, {
+      assumptions: VALUES,
+      option_levels: [...PARTIAL_LEVELS,
+        { option_label: 'Stage Hiring After Review', factor_label: 'Coordination load', value: 35, basis: 'review lowers load' }],
+    });
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(r).not.toHaveProperty('levels_not_accepted');
+    expect(store.outstanding(SCENARIO, USER)).toHaveLength(1);
+  });
+
   it('CONTROL: a complete FIRST call is admitted as one approvable proposal', async () => {
     const p = fakeProduct();
     const store = new ProposalStore();

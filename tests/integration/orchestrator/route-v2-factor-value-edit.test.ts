@@ -202,7 +202,7 @@ describe('POST /orchestrate/v2/turn — factor_value_edit (the value-carrying in
     expect(after).not.toBe(before);
   });
 
-  it('the wire carries a graph_patch block, a graph_hash, and analysis_ready', async () => {
+  it('the wire carries the applied graph, graph_patch, graph_hash, and analysis_ready', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/orchestrate/v2/turn',
@@ -220,6 +220,18 @@ describe('POST /orchestrate/v2/turn — factor_value_edit (the value-carrying in
     expect(patch?.target_id).toBe('f-budget');
     expect(patch?.status).toBe('applied');
     expect(patch?.operation).toBe('set_factor_value');
+
+    // The applied postimage is the UI's authoritative inline receipt on a
+    // non-empty canvas. Without this, the server can persist the edit while the
+    // current session appears to revert until reload.
+    expect(body.draft_graph).toBeDefined();
+    const wireNodes = (body.draft_graph.nodes ?? []) as Array<{
+      id: string;
+      observed_state?: Record<string, unknown>;
+    }>;
+    const wireBudget = wireNodes.find((n) => n.id === 'f-budget');
+    expect(wireBudget?.observed_state?.raw_value).toBe(50000);
+    expect(wireBudget?.observed_state?.value).toBeCloseTo(0.5, 10);
 
     // `graph_hash` is stamped from the commit's OWN persisted hash, then the
     // egress sanitiser defers to it.
@@ -278,6 +290,7 @@ describe('POST /orchestrate/v2/turn — factor_value_edit (the value-carrying in
     // NOT SILENTLY CLAMPED: the copy says nothing changed.
     expect(body.assistant_text).toMatch(/haven't changed anything/i);
     expect(body.blocks).toEqual([]);
+    expect(body.draft_graph).toBeUndefined();
   });
 
   it('REFUSES an unknown target id — no write', async () => {

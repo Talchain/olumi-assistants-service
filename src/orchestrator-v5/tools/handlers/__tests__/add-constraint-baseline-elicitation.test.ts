@@ -842,3 +842,73 @@ describe('2.918 — the elicitation cell EXCLUDES goals, so a goal target can ne
     expect(asGoal.__elicit_baseline).toBeUndefined();
   });
 });
+
+/**
+ * ⛔⛔ WHY THE EXCLUSION ABOVE MAY NOT SIMPLY BE WIDENED — the answer path is
+ * PERCENT-SHAPED, and widening the ask without it would mint wrong numbers.
+ *
+ * The block above pins that a GOAL can never be asked for its baseline. The
+ * obvious remedy is to admit goals to the cell. **Measured, that would be
+ * worse than the gap it closes**, and this is the evidence.
+ *
+ * `deriveElicitedBaselineAnswerPercent` — the parser that reads an answer to
+ * the elicitation question — binds a BARE NUMBER and returns it as a
+ * PERCENTAGE. Run against the real function:
+ *
+ *   '12%'    on "Churn rate"                 → 12    ← contrast control, fires
+ *   '12'     on "Churn rate"                 → 12    ← the bare-number widening
+ *   '8'      on "New enterprise customers"   → 8     ⚠ A COUNT, READ AS A PERCENT
+ *   '250000' on "Annual recurring revenue"   → undefined  ← a 0–100 range guard
+ *
+ * ⇒ A user asked *"where does this stand today?"* about a goal counted in
+ * CUSTOMERS, answering "8", would have **8 percent** written as their
+ * baseline. The analysis would then run on it. **A wrong baseline silently
+ * corrupts the recommendation; a missing one visibly withholds it** — and the
+ * second is the state the product is in today.
+ *
+ * ⚠ The ask's own copy says "percentage" DELIBERATELY (`format-confirmation.ts`
+ * — *"it is the unambiguous shape"*), so the question and the parser agree with
+ * each other. They agree on a shape that a goal in customers does not have.
+ *
+ * ⇒ **THE ORDER IS FORCED: make the answer path unit-aware FIRST, then widen
+ * the ask.** Not the reverse, and not both at once. This file is where someone
+ * about to widen the gate will look, which is why the evidence lives here
+ * rather than in a document.
+ *
+ * ⛔ NOT ASSERTED: that the parser is wrong. It is correct for the population
+ * it was built for, and the copy requests exactly the shape it reads. What is
+ * asserted is the CONJUNCTION — percent-shaped answers plus a non-percentage
+ * target is the unsafe cell, and nothing currently prevents entering it except
+ * the kind exclusion this file pins.
+ */
+describe('the baseline answer path reads a bare number as a PERCENTAGE', () => {
+  it('CONTRAST CONTROL — a percentage answer binds, so the readings below are real', async () => {
+    const { deriveElicitedBaselineAnswerPercent } = await import(
+      '../../../../cee/factor-extraction/stated-level.js'
+    );
+    expect(
+      deriveElicitedBaselineAnswerPercent('12%', 'Churn rate', []),
+      'if this stopped binding, every reading below would be a blind probe',
+    ).toBe(12);
+  });
+
+  it('⚠ a bare number on a COUNT-shaped target binds and is returned as a percentage', async () => {
+    const { deriveElicitedBaselineAnswerPercent } = await import(
+      '../../../../cee/factor-extraction/stated-level.js'
+    );
+    // The function cannot know the target's unit — it is not given one. So "8"
+    // for a goal counted in customers comes back as 8, and the caller stamps a
+    // percentage. THIS is why the kind exclusion may not simply be widened.
+    expect(deriveElicitedBaselineAnswerPercent('8', 'New enterprise customers', [])).toBe(8);
+  });
+
+  it('and a unit-bearing answer does NOT bind — so the user cannot correct it either', async () => {
+    const { deriveElicitedBaselineAnswerPercent } = await import(
+      '../../../../cee/factor-extraction/stated-level.js'
+    );
+    // "about 8 customers" is the natural answer to a count question, and it is
+    // unreadable here. The user has no way to say what they mean.
+    expect(deriveElicitedBaselineAnswerPercent('about 8 customers', 'New enterprise customers', []))
+      .toBeUndefined();
+  });
+});

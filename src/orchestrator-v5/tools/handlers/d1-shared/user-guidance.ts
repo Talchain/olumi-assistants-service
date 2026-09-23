@@ -33,3 +33,24 @@ export const SET_FACTOR_VALUE_USER_GUIDANCE =
 
 export const ADJUST_EDGE_STRENGTH_USER_GUIDANCE =
   'I could not apply that edit because it no longer matched the current model.';
+
+/**
+ * ⭐ THE ONE USER-VOICED REFUSAL IN `add-constraint.ts` THAT IS SHOWN AS-IS.
+ *
+ * Every other failure on that handler gets {@link ADD_CONSTRAINT_USER_GUIDANCE}
+ * — deliberately, because the precise messages leak node ids and schema jargon.
+ * This one passes both gates and is therefore routed to the user instead:
+ *
+ *   VOCABULARY — every term is one the product has already shown. "Success
+ *   target value" is a labelled field in the interface and "Get help defining
+ *   the success target" is its help copy. The test is whether the user has MET
+ *   the term, not whether the sentence reads well; a sentence can be flawless
+ *   English and still name a concept the product invented and never taught.
+ *
+ *   BUDGET — 76 characters against `sanitiseForUser`'s 100. Exported rather
+ *   than inlined at the throw precisely so the budget guard's union assertion
+ *   sees it: a `*_USER_GUIDANCE` constant is covered automatically, an inline
+ *   string is not.
+ */
+export const SUCCESS_TARGET_POSITIVE_USER_GUIDANCE =
+  'A success target must be a positive number — tell me the target value again.';
