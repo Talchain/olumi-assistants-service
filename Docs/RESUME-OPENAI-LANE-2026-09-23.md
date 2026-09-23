@@ -1,269 +1,212 @@
-# RESUME HERE — OpenAI Technical Architecture lane, 23 Sep 2026 ~18:00
+# RESUME HERE — OpenAI Technical Architecture lane, 23 Sep 2026 ~21:30
 
-Written immediately before a machine restart. Everything below was verified at the
-time of writing; **re-derive every SHA before acting on it** — a restart is exactly
-the boundary at which pins go stale.
+> ⛔ **THIS FILE WAS REWRITTEN AT 21:30 AND ITS EARLIER VERSION WAS WRONG ABOUT THE
+> CENTRAL FACT.** The 18:00 version said provider isolation was unachieved and the PoC
+> needed its own deployment. **Both were false.** Isolation is request-scoped and
+> already works. Nothing in this file is safe to quote without re-deriving — including
+> this sentence.
 
 ## The goal (unchanged)
 
-> Make the OpenAI PoC fast, simple and differentiated by using the optimal mix of
-> OpenAI models, focused prompts, deterministic tools, context delivery, caching
-> and optional challenger reasoning, while preserving Olumi's scientific and
-> human-in-control principles.
-
-Hard constraints: **OpenAI means OpenAI** (zero Anthropic generative calls, no
-hidden fallback) · **Conventional stays untouched** (no provider config change, no
-prompt migration) · post material findings to `Talchain/olumi-programme-docs#63`
-as "OpenAI Technical Architecture".
+> Make the OpenAI PoC fast, simple and differentiated by using the optimal mix of OpenAI
+> models, focused prompts, deterministic tools, context delivery, caching and optional
+> challenger reasoning, while preserving Olumi's scientific and human-in-control principles.
 
 ---
 
-## 1. FIRST ACTIONS ON RESTART, in order
+## 1. ⭐ READ THIS BEFORE ANY CLAIM — the lane's dominant failure mode
 
-```bash
-# 1. Re-derive every head — do not trust the SHAs in this file
-gh api repos/Talchain/olumi-assistants-service/pulls/1755 --jq '.head.sha'
-gh api repos/Talchain/olumi-assistants-service/pulls/1764 --jq '.head.sha'
-gh api repos/Talchain/DecisionGuideAI/pulls/1907          --jq '.head.sha'
+**I published seven claims today that needed correcting. Four were the same mistake: I
+measured one code path and attributed the result to another.** The correction is mechanical,
+and it is the single most valuable thing in this file:
 
-# 2. Required check + verdicts on each (the ONLY required context on CEE is
-#    "Lint, TypeCheck, Unit Tests"; on the UI it is "Full Test Suite" x4 + "TypeScript + Lint")
-gh api "repos/Talchain/olumi-assistants-service/commits/<head>/check-runs?per_page=100" \
-  --jq '.check_runs[] | select(.status=="completed") | "\(.conclusion) \(.name)"'
-gh api repos/Talchain/olumi-assistants-service/pulls/1755/reviews --jq '.[] | "\(.state) \(.commit_id)"'
+- **The OpenAI PoC is `POST /agent/v1/turn`** — `exit_path: agent_lane_v1`, one model
+  `gpt-5.6-terra`, wrapped in `runWithProviderPolicy(OPENAI_ONLY(...))` at
+  `src/routes/agent-v1-turn.ts:1080-1081`.
+- **It does NOT use the router.** Not `TASK_MODEL_DEFAULTS`, not `CEE_MODEL_*`, not
+  `LLM_PROVIDER`. Its model and reasoning effort live in
+  `src/orchestrator-v5/agent-lane/model-budgets.ts` (`BANKED_BUDGETS`, keyed by
+  `(model, role)`, each entry carrying the measurement that justifies it).
+- **It does NOT run Pass-2 validation.** 0 of 13 calls in a full journey. So every
+  `validate_graph` / 75.7%-reasoning-token / 28s figure is **v5/Conventional**, never the PoC.
 
-# 3. What CEE is actually serving (there is NO /version.json on CEE — see §5)
-#    Take the deploy whose status == "live", NOT the newest.
-```
+⛔ **Before publishing any latency, purity or reachability number: read
+`_diagnostic_trace.exit_path` and the ledger's `purpose` column, and write the path name
+INTO the claim.** "28s Pass-2 on the v5 pipeline", never "28s".
 
-**Then act:** if a required check is RED, fix it — that is the top priority.
-If required is GREEN **and** an exact-head independent verdict exists, run
-`bash scripts/premerge-check.sh Talchain/olumi-assistants-service <n>` and merge.
-**Merging to `staging` IS the deploy** (`cee-staging` `autoDeploy=yes`).
+⛔ **For a reachability claim, ask "reachable by whom"** — a user, a route, or an internal
+dispatch — **and say which.** `provider-policy.ts:13-15` is explicit that `AsyncLocalStorage`
+survives `app.inject()`, so "no user-facing caller" does NOT mean unreachable. I got this
+wrong twice, in both directions.
 
----
-
-## 2. STATE OF THE THREE OPEN PRs
-
-| PR | head at write time | what it is | gate |
-|---|---|---|---|
-| CEE **#1755** | `ccc5f94293d034d9e17fcd5753e99b7eab58330c` | 9 commits: `reasoning_effort` reachable + Pass 2 `'low'`; `OpenAIAdapter.critiqueGraph`; `critique_graph` capability; admin bake-off live-resolver fallback; OpenAI cache-read mapping; + typecheck fix + route test | required check was **queued**; **0 reviews** |
-| CEE **#1764** | `497d74715bc6304c3419356a2b330681806ea0c0` | 1 commit, 5 files: `OpenAIAdapter.explainDiff` + `explain_diff` capability + 2 test files | 22 checks **queued**; **0 reviews** |
-| UI **#1907** | `10136c997527c608224331b1c60c06e4bb883695` | inspector no longer claims "Estimated by Olumi" over no evidence | required **queued**; **0 reviews** |
-
-**All three are NOT LOW RISK → each needs an independent exact-head verdict. Do
-not self-merge any of them.** Exact-head REVIEW_REQUESTs are posted on all three.
-
-⚠ **#1755 and #1764 both touch `src/adapters/llm/openai.ts` and adjacent lines of
-the capability map** (#1755 opens `critique_graph` at `:851`, #1764 opens
-`explain_diff` at `:852`). **Whichever merges second needs a mechanical rebase —
-that is mine to do, not the reviewer's.**
-
-⚠ **#1764 carries a correction I posted against my own description.** Read
-[the correction](https://github.com/Talchain/olumi-assistants-service/pull/1764)
-before defending the PR: the stub it removes was **unreachable**, so the PR is a
-**precondition, not a fix**. Details in §3.
+⛔ **Before proposing where a config value should live, read the consuming call site and
+name the rank it resolves at.** I recommended an env var twice; both times the call site
+read something else first.
 
 ---
 
-## 3. ⛔ THE HEADLINE FINDING — provider isolation is NOT achieved by `LLM_PROVIDER`
+## 2. WHAT IS TRUE, MEASURED TODAY (re-derive before quoting, but these were done properly)
 
-`resolveModelAssignment` returns **`provider: exact.provider`, the resolved
-MODEL's registry provider.** The configured provider is consulted **only when no
-model was selected** (`resolveCandidate`: `model ?? providerDefaults[provider]`),
-and for a valid CEE task `taskDefault` always selects one.
-Precedence: `modelOverride > env_var (config.cee.models) > taskDefault`.
+### Provider isolation — MET, and proven under contrary load
 
-**So the model decides the provider and `LLM_PROVIDER=openai` is close to inert
-for task-routed calls.** An OpenAI-only deployment is built from the per-task
-`CEE_MODEL_*` vars, not from the provider setting.
+- `POST /agent/v1/turn` with `X-Olumi-Assist-Key`. Mounting proven with controls:
+  fabricated path + key → Fastify **404**; real route + key → its own **422**
+  (`scenario_id and message are required`); no key → **401**. A 401 alone proves nothing.
+- **53 guarded generative calls across 12 turns: 53 OpenAI, 0 Anthropic** — counting both
+  `allowed` and `refused_before_network`, so zero means never attempted.
+- ⭐ **Render logs for the same window show 16 Anthropic lines on the same process**
+  (`claude-sonnet-4-6`, `claude-sonnet-5`, `claude-haiku-4-5`). So this is isolation
+  demonstrated **under concurrent contrary load**, not an empty window. It also confirms
+  `provider-policy.ts`'s promise that Conventional is untouched.
+- `_provider_calls` is a **TOP-LEVEL** response key, not under `_agent`.
 
-Derived over all 19 `TASK_MODEL_DEFAULTS` (counts sum to 19):
+### Latency — NOT met, and the variance matters more than the mean
 
-- **11 already OpenAI by default** — incl. `validate_graph` = `o4-mini`
-- **5 Anthropic but overridable** — `draft_graph`, `critique_graph`, `edit_graph`, `orchestrator`, `m2_graph_review`
-- ⛔ **3 Anthropic with NO live env override** — `bias_check`, `explain_diff`, `routing`
+- **n=6 identical-brief construction turns: mean 54.1s, sd 10.4s, CV 19%** (range 39.0–69.2s).
+- Sample size to detect an effect: **n≥5 per arm for 35%, n≥7 for 30%, n≥15 for 20%.**
+  ⛔ **A single before/after turn cannot distinguish a 30% win from noise.**
+- Shape: ~5 calls / 3 hops per construction turn, ~10.9s mean per call. Per-call cost rises
+  to ~23.6s on a ~700-char brief (a 66-char brief still took 49.9s — within the noise band,
+  so **do not claim brief length is irrelevant**, only that any effect is smaller than the spread).
+- A **duplicated `propose_starting_point` hop** was observed **1 in 7** turns — intermittent,
+  not systematic. Still worth an idempotence guard (~10s on a 54s turn).
 
-⚠ Reachability, measured: `routing` and `bias_check` have **zero `getAdapter()`
-call sites** in non-test source → **latent**. **`explain_diff` is the only
-reachable one** (route + mounted, unflagged `ExplainDiffButton`).
+### Caching / context delivery / focused prompts — ALL gated on ONE discarded field
 
-⭐ **So exactly one live path would silently make an Anthropic call on an
-"OpenAI-only" CEE.** That is the hard-constraint-#1 violation, and it is one path,
-not eleven.
+- `AGENT_INSTRUCTIONS` is **5,750 chars ≈ 1,437 tokens**, assembled at exactly one place
+  (`agent-v1-turn.ts:886`), a module constant, passed through unmodified. **Byte-identical on
+  every call, for every user** — a textbook prompt-cache prefix, above OpenAI's ~1,024-token
+  automatic-caching floor (that floor is model knowledge, **not measured here**).
+- ⭐ **So there is no cache system to build.** The brief's "do not build another cache system"
+  is already satisfied by construction. **Only the verification is missing.**
+- ⛔ `agent-v1-turn.ts:533-542` fetches `usage` from the Responses API and **returns it into a
+  void** — `usage` appears exactly twice in the file, the type and the return. Nothing consumes it.
+  Absence confirmed with controls: `cached_tokens` 0 and `prompt_tokens_details` 0 in the logs,
+  against `msg` 100, `input_tokens` 15 and `cache_read` 4 in the same window.
+- ⚠ **"Focused prompts" is a TRAP, not a task.** If caching works, ~90% of that prefix is a
+  cache read and trimming saves almost nothing — and every line in those instructions is a
+  measured behavioural fix (the `raw_value`-vs-normalised-`value` rule, "never print a
+  proposal_id", "say what the change became"). **Do not trim before measuring.**
 
-⚠ Also: **`CEE_MODEL_TASK_*` is inert.** `config/index.ts` annotates that whole
-inventory "Audited at startup but inert for serving". Anyone grepping for env
-names will find them and they do nothing.
+### The challenger — NOT wired, and the path is now known
 
----
-
-## 4. NEXT PRIORITIES, in order
-
-1. **Unblock the three PRs** — fix any red required check; merge on a green
-   required check **plus** an exact-head verdict. Merging is deploying.
-2. **`CEE_MODEL_EXPLAIN_DIFF`** (small, own PR): add to `config.cee.models`,
-   `TASK_TO_CONFIG_KEY` and `CONFIG_KEY_TO_MODEL_ENV_KEY`. This is what makes
-   #1764 actually do something, and it completes hard constraint #1 for the only
-   reachable path.
-3. **A provider-isolation test**, now specifiable: for an OpenAI-only config,
-   every *reachable* task must resolve to a `provider === 'openai'` assignment.
-   Pure resolver test, no network. This is the honest form of "OpenAI means
-   OpenAI" — far better than my earlier reliance on the capability map.
-4. **Run the bake-off** the moment #1755 deploys — driver is banked at
-   `Docs/openai-bakeoff/run-bakeoff.py` on this branch. It exits non-zero and
-   writes **no report** if the fix is not live, so it is safe to just run.
-   Needs `ADMIN_API_KEY` and `RENDER_API_KEY` in env.
-5. **Parse is the remaining latency prize and nothing in flight touches it**
-   (23.1 s p50 of a 52.7 s turn). Its only lever is a faster draft model — i.e.
-   the bake-off. Do not invent a second lever before measuring.
-
----
-
-## 5. MEASUREMENTS ESTABLISHED TODAY — do not re-derive these
-
-**Pipeline decomposition** (n=800 `cee.unified_pipeline.stage_timings`, 774 distinct request ids):
-
-| stage | p50 ms | class |
-|---|---:|---|
-| `parse_ms` | 23,128 | LLM (`parse_llm_ms` 21,495; only 313 ms is non-LLM) |
-| `validation_pipeline_ms` | **28,356** | LLM — the binding stage |
-| `coaching_pass_ms` | 20,680 | LLM — hidden behind validation, ~7.7 s slack |
-| all 6 deterministic stages | **240** | **0.45% of the turn** |
-| `total_ms` | 52,741 | |
-
-Per-row model test: `parse → (coaching ∥ validation)` residual **−918 ms**;
-fully-serial **+19,052 ms**. ⇒ coaching and validation **already overlap**.
-⇒ **"deterministic fast paths" is NOT a speed lever — retired.** Validation
-savings cap out at ~7.7 s, after which coaching binds. Say "bounded", not "28 s".
-
-**Harness / prompt facts**
-- All 12 probed prompt ids return the **handler's** `404` from
-  `POST /admin/v1/test-prompt-llm`. Discriminator: the handler's 404 names the
-  prompt; **Fastify's route-level 404 carries `statusCode`**. Different shapes.
-- `GET /admin/prompts/status` registers only **9** keys (8 `pms` + 1 `default`).
-  `critique_graph`, `suggest_options`, `clarify_brief`, `explain_diff` are **not
-  registered**. `draft_graph` is `pms`, **version 202**, live, 40,393 chars.
-- The admin harness discloses its own divergence from production in
-  `harness_fidelity.divergences`. ⛔ **A bake-off from it licenses a RELATIVE
-  ranking between arms only — never an absolute production latency or quality
-  figure.**
-- ⛔ **CEE has NO version endpoint.** `/version.json` returns 401 without a key
-  and a **route-level 404 with a valid `X-Olumi-Assist-Key`**. `/health` and
-  `/admin/v1/health` 404; `/api/health` 401s the same misleading way. **The only
-  authority is the Render API, taking the deploy with `status == "live"`** — the
-  newest was `build_in_progress` while a 14-minute-older commit served traffic.
-- Admin header is `x-admin-key` (`ADMIN_API_KEY`). Assist header is
-  `X-Olumi-Assist-Key` (`ASSIST_API_KEY`). Never print the values.
-
-**Context/caching** (n=936 `v5.turn_executor.stage_timings`): 173/193 multi-turn
-sessions (89.6%) have an unstable context pack, yet `routing_cache` shows
-**79.9% hits** — because the only cache breakpoint is the frozen system prefix
-and the pack sits entirely after it. **Refuted my own hypothesis; no second
-breakpoint proposed** — volume is not position.
-
-**Arm design note:** `gpt-5-mini` is **`reasoning: false`** in `MODEL_REGISTRY`.
-Keep it as a fast non-reasoning arm but report it as a **separate class**; never
-pool it into a `reasoning_effort` comparison.
+- **0 `decision_review` attempts and 0 `critique_graph` attempts in 53 calls.** Not a refusal
+  either — a refused Anthropic call would be *recorded*. It is never invoked.
+  Consistent with `run-analysis.ts:965` deliberately withholding the brief from PLoT under any
+  policy so PLoT cannot call back into CEE's review legs.
+- The agent substitutes prose hedging ("no robust leader", "a fragile near tie"). Honest, and
+  preserves the scientific principle, **but it is the model's own narration, not an
+  independent challenger.**
 
 ---
 
-## 6. BANKED STATE — corrected after a wider re-check
+## 3. THE CHALLENGER PATH — step 1 is DONE and DEPLOYED
 
-⚠ **My first census was scoped wrong and I am recording that, because the wrong
-number is the dangerous one.** I reported "7 git trees in /private/tmp, all
-clean". That was only **my own session directory**, searched to `-maxdepth 4`,
-checking `refs/heads` containment but **not** the detached `HEAD` itself, **not**
-stashes, and **not** worktrees.
-
-**The real figure for `/private/tmp` is 94 git dirs + 34 worktrees.**
-
-### My own 7 trees — verified properly, and genuinely safe
-
-Re-audited with the gaps closed (detached `HEAD` containment, `git stash list`,
-worktree pointer files, and tags checked for remote reachability rather than
-merely counted):
-
-| tree | HEAD | on a remote ref |
+| # | what | state |
 |---|---|---|
-| `cee-p0` | `work1701` @ `5421b067f64b` | `origin/feat/deterministic-request-assembly` |
-| `cee-effort-…` | detached @ `ccc5f94293d0` | `origin/fix/pass2-reasoning-effort-low` |
-| `cee-explaindiff` | `feat/openai-explain-diff` @ `497d74715bc6` | `origin/feat/openai-explain-diff` |
-| `cee-plan-…` | detached @ `cc7b26cbe168` | `origin/staging` |
-| `ui-1907-…` | detached @ `10136c997527` | `origin/fix/inspector-extraction-label-honesty` |
-| `ui-fa84d226…` ×2 | detached @ `fa84d226ee07` | `origin/canvas/applied-receipt-acknowledges` |
+| 1 | `critique_graph` capability-open + `OpenAIAdapter.critiqueGraph` + the effort knob | ✅ **#1771 MERGED `467b5912cb75`, LIVE on cee-staging 20:58:38Z** |
+| 2 | a **request-scoped** OpenAI model for `critique_graph` | ⛔ open — see the RC ruling below |
+| 3 | one `critique_model` tool registration (`agent-tools.ts`) | ⛔ agent lane's; file contended |
 
-**All seven: `dirty=0`, `stashes=0`, zero unpushed branches, zero tags I
-created.** Every HEAD — including all four detached ones — is contained in a
-remote ref. ⇒ **nothing of mine exists only on this machine.**
+**Verified on the deployed build by identity, not inference:**
+`critique_graph = ['anthropic','openai','fixtures']`, `explain_diff = ['anthropic','fixtures']`,
+`async critiqueGraph(` present, `reasoningEffort: 'high'` at the critique site,
+`args.reasoningEffort` threaded at the chat site, and **0** occurrences of the executable
+`throw new Error("openai_critique_not_supported` (the string survives only in a docblock —
+check position, not count).
 
-### ⛔ 39 OTHER trees DO carry work that exists only in volatile /private/tmp
+### ⛔ RC RULING ON STEP 2 — do not repeat my mistake
 
-**Not mine. I did not touch, push or modify any of them** — other sessions may
-still be live in them, and publishing another lane's WIP could be destructive.
-Full inventory saved at `~/olumi-bank-20260923/OTHER-LANES-AT-RISK.txt`.
-Largest: a DGAI clone with **16 stashes and 116 unpushed branches**, visible
-three times because two worktrees share it; and a `schemas` clone with **237
-uncommitted files**. ⚠ Deleting a parent clone destroys its worktrees.
+RC on #1771: *"The proposed `CEE_MODEL_CRITIQUE=gpt-4.1-2025-04-14` on the shared
+PoC/Conventional service changes its process-wide task default; this is not request-scoped
+isolation, and historical model-routing intent is not current authorisation to repoint
+Conventional config."*
 
-### Where my work lives
+**I proposed an env var, withdrew it, proposed PMS `modelConfig`, and withdrew that too** —
+per-environment is still not per-request. **The correct boundary is a request-scoped model
+choice: rank 1, an explicit `modelOverride` at the call site**, which belongs to the tool
+registration in step 3. RC also notes their comment is *"not a duplicate source-review gate"*
+on #1771.
 
-- both code branches → pushed (`fix/pass2-reasoning-effort-low`, `feat/openai-explain-diff`)
-- bake-off driver → `Docs/openai-bakeoff/run-bakeoff.py` on this branch
-- this file + `Docs/MORNING-BRIEF-2026-09-23.md` §14 → this branch
-- every finding → `Talchain/olumi-programme-docs#63` and the three PRs
-- raw evidence → `~/olumi-bank-20260923/openai-lane/` (non-volatile):
-  `unified_timings.ndjson` (n=800, the pipeline decomposition),
-  **`pass2_complete.ndjson` (the n=795 evidence behind #1755 item 1 — nearly
-  missed on the first pass)**, `pipe.ndjson`, `verify-p2-stages.ndjson`
-- `NOT-BANKED-AND-WHY.txt` records what I dropped **on purpose** (API dumps that
-  would go stale, copies of files already in git, drafts already posted) so a
-  future pass does not mistake a decision for an oversight.
-
-## 7. MISTAKES TO KEEP CORRECTED
-
-- **A true "blocked on CI" line is not licence to stop.** Before ending a turn,
-  name one thing that can run now — and run it.
-- **Read the code, never a docblock or spec title.** A stale `FactorNode` docblock
-  nearly had me expand #1907 onto a defect that does not exist.
-- **Assert the branch name before pushing.** A detached clone made
-  `--abbrev-ref HEAD` return the literal `"HEAD"` and I created a remote branch
-  called `HEAD`. Use `git symbolic-ref --short HEAD`.
-- **A 401 never proves a route exists** — auth precedes routing. Probe with the key.
-- **Two local test attempts, then CI is the gate.** This machine hit load 14.7 and
-  produced zero collection across eight attempts.
-- **Only required checks gate a merge.** `Graph Evaluator` and `Typecheck Drift`
-  are advisory here; an advisory red gets one line, not a work lane.
-- **Count, don't sample; and check counts sum.** The 19-task table above is only
-  trustworthy because the three buckets add to 19.
+⚠ **Model choice, if and when it is scoped correctly:** `gpt-4.1-2025-04-14`, on the estate's
+own recorded reasoning — `draft_quality_review`'s docblock picks the fast non-reasoning model
+because *"this call cannot be hidden — the redraw decision waits on it"*, and a critique
+dispatched as an agent tool is likewise on the user's critical path. `gpt-5.2` (the estate's
+original choice for critique) belongs there only if the challenger moves OFF the path.
+⚠ A challenger adds a call to a turn already costing 10–24s per call on a ~54s floor —
+**make it the model's choice, not an auto-fire, and measure before and after.**
 
 ---
 
-# 8. ✅ RESOLVED BEFORE THE RESTART — the red required check is FIXED and pushed
+## 4. OPEN PRs — mine, with their risk class
 
-#1755's `Lint, TypeCheck, Unit Tests` failed at `ccc5f94293d0`. **Diagnosed and
-fixed in the same session.** Do not re-diagnose it.
+| PR | head | risk | what it needs |
+|---|---|---|---|
+| **#1764** explainDiff | `ccdbc4bba2b6` | **LOW** (same clauses as #1771) | CI green, then a self-verdict + `premerge-check.sh` |
+| **#1774** bake-off harness | `4b41107f6598` | **NOT LOW** — admin route + response shape | an independent exact-head verdict |
+| **UI #1907** inspector label | `848104fde313` | **NOT LOW** — view change | an independent exact-head verdict |
+| ~~#1755~~ | — | — | **CLOSED**, split into #1771 + #1774; Pass-2 `'low'` dropped |
 
-**Cause:** opening `critique_graph` to `'openai'` broke six existing tests that
-encoded the old exclusion. I changed a shared constant without sweeping its
-readers — none of which live in the directories I touched. My two new files
-PASSED (`✓ admin-testing-live-resolver-fallback.test.ts, 7 tests`).
+⛔ **#1774 and #1907 are NOT self-mergeable and I must not re-classify them to unblock myself.**
+The rubric is explicit that the judgement is written down **before** the merge; flipping it
+afterwards is the thing it guards against.
 
-**Fix, pushed:**
-- **#1755 → `6f1bd2da72521534e881e1f1f37f01800295ae58`** — six readers repointed.
-  ⭐ **Nothing deleted**: every "OpenAI must be rejected" assertion moved to
-  `explain_diff`, still closed on that branch. `expect()` counts did not fall
-  (111/109, 23/22, 27/27, 63/63, 53/53).
-- **#1764 → `ab90edecc489eb4da16c993d986d2b3b3a67c960`** — the map deep-equal
-  updated, **plus the discriminator that survives both tasks being open**:
-  once both land the map has no closed entry, so the asymmetry tests stop
-  discriminating. Replacement asserts `MODEL_DISABLED` still fires for
-  `test-disabled-model`, bound by identity, with a positive control.
+### The premerge gate — four refusals, all correct. Read this before merging anything.
 
-**Both have fresh exact-head REVIEW_REQUESTs and CI re-queued. Neither is
-self-merged. On restart: check those two heads, not the ones in §2.**
+1. **One merge per command.** The hook refuses two.
+2. **`never a verdict while running>0`** — ALL checks, advisory included.
+3. **The required context must be green in EVERY instance.** Duplicate workflow runs produce
+   two; my monitor's glob matched `in_progress,completed/success` as green. **Evaluate CI
+   predicates with `jq all(...)`, never a substring match.**
+4. ⭐ **A verdict must be `VERDICT: APPROVE`** — `_DECL` in `scripts/verdict_lib.py` requires
+   the literal `VERDICT` label. A bare `APPROVE` is refused deliberately, because it once
+   cleared CEE #1314 on an author's own comment. It must also sit in the **opening protocol
+   region** and carry substance (`approve-substance.py`).
 
-⚠ `Integration Tests (advisory)` and `Full Test Suite (advisory)` were also red
-at the old head. Check whether they are red on staging's own head before
-treating them as mine — several estate advisories are known-red.
+**The working sequence:** all checks terminal → publish `VERDICT: APPROVE` + `REVIEWED_HEAD:`
+(substitute the SHA from a variable, never transcribe) → `bash scripts/premerge-check.sh <repo>
+<pr>` → `gh pr merge <n> --repo <repo> --squash`. **The gate lives at the estate root:
+`/Users/paulslee/Documents/GitHub/scripts/premerge-check.sh`**, not in the CEE repo.
 
+⚠ `gh pr comment` from the estate root **silently posts nothing** — it is not a git repo.
+Always pass `--repo`.
+
+---
+
+## 5. THE BLOCKER, and the handoff that is already posted
+
+**3 of the 4 remaining goal elements reduce to one line** — logging `usage` at
+`agent-v1-turn.ts:542`. That file had **7 open PRs** against it at 21:30 (two updated within
+three minutes), so it is genuinely leased to the `openai-experiment-poc-integration` lane.
+Declared in `output/panel-lane/BLOCKED-NOW.md`.
+
+**Four ready-to-apply diffs are posted on `Talchain/olumi-programme-docs#63`**, each with the
+measurement that justifies it:
+1. **log `usage`** — converts caching, context delivery and focused prompts from unmeasurable
+   to measured. 1 line.
+2. **thread `budget.reasoning_effort` into `callModel`** — `reasoning` appears nowhere in that
+   file except `callStructured:516-517`, so **92% of the PoC's calls have no effort control**.
+   ⚠ Put the value in `BANKED_BUDGETS` with its measurement, **not an env var** — and the
+   conversation entry says *"reasoning effort omitted (model default)"*, never measured.
+   Precedent: the `whole` role's high→medium ruling bought **20–26s** (#63 5798194848).
+3. **make the conversation model selectable** — it is a literal at `:475` and `:877`.
+4. **idempotence guard on `propose_starting_point`** — reproduction: the identical 203-char
+   brief gave 3 hops once and 4 the next time.
+
+---
+
+## 6. GOAL SCORECARD — 7 of 11, stated honestly
+
+| element | verdict |
+|---|---|
+| OpenAI means OpenAI | ✅ **MET (strong)** — 53/53 under concurrent Anthropic load |
+| Conventional untouched | ✅ **MET** — request-scoped policy, proven by the same logs |
+| deterministic tools | ✅ **MET** — 5 tools, all `ok`, `authorise_change` gates the write |
+| human-in-control | ✅ **MET** — leader refused until explicit approval; assumptions disclosed as pending |
+| scientific | ✅ **MET** — 41.1/32.8/26.1 delivered with "fragile near tie", no over-claim |
+| simple | ✅ **MET** — one model, one transport, one loop |
+| challenger step 1 | ✅ **MERGED + DEPLOYED** |
+| **fast** | ❌ 54.1s mean, and the lever is absent on 92% of calls |
+| **optimal mix** | ❌ conversation model is a literal (a measured mix DOES exist per role) |
+| **challenger (end to end)** | ❌ 0 attempts in 53 calls; needs steps 2–3 |
+| **caching / context / focused prompts** | ⛔ unmeasurable until the `usage` line lands |
