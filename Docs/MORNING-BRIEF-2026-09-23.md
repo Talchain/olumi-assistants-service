@@ -38,21 +38,38 @@ Split by authentication, n = 14 since the deploy. The pattern is total:
 
 ---
 
-## 2. Expect it to still be slow, and know why
+## 2. Expect it to still be slow — and it is FOUR PROVIDER CALLS, not compute
 
-**~51s construction + ~44s analysis ≈ 95s to a first analysis result.** Roughly half has no provider call at all.
+**Measured overnight, n=1,200, instrument `cee.unified_pipeline.stage_timings` which was already
+deployed on staging.** Window 2026-09-18 → 2026-09-23.
 
-The construction half is **61% reasoning tokens**, not output. The banked budget evidence for the `whole` role says it plainly:
+A slow turn decomposes, p50:
 
-> `in 838 / out 3404 incl. 2070 reasoning, 54.4 s`
+```
+total 53.6s = parse              23.2s   <- ONE provider call (parse_llm_ms 21.2s = 91% of it)
+            + validation_pipeline 28.8s
+                  \__ coaching_pass 20.9s   <- ONE OpenAI chat completion, NESTED inside validation
+            + ~1.9s   EVERYTHING non-LLM, combined
+```
 
-which matches the measured construction p50 of **54.4s** across n=1,579 turns.
+The nesting is derived, not assumed: `total - (parse + validation)` has p50 **1,882ms**, whereas
+`total - (parse + coaching + validation)` overshoots by p50 **-18,626ms**, and
+`validation >= coaching` holds in **894/992 = 90.1%**.
 
-**Graph size barely matters:** `r(nodes, duration) = 0.293`, so size explains **under 9%** of the variance. On your own brief a **26-node** graph took **48.9s** while a **15-node** one took **77.9s**.
+**The journey is roughly four sequential provider calls of ~21-23s each. Everything that is not a
+provider call totals about two seconds per turn.**
 
-⛔ **I withdrew my own earlier advice here.** I told Release Control compaction was the dominant latency lever. It is not. Compaction touches the 39% that is output; it cannot touch the 61% that is reasoning.
+⛔ **There is no significant compute anywhere.** `threshold_sweep_ms` p50 = **1 millisecond**
+(max 69ms). `normalise_ms` 2ms · `package_ms` 13ms · `boundary_ms` 13ms · `repair_ms` 109ms.
 
----
+The construction half is still **61% reasoning tokens** — banked evidence for the `whole` role reads
+`in 838 / out 3404 incl. 2070 reasoning, 54.4 s`. **Graph size barely matters**
+(`r(nodes,duration) = 0.293`, under 9% of variance); on your own brief a **26-node** graph took
+**48.9s** while a **15-node** one took **77.9s**.
+
+⛔ **Two of my own claims died here.** I told Release Control compaction was the dominant lever
+(it is not — it touches output, not the 61% that is reasoning), and I then said the analysis half
+was a fixed Monte Carlo sample budget (see §4).
 
 ## 3. Merge order I would recommend
 
@@ -66,45 +83,45 @@ which matches the measured construction p50 of **54.4s** across n=1,579 turns.
 
 ---
 
-## 4. A gap nobody owns — and it is the single biggest one
+## 4. ⛔ RETIRED — "a 42s gap nobody owns" was my claim, and it was wrong twice over
 
-`run_analysis` is **~42s of the ~95s journey, with ZERO provider calls**, and no lane is assigned to it.
+I reported `run_analysis` as **~42s with ZERO provider calls** and called it the single biggest
+unowned gap. I repeated it in this brief, in `#63` and in two PR comments. **Both halves were wrong.**
 
-Measured, n = **1,667** over 7 days:
+**Error 1 — the mechanism.** I said the time was a *fixed 1000-sample Monte Carlo downstream in
+PLoT/ISL*. I inferred that from a config constant and never measured it. The analytical sweep
+(`threshold_sweep_ms`) has a **p50 of 1 millisecond**.
 
-| | secs |
-|---|---|
-| avg | 42.1 |
-| **p10** | **33.0** |
-| p50 | 44.0 |
-| p90 | 52.6 |
-| max | 84 |
-| stddev | 13.0 |
+**Error 2 — "zero provider calls".** This came from `llm_calls_used = 0` in 1,606 of 1,670 rows, and
+I re-affirmed it as "non-vacuous" on that basis. **`llm_calls_used` counts the v5 ROUTING call only.**
+Joining the timing events back to the logs by `request_id`:
 
-**Even the fastest 10% take 33 seconds.** And graph size does not drive it:
+| turn class | total_ms | `coaching_pass_ms` | `llm_usage` | `calling OpenAI` |
+|---|---|---|---|---|
+| `run_analysis` (n=9) | 44,786–61,399 | 17,265–23,608 | **2** | **1** |
+| draft, coaching present (n=1) | 80,833 | 21,218 | **1** | **1** |
+| draft, coaching absent (n=4) | **24,021–34,109** | — | **0** | **0** |
 
-```
-r(nodes, duration) = -0.225      r(edges, duration) = -0.029
-```
+Coaching present ⇔ provider calls present, **10/10**; absent ⇔ zero, **4/4**. One of those
+`run_analysis` turns logs the literal line `calling OpenAI for chat completion`.
 
-The correlation is **negative** — bigger graphs analyse marginally *faster*. By band: 10–11 nodes 40.5s (n=22), 12–15 nodes 41.7s (n=1,061), 16–19 nodes 47.2s (n=452).
+⚠ **Practical consequence for anyone reading dashboards: `llm_calls_used` is not a provider-call
+count.** It under-reports, and I built a whole argument on it.
 
-**What I established:** the time is **not** CEE waiting. I read `plot-client.ts` and `run-analysis.ts` at the served SHA and found **no poll loop, no sleep, no fixed delay** — CEE's `/v2/run` cap is 75s and sits above PLoT's own budget. So the ~42s is genuinely spent downstream in PLoT/ISL.
+**The gap is real but it is an OWNED provider-latency gap, not an unowned compute gap:**
 
-**MECHANISM NOW IDENTIFIED** (I read `plot-lite-service` read-only; I did not touch it):
+| target | p50 | owner |
+|---|---|---|
+| `coaching_pass_ms`, nested in validation | **20.9s** (39% of turn) | **Conventional AI Coaching** |
+| `parse_llm_ms` | **21.2s** (40% of turn) | **Model Generation / OpenAI path** |
+| 25,000ms validation abandonment cap — fires 29/1200 (2.4%) and **those turns still complete** | — | shared / Release Control |
+| `repair_fired` **0 of 1,200** (`REPAIR_SKIPPED` in the logs; `repair_ms` p50 109ms, so it runs and declines) | — | Model Generation |
 
-- PLoT defaults to **1000 Monte Carlo samples** — `engine-v3.ts:436` *"Number of Monte Carlo samples (default: 1000)"*, `assembly/decision-brief.ts:47` `n_samples_default: 1000`. Bounded 100–10000 by `input-validation.ts`.
-- **CEE only sends `n_samples` when the snapshot already carries one** — `run-analysis.ts:901` `if (snapshot.n_samples !== undefined)`. So for a normal first analysis CEE sends nothing and **the 1000 default applies by omission.** (Contrast control: `goal_constraints` appears 8× in the same payload, so the probe is not blind.)
-- A fixed sample budget is exactly what produces a high floor that does not scale with node count — which is what the data shows.
-- PLoT already has a **`samples_reduced`** path that CEE surfaces to the user (`run-analysis.ts:1607, 1849`), so reducing samples is **supported, disclosed behaviour** rather than a hack.
-
-**⚠ THE TRADE, WHICH IS REAL — samples buy statistical confidence.** `trust/confidence-calibrated.ts:46` gates on `k_samples >= 1000`. Going below that plausibly downgrades what the product may honestly claim about its own confidence. This is the same shape as the `reasoning_effort` trade: not a free knob, a decision about what the product is allowed to say.
-
-**Still unverified:** that wall time scales roughly linearly with sample count. I did not measure it. If it does, 1000 → 300 would take ~42s toward ~15s — larger than compaction and `reasoning_effort` combined. **Owner: whoever owns PLoT / Scientific Compute, not me.**
-
-**Why this matters for sequencing:** compaction (#1710) targets 39% of the construction half; `reasoning_effort` targets 61% of it. **Neither touches this 42s at all.** If the journey needs to feel fast, this is the largest single lever and it currently has no owner.
-
----
+⭐ **The cheapest evidence that speed is available:** a hard 25s abandonment cap on the validation
+pipeline **already exists and already fires on 2.4% of turns, and those turns still return a usable
+result.** Separately, 179 turns carry no coaching pass at all and complete in **p50 24.0s vs 55.1s**.
+⚠ That second figure is correlational — I have not shown those 179 are the same work minus coaching.
+The abandonment cap is the sound evidence; the 179 are a strong prior.
 
 ## 5. What landed overnight
 
@@ -139,30 +156,34 @@ The premerge guard also blocked a merge I was confident in, for two reasons that
 
 ---
 
-## 8. The ~40s will measure itself once #1701 lands — no env change needed
+## 8. What is ALREADY instrumented on staging — no env change, no merge, nothing to build
 
-My timing instrumentation (`agent_lane.turn_timings`: `provider_ms` / `tool_ms` / `overhead_ms` / `tool_provider_ms` / call counts) is gated on the estate's own timing flags:
+I spent much of the night about to build a latency instrument. **It already exists**, and my
+earlier claim in this slot ("the ~40s will measure itself once #1701 lands") was wrong in a way
+worth recording, because it would have had you waiting on a merge for data you already have.
 
-```ts
-if (!config.cee.timingDebugEnabled && !config.features.diagnosticTraceEnabled) return;
-```
+Two separate events, two separate gates — and I conflated them for hours:
 
-Measured in the served Render env just now (125 vars, fully paginated):
+| event | gate | env value | what it covers |
+|---|---|---|---|
+| `cee.unified_pipeline.stage_timings` | diagnostic trace | **`CEE_DIAGNOSTIC_TRACE_ENABLED=true`** | **the slow turns** — 12 stage fields, n=1,200 retained |
+| `v5.turn_executor.stage_timings` | diagnostic trace | same | turns **under ~10s** (total_ms 881–10,134) |
+| handler-level `plot_request_ms` / `plot_status` | **`V5_TIMING_DEBUG`** | **`false`** on staging and prod, **`true` on cee-demo** | never recorded on staging |
 
-```
-V5_TIMING_DEBUG               = false
-CEE_DIAGNOSTIC_TRACE_ENABLED  = true     <- the gate is a disjunction
-```
+So the PLoT split is dark, but **it does not matter** — the stage fields already account for the
+whole turn to within ~1.9s.
 
-**So the second disjunct is already true on staging.** The moment #1701 merges, real provider-versus-overhead numbers start flowing into the logs with no env change and no default-ON decision.
+⛔ **A fix I designed and then killed, because checking stopped it.** I was about to widen the
+handler gate to `timingDebugEnabled || diagnosticTraceEnabled`, reasoning that the second disjunct
+is already true on staging so it needed no env change. **`CEE_DIAGNOSTIC_TRACE_ENABLED` is also
+`true` on cee-production** (118 vars, fully paginated) — so that one-line change would have
+switched timing instrumentation on **in production**, against the explicit design at
+`run-analysis.ts:970` ("default-OFF production runs make zero `Date.now()` calls"). Not done.
 
-⚠ **Correcting myself:** in #1701's review request I asked the reviewer whether this should be default-ON, *"because otherwise the ~40s stays unmeasured until someone sets `V5_TIMING_DEBUG=true`"*. That question rested on a false premise — I had not checked the served env before asking it. Withdrawn.
-
-**Contrast control, so the absence claim is sound:** `agent_lane.route_mounted` appears once on staging while `agent_lane.turn_timings` is absent — which is exactly right, because #1701 is not merged yet. The probe sees the emission when it exists.
-
-**What this buys:** the ~40s unexplained portion of construction becomes a measured split rather than an inference, which is what would settle whether it is provider time or our own pipeline — the one question my whole latency argument tonight rests on.
-
----
+⚠ **I mis-read this instrument twice before getting it right, and a control caught it both times,
+not re-reading.** First I searched logs for `text=stage_timings` and treated the hits as one
+population — they are two different events. Then I reported the slow event as carrying "only
+`total_ms`" — it carries twelve stage fields; I had grepped for the *other* event's field names.
 
 ## 9. ⚠ A turn-fence change landed on the registration path at 03:21 — what to do if your test shows no receipt
 
@@ -208,24 +229,39 @@ so registrations were bypassing the fence that stops a superseded turn clobberin
 
 ---
 
-## 11. ⚠ After #1717 lands, a stacked PR will have NO required check — and no signal that it is missing
+## 11. #1717 was RE-CUT overnight — an existing guard caught it, and the result is strictly better
 
-#1717 (`25bf0e91…`) has an independent exact-head APPROVE and merges as soon as its required check goes green. It narrows `push` to `[main, staging]` and keeps `pull_request` on `[main, staging]`.
+The version described in the earlier draft of this section (`25bf0e91…`, narrowing `push` to
+`[main, staging]` on all five workflows) **failed its required check** and was never merged.
 
-**The reviewer surfaced a consequence I had not stated**, and it is the sharper half of the trade:
+```
+× only the paid CI job is variable-gated; required code checks retain their gate
+  FAIL tests/unit/ci/staging-journey-smoke.test.ts
+  AssertionError: expected [ 'main', 'staging' ] to deeply equal [ 'main', 'staging', 'feat/**' ]
+```
 
-> stacked PRs whose base is not `main`/`staging` get **none** of these five workflows, because `pull_request` filters on the **base** branch.
+`tests/unit/ci/staging-journey-smoke.test.ts` already pinned `ci.yml`'s triggers exactly. ⭐ **The
+guard caught what two agents missed:** the PR carried an independent exact-head APPROVE, and the
+reviewer's check #2 had verified `push: [main, staging]` in all five files — correctly, against my
+*stated intent*. Neither of us checked that intent against the test that encoded the opposite.
 
-So after this lands:
+**Current head `c50e7ba31f7fd2825ee07be8136efeadf0184682`**, re-requested for review:
+`ci.yml`'s `on:` block is restored to staging's form verbatim, and only the four workflows with
+**zero** guard coverage stay narrowed (`contract-schemas`, which fired on every push to every
+branch; `test-skip-guard` and `telemetry-validation`, which were `push: ['*']`; `graph-evaluator`).
 
-| what you do | checks you get |
-|---|---|
-| PR into `staging`/`main` | full set, including the required `Lint, TypeCheck, Unit Tests` |
-| push to `feat/**` with no PR | none (accepted trade) |
-| **PR stacked onto another feature branch** | **none of these five — silently** |
+Three things this fixes versus the earlier cut:
 
-**Why this is worse than the `feat/**` loss:** it is invisible. A stacked PR shows **no checks at all** rather than a red one, and on this estate silence has repeatedly been misread as green. `ci.yml` carries the **sole required context**, so someone stacking onto a feature branch gets nothing to satisfy and no indication anything is absent.
+| | earlier cut | now |
+|---|---|---|
+| `feat/**` push, no PR | lost its required check (accepted trade) | **keeps it — trade gone** |
+| PR stacked on a feature branch | lost **the required check**, silently | loses only four advisory/contract workflows |
+| queue relief | yes | **retained** (the worst offender fired on every branch) |
 
-It matches the estate's pre-existing rule that stacked PRs get zero checks, which is why the reviewer approved and why landing it tonight is still right — the queue relief is real and measured. But it extends that hole to the required check.
+**The practical rule still holds and is worth keeping: base PRs on `staging`, not on another
+feature branch.** A stacked PR shows *no checks at all* rather than a red one, and on this estate
+silence has repeatedly been misread as green.
 
-**Practical rule after this lands: base PRs on `staging`, not on another feature branch.** If a stack is unavoidable, re-target the tip PR at `staging` before asking for a verdict, or it cannot be merge-cleared and nothing will tell you why.
+⚠ One thing to check me on: I restored `ci.yml` with `git checkout origin/staging --`, so the
+**whole file** is staging's, not just its `on:` block. #1713's concurrency stanza is asserted intact
+by a YAML check in the commit, but that is the failure mode if it ever looks wrong.
