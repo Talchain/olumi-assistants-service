@@ -189,3 +189,45 @@ no receipt on version 1 · `c5633816` #1746 false FRESH · `af8378f0` #1743 grap
 deletion · `a4a40768` #1751 unbounded body.
 
 **#1743 needed three. #1751 needed two.** All six found by attacking the work.
+
+---
+
+## ⛔ THIRD CORRECTION: the bank had FOUR blind spots, not one
+
+Paul asked a third time whether the restart was genuinely safe. Widening the check
+found two more loss classes. **The first answer was wrong three times, each for a
+different structural reason** — which is the lesson, not the fixes.
+
+| # | blind spot | what was found | why the earlier check could not see it |
+|---|---|---|---|
+| 1 | branches | 23 unbanked branches across 12 tmp trees | `git branch -r --contains` reads **stale tracking refs**; a tree that has not fetched reports its work safe |
+| 2 | **stashes** | **3 stashes** in `cee-1659-egress`, `cee-obsstate`, `gfix` | a stash is **not a branch** — a `refs/heads` scan is structurally blind to it |
+| 3 | worktrees | none beyond the main clone | — |
+| 4 | **untracked** | `dgai-aria/e2e/canvas-witness/renamePersistence.spec.ts` (146 lines), plus `advprobe/` and `scripts/pre-merge-results/` | untracked files are invisible to git AND skipped by `git stash create` |
+
+### Stash rescue refs — OTHER LANES' uncommitted work, recover these
+
+| tree | rescue ref | was |
+|---|---|---|
+| `cee-1659-egress-1790005344` | `rescue/tmp-cee-1659-egress-1790005344-STASH0-b8128e66` | WIP on `p3/capped-factor` |
+| `cee-obsstate-1790005286` | `rescue/tmp-cee-obsstate-1790005286-STASH0-ca16bedb` | WIP on `feat/observed-state-must-not-destroy-the-model` |
+| `gfix` | `rescue/tmp-gfix-STASH0-e26c7e69` | WIP on `feat/a-capped-factor-is-not-a-choice` |
+
+Each verified present on its remote by `ls-remote`. Recover with
+`git stash apply <ref>` or `git checkout <ref> -- <path>`.
+
+Untracked files are at
+`~/.claude/projects/-Users-paulslee-Documents-GitHub/restart-bank-20260923/`.
+
+### ⭐⭐ THE REUSABLE RULE
+
+**A bank check needs FOUR probes, not one: branches, stashes, worktrees, untracked —
+and branches must be confirmed with `git ls-remote`, never `git branch -r --contains`.**
+
+And: **a repeated safety question means their confidence is lower than yours.
+Widen the probe; do not restate the answer.** Three restatements would have taken
+3 stashes and a 146-line spec into a wipe.
+
+⚠ 5,622 unreachable commits exist in the working clone. Historical git garbage from
+the repo's life, not this session, and `~/Documents/GitHub` survives a restart — not
+a loss risk, recorded so nobody re-investigates it.
