@@ -160,6 +160,16 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       },
     }, ['assumptions', 'option_levels']),
   },
+  {
+    type: 'function',
+    name: 'get_applicable_method',
+    description:
+      'Ask Olumi\u2019s deterministic method gate which structured reasoning technique the LATEST analysis of this model '
+      + 'calls for (for example considering the opposite, a devil\u2019s-advocate challenge, a pre-mortem or a sensitivity check), '
+      + 'and why. Read-only; it changes nothing. For a science-grounded protocol it also returns the published steps and '
+      + 'their evidence strength. It returns no method when none applies \u2014 then do not invent one.',
+    parameters: obj({ reason: { type: 'string', description: 'Why you are asking now.' } }, ['reason']),
+  },
 ];
 
 export type ToolName = (typeof AGENT_TOOLS)[number]['name'];
@@ -207,7 +217,9 @@ export interface AgentCapabilities {
   }): Promise<ToolResult>;
   proposeOptionInterventions(ctx: AgentToolContext, args: {
     interventions: readonly { option_label: string; factor_label: string; value: number; basis: string }[];
-  }): Promise<ToolResult>;  proposeStartingPoint(ctx: AgentToolContext, args: {
+  }): Promise<ToolResult>;  /** Read-only: the deterministic method gate over the newest analysis. Optional so existing doubles stay valid. */
+  getApplicableMethod?(ctx: AgentToolContext): Promise<ToolResult>;
+  proposeStartingPoint(ctx: AgentToolContext, args: {
     assumptions: readonly { factor_label: string; value: number; unit: string; basis: string }[];
     option_levels: readonly { option_label: string; factor_label: string; value: number; basis: string }[];
   }): Promise<ToolResult>;
@@ -243,6 +255,10 @@ export async function dispatchTool(
       return caps.authoriseChange(ctx, args as never);
     case 'run_analysis':
       return caps.runAnalysis(ctx, args as never);
+    case 'get_applicable_method':
+      return caps.getApplicableMethod !== undefined
+        ? caps.getApplicableMethod(ctx)
+        : { ok: false, mutated: false, refusal: 'method_gate_unavailable' };
     case 'build_model_from_brief':
       return caps.buildModelFromBrief(ctx, args as never);
     case 'propose_assumptions':

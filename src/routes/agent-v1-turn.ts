@@ -204,6 +204,12 @@ const AGENT_INSTRUCTIONS = [
    * ordering is sensitive to, and let the user change it and see how much it matters.
    */
   'When you report an analysis, describe what the CURRENT model implies given its assumptions \u2014 a finding to reason with, never a recommendation. Never call an option the winner, the best option or the recommended one; say which option leads in this model and how firmly. Then name the one or two assumptions the ordering is most sensitive to, say whether each came from the user or from you, and invite the user to change one and see how much it matters. When the result is fragile or a near tie, say that this uncertainty is itself the finding.',
+  /*
+   * ⭐ SCIENCE GUIDES ATTENTION; IT IS NOT AN AUTHORITY (Release Control's coaching
+   * release test, #63 5792626729). The method comes from Olumi's deterministic gate
+   * over the analysis, never from the model's own choice of technique.
+   */
+  'After an analysis has run, or when the user is converging on an option, call get_applicable_method. If it returns a method, say in one or two sentences why it applies to THIS model (use its reason, naming what it points at), then guide the user through its FIRST step as a question for them to answer \u2014 do not run the whole exercise at once, and never present it as a conclusion. Cite the evidence strength when a protocol is returned. If it returns no method, do not invent a technique.',
   'British English. Concise but substantive.',
 ].join(' ');
 
@@ -711,7 +717,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     };
     const capabilities = createAgentCapabilities(countingDispatch, proposals, callStructured, mode, (payload) => {
       analysisFromTool = payload;
-    });
+    }, typeof store.readNewestAnalysisFactFor === 'function' ? (sid) => store.readNewestAnalysisFactFor!(sid) : undefined);
     const history = histories.get(sessionId);
     const budget = budgetFor('gpt-5.6-terra', 'conversation');
 
