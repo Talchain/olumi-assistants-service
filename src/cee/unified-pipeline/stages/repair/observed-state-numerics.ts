@@ -63,6 +63,21 @@
  * constraint-shaped object is identified exactly as `NodeObservedState` does
  * it — by the presence of a `metadata` key — and skipped untouched.
  *
+ * ⭐ THE USER'S MAGNITUDE IS NOT LOST FROM THE GRAPH, MEASURED AT THE PRODUCER.
+ * Every site in `projector.ts` that writes a magnitude into `observed_state`
+ * writes the SAME magnitude into `node.data` in the same block — `:2898`
+ * (`data = {value, unit?}`), `:3372` (`data = {value, raw_value?}`) and `:4334`
+ * (`data = {…, value, raw_value}`), whose own comment says why: *"Both carriers
+ * are written because `schema-v3.ts` rebuilds factor observed_state FROM
+ * `data`."* This repair never touches `data`, so dropping an unparseable
+ * `observed_state` costs the copy that cannot parse, not the figure.
+ *
+ * ⚠ KNOWN LIMIT, PINNED BY ITS OWN TEST. `FactorData` also requires
+ * `value: z.number()`, so a node whose `data.value` is non-finite STILL fails
+ * the structural parse — this repair covers `observed_state` only. The honest
+ * scope is "an unparseable `observed_state` no longer causes a 500", not "no
+ * more invalid-numeric 500s".
+ *
  * ⚠ THE RECOVERY CLAIM IS REAL BUT DOES NOT COVER THE SHAPE THIS ACTUALLY
  * MEETS, and the earlier wording here over-read it. `schema-v3.ts:456` does
  * rebuild `observed_state` from `data.value` — read directly. Its two reads of

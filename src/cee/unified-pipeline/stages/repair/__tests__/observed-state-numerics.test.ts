@@ -313,3 +313,100 @@ describe("structural parse failure telemetry names the node", () => {
     expect(JSON.stringify(nodes)).not.toContain("50000");
   });
 });
+
+/**
+ * ⛔ DOES THE REPAIR LOSE THE USER'S MONEY? — the standing blocking finding.
+ *
+ * The concern, stated fairly: the `value`-unsound branch deletes the WHOLE
+ * `observed_state`, so a node carrying `{ raw_value: 30000, unit: "£" }` loses
+ * the user's £30,000 rather than merely an unparseable field.
+ *
+ * ── WHY IT DOES NOT, MEASURED AT THE PRODUCER ──────────────────────────────
+ * Every site in `projector.ts` that writes a magnitude into `observed_state`
+ * writes the SAME magnitude into `node.data` in the same block:
+ *   :2898  node.data = { value, unit? }          → node.observed_state = { value, raw_value }
+ *   :3372  node.data = { value, raw_value? }     → node.observed_state = { value, raw_value? }
+ *   :4334  factor.data = { …, value, raw_value } → factor.observed_state = { …, value, raw_value }
+ * `:4334`'s own comment says why: *"Both carriers are written because
+ * `schema-v3.ts` rebuilds factor observed_state FROM `data`."*
+ *
+ * `data` is NOT touched by this repair, and `schema-v3.ts:456` rebuilds
+ * `observed_state` from `data.value` downstream. So the figure survives the
+ * drop in the canonical graph — which is the claim, and these assert it
+ * rather than arguing it.
+ *
+ * ⚠ The prior £30,000 test asserted only "the parse succeeds and the deletion
+ * is logged". Both are true of the defect as well, so it could not
+ * discriminate. That was a fair criticism and this is the replacement.
+ */
+describe("the user's magnitude is not lost from the graph", () => {
+  it('a finite raw_value in `data` SURVIVES the observed_state drop', () => {
+    const ctx = makeCtx([
+      {
+        id: 'fac_cost', kind: 'factor', label: 'Operating cost',
+        // The paired carrier the producer always writes.
+        data: { value: 0.6, raw_value: 30000, unit: '£' },
+        // …and an observed_state the schema cannot accept.
+        observed_state: { raw_value: 30000, unit: '£' },
+      },
+    ]);
+    runBoth(ctx);
+
+    expect(ctx.earlyReturn).toBeUndefined();
+    const node = (ctx.graph as any).nodes.find((n: any) => n.id === 'fac_cost');
+    expect(node.observed_state).toBeUndefined();
+    // ⭐ THE FIGURE IS STILL IN THE GRAPH.
+    expect(node.data).toEqual({ value: 0.6, raw_value: 30000, unit: '£' });
+    expect(node.data.raw_value).toBe(30000);
+  });
+
+  it('⚠ KNOWN LIMIT, PINNED: a non-finite `data.value` is NOT repaired and still 400s', () => {
+    // ⛔ THIS TEST FOUND A LIMIT OF THE FIX AND RECORDS IT RATHER THAN HIDING
+    // IT. `:4334` writes `value: baseline / frame` into BOTH carriers, so a
+    // non-finite quotient lands in `data` as well. This repair covers
+    // `observed_state` only; `FactorData` also requires `value: z.number()`,
+    // which rejects NaN, so such a graph STILL fails the structural parse.
+    //
+    // The scope claim is therefore narrower than "no more invalid-numeric
+    // 500s": it is "an unparseable `observed_state` no longer causes one".
+    // A non-finite `data.value` is a DIFFERENT carrier and a separate fix.
+    const ctx = makeCtx([
+      {
+        id: 'fac_cost', kind: 'factor', label: 'Operating cost',
+        data: { value: Number.NaN, raw_value: 50000 },
+        observed_state: { value: Number.NaN, raw_value: 50000 },
+      },
+    ]);
+    runBoth(ctx);
+
+    // The observed_state IS repaired…
+    const node = (ctx.graph as any).nodes.find((n: any) => n.id === 'fac_cost');
+    expect(node.observed_state).toBeUndefined();
+    // …and the magnitude survives in `data`…
+    expect(node.data.raw_value).toBe(50000);
+    // …but the turn still refuses, because `data.value` is NaN.
+    expect(ctx.earlyReturn?.statusCode).toBe(400);
+  });
+
+  it('and the audit records the magnitude and unit it removed', () => {
+    const ctx = makeCtx([factor({ raw_value: 30000, unit: '£' })]);
+    runBoth(ctx);
+    const ev = ((ctx as any).fieldDeletions ?? []).find((e: any) => e.node_id === 'fac_cost');
+    const roundTripped = JSON.parse(JSON.stringify(ev));
+    expect(roundTripped.previous_raw_value).toBe(30000);
+    expect(roundTripped.previous_unit).toBe('£');
+  });
+
+  it('CONTROL: a repair that also cleared `data` would be caught here', () => {
+    // Guards the assertion above against a future change that "tidies up" the
+    // node: if `data` were cleared alongside, the figure WOULD be lost.
+    const ctx = makeCtx([
+      { id: 'fac_cost', kind: 'factor', label: 'C', data: { value: 0.6, raw_value: 30000 },
+        observed_state: { raw_value: 30000 } },
+    ]);
+    runBoth(ctx);
+    const node = (ctx.graph as any).nodes.find((n: any) => n.id === 'fac_cost');
+    expect(node.data).toBeDefined();
+    expect(node.data.raw_value).toBe(30000);
+  });
+});
