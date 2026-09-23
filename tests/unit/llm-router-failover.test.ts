@@ -131,10 +131,14 @@ describe("LLM Router - Failover Configuration", () => {
     expect(adapter.name).toBe("fixtures-failover");
   });
 
-  it("filters unsupported critique providers before constructing the failover chain", () => {
+  // Repointed from critique_graph to explain_diff: critique_graph now
+  // implements OpenAI, so OpenAI is no longer filtered out of its chain and the
+  // test would assert a filter that correctly no longer happens. explain_diff's
+  // adapter still throws, so it is the live example of a filtered provider.
+  it("filters unsupported task providers before constructing the failover chain", () => {
     vi.stubEnv("LLM_FAILOVER_PROVIDERS", "openai,anthropic,fixtures");
 
-    const { adapter, resolution } = getAdapterWithResolution("critique_graph");
+    const { adapter, resolution } = getAdapterWithResolution("explain_diff");
 
     expect(adapter.name).toBe("anthropic-failover");
     expect(resolution).toMatchObject({
@@ -147,20 +151,23 @@ describe("LLM Router - Failover Configuration", () => {
     vi.stubEnv("LLM_FAILOVER_PROVIDERS", "openai,anthropic");
     vi.stubEnv("LLM_PROVIDER", "openai");
 
-    // Only ONE listed provider (anthropic) can serve critique_graph, so the
-    // chain must not activate. This used to be asserted indirectly, via the
-    // MODEL_PROVIDER_MISMATCH that the then-OpenAI checked-in default produced
-    // once resolution fell through. That default is now Anthropic, so the
-    // fall-through succeeds — and the non-activation is asserted DIRECTLY:
-    // a plain "anthropic" adapter from the task default, never a
-    // "*-failover" adapter and never resolution_source "llm_model_fallback".
-    const { adapter, resolution } = getAdapterWithResolution("critique_graph");
+    // Only ONE listed provider (anthropic) can serve explain_diff, so the chain
+    // must not activate: a plain "anthropic" adapter from the task default,
+    // never a "*-failover" adapter and never resolution_source
+    // "llm_model_fallback".
+    //
+    // ⚠ REPOINTED from critique_graph. That task now implements BOTH listed
+    // providers, so two capable members remain and the chain legitimately DOES
+    // activate for it — the old assertion was testing a filter that correctly
+    // stopped happening. explain_diff still has exactly one capable member
+    // among "openai,anthropic", which is the condition this test is about.
+    const { adapter, resolution } = getAdapterWithResolution("explain_diff");
 
     expect(adapter.name).toBe("anthropic");
     expect(adapter.name).not.toContain("failover");
     expect(resolution).toMatchObject({
       provider: "anthropic",
-      resolved_model: TASK_MODEL_DEFAULTS.critique_graph,
+      resolved_model: TASK_MODEL_DEFAULTS.explain_diff,
       resolution_source: "task_default",
     });
   });

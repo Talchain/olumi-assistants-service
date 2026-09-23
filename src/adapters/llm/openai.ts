@@ -20,6 +20,7 @@ import { normaliseDraftResponse, ensureControllableFactorBaselines, stripModelAu
 import { contentDigest } from "../../utils/redaction.js";
 import { captureCheckpoint, type PipelineCheckpoint } from "../../cee/pipeline-checkpoints.js";
 import { getMaxTokensFromConfig } from "./router.js";
+import { buildCritiqueUserContent } from "./critique-prompt.js";
 import { resolveDraftMaxTokens, isDraftTruncated, buildFailedCallLlmMeta } from "./draft-budget.js";
 import { wrapUntrusted } from "./untrusted-envelope.js";
 import {
@@ -177,6 +178,50 @@ export function requiresMaxCompletionTokens(model: string): boolean {
  * @param options - Optional parameters including maxTokens and reasoningEffort
  * @returns Object with appropriate parameters for the model type
  */
+/**
+ * ⭐ THE ONE PLACE OPENAI USAGE BECOMES `UsageMetrics` — INCLUDING CACHE READS.
+ *
+ * `UsageMetrics.cache_read_input_tokens` has existed all along and is read by 29
+ * files, which is how the estate measured Anthropic's routing cache at an 80.0%
+ * hit rate (15,338 tokens read per hit, constant). **The OpenAI adapter simply
+ * never populated it**, so every OpenAI cache read was invisible — `cached_tokens`
+ * and `prompt_tokens_details` had ZERO occurrences anywhere in `src`, against a
+ * contrast control of 17 files referencing `prompt_tokens` and 29 referencing
+ * `cache_read_input_tokens`.
+ *
+ * ⚠ SO THIS IS NOT A NEW CACHE SYSTEM, AND DELIBERATELY SO. The governing brief
+ * is explicit: "Caching is already demonstrably working on warm OpenAI requests.
+ * Therefore: measure real production cache reads/writes; do not build another
+ * cache system unless evidence demands it." Mapping the provider's own
+ * `usage.prompt_tokens_details.cached_tokens` onto the field the estate already
+ * aggregates makes OpenAI cache usage measurable through the EXISTING pipeline —
+ * no new telemetry event, no new dashboard, no padding of prompts to chase hits.
+ *
+ * ⚠ AND `cache_creation_input_tokens` IS LEFT UNSET ON PURPOSE. That field means
+ * something specific on Anthropic: tokens billed to WRITE a cache entry, which
+ * that API reports explicitly. OpenAI's automatic prompt caching reports no
+ * write-side figure, so populating it would be inventing a number — and a
+ * fabricated zero would read to an aggregator as "no cache writes occurred"
+ * rather than "this provider does not report them". Absent is the honest value.
+ *
+ * Six call sites built this object by hand; one helper means the mapping cannot
+ * be added to some and forgotten on others.
+ */
+function openAiUsage(usage: {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  prompt_tokens_details?: { cached_tokens?: number } | null;
+} | null | undefined): import("./types.js").UsageMetrics {
+  const cached = usage?.prompt_tokens_details?.cached_tokens;
+  return {
+    input_tokens: usage?.prompt_tokens ?? 0,
+    output_tokens: usage?.completion_tokens ?? 0,
+    // Omitted rather than zeroed when the provider does not report it, so a
+    // missing figure is distinguishable from a measured zero.
+    ...(typeof cached === 'number' ? { cache_read_input_tokens: cached } : {}),
+  };
+}
+
 /** @internal Exported for testing only */
 export function buildModelParams(
   model: string,
@@ -857,7 +902,15 @@ export class OpenAIAdapter implements LLMAdapter {
           temperature,
           max_tokens: maxTokens,
           seed,
-          reasoning_effort: isReasoningModel(this.model) ? "medium" : undefined,
+          // ⭐ REPORTED FROM WHAT WAS ACTUALLY SENT, NEVER RE-DERIVED.
+          // This hard-coded "medium" was only ACCIDENTALLY correct: it was
+          // right for as long as no call site could choose an effort. This PR
+          // makes that choice possible, so a re-derived value would report
+          // "medium" while the request carried "low" — and every bake-off row
+          // keyed on reasoning effort would then be unattributable to the
+          // effort it actually used. `modelParams` is the request that went to
+          // the wire, so it is the only honest source for this field.
+          reasoning_effort: modelParams.reasoning_effort,
           token_usage: tokenUsage,
           finish_reason: typeof finishReason === 'string' ? finishReason : undefined,
           provider_latency_ms: _elapsedMs,
@@ -874,10 +927,7 @@ export class OpenAIAdapter implements LLMAdapter {
             raw_llm_json: rawOutput.output,
           } : {}),
         },
-        usage: {
-          input_tokens: response.usage?.prompt_tokens || 0,
-          output_tokens: response.usage?.completion_tokens || 0,
-        },
+        usage: openAiUsage(response.usage),
       };
     } catch (error) {
       clearTimeout(timeoutId);
@@ -1023,10 +1073,7 @@ export class OpenAIAdapter implements LLMAdapter {
 
       return {
         options: parseResult.data.options,
-        usage: {
-          input_tokens: response.usage?.prompt_tokens || 0,
-          output_tokens: response.usage?.completion_tokens || 0,
-        },
+        usage: openAiUsage(response.usage),
       };
     } catch (error) {
       clearTimeout(timeoutId);
@@ -1284,10 +1331,99 @@ export class OpenAIAdapter implements LLMAdapter {
     }
   }
 
-  async critiqueGraph(_args: import("./types.js").CritiqueGraphArgs, _opts: CallOpts): Promise<import("./types.js").CritiqueGraphResult> {
-    // OpenAI provider does not yet support critiqueGraph
-    // Switch to LLM_PROVIDER=anthropic to use this feature
-    throw new Error("openai_critique_not_supported: Critique endpoint requires LLM_PROVIDER=anthropic (OpenAI implementation pending)");
+  /**
+   * ⭐ THE CHALLENGER, ON OPENAI. Previously this threw
+   * `openai_critique_not_supported` and told the caller to "switch to
+   * LLM_PROVIDER=anthropic" — which for a dedicated OpenAI PoC is not a
+   * fallback, it is a wall: the one read-only reviewing capability in the
+   * product could not run on OpenAI at all.
+   *
+   * ⛔ SAME PROMPT, SAME CONTRACT, DIFFERENT PROVIDER. The system prompt comes
+   * from `getSystemPrompt('critique_graph')` — the SAME PMS-governed source the
+   * Anthropic path reads — and the user half from the shared
+   * `buildCritiqueUserContent`, whose byte-equivalence with the Anthropic
+   * renderer is pinned by a test. Nothing about the critique's instructions is
+   * re-authored here. A provider swap must not become a silent prompt rewrite.
+   *
+   * ⭐ reasoningEffort: 'high', AND THIS IS THE POINT OF THE KNOB.
+   * A challenger is the one call where more deliberation is worth paying for:
+   * its whole job is to find a defect a faster pass missed, and it does not sit
+   * on the user's critical path (it is read-only and cannot mutate the model).
+   * That is the opposite trade from validation Pass 2, which is output-bound and
+   * now asks for 'low'. One adapter, two deliberate settings — which is only
+   * expressible because `reasoningEffort` was threaded through `chat()`; before
+   * that, every reasoning call in this file shipped the same unchosen "medium".
+   *
+   * ⚠ DEGRADES HONESTLY. A malformed or non-conforming response throws with the
+   * provider's own detail rather than returning an empty critique: a challenger
+   * that silently reports "no issues" because its JSON failed to parse is worse
+   * than one that fails loudly, because the caller cannot tell a clean graph from
+   * a broken reviewer. `assist.critique-graph.ts:229` counts issues by level, so
+   * an empty-on-error result would read to it as "nothing wrong".
+   */
+  async critiqueGraph(args: import("./types.js").CritiqueGraphArgs, opts: CallOpts): Promise<import("./types.js").CritiqueGraphResult> {
+    const system =
+      opts.preloadedSystemPrompt?.operation === 'critique_graph'
+        ? opts.preloadedSystemPrompt.content
+        : await getSystemPrompt('critique_graph');
+
+    const result = await this.chat(
+      {
+        system,
+        userMessage: buildCritiqueUserContent(args),
+        maxTokens: getMaxTokensFromConfig('critique_graph') ?? 2048,
+        responseFormat: 'json_object',
+        reasoningEffort: 'high',
+      },
+      opts,
+    );
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(result.content);
+    } catch {
+      throw new Error(
+        `openai_critique_unparseable: critique_graph returned non-JSON (${result.content.length} chars)`,
+      );
+    }
+
+    const obj = parsed as { issues?: unknown; suggested_fixes?: unknown; overall_quality?: unknown };
+    if (!Array.isArray(obj.issues)) {
+      // Fails closed on SHAPE, not just on syntax. `issues` is the field the
+      // caller counts; a response that parsed but carries no array would
+      // otherwise become a confident "no issues found".
+      throw new Error('openai_critique_malformed: critique_graph response has no `issues` array');
+    }
+
+    const LEVELS = ['BLOCKER', 'IMPROVEMENT', 'OBSERVATION'] as const;
+    type Level = (typeof LEVELS)[number];
+    const isLevel = (v: unknown): v is Level => LEVELS.includes(v as Level);
+
+    const issues = obj.issues
+      .filter(
+        (i): i is { level: Level; note: string; target?: string } =>
+          typeof i === 'object' &&
+          i !== null &&
+          isLevel((i as { level?: unknown }).level) &&
+          typeof (i as { note?: unknown }).note === 'string',
+      )
+      // Same severity ordering the Anthropic path applies, so a caller cannot
+      // tell the providers apart by issue order.
+      .sort((a, b) => LEVELS.indexOf(a.level) - LEVELS.indexOf(b.level));
+
+    const QUALITY = ['poor', 'fair', 'good', 'excellent'] as const;
+    const quality = QUALITY.includes(obj.overall_quality as (typeof QUALITY)[number])
+      ? (obj.overall_quality as (typeof QUALITY)[number])
+      : undefined;
+
+    return {
+      issues,
+      suggested_fixes: Array.isArray(obj.suggested_fixes)
+        ? obj.suggested_fixes.filter((s): s is string => typeof s === 'string')
+        : [],
+      ...(quality ? { overall_quality: quality } : {}),
+      usage: result.usage,
+    };
   }
 
   async explainDiff(_args: import("./types.js").ExplainDiffArgs, _opts: CallOpts): Promise<import("./types.js").ExplainDiffResult> {
@@ -1336,8 +1472,30 @@ export class OpenAIAdapter implements LLMAdapter {
     }
 
     try {
+      // ⭐ BOTH SIDES KEPT. `guardedClient` is #1749's OpenAI-only provider
+      // guard and is the more important of the two — it must not be lost to a
+      // merge that only wanted a parameter.
       const apiClient = guardedClient('chat', this.model);
-      const modelParams = buildModelParams(this.model, temperature, { maxTokens });
+      // `reasoningEffort` is threaded from the caller so a call site can choose
+      // it. Omitting it keeps `buildModelParams`' existing `?? "medium"`
+      // default, so every existing caller stays byte-identical — the only
+      // change is that a caller CAN now say otherwise. Ignored for
+      // non-reasoning models by the `isReasoningModel` branch, exactly as
+      // `thinking` is Anthropic-only.
+      //
+      // ⚠ A CLAIM OF MINE I CHECKED ON THIS MERGE AND AM KEEPING, NARROWED.
+      // I briefly thought #1761 had already threaded an effort through and that
+      // my premise was stale. It had not: the only other `reasoning_effort` in
+      // this file is a TELEMETRY field (see draftGraph's `meta`), not a call.
+      // Re-derived on the merged tree: all five `buildModelParams` call sites
+      // pass `{ maxTokens }` and nothing else, against a contrast control of
+      // `maxTokens` being threaded five times — so the probe does detect
+      // threading where it exists. The knob was reachable-by-signature and
+      // unreachable-in-fact.
+      const modelParams = buildModelParams(this.model, temperature, {
+        maxTokens,
+        reasoningEffort: args.reasoningEffort,
+      });
 
       const response = await withRetry(
         async () =>
@@ -1381,6 +1539,9 @@ export class OpenAIAdapter implements LLMAdapter {
           latency_ms: latencyMs,
           input_tokens: response.usage?.prompt_tokens ?? 0,
           output_tokens: response.usage?.completion_tokens ?? 0,
+          // Per-call cache visibility. Aggregates come from `openAiUsage`; this is
+          // what lets a single slow call be checked for a cache miss.
+          cached_input_tokens: response.usage?.prompt_tokens_details?.cached_tokens ?? 0,
           content_chars: content.length,
         },
         "OpenAI chat completion successful"
@@ -1392,10 +1553,7 @@ export class OpenAIAdapter implements LLMAdapter {
         latencyMs,
         // R7: surface the raw provider finish reason for per-turn observability.
         stopReason: response.choices[0]?.finish_reason ?? null,
-        usage: {
-          input_tokens: response.usage?.prompt_tokens ?? 0,
-          output_tokens: response.usage?.completion_tokens ?? 0,
-        },
+        usage: openAiUsage(response.usage),
       };
     } catch (error: unknown) {
       clearTimeout(timeoutId);
@@ -1615,6 +1773,9 @@ export class OpenAIAdapter implements LLMAdapter {
           latency_ms: latencyMs,
           input_tokens: response.usage?.prompt_tokens ?? 0,
           output_tokens: response.usage?.completion_tokens ?? 0,
+          // Per-call cache visibility. Aggregates come from `openAiUsage`; this is
+          // what lets a single slow call be checked for a cache miss.
+          cached_input_tokens: response.usage?.prompt_tokens_details?.cached_tokens ?? 0,
           content_blocks: content.length,
           tool_use_blocks: content.filter(b => b.type === 'tool_use').length,
           stop_reason,
@@ -1629,10 +1790,7 @@ export class OpenAIAdapter implements LLMAdapter {
         // must remain truthful under provider-side model substitution.
         model: response.model,
         latencyMs,
-        usage: {
-          input_tokens: response.usage?.prompt_tokens ?? 0,
-          output_tokens: response.usage?.completion_tokens ?? 0,
-        },
+        usage: openAiUsage(response.usage),
       };
     } catch (error: unknown) {
       clearTimeout(timeoutId);
@@ -1674,3 +1832,13 @@ export class OpenAIAdapter implements LLMAdapter {
     }
   }
 }
+
+/**
+ * Test-only export of the usage mapper.
+ *
+ * Narrow on purpose: the mapping is what the cache measurement depends on, and
+ * it is otherwise unreachable from a test without constructing a real adapter
+ * (which needs credentials and a client). Mirrors `anthropic.ts`'s `__test_only`
+ * convention rather than widening the module's public surface.
+ */
+export { openAiUsage as __test_only_openAiUsage };
