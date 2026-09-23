@@ -82,6 +82,9 @@ import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { linkedFactorsOf } from '../../routing/option-effect-write.js';
 
+/** Marks a compound starting point, so a newer one can replace it before approval. */
+const STARTING_POINT_BASIS = 'a starting point \u2014 values and what each option sets \u2014 for the user to adopt or correct in one approval';
+
 /** One internal dispatch, so every path is the product's own. */
 export type InternalDispatch = (path: string, body: unknown) => Promise<{ status: number; json: Record<string, unknown> }>;
 
@@ -462,6 +465,66 @@ export function createAgentCapabilities(
           }),
     };
   };
+  /**
+   * ⛔ A STARTING POINT MUST COVER EVERY FACTOR EACH OPTION ACTS ON.
+   *
+   * MEASURED on served 63cf4dcf (journey witness, direct transport): the
+   * starting point gave "Stage Hiring After Review" ONE level, but the option is
+   * wired to three factors; readiness blocks the comparison on every unset
+   * (option, linked factor) pair (`missing_value`), so "one approval -> first
+   * comparison" needed a second approval. Across six served journeys only two
+   * were fully analysable after one approval.
+   *
+   * Deterministic, from the SAME reader the write and the proposer use
+   * (`linkedFactorsOf`): the pairs still lacking a level after this proposal
+   * would apply. The values themselves are never invented here — the Agent is
+   * told which pairs to propose before it shows the user anything.
+   */
+  const missingPairs = async (ctx: AgentToolContext, levelPaths: ReadonlySet<string>): Promise<{ option: string; factor: string }[] | null> => {
+    const g = await readGraph(ctx.scenario_id);
+    if (g === null) return null;
+    const missing: { option: string; factor: string }[] = [];
+    for (const o of g.nodes.filter((n) => n.kind === 'option')) {
+      const has = (o.interventions ?? {}) as Record<string, unknown>;
+      for (const f of linkedFactorsOf(g as never, o.id)) {
+        if (has[f.id] !== undefined || levelPaths.has(`${o.id}::${f.id}`)) continue;
+        missing.push({ option: o.label, factor: String(f.label ?? f.id) });
+      }
+    }
+    return missing;
+  };
+  const levelPathsOf = (ps: readonly StructuredProposal[]): Set<string> =>
+    new Set(ps.flatMap((p) => p.operations).filter((o) => o.op === 'set_option_intervention').map((o) => o.path));
+  /**
+   * ⛔ COMPLETENESS IS AN ADMISSION RULE, NOT A NOTE — independent review of
+   * #1719 at d00727aa: reporting the missing pairs AFTER storing an approvable
+   * proposal let a model that ignored the note ask the user to approve an
+   * incomplete set, and the user still needed a second approval. So an
+   * incomplete starting point leaves NOTHING approvable.
+   */
+  const incompleteStartingPoint = (missing: { option: string; factor: string }[], extra: Record<string, unknown>): ToolResult => ({
+    ok: false, mutated: false, refusal: 'incomplete_starting_point',
+    options_missing_levels: missing,
+    ...extra,
+    detail:
+      'Nothing is awaiting approval. A starting point must give a level for EVERY factor each option acts on, and the pairs in ' +
+      'options_missing_levels have none. Call propose_starting_point again with the same values and levels PLUS a level for each ' +
+      'pair (in the factor\u2019s own units, as an assumption to correct), then show the user that one proposal.',
+  });
+
+  /**
+   * A newer starting point REPLACES the caller's earlier unapproved one, so
+   * "if exactly one is awaiting approval, authorise THAT" always names the
+   * latest set the user was shown. Only starting points are replaced; an
+   * ordinary single proposal is never discarded here.
+   */
+  const replaceEarlierStartingPoints = (ctx: AgentToolContext): void => {
+    for (const o of proposals.outstanding(ctx.scenario_id, ctx.authenticated_user_id)) {
+      const p = proposals.get(o.proposal_id);
+      if (p !== undefined && p.provenance.basis === STARTING_POINT_BASIS) proposals.discard(o.proposal_id);
+    }
+  };
+
   const caps: AgentCapabilities = {
     async getCanonicalState(ctx: AgentToolContext): Promise<ToolResult> {
       const g = await readGraph(ctx.scenario_id);
@@ -661,21 +724,43 @@ export function createAgentCapabilities(
       const made = [a, b].filter((r): r is ToolResult => r !== null && r.ok === true && typeof r.proposal_id === 'string');
       if (made.length === 0) return { ok: false, mutated: false, refusal: 'nothing_to_propose', ...refused };
       // Only one half could be proposed: it is an ordinary proposal already.
-      if (made.length === 1) return { ...made[0], ...refused };
+      if (made.length === 1) {
+        const only = proposals.get(made[0].proposal_id as string);
+        const missing = await missingPairs(ctx, levelPathsOf(only !== undefined ? [only] : []));
+        if (missing === null || missing.length > 0) {
+          if (only !== undefined) proposals.discard(only.proposal_id);
+          if (missing === null) return { ok: false, mutated: false, refusal: 'not_found' };
+          return incompleteStartingPoint(missing, {
+            assumptions: a?.assumptions ?? [], option_levels: b?.interventions ?? [],
+            ...(b !== null && Array.isArray(b.not_linked) ? { not_linked: b.not_linked } : {}), ...refused,
+          });
+        }
+        return { ...made[0], ...refused };
+      }
       const halves = made.map((r) => proposals.get(r.proposal_id as string)).filter((p): p is StructuredProposal => p !== undefined);
       if (halves.length !== 2 || halves[0].base_graph_identity_hash !== halves[1].base_graph_identity_hash) {
         for (const h of halves) proposals.discard(h.proposal_id);
         return { ok: false, mutated: false, refusal: 'model_changed_while_proposing', detail: 'The model changed while this was being put together. Read the state again and propose once more.' };
+      }
+      const missing = await missingPairs(ctx, levelPathsOf(halves));
+      if (missing === null || missing.length > 0) {
+        for (const h of halves) proposals.discard(h.proposal_id);
+        if (missing === null) return { ok: false, mutated: false, refusal: 'not_found' };
+        return incompleteStartingPoint(missing, {
+          assumptions: a?.assumptions ?? [], option_levels: b?.interventions ?? [],
+          ...(b !== null && Array.isArray(b.not_linked) ? { not_linked: b.not_linked } : {}), ...refused,
+        });
       }
       const compound = createProposal({
         scenario_id: ctx.scenario_id,
         user_id: ctx.authenticated_user_id,
         base_graph_identity_hash: halves[0].base_graph_identity_hash,
         operations: [...halves[0].operations, ...halves[1].operations],
-        provenance: { authored_by: 'model_proposed', basis: 'a starting point — values and what each option sets — for the user to adopt or correct in one approval' },
+        provenance: { authored_by: 'model_proposed', basis: STARTING_POINT_BASIS },
         validation: { admitted: true, loss_count: 0, refusals: [] },
         public_label: `${halves[0].public_label}; ${halves[1].public_label}`,
       });
+      replaceEarlierStartingPoints(ctx);
       proposals.put(compound);
       for (const h of halves) proposals.discard(h.proposal_id);
       return {

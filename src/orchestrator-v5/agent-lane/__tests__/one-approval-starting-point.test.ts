@@ -33,7 +33,9 @@ import { ProposalStore } from '../proposal.js';
  * not about links; the link rule has its own discriminating test.
  */
 const wired = (ns: { id: string; kind: string }[]) =>
-  ns.filter((o) => o.kind === 'option').flatMap((o) => ns.filter((f) => f.kind === 'factor').map((f) => ({
+  // `coordination_load` is only ever a VALUE target here: an option wired to it would need a level too
+  // (#1719: a starting point must cover every factor each option acts on).
+  ns.filter((o) => o.kind === 'option').flatMap((o) => ns.filter((f) => f.kind === 'factor' && f.id !== 'coordination_load').map((f) => ({
     from: o.id, to: f.id, strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.8, effect_direction: 'positive',
   })));
 

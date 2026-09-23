@@ -102,6 +102,8 @@ describe('a level is only proposed on a factor the option is wired to', () => {
       option_levels: [
         { option_label: 'Hire Two Developers', factor_label: 'Team size', value: 7, basis: 'five plus two' },
         { option_label: 'Internal Lead Trial', factor_label: 'Team size', value: 6, basis: 'not wired' },
+        // The level it CAN carry — a starting point must cover every factor each option acts on (#1719).
+        { option_label: 'Internal Lead Trial', factor_label: 'Coordination load', value: 30, basis: 'a trial lead eases load' },
       ],
     });
     expect(r.ok, JSON.stringify(r)).toBe(true);
@@ -111,9 +113,12 @@ describe('a level is only proposed on a factor the option is wired to', () => {
     // unlinked level was written first-refused and stopped the chain.
     expect(out.ok, JSON.stringify(out)).toBe(true);
     expect(out.applied).toBe(true);
-    expect(p.posted.filter((x) => x.kind === 'option_intervention_edit').map((x) => x.target)).toEqual(['hire_two::team_size']);
+    const levelWrites = p.posted.filter((x) => x.kind === 'option_intervention_edit').map((x) => x.target).sort();
+    expect(levelWrites).toEqual(['hire_two::team_size', 'internal_trial::coordination_load']);
+    // The unlinked level was never even attempted.
+    expect(levelWrites).not.toContain('internal_trial::team_size');
     const byId = Object.fromEntries(p.read().map((n) => [n.id, n]));
     expect(Object.keys(byId.hire_two.interventions ?? {})).toEqual(['team_size']);
-    expect(byId.internal_trial.interventions).toBeUndefined();
+    expect(Object.keys(byId.internal_trial.interventions ?? {})).toEqual(['coordination_load']);
   });
 });
