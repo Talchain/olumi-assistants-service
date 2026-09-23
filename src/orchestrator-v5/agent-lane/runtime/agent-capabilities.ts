@@ -1343,11 +1343,29 @@ export function createAgentCapabilities(
               const raw = typeof os.raw_value === 'number' ? os.raw_value : os.value;
               return { ...n, observed_state: { ...os, value: raw / range, raw_value: raw, cap: range, declared_scale: 'unit_interval' } };
             });
+            /**
+             * ⛔ THE SIBLING OF THE FRAME WRITE ABOVE, and it carried the same
+             * omission. `afterSet` is a re-read, so it is fresher — but a read
+             * is still a read, and this asserts `edges: afterSet.edges`, the
+             * whole edge set as it was at that moment. Without an expected hash
+             * a write landing in between is silently restored to its old value.
+             *
+             * ⚠ I CLAIMED THIS WAS FIXED ONCE AND IT WAS NOT. The claim went
+             * into a commit message and a PR body while only the first site had
+             * changed. Fixed now, and the guard below counts BOTH.
+             */
             const reg = await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, {
               graph: { nodes: patched, edges: afterSet.edges },
+              ...(afterSet.graph_hash !== '' ? { expected_graph_hash: afterSet.graph_hash } : {}),
             });
             if (reg.status !== 200) {
-              failures.push({ factor: 'scale_frame', detail: `could not attach a range: http ${reg.status}` });
+              const code = String((reg.json.details as { code?: unknown } | undefined)?.code ?? reg.json.code ?? '');
+              failures.push({
+                factor: 'scale_frame',
+                detail: code === 'GRAPH_STALE'
+                  ? 'the model changed while this was being prepared, so no range was attached and nothing was written — read it again and propose afresh'
+                  : `could not attach a range: http ${reg.status}`,
+              });
               framed.length = 0;
             }
           }
