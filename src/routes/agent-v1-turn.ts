@@ -26,6 +26,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { config } from '../config/index.js';
+import { OPENAI_ONLY, runWithProviderPolicy } from '../adapters/llm/provider-policy.js';
 import { TURN_RESPONSE_HEADROOM_MS } from '../config/timeouts.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
@@ -442,7 +443,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     return { text, usage: j.usage };
   }, (call, err) => log.warn({ err, call }, 'agent-lane transport failure, retrying once'));
 
-  app.post('/agent/v1/turn', async (req: FastifyRequest, reply: FastifyReply) => {
+  /*
+   * ⛔ EVERY AGENT TURN IS OPENAI-ONLY (Paul, 23 Sep: zero Anthropic calls on the
+   * OpenAI journey). Any Anthropic attempt beneath this turn — including internal
+   * dispatch to the conventional handlers — is refused before network I/O and logged
+   * (`adapters/llm/provider-policy.ts`).
+   */
+  const agentTurnHandler = async (req: FastifyRequest, reply: FastifyReply) => {
     const startedAt = Date.now();
     const body = (req.body ?? {}) as Record<string, unknown>;
     const scenarioId = typeof body.scenario_id === 'string' ? body.scenario_id : '';
@@ -915,7 +922,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...(turnId !== undefined ? { turn_id: turnId, durability } : {}),
       },
     });
-  });
+  };
+  app.post('/agent/v1/turn', (req: FastifyRequest, reply: FastifyReply) =>
+    runWithProviderPolicy(OPENAI_ONLY('agent_v1_turn'), () => agentTurnHandler(req, reply)));
 
   log.info({ event: 'agent_lane.route_mounted' }, 'POST /agent/v1/turn mounted');
 }

@@ -15,6 +15,7 @@ import {
   resolveModelAssignment,
 } from '../../config/model-assignment.js';
 import { emit, log, TelemetryEvents } from "../../utils/telemetry.js";
+import { assertProviderAllowed } from "./provider-policy.js";
 import { normaliseLegacyCoachingValues } from "./normalise-legacy-coaching.js";
 import { withRetry } from "../../utils/retry.js";
 import {
@@ -237,11 +238,14 @@ const anthropicDispatcher = new Agent({
 });
 
 // Scoped fetch that uses our Anthropic-tuned dispatcher without polluting the global
-const anthropicFetch: typeof globalThis.fetch = (input, init) =>
-  undiciFetch(input as Parameters<typeof undiciFetch>[0], {
+const anthropicFetch: typeof globalThis.fetch = (input, init) => {
+  // ⛔ The network choke point: refused BEFORE I/O under an OpenAI-only request policy.
+  assertProviderAllowed('anthropic', 'transport');
+  return undiciFetch(input as Parameters<typeof undiciFetch>[0], {
     ...init as Parameters<typeof undiciFetch>[1],
     dispatcher: anthropicDispatcher,
   }) as unknown as Promise<Response>;
+};
 
 // Lazy initialization to allow testing without API key.
 // Tracks the key the client was created with so we can detect rotation.
@@ -250,6 +254,7 @@ let clientApiKey: string | null = null;
 let clientSdkMaxRetries: number | undefined;
 
 function getClient(): Anthropic {
+  assertProviderAllowed('anthropic', 'client');
   const apiKey = getApiKey();
   const sdkMaxRetries = sdkMaxRetriesForLiveEval();
   if (!apiKey) {
