@@ -65,22 +65,43 @@ PLoT call (~22s) + **~2s of everything else combined**.
 (max 69ms) · `normalise_ms` 2ms · `package_ms` 13ms · `boundary_ms` 13ms · `repair_ms` 109ms.
 Any "it is the analytical sweep / a Monte Carlo sample budget" explanation is dead. I had one; see §4.
 
-### ⭐⭐ The single best lever, and the code says it is safe
+### ⛔⛔ I WAS WRONG ABOUT THE LEVER — staged delivery ALREADY EXISTS, and you already see the graph at ~36s
 
-**`coaching_pass` is ~21s — about 24% of the journey — and its own design contract makes it optional.**
-From `src/cee/unified-pipeline/stages/coaching-pass.ts`:
+**Retracted within the hour, and this one is a repeat of a lesson I had already banked.** I wrote
+here that the response "WAITS ~21s for an optional UI-only enrichment" and that deferring the
+coaching pass would cut ~21s off time-to-first-model. **Both halves are false.**
 
-> "STRICTLY NON-FATAL … **The structural graph is IDENTICAL with or without this pass**; the draft
-> NEVER fails because of it." · "The UI (their only consumer) therefore sees the same response shape."
+`cee/unified-pipeline/index.ts` emits **`GRAPH_READY` at line 1371**; the coaching pass begins at
+**line 1383 — after it.** The file says so directly:
 
-The degradation path **already ships**: on a budget skip it emits canonical-empty coaching plus a
-`coaching_status='skipped_budget'` marker that the UI already renders. My n=1,021 measurement
-reproduces that file's own n=40 capture almost exactly (it says median 20.8s / max 26.0s; I get
-p50 20.9s / p90 23.6s / max 30.0s, the max being its own 30s timeout ceiling).
+> *"The graph is repaired HERE, and the ~20 s coaching pass has not started … Emitting here is what
+> turns one silent blob into staged delivery, and it needs NO reordering: the split the design asked
+> for already exists in the current stage order."*
 
-**So the response currently WAITS for a strictly-non-fatal, UI-only enrichment before you see your
-model.** Deliver the graph when ready and let coaching follow, and **time-to-first-model drops ~21s
-with no loss of content.** That is a pipeline-owner change, not mine — I have changed nothing.
+**And my exact proposal was already evaluated and rejected by this estate:**
+
+> *"The design's Q3 CEE-1 also said 'reorder coaching after package+boundary'. **That is REFUTED and
+> deliberately NOT done**: Stage 5 (Package) is a CONSUMER of the coaching pass's output …
+> Reordering would make Package emit canonical-empty coaching, changing the BUFFERED route's
+> response bytes — breaking both 'the buffered route stays byte-identical' and the equivalence pin."*
+
+### ⭐ So the number that describes YOUR wait is not 87s
+
+The estate's own staged-frame measurements (`cee2-live-latency.md`, 3 runs, per chunk):
+
+| frame | median | what you see |
+|---|---|---|
+| **`GRAPH_READY`** | **35.8s** | **your graph — repaired structure, node identity stable** |
+| `COACHING_READY` | 59.2s | coaching arrives as its OWN later frame |
+| `COMPLETE` | 60.9s | terminal payload (worst run 63,957ms) |
+
+**~87s is the request's wall clock. Time-to-first-graph is ~36s, and coaching is already off that
+critical path.** Which relocates the lever: **the thing to attack is `parse` (~23s, one o4-mini
+call), because that is what `GRAPH_READY` actually waits for.** Coaching is not on it.
+
+⚠ Note `GRAPH_READY` is explicitly **provisional** — `assist.v1.draft-graph-staged.ts:51` says the
+pipeline can still fail or degrade after it, and the client is required to discard it and render the
+terminal payload in named cases. So "you see a graph at 36s" is not "the turn succeeded at 36s".
 
 ### ⛔ A load-bearing comment is refuted
 
