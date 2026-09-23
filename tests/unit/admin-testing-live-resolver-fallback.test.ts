@@ -40,7 +40,7 @@ const routeState = vi.hoisted(() => ({
   snapshotCalls: [] as string[],
   snapshot: {
     content: 'RESOLVED LIVE SYSTEM PROMPT BYTES',
-    meta: { prompt_version: '202', source: 'pms' },
+    meta: { taskId: 'draft_graph', prompt_version: 'v202', version: 202, source: 'store' }, // real SystemPromptMeta form — source is 'store'|'default', NEVER 'pms'
   } as unknown,
   snapshotThrows: null as Error | null,
 }));
@@ -120,7 +120,7 @@ describe('the bake-off harness resolves PMS-served prompts, and says so', () => 
     routeState.snapshotThrows = null;
     routeState.snapshot = {
       content: 'RESOLVED LIVE SYSTEM PROMPT BYTES',
-      meta: { prompt_version: '202', source: 'pms' },
+      meta: { taskId: 'draft_graph', prompt_version: 'v202', version: 202, source: 'store' }, // real SystemPromptMeta form — source is 'store'|'default', NEVER 'pms'
     };
   });
 
@@ -145,8 +145,12 @@ describe('the bake-off harness resolves PMS-served prompts, and says so', () => 
     const res = await post(app, { prompt_id: 'draft_graph', version: 1, brief: BRIEF });
     const body = res.json();
     expect(body.prompt.version, 'echoes the request verbatim').toBe(1);
-    expect(body.prompt.live_prompt_version, 'the authority on what ran').toBe('202');
-    expect(body.prompt.live_prompt_source).toBe('pms');
+    expect(body.prompt.live_prompt_version, 'the authority on what ran').toBe('v202');
+    // ⚠ CORRECTED IN REVIEW: I asserted source 'pms', which `SystemPromptMeta`
+    // cannot produce — it is `'store' | 'default'` (`prompt-loader.ts:549`).
+    // A mock that returns an impossible value tests a shape the runtime never
+    // emits, so the assertion was green and meaningless.
+    expect(body.prompt.live_prompt_source).toBe('store');
     expect(body.prompt.content_length).toBe('RESOLVED LIVE SYSTEM PROMPT BYTES'.length);
   });
 
@@ -203,6 +207,50 @@ describe('the bake-off harness resolves PMS-served prompts, and says so', () => 
     expect(res.statusCode).toBe(404);
     expect(res.json().message).toContain('not found in the store');
     expect(res.json().message).toContain('runtime resolver returned no content');
+  });
+
+  /**
+   * ⛔⛔ THE WRONG BOUNDARY THIS PR SHIPPED FIRST, NOW PINNED.
+   *
+   * `isValidCeeTask` and "the resolver can serve this operation" are DIFFERENT
+   * SETS. `model-routing.ts` admits `explain_diff` and `routing`; neither
+   * appears in `prompts/operations.ts`, and `getSystemPromptSnapshot` THROWS on
+   * an unmapped operation (`prompt-loader.ts:660-663`). The first version of
+   * this route gated on `isValidCeeTask`, so those two reached the resolver,
+   * threw, and the route answered **500** — an instrument promising a broader
+   * resolvable surface than it implements.
+   *
+   * ⚠ AND MY OWN TEST COULD NOT HAVE CAUGHT IT: every case used `draft_graph`,
+   * which IS mapped. A fixture drawn from the supported set cannot exercise the
+   * boundary between the two sets. That is what these cases are for.
+   */
+  it.each(['explain_diff', 'routing'])(
+    '⛔ %s is a valid CEE task the resolver CANNOT serve — bounded 422, never 500',
+    async (taskId) => {
+      const res = await post(app, { prompt_id: taskId, version: 1, brief: BRIEF });
+
+      expect(res.statusCode, 'must be a bounded 4xx, not the catch-all 500').toBe(422);
+      expect(res.json().error).toBe('unsupported_operation');
+      // Identity binding: the response names the id it refused and discloses
+      // the scope it DOES support, so a bake-off cannot silently omit a task.
+      expect(res.json().message).toContain(taskId);
+      expect(res.json().message).toContain('Supported operations:');
+      expect(res.json().message).toContain('draft_graph');
+      // ⛔ AND THE RESOLVER IS NEVER CONSULTED — the refusal happens before any
+      // provider call, which is the difference between a disclosed limit and a
+      // 500 with a sanitised message.
+      expect(routeState.snapshotCalls).toEqual([]);
+    },
+  );
+
+  it('POSITIVE CONTROL — a MAPPED task still resolves, so the gate is not refusing everything', async () => {
+    // Without this, the two refusals above would pass on a gate that rejected
+    // every store miss. `draft_graph` is in `OPERATION_TO_TASK_ID`, so it must
+    // still reach the resolver and answer 200.
+    const res = await post(app, { prompt_id: 'draft_graph', version: 202, brief: BRIEF });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().prompt.resolved_via).toBe('live_resolver');
+    expect(routeState.snapshotCalls).toEqual(['draft_graph']);
   });
 
   /**

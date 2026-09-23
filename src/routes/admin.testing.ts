@@ -28,6 +28,7 @@ import {
 } from '../config/model-assignment.js';
 import { requiresMaxCompletionTokens } from '../adapters/llm/openai.js';
 import { getDefaultModelForTask, isValidCeeTask } from '../config/model-routing.js';
+import { OPERATION_TO_TASK_ID } from '../prompts/operations.js';
 import { getSystemPromptSnapshot } from '../adapters/llm/prompt-loader.js';
 import { checkModelAvailability, getModelErrorSummary, recordModelError, fetchOpenAIModels, getAnthropicModels } from '../services/model-availability.js';
 import { verifyAdminKey } from '../middleware/admin-auth.js';
@@ -1193,7 +1194,20 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
         // Compile prompt content (interpolate variables if any)
         compiledContent = interpolatePrompt(versionData.content, {});
         resolvedVia = 'store_version';
-      } else if (isValidCeeTask(prompt_id)) {
+        // ⛔ GATED ON THE RESOLVER'S OWN CAPABILITY, NOT ON `isValidCeeTask`.
+        // THOSE ARE DIFFERENT SETS, and conflating them was this PR's first
+        // wrong boundary (caught in review, source-derived):
+        // `model-routing.ts` admits `explain_diff` and `routing` as CEE tasks,
+        // but neither appears in `prompts/operations.ts` — and
+        // `getSystemPromptSnapshot` THROWS on an unmapped operation
+        // (`prompt-loader.ts:660-663`, "Unknown LLM operation"). So the old
+        // gate sent those two into the catch-all and the route answered **500**.
+        //
+        // ⚠ The condition below is the resolver's own, imported rather than
+        // mirrored: `OPERATION_TO_TASK_ID[operation]` is the exact lookup
+        // `getSystemPromptSnapshot` performs before it throws. A hand-kept list
+        // here would drift the moment an operation is added.
+      } else if (OPERATION_TO_TASK_ID[prompt_id] !== undefined) {
         const snapshot = await getSystemPromptSnapshot(prompt_id);
         if (!snapshot?.content) {
           return reply.status(404).send({
@@ -1208,6 +1222,24 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
         liveVersion = snapshot.meta?.prompt_version;
         liveSource = snapshot.meta?.source;
         resolvedVia = 'live_resolver';
+      } else if (isValidCeeTask(prompt_id)) {
+        // ⭐ A REAL CEE TASK THIS INSTRUMENT CANNOT TEST — say so, in 4xx,
+        // BEFORE any provider call. Never 500, and never a fabricated default:
+        // an instrument that promises a broader resolvable surface than it
+        // implements produces evidence that cannot name its own bytes, and this
+        // harness has already cost a lane once that way.
+        //
+        // ⛔ DO NOT "fix" this by aliasing the missing operations. `routing`'s
+        // runtime loader goes through the `orchestrator` PMS alias with a
+        // routing-specific default and a size guard (`estate.ts:85-107`), so
+        // generic bytes would answer a DIFFERENT question while looking right.
+        return reply.status(422).send({
+          error: 'unsupported_operation',
+          message:
+            `Prompt '${prompt_id}' is a valid CEE task but has no prompt-operation mapping, ` +
+            `so this harness cannot resolve the bytes its runtime actually uses. ` +
+            `Supported operations: ${Object.keys(OPERATION_TO_TASK_ID).sort().join(', ')}`,
+        });
       } else {
         return reply.status(404).send({
           error: 'not_found',
