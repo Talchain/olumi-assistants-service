@@ -227,6 +227,19 @@ const SLOT_FAMILY: ReadonlyArray<readonly [string, string, 'registered' | 'exclu
   ['unsetOptionEffectDisclosure', 'UNSET_OPTION_EFFECT_DISCLOSURE_RE_SRC', 'registered'],
   ['participationDisclosure', 'ANALYSIS_PARTICIPATION_DISCLOSURE_RE_SRC', 'registered'],
   ['separabilityDisclosure', 'SEPARABILITY_DISCLOSURE_RE_SRC', 'registered'],
+  // ⭐ THE OBJECTIVE-SENSE DISCLOSURE — REGISTERED, and by the same test every
+  // entry above is judged on: does the tail make a claim a withhold just denied?
+  // This one says only how the product READ THE GOAL'S WORDING in order to decide
+  // which direction counts as better. It names no option, asserts no ranking and
+  // implies no leader, so `template + tail` is a composition the handler can and
+  // does emit — and a withheld run is a turn on which the person most needs to
+  // know that an inference about their own objective was in play at all.
+  //
+  // LAST, mirroring the handler's append order, which is the load-bearing
+  // property: TEMPLATE_SUFFIX_ONLY_REGEX compiles the registry IN ORDER, so a
+  // family registered out of position makes the egress reject the composed
+  // summary and the user silently receives the bare template.
+  ['goalDirectionDisclosure', 'GOAL_DIRECTION_DISCLOSURE_RE_SRC', 'registered'],
 ];
 
 describe('the handler-source extractor can see (controls first — trap 13)', () => {

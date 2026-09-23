@@ -113,6 +113,15 @@ import {
   SEPARABILITY_DISCLOSURE_MAX_CHARS,
   type SeparabilityWithhold,
 } from './separability-disclosure.js';
+// The objective-sense disclosure — the run says it read the goal as a quantity
+// to REDUCE, because that reading is what decides the leader. Same three pieces
+// of plumbing as its siblings (grammar, budget, registration) for the same
+// reason: without all three the disclosure composes correctly and is then
+// rejected at egress, replacing the WHOLE summary with the locked template.
+import {
+  GOAL_DIRECTION_DISCLOSURE_RE_SRC,
+  GOAL_DIRECTION_DISCLOSURE_MAX_CHARS,
+} from './goal-direction-disclosure.js';
 // The objective-contradiction honesty surface (pricing-objective FINDINGS fix
 // 1) — the fourth tail, and the same three pieces of plumbing for the same
 // reason as the three above. Without them the disclosure composes correctly,
@@ -396,7 +405,10 @@ export const MAX_ASSISTANT_TEXT_CHARS =
   // It can co-occur with every other suffix, though: a run can be unseparable
   // AND scaffolded AND carrying an unevaluated constraint. Same rule as its six
   // siblings: budgeted from the builder's own worst case, never hand-estimated.
-  SEPARABILITY_DISCLOSURE_MAX_CHARS;
+  SEPARABILITY_DISCLOSURE_MAX_CHARS +
+  // The objective-sense disclosure rides with the others; budgeted from the
+  // builder's own output so an honest disclosure can never cost the summary.
+  GOAL_DIRECTION_DISCLOSURE_MAX_CHARS;
 
 /**
  * Minimum win_probability for the leading option before the headline may emit a
@@ -2407,6 +2419,25 @@ export const TEMPLATE_SUFFIX_DISCLOSURE_GRAMMARS: readonly TemplateSuffixDisclos
   // `computeHeadline` returned `text: null`), so admitting it there would admit
   // a sentence the handler can never emit.
   { name: 'SEPARABILITY_DISCLOSURE_RE_SRC', source: SEPARABILITY_DISCLOSURE_RE_SRC },
+  // ⭐ REGISTERED, NOT EXCLUDED. The question is: does the tail make a claim the
+  // withhold just denied? This one says only how the product READ THE GOAL'S
+  // WORDING. It names no option, asserts no ranking and implies no leader, so
+  // `template + tail` is a composition the handler can emit — and a withheld run
+  // is a turn on which the person most needs to know that an inference about
+  // their objective was in play.
+  //
+  // ⛔ THAT SENTENCE USED TO CITE "the same test the entries above state", AND
+  // THAT WAS WRONG. `template-suffix-disclosure-registry-completeness.test.ts`
+  // checks registration BOOKKEEPING — identity binding, append order, no orphans
+  // — and nothing semantic. Measured: mutating the copy to "…so the leading
+  // option is the one with the lowest result" left that suite GREEN 18/18 while
+  // naming exactly what a withhold denies.
+  //
+  // The property is now enforced in `__tests__/goal-direction-disclosure.test.ts`
+  // against the estate's own authority, `textAssertsLeadingOption`
+  // (`compose/leading-option-egress-guard.ts`), with a contrast control proving
+  // the probe can see a leader claim. That mutant is now RED.
+  { name: 'GOAL_DIRECTION_DISCLOSURE_RE_SRC', source: GOAL_DIRECTION_DISCLOSURE_RE_SRC },
 ];
 
 /** A `*_RE_SRC` grammar that is deliberately NOT on the template branch. */

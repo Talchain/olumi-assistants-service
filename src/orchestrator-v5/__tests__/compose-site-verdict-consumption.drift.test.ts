@@ -1828,8 +1828,15 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // ⚠ The `gated` stance is unaffected: `summary` is still "withheld-able
     // headline, else a locked template", and this tail can only ever ride the
     // locked-template arm.
+    // ⭐ `goalDirectionDisclosure` APPENDED, 23 Sep. It says how the product READ
+    // THE GOAL'S WORDING in order to decide which direction counts as better —
+    // an inference that silently decided the leader and that nothing carried
+    // back to the person. It names no option and asserts no ranking, so it can
+    // ride the locked-template arm exactly as its siblings do, and it is LAST,
+    // mirroring the handler's append order (which is the load-bearing property:
+    // `TEMPLATE_SUFFIX_ONLY_REGEX` compiles the registry IN ORDER).
     expect(RUN_ANALYSIS).toContain(
-      'const summary = `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}${separabilityDisclosure}`;',
+      'const summary = `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}${separabilityDisclosure}${goalDirectionDisclosure}`;',
     );
     expect(RUN_ANALYSIS).toContain('assistant_text: summary,');
     // ONE verdict, TWO consumers — the property that makes this `gated` rather

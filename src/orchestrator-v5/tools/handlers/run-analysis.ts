@@ -146,6 +146,10 @@ import {
 // headline ON them, and then discarded both — so this handler could only ever
 // emit the locked template on the one population that most needs the reason.
 import { buildSeparabilityDisclosure } from '../../coaching/separability-disclosure.js';
+// The objective-sense disclosure. #1680 made the run ATTEST a reduce-goal to
+// the engine as `minimise`, which decides the leader; measured at `staging`,
+// nothing carried that reading back to the person. This is the half that does.
+import { buildGoalDirectionDisclosure } from '../../coaching/goal-direction-disclosure.js';
 import { deriveEmittedGoalDirection } from '../../goal-target/goal-direction.js';
 
 // `PLOT_SLOW_LIKELY_MS` lives in the shared `../../telemetry/turn-timings.js`
@@ -2158,7 +2162,13 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     const separabilityDisclosure = buildSeparabilityDisclosure(
       headlineDescriptor.separability_withhold,
     );
-    const summary = `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}${separabilityDisclosure}`;
+    // ⭐ THE VALUE THAT WAS ACTUALLY ATTESTED, not a re-derivation from the
+    // label. A second authority answering "is this a reduce goal?" is how the
+    // disclosure and the wire come to disagree (trap 21); this reads the very
+    // variable that was assigned to `plotPayload.goal_direction` above, so the
+    // person is told about the attestation that was really sent, or nothing.
+    const goalDirectionDisclosure = buildGoalDirectionDisclosure(emittedGoalDirection);
+    const summary = `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}${separabilityDisclosure}${goalDirectionDisclosure}`;
 
     // V5 link-safe response floor: when the deterministic headline builder
     // picks Case-E ("{label} currently leads.") because stronger cases
