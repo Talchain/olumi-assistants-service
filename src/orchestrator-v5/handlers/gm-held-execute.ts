@@ -105,6 +105,7 @@ export const GM_HELD_APPLIED_ASSISTANT_TEXT =
 export function buildGmHeldAppliedReceipt(
   subjects: readonly string[],
   unconfiguredOptionLabels: readonly string[] = [],
+  blockedConfiguredOptions: readonly BlockedConfiguredOption[] = [],
 ): string {
   const named = subjects.map((s) => s.trim()).filter((s) => s.length > 0);
   const base =
@@ -119,7 +120,13 @@ export function buildGmHeldAppliedReceipt(
   // very next turn. When the applied graph leaves options unconfigured,
   // the receipt must say so AT APPLY TIME and point at the real writer.
   const disclosure = buildUnconfiguredOptionsNotice(unconfiguredOptionLabels);
-  return disclosure === null ? base : `${base} ${disclosure}`;
+  // ⭐ NARROW THE CLAIM, DO NOT DELETE IT. Filtering the false "no effect
+  // values" sentence removed a lie, but left an option that genuinely blocks
+  // the analysis with NO surface naming it — which is how a user spends
+  // thirty-seven minutes on the wrong obligation. This says the true thing
+  // instead, in the readiness projection's own words.
+  const blocked = buildBlockedOptionsNotice(blockedConfiguredOptions);
+  return [base, disclosure, blocked].filter((s2) => s2 !== null && s2.length > 0).join(' ');
 }
 
 /**
@@ -208,6 +215,28 @@ export interface GmReadinessOption {
   readonly option_id?: string;
   readonly label?: string;
   readonly status?: string;
+  /**
+   * The option's effect values, as the canonical readiness projection carries
+   * them. Optional because the narrow view above predates it; absence is read
+   * as "we cannot prove this option has any", which preserves the prior
+   * behaviour exactly.
+   */
+  readonly interventions?: Readonly<Record<string, unknown>>;
+  /** The canonical readiness projection's own words for why this option is not ready. */
+  readonly status_reason?: string;
+}
+
+/**
+ * Can we PROVE this option already carries effect values?
+ *
+ * Absence of the field is NOT proof of absence of values — it means the
+ * projection did not carry them — so this answers false there and the caller
+ * behaves exactly as it did before.
+ */
+function provablyHasEffectValues(option: GmReadinessOption): boolean {
+  const iv = option.interventions;
+  if (iv === null || typeof iv !== 'object') return false;
+  return Object.keys(iv).length > 0;
 }
 
 /**
@@ -230,8 +259,93 @@ export function deriveUnconfiguredOptionLabels(
   if (!readiness) return [];
   return readiness.options
     .filter((o) => o.status !== 'ready')
+    // ⛔ THE SENTENCE THIS FEEDS CLAIMS A SPECIFIC FACT, SO THE PREDICATE MUST
+    // ESTABLISH THAT FACT. `buildUnconfiguredOptionsNotice` says the option
+    // "does not have effect values yet" — but `status !== 'ready'` has several
+    // causes and only one of them is that. `option-intervention-write-guard.ts`
+    // already names this exact sentence as a lie when the option carries a
+    // value, and carries a whole verdict (`not_honoured_no_copy`) to avoid it.
+    //
+    // ⛔ MEASURED IN A USER SESSION (deployed staging, 23 Sep, scenario
+    // `399c2814`, 23:38:00). "Two Developers" was `needs_user_mapping` because
+    // ONE EDGE lacked a mechanism — readiness named it exactly:
+    // `OPTION_NEEDS_MAPPING`, "How does Two Developers change Coordination
+    // Overhead Risk?". It already carried effect values on two factors, and the
+    // product had said so itself twenty minutes earlier. The notice told the
+    // user it had none and to "configure the Two Developers option"; he did,
+    // twice, and analysis stayed blocked on the edge nobody named. That is the
+    // trap-19 shape: a claim bound to a predicate another cause satisfies.
+    //
+    // Absence of `interventions` is NOT proof of absence — the notice still
+    // fires there, byte-identical to before. This only withholds a claim that
+    // can be PROVEN false.
+    .filter((o) => !provablyHasEffectValues(o))
     .map((o) => (typeof o.label === 'string' ? o.label.trim() : ''))
     .filter((l) => l.length > 0 && !/^(?:opt|fac|out|risk|goal|dec)_[a-z0-9_]+$/i.test(l));
+}
+
+/** An option that blocks analysis for a reason OTHER than missing effect values. */
+export interface BlockedConfiguredOption {
+  readonly label: string;
+  readonly reason?: string;
+}
+
+/**
+ * Options that block the analysis while already carrying effect values.
+ *
+ * These are exactly the ones `deriveUnconfiguredOptionLabels` must NOT name,
+ * because "does not have effect values yet" is false of them — and exactly the
+ * ones that were left with no disclosure at all once that lie was removed.
+ */
+export function deriveBlockedConfiguredOptions(
+  readiness: { readonly options: ReadonlyArray<GmReadinessOption> } | undefined,
+): BlockedConfiguredOption[] {
+  if (!readiness) return [];
+  return readiness.options
+    .filter((o) => o.status !== 'ready' && provablyHasEffectValues(o))
+    .map((o) => ({
+      label: typeof o.label === 'string' ? o.label.trim() : '',
+      ...(typeof o.status_reason === 'string' && o.status_reason.trim().length > 0
+        ? { reason: o.status_reason.trim() }
+        : {}),
+    }))
+    .filter((o) => o.label.length > 0 && !/^(?:opt|fac|out|risk|goal|dec)_[a-z0-9_]+$/i.test(o.label));
+}
+
+/**
+ * Says an option blocks the analysis, and why, WITHOUT claiming a cause the
+ * projection did not give.
+ *
+ * ⛔ WHERE NO `status_reason` IS CARRIED IT NAMES NO CAUSE. Inventing one is
+ * how the previous notice came to tell a user an option had no effect values
+ * when it had two.
+ */
+export function buildBlockedOptionsNotice(
+  blocked: readonly BlockedConfiguredOption[],
+): string | null {
+  const entries = blocked.filter((b) => b.label.length > 0);
+  if (entries.length === 0) return null;
+
+  // ⛔ A COUNT IS NOT A DISCLOSURE. This said "Note: 2 options still block the
+  // analysis." at n >= 2 — no names, no reasons, nothing to act on — while the
+  // receipt still pointed the user at a DIFFERENT, unconfigured option whose
+  // repair would not unblock anything. That reinstates exactly the condition
+  // this notice exists to remove: the user is told something is wrong and sent
+  // to the wrong place. Every blocked option is named, with its own reason.
+  const sentence = (b: BlockedConfiguredOption): string =>
+    typeof b.reason === 'string' && b.reason.length > 0
+      ? `'${b.label}' (${b.reason.replace(/\.$/, '')})`
+      : `'${b.label}'`;
+
+  if (entries.length === 1) {
+    const one = entries[0] as BlockedConfiguredOption;
+    const because =
+      typeof one.reason === 'string' && one.reason.length > 0
+        ? ` ${one.reason.replace(/\.$/, '')}.`
+        : '';
+    return `Note: '${one.label}' still blocks the analysis.${because}`;
+  }
+  return `Note: ${entries.length} options still block the analysis: ${entries.map(sentence).join('; ')}.`;
 }
 
 /** Rerun affordance offered when the post-apply graph is analysis-ready. */
