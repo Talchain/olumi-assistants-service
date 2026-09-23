@@ -114,9 +114,10 @@ function leftOutLine(r: ToolResult): string {
 function openQuestionsLine(r: ToolResult): string {
   const qs = Array.isArray(r.open_questions) ? (r.open_questions as unknown[]).map((q) => String(q).trim()).filter((q) => q !== '') : [];
   if (qs.length === 0) return '';
-  const shown = qs.slice(0, LEFT_OUT_SHOWN).map((q) => q.replace(/[.?!]+$/, '')).join('; ');
-  const more = qs.length > LEFT_OUT_SHOWN ? `; and ${qs.length - LEFT_OUT_SHOWN} more` : '';
-  return ` Questions this model does not answer yet: ${shown}${more}.`;
+  // Each question kept whole, so it still reads as a question the team can take up.
+  const shown = qs.slice(0, LEFT_OUT_SHOWN).map((q) => (/[?.!]$/.test(q) ? q : `${q}?`)).join(' ');
+  const more = qs.length > LEFT_OUT_SHOWN ? ` (and ${qs.length - LEFT_OUT_SHOWN} more)` : '';
+  return ` Questions this model does not answer yet: ${shown}${more}`;
 }
 
 /** One authoritative line per write the turn attempted. */
