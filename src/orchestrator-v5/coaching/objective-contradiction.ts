@@ -291,8 +291,28 @@ const AMBIGUOUS_STEMS: readonly string[] = [
   'manag(?:e|es|ing|ed)?',
 ];
 
+/**
+ * ⚠ A HYPHEN IS PART OF THE WORD, NOT A BOUNDARY — measured defect.
+ *
+ * `\b` treats `-` as a word boundary, so `\blower\b` matched INSIDE
+ * `"Lower-funnel conversion rate"` and the label classified as `decrease`.
+ * A hyphenated compound is one lexical unit: "Lower-funnel" names a funnel
+ * stage, it does not ask anyone to lower anything. Measured false positives
+ * before this fix, all classified `decrease`: "Lower-funnel conversion rate",
+ * "Cut-through in the market", "Drop-in session bookings", "Lower-tier
+ * subscription revenue", "Cut-price volume share" — every one a quantity the
+ * user wants to RISE, and a wrong direction INVERTS the engine's ranking.
+ *
+ * The lookarounds below exclude `-` on both sides in addition to word
+ * characters. This can only ever move a label TOWARD `undetermined`, which is
+ * this classifier's declared safe failure ("silence is always the safe failure
+ * here, never a guess") — it can never create a new direction claim.
+ */
+const WORD_EDGE_LEFT = '(?<![A-Za-z0-9_-])';
+const WORD_EDGE_RIGHT = '(?![A-Za-z0-9_-])';
+
 function stemAlternation(stems: readonly string[]): RegExp {
-  return new RegExp(`\\b(?:${stems.join('|')})\\b`, 'i');
+  return new RegExp(`${WORD_EDGE_LEFT}(?:${stems.join('|')})${WORD_EDGE_RIGHT}`, 'i');
 }
 
 const INCREASE_RE = stemAlternation(INCREASE_STEMS);
@@ -314,7 +334,7 @@ const SUBJECT_BOUNDARY =
   /\s+(?:to|by|from|within|over|at|above|below|under|while|without|and|with|for|in|per)\b|[,;:—–]|\d/i;
 
 const DIRECTION_STEM_RE = new RegExp(
-  `\\b(?:${[...INCREASE_STEMS, ...DECREASE_STEMS].join('|')})\\b`,
+  `${WORD_EDGE_LEFT}(?:${[...INCREASE_STEMS, ...DECREASE_STEMS].join('|')})${WORD_EDGE_RIGHT}`,
   'i',
 );
 

@@ -146,6 +146,7 @@ import {
 // headline ON them, and then discarded both — so this handler could only ever
 // emit the locked template on the one population that most needs the reason.
 import { buildSeparabilityDisclosure } from '../../coaching/separability-disclosure.js';
+import { deriveEmittedGoalDirection } from '../../goal-target/goal-direction.js';
 
 // `PLOT_SLOW_LIKELY_MS` lives in the shared `../../telemetry/turn-timings.js`
 // module so the turn-executor (error-path reconstruction) can apply the
@@ -901,6 +902,40 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     if (snapshot.n_samples !== undefined) plotPayload.n_samples = snapshot.n_samples;
     if (snapshot.goal_constraints !== undefined) {
       plotPayload.goal_constraints = snapshot.goal_constraints;
+    }
+    // ROADMAP 2.920 — the user's ATTESTED objective sense, MINIMISE ONLY.
+    //
+    // Absent ⇒ ISL runs the maximiser unattested, which for a goal that is a
+    // quantity to REDUCE crowns the WORST option (measured on isl-staging: the
+    // ranking flips completely when 'minimise' is stamped). `maximise` is
+    // byte-identical to sending nothing, so emitting it is pure downside and
+    // `deriveEmittedGoalDirection` never returns it — see that module's header
+    // for the one-sided-exposure argument.
+    const emittedGoalDirection = deriveEmittedGoalDirection(
+      graphForAnalysis,
+      snapshot.goal_node_id,
+    );
+    if (emittedGoalDirection !== undefined) {
+      plotPayload.goal_direction = emittedGoalDirection;
+      // ⚠ DISCLOSED AS DERIVED, NOT AS ATTESTED. PLoT's contract documents this
+      // field as "the user's attested objective sense" and states that PLoT
+      // never infers it from a node label — but CEE does exactly that, from the
+      // goal label, because no user-settable direction exists anywhere in this
+      // repo (`rg 'objective_sense|goalDirection|goal_sense' src` non-test: 0).
+      // Until a user-settable sense exists, the honest record is that CEE
+      // derived it, so a deploy can be wire-witnessed and the claim audited
+      // rather than taken on trust. The contract-wording mismatch is raised
+      // separately; it is NOT resolved by this log line.
+      log.info(
+        {
+          event: 'cee.goal_direction.derived',
+          goal_direction: emittedGoalDirection,
+          goal_node_id: snapshot.goal_node_id,
+          provenance: 'derived_from_goal_label',
+          request_id: invocation.requestId,
+        },
+        'goal_direction derived from the goal label and forwarded to PLoT',
+      );
     }
     // Lane 28 — brief pipeline seam 3: flag-gated brief leg
     // (CEE_SEND_BRIEF_TO_PLOT, default OFF — doctrine ask D5 is Paul-gated;
