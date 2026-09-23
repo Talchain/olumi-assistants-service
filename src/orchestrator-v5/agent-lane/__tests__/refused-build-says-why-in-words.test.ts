@@ -32,3 +32,35 @@ describe('a refused build says why, in words, with a next step', () => {
     expect(said('some_new_refusal')).toContain('it was refused (some_new_refusal)');
   });
 });
+
+describe('⛔ the wording is true of EVERY way the producer reaches the code (review 5803854263)', () => {
+  /**
+   * `construction_failed` is produced both when the builder call throws AND when it
+   * returns a non-empty answer that is not a usable model (`build-model.ts`, the
+   * JSON.parse catch). "Did not answer" is false in the second case, so the words
+   * must claim only what both cases share: no usable model came back.
+   */
+  const buildSaid = async (callStructured: unknown) => {
+    const { buildModelFromBrief } = await import('../runtime/build-model.js');
+    const dispatch = async () => ({ status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } });
+    const out = await buildModelFromBrief('33333333-3333-4333-8333-333333333333', 'Should I hire a tech lead?', dispatch as never, callStructured as never);
+    const n = narrateWriteOutcome('Here is what I found.', [{ name: 'build_model_from_brief' }], [out as never]);
+    return { refusal: (out as { refusal?: string }).refusal, text: withWriteOutcome(n.text, n.status) };
+  };
+
+  it('RED: the builder ANSWERED with malformed output: never told the user it "did not answer"', async () => {
+    const r = await buildSaid(async () => ({ text: '{"goal": {"metric": "Velocity"' }));
+    expect(r.refusal, 'the control: this is the construction_failed producer path').toBe('construction_failed');
+    expect(r.text).not.toMatch(/did not answer/i);
+    expect(r.text).toMatch(/could not produce a usable model/i);
+    expect(r.text).toMatch(/ask me to try again/i);
+  });
+
+  it('the builder call THREW: the same honest no-build message with a retry', async () => {
+    const r = await buildSaid(async () => { throw new Error('upstream timeout'); });
+    expect(r.refusal).toBe('construction_failed');
+    expect(r.text).toContain('The model was not built');
+    expect(r.text).toMatch(/could not produce a usable model/i);
+    expect(r.text).not.toContain('construction_failed');
+  });
+});

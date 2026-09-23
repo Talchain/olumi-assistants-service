@@ -67,7 +67,7 @@ const REFUSAL_WORDS: Record<string, string> = {
   // reason, nothing to do next. Every refusal `runtime/build-model.ts` returns.
   model_too_large: 'it came back larger than a first model can be, even after one attempt to make it more compact — ask me to build it again, or tell me which options and factors matter most',
   no_structured_output: 'the model builder returned nothing usable this time — ask me to try again',
-  construction_failed: 'the model builder did not answer this time — ask me to try again',
+  construction_failed: 'the model builder could not produce a usable model this time — ask me to try again',
   admitted_graph_invalid: 'what came back did not form a valid model, so nothing was saved — ask me to try again',
   registration_refused: 'it could not be saved to this decision — ask me to try again',
 };
