@@ -97,3 +97,76 @@ describe('the agent route actually surfaces them', () => {
     expect(sidecar.indexOf('collectTurnReceipts')).toBeLessThan(sidecar.indexOf('\n    });'));
   });
 });
+
+/**
+ * ⛔⛔ THE TWO GAPS MY OWN MUTANTS FOUND, closed here.
+ *
+ * Re-running the mutants at the rebased head (rather than carrying the evidence
+ * forward) turned up two holes in my own table:
+ *
+ *   R1  removing the `has()` guard SURVIVED 9/9. My description of that mutant
+ *       was also wrong: `byVersionId` is a Map keyed on `version_id`, so
+ *       de-duplication is STRUCTURAL and a duplicate can never ship twice.
+ *       Removing the guard flips FIRST-WINS to LAST-WINS — a real semantic
+ *       change that nothing pinned. Two receipts can share a `version_id` and
+ *       differ in `mutation_id` / `source_turn_id`; which one reaches the wire
+ *       was undefined by the tests.
+ *
+ *   R5  my fail-closed mutant was a NO-OP (`return []` vs `return [] as
+ *       TurnReceipt[]` — a type annotation). It proved nothing, so the
+ *       non-array path had no real binding either.
+ *
+ * FIRST-WINS is the correct rule and is now stated: the earliest tool result is
+ * the write that actually happened first, so its `mutation_id` is the one a
+ * consumer should reconcile against. A later duplicate is an echo.
+ */
+describe('which of two same-id receipts ships is DEFINED, not incidental', () => {
+  const dup = (mutationId: string) => ({
+    version: 7,
+    version_id: 'ver-same',
+    mutation_id: mutationId,
+    source_turn_id: null,
+  });
+
+  it('FIRST-WINS across two tool results sharing a version_id', () => {
+    const out = collectTurnReceipts([
+      { receipts: [dup('mut-first')] },
+      { receipts: [dup('mut-second')] },
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0]!.mutation_id, 'the first write wins; a later duplicate is an echo').toBe('mut-first');
+  });
+
+  it('FIRST-WINS within a single tool result too', () => {
+    const out = collectTurnReceipts([{ receipts: [dup('mut-a'), dup('mut-b')] }]);
+    expect(out).toHaveLength(1);
+    expect(out[0]!.mutation_id).toBe('mut-a');
+  });
+
+  it('CONTRAST: two DIFFERENT version_ids both ship, so the dedup is not swallowing work', () => {
+    const out = collectTurnReceipts([
+      { receipts: [{ version: 1, version_id: 'v1', mutation_id: 'm1', source_turn_id: null }] },
+      { receipts: [{ version: 2, version_id: 'v2', mutation_id: 'm2', source_turn_id: null }] },
+    ]);
+    expect(out.map((r) => r.version_id)).toEqual(['v1', 'v2']);
+  });
+});
+
+describe('the non-array path fails closed — bound behaviourally, not by a type annotation', () => {
+  it.each([
+    ['undefined', undefined],
+    ['null', null as unknown as undefined],
+    ['a string', 'receipts' as unknown as undefined],
+    ['an object', { receipts: [] } as unknown as undefined],
+    ['a number', 7 as unknown as undefined],
+  ])('returns an empty list for %s', (_label, input) => {
+    expect(collectTurnReceipts(input)).toEqual([]);
+  });
+
+  it('CONTRAST: a well-formed array DOES yield a receipt (so the above is not vacuous)', () => {
+    const out = collectTurnReceipts([
+      { receipts: [{ version: 3, version_id: 'v3', mutation_id: 'm3', source_turn_id: null }] },
+    ]);
+    expect(out).toHaveLength(1);
+  });
+});
