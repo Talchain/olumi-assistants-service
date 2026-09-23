@@ -93,3 +93,49 @@ did not refute. Candidates I have NOT verified:
 - **12 unbanked branches belonging to OTHER lanes** found in `/private/tmp` and pushed to `rescue/tmp-<tree>-<branch>-<sha8>` on their own remotes, plus one uncommitted tree captured via `git stash create`. `/private/tmp` is wiped on restart; nothing there is now unique.
 - Probe artefacts + 30 scratchpad notes copied to `~/.claude/projects/-Users-paulslee-Documents-GitHub/restart-bank-20260923/`.
 - Workflow transcript survives at `~/.claude/.../subagents/workflows/wf_ee50984e-d8b/journal.jsonl`.
+
+---
+
+## ⛔ CORRECTION, appended after the section above was written: there are FIVE defects, not four
+
+A fifth was found after the table above. It is the worst shape of the five.
+
+| commit | PR | what was wrong |
+|---|---|---|
+| `af8378f0` | #1743 | **The frame write DELETED the rest of the model.** The PR whose purpose is to stop a write landing on an unapproved model was itself destroying part of it. Both frame writes sent only `graph: { nodes, edges }`, dropping `options`, `goal_node_id` and `goal_constraints` — all three analysis-affecting per `context/graph-hash.ts:149-162` — so it also moved the very hash this PR adds a CAS on. The correct spread was already in the same file at `:367`. |
+
+### ⛔⛔ #1743 HAS NOW NEEDED THREE SEPARATE CORRECTIONS
+
+1. the false *"both frame writes fixed"* claim (only one had changed);
+2. `302b7cb4` — partial apply of an unapproved authorisation on any multi-op proposal;
+3. `af8378f0` — the frame write deleting `options` / `goal_node_id` / `goal_constraints`.
+
+**I would have merged it twice.** This is the single strongest argument for the
+independent verdict it is blocked on. **Do not let impatience with the review queue
+turn into self-approval** — my own confidence in this PR was wrong three times.
+
+### ⛔ A SIBLING WRITE IS NEVER COVERED BY A TEST THAT CANNOT REACH IT
+
+Twice on #1743 a fix landed on one register site while its twin kept the bug: the
+behavioural fixture reaches only the option-intervention path, so the `afterSet`
+twin was unpinned and the mutant SURVIVED both times. When two call sites share an
+invariant and the fixture can reach only one, assert the invariant over the
+**SOURCE** as well — `frame-write-is-cas-gated.test.ts` now does that for all three
+register calls, as it already did for `expected_graph_hash`.
+
+⚠ Also: that source guard's first version sliced a fixed 400-char window, and the
+docblock I had just added pushed the `graph:` line out of it, so the guard failed on
+its own baseline. It is now bounded by the call's own closing `});`. A fixed window
+is a second thing to keep in sync.
+
+## Corrected defect ledger — 5
+
+| commit | PR | one line |
+|---|---|---|
+| `da3a0a19` | #1751 | rescale disclosure could never fire; fixture invented `option`; rendered "undefined" to the user |
+| `302b7cb4` | #1743 | partially applied an UNAPPROVED authorisation on any multi-op proposal |
+| `a939e161` | #1747 | no receipt on the turn that mints version 1 (`model_version`, singular) |
+| `c5633816` | #1746 | made freshness WORSE — UI read FRESH over a moved model |
+| `af8378f0` | #1743 | frame write deleted `options` / `goal_node_id` / `goal_constraints` |
+
+All five found by ADVERSARIALLY ATTACKING the work. **None by re-reading it.**
