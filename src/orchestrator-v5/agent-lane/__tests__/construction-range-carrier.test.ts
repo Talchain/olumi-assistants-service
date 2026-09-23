@@ -163,7 +163,8 @@ describe("the Agent's own option-level reader honours the same range", () => {
   it('reads a level in the user’s units against the stored range, not one derived from the figure', async () => {
     const { caps } = await built();
     const r = await caps.proposeOptionInterventions(ctx, {
-      interventions: [{ option_label: 'Hire a Tech Lead', factor_label: 'Developer headcount', value: 6, basis: 'the lead replaces one developer' }],
+      // A LINKED pair: the proposer (like the write) refuses a factor the option is not wired to.
+      interventions: [{ option_label: 'Hire Two Developers', factor_label: 'Developer headcount', value: 6, basis: 'one of the two hires starts later' }],
     });
     expect(r.ok, JSON.stringify(r)).toBe(true);
     const [iv] = r.interventions as { recorded_on_model_scale: number; model_range: number | null; range_taken_from_your_figure?: number }[];

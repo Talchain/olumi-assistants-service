@@ -26,6 +26,18 @@ import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent
 import { dispatchTool } from '../runtime/agent-tools.js';
 import { ProposalStore } from '../proposal.js';
 
+/**
+ * Every option wired to every factor. The real product only records a level on
+ * a factor the option is linked to (`linkedFactorsOf`, the write's own rule), so
+ * a fake that returns NO edges would model an impossible graph. These cases are
+ * not about links; the link rule has its own discriminating test.
+ */
+const wired = (ns: { id: string; kind: string }[]) =>
+  ns.filter((o) => o.kind === 'option').flatMap((o) => ns.filter((f) => f.kind === 'factor').map((f) => ({
+    from: o.id, to: f.id, strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.8, effect_direction: 'positive',
+  })));
+
+
 const SCENARIO = '6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b';
 const USER = 'user-a';
 const ctx = { scenario_id: SCENARIO, authenticated_user_id: USER, request_id: 'r' };
@@ -103,7 +115,7 @@ function fakeProduct(opts: {
     }
     // The graph read.
     reads += 1;
-    const out = { status: 200, json: { graph: { nodes, edges: [] }, graph_hash: `h${rev}` } };
+    const out = { status: 200, json: { graph: { nodes, edges: wired(nodes) }, graph_hash: `h${rev}` } };
     if (opts.foreignEditAfterReads !== undefined && reads === opts.foreignEditAfterReads) foreign();
     return out;
   };
