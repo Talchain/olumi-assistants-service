@@ -176,6 +176,13 @@ export interface AdmittedModel {
   readonly goal_constraints: readonly AdmittedConstraint[];
   readonly loss: readonly RepairEntry[];
   readonly withheld: readonly { from: string; to: string; reason: string; detail: string }[];
+  /**
+   * ⛔ EVERY LINK ADMISSION ADDED TO THE GOAL ON ITS OWN AUTHORITY, WITH THE DIRECTION
+   * IT ASSUMED (Panel #1730 B1/B2). The `loss` ledger alone reached no person: the
+   * build result carried only its length. This list travels to the build result and
+   * the server states each link — its direction is an assumption the user can flip.
+   */
+  readonly assumed_goal_links?: readonly { readonly from_label: string; readonly to_label: string; readonly direction: 'positive' | 'negative' }[];
 }
 
 /** Shorten to the label budget at a word boundary, never mid-word. */
@@ -912,12 +919,22 @@ export function admitCandidateModel(
     finalEdges = edgesNow;
   }
 
+  const labelOfNode = new Map(nodes.map((n) => [n.id, n.label]));
+  const assumedGoalLinks = [...repaired, ...riskRepairs]
+    .filter((e) => finalEdges.includes(e))
+    .map((e) => ({
+      from_label: labelOfNode.get(e.from) ?? e.from,
+      to_label: labelOfNode.get(e.to) ?? e.to,
+      direction: (e.effect_direction === 'negative' ? 'negative' : 'positive') as 'positive' | 'negative',
+    }));
+
   return {
     nodes,
     inference_classes,
     edges: finalEdges,
     goal_constraints: constraintResult.constraints,
     loss,
+    ...(assumedGoalLinks.length > 0 ? { assumed_goal_links: assumedGoalLinks } : {}),
     // `withheld` is a list of LINKS by contract; a withheld NODE is reported
     // through `loss`, which is the channel the build result already surfaces.
     withheld: [...unresolved, ...linkResult.withheld],

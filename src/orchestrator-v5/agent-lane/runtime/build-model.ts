@@ -431,6 +431,9 @@ export async function buildModelFromBrief(
     // What the projection could not carry — the Agent is expected to say this.
     withheld: admitted.withheld.map((w) => ({ from: w.from, to: w.to, reason: w.reason })),
     projected_field_count: admitted.loss.length,
+    // ⛔ The links admission added to the goal on its own authority, with the
+    // direction it assumed — stated to the user by the server (disclosure.ts).
+    ...(admitted.assumed_goal_links !== undefined ? { assumed_goal_links: admitted.assumed_goal_links } : {}),
     // Options that say what they DO, versus options that are inert. An inert
     // option can never be compared, whatever values arrive later.
     options_that_change_nothing: admitted.withheld

@@ -14,6 +14,9 @@
 import { describe, it, expect } from 'vitest';
 import { assessCanonicalAnalysisReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
+import { disclosuresFor } from '../disclosure.js';
+import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
+import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 
 const GOAL = { metric: 'Engineering velocity', operator: '>=', value: 20, unit: 'points', horizon_months: 6, provenance: 'explicit' };
 const factor = (label: string) => ({ label, role: 'controllable', baseline_known: false, baseline_value: null, unit: 'hires', plausible_max: 10, provenance: 'inferred' });
@@ -55,6 +58,40 @@ describe('a compact model still reaches its goal', () => {
     expect((r.analysisReady?.options ?? []).map((o) => o.option_id).sort()).toEqual(['hire_tech_lead', 'hire_two_developers']);
   });
 
+  it('RED (Panel B1): the build result carries each assumed goal link, with its direction — not only the ledger', async () => {
+    const calls: string[] = [];
+    const call = (async () => { calls.push('x'); return { text: JSON.stringify(SERVED_COMPACT) }; }) as unknown as CallStructuredModel;
+    const d: InternalDispatch = async (path) => (path.endsWith('/graph/register')
+      ? { status: 200, json: { model_version: { version_number: 1 } } }
+      : { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } });
+    const out = await buildModelFromBrief('33333333-3333-4333-8333-333333333333', 'Should I hire a Tech lead or two developers to increase velocity?', d, call) as Record<string, unknown>;
+    expect(out.ok, JSON.stringify(out)).toBe(true);
+    expect(out.assumed_goal_links).toEqual([
+      { from_label: 'Tech lead hires', to_label: 'Engineering velocity', direction: 'positive' },
+      { from_label: 'Developer hires', to_label: 'Engineering velocity', direction: 'positive' },
+    ]);
+  });
+
+  it('RED (Panel B1+B2): the server STATES each assumed link and its direction, and offers to flip it — Panel’s churn probe', () => {
+    const churn = {
+      ...SERVED_COMPACT,
+      goal: { metric: 'Monthly recurring revenue', operator: '>=', value: 20000, unit: 'GBP', horizon_months: 12, provenance: 'explicit' },
+      options: [option('Raise price', 'Monthly churn', 8), option('Hold price', 'Monthly churn', 4)],
+      factors: [factor('Monthly churn')],
+    };
+    const a = admit(churn);
+    expect(a.assumed_goal_links).toEqual([{ from_label: 'Monthly churn', to_label: 'Monthly recurring revenue', direction: 'positive' }]);
+    const owed = disclosuresFor([{ mutated: true, assumed_goal_links: a.assumed_goal_links }]);
+    expect(owed).toHaveLength(1);
+    expect(owed[0]).toContain('\u201cMonthly churn\u201d \u2192 \u201cMonthly recurring revenue\u201d: I assumed more of it raises Monthly recurring revenue');
+    expect(owed[0]).toMatch(/tell me and I will flip it/);
+  });
+
+  it('CONTRAST: no assumed link → no disclosure; a non-write never discloses', () => {
+    expect(disclosuresFor([{ mutated: true }])).toEqual([]);
+    expect(disclosuresFor([{ mutated: false, assumed_goal_links: [{ from_label: 'A', to_label: 'G', direction: 'positive' }] }])).toEqual([]);
+  });
+
   it('CONTRAST: when an outcome ends the chain, the outcome is linked — not the factor', () => {
     const c = {
       ...SERVED_COMPACT,
@@ -79,5 +116,6 @@ describe('a compact model still reaches its goal', () => {
     // project, including this model-supplied one. The repair's identity is its
     // disclosure — and there must be none.
     expect(a.loss.filter((l) => /connected to the goal as an ASSUMPTION/.test(String(l.reason)))).toEqual([]);
+    expect(a.assumed_goal_links).toBeUndefined();
   });
 });

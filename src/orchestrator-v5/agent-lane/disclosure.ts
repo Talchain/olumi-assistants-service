@@ -22,6 +22,21 @@ export interface DisclosableOutcome {
   readonly mutated: boolean;
   /** The written strength was a placeholder, not a stated one. */
   readonly placeholder_strength?: boolean;
+  /** Links a build added to the goal on Olumi's own authority, with the direction assumed. */
+  readonly assumed_goal_links?: readonly { readonly from_label: string; readonly to_label: string; readonly direction: 'positive' | 'negative' }[];
+}
+
+const GOAL_LINKS_SHOWN = 3;
+/**
+ * ⛔ AN ASSUMED DIRECTION CAN INVERT THE COMPARISON (Panel #1730 B2): "more churn
+ * increases revenue" makes the option that raises churn read as better. So each link
+ * is named with the direction assumed, and the user is told how to flip it.
+ */
+export function assumedGoalLinksDisclosure(links: NonNullable<DisclosableOutcome['assumed_goal_links']>): string {
+  const lines = links.slice(0, GOAL_LINKS_SHOWN).map((l) =>
+    `\u201c${l.from_label}\u201d \u2192 \u201c${l.to_label}\u201d: I assumed more of it ${l.direction === 'negative' ? 'lowers' : 'raises'} ${l.to_label}`);
+  const more = links.length > GOAL_LINKS_SHOWN ? ` (and ${links.length - GOAL_LINKS_SHOWN} more)` : '';
+  return `Note: nothing you said linked these to your goal, so I connected them as assumptions \u2014 the direction and the strength are mine, not yours: ${lines.join('; ')}${more}. If any of those runs the other way, tell me and I will flip it before you rely on the comparison.`;
 }
 
 export const PLACEHOLDER_STRENGTH_DISCLOSURE =
@@ -35,6 +50,8 @@ export function disclosuresFor(outcomes: readonly DisclosableOutcome[]): readonl
   if (outcomes.some((o) => o.mutated && o.placeholder_strength === true)) {
     owed.push(PLACEHOLDER_STRENGTH_DISCLOSURE);
   }
+  const assumed = outcomes.flatMap((o) => (o.mutated && Array.isArray(o.assumed_goal_links) ? o.assumed_goal_links : []));
+  if (assumed.length > 0) owed.push(assumedGoalLinksDisclosure(assumed));
   return owed;
 }
 
