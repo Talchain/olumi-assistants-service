@@ -11,7 +11,8 @@
  *   1. When a write tool ran, the SERVER composes the write-status line from the
  *      authoritative results — version from the receipts, `already_applied`,
  *      refusal — and appends it. The model's own numbers are never the source.
- *   2. When NO write landed this turn, a sentence that asserts a completed write
+ *   2. On EVERY turn (not only when no write landed — see narrateWriteOutcome), a
+ *      sentence that asserts a completed write
  *      is removed. The claim shape is derived from REAL served replies
  *      (output/paul-test-20260923/repro, construction-witness/raw,
  *      openai-agent-lane/evidence): every success claim in that corpus OPENS
@@ -63,6 +64,34 @@ const REFUSAL_WORDS: Record<string, string> = {
   read_only_preview: 'this preview cannot change the model',
 };
 
+const PART_NAMES: Record<string, string> = { values: 'starting values', option_levels: 'option levels' };
+
+/**
+ * A compound approval (#1712) reports each part: what was recorded, out of how
+ * many, and with which receipts. State exactly that — "Saved 6 of 6 starting
+ * values as version 2. Not saved: 0 of 2 option levels (…)." — never a vague
+ * "part of it".
+ */
+function partsLine(r: ToolResult): string | null {
+  const parts = Array.isArray(r.parts) ? (r.parts as ToolResult[]) : null;
+  if (parts === null || parts.length === 0) return null;
+  const bits = parts.map((p) => {
+    const what = PART_NAMES[String(p.part)] ?? String(p.part ?? 'change');
+    const rec = typeof p.recorded_count === 'number' ? p.recorded_count : null;
+    const req = typeof p.requested_count === 'number' ? p.requested_count : null;
+    const count = rec !== null && req !== null ? `${rec} of ${req} ` : '';
+    if (p.ok === true) return `Saved ${count}${what}${versionPhrase(versionsOf(p))}.`;
+    const code = String(p.reason ?? p.refusal ?? '');
+    const why = code !== '' ? ` (${REFUSAL_WORDS[code] ?? code.replace(/_/g, ' ')})` : '';
+    return `Not saved: ${count}${what}${why}.`;
+  });
+  // A part the chain never reached is still not saved — say so.
+  if (r.ok !== true && r.refusal === 'partially_applied' && parts.every((p) => p.part !== 'option_levels') && parts.some((p) => p.part === 'values')) {
+    bits.push('Not saved: option levels (stopped before they were written).');
+  }
+  return bits.join(' ');
+}
+
 /** One authoritative line per write the turn attempted. */
 function statusLine(name: string, r: ToolResult): string {
   if (name === 'build_model_from_brief') {
@@ -72,6 +101,8 @@ function statusLine(name: string, r: ToolResult): string {
     if (r.ok === true && r.mutated === true) return `The model was saved${typeof v === 'number' ? ` as version ${v}` : ''}.`;
     return `The model was not built: ${REFUSAL_WORDS[String(r.refusal)] ?? `it was refused (${String(r.refusal ?? 'unknown')})`}.`;
   }
+  const perPart = partsLine(r);
+  if (perPart !== null) return perPart;
   if (r.ok === true && r.already_applied === true) {
     const vs = versionsOf(r);
     return `That change was already saved${vs.length > 0 ? ` (version ${vs[vs.length - 1]})` : ''}; nothing was written again.`;
@@ -88,7 +119,7 @@ function statusLine(name: string, r: ToolResult): string {
 }
 
 export interface WriteOutcomeNarration {
-  /** The model's text, with unsupported write claims removed when nothing landed. */
+  /** The model's text with every completion claim removed — the server states what was saved. */
   readonly text: string;
   /** The server's own write-status line, or null when the turn neither wrote nor claimed to. */
   readonly status: string | null;
@@ -104,11 +135,19 @@ export function narrateWriteOutcome(
   const writes = toolCalls
     .map((c, i) => ({ name: c.name, result: toolResults[i] }))
     .filter((w): w is { name: string; result: ToolResult } => WRITE_TOOLS.includes(w.name) && w.result !== undefined);
-  const landed = toolResults.some((r) => r.mutated === true);
 
   const stripped: string[] = [];
   let out = text;
-  if (!landed) {
+  /**
+   * ⛔ THE SERVER OWNS EVERY COMPLETION CLAIM ON EVERY TURN — not only when
+   * nothing landed. Independent pre-read of #1712/#1720 (PR #1720 comment
+   * 5790103315): a partial approval returns `mutated: true` (values landed,
+   * levels refused), so a model sentence "Saved all values and option levels"
+   * survived beside the server's own "Partly saved". A model-authored completion
+   * sentence is therefore always removed; the extent saved/refused is stated
+   * from the structured results below. Non-write reasoning is kept.
+   */
+  {
     out = text
       .split('\n')
       .map((line) => {

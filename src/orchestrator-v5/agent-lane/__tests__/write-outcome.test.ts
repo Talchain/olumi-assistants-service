@@ -61,10 +61,25 @@ describe('the write-status line is composed from the tool results', () => {
     expect(withWriteOutcome(n.text, n.status)).toBe('Nothing was saved this turn.');
   });
 
-  it('applied with a receipt → the version comes from the RECEIPT, and the model’s words are kept', () => {
-    const n = narrateWriteOutcome('Applied all 7 assumptions.', [{ name: 'authorise_change' }], [APPLIED]);
-    expect(n.text).toBe('Applied all 7 assumptions.');
+  it('applied with a receipt → the version comes from the RECEIPT, and the SERVER states it (the model’s own claim is removed)', () => {
+    const n = narrateWriteOutcome('Applied all 7 assumptions. The biggest driver is churn.', [{ name: 'authorise_change' }], [APPLIED]);
+    // The completion claim is the server's to make on every turn; reasoning is kept.
+    expect(n.text).toBe('The biggest driver is churn.');
     expect(n.status).toBe('Saved as version 11.');
+  });
+
+  it('RED: a PARTIAL compound (values landed, levels refused) + the model claims everything saved → the claim is removed and the extent is stated', () => {
+    const PARTIAL = {
+      ok: false, mutated: true, applied: false, refusal: 'partially_applied',
+      parts: [
+        { part: 'values', ok: true, mutated: true, recorded_count: 1, requested_count: 1, receipts: [{ version: 2 }] },
+        { part: 'option_levels', ok: false, mutated: false, recorded_count: 0, requested_count: 2, reason: 'unresolved_effect_relationship' },
+      ],
+    };
+    const n = narrateWriteOutcome('Saved all values and option levels. Tech Lead now leads.', [{ name: 'authorise_change' }], [PARTIAL as never]);
+    expect(n.text).not.toMatch(/Saved all values and option levels/);
+    expect(n.text).toBe('Tech Lead now leads.');
+    expect(n.status).toBe('Saved 1 of 1 starting values as version 2. Not saved: 0 of 2 option levels (unresolved effect relationship).');
   });
 
   it('already applied → says so, with the original version, and that nothing was written again', () => {
