@@ -239,69 +239,31 @@ uncommitted files**. ⚠ Deleting a parent clone destroys its worktrees.
 
 ---
 
-# 8. ⛔⛔ READ THIS FIRST — #1755's REQUIRED CHECK IS RED, AND THE CAUSE IS KNOWN
+# 8. ✅ RESOLVED BEFORE THE RESTART — the red required check is FIXED and pushed
 
-Captured at 18:25, minutes before the restart, from check-run `107270240088`
-(`Lint, TypeCheck, Unit Tests` on `ccc5f94293d034d9e17fcd5753e99b7eab58330c`).
-**Do not re-diagnose this — go straight to the fix.**
+#1755's `Lint, TypeCheck, Unit Tests` failed at `ccc5f94293d0`. **Diagnosed and
+fixed in the same session.** Do not re-diagnose it.
 
-## ✅ What is NOT the problem
+**Cause:** opening `critique_graph` to `'openai'` broke six existing tests that
+encoded the old exclusion. I changed a shared constant without sweeping its
+readers — none of which live in the directories I touched. My two new files
+PASSED (`✓ admin-testing-live-resolver-fallback.test.ts, 7 tests`).
 
-**Both files I added in that push PASSED:**
-`✓ tests/unit/admin-testing-live-resolver-fallback.test.ts (7 tests) 1698ms`.
-The route test and the typecheck fix are sound.
+**Fix, pushed:**
+- **#1755 → `6f1bd2da72521534e881e1f1f37f01800295ae58`** — six readers repointed.
+  ⭐ **Nothing deleted**: every "OpenAI must be rejected" assertion moved to
+  `explain_diff`, still closed on that branch. `expect()` counts did not fall
+  (111/109, 23/22, 27/27, 63/63, 53/53).
+- **#1764 → `ab90edecc489eb4da16c993d986d2b3b3a67c960`** — the map deep-equal
+  updated, **plus the discriminator that survives both tasks being open**:
+  once both land the map has no closed entry, so the asymmetry tests stop
+  discriminating. Replacement asserts `MODEL_DISABLED` still fires for
+  `test-disabled-model`, bound by identity, with a positive control.
 
-## ⛔ The actual cause: I changed a shared constant and did not sweep its readers
+**Both have fresh exact-head REVIEW_REQUESTs and CI re-queued. Neither is
+self-merged. On restart: check those two heads, not the ones in §2.**
 
-Opening `critique_graph` to `'openai'` in `ROUTER_TASK_PROVIDER_CAPABILITIES`
-broke **existing tests that encode the OLD exclusion**. Observed failures:
+⚠ `Integration Tests (advisory)` and `Full Test Suite (advisory)` were also red
+at the old head. Check whether they are red on staging's own head before
+treating them as mine — several estate advisories are known-red.
 
-| failure | file |
-|---|---|
-| `expected { critique_graph: [ …(3) ], …(1) } to deeply equal { critique_graph: [ …(2) ], …(1) }` | a test **deep-equals the whole map** — I made a 2-element list into 3 |
-| `expected undefined to be an instance of ModelAssignmentError` (×2) | `tests/unit/llm-router.test.ts:218` via `expectProviderMismatch`, called from `:261` and `:265` |
-| `expected function to throw an error, but it didn't` | `tests/unit/prompt-config-cold-routing.test.ts:218` |
-| `expected 'openai-failover' to be 'anthropic'` and `to be 'anthropic-failover'` | failover resolution expectations |
-| `expected { task: 'critique_graph', …(10) } to match object { model: 'gpt-4o', …(5) }` | a routing projection expectation |
-| `expected 200 to be 400` | a route test expecting the capability rejection |
-
-**This is the banked "sweep a shared symbol's READERS, not its directory" lesson
-recurring.** The capability map is read by router tests, cold-routing tests, a
-routing-projection test and at least one route test — none of which live in the
-directories I changed.
-
-## ⚠ AND #1764 WILL FAIL THE SAME WAY
-
-#1764 opens **`explain_diff`** in the same map. It will break the same
-readers — the deep-equal test and any `expectProviderMismatch('explain_diff',
-'openai')` — for identical reasons. **Fix both together.**
-
-## The fix, in order
-
-```bash
-# 1. Derive the FULL reader set of the capability map — do not guess
-rg -l -a 'ROUTER_TASK_PROVIDER_CAPABILITIES' src tests
-rg -n -a 'expectProviderMismatch' tests
-# 2. Fix each reader so it asserts the NEW fact (critique_graph and explain_diff
-#    are implemented on OpenAI) while KEEPING a contrast control: some task must
-#    still be closed to some provider, or the suite proves nothing.
-# 3. Re-run just those files, then push ONCE (each push restarts CI in the queue)
-# 4. Re-post an exact-head REVIEW_REQUEST in the same action as the push
-```
-
-⭐ **Keep a contrast control.** The whole point of the map is that it states a
-fact. After opening both `critique_graph` and `explain_diff`, the map has **no
-closed entry left** — so the asymmetry test I wrote in #1755
-(`explain_diff` must NOT contain `openai`) becomes false and must be replaced.
-**Replace it with a positive assertion that the adapters implement both**, and
-find a different discriminator for "the map tracks reality" — e.g. that a
-genuinely unimplemented provider/task pair still throws. **Do not simply delete
-the failing assertion**; that would leave the map unguarded, which is how it
-drifted into being wrong in the first place.
-
-⚠ **`Integration Tests (advisory)` and `Full Test Suite (advisory)` also went
-red** on the same head — likely the same root cause (the `explain-diff` route
-logs a `ZodError: rationales — Array must contain at least 1 element(s)`, which
-is the `.min(1)` contract my #1764 notes describe). Check whether those are
-pre-existing on staging's own head before treating them as mine: several estate
-advisories are known-red.
