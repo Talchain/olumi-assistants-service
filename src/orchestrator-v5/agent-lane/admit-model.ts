@@ -732,7 +732,51 @@ export function admitCandidateModel(
     return undefined;
   });
 
-  loss.push(...linkResult.loss, ...constraintResult.loss);
+  /**
+   * ⛔ ONE CONNECTION, ONE EDGE — an option's link to a factor it already acts on
+   * is the SAME connection, not a second one.
+   *
+   * MEASURED LIVE (23 Sep, Paul's hiring brief, gpt-5.6-terra): the drafter named
+   * each option's factors in `changes`/`interventions` AND restated them as
+   * `links`, so admission emitted the canonical structural edge AND a causal
+   * duplicate for the same option -> factor pair — 4 duplicates, 28 real links
+   * reported as 32, and the first model was refused as oversized. The duplicate
+   * is also wrong in kind: an option -> factor edge must carry the canonical
+   * structural values (`graph-validator.ts`, STRUCTURAL_EDGE_NOT_CANONICAL_ERROR),
+   * which the causal projection (0.5 / 0.125 / 0.8) does not.
+   *
+   * So the structural edge is kept and the duplicate is dropped, with the
+   * projection entries it generated, and the drop is recorded — nothing silent.
+   * A candidate option -> factor link with NO structural twin is untouched.
+   */
+  const topologyPairs = new Set(topologyEdges.map((e) => `${e.from}\u0000${e.to}`));
+  const optionIdSet = new Set(optionNodes.map((o) => o.id));
+  const duplicatePairs = new Set(
+    linkResult.edges
+      .filter((e) => optionIdSet.has(e.from) && topologyPairs.has(`${e.from}\u0000${e.to}`))
+      .map((e) => `${e.from}::${e.to}`),
+  );
+  const causalEdges = linkResult.edges.filter((e) => !duplicatePairs.has(`${e.from}::${e.to}`));
+  const causalLoss = linkResult.loss.filter((l) => {
+    const m = /^edges\[(.+?)\]\./.exec(String(l.field_path ?? ''));
+    return m === null || !duplicatePairs.has(m[1]!);
+  });
+  for (const pair of duplicatePairs) {
+    const [from, to] = pair.split('::');
+    const stated = linkResult.edges.find((e) => e.from === from && e.to === to);
+    loss.push({
+      field_path: `edges[${pair}]`,
+      before: stated?.effect_direction ?? null,
+      after: 'structural',
+      reason:
+        'This option already acts on this factor, so the link was the same connection stated twice. ' +
+        'It is kept once, as the structural option-to-factor edge; what the option sets the factor to ' +
+        'is carried by the option itself, not by the sign of this edge.',
+      severity: 'info',
+    } as RepairEntry);
+  }
+
+  loss.push(...causalLoss, ...constraintResult.loss);
 
   /**
    * ⛔ AN ORPHANED GOAL MAKES THE WHOLE MODEL UNANALYSABLE, and it is invisible
@@ -752,7 +796,7 @@ export function admitCandidateModel(
    * It fires only when the goal has no incoming edge at all. If the model
    * connected the goal properly, nothing here runs.
    */
-  const allEdges = [...topologyEdges, ...linkResult.edges];
+  const allEdges = [...topologyEdges, ...causalEdges];
   const goalNode = nodes.find((n) => n.kind === 'goal');
   const repaired: AdmittedEdge[] = [];
   if (goalNode !== undefined && !allEdges.some((e) => e.to === goalNode.id)) {

@@ -80,14 +80,15 @@ describe('⛔ FINDING 1 — the candidate schema must not cap arrays that can ho
 });
 
 describe('⛔ FINDING 2 — user-stated RELATIONSHIPS are protected, not just nodes', () => {
-  // 6 nodes (inside the 12 limit) but 24 user-stated edges (over the 20 limit).
+  // 6 nodes (inside the node limit) but more user-stated edges than the edge limit.
   const ids = ['a', 'b', 'c', 'd', 'e', 'f'];
   const nodeSpecs: NodeSpec[] = ids.map((id, i) => ({
     id,
     kind: i === 0 ? 'goal' : 'factor',
     cls: 'brief_stated' as InferenceClass,
   }));
-  const edgeSpecs = Array.from({ length: 24 }, (_, i) => ({
+  const STATED = COMPACT_LIMITS.maxEdges + 4;
+  const edgeSpecs = Array.from({ length: STATED }, (_, i) => ({
     from: ids[i % ids.length]!,
     to: ids[(i + 1) % ids.length]!,
     briefStated: true,
@@ -95,12 +96,12 @@ describe('⛔ FINDING 2 — user-stated RELATIONSHIPS are protected, not just no
   const v = assessConstructionSize(model(nodeSpecs, edgeSpecs));
 
   it('counts the user-stated relationships', () => {
-    expect(v.brief_stated_edges).toBe(24);
+    expect(v.brief_stated_edges).toBe(STATED);
   });
 
   it('is over the edge limit', () => {
     expect(v.within).toBe(false);
-    expect(v.over_by.edges).toBe(24 - COMPACT_LIMITS.maxEdges);
+    expect(v.over_by.edges).toBe(STATED - COMPACT_LIMITS.maxEdges);
   });
 
   it('⭐ flags user_material_exceeds_limit on RELATIONSHIPS, not only nodes', () => {
@@ -120,7 +121,7 @@ describe('the node exemption still works, and widening is still sheddable', () =
   it('flags a node-heavy explicit brief', () => {
     const v = assessConstructionSize(
       model(
-        Array.from({ length: 15 }, (_, i) => ({ id: `o${i}`, kind: 'option', cls: 'brief_stated' as InferenceClass })),
+        Array.from({ length: COMPACT_LIMITS.maxNodes + 3 }, (_, i) => ({ id: `o${i}`, kind: 'option', cls: 'brief_stated' as InferenceClass })),
         [],
       ),
     );
@@ -132,13 +133,14 @@ describe('the node exemption still works, and widening is still sheddable', () =
       model(
         [
           { id: 'g', kind: 'goal', cls: 'brief_stated' },
-          ...Array.from({ length: 14 }, (_, i) => ({ id: `f${i}`, kind: 'factor', cls: 'model_proposed' as InferenceClass })),
+          ...Array.from({ length: COMPACT_LIMITS.maxNodes }, (_, i) => ({ id: `f${i}`, kind: 'factor', cls: 'model_proposed' as InferenceClass })),
         ],
-        Array.from({ length: 25 }, (_, i) => ({ from: `f${i % 14}`, to: 'g', briefStated: false })),
+        Array.from({ length: COMPACT_LIMITS.maxEdges + 5 }, (_, i) => ({ from: `f${i % COMPACT_LIMITS.maxNodes}`, to: 'g', briefStated: false })),
       ),
     );
+    expect(v.within).toBe(false);
     expect(v.user_material_exceeds_limit).toBe(false);
-    expect(v.sheddable_nodes).toBe(14);
+    expect(v.sheddable_nodes).toBe(COMPACT_LIMITS.maxNodes);
     expect(v.brief_stated_edges).toBe(0);
   });
 });

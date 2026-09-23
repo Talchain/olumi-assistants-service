@@ -11,7 +11,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
-import { assessConstructionSize } from '../construction-size-gate.js';
+import { COMPACT_LIMITS, assessConstructionSize } from '../construction-size-gate.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 
 const SCENARIO = '22222222-2222-4222-8222-222222222222';
@@ -92,7 +92,7 @@ describe('an oversized first model gets exactly ONE bounded retry', () => {
     const s = structuredSequence(candidate(20), candidate(3));
     await buildModelFromBrief(SCENARIO, BRIEF, dispatcher().d, s.fn);
     const retry = s.calls[1]!;
-    expect(retry).toContain('12 nodes and 20 links');
+    expect(retry).toContain(`${COMPACT_LIMITS.maxNodes} nodes and ${COMPACT_LIMITS.maxEdges} links`);
     expect(retry).toMatch(/not negotiable|must not be dropped/i);
     expect(retry).toContain('`unknowns`');
     // The first pass's rules still hold — the delta is APPENDED, not a replacement.
@@ -116,8 +116,8 @@ describe('⛔ the refusal is explicit, and writes nothing', () => {
     const dp = dispatcher();
     const out = await buildModelFromBrief(SCENARIO, BRIEF, dp.d, s.fn);
     expect(out['refusal']).toBe('model_too_large');
-    expect(out['limits']).toEqual({ maxNodes: 12, maxEdges: 20 });
-    expect(Number(out['nodes'])).toBeGreaterThan(12);
+    expect(out['limits']).toEqual(COMPACT_LIMITS);
+    expect(Number(out['nodes'])).toBeGreaterThan(COMPACT_LIMITS.maxNodes);
     expect(Number(out['added_beyond_brief'])).toBeGreaterThan(0);
     expect(out['retried']).toBe(true);
     expect(out.mutated).toBe(false);
@@ -161,10 +161,10 @@ describe('a retry that is not actually smaller is NOT adopted', () => {
 
 describe('⭐ the cap never overrides the user', () => {
   it('ADMITS an oversized model when the user’s OWN material is what exceeds it', async () => {
-    // 14 options the user themselves named: their decision genuinely has 14.
+    // More options than the node limit, all named by the user themselves.
     const userHeavy = {
       ...candidate(0),
-      options: Array.from({ length: 14 }, (_, i) => ({
+      options: Array.from({ length: COMPACT_LIMITS.maxNodes + 2 }, (_, i) => ({
         label: `User option ${i}`, provenance: 'explicit',
         changes: ['Delivery capacity'], interventions: [],
       })),

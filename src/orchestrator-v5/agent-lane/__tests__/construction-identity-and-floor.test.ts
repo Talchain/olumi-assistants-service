@@ -6,7 +6,7 @@
  *    relationship was adopted and registered once. Same counts are not the same
  *    decision.
  * 2. ⛔ THE CAP GOVERNS MODEL-PROPOSED ENRICHMENT ONLY. Release Control: when the
- *    user's material PLUS required structural scaffolding alone exceeds 12/20,
+ *    user's material PLUS required structural scaffolding alone exceeds the limits,
  *    admit the model unchanged and report it oversized — never refuse, truncate
  *    or retry it.
  *
@@ -16,7 +16,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
-import { assessConstructionSize } from '../construction-size-gate.js';
+import { COMPACT_LIMITS, assessConstructionSize } from '../construction-size-gate.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 
 const SCENARIO = '33333333-3333-4333-8333-333333333333';
@@ -207,15 +207,16 @@ describe('⛔ the cap never overrides the user’s material plus its required sc
     // Paul's real first turn: most nodes arrive classed builder-inferred. Were that
     // class in the floor, the widening itself would be exempt and nothing retried.
     const c = candidate({ extraFactors: 0 });
-    (c.factors as unknown[]).push(...Array.from({ length: 14 }, (_, i) => factor(`Inferred factor ${i}`, 'inferred')));
-    (c.links as unknown[]).push(...Array.from({ length: 14 }, (_, i) => link(`Inferred factor ${i}`, 'Velocity')));
+    const INFERRED = COMPACT_LIMITS.maxNodes + 2;
+    (c.factors as unknown[]).push(...Array.from({ length: INFERRED }, (_, i) => factor(`Inferred factor ${i}`, 'inferred')));
+    (c.links as unknown[]).push(...Array.from({ length: INFERRED }, (_, i) => link(`Inferred factor ${i}`, 'Velocity')));
     const admitted = admitCandidateModel(c as unknown as CandidateModel, {});
     const inferred = admitted.nodes.filter((n) => admitted.inference_classes[n.id] === 'builder_inferred').length;
-    expect(inferred, 'vacuity: the builder-inferred nodes alone exceed the node limit').toBeGreaterThan(12);
+    expect(inferred, 'vacuity: the builder-inferred nodes alone exceed the node limit').toBeGreaterThan(COMPACT_LIMITS.maxNodes);
     const v = assessConstructionSize(admitted);
     expect(v.within).toBe(false);
     expect(v.user_material_exceeds_limit).toBe(false);
-    expect(v.floor_nodes).toBeLessThanOrEqual(12);
+    expect(v.floor_nodes).toBeLessThanOrEqual(COMPACT_LIMITS.maxNodes);
 
     const s = structuredSequence(c, c);
     const dp = dispatcher();
@@ -225,15 +226,16 @@ describe('⛔ the cap never overrides the user’s material plus its required sc
     expect(out.refusal).toBe('model_too_large');
   });
 
-  it('RED: user-stated material ≤ 12 but material + scaffolding > 12 → ADMITTED unchanged, no retry, reported oversized', async () => {
-    const elevenOptions = Array.from({ length: 11 }, (_, i) => `User option ${i + 1}`);
-    const c = candidate({ extraFactors: 0, options: elevenOptions });
+  it('RED: user-stated material ≤ the node limit but material + scaffolding > it → ADMITTED unchanged, no retry, reported oversized', async () => {
+    const userOptions = Array.from({ length: COMPACT_LIMITS.maxNodes - 1 }, (_, i) => `User option ${i + 1}`);
+    const c = candidate({ extraFactors: 0, options: userOptions });
     // Vacuity guards: the user's OWN stated nodes fit the cap; the floor (their
     // material plus the goal/decision scaffolding) does not. At the old rule this
     // took the retry/refusal path.
     const v = sizeOf(c);
-    expect(v.brief_stated_nodes).toBeLessThanOrEqual(12);
-    expect(v.floor_nodes).toBeGreaterThan(12);
+    expect(v.brief_stated_nodes).toBeLessThanOrEqual(COMPACT_LIMITS.maxNodes);
+    expect(v.floor_nodes).toBeGreaterThan(COMPACT_LIMITS.maxNodes);
+    expect(v.within, 'vacuity: the model really is over the cap').toBe(false);
 
     const s = structuredSequence(c);
     const dp = dispatcher();

@@ -26,7 +26,7 @@ const SERVED_WIDEN_CLAUSE =
   'Then widen: add the options, factors, risks, outcomes and causal mechanisms that materially improve strategic reasoning, including alternatives beyond the user’s initial frame.';
 
 /** The compact clause this lane installed, as it appears in BUILD_INSTRUCTIONS. */
-const COMPACT_MARKER = 'KEEP THE FIRST MODEL DECISION-CRITICAL, NOT COMPREHENSIVE.';
+const COMPACT_MARKER = 'KEEP THE FIRST MODEL DECISION-CRITICAL, NOT COMPREHENSIVE';
 
 function key(): string {
   for (const f of ['/Users/paulslee/Documents/GitHub/olumi-assistants-service/.env']) {

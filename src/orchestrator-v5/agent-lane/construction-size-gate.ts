@@ -36,10 +36,21 @@
 import type { AdmittedModel, InferenceClass } from './admit-model.js';
 
 /**
- * Hard initial target. Set by Release Control, not derived here — so it is a
- * stated product limit rather than a number this module invented.
+ * The ceiling a first model is gated against — a BACKSTOP to the envelope, not
+ * the envelope itself, and not a product rule.
+ *
+ * ⛔ WAS 12 / 20, AND 12 / 20 MADE THE ENVELOPE UNREACHABLE. Release Control's
+ * envelope (5792626729) is 1 decision + 1 goal + every user option (normally
+ * 3–5) + roughly 4–8 factors + 4–6 outcomes and risks only where they
+ * materially improve the reasoning: 12–18 nodes for an ordinary brief, up to
+ * 21 at its edges. Links are decision→option (≤5) + option→factor + each
+ * factor's own link toward the goal + outcome→goal — about 1.6× the node count.
+ * A 12/20 ceiling therefore refused, or forced a retry that shed, a model the
+ * envelope calls normal, and it pushed the drafter to the 6-node, goal-orphaned
+ * first model measured on served 553254d. 18 / 30 admits the ordinary envelope
+ * and still catches the 26-node / 57-link explosion this gate was built for.
  */
-export const COMPACT_LIMITS = { maxNodes: 12, maxEdges: 20 } as const;
+export const COMPACT_LIMITS = { maxNodes: 18, maxEdges: 30 } as const;
 
 export interface ConstructionSizeLimits {
   readonly maxNodes: number;
