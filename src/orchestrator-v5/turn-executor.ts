@@ -262,6 +262,8 @@ import { stripPlanningPreamble } from './routing/strip-planning-preamble.js';
 import { tryStaleRerunGuard } from './routing/stale-rerun-guard.js';
 import { tryRunComparisonGate } from './routing/run-comparison-gate.js';
 import { tryNoAnalysisGuard } from './routing/no-analysis-guard.js';
+import { detectUnblockAnalysisIntent } from './routing/unblock-analysis-intent.js';
+import { buildUnblockAnalysisAnswer } from './routing/unblock-analysis-answer.js';
 import {
   collectOptionGuardLabels,
   impliesOptionInterventionEdit,
@@ -9657,6 +9659,109 @@ export async function runTurnExecutor(
                 err: serialiseError(error),
               },
               'V5 TurnExecutor commit failure on no-analysis guard',
+            );
+            failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
+            response = buildFailureResponse(
+              'STATE_COMMIT_FAILED',
+              context.stage,
+              { phase: 'commit' },
+              recoveryCtx(),
+            );
+          }
+          return finalizeRun();
+        }
+      }
+
+      // ⭐⭐ UNBLOCK-ANALYSIS PRE-ROUTE — "what is stopping my analysis?"
+      //
+      // ⛔ MEASURED, deployed staging 23 Sep, scenario `399c2814`. Readiness
+      // held exactly ONE issue for thirty-seven minutes — OPTION_NEEDS_MAPPING,
+      // "How does Two Developers change Coordination Overhead Risk?" — while
+      // the other option was `ready` throughout. The user wrote "just help me
+      // fix what's stopping me from running the analysis". `tryNoAnalysisGuard`
+      // correctly declined (`no_analytical_signal`: its remedy is "run analysis
+      // first", which was not his problem), nothing else claimed the turn, and
+      // generic LLM routing chose `adjust_edge_strength` — which moved a number
+      // that COULD NEVER satisfy a mapping obligation. No analysis fact was
+      // created and the blocker was untouched.
+      //
+      // ⚠ IT RUNS AFTER THE NO-ANALYSIS GUARD, DELIBERATELY. That guard's
+      // behaviour is pinned by its own suites; running ahead of it would change
+      // which of the two claims a turn both could match. This only ever claims
+      // turns the guard has already declined, so the existing path is
+      // byte-unchanged and the delta is confined to turns that previously fell
+      // through to the router.
+      //
+      // The answer is built from `analysisReadyForTurn` — the canonical
+      // readiness the turn ALREADY computed — so this is a field read, not a
+      // second opinion about what blocks admission. Two authorities on that
+      // question is the defect that sent the user to configure an option which
+      // was already configured.
+      if (routingResult === undefined) {
+        const unblockIntent = detectUnblockAnalysisIntent(payload.message);
+        log.info(
+          {
+            event: 'v5.unblock_analysis_preroute',
+            request_id: requestId,
+            session_id: context.session_id,
+            matched: unblockIntent.matched,
+            unmatched_reason: unblockIntent.matched ? null : unblockIntent.reason,
+            authorises_repair: unblockIntent.matched ? unblockIntent.authorises_repair : null,
+            readiness_status: analysisReadyForTurn?.status ?? null,
+          },
+          'V5 unblock-analysis pre-route',
+        );
+        if (unblockIntent.matched) {
+          const unblockAnswer = buildUnblockAnalysisAnswer(
+            analysisReadyForTurn as never,
+            { authorises_repair: unblockIntent.authorises_repair },
+          );
+          const unblockResponse = composeAnswer({
+            answerKind: 'functional',
+            assistant_text: unblockAnswer.assistant_text,
+            stage: context.stage,
+            suggested_actions: unblockAnswer.offer_run_analysis
+              ? [
+                  {
+                    id: 'chip_action_run_analysis',
+                    label: 'Run analysis',
+                    message: 'Run analysis.',
+                    action_type: 'run_analysis' as const,
+                  },
+                ]
+              : [],
+          });
+          sonnetTextForLog = unblockResponse.assistant_text;
+          resolvedTurnClass = 'direct_answer';
+          intentClass = 'converse';
+          responseTypeForObs = 'direct_answer';
+          llmCallsUsed = 0;
+          stagesCompleted.push('orient');
+          stagesCompleted.push('compose');
+          try {
+            const committed = await commitTurn(unblockResponse, {
+              scenario_id: context.session_id,
+              turn_id: context.request_id,
+              turn_class: 'direct_answer',
+              handler_id: null,
+              request_hash: computeRequestHash(payload),
+              llm_calls_used: 0,
+              duration_ms: Date.now() - startedAt,
+              handler_facts: [],
+            });
+            commitPerformed = committed.performed;
+            stagesCompleted.push('commit');
+            response = committed.response;
+          } catch (error) {
+            log.error(
+              {
+                event: 'v5.state_commit_failed',
+                request_id: requestId,
+                session_id: context.session_id,
+                path: 'unblock_analysis_preroute',
+                err: serialiseError(error),
+              },
+              'V5 TurnExecutor commit failure on unblock-analysis pre-route',
             );
             failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
             response = buildFailureResponse(
