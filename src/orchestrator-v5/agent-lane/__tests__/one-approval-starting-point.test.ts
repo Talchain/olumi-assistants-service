@@ -54,9 +54,11 @@ function fakeProduct(opts: {
   /** An unrelated actor edits the model at this moment. */
   foreignEditAfterReads?: number;
   foreignEditAfterRegister?: boolean;
+  /** A different starting model, for cases the shared one cannot express. */
+  base?: Node[];
 } = {}) {
   const posted: Posted[] = [];
-  let nodes: Node[] = BASE.map((n) => ({ ...n, ...(n.observed_state ? { observed_state: { ...n.observed_state } } : {}) }));
+  let nodes: Node[] = (opts.base ?? BASE).map((n) => ({ ...n, ...(n.observed_state ? { observed_state: { ...n.observed_state } } : {}) }));
   let rev = 0;
   let reads = 0;
   const foreign = () => {
@@ -219,6 +221,43 @@ describe('propose_starting_point', () => {
     expect(byId.hire_lead.interventions ?? undefined).toBeUndefined();
     // Never listed as done; only the object the user was shown can await approval.
     expect(store.outstanding(SCENARIO, USER).map((w) => w.proposal_id)).toEqual([id]);
+  });
+
+  /**
+   * ⛔ A LEVEL IS A NUMBER ON ITS FACTOR'S FRAME — independent review of #1712
+   * at 286240fa (M6): removing the frame refusal turned nothing RED, yet one
+   * approval then stored a level SHOWN as 1 FTE as 10 FTE and reported
+   * `applied: true`. The level is proposed while its factor has no range (so it
+   * is read against the range derived from its own figure); this SAME approval's
+   * value then gives the factor a range of 0-10. Applied as-is, 1.0 of 0-10 = 10.
+   */
+  it('a level whose factor THIS approval would re-frame is REFUSED before any write — 1 FTE is never stored as 10', async () => {
+    const base: Node[] = [
+      { id: 'velocity', kind: 'goal', label: 'Velocity' },
+      { id: 'tech_leads', kind: 'factor', label: 'Tech leads hired', category: 'controllable' },
+      { id: 'hire_lead', kind: 'option', label: 'Hire a Tech Lead' },
+    ];
+    const p = fakeProduct({ base });
+    const store = new ProposalStore();
+    const caps = createAgentCapabilities(p.d, store);
+    const r = await caps.proposeStartingPoint(ctx, {
+      assumptions: [{ factor_label: 'Tech leads hired', value: 3, unit: 'FTE', basis: 'three leads across the org today' }],
+      option_levels: [{ option_label: 'Hire a Tech Lead', factor_label: 'Tech leads hired', value: 1, basis: 'one hire' }],
+    });
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    const kinds = new Set(store.get(String(r.proposal_id))!.operations.map((o) => o.op));
+    expect([...kinds].sort(), 'both halves must be in the ONE proposal for this case to mean anything').toEqual(['set_factor_value', 'set_option_intervention']);
+    const out = await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) });
+    expect(out.ok).toBe(false);
+    expect(out.applied).toBe(false);
+    expect(out.mutated).toBe(false);
+    expect(out.refusal).toBe('not_applied');
+    expect(out.reason).toBe('level_frame_changed_by_values');
+    // ZERO writes attempted — refused before the one conditional registration.
+    expect(p.posted).toEqual([]);
+    const byId = Object.fromEntries(p.read().map((n) => [n.id, n]));
+    expect(byId.hire_lead.interventions).toBeUndefined();
+    expect(byId.tech_leads.observed_state).toBeUndefined();
   });
 
   it('a level that refuses is reported as PARTIAL, and never listed as a second thing to approve', async () => {
