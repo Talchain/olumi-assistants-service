@@ -119,7 +119,21 @@ describe('[P1c.1] the enforcement auto-retry arm reaches the quality pass', () =
   });
 
   it('⭐ BOTH success arms return through the quality pass', () => {
-    const calls = fnBody.match(/return applyDraftQualityPass\(\{/g) ?? [];
+    // ⚠ MATCHES THE CALL, NOT ITS ARGUMENT SHAPE. This read
+    // `applyDraftQualityPass({` until the first arm's argument became a
+    // conditional (observe-only once a grammar redraw has already been spent).
+    // The invariant is "a successful draw is never shipped unmeasured" — that
+    // is about the CALL, and a brace is not part of it.
+    const calls = fnBody.match(/return applyDraftQualityPass\(/g) ?? [];
+    expect(calls).toHaveLength(2);
+  });
+
+  it('⭐ BOTH success arms are also measured against the edge grammar', () => {
+    // The sibling invariant, added with the grammar pass: the same two arms
+    // that must not ship unmeasured by COVERAGE must not ship unmeasured by
+    // LEGALITY either. The enforcement-retry arm supplies no `redraw`, so its
+    // row is emitted with no possibility of spending a further draw.
+    const calls = fnBody.match(/await applyGrammarRedraw\(\{/g) ?? [];
     expect(calls).toHaveLength(2);
   });
 
@@ -130,7 +144,7 @@ describe('[P1c.1] the enforcement auto-retry arm reaches the quality pass', () =
     const returns = (fnBody.match(/\n\s*return [A-Za-z_][^\n]*/g) ?? []).map((s) => s.trim());
     expect(returns.length).toBeGreaterThan(0);
     const classified = returns.map((r) => {
-      if (r.startsWith('return applyDraftQualityPass({')) return 'measured';
+      if (r.startsWith('return applyDraftQualityPass(')) return 'measured';
       if (r.startsWith('return applyRetryUnaffordableCopy(')) return 'failure_arm';
       if (r.startsWith('return applyRetryExhaustedCopy(')) return 'failure_arm';
       // goalfence: the draft blocked on a goal CEE itself minted, so no retry

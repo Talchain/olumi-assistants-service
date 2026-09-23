@@ -36,6 +36,7 @@ import {
 } from "./draft-auto-retry.js";
 import { buildPriorAttemptDirective } from "./retry-directive.js";
 import { applyDraftQualityPass } from "../draft-quality/pipeline-hook.js";
+import { applyGrammarRedraw } from "../draft-quality/grammar-redraw.js";
 import {
   MIN_DRAFT_RETRY_BUDGET_MS,
   VALIDATION_ATTACH_WAIT_MS,
@@ -789,24 +790,66 @@ export async function runUnifiedPipeline(
     // returns `first` byte-identical on every arm except a successful redraw
     // that is materially richer. It cannot introduce a failure and it cannot
     // throw.
-    return applyDraftQualityPass({
+    // ⚠ `string | null | undefined`: the two consumers spell "no directive"
+    // differently — the quality pass passes `null`, the grammar pass a string,
+    // and the failure retry omits it. One callback serves all three rather than
+    // three near-copies of the same attempt builder.
+    const redrawAttempt = (directive: string | null | undefined) =>
+      runUnifiedPipelineAttempt(input, rawBody, request, {
+        ...opts,
+        // Same composition-safety rule as the failure retry: attempt 2's
+        // budget arithmetic measures elapsed time from where the REQUEST
+        // started, not from where the redraw did, so the whole composition
+        // stays inside DRAFT_REQUEST_BUDGET_MS by construction.
+        requestStartMs: retryBaselineMs,
+        ...(directive ? { priorAttemptDirective: directive } : {}),
+      });
+
+    // ⭐⭐ THE THIRD AUTHORITY, AND IT RUNS FIRST BECAUSE IT IS THE CHEAP ONE.
+    //
+    // "Did this draft break the ALLOWED EDGE PATTERNS rule its own prompt
+    // states?" is answered by COUNTING EDGES — no judge call, no model spend —
+    // so a clean draw reaches the quality pass having paid nothing at all, on
+    // the same object, and roughly half of live traffic drafts clean.
+    //
+    // WHY IT IS NOT A CLAUSE IN THE PASS BELOW: that pass selects on COVERAGE,
+    // which rewards MORE nodes. A draw that fixes this defect is the same size
+    // or smaller, so the richer-selector would reject exactly the draw this
+    // keeps. Opposite directions under one predicate is trap 21.
+    //
+    // ⚠ MEASURED, 23 Sep 2026, deployed `bdad785a`: the same brief drafted four
+    // times reached `status: ready` twice and `needs_user_mapping` twice, and
+    // across 7+ captured drafts an `option→risk` edge agreed with the refusal
+    // 100% of the time. This is the defect, not a tidy-up.
+    const grammar = await applyGrammarRedraw({
       first,
-      brief: readBriefForQuality(input, rawBody),
       requestId: getRequestId(request),
       elapsedMs,
-      retryBaselineMs,
       attemptSource: "first",
-      redraw: (directive) =>
-        runUnifiedPipelineAttempt(input, rawBody, request, {
-          ...opts,
-          // Same composition-safety rule as the failure retry: attempt 2's
-          // budget arithmetic measures elapsed time from where the REQUEST
-          // started, not from where the redraw did, so the whole composition
-          // stays inside DRAFT_REQUEST_BUDGET_MS by construction.
-          requestStartMs: retryBaselineMs,
-          ...(directive ? { priorAttemptDirective: directive } : {}),
-        }),
+      redraw: redrawAttempt,
     });
+
+    // ⛔ `drawSpent`, NOT "did the result change". A grammar redraw that was
+    // spent and LOST returns the first draw byte-identical, so inferring spend
+    // from object identity would let the quality pass fund a THIRD full draw on
+    // the user's clock in precisely the case that already cost the most. When a
+    // draw has been spent this arm becomes OBSERVE-ONLY: `redraw` is omitted
+    // entirely, so a further draw is structurally impossible rather than gated,
+    // and `attempt_source` keeps the two populations separable on the wire.
+    const qualityInput = {
+      first: grammar.result,
+      brief: readBriefForQuality(input, rawBody),
+      requestId: getRequestId(request),
+      elapsedMs: grammar.drawSpent ? Date.now() - retryBaselineMs : elapsedMs,
+      retryBaselineMs,
+    } as const;
+    return applyDraftQualityPass(
+      grammar.drawSpent
+        // Observe-only: `redraw` is ABSENT, not undefined, so a further draw is
+        // structurally impossible rather than merely gated.
+        ? { ...qualityInput, attemptSource: "quality_redraw" }
+        : { ...qualityInput, attemptSource: "first", redraw: redrawAttempt },
+    );
   }
 
   const firstDetails = ((first.body as Record<string, unknown> | null)?.details ?? {}) as Record<string, unknown>;
@@ -884,8 +927,20 @@ export async function runUnifiedPipeline(
   // gated), and the result is returned byte-identical. It also keeps this
   // population separable from a quality redraw on the wire — the two are
   // different diagnoses about the drafter.
-  return applyDraftQualityPass({
+  // Measured on this arm too, and OBSERVE-ONLY by construction: no `redraw`
+  // callback is supplied, so `decideGrammarRedraw` returns
+  // `redraw_already_spent` and the row is emitted without any possibility of a
+  // further draw. Leaving it out would blind the metric to the population most
+  // worth watching — drafts that had already gone wrong once.
+  const secondGrammar = await applyGrammarRedraw({
     first: second,
+    requestId: getRequestId(request),
+    elapsedMs: Date.now() - retryBaselineMs,
+    attemptSource: "enforcement_retry",
+  });
+
+  return applyDraftQualityPass({
+    first: secondGrammar.result,
     brief: readBriefForQuality(input, rawBody),
     requestId: getRequestId(request),
     elapsedMs: Date.now() - retryBaselineMs,

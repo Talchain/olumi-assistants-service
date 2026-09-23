@@ -32,23 +32,42 @@ describe('draft-quality is mounted on the live draft path', () => {
     // arm it declined. If the call ever moved above the failure decision, a
     // retryable 422 would be handed to a pass that expects a shippable model.
     const failureDecision = wrapper.indexOf('decideDraftAutoRetry(first, elapsedMs)');
-    const qualityCall = wrapper.indexOf('applyDraftQualityPass({');
+    const qualityCall = wrapper.indexOf('applyDraftQualityPass(');
     expect(failureDecision).toBeGreaterThan(-1);
     expect(qualityCall).toBeGreaterThan(-1);
     expect(qualityCall).toBeGreaterThan(failureDecision);
   });
 
   it('the redraw reuses the ONE attempt runner, with the request-start baseline pinned', () => {
-    const call = wrapper.slice(
-      wrapper.indexOf('applyDraftQualityPass({'),
-      wrapper.indexOf('applyDraftQualityPass({') + 1600,
-    );
+    // ⭐ STRONGER THAN THE WINDOW IT REPLACES. This used to slice 1,600 chars
+    // after the quality-pass call and look for an INLINE attempt runner, so it
+    // was really asserting a layout. Two passes now share ONE hoisted
+    // `redrawAttempt`, which is what "the ONE attempt runner" always meant, and
+    // the window silently stopped covering it.
+    //
     // Same composition-safety rule as the failure retry: attempt 2's budgets
     // measure from where the REQUEST started, so the whole composition stays
     // inside DRAFT_REQUEST_BUDGET_MS by construction.
-    expect(call).toContain('runUnifiedPipelineAttempt(input, rawBody, request, {');
-    expect(call).toContain('requestStartMs: retryBaselineMs');
-    expect(call).toContain('priorAttemptDirective');
+    const builder = wrapper.slice(
+      wrapper.indexOf('const redrawAttempt ='),
+      wrapper.indexOf('const grammar = await applyGrammarRedraw('),
+    );
+    expect(builder.length).toBeGreaterThan(100);
+    expect(builder).toContain('runUnifiedPipelineAttempt(input, rawBody, request, {');
+    expect(builder).toContain('requestStartMs: retryBaselineMs');
+    expect(builder).toContain('priorAttemptDirective');
+
+    // ⛔ AND BOTH CONSUMERS ARE HANDED THAT SAME CALLBACK — never their own.
+    // Two references, one builder: neither pass can acquire an attempt runner
+    // with its own baseline, which is the defect the original window was
+    // reaching for. A THIRD reference, or any inline
+    // `runUnifiedPipelineAttempt` beside them, REDs here.
+    expect(wrapper.match(/redraw: redrawAttempt/g) ?? []).toHaveLength(2);
+    expect(wrapper.match(/runUnifiedPipelineAttempt\(input, rawBody, request, \{/g) ?? [])
+      // The two sites that build an options LITERAL: the shared redraw builder
+      // and the failure retry's attempt 2. Attempt 1 passes `opts` through
+      // unchanged and is deliberately not one of them.
+      .toHaveLength(2);
   });
 
   it('the wrapper still returns the plain first result on the failure arms it owns', () => {

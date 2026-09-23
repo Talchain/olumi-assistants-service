@@ -73,48 +73,87 @@ describe('the pass — fail open, always', () => {
     // this: identity, not deep equality.
     const first = ok(CLEAN);
     const redraw = vi.fn(async () => ok(CLEAN));
-    const out = await applyGrammarRedraw({ first, requestId: 'r', elapsedMs: AFFORDABLE_MS, redraw });
+    const out = (await applyGrammarRedraw({ first, requestId: 'r', elapsedMs: AFFORDABLE_MS, redraw })).result;
     expect(out).toBe(first);
     expect(redraw).not.toHaveBeenCalled();
   });
 
+  /**
+   * ⭐⭐ `drawSpent` IS NOT "the second draw won". The caller chains this into
+   * `applyDraftQualityPass`, which can fund a draw of its own. A redraw that
+   * was SPENT AND LOST returns the first draw — identical, by object identity,
+   * to never having redrawn — so a caller inferring spend from the result would
+   * fund a THIRD full draw on the user's clock in exactly the expensive case.
+   */
+  describe('drawSpent reports the SPEND, never the winner', () => {
+    it('is false only when the drafter was never called again', async () => {
+      const clean = await applyGrammarRedraw({ first: ok(CLEAN), requestId: 'r', elapsedMs: AFFORDABLE_MS, redraw: async () => ok(CLEAN) });
+      expect(clean.drawSpent).toBe(false);
+      const noCallback = await applyGrammarRedraw({ first: ok(DIRTY_8), requestId: 'r', elapsedMs: AFFORDABLE_MS });
+      expect(noCallback.drawSpent).toBe(false);
+      const broke = await applyGrammarRedraw({ first: ok(DIRTY_8), requestId: 'r', elapsedMs: 10_000_000, redraw: async () => ok(CLEAN) });
+      expect(broke.drawSpent).toBe(false);
+    });
+
+    it('is TRUE when the redraw was spent and LOST — the expensive case', async () => {
+      for (const second of [ok(DIRTY_8), failed(), ok('not a graph')]) {
+        const r = await applyGrammarRedraw({ first: ok(DIRTY_2), requestId: 'r', elapsedMs: AFFORDABLE_MS, redraw: async () => second });
+        expect(r.drawSpent).toBe(true);
+      }
+    });
+
+    it('is TRUE when the redraw threw — the drafter may already have been called', async () => {
+      const r = await applyGrammarRedraw({
+        first: ok(DIRTY_8), requestId: 'r', elapsedMs: AFFORDABLE_MS,
+        redraw: async () => { throw new Error('provider exploded'); },
+      });
+      expect(r.result).toBe(r.result);
+      expect(r.drawSpent).toBe(true);
+    });
+
+    it('is TRUE when the second draw won', async () => {
+      const r = await applyGrammarRedraw({ first: ok(DIRTY_8), requestId: 'r', elapsedMs: AFFORDABLE_MS, redraw: async () => ok(CLEAN) });
+      expect(r.drawSpent).toBe(true);
+    });
+  });
+
   it('ships the SECOND draw when it is cleaner', async () => {
     const second = ok(CLEAN);
-    const out = await applyGrammarRedraw({
+    const out = (await applyGrammarRedraw({
       first: ok(DIRTY_8), requestId: 'r', elapsedMs: AFFORDABLE_MS, redraw: async () => second,
-    });
+    })).result;
     expect(out).toBe(second);
   });
 
   it('ships the second draw when it is merely LESS dirty', async () => {
     const second = ok(DIRTY_2);
-    const out = await applyGrammarRedraw({
+    const out = (await applyGrammarRedraw({
       first: ok(DIRTY_8), requestId: 'r', elapsedMs: AFFORDABLE_MS, redraw: async () => second,
-    });
+    })).result;
     expect(out).toBe(second);
   });
 
   it('keeps the FIRST draw on a tie', async () => {
     const first = ok(DIRTY_2);
-    const out = await applyGrammarRedraw({
+    const out = (await applyGrammarRedraw({
       first, requestId: 'r', elapsedMs: AFFORDABLE_MS, redraw: async () => ok(DIRTY_2),
-    });
+    })).result;
     expect(out).toBe(first);
   });
 
   it('keeps the FIRST draw when the second is dirtier', async () => {
     const first = ok(DIRTY_2);
-    const out = await applyGrammarRedraw({
+    const out = (await applyGrammarRedraw({
       first, requestId: 'r', elapsedMs: AFFORDABLE_MS, redraw: async () => ok(DIRTY_8),
-    });
+    })).result;
     expect(out).toBe(first);
   });
 
   it('⛔ a FAILED second draw never replaces a shippable first draw', async () => {
     const first = ok(DIRTY_8);
-    const out = await applyGrammarRedraw({
+    const out = (await applyGrammarRedraw({
       first, requestId: 'r', elapsedMs: AFFORDABLE_MS, redraw: async () => failed(),
-    });
+    })).result;
     expect(out).toBe(first);
     expect(out.statusCode).toBe(200);
   });
@@ -128,27 +167,27 @@ describe('the pass — fail open, always', () => {
     // 422. This is the case that separates the two mechanisms.
     const first = ok(DIRTY_8);
     const poisoned = { statusCode: 422, body: { error: 'CEE_GRAPH_INVALID', graph: CLEAN } } as unknown as UnifiedPipelineResult;
-    const out = await applyGrammarRedraw({
+    const out = (await applyGrammarRedraw({
       first, requestId: 'r', elapsedMs: AFFORDABLE_MS, redraw: async () => poisoned,
-    });
+    })).result;
     expect(out).toBe(first);
     expect(out.statusCode).toBe(200);
   });
 
   it('an UNREADABLE second draw never wins', async () => {
     const first = ok(DIRTY_8);
-    const out = await applyGrammarRedraw({
+    const out = (await applyGrammarRedraw({
       first, requestId: 'r', elapsedMs: AFFORDABLE_MS, redraw: async () => ok('not a graph'),
-    });
+    })).result;
     expect(out).toBe(first);
   });
 
   it('a THROWING redraw returns the first draw and does not propagate', async () => {
     const first = ok(DIRTY_8);
-    const out = await applyGrammarRedraw({
+    const out = (await applyGrammarRedraw({
       first, requestId: 'r', elapsedMs: AFFORDABLE_MS,
       redraw: async () => { throw new Error('provider exploded'); },
-    });
+    })).result;
     expect(out).toBe(first);
   });
 

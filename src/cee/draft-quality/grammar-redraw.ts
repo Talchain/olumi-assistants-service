@@ -71,6 +71,22 @@ export type GrammarRedrawDecision =
   | { readonly redraw: true; readonly facts: EdgeGrammarFacts; readonly retryBudgetMs: number }
   | { readonly redraw: false; readonly reason: GrammarRedrawSkipReason; readonly facts: EdgeGrammarFacts | null };
 
+/**
+ * ⭐ WHY THIS RETURNS `drawSpent` AND NOT JUST THE RESULT.
+ *
+ * The caller chains this into `applyDraftQualityPass`, which can fund a draw of
+ * its own. "Did the second draw WIN?" and "did we SPEND a draw?" are different
+ * questions, and a caller that infers the second from the first (by comparing
+ * object identity) gets it wrong in exactly the expensive case: a redraw that
+ * was spent and LOST looks identical to no redraw at all, so the quality pass
+ * would then fund a THIRD full draw on the user's clock.
+ */
+export interface GrammarRedrawResult {
+  readonly result: UnifiedPipelineResult;
+  /** True iff the drafter was actually called again, whichever draw shipped. */
+  readonly drawSpent: boolean;
+}
+
 export interface GrammarRedrawInput {
   readonly first: UnifiedPipelineResult;
   readonly requestId: string;
@@ -122,7 +138,7 @@ export function decideGrammarRedraw(
  */
 export async function applyGrammarRedraw(
   input: GrammarRedrawInput,
-): Promise<UnifiedPipelineResult> {
+): Promise<GrammarRedrawResult> {
   try {
     return await runGrammarRedraw(input);
   } catch (err) {
@@ -132,11 +148,15 @@ export async function applyGrammarRedraw(
       { request_id: input.requestId, err: err instanceof Error ? err.message : String(err) },
       'grammar redraw threw — returning the original draft unchanged (fail open)',
     );
-    return input.first;
+    // ⚠ `drawSpent: true` is the HONEST answer on the throw arm: the drafter
+    // may well have been called before the throw, and claiming otherwise would
+    // license the next pass to spend another full draw on a request that has
+    // already paid for one.
+    return { result: input.first, drawSpent: true };
   }
 }
 
-async function runGrammarRedraw(input: GrammarRedrawInput): Promise<UnifiedPipelineResult> {
+async function runGrammarRedraw(input: GrammarRedrawInput): Promise<GrammarRedrawResult> {
   const decision = decideGrammarRedraw(input);
 
   // ⭐ EMITTED ON EVERY ARM INCLUDING THE CLEAN ONE, and that is the point: the
@@ -158,9 +178,9 @@ async function runGrammarRedraw(input: GrammarRedrawInput): Promise<UnifiedPipel
     'Draft measured against the ALLOWED EDGE PATTERNS rule',
   );
 
-  if (!decision.redraw) return input.first;
+  if (!decision.redraw) return { result: input.first, drawSpent: false };
   /* c8 ignore next */
-  if (!input.redraw) return input.first;
+  if (!input.redraw) return { result: input.first, drawSpent: false };
 
   const second = await input.redraw(buildEdgeGrammarDirective(decision.facts));
 
@@ -172,7 +192,7 @@ async function runGrammarRedraw(input: GrammarRedrawInput): Promise<UnifiedPipel
       { event: 'cee.draft.edge_grammar_redraw', request_id: input.requestId, shipped: 'first', second_outcome: 'draft_failed' },
       'Grammar redraw failed — shipping the original draft',
     );
-    return input.first;
+    return { result: input.first, drawSpent: true };
   }
 
   const secondFacts = readEdgeGrammarFacts(graphFrom(second.body));
@@ -194,5 +214,5 @@ async function runGrammarRedraw(input: GrammarRedrawInput): Promise<UnifiedPipel
     'Grammar redraw complete',
   );
 
-  return shipSecond ? second : input.first;
+  return { result: shipSecond ? second : input.first, drawSpent: true };
 }
