@@ -4,7 +4,7 @@
  * ═══════════════════════════════════════════════════════════════════════════
  * THE GAP, MEASURED ON DEPLOYED STAGING (23 Sep, scenario `e243debd`).
  *
- * The brief stated no numbers. The product supplied all four factor values —
+ * The brief stated no numbers. The product supplied three of its four factor values —
  * `source: "cee_inference"`, `extractionType: "inferred"`, identical across
  * three draws — ran the analysis, and told the user *"Hire a Tech Lead scored
  * highest against your goal in 81% of runs."* **The user was never told a single

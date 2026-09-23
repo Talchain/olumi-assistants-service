@@ -2166,7 +2166,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     );
     // D-ask-1 (2.11) applied to CEE-INFERRED FACTOR values. Measured on staging
     // 23 Sep (scenario `e243debd`): the brief stated no numbers, the product
-    // supplied all four factor values, and the result named a leading option
+    // supplied three of its four factor values, and the result named a leading option
     // without ever saying a single number was ours. The ratified ruling —
     // "the analysis result must never present [our] numbers as user-provided" —
     // was plumbed for scaffolded OPTIONS and silent on inferred FACTORS.

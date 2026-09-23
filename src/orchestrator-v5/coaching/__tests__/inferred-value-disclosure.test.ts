@@ -2,7 +2,7 @@
  * THE ANALYSIS MUST SAY WHOSE NUMBERS IT RAN ON.
  *
  * ⛔ MEASURED on deployed staging, 23 Sep, scenario `e243debd`: the brief stated
- * no numbers, the product supplied all four factor values (`cee_inference` /
+ * no numbers, the product supplied three of its four factor values (`cee_inference` /
  * `inferred`, identical across three draws), ran the analysis and reported
  * *"Hire a Tech Lead scored highest against your goal in 81% of runs"* — with no
  * mention that a single number was ours.
@@ -13,6 +13,10 @@
  * disclosure modules reference the inference family, against a contrast control
  * of 59 non-test files for the scaffolded-option path.
  */
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { describe, expect, it } from 'vitest';
 import {
   buildInferredValueDisclosure,
@@ -112,19 +116,6 @@ describe('buildInferredValueDisclosure', () => {
 });
 
 /**
- * ⭐ WHERE "PROVISIONAL" BECOMES REAL.
- *
- * *"Provisional means the user can change something and see how much it
- * matters."* The engine already answers it per factor — `p_win_sensitivity`
- * carries `status: "below_resolution"` when resolving that factor perfectly
- * would move the result less than the noise floor.
- *
- * Measured on scenario `e243debd`: all four inferred values were
- * `below_resolution`. The product invented four numbers, named a leading
- * option, and NOT ONE of them would have changed which option led — a fact that
- * makes the result MORE trustworthy and which the user was never told.
- */
-/**
  * ⛔⛔ THE PROHIBITION GUARD — the claim this module must NOT make.
  *
  * A `p_win_sensitivity`-driven sentence ("our numbers do / do not change which
@@ -199,5 +190,52 @@ describe('the length budget is DERIVED from the builder, never hand-estimated', 
     }
     expect(worstSentence).not.toBe('');
     expect(INFERRED_VALUE_DISCLOSURE_MAX_CHARS).toBe(worst);
+  });
+});
+
+/**
+ * ⛔⛔ THE BUDGET IS EXPORTED, BUT IS IT SUMMED?
+ *
+ * Found by an independent review's mutant: deleting
+ * `INFERRED_VALUE_DISCLOSURE_MAX_CHARS` from the `MAX_ASSISTANT_TEXT_CHARS`
+ * sum in `analysis-result-headline.ts` SURVIVED 14 files / 357 tests. The
+ * identical mutation on the sibling `SEPARABILITY_DISCLOSURE_MAX_CHARS` is
+ * killed — by a source-level guard that is FAMILY-SPECIFIC and therefore did
+ * not cover this one. Of the eight family budgets, this was the only term
+ * nothing pinned.
+ *
+ * It matters because an under-sized total does not truncate: the composed
+ * summary fails the length check and the caller DROPS a disclosure, so the
+ * user is silently not told a number was Olumi's.
+ *
+ * Mirrors `separability-disclosure.test.ts`'s `M10` block, controls included —
+ * a source-text assertion is only worth anything if it is shown to be looking
+ * at the right text, and shown to be capable of saying no.
+ */
+describe('M10 — this family budget is really a TERM OF THE SUM, not merely exported', () => {
+  const HEADLINE_SRC = readFileSync(
+    resolve(dirname(fileURLToPath(import.meta.url)), '../analysis-result-headline.ts'),
+    'utf8',
+  );
+  const SUM_EXPR = (() => {
+    const start = HEADLINE_SRC.indexOf('export const MAX_ASSISTANT_TEXT_CHARS');
+    return start < 0 ? '' : HEADLINE_SRC.slice(start, HEADLINE_SRC.indexOf(';', start) + 1);
+  })();
+
+  it('POSITIVE CONTROL — the extraction found a non-empty sum expression', () => {
+    expect(SUM_EXPR.length).toBeGreaterThan(50);
+    expect(SUM_EXPR).toContain('MAX_HEADLINE_CHARS');
+  });
+
+  it('CONTRAST CONTROL — it can see a SIBLING family budget in the same expression', () => {
+    expect(SUM_EXPR).toContain('INTAKE_OPTION_DISCLOSURE_MAX_CHARS');
+  });
+
+  it('NEGATIVE CONTROL — it does not find a budget that is not in the sum', () => {
+    expect(SUM_EXPR).not.toContain('DEFINITELY_NOT_A_BUDGET_MAX_CHARS');
+  });
+
+  it('⭐ this family budget is a term of the sum', () => {
+    expect(SUM_EXPR).toContain('INFERRED_VALUE_DISCLOSURE_MAX_CHARS');
   });
 });
