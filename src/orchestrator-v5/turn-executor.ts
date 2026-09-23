@@ -203,6 +203,7 @@ import {
   buildOutsideViewOffer,
   deriveOutsideViewHistory,
   type OutsideViewOffer,
+  outsideViewOfferFitsChipBudget,
 } from './coaching/outside-view-offer.js';
 import { deriveConversationTextSignals } from './compose/conversation-text-signals.js';
 import {
@@ -10383,7 +10384,10 @@ export async function runTurnExecutor(
           // `required_input`. Without one there is nothing to take an outside view
           // ON, and the gate returns `needs_input` rather than offering.
           hasDecisionDescription: context.persistedGraph !== null,
-          ...deriveOutsideViewHistory(context.prior_turns),
+          // ⛔ THE CURRENT MESSAGE IS PASSED. Without it the decline and engage
+          // turns could not see their own message and the offer was re-attached
+          // to the reply acknowledging them (review probes P1, P1b, P2).
+          ...deriveOutsideViewHistory(context.prior_turns, userMessage),
           // ⛔ DECLARED BUT UNREACHABLE FROM THIS CALL SITE, AND SAID SO RATHER THAN
           // IMPLIED. The `user_states_no_comparable_cases` arm is exercised by the
           // unit suite but has NO PRODUCER here: deciding "the user has told me this
@@ -10407,6 +10411,20 @@ export async function runTurnExecutor(
     const withOutsideViewOffer = (resp: OlumiResponse): OlumiResponse => {
       const offer = outsideViewOffer();
       if (offer === null || offer.blocks.length === 0) return resp;
+      // ⛔⛔ NEVER SHOW A CARD THE USER CANNOT DECLINE.
+      //
+      // `chip-finalizer.ts` caps the `chip_prompt_`/`chip_action_` suggestion
+      // family at 3 and keeps the EARLIER chips. The Canvas Completion lane's
+      // review measured both failure rows: with 2 base suggestion chips "Not now"
+      // was trimmed, and with 3 base chips BOTH offer chips were trimmed — while
+      // the card survived either way, because blocks are not budgeted. The user
+      // was asked a question with no way to say no, and it came back next turn.
+      //
+      // The decline is now emitted first, so a one-slot budget keeps it. If there
+      // is no slot at all, the whole offer stands down: silence is honest, an
+      // un-refusable prompt is not. The budget is asserted against the real
+      // finaliser in `__tests__`, not trusted from this comment.
+      if (!outsideViewOfferFitsChipBudget(resp.suggested_actions)) return resp;
       return {
         ...resp,
         blocks: [...resp.blocks, ...offer.blocks],

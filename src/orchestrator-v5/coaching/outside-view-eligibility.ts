@@ -80,9 +80,18 @@ export const OUTSIDE_VIEW_CLAIM_ID = 'DSK-T-002';
  *
  * The weak arm is `current`, and that is the irreducible ambiguity above, not a
  * missing pattern. **A false positive therefore remains possible on a bare
- * current fact** ("the team is 35 people"). It costs one suggested action, at
- * most once per decision per stage, asking a framing question about the
- * DECISION rather than about that number.
+ * current fact** ("the team is 35 people"). It costs one suggested action asking
+ * a framing question about the DECISION rather than about that number.
+ *
+ * ⛔ THIS USED TO SAY "at most once per decision per stage". THAT WAS NOT TRUE and
+ * no code implemented it — the Canvas Completion lane's review proved the offer
+ * re-attached on every later substantive turn (their probes P3 and P4). What is
+ * now enforced is narrower and is stated exactly: a CONFIRM, an ENGAGE or a
+ * DECLINE anywhere in the window — including the current turn — settles it. An
+ * offer the user simply IGNORED is still re-made, because nothing durable records
+ * that it fired, and `assistant_message` excludes block copy so it cannot see
+ * itself. Closing that needs a durable per-decision-per-stage record; until one
+ * exists this comment must not claim the guarantee.
  *
  * ⚠ A bare worded horizon ("next quarter") is deliberately NOT suppressed:
  * requiring a preposition keeps deadline language out while leaving a forecast
@@ -230,6 +239,8 @@ export interface OutsideViewInputs {
    * persistence is NOT guaranteed. Disclosed, not papered over.
    */
   readonly declineObservedInWindow: boolean;
+  /** The user has already taken the offer up in this window (see `declined`). */
+  readonly engageObservedInWindow: boolean;
   /**
    * The user has said there are no comparable cases. ⛔ Only ever the user's own
    * claim: deterministic code must never INFER that a decision is unprecedented,
@@ -292,6 +303,10 @@ export function assessOutsideViewEligibility(input: OutsideViewInputs): OutsideV
 
   // 1. Settled state first — never re-open finished or refused work.
   if (input.confirmedReferenceClassPresent) return { eligibility: 'already_completed' };
+  // ⛔ ENGAGING SETTLES IT TOO. The user pressing "Take the outside view" has
+  // started the protocol; attaching the same offer to the reply that answers them
+  // is nagging. Measured as probe P2 by the Canvas Completion lane's review.
+  if (input.engageObservedInWindow) return { eligibility: 'already_completed' };
   if (input.declineObservedInWindow) return { eligibility: 'declined' };
 
   // 2. The user's own claim outranks anything we could infer.

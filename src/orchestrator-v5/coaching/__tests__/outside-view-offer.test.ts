@@ -13,6 +13,8 @@ import {
   OUTSIDE_VIEW_ENGAGE_MESSAGE,
   buildOutsideViewOffer,
   deriveOutsideViewHistory,
+  outsideViewOfferFitsChipBudget,
+  SUGGESTION_BUDGET,
 } from '../outside-view-offer.js';
 import { ROUTED_COACHING_INTENTS } from '../typed-intent-directive.js';
 import { coachingIntentForChipId } from '../coaching-chip-registry.js';
@@ -107,10 +109,18 @@ describe('what the user is shown', () => {
     expect((offer.blocks[0] as Record<string, unknown>)['target_refs']).toEqual([]);
   });
 
-  it('offers BOTH engage and decline, so silence is not the only way out', () => {
+  /**
+   * ⛔⛔ THE ORDER IS LOAD-BEARING, so it is pinned rather than incidental.
+   * `chip-finalizer.ts` caps the `chip_prompt_` family and keeps the EARLIER
+   * chips. The Canvas Completion lane's review measured the old order: with 2
+   * base suggestion chips "Not now" was trimmed and the user was shown a card
+   * they could not decline. Decline FIRST means a one-slot budget keeps the
+   * refusal, not the commitment.
+   */
+  it('offers BOTH, with the DECLINE first so a chip budget can never trim the refusal', () => {
     expect(offer.suggested_actions.map((a) => a.id)).toEqual([
-      OUTSIDE_VIEW_ENGAGE_CHIP_ID,
       OUTSIDE_VIEW_DECLINE_CHIP_ID,
+      OUTSIDE_VIEW_ENGAGE_CHIP_ID,
     ]);
   });
 
@@ -143,6 +153,7 @@ describe('history derivation binds to the product’s own literals', () => {
     expect(deriveOutsideViewHistory([turn(null, 'system event')])).toEqual({
       confirmedReferenceClassPresent: false,
       declineObservedInWindow: false,
+      engageObservedInWindow: false,
     });
   });
 
@@ -198,5 +209,92 @@ describe('\u26d4 the chip ids must stay honest about what they invoke', () => {
       expect(OUTSIDE_VIEW_DECLINE_CHIP_ID).not.toContain(intent);
     }
     expect(coachingIntentForChipId(OUTSIDE_VIEW_DECLINE_CHIP_ID)).toBeUndefined();
+  });
+});
+
+
+/**
+ * ⛔⛔ THE FIRST BLOCKER OF THE CANVAS COMPLETION LANE'S EXACT-HEAD REVIEW.
+ *
+ * Settled state was read from PRIOR turns only, so the turn on which the user
+ * pressed "Not now" — and the turn on which they pressed "Take the outside view"
+ * — could not see its own message, and the offer was attached again to the very
+ * reply acknowledging it. Their probes P1, P1b and P2 each reproduced it through
+ * the real `runTurnExecutor`.
+ *
+ * Bound at the derivation with a CONTRAST CONTROL in each case, so a fix cannot
+ * pass by settling everything.
+ */
+describe('the CURRENT turn settles the offer, not just prior ones', () => {
+  it('a decline typed on THIS turn is seen', () => {
+    const h = deriveOutsideViewHistory([], OUTSIDE_VIEW_DECLINE_MESSAGE);
+    expect(h.declineObservedInWindow).toBe(true);
+    expect(h.engageObservedInWindow, 'contrast: engage is untouched').toBe(false);
+  });
+
+  it('an engage pressed on THIS turn is seen', () => {
+    const h = deriveOutsideViewHistory([], OUTSIDE_VIEW_ENGAGE_MESSAGE);
+    expect(h.engageObservedInWindow).toBe(true);
+    expect(h.declineObservedInWindow, 'contrast: decline is untouched').toBe(false);
+  });
+
+  it('CONTRAST: an ordinary current message settles nothing', () => {
+    const h = deriveOutsideViewHistory([], 'we think churn lands at 4% next quarter');
+    expect(h.declineObservedInWindow).toBe(false);
+    expect(h.engageObservedInWindow).toBe(false);
+    expect(h.confirmedReferenceClassPresent).toBe(false);
+  });
+
+  it('an absent current message is not an error and settles nothing', () => {
+    expect(deriveOutsideViewHistory([])).toEqual({
+      confirmedReferenceClassPresent: false,
+      declineObservedInWindow: false,
+      engageObservedInWindow: false,
+    });
+  });
+});
+
+/**
+ * ⛔⛔ THE SECOND HALF OF THE CANVAS COMPLETION REVIEW'S FIRST BLOCKER: the card
+ * is not budgeted but its chips are, so the offer could be shown with no way to
+ * decline it.
+ *
+ * `SUGGESTION_BUDGET` is pinned against the REAL finaliser below, not asserted
+ * from a comment — a second authority on a shared cap is how these drift.
+ */
+describe('the offer stands down rather than become un-refusable', () => {
+  const sugg = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({ id: `chip_prompt_base_${i}` }));
+
+  it('fits when there is at least one suggestion slot left', () => {
+    expect(outsideViewOfferFitsChipBudget([])).toBe(true);
+    expect(outsideViewOfferFitsChipBudget(sugg(SUGGESTION_BUDGET - 1))).toBe(true);
+  });
+
+  it('does NOT fit once the suggestion family is full', () => {
+    expect(outsideViewOfferFitsChipBudget(sugg(SUGGESTION_BUDGET))).toBe(false);
+    expect(outsideViewOfferFitsChipBudget(sugg(SUGGESTION_BUDGET + 2))).toBe(false);
+  });
+
+  it('CONTRAST: non-suggestion chips do not consume the budget', () => {
+    const proposals = Array.from({ length: 6 }, (_, i) => ({ id: `prop_${i}` }));
+    expect(outsideViewOfferFitsChipBudget(proposals), 'proposals are a different family').toBe(true);
+  });
+
+  it('ignores a malformed id instead of throwing', () => {
+    expect(outsideViewOfferFitsChipBudget([{ id: 42 }, { }, { id: null }])).toBe(true);
+  });
+
+  it('⭐ SUGGESTION_BUDGET agrees with the REAL finaliser, measured not asserted', async () => {
+    const { finalizeChips } = await import('../../compose/chip-finalizer.js');
+    const over = Array.from({ length: SUGGESTION_BUDGET + 2 }, (_, i) => ({
+      id: `chip_prompt_probe_${i}`,
+      label: `Probe ${i}`,
+      message: `probe ${i}`,
+    }));
+    const kept = finalizeChips(over as never, { logSuppressions: false }).chips.filter((c) =>
+      String((c as { id?: unknown }).id ?? '').startsWith('chip_prompt_'),
+    ).length;
+    expect(kept, 'the finaliser keeps exactly the budget this module assumes').toBe(SUGGESTION_BUDGET);
   });
 });

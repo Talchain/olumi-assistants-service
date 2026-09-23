@@ -95,6 +95,11 @@ const PRIORITY_RANK = 150;
 export interface OutsideViewHistory {
   readonly confirmedReferenceClassPresent: boolean;
   readonly declineObservedInWindow: boolean;
+  /**
+   * The user has ALREADY taken the offer up in this window. Engaging starts the
+   * protocol; re-offering it on the same breath is nagging, not method.
+   */
+  readonly engageObservedInWindow: boolean;
 }
 
 /**
@@ -102,20 +107,73 @@ export interface OutsideViewHistory {
  *
  * Scoped to USER-authored text: the assistant mentioning the confirm phrase
  * inside its own copy must not read as the user having confirmed anything.
+ *
+ * ⛔⛔ THE CURRENT TURN COUNTS. It did not, and that was the first blocker of the
+ * Canvas Completion lane's exact-head review: settled state was read from PRIOR
+ * turns only, so the turn on which the user pressed "Not now" — and the turn on
+ * which they pressed "Take the outside view" — could not see its own message,
+ * and the offer was attached again to the very reply acknowledging it. Their
+ * probes P1, P1b and P2 all reproduced it.
+ *
+ * `currentMessage` is therefore scanned alongside the window. It is the SAME
+ * user-authored channel, arriving one turn earlier than the store can supply it.
  */
 export function deriveOutsideViewHistory(
   priorTurns: readonly SessionTurnWithContent[],
+  currentMessage?: string,
 ): OutsideViewHistory {
   let confirmed = false;
   let declined = false;
-  for (const turn of priorTurns) {
-    const message = turn.user_message;
-    if (typeof message !== 'string') continue;
+  let engaged = false;
+  const consider = (message: unknown): void => {
+    if (typeof message !== 'string' || message === '') return;
     const trimmed = message.trimStart().toLowerCase();
     if (trimmed.startsWith(REFERENCE_CLASS_CONFIRM_PREFIX.toLowerCase())) confirmed = true;
     if (message.includes(OUTSIDE_VIEW_DECLINE_MESSAGE)) declined = true;
+    if (message.includes(OUTSIDE_VIEW_ENGAGE_MESSAGE)) engaged = true;
+  };
+  for (const turn of priorTurns) consider(turn.user_message);
+  consider(currentMessage);
+  return {
+    confirmedReferenceClassPresent: confirmed,
+    declineObservedInWindow: declined,
+    engageObservedInWindow: engaged,
+  };
+}
+
+/**
+ * ⛔⛔ IS THERE ROOM FOR THE USER TO SAY NO?
+ *
+ * `chip-finalizer.ts` caps the `chip_prompt_` / `chip_action_` SUGGESTION family
+ * and keeps the EARLIER chips. Blocks are not budgeted, so the card always
+ * survives. The Canvas Completion lane's exact-head review measured both rows:
+ * with 2 base suggestion chips "Not now" was trimmed, and with 3 both offer chips
+ * were trimmed — while the card stayed. **The user was asked a question with no
+ * way to decline it, and it returned on later turns anyway.**
+ *
+ * So the offer stands down entirely when no suggestion slot remains. Silence is
+ * honest; an un-refusable prompt is not.
+ *
+ * ⚠ EXPORTED AND USED BY THE CALL SITE, deliberately. The same review found a
+ * sibling PR whose mount spec RE-IMPLEMENTED the logic it claimed to pin, so no
+ * mutation of the real path could reach it. One implementation, imported by both.
+ * `SUGGESTION_BUDGET` is asserted against the real finaliser in the specs, not
+ * trusted from this comment.
+ */
+export const SUGGESTION_BUDGET = 3;
+
+const SUGGESTION_CHIP_PREFIXES = ['chip_prompt_', 'chip_action_'] as const;
+
+export function outsideViewOfferFitsChipBudget(
+  existingActions: ReadonlyArray<{ readonly id?: unknown }>,
+): boolean {
+  let used = 0;
+  for (const a of existingActions) {
+    const id = a.id;
+    if (typeof id !== 'string') continue;
+    if (SUGGESTION_CHIP_PREFIXES.some((p) => id.startsWith(p))) used += 1;
   }
-  return { confirmedReferenceClassPresent: confirmed, declineObservedInWindow: declined };
+  return used < SUGGESTION_BUDGET;
 }
 
 export interface OutsideViewOffer {
@@ -188,12 +246,13 @@ export function buildOutsideViewOffer(
 
   return {
     assistant_text,
+    // ⛔⛔ THE DECLINE COMES FIRST, AND THE ORDER IS LOAD-BEARING.
+    // `chip-finalizer.ts` caps the `chip_prompt_` suggestion family and keeps the
+    // EARLIER chips, so whichever of these two is second is the one dropped. The
+    // Canvas Completion review measured the consequence: with the engage chip
+    // first, "Not now" was trimmed and the user was shown a card they could not
+    // decline. An offer whose refusal can be budgeted away is not an offer.
     suggested_actions: [
-      {
-        id: OUTSIDE_VIEW_ENGAGE_CHIP_ID,
-        label: 'Take the outside view',
-        message: OUTSIDE_VIEW_ENGAGE_MESSAGE,
-      },
       {
         // ⭐ THE DECLINE IS A FIRST-CLASS CHIP, not an absence. Without it the
         // only way not to engage is silence, and silence is indistinguishable
@@ -202,6 +261,11 @@ export function buildOutsideViewOffer(
         id: OUTSIDE_VIEW_DECLINE_CHIP_ID,
         label: 'Not now',
         message: OUTSIDE_VIEW_DECLINE_MESSAGE,
+      },
+      {
+        id: OUTSIDE_VIEW_ENGAGE_CHIP_ID,
+        label: 'Take the outside view',
+        message: OUTSIDE_VIEW_ENGAGE_MESSAGE,
       },
     ],
     blocks,
