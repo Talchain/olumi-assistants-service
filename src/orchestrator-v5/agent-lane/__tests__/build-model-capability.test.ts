@@ -15,7 +15,7 @@ import { config } from '../../../config/index.js';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
 import { budgetFor } from '../model-budgets.js';
-import type { CallStructuredModel } from '../runtime/build-model.js';
+import { constructionOperationId, type CallStructuredModel } from '../runtime/build-model.js';
 import { AGENT_TOOLS, dispatchTool } from '../runtime/agent-tools.js';
 
 const SCENARIO = '11111111-1111-1111-1111-111111111111';
@@ -195,3 +195,32 @@ describe('the construction budget is the measured one', () => {
     expect(budgetFor(seen[0].model!, 'widening').max_output_tokens).toBeLessThan(3404);
   });
 });
+
+/**
+ * ⛔ The construction must NAME its operation, or a lost registration response
+ * can only be retried as a brand-new write — and #1691 makes registration mint
+ * a version, so that retry would mint a SECOND one.
+ */
+describe('build_model_from_brief names its construction operation', () => {
+  it('sends a DERIVED operation_id — the same (scenario, brief) always names the same operation', async () => {
+    const run = async () => {
+      const { d, bodies } = dispatcher({ before: [], after: [{ id: 'a' }] });
+      const caps = createAgentCapabilities(d, new ProposalStore(), structured());
+      await dispatchTool('build_model_from_brief', JSON.stringify({ brief: 'the pricing brief' }), ctx, caps);
+      return (bodies.register as { operation_id?: string }).operation_id;
+    };
+    const first = await run();
+    const second = await run();
+    // Bound by IDENTITY: the exact derivation, and stable across two processes.
+    expect(first).toBe(constructionOperationId(SCENARIO, 'the pricing brief'));
+    expect(second).toBe(first);
+    // A UUID, because the route validates it as one.
+    expect(first).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  });
+
+  it('CONTRAST CONTROL: a different brief is a different operation', () => {
+    expect(constructionOperationId(SCENARIO, 'brief A')).not.toBe(constructionOperationId(SCENARIO, 'brief B'));
+    expect(constructionOperationId(SCENARIO, 'brief A')).not.toBe(constructionOperationId('22222222-2222-2222-2222-222222222222', 'brief A'));
+  });
+});
+

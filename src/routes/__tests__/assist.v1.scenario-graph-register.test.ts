@@ -774,3 +774,363 @@ describe("register — the terminal persisted-graph invariant (C3 shared floor)"
     await app.close();
   });
 });
+
+/**
+ * ⛔ A REGISTRATION THAT WRITES A VERSIONABLE GRAPH MUST LEAVE A VERSION BEHIND.
+ *
+ * MEASURED on deployed staging (`a76f1a0`, again on `46820d6`): a model built
+ * through this route wrote 28 nodes with `model_versions = 0` and
+ * `current_model_version_id = NULL`, while the CONVENTIONAL route minted a
+ * version for the identical brief in the same run. A user's first model had no
+ * version to reread, no receipt and no rollback point.
+ *
+ * The cause was not a lost version — it was never requested: the write carried
+ * no `modelVersion`, so `supabase-store.ts` took its non-versioned branch.
+ *
+ * ⚠ AND THE FIX IS NOT UNCONDITIONAL, WHICH MATTERS. This route accepts graphs
+ *   that `PersistedGraphV3` rejects — its own ingress schema is looser. The
+ *   carrier then SKIPS (`graph_missing_required_fields`) rather than throwing,
+ *   and the registration still succeeds with no version. That is the correct
+ *   behaviour (a graph with no derivable version must not fail the import), but
+ *   it means "registration" and "versioned" are not synonyms. Both arms are
+ *   pinned below; the skip arm is the one that keeps the import path working.
+ */
+const VERSIONABLE = {
+  nodes: [
+    { id: "n1", kind: "factor", label: "Budget", observed_state: { value: 0.5 } },
+    { id: "n2", kind: "factor", label: "Risk", observed_state: { value: 0.25 } },
+  ],
+  edges: [],
+};
+
+describe("register — the atomic write carries a model-version carrier", () => {
+  it("RED: a versionable graph supplies a modelVersion", async () => {
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: VERSIONABLE });
+    expect(res.statusCode).toBe(200);
+    expect(append).toHaveBeenCalledTimes(1);
+    expect(
+      append.mock.calls[0][0].modelVersion,
+      "without this the store takes its NON-versioned branch and no version row is ever written",
+    ).toBeDefined();
+    await app.close();
+  });
+
+  it("RED: the carrier satisfies both invariants append_turn_atomic_v5 raises on", async () => {
+    const app = await buildApp();
+    await post(app, SCENARIO, { graph: VERSIONABLE });
+    const write = append.mock.calls[0][0];
+    const carrier = write.modelVersion;
+    expect(
+      carrier.source_turn_id,
+      "the RPC raises `creation/source turn carrier mismatch` when these differ",
+    ).toBe(write.turn_id);
+    expect(
+      carrier.creation_kind,
+      "the RPC requires exactly this from any caller and derives `initial` itself when the scenario has no versions yet",
+    ).toBe("committed_mutation");
+    expect(carrier.graph_identity_hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(carrier.analysis_affecting_hash).toMatch(/^[0-9a-f]{64}$/);
+    await app.close();
+  });
+
+  it("CONTROL — a graph PersistedGraphV3 rejects still registers, with NO carrier and no throw", async () => {
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED });
+    expect(res.statusCode, "an unversionable graph must not fail the import").toBe(200);
+    expect(append).toHaveBeenCalledTimes(1);
+    expect(
+      append.mock.calls[0][0].modelVersion,
+      "the carrier SKIPS rather than throwing — registration and versioning are not synonyms",
+    ).toBeUndefined();
+    await app.close();
+  });
+});
+
+/**
+ * ⛔ THE CARRIER MUST DESCRIBE THE BYTES WE STORED — and three mutants the
+ * block above does not kill.
+ *
+ * `VERSIONABLE` above is hand-authored and has ZERO edges, which is what makes
+ * it versionable (`GraphV3` requires `strength.std` on every edge, so an
+ * edge-bearing graph without it is refused). Two consequences, both measured:
+ *
+ *  1. `projectGraphForPersistence` is a byte-identical NO-OP on it, so passing
+ *     the SUBMITTED graph to the carrier instead of the projected one SURVIVES
+ *     the block above. A receipt that content-addresses bytes we did not store
+ *     is the split semantic history the carrier's own header forbids.
+ *  2. Nothing above pins the carrier's POLICY, so threading the plan in
+ *     unconditionally — ignoring the server-read CAS base — also survives.
+ *
+ * The edge-bearing fixture here is `rich-persisted-graph.json` (the
+ * draft-persisted shape, already the fixture of record in
+ * `merge-mutated-graph-persistence.test.ts` and
+ * `turn-executor-d1-mutation-commit-graph.test.ts`), not a hand-written one.
+ * It matters that the real shape is covered: measured on the live estate
+ * 22 Sep 2026, registration-written scenarios carry `strength.std` on
+ * **16,000 of 16,092 edges**, 517 of 535 graphs fully populated (contrast,
+ * `strength.mean`: 338,179/338,333). So the edge-bearing versionable graph is
+ * the NORMAL case for this route and the skip arm is an 18-graph minority —
+ * the reverse of what a 0-edge fixture and `IMPORTED` together suggest.
+ */
+describe("register — the carrier describes the STORED graph, and obeys the policy", () => {
+  const EDGED = JSON.parse(
+    readFileSync(
+      new URL(
+        "../../orchestrator-v5/__tests__/fixtures/exp01/rich-persisted-graph.json",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  );
+
+  it("POSITIVE CONTROL: the edge-bearing fixture is versionable, and `VERSIONABLE` really has no edges", () => {
+    expect(EDGED.edges.length).toBeGreaterThan(0);
+    expect(
+      EDGED.edges.filter((e: { strength?: { std?: number } }) => typeof e.strength?.std === "number"),
+    ).toHaveLength(EDGED.edges.length);
+    expect(VERSIONABLE.edges).toHaveLength(0);
+  });
+
+  it("an EDGE-BEARING versionable graph — the route's normal shape — still supplies a carrier", async () => {
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: EDGED });
+    expect(res.statusCode).toBe(200);
+    const write = append.mock.calls[0][0];
+    expect(write.modelVersion).toBeDefined();
+    expect(write.modelVersion.source_turn_id).toBe(write.turn_id);
+    await app.close();
+  });
+
+  it("MUTANT KILLER — content-addresses the PROJECTED bytes, never the submitted ones", async () => {
+    // `reconcileTopLevelOptionsFromNodes` moves a graph whose top-level
+    // `options[]` is PRESENT but incomplete (an absent `options` is never
+    // invented), so seeding it with one option makes the pass fire and the
+    // submitted and stored bytes genuinely differ.
+    const partial = { ...EDGED, options: [{ id: EDGED.options[0].id, label: "Partial" }] };
+
+    // POSITIVE CONTROL: the projection must actually MOVE this graph, or every
+    // assertion below passes by comparing a no-op to itself.
+    const projected = projectGraphForPersistence(partial, {});
+    expect(projected).not.toBe(partial);
+    expect(computeGraphIdentityHash(projected as never)?.value).not.toBe(
+      computeGraphIdentityHash(partial as never)?.value,
+    );
+
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: partial });
+    expect(res.statusCode).toBe(200);
+
+    const write = append.mock.calls[0][0];
+    expect(write.modelVersion).toBeDefined();
+    // The receipt describes the STORED bytes …
+    expect(write.modelVersion.graph_identity_hash).toBe(
+      computeGraphIdentityHash(write.graph as never)?.value,
+    );
+    // … and demonstrably NOT the submitted ones.
+    expect(write.modelVersion.graph_identity_hash).not.toBe(
+      computeGraphIdentityHash(partial as never)?.value,
+    );
+    // Receipt and the column this route stamps agree by construction.
+    expect(write.modelVersion.graph_identity_hash).toBe(res.json().graph_identity_hash.value);
+    await app.close();
+  });
+
+  it("MUTANT KILLER — re-registering the SAME graph writes NO carrier (the policy is the carrier's)", async () => {
+    // `decideModelVersionCreation` returns `no_op` when the comparable shapes
+    // match. A fix that threads the plan in unconditionally, or that drops the
+    // server-read CAS base, passes every other case here and fails this one.
+    loadGraph.mockResolvedValue(EDGED);
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: EDGED });
+    expect(res.statusCode).toBe(200);
+    expect(append.mock.calls[0][0].modelVersion).toBeUndefined();
+    await app.close();
+  });
+
+  it("FRESH SCENARIO — the agent-construction case: a null base takes the `initial` arm", async () => {
+    // `build_model_from_brief` (agent lane) persists THROUGH this route into an
+    // empty scenario, so `loadGraph` returns null. This is the shape the
+    // deployed-staging measurement in the block above was taken on.
+    loadGraph.mockResolvedValue(null);
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: EDGED });
+    expect(res.statusCode).toBe(200);
+    const write = append.mock.calls[0][0];
+    expect(write.modelVersion).toBeDefined();
+    expect(write.modelVersion.source_turn_id).toBe(write.turn_id);
+    await app.close();
+  });
+});
+
+/**
+ * ⛔ THE CANONICAL RECEIPT MUST REACH THE CALLER.
+ *
+ * `append_turn_atomic_v5` builds a `model_version_receipt` and
+ * `SupabaseSessionStore` parses it into `SessionAppendOutcome.modelVersionReceipt`
+ * (`session/store.ts:96`); `appendCheckedGraphWrite` returns that outcome
+ * verbatim. This route DISCARDED it — it did not capture the return value at
+ * all, and its 200 envelope carried only `graph_identity_hash`.
+ *
+ * That is why `build_model_from_brief` could not cite a version: the agent
+ * lane reads `reg.json` and there was no version identity in it, so a freshly
+ * constructed model had no id, no number and no rollback point to name.
+ *
+ * The field is ADDITIVE and optional. The envelope is frozen, so this matters:
+ * the UI consumer (`DecisionGuideAI/src/adapters/cee/registerScenarioGraph.ts:228`)
+ * accepts it by checking `schema` and `registered` rather than parsing
+ * strictly, so an extra key does not break it. Attribution (`authored_by`,
+ * `actor_kind`) is deliberately NOT exposed — citing a version needs its
+ * identity, not its author, and this route is reachable with a service key.
+ */
+describe("register — the canonical receipt reaches the caller", () => {
+  const RECEIPT = {
+    mutation_id: "8f7e6d5c-4b3a-4291-8071-6f5e4d3c2b1a",
+    version_id: "1a2b3c4d-5e6f-4071-8192-a3b4c5d6e7f8",
+    version_number: 1,
+    graph_identity_hash: "a".repeat(64),
+    analysis_affecting_hash: "b".repeat(64),
+    hash_algorithm: "sha256",
+    identity_projection_version: "identity.v1",
+    identity_normaliser_version: "norm.v1",
+    graph_schema_version: "3.0",
+    actor_kind: "unknown" as const,
+    authored_by: null,
+    creation_kind: "initial" as const,
+    source_version_id: null,
+    source_turn_id: "graph_registration:whatever",
+    parent_version_id: null,
+    root_version_id: null,
+  };
+
+  it("surfaces the version identity the RPC returned", async () => {
+    append.mockResolvedValue({ id: "turn-1", modelVersionReceipt: RECEIPT });
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: VERSIONABLE });
+    expect(res.statusCode).toBe(200);
+
+    const body = res.json();
+    expect(body.model_version).toBeDefined();
+    // Identity, not shape — the exact row the store said it wrote.
+    expect(body.model_version.version_id).toBe(RECEIPT.version_id);
+    expect(body.model_version.mutation_id).toBe(RECEIPT.mutation_id);
+    expect(body.model_version.version_number).toBe(1);
+    expect(body.model_version.creation_kind).toBe("initial");
+    await app.close();
+  });
+
+  it("does NOT leak attribution — identity only", async () => {
+    append.mockResolvedValue({ id: "turn-1", modelVersionReceipt: RECEIPT });
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: VERSIONABLE });
+    const mv = res.json().model_version;
+    expect(mv.authored_by).toBeUndefined();
+    expect(mv.actor_kind).toBeUndefined();
+    await app.close();
+  });
+
+  it("CONTROL — a registration that wrote NO version carries no `model_version` key", async () => {
+    // The skip arm. The absence must be an absent key, not a null that a
+    // client would have to distinguish from "version unknown".
+    append.mockResolvedValue({ id: "turn-1" });
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().model_version).toBeUndefined();
+    await app.close();
+  });
+});
+
+/**
+ * ⛔ A REGISTRATION RETRY MUST NOT MINT A SECOND VERSION — and a reused
+ * operation id carrying a DIFFERENT graph must not be reported as a success.
+ *
+ * The reviewer's blocker on this PR: `registrationTurnId()` minted
+ * `crypto.randomUUID()` per request, and the RPC's idempotency key is
+ * `(scenario_id, turn_id)`. So a lost-response retry was a brand-new write to
+ * every layer beneath it, and the store's replay classifier
+ * (`classifyPriorTurn`) could never match a prior row. Measured signed-in on
+ * staging 9c16e8cd: construction wrote `graph_registration:<random>` with
+ * `model_version_created = NULL`.
+ *
+ * `request_hash` was ALSO set to the turn id, so even with a stable id the
+ * classifier could not tell an identical retry from the same id reused for a
+ * different graph.
+ */
+describe("register — a replay-stable construction identity", () => {
+  const OP = "7b8f0c2e-4d1a-4c3b-9e5f-1a2b3c4d5e6f";
+  const OTHER_OP = "0d9e8f7a-6b5c-4d3e-8f2a-1b0c9d8e7f6a";
+  const SID = "8f14e45f-ceea-4f1a-9e6b-2c8d1b3a7e90";
+  const call = (i: number) => append.mock.calls[i][0] as { turn_id: string; request_hash: string };
+
+  it("RED: the SAME operation_id yields the SAME turn id, so a retry reaches the replay arm", async () => {
+    const app = await buildApp();
+    await post(app, SID, { graph: IMPORTED, operation_id: OP });
+    await post(app, SID, { graph: IMPORTED, operation_id: OP });
+    expect(call(0).turn_id).toBe(call(1).turn_id);
+    // Still says WHY the graph moved, in the turn log.
+    expect(call(0).turn_id.startsWith("graph_registration:")).toBe(true);
+  });
+
+  it("a DIFFERENT operation_id is a different operation", async () => {
+    const app = await buildApp();
+    await post(app, SID, { graph: IMPORTED, operation_id: OP });
+    await post(app, SID, { graph: IMPORTED, operation_id: OTHER_OP });
+    expect(call(0).turn_id).not.toBe(call(1).turn_id);
+  });
+
+  it("CONTRAST CONTROL: with no operation_id every request is still distinct — the UI import does not change", async () => {
+    const app = await buildApp();
+    await post(app, SID, { graph: IMPORTED });
+    await post(app, SID, { graph: IMPORTED });
+    expect(call(0).turn_id).not.toBe(call(1).turn_id);
+  });
+
+  it("RED: request_hash covers the PAYLOAD — identical on an exact retry, different when the graph differs", async () => {
+    const app = await buildApp();
+    await post(app, SID, { graph: IMPORTED, operation_id: OP });
+    await post(app, SID, { graph: IMPORTED, operation_id: OP });
+    await post(app, SID, { graph: SERVER_PRE_IMPORT, operation_id: OP });
+    expect(call(0).request_hash).toBe(call(1).request_hash);
+    expect(call(2).request_hash).not.toBe(call(0).request_hash);
+    // Not the turn id any more: that is what made a reused id undetectable.
+    expect(call(0).request_hash).not.toBe(call(0).turn_id);
+  });
+
+  it("RED: a replay returns the ORIGINAL receipt and says it was a replay", async () => {
+    const receipt = {
+      mutation_id: "cb1dd25d-36c3-5beb-aadf-5a016b2bce25",
+      version_id: "c0813c01-1111-4111-8111-111111111111",
+      version_number: 1,
+      creation_kind: "initial",
+      graph_identity_hash: "a".repeat(64),
+      analysis_affecting_hash: "b".repeat(64),
+    };
+    append.mockResolvedValue({ id: "turn-1", modelVersionReceipt: receipt, replayedPriorTurn: true });
+    const app = await buildApp();
+    const res = await post(app, SID, { graph: IMPORTED, operation_id: OP });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { replayed?: boolean; model_version?: { mutation_id: string; version_id: string } };
+    expect(body.replayed).toBe(true);
+    // Bound by IDENTITY: the receipt the store handed back, not a fresh one.
+    expect(body.model_version?.mutation_id).toBe(receipt.mutation_id);
+    expect(body.model_version?.version_id).toBe(receipt.version_id);
+  });
+
+  it("RED: the same operation_id with a DIFFERENT graph is REFUSED (409), never reported as registered", async () => {
+    append.mockResolvedValue({ id: "turn-1", priorTurnConflict: true });
+    const app = await buildApp();
+    const res = await post(app, SID, { graph: SERVER_PRE_IMPORT, operation_id: OP });
+    expect(res.statusCode).toBe(409);
+    const body = res.json() as { registered?: boolean; details?: { code?: string } };
+    expect(body.registered).not.toBe(true);
+    expect(body.details?.code).toBe("OPERATION_ID_REUSED");
+  });
+
+  it("refuses a malformed operation_id before any database work", async () => {
+    const app = await buildApp();
+    const res = await post(app, SID, { graph: IMPORTED, operation_id: "not-a-uuid" });
+    expect(res.statusCode).toBe(422);
+    expect(append).not.toHaveBeenCalled();
+  });
+});

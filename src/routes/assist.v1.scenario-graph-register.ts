@@ -149,8 +149,10 @@ import { computeGraphIdentityHash } from "../orchestrator-v5/context/graph-ident
 import { computeExpectedGraphCasHashes } from "../orchestrator-v5/context/graph-cas-conflict.js";
 import { projectGraphForPersistence } from "../orchestrator-v5/persisted-graph-projection.js";
 import { appendCheckedGraphWrite } from "../orchestrator-v5/persist-graph-write.js";
+import { buildAtomicCommittedModelVersion } from "../orchestrator-v5/commit.js";
 import { PersistedGraphInvariantError } from "../orchestrator-v5/persisted-graph-invariants.js";
 import { getSessionStore } from "../orchestrator-v5/session/index.js";
+import { registrationRequestHash, registrationTurnId } from "../orchestrator-v5/graph-registration/registration-identity.js";
 import { GraphStaleWriteError } from "../orchestrator-v5/session/store.js";
 import { normaliseBriefText } from "../orchestrator-v5/session/normalise-brief-text.js";
 import { resolveCeeRateLimit } from "../cee/config/limits.js";
@@ -165,17 +167,6 @@ export const SCENARIO_GRAPH_REGISTRATION_SCHEMA =
 /** `scenarios.id` is a UUID column, so a non-UUID id cannot name a row. */
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-/**
- * `turn_id` for the registration commit.
- *
- * Prefixed so the turn log says WHY the graph moved without anyone having to
- * join it against another table, and unique per request so the RPC's
- * idempotency key never collides with a conversational turn.
- */
-function registrationTurnId(): string {
-  return `graph_registration:${globalThis.crypto.randomUUID()}`;
-}
 
 export default async function route(app: FastifyInstance) {
   // Tier DERIVED from RATE_BUCKET_REGISTRY. This is a WRITE — it is registered
@@ -287,6 +278,13 @@ export default async function route(app: FastifyInstance) {
       if (body.brief_text != null && typeof body.brief_text !== "string") {
         return invalid("BRIEF_INVALID", "`brief_text` must be a string when supplied.");
       }
+      // An OPTIONAL caller-named operation. Validated before any database work:
+      // it becomes part of the durable idempotency key, so a malformed one must
+      // never reach the RPC.
+      if (body.operation_id != null && (typeof body.operation_id !== "string" || !UUID_PATTERN.test(body.operation_id))) {
+        return invalid("OPERATION_ID_INVALID", "`operation_id` must be a UUID when supplied.");
+      }
+      const operationId = typeof body.operation_id === "string" ? body.operation_id : undefined;
       const brief = normaliseBriefText(body.brief_text);
       if (brief.truncated) {
         return invalid("BRIEF_INVALID", "`brief_text` exceeds the supported brief length.");
@@ -442,7 +440,47 @@ export default async function route(app: FastifyInstance) {
         source: "graph_registration",
       });
 
-      const turnId = registrationTurnId();
+      const turnId = registrationTurnId(scenarioId, operationId);
+      const requestHash = registrationRequestHash(graphForStore, brief.value);
+      // THE CANONICAL RECEIPT, captured rather than discarded. The RPC builds
+      // it and `SupabaseSessionStore` parses it onto the append outcome; this
+      // route threw that outcome away, which is why a freshly constructed model
+      // had no version identity any caller could cite.
+      let appendOutcome: Awaited<ReturnType<typeof appendCheckedGraphWrite>> | undefined;
+
+      /**
+       * ⛔ A REGISTRATION THAT WRITES A GRAPH MUST LEAVE A VERSION BEHIND.
+       *
+       * Until this, the write below carried no `modelVersion`, so
+       * `supabase-store.ts` took its NON-VERSIONED branch
+       * (`if (write.modelVersion !== undefined)`) and the RPC was never asked
+       * for a version at all. The version was not lost — it was never
+       * requested. MEASURED on deployed staging: a model built through this
+       * route wrote 28 nodes with `model_versions = 0` and
+       * `current_model_version_id = NULL`, while the conventional route minted
+       * one for the identical brief. A user's first model had no version to
+       * reread, no receipt, and no rollback point.
+       *
+       * ⭐ The SAME builder the turn path uses, not a second one — the brief
+       *    forbids duplicate controllers, and `append_turn_atomic_v5` stays the
+       *    only writer either way.
+       *
+       * ⚠ `creation_kind` is deliberately left as the carrier's
+       *   `committed_mutation`: the RPC REQUIRES exactly that value from any
+       *   caller (it raises `creation/source turn carrier mismatch` otherwise)
+       *   and decides the stored value itself —
+       *   `CASE WHEN NOT v_has_versions THEN 'initial' ELSE 'committed_mutation' END`.
+       *   So a first registration is correctly recorded as `initial` without
+       *   this route asserting anything about lineage. Verified against the
+       *   deployed function body and against the data: all 3,162 scenario-first
+       *   versions are `initial`, and `committed_mutation` never appears first.
+       */
+      const versionPlan = buildAtomicCommittedModelVersion(graphForStore, {
+        scenario_id: scenarioId,
+        turn_id: turnId,
+        baseGraphForInvariants,
+      });
+
       try {
         // C3 — THE SHARED PERSISTENCE FLOOR, not `store.append` directly. This
         // route and `commitDirectAnswer` are the only two `scenarios.graph`
@@ -452,7 +490,7 @@ export default async function route(app: FastifyInstance) {
         // questions (a TURN vs a REGISTRATION — no LLM, no composed response,
         // `response_emitted: false`), so they are not merged; what they share
         // is HOW a graph persists, and that now has one owner.
-        await appendCheckedGraphWrite({
+        appendOutcome = await appendCheckedGraphWrite({
           store,
           writesGraph: true,
           // Only what THIS registration introduces can refuse it — a scenario
@@ -484,12 +522,15 @@ export default async function route(app: FastifyInstance) {
             // `(turn_class = 'handler') = (handler_id IS NOT NULL)`.
             turn_class: "direct_answer",
             handler_id: null,
-            request_hash: turnId,
+            request_hash: requestHash,
             response_emitted: false,
             llm_calls_used: 0,
             duration_ms: Date.now() - startedAt,
             handler_facts: [],
             graph: graphForStore,
+            // Present only when the carrier says this graph is versionable; a
+            // `none`/`skip` outcome leaves the write byte-identical to before.
+            ...(versionPlan.kind === "plan" ? { modelVersion: versionPlan.write } : {}),
             ...(brief.value === undefined ? {} : { briefText: brief.value }),
             expectedGraphIdentityHash,
             expectedGraphAnalysisHash,
@@ -563,6 +604,36 @@ export default async function route(app: FastifyInstance) {
         return unavailable();
       }
 
+      /**
+       * ⛔ A REUSED OPERATION ID WITH A DIFFERENT GRAPH IS A REFUSAL, NOT A SUCCESS.
+       *
+       * The durable key held: the RPC's `(scenario_id, turn_id)` arm returned the
+       * row already there and wrote nothing. Answering 200 `registered: true`
+       * with THIS request's identity hash would tell the caller its graph is
+       * stored when the stored graph is the earlier one — the exact false
+       * "Updated X" the store's classifier docblock measured on the turn path.
+       */
+      if (appendOutcome?.priorTurnConflict === true) {
+        log.warn(
+          {
+            event: "v5.scenario_graph_register.operation_id_reused",
+            request_id: requestId,
+            scenario_id: scenarioId,
+          },
+          "Graph registration — operation_id reused with a different graph; nothing written",
+        );
+        return reply
+          .code(409)
+          .send(
+            buildErrorV1(
+              "BAD_INPUT",
+              "This import was already recorded with a different model. Nothing was changed.",
+              { code: "OPERATION_ID_REUSED" },
+              requestId,
+            ),
+          );
+      }
+
       const identity = computeGraphIdentityHash(graphForStore as GraphStateIngress);
 
       log.info(
@@ -581,9 +652,31 @@ export default async function route(app: FastifyInstance) {
         schema: SCENARIO_GRAPH_REGISTRATION_SCHEMA,
         scenario_id: scenarioId,
         registered: true,
+        // ADDITIVE: present only when this request replayed a registration that
+        // was already committed under the same operation id. The receipt below
+        // is then the ORIGINAL one, not a second version.
+        ...(appendOutcome?.replayedPriorTurn === true ? { replayed: true } : {}),
         // The ACKNOWLEDGEMENT. This is what lets a client stop saying
         // "cannot confirm": the server has the graph, and this token names it.
         graph_identity_hash: identity,
+        // ADDITIVE and optional: present only when this registration actually
+        // wrote a version. The skip arm omits the KEY rather than sending null,
+        // so a client never has to tell "no version written" apart from
+        // "version unknown". Identity only — attribution is deliberately not
+        // exposed on a service-key-reachable route.
+        ...(appendOutcome?.modelVersionReceipt === undefined
+          ? {}
+          : {
+              model_version: {
+                mutation_id: appendOutcome.modelVersionReceipt.mutation_id,
+                version_id: appendOutcome.modelVersionReceipt.version_id,
+                version_number: appendOutcome.modelVersionReceipt.version_number,
+                creation_kind: appendOutcome.modelVersionReceipt.creation_kind,
+                graph_identity_hash: appendOutcome.modelVersionReceipt.graph_identity_hash,
+                analysis_affecting_hash:
+                  appendOutcome.modelVersionReceipt.analysis_affecting_hash,
+              },
+            }),
         node_count: parsed.data.nodes.length,
         edge_count: parsed.data.edges.length,
         kind_fields_normalised: normalised.changedNodeCount,
