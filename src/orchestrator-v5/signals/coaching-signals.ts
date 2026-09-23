@@ -165,6 +165,14 @@ export const COACHING_TEXT: Record<CoachingSignalId, (ctx: {
    * user change?", this answers "could that change have moved anything?".
    */
   readonly interveningChangeIsInert?: boolean;
+  /**
+   * ⭐ BOTH RUNS RECORD THE SAME MODEL — two NON-NULL equal `graph_hash_at_run`
+   * on the compared pair: the model's structure and values matched. That is NOT
+   * "the same analytical inputs" (labels, and the goal direction derived from
+   * the goal label, sit outside the hash), so it licenses only withholding the
+   * attribution. See {@link composeRerunText}.
+   */
+  readonly sameRecordedModel?: boolean;
 }) => string> = {
   STALE_ANALYSIS_AFTER_EDIT: () =>
     'This change affects the model. The current analysis may not reflect it. Run the analysis to see updated results.',
@@ -181,12 +189,19 @@ export const COACHING_TEXT: Record<CoachingSignalId, (ctx: {
   // It deliberately does NOT get its own `signal_id`: the telemetry series must
   // stay continuous across the cap, which is the same reasoning the withheld
   // rerun arm uses for reusing RERUN_ANALYSIS_COMPLETE.
-  RERUN_ANALYSIS_COMPLETE: ({ runDelta, interveningChange, movementLicence, interveningChangeIsInert }) =>
+  RERUN_ANALYSIS_COMPLETE: ({
+    runDelta,
+    interveningChange,
+    movementLicence,
+    interveningChangeIsInert,
+    sameRecordedModel,
+  }) =>
     composeRerunText(
       runDelta ?? null,
       interveningChange ?? null,
       movementLicence ?? { kind: 'indeterminate', reason: 'no_identity_bound_pair' },
       interveningChangeIsInert === true,
+      sameRecordedModel === true,
     ),
 };
 
@@ -275,6 +290,21 @@ export const INERT_EDIT_TAIL =
   + ' the comparison, set the value each option uses.';
 
 /**
+ * ⭐ THE RE-RUN SENTENCE WHEN BOTH RUNS RECORD THE SAME MODEL — worded no
+ * stronger than the evidence (Codex CHANGES_REQUIRED on #1758, 5796590960).
+ *
+ * Equal `graph_hash_at_run` proves the model's STRUCTURE AND VALUES matched
+ * (`context/graph-hash.ts`). It does NOT prove the analytical inputs matched:
+ * labels are excluded from the hash, yet `run-analysis.ts` derives PLoT's
+ * `goal_direction` from the goal LABEL, and the seed and sample count are sent
+ * outside it too. So this may not say "the same analytical inputs" (the routing
+ * gate's stronger framing), and it may not suggest the edit went unsaved. It
+ * says only what the pair cannot show.
+ */
+export const RERUN_SAME_RECORDED_MODEL_TEXT =
+  "The model's structure and values were the same in both runs, so this pair can't show what your change did.";
+
+/**
  * ⭐ THE TAIL IS APPLIED HERE, ONCE, RATHER THAN AT EVERY `return` BELOW.
  * `composeRerunBody` has many exits — deliberately not counted here, because a
  * hand-typed count is a mirror that drifts the moment an arm is added
@@ -298,7 +328,28 @@ function composeRerunText(
     reason: 'no_identity_bound_pair',
   },
   interveningChangeIsInert = false,
+  sameRecordedModel = false,
 ): string {
+  // ⭐⭐ "HELD BOTH BEFORE AND AFTER" NEEDS AN AFTER (Paul's manual test,
+  // 23 Sep 2026, scenario 58af9704; #63 5794675550). His option edits never
+  // wrote the option's `interventions`, both runs recorded the SAME model, and
+  // this sentence still said "the conclusion held both before and after those
+  // changes" — attributing a result to a change the pair cannot speak to.
+  // `interveningChangeIsInert` cannot catch it: it covers one factor value edit
+  // on a factor every option overrides, not a change that never landed, nor any
+  // other change kind.
+  //
+  // ⚠ WITHHOLD, DON'T EXPLAIN. Equal hashes license only "this pair can't show
+  // what your change did" — not "the same analytical inputs" (a goal rename can
+  // change the goal direction PLoT receives while the hash stays equal) and not
+  // "your change may not have been saved". See RERUN_SAME_RECORDED_MODEL_TEXT.
+  // An abstention exit (no comparison made) stays as it is, and a run with no
+  // attributed change keeps its plain sentence — there is nothing to withdraw.
+  if (sameRecordedModel && interveningChange !== null) {
+    const unattributed = composeRerunBody(delta, null, movementLicence, false);
+    if (RERUN_ABSTENTION_EXITS.has(unattributed.kind)) return unattributed.text;
+    return `${RERUN_SAME_RECORDED_MODEL_TEXT} ${unattributed.text}`;
+  }
   const body = composeRerunBody(
     delta,
     interveningChange,
@@ -751,6 +802,7 @@ export function detectCoachingSignal(
           interveningChange: null,
           movementLicence: null,
           interveningChangeIsInert: false,
+          sameRecordedModel: false,
         }
       : buildRerunAcknowledgement(input);
     return {
@@ -760,6 +812,7 @@ export function detectCoachingSignal(
         interveningChange: rerun.interveningChange,
         movementLicence: rerun.movementLicence,
         interveningChangeIsInert: rerun.interveningChangeIsInert,
+        sameRecordedModel: rerun.sameRecordedModel,
       }),
     };
   }
@@ -843,12 +896,14 @@ function buildRerunAcknowledgement(input: CoachingSignalInput): {
   readonly interveningChange: InterveningChange | null;
   readonly movementLicence: MovementDirectionLicence | null;
   readonly interveningChangeIsInert: boolean;
+  readonly sameRecordedModel: boolean;
 } {
   const none = {
     delta: null,
     interveningChange: null,
     movementLicence: null,
     interveningChangeIsInert: false,
+    sameRecordedModel: false,
   } as const;
 
   const currentFact = input.outcome.handler_facts.find(
@@ -896,7 +951,27 @@ function buildRerunAcknowledgement(input: CoachingSignalInput): {
       interveningChange,
       currentEnrichment,
     ),
+    // ⭐ THE SAME SELECTION AGAIN, NOW FIVE CONSUMERS: the prior hash is the
+    // freshness selector's own `graph_hash_at_run` for the run compared against,
+    // never a second read. A null or empty hash on EITHER side proves nothing
+    // (a legacy fact), exactly as in `run-comparison-gate.ts`'s `same_inputs`.
+    sameRecordedModel: sameRecordedModelHashes(selected.graph_hash_at_run, currentFact),
   };
+}
+
+/** An empty string is no hash — the rule `compare-runs.ts`'s `nonEmptyHash` applies. */
+function sameRecordedModelHashes(priorHash: string | null, currentFact: HandlerFact): boolean {
+  const result = (currentFact as { result?: unknown }).result;
+  const currentHash =
+    result !== null && typeof result === 'object' && !Array.isArray(result)
+      ? (result as Record<string, unknown>).graph_hash_at_run
+      : undefined;
+  return (
+    typeof priorHash === 'string'
+    && priorHash.length > 0
+    && typeof currentHash === 'string'
+    && currentHash === priorHash
+  );
 }
 
 /**
