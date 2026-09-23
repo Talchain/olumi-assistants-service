@@ -19,6 +19,7 @@ import {
   type TrackedKey,
 } from './tracked.js';
 import type { FallbackReason } from './resolution-policy.js';
+import { isFrozenPromptTask } from './release-snapshot.js';
 
 /** Source of a `loadPrompt()` call. Lets dashboards filter probe noise. */
 export type PromptResolveTrigger =
@@ -161,6 +162,10 @@ export async function loadPrompt(
     trigger = 'runtime',
     cache,
   } = options;
+  const frozenTask = isFrozenPromptTask(pmsResolveTaskId(taskId));
+  if (frozenTask && forceDefault) {
+    throw new Error(`Default prompt is forbidden for frozen task ${taskId}`);
+  }
 
   // Check if we should use defaults
   if (forceDefault || !isPromptManagementEnabled()) {
@@ -242,9 +247,11 @@ export async function loadPrompt(
     }
 
     // No managed prompt found, fall back to default
+    if (frozenTask) throw new Error(`Frozen prompt missing for task ${taskId}`);
     log.debug({ taskId }, 'No managed prompt found, using default');
     return loadDefaultPrompt(taskId, variables, correlationId, trigger, cache, 'not_found');
   } catch (error) {
+    if (frozenTask) throw error;
     // Error loading from store, fall back to default
     log.warn(
       { taskId, error, correlationId },

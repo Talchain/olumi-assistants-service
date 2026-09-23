@@ -1105,8 +1105,10 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
     })();
 
     if (promptMgmtEnabled) {
-      const seedResult = await initializeAndSeedPrompts();
-      app.log.info({ seedResult }, 'Prompt system initialized');
+      if (!config.prompts?.releaseManifestPath) {
+        const seedResult = await initializeAndSeedPrompts();
+        app.log.info({ seedResult }, 'Prompt system initialized');
+      }
 
       if (isPromptStoreHealthy()) {
         const warmResult = await warmPromptCacheFromStore();

@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "tsx src/server.ts",
-    "build": "pnpm openapi:generate && rm -rf dist && tsc -p tsconfig.build.json",
+    "build": "pnpm openapi:generate && rm -rf dist && tsc -p tsconfig.build.json && node dist/src/prompts/build-release-snapshot.js",
     "prestart": "pnpm build",
     "start": "node dist/src/server.js",
     "check:dist": "bash scripts/check-dist-freshness.sh",

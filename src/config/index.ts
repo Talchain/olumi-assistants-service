@@ -1180,6 +1180,7 @@ const ConfigSchema = z.object({
     enabled: booleanString.default(false), // Master switch for prompt management
     storeType: z.enum(["file", "postgres", "supabase"]).default("file"), // Storage backend type
     storePath: z.string().default("data/prompts.json"), // Path to prompts JSON file (file store)
+    releaseManifestPath: z.string().optional(), // Immutable release manifest; enables strict private file snapshot
     backupEnabled: booleanString.default(true), // Create backups before writes (file store)
     maxBackups: z.coerce.number().int().positive().default(10), // Max backup files to keep (file store)
     postgresUrl: z.string().optional(), // PostgreSQL connection string (postgres store)
@@ -1609,6 +1610,7 @@ function parseConfig(): Config {
       enabled: env.PROMPTS_ENABLED,
       storeType: env.PROMPTS_STORE_TYPE,
       storePath: env.PROMPTS_STORE_PATH,
+      releaseManifestPath: env.PROMPTS_RELEASE_MANIFEST,
       backupEnabled: env.PROMPTS_BACKUP_ENABLED,
       maxBackups: env.PROMPTS_MAX_BACKUPS,
       postgresUrl: env.PROMPTS_POSTGRES_URL,

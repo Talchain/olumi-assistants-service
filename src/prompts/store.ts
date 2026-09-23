@@ -13,6 +13,7 @@ import { SupabasePromptStore } from './stores/supabase.js';
 import type { IPromptStore, FileStoreConfig, PostgresStoreConfig } from './stores/interface.js';
 import { log, emit, TelemetryEvents } from '../utils/telemetry.js';
 import { config } from '../config/index.js';
+import { assertReleaseSnapshot } from './release-snapshot.js';
 
 // Re-export types and interfaces for backward compatibility
 export { FilePromptStore } from './stores/file.js';
@@ -49,10 +50,12 @@ let actualStoreType: 'file' | 'postgres' | 'supabase' | null = null;
  * Returns true ONLY if database credentials are present (Supabase or Postgres).
  * File store returns false - it should use defaults unless explicitly enabled.
  *
- * Also detects credential/storeType mismatches and logs warnings.
+ * Explicit PROMPTS_STORE_TYPE=file takes precedence over database credentials.
+ * Legacy auto-detection applies only when the setting is absent.
  */
 export function isStoreBackendConfigured(): boolean {
   const storeType = config.prompts?.storeType ?? 'file';
+  if (storeType === 'file' && process.env.PROMPTS_STORE_TYPE === 'file') return false;
   const hasSupabaseCreds = Boolean(config.prompts?.supabaseUrl && config.prompts?.supabaseServiceRoleKey);
   const hasPostgresCreds = Boolean(config.prompts?.postgresUrl);
 
@@ -98,8 +101,8 @@ export function isStoreBackendConfigured(): boolean {
  * - 'postgres': PostgresPromptStore with database backend
  * - 'supabase': SupabasePromptStore with Supabase backend
  *
- * Auto-detection: When storeType is 'file' (default) but database credentials
- * are present, automatically selects the appropriate database store.
+ * Auto-detection: when the setting is absent and database credentials are
+ * present, select the appropriate database store.
  *
  * @param overrideConfig - Optional configuration overrides (for testing)
  */
@@ -107,8 +110,8 @@ export function getPromptStore(overrideConfig?: Partial<PromptStoreConfig>): IPr
   if (!defaultStore) {
     let storeType = config.prompts?.storeType ?? 'file';
 
-    // Auto-detect store type from credentials if using default 'file'
-    if (storeType === 'file') {
+    // Auto-detect only for an omitted setting; explicit file is authoritative.
+    if (storeType === 'file' && process.env.PROMPTS_STORE_TYPE !== 'file') {
       const hasSupabaseCreds = Boolean(config.prompts?.supabaseUrl && config.prompts?.supabaseServiceRoleKey);
       const hasPostgresCreds = Boolean(config.prompts?.postgresUrl);
 
@@ -179,9 +182,14 @@ export async function initializePromptStore(): Promise<void> {
   }
 
   const storeType = config.prompts?.storeType ?? 'file';
-  // Use isStoreBackendConfigured() which handles auto-detection of credentials
-  // even when storeType is 'file' (the default). This ensures we initialize
-  // if Supabase/Postgres credentials are present, regardless of PROMPTS_STORE_TYPE.
+  if (config.prompts?.releaseManifestPath) {
+    if (process.env.PROMPTS_STORE_TYPE !== 'file' || !config.prompts.enabled ||
+        config.prompts.adminRoutesEnabled || config.prompts.autoMigrateEnabled) {
+      throw new Error('Release prompt snapshot requires explicit file store, enabled prompts, disabled admin routes and disabled auto-migration');
+    }
+    await assertReleaseSnapshot(config.prompts.releaseManifestPath, config.prompts.storePath);
+  }
+  // Auto-detection of credentials applies only when the store setting is absent.
   const hasDbCredentials = isStoreBackendConfigured();
 
   // Skip initialization only if:
@@ -210,6 +218,7 @@ export async function initializePromptStore(): Promise<void> {
       enabled: config.prompts?.enabled ?? false,
     }, 'Prompt store initialized successfully');
   } catch (error) {
+    if (config.prompts?.releaseManifestPath) throw error;
     const errorMessage = error instanceof Error ? error.message : String(error);
     log.warn({
       event: 'prompt.store.init_failed',
