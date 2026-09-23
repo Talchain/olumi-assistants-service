@@ -167,6 +167,50 @@ export function requiresMaxCompletionTokens(model: string): boolean {
  * @param options - Optional parameters including maxTokens and reasoningEffort
  * @returns Object with appropriate parameters for the model type
  */
+/**
+ * ⭐ THE ONE PLACE OPENAI USAGE BECOMES `UsageMetrics` — INCLUDING CACHE READS.
+ *
+ * `UsageMetrics.cache_read_input_tokens` has existed all along and is read by 29
+ * files, which is how the estate measured Anthropic's routing cache at an 80.0%
+ * hit rate (15,338 tokens read per hit, constant). **The OpenAI adapter simply
+ * never populated it**, so every OpenAI cache read was invisible — `cached_tokens`
+ * and `prompt_tokens_details` had ZERO occurrences anywhere in `src`, against a
+ * contrast control of 17 files referencing `prompt_tokens` and 29 referencing
+ * `cache_read_input_tokens`.
+ *
+ * ⚠ SO THIS IS NOT A NEW CACHE SYSTEM, AND DELIBERATELY SO. The governing brief
+ * is explicit: "Caching is already demonstrably working on warm OpenAI requests.
+ * Therefore: measure real production cache reads/writes; do not build another
+ * cache system unless evidence demands it." Mapping the provider's own
+ * `usage.prompt_tokens_details.cached_tokens` onto the field the estate already
+ * aggregates makes OpenAI cache usage measurable through the EXISTING pipeline —
+ * no new telemetry event, no new dashboard, no padding of prompts to chase hits.
+ *
+ * ⚠ AND `cache_creation_input_tokens` IS LEFT UNSET ON PURPOSE. That field means
+ * something specific on Anthropic: tokens billed to WRITE a cache entry, which
+ * that API reports explicitly. OpenAI's automatic prompt caching reports no
+ * write-side figure, so populating it would be inventing a number — and a
+ * fabricated zero would read to an aggregator as "no cache writes occurred"
+ * rather than "this provider does not report them". Absent is the honest value.
+ *
+ * Six call sites built this object by hand; one helper means the mapping cannot
+ * be added to some and forgotten on others.
+ */
+function openAiUsage(usage: {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  prompt_tokens_details?: { cached_tokens?: number } | null;
+} | null | undefined): import("./types.js").UsageMetrics {
+  const cached = usage?.prompt_tokens_details?.cached_tokens;
+  return {
+    input_tokens: usage?.prompt_tokens ?? 0,
+    output_tokens: usage?.completion_tokens ?? 0,
+    // Omitted rather than zeroed when the provider does not report it, so a
+    // missing figure is distinguishable from a measured zero.
+    ...(typeof cached === 'number' ? { cache_read_input_tokens: cached } : {}),
+  };
+}
+
 /** @internal Exported for testing only */
 export function buildModelParams(
   model: string,
@@ -864,10 +908,7 @@ export class OpenAIAdapter implements LLMAdapter {
             raw_llm_json: rawOutput.output,
           } : {}),
         },
-        usage: {
-          input_tokens: response.usage?.prompt_tokens || 0,
-          output_tokens: response.usage?.completion_tokens || 0,
-        },
+        usage: openAiUsage(response.usage),
       };
     } catch (error) {
       clearTimeout(timeoutId);
@@ -1013,10 +1054,7 @@ export class OpenAIAdapter implements LLMAdapter {
 
       return {
         options: parseResult.data.options,
-        usage: {
-          input_tokens: response.usage?.prompt_tokens || 0,
-          output_tokens: response.usage?.completion_tokens || 0,
-        },
+        usage: openAiUsage(response.usage),
       };
     } catch (error) {
       clearTimeout(timeoutId);
@@ -1469,6 +1507,9 @@ export class OpenAIAdapter implements LLMAdapter {
           latency_ms: latencyMs,
           input_tokens: response.usage?.prompt_tokens ?? 0,
           output_tokens: response.usage?.completion_tokens ?? 0,
+          // Per-call cache visibility. Aggregates come from `openAiUsage`; this is
+          // what lets a single slow call be checked for a cache miss.
+          cached_input_tokens: response.usage?.prompt_tokens_details?.cached_tokens ?? 0,
           content_chars: content.length,
         },
         "OpenAI chat completion successful"
@@ -1480,10 +1521,7 @@ export class OpenAIAdapter implements LLMAdapter {
         latencyMs,
         // R7: surface the raw provider finish reason for per-turn observability.
         stopReason: response.choices[0]?.finish_reason ?? null,
-        usage: {
-          input_tokens: response.usage?.prompt_tokens ?? 0,
-          output_tokens: response.usage?.completion_tokens ?? 0,
-        },
+        usage: openAiUsage(response.usage),
       };
     } catch (error: unknown) {
       clearTimeout(timeoutId);
@@ -1703,6 +1741,9 @@ export class OpenAIAdapter implements LLMAdapter {
           latency_ms: latencyMs,
           input_tokens: response.usage?.prompt_tokens ?? 0,
           output_tokens: response.usage?.completion_tokens ?? 0,
+          // Per-call cache visibility. Aggregates come from `openAiUsage`; this is
+          // what lets a single slow call be checked for a cache miss.
+          cached_input_tokens: response.usage?.prompt_tokens_details?.cached_tokens ?? 0,
           content_blocks: content.length,
           tool_use_blocks: content.filter(b => b.type === 'tool_use').length,
           stop_reason,
@@ -1717,10 +1758,7 @@ export class OpenAIAdapter implements LLMAdapter {
         // must remain truthful under provider-side model substitution.
         model: response.model,
         latencyMs,
-        usage: {
-          input_tokens: response.usage?.prompt_tokens ?? 0,
-          output_tokens: response.usage?.completion_tokens ?? 0,
-        },
+        usage: openAiUsage(response.usage),
       };
     } catch (error: unknown) {
       clearTimeout(timeoutId);
@@ -1762,3 +1800,13 @@ export class OpenAIAdapter implements LLMAdapter {
     }
   }
 }
+
+/**
+ * Test-only export of the usage mapper.
+ *
+ * Narrow on purpose: the mapping is what the cache measurement depends on, and
+ * it is otherwise unreachable from a test without constructing a real adapter
+ * (which needs credentials and a client). Mirrors `anthropic.ts`'s `__test_only`
+ * convention rather than widening the module's public surface.
+ */
+export { openAiUsage as __test_only_openAiUsage };
