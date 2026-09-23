@@ -26,6 +26,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { config } from '../config/index.js';
+import { TURN_RESPONSE_HEADROOM_MS } from '../config/timeouts.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
 import { appendCheckedGraphWrite } from '../orchestrator-v5/persist-graph-write.js';
@@ -77,8 +78,19 @@ export const claimTurnIdOf = (turnId: string): string => `${turnId}:claim`;
 const CLAIM_NONCE = '#claim:';
 const claimHashFor = (requestHash: string, nonce: string): string => `${requestHash}${CLAIM_NONCE}${nonce}`;
 const requestHashOfClaim = (claimHash: string): string => claimHash.split(CLAIM_NONCE)[0] ?? '';
-/** How long a request that did not win the claim waits for the winner's answer. */
-export const AGENT_TURN_CLAIM_WAIT = { totalMs: 150_000, everyMs: 1_000 };
+/**
+ * How long a request that did not win the claim waits for the winner's answer.
+ *
+ * ⛔ IT MUST END BEFORE THE BROWSER PROXY GIVES UP (Panel, #1720 APPROVE 5792014826,
+ * non-blocking #1). At 150 s it outlasted the proxy's 125 s inject timeout, so a
+ * same-id duplicate in the browser got a proxy timeout instead of the replay or the
+ * 409 it was designed to return. Derived from the served proxy timeout, less the
+ * same response headroom the V5 turn budget reserves, so the loser always answers.
+ */
+export const AGENT_TURN_CLAIM_WAIT = {
+  totalMs: Math.min(150_000, config.proxy.browserProxyTimeoutMs - TURN_RESPONSE_HEADROOM_MS),
+  everyMs: 1_000,
+};
 
 /** The conversation of record stays Olumi's; this is a per-process cache. */
 const histories = new HistoryStore();
